@@ -508,17 +508,17 @@ mod tests {
 
     #[test]
     fn test_formula_debug() {
-        let f = FormulaExpr::Constant { value: 3.14 };
+        let f = FormulaExpr::Constant { value: 12.34 };
         let debug = format!("{:?}", f);
-        assert!(debug.contains("3.14"));
+        assert!(debug.contains("12.34"));
     }
 
     #[test]
     fn test_value_variants() {
-        let values = vec![
+        let values = [
             Value::Str("hello"),
             Value::Int(42),
-            Value::Float(3.14),
+            Value::Float(12.34),
             Value::Bool(true),
             Value::Null,
         ];

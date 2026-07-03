@@ -5,11 +5,11 @@ mod tests {
     use crate::token::TokenKind;
     use alloc::vec::Vec;
 
-    fn tokenize(input: &str) -> Vec<Token> {
+    fn tokenize(input: &str) -> Vec<Token<'_>> {
         Lexer::new(input).filter_map(|r| r.ok()).collect()
     }
 
-    fn tokenize_full(input: &str) -> Result<Vec<Token>, crate::error::QqlError> {
+    fn tokenize_full(input: &str) -> Result<Vec<Token<'_>>, crate::error::QqlError> {
         Lexer::new(input).collect()
     }
 

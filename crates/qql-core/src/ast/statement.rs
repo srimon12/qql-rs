@@ -1,157 +1,6 @@
+use super::{FilterExpr, FormulaExpr, Value};
 use alloc::boxed::Box;
 use alloc::vec::Vec;
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Value<'a> {
-    Str(&'a str),
-    Int(i64),
-    Float(f64),
-    Bool(bool),
-    Null,
-    Dict(Vec<(&'a str, Value<'a>)>),
-    List(Vec<Value<'a>>),
-}
-
-// ── Filter Expressions ──────────────────────────────────────────
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum FilterExpr<'a> {
-    Compare {
-        field: &'a str,
-        op: &'a str,
-        value: Value<'a>,
-    },
-    Between {
-        field: &'a str,
-        low: Value<'a>,
-        high: Value<'a>,
-    },
-    In {
-        field: &'a str,
-        values: Vec<Value<'a>>,
-    },
-    NotIn {
-        field: &'a str,
-        values: Vec<Value<'a>>,
-    },
-    IsNull {
-        field: &'a str,
-    },
-    IsNotNull {
-        field: &'a str,
-    },
-    IsEmpty {
-        field: &'a str,
-    },
-    IsNotEmpty {
-        field: &'a str,
-    },
-    MatchText {
-        field: &'a str,
-        text: &'a str,
-    },
-    MatchAny {
-        field: &'a str,
-        text: &'a str,
-    },
-    MatchPhrase {
-        field: &'a str,
-        text: &'a str,
-    },
-    And {
-        operands: Vec<FilterExpr<'a>>,
-    },
-    Or {
-        operands: Vec<FilterExpr<'a>>,
-    },
-    Not {
-        operand: Box<FilterExpr<'a>>,
-    },
-    Nested {
-        path: &'a str,
-        filter: Box<FilterExpr<'a>>,
-    },
-}
-
-// ── Formula Expressions ─────────────────────────────────────────
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum FormulaExpr<'a> {
-    Constant {
-        value: f64,
-    },
-    Variable {
-        name: &'a str,
-    },
-    Sum {
-        left: Box<FormulaExpr<'a>>,
-        right: Box<FormulaExpr<'a>>,
-    },
-    Sub {
-        left: Box<FormulaExpr<'a>>,
-        right: Box<FormulaExpr<'a>>,
-    },
-    Mul {
-        left: Box<FormulaExpr<'a>>,
-        right: Box<FormulaExpr<'a>>,
-    },
-    Div {
-        left: Box<FormulaExpr<'a>>,
-        right: Box<FormulaExpr<'a>>,
-        by_zero_default: Option<f64>,
-    },
-    Neg {
-        operand: Box<FormulaExpr<'a>>,
-    },
-    Abs {
-        x: Box<FormulaExpr<'a>>,
-    },
-    Sqrt {
-        x: Box<FormulaExpr<'a>>,
-    },
-    Log {
-        x: Box<FormulaExpr<'a>>,
-    },
-    Ln {
-        x: Box<FormulaExpr<'a>>,
-    },
-    Exp {
-        x: Box<FormulaExpr<'a>>,
-    },
-    Pow {
-        base: Box<FormulaExpr<'a>>,
-        exponent: Box<FormulaExpr<'a>>,
-    },
-    GeoDistance {
-        lat: f64,
-        lon: f64,
-        field: &'a str,
-    },
-    Decay {
-        kind: &'a str,
-        x: Box<FormulaExpr<'a>>,
-        target: Option<Box<FormulaExpr<'a>>>,
-        scale: Option<f64>,
-        midpoint: Option<f64>,
-    },
-    Case {
-        cond: Box<FilterExpr<'a>>,
-        then_: Box<FormulaExpr<'a>>,
-        else_: Box<FormulaExpr<'a>>,
-    },
-    MatchCondition {
-        field: &'a str,
-        values: Vec<Value<'a>>,
-    },
-    Datetime {
-        value: &'a str,
-    },
-    DatetimeKey {
-        key: &'a str,
-    },
-}
-
-// ── Search / Query ──────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueryMode {
@@ -183,7 +32,7 @@ pub struct FeedbackItem<'a> {
     pub score: f64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeedbackStrategyType {
     Naive,
 }
@@ -285,8 +134,6 @@ pub struct QueryStmt<'a> {
     pub feedback_strategy: Option<Box<FeedbackStrategy>>,
 }
 
-// ── Statements ──────────────────────────────────────────────────
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct SelectStmt<'a> {
     pub collection: &'a str,
@@ -321,7 +168,7 @@ pub struct InsertStmt<'a> {
     pub embed_directives: Vec<EmbedDirective<'a>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VectorDistance {
     Cosine,
     Dot,
@@ -349,7 +196,7 @@ pub struct SparseVectorDef<'a> {
     pub name: &'a str,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QuantizationType {
     Scalar,
     Binary,

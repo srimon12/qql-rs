@@ -4,7 +4,6 @@ use pyo3::types::PyDict;
 use qql_core::lexer::Lexer;
 use qql_core::parser::Parser;
 
-
 #[pyfunction]
 fn parse(input: &str) -> PyResult<String> {
     match Parser::parse(input) {
