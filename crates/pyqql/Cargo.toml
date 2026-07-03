@@ -1,0 +1,11 @@
+[package]
+name = "pyqql"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+qql-core = { path = "../qql-core" }
+pyo3 = { version = "0.23", features = ["extension-module"] }

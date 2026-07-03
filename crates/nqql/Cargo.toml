@@ -1,0 +1,12 @@
+[package]
+name = "nqql"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+qql-core = { path = "../qql-core" }
+napi = { version = "2", features = ["napi8"] }
+napi-derive = "2"

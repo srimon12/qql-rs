@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/qql-core",
+    "crates/qql-runtime",
+    "crates/qql-cli",
+    "crates/qql-wasm",
+    "crates/pyqql",
+    "crates/nqql",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

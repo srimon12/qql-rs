@@ -1,0 +1,12 @@
+[package]
+name = "qql"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+qql-core = { path = "../qql-core" }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+async-trait = "0.1"

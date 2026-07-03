@@ -1,0 +1,10 @@
+[package]
+name = "qql-core"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = []
+
+[dependencies]
+phf = { version = "0.11", features = ["macros"] }
