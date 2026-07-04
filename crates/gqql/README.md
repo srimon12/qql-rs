@@ -11,7 +11,7 @@ Native Go SDK for the Qdrant Query Language (QQL) parser, compiled via CGO and R
 ## Usage
 
 ```go
-import "github.com/srimon12/qql-rs/gqql"
+import "github.com/srimon12/qql-rs/crates/gqql"
 
 func main() {
     // Parse to JSON string
