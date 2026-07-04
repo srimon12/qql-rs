@@ -1,0 +1,9 @@
+[workspace]
+
+[package]
+name = "expert_gateway"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+qql-core = { path = "../../../crates/qql-core" }

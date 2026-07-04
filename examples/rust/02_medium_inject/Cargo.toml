@@ -1,0 +1,9 @@
+[workspace]
+
+[package]
+name = "medium_inject"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+qql-core = { path = "../../../crates/qql-core" }
