@@ -42,6 +42,7 @@ impl<'a> Lexer<'a> {
             b'<' => self.read_lt_or_lte(),
             b'+' => self.single_char(TokenKind::Plus),
             b'/' => self.single_char(TokenKind::Slash),
+            b';' => self.single_char(TokenKind::Semicolon),
             b'-' => self.read_minus_or_number(),
             b'"' | b'\'' => self.read_string(ch),
             _ => {

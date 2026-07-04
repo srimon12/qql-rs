@@ -22,7 +22,7 @@ use super::helpers::{
 };
 
 impl Executor {
-    async fn build_query_state_and_pipeline(
+    pub(crate) async fn build_query_state_and_pipeline(
         &self,
         stmt: &ast::QueryStmt<'_>,
     ) -> Result<(QueryState, QueryPipeline), QqlError> {
@@ -643,8 +643,39 @@ impl Executor {
             )
             .await?;
 
-        let mut points = Vec::with_capacity(stmt.values_list.len());
+        // 1. Gather all text fields that need embedding
+        let mut texts_to_embed = Vec::new();
+        let mut embedding_indices = Vec::new(); // maps local text index -> point index
 
+        for (i, row) in stmt.values_list.iter().enumerate() {
+            let text_field = row
+                .iter()
+                .find(|(k, _)| *k == "text" || *k == "description" || *k == "content")
+                .map(|(_, v)| match v {
+                    Value::Str(s) => s.to_string(),
+                    _ => String::new(),
+                })
+                .unwrap_or_default();
+
+            if !text_field.is_empty() && self.uses_local_embeddings() {
+                texts_to_embed.push(text_field);
+                embedding_indices.push(i);
+            }
+        }
+
+        // 2. Perform batch embedding if needed
+        let mut embedded_vectors = Vec::new();
+        if !texts_to_embed.is_empty() {
+            let _dense_dim = self.resolve_dense_vector_size(stmt.model).await?;
+            if let Some(ref embedder) = self.embedder {
+                embedded_vectors = embedder
+                    .embed_dense_batch(&texts_to_embed, &self.resolve_dense_model(stmt.model))
+                    .await?;
+            }
+        }
+
+        // 3. Build points structures
+        let mut points = Vec::with_capacity(stmt.values_list.len());
         for row in &stmt.values_list {
             let payload: HashMap<String, serde_json::Value> = row
                 .iter()
@@ -668,29 +699,18 @@ impl Executor {
                 point.id = PointId::Uuid(id.to_string());
             }
 
-            // Determine text field for embedding
-            let text_field = row
-                .iter()
-                .find(|(k, _)| *k == "text" || *k == "description" || *k == "content")
-                .map(|(_, v)| match v {
-                    Value::Str(s) => s.to_string(),
-                    _ => String::new(),
-                })
-                .unwrap_or_default();
-
-            if !text_field.is_empty() && self.uses_local_embeddings() {
-                let _dense_dim = self.resolve_dense_vector_size(stmt.model).await?;
-                if let Some(ref embedder) = self.embedder {
-                    let dense_vec = embedder
-                        .embed_dense(&text_field, &self.resolve_dense_model(stmt.model))
-                        .await?;
-                    point.vector = Some(serde_json::json!({
-                        stmt.dense_vector.unwrap_or(super::DENSE_VECTOR_NAME): dense_vec
-                    }));
-                }
-            }
-
             points.push(point);
+        }
+
+        // Assign batched embeddings to the corresponding points
+        let dense_vector_name = stmt.dense_vector.unwrap_or(super::DENSE_VECTOR_NAME);
+        for (local_idx, &point_idx) in embedding_indices.iter().enumerate() {
+            if local_idx < embedded_vectors.len() {
+                let vec = embedded_vectors[local_idx].clone();
+                points[point_idx].vector = Some(serde_json::json!({
+                    dense_vector_name: vec
+                }));
+            }
         }
 
         let req = UpsertPointsReq {

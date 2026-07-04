@@ -119,6 +119,24 @@ impl<'a> Parser<'a> {
         parser.parse_stmt()
     }
 
+    pub fn parse_all(input: &'a str) -> Result<alloc::vec::Vec<Stmt<'a>>, QqlError> {
+        let lexer = Lexer::new(input);
+        let mut tokens = alloc::vec::Vec::new();
+        for token_res in lexer {
+            tokens.push(token_res?);
+        }
+        let mut parser = Parser::new(tokens);
+        let mut stmts = alloc::vec::Vec::new();
+        while parser.index < parser.tokens.len() {
+            if parser.tokens[parser.index].kind == TokenKind::Semicolon {
+                parser.index += 1;
+                continue;
+            }
+            stmts.push(parser.parse_stmt()?);
+        }
+        Ok(stmts)
+    }
+
     pub fn parse_stmt(&mut self) -> Result<Stmt<'a>, QqlError> {
         let tok = self.peek()?;
         match tok.kind {

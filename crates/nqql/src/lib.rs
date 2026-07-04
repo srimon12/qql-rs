@@ -14,6 +14,26 @@ pub fn parse(input: String) -> napi::Result<String> {
 }
 
 #[napi]
+pub fn parse_all(input: String) -> napi::Result<Vec<String>> {
+    match Parser::parse_all(&input) {
+        Ok(stmts) => Ok(stmts.into_iter().map(|s| format!("{:#?}", s)).collect()),
+        Err(e) => Err(napi::Error::from_reason(e.to_string())),
+    }
+}
+
+#[napi]
+pub fn parse_batch(queries: Vec<String>) -> napi::Result<Vec<String>> {
+    let mut results = Vec::with_capacity(queries.len());
+    for q in queries {
+        match Parser::parse(&q) {
+            Ok(stmt) => results.push(format!("{:#?}", stmt)),
+            Err(e) => return Err(napi::Error::from_reason(e.to_string())),
+        }
+    }
+    Ok(results)
+}
+
+#[napi]
 pub fn is_valid(input: String) -> bool {
     Parser::parse(&input).is_ok()
 }

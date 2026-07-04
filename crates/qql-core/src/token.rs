@@ -122,6 +122,7 @@ pub enum TokenKind {
     Slash,
     Relevance,
     Feedback,
+    Semicolon,
     Eof,
 }
 
@@ -248,6 +249,7 @@ impl TokenKind {
             TokenKind::Slash => "SLASH",
             TokenKind::Relevance => "RELEVANCE",
             TokenKind::Feedback => "FEEDBACK",
+            TokenKind::Semicolon => "SEMICOLON",
             TokenKind::Eof => "EOF",
         }
     }

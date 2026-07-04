@@ -12,6 +12,22 @@ pub fn parse(input: &str) -> Result<String, JsValue> {
 }
 
 #[wasm_bindgen]
+pub fn parse_all(input: &str) -> Result<Vec<String>, JsValue> {
+    let stmts = Parser::parse_all(input).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    Ok(stmts.into_iter().map(|s| format!("{:#?}", s)).collect())
+}
+
+#[wasm_bindgen]
+pub fn parse_batch(queries: Vec<String>) -> Result<Vec<String>, JsValue> {
+    let mut results = Vec::with_capacity(queries.len());
+    for q in queries {
+        let stmt = Parser::parse(&q).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        results.push(format!("{:#?}", stmt));
+    }
+    Ok(results)
+}
+
+#[wasm_bindgen]
 pub fn is_valid(input: &str) -> bool {
     Parser::parse(input).is_ok()
 }

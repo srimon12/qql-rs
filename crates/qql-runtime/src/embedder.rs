@@ -10,6 +10,18 @@ use crate::sparse::{self, SparseVector};
 pub trait Embedder: Send + Sync {
     async fn embed_dense(&self, text: &str, model: &str) -> Result<Vec<f32>, QqlError>;
     async fn embed_sparse(&self, text: &str) -> Result<SparseVector, QqlError>;
+
+    async fn embed_dense_batch(
+        &self,
+        texts: &[String],
+        model: &str,
+    ) -> Result<Vec<Vec<f32>>, QqlError> {
+        let mut results = Vec::with_capacity(texts.len());
+        for text in texts {
+            results.push(self.embed_dense(text, model).await?);
+        }
+        Ok(results)
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -176,6 +188,14 @@ impl Embedder for HttpEmbedder {
     async fn embed_dense(&self, text: &str, _model: &str) -> Result<Vec<f32>, QqlError> {
         let results = self.embed_batch(&[text.to_string()]).await?;
         Ok(results.into_iter().next().unwrap_or_default())
+    }
+
+    async fn embed_dense_batch(
+        &self,
+        texts: &[String],
+        _model: &str,
+    ) -> Result<Vec<Vec<f32>>, QqlError> {
+        self.embed_batch(texts).await
     }
 
     async fn embed_sparse(&self, _text: &str) -> Result<SparseVector, QqlError> {

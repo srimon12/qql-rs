@@ -16,6 +16,26 @@ fn parse(input: &str) -> PyResult<String> {
 }
 
 #[pyfunction]
+fn parse_all(input: &str) -> PyResult<Vec<String>> {
+    match Parser::parse_all(input) {
+        Ok(stmts) => Ok(stmts.into_iter().map(|s| format!("{:#?}", s)).collect()),
+        Err(e) => Err(PySyntaxError::new_err(e.to_string())),
+    }
+}
+
+#[pyfunction]
+fn parse_batch(queries: Vec<String>) -> PyResult<Vec<String>> {
+    let mut results = Vec::with_capacity(queries.len());
+    for q in queries {
+        match Parser::parse(&q) {
+            Ok(stmt) => results.push(format!("{:#?}", stmt)),
+            Err(e) => return Err(PySyntaxError::new_err(e.to_string())),
+        }
+    }
+    Ok(results)
+}
+
+#[pyfunction]
 fn is_valid(input: &str) -> bool {
     Parser::parse(input).is_ok()
 }
@@ -48,6 +68,8 @@ fn tokenize<'py>(input: &str, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict
 #[pymodule]
 fn pyqql(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_all, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_batch, m)?)?;
     m.add_function(wrap_pyfunction!(is_valid, m)?)?;
     m.add_function(wrap_pyfunction!(inject_filter, m)?)?;
     m.add_function(wrap_pyfunction!(tokenize, m)?)?;

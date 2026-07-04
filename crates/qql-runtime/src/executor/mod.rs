@@ -271,6 +271,18 @@ impl Executor {
         }
     }
 
+    pub fn client(&self) -> &dyn QdrantOperations {
+        self.client.as_ref()
+    }
+
+    pub fn embedder(&self) -> Option<Arc<dyn Embedder>> {
+        self.embedder.clone()
+    }
+
+    pub fn config(&self) -> Option<&QqlConfig> {
+        self.config.as_ref()
+    }
+
     pub fn default_context_timeout(&self) -> u64 {
         self.config
             .as_ref()
@@ -319,6 +331,165 @@ impl Executor {
             Stmt::UpdatePayload(n) => self.do_update_payload(*n).await,
             Stmt::CreateIndex(n) => self.do_create_index(*n).await,
         }
+    }
+
+    pub async fn execute_batch(
+        &self,
+        queries: &[&str],
+        stop_on_error: bool,
+    ) -> Result<Vec<ExecResponse>, QqlError> {
+        let mut results = Vec::with_capacity(queries.len());
+        for query in queries {
+            match self.execute(query).await {
+                Ok(resp) => results.push(resp),
+                Err(err) => {
+                    if stop_on_error {
+                        return Err(err);
+                    }
+                    results.push(ExecResponse {
+                        ok: false,
+                        operation: "ERROR".to_string(),
+                        message: err.to_string(),
+                        data: None,
+                    });
+                }
+            }
+        }
+        Ok(results)
+    }
+
+    pub async fn execute_batch_nodes(
+        &self,
+        stmts: Vec<Stmt<'_>>,
+        stop_on_error: bool,
+    ) -> Result<Vec<ExecResponse>, QqlError> {
+        let mut results = Vec::with_capacity(stmts.len());
+        for stmt in stmts {
+            match self.execute_node(stmt).await {
+                Ok(resp) => results.push(resp),
+                Err(err) => {
+                    if stop_on_error {
+                        return Err(err);
+                    }
+                    results.push(ExecResponse {
+                        ok: false,
+                        operation: "ERROR".to_string(),
+                        message: err.to_string(),
+                        data: None,
+                    });
+                }
+            }
+        }
+        Ok(results)
+    }
+
+    pub async fn query_batch(&self, queries: &[&str]) -> Result<Vec<ExecResponse>, QqlError> {
+        let mut parsed_stmts = Vec::with_capacity(queries.len());
+        for q in queries {
+            let stmt = Self::parse_query(q)?;
+            if let Stmt::Query(query_stmt) = stmt {
+                parsed_stmts.push(*query_stmt);
+            } else {
+                return Err(QqlError::runtime(format!(
+                    "query_batch only supports QUERY statements, got non-query statement"
+                )));
+            }
+        }
+        self.query_batch_nodes(parsed_stmts).await
+    }
+
+    pub async fn query_batch_nodes(
+        &self,
+        stmts: Vec<qql_core::ast::QueryStmt<'_>>,
+    ) -> Result<Vec<ExecResponse>, QqlError> {
+        let num_statements = stmts.len();
+        if num_statements == 0 {
+            return Ok(Vec::new());
+        }
+
+        // 1. Build state and pipeline for each query, and run their pipelines
+        let mut prepared = Vec::with_capacity(num_statements);
+        for stmt in stmts {
+            let (mut state, pipeline) = self.build_query_state_and_pipeline(&stmt).await?;
+            pipeline.execute(&mut state).await?;
+            prepared.push((state, pipeline));
+        }
+
+        // 2. Group flat queries by collection
+        struct CollectionBatch {
+            indices: Vec<usize>,
+            requests: Vec<QueryPointsRequest>,
+        }
+
+        let mut batches: HashMap<String, CollectionBatch> = HashMap::new();
+        let mut ordered_collections = Vec::new();
+        let mut results = vec![
+            ExecResponse {
+                ok: false,
+                operation: String::new(),
+                message: String::new(),
+                data: None,
+            };
+            num_statements
+        ];
+
+        for (i, (state, pipeline)) in prepared.iter().enumerate() {
+            if !state.group_by.is_empty() {
+                // Execute grouped query individually
+                let resp = self.execute_grouped_query(pipeline, state).await?;
+                results[i] = resp;
+            } else {
+                let coll = state.collection_name.clone();
+                if !batches.contains_key(&coll) {
+                    ordered_collections.push(coll.clone());
+                    batches.insert(coll.clone(), CollectionBatch {
+                        indices: Vec::new(),
+                        requests: Vec::new(),
+                    });
+                }
+                let b = batches.get_mut(&coll).unwrap();
+                let mut req = pipeline.build_flat_request(state);
+                if req.with_payload.is_none() {
+                    req.with_payload = Some(crate::pipeline::WithPayload {
+                        enable: Some(true),
+                        include: Vec::new(),
+                        exclude: Vec::new(),
+                    });
+                }
+                b.indices.push(i);
+                b.requests.push(req);
+            }
+        }
+
+        // 3. Execute batched flat queries per collection
+        for coll in ordered_collections {
+            let batch = batches.remove(&coll).unwrap();
+            let batch_results = self.client.query_batch(batch.requests).await?;
+            for (j, pts) in batch_results.into_iter().enumerate() {
+                let orig_idx = batch.indices[j];
+                let formatted: Vec<SearchHit> = pts
+                    .into_iter()
+                    .map(|hit| SearchHit {
+                        id: crate::executor::helpers::point_id_string(&hit.id),
+                        score: hit.score,
+                        text: hit.payload.as_ref().and_then(|p| {
+                            p.get("text")
+                                .and_then(|v| v.as_str().map(|s| s.to_string()))
+                        }),
+                        payload: hit.payload,
+                    })
+                    .collect();
+
+                results[orig_idx] = ExecResponse {
+                    ok: true,
+                    operation: "QUERY".to_string(),
+                    message: format!("Found {} hits", formatted.len()),
+                    data: Some(serde_json::to_value(formatted).unwrap_or(serde_json::Value::Null)),
+                };
+            }
+        }
+
+        Ok(results)
     }
 }
 

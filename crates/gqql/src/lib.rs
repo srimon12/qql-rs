@@ -19,6 +19,47 @@ pub extern "C" fn qql_parse(input: *const c_char) -> *mut c_char {
 }
 
 #[no_mangle]
+pub extern "C" fn qql_parse_all(input: *const c_char) -> *mut c_char {
+    let input_str = match cstr(input) {
+        Ok(s) => s,
+        Err(e) => return err(e),
+    };
+    match Parser::parse_all(input_str) {
+        Ok(stmts) => {
+            let list: Vec<String> = stmts.into_iter().map(|s| format!("{:#?}", s)).collect();
+            match serde_json::to_string(&list) {
+                Ok(json) => to_c_string(&json),
+                Err(e) => err(&e.to_string()),
+            }
+        }
+        Err(e) => err(&e.to_string()),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn qql_parse_batch(queries_json: *const c_char) -> *mut c_char {
+    let json_str = match cstr(queries_json) {
+        Ok(s) => s,
+        Err(e) => return err(e),
+    };
+    let queries: Vec<String> = match serde_json::from_str(json_str) {
+        Ok(q) => q,
+        Err(e) => return err(&format!("invalid input JSON: {}", e)),
+    };
+    let mut results = Vec::with_capacity(queries.len());
+    for q in queries {
+        match Parser::parse(&q) {
+            Ok(stmt) => results.push(format!("{:#?}", stmt)),
+            Err(e) => return err(&e.to_string()),
+        }
+    }
+    match serde_json::to_string(&results) {
+        Ok(json) => to_c_string(&json),
+        Err(e) => err(&e.to_string()),
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn qql_is_valid(input: *const c_char) -> *mut c_char {
     let input_str = match cstr(input) {
         Ok(s) => s,
