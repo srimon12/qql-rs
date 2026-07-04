@@ -1,5 +1,5 @@
-use std::borrow::Cow;
 use core::fmt;
+use std::borrow::Cow;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QqlError {

@@ -33,11 +33,14 @@ pub fn is_valid(input: &str) -> bool {
 }
 
 #[wasm_bindgen]
-pub fn inject_filter(query: &str, field: &str, op: &str, value_json: &str) -> Result<String, JsValue> {
-    let value = json_to_value(value_json)
-        .ok_or_else(|| JsValue::from_str("invalid value JSON"))?;
-    let mut stmt = Parser::parse(query)
-        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+pub fn inject_filter(
+    query: &str,
+    field: &str,
+    op: &str,
+    value_json: &str,
+) -> Result<String, JsValue> {
+    let value = json_to_value(value_json).ok_or_else(|| JsValue::from_str("invalid value JSON"))?;
+    let mut stmt = Parser::parse(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
     ast::inject_filter(&mut stmt, field, op, &value);
     Ok(format!("{:#?}", stmt))
 }
@@ -83,11 +86,7 @@ fn serde_json_to_value(jv: serde_json::Value) -> Option<Value<'static>> {
         serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
                 Some(Value::Int(i))
-            } else if let Some(f) = n.as_f64() {
-                Some(Value::Float(f))
-            } else {
-                None
-            }
+            } else { n.as_f64().map(Value::Float) }
         }
         serde_json::Value::Bool(b) => Some(Value::Bool(b)),
         serde_json::Value::Null => Some(Value::Null),

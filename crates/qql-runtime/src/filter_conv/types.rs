@@ -11,6 +11,7 @@ pub struct QdrantFilter {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum QdrantCondition {
     Match {
         key: String,
@@ -59,6 +60,50 @@ pub enum QdrantCondition {
         key: String,
         text: String,
     },
+    #[serde(rename = "has_vector")]
+    HasVector(String),
+    ValuesCount {
+        key: String,
+        values_count: QdrantRange,
+    },
+    GeoBoundingBox {
+        key: String,
+        geo_bounding_box: QdrantGeoBoundingBox,
+    },
+    GeoRadius {
+        key: String,
+        geo_radius: QdrantGeoRadius,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QdrantRange {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gt: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gte: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lt: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lte: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QdrantGeoPoint {
+    pub lat: f64,
+    pub lon: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QdrantGeoBoundingBox {
+    pub top_left: QdrantGeoPoint,
+    pub bottom_right: QdrantGeoPoint,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QdrantGeoRadius {
+    pub center: QdrantGeoPoint,
+    pub radius: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

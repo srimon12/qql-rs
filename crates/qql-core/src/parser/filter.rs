@@ -1,7 +1,7 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use crate::ast::FilterExpr;
+use crate::ast::{FilterExpr, Value};
 use crate::error::QqlError;
 use crate::token::TokenKind;
 
@@ -58,6 +58,13 @@ impl<'a> Parser<'a> {
         }
         if self.peek()?.kind == TokenKind::Identifier && ascii_equal(self.peek()?.text, "NESTED") {
             return self.parse_nested_function();
+        }
+        if self.peek()?.kind == TokenKind::HasVector {
+            self.advance()?;
+            let name_tok = self.expect(TokenKind::String)?;
+            return Ok(FilterExpr::HasVector {
+                name: name_tok.text,
+            });
         }
         self.parse_predicate()
     }
@@ -131,6 +138,127 @@ impl<'a> Parser<'a> {
             return Ok(FilterExpr::Between { field, low, high });
         }
 
+        if tok.kind == TokenKind::GeoBbox {
+            let pos = tok.pos;
+            self.advance()?;
+            let val = self.parse_value()?;
+            if let Value::Dict(ref items) = val {
+                let mut top_left_lat = 0.0;
+                let mut top_left_lon = 0.0;
+                let mut bottom_right_lat = 0.0;
+                let mut bottom_right_lon = 0.0;
+
+                let top_left = items
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case("top_left"));
+                let bottom_right = items
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case("bottom_right"));
+
+                if let Some((_, Value::Dict(ref tl_items))) = top_left {
+                    if let Some((_, ref v)) =
+                        tl_items.iter().find(|(k, _)| k.eq_ignore_ascii_case("lat"))
+                    {
+                        top_left_lat = get_f64(v).unwrap_or(0.0);
+                    }
+                    if let Some((_, ref v)) =
+                        tl_items.iter().find(|(k, _)| k.eq_ignore_ascii_case("lon"))
+                    {
+                        top_left_lon = get_f64(v).unwrap_or(0.0);
+                    }
+                }
+                if let Some((_, Value::Dict(ref br_items))) = bottom_right {
+                    if let Some((_, ref v)) =
+                        br_items.iter().find(|(k, _)| k.eq_ignore_ascii_case("lat"))
+                    {
+                        bottom_right_lat = get_f64(v).unwrap_or(0.0);
+                    }
+                    if let Some((_, ref v)) =
+                        br_items.iter().find(|(k, _)| k.eq_ignore_ascii_case("lon"))
+                    {
+                        bottom_right_lon = get_f64(v).unwrap_or(0.0);
+                    }
+                }
+
+                return Ok(FilterExpr::GeoBoundingBox {
+                    field,
+                    top_left_lat,
+                    top_left_lon,
+                    bottom_right_lat,
+                    bottom_right_lon,
+                });
+            }
+            return Err(QqlError::syntax("GEO_BBOX requires a bounding box dictionary {top_left: {lat, lon}, bottom_right: {lat, lon}}", pos));
+        }
+
+        if tok.kind == TokenKind::GeoRadius {
+            let pos = tok.pos;
+            self.advance()?;
+            let val = self.parse_value()?;
+            if let Value::Dict(ref items) = val {
+                let mut lat = 0.0;
+                let mut lon = 0.0;
+                let mut radius = 0.0;
+
+                let center = items.iter().find(|(k, _)| k.eq_ignore_ascii_case("center"));
+                let rad_val = items.iter().find(|(k, _)| k.eq_ignore_ascii_case("radius"));
+
+                if let Some((_, Value::Dict(ref c_items))) = center {
+                    if let Some((_, ref v)) =
+                        c_items.iter().find(|(k, _)| k.eq_ignore_ascii_case("lat"))
+                    {
+                        lat = get_f64(v).unwrap_or(0.0);
+                    }
+                    if let Some((_, ref v)) =
+                        c_items.iter().find(|(k, _)| k.eq_ignore_ascii_case("lon"))
+                    {
+                        lon = get_f64(v).unwrap_or(0.0);
+                    }
+                }
+                if let Some((_, ref v)) = rad_val {
+                    radius = get_f64(v).unwrap_or(0.0);
+                }
+
+                return Ok(FilterExpr::GeoRadius {
+                    field,
+                    lat,
+                    lon,
+                    radius,
+                });
+            }
+            return Err(QqlError::syntax(
+                "GEO_RADIUS requires a radius dictionary {center: {lat, lon}, radius: number}",
+                pos,
+            ));
+        }
+
+        if tok.kind == TokenKind::ValuesCount {
+            self.advance()?;
+            let op_tok = self.advance()?;
+            let op = match op_tok.kind {
+                TokenKind::Equals => "=",
+                TokenKind::NotEquals => "!=",
+                TokenKind::Gt => ">",
+                TokenKind::Gte => ">=",
+                TokenKind::Lt => "<",
+                TokenKind::Lte => "<=",
+                _ => {
+                    return Err(QqlError::syntax(
+                        "expected comparison operator after VALUES_COUNT",
+                        op_tok.pos,
+                    ))
+                }
+            };
+
+            let count_tok = self.expect(TokenKind::Integer)?;
+            let count = count_tok
+                .text
+                .parse::<i64>()
+                .map_err(|_| QqlError::syntax("invalid integer count", count_tok.pos))?;
+
+            return Ok(FilterExpr::ValuesCount { field, op, count });
+        }
+
         if tok.kind == TokenKind::Match {
             self.advance()?;
             if self.peek()?.kind == TokenKind::Any {
@@ -171,5 +299,13 @@ impl<'a> Parser<'a> {
             ),
             tok.pos,
         ))
+    }
+}
+
+fn get_f64(val: &crate::ast::Value) -> Option<f64> {
+    match val {
+        crate::ast::Value::Float(f) => Some(*f),
+        crate::ast::Value::Int(i) => Some(*i as f64),
+        _ => None,
     }
 }

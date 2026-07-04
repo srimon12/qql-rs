@@ -244,6 +244,8 @@ pub struct QueryPointsRequest {
     pub lookup_from: Option<LookupLocation>,
     pub using: Option<String>,
     pub timeout: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub formula: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -263,6 +265,8 @@ pub struct QueryPointsGroupsRequest {
     pub lookup_from: Option<LookupLocation>,
     pub with_lookup: Option<WithLookup>,
     pub using: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub formula: Option<serde_json::Value>,
 }
 
 pub struct QueryState {
@@ -297,6 +301,9 @@ pub struct QueryState {
     pub group_by: String,
     pub group_size: u64,
     pub with_lookup: Option<WithLookup>,
+
+    pub formula: Option<serde_json::Value>,
+    pub formula_defaults: HashMap<String, f64>,
 }
 
 impl Default for QueryState {
@@ -329,6 +336,8 @@ impl Default for QueryState {
             group_by: String::new(),
             group_size: 0,
             with_lookup: None,
+            formula: None,
+            formula_defaults: HashMap::new(),
         }
     }
 }
@@ -386,6 +395,7 @@ impl QueryPipeline {
             lookup_from: state.lookup_from.clone(),
             using: None,
             timeout: state.request_timeout,
+            formula: state.formula.clone(),
         };
 
         if !state.vector_name.is_empty() {
@@ -412,6 +422,7 @@ impl QueryPipeline {
             lookup_from: flat.lookup_from,
             with_lookup: state.with_lookup.clone(),
             using: flat.using,
+            formula: state.formula.clone(),
         }
     }
 }

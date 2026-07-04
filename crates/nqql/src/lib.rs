@@ -39,11 +39,15 @@ pub fn is_valid(input: String) -> bool {
 }
 
 #[napi]
-pub fn inject_filter(query: String, field: String, op: String, value_json: String) -> napi::Result<String> {
-    let value = json_to_value(&value_json)
-        .ok_or_else(|| napi::Error::from_reason("invalid value JSON"))?;
-    let mut stmt = Parser::parse(&query)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+pub fn inject_filter(
+    query: String,
+    field: String,
+    op: String,
+    value_json: String,
+) -> napi::Result<String> {
+    let value =
+        json_to_value(&value_json).ok_or_else(|| napi::Error::from_reason("invalid value JSON"))?;
+    let mut stmt = Parser::parse(&query).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     ast::inject_filter(&mut stmt, &field, &op, &value);
     Ok(format!("{:#?}", stmt))
 }
@@ -75,11 +79,7 @@ fn serde_json_to_value(jv: serde_json::Value) -> Option<Value<'static>> {
         serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
                 Some(Value::Int(i))
-            } else if let Some(f) = n.as_f64() {
-                Some(Value::Float(f))
-            } else {
-                None
-            }
+            } else { n.as_f64().map(Value::Float) }
         }
         serde_json::Value::Bool(b) => Some(Value::Bool(b)),
         serde_json::Value::Null => Some(Value::Null),

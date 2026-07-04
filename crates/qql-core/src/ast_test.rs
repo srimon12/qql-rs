@@ -44,7 +44,10 @@ mod tests {
     fn test_filter_in() {
         let f = FilterExpr::In {
             field: "color",
-            values: vec![Value::Str(alloc::borrow::Cow::Borrowed("red")), Value::Str(alloc::borrow::Cow::Borrowed("blue"))],
+            values: vec![
+                Value::Str(alloc::borrow::Cow::Borrowed("red")),
+                Value::Str(alloc::borrow::Cow::Borrowed("blue")),
+            ],
         };
         match f {
             FilterExpr::In { field, values } => {
@@ -527,7 +530,10 @@ mod tests {
 
     #[test]
     fn test_value_debug() {
-        assert_eq!(format!("{:?}", Value::Str(alloc::borrow::Cow::Borrowed("hi"))), "Str(\"hi\")");
+        assert_eq!(
+            format!("{:?}", Value::Str(alloc::borrow::Cow::Borrowed("hi"))),
+            "Str(\"hi\")"
+        );
         assert_eq!(format!("{:?}", Value::Int(7)), "Int(7)");
         assert_eq!(format!("{:?}", Value::Bool(false)), "Bool(false)");
         assert_eq!(format!("{:?}", Value::Null), "Null");
@@ -621,7 +627,12 @@ mod tests {
 
         let mut stmt = Stmt::Query(Box::new(query));
 
-        inject_filter(&mut stmt, "org_id", "=", &Value::Str(alloc::borrow::Cow::Borrowed("acme-corp")));
+        inject_filter(
+            &mut stmt,
+            "org_id",
+            "=",
+            &Value::Str(alloc::borrow::Cow::Borrowed("acme-corp")),
+        );
 
         if let Stmt::Query(q) = stmt {
             let main_filter = q.query_filter.unwrap();

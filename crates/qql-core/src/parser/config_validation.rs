@@ -266,3 +266,61 @@ pub fn check_deleted_threshold(value: &Value, pos: usize) -> Result<(), QqlError
     }
     Ok(())
 }
+
+pub fn validate_index_options(options: &[(&str, Value)], pos: usize) -> Result<(), QqlError> {
+    for (k, v) in options {
+        let lower = k.to_ascii_lowercase();
+        match lower.as_str() {
+            "is_tenant" | "on_disk" | "enable_hnsw" | "lowercase" | "ascii_folding"
+            | "phrase_matching" => {
+                if !matches!(v, Value::Bool(_)) {
+                    return Err(QqlError::syntax(
+                        alloc::format!("{} must be true or false", k),
+                        pos,
+                    ));
+                }
+            }
+            "min_token_len" | "max_token_len" => {
+                if !matches!(v, Value::Int(n) if *n >= 0) {
+                    return Err(QqlError::syntax(
+                        alloc::format!("{} must be a non-negative integer", k),
+                        pos,
+                    ));
+                }
+            }
+            "tokenizer" => {
+                if !matches!(v, Value::Str(_)) {
+                    return Err(QqlError::syntax(
+                        alloc::format!("{} must be a string", k),
+                        pos,
+                    ));
+                }
+            }
+            "stopwords" => match v {
+                Value::List(items) => {
+                    for item in items {
+                        if !matches!(item, Value::Str(_)) {
+                            return Err(QqlError::syntax(
+                                alloc::format!("{} must be a list of strings", k),
+                                pos,
+                            ));
+                        }
+                    }
+                }
+                _ => {
+                    return Err(QqlError::syntax(
+                        alloc::format!("{} must be a list of strings", k),
+                        pos,
+                    ));
+                }
+            },
+            _ => {
+                return Err(QqlError::syntax(
+                    alloc::format!("unknown index option: {}", k),
+                    pos,
+                ));
+            }
+        }
+    }
+    Ok(())
+}

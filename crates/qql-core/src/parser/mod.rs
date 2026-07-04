@@ -16,8 +16,8 @@ pub mod with_clause;
 pub use config_validation::{
     check_deleted_threshold, config_bool, config_float_range, config_has_key,
     config_max_optimization_threads, config_non_negative_u64, config_positive_u64, config_value,
-    merge_collection_config, validate_hnsw_value, validate_optimizers_value, validate_params_value,
-    validate_vectors_value,
+    merge_collection_config, validate_hnsw_value, validate_index_options,
+    validate_optimizers_value, validate_params_value, validate_vectors_value,
 };
 pub use with_clause::merge_search_with;
 
@@ -67,10 +67,6 @@ pub fn token_kind_to_op(kind: TokenKind) -> &'static str {
         TokenKind::Gte => ">=",
         TokenKind::Lt => "<",
         TokenKind::Lte => "<=",
-        TokenKind::GeoBbox => "GEO_BBOX",
-        TokenKind::GeoRadius => "GEO_RADIUS",
-        TokenKind::ValuesCount => "VALUES_COUNT",
-        TokenKind::HasVector => "HAS_VECTOR",
         _ => "",
     }
 }

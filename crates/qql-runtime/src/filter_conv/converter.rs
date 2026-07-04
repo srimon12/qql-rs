@@ -5,7 +5,10 @@ use std::vec::Vec;
 use qql_core::ast::{FilterExpr, Value};
 use qql_core::error::QqlError;
 
-use super::types::{FilterValue, QdrantCondition, QdrantFilter};
+use super::types::{
+    FilterValue, QdrantCondition, QdrantFilter, QdrantGeoBoundingBox, QdrantGeoPoint,
+    QdrantGeoRadius, QdrantRange,
+};
 
 pub struct FilterConverter;
 
@@ -71,6 +74,69 @@ impl FilterConverter {
             FilterExpr::Or { operands } => self.build_or_expr(operands),
             FilterExpr::Not { operand } => self.build_not_expr(operand),
             FilterExpr::Nested { path, filter } => self.build_nested_expr(path, filter),
+            FilterExpr::HasVector { name } => Ok(QdrantCondition::HasVector(name.to_string())),
+            FilterExpr::ValuesCount { field, op, count } => {
+                let mut range = QdrantRange {
+                    gt: None,
+                    gte: None,
+                    lt: None,
+                    lte: None,
+                };
+                match *op {
+                    ">" => range.gt = Some(*count),
+                    ">=" => range.gte = Some(*count),
+                    "<" => range.lt = Some(*count),
+                    "<=" => range.lte = Some(*count),
+                    "=" => {
+                        range.gte = Some(*count);
+                        range.lte = Some(*count);
+                    }
+                    _ => {
+                        return Err(QqlError::runtime(format!(
+                            "unsupported values_count operator: {}",
+                            op
+                        )))
+                    }
+                }
+                Ok(QdrantCondition::ValuesCount {
+                    key: field.to_string(),
+                    values_count: range,
+                })
+            }
+            FilterExpr::GeoBoundingBox {
+                field,
+                top_left_lat,
+                top_left_lon,
+                bottom_right_lat,
+                bottom_right_lon,
+            } => Ok(QdrantCondition::GeoBoundingBox {
+                key: field.to_string(),
+                geo_bounding_box: QdrantGeoBoundingBox {
+                    top_left: QdrantGeoPoint {
+                        lat: *top_left_lat,
+                        lon: *top_left_lon,
+                    },
+                    bottom_right: QdrantGeoPoint {
+                        lat: *bottom_right_lat,
+                        lon: *bottom_right_lon,
+                    },
+                },
+            }),
+            FilterExpr::GeoRadius {
+                field,
+                lat,
+                lon,
+                radius,
+            } => Ok(QdrantCondition::GeoRadius {
+                key: field.to_string(),
+                geo_radius: QdrantGeoRadius {
+                    center: QdrantGeoPoint {
+                        lat: *lat,
+                        lon: *lon,
+                    },
+                    radius: *radius,
+                },
+            }),
         }
     }
 

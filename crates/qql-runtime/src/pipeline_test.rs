@@ -441,10 +441,14 @@ async fn test_rerank_node_execute() {
 async fn test_recommend_node_execute() {
     let node = RecommendNode {
         positive_ids: vec![
-            ast::Value::Str(std::borrow::Cow::Borrowed("123e4567-e89b-12d3-a456-426614174000")),
+            ast::Value::Str(std::borrow::Cow::Borrowed(
+                "123e4567-e89b-12d3-a456-426614174000",
+            )),
             ast::Value::Int(42),
         ],
-        negative_ids: vec![ast::Value::Str(std::borrow::Cow::Borrowed("123e4567-e89b-12d3-a456-426614174001"))],
+        negative_ids: vec![ast::Value::Str(std::borrow::Cow::Borrowed(
+            "123e4567-e89b-12d3-a456-426614174001",
+        ))],
         strategy: None,
     };
     let mut state = QueryState::default();
@@ -527,8 +531,10 @@ fn test_point_id_num() {
 
 #[test]
 fn test_point_id_uuid() {
-    let id =
-        pipeline::to_point_id(&ast::Value::Str(std::borrow::Cow::Borrowed("550e8400-e29b-41d4-a716-446655440000"))).unwrap();
+    let id = pipeline::to_point_id(&ast::Value::Str(std::borrow::Cow::Borrowed(
+        "550e8400-e29b-41d4-a716-446655440000",
+    )))
+    .unwrap();
     match id {
         PointId::Uuid(_) => {}
         _ => panic!("expected UUID"),
@@ -551,4 +557,16 @@ fn test_mmr_enabled() {
     };
     let has = with.mmr_diversity.is_some() && with.mmr_candidates.is_some();
     assert!(has);
+}
+
+#[test]
+fn test_query_variant_serialization_roundtrip() {
+    use crate::pipeline::QueryVariant;
+
+    let variant = QueryVariant::Nearest(vec![1.0, 2.0, 3.0]);
+    let serialized = serde_json::to_value(&variant).unwrap();
+    let expected = serde_json::json!({"nearest": [1.0, 2.0, 3.0]});
+    assert_eq!(serialized, expected);
+    let deserialized: QueryVariant = serde_json::from_value(serialized).unwrap();
+    assert_eq!(deserialized, variant);
 }

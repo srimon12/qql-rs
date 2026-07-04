@@ -115,6 +115,8 @@ impl Executor {
             with_lookup: stmt.with_lookup_collection.map(|c| pipeline::WithLookup {
                 collection: c.to_string(),
             }),
+            formula: None,
+            formula_defaults: HashMap::new(),
         };
 
         // Fusion config
@@ -311,6 +313,23 @@ impl Executor {
                 }));
                 state.vector_name = dense_vector_name.clone();
             }
+        }
+
+        if let Some(ref formula) = stmt.formula {
+            let formula_json = crate::pipeline::build_expression(formula)?;
+            let mut defaults = Vec::new();
+            for (k, v) in &stmt.formula_defaults {
+                let val_f64 = match v {
+                    Value::Int(i) => *i as f64,
+                    Value::Float(f) => *f,
+                    _ => 0.0,
+                };
+                defaults.push((k.to_string(), val_f64));
+            }
+            exec_pipeline.add(Box::new(crate::pipeline::formula_nodes::FormulaNode {
+                expr: formula_json,
+                defaults,
+            }));
         }
 
         if stmt.rerank {
@@ -654,13 +673,16 @@ impl Executor {
         // Detect hybrid mode from EMBED directives or collection topology
         let has_sparse = stmt.hybrid
             || stmt.sparse_model.is_some()
-            || stmt.embed_directives.iter().any(|d| d.sparse_model.is_some());
+            || stmt
+                .embed_directives
+                .iter()
+                .any(|d| d.sparse_model.is_some());
 
         // 1. Extract point IDs and payloads from all rows
         let mut point_ids = Vec::with_capacity(stmt.values_list.len());
         let mut payloads = Vec::with_capacity(stmt.values_list.len());
 
-        for (idx, row) in stmt.values_list.iter().enumerate() {
+        for row in &stmt.values_list {
             let id = extract_point_id(row)?;
             point_ids.push(id);
 
@@ -676,18 +698,20 @@ impl Executor {
 
         // 2. Build vectors batch
         let vectors_batch = if has_embed {
-            self.build_embed_vectors_batch(&stmt.values_list, &stmt.embed_directives).await?
+            self.build_embed_vectors_batch(&stmt.values_list, &stmt.embed_directives)
+                .await?
         } else if has_provided_vectors {
             extract_provided_vectors(&stmt.values_list)?
         } else {
-            self.build_auto_embed_vectors_batch(&stmt.values_list, stmt.model, has_sparse).await?
+            self.build_auto_embed_vectors_batch(&stmt.values_list, stmt.model, has_sparse)
+                .await?
         };
 
         // 3. Build and upsert points
         let points = point_ids
             .into_iter()
-            .zip(payloads.into_iter())
-            .zip(vectors_batch.into_iter())
+            .zip(payloads)
+            .zip(vectors_batch)
             .map(|((id, payload), vectors)| PointStruct {
                 id,
                 vector: vectors,
@@ -838,15 +862,16 @@ impl Executor {
         };
 
         // Build sparse vectors if hybrid
-        let sparse_vectors: Option<Vec<crate::sparse::SparseVector>> = if has_sparse && !texts.is_empty() {
-            let mut sv = Vec::with_capacity(texts.len());
-            for text in &texts {
-                sv.push(crate::sparse::build_query_default(text));
-            }
-            Some(sv)
-        } else {
-            None
-        };
+        let sparse_vectors: Option<Vec<crate::sparse::SparseVector>> =
+            if has_sparse && !texts.is_empty() {
+                let mut sv = Vec::with_capacity(texts.len());
+                for text in &texts {
+                    sv.push(crate::sparse::build_query_default(text));
+                }
+                Some(sv)
+            } else {
+                None
+            };
 
         let dense_name = super::DENSE_VECTOR_NAME;
 
@@ -857,20 +882,24 @@ impl Executor {
             let vec_val = match (pos, &dense_vectors, &sparse_vectors) {
                 (Some(p), Some(dv), Some(sv)) if p < dv.len() && p < sv.len() => {
                     let mut map = serde_json::Map::new();
-                    map.insert(dense_name.to_string(), serde_json::Value::Array(
-                        dv[p].iter().map(|f| serde_json::json!(f)).collect()
-                    ));
-                    map.insert(super::SPARSE_VECTOR_NAME.to_string(), serde_json::json!({
-                        "indices": sv[p].indices,
-                        "values": sv[p].values,
-                    }));
+                    map.insert(
+                        dense_name.to_string(),
+                        serde_json::Value::Array(
+                            dv[p].iter().map(|f| serde_json::json!(f)).collect(),
+                        ),
+                    );
+                    map.insert(
+                        super::SPARSE_VECTOR_NAME.to_string(),
+                        serde_json::json!({
+                            "indices": sv[p].indices,
+                            "values": sv[p].values,
+                        }),
+                    );
                     Some(serde_json::Value::Object(map))
                 }
-                (Some(p), Some(dv), None) if p < dv.len() => {
-                    Some(serde_json::json!({
-                        dense_name: dv[p]
-                    }))
-                }
+                (Some(p), Some(dv), None) if p < dv.len() => Some(serde_json::json!({
+                    dense_name: dv[p]
+                })),
                 _ => None,
             };
             batch.push(vec_val);
@@ -1105,11 +1134,9 @@ fn is_vector_key(key: &str) -> bool {
     key == "vector" || key == "_v" || key.starts_with("_v_")
 }
 
-fn has_vector_keys(
-    values_list: &[Vec<(&str, Value<'_>)>],
-) -> bool {
+fn has_vector_keys(values_list: &[Vec<(&str, Value<'_>)>]) -> bool {
     for row in values_list {
-        if row.iter().any(|(k, _)| is_vector_key(k.as_ref())) {
+        if row.iter().any(|(k, _)| is_vector_key(k)) {
             return true;
         }
     }
@@ -1128,7 +1155,7 @@ fn extract_provided_vectors(
                 continue;
             }
             let vec_name = if key == "vector" || key == "_v" {
-                ""  // unnamed single vector
+                "" // unnamed single vector
             } else {
                 key.strip_prefix("_v_").unwrap_or(key)
             };
@@ -1140,7 +1167,7 @@ fn extract_provided_vectors(
                         vectors.insert(nk.to_string(), value_to_json(nv));
                     }
                 }
-                Value::List(items) => {
+                Value::List(_items) => {
                     let json_val = value_to_json(v);
                     if vec_name.is_empty() {
                         vectors.insert(super::DENSE_VECTOR_NAME.to_string(), json_val);

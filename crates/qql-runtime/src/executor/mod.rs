@@ -271,6 +271,159 @@ impl Executor {
         }
     }
 
+    pub fn explain(query: &str) -> Result<String, QqlError> {
+        let stmt = qql_core::parser::Parser::parse(query)?;
+        let mut plan = String::new();
+        Self::explain_stmt(&stmt, &mut plan);
+        plan.push_str("Action: Explain-only mode (no Qdrant server)\n");
+        Ok(plan)
+    }
+
+    fn explain_stmt(stmt: &Stmt, plan: &mut String) {
+        match stmt {
+            Stmt::ShowCollections => {
+                plan.push_str("Statement: SHOW COLLECTIONS\n");
+            }
+            Stmt::ShowCollection(collection) => {
+                plan.push_str(&format!("Statement: SHOW COLLECTION {}\n", collection));
+            }
+            Stmt::CreateCollection(s) => {
+                plan.push_str(&format!("Statement: CREATE COLLECTION {}\n", s.collection));
+                if let Some(model) = &s.model {
+                    plan.push_str(&format!("Model: {}\n", model));
+                }
+                if s.rerank {
+                    plan.push_str("Type: HYBRID + RERANK (dense + sparse + ColBERT multivector)\n");
+                } else if s.hybrid {
+                    plan.push_str("Type: HYBRID (dense + sparse)\n");
+                } else {
+                    plan.push_str("Type: DENSE\n");
+                }
+                for v in &s.vectors {
+                    plan.push_str(&format!("Vector: {}, Size: {}\n", v.name, v.size));
+                }
+            }
+            Stmt::AlterCollection(s) => {
+                plan.push_str(&format!("Statement: ALTER COLLECTION {}\n", s.collection));
+            }
+            Stmt::DropCollection(s) => {
+                plan.push_str(&format!("Statement: DROP COLLECTION {}\n", s.collection));
+            }
+            Stmt::Insert(s) => {
+                plan.push_str(&format!("Statement: INSERT INTO {}\n", s.collection));
+                if let Some(model) = &s.model {
+                    plan.push_str(&format!("Model: {}\n", model));
+                }
+                plan.push_str(&format!("Rows: {}\n", s.values_list.len()));
+            }
+            Stmt::Select(s) => {
+                plan.push_str(&format!(
+                    "Statement: SELECT * FROM {} WHERE id = '{:?}'\n",
+                    s.collection, s.point_id
+                ));
+            }
+            Stmt::Scroll(s) => {
+                plan.push_str(&format!(
+                    "Statement: SCROLL FROM {} LIMIT {}\n",
+                    s.collection, s.limit
+                ));
+            }
+            Stmt::Query(q) => {
+                let mode_str = match q.mode {
+                    qql_core::ast::QueryMode::OrderBy => "ORDER BY",
+                    qql_core::ast::QueryMode::Sample => "SAMPLE",
+                    qql_core::ast::QueryMode::RelevanceFeedback => "RELEVANCE FEEDBACK",
+                    _ => "",
+                };
+                let coll = q
+                    .collection
+                    .as_ref()
+                    .map(|c| c.as_ref())
+                    .unwrap_or("<none>");
+                if !mode_str.is_empty() {
+                    plan.push_str(&format!(
+                        "Statement: QUERY {} FROM {} LIMIT {}\n",
+                        mode_str, coll, q.limit
+                    ));
+                } else {
+                    plan.push_str(&format!(
+                        "Statement: QUERY FROM {} LIMIT {}\n",
+                        coll, q.limit
+                    ));
+                }
+                if let Some(text) = &q.query_text {
+                    plan.push_str(&format!("Query: '{}'\n", text));
+                }
+                if !q.raw_vector.is_empty() {
+                    plan.push_str(&format!("Raw Vector: {:?}\n", q.raw_vector));
+                }
+                match q.query_type {
+                    qql_core::ast::QueryType::Hybrid => plan.push_str("Using: HYBRID\n"),
+                    qql_core::ast::QueryType::Sparse => plan.push_str("Using: SPARSE\n"),
+                    qql_core::ast::QueryType::Dense => {}
+                }
+                if let Some(u) = &q.using_ {
+                    plan.push_str(&format!("Using: '{}'\n", u));
+                }
+                if let Some(m) = &q.model {
+                    plan.push_str(&format!("Model: {}\n", m));
+                }
+                if q.offset > 0 {
+                    plan.push_str(&format!("Offset: {}\n", q.offset));
+                }
+                if let Some(th) = &q.score_threshold {
+                    plan.push_str(&format!("Score threshold: {}\n", th));
+                }
+                if let Some(gb) = &q.group_by {
+                    plan.push_str(&format!("Group by: {}\n", gb));
+                }
+                if q.rerank {
+                    plan.push_str("Rerank: enabled\n");
+                }
+                if !q.ctes.is_empty() {
+                    plan.push_str(&format!("CTEs: {} defined\n", q.ctes.len()));
+                }
+                if !q.prefetch_refs.is_empty() {
+                    plan.push_str(&format!("Prefetch refs: {}\n", q.prefetch_refs.len()));
+                }
+                if let Some(ft) = &q.fusion_type {
+                    plan.push_str(&format!("Fusion: {}\n", ft));
+                }
+            }
+            Stmt::Delete(s) => {
+                if let Some(field) = &s.field {
+                    plan.push_str(&format!(
+                        "Statement: DELETE FROM {} WHERE {} = '{:?}'\n",
+                        s.collection, field, s.value
+                    ));
+                } else {
+                    plan.push_str(&format!(
+                        "Statement: DELETE FROM {} WHERE id = '{:?}'\n",
+                        s.collection, s.point_id
+                    ));
+                }
+            }
+            Stmt::UpdateVector(s) => {
+                plan.push_str(&format!(
+                    "Statement: UPDATE {} SET VECTOR = [...] WHERE id = '{:?}'\n",
+                    s.collection, s.point_id
+                ));
+            }
+            Stmt::UpdatePayload(s) => {
+                plan.push_str(&format!(
+                    "Statement: UPDATE {} SET PAYLOAD = {{...}} WHERE id = '{:?}'\n",
+                    s.collection, s.point_id
+                ));
+            }
+            Stmt::CreateIndex(s) => {
+                plan.push_str(&format!(
+                    "Statement: CREATE INDEX ON COLLECTION {} FOR {} TYPE {}\n",
+                    s.collection, s.field, s.field_type
+                ));
+            }
+        }
+    }
+
     pub fn client(&self) -> &dyn QdrantOperations {
         self.client.as_ref()
     }
@@ -390,9 +543,7 @@ impl Executor {
             if let Stmt::Query(query_stmt) = stmt {
                 parsed_stmts.push(*query_stmt);
             } else {
-                return Err(QqlError::runtime(format!(
-                    "query_batch only supports QUERY statements, got non-query statement"
-                )));
+                return Err(QqlError::runtime("query_batch only supports QUERY statements, got non-query statement".to_string()));
             }
         }
         self.query_batch_nodes(parsed_stmts).await
@@ -442,10 +593,13 @@ impl Executor {
                 let coll = state.collection_name.clone();
                 if !batches.contains_key(&coll) {
                     ordered_collections.push(coll.clone());
-                    batches.insert(coll.clone(), CollectionBatch {
-                        indices: Vec::new(),
-                        requests: Vec::new(),
-                    });
+                    batches.insert(
+                        coll.clone(),
+                        CollectionBatch {
+                            indices: Vec::new(),
+                            requests: Vec::new(),
+                        },
+                    );
                 }
                 let b = batches.get_mut(&coll).unwrap();
                 let mut req = pipeline.build_flat_request(state);

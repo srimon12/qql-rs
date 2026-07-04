@@ -9,6 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 qql-core = { path = "../qql-core" }
+qql = { path = "../qql-runtime" }
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }

@@ -42,10 +42,9 @@ fn is_valid(input: &str) -> bool {
 
 #[pyfunction]
 fn inject_filter(query: &str, field: &str, op: &str, value_json: &str) -> PyResult<String> {
-    let value = json_to_value(value_json)
-        .ok_or_else(|| PySyntaxError::new_err("invalid value JSON"))?;
-    let mut stmt = Parser::parse(query)
-        .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+    let value =
+        json_to_value(value_json).ok_or_else(|| PySyntaxError::new_err("invalid value JSON"))?;
+    let mut stmt = Parser::parse(query).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
     ast::inject_filter(&mut stmt, field, op, &value);
     Ok(format!("{:#?}", stmt))
 }

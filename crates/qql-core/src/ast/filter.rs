@@ -59,4 +59,25 @@ pub enum FilterExpr<'a> {
         path: &'a str,
         filter: Box<FilterExpr<'a>>,
     },
+    HasVector {
+        name: &'a str,
+    },
+    ValuesCount {
+        field: &'a str,
+        op: &'a str,
+        count: i64,
+    },
+    GeoBoundingBox {
+        field: &'a str,
+        top_left_lat: f64,
+        top_left_lon: f64,
+        bottom_right_lat: f64,
+        bottom_right_lon: f64,
+    },
+    GeoRadius {
+        field: &'a str,
+        lat: f64,
+        lon: f64,
+        radius: f64,
+    },
 }

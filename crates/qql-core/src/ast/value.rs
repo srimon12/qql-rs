@@ -57,9 +57,7 @@ impl<'a> Value<'a> {
                     .map(|(k, v)| (Cow::Owned(k.to_string()), v.to_static()))
                     .collect(),
             ),
-            Value::List(items) => Value::List(
-                items.iter().map(|v| v.to_static()).collect(),
-            ),
+            Value::List(items) => Value::List(items.iter().map(|v| v.to_static()).collect()),
         }
     }
 

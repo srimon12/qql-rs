@@ -244,3 +244,65 @@ fn test_basic_conversion() {
     let result = FilterConverter.build_filter(&expr);
     assert!(result.is_ok());
 }
+
+#[test]
+fn test_has_vector() {
+    let expr = FilterExpr::HasVector { name: "my_vector" };
+    let filter = build(&expr);
+    let must = filter.must.unwrap();
+    assert!(matches!(&must[0],
+        QdrantCondition::HasVector(name) if name == "my_vector"
+    ));
+}
+
+#[test]
+fn test_values_count() {
+    let expr = FilterExpr::ValuesCount {
+        field: "tags",
+        op: ">",
+        count: 5,
+    };
+    let filter = build(&expr);
+    let must = filter.must.unwrap();
+    assert!(matches!(&must[0],
+        QdrantCondition::ValuesCount { key, values_count }
+        if key == "tags" && values_count.gt == Some(5)
+    ));
+}
+
+#[test]
+fn test_geo_bounding_box() {
+    let expr = FilterExpr::GeoBoundingBox {
+        field: "location",
+        top_left_lat: 52.520711,
+        top_left_lon: 13.403683,
+        bottom_right_lat: 52.520712,
+        bottom_right_lon: 13.403684,
+    };
+    let filter = build(&expr);
+    let must = filter.must.unwrap();
+    assert!(matches!(&must[0],
+        QdrantCondition::GeoBoundingBox { key, geo_bounding_box }
+        if key == "location"
+        && (geo_bounding_box.top_left.lat - 52.520711).abs() < f64::EPSILON
+        && (geo_bounding_box.bottom_right.lon - 13.403684).abs() < f64::EPSILON
+    ));
+}
+
+#[test]
+fn test_geo_radius() {
+    let expr = FilterExpr::GeoRadius {
+        field: "location",
+        lat: 52.520711,
+        lon: 13.403683,
+        radius: 1000.0,
+    };
+    let filter = build(&expr);
+    let must = filter.must.unwrap();
+    assert!(matches!(&must[0],
+        QdrantCondition::GeoRadius { key, geo_radius }
+        if key == "location"
+        && (geo_radius.center.lat - 52.520711).abs() < f64::EPSILON
+        && (geo_radius.radius - 1000.0).abs() < f64::EPSILON
+    ));
+}

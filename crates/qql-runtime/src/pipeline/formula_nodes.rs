@@ -4,41 +4,23 @@ use qql_core::ast;
 use qql_core::error::QqlError;
 use std::collections::HashMap;
 
-use super::{ExecutionNode, PrefetchQuery, QueryState};
+use super::ExecutionNode;
+use super::QueryState;
 
 pub struct FormulaNode {
-    pub expr: ast::FormulaExpr<'static>,
+    pub expr: serde_json::Value,
     pub defaults: Vec<(String, f64)>,
 }
 
 #[async_trait]
 impl ExecutionNode for FormulaNode {
     async fn execute(&self, state: &mut QueryState) -> Result<(), QqlError> {
-        let _expr = build_expression(&self.expr)?;
-
         let mut defs: HashMap<String, f64> = HashMap::new();
         for (k, v) in &self.defaults {
             defs.insert(k.clone(), *v);
         }
-
-        if let Some(target) = &state.target_query {
-            let pq = PrefetchQuery {
-                prefetch: Vec::new(),
-                query: Some(target.clone()),
-                using: if state.vector_name.is_empty() {
-                    None
-                } else {
-                    Some(state.vector_name.clone())
-                },
-                limit: None,
-                params: None,
-                filter: None,
-                score_threshold: None,
-                lookup_from: None,
-            };
-            state.prefetches.push(pq);
-        }
-
+        state.formula = Some(self.expr.clone());
+        state.formula_defaults = defs;
         Ok(())
     }
 }

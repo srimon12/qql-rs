@@ -270,6 +270,28 @@ fn test_create_index_with_text_options() {
 }
 
 #[test]
+fn test_create_index_validation_errors() {
+    assert_parse_err(
+        "CREATE INDEX ON COLLECTION mycollection FOR tenant_id TYPE keyword WITH (is_tenant = 123)",
+    );
+    assert_parse_err(
+        "CREATE INDEX ON COLLECTION mycollection FOR title TYPE text WITH (min_token_len = -5)",
+    );
+    assert_parse_err(
+        "CREATE INDEX ON COLLECTION mycollection FOR title TYPE text WITH (tokenizer = 123)",
+    );
+    assert_parse_err(
+        "CREATE INDEX ON COLLECTION mycollection FOR title TYPE text WITH (stopwords = 'foo')",
+    );
+    assert_parse_err(
+        "CREATE INDEX ON COLLECTION mycollection FOR title TYPE text WITH (stopwords = [123])",
+    );
+    assert_parse_err(
+        "CREATE INDEX ON COLLECTION mycollection FOR title TYPE text WITH (unknown_option = true)",
+    );
+}
+
+#[test]
 fn test_create_collection_with_turbo_quantization_default() {
     let stmt = assert_parse_ok("CREATE COLLECTION docs WITH QUANTIZATION (type = 'turbo')");
     match stmt {

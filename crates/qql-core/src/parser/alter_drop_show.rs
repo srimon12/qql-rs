@@ -72,8 +72,10 @@ impl<'a> Parser<'a> {
         }
         let mut options = Vec::new();
         if self.peek()?.kind == TokenKind::With {
+            let pos = self.peek()?.pos;
             self.advance()?;
             options = self.parse_config_block()?;
+            super::validate_index_options(&options, pos)?;
         }
         Ok(Stmt::CreateIndex(Box::new(CreateIndexStmt {
             collection,

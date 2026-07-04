@@ -132,6 +132,7 @@ pub extern "C" fn qql_tokenize(input: *const c_char) -> *mut c_char {
 }
 
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn qql_free_string(s: *mut c_char) {
     if !s.is_null() {
         unsafe { drop(CString::from_raw(s)) };
@@ -171,11 +172,7 @@ fn serde_json_value_to_value(jv: serde_json::Value) -> Option<Value<'static>> {
         serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
                 Some(Value::Int(i))
-            } else if let Some(f) = n.as_f64() {
-                Some(Value::Float(f))
-            } else {
-                None
-            }
+            } else { n.as_f64().map(Value::Float) }
         }
         serde_json::Value::Bool(b) => Some(Value::Bool(b)),
         serde_json::Value::Null => Some(Value::Null),
