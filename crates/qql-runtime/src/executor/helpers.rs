@@ -91,26 +91,7 @@ pub(crate) fn to_point_id_static(val: &ast::Value) -> Result<PointId, QqlError> 
 }
 
 pub(crate) fn clone_value(val: &Value<'_>) -> Value<'static> {
-    match val {
-        Value::Str(s) => {
-            let leaked: &'static str = Box::leak(s.to_string().into_boxed_str());
-            Value::Str(leaked)
-        }
-        Value::Int(i) => Value::Int(*i),
-        Value::Float(f) => Value::Float(*f),
-        Value::Bool(b) => Value::Bool(*b),
-        Value::Null => Value::Null,
-        Value::Dict(items) => Value::Dict(
-            items
-                .iter()
-                .map(|(k, v)| {
-                    let s: &'static str = Box::leak(k.to_string().into_boxed_str());
-                    (s, clone_value(v))
-                })
-                .collect(),
-        ),
-        Value::List(items) => Value::List(items.iter().map(clone_value).collect()),
-    }
+    val.to_static()
 }
 
 pub(crate) fn value_to_json(val: &Value) -> serde_json::Value {

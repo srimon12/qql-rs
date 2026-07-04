@@ -197,9 +197,9 @@ fn test_build_expression_match_condition() {
     let expr = ast::FormulaExpr::MatchCondition {
         field: "tag",
         values: vec![
-            ast::Value::Str("h1"),
-            ast::Value::Str("h2"),
-            ast::Value::Str("h3"),
+            ast::Value::Str(std::borrow::Cow::Borrowed("h1")),
+            ast::Value::Str(std::borrow::Cow::Borrowed("h2")),
+            ast::Value::Str(std::borrow::Cow::Borrowed("h3")),
         ],
     };
 
@@ -218,7 +218,7 @@ fn test_build_expression_match_condition() {
 fn test_build_expression_match_condition_single() {
     let expr = ast::FormulaExpr::MatchCondition {
         field: "category",
-        values: vec![ast::Value::Str("premium")],
+        values: vec![ast::Value::Str(std::borrow::Cow::Borrowed("premium"))],
     };
 
     let result = pipeline::build_expression(&expr);
@@ -441,10 +441,10 @@ async fn test_rerank_node_execute() {
 async fn test_recommend_node_execute() {
     let node = RecommendNode {
         positive_ids: vec![
-            ast::Value::Str("123e4567-e89b-12d3-a456-426614174000"),
+            ast::Value::Str(std::borrow::Cow::Borrowed("123e4567-e89b-12d3-a456-426614174000")),
             ast::Value::Int(42),
         ],
-        negative_ids: vec![ast::Value::Str("123e4567-e89b-12d3-a456-426614174001")],
+        negative_ids: vec![ast::Value::Str(std::borrow::Cow::Borrowed("123e4567-e89b-12d3-a456-426614174001"))],
         strategy: None,
     };
     let mut state = QueryState::default();
@@ -528,7 +528,7 @@ fn test_point_id_num() {
 #[test]
 fn test_point_id_uuid() {
     let id =
-        pipeline::to_point_id(&ast::Value::Str("550e8400-e29b-41d4-a716-446655440000")).unwrap();
+        pipeline::to_point_id(&ast::Value::Str(std::borrow::Cow::Borrowed("550e8400-e29b-41d4-a716-446655440000"))).unwrap();
     match id {
         PointId::Uuid(_) => {}
         _ => panic!("expected UUID"),

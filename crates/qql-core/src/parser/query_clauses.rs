@@ -219,7 +219,7 @@ impl<'a> Parser<'a> {
                     let mut inline_idx = 0;
                     while self.peek()?.kind != TokenKind::Rparen {
                         let mut prefetch_ref = PrefetchRef {
-                            cte_name: "",
+                            cte_name: alloc::borrow::Cow::Borrowed(""),
                             filter: None,
                             score_threshold: None,
                             lookup_from: None,
@@ -234,9 +234,9 @@ impl<'a> Parser<'a> {
                             let inline_stmt = self.parse_cte_query()?;
                             let cte_name = alloc::format!("__inline_pf{}", inline_idx);
                             inline_idx += 1;
-                            prefetch_ref.cte_name = self.intern_string(cte_name);
+                            prefetch_ref.cte_name = alloc::borrow::Cow::Owned(cte_name);
                             stmt.ctes.push(CTE {
-                                name: prefetch_ref.cte_name,
+                                name: prefetch_ref.cte_name.clone(),
                                 stmt: inline_stmt,
                             });
                         } else if pk == TokenKind::Identifier
@@ -244,7 +244,7 @@ impl<'a> Parser<'a> {
                             || pk == TokenKind::Sparse
                         {
                             let name = self.parse_identifier()?;
-                            prefetch_ref.cte_name = name;
+                            prefetch_ref.cte_name = alloc::borrow::Cow::Borrowed(name);
                         } else {
                             return Ok(());
                         }
@@ -320,7 +320,7 @@ impl<'a> Parser<'a> {
                     } else {
                         "DBSF"
                     };
-                    stmt.fusion_type = Some(self.intern_string(alloc::string::String::from(upper)));
+                    stmt.fusion_type = Some(upper);
                 }
                 TokenKind::Where => {
                     if seen_where {
@@ -515,15 +515,4 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Helper: store an owned string so we can borrow it as `&'a str`.
-    /// Since the parser borrows from the input, we use this sparingly for
-    /// dynamically-constructed CTE names.
-    fn intern_string(&self, s: alloc::string::String) -> &'a str {
-        // SAFETY: leak the string to get a 'static reference, then cast.
-        // This is only used for CTE names like "__inline_pf0".
-        let leaked: &'static str = Box::leak(s.into_boxed_str());
-        // We lie about the lifetime — this is safe because the leaked
-        // memory lives for the rest of the program.
-        unsafe { &*(leaked as *const str) }
-    }
 }

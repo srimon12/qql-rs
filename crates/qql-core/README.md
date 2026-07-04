@@ -6,7 +6,7 @@ Standalone Lexer, Parser, AST representation, and Query Transformers for the Qdr
 
 ## Features
 * **Zero I/O Dependencies**: A pure computation library with no network or system call overhead.
-* **`no_std` Support**: Fully compatible with `no_std` environments (using the `alloc` crate), enabling compilation to WebAssembly (WASM) and lightweight edge systems.
+* **Standard Compatibility**: Fully compatible with standard environments, enabling compilation to WebAssembly (WASM) and lightweight edge systems.
 * **Lexer**: Tokenizes raw query strings into structured lexer tokens.
 * **Parser**: Generates a typed Abstract Syntax Tree (AST) representing QQL queries.
 * **AST Transformations**: Provides standard AST mutation utilities (such as `inject_filter` for recursive tenant-isolation and query security injection).

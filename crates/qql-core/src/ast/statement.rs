@@ -47,13 +47,13 @@ pub struct FeedbackStrategy {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CTE<'a> {
-    pub name: &'a str,
+    pub name: std::borrow::Cow<'a, str>,
     pub stmt: Box<QueryStmt<'a>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PrefetchRef<'a> {
-    pub cte_name: &'a str,
+    pub cte_name: std::borrow::Cow<'a, str>,
     pub filter: Option<Box<FilterExpr<'a>>>,
     pub score_threshold: Option<f64>,
     pub lookup_from: Option<&'a str>,
@@ -300,7 +300,7 @@ pub struct DropCollectionStmt<'a> {
 pub struct CreateIndexStmt<'a> {
     pub collection: &'a str,
     pub field: &'a str,
-    pub field_type: &'a str,
+    pub field_type: std::borrow::Cow<'a, str>,
     pub options: Vec<(&'a str, Value<'a>)>,
 }
 

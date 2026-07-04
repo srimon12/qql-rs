@@ -141,6 +141,14 @@ impl<'a> Parser<'a> {
         self.tokens.peek().cloned().unwrap_or(Ok(Token::eof()))
     }
 
+    pub fn save_pos(&self) -> crate::lexer::TokenIter<'a> {
+        self.tokens.clone()
+    }
+
+    pub fn restore_pos(&mut self, saved: crate::lexer::TokenIter<'a>) {
+        self.tokens = saved;
+    }
+
     pub fn peek_kind(&mut self) -> Result<TokenKind, QqlError> {
         self.peek().map(|t| t.kind)
     }
@@ -185,7 +193,7 @@ impl<'a> Parser<'a> {
         match tok.kind {
             TokenKind::String => {
                 self.advance()?;
-                Ok(Value::Str(tok.text))
+                Ok(Value::Str(alloc::borrow::Cow::Borrowed(tok.text)))
             }
             TokenKind::Float => {
                 self.advance()?;
@@ -220,10 +228,17 @@ impl<'a> Parser<'a> {
                 } else if ascii_equal(tok.text, "NULL") {
                     Ok(Value::Null)
                 } else {
-                    Ok(Value::Str(tok.text))
+                    Ok(Value::Str(alloc::borrow::Cow::Borrowed(tok.text)))
                 }
             }
-            TokenKind::Lbrace => self.parse_payload_dict().map(Value::Dict),
+            TokenKind::Lbrace => self.parse_payload_dict().map(|items| {
+                Value::Dict(
+                    items
+                        .into_iter()
+                        .map(|(k, v)| (alloc::borrow::Cow::Borrowed(k), v))
+                        .collect(),
+                )
+            }),
             TokenKind::Lbracket => self.parse_list().map(Value::List),
             _ => Err(QqlError::syntax(
                 alloc::format!("unexpected value token '{}'", tok.text),

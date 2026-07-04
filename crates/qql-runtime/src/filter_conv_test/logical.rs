@@ -68,7 +68,7 @@ fn test_logical_expressions() {
                     FilterExpr::Compare {
                         field: "status",
                         op: "=",
-                        value: Value::Str("active"),
+                        value: Value::Str(std::borrow::Cow::Borrowed("active")),
                     },
                     FilterExpr::Between {
                         field: "score",
@@ -118,19 +118,19 @@ fn test_complex_nested_expression() {
             FilterExpr::Compare {
                 field: "org_id",
                 op: "=",
-                value: Value::Str("acme"),
+                value: Value::Str(std::borrow::Cow::Borrowed("acme")),
             },
             FilterExpr::Or {
                 operands: vec![
                     FilterExpr::Compare {
                         field: "role",
                         op: "=",
-                        value: Value::Str("admin"),
+                        value: Value::Str(std::borrow::Cow::Borrowed("admin")),
                     },
                     FilterExpr::Compare {
                         field: "role",
                         op: "=",
-                        value: Value::Str("owner"),
+                        value: Value::Str(std::borrow::Cow::Borrowed("owner")),
                     },
                 ],
             },
@@ -154,7 +154,7 @@ fn test_nested() {
                 FilterExpr::Compare {
                     field: "by",
                     op: "=",
-                    value: Value::Str("root"),
+                    value: Value::Str(std::borrow::Cow::Borrowed("root")),
                 },
                 FilterExpr::Compare {
                     field: "seq",
@@ -189,7 +189,7 @@ fn test_nested_simple() {
         filter: Box::new(FilterExpr::Compare {
             field: "name",
             op: "=",
-            value: Value::Str("important"),
+            value: Value::Str(std::borrow::Cow::Borrowed("important")),
         }),
     };
     let filter = build(&expr);
@@ -218,7 +218,7 @@ fn test_nested_with_must_not() {
             filter: Box::new(FilterExpr::Compare {
                 field: "by",
                 op: "=",
-                value: Value::Str("root"),
+                value: Value::Str(std::borrow::Cow::Borrowed("root")),
             }),
         }),
     };

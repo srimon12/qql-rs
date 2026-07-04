@@ -1,4 +1,4 @@
-use alloc::borrow::Cow;
+use std::borrow::Cow;
 use core::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,3 +32,5 @@ impl fmt::Display for QqlError {
         }
     }
 }
+
+impl std::error::Error for QqlError {}

@@ -7,7 +7,7 @@ fn test_equals_string() {
     let expr = FilterExpr::Compare {
         field: "status",
         op: "=",
-        value: Value::Str("active"),
+        value: Value::Str(std::borrow::Cow::Borrowed("active")),
     };
     let filter = build(&expr);
     let must = filter.must.unwrap();
@@ -67,7 +67,7 @@ fn test_not_equals_string() {
     let expr = FilterExpr::Compare {
         field: "status",
         op: "!=",
-        value: Value::Str("archived"),
+        value: Value::Str(std::borrow::Cow::Borrowed("archived")),
     };
     let filter = build(&expr);
     let must = filter.must.unwrap();

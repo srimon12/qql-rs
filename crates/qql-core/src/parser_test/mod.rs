@@ -29,7 +29,7 @@ pub(crate) fn i64_val(v: i64) -> Value<'static> {
 }
 
 pub(crate) fn str_val(s: &'static str) -> Value<'static> {
-    Value::Str(s)
+    Value::Str(alloc::borrow::Cow::Borrowed(s))
 }
 
 pub(crate) fn float_val(f: f64) -> Value<'static> {

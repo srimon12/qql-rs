@@ -660,6 +660,9 @@ impl Executor {
             // Extract ID from payload if present
             let id_val = row.iter().find(|(k, _)| *k == "id");
             if let Some((_, Value::Int(id))) = id_val {
+                if *id < 0 {
+                    return Err(QqlError::runtime("negative ID not supported"));
+                }
                 point.id = PointId::Num(*id as u64);
             } else if let Some((_, Value::Str(id))) = id_val {
                 point.id = PointId::Uuid(id.to_string());

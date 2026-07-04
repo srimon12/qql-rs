@@ -17,7 +17,7 @@ impl<'a> Parser<'a> {
             let sub_stmt = self.parse_cte_query()?;
             self.expect(TokenKind::Rparen)?;
             ctes.push(CTE {
-                name,
+                name: alloc::borrow::Cow::Borrowed(name),
                 stmt: sub_stmt,
             });
             if self.peek()?.kind == TokenKind::Comma {

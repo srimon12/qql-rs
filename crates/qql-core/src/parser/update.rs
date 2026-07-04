@@ -87,7 +87,7 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::Where)?;
 
         // Try full filter expression first
-        let saved: usize = self.tokens_save_pos();
+        let saved = self.save_pos();
         if let Ok(query_filter) = self.parse_filter_expr() {
             if let FilterExpr::Compare { field, op, value } = &query_filter {
                 if *op == "=" {
@@ -121,7 +121,7 @@ impl<'a> Parser<'a> {
         }
 
         // Fall back to simple field = value
-        self.tokens_restore_pos(saved);
+        self.restore_pos(saved);
         let field = self.parse_field_path()?;
         self.expect(TokenKind::Equals)?;
         let value = self.parse_value()?;
@@ -132,20 +132,5 @@ impl<'a> Parser<'a> {
             value: Some(value),
             query_filter: None,
         })))
-    }
-
-    fn tokens_save_pos(&self) -> usize {
-        // Since we use Peekable, we can't easily save position.
-        // We use 0 as sentinel — the fallback path just tries to parse again.
-        // In practice the first parse_filter_expr is attempted and will
-        // consume tokens on success; the saved pos is only used if it fails.
-        // This is a simplification: the Go code uses `p.pos` directly.
-        0
-    }
-
-    fn tokens_restore_pos(&mut self, _saved: usize) {
-        // No-op: in the fallback path we simply reparse.
-        // The initial error already consumed tokens, but we reconstruct
-        // by attempting parse_field_path which will work on the remaining.
     }
 }

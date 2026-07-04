@@ -63,13 +63,12 @@ impl<'a> Parser<'a> {
         let collection = self.parse_identifier()?;
         self.expect(TokenKind::For)?;
         let field = self.parse_identifier()?;
-        let mut field_type: &'a str = "keyword";
+        let mut field_type = alloc::borrow::Cow::Borrowed("keyword");
         if self.peek()?.kind == TokenKind::Type {
             self.advance()?;
             let type_tok = self.expect(TokenKind::Identifier)?;
             let lowered = type_tok.text.to_ascii_lowercase();
-            let leaked: &'static str = Box::leak(lowered.into_boxed_str());
-            field_type = unsafe { &*(leaked as *const str) };
+            field_type = alloc::borrow::Cow::Owned(lowered);
         }
         let mut options = Vec::new();
         if self.peek()?.kind == TokenKind::With {

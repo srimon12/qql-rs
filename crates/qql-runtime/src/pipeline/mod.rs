@@ -265,7 +265,6 @@ pub struct QueryPointsGroupsRequest {
     pub using: Option<String>,
 }
 
-#[derive(Default)]
 pub struct QueryState {
     pub query_text: String,
     pub prefetches: Vec<PrefetchQuery>,
@@ -298,6 +297,40 @@ pub struct QueryState {
     pub group_by: String,
     pub group_size: u64,
     pub with_lookup: Option<WithLookup>,
+}
+
+impl Default for QueryState {
+    fn default() -> Self {
+        QueryState {
+            query_text: String::new(),
+            prefetches: Vec::new(),
+            manual_prefetches: Vec::new(),
+            target_query: None,
+            params: None,
+            fusion_config: None,
+            has_mmr: false,
+            mmr_candidates: 0,
+            mmr_diversity: 0.0,
+            local_embed: false,
+            embedder: None,
+            cloud_model_options: HashMap::new(),
+            dense_model: String::new(),
+            doc_options: None,
+            request_timeout: None,
+            collection_name: String::new(),
+            vector_name: String::new(),
+            limit: 0,
+            offset: 0,
+            qdrant_filter: None,
+            score_threshold: None,
+            lookup_from: None,
+            with_payload: None,
+            with_vectors: None,
+            group_by: String::new(),
+            group_size: 0,
+            with_lookup: None,
+        }
+    }
 }
 
 impl QueryState {

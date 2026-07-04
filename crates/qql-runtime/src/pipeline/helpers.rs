@@ -59,7 +59,7 @@ pub fn to_point_id(val: &ast::Value) -> Result<PointId, QqlError> {
 pub fn point_id_to_value(pid: &PointId) -> ast::Value<'static> {
     match pid {
         PointId::Num(n) => ast::Value::Int(*n as i64),
-        PointId::Uuid(s) => ast::Value::Str(Box::leak(s.clone().into_boxed_str())),
+        PointId::Uuid(s) => ast::Value::Str(std::borrow::Cow::Owned(s.clone())),
     }
 }
 

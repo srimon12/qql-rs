@@ -211,13 +211,11 @@ pub struct FusionNode {
 #[async_trait]
 impl ExecutionNode for FusionNode {
     async fn execute(&self, state: &mut QueryState) -> Result<(), QqlError> {
-        if self.mode == "rrf" && state.fusion_config.is_some() {
-            let config = state
-                .fusion_config
-                .as_ref()
-                .unwrap_or_else(|| unreachable!());
-            state.target_query = Some(QueryVariant::Rrf(config.clone()));
-            return Ok(());
+        if self.mode == "rrf" {
+            if let Some(config) = &state.fusion_config {
+                state.target_query = Some(QueryVariant::Rrf(config.clone()));
+                return Ok(());
+            }
         }
 
         match self.mode.as_str() {

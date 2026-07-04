@@ -155,7 +155,17 @@ impl HttpEmbedder {
             vectors[item.index] = Some(item.embedding);
         }
 
-        let result: Vec<Vec<f32>> = vectors.into_iter().map(|v| v.unwrap_or_default()).collect();
+        let mut result = Vec::with_capacity(vectors.len());
+        for (i, v) in vectors.into_iter().enumerate() {
+            if let Some(vec) = v {
+                result.push(vec);
+            } else {
+                return Err(QqlError::runtime(format!(
+                    "missing embedding vector at index {}",
+                    i
+                )));
+            }
+        }
 
         Ok(result)
     }

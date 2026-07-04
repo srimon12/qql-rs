@@ -44,7 +44,7 @@ mod tests {
     fn test_filter_in() {
         let f = FilterExpr::In {
             field: "color",
-            values: vec![Value::Str("red"), Value::Str("blue")],
+            values: vec![Value::Str(alloc::borrow::Cow::Borrowed("red")), Value::Str(alloc::borrow::Cow::Borrowed("blue"))],
         };
         match f {
             FilterExpr::In { field, values } => {
@@ -59,7 +59,7 @@ mod tests {
     fn test_filter_not_in() {
         let f = FilterExpr::NotIn {
             field: "status",
-            values: vec![Value::Str("deleted")],
+            values: vec![Value::Str(alloc::borrow::Cow::Borrowed("deleted"))],
         };
         match f {
             FilterExpr::NotIn { field, values } => {
@@ -211,7 +211,7 @@ mod tests {
             filter: Box::new(FilterExpr::Compare {
                 field: "city",
                 op: "=",
-                value: Value::Str("NYC"),
+                value: Value::Str(alloc::borrow::Cow::Borrowed("NYC")),
             }),
         };
         match f {
@@ -228,7 +228,7 @@ mod tests {
                 filter: Box::new(FilterExpr::Compare {
                     field: "name",
                     op: "=",
-                    value: Value::Str("important"),
+                    value: Value::Str(alloc::borrow::Cow::Borrowed("important")),
                 }),
             }),
         };
@@ -259,7 +259,7 @@ mod tests {
         let f1 = FilterExpr::Compare {
             field: "x",
             op: "=",
-            value: Value::Str("y"),
+            value: Value::Str(alloc::borrow::Cow::Borrowed("y")),
         };
         let f2 = f1.clone();
         assert_eq!(f1, f2);
@@ -475,7 +475,7 @@ mod tests {
     fn test_formula_match_condition() {
         let f = FormulaExpr::MatchCondition {
             field: "status",
-            values: vec![Value::Str("active")],
+            values: vec![Value::Str(alloc::borrow::Cow::Borrowed("active"))],
         };
         match f {
             FormulaExpr::MatchCondition { field, values } => {
@@ -516,7 +516,7 @@ mod tests {
     #[test]
     fn test_value_variants() {
         let values = [
-            Value::Str("hello"),
+            Value::Str(alloc::borrow::Cow::Borrowed("hello")),
             Value::Int(42),
             Value::Float(12.34),
             Value::Bool(true),
@@ -527,7 +527,7 @@ mod tests {
 
     #[test]
     fn test_value_debug() {
-        assert_eq!(format!("{:?}", Value::Str("hi")), "Str(\"hi\")");
+        assert_eq!(format!("{:?}", Value::Str(alloc::borrow::Cow::Borrowed("hi"))), "Str(\"hi\")");
         assert_eq!(format!("{:?}", Value::Int(7)), "Int(7)");
         assert_eq!(format!("{:?}", Value::Bool(false)), "Bool(false)");
         assert_eq!(format!("{:?}", Value::Null), "Null");
@@ -606,11 +606,11 @@ mod tests {
         inner_query.query_filter = Some(Box::new(FilterExpr::Compare {
             field: "status",
             op: "=",
-            value: Value::Str("published"),
+            value: Value::Str(alloc::borrow::Cow::Borrowed("published")),
         }));
 
         let inner_cte = CTE {
-            name: "prefetch_1",
+            name: alloc::borrow::Cow::Borrowed("prefetch_1"),
             stmt: Box::new(inner_query),
         };
 
@@ -621,7 +621,7 @@ mod tests {
 
         let mut stmt = Stmt::Query(Box::new(query));
 
-        inject_filter(&mut stmt, "org_id", "=", &Value::Str("acme-corp"));
+        inject_filter(&mut stmt, "org_id", "=", &Value::Str(alloc::borrow::Cow::Borrowed("acme-corp")));
 
         if let Stmt::Query(q) = stmt {
             let main_filter = q.query_filter.unwrap();
@@ -630,7 +630,7 @@ mod tests {
                 FilterExpr::Compare {
                     field: "org_id",
                     op: "=",
-                    value: Value::Str("acme-corp"),
+                    value: Value::Str(alloc::borrow::Cow::Borrowed("acme-corp")),
                 }
             );
 
@@ -644,7 +644,7 @@ mod tests {
                         FilterExpr::Compare {
                             field: "status",
                             op: "=",
-                            value: Value::Str("published"),
+                            value: Value::Str(alloc::borrow::Cow::Borrowed("published")),
                         }
                     );
                     assert_eq!(
@@ -652,7 +652,7 @@ mod tests {
                         FilterExpr::Compare {
                             field: "org_id",
                             op: "=",
-                            value: Value::Str("acme-corp"),
+                            value: Value::Str(alloc::borrow::Cow::Borrowed("acme-corp")),
                         }
                     );
                 }

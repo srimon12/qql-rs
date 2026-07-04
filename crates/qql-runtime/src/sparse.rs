@@ -59,7 +59,7 @@ fn to_lower_ascii(s: &str) -> String {
             for &b in &bytes[i..] {
                 buf.push(if b.is_ascii_uppercase() { b + 32 } else { b });
             }
-            return unsafe { String::from_utf8_unchecked(buf) };
+            return String::from_utf8(buf).unwrap_or_else(|_| s.to_ascii_lowercase());
         }
     }
     s.to_string()
@@ -208,7 +208,8 @@ pub fn build_document(text: &str, k1: f64, b: f64, avgdl: f64) -> SparseVector {
     }
 
     let doc_len = tokens.len() as f64;
-    let denom_scale = k1 * (1.0 - b + b * doc_len / avgdl);
+    let safe_avgdl = if avgdl <= 0.0 { 256.0 } else { avgdl };
+    let denom_scale = k1 * (1.0 - b + b * doc_len / safe_avgdl);
     let k1p1 = k1 + 1.0;
 
     let mut indices: Vec<u32> = counts.keys().copied().collect();

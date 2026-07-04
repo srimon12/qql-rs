@@ -6,7 +6,7 @@ use qql_core::ast::{FilterExpr, Value};
 fn test_in_strings() {
     let expr = FilterExpr::In {
         field: "status",
-        values: vec![Value::Str("active"), Value::Str("pending")],
+        values: vec![Value::Str(std::borrow::Cow::Borrowed("active")), Value::Str(std::borrow::Cow::Borrowed("pending"))],
     };
     let filter = build(&expr);
     let must = filter.must.unwrap();
@@ -69,7 +69,7 @@ fn test_in_bools() {
 fn test_not_in_strings() {
     let expr = FilterExpr::NotIn {
         field: "status",
-        values: vec![Value::Str("deleted"), Value::Str("archived")],
+        values: vec![Value::Str(std::borrow::Cow::Borrowed("deleted")), Value::Str(std::borrow::Cow::Borrowed("archived"))],
     };
     let filter = build(&expr);
     let must = filter.must.unwrap();
@@ -132,7 +132,7 @@ fn test_not_in_bools() {
 fn test_rejects_mixed_in_types() {
     let expr = FilterExpr::In {
         field: "mixed",
-        values: vec![Value::Str("active"), Value::Int(1)],
+        values: vec![Value::Str(std::borrow::Cow::Borrowed("active")), Value::Int(1)],
     };
     let result = FilterConverter.build_filter(&expr);
     assert!(result.is_err());

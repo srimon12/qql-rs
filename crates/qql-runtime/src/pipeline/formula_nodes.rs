@@ -200,27 +200,27 @@ pub fn build_match_condition_expression(
         let first = &values[0];
         match first {
             ast::Value::Str(_) => {
-                let keywords: Vec<&str> = values
-                    .iter()
-                    .map(|v| match v {
-                        ast::Value::Str(s) => *s,
-                        _ => panic!("all values must be strings"),
-                    })
-                    .collect();
+                let mut keywords = Vec::new();
+                for v in values {
+                    match v {
+                        ast::Value::Str(s) => keywords.push(s.as_ref()),
+                        _ => return Err(QqlError::runtime("all MATCH values must be strings")),
+                    }
+                }
                 let condition = serde_json::json!({
                     "match": {"key": field, "values": keywords.iter().map(|s| serde_json::json!({"str": s})).collect::<Vec<_>>()}
                 });
                 Ok(serde_json::json!({"condition": condition}))
             }
             ast::Value::Int(_) | ast::Value::Float(_) => {
-                let ints: Vec<i64> = values
-                    .iter()
-                    .map(|v| match v {
-                        ast::Value::Int(i) => *i,
-                        ast::Value::Float(f) => *f as i64,
-                        _ => panic!("all values must be numbers"),
-                    })
-                    .collect();
+                let mut ints = Vec::new();
+                for v in values {
+                    match v {
+                        ast::Value::Int(i) => ints.push(*i),
+                        ast::Value::Float(f) => ints.push(*f as i64),
+                        _ => return Err(QqlError::runtime("all MATCH values must be numbers")),
+                    }
+                }
                 let condition = serde_json::json!({
                     "match": {"key": field, "values": ints.iter().map(|i| serde_json::json!({"int": *i})).collect::<Vec<_>>()}
                 });

@@ -301,10 +301,10 @@ fn test_point_id_helpers() {
     use qql_core::ast::Value;
 
     // to_point_id_static
-    let id_str = to_point_id_static(&Value::Str("abc")).unwrap();
+    let id_str = to_point_id_static(&Value::Str(std::borrow::Cow::Borrowed("abc"))).unwrap();
     assert_eq!(point_id_string(&id_str), "abc");
 
-    let id_num_str = to_point_id_static(&Value::Str("42")).unwrap();
+    let id_num_str = to_point_id_static(&Value::Str(std::borrow::Cow::Borrowed("42"))).unwrap();
     assert_eq!(point_id_string(&id_num_str), "42");
 
     let id_int = to_point_id_static(&Value::Int(100)).unwrap();

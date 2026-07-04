@@ -180,7 +180,7 @@ impl FilterConverter {
         }
         Ok(QdrantCondition::Boolean(Box::new(QdrantFilter {
             must: None,
-            must_not: Some(Vec::new()),
+            must_not: None,
             should: Some(should),
         })))
     }
@@ -450,7 +450,15 @@ fn literal_kind_of(value: &Value) -> Result<LiteralKind, QqlError> {
 fn to_float64(value: &Value) -> Result<Option<f64>, QqlError> {
     match value {
         Value::Float(f) => Ok(Some(*f)),
-        Value::Int(i) => Ok(Some(*i as f64)),
+        Value::Int(i) => {
+            let val = *i;
+            if val.abs() > (1i64 << 53) {
+                return Err(QqlError::runtime(
+                    "integer too large: precision loss beyond 2^53 is not supported for range comparisons",
+                ));
+            }
+            Ok(Some(val as f64))
+        }
         _ => Err(QqlError::runtime(
             "expected numeric type for range condition",
         )),

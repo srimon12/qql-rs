@@ -115,7 +115,7 @@ impl<'a> Parser<'a> {
         match tok.kind {
             TokenKind::String => {
                 self.advance()?;
-                Ok(Value::Str(tok.text))
+                Ok(Value::Str(alloc::borrow::Cow::Borrowed(tok.text)))
             }
             TokenKind::Integer => {
                 self.advance()?;
@@ -158,7 +158,7 @@ impl<'a> Parser<'a> {
         match tok.kind {
             TokenKind::String => {
                 self.advance()?;
-                Ok(Value::Str(tok.text))
+                Ok(Value::Str(alloc::borrow::Cow::Borrowed(tok.text)))
             }
             TokenKind::Integer => {
                 self.advance()?;
