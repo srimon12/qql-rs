@@ -1,5 +1,5 @@
 use super::build;
-use crate::filter_conv::*;
+use crate::filter_conv::FilterConverter;
 use qql_core::ast::{FilterExpr, Value};
 
 #[test]

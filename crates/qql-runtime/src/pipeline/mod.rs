@@ -396,7 +396,7 @@ impl TryFrom<QueryVariant> for crate::qdrant::Query {
                 ))
             }
             QueryVariant::Rrf(rrf) => {
-                let k_nz = rrf.k.and_then(|k_val| std::num::NonZeroU32::new(k_val));
+                let k_nz = rrf.k.and_then(std::num::NonZeroU32::new);
                 Ok(crate::qdrant::Query::RrfQuery(crate::qdrant::RrfQuery {
                     rrf: crate::qdrant::Rrf {
                         k: k_nz,
@@ -456,13 +456,11 @@ impl TryFrom<QueryVariant> for crate::qdrant::Query {
 impl TryFrom<PrefetchQuery> for crate::qdrant::Prefetch {
     type Error = QqlError;
     fn try_from(pq: PrefetchQuery) -> Result<Self, Self::Error> {
-        let query_gen: Option<crate::qdrant::Query> = pq
-            .query
-            .map(|q| crate::qdrant::Query::try_from(q))
-            .transpose()?;
+        let query_gen: Option<crate::qdrant::Query> =
+            pq.query.map(crate::qdrant::Query::try_from).transpose()?;
         let params_gen: Option<crate::qdrant::SearchParams> = pq
             .params
-            .map(|p| crate::qdrant::SearchParams::try_from(p))
+            .map(crate::qdrant::SearchParams::try_from)
             .transpose()?;
 
         let prefetch_gen = if !pq.prefetch.is_empty() {
