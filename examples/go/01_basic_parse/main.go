@@ -2,28 +2,20 @@ package main
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/qdrant/qql/gqql"
 )
 
 func main() {
-	// Parse a CREATE COLLECTION statement
 	ast, _ := gqql.Parse("CREATE COLLECTION docs HYBRID WITH HNSW (m = 32)")
 	fmt.Println("=== Parsed AST ===")
-	fmt.Println(ast[:min(len(ast), 500)])
-	fmt.Println()
+	fmt.Println(trunc(ast, 500))
 
-	// Tokenize a QUERY
+	fmt.Println("\n=== Tokens ===")
 	tokens, _ := gqql.Tokenize("QUERY 'vector database' FROM docs LIMIT 10")
-	fmt.Println("=== Tokens ===")
-	type tok struct{ Kind, Text string; Pos int }
-	// parse JSON manually since Go SDK returns string
-	tokens = strings.ReplaceAll(tokens, ",", "\n")
-	fmt.Println(tokens[:min(len(tokens), 300)])
-	fmt.Println()
+	fmt.Println(tokens[:truncIdx(tokens, 400)])
 
-	// Validate queries
+	fmt.Println("\n=== Validation ===")
 	for _, q := range []string{
 		"QUERY 'hello' FROM docs LIMIT 5",
 		"CREATE COLLECTION docs",
@@ -33,4 +25,18 @@ func main() {
 	} {
 		fmt.Printf("  valid=%-5t  %q\n", gqql.IsValid(q), q)
 	}
+}
+
+func trunc(s string, n int) string {
+	if len(s) > n {
+		return s[:n]
+	}
+	return s
+}
+
+func truncIdx(s string, n int) int {
+	if len(s) > n {
+		return n
+	}
+	return len(s)
 }

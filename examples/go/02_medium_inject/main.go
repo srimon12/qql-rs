@@ -7,34 +7,24 @@ import (
 )
 
 func main() {
-	userQuery := "QUERY 'machine learning transformer' FROM papers LIMIT 20"
-	fmt.Printf("User query valid: %t\n", gqql.IsValid(userQuery))
+	q := "QUERY 'machine learning transformer' FROM papers LIMIT 20"
 
-	// Inject a tenant_id filter (string value)
-	tenantQuery, _ := gqql.InjectFilter(
-		userQuery, "tenant_id", "=", `{"str": "acme-corp"}`,
-	)
-	fmt.Println("\n=== Tenant isolation ===")
-	fmt.Println(trunc(tenantQuery, 500))
+	r, _ := gqql.InjectFilter(q, "tenant_id", "=", `{"str": "acme-corp"}`)
+	fmt.Println("=== String filter ===")
+	fmt.Println(trunc(r, 400))
 
-	// Inject a numeric threshold
-	boosted, _ := gqql.InjectFilter(
-		userQuery, "impact_factor", ">=", `{"float": 5.0}`,
-	)
-	fmt.Println("\n=== Numeric threshold ===")
-	fmt.Println(trunc(boosted, 500))
+	r, _ = gqql.InjectFilter(q, "impact_factor", ">=", `{"float": 5.0}`)
+	fmt.Println("\n=== Numeric filter ===")
+	fmt.Println(trunc(r, 400))
 
-	// Inject a boolean flag
-	published, _ := gqql.InjectFilter(
-		userQuery, "is_published", "=", `{"bool": true}`,
-	)
+	r, _ = gqql.InjectFilter(q, "is_published", "=", `{"bool": true}`)
 	fmt.Println("\n=== Boolean filter ===")
-	fmt.Println(trunc(published, 500))
+	fmt.Println(trunc(r, 400))
 }
 
 func trunc(s string, n int) string {
 	if len(s) > n {
-		return s[:n] + "..."
+		return s[:n]
 	}
 	return s
 }

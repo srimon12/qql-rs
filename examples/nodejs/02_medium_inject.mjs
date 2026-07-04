@@ -1,26 +1,16 @@
-// Medium: Programmatic WHERE injection — apply security filters to queries.
-import { injectFilter, isValid } from 'nqql';
+// 02 Medium: Programmatic WHERE injection.
+import { injectFilter } from 'nqql';
 
-const userQuery = "QUERY 'machine learning transformer' FROM papers LIMIT 20";
-console.log(`User query valid: ${isValid(userQuery)}`);
+const q = "QUERY 'machine learning transformer' FROM papers LIMIT 20";
 
-// Inject a tenant_id filter (string value)
-const tenantQuery = injectFilter(
-  userQuery, 'tenant_id', '=', '{"str": "acme-corp"}',
-);
-console.log('\n=== Tenant isolation ===');
-console.log(tenantQuery.substring(0, 500));
+let r = injectFilter(q, 'tenant_id', '=', '{"str": "acme-corp"}');
+console.log('=== String filter ===');
+console.log(r.substring(0, 400));
 
-// Inject a numeric threshold
-const boosted = injectFilter(
-  userQuery, 'impact_factor', '>=', '{"float": 5.0}',
-);
-console.log('\n=== Numeric threshold ===');
-console.log(boosted.substring(0, 500));
+r = injectFilter(q, 'impact_factor', '>=', '{"float": 5.0}');
+console.log('\n=== Numeric filter ===');
+console.log(r.substring(0, 400));
 
-// Inject a boolean flag
-const published = injectFilter(
-  userQuery, 'is_published', '=', '{"bool": true}',
-);
+r = injectFilter(q, 'is_published', '=', '{"bool": true}');
 console.log('\n=== Boolean filter ===');
-console.log(published.substring(0, 500));
+console.log(r.substring(0, 400));

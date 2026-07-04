@@ -1,27 +1,16 @@
-"""Medium: Programmatic WHERE injection — apply security filters to queries."""
+"""02 Medium: Programmatic WHERE injection — QQL's superpower."""
 import pyqql
 
-# A user-provided search query — validate it first
-user_query = "QUERY 'machine learning transformer' FROM papers LIMIT 20"
-print(f"User query valid: {pyqql.is_valid(user_query)}")
+q = "QUERY 'machine learning transformer' FROM papers LIMIT 20"
 
-# Inject a tenant_id filter (string value)
-tenant_query = pyqql.inject_filter(
-    user_query, "tenant_id", "=", '{"str": "acme-corp"}'
-)
-print("\n=== Tenant isolation ===")
-print(tenant_query[:500])
+s = pyqql.inject_filter(q, "tenant_id", "=", '{"str": "acme-corp"}')
+print("=== String filter ===")
+print(s[:400])
 
-# Inject a numeric threshold
-boosted = pyqql.inject_filter(
-    user_query, "impact_factor", ">=", '{"float": 5.0}'
-)
-print("\n=== Numeric threshold ===")
-print(boosted[:500])
+s = pyqql.inject_filter(q, "impact_factor", ">=", '{"float": 5.0}')
+print("\n=== Numeric filter ===")
+print(s[:400])
 
-# Inject a boolean flag
-published = pyqql.inject_filter(
-    user_query, "is_published", "=", '{"bool": true}'
-)
+s = pyqql.inject_filter(q, "is_published", "=", '{"bool": true}')
 print("\n=== Boolean filter ===")
-print(published[:500])
+print(s[:400])

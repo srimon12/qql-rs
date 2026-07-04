@@ -6,26 +6,25 @@ import (
 	"github.com/qdrant/qql/gqql"
 )
 
-type userCtx struct {
-	Tenant string
-	Role   string
-}
-
-var users = map[string]userCtx{
+var users = map[string]struct{ Tenant, Role string }{
 	"alice":   {"acme", "admin"},
 	"bob":     {"acme", "viewer"},
 	"charlie": {"globex", "viewer"},
 }
 
 func enforce(user, query string) (string, error) {
-	ctx, ok := users[user]
-	if !ok {
-		return "", fmt.Errorf("unknown user: %s", user)
+	ctx := users[user]
+	safe, err := gqql.InjectFilter(query, "tenant_id", "=", fmt.Sprintf(`{"str": "%s"}`, ctx.Tenant))
+	if err != nil {
+		return "", err
 	}
-	if !gqql.IsValid(query) {
-		return "", fmt.Errorf("invalid QQL query")
+	if ctx.Role == "viewer" {
+		safe, err = gqql.InjectFilter(safe, "status", "!=", `{"str": "confidential"}`)
+		if err != nil {
+			return "", err
+		}
 	}
-	return gqql.InjectFilter(query, "tenant_id", "=", fmt.Sprintf(`{"str": "%s"}`, ctx.Tenant))
+	return safe, nil
 }
 
 func main() {
@@ -37,22 +36,16 @@ func main() {
 
 	fmt.Println("=== QQL Query Gateway ===")
 	for _, r := range requests {
-		safe, err := enforce(r.user, r.query)
-		if err != nil {
-			fmt.Printf("  ERROR: %v\n", err)
-			continue
-		}
+		safe, _ := enforce(r.user, r.query)
 		fmt.Printf("\n  user=%-8s role=%-7s\n", r.user, users[r.user].Role)
 		fmt.Printf("  raw:  %s\n", r.query)
 		fmt.Printf("  safe: %s\n", trunc(safe, 130))
 	}
-	fmt.Println("\n  → QQL inject_filter enables auth middleware that rewrites")
-	fmt.Println("    queries before they reach Qdrant — no per-tenant collections.")
 }
 
 func trunc(s string, n int) string {
 	if len(s) > n {
-		return s[:n] + "..."
+		return s[:n]
 	}
 	return s
 }

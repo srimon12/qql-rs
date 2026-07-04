@@ -1,4 +1,4 @@
-// Expert: Multi-tenant query gateway — runs entirely in the browser.
+// 03 Expert: Multi-tenant query gateway — runs entirely in the browser.
 async function main() {
   const qql = await import('qql-wasm');
 
@@ -10,9 +10,11 @@ async function main() {
 
   function enforce(user, query) {
     const ctx = USERS[user];
-    if (!ctx) throw new Error('unknown user');
-    if (!qql.is_valid(query)) throw new Error('invalid QQL query');
-    return qql.inject_filter(query, 'tenant_id', '=', `{"str": "${ctx.tenant}"}`);
+    let safe = qql.inject_filter(query, 'tenant_id', '=', `{"str": "${ctx.tenant}"}`);
+    if (ctx.role === 'viewer') {
+      safe = qql.inject_filter(safe, 'status', '!=', '{"str": "confidential"}');
+    }
+    return safe;
   }
 
   const requests = [
@@ -29,5 +31,4 @@ async function main() {
     console.log(`  safe: ${safe.substring(0, 130)}...`);
   }
 }
-
 main().catch(console.error);

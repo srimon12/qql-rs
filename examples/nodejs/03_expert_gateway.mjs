@@ -1,5 +1,5 @@
-// Expert: Multi-tenant query gateway using injectFilter as auth middleware.
-import { injectFilter, isValid } from 'nqql';
+// 03 Expert: Multi-tenant query gateway using injectFilter as auth middleware.
+import { injectFilter } from 'nqql';
 
 const USERS = {
   alice:   { tenant: 'acme',  role: 'admin' },
@@ -9,9 +9,11 @@ const USERS = {
 
 function enforce(user, query) {
   const ctx = USERS[user];
-  if (!ctx) throw new Error('unknown user');
-  if (!isValid(query)) throw new Error('invalid QQL query');
-  return injectFilter(query, 'tenant_id', '=', `{"str": "${ctx.tenant}"}`);
+  let safe = injectFilter(query, 'tenant_id', '=', `{"str": "${ctx.tenant}"}`);
+  if (ctx.role === 'viewer') {
+    safe = injectFilter(safe, 'status', '!=', '{"str": "confidential"}');
+  }
+  return safe;
 }
 
 const requests = [

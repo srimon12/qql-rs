@@ -1,7 +1,4 @@
-"""Expert: Multi-tenant query gateway — inject tenant_id as an auth middleware.
-
-In production, this runs in an API gateway before forwarding the query to Qdrant.
-Every user query gets the tenant_id injected — no per-tenant collections needed."""
+"""03 Expert: Multi-tenant query gateway using inject_filter as auth middleware."""
 import pyqql
 
 USERS = {
@@ -10,15 +7,12 @@ USERS = {
     "charlie":{"tenant": "globex","role": "viewer"},
 }
 
-TENANT_POLICY = ("tenant_id", "=")
-
-def enforce(user: str, query: str) -> str:
-    ctx = USERS.get(user)
-    if not ctx:
-        raise PermissionError("unknown user")
-    if not pyqql.is_valid(query):
-        raise ValueError("invalid QQL query")
-    return pyqql.inject_filter(query, *TENANT_POLICY, '{"str": "%s"}' % ctx["tenant"])
+def enforce(user, query):
+    ctx = USERS[user]
+    safe = pyqql.inject_filter(query, "tenant_id", "=", '{"str": "%s"}' % ctx["tenant"])
+    if ctx["role"] == "viewer":
+        safe = pyqql.inject_filter(safe, "status", "!=", '{"str": "confidential"}')
+    return safe
 
 requests = [
     ("alice",   "QUERY 'sales data' FROM analytics LIMIT 10"),
@@ -27,8 +21,8 @@ requests = [
 ]
 
 print("=== QQL Query Gateway ===")
-for user, raw_query in requests:
-    safe = enforce(user, raw_query)
+for user, raw in requests:
+    safe = enforce(user, raw)
     print(f"\n  user={user:8} role={USERS[user]['role']:7}")
-    print(f"  raw:  {raw_query}")
+    print(f"  raw:  {raw}")
     print(f"  safe: {safe[:130]}...")
