@@ -243,8 +243,6 @@ pub struct QueryPointsRequest {
     pub lookup_from: Option<crate::qdrant::LookupLocation>,
     pub using: Option<String>,
     pub timeout: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub formula: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -263,8 +261,6 @@ pub struct QueryPointsGroupsRequest {
     pub lookup_from: Option<crate::qdrant::LookupLocation>,
     pub with_lookup: Option<crate::qdrant::QueryGroupsRequestWithLookup>,
     pub using: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub formula: Option<serde_json::Value>,
 }
 
 impl From<VectorInput> for crate::qdrant::VectorInput {
@@ -683,11 +679,26 @@ impl QueryPipeline {
         let mut prefetches = state.prefetches.clone();
         prefetches.extend(state.manual_prefetches.clone());
 
-        let query = state
-            .target_query
-            .as_ref()
-            .map(|q| q.clone().try_into())
-            .transpose()?;
+        let query = if let Some(ref f) = state.formula {
+            let defaults_map: serde_json::Map<String, serde_json::Value> = state
+                .formula_defaults
+                .iter()
+                .map(|(k, v)| (k.clone(), serde_json::json!(v)))
+                .collect();
+            let formula_val = serde_json::json!({
+                "formula": f,
+                "defaults": defaults_map
+            });
+            let formula_query: crate::qdrant::FormulaQuery = serde_json::from_value(formula_val)
+                .map_err(|e| QqlError::runtime(e.to_string()))?;
+            Some(crate::qdrant::Query::FormulaQuery(formula_query))
+        } else {
+            state
+                .target_query
+                .as_ref()
+                .map(|q| q.clone().try_into())
+                .transpose()?
+        };
         let prefetch = prefetches
             .into_iter()
             .map(|p| p.try_into())
@@ -700,7 +711,7 @@ impl QueryPipeline {
         let with_payload = state.with_payload.as_ref().map(|wp| wp.clone().into());
         let with_vectors = state.with_vectors.as_ref().map(|wv| wv.clone().into());
         let lookup_from = state.lookup_from.as_ref().map(|lf| lf.clone().into());
-
+ 
         let mut req = QueryPointsRequest {
             collection_name: state.collection_name.clone(),
             query,
@@ -715,13 +726,12 @@ impl QueryPipeline {
             lookup_from,
             using: None,
             timeout: state.request_timeout,
-            formula: state.formula.clone(),
         };
-
+ 
         if !state.vector_name.is_empty() {
             req.using = Some(state.vector_name.clone());
         }
-
+ 
         Ok(req)
     }
 
@@ -756,7 +766,6 @@ impl QueryPipeline {
             lookup_from: flat.lookup_from,
             with_lookup,
             using: flat.using,
-            formula: state.formula.clone(),
         })
     }
 }
