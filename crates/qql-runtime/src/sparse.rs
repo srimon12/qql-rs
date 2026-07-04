@@ -1,10 +1,6 @@
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct SparseVector {
-    pub indices: Vec<u32>,
-    pub values: Vec<f32>,
-}
+pub type SparseVector = crate::qdrant::SparseVector;
 
 const OFFSET32: u32 = 2166136261;
 const PRIME32: u32 = 16777619;

@@ -362,26 +362,35 @@ impl Executor {
         pipeline: &QueryPipeline,
         state: &QueryState,
     ) -> Result<ExecResponse, QqlError> {
-        let mut req = pipeline.build_flat_request(state);
+        let mut req = pipeline.build_flat_request(state)?;
         if req.with_payload.is_none() {
-            req.with_payload = Some(WithPayload {
-                enable: Some(true),
-                include: Vec::new(),
-                exclude: Vec::new(),
-            });
+            req.with_payload = Some(
+                WithPayload {
+                    enable: Some(true),
+                    include: Vec::new(),
+                    exclude: Vec::new(),
+                }
+                .into(),
+            );
         }
         let results = self.client.query(req).await?;
 
         let formatted: Vec<SearchHit> = results
             .into_iter()
-            .map(|hit| SearchHit {
-                id: point_id_string(&hit.id),
-                score: hit.score,
-                text: hit.payload.as_ref().and_then(|p| {
-                    p.get("text")
-                        .and_then(|v| v.as_str().map(|s| s.to_string()))
-                }),
-                payload: hit.payload,
+            .map(|hit| {
+                let payload_map: Option<HashMap<String, serde_json::Value>> = hit
+                    .payload
+                    .as_ref()
+                    .and_then(|p| serde_json::from_value(serde_json::to_value(p).unwrap()).ok());
+                SearchHit {
+                    id: point_id_string(&hit.id.clone().into()),
+                    score: hit.score,
+                    text: payload_map.as_ref().and_then(|p| {
+                        p.get("text")
+                            .and_then(|v| v.as_str().map(|s| s.to_string()))
+                    }),
+                    payload: payload_map,
+                }
             })
             .collect();
 
@@ -398,13 +407,16 @@ impl Executor {
         pipeline: &QueryPipeline,
         state: &QueryState,
     ) -> Result<ExecResponse, QqlError> {
-        let mut req = pipeline.build_grouped_request(state);
+        let mut req = pipeline.build_grouped_request(state)?;
         if req.with_payload.is_none() {
-            req.with_payload = Some(WithPayload {
-                enable: Some(true),
-                include: Vec::new(),
-                exclude: Vec::new(),
-            });
+            req.with_payload = Some(
+                WithPayload {
+                    enable: Some(true),
+                    include: Vec::new(),
+                    exclude: Vec::new(),
+                }
+                .into(),
+            );
         }
         let groups = self.client.query_groups(req).await?;
 
@@ -414,18 +426,24 @@ impl Executor {
                 let hits: Vec<SearchHit> = g
                     .hits
                     .into_iter()
-                    .map(|hit| SearchHit {
-                        id: point_id_string(&hit.id),
-                        score: hit.score,
-                        text: hit.payload.as_ref().and_then(|p| {
-                            p.get("text")
-                                .and_then(|v| v.as_str().map(|s| s.to_string()))
-                        }),
-                        payload: hit.payload,
+                    .map(|hit| {
+                        let payload_map: Option<HashMap<String, serde_json::Value>> =
+                            hit.payload.as_ref().and_then(|p| {
+                                serde_json::from_value(serde_json::to_value(p).unwrap()).ok()
+                            });
+                        SearchHit {
+                            id: point_id_string(&hit.id.clone().into()),
+                            score: hit.score,
+                            text: payload_map.as_ref().and_then(|p| {
+                                p.get("text")
+                                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+                            }),
+                            payload: payload_map,
+                        }
                     })
                     .collect();
                 super::GroupedSearchResult {
-                    group_id: g.group_id,
+                    group_id: serde_json::to_value(&g.id).unwrap_or(serde_json::Value::Null),
                     hits,
                 }
             })
@@ -508,48 +526,42 @@ impl Executor {
             rerank_vector: None,
         };
 
-        if let Some(ref config) = info.config {
-            if let Some(ref params) = config.params {
-                if let Some(ref vc) = params.vectors_config {
-                    match vc {
-                        super::VectorsConfigType::Multi(map) => {
-                            for vname in map.keys() {
-                                if vname == super::DENSE_VECTOR_NAME {
-                                    topo.dense_vector = Some(super::DENSE_VECTOR_NAME.to_string());
-                                } else if vname == super::RERANK_VECTOR_NAME {
-                                    topo.rerank_vector =
-                                        Some(super::RERANK_VECTOR_NAME.to_string());
-                                } else if topo.dense_vector.is_none()
-                                    || topo
-                                        .dense_vector
-                                        .as_ref()
-                                        .map(|s| s.is_empty())
-                                        .unwrap_or(true)
-                                {
-                                    topo.dense_vector = Some(vname.clone());
-                                }
-                            }
-                        }
-                        super::VectorsConfigType::Single(_) => {
-                            topo.dense_vector = Some(String::new());
-                        }
+        let config = &info.config;
+        let params = &config.params;
+        if let Some(ref vc) = params.vectors {
+            if let Some(ref map) = vc.subtype_1 {
+                for vname in map.keys() {
+                    if vname == super::DENSE_VECTOR_NAME {
+                        topo.dense_vector = Some(super::DENSE_VECTOR_NAME.to_string());
+                    } else if vname == super::RERANK_VECTOR_NAME {
+                        topo.rerank_vector = Some(super::RERANK_VECTOR_NAME.to_string());
+                    } else if topo.dense_vector.is_none()
+                        || topo
+                            .dense_vector
+                            .as_ref()
+                            .map(|s| s.is_empty())
+                            .unwrap_or(true)
+                    {
+                        topo.dense_vector = Some(vname.clone());
                     }
                 }
+            } else if vc.subtype_0.is_some() {
+                topo.dense_vector = Some(String::new());
+            }
+        }
 
-                if let Some(ref svc) = params.sparse_vectors_config {
-                    for vname in svc.keys() {
-                        if vname == super::SPARSE_VECTOR_NAME {
-                            topo.sparse_vector = Some(super::SPARSE_VECTOR_NAME.to_string());
-                        } else if topo.sparse_vector.is_none()
-                            || topo
-                                .sparse_vector
-                                .as_ref()
-                                .map(|s| s.is_empty())
-                                .unwrap_or(true)
-                        {
-                            topo.sparse_vector = Some(vname.clone());
-                        }
-                    }
+        if !params.sparse_vectors.is_empty() {
+            for vname in params.sparse_vectors.keys() {
+                if vname == super::SPARSE_VECTOR_NAME {
+                    topo.sparse_vector = Some(super::SPARSE_VECTOR_NAME.to_string());
+                } else if topo.sparse_vector.is_none()
+                    || topo
+                        .sparse_vector
+                        .as_ref()
+                        .map(|s| s.is_empty())
+                        .unwrap_or(true)
+                {
+                    topo.sparse_vector = Some(vname.clone());
                 }
             }
         }
@@ -713,9 +725,11 @@ impl Executor {
             .zip(payloads)
             .zip(vectors_batch)
             .map(|((id, payload), vectors)| PointStruct {
-                id,
-                vector: vectors,
-                payload: Some(payload),
+                id: id.into(),
+                vector: serde_json::from_value(vectors.unwrap_or(serde_json::Value::Null)).unwrap(),
+                payload: Some(
+                    serde_json::from_value(serde_json::to_value(payload).unwrap()).unwrap(),
+                ),
             })
             .collect();
 
@@ -806,7 +820,9 @@ impl Executor {
                             QqlError::runtime("local embedding requested but no Embedder provided")
                         })?;
                         let dv = embedder.embed_dense(&source_text, &model).await?;
-                        serde_json::Value::Array(dv.into_iter().map(|f| serde_json::json!(f)).collect())
+                        serde_json::Value::Array(
+                            dv.into_iter().map(|f| serde_json::json!(f)).collect(),
+                        )
                     }
                 } else {
                     serde_json::json!({
@@ -860,21 +876,33 @@ impl Executor {
             if self.uses_local_embeddings() {
                 if let Some(ref embedder) = self.embedder {
                     let dv_list = embedder.embed_dense_batch(&texts, &dense_model).await?;
-                    Some(dv_list.into_iter().map(|dv| {
-                        serde_json::Value::Array(dv.into_iter().map(|f| serde_json::json!(f)).collect())
-                    }).collect())
+                    Some(
+                        dv_list
+                            .into_iter()
+                            .map(|dv| {
+                                serde_json::Value::Array(
+                                    dv.into_iter().map(|f| serde_json::json!(f)).collect(),
+                                )
+                            })
+                            .collect(),
+                    )
                 } else {
                     None
                 }
             } else {
                 let cloud_opts = self.cloud_model_options();
-                Some(texts.iter().map(|text| {
-                    serde_json::json!({
-                        "text": text,
-                        "model": dense_model,
-                        "options": cloud_opts,
-                    })
-                }).collect())
+                Some(
+                    texts
+                        .iter()
+                        .map(|text| {
+                            serde_json::json!({
+                                "text": text,
+                                "model": dense_model,
+                                "options": cloud_opts,
+                            })
+                        })
+                        .collect(),
+                )
             }
         } else {
             None
@@ -899,13 +927,18 @@ impl Executor {
             } else {
                 let cloud_opts = self.cloud_model_options();
                 let sparse_model = self.resolve_sparse_model(None);
-                Some(texts.iter().map(|text| {
-                    serde_json::json!({
-                        "text": text,
-                        "model": sparse_model,
-                        "options": cloud_opts,
-                    })
-                }).collect())
+                Some(
+                    texts
+                        .iter()
+                        .map(|text| {
+                            serde_json::json!({
+                                "text": text,
+                                "model": sparse_model,
+                                "options": cloud_opts,
+                            })
+                        })
+                        .collect(),
+                )
             }
         } else {
             None
@@ -1007,34 +1040,39 @@ impl Executor {
 
         if let Some(ref field) = stmt.field {
             if let Some(ref val) = stmt.value {
-                let f_val = match val {
-                    Value::Str(s) => crate::filter_conv::FilterValue::Str(s.to_string()),
-                    Value::Int(i) => crate::filter_conv::FilterValue::Int(*i),
-                    Value::Float(f) => crate::filter_conv::FilterValue::Float(*f),
-                    Value::Bool(b) => crate::filter_conv::FilterValue::Bool(*b),
+                let match_val = match val {
+                    Value::Str(s) => serde_json::json!(s),
+                    Value::Int(i) => serde_json::json!(i),
+                    Value::Float(f) => serde_json::json!(f),
+                    Value::Bool(b) => serde_json::json!(b),
                     _ => {
                         return Err(QqlError::runtime(
                             "unsupported value type for delete filter",
                         ))
                     }
                 };
-                let cond = crate::filter_conv::QdrantCondition::Match {
-                    key: field.to_string(),
-                    value: f_val,
-                };
-                if let Some(ref mut f) = filter {
-                    if let Some(ref mut musts) = f.must {
-                        musts.push(cond);
-                    } else {
-                        f.must = Some(vec![cond]);
-                    }
-                } else {
-                    filter = Some(crate::filter_conv::QdrantFilter {
-                        must: Some(vec![cond]),
-                        must_not: None,
-                        should: None,
-                    });
+                let cond = serde_json::json!({
+                    "key": field,
+                    "match": { "value": match_val }
+                });
+
+                let mut filter_json =
+                    serde_json::to_value(&filter).unwrap_or(serde_json::json!({}));
+                if filter_json.is_null() || !filter_json.is_object() {
+                    filter_json = serde_json::json!({});
                 }
+
+                let must_arr = filter_json.get_mut("must").and_then(|m| m.as_array_mut());
+                if let Some(musts) = must_arr {
+                    musts.push(cond);
+                } else {
+                    filter_json["must"] = serde_json::json!([cond]);
+                }
+
+                filter = Some(
+                    serde_json::from_value(filter_json)
+                        .map_err(|e| QqlError::runtime(e.to_string()))?,
+                );
             }
         }
 

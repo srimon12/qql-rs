@@ -12,11 +12,16 @@ fn test_in_strings() {
         ],
     };
     let filter = build(&expr);
-    let must = filter.must.unwrap();
-    assert!(matches!(&must[0],
-        QdrantCondition::MatchKeywords { key, values }
-        if key == "status" && values.len() == 2
-    ));
+    assert_eq!(filter, serde_json::json!({
+        "must": [
+            {
+                "key": "status",
+                "match": {
+                    "any": ["active", "pending"]
+                }
+            }
+        ]
+    }));
 }
 
 #[test]
@@ -26,13 +31,12 @@ fn test_in_ints() {
         values: vec![Value::Int(1), Value::Int(2)],
     };
     let filter = build(&expr);
-    let should = filter.should.unwrap();
-    assert_eq!(should.len(), 2);
-    for cond in &should {
-        assert!(
-            matches!(cond, QdrantCondition::MatchKeywords { key, values } if key == "count" && values.len() == 1)
-        );
-    }
+    assert_eq!(filter, serde_json::json!({
+        "should": [
+            { "key": "count", "match": { "value": 1 } },
+            { "key": "count", "match": { "value": 2 } }
+        ]
+    }));
 }
 
 #[test]
@@ -42,13 +46,12 @@ fn test_in_floats() {
         values: vec![Value::Float(1.25), Value::Float(2.5)],
     };
     let filter = build(&expr);
-    let should = filter.should.unwrap();
-    assert_eq!(should.len(), 2);
-    for cond in &should {
-        assert!(
-            matches!(cond, QdrantCondition::Range { key, gte: Some(_), lte: Some(_), .. } if key == "score")
-        );
-    }
+    assert_eq!(filter, serde_json::json!({
+        "should": [
+            { "key": "score", "range": { "gte": 1.25, "lte": 1.25 } },
+            { "key": "score", "range": { "gte": 2.5, "lte": 2.5 } }
+        ]
+    }));
 }
 
 #[test]
@@ -58,14 +61,12 @@ fn test_in_bools() {
         values: vec![Value::Bool(true), Value::Bool(false)],
     };
     let filter = build(&expr);
-    let should = filter.should.unwrap();
-    assert_eq!(should.len(), 2);
-    assert!(
-        matches!(&should[0], QdrantCondition::Match { key, value: FilterValue::Bool(true) } if key == "is_active")
-    );
-    assert!(
-        matches!(&should[1], QdrantCondition::Match { key, value: FilterValue::Bool(false) } if key == "is_active")
-    );
+    assert_eq!(filter, serde_json::json!({
+        "should": [
+            { "key": "is_active", "match": { "value": true } },
+            { "key": "is_active", "match": { "value": false } }
+        ]
+    }));
 }
 
 #[test]
@@ -78,11 +79,16 @@ fn test_not_in_strings() {
         ],
     };
     let filter = build(&expr);
-    let must = filter.must.unwrap();
-    assert!(matches!(&must[0],
-        QdrantCondition::MatchExceptKeywords { key, values }
-        if key == "status" && values.len() == 2
-    ));
+    assert_eq!(filter, serde_json::json!({
+        "must": [
+            {
+                "key": "status",
+                "match": {
+                    "except": ["deleted", "archived"]
+                }
+            }
+        ]
+    }));
 }
 
 #[test]
@@ -92,13 +98,12 @@ fn test_not_in_ints() {
         values: vec![Value::Int(3), Value::Int(4)],
     };
     let filter = build(&expr);
-    let must_not = filter.must_not.unwrap();
-    assert_eq!(must_not.len(), 2);
-    for cond in &must_not {
-        assert!(
-            matches!(cond, QdrantCondition::MatchKeywords { key, values } if key == "count" && values.len() == 1)
-        );
-    }
+    assert_eq!(filter, serde_json::json!({
+        "must_not": [
+            { "key": "count", "match": { "value": 3 } },
+            { "key": "count", "match": { "value": 4 } }
+        ]
+    }));
 }
 
 #[test]
@@ -108,13 +113,12 @@ fn test_not_in_floats() {
         values: vec![Value::Float(4.5), Value::Float(9.0)],
     };
     let filter = build(&expr);
-    let must_not = filter.must_not.unwrap();
-    assert_eq!(must_not.len(), 2);
-    for cond in &must_not {
-        assert!(
-            matches!(cond, QdrantCondition::Range { key, gte: Some(_), lte: Some(_), .. } if key == "score")
-        );
-    }
+    assert_eq!(filter, serde_json::json!({
+        "must_not": [
+            { "key": "score", "range": { "gte": 4.5, "lte": 4.5 } },
+            { "key": "score", "range": { "gte": 9.0, "lte": 9.0 } }
+        ]
+    }));
 }
 
 #[test]
@@ -124,14 +128,12 @@ fn test_not_in_bools() {
         values: vec![Value::Bool(true), Value::Bool(false)],
     };
     let filter = build(&expr);
-    let must_not = filter.must_not.unwrap();
-    assert_eq!(must_not.len(), 2);
-    assert!(
-        matches!(&must_not[0], QdrantCondition::Match { key, value: FilterValue::Bool(true) } if key == "is_active")
-    );
-    assert!(
-        matches!(&must_not[1], QdrantCondition::Match { key, value: FilterValue::Bool(false) } if key == "is_active")
-    );
+    assert_eq!(filter, serde_json::json!({
+        "must_not": [
+            { "key": "is_active", "match": { "value": true } },
+            { "key": "is_active", "match": { "value": false } }
+        ]
+    }));
 }
 
 #[test]
@@ -154,11 +156,14 @@ fn test_match_text() {
         text: "hello world",
     };
     let filter = build(&expr);
-    let must = filter.must.unwrap();
-    assert!(matches!(&must[0],
-        QdrantCondition::MatchText { key, text }
-        if key == "content" && text == "hello world"
-    ));
+    assert_eq!(filter, serde_json::json!({
+        "must": [
+            {
+                "key": "content",
+                "match": { "text": "hello world" }
+            }
+        ]
+    }));
 }
 
 #[test]
@@ -168,11 +173,14 @@ fn test_match_any() {
         text: "hello world",
     };
     let filter = build(&expr);
-    let must = filter.must.unwrap();
-    assert!(matches!(&must[0],
-        QdrantCondition::MatchAny { key, text }
-        if key == "content" && text == "hello world"
-    ));
+    assert_eq!(filter, serde_json::json!({
+        "must": [
+            {
+                "key": "content",
+                "match": { "any": ["hello world"] }
+            }
+        ]
+    }));
 }
 
 #[test]
@@ -182,9 +190,12 @@ fn test_match_phrase() {
         text: "hello world",
     };
     let filter = build(&expr);
-    let must = filter.must.unwrap();
-    assert!(matches!(&must[0],
-        QdrantCondition::MatchPhrase { key, text }
-        if key == "content" && text == "hello world"
-    ));
+    assert_eq!(filter, serde_json::json!({
+        "must": [
+            {
+                "key": "content",
+                "match": { "phrase": "hello world" }
+            }
+        ]
+    }));
 }

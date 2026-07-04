@@ -124,7 +124,7 @@ fn test_build_flat_request_sets_all_fields() {
         ..Default::default()
     };
 
-    let req = p.build_flat_request(&state);
+    let req = p.build_flat_request(&state).unwrap();
 
     assert_eq!(req.collection_name, "docs");
     assert_eq!(req.limit, 10);
@@ -144,7 +144,7 @@ fn test_build_flat_request_omits_zero_offset() {
         ..Default::default()
     };
 
-    let req = p.build_flat_request(&state);
+    let req = p.build_flat_request(&state).unwrap();
     assert_eq!(req.offset, 0);
 }
 
@@ -159,7 +159,7 @@ fn test_build_grouped_request_inherits_flat_fields() {
         ..Default::default()
     };
 
-    let req = p.build_grouped_request(&state);
+    let req = p.build_grouped_request(&state).unwrap();
 
     assert_eq!(req.collection_name, "docs");
     assert_eq!(req.limit, 10);

@@ -20,8 +20,12 @@ fn test_and() {
         ],
     };
     let filter = build(&expr);
-    let must = filter.must.unwrap();
-    assert_eq!(must.len(), 2);
+    assert_eq!(filter, serde_json::json!({
+        "must": [
+            { "key": "a", "match": { "value": 1 } },
+            { "key": "b", "match": { "value": 2 } }
+        ]
+    }));
 }
 
 #[test]
@@ -41,8 +45,12 @@ fn test_or() {
         ],
     };
     let filter = build(&expr);
-    let should = filter.should.unwrap();
-    assert_eq!(should.len(), 2);
+    assert_eq!(filter, serde_json::json!({
+        "should": [
+            { "key": "a", "match": { "value": 1 } },
+            { "key": "b", "match": { "value": 2 } }
+        ]
+    }));
 }
 
 #[test]
@@ -55,8 +63,11 @@ fn test_not() {
         }),
     };
     let filter = build(&expr);
-    let must_not = filter.must_not.unwrap();
-    assert_eq!(must_not.len(), 1);
+    assert_eq!(filter, serde_json::json!({
+        "must_not": [
+            { "key": "x", "match": { "value": true } }
+        ]
+    }));
 }
 
 #[test]
@@ -83,32 +94,21 @@ fn test_logical_expressions() {
         ],
     };
     let filter = build(&expr);
-    let should = filter.should.unwrap();
-    assert_eq!(should.len(), 2);
-    assert!(filter.must_not.is_none() || filter.must_not.as_ref().unwrap().is_empty());
-
-    // Left operand: And -> Boolean with must
-    match &should[0] {
-        QdrantCondition::Boolean(b) => {
-            let inner_must = b.must.as_ref().unwrap();
-            assert_eq!(inner_must.len(), 2);
-            assert!(matches!(&inner_must[0], QdrantCondition::Match { .. }));
-            assert!(matches!(&inner_must[1], QdrantCondition::Range { key, .. } if key == "score"));
-        }
-        _ => panic!("expected Boolean for AND"),
-    }
-
-    // Right operand: Not(IsNull) -> Boolean with must_not
-    match &should[1] {
-        QdrantCondition::Boolean(b) => {
-            let inner_must_not = b.must_not.as_ref().unwrap();
-            assert_eq!(inner_must_not.len(), 1);
-            assert!(
-                matches!(&inner_must_not[0], QdrantCondition::IsNull { key } if key == "category")
-            );
-        }
-        _ => panic!("expected Boolean for NOT"),
-    }
+    assert_eq!(filter, serde_json::json!({
+        "should": [
+            {
+                "must": [
+                    { "key": "status", "match": { "value": "active" } },
+                    { "key": "score", "range": { "gte": 1.0, "lte": 5.0 } }
+                ]
+            },
+            {
+                "must_not": [
+                    { "is_null": { "key": "category" } }
+                ]
+            }
+        ]
+    }));
 }
 
 #[test]
@@ -137,12 +137,17 @@ fn test_complex_nested_expression() {
         ],
     };
     let filter = build(&expr);
-    let must = filter.must.unwrap();
-    assert_eq!(must.len(), 2);
-    // First condition is Match for org_id
-    assert!(matches!(&must[0], QdrantCondition::Match { .. }));
-    // Second condition is Boolean with Should
-    assert!(matches!(&must[1], QdrantCondition::Boolean(b) if b.should.is_some()));
+    assert_eq!(filter, serde_json::json!({
+        "must": [
+            { "key": "org_id", "match": { "value": "acme" } },
+            {
+                "should": [
+                    { "key": "role", "match": { "value": "admin" } },
+                    { "key": "role", "match": { "value": "owner" } }
+                ]
+            }
+        ]
+    }));
 }
 
 #[test]
@@ -165,21 +170,21 @@ fn test_nested() {
         }),
     };
     let filter = build(&expr);
-    let must = filter.must.unwrap();
-    assert!(matches!(&must[0],
-        QdrantCondition::Nested { key, filter: _inner }
-        if key == "overwritten_in"
-    ));
-    if let QdrantCondition::Nested {
-        key: _,
-        filter: inner,
-    } = &must[0]
-    {
-        let inner_must = inner.must.as_ref().unwrap();
-        assert_eq!(inner_must.len(), 2);
-        assert!(matches!(&inner_must[0], QdrantCondition::Match { key, .. } if key == "by"));
-        assert!(matches!(&inner_must[1], QdrantCondition::Range { key, .. } if key == "seq"));
-    }
+    assert_eq!(filter, serde_json::json!({
+        "must": [
+            {
+                "nested": {
+                    "key": "overwritten_in",
+                    "filter": {
+                        "must": [
+                            { "key": "by", "match": { "value": "root" } },
+                            { "key": "seq", "range": { "lte": 2.0 } }
+                        ]
+                    }
+                }
+            }
+        ]
+    }));
 }
 
 #[test]
@@ -193,21 +198,20 @@ fn test_nested_simple() {
         }),
     };
     let filter = build(&expr);
-    let must = filter.must.unwrap();
-    assert!(matches!(&must[0],
-        QdrantCondition::Nested { key, .. } if key == "tags"
-    ));
-    if let QdrantCondition::Nested {
-        key: _,
-        filter: inner,
-    } = &must[0]
-    {
-        let inner_must = inner.must.as_ref().unwrap();
-        assert_eq!(inner_must.len(), 1);
-        assert!(
-            matches!(&inner_must[0], QdrantCondition::Match { key, value: FilterValue::Str(val) } if key == "name" && val == "important")
-        );
-    }
+    assert_eq!(filter, serde_json::json!({
+        "must": [
+            {
+                "nested": {
+                    "key": "tags",
+                    "filter": {
+                        "must": [
+                            { "key": "name", "match": { "value": "important" } }
+                        ]
+                    }
+                }
+            }
+        ]
+    }));
 }
 
 #[test]
@@ -223,9 +227,18 @@ fn test_nested_with_must_not() {
         }),
     };
     let filter = build(&expr);
-    let must_not = filter.must_not.unwrap();
-    assert_eq!(must_not.len(), 1);
-    assert!(matches!(&must_not[0],
-        QdrantCondition::Nested { key, .. } if key == "overwritten_in"
-    ));
+    assert_eq!(filter, serde_json::json!({
+        "must_not": [
+            {
+                "nested": {
+                    "key": "overwritten_in",
+                    "filter": {
+                        "must": [
+                            { "key": "by", "match": { "value": "root" } }
+                        ]
+                    }
+                }
+            }
+        ]
+    }));
 }

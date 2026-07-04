@@ -11,7 +11,7 @@ use qql_core::parser;
 
 use crate::config::QqlConfig;
 use crate::embedder::Embedder;
-use crate::filter_conv::QdrantFilter;
+pub type QdrantFilter = crate::qdrant::Filter;
 use crate::pipeline::{PointId, QueryPointsGroupsRequest, QueryPointsRequest};
 
 pub const DENSE_VECTOR_NAME: &str = "dense";
@@ -84,25 +84,43 @@ pub struct UpsertPointsReq {
     pub points: Vec<PointStruct>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PointStruct {
-    pub id: PointId,
-    pub vector: Option<serde_json::Value>,
-    pub payload: Option<HashMap<String, serde_json::Value>>,
+pub type PointStruct = crate::qdrant::PointStruct;
+pub type ScoredPoint = crate::qdrant::ScoredPoint;
+pub type PointGroup = crate::qdrant::PointGroup;
+pub type RetrievedPoint = crate::qdrant::Record;
+pub type CollectionInfo = crate::qdrant::CollectionInfo;
+pub type CollectionConfig = crate::qdrant::CollectionConfig;
+pub type CollectionParams = crate::qdrant::CollectionParams;
+pub type VectorsConfigType = crate::qdrant::VectorsConfig;
+pub type VectorParams = crate::qdrant::VectorParams;
+pub type SparseVectorConfig = crate::qdrant::SparseVectorParams;
+pub type PayloadSchemaInfo = crate::qdrant::PayloadIndexInfo;
+
+impl From<PointId> for crate::qdrant::ExtendedPointId {
+    fn from(id: PointId) -> Self {
+        match id {
+            PointId::Num(num) => crate::qdrant::ExtendedPointId {
+                num: Some(num),
+                uuid: None,
+            },
+            PointId::Uuid(uuid) => crate::qdrant::ExtendedPointId {
+                num: None,
+                uuid: Some(uuid),
+            },
+        }
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ScoredPoint {
-    pub id: PointId,
-    pub score: f32,
-    pub payload: Option<HashMap<String, serde_json::Value>>,
-    pub vector: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PointGroup {
-    pub group_id: serde_json::Value,
-    pub hits: Vec<ScoredPoint>,
+impl From<crate::qdrant::ExtendedPointId> for PointId {
+    fn from(id: crate::qdrant::ExtendedPointId) -> Self {
+        if let Some(num) = id.num {
+            PointId::Num(num)
+        } else if let Some(uuid) = id.uuid {
+            PointId::Uuid(uuid)
+        } else {
+            PointId::Num(0)
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -144,68 +162,10 @@ pub struct ScrollPointsReq {
     pub after: Option<PointId>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct RetrievedPoint {
-    pub id: PointId,
-    pub payload: HashMap<String, serde_json::Value>,
-}
-
 #[derive(Debug, Clone)]
 pub struct CountPointsReq {
     pub collection_name: String,
     pub filter: Option<QdrantFilter>,
-}
-
-#[derive(Debug, Clone)]
-pub struct CollectionInfo {
-    pub name: String,
-    pub status: String,
-    pub points_count: Option<u64>,
-    pub indexed_vectors_count: Option<u64>,
-    pub segments_count: u64,
-    pub config: Option<CollectionConfig>,
-    pub payload_schema: HashMap<String, PayloadSchemaInfo>,
-}
-
-#[derive(Debug, Clone)]
-pub struct CollectionConfig {
-    pub params: Option<CollectionParams>,
-}
-
-#[derive(Debug, Clone)]
-pub struct CollectionParams {
-    pub vectors_config: Option<VectorsConfigType>,
-    pub sparse_vectors_config: Option<HashMap<String, SparseVectorConfig>>,
-    pub shard_number: Option<u64>,
-    pub replication_factor: Option<u64>,
-    pub write_consistency_factor: Option<u64>,
-    pub read_fan_out_factor: Option<u64>,
-    pub read_fan_out_delay_ms: Option<u64>,
-    pub on_disk_payload: Option<bool>,
-}
-
-#[derive(Debug, Clone)]
-pub enum VectorsConfigType {
-    Single(VectorParams),
-    Multi(HashMap<String, VectorParams>),
-}
-
-#[derive(Debug, Clone)]
-pub struct VectorParams {
-    pub size: u64,
-    pub distance: String,
-    pub on_disk: Option<bool>,
-}
-
-#[derive(Debug, Clone)]
-pub struct SparseVectorConfig {
-    pub modifier: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct PayloadSchemaInfo {
-    pub data_type: String,
-    pub params: Option<serde_json::Value>,
 }
 
 #[async_trait]
@@ -543,7 +503,10 @@ impl Executor {
             if let Stmt::Query(query_stmt) = stmt {
                 parsed_stmts.push(*query_stmt);
             } else {
-                return Err(QqlError::runtime("query_batch only supports QUERY statements, got non-query statement".to_string()));
+                return Err(QqlError::runtime(
+                    "query_batch only supports QUERY statements, got non-query statement"
+                        .to_string(),
+                ));
             }
         }
         self.query_batch_nodes(parsed_stmts).await
@@ -602,13 +565,16 @@ impl Executor {
                     );
                 }
                 let b = batches.get_mut(&coll).unwrap();
-                let mut req = pipeline.build_flat_request(state);
+                let mut req = pipeline.build_flat_request(state)?;
                 if req.with_payload.is_none() {
-                    req.with_payload = Some(crate::pipeline::WithPayload {
-                        enable: Some(true),
-                        include: Vec::new(),
-                        exclude: Vec::new(),
-                    });
+                    req.with_payload = Some(
+                        crate::pipeline::WithPayload {
+                            enable: Some(true),
+                            include: Vec::new(),
+                            exclude: Vec::new(),
+                        }
+                        .into(),
+                    );
                 }
                 b.indices.push(i);
                 b.requests.push(req);
@@ -623,14 +589,20 @@ impl Executor {
                 let orig_idx = batch.indices[j];
                 let formatted: Vec<SearchHit> = pts
                     .into_iter()
-                    .map(|hit| SearchHit {
-                        id: crate::executor::helpers::point_id_string(&hit.id),
-                        score: hit.score,
-                        text: hit.payload.as_ref().and_then(|p| {
-                            p.get("text")
-                                .and_then(|v| v.as_str().map(|s| s.to_string()))
-                        }),
-                        payload: hit.payload,
+                    .map(|hit| {
+                        let payload_map: Option<HashMap<String, serde_json::Value>> =
+                            hit.payload.as_ref().and_then(|p| {
+                                serde_json::from_value(serde_json::to_value(p).unwrap()).ok()
+                            });
+                        SearchHit {
+                            id: crate::executor::helpers::point_id_string(&hit.id.clone().into()),
+                            score: hit.score,
+                            text: payload_map.as_ref().and_then(|p| {
+                                p.get("text")
+                                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+                            }),
+                            payload: payload_map,
+                        }
                     })
                     .collect();
 

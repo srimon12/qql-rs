@@ -11,7 +11,7 @@ The workspace is organized into a modular, multi-crate Rust workspace under the 
 ```
 qql/ (workspace root)
 ├── crates/
-│   ├── qql-core/         # Standalone Lexer, Parser, AST structures, & AST Transforms (no_std compatible)
+│   ├── qql-core/         # Standalone Lexer, Parser, AST structures, & AST Transforms
 │   ├── qql-runtime/      # Core execution pipeline, Qdrant client integrations, embedding resolution, & DML/DDL executor
 │   ├── qql-cli/          # Command Line Interface (CLI) and interactive query REPL
 │   ├── pyqql/            # Python bindings (PyO3)
@@ -20,7 +20,7 @@ qql/ (workspace root)
 ```
 
 ### Crate Division Boundaries
-* **`qql-core`**: High-performance syntax parsing. No network or file I/O dependencies. Must remain fully `no_std` compatible (using `alloc` for boxing/vectors). Exposed structures are compiled into other environments (e.g. WASM, NodeJS).
+* **`qql-core`**: High-performance syntax parsing. No network or file I/O dependencies. Uses `std` (via `std::borrow::Cow` and `std::error::Error`). Exposed structures are compiled into other environments (e.g. WASM, NodeJS).
 * **`qql-runtime`**: Heavy operations. Integrates with the official `qdrant-client` crate, handles embedding models, sparse vector representations, and executes pipeline graphs.
 * **Foreign Bindings**: Expose parsed AST payloads or runtime executor endpoints to Python, JS, or browser runtime target layers.
 

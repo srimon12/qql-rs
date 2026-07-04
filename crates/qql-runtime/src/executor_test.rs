@@ -50,32 +50,33 @@ impl Default for MockQdrantClient {
 }
 
 fn mock_collection_info() -> CollectionInfo {
-    CollectionInfo {
-        name: "docs".to_string(),
-        status: "green".to_string(),
-        points_count: Some(0),
-        indexed_vectors_count: Some(0),
-        segments_count: 0,
-        payload_schema: HashMap::new(),
-        config: Some(crate::executor::CollectionConfig {
-            params: Some(crate::executor::CollectionParams {
-                vectors_config: Some(crate::executor::VectorsConfigType::Single(
-                    crate::executor::VectorParams {
-                        size: 384,
-                        distance: "Cosine".to_string(),
-                        on_disk: None,
-                    },
-                )),
-                sparse_vectors_config: None,
-                shard_number: None,
-                replication_factor: None,
-                write_consistency_factor: None,
-                on_disk_payload: None,
-                read_fan_out_factor: None,
-                read_fan_out_delay_ms: None,
-            }),
-        }),
-    }
+    let val = serde_json::json!({
+        "status": "green",
+        "optimizer_status": "ok",
+        "segments_count": 0,
+        "payload_schema": {},
+        "config": {
+            "params": {
+                "vectors": {
+                    "size": 384,
+                    "distance": "Cosine"
+                },
+                "sparse_vectors": {},
+                "replication_factor": 1,
+                "shard_number": 1,
+                "write_consistency_factor": 1
+            },
+            "hnsw_config": {
+                "m": 16,
+                "ef_construct": 100
+            },
+            "optimizer_config": {
+                "deleted_threshold": 0.2,
+                "vacuum_min_vector_number": 1000
+            }
+        }
+    });
+    serde_json::from_value(val).unwrap()
 }
 
 #[async_trait]
@@ -325,10 +326,13 @@ async fn test_do_select_returns_record_or_nil() {
     let mut payload = HashMap::new();
     payload.insert("text".to_string(), serde_json::json!("hello"));
     payload.insert("topic".to_string(), serde_json::json!("search"));
-    client.get_records = vec![RetrievedPoint {
-        id: PointId::Uuid("pt-1".to_string()),
-        payload,
-    }];
+    let record_val = serde_json::json!({
+        "id": {
+            "uuid": "pt-1"
+        },
+        "payload": payload
+    });
+    client.get_records = vec![serde_json::from_value(record_val).unwrap()];
 
     let executor = Executor::new(Box::new(client), Some(test_config()));
     let resp = executor
@@ -336,7 +340,7 @@ async fn test_do_select_returns_record_or_nil() {
         .await;
     assert!(resp.is_ok());
     let data = resp.unwrap().data.unwrap();
-    assert_eq!(data[0]["id"]["Uuid"], "pt-1");
+    assert_eq!(data[0]["id"]["uuid"], "pt-1");
     assert_eq!(data[0]["payload"]["text"], "hello");
 
     // missing
@@ -358,17 +362,20 @@ async fn test_do_scroll_returns_upstream_style_payload() {
     let mut payload = HashMap::new();
     payload.insert("text".to_string(), serde_json::json!("hello"));
     payload.insert("topic".to_string(), serde_json::json!("search"));
-    client.scroll_records = vec![RetrievedPoint {
-        id: PointId::Num(7),
-        payload,
-    }];
+    let record_val = serde_json::json!({
+        "id": {
+            "num": 7
+        },
+        "payload": payload
+    });
+    client.scroll_records = vec![serde_json::from_value(record_val).unwrap()];
     client.scroll_offset = Some(PointId::Uuid("pt-next".to_string()));
 
     let executor = Executor::new(Box::new(client), Some(test_config()));
     let resp = executor.execute("SCROLL FROM docs LIMIT 5").await;
     assert!(resp.is_ok());
     let data = resp.unwrap().data.unwrap();
-    assert_eq!(data["points"][0]["id"]["Num"], 7);
+    assert_eq!(data["points"][0]["id"]["num"], 7);
     assert_eq!(data["points"][0]["payload"]["text"], "hello");
     assert_eq!(data["next_offset"], "pt-next");
 }
@@ -400,20 +407,49 @@ async fn test_delete_by_id_and_filter() {
 }
 
 #[tokio::test]
-async fn test_update_payload_by_filter() {
+async fn test_update_by_id() {
     let mut client = MockQdrantClient::default();
     client.exists = true;
-    let last_set_payload = client.last_set_payload.clone();
+    let last_update = client.last_update_vectors.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let resp = executor
-        .execute("UPDATE docs SET PAYLOAD = {status: 'published'} WHERE status = 'draft'")
+        .execute("UPDATE docs SET vector = [1.0, 2.0] WHERE id = 12")
         .await;
     assert!(resp.is_ok());
-    let req = last_set_payload.lock().unwrap().take().unwrap();
+    let req = last_update.lock().unwrap().take().unwrap();
     assert_eq!(req.collection_name, "docs");
-    assert!(req.filter.is_some());
-    assert_eq!(req.payload["status"], "published");
+    assert_eq!(req.point_id, PointId::Num(12));
+    assert_eq!(req.vector, vec![1.0, 2.0]);
+}
+
+#[tokio::test]
+async fn test_set_payload_by_id_and_filter() {
+    let mut client = MockQdrantClient::default();
+    client.exists = true;
+    let last_set = client.last_set_payload.clone();
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+
+    // by id
+    // by id
+    let resp = executor
+        .execute("UPDATE docs SET PAYLOAD = {status: 'active'} WHERE id = 12")
+        .await;
+    assert!(resp.is_ok());
+    let req = last_set.lock().unwrap().take().unwrap();
+    assert_eq!(req.collection_name, "docs");
+    assert_eq!(req.point_id, Some(PointId::Num(12)));
+    assert_eq!(req.payload.get("status").unwrap(), "active");
+
+    // by filter
+    let resp_filter = executor
+        .execute("UPDATE docs SET PAYLOAD = {status: 'active'} WHERE category = 'news'")
+        .await;
+    assert!(resp_filter.is_ok());
+    let req_filter = last_set.lock().unwrap().take().unwrap();
+    assert_eq!(req_filter.collection_name, "docs");
+    assert!(req_filter.filter.is_some());
+    assert_eq!(req_filter.payload.get("status").unwrap(), "active");
 }
 
 #[tokio::test]
@@ -435,8 +471,8 @@ async fn test_dml_missing_collection_errors() {
 }
 
 #[tokio::test]
-async fn test_insert_auto_creates_missing_collection() {
-    let client = MockQdrantClient::default(); // exists = false
+async fn test_insert_into_collection_creates_missing() {
+    let client = MockQdrantClient::default();
     let last_create = client.last_create_collection.clone();
     let last_upsert = client.last_upsert.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
@@ -455,7 +491,7 @@ async fn test_insert_auto_creates_missing_collection() {
     assert_eq!(upsert_req.collection_name, "docs");
     assert_eq!(upsert_req.points.len(), 1);
     assert_eq!(
-        upsert_req.points[0].id,
+        PointId::from(upsert_req.points[0].id.clone()),
         PointId::Uuid("550e8400-e29b-41d4-a716-446655440000".to_string())
     );
 }

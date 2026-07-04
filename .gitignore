@@ -25,3 +25,4 @@ Thumbs.db
 # Build artifacts
 *.so
 uv.lock
+documentation/

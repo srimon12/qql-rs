@@ -86,7 +86,9 @@ fn serde_json_to_value(jv: serde_json::Value) -> Option<Value<'static>> {
         serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
                 Some(Value::Int(i))
-            } else { n.as_f64().map(Value::Float) }
+            } else {
+                n.as_f64().map(Value::Float)
+            }
         }
         serde_json::Value::Bool(b) => Some(Value::Bool(b)),
         serde_json::Value::Null => Some(Value::Null),

@@ -10,11 +10,14 @@ fn test_equals_string() {
         value: Value::Str(std::borrow::Cow::Borrowed("active")),
     };
     let filter = build(&expr);
-    let must = filter.must.unwrap();
-    assert!(matches!(&must[0],
-        QdrantCondition::Match { key, value: FilterValue::Str(val) }
-        if key == "status" && val == "active"
-    ));
+    assert_eq!(filter, serde_json::json!({
+        "must": [
+            {
+                "key": "status",
+                "match": { "value": "active" }
+            }
+        ]
+    }));
 }
 
 #[test]
@@ -25,11 +28,14 @@ fn test_equals_int() {
         value: Value::Int(42),
     };
     let filter = build(&expr);
-    let must = filter.must.unwrap();
-    assert!(matches!(&must[0],
-        QdrantCondition::MatchKeywords { key, values }
-        if key == "count" && values == &[FilterValue::Int(42)]
-    ));
+    assert_eq!(filter, serde_json::json!({
+        "must": [
+            {
+                "key": "count",
+                "match": { "value": 42 }
+            }
+        ]
+    }));
 }
 
 #[test]
@@ -40,11 +46,17 @@ fn test_equals_float() {
         value: Value::Float(12.34),
     };
     let filter = build(&expr);
-    let must = filter.must.unwrap();
-    assert!(matches!(&must[0],
-        QdrantCondition::Range { key, gte: Some(g), lte: Some(l), .. }
-        if key == "score" && (*g - 12.34).abs() < f64::EPSILON && (*l - 12.34).abs() < f64::EPSILON
-    ));
+    assert_eq!(filter, serde_json::json!({
+        "must": [
+            {
+                "key": "score",
+                "range": {
+                    "gte": 12.34,
+                    "lte": 12.34
+                }
+            }
+        ]
+    }));
 }
 
 #[test]
@@ -55,11 +67,14 @@ fn test_equals_bool() {
         value: Value::Bool(true),
     };
     let filter = build(&expr);
-    let must = filter.must.unwrap();
-    assert!(matches!(&must[0],
-        QdrantCondition::Match { key, value: FilterValue::Bool(true) }
-        if key == "is_active"
-    ));
+    assert_eq!(filter, serde_json::json!({
+        "must": [
+            {
+                "key": "is_active",
+                "match": { "value": true }
+            }
+        ]
+    }));
 }
 
 #[test]
@@ -70,11 +85,14 @@ fn test_not_equals_string() {
         value: Value::Str(std::borrow::Cow::Borrowed("archived")),
     };
     let filter = build(&expr);
-    let must = filter.must.unwrap();
-    assert!(matches!(&must[0],
-        QdrantCondition::MatchExcept { key, value: FilterValue::Str(val) }
-        if key == "status" && val == "archived"
-    ));
+    assert_eq!(filter, serde_json::json!({
+        "must": [
+            {
+                "key": "status",
+                "match": { "except": "archived" }
+            }
+        ]
+    }));
 }
 
 #[test]
@@ -85,11 +103,14 @@ fn test_not_equals_int() {
         value: Value::Int(7),
     };
     let filter = build(&expr);
-    let must_not = filter.must_not.unwrap();
-    assert!(matches!(&must_not[0],
-        QdrantCondition::MatchKeywords { key, values }
-        if key == "count" && values == &[FilterValue::Int(7)]
-    ));
+    assert_eq!(filter, serde_json::json!({
+        "must_not": [
+            {
+                "key": "count",
+                "match": { "value": 7 }
+            }
+        ]
+    }));
 }
 
 #[test]
@@ -100,11 +121,17 @@ fn test_not_equals_float() {
         value: Value::Float(1.5),
     };
     let filter = build(&expr);
-    let must_not = filter.must_not.unwrap();
-    assert!(matches!(&must_not[0],
-        QdrantCondition::Range { key, gte: Some(g), lte: Some(l), .. }
-        if key == "score" && (*g - 1.5).abs() < f64::EPSILON && (*l - 1.5).abs() < f64::EPSILON
-    ));
+    assert_eq!(filter, serde_json::json!({
+        "must_not": [
+            {
+                "key": "score",
+                "range": {
+                    "gte": 1.5,
+                    "lte": 1.5
+                }
+            }
+        ]
+    }));
 }
 
 #[test]
@@ -115,11 +142,14 @@ fn test_not_equals_bool() {
         value: Value::Bool(false),
     };
     let filter = build(&expr);
-    let must_not = filter.must_not.unwrap();
-    assert!(matches!(&must_not[0],
-        QdrantCondition::Match { key, value: FilterValue::Bool(false) }
-        if key == "is_active"
-    ));
+    assert_eq!(filter, serde_json::json!({
+        "must_not": [
+            {
+                "key": "is_active",
+                "match": { "value": false }
+            }
+        ]
+    }));
 }
 
 #[test]
@@ -130,10 +160,14 @@ fn test_greater_than() {
         value: Value::Int(18),
     };
     let filter = build(&expr);
-    let must = filter.must.unwrap();
-    assert!(matches!(&must[0],
-        QdrantCondition::Range { key, gt: Some(_), .. } if key == "age"
-    ));
+    assert_eq!(filter, serde_json::json!({
+        "must": [
+            {
+                "key": "age",
+                "range": { "gt": 18.0 }
+            }
+        ]
+    }));
 }
 
 #[test]
@@ -144,10 +178,14 @@ fn test_greater_than_equal() {
         value: Value::Int(18),
     };
     let filter = build(&expr);
-    let must = filter.must.unwrap();
-    assert!(matches!(&must[0],
-        QdrantCondition::Range { key, gte: Some(_), .. } if key == "age"
-    ));
+    assert_eq!(filter, serde_json::json!({
+        "must": [
+            {
+                "key": "age",
+                "range": { "gte": 18.0 }
+            }
+        ]
+    }));
 }
 
 #[test]
@@ -158,10 +196,14 @@ fn test_less_than() {
         value: Value::Float(100.0),
     };
     let filter = build(&expr);
-    let must = filter.must.unwrap();
-    assert!(matches!(&must[0],
-        QdrantCondition::Range { key, lt: Some(_), .. } if key == "price"
-    ));
+    assert_eq!(filter, serde_json::json!({
+        "must": [
+            {
+                "key": "price",
+                "range": { "lt": 100.0 }
+            }
+        ]
+    }));
 }
 
 #[test]
@@ -172,10 +214,14 @@ fn test_less_than_equal() {
         value: Value::Float(100.0),
     };
     let filter = build(&expr);
-    let must = filter.must.unwrap();
-    assert!(matches!(&must[0],
-        QdrantCondition::Range { key, lte: Some(_), .. } if key == "price"
-    ));
+    assert_eq!(filter, serde_json::json!({
+        "must": [
+            {
+                "key": "price",
+                "range": { "lte": 100.0 }
+            }
+        ]
+    }));
 }
 
 #[test]
@@ -186,10 +232,17 @@ fn test_between() {
         high: Value::Int(65),
     };
     let filter = build(&expr);
-    let must = filter.must.unwrap();
-    assert!(matches!(&must[0],
-        QdrantCondition::Range { key, gte: Some(_), lte: Some(_), .. } if key == "age"
-    ));
+    assert_eq!(filter, serde_json::json!({
+        "must": [
+            {
+                "key": "age",
+                "range": {
+                    "gte": 18.0,
+                    "lte": 65.0
+                }
+            }
+        ]
+    }));
 }
 
 #[test]
@@ -198,40 +251,48 @@ fn test_is_null() {
         field: "deleted_at",
     };
     let filter = build(&expr);
-    let must = filter.must.unwrap();
-    assert!(matches!(&must[0],
-        QdrantCondition::IsNull { key } if key == "deleted_at"
-    ));
+    assert_eq!(filter, serde_json::json!({
+        "must": [
+            {
+                "is_null": { "key": "deleted_at" }
+            }
+        ]
+    }));
 }
 
 #[test]
 fn test_is_not_null() {
     let expr = FilterExpr::IsNotNull { field: "email" };
     let filter = build(&expr);
-    let must_not = filter.must_not.unwrap();
-    assert!(matches!(&must_not[0],
-        QdrantCondition::IsNull { key } if key == "email"
-    ));
+    assert_eq!(filter, serde_json::json!({
+        "must_not": [
+            { "is_null": { "key": "email" } }
+        ]
+    }));
 }
 
 #[test]
 fn test_is_empty() {
     let expr = FilterExpr::IsEmpty { field: "tags" };
     let filter = build(&expr);
-    let must = filter.must.unwrap();
-    assert!(matches!(&must[0],
-        QdrantCondition::IsEmpty { key } if key == "tags"
-    ));
+    assert_eq!(filter, serde_json::json!({
+        "must": [
+            {
+                "is_empty": { "key": "tags" }
+            }
+        ]
+    }));
 }
 
 #[test]
 fn test_is_not_empty() {
     let expr = FilterExpr::IsNotEmpty { field: "tags" };
     let filter = build(&expr);
-    let must_not = filter.must_not.unwrap();
-    assert!(matches!(&must_not[0],
-        QdrantCondition::IsEmpty { key } if key == "tags"
-    ));
+    assert_eq!(filter, serde_json::json!({
+        "must_not": [
+            { "is_empty": { "key": "tags" } }
+        ]
+    }));
 }
 
 #[test]
@@ -249,10 +310,13 @@ fn test_basic_conversion() {
 fn test_has_vector() {
     let expr = FilterExpr::HasVector { name: "my_vector" };
     let filter = build(&expr);
-    let must = filter.must.unwrap();
-    assert!(matches!(&must[0],
-        QdrantCondition::HasVector(name) if name == "my_vector"
-    ));
+    assert_eq!(filter, serde_json::json!({
+        "must": [
+            {
+                "has_vector": "my_vector"
+            }
+        ]
+    }));
 }
 
 #[test]
@@ -263,11 +327,14 @@ fn test_values_count() {
         count: 5,
     };
     let filter = build(&expr);
-    let must = filter.must.unwrap();
-    assert!(matches!(&must[0],
-        QdrantCondition::ValuesCount { key, values_count }
-        if key == "tags" && values_count.gt == Some(5)
-    ));
+    assert_eq!(filter, serde_json::json!({
+        "must": [
+            {
+                "key": "tags",
+                "values_count": { "gt": 5 }
+            }
+        ]
+    }));
 }
 
 #[test]
@@ -280,13 +347,23 @@ fn test_geo_bounding_box() {
         bottom_right_lon: 13.403684,
     };
     let filter = build(&expr);
-    let must = filter.must.unwrap();
-    assert!(matches!(&must[0],
-        QdrantCondition::GeoBoundingBox { key, geo_bounding_box }
-        if key == "location"
-        && (geo_bounding_box.top_left.lat - 52.520711).abs() < f64::EPSILON
-        && (geo_bounding_box.bottom_right.lon - 13.403684).abs() < f64::EPSILON
-    ));
+    assert_eq!(filter, serde_json::json!({
+        "must": [
+            {
+                "key": "location",
+                "geo_bounding_box": {
+                    "top_left": {
+                        "lat": 52.520711,
+                        "lon": 13.403683
+                    },
+                    "bottom_right": {
+                        "lat": 52.520712,
+                        "lon": 13.403684
+                    }
+                }
+            }
+        ]
+    }));
 }
 
 #[test]
@@ -298,11 +375,18 @@ fn test_geo_radius() {
         radius: 1000.0,
     };
     let filter = build(&expr);
-    let must = filter.must.unwrap();
-    assert!(matches!(&must[0],
-        QdrantCondition::GeoRadius { key, geo_radius }
-        if key == "location"
-        && (geo_radius.center.lat - 52.520711).abs() < f64::EPSILON
-        && (geo_radius.radius - 1000.0).abs() < f64::EPSILON
-    ));
+    assert_eq!(filter, serde_json::json!({
+        "must": [
+            {
+                "key": "location",
+                "geo_radius": {
+                    "center": {
+                        "lat": 52.520711,
+                        "lon": 13.403683
+                    },
+                    "radius": 1000.0
+                }
+            }
+        ]
+    }));
 }

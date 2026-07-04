@@ -62,7 +62,7 @@ isValid := gqql.IsValid("SELECT * FROM docs WHERE id = 1")
 
 ### Rust
 ```toml
-qql-core = "0.1"    # parser only (no_std compatible)
+qql-core = "0.1"    # parser only
 qql = "0.1"         # full runtime + executor
 ```
 ```rust

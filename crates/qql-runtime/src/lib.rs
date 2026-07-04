@@ -3,6 +3,7 @@ pub mod embedder;
 pub mod executor;
 pub mod filter_conv;
 pub mod pipeline;
+pub mod qdrant;
 pub mod sparse;
 
 #[cfg(test)]

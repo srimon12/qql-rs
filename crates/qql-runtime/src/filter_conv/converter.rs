@@ -1,14 +1,8 @@
-use std::boxed::Box;
 use std::string::String;
 use std::vec::Vec;
 
 use qql_core::ast::{FilterExpr, Value};
 use qql_core::error::QqlError;
-
-use super::types::{
-    FilterValue, QdrantCondition, QdrantFilter, QdrantGeoBoundingBox, QdrantGeoPoint,
-    QdrantGeoRadius, QdrantRange,
-};
 
 pub struct FilterConverter;
 
@@ -23,73 +17,69 @@ impl FilterConverter {
         FilterConverter
     }
 
-    pub fn build_filter(&self, expr: &FilterExpr) -> Result<Option<QdrantFilter>, QqlError> {
+    pub fn build_filter(&self, expr: &FilterExpr) -> Result<Option<crate::qdrant::Filter>, QqlError> {
         let condition = self.build_condition(expr)?;
-        Ok(self.wrap_as_filter(condition))
+        let filter_val = self.wrap_as_filter(condition);
+        let filter: crate::qdrant::Filter = serde_json::from_value(filter_val)
+            .map_err(|e| QqlError::runtime(e.to_string()))?;
+        Ok(Some(filter))
     }
 
-    fn build_condition(&self, expr: &FilterExpr) -> Result<QdrantCondition, QqlError> {
+    fn build_condition(&self, expr: &FilterExpr) -> Result<serde_json::Value, QqlError> {
         match expr {
             FilterExpr::Compare { field, op, value } => self.build_compare_expr(field, op, value),
             FilterExpr::Between { field, low, high } => self.build_between_expr(field, low, high),
             FilterExpr::In { field, values } => self.build_in_expr(field, values),
             FilterExpr::NotIn { field, values } => self.build_not_in_expr(field, values),
-            FilterExpr::IsNull { field } => Ok(QdrantCondition::IsNull {
-                key: field.to_string(),
-            }),
+            FilterExpr::IsNull { field } => Ok(serde_json::json!({
+                "is_null": { "key": field }
+            })),
             FilterExpr::IsNotNull { field } => {
-                Ok(QdrantCondition::Boolean(Box::new(QdrantFilter {
-                    must_not: Some(vec![QdrantCondition::IsNull {
-                        key: field.to_string(),
-                    }]),
-                    must: None,
-                    should: None,
-                })))
+                Ok(serde_json::json!({
+                    "must_not": [
+                        { "is_null": { "key": field } }
+                    ]
+                }))
             }
-            FilterExpr::IsEmpty { field } => Ok(QdrantCondition::IsEmpty {
-                key: field.to_string(),
-            }),
+            FilterExpr::IsEmpty { field } => Ok(serde_json::json!({
+                "is_empty": { "key": field }
+            })),
             FilterExpr::IsNotEmpty { field } => {
-                Ok(QdrantCondition::Boolean(Box::new(QdrantFilter {
-                    must_not: Some(vec![QdrantCondition::IsEmpty {
-                        key: field.to_string(),
-                    }]),
-                    must: None,
-                    should: None,
-                })))
+                Ok(serde_json::json!({
+                    "must_not": [
+                        { "is_empty": { "key": field } }
+                    ]
+                }))
             }
-            FilterExpr::MatchText { field, text } => Ok(QdrantCondition::MatchText {
-                key: field.to_string(),
-                text: text.to_string(),
-            }),
-            FilterExpr::MatchAny { field, text } => Ok(QdrantCondition::MatchAny {
-                key: field.to_string(),
-                text: text.to_string(),
-            }),
-            FilterExpr::MatchPhrase { field, text } => Ok(QdrantCondition::MatchPhrase {
-                key: field.to_string(),
-                text: text.to_string(),
-            }),
+            FilterExpr::MatchText { field, text } => Ok(serde_json::json!({
+                "key": field,
+                "match": { "text": text }
+            })),
+            FilterExpr::MatchAny { field, text } => Ok(serde_json::json!({
+                "key": field,
+                "match": { "any": [text] }
+            })),
+            FilterExpr::MatchPhrase { field, text } => Ok(serde_json::json!({
+                "key": field,
+                "match": { "phrase": text }
+            })),
             FilterExpr::And { operands } => self.build_and_expr(operands),
             FilterExpr::Or { operands } => self.build_or_expr(operands),
             FilterExpr::Not { operand } => self.build_not_expr(operand),
             FilterExpr::Nested { path, filter } => self.build_nested_expr(path, filter),
-            FilterExpr::HasVector { name } => Ok(QdrantCondition::HasVector(name.to_string())),
+            FilterExpr::HasVector { name } => Ok(serde_json::json!({
+                "has_vector": name
+            })),
             FilterExpr::ValuesCount { field, op, count } => {
-                let mut range = QdrantRange {
-                    gt: None,
-                    gte: None,
-                    lt: None,
-                    lte: None,
-                };
+                let mut range = serde_json::json!({});
                 match *op {
-                    ">" => range.gt = Some(*count),
-                    ">=" => range.gte = Some(*count),
-                    "<" => range.lt = Some(*count),
-                    "<=" => range.lte = Some(*count),
+                    ">" => range["gt"] = serde_json::json!(count),
+                    ">=" => range["gte"] = serde_json::json!(count),
+                    "<" => range["lt"] = serde_json::json!(count),
+                    "<=" => range["lte"] = serde_json::json!(count),
                     "=" => {
-                        range.gte = Some(*count);
-                        range.lte = Some(*count);
+                        range["gte"] = serde_json::json!(count);
+                        range["lte"] = serde_json::json!(count);
                     }
                     _ => {
                         return Err(QqlError::runtime(format!(
@@ -98,10 +88,10 @@ impl FilterConverter {
                         )))
                     }
                 }
-                Ok(QdrantCondition::ValuesCount {
-                    key: field.to_string(),
-                    values_count: range,
-                })
+                Ok(serde_json::json!({
+                    "key": field,
+                    "values_count": range
+                }))
             }
             FilterExpr::GeoBoundingBox {
                 field,
@@ -109,34 +99,34 @@ impl FilterConverter {
                 top_left_lon,
                 bottom_right_lat,
                 bottom_right_lon,
-            } => Ok(QdrantCondition::GeoBoundingBox {
-                key: field.to_string(),
-                geo_bounding_box: QdrantGeoBoundingBox {
-                    top_left: QdrantGeoPoint {
-                        lat: *top_left_lat,
-                        lon: *top_left_lon,
+            } => Ok(serde_json::json!({
+                "key": field,
+                "geo_bounding_box": {
+                    "top_left": {
+                        "lat": top_left_lat,
+                        "lon": top_left_lon
                     },
-                    bottom_right: QdrantGeoPoint {
-                        lat: *bottom_right_lat,
-                        lon: *bottom_right_lon,
-                    },
-                },
-            }),
+                    "bottom_right": {
+                        "lat": bottom_right_lat,
+                        "lon": bottom_right_lon
+                    }
+                }
+            })),
             FilterExpr::GeoRadius {
                 field,
                 lat,
                 lon,
                 radius,
-            } => Ok(QdrantCondition::GeoRadius {
-                key: field.to_string(),
-                geo_radius: QdrantGeoRadius {
-                    center: QdrantGeoPoint {
-                        lat: *lat,
-                        lon: *lon,
+            } => Ok(serde_json::json!({
+                "key": field,
+                "geo_radius": {
+                    "center": {
+                        "lat": lat,
+                        "lon": lon
                     },
-                    radius: *radius,
-                },
-            }),
+                    "radius": radius
+                }
+            })),
         }
     }
 
@@ -145,49 +135,37 @@ impl FilterConverter {
         field: &str,
         op: &str,
         value: &Value,
-    ) -> Result<QdrantCondition, QqlError> {
+    ) -> Result<serde_json::Value, QqlError> {
         match op {
             "=" => self.build_equal_condition(field, value),
             "!=" => self.build_not_equal_condition(field, value),
             ">" => {
                 let v = to_float64(value)?;
-                Ok(QdrantCondition::Range {
-                    key: field.to_string(),
-                    gt: v,
-                    gte: None,
-                    lt: None,
-                    lte: None,
-                })
+                Ok(serde_json::json!({
+                    "key": field,
+                    "range": { "gt": v }
+                }))
             }
             ">=" => {
                 let v = to_float64(value)?;
-                Ok(QdrantCondition::Range {
-                    key: field.to_string(),
-                    gt: None,
-                    gte: v,
-                    lt: None,
-                    lte: None,
-                })
+                Ok(serde_json::json!({
+                    "key": field,
+                    "range": { "gte": v }
+                }))
             }
             "<" => {
                 let v = to_float64(value)?;
-                Ok(QdrantCondition::Range {
-                    key: field.to_string(),
-                    gt: None,
-                    gte: None,
-                    lt: v,
-                    lte: None,
-                })
+                Ok(serde_json::json!({
+                    "key": field,
+                    "range": { "lt": v }
+                }))
             }
             "<=" => {
                 let v = to_float64(value)?;
-                Ok(QdrantCondition::Range {
-                    key: field.to_string(),
-                    gt: None,
-                    gte: None,
-                    lt: None,
-                    lte: v,
-                })
+                Ok(serde_json::json!({
+                    "key": field,
+                    "range": { "lte": v }
+                }))
             }
             _ => Err(QqlError::runtime(format!(
                 "unknown comparison operator: {}",
@@ -201,19 +179,19 @@ impl FilterConverter {
         field: &str,
         low: &Value,
         high: &Value,
-    ) -> Result<QdrantCondition, QqlError> {
+    ) -> Result<serde_json::Value, QqlError> {
         let low_v = to_float64(low)?;
         let high_v = to_float64(high)?;
-        Ok(QdrantCondition::Range {
-            key: field.to_string(),
-            gt: None,
-            gte: low_v,
-            lt: None,
-            lte: high_v,
-        })
+        Ok(serde_json::json!({
+            "key": field,
+            "range": {
+                "gte": low_v,
+                "lte": high_v
+            }
+        }))
     }
 
-    fn build_in_expr(&self, field: &str, values: &[Value]) -> Result<QdrantCondition, QqlError> {
+    fn build_in_expr(&self, field: &str, values: &[Value]) -> Result<serde_json::Value, QqlError> {
         self.build_set_condition(field, values, false)
     }
 
@@ -221,56 +199,52 @@ impl FilterConverter {
         &self,
         field: &str,
         values: &[Value],
-    ) -> Result<QdrantCondition, QqlError> {
+    ) -> Result<serde_json::Value, QqlError> {
         self.build_set_condition(field, values, true)
     }
 
-    fn build_and_expr(&self, operands: &[FilterExpr]) -> Result<QdrantCondition, QqlError> {
+    fn build_and_expr(&self, operands: &[FilterExpr]) -> Result<serde_json::Value, QqlError> {
         let mut must = Vec::with_capacity(operands.len());
         for operand in operands {
             let cond = self.build_condition(operand)?;
             must.push(cond);
         }
-        Ok(QdrantCondition::Boolean(Box::new(QdrantFilter {
-            must: Some(must),
-            must_not: None,
-            should: None,
-        })))
+        Ok(serde_json::json!({
+            "must": must
+        }))
     }
 
-    fn build_or_expr(&self, operands: &[FilterExpr]) -> Result<QdrantCondition, QqlError> {
+    fn build_or_expr(&self, operands: &[FilterExpr]) -> Result<serde_json::Value, QqlError> {
         let mut should = Vec::with_capacity(operands.len());
         for operand in operands {
             let cond = self.build_condition(operand)?;
             should.push(cond);
         }
-        Ok(QdrantCondition::Boolean(Box::new(QdrantFilter {
-            must: None,
-            must_not: None,
-            should: Some(should),
-        })))
+        Ok(serde_json::json!({
+            "should": should
+        }))
     }
 
-    fn build_not_expr(&self, operand: &FilterExpr) -> Result<QdrantCondition, QqlError> {
+    fn build_not_expr(&self, operand: &FilterExpr) -> Result<serde_json::Value, QqlError> {
         let cond = self.build_condition(operand)?;
-        Ok(QdrantCondition::Boolean(Box::new(QdrantFilter {
-            must: None,
-            must_not: Some(vec![cond]),
-            should: None,
-        })))
+        Ok(serde_json::json!({
+            "must_not": [cond]
+        }))
     }
 
     fn build_nested_expr(
         &self,
         path: &str,
         filter: &FilterExpr,
-    ) -> Result<QdrantCondition, QqlError> {
+    ) -> Result<serde_json::Value, QqlError> {
         let inner = self.build_filter(filter)?;
         match inner {
-            Some(f) => Ok(QdrantCondition::Nested {
-                key: path.to_string(),
-                filter: Box::new(f),
-            }),
+            Some(f) => Ok(serde_json::json!({
+                "nested": {
+                    "key": path,
+                    "filter": f
+                }
+            })),
             None => Err(QqlError::runtime("empty nested filter")),
         }
     }
@@ -279,21 +253,21 @@ impl FilterConverter {
         &self,
         field: &str,
         value: &Value,
-    ) -> Result<QdrantCondition, QqlError> {
+    ) -> Result<serde_json::Value, QqlError> {
         match value {
-            Value::Str(s) => Ok(QdrantCondition::Match {
-                key: field.to_string(),
-                value: FilterValue::Str(s.to_string()),
-            }),
-            Value::Int(i) => Ok(QdrantCondition::MatchKeywords {
-                key: field.to_string(),
-                values: vec![FilterValue::Int(*i)],
-            }),
+            Value::Str(s) => Ok(serde_json::json!({
+                "key": field,
+                "match": { "value": s }
+            })),
+            Value::Int(i) => Ok(serde_json::json!({
+                "key": field,
+                "match": { "value": i }
+            })),
             Value::Float(f) => Ok(exact_float_condition(field.to_string(), *f)),
-            Value::Bool(b) => Ok(QdrantCondition::Match {
-                key: field.to_string(),
-                value: FilterValue::Bool(*b),
-            }),
+            Value::Bool(b) => Ok(serde_json::json!({
+                "key": field,
+                "match": { "value": b }
+            })),
             _ => Err(QqlError::runtime(
                 "unsupported value type for equality match",
             )),
@@ -304,33 +278,33 @@ impl FilterConverter {
         &self,
         field: &str,
         value: &Value,
-    ) -> Result<QdrantCondition, QqlError> {
+    ) -> Result<serde_json::Value, QqlError> {
         match value {
-            Value::Str(s) => Ok(QdrantCondition::MatchExcept {
-                key: field.to_string(),
-                value: FilterValue::Str(s.to_string()),
-            }),
-            Value::Int(i) => Ok(QdrantCondition::Boolean(Box::new(QdrantFilter {
-                must_not: Some(vec![QdrantCondition::MatchKeywords {
-                    key: field.to_string(),
-                    values: vec![FilterValue::Int(*i)],
-                }]),
-                must: None,
-                should: None,
-            }))),
-            Value::Float(f) => Ok(QdrantCondition::Boolean(Box::new(QdrantFilter {
-                must_not: Some(vec![exact_float_condition(field.to_string(), *f)]),
-                must: None,
-                should: None,
-            }))),
-            Value::Bool(b) => Ok(QdrantCondition::Boolean(Box::new(QdrantFilter {
-                must_not: Some(vec![QdrantCondition::Match {
-                    key: field.to_string(),
-                    value: FilterValue::Bool(*b),
-                }]),
-                must: None,
-                should: None,
-            }))),
+            Value::Str(s) => Ok(serde_json::json!({
+                "key": field,
+                "match": { "except": s }
+            })),
+            Value::Int(i) => Ok(serde_json::json!({
+                "must_not": [
+                    {
+                        "key": field,
+                        "match": { "value": i }
+                    }
+                ]
+            })),
+            Value::Float(f) => Ok(serde_json::json!({
+                "must_not": [
+                    exact_float_condition(field.to_string(), *f)
+                ]
+            })),
+            Value::Bool(b) => Ok(serde_json::json!({
+                "must_not": [
+                    {
+                        "key": field,
+                        "match": { "value": b }
+                    }
+                ]
+            })),
             _ => Err(QqlError::runtime(
                 "unsupported value type for inequality match",
             )),
@@ -342,18 +316,18 @@ impl FilterConverter {
         field: &str,
         values: &[Value],
         negate: bool,
-    ) -> Result<QdrantCondition, QqlError> {
+    ) -> Result<serde_json::Value, QqlError> {
         if values.is_empty() {
             if negate {
-                return Ok(QdrantCondition::MatchExceptKeywords {
-                    key: field.to_string(),
-                    values: Vec::new(),
-                });
+                return Ok(serde_json::json!({
+                    "key": field,
+                    "match": { "except": [] }
+                }));
             }
-            return Ok(QdrantCondition::MatchKeywords {
-                key: field.to_string(),
-                values: Vec::new(),
-            });
+            return Ok(serde_json::json!({
+                "key": field,
+                "match": { "any": [] }
+            }));
         }
 
         let kind = literal_kind_of(&values[0])?;
@@ -368,60 +342,61 @@ impl FilterConverter {
 
         match kind {
             LiteralKind::String => {
-                let str_values: Vec<FilterValue> = values
+                let str_values: Vec<String> = values
                     .iter()
                     .map(|v| match v {
-                        Value::Str(s) => FilterValue::Str(s.to_string()),
+                        Value::Str(s) => s.to_string(),
                         _ => unreachable!(),
                     })
                     .collect();
                 if negate {
-                    Ok(QdrantCondition::MatchExceptKeywords {
-                        key: field.to_string(),
-                        values: str_values,
-                    })
+                    Ok(serde_json::json!({
+                        "key": field,
+                        "match": { "except": str_values }
+                    }))
                 } else {
-                    Ok(QdrantCondition::MatchKeywords {
-                        key: field.to_string(),
-                        values: str_values,
-                    })
+                    Ok(serde_json::json!({
+                        "key": field,
+                        "match": { "any": str_values }
+                    }))
                 }
             }
             LiteralKind::Int => {
+                let int_values: Vec<i64> = values
+                    .iter()
+                    .map(|v| match v {
+                        Value::Int(i) => *i,
+                        _ => unreachable!(),
+                    })
+                    .collect();
                 if negate {
-                    Ok(QdrantCondition::Boolean(Box::new(QdrantFilter {
-                        must_not: Some(
-                            values
-                                .iter()
-                                .map(|v| match v {
-                                    Value::Int(i) => QdrantCondition::MatchKeywords {
-                                        key: field.to_string(),
-                                        values: vec![FilterValue::Int(*i)],
-                                    },
-                                    _ => unreachable!(),
-                                })
-                                .collect(),
-                        ),
-                        must: None,
-                        should: None,
-                    })))
-                } else {
-                    Ok(combine_conditions(
-                        values
-                            .iter()
-                            .map(|v| match v {
-                                Value::Int(i) => QdrantCondition::MatchKeywords {
-                                    key: field.to_string(),
-                                    values: vec![FilterValue::Int(*i)],
-                                },
-                                _ => unreachable!(),
+                    let conds: Vec<serde_json::Value> = int_values
+                        .iter()
+                        .map(|i| {
+                            serde_json::json!({
+                                "key": field,
+                                "match": { "value": i }
                             })
-                            .collect(),
-                    ))
+                        })
+                        .collect();
+                    Ok(serde_json::json!({
+                        "must_not": conds
+                    }))
+                } else {
+                    let conds: Vec<serde_json::Value> = int_values
+                        .iter()
+                        .map(|i| {
+                            serde_json::json!({
+                                "key": field,
+                                "match": { "value": i }
+                            })
+                        })
+                        .collect();
+                    Ok(combine_conditions(conds))
                 }
             }
             LiteralKind::Float => {
-                let conds: Vec<QdrantCondition> = values
+                let conds: Vec<serde_json::Value> = values
                     .iter()
                     .map(|v| match v {
                         Value::Float(f) => exact_float_condition(field.to_string(), *f),
@@ -429,32 +404,28 @@ impl FilterConverter {
                     })
                     .collect();
                 if negate {
-                    Ok(QdrantCondition::Boolean(Box::new(QdrantFilter {
-                        must_not: Some(conds),
-                        must: None,
-                        should: None,
-                    })))
+                    Ok(serde_json::json!({
+                        "must_not": conds
+                    }))
                 } else {
                     Ok(combine_conditions(conds))
                 }
             }
             LiteralKind::Bool => {
-                let conds: Vec<QdrantCondition> = values
+                let conds: Vec<serde_json::Value> = values
                     .iter()
                     .map(|v| match v {
-                        Value::Bool(b) => QdrantCondition::Match {
-                            key: field.to_string(),
-                            value: FilterValue::Bool(*b),
-                        },
+                        Value::Bool(b) => serde_json::json!({
+                            "key": field,
+                            "match": { "value": b }
+                        }),
                         _ => unreachable!(),
                     })
                     .collect();
                 if negate {
-                    Ok(QdrantCondition::Boolean(Box::new(QdrantFilter {
-                        must_not: Some(conds),
-                        must: None,
-                        should: None,
-                    })))
+                    Ok(serde_json::json!({
+                        "must_not": conds
+                    }))
                 } else {
                     Ok(combine_conditions(conds))
                 }
@@ -462,37 +433,37 @@ impl FilterConverter {
         }
     }
 
-    fn wrap_as_filter(&self, condition: QdrantCondition) -> Option<QdrantFilter> {
-        match &condition {
-            QdrantCondition::Boolean(filter) => Some(filter.as_ref().clone()),
-            _ => Some(QdrantFilter {
-                must: Some(vec![condition]),
-                must_not: None,
-                should: None,
-            }),
+    fn wrap_as_filter(&self, condition: serde_json::Value) -> serde_json::Value {
+        if condition.get("must").is_some()
+            || condition.get("must_not").is_some()
+            || condition.get("should").is_some()
+        {
+            condition
+        } else {
+            serde_json::json!({
+                "must": [condition]
+            })
         }
     }
 }
 
-fn exact_float_condition(key: String, value: f64) -> QdrantCondition {
-    QdrantCondition::Range {
-        key,
-        gt: None,
-        gte: Some(value),
-        lt: None,
-        lte: Some(value),
-    }
+fn exact_float_condition(key: String, value: f64) -> serde_json::Value {
+    serde_json::json!({
+        "key": key,
+        "range": {
+            "gte": value,
+            "lte": value
+        }
+    })
 }
 
-fn combine_conditions(conds: Vec<QdrantCondition>) -> QdrantCondition {
+fn combine_conditions(conds: Vec<serde_json::Value>) -> serde_json::Value {
     if conds.len() == 1 {
         return conds.into_iter().next().unwrap();
     }
-    QdrantCondition::Boolean(Box::new(QdrantFilter {
-        must: None,
-        must_not: None,
-        should: Some(conds),
-    }))
+    serde_json::json!({
+        "should": conds
+    })
 }
 
 #[derive(PartialEq)]

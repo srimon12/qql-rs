@@ -137,20 +137,16 @@ fn parse_formula_infix_expression<'a>(
         }),
         TokenKind::Slash => {
             let mut by_zero_default = None;
-            if p.peek()?.kind == TokenKind::Lbracket
-                && p.index + 1 < p.tokens.len()
-            {
+            if p.peek()?.kind == TokenKind::Lbracket && p.index + 1 < p.tokens.len() {
                 let next_tok = &p.tokens[p.index + 1];
-                if next_tok.kind == TokenKind::Identifier
-                    && ascii_equal(next_tok.text, "DEFAULT")
-                {
-                        p.advance()?;
-                        p.advance()?;
-                        p.expect(TokenKind::Equals)?;
-                        let val = p.parse_numeric_literal()?;
-                        by_zero_default = Some(val);
-                        p.expect(TokenKind::Rbracket)?;
-                    }
+                if next_tok.kind == TokenKind::Identifier && ascii_equal(next_tok.text, "DEFAULT") {
+                    p.advance()?;
+                    p.advance()?;
+                    p.expect(TokenKind::Equals)?;
+                    let val = p.parse_numeric_literal()?;
+                    by_zero_default = Some(val);
+                    p.expect(TokenKind::Rbracket)?;
+                }
             }
             Ok(FormulaExpr::Div {
                 left: Box::new(left),
