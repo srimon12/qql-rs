@@ -13,6 +13,7 @@ use crate::pipeline::{
     RawVectorNode, RecommendNode, RelevanceFeedbackNode, RerankNode, SampleNode, SparseEmbedNode,
     WithPayload,
 };
+use crate::sparse;
 use qql_core::ast::{self, Value};
 use qql_core::error::QqlError;
 
@@ -633,6 +634,10 @@ impl Executor {
         &self,
         stmt: ast::InsertStmt<'_>,
     ) -> Result<ExecResponse, QqlError> {
+        if stmt.values_list.is_empty() {
+            return Err(QqlError::runtime("INSERT VALUES list is empty"));
+        }
+
         let _created = self
             .ensure_collection_for_insert(
                 stmt.collection,
@@ -643,75 +648,52 @@ impl Executor {
             )
             .await?;
 
-        // 1. Gather all text fields that need embedding
-        let mut texts_to_embed = Vec::new();
-        let mut embedding_indices = Vec::new(); // maps local text index -> point index
+        let has_embed = !stmt.embed_directives.is_empty();
+        let has_provided_vectors = has_vector_keys(&stmt.values_list);
 
-        for (i, row) in stmt.values_list.iter().enumerate() {
-            let text_field = row
+        // Detect hybrid mode from EMBED directives or collection topology
+        let has_sparse = stmt.hybrid
+            || stmt.sparse_model.is_some()
+            || stmt.embed_directives.iter().any(|d| d.sparse_model.is_some());
+
+        // 1. Extract point IDs and payloads from all rows
+        let mut point_ids = Vec::with_capacity(stmt.values_list.len());
+        let mut payloads = Vec::with_capacity(stmt.values_list.len());
+
+        for (idx, row) in stmt.values_list.iter().enumerate() {
+            let id = extract_point_id(row)?;
+            point_ids.push(id);
+
+            let mut payload = row
                 .iter()
-                .find(|(k, _)| *k == "text" || *k == "description" || *k == "content")
-                .map(|(_, v)| match v {
-                    Value::Str(s) => s.to_string(),
-                    _ => String::new(),
-                })
-                .unwrap_or_default();
-
-            if !text_field.is_empty() && self.uses_local_embeddings() {
-                texts_to_embed.push(text_field);
-                embedding_indices.push(i);
-            }
-        }
-
-        // 2. Perform batch embedding if needed
-        let mut embedded_vectors = Vec::new();
-        if !texts_to_embed.is_empty() {
-            let _dense_dim = self.resolve_dense_vector_size(stmt.model).await?;
-            if let Some(ref embedder) = self.embedder {
-                embedded_vectors = embedder
-                    .embed_dense_batch(&texts_to_embed, &self.resolve_dense_model(stmt.model))
-                    .await?;
-            }
-        }
-
-        // 3. Build points structures
-        let mut points = Vec::with_capacity(stmt.values_list.len());
-        for row in &stmt.values_list {
-            let payload: HashMap<String, serde_json::Value> = row
-                .iter()
+                .filter(|(k, _)| *k != "id" && !is_vector_key(k))
                 .map(|(k, v)| (k.to_string(), value_to_json(v)))
-                .collect();
+                .collect::<HashMap<_, _>>();
+            // Strip vector keys from payload
+            payload.retain(|k, _| !is_vector_key(k));
+            payloads.push(payload);
+        }
 
-            let mut point = PointStruct {
-                id: PointId::Num(0),
-                vector: None,
+        // 2. Build vectors batch
+        let vectors_batch = if has_embed {
+            self.build_embed_vectors_batch(&stmt.values_list, &stmt.embed_directives).await?
+        } else if has_provided_vectors {
+            extract_provided_vectors(&stmt.values_list)?
+        } else {
+            self.build_auto_embed_vectors_batch(&stmt.values_list, stmt.model, has_sparse).await?
+        };
+
+        // 3. Build and upsert points
+        let points = point_ids
+            .into_iter()
+            .zip(payloads.into_iter())
+            .zip(vectors_batch.into_iter())
+            .map(|((id, payload), vectors)| PointStruct {
+                id,
+                vector: vectors,
                 payload: Some(payload),
-            };
-
-            // Extract ID from payload if present
-            let id_val = row.iter().find(|(k, _)| *k == "id");
-            if let Some((_, Value::Int(id))) = id_val {
-                if *id < 0 {
-                    return Err(QqlError::runtime("negative ID not supported"));
-                }
-                point.id = PointId::Num(*id as u64);
-            } else if let Some((_, Value::Str(id))) = id_val {
-                point.id = PointId::Uuid(id.to_string());
-            }
-
-            points.push(point);
-        }
-
-        // Assign batched embeddings to the corresponding points
-        let dense_vector_name = stmt.dense_vector.unwrap_or(super::DENSE_VECTOR_NAME);
-        for (local_idx, &point_idx) in embedding_indices.iter().enumerate() {
-            if local_idx < embedded_vectors.len() {
-                let vec = embedded_vectors[local_idx].clone();
-                points[point_idx].vector = Some(serde_json::json!({
-                    dense_vector_name: vec
-                }));
-            }
-        }
+            })
+            .collect();
 
         let req = UpsertPointsReq {
             collection_name: stmt.collection.to_string(),
@@ -727,6 +709,177 @@ impl Executor {
             data: Some(serde_json::json!({"count": stmt.values_list.len()})),
         })
     }
+
+    // ── EMBED: Build vectors from EMBED directives ───────────────────
+
+    async fn build_embed_vectors_batch<'a>(
+        &self,
+        values_list: &[Vec<(&'a str, Value<'a>)>],
+        directives: &[ast::EmbedDirective<'a>],
+    ) -> Result<Vec<Option<serde_json::Value>>, QqlError> {
+        // Validate no duplicate target vectors
+        let mut seen = std::collections::HashSet::new();
+        for dir in directives {
+            if !seen.insert(dir.target_vector) {
+                return Err(QqlError::runtime(format!(
+                    "EMBED duplicate target vector '{}'",
+                    dir.target_vector
+                )));
+            }
+        }
+
+        let mut batch = Vec::with_capacity(values_list.len());
+        for (row_idx, row) in values_list.iter().enumerate() {
+            let mut vectors = serde_json::Map::new();
+            for dir in directives {
+                let source_val = row
+                    .iter()
+                    .find(|(k, _)| *k == dir.source_field)
+                    .map(|(_, v)| v)
+                    .ok_or_else(|| {
+                        QqlError::runtime(format!(
+                            "EMBED row {}: source field '{}' not found in VALUES",
+                            row_idx, dir.source_field
+                        ))
+                    })?;
+
+                let source_text = match source_val {
+                    Value::Str(s) => s.to_string(),
+                    _ => {
+                        return Err(QqlError::runtime(format!(
+                            "EMBED row {}: source field '{}' must be a string",
+                            row_idx, dir.source_field
+                        )));
+                    }
+                };
+
+                let is_sparse = dir.sparse_model.is_some();
+                let model = if is_sparse {
+                    dir.sparse_model
+                        .filter(|m| !m.is_empty())
+                        .map(|m| m.to_string())
+                        .unwrap_or_else(|| self.resolve_sparse_model(None))
+                } else {
+                    dir.model
+                        .filter(|m| !m.is_empty())
+                        .map(|m| m.to_string())
+                        .unwrap_or_else(|| self.resolve_dense_model(None))
+                };
+
+                let vector = if is_sparse {
+                    let sv = if self.uses_local_embeddings() {
+                        if let Some(ref embedder) = self.embedder {
+                            embedder.embed_sparse(&source_text).await?
+                        } else {
+                            sparse::build_query_default(&source_text)
+                        }
+                    } else {
+                        sparse::build_query_default(&source_text)
+                    };
+                    serde_json::json!({
+                        "indices": sv.indices,
+                        "values": sv.values,
+                    })
+                } else if let Some(ref embedder) = self.embedder {
+                    let dv = embedder.embed_dense(&source_text, &model).await?;
+                    serde_json::Value::Array(dv.into_iter().map(|f| serde_json::json!(f)).collect())
+                } else {
+                    return Err(QqlError::runtime("no embedder configured for EMBED"));
+                };
+
+                vectors.insert(dir.target_vector.to_string(), vector);
+            }
+            batch.push(Some(serde_json::Value::Object(vectors)));
+        }
+        Ok(batch)
+    }
+
+    // ── Auto-embed: Build dense + optional sparse vectors from text fields ──
+
+    async fn build_auto_embed_vectors_batch<'a>(
+        &self,
+        values_list: &[Vec<(&'a str, Value<'a>)>],
+        model: Option<&str>,
+        has_sparse: bool,
+    ) -> Result<Vec<Option<serde_json::Value>>, QqlError> {
+        // Collect texts that need dense embedding
+        let mut texts: Vec<String> = Vec::new();
+        let mut text_indices: Vec<usize> = Vec::new(); // maps text index → row index
+
+        for (i, row) in values_list.iter().enumerate() {
+            let text = row
+                .iter()
+                .find(|(k, _)| *k == "text" || *k == "description" || *k == "content")
+                .and_then(|(_, v)| match v {
+                    Value::Str(s) => Some(s.to_string()),
+                    _ => None,
+                });
+
+            match text {
+                Some(t) if !t.is_empty() && self.uses_local_embeddings() => {
+                    text_indices.push(i);
+                    texts.push(t);
+                }
+                _ => {}
+            }
+        }
+
+        let dense_model = self.resolve_dense_model(model);
+
+        // Batch embed dense vectors
+        let dense_vectors = if !texts.is_empty() {
+            if let Some(ref embedder) = self.embedder {
+                Some(embedder.embed_dense_batch(&texts, &dense_model).await?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Build sparse vectors if hybrid
+        let sparse_vectors: Option<Vec<crate::sparse::SparseVector>> = if has_sparse && !texts.is_empty() {
+            let mut sv = Vec::with_capacity(texts.len());
+            for text in &texts {
+                sv.push(crate::sparse::build_query_default(text));
+            }
+            Some(sv)
+        } else {
+            None
+        };
+
+        let dense_name = super::DENSE_VECTOR_NAME;
+
+        let mut batch = Vec::with_capacity(values_list.len());
+        for i in 0..values_list.len() {
+            // Find the text index for this row
+            let pos = text_indices.iter().position(|&idx| idx == i);
+            let vec_val = match (pos, &dense_vectors, &sparse_vectors) {
+                (Some(p), Some(dv), Some(sv)) if p < dv.len() && p < sv.len() => {
+                    let mut map = serde_json::Map::new();
+                    map.insert(dense_name.to_string(), serde_json::Value::Array(
+                        dv[p].iter().map(|f| serde_json::json!(f)).collect()
+                    ));
+                    map.insert(super::SPARSE_VECTOR_NAME.to_string(), serde_json::json!({
+                        "indices": sv[p].indices,
+                        "values": sv[p].values,
+                    }));
+                    Some(serde_json::Value::Object(map))
+                }
+                (Some(p), Some(dv), None) if p < dv.len() => {
+                    Some(serde_json::json!({
+                        dense_name: dv[p]
+                    }))
+                }
+                _ => None,
+            };
+            batch.push(vec_val);
+        }
+
+        Ok(batch)
+    }
+
+    // ── Other DML operations ─────────────────────────────────────────
 
     pub(crate) async fn do_select(
         &self,
@@ -911,4 +1064,100 @@ impl Executor {
             data: None,
         })
     }
+}
+
+// ── Free helpers ────────────────────────────────────────────────────
+
+fn extract_point_id<'a>(row: &[(&'a str, Value<'a>)]) -> Result<PointId, QqlError> {
+    let id_val = row.iter().find(|(k, _)| *k == "id");
+    match id_val {
+        Some((_, Value::Int(i))) => {
+            if *i < 0 {
+                Err(QqlError::runtime("negative ID not supported"))
+            } else {
+                Ok(PointId::Num(*i as u64))
+            }
+        }
+        Some((_, Value::Str(s))) => {
+            if let Ok(num) = s.parse::<u64>() {
+                Ok(PointId::Num(num))
+            } else {
+                Ok(PointId::Uuid(s.to_string()))
+            }
+        }
+        Some((_, Value::Float(f))) => {
+            let v = *f;
+            if v < 0.0 || v > (1u64 << 53) as f64 || v != (v as u64) as f64 {
+                Err(QqlError::runtime(
+                    "unsupported point ID: non-integer or oversized float",
+                ))
+            } else {
+                Ok(PointId::Num(v as u64))
+            }
+        }
+        _ => Err(QqlError::runtime(
+            "INSERT requires an 'id' field in VALUES (unsigned integer or UUID string)",
+        )),
+    }
+}
+
+fn is_vector_key(key: &str) -> bool {
+    key == "vector" || key == "_v" || key.starts_with("_v_")
+}
+
+fn has_vector_keys(
+    values_list: &[Vec<(&str, Value<'_>)>],
+) -> bool {
+    for row in values_list {
+        if row.iter().any(|(k, _)| is_vector_key(k.as_ref())) {
+            return true;
+        }
+    }
+    false
+}
+
+fn extract_provided_vectors(
+    values_list: &[Vec<(&str, Value<'_>)>],
+) -> Result<Vec<Option<serde_json::Value>>, QqlError> {
+    let mut batch = Vec::with_capacity(values_list.len());
+    for row in values_list {
+        let mut vectors = serde_json::Map::new();
+        for (k, v) in row {
+            let key = *k;
+            if !is_vector_key(key) {
+                continue;
+            }
+            let vec_name = if key == "vector" || key == "_v" {
+                ""  // unnamed single vector
+            } else {
+                key.strip_prefix("_v_").unwrap_or(key)
+            };
+
+            match v {
+                Value::Dict(items) => {
+                    // Named vectors: {"dense": [...], "sparse": {...}}
+                    for (nk, nv) in items {
+                        vectors.insert(nk.to_string(), value_to_json(nv));
+                    }
+                }
+                Value::List(items) => {
+                    let json_val = value_to_json(v);
+                    if vec_name.is_empty() {
+                        vectors.insert(super::DENSE_VECTOR_NAME.to_string(), json_val);
+                    } else {
+                        vectors.insert(vec_name.to_string(), json_val);
+                    }
+                }
+                _ => {
+                    vectors.insert(vec_name.to_string(), value_to_json(v));
+                }
+            }
+        }
+        batch.push(if vectors.is_empty() {
+            None
+        } else {
+            Some(serde_json::Value::Object(vectors))
+        });
+    }
+    Ok(batch)
 }
