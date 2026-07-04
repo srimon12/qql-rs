@@ -39,7 +39,7 @@ stmt = parse("QUERY 'chest pain' FROM medical LIMIT 5 WHERE department = 'cardio
 
 | Crate | Description | Dependencies |
 |-------|-------------|-------------|
-| `qql-core` | Lexer, parser, AST, errors. Pure parsing, `no_std` + alloc. | `phf` (compile-time keyword map) |
+| `qql-core` | Lexer, parser, AST, errors. Pure parsing. | `phf` (compile-time keyword map) |
 | `qql` | Runtime: pipeline, filter conversion, BM25 sparse, HTTP embedding, config. Optional. | `qql-core`, `tokio`, `reqwest` |
 | `qql-cli` | CLI binary (`qql`). Exec, explain, REPL, dump, convert. | `qql-core`, `qql`, `clap` |
 | `pyqql` | Python bindings via PyO3 (`pip install pyqql`) | `qql-core` |
@@ -95,7 +95,7 @@ console.log(ast);
 
 ```toml
 [dependencies]
-qql-core = { git = "..." }  # parser only, no_std compatible
+qql-core = { git = "..." }  # parser only
 # or
 qql = { git = "..." }       # full runtime + CLI
 ```

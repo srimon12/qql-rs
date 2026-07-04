@@ -259,7 +259,7 @@ impl fmt::Display for TokenKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Token<'a> {
     pub kind: TokenKind,
     pub text: &'a str,

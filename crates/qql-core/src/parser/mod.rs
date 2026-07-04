@@ -27,7 +27,8 @@ use crate::lexer::Lexer;
 use crate::token::{Token, TokenKind};
 
 pub struct Parser<'a> {
-    tokens: crate::lexer::TokenIter<'a>,
+    tokens: alloc::vec::Vec<Token<'a>>,
+    index: usize,
 }
 
 pub struct EmbeddingOptions<'a> {
@@ -104,13 +105,17 @@ fn is_contextual_identifier(kind: TokenKind) -> bool {
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(tokens: crate::lexer::TokenIter<'a>) -> Self {
-        Self { tokens }
+    pub fn new(tokens: alloc::vec::Vec<Token<'a>>) -> Self {
+        Self { tokens, index: 0 }
     }
 
     pub fn parse(input: &'a str) -> Result<Stmt<'a>, QqlError> {
         let lexer = Lexer::new(input);
-        let mut parser = Parser::new(lexer.peekable());
+        let mut tokens = alloc::vec::Vec::new();
+        for token_res in lexer {
+            tokens.push(token_res?);
+        }
+        let mut parser = Parser::new(tokens);
         parser.parse_stmt()
     }
 
@@ -138,15 +143,19 @@ impl<'a> Parser<'a> {
     // ── Token stream helpers ────────────────────────────────────
 
     pub fn peek(&mut self) -> Result<Token<'a>, QqlError> {
-        self.tokens.peek().cloned().unwrap_or(Ok(Token::eof()))
+        if self.index < self.tokens.len() {
+            Ok(self.tokens[self.index])
+        } else {
+            Ok(Token::eof())
+        }
     }
 
-    pub fn save_pos(&self) -> crate::lexer::TokenIter<'a> {
-        self.tokens.clone()
+    pub fn save_pos(&self) -> usize {
+        self.index
     }
 
-    pub fn restore_pos(&mut self, saved: crate::lexer::TokenIter<'a>) {
-        self.tokens = saved;
+    pub fn restore_pos(&mut self, saved: usize) {
+        self.index = saved;
     }
 
     pub fn peek_kind(&mut self) -> Result<TokenKind, QqlError> {
@@ -154,7 +163,11 @@ impl<'a> Parser<'a> {
     }
 
     pub fn advance(&mut self) -> Result<Token<'a>, QqlError> {
-        self.tokens.next().unwrap_or(Ok(Token::eof()))
+        let tok = self.peek()?;
+        if self.index < self.tokens.len() {
+            self.index += 1;
+        }
+        Ok(tok)
     }
 
     pub fn expect(&mut self, kind: TokenKind) -> Result<Token<'a>, QqlError> {

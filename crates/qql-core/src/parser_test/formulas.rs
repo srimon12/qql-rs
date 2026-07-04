@@ -232,11 +232,14 @@ fn test_formula_div_with_default() {
     let stmt =
         assert_parse_ok("QUERY 'test' FROM my_col BOOST ($score / popularity [default=1.5])");
     match stmt {
-        Stmt::Query(q) => {
-            // Rust formula parser does not handle [default=...] syntax inside BOOST
-            // so the formula is silently set to None
-            assert!(q.formula.is_none());
-        }
+        Stmt::Query(q) => match q.formula.as_ref().unwrap().as_ref() {
+            FormulaExpr::Div {
+                by_zero_default, ..
+            } => {
+                assert_eq!(*by_zero_default, Some(1.5));
+            }
+            _ => panic!("expected Div"),
+        },
         _ => panic!("expected Query"),
     }
 }

@@ -138,8 +138,8 @@ fn parse_formula_infix_expression<'a>(
         TokenKind::Slash => {
             let mut by_zero_default = None;
             if p.peek()?.kind == TokenKind::Lbracket {
-                let mut cloned = p.tokens.clone();
-                if let Some(Ok(next_tok)) = cloned.peek().cloned() {
+                if p.index + 1 < p.tokens.len() {
+                    let next_tok = &p.tokens[p.index + 1];
                     if next_tok.kind == TokenKind::Identifier
                         && ascii_equal(next_tok.text, "DEFAULT")
                     {
@@ -485,22 +485,20 @@ fn parse_formula_call_arguments_and_kwargs<'a>(
 
     loop {
         let is_kwarg = {
-            let mut clone = p.tokens.clone();
-            let curr = clone.next();
-            match curr {
-                Some(Ok(t)) => {
-                    if t.kind == TokenKind::Rparen {
-                        break;
-                    }
-                    match clone.peek() {
-                        Some(Ok(next)) => {
-                            next.kind == TokenKind::Equals
-                                && (t.kind == TokenKind::Identifier || t.kind == TokenKind::String)
-                        }
-                        _ => false,
-                    }
+            if p.index < p.tokens.len() {
+                let t = &p.tokens[p.index];
+                if t.kind == TokenKind::Rparen {
+                    break;
                 }
-                _ => false,
+                if p.index + 1 < p.tokens.len() {
+                    let next = &p.tokens[p.index + 1];
+                    next.kind == TokenKind::Equals
+                        && (t.kind == TokenKind::Identifier || t.kind == TokenKind::String)
+                } else {
+                    false
+                }
+            } else {
+                false
             }
         };
 
