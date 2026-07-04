@@ -1059,28 +1059,8 @@ impl Executor {
                     );
                 }
                 if let Some(ref quant) = v.quantization {
-                    let qtype_str = match quant.qtype {
-                        ast::QuantizationType::Scalar => "scalar",
-                        ast::QuantizationType::Binary => "binary",
-                        ast::QuantizationType::Product => "product",
-                        ast::QuantizationType::Turbo => "turbo",
-                    };
-                    let mut quant_map = serde_json::Map::new();
-                    quant_map.insert("type".to_string(), serde_json::json!(qtype_str));
-                    quant_map.insert(
-                        "always_ram".to_string(),
-                        serde_json::json!(quant.always_ram),
-                    );
-                    if let Some(quantile) = quant.quantile {
-                        quant_map.insert("quantile".to_string(), serde_json::json!(quantile));
-                    }
-                    if let Some(bits) = quant.turbo_bits {
-                        quant_map.insert("turbo_bits".to_string(), serde_json::json!(bits));
-                    }
-                    vp_obj.insert(
-                        "quantization_config".to_string(),
-                        serde_json::Value::Object(quant_map),
-                    );
+                    let q_val = build_quantization_config(quant)?;
+                    vp_obj.insert("quantization_config".to_string(), q_val);
                 }
                 params_map.insert(v.name.to_string(), vp);
             }
@@ -1193,25 +1173,8 @@ impl Executor {
                 create_req.params = Some(serde_json::Value::Object(params_map));
             }
             if let Some(ref quant) = config.quantization {
-                let qtype_str = match quant.qtype {
-                    ast::QuantizationType::Scalar => "scalar",
-                    ast::QuantizationType::Binary => "binary",
-                    ast::QuantizationType::Product => "product",
-                    ast::QuantizationType::Turbo => "turbo",
-                };
-                let mut quant_map = serde_json::Map::new();
-                quant_map.insert("type".to_string(), serde_json::json!(qtype_str));
-                quant_map.insert(
-                    "always_ram".to_string(),
-                    serde_json::json!(quant.always_ram),
-                );
-                if let Some(quantile) = quant.quantile {
-                    quant_map.insert("quantile".to_string(), serde_json::json!(quantile));
-                }
-                if let Some(bits) = quant.turbo_bits {
-                    quant_map.insert("turbo_bits".to_string(), serde_json::json!(bits));
-                }
-                create_req.quantization_config = Some(serde_json::Value::Object(quant_map));
+                let q_val = build_quantization_config(quant)?;
+                create_req.quantization_config = Some(q_val);
             }
             if let Some(ref vectors) = config.vectors {
                 if let Some(on_disk) = vectors.on_disk {
@@ -1387,28 +1350,8 @@ impl Executor {
                         serde_json::json!({ "disabled": true }),
                     );
                 } else if let Some(ref quant) = quant_update.config {
-                    let qtype_str = match quant.qtype {
-                        ast::QuantizationType::Scalar => "scalar",
-                        ast::QuantizationType::Binary => "binary",
-                        ast::QuantizationType::Product => "product",
-                        ast::QuantizationType::Turbo => "turbo",
-                    };
-                    let mut quant_map = serde_json::Map::new();
-                    quant_map.insert("type".to_string(), serde_json::json!(qtype_str));
-                    quant_map.insert(
-                        "always_ram".to_string(),
-                        serde_json::json!(quant.always_ram),
-                    );
-                    if let Some(quantile) = quant.quantile {
-                        quant_map.insert("quantile".to_string(), serde_json::json!(quantile));
-                    }
-                    if let Some(bits) = quant.turbo_bits {
-                        quant_map.insert("turbo_bits".to_string(), serde_json::json!(bits));
-                    }
-                    req_map.insert(
-                        "quantization_config".to_string(),
-                        serde_json::Value::Object(quant_map),
-                    );
+                    let q_val = build_quantization_config(quant)?;
+                    req_map.insert("quantization_config".to_string(), q_val);
                 }
             }
             if let Some(ref vectors) = config.vectors {
@@ -1823,4 +1766,53 @@ fn value_to_json(val: &Value) -> serde_json::Value {
         }
         Value::List(items) => serde_json::Value::Array(items.iter().map(value_to_json).collect()),
     }
+}
+
+fn build_quantization_config(
+    quant: &ast::QuantizationConfig,
+) -> Result<serde_json::Value, QqlError> {
+    let mut config_map = serde_json::Map::new();
+    config_map.insert(
+        "always_ram".to_string(),
+        serde_json::json!(quant.always_ram),
+    );
+
+    let key = match quant.qtype {
+        ast::QuantizationType::Scalar => {
+            config_map.insert("type".to_string(), serde_json::json!("int8"));
+            if let Some(quantile) = quant.quantile {
+                config_map.insert("quantile".to_string(), serde_json::json!(quantile));
+            }
+            "scalar"
+        }
+        ast::QuantizationType::Binary => "binary",
+        ast::QuantizationType::Product => {
+            config_map.insert("compression".to_string(), serde_json::json!("x4"));
+            "product"
+        }
+        ast::QuantizationType::Turbo => {
+            if let Some(bits) = quant.turbo_bits {
+                let bit_str = if (bits - 1.0).abs() < f64::EPSILON {
+                    "bits1"
+                } else if (bits - 1.5).abs() < f64::EPSILON {
+                    "bits1_5"
+                } else if (bits - 2.0).abs() < f64::EPSILON {
+                    "bits2"
+                } else if (bits - 4.0).abs() < f64::EPSILON {
+                    "bits4"
+                } else {
+                    return Err(QqlError::runtime(format!(
+                        "unsupported TURBO bit depth {}; expected one of 1, 1.5, 2, or 4",
+                        bits
+                    )));
+                };
+                config_map.insert("bits".to_string(), serde_json::json!(bit_str));
+            }
+            "turbo"
+        }
+    };
+
+    let mut wrapper = serde_json::Map::new();
+    wrapper.insert(key.to_string(), serde_json::Value::Object(config_map));
+    Ok(serde_json::Value::Object(wrapper))
 }
