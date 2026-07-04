@@ -1,13 +1,11 @@
 [package]
-name = "nqql"
+name = "gqql"
 version.workspace = true
 edition.workspace = true
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
 qql-core = { path = "../qql-core" }
-napi = { version = "2", features = ["napi8"] }
-napi-derive = "2"
 serde_json = "1"
