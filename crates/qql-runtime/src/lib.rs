@@ -11,4 +11,6 @@ mod pipeline_test;
 mod sparse_test;
 
 #[cfg(test)]
+mod executor_test;
+#[cfg(test)]
 mod filter_conv_test;

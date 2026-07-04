@@ -555,4 +555,111 @@ mod tests {
         assert_eq!(format!("{:?}", QueryType::Sparse), "Sparse");
         assert_eq!(format!("{:?}", QueryType::Hybrid), "Hybrid");
     }
+
+    fn dummy_query_stmt() -> QueryStmt<'static> {
+        QueryStmt {
+            collection: None,
+            mode: QueryMode::Nearest,
+            query_type: QueryType::Dense,
+            query_text: None,
+            query_id: None,
+            raw_vector: Vec::new(),
+            positive_ids: Vec::new(),
+            negative_ids: Vec::new(),
+            context_pairs: Vec::new(),
+            target: None,
+            order_by_field: None,
+            order_by_asc: None,
+            limit: 10,
+            offset: 0,
+            score_threshold: None,
+            strategy: None,
+            query_filter: None,
+            group_by: None,
+            group_size: None,
+            with_clause: None,
+            with_payload: None,
+            with_vectors: None,
+            lookup_from: None,
+            lookup_vector: None,
+            with_lookup_collection: None,
+            using_: None,
+            model: None,
+            ctes: Vec::new(),
+            prefetch_refs: Vec::new(),
+            fusion_type: None,
+            rerank: false,
+            rerank_model: None,
+            formula: None,
+            formula_defaults: Vec::new(),
+            feedback_target: None,
+            feedback_items: Vec::new(),
+            feedback_strategy: None,
+        }
+    }
+
+    #[test]
+    fn test_ast_inject_filter() {
+        let mut inner_query = dummy_query_stmt();
+        inner_query.collection = Some("docs");
+        inner_query.limit = 5;
+        inner_query.query_filter = Some(Box::new(FilterExpr::Compare {
+            field: "status",
+            op: "=",
+            value: Value::Str("published"),
+        }));
+
+        let inner_cte = CTE {
+            name: "prefetch_1",
+            stmt: Box::new(inner_query),
+        };
+
+        let mut query = dummy_query_stmt();
+        query.collection = Some("docs");
+        query.limit = 10;
+        query.ctes = vec![inner_cte];
+
+        let mut stmt = Stmt::Query(Box::new(query));
+
+        inject_filter(&mut stmt, "org_id", "=", &Value::Str("acme-corp"));
+
+        if let Stmt::Query(q) = stmt {
+            let main_filter = q.query_filter.unwrap();
+            assert_eq!(
+                *main_filter,
+                FilterExpr::Compare {
+                    field: "org_id",
+                    op: "=",
+                    value: Value::Str("acme-corp"),
+                }
+            );
+
+            let cte_stmt = &q.ctes[0].stmt;
+            let cte_filter = cte_stmt.query_filter.as_ref().unwrap();
+            match &**cte_filter {
+                FilterExpr::And { operands } => {
+                    assert_eq!(operands.len(), 2);
+                    assert_eq!(
+                        operands[0],
+                        FilterExpr::Compare {
+                            field: "status",
+                            op: "=",
+                            value: Value::Str("published"),
+                        }
+                    );
+                    assert_eq!(
+                        operands[1],
+                        FilterExpr::Compare {
+                            field: "org_id",
+                            op: "=",
+                            value: Value::Str("acme-corp"),
+                        }
+                    );
+                }
+                _ => panic!("expected And filter"),
+            }
+        } else {
+            panic!("expected Stmt::Query");
+        }
+    }
 }

@@ -1,6 +1,7 @@
 pub mod filter;
 pub mod formula;
 pub mod statement;
+pub mod transform;
 pub mod value;
 
 pub use filter::FilterExpr;
@@ -15,4 +16,5 @@ pub use statement::{
     UpdatePayloadStmt, UpdateVectorStmt, VectorDef, VectorDistance, VectorsConfig, VectorsSelector,
     CTE,
 };
+pub use transform::inject_filter;
 pub use value::Value;
