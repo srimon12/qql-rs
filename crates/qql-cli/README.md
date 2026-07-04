@@ -1,44 +1,104 @@
 # qql-cli
 
-Command Line Interface (CLI) and interactive REPL shell tool for QQL.
-
----
+Command-line interface and interactive REPL for QQL. Connects to Qdrant, executes queries, converts REST payloads, and dumps collections.
 
 ## Installation
 
-Build the CLI binary using cargo:
 ```bash
 cargo build --release -p qql-cli
+# binary at target/release/qql
 ```
 
-The resulting binary will be saved at `target/release/qql`.
+## Commands
 
----
+### exec — Run a single QQL query
 
-## Command Usage
-
-Execute QQL commands directly from your terminal or launch the interactive shell:
-
-### Run directly
 ```bash
-qql -q "SHOW COLLECTIONS"
+qql exec "SHOW COLLECTIONS"
+qql exec --json "QUERY 'machine learning' FROM docs LIMIT 5"
 ```
 
-### Launch Interactive REPL Shell
+### execute — Run multiple queries from a .qql script file
+
 ```bash
-qql
+qql execute script.qql
+qql execute --stop-on-error migrate.qql
 ```
-Inside the interactive REPL shell:
+
+### explain — Show execution plan without running
+
+```bash
+qql explain "QUERY 'search' FROM docs LIMIT 10"
+```
+
+### connect — Start interactive REPL
+
+Opens a REPl connected to Qdrant:
+
+```bash
+qql connect --url http://localhost:6334
+```
+
+Then type QQL directly:
 ```
 qql> SHOW COLLECTIONS;
-qql> QUERY 'search terms' FROM docs LIMIT 5;
+qql> QUERY 'similar to this' FROM docs LIMIT 10;
+qql> INSERT INTO docs (id, vector, payload) VALUES ...
 qql> exit
 ```
 
----
+### convert — Convert Qdrant REST JSON payloads to QQL
+
+Reads a REST JSON payload (from file or stdin) and outputs the equivalent QQL statement. Useful for translating existing SDK code or captured API calls:
+
+```bash
+# From file
+qql convert search_payload.json
+
+# From stdin
+echo '{"collection": "docs", "limit": 5, "with_payload": true}' | qql convert -
+```
+
+### dump — Export a collection to .qql script
+
+Scans all points in a collection and generates QQL INSERT statements:
+
+```bash
+qql dump docs docs_export.qql
+qql dump --batch-size 500 docs docs_export.qql
+```
+
+The output file can be replayed with `qql execute`:
+```bash
+qql execute docs_export.qql
+```
+
+### version — Print version info
+
+```bash
+qql version
+```
 
 ## Configuration
 
-The CLI reads configuration from `qql.toml` or environment variables for connection parameters:
-* `QDRANT_URL`: Qdrant gRPC/HTTP URL (default: `http://localhost:6334`)
-* `INFERENCE_MODE`: Model embeddings provider (`local` or `cloud`)
+Set via environment variables:
+
+| Variable | Default | Description |
+|---|---|---|
+| `QDRANT_URL` | `http://localhost:6334` | Qdrant gRPC/HTTP URL |
+| `INFERENCE_MODE` | `local` | Embedding mode: `local` or `cloud` |
+| `CLOUD_MODEL_OPTIONS` | — | JSON object with cloud model params |
+
+## .qql Script Format
+
+Statements are separated by semicolons. Supports all QQL statements:
+
+```qql
+CREATE COLLECTION docs WITH VECTORS size 384 distance Cosine;
+INSERT INTO docs (id, vector, payload) VALUES
+    (1, [0.1, 0.2, ...], {"text": "first document"}),
+    (2, [0.3, 0.4, ...], {"text": "second document"});
+QUERY 'search' FROM docs LIMIT 10;
+```
+
+Comments with `--` and blank lines are ignored.

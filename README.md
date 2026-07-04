@@ -52,7 +52,7 @@ const safe = injectFilter("QUERY 'x' FROM docs LIMIT 5", "tenant_id", "=", '{"st
 
 ### Go
 ```bash
-import "github.com/qdrant/qql/gqql"
+import "github.com/srimon12/qql-rs/gqql"
 ```
 ```go
 ast, _ := gqql.Parse("QUERY 'search' FROM docs LIMIT 10")
