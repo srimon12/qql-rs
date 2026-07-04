@@ -790,25 +790,30 @@ impl Executor {
                         .unwrap_or_else(|| self.resolve_dense_model(None))
                 };
 
-                let vector = if is_sparse {
-                    let sv = if self.uses_local_embeddings() {
-                        if let Some(ref embedder) = self.embedder {
+                let vector = if self.uses_local_embeddings() {
+                    if is_sparse {
+                        let sv = if let Some(ref embedder) = self.embedder {
                             embedder.embed_sparse(&source_text).await?
                         } else {
                             sparse::build_query_default(&source_text)
-                        }
+                        };
+                        serde_json::json!({
+                            "indices": sv.indices,
+                            "values": sv.values,
+                        })
                     } else {
-                        sparse::build_query_default(&source_text)
-                    };
-                    serde_json::json!({
-                        "indices": sv.indices,
-                        "values": sv.values,
-                    })
-                } else if let Some(ref embedder) = self.embedder {
-                    let dv = embedder.embed_dense(&source_text, &model).await?;
-                    serde_json::Value::Array(dv.into_iter().map(|f| serde_json::json!(f)).collect())
+                        let embedder = self.embedder.as_ref().ok_or_else(|| {
+                            QqlError::runtime("local embedding requested but no Embedder provided")
+                        })?;
+                        let dv = embedder.embed_dense(&source_text, &model).await?;
+                        serde_json::Value::Array(dv.into_iter().map(|f| serde_json::json!(f)).collect())
+                    }
                 } else {
-                    return Err(QqlError::runtime("no embedder configured for EMBED"));
+                    serde_json::json!({
+                        "text": source_text,
+                        "model": model,
+                        "options": self.cloud_model_options(),
+                    })
                 };
 
                 vectors.insert(dir.target_vector.to_string(), vector);
@@ -840,7 +845,7 @@ impl Executor {
                 });
 
             match text {
-                Some(t) if !t.is_empty() && self.uses_local_embeddings() => {
+                Some(t) if !t.is_empty() => {
                     text_indices.push(i);
                     texts.push(t);
                 }
@@ -850,28 +855,61 @@ impl Executor {
 
         let dense_model = self.resolve_dense_model(model);
 
-        // Batch embed dense vectors
-        let dense_vectors = if !texts.is_empty() {
-            if let Some(ref embedder) = self.embedder {
-                Some(embedder.embed_dense_batch(&texts, &dense_model).await?)
+        // Build dense vectors
+        let dense_vectors: Option<Vec<serde_json::Value>> = if !texts.is_empty() {
+            if self.uses_local_embeddings() {
+                if let Some(ref embedder) = self.embedder {
+                    let dv_list = embedder.embed_dense_batch(&texts, &dense_model).await?;
+                    Some(dv_list.into_iter().map(|dv| {
+                        serde_json::Value::Array(dv.into_iter().map(|f| serde_json::json!(f)).collect())
+                    }).collect())
+                } else {
+                    None
+                }
             } else {
-                None
+                let cloud_opts = self.cloud_model_options();
+                Some(texts.iter().map(|text| {
+                    serde_json::json!({
+                        "text": text,
+                        "model": dense_model,
+                        "options": cloud_opts,
+                    })
+                }).collect())
             }
         } else {
             None
         };
 
         // Build sparse vectors if hybrid
-        let sparse_vectors: Option<Vec<crate::sparse::SparseVector>> =
-            if has_sparse && !texts.is_empty() {
-                let mut sv = Vec::with_capacity(texts.len());
+        let sparse_vectors: Option<Vec<serde_json::Value>> = if has_sparse && !texts.is_empty() {
+            if self.uses_local_embeddings() {
+                let mut sv_list = Vec::with_capacity(texts.len());
                 for text in &texts {
-                    sv.push(crate::sparse::build_query_default(text));
+                    let sv = if let Some(ref embedder) = self.embedder {
+                        embedder.embed_sparse(text).await?
+                    } else {
+                        crate::sparse::build_query_default(text)
+                    };
+                    sv_list.push(serde_json::json!({
+                        "indices": sv.indices,
+                        "values": sv.values,
+                    }));
                 }
-                Some(sv)
+                Some(sv_list)
             } else {
-                None
-            };
+                let cloud_opts = self.cloud_model_options();
+                let sparse_model = self.resolve_sparse_model(None);
+                Some(texts.iter().map(|text| {
+                    serde_json::json!({
+                        "text": text,
+                        "model": sparse_model,
+                        "options": cloud_opts,
+                    })
+                }).collect())
+            }
+        } else {
+            None
+        };
 
         let dense_name = super::DENSE_VECTOR_NAME;
 
@@ -882,24 +920,15 @@ impl Executor {
             let vec_val = match (pos, &dense_vectors, &sparse_vectors) {
                 (Some(p), Some(dv), Some(sv)) if p < dv.len() && p < sv.len() => {
                     let mut map = serde_json::Map::new();
-                    map.insert(
-                        dense_name.to_string(),
-                        serde_json::Value::Array(
-                            dv[p].iter().map(|f| serde_json::json!(f)).collect(),
-                        ),
-                    );
-                    map.insert(
-                        super::SPARSE_VECTOR_NAME.to_string(),
-                        serde_json::json!({
-                            "indices": sv[p].indices,
-                            "values": sv[p].values,
-                        }),
-                    );
+                    map.insert(dense_name.to_string(), dv[p].clone());
+                    map.insert(super::SPARSE_VECTOR_NAME.to_string(), sv[p].clone());
                     Some(serde_json::Value::Object(map))
                 }
-                (Some(p), Some(dv), None) if p < dv.len() => Some(serde_json::json!({
-                    dense_name: dv[p]
-                })),
+                (Some(p), Some(dv), None) if p < dv.len() => {
+                    let mut map = serde_json::Map::new();
+                    map.insert(dense_name.to_string(), dv[p].clone());
+                    Some(serde_json::Value::Object(map))
+                }
                 _ => None,
             };
             batch.push(vec_val);
