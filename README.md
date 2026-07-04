@@ -51,14 +51,7 @@ const safe = injectFilter("QUERY 'x' FROM docs LIMIT 5", "tenant_id", "=", '{"st
 ```
 
 ### Go
-```bash
-import "github.com/srimon12/qql-rs/crates/gqql"
-```
-```go
-ast, _ := gqql.Parse("QUERY 'search' FROM docs LIMIT 10")
-safe, _ := gqql.InjectFilter("QUERY 'x' FROM docs LIMIT 5", "tenant_id", "=", `{"str": "acme"}`)
-isValid := gqql.IsValid("SELECT * FROM docs WHERE id = 1")
-```
+Use the standalone [qql-go](https://github.com/srimon12/qql-go) library — a pure Go implementation with no CGO dependency.
 
 ### Rust
 ```toml
@@ -135,7 +128,6 @@ and hope it works. QQL gives you **programmatic access to the query itself**:
 |-----|----------|-------|----------|----------|---------------|-----------|-------------|---------|
 | **pyqql** | Python | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | **nqql** | Node.js | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
-| **gqql** | Go | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | **qql-wasm** | WASM | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | **qql-core** | Rust | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | **qql** | Rust | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |

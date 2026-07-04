@@ -30,11 +30,7 @@ for f in examples/nodejs/*.mjs; do node "$f"; done
 ```
 
 ### Go
-```bash
-for d in examples/go/*/; do
-  cd "$d" && CGO_LDFLAGS="-L$(pwd)/../../../target/release -l:libgqql.a -lm" go run main.go
-done
-```
+Use the standalone [qql-go](https://github.com/srimon12/qql-go) library for Go bindings.
 
 ### Rust
 ```bash
