@@ -28,7 +28,8 @@ pub trait ExecutionNode: Send + Sync {
     async fn execute(&self, state: &mut QueryState) -> Result<(), QqlError>;
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct SearchParams {
     pub hnsw_ef: Option<u64>,
     pub exact: Option<bool>,
@@ -37,26 +38,30 @@ pub struct SearchParams {
     pub quantization: Option<QuantizationSearchParams>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct QuantizationSearchParams {
     pub ignore: Option<bool>,
     pub rescore: Option<bool>,
     pub oversampling: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FusionType {
     Rrf,
     Dbsf,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct RrfConfig {
     pub k: Option<u32>,
     pub weights: Vec<f32>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RecommendStrategyType {
     AverageVector,
     BestScore,
@@ -74,7 +79,8 @@ impl RecommendStrategyType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum QueryVariant {
     Nearest(Vec<f32>),
     Sparse(Vec<u32>, Vec<f32>),
@@ -98,63 +104,73 @@ pub enum QueryVariant {
     },
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct RecommendInput {
     pub positive: Vec<VectorInput>,
     pub negative: Vec<VectorInput>,
     pub strategy: Option<RecommendStrategyType>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct ContextInput {
     pub pairs: Vec<ContextPair>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct ContextPair {
     pub positive: Option<VectorInput>,
     pub negative: Option<VectorInput>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct DiscoverInput {
     pub target: VectorInput,
     pub context: ContextInput,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct OrderByInput {
     pub key: String,
     pub direction: OrderByDirection,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum OrderByDirection {
     Asc,
     Desc,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct RelevanceFeedbackInput {
     pub target: VectorInput,
     pub feedback: Vec<FeedbackItem>,
     pub strategy: Option<NaiveFeedbackStrategy>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct FeedbackItem {
     pub example: VectorInput,
     pub score: f32,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct NaiveFeedbackStrategy {
     pub a: f32,
     pub b: f32,
     pub c: f32,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum VectorInput {
     Id(PointId),
     Dense(Vec<f32>),
@@ -171,7 +187,8 @@ pub enum PointId {
     Uuid(String),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct PrefetchQuery {
     pub prefetch: Vec<PrefetchQuery>,
     pub query: Option<QueryVariant>,
@@ -183,31 +200,36 @@ pub struct PrefetchQuery {
     pub lookup_from: Option<LookupLocation>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct LookupLocation {
     pub collection_name: String,
     pub vector_name: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct WithPayload {
     pub enable: Option<bool>,
     pub include: Vec<String>,
     pub exclude: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct WithVectors {
     pub enable: Option<bool>,
     pub vectors: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct WithLookup {
     pub collection: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct QueryPointsRequest {
     pub collection_name: String,
     pub query: Option<QueryVariant>,
@@ -224,7 +246,8 @@ pub struct QueryPointsRequest {
     pub timeout: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct QueryPointsGroupsRequest {
     pub collection_name: String,
     pub query: Option<QueryVariant>,
