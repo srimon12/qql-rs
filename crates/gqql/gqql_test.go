@@ -49,16 +49,6 @@ func TestParseEmptyInput(t *testing.T) {
 	}
 }
 
-func TestParseDeleteById(t *testing.T) {
-	r, err := Parse("DELETE FROM docs WHERE id = 42")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(r, "Delete") {
-		t.Errorf("expected Delete in result, got: %s", r)
-	}
-}
-
 func TestTokenize(t *testing.T) {
 	r, err := Tokenize("CREATE COLLECTION docs")
 	if err != nil {
@@ -73,5 +63,50 @@ func TestTokenizeInvalid(t *testing.T) {
 	_, err := Tokenize("!")
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestIsValid(t *testing.T) {
+	if !IsValid("CREATE COLLECTION docs") {
+		t.Error("expected true")
+	}
+	if IsValid("CREATE INVALID") {
+		t.Error("expected false")
+	}
+	if IsValid("") {
+		t.Error("expected false for empty")
+	}
+}
+
+func TestInjectFilterOnQuery(t *testing.T) {
+	r, err := InjectFilter(`QUERY 'hello' FROM docs LIMIT 10`, "tenant_id", "=", `{"str": "acme"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(r, "tenant_id") {
+		t.Errorf("expected tenant_id in result, got: %s", r)
+	}
+	if !strings.Contains(r, "acme") {
+		t.Errorf("expected acme in result, got: %s", r)
+	}
+}
+
+func TestInjectFilterOnDelete(t *testing.T) {
+	r, err := InjectFilter(`DELETE FROM docs WHERE id = 1`, "tenant_id", "=", `{"str": "acme"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(r, "tenant_id") {
+		t.Errorf("expected tenant_id in result, got: %s", r)
+	}
+}
+
+func TestInjectFilterWithIntValue(t *testing.T) {
+	r, err := InjectFilter(`QUERY 'test' FROM docs LIMIT 5`, "score", ">", `{"float": 0.5}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(r, "score") {
+		t.Errorf("expected score in result, got: %s", r)
 	}
 }

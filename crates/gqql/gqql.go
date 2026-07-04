@@ -5,6 +5,8 @@ package gqql
 // #include <stdlib.h>
 // extern char* qql_parse(const char* input);
 // extern char* qql_tokenize(const char* input);
+// extern char* qql_is_valid(const char* input);
+// extern char* qql_inject_filter(const char* query, const char* field, const char* op, const char* value);
 // extern void  qql_free_string(char* s);
 import "C"
 import (
@@ -15,39 +17,54 @@ import (
 
 const errPrefix = "gqql error: "
 
-// Parse parses a QQL query string and returns the debug representation
-// of the resulting AST, or an error if the query is invalid.
+func decode(s string) (string, error) {
+	if strings.HasPrefix(s, errPrefix) {
+		return "", errors.New(strings.TrimPrefix(s, errPrefix))
+	}
+	return s, nil
+}
+
 func Parse(input string) (string, error) {
 	cInput := C.CString(input)
 	defer C.free(unsafe.Pointer(cInput))
-
-	cResult := C.qql_parse(cInput)
-	if cResult == nil {
+	r := C.qql_parse(cInput)
+	if r == nil {
 		return "", errors.New("gqql: null result")
 	}
-	defer C.qql_free_string(cResult)
-
-	result := C.GoString(cResult)
-	if strings.HasPrefix(result, errPrefix) {
-		return "", errors.New(strings.TrimPrefix(result, errPrefix))
-	}
-	return result, nil
+	defer C.qql_free_string(r)
+	return decode(C.GoString(r))
 }
 
-// Tokenize parses a QQL query string and returns a JSON array of tokens.
 func Tokenize(input string) (string, error) {
 	cInput := C.CString(input)
 	defer C.free(unsafe.Pointer(cInput))
-
-	cResult := C.qql_tokenize(cInput)
-	if cResult == nil {
+	r := C.qql_tokenize(cInput)
+	if r == nil {
 		return "", errors.New("gqql: null result")
 	}
-	defer C.qql_free_string(cResult)
+	defer C.qql_free_string(r)
+	return decode(C.GoString(r))
+}
 
-	result := C.GoString(cResult)
-	if strings.HasPrefix(result, errPrefix) {
-		return "", errors.New(strings.TrimPrefix(result, errPrefix))
+func IsValid(input string) bool {
+	cInput := C.CString(input)
+	defer C.free(unsafe.Pointer(cInput))
+	return C.GoString(C.qql_is_valid(cInput)) == "true"
+}
+
+func InjectFilter(query, field, op, value string) (string, error) {
+	cQ := C.CString(query)
+	cF := C.CString(field)
+	cO := C.CString(op)
+	cV := C.CString(value)
+	defer C.free(unsafe.Pointer(cQ))
+	defer C.free(unsafe.Pointer(cF))
+	defer C.free(unsafe.Pointer(cO))
+	defer C.free(unsafe.Pointer(cV))
+	r := C.qql_inject_filter(cQ, cF, cO, cV)
+	if r == nil {
+		return "", errors.New("gqql: null result")
 	}
-	return result, nil
+	defer C.qql_free_string(r)
+	return decode(C.GoString(r))
 }
