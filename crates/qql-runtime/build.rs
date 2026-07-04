@@ -69,7 +69,7 @@ fn main() {
             }
         }),
     );
- 
+
     // Simplify Filter to avoid typify generating broken anyOf array wrappers
     if let Some(filter_schema) = schemas.get_mut("Filter") {
         if let Some(props) = filter_schema.pointer_mut("/properties") {

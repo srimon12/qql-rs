@@ -17,11 +17,14 @@ impl FilterConverter {
         FilterConverter
     }
 
-    pub fn build_filter(&self, expr: &FilterExpr) -> Result<Option<crate::qdrant::Filter>, QqlError> {
+    pub fn build_filter(
+        &self,
+        expr: &FilterExpr,
+    ) -> Result<Option<crate::qdrant::Filter>, QqlError> {
         let condition = self.build_condition(expr)?;
         let filter_val = self.wrap_as_filter(condition);
-        let filter: crate::qdrant::Filter = serde_json::from_value(filter_val)
-            .map_err(|e| QqlError::runtime(e.to_string()))?;
+        let filter: crate::qdrant::Filter =
+            serde_json::from_value(filter_val).map_err(|e| QqlError::runtime(e.to_string()))?;
         Ok(Some(filter))
     }
 
@@ -34,23 +37,19 @@ impl FilterConverter {
             FilterExpr::IsNull { field } => Ok(serde_json::json!({
                 "is_null": { "key": field }
             })),
-            FilterExpr::IsNotNull { field } => {
-                Ok(serde_json::json!({
-                    "must_not": [
-                        { "is_null": { "key": field } }
-                    ]
-                }))
-            }
+            FilterExpr::IsNotNull { field } => Ok(serde_json::json!({
+                "must_not": [
+                    { "is_null": { "key": field } }
+                ]
+            })),
             FilterExpr::IsEmpty { field } => Ok(serde_json::json!({
                 "is_empty": { "key": field }
             })),
-            FilterExpr::IsNotEmpty { field } => {
-                Ok(serde_json::json!({
-                    "must_not": [
-                        { "is_empty": { "key": field } }
-                    ]
-                }))
-            }
+            FilterExpr::IsNotEmpty { field } => Ok(serde_json::json!({
+                "must_not": [
+                    { "is_empty": { "key": field } }
+                ]
+            })),
             FilterExpr::MatchText { field, text } => Ok(serde_json::json!({
                 "key": field,
                 "match": { "text": text }

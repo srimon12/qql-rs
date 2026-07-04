@@ -727,14 +727,21 @@ impl QueryPipeline {
         Ok(req)
     }
 
-    pub fn build_grouped_request(&self, state: &QueryState) -> Result<QueryPointsGroupsRequest, QqlError> {
+    pub fn build_grouped_request(
+        &self,
+        state: &QueryState,
+    ) -> Result<QueryPointsGroupsRequest, QqlError> {
         let flat = self.build_flat_request(state)?;
-        let with_lookup = state.with_lookup.as_ref().map(|wl| {
-            let wl_val = serde_json::json!({
-                "collection": wl.collection
-            });
-            serde_json::from_value(wl_val).map_err(|e| QqlError::runtime(e.to_string()))
-        }).transpose()?;
+        let with_lookup = state
+            .with_lookup
+            .as_ref()
+            .map(|wl| {
+                let wl_val = serde_json::json!({
+                    "collection": wl.collection
+                });
+                serde_json::from_value(wl_val).map_err(|e| QqlError::runtime(e.to_string()))
+            })
+            .transpose()?;
 
         Ok(QueryPointsGroupsRequest {
             collection_name: flat.collection_name,

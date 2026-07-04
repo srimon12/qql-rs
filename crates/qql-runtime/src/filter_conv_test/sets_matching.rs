@@ -12,16 +12,19 @@ fn test_in_strings() {
         ],
     };
     let filter = build(&expr);
-    assert_eq!(filter, serde_json::json!({
-        "must": [
-            {
-                "key": "status",
-                "match": {
-                    "any": ["active", "pending"]
+    assert_eq!(
+        filter,
+        serde_json::json!({
+            "must": [
+                {
+                    "key": "status",
+                    "match": {
+                        "any": ["active", "pending"]
+                    }
                 }
-            }
-        ]
-    }));
+            ]
+        })
+    );
 }
 
 #[test]
@@ -31,12 +34,15 @@ fn test_in_ints() {
         values: vec![Value::Int(1), Value::Int(2)],
     };
     let filter = build(&expr);
-    assert_eq!(filter, serde_json::json!({
-        "should": [
-            { "key": "count", "match": { "value": 1 } },
-            { "key": "count", "match": { "value": 2 } }
-        ]
-    }));
+    assert_eq!(
+        filter,
+        serde_json::json!({
+            "should": [
+                { "key": "count", "match": { "value": 1 } },
+                { "key": "count", "match": { "value": 2 } }
+            ]
+        })
+    );
 }
 
 #[test]
@@ -46,12 +52,15 @@ fn test_in_floats() {
         values: vec![Value::Float(1.25), Value::Float(2.5)],
     };
     let filter = build(&expr);
-    assert_eq!(filter, serde_json::json!({
-        "should": [
-            { "key": "score", "range": { "gte": 1.25, "lte": 1.25 } },
-            { "key": "score", "range": { "gte": 2.5, "lte": 2.5 } }
-        ]
-    }));
+    assert_eq!(
+        filter,
+        serde_json::json!({
+            "should": [
+                { "key": "score", "range": { "gte": 1.25, "lte": 1.25 } },
+                { "key": "score", "range": { "gte": 2.5, "lte": 2.5 } }
+            ]
+        })
+    );
 }
 
 #[test]
@@ -61,12 +70,15 @@ fn test_in_bools() {
         values: vec![Value::Bool(true), Value::Bool(false)],
     };
     let filter = build(&expr);
-    assert_eq!(filter, serde_json::json!({
-        "should": [
-            { "key": "is_active", "match": { "value": true } },
-            { "key": "is_active", "match": { "value": false } }
-        ]
-    }));
+    assert_eq!(
+        filter,
+        serde_json::json!({
+            "should": [
+                { "key": "is_active", "match": { "value": true } },
+                { "key": "is_active", "match": { "value": false } }
+            ]
+        })
+    );
 }
 
 #[test]
@@ -79,16 +91,19 @@ fn test_not_in_strings() {
         ],
     };
     let filter = build(&expr);
-    assert_eq!(filter, serde_json::json!({
-        "must": [
-            {
-                "key": "status",
-                "match": {
-                    "except": ["deleted", "archived"]
+    assert_eq!(
+        filter,
+        serde_json::json!({
+            "must": [
+                {
+                    "key": "status",
+                    "match": {
+                        "except": ["deleted", "archived"]
+                    }
                 }
-            }
-        ]
-    }));
+            ]
+        })
+    );
 }
 
 #[test]
@@ -98,12 +113,15 @@ fn test_not_in_ints() {
         values: vec![Value::Int(3), Value::Int(4)],
     };
     let filter = build(&expr);
-    assert_eq!(filter, serde_json::json!({
-        "must_not": [
-            { "key": "count", "match": { "value": 3 } },
-            { "key": "count", "match": { "value": 4 } }
-        ]
-    }));
+    assert_eq!(
+        filter,
+        serde_json::json!({
+            "must_not": [
+                { "key": "count", "match": { "value": 3 } },
+                { "key": "count", "match": { "value": 4 } }
+            ]
+        })
+    );
 }
 
 #[test]
@@ -113,12 +131,15 @@ fn test_not_in_floats() {
         values: vec![Value::Float(4.5), Value::Float(9.0)],
     };
     let filter = build(&expr);
-    assert_eq!(filter, serde_json::json!({
-        "must_not": [
-            { "key": "score", "range": { "gte": 4.5, "lte": 4.5 } },
-            { "key": "score", "range": { "gte": 9.0, "lte": 9.0 } }
-        ]
-    }));
+    assert_eq!(
+        filter,
+        serde_json::json!({
+            "must_not": [
+                { "key": "score", "range": { "gte": 4.5, "lte": 4.5 } },
+                { "key": "score", "range": { "gte": 9.0, "lte": 9.0 } }
+            ]
+        })
+    );
 }
 
 #[test]
@@ -128,12 +149,15 @@ fn test_not_in_bools() {
         values: vec![Value::Bool(true), Value::Bool(false)],
     };
     let filter = build(&expr);
-    assert_eq!(filter, serde_json::json!({
-        "must_not": [
-            { "key": "is_active", "match": { "value": true } },
-            { "key": "is_active", "match": { "value": false } }
-        ]
-    }));
+    assert_eq!(
+        filter,
+        serde_json::json!({
+            "must_not": [
+                { "key": "is_active", "match": { "value": true } },
+                { "key": "is_active", "match": { "value": false } }
+            ]
+        })
+    );
 }
 
 #[test]
@@ -156,14 +180,17 @@ fn test_match_text() {
         text: "hello world",
     };
     let filter = build(&expr);
-    assert_eq!(filter, serde_json::json!({
-        "must": [
-            {
-                "key": "content",
-                "match": { "text": "hello world" }
-            }
-        ]
-    }));
+    assert_eq!(
+        filter,
+        serde_json::json!({
+            "must": [
+                {
+                    "key": "content",
+                    "match": { "text": "hello world" }
+                }
+            ]
+        })
+    );
 }
 
 #[test]
@@ -173,14 +200,17 @@ fn test_match_any() {
         text: "hello world",
     };
     let filter = build(&expr);
-    assert_eq!(filter, serde_json::json!({
-        "must": [
-            {
-                "key": "content",
-                "match": { "any": ["hello world"] }
-            }
-        ]
-    }));
+    assert_eq!(
+        filter,
+        serde_json::json!({
+            "must": [
+                {
+                    "key": "content",
+                    "match": { "any": ["hello world"] }
+                }
+            ]
+        })
+    );
 }
 
 #[test]
@@ -190,12 +220,15 @@ fn test_match_phrase() {
         text: "hello world",
     };
     let filter = build(&expr);
-    assert_eq!(filter, serde_json::json!({
-        "must": [
-            {
-                "key": "content",
-                "match": { "phrase": "hello world" }
-            }
-        ]
-    }));
+    assert_eq!(
+        filter,
+        serde_json::json!({
+            "must": [
+                {
+                    "key": "content",
+                    "match": { "phrase": "hello world" }
+                }
+            ]
+        })
+    );
 }
