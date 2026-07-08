@@ -1,0 +1,166 @@
+use async_trait::async_trait;
+use qql_core::ast::Value;
+use qql_core::error::QqlError;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+use crate::pipeline::{PointId, QueryPointsGroupsRequest, QueryPointsRequest};
+
+pub type QdrantFilter = crate::qdrant::Filter;
+pub type PointStruct = crate::qdrant::PointStruct;
+pub type ScoredPoint = crate::qdrant::ScoredPoint;
+pub type PointGroup = crate::qdrant::PointGroup;
+pub type RetrievedPoint = crate::qdrant::Record;
+pub type CollectionInfo = crate::qdrant::CollectionInfo;
+pub type CollectionConfig = crate::qdrant::CollectionConfig;
+pub type CollectionParams = crate::qdrant::CollectionParams;
+pub type VectorsConfigType = crate::qdrant::VectorsConfig;
+pub type VectorParams = crate::qdrant::VectorParams;
+pub type SparseVectorConfig = crate::qdrant::SparseVectorParams;
+pub type PayloadSchemaInfo = crate::qdrant::PayloadIndexInfo;
+
+#[derive(Debug, Clone)]
+pub struct VectorTopology {
+    pub dense_vector: Option<String>,
+    pub sparse_vector: Option<String>,
+    pub rerank_vector: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateCollectionReq {
+    pub collection_name: String,
+    pub vectors_config: Option<serde_json::Value>,
+    pub sparse_vectors_config: Option<serde_json::Value>,
+    pub hnsw_config: Option<serde_json::Value>,
+    pub optimizers_config: Option<serde_json::Value>,
+    pub quantization_config: Option<serde_json::Value>,
+    pub params: Option<serde_json::Value>,
+}
+
+impl CreateCollectionReq {
+    pub fn new(name: String) -> Self {
+        CreateCollectionReq {
+            collection_name: name,
+            vectors_config: None,
+            sparse_vectors_config: None,
+            hnsw_config: None,
+            optimizers_config: None,
+            quantization_config: None,
+            params: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct UpsertPointsReq {
+    pub collection_name: String,
+    pub points: Vec<PointStruct>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeletePointsReq {
+    pub collection_name: String,
+    pub filter: Option<QdrantFilter>,
+    pub point_id: Option<PointId>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpdateVectorsReq {
+    pub collection_name: String,
+    pub point_id: PointId,
+    pub vector: Vec<f32>,
+    pub vector_name: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SetPayloadReq {
+    pub collection_name: String,
+    pub point_id: Option<PointId>,
+    pub filter: Option<QdrantFilter>,
+    pub payload: HashMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CreateFieldIndexReq {
+    pub collection_name: String,
+    pub field: String,
+    pub field_type: String,
+    pub options: HashMap<String, Value<'static>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ScrollPointsReq {
+    pub collection_name: String,
+    pub limit: u64,
+    pub filter: Option<QdrantFilter>,
+    pub after: Option<PointId>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CountPointsReq {
+    pub collection_name: String,
+    pub filter: Option<QdrantFilter>,
+}
+
+#[derive(Debug, Clone)]
+pub struct GetPointsReq {
+    pub collection_name: String,
+    pub point_id: Value<'static>,
+}
+
+#[async_trait]
+pub trait QdrantOps: Send + Sync {
+    async fn list_collections(&self) -> Result<Vec<String>, QqlError>;
+    async fn collection_exists(&self, name: &str) -> Result<bool, QqlError>;
+    async fn get_collection_info(&self, name: &str) -> Result<CollectionInfo, QqlError>;
+    async fn create_collection(&self, req: CreateCollectionReq) -> Result<(), QqlError>;
+    async fn update_collection(&self, req: serde_json::Value) -> Result<(), QqlError>;
+    async fn delete_collection(&self, name: &str) -> Result<(), QqlError>;
+    async fn upsert(&self, req: UpsertPointsReq) -> Result<(), QqlError>;
+    async fn query(&self, req: QueryPointsRequest) -> Result<Vec<ScoredPoint>, QqlError>;
+    async fn query_groups(
+        &self,
+        req: QueryPointsGroupsRequest,
+    ) -> Result<Vec<PointGroup>, QqlError>;
+    async fn query_batch(
+        &self,
+        req: Vec<QueryPointsRequest>,
+    ) -> Result<Vec<Vec<ScoredPoint>>, QqlError>;
+    async fn delete(&self, req: DeletePointsReq) -> Result<(), QqlError>;
+    async fn update_vectors(&self, req: UpdateVectorsReq) -> Result<(), QqlError>;
+    async fn set_payload(&self, req: SetPayloadReq) -> Result<(), QqlError>;
+    async fn create_field_index(&self, req: CreateFieldIndexReq) -> Result<(), QqlError>;
+    async fn scroll(
+        &self,
+        req: ScrollPointsReq,
+    ) -> Result<(Vec<RetrievedPoint>, Option<PointId>), QqlError>;
+    async fn count(&self, req: CountPointsReq) -> Result<u64, QqlError>;
+    async fn get(&self, req: GetPointsReq) -> Result<Vec<RetrievedPoint>, QqlError>;
+}
+
+impl From<PointId> for crate::qdrant::ExtendedPointId {
+    fn from(id: PointId) -> Self {
+        match id {
+            PointId::Num(num) => crate::qdrant::ExtendedPointId {
+                num: Some(num),
+                uuid: None,
+            },
+            PointId::Uuid(uuid) => crate::qdrant::ExtendedPointId {
+                num: None,
+                uuid: Some(uuid),
+            },
+        }
+    }
+}
+
+impl From<crate::qdrant::ExtendedPointId> for PointId {
+    fn from(id: crate::qdrant::ExtendedPointId) -> Self {
+        if let Some(num) = id.num {
+            PointId::Num(num)
+        } else if let Some(uuid) = id.uuid {
+            PointId::Uuid(uuid)
+        } else {
+            PointId::Num(0)
+        }
+    }
+}

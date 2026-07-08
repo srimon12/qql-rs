@@ -1,0 +1,16 @@
+{
+  "name": "nqql",
+  "version": "1.0.0",
+  "description": "Node.js native bindings for the QQL parser, compiled using N-API (`napi-rs`).",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@napi-rs/cli": "^3.7.2"
+  }
+}
