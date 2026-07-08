@@ -7,7 +7,8 @@ edition.workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
-qql-core = { path = "../qql-core" }
-napi = { version = "2", features = ["napi8"] }
+serde = { version = "1.0", features = ["derive"] }
+qql-core = { path = "../qql-core", features = ["serde"] }
+napi = { version = "2", features = ["napi8", "serde-json"] }
 napi-derive = "2"
 serde_json = "1"

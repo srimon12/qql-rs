@@ -61,7 +61,7 @@ pub enum Value<'a> {
     Bool(bool),
     Null,
     List(Vec<Value<'a>>),
-    Map(BTreeMap<Cow<'a, str>, Value<'a>>),
+    Dict(Vec<(Cow<'a, str>, Value<'a>)>),
 }
 ```
 
@@ -70,14 +70,17 @@ pub enum Value<'a> {
 The `inject_filter` function recursively adds a filter condition to all query nodes — main statement and nested CTE prefetches. Designed for tenant isolation and row-level security.
 
 ```rust
-use qql_core::ast::{Stmt, Value, inject_filter};
+use std::borrow::Cow;
+use qql_core::ast::{inject_filter, Value};
 use qql_core::parser::Parser;
 
 let mut stmt = Parser::parse("QUERY 'search' FROM docs LIMIT 10").unwrap();
-inject_filter(&mut stmt, "org_id", "=", &Value::Str("acme-corp"));
+inject_filter(&mut stmt, "org_id", "=", &Value::Str(Cow::Borrowed("acme-corp")));
 ```
 
-Also available for `SCROLL`, `DELETE`, and `UPDATE ... SET PAYLOAD` statements.
+Also available for `SCROLL`, `DELETE`, `UPDATE ... SET PAYLOAD`, and
+`INSERT` statements. For `INSERT`, equality injection forces the field value
+into every payload row.
 
 ## Parser API
 
@@ -89,16 +92,10 @@ use qql_core::ast::Stmt;
 let stmt = Parser::parse("SHOW COLLECTIONS")?;
 
 // Parse multiple statements (semicolon-separated)
-let stmts = Parser::parse_multi("INSERT INTO docs ...; QUERY 'text' FROM docs ...")?;
+let stmts = Parser::parse_all("INSERT INTO docs ...; QUERY 'text' FROM docs ...")?;
 
-// Parse as QueryStmt (fails if not a QUERY)
-let query = Parser::parse_query(&full_stmt)?;
-
-// Validate only (no AST returned)
-let valid = Parser::is_valid("QUERY 'test' FROM docs LIMIT 10");
-
-// Tokenize without full parsing
-let tokens = Parser::tokenize("SELECT * FROM docs WHERE id = 1")?;
+// Validate with the same strict parser used by parse()
+let valid = Parser::parse("QUERY 'test' FROM docs LIMIT 10").is_ok();
 ```
 
 ## Usage

@@ -18,7 +18,7 @@ npm install qql-wasm
 ## Usage
 
 ```javascript
-import init, { parse, parseAll, isValid, injectFilter, tokenize } from 'qql-wasm';
+import init, { parse, parseAll, isValid, injectFilter, tokenizeJson } from 'qql-wasm';
 
 async function run() {
     await init();
@@ -33,14 +33,14 @@ async function run() {
     // Validate
     const valid = isValid("SELECT * FROM docs WHERE id = 1");
 
-    // Inject filter
+    // Inject filter. Value is plain JSON; legacy tagged JSON is accepted.
     const secured = injectFilter(
         "QUERY 'search' FROM docs LIMIT 10",
         "org_id", "=", "\"acme-corp\""
     );
 
     // Tokenize
-    const tokens = tokenize("QUERY 'hello' FROM docs LIMIT 5");
+    const tokens = tokenizeJson("QUERY 'hello' FROM docs LIMIT 5");
 }
 
 run();
@@ -53,5 +53,6 @@ run();
 | `parse(input)` | `string` | Parse single statement → debug AST |
 | `parseAll(input)` | `string` | Parse multiple semicolon-separated statements |
 | `isValid(input)` | `boolean` | Check if query string is valid QQL |
-| `injectFilter(query, field, op, value)` | `string` | Inject filter into query AST |
-| `tokenize(input)` | `string` | Tokenize query string (JSON) |
+| `injectFilter(query, field, op, valueJson)` | `string` | Inject filter into query AST |
+| `tokenize(input)` | `Array<object>` | Tokenize query string |
+| `tokenizeJson(input)` | `string` | Tokenize query string as one JSON array string |

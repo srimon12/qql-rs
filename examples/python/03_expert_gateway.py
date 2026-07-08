@@ -9,9 +9,9 @@ USERS = {
 
 def enforce(user, query):
     ctx = USERS[user]
-    safe = pyqql.inject_filter(query, "tenant_id", "=", '{"str": "%s"}' % ctx["tenant"])
+    safe = pyqql.inject_filter(query, "tenant_id", "=", ctx["tenant"])
     if ctx["role"] == "viewer":
-        safe = pyqql.inject_filter(safe, "status", "!=", '{"str": "confidential"}')
+        safe = pyqql.inject_filter(safe, "status", "!=", "confidential")
     return safe
 
 requests = [

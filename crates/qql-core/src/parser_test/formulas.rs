@@ -1,7 +1,7 @@
 use alloc::vec;
 
 use crate::ast::{FilterExpr, FormulaExpr, Stmt};
-use crate::parser_test::{assert_parse_ok, float_val, str_val};
+use crate::parser_test::{assert_parse_err, assert_parse_ok, float_val, str_val};
 
 // ── FORMULA: Basic ───────────────────────────────────────────
 
@@ -69,27 +69,35 @@ fn test_formula_geo_distance() {
             "QUERY 'test' FROM my_col BOOST (gauss_decay(geo_distance(48.8, 2.3, location), target=0.0, scale=1000.0, decay=0.8))";
     let stmt = assert_parse_ok(query);
     match stmt {
-        Stmt::Query(q) => {
-            // BOOST with nested functions may not be fully handled by Rust formula parser
-            // so formula is silently None
-            assert!(q.formula.is_none());
-        }
+        Stmt::Query(q) => match q.formula.as_ref().unwrap().as_ref() {
+            FormulaExpr::Decay {
+                kind,
+                x,
+                target,
+                scale,
+                midpoint,
+            } => {
+                assert_eq!(*kind, "gauss_decay");
+                assert!(
+                    matches!(x.as_ref(), FormulaExpr::GeoDistance { field, .. } if *field == "location")
+                );
+                assert!(
+                    matches!(target.as_ref().unwrap().as_ref(), FormulaExpr::Constant { value } if *value == 0.0)
+                );
+                assert_eq!(*scale, Some(1000.0));
+                assert_eq!(*midpoint, Some(0.8));
+            }
+            _ => panic!("expected Decay"),
+        },
         _ => panic!("expected Query"),
     }
 }
 
 #[test]
 fn test_formula_decay_errors() {
-    let stmt = assert_parse_ok(
-            "QUERY 'test' FROM my_col BOOST (gauss_decay(geo_distance(48.8, 2.3, location), target=0.0, scale=popularity, midpoint=0.5))",
-        );
-    match stmt {
-        Stmt::Query(q) => {
-            // BOOST silently ignores formula parse errors; formula is None
-            assert!(q.formula.is_none());
-        }
-        _ => panic!("expected Query"),
-    }
+    assert_parse_err(
+        "QUERY 'test' FROM my_col BOOST (gauss_decay(geo_distance(48.8, 2.3, location), target=0.0, scale=popularity, midpoint=0.5))",
+    );
 }
 
 // ── FORMULA: CASE ────────────────────────────────────────────
@@ -248,14 +256,6 @@ fn test_formula_div_with_default() {
 
 #[test]
 fn test_formula_errors() {
-    let stmt = assert_parse_ok("QUERY 'test' FROM my_col BOOST ()");
-    match stmt {
-        Stmt::Query(q) => assert!(q.formula.is_none()),
-        _ => panic!("expected Query"),
-    }
-    let stmt = assert_parse_ok("QUERY 'test' FROM my_col BOOST (+ )");
-    match stmt {
-        Stmt::Query(q) => assert!(q.formula.is_none()),
-        _ => panic!("expected Query"),
-    }
+    assert_parse_err("QUERY 'test' FROM my_col BOOST ()");
+    assert_parse_err("QUERY 'test' FROM my_col BOOST (+ )");
 }

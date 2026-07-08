@@ -33,7 +33,7 @@ We enforce a strict **"Minimal Vibe"** across the codebase:
    * *Example*: The previously monolithic `executor.rs` was refactored into:
      * `executor/mod.rs` (entrypoint and statement dispatch)
      * `executor/ddl.rs` (collection and index management operations)
-     * `executor/dml.rs` (query, insert, select, scroll, delete, and payload updates)
+     * `executor/dml/` (query, insert, select, scroll, delete, config, and helpers)
      * `executor/helpers.rs` (type conversion and serialization utilities)
 2. **Error Propagation**: Avoid redundant pre-emptive roundtrips. For example, rather than verifying collection existence via `collection_exists` before executing `DELETE` or `UPDATE`, we dispatch the request directly and bubble up Qdrant's native downstream errors. This minimizes database load and network latency.
 

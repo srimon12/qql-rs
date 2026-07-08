@@ -1,4 +1,7 @@
-use crate::ast::{DeleteStmt, FilterExpr, QueryStmt, ScrollStmt, Stmt, UpdatePayloadStmt, Value};
+use crate::ast::{
+    DeleteStmt, FilterExpr, InsertStmt, QueryStmt, ScrollStmt, Stmt, UpdatePayloadStmt, Value,
+};
+use alloc::borrow::Cow;
 use alloc::boxed::Box;
 use alloc::vec;
 
@@ -102,6 +105,35 @@ pub fn inject_update_payload_filter<'a>(
     u.query_filter = merge_filters(u.query_filter.take(), new_filter);
 }
 
+/// Forces a field value into every INSERT payload row.
+///
+/// This is deliberately limited to equality-style tenant stamping. Other
+/// operators describe predicates, not payload mutations, so they are ignored
+/// for INSERT rather than inventing ambiguous row semantics.
+pub fn inject_insert_value<'a>(
+    i: &mut InsertStmt<'a>,
+    field: &'a str,
+    op: &'a str,
+    value: &Value<'a>,
+) {
+    if op != "=" {
+        return;
+    }
+
+    for row in &mut i.values_list {
+        if let Some((_, existing)) = row.iter_mut().rev().find(|(k, _)| *k == field) {
+            *existing = value.clone();
+        } else {
+            row.push((field, value.clone()));
+        }
+    }
+}
+
+/// Forces a field value into a Value::Dict payload.
+pub fn inject_dict_value<'a>(dict: &mut Value<'a>, field: &'a str, value: &Value<'a>) {
+    dict.dict_set(Cow::Borrowed(field), value.clone());
+}
+
 /// Injects a filter condition recursively into the WHERE clause of the given Stmt.
 pub fn inject_filter<'a>(stmt: &mut Stmt<'a>, field: &'a str, op: &'a str, value: &Value<'a>) {
     match stmt {
@@ -109,6 +141,7 @@ pub fn inject_filter<'a>(stmt: &mut Stmt<'a>, field: &'a str, op: &'a str, value
         Stmt::Scroll(ref mut s) => inject_scroll_filter(s, field, op, value),
         Stmt::Delete(ref mut d) => inject_delete_filter(d, field, op, value),
         Stmt::UpdatePayload(ref mut u) => inject_update_payload_filter(u, field, op, value),
+        Stmt::Insert(ref mut i) => inject_insert_value(i, field, op, value),
         _ => {}
     }
 }

@@ -7,3 +7,7 @@ edition = "2021"
 
 [dependencies]
 qql-core = { path = "../../crates/qql-core" }
+qql = { path = "../../crates/qql-runtime" }
+async-trait = "0.1"
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"

@@ -4,15 +4,15 @@ async function main() {
 
   const q = "QUERY 'machine learning transformer' FROM papers LIMIT 20";
 
-  let r = qql.inject_filter(q, 'tenant_id', '=', '{"str": "acme-corp"}');
+  let r = qql.inject_filter(q, 'tenant_id', '=', 'acme-corp');
   console.log('=== String filter ===');
   console.log(r.substring(0, 400));
 
-  r = qql.inject_filter(q, 'impact_factor', '>=', '{"float": 5.0}');
+  r = qql.inject_filter(q, 'impact_factor', '>=', 5.0);
   console.log('\n=== Numeric filter ===');
   console.log(r.substring(0, 400));
 
-  r = qql.inject_filter(q, 'is_published', '=', '{"bool": true}');
+  r = qql.inject_filter(q, 'is_published', '=', true);
   console.log('\n=== Boolean filter ===');
   console.log(r.substring(0, 400));
 }

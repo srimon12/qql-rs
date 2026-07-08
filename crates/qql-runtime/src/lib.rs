@@ -1,3 +1,4 @@
+pub mod client;
 pub mod config;
 pub mod embedder;
 pub mod executor;

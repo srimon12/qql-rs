@@ -1,5 +1,4 @@
-// Benchmark nqql parse across query types.
-const nqql = require('../target/release/nqql.node');
+const nqql = require('../crates/nqql/index.js');
 
 const QUERIES = [
   ['Simple', "QUERY 'search' FROM docs LIMIT 10"],
@@ -13,25 +12,49 @@ const QUERIES = [
   ['WithPayload', "QUERY 'search' FROM docs LIMIT 10 WITH PAYLOAD (include = ['title', 'body']) WITH VECTORS ('dense')"],
 ];
 
-function bench(name, q, iterations) {
-  // warmup
-  for (let i = 0; i < 1000; i++) nqql.parse(q);
+function bench_napi(name, q, iterations) {
+    // warmup
+    for (let i = 0; i < 100; i++) {
+        nqql.parse(q)
+    }
+    
+    let start = process.hrtime.bigint()
+    for (let i = 0; i < iterations; i++) {
+        nqql.parse(q)
+    }
+    let end = process.hrtime.bigint()
+    let elapsed = Number(end - start)
+    return {
+        ns_per_op: elapsed / iterations,
+        ops_per_sec: (iterations / elapsed) * 1e9
+    }
+}
 
-  const start = process.hrtime.bigint();
-  for (let i = 0; i < iterations; i++) nqql.parse(q);
-  const elapsed = Number(process.hrtime.bigint() - start);
-
-  const nsPerOp = elapsed / iterations;
-  const opsPerSec = (iterations / elapsed) * 1e9;
-  return { nsPerOp, opsPerSec };
+function bench_json(name, q, iterations) {
+    // warmup
+    for (let i = 0; i < 100; i++) {
+        nqql.parseFastJson(q)
+    }
+    
+    let start = process.hrtime.bigint()
+    for (let i = 0; i < iterations; i++) {
+        nqql.parseFastJson(q)
+    }
+    let end = process.hrtime.bigint()
+    let elapsed = Number(end - start)
+    return {
+        ns_per_op: elapsed / iterations,
+        ops_per_sec: (iterations / elapsed) * 1e9
+    }
 }
 
 const iterations = 100_000;
 console.log(`Node.js nqql  |  ${iterations} iterations each\n`);
-console.log(`${'Query'.padEnd(20)} ${'ns/op'.padStart(10)} ${'ops/s'.padStart(12)}`);
-console.log('-'.repeat(46));
+console.log(`${'Query'.padEnd(20)} | ${'NAPI parse()'.padStart(15)} | ${'parseFastJson()'.padStart(15)}`);
+console.log('-'.repeat(60));
 
 for (const [name, q] of QUERIES) {
-  const { nsPerOp, opsPerSec } = bench(name, q, iterations);
-  console.log(`${name.padEnd(20)} ${nsPerOp.toFixed(0).padStart(10)} ${opsPerSec.toFixed(0).padStart(12)}`);
+  const n_napi = bench_napi(name, q, iterations);
+  const n_json = bench_json(name, q, iterations);
+  console.log(`${name.padEnd(20)} | ${n_napi.ops_per_sec.toFixed(0).padStart(15)} | ${n_json.ops_per_sec.toFixed(0).padStart(15)}`);
 }

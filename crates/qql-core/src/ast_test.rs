@@ -546,6 +546,31 @@ mod tests {
     }
 
     #[test]
+    fn test_value_dict_helpers_are_ordered_and_last_write_wins() {
+        let mut value = Value::Dict(vec![
+            (
+                alloc::borrow::Cow::Borrowed("tenant_id"),
+                Value::Str(alloc::borrow::Cow::Borrowed("attacker")),
+            ),
+            (
+                alloc::borrow::Cow::Borrowed("title"),
+                Value::Str(alloc::borrow::Cow::Borrowed("hello")),
+            ),
+        ]);
+
+        value.dict_set(
+            alloc::borrow::Cow::Borrowed("tenant_id"),
+            Value::Str(alloc::borrow::Cow::Borrowed("acme")),
+        );
+
+        assert_eq!(
+            value.dict_get("tenant_id"),
+            Some(&Value::Str(alloc::borrow::Cow::Borrowed("acme")))
+        );
+        assert!(matches!(value, Value::Dict(items) if items.len() == 2));
+    }
+
+    #[test]
     fn test_query_mode_debug() {
         assert_eq!(format!("{:?}", QueryMode::Nearest), "Nearest");
         assert_eq!(format!("{:?}", QueryMode::Recommend), "Recommend");
@@ -671,6 +696,51 @@ mod tests {
             }
         } else {
             panic!("expected Stmt::Query");
+        }
+    }
+
+    #[test]
+    fn test_ast_inject_filter_forces_insert_payload_field() {
+        let mut stmt = Stmt::Insert(Box::new(InsertStmt {
+            collection: "docs",
+            values_list: vec![
+                vec![
+                    ("id", Value::Int(1)),
+                    (
+                        "tenant_id",
+                        Value::Str(alloc::borrow::Cow::Borrowed("attacker")),
+                    ),
+                ],
+                vec![("id", Value::Int(2))],
+            ],
+            model: None,
+            hybrid: false,
+            sparse_model: None,
+            dense_vector: None,
+            sparse_vector: None,
+            embed_directives: Vec::new(),
+        }));
+
+        inject_filter(
+            &mut stmt,
+            "tenant_id",
+            "=",
+            &Value::Str(alloc::borrow::Cow::Borrowed("acme")),
+        );
+
+        let Stmt::Insert(insert) = stmt else {
+            panic!("expected insert");
+        };
+        for row in &insert.values_list {
+            let tenant = row
+                .iter()
+                .rev()
+                .find(|(k, _)| *k == "tenant_id")
+                .map(|(_, v)| v);
+            assert_eq!(
+                tenant,
+                Some(&Value::Str(alloc::borrow::Cow::Borrowed("acme")))
+            );
         }
     }
 }

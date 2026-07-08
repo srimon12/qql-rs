@@ -28,10 +28,10 @@ console.log(ast);
 const stmts = nqql.parseAll("INSERT INTO docs ...; QUERY 'text' FROM docs ...");
 console.log(stmts);
 
-// Validate without parsing
+// Validate without returning the AST
 const valid = nqql.isValid("SELECT * FROM docs WHERE id = 1");
 
-// Inject filter (tenant isolation)
+// Inject filter (tenant isolation). Value is plain JSON; legacy tagged JSON is accepted.
 const secured = nqql.injectFilter(
     "QUERY 'search' FROM docs LIMIT 10",
     "org_id",
@@ -40,7 +40,7 @@ const secured = nqql.injectFilter(
 );
 
 // Tokenize
-const tokens = nqql.tokenize("QUERY 'hello' FROM docs LIMIT 5");
+const tokens = nqql.tokenizeJson("QUERY 'hello' FROM docs LIMIT 5");
 ```
 
 ## API
@@ -51,5 +51,6 @@ const tokens = nqql.tokenize("QUERY 'hello' FROM docs LIMIT 5");
 | `parseAll(input)` | `string[]` | Parse multiple semicolon-separated statements |
 | `parseBatch(queries)` | `string[]` | Parse an array of query strings |
 | `isValid(input)` | `boolean` | Check if query string is valid QQL |
-| `injectFilter(query, field, op, value)` | `string` | Inject filter into query AST |
+| `injectFilter(query, field, op, valueJson)` | `string` | Inject filter into query AST |
 | `tokenize(input)` | `string` | Tokenize query string (JSON) |
+| `tokenizeJson(input)` | `string` | Tokenize query string (JSON) |

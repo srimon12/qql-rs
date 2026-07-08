@@ -10,9 +10,9 @@ async function main() {
 
   function enforce(user, query) {
     const ctx = USERS[user];
-    let safe = qql.inject_filter(query, 'tenant_id', '=', `{"str": "${ctx.tenant}"}`);
+    let safe = qql.inject_filter(query, 'tenant_id', '=', ctx.tenant);
     if (ctx.role === 'viewer') {
-      safe = qql.inject_filter(safe, 'status', '!=', '{"str": "confidential"}');
+      safe = qql.inject_filter(safe, 'status', '!=', 'confidential');
     }
     return safe;
   }

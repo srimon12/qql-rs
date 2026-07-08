@@ -23,6 +23,19 @@ fn token_precedence(kind: TokenKind) -> u8 {
     }
 }
 
+fn is_formula_kwarg_key(kind: TokenKind) -> bool {
+    matches!(
+        kind,
+        TokenKind::Identifier
+            | TokenKind::String
+            | TokenKind::Target
+            | TokenKind::Score
+            | TokenKind::Offset
+            | TokenKind::Threshold
+            | TokenKind::Lookup
+    )
+}
+
 type PrefixParseFn = for<'a> fn(&mut Parser<'a>) -> Result<FormulaExpr<'a>, QqlError>;
 type InfixParseFn =
     for<'a> fn(&mut Parser<'a>, FormulaExpr<'a>) -> Result<FormulaExpr<'a>, QqlError>;
@@ -488,8 +501,7 @@ fn parse_formula_call_arguments_and_kwargs<'a>(
                 }
                 if p.index + 1 < p.tokens.len() {
                     let next = &p.tokens[p.index + 1];
-                    next.kind == TokenKind::Equals
-                        && (t.kind == TokenKind::Identifier || t.kind == TokenKind::String)
+                    next.kind == TokenKind::Equals && is_formula_kwarg_key(t.kind)
                 } else {
                     false
                 }

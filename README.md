@@ -9,8 +9,9 @@ parse("QUERY 'chest pain' FROM medical LIMIT 5 WHERE department = 'cardio'")
 # → inspectable, injectable, transformable AST
 ```
 
-Available as **native libraries** for Python, Node.js, Go, Rust, and WASM.
-No gateway. No YAML policies. No server sidecars.
+Available as native parser libraries for Python, Node.js, Rust, and WASM,
+with a standalone Go implementation in `qql-go`. No gateway. No YAML
+policies. No server sidecars.
 
 ---
 
@@ -26,13 +27,17 @@ from pyqql import parse, tokenize, is_valid, inject_filter
 # Parse any QQL statement into an AST
 ast = parse("QUERY 'machine learning' FROM papers LIMIT 20 WHERE year >= 2024")
 
-# Check if a query is valid without parsing it fully
+# Check if a query is valid without returning the AST
 if is_valid("CREATE COLLECTION docs HYBRID"):
     print("valid QQL")
 
 # Inject security filters — no string concatenation
-safe = inject_filter('''QUERY 'papers' FROM docs LIMIT 50''',
-    "org_id", "IN", '{"list": [{"str": "acme"}, {"str": "globex"}]}')
+safe = inject_filter(
+    "QUERY 'papers' FROM docs LIMIT 50",
+    "org_id",
+    "IN",
+    ["acme", "globex"],
+)
 
 # Tokenize for syntax highlighting or analysis
 for t in tokenize("SELECT * FROM docs WHERE id = 1"):
@@ -47,7 +52,7 @@ npm install nqql
 import { parse, injectFilter, isValid } from 'nqql';
 
 const ast = parse("QUERY 'search' FROM docs LIMIT 10");
-const safe = injectFilter("QUERY 'x' FROM docs LIMIT 5", "tenant_id", "=", '{"str": "acme"}');
+const safe = injectFilter("QUERY 'x' FROM docs LIMIT 5", "tenant_id", "=", '"acme"');
 ```
 
 ### Go
@@ -84,26 +89,24 @@ Every language binding exposes the same set of functions:
 
 | Function | Returns | Description |
 |----------|---------|-------------|
-| `parse(input)` | debug string | Parse a single QQL statement |
-| `parse_all(input)` | `Vec<string>` | Parse a semicolon-delimited script |
-| `parse_batch(queries)` | `Vec<string>` | Batch-parse multiple queries (minimizes FFI overhead) |
+| `parse(input)` | AST (native types per binding) | Parse a single QQL statement |
+| `parse_all(input)` | `Vec<AST>` | Parse a semicolon-delimited script |
+| `parse_batch(queries)` | `Vec<AST>` | Batch-parse multiple queries (minimizes FFI overhead) |
 | `tokenize(input)` | `Vec<Token>` | Tokenize for highlighting, validation, or analysis |
 | `is_valid(input)` | `bool` | Lightweight syntax validation |
-| `inject_filter(query, field, op, value_json)` | debug string | Inject a WHERE clause programmatically |
+| `inject_filter(query, field, op, value)` | AST | Inject a WHERE clause programmatically. Python accepts native values; Node/WASM accept native JS types. Legacy tagged JSON such as `{"str":"acme"}` is still accepted. |
 
 ---
 
 ## Examples
 
-See the [`examples/`](examples/) directory for 4 progressive levels
-across all 5 languages:
+See the [`examples/`](examples/) directory for examples in the primary Python
+and Rust flows, plus experimental Node.js and WASM bindings:
 
 | Level | What it shows |
 |-------|---------------|
-| **01 Basic** | `parse`, `tokenize`, `is_valid` |
 | **02 Medium** | `inject_filter` with string, numeric, boolean values |
 | **03 Expert** | Multi-tenant query gateway pattern |
-| **04 Batch** | Script parsing and batch FFI for throughput |
 
 ---
 
@@ -126,11 +129,11 @@ and hope it works. QQL gives you **programmatic access to the query itself**:
 
 | SDK | Language | parse | tokenize | is_valid | inject_filter | parse_all | parse_batch | Runtime |
 |-----|----------|-------|----------|----------|---------------|-----------|-------------|---------|
-| **pyqql** | Python | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
-| **nqql** | Node.js | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
-| **qql-wasm** | WASM | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
-| **qql-core** | Rust | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
-| **qql** | Rust | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **pyqql** | Python, first-class binding | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| **qql-core** | Rust parser library | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| **qql** | Rust runtime library | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **nqql** | Node.js, experimental binding | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| **qql-wasm** | WASM, experimental binding | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 
 ---
 
@@ -234,7 +237,9 @@ or log it for audit. No gateway, no YAML, no interceptors.
 
 ## Benchmarks
 
-Parser throughput across all SDKs (ns/op, lower is better):
+These numbers are parse-only microbenchmarks. They are useful for catching
+parser regressions, but they are not an end-to-end vector search latency
+claim; Qdrant I/O and embedding inference dominate real workloads.
 
 | Query | Rust | Go | Python | Node.js |
 |-------|------|----|--------|---------|
@@ -243,9 +248,10 @@ Parser throughput across all SDKs (ns/op, lower is better):
 | Full | **1,234 ns** | 1,565 ns | 12,285 ns | 12,815 ns |
 | CTE Prefetch | **2,662 ns** | 3,278 ns | 53,456 ns | 53,872 ns |
 
-Native SDKs (Rust, Go) have no FFI tax. Bindings (Python, Node.js)
-trade ~5–10 µs per call for the convenience of using QQL from your
-preferred language — negligible next to embedding inference (50–200 ms).
+The important product wins are the shared AST, recursive filter injection,
+and no gateway/sidecar requirement. Native SDKs (Rust, Go) have no FFI tax.
+Bindings (Python, Node.js) trade a few microseconds per call for the
+convenience of using the same parser from the host language.
 
 Full benchmark report at [`bench/README.md`](bench/README.md).
 
@@ -255,16 +261,14 @@ Full benchmark report at [`bench/README.md`](bench/README.md).
 
 ```bash
 # Build everything
-make build
+cargo build --workspace
 
 # Run all tests
-make test
+cargo test --workspace
 
-# Run all benchmarks
-make bench
+# Run parser benchmarks
+cargo run --release --manifest-path bench/bench_rust/Cargo.toml
 
-# Run all examples
-make examples
+# Run Rust examples
+for f in examples/rust/*/Cargo.toml; do cargo run --manifest-path "$f"; done
 ```
-
-See the [`Makefile`](Makefile) for individual targets.

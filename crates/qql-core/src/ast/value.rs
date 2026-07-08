@@ -1,6 +1,7 @@
-use std::borrow::Cow;
+use alloc::borrow::Cow;
 
 #[derive(Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum Value<'a> {
     Str(Cow<'a, str>),
     Int(i64),
@@ -44,6 +45,34 @@ impl<'a> core::fmt::Debug for Value<'a> {
 }
 
 impl<'a> Value<'a> {
+    /// Returns the value for the last matching key in an insertion-ordered dict.
+    ///
+    /// QQL keeps dictionaries as vectors so parsed payloads retain source order
+    /// for stable debug output and serialization. Duplicate keys are allowed at
+    /// parse time; mutation treats the last key as authoritative.
+    pub fn dict_get(&self, key: &str) -> Option<&Value<'a>> {
+        match self {
+            Value::Dict(items) => items
+                .iter()
+                .rev()
+                .find(|(k, _)| k.as_ref() == key)
+                .map(|(_, v)| v),
+            _ => None,
+        }
+    }
+
+    /// Sets a key in an insertion-ordered dict, updating the last matching key
+    /// or appending a new key when it is absent.
+    pub fn dict_set(&mut self, key: Cow<'a, str>, value: Value<'a>) {
+        if let Value::Dict(items) = self {
+            if let Some((_, existing)) = items.iter_mut().rev().find(|(k, _)| k == &key) {
+                *existing = value;
+            } else {
+                items.push((key, value));
+            }
+        }
+    }
+
     pub fn to_static(&self) -> Value<'static> {
         match self {
             Value::Str(s) => Value::Str(Cow::Owned(s.to_string())),

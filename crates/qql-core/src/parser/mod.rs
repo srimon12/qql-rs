@@ -106,21 +106,23 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse(input: &'a str) -> Result<Stmt<'a>, QqlError> {
-        let lexer = Lexer::new(input);
-        let mut tokens = alloc::vec::Vec::new();
-        for token_res in lexer {
-            tokens.push(token_res?);
-        }
+        let tokens = Self::lex(input)?;
         let mut parser = Parser::new(tokens);
-        parser.parse_stmt()
+        let stmt = parser.parse_stmt()?;
+        parser.expect_end()?;
+        Ok(stmt)
+    }
+
+    pub fn try_parse(input: &'a str) -> Result<(), QqlError> {
+        let tokens = Self::lex(input)?;
+        let mut parser = Parser::new(tokens);
+        parser.parse_stmt()?;
+        parser.expect_end()?;
+        Ok(())
     }
 
     pub fn parse_all(input: &'a str) -> Result<alloc::vec::Vec<Stmt<'a>>, QqlError> {
-        let lexer = Lexer::new(input);
-        let mut tokens = alloc::vec::Vec::new();
-        for token_res in lexer {
-            tokens.push(token_res?);
-        }
+        let tokens = Self::lex(input)?;
         let mut parser = Parser::new(tokens);
         let mut stmts = alloc::vec::Vec::new();
         while parser.index < parser.tokens.len() {
@@ -131,6 +133,32 @@ impl<'a> Parser<'a> {
             stmts.push(parser.parse_stmt()?);
         }
         Ok(stmts)
+    }
+
+    fn lex(input: &'a str) -> Result<alloc::vec::Vec<Token<'a>>, QqlError> {
+        let lexer = Lexer::new(input);
+        let mut tokens = alloc::vec::Vec::new();
+        for token_res in lexer {
+            tokens.push(token_res?);
+        }
+        Ok(tokens)
+    }
+
+    fn expect_end(&mut self) -> Result<(), QqlError> {
+        while self.index < self.tokens.len() && self.tokens[self.index].kind == TokenKind::Semicolon
+        {
+            self.index += 1;
+        }
+
+        if self.index < self.tokens.len() {
+            let tok = self.tokens[self.index];
+            return Err(QqlError::syntax(
+                alloc::format!("unexpected trailing token '{}'", tok.text),
+                tok.pos,
+            ));
+        }
+
+        Ok(())
     }
 
     pub fn parse_stmt(&mut self) -> Result<Stmt<'a>, QqlError> {

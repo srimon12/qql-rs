@@ -5,7 +5,7 @@ Native Python bindings for the Qdrant Query Language (QQL) parser, compiled with
 ## Features
 
 - **Native parsing**: Rust-speed QQL parsing in Python
-- **AST dictionaries**: Parsed queries as typed Python dicts
+- **Inspectable AST output**: Parsed queries as debug-formatted AST strings
 - **Filter injection**: Add tenant isolation filters to parsed ASTs
 - **Validation**: Check if a query string is valid QQL
 - **Batch parsing**: Parse multiple queries at once
@@ -21,7 +21,7 @@ pip install pyqql
 ```python
 import pyqql
 
-# Parse to AST dict
+# Parse to debug-formatted AST
 ast = pyqql.parse("QUERY 'vector database' FROM docs LIMIT 10")
 print(ast)
 
@@ -34,12 +34,11 @@ results = pyqql.parse_batch([
     "QUERY 'nlp' FROM docs LIMIT 5",
 ])
 
-# Validate without parsing
+# Validate without returning the AST
 valid = pyqql.is_valid("SELECT * FROM docs WHERE id = 1")
 
-# Inject security filter into AST
-stmt = pyqql.parse("QUERY 'patients' FROM medical LIMIT 5")
-pyqql.inject_filter(stmt, "org_id", "=", "acme-corp")
+# Inject security filter. Native Python values are accepted.
+secured = pyqql.inject_filter("QUERY 'patients' FROM medical LIMIT 5", "org_id", "=", "acme-corp")
 
 # Tokenize query string
 tokens = pyqql.tokenize("QUERY 'hello' FROM docs LIMIT 5")
@@ -49,9 +48,9 @@ tokens = pyqql.tokenize("QUERY 'hello' FROM docs LIMIT 5")
 
 | Function | Returns | Description |
 |---|---|---|
-| `parse(input)` | `dict` | Parse single statement → AST dict |
-| `parse_all(input)` | `list[dict]` | Parse multiple semicolon-separated statements |
-| `parse_batch(queries)` | `list[dict]` | Parse a list of query strings |
+| `parse(input)` | `str` | Parse single statement → debug AST |
+| `parse_all(input)` | `list[str]` | Parse multiple semicolon-separated statements |
+| `parse_batch(queries)` | `list[str]` | Parse a list of query strings |
 | `is_valid(input)` | `bool` | Check if query string is valid QQL |
 | `inject_filter(query, field, op, value)` | `str` | Inject filter into query AST |
-| `tokenize(input)` | `str` | Tokenize query string |
+| `tokenize(input)` | `list[dict]` | Tokenize query string |

@@ -172,3 +172,58 @@ QUERY 'vector databases' FROM docs LIMIT 10
   )
   FUSION RRF
 ```
+
+---
+
+## 5. Point Operations (Get & Scroll)
+
+### Point Retrieval (SELECT)
+Retrieve a specific point directly by its ID.
+
+```sql
+SELECT * FROM docs WHERE id = '550e8400-e29b-41d4-a716-446655440000'
+SELECT * FROM docs WHERE id = 123
+```
+
+### Scrolling & Pagination (SCROLL)
+Iterate over points in a collection sequentially, optionally filtered.
+
+```sql
+-- Scroll through the first 100 points
+SCROLL FROM docs LIMIT 100
+
+-- Scroll with a filter and an offset point ID
+SCROLL FROM docs WHERE category = 'tech' AFTER 'id-100' LIMIT 50
+```
+
+---
+
+## 6. Modifications (UPDATE & DELETE)
+
+### Update Operations
+Update vectors or payloads for existing points.
+
+```sql
+-- Update a specific vector for a point
+UPDATE docs SET VECTOR = [0.1, 0.2, 0.3, 0.4] WHERE id = 1
+
+-- Update a named vector
+UPDATE docs SET VECTOR 'colbert' = [[0.1, 0.2], [0.3, 0.4]] WHERE id = 1
+
+-- Update payload for a specific point
+UPDATE docs SET PAYLOAD = {status: 'active', tags: ['updated']} WHERE id = 1
+
+-- Update payload for all points matching a filter
+UPDATE docs SET PAYLOAD = {archived: true} WHERE status = 'expired'
+```
+
+### Delete Operations
+Remove points by ID or by metadata filter.
+
+```sql
+-- Delete points matching a filter
+DELETE FROM docs WHERE status = 'archived'
+
+-- Delete specific points by ID using the IN operator
+DELETE FROM docs WHERE id IN ('id-1', 'id-2')
+```

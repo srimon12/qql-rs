@@ -6,30 +6,32 @@ use qql_core::parser::Parser;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
-pub fn parse(input: &str) -> Result<String, JsValue> {
+pub fn parse(input: &str) -> Result<JsValue, JsValue> {
     let stmt = Parser::parse(input).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    Ok(format!("{:#?}", stmt))
+    serde_wasm_bindgen::to_value(&stmt).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 #[wasm_bindgen]
-pub fn parse_all(input: &str) -> Result<Vec<String>, JsValue> {
+pub fn parse_all(input: &str) -> Result<JsValue, JsValue> {
     let stmts = Parser::parse_all(input).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    Ok(stmts.into_iter().map(|s| format!("{:#?}", s)).collect())
+    serde_wasm_bindgen::to_value(&stmts).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 #[wasm_bindgen]
-pub fn parse_batch(queries: Vec<String>) -> Result<Vec<String>, JsValue> {
-    let mut results = Vec::with_capacity(queries.len());
+pub fn parse_batch(queries: Vec<String>) -> Result<JsValue, JsValue> {
+    let results = js_sys::Array::new();
     for q in queries {
         let stmt = Parser::parse(&q).map_err(|e| JsValue::from_str(&e.to_string()))?;
-        results.push(format!("{:#?}", stmt));
+        let v =
+            serde_wasm_bindgen::to_value(&stmt).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        results.push(&v);
     }
-    Ok(results)
+    Ok(results.into())
 }
 
-#[wasm_bindgen]
+#[wasm_bindgen(js_name = isValid)]
 pub fn is_valid(input: &str) -> bool {
-    Parser::parse(input).is_ok()
+    Parser::try_parse(input).is_ok()
 }
 
 #[wasm_bindgen]
@@ -37,12 +39,15 @@ pub fn inject_filter(
     query: &str,
     field: &str,
     op: &str,
-    value_json: &str,
-) -> Result<String, JsValue> {
-    let value = json_to_value(value_json).ok_or_else(|| JsValue::from_str("invalid value JSON"))?;
+    value: JsValue,
+) -> Result<JsValue, JsValue> {
+    let serde_value: serde_json::Value = serde_wasm_bindgen::from_value(value)
+        .map_err(|e| JsValue::from_str(&format!("invalid value: {}", e)))?;
+    let value = serde_json_to_value(serde_value)
+        .ok_or_else(|| JsValue::from_str("unsupported value type"))?;
     let mut stmt = Parser::parse(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
     ast::inject_filter(&mut stmt, field, op, &value);
-    Ok(format!("{:#?}", stmt))
+    serde_wasm_bindgen::to_value(&stmt).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 #[wasm_bindgen]
@@ -75,11 +80,6 @@ pub fn tokenize(input: &str) -> Result<Vec<JsValue>, JsValue> {
     Ok(tokens)
 }
 
-fn json_to_value(json: &str) -> Option<Value<'static>> {
-    let jv: serde_json::Value = serde_json::from_str(json).ok()?;
-    serde_json_to_value(jv)
-}
-
 fn serde_json_to_value(jv: serde_json::Value) -> Option<Value<'static>> {
     match jv {
         serde_json::Value::String(s) => Some(Value::Str(Cow::Owned(s))),
@@ -100,6 +100,20 @@ fn serde_json_to_value(jv: serde_json::Value) -> Option<Value<'static>> {
             Some(Value::List(vals))
         }
         serde_json::Value::Object(map) => {
+            if map.len() == 1 {
+                if let Some((tag, inner)) = map.iter().next() {
+                    match tag.as_str() {
+                        "str" => return inner.as_str().map(|s| Value::Str(Cow::Owned(s.into()))),
+                        "int" => return inner.as_i64().map(Value::Int),
+                        "float" => return inner.as_f64().map(Value::Float),
+                        "bool" => return inner.as_bool().map(Value::Bool),
+                        "null" if inner.is_null() => return Some(Value::Null),
+                        "list" => return serde_json_to_value(inner.clone()),
+                        "dict" => return serde_json_to_value(inner.clone()),
+                        _ => {}
+                    }
+                }
+            }
             let mut pairs = Vec::with_capacity(map.len());
             for (k, v) in map {
                 pairs.push((Cow::Owned(k), serde_json_to_value(v)?));

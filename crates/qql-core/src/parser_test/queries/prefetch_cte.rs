@@ -1,7 +1,7 @@
 use alloc::vec;
 
 use crate::ast::Stmt;
-use crate::parser_test::assert_parse_ok;
+use crate::parser_test::{assert_parse_err, assert_parse_ok};
 
 // ── Query: Prefetch ──────────────────────────────────────────
 
@@ -68,14 +68,7 @@ fn test_query_prefetch_empty_prefetch_block() {
 
 #[test]
 fn test_query_prefetch_duplicate_fusion() {
-    // Rust parser silently ignores duplicate FUSION, uses the first one
-    let stmt = assert_parse_ok("QUERY 'test' FROM docs USING HYBRID FUSION RRF FUSION DBSF");
-    match stmt {
-        Stmt::Query(q) => {
-            assert_eq!(q.fusion_type, Some("RRF"));
-        }
-        _ => panic!("expected Query"),
-    }
+    assert_parse_err("QUERY 'test' FROM docs USING HYBRID FUSION RRF FUSION DBSF");
 }
 
 #[test]

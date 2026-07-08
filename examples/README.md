@@ -1,17 +1,14 @@
 # QQL SDK Examples
 
-Each language directory contains 4 examples — **basic, medium, expert,
-high-perf** — that showcase the QQL parser SDK in progressively more
-powerful patterns.
+The examples show the primary Python and Rust flows, plus experimental Node.js
+and WASM bindings, in progressively more powerful parser SDK patterns.
 
 ## Levels
 
 | # | Level | APIs shown | What it demonstrates |
 |---|-------|------------|---------------------|
-| 01 | Basic | `parse`, `tokenize`, `is_valid` | QQL is an inspectable, programmable language |
 | 02 | Medium | `inject_filter` | Programmatic WHERE injection — QQL's superpower |
 | 03 | Expert | Gateway pattern | Multi-tenant query rewriting with auth policies |
-| 04 | High-Perf | `parse_all`, `parse_batch` | Script parsing and batch FFI for throughput |
 
 ## Running
 

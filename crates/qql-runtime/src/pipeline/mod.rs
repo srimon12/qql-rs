@@ -711,7 +711,7 @@ impl QueryPipeline {
         let with_payload = state.with_payload.as_ref().map(|wp| wp.clone().into());
         let with_vectors = state.with_vectors.as_ref().map(|wv| wv.clone().into());
         let lookup_from = state.lookup_from.as_ref().map(|lf| lf.clone().into());
- 
+
         let mut req = QueryPointsRequest {
             collection_name: state.collection_name.clone(),
             query,
@@ -727,11 +727,11 @@ impl QueryPipeline {
             using: None,
             timeout: state.request_timeout,
         };
- 
+
         if !state.vector_name.is_empty() {
             req.using = Some(state.vector_name.clone());
         }
- 
+
         Ok(req)
     }
 

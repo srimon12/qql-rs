@@ -304,7 +304,8 @@ impl<'a> Parser<'a> {
                 }
                 TokenKind::Fusion => {
                     if seen_fusion {
-                        return Ok(());
+                        let tok = self.peek()?;
+                        return Err(QqlError::syntax("duplicate FUSION clause", tok.pos));
                     }
                     seen_fusion = true;
                     self.advance()?;
@@ -324,7 +325,8 @@ impl<'a> Parser<'a> {
                 }
                 TokenKind::Where => {
                     if seen_where {
-                        return Ok(());
+                        let tok = self.peek()?;
+                        return Err(QqlError::syntax("duplicate WHERE clause", tok.pos));
                     }
                     seen_where = true;
                     self.advance()?;
@@ -336,7 +338,8 @@ impl<'a> Parser<'a> {
                 }
                 TokenKind::Rerank => {
                     if seen_rerank {
-                        return Ok(());
+                        let tok = self.peek()?;
+                        return Err(QqlError::syntax("duplicate RERANK clause", tok.pos));
                     }
                     seen_rerank = true;
                     self.advance()?;
@@ -350,7 +353,8 @@ impl<'a> Parser<'a> {
                 }
                 TokenKind::Exact => {
                     if seen_exact {
-                        return Ok(());
+                        let tok = self.peek()?;
+                        return Err(QqlError::syntax("duplicate EXACT clause", tok.pos));
                     }
                     seen_exact = true;
                     self.advance()?;
@@ -404,7 +408,8 @@ impl<'a> Parser<'a> {
                 }
                 TokenKind::Group => {
                     if seen_group {
-                        return Ok(());
+                        let tok = self.peek()?;
+                        return Err(QqlError::syntax("duplicate GROUP BY clause", tok.pos));
                     }
                     seen_group = true;
                     self.advance()?;
@@ -417,7 +422,8 @@ impl<'a> Parser<'a> {
                 }
                 TokenKind::GroupSize => {
                     if seen_group_size {
-                        return Ok(());
+                        let tok = self.peek()?;
+                        return Err(QqlError::syntax("duplicate GROUP SIZE clause", tok.pos));
                     }
                     seen_group_size = true;
                     self.advance()?;
@@ -433,7 +439,8 @@ impl<'a> Parser<'a> {
                 }
                 TokenKind::Strategy => {
                     if seen_strategy {
-                        return Ok(());
+                        let tok = self.peek()?;
+                        return Err(QqlError::syntax("duplicate STRATEGY clause", tok.pos));
                     }
                     seen_strategy = true;
                     self.advance()?;
@@ -484,11 +491,8 @@ impl<'a> Parser<'a> {
                 }
                 TokenKind::Boost => {
                     self.advance()?;
-                    if let Ok(expr) = self.parse_formula_expr(super::formula::PRECEDENCE_LOWEST) {
-                        stmt.formula = Some(Box::new(expr));
-                    } else {
-                        return Ok(());
-                    }
+                    let expr = self.parse_formula_expr(super::formula::PRECEDENCE_LOWEST)?;
+                    stmt.formula = Some(Box::new(expr));
                 }
                 TokenKind::Defaults => {
                     self.advance()?;

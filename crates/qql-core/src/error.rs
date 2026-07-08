@@ -1,7 +1,8 @@
+use alloc::borrow::Cow;
 use core::fmt;
-use std::borrow::Cow;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct QqlError {
     pub msg: Cow<'static, str>,
     pub pos: usize,

@@ -6,6 +6,7 @@ use crate::token::{lookup_keyword, Token, TokenKind};
 pub type TokenIter<'a> = Peekable<Lexer<'a>>;
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct Lexer<'a> {
     input: &'a str,
     pos: usize,

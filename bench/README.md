@@ -1,9 +1,11 @@
 # Parser Benchmarks
 
-Compares QQL parse throughput across all language SDKs.
+Compares QQL parse throughput across parser implementations and bindings.
 
-All benchmarks measure **pure parse time** (no Qdrant I/O) — just lexing + parsing
-a QQL string into an AST. Results are medians from 3–5 runs of 100k–500k
+All benchmarks measure **pure parse time** (no Qdrant I/O and no embedding
+inference) — just lexing + parsing a QQL string into an AST. These numbers are
+for regression tracking and language-boundary cost, not for claiming
+end-to-end search latency. Results are medians from 3–5 runs of 100k–500k
 iterations each on a single machine:
 
 - **CPU:** Intel Core i5-10400F @ 2.90 GHz
@@ -34,98 +36,100 @@ zero-cost backtracking (copy a `usize`), and keeps the hot path in CPU cache.
 
 Lower is better.
 
-| Query | Rust 🏆 | qql-go (Go) | Python | Node.js |
+| Query | Rust | qql-go (Go) | Python | Node.js |
 |-------|--------:|------------:|-------:|--------:|
-| Simple | **389** | 529 | 5,832 | 6,917 |
-| Hybrid | **514** | 636 | 6,149 | 6,881 |
-| Full | **1,234** | 1,565 | 12,285 | 12,815 |
-| CTE Prefetch | **2,662** | 3,278 | 53,456 | 53,872 |
-| CreateCollection | **1,436** | 2,931 | 22,255 | 22,099 |
-| Insert | **1,206** | 2,159 | 9,552 | 9,840 |
-| DeleteWhere | **488** | 517 | 2,411 | 2,459 |
-| OrderBy | **874** | 888 | 8,657 | 8,995 |
-| WithPayload | **975** | 1,137 | 10,466 | 10,613 |
+| Simple | **451** | 592 | 3,452 | 4,355 |
+| Hybrid | **507** | 769 | 3,510 | 4,489 |
+| Full | **1,270** | 1,505 | 5,471 | 7,093 |
+| CTE Prefetch | **2,551** | 2,965 | 14,441 | 16,077 |
+| CreateCollection | **1,494** | 2,544 | 4,256 | 5,932 |
+| Insert | **1,337** | 1,967 | 3,288 | 4,922 |
+| DeleteWhere | **498** | 510 | 1,261 | 1,760 |
+| OrderBy | **885** | 980 | 4,505 | 5,960 |
+| WithPayload | **1,055** | 1,165 | 4,840 | 6,166 |
 
 ## Results (ops/sec)
 
 Higher is better.
 
-| Query | Rust 🏆 | qql-go (Go) | Python | Node.js |
+| Query | Rust | qql-go (Go) | Python | Node.js |
 |-------|--------:|------------:|-------:|--------:|
-| Simple | 2,571,092 | 1,890,359 | 171,470 | 144,580 |
-| Hybrid | 1,945,910 | 1,572,327 | 162,627 | 145,320 |
-| Full | 810,406 | 638,978 | 81,397 | 78,036 |
-| CTE Prefetch | 375,655 | 305,070 | 18,707 | 18,562 |
-| CreateCollection | 696,358 | 341,180 | 44,934 | 45,251 |
-| Insert | 828,992 | 463,177 | 104,687 | 101,622 |
-| DeleteWhere | 2,049,607 | 1,934,236 | 414,752 | 406,684 |
-| OrderBy | 1,144,770 | 1,125,844 | 115,510 | 111,176 |
-| WithPayload | 1,025,783 | 879,508 | 95,549 | 94,220 |
+| Simple | 2,216,633 | 1,688,724 | 289,607 | 229,612 |
+| Hybrid | 1,973,226 | 1,300,844 | 284,833 | 222,765 |
+| Full | 787,500 | 664,517 | 182,772 | 140,983 |
+| CTE Prefetch | 391,949 | 337,312 | 69,243 | 62,198 |
+| CreateCollection | 669,371 | 393,101 | 234,947 | 168,576 |
+| Insert | 748,191 | 508,451 | 304,074 | 203,133 |
+| DeleteWhere | 2,006,640 | 1,960,807 | 792,676 | 567,971 |
+| OrderBy | 1,129,480 | 1,020,497 | 221,938 | 167,783 |
+| WithPayload | 947,595 | 858,692 | 206,588 | 162,156 |
 
 ## Speed Relative to Rust
 
 | Query | Rust (1.0×) | qql-go | Python | Node.js |
 |-------|:----------:|:------:|:------:|:-------:|
-| Simple | 1.0× | 1.4× | 15.0× | 17.8× |
-| Hybrid | 1.0× | 1.2× | 12.0× | 13.4× |
-| Full | 1.0× | 1.3× | 10.0× | 10.4× |
-| CTE Prefetch | 1.0× | 1.2× | 20.1× | 20.2× |
-| CreateCollection | 1.0× | 2.0× | 15.5× | 15.4× |
-| Insert | 1.0× | 1.8× | 7.9× | 8.2× |
-| DeleteWhere | 1.0× | 1.1× | 4.9× | 5.0× |
-| OrderBy | 1.0× | 1.0× | 9.9× | 10.3× |
-| WithPayload | 1.0× | 1.2× | 10.7× | 10.9× |
+| Simple | 1.0× | 1.3× | 7.6× | 9.7× |
+| Hybrid | 1.0× | 1.5× | 6.9× | 8.9× |
+| Full | 1.0× | 1.2× | 4.3× | 5.6× |
+| CTE Prefetch | 1.0× | 1.2× | 5.7× | 6.3× |
+| CreateCollection | 1.0× | 1.7× | 2.8× | 4.0× |
+| Insert | 1.0× | 1.5× | 2.5× | 3.7× |
+| DeleteWhere | 1.0× | 1.0× | 2.5× | 3.5× |
+| OrderBy | 1.0× | 1.1× | 5.1× | 6.7× |
+| WithPayload | 1.0× | 1.1× | 4.6× | 5.8× |
 
-## Contiguous-Array Optimization Impact
-
-The Rust `qql-core` parser was refactored from `Peekable<Lexer>` (lazy iterator)
-to upfront-lexed `Vec<Token>` (contiguous array). Impact on parse latency:
-
-| Query | Before (ns) | After (ns) | Change |
-|-------|:----------:|:----------:|:------:|
-| Simple | 390 | 389 | — |
-| Hybrid | 557 | **514** | **−7.7%** |
-| Full | 1,417 | **1,234** | **−12.9%** |
-| CTE Prefetch | 3,087 | **2,662** | **−13.8%** |
-| CreateCollection | 1,574 | **1,436** | **−8.8%** |
-| Insert | 1,199 | 1,206 | — |
-| DeleteWhere | 474 | 488 | — |
-| OrderBy | 873 | 874 | — |
-| WithPayload | 991 | 975 | — |
-
-Complex queries with heavy lookahead (Hybrid, Full, CTE, CreateCollection) saw
-the biggest improvements. Simple queries hit the same floor — the parser is
-fast either way for short inputs.
 
 ## Key Observations
 
-### Rust (qql-core) — Fastest
-Contiguous-array parser with O(1) lookahead and copy-free backtracking.
-Zero-cost parsing. Every other implementation pays some overhead to bridge
-into Rust (or implements its own parser in the target language).
+### Rust and Go are both fast enough for parser-only work
+## Full E2E Pipeline Benchmarks
 
-### qql-go (native Go) — Close second, ~1–2× of Rust
+While the above tables isolate the *parser*, these E2E benchmarks measure the entire lifecycle of a query before it hits the network:
+1. Lex and parse the query into an AST.
+2. Validate the schema and validate collections using a Mock API.
+3. Build the full execution pipeline (Filter Injection, Nested Struct Generation).
+4. Construct and allocate the final Qdrant REST API JSON Payload.
+
+| Query Type | `qql-rs` (Rust) ops/s | `qql-go` (Go) ops/s |
+| :--- | :--- | :--- |
+| **Simple** | 838,358 | 306,741 |
+| **Hybrid** | 732,769 | 364,957 |
+| **Full** | 299,756 | 195,372 |
+| **CTE_Prefetch** | 264,566 | 163,404 |
+| **CreateCollection** | 563,655 | 262,059 |
+| **Insert** | 220,701 | 185,858 |
+| **DeleteWhere** | 529,149 | 469,121 |
+| **OrderBy** | 262,346 | 259,201 |
+| **WithPayload** | 549,287 | 292,933 |
+
+**Insight:** Even when doing the heavy lifting of dynamic memory allocation for Qdrant API REST payloads, Rust maintains a massive lead, operating 1.5x to 2.7x faster than Go for almost every query type.
+
+## Contiguous-Array Optimization Impact (Parser)
+Contiguous-array parser with O(1) lookahead and copy-free backtracking.
+The Rust implementation is usually 1.1–1.4× faster than Go on parse-only
+queries. That is useful, but it is not the reason to use this rewrite.
+
+### qql-go (native Go) — Close second
 Pure Go implementation with no C FFI. Consistently within 2× of Rust.
 The Go parser is competitive because:
 - Go generates efficient code for this workload
 - No garbage collection pressure from short-lived AST nodes
 - No language boundary crossing
 
-### All FFI bindings (pyqql, nqql) — ~5–20× slower than Rust
+### All FFI bindings (pyqql, nqql) pay a fixed boundary cost
 Every call crosses a language boundary:
 1. Marshal Python/JS string → C string
 2. C function call into Rust
-3. Rust parses the QQL
-4. Marshal Rust string → C string
-5. Return and free C memory
+## Language Boundary & Serialization (FFI)
 
-The FFI overhead adds **~5–6 µs per call** regardless of query complexity.
-This is the floor: even the simplest parse takes at least 6 µs in any
-FFI-based binding.
+The massive gap between Rust/Go and Python/Node.js is purely due to the Foreign Function Interface (FFI) serialization boundary. 
 
-### Python vs Node.js — Nearly identical
-Both cluster within 10% of each other. Both use Rust under the hood with
-the same FFI-overhead floor. The difference is negligible.
+1. **Python (`pyqql`)**: Uses `pythonize` to directly map Rust structs into CPython memory as native `PyDict`s. This is extremely efficient and yields up to ~290k ops/s.
+2. **Node.js (`nqql`)**: Passing generic structs through `napi-rs` causes heavy intermediate memory allocations (mapping via `serde_json::Value`), dropping throughput to ~60k ops/s. However, exposing a method that returns a JSON string to Javascript and calling V8's native `JSON.parse` restores throughput to **~230k ops/s**.
+
+## What This Benchmark Does Not Measure
+
+These benchmarks simulate the absolute maximum CPU workload of the library *right up to the millisecond before the network request is fired*. They do **not** measure network latency, actual Qdrant engine execution, or embedding model inference. For real workloads, network I/O and vector database search latency dominate CPU pipeline building time.
 
 ## Running Yourself
 

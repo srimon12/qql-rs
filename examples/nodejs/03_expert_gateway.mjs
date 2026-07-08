@@ -9,9 +9,9 @@ const USERS = {
 
 function enforce(user, query) {
   const ctx = USERS[user];
-  let safe = injectFilter(query, 'tenant_id', '=', `{"str": "${ctx.tenant}"}`);
+  let safe = injectFilter(query, 'tenant_id', '=', ctx.tenant);
   if (ctx.role === 'viewer') {
-    safe = injectFilter(safe, 'status', '!=', '{"str": "confidential"}');
+    safe = injectFilter(safe, 'status', '!=', 'confidential');
   }
   return safe;
 }

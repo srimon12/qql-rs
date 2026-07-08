@@ -1,6 +1,7 @@
 use core::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum TokenKind {
     Insert,
     Into,
@@ -262,6 +263,7 @@ impl fmt::Display for TokenKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct Token<'a> {
     pub kind: TokenKind,
     pub text: &'a str,

@@ -99,3 +99,22 @@ From highest to lowest:
 4. `OR`
 
 Use parentheses `( ... )` to explicitly group clauses and override default precedence.
+
+---
+
+## 9. Advanced Filters
+
+```sql
+-- Check if a specific named vector exists
+WHERE HAS_VECTOR 'dense'
+
+-- Filter by the number of values in an array field
+WHERE tags VALUES_COUNT >= 2
+WHERE categories VALUES_COUNT = 0
+
+-- Geospatial filtering with a bounding box (top_left, bottom_right)
+WHERE location GEO_BBOX { top_left: {lat: 52.5200, lon: 13.4050}, bottom_right: {lat: 52.5100, lon: 13.4150} }
+
+-- Geospatial filtering within a radius (center, radius in meters)
+WHERE location GEO_RADIUS { center: {lat: 52.5200, lon: 13.4050}, radius: 1000.0 }
+```
