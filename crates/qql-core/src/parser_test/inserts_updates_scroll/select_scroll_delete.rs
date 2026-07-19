@@ -1,7 +1,7 @@
 use alloc::boxed::Box;
 
 use crate::ast::{FilterExpr, Stmt};
-use crate::parser_test::{assert_parse_ok, i64_val, str_val};
+use crate::parser_test::{assert_parse_err, assert_parse_ok, i64_val, str_val};
 
 // ── DELETE ───────────────────────────────────────────────────
 
@@ -82,6 +82,12 @@ fn test_scroll_basic() {
         }
         _ => panic!("expected Scroll"),
     }
+}
+
+#[test]
+fn test_scroll_rejects_non_positive_limit() {
+    assert_parse_err("SCROLL FROM docs LIMIT 0");
+    assert_parse_err("SCROLL FROM docs LIMIT -1");
 }
 
 #[test]

@@ -12,6 +12,9 @@ mod script;
 #[derive(Parser)]
 #[command(name = "qql", about = "Qdrant Query Language CLI")]
 struct Cli {
+    /// Qdrant REST URL. Overrides QDRANT_URL when supplied.
+    #[arg(long, global = true)]
+    url: Option<String>,
     #[command(subcommand)]
     command: Command,
 }
@@ -37,11 +40,7 @@ enum Command {
     /// Explain a QQL query (show execution plan)
     Explain { query: String },
     /// Start interactive REPL connected to Qdrant
-    Connect {
-        /// Qdrant gRPC URL
-        #[arg(long, default_value = "http://localhost:6334")]
-        url: String,
-    },
+    Connect,
     /// Convert REST JSON payload to QQL
     Convert {
         /// Path to JSON file (or stdin if omitted)
@@ -58,17 +57,22 @@ enum Command {
     Version,
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
+    let url = cli
+        .url
+        .or_else(|| std::env::var("QDRANT_URL").ok())
+        .unwrap_or_else(|| "http://localhost:6333".to_string());
 
     match cli.command {
-        Command::Exec { query, json } => commands::handle_exec(&query, json),
+        Command::Exec { query, json } => commands::handle_exec(&url, &query, json).await,
         Command::Execute {
             file,
             stop_on_error,
-        } => commands::handle_execute_file(&file, stop_on_error),
+        } => commands::handle_execute_file(&url, &file, stop_on_error).await,
         Command::Explain { query } => commands::handle_explain(&query),
-        Command::Connect { url } => commands::handle_connect(&url),
+        Command::Connect => commands::handle_connect(&url).await,
         Command::Convert { file } => commands::handle_convert(file.as_deref()),
         Command::Dump {
             collection,

@@ -29,6 +29,12 @@ impl<'a> Parser<'a> {
             .text
             .parse()
             .map_err(|_| QqlError::syntax("invalid limit for SCROLL", limit_tok.pos))?;
+        if limit <= 0 {
+            return Err(QqlError::syntax(
+                "limit for SCROLL must be a positive integer",
+                limit_tok.pos,
+            ));
+        }
         Ok(Stmt::Scroll(Box::new(ScrollStmt {
             collection,
             limit,

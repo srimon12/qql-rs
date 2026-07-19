@@ -3,6 +3,7 @@ use std::borrow::Cow;
 use pyo3::exceptions::PySyntaxError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList};
+use qql::offline;
 use qql_core::ast::{self, Value};
 use qql_core::lexer::Lexer;
 use qql_core::parser::Parser;
@@ -77,6 +78,12 @@ fn tokenize<'py>(input: &str, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict
     Ok(result)
 }
 
+#[pyfunction]
+fn compile_query<'py>(py: Python<'py>, input: &str) -> PyResult<Bound<'py, PyAny>> {
+    let compiled = offline::compile(input).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+    pythonize::pythonize(py, &compiled).map_err(|e| PySyntaxError::new_err(e.to_string()))
+}
+
 #[pymodule]
 fn pyqql(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse, m)?)?;
@@ -85,6 +92,7 @@ fn pyqql(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(is_valid, m)?)?;
     m.add_function(wrap_pyfunction!(inject_filter, m)?)?;
     m.add_function(wrap_pyfunction!(tokenize, m)?)?;
+    m.add_function(wrap_pyfunction!(compile_query, m)?)?;
     Ok(())
 }
 
@@ -102,7 +110,7 @@ fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value<'static>> {
         return Ok(Value::Float(v));
     }
     if let Ok(s) = value.extract::<String>() {
-        return Ok(json_to_value(&s).unwrap_or(Value::Str(Cow::Owned(s))));
+        return Ok(Value::Str(Cow::Owned(s)));
     }
     if let Ok(list) = value.downcast::<PyList>() {
         let mut items = Vec::with_capacity(list.len());
@@ -122,52 +130,4 @@ fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value<'static>> {
         return Ok(Value::Dict(items));
     }
     Err(PySyntaxError::new_err("unsupported filter value type"))
-}
-
-fn json_to_value(json: &str) -> Option<Value<'static>> {
-    let jv: serde_json::Value = serde_json::from_str(json).ok()?;
-    serde_json_to_value(jv)
-}
-
-fn serde_json_to_value(jv: serde_json::Value) -> Option<Value<'static>> {
-    match jv {
-        serde_json::Value::String(s) => Some(Value::Str(Cow::Owned(s))),
-        serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                Some(Value::Int(i))
-            } else {
-                n.as_f64().map(Value::Float)
-            }
-        }
-        serde_json::Value::Bool(b) => Some(Value::Bool(b)),
-        serde_json::Value::Null => Some(Value::Null),
-        serde_json::Value::Array(items) => {
-            let mut vals = Vec::with_capacity(items.len());
-            for item in items {
-                vals.push(serde_json_to_value(item)?);
-            }
-            Some(Value::List(vals))
-        }
-        serde_json::Value::Object(map) => {
-            if map.len() == 1 {
-                if let Some((tag, inner)) = map.iter().next() {
-                    match tag.as_str() {
-                        "str" => return inner.as_str().map(|s| Value::Str(Cow::Owned(s.into()))),
-                        "int" => return inner.as_i64().map(Value::Int),
-                        "float" => return inner.as_f64().map(Value::Float),
-                        "bool" => return inner.as_bool().map(Value::Bool),
-                        "null" if inner.is_null() => return Some(Value::Null),
-                        "list" => return serde_json_to_value(inner.clone()),
-                        "dict" => return serde_json_to_value(inner.clone()),
-                        _ => {}
-                    }
-                }
-            }
-            let mut pairs = Vec::with_capacity(map.len());
-            for (k, v) in map {
-                pairs.push((Cow::Owned(k), serde_json_to_value(v)?));
-            }
-            Some(Value::Dict(pairs))
-        }
-    }
 }

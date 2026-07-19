@@ -190,14 +190,14 @@ impl<'a> Parser<'a> {
                 stmt.mode = QueryMode::Recommend;
                 self.advance()?;
                 if self.peek()?.kind == TokenKind::With {
-                    self.parse_recommend_with(&mut stmt);
+                    self.parse_recommend_with(&mut stmt)?;
                 }
             }
             TokenKind::Context => {
                 stmt.mode = QueryMode::Context;
                 self.advance()?;
                 self.expect(TokenKind::Pairs)?;
-                stmt.context_pairs = self.parse_context_pairs("CONTEXT");
+                stmt.context_pairs = self.parse_context_pairs("CONTEXT")?;
             }
             TokenKind::Discover => {
                 stmt.mode = QueryMode::Discover;
@@ -208,7 +208,7 @@ impl<'a> Parser<'a> {
                 if self.peek()?.kind == TokenKind::Context {
                     self.advance()?;
                     self.expect(TokenKind::Pairs)?;
-                    stmt.context_pairs = self.parse_context_pairs("DISCOVER CONTEXT");
+                    stmt.context_pairs = self.parse_context_pairs("DISCOVER CONTEXT")?;
                 }
             }
             TokenKind::Order => {

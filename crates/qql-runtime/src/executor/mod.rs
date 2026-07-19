@@ -54,6 +54,18 @@ pub struct Executor {
 }
 
 impl Executor {
+    /// Creates an executor backed by Qdrant's REST API.
+    ///
+    /// The backend owns a reusable HTTP client. Applications that need custom
+    /// proxy, TLS, tracing, or pool settings can construct `RestQdrant` with
+    /// their own `reqwest::Client` and pass it to [`Self::new`] instead.
+    pub fn rest(url: impl Into<String>, api_key: Option<String>) -> Result<Self, QqlError> {
+        Ok(Self::new(
+            Box::new(crate::rest::RestQdrant::new(url, api_key)?),
+            None,
+        ))
+    }
+
     pub fn new(client: Box<dyn QdrantOps>, config: Option<QqlConfig>) -> Self {
         Executor {
             client,

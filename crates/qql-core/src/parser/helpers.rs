@@ -269,6 +269,7 @@ impl<'a> Parser<'a> {
             if key_tok.kind != TokenKind::String
                 && key_tok.kind != TokenKind::Identifier
                 && key_tok.kind != TokenKind::Id
+                && key_tok.kind != TokenKind::Vector
             {
                 return Err(QqlError::syntax(
                     alloc::format!("expected string key in dict, got '{}'", key_tok.text),

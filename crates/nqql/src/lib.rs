@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 
 use napi_derive::napi;
+use qql::offline;
 use qql_core::ast::{self, Value};
 use qql_core::lexer::Lexer;
 use qql_core::parser::Parser;
@@ -108,6 +109,12 @@ pub fn tokenize(input: String) -> napi::Result<serde_json::Value> {
             format!("failed to serialize tokens: {}", e),
         )
     })
+}
+
+#[napi]
+pub fn compile_query(input: String) -> napi::Result<serde_json::Value> {
+    let compiled = offline::compile(&input).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    serde_json::to_value(&compiled).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 fn serde_json_to_value(jv: serde_json::Value) -> Option<Value<'static>> {

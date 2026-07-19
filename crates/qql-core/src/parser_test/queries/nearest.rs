@@ -92,20 +92,23 @@ fn test_query_error_missing_context_pairs() {
 }
 
 #[test]
+fn test_query_error_empty_context_pairs() {
+    assert_parse_err("QUERY CONTEXT PAIRS");
+}
+
+#[test]
 fn test_query_error_missing_discover_target() {
     assert_parse_err("QUERY DISCOVER FROM docs");
 }
 
 #[test]
 fn test_query_error_missing_positive_ids() {
-    // Rust parser handles RECOMMEND WITH gracefully; if positive is missing, it's just empty
-    let stmt = assert_parse_ok("QUERY RECOMMEND WITH (negative = (1)) FROM docs");
-    match stmt {
-        Stmt::Query(q) => {
-            assert_eq!(q.mode, QueryMode::Recommend);
-            assert!(q.positive_ids.is_empty());
-            assert_eq!(q.negative_ids, vec![i64_val(1)]);
-        }
-        _ => panic!("expected Query"),
-    }
+    assert_parse_err("QUERY RECOMMEND WITH (negative = (1)) FROM docs");
+}
+
+#[test]
+fn test_query_rejects_non_positive_limit_and_negative_offset() {
+    assert_parse_err("QUERY 'search' FROM docs LIMIT 0");
+    assert_parse_err("QUERY 'search' FROM docs LIMIT -1");
+    assert_parse_err("QUERY 'search' FROM docs OFFSET -1");
 }

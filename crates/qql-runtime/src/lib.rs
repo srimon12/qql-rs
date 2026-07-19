@@ -3,8 +3,12 @@ pub mod config;
 pub mod embedder;
 pub mod executor;
 pub mod filter_conv;
+#[cfg(feature = "grpc")]
+pub mod grpc;
+pub mod offline;
 pub mod pipeline;
 pub mod qdrant;
+pub mod rest;
 pub mod sparse;
 
 #[cfg(test)]

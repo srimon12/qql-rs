@@ -7,32 +7,47 @@ const VERSION: &str = "0.1.0";
 
 // ── Public handlers ───────────────────────────────────────────
 
-pub fn handle_exec(query: &str, json: bool) -> Result<(), Box<dyn std::error::Error>> {
-    let plan = explain_query(query)?;
+pub async fn handle_exec(
+    url: &str,
+    query: &str,
+    json: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let executor = executor(url)?;
+    let response = executor.execute(query).await?;
     if json {
-        let resp = output::ExecResponse {
-            ok: true,
-            operation: "exec".to_string(),
-            message: plan.clone(),
-        };
-        let s = serde_json::to_string_pretty(&resp)?;
+        let s = serde_json::to_string_pretty(&response)?;
         println!("{}", s);
     } else {
-        println!("{}", plan);
+        println!("{}", response.message);
+        if let Some(data) = response.data {
+            println!("{}", serde_json::to_string_pretty(&data)?);
+        }
     }
     Ok(())
 }
 
-pub fn handle_execute_file(
+pub async fn handle_execute_file(
+    url: &str,
     path: &str,
     stop_on_error: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let statements = script::read_script(path).map_err(|e| format!("{}", e))?;
+    let executor = executor(url)?;
+    let mut ok_count = 0;
+    let mut fail_count = 0;
 
-    let (ok_count, fail_count) = script::execute_script(statements, stop_on_error, |stmt| {
-        let plan = explain_query(stmt)?;
-        Ok(plan)
-    })?;
+    for (index, statement) in statements.iter().enumerate() {
+        match executor.execute(statement).await {
+            Ok(_) => ok_count += 1,
+            Err(error) => {
+                fail_count += 1;
+                output::print_error(&format!("statement {}: {}", index + 1, error));
+                if stop_on_error {
+                    return Err(format!("statement {} failed: {}", index + 1, error).into());
+                }
+            }
+        }
+    }
 
     let msg = format!(
         "Executed script {} ({} succeeded, {} failed)",
@@ -65,7 +80,9 @@ pub fn handle_explain(query: &str) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-pub fn handle_connect(url: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn handle_connect(url: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let executor = executor(url)?;
+    executor.execute("SHOW COLLECTIONS").await?;
     output::print_banner();
     output::print_success(&format!("Connected to \x1b[36m{}\x1b[0m", url));
     println!("Type \x1b[1mhelp\x1b[0m for available commands or \x1b[1mexit\x1b[0m to quit.\n");
@@ -162,15 +179,23 @@ pub fn handle_connect(url: &str) -> Result<(), Box<dyn std::error::Error>> {
             continue;
         }
 
-        match explain_query(&trimmed) {
-            Ok(plan) => {
-                output::print_success(&plan);
+        match executor.execute(&trimmed).await {
+            Ok(response) => {
+                output::print_success(&response.message);
+                if let Some(data) = response.data {
+                    println!("{}", serde_json::to_string_pretty(&data)?);
+                }
             }
             Err(e) => output::print_error(&format!("execution error: {}", e)),
         }
     }
 
     Ok(())
+}
+
+fn executor(url: &str) -> Result<qql::executor::Executor, Box<dyn std::error::Error>> {
+    qql::executor::Executor::rest(url.to_owned(), std::env::var("QDRANT_API_KEY").ok())
+        .map_err(Into::into)
 }
 
 pub fn handle_convert(path: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {

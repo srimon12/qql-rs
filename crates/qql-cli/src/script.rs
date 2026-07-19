@@ -1,5 +1,6 @@
 use qql_core::error::QqlError;
 use qql_core::lexer::Lexer;
+use qql_core::parser::Parser;
 use qql_core::token::TokenKind;
 
 pub fn strip_comments(text: &str) -> String {
@@ -13,25 +14,22 @@ pub fn strip_comments(text: &str) -> String {
         let ch = bytes[i];
 
         if in_string {
-            out.push(ch as char);
-            if ch == b'\\' && i + 1 < bytes.len() {
-                out.push(bytes[i + 1] as char);
-                i += 2;
+            push_input_char(&mut out, text, &mut i);
+            if ch == b'\\' && i < bytes.len() {
+                push_input_char(&mut out, text, &mut i);
                 continue;
             }
             if ch == quote_char {
                 in_string = false;
                 quote_char = 0;
             }
-            i += 1;
             continue;
         }
 
         if ch == b'\'' || ch == b'"' {
             in_string = true;
             quote_char = ch;
-            out.push(ch as char);
-            i += 1;
+            push_input_char(&mut out, text, &mut i);
             continue;
         }
 
@@ -43,27 +41,19 @@ pub fn strip_comments(text: &str) -> String {
             continue;
         }
 
-        out.push(ch as char);
-        i += 1;
+        push_input_char(&mut out, text, &mut i);
     }
 
     out
 }
 
-fn is_statement_starter(kind: TokenKind) -> bool {
-    matches!(
-        kind,
-        TokenKind::Insert
-            | TokenKind::Create
-            | TokenKind::Alter
-            | TokenKind::Drop
-            | TokenKind::Show
-            | TokenKind::Query
-            | TokenKind::Select
-            | TokenKind::Scroll
-            | TokenKind::Delete
-            | TokenKind::Update
-    )
+fn push_input_char(output: &mut String, input: &str, index: &mut usize) {
+    let ch = input[*index..]
+        .chars()
+        .next()
+        .expect("index is always within the input while copying a character");
+    output.push(ch);
+    *index += ch.len_utf8();
 }
 
 pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
@@ -78,12 +68,10 @@ pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
         tokens.push(tok);
     }
 
-    let mut starts: Vec<usize> = Vec::new();
     let mut depth: i32 = 0;
+    let mut statement_start = 0;
+    let mut statements = Vec::new();
     for tok in &tokens {
-        if depth == 0 && is_statement_starter(tok.kind) {
-            starts.push(tok.pos);
-        }
         match tok.kind {
             TokenKind::Lbrace | TokenKind::Lbracket | TokenKind::Lparen => depth += 1,
             TokenKind::Rbrace | TokenKind::Rbracket | TokenKind::Rparen => {
@@ -98,6 +86,10 @@ pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
                     ));
                 }
             }
+            TokenKind::Semicolon if depth == 0 => {
+                push_statement(&cleaned, statement_start, tok.pos, &mut statements)?;
+                statement_start = tok.pos + tok.text.len();
+            }
             _ => {}
         }
     }
@@ -108,25 +100,23 @@ pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
         ));
     }
 
-    if starts.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let mut statements = Vec::with_capacity(starts.len());
-    for i in 0..starts.len() {
-        let start = starts[i];
-        let end = if i + 1 < starts.len() {
-            starts[i + 1]
-        } else {
-            cleaned.len()
-        };
-        let stmt = cleaned[start..end].trim();
-        if !stmt.is_empty() {
-            statements.push(stmt.to_string());
-        }
-    }
+    push_statement(&cleaned, statement_start, cleaned.len(), &mut statements)?;
 
     Ok(statements)
+}
+
+fn push_statement(
+    input: &str,
+    start: usize,
+    end: usize,
+    statements: &mut Vec<String>,
+) -> Result<(), QqlError> {
+    let statement = input[start..end].trim();
+    if !statement.is_empty() {
+        Parser::parse(statement)?;
+        statements.push(statement.to_string());
+    }
+    Ok(())
 }
 
 pub fn read_script(path: &str) -> Result<Vec<String>, QqlError> {
@@ -157,4 +147,35 @@ where
         }
     }
     Ok((ok_count, fail_count))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_statements;
+
+    #[test]
+    fn splits_top_level_semicolons_without_breaking_ctes() {
+        let script = "WITH dense AS (QUERY 'search' LIMIT 10) QUERY 'search' FROM docs PREFETCH (dense); SHOW COLLECTIONS;";
+
+        let statements = split_statements(script).expect("script should parse");
+
+        assert_eq!(statements.len(), 2);
+        assert!(statements[0].starts_with("WITH dense"));
+        assert_eq!(statements[1], "SHOW COLLECTIONS");
+    }
+
+    #[test]
+    fn preserves_unicode_string_literals() {
+        let statements =
+            split_statements("QUERY 'café' FROM docs LIMIT 1;").expect("script should parse");
+
+        assert_eq!(statements, ["QUERY 'café' FROM docs LIMIT 1"]);
+    }
+
+    #[test]
+    fn rejects_adjacent_statements_without_a_semicolon() {
+        let result = split_statements("SHOW COLLECTIONS SHOW COLLECTION docs");
+
+        assert!(result.is_err());
+    }
 }

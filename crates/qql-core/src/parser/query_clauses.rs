@@ -11,84 +11,64 @@ use crate::token::TokenKind;
 use super::{ascii_equal, ascii_equal_lower, merge_search_with, Parser};
 
 impl<'a> Parser<'a> {
-    pub fn parse_recommend_with(&mut self, stmt: &mut QueryStmt<'a>) {
-        if self.advance().is_err() {
-            return;
-        }
-        if self.expect(TokenKind::Lparen).is_err() {
-            return;
-        }
-        while self.peek().map(|t| t.kind).unwrap_or(TokenKind::Eof) != TokenKind::Rparen {
-            let key_tok = match self.peek() {
-                Ok(t) => t,
-                _ => return,
-            };
+    pub fn parse_recommend_with(&mut self, stmt: &mut QueryStmt<'a>) -> Result<(), QqlError> {
+        self.advance()?;
+        self.expect(TokenKind::Lparen)?;
+        while self.peek()?.kind != TokenKind::Rparen {
+            let key_tok = self.peek()?;
             if key_tok.kind != TokenKind::Identifier {
-                return;
+                return Err(QqlError::syntax(
+                    "expected positive or negative in RECOMMEND WITH",
+                    key_tok.pos,
+                ));
             }
-            if self.advance().is_err() {
-                return;
-            }
-            if self.expect(TokenKind::Equals).is_err() {
-                return;
-            }
+            self.advance()?;
+            self.expect(TokenKind::Equals)?;
             if ascii_equal_lower(key_tok.text, "positive") {
-                if let Ok(ids) = self.parse_point_id_list() {
-                    stmt.positive_ids = ids;
-                } else {
-                    return;
-                }
+                stmt.positive_ids = self.parse_point_id_list()?;
             } else if ascii_equal_lower(key_tok.text, "negative") {
-                if let Ok(ids) = self.parse_point_id_list() {
-                    stmt.negative_ids = ids;
-                } else {
-                    return;
-                }
+                stmt.negative_ids = self.parse_point_id_list()?;
+            } else {
+                return Err(QqlError::syntax(
+                    "expected positive or negative in RECOMMEND WITH",
+                    key_tok.pos,
+                ));
             }
-            if self.peek().map(|t| t.kind).unwrap_or(TokenKind::Eof) == TokenKind::Comma {
-                if self.advance().is_err() {
-                    return;
-                }
+            if self.peek()?.kind == TokenKind::Comma {
+                self.advance()?;
             } else {
                 break;
             }
         }
-        let _ = self.expect(TokenKind::Rparen);
+        self.expect(TokenKind::Rparen)?;
+        if stmt.positive_ids.is_empty() {
+            return Err(QqlError::syntax(
+                "RECOMMEND requires at least one positive point ID",
+                self.peek()?.pos,
+            ));
+        }
+        Ok(())
     }
 
     // ── Context pairs ───────────────────────────────────────────
 
-    pub fn parse_context_pairs(&mut self, label: &str) -> Vec<ContextPair<'a>> {
+    pub fn parse_context_pairs(&mut self, label: &str) -> Result<Vec<ContextPair<'a>>, QqlError> {
         let mut pairs = Vec::new();
         loop {
-            if self.expect(TokenKind::Lparen).is_err() {
-                return pairs;
-            }
-            let pos_id = match self.parse_point_id_value(&alloc::format!("{} POSITIVE", label)) {
-                Ok(id) => id,
-                _ => return pairs,
-            };
-            if self.expect(TokenKind::Comma).is_err() {
-                return pairs;
-            }
-            let neg_id = match self.parse_point_id_value(&alloc::format!("{} NEGATIVE", label)) {
-                Ok(id) => id,
-                _ => return pairs,
-            };
-            if self.expect(TokenKind::Rparen).is_err() {
-                return pairs;
-            }
+            self.expect(TokenKind::Lparen)?;
+            let pos_id = self.parse_point_id_value(&alloc::format!("{} POSITIVE", label))?;
+            self.expect(TokenKind::Comma)?;
+            let neg_id = self.parse_point_id_value(&alloc::format!("{} NEGATIVE", label))?;
+            self.expect(TokenKind::Rparen)?;
             pairs.push(ContextPair {
                 positive: pos_id,
                 negative: neg_id,
             });
-            if self.peek().map(|t| t.kind).unwrap_or(TokenKind::Eof) == TokenKind::Comma {
-                if self.advance().is_err() {
-                    return pairs;
-                }
+            if self.peek()?.kind == TokenKind::Comma {
+                self.advance()?;
                 continue;
             }
-            return pairs;
+            return Ok(pairs);
         }
     }
 
@@ -134,6 +114,12 @@ impl<'a> Parser<'a> {
                 .text
                 .parse()
                 .map_err(|_| QqlError::syntax("invalid limit", limit_tok.pos))?;
+            if limit <= 0 {
+                return Err(QqlError::syntax(
+                    "limit must be a positive integer",
+                    limit_tok.pos,
+                ));
+            }
             stmt.limit = limit;
         } else {
             stmt.limit = 10;
@@ -153,11 +139,22 @@ impl<'a> Parser<'a> {
                     self.advance()?;
                     let offset_tok = self.advance()?;
                     let offset: i64 = match offset_tok.kind {
-                        TokenKind::Integer => offset_tok.text.parse().unwrap_or(0),
-                        _ => return Ok(()),
+                        TokenKind::Integer => offset_tok
+                            .text
+                            .parse()
+                            .map_err(|_| QqlError::syntax("invalid offset", offset_tok.pos))?,
+                        _ => {
+                            return Err(QqlError::syntax(
+                                "offset must be a non-negative integer",
+                                offset_tok.pos,
+                            ))
+                        }
                     };
                     if offset < 0 {
-                        return Ok(());
+                        return Err(QqlError::syntax(
+                            "offset must be a non-negative integer",
+                            offset_tok.pos,
+                        ));
                     }
                     stmt.offset = offset;
                 }
@@ -431,10 +428,16 @@ impl<'a> Parser<'a> {
                         if val > 0.0 && val == (val as u64) as f64 {
                             stmt.group_size = Some(val as i64);
                         } else {
-                            return Ok(());
+                            return Err(QqlError::syntax(
+                                "GROUP_SIZE must be a positive integer",
+                                self.peek()?.pos,
+                            ));
                         }
                     } else {
-                        return Ok(());
+                        return Err(QqlError::syntax(
+                            "GROUP_SIZE must be a positive integer",
+                            self.peek()?.pos,
+                        ));
                     }
                 }
                 TokenKind::Strategy => {
@@ -487,6 +490,12 @@ impl<'a> Parser<'a> {
                         .text
                         .parse()
                         .map_err(|_| QqlError::syntax("invalid limit", limit_tok.pos))?;
+                    if limit <= 0 {
+                        return Err(QqlError::syntax(
+                            "limit must be a positive integer",
+                            limit_tok.pos,
+                        ));
+                    }
                     stmt.limit = limit;
                 }
                 TokenKind::Boost => {

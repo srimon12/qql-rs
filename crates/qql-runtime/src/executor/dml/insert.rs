@@ -441,8 +441,9 @@ impl Executor {
                     let dim = embedder.probe_dimension("probe").await?;
                     Ok(dim)
                 }
+                _ if model.is_none() => Ok(crate::executor::DENSE_VECTOR_SIZE as usize),
                 _ => Err(QqlError::runtime(
-                    "embedding_dimension must be configured for local inference mode",
+                    "embedding_dimension must be configured when creating collections with USING MODEL in local inference mode",
                 )),
             };
         }
