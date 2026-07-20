@@ -176,7 +176,7 @@ impl JsHttpEmbedder {
 
 fn create_js_executor(
     options: Option<serde_json::Value>,
-) -> napi::Result<(qql::executor::Executor, tokio::runtime::Runtime)> {
+) -> napi::Result<qql::executor::Executor> {
     let opts = options.unwrap_or_else(|| serde_json::json!({}));
     let url_str = opts
         .get("url")
@@ -193,7 +193,6 @@ fn create_js_executor(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let rt = tokio::runtime::Runtime::new().map_err(|e| napi::Error::from_reason(e.to_string()))?;
 
     let mut config = qql::config::QqlConfig {
         url: url_str.to_string(),
@@ -253,61 +252,63 @@ fn create_js_executor(
 
     let exec = qql::executor::Executor::with_embedder(client, Some(config), embedder);
 
-    Ok((exec, rt))
+    Ok(exec)
 }
 
 #[napi(js_name = "Client")]
 pub struct JsClient {
     inner: qql::executor::Executor,
-    runtime: tokio::runtime::Runtime,
 }
 
 #[napi]
 impl JsClient {
     #[napi(constructor)]
     pub fn new(options: Option<serde_json::Value>) -> napi::Result<Self> {
-        let (exec, rt) = create_js_executor(options)?;
+        let exec = create_js_executor(options)?;
         Ok(JsClient {
             inner: exec,
-            runtime: rt,
         })
     }
 
     #[napi]
-    pub fn execute(&self, query: String) -> napi::Result<serde_json::Value> {
+    pub async fn execute(&self, query: String) -> napi::Result<serde_json::Value> {
         let res = self
-            .runtime
-            .block_on(self.inner.execute(&query))
+            .inner
+            .execute(&query)
+            .await
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
 
         serde_json::to_value(&res).map_err(|e| napi::Error::from_reason(e.to_string()))
     }
 
     #[napi]
-    pub fn execute_stmt(&self, stmt: &NapiStmt) -> napi::Result<serde_json::Value> {
+    pub async fn execute_stmt(&self, stmt: &NapiStmt) -> napi::Result<serde_json::Value> {
         let res = self
-            .runtime
-            .block_on(self.inner.execute_node(stmt.inner.clone()))
+            .inner
+            .execute_node(stmt.inner.clone())
+            .await
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
 
         serde_json::to_value(&res).map_err(|e| napi::Error::from_reason(e.to_string()))
     }
 
     #[napi]
-    pub fn execute_json(&self, query: String) -> napi::Result<String> {
+    pub async fn execute_json(&self, query: String) -> napi::Result<String> {
         let res = self
-            .runtime
-            .block_on(self.inner.execute(&query))
+            .inner
+            .execute(&query)
+            .await
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
 
         serde_json::to_string(&res).map_err(|e| napi::Error::from_reason(e.to_string()))
     }
 
     #[napi]
-    pub fn execute_stmt_json(&self, stmt: &NapiStmt) -> napi::Result<String> {
+    pub async fn execute_stmt_json(&self, stmt: &NapiStmt) -> napi::Result<String> {
         let res = self
-            .runtime
-            .block_on(self.inner.execute_node(stmt.inner.clone()))
+            .inner
+            .execute_node(stmt.inner.clone())
+            .await
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
 
         serde_json::to_string(&res).map_err(|e| napi::Error::from_reason(e.to_string()))
@@ -327,21 +328,21 @@ impl JsClient {
 }
 
 #[napi]
-pub fn execute(
+pub async fn execute(
     query: String,
     options: Option<serde_json::Value>,
 ) -> napi::Result<serde_json::Value> {
     let client = JsClient::new(options)?;
-    client.execute(query)
+    client.execute(query).await
 }
 
 #[napi]
-pub fn execute_stmt(
+pub async fn execute_stmt(
     stmt: &NapiStmt,
     options: Option<serde_json::Value>,
 ) -> napi::Result<serde_json::Value> {
     let client = JsClient::new(options)?;
-    client.execute_stmt(stmt)
+    client.execute_stmt(stmt).await
 }
 
 #[napi]

@@ -228,7 +228,7 @@ fn create_executor(
 
 #[pyclass(name = "Client")]
 struct PyClient {
-    inner: qql::executor::Executor,
+    inner: std::sync::Arc<qql::executor::Executor>,
     runtime: tokio::runtime::Runtime,
 }
 
@@ -244,7 +244,7 @@ impl PyClient {
     ) -> PyResult<Self> {
         let (exec, rt) = create_executor(url, api_key, use_grpc, embedder)?;
         Ok(PyClient {
-            inner: exec,
+            inner: std::sync::Arc::new(exec),
             runtime: rt,
         })
     }
@@ -270,6 +270,46 @@ impl PyClient {
 
         pythonize::pythonize(py, &res)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    #[pyo3(signature = (query))]
+    fn execute_async<'py>(
+        &self,
+        py: Python<'py>,
+        query: Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        let is_stmt = query.extract::<PyRef<PyStmt>>().is_ok();
+        let query_str = if !is_stmt {
+            Some(query.extract::<String>()?)
+        } else {
+            None
+        };
+        let py_stmt = if is_stmt {
+            Some(query.extract::<PyRef<PyStmt>>()?.inner.clone())
+        } else {
+            None
+        };
+
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let res = if let Some(stmt) = py_stmt {
+                inner.execute_node(stmt).await
+                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
+            } else if let Some(q_str) = query_str {
+                inner.execute(&q_str).await
+                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
+            } else {
+                return Err(pyo3::exceptions::PyTypeError::new_err(
+                    "query must be a string or a Stmt object",
+                ));
+            };
+            let py_val = Python::with_gil(|py| {
+                pythonize::pythonize(py, &res)
+                    .map(|b| b.unbind())
+                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+            })?;
+            Ok(py_val)
+        })
     }
 
     fn explain(&self, query: &Bound<'_, PyAny>) -> PyResult<String> {
@@ -303,6 +343,52 @@ fn execute<'py>(
 }
 
 #[pyfunction]
+#[pyo3(signature = (query, url="http://localhost:6333", api_key=None, use_grpc=false, embedder=None))]
+fn execute_async<'py>(
+    py: Python<'py>,
+    query: Bound<'py, PyAny>,
+    url: &str,
+    api_key: Option<String>,
+    use_grpc: bool,
+    embedder: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let (inner, rt) = create_executor(url, api_key, use_grpc, embedder)?;
+    let inner_arc = std::sync::Arc::new(inner);
+    let is_stmt = query.extract::<PyRef<PyStmt>>().is_ok();
+    let query_str = if !is_stmt {
+        Some(query.extract::<String>()?)
+    } else {
+        None
+    };
+    let py_stmt = if is_stmt {
+        Some(query.extract::<PyRef<PyStmt>>()?.inner.clone())
+    } else {
+        None
+    };
+
+    pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        let res = if let Some(stmt) = py_stmt {
+            inner_arc.execute_node(stmt).await
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
+        } else if let Some(q_str) = query_str {
+            inner_arc.execute(&q_str).await
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
+        } else {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "query must be a string or a Stmt object",
+            ));
+        };
+        let _rt_keepalive = rt;
+        let py_val = Python::with_gil(|py| {
+            pythonize::pythonize(py, &res)
+                .map(|b| b.unbind())
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+        })?;
+        Ok(py_val)
+    })
+}
+
+#[pyfunction]
 fn explain(query: &Bound<'_, PyAny>) -> PyResult<String> {
     if let Ok(py_stmt) = query.extract::<PyRef<PyStmt>>() {
         qql::executor::Executor::explain_node(&py_stmt.inner)
@@ -323,6 +409,7 @@ fn pyqql(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyHttpEmbedder>()?;
     m.add_class::<PyClient>()?;
     m.add_function(wrap_pyfunction!(execute, m)?)?;
+    m.add_function(wrap_pyfunction!(execute_async, m)?)?;
     m.add_function(wrap_pyfunction!(explain, m)?)?;
     m.add_function(wrap_pyfunction!(parse, m)?)?;
     m.add_function(wrap_pyfunction!(parse_all, m)?)?;
