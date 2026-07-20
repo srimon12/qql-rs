@@ -19,7 +19,7 @@ mod tests {
     #[test]
     fn test_tokenize_keywords() {
         let cases = [
-            ("INSERT", TokenKind::Insert),
+            ("UPSERT", TokenKind::Upsert),
             ("INTO", TokenKind::Into),
             ("COLLECTION", TokenKind::Collection),
             ("VALUES", TokenKind::Values),
@@ -139,8 +139,8 @@ mod tests {
     #[test]
     fn test_tokenize_keywords_case_insensitive() {
         let cases = [
-            ("insert", "insert", TokenKind::Insert),
-            ("Insert", "Insert", TokenKind::Insert),
+            ("upsert", "upsert", TokenKind::Upsert),
+            ("Upsert", "Upsert", TokenKind::Upsert),
             ("where", "where", TokenKind::Where),
             ("WhErE", "WhErE", TokenKind::Where),
             ("from", "from", TokenKind::From),
@@ -410,12 +410,12 @@ mod tests {
     // Full INSERT query
     // ---------------------------------------------------------------
     #[test]
-    fn test_tokenize_full_insert_query() {
-        let input = r#"INSERT INTO mycol VALUES {"text": "hello", "vector": [0.1, 0.2]}"#;
+    fn test_tokenize_full_upsert_query() {
+        let input = r#"UPSERT INTO mycol VALUES {"text": "hello", "vector": [0.1, 0.2]}"#;
         let tokens = tokenize(input);
 
         let expected = [
-            (TokenKind::Insert, "INSERT", 0),
+            (TokenKind::Upsert, "UPSERT", 0),
             (TokenKind::Into, "INTO", 7),
             (TokenKind::Identifier, "mycol", 12),
             (TokenKind::Values, "VALUES", 18),
@@ -546,12 +546,12 @@ mod tests {
     }
 
     #[test]
-    fn test_tokenize_qql_insert() {
-        let input = "INSERT INTO coll VALUES {'id': 1, 'text': 'hello'} USING HYBRID";
+    fn test_tokenize_qql_upsert() {
+        let input = "UPSERT INTO coll VALUES {'id': 1, 'text': 'hello'} USING HYBRID";
         let tokens = tokenize(input);
 
         let expected = [
-            (TokenKind::Insert, "INSERT", 0),
+            (TokenKind::Upsert, "UPSERT", 0),
             (TokenKind::Into, "INTO", 7),
             (TokenKind::Identifier, "coll", 12),
             (TokenKind::Values, "VALUES", 17),
@@ -642,11 +642,11 @@ mod tests {
     // ---------------------------------------------------------------
     #[test]
     fn test_tokenize_whitespace() {
-        let input = "  INSERT   INTO   COLLECTION  ";
+        let input = "  UPSERT   INTO   COLLECTION  ";
         let tokens = tokenize(input);
 
         let expected = [
-            (TokenKind::Insert, "INSERT", 2),
+            (TokenKind::Upsert, "UPSERT", 2),
             (TokenKind::Into, "INTO", 11),
             (TokenKind::Collection, "COLLECTION", 18),
         ];
@@ -661,11 +661,11 @@ mod tests {
 
     #[test]
     fn test_tokenize_tabs_and_newlines() {
-        let input = "INSERT\tINTO\nCOLLECTION";
+        let input = "UPSERT\tINTO\nCOLLECTION";
         let tokens = tokenize(input);
 
         let expected = [
-            (TokenKind::Insert, "INSERT", 0),
+            (TokenKind::Upsert, "UPSERT", 0),
             (TokenKind::Into, "INTO", 7),
             (TokenKind::Collection, "COLLECTION", 12),
         ];
@@ -799,7 +799,7 @@ mod tests {
     #[test]
     fn test_token_kind_string() {
         let cases = [
-            (TokenKind::Insert, "INSERT"),
+            (TokenKind::Upsert, "UPSERT"),
             (TokenKind::Eof, "EOF"),
             (TokenKind::Identifier, "IDENTIFIER"),
             (TokenKind::String, "STRING"),
@@ -820,9 +820,9 @@ mod tests {
     // ---------------------------------------------------------------
     #[test]
     fn test_token_display() {
-        let token = Token::new(TokenKind::Insert, "INSERT", 0);
+        let token = Token::new(TokenKind::Upsert, "UPSERT", 0);
         let s = alloc::format!("{}", token);
-        assert_eq!(s, "INSERT(INSERT)");
+        assert_eq!(s, "UPSERT(UPSERT)");
     }
 
     // ---------------------------------------------------------------

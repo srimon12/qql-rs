@@ -363,8 +363,8 @@ impl serde::Serialize for VectorInput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct PrefetchQuery {
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub prefetch: Vec<PrefetchQuery>,
+    #[serde(rename = "prefetch", skip_serializing_if = "Vec::is_empty")]
+    pub prefetches: Vec<PrefetchQuery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub query: Option<QueryVariant>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -418,12 +418,12 @@ impl serde::Serialize for WithPayload {
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct WithVectors {
+pub struct WithVector {
     pub enable: Option<bool>,
     pub vectors: Vec<String>,
 }
 
-impl serde::Serialize for WithVectors {
+impl serde::Serialize for WithVector {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -448,8 +448,8 @@ pub struct QueryPointsRequest {
     pub collection_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub query: Option<QueryVariant>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub prefetch: Vec<PrefetchQuery>,
+    #[serde(rename = "prefetch", skip_serializing_if = "Vec::is_empty")]
+    pub prefetches: Vec<PrefetchQuery>,
     pub limit: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<SearchParams>,
@@ -458,7 +458,7 @@ pub struct QueryPointsRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub with_payload: Option<WithPayload>,
     #[serde(rename = "with_vector", skip_serializing_if = "Option::is_none")]
-    pub with_vectors: Option<WithVectors>,
+    pub with_vector: Option<WithVector>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub score_threshold: Option<f32>,
     pub offset: u64,
@@ -476,8 +476,8 @@ pub struct QueryPointsGroupsRequest {
     pub collection_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub query: Option<QueryVariant>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub prefetch: Vec<PrefetchQuery>,
+    #[serde(rename = "prefetch", skip_serializing_if = "Vec::is_empty")]
+    pub prefetches: Vec<PrefetchQuery>,
     pub limit: u64,
     pub group_by: String,
     pub group_size: u64,
@@ -488,7 +488,7 @@ pub struct QueryPointsGroupsRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub with_payload: Option<WithPayload>,
     #[serde(rename = "with_vector", skip_serializing_if = "Option::is_none")]
-    pub with_vectors: Option<WithVectors>,
+    pub with_vector: Option<WithVector>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub score_threshold: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -527,7 +527,7 @@ pub struct QueryState {
     pub score_threshold: Option<f32>,
     pub lookup_from: Option<LookupLocation>,
     pub with_payload: Option<WithPayload>,
-    pub with_vectors: Option<WithVectors>,
+    pub with_vector: Option<WithVector>,
 
     pub group_by: String,
     pub group_size: u64,
@@ -589,7 +589,7 @@ impl QueryPipeline {
 
             if let Some(ref target) = state.target_query {
                 prefetches.push(PrefetchQuery {
-                    prefetch: Vec::new(),
+                    prefetches: Vec::new(),
                     query: Some(target.clone()),
                     using: if state.vector_name.is_empty() {
                         None
@@ -611,21 +611,21 @@ impl QueryPipeline {
         } else {
             state.target_query.clone()
         };
-        let prefetch = prefetches;
+        let prefetches = prefetches;
         let params = state.params.clone();
         let with_payload = state.with_payload.clone();
-        let with_vectors = state.with_vectors.clone();
+        let with_vector = state.with_vector.clone();
         let lookup_from = state.lookup_from.clone();
 
         let mut req = QueryPointsRequest {
             collection_name: state.collection_name.clone(),
             query,
-            prefetch,
+            prefetches,
             limit: state.limit,
             params,
             filter: state.qdrant_filter.clone(),
             with_payload,
-            with_vectors,
+            with_vector,
             score_threshold: state.score_threshold,
             offset: state.offset,
             lookup_from,
@@ -650,14 +650,14 @@ impl QueryPipeline {
         Ok(QueryPointsGroupsRequest {
             collection_name: flat.collection_name,
             query: flat.query,
-            prefetch: flat.prefetch,
+            prefetches: flat.prefetches,
             limit: flat.limit,
             group_by: state.group_by.clone(),
             group_size: state.group_size,
             params: flat.params,
             filter: flat.filter,
             with_payload: flat.with_payload,
-            with_vectors: flat.with_vectors,
+            with_vector: flat.with_vector,
             score_threshold: flat.score_threshold,
             lookup_from: flat.lookup_from,
             with_lookup,

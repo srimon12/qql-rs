@@ -157,7 +157,7 @@ fn new_default_cte_stmt() -> QueryStmt {
         group_size: None,
         with_clause: None,
         with_payload: None,
-        with_vectors: None,
+        with_vector: None,
         lookup_from: None,
         lookup_vector: None,
         with_lookup_collection: None,

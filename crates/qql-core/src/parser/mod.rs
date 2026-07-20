@@ -6,11 +6,11 @@ pub mod cte;
 pub mod filter;
 pub mod formula;
 pub mod helpers;
-pub mod insert;
 pub mod query;
 pub mod query_clauses;
 pub mod select;
 pub mod r#update;
+pub mod upsert;
 pub mod with_clause;
 
 pub use config_validation::{
@@ -167,7 +167,7 @@ impl<'a> Parser<'a> {
             TokenKind::Alter => self.parse_alter(),
             TokenKind::Drop => self.parse_drop(),
             TokenKind::Show => self.parse_show(),
-            TokenKind::Insert => self.parse_insert(),
+            TokenKind::Upsert => self.parse_upsert(),
             TokenKind::Select => self.parse_select(),
             TokenKind::Scroll => self.parse_scroll(),
             TokenKind::Query => self.parse_query(),

@@ -13,13 +13,13 @@ use qql_core::error::QqlError;
 use super::helpers::*;
 
 impl Executor {
-    pub(crate) async fn do_insert(&self, stmt: ast::InsertStmt) -> Result<ExecResponse, QqlError> {
+    pub(crate) async fn do_upsert(&self, stmt: ast::UpsertStmt) -> Result<ExecResponse, QqlError> {
         if stmt.values_list.is_empty() {
-            return Err(QqlError::runtime("INSERT VALUES list is empty"));
+            return Err(QqlError::runtime("UPSERT VALUES list is empty"));
         }
 
         let _created = self
-            .ensure_collection_for_insert(
+            .ensure_collection_for_upsert(
                 &stmt.collection,
                 stmt.model.as_deref(),
                 stmt.hybrid,
@@ -146,8 +146,8 @@ impl Executor {
 
         Ok(ExecResponse {
             ok: true,
-            operation: "insert".to_string(),
-            message: format!("Inserted {} point(s)", count),
+            operation: "upsert".to_string(),
+            message: format!("Upserted {} point(s)", count),
             data: Some(serde_json::json!({"count": count})),
         })
     }
@@ -375,7 +375,7 @@ impl Executor {
         Ok(batch)
     }
 
-    pub(crate) async fn ensure_collection_for_insert(
+    pub(crate) async fn ensure_collection_for_upsert(
         &self,
         collection: &str,
         model: Option<&str>,

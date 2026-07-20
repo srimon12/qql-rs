@@ -62,7 +62,7 @@ fn test_query_with_payload_and_vectors() {
             assert_eq!(wp.include, vec!["title"]);
             assert_eq!(wp.exclude, vec!["metadata"]);
             assert!(wp.enable.is_none());
-            let wv = q.with_vectors.as_ref().unwrap();
+            let wv = q.with_vector.as_ref().unwrap();
             assert_eq!(wv.enable, Some(true));
             assert!(wv.vectors.is_empty());
         }
@@ -76,7 +76,7 @@ fn test_query_with_payload_and_vectors() {
         Stmt::Query(q) => {
             let wp = q.with_payload.as_ref().unwrap();
             assert_eq!(wp.enable, Some(false));
-            let wv = q.with_vectors.as_ref().unwrap();
+            let wv = q.with_vector.as_ref().unwrap();
             assert!(wv.enable.is_none());
             assert_eq!(wv.vectors, vec!["dense", "sparse"]);
         }
@@ -94,7 +94,7 @@ fn test_query_multiple_with_clauses() {
             assert_eq!(q.model, Some(String::from("foo")));
             let wp = q.with_payload.as_ref().unwrap();
             assert_eq!(wp.include, vec!["title"]);
-            let wv = q.with_vectors.as_ref().unwrap();
+            let wv = q.with_vector.as_ref().unwrap();
             assert_eq!(wv.enable, Some(true));
             let wc = q.with_clause.as_ref().unwrap();
             assert!(wc.exact);

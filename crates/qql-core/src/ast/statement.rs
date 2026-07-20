@@ -130,7 +130,7 @@ pub struct QueryStmt {
     pub group_size: Option<i64>,
     pub with_clause: Option<Box<SearchWith>>,
     pub with_payload: Option<Box<PayloadSelector>>,
-    pub with_vectors: Option<Box<VectorsSelector>>,
+    pub with_vector: Option<Box<VectorsSelector>>,
     pub lookup_from: Option<String>,
     pub lookup_vector: Option<String>,
     pub with_lookup_collection: Option<String>,
@@ -175,7 +175,7 @@ pub struct EmbedDirective {
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
-pub struct InsertStmt {
+pub struct UpsertStmt {
     pub collection: String,
     pub values_list: Vec<Vec<(String, Value)>>,
     pub model: Option<String>,
@@ -373,7 +373,7 @@ pub enum Stmt {
     Query(Box<QueryStmt>),
     Select(Box<SelectStmt>),
     Scroll(Box<ScrollStmt>),
-    Insert(Box<InsertStmt>),
+    Upsert(Box<UpsertStmt>),
     CreateCollection(Box<CreateCollectionStmt>),
     CreateIndex(Box<CreateIndexStmt>),
     AlterCollection(Box<AlterCollectionStmt>),

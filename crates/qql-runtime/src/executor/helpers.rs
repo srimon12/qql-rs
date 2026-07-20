@@ -1,4 +1,4 @@
-use crate::pipeline::{PointId, WithPayload, WithVectors};
+use crate::pipeline::{PointId, WithPayload, WithVector};
 use qql_core::ast::{self, Value};
 use qql_core::error::QqlError;
 
@@ -28,16 +28,16 @@ pub(crate) fn build_with_payload(sel: Option<&ast::PayloadSelector>) -> Option<W
     None
 }
 
-pub(crate) fn build_with_vectors(sel: Option<&ast::VectorsSelector>) -> Option<WithVectors> {
+pub(crate) fn build_with_vector(sel: Option<&ast::VectorsSelector>) -> Option<WithVector> {
     let sel = sel?;
     if let Some(enable) = sel.enable {
-        return Some(WithVectors {
+        return Some(WithVector {
             enable: Some(enable),
             vectors: Vec::new(),
         });
     }
     if !sel.vectors.is_empty() {
-        return Some(WithVectors {
+        return Some(WithVector {
             enable: None,
             vectors: sel.vectors.iter().map(|s| s.to_string()).collect(),
         });

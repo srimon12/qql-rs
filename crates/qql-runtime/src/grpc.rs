@@ -6,8 +6,8 @@ use std::collections::HashMap;
 
 use crate::client::{
     CollectionInfo, CountPointsReq, CreateCollectionReq, CreateFieldIndexReq, DeletePointsReq,
-    GetPointsReq, PointGroup, QdrantOps, RetrievedPoint, ScoredPoint, ScrollPointsReq,
-    SetPayloadReq, UpdateVectorsReq, UpsertPointsReq,
+    GetPointsReq, PointGroup, QdrantAdminOps, QdrantCoreOps, RetrievedPoint, ScoredPoint,
+    ScrollPointsReq, SetPayloadReq, UpdateVectorsReq, UpsertPointsReq,
 };
 use crate::pipeline::{PointId, QueryPointsGroupsRequest, QueryPointsRequest};
 use qql_core::error::QqlError;
@@ -957,7 +957,7 @@ fn to_grpc_with_payload(
 }
 
 fn to_grpc_with_vectors(
-    wv: &crate::pipeline::WithVectors,
+    wv: &crate::pipeline::WithVector,
 ) -> qdrant_client::qdrant::WithVectorsSelector {
     let selector_options = if !wv.vectors.is_empty() {
         Some(
@@ -981,7 +981,7 @@ fn to_grpc_prefetch(
     pq: crate::pipeline::PrefetchQuery,
 ) -> Result<qdrant_client::qdrant::PrefetchQuery, QqlError> {
     let prefetch: Result<Vec<qdrant_client::qdrant::PrefetchQuery>, QqlError> =
-        pq.prefetch.into_iter().map(to_grpc_prefetch).collect();
+        pq.prefetches.into_iter().map(to_grpc_prefetch).collect();
 
     let query = pq.query.map(to_grpc_query).transpose()?;
     let params = pq.params.map(to_grpc_search_params);
@@ -1004,14 +1004,14 @@ fn to_grpc_query_points(
     req: QueryPointsRequest,
 ) -> Result<qdrant_client::qdrant::QueryPoints, QqlError> {
     let prefetch: Result<Vec<qdrant_client::qdrant::PrefetchQuery>, QqlError> =
-        req.prefetch.into_iter().map(to_grpc_prefetch).collect();
+        req.prefetches.into_iter().map(to_grpc_prefetch).collect();
 
     let query = req.query.map(to_grpc_query).transpose()?;
     let params = req.params.map(to_grpc_search_params);
     let filter = req.filter.map(to_grpc_filter).transpose()?;
     let lookup_from = req.lookup_from.map(to_grpc_lookup_location);
     let with_payload = req.with_payload.map(|wp| to_grpc_with_payload(&wp));
-    let with_vectors = req.with_vectors.map(|wv| to_grpc_with_vectors(&wv));
+    let with_vectors = req.with_vector.map(|wv| to_grpc_with_vectors(&wv));
 
     Ok(qdrant_client::qdrant::QueryPoints {
         collection_name: req.collection_name,
@@ -1042,14 +1042,14 @@ fn to_grpc_query_point_groups(
     req: QueryPointsGroupsRequest,
 ) -> Result<qdrant_client::qdrant::QueryPointGroups, QqlError> {
     let prefetch: Result<Vec<qdrant_client::qdrant::PrefetchQuery>, QqlError> =
-        req.prefetch.into_iter().map(to_grpc_prefetch).collect();
+        req.prefetches.into_iter().map(to_grpc_prefetch).collect();
 
     let query = req.query.map(to_grpc_query).transpose()?;
     let params = req.params.map(to_grpc_search_params);
     let filter = req.filter.map(to_grpc_filter).transpose()?;
     let lookup_from = req.lookup_from.map(to_grpc_lookup_location);
     let with_payload = req.with_payload.map(|wp| to_grpc_with_payload(&wp));
-    let with_vectors = req.with_vectors.map(|wv| to_grpc_with_vectors(&wv));
+    let with_vectors = req.with_vector.map(|wv| to_grpc_with_vectors(&wv));
     let with_lookup = req.with_lookup.map(|wl| qdrant_client::qdrant::WithLookup {
         collection: wl.collection,
         with_payload: None,
@@ -1364,7 +1364,7 @@ fn parse_json_collection_params_diff(
 }
 
 #[async_trait]
-impl QdrantOps for GrpcQdrant {
+impl QdrantCoreOps for GrpcQdrant {
     async fn list_collections(&self) -> Result<Vec<String>, QqlError> {
         let resp = self
             .client
@@ -1582,57 +1582,6 @@ impl QdrantOps for GrpcQdrant {
         Ok(())
     }
 
-    async fn update_collection(&self, req: serde_json::Value) -> Result<(), QqlError> {
-        let collection_name = req
-            .get("collection_name")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| QqlError::runtime("collection_name is required"))?
-            .to_string();
-
-        let optimizers_config = req
-            .get("optimizers_config")
-            .map(parse_json_optimizers_config_diff)
-            .transpose()?;
-
-        let hnsw_config = req
-            .get("hnsw_config")
-            .map(parse_json_hnsw_config_diff)
-            .transpose()?;
-
-        let quantization_config = req
-            .get("quantization_config")
-            .map(parse_json_quantization_config_diff)
-            .transpose()?;
-
-        let params = req
-            .get("params")
-            .map(parse_json_collection_params_diff)
-            .transpose()?;
-
-        let grpc_req = qdrant_client::qdrant::UpdateCollection {
-            collection_name,
-            optimizers_config,
-            hnsw_config,
-            quantization_config,
-            params,
-            ..Default::default()
-        };
-
-        self.client
-            .update_collection(grpc_req)
-            .await
-            .map_err(|e| QqlError::runtime(format!("gRPC update_collection failed: {e}")))?;
-        Ok(())
-    }
-
-    async fn delete_collection(&self, name: &str) -> Result<(), QqlError> {
-        self.client
-            .delete_collection(name)
-            .await
-            .map_err(|e| QqlError::runtime(format!("gRPC delete_collection failed: {e}")))?;
-        Ok(())
-    }
-
     async fn upsert(&self, req: UpsertPointsReq) -> Result<(), QqlError> {
         let points: Result<Vec<qdrant_client::qdrant::PointStruct>, QqlError> = req
             .points
@@ -1702,47 +1651,6 @@ impl QdrantOps for GrpcQdrant {
             .map(from_grpc_point_group)
             .collect();
         groups
-    }
-
-    async fn query_batch(
-        &self,
-        req: Vec<QueryPointsRequest>,
-    ) -> Result<Vec<Vec<ScoredPoint>>, QqlError> {
-        if req.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let collection_name = req[0].collection_name.clone();
-        let mut query_points = Vec::new();
-        for r in req {
-            let grpc_req = to_grpc_query_points(r)?;
-            query_points.push(grpc_req);
-        }
-
-        let grpc_req = qdrant_client::qdrant::QueryBatchPoints {
-            collection_name,
-            query_points,
-            ..Default::default()
-        };
-
-        let resp = self
-            .client
-            .query_batch(grpc_req)
-            .await
-            .map_err(|e| QqlError::runtime(format!("gRPC query_batch failed: {e}")))?;
-
-        let results: Result<Vec<Vec<ScoredPoint>>, QqlError> = resp
-            .result
-            .into_iter()
-            .map(|batch_result| {
-                batch_result
-                    .result
-                    .into_iter()
-                    .map(from_grpc_scored_point)
-                    .collect()
-            })
-            .collect();
-        results
     }
 
     async fn delete(&self, req: DeletePointsReq) -> Result<(), QqlError> {
@@ -1851,6 +1759,166 @@ impl QdrantOps for GrpcQdrant {
             .await
             .map_err(|e| QqlError::runtime(format!("gRPC set_payload failed: {e}")))?;
         Ok(())
+    }
+
+    async fn scroll(
+        &self,
+        req: ScrollPointsReq,
+    ) -> Result<(Vec<RetrievedPoint>, Option<PointId>), QqlError> {
+        let filter = req.filter.map(to_grpc_filter).transpose()?;
+        let offset = req.after.map(to_grpc_point_id);
+
+        let grpc_req = qdrant_client::qdrant::ScrollPoints {
+            collection_name: req.collection_name,
+            filter,
+            offset,
+            limit: Some(req.limit as u32),
+            with_payload: Some(qdrant_client::qdrant::WithPayloadSelector {
+                selector_options: Some(
+                    qdrant_client::qdrant::with_payload_selector::SelectorOptions::Enable(true),
+                ),
+            }),
+            ..Default::default()
+        };
+
+        let resp = self
+            .client
+            .scroll(grpc_req)
+            .await
+            .map_err(|e| QqlError::runtime(format!("gRPC scroll failed: {e}")))?;
+
+        let points: Result<Vec<RetrievedPoint>, QqlError> = resp
+            .result
+            .into_iter()
+            .map(from_grpc_retrieved_point)
+            .collect();
+
+        let next_page_offset = resp.next_page_offset.map(from_grpc_point_id).transpose()?;
+
+        Ok((points?, next_page_offset))
+    }
+
+    async fn get(&self, req: GetPointsReq) -> Result<Vec<RetrievedPoint>, QqlError> {
+        let id = crate::executor::helpers::to_point_id_static(&req.point_id)?;
+        let grpc_req = qdrant_client::qdrant::GetPoints {
+            collection_name: req.collection_name,
+            ids: vec![to_grpc_point_id(id)],
+            with_payload: Some(qdrant_client::qdrant::WithPayloadSelector {
+                selector_options: Some(
+                    qdrant_client::qdrant::with_payload_selector::SelectorOptions::Enable(true),
+                ),
+            }),
+            ..Default::default()
+        };
+
+        let resp = self
+            .client
+            .get_points(grpc_req)
+            .await
+            .map_err(|e| QqlError::runtime(format!("gRPC get failed: {e}")))?;
+
+        let points: Result<Vec<RetrievedPoint>, QqlError> = resp
+            .result
+            .into_iter()
+            .map(from_grpc_retrieved_point)
+            .collect();
+
+        points
+    }
+}
+
+#[async_trait]
+impl QdrantAdminOps for GrpcQdrant {
+    async fn update_collection(&self, req: serde_json::Value) -> Result<(), QqlError> {
+        let collection_name = req
+            .get("collection_name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| QqlError::runtime("collection_name is required"))?
+            .to_string();
+
+        let optimizers_config = req
+            .get("optimizers_config")
+            .map(parse_json_optimizers_config_diff)
+            .transpose()?;
+
+        let hnsw_config = req
+            .get("hnsw_config")
+            .map(parse_json_hnsw_config_diff)
+            .transpose()?;
+
+        let quantization_config = req
+            .get("quantization_config")
+            .map(parse_json_quantization_config_diff)
+            .transpose()?;
+
+        let params = req
+            .get("params")
+            .map(parse_json_collection_params_diff)
+            .transpose()?;
+
+        let grpc_req = qdrant_client::qdrant::UpdateCollection {
+            collection_name,
+            optimizers_config,
+            hnsw_config,
+            quantization_config,
+            params,
+            ..Default::default()
+        };
+
+        self.client
+            .update_collection(grpc_req)
+            .await
+            .map_err(|e| QqlError::runtime(format!("gRPC update_collection failed: {e}")))?;
+        Ok(())
+    }
+
+    async fn delete_collection(&self, name: &str) -> Result<(), QqlError> {
+        self.client
+            .delete_collection(name)
+            .await
+            .map_err(|e| QqlError::runtime(format!("gRPC delete_collection failed: {e}")))?;
+        Ok(())
+    }
+
+    async fn query_batch(
+        &self,
+        req: Vec<QueryPointsRequest>,
+    ) -> Result<Vec<Vec<ScoredPoint>>, QqlError> {
+        if req.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let collection_name = req[0].collection_name.clone();
+        let mut query_points = Vec::new();
+        for r in req {
+            let grpc_req = to_grpc_query_points(r)?;
+            query_points.push(grpc_req);
+        }
+
+        let grpc_req = qdrant_client::qdrant::QueryBatchPoints {
+            collection_name,
+            query_points,
+            ..Default::default()
+        };
+
+        let resp = self
+            .client
+            .query_batch(grpc_req)
+            .await
+            .map_err(|e| QqlError::runtime(format!("gRPC query_batch failed: {e}")))?;
+
+        let results: Result<Vec<Vec<ScoredPoint>>, QqlError> = resp
+            .result
+            .into_iter()
+            .map(|batch_result| {
+                batch_result
+                    .result
+                    .into_iter()
+                    .map(from_grpc_scored_point)
+                    .collect()
+            })
+            .collect();
+        results
     }
 
     async fn create_field_index(&self, req: CreateFieldIndexReq) -> Result<(), QqlError> {
@@ -2013,43 +2081,6 @@ impl QdrantOps for GrpcQdrant {
         Ok(())
     }
 
-    async fn scroll(
-        &self,
-        req: ScrollPointsReq,
-    ) -> Result<(Vec<RetrievedPoint>, Option<PointId>), QqlError> {
-        let filter = req.filter.map(to_grpc_filter).transpose()?;
-        let offset = req.after.map(to_grpc_point_id);
-
-        let grpc_req = qdrant_client::qdrant::ScrollPoints {
-            collection_name: req.collection_name,
-            filter,
-            offset,
-            limit: Some(req.limit as u32),
-            with_payload: Some(qdrant_client::qdrant::WithPayloadSelector {
-                selector_options: Some(
-                    qdrant_client::qdrant::with_payload_selector::SelectorOptions::Enable(true),
-                ),
-            }),
-            ..Default::default()
-        };
-
-        let resp = self
-            .client
-            .scroll(grpc_req)
-            .await
-            .map_err(|e| QqlError::runtime(format!("gRPC scroll failed: {e}")))?;
-
-        let points: Result<Vec<RetrievedPoint>, QqlError> = resp
-            .result
-            .into_iter()
-            .map(from_grpc_retrieved_point)
-            .collect();
-
-        let next_page_offset = resp.next_page_offset.map(from_grpc_point_id).transpose()?;
-
-        Ok((points?, next_page_offset))
-    }
-
     async fn count(&self, req: CountPointsReq) -> Result<u64, QqlError> {
         let filter = req.filter.map(to_grpc_filter).transpose()?;
         let grpc_req = qdrant_client::qdrant::CountPoints {
@@ -2071,33 +2102,5 @@ impl QdrantOps for GrpcQdrant {
             .count;
 
         Ok(count)
-    }
-
-    async fn get(&self, req: GetPointsReq) -> Result<Vec<RetrievedPoint>, QqlError> {
-        let id = crate::executor::helpers::to_point_id_static(&req.point_id)?;
-        let grpc_req = qdrant_client::qdrant::GetPoints {
-            collection_name: req.collection_name,
-            ids: vec![to_grpc_point_id(id)],
-            with_payload: Some(qdrant_client::qdrant::WithPayloadSelector {
-                selector_options: Some(
-                    qdrant_client::qdrant::with_payload_selector::SelectorOptions::Enable(true),
-                ),
-            }),
-            ..Default::default()
-        };
-
-        let resp = self
-            .client
-            .get_points(grpc_req)
-            .await
-            .map_err(|e| QqlError::runtime(format!("gRPC get failed: {e}")))?;
-
-        let points: Result<Vec<RetrievedPoint>, QqlError> = resp
-            .result
-            .into_iter()
-            .map(from_grpc_retrieved_point)
-            .collect();
-
-        points
     }
 }

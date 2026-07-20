@@ -78,7 +78,7 @@ impl ExecutionNode for DenseEmbedNode {
 
         if self.as_prefetch {
             state.prefetches.push(PrefetchQuery {
-                prefetch: Vec::new(),
+                prefetches: Vec::new(),
                 query: Some(final_query),
                 using: Some(self.vector_name.clone()),
                 limit: Some(self.limit),
@@ -111,7 +111,7 @@ impl ExecutionNode for RawVectorNode {
 
         if self.as_prefetch {
             _state.prefetches.push(PrefetchQuery {
-                prefetch: Vec::new(),
+                prefetches: Vec::new(),
                 query: Some(query),
                 using: Some(self.vector_name.clone()),
                 limit: Some(self.limit),
@@ -171,7 +171,7 @@ impl ExecutionNode for SparseEmbedNode {
 
         if self.as_prefetch {
             state.prefetches.push(PrefetchQuery {
-                prefetch: Vec::new(),
+                prefetches: Vec::new(),
                 query: Some(query),
                 using: Some(self.vector_name.clone()),
                 limit: Some(self.limit),

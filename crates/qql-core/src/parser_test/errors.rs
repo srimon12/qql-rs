@@ -8,8 +8,8 @@ fn test_parse_error_invalid_statement() {
 }
 
 #[test]
-fn test_parse_error_insert_missing_values() {
-    assert_parse_err("INSERT INTO test");
+fn test_parse_error_upsert_missing_values() {
+    assert_parse_err("UPSERT INTO test");
 }
 
 #[test]
@@ -19,7 +19,7 @@ fn test_parse_error_search_missing_query_text() {
 
 #[test]
 fn test_parse_error_reject_trailing_tokens() {
-    assert_parse_err("INSERT INTO test VALUES {'text': 'hello'} EXTRA");
+    assert_parse_err("UPSERT INTO test VALUES {'text': 'hello'} EXTRA");
 }
 
 #[test]

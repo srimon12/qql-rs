@@ -1,5 +1,5 @@
 use crate::ast::{
-    DeleteStmt, FilterExpr, InsertStmt, QueryStmt, ScrollStmt, Stmt, UpdatePayloadStmt, Value,
+    DeleteStmt, FilterExpr, QueryStmt, ScrollStmt, Stmt, UpdatePayloadStmt, UpsertStmt, Value,
 };
 use alloc::boxed::Box;
 use alloc::string::String;
@@ -90,12 +90,12 @@ pub fn inject_update_payload_filter(
     u.query_filter = merge_filters(u.query_filter.take(), new_filter);
 }
 
-/// Forces a field value into every INSERT payload row.
+/// Forces a field value into every UPSERT payload row.
 ///
 /// This is deliberately limited to equality-style tenant stamping. Other
 /// operators describe predicates, not payload mutations, so they are ignored
-/// for INSERT rather than inventing ambiguous row semantics.
-pub fn inject_insert_value(i: &mut InsertStmt, field: &str, op: &str, value: &Value) {
+/// for UPSERT rather than inventing ambiguous row semantics.
+pub fn inject_upsert_value(i: &mut UpsertStmt, field: &str, op: &str, value: &Value) {
     if op != "=" {
         return;
     }
@@ -129,7 +129,7 @@ pub fn inject_filter(stmt: &mut Stmt, field: &str, op: &str, value: &Value) {
         Stmt::UpdatePayload(ref mut u) => {
             inject_update_payload_filter(u, field.to_string(), op.to_string(), value.clone())
         }
-        Stmt::Insert(ref mut i) => inject_insert_value(i, field, op, value),
+        Stmt::Upsert(ref mut i) => inject_upsert_value(i, field, op, value),
         _ => {}
     }
 }

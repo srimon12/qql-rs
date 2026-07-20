@@ -293,10 +293,14 @@ impl PyClient {
 
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let res = if let Some(stmt) = py_stmt {
-                inner.execute_node(stmt).await
+                inner
+                    .execute_node(stmt)
+                    .await
                     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
             } else if let Some(q_str) = query_str {
-                inner.execute(&q_str).await
+                inner
+                    .execute(&q_str)
+                    .await
                     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
             } else {
                 return Err(pyo3::exceptions::PyTypeError::new_err(
@@ -326,7 +330,6 @@ impl PyClient {
         }
     }
 }
-
 
 #[pyfunction]
 #[pyo3(signature = (query, url="http://localhost:6333", api_key=None, use_grpc=false, embedder=None))]
@@ -368,10 +371,14 @@ fn execute_async<'py>(
 
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
         let res = if let Some(stmt) = py_stmt {
-            inner_arc.execute_node(stmt).await
+            inner_arc
+                .execute_node(stmt)
+                .await
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
         } else if let Some(q_str) = query_str {
-            inner_arc.execute(&q_str).await
+            inner_arc
+                .execute(&q_str)
+                .await
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
         } else {
             return Err(pyo3::exceptions::PyTypeError::new_err(

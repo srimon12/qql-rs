@@ -21,7 +21,7 @@ fn stmt_type_name(stmt: &ast::Stmt) -> &'static str {
         ast::Stmt::Query(_) => "query",
         ast::Stmt::Select(_) => "select",
         ast::Stmt::Scroll(_) => "scroll",
-        ast::Stmt::Insert(_) => "insert",
+        ast::Stmt::Upsert(_) => "upsert",
         ast::Stmt::Delete(_) => "delete",
         ast::Stmt::UpdateVector(_) => "update_vector",
         ast::Stmt::UpdatePayload(_) => "update_payload",
@@ -39,7 +39,7 @@ fn compile_stmt(stmt: &ast::Stmt) -> Result<serde_json::Value, QqlError> {
         ast::Stmt::Query(q) => compile_query(q),
         ast::Stmt::Select(s) => compile_select(s),
         ast::Stmt::Scroll(s) => compile_scroll(s),
-        ast::Stmt::Insert(i) => compile_insert(i),
+        ast::Stmt::Upsert(i) => compile_upsert(i),
         ast::Stmt::Delete(d) => compile_delete(d),
         ast::Stmt::UpdateVector(u) => compile_update_vector(u),
         ast::Stmt::UpdatePayload(u) => compile_update_payload(u),
@@ -169,7 +169,7 @@ fn compile_query(stmt: &ast::QueryStmt) -> Result<serde_json::Value, QqlError> {
         }
         body["with_payload"] = serde_json::Value::Object(wp);
     }
-    if let Some(ref sel) = stmt.with_vectors {
+    if let Some(ref sel) = stmt.with_vector {
         let mut wv = serde_json::Map::new();
         if let Some(enable) = sel.enable {
             wv.insert("enable".to_string(), serde_json::json!(enable));
@@ -177,7 +177,7 @@ fn compile_query(stmt: &ast::QueryStmt) -> Result<serde_json::Value, QqlError> {
         if !sel.vectors.is_empty() {
             wv.insert("vectors".to_string(), serde_json::json!(sel.vectors));
         }
-        body["with_vectors"] = serde_json::Value::Object(wv);
+        body["with_vector"] = serde_json::Value::Object(wv);
     }
     if let Some(lf) = &stmt.lookup_from {
         body["lookup_from"] = serde_json::json!({ "collection": lf });
@@ -218,7 +218,7 @@ fn compile_scroll(stmt: &ast::ScrollStmt) -> Result<serde_json::Value, QqlError>
     Ok(body)
 }
 
-fn compile_insert(stmt: &ast::InsertStmt) -> Result<serde_json::Value, QqlError> {
+fn compile_upsert(stmt: &ast::UpsertStmt) -> Result<serde_json::Value, QqlError> {
     let mut points = Vec::with_capacity(stmt.values_list.len());
     for row in &stmt.values_list {
         let mut payload = serde_json::Map::new();

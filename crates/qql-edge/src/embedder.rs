@@ -70,7 +70,9 @@ impl Embedder for FastEmbedder {
         let texts = vec![text.to_string()];
 
         let mut embeddings = tokio::task::spawn_blocking(move || {
-            let mut model = model.lock().unwrap();
+            let mut model = model
+                .lock()
+                .map_err(|e| QqlError::runtime(format!("fastembed mutex poisoned: {e}")))?;
             model
                 .embed(texts, None)
                 .map_err(|e| QqlError::runtime(format!("fastembed failed: {e}")))
@@ -96,7 +98,9 @@ impl Embedder for FastEmbedder {
         let batch = texts.to_vec();
 
         let embeddings = tokio::task::spawn_blocking(move || {
-            let mut model = model.lock().unwrap();
+            let mut model = model
+                .lock()
+                .map_err(|e| QqlError::runtime(format!("fastembed mutex poisoned: {e}")))?;
             model
                 .embed(batch, None)
                 .map_err(|e| QqlError::runtime(format!("fastembed batch failed: {e}")))

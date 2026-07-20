@@ -93,6 +93,7 @@ pub fn explain(query: &str) -> Result<String, JsValue> {
 
 #[cfg(feature = "runtime")]
 #[wasm_bindgen]
+#[allow(dead_code)]
 pub struct HttpEmbedder {
     endpoint: String,
     api_key: String,
@@ -136,6 +137,7 @@ impl HttpEmbedder {
 
 #[cfg(feature = "runtime")]
 #[wasm_bindgen]
+#[allow(dead_code)]
 pub struct Client {
     url: String,
     api_key: Option<String>,

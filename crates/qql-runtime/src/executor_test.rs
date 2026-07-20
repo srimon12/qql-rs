@@ -10,8 +10,8 @@ use qql_core::error::QqlError;
 use crate::config::QqlConfig;
 use crate::executor::{
     CollectionInfo, CountPointsReq, CreateCollectionReq, CreateFieldIndexReq, DeletePointsReq,
-    Executor, GetPointsReq, PointGroup, QdrantOps, RetrievedPoint, ScoredPoint, ScrollPointsReq,
-    SetPayloadReq, UpdateVectorsReq, UpsertPointsReq,
+    Executor, GetPointsReq, PointGroup, QdrantAdminOps, QdrantCoreOps, RetrievedPoint, ScoredPoint,
+    ScrollPointsReq, SetPayloadReq, UpdateVectorsReq, UpsertPointsReq,
 };
 use crate::pipeline::PointId;
 
@@ -90,7 +90,7 @@ fn mock_collection_info() -> CollectionInfo {
 }
 
 #[async_trait]
-impl QdrantOps for MockQdrantClient {
+impl QdrantCoreOps for MockQdrantClient {
     async fn list_collections(&self) -> Result<Vec<String>, QqlError> {
         Ok(self.collections.clone())
     }
@@ -106,13 +106,6 @@ impl QdrantOps for MockQdrantClient {
     }
     async fn create_collection(&self, req: CreateCollectionReq) -> Result<(), QqlError> {
         *self.last_create_collection.lock().unwrap() = Some(req);
-        Ok(())
-    }
-    async fn update_collection(&self, req: serde_json::Value) -> Result<(), QqlError> {
-        *self.last_update_collection.lock().unwrap() = Some(req);
-        Ok(())
-    }
-    async fn delete_collection(&self, _name: &str) -> Result<(), QqlError> {
         Ok(())
     }
     async fn upsert(&self, req: UpsertPointsReq) -> Result<(), QqlError> {
@@ -133,12 +126,6 @@ impl QdrantOps for MockQdrantClient {
         &self,
         _req: crate::pipeline::QueryPointsGroupsRequest,
     ) -> Result<Vec<PointGroup>, QqlError> {
-        Ok(vec![])
-    }
-    async fn query_batch(
-        &self,
-        _req: Vec<crate::pipeline::QueryPointsRequest>,
-    ) -> Result<Vec<Vec<ScoredPoint>>, QqlError> {
         Ok(vec![])
     }
     async fn delete(&self, req: DeletePointsReq) -> Result<(), QqlError> {
@@ -162,20 +149,37 @@ impl QdrantOps for MockQdrantClient {
         *self.last_set_payload.lock().unwrap() = Some(req);
         Ok(())
     }
-    async fn create_field_index(&self, _req: CreateFieldIndexReq) -> Result<(), QqlError> {
-        Ok(())
-    }
     async fn scroll(
         &self,
         _req: ScrollPointsReq,
     ) -> Result<(Vec<RetrievedPoint>, Option<PointId>), QqlError> {
         Ok((self.scroll_records.clone(), self.scroll_offset.clone()))
     }
-    async fn count(&self, _req: CountPointsReq) -> Result<u64, QqlError> {
-        Ok(0)
-    }
     async fn get(&self, _req: GetPointsReq) -> Result<Vec<RetrievedPoint>, QqlError> {
         Ok(self.get_records.clone())
+    }
+}
+
+#[async_trait]
+impl QdrantAdminOps for MockQdrantClient {
+    async fn update_collection(&self, req: serde_json::Value) -> Result<(), QqlError> {
+        *self.last_update_collection.lock().unwrap() = Some(req);
+        Ok(())
+    }
+    async fn delete_collection(&self, _name: &str) -> Result<(), QqlError> {
+        Ok(())
+    }
+    async fn query_batch(
+        &self,
+        _req: Vec<crate::pipeline::QueryPointsRequest>,
+    ) -> Result<Vec<Vec<ScoredPoint>>, QqlError> {
+        Ok(vec![])
+    }
+    async fn create_field_index(&self, _req: CreateFieldIndexReq) -> Result<(), QqlError> {
+        Ok(())
+    }
+    async fn count(&self, _req: CountPointsReq) -> Result<u64, QqlError> {
+        Ok(0)
     }
 }
 
@@ -511,14 +515,14 @@ async fn test_dml_missing_collection_errors() {
 }
 
 #[tokio::test]
-async fn test_insert_into_collection_creates_missing() {
+async fn test_upsert_into_collection_creates_missing() {
     let client = MockQdrantClient::default();
     let last_create = client.last_create_collection.clone();
     let last_upsert = client.last_upsert.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let query =
-        "INSERT INTO docs VALUES {id: '550e8400-e29b-41d4-a716-446655440000', text: 'hello'}";
+        "UPSERT INTO docs VALUES {id: '550e8400-e29b-41d4-a716-446655440000', text: 'hello'}";
     let resp = executor.execute(query).await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
@@ -586,8 +590,8 @@ async fn test_do_query_hybrid() {
     let query_req = last_query.lock().unwrap().take().unwrap();
     assert_eq!(query_req.collection_name, "docs");
     // Verify prefetch was constructed
-    assert!(!query_req.prefetch.is_empty());
-    let prefetches = &query_req.prefetch;
+    assert!(!query_req.prefetches.is_empty());
+    let prefetches = &query_req.prefetches;
     assert_eq!(prefetches.len(), 2);
 }
 
@@ -612,14 +616,14 @@ async fn test_query_missing_collection_errors() {
 }
 
 #[tokio::test]
-async fn test_insert_bad_types() {
+async fn test_upsert_bad_types() {
     let mut client = MockQdrantClient::default();
     client.exists = true;
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     // Wait, the parser catches syntax errors. But logic errors?
-    // E.g., INSERT with mismatching value lengths
-    let query = "INSERT INTO docs VALUES {id: 1}, {id: 2, text: 'a'}, {id: 3}";
+    // E.g., UPSERT with mismatching value lengths
+    let query = "UPSERT INTO docs VALUES {id: 1}, {id: 2, text: 'a'}, {id: 3}";
     let resp = executor.execute(query).await;
     // Actually, qql parser allows this since schema is flexible.
     assert!(resp.is_ok(), "{:?}", resp.err());

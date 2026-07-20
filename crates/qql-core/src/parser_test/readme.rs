@@ -32,12 +32,12 @@ fn test_readme_create_hybrid_rerank_collection() {
 }
 
 #[test]
-fn test_readme_hybrid_insert() {
+fn test_readme_hybrid_upsert() {
     let stmt = assert_parse_ok(
-        "INSERT INTO docs VALUES {'text': 'Qdrant stores vectors', 'topic': 'search'} USING HYBRID",
+        "UPSERT INTO docs VALUES {'text': 'Qdrant stores vectors', 'topic': 'search'} USING HYBRID",
     );
     match stmt {
-        Stmt::Insert(i) => {
+        Stmt::Upsert(i) => {
             assert_eq!(i.collection, "docs");
             assert!(i.hybrid);
             assert_eq!(

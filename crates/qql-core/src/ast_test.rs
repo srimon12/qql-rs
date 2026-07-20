@@ -624,7 +624,7 @@ mod tests {
             group_size: None,
             with_clause: None,
             with_payload: None,
-            with_vectors: None,
+            with_vector: None,
             lookup_from: None,
             lookup_vector: None,
             with_lookup_collection: None,
@@ -714,8 +714,8 @@ mod tests {
     }
 
     #[test]
-    fn test_ast_inject_filter_forces_insert_payload_field() {
-        let mut stmt = Stmt::Insert(Box::new(InsertStmt {
+    fn test_ast_inject_filter_forces_upsert_payload_field() {
+        let mut stmt = Stmt::Upsert(Box::new(UpsertStmt {
             collection: String::from("docs"),
             values_list: vec![
                 vec![
@@ -742,10 +742,10 @@ mod tests {
             &Value::Str(String::from("acme")),
         );
 
-        let Stmt::Insert(insert) = stmt else {
-            panic!("expected insert");
+        let Stmt::Upsert(upsert) = stmt else {
+            panic!("expected upsert");
         };
-        for row in &insert.values_list {
+        for row in &upsert.values_list {
             let tenant = row
                 .iter()
                 .rev()

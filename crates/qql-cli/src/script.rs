@@ -93,7 +93,7 @@ pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
             in_with_cte = false;
         } else {
             let is_starter = match tok.kind {
-                TokenKind::Insert
+                TokenKind::Upsert
                 | TokenKind::Create
                 | TokenKind::Alter
                 | TokenKind::Drop

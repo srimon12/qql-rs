@@ -12,7 +12,7 @@ use qql_core::ast::{self, Value};
 use qql_core::error::QqlError;
 
 use crate::executor::helpers::{
-    build_with_payload, build_with_vectors, clone_value, has_mmr, point_id_string,
+    build_with_payload, build_with_vector, clone_value, has_mmr, point_id_string,
 };
 
 impl Executor {
@@ -103,7 +103,7 @@ impl Executor {
                     vector_name: stmt.lookup_vector.clone(),
                 }),
             with_payload: build_with_payload(stmt.with_payload.as_ref().map(|p| p.as_ref())),
-            with_vectors: build_with_vectors(stmt.with_vectors.as_ref().map(|v| v.as_ref())),
+            with_vector: build_with_vector(stmt.with_vector.as_ref().map(|v| v.as_ref())),
             group_by: stmt.group_by.clone().unwrap_or_default(),
             group_size: stmt.group_size.unwrap_or(0) as u64,
             with_lookup: stmt
@@ -476,7 +476,7 @@ impl Executor {
         stmt: &ast::QueryStmt,
         cte_map: &HashMap<String, pipeline::PrefetchQuery>,
     ) -> Result<pipeline::PrefetchQuery, QqlError> {
-        let mut prefetch = Vec::new();
+        let mut prefetches = Vec::new();
 
         let mut scoped_map = cte_map.clone();
         for local_cte in &stmt.ctes {
@@ -492,7 +492,7 @@ impl Executor {
                     ref_node.cte_name
                 ))
             })?;
-            prefetch.push(nested.clone());
+            prefetches.push(nested.clone());
         }
 
         let using = stmt.using_.clone();
@@ -623,7 +623,7 @@ impl Executor {
         }
 
         Ok(pipeline::PrefetchQuery {
-            prefetch,
+            prefetches,
             query,
             using,
             limit,

@@ -140,8 +140,8 @@ impl Executor {
             Stmt::DropCollection(s) => {
                 plan.push_str(&format!("Statement: DROP COLLECTION {}\n", s.collection));
             }
-            Stmt::Insert(s) => {
-                plan.push_str(&format!("Statement: INSERT INTO {}\n", s.collection));
+            Stmt::Upsert(s) => {
+                plan.push_str(&format!("Statement: UPSERT INTO {}\n", s.collection));
                 if let Some(model) = &s.model {
                     plan.push_str(&format!("Model: {}\n", model));
                 }
@@ -305,7 +305,7 @@ impl Executor {
             Stmt::CreateCollection(n) => self.do_create_collection(*n).await,
             Stmt::AlterCollection(n) => self.do_alter_collection(*n).await,
             Stmt::DropCollection(n) => self.do_drop_collection(&n.collection).await,
-            Stmt::Insert(n) => self.do_insert(*n).await,
+            Stmt::Upsert(n) => self.do_upsert(*n).await,
             Stmt::Select(n) => self.do_select(*n).await,
             Stmt::Scroll(n) => self.do_scroll(*n).await,
             Stmt::Query(n) => self.do_query(*n).await,

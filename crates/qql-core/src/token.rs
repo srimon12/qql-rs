@@ -29,7 +29,7 @@ macro_rules! gen_keywords {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum TokenKind {
-    Insert,
+    Upsert,
     Into,
     Collection,
     Values,
@@ -154,7 +154,7 @@ pub enum TokenKind {
 }
 
 gen_as_str! {
-    Insert => "INSERT",
+    Upsert => "UPSERT",
     Into => "INTO",
     Collection => "COLLECTION",
     Values => "VALUES",
@@ -279,7 +279,7 @@ gen_as_str! {
 }
 
 gen_keywords! {
-    "INSERT" => TokenKind::Insert,
+    "UPSERT" => TokenKind::Upsert,
     "INTO" => TokenKind::Into,
     "COLLECTION" => TokenKind::Collection,
     "VALUES" => TokenKind::Values,

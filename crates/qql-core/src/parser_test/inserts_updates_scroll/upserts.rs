@@ -3,28 +3,28 @@ use alloc::vec;
 use crate::ast::Stmt;
 use crate::parser_test::{assert_parse_err, assert_parse_ok, make_payload, str_val};
 
-// ── INSERT ───────────────────────────────────────────────────
+// ── UPSERT ───────────────────────────────────────────────────
 
 #[test]
-fn test_insert_simple() {
-    let stmt = assert_parse_ok("INSERT INTO test VALUES {'text': 'hello'}");
+fn test_upsert_simple() {
+    let stmt = assert_parse_ok("UPSERT INTO test VALUES {'text': 'hello'}");
     match stmt {
-        Stmt::Insert(i) => {
+        Stmt::Upsert(i) => {
             assert_eq!(i.collection, "test");
             assert_eq!(
                 i.values_list,
                 vec![vec![(String::from("text"), str_val("hello"))]]
             );
         }
-        _ => panic!("expected Insert"),
+        _ => panic!("expected Upsert"),
     }
 }
 
 #[test]
-fn test_insert_with_bare_keys() {
-    let stmt = assert_parse_ok("INSERT INTO test VALUES {text: 'hello', topic: 'search'}");
+fn test_upsert_with_bare_keys() {
+    let stmt = assert_parse_ok("UPSERT INTO test VALUES {text: 'hello', topic: 'search'}");
     match stmt {
-        Stmt::Insert(i) => {
+        Stmt::Upsert(i) => {
             assert_eq!(i.collection, "test");
             assert_eq!(
                 i.values_list,
@@ -34,15 +34,15 @@ fn test_insert_with_bare_keys() {
                 ])]
             );
         }
-        _ => panic!("expected Insert"),
+        _ => panic!("expected Upsert"),
     }
 }
 
 #[test]
-fn test_insert_with_explicit_id() {
-    let stmt = assert_parse_ok("INSERT INTO test VALUES {id: 'point-123', text: 'hello'}");
+fn test_upsert_with_explicit_id() {
+    let stmt = assert_parse_ok("UPSERT INTO test VALUES {id: 'point-123', text: 'hello'}");
     match stmt {
-        Stmt::Insert(i) => {
+        Stmt::Upsert(i) => {
             assert_eq!(i.collection, "test");
             assert_eq!(
                 i.values_list,
@@ -52,72 +52,72 @@ fn test_insert_with_explicit_id() {
                 ])]
             );
         }
-        _ => panic!("expected Insert"),
+        _ => panic!("expected Upsert"),
     }
 }
 
 #[test]
-fn test_insert_with_model() {
+fn test_upsert_with_model() {
     let stmt =
-        assert_parse_ok("INSERT INTO test VALUES {'text': 'hello'} USING MODEL 'model-name'");
+        assert_parse_ok("UPSERT INTO test VALUES {'text': 'hello'} USING MODEL 'model-name'");
     match stmt {
-        Stmt::Insert(i) => {
+        Stmt::Upsert(i) => {
             assert_eq!(i.collection, "test");
             assert_eq!(i.model, Some(String::from("model-name")));
             assert!(!i.hybrid);
         }
-        _ => panic!("expected Insert"),
+        _ => panic!("expected Upsert"),
     }
 }
 
 #[test]
-fn test_insert_with_hybrid() {
-    let stmt = assert_parse_ok("INSERT INTO test VALUES {'text': 'hello'} USING HYBRID");
+fn test_upsert_with_hybrid() {
+    let stmt = assert_parse_ok("UPSERT INTO test VALUES {'text': 'hello'} USING HYBRID");
     match stmt {
-        Stmt::Insert(i) => {
+        Stmt::Upsert(i) => {
             assert_eq!(i.collection, "test");
             assert!(i.hybrid);
         }
-        _ => panic!("expected Insert"),
+        _ => panic!("expected Upsert"),
     }
 }
 
 #[test]
-fn test_insert_with_hybrid_and_models() {
+fn test_upsert_with_hybrid_and_models() {
     let stmt = assert_parse_ok(
-            "INSERT INTO test VALUES {'text': 'hello'} USING HYBRID DENSE MODEL 'dense-model' SPARSE MODEL 'sparse-model'",
+            "UPSERT INTO test VALUES {'text': 'hello'} USING HYBRID DENSE MODEL 'dense-model' SPARSE MODEL 'sparse-model'",
         );
     match stmt {
-        Stmt::Insert(i) => {
+        Stmt::Upsert(i) => {
             assert_eq!(i.collection, "test");
             assert!(i.hybrid);
             assert_eq!(i.model, Some(String::from("dense-model")));
             assert_eq!(i.sparse_model, Some(String::from("sparse-model")));
         }
-        _ => panic!("expected Insert"),
+        _ => panic!("expected Upsert"),
     }
 }
 
 #[test]
-fn test_insert_with_sparse_model_only() {
+fn test_upsert_with_sparse_model_only() {
     let stmt = assert_parse_ok(
-        "INSERT INTO test VALUES {'text': 'hello'} USING HYBRID SPARSE MODEL 'sparse-model'",
+        "UPSERT INTO test VALUES {'text': 'hello'} USING HYBRID SPARSE MODEL 'sparse-model'",
     );
     match stmt {
-        Stmt::Insert(i) => {
+        Stmt::Upsert(i) => {
             assert_eq!(i.collection, "test");
             assert!(i.hybrid);
             assert_eq!(i.sparse_model, Some(String::from("sparse-model")));
         }
-        _ => panic!("expected Insert"),
+        _ => panic!("expected Upsert"),
     }
 }
 
 #[test]
-fn test_insert_multiple_values() {
-    let stmt = assert_parse_ok("INSERT INTO test VALUES {'text': 'hello'}, {'text': 'world'}");
+fn test_upsert_multiple_values() {
+    let stmt = assert_parse_ok("UPSERT INTO test VALUES {'text': 'hello'}, {'text': 'world'}");
     match stmt {
-        Stmt::Insert(i) => {
+        Stmt::Upsert(i) => {
             assert_eq!(i.collection, "test");
             assert_eq!(
                 i.values_list,
@@ -127,35 +127,35 @@ fn test_insert_multiple_values() {
                 ]
             );
         }
-        _ => panic!("expected Insert"),
+        _ => panic!("expected Upsert"),
     }
 }
 
-// ── INSERT with EMBED ────────────────────────────────────────
+// ── UPSERT with EMBED ────────────────────────────────────────
 
 #[test]
-fn test_insert_embed_single() {
+fn test_upsert_embed_single() {
     let stmt = assert_parse_ok(
-            "INSERT INTO arxiv VALUES {id: 'p1', text: 'chunk', title: 'Paper'} EMBED text INTO dense_chunk",
+            "UPSERT INTO arxiv VALUES {id: 'p1', text: 'chunk', title: 'Paper'} EMBED text INTO dense_chunk",
         );
     match stmt {
-        Stmt::Insert(i) => {
+        Stmt::Upsert(i) => {
             assert_eq!(i.collection, "arxiv");
             assert_eq!(i.embed_directives.len(), 1);
             assert_eq!(i.embed_directives[0].source_field, "text");
             assert_eq!(i.embed_directives[0].target_vector, "dense_chunk");
         }
-        _ => panic!("expected Insert"),
+        _ => panic!("expected Upsert"),
     }
 }
 
 #[test]
-fn test_insert_embed_multiple() {
+fn test_upsert_embed_multiple() {
     let stmt = assert_parse_ok(
-            "INSERT INTO arxiv VALUES {id: 'p1', text: 'chunk', title: 'Paper', abstract: 'Full abstract'} EMBED text INTO dense_chunk, title INTO dense_title, abstract INTO dense_abstract",
+            "UPSERT INTO arxiv VALUES {id: 'p1', text: 'chunk', title: 'Paper', abstract: 'Full abstract'} EMBED text INTO dense_chunk, title INTO dense_title, abstract INTO dense_abstract",
         );
     match stmt {
-        Stmt::Insert(i) => {
+        Stmt::Upsert(i) => {
             assert_eq!(i.collection, "arxiv");
             assert_eq!(i.embed_directives.len(), 3);
             assert_eq!(i.embed_directives[0].source_field, "text");
@@ -165,34 +165,34 @@ fn test_insert_embed_multiple() {
             assert_eq!(i.embed_directives[2].source_field, "abstract");
             assert_eq!(i.embed_directives[2].target_vector, "dense_abstract");
         }
-        _ => panic!("expected Insert"),
+        _ => panic!("expected Upsert"),
     }
 }
 
 #[test]
-fn test_insert_embed_with_sparse() {
+fn test_upsert_embed_with_sparse() {
     let stmt = assert_parse_ok(
-            "INSERT INTO arxiv VALUES {id: 'p1', title: 'Paper'} EMBED title INTO sparse_title USING SPARSE",
+            "UPSERT INTO arxiv VALUES {id: 'p1', title: 'Paper'} EMBED title INTO sparse_title USING SPARSE",
         );
     match stmt {
-        Stmt::Insert(i) => {
+        Stmt::Upsert(i) => {
             assert_eq!(i.collection, "arxiv");
             assert_eq!(i.embed_directives.len(), 1);
             assert_eq!(i.embed_directives[0].source_field, "title");
             assert_eq!(i.embed_directives[0].target_vector, "sparse_title");
             assert_eq!(i.embed_directives[0].sparse_model, Some(String::from("")));
         }
-        _ => panic!("expected Insert"),
+        _ => panic!("expected Upsert"),
     }
 }
 
 #[test]
-fn test_insert_embed_with_explicit_model() {
+fn test_upsert_embed_with_explicit_model() {
     let stmt = assert_parse_ok(
-            "INSERT INTO arxiv VALUES {id: 'p1', title: 'Paper'} EMBED title INTO dense_title USING MODEL 'custom-model'",
+            "UPSERT INTO arxiv VALUES {id: 'p1', title: 'Paper'} EMBED title INTO dense_title USING MODEL 'custom-model'",
         );
     match stmt {
-        Stmt::Insert(i) => {
+        Stmt::Upsert(i) => {
             assert_eq!(i.collection, "arxiv");
             assert_eq!(i.embed_directives.len(), 1);
             assert_eq!(i.embed_directives[0].source_field, "title");
@@ -202,17 +202,17 @@ fn test_insert_embed_with_explicit_model() {
                 Some(String::from("custom-model"))
             );
         }
-        _ => panic!("expected Insert"),
+        _ => panic!("expected Upsert"),
     }
 }
 
 #[test]
-fn test_insert_embed_mixed_dense_sparse() {
+fn test_upsert_embed_mixed_dense_sparse() {
     let stmt = assert_parse_ok(
-            "INSERT INTO arxiv VALUES {id: 'p1', text: 'chunk', title: 'Paper'} EMBED text INTO dense_chunk, title INTO sparse_title USING SPARSE",
+            "UPSERT INTO arxiv VALUES {id: 'p1', text: 'chunk', title: 'Paper'} EMBED text INTO dense_chunk, title INTO sparse_title USING SPARSE",
         );
     match stmt {
-        Stmt::Insert(i) => {
+        Stmt::Upsert(i) => {
             assert_eq!(i.collection, "arxiv");
             assert_eq!(i.embed_directives.len(), 2);
             assert_eq!(i.embed_directives[0].source_field, "text");
@@ -222,24 +222,24 @@ fn test_insert_embed_mixed_dense_sparse() {
             assert_eq!(i.embed_directives[1].target_vector, "sparse_title");
             assert_eq!(i.embed_directives[1].sparse_model, Some(String::from("")));
         }
-        _ => panic!("expected Insert"),
+        _ => panic!("expected Upsert"),
     }
 }
 
-// ── INSERT Errors ────────────────────────────────────────────
+// ── UPSERT Errors ────────────────────────────────────────────
 
 #[test]
-fn test_insert_errors() {
-    assert_parse_err("INSERT INTO test VALUES");
+fn test_upsert_errors() {
+    assert_parse_err("UPSERT INTO test VALUES");
 }
 
 // ── QUERY: Simple basic parse ────────────────────────────────
 
 #[test]
-fn test_parse_insert() {
-    let stmt = assert_parse_ok("INSERT INTO test VALUES {'text': 'hello'}");
+fn test_parse_upsert() {
+    let stmt = assert_parse_ok("UPSERT INTO test VALUES {'text': 'hello'}");
     match stmt {
-        Stmt::Insert(_) => {}
-        _ => panic!("expected Insert"),
+        Stmt::Upsert(_) => {}
+        _ => panic!("expected Upsert"),
     }
 }

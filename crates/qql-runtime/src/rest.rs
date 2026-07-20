@@ -10,8 +10,8 @@ use qql_core::error::QqlError;
 
 use crate::client::{
     CollectionInfo, CountPointsReq, CreateCollectionReq, CreateFieldIndexReq, DeletePointsReq,
-    GetPointsReq, PointGroup, QdrantOps, RetrievedPoint, ScoredPoint, ScrollPointsReq,
-    SetPayloadReq, UpdateVectorsReq, UpsertPointsReq,
+    GetPointsReq, PointGroup, QdrantAdminOps, QdrantCoreOps, RetrievedPoint, ScoredPoint,
+    ScrollPointsReq, SetPayloadReq, UpdateVectorsReq, UpsertPointsReq,
 };
 use crate::pipeline::{PointId, QueryPointsGroupsRequest, QueryPointsRequest};
 
@@ -153,7 +153,7 @@ pub(crate) fn grouped_query_request_json(
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-impl QdrantOps for RestQdrant {
+impl QdrantCoreOps for RestQdrant {
     async fn list_collections(&self) -> Result<Vec<String>, QqlError> {
         let value: Value = self.call(Method::GET, "/collections", None).await?;
         Ok(value
@@ -242,35 +242,6 @@ impl QdrantOps for RestQdrant {
         Ok(())
     }
 
-    async fn update_collection(&self, req: Value) -> Result<(), QqlError> {
-        let name = req
-            .get("collection_name")
-            .and_then(Value::as_str)
-            .ok_or_else(|| QqlError::runtime("collection_name is required"))?
-            .to_owned();
-        let mut body = req;
-        body.as_object_mut()
-            .expect("request is constructed as an object")
-            .remove("collection_name");
-        self.call::<Value>(
-            Method::PATCH,
-            &format!("/collections/{name}?wait=true"),
-            Some(body),
-        )
-        .await?;
-        Ok(())
-    }
-
-    async fn delete_collection(&self, name: &str) -> Result<(), QqlError> {
-        self.call::<Value>(
-            Method::DELETE,
-            &format!("/collections/{name}?wait=true"),
-            None,
-        )
-        .await?;
-        Ok(())
-    }
-
     async fn upsert(&self, req: UpsertPointsReq) -> Result<(), QqlError> {
         let points: Result<Vec<Value>, QqlError> = req
             .points
@@ -318,14 +289,6 @@ impl QdrantOps for RestQdrant {
             .await?;
         let groups = value.get("groups").cloned().unwrap_or(value);
         serde_json::from_value(groups).map_err(|error| QqlError::runtime(error.to_string()))
-    }
-
-    async fn query_batch(
-        &self,
-        req: Vec<QueryPointsRequest>,
-    ) -> Result<Vec<Vec<ScoredPoint>>, QqlError> {
-        let futures = req.into_iter().map(|query| self.query(query));
-        futures_util::future::try_join_all(futures).await
     }
 
     async fn delete(&self, req: DeletePointsReq) -> Result<(), QqlError> {
@@ -386,25 +349,6 @@ impl QdrantOps for RestQdrant {
         Ok(())
     }
 
-    async fn create_field_index(&self, req: CreateFieldIndexReq) -> Result<(), QqlError> {
-        let options: HashMap<String, Value> = req
-            .options
-            .into_iter()
-            .map(|(key, value)| (key, crate::executor::helpers::value_to_json(&value)))
-            .collect();
-        self.call::<Value>(
-            Method::PUT,
-            &format!("/collections/{}/index?wait=true", req.collection_name),
-            Some(json!({
-                "field_name": req.field,
-                "field_schema": req.field_type,
-                "field_index_params": options,
-            })),
-        )
-        .await?;
-        Ok(())
-    }
-
     async fn scroll(
         &self,
         req: ScrollPointsReq,
@@ -434,6 +378,78 @@ impl QdrantOps for RestQdrant {
         Ok((points, offset))
     }
 
+    async fn get(&self, req: GetPointsReq) -> Result<Vec<RetrievedPoint>, QqlError> {
+        let id = crate::executor::helpers::to_point_id_static(&req.point_id)?;
+        let points: Value = self
+            .call(
+                Method::POST,
+                &format!("/collections/{}/points", req.collection_name),
+                Some(json!({ "ids": [point_id_json(id)], "with_payload": true })),
+            )
+            .await?;
+        serde_json::from_value(points).map_err(|error| QqlError::runtime(error.to_string()))
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+impl QdrantAdminOps for RestQdrant {
+    async fn update_collection(&self, req: Value) -> Result<(), QqlError> {
+        let name = req
+            .get("collection_name")
+            .and_then(Value::as_str)
+            .ok_or_else(|| QqlError::runtime("collection_name is required"))?
+            .to_owned();
+        let mut body = req;
+        body.as_object_mut()
+            .expect("request is constructed as an object")
+            .remove("collection_name");
+        self.call::<Value>(
+            Method::PATCH,
+            &format!("/collections/{name}?wait=true"),
+            Some(body),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn delete_collection(&self, name: &str) -> Result<(), QqlError> {
+        self.call::<Value>(
+            Method::DELETE,
+            &format!("/collections/{name}?wait=true"),
+            None,
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn query_batch(
+        &self,
+        req: Vec<QueryPointsRequest>,
+    ) -> Result<Vec<Vec<ScoredPoint>>, QqlError> {
+        let futures = req.into_iter().map(|query| self.query(query));
+        futures_util::future::try_join_all(futures).await
+    }
+
+    async fn create_field_index(&self, req: CreateFieldIndexReq) -> Result<(), QqlError> {
+        let options: HashMap<String, Value> = req
+            .options
+            .into_iter()
+            .map(|(key, value)| (key, crate::executor::helpers::value_to_json(&value)))
+            .collect();
+        self.call::<Value>(
+            Method::PUT,
+            &format!("/collections/{}/index?wait=true", req.collection_name),
+            Some(json!({
+                "field_name": req.field,
+                "field_schema": req.field_type,
+                "field_index_params": options,
+            })),
+        )
+        .await?;
+        Ok(())
+    }
+
     async fn count(&self, req: CountPointsReq) -> Result<u64, QqlError> {
         let value: Value = self
             .call(
@@ -446,17 +462,5 @@ impl QdrantOps for RestQdrant {
             .get("count")
             .and_then(Value::as_u64)
             .ok_or_else(|| QqlError::runtime("Qdrant did not return a point count"))
-    }
-
-    async fn get(&self, req: GetPointsReq) -> Result<Vec<RetrievedPoint>, QqlError> {
-        let id = crate::executor::helpers::to_point_id_static(&req.point_id)?;
-        let points: Value = self
-            .call(
-                Method::POST,
-                &format!("/collections/{}/points", req.collection_name),
-                Some(json!({ "ids": [point_id_json(id)], "with_payload": true })),
-            )
-            .await?;
-        serde_json::from_value(points).map_err(|error| QqlError::runtime(error.to_string()))
     }
 }

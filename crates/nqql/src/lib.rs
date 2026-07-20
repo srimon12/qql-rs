@@ -174,9 +174,7 @@ impl JsHttpEmbedder {
     }
 }
 
-fn create_js_executor(
-    options: Option<serde_json::Value>,
-) -> napi::Result<qql::executor::Executor> {
+fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::executor::Executor> {
     let opts = options.unwrap_or_else(|| serde_json::json!({}));
     let url_str = opts
         .get("url")
@@ -192,7 +190,6 @@ fn create_js_executor(
         .or_else(|| opts.get("use_grpc"))
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-
 
     let mut config = qql::config::QqlConfig {
         url: url_str.to_string(),
@@ -265,9 +262,7 @@ impl JsClient {
     #[napi(constructor)]
     pub fn new(options: Option<serde_json::Value>) -> napi::Result<Self> {
         let exec = create_js_executor(options)?;
-        Ok(JsClient {
-            inner: exec,
-        })
+        Ok(JsClient { inner: exec })
     }
 
     #[napi]

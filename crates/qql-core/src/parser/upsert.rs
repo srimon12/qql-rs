@@ -1,14 +1,14 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use crate::ast::{EmbedDirective, InsertStmt, Stmt};
+use crate::ast::{EmbedDirective, Stmt, UpsertStmt};
 use crate::error::QqlError;
 use crate::token::TokenKind;
 
 use super::{ascii_equal, Parser};
 
 impl<'a> Parser<'a> {
-    pub fn parse_insert(&mut self) -> Result<Stmt, QqlError> {
+    pub fn parse_upsert(&mut self) -> Result<Stmt, QqlError> {
         self.advance()?;
         self.expect(TokenKind::Into)?;
         let collection = self.parse_identifier()?;
@@ -26,7 +26,7 @@ impl<'a> Parser<'a> {
         }
         if values_list.is_empty() {
             return Err(QqlError::syntax(
-                "INSERT VALUES requires at least one row",
+                "UPSERT VALUES requires at least one row",
                 self.peek()?.pos,
             ));
         }
@@ -43,7 +43,7 @@ impl<'a> Parser<'a> {
             embed_directives = self.parse_embed_clause()?;
         }
 
-        Ok(Stmt::Insert(Box::new(InsertStmt {
+        Ok(Stmt::Upsert(Box::new(UpsertStmt {
             collection,
             values_list,
             model,

@@ -344,12 +344,12 @@ fn test_fusion_from_keyword() {
 fn test_parse_all_statements() {
     let script = "
         CREATE COLLECTION my_col HYBRID;
-        INSERT INTO my_col VALUES {id: 1, text: 'hello'};
+        UPSERT INTO my_col VALUES {id: 1, text: 'hello'};
         QUERY 'hello' FROM my_col;
     ";
     let stmts = crate::parser::Parser::parse_all(script).unwrap();
     assert_eq!(stmts.len(), 3);
     assert!(matches!(stmts[0], Stmt::CreateCollection(_)));
-    assert!(matches!(stmts[1], Stmt::Insert(_)));
+    assert!(matches!(stmts[1], Stmt::Upsert(_)));
     assert!(matches!(stmts[2], Stmt::Query(_)));
 }

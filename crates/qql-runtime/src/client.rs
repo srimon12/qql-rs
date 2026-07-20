@@ -112,31 +112,49 @@ impl<T> QdrantOpsBound for T {}
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-pub trait QdrantOps: QdrantOpsBound {
+pub trait QdrantCoreOps: QdrantOpsBound {
     async fn list_collections(&self) -> Result<Vec<String>, QqlError>;
     async fn collection_exists(&self, name: &str) -> Result<bool, QqlError>;
     async fn get_collection_info(&self, name: &str) -> Result<CollectionInfo, QqlError>;
     async fn create_collection(&self, req: CreateCollectionReq) -> Result<(), QqlError>;
-    async fn update_collection(&self, req: serde_json::Value) -> Result<(), QqlError>;
-    async fn delete_collection(&self, name: &str) -> Result<(), QqlError>;
     async fn upsert(&self, req: UpsertPointsReq) -> Result<(), QqlError>;
     async fn query(&self, req: QueryPointsRequest) -> Result<Vec<ScoredPoint>, QqlError>;
     async fn query_groups(
         &self,
         req: QueryPointsGroupsRequest,
     ) -> Result<Vec<PointGroup>, QqlError>;
-    async fn query_batch(
-        &self,
-        req: Vec<QueryPointsRequest>,
-    ) -> Result<Vec<Vec<ScoredPoint>>, QqlError>;
     async fn delete(&self, req: DeletePointsReq) -> Result<(), QqlError>;
     async fn update_vectors(&self, req: UpdateVectorsReq) -> Result<(), QqlError>;
     async fn set_payload(&self, req: SetPayloadReq) -> Result<(), QqlError>;
-    async fn create_field_index(&self, req: CreateFieldIndexReq) -> Result<(), QqlError>;
     async fn scroll(
         &self,
         req: ScrollPointsReq,
     ) -> Result<(Vec<RetrievedPoint>, Option<PointId>), QqlError>;
-    async fn count(&self, req: CountPointsReq) -> Result<u64, QqlError>;
     async fn get(&self, req: GetPointsReq) -> Result<Vec<RetrievedPoint>, QqlError>;
 }
+
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+pub trait QdrantAdminOps: QdrantOpsBound {
+    async fn update_collection(&self, _req: serde_json::Value) -> Result<(), QqlError> {
+        Err(QqlError::runtime("update_collection not supported"))
+    }
+    async fn delete_collection(&self, _name: &str) -> Result<(), QqlError> {
+        Err(QqlError::runtime("delete_collection not supported"))
+    }
+    async fn query_batch(
+        &self,
+        _req: Vec<QueryPointsRequest>,
+    ) -> Result<Vec<Vec<ScoredPoint>>, QqlError> {
+        Err(QqlError::runtime("query_batch not supported"))
+    }
+    async fn create_field_index(&self, _req: CreateFieldIndexReq) -> Result<(), QqlError> {
+        Err(QqlError::runtime("create_field_index not supported"))
+    }
+    async fn count(&self, _req: CountPointsReq) -> Result<u64, QqlError> {
+        Err(QqlError::runtime("count not supported"))
+    }
+}
+
+pub trait QdrantOps: QdrantCoreOps + QdrantAdminOps {}
+impl<T: QdrantCoreOps + QdrantAdminOps> QdrantOps for T {}

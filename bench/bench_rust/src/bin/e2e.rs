@@ -56,7 +56,7 @@ impl MockQdrant {
 }
 
 #[async_trait]
-impl QdrantOps for MockQdrant {
+impl QdrantCoreOps for MockQdrant {
     async fn list_collections(&self) -> Result<Vec<String>, QqlError> {
         Ok(vec!["docs".to_string()])
     }
@@ -67,12 +67,6 @@ impl QdrantOps for MockQdrant {
         Ok(self.collection_info.clone())
     }
     async fn create_collection(&self, _req: CreateCollectionReq) -> Result<(), QqlError> {
-        Ok(())
-    }
-    async fn update_collection(&self, _req: serde_json::Value) -> Result<(), QqlError> {
-        Ok(())
-    }
-    async fn delete_collection(&self, _name: &str) -> Result<(), QqlError> {
         Ok(())
     }
     async fn upsert(&self, _req: UpsertPointsReq) -> Result<(), QqlError> {
@@ -87,12 +81,6 @@ impl QdrantOps for MockQdrant {
     ) -> Result<Vec<PointGroup>, QqlError> {
         Ok(vec![])
     }
-    async fn query_batch(
-        &self,
-        req: Vec<qql::pipeline::QueryPointsRequest>,
-    ) -> Result<Vec<Vec<ScoredPoint>>, QqlError> {
-        Ok(vec![vec![]; req.len()])
-    }
     async fn delete(&self, _req: DeletePointsReq) -> Result<(), QqlError> {
         Ok(())
     }
@@ -102,20 +90,36 @@ impl QdrantOps for MockQdrant {
     async fn set_payload(&self, _req: SetPayloadReq) -> Result<(), QqlError> {
         Ok(())
     }
-    async fn create_field_index(&self, _req: CreateFieldIndexReq) -> Result<(), QqlError> {
-        Ok(())
-    }
     async fn scroll(
         &self,
         _req: ScrollPointsReq,
     ) -> Result<(Vec<RetrievedPoint>, Option<qql::pipeline::PointId>), QqlError> {
         Ok((vec![], None))
     }
-    async fn count(&self, _req: CountPointsReq) -> Result<u64, QqlError> {
-        Ok(0)
-    }
     async fn get(&self, _req: GetPointsReq) -> Result<Vec<RetrievedPoint>, QqlError> {
         Ok(vec![])
+    }
+}
+
+#[async_trait]
+impl QdrantAdminOps for MockQdrant {
+    async fn update_collection(&self, _req: serde_json::Value) -> Result<(), QqlError> {
+        Ok(())
+    }
+    async fn delete_collection(&self, _name: &str) -> Result<(), QqlError> {
+        Ok(())
+    }
+    async fn query_batch(
+        &self,
+        req: Vec<qql::pipeline::QueryPointsRequest>,
+    ) -> Result<Vec<Vec<ScoredPoint>>, QqlError> {
+        Ok(vec![vec![]; req.len()])
+    }
+    async fn create_field_index(&self, _req: CreateFieldIndexReq) -> Result<(), QqlError> {
+        Ok(())
+    }
+    async fn count(&self, _req: CountPointsReq) -> Result<u64, QqlError> {
+        Ok(0)
     }
 }
 
@@ -125,7 +129,7 @@ const QUERIES: &[(&str, &str)] = &[
     ("Full", "QUERY 'vector search' FROM docs LIMIT 10 OFFSET 5 USING HYBRID RERANK WHERE topic = 'search' WITH (hnsw_ef = 128, exact = true)"),
     ("CTE_Prefetch", "WITH a AS (QUERY 'search' USING dense LIMIT 100 WHERE category = 'tech'), b AS (QUERY 'search' USING sparse LIMIT 100)\nQUERY 'search' FROM docs LIMIT 10 PREFETCH (a WHERE priority = 'high' SCORE THRESHOLD 0.8, b SCORE THRESHOLD 0.5) FUSION RRF"),
     ("CreateCollection", "CREATE COLLECTION docs HYBRID WITH HNSW (m = 32, ef_construct = 100) WITH QUANTIZATION (type = 'scalar', quantile = 0.95)"),
-    ("Insert", "INSERT INTO docs VALUES {id: 1, text: 'hello world', category: 'tech'}, {id: 2, text: 'second document', category: 'science'}"),
+    ("Upsert", "UPSERT INTO docs VALUES {id: 1, text: 'hello world', category: 'tech'}, {id: 2, text: 'second document', category: 'science'}"),
     ("DeleteWhere", "DELETE FROM docs WHERE category = 'archived'"),
     ("OrderBy", "QUERY ORDER BY created_at DESC FROM docs LIMIT 20 WHERE status = 'active'"),
     ("WithPayload", "QUERY 'search' FROM docs LIMIT 10 WITH PAYLOAD (include = ['title', 'body']) WITH VECTORS ('dense')"),
