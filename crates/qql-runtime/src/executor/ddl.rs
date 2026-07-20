@@ -478,18 +478,32 @@ impl Executor {
 }
 
 fn extract_collection_diagnostics(name: &str, raw: &serde_json::Value) -> serde_json::Value {
-    let status = raw.get("status").and_then(serde_json::Value::as_str).unwrap_or("green");
-    let points_count = raw.get("points_count").and_then(serde_json::Value::as_u64).unwrap_or(0);
-    let segments_count = raw.get("segments_count").and_then(serde_json::Value::as_u64).unwrap_or(0);
-    let indexed_vectors_count = raw.get("indexed_vectors_count").and_then(serde_json::Value::as_u64).unwrap_or(0);
+    let status = raw
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("green");
+    let points_count = raw
+        .get("points_count")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let segments_count = raw
+        .get("segments_count")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let indexed_vectors_count = raw
+        .get("indexed_vectors_count")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
 
-    let has_sparse = raw.pointer("/config/params/sparse_vectors")
+    let has_sparse = raw
+        .pointer("/config/params/sparse_vectors")
         .and_then(serde_json::Value::as_object)
         .map(|m| !m.is_empty())
         .unwrap_or(false);
     let topology = if has_sparse { "hybrid" } else { "dense" };
 
-    let quantization_ptr = raw.pointer("/config/quantization_config")
+    let quantization_ptr = raw
+        .pointer("/config/quantization_config")
         .or_else(|| raw.pointer("/config/params/quantization_config"));
 
     let quantization = if let Some(qc) = quantization_ptr.and_then(serde_json::Value::as_object) {
@@ -507,7 +521,10 @@ fn extract_collection_diagnostics(name: &str, raw: &serde_json::Value) -> serde_
     };
 
     let mut payload_schema = serde_json::Map::new();
-    if let Some(ps) = raw.get("payload_schema").and_then(serde_json::Value::as_object) {
+    if let Some(ps) = raw
+        .get("payload_schema")
+        .and_then(serde_json::Value::as_object)
+    {
         for (field, info) in ps {
             let data_type = info
                 .get("data_type")
@@ -515,7 +532,10 @@ fn extract_collection_diagnostics(name: &str, raw: &serde_json::Value) -> serde_
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("keyword");
             let mut entry = serde_json::Map::new();
-            entry.insert("type".to_string(), serde_json::Value::String(data_type.to_string()));
+            entry.insert(
+                "type".to_string(),
+                serde_json::Value::String(data_type.to_string()),
+            );
             if let Some(params) = info.get("params") {
                 entry.insert("params".to_string(), params.clone());
             }

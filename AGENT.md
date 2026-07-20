@@ -41,7 +41,7 @@ QQL is a layered SDK, not only a parser or a CLI:
 `qql-core` keeps Serde optional (`default = []`). Parser-only Rust consumers must not pay for Serde, JSON, networking, or binding dependencies. Enable `qql-core/serde` only at serialization boundaries: the Python, Node, and WASM bindings need it to expose native host objects. The runtime should not enable that feature unless it serializes the AST itself; its Qdrant payload serialization belongs in the runtime adapters. Removing Serde derives from core altogether would require maintaining equivalent local AST DTOs or wrappers at every binding boundary, so retain the optional derive feature unless the public AST schema is deliberately replaced.
 
 ### Compilation and Transport Ownership
-Parsing, compilation, and execution are separate operations. A transport-free compiler is required for `compile_query`, explain/plan UX, FFI bindings, audit logging, and dry-run validation, but it must emit a QQL-owned `CompiledOperation` rather than protocol-specific REST JSON. Rename or replace the current `offline` module with a compiler/plan layer as it is refactored; do not maintain a second, incomplete executor alongside the runtime pipeline.
+Parsing, compilation, and execution are separate operations. A transport-free compiler is required for `compile_query`, explain/plan UX, FFI bindings, audit logging, and dry-run validation, but it must emit a QQL-owned `CompiledOperation` rather than protocol-specific REST JSON. The `offline` module shares an `insert_collection_config` helper between CREATE and ALTER collection compilation; further consolidation into a shared compiler/plan layer is ongoing — do not maintain a second, incomplete executor alongside the runtime pipeline.
 
 HTTP belongs in the runtime REST adapter, not the CLI. The adapter owns one reusable `reqwest::Client` configured with explicit timeouts and connection-pool policy; it should also allow an application to inject its existing client. The CLI owns argument/config resolution and constructs a `Qql` session, while the runtime owns request execution. This keeps CLI, library, and future bindings behavior identical and prevents a new client per statement in the REPL or script runner.
 
@@ -54,6 +54,21 @@ The gRPC adapter must map the same QQL-owned operation exactly once to `qdrant-c
 The public runtime has one entry point: a `Qql`/executor builder selects REST or gRPC once and returns the same execution API. A caller must never choose a protocol per statement, and the CLI must use that builder rather than construct transport clients itself.
 
 `qql::backend` is the transport boundary. `PointId`, point/query results, collection metadata, and filters crossing `QdrantOps` must be QQL-owned types; generated OpenAPI and protobuf types belong exclusively in their respective adapters. During this migration, compatibility deserialization may accept legacy generated point-ID objects, but QQL serializes public point IDs as Qdrant's canonical primitive number or UUID string.
+
+### Serialization & Protocol Alignment Rules
+1. **Vector & Point ID Serialization (`VectorInput`)**:
+   - `VectorInput` point ID variants serialize directly as scalar numbers or UUID strings (`2`, `"pt-1"`), matching Qdrant REST OpenAPI `ExtendedPointId` specs. Avoid wrapping point IDs in object tags (`{"id": 2}`).
+2. **Context Inputs (`ContextInput`)**:
+   - Serializes directly as an array of pairs `[{"positive": ..., "negative": ...}]` without a wrapping `{"pairs": [...]}` key.
+3. **Common Table Expressions (CTEs) & Prefetch DAGs**:
+   - CTE declarations (`WITH a AS (...), b AS (...)`) and prefetch references (`PREFETCH (a, b)`) are resolved into `state.manual_prefetches` in `crates/qql-runtime/src/executor/dml/query.rs`.
+   - Nested `PrefetchQuery` trees are mapped recursively to REST JSON `prefetch` arrays in `RestQdrant` and to `qdrant_client::qdrant::PrefetchQuery` protobuf structures in `GrpcQdrant`.
+4. **Collection Diagnostics (`SHOW COLLECTION`)**:
+   - Both `RestQdrant` and `GrpcQdrant` populate `raw_json` on `CollectionInfo`. `extract_collection_diagnostics` processes topology (`"hybrid"` / `"dense"`), quantization (`"scalar"`, `"product"`, `"binary"`), indexed point count, and `payload_schema` data types (`"text"`, `"keyword"`, `"integer"`, etc.) uniformly across REST and gRPC.
+5. **Statement Response Formats**:
+   - `SELECT * FROM collection WHERE id = '...'` unwraps to a single point record object `{"id": ..., "payload": ...}` or `null` if missing.
+   - `EXPLAIN` outputs standard plan text format (e.g. `Statement: QUERY NEAREST FROM ...`).
+   - `DUMP COLLECTION` outputs JSON `{"ok": true, "operation": "dump", "message": "..."}` when `--json` flag is supplied.
 
 ---
 
@@ -98,7 +113,7 @@ Always use this recursive approach to mutate AST structures rather than post-com
 
 * Keep syntax parsing strict: malformed clauses must return a `QqlError`, never silently keep a default value. In particular, limits, offsets, group sizes, point IDs, and vector dimensions must be validated before conversion to unsigned Qdrant request fields.
 * Treat the parser's byte `pos` as a byte offset. Preserve this contract or explicitly version the API before changing positions to line/column or Unicode scalar offsets.
-* Preserve statement boundaries in script execution. A script splitter must respect semicolons and the full grammar, including `WITH` CTE statements; do not infer boundaries solely from a later statement keyword.
+* Preserve statement boundaries in script execution. A script splitter must respect semicolons and the full grammar, including `WITH` CTE statements. The splitter suppresses `QUERY`/`FUSION` as statement starters when they follow a `WITH ... AS (...)` CTE block, since they belong to the same statement. Do not infer boundaries solely from a later statement keyword.
 * Runtime request construction must propagate serialization and generated-type conversion failures as `QqlError`. Do not replace them with `null`, an empty value, or a fabricated point ID, because that can change the query the user asked to execute.
 * Network clients need explicit timeouts, bounded error-body reads, and actionable context. Do not log secrets (`secret`, `embedding_api_key`) or serialize them into user-visible output.
 
@@ -137,7 +152,15 @@ If formatting fails, auto-apply corrections using:
 cargo fmt
 ```
 
+### Token Definition Hygiene
+The `TokenKind` enum and its string representation (`as_str()`) and keyword lookup map (`KEYWORDS`) are declared once in `token.rs` and then consumed by two macros: `gen_as_str!` (all variants) and `gen_keywords!` (keyword-only entries for the `phf_map`). When adding a new keyword token:
+1. Add the variant to the `pub enum TokenKind` block.
+2. Add a `Variant => "STRING"` entry to `gen_as_str!`.
+3. Add a `"STRING" => TokenKind::Variant` entry to `gen_keywords!`.
+Non-keyword tokens (punctuation, literals) only need steps 1 and 2. Keeping the two lists synchronized is manual but the entries are adjacent in the same file for easy review.
+
 ### Workspace Hygiene
 * Keep the workspace version in `Cargo.toml` as the single source of truth; do not duplicate it in binaries or package documentation.
+* Minimize dependency surface: prefer `tokio` feature subsets over `"full"`, and remove unused dependencies. Check for unused deps with `cargo +nightly udeps` before adding new ones.
 * Before changing dependencies, lockfiles, generated schema inputs, or package-manager files, obtain explicit approval.
 * The repository may contain in-progress changes from another developer. Inspect `git status` first and do not overwrite unrelated work.

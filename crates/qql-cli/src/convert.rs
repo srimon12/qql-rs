@@ -1,5 +1,24 @@
 use serde_json::Value;
 
+/// Shared helper: convert a `using` field value to its QQL representation.
+fn using_str(using: &str) -> String {
+    match using.to_lowercase().as_str() {
+        "hybrid" => "USING HYBRID".to_string(),
+        "sparse" => "USING SPARSE".to_string(),
+        _ => format!("USING '{}'", escape_qql_string(using)),
+    }
+}
+
+/// Shared helper: convert a `lookup_from` object to its QQL representation.
+fn lookup_from_str(lookup: &serde_json::Map<String, Value>) -> Option<String> {
+    let coll = lookup.get("collection").and_then(|v| v.as_str())?;
+    let vec_name = lookup.get("vector").and_then(|v| v.as_str());
+    Some(match vec_name {
+        Some(vn) => format!("LOOKUP FROM {} VECTOR '{}'", coll, escape_qql_string(vn)),
+        None => format!("LOOKUP FROM {}", coll),
+    })
+}
+
 fn sanitize_collection_name(name: &str) -> String {
     if name.is_empty() {
         return "unknown".to_string();
@@ -103,21 +122,13 @@ fn format_vector(vec: &Value) -> Option<String> {
     }
 }
 
-fn format_point_id(id: &Value) -> String {
-    format_id(id)
-}
-
-fn format_body_value(v: &serde_json::Value) -> String {
-    format_value(v)
-}
-
 fn build_payload_dict(payload: &serde_json::Map<String, Value>) -> String {
     if payload.is_empty() {
         return "{}".to_string();
     }
     let mut parts = Vec::new();
     for (k, v) in payload {
-        parts.push(format!("'{}': {}", k, format_body_value(v)));
+        parts.push(format!("'{}': {}", k, format_value(v)));
     }
     format!("{{{}}}", parts.join(", "))
 }
@@ -519,11 +530,7 @@ fn convert_search(input: &Value, collection: &str) -> Result<Vec<String>, String
 
     // Using
     if let Some(using) = obj.get("using").and_then(|v| v.as_str()) {
-        match using.to_lowercase().as_str() {
-            "hybrid" => qql_args.push("USING HYBRID".to_string()),
-            "sparse" => qql_args.push("USING SPARSE".to_string()),
-            _ => qql_args.push(format!("USING '{}'", using)),
-        }
+        qql_args.push(using_str(using));
     }
 
     // Filter
@@ -549,16 +556,8 @@ fn convert_search(input: &Value, collection: &str) -> Result<Vec<String>, String
 
     // Lookup from
     if let Some(lookup) = obj.get("lookup_from").and_then(|v| v.as_object()) {
-        if let Some(coll) = lookup.get("collection").and_then(|v| v.as_str()) {
-            if let Some(vec_name) = lookup.get("vector").and_then(|v| v.as_str()) {
-                qql_args.push(format!(
-                    "LOOKUP FROM {} VECTOR '{}'",
-                    coll,
-                    escape_qql_string(vec_name)
-                ));
-            } else {
-                qql_args.push(format!("LOOKUP FROM {}", coll));
-            }
+        if let Some(s) = lookup_from_str(lookup) {
+            qql_args.push(s);
         }
     }
 
@@ -596,20 +595,12 @@ fn convert_recommend(input: &Value, collection: &str) -> Result<Vec<String>, Str
     }
 
     if let Some(using) = obj.get("using").and_then(|v| v.as_str()) {
-        parts.push(format!("USING '{}'", using));
+        parts.push(using_str(using));
     }
 
     if let Some(lookup) = obj.get("lookup_from").and_then(|v| v.as_object()) {
-        if let Some(coll) = lookup.get("collection").and_then(|v| v.as_str()) {
-            if let Some(vec_name) = lookup.get("vector").and_then(|v| v.as_str()) {
-                parts.push(format!(
-                    "LOOKUP FROM {} VECTOR '{}'",
-                    coll,
-                    escape_qql_string(vec_name)
-                ));
-            } else {
-                parts.push(format!("LOOKUP FROM {}", coll));
-            }
+        if let Some(s) = lookup_from_str(lookup) {
+            parts.push(s);
         }
     }
 
@@ -681,11 +672,11 @@ fn convert_discover(input: &Value, collection: &str) -> Result<Vec<String>, Stri
 
     let mut parts = Vec::new();
     if let Some(t) = target {
-        parts.push(format!("QUERY DISCOVER TARGET {}", format_point_id(&t)));
+        parts.push(format!("QUERY DISCOVER TARGET {}", format_id(&t)));
         if !ctx_pairs.is_empty() {
             let pairs: Vec<String> = ctx_pairs
                 .iter()
-                .map(|(p, n)| format!("({}, {})", format_point_id(p), format_point_id(n)))
+                .map(|(p, n)| format!("({}, {})", format_id(p), format_id(n)))
                 .collect();
             parts.push(format!("CONTEXT PAIRS {}", pairs.join(", ")));
         }
@@ -694,7 +685,7 @@ fn convert_discover(input: &Value, collection: &str) -> Result<Vec<String>, Stri
         if !ctx_pairs.is_empty() {
             let pairs: Vec<String> = ctx_pairs
                 .iter()
-                .map(|(p, n)| format!("({}, {})", format_point_id(p), format_point_id(n)))
+                .map(|(p, n)| format!("({}, {})", format_id(p), format_id(n)))
                 .collect();
             parts.push(format!("PAIRS {}", pairs.join(", ")));
         }
@@ -797,7 +788,7 @@ fn convert_scroll(input: &Value, collection: &str) -> Result<Vec<String>, String
     }
 
     if let Some(after) = obj.get("offset") {
-        parts.push(format!("AFTER {}", format_point_id(after)));
+        parts.push(format!("AFTER {}", format_id(after)));
     }
 
     if let Some(limit) = obj.get("limit").and_then(|v| v.as_i64()) {
@@ -1059,11 +1050,7 @@ fn convert_formula_query(input: &Value, collection: &str) -> Result<Vec<String>,
 
     // Using
     if let Some(using) = obj.get("using").and_then(|v| v.as_str()) {
-        match using.to_lowercase().as_str() {
-            "hybrid" => stmt_parts.push("USING HYBRID".to_string()),
-            "sparse" => stmt_parts.push("USING SPARSE".to_string()),
-            _ => stmt_parts.push(format!("USING '{}'", using)),
-        }
+        stmt_parts.push(using_str(using));
     }
 
     // Score Threshold
@@ -1132,11 +1119,7 @@ fn stmts_with_prefetch(
             }
 
             if let Some(using) = pf_obj.get("using").and_then(|v| v.as_str()) {
-                match using.to_lowercase().as_str() {
-                    "hybrid" => pf_parts.push("USING HYBRID".to_string()),
-                    "sparse" => pf_parts.push("USING SPARSE".to_string()),
-                    _ => pf_parts.push(format!("USING '{}'", using)),
-                }
+                pf_parts.push(using_str(using));
             }
 
             if pf_parts.is_empty() {

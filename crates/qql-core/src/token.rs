@@ -1,5 +1,31 @@
 use core::fmt;
 
+// ── Token kind definitions ─────────────────────────────────────
+// All variants are listed ONCE in the `token_table!`.
+// Two helper macros consume that table to produce:
+//   • as_str()     – for all variants
+//   • KEYWORDS map – for keyword-only variants
+
+macro_rules! gen_as_str {
+    ($($var:ident => $str:expr),* $(,)?) => {
+        impl TokenKind {
+            pub fn as_str(&self) -> &'static str {
+                match self {
+                    $( Self::$var => $str, )*
+                }
+            }
+        }
+    };
+}
+
+macro_rules! gen_keywords {
+    ($($str:expr => TokenKind::$var:ident),* $(,)?) => {
+        pub static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {
+            $( $str => TokenKind::$var, )*
+        };
+    };
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum TokenKind {
@@ -38,8 +64,6 @@ pub enum TokenKind {
     Collections,
     Select,
     Scroll,
-    Star,
-    After,
     Recommend,
     Limit,
     Group,
@@ -49,6 +73,10 @@ pub enum TokenKind {
     Delete,
     Update,
     Set,
+    Offset,
+    Score,
+    Threshold,
+    Lookup,
     Vector,
     Payload,
     From,
@@ -69,10 +97,6 @@ pub enum TokenKind {
     Match,
     Any,
     Phrase,
-    Offset,
-    Score,
-    Threshold,
-    Lookup,
     Cosine,
     Dot,
     Euclid,
@@ -86,6 +110,24 @@ pub enum TokenKind {
     Discover,
     Pairs,
     Target,
+    Prefetch,
+    Fusion,
+    Sample,
+    Boost,
+    Defaults,
+    Case,
+    When,
+    Then,
+    Else,
+    End,
+    GeoBbox,
+    GeoRadius,
+    ValuesCount,
+    HasVector,
+    Relevance,
+    Feedback,
+    Star,
+    After,
     Identifier,
     String,
     Integer,
@@ -104,193 +146,139 @@ pub enum TokenKind {
     Gte,
     Lt,
     Lte,
-    GeoBbox,
-    GeoRadius,
-    ValuesCount,
-    HasVector,
-    Prefetch,
-    Fusion,
-    Sample,
-    Boost,
-    Defaults,
-    Case,
-    When,
-    Then,
-    Else,
-    End,
     Plus,
     Minus,
     Slash,
-    Relevance,
-    Feedback,
     Semicolon,
     Eof,
 }
 
-impl TokenKind {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            TokenKind::Insert => "INSERT",
-            TokenKind::Into => "INTO",
-            TokenKind::Collection => "COLLECTION",
-            TokenKind::Values => "VALUES",
-            TokenKind::Using => "USING",
-            TokenKind::Model => "MODEL",
-            TokenKind::Hybrid => "HYBRID",
-            TokenKind::Dense => "DENSE",
-            TokenKind::Sparse => "SPARSE",
-            TokenKind::Rerank => "RERANK",
-            TokenKind::Exact => "EXACT",
-            TokenKind::With => "WITH",
-            TokenKind::As => "AS",
-            TokenKind::Acorn => "ACORN",
-            TokenKind::Quantize => "QUANTIZE",
-            TokenKind::Scalar => "SCALAR",
-            TokenKind::Binary => "BINARY",
-            TokenKind::Product => "PRODUCT",
-            TokenKind::Turbo => "TURBO",
-            TokenKind::Bits => "BITS",
-            TokenKind::Quantile => "QUANTILE",
-            TokenKind::Always => "ALWAYS",
-            TokenKind::Ram => "RAM",
-            TokenKind::Hnsw => "HNSW",
-            TokenKind::Vectors => "VECTORS",
-            TokenKind::Optimizers => "OPTIMIZERS",
-            TokenKind::Params => "PARAMS",
-            TokenKind::Disabled => "DISABLED",
-            TokenKind::Create => "CREATE",
-            TokenKind::Alter => "ALTER",
-            TokenKind::Drop => "DROP",
-            TokenKind::Show => "SHOW",
-            TokenKind::Collections => "COLLECTIONS",
-            TokenKind::Select => "SELECT",
-            TokenKind::Scroll => "SCROLL",
-            TokenKind::Star => "STAR",
-            TokenKind::After => "AFTER",
-            TokenKind::Recommend => "RECOMMEND",
-            TokenKind::Limit => "LIMIT",
-            TokenKind::Group => "GROUP",
-            TokenKind::By => "BY",
-            TokenKind::GroupSize => "GROUP_SIZE",
-            TokenKind::Strategy => "STRATEGY",
-            TokenKind::Delete => "DELETE",
-            TokenKind::Update => "UPDATE",
-            TokenKind::Set => "SET",
-            TokenKind::Vector => "VECTOR",
-            TokenKind::Payload => "PAYLOAD",
-            TokenKind::From => "FROM",
-            TokenKind::Where => "WHERE",
-            TokenKind::Id => "ID",
-            TokenKind::Index => "INDEX",
-            TokenKind::On => "ON",
-            TokenKind::For => "FOR",
-            TokenKind::Type => "TYPE",
-            TokenKind::And => "AND",
-            TokenKind::Or => "OR",
-            TokenKind::Not => "NOT",
-            TokenKind::In => "IN",
-            TokenKind::Between => "BETWEEN",
-            TokenKind::Is => "IS",
-            TokenKind::Null => "NULL",
-            TokenKind::Empty => "EMPTY",
-            TokenKind::Match => "MATCH",
-            TokenKind::Any => "ANY",
-            TokenKind::Phrase => "PHRASE",
-            TokenKind::Offset => "OFFSET",
-            TokenKind::Score => "SCORE",
-            TokenKind::Threshold => "THRESHOLD",
-            TokenKind::Lookup => "LOOKUP",
-            TokenKind::Cosine => "COSINE",
-            TokenKind::Dot => "DOT",
-            TokenKind::Euclid => "EUCLID",
-            TokenKind::Manhattan => "MANHATTAN",
-            TokenKind::Order => "ORDER",
-            TokenKind::Asc => "ASC",
-            TokenKind::Desc => "DESC",
-            TokenKind::Query => "QUERY",
-            TokenKind::Nearest => "NEAREST",
-            TokenKind::Context => "CONTEXT",
-            TokenKind::Discover => "DISCOVER",
-            TokenKind::Pairs => "PAIRS",
-            TokenKind::Target => "TARGET",
-            TokenKind::Identifier => "IDENTIFIER",
-            TokenKind::String => "STRING",
-            TokenKind::Integer => "INTEGER",
-            TokenKind::Float => "FLOAT",
-            TokenKind::Lbrace => "LBRACE",
-            TokenKind::Rbrace => "RBRACE",
-            TokenKind::Lbracket => "LBRACKET",
-            TokenKind::Rbracket => "RBRACKET",
-            TokenKind::Lparen => "LPAREN",
-            TokenKind::Rparen => "RPAREN",
-            TokenKind::Colon => "COLON",
-            TokenKind::Comma => "COMMA",
-            TokenKind::Equals => "EQUALS",
-            TokenKind::NotEquals => "NOT_EQUALS",
-            TokenKind::Gt => "GT",
-            TokenKind::Gte => "GTE",
-            TokenKind::Lt => "LT",
-            TokenKind::Lte => "LTE",
-            TokenKind::GeoBbox => "GEO_BBOX",
-            TokenKind::GeoRadius => "GEO_RADIUS",
-            TokenKind::ValuesCount => "VALUES_COUNT",
-            TokenKind::HasVector => "HAS_VECTOR",
-            TokenKind::Prefetch => "PREFETCH",
-            TokenKind::Fusion => "FUSION",
-            TokenKind::Sample => "SAMPLE",
-            TokenKind::Boost => "BOOST",
-            TokenKind::Defaults => "DEFAULTS",
-            TokenKind::Case => "CASE",
-            TokenKind::When => "WHEN",
-            TokenKind::Then => "THEN",
-            TokenKind::Else => "ELSE",
-            TokenKind::End => "END",
-            TokenKind::Plus => "PLUS",
-            TokenKind::Minus => "MINUS",
-            TokenKind::Slash => "SLASH",
-            TokenKind::Relevance => "RELEVANCE",
-            TokenKind::Feedback => "FEEDBACK",
-            TokenKind::Semicolon => "SEMICOLON",
-            TokenKind::Eof => "EOF",
-        }
-    }
+gen_as_str! {
+    Insert => "INSERT",
+    Into => "INTO",
+    Collection => "COLLECTION",
+    Values => "VALUES",
+    Using => "USING",
+    Model => "MODEL",
+    Hybrid => "HYBRID",
+    Dense => "DENSE",
+    Sparse => "SPARSE",
+    Rerank => "RERANK",
+    Exact => "EXACT",
+    With => "WITH",
+    As => "AS",
+    Acorn => "ACORN",
+    Quantize => "QUANTIZE",
+    Scalar => "SCALAR",
+    Binary => "BINARY",
+    Product => "PRODUCT",
+    Turbo => "TURBO",
+    Bits => "BITS",
+    Quantile => "QUANTILE",
+    Always => "ALWAYS",
+    Ram => "RAM",
+    Hnsw => "HNSW",
+    Vectors => "VECTORS",
+    Optimizers => "OPTIMIZERS",
+    Params => "PARAMS",
+    Disabled => "DISABLED",
+    Create => "CREATE",
+    Alter => "ALTER",
+    Drop => "DROP",
+    Show => "SHOW",
+    Collections => "COLLECTIONS",
+    Select => "SELECT",
+    Scroll => "SCROLL",
+    Recommend => "RECOMMEND",
+    Limit => "LIMIT",
+    Group => "GROUP",
+    By => "BY",
+    GroupSize => "GROUP_SIZE",
+    Strategy => "STRATEGY",
+    Delete => "DELETE",
+    Update => "UPDATE",
+    Set => "SET",
+    Offset => "OFFSET",
+    Score => "SCORE",
+    Threshold => "THRESHOLD",
+    Lookup => "LOOKUP",
+    Vector => "VECTOR",
+    Payload => "PAYLOAD",
+    From => "FROM",
+    Where => "WHERE",
+    Id => "ID",
+    Index => "INDEX",
+    On => "ON",
+    For => "FOR",
+    Type => "TYPE",
+    And => "AND",
+    Or => "OR",
+    Not => "NOT",
+    In => "IN",
+    Between => "BETWEEN",
+    Is => "IS",
+    Null => "NULL",
+    Empty => "EMPTY",
+    Match => "MATCH",
+    Any => "ANY",
+    Phrase => "PHRASE",
+    Cosine => "COSINE",
+    Dot => "DOT",
+    Euclid => "EUCLID",
+    Manhattan => "MANHATTAN",
+    Order => "ORDER",
+    Asc => "ASC",
+    Desc => "DESC",
+    Query => "QUERY",
+    Nearest => "NEAREST",
+    Context => "CONTEXT",
+    Discover => "DISCOVER",
+    Pairs => "PAIRS",
+    Target => "TARGET",
+    Prefetch => "PREFETCH",
+    Fusion => "FUSION",
+    Sample => "SAMPLE",
+    Boost => "BOOST",
+    Defaults => "DEFAULTS",
+    Case => "CASE",
+    When => "WHEN",
+    Then => "THEN",
+    Else => "ELSE",
+    End => "END",
+    GeoBbox => "GEO_BBOX",
+    GeoRadius => "GEO_RADIUS",
+    ValuesCount => "VALUES_COUNT",
+    HasVector => "HAS_VECTOR",
+    Relevance => "RELEVANCE",
+    Feedback => "FEEDBACK",
+    Star => "STAR",
+    After => "AFTER",
+    Identifier => "IDENTIFIER",
+    String => "STRING",
+    Integer => "INTEGER",
+    Float => "FLOAT",
+    Lbrace => "LBRACE",
+    Rbrace => "RBRACE",
+    Lbracket => "LBRACKET",
+    Rbracket => "RBRACKET",
+    Lparen => "LPAREN",
+    Rparen => "RPAREN",
+    Colon => "COLON",
+    Comma => "COMMA",
+    Equals => "EQUALS",
+    NotEquals => "NOT_EQUALS",
+    Gt => "GT",
+    Gte => "GTE",
+    Lt => "LT",
+    Lte => "LTE",
+    Plus => "PLUS",
+    Minus => "MINUS",
+    Slash => "SLASH",
+    Semicolon => "SEMICOLON",
+    Eof => "EOF",
 }
 
-impl fmt::Display for TokenKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
-pub struct Token<'a> {
-    pub kind: TokenKind,
-    pub text: &'a str,
-    pub pos: usize,
-}
-
-impl<'a> Token<'a> {
-    pub fn new(kind: TokenKind, text: &'a str, pos: usize) -> Self {
-        Token { kind, text, pos }
-    }
-
-    pub fn eof() -> Self {
-        Token {
-            kind: TokenKind::Eof,
-            text: "",
-            pos: 0,
-        }
-    }
-}
-
-impl<'a> fmt::Display for Token<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}({})", self.kind, self.text)
-    }
-}
-
-pub static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {
+gen_keywords! {
     "INSERT" => TokenKind::Insert,
     "INTO" => TokenKind::Into,
     "COLLECTION" => TokenKind::Collection,
@@ -326,7 +314,6 @@ pub static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {
     "COLLECTIONS" => TokenKind::Collections,
     "SELECT" => TokenKind::Select,
     "SCROLL" => TokenKind::Scroll,
-    "AFTER" => TokenKind::After,
     "RECOMMEND" => TokenKind::Recommend,
     "LIMIT" => TokenKind::Limit,
     "GROUP" => TokenKind::Group,
@@ -336,6 +323,10 @@ pub static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {
     "DELETE" => TokenKind::Delete,
     "UPDATE" => TokenKind::Update,
     "SET" => TokenKind::Set,
+    "OFFSET" => TokenKind::Offset,
+    "SCORE" => TokenKind::Score,
+    "THRESHOLD" => TokenKind::Threshold,
+    "LOOKUP" => TokenKind::Lookup,
     "VECTOR" => TokenKind::Vector,
     "PAYLOAD" => TokenKind::Payload,
     "FROM" => TokenKind::From,
@@ -356,10 +347,6 @@ pub static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {
     "MATCH" => TokenKind::Match,
     "ANY" => TokenKind::Any,
     "PHRASE" => TokenKind::Phrase,
-    "OFFSET" => TokenKind::Offset,
-    "SCORE" => TokenKind::Score,
-    "THRESHOLD" => TokenKind::Threshold,
-    "LOOKUP" => TokenKind::Lookup,
     "COSINE" => TokenKind::Cosine,
     "DOT" => TokenKind::Dot,
     "EUCLID" => TokenKind::Euclid,
@@ -389,7 +376,43 @@ pub static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {
     "HAS_VECTOR" => TokenKind::HasVector,
     "RELEVANCE" => TokenKind::Relevance,
     "FEEDBACK" => TokenKind::Feedback,
-};
+    "STAR" => TokenKind::Star,
+    "AFTER" => TokenKind::After,
+}
+
+impl fmt::Display for TokenKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub struct Token<'a> {
+    pub kind: TokenKind,
+    pub text: &'a str,
+    pub pos: usize,
+}
+
+impl<'a> Token<'a> {
+    pub fn new(kind: TokenKind, text: &'a str, pos: usize) -> Self {
+        Token { kind, text, pos }
+    }
+
+    pub fn eof() -> Self {
+        Token {
+            kind: TokenKind::Eof,
+            text: "",
+            pos: 0,
+        }
+    }
+}
+
+impl<'a> fmt::Display for Token<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}({})", self.kind, self.text)
+    }
+}
 
 pub fn lookup_keyword(s: &str) -> Option<TokenKind> {
     let bytes = s.as_bytes();

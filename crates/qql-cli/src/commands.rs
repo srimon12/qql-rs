@@ -195,24 +195,30 @@ pub async fn handle_connect(url: &str) -> Result<(), Box<dyn std::error::Error>>
 
 fn executor(url: &str) -> Result<qql::executor::Executor, Box<dyn std::error::Error>> {
     let config = qql::config::QqlConfig::load()?.unwrap_or_default();
-    
+
     let client: Box<dyn qql::client::QdrantOps> = if url.contains(":6334") {
-        Box::new(qql::grpc::GrpcQdrant::from_url(url, std::env::var("QDRANT_API_KEY").ok().or_else(|| config.secret.clone()))?)
+        Box::new(qql::grpc::GrpcQdrant::from_url(
+            url,
+            std::env::var("QDRANT_API_KEY")
+                .ok()
+                .or_else(|| config.secret.clone()),
+        )?)
     } else {
-        Box::new(qql::rest::RestQdrant::new(url.to_owned(), std::env::var("QDRANT_API_KEY").ok().or_else(|| config.secret.clone()))?)
+        Box::new(qql::rest::RestQdrant::new(
+            url.to_owned(),
+            std::env::var("QDRANT_API_KEY")
+                .ok()
+                .or_else(|| config.secret.clone()),
+        )?)
     };
-    
+
     let embedder = if let Some(endpoint) = &config.embedding_endpoint {
         if !endpoint.trim().is_empty() {
             let api_key = config.embedding_api_key.clone().unwrap_or_default();
             let model = config.embedding_model.clone().unwrap_or_default();
             let dimension = config.embedding_dimension;
-            let http_emb = qql::embedder::HttpEmbedder::new(
-                endpoint.clone(),
-                api_key,
-                model,
-                dimension,
-            )?;
+            let http_emb =
+                qql::embedder::HttpEmbedder::new(endpoint.clone(), api_key, model, dimension)?;
             Some(std::sync::Arc::new(http_emb) as std::sync::Arc<dyn qql::embedder::Embedder>)
         } else {
             None

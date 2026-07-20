@@ -359,22 +359,7 @@ fn compile_create_collection(
                 ast::VectorDistance::Euclid => "Euclid",
                 ast::VectorDistance::Manhattan => "Manhattan",
             };
-            let mut vp = serde_json::json!({ "size": v.size, "distance": distance_str });
-            if let Some(ref hnsw) = v.hnsw {
-                let mut hnsw_map = serde_json::Map::new();
-                if let Some(m) = hnsw.m {
-                    hnsw_map.insert("m".to_string(), serde_json::json!(m));
-                }
-                if let Some(ef) = hnsw.ef_construct {
-                    hnsw_map.insert("ef_construct".to_string(), serde_json::json!(ef));
-                }
-                if !hnsw_map.is_empty() {
-                    vp.as_object_mut().unwrap().insert(
-                        "hnsw_config".to_string(),
-                        serde_json::Value::Object(hnsw_map),
-                    );
-                }
-            }
+            let vp = serde_json::json!({ "size": v.size, "distance": distance_str });
             let vec_name = if v.name.is_empty() { "dense" } else { v.name };
             vectors_config.insert(vec_name.to_string(), vp);
         }
@@ -393,33 +378,7 @@ fn compile_create_collection(
         );
     }
 
-    if let Some(ref config) = stmt.config {
-        if let Some(ref hnsw) = config.hnsw {
-            body.insert(
-                "hnsw_config".to_string(),
-                serde_json::to_value(hnsw).unwrap_or(serde_json::Value::Null),
-            );
-        }
-        if let Some(ref quant) = config.quantization {
-            body.insert(
-                "quantization_config".to_string(),
-                serde_json::to_value(quant).unwrap_or(serde_json::Value::Null),
-            );
-        }
-        if let Some(ref opts) = config.optimizers {
-            body.insert(
-                "optimizers_config".to_string(),
-                serde_json::to_value(opts).unwrap_or(serde_json::Value::Null),
-            );
-        }
-        if let Some(ref params) = config.params {
-            body.insert(
-                "params".to_string(),
-                serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
-            );
-        }
-    }
-
+    insert_collection_config(&mut body, &stmt.config);
     Ok(serde_json::Value::Object(body))
 }
 
@@ -439,27 +398,41 @@ fn compile_alter_collection(
         "collection_name".to_string(),
         serde_json::json!(stmt.collection),
     );
-    if let Some(ref config) = stmt.config {
-        if let Some(ref hnsw) = config.hnsw {
-            body.insert(
-                "hnsw_config".to_string(),
-                serde_json::to_value(hnsw).unwrap_or(serde_json::Value::Null),
-            );
-        }
-        if let Some(ref opts) = config.optimizers {
-            body.insert(
-                "optimizers_config".to_string(),
-                serde_json::to_value(opts).unwrap_or(serde_json::Value::Null),
-            );
-        }
-        if let Some(ref params) = config.params {
-            body.insert(
-                "params".to_string(),
-                serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
-            );
-        }
-    }
+    insert_collection_config(&mut body, &stmt.config);
     Ok(serde_json::Value::Object(body))
+}
+
+/// Insert hnsw/optimizers/quantization/params config into a JSON body,
+/// shared by both CREATE and ALTER collection compilation.
+fn insert_collection_config(
+    body: &mut serde_json::Map<String, serde_json::Value>,
+    config: &Option<Box<ast::CollectionConfig>>,
+) {
+    let Some(ref config) = config else { return };
+    if let Some(ref hnsw) = config.hnsw {
+        body.insert(
+            "hnsw_config".to_string(),
+            serde_json::to_value(hnsw).unwrap_or(serde_json::Value::Null),
+        );
+    }
+    if let Some(ref quant) = config.quantization {
+        body.insert(
+            "quantization_config".to_string(),
+            serde_json::to_value(quant).unwrap_or(serde_json::Value::Null),
+        );
+    }
+    if let Some(ref opts) = config.optimizers {
+        body.insert(
+            "optimizers_config".to_string(),
+            serde_json::to_value(opts).unwrap_or(serde_json::Value::Null),
+        );
+    }
+    if let Some(ref params) = config.params {
+        body.insert(
+            "params".to_string(),
+            serde_json::to_value(params).unwrap_or(serde_json::Value::Null),
+        );
+    }
 }
 
 fn compile_drop_collection(stmt: &ast::DropCollectionStmt) -> serde_json::Value {

@@ -163,7 +163,9 @@ pub(crate) fn query_request_json(request: &QueryPointsRequest) -> Result<Value, 
     Ok(body)
 }
 
-pub(crate) fn grouped_query_request_json(request: &QueryPointsGroupsRequest) -> Result<Value, QqlError> {
+pub(crate) fn grouped_query_request_json(
+    request: &QueryPointsGroupsRequest,
+) -> Result<Value, QqlError> {
     let mut body = serde_json::to_value(request).map_err(|error| {
         QqlError::runtime(format!(
             "failed to serialize grouped query request: {error}"

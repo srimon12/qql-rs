@@ -98,9 +98,12 @@ pub(crate) fn value_to_json(val: &Value) -> serde_json::Value {
     match val {
         Value::Str(s) => serde_json::Value::String(s.to_string()),
         Value::Int(i) => serde_json::Value::Number((*i).into()),
-        Value::Float(f) => serde_json::Value::Number(
-            serde_json::Number::from_f64(*f).unwrap_or(serde_json::Number::from_f64(0.0).unwrap()),
-        ),
+        Value::Float(f) => {
+            serde_json::Value::Number(serde_json::Number::from_f64(*f).unwrap_or_else(|| {
+                // Fallback: NaN, Inf, or subnormal → serialize as 0
+                serde_json::Number::from_f64(0.0).unwrap_or(serde_json::Number::from(0))
+            }))
+        }
         Value::Bool(b) => serde_json::Value::Bool(*b),
         Value::Null => serde_json::Value::Null,
         Value::Dict(items) => {

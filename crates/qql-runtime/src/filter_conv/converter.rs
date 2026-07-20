@@ -315,15 +315,10 @@ impl FilterConverter {
         negate: bool,
     ) -> Result<serde_json::Value, QqlError> {
         if values.is_empty() {
-            if negate {
-                return Ok(serde_json::json!({
-                    "key": field,
-                    "match": { "except": [] }
-                }));
-            }
+            let match_key = if negate { "except" } else { "any" };
             return Ok(serde_json::json!({
                 "key": field,
-                "match": { "any": [] }
+                "match": { match_key: [] }
             }));
         }
 
@@ -346,83 +341,16 @@ impl FilterConverter {
                         _ => unreachable!(),
                     })
                     .collect();
-                if negate {
-                    Ok(serde_json::json!({
-                        "key": field,
-                        "match": { "except": str_values }
-                    }))
-                } else {
-                    Ok(serde_json::json!({
-                        "key": field,
-                        "match": { "any": str_values }
-                    }))
-                }
+                let match_key = if negate { "except" } else { "any" };
+                Ok(serde_json::json!({
+                    "key": field,
+                    "match": { match_key: str_values }
+                }))
             }
-            LiteralKind::Int => {
-                let int_values: Vec<i64> = values
-                    .iter()
-                    .map(|v| match v {
-                        Value::Int(i) => *i,
-                        _ => unreachable!(),
-                    })
-                    .collect();
+            LiteralKind::Int | LiteralKind::Float | LiteralKind::Bool => {
+                let conds = build_scalar_conditions(field, values, &kind);
                 if negate {
-                    let conds: Vec<serde_json::Value> = int_values
-                        .iter()
-                        .map(|i| {
-                            serde_json::json!({
-                                "key": field,
-                                "match": { "value": i }
-                            })
-                        })
-                        .collect();
-                    Ok(serde_json::json!({
-                        "must_not": conds
-                    }))
-                } else {
-                    let conds: Vec<serde_json::Value> = int_values
-                        .iter()
-                        .map(|i| {
-                            serde_json::json!({
-                                "key": field,
-                                "match": { "value": i }
-                            })
-                        })
-                        .collect();
-                    Ok(combine_conditions(conds))
-                }
-            }
-            LiteralKind::Float => {
-                let conds: Vec<serde_json::Value> = values
-                    .iter()
-                    .map(|v| match v {
-                        Value::Float(f) => exact_float_condition(field.to_string(), *f),
-                        _ => unreachable!(),
-                    })
-                    .collect();
-                if negate {
-                    Ok(serde_json::json!({
-                        "must_not": conds
-                    }))
-                } else {
-                    Ok(combine_conditions(conds))
-                }
-            }
-            LiteralKind::Bool => {
-                let conds: Vec<serde_json::Value> = values
-                    .iter()
-                    .map(|v| match v {
-                        Value::Bool(b) => serde_json::json!({
-                            "key": field,
-                            "match": { "value": b }
-                        }),
-                        _ => unreachable!(),
-                    })
-                    .collect();
-                if negate {
-                    Ok(serde_json::json!({
-                        "must_not": conds
-                    }))
+                    Ok(serde_json::json!({ "must_not": conds }))
                 } else {
                     Ok(combine_conditions(conds))
                 }
@@ -479,6 +407,29 @@ fn literal_kind_of(value: &Value) -> Result<LiteralKind, QqlError> {
         Value::Bool(_) => Ok(LiteralKind::Bool),
         _ => Err(QqlError::runtime("unsupported literal type")),
     }
+}
+
+/// Build scalar match conditions for Int, Float, and Bool values in an IN/NOT IN set.
+fn build_scalar_conditions(
+    field: &str,
+    values: &[Value],
+    kind: &LiteralKind,
+) -> Vec<serde_json::Value> {
+    values
+        .iter()
+        .map(|v| match (kind, v) {
+            (LiteralKind::Int, Value::Int(i)) => serde_json::json!({
+                "key": field,
+                "match": { "value": i }
+            }),
+            (LiteralKind::Float, Value::Float(f)) => exact_float_condition(field.to_string(), *f),
+            (LiteralKind::Bool, Value::Bool(b)) => serde_json::json!({
+                "key": field,
+                "match": { "value": b }
+            }),
+            _ => unreachable!(),
+        })
+        .collect()
 }
 
 fn to_float64(value: &Value) -> Result<Option<f64>, QqlError> {

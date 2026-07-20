@@ -84,9 +84,16 @@ pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
 
     let mut starts = Vec::new();
     let mut depth: i32 = 0;
+    let mut in_with_cte = false;
     for (i, tok) in tokens.iter().enumerate() {
-        let is_starter = match tok.kind {
-            TokenKind::Insert
+        // After a WITH ... AS (...) CTE block, suppress the next QUERY/FUSION
+        // from being treated as a new statement starter — it is the main query
+        // of the WITH statement.
+        if in_with_cte && depth == 0 && matches!(tok.kind, TokenKind::Query | TokenKind::Fusion) {
+            in_with_cte = false;
+        } else {
+            let is_starter = match tok.kind {
+                TokenKind::Insert
                 | TokenKind::Create
                 | TokenKind::Alter
                 | TokenKind::Drop
@@ -96,23 +103,23 @@ pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
                 | TokenKind::Scroll
                 | TokenKind::Delete
                 | TokenKind::Update => true,
-            TokenKind::With => {
-                if i + 2 < tokens.len() {
+                TokenKind::With if i + 2 < tokens.len() => {
                     let next1 = &tokens[i + 1];
                     let next2 = &tokens[i + 2];
                     let next1_is_ident = next1.kind == TokenKind::Identifier
                         || next1.kind == TokenKind::String
                         || is_contextual_identifier(next1.kind);
                     next1_is_ident && next2.kind == TokenKind::As
-                } else {
-                    false
+                }
+                _ => false,
+            };
+
+            if depth == 0 && is_starter {
+                starts.push(tok.pos);
+                if tok.kind == TokenKind::With {
+                    in_with_cte = true;
                 }
             }
-            _ => false,
-        };
-
-        if depth == 0 && is_starter {
-            starts.push(tok.pos);
         }
 
         match tok.kind {

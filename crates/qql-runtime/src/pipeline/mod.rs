@@ -130,18 +130,34 @@ impl serde::Serialize for QueryVariant {
             QueryVariant::Sparse(indices, values) => {
                 let mut map = serializer.serialize_map(Some(1))?;
                 let mut sparse_map = serde_json::Map::new();
-                sparse_map.insert("indices".to_string(), serde_json::to_value(indices).map_err(serde::ser::Error::custom)?);
-                sparse_map.insert("values".to_string(), serde_json::to_value(values).map_err(serde::ser::Error::custom)?);
+                sparse_map.insert(
+                    "indices".to_string(),
+                    serde_json::to_value(indices).map_err(serde::ser::Error::custom)?,
+                );
+                sparse_map.insert(
+                    "values".to_string(),
+                    serde_json::to_value(values).map_err(serde::ser::Error::custom)?,
+                );
                 map.serialize_entry("nearest", &serde_json::Value::Object(sparse_map))?;
                 map.end()
             }
-            QueryVariant::Document { text, model, options } => {
+            QueryVariant::Document {
+                text,
+                model,
+                options,
+            } => {
                 let mut map = serializer.serialize_map(Some(1))?;
                 let mut inner = serde_json::Map::new();
                 let mut doc_map = serde_json::Map::new();
                 doc_map.insert("text".to_string(), serde_json::Value::String(text.clone()));
-                doc_map.insert("model".to_string(), serde_json::Value::String(model.clone()));
-                doc_map.insert("options".to_string(), serde_json::to_value(options).map_err(serde::ser::Error::custom)?);
+                doc_map.insert(
+                    "model".to_string(),
+                    serde_json::Value::String(model.clone()),
+                );
+                doc_map.insert(
+                    "options".to_string(),
+                    serde_json::to_value(options).map_err(serde::ser::Error::custom)?,
+                );
                 inner.insert("document".to_string(), serde_json::Value::Object(doc_map));
                 map.serialize_entry("nearest", &serde_json::Value::Object(inner))?;
                 map.end()
@@ -181,11 +197,17 @@ impl serde::Serialize for QueryVariant {
                 map.serialize_entry("rrf", config)?;
                 map.end()
             }
-            QueryVariant::Formula { expression, defaults } => {
+            QueryVariant::Formula {
+                expression,
+                defaults,
+            } => {
                 let mut map = serializer.serialize_map(Some(1))?;
                 let mut formula_map = serde_json::Map::new();
                 formula_map.insert("expression".to_string(), expression.clone());
-                formula_map.insert("defaults".to_string(), serde_json::to_value(defaults).map_err(serde::ser::Error::custom)?);
+                formula_map.insert(
+                    "defaults".to_string(),
+                    serde_json::to_value(defaults).map_err(serde::ser::Error::custom)?,
+                );
                 map.serialize_entry("formula", &serde_json::Value::Object(formula_map))?;
                 map.end()
             }
@@ -194,20 +216,29 @@ impl serde::Serialize for QueryVariant {
                 map.serialize_entry("relevance_feedback", input)?;
                 map.end()
             }
-            QueryVariant::MMR { input, diversity, candidates } => {
+            QueryVariant::MMR {
+                input,
+                diversity,
+                candidates,
+            } => {
                 let mut map = serializer.serialize_map(Some(2))?;
-                
+
                 let inner_json = serde_json::to_value(input).map_err(serde::ser::Error::custom)?;
                 let inner_vector_input = if let Some(nearest_val) = inner_json.get("nearest") {
                     nearest_val.clone()
                 } else {
-                    return Err(serde::ser::Error::custom("MMR inner query must be a nearest query"));
+                    return Err(serde::ser::Error::custom(
+                        "MMR inner query must be a nearest query",
+                    ));
                 };
-                
+
                 map.serialize_entry("nearest", &inner_vector_input)?;
                 let mut mmr_opts = serde_json::Map::new();
                 mmr_opts.insert("diversity".to_string(), serde_json::json!(diversity));
-                mmr_opts.insert("candidates_limit".to_string(), serde_json::json!(candidates));
+                mmr_opts.insert(
+                    "candidates_limit".to_string(),
+                    serde_json::json!(candidates),
+                );
                 map.serialize_entry("mmr", &serde_json::Value::Object(mmr_opts))?;
                 map.end()
             }
@@ -307,14 +338,24 @@ impl serde::Serialize for VectorInput {
         match self {
             VectorInput::Id(pid) => pid.serialize(serializer),
             VectorInput::Dense(vec) => vec.serialize(serializer),
-            VectorInput::Document { text, model, options } => {
+            VectorInput::Document {
+                text,
+                model,
+                options,
+            } => {
                 use serde::ser::SerializeMap;
                 let mut map = serializer.serialize_map(Some(1))?;
                 let mut doc_map = serde_json::Map::new();
                 doc_map.insert("text".to_string(), serde_json::Value::String(text.clone()));
-                doc_map.insert("model".to_string(), serde_json::Value::String(model.clone()));
+                doc_map.insert(
+                    "model".to_string(),
+                    serde_json::Value::String(model.clone()),
+                );
                 if !options.is_empty() {
-                    doc_map.insert("options".to_string(), serde_json::to_value(options).map_err(serde::ser::Error::custom)?);
+                    doc_map.insert(
+                        "options".to_string(),
+                        serde_json::to_value(options).map_err(serde::ser::Error::custom)?,
+                    );
                 }
                 map.serialize_entry("document", &serde_json::Value::Object(doc_map))?;
                 map.end()
@@ -425,6 +466,7 @@ pub struct QueryPointsGroupsRequest {
     pub using: Option<String>,
 }
 
+#[derive(Default)]
 pub struct QueryState {
     pub query_text: String,
     pub prefetches: Vec<PrefetchQuery>,
@@ -460,42 +502,6 @@ pub struct QueryState {
 
     pub formula: Option<serde_json::Value>,
     pub formula_defaults: HashMap<String, f64>,
-}
-
-impl Default for QueryState {
-    fn default() -> Self {
-        QueryState {
-            query_text: String::new(),
-            prefetches: Vec::new(),
-            manual_prefetches: Vec::new(),
-            target_query: None,
-            params: None,
-            fusion_config: None,
-            has_mmr: false,
-            mmr_candidates: 0,
-            mmr_diversity: 0.0,
-            local_embed: false,
-            embedder: None,
-            cloud_model_options: HashMap::new(),
-            dense_model: String::new(),
-            doc_options: None,
-            request_timeout: None,
-            collection_name: String::new(),
-            vector_name: String::new(),
-            limit: 0,
-            offset: 0,
-            qdrant_filter: None,
-            score_threshold: None,
-            lookup_from: None,
-            with_payload: None,
-            with_vectors: None,
-            group_by: String::new(),
-            group_size: 0,
-            with_lookup: None,
-            formula: None,
-            formula_defaults: HashMap::new(),
-        }
-    }
 }
 
 impl QueryState {
