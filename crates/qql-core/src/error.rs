@@ -34,4 +34,5 @@ impl fmt::Display for QqlError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for QqlError {}

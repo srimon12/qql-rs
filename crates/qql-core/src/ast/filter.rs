@@ -1,82 +1,83 @@
 use super::Value;
 use alloc::boxed::Box;
+use alloc::string::String;
 use alloc::vec::Vec;
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
-pub enum FilterExpr<'a> {
+pub enum FilterExpr {
     Compare {
-        field: &'a str,
-        op: &'a str,
-        value: Value<'a>,
+        field: String,
+        op: String,
+        value: Value,
     },
     Between {
-        field: &'a str,
-        low: Value<'a>,
-        high: Value<'a>,
+        field: String,
+        low: Value,
+        high: Value,
     },
     In {
-        field: &'a str,
-        values: Vec<Value<'a>>,
+        field: String,
+        values: Vec<Value>,
     },
     NotIn {
-        field: &'a str,
-        values: Vec<Value<'a>>,
+        field: String,
+        values: Vec<Value>,
     },
     IsNull {
-        field: &'a str,
+        field: String,
     },
     IsNotNull {
-        field: &'a str,
+        field: String,
     },
     IsEmpty {
-        field: &'a str,
+        field: String,
     },
     IsNotEmpty {
-        field: &'a str,
+        field: String,
     },
     MatchText {
-        field: &'a str,
-        text: &'a str,
+        field: String,
+        text: String,
     },
     MatchAny {
-        field: &'a str,
-        text: &'a str,
+        field: String,
+        text: String,
     },
     MatchPhrase {
-        field: &'a str,
-        text: &'a str,
+        field: String,
+        text: String,
     },
     And {
-        operands: Vec<FilterExpr<'a>>,
+        operands: Vec<FilterExpr>,
     },
     Or {
-        operands: Vec<FilterExpr<'a>>,
+        operands: Vec<FilterExpr>,
     },
     Not {
-        operand: Box<FilterExpr<'a>>,
+        operand: Box<FilterExpr>,
     },
     Nested {
-        path: &'a str,
-        filter: Box<FilterExpr<'a>>,
+        path: String,
+        filter: Box<FilterExpr>,
     },
     HasVector {
-        name: &'a str,
+        name: String,
     },
     ValuesCount {
-        field: &'a str,
-        op: &'a str,
+        field: String,
+        op: String,
         count: i64,
     },
     GeoBoundingBox {
-        field: &'a str,
+        field: String,
         top_left_lat: f64,
         top_left_lon: f64,
         bottom_right_lat: f64,
         bottom_right_lon: f64,
     },
     GeoRadius {
-        field: &'a str,
+        field: String,
         lat: f64,
         lon: f64,
         radius: f64,

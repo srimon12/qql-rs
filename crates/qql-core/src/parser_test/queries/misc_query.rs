@@ -10,11 +10,11 @@ fn test_query_with_lookup() {
             assert_parse_ok("QUERY 'search' FROM docs LIMIT 10 GROUP BY 'category' GROUP_SIZE 5 WITH LOOKUP FROM metadata");
     match stmt {
         Stmt::Query(q) => {
-            assert_eq!(q.collection, Some("docs"));
+            assert_eq!(q.collection, Some(String::from("docs")));
             assert_eq!(q.limit, 10);
-            assert_eq!(q.group_by, Some("category"));
+            assert_eq!(q.group_by, Some(String::from("category")));
             assert_eq!(q.group_size, Some(5));
-            assert_eq!(q.with_lookup_collection, Some("metadata"));
+            assert_eq!(q.with_lookup_collection, Some(String::from("metadata")));
         }
         _ => panic!("expected Query stmt"),
     }
@@ -29,7 +29,7 @@ fn test_query_nested_filter() {
         );
     match stmt {
         Stmt::Query(q) => {
-            assert_eq!(q.collection, Some("content"));
+            assert_eq!(q.collection, Some(String::from("content")));
             let filter = q.query_filter.as_ref().unwrap();
             match filter.as_ref() {
                 FilterExpr::And { operands } => {
@@ -37,8 +37,8 @@ fn test_query_nested_filter() {
                     assert_eq!(
                         operands[0],
                         FilterExpr::Compare {
-                            field: "branch",
-                            op: "=",
+                            field: String::from("branch"),
+                            op: String::from("="),
                             value: str_val("root"),
                         }
                     );
@@ -57,16 +57,16 @@ fn test_query_nested_filter() {
                                         assert_eq!(
                                             inner_ops[0],
                                             FilterExpr::Compare {
-                                                field: "by",
-                                                op: "=",
+                                                field: String::from("by"),
+                                                op: String::from("="),
                                                 value: str_val("root"),
                                             }
                                         );
                                         assert_eq!(
                                             inner_ops[1],
                                             FilterExpr::Compare {
-                                                field: "seq",
-                                                op: "<=",
+                                                field: String::from("seq"),
+                                                op: String::from("<="),
                                                 value: i64_val(2),
                                             }
                                         );
@@ -212,8 +212,8 @@ fn test_query_where() {
             assert_eq!(
                 q.query_filter,
                 Some(Box::new(FilterExpr::Compare {
-                    field: "field",
-                    op: "=",
+                    field: String::from("field"),
+                    op: String::from("="),
                     value: str_val("value"),
                 }))
             );
@@ -238,7 +238,7 @@ fn test_query_group_by() {
     let stmt = assert_parse_ok("QUERY 'text' FROM docs LIMIT 10 GROUP BY 'category'");
     match stmt {
         Stmt::Query(q) => {
-            assert_eq!(q.group_by, Some("category"));
+            assert_eq!(q.group_by, Some(String::from("category")));
         }
         _ => panic!("expected Query"),
     }
@@ -251,7 +251,7 @@ fn test_query_lookup() {
     let stmt = assert_parse_ok("QUERY 'text' FROM docs LIMIT 10 LOOKUP FROM metadata");
     match stmt {
         Stmt::Query(q) => {
-            assert_eq!(q.lookup_from, Some("metadata"));
+            assert_eq!(q.lookup_from, Some(String::from("metadata")));
         }
         _ => panic!("expected Query"),
     }
@@ -321,8 +321,8 @@ fn test_query_with_cte_fusion_from() {
     match stmt {
         Stmt::Query(q) => {
             assert_eq!(q.ctes.len(), 1);
-            assert_eq!(q.fusion_type, Some("RRF"));
-            assert_eq!(q.collection, Some("docs"));
+            assert_eq!(q.fusion_type, Some(String::from("RRF")));
+            assert_eq!(q.collection, Some(String::from("docs")));
         }
         _ => panic!("expected Query"),
     }
@@ -333,8 +333,8 @@ fn test_fusion_from_keyword() {
     let stmt = assert_parse_ok("QUERY 'text' FROM docs FUSION RRF");
     match stmt {
         Stmt::Query(q) => {
-            assert_eq!(q.fusion_type, Some("RRF"));
-            assert_eq!(q.collection, Some("docs"));
+            assert_eq!(q.fusion_type, Some(String::from("RRF")));
+            assert_eq!(q.collection, Some(String::from("docs")));
         }
         _ => panic!("expected Query"),
     }

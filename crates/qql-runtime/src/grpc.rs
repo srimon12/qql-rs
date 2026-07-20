@@ -1115,7 +1115,8 @@ fn parse_json_vector_params(
     let distance_str = obj
         .get("distance")
         .and_then(|v| v.as_str())
-        .unwrap_or("Cosine");
+        .unwrap_or("Cosine")
+        .to_string();
     let distance = match distance_str.to_lowercase().as_str() {
         "cosine" => qdrant_client::qdrant::Distance::Cosine as i32,
         "dot" => qdrant_client::qdrant::Distance::Dot as i32,
@@ -1226,6 +1227,7 @@ fn parse_json_quantization_config(
         let r#type = match scalar_obj
             .get("type")
             .and_then(|v| v.as_str())
+            .as_deref()
             .unwrap_or("Int8")
         {
             "Int8" => qdrant_client::qdrant::QuantizationType::Int8 as i32,
@@ -1252,6 +1254,7 @@ fn parse_json_quantization_config(
         let compression = match product_obj
             .get("compression")
             .and_then(|v| v.as_str())
+            .as_deref()
             .unwrap_or("x8")
         {
             "x8" => qdrant_client::qdrant::CompressionRatio::X8 as i32,
@@ -1288,6 +1291,7 @@ fn parse_json_quantization_config_diff(
         let r#type = match scalar_obj
             .get("type")
             .and_then(|v| v.as_str())
+            .as_deref()
             .unwrap_or("Int8")
         {
             "Int8" => qdrant_client::qdrant::QuantizationType::Int8 as i32,
@@ -1314,6 +1318,7 @@ fn parse_json_quantization_config_diff(
         let compression = match product_obj
             .get("compression")
             .and_then(|v| v.as_str())
+            .as_deref()
             .unwrap_or("x8")
         {
             "x8" => qdrant_client::qdrant::CompressionRatio::X8 as i32,
@@ -1449,7 +1454,8 @@ impl QdrantOps for GrpcQdrant {
 
         let mut payload_schema = serde_json::Map::new();
         for (field, idx_info) in &info.payload_schema {
-            let schema_type = qdrant_client::qdrant::PayloadSchemaType::try_from(idx_info.data_type).ok();
+            let schema_type =
+                qdrant_client::qdrant::PayloadSchemaType::try_from(idx_info.data_type).ok();
             let data_type = match schema_type {
                 Some(qdrant_client::qdrant::PayloadSchemaType::Text) => "text",
                 Some(qdrant_client::qdrant::PayloadSchemaType::Integer) => "integer",
@@ -1878,11 +1884,12 @@ impl QdrantOps for GrpcQdrant {
         let field_index_params = if !options.is_empty() {
             let index_params = match req.field_type.to_lowercase().as_str() {
                 "text" => {
-                    let tokenizer_str = options
+                    let tokenizer = options
                         .get("tokenizer")
                         .and_then(|v| v.as_str())
-                        .unwrap_or("word");
-                    let tokenizer = match tokenizer_str.to_lowercase().as_str() {
+                        .unwrap_or("word")
+                        .to_lowercase();
+                    let tokenizer = match tokenizer.as_str() {
                         "prefix" => 1,
                         "whitespace" => 2,
                         "word" => 3,

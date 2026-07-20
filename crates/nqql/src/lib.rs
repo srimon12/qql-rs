@@ -1,9 +1,7 @@
-use std::borrow::Cow;
-
 use napi_derive::napi;
-use qql::offline;
 use qql_core::ast::{self, Value};
 use qql_core::lexer::Lexer;
+use qql_core::offline;
 use qql_core::parser::Parser;
 
 #[napi]
@@ -77,7 +75,7 @@ pub fn inject_filter(
     value: serde_json::Value,
 ) -> napi::Result<serde_json::Value> {
     let value =
-        serde_json_to_value(value).ok_or_else(|| napi::Error::from_reason("invalid value JSON"))?;
+        Value::from_json(value).ok_or_else(|| napi::Error::from_reason("invalid value JSON"))?;
     let mut stmt = Parser::parse(&query).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     ast::inject_filter(&mut stmt, &field, &op, &value);
     serde_json::to_value(&stmt).map_err(|e| napi::Error::from_reason(e.to_string()))
@@ -115,49 +113,6 @@ pub fn tokenize(input: String) -> napi::Result<serde_json::Value> {
 pub fn compile_query(input: String) -> napi::Result<serde_json::Value> {
     let compiled = offline::compile(&input).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     serde_json::to_value(&compiled).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-fn serde_json_to_value(jv: serde_json::Value) -> Option<Value<'static>> {
-    match jv {
-        serde_json::Value::String(s) => Some(Value::Str(Cow::Owned(s))),
-        serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                Some(Value::Int(i))
-            } else {
-                n.as_f64().map(Value::Float)
-            }
-        }
-        serde_json::Value::Bool(b) => Some(Value::Bool(b)),
-        serde_json::Value::Null => Some(Value::Null),
-        serde_json::Value::Array(items) => {
-            let mut vals = Vec::with_capacity(items.len());
-            for item in items {
-                vals.push(serde_json_to_value(item)?);
-            }
-            Some(Value::List(vals))
-        }
-        serde_json::Value::Object(map) => {
-            if map.len() == 1 {
-                if let Some((tag, inner)) = map.iter().next() {
-                    match tag.as_str() {
-                        "str" => return inner.as_str().map(|s| Value::Str(Cow::Owned(s.into()))),
-                        "int" => return inner.as_i64().map(Value::Int),
-                        "float" => return inner.as_f64().map(Value::Float),
-                        "bool" => return inner.as_bool().map(Value::Bool),
-                        "null" if inner.is_null() => return Some(Value::Null),
-                        "list" => return serde_json_to_value(inner.clone()),
-                        "dict" => return serde_json_to_value(inner.clone()),
-                        _ => {}
-                    }
-                }
-            }
-            let mut pairs = Vec::with_capacity(map.len());
-            for (k, v) in map {
-                pairs.push((Cow::Owned(k), serde_json_to_value(v)?));
-            }
-            Some(Value::Dict(pairs))
-        }
-    }
 }
 
 #[napi(js_name = "HttpEmbedder")]
@@ -222,8 +177,7 @@ fn create_js_executor(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let rt = tokio::runtime::Runtime::new()
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let rt = tokio::runtime::Runtime::new().map_err(|e| napi::Error::from_reason(e.to_string()))?;
 
     let mut config = qql::config::QqlConfig::default();
     config.url = url_str.to_string();
@@ -238,10 +192,8 @@ fn create_js_executor(
                 .and_then(|v| v.as_str())
                 .map(String::from);
             config.embedding_model = emb.get("model").and_then(|v| v.as_str()).map(String::from);
-            config.embedding_dimension = emb
-                .get("dimension")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as usize;
+            config.embedding_dimension =
+                emb.get("dimension").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
         }
     }
 
@@ -331,7 +283,10 @@ impl JsClient {
 }
 
 #[napi]
-pub fn execute(query: String, options: Option<serde_json::Value>) -> napi::Result<serde_json::Value> {
+pub fn execute(
+    query: String,
+    options: Option<serde_json::Value>,
+) -> napi::Result<serde_json::Value> {
     let client = JsClient::new(options)?;
     client.execute(query)
 }

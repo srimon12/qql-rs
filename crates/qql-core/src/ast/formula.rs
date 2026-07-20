@@ -1,80 +1,81 @@
 use super::{FilterExpr, Value};
 use alloc::boxed::Box;
+use alloc::string::String;
 use alloc::vec::Vec;
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
-pub enum FormulaExpr<'a> {
+pub enum FormulaExpr {
     Constant {
         value: f64,
     },
     Variable {
-        name: &'a str,
+        name: String,
     },
     Sum {
-        left: Box<FormulaExpr<'a>>,
-        right: Box<FormulaExpr<'a>>,
+        left: Box<FormulaExpr>,
+        right: Box<FormulaExpr>,
     },
     Sub {
-        left: Box<FormulaExpr<'a>>,
-        right: Box<FormulaExpr<'a>>,
+        left: Box<FormulaExpr>,
+        right: Box<FormulaExpr>,
     },
     Mul {
-        left: Box<FormulaExpr<'a>>,
-        right: Box<FormulaExpr<'a>>,
+        left: Box<FormulaExpr>,
+        right: Box<FormulaExpr>,
     },
     Div {
-        left: Box<FormulaExpr<'a>>,
-        right: Box<FormulaExpr<'a>>,
+        left: Box<FormulaExpr>,
+        right: Box<FormulaExpr>,
         by_zero_default: Option<f64>,
     },
     Neg {
-        operand: Box<FormulaExpr<'a>>,
+        operand: Box<FormulaExpr>,
     },
     Abs {
-        x: Box<FormulaExpr<'a>>,
+        x: Box<FormulaExpr>,
     },
     Sqrt {
-        x: Box<FormulaExpr<'a>>,
+        x: Box<FormulaExpr>,
     },
     Log {
-        x: Box<FormulaExpr<'a>>,
+        x: Box<FormulaExpr>,
     },
     Ln {
-        x: Box<FormulaExpr<'a>>,
+        x: Box<FormulaExpr>,
     },
     Exp {
-        x: Box<FormulaExpr<'a>>,
+        x: Box<FormulaExpr>,
     },
     Pow {
-        base: Box<FormulaExpr<'a>>,
-        exponent: Box<FormulaExpr<'a>>,
+        base: Box<FormulaExpr>,
+        exponent: Box<FormulaExpr>,
     },
     GeoDistance {
         lat: f64,
         lon: f64,
-        field: &'a str,
+        field: String,
     },
     Decay {
-        kind: &'a str,
-        x: Box<FormulaExpr<'a>>,
-        target: Option<Box<FormulaExpr<'a>>>,
+        kind: String,
+        x: Box<FormulaExpr>,
+        target: Option<Box<FormulaExpr>>,
         scale: Option<f64>,
         midpoint: Option<f64>,
     },
     Case {
-        cond: Box<FilterExpr<'a>>,
-        then_: Box<FormulaExpr<'a>>,
-        else_: Box<FormulaExpr<'a>>,
+        cond: Box<FilterExpr>,
+        then_: Box<FormulaExpr>,
+        else_: Box<FormulaExpr>,
     },
     MatchCondition {
-        field: &'a str,
-        values: Vec<Value<'a>>,
+        field: String,
+        values: Vec<Value>,
     },
     Datetime {
-        value: &'a str,
+        value: String,
     },
     DatetimeKey {
-        key: &'a str,
+        key: String,
     },
 }

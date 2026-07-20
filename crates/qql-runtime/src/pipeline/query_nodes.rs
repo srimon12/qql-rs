@@ -9,12 +9,13 @@ use super::{
 };
 
 pub struct RecommendNode {
-    pub positive_ids: Vec<ast::Value<'static>>,
-    pub negative_ids: Vec<ast::Value<'static>>,
+    pub positive_ids: Vec<ast::Value>,
+    pub negative_ids: Vec<ast::Value>,
     pub strategy: Option<String>,
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl ExecutionNode for RecommendNode {
     async fn execute(&self, state: &mut QueryState) -> Result<(), QqlError> {
         if state.has_mmr {
@@ -57,15 +58,16 @@ impl ExecutionNode for RecommendNode {
 }
 
 pub struct ContextPairInput {
-    pub positive: Option<ast::Value<'static>>,
-    pub negative: Option<ast::Value<'static>>,
+    pub positive: Option<ast::Value>,
+    pub negative: Option<ast::Value>,
 }
 
 pub struct ContextNode {
     pub pairs: Vec<ContextPairInput>,
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl ExecutionNode for ContextNode {
     async fn execute(&self, state: &mut QueryState) -> Result<(), QqlError> {
         let pairs = build_context_pairs(state, &self.pairs).await?;
@@ -75,11 +77,12 @@ impl ExecutionNode for ContextNode {
 }
 
 pub struct DiscoverNode {
-    pub target: Option<ast::Value<'static>>,
+    pub target: Option<ast::Value>,
     pub pairs: Vec<ContextPairInput>,
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl ExecutionNode for DiscoverNode {
     async fn execute(&self, state: &mut QueryState) -> Result<(), QqlError> {
         let target = match &self.target {
@@ -119,7 +122,8 @@ pub struct OrderByNode {
     pub asc: bool,
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl ExecutionNode for OrderByNode {
     async fn execute(&self, state: &mut QueryState) -> Result<(), QqlError> {
         let direction = if self.asc {
@@ -137,7 +141,8 @@ impl ExecutionNode for OrderByNode {
 
 pub struct SampleNode;
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl ExecutionNode for SampleNode {
     async fn execute(&self, state: &mut QueryState) -> Result<(), QqlError> {
         state.target_query = Some(QueryVariant::Sample);
@@ -146,12 +151,13 @@ impl ExecutionNode for SampleNode {
 }
 
 pub struct RelevanceFeedbackNode {
-    pub target: ast::Value<'static>,
-    pub feedback: Vec<(ast::Value<'static>, f64)>,
+    pub target: ast::Value,
+    pub feedback: Vec<(ast::Value, f64)>,
     pub strategy: Option<(f64, f64, f64)>,
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl ExecutionNode for RelevanceFeedbackNode {
     async fn execute(&self, state: &mut QueryState) -> Result<(), QqlError> {
         fn build_vector_input_from_value(val: &ast::Value) -> Result<VectorInput, QqlError> {
@@ -208,7 +214,8 @@ pub struct FusionNode {
     pub mode: String,
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl ExecutionNode for FusionNode {
     async fn execute(&self, state: &mut QueryState) -> Result<(), QqlError> {
         let mode_lower = self.mode.to_lowercase();
@@ -242,7 +249,8 @@ pub struct RerankNode {
     pub model: String,
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl ExecutionNode for RerankNode {
     async fn execute(&self, state: &mut QueryState) -> Result<(), QqlError> {
         if state.local_embed {

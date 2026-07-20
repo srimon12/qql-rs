@@ -7,7 +7,7 @@ use crate::token::TokenKind;
 use super::Parser;
 
 impl<'a> Parser<'a> {
-    pub fn parse_scroll(&mut self) -> Result<Stmt<'a>, QqlError> {
+    pub fn parse_scroll(&mut self) -> Result<Stmt, QqlError> {
         self.advance()?;
         self.expect(TokenKind::From)?;
         let collection = self.parse_identifier()?;
@@ -43,7 +43,7 @@ impl<'a> Parser<'a> {
         })))
     }
 
-    pub fn parse_select(&mut self) -> Result<Stmt<'a>, QqlError> {
+    pub fn parse_select(&mut self) -> Result<Stmt, QqlError> {
         self.advance()?;
         self.expect(TokenKind::Star)?;
         self.expect(TokenKind::From)?;

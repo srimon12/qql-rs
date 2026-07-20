@@ -1,8 +1,9 @@
 use super::ascii_equal_lower;
 use crate::ast::{CollectionConfig, OptimizationThreads, Value};
 use crate::error::QqlError;
+use alloc::string::String;
 
-pub fn config_value<'a>(config: &'a [(&'a str, Value<'a>)], key: &str) -> Option<&'a Value<'a>> {
+pub fn config_value<'a>(config: &'a [(String, Value)], key: &str) -> Option<&'a Value> {
     for (k, v) in config {
         if ascii_equal_lower(k, key) {
             return Some(v);
@@ -11,11 +12,11 @@ pub fn config_value<'a>(config: &'a [(&'a str, Value<'a>)], key: &str) -> Option
     None
 }
 
-pub fn config_has_key(config: &[(&str, Value)], key: &str) -> bool {
+pub fn config_has_key(config: &[(String, Value)], key: &str) -> bool {
     config_value(config, key).is_some()
 }
 
-pub fn config_bool(config: &[(&str, Value)], key: &str) -> Option<bool> {
+pub fn config_bool(config: &[(String, Value)], key: &str) -> Option<bool> {
     match config_value(config, key)? {
         Value::Bool(b) => Some(*b),
         _ => None,
@@ -23,7 +24,7 @@ pub fn config_bool(config: &[(&str, Value)], key: &str) -> Option<bool> {
 }
 
 pub fn config_positive_u64(
-    config: &[(&str, Value)],
+    config: &[(String, Value)],
     key: &str,
     pos: usize,
 ) -> Result<Option<u64>, QqlError> {
@@ -39,7 +40,7 @@ pub fn config_positive_u64(
 }
 
 pub fn config_non_negative_u64(
-    config: &[(&str, Value)],
+    config: &[(String, Value)],
     key: &str,
     pos: usize,
 ) -> Result<Option<u64>, QqlError> {
@@ -54,7 +55,12 @@ pub fn config_non_negative_u64(
     }
 }
 
-pub fn config_float_range(config: &[(&str, Value)], key: &str, min: f64, max: f64) -> Option<f64> {
+pub fn config_float_range(
+    config: &[(String, Value)],
+    key: &str,
+    min: f64,
+    max: f64,
+) -> Option<f64> {
     match config_value(config, key)? {
         Value::Int(n) => {
             let f = *n as f64;
@@ -76,7 +82,7 @@ pub fn config_float_range(config: &[(&str, Value)], key: &str, min: f64, max: f6
 }
 
 pub fn config_max_optimization_threads(
-    config: &[(&str, Value)],
+    config: &[(String, Value)],
     key: &str,
 ) -> Option<OptimizationThreads> {
     match config_value(config, key)? {
@@ -267,7 +273,7 @@ pub fn check_deleted_threshold(value: &Value, pos: usize) -> Result<(), QqlError
     Ok(())
 }
 
-pub fn validate_index_options(options: &[(&str, Value)], pos: usize) -> Result<(), QqlError> {
+pub fn validate_index_options(options: &[(String, Value)], pos: usize) -> Result<(), QqlError> {
     for (k, v) in options {
         let lower = k.to_ascii_lowercase();
         match lower.as_str() {

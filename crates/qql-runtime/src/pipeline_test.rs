@@ -62,7 +62,7 @@ impl Embedder for MockEmbedder {
 async fn test_query_pipeline_execute_success() {
     let mut p = QueryPipeline::new();
     let mut state = QueryState {
-        query_text: "test".to_string(),
+        query_text: String::from("test").to_string(),
         ..Default::default()
     };
 
@@ -88,7 +88,7 @@ async fn test_query_pipeline_execute_success() {
 async fn test_query_pipeline_execute_error_stops_execution() {
     let mut p = QueryPipeline::new();
     let mut state = QueryState {
-        query_text: "test".to_string(),
+        query_text: String::from("test").to_string(),
         ..Default::default()
     };
 
@@ -116,7 +116,7 @@ fn test_build_flat_request_sets_all_fields() {
     let p = QueryPipeline::new();
     let state = QueryState {
         collection_name: "docs".to_string(),
-        vector_name: "dense".to_string(),
+        vector_name: String::from("dense").to_string(),
         limit: 10,
         offset: 5,
         score_threshold: Some(0.5),
@@ -195,11 +195,11 @@ fn test_get_doc_options_nil_for_empty_config() {
 #[test]
 fn test_build_expression_match_condition() {
     let expr = ast::FormulaExpr::MatchCondition {
-        field: "tag",
+        field: String::from("tag"),
         values: vec![
-            ast::Value::Str(std::borrow::Cow::Borrowed("h1")),
-            ast::Value::Str(std::borrow::Cow::Borrowed("h2")),
-            ast::Value::Str(std::borrow::Cow::Borrowed("h3")),
+            ast::Value::Str(String::from("h1")),
+            ast::Value::Str(String::from("h2")),
+            ast::Value::Str(String::from("h3")),
         ],
     };
 
@@ -217,8 +217,8 @@ fn test_build_expression_match_condition() {
 #[test]
 fn test_build_expression_match_condition_single() {
     let expr = ast::FormulaExpr::MatchCondition {
-        field: "category",
-        values: vec![ast::Value::Str(std::borrow::Cow::Borrowed("premium"))],
+        field: String::from("category"),
+        values: vec![ast::Value::Str(String::from("premium"))],
     };
 
     let result = pipeline::build_expression(&expr);
@@ -233,7 +233,7 @@ fn test_build_expression_match_condition_single() {
 #[test]
 fn test_build_expression_match_condition_numeric() {
     let expr = ast::FormulaExpr::MatchCondition {
-        field: "count",
+        field: String::from("count"),
         values: vec![ast::Value::Int(1), ast::Value::Int(2), ast::Value::Int(3)],
     };
 
@@ -257,14 +257,14 @@ fn test_build_expression_match_condition_numeric() {
 #[tokio::test]
 async fn test_dense_embed_node_execute_cloud() {
     let node = DenseEmbedNode {
-        model: "test-model".to_string(),
-        vector_name: "dense".to_string(),
+        model: String::from("test-model").to_string(),
+        vector_name: String::from("dense").to_string(),
         limit: 10,
         as_prefetch: false,
     };
 
     let mut state = QueryState {
-        query_text: "hello".to_string(),
+        query_text: String::from("hello").to_string(),
         local_embed: false,
         ..Default::default()
     };
@@ -285,14 +285,14 @@ async fn test_dense_embed_node_execute_cloud() {
 #[tokio::test]
 async fn test_dense_embed_node_execute_local() {
     let node = DenseEmbedNode {
-        model: "test-model".to_string(),
-        vector_name: "dense".to_string(),
+        model: String::from("test-model").to_string(),
+        vector_name: String::from("dense").to_string(),
         limit: 10,
         as_prefetch: false,
     };
 
     let mut state = QueryState {
-        query_text: "hello".to_string(),
+        query_text: String::from("hello").to_string(),
         local_embed: true,
         embedder: Some(Arc::new(MockEmbedder {
             dense: vec![0.1, 0.2, 0.3],
@@ -318,14 +318,14 @@ async fn test_dense_embed_node_execute_local() {
 #[tokio::test]
 async fn test_sparse_embed_node_execute_cloud() {
     let node = SparseEmbedNode {
-        model: "test-sparse-model".to_string(),
-        vector_name: "sparse".to_string(),
+        model: String::from("test-sparse-model").to_string(),
+        vector_name: String::from("sparse").to_string(),
         limit: 10,
         as_prefetch: false,
     };
 
     let mut state = QueryState {
-        query_text: "hello".to_string(),
+        query_text: String::from("hello").to_string(),
         local_embed: false,
         ..Default::default()
     };
@@ -346,14 +346,14 @@ async fn test_sparse_embed_node_execute_cloud() {
 #[tokio::test]
 async fn test_sparse_embed_node_execute_local() {
     let node = SparseEmbedNode {
-        model: "test-sparse-model".to_string(),
-        vector_name: "sparse".to_string(),
+        model: String::from("test-sparse-model").to_string(),
+        vector_name: String::from("sparse").to_string(),
         limit: 10,
         as_prefetch: false,
     };
 
     let mut state = QueryState {
-        query_text: "hello".to_string(),
+        query_text: String::from("hello").to_string(),
         local_embed: true,
         embedder: Some(Arc::new(MockEmbedder {
             dense: Vec::new(),
@@ -406,10 +406,10 @@ async fn test_fusion_node_execute() {
 #[tokio::test]
 async fn test_rerank_node_execute() {
     let node = RerankNode {
-        model: "rerank-model".to_string(),
+        model: String::from("rerank-model").to_string(),
     };
     let mut state = QueryState {
-        query_text: "hello".to_string(),
+        query_text: String::from("hello").to_string(),
         local_embed: false,
         ..Default::default()
     };
@@ -431,12 +431,10 @@ async fn test_rerank_node_execute() {
 async fn test_recommend_node_execute() {
     let node = RecommendNode {
         positive_ids: vec![
-            ast::Value::Str(std::borrow::Cow::Borrowed(
-                "123e4567-e89b-12d3-a456-426614174000",
-            )),
+            ast::Value::Str(String::from("123e4567-e89b-12d3-a456-426614174000")),
             ast::Value::Int(42),
         ],
-        negative_ids: vec![ast::Value::Str(std::borrow::Cow::Borrowed(
+        negative_ids: vec![ast::Value::Str(String::from(
             "123e4567-e89b-12d3-a456-426614174001",
         ))],
         strategy: None,
@@ -521,7 +519,7 @@ fn test_point_id_num() {
 
 #[test]
 fn test_point_id_uuid() {
-    let id = pipeline::to_point_id(&ast::Value::Str(std::borrow::Cow::Borrowed(
+    let id = pipeline::to_point_id(&ast::Value::Str(String::from(
         "550e8400-e29b-41d4-a716-446655440000",
     )))
     .unwrap();

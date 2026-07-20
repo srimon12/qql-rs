@@ -18,17 +18,17 @@ use crate::executor::helpers::{
 impl Executor {
     pub(crate) async fn build_query_state_and_pipeline(
         &self,
-        stmt: &ast::QueryStmt<'_>,
+        stmt: &ast::QueryStmt,
     ) -> Result<(QueryState, QueryPipeline), QqlError> {
         let dense_vector_name: String;
         let sparse_vector_name: String;
 
-        if let Some(using) = stmt.using_ {
-            dense_vector_name = using.to_string();
-            sparse_vector_name = using.to_string();
+        if let Some(using) = &stmt.using_ {
+            dense_vector_name = using.clone();
+            sparse_vector_name = using.clone();
         } else {
             let topo = self
-                .resolve_vector_topology(stmt.collection.unwrap_or(""))
+                .resolve_vector_topology(stmt.collection.as_deref().unwrap_or(""))
                 .await?;
             if let Some(ref dv) = topo.dense_vector {
                 if !dv.is_empty() {
@@ -52,22 +52,24 @@ impl Executor {
             }
         }
 
-        let dense_model = self.resolve_dense_model(stmt.model);
+        let dense_model = self.resolve_dense_model(stmt.model.as_deref());
         let sparse_model = if stmt.query_type == ast::QueryType::Hybrid {
-            Some(self.resolve_sparse_model(stmt.model))
+            Some(self.resolve_sparse_model(stmt.model.as_deref()))
         } else {
             None
         };
 
         let qdrant_filter = if let Some(ref filter) = stmt.query_filter {
             let converter = FilterConverter::new();
-            converter.build_filter(filter)?
+            converter
+                .build_filter(filter)?
+                .map(crate::backend::Filter::from_json)
         } else {
             None
         };
 
         let mut state = QueryState {
-            query_text: stmt.query_text.map(|s| s.to_string()).unwrap_or_default(),
+            query_text: stmt.query_text.clone().unwrap_or_default(),
             prefetches: Vec::new(),
             manual_prefetches: Vec::new(),
             target_query: None,
@@ -87,27 +89,29 @@ impl Executor {
             doc_options: None,
             request_timeout: self.request_timeout(),
 
-            collection_name: stmt.collection.map(|s| s.to_string()).unwrap_or_default(),
+            collection_name: stmt.collection.clone().unwrap_or_default(),
             vector_name: String::new(),
             limit: stmt.limit as u64,
             offset: stmt.offset as u64,
             qdrant_filter,
             score_threshold: stmt.score_threshold.map(|v| v as f32),
-            lookup_from: if !stmt.lookup_from.unwrap_or("").is_empty() {
-                Some(pipeline::LookupLocation {
-                    collection_name: stmt.lookup_from.unwrap().to_string(),
-                    vector_name: stmt.lookup_vector.map(|s| s.to_string()),
-                })
-            } else {
-                None
-            },
+            lookup_from: stmt
+                .lookup_from
+                .as_ref()
+                .map(|lf| pipeline::LookupLocation {
+                    collection_name: lf.clone(),
+                    vector_name: stmt.lookup_vector.clone(),
+                }),
             with_payload: build_with_payload(stmt.with_payload.as_ref().map(|p| p.as_ref())),
             with_vectors: build_with_vectors(stmt.with_vectors.as_ref().map(|v| v.as_ref())),
-            group_by: stmt.group_by.map(|s| s.to_string()).unwrap_or_default(),
+            group_by: stmt.group_by.clone().unwrap_or_default(),
             group_size: stmt.group_size.unwrap_or(0) as u64,
-            with_lookup: stmt.with_lookup_collection.map(|c| pipeline::WithLookup {
-                collection: c.to_string(),
-            }),
+            with_lookup: stmt
+                .with_lookup_collection
+                .as_ref()
+                .map(|c| pipeline::WithLookup {
+                    collection: c.clone(),
+                }),
             formula: None,
             formula_defaults: HashMap::new(),
         };
@@ -143,7 +147,7 @@ impl Executor {
 
         // Populate manual_prefetches from prefetch_refs
         for ref_node in &stmt.prefetch_refs {
-            let pq = cte_map.get(ref_node.cte_name.as_ref()).ok_or_else(|| {
+            let pq = cte_map.get(ref_node.cte_name.as_str()).ok_or_else(|| {
                 QqlError::runtime(format!(
                     "unknown CTE referenced in prefetch: '{}'",
                     ref_node.cte_name
@@ -153,15 +157,17 @@ impl Executor {
             let mut clone = pq.clone();
             if let Some(ref filter) = ref_node.filter {
                 let converter = FilterConverter::new();
-                clone.filter = converter.build_filter(filter)?;
+                clone.filter = converter
+                    .build_filter(filter)?
+                    .map(crate::backend::Filter::from_json);
             }
             if let Some(st) = ref_node.score_threshold {
                 clone.score_threshold = Some(st as f32);
             }
-            if let Some(lf) = ref_node.lookup_from {
+            if let Some(lf) = &ref_node.lookup_from {
                 clone.lookup_from = Some(pipeline::LookupLocation {
-                    collection_name: lf.to_string(),
-                    vector_name: ref_node.lookup_vector.map(|s| s.to_string()),
+                    collection_name: lf.clone(),
+                    vector_name: ref_node.lookup_vector.clone(),
                 });
             }
             state.manual_prefetches.push(clone);
@@ -173,10 +179,7 @@ impl Executor {
             ast::QueryMode::OrderBy => {
                 let asc = stmt.order_by_asc.unwrap_or(true);
                 exec_pipeline.add(Box::new(OrderByNode {
-                    field: stmt
-                        .order_by_field
-                        .map(|s| s.to_string())
-                        .unwrap_or_default(),
+                    field: stmt.order_by_field.clone().unwrap_or_default(),
                     asc,
                 }));
             }
@@ -184,7 +187,7 @@ impl Executor {
                 exec_pipeline.add(Box::new(SampleNode));
             }
             ast::QueryMode::RelevanceFeedback => {
-                let feedback: Vec<(Value<'static>, f64)> = stmt
+                let feedback: Vec<(Value, f64)> = stmt
                     .feedback_items
                     .iter()
                     .map(|item| {
@@ -223,7 +226,7 @@ impl Executor {
                             as_prefetch: true,
                         }));
                         exec_pipeline.add(Box::new(FusionNode {
-                            mode: stmt.fusion_type.unwrap_or("rrf").to_string(),
+                            mode: stmt.fusion_type.as_deref().unwrap_or("rrf").to_string(),
                         }));
                     } else {
                         exec_pipeline.add(Box::new(RawVectorNode {
@@ -244,7 +247,7 @@ impl Executor {
                     exec_pipeline.add(Box::new(RecommendNode {
                         positive_ids: vec![id],
                         negative_ids: Vec::new(),
-                        strategy: stmt.strategy.map(|s| s.to_string()),
+                        strategy: stmt.strategy.clone(),
                     }));
                 } else {
                     if let Some(text) = &stmt.query_text {
@@ -267,11 +270,11 @@ impl Executor {
                                 as_prefetch: true,
                             }));
                             exec_pipeline.add(Box::new(FusionNode {
-                                mode: stmt.fusion_type.unwrap_or("rrf").to_string(),
+                                mode: stmt.fusion_type.as_deref().unwrap_or("rrf").to_string(),
                             }));
                         }
                         ast::QueryType::Sparse => {
-                            let sm = self.resolve_sparse_model(stmt.model);
+                            let sm = self.resolve_sparse_model(stmt.model.as_deref());
                             exec_pipeline.add(Box::new(SparseEmbedNode {
                                 model: sm.clone(),
                                 vector_name: sparse_vector_name.clone(),
@@ -303,12 +306,12 @@ impl Executor {
                 }
             }
             ast::QueryMode::Recommend => {
-                let pos: Vec<Value<'static>> = stmt.positive_ids.iter().map(clone_value).collect();
-                let neg: Vec<Value<'static>> = stmt.negative_ids.iter().map(clone_value).collect();
+                let pos: Vec<Value> = stmt.positive_ids.iter().map(clone_value).collect();
+                let neg: Vec<Value> = stmt.negative_ids.iter().map(clone_value).collect();
                 exec_pipeline.add(Box::new(RecommendNode {
                     positive_ids: pos,
                     negative_ids: neg,
-                    strategy: stmt.strategy.map(|s| s.to_string()),
+                    strategy: stmt.strategy.clone(),
                 }));
                 state.vector_name = dense_vector_name.clone();
             }
@@ -359,7 +362,7 @@ impl Executor {
         }
 
         if stmt.rerank {
-            let rerank_model = stmt.rerank_model.unwrap_or("default-reranker");
+            let rerank_model = stmt.rerank_model.as_deref().unwrap_or("default-reranker");
             exec_pipeline.add(Box::new(RerankNode {
                 model: rerank_model.to_string(),
             }));
@@ -368,10 +371,7 @@ impl Executor {
         Ok((state, exec_pipeline))
     }
 
-    pub(crate) async fn do_query(
-        &self,
-        stmt: ast::QueryStmt<'_>,
-    ) -> Result<ExecResponse, QqlError> {
+    pub(crate) async fn do_query(&self, stmt: ast::QueryStmt) -> Result<ExecResponse, QqlError> {
         let (mut state, exec_pipeline) = self.build_query_state_and_pipeline(&stmt).await?;
 
         exec_pipeline.execute(&mut state).await?;
@@ -401,10 +401,7 @@ impl Executor {
         let formatted: Vec<SearchHit> = results
             .into_iter()
             .map(|hit| {
-                let payload_map: Option<HashMap<String, serde_json::Value>> = hit
-                    .payload
-                    .as_ref()
-                    .and_then(|p| serde_json::from_value(serde_json::to_value(p).unwrap()).ok());
+                let payload_map = hit.payload.clone();
                 SearchHit {
                     id: point_id_string(&hit.id),
                     score: hit.score,
@@ -447,10 +444,7 @@ impl Executor {
                     .hits
                     .into_iter()
                     .map(|hit| {
-                        let payload_map: Option<HashMap<String, serde_json::Value>> =
-                            hit.payload.as_ref().and_then(|p| {
-                                serde_json::from_value(serde_json::to_value(p).unwrap()).ok()
-                            });
+                        let payload_map = hit.payload.clone();
                         SearchHit {
                             id: point_id_string(&hit.id),
                             score: hit.score,
@@ -479,7 +473,7 @@ impl Executor {
 
     async fn build_cte_prefetch(
         &self,
-        stmt: &ast::QueryStmt<'_>,
+        stmt: &ast::QueryStmt,
         cte_map: &HashMap<String, pipeline::PrefetchQuery>,
     ) -> Result<pipeline::PrefetchQuery, QqlError> {
         let mut prefetch = Vec::new();
@@ -492,7 +486,7 @@ impl Executor {
         }
 
         for ref_node in &stmt.prefetch_refs {
-            let nested = scoped_map.get(ref_node.cte_name.as_ref()).ok_or_else(|| {
+            let nested = scoped_map.get(ref_node.cte_name.as_str()).ok_or_else(|| {
                 QqlError::runtime(format!(
                     "unknown CTE referenced in prefetch: '{}'",
                     ref_node.cte_name
@@ -501,25 +495,26 @@ impl Executor {
             prefetch.push(nested.clone());
         }
 
-        let using = stmt.using_.map(|s| s.to_string());
+        let using = stmt.using_.clone();
         let limit = if stmt.limit > 0 {
             Some(stmt.limit as u64)
         } else {
             None
         };
         let score_threshold = stmt.score_threshold.map(|v| v as f32);
-        let lookup_from = if !stmt.lookup_from.unwrap_or("").is_empty() {
-            Some(pipeline::LookupLocation {
-                collection_name: stmt.lookup_from.unwrap().to_string(),
-                vector_name: stmt.lookup_vector.map(|s| s.to_string()),
-            })
-        } else {
-            None
-        };
+        let lookup_from = stmt
+            .lookup_from
+            .as_ref()
+            .map(|lf| pipeline::LookupLocation {
+                collection_name: lf.clone(),
+                vector_name: stmt.lookup_vector.clone(),
+            });
 
         let filter = if let Some(ref f) = stmt.query_filter {
             let converter = FilterConverter::new();
-            converter.build_filter(f)?
+            converter
+                .build_filter(f)?
+                .map(crate::backend::Filter::from_json)
         } else {
             None
         };
@@ -529,7 +524,7 @@ impl Executor {
             .as_ref()
             .and_then(|wc| pipeline::build_search_params(wc));
 
-        let dense_model = self.resolve_dense_model(stmt.model);
+        let dense_model = self.resolve_dense_model(stmt.model.as_deref());
 
         let mut query = None;
         match stmt.mode {
@@ -544,7 +539,7 @@ impl Executor {
                     let pid = crate::pipeline::to_point_id(id)?;
                     neg.push(pipeline::VectorInput::Id(pid));
                 }
-                let strategy = if let Some(strat) = stmt.strategy {
+                let strategy = if let Some(strat) = &stmt.strategy {
                     match strat.to_lowercase().as_str() {
                         "average_vector" => Some(pipeline::RecommendStrategyType::AverageVector),
                         "best_score" => Some(pipeline::RecommendStrategyType::BestScore),
@@ -578,7 +573,7 @@ impl Executor {
                     query = Some(pipeline::QueryVariant::Nearest(
                         stmt.raw_vector.iter().map(|&x| x as f32).collect(),
                     ));
-                } else if let Some(text) = stmt.query_text {
+                } else if let Some(text) = &stmt.query_text {
                     let is_sparse = stmt.query_type == ast::QueryType::Sparse;
                     if is_sparse {
                         if self.uses_local_embeddings() {
@@ -592,7 +587,7 @@ impl Executor {
                         } else {
                             query = Some(pipeline::QueryVariant::Document {
                                 text: text.to_string(),
-                                model: self.resolve_sparse_model(stmt.model),
+                                model: self.resolve_sparse_model(stmt.model.as_deref()),
                                 options: self.cloud_model_options(),
                             });
                         }

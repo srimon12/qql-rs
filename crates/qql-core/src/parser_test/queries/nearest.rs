@@ -13,8 +13,8 @@ fn test_query_nearest() {
     match stmt {
         Stmt::Query(q) => {
             assert_eq!(q.mode, QueryMode::Nearest);
-            assert_eq!(q.collection, Some("docs"));
-            assert_eq!(q.query_text, Some("vector search"));
+            assert_eq!(q.collection, Some(String::from("docs")));
+            assert_eq!(q.query_text, Some(String::from("vector search")));
             assert_eq!(q.limit, 10);
             assert_eq!(q.offset, 5);
             assert_eq!(q.query_type, QueryType::Hybrid);
@@ -34,7 +34,7 @@ fn test_query_recommend() {
     match stmt {
         Stmt::Query(q) => {
             assert_eq!(q.mode, QueryMode::Recommend);
-            assert_eq!(q.collection, Some("users"));
+            assert_eq!(q.collection, Some(String::from("users")));
             assert_eq!(q.positive_ids, vec![i64_val(1), i64_val(2)]);
             assert_eq!(q.negative_ids, vec![i64_val(3)]);
             assert_eq!(q.limit, 10);
@@ -51,7 +51,7 @@ fn test_query_discover() {
     match stmt {
         Stmt::Query(q) => {
             assert_eq!(q.mode, QueryMode::Discover);
-            assert_eq!(q.collection, Some("products"));
+            assert_eq!(q.collection, Some(String::from("products")));
             assert_eq!(q.target, Some(i64_val(100)));
             assert_eq!(q.context_pairs.len(), 2);
             assert_eq!(q.context_pairs[0].positive, i64_val(1));
@@ -70,7 +70,7 @@ fn test_query_context() {
     match stmt {
         Stmt::Query(q) => {
             assert_eq!(q.mode, QueryMode::Context);
-            assert_eq!(q.collection, Some("logs"));
+            assert_eq!(q.collection, Some(String::from("logs")));
             assert_eq!(q.context_pairs.len(), 1);
             assert_eq!(q.context_pairs[0].positive, str_val("uuid-1"));
             assert_eq!(q.context_pairs[0].negative, str_val("uuid-2"));

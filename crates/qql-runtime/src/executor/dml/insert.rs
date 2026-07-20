@@ -1,6 +1,7 @@
 use serde_json;
 use std::collections::HashMap;
 
+#[cfg(feature = "rest")]
 use crate::embedder::HttpEmbedder;
 use crate::executor::{
     CreateCollectionReq, ExecResponse, Executor, PointStruct, UpsertPointsReq, VectorTopology,
@@ -14,21 +15,18 @@ use crate::executor::helpers::value_to_json;
 use super::helpers::*;
 
 impl Executor {
-    pub(crate) async fn do_insert(
-        &self,
-        stmt: ast::InsertStmt<'_>,
-    ) -> Result<ExecResponse, QqlError> {
+    pub(crate) async fn do_insert(&self, stmt: ast::InsertStmt) -> Result<ExecResponse, QqlError> {
         if stmt.values_list.is_empty() {
             return Err(QqlError::runtime("INSERT VALUES list is empty"));
         }
 
         let _created = self
             .ensure_collection_for_insert(
-                stmt.collection,
-                stmt.model,
+                &stmt.collection,
+                stmt.model.as_deref(),
                 stmt.hybrid,
-                stmt.dense_vector,
-                stmt.sparse_vector,
+                stmt.dense_vector.as_deref(),
+                stmt.sparse_vector.as_deref(),
             )
             .await?;
 
@@ -68,8 +66,12 @@ impl Executor {
         } else if has_provided_vectors {
             extract_provided_vectors(&stmt.values_list)?
         } else {
-            self.build_auto_embed_vectors_batch(&stmt.values_list, stmt.model, has_sparse)
-                .await?
+            self.build_auto_embed_vectors_batch(
+                &stmt.values_list,
+                stmt.model.as_deref(),
+                has_sparse,
+            )
+            .await?
         };
 
         // 3. Build and upsert points
@@ -99,15 +101,15 @@ impl Executor {
         })
     }
 
-    async fn build_embed_vectors_batch<'a>(
+    async fn build_embed_vectors_batch(
         &self,
-        values_list: &[Vec<(&'a str, Value<'a>)>],
-        directives: &[ast::EmbedDirective<'a>],
+        values_list: &[Vec<(String, Value)>],
+        directives: &[ast::EmbedDirective],
     ) -> Result<Vec<Option<serde_json::Value>>, QqlError> {
         // Validate no duplicate target vectors
         let mut seen = std::collections::HashSet::new();
         for dir in directives {
-            if !seen.insert(dir.target_vector) {
+            if !seen.insert(dir.target_vector.clone()) {
                 return Err(QqlError::runtime(format!(
                     "EMBED duplicate target vector '{}'",
                     dir.target_vector
@@ -143,13 +145,15 @@ impl Executor {
                 let is_sparse = dir.sparse_model.is_some();
                 let model = if is_sparse {
                     dir.sparse_model
+                        .as_ref()
                         .filter(|m| !m.is_empty())
-                        .map(|m| m.to_string())
+                        .cloned()
                         .unwrap_or_else(|| self.resolve_sparse_model(None))
                 } else {
                     dir.model
+                        .as_ref()
                         .filter(|m| !m.is_empty())
-                        .map(|m| m.to_string())
+                        .cloned()
                         .unwrap_or_else(|| self.resolve_dense_model(None))
                 };
 
@@ -188,9 +192,9 @@ impl Executor {
         Ok(batch)
     }
 
-    async fn build_auto_embed_vectors_batch<'a>(
+    async fn build_auto_embed_vectors_batch(
         &self,
-        values_list: &[Vec<(&'a str, Value<'a>)>],
+        values_list: &[Vec<(String, Value)>],
         model: Option<&str>,
         has_sparse: bool,
     ) -> Result<Vec<Option<serde_json::Value>>, QqlError> {
@@ -354,8 +358,6 @@ impl Executor {
         }
 
         self.client.create_collection(create_req).await?;
-        // Wait for collection to be ready
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
         Ok(true)
     }
@@ -413,6 +415,7 @@ impl Executor {
                 }
             }
             return match self.config.as_ref() {
+                #[cfg(feature = "rest")]
                 Some(cfg)
                     if !cfg.embedding_endpoint.as_deref().unwrap_or("").is_empty()
                         && !cfg.embedding_model.as_deref().unwrap_or("").is_empty() =>

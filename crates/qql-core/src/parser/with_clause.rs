@@ -3,6 +3,7 @@ use crate::ast::{PayloadSelector, QuantizationSearchWith, SearchWith, Value, Vec
 use crate::error::QqlError;
 use crate::token::TokenKind;
 use alloc::boxed::Box;
+use alloc::string::String;
 use alloc::vec::Vec;
 
 impl<'a> Parser<'a> {
@@ -216,7 +217,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    pub fn parse_with_payload(&mut self) -> Result<Box<PayloadSelector<'a>>, QqlError> {
+    pub fn parse_with_payload(&mut self) -> Result<Box<PayloadSelector>, QqlError> {
         if self.peek()?.kind == TokenKind::Identifier
             && (ascii_equal(self.peek()?.text, "TRUE") || ascii_equal(self.peek()?.text, "FALSE"))
         {
@@ -229,16 +230,16 @@ impl<'a> Parser<'a> {
             }));
         }
         self.expect(TokenKind::Lparen)?;
-        let mut include: Vec<&'a str> = Vec::new();
-        let mut exclude: Vec<&'a str> = Vec::new();
+        let mut include: Vec<String> = Vec::new();
+        let mut exclude: Vec<String> = Vec::new();
         while self.peek()?.kind != TokenKind::Rparen {
             let key_tok = self.expect(TokenKind::Identifier)?;
             self.expect(TokenKind::Equals)?;
             self.expect(TokenKind::Lbracket)?;
             let mut fields = Vec::new();
             while self.peek()?.kind != TokenKind::Rbracket {
-                let val_tok = self.expect(TokenKind::String)?;
-                fields.push(val_tok.text);
+                let val = self.parse_string()?;
+                fields.push(val);
                 if self.peek()?.kind == TokenKind::Comma {
                     self.advance()?;
                 } else {
@@ -270,7 +271,7 @@ impl<'a> Parser<'a> {
         }))
     }
 
-    pub fn parse_with_vectors(&mut self) -> Result<Box<VectorsSelector<'a>>, QqlError> {
+    pub fn parse_with_vectors(&mut self) -> Result<Box<VectorsSelector>, QqlError> {
         if self.peek()?.kind == TokenKind::Identifier
             && (ascii_equal(self.peek()?.text, "TRUE") || ascii_equal(self.peek()?.text, "FALSE"))
         {
@@ -284,8 +285,8 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::Lparen)?;
         let mut vectors = Vec::new();
         while self.peek()?.kind != TokenKind::Rparen {
-            let val_tok = self.expect(TokenKind::String)?;
-            vectors.push(val_tok.text);
+            let val = self.parse_string()?;
+            vectors.push(val);
             if self.peek()?.kind == TokenKind::Comma {
                 self.advance()?;
             } else {

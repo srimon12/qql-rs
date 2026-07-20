@@ -1,11 +1,7 @@
-use serde_json;
-
-use qql_core::ast::{self, Value};
-use qql_core::error::QqlError;
-use qql_core::parser::Parser;
-
-use crate::executor::helpers::value_to_json;
+use crate::ast::{self, Value};
+use crate::error::QqlError;
 use crate::filter_conv::FilterConverter;
+use crate::parser::Parser;
 
 #[derive(serde::Serialize)]
 pub struct CompiledQuery {
@@ -64,11 +60,11 @@ fn compile_query(stmt: &ast::QueryStmt) -> Result<serde_json::Value, QqlError> {
         None
     };
 
-    let query = if let Some(text) = stmt.query_text {
+    let query = if let Some(text) = &stmt.query_text {
         let mut q = serde_json::json!({
             "nearest": { "document": { "text": text } }
         });
-        if let Some(model) = stmt.model {
+        if let Some(model) = stmt.model.as_deref() {
             q["nearest"]["document"]["model"] = serde_json::json!(model);
         }
         q
@@ -76,9 +72,9 @@ fn compile_query(stmt: &ast::QueryStmt) -> Result<serde_json::Value, QqlError> {
         serde_json::json!({ "nearest": stmt.raw_vector })
     } else if !stmt.positive_ids.is_empty() {
         let positive: Vec<serde_json::Value> =
-            stmt.positive_ids.iter().map(value_to_json).collect();
+            stmt.positive_ids.iter().map(|id| id.to_json()).collect();
         let negative: Vec<serde_json::Value> =
-            stmt.negative_ids.iter().map(value_to_json).collect();
+            stmt.negative_ids.iter().map(|id| id.to_json()).collect();
         let mut rec = serde_json::json!({ "recommend": { "positive": positive } });
         if !negative.is_empty() {
             rec["recommend"]["negative"] = serde_json::json!(negative);
@@ -90,8 +86,8 @@ fn compile_query(stmt: &ast::QueryStmt) -> Result<serde_json::Value, QqlError> {
             .iter()
             .map(|p| {
                 serde_json::json!({
-                    "positive": value_to_json(&p.positive),
-                    "negative": value_to_json(&p.negative),
+                    "positive": p.positive.to_json(),
+                    "negative": p.negative.to_json(),
                 })
             })
             .collect();
@@ -135,10 +131,10 @@ fn compile_query(stmt: &ast::QueryStmt) -> Result<serde_json::Value, QqlError> {
     if let Some(threshold) = stmt.score_threshold {
         body["score_threshold"] = serde_json::json!(threshold);
     }
-    if let Some(using) = stmt.using_ {
+    if let Some(using) = &stmt.using_ {
         body["using"] = serde_json::json!(using);
     }
-    if let Some(fusion) = stmt.fusion_type {
+    if let Some(fusion) = &stmt.fusion_type {
         body["fusion"] = serde_json::json!(fusion.to_uppercase());
     }
     if stmt.rerank {
@@ -183,10 +179,10 @@ fn compile_query(stmt: &ast::QueryStmt) -> Result<serde_json::Value, QqlError> {
         }
         body["with_vectors"] = serde_json::Value::Object(wv);
     }
-    if let Some(lf) = stmt.lookup_from {
+    if let Some(lf) = &stmt.lookup_from {
         body["lookup_from"] = serde_json::json!({ "collection": lf });
     }
-    if let Some(group_by) = stmt.group_by {
+    if let Some(group_by) = &stmt.group_by {
         body["group_by"] = serde_json::json!(group_by);
         body["group_size"] = serde_json::json!(stmt.group_size.unwrap_or(1));
     }
@@ -197,7 +193,7 @@ fn compile_query(stmt: &ast::QueryStmt) -> Result<serde_json::Value, QqlError> {
 fn compile_select(stmt: &ast::SelectStmt) -> Result<serde_json::Value, QqlError> {
     Ok(serde_json::json!({
         "collection_name": stmt.collection,
-        "point_id": value_to_json(&stmt.point_id),
+        "point_id": stmt.point_id.to_json(),
     }))
 }
 
@@ -217,7 +213,7 @@ fn compile_scroll(stmt: &ast::ScrollStmt) -> Result<serde_json::Value, QqlError>
         body["filter"] = serde_json::to_value(qdrant_filter).unwrap_or(serde_json::Value::Null);
     }
     if let Some(ref after) = stmt.after {
-        body["after"] = value_to_json(after);
+        body["after"] = after.to_json();
     }
     Ok(body)
 }
@@ -230,24 +226,24 @@ fn compile_insert(stmt: &ast::InsertStmt) -> Result<serde_json::Value, QqlError>
         let mut vectors = serde_json::Map::new();
 
         for (k, v) in row {
-            match *k {
-                "id" => id = Some(value_to_json(v)),
+            match k.as_str() {
+                "id" => id = Some(v.to_json()),
                 "vector" | "_v" => match v {
                     Value::Dict(items) => {
                         for (nk, nv) in items {
-                            vectors.insert(nk.to_string(), value_to_json(nv));
+                            vectors.insert(nk.to_string(), nv.to_json());
                         }
                     }
                     _ => {
-                        vectors.insert("dense".to_string(), value_to_json(v));
+                        vectors.insert("dense".to_string(), v.to_json());
                     }
                 },
                 k if k.starts_with("_v_") => {
                     let vec_name = k.strip_prefix("_v_").unwrap_or(k);
-                    vectors.insert(vec_name.to_string(), value_to_json(v));
+                    vectors.insert(vec_name.to_string(), v.to_json());
                 }
                 _ => {
-                    payload.insert(k.to_string(), value_to_json(v));
+                    payload.insert(k.to_string(), v.to_json());
                 }
             }
         }
@@ -273,7 +269,7 @@ fn compile_delete(stmt: &ast::DeleteStmt) -> Result<serde_json::Value, QqlError>
     let mut body = serde_json::json!({ "collection_name": stmt.collection });
 
     if let Some(ref point_id) = stmt.point_id {
-        body["point_id"] = value_to_json(point_id);
+        body["point_id"] = point_id.to_json();
     } else {
         let mut filter = if let Some(ref f) = stmt.query_filter {
             let converter = FilterConverter::new();
@@ -284,7 +280,7 @@ fn compile_delete(stmt: &ast::DeleteStmt) -> Result<serde_json::Value, QqlError>
 
         if let Some(ref field) = stmt.field {
             if let Some(ref val) = stmt.value {
-                let match_val = value_to_json(val);
+                let match_val = val.to_json();
                 let cond = serde_json::json!({ "key": field, "match": { "value": match_val } });
                 match serde_json::to_value(&filter).unwrap_or(serde_json::Value::Null) {
                     serde_json::Value::Null => {
@@ -308,7 +304,7 @@ fn compile_delete(stmt: &ast::DeleteStmt) -> Result<serde_json::Value, QqlError>
 fn compile_update_vector(stmt: &ast::UpdateVectorStmt) -> Result<serde_json::Value, QqlError> {
     Ok(serde_json::json!({
         "collection_name": stmt.collection,
-        "point_id": value_to_json(&stmt.point_id),
+        "point_id": stmt.point_id.to_json(),
         "vector": stmt.vector,
         "vector_name": stmt.vector_name,
     }))
@@ -325,7 +321,7 @@ fn compile_update_payload(stmt: &ast::UpdatePayloadStmt) -> Result<serde_json::V
     let payload: serde_json::Map<String, serde_json::Value> = stmt
         .payload
         .iter()
-        .map(|(k, v)| (k.to_string(), value_to_json(v)))
+        .map(|(k, v)| (k.to_string(), v.to_json()))
         .collect();
 
     let mut body = serde_json::json!({
@@ -333,7 +329,7 @@ fn compile_update_payload(stmt: &ast::UpdatePayloadStmt) -> Result<serde_json::V
         "payload": payload,
     });
     if let Some(ref point_id) = stmt.point_id {
-        body["point_id"] = value_to_json(point_id);
+        body["point_id"] = point_id.to_json();
     }
     if let Some(filter) = filter {
         body["filter"] = serde_json::to_value(filter).unwrap_or(serde_json::Value::Null);
@@ -360,7 +356,11 @@ fn compile_create_collection(
                 ast::VectorDistance::Manhattan => "Manhattan",
             };
             let vp = serde_json::json!({ "size": v.size, "distance": distance_str });
-            let vec_name = if v.name.is_empty() { "dense" } else { v.name };
+            let vec_name = if v.name.is_empty() {
+                "dense".to_string()
+            } else {
+                v.name.clone()
+            };
             vectors_config.insert(vec_name.to_string(), vp);
         }
         body.insert(

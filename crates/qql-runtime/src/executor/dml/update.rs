@@ -6,12 +6,12 @@ use crate::filter_conv::FilterConverter;
 use qql_core::ast::{self};
 use qql_core::error::QqlError;
 
-use crate::executor::helpers::{to_point_id_static, value_to_json};
+use crate::executor::helpers::to_point_id_static;
 
 impl Executor {
     pub(crate) async fn do_update_vector(
         &self,
-        stmt: ast::UpdateVectorStmt<'_>,
+        stmt: ast::UpdateVectorStmt,
     ) -> Result<ExecResponse, QqlError> {
         let point_id = to_point_id_static(&stmt.point_id)?;
 
@@ -34,11 +34,13 @@ impl Executor {
 
     pub(crate) async fn do_update_payload(
         &self,
-        stmt: ast::UpdatePayloadStmt<'_>,
+        stmt: ast::UpdatePayloadStmt,
     ) -> Result<ExecResponse, QqlError> {
         let filter = if let Some(ref f) = stmt.query_filter {
             let converter = FilterConverter::new();
-            converter.build_filter(f)?
+            converter
+                .build_filter(f)?
+                .map(crate::backend::Filter::from_json)
         } else {
             None
         };
@@ -52,7 +54,7 @@ impl Executor {
         let payload: HashMap<String, serde_json::Value> = stmt
             .payload
             .iter()
-            .map(|(k, v)| (k.to_string(), value_to_json(v)))
+            .map(|(k, v)| (k.to_string(), v.to_json()))
             .collect();
 
         let req = SetPayloadReq {

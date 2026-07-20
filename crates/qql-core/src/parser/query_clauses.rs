@@ -1,4 +1,5 @@
 use alloc::boxed::Box;
+use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::ast::{
@@ -11,7 +12,7 @@ use crate::token::TokenKind;
 use super::{ascii_equal, ascii_equal_lower, merge_search_with, Parser};
 
 impl<'a> Parser<'a> {
-    pub fn parse_recommend_with(&mut self, stmt: &mut QueryStmt<'a>) -> Result<(), QqlError> {
+    pub fn parse_recommend_with(&mut self, stmt: &mut QueryStmt) -> Result<(), QqlError> {
         self.advance()?;
         self.expect(TokenKind::Lparen)?;
         while self.peek()?.kind != TokenKind::Rparen {
@@ -52,9 +53,11 @@ impl<'a> Parser<'a> {
 
     // ── Context pairs ───────────────────────────────────────────
 
-    pub fn parse_context_pairs(&mut self, label: &str) -> Result<Vec<ContextPair<'a>>, QqlError> {
+    pub fn parse_context_pairs(&mut self, label: &str) -> Result<Vec<ContextPair>, QqlError> {
         let mut pairs = Vec::new();
-        let outer_paren = if self.peek()?.kind == TokenKind::Lparen && self.peek_nth(1).kind == TokenKind::Lparen {
+        let outer_paren = if self.peek()?.kind == TokenKind::Lparen
+            && self.peek_nth(1).kind == TokenKind::Lparen
+        {
             self.advance()?;
             true
         } else {
@@ -84,7 +87,7 @@ impl<'a> Parser<'a> {
 
     // ── Feedback items ──────────────────────────────────────────
 
-    pub fn parse_feedback_items(&mut self) -> Result<Vec<FeedbackItem<'a>>, QqlError> {
+    pub fn parse_feedback_items(&mut self) -> Result<Vec<FeedbackItem>, QqlError> {
         self.expect(TokenKind::Lparen)?;
         let mut items = Vec::new();
         loop {
@@ -114,7 +117,7 @@ impl<'a> Parser<'a> {
 
     pub fn parse_query_clauses(
         &mut self,
-        stmt: &mut QueryStmt<'a>,
+        stmt: &mut QueryStmt,
         _pos: usize,
     ) -> Result<(), QqlError> {
         if self.peek()?.kind == TokenKind::Limit {
@@ -188,7 +191,7 @@ impl<'a> Parser<'a> {
                         || (tok.kind == TokenKind::Identifier && ascii_equal(tok.text, "VECTOR"))
                     {
                         self.advance()?;
-                        if let Ok(lv) = self.parse_string_ptr() {
+                        if let Ok(lv) = self.parse_string() {
                             stmt.lookup_vector = Some(lv);
                         }
                     }
@@ -201,22 +204,22 @@ impl<'a> Parser<'a> {
                     } else if self.peek()?.kind == TokenKind::Sparse {
                         self.advance()?;
                         stmt.query_type = QueryType::Sparse;
-                        stmt.using_ = Some("sparse");
+                        stmt.using_ = Some("sparse".to_string());
                         if self.peek()?.kind == TokenKind::String {
                             let vec = self.advance()?;
-                            stmt.using_ = Some(vec.text);
+                            stmt.using_ = Some(vec.text.to_string());
                         }
                     } else if self.peek()?.kind == TokenKind::Dense {
                         self.advance()?;
                         stmt.query_type = QueryType::Dense;
-                        stmt.using_ = Some("dense");
+                        stmt.using_ = Some("dense".to_string());
                         if self.peek()?.kind == TokenKind::String {
                             let vec = self.advance()?;
-                            stmt.using_ = Some(vec.text);
+                            stmt.using_ = Some(vec.text.to_string());
                         }
                     } else if self.peek()?.kind == TokenKind::String {
                         let vec = self.advance()?;
-                        stmt.using_ = Some(vec.text);
+                        stmt.using_ = Some(vec.text.to_string());
                         stmt.query_type = QueryType::Dense;
                     }
                 }
@@ -226,7 +229,7 @@ impl<'a> Parser<'a> {
                     let mut inline_idx = 0;
                     while self.peek()?.kind != TokenKind::Rparen {
                         let mut prefetch_ref = PrefetchRef {
-                            cte_name: alloc::borrow::Cow::Borrowed(""),
+                            cte_name: String::new(),
                             filter: None,
                             score_threshold: None,
                             lookup_from: None,
@@ -241,7 +244,7 @@ impl<'a> Parser<'a> {
                             let inline_stmt = self.parse_cte_query()?;
                             let cte_name = alloc::format!("__inline_pf{}", inline_idx);
                             inline_idx += 1;
-                            prefetch_ref.cte_name = alloc::borrow::Cow::Owned(cte_name);
+                            prefetch_ref.cte_name = cte_name.clone();
                             stmt.ctes.push(CTE {
                                 name: prefetch_ref.cte_name.clone(),
                                 stmt: inline_stmt,
@@ -251,7 +254,7 @@ impl<'a> Parser<'a> {
                             || pk == TokenKind::Sparse
                         {
                             let name = self.parse_identifier()?;
-                            prefetch_ref.cte_name = alloc::borrow::Cow::Borrowed(name);
+                            prefetch_ref.cte_name = name;
                         } else {
                             return Ok(());
                         }
@@ -291,7 +294,7 @@ impl<'a> Parser<'a> {
                                             && ascii_equal(tok.text, "VECTOR"))
                                     {
                                         self.advance()?;
-                                        if let Ok(lv) = self.parse_string_ptr() {
+                                        if let Ok(lv) = self.parse_string() {
                                             prefetch_ref.lookup_vector = Some(lv);
                                         }
                                     }
@@ -328,7 +331,7 @@ impl<'a> Parser<'a> {
                     } else {
                         "DBSF"
                     };
-                    stmt.fusion_type = Some(upper);
+                    stmt.fusion_type = Some(upper.to_string());
                 }
                 TokenKind::Where => {
                     if seen_where {
@@ -353,7 +356,7 @@ impl<'a> Parser<'a> {
                     stmt.rerank = true;
                     if self.peek()?.kind == TokenKind::Model {
                         self.advance()?;
-                        if let Ok(m) = self.parse_string_ptr() {
+                        if let Ok(m) = self.parse_string() {
                             stmt.rerank_model = Some(m);
                         }
                     }
@@ -382,8 +385,8 @@ impl<'a> Parser<'a> {
                     self.advance()?;
                     if self.peek()?.kind == TokenKind::Model {
                         self.advance()?;
-                        let model_tok = self.expect(TokenKind::String)?;
-                        stmt.model = Some(model_tok.text);
+                        let model_val = self.parse_string()?;
+                        stmt.model = Some(model_val);
                     } else if self.peek()?.kind == TokenKind::Payload {
                         self.advance()?;
                         if let Ok(parsed) = self.parse_with_payload() {
@@ -421,7 +424,7 @@ impl<'a> Parser<'a> {
                     seen_group = true;
                     self.advance()?;
                     self.expect(TokenKind::By)?;
-                    if let Ok(group_field) = self.parse_string_ptr() {
+                    if let Ok(group_field) = self.parse_string() {
                         stmt.group_by = Some(group_field);
                     } else {
                         return Ok(());
@@ -472,11 +475,11 @@ impl<'a> Parser<'a> {
                             if let Ok(key) = self.parse_identifier() {
                                 self.expect(TokenKind::Equals)?;
                                 if let Ok(val) = self.parse_numeric_literal() {
-                                    if ascii_equal_lower(key, "a") {
+                                    if ascii_equal_lower(&key, "a") {
                                         strat.a = val;
-                                    } else if ascii_equal_lower(key, "b") {
+                                    } else if ascii_equal_lower(&key, "b") {
                                         strat.b = val;
-                                    } else if ascii_equal_lower(key, "c") {
+                                    } else if ascii_equal_lower(&key, "c") {
                                         strat.c = val;
                                     }
                                 }
@@ -488,7 +491,7 @@ impl<'a> Parser<'a> {
                         self.advance()?;
                         stmt.feedback_strategy = Some(Box::new(strat));
                     } else {
-                        if let Ok(s) = self.parse_string_ptr() {
+                        if let Ok(s) = self.parse_string() {
                             stmt.strategy = Some(s);
                         }
                     }

@@ -9,8 +9,8 @@ mod tests {
     #[test]
     fn test_filter_compare() {
         let f = FilterExpr::Compare {
-            field: "age",
-            op: ">",
+            field: String::from("age"),
+            op: String::from(">"),
             value: Value::Int(18),
         };
         match f {
@@ -26,7 +26,7 @@ mod tests {
     #[test]
     fn test_filter_between() {
         let f = FilterExpr::Between {
-            field: "age",
+            field: String::from("age"),
             low: Value::Int(18),
             high: Value::Int(65),
         };
@@ -43,10 +43,10 @@ mod tests {
     #[test]
     fn test_filter_in() {
         let f = FilterExpr::In {
-            field: "color",
+            field: String::from("color"),
             values: vec![
-                Value::Str(alloc::borrow::Cow::Borrowed("red")),
-                Value::Str(alloc::borrow::Cow::Borrowed("blue")),
+                Value::Str(String::from("red")),
+                Value::Str(String::from("blue")),
             ],
         };
         match f {
@@ -61,8 +61,8 @@ mod tests {
     #[test]
     fn test_filter_not_in() {
         let f = FilterExpr::NotIn {
-            field: "status",
-            values: vec![Value::Str(alloc::borrow::Cow::Borrowed("deleted"))],
+            field: String::from("status"),
+            values: vec![Value::Str(String::from("deleted"))],
         };
         match f {
             FilterExpr::NotIn { field, values } => {
@@ -76,7 +76,7 @@ mod tests {
     #[test]
     fn test_filter_is_null() {
         let f = FilterExpr::IsNull {
-            field: "deleted_at",
+            field: String::from("deleted_at"),
         };
         match f {
             FilterExpr::IsNull { field } => assert_eq!(field, "deleted_at"),
@@ -86,7 +86,9 @@ mod tests {
 
     #[test]
     fn test_filter_is_not_null() {
-        let f = FilterExpr::IsNotNull { field: "email" };
+        let f = FilterExpr::IsNotNull {
+            field: String::from("email"),
+        };
         match f {
             FilterExpr::IsNotNull { field } => assert_eq!(field, "email"),
             _ => panic!("expected IsNotNull"),
@@ -95,7 +97,9 @@ mod tests {
 
     #[test]
     fn test_filter_is_empty() {
-        let f = FilterExpr::IsEmpty { field: "tags" };
+        let f = FilterExpr::IsEmpty {
+            field: String::from("tags"),
+        };
         match f {
             FilterExpr::IsEmpty { field } => assert_eq!(field, "tags"),
             _ => panic!("expected IsEmpty"),
@@ -104,7 +108,9 @@ mod tests {
 
     #[test]
     fn test_filter_is_not_empty() {
-        let f = FilterExpr::IsNotEmpty { field: "tags" };
+        let f = FilterExpr::IsNotEmpty {
+            field: String::from("tags"),
+        };
         match f {
             FilterExpr::IsNotEmpty { field } => assert_eq!(field, "tags"),
             _ => panic!("expected IsNotEmpty"),
@@ -114,8 +120,8 @@ mod tests {
     #[test]
     fn test_filter_match_text() {
         let f = FilterExpr::MatchText {
-            field: "title",
-            text: "hello",
+            field: String::from("title"),
+            text: String::from("hello"),
         };
         match f {
             FilterExpr::MatchText { field, text } => {
@@ -129,8 +135,8 @@ mod tests {
     #[test]
     fn test_filter_match_any() {
         let f = FilterExpr::MatchAny {
-            field: "title",
-            text: "hello",
+            field: String::from("title"),
+            text: String::from("hello"),
         };
         match f {
             FilterExpr::MatchAny { field, text } => {
@@ -144,8 +150,8 @@ mod tests {
     #[test]
     fn test_filter_match_phrase() {
         let f = FilterExpr::MatchPhrase {
-            field: "title",
-            text: "hello world",
+            field: String::from("title"),
+            text: String::from("hello world"),
         };
         match f {
             FilterExpr::MatchPhrase { field, text } => {
@@ -161,20 +167,20 @@ mod tests {
         let f = FilterExpr::And {
             operands: vec![
                 FilterExpr::Compare {
-                    field: "a",
-                    op: "=",
+                    field: String::from("a"),
+                    op: String::from("="),
                     value: Value::Int(1),
                 },
                 FilterExpr::Or {
                     operands: vec![
                         FilterExpr::Compare {
-                            field: "b",
-                            op: "=",
+                            field: String::from("b"),
+                            op: String::from("="),
                             value: Value::Int(2),
                         },
                         FilterExpr::Compare {
-                            field: "c",
-                            op: "=",
+                            field: String::from("c"),
+                            op: String::from("="),
                             value: Value::Int(3),
                         },
                     ],
@@ -193,8 +199,8 @@ mod tests {
     fn test_filter_not() {
         let f = FilterExpr::Not {
             operand: Box::new(FilterExpr::Compare {
-                field: "x",
-                op: "=",
+                field: String::from("x"),
+                op: String::from("="),
                 value: Value::Bool(true),
             }),
         };
@@ -210,11 +216,11 @@ mod tests {
     #[test]
     fn test_filter_nested() {
         let f = FilterExpr::Nested {
-            path: "address",
+            path: String::from("address"),
             filter: Box::new(FilterExpr::Compare {
-                field: "city",
-                op: "=",
-                value: Value::Str(alloc::borrow::Cow::Borrowed("NYC")),
+                field: String::from("city"),
+                op: String::from("="),
+                value: Value::Str(String::from("NYC")),
             }),
         };
         match f {
@@ -227,11 +233,11 @@ mod tests {
     fn test_filter_nested_in_not() {
         let f = FilterExpr::Not {
             operand: Box::new(FilterExpr::Nested {
-                path: "tags",
+                path: String::from("tags"),
                 filter: Box::new(FilterExpr::Compare {
-                    field: "name",
-                    op: "=",
-                    value: Value::Str(alloc::borrow::Cow::Borrowed("important")),
+                    field: String::from("name"),
+                    op: String::from("="),
+                    value: Value::Str(String::from("important")),
                 }),
             }),
         };
@@ -247,8 +253,8 @@ mod tests {
     #[test]
     fn test_filter_debug() {
         let f = FilterExpr::Compare {
-            field: "age",
-            op: ">=",
+            field: String::from("age"),
+            op: String::from(">="),
             value: Value::Int(18),
         };
         let debug = format!("{:?}", f);
@@ -260,9 +266,9 @@ mod tests {
     #[test]
     fn test_filter_clone_equal() {
         let f1 = FilterExpr::Compare {
-            field: "x",
-            op: "=",
-            value: Value::Str(alloc::borrow::Cow::Borrowed("y")),
+            field: String::from("x"),
+            op: String::from("="),
+            value: Value::Str(String::from("y")),
         };
         let f2 = f1.clone();
         assert_eq!(f1, f2);
@@ -279,7 +285,9 @@ mod tests {
 
     #[test]
     fn test_formula_variable() {
-        let f = FormulaExpr::Variable { name: "$score" };
+        let f = FormulaExpr::Variable {
+            name: String::from("$score"),
+        };
         match f {
             FormulaExpr::Variable { name } => assert_eq!(name, "$score"),
             _ => panic!("expected Variable"),
@@ -290,7 +298,9 @@ mod tests {
     fn test_formula_sum() {
         let f = FormulaExpr::Sum {
             left: Box::new(FormulaExpr::Constant { value: 1.0 }),
-            right: Box::new(FormulaExpr::Variable { name: "$x" }),
+            right: Box::new(FormulaExpr::Variable {
+                name: String::from("$x"),
+            }),
         };
         match f {
             FormulaExpr::Sum { left, right } => {
@@ -306,8 +316,12 @@ mod tests {
     #[test]
     fn test_formula_sub() {
         let f = FormulaExpr::Sub {
-            left: Box::new(FormulaExpr::Variable { name: "$a" }),
-            right: Box::new(FormulaExpr::Variable { name: "$b" }),
+            left: Box::new(FormulaExpr::Variable {
+                name: String::from("$a"),
+            }),
+            right: Box::new(FormulaExpr::Variable {
+                name: String::from("$b"),
+            }),
         };
         match f {
             FormulaExpr::Sub { .. } => {}
@@ -318,7 +332,9 @@ mod tests {
     #[test]
     fn test_formula_mul() {
         let f = FormulaExpr::Mul {
-            left: Box::new(FormulaExpr::Variable { name: "$score" }),
+            left: Box::new(FormulaExpr::Variable {
+                name: String::from("$score"),
+            }),
             right: Box::new(FormulaExpr::Constant { value: 2.0 }),
         };
         match f {
@@ -430,7 +446,7 @@ mod tests {
         let f = FormulaExpr::GeoDistance {
             lat: 40.7,
             lon: -74.0,
-            field: "location",
+            field: String::from("location"),
         };
         match f {
             FormulaExpr::GeoDistance { lat, lon, field } => {
@@ -445,8 +461,10 @@ mod tests {
     #[test]
     fn test_formula_decay() {
         let f = FormulaExpr::Decay {
-            kind: "gauss_decay",
-            x: Box::new(FormulaExpr::Variable { name: "age" }),
+            kind: String::from("gauss_decay"),
+            x: Box::new(FormulaExpr::Variable {
+                name: String::from("age"),
+            }),
             target: Some(Box::new(FormulaExpr::Constant { value: 30.0 })),
             scale: Some(10.0),
             midpoint: None,
@@ -461,8 +479,8 @@ mod tests {
     fn test_formula_case() {
         let f = FormulaExpr::Case {
             cond: Box::new(FilterExpr::Compare {
-                field: "age",
-                op: ">",
+                field: String::from("age"),
+                op: String::from(">"),
                 value: Value::Int(18),
             }),
             then_: Box::new(FormulaExpr::Constant { value: 1.0 }),
@@ -477,8 +495,8 @@ mod tests {
     #[test]
     fn test_formula_match_condition() {
         let f = FormulaExpr::MatchCondition {
-            field: "status",
-            values: vec![Value::Str(alloc::borrow::Cow::Borrowed("active"))],
+            field: String::from("status"),
+            values: vec![Value::Str(String::from("active"))],
         };
         match f {
             FormulaExpr::MatchCondition { field, values } => {
@@ -492,7 +510,7 @@ mod tests {
     #[test]
     fn test_formula_datetime() {
         let f = FormulaExpr::Datetime {
-            value: "2024-01-01",
+            value: String::from("2024-01-01"),
         };
         match f {
             FormulaExpr::Datetime { value } => assert_eq!(value, "2024-01-01"),
@@ -502,7 +520,9 @@ mod tests {
 
     #[test]
     fn test_formula_datetime_key() {
-        let f = FormulaExpr::DatetimeKey { key: "created_at" };
+        let f = FormulaExpr::DatetimeKey {
+            key: String::from("created_at"),
+        };
         match f {
             FormulaExpr::DatetimeKey { key } => assert_eq!(key, "created_at"),
             _ => panic!("expected DatetimeKey"),
@@ -519,7 +539,7 @@ mod tests {
     #[test]
     fn test_value_variants() {
         let values = [
-            Value::Str(alloc::borrow::Cow::Borrowed("hello")),
+            Value::Str(String::from("hello")),
             Value::Int(42),
             Value::Float(12.34),
             Value::Bool(true),
@@ -531,7 +551,7 @@ mod tests {
     #[test]
     fn test_value_debug() {
         assert_eq!(
-            format!("{:?}", Value::Str(alloc::borrow::Cow::Borrowed("hi"))),
+            format!("{:?}", Value::Str(String::from("hi"))),
             "Str(\"hi\")"
         );
         assert_eq!(format!("{:?}", Value::Int(7)), "Int(7)");
@@ -549,23 +569,17 @@ mod tests {
     fn test_value_dict_helpers_are_ordered_and_last_write_wins() {
         let mut value = Value::Dict(vec![
             (
-                alloc::borrow::Cow::Borrowed("tenant_id"),
-                Value::Str(alloc::borrow::Cow::Borrowed("attacker")),
+                String::from("tenant_id"),
+                Value::Str(String::from("attacker")),
             ),
-            (
-                alloc::borrow::Cow::Borrowed("title"),
-                Value::Str(alloc::borrow::Cow::Borrowed("hello")),
-            ),
+            (String::from("title"), Value::Str(String::from("hello"))),
         ]);
 
-        value.dict_set(
-            alloc::borrow::Cow::Borrowed("tenant_id"),
-            Value::Str(alloc::borrow::Cow::Borrowed("acme")),
-        );
+        value.dict_set(String::from("tenant_id"), Value::Str(String::from("acme")));
 
         assert_eq!(
             value.dict_get("tenant_id"),
-            Some(&Value::Str(alloc::borrow::Cow::Borrowed("acme")))
+            Some(&Value::Str(String::from("acme")))
         );
         assert!(matches!(value, Value::Dict(items) if items.len() == 2));
     }
@@ -587,7 +601,7 @@ mod tests {
         assert_eq!(format!("{:?}", QueryType::Hybrid), "Hybrid");
     }
 
-    fn dummy_query_stmt() -> QueryStmt<'static> {
+    fn dummy_query_stmt() -> QueryStmt {
         QueryStmt {
             collection: None,
             mode: QueryMode::Nearest,
@@ -632,21 +646,21 @@ mod tests {
     #[test]
     fn test_ast_inject_filter() {
         let mut inner_query = dummy_query_stmt();
-        inner_query.collection = Some("docs");
+        inner_query.collection = Some(String::from("docs"));
         inner_query.limit = 5;
         inner_query.query_filter = Some(Box::new(FilterExpr::Compare {
-            field: "status",
-            op: "=",
-            value: Value::Str(alloc::borrow::Cow::Borrowed("published")),
+            field: String::from("status"),
+            op: String::from("="),
+            value: Value::Str(String::from("published")),
         }));
 
         let inner_cte = CTE {
-            name: alloc::borrow::Cow::Borrowed("prefetch_1"),
+            name: String::from("prefetch_1"),
             stmt: Box::new(inner_query),
         };
 
         let mut query = dummy_query_stmt();
-        query.collection = Some("docs");
+        query.collection = Some(String::from("docs"));
         query.limit = 10;
         query.ctes = vec![inner_cte];
 
@@ -656,7 +670,7 @@ mod tests {
             &mut stmt,
             "org_id",
             "=",
-            &Value::Str(alloc::borrow::Cow::Borrowed("acme-corp")),
+            &Value::Str(String::from("acme-corp")),
         );
 
         if let Stmt::Query(q) = stmt {
@@ -664,9 +678,9 @@ mod tests {
             assert_eq!(
                 *main_filter,
                 FilterExpr::Compare {
-                    field: "org_id",
-                    op: "=",
-                    value: Value::Str(alloc::borrow::Cow::Borrowed("acme-corp")),
+                    field: String::from("org_id"),
+                    op: String::from("="),
+                    value: Value::Str(String::from("acme-corp")),
                 }
             );
 
@@ -678,17 +692,17 @@ mod tests {
                     assert_eq!(
                         operands[0],
                         FilterExpr::Compare {
-                            field: "status",
-                            op: "=",
-                            value: Value::Str(alloc::borrow::Cow::Borrowed("published")),
+                            field: String::from("status"),
+                            op: String::from("="),
+                            value: Value::Str(String::from("published")),
                         }
                     );
                     assert_eq!(
                         operands[1],
                         FilterExpr::Compare {
-                            field: "org_id",
-                            op: "=",
-                            value: Value::Str(alloc::borrow::Cow::Borrowed("acme-corp")),
+                            field: String::from("org_id"),
+                            op: String::from("="),
+                            value: Value::Str(String::from("acme-corp")),
                         }
                     );
                 }
@@ -702,16 +716,16 @@ mod tests {
     #[test]
     fn test_ast_inject_filter_forces_insert_payload_field() {
         let mut stmt = Stmt::Insert(Box::new(InsertStmt {
-            collection: "docs",
+            collection: String::from("docs"),
             values_list: vec![
                 vec![
-                    ("id", Value::Int(1)),
+                    (String::from("id"), Value::Int(1)),
                     (
-                        "tenant_id",
-                        Value::Str(alloc::borrow::Cow::Borrowed("attacker")),
+                        String::from("tenant_id"),
+                        Value::Str(String::from("attacker")),
                     ),
                 ],
-                vec![("id", Value::Int(2))],
+                vec![(String::from("id"), Value::Int(2))],
             ],
             model: None,
             hybrid: false,
@@ -725,7 +739,7 @@ mod tests {
             &mut stmt,
             "tenant_id",
             "=",
-            &Value::Str(alloc::borrow::Cow::Borrowed("acme")),
+            &Value::Str(String::from("acme")),
         );
 
         let Stmt::Insert(insert) = stmt else {
@@ -737,10 +751,7 @@ mod tests {
                 .rev()
                 .find(|(k, _)| *k == "tenant_id")
                 .map(|(_, v)| v);
-            assert_eq!(
-                tenant,
-                Some(&Value::Str(alloc::borrow::Cow::Borrowed("acme")))
-            );
+            assert_eq!(tenant, Some(&Value::Str(String::from("acme"))));
         }
     }
 }

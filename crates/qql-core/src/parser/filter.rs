@@ -8,7 +8,7 @@ use crate::token::TokenKind;
 use super::{ascii_equal, token_kind_to_op, Parser};
 
 impl<'a> Parser<'a> {
-    pub fn parse_filter_expr(&mut self) -> Result<FilterExpr<'a>, QqlError> {
+    pub fn parse_filter_expr(&mut self) -> Result<FilterExpr, QqlError> {
         let left = self.parse_filter_and()?;
         if self.peek()?.kind != TokenKind::Or {
             return Ok(left);
@@ -23,7 +23,7 @@ impl<'a> Parser<'a> {
         Ok(FilterExpr::Or { operands })
     }
 
-    pub fn parse_filter_and(&mut self) -> Result<FilterExpr<'a>, QqlError> {
+    pub fn parse_filter_and(&mut self) -> Result<FilterExpr, QqlError> {
         let left = self.parse_filter_not()?;
         if self.peek()?.kind != TokenKind::And {
             return Ok(left);
@@ -38,7 +38,7 @@ impl<'a> Parser<'a> {
         Ok(FilterExpr::And { operands })
     }
 
-    pub fn parse_filter_not(&mut self) -> Result<FilterExpr<'a>, QqlError> {
+    pub fn parse_filter_not(&mut self) -> Result<FilterExpr, QqlError> {
         if self.peek()?.kind == TokenKind::Not {
             self.advance()?;
             let operand = self.parse_filter_not()?;
@@ -49,7 +49,7 @@ impl<'a> Parser<'a> {
         self.parse_filter_primary()
     }
 
-    pub fn parse_filter_primary(&mut self) -> Result<FilterExpr<'a>, QqlError> {
+    pub fn parse_filter_primary(&mut self) -> Result<FilterExpr, QqlError> {
         if self.peek()?.kind == TokenKind::Lparen {
             self.advance()?;
             let expr = self.parse_filter_expr()?;
@@ -61,28 +61,26 @@ impl<'a> Parser<'a> {
         }
         if self.peek()?.kind == TokenKind::HasVector {
             self.advance()?;
-            let name_tok = self.expect(TokenKind::String)?;
-            return Ok(FilterExpr::HasVector {
-                name: name_tok.text,
-            });
+            let name = self.parse_string()?;
+            return Ok(FilterExpr::HasVector { name });
         }
         self.parse_predicate()
     }
 
-    pub fn parse_nested_function(&mut self) -> Result<FilterExpr<'a>, QqlError> {
+    pub fn parse_nested_function(&mut self) -> Result<FilterExpr, QqlError> {
         self.advance()?;
         self.expect(TokenKind::Lparen)?;
-        let path_tok = self.expect(TokenKind::String)?;
+        let path = self.parse_string()?;
         self.expect(TokenKind::Comma)?;
         let inner = self.parse_filter_expr()?;
         self.expect(TokenKind::Rparen)?;
         Ok(FilterExpr::Nested {
-            path: path_tok.text,
+            path,
             filter: Box::new(inner),
         })
     }
 
-    pub fn parse_predicate(&mut self) -> Result<FilterExpr<'a>, QqlError> {
+    pub fn parse_predicate(&mut self) -> Result<FilterExpr, QqlError> {
         let field = self.parse_field_path()?;
         let tok = self.peek()?;
 
@@ -256,7 +254,11 @@ impl<'a> Parser<'a> {
                 .parse::<i64>()
                 .map_err(|_| QqlError::syntax("invalid integer count", count_tok.pos))?;
 
-            return Ok(FilterExpr::ValuesCount { field, op, count });
+            return Ok(FilterExpr::ValuesCount {
+                field,
+                op: op.to_string(),
+                count,
+            });
         }
 
         if tok.kind == TokenKind::Match {
@@ -267,7 +269,9 @@ impl<'a> Parser<'a> {
                     self.advance()?;
                     let first_tok = self.expect(TokenKind::String)?;
                     let mut last_tok = first_tok;
-                    while self.peek()?.kind == TokenKind::Comma || self.peek()?.kind == TokenKind::String {
+                    while self.peek()?.kind == TokenKind::Comma
+                        || self.peek()?.kind == TokenKind::String
+                    {
                         if self.peek()?.kind == TokenKind::Comma {
                             self.advance()?;
                         }
@@ -277,9 +281,10 @@ impl<'a> Parser<'a> {
                     }
                     self.expect(TokenKind::Rparen)?;
                     let text = if first_tok.pos == last_tok.pos {
-                        first_tok.text
+                        first_tok.text.to_string()
                     } else {
-                        &self.input[first_tok.pos + 1..last_tok.pos + last_tok.text.len() + 1]
+                        self.input[first_tok.pos + 1..last_tok.pos + last_tok.text.len() + 1]
+                            .to_string()
                     };
                     return Ok(FilterExpr::MatchAny { field, text });
                 }
@@ -289,32 +294,31 @@ impl<'a> Parser<'a> {
                     last_tok = self.advance()?;
                 }
                 let text = if first_tok.pos == last_tok.pos {
-                    first_tok.text
+                    first_tok.text.to_string()
                 } else {
-                    &self.input[first_tok.pos + 1..last_tok.pos + last_tok.text.len() + 1]
+                    self.input[first_tok.pos + 1..last_tok.pos + last_tok.text.len() + 1]
+                        .to_string()
                 };
                 return Ok(FilterExpr::MatchAny { field, text });
             }
             if self.peek()?.kind == TokenKind::Phrase {
                 self.advance()?;
-                let text_tok = self.expect(TokenKind::String)?;
-                return Ok(FilterExpr::MatchPhrase {
-                    field,
-                    text: text_tok.text,
-                });
+                let text = self.parse_string()?;
+                return Ok(FilterExpr::MatchPhrase { field, text });
             }
-            let text_tok = self.expect(TokenKind::String)?;
-            return Ok(FilterExpr::MatchText {
-                field,
-                text: text_tok.text,
-            });
+            let text = self.parse_string()?;
+            return Ok(FilterExpr::MatchText { field, text });
         }
 
         let op = token_kind_to_op(tok.kind);
         if !op.is_empty() {
             self.advance()?;
             let value = self.parse_value()?;
-            return Ok(FilterExpr::Compare { field, op, value });
+            return Ok(FilterExpr::Compare {
+                field,
+                op: op.to_string(),
+                value,
+            });
         }
 
         Err(QqlError::syntax(

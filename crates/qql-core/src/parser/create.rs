@@ -8,7 +8,7 @@ use crate::token::TokenKind;
 use super::{ascii_equal, Parser};
 
 impl<'a> Parser<'a> {
-    pub fn parse_create(&mut self) -> Result<Stmt<'a>, QqlError> {
+    pub fn parse_create(&mut self) -> Result<Stmt, QqlError> {
         self.advance()?;
         let tok = self.peek()?;
         if tok.kind == TokenKind::Index {
@@ -19,11 +19,11 @@ impl<'a> Parser<'a> {
 
         let mut hybrid = false;
         let mut rerank = false;
-        let mut model: Option<&'a str> = None;
-        let mut dense_vector: Option<&'a str> = None;
-        let mut sparse_vector: Option<&'a str> = None;
-        let mut explicit_vectors: Vec<VectorDef<'a>> = Vec::new();
-        let mut explicit_sparse_vectors: Vec<SparseVectorDef<'a>> = Vec::new();
+        let mut model: Option<String> = None;
+        let mut dense_vector: Option<String> = None;
+        let mut sparse_vector: Option<String> = None;
+        let mut explicit_vectors: Vec<VectorDef> = Vec::new();
+        let mut explicit_sparse_vectors: Vec<SparseVectorDef> = Vec::new();
 
         if self.peek()?.kind == TokenKind::Lparen {
             self.advance()?;
@@ -66,15 +66,13 @@ impl<'a> Parser<'a> {
                         self.advance()?;
                         if self.peek()?.kind == TokenKind::Hnsw {
                             self.advance()?;
-                            let block = self.parse_hnsw_config_block()?;
-                            hnsw = block.hnsw;
+                            hnsw = self.parse_hnsw_config_block()?.hnsw;
                         } else if self.peek()?.kind == TokenKind::Quantize
                             || (self.peek()?.kind == TokenKind::Identifier
                                 && ascii_equal(self.peek()?.text, "QUANTIZATION"))
                         {
                             self.advance()?;
-                            let block = self.parse_quantization_config_block()?;
-                            quant = block.quantization;
+                            quant = self.parse_quantization_config_block()?.quantization;
                         } else if self.peek()?.kind == TokenKind::Identifier
                             && ascii_equal(self.peek()?.text, "MULTIVECTOR")
                         {
@@ -131,7 +129,7 @@ impl<'a> Parser<'a> {
                         || (tok.kind == TokenKind::Identifier && ascii_equal(tok.text, "VECTOR"))
                     {
                         self.advance()?;
-                        let v = self.parse_string_ptr()?;
+                        let v = self.parse_string()?;
                         if mode == TokenKind::Dense {
                             dense_vector = Some(v);
                         } else {

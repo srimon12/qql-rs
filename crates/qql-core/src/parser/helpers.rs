@@ -1,44 +1,45 @@
-use super::{ascii_equal, EmbeddingOptions, Parser};
+use super::{ascii_equal, Parser};
 use crate::ast::Value;
 use crate::error::QqlError;
 use crate::token::TokenKind;
+use alloc::string::String;
 use alloc::vec::Vec;
 
 impl<'a> Parser<'a> {
-    // ── String pointer helpers ──────────────────────────────────
+    // ── String helpers (owned) ──────────────────────────────────
 
-    pub fn parse_string_ptr(&mut self) -> Result<&'a str, QqlError> {
+    pub fn parse_string(&mut self) -> Result<String, QqlError> {
         let tok = self.expect(TokenKind::String)?;
-        Ok(tok.text)
+        Ok(tok.text.to_string())
     }
 
-    pub fn parse_required_model_string(&mut self) -> Result<&'a str, QqlError> {
+    pub fn parse_required_model_string(&mut self) -> Result<String, QqlError> {
         self.expect(TokenKind::Model)?;
-        self.parse_string_ptr()
+        self.parse_string()
     }
 
-    pub fn parse_optional_model_string(&mut self) -> Result<Option<&'a str>, QqlError> {
+    pub fn parse_optional_model_string(&mut self) -> Result<Option<String>, QqlError> {
         if self.peek()?.kind != TokenKind::Model {
             return Ok(None);
         }
         self.advance()?;
-        self.parse_string_ptr().map(Some)
+        self.parse_string().map(Some)
     }
 
-    pub fn parse_optional_vector_string(&mut self) -> Result<Option<&'a str>, QqlError> {
+    pub fn parse_optional_vector_string(&mut self) -> Result<Option<String>, QqlError> {
         let tok = self.peek()?;
         if tok.kind == TokenKind::Vector
             || (tok.kind == TokenKind::Identifier && ascii_equal(tok.text, "VECTOR"))
         {
             self.advance()?;
-            return self.parse_string_ptr().map(Some);
+            return self.parse_string().map(Some);
         }
         Ok(None)
     }
 
-    // ── Embedding options ───────────────────────────────────────
+    // ── Embedding options (owned) ───────────────────────────────
 
-    pub fn parse_embedding_options(&mut self) -> Result<EmbeddingOptions<'a>, QqlError> {
+    pub fn parse_embedding_options(&mut self) -> Result<EmbeddingOptions, QqlError> {
         if self.peek()?.kind != TokenKind::Using {
             return Ok(EmbeddingOptions {
                 model: None,
@@ -72,10 +73,10 @@ impl<'a> Parser<'a> {
         }
 
         self.advance()?; // consume HYBRID
-        let mut model: Option<&'a str> = None;
-        let mut sparse_model: Option<&'a str> = None;
-        let mut dense_vector: Option<&'a str> = None;
-        let mut sparse_vector: Option<&'a str> = None;
+        let mut model: Option<String> = None;
+        let mut sparse_model: Option<String> = None;
+        let mut dense_vector: Option<String> = None;
+        let mut sparse_vector: Option<String> = None;
 
         while self.peek()?.kind == TokenKind::Dense || self.peek()?.kind == TokenKind::Sparse {
             let mode = self.advance()?.kind;
@@ -110,12 +111,12 @@ impl<'a> Parser<'a> {
 
     // ── Point ID helpers ────────────────────────────────────────
 
-    pub fn parse_point_id_value(&mut self, context: &str) -> Result<Value<'a>, QqlError> {
+    pub fn parse_point_id_value(&mut self, context: &str) -> Result<Value, QqlError> {
         let tok = self.peek()?;
         match tok.kind {
             TokenKind::String => {
                 self.advance()?;
-                Ok(Value::Str(alloc::borrow::Cow::Borrowed(tok.text)))
+                Ok(Value::Str(tok.text.to_string()))
             }
             TokenKind::Integer => {
                 self.advance()?;
@@ -135,7 +136,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse_point_id_list(&mut self) -> Result<Vec<Value<'a>>, QqlError> {
+    pub fn parse_point_id_list(&mut self) -> Result<Vec<Value>, QqlError> {
         let values = self.parse_literal_list()?;
         for v in &values {
             match v {
@@ -153,12 +154,12 @@ impl<'a> Parser<'a> {
 
     // ── Literal / Number helpers ────────────────────────────────
 
-    pub fn parse_literal(&mut self) -> Result<Value<'a>, QqlError> {
+    pub fn parse_literal(&mut self) -> Result<Value, QqlError> {
         let tok = self.peek()?;
         match tok.kind {
             TokenKind::String => {
                 self.advance()?;
-                Ok(Value::Str(alloc::borrow::Cow::Borrowed(tok.text)))
+                Ok(Value::Str(tok.text.to_string()))
             }
             TokenKind::Integer => {
                 self.advance()?;
@@ -194,7 +195,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse_number(&mut self) -> Result<Value<'a>, QqlError> {
+    pub fn parse_number(&mut self) -> Result<Value, QqlError> {
         let tok = self.peek()?;
         match tok.kind {
             TokenKind::Integer => {
@@ -218,7 +219,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse_literal_list(&mut self) -> Result<Vec<Value<'a>>, QqlError> {
+    pub fn parse_literal_list(&mut self) -> Result<Vec<Value>, QqlError> {
         self.expect(TokenKind::Lparen)?;
         let mut items = Vec::new();
         if self.peek()?.kind == TokenKind::Rparen {
@@ -243,7 +244,7 @@ impl<'a> Parser<'a> {
 
     // ── Field path ──────────────────────────────────────────────
 
-    pub fn parse_field_path(&mut self) -> Result<&'a str, QqlError> {
+    pub fn parse_field_path(&mut self) -> Result<String, QqlError> {
         let tok = self.peek()?;
         if tok.kind != TokenKind::Identifier && !super::is_contextual_field_name(tok.kind) {
             return Err(QqlError::syntax(
@@ -252,12 +253,12 @@ impl<'a> Parser<'a> {
             ));
         }
         self.advance()?;
-        Ok(tok.text)
+        Ok(tok.text.to_string())
     }
 
     // ── Dict / Config / List helpers ────────────────────────────
 
-    pub fn parse_payload_dict(&mut self) -> Result<Vec<(&'a str, Value<'a>)>, QqlError> {
+    pub fn parse_payload_dict(&mut self) -> Result<Vec<(String, Value)>, QqlError> {
         self.expect(TokenKind::Lbrace)?;
         let mut result = Vec::new();
         if self.peek()?.kind == TokenKind::Rbrace {
@@ -277,7 +278,7 @@ impl<'a> Parser<'a> {
                 ));
             }
             self.advance()?;
-            let key = key_tok.text;
+            let key = key_tok.text.to_string();
             self.expect(TokenKind::Colon)?;
             let value = self.parse_value()?;
             result.push((key, value));
@@ -294,7 +295,7 @@ impl<'a> Parser<'a> {
         Ok(result)
     }
 
-    pub fn parse_config_block(&mut self) -> Result<Vec<(&'a str, Value<'a>)>, QqlError> {
+    pub fn parse_config_block(&mut self) -> Result<Vec<(String, Value)>, QqlError> {
         self.expect(TokenKind::Lparen)?;
         let mut result = Vec::new();
         if self.peek()?.kind == TokenKind::Rparen {
@@ -317,7 +318,7 @@ impl<'a> Parser<'a> {
                 _ => {}
             }
             self.advance()?;
-            let key = key_tok.text;
+            let key = key_tok.text.to_string();
             self.expect(TokenKind::Equals)?;
             let value = self.parse_value()?;
             result.push((key, value));
@@ -334,7 +335,7 @@ impl<'a> Parser<'a> {
         Ok(result)
     }
 
-    pub fn parse_list(&mut self) -> Result<Vec<Value<'a>>, QqlError> {
+    pub fn parse_list(&mut self) -> Result<Vec<Value>, QqlError> {
         self.expect(TokenKind::Lbracket)?;
         let mut items = Vec::new();
         if self.peek()?.kind == TokenKind::Rbracket {
@@ -421,7 +422,7 @@ impl<'a> Parser<'a> {
         Ok(vec)
     }
 
-    pub fn coerce_vector_values(&self, values: Vec<Value<'a>>) -> Result<Vec<f32>, QqlError> {
+    pub fn coerce_vector_values(&self, values: Vec<Value>) -> Result<Vec<f32>, QqlError> {
         let mut vector = Vec::with_capacity(values.len());
         for v in values {
             match v {
@@ -432,4 +433,14 @@ impl<'a> Parser<'a> {
         }
         Ok(vector)
     }
+}
+
+// ── EmbeddingOptions (owned) ──────────────────────────────────────
+
+pub struct EmbeddingOptions {
+    pub model: Option<String>,
+    pub hybrid: bool,
+    pub sparse_model: Option<String>,
+    pub dense_vector: Option<String>,
+    pub sparse_vector: Option<String>,
 }

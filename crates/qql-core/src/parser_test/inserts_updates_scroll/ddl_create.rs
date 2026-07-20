@@ -37,7 +37,7 @@ fn test_create_collection_with_model() {
     match stmt {
         Stmt::CreateCollection(c) => {
             assert_eq!(c.collection, "mycollection");
-            assert_eq!(c.model, Some("dense-model"));
+            assert_eq!(c.model, Some(String::from("dense-model")));
         }
         _ => panic!("expected CreateCollection"),
     }
@@ -242,9 +242,15 @@ fn test_create_index_with_keyword_options() {
             assert_eq!(i.collection, "mycollection");
             assert_eq!(i.field, "tenant_id");
             assert_eq!(i.field_type, "keyword");
-            assert!(i.options.contains(&("is_tenant", Value::Bool(true))));
-            assert!(i.options.contains(&("on_disk", Value::Bool(true))));
-            assert!(i.options.contains(&("enable_hnsw", Value::Bool(false))));
+            assert!(i
+                .options
+                .contains(&(String::from("is_tenant"), Value::Bool(true))));
+            assert!(i
+                .options
+                .contains(&(String::from("on_disk"), Value::Bool(true))));
+            assert!(i
+                .options
+                .contains(&(String::from("enable_hnsw"), Value::Bool(false))));
         }
         _ => panic!("expected CreateIndex"),
     }
@@ -260,10 +266,18 @@ fn test_create_index_with_text_options() {
             assert_eq!(i.collection, "mycollection");
             assert_eq!(i.field, "title");
             assert_eq!(i.field_type, "text");
-            assert!(i.options.contains(&("tokenizer", str_val("word"))));
-            assert!(i.options.contains(&("min_token_len", i64_val(2))));
-            assert!(i.options.contains(&("max_token_len", i64_val(20))));
-            assert!(i.options.contains(&("lowercase", Value::Bool(true))));
+            assert!(i
+                .options
+                .contains(&(String::from("tokenizer"), str_val("word"))));
+            assert!(i
+                .options
+                .contains(&(String::from("min_token_len"), i64_val(2))));
+            assert!(i
+                .options
+                .contains(&(String::from("max_token_len"), i64_val(20))));
+            assert!(i
+                .options
+                .contains(&(String::from("lowercase"), Value::Bool(true))));
         }
         _ => panic!("expected CreateIndex"),
     }

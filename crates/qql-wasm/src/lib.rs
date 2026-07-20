@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use qql_core::ast::{self, Value};
 use qql_core::lexer::Lexer;
 use qql_core::parser::Parser;
@@ -43,8 +41,8 @@ pub fn inject_filter(
 ) -> Result<JsValue, JsValue> {
     let serde_value: serde_json::Value = serde_wasm_bindgen::from_value(value)
         .map_err(|e| JsValue::from_str(&format!("invalid value: {}", e)))?;
-    let value = serde_json_to_value(serde_value)
-        .ok_or_else(|| JsValue::from_str("unsupported value type"))?;
+    let value =
+        Value::from_json(serde_value).ok_or_else(|| JsValue::from_str("unsupported value type"))?;
     let mut stmt = Parser::parse(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
     ast::inject_filter(&mut stmt, field, op, &value);
     serde_wasm_bindgen::to_value(&stmt).map_err(|e| JsValue::from_str(&e.to_string()))
@@ -80,60 +78,20 @@ pub fn tokenize(input: &str) -> Result<Vec<JsValue>, JsValue> {
     Ok(tokens)
 }
 
-fn serde_json_to_value(jv: serde_json::Value) -> Option<Value<'static>> {
-    match jv {
-        serde_json::Value::String(s) => Some(Value::Str(Cow::Owned(s))),
-        serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                Some(Value::Int(i))
-            } else {
-                n.as_f64().map(Value::Float)
-            }
-        }
-        serde_json::Value::Bool(b) => Some(Value::Bool(b)),
-        serde_json::Value::Null => Some(Value::Null),
-        serde_json::Value::Array(items) => {
-            let mut vals = Vec::with_capacity(items.len());
-            for item in items {
-                vals.push(serde_json_to_value(item)?);
-            }
-            Some(Value::List(vals))
-        }
-        serde_json::Value::Object(map) => {
-            if map.len() == 1 {
-                if let Some((tag, inner)) = map.iter().next() {
-                    match tag.as_str() {
-                        "str" => return inner.as_str().map(|s| Value::Str(Cow::Owned(s.into()))),
-                        "int" => return inner.as_i64().map(Value::Int),
-                        "float" => return inner.as_f64().map(Value::Float),
-                        "bool" => return inner.as_bool().map(Value::Bool),
-                        "null" if inner.is_null() => return Some(Value::Null),
-                        "list" => return serde_json_to_value(inner.clone()),
-                        "dict" => return serde_json_to_value(inner.clone()),
-                        _ => {}
-                    }
-                }
-            }
-            let mut pairs = Vec::with_capacity(map.len());
-            for (k, v) in map {
-                pairs.push((Cow::Owned(k), serde_json_to_value(v)?));
-            }
-            Some(Value::Dict(pairs))
-        }
-    }
-}
-
 #[wasm_bindgen]
 pub fn compile(query: &str) -> Result<JsValue, JsValue> {
-    let compiled = qql::offline::compile(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let compiled =
+        qql_core::offline::compile(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
     serde_wasm_bindgen::to_value(&compiled).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
+#[cfg(feature = "runtime")]
 #[wasm_bindgen]
 pub fn explain(query: &str) -> Result<String, JsValue> {
-    qql::executor::Executor::explain(query).map_err(|e| JsValue::from_str(&e.to_string()))
+    q::executor::Executor::explain(query).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
+#[cfg(feature = "runtime")]
 #[wasm_bindgen]
 pub struct HttpEmbedder {
     endpoint: String,
@@ -142,6 +100,7 @@ pub struct HttpEmbedder {
     dimension: usize,
 }
 
+#[cfg(feature = "runtime")]
 #[wasm_bindgen]
 impl HttpEmbedder {
     #[wasm_bindgen(constructor)]
@@ -175,6 +134,7 @@ impl HttpEmbedder {
     }
 }
 
+#[cfg(feature = "runtime")]
 #[wasm_bindgen]
 pub struct Client {
     url: String,
@@ -182,6 +142,7 @@ pub struct Client {
     embedder: Option<HttpEmbedder>,
 }
 
+#[cfg(feature = "runtime")]
 #[wasm_bindgen]
 impl Client {
     #[wasm_bindgen(constructor)]
@@ -200,12 +161,12 @@ impl Client {
     #[wasm_bindgen]
     pub fn compile(&self, query: &str) -> Result<JsValue, JsValue> {
         let compiled =
-            qql::offline::compile(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
+            qql_core::offline::compile(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
         serde_wasm_bindgen::to_value(&compiled).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     #[wasm_bindgen]
     pub fn explain(&self, query: &str) -> Result<String, JsValue> {
-        qql::executor::Executor::explain(query).map_err(|e| JsValue::from_str(&e.to_string()))
+        q::executor::Executor::explain(query).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 }

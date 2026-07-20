@@ -5,7 +5,7 @@ mod tests {
 
     #[test]
     fn test_syntax_error_message() {
-        let err = QqlError::syntax("unexpected token", 42);
+        let err = QqlError::syntax(String::from("unexpected token"), 42);
         let msg = err.to_string();
         assert!(msg.contains("42"), "error should contain position: {}", msg);
         assert!(
@@ -17,7 +17,7 @@ mod tests {
 
     #[test]
     fn test_syntax_error_at_pos_0() {
-        let err = QqlError::syntax("unexpected token", 0);
+        let err = QqlError::syntax(String::from("unexpected token"), 0);
         let msg = err.to_string();
         assert!(
             !msg.contains("position"),
@@ -49,7 +49,7 @@ mod tests {
 
     #[test]
     fn test_syntax_error_matches_pos() {
-        let err = QqlError::syntax("bad token", 5);
+        let err = QqlError::syntax(String::from("bad token"), 5);
         assert_eq!(err.pos, 5);
     }
 
@@ -61,11 +61,11 @@ mod tests {
 
     #[test]
     fn test_error_clone_and_eq() {
-        let err1 = QqlError::syntax("test", 10);
-        let err2 = QqlError::syntax("test", 10);
+        let err1 = QqlError::syntax(String::from("test"), 10);
+        let err2 = QqlError::syntax(String::from("test"), 10);
         assert_eq!(err1, err2);
 
-        let err3 = QqlError::syntax("test", 20);
+        let err3 = QqlError::syntax(String::from("test"), 20);
         assert_ne!(err1, err3);
 
         let err4 = QqlError::runtime("test");
@@ -75,14 +75,14 @@ mod tests {
 
     #[test]
     fn test_syntax_with_pos() {
-        let err = QqlError::syntax("unexpected token", 42);
+        let err = QqlError::syntax(String::from("unexpected token"), 42);
         let msg = err.to_string();
         assert_eq!(msg, "syntax error at 42: unexpected token");
     }
 
     #[test]
     fn test_syntax_with_negative_pos_is_zero() {
-        let err = QqlError::syntax("unexpected token", 0);
+        let err = QqlError::syntax(String::from("unexpected token"), 0);
         let msg = err.to_string();
         assert_eq!(msg, "runtime error: unexpected token");
     }

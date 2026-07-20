@@ -1,4 +1,5 @@
 use alloc::boxed::Box;
+use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -36,9 +37,8 @@ fn is_formula_kwarg_key(kind: TokenKind) -> bool {
     )
 }
 
-type PrefixParseFn = for<'a> fn(&mut Parser<'a>) -> Result<FormulaExpr<'a>, QqlError>;
-type InfixParseFn =
-    for<'a> fn(&mut Parser<'a>, FormulaExpr<'a>) -> Result<FormulaExpr<'a>, QqlError>;
+type PrefixParseFn = fn(&mut Parser<'_>) -> Result<FormulaExpr, QqlError>;
+type InfixParseFn = fn(&mut Parser<'_>, FormulaExpr) -> Result<FormulaExpr, QqlError>;
 
 fn formula_prefix_parse_fn(kind: TokenKind) -> Option<PrefixParseFn> {
     match kind {
@@ -66,7 +66,7 @@ fn formula_infix_parse_fn(kind: TokenKind) -> Option<InfixParseFn> {
 }
 
 impl<'a> Parser<'a> {
-    pub fn parse_formula_expr(&mut self, precedence: u8) -> Result<FormulaExpr<'a>, QqlError> {
+    pub fn parse_formula_expr(&mut self, precedence: u8) -> Result<FormulaExpr, QqlError> {
         let tok = self.peek()?;
         let prefix = formula_prefix_parse_fn(tok.kind).ok_or_else(|| {
             QqlError::syntax(
@@ -95,9 +95,9 @@ impl<'a> Parser<'a> {
 
 // ── Prefix parse functions ──────────────────────────────────────
 
-fn parse_formula_identifier_or_func<'a>(p: &mut Parser<'a>) -> Result<FormulaExpr<'a>, QqlError> {
+fn parse_formula_identifier_or_func(p: &mut Parser<'_>) -> Result<FormulaExpr, QqlError> {
     let tok = p.advance()?;
-    let val = tok.text;
+    let val = tok.text.to_string();
     let lower = val.to_ascii_lowercase();
 
     if p.peek()?.kind == TokenKind::Lparen {
@@ -108,7 +108,7 @@ fn parse_formula_identifier_or_func<'a>(p: &mut Parser<'a>) -> Result<FormulaExp
     Ok(FormulaExpr::Variable { name: val })
 }
 
-fn parse_formula_constant<'a>(p: &mut Parser<'a>) -> Result<FormulaExpr<'a>, QqlError> {
+fn parse_formula_constant(p: &mut Parser<'_>) -> Result<FormulaExpr, QqlError> {
     let tok = p.advance()?;
     let v: f64 = tok
         .text
@@ -117,7 +117,7 @@ fn parse_formula_constant<'a>(p: &mut Parser<'a>) -> Result<FormulaExpr<'a>, Qql
     Ok(FormulaExpr::Constant { value: v })
 }
 
-fn parse_formula_prefix_expression<'a>(p: &mut Parser<'a>) -> Result<FormulaExpr<'a>, QqlError> {
+fn parse_formula_prefix_expression(p: &mut Parser<'_>) -> Result<FormulaExpr, QqlError> {
     p.advance()?;
     let right = p.parse_formula_expr(PRECEDENCE_PREFIX)?;
     Ok(FormulaExpr::Neg {
@@ -127,10 +127,10 @@ fn parse_formula_prefix_expression<'a>(p: &mut Parser<'a>) -> Result<FormulaExpr
 
 // ── Infix parse functions ───────────────────────────────────────
 
-fn parse_formula_infix_expression<'a>(
-    p: &mut Parser<'a>,
-    left: FormulaExpr<'a>,
-) -> Result<FormulaExpr<'a>, QqlError> {
+fn parse_formula_infix_expression(
+    p: &mut Parser<'_>,
+    left: FormulaExpr,
+) -> Result<FormulaExpr, QqlError> {
     let tok = p.advance()?;
     let prec = token_precedence(tok.kind);
     let right = p.parse_formula_expr(prec)?;
@@ -174,14 +174,14 @@ fn parse_formula_infix_expression<'a>(
     }
 }
 
-fn parse_formula_grouped_expression<'a>(p: &mut Parser<'a>) -> Result<FormulaExpr<'a>, QqlError> {
+fn parse_formula_grouped_expression(p: &mut Parser<'_>) -> Result<FormulaExpr, QqlError> {
     p.advance()?;
     let expr = p.parse_formula_expr(PRECEDENCE_LOWEST)?;
     p.expect(TokenKind::Rparen)?;
     Ok(expr)
 }
 
-fn parse_formula_case_expression<'a>(p: &mut Parser<'a>) -> Result<FormulaExpr<'a>, QqlError> {
+fn parse_formula_case_expression(p: &mut Parser<'_>) -> Result<FormulaExpr, QqlError> {
     p.advance()?;
     p.expect(TokenKind::When)?;
     let cond = p.parse_filter_expr()?;
@@ -199,14 +199,14 @@ fn parse_formula_case_expression<'a>(p: &mut Parser<'a>) -> Result<FormulaExpr<'
 
 // ── Function call dispatcher ────────────────────────────────────
 
-fn parse_formula_function_call<'a>(
-    p: &mut Parser<'a>,
+fn parse_formula_function_call(
+    p: &mut Parser<'_>,
     func_name: &str,
     pos: usize,
-) -> Result<FormulaExpr<'a>, QqlError> {
+) -> Result<FormulaExpr, QqlError> {
     match func_name {
         "match" | "match_any" => {
-            let field_tok = p.expect(TokenKind::Identifier)?;
+            let field = p.parse_identifier()?;
             p.expect(TokenKind::Comma)?;
             let values = if p.peek()?.kind == TokenKind::Lbracket {
                 p.parse_list()?
@@ -215,27 +215,24 @@ fn parse_formula_function_call<'a>(
                 vec![single]
             };
             p.expect(TokenKind::Rparen)?;
-            return Ok(FormulaExpr::MatchCondition {
-                field: field_tok.text,
-                values,
-            });
+            return Ok(FormulaExpr::MatchCondition { field, values });
         }
         "datetime" => {
-            let tok = p.expect(TokenKind::String)?;
+            let value = p.parse_string()?;
             p.expect(TokenKind::Rparen)?;
-            return Ok(FormulaExpr::Datetime { value: tok.text });
+            return Ok(FormulaExpr::Datetime { value });
         }
         "datetime_key" => {
-            let tok = p.expect(TokenKind::String)?;
+            let key = p.parse_string()?;
             p.expect(TokenKind::Rparen)?;
-            return Ok(FormulaExpr::DatetimeKey { key: tok.text });
+            return Ok(FormulaExpr::DatetimeKey { key });
         }
         "geo_distance" if p.peek()?.kind == TokenKind::Lbrace => {
             let dict = p.parse_payload_dict()?;
             if p.peek()?.kind == TokenKind::Comma {
                 p.advance()?;
             }
-            let field_tok = p.expect(TokenKind::Identifier)?;
+            let field = p.parse_identifier()?;
             p.expect(TokenKind::Rparen)?;
 
             let mut lat = None;
@@ -260,11 +257,7 @@ fn parse_formula_function_call<'a>(
                 lat.ok_or_else(|| QqlError::syntax("geo_distance dict must have 'lat' key", pos))?;
             let lon =
                 lon.ok_or_else(|| QqlError::syntax("geo_distance dict must have 'lon' key", pos))?;
-            return Ok(FormulaExpr::GeoDistance {
-                lat,
-                lon,
-                field: field_tok.text,
-            });
+            return Ok(FormulaExpr::GeoDistance { lat, lon, field });
         }
         _ => {}
     }
@@ -347,7 +340,7 @@ fn parse_formula_function_call<'a>(
                 }
             };
             let field = match &args[2] {
-                FormulaExpr::Variable { name } => *name,
+                FormulaExpr::Variable { name } => name.clone(),
                 _ => {
                     return Err(QqlError::syntax(
                         "GEO_DISTANCE() third argument must be a field name",
@@ -463,7 +456,7 @@ fn parse_formula_function_call<'a>(
                 }
             };
             Ok(FormulaExpr::Decay {
-                kind: static_kind,
+                kind: static_kind.to_string(),
                 x: Box::new(x),
                 target,
                 scale,
@@ -477,13 +470,11 @@ fn parse_formula_function_call<'a>(
     }
 }
 
-type FormulaArgs<'a> = (Vec<FormulaExpr<'a>>, Vec<(&'a str, FormulaExpr<'a>)>);
+type FormulaArgs = (Vec<FormulaExpr>, Vec<(String, FormulaExpr)>);
 
 // ── Argument parsing (standalone function) ──────────────────────
 
-fn parse_formula_call_arguments_and_kwargs<'a>(
-    p: &mut Parser<'a>,
-) -> Result<FormulaArgs<'a>, QqlError> {
+fn parse_formula_call_arguments_and_kwargs(p: &mut Parser<'_>) -> Result<FormulaArgs, QqlError> {
     let mut args = Vec::new();
     let mut kwargs = Vec::new();
 
@@ -514,7 +505,7 @@ fn parse_formula_call_arguments_and_kwargs<'a>(
             let key_tok = p.advance()?;
             let _eq = p.advance()?;
             let arg = p.parse_formula_expr(PRECEDENCE_LOWEST)?;
-            kwargs.push((key_tok.text, arg));
+            kwargs.push((key_tok.text.to_string(), arg));
         } else {
             if !kwargs.is_empty() {
                 return Err(QqlError::syntax(

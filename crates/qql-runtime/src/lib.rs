@@ -3,12 +3,13 @@ pub mod client;
 pub mod config;
 pub mod embedder;
 pub mod executor;
-pub mod filter_conv;
 #[cfg(feature = "grpc")]
 pub mod grpc;
-pub mod offline;
+pub use qql_core::filter_conv;
+pub use qql_core::offline;
 pub mod pipeline;
 pub mod qdrant;
+#[cfg(feature = "rest")]
 pub mod rest;
 pub mod sparse;
 
@@ -18,9 +19,6 @@ mod pipeline_test;
 mod sparse_test;
 
 #[cfg(test)]
-mod executor_test;
-#[cfg(test)]
-mod filter_conv_test;
-#[cfg(test)]
 mod contract_test;
-
+#[cfg(test)]
+mod executor_test;

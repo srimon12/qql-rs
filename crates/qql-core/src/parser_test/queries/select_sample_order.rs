@@ -11,9 +11,9 @@ fn test_query_order_by() {
     match stmt {
         Stmt::Query(q) => {
             assert_eq!(q.mode, QueryMode::OrderBy);
-            assert_eq!(q.order_by_field, Some("timestamp"));
+            assert_eq!(q.order_by_field, Some(String::from("timestamp")));
             assert_eq!(q.order_by_asc, Some(true));
-            assert_eq!(q.collection, Some("logs"));
+            assert_eq!(q.collection, Some(String::from("logs")));
             assert_eq!(q.limit, 100);
         }
         _ => panic!("expected Query stmt"),
@@ -28,7 +28,7 @@ fn test_query_sample() {
     match stmt {
         Stmt::Query(q) => {
             assert_eq!(q.mode, QueryMode::Sample);
-            assert_eq!(q.collection, Some("docs"));
+            assert_eq!(q.collection, Some(String::from("docs")));
             assert_eq!(q.limit, 10);
         }
         _ => panic!("expected Query stmt"),
@@ -41,7 +41,7 @@ fn test_query_sample_with_filter() {
     match stmt {
         Stmt::Query(q) => {
             assert_eq!(q.mode, QueryMode::Sample);
-            assert_eq!(q.collection, Some("docs"));
+            assert_eq!(q.collection, Some(String::from("docs")));
             assert_eq!(q.limit, 10);
             assert!(q.query_filter.is_some());
         }
@@ -91,7 +91,7 @@ fn test_query_multiple_with_clauses() {
         );
     match stmt {
         Stmt::Query(q) => {
-            assert_eq!(q.model, Some("foo"));
+            assert_eq!(q.model, Some(String::from("foo")));
             let wp = q.with_payload.as_ref().unwrap();
             assert_eq!(wp.include, vec!["title"]);
             let wv = q.with_vectors.as_ref().unwrap();
@@ -128,7 +128,7 @@ fn test_query_raw_vector() {
     let stmt = assert_parse_ok("QUERY [0.1, 0.2, 0.3] FROM docs LIMIT 5");
     match stmt {
         Stmt::Query(q) => {
-            assert_eq!(q.collection, Some("docs"));
+            assert_eq!(q.collection, Some(String::from("docs")));
             assert_eq!(q.raw_vector, vec![0.1, 0.2, 0.3]);
             assert_eq!(q.limit, 5);
         }

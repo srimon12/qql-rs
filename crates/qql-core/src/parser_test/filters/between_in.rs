@@ -14,7 +14,7 @@ fn test_filter_between() {
             assert_eq!(
                 s.query_filter,
                 Some(Box::new(FilterExpr::Between {
-                    field: "age",
+                    field: String::from("age"),
                     low: i64_val(18),
                     high: i64_val(65),
                 }))
@@ -34,7 +34,7 @@ fn test_filter_in() {
             assert_eq!(
                 s.query_filter,
                 Some(Box::new(FilterExpr::In {
-                    field: "status",
+                    field: String::from("status"),
                     values: vec![str_val("active"), str_val("pending")],
                 }))
             );
@@ -54,7 +54,7 @@ fn test_filter_not_in() {
             assert_eq!(
                 s.query_filter,
                 Some(Box::new(FilterExpr::NotIn {
-                    field: "status",
+                    field: String::from("status"),
                     values: vec![str_val("deleted"), str_val("archived")],
                 }))
             );
@@ -72,7 +72,9 @@ fn test_filter_is_null() {
         Stmt::Scroll(s) => {
             assert_eq!(
                 s.query_filter,
-                Some(Box::new(FilterExpr::IsNull { field: "field" }))
+                Some(Box::new(FilterExpr::IsNull {
+                    field: String::from("field")
+                }))
             );
         }
         _ => panic!("expected Scroll stmt"),
@@ -86,7 +88,9 @@ fn test_filter_is_not_null() {
         Stmt::Scroll(s) => {
             assert_eq!(
                 s.query_filter,
-                Some(Box::new(FilterExpr::IsNotNull { field: "field" }))
+                Some(Box::new(FilterExpr::IsNotNull {
+                    field: String::from("field")
+                }))
             );
         }
         _ => panic!("expected Scroll stmt"),
@@ -100,7 +104,9 @@ fn test_filter_is_empty() {
         Stmt::Scroll(s) => {
             assert_eq!(
                 s.query_filter,
-                Some(Box::new(FilterExpr::IsEmpty { field: "field" }))
+                Some(Box::new(FilterExpr::IsEmpty {
+                    field: String::from("field")
+                }))
             );
         }
         _ => panic!("expected Scroll stmt"),
@@ -114,7 +120,9 @@ fn test_filter_is_not_empty() {
         Stmt::Scroll(s) => {
             assert_eq!(
                 s.query_filter,
-                Some(Box::new(FilterExpr::IsNotEmpty { field: "field" }))
+                Some(Box::new(FilterExpr::IsNotEmpty {
+                    field: String::from("field")
+                }))
             );
         }
         _ => panic!("expected Scroll stmt"),
@@ -131,8 +139,8 @@ fn test_filter_match_text() {
             assert_eq!(
                 s.query_filter,
                 Some(Box::new(FilterExpr::MatchText {
-                    field: "content",
-                    text: "hello world",
+                    field: String::from("content"),
+                    text: String::from("hello world"),
                 }))
             );
         }
@@ -148,8 +156,8 @@ fn test_filter_match_any() {
             assert_eq!(
                 s.query_filter,
                 Some(Box::new(FilterExpr::MatchAny {
-                    field: "content",
-                    text: "hello world",
+                    field: String::from("content"),
+                    text: String::from("hello world"),
                 }))
             );
         }
@@ -165,8 +173,8 @@ fn test_filter_match_phrase() {
             assert_eq!(
                 s.query_filter,
                 Some(Box::new(FilterExpr::MatchPhrase {
-                    field: "content",
-                    text: "hello world",
+                    field: String::from("content"),
+                    text: String::from("hello world"),
                 }))
             );
         }

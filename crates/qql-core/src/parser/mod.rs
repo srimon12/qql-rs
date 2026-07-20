@@ -21,23 +21,17 @@ pub use config_validation::{
 };
 pub use with_clause::merge_search_with;
 
-use crate::ast::{Stmt, Value};
+use crate::ast::Stmt;
 use crate::error::QqlError;
 use crate::lexer::Lexer;
 use crate::token::{Token, TokenKind};
+use alloc::string::String;
+use alloc::vec::Vec;
 
 pub struct Parser<'a> {
     pub input: &'a str,
-    tokens: alloc::vec::Vec<Token<'a>>,
+    tokens: Vec<Token<'a>>,
     index: usize,
-}
-
-pub struct EmbeddingOptions<'a> {
-    pub model: Option<&'a str>,
-    pub hybrid: bool,
-    pub sparse_model: Option<&'a str>,
-    pub dense_vector: Option<&'a str>,
-    pub sparse_vector: Option<&'a str>,
 }
 
 pub fn ascii_equal(s: &str, upper: &str) -> bool {
@@ -102,11 +96,15 @@ fn is_contextual_identifier(kind: TokenKind) -> bool {
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(input: &'a str, tokens: alloc::vec::Vec<Token<'a>>) -> Self {
-        Self { input, tokens, index: 0 }
+    pub fn new(input: &'a str, tokens: Vec<Token<'a>>) -> Self {
+        Self {
+            input,
+            tokens,
+            index: 0,
+        }
     }
 
-    pub fn parse(input: &'a str) -> Result<Stmt<'a>, QqlError> {
+    pub fn parse(input: &'a str) -> Result<Stmt, QqlError> {
         let tokens = Self::lex(input)?;
         let mut parser = Parser::new(input, tokens);
         let stmt = parser.parse_stmt()?;
@@ -122,10 +120,10 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    pub fn parse_all(input: &'a str) -> Result<alloc::vec::Vec<Stmt<'a>>, QqlError> {
+    pub fn parse_all(input: &'a str) -> Result<Vec<Stmt>, QqlError> {
         let tokens = Self::lex(input)?;
         let mut parser = Parser::new(input, tokens);
-        let mut stmts = alloc::vec::Vec::new();
+        let mut stmts = Vec::new();
         while parser.index < parser.tokens.len() {
             if parser.tokens[parser.index].kind == TokenKind::Semicolon {
                 parser.index += 1;
@@ -136,9 +134,9 @@ impl<'a> Parser<'a> {
         Ok(stmts)
     }
 
-    fn lex(input: &'a str) -> Result<alloc::vec::Vec<Token<'a>>, QqlError> {
+    fn lex(input: &'a str) -> Result<Vec<Token<'a>>, QqlError> {
         let lexer = Lexer::new(input);
-        let mut tokens = alloc::vec::Vec::new();
+        let mut tokens = Vec::new();
         for token_res in lexer {
             tokens.push(token_res?);
         }
@@ -162,7 +160,7 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    pub fn parse_stmt(&mut self) -> Result<Stmt<'a>, QqlError> {
+    pub fn parse_stmt(&mut self) -> Result<Stmt, QqlError> {
         let tok = self.peek()?;
         match tok.kind {
             TokenKind::Create => self.parse_create(),
@@ -235,14 +233,14 @@ impl<'a> Parser<'a> {
 
     // ── Identifier parsing ──────────────────────────────────────
 
-    pub fn parse_identifier(&mut self) -> Result<&'a str, QqlError> {
+    pub fn parse_identifier(&mut self) -> Result<String, QqlError> {
         let tok = self.peek()?;
         if tok.kind == TokenKind::Identifier
             || tok.kind == TokenKind::String
             || is_contextual_identifier(tok.kind)
         {
             self.advance()?;
-            Ok(tok.text)
+            Ok(tok.text.to_string())
         } else {
             Err(QqlError::syntax(
                 alloc::format!("expected identifier or quoted name, got '{}'", tok.text),
@@ -253,12 +251,12 @@ impl<'a> Parser<'a> {
 
     // ── Value parsing ───────────────────────────────────────────
 
-    pub fn parse_value(&mut self) -> Result<Value<'a>, QqlError> {
+    pub fn parse_value(&mut self) -> Result<crate::ast::Value, QqlError> {
         let tok = self.peek()?;
         match tok.kind {
             TokenKind::String => {
                 self.advance()?;
-                Ok(Value::Str(alloc::borrow::Cow::Borrowed(tok.text)))
+                Ok(crate::ast::Value::Str(tok.text.to_string()))
             }
             TokenKind::Float => {
                 self.advance()?;
@@ -268,7 +266,7 @@ impl<'a> Parser<'a> {
                         tok.pos,
                     )
                 })?;
-                Ok(Value::Float(v))
+                Ok(crate::ast::Value::Float(v))
             }
             TokenKind::Integer => {
                 self.advance()?;
@@ -278,33 +276,28 @@ impl<'a> Parser<'a> {
                         tok.pos,
                     )
                 })?;
-                Ok(Value::Int(v))
+                Ok(crate::ast::Value::Int(v))
             }
             TokenKind::Null => {
                 self.advance()?;
-                Ok(Value::Null)
+                Ok(crate::ast::Value::Null)
             }
             TokenKind::Identifier => {
                 self.advance()?;
                 if ascii_equal(tok.text, "TRUE") {
-                    Ok(Value::Bool(true))
+                    Ok(crate::ast::Value::Bool(true))
                 } else if ascii_equal(tok.text, "FALSE") {
-                    Ok(Value::Bool(false))
+                    Ok(crate::ast::Value::Bool(false))
                 } else if ascii_equal(tok.text, "NULL") {
-                    Ok(Value::Null)
+                    Ok(crate::ast::Value::Null)
                 } else {
-                    Ok(Value::Str(alloc::borrow::Cow::Borrowed(tok.text)))
+                    Ok(crate::ast::Value::Str(tok.text.to_string()))
                 }
             }
-            TokenKind::Lbrace => self.parse_payload_dict().map(|items| {
-                Value::Dict(
-                    items
-                        .into_iter()
-                        .map(|(k, v)| (alloc::borrow::Cow::Borrowed(k), v))
-                        .collect(),
-                )
-            }),
-            TokenKind::Lbracket => self.parse_list().map(Value::List),
+            TokenKind::Lbrace => self
+                .parse_payload_dict()
+                .map(|items| crate::ast::Value::Dict(items.into_iter().collect())),
+            TokenKind::Lbracket => self.parse_list().map(crate::ast::Value::List),
             _ => Err(QqlError::syntax(
                 alloc::format!("unexpected value token '{}'", tok.text),
                 tok.pos,

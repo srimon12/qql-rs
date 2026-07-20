@@ -1,8 +1,8 @@
-use std::string::String;
-use std::vec::Vec;
+use alloc::string::String;
+use alloc::vec::Vec;
 
-use qql_core::ast::{FilterExpr, Value};
-use qql_core::error::QqlError;
+use crate::ast::{FilterExpr, Value};
+use crate::error::QqlError;
 
 pub struct FilterConverter;
 
@@ -17,13 +17,10 @@ impl FilterConverter {
         FilterConverter
     }
 
-    pub fn build_filter(
-        &self,
-        expr: &FilterExpr,
-    ) -> Result<Option<crate::backend::Filter>, QqlError> {
+    pub fn build_filter(&self, expr: &FilterExpr) -> Result<Option<serde_json::Value>, QqlError> {
         let condition = self.build_condition(expr)?;
         let filter_val = self.wrap_as_filter(condition);
-        Ok(Some(crate::backend::Filter::from_json(filter_val)))
+        Ok(Some(filter_val))
     }
 
     fn build_condition(&self, expr: &FilterExpr) -> Result<serde_json::Value, QqlError> {
@@ -69,7 +66,7 @@ impl FilterConverter {
             })),
             FilterExpr::ValuesCount { field, op, count } => {
                 let mut range = serde_json::json!({});
-                match *op {
+                match op.as_str() {
                     ">" => range["gt"] = serde_json::json!(count),
                     ">=" => range["gte"] = serde_json::json!(count),
                     "<" => range["lt"] = serde_json::json!(count),

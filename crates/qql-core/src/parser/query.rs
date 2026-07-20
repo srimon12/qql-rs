@@ -8,52 +8,14 @@ use crate::token::TokenKind;
 use super::Parser;
 
 impl<'a> Parser<'a> {
-    pub fn parse_query(&mut self) -> Result<Stmt<'a>, QqlError> {
+    pub fn parse_query(&mut self) -> Result<Stmt, QqlError> {
         let tok = self.peek()?;
         if tok.kind == TokenKind::Fusion {
             self.advance()?;
-            let mut stmt = QueryStmt {
-                collection: None,
-                mode: QueryMode::Nearest,
-                query_type: QueryType::Dense,
-                query_text: None,
-                query_id: None,
-                raw_vector: Vec::new(),
-                positive_ids: Vec::new(),
-                negative_ids: Vec::new(),
-                context_pairs: Vec::new(),
-                target: None,
-                order_by_field: None,
-                order_by_asc: None,
-                limit: 10,
-                offset: 0,
-                score_threshold: None,
-                strategy: None,
-                query_filter: None,
-                group_by: None,
-                group_size: None,
-                with_clause: None,
-                with_payload: None,
-                with_vectors: None,
-                lookup_from: None,
-                lookup_vector: None,
-                with_lookup_collection: None,
-                using_: None,
-                model: None,
-                ctes: Vec::new(),
-                prefetch_refs: Vec::new(),
-                fusion_type: None,
-                rerank: false,
-                rerank_model: None,
-                formula: None,
-                formula_defaults: Vec::new(),
-                feedback_target: None,
-                feedback_items: Vec::new(),
-                feedback_strategy: None,
-            };
+            let mut stmt = new_default_query_stmt();
             let fusion_tok = self.peek()?;
             if fusion_tok.kind == TokenKind::Identifier || fusion_tok.kind == TokenKind::String {
-                stmt.fusion_type = Some(fusion_tok.text);
+                stmt.fusion_type = Some(fusion_tok.text.to_string());
                 self.advance()?;
             }
             if self.peek()?.kind == TokenKind::From {
@@ -70,55 +32,18 @@ impl<'a> Parser<'a> {
         Ok(Stmt::Query(self.parse_query_body(None)?))
     }
 
-    pub fn parse_query_with_cte(&mut self) -> Result<Stmt<'a>, QqlError> {
+    pub fn parse_query_with_cte(&mut self) -> Result<Stmt, QqlError> {
         self.expect(TokenKind::With)?;
         let ctes = self.parse_cte_list()?;
         let tok = self.peek()?;
 
         if tok.kind == TokenKind::Fusion {
             self.advance()?;
-            let mut stmt = QueryStmt {
-                collection: None,
-                mode: QueryMode::Nearest,
-                query_type: QueryType::Dense,
-                query_text: None,
-                query_id: None,
-                raw_vector: Vec::new(),
-                positive_ids: Vec::new(),
-                negative_ids: Vec::new(),
-                context_pairs: Vec::new(),
-                target: None,
-                order_by_field: None,
-                order_by_asc: None,
-                limit: 10,
-                offset: 0,
-                score_threshold: None,
-                strategy: None,
-                query_filter: None,
-                group_by: None,
-                group_size: None,
-                with_clause: None,
-                with_payload: None,
-                with_vectors: None,
-                lookup_from: None,
-                lookup_vector: None,
-                with_lookup_collection: None,
-                using_: None,
-                model: None,
-                ctes,
-                prefetch_refs: Vec::new(),
-                fusion_type: None,
-                rerank: false,
-                rerank_model: None,
-                formula: None,
-                formula_defaults: Vec::new(),
-                feedback_target: None,
-                feedback_items: Vec::new(),
-                feedback_strategy: None,
-            };
+            let mut stmt = new_default_query_stmt();
+            stmt.ctes = ctes;
             let fusion_tok = self.peek()?;
             if fusion_tok.kind == TokenKind::Identifier || fusion_tok.kind == TokenKind::String {
-                stmt.fusion_type = Some(fusion_tok.text);
+                stmt.fusion_type = Some(fusion_tok.text.to_string());
                 self.advance()?;
             }
             if self.peek()?.kind == TokenKind::From {
@@ -138,47 +63,10 @@ impl<'a> Parser<'a> {
 
     fn parse_query_body(
         &mut self,
-        existing_ctes: Option<Vec<CTE<'a>>>,
-    ) -> Result<Box<QueryStmt<'a>>, QqlError> {
-        let mut stmt = QueryStmt {
-            collection: None,
-            mode: QueryMode::Nearest,
-            query_type: QueryType::Dense,
-            query_text: None,
-            query_id: None,
-            raw_vector: Vec::new(),
-            positive_ids: Vec::new(),
-            negative_ids: Vec::new(),
-            context_pairs: Vec::new(),
-            target: None,
-            order_by_field: None,
-            order_by_asc: None,
-            limit: 10,
-            offset: 0,
-            score_threshold: None,
-            strategy: None,
-            query_filter: None,
-            group_by: None,
-            group_size: None,
-            with_clause: None,
-            with_payload: None,
-            with_vectors: None,
-            lookup_from: None,
-            lookup_vector: None,
-            with_lookup_collection: None,
-            using_: None,
-            model: None,
-            ctes: existing_ctes.unwrap_or_default(),
-            prefetch_refs: Vec::new(),
-            fusion_type: None,
-            rerank: false,
-            rerank_model: None,
-            formula: None,
-            formula_defaults: Vec::new(),
-            feedback_target: None,
-            feedback_items: Vec::new(),
-            feedback_strategy: None,
-        };
+        existing_ctes: Option<Vec<CTE>>,
+    ) -> Result<Box<QueryStmt>, QqlError> {
+        let mut stmt = new_default_query_stmt();
+        stmt.ctes = existing_ctes.unwrap_or_default();
 
         if self.peek()?.kind == TokenKind::Nearest {
             self.advance()?;
@@ -248,7 +136,7 @@ impl<'a> Parser<'a> {
                 stmt.mode = QueryMode::Nearest;
                 match tok.kind {
                     TokenKind::String => {
-                        stmt.query_text = Some(tok.text);
+                        stmt.query_text = Some(tok.text.to_string());
                         self.advance()?;
                     }
                     TokenKind::Integer => {
@@ -260,12 +148,13 @@ impl<'a> Parser<'a> {
                         stmt.raw_vector = vec;
                     }
                     _ => {
-                        if tok.kind == TokenKind::From
-                            || tok.kind == TokenKind::Limit
-                            || tok.kind == TokenKind::Prefetch
-                            || tok.kind == TokenKind::Eof
-                        {
-                        } else {
+                        if !matches!(
+                            tok.kind,
+                            TokenKind::From
+                                | TokenKind::Limit
+                                | TokenKind::Prefetch
+                                | TokenKind::Eof
+                        ) {
                             return Err(QqlError::syntax(
                                 "expected a string query, a point ID, a raw vector [...], or a query mode (RECOMMEND/DISCOVER/CONTEXT) after QUERY",
                                 tok.pos,
@@ -301,5 +190,47 @@ impl<'a> Parser<'a> {
         }
 
         Ok(Box::new(stmt))
+    }
+}
+
+fn new_default_query_stmt() -> QueryStmt {
+    QueryStmt {
+        collection: None,
+        mode: QueryMode::Nearest,
+        query_type: QueryType::Dense,
+        query_text: None,
+        query_id: None,
+        raw_vector: Vec::new(),
+        positive_ids: Vec::new(),
+        negative_ids: Vec::new(),
+        context_pairs: Vec::new(),
+        target: None,
+        order_by_field: None,
+        order_by_asc: None,
+        limit: 10,
+        offset: 0,
+        score_threshold: None,
+        strategy: None,
+        query_filter: None,
+        group_by: None,
+        group_size: None,
+        with_clause: None,
+        with_payload: None,
+        with_vectors: None,
+        lookup_from: None,
+        lookup_vector: None,
+        with_lookup_collection: None,
+        using_: None,
+        model: None,
+        ctes: Vec::new(),
+        prefetch_refs: Vec::new(),
+        fusion_type: None,
+        rerank: false,
+        rerank_model: None,
+        formula: None,
+        formula_defaults: Vec::new(),
+        feedback_target: None,
+        feedback_items: Vec::new(),
+        feedback_strategy: None,
     }
 }

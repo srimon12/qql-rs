@@ -8,13 +8,12 @@ use qql_core::error::QqlError;
 use crate::executor::helpers::to_point_id_static;
 
 impl Executor {
-    pub(crate) async fn do_delete(
-        &self,
-        stmt: ast::DeleteStmt<'_>,
-    ) -> Result<ExecResponse, QqlError> {
+    pub(crate) async fn do_delete(&self, stmt: ast::DeleteStmt) -> Result<ExecResponse, QqlError> {
         let mut filter = if let Some(ref f) = stmt.query_filter {
             let converter = FilterConverter::new();
-            converter.build_filter(f)?
+            converter
+                .build_filter(f)?
+                .map(crate::backend::Filter::from_json)
         } else {
             None
         };
@@ -37,8 +36,10 @@ impl Executor {
                     "match": { "value": match_val }
                 });
 
-                let mut filter_json =
-                    serde_json::to_value(&filter).unwrap_or(serde_json::json!({}));
+                let mut filter_json = filter
+                    .as_ref()
+                    .map(|f| f.as_json().clone())
+                    .unwrap_or_else(|| serde_json::json!({}));
                 if filter_json.is_null() || !filter_json.is_object() {
                     filter_json = serde_json::json!({});
                 }
@@ -50,10 +51,7 @@ impl Executor {
                     filter_json["must"] = serde_json::json!([cond]);
                 }
 
-                filter = Some(
-                    serde_json::from_value(filter_json)
-                        .map_err(|e| QqlError::runtime(e.to_string()))?,
-                );
+                filter = Some(crate::backend::Filter::from_json(filter_json));
             }
         }
 

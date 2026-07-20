@@ -277,7 +277,8 @@ pub async fn handle_dump(
     batch_size: u32,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let exec = executor(url)?;
-    let (written, skipped) = dump::dump_collection(&exec, collection, output, batch_size, "", "").await?;
+    let (written, skipped) =
+        dump::dump_collection(&exec, collection, output, batch_size, "", "").await?;
     Ok(format!(
         "Dumped collection '{}' to {} ({} written, {} skipped)",
         collection, output, written, skipped

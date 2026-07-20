@@ -12,7 +12,8 @@ pub struct FormulaNode {
     pub defaults: Vec<(String, f64)>,
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl ExecutionNode for FormulaNode {
     async fn execute(&self, state: &mut QueryState) -> Result<(), QqlError> {
         let mut defs: HashMap<String, f64> = HashMap::new();
@@ -129,7 +130,7 @@ pub fn build_expression(expr: &ast::FormulaExpr) -> Result<serde_json::Value, Qq
                     .unwrap()
                     .insert("midpoint".to_string(), serde_json::json!(m));
             }
-            let decay_key = match *kind {
+            let decay_key = match kind.as_str() {
                 "exp_decay" => "exp_decay",
                 "gauss_decay" => "gauss_decay",
                 "lin_decay" => "lin_decay",
@@ -139,7 +140,7 @@ pub fn build_expression(expr: &ast::FormulaExpr) -> Result<serde_json::Value, Qq
         }
         ast::FormulaExpr::Case { cond, then_, else_ } => {
             let cond_expr = match cond.as_ref() {
-                ast::FilterExpr::Compare { field, op: "=", value } => {
+                ast::FilterExpr::Compare { field, op, value } if op == "=" => {
                     build_match_condition_expression(field, &[value.clone()])?
                 }
                 _ => {
@@ -147,8 +148,9 @@ pub fn build_expression(expr: &ast::FormulaExpr) -> Result<serde_json::Value, Qq
                     let qdrant_filter = filter_converter
                         .build_filter(cond)?
                         .ok_or_else(|| QqlError::runtime("empty condition in CASE expression"))?;
-                    let cond_json = serde_json::to_value(&qdrant_filter)
-                        .map_err(|e| QqlError::runtime(format!("failed to serialize filter: {}", e)))?;
+                    let cond_json = serde_json::to_value(&qdrant_filter).map_err(|e| {
+                        QqlError::runtime(format!("failed to serialize filter: {}", e))
+                    })?;
                     serde_json::json!({"filter": cond_json})
                 }
             };
@@ -198,7 +200,7 @@ pub fn build_match_condition_expression(
                 let mut keywords = Vec::new();
                 for v in values {
                     match v {
-                        ast::Value::Str(s) => keywords.push(s.as_ref()),
+                        ast::Value::Str(s) => keywords.push(s.as_str()),
                         _ => return Err(QqlError::runtime("all MATCH values must be strings")),
                     }
                 }

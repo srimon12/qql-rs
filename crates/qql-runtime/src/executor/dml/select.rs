@@ -8,10 +8,7 @@ use qql_core::error::QqlError;
 use crate::executor::helpers::{clone_value, point_id_string, to_point_id_static};
 
 impl Executor {
-    pub(crate) async fn do_select(
-        &self,
-        stmt: ast::SelectStmt<'_>,
-    ) -> Result<ExecResponse, QqlError> {
+    pub(crate) async fn do_select(&self, stmt: ast::SelectStmt) -> Result<ExecResponse, QqlError> {
         let req = GetPointsReq {
             collection_name: stmt.collection.to_string(),
             point_id: clone_value(&stmt.point_id),
@@ -31,22 +28,17 @@ impl Executor {
         })
     }
 
-    pub(crate) async fn do_scroll(
-        &self,
-        stmt: ast::ScrollStmt<'_>,
-    ) -> Result<ExecResponse, QqlError> {
+    pub(crate) async fn do_scroll(&self, stmt: ast::ScrollStmt) -> Result<ExecResponse, QqlError> {
         let qdrant_filter = if let Some(ref filter) = stmt.query_filter {
             let converter = FilterConverter::new();
-            converter.build_filter(filter)?
+            converter
+                .build_filter(filter)?
+                .map(crate::backend::Filter::from_json)
         } else {
             None
         };
 
-        let after = stmt
-            .after
-            .as_ref()
-            .map(|v| to_point_id_static(v))
-            .transpose()?;
+        let after = stmt.after.as_ref().map(to_point_id_static).transpose()?;
 
         let req = ScrollPointsReq {
             collection_name: stmt.collection.to_string(),

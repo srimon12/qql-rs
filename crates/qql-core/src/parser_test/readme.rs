@@ -43,8 +43,8 @@ fn test_readme_hybrid_insert() {
             assert_eq!(
                 i.values_list,
                 vec![vec![
-                    ("text", str_val("Qdrant stores vectors")),
-                    ("topic", str_val("search")),
+                    (String::from("text"), str_val("Qdrant stores vectors")),
+                    (String::from("topic"), str_val("search")),
                 ]]
             );
         }
@@ -57,8 +57,8 @@ fn test_readme_hybrid_search() {
     let stmt = assert_parse_ok("QUERY NEAREST 'vector database' FROM docs LIMIT 5 USING HYBRID");
     match stmt {
         Stmt::Query(q) => {
-            assert_eq!(q.collection, Some("docs"));
-            assert_eq!(q.query_text, Some("vector database"));
+            assert_eq!(q.collection, Some(String::from("docs")));
+            assert_eq!(q.query_text, Some(String::from("vector database")));
             assert_eq!(q.limit, 5);
         }
         _ => panic!("expected Query stmt"),
@@ -72,12 +72,12 @@ fn test_readme_hybrid_search_with_filter() {
     );
     match stmt {
         Stmt::Query(q) => {
-            assert_eq!(q.collection, Some("notes"));
+            assert_eq!(q.collection, Some(String::from("notes")));
             assert_eq!(
                 q.query_filter,
                 Some(Box::new(FilterExpr::Compare {
-                    field: "topic",
-                    op: "=",
+                    field: String::from("topic"),
+                    op: String::from("="),
                     value: str_val("search"),
                 }))
             );
@@ -92,7 +92,7 @@ fn test_readme_hybrid_rerank_search() {
         assert_parse_ok("QUERY NEAREST 'vector database' FROM docs LIMIT 5 USING HYBRID RERANK");
     match stmt {
         Stmt::Query(q) => {
-            assert_eq!(q.collection, Some("docs"));
+            assert_eq!(q.collection, Some(String::from("docs")));
         }
         _ => panic!("expected Query stmt"),
     }
@@ -116,7 +116,7 @@ fn test_readme_delete_by_field() {
     match stmt {
         Stmt::Delete(d) => {
             assert_eq!(d.collection, "notes");
-            assert_eq!(d.field, Some("specialty"));
+            assert_eq!(d.field, Some(String::from("specialty")));
             assert_eq!(d.value, Some(str_val("search")));
         }
         _ => panic!("expected Delete stmt"),

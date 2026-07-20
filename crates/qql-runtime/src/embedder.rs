@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+#[cfg(feature = "rest")]
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -6,8 +7,19 @@ use qql_core::error::QqlError;
 
 use crate::sparse::{self, SparseVector};
 
-#[async_trait]
-pub trait Embedder: Send + Sync {
+#[cfg(not(target_arch = "wasm32"))]
+pub trait EmbedderBound: Send + Sync {}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T: Send + Sync> EmbedderBound for T {}
+
+#[cfg(target_arch = "wasm32")]
+pub trait EmbedderBound {}
+#[cfg(target_arch = "wasm32")]
+impl<T> EmbedderBound for T {}
+
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+pub trait Embedder: EmbedderBound {
     async fn embed_dense(&self, text: &str, model: &str) -> Result<Vec<f32>, QqlError>;
     async fn embed_sparse(&self, text: &str) -> Result<SparseVector, QqlError>;
 
@@ -24,23 +36,27 @@ pub trait Embedder: Send + Sync {
     }
 }
 
+#[cfg(feature = "rest")]
 #[derive(Debug, Clone, Serialize)]
 struct EmbedRequest {
     model: String,
     input: Vec<String>,
 }
 
+#[cfg(feature = "rest")]
 #[derive(Debug, Clone, Deserialize)]
 struct EmbedResponse {
     data: Vec<EmbedData>,
 }
 
+#[cfg(feature = "rest")]
 #[derive(Debug, Clone, Deserialize)]
 struct EmbedData {
     index: usize,
     embedding: Vec<f32>,
 }
 
+#[cfg(feature = "rest")]
 pub struct HttpEmbedder {
     endpoint: String,
     api_key: String,
@@ -49,6 +65,7 @@ pub struct HttpEmbedder {
     client: Client,
 }
 
+#[cfg(feature = "rest")]
 impl HttpEmbedder {
     pub fn new(
         endpoint: String,
@@ -183,7 +200,9 @@ impl HttpEmbedder {
     }
 }
 
-#[async_trait]
+#[cfg(feature = "rest")]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl Embedder for HttpEmbedder {
     async fn embed_dense(&self, text: &str, _model: &str) -> Result<Vec<f32>, QqlError> {
         let results = self.embed_batch(&[text.to_string()]).await?;

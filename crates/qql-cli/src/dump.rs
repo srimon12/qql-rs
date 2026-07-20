@@ -233,10 +233,7 @@ pub async fn dump_collection(
         after = next_after;
     }
 
-    let header = format!(
-        "-- QQL dump for {}\n-- Points: {}\n\n",
-        collection, written
-    );
+    let header = format!("-- QQL dump for {}\n-- Points: {}\n\n", collection, written);
     let footer = format!("-- Written: {}\n-- Skipped: {}\n", written, skipped);
     let final_output = format!("{}{}{}", header, body, footer);
 

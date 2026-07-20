@@ -32,12 +32,15 @@ fn test_update_payload_by_filter() {
             assert_eq!(
                 u.query_filter,
                 Some(Box::new(FilterExpr::Compare {
-                    field: "category",
-                    op: "=",
+                    field: String::from("category"),
+                    op: String::from("="),
                     value: str_val("draft"),
                 }))
             );
-            assert_eq!(u.payload, vec![("status", str_val("published"))]);
+            assert_eq!(
+                u.payload,
+                vec![(String::from("status"), str_val("published"))]
+            );
         }
         _ => panic!("expected UpdatePayload"),
     }
@@ -51,7 +54,7 @@ fn test_update_custom_named_vector_by_id() {
             assert_eq!(u.collection, "articles");
             assert_eq!(u.point_id, i64_val(42));
             assert_eq!(u.vector, vec![0.1f32, 0.2f32]);
-            assert_eq!(u.vector_name, Some("colbert"));
+            assert_eq!(u.vector_name, Some(String::from("colbert")));
         }
         _ => panic!("expected UpdateVector"),
     }
@@ -64,7 +67,7 @@ fn test_update_payload_by_id() {
         Stmt::UpdatePayload(u) => {
             assert_eq!(u.collection, "articles");
             assert_eq!(u.point_id, Some(str_val("abc-123")));
-            assert_eq!(u.payload, vec![("year", i64_val(2025))]);
+            assert_eq!(u.payload, vec![(String::from("year"), i64_val(2025))]);
         }
         _ => panic!("expected UpdatePayload"),
     }

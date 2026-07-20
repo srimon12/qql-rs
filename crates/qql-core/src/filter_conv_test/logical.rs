@@ -1,5 +1,5 @@
 use super::build;
-use qql_core::ast::{FilterExpr, Value};
+use crate::ast::{FilterExpr, Value};
 use std::boxed::Box;
 
 #[test]
@@ -7,13 +7,13 @@ fn test_and() {
     let expr = FilterExpr::And {
         operands: vec![
             FilterExpr::Compare {
-                field: "a",
-                op: "=",
+                field: String::from("a"),
+                op: String::from("="),
                 value: Value::Int(1),
             },
             FilterExpr::Compare {
-                field: "b",
-                op: "=",
+                field: String::from("b"),
+                op: String::from("="),
                 value: Value::Int(2),
             },
         ],
@@ -35,13 +35,13 @@ fn test_or() {
     let expr = FilterExpr::Or {
         operands: vec![
             FilterExpr::Compare {
-                field: "a",
-                op: "=",
+                field: String::from("a"),
+                op: String::from("="),
                 value: Value::Int(1),
             },
             FilterExpr::Compare {
-                field: "b",
-                op: "=",
+                field: String::from("b"),
+                op: String::from("="),
                 value: Value::Int(2),
             },
         ],
@@ -62,8 +62,8 @@ fn test_or() {
 fn test_not() {
     let expr = FilterExpr::Not {
         operand: Box::new(FilterExpr::Compare {
-            field: "x",
-            op: "=",
+            field: String::from("x"),
+            op: String::from("="),
             value: Value::Bool(true),
         }),
     };
@@ -85,19 +85,21 @@ fn test_logical_expressions() {
             FilterExpr::And {
                 operands: vec![
                     FilterExpr::Compare {
-                        field: "status",
-                        op: "=",
-                        value: Value::Str(std::borrow::Cow::Borrowed("active")),
+                        field: String::from("status"),
+                        op: String::from("="),
+                        value: Value::Str(String::from("active")),
                     },
                     FilterExpr::Between {
-                        field: "score",
+                        field: String::from("score"),
                         low: Value::Int(1),
                         high: Value::Int(5),
                     },
                 ],
             },
             FilterExpr::Not {
-                operand: Box::new(FilterExpr::IsNull { field: "category" }),
+                operand: Box::new(FilterExpr::IsNull {
+                    field: String::from("category"),
+                }),
             },
         ],
     };
@@ -127,21 +129,21 @@ fn test_complex_nested_expression() {
     let expr = FilterExpr::And {
         operands: vec![
             FilterExpr::Compare {
-                field: "org_id",
-                op: "=",
-                value: Value::Str(std::borrow::Cow::Borrowed("acme")),
+                field: String::from("org_id"),
+                op: String::from("="),
+                value: Value::Str(String::from("acme")),
             },
             FilterExpr::Or {
                 operands: vec![
                     FilterExpr::Compare {
-                        field: "role",
-                        op: "=",
-                        value: Value::Str(std::borrow::Cow::Borrowed("admin")),
+                        field: String::from("role"),
+                        op: String::from("="),
+                        value: Value::Str(String::from("admin")),
                     },
                     FilterExpr::Compare {
-                        field: "role",
-                        op: "=",
-                        value: Value::Str(std::borrow::Cow::Borrowed("owner")),
+                        field: String::from("role"),
+                        op: String::from("="),
+                        value: Value::Str(String::from("owner")),
                     },
                 ],
             },
@@ -167,17 +169,17 @@ fn test_complex_nested_expression() {
 #[test]
 fn test_nested() {
     let expr = FilterExpr::Nested {
-        path: "overwritten_in",
+        path: String::from("overwritten_in"),
         filter: Box::new(FilterExpr::And {
             operands: vec![
                 FilterExpr::Compare {
-                    field: "by",
-                    op: "=",
-                    value: Value::Str(std::borrow::Cow::Borrowed("root")),
+                    field: String::from("by"),
+                    op: String::from("="),
+                    value: Value::Str(String::from("root")),
                 },
                 FilterExpr::Compare {
-                    field: "seq",
-                    op: "<=",
+                    field: String::from("seq"),
+                    op: String::from("<="),
                     value: Value::Float(2.0),
                 },
             ],
@@ -207,11 +209,11 @@ fn test_nested() {
 #[test]
 fn test_nested_simple() {
     let expr = FilterExpr::Nested {
-        path: "tags",
+        path: String::from("tags"),
         filter: Box::new(FilterExpr::Compare {
-            field: "name",
-            op: "=",
-            value: Value::Str(std::borrow::Cow::Borrowed("important")),
+            field: String::from("name"),
+            op: String::from("="),
+            value: Value::Str(String::from("important")),
         }),
     };
     let filter = build(&expr);
@@ -238,11 +240,11 @@ fn test_nested_simple() {
 fn test_nested_with_must_not() {
     let expr = FilterExpr::Not {
         operand: Box::new(FilterExpr::Nested {
-            path: "overwritten_in",
+            path: String::from("overwritten_in"),
             filter: Box::new(FilterExpr::Compare {
-                field: "by",
-                op: "=",
-                value: Value::Str(std::borrow::Cow::Borrowed("root")),
+                field: String::from("by"),
+                op: String::from("="),
+                value: Value::Str(String::from("root")),
             }),
         }),
     };

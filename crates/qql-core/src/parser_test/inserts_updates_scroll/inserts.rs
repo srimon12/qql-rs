@@ -11,7 +11,10 @@ fn test_insert_simple() {
     match stmt {
         Stmt::Insert(i) => {
             assert_eq!(i.collection, "test");
-            assert_eq!(i.values_list, vec![vec![("text", str_val("hello"))]]);
+            assert_eq!(
+                i.values_list,
+                vec![vec![(String::from("text"), str_val("hello"))]]
+            );
         }
         _ => panic!("expected Insert"),
     }
@@ -26,8 +29,8 @@ fn test_insert_with_bare_keys() {
             assert_eq!(
                 i.values_list,
                 vec![make_payload(&[
-                    ("text", str_val("hello")),
-                    ("topic", str_val("search"))
+                    (String::from("text"), str_val("hello")),
+                    (String::from("topic"), str_val("search"))
                 ])]
             );
         }
@@ -44,8 +47,8 @@ fn test_insert_with_explicit_id() {
             assert_eq!(
                 i.values_list,
                 vec![make_payload(&[
-                    ("id", str_val("point-123")),
-                    ("text", str_val("hello")),
+                    (String::from("id"), str_val("point-123")),
+                    (String::from("text"), str_val("hello")),
                 ])]
             );
         }
@@ -60,7 +63,7 @@ fn test_insert_with_model() {
     match stmt {
         Stmt::Insert(i) => {
             assert_eq!(i.collection, "test");
-            assert_eq!(i.model, Some("model-name"));
+            assert_eq!(i.model, Some(String::from("model-name")));
             assert!(!i.hybrid);
         }
         _ => panic!("expected Insert"),
@@ -88,8 +91,8 @@ fn test_insert_with_hybrid_and_models() {
         Stmt::Insert(i) => {
             assert_eq!(i.collection, "test");
             assert!(i.hybrid);
-            assert_eq!(i.model, Some("dense-model"));
-            assert_eq!(i.sparse_model, Some("sparse-model"));
+            assert_eq!(i.model, Some(String::from("dense-model")));
+            assert_eq!(i.sparse_model, Some(String::from("sparse-model")));
         }
         _ => panic!("expected Insert"),
     }
@@ -104,7 +107,7 @@ fn test_insert_with_sparse_model_only() {
         Stmt::Insert(i) => {
             assert_eq!(i.collection, "test");
             assert!(i.hybrid);
-            assert_eq!(i.sparse_model, Some("sparse-model"));
+            assert_eq!(i.sparse_model, Some(String::from("sparse-model")));
         }
         _ => panic!("expected Insert"),
     }
@@ -119,8 +122,8 @@ fn test_insert_multiple_values() {
             assert_eq!(
                 i.values_list,
                 vec![
-                    vec![("text", str_val("hello"))],
-                    vec![("text", str_val("world"))],
+                    vec![(String::from("text"), str_val("hello"))],
+                    vec![(String::from("text"), str_val("world"))],
                 ]
             );
         }
@@ -177,7 +180,7 @@ fn test_insert_embed_with_sparse() {
             assert_eq!(i.embed_directives.len(), 1);
             assert_eq!(i.embed_directives[0].source_field, "title");
             assert_eq!(i.embed_directives[0].target_vector, "sparse_title");
-            assert_eq!(i.embed_directives[0].sparse_model, Some(""));
+            assert_eq!(i.embed_directives[0].sparse_model, Some(String::from("")));
         }
         _ => panic!("expected Insert"),
     }
@@ -194,7 +197,10 @@ fn test_insert_embed_with_explicit_model() {
             assert_eq!(i.embed_directives.len(), 1);
             assert_eq!(i.embed_directives[0].source_field, "title");
             assert_eq!(i.embed_directives[0].target_vector, "dense_title");
-            assert_eq!(i.embed_directives[0].model, Some("custom-model"));
+            assert_eq!(
+                i.embed_directives[0].model,
+                Some(String::from("custom-model"))
+            );
         }
         _ => panic!("expected Insert"),
     }
@@ -214,7 +220,7 @@ fn test_insert_embed_mixed_dense_sparse() {
             assert_eq!(i.embed_directives[0].sparse_model, None);
             assert_eq!(i.embed_directives[1].source_field, "title");
             assert_eq!(i.embed_directives[1].target_vector, "sparse_title");
-            assert_eq!(i.embed_directives[1].sparse_model, Some(""));
+            assert_eq!(i.embed_directives[1].sparse_model, Some(String::from("")));
         }
         _ => panic!("expected Insert"),
     }

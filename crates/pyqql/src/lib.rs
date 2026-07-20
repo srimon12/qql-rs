@@ -1,11 +1,9 @@
-use std::borrow::Cow;
-
 use pyo3::exceptions::PySyntaxError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList};
-use qql::offline;
 use qql_core::ast::{self, Value};
 use qql_core::lexer::Lexer;
+use qql_core::offline;
 use qql_core::parser::Parser;
 
 #[pyfunction]
@@ -289,7 +287,7 @@ fn pyqql(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     Ok(())
 }
 
-fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value<'static>> {
+fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
     if value.is_none() {
         return Ok(Value::Null);
     }
@@ -303,7 +301,7 @@ fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value<'static>> {
         return Ok(Value::Float(v));
     }
     if let Ok(s) = value.extract::<String>() {
-        return Ok(Value::Str(Cow::Owned(s)));
+        return Ok(Value::Str(s));
     }
     if let Ok(list) = value.downcast::<PyList>() {
         let mut items = Vec::with_capacity(list.len());
@@ -318,7 +316,7 @@ fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value<'static>> {
             let key = key
                 .extract::<String>()
                 .map_err(|_| PySyntaxError::new_err("dict keys must be strings"))?;
-            items.push((Cow::Owned(key), py_to_value(&item)?));
+            items.push((key, py_to_value(&item)?));
         }
         return Ok(Value::Dict(items));
     }

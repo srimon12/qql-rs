@@ -4,9 +4,7 @@ mod tests {
     use std::fs;
     use std::path::Path;
 
-    use crate::pipeline::{
-        QueryPointsRequest, QueryVariant, WithPayload,
-    };
+    use crate::pipeline::{QueryPointsRequest, QueryVariant, WithPayload};
     use crate::rest::query_request_json;
 
     #[test]
@@ -18,7 +16,8 @@ mod tests {
         }
 
         let content = fs::read_to_string(path).expect("failed to read openapi.json");
-        let openapi: serde_json::Value = serde_json::from_str(&content).expect("invalid openapi.json");
+        let openapi: serde_json::Value =
+            serde_json::from_str(&content).expect("invalid openapi.json");
 
         // Validate sample request JSON structure
         let req_sample = QueryPointsRequest {
@@ -84,7 +83,7 @@ mod tests {
         let req_doc = QueryPointsRequest {
             collection_name: "test_coll".to_string(),
             query: Some(QueryVariant::Document {
-                text: "stroke".to_string(),
+                text: String::from("stroke").to_string(),
                 model: String::new(),
                 options: HashMap::new(),
             }),
@@ -109,14 +108,15 @@ mod tests {
 
         let expr = qql_core::ast::FormulaExpr::Case {
             cond: Box::new(qql_core::ast::FilterExpr::Compare {
-                field: "priority",
-                op: "=",
-                value: qql_core::ast::Value::Str(std::borrow::Cow::Borrowed("high")),
+                field: String::from("priority"),
+                op: String::from("="),
+                value: qql_core::ast::Value::Str(String::from("high")),
             }),
             then_: Box::new(qql_core::ast::FormulaExpr::Constant { value: 2.0 }),
             else_: Box::new(qql_core::ast::FormulaExpr::Constant { value: 1.0 }),
         };
-        let formula_json = crate::pipeline::formula_nodes::build_expression(&expr).expect("failed to build CASE expression");
+        let formula_json = crate::pipeline::formula_nodes::build_expression(&expr)
+            .expect("failed to build CASE expression");
         let req_case = QueryPointsRequest {
             collection_name: "test_coll".to_string(),
             query: Some(QueryVariant::Formula {

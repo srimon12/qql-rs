@@ -10,7 +10,7 @@ use super::Parser;
 impl<'a> Parser<'a> {
     // ── ALTER ───────────────────────────────────────────────────
 
-    pub fn parse_alter(&mut self) -> Result<Stmt<'a>, QqlError> {
+    pub fn parse_alter(&mut self) -> Result<Stmt, QqlError> {
         self.advance()?;
         self.expect(TokenKind::Collection)?;
         let collection = self.parse_identifier()?;
@@ -23,7 +23,7 @@ impl<'a> Parser<'a> {
 
     // ── DROP ────────────────────────────────────────────────────
 
-    pub fn parse_drop(&mut self) -> Result<Stmt<'a>, QqlError> {
+    pub fn parse_drop(&mut self) -> Result<Stmt, QqlError> {
         self.advance()?;
         self.expect(TokenKind::Collection)?;
         let collection = self.parse_identifier()?;
@@ -34,7 +34,7 @@ impl<'a> Parser<'a> {
 
     // ── SHOW ────────────────────────────────────────────────────
 
-    pub fn parse_show(&mut self) -> Result<Stmt<'a>, QqlError> {
+    pub fn parse_show(&mut self) -> Result<Stmt, QqlError> {
         self.advance()?;
         if self.peek()?.kind == TokenKind::Collections {
             self.advance()?;
@@ -56,19 +56,18 @@ impl<'a> Parser<'a> {
 
     // ── CREATE INDEX ────────────────────────────────────────────
 
-    pub fn parse_create_index(&mut self) -> Result<Stmt<'a>, QqlError> {
+    pub fn parse_create_index(&mut self) -> Result<Stmt, QqlError> {
         self.advance()?;
         self.expect(TokenKind::On)?;
         self.expect(TokenKind::Collection)?;
         let collection = self.parse_identifier()?;
         self.expect(TokenKind::For)?;
         let field = self.parse_identifier()?;
-        let mut field_type = alloc::borrow::Cow::Borrowed("keyword");
+        let mut field_type = String::from("keyword");
         if self.peek()?.kind == TokenKind::Type {
             self.advance()?;
             let type_tok = self.expect(TokenKind::Identifier)?;
-            let lowered = type_tok.text.to_ascii_lowercase();
-            field_type = alloc::borrow::Cow::Owned(lowered);
+            field_type = type_tok.text.to_ascii_lowercase();
         }
         let mut options = Vec::new();
         if self.peek()?.kind == TokenKind::With {

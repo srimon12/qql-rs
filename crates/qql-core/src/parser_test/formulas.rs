@@ -16,7 +16,10 @@ fn test_formula_arithmetic() {
             assert!(q.formula.is_some());
             assert_eq!(
                 q.formula_defaults,
-                vec![("popularity", float_val(1.0)), ("rating", float_val(0.0))]
+                vec![
+                    (String::from("popularity"), float_val(1.0)),
+                    (String::from("rating"), float_val(0.0))
+                ]
             );
             match q.formula.as_ref().unwrap().as_ref() {
                 FormulaExpr::Sum { left, right } => {

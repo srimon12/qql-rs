@@ -12,7 +12,7 @@ QUERY 'search' FROM docs LIMIT 10 PREFETCH (p1, p2) FUSION RRF WITH (rrf_k = 10,
     let stmt = assert_parse_ok(input);
     match stmt {
         Stmt::Query(q) => {
-            assert_eq!(q.collection, Some("docs"));
+            assert_eq!(q.collection, Some(String::from("docs")));
             assert_eq!(q.limit, 10);
             assert_eq!(q.ctes.len(), 2);
             assert_eq!(q.ctes[0].name, "p1");
@@ -20,7 +20,7 @@ QUERY 'search' FROM docs LIMIT 10 PREFETCH (p1, p2) FUSION RRF WITH (rrf_k = 10,
             assert_eq!(q.prefetch_refs.len(), 2);
             assert_eq!(q.prefetch_refs[0].cte_name, "p1");
             assert_eq!(q.prefetch_refs[1].cte_name, "p2");
-            assert_eq!(q.fusion_type, Some("RRF"));
+            assert_eq!(q.fusion_type, Some(String::from("RRF")));
             let wc = q.with_clause.as_ref().unwrap();
             assert_eq!(wc.rrf_k, Some(10));
             assert_eq!(wc.rrf_weights, vec![0.7f32, 0.3f32]);
@@ -51,7 +51,7 @@ fn test_query_prefetch_fusion_without_prefetch() {
     let stmt = assert_parse_ok("QUERY 'test' FROM docs FUSION RRF");
     match stmt {
         Stmt::Query(q) => {
-            assert_eq!(q.fusion_type, Some("RRF"));
+            assert_eq!(q.fusion_type, Some(String::from("RRF")));
         }
         _ => panic!("expected Query stmt"),
     }
@@ -87,7 +87,7 @@ fn test_query_prefetch_fusion_dbsf() {
     let stmt = assert_parse_ok("QUERY 'test' FROM docs USING HYBRID FUSION DBSF");
     match stmt {
         Stmt::Query(q) => {
-            assert_eq!(q.fusion_type, Some("DBSF"));
+            assert_eq!(q.fusion_type, Some(String::from("DBSF")));
         }
         _ => panic!("expected Query stmt"),
     }
@@ -148,8 +148,14 @@ QUERY 'search' FROM docs LIMIT 10 PREFETCH (a LOOKUP FROM external_col VECTOR 'd
         Stmt::Query(q) => {
             assert_eq!(q.prefetch_refs.len(), 1);
             assert_eq!(q.prefetch_refs[0].cte_name, "a");
-            assert_eq!(q.prefetch_refs[0].lookup_from, Some("external_col"));
-            assert_eq!(q.prefetch_refs[0].lookup_vector, Some("dense_vec"));
+            assert_eq!(
+                q.prefetch_refs[0].lookup_from,
+                Some(String::from("external_col"))
+            );
+            assert_eq!(
+                q.prefetch_refs[0].lookup_vector,
+                Some(String::from("dense_vec"))
+            );
         }
         _ => panic!("expected Query stmt"),
     }

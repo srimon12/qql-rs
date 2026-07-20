@@ -24,8 +24,9 @@ pub use query_nodes::{
     RelevanceFeedbackNode, RerankNode, SampleNode,
 };
 
-#[async_trait]
-pub trait ExecutionNode: Send + Sync {
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+pub trait ExecutionNode: crate::client::QdrantOpsBound {
     async fn execute(&self, state: &mut QueryState) -> Result<(), QqlError>;
 }
 
@@ -152,7 +153,10 @@ impl serde::Serialize for QueryVariant {
                 } else {
                     let mut doc_map = serde_json::Map::new();
                     doc_map.insert("text".to_string(), serde_json::Value::String(text.clone()));
-                    doc_map.insert("model".to_string(), serde_json::Value::String(model.clone()));
+                    doc_map.insert(
+                        "model".to_string(),
+                        serde_json::Value::String(model.clone()),
+                    );
                     map.serialize_entry("nearest", &serde_json::Value::Object(doc_map))?;
                 }
                 map.end()

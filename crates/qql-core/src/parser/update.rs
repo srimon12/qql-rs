@@ -8,7 +8,7 @@ use crate::token::TokenKind;
 use super::Parser;
 
 impl<'a> Parser<'a> {
-    pub fn parse_update(&mut self) -> Result<Stmt<'a>, QqlError> {
+    pub fn parse_update(&mut self) -> Result<Stmt, QqlError> {
         self.advance()?;
         let collection = self.parse_identifier()?;
         self.expect(TokenKind::Set)?;
@@ -16,11 +16,11 @@ impl<'a> Parser<'a> {
         match self.peek()?.kind {
             TokenKind::Vector => {
                 self.advance()?;
-                let mut vector_name: Option<&'a str> = None;
+                let mut vector_name: Option<String> = None;
                 let tok = self.peek()?;
                 if tok.kind == TokenKind::String || tok.kind == TokenKind::Identifier {
-                    let name_tok = self.advance()?;
-                    vector_name = Some(name_tok.text);
+                    let name_val = self.parse_identifier()?;
+                    vector_name = Some(name_val);
                 }
                 self.expect(TokenKind::Equals)?;
                 let vector_value = self.parse_value()?;
@@ -80,7 +80,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse_delete(&mut self) -> Result<Stmt<'a>, QqlError> {
+    pub fn parse_delete(&mut self) -> Result<Stmt, QqlError> {
         self.advance()?;
         self.expect(TokenKind::From)?;
         let collection = self.parse_identifier()?;
@@ -90,9 +90,9 @@ impl<'a> Parser<'a> {
         let saved = self.save_pos();
         if let Ok(query_filter) = self.parse_filter_expr() {
             if let FilterExpr::Compare { field, op, value } = &query_filter {
-                if *op == "=" {
+                if op == "=" {
                     let value = value.clone();
-                    if *field == "id" {
+                    if field == "id" {
                         return Ok(Stmt::Delete(Box::new(DeleteStmt {
                             collection,
                             point_id: Some(value),
@@ -101,11 +101,10 @@ impl<'a> Parser<'a> {
                             query_filter: None,
                         })));
                     }
-                    let field_str = *field;
                     return Ok(Stmt::Delete(Box::new(DeleteStmt {
                         collection,
                         point_id: None,
-                        field: Some(field_str),
+                        field: Some(field.clone()),
                         value: Some(value),
                         query_filter: None,
                     })));

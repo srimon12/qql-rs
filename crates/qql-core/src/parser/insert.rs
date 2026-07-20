@@ -1,20 +1,20 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use crate::ast::{EmbedDirective, InsertStmt, Stmt, Value};
+use crate::ast::{EmbedDirective, InsertStmt, Stmt};
 use crate::error::QqlError;
 use crate::token::TokenKind;
 
 use super::{ascii_equal, Parser};
 
 impl<'a> Parser<'a> {
-    pub fn parse_insert(&mut self) -> Result<Stmt<'a>, QqlError> {
+    pub fn parse_insert(&mut self) -> Result<Stmt, QqlError> {
         self.advance()?;
         self.expect(TokenKind::Into)?;
         let collection = self.parse_identifier()?;
         self.expect(TokenKind::Values)?;
 
-        let mut values_list: Vec<Vec<(&'a str, Value<'a>)>> = Vec::new();
+        let mut values_list: Vec<Vec<(String, crate::ast::Value)>> = Vec::new();
         loop {
             let dict = self.parse_payload_dict()?;
             values_list.push(dict);
@@ -55,7 +55,7 @@ impl<'a> Parser<'a> {
         })))
     }
 
-    pub fn parse_embed_clause(&mut self) -> Result<Vec<EmbedDirective<'a>>, QqlError> {
+    pub fn parse_embed_clause(&mut self) -> Result<Vec<EmbedDirective>, QqlError> {
         self.advance()?;
 
         let mut directives = Vec::new();
@@ -78,11 +78,11 @@ impl<'a> Parser<'a> {
                     let sm = self.parse_optional_model_string()?;
                     dir.sparse_model = match sm {
                         Some(m) => Some(m),
-                        None => Some(""), // mark as sparse directive
+                        None => Some(String::new()), // mark as sparse directive
                     };
                 } else if self.peek()?.kind == TokenKind::Model {
                     self.advance()?;
-                    let m = self.parse_string_ptr()?;
+                    let m = self.parse_string()?;
                     dir.model = Some(m);
                 }
             }

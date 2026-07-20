@@ -6,8 +6,8 @@ use qql_core::error::QqlError;
 
 use crate::executor::helpers::value_to_json;
 
-pub(crate) fn extract_point_id<'a>(row: &[(&'a str, Value<'a>)]) -> Result<PointId, QqlError> {
-    let id_val = row.iter().find(|(k, _)| *k == "id");
+pub(crate) fn extract_point_id(row: &[(String, Value)]) -> Result<PointId, QqlError> {
+    let id_val = row.iter().find(|(k, _)| k == "id");
     match id_val {
         Some((_, Value::Int(i))) => {
             if *i < 0 {
@@ -20,7 +20,7 @@ pub(crate) fn extract_point_id<'a>(row: &[(&'a str, Value<'a>)]) -> Result<Point
             if let Ok(num) = s.parse::<u64>() {
                 Ok(PointId::Num(num))
             } else {
-                Ok(PointId::Uuid(s.to_string()))
+                Ok(PointId::Uuid(s.clone()))
             }
         }
         Some((_, Value::Float(f))) => {
@@ -43,7 +43,7 @@ pub(crate) fn is_vector_key(key: &str) -> bool {
     key == "vector" || key == "_v" || key.starts_with("_v_")
 }
 
-pub(crate) fn has_vector_keys(values_list: &[Vec<(&str, Value<'_>)>]) -> bool {
+pub(crate) fn has_vector_keys(values_list: &[Vec<(String, Value)>]) -> bool {
     for row in values_list {
         if row.iter().any(|(k, _)| is_vector_key(k)) {
             return true;
@@ -53,27 +53,26 @@ pub(crate) fn has_vector_keys(values_list: &[Vec<(&str, Value<'_>)>]) -> bool {
 }
 
 pub(crate) fn extract_provided_vectors(
-    values_list: &[Vec<(&str, Value<'_>)>],
+    values_list: &[Vec<(String, Value)>],
 ) -> Result<Vec<Option<serde_json::Value>>, QqlError> {
     let mut batch = Vec::with_capacity(values_list.len());
     for row in values_list {
         let mut vectors = serde_json::Map::new();
         for (k, v) in row {
-            let key = *k;
-            if !is_vector_key(key) {
+            if !is_vector_key(k) {
                 continue;
             }
-            let vec_name = if key == "vector" || key == "_v" {
+            let vec_name = if k == "vector" || k == "_v" {
                 "" // unnamed single vector
             } else {
-                key.strip_prefix("_v_").unwrap_or(key)
+                k.strip_prefix("_v_").unwrap_or(k)
             };
 
             match v {
                 Value::Dict(items) => {
                     // Named vectors: {"dense": [...], "sparse": {...}}
                     for (nk, nv) in items {
-                        vectors.insert(nk.to_string(), value_to_json(nv));
+                        vectors.insert(nk.clone(), value_to_json(nv));
                     }
                 }
                 Value::List(_items) => {

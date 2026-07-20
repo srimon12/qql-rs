@@ -13,8 +13,8 @@ fn test_filter_equals() {
             assert_eq!(
                 s.query_filter,
                 Some(Box::new(FilterExpr::Compare {
-                    field: "field",
-                    op: "=",
+                    field: String::from("field"),
+                    op: String::from("="),
                     value: str_val("value"),
                 }))
             );
@@ -31,8 +31,8 @@ fn test_filter_not_equals() {
             assert_eq!(
                 s.query_filter,
                 Some(Box::new(FilterExpr::Compare {
-                    field: "field",
-                    op: "!=",
+                    field: String::from("field"),
+                    op: String::from("!="),
                     value: str_val("value"),
                 }))
             );
@@ -49,8 +49,8 @@ fn test_filter_greater_than() {
             assert_eq!(
                 s.query_filter,
                 Some(Box::new(FilterExpr::Compare {
-                    field: "count",
-                    op: ">",
+                    field: String::from("count"),
+                    op: String::from(">"),
                     value: i64_val(5),
                 }))
             );
@@ -67,8 +67,8 @@ fn test_filter_greater_than_or_equals() {
             assert_eq!(
                 s.query_filter,
                 Some(Box::new(FilterExpr::Compare {
-                    field: "count",
-                    op: ">=",
+                    field: String::from("count"),
+                    op: String::from(">="),
                     value: i64_val(5),
                 }))
             );
@@ -85,8 +85,8 @@ fn test_filter_less_than() {
             assert_eq!(
                 s.query_filter,
                 Some(Box::new(FilterExpr::Compare {
-                    field: "count",
-                    op: "<",
+                    field: String::from("count"),
+                    op: String::from("<"),
                     value: i64_val(10),
                 }))
             );
@@ -103,8 +103,8 @@ fn test_filter_less_than_or_equals() {
             assert_eq!(
                 s.query_filter,
                 Some(Box::new(FilterExpr::Compare {
-                    field: "count",
-                    op: "<=",
+                    field: String::from("count"),
+                    op: String::from("<="),
                     value: i64_val(10),
                 }))
             );
@@ -121,8 +121,8 @@ fn test_filter_equals_integer() {
             assert_eq!(
                 s.query_filter,
                 Some(Box::new(FilterExpr::Compare {
-                    field: "count",
-                    op: "=",
+                    field: String::from("count"),
+                    op: String::from("="),
                     value: i64_val(42),
                 }))
             );
@@ -139,8 +139,8 @@ fn test_filter_equals_float() {
             assert_eq!(
                 s.query_filter,
                 Some(Box::new(FilterExpr::Compare {
-                    field: "score",
-                    op: "=",
+                    field: String::from("score"),
+                    op: String::from("="),
                     value: float_val(12.34),
                 }))
             );

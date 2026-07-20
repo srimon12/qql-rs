@@ -11,7 +11,8 @@ pub struct DenseEmbedNode {
     pub as_prefetch: bool,
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl ExecutionNode for DenseEmbedNode {
     async fn execute(&self, state: &mut QueryState) -> Result<(), QqlError> {
         let query: QueryVariant;
@@ -101,7 +102,8 @@ pub struct RawVectorNode {
     pub limit: u64,
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl ExecutionNode for RawVectorNode {
     async fn execute(&self, _state: &mut QueryState) -> Result<(), QqlError> {
         let raw: Vec<f32> = self.vector.iter().map(|v| *v as f32).collect();
@@ -136,7 +138,8 @@ pub struct SparseEmbedNode {
     pub as_prefetch: bool,
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl ExecutionNode for SparseEmbedNode {
     async fn execute(&self, state: &mut QueryState) -> Result<(), QqlError> {
         if state.has_mmr && !self.as_prefetch {

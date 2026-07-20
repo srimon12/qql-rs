@@ -1,13 +1,13 @@
 use super::build;
+use crate::ast::{FilterExpr, Value};
 use crate::filter_conv::FilterConverter;
-use qql_core::ast::{FilterExpr, Value};
 
 #[test]
 fn test_equals_string() {
     let expr = FilterExpr::Compare {
-        field: "status",
-        op: "=",
-        value: Value::Str(std::borrow::Cow::Borrowed("active")),
+        field: String::from("status"),
+        op: String::from("="),
+        value: Value::Str(String::from("active")),
     };
     let filter = build(&expr);
     assert_eq!(
@@ -26,8 +26,8 @@ fn test_equals_string() {
 #[test]
 fn test_equals_int() {
     let expr = FilterExpr::Compare {
-        field: "count",
-        op: "=",
+        field: String::from("count"),
+        op: String::from("="),
         value: Value::Int(42),
     };
     let filter = build(&expr);
@@ -47,8 +47,8 @@ fn test_equals_int() {
 #[test]
 fn test_equals_float() {
     let expr = FilterExpr::Compare {
-        field: "score",
-        op: "=",
+        field: String::from("score"),
+        op: String::from("="),
         value: Value::Float(12.34),
     };
     let filter = build(&expr);
@@ -71,8 +71,8 @@ fn test_equals_float() {
 #[test]
 fn test_equals_bool() {
     let expr = FilterExpr::Compare {
-        field: "is_active",
-        op: "=",
+        field: String::from("is_active"),
+        op: String::from("="),
         value: Value::Bool(true),
     };
     let filter = build(&expr);
@@ -92,9 +92,9 @@ fn test_equals_bool() {
 #[test]
 fn test_not_equals_string() {
     let expr = FilterExpr::Compare {
-        field: "status",
-        op: "!=",
-        value: Value::Str(std::borrow::Cow::Borrowed("archived")),
+        field: String::from("status"),
+        op: String::from("!="),
+        value: Value::Str(String::from("archived")),
     };
     let filter = build(&expr);
     assert_eq!(
@@ -113,8 +113,8 @@ fn test_not_equals_string() {
 #[test]
 fn test_not_equals_int() {
     let expr = FilterExpr::Compare {
-        field: "count",
-        op: "!=",
+        field: String::from("count"),
+        op: String::from("!="),
         value: Value::Int(7),
     };
     let filter = build(&expr);
@@ -134,8 +134,8 @@ fn test_not_equals_int() {
 #[test]
 fn test_not_equals_float() {
     let expr = FilterExpr::Compare {
-        field: "score",
-        op: "!=",
+        field: String::from("score"),
+        op: String::from("!="),
         value: Value::Float(1.5),
     };
     let filter = build(&expr);
@@ -158,8 +158,8 @@ fn test_not_equals_float() {
 #[test]
 fn test_not_equals_bool() {
     let expr = FilterExpr::Compare {
-        field: "is_active",
-        op: "!=",
+        field: String::from("is_active"),
+        op: String::from("!="),
         value: Value::Bool(false),
     };
     let filter = build(&expr);
@@ -179,8 +179,8 @@ fn test_not_equals_bool() {
 #[test]
 fn test_greater_than() {
     let expr = FilterExpr::Compare {
-        field: "age",
-        op: ">",
+        field: String::from("age"),
+        op: String::from(">"),
         value: Value::Int(18),
     };
     let filter = build(&expr);
@@ -200,8 +200,8 @@ fn test_greater_than() {
 #[test]
 fn test_greater_than_equal() {
     let expr = FilterExpr::Compare {
-        field: "age",
-        op: ">=",
+        field: String::from("age"),
+        op: String::from(">="),
         value: Value::Int(18),
     };
     let filter = build(&expr);
@@ -221,8 +221,8 @@ fn test_greater_than_equal() {
 #[test]
 fn test_less_than() {
     let expr = FilterExpr::Compare {
-        field: "price",
-        op: "<",
+        field: String::from("price"),
+        op: String::from("<"),
         value: Value::Float(100.0),
     };
     let filter = build(&expr);
@@ -242,8 +242,8 @@ fn test_less_than() {
 #[test]
 fn test_less_than_equal() {
     let expr = FilterExpr::Compare {
-        field: "price",
-        op: "<=",
+        field: String::from("price"),
+        op: String::from("<="),
         value: Value::Float(100.0),
     };
     let filter = build(&expr);
@@ -263,7 +263,7 @@ fn test_less_than_equal() {
 #[test]
 fn test_between() {
     let expr = FilterExpr::Between {
-        field: "age",
+        field: String::from("age"),
         low: Value::Int(18),
         high: Value::Int(65),
     };
@@ -287,7 +287,7 @@ fn test_between() {
 #[test]
 fn test_is_null() {
     let expr = FilterExpr::IsNull {
-        field: "deleted_at",
+        field: String::from("deleted_at"),
     };
     let filter = build(&expr);
     assert_eq!(
@@ -304,7 +304,9 @@ fn test_is_null() {
 
 #[test]
 fn test_is_not_null() {
-    let expr = FilterExpr::IsNotNull { field: "email" };
+    let expr = FilterExpr::IsNotNull {
+        field: String::from("email"),
+    };
     let filter = build(&expr);
     assert_eq!(
         filter,
@@ -318,7 +320,9 @@ fn test_is_not_null() {
 
 #[test]
 fn test_is_empty() {
-    let expr = FilterExpr::IsEmpty { field: "tags" };
+    let expr = FilterExpr::IsEmpty {
+        field: String::from("tags"),
+    };
     let filter = build(&expr);
     assert_eq!(
         filter,
@@ -334,7 +338,9 @@ fn test_is_empty() {
 
 #[test]
 fn test_is_not_empty() {
-    let expr = FilterExpr::IsNotEmpty { field: "tags" };
+    let expr = FilterExpr::IsNotEmpty {
+        field: String::from("tags"),
+    };
     let filter = build(&expr);
     assert_eq!(
         filter,
@@ -349,8 +355,8 @@ fn test_is_not_empty() {
 #[test]
 fn test_basic_conversion() {
     let expr = FilterExpr::Compare {
-        field: "x",
-        op: "=",
+        field: String::from("x"),
+        op: String::from("="),
         value: Value::Int(0),
     };
     let result = FilterConverter.build_filter(&expr);
@@ -359,7 +365,9 @@ fn test_basic_conversion() {
 
 #[test]
 fn test_has_vector() {
-    let expr = FilterExpr::HasVector { name: "my_vector" };
+    let expr = FilterExpr::HasVector {
+        name: String::from("my_vector"),
+    };
     let filter = build(&expr);
     assert_eq!(
         filter,
@@ -376,8 +384,8 @@ fn test_has_vector() {
 #[test]
 fn test_values_count() {
     let expr = FilterExpr::ValuesCount {
-        field: "tags",
-        op: ">",
+        field: String::from("tags"),
+        op: String::from(">"),
         count: 5,
     };
     let filter = build(&expr);
@@ -397,7 +405,7 @@ fn test_values_count() {
 #[test]
 fn test_geo_bounding_box() {
     let expr = FilterExpr::GeoBoundingBox {
-        field: "location",
+        field: String::from("location"),
         top_left_lat: 52.520711,
         top_left_lon: 13.403683,
         bottom_right_lat: 52.520712,
@@ -429,7 +437,7 @@ fn test_geo_bounding_box() {
 #[test]
 fn test_geo_radius() {
     let expr = FilterExpr::GeoRadius {
-        field: "location",
+        field: String::from("location"),
         lat: 52.520711,
         lon: 13.403683,
         radius: 1000.0,

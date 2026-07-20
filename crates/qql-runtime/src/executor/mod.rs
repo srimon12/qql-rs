@@ -58,6 +58,7 @@ impl Executor {
     /// The backend owns a reusable HTTP client. Applications that need custom
     /// proxy, TLS, tracing, or pool settings can construct `RestQdrant` with
     /// their own `reqwest::Client` and pass it to [`Self::new`] instead.
+    #[cfg(feature = "rest")]
     pub fn rest(url: impl Into<String>, api_key: Option<String>) -> Result<Self, QqlError> {
         Ok(Self::new(
             Box::new(crate::rest::RestQdrant::new(url, api_key)?),
@@ -164,11 +165,7 @@ impl Executor {
                     qql_core::ast::QueryMode::Sample => "SAMPLE",
                     qql_core::ast::QueryMode::RelevanceFeedback => "RELEVANCE FEEDBACK",
                 };
-                let coll = q
-                    .collection
-                    .as_ref()
-                    .map(|c| c.as_ref())
-                    .unwrap_or("<none>");
+                let coll: &str = q.collection.as_deref().unwrap_or("<none>");
                 if !mode_str.is_empty() {
                     plan.push_str(&format!(
                         "Statement: QUERY {} FROM {} LIMIT {}\n",
@@ -288,7 +285,7 @@ impl Executor {
         })
     }
 
-    pub fn parse_query(query: &str) -> Result<Stmt<'_>, QqlError> {
+    pub fn parse_query(query: &str) -> Result<Stmt, QqlError> {
         parser::Parser::parse(query)
     }
 
@@ -297,13 +294,13 @@ impl Executor {
         self.execute_node(stmt).await
     }
 
-    pub async fn execute_node(&self, stmt: Stmt<'_>) -> Result<ExecResponse, QqlError> {
+    pub async fn execute_node(&self, stmt: Stmt) -> Result<ExecResponse, QqlError> {
         match stmt {
             Stmt::ShowCollections => self.do_show_collections().await,
-            Stmt::ShowCollection(collection) => self.do_show_collection(collection).await,
+            Stmt::ShowCollection(collection) => self.do_show_collection(&collection).await,
             Stmt::CreateCollection(n) => self.do_create_collection(*n).await,
             Stmt::AlterCollection(n) => self.do_alter_collection(*n).await,
-            Stmt::DropCollection(n) => self.do_drop_collection(n.collection).await,
+            Stmt::DropCollection(n) => self.do_drop_collection(&n.collection).await,
             Stmt::Insert(n) => self.do_insert(*n).await,
             Stmt::Select(n) => self.do_select(*n).await,
             Stmt::Scroll(n) => self.do_scroll(*n).await,
@@ -342,7 +339,7 @@ impl Executor {
 
     pub async fn execute_batch_nodes(
         &self,
-        stmts: Vec<Stmt<'_>>,
+        stmts: Vec<Stmt>,
         stop_on_error: bool,
     ) -> Result<Vec<ExecResponse>, QqlError> {
         let mut results = Vec::with_capacity(stmts.len());
@@ -383,7 +380,7 @@ impl Executor {
 
     pub async fn query_batch_nodes(
         &self,
-        stmts: Vec<qql_core::ast::QueryStmt<'_>>,
+        stmts: Vec<qql_core::ast::QueryStmt>,
     ) -> Result<Vec<ExecResponse>, QqlError> {
         let num_statements = stmts.len();
         if num_statements == 0 {
@@ -456,10 +453,7 @@ impl Executor {
                 let formatted: Vec<SearchHit> = pts
                     .into_iter()
                     .map(|hit| {
-                        let payload_map: Option<HashMap<String, serde_json::Value>> =
-                            hit.payload.as_ref().and_then(|p| {
-                                serde_json::from_value(serde_json::to_value(p).unwrap()).ok()
-                            });
+                        let payload_map = hit.payload.clone();
                         SearchHit {
                             id: crate::executor::helpers::point_id_string(&hit.id),
                             score: hit.score,

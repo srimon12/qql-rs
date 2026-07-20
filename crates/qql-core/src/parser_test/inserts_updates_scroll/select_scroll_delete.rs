@@ -35,7 +35,7 @@ fn test_delete_by_field() {
     match stmt {
         Stmt::Delete(d) => {
             assert_eq!(d.collection, "mycollection");
-            assert_eq!(d.field, Some("status"));
+            assert_eq!(d.field, Some(String::from("status")));
             assert_eq!(d.value, Some(str_val("archived")));
         }
         _ => panic!("expected Delete"),
@@ -100,8 +100,8 @@ fn test_scroll_with_where() {
             assert_eq!(
                 s.query_filter,
                 Some(Box::new(FilterExpr::Compare {
-                    field: "status",
-                    op: "=",
+                    field: String::from("status"),
+                    op: String::from("="),
                     value: str_val("active"),
                 }))
             );
@@ -147,8 +147,8 @@ fn test_scroll_with_where_and_after() {
             assert_eq!(
                 s.query_filter,
                 Some(Box::new(FilterExpr::Compare {
-                    field: "status",
-                    op: "=",
+                    field: String::from("status"),
+                    op: String::from("="),
                     value: str_val("active"),
                 }))
             );

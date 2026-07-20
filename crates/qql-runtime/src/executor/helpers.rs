@@ -90,7 +90,7 @@ pub(crate) fn to_point_id_static(val: &ast::Value) -> Result<PointId, QqlError> 
     }
 }
 
-pub(crate) fn clone_value(val: &Value<'_>) -> Value<'static> {
+pub(crate) fn clone_value(val: &Value) -> Value {
     val.to_static()
 }
 

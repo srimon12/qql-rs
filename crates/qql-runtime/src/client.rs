@@ -77,7 +77,7 @@ pub struct CreateFieldIndexReq {
     pub collection_name: String,
     pub field: String,
     pub field_type: String,
-    pub options: HashMap<String, Value<'static>>,
+    pub options: HashMap<String, Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -97,11 +97,22 @@ pub struct CountPointsReq {
 #[derive(Debug, Clone)]
 pub struct GetPointsReq {
     pub collection_name: String,
-    pub point_id: Value<'static>,
+    pub point_id: Value,
 }
 
-#[async_trait]
-pub trait QdrantOps: Send + Sync {
+#[cfg(not(target_arch = "wasm32"))]
+pub trait QdrantOpsBound: Send + Sync {}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T: Send + Sync> QdrantOpsBound for T {}
+
+#[cfg(target_arch = "wasm32")]
+pub trait QdrantOpsBound {}
+#[cfg(target_arch = "wasm32")]
+impl<T> QdrantOpsBound for T {}
+
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+pub trait QdrantOps: QdrantOpsBound {
     async fn list_collections(&self) -> Result<Vec<String>, QqlError>;
     async fn collection_exists(&self, name: &str) -> Result<bool, QqlError>;
     async fn get_collection_info(&self, name: &str) -> Result<CollectionInfo, QqlError>;

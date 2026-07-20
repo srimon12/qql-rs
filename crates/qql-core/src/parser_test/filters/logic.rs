@@ -16,13 +16,13 @@ fn test_filter_and() {
                 Some(Box::new(FilterExpr::And {
                     operands: vec![
                         FilterExpr::Compare {
-                            field: "a",
-                            op: "=",
+                            field: String::from("a"),
+                            op: String::from("="),
                             value: i64_val(1),
                         },
                         FilterExpr::Compare {
-                            field: "b",
-                            op: "=",
+                            field: String::from("b"),
+                            op: String::from("="),
                             value: i64_val(2),
                         },
                     ],
@@ -43,13 +43,13 @@ fn test_filter_or() {
                 Some(Box::new(FilterExpr::Or {
                     operands: vec![
                         FilterExpr::Compare {
-                            field: "a",
-                            op: "=",
+                            field: String::from("a"),
+                            op: String::from("="),
                             value: i64_val(1),
                         },
                         FilterExpr::Compare {
-                            field: "b",
-                            op: "=",
+                            field: String::from("b"),
+                            op: String::from("="),
                             value: i64_val(2),
                         },
                     ],
@@ -69,8 +69,8 @@ fn test_filter_not() {
                 s.query_filter,
                 Some(Box::new(FilterExpr::Not {
                     operand: Box::new(FilterExpr::Compare {
-                        field: "a",
-                        op: "=",
+                        field: String::from("a"),
+                        op: String::from("="),
                         value: i64_val(1),
                     }),
                 }))
@@ -93,13 +93,13 @@ fn test_filter_complex() {
                         FilterExpr::And {
                             operands: vec![
                                 FilterExpr::Compare {
-                                    field: "a",
-                                    op: "=",
+                                    field: String::from("a"),
+                                    op: String::from("="),
                                     value: i64_val(1),
                                 },
                                 FilterExpr::Compare {
-                                    field: "b",
-                                    op: "=",
+                                    field: String::from("b"),
+                                    op: String::from("="),
                                     value: i64_val(2),
                                 },
                             ],
@@ -107,14 +107,14 @@ fn test_filter_complex() {
                         FilterExpr::And {
                             operands: vec![
                                 FilterExpr::Compare {
-                                    field: "c",
-                                    op: "=",
+                                    field: String::from("c"),
+                                    op: String::from("="),
                                     value: i64_val(3),
                                 },
                                 FilterExpr::Not {
                                     operand: Box::new(FilterExpr::Compare {
-                                        field: "d",
-                                        op: "=",
+                                        field: String::from("d"),
+                                        op: String::from("="),
                                         value: i64_val(4),
                                     }),
                                 },
@@ -140,20 +140,20 @@ fn test_filter_precedence() {
                         FilterExpr::And {
                             operands: vec![
                                 FilterExpr::Compare {
-                                    field: "a",
-                                    op: "=",
+                                    field: String::from("a"),
+                                    op: String::from("="),
                                     value: i64_val(1),
                                 },
                                 FilterExpr::Compare {
-                                    field: "b",
-                                    op: "=",
+                                    field: String::from("b"),
+                                    op: String::from("="),
                                     value: i64_val(2),
                                 },
                             ],
                         },
                         FilterExpr::Compare {
-                            field: "c",
-                            op: "=",
+                            field: String::from("c"),
+                            op: String::from("="),
                             value: i64_val(3),
                         },
                     ],

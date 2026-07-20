@@ -13,9 +13,7 @@ use crate::client::{
     GetPointsReq, PointGroup, QdrantOps, RetrievedPoint, ScoredPoint, ScrollPointsReq,
     SetPayloadReq, UpdateVectorsReq, UpsertPointsReq,
 };
-use crate::pipeline::{
-    PointId, QueryPointsGroupsRequest, QueryPointsRequest,
-};
+use crate::pipeline::{PointId, QueryPointsGroupsRequest, QueryPointsRequest};
 
 /// REST implementation of [`QdrantOps`].
 ///
@@ -31,11 +29,18 @@ pub struct RestQdrant {
 
 impl RestQdrant {
     pub fn new(url: impl Into<String>, api_key: Option<String>) -> Result<Self, QqlError> {
+        #[cfg(not(target_arch = "wasm32"))]
         let client = Client::builder()
             .timeout(Duration::from_secs(30))
             .connect_timeout(Duration::from_secs(10))
             .build()
             .map_err(|error| QqlError::runtime(format!("failed to build REST client: {error}")))?;
+
+        #[cfg(target_arch = "wasm32")]
+        let client = Client::builder()
+            .build()
+            .map_err(|error| QqlError::runtime(format!("failed to build REST client: {error}")))?;
+
         Self::with_client(url, api_key, client)
     }
 
@@ -109,8 +114,6 @@ fn points_result(value: Value) -> Result<Vec<ScoredPoint>, QqlError> {
         .map_err(|error| QqlError::runtime(format!("invalid Qdrant query result: {error}")))
 }
 
-
-
 fn remove_nulls(value: &mut Value) {
     match value {
         Value::Object(map) => {
@@ -148,7 +151,8 @@ pub(crate) fn grouped_query_request_json(
     Ok(body)
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl QdrantOps for RestQdrant {
     async fn list_collections(&self) -> Result<Vec<String>, QqlError> {
         let value: Value = self.call(Method::GET, "/collections", None).await?;
@@ -320,11 +324,8 @@ impl QdrantOps for RestQdrant {
         &self,
         req: Vec<QueryPointsRequest>,
     ) -> Result<Vec<Vec<ScoredPoint>>, QqlError> {
-        let mut results = Vec::with_capacity(req.len());
-        for query in req {
-            results.push(self.query(query).await?);
-        }
-        Ok(results)
+        let futures = req.into_iter().map(|query| self.query(query));
+        futures_util::future::try_join_all(futures).await
     }
 
     async fn delete(&self, req: DeletePointsReq) -> Result<(), QqlError> {

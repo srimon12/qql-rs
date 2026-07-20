@@ -48,9 +48,9 @@ impl Executor {
 
     pub(crate) async fn do_create_collection(
         &self,
-        stmt: ast::CreateCollectionStmt<'_>,
+        stmt: ast::CreateCollectionStmt,
     ) -> Result<ExecResponse, QqlError> {
-        let exists = self.client.collection_exists(stmt.collection).await?;
+        let exists = self.client.collection_exists(&stmt.collection).await?;
         if exists {
             return Ok(ExecResponse {
                 ok: true,
@@ -120,8 +120,12 @@ impl Executor {
             }
             create_req.vectors_config = Some(serde_json::Value::Object(params_map));
         } else {
-            let dense_size = self.resolve_dense_vector_size(stmt.model).await? as u64;
-            let dense_name = stmt.dense_vector.unwrap_or(super::DENSE_VECTOR_NAME);
+            let dense_size = self
+                .resolve_dense_vector_size(stmt.model.as_deref())
+                .await? as u64;
+            let dense_name = stmt
+                .dense_vector
+                .unwrap_or_else(|| super::DENSE_VECTOR_NAME.to_string());
             create_req.vectors_config = Some(serde_json::json!({
                 dense_name: {
                     "size": dense_size,
@@ -137,7 +141,9 @@ impl Executor {
             }
             create_req.sparse_vectors_config = Some(serde_json::Value::Object(sparse_map));
         } else if stmt.hybrid || stmt.rerank {
-            let sparse_name = stmt.sparse_vector.unwrap_or(super::SPARSE_VECTOR_NAME);
+            let sparse_name = stmt
+                .sparse_vector
+                .unwrap_or_else(|| super::SPARSE_VECTOR_NAME.to_string());
             create_req.sparse_vectors_config = Some(serde_json::json!({
                 sparse_name: {"modifier": "idf"}
             }));
@@ -246,8 +252,6 @@ impl Executor {
         }
 
         self.client.create_collection(create_req).await?;
-        // Wait for collection to be ready
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
         let mut message = format!("Collection '{}' created", stmt.collection);
         if stmt.vectors.is_empty() {
@@ -283,9 +287,9 @@ impl Executor {
 
     pub(crate) async fn do_alter_collection(
         &self,
-        stmt: ast::AlterCollectionStmt<'_>,
+        stmt: ast::AlterCollectionStmt,
     ) -> Result<ExecResponse, QqlError> {
-        let exists = self.client.collection_exists(stmt.collection).await?;
+        let exists = self.client.collection_exists(&stmt.collection).await?;
         if !exists {
             return Err(QqlError::runtime(format!(
                 "collection '{}' does not exist",
@@ -453,7 +457,7 @@ impl Executor {
 
     pub(crate) async fn do_create_index(
         &self,
-        stmt: ast::CreateIndexStmt<'_>,
+        stmt: ast::CreateIndexStmt,
     ) -> Result<ExecResponse, QqlError> {
         let req = crate::executor::CreateFieldIndexReq {
             collection_name: stmt.collection.to_string(),
@@ -480,8 +484,9 @@ impl Executor {
 fn extract_collection_diagnostics(name: &str, raw: &serde_json::Value) -> serde_json::Value {
     let status = raw
         .get("status")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("green");
+        .and_then(|v| v.as_str())
+        .unwrap_or("green")
+        .to_string();
     let points_count = raw
         .get("points_count")
         .and_then(serde_json::Value::as_u64)
@@ -500,13 +505,19 @@ fn extract_collection_diagnostics(name: &str, raw: &serde_json::Value) -> serde_
         .and_then(serde_json::Value::as_object)
         .map(|m| !m.is_empty())
         .unwrap_or(false);
-    let topology = if has_sparse { "hybrid" } else { "dense" };
+    let topology = if has_sparse {
+        "hybrid".to_string()
+    } else {
+        "dense".to_string()
+    };
 
-    let quantization_ptr = raw
+    let binding = raw
         .pointer("/config/quantization_config")
-        .or_else(|| raw.pointer("/config/params/quantization_config"));
+        .or_else(|| raw.pointer("/config/params/quantization_config"))
+        .and_then(|qc| qc.as_object())
+        .cloned();
 
-    let quantization = if let Some(qc) = quantization_ptr.and_then(serde_json::Value::as_object) {
+    let quantization = if let Some(qc) = binding {
         if qc.contains_key("scalar") {
             serde_json::Value::String("scalar".to_string())
         } else if qc.contains_key("product") {
@@ -529,13 +540,11 @@ fn extract_collection_diagnostics(name: &str, raw: &serde_json::Value) -> serde_
             let data_type = info
                 .get("data_type")
                 .or_else(|| info.get("type"))
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("keyword");
+                .and_then(|v| v.as_str())
+                .unwrap_or("keyword")
+                .to_string();
             let mut entry = serde_json::Map::new();
-            entry.insert(
-                "type".to_string(),
-                serde_json::Value::String(data_type.to_string()),
-            );
+            entry.insert("type".to_string(), serde_json::Value::String(data_type));
             if let Some(params) = info.get("params") {
                 entry.insert("params".to_string(), params.clone());
             }
