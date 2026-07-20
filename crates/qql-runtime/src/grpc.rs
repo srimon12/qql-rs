@@ -1227,7 +1227,6 @@ fn parse_json_quantization_config(
         let r#type = match scalar_obj
             .get("type")
             .and_then(|v| v.as_str())
-            .as_deref()
             .unwrap_or("Int8")
         {
             "Int8" => qdrant_client::qdrant::QuantizationType::Int8 as i32,
@@ -1254,7 +1253,6 @@ fn parse_json_quantization_config(
         let compression = match product_obj
             .get("compression")
             .and_then(|v| v.as_str())
-            .as_deref()
             .unwrap_or("x8")
         {
             "x8" => qdrant_client::qdrant::CompressionRatio::X8 as i32,
@@ -1291,7 +1289,6 @@ fn parse_json_quantization_config_diff(
         let r#type = match scalar_obj
             .get("type")
             .and_then(|v| v.as_str())
-            .as_deref()
             .unwrap_or("Int8")
         {
             "Int8" => qdrant_client::qdrant::QuantizationType::Int8 as i32,
@@ -1318,7 +1315,6 @@ fn parse_json_quantization_config_diff(
         let compression = match product_obj
             .get("compression")
             .and_then(|v| v.as_str())
-            .as_deref()
             .unwrap_or("x8")
         {
             "x8" => qdrant_client::qdrant::CompressionRatio::X8 as i32,

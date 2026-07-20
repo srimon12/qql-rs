@@ -100,8 +100,12 @@ impl Executor {
 
     pub fn explain(query: &str) -> Result<String, QqlError> {
         let stmt = qql_core::parser::Parser::parse(query)?;
+        Self::explain_node(&stmt)
+    }
+
+    pub fn explain_node(stmt: &Stmt) -> Result<String, QqlError> {
         let mut plan = String::new();
-        Self::explain_stmt(&stmt, &mut plan);
+        Self::explain_stmt(stmt, &mut plan);
         plan.push_str("Action: Explain-only mode (no Qdrant server)\n");
         Ok(plan)
     }

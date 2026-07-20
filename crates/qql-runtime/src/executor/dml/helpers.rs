@@ -1,10 +1,6 @@
-use serde_json;
-
 use crate::executor::PointId;
 use qql_core::ast::Value;
 use qql_core::error::QqlError;
-
-use crate::executor::helpers::value_to_json;
 
 pub(crate) fn extract_point_id(row: &[(String, Value)]) -> Result<PointId, QqlError> {
     let id_val = row.iter().find(|(k, _)| k == "id");
@@ -52,47 +48,3 @@ pub(crate) fn has_vector_keys(values_list: &[Vec<(String, Value)>]) -> bool {
     false
 }
 
-pub(crate) fn extract_provided_vectors(
-    values_list: &[Vec<(String, Value)>],
-) -> Result<Vec<Option<serde_json::Value>>, QqlError> {
-    let mut batch = Vec::with_capacity(values_list.len());
-    for row in values_list {
-        let mut vectors = serde_json::Map::new();
-        for (k, v) in row {
-            if !is_vector_key(k) {
-                continue;
-            }
-            let vec_name = if k == "vector" || k == "_v" {
-                "" // unnamed single vector
-            } else {
-                k.strip_prefix("_v_").unwrap_or(k)
-            };
-
-            match v {
-                Value::Dict(items) => {
-                    // Named vectors: {"dense": [...], "sparse": {...}}
-                    for (nk, nv) in items {
-                        vectors.insert(nk.clone(), value_to_json(nv));
-                    }
-                }
-                Value::List(_items) => {
-                    let json_val = value_to_json(v);
-                    if vec_name.is_empty() {
-                        vectors.insert(crate::executor::DENSE_VECTOR_NAME.to_string(), json_val);
-                    } else {
-                        vectors.insert(vec_name.to_string(), json_val);
-                    }
-                }
-                _ => {
-                    vectors.insert(vec_name.to_string(), value_to_json(v));
-                }
-            }
-        }
-        batch.push(if vectors.is_empty() {
-            None
-        } else {
-            Some(serde_json::Value::Object(vectors))
-        });
-    }
-    Ok(batch)
-}

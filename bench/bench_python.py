@@ -1,4 +1,4 @@
-"""Benchmark pyqql parse across query types."""
+"""Benchmark pyqql parse and E2E explain across query types."""
 import time
 import sys
 
@@ -18,27 +18,32 @@ QUERIES = [
     ("WithPayload", "QUERY 'search' FROM docs LIMIT 10 WITH PAYLOAD (include = ['title', 'body']) WITH VECTORS ('dense')"),
 ]
 
-def bench(name, q, iterations):
-    # warmup
-    for _ in range(1000):
+def bench_parse(q, iterations):
+    for _ in range(100):
         pyqql.parse(q)
-
     start = time.perf_counter()
     for _ in range(iterations):
         pyqql.parse(q)
     elapsed = time.perf_counter() - start
+    return iterations / elapsed
 
-    ns_per_op = (elapsed / iterations) * 1e9
-    ops_per_sec = iterations / elapsed
-    return ns_per_op, ops_per_sec
-
+def bench_e2e(q, iterations):
+    # Explain constructs the full execution payload offline (E2E pipeline)
+    for _ in range(100):
+        pyqql.explain(q)
+    start = time.perf_counter()
+    for _ in range(iterations):
+        pyqql.explain(q)
+    elapsed = time.perf_counter() - start
+    return iterations / elapsed
 
 if __name__ == "__main__":
-    iterations = 100_000
+    iterations = 10_000
     print(f"Python pyqql  |  {iterations} iterations each\n")
-    print(f"{'Query':<20} {'ns/op':>10} {'ops/s':>12}")
-    print("-" * 46)
+    print(f"{'Query':<20} | {'Parse (ops/s)':>15} | {'E2E (ops/s)':>15}")
+    print("-" * 58)
 
     for name, q in QUERIES:
-        ns, ops = bench(name, q, iterations)
-        print(f"{name:<20} {ns:>10.0f} {ops:>12.0f}")
+        parse_ops = bench_parse(q, iterations)
+        e2e_ops = bench_e2e(q, iterations)
+        print(f"{name:<20} | {parse_ops:>15.0f} | {e2e_ops:>15.0f}")

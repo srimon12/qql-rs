@@ -1,8 +1,7 @@
 const nativeBinding = require('./index.linux-x64-gnu.node');
 
 /**
- * Parses a QQL statement and returns the AST as native Javascript Objects.
- * This is the standard binding using `napi-rs` serialization (~60k ops/s).
+ * Parses a QQL statement and returns the AST as a Stmt class instance.
  */
 function parse(query) {
     return nativeBinding.parse(query);
@@ -45,11 +44,20 @@ function explain(query) {
     return nativeBinding.explain(query);
 }
 
+function explainStmt(stmt) {
+    return nativeBinding.explainStmt(stmt);
+}
+
 function execute(query, options) {
     return nativeBinding.execute(query, options);
 }
 
+function executeStmt(stmt, options) {
+    return nativeBinding.executeStmt(stmt, options);
+}
+
 const Client = nativeBinding.Client;
+const Stmt = nativeBinding.Stmt;
 const HttpEmbedder = nativeBinding.HttpEmbedder;
 
 module.exports = {
@@ -62,9 +70,11 @@ module.exports = {
     injectFilter,
     tokenize,
     explain,
+    explainStmt,
     execute,
+    executeStmt,
     Client,
+    Stmt,
     HttpEmbedder,
-    // raw export for native bindings if required
     nativeBinding
 };

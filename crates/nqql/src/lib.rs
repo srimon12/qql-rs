@@ -4,14 +4,58 @@ use qql_core::lexer::Lexer;
 use qql_core::offline;
 use qql_core::parser::Parser;
 
+#[napi(js_name = "Stmt")]
+#[derive(Clone)]
+pub struct NapiStmt {
+    inner: qql_core::ast::Stmt,
+}
+
 #[napi]
-pub fn parse(input: String) -> napi::Result<serde_json::Value> {
-    match Parser::parse(&input) {
-        Ok(stmt) => {
-            serde_json::to_value(&stmt).map_err(|e| napi::Error::from_reason(e.to_string()))
-        }
-        Err(e) => Err(napi::Error::from_reason(e.to_string())),
+impl NapiStmt {
+    #[napi]
+    pub fn inject_filter(
+        &mut self,
+        field: String,
+        op: String,
+        value: serde_json::Value,
+    ) -> napi::Result<()> {
+        let val = Value::from_json(value)
+            .ok_or_else(|| napi::Error::from_reason("invalid value JSON"))?;
+        ast::inject_filter(&mut self.inner, &field, &op, &val);
+        Ok(())
     }
+
+    #[napi]
+    pub fn to_object(&self) -> napi::Result<serde_json::Value> {
+        serde_json::to_value(&self.inner).map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
+    #[napi]
+    pub fn to_json(&self) -> napi::Result<String> {
+        serde_json::to_string(&self.inner).map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+}
+
+#[napi]
+pub fn parse(input: String) -> napi::Result<NapiStmt> {
+    let stmt = Parser::parse(&input).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    Ok(NapiStmt { inner: stmt })
+}
+
+#[napi]
+pub fn parse_all(input: String) -> napi::Result<Vec<NapiStmt>> {
+    let stmts = Parser::parse_all(&input).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    Ok(stmts.into_iter().map(|s| NapiStmt { inner: s }).collect())
+}
+
+#[napi]
+pub fn parse_batch(queries: Vec<String>) -> napi::Result<Vec<NapiStmt>> {
+    let mut results = Vec::with_capacity(queries.len());
+    for q in queries {
+        let stmt = Parser::parse(&q).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+        results.push(NapiStmt { inner: stmt });
+    }
+    Ok(results)
 }
 
 #[napi]
@@ -25,39 +69,11 @@ pub fn parse_json(input: String) -> napi::Result<String> {
 }
 
 #[napi]
-pub fn parse_all(input: String) -> napi::Result<serde_json::Value> {
-    match Parser::parse_all(&input) {
-        Ok(stmts) => {
-            serde_json::to_value(&stmts).map_err(|e| napi::Error::from_reason(e.to_string()))
-        }
-        Err(e) => Err(napi::Error::from_reason(e.to_string())),
-    }
-}
-
-#[napi]
-pub fn parse_batch(queries: Vec<String>) -> napi::Result<serde_json::Value> {
-    let mut results = Vec::with_capacity(queries.len());
-    for q in queries {
-        match Parser::parse(&q) {
-            Ok(stmt) => results.push(
-                serde_json::to_value(&stmt).map_err(|e| napi::Error::from_reason(e.to_string()))?,
-            ),
-            Err(e) => return Err(napi::Error::from_reason(e.to_string())),
-        }
-    }
-    serde_json::to_value(&results).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
 pub fn parse_batch_json(queries: Vec<String>) -> napi::Result<String> {
     let mut results = Vec::with_capacity(queries.len());
     for q in queries {
-        match Parser::parse(&q) {
-            Ok(stmt) => results.push(
-                serde_json::to_value(&stmt).map_err(|e| napi::Error::from_reason(e.to_string()))?,
-            ),
-            Err(e) => return Err(napi::Error::from_reason(e.to_string())),
-        }
+        let stmt = Parser::parse(&q).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+        results.push(stmt);
     }
     serde_json::to_string(&results).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
@@ -179,9 +195,11 @@ fn create_js_executor(
 
     let rt = tokio::runtime::Runtime::new().map_err(|e| napi::Error::from_reason(e.to_string()))?;
 
-    let mut config = qql::config::QqlConfig::default();
-    config.url = url_str.to_string();
-    config.secret = api_key.clone();
+    let mut config = qql::config::QqlConfig {
+        url: url_str.to_string(),
+        secret: api_key.clone(),
+        ..Default::default()
+    };
 
     if let Some(emb) = opts.get("embedder") {
         if let Some(ep) = emb.get("endpoint").and_then(|v| v.as_str()) {
@@ -266,6 +284,16 @@ impl JsClient {
     }
 
     #[napi]
+    pub fn execute_stmt(&self, stmt: &NapiStmt) -> napi::Result<serde_json::Value> {
+        let res = self
+            .runtime
+            .block_on(self.inner.execute_node(stmt.inner.clone()))
+            .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+
+        serde_json::to_value(&res).map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
+    #[napi]
     pub fn execute_json(&self, query: String) -> napi::Result<String> {
         let res = self
             .runtime
@@ -276,8 +304,24 @@ impl JsClient {
     }
 
     #[napi]
+    pub fn execute_stmt_json(&self, stmt: &NapiStmt) -> napi::Result<String> {
+        let res = self
+            .runtime
+            .block_on(self.inner.execute_node(stmt.inner.clone()))
+            .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+
+        serde_json::to_string(&res).map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
+    #[napi]
     pub fn explain(&self, query: String) -> napi::Result<String> {
         qql::executor::Executor::explain(&query)
+            .map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
+    #[napi]
+    pub fn explain_stmt(&self, stmt: &NapiStmt) -> napi::Result<String> {
+        qql::executor::Executor::explain_node(&stmt.inner)
             .map_err(|e| napi::Error::from_reason(e.to_string()))
     }
 }
@@ -292,6 +336,21 @@ pub fn execute(
 }
 
 #[napi]
+pub fn execute_stmt(
+    stmt: &NapiStmt,
+    options: Option<serde_json::Value>,
+) -> napi::Result<serde_json::Value> {
+    let client = JsClient::new(options)?;
+    client.execute_stmt(stmt)
+}
+
+#[napi]
 pub fn explain(query: String) -> napi::Result<String> {
     qql::executor::Executor::explain(&query).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn explain_stmt(stmt: &NapiStmt) -> napi::Result<String> {
+    qql::executor::Executor::explain_node(&stmt.inner)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))
 }

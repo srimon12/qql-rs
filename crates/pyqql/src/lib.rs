@@ -6,40 +6,45 @@ use qql_core::lexer::Lexer;
 use qql_core::offline;
 use qql_core::parser::Parser;
 
-#[pyfunction]
-fn parse<'py>(py: Python<'py>, input: &str) -> PyResult<Bound<'py, PyAny>> {
-    match Parser::parse(input) {
-        Ok(stmt) => {
-            pythonize::pythonize(py, &stmt).map_err(|e| PySyntaxError::new_err(e.to_string()))
-        }
-        Err(e) => Err(PySyntaxError::new_err(e.to_string())),
+#[pyclass(name = "Stmt")]
+#[derive(Clone)]
+pub struct PyStmt {
+    pub inner: qql_core::ast::Stmt,
+}
+
+#[pymethods]
+impl PyStmt {
+    fn inject_filter(&mut self, field: &str, op: &str, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        let val = py_to_value(value)?;
+        ast::inject_filter(&mut self.inner, field, op, &val);
+        Ok(())
+    }
+
+    fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        pythonize::pythonize(py, &self.inner).map_err(|e| PySyntaxError::new_err(e.to_string()))
     }
 }
 
 #[pyfunction]
-fn parse_all<'py>(py: Python<'py>, input: &str) -> PyResult<Bound<'py, PyAny>> {
-    match Parser::parse_all(input) {
-        Ok(stmts) => {
-            pythonize::pythonize(py, &stmts).map_err(|e| PySyntaxError::new_err(e.to_string()))
-        }
-        Err(e) => Err(PySyntaxError::new_err(e.to_string())),
-    }
+fn parse(input: &str) -> PyResult<PyStmt> {
+    let stmt = Parser::parse(input).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+    Ok(PyStmt { inner: stmt })
 }
 
 #[pyfunction]
-fn parse_batch<'py>(py: Python<'py>, queries: Vec<String>) -> PyResult<Bound<'py, PyAny>> {
-    let list = pyo3::types::PyList::empty(py);
+fn parse_all(input: &str) -> PyResult<Vec<PyStmt>> {
+    let stmts = Parser::parse_all(input).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+    Ok(stmts.into_iter().map(|s| PyStmt { inner: s }).collect())
+}
+
+#[pyfunction]
+fn parse_batch(queries: Vec<String>) -> PyResult<Vec<PyStmt>> {
+    let mut results = Vec::with_capacity(queries.len());
     for q in queries {
-        match Parser::parse(&q) {
-            Ok(stmt) => {
-                let obj = pythonize::pythonize(py, &stmt)
-                    .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
-                list.append(obj)?;
-            }
-            Err(e) => return Err(PySyntaxError::new_err(e.to_string())),
-        }
+        let stmt = Parser::parse(&q).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+        results.push(PyStmt { inner: stmt });
     }
-    Ok(list.into_any())
+    Ok(results)
 }
 
 #[pyfunction]
@@ -48,17 +53,26 @@ fn is_valid(input: &str) -> bool {
 }
 
 #[pyfunction]
-fn inject_filter<'py>(
-    py: Python<'py>,
-    query: &str,
+fn inject_filter(
+    query: &Bound<'_, PyAny>,
     field: &str,
     op: &str,
     value: &Bound<'_, PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
-    let value = py_to_value(value)?;
-    let mut stmt = Parser::parse(query).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
-    ast::inject_filter(&mut stmt, field, op, &value);
-    pythonize::pythonize(py, &stmt).map_err(|e| PySyntaxError::new_err(e.to_string()))
+) -> PyResult<PyStmt> {
+    let val = py_to_value(value)?;
+    if let Ok(mut py_stmt) = query.extract::<PyRefMut<'_, PyStmt>>() {
+        ast::inject_filter(&mut py_stmt.inner, field, op, &val);
+        Ok(py_stmt.clone())
+    } else if let Ok(query_str) = query.extract::<String>() {
+        let mut stmt =
+            Parser::parse(&query_str).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+        ast::inject_filter(&mut stmt, field, op, &val);
+        Ok(PyStmt { inner: stmt })
+    } else {
+        Err(pyo3::exceptions::PyTypeError::new_err(
+            "query must be a string or a Stmt object",
+        ))
+    }
 }
 
 #[pyfunction]
@@ -110,6 +124,7 @@ impl PyHttpEmbedder {
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn extract_embedder_config(
     embedder: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<(
@@ -158,9 +173,11 @@ fn create_executor(
 
     let (ep, ep_key, model, dim) = extract_embedder_config(embedder)?;
 
-    let mut config = qql::config::QqlConfig::default();
-    config.url = url.to_string();
-    config.secret = api_key.clone();
+    let mut config = qql::config::QqlConfig {
+        url: url.to_string(),
+        secret: api_key.clone(),
+        ..Default::default()
+    };
 
     if let Some(endpoint) = ep {
         config.embedding_endpoint = Some(endpoint);
@@ -232,30 +249,50 @@ impl PyClient {
         })
     }
 
-    fn execute<'py>(&self, py: Python<'py>, query: &str) -> PyResult<Bound<'py, PyAny>> {
-        let res = self
-            .runtime
-            .block_on(self.inner.execute(query))
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    fn execute<'py>(
+        &self,
+        py: Python<'py>,
+        query: &Bound<'_, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let res = if let Ok(py_stmt) = query.extract::<PyRef<PyStmt>>() {
+            self.runtime
+                .block_on(self.inner.execute_node(py_stmt.inner.clone()))
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
+        } else if let Ok(query_str) = query.extract::<String>() {
+            self.runtime
+                .block_on(self.inner.execute(&query_str))
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
+        } else {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "query must be a string or a Stmt object",
+            ));
+        };
 
         pythonize::pythonize(py, &res)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
     }
 
-    fn explain(&self, query: &str) -> PyResult<String> {
-        qql::executor::Executor::explain(query)
-            .map_err(|e| pyo3::exceptions::PySyntaxError::new_err(e.to_string()))
+    fn explain(&self, query: &Bound<'_, PyAny>) -> PyResult<String> {
+        if let Ok(py_stmt) = query.extract::<PyRef<PyStmt>>() {
+            qql::executor::Executor::explain_node(&py_stmt.inner)
+                .map_err(|e| pyo3::exceptions::PySyntaxError::new_err(e.to_string()))
+        } else if let Ok(query_str) = query.extract::<String>() {
+            qql::executor::Executor::explain(&query_str)
+                .map_err(|e| pyo3::exceptions::PySyntaxError::new_err(e.to_string()))
+        } else {
+            Err(pyo3::exceptions::PyTypeError::new_err(
+                "query must be a string or a Stmt object",
+            ))
+        }
     }
 }
 
-// Alias PyExecutor to PyClient for backwards compatibility
-type PyExecutor = PyClient;
 
 #[pyfunction]
 #[pyo3(signature = (query, url="http://localhost:6333", api_key=None, use_grpc=false, embedder=None))]
 fn execute<'py>(
     py: Python<'py>,
-    query: &str,
+    query: &Bound<'_, PyAny>,
     url: &str,
     api_key: Option<String>,
     use_grpc: bool,
@@ -266,13 +303,23 @@ fn execute<'py>(
 }
 
 #[pyfunction]
-fn explain(query: &str) -> PyResult<String> {
-    qql::executor::Executor::explain(query)
-        .map_err(|e| pyo3::exceptions::PySyntaxError::new_err(e.to_string()))
+fn explain(query: &Bound<'_, PyAny>) -> PyResult<String> {
+    if let Ok(py_stmt) = query.extract::<PyRef<PyStmt>>() {
+        qql::executor::Executor::explain_node(&py_stmt.inner)
+            .map_err(|e| pyo3::exceptions::PySyntaxError::new_err(e.to_string()))
+    } else if let Ok(query_str) = query.extract::<String>() {
+        qql::executor::Executor::explain(&query_str)
+            .map_err(|e| pyo3::exceptions::PySyntaxError::new_err(e.to_string()))
+    } else {
+        Err(pyo3::exceptions::PyTypeError::new_err(
+            "query must be a string or a Stmt object",
+        ))
+    }
 }
 
 #[pymodule]
 fn pyqql(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<PyStmt>()?;
     m.add_class::<PyHttpEmbedder>()?;
     m.add_class::<PyClient>()?;
     m.add_function(wrap_pyfunction!(execute, m)?)?;

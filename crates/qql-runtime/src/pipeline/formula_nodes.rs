@@ -141,7 +141,7 @@ pub fn build_expression(expr: &ast::FormulaExpr) -> Result<serde_json::Value, Qq
         ast::FormulaExpr::Case { cond, then_, else_ } => {
             let cond_expr = match cond.as_ref() {
                 ast::FilterExpr::Compare { field, op, value } if op == "=" => {
-                    build_match_condition_expression(field, &[value.clone()])?
+                    build_match_condition_expression(field, std::slice::from_ref(value))?
                 }
                 _ => {
                     let filter_converter = FilterConverter::new();

@@ -12,49 +12,54 @@ const QUERIES = [
   ['WithPayload', "QUERY 'search' FROM docs LIMIT 10 WITH PAYLOAD (include = ['title', 'body']) WITH VECTORS ('dense')"],
 ];
 
-function bench_napi(name, q, iterations) {
-    // warmup
+function bench_napi_parse(name, q, iterations) {
     for (let i = 0; i < 100; i++) {
         nqql.parse(q)
     }
-    
     let start = process.hrtime.bigint()
     for (let i = 0; i < iterations; i++) {
         nqql.parse(q)
     }
     let end = process.hrtime.bigint()
     let elapsed = Number(end - start)
-    return {
-        ns_per_op: elapsed / iterations,
-        ops_per_sec: (iterations / elapsed) * 1e9
-    }
+    return (iterations / elapsed) * 1e9
 }
 
-function bench_json(name, q, iterations) {
-    // warmup
+function bench_fast_json_parse(name, q, iterations) {
     for (let i = 0; i < 100; i++) {
         nqql.parseFastJson(q)
     }
-    
     let start = process.hrtime.bigint()
     for (let i = 0; i < iterations; i++) {
         nqql.parseFastJson(q)
     }
     let end = process.hrtime.bigint()
     let elapsed = Number(end - start)
-    return {
-        ns_per_op: elapsed / iterations,
-        ops_per_sec: (iterations / elapsed) * 1e9
-    }
+    return (iterations / elapsed) * 1e9
 }
 
-const iterations = 100_000;
+function bench_e2e(name, q, iterations) {
+    // Explain builds the full execution payload offline (E2E pipeline)
+    for (let i = 0; i < 100; i++) {
+        nqql.explain(q)
+    }
+    let start = process.hrtime.bigint()
+    for (let i = 0; i < iterations; i++) {
+        nqql.explain(q)
+    }
+    let end = process.hrtime.bigint()
+    let elapsed = Number(end - start)
+    return (iterations / elapsed) * 1e9
+}
+
+const iterations = 10_000;
 console.log(`Node.js nqql  |  ${iterations} iterations each\n`);
-console.log(`${'Query'.padEnd(20)} | ${'NAPI parse()'.padStart(15)} | ${'parseFastJson()'.padStart(15)}`);
-console.log('-'.repeat(60));
+console.log(`${'Query'.padEnd(20)} | ${'NAPI parse()'.padStart(15)} | ${'parseFastJson()'.padStart(15)} | ${'E2E explain()'.padStart(15)}`);
+console.log('-'.repeat(74));
 
 for (const [name, q] of QUERIES) {
-  const n_napi = bench_napi(name, q, iterations);
-  const n_json = bench_json(name, q, iterations);
-  console.log(`${name.padEnd(20)} | ${n_napi.ops_per_sec.toFixed(0).padStart(15)} | ${n_json.ops_per_sec.toFixed(0).padStart(15)}`);
+  const napi_parse = bench_napi_parse(name, q, iterations);
+  const fast_parse = bench_fast_json_parse(name, q, iterations);
+  const e2e = bench_e2e(name, q, iterations);
+  console.log(`${name.padEnd(20)} | ${napi_parse.toFixed(0).padStart(15)} | ${fast_parse.toFixed(0).padStart(15)} | ${e2e.toFixed(0).padStart(15)}`);
 }

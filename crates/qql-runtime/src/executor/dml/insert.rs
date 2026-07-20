@@ -10,8 +10,6 @@ use crate::sparse;
 use qql_core::ast::{self, Value};
 use qql_core::error::QqlError;
 
-use crate::executor::helpers::value_to_json;
-
 use super::helpers::*;
 
 impl Executor {
@@ -41,38 +39,91 @@ impl Executor {
                 .iter()
                 .any(|d| d.sparse_model.is_some());
 
-        // 1. Extract point IDs and payloads from all rows
-        let mut point_ids = Vec::with_capacity(stmt.values_list.len());
-        let mut payloads = Vec::with_capacity(stmt.values_list.len());
+        let count = stmt.values_list.len();
+        // 1. Extract point IDs, payloads and vectors from all rows
+        let mut point_ids = Vec::with_capacity(count);
+        let mut payloads = Vec::with_capacity(count);
+        let mut vectors_batch = Vec::with_capacity(count);
 
-        for row in &stmt.values_list {
-            let id = extract_point_id(row)?;
-            point_ids.push(id);
+        if has_embed || !has_provided_vectors {
+            // Fallback for auto-embedding which needs reference to values_list
+            for row in &stmt.values_list {
+                let id = extract_point_id(row)?;
+                point_ids.push(id);
 
-            let mut payload = row
-                .iter()
-                .filter(|(k, _)| *k != "id" && !is_vector_key(k))
-                .map(|(k, v)| (k.to_string(), value_to_json(v)))
-                .collect::<HashMap<_, _>>();
-            // Strip vector keys from payload
-            payload.retain(|k, _| !is_vector_key(k));
-            payloads.push(payload);
-        }
+                let payload = row
+                    .iter()
+                    .filter(|(k, _)| *k != "id" && !is_vector_key(k))
+                    .map(|(k, v)| (k.to_string(), v.to_json()))
+                    .collect::<HashMap<_, _>>();
+                payloads.push(payload);
+            }
 
-        // 2. Build vectors batch
-        let vectors_batch = if has_embed {
-            self.build_embed_vectors_batch(&stmt.values_list, &stmt.embed_directives)
+            vectors_batch = if has_embed {
+                self.build_embed_vectors_batch(&stmt.values_list, &stmt.embed_directives)
+                    .await?
+            } else {
+                self.build_auto_embed_vectors_batch(
+                    &stmt.values_list,
+                    stmt.model.as_deref(),
+                    has_sparse,
+                )
                 .await?
-        } else if has_provided_vectors {
-            extract_provided_vectors(&stmt.values_list)?
+            };
         } else {
-            self.build_auto_embed_vectors_batch(
-                &stmt.values_list,
-                stmt.model.as_deref(),
-                has_sparse,
-            )
-            .await?
-        };
+            // High performance single-pass zero-copy route for pre-computed vectors!
+            for row in stmt.values_list {
+                let id = extract_point_id(&row)?;
+                point_ids.push(id);
+
+                let mut payload = HashMap::new();
+                let mut vectors = serde_json::Map::new();
+
+                for (k, v) in row {
+                    if k == "id" {
+                        continue;
+                    }
+                    if is_vector_key(&k) {
+                        let vec_name = if k == "vector" || k == "_v" {
+                            ""
+                        } else {
+                            k.strip_prefix("_v_").unwrap_or(&k)
+                        };
+
+                        match v {
+                            Value::Dict(items) => {
+                                for (nk, nv) in items {
+                                    vectors.insert(nk, nv.to_json());
+                                }
+                            }
+                            Value::List(_) => {
+                                let json_val = v.to_json();
+                                if vec_name.is_empty() {
+                                    vectors.insert(
+                                        crate::executor::DENSE_VECTOR_NAME.to_string(),
+                                        json_val,
+                                    );
+                                } else {
+                                    vectors.insert(vec_name.to_string(), json_val);
+                                }
+                            }
+                            _ => {
+                                vectors.insert(vec_name.to_string(), v.to_json());
+                            }
+                        }
+                    } else {
+                        payload.insert(k, v.to_json());
+                    }
+                }
+
+                payloads.push(payload);
+                vectors_batch.push(if vectors.is_empty() {
+                    None
+                } else {
+                    Some(serde_json::Value::Object(vectors))
+                });
+            }
+        }
 
         // 3. Build and upsert points
         let points = point_ids
@@ -96,8 +147,8 @@ impl Executor {
         Ok(ExecResponse {
             ok: true,
             operation: "insert".to_string(),
-            message: format!("Inserted {} point(s)", stmt.values_list.len()),
-            data: Some(serde_json::json!({"count": stmt.values_list.len()})),
+            message: format!("Inserted {} point(s)", count),
+            data: Some(serde_json::json!({"count": count})),
         })
     }
 

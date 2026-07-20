@@ -531,7 +531,7 @@ async fn test_insert_into_collection_creates_missing() {
     assert_eq!(upsert_req.collection_name, "docs");
     assert_eq!(upsert_req.points.len(), 1);
     assert_eq!(
-        PointId::from(upsert_req.points[0].id.clone()),
+        upsert_req.points[0].id.clone(),
         PointId::Uuid("550e8400-e29b-41d4-a716-446655440000".to_string())
     );
 }
