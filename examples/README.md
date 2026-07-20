@@ -1,43 +1,37 @@
 # QQL SDK Examples
 
-The examples show the primary Python and Rust flows, plus experimental Node.js
-and WASM bindings, in progressively more powerful parser SDK patterns.
+Clean, production-ready SDK examples across Python, Node.js, WebAssembly, and Rust.
 
-## Levels
+## Examples Structure
 
-| # | Level | APIs shown | What it demonstrates |
-|---|-------|------------|---------------------|
-| 02 | Medium | `inject_filter` | Programmatic WHERE injection — QQL's superpower |
-| 03 | Expert | Gateway pattern | Multi-tenant query rewriting with auth policies |
+Each language directory contains two unnumbered example scripts:
 
-## Running
+1. **`basic_to_medium`**: Connection initialization, basic execution, plan explanation, and AST filter injection.
+2. **`medium_to_expert`**: First-class HTTP embedding provider integration (`HttpEmbedder`), complex CTE prefetch DAGs with RRF fusion, and multi-tenant security gateways.
+
+| Language | Basic to Medium | Medium to Expert |
+|---|---|---|
+| **Python** | `examples/python/basic_to_medium.py` | `examples/python/medium_to_expert.py` |
+| **Node.js** | `examples/nodejs/basic_to_medium.mjs` | `examples/nodejs/medium_to_expert.mjs` |
+| **WASM** | `examples/wasm/basic_to_medium.js` | `examples/wasm/medium_to_expert.js` |
+| **Rust** | `examples/rust/basic_to_medium` | `examples/rust/medium_to_expert` |
+
+## Running Examples
 
 ### Python
 ```bash
-pip install pyqql
-# Or: PYTHONPATH=target/release python3 examples/python/01_basic_parse.py
-for f in examples/python/*.py; do python3 "$f"; done
+python3 examples/python/basic_to_medium.py
+python3 examples/python/medium_to_expert.py
 ```
 
 ### Node.js
 ```bash
-npm install nqql
-# Or: cp target/release/libnqql.so target/release/nqql.node
-for f in examples/nodejs/*.mjs; do node "$f"; done
+node examples/nodejs/basic_to_medium.mjs
+node examples/nodejs/medium_to_expert.mjs
 ```
-
-### Go
-Use the standalone [qql-go](https://github.com/srimon12/qql-go) library for Go bindings.
 
 ### Rust
 ```bash
-for f in examples/rust/*/Cargo.toml; do
-  cargo run --manifest-path "$f"
-done
-```
-
-### WASM (Browser)
-```bash
-cd crates/qql-wasm && wasm-pack build --target web
-# Then serve examples/wasm/ and open in browser
+cargo run --manifest-path examples/rust/basic_to_medium/Cargo.toml
+cargo run --manifest-path examples/rust/medium_to_expert/Cargo.toml
 ```
