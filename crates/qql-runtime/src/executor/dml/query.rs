@@ -134,6 +134,36 @@ impl Executor {
             }
         }
 
+        // Resolve CTEs
+        let mut cte_map = HashMap::new();
+        for cte in &stmt.ctes {
+            let pq = Box::pin(self.build_cte_prefetch(cte.stmt.as_ref(), &cte_map)).await?;
+            cte_map.insert(cte.name.to_string(), pq);
+        }
+
+        // Populate manual_prefetches from prefetch_refs
+        for ref_node in &stmt.prefetch_refs {
+            let pq = cte_map.get(ref_node.cte_name.as_ref()).ok_or_else(|| {
+                QqlError::runtime(format!("unknown CTE referenced in prefetch: '{}'", ref_node.cte_name))
+            })?;
+            
+            let mut clone = pq.clone();
+            if let Some(ref filter) = ref_node.filter {
+                let converter = FilterConverter::new();
+                clone.filter = converter.build_filter(filter)?;
+            }
+            if let Some(st) = ref_node.score_threshold {
+                clone.score_threshold = Some(st as f32);
+            }
+            if let Some(lf) = ref_node.lookup_from {
+                clone.lookup_from = Some(pipeline::LookupLocation {
+                    collection_name: lf.to_string(),
+                    vector_name: ref_node.lookup_vector.map(|s| s.to_string()),
+                });
+            }
+            state.manual_prefetches.push(clone);
+        }
+
         let mut exec_pipeline = QueryPipeline::new();
 
         match stmt.mode {
@@ -357,14 +387,11 @@ impl Executor {
     ) -> Result<ExecResponse, QqlError> {
         let mut req = pipeline.build_flat_request(state)?;
         if req.with_payload.is_none() {
-            req.with_payload = Some(
-                WithPayload {
-                    enable: Some(true),
-                    include: Vec::new(),
-                    exclude: Vec::new(),
-                }
-                .into(),
-            );
+            req.with_payload = Some(WithPayload {
+                enable: Some(true),
+                include: Vec::new(),
+                exclude: Vec::new(),
+            });
         }
         let results = self.client.query(req).await?;
 
@@ -376,7 +403,7 @@ impl Executor {
                     .as_ref()
                     .and_then(|p| serde_json::from_value(serde_json::to_value(p).unwrap()).ok());
                 SearchHit {
-                    id: point_id_string(&hit.id.clone().into()),
+                    id: point_id_string(&hit.id),
                     score: hit.score,
                     text: payload_map.as_ref().and_then(|p| {
                         p.get("text")
@@ -402,14 +429,11 @@ impl Executor {
     ) -> Result<ExecResponse, QqlError> {
         let mut req = pipeline.build_grouped_request(state)?;
         if req.with_payload.is_none() {
-            req.with_payload = Some(
-                WithPayload {
-                    enable: Some(true),
-                    include: Vec::new(),
-                    exclude: Vec::new(),
-                }
-                .into(),
-            );
+            req.with_payload = Some(WithPayload {
+                enable: Some(true),
+                include: Vec::new(),
+                exclude: Vec::new(),
+            });
         }
         let groups = self.client.query_groups(req).await?;
 
@@ -425,7 +449,7 @@ impl Executor {
                                 serde_json::from_value(serde_json::to_value(p).unwrap()).ok()
                             });
                         SearchHit {
-                            id: point_id_string(&hit.id.clone().into()),
+                            id: point_id_string(&hit.id),
                             score: hit.score,
                             text: payload_map.as_ref().and_then(|p| {
                                 p.get("text")
@@ -447,6 +471,142 @@ impl Executor {
             operation: "QUERY_GROUPS".to_string(),
             message: format!("Found {} groups", formatted.len()),
             data: Some(serde_json::to_value(formatted).unwrap_or(serde_json::Value::Null)),
+        })
+    }
+
+    async fn build_cte_prefetch(
+        &self,
+        stmt: &ast::QueryStmt<'_>,
+        cte_map: &HashMap<String, pipeline::PrefetchQuery>,
+    ) -> Result<pipeline::PrefetchQuery, QqlError> {
+        let mut prefetch = Vec::new();
+        
+        let mut scoped_map = cte_map.clone();
+        for local_cte in &stmt.ctes {
+            let local_pq = Box::pin(self.build_cte_prefetch(local_cte.stmt.as_ref(), &scoped_map)).await?;
+            scoped_map.insert(local_cte.name.to_string(), local_pq);
+        }
+        
+        for ref_node in &stmt.prefetch_refs {
+            let nested = scoped_map.get(ref_node.cte_name.as_ref()).ok_or_else(|| {
+                QqlError::runtime(format!("unknown CTE referenced in prefetch: '{}'", ref_node.cte_name))
+            })?;
+            prefetch.push(nested.clone());
+        }
+        
+        let using = stmt.using_.map(|s| s.to_string());
+        let limit = if stmt.limit > 0 { Some(stmt.limit as u64) } else { None };
+        let score_threshold = stmt.score_threshold.map(|v| v as f32);
+        let lookup_from = if !stmt.lookup_from.unwrap_or("").is_empty() {
+            Some(pipeline::LookupLocation {
+                collection_name: stmt.lookup_from.unwrap().to_string(),
+                vector_name: stmt.lookup_vector.map(|s| s.to_string()),
+            })
+        } else {
+            None
+        };
+        
+        let filter = if let Some(ref f) = stmt.query_filter {
+            let converter = FilterConverter::new();
+            converter.build_filter(f)?
+        } else {
+            None
+        };
+        
+        let params = stmt.with_clause.as_ref().and_then(|wc| pipeline::build_search_params(wc));
+        
+        let dense_model = self.resolve_dense_model(stmt.model);
+        
+        let mut query = None;
+        match stmt.mode {
+            ast::QueryMode::Recommend => {
+                let mut pos = Vec::new();
+                for id in &stmt.positive_ids {
+                    let pid = crate::pipeline::to_point_id(id)?;
+                    pos.push(pipeline::VectorInput::Id(pid));
+                }
+                let mut neg = Vec::new();
+                for id in &stmt.negative_ids {
+                    let pid = crate::pipeline::to_point_id(id)?;
+                    neg.push(pipeline::VectorInput::Id(pid));
+                }
+                let strategy = if let Some(strat) = stmt.strategy {
+                    match strat.to_lowercase().as_str() {
+                        "average_vector" => Some(pipeline::RecommendStrategyType::AverageVector),
+                        "best_score" => Some(pipeline::RecommendStrategyType::BestScore),
+                        "sum_scores" => Some(pipeline::RecommendStrategyType::SumScores),
+                        _ => return Err(QqlError::runtime(format!("unknown recommend strategy '{}'", strat))),
+                    }
+                } else {
+                    None
+                };
+                query = Some(pipeline::QueryVariant::Recommend(pipeline::RecommendInput {
+                    positive: pos,
+                    negative: neg,
+                    strategy,
+                }));
+            }
+            ast::QueryMode::Nearest => {
+                if stmt.query_type == ast::QueryType::Hybrid {
+                    return Err(QqlError::runtime(
+                        "USING HYBRID is not supported inside CTE prefetch queries; define separate sparse and dense CTEs and combine them via prefetch references",
+                    ));
+                }
+                
+                if !stmt.raw_vector.is_empty() {
+                    query = Some(pipeline::QueryVariant::Nearest(stmt.raw_vector.iter().map(|&x| x as f32).collect()));
+                } else if let Some(text) = stmt.query_text {
+                    let is_sparse = stmt.query_type == ast::QueryType::Sparse;
+                    if is_sparse {
+                        if self.uses_local_embeddings() {
+                            let embedder = self.embedder.as_ref().ok_or_else(|| {
+                                QqlError::runtime("local embedding requested but no Embedder provided")
+                            })?;
+                            let sv = embedder.embed_sparse(text).await?;
+                            query = Some(pipeline::QueryVariant::Sparse(sv.indices, sv.values));
+                        } else {
+                            query = Some(pipeline::QueryVariant::Document {
+                                text: text.to_string(),
+                                model: self.resolve_sparse_model(stmt.model),
+                                options: self.cloud_model_options(),
+                            });
+                        }
+                    } else {
+                        if self.uses_local_embeddings() {
+                            let embedder = self.embedder.as_ref().ok_or_else(|| {
+                                QqlError::runtime("local embedding requested but no Embedder provided")
+                            })?;
+                            let dv = embedder.embed_dense(text, &dense_model).await?;
+                            query = Some(pipeline::QueryVariant::Nearest(dv));
+                        } else {
+                            query = Some(pipeline::QueryVariant::Document {
+                                text: text.to_string(),
+                                model: dense_model.clone(),
+                                options: self.cloud_model_options(),
+                            });
+                        }
+                    }
+                } else if let Some(ref query_id) = stmt.query_id {
+                    let pid = crate::pipeline::to_point_id(query_id)?;
+                    query = Some(pipeline::QueryVariant::Recommend(pipeline::RecommendInput {
+                        positive: vec![pipeline::VectorInput::Id(pid)],
+                        negative: Vec::new(),
+                        strategy: None,
+                    }));
+                }
+            }
+            _ => {}
+        }
+        
+        Ok(pipeline::PrefetchQuery {
+            prefetch,
+            query,
+            using,
+            limit,
+            params,
+            filter,
+            score_threshold,
+            lookup_from,
         })
     }
 }

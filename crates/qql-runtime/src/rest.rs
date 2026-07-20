@@ -13,7 +13,9 @@ use crate::client::{
     GetPointsReq, PointGroup, QdrantOps, RetrievedPoint, ScoredPoint, ScrollPointsReq,
     SetPayloadReq, UpdateVectorsReq, UpsertPointsReq,
 };
-use crate::pipeline::{PointId, QueryPointsGroupsRequest, QueryPointsRequest};
+use crate::pipeline::{
+    PointId, QueryPointsGroupsRequest, QueryPointsRequest, WithPayload, WithVectors,
+};
 
 /// REST implementation of [`QdrantOps`].
 ///
@@ -94,7 +96,7 @@ impl RestQdrant {
     }
 }
 
-fn point_id_json(id: PointId) -> Value {
+pub(crate) fn point_id_json(id: PointId) -> Value {
     match id {
         PointId::Num(value) => json!(value),
         PointId::Uuid(value) => json!(value),
@@ -102,34 +104,84 @@ fn point_id_json(id: PointId) -> Value {
 }
 
 fn points_result(value: Value) -> Result<Vec<ScoredPoint>, QqlError> {
-    let mut points = value.get("points").cloned().unwrap_or(value);
-    normalize_point_ids(&mut points);
+    let points = value.get("points").cloned().unwrap_or(value);
     serde_json::from_value(points)
         .map_err(|error| QqlError::runtime(format!("invalid Qdrant query result: {error}")))
 }
 
-/// The generated OpenAPI types model point IDs as objects, while Qdrant's REST
-/// API returns primitive JSON values. Normalize only at this adapter boundary.
-fn normalize_point_ids(value: &mut Value) {
+fn with_payload_json(selection: &WithPayload) -> Value {
+    if !selection.exclude.is_empty() {
+        json!({ "exclude": selection.exclude })
+    } else if !selection.include.is_empty() {
+        json!({ "include": selection.include })
+    } else {
+        json!(selection.enable.unwrap_or(false))
+    }
+}
+
+fn with_vectors_json(selection: &WithVectors) -> Value {
+    if selection.vectors.is_empty() {
+        json!(selection.enable.unwrap_or(false))
+    } else {
+        json!(selection.vectors)
+    }
+}
+
+fn remove_nulls(value: &mut Value) {
     match value {
-        Value::Array(values) => values.iter_mut().for_each(normalize_point_ids),
-        Value::Object(object) => {
-            for key in ["id", "next_page_offset"] {
-                if let Some(id) = object.get_mut(key) {
-                    let normalized = match id {
-                        Value::Number(number) => Some(json!({ "num": number, "uuid": null })),
-                        Value::String(uuid) => Some(json!({ "num": null, "uuid": uuid })),
-                        _ => None,
-                    };
-                    if let Some(normalized) = normalized {
-                        *id = normalized;
-                    }
-                }
+        Value::Object(map) => {
+            map.retain(|_, v| !v.is_null());
+            for v in map.values_mut() {
+                remove_nulls(v);
             }
-            object.values_mut().for_each(normalize_point_ids);
+        }
+        Value::Array(arr) => {
+            for v in arr {
+                remove_nulls(v);
+            }
         }
         _ => {}
     }
+}
+
+pub(crate) fn query_request_json(request: &QueryPointsRequest) -> Result<Value, QqlError> {
+    let mut body = serde_json::to_value(request).map_err(|error| {
+        QqlError::runtime(format!("failed to serialize query request: {error}"))
+    })?;
+    remove_nulls(&mut body);
+    let object = body
+        .as_object_mut()
+        .ok_or_else(|| QqlError::runtime("query request must serialize as an object"))?;
+    object.remove("collection_name");
+    if let Some(payload) = &request.with_payload {
+        object.insert("with_payload".to_string(), with_payload_json(payload));
+    }
+    if let Some(vectors) = &request.with_vectors {
+        object.remove("with_vectors");
+        object.insert("with_vector".to_string(), with_vectors_json(vectors));
+    }
+    Ok(body)
+}
+
+pub(crate) fn grouped_query_request_json(request: &QueryPointsGroupsRequest) -> Result<Value, QqlError> {
+    let mut body = serde_json::to_value(request).map_err(|error| {
+        QqlError::runtime(format!(
+            "failed to serialize grouped query request: {error}"
+        ))
+    })?;
+    remove_nulls(&mut body);
+    let object = body
+        .as_object_mut()
+        .ok_or_else(|| QqlError::runtime("grouped query request must serialize as an object"))?;
+    object.remove("collection_name");
+    if let Some(payload) = &request.with_payload {
+        object.insert("with_payload".to_string(), with_payload_json(payload));
+    }
+    if let Some(vectors) = &request.with_vectors {
+        object.remove("with_vectors");
+        object.insert("with_vector".to_string(), with_vectors_json(vectors));
+    }
+    Ok(body)
 }
 
 #[async_trait]
@@ -157,8 +209,46 @@ impl QdrantOps for RestQdrant {
     }
 
     async fn get_collection_info(&self, name: &str) -> Result<CollectionInfo, QqlError> {
-        self.call(Method::GET, &format!("/collections/{name}"), None)
-            .await
+        let value: Value = self
+            .call(Method::GET, &format!("/collections/{name}"), None)
+            .await?;
+        let vectors = value
+            .pointer("/config/params/vectors")
+            .and_then(Value::as_object);
+        let dense_vectors = vectors
+            .map(|vectors| {
+                if vectors.contains_key("size") {
+                    vec![String::new()]
+                } else {
+                    vectors.keys().cloned().collect()
+                }
+            })
+            .unwrap_or_default();
+        let sparse_vectors = value
+            .pointer("/config/params/sparse_vectors")
+            .and_then(Value::as_object)
+            .map(|vectors| vectors.keys().cloned().collect())
+            .unwrap_or_default();
+        Ok(CollectionInfo {
+            status: value
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            points_count: value
+                .get("points_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
+            segments_count: value
+                .get("segments_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
+            schema: crate::backend::CollectionSchema {
+                dense_vectors,
+                sparse_vectors,
+            },
+            raw_json: Some(value.clone()),
+        })
     }
 
     async fn create_collection(&self, req: CreateCollectionReq) -> Result<(), QqlError> {
@@ -219,11 +309,9 @@ impl QdrantOps for RestQdrant {
             .into_iter()
             .map(|point| {
                 Ok(json!({
-                    "id": point_id_json(point.id.into()),
-                    "vector": serde_json::to_value(point.vector)
-                        .map_err(|error| QqlError::runtime(error.to_string()))?,
-                    "payload": serde_json::to_value(point.payload)
-                        .map_err(|error| QqlError::runtime(error.to_string()))?,
+                    "id": point_id_json(point.id),
+                    "vector": point.vector,
+                    "payload": point.payload,
                 }))
             })
             .collect();
@@ -242,10 +330,7 @@ impl QdrantOps for RestQdrant {
             .call(
                 Method::POST,
                 &format!("/collections/{collection}/points/query"),
-                Some(
-                    serde_json::to_value(req)
-                        .map_err(|error| QqlError::runtime(error.to_string()))?,
-                ),
+                Some(query_request_json(&req)?),
             )
             .await?;
         points_result(value)
@@ -260,14 +345,10 @@ impl QdrantOps for RestQdrant {
             .call(
                 Method::POST,
                 &format!("/collections/{collection}/points/query/groups"),
-                Some(
-                    serde_json::to_value(req)
-                        .map_err(|error| QqlError::runtime(error.to_string()))?,
-                ),
+                Some(grouped_query_request_json(&req)?),
             )
             .await?;
-        let mut groups = value.get("groups").cloned().unwrap_or(value);
-        normalize_point_ids(&mut groups);
+        let groups = value.get("groups").cloned().unwrap_or(value);
         serde_json::from_value(groups).map_err(|error| QqlError::runtime(error.to_string()))
     }
 
@@ -375,17 +456,15 @@ impl QdrantOps for RestQdrant {
                 })),
             )
             .await?;
-        let mut points = value.get("points").cloned().unwrap_or_else(|| json!([]));
-        normalize_point_ids(&mut points);
+        let points = value.get("points").cloned().unwrap_or_else(|| json!([]));
         let points =
             serde_json::from_value(points).map_err(|error| QqlError::runtime(error.to_string()))?;
-        let mut offset = value.get("next_page_offset").cloned();
-        if let Some(offset) = &mut offset {
-            normalize_point_ids(offset);
-        }
-        let offset = offset
-            .and_then(|value| serde_json::from_value::<crate::qdrant::ExtendedPointId>(value).ok())
-            .map(Into::into);
+        let offset = value
+            .get("next_page_offset")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|error| QqlError::runtime(format!("invalid scroll offset: {error}")))?;
         Ok((points, offset))
     }
 
@@ -405,14 +484,13 @@ impl QdrantOps for RestQdrant {
 
     async fn get(&self, req: GetPointsReq) -> Result<Vec<RetrievedPoint>, QqlError> {
         let id = crate::executor::helpers::to_point_id_static(&req.point_id)?;
-        let mut points: Value = self
+        let points: Value = self
             .call(
                 Method::POST,
                 &format!("/collections/{}/points", req.collection_name),
                 Some(json!({ "ids": [point_id_json(id)], "with_payload": true })),
             )
             .await?;
-        normalize_point_ids(&mut points);
         serde_json::from_value(points).map_err(|error| QqlError::runtime(error.to_string()))
     }
 }

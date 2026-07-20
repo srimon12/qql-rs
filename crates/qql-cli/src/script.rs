@@ -56,6 +56,20 @@ fn push_input_char(output: &mut String, input: &str, index: &mut usize) {
     *index += ch.len_utf8();
 }
 
+fn is_contextual_identifier(kind: TokenKind) -> bool {
+    matches!(
+        kind,
+        TokenKind::Offset
+            | TokenKind::Score
+            | TokenKind::Threshold
+            | TokenKind::Lookup
+            | TokenKind::Id
+            | TokenKind::Dense
+            | TokenKind::Sparse
+            | TokenKind::Vector
+    )
+}
+
 pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
     let cleaned = strip_comments(text);
     let mut lexer = Lexer::new(&cleaned);
@@ -68,10 +82,39 @@ pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
         tokens.push(tok);
     }
 
+    let mut starts = Vec::new();
     let mut depth: i32 = 0;
-    let mut statement_start = 0;
-    let mut statements = Vec::new();
-    for tok in &tokens {
+    for (i, tok) in tokens.iter().enumerate() {
+        let is_starter = match tok.kind {
+            TokenKind::Insert
+                | TokenKind::Create
+                | TokenKind::Alter
+                | TokenKind::Drop
+                | TokenKind::Show
+                | TokenKind::Query
+                | TokenKind::Select
+                | TokenKind::Scroll
+                | TokenKind::Delete
+                | TokenKind::Update => true,
+            TokenKind::With => {
+                if i + 2 < tokens.len() {
+                    let next1 = &tokens[i + 1];
+                    let next2 = &tokens[i + 2];
+                    let next1_is_ident = next1.kind == TokenKind::Identifier
+                        || next1.kind == TokenKind::String
+                        || is_contextual_identifier(next1.kind);
+                    next1_is_ident && next2.kind == TokenKind::As
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        };
+
+        if depth == 0 && is_starter {
+            starts.push(tok.pos);
+        }
+
         match tok.kind {
             TokenKind::Lbrace | TokenKind::Lbracket | TokenKind::Lparen => depth += 1,
             TokenKind::Rbrace | TokenKind::Rbracket | TokenKind::Rparen => {
@@ -86,10 +129,6 @@ pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
                     ));
                 }
             }
-            TokenKind::Semicolon if depth == 0 => {
-                push_statement(&cleaned, statement_start, tok.pos, &mut statements)?;
-                statement_start = tok.pos + tok.text.len();
-            }
             _ => {}
         }
     }
@@ -100,23 +139,30 @@ pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
         ));
     }
 
-    push_statement(&cleaned, statement_start, cleaned.len(), &mut statements)?;
+    if starts.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut statements = Vec::new();
+    for (idx, &start) in starts.iter().enumerate() {
+        let end = if idx + 1 < starts.len() {
+            starts[idx + 1]
+        } else {
+            cleaned.len()
+        };
+
+        let mut stmt = cleaned[start..end].trim();
+        if stmt.ends_with(';') {
+            stmt = stmt[..stmt.len() - 1].trim();
+        }
+
+        if !stmt.is_empty() {
+            Parser::parse(stmt)?;
+            statements.push(stmt.to_string());
+        }
+    }
 
     Ok(statements)
-}
-
-fn push_statement(
-    input: &str,
-    start: usize,
-    end: usize,
-    statements: &mut Vec<String>,
-) -> Result<(), QqlError> {
-    let statement = input[start..end].trim();
-    if !statement.is_empty() {
-        Parser::parse(statement)?;
-        statements.push(statement.to_string());
-    }
-    Ok(())
 }
 
 pub fn read_script(path: &str) -> Result<Vec<String>, QqlError> {
@@ -170,12 +216,5 @@ mod tests {
             split_statements("QUERY 'café' FROM docs LIMIT 1;").expect("script should parse");
 
         assert_eq!(statements, ["QUERY 'café' FROM docs LIMIT 1"]);
-    }
-
-    #[test]
-    fn rejects_adjacent_statements_without_a_semicolon() {
-        let result = split_statements("SHOW COLLECTIONS SHOW COLLECTION docs");
-
-        assert!(result.is_err());
     }
 }

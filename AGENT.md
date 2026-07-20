@@ -53,6 +53,8 @@ The gRPC adapter must map the same QQL-owned operation exactly once to `qdrant-c
 
 The public runtime has one entry point: a `Qql`/executor builder selects REST or gRPC once and returns the same execution API. A caller must never choose a protocol per statement, and the CLI must use that builder rather than construct transport clients itself.
 
+`qql::backend` is the transport boundary. `PointId`, point/query results, collection metadata, and filters crossing `QdrantOps` must be QQL-owned types; generated OpenAPI and protobuf types belong exclusively in their respective adapters. During this migration, compatibility deserialization may accept legacy generated point-ID objects, but QQL serializes public point IDs as Qdrant's canonical primitive number or UUID string.
+
 ---
 
 ## 2. Minimalist Code Design Philosophy

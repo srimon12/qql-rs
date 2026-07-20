@@ -10,8 +10,7 @@ use qql_core::parser;
 
 use crate::config::QqlConfig;
 use crate::embedder::Embedder;
-pub type QdrantFilter = crate::qdrant::Filter;
-use crate::pipeline::{PointId, QueryPointsRequest};
+use crate::pipeline::QueryPointsRequest;
 
 pub const DENSE_VECTOR_NAME: &str = "dense";
 pub const SPARSE_VECTOR_NAME: &str = "sparse";
@@ -62,6 +61,13 @@ impl Executor {
     pub fn rest(url: impl Into<String>, api_key: Option<String>) -> Result<Self, QqlError> {
         Ok(Self::new(
             Box::new(crate::rest::RestQdrant::new(url, api_key)?),
+            None,
+        ))
+    }
+
+    pub fn grpc(url: &str, api_key: Option<String>) -> Result<Self, QqlError> {
+        Ok(Self::new(
+            Box::new(crate::grpc::GrpcQdrant::from_url(url, api_key)?),
             None,
         ))
     }
@@ -145,10 +151,13 @@ impl Executor {
             }
             Stmt::Query(q) => {
                 let mode_str = match q.mode {
+                    qql_core::ast::QueryMode::Nearest => "NEAREST",
+                    qql_core::ast::QueryMode::Recommend => "RECOMMEND",
+                    qql_core::ast::QueryMode::Context => "CONTEXT",
+                    qql_core::ast::QueryMode::Discover => "DISCOVER",
                     qql_core::ast::QueryMode::OrderBy => "ORDER BY",
                     qql_core::ast::QueryMode::Sample => "SAMPLE",
                     qql_core::ast::QueryMode::RelevanceFeedback => "RELEVANCE FEEDBACK",
-                    _ => "",
                 };
                 let coll = q
                     .collection
@@ -422,14 +431,11 @@ impl Executor {
                 let b = batches.get_mut(&coll).unwrap();
                 let mut req = pipeline.build_flat_request(state)?;
                 if req.with_payload.is_none() {
-                    req.with_payload = Some(
-                        crate::pipeline::WithPayload {
-                            enable: Some(true),
-                            include: Vec::new(),
-                            exclude: Vec::new(),
-                        }
-                        .into(),
-                    );
+                    req.with_payload = Some(crate::pipeline::WithPayload {
+                        enable: Some(true),
+                        include: Vec::new(),
+                        exclude: Vec::new(),
+                    });
                 }
                 b.indices.push(i);
                 b.requests.push(req);
@@ -450,7 +456,7 @@ impl Executor {
                                 serde_json::from_value(serde_json::to_value(p).unwrap()).ok()
                             });
                         SearchHit {
-                            id: crate::executor::helpers::point_id_string(&hit.id.clone().into()),
+                            id: crate::executor::helpers::point_id_string(&hit.id),
                             score: hit.score,
                             text: payload_map.as_ref().and_then(|p| {
                                 p.get("text")

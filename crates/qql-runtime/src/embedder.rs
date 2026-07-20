@@ -198,10 +198,8 @@ impl Embedder for HttpEmbedder {
         self.embed_batch(texts).await
     }
 
-    async fn embed_sparse(&self, _text: &str) -> Result<SparseVector, QqlError> {
-        Err(QqlError::runtime(
-            "HttpEmbedder does not support sparse embedding; use SparseEmbedder",
-        ))
+    async fn embed_sparse(&self, text: &str) -> Result<SparseVector, QqlError> {
+        Ok(sparse::build_query_default(text))
     }
 }
 

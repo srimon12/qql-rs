@@ -127,7 +127,7 @@ pub fn build_search_params(with_clause: &ast::SearchWith) -> Option<SearchParams
         has_any = true;
     }
     if with_clause.acorn {
-        params.acorn = Some(true);
+        params.acorn = Some(crate::pipeline::AcornSearchParams { enable: true });
         has_any = true;
     }
     if with_clause.indexed_only {

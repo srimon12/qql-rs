@@ -18,11 +18,16 @@ impl Executor {
         };
         let results = self.client.get(req).await?;
 
+        let single = results.into_iter().next();
+        let data = single
+            .map(|p| serde_json::to_value(&p).unwrap_or(serde_json::Value::Null))
+            .unwrap_or(serde_json::Value::Null);
+
         Ok(ExecResponse {
             ok: true,
             operation: "select".to_string(),
-            message: format!("Found {} point(s)", results.len()),
-            data: Some(serde_json::to_value(&results).unwrap_or(serde_json::Value::Null)),
+            message: format!("Found {} point(s)", if data.is_null() { 0 } else { 1 }),
+            data: Some(data),
         })
     }
 

@@ -380,8 +380,8 @@ async fn test_do_select_returns_record_or_nil() {
         .await;
     assert!(resp.is_ok(), "{:?}", resp.err());
     let data = resp.unwrap().data.unwrap();
-    assert_eq!(data[0]["id"]["uuid"], "pt-1");
-    assert_eq!(data[0]["payload"]["text"], "hello");
+    assert_eq!(data["id"], "pt-1");
+    assert_eq!(data["payload"]["text"], "hello");
 
     // missing
     let mut client_missing = MockQdrantClient::default();
@@ -392,7 +392,7 @@ async fn test_do_select_returns_record_or_nil() {
         .await;
     assert!(resp_missing.is_ok());
     let data_missing = resp_missing.unwrap().data.unwrap();
-    assert!(data_missing.as_array().unwrap().is_empty());
+    assert!(data_missing.is_null());
 }
 
 #[tokio::test]
@@ -415,7 +415,7 @@ async fn test_do_scroll_returns_upstream_style_payload() {
     let resp = executor.execute("SCROLL FROM docs LIMIT 5").await;
     assert!(resp.is_ok(), "{:?}", resp.err());
     let data = resp.unwrap().data.unwrap();
-    assert_eq!(data["points"][0]["id"]["num"], 7);
+    assert_eq!(data["points"][0]["id"], 7);
     assert_eq!(data["points"][0]["payload"]["text"], "hello");
     assert_eq!(data["next_offset"], "pt-next");
 }

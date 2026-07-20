@@ -27,16 +27,22 @@ impl Executor {
         }
 
         let info = self.client.get_collection_info(collection).await?;
-        Ok(ExecResponse {
-            ok: true,
-            operation: "show_collection".to_string(),
-            message: format!("Collection: {}", collection),
-            data: Some(serde_json::json!({
+        let data = if let Some(ref raw) = info.raw_json {
+            extract_collection_diagnostics(collection, raw)
+        } else {
+            serde_json::json!({
                 "name": collection,
                 "status": info.status,
                 "points_count": info.points_count,
                 "segments_count": info.segments_count,
-            })),
+            })
+        };
+
+        Ok(ExecResponse {
+            ok: true,
+            operation: "show_collection".to_string(),
+            message: format!("Collection: {}", collection),
+            data: Some(data),
         })
     }
 
@@ -469,4 +475,62 @@ impl Executor {
             data: None,
         })
     }
+}
+
+fn extract_collection_diagnostics(name: &str, raw: &serde_json::Value) -> serde_json::Value {
+    let status = raw.get("status").and_then(serde_json::Value::as_str).unwrap_or("green");
+    let points_count = raw.get("points_count").and_then(serde_json::Value::as_u64).unwrap_or(0);
+    let segments_count = raw.get("segments_count").and_then(serde_json::Value::as_u64).unwrap_or(0);
+    let indexed_vectors_count = raw.get("indexed_vectors_count").and_then(serde_json::Value::as_u64).unwrap_or(0);
+
+    let has_sparse = raw.pointer("/config/params/sparse_vectors")
+        .and_then(serde_json::Value::as_object)
+        .map(|m| !m.is_empty())
+        .unwrap_or(false);
+    let topology = if has_sparse { "hybrid" } else { "dense" };
+
+    let quantization_ptr = raw.pointer("/config/quantization_config")
+        .or_else(|| raw.pointer("/config/params/quantization_config"));
+
+    let quantization = if let Some(qc) = quantization_ptr.and_then(serde_json::Value::as_object) {
+        if qc.contains_key("scalar") {
+            serde_json::Value::String("scalar".to_string())
+        } else if qc.contains_key("product") {
+            serde_json::Value::String("product".to_string())
+        } else if qc.contains_key("binary") {
+            serde_json::Value::String("binary".to_string())
+        } else {
+            serde_json::Value::Null
+        }
+    } else {
+        serde_json::Value::Null
+    };
+
+    let mut payload_schema = serde_json::Map::new();
+    if let Some(ps) = raw.get("payload_schema").and_then(serde_json::Value::as_object) {
+        for (field, info) in ps {
+            let data_type = info
+                .get("data_type")
+                .or_else(|| info.get("type"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("keyword");
+            let mut entry = serde_json::Map::new();
+            entry.insert("type".to_string(), serde_json::Value::String(data_type.to_string()));
+            if let Some(params) = info.get("params") {
+                entry.insert("params".to_string(), params.clone());
+            }
+            payload_schema.insert(field.clone(), serde_json::Value::Object(entry));
+        }
+    }
+
+    serde_json::json!({
+        "name": name,
+        "status": status,
+        "points_count": points_count,
+        "segments_count": segments_count,
+        "indexed_vectors_count": indexed_vectors_count,
+        "topology": topology,
+        "quantization": quantization,
+        "payload_schema": payload_schema,
+    })
 }

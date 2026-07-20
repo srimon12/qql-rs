@@ -52,6 +52,9 @@ enum Command {
         output: String,
         #[arg(long, default_value = "100")]
         batch_size: u32,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Show version
     Version,
@@ -78,9 +81,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             collection,
             output,
             batch_size,
+            json,
         } => {
             let msg = commands::handle_dump(&collection, &output, batch_size)?;
-            println!("{}", msg);
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "ok": true,
+                        "operation": "dump",
+                        "message": msg,
+                    })
+                );
+            } else {
+                println!("{}", msg);
+            }
             Ok(())
         }
         Command::Version => commands::handle_version(),

@@ -20,12 +20,10 @@ impl FilterConverter {
     pub fn build_filter(
         &self,
         expr: &FilterExpr,
-    ) -> Result<Option<crate::qdrant::Filter>, QqlError> {
+    ) -> Result<Option<crate::backend::Filter>, QqlError> {
         let condition = self.build_condition(expr)?;
         let filter_val = self.wrap_as_filter(condition);
-        let filter: crate::qdrant::Filter =
-            serde_json::from_value(filter_val).map_err(|e| QqlError::runtime(e.to_string()))?;
-        Ok(Some(filter))
+        Ok(Some(crate::backend::Filter::from_json(filter_val)))
     }
 
     fn build_condition(&self, expr: &FilterExpr) -> Result<serde_json::Value, QqlError> {

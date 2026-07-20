@@ -4,20 +4,12 @@ use qql_core::error::QqlError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::pipeline::{PointId, QueryPointsGroupsRequest, QueryPointsRequest};
+use crate::pipeline::{QueryPointsGroupsRequest, QueryPointsRequest};
 
-pub type QdrantFilter = crate::qdrant::Filter;
-pub type PointStruct = crate::qdrant::PointStruct;
-pub type ScoredPoint = crate::qdrant::ScoredPoint;
-pub type PointGroup = crate::qdrant::PointGroup;
-pub type RetrievedPoint = crate::qdrant::Record;
-pub type CollectionInfo = crate::qdrant::CollectionInfo;
-pub type CollectionConfig = crate::qdrant::CollectionConfig;
-pub type CollectionParams = crate::qdrant::CollectionParams;
-pub type VectorsConfigType = crate::qdrant::VectorsConfig;
-pub type VectorParams = crate::qdrant::VectorParams;
-pub type SparseVectorConfig = crate::qdrant::SparseVectorParams;
-pub type PayloadSchemaInfo = crate::qdrant::PayloadIndexInfo;
+pub use crate::backend::{
+    CollectionInfo, Filter as QdrantFilter, Point as PointStruct, PointGroup, PointId,
+    RetrievedPoint, ScoredPoint,
+};
 
 #[derive(Debug, Clone)]
 pub struct VectorTopology {
@@ -136,31 +128,4 @@ pub trait QdrantOps: Send + Sync {
     ) -> Result<(Vec<RetrievedPoint>, Option<PointId>), QqlError>;
     async fn count(&self, req: CountPointsReq) -> Result<u64, QqlError>;
     async fn get(&self, req: GetPointsReq) -> Result<Vec<RetrievedPoint>, QqlError>;
-}
-
-impl From<PointId> for crate::qdrant::ExtendedPointId {
-    fn from(id: PointId) -> Self {
-        match id {
-            PointId::Num(num) => crate::qdrant::ExtendedPointId {
-                num: Some(num),
-                uuid: None,
-            },
-            PointId::Uuid(uuid) => crate::qdrant::ExtendedPointId {
-                num: None,
-                uuid: Some(uuid),
-            },
-        }
-    }
-}
-
-impl From<crate::qdrant::ExtendedPointId> for PointId {
-    fn from(id: crate::qdrant::ExtendedPointId) -> Self {
-        if let Some(num) = id.num {
-            PointId::Num(num)
-        } else if let Some(uuid) = id.uuid {
-            PointId::Uuid(uuid)
-        } else {
-            PointId::Num(0)
-        }
-    }
 }

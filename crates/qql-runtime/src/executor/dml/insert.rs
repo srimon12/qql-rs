@@ -78,12 +78,9 @@ impl Executor {
             .zip(payloads)
             .zip(vectors_batch)
             .map(|((id, payload), vectors)| PointStruct {
-                id: id.into(),
-                vector: serde_json::from_value(vectors.unwrap_or_else(|| serde_json::json!({})))
-                    .unwrap(),
-                payload: Some(
-                    serde_json::from_value(serde_json::to_value(payload).unwrap()).unwrap(),
-                ),
+                id,
+                vector: vectors.unwrap_or_else(|| serde_json::json!({})),
+                payload,
             })
             .collect();
 
@@ -374,43 +371,31 @@ impl Executor {
             rerank_vector: None,
         };
 
-        let config = &info.config;
-        let params = &config.params;
-        if let Some(ref vc) = params.vectors {
-            if let Some(ref map) = vc.subtype_1 {
-                for vname in map.keys() {
-                    if vname == crate::executor::DENSE_VECTOR_NAME {
-                        topo.dense_vector = Some(crate::executor::DENSE_VECTOR_NAME.to_string());
-                    } else if vname == crate::executor::RERANK_VECTOR_NAME {
-                        topo.rerank_vector = Some(crate::executor::RERANK_VECTOR_NAME.to_string());
-                    } else if topo.dense_vector.is_none()
-                        || topo
-                            .dense_vector
-                            .as_ref()
-                            .map(|s| s.is_empty())
-                            .unwrap_or(true)
-                    {
-                        topo.dense_vector = Some(vname.clone());
-                    }
-                }
-            } else if vc.subtype_0.is_some() {
-                topo.dense_vector = Some(String::new());
+        for vname in &info.schema.dense_vectors {
+            if vname == crate::executor::DENSE_VECTOR_NAME {
+                topo.dense_vector = Some(crate::executor::DENSE_VECTOR_NAME.to_string());
+            } else if vname == crate::executor::RERANK_VECTOR_NAME {
+                topo.rerank_vector = Some(crate::executor::RERANK_VECTOR_NAME.to_string());
+            } else if topo.dense_vector.is_none()
+                || topo
+                    .dense_vector
+                    .as_ref()
+                    .is_some_and(|name| name.is_empty())
+            {
+                topo.dense_vector = Some(vname.clone());
             }
         }
 
-        if !params.sparse_vectors.is_empty() {
-            for vname in params.sparse_vectors.keys() {
-                if vname == crate::executor::SPARSE_VECTOR_NAME {
-                    topo.sparse_vector = Some(crate::executor::SPARSE_VECTOR_NAME.to_string());
-                } else if topo.sparse_vector.is_none()
-                    || topo
-                        .sparse_vector
-                        .as_ref()
-                        .map(|s| s.is_empty())
-                        .unwrap_or(true)
-                {
-                    topo.sparse_vector = Some(vname.clone());
-                }
+        for vname in &info.schema.sparse_vectors {
+            if vname == crate::executor::SPARSE_VECTOR_NAME {
+                topo.sparse_vector = Some(crate::executor::SPARSE_VECTOR_NAME.to_string());
+            } else if topo.sparse_vector.is_none()
+                || topo
+                    .sparse_vector
+                    .as_ref()
+                    .is_some_and(|name| name.is_empty())
+            {
+                topo.sparse_vector = Some(vname.clone());
             }
         }
 
