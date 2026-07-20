@@ -224,20 +224,10 @@ fn test_build_expression_match_condition_single() {
     let result = pipeline::build_expression(&expr);
     assert!(result.is_ok());
 
-    let json = result.unwrap();
-    let condition = json.get("condition").unwrap();
-    let field_cond = condition.get("match").unwrap();
-    assert_eq!(field_cond.get("key").unwrap().as_str().unwrap(), "category");
-    assert_eq!(
-        field_cond
-            .get("value")
-            .unwrap()
-            .get("str")
-            .unwrap()
-            .as_str()
-            .unwrap(),
-        "premium"
-    );
+    let condition = result.unwrap();
+    assert_eq!(condition.get("key").unwrap().as_str().unwrap(), "category");
+    let match_obj = condition.get("match").unwrap();
+    assert_eq!(match_obj.get("value").unwrap().as_str().unwrap(), "premium");
 }
 
 #[test]

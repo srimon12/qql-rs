@@ -27,6 +27,7 @@ use crate::lexer::Lexer;
 use crate::token::{Token, TokenKind};
 
 pub struct Parser<'a> {
+    pub input: &'a str,
     tokens: alloc::vec::Vec<Token<'a>>,
     index: usize,
 }
@@ -101,13 +102,13 @@ fn is_contextual_identifier(kind: TokenKind) -> bool {
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(tokens: alloc::vec::Vec<Token<'a>>) -> Self {
-        Self { tokens, index: 0 }
+    pub fn new(input: &'a str, tokens: alloc::vec::Vec<Token<'a>>) -> Self {
+        Self { input, tokens, index: 0 }
     }
 
     pub fn parse(input: &'a str) -> Result<Stmt<'a>, QqlError> {
         let tokens = Self::lex(input)?;
-        let mut parser = Parser::new(tokens);
+        let mut parser = Parser::new(input, tokens);
         let stmt = parser.parse_stmt()?;
         parser.expect_end()?;
         Ok(stmt)
@@ -115,7 +116,7 @@ impl<'a> Parser<'a> {
 
     pub fn try_parse(input: &'a str) -> Result<(), QqlError> {
         let tokens = Self::lex(input)?;
-        let mut parser = Parser::new(tokens);
+        let mut parser = Parser::new(input, tokens);
         parser.parse_stmt()?;
         parser.expect_end()?;
         Ok(())
@@ -123,7 +124,7 @@ impl<'a> Parser<'a> {
 
     pub fn parse_all(input: &'a str) -> Result<alloc::vec::Vec<Stmt<'a>>, QqlError> {
         let tokens = Self::lex(input)?;
-        let mut parser = Parser::new(tokens);
+        let mut parser = Parser::new(input, tokens);
         let mut stmts = alloc::vec::Vec::new();
         while parser.index < parser.tokens.len() {
             if parser.tokens[parser.index].kind == TokenKind::Semicolon {
@@ -189,6 +190,15 @@ impl<'a> Parser<'a> {
             Ok(self.tokens[self.index])
         } else {
             Ok(Token::eof())
+        }
+    }
+
+    pub fn peek_nth(&self, offset: usize) -> Token<'a> {
+        let idx = self.index + offset;
+        if idx < self.tokens.len() {
+            self.tokens[idx]
+        } else {
+            Token::eof()
         }
     }
 

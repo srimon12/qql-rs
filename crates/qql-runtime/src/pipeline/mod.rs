@@ -144,22 +144,17 @@ impl serde::Serialize for QueryVariant {
             QueryVariant::Document {
                 text,
                 model,
-                options,
+                options: _,
             } => {
                 let mut map = serializer.serialize_map(Some(1))?;
-                let mut inner = serde_json::Map::new();
-                let mut doc_map = serde_json::Map::new();
-                doc_map.insert("text".to_string(), serde_json::Value::String(text.clone()));
-                doc_map.insert(
-                    "model".to_string(),
-                    serde_json::Value::String(model.clone()),
-                );
-                doc_map.insert(
-                    "options".to_string(),
-                    serde_json::to_value(options).map_err(serde::ser::Error::custom)?,
-                );
-                inner.insert("document".to_string(), serde_json::Value::Object(doc_map));
-                map.serialize_entry("nearest", &serde_json::Value::Object(inner))?;
+                if model.is_empty() {
+                    map.serialize_entry("nearest", text)?;
+                } else {
+                    let mut doc_map = serde_json::Map::new();
+                    doc_map.insert("text".to_string(), serde_json::Value::String(text.clone()));
+                    doc_map.insert("model".to_string(), serde_json::Value::String(model.clone()));
+                    map.serialize_entry("nearest", &serde_json::Value::Object(doc_map))?;
+                }
                 map.end()
             }
             QueryVariant::Recommend(input) => {
@@ -184,7 +179,7 @@ impl serde::Serialize for QueryVariant {
             }
             QueryVariant::Sample => {
                 let mut map = serializer.serialize_map(Some(1))?;
-                map.serialize_entry("sample", &0)?;
+                map.serialize_entry("sample", &"random")?;
                 map.end()
             }
             QueryVariant::Fusion(ft) => {
@@ -199,16 +194,10 @@ impl serde::Serialize for QueryVariant {
             }
             QueryVariant::Formula {
                 expression,
-                defaults,
+                defaults: _,
             } => {
                 let mut map = serializer.serialize_map(Some(1))?;
-                let mut formula_map = serde_json::Map::new();
-                formula_map.insert("expression".to_string(), expression.clone());
-                formula_map.insert(
-                    "defaults".to_string(),
-                    serde_json::to_value(defaults).map_err(serde::ser::Error::custom)?,
-                );
-                map.serialize_entry("formula", &serde_json::Value::Object(formula_map))?;
+                map.serialize_entry("formula", expression)?;
                 map.end()
             }
             QueryVariant::RelevanceFeedback(input) => {
@@ -343,22 +332,25 @@ impl serde::Serialize for VectorInput {
                 model,
                 options,
             } => {
-                use serde::ser::SerializeMap;
-                let mut map = serializer.serialize_map(Some(1))?;
-                let mut doc_map = serde_json::Map::new();
-                doc_map.insert("text".to_string(), serde_json::Value::String(text.clone()));
-                doc_map.insert(
-                    "model".to_string(),
-                    serde_json::Value::String(model.clone()),
-                );
-                if !options.is_empty() {
-                    doc_map.insert(
-                        "options".to_string(),
-                        serde_json::to_value(options).map_err(serde::ser::Error::custom)?,
-                    );
+                if model.is_empty() && options.is_empty() {
+                    text.serialize(serializer)
+                } else {
+                    let mut doc_map = serde_json::Map::new();
+                    doc_map.insert("text".to_string(), serde_json::Value::String(text.clone()));
+                    if !model.is_empty() {
+                        doc_map.insert(
+                            "model".to_string(),
+                            serde_json::Value::String(model.clone()),
+                        );
+                    }
+                    if !options.is_empty() {
+                        doc_map.insert(
+                            "options".to_string(),
+                            serde_json::to_value(options).map_err(serde::ser::Error::custom)?,
+                        );
+                    }
+                    doc_map.serialize(serializer)
                 }
-                map.serialize_entry("document", &serde_json::Value::Object(doc_map))?;
-                map.end()
             }
         }
     }
@@ -367,6 +359,7 @@ impl serde::Serialize for VectorInput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct PrefetchQuery {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub prefetch: Vec<PrefetchQuery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub query: Option<QueryVariant>,
@@ -392,19 +385,51 @@ pub struct LookupLocation {
     pub vector_name: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct WithPayload {
     pub enable: Option<bool>,
     pub include: Vec<String>,
     pub exclude: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+impl serde::Serialize for WithPayload {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        if !self.exclude.is_empty() {
+            use serde::ser::SerializeMap;
+            let mut map = serializer.serialize_map(Some(1))?;
+            map.serialize_entry("exclude", &self.exclude)?;
+            map.end()
+        } else if !self.include.is_empty() {
+            use serde::ser::SerializeMap;
+            let mut map = serializer.serialize_map(Some(1))?;
+            map.serialize_entry("include", &self.include)?;
+            map.end()
+        } else {
+            self.enable.unwrap_or(false).serialize(serializer)
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct WithVectors {
     pub enable: Option<bool>,
     pub vectors: Vec<String>,
+}
+
+impl serde::Serialize for WithVectors {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        if self.vectors.is_empty() {
+            self.enable.unwrap_or(false).serialize(serializer)
+        } else {
+            self.vectors.serialize(serializer)
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -415,9 +440,11 @@ pub struct WithLookup {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueryPointsRequest {
+    #[serde(skip_serializing)]
     pub collection_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub query: Option<QueryVariant>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub prefetch: Vec<PrefetchQuery>,
     pub limit: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -426,7 +453,7 @@ pub struct QueryPointsRequest {
     pub filter: Option<Filter>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub with_payload: Option<WithPayload>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "with_vector", skip_serializing_if = "Option::is_none")]
     pub with_vectors: Option<WithVectors>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub score_threshold: Option<f32>,
@@ -441,9 +468,11 @@ pub struct QueryPointsRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueryPointsGroupsRequest {
+    #[serde(skip_serializing)]
     pub collection_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub query: Option<QueryVariant>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub prefetch: Vec<PrefetchQuery>,
     pub limit: u64,
     pub group_by: String,
@@ -454,7 +483,7 @@ pub struct QueryPointsGroupsRequest {
     pub filter: Option<Filter>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub with_payload: Option<WithPayload>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "with_vector", skip_serializing_if = "Option::is_none")]
     pub with_vectors: Option<WithVectors>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub score_threshold: Option<f32>,
@@ -553,6 +582,24 @@ impl QueryPipeline {
                 .into_iter()
                 .filter_map(|(key, value)| value.as_f64().map(|value| (key, value)))
                 .collect();
+
+            if let Some(ref target) = state.target_query {
+                prefetches.push(PrefetchQuery {
+                    prefetch: Vec::new(),
+                    query: Some(target.clone()),
+                    using: if state.vector_name.is_empty() {
+                        None
+                    } else {
+                        Some(state.vector_name.clone())
+                    },
+                    limit: Some(state.limit),
+                    params: None,
+                    filter: None,
+                    score_threshold: None,
+                    lookup_from: None,
+                });
+            }
+
             Some(QueryVariant::Formula {
                 expression: f.clone(),
                 defaults,

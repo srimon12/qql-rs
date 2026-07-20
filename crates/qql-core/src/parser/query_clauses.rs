@@ -54,6 +54,12 @@ impl<'a> Parser<'a> {
 
     pub fn parse_context_pairs(&mut self, label: &str) -> Result<Vec<ContextPair<'a>>, QqlError> {
         let mut pairs = Vec::new();
+        let outer_paren = if self.peek()?.kind == TokenKind::Lparen && self.peek_nth(1).kind == TokenKind::Lparen {
+            self.advance()?;
+            true
+        } else {
+            false
+        };
         loop {
             self.expect(TokenKind::Lparen)?;
             let pos_id = self.parse_point_id_value(&alloc::format!("{} POSITIVE", label))?;
@@ -68,8 +74,12 @@ impl<'a> Parser<'a> {
                 self.advance()?;
                 continue;
             }
-            return Ok(pairs);
+            break;
         }
+        if outer_paren {
+            self.expect(TokenKind::Rparen)?;
+        }
+        Ok(pairs)
     }
 
     // ── Feedback items ──────────────────────────────────────────

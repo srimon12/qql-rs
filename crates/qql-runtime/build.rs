@@ -119,9 +119,11 @@ fn main() {
     let mut type_space = TypeSpace::new(&TypeSpaceSettings::default());
     type_space.add_ref_types(type_defs).unwrap();
 
-    let contents = type_space.to_stream().to_string();
+    let token_stream = type_space.to_stream();
+    let file = syn::parse2(token_stream).expect("Failed to parse generated Rust tokens");
+    let formatted = prettyplease::unparse(&file);
 
     let out_dir = env::var_os("OUT_DIR").unwrap();
     let dest_path = Path::new(&out_dir).join("qdrant_types.rs");
-    fs::write(dest_path, contents).unwrap();
+    fs::write(dest_path, formatted).unwrap();
 }

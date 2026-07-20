@@ -23,3 +23,8 @@ qdrant-client = { version = "1.18", default-features = false, optional = true, f
 typify = "0.7"
 serde_json = "1"
 schemars = "0.8"
+prettyplease = "0.2"
+syn = "2"
+
+[dev-dependencies]
+jsonschema = "0.26"

@@ -1030,6 +1030,14 @@ fn to_grpc_query_points(
     })
 }
 
+impl TryFrom<QueryPointsRequest> for qdrant_client::qdrant::QueryPoints {
+    type Error = QqlError;
+
+    fn try_from(req: QueryPointsRequest) -> Result<Self, Self::Error> {
+        to_grpc_query_points(req)
+    }
+}
+
 fn to_grpc_query_point_groups(
     req: QueryPointsGroupsRequest,
 ) -> Result<qdrant_client::qdrant::QueryPointGroups, QqlError> {
@@ -1109,10 +1117,10 @@ fn parse_json_vector_params(
         .and_then(|v| v.as_str())
         .unwrap_or("Cosine");
     let distance = match distance_str.to_lowercase().as_str() {
-        "cosine" => 1,
-        "dot" => 2,
-        "euclid" | "euclidean" => 3,
-        "manhattan" => 4,
+        "cosine" => qdrant_client::qdrant::Distance::Cosine as i32,
+        "dot" => qdrant_client::qdrant::Distance::Dot as i32,
+        "euclid" | "euclidean" => qdrant_client::qdrant::Distance::Euclid as i32,
+        "manhattan" => qdrant_client::qdrant::Distance::Manhattan as i32,
         _ => {
             return Err(QqlError::runtime(format!(
                 "unknown distance: {distance_str}"
@@ -1220,8 +1228,8 @@ fn parse_json_quantization_config(
             .and_then(|v| v.as_str())
             .unwrap_or("Int8")
         {
-            "Int8" => 1,
-            _ => 1,
+            "Int8" => qdrant_client::qdrant::QuantizationType::Int8 as i32,
+            _ => qdrant_client::qdrant::QuantizationType::Int8 as i32,
         };
         let quantile = scalar_obj
             .get("quantile")
@@ -1246,11 +1254,11 @@ fn parse_json_quantization_config(
             .and_then(|v| v.as_str())
             .unwrap_or("x8")
         {
-            "x8" => 1,
-            "x16" => 2,
-            "x32" => 3,
-            "x64" => 4,
-            _ => 1,
+            "x8" => qdrant_client::qdrant::CompressionRatio::X8 as i32,
+            "x16" => qdrant_client::qdrant::CompressionRatio::X16 as i32,
+            "x32" => qdrant_client::qdrant::CompressionRatio::X32 as i32,
+            "x64" => qdrant_client::qdrant::CompressionRatio::X64 as i32,
+            _ => qdrant_client::qdrant::CompressionRatio::X8 as i32,
         };
         let always_ram = product_obj.get("always_ram").and_then(|v| v.as_bool());
         Some(
@@ -1282,8 +1290,8 @@ fn parse_json_quantization_config_diff(
             .and_then(|v| v.as_str())
             .unwrap_or("Int8")
         {
-            "Int8" => 1,
-            _ => 1,
+            "Int8" => qdrant_client::qdrant::QuantizationType::Int8 as i32,
+            _ => qdrant_client::qdrant::QuantizationType::Int8 as i32,
         };
         let quantile = scalar_obj
             .get("quantile")
@@ -1308,11 +1316,11 @@ fn parse_json_quantization_config_diff(
             .and_then(|v| v.as_str())
             .unwrap_or("x8")
         {
-            "x8" => 1,
-            "x16" => 2,
-            "x32" => 3,
-            "x64" => 4,
-            _ => 1,
+            "x8" => qdrant_client::qdrant::CompressionRatio::X8 as i32,
+            "x16" => qdrant_client::qdrant::CompressionRatio::X16 as i32,
+            "x32" => qdrant_client::qdrant::CompressionRatio::X32 as i32,
+            "x64" => qdrant_client::qdrant::CompressionRatio::X64 as i32,
+            _ => qdrant_client::qdrant::CompressionRatio::X8 as i32,
         };
         let always_ram = product_obj.get("always_ram").and_then(|v| v.as_bool());
         Some(
@@ -1441,14 +1449,15 @@ impl QdrantOps for GrpcQdrant {
 
         let mut payload_schema = serde_json::Map::new();
         for (field, idx_info) in &info.payload_schema {
-            let data_type = match idx_info.data_type {
-                5 => "text",
-                2 => "integer",
-                3 => "float",
-                4 => "geo",
-                6 => "bool",
-                7 => "datetime",
-                8 => "uuid",
+            let schema_type = qdrant_client::qdrant::PayloadSchemaType::try_from(idx_info.data_type).ok();
+            let data_type = match schema_type {
+                Some(qdrant_client::qdrant::PayloadSchemaType::Text) => "text",
+                Some(qdrant_client::qdrant::PayloadSchemaType::Integer) => "integer",
+                Some(qdrant_client::qdrant::PayloadSchemaType::Float) => "float",
+                Some(qdrant_client::qdrant::PayloadSchemaType::Geo) => "geo",
+                Some(qdrant_client::qdrant::PayloadSchemaType::Bool) => "bool",
+                Some(qdrant_client::qdrant::PayloadSchemaType::Datetime) => "datetime",
+                Some(qdrant_client::qdrant::PayloadSchemaType::Uuid) => "uuid",
                 _ => {
                     if let Some(ref p) = idx_info.params {
                         if let Some(ref ip) = p.index_params {
@@ -1657,7 +1666,7 @@ impl QdrantOps for GrpcQdrant {
     }
 
     async fn query(&self, req: QueryPointsRequest) -> Result<Vec<ScoredPoint>, QqlError> {
-        let grpc_req = to_grpc_query_points(req)?;
+        let grpc_req = qdrant_client::qdrant::QueryPoints::try_from(req)?;
         let resp = self
             .client
             .query(grpc_req)

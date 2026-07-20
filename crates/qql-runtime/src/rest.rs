@@ -14,7 +14,7 @@ use crate::client::{
     SetPayloadReq, UpdateVectorsReq, UpsertPointsReq,
 };
 use crate::pipeline::{
-    PointId, QueryPointsGroupsRequest, QueryPointsRequest, WithPayload, WithVectors,
+    PointId, QueryPointsGroupsRequest, QueryPointsRequest,
 };
 
 /// REST implementation of [`QdrantOps`].
@@ -109,23 +109,7 @@ fn points_result(value: Value) -> Result<Vec<ScoredPoint>, QqlError> {
         .map_err(|error| QqlError::runtime(format!("invalid Qdrant query result: {error}")))
 }
 
-fn with_payload_json(selection: &WithPayload) -> Value {
-    if !selection.exclude.is_empty() {
-        json!({ "exclude": selection.exclude })
-    } else if !selection.include.is_empty() {
-        json!({ "include": selection.include })
-    } else {
-        json!(selection.enable.unwrap_or(false))
-    }
-}
 
-fn with_vectors_json(selection: &WithVectors) -> Value {
-    if selection.vectors.is_empty() {
-        json!(selection.enable.unwrap_or(false))
-    } else {
-        json!(selection.vectors)
-    }
-}
 
 fn remove_nulls(value: &mut Value) {
     match value {
@@ -149,17 +133,6 @@ pub(crate) fn query_request_json(request: &QueryPointsRequest) -> Result<Value, 
         QqlError::runtime(format!("failed to serialize query request: {error}"))
     })?;
     remove_nulls(&mut body);
-    let object = body
-        .as_object_mut()
-        .ok_or_else(|| QqlError::runtime("query request must serialize as an object"))?;
-    object.remove("collection_name");
-    if let Some(payload) = &request.with_payload {
-        object.insert("with_payload".to_string(), with_payload_json(payload));
-    }
-    if let Some(vectors) = &request.with_vectors {
-        object.remove("with_vectors");
-        object.insert("with_vector".to_string(), with_vectors_json(vectors));
-    }
     Ok(body)
 }
 
@@ -172,17 +145,6 @@ pub(crate) fn grouped_query_request_json(
         ))
     })?;
     remove_nulls(&mut body);
-    let object = body
-        .as_object_mut()
-        .ok_or_else(|| QqlError::runtime("grouped query request must serialize as an object"))?;
-    object.remove("collection_name");
-    if let Some(payload) = &request.with_payload {
-        object.insert("with_payload".to_string(), with_payload_json(payload));
-    }
-    if let Some(vectors) = &request.with_vectors {
-        object.remove("with_vectors");
-        object.insert("with_vector".to_string(), with_vectors_json(vectors));
-    }
     Ok(body)
 }
 

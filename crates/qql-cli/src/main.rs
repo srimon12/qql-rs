@@ -28,6 +28,9 @@ enum Command {
         /// Output as JSON
         #[arg(long)]
         json: bool,
+        /// Quiet mode
+        #[arg(long, short)]
+        quiet: bool,
     },
     /// Execute multiple QQL queries from a file
     Execute {
@@ -69,7 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|| "http://localhost:6333".to_string());
 
     match cli.command {
-        Command::Exec { query, json } => commands::handle_exec(&url, &query, json).await,
+        Command::Exec { query, json, quiet: _ } => commands::handle_exec(&url, &query, json).await,
         Command::Execute {
             file,
             stop_on_error,

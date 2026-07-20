@@ -21,3 +21,6 @@ mod sparse_test;
 mod executor_test;
 #[cfg(test)]
 mod filter_conv_test;
+#[cfg(test)]
+mod contract_test;
+

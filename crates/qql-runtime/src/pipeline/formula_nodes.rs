@@ -27,8 +27,15 @@ impl ExecutionNode for FormulaNode {
 
 pub fn build_expression(expr: &ast::FormulaExpr) -> Result<serde_json::Value, QqlError> {
     match expr {
-        ast::FormulaExpr::Constant { value } => Ok(serde_json::json!({"constant": value})),
-        ast::FormulaExpr::Variable { name } => Ok(serde_json::json!({"variable": name})),
+        ast::FormulaExpr::Constant { value } => Ok(serde_json::json!(value)),
+        ast::FormulaExpr::Variable { name } => {
+            let var_name = if *name == "score" || name.starts_with('$') {
+                format!("${}", name.trim_start_matches('$'))
+            } else {
+                name.to_string()
+            };
+            Ok(serde_json::json!(var_name))
+        }
         ast::FormulaExpr::Datetime { value } => Ok(serde_json::json!({"datetime": value})),
         ast::FormulaExpr::DatetimeKey { key } => Ok(serde_json::json!({"datetime_key": key})),
         ast::FormulaExpr::Sum { left, right } => {
@@ -131,17 +138,23 @@ pub fn build_expression(expr: &ast::FormulaExpr) -> Result<serde_json::Value, Qq
             Ok(serde_json::json!({decay_key: decay}))
         }
         ast::FormulaExpr::Case { cond, then_, else_ } => {
-            let filter_converter = FilterConverter::new();
-            let qdrant_filter = filter_converter
-                .build_filter(cond)?
-                .ok_or_else(|| QqlError::runtime("empty condition in CASE expression"))?;
-            let cond_json = serde_json::to_value(&qdrant_filter)
-                .map_err(|e| QqlError::runtime(format!("failed to serialize filter: {}", e)))?;
-            let cond_expr = serde_json::json!({"condition": cond_json});
-            let not_cond_filter = serde_json::json!({
-                "must_not": [{"filter": cond_json}]
+            let cond_expr = match cond.as_ref() {
+                ast::FilterExpr::Compare { field, op: "=", value } => {
+                    build_match_condition_expression(field, &[value.clone()])?
+                }
+                _ => {
+                    let filter_converter = FilterConverter::new();
+                    let qdrant_filter = filter_converter
+                        .build_filter(cond)?
+                        .ok_or_else(|| QqlError::runtime("empty condition in CASE expression"))?;
+                    let cond_json = serde_json::to_value(&qdrant_filter)
+                        .map_err(|e| QqlError::runtime(format!("failed to serialize filter: {}", e)))?;
+                    serde_json::json!({"filter": cond_json})
+                }
+            };
+            let not_cond_expr = serde_json::json!({
+                "sum": [1.0, {"neg": cond_expr.clone()}]
             });
-            let not_cond_expr = serde_json::json!({"condition": not_cond_filter});
             let then_expr = build_expression(then_)?;
             let else_expr = build_expression(else_)?;
             let then_part = serde_json::json!({"mult": [cond_expr, then_expr]});
@@ -165,19 +178,19 @@ pub fn build_match_condition_expression(
     if values.len() == 1 {
         let condition = match &values[0] {
             ast::Value::Str(s) => {
-                serde_json::json!({"match": {"key": field, "value": {"str": s}}})
+                serde_json::json!({"key": field, "match": {"value": s}})
             }
             ast::Value::Int(i) => {
-                serde_json::json!({"match": {"key": field, "value": {"int": *i}}})
+                serde_json::json!({"key": field, "match": {"value": i}})
             }
             ast::Value::Float(f) => {
-                serde_json::json!({"range": {"key": field, "gte": f, "lte": f}})
+                serde_json::json!({"key": field, "range": {"gte": f, "lte": f}})
             }
             _ => {
                 return Err(QqlError::runtime("MATCH value must be a string or number"));
             }
         };
-        Ok(serde_json::json!({"condition": condition}))
+        Ok(condition)
     } else {
         let first = &values[0];
         match first {

@@ -263,11 +263,37 @@ impl<'a> Parser<'a> {
             self.advance()?;
             if self.peek()?.kind == TokenKind::Any {
                 self.advance()?;
-                let text_tok = self.expect(TokenKind::String)?;
-                return Ok(FilterExpr::MatchAny {
-                    field,
-                    text: text_tok.text,
-                });
+                if self.peek()?.kind == TokenKind::Lparen {
+                    self.advance()?;
+                    let first_tok = self.expect(TokenKind::String)?;
+                    let mut last_tok = first_tok;
+                    while self.peek()?.kind == TokenKind::Comma || self.peek()?.kind == TokenKind::String {
+                        if self.peek()?.kind == TokenKind::Comma {
+                            self.advance()?;
+                        }
+                        if self.peek()?.kind == TokenKind::String {
+                            last_tok = self.advance()?;
+                        }
+                    }
+                    self.expect(TokenKind::Rparen)?;
+                    let text = if first_tok.pos == last_tok.pos {
+                        first_tok.text
+                    } else {
+                        &self.input[first_tok.pos + 1..last_tok.pos + last_tok.text.len() + 1]
+                    };
+                    return Ok(FilterExpr::MatchAny { field, text });
+                }
+                let first_tok = self.expect(TokenKind::String)?;
+                let mut last_tok = first_tok;
+                while self.peek()?.kind == TokenKind::String {
+                    last_tok = self.advance()?;
+                }
+                let text = if first_tok.pos == last_tok.pos {
+                    first_tok.text
+                } else {
+                    &self.input[first_tok.pos + 1..last_tok.pos + last_tok.text.len() + 1]
+                };
+                return Ok(FilterExpr::MatchAny { field, text });
             }
             if self.peek()?.kind == TokenKind::Phrase {
                 self.advance()?;
