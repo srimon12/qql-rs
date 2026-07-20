@@ -65,6 +65,7 @@ impl Executor {
         ))
     }
 
+    #[cfg(feature = "grpc")]
     pub fn grpc(url: &str, api_key: Option<String>) -> Result<Self, QqlError> {
         Ok(Self::new(
             Box::new(crate::grpc::GrpcQdrant::from_url(url, api_key)?),

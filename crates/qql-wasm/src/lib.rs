@@ -122,3 +122,90 @@ fn serde_json_to_value(jv: serde_json::Value) -> Option<Value<'static>> {
         }
     }
 }
+
+#[wasm_bindgen]
+pub fn compile(query: &str) -> Result<JsValue, JsValue> {
+    let compiled = qql::offline::compile(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    serde_wasm_bindgen::to_value(&compiled).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+#[wasm_bindgen]
+pub fn explain(query: &str) -> Result<String, JsValue> {
+    qql::executor::Executor::explain(query).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+#[wasm_bindgen]
+pub struct HttpEmbedder {
+    endpoint: String,
+    api_key: String,
+    model: String,
+    dimension: usize,
+}
+
+#[wasm_bindgen]
+impl HttpEmbedder {
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        endpoint: &str,
+        model: &str,
+        dimension: usize,
+        api_key: Option<String>,
+    ) -> HttpEmbedder {
+        HttpEmbedder {
+            endpoint: endpoint.to_string(),
+            api_key: api_key.unwrap_or_default(),
+            model: model.to_string(),
+            dimension,
+        }
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn endpoint(&self) -> String {
+        self.endpoint.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn model(&self) -> String {
+        self.model.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn dimension(&self) -> usize {
+        self.dimension
+    }
+}
+
+#[wasm_bindgen]
+pub struct Client {
+    url: String,
+    api_key: Option<String>,
+    embedder: Option<HttpEmbedder>,
+}
+
+#[wasm_bindgen]
+impl Client {
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        url: Option<String>,
+        api_key: Option<String>,
+        embedder: Option<HttpEmbedder>,
+    ) -> Client {
+        Client {
+            url: url.unwrap_or_else(|| "http://localhost:6333".to_string()),
+            api_key,
+            embedder,
+        }
+    }
+
+    #[wasm_bindgen]
+    pub fn compile(&self, query: &str) -> Result<JsValue, JsValue> {
+        let compiled =
+            qql::offline::compile(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        serde_wasm_bindgen::to_value(&compiled).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    #[wasm_bindgen]
+    pub fn explain(&self, query: &str) -> Result<String, JsValue> {
+        qql::executor::Executor::explain(query).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+}

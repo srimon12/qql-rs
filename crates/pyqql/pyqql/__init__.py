@@ -1,5 +1,9 @@
 from .pyqql import (
+    Client,
+    HttpEmbedder,
     compile_query,
+    execute,
+    explain,
     inject_filter,
     is_valid,
     parse,
@@ -9,7 +13,11 @@ from .pyqql import (
 )
 
 __all__ = [
+    "Client",
+    "HttpEmbedder",
     "compile_query",
+    "execute",
+    "explain",
     "inject_filter",
     "is_valid",
     "parse",

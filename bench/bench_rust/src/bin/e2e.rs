@@ -131,7 +131,7 @@ const QUERIES: &[(&str, &str)] = &[
     ("WithPayload", "QUERY 'search' FROM docs LIMIT 10 WITH PAYLOAD (include = ['title', 'body']) WITH VECTORS ('dense')"),
 ];
 
-async fn bench(executor: &Executor, name: &str, q: &str, iterations: usize) -> Duration {
+async fn bench(executor: &Executor, _name: &str, q: &str, iterations: usize) -> Duration {
     // warmup
     for _ in 0..100 {
         let _ = executor.execute(q).await;

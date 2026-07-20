@@ -10,6 +10,39 @@ class TestPyQql(unittest.TestCase):
         self.assertEqual(ast["Query"]["collection"], "docs")
         self.assertEqual(ast["Query"]["query_text"], "hello")
 
+    def test_explain(self):
+        query = "QUERY 'hello' FROM docs LIMIT 10"
+        plan = pyqql.explain(query)
+        self.assertIn("Action: Explain-only mode", plan)
+
+    def test_client_instantiation(self):
+        client = pyqql.Client("http://localhost:6333", use_grpc=False)
+        plan = client.explain("QUERY 'hello' FROM docs LIMIT 10")
+        self.assertIn("Action: Explain-only mode", plan)
+
+    def test_client_first_class_embedder(self):
+        embedder = pyqql.HttpEmbedder(
+            endpoint="http://localhost:11434/v1/embeddings",
+            model="nomic-embed-text",
+            dimension=768,
+            api_key="embed-key"
+        )
+        client = pyqql.Client("http://localhost:6333", api_key="test-key", embedder=embedder)
+        plan = client.explain("QUERY 'hello' FROM docs LIMIT 10")
+        self.assertIn("Action: Explain-only mode", plan)
+
+    def test_client_dict_embedder(self):
+        client = pyqql.Client(
+            "http://localhost:6333",
+            embedder={
+                "endpoint": "http://localhost:11434/v1/embeddings",
+                "model": "nomic-embed-text",
+                "dimension": 768
+            }
+        )
+        plan = client.explain("QUERY 'hello' FROM docs LIMIT 10")
+        self.assertIn("Action: Explain-only mode", plan)
+
     def test_parse_batch(self):
         queries = ["QUERY 'test' FROM users LIMIT 5", "CREATE COLLECTION items"]
         results = pyqql.parse_batch(queries)

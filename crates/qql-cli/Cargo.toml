@@ -7,9 +7,14 @@ edition.workspace = true
 name = "qql"
 path = "src/main.rs"
 
+[features]
+default = ["grpc", "rest"]
+grpc = ["qql/grpc"]
+rest = ["qql/rest"]
+
 [dependencies]
 qql-core = { path = "../qql-core" }
-qql = { path = "../qql-runtime" }
+qql = { path = "../qql-runtime", default-features = false }
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 serde = { version = "1", features = ["derive"] }

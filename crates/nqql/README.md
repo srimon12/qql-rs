@@ -1,11 +1,13 @@
 # nqql
 
-Node.js native bindings for the QQL parser, compiled using N-API (`napi-rs`).
+Node.js native bindings for the QQL parser and execution engine, compiled using N-API (`napi-rs`).
 
 ## Features
 
+- **Live Qdrant Execution**: Connect to live Qdrant instances over REST (default) or gRPC
+- **First-Class Embedding Inference**: Integrate custom HTTP embedder models (Ollama, OpenAI, vLLM, TEI)
+- **Fast JSON Parsing**: High-throughput JSON string and object deserialization
 - **Native parsing**: Rust-speed QQL parsing in Node.js
-- **Tokenization**: Access raw lexer tokens
 - **Filter injection**: Add tenant isolation filters to parsed queries
 - **Validation**: Check if a query string is valid QQL
 
@@ -15,42 +17,49 @@ Node.js native bindings for the QQL parser, compiled using N-API (`napi-rs`).
 npm install nqql
 ```
 
-## Usage
+## Quick Start
 
 ```javascript
-const nqql = require('nqql');
+const { Client, HttpEmbedder, parse, isValid, injectFilter } = require('nqql');
 
-// Parse to debug-formatted AST
-const ast = nqql.parse("QUERY 'full text match' FROM articles LIMIT 10");
-console.log(ast);
+// 1. Connect to live Qdrant with optional custom embedding provider
+const embedder = new HttpEmbedder({
+    endpoint: "http://localhost:11434/v1/embeddings",
+    model: "nomic-embed-text",
+    dimension: 768,
+    apiKey: "optional-key"
+});
 
-// Parse multiple statements
-const stmts = nqql.parseAll("INSERT INTO docs ...; QUERY 'text' FROM docs ...");
-console.log(stmts);
+const client = new Client({
+    url: "http://localhost:6333",
+    apiKey: "optional-qdrant-secret",
+    useGrpc: false,
+    embedder: embedder
+});
 
-// Validate without returning the AST
-const valid = nqql.isValid("SELECT * FROM docs WHERE id = 1");
+// Execute QQL query
+const result = client.execute("QUERY 'cardiology' FROM medical_records LIMIT 5");
+console.log(result);
 
-// Inject filter (tenant isolation). Value is plain JSON; legacy tagged JSON is accepted.
-const secured = nqql.injectFilter(
-    "QUERY 'search' FROM docs LIMIT 10",
-    "org_id",
-    "=",
-    '"acme-corp"'
-);
+// Explain query execution plan
+const plan = client.explain("QUERY 'test' FROM docs LIMIT 5");
+console.log(plan);
 
-// Tokenize
-const tokens = nqql.tokenizeJson("QUERY 'hello' FROM docs LIMIT 5");
+// 2. Pure AST Parsing & Filter Injection
+const ast = parse("QUERY 'full text match' FROM articles LIMIT 10");
+const valid = isValid("SELECT * FROM docs WHERE id = 1");
+const secured = injectFilter("QUERY 'search' FROM docs LIMIT 10", "org_id", "=", '"acme-corp"');
 ```
 
-## API
+## API Summary
 
-| Function | Returns | Description |
-|---|---|---|
-| `parse(input)` | `string` | Parse single statement → debug AST |
-| `parseAll(input)` | `string[]` | Parse multiple semicolon-separated statements |
-| `parseBatch(queries)` | `string[]` | Parse an array of query strings |
-| `isValid(input)` | `boolean` | Check if query string is valid QQL |
-| `injectFilter(query, field, op, valueJson)` | `string` | Inject filter into query AST |
-| `tokenize(input)` | `string` | Tokenize query string (JSON) |
-| `tokenizeJson(input)` | `string` | Tokenize query string (JSON) |
+| Export | Description |
+|---|---|
+| `Client(options)` | Class for executing QQL against a live Qdrant database |
+| `HttpEmbedder(options)` | First-class HTTP embedding provider configuration |
+| `execute(query, options)` | One-off helper function to execute a QQL statement |
+| `explain(query)` | Inspect the execution plan without executing network calls |
+| `parse(input)` | Parse single statement to AST object |
+| `parseFastJson(input)` | Fast JSON-path string parse for V8 performance |
+| `isValid(input)` | Validate QQL syntax |
+| `injectFilter(query, field, op, valueJson)` | Inject tenant filter into statement AST |

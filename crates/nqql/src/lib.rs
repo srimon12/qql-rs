@@ -159,3 +159,184 @@ fn serde_json_to_value(jv: serde_json::Value) -> Option<Value<'static>> {
         }
     }
 }
+
+#[napi(js_name = "HttpEmbedder")]
+#[derive(Clone)]
+pub struct JsHttpEmbedder {
+    pub endpoint: String,
+    pub api_key: String,
+    pub model: String,
+    pub dimension: u32,
+}
+
+#[napi]
+impl JsHttpEmbedder {
+    #[napi(constructor)]
+    pub fn new(options: serde_json::Value) -> napi::Result<Self> {
+        let ep = options
+            .get("endpoint")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let key = options
+            .get("apiKey")
+            .or_else(|| options.get("api_key"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let model = options
+            .get("model")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let dim = options
+            .get("dimension")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32;
+
+        Ok(JsHttpEmbedder {
+            endpoint: ep,
+            api_key: key,
+            model,
+            dimension: dim,
+        })
+    }
+}
+
+fn create_js_executor(
+    options: Option<serde_json::Value>,
+) -> napi::Result<(qql::executor::Executor, tokio::runtime::Runtime)> {
+    let opts = options.unwrap_or_else(|| serde_json::json!({}));
+    let url_str = opts
+        .get("url")
+        .and_then(|v| v.as_str())
+        .unwrap_or("http://localhost:6333");
+    let api_key = opts
+        .get("apiKey")
+        .or_else(|| opts.get("api_key"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let grpc = opts
+        .get("useGrpc")
+        .or_else(|| opts.get("use_grpc"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let rt = tokio::runtime::Runtime::new()
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+
+    let mut config = qql::config::QqlConfig::default();
+    config.url = url_str.to_string();
+    config.secret = api_key.clone();
+
+    if let Some(emb) = opts.get("embedder") {
+        if let Some(ep) = emb.get("endpoint").and_then(|v| v.as_str()) {
+            config.embedding_endpoint = Some(ep.to_string());
+            config.embedding_api_key = emb
+                .get("apiKey")
+                .or_else(|| emb.get("api_key"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            config.embedding_model = emb.get("model").and_then(|v| v.as_str()).map(String::from);
+            config.embedding_dimension = emb
+                .get("dimension")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize;
+        }
+    }
+
+    let client: Box<dyn qql::client::QdrantOps> = if grpc {
+        #[cfg(feature = "grpc")]
+        {
+            Box::new(
+                qql::grpc::GrpcQdrant::from_url(url_str, api_key)
+                    .map_err(|e| napi::Error::from_reason(e.to_string()))?,
+            )
+        }
+        #[cfg(not(feature = "grpc"))]
+        {
+            return Err(napi::Error::from_reason(
+                "gRPC feature not enabled in this build",
+            ));
+        }
+    } else {
+        Box::new(
+            qql::rest::RestQdrant::new(url_str.to_string(), api_key)
+                .map_err(|e| napi::Error::from_reason(e.to_string()))?,
+        )
+    };
+
+    let embedder = if let Some(endpoint) = &config.embedding_endpoint {
+        if !endpoint.trim().is_empty() {
+            let api_key = config.embedding_api_key.clone().unwrap_or_default();
+            let model = config.embedding_model.clone().unwrap_or_default();
+            let dim = config.embedding_dimension;
+            let http_emb = qql::embedder::HttpEmbedder::new(endpoint.clone(), api_key, model, dim)
+                .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+            Some(std::sync::Arc::new(http_emb) as std::sync::Arc<dyn qql::embedder::Embedder>)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let exec = qql::executor::Executor::with_embedder(client, Some(config), embedder);
+
+    Ok((exec, rt))
+}
+
+#[napi(js_name = "Client")]
+pub struct JsClient {
+    inner: qql::executor::Executor,
+    runtime: tokio::runtime::Runtime,
+}
+
+#[napi]
+impl JsClient {
+    #[napi(constructor)]
+    pub fn new(options: Option<serde_json::Value>) -> napi::Result<Self> {
+        let (exec, rt) = create_js_executor(options)?;
+        Ok(JsClient {
+            inner: exec,
+            runtime: rt,
+        })
+    }
+
+    #[napi]
+    pub fn execute(&self, query: String) -> napi::Result<serde_json::Value> {
+        let res = self
+            .runtime
+            .block_on(self.inner.execute(&query))
+            .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+
+        serde_json::to_value(&res).map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
+    #[napi]
+    pub fn execute_json(&self, query: String) -> napi::Result<String> {
+        let res = self
+            .runtime
+            .block_on(self.inner.execute(&query))
+            .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+
+        serde_json::to_string(&res).map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
+    #[napi]
+    pub fn explain(&self, query: String) -> napi::Result<String> {
+        qql::executor::Executor::explain(&query)
+            .map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+}
+
+#[napi]
+pub fn execute(query: String, options: Option<serde_json::Value>) -> napi::Result<serde_json::Value> {
+    let client = JsClient::new(options)?;
+    client.execute(query)
+}
+
+#[napi]
+pub fn explain(query: String) -> napi::Result<String> {
+    qql::executor::Executor::explain(&query).map_err(|e| napi::Error::from_reason(e.to_string()))
+}

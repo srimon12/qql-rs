@@ -196,13 +196,25 @@ pub async fn handle_connect(url: &str) -> Result<(), Box<dyn std::error::Error>>
 fn executor(url: &str) -> Result<qql::executor::Executor, Box<dyn std::error::Error>> {
     let config = qql::config::QqlConfig::load()?.unwrap_or_default();
 
-    let client: Box<dyn qql::client::QdrantOps> = if url.contains(":6334") {
-        Box::new(qql::grpc::GrpcQdrant::from_url(
-            url,
-            std::env::var("QDRANT_API_KEY")
-                .ok()
-                .or_else(|| config.secret.clone()),
-        )?)
+    #[cfg(feature = "grpc")]
+    let use_grpc = url.contains(":6334");
+    #[cfg(not(feature = "grpc"))]
+    let use_grpc = false;
+
+    let client: Box<dyn qql::client::QdrantOps> = if use_grpc {
+        #[cfg(feature = "grpc")]
+        {
+            Box::new(qql::grpc::GrpcQdrant::from_url(
+                url,
+                std::env::var("QDRANT_API_KEY")
+                    .ok()
+                    .or_else(|| config.secret.clone()),
+            )?)
+        }
+        #[cfg(not(feature = "grpc"))]
+        {
+            return Err("gRPC support is disabled in this build".into());
+        }
     } else {
         Box::new(qql::rest::RestQdrant::new(
             url.to_owned(),

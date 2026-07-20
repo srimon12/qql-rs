@@ -41,6 +41,17 @@ function tokenize(query) {
     return nativeBinding.tokenize(query);
 }
 
+function explain(query) {
+    return nativeBinding.explain(query);
+}
+
+function execute(query, options) {
+    return nativeBinding.execute(query, options);
+}
+
+const Client = nativeBinding.Client;
+const HttpEmbedder = nativeBinding.HttpEmbedder;
+
 module.exports = {
     parse,
     parseFastJson,
@@ -50,6 +61,10 @@ module.exports = {
     isValid,
     injectFilter,
     tokenize,
+    explain,
+    execute,
+    Client,
+    HttpEmbedder,
     // raw export for native bindings if required
     nativeBinding
 };

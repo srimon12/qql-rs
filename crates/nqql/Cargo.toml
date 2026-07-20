@@ -6,10 +6,16 @@ edition.workspace = true
 [lib]
 crate-type = ["cdylib"]
 
+[features]
+default = ["rest"]
+grpc = ["qql/grpc"]
+rest = ["qql/rest"]
+
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 qql-core = { path = "../qql-core", features = ["serde"] }
-qql = { path = "../qql-runtime" }
-napi = { version = "2", features = ["napi8", "serde-json"] }
+qql = { path = "../qql-runtime", default-features = false }
+napi = { version = "2", features = ["napi8", "serde-json", "async"] }
 napi-derive = "2"
 serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
