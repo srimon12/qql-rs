@@ -417,18 +417,19 @@ impl QdrantOps for RestQdrant {
                     "filter": req.filter,
                     "offset": req.after.map(point_id_json),
                     "with_payload": true,
+                    "with_vector": true,
                 })),
             )
             .await?;
         let points = value.get("points").cloned().unwrap_or_else(|| json!([]));
         let points =
             serde_json::from_value(points).map_err(|error| QqlError::runtime(error.to_string()))?;
-        let offset = value
-            .get("next_page_offset")
-            .cloned()
-            .map(serde_json::from_value)
-            .transpose()
-            .map_err(|error| QqlError::runtime(format!("invalid scroll offset: {error}")))?;
+        let offset = match value.get("next_page_offset") {
+            Some(v) if !v.is_null() => serde_json::from_value(v.clone())
+                .map(Some)
+                .map_err(|error| QqlError::runtime(format!("invalid scroll offset: {error}")))?,
+            _ => None,
+        };
         Ok((points, offset))
     }
 

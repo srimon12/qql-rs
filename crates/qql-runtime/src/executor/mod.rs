@@ -92,6 +92,10 @@ impl Executor {
         }
     }
 
+    pub fn ops(&self) -> &dyn QdrantOps {
+        self.client.as_ref()
+    }
+
     pub fn explain(query: &str) -> Result<String, QqlError> {
         let stmt = qql_core::parser::Parser::parse(query)?;
         let mut plan = String::new();

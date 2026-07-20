@@ -86,7 +86,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             batch_size,
             json,
         } => {
-            let msg = commands::handle_dump(&collection, &output, batch_size)?;
+            let msg = commands::handle_dump(&url, &collection, &output, batch_size).await?;
             if json {
                 println!(
                     "{}",

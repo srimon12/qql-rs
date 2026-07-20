@@ -172,7 +172,7 @@ pub async fn handle_connect(url: &str) -> Result<(), Box<dyn std::error::Error>>
                 output::print_error("dump error: usage DUMP [COLLECTION] <name> <output.qql>");
                 continue;
             }
-            match handle_dump(dump_parts[0], dump_parts[1], 50) {
+            match handle_dump(url, dump_parts[0], dump_parts[1], 50).await {
                 Ok(msg) => output::print_success(&msg),
                 Err(e) => output::print_error(&format!("dump error: {}", e)),
             }
@@ -258,27 +258,17 @@ pub fn handle_convert(path: Option<&str>) -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 
-pub fn handle_dump(
+pub async fn handle_dump(
+    url: &str,
     collection: &str,
     output: &str,
-    _batch_size: u32,
+    batch_size: u32,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    // Mock dump: generate a header and CREATE COLLECTION statement
-    let header = format!("-- QQL dump for {}", collection);
-    let create = dump::generate_create_statement(collection, false, "dense", "sparse", "", "");
-    let body = format!("-- Points: 0\n\n{}", create);
-    let footer = "-- Written: 0\n-- Skipped: 0".to_string();
-
-    let final_output = format!("{}\n\n{}\n\n{}", header, body, footer);
-
-    if let Some(parent) = std::path::Path::new(output).parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(output, &final_output)?;
-
+    let exec = executor(url)?;
+    let (written, skipped) = dump::dump_collection(&exec, collection, output, batch_size, "", "").await?;
     Ok(format!(
-        "Dumped collection '{}' to {} (0 written, 0 skipped)",
-        collection, output
+        "Dumped collection '{}' to {} ({} written, {} skipped)",
+        collection, output, written, skipped
     ))
 }
 
