@@ -31,3 +31,4 @@ crates/nqql/index.d.ts
 crates/nqql/package-lock.json
 qdrant_storage
 crates/nqql/index.node
+qdrant-lib-edge

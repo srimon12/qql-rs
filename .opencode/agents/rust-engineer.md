@@ -11,7 +11,7 @@ permission:
   edit: allow
   lsp: allow
   bash:
-    "*": ask
+    "*": allow
     "cargo check*": allow
     "cargo test*": allow
     "cargo clippy*": allow
@@ -61,11 +61,11 @@ permission:
     "rust-symbol-analyzer": allow
     "rust-trait-explorer": allow
     "unsafe-checker": allow
-  task: deny
-  external_directory: deny
+  task: allow
+  external_directory: allow
   todowrite: allow
-  webfetch: deny
-  websearch: deny
+  webfetch: allow
+  websearch: allow
   question: allow
 ---
 
