@@ -11,8 +11,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use qdrant_edge::{
-    EdgeConfigBuilder, EdgeShard, Filter as EdgeFilter, PointInsertOperations, PointOperations,
-    UpdateOperation, VectorInternal, VectorOperations, VectorStructInternal, VectorStructPersisted,
+    CreateIndex, EdgeConfigBuilder, EdgeShard, FieldIndexOperations, Filter as EdgeFilter,
+    PayloadFieldSchema, PayloadSchemaType, PointInsertOperations, PointOperations, UpdateOperation,
+    VectorInternal, VectorOperations, VectorStructInternal, VectorStructPersisted,
     WithPayloadInterface, WithVector,
 };
 use serde_json::Value;
@@ -387,10 +388,43 @@ impl QdrantAdminOps for EdgeQdrant {
         Ok(results)
     }
 
-    async fn create_field_index(&self, _req: CreateFieldIndexReq) -> Result<(), QqlError> {
-        Err(QqlError::runtime(
-            "create_field_index not supported in edge mode",
-        ))
+    async fn create_field_index(&self, req: CreateFieldIndexReq) -> Result<(), QqlError> {
+        let shard = self.open_shard(&req.collection_name).await?;
+
+        // Map QQL field type string → qdrant-edge PayloadSchemaType
+        let schema_type = match req.field_type.to_lowercase().as_str() {
+            "keyword" => PayloadSchemaType::Keyword,
+            "integer" | "int" => PayloadSchemaType::Integer,
+            "float" => PayloadSchemaType::Float,
+            "bool" | "boolean" => PayloadSchemaType::Bool,
+            "geo" => PayloadSchemaType::Geo,
+            "text" => PayloadSchemaType::Text,
+            other => {
+                return Err(QqlError::runtime(format!(
+                    "unsupported field index type in edge mode: '{other}'. \
+                     Use: keyword, integer, float, bool, geo, text"
+                )))
+            }
+        };
+
+        let field_schema = Some(PayloadFieldSchema::FieldType(schema_type));
+
+        let field_name: qdrant_edge::JsonPath =
+            serde_json::from_value(serde_json::Value::String(req.field.clone()))
+                .map_err(|e| QqlError::runtime(format!("field name: {e}")))?;
+
+        let create_index = CreateIndex {
+            field_name,
+            field_schema,
+        };
+
+        let op = UpdateOperation::FieldIndexOperation(
+            FieldIndexOperations::CreateIndex(create_index),
+        );
+
+        tokio::task::spawn_blocking(move || shard.update(op).map_err(edge_err))
+            .await
+            .map_err(|e| QqlError::runtime(format!("spawn_blocking: {e}")))?
     }
 
     async fn count(&self, req: CountPointsReq) -> Result<u64, QqlError> {

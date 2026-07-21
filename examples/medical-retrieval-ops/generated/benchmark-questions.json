@@ -1,0 +1,302 @@
+[
+  {
+    "id": 1,
+    "question": "The main pathophysiological disorder in restrictive cardiomyopathy is: a.Impaired diastolic ventricular function b.Impaired ventricular contraction c.Pericardial constriction d.Thickened walls of both ventricles e.Functional tricuspid and mitral insufficiency",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 2,
+    "question": "2. The following is NOT classified as a cardiomyopathy in the strict sense of the word: a.dilated cardiomyopathy b.arrhythmogenic right ventricular dysplasia c.hypertrophic cardiomyopathy d.severe aortic stenosis e.restrictive cardiomyopathy",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 3,
+    "question": "3. What is true about the third heart sound? A. It is always a pathological finding B. It is a low-frequency sound C. We hear it just before the first heart sound D. The loudness is not proportional to its clinical significance E. It is rarely heard in heart failure",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 4,
+    "question": "4. What does hemoptysis mean? A. Coughing up pure blood, more than 250 ml in 24 hours B. Vomiting blood C. Coughing up blood-streaked sputum D. Passing bloody stool E. Bloody expectoration",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 5,
+    "question": "5. How is orthostatic hypotension defined? a. If a drop in systolic blood pressure is detected when the patient stands up from a supine position b. If a drop in both systolic and diastolic blood pressure is detected when the patient stands up from a supine position c. If the patient experiences syncope or dizziness when standing up from a supine position d. If blood pressure falls by at least 30/20 mm Hg when the patient stands up from a supine position e. If blood pressure falls by at least 60/30 mm Hg when the patient stands up from a supine position",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 6,
+    "question": "6. The sensation of difficult breathing reported by the patient in the medical history is best described by the term: a. Orthopnea b. Tachypnea c. Dyspnea d. Platypnea e. Trepopnea",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 7,
+    "question": "7. Which laboratory test can we use in clinical practice to confirm heart failure as the cause of exertional dyspnea? a. Troponin T b. Troponin I c. Atrial natriuretic peptide (ANP) d. Brain (B-type) natriuretic peptide (BNP) e. Erythropoietin",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 8,
+    "question": "8. \u201cOrganic murmur\u201d means: a. Pathologically altered hemodynamics b. The cause is in another organ c. The heart is morphologically changed d. The cause is in artificial material e. It is not a sign of heart disease",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 9,
+    "question": "9. An accidental (incidental) murmur is: a. A consequence of trauma (e.g., a motor vehicle accident with blunt chest injury) b. Randomly detected in the early phase of heart disease c. Most common in children d. Soft and most often diastolic e. Most often a consequence of aortic stenosis",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 10,
+    "question": "10. Pulmonary embolism most often arises from a clot originating from: a. The large veins of the legs b. The large veins of the arms c. The calf (tibial) veins d. The pelvic veins e. The clot forms in the lungs",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 11,
+    "question": "11. A patient suddenly loses consciousness and falls to the ground. After a few seconds, consciousness returns. Such an event is called: a. Psychogenic coma b. Opisthotonus c. Decortication d. Syncope e. Asystole",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 12,
+    "question": "12. Which of the following is characteristic of hypertrophic cardiomyopathy? a. The walls of the heart muscle are of normal thickness b. The disease is inherited in an autosomal dominant manner c. All four cardiac chambers are enlarged d. The only possible treatment is heart transplantation e. Patients never experience rhythm disturbances",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 13,
+    "question": "13. What is cardiac index? a. Heart rate divided by body surface area b. Heart rate divided by body-mass index c. Cardiac output (minute volume) divided by body surface area d. Cardiac output (minute volume) divided by body mass \u00d7 100 e. Cardiac output (minute volume) divided by body-mass index",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 14,
+    "question": "14. In atrial flutter, the atrial rate limit is: a. Below 220/min b. Above 350/min c. 220\u2013350/min d. 120\u2013250/min e. 280\u2013390/min",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 15,
+    "question": "15. The most effective method to terminate ventricular fibrillation is: a. Cardioversion b. Defibrillation c. Medications d. External cardiac massage (chest compressions) e. Artificial respiration",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 16,
+    "question": "16. The AV node can generate a heart rate in the range of: a. 40\u201360 b. 60\u2013100 c. 20\u201340 d. 40\u201380 e. The AV node does not have this capability",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 17,
+    "question": "17. What is the most common cause of mitral regurgitation in developed countries? a. Mitral valve prolapse b. Dilatation of the mitral annulus due to left ventricular failure c. Ischemia of the papillary muscles d. Infective endocarditis e. Rupture of a papillary muscle head",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 18,
+    "question": "18. The most common causative agents of infective endocarditis are: a. Gram-positive cocci b. Gram-negative bacilli c. Fungi d. Cardiotropic viruses e. Intracellular bacteria",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 19,
+    "question": "19. For pain relief in myocardial infarction, we most commonly use: a. Acetylsalicylic acid (aspirin) 100 mg b. Acetylsalicylic acid (aspirin) 500 mg c. Paracetamol 500 mg d. Morphine 1 mg/kg body weight e. Morphine 0.1 mg/kg body weight",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 20,
+    "question": "20. Primary cardiac arrest means: a. Cardiac arrest occurring in the hospital b. Cardiac arrest occurring in the field (outside the hospital) c. The cause of the arrest is intrinsic to the heart itself d. The cardiac arrest is secondary to another cause (e.g., pulmonary embolism, hemorrhage, tension pneumothorax) e. Cardiac arrest whose cause is ventricular fibrillation",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 21,
+    "question": "21. Kussmaul\u2019s sign is characteristic of: a. Superior vena cava syndrome b. Pulmonary embolism c. Constrictive pericarditis d. Left-sided heart failure",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 22,
+    "question": "22. We auscultate the aortic valve in the: a. 3rd intercostal space, right parasternal b. 3rd intercostal space, left parasternal c. 2nd intercostal space, right parasternal d. 4th intercostal space, left parasternal e. 5th intercostal space, left parasternal",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 23,
+    "question": "23. Peripheral arterial disease is: a. Involvement of small arteries b. Involvement of arteries distal to the knee c. A manifestation of atherosclerosis",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 24,
+    "question": "24. Which of the following conditions is characterized by convergent (narrow\u2010pulse\u2010pressure) blood pressure? a. Severe aortic regurgitation b. Mitral regurgitation c. Cardiogenic shock d. Septic shock e. Anaphylactic shock",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 25,
+    "question": "25. What type of heart murmurs can also be found in healthy people? a. Quiet, mid\u2010systolic b. Quiet, diastolic c. Quiet, that become louder with exertion d. Quiet, systolic, that radiate to the neck e. A heart murmur always means disease",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 26,
+    "question": "26. What does hemoptysis mean? a. Coughing up pure blood, more than 250 mL in 24 hours b. Vomiting blood c. Coughing up bloody sputum d. Passing bloody stool e. Bloody expectoration",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 27,
+    "question": "27. Which investigation most easily allows us to determine the cause of acute heart failure? a. 12-lead electrocardiogram b. Chest radiograph c. Echocardiography d. Chest CT scan e. Cardiac magnetic resonance imaging",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 28,
+    "question": "28. When do we say that the cardiac axis on an electrocardiogram is normal? a. If it is between 30\u00b0 and 60\u00b0 b. If it is between 0\u00b0 and 90\u00b0 c. If it is 45\u00b0 d. If it is between \u201330\u00b0 and 90\u00b0 e. If it is between \u201360\u00b0 and 120\u00b0",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 29,
+    "question": "29. How is stress echocardiography performed? a. Echocardiography using a contrast agent as stress b. An ultrasound examination after physical exercise c. An ultrasound examination before and after physical exercise d. An ultrasound examination during compression under the right costal margin e. An ultrasound examination during the Valsalva maneuver",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 30,
+    "question": "30. Using Doppler echocardiography and the modified Bernoulli equation, we noninvasively estimate: a. Any pressure gradient in the heart b. Only the systolic pressure in the right ventricle c. Only the gradient across a stenotic aortic valve d. Central venous pressure e. Only pulmonary arterial hypertension",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 31,
+    "question": "31. What is characteristic of cardiogenic shock? a. Decreased central venous pressure b. Decreased pulmonary arterial pressure c. Decreased pulmonary capillary wedge pressure d. Decreased mixed venous blood oxygen saturation e. Decreased lactate concentration in arterial blood",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 32,
+    "question": "32. In the late period after heart transplantation, which of the following is an important factor in patient morbidity? a. Hepatitis B virus b. Influenza A (H1N1) virus c. Cytomegalovirus d. JC virus e. Adenovirus",
+    "specialty": "Cardiology",
+    "limit": 5
+  },
+  {
+    "id": 33,
+    "question": "1. Which statement about the concentration test and desmopressin is correct? a) The patient will be treated with dDAVP b) The patient will be treated with lithium c) The patient has nephrogenic diabetes insipidus d) The patient has central diabetes insipidus e) The patient has psychogenic polydipsia",
+    "specialty": "Endocrinology",
+    "limit": 5
+  },
+  {
+    "id": 34,
+    "question": "2. Type 1 diabetes is characterized by: a) It is predominantly immune-mediated b) It is predominantly idiopathic c) At disease onset, nearly 50% of beta cells have been destroyed d) At disease onset, about three-quarters of beta cells have been destroyed e) At disease onset, practically all beta cells have been destroyed",
+    "specialty": "Endocrinology",
+    "limit": 5
+  },
+  {
+    "id": 35,
+    "question": "3. Which of the following is true about glucocorticoid-induced osteoporosis? a) It does not develop with glucocorticoid nasal spray use b) Glucocorticoids accelerate resorption but do not reduce bone formation c) We initiate treatment with bisphosphonates when bone mineral density is below \u20131 SD d) Due to increased calcium excretion, only vitamin D is added, not calcium e) Treatment begins only if glucocorticoids are expected to be given for more than 6 months",
+    "specialty": "Endocrinology",
+    "limit": 5
+  },
+  {
+    "id": 36,
+    "question": "4. What are the appropriate next steps for a 50-year-old patient who has been taking amiodarone for several years and presents with hypothyroidism? a) Start treatment with L-thyroxine b) Start treatment with antithyroid drugs c) Discontinue amiodarone d) Do not discontinue amiodarone e) Start treatment with glucocorticoids",
+    "specialty": "Endocrinology",
+    "limit": 5
+  },
+  {
+    "id": 37,
+    "question": "5. What is the most appropriate treatment for subacute thyroiditis? a) Propylthiouracil b) Methimazole c) Radioactive iodine d) Methylprednisolone e) Amoxicillin",
+    "specialty": "Endocrinology",
+    "limit": 5
+  },
+  {
+    "id": 38,
+    "question": "6. What stimulates TSH receptors on thyroid cells? a) Triiodothyronine b) TSH c) Stimulating antibodies against the TSH receptor d) hCG",
+    "specialty": "Endocrinology",
+    "limit": 5
+  },
+  {
+    "id": 39,
+    "question": "7. Which of the following conditions does NOT typically cause amenorrhea? a) Primary hyperparathyroidism b) Hypothyroidism and hyperthyroidism c) Addison\u2019s disease d) Congenital adrenal hyperplasia and Cushing\u2019s syndrome e) Virilizing tumors of the adrenal glands and ovaries",
+    "specialty": "Endocrinology",
+    "limit": 5
+  },
+  {
+    "id": 40,
+    "question": "8. What do we find in hypothyroidism due to thyroid disease? a) High TSH, normal or low T3 and T4 b) Low TSH, high T3 and T4 c) High TSH, high T3 and T4 d) Low TSH, low T3 and T4 e) Normal TSH, low T3",
+    "specialty": "Endocrinology",
+    "limit": 5
+  },
+  {
+    "id": 41,
+    "question": "9. What is characteristic of subacute thyroiditis? a) Elevated ESR b) Markedly increased leukocytes c) Painful thyroid on palpation during acute phase d) Enlarged thyroid with hypoechoic areas on ultrasound e) Decreased thyroid hormones and normal TSH during acute phase",
+    "specialty": "Endocrinology",
+    "limit": 5
+  },
+  {
+    "id": 42,
+    "question": "10. Which of the following statements about thyroid hormones is correct? a) Thyroid peroxidase (TPO) participates in the synthesis of thyroid hormones b) T3 is produced in greater amounts than T4 in the thyroid c) T4 is formed from two molecules of monoiodotyrosine d) The first step of thyroid hormone synthesis is the synthesis of monomers and dimers e) The enzyme P450 desmolase participates in thyroid hormone synthesis",
+    "specialty": "Endocrinology",
+    "limit": 5
+  },
+  {
+    "id": 43,
+    "question": "11. Which of the following statements regarding thyroid eye disease (TED) and Graves' disease are true? a) Graves' disease and thyroid eye disease do not require treatment b) Patients with orbitopathy may smoke c) Thyroid eye disease is never treated surgically d) In the acute phase, immunosuppressive drugs are used e) Radioiodine therapy does not stop progression of orbitopathy",
+    "specialty": "Endocrinology",
+    "limit": 5
+  },
+  {
+    "id": 44,
+    "question": "12. Which lab values are typical of hyperthyroidism caused by thyroid disease? a) Low TSH, high free T4, high free T3 b) High TSH, normal free T4, normal free T3 c) Low TSH, low free T4, low free T3 d) High TSH, low free T4, low free T3 e) High TSH, high free T4, high free T3",
+    "specialty": "Endocrinology",
+    "limit": 5
+  },
+  {
+    "id": 45,
+    "question": "13. What causes Graves' disease? a) Excess hormone production from an endocrine tumor b) Destruction of the endocrine gland by tumor, trauma, or infarction c) Autoimmune stimulation of the endocrine gland d) Autoimmune destruction of the endocrine gland e) Malformation of the olfactory lobe and adjacent CNS structures",
+    "specialty": "Endocrinology",
+    "limit": 5
+  },
+  {
+    "id": 46,
+    "question": "14. Which statement about malignant thyroid tumors is correct? a) Malignant thyroid tumors are very common b) The most malignant type is papillary thyroid carcinoma c) Papillary thyroid carcinoma is the least common d) Patients with anaplastic thyroid carcinoma often die within months e) Men are more commonly affected than women",
+    "specialty": "Endocrinology",
+    "limit": 5
+  },
+  {
+    "id": 47,
+    "question": "15. In which conditions are neck veins often distended? a) Grade I goiter b) Grade II goiter c) Grade IV goiter d) Tricuspid valve insufficiency e) Subacute thyroiditis",
+    "specialty": "Endocrinology",
+    "limit": 5
+  },
+  {
+    "id": 48,
+    "question": "16. Which statement about malignant thyroid tumors is correct? a) Malignant thyroid tumors are very common b) Papillary thyroid carcinoma is the most aggressive c) Papillary thyroid carcinoma is the least common d) Patients with anaplastic thyroid carcinoma often die within months e) Men are more frequently affected than women",
+    "specialty": "Endocrinology",
+    "limit": 5
+  },
+  {
+    "id": 49,
+    "question": "17. What procedures should be performed in a patient with a painless, growing neck mass and breathing difficulties? a) Cervical spine X-ray b) Trachea X-ray c) Ultrasound-guided fine needle biopsy d) Chest CT e) Spirometry",
+    "specialty": "Endocrinology",
+    "limit": 5
+  },
+  {
+    "id": 50,
+    "question": "18. What is a typical sign of hyperthyroidism? a) Cold, dry skin b) Weight loss c) Bradycardia d) Constipation e) Cold intolerance",
+    "specialty": "Endocrinology",
+    "limit": 5
+  }
+]

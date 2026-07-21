@@ -8,13 +8,19 @@ name = "qql"
 path = "src/main.rs"
 
 [features]
-default = ["grpc", "rest"]
+default = ["grpc", "rest", "edge"]
 grpc = ["qql/grpc"]
 rest = ["qql/rest"]
+# Local in-process qdrant-edge backend (no Qdrant server needed).
+# Always enables qql-edge/rest so HTTP embedding providers work out of the box.
+edge = ["qql-edge", "qql-edge/rest"]
+# (kept for backwards-compat; same as edge now)
+edge-http = ["edge"]
 
 [dependencies]
 qql-core = { path = "../qql-core" }
 qql = { path = "../qql-runtime", default-features = false }
+qql-edge = { path = "../qql-edge", optional = true }
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 serde = { version = "1", features = ["derive"] }

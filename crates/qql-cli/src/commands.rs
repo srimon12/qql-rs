@@ -1,3 +1,41 @@
+pub async fn handle_doctor(
+    url: &str,
+    json: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let executor = executor(url)?;
+    match executor.execute("SHOW COLLECTIONS").await {
+        Ok(_) => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "ok": true,
+                        "healthy": true,
+                        "message": format!("Connected to Qdrant at {url}")
+                    })
+                );
+            } else {
+                println!("Connected to Qdrant at {url} (healthy)");
+            }
+            Ok(())
+        }
+        Err(e) => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "ok": false,
+                        "healthy": false,
+                        "error": format!("Failed to connect to Qdrant at {url}: {e}")
+                    })
+                );
+            } else {
+                println!("Failed to connect to Qdrant at {url}: {e}");
+            }
+            Err(e.into())
+        }
+    }
+}
 use crate::convert;
 use crate::dump;
 use crate::output;
@@ -358,4 +396,67 @@ fn print_repl_help() {
   Ctrl-D         Exit shell
 "#
     );
+}
+
+/// Run a single QQL statement against a local qdrant-edge instance.
+///
+/// The edge executor runs entirely in-process — no Qdrant server is needed.
+/// Embeddings are handled by either:
+/// - `fastembed` — local ONNX inference (default, no network)
+/// - `http`      — any OpenAI-compatible endpoint (Ollama, OpenAI, etc.)
+#[cfg(feature = "edge")]
+#[allow(clippy::too_many_arguments)]
+pub async fn handle_edge(
+    query: &str,
+    data_dir: &str,
+    on_disk: bool,
+    embedder: &str,
+    embed_url: Option<&str>,
+    embed_key: &str,
+    embed_model: &str,
+    embed_dim: usize,
+    json: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let exec = match embedder {
+        #[cfg(feature = "edge")]
+        "fastembed" => {
+            #[cfg(not(feature = "edge"))]
+            { return Err("fastembed support not compiled in".into()); }
+            #[cfg(feature = "edge")]
+            qql_edge::local_executor(data_dir, on_disk)
+                .map_err(|e| format!("edge init failed: {e}"))?
+        }
+
+        "http" => {
+            let url = embed_url.ok_or(
+                "HTTP embedder requires --embed-url (e.g. http://localhost:11434/v1/embeddings)",
+            )?;
+            qql_edge::http_executor(data_dir, on_disk, url, embed_key, embed_model, embed_dim)
+                .map_err(|e| format!("edge init failed: {e}"))?
+        }
+
+        other => {
+            return Err(format!(
+                "unknown embedder '{}': use 'fastembed' or 'http'",
+                other
+            )
+            .into())
+        }
+    };
+
+    let response = exec
+        .execute(query)
+        .await
+        .map_err(|e| format!("edge query failed: {e}"))?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&response)?);
+    } else {
+        println!("{}", response.message);
+        if let Some(data) = response.data {
+            println!("{}", serde_json::to_string_pretty(&data)?);
+        }
+    }
+
+    Ok(())
 }

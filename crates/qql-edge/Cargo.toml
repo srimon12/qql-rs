@@ -4,11 +4,18 @@ version.workspace = true
 edition.workspace = true
 description = "Local/edge QQL executor — fastembed-rs + qdrant-edge, zero network hops"
 
+[features]
+default = ["fastembed-local"]
+# Local ONNX embedding via fastembed-rs (no network needed for inference)
+fastembed-local = ["fastembed"]
+# External OpenAI-compatible HTTP embedding provider
+rest = ["qql/rest"]
+
 [dependencies]
 qql-core = { path = "../qql-core", features = ["serde", "std"] }
-qql = { path = "../qql-runtime" }
+qql = { path = "../qql-runtime", default-features = false }
 
-fastembed = "5"
+fastembed = { version = "5", optional = true }
 qdrant-edge = "0.7"
 
 tokio = { version = "1", features = ["rt", "sync"] }

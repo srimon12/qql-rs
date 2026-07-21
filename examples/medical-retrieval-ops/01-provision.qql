@@ -1,0 +1,11 @@
+CREATE COLLECTION medical_retrieval_ops HYBRID WITH HNSW (payload_m = 16) WITH QUANTIZATION (type = 'scalar', quantile = 0.99, always_ram = true)
+CREATE INDEX ON COLLECTION medical_retrieval_ops FOR source_dataset TYPE keyword
+CREATE INDEX ON COLLECTION medical_retrieval_ops FOR tenant_id TYPE keyword WITH (is_tenant = true, on_disk = true)
+CREATE INDEX ON COLLECTION medical_retrieval_ops FOR specialty TYPE keyword
+CREATE INDEX ON COLLECTION medical_retrieval_ops FOR complexity TYPE keyword
+CREATE INDEX ON COLLECTION medical_retrieval_ops FOR case_priority TYPE keyword
+CREATE INDEX ON COLLECTION medical_retrieval_ops FOR case_status TYPE keyword
+CREATE INDEX ON COLLECTION medical_retrieval_ops FOR rag_pipeline TYPE keyword
+CREATE INDEX ON COLLECTION medical_retrieval_ops FOR topic_text TYPE text WITH (tokenizer = 'word', min_token_len = 2, max_token_len = 24, lowercase = true, phrase_matching = true)
+CREATE INDEX ON COLLECTION medical_retrieval_ops FOR reference TYPE text WITH (tokenizer = 'word', min_token_len = 2, max_token_len = 24, lowercase = true, phrase_matching = true)
+SHOW COLLECTION medical_retrieval_ops
