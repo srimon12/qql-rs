@@ -2,7 +2,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use serde::Serialize;
 
-// ── Route ──────────────────────────────────────────────────────
+// ── Method ──────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Method {
@@ -22,20 +22,6 @@ impl Method {
             Method::Patch => "PATCH",
             Method::Delete => "DELETE",
         }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Route<T> {
-    pub method: Method,
-    pub path: String,
-    pub query: Vec<(String, String)>,
-    pub body: Option<T>,
-}
-
-impl<T: Serialize> Route<T> {
-    pub fn body_json(&self) -> Option<serde_json::Value> {
-        self.body.as_ref().map(|b| serde_json::to_value(b).unwrap())
     }
 }
 

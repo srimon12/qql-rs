@@ -256,7 +256,7 @@ fn executor(url: &str) -> Result<qql::executor::Executor, Box<dyn std::error::Er
             std::env::var("QDRANT_API_KEY")
                 .ok()
                 .or_else(|| config.secret.clone()),
-        )?)
+        ))
     };
 
     let embedder = if let Some(endpoint) = &config.embedding_endpoint {

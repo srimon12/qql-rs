@@ -1,9 +1,8 @@
 use pyo3::exceptions::PySyntaxError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList};
-use qql_core::ast::{self, Value};
+use qql_core::ast::{self, ComparisonOp, Value};
 use qql_core::lexer::Lexer;
-use qql_core::offline;
 use qql_core::parser::Parser;
 
 #[pyclass(name = "Stmt")]
@@ -16,7 +15,9 @@ pub struct PyStmt {
 impl PyStmt {
     fn inject_filter(&mut self, field: &str, op: &str, value: &Bound<'_, PyAny>) -> PyResult<()> {
         let val = py_to_value(value)?;
-        ast::inject_filter(&mut self.inner, field, op, &val);
+        let cmp = str_to_comparison_op(op);
+        ast::inject_filter(&mut self.inner, field, cmp, val)
+            .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
         Ok(())
     }
 
@@ -60,13 +61,16 @@ fn inject_filter(
     value: &Bound<'_, PyAny>,
 ) -> PyResult<PyStmt> {
     let val = py_to_value(value)?;
+    let cmp = str_to_comparison_op(op);
     if let Ok(mut py_stmt) = query.extract::<PyRefMut<'_, PyStmt>>() {
-        ast::inject_filter(&mut py_stmt.inner, field, op, &val);
+        ast::inject_filter(&mut py_stmt.inner, field, cmp, val)
+            .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
         Ok(py_stmt.clone())
     } else if let Ok(query_str) = query.extract::<String>() {
         let mut stmt =
             Parser::parse(&query_str).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
-        ast::inject_filter(&mut stmt, field, op, &val);
+        ast::inject_filter(&mut stmt, field, cmp, val)
+            .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
         Ok(PyStmt { inner: stmt })
     } else {
         Err(pyo3::exceptions::PyTypeError::new_err(
@@ -84,7 +88,7 @@ fn tokenize<'py>(input: &str, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict
         let d = PyDict::new(py);
         d.set_item("kind", token.kind.as_str())?;
         d.set_item("text", token.text)?;
-        d.set_item("pos", token.pos as i64)?;
+        d.set_item("pos", token.span.start as i64)?;
         result.push(d);
     }
     Ok(result)
@@ -92,8 +96,14 @@ fn tokenize<'py>(input: &str, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict
 
 #[pyfunction]
 fn compile_query<'py>(py: Python<'py>, input: &str) -> PyResult<Bound<'py, PyAny>> {
-    let compiled = offline::compile(input).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
-    pythonize::pythonize(py, &compiled).map_err(|e| PySyntaxError::new_err(e.to_string()))
+    let stmt = Parser::parse(input).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+    let route = qql_plan::routing::route(&stmt);
+    let result = serde_json::json!({
+        "method": route.method.as_str(),
+        "path": route.path,
+        "payload": route.body_json().unwrap_or(serde_json::Value::Null),
+    });
+    pythonize::pythonize(py, &result).map_err(|e| PySyntaxError::new_err(e.to_string()))
 }
 
 #[pyclass(name = "HttpEmbedder")]
@@ -201,10 +211,7 @@ fn create_executor(
             ));
         }
     } else {
-        Box::new(
-            qql::rest::RestQdrant::new(url.to_string(), api_key)
-                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?,
-        )
+        Box::new(qql::rest::RestQdrant::new(url.to_string(), api_key))
     };
 
     let embedder_impl = if let Some(endpoint) = &config.embedding_endpoint {
@@ -318,8 +325,7 @@ impl PyClient {
 
     fn explain(&self, query: &Bound<'_, PyAny>) -> PyResult<String> {
         if let Ok(py_stmt) = query.extract::<PyRef<PyStmt>>() {
-            qql_core::explain::explain_node(&py_stmt.inner)
-                .map_err(|e| pyo3::exceptions::PySyntaxError::new_err(e.to_string()))
+            Ok(qql_core::explain::explain_node(&py_stmt.inner))
         } else if let Ok(query_str) = query.extract::<String>() {
             qql_core::explain::explain(&query_str)
                 .map_err(|e| pyo3::exceptions::PySyntaxError::new_err(e.to_string()))
@@ -398,8 +404,7 @@ fn execute_async<'py>(
 #[pyfunction]
 fn explain(query: &Bound<'_, PyAny>) -> PyResult<String> {
     if let Ok(py_stmt) = query.extract::<PyRef<PyStmt>>() {
-        qql_core::explain::explain_node(&py_stmt.inner)
-            .map_err(|e| pyo3::exceptions::PySyntaxError::new_err(e.to_string()))
+        Ok(qql_core::explain::explain_node(&py_stmt.inner))
     } else if let Ok(query_str) = query.extract::<String>() {
         qql_core::explain::explain(&query_str)
             .map_err(|e| pyo3::exceptions::PySyntaxError::new_err(e.to_string()))
@@ -462,4 +467,16 @@ fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
         return Ok(Value::Dict(items));
     }
     Err(PySyntaxError::new_err("unsupported filter value type"))
+}
+
+fn str_to_comparison_op(op: &str) -> ComparisonOp {
+    match op {
+        "=" | "==" | "eq" => ComparisonOp::Eq,
+        "!=" | "neq" => ComparisonOp::Eq,
+        ">" | "gt" => ComparisonOp::Gt,
+        ">=" | "gte" => ComparisonOp::Gte,
+        "<" | "lt" => ComparisonOp::Lt,
+        "<=" | "lte" => ComparisonOp::Lte,
+        _ => ComparisonOp::Eq,
+    }
 }

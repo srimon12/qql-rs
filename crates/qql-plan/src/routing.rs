@@ -11,12 +11,12 @@ pub enum RequestBody {
     Query(Box<QueryRequest>),
     QueryGroups(Box<QueryGroupsRequest>),
     Points(PointsRequest),
-    Scroll(ScrollRequest),
+    Scroll(Box<ScrollRequest>),
     Upsert(UpsertRequest),
-    Delete(DeleteRequest),
+    Delete(Box<DeleteRequest>),
     UpdateVector(UpdateVectorRequest),
     UpdatePayload(UpdatePayloadRequest),
-    CreateCollection(CreateCollectionRequest),
+    CreateCollection(Box<CreateCollectionRequest>),
     CreateIndex(CreateIndexRequest),
 }
 
@@ -124,11 +124,11 @@ pub fn route(statement: &Stmt) -> Route {
             method: Method::Post,
             path: format!("/collections/{}/points/scroll", scroll.collection),
             query: Vec::new(),
-            body: Some(RequestBody::Scroll(lower_scroll_request(
+            body: Some(RequestBody::Scroll(Box::new(lower_scroll_request(
                 scroll.limit,
                 scroll.filter.as_deref(),
                 scroll.after.as_ref(),
-            ))),
+            )))),
         },
         Stmt::Upsert(upsert) => {
             let mut query = Vec::new();
@@ -146,7 +146,7 @@ pub fn route(statement: &Stmt) -> Route {
             method: Method::Post,
             path: format!("/collections/{}/points/delete", delete.collection),
             query: vec![("wait".into(), "true".into())],
-            body: Some(RequestBody::Delete(lower_delete_request(delete))),
+            body: Some(RequestBody::Delete(Box::new(lower_delete_request(delete)))),
         },
         Stmt::UpdateVector(update) => Route {
             method: Method::Put,
@@ -168,15 +168,17 @@ pub fn route(statement: &Stmt) -> Route {
             method: Method::Put,
             path: format!("/collections/{}", create.collection),
             query: Vec::new(),
-            body: Some(RequestBody::CreateCollection(lower_create_collection(
-                create,
+            body: Some(RequestBody::CreateCollection(Box::new(
+                lower_create_collection(create),
             ))),
         },
         Stmt::AlterCollection(alter) => Route {
             method: Method::Patch,
             path: format!("/collections/{}", alter.collection),
             query: Vec::new(),
-            body: Some(RequestBody::CreateCollection(lower_alter_collection(alter))),
+            body: Some(RequestBody::CreateCollection(Box::new(
+                lower_alter_collection(alter),
+            ))),
         },
         Stmt::DropCollection(drop) => Route {
             method: Method::Delete,
@@ -446,7 +448,7 @@ mod tests {
             "SCROLL FROM docs LIMIT 10;",
         ];
         for source in cases {
-            let s = Parser::parse(source).expect(&format!("parse failed: {}", source));
+            let s = Parser::parse(source).unwrap_or_else(|_| panic!("parse failed: {}", source));
             let r = route(&s);
             let json = r.body_json();
             match r.body {

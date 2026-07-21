@@ -7,9 +7,9 @@ pub mod executor;
 pub mod grpc;
 #[cfg(feature = "grpc")]
 mod grpc_route;
+pub mod qdrant;
 #[cfg(feature = "grpc")]
 pub mod qdrant_grpc;
-pub mod qdrant;
 #[cfg(feature = "rest")]
 pub mod rest;
 pub mod sparse;

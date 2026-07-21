@@ -42,6 +42,7 @@ fn explain_reports_ast_intent_without_runtime_claims() {
 #[cfg(feature = "json")]
 #[test]
 fn json_conversion_is_fallible_for_non_finite_floats() {
+    use crate::ast::Value;
     assert!(Value::Float(f64::NAN).to_json().is_err());
     assert_eq!(
         Value::from_json(serde_json::json!({"nested": [1, true, null]})).unwrap(),

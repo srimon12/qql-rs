@@ -99,7 +99,6 @@ pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
                 | TokenKind::Drop
                 | TokenKind::Show
                 | TokenKind::Query
-                | TokenKind::Select
                 | TokenKind::Scroll
                 | TokenKind::Delete
                 | TokenKind::Update => true,
@@ -115,7 +114,7 @@ pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
             };
 
             if depth == 0 && is_starter {
-                starts.push(tok.pos);
+                starts.push(tok.span.start);
                 if tok.kind == TokenKind::With {
                     in_with_cte = true;
                 }
@@ -127,12 +126,13 @@ pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
             TokenKind::Rbrace | TokenKind::Rbracket | TokenKind::Rparen => {
                 depth -= 1;
                 if depth < 0 {
-                    return Err(QqlError::syntax(
+                    return Err(QqlError::parse(
+                        "QQL-PARSE",
                         format!(
                             "unexpected '{}' at position {} (unmatched closing delimiter)",
-                            tok.text, tok.pos
+                            tok.text, tok.span.start,
                         ),
-                        tok.pos,
+                        tok.span,
                     ));
                 }
             }
@@ -140,9 +140,10 @@ pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
         }
     }
     if depth > 0 {
-        return Err(QqlError::syntax(
+        return Err(QqlError::parse(
+            "QQL-PARSE",
             format!("unexpected end of input: {} unclosed delimiter(s)", depth),
-            0,
+            qql_core::error::Span::new(0, cleaned.len()),
         ));
     }
 
@@ -174,7 +175,7 @@ pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
 
 pub fn read_script(path: &str) -> Result<Vec<String>, QqlError> {
     let data = std::fs::read_to_string(path)
-        .map_err(|e| QqlError::runtime(format!("cannot read file: {}", e)))?;
+        .map_err(|e| QqlError::execution("QQL-CLI", format!("cannot read file: {e}"), None))?;
     split_statements(&data)
 }
 

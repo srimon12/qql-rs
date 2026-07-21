@@ -1,8 +1,8 @@
 use napi_derive::napi;
-use qql_core::ast::{self, Value};
+use qql_core::ast::{self, ComparisonOp, Value};
 use qql_core::lexer::Lexer;
-use qql_core::offline;
 use qql_core::parser::Parser;
+use qql_plan::routing;
 
 #[napi(js_name = "Stmt")]
 #[derive(Clone)]
@@ -19,9 +19,18 @@ impl NapiStmt {
         op: String,
         value: serde_json::Value,
     ) -> napi::Result<()> {
-        let val = Value::from_json(value)
-            .ok_or_else(|| napi::Error::from_reason("invalid value JSON"))?;
-        ast::inject_filter(&mut self.inner, &field, &op, &val);
+        let cmp = match op.as_str() {
+            "=" | "==" | "eq" => ComparisonOp::Eq,
+            "!=" | "neq" => ComparisonOp::Eq,
+            ">" | "gt" => ComparisonOp::Gt,
+            ">=" | "gte" => ComparisonOp::Gte,
+            "<" | "lt" => ComparisonOp::Lt,
+            "<=" | "lte" => ComparisonOp::Lte,
+            _ => ComparisonOp::Eq,
+        };
+        let val = Value::from_json(value).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+        ast::inject_filter(&mut self.inner, &field, cmp, val)
+            .map_err(|e| napi::Error::from_reason(e.to_string()))?;
         Ok(())
     }
 
@@ -90,10 +99,19 @@ pub fn inject_filter(
     op: String,
     value: serde_json::Value,
 ) -> napi::Result<serde_json::Value> {
-    let value =
-        Value::from_json(value).ok_or_else(|| napi::Error::from_reason("invalid value JSON"))?;
+    let cmp = match op.as_str() {
+        "=" | "==" | "eq" => ComparisonOp::Eq,
+        "!=" | "neq" => ComparisonOp::Eq,
+        ">" | "gt" => ComparisonOp::Gt,
+        ">=" | "gte" => ComparisonOp::Gte,
+        "<" | "lt" => ComparisonOp::Lt,
+        "<=" | "lte" => ComparisonOp::Lte,
+        _ => ComparisonOp::Eq,
+    };
+    let val = Value::from_json(value).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let mut stmt = Parser::parse(&query).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    ast::inject_filter(&mut stmt, &field, &op, &value);
+    ast::inject_filter(&mut stmt, &field, cmp, val)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     serde_json::to_value(&stmt).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
@@ -114,7 +132,7 @@ pub fn tokenize(input: String) -> napi::Result<serde_json::Value> {
         tokens.push(TokenView {
             kind: token.kind.as_str(),
             text: token.text,
-            pos: token.pos,
+            pos: token.span.start,
         });
     }
     serde_json::to_value(&tokens).map_err(|e| {
@@ -127,8 +145,30 @@ pub fn tokenize(input: String) -> napi::Result<serde_json::Value> {
 
 #[napi]
 pub fn compile_query(input: String) -> napi::Result<serde_json::Value> {
-    let compiled = offline::compile(&input).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    serde_json::to_value(&compiled).map_err(|e| napi::Error::from_reason(e.to_string()))
+    let stmt = Parser::parse(&input).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let route = routing::route(&stmt);
+    let output = serde_json::json!({
+        "stmt_type": match &route.body {
+            Some(qql_plan::routing::RequestBody::Query(_)) => "query",
+            Some(qql_plan::routing::RequestBody::QueryGroups(_)) => "query_groups",
+            Some(qql_plan::routing::RequestBody::Points(_)) => "points",
+            Some(qql_plan::routing::RequestBody::Scroll(_)) => "scroll",
+            Some(qql_plan::routing::RequestBody::Upsert(_)) => "upsert",
+            Some(qql_plan::routing::RequestBody::Delete(_)) => "delete",
+            Some(qql_plan::routing::RequestBody::UpdateVector(_)) => "update_vector",
+            Some(qql_plan::routing::RequestBody::UpdatePayload(_)) => "update_payload",
+            Some(qql_plan::routing::RequestBody::CreateCollection(_)) => "create_collection",
+            Some(qql_plan::routing::RequestBody::CreateIndex(_)) => "create_index",
+            None => match route.method {
+                qql_plan::types::Method::Get if route.path == "/collections" => "show_collections",
+                qql_plan::types::Method::Get => "show_collection",
+                qql_plan::types::Method::Delete => "drop_collection",
+                _ => "unknown",
+            },
+        },
+        "payload": route.body_json().unwrap_or(serde_json::Value::Null),
+    });
+    Ok(output)
 }
 
 #[napi(js_name = "HttpEmbedder")]
@@ -226,10 +266,7 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
             ));
         }
     } else {
-        Box::new(
-            qql::rest::RestQdrant::new(url_str.to_string(), api_key)
-                .map_err(|e| napi::Error::from_reason(e.to_string()))?,
-        )
+        Box::new(qql::rest::RestQdrant::new(url_str.to_string(), api_key))
     };
 
     let embedder = if let Some(endpoint) = &config.embedding_endpoint {
@@ -347,6 +384,5 @@ pub fn explain(query: String) -> napi::Result<String> {
 
 #[napi]
 pub fn explain_stmt(stmt: &NapiStmt) -> napi::Result<String> {
-    qql_core::explain::explain_node(&stmt.inner)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))
+    Ok(qql_core::explain::explain_node(&stmt.inner))
 }

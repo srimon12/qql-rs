@@ -22,7 +22,9 @@ impl GrpcQdrant {
         let endpoint = format!("https://{endpoint}");
 
         let channel = tonic::transport::Endpoint::from_shared(endpoint)
-            .map_err(|e| QqlError::transport("QQL-TRANSPORT", format!("invalid gRPC url: {e}"), None))?
+            .map_err(|e| {
+                QqlError::transport("QQL-TRANSPORT", format!("invalid gRPC url: {e}"), None)
+            })?
             .connect_lazy();
 
         Ok(Self { channel })
@@ -34,10 +36,7 @@ impl GrpcQdrant {
 
     // ── Thin typed wrappers — same API shape as qdrant-client's Qdrant ──
 
-    pub async fn query(
-        &self,
-        req: qdrant::QueryPoints,
-    ) -> Result<qdrant::QueryResponse, QqlError> {
+    pub async fn query(&self, req: qdrant::QueryPoints) -> Result<qdrant::QueryResponse, QqlError> {
         let mut cl = qdrant::points_client::PointsClient::new(self.channel.clone());
         cl.query(tonic::Request::new(req))
             .await
@@ -126,8 +125,7 @@ impl GrpcQdrant {
         &self,
         req: qdrant::CreateCollection,
     ) -> Result<qdrant::CollectionOperationResponse, QqlError> {
-        let mut cl =
-            qdrant::collections_client::CollectionsClient::new(self.channel.clone());
+        let mut cl = qdrant::collections_client::CollectionsClient::new(self.channel.clone());
         cl.create(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
@@ -138,8 +136,7 @@ impl GrpcQdrant {
         &self,
         req: qdrant::DeleteCollection,
     ) -> Result<qdrant::CollectionOperationResponse, QqlError> {
-        let mut cl =
-            qdrant::collections_client::CollectionsClient::new(self.channel.clone());
+        let mut cl = qdrant::collections_client::CollectionsClient::new(self.channel.clone());
         cl.delete(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
@@ -157,11 +154,8 @@ impl GrpcQdrant {
             .map_err(|e| QqlError::backend("QQL-GRPC", format!("create_field_index: {e}"), None))
     }
 
-    pub async fn list_collections_raw(
-        &self,
-    ) -> Result<qdrant::ListCollectionsResponse, QqlError> {
-        let mut cl =
-            qdrant::collections_client::CollectionsClient::new(self.channel.clone());
+    pub async fn list_collections_raw(&self) -> Result<qdrant::ListCollectionsResponse, QqlError> {
+        let mut cl = qdrant::collections_client::CollectionsClient::new(self.channel.clone());
         cl.list(tonic::Request::new(qdrant::ListCollectionsRequest {}))
             .await
             .map(|r| r.into_inner())
@@ -172,8 +166,7 @@ impl GrpcQdrant {
         &self,
         collection: String,
     ) -> Result<qdrant::GetCollectionInfoResponse, QqlError> {
-        let mut cl =
-            qdrant::collections_client::CollectionsClient::new(self.channel.clone());
+        let mut cl = qdrant::collections_client::CollectionsClient::new(self.channel.clone());
         cl.get(tonic::Request::new(qdrant::GetCollectionInfoRequest {
             collection_name: collection,
         }))
@@ -191,8 +184,7 @@ impl QdrantOps for GrpcQdrant {
     }
 
     async fn collection_exists(&self, name: &str) -> Result<bool, QqlError> {
-        let mut cl =
-            qdrant::collections_client::CollectionsClient::new(self.channel.clone());
+        let mut cl = qdrant::collections_client::CollectionsClient::new(self.channel.clone());
         let resp = cl
             .collection_exists(tonic::Request::new(qdrant::CollectionExistsRequest {
                 collection_name: name.to_string(),

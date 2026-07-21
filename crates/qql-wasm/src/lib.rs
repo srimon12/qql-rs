@@ -1,7 +1,8 @@
 use gloo_net::http::Request;
-use qql_core::ast::{self, Value};
+use qql_core::ast::{self, ComparisonOp, Value};
 use qql_core::lexer::Lexer;
 use qql_core::parser::Parser;
+use qql_plan::routing;
 use serde_json::json;
 use wasm_bindgen::prelude::*;
 
@@ -45,10 +46,19 @@ pub fn inject_filter(
 ) -> Result<JsValue, JsValue> {
     let serde_value: serde_json::Value = serde_wasm_bindgen::from_value(value)
         .map_err(|e| JsValue::from_str(&format!("invalid value: {}", e)))?;
-    let value =
-        Value::from_json(serde_value).ok_or_else(|| JsValue::from_str("unsupported value type"))?;
+    let val = Value::from_json(serde_value).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let cmp = match op {
+        "=" | "==" | "eq" => ComparisonOp::Eq,
+        "!=" | "neq" => ComparisonOp::Eq,
+        ">" | "gt" => ComparisonOp::Gt,
+        ">=" | "gte" => ComparisonOp::Gte,
+        "<" | "lt" => ComparisonOp::Lt,
+        "<=" | "lte" => ComparisonOp::Lte,
+        _ => ComparisonOp::Eq,
+    };
     let mut stmt = Parser::parse(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    ast::inject_filter(&mut stmt, field, op, &value);
+    ast::inject_filter(&mut stmt, field, cmp, val)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
     serde_wasm_bindgen::to_value(&stmt).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
@@ -76,7 +86,7 @@ pub fn tokenize(input: &str) -> Result<Vec<JsValue>, JsValue> {
         js_sys::Reflect::set(
             &obj,
             &JsValue::from_str("pos"),
-            &JsValue::from_f64(token.pos as f64),
+            &JsValue::from_f64(token.span.start as f64),
         )
         .unwrap();
         tokens.push(JsValue::from(obj));
@@ -88,9 +98,31 @@ pub fn tokenize(input: &str) -> Result<Vec<JsValue>, JsValue> {
 
 #[wasm_bindgen]
 pub fn compile(query: &str) -> Result<String, JsValue> {
-    let compiled =
-        qql_core::offline::compile(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    serde_json::to_string(&compiled).map_err(|e| JsValue::from_str(&e.to_string()))
+    let stmt = Parser::parse(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let route = routing::route(&stmt);
+    let json_body = route.body_json();
+    let output = serde_json::json!({
+        "stmt_type": match &route.body {
+            Some(qql_plan::routing::RequestBody::Query(_)) => "query",
+            Some(qql_plan::routing::RequestBody::QueryGroups(_)) => "query_groups",
+            Some(qql_plan::routing::RequestBody::Points(_)) => "points",
+            Some(qql_plan::routing::RequestBody::Scroll(_)) => "scroll",
+            Some(qql_plan::routing::RequestBody::Upsert(_)) => "upsert",
+            Some(qql_plan::routing::RequestBody::Delete(_)) => "delete",
+            Some(qql_plan::routing::RequestBody::UpdateVector(_)) => "update_vector",
+            Some(qql_plan::routing::RequestBody::UpdatePayload(_)) => "update_payload",
+            Some(qql_plan::routing::RequestBody::CreateCollection(_)) => "create_collection",
+            Some(qql_plan::routing::RequestBody::CreateIndex(_)) => "create_index",
+            None => match route.method {
+                qql_plan::types::Method::Get if route.path == "/collections" => "show_collections",
+                qql_plan::types::Method::Get => "show_collection",
+                qql_plan::types::Method::Delete => "drop_collection",
+                _ => "unknown",
+            },
+        },
+        "payload": json_body.unwrap_or(serde_json::Value::Null),
+    });
+    serde_json::to_string(&output).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 #[wasm_bindgen]
@@ -123,8 +155,10 @@ pub struct Client {
     embed_model: String,
     embed_dim: u32,
     // Custom embedder: request body field name for texts (default: "input")
+    #[allow(dead_code)]
     embed_request_field: String,
     // Custom embedder: JSON path to vectors array (default: "data[*].embedding")
+    #[allow(dead_code)]
     embed_response_path: String,
 }
 
@@ -421,78 +455,37 @@ impl Client {
     /// Parse, compile, embed if needed, and POST to Qdrant's REST API.
     #[wasm_bindgen]
     pub async fn execute(&self, query: &str) -> Result<JsValue, JsValue> {
-        let compiled =
-            qql_core::offline::compile(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let stmt = Parser::parse(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let route = routing::route(&stmt);
+        let method_str = route.method.as_str();
+        let path = &route.path;
 
-        let stmt_type = compiled.stmt_type;
-        let mut payload = compiled.payload;
+        let mut body = route.body_json();
 
         // Inject embeddings for upsert statements if embedder is configured
-        if stmt_type == "upsert" {
-            self.embed_upsert_points(&mut payload).await?;
+        if matches!(stmt, qql_core::ast::Stmt::Upsert(_)) {
+            if let Some(ref mut payload) = body {
+                self.embed_upsert_points(payload).await?;
+            }
         }
 
-        let (method, endpoint) = match stmt_type {
-            "query" | "scroll" => {
-                let coll = payload["collection_name"].as_str().unwrap_or("unknown");
-                let path = format!("/collections/{}/points/{}", coll, stmt_type);
-                ("POST", path)
-            }
-            "select" => {
-                let coll = payload["collection_name"].as_str().unwrap_or("unknown");
-                ("GET", format!("/collections/{}/points", coll))
-            }
-            "upsert" => {
-                let coll = payload["collection_name"].as_str().unwrap_or("unknown");
-                ("PUT", format!("/collections/{}/points", coll))
-            }
-            "delete" => {
-                let coll = payload["collection_name"].as_str().unwrap_or("unknown");
-                ("POST", format!("/collections/{}/points/delete", coll))
-            }
-            "update_vector" | "update_payload" => {
-                let coll = payload["collection_name"].as_str().unwrap_or("unknown");
-                ("PUT", format!("/collections/{}/points", coll))
-            }
-            "create_collection" => {
-                let coll = payload["collection_name"].as_str().unwrap_or("unknown");
-                ("PUT", format!("/collections/{}", coll))
-            }
-            "create_index" => {
-                let coll = payload["collection_name"].as_str().unwrap_or("unknown");
-                ("PUT", format!("/collections/{}/index", coll))
-            }
-            "alter_collection" => {
-                let coll = payload["collection_name"].as_str().unwrap_or("unknown");
-                ("PATCH", format!("/collections/{}", coll))
-            }
-            "drop_collection" => {
-                let coll = payload["collection_name"].as_str().unwrap_or("unknown");
-                ("DELETE", format!("/collections/{}", coll))
-            }
-            "show_collections" => ("GET", "/collections".to_string()),
-            "show_collection" => {
-                let coll = payload["collection_name"].as_str().unwrap_or("unknown");
-                ("GET", format!("/collections/{}", coll))
-            }
-            _ => {
-                return Err(JsValue::from_str(&format!(
-                    "unsupported statement type: {}",
-                    stmt_type
-                )))
-            }
+        let body_str = body
+            .as_ref()
+            .map(|b| serde_json::to_string(b).map_err(|e| JsValue::from_str(&e.to_string())))
+            .transpose()?;
+
+        let rb = self.request(method_str, path);
+        let resp = if let Some(s) = body_str {
+            rb.body(s)
+                .map_err(|e| JsValue::from_str(&e.to_string()))?
+                .send()
+                .await
+                .map_err(|e| JsValue::from_str(&e.to_string()))?
+        } else {
+            rb.send()
+                .await
+                .map_err(|e| JsValue::from_str(&e.to_string()))?
         };
-
-        let body =
-            serde_json::to_string(&payload).map_err(|e| JsValue::from_str(&e.to_string()))?;
-
-        let resp = self
-            .request(method, &endpoint)
-            .body(body)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?
-            .send()
-            .await
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
         let status = resp.status();
         let text = resp
@@ -514,12 +507,18 @@ impl Client {
             })
     }
 
-    /// Parse → compile → return the JSON payload without executing.
+    /// Parse → route → return the JSON payload without executing.
     #[wasm_bindgen]
     pub fn compile(&self, query: &str) -> Result<String, JsValue> {
-        let compiled =
-            qql_core::offline::compile(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
-        serde_json::to_string(&compiled).map_err(|e| JsValue::from_str(&e.to_string()))
+        let stmt = Parser::parse(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let route = routing::route(&stmt);
+        let json_body = route.body_json();
+        let output = serde_json::json!({
+            "method": route.method.as_str(),
+            "path": route.path,
+            "payload": json_body.unwrap_or(serde_json::Value::Null),
+        });
+        serde_json::to_string(&output).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     /// Parse and explain the query — no server needed.
