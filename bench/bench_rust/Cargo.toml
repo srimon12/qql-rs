@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 qql-core = { path = "../../crates/qql-core" }
+qql-plan = { path = "../../crates/qql-plan" }
 qql = { path = "../../crates/qql-runtime" }
 qql-edge = { path = "../../crates/qql-edge" }
 async-trait = "0.1"
