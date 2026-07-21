@@ -4,14 +4,14 @@ use qql_core::lexer::Lexer;
 use qql_core::parser::Parser;
 use qql_plan::routing;
 
-#[napi(js_name = "Stmt")]
+#[napi]
 #[derive(Clone)]
-pub struct NapiStmt {
+pub struct Stmt {
     inner: qql_core::ast::Stmt,
 }
 
 #[napi]
-impl NapiStmt {
+impl Stmt {
     #[napi]
     pub fn inject_filter(
         &mut self,
@@ -46,23 +46,23 @@ impl NapiStmt {
 }
 
 #[napi]
-pub fn parse(input: String) -> napi::Result<NapiStmt> {
+pub fn parse(input: String) -> napi::Result<Stmt> {
     let stmt = Parser::parse(&input).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    Ok(NapiStmt { inner: stmt })
+    Ok(Stmt { inner: stmt })
 }
 
 #[napi]
-pub fn parse_all(input: String) -> napi::Result<Vec<NapiStmt>> {
+pub fn parse_all(input: String) -> napi::Result<Vec<Stmt>> {
     let stmts = Parser::parse_all(&input).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    Ok(stmts.into_iter().map(|s| NapiStmt { inner: s }).collect())
+    Ok(stmts.into_iter().map(|s| Stmt { inner: s }).collect())
 }
 
 #[napi]
-pub fn parse_batch(queries: Vec<String>) -> napi::Result<Vec<NapiStmt>> {
+pub fn parse_batch(queries: Vec<String>) -> napi::Result<Vec<Stmt>> {
     let mut results = Vec::with_capacity(queries.len());
     for q in queries {
         let stmt = Parser::parse(&q).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-        results.push(NapiStmt { inner: stmt });
+        results.push(Stmt { inner: stmt });
     }
     Ok(results)
 }
@@ -314,7 +314,7 @@ impl JsClient {
     }
 
     #[napi]
-    pub async fn execute_stmt(&self, stmt: &NapiStmt) -> napi::Result<serde_json::Value> {
+    pub async fn execute_stmt(&self, stmt: &Stmt) -> napi::Result<serde_json::Value> {
         let res = self
             .inner
             .execute_node(stmt.inner.clone())
@@ -336,7 +336,7 @@ impl JsClient {
     }
 
     #[napi]
-    pub async fn execute_stmt_json(&self, stmt: &NapiStmt) -> napi::Result<String> {
+    pub async fn execute_stmt_json(&self, stmt: &Stmt) -> napi::Result<String> {
         let res = self
             .inner
             .execute_node(stmt.inner.clone())
@@ -353,7 +353,7 @@ impl JsClient {
     }
 
     #[napi]
-    pub fn explain_stmt(&self, stmt: &NapiStmt) -> napi::Result<String> {
+    pub fn explain_stmt(&self, stmt: &Stmt) -> napi::Result<String> {
         qql::executor::Executor::explain_node(&stmt.inner)
             .map_err(|e| napi::Error::from_reason(e.to_string()))
     }
@@ -370,7 +370,7 @@ pub async fn execute(
 
 #[napi]
 pub async fn execute_stmt(
-    stmt: &NapiStmt,
+    stmt: &Stmt,
     options: Option<serde_json::Value>,
 ) -> napi::Result<serde_json::Value> {
     let client = JsClient::new(options)?;
@@ -383,6 +383,6 @@ pub fn explain(query: String) -> napi::Result<String> {
 }
 
 #[napi]
-pub fn explain_stmt(stmt: &NapiStmt) -> napi::Result<String> {
+pub fn explain_stmt(stmt: &Stmt) -> napi::Result<String> {
     Ok(qql_core::explain::explain_node(&stmt.inner))
 }

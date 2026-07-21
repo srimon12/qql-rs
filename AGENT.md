@@ -1,6 +1,6 @@
 # QQL Agent & Developer Reference Guide
 
-Welcome to the QQL Rust codebase. This guide details the architecture, design philosophy, and key implementation guidelines for developers and AI coding agents.
+Welcome to the QQL Rust codebase. This guide details the architecture, design philosophy, contract testing standards, and key implementation guidelines for developers and AI coding agents.
 
 ---
 
@@ -13,7 +13,7 @@ qql/ (workspace root)
 ├── crates/
 │   ├── qql-core/         # Lexer, parser, typed AST, semantic validation, explain, filter injection
 │   ├── qql-plan/         # Typed operation lowering: AST → Route { method, path, body }
-│   ├── qql-runtime/      # Executor (package name `qql`), REST & gRPC adapters, embedding
+│   ├── qql-runtime/      # Executor (package name `qql`), REST & gRPC adapters, embedding resolution
 │   ├── qql-edge/         # Local executor: fastembed-rs + qdrant-edge (zero-network)
 │   ├── qql-cli/          # CLI binary and interactive REPL
 │   ├── pyqql/            # Python bindings (PyO3)
@@ -28,26 +28,26 @@ qql-core (parse → typed AST → explain → inject_filter)
     ↓
 qql-plan (AST → typed RequestBody enum → Route { method, path, body })
     ↓
-qql-runtime (route() → execute_route() via REST (reqwest) or gRPC (tonic))
+qql-runtime (resolve_embeddings → execute_route() via REST reqwest or gRPC tonic)
 ```
 
 No JSON-as-IR. No duplicate planning. No compatibility shims. No custom serde renames.
 
 ### Crate Division Boundaries
 
-* **`qql-core`**: The parser, lexer, typed AST (`QueryExpr` enum, `FilterExpr`, `ComparisonOp`, etc.), AST transforms (`inject_filter`), and explain formatting. It performs NO network or file I/O. It has NO knowledge of Qdrant endpoints, REST JSON shapes, or transport protocols. Features: `default = []`, `serde`, `json`, `std`. The AST uses owned `String` types throughout — no lifetime parameters on input.
+* **`qql-core`**: The parser, lexer, typed AST (`QueryExpr` enum, `FilterExpr`, `ComparisonOp`, etc.), AST transforms (`inject_filter`), and explain formatting. Performs NO network or file I/O. Has NO knowledge of Qdrant endpoints, REST JSON shapes, or transport protocols. Features: `default = []`, `serde`, `json`, `std`. Uses owned `String` types throughout — no lifetime parameters on input.
 
 * **`qql-plan`**: Transport-neutral lowering layer. Converts AST `Stmt` into a `Route { method: Method, path: String, body: Option<RequestBody> }`. All field names match the OpenAPI wire format — no `serde(rename)`. Contains typed filter, query, mutation, DDL, and embedding types. Depends ONLY on `qql-core`. No networking, no tokio, no reqwest.
 
-* **`qql-runtime`**: The executor and transport adapters. Package name is `qql`. The `Executor` holds a `Box<dyn QdrantOps>` (single unified trait) and optional `Embedder`. DML operations delegate to `qql_plan::routing::route()` → `client.execute_route()`. DDL operations call dedicated methods on `QdrantOps`. Features: `default = ["grpc", "rest"]`, `grpc`, `rest`.
+* **`qql-runtime`**: The executor and transport adapters. Package name is `qql`. The `Executor` holds a `Box<dyn QdrantOps>` (single unified trait) and optional `Embedder`. Handles automated text-to-vector embedding resolution (`resolve_embeddings`) before delegating DML operations to `qql_plan::routing::route()` → `client.execute_route()`. DDL operations call dedicated admin methods on `QdrantOps`. Features: `default = ["grpc", "rest"]`, `grpc`, `rest`.
 
 * **`qql-edge`**: In-process vector search using qdrant-edge + optional fastembed-rs. Zero network. Implements `QdrantOps` with `execute_route()` dispatching to `EdgeShard` operations. Uses `qdrant-edge` 0.7.x.
 
 * **`qql-cli`**: CLI binary. Uses the executor via REST/adapter construction. Dump uses parser + `route()` + `execute_route()`.
 
-* **Foreign Bindings**: PyO3 (`pyqql`), N-API (`nqql`), Wasm-bindgen (`qql-wasm`). Expose parser, tokenization, filter injection, explain, `compile_query` (via `routing::route()`), and first-class `Client` classes. Keep public class names (`Client`, `HttpEmbedder`), return shapes, and error mappings aligned.
+* **Foreign Bindings**: PyO3 (`pyqql`), N-API (`nqql`), Wasm-bindgen (`qql-wasm`). Expose parser, tokenization, filter injection, explain, `compile_query` (via `routing::route()`), and first-class `Client` classes. Keep public class names (`Client`, `HttpEmbedder`, `Stmt`), return shapes, and error mappings aligned.
 
-### Removed from the Codebase
+### Permanently Removed Abstractions
 
 The following old abstractions have been permanently removed — do NOT reintroduce them:
 
@@ -74,7 +74,7 @@ SampleRandom, Fusion, Formula, RelevanceFeedback, Hybrid, Rerank
 
 ```rust
 pub enum ErrorKind { Lex, Parse, Validation, Execution, Transport, Backend }
-pub struct QqlError { kind, code: &'static str, message, span: Option<Span> }
+pub struct QqlError { kind: ErrorKind, code: &'static str, message: String, span: Option<Span> }
 pub struct Span { start: usize, end: usize }
 ```
 
@@ -95,7 +95,7 @@ pub trait QdrantOps: Send + Sync {
 }
 ```
 
-A single trait with 8 methods. No per-statement query/upsert/delete methods. All DML flows through `execute_route()`. DDL uses dedicated admin methods. Three implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant`.
+A single trait with 8 methods. All DML flows through `execute_route()`. DDL uses dedicated admin methods. Three implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant`.
 
 ### Statement → Endpoint Matrix (14 routes)
 
@@ -122,21 +122,31 @@ A single trait with 8 methods. No per-statement query/upsert/delete methods. All
 - Proto files in `proto/`, compiled at build time via `tonic-prost-build`
 - `GrpcQdrant` wraps `tonic::Channel` with `connect_lazy`
 - `grpc_route.rs` converts qql-plan typed structs → generated protobuf types directly (no JSON intermediary)
-- `grpc.rs` is a thin ~290-line wrapper; heavy conversion lives in `grpc_route.rs` (~860 lines)
+- `grpc.rs` is a thin ~290-line wrapper; heavy conversion lives in `grpc_route.rs` (~1,570 lines)
 - Tonic features: `channel`, `codegen`, `tls-ring`, `tls-webpki-roots` (no server, no axum, no router)
 
 ### Serialization Policy
 
 - `qql-core`: Serde optional (`default = []`, features `serde` and `json` separately). Parser-only consumers pay for nothing.
-- `qql-plan`: Always depends on serde/serde_json — it builds JSON wire bodies. Field names match OpenAPI exactly.
+- `qql-plan`: Always depends on serde/serde_json — builds JSON wire bodies matching OpenAPI format exactly.
 - `qql-runtime`: Uses serde/serde_json in REST adapter. gRPC adapter uses typed protobuf conversion.
 - Bindings: All enable `qql-core/serde` + `qql-core/json` for AST serialization and `Value::from_json()`.
 
 ---
 
-## 2. Minimalist Code Design Philosophy
+## 2. OpenAPI Schema Contract Testing
 
-1. **Size Constraints**: Target <400 lines per file. Split large files into modules.
+All generated route payloads are validated directly against Qdrant's official [`openapi.json`](file:///data/codebases/qql-rs/openapi.json) specification in `crates/qql-runtime/src/contract_test.rs`:
+
+1. **`Query` Schema Validation**: All 11 query expression variants are validated against `# /components/schemas/Query`.
+2. **`Filter` Schema Validation**: All 17 filter expression variants (`Compare`, `Between`, `In`, `MatchText`, `MatchPhrase`, `MatchAny`, `IsNull`, `IsEmpty`, `HasVector`, `ValuesCount`, `Nested`, `GeoBoundingBox`, `GeoRadius`, `PointId`, and compound logic) are validated against `# /components/schemas/Filter`.
+3. **`PointRequest` & `ScrollRequest` Validation**: Validated against `# /components/schemas/PointRequest` and `# /components/schemas/ScrollRequest`.
+
+---
+
+## 3. Minimalist Code Design Philosophy
+
+1. **Size Constraints**: Target <400 lines per file where possible. Split large files into modules.
 2. **Error Propagation**: Dispatch directly; bubble up downstream errors. No pre-emptive checks.
 3. **No JSON-as-IR**: `RequestBody` is typed. JSON only at the REST boundary.
 4. **No duplicate planners**: `qql_plan::routing::route()` is the single source of truth for statement → HTTP mapping.
@@ -144,22 +154,22 @@ A single trait with 8 methods. No per-statement query/upsert/delete methods. All
 
 ---
 
-## 3. AST Query Transformation & Filter Injection
+## 4. AST Query Transformation & Filter Injection
 
 ```rust
 pub fn inject_filter(
     statement: &mut Stmt,
     field: &str,
-    operator: ComparisonOp,   // not &str — typed enum
+    operator: ComparisonOp,   // typed enum (Eq, Gt, Gte, Lt, Lte)
     value: Value,             // owned, no lifetime
 ) -> Result<(), QqlError>
 ```
 
-Recursively injects into QueryStmt, all CTEs, and Scroll. Uses typed `ComparisonOp` enum (`Eq`, `Gt`, `Gte`, `Lt`, `Lte`). Callers must convert their string operators before calling.
+Recursively injects into QueryStmt, all CTEs, and Scroll. Callers must convert their string operators before calling.
 
 ---
 
-## 4. Grammar and Runtime Invariants
+## 5. Grammar and Runtime Invariants
 
 * Parsing is strict: malformed clauses return `QqlError::Parse`, never silently keep defaults.
 * `Span { start, end }` uses byte offsets. `Token::pos` is `pub(crate)`; public API uses `span`.
@@ -170,15 +180,19 @@ Recursively injects into QueryStmt, all CTEs, and Scroll. Uses typed `Comparison
 
 ---
 
-## 5. CLI and Binding UX Contracts
+## 6. Host Language SDK Reference Manuals
 
-* Data on stdout; diagnostics on stderr.
-* Binding errors preserve syntax position via `Span`.
-* Any public binding API change requires updating READMEs and smoke tests.
+Dedicated reference guides for each host SDK live under `skills/qql-skill/references/`:
+
+- **[`qql-examples.md`](file:///data/codebases/qql-rs/skills/qql-skill/references/qql-examples.md)**: Pure QQL query examples (` ```sql ` code blocks strictly).
+- **[`python-sdk.md`](file:///data/codebases/qql-rs/skills/qql-skill/references/python-sdk.md)**: Python `pyqql` PyO3 client and AST functions.
+- **[`node-sdk.md`](file:///data/codebases/qql-rs/skills/qql-skill/references/node-sdk.md)**: Node.js `nqql` N-API client and `parseFastJson` usage.
+- **[`wasm-sdk.md`](file:///data/codebases/qql-rs/skills/qql-skill/references/wasm-sdk.md)**: WebAssembly `qql-wasm` browser & edge client.
+- **[`rust-sdk.md`](file:///data/codebases/qql-rs/skills/qql-skill/references/rust-sdk.md)**: Native Rust `qql` runtime & `qql-core` SDK reference.
 
 ---
 
-## 6. Developer Workflow
+## 7. Developer Workflow
 
 ### Testing
 ```bash
