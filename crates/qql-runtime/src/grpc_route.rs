@@ -1,4 +1,4 @@
-use qdrant_client::qdrant;
+use crate::qdrant_grpc::qdrant;
 use qql_core::error::QqlError;
 use qql_plan::routing::{RequestBody, Route};
 use qql_plan::types::{
@@ -24,7 +24,7 @@ fn extract_collection(path: &str) -> Result<String, QqlError> {
 }
 
 pub async fn execute_grpc_route(
-    client: &qdrant_client::Qdrant,
+    client: &crate::grpc::GrpcQdrant,
     route: Route,
 ) -> Result<serde_json::Value, QqlError> {
     match route.body {
@@ -247,7 +247,7 @@ pub async fn execute_grpc_route(
                 }),
                 ..Default::default()
             };
-            client.create_collection(grpc_req).await.map_err(|e| {
+            client.create_collection_raw(grpc_req).await.map_err(|e| {
                 QqlError::backend("QQL-GRPC", format!("create_collection: {e}"), None)
             })?;
             Ok(serde_json::Value::Object(Default::default()))
@@ -280,7 +280,7 @@ pub async fn execute_grpc_route(
         None => match route.method {
             qql_plan::types::Method::Get if route.path == "/collections" => {
                 let _resp = client
-                    .list_collections()
+                    .list_collections_raw()
                     .await
                     .map_err(|e| QqlError::backend("QQL-GRPC", format!("list: {e}"), None))?;
                 Ok(serde_json::json!({"result": [], "status": "ok", "time": 0.0}))
@@ -288,9 +288,7 @@ pub async fn execute_grpc_route(
             qql_plan::types::Method::Get if route.path.starts_with("/collections/") => {
                 let collection = extract_collection(&route.path)?;
                 let _resp = client
-                    .collection_info(qdrant::GetCollectionInfoRequest {
-                        collection_name: collection,
-                    })
+                    .collection_info_raw(collection)
                     .await
                     .map_err(|e| {
                         QqlError::backend("QQL-GRPC", format!("get_collection: {e}"), None)
@@ -300,7 +298,7 @@ pub async fn execute_grpc_route(
             qql_plan::types::Method::Delete if route.path.starts_with("/collections/") => {
                 let collection = extract_collection(&route.path)?;
                 client
-                    .delete_collection(qdrant::DeleteCollection {
+                    .delete_collection_raw(qdrant::DeleteCollection {
                         collection_name: collection,
                         ..Default::default()
                     })
