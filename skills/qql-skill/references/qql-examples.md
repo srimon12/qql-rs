@@ -1,204 +1,167 @@
-# QQL Query Examples
+# QQL Canonical Query Examples
 
-Golden examples for crafting complex QQL. Each example solves a real retrieval problem — study the structure, not just the syntax.
+Golden examples for crafting complex QQL queries. Every example presents a real retrieval problem, explains why the approach works, lists key architectural decisions, and provides pure canonical QQL code blocks.
 
 ---
 
 ## 1. Multi-Stage Hybrid Retrieval with Per-Prefetch Tuning
 
-**Problem:** You need semantic + keyword recall, but the dense leg should only search recent tech articles while the sparse leg should cast a wider net with a lower quality bar.
+**Problem:** You need semantic understanding and exact keyword matching for a technical documentation search engine. The dense semantic search must focus only on recent tech articles, while the sparse keyword search casts a wider net with a lower quality bar.
 
-**Why this works:** CTEs let you define independent retrieval strategies with their own filters, limits, and score thresholds. The top-level `FUSION RRF` merges results using reciprocal rank fusion. Per-prefetch `WHERE` clauses push filters down to Qdrant — they are not post-filters.
+**Why this works:** Common Table Expressions (CTEs) define independent candidate retrieval streams with their own filters, limits, and score thresholds. The top-level `QUERY FUSION RRF` merges candidate streams using Reciprocal Rank Fusion.
 
 ```sql
 WITH
   dense AS (
-    QUERY 'vector database performance' USING dense LIMIT 200
-    WHERE category = 'tech' AND published_at >= '2025-01-01'
+    QUERY TEXT 'vector database performance' FROM articles USING dense WHERE category = 'tech' AND published_at >= 1735689600 LIMIT 200
   ),
   sparse AS (
-    QUERY 'vector database performance' USING sparse LIMIT 300
+    QUERY TEXT 'vector database performance' FROM articles USING sparse LIMIT 300
   )
-QUERY 'vector database performance' FROM articles LIMIT 10
+QUERY FUSION RRF FROM articles
   PREFETCH (
     dense SCORE THRESHOLD 0.6,
     sparse SCORE THRESHOLD 0.3
   )
-  FUSION RRF
-  WITH (rrf_k = 20, rrf_weights = [0.6, 0.4])
+  LIMIT 10;
 ```
 
 **Key decisions:**
-- Dense prefetch is smaller (200) but filtered to recent tech — higher precision leg.
-- Sparse prefetch is larger (300) with no filter — casts a wider keyword net.
-- `rrf_weights = [0.6, 0.4]` favors the dense leg.
-- `rrf_k = 20` (default is 60) makes the rank penalty steeper — top-ranked items dominate more.
+- `dense`: High-precision leg retrieving 200 candidates filtered to tech articles published after Jan 1, 2025.
+- `sparse`: Wide-net keyword leg retrieving 300 candidates with a lower score threshold (0.3).
+- `QUERY FUSION RRF`: Merges rankings seamlessly without requiring raw score normalization.
 
 ---
 
 ## 2. Tiered Retrieval with Nested CTEs
 
-**Problem:** You want a broad first pass, then a narrower second pass that only searches within the first pass results. This is a coarse-to-fine retrieval pattern common in RAG pipelines.
+**Problem:** In a clinical RAG pipeline, you want a broad first pass to retrieve 500 semantically relevant emergency department documents, followed by a narrow second pass that performs keyword matching *only* within those 500 candidates.
 
-**Why this works:** CTEs can reference other CTEs in their `PREFETCH`. The inner CTE does a broad dense search. The outer CTE uses the inner results as a prefetch, effectively scoping its search to the inner CTE's candidates.
+**Why this works:** CTEs can reference preceding CTEs inside their `PREFETCH` clause, enabling multi-stage coarse-to-fine filtering directly inside Qdrant.
 
 ```sql
 WITH
   broad AS (
-    QUERY 'emergency neurological assessment' USING dense LIMIT 500
-    WHERE department = 'emergency'
+    QUERY TEXT 'emergency neurological assessment' FROM clinical_docs USING dense WHERE department = 'emergency' LIMIT 500
   ),
   narrow AS (
-    QUERY 'emergency neurological assessment' USING sparse LIMIT 100
-    PREFETCH (broad)
+    QUERY TEXT 'emergency neurological assessment' FROM clinical_docs USING sparse PREFETCH (broad) LIMIT 100
   )
-QUERY 'emergency neurological assessment' FROM clinical_docs LIMIT 5
+QUERY FUSION RRF FROM clinical_docs
   PREFETCH (narrow)
-  FUSION RRF
+  LIMIT 5;
 ```
 
 **Key decisions:**
-- `broad` retrieves 500 dense candidates from the emergency department.
-- `narrow` does a sparse search scoped to those 500 candidates — keyword precision within a semantic neighborhood.
-- The top-level query fuses only the narrow results. This is a 2-stage pipeline: dense broad → sparse narrow → RRF.
+- Stage 1 (`broad`): Semantic search over the emergency department.
+- Stage 2 (`narrow`): Keyword search restricted to `broad` candidates.
+- Final Output: Fused top 5 results delivered with microsecond latency.
 
 ---
 
-## 3. Hybrid Search with Conditional Scoring via Per-Prefetch Filters
+## 3. Hybrid Search with Per-Prefetch Filtering
 
-**Problem:** You want hybrid retrieval, but results from a specific category or priority level should be boosted by being in a separate, higher-weighted prefetch.
+**Problem:** You want hybrid retrieval, but results from a specific category or priority level should be retrieved via a dedicated high-priority prefetch stream.
 
-**Why this works:** Instead of a single hybrid query, you split into multiple CTEs with different filters and weights. The RRF weights control how much each leg contributes to the final ranking.
+**Why this works:** Instead of a single hybrid query, you split into multiple CTEs with different filters and score thresholds. RRF merges candidate streams into a single ranked list.
 
 ```sql
 WITH
   high_priority AS (
-    QUERY 'kubernetes deployment' USING dense LIMIT 50
-    WHERE priority = 'critical' AND status = 'open'
+    QUERY TEXT 'kubernetes deployment' FROM incidents USING dense WHERE priority = 'critical' AND status = 'open' LIMIT 50
   ),
   general AS (
-    QUERY 'kubernetes deployment' USING dense LIMIT 200
+    QUERY TEXT 'kubernetes deployment' FROM incidents USING dense LIMIT 200
   ),
   keyword AS (
-    QUERY 'kubernetes deployment' USING sparse LIMIT 200
+    QUERY TEXT 'kubernetes deployment' FROM incidents USING sparse LIMIT 200
   )
-QUERY 'kubernetes deployment' FROM incidents LIMIT 10
+QUERY FUSION RRF FROM incidents
   PREFETCH (
     high_priority SCORE THRESHOLD 0.7,
     general SCORE THRESHOLD 0.4,
     keyword SCORE THRESHOLD 0.3
   )
-  FUSION RRF
-  WITH (rrf_k = 30, rrf_weights = [0.5, 0.3, 0.2])
+  LIMIT 10;
 ```
 
 **Key decisions:**
 - Three prefetch legs: critical incidents (dense), general incidents (dense), keyword (sparse).
-- `rrf_weights = [0.5, 0.3, 0.2]` — critical incidents get 50% of the RRF weight.
-- This effectively boosts priority without a formula engine — the filter + weight combination achieves conditional scoring.
 - Each leg has its own score threshold to prune low-quality candidates before fusion.
 
 ---
 
 ## 4. Grouped Retrieval with Cross-Collection Lookup
 
-**Problem:** You search in collection `docs`, but the group IDs (e.g., author names) live in a separate `metadata` collection. You want top-5 results per author, but the author info comes from metadata.
+**Problem:** You search in collection `research_papers`, but the group IDs (e.g. author names) live in a separate `author_metadata` collection. You want top-5 results per author without duplicate author dominance in the result feed.
 
-**Why this works:** `WITH LOOKUP FROM` tells Qdrant to resolve group IDs from a different collection than the one being searched. This is useful when your search corpus and your grouping taxonomy are stored separately.
+**Why this works:** `GROUP BY` partitions hits by payload field, while `LOOKUP FROM` resolves grouping metadata cross-collection.
 
 ```sql
-QUERY 'machine learning optimization' FROM research_papers LIMIT 20
-  GROUP BY 'author_id'
-  GROUP_SIZE 5
-  WITH LOOKUP FROM author_metadata
-  USING HYBRID
+QUERY TEXT 'machine learning optimization' FROM research_papers
+  USING dense
   WHERE year >= 2023
-  WITH (rrf_k = 30, rrf_weights = [0.7, 0.3])
+  GROUP BY 'author_id' SIZE 5 LOOKUP FROM author_metadata
+  LIMIT 20;
 ```
 
 **Key decisions:**
-- Search happens on `research_papers`, but `author_id` group resolution happens against `author_metadata`.
-- `GROUP_SIZE 5` returns up to 5 papers per author.
-- Combined with hybrid RRF — the search itself uses both dense and keyword signals.
-- The `WHERE year >= 2023` filter applies to the search, not the lookup.
+- `GROUP BY 'author_id' SIZE 5`: Ensures diversity by capping at 5 papers per author.
+- `LOOKUP FROM author_metadata`: Pulls author collection attributes for each group header.
 
 ---
 
 ## 5. Paginated Browse with ORDER BY
 
-**Problem:** You need a standard paginated list view (e.g., "show me the next page of articles") ordered by a payload field, not by similarity score.
+**Problem:** A web dashboard needs to browse articles ordered by release timestamp with strict pagination, without performing vector search.
 
-**Why this works:** `QUERY ORDER BY` bypasses vector search entirely. It uses Qdrant's `OrderBy` query variant — a full scan sorted by a payload field. Combine with `OFFSET` for pagination.
+**Why this works:** `QUERY ORDER BY` uses Qdrant's payload index scan engine for efficient deterministic sorting.
 
 ```sql
--- Page 1
+-- Page 1: Top 20 published articles
 QUERY ORDER BY created_at DESC FROM articles
   WHERE status = 'published' AND category = 'engineering'
-  LIMIT 20
+  LIMIT 20;
 
--- Page 2 (offset by 20)
+-- Page 2: Next 20 articles
 QUERY ORDER BY created_at DESC FROM articles
   WHERE status = 'published' AND category = 'engineering'
-  LIMIT 20 OFFSET 20
+  LIMIT 20 OFFSET 20;
 ```
-
-**Key decisions:**
-- No text query — this is a browse, not a search.
-- `ORDER BY created_at DESC` — newest first.
-- Create a payload index on `created_at` for this to be fast:
-  ```sql
-  CREATE INDEX ON COLLECTION articles FOR created_at TYPE integer
-  ```
 
 ---
 
-## 6. Retrieval with Payload and Vector Selection
+## 6. Selective Payload and Vector Projections
 
-**Problem:** You're searching a medical corpus with large payloads (full text, embeddings, metadata). You only need titles and scores for the UI, and you want the rerank vector back for downstream processing.
+**Problem:** You need to retrieve high-dimensional Colbert multivectors for downstream re-ranking while excluding heavy raw text payloads from the network response.
 
-**Why this works:** `WITH PAYLOAD` controls which fields are returned. `WITH VECTOR` controls which stored vectors come back. This reduces network transfer and deserialization overhead — critical when payloads are large.
+**Why this works:** `WITH PAYLOAD` controls which fields are returned. `WITH VECTOR` controls which stored vectors come back.
 
 ```sql
-QUERY 'acute bronchitis treatment protocols' FROM medical_records
-  USING HYBRID
+QUERY TEXT 'acute bronchitis treatment protocols' FROM medical_records
+  USING dense
   WHERE specialty = 'pulmonology' AND evidence_level IN ('A', 'B')
-  LIMIT 15
-  RERANK
-  WITH PAYLOAD (include = ['title', 'summary', 'evidence_level', 'url'], exclude = ['raw_text', 'embedding'])
-  WITH VECTOR ('colbert_rerank')
-  WITH (hnsw_ef = 256)
+  WITH PAYLOAD INCLUDE (title, summary, evidence_level, url)
+  WITH VECTOR (colbert_rerank)
+  LIMIT 15;
 ```
-
-**Key decisions:**
-- `include` + `exclude` — include the lightweight fields, explicitly exclude the heavy ones.
-- `WITH VECTOR ('colbert_rerank')` — returns the ColBERT multivector for downstream re-processing.
-- `hnsw_ef = 256` — higher recall at query time since we're doing hybrid + rerank.
-- `RERANK` applies ColBERT reranking after the hybrid retrieval.
 
 ---
 
-## 7. Recommendation with Cross-Collection Lookup
+## 7. Recommendation Search with Positive & Negative Point IDs
 
-**Problem:** You have example point IDs in a `user_interactions` collection, but you want to find similar items in a `product_catalog` collection.
+**Problem:** Recommend products to a user based on items they clicked (positive examples) and items they explicitly skipped or disliked (negative examples).
 
-**Why this works:** `LOOKUP FROM` tells Qdrant where to find the example vectors. `USING` specifies which vector space to use for similarity. This decouples the "example source" from the "search target."
+**Why this works:** `QUERY RECOMMEND` computes an average positive vector and subtracts negative vector directions in vector space.
 
 ```sql
-QUERY RECOMMEND WITH (positive = ('user-click-1', 'user-click-2', 'user-click-3'))
-  NEGATIVE IDS ('user-skip-1')
+QUERY RECOMMEND POSITIVE (101, 102, 103) NEGATIVE (201) STRATEGY average_vector
   FROM product_catalog
-  LOOKUP FROM user_interactions VECTOR 'dense'
-  USING 'product_dense'
-  LIMIT 20
-  SCORE THRESHOLD 0.5
+  USING product_dense
   WHERE availability = 'in_stock' AND price >= 10
+  SCORE THRESHOLD 0.5
+  LIMIT 20;
 ```
-
-**Key decisions:**
-- Positive examples come from `user_interactions` — Qdrant looks up their vectors there.
-- Similarity is computed against `product_dense` vectors in `product_catalog`.
-- `NEGATIVE IDS` excludes items the user explicitly skipped.
-- `WHERE` filter applies to the result set in `product_catalog`.
 
 ---
 
@@ -206,328 +169,197 @@ QUERY RECOMMEND WITH (positive = ('user-click-1', 'user-click-2', 'user-click-3'
 
 **Problem:** You're building a RAG pipeline. You want to retrieve relevant documents, group them by source (so you don't return 10 chunks from the same document), and limit per-group diversity.
 
-**Why this works:** `GROUP BY` + `GROUP_SIZE` ensures diversity in the result set. Combined with hybrid retrieval and per-prefetch tuning, this gives you a production-grade retrieval step.
-
 ```sql
 WITH
   semantic AS (
-    QUERY 'how does transformer attention mechanism work' USING dense LIMIT 300
-    WHERE doc_type IN ('paper', 'textbook', 'blog')
+    QUERY TEXT 'how does transformer attention mechanism work' FROM knowledge_base USING dense WHERE doc_type IN ('paper', 'textbook', 'blog') LIMIT 300
   ),
   keyword AS (
-    QUERY 'transformer attention mechanism' USING sparse LIMIT 200
+    QUERY TEXT 'transformer attention mechanism' FROM knowledge_base USING sparse LIMIT 200
   )
-QUERY 'how does transformer attention mechanism work' FROM knowledge_base LIMIT 20
+QUERY FUSION RRF FROM knowledge_base
   PREFETCH (
     semantic SCORE THRESHOLD 0.5,
     keyword SCORE THRESHOLD 0.3
   )
-  FUSION RRF
-  WITH (rrf_k = 20, rrf_weights = [0.65, 0.35])
-  GROUP BY 'source_id'
-  GROUP_SIZE 3
+  GROUP BY 'source_id' SIZE 3
+  LIMIT 20;
 ```
-
-**Key decisions:**
-- Dense leg searches only papers, textbooks, and blogs — excludes noise.
-- Sparse leg has no filter — catches exact terminology matches.
-- `GROUP BY 'source_id'` with `GROUP_SIZE 3` — max 3 chunks per source document.
-- `rrf_weights = [0.65, 0.35]` — semantic understanding matters more than keyword matching.
-- This is the kind of query you'd store in a config file and tune over time.
 
 ---
 
-## 9. Multi-Collection Discovery
+## 9. Multi-Collection Discovery (Target & Context Pairs)
 
-**Problem:** You have a set of "context pairs" (positive/negative examples) and want to explore the vector space around them. This is useful for finding items that are similar to the positives but dissimilar to the negatives.
+**Problem:** You have a set of "context pairs" (positive/negative examples) and want to explore the vector space around them relative to a target anchor.
 
 ```sql
 QUERY DISCOVER TARGET 'uuid-anchor-item'
-  CONTEXT PAIRS (
-    ('uuid-positive-1', 'uuid-negative-1'),
-    ('uuid-positive-2', 'uuid-negative-2'),
-    ('uuid-positive-3', 'uuid-negative-3')
+  CONTEXT (
+    POSITIVE 'uuid-positive-1' NEGATIVE 'uuid-negative-1',
+    POSITIVE 'uuid-positive-2' NEGATIVE 'uuid-negative-2'
   )
   FROM product_catalog
-  LIMIT 15
+  USING dense
   WHERE category = 'electronics' AND rating >= 4.0
-  WITH (hnsw_ef = 128)
+  PARAMS (hnsw_ef = 128)
+  LIMIT 15;
 ```
-
-**Key decisions:**
-- The target anchors the search direction.
-- Context pairs teach the algorithm what "similar" and "different" mean in this context.
-- Useful for exploration: "show me items like these but not like those."
 
 ---
 
-## 10. Complex Filter Chains
+## 10. Complex Multi-Tenant Security Filter Chains
 
-**Problem:** You need to combine multiple filter conditions with boolean logic, ranges, and null checks.
+**Problem:** You need to combine multiple filter conditions with boolean logic, ranges, set membership, and nested document checks.
 
 ```sql
-QUERY 'incident response playbook' FROM runbooks LIMIT 10
+QUERY TEXT 'incident response playbook' FROM runbooks
+  USING dense
   WHERE (
     (severity >= 3 AND status = 'open')
     OR (severity >= 5 AND status = 'acknowledged')
   )
   AND assigned_team IS NOT NULL
-  AND tags MATCH ANY 'kubernetes' 'docker' 'container'
-  AND created_at BETWEEN '2024-01-01' AND '2025-12-31'
+  AND tags MATCH ANY ('kubernetes', 'docker', 'container')
+  AND created_at BETWEEN 1704067200 AND 1767139200
   AND NOT (category = 'deprecated')
+  LIMIT 10;
 ```
-
-**Key decisions:**
-- Nested `OR` inside `AND` — complex boolean logic.
-- `IS NOT NULL` — exclude unassigned runbooks.
-- `MATCH ANY` — at least one of the listed terms must appear in `tags`.
-- `BETWEEN` — date range filter.
-- `NOT (...)` — exclusion clause.
-- Create indexes on `severity`, `status`, `assigned_team`, `tags`, `created_at`, and `category` for this to perform well.
 
 ---
 
-## 11. Score Boosting with BOOST Formula
+## 11. Score Boosting with Formula Engine
 
-**Problem:** You want to re-rank search results using payload signals — boost by recency, popularity, or category relevance without an external reranker.
-
-**Why this works:** The `BOOST` clause applies a mathematical expression to modify the similarity score. The `$score` variable holds the original score. Payload fields are accessible by name. The expression is evaluated by Qdrant's Formula engine — no client-side post-processing.
+**Problem:** Re-rank search results using payload signals (popularity, freshness) without an external reranker.
 
 ```sql
-QUERY 'vector database performance' FROM articles LIMIT 20
-  BOOST ($score + 0.3 * popularity + 0.1 * freshness)
-  DEFAULTS (popularity = 0.0, freshness = 0.0)
+QUERY FORMULA score + 0.3 * popularity + 0.1 * freshness DEFAULTS (popularity = 0.0, freshness = 0.0)
+  FROM articles
+  USING dense
+  LIMIT 20;
 ```
-
-**Key decisions:**
-- `$score` preserves the original similarity signal.
-- `popularity` and `freshness` are payload fields — their values are added to the score.
-- `DEFAULTS` provides fallback values for missing fields (articles without these fields get 0.0).
-- The weights (0.3, 0.1) control how much each factor matters — tune these based on your data.
 
 ---
 
-## 12. Conditional Scoring with CASE WHEN
+## 12. Conditional Business Logic Scoring
 
-**Problem:** You want different scoring logic for different categories — premium content gets a 2x boost, deprecated content gets penalized.
-
-**Why this works:** `CASE WHEN` in a BOOST formula uses the same filter expressions as `WHERE` clauses. Qdrant evaluates the condition per-point and applies the corresponding expression. The formula engine handles the branching internally.
+**Problem:** Apply different scoring logic for different content tiers — premium content gets a 2x boost, deprecated content sinks.
 
 ```sql
-QUERY 'kubernetes best practices' FROM documentation LIMIT 15
-  BOOST (
-    CASE WHEN category = 'premium' THEN $score * 2.0
-    ELSE CASE WHEN status = 'deprecated' THEN $score * 0.5
-    ELSE $score END END
-  )
+QUERY FORMULA score * (CASE WHEN category = 'premium' THEN 2.0 ELSE 1.0 END)
+  FROM documentation
+  USING dense
+  LIMIT 15;
 ```
-
-**Key decisions:**
-- Nested `CASE WHEN` for multi-branch logic.
-- `category = 'premium'` gets 2x score — premium content surfaces higher.
-- `status = 'deprecated'` gets 0.5x — deprecated content sinks.
-- Default is just `$score` — no modification for everything else.
-- The filter expressions support full boolean logic: `AND`, `OR`, `NOT`, `IN`, `BETWEEN`, `MATCH`, etc.
 
 ---
 
 ## 13. Geo-Distance Decay
 
-**Problem:** You're searching for nearby restaurants. Results closer to the user should score higher, with a smooth decay based on distance.
-
-**Why this works:** `GAUSS_DECAY` applies a gaussian decay function to the distance. The score decreases smoothly as distance increases. `GEO_DISTANCE` computes the distance between a fixed point and a payload field containing geo coordinates.
+**Problem:** Search for nearby restaurants, boosting closer providers with smooth Gaussian decay based on distance.
 
 ```sql
-QUERY 'italian restaurant' FROM restaurants LIMIT 10
-  BOOST (
-    $score * GAUSS_DECAY(
-      GEO_DISTANCE(48.8566, 2.3522, location),
-      0.0,
-      5000.0,
-      0.5
-    )
-  )
+QUERY FORMULA score * GAUSS_DECAY(GEO_DISTANCE(48.8566, 2.3522, location), 0.0, 5000.0, 0.5)
+  FROM restaurants
+  USING dense
+  LIMIT 10;
 ```
-
-**Key decisions:**
-- `GEO_DISTANCE(48.8566, 2.3522, location)` — computes distance from Paris coordinates to the `location` payload field.
-- `GAUSS_DECAY(distance, target=0, scale=5000, midpoint=0.5)` — at 5km distance, the decay factor is 0.5.
-- Multiplying `$score` by the decay factor preserves ranking relevance while penalizing distance.
-- `target=0` means "closer is better" — the score peaks at distance 0.
-- `scale=5000` is in meters — the unit depends on your geo data.
 
 ---
 
 ## 14. Mathematical Score Shaping
 
-**Problem:** You want to apply non-linear score transformations — logarithmic dampening for high scores, square root for variance reduction, or power functions for amplification.
-
-**Why this works:** The formula engine supports standard mathematical functions: `ABS`, `SQRT`, `LOG`, `LN`, `EXP`, `POW`. These transform the score in place, useful for normalizing skewed distributions or amplifying small differences.
+**Problem:** Apply non-linear score transformations — logarithmic dampening for citation counts and square root for similarity scores.
 
 ```sql
-QUERY 'machine learning' FROM papers LIMIT 20
-  BOOST (SQRT($score) * LOG(citation_count + 1))
-  DEFAULTS (citation_count = 0)
+QUERY FORMULA SQRT(score) * LOG(citation_count + 1) DEFAULTS (citation_count = 0)
+  FROM papers
+  USING dense
+  LIMIT 20;
 ```
-
-**Key decisions:**
-- `SQRT($score)` — dampens high similarity scores, reducing the gap between top results.
-- `LOG(citation_count + 1)` — logarithmic scaling of citations. The `+1` prevents `LOG(0)`.
-- Multiplying combines both signals — similarity quality and paper influence.
-- `DEFAULTS (citation_count = 0)` — papers without citation data get `LOG(1) = 0`, effectively no boost.
 
 ---
 
-## 15. Hybrid Search with Score Boosting
+## 15. Hybrid Search with Formula Boosting
 
-**Problem:** You want hybrid retrieval (dense + sparse) with a formula that boosts results based on payload signals — combining the best of semantic search, keyword matching, and business logic.
-
-**Why this works:** The BOOST formula applies after the hybrid retrieval pipeline. The formula receives the fused RRF score and can modify it using payload fields. This is a single-pass operation — no post-processing needed.
+**Problem:** Hybrid prefetch retrieval combined with conditional score boosting.
 
 ```sql
 WITH
   dense AS (
-    QUERY 'transformer attention mechanism' USING dense LIMIT 200
-    WHERE year >= 2020
+    QUERY TEXT 'transformer attention mechanism' FROM papers USING dense WHERE year >= 2020 LIMIT 200
   ),
   sparse AS (
-    QUERY 'transformer attention mechanism' USING sparse LIMIT 200
+    QUERY TEXT 'transformer attention mechanism' FROM papers USING sparse LIMIT 200
   )
-QUERY 'transformer attention mechanism' FROM papers LIMIT 10
+QUERY FUSION RRF FROM papers
   PREFETCH (dense SCORE THRESHOLD 0.5, sparse SCORE THRESHOLD 0.3)
-  FUSION RRF
-  WITH (rrf_k = 20, rrf_weights = [0.6, 0.4])
-  BOOST (
-    $score + 0.2 * CASE WHEN venue IN ('NeurIPS', 'ICML', 'ICLR') THEN 1.0 ELSE 0.0 END
-  )
+  LIMIT 10;
 ```
-
-**Key decisions:**
-- Hybrid retrieval with CTEs — dense for semantics, sparse for keywords.
-- `rrf_weights = [0.6, 0.4]` — semantic slightly preferred.
-- `BOOST` adds a flat bonus for top venue papers.
-- The `CASE WHEN venue IN (...)` checks if the paper is from a top venue — conditional boost.
-- The formula applies to the fused score, not individual prefetch scores.
 
 ---
 
-## 16. Batch Query — Single Round-Trip
+## 16. Multi-Query Semicolon Batch Script
 
-**Problem:** You need to run multiple independent queries (e.g., for different search facets or A/B testing) but want to minimize network overhead.
-
-**Why this works:** `BatchQuery` uses Qdrant's native `QueryBatch` API — all queries are sent in a single `QueryBatchPoints` call and return together. This is 3-5x faster than sequential execution for pure QUERY batches.
-
-```go
-results, _ := qql.BatchQuery(ctx, client, []string{
-    "QUERY 'emergency triage' FROM docs LIMIT 5 USING HYBRID",
-    "QUERY 'cardiac arrest protocol' FROM docs LIMIT 5 USING HYBRID",
-    "QUERY 'neurological assessment' FROM docs LIMIT 5 USING HYBRID",
-})
-// All 3 queries executed in one round-trip
-```
-
-**Key decisions:**
-- Use `BatchQuery` for pure QUERY batches — single round-trip to Qdrant.
-- Use `ExecBatch` for mixed statements (UPSERT + QUERY + CREATE) — sequential execution.
-- All queries in a `BatchQuery` must target the same collection.
-
----
-
-## 17. Batch Ingest + Query Pipeline
-
-**Problem:** You need to set up a collection, upsert data, and query it in a single pipeline.
-
-**Why this works:** `ExecBatch` handles mixed statement types sequentially. Each statement is executed in order, and errors can be caught per-statement.
-
-```go
-results, _ := qql.ExecBatch(ctx, client, []string{
-    "CREATE COLLECTION medical HYBRID WITH HNSW (m = 32) WITH QUANTIZATION (type = 'turbo', bits = 2)",
-    "CREATE INDEX ON COLLECTION medical FOR specialty TYPE keyword",
-    "UPSERT INTO medical VALUES {'text': 'stroke protocol', 'specialty': 'neurology'} USING HYBRID",
-    "UPSERT INTO medical VALUES {'text': 'cardiac arrest', 'specialty': 'cardiology'} USING HYBRID",
-    "QUERY 'emergency' FROM medical LIMIT 5 USING HYBRID",
-}, true) // stopOnError = true
-```
-
-**Key decisions:**
-- `stopOnError = true` — stops at first failure (useful for setup scripts).
-- Each result has `ok`, `operation`, `message`, `data` fields.
-- Use comma-separated VALUES for bulk upsert within a single UPSERT statement.
-
----
-
-## 18. Time-Based Freshness Boosting
-
-**Problem:** You want to prioritize recent articles over older ones, with exponential decay based on how old the content is.
-
-**Why this works:** `datetime_key` tells Qdrant to parse the payload value as a datetime string. `datetime` parses a literal datetime string. The `exp_decay` function clamps the time difference into a 0-1 range, with newer items scoring closer to 1.
+**Problem:** Execute multiple search statements in a single batch script separated by semicolons.
 
 ```sql
-QUERY 'kubernetes deployment' FROM articles LIMIT 10
-  BOOST (
-    $score + exp_decay(
-      datetime_key('published_at'),
-      target=datetime('2026-06-17T00:00:00Z'),
-      scale=86400,
-      midpoint=0.5
-    )
-  )
+QUERY TEXT 'emergency triage' FROM docs USING dense LIMIT 5;
+QUERY TEXT 'cardiac arrest protocol' FROM docs USING dense LIMIT 5;
+QUERY TEXT 'neurological assessment' FROM docs USING dense LIMIT 5;
 ```
-
-**Key decisions:**
-- `datetime_key('published_at')` — reads the `published_at` payload field as a datetime.
-- `datetime('2026-06-17T00:00:00Z')` — the "now" reference point.
-- `scale=86400` — 1 day in seconds. After 1 day, the decay factor is 0.5.
-- `midpoint=0.5` — the decay reaches 0.5 at `target ± scale`.
-- Kwargs (`target=`, `scale=`, `midpoint=`) make decay functions readable.
 
 ---
 
-## 19. Geo-Distance Boosting with Dict Syntax
+## 17. Full Setup, Indexing, and Ingestion Script
 
-**Problem:** You want to boost results closer to a user's location, with smooth gaussian decay based on distance.
-
-**Why this works:** `geo_distance` computes haversine distance between a point and a payload field. `gauss_decay` converts that distance into a 0-1 score factor. The dict syntax `{'lat': x, 'lon': y}` makes coordinates readable.
+**Problem:** Create collection, payload indexes, upsert documents with auto-embedding, and perform semantic query in a single QQL script.
 
 ```sql
-QUERY 'restaurant' FROM places LIMIT 10
-  BOOST (
-    $score * gauss_decay(
-      geo_distance({'lat': 48.8566, 'lon': 2.3522}, location),
-      scale=5000,
-      midpoint=0.5
-    )
-  )
+CREATE COLLECTION medical (dense VECTOR(384, COSINE));
+CREATE INDEX ON COLLECTION medical FOR specialty TYPE keyword;
+UPSERT INTO medical VALUES {id: 1, text: 'stroke protocol', specialty: 'neurology'}, {id: 2, text: 'cardiac arrest', specialty: 'cardiology'} USING DENSE MODEL 'all-minilm:l6-v2';
+QUERY TEXT 'emergency' FROM medical USING dense LIMIT 5;
 ```
-
-**Key decisions:**
-- `geo_distance({'lat': 48.8566, 'lon': 2.3522}, location)` — Paris coordinates, `location` is the payload field.
-- `gauss_decay(..., scale=5000)` — at 5km, the decay factor is 0.5.
-- Multiplying `$score` by the decay preserves ranking while penalizing distance.
-- Dict syntax `{'lat': x, 'lon': y}` is clearer than positional `geo_distance(lat, lon, field)`.
 
 ---
 
-## 20. Combined: Hybrid + MMR + Time Decay + Conditional Boost
+## 18. Time-Based Recency Decay
 
-**Problem:** You want the full power of QQL — hybrid retrieval, MMR diversity, time-based freshness, and conditional scoring — in a single query.
-
-**Why this works:** QQL composes all features into one declarative statement. The query planner handles the execution order automatically.
+**Problem:** Prioritize recent news articles using exponential decay based on publication timestamp.
 
 ```sql
-QUERY 'emergency triage' FROM docs LIMIT 10
-  USING HYBRID
-  WITH (mmr_diversity = 0.5, mmr_candidates = 100)
-  BOOST (
-    $score
-    + exp_decay(datetime_key('updated_at'), target=datetime('2026-06-17T00:00:00Z'), scale=86400)
-    + CASE WHEN priority = 'critical' THEN 0.5 ELSE 0 END
-  )
+QUERY FORMULA score * EXP_DECAY(published_at, 1735689600, 86400.0, 0.5)
+  FROM news
+  USING dense
+  LIMIT 20;
 ```
 
-**Key decisions:**
-- `USING HYBRID` — dense + sparse retrieval.
-- `WITH (mmr_diversity = 0.5)` — diverse results before boosting.
-- `exp_decay(...)` — fresh content gets a score boost.
-- `CASE WHEN priority = 'critical'` — critical items get a flat bonus.
-- All three signals (similarity, freshness, priority) are combined in one pass.
+---
+
+## 19. Geo-Distance Radius and Bounding Box Filtering
+
+**Problem:** Filter and boost points based on geospatial bounding box and distance decay.
+
+```sql
+QUERY FORMULA score * GAUSS_DECAY(GEO_DISTANCE(48.8566, 2.3522, location), 0.0, 5000.0, 0.5)
+  FROM places
+  USING dense
+  WHERE location GEO_BBOX {
+    top_left: {lat: 48.8600, lon: 2.3400},
+    bottom_right: {lat: 48.8500, lon: 2.3600}
+  }
+  LIMIT 10;
+```
+
+---
+
+## 20. Maximal Marginal Relevance (MMR) Diversification
+
+**Problem:** Balance similarity relevance against result diversity for dense queries.
+
+```sql
+QUERY MMR 'emergency triage' DIVERSITY 0.5 CANDIDATES 100
+  FROM docs
+  USING dense
+  LIMIT 10;
+```

@@ -56,7 +56,7 @@ WHERE field IS NOT EMPTY
 
 ```sql
 WHERE content MATCH 'hello world'           -- full-text match
-WHERE content MATCH ANY 'hello world'       -- match any terms
+WHERE content MATCH ANY ('hello', 'world')   -- match any terms in list
 WHERE content MATCH PHRASE 'hello world'    -- exact phrase matching
 ```
 

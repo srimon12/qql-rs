@@ -15,11 +15,16 @@ impl GrpcQdrant {
     }
 
     pub fn from_url(url: &str, _api_key: Option<String>) -> Result<Self, QqlError> {
-        let endpoint = url
+        let scheme = if url.starts_with("https://") {
+            "https://"
+        } else {
+            "http://"
+        };
+        let raw = url
             .trim_start_matches("grpc://")
-            .trim_start_matches("http://")
-            .trim_start_matches("https://");
-        let endpoint = format!("https://{endpoint}");
+            .trim_start_matches("https://")
+            .trim_start_matches("http://");
+        let endpoint = format!("{scheme}{raw}");
 
         let channel = tonic::transport::Endpoint::from_shared(endpoint)
             .map_err(|e| {
@@ -185,14 +190,16 @@ impl QdrantOps for GrpcQdrant {
 
     async fn collection_exists(&self, name: &str) -> Result<bool, QqlError> {
         let mut cl = qdrant::collections_client::CollectionsClient::new(self.channel.clone());
-        let resp = cl
+        match cl
             .collection_exists(tonic::Request::new(qdrant::CollectionExistsRequest {
                 collection_name: name.to_string(),
             }))
             .await
-            .map_err(|e| QqlError::backend("QQL-GRPC", format!("collection_exists: {e}"), None))?
-            .into_inner();
-        Ok(resp.result.map(|r| r.exists).unwrap_or(false))
+        {
+            Ok(resp) => Ok(resp.into_inner().result.map(|r| r.exists).unwrap_or(false)),
+            Err(status) if status.code() == tonic::Code::NotFound => Ok(false),
+            Err(e) => Err(QqlError::backend("QQL-GRPC", format!("collection_exists: {e}"), None)),
+        }
     }
 
     async fn get_collection_info(&self, name: &str) -> Result<CollectionInfo, QqlError> {

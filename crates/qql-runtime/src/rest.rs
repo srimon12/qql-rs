@@ -110,14 +110,18 @@ impl QdrantOps for RestQdrant {
     }
 
     async fn collection_exists(&self, name: &str) -> Result<bool, QqlError> {
-        let value: Value = self
-            .call(Method::GET, &format!("/collections/{name}"), None)
-            .await?;
-        Ok(value
-            .get("result")
-            .and_then(|r| r.get("exists"))
-            .and_then(|e| e.as_bool())
-            .unwrap_or(false))
+        match self
+            .call::<Value>(Method::GET, &format!("/collections/{name}"), None)
+            .await
+        {
+            Ok(value) => Ok(value
+                .get("result")
+                .and_then(|r| r.get("status").or_else(|| r.get("exists")))
+                .map(|_| true)
+                .unwrap_or(true)),
+            Err(e) if e.message.contains("404") || e.message.contains("Not found") => Ok(false),
+            Err(e) => Err(e),
+        }
     }
 
     async fn get_collection_info(&self, name: &str) -> Result<CollectionInfo, QqlError> {
