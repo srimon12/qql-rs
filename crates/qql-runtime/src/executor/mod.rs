@@ -60,7 +60,7 @@ impl Executor {
     #[cfg(feature = "rest")]
     pub fn rest(url: impl Into<String>, api_key: Option<String>) -> Result<Self, QqlError> {
         Ok(Self::new(
-            Box::new(crate::rest::RestQdrant::new(url, api_key)?),
+            Box::new(crate::rest::RestQdrant::new(url, api_key)),
             None,
         ))
     }
@@ -225,9 +225,12 @@ impl Executor {
             if let Stmt::Query(query_stmt) = stmt {
                 parsed_stmts.push(*query_stmt);
             } else {
-                return Err(QqlError::execution("QQL-EXECUTION", 
+                return Err(QqlError::execution(
+                    "QQL-EXECUTION",
                     "query_batch only supports QUERY statements, got non-query statement"
-                        .to_string(), None));
+                        .to_string(),
+                    None,
+                ));
             }
         }
         self.query_batch_nodes(parsed_stmts).await

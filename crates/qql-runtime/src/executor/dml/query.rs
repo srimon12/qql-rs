@@ -131,10 +131,7 @@ fn extract_search_hits(result: &serde_json::Value) -> Vec<SearchHit> {
                         _ => id.to_string(),
                     })
                     .unwrap_or_default(),
-                score: hit
-                    .get("score")
-                    .and_then(|s| s.as_f64())
-                    .unwrap_or(0.0) as f32,
+                score: hit.get("score").and_then(|s| s.as_f64()).unwrap_or(0.0) as f32,
                 text: hit
                     .get("payload")
                     .and_then(|p| p.get("text"))

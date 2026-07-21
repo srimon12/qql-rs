@@ -5,14 +5,13 @@ pub mod embedder;
 pub mod executor;
 #[cfg(feature = "grpc")]
 pub mod grpc;
-pub mod pipeline;
+#[cfg(feature = "grpc")]
+mod grpc_route;
 pub mod qdrant;
 #[cfg(feature = "rest")]
 pub mod rest;
 pub mod sparse;
 
-#[cfg(test)]
-mod pipeline_test;
 #[cfg(test)]
 mod sparse_test;
 

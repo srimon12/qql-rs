@@ -66,7 +66,7 @@ pub struct EmbeddingDestination {
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 pub enum FilterExpression {
-    Single(FilterClause),
+    Single(Box<FilterClause>),
     Compound(FilterCompound),
 }
 
@@ -78,40 +78,59 @@ pub struct FilterCompound {
     pub must_not: Vec<FilterClause>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub should: Vec<FilterClause>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_should: Option<MinShould>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MinShould {
+    pub conditions: Vec<FilterClause>,
+    pub min_count: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 pub enum FilterClause {
-    Field(FieldCondition),
+    Field(Box<FieldCondition>),
     IsNull(IsNullCondition),
     IsEmpty(IsEmptyCondition),
     HasId(HasIdCondition),
     HasVector(HasVectorCondition),
     Nested(NestedCondition),
-    ValuesCount(ValuesCountCondition),
+    Filter(Box<FilterCompound>),
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FieldCondition {
     pub key: String,
-    #[serde(flatten)]
-    pub condition: FieldMatch,
+    #[serde(rename = "match", skip_serializing_if = "Option::is_none")]
+    pub r#match: Option<MatchValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub range: Option<RangeParams>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub geo_bounding_box: Option<GeoBoundingBox>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub geo_radius: Option<GeoRadius>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub geo_polygon: Option<GeoPolygon>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub values_count: Option<ValuesCountParams>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_empty: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_null: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[serde(untagged)]
-pub enum FieldMatch {
-    Match(MatchCondition),
-    Range(RangeCondition),
-    GeoBoundingBox(GeoBoundingBoxCondition),
-    GeoRadius(GeoRadiusCondition),
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct MatchCondition {
-    #[serde(rename = "match")]
-    pub match_: MatchValue,
+pub struct ValuesCountParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lt: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gt: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gte: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lte: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -119,12 +138,10 @@ pub struct MatchCondition {
 pub enum MatchValue {
     Value { value: serde_json::Value },
     Text { text: String },
+    TextAny { text: String },
     Any { any: Vec<serde_json::Value> },
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct RangeCondition {
-    pub range: RangeParams,
+    Except { except: Vec<serde_json::Value> },
+    Phrase { phrase: String },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -140,25 +157,26 @@ pub struct RangeParams {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct GeoBoundingBoxCondition {
-    pub geo_bounding_box: GeoBoundingBox,
-}
-
-#[derive(Debug, Clone, Serialize)]
 pub struct GeoBoundingBox {
     pub top_left: GeoPoint,
     pub bottom_right: GeoPoint,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct GeoRadiusCondition {
-    pub geo_radius: GeoRadius,
-}
-
-#[derive(Debug, Clone, Serialize)]
 pub struct GeoRadius {
     pub center: GeoPoint,
     pub radius: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GeoPolygon {
+    pub exterior: GeoLineString,
+    pub interiors: Vec<GeoLineString>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GeoLineString {
+    pub points: Vec<GeoPoint>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -203,13 +221,6 @@ pub struct NestedParams {
     pub filter: Box<FilterExpression>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct ValuesCountCondition {
-    pub key: String,
-    #[serde(rename = "values_count")]
-    pub values_count: RangeParams,
-}
-
 // ── Query types ────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize)]
@@ -226,12 +237,6 @@ pub struct QueryRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub score_threshold: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub group_by: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub group_size: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub group_request: Option<GroupRequest>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub with_payload: Option<PayloadSelectorReq>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub with_vector: Option<VectorSelectorReq>,
@@ -239,11 +244,49 @@ pub struct QueryRequest {
     pub limit: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub offset: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "lookup_from")]
+    pub lookup_from: Option<LookupRequest>,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct GroupRequest {
-    pub with_lookup: String,
+pub struct QueryGroupsRequest {
+    pub query: QueryVariant,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub using: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub prefetch: Vec<PrefetchRequest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter: Option<FilterExpression>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub params: Option<SearchParamsRequest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score_threshold: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub with_payload: Option<PayloadSelectorReq>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub with_vector: Option<VectorSelectorReq>,
+    pub group_by: String,
+    pub group_size: u64,
+    pub limit: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub with_lookup: Option<WithLookupValue>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "lookup_from")]
+    pub lookup_from: Option<LookupRequest>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum WithLookupValue {
+    Collection(String),
+    Full(WithLookup),
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WithLookup {
+    pub collection: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub with_payload: Option<PayloadSelectorReq>,
+    pub with_vectors: Option<VectorSelectorReq>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -287,13 +330,60 @@ pub struct MmrQueryParams {
 #[serde(untagged)]
 pub enum QueryVariant {
     Nearest(NearestQuery),
-    Recommend { recommend: RecommendQuery },
-    Context { context: Vec<ContextPair> },
-    Discover { discover: DiscoverQuery },
-    OrderBy { order_by: OrderByQuery },
-    Sample { sample: String },
-    Fusion { fusion: String },
-    Formula { formula: serde_json::Value },
+    Recommend {
+        recommend: RecommendQuery,
+    },
+    Context {
+        context: Vec<ContextPair>,
+    },
+    Discover {
+        discover: DiscoverQuery,
+    },
+    OrderBy {
+        order_by: OrderByQuery,
+    },
+    Sample {
+        sample: String,
+    },
+    Fusion {
+        fusion: String,
+    },
+    Formula(FormulaQuery),
+    RelevanceFeedback {
+        relevance_feedback: RelevanceFeedbackInput,
+    },
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FormulaQuery {
+    pub formula: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub defaults: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RelevanceFeedbackInput {
+    pub target: serde_json::Value,
+    pub feedback: Vec<FeedbackItem>,
+    pub strategy: FeedbackStrategy,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FeedbackItem {
+    pub example: serde_json::Value,
+    pub score: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FeedbackStrategy {
+    pub naive: NaiveFeedbackStrategyParams,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NaiveFeedbackStrategyParams {
+    pub a: f64,
+    pub b: f64,
+    pub c: f64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -328,11 +418,19 @@ pub struct PrefetchRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub query: Option<QueryVariant>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub using: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<FilterExpression>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub params: Option<SearchParamsRequest>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub score_threshold: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub lookup: Option<LookupRequest>,
+    pub limit: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lookup_from: Option<LookupRequest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prefetch: Option<Vec<PrefetchRequest>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -374,11 +472,14 @@ pub struct ScrollRequest {
     pub filter: Option<FilterExpression>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub offset: Option<serde_json::Value>,
-    pub limit: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub with_payload: Option<PayloadSelectorReq>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub with_vector: Option<VectorSelectorReq>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order_by: Option<OrderByQuery>,
 }
 
 // ── Mutations ──────────────────────────────────────────────────

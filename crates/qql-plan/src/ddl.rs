@@ -1,8 +1,6 @@
 use crate::filter::value_to_json;
 use crate::types::*;
-use qql_core::ast::{
-    AlterCollectionStmt, CreateCollectionStmt, CreateIndexStmt, VectorDistance,
-};
+use qql_core::ast::{AlterCollectionStmt, CreateCollectionStmt, CreateIndexStmt, VectorDistance};
 
 pub fn lower_create_collection(stmt: &CreateCollectionStmt) -> CreateCollectionRequest {
     let mut req = CreateCollectionRequest {
@@ -19,12 +17,18 @@ pub fn lower_create_collection(stmt: &CreateCollectionStmt) -> CreateCollectionR
     for vd in &stmt.vectors {
         let mut v = serde_json::Map::new();
         v.insert("size".into(), serde_json::Value::from(vd.size));
-        v.insert("distance".into(), serde_json::Value::String(distance_str(vd.distance)));
+        v.insert(
+            "distance".into(),
+            serde_json::Value::String(distance_str(vd.distance)),
+        );
         if let Some(ref hnsw) = vd.hnsw {
             v.insert("hnsw_config".into(), lower_hnsw_config_val(hnsw));
         }
         if let Some(ref quant) = vd.quantization {
-            v.insert("quantization_config".into(), lower_quantization_config_val(quant));
+            v.insert(
+                "quantization_config".into(),
+                lower_quantization_config_val(quant),
+            );
         }
         if vd.multivector.is_some() {
             v.insert(
@@ -106,7 +110,10 @@ fn fill_collection_config(
             pc.insert("replication_factor".into(), serde_json::Value::from(rf));
         }
         if let Some(wc) = p.write_consistency_factor {
-            pc.insert("write_consistency_factor".into(), serde_json::Value::from(wc));
+            pc.insert(
+                "write_consistency_factor".into(),
+                serde_json::Value::from(wc),
+            );
         }
         if let Some(rf) = p.read_fan_out_factor {
             pc.insert("read_fan_out_factor".into(), serde_json::Value::from(rf));
@@ -128,15 +135,16 @@ fn fill_collection_config(
         let mut qup = serde_json::Map::new();
         qup.insert("disabled".into(), serde_json::Value::Bool(qu.disabled));
         if let Some(ref qc) = qu.config {
-            qup.insert("quantization_config".into(), lower_quantization_config_val(qc));
+            qup.insert(
+                "quantization_config".into(),
+                lower_quantization_config_val(qc),
+            );
         }
         req.quantization_config = Some(serde_json::Value::Object(qup));
     }
 }
 
-pub fn lower_hnsw_config_val(
-    config: &qql_core::ast::HnswRuntimeConfig,
-) -> serde_json::Value {
+pub fn lower_hnsw_config_val(config: &qql_core::ast::HnswRuntimeConfig) -> serde_json::Value {
     let mut obj = serde_json::Map::new();
     if let Some(m) = config.m {
         obj.insert("m".into(), serde_json::Value::from(m));
@@ -170,10 +178,16 @@ pub fn lower_optimizers_config_val(
         obj.insert("deleted_threshold".into(), serde_json::Value::from(dt));
     }
     if let Some(vmvn) = config.vacuum_min_vector_number {
-        obj.insert("vacuum_min_vector_number".into(), serde_json::Value::from(vmvn));
+        obj.insert(
+            "vacuum_min_vector_number".into(),
+            serde_json::Value::from(vmvn),
+        );
     }
     if let Some(dsn) = config.default_segment_number {
-        obj.insert("default_segment_number".into(), serde_json::Value::from(dsn));
+        obj.insert(
+            "default_segment_number".into(),
+            serde_json::Value::from(dsn),
+        );
     }
     if let Some(mss) = config.max_segment_size {
         obj.insert("max_segment_size".into(), serde_json::Value::from(mss));
@@ -210,7 +224,10 @@ pub fn lower_quantization_config_val(
     };
     let mut obj = serde_json::Map::new();
     obj.insert("type".into(), serde_json::Value::String(qtype.into()));
-    obj.insert("always_ram".into(), serde_json::Value::Bool(config.always_ram));
+    obj.insert(
+        "always_ram".into(),
+        serde_json::Value::Bool(config.always_ram),
+    );
     if let Some(quantile) = config.quantile {
         obj.insert("quantile".into(), serde_json::Value::from(quantile));
     }
@@ -253,9 +270,8 @@ mod tests {
 
     #[test]
     fn create_collection_with_config() {
-        let stmt = parse_stmt(
-            "CREATE COLLECTION docs (dense VECTOR(128, EUCLID)) WITH HNSW (m = 16);",
-        );
+        let stmt =
+            parse_stmt("CREATE COLLECTION docs (dense VECTOR(128, EUCLID)) WITH HNSW (m = 16);");
         let Stmt::CreateCollection(ref cc) = stmt else {
             panic!()
         };

@@ -9,9 +9,8 @@ fn create_collection_dense() {
 
 #[test]
 fn create_collection_with_sparse() {
-    let s = Parser::parse(
-        "CREATE COLLECTION docs (dense VECTOR(768, DOT), sparse SPARSE);",
-    ).unwrap();
+    let s =
+        Parser::parse("CREATE COLLECTION docs (dense VECTOR(768, DOT), sparse SPARSE);").unwrap();
     assert!(matches!(s, Stmt::CreateCollection(_)));
 }
 
@@ -19,7 +18,8 @@ fn create_collection_with_sparse() {
 fn create_collection_with_hnsw() {
     let s = Parser::parse(
         "CREATE COLLECTION docs (d VECTOR(128, EUCLID)) WITH HNSW (m = 16, ef_construct = 100);",
-    ).unwrap();
+    )
+    .unwrap();
     assert!(matches!(s, Stmt::CreateCollection(_)));
 }
 
@@ -33,9 +33,8 @@ fn create_collection_with_params() {
 
 #[test]
 fn alter_collection() {
-    let s = Parser::parse(
-        "ALTER COLLECTION docs WITH VECTOR (on_disk = true) WITH HNSW (m = 32);",
-    ).unwrap();
+    let s = Parser::parse("ALTER COLLECTION docs WITH VECTOR (on_disk = true) WITH HNSW (m = 32);")
+        .unwrap();
     assert!(matches!(s, Stmt::AlterCollection(_)));
 }
 
@@ -67,9 +66,8 @@ fn show_collection() {
 
 #[test]
 fn upsert_simple() {
-    let s = Parser::parse(
-        "UPSERT INTO docs VALUES {id: 1, title: 'hello', vector: [0.1, 0.2]};",
-    ).unwrap();
+    let s = Parser::parse("UPSERT INTO docs VALUES {id: 1, title: 'hello', vector: [0.1, 0.2]};")
+        .unwrap();
     let Stmt::Upsert(u) = s else { panic!() };
     assert_eq!(u.points.len(), 1);
     assert_eq!(u.collection, "docs");
@@ -93,9 +91,9 @@ fn upsert_named_vectors() {
 
 #[test]
 fn upsert_with_embedding() {
-    let s = Parser::parse(
-        "UPSERT INTO docs VALUES {id: 1, text: 'hello'} USING DENSE MODEL 'nomic';",
-    ).unwrap();
+    let s =
+        Parser::parse("UPSERT INTO docs VALUES {id: 1, text: 'hello'} USING DENSE MODEL 'nomic';")
+            .unwrap();
     assert!(matches!(s, Stmt::Upsert(_)));
 }
 
@@ -121,17 +119,15 @@ fn delete_by_filter() {
 
 #[test]
 fn update_vector() {
-    let s = Parser::parse(
-        "UPDATE docs SET VECTOR dense = [0.3, 0.7] WHERE id = 'p1';",
-    ).unwrap();
+    let s = Parser::parse("UPDATE docs SET VECTOR dense = [0.3, 0.7] WHERE id = 'p1';").unwrap();
     assert!(matches!(s, Stmt::UpdateVector(_)));
 }
 
 #[test]
 fn update_payload() {
-    let s = Parser::parse(
-        "UPDATE docs SET PAYLOAD = {status: 'active', priority: 5} WHERE id = 42;",
-    ).unwrap();
+    let s =
+        Parser::parse("UPDATE docs SET PAYLOAD = {status: 'active', priority: 5} WHERE id = 42;")
+            .unwrap();
     assert!(matches!(s, Stmt::UpdatePayload(_)));
 }
 

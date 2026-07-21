@@ -1,11 +1,10 @@
-mod lexer_tests;
-mod filter_tests;
-mod parser_tests;
 mod ddl_tests;
+mod filter_tests;
+mod lexer_tests;
 mod negative_tests;
+mod parser_tests;
 mod transform_tests;
 
-pub(crate) use crate::ast::Value;
 pub(crate) use crate::parser::Parser;
 
 #[test]

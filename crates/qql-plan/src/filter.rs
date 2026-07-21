@@ -7,18 +7,21 @@ pub fn lower_filter(filter: &FilterExpr) -> FilterExpression {
             must: operands.iter().map(lower_clause).collect(),
             must_not: Vec::new(),
             should: Vec::new(),
+            min_should: None,
         }),
         FilterExpr::Or { operands } => FilterExpression::Compound(FilterCompound {
             must: Vec::new(),
             must_not: Vec::new(),
             should: operands.iter().map(lower_clause).collect(),
+            min_should: None,
         }),
         FilterExpr::Not { operand } => FilterExpression::Compound(FilterCompound {
             must: Vec::new(),
             must_not: vec![lower_clause(operand)],
             should: Vec::new(),
+            min_should: None,
         }),
-        other => FilterExpression::Single(lower_clause(other)),
+        other => FilterExpression::Single(Box::new(lower_clause(other))),
     }
 }
 
@@ -29,31 +32,22 @@ fn lower_clause(filter: &FilterExpr) -> FilterClause {
         FilterExpr::Between { field, low, high } => lower_between(field, low, high),
         FilterExpr::In { field, values } => lower_match_any(field, values),
         FilterExpr::IsNull { field } => FilterClause::IsNull(IsNullCondition {
-            is_null: KeyOnly {
-                key: field.clone(),
-            },
+            is_null: KeyOnly { key: field.clone() },
         }),
         FilterExpr::IsEmpty { field } => FilterClause::IsEmpty(IsEmptyCondition {
-            is_empty: KeyOnly {
-                key: field.clone(),
-            },
+            is_empty: KeyOnly { key: field.clone() },
         }),
-        FilterExpr::MatchText { field, text } => FilterClause::Field(FieldCondition {
-            key: field.clone(),
-            condition: FieldMatch::Match(MatchCondition {
-                match_: MatchValue::Text {
-                    text: text.clone(),
-                },
-            }),
+        FilterExpr::MatchText { field, text } => field_condition(field, |fc| {
+            fc.r#match = Some(MatchValue::Text { text: text.clone() })
         }),
-        FilterExpr::MatchAny { field, values } => lower_match_any(field, values),
-        FilterExpr::MatchPhrase { field, text } => FilterClause::Field(FieldCondition {
-            key: field.clone(),
-            condition: FieldMatch::Match(MatchCondition {
-                match_: MatchValue::Text {
-                    text: text.clone(),
-                },
-            }),
+        FilterExpr::MatchAny { field, values } => {
+            let any: Vec<_> = values.iter().map(value_to_json).collect();
+            field_condition(field, |fc| fc.r#match = Some(MatchValue::Any { any }))
+        }
+        FilterExpr::MatchPhrase { field, text } => field_condition(field, |fc| {
+            fc.r#match = Some(MatchValue::Phrase {
+                phrase: text.clone(),
+            })
         }),
         FilterExpr::Nested { path, filter } => FilterClause::Nested(NestedCondition {
             nested: NestedParams {
@@ -65,41 +59,69 @@ fn lower_clause(filter: &FilterExpr) -> FilterClause {
             has_vector: name.clone(),
         }),
         FilterExpr::ValuesCount { field, op, count } => {
-            FilterClause::ValuesCount(ValuesCountCondition {
-                key: field.clone(),
-                values_count: comparison_range(*op, &Value::Int(*count as i64)),
-            })
+            let mut fc = empty_field_condition(field);
+            fc.values_count = Some(values_count_params(*op, *count));
+            FilterClause::Field(Box::new(fc))
         }
         FilterExpr::GeoBoundingBox {
             field,
             top_left,
             bottom_right,
-        } => FilterClause::Field(FieldCondition {
-            key: field.clone(),
-            condition: FieldMatch::GeoBoundingBox(GeoBoundingBoxCondition {
-                geo_bounding_box: GeoBoundingBox {
-                    top_left: geo_point_req(top_left),
-                    bottom_right: geo_point_req(bottom_right),
-                },
-            }),
+        } => field_condition(field, |fc| {
+            fc.geo_bounding_box = Some(GeoBoundingBox {
+                top_left: geo_point_req(top_left),
+                bottom_right: geo_point_req(bottom_right),
+            })
         }),
         FilterExpr::GeoRadius {
             field,
             center,
             radius,
-        } => FilterClause::Field(FieldCondition {
-            key: field.clone(),
-            condition: FieldMatch::GeoRadius(GeoRadiusCondition {
-                geo_radius: GeoRadius {
-                    center: geo_point_req(center),
-                    radius: *radius,
-                },
-            }),
+        } => field_condition(field, |fc| {
+            fc.geo_radius = Some(GeoRadius {
+                center: geo_point_req(center),
+                radius: *radius,
+            })
         }),
-        FilterExpr::And { .. } | FilterExpr::Or { .. } | FilterExpr::Not { .. } => {
-            unreachable!("compound filters handled in lower_filter")
-        }
+        FilterExpr::And { operands } => FilterClause::Filter(Box::new(FilterCompound {
+            must: operands.iter().map(lower_clause).collect(),
+            must_not: Vec::new(),
+            should: Vec::new(),
+            min_should: None,
+        })),
+        FilterExpr::Or { operands } => FilterClause::Filter(Box::new(FilterCompound {
+            must: Vec::new(),
+            must_not: Vec::new(),
+            should: operands.iter().map(lower_clause).collect(),
+            min_should: None,
+        })),
+        FilterExpr::Not { operand } => FilterClause::Filter(Box::new(FilterCompound {
+            must: Vec::new(),
+            must_not: vec![lower_clause(operand)],
+            should: Vec::new(),
+            min_should: None,
+        })),
     }
+}
+
+fn empty_field_condition(field: &str) -> FieldCondition {
+    FieldCondition {
+        key: field.into(),
+        r#match: None,
+        range: None,
+        geo_bounding_box: None,
+        geo_radius: None,
+        geo_polygon: None,
+        values_count: None,
+        is_empty: None,
+        is_null: None,
+    }
+}
+
+fn field_condition(field: &str, f: impl FnOnce(&mut FieldCondition)) -> FilterClause {
+    let mut fc = empty_field_condition(field);
+    f(&mut fc);
+    FilterClause::Field(Box::new(fc))
 }
 
 fn lower_point_id(predicate: &PointIdPredicate) -> FilterClause {
@@ -112,45 +134,29 @@ fn lower_point_id(predicate: &PointIdPredicate) -> FilterClause {
 
 fn lower_compare(field: &str, op: ComparisonOp, value: &Value) -> FilterClause {
     if op == ComparisonOp::Eq {
-        return FilterClause::Field(FieldCondition {
-            key: field.into(),
-            condition: FieldMatch::Match(MatchCondition {
-                match_: MatchValue::Value {
-                    value: value_to_json(value),
-                },
-            }),
+        return field_condition(field, |fc| {
+            fc.r#match = Some(MatchValue::Value {
+                value: value_to_json(value),
+            })
         });
     }
-    FilterClause::Field(FieldCondition {
-        key: field.into(),
-        condition: FieldMatch::Range(RangeCondition {
-            range: comparison_range(op, value),
-        }),
-    })
+    field_condition(field, |fc| fc.range = Some(comparison_range(op, value)))
 }
 
 fn lower_between(field: &str, low: &Value, high: &Value) -> FilterClause {
-    FilterClause::Field(FieldCondition {
-        key: field.into(),
-        condition: FieldMatch::Range(RangeCondition {
-            range: RangeParams {
-                gt: None,
-                gte: Some(value_to_json(low)),
-                lt: None,
-                lte: Some(value_to_json(high)),
-            },
-        }),
+    field_condition(field, |fc| {
+        fc.range = Some(RangeParams {
+            gt: None,
+            gte: Some(value_to_json(low)),
+            lt: None,
+            lte: Some(value_to_json(high)),
+        })
     })
 }
 
 fn lower_match_any(field: &str, values: &[Value]) -> FilterClause {
     let any: Vec<_> = values.iter().map(value_to_json).collect();
-    FilterClause::Field(FieldCondition {
-        key: field.into(),
-        condition: FieldMatch::Match(MatchCondition {
-            match_: MatchValue::Any { any },
-        }),
-    })
+    field_condition(field, |fc| fc.r#match = Some(MatchValue::Any { any }))
 }
 
 fn comparison_range(op: ComparisonOp, value: &Value) -> RangeParams {
@@ -181,6 +187,41 @@ fn comparison_range(op: ComparisonOp, value: &Value) -> RangeParams {
             lte: Some(v),
         },
         ComparisonOp::Eq => unreachable!(),
+    }
+}
+
+fn values_count_params(op: ComparisonOp, count: u64) -> ValuesCountParams {
+    match op {
+        ComparisonOp::Gt => ValuesCountParams {
+            gt: Some(count),
+            gte: None,
+            lt: None,
+            lte: None,
+        },
+        ComparisonOp::Gte => ValuesCountParams {
+            gt: None,
+            gte: Some(count),
+            lt: None,
+            lte: None,
+        },
+        ComparisonOp::Lt => ValuesCountParams {
+            gt: None,
+            gte: None,
+            lt: Some(count),
+            lte: None,
+        },
+        ComparisonOp::Lte => ValuesCountParams {
+            gt: None,
+            gte: None,
+            lt: None,
+            lte: Some(count),
+        },
+        ComparisonOp::Eq => ValuesCountParams {
+            gt: None,
+            gte: Some(count),
+            lt: None,
+            lte: Some(count),
+        },
     }
 }
 
@@ -255,8 +296,7 @@ mod tests {
 
     #[test]
     fn point_id_eq() {
-        let f =
-            FilterExpr::PointId(PointIdPredicate::Eq(qql_core::ast::PointId::Number(42)));
+        let f = FilterExpr::PointId(PointIdPredicate::Eq(qql_core::ast::PointId::Number(42)));
         assert_json(&lower_filter(&f), json!({"has_id": [42]}));
     }
 
@@ -282,6 +322,18 @@ mod tests {
     }
 
     #[test]
+    fn match_phrase() {
+        let f = FilterExpr::MatchPhrase {
+            field: "content".into(),
+            text: "exact match".into(),
+        };
+        assert_json(
+            &lower_filter(&f),
+            json!({"key": "content", "match": {"phrase": "exact match"}}),
+        );
+    }
+
+    #[test]
     fn match_any() {
         let f = FilterExpr::MatchAny {
             field: "tags".into(),
@@ -294,7 +346,7 @@ mod tests {
     }
 
     #[test]
-    fn not() {
+    fn not_simple() {
         let f = FilterExpr::Not {
             operand: Box::new(FilterExpr::Compare {
                 field: "status".into(),
@@ -305,6 +357,33 @@ mod tests {
         assert_json(
             &lower_filter(&f),
             json!({"must_not": [{"key": "status", "match": {"value": "deleted"}}]}),
+        );
+    }
+
+    #[test]
+    fn not_compound() {
+        let f = FilterExpr::Not {
+            operand: Box::new(FilterExpr::And {
+                operands: vec![
+                    FilterExpr::Compare {
+                        field: "a".into(),
+                        op: ComparisonOp::Eq,
+                        value: Value::Bool(true),
+                    },
+                    FilterExpr::Compare {
+                        field: "b".into(),
+                        op: ComparisonOp::Gt,
+                        value: Value::Int(10),
+                    },
+                ],
+            }),
+        };
+        assert_json(
+            &lower_filter(&f),
+            json!({"must_not": [{"must": [
+                {"key": "a", "match": {"value": true}},
+                {"key": "b", "range": {"gt": 10}}
+            ]}]}),
         );
     }
 
@@ -385,6 +464,19 @@ mod tests {
     }
 
     #[test]
+    fn values_count() {
+        let f = FilterExpr::ValuesCount {
+            field: "tags".into(),
+            op: ComparisonOp::Gt,
+            count: 3,
+        };
+        assert_json(
+            &lower_filter(&f),
+            json!({"key": "tags", "values_count": {"gt": 3}}),
+        );
+    }
+
+    #[test]
     fn nested() {
         let f = FilterExpr::Nested {
             path: "comments".into(),
@@ -421,14 +513,8 @@ mod tests {
     fn geo_bbox() {
         let f = FilterExpr::GeoBoundingBox {
             field: "area".into(),
-            top_left: qql_core::ast::GeoPoint {
-                lat: 1.0,
-                lon: 2.0,
-            },
-            bottom_right: qql_core::ast::GeoPoint {
-                lat: 3.0,
-                lon: 4.0,
-            },
+            top_left: qql_core::ast::GeoPoint { lat: 1.0, lon: 2.0 },
+            bottom_right: qql_core::ast::GeoPoint { lat: 3.0, lon: 4.0 },
         };
         let json = serde_json::to_value(lower_filter(&f)).unwrap();
         assert_eq!(json["key"], "area");

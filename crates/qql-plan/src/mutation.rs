@@ -103,9 +103,10 @@ pub fn lower_scroll_request(
     ScrollRequest {
         filter: filter.map(lower_filter),
         offset: after.map(point_id_req),
-        limit,
+        limit: Some(limit),
         with_payload: Some(PayloadSelectorReq::All(true)),
         with_vector: Some(VectorSelectorReq::All(false)),
+        order_by: None,
     }
 }
 
@@ -167,19 +168,25 @@ mod tests {
 
     #[test]
     fn update_vector() {
-        let s =
-            parse_stmt("UPDATE docs SET VECTOR dense = [3.0, 7.0] WHERE id = 'p1';");
-        let Stmt::UpdateVector(ref uv) = s else { panic!() };
+        let s = parse_stmt("UPDATE docs SET VECTOR dense = [3.0, 7.0] WHERE id = 'p1';");
+        let Stmt::UpdateVector(ref uv) = s else {
+            panic!()
+        };
         let req = lower_update_vector_request(uv);
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["points"][0]["id"], "p1");
-        assert_eq!(json["points"][0]["vector"]["dense"], serde_json::json!([3.0, 7.0]));
+        assert_eq!(
+            json["points"][0]["vector"]["dense"],
+            serde_json::json!([3.0, 7.0])
+        );
     }
 
     #[test]
     fn update_payload() {
         let s = parse_stmt("UPDATE docs SET PAYLOAD = {status: 'active'} WHERE id = 42;");
-        let Stmt::UpdatePayload(ref up) = s else { panic!() };
+        let Stmt::UpdatePayload(ref up) = s else {
+            panic!()
+        };
         let req = lower_update_payload_request(up);
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["points"], serde_json::json!([42]));

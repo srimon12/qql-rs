@@ -4,14 +4,24 @@ use crate::parser::Parser;
 macro_rules! assert_parse_err {
     ($source:expr, $kind:ident) => {{
         let err = Parser::parse($source).expect_err(&format!("expected error for: {}", $source));
-        assert_eq!(err.kind, ErrorKind::Parse, "wrong error kind for: {}", $source);
+        assert_eq!(
+            err.kind,
+            ErrorKind::Parse,
+            "wrong error kind for: {}",
+            $source
+        );
     }};
 }
 
 macro_rules! assert_validation_err {
     ($source:expr) => {{
         let err = Parser::parse($source).expect_err(&format!("expected error for: {}", $source));
-        assert_eq!(err.kind, ErrorKind::Validation, "wrong error kind for: {}", $source);
+        assert_eq!(
+            err.kind,
+            ErrorKind::Validation,
+            "wrong error kind for: {}",
+            $source
+        );
     }};
 }
 
@@ -99,8 +109,7 @@ fn invalid_geo_rejected() {
         "QUERY TEXT 'x' FROM docs WHERE loc GEO_RADIUS {center: {lat: 1, lon: 2}, radius: 0};",
     ];
     for source in cases {
-        let err = Parser::parse(source)
-            .expect_err(&format!("expected geo error for: {}", source));
+        let err = Parser::parse(source).expect_err(&format!("expected geo error for: {}", source));
         assert_eq!(err.kind, ErrorKind::Validation);
     }
 }

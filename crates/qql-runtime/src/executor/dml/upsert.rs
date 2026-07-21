@@ -1,6 +1,7 @@
+use crate::client::{CreateCollectionReq, VectorTopology};
 #[cfg(feature = "rest")]
 use crate::embedder::HttpEmbedder;
-use crate::executor::{CreateCollectionReq, Executor, VectorTopology};
+use crate::executor::Executor;
 use qql_core::error::QqlError;
 
 impl Executor {
@@ -59,7 +60,10 @@ impl Executor {
             } else if vname == crate::executor::RERANK_VECTOR_NAME {
                 topo.rerank_vector = Some(crate::executor::RERANK_VECTOR_NAME.to_string());
             } else if topo.dense_vector.is_none()
-                || topo.dense_vector.as_ref().is_some_and(|name| name.is_empty())
+                || topo
+                    .dense_vector
+                    .as_ref()
+                    .is_some_and(|name| name.is_empty())
             {
                 topo.dense_vector = Some(vname.clone());
             }
@@ -69,7 +73,10 @@ impl Executor {
             if vname == crate::executor::SPARSE_VECTOR_NAME {
                 topo.sparse_vector = Some(crate::executor::SPARSE_VECTOR_NAME.to_string());
             } else if topo.sparse_vector.is_none()
-                || topo.sparse_vector.as_ref().is_some_and(|name| name.is_empty())
+                || topo
+                    .sparse_vector
+                    .as_ref()
+                    .is_some_and(|name| name.is_empty())
             {
                 topo.sparse_vector = Some(vname.clone());
             }

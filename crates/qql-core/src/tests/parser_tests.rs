@@ -22,7 +22,8 @@ fn nearest_explicit_text_with_model() {
 
 #[test]
 fn nearest_vector() {
-    let s = Parser::parse("QUERY NEAREST VECTOR [0.1, 0.2, 0.3] FROM docs USING dense LIMIT 5;").unwrap();
+    let s = Parser::parse("QUERY NEAREST VECTOR [0.1, 0.2, 0.3] FROM docs USING dense LIMIT 5;")
+        .unwrap();
     let Stmt::Query(q) = s else { panic!() };
     assert!(matches!(q.expression, QueryExpr::Nearest {
         input: QueryInput::Vector(_), using: Some(ref u), ..
@@ -77,7 +78,8 @@ fn context_search() {
 fn discover_search() {
     let s = Parser::parse(
         "QUERY DISCOVER TARGET POINT 1 CONTEXT (POSITIVE POINT 2 NEGATIVE POINT 3) FROM docs;",
-    ).unwrap();
+    )
+    .unwrap();
     let Stmt::Query(q) = s else { panic!() };
     assert!(matches!(q.expression, QueryExpr::Discover { .. }));
 }
@@ -103,7 +105,9 @@ fn fusion_with_prefetch() {
     ).unwrap();
     let Stmt::Query(q) = s else { panic!() };
     assert_eq!(q.ctes.len(), 2);
-    assert!(matches!(q.expression, QueryExpr::Fusion { method: FusionMethod::Rrf, ref prefetch } if prefetch.len() == 2));
+    assert!(
+        matches!(q.expression, QueryExpr::Fusion { method: FusionMethod::Rrf, ref prefetch } if prefetch.len() == 2)
+    );
 }
 
 #[test]
@@ -112,14 +116,18 @@ fn fusion_dbsf() {
         "WITH d AS (QUERY TEXT 'x' USING dense LIMIT 100) QUERY FUSION DBSF FROM docs PREFETCH (d) LIMIT 10;",
     ).unwrap();
     let Stmt::Query(q) = s else { panic!() };
-    assert!(matches!(q.expression, QueryExpr::Fusion { method: FusionMethod::Dbsf, .. }));
+    assert!(matches!(
+        q.expression,
+        QueryExpr::Fusion {
+            method: FusionMethod::Dbsf,
+            ..
+        }
+    ));
 }
 
 #[test]
 fn formula_query() {
-    let s = Parser::parse(
-        "QUERY FORMULA $score + 1 DEFAULTS (missing = 0) FROM docs;",
-    ).unwrap();
+    let s = Parser::parse("QUERY FORMULA $score + 1 DEFAULTS (missing = 0) FROM docs;").unwrap();
     let Stmt::Query(q) = s else { panic!() };
     assert!(matches!(q.expression, QueryExpr::Formula { .. }));
 }
@@ -137,7 +145,8 @@ fn relevance_feedback() {
 fn mmr_query() {
     let s = Parser::parse(
         "QUERY MMR TEXT 'diverse' DIVERSITY 0.4 CANDIDATES 50 FROM docs USING dense;",
-    ).unwrap();
+    )
+    .unwrap();
     let Stmt::Query(q) = s else { panic!() };
     assert!(matches!(q.expression, QueryExpr::Nearest {
         input: QueryInput::Text { ref text, .. }, mmr: Some(_), ..
@@ -155,7 +164,8 @@ fn mmr_diversity_must_be_valid() {
 fn hybrid_shorthand() {
     let s = Parser::parse(
         "QUERY HYBRID TEXT 'search' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10;",
-    ).unwrap();
+    )
+    .unwrap();
     let Stmt::Query(q) = s else { panic!() };
     assert!(matches!(q.expression, QueryExpr::Hybrid {
         ref text, fusion: FusionMethod::Rrf, ..
@@ -199,7 +209,9 @@ fn trailing_semicolons_rejected() {
 #[test]
 fn parse_all_semicolons_required() {
     assert_eq!(
-        Parser::parse_all("SHOW COLLECTIONS; SHOW COLLECTION docs;").unwrap().len(),
+        Parser::parse_all("SHOW COLLECTIONS; SHOW COLLECTION docs;")
+            .unwrap()
+            .len(),
         2
     );
     assert!(Parser::parse_all("SHOW COLLECTIONS SHOW COLLECTION docs").is_err());

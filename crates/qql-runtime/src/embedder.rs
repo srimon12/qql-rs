@@ -74,18 +74,34 @@ impl HttpEmbedder {
         dimension: usize,
     ) -> Result<Self, QqlError> {
         if endpoint.trim().is_empty() {
-            return Err(QqlError::execution("QQL-EMBEDDING", "embedding endpoint is required", None));
+            return Err(QqlError::execution(
+                "QQL-EMBEDDING",
+                "embedding endpoint is required",
+                None,
+            ));
         }
         if model.trim().is_empty() {
-            return Err(QqlError::execution("QQL-EMBEDDING", "embedding model is required", None));
+            return Err(QqlError::execution(
+                "QQL-EMBEDDING",
+                "embedding model is required",
+                None,
+            ));
         }
         if dimension == 0 {
-            return Err(QqlError::execution("QQL-EMBEDDING", "embedding dimension must be positive", None));
+            return Err(QqlError::execution(
+                "QQL-EMBEDDING",
+                "embedding dimension must be positive",
+                None,
+            ));
         }
 
-        let client = Client::builder()
-            .build()
-            .map_err(|e| QqlError::execution("QQL-EMBEDDING", format!("failed to create HTTP client: {}", e), None))?;
+        let client = Client::builder().build().map_err(|e| {
+            QqlError::execution(
+                "QQL-EMBEDDING",
+                format!("failed to create HTTP client: {}", e),
+                None,
+            )
+        })?;
 
         Ok(HttpEmbedder {
             endpoint,
@@ -105,7 +121,11 @@ impl HttpEmbedder {
         let resp = self.do_request(&body).await?;
 
         if resp.data.is_empty() {
-            return Err(QqlError::execution("QQL-EMBEDDING", "embedding response contained no vectors", None));
+            return Err(QqlError::execution(
+                "QQL-EMBEDDING",
+                "embedding response contained no vectors",
+                None,
+            ));
         }
 
         Ok(resp.data[0].embedding.len())
@@ -118,22 +138,30 @@ impl HttpEmbedder {
             req = req.header("Authorization", format!("Bearer {}", self.api_key));
         }
 
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| QqlError::execution("QQL-EMBEDDING", format!("failed to call embedding endpoint: {}", e), None))?;
+        let resp = req.send().await.map_err(|e| {
+            QqlError::execution(
+                "QQL-EMBEDDING",
+                format!("failed to call embedding endpoint: {}", e),
+                None,
+            )
+        })?;
 
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(QqlError::execution("QQL-EMBEDDING", format!(
-                "embedding endpoint returned {}: {}",
-                status, text
-            ), None));
+            return Err(QqlError::execution(
+                "QQL-EMBEDDING",
+                format!("embedding endpoint returned {}: {}", status, text),
+                None,
+            ));
         }
 
         let decoded: EmbedResponse = resp.json().await.map_err(|e| {
-            QqlError::execution("QQL-EMBEDDING", format!("failed to decode embedding response: {}", e), None)
+            QqlError::execution(
+                "QQL-EMBEDDING",
+                format!("failed to decode embedding response: {}", e),
+                None,
+            )
         })?;
 
         Ok(decoded)
@@ -141,7 +169,11 @@ impl HttpEmbedder {
 
     async fn embed_batch(&self, inputs: &[String]) -> Result<Vec<Vec<f32>>, QqlError> {
         if inputs.is_empty() {
-            return Err(QqlError::execution("QQL-EMBEDDING", "inputs are required", None));
+            return Err(QqlError::execution(
+                "QQL-EMBEDDING",
+                "inputs are required",
+                None,
+            ));
         }
 
         let body = EmbedRequest {
@@ -152,34 +184,44 @@ impl HttpEmbedder {
         let decoded = self.do_request(&body).await?;
 
         if decoded.data.len() != inputs.len() {
-            return Err(QqlError::execution("QQL-EMBEDDING", format!(
-                "embedding response returned {} vector(s) for {} input(s)",
-                decoded.data.len(),
-                inputs.len()
-            ), None));
+            return Err(QqlError::execution(
+                "QQL-EMBEDDING",
+                format!(
+                    "embedding response returned {} vector(s) for {} input(s)",
+                    decoded.data.len(),
+                    inputs.len()
+                ),
+                None,
+            ));
         }
 
         let mut vectors: Vec<Option<Vec<f32>>> = vec![None; inputs.len()];
         for item in decoded.data {
             if item.index >= inputs.len() {
-                return Err(QqlError::execution("QQL-EMBEDDING", format!(
-                    "embedding response index {} out of range",
-                    item.index
-                ), None));
+                return Err(QqlError::execution(
+                    "QQL-EMBEDDING",
+                    format!("embedding response index {} out of range", item.index),
+                    None,
+                ));
             }
             if vectors[item.index].is_some() {
-                return Err(QqlError::execution("QQL-EMBEDDING", format!(
-                    "embedding response duplicated index {}",
-                    item.index
-                ), None));
+                return Err(QqlError::execution(
+                    "QQL-EMBEDDING",
+                    format!("embedding response duplicated index {}", item.index),
+                    None,
+                ));
             }
             if item.embedding.len() != self.dimension {
-                return Err(QqlError::execution("QQL-EMBEDDING", format!(
-                    "embedding dimension mismatch for index {}: got {} want {}",
-                    item.index,
-                    item.embedding.len(),
-                    self.dimension
-                ), None));
+                return Err(QqlError::execution(
+                    "QQL-EMBEDDING",
+                    format!(
+                        "embedding dimension mismatch for index {}: got {} want {}",
+                        item.index,
+                        item.embedding.len(),
+                        self.dimension
+                    ),
+                    None,
+                ));
             }
             vectors[item.index] = Some(item.embedding);
         }
@@ -189,10 +231,11 @@ impl HttpEmbedder {
             if let Some(vec) = v {
                 result.push(vec);
             } else {
-                return Err(QqlError::execution("QQL-EMBEDDING", format!(
-                    "missing embedding vector at index {}",
-                    i
-                ), None));
+                return Err(QqlError::execution(
+                    "QQL-EMBEDDING",
+                    format!("missing embedding vector at index {}", i),
+                    None,
+                ));
             }
         }
 

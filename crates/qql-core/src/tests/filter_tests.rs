@@ -25,11 +25,19 @@ fn not_equals_is_normalized() {
 
 #[test]
 fn range_operators() {
-    for (op_str, op) in [(">", ComparisonOp::Gt), (">=", ComparisonOp::Gte), ("<", ComparisonOp::Lt), ("<=", ComparisonOp::Lte)] {
+    for (op_str, op) in [
+        (">", ComparisonOp::Gt),
+        (">=", ComparisonOp::Gte),
+        ("<", ComparisonOp::Lt),
+        ("<=", ComparisonOp::Lte),
+    ] {
         let source = format!("QUERY TEXT 'x' FROM docs WHERE count {} 5;", op_str);
         let f = filter_of(&source).unwrap();
-        assert!(matches!(*f, FilterExpr::Compare { op: expected, .. } if expected == op),
-            "failed for {}", op_str);
+        assert!(
+            matches!(*f, FilterExpr::Compare { op: expected, .. } if expected == op),
+            "failed for {}",
+            op_str
+        );
     }
 }
 
@@ -86,27 +94,20 @@ fn match_phrase() {
 
 #[test]
 fn logical_and_or_not() {
-    let f = filter_of(
-        "QUERY TEXT 'x' FROM docs WHERE a = 1 AND b = 2 OR c = 3;"
-    ).unwrap();
+    let f = filter_of("QUERY TEXT 'x' FROM docs WHERE a = 1 AND b = 2 OR c = 3;").unwrap();
     assert!(matches!(*f, FilterExpr::Or { .. }));
 
-    let f = filter_of(
-        "QUERY TEXT 'x' FROM docs WHERE a = 1 AND (b = 2 OR c = 3);"
-    ).unwrap();
+    let f = filter_of("QUERY TEXT 'x' FROM docs WHERE a = 1 AND (b = 2 OR c = 3);").unwrap();
     assert!(matches!(*f, FilterExpr::And { .. }));
 
-    let f = filter_of(
-        "QUERY TEXT 'x' FROM docs WHERE NOT (a = 1 AND b = 2);"
-    ).unwrap();
+    let f = filter_of("QUERY TEXT 'x' FROM docs WHERE NOT (a = 1 AND b = 2);").unwrap();
     assert!(matches!(*f, FilterExpr::Not { .. }));
 }
 
 #[test]
 fn nested_filter() {
-    let f = filter_of(
-        "QUERY TEXT 'x' FROM docs WHERE NESTED('comments', author = 'alice');"
-    ).unwrap();
+    let f =
+        filter_of("QUERY TEXT 'x' FROM docs WHERE NESTED('comments', author = 'alice');").unwrap();
     assert!(matches!(*f, FilterExpr::Nested { .. }));
 }
 

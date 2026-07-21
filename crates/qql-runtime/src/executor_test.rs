@@ -5,30 +5,18 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 use qql_core::error::QqlError;
-
-use crate::config::QqlConfig;
-use crate::executor::{
-    CollectionInfo, CountPointsReq, CreateCollectionReq, CreateFieldIndexReq, DeletePointsReq,
-    Executor, GetPointsReq, PointGroup, QdrantAdminOps, QdrantCoreOps, RetrievedPoint, ScoredPoint,
-    ScrollPointsReq, SetPayloadReq, UpdateVectorsReq, UpsertPointsReq,
-};
-use crate::pipeline::PointId;
 use qql_plan::routing::Route;
+
+use crate::client::{CollectionInfo, CreateCollectionReq, CreateFieldIndexReq, QdrantOps};
+use crate::config::QqlConfig;
+use crate::executor::Executor;
 
 struct MockQdrantClient {
     pub exists: bool,
     pub collections: Vec<String>,
     pub info: Option<CollectionInfo>,
-    pub get_records: Vec<RetrievedPoint>,
-    pub scroll_records: Vec<RetrievedPoint>,
-    pub scroll_offset: Option<PointId>,
     pub last_create_collection: Arc<Mutex<Option<CreateCollectionReq>>>,
     pub last_update_collection: Arc<Mutex<Option<serde_json::Value>>>,
-    pub last_upsert: Arc<Mutex<Option<UpsertPointsReq>>>,
-    pub last_delete: Arc<Mutex<Option<DeletePointsReq>>>,
-    pub last_update_vectors: Arc<Mutex<Option<UpdateVectorsReq>>>,
-    pub last_set_payload: Arc<Mutex<Option<SetPayloadReq>>>,
-    pub last_query: Arc<Mutex<Option<crate::pipeline::QueryPointsRequest>>>,
     pub last_route: Arc<Mutex<Option<Route>>>,
 }
 
@@ -38,61 +26,15 @@ impl Default for MockQdrantClient {
             exists: false,
             collections: Vec::new(),
             info: None,
-            get_records: Vec::new(),
-            scroll_records: Vec::new(),
-            scroll_offset: None,
             last_create_collection: Arc::new(Mutex::new(None)),
             last_update_collection: Arc::new(Mutex::new(None)),
-            last_upsert: Arc::new(Mutex::new(None)),
-            last_delete: Arc::new(Mutex::new(None)),
-            last_update_vectors: Arc::new(Mutex::new(None)),
-            last_set_payload: Arc::new(Mutex::new(None)),
-            last_query: Arc::new(Mutex::new(None)),
             last_route: Arc::new(Mutex::new(None)),
         }
     }
 }
 
-fn mock_collection_info() -> CollectionInfo {
-    let val = serde_json::json!({
-        "status": "green",
-        "optimizer_status": "ok",
-        "segments_count": 0,
-        "payload_schema": {},
-        "config": {
-            "params": {
-                "vectors": {
-                    "size": 384,
-                    "distance": "Cosine"
-                },
-                "sparse_vectors": {},
-                "replication_factor": 1,
-                "shard_number": 1,
-                "write_consistency_factor": 1
-            },
-            "hnsw_config": {
-                "m": 16,
-                "ef_construct": 100,
-                "full_scan_threshold": 10000
-            },
-            "optimizer_config": {
-                "deleted_threshold": 0.2,
-                "vacuum_min_vector_number": 1000,
-                "full_scan_threshold": 10000,
-                "indexing_threshold": 1000,
-                "max_optimization_threads": 1,
-                "default_segment_number": 0,
-                "flush_interval_sec": 1,
-                "max_segment_size": 10000,
-                "memmap_threshold": 10000
-            }
-        }
-    });
-    serde_json::from_value(val).unwrap()
-}
-
 #[async_trait]
-impl QdrantCoreOps for MockQdrantClient {
+impl QdrantOps for MockQdrantClient {
     async fn list_collections(&self) -> Result<Vec<String>, QqlError> {
         Ok(self.collections.clone())
     }
@@ -100,70 +42,14 @@ impl QdrantCoreOps for MockQdrantClient {
         Ok(self.exists)
     }
     async fn get_collection_info(&self, _name: &str) -> Result<CollectionInfo, QqlError> {
-        if let Some(ref info) = self.info {
-            Ok(info.clone())
-        } else {
-            Ok(mock_collection_info())
-        }
+        self.info
+            .clone()
+            .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "no mock info set", None))
     }
     async fn create_collection(&self, req: CreateCollectionReq) -> Result<(), QqlError> {
         *self.last_create_collection.lock().unwrap() = Some(req);
         Ok(())
     }
-    async fn upsert(&self, req: UpsertPointsReq) -> Result<(), QqlError> {
-        *self.last_upsert.lock().unwrap() = Some(req);
-        Ok(())
-    }
-    async fn query(
-        &self,
-        req: crate::pipeline::QueryPointsRequest,
-    ) -> Result<Vec<ScoredPoint>, QqlError> {
-        if req.collection_name == "nonexistent" {
-            return Err(QqlError::execution("QQL-EXECUTION", "collection 'nonexistent' does not exist", None));
-        }
-        *self.last_query.lock().unwrap() = Some(req);
-        Ok(vec![])
-    }
-    async fn query_groups(
-        &self,
-        _req: crate::pipeline::QueryPointsGroupsRequest,
-    ) -> Result<Vec<PointGroup>, QqlError> {
-        Ok(vec![])
-    }
-    async fn delete(&self, req: DeletePointsReq) -> Result<(), QqlError> {
-        if req.collection_name == "nonexistent" {
-            return Err(QqlError::execution("QQL-EXECUTION", "collection 'nonexistent' does not exist", None));
-        }
-        *self.last_delete.lock().unwrap() = Some(req);
-        Ok(())
-    }
-    async fn update_vectors(&self, req: UpdateVectorsReq) -> Result<(), QqlError> {
-        if req.collection_name == "nonexistent" {
-            return Err(QqlError::execution("QQL-EXECUTION", "collection 'nonexistent' does not exist", None));
-        }
-        *self.last_update_vectors.lock().unwrap() = Some(req);
-        Ok(())
-    }
-    async fn set_payload(&self, req: SetPayloadReq) -> Result<(), QqlError> {
-        if req.collection_name == "nonexistent" {
-            return Err(QqlError::execution("QQL-EXECUTION", "collection 'nonexistent' does not exist", None));
-        }
-        *self.last_set_payload.lock().unwrap() = Some(req);
-        Ok(())
-    }
-    async fn scroll(
-        &self,
-        _req: ScrollPointsReq,
-    ) -> Result<(Vec<RetrievedPoint>, Option<PointId>), QqlError> {
-        Ok((self.scroll_records.clone(), self.scroll_offset.clone()))
-    }
-    async fn get(&self, _req: GetPointsReq) -> Result<Vec<RetrievedPoint>, QqlError> {
-        Ok(self.get_records.clone())
-    }
-}
-
-#[async_trait]
-impl QdrantAdminOps for MockQdrantClient {
     async fn update_collection(&self, req: serde_json::Value) -> Result<(), QqlError> {
         *self.last_update_collection.lock().unwrap() = Some(req);
         Ok(())
@@ -171,28 +57,22 @@ impl QdrantAdminOps for MockQdrantClient {
     async fn delete_collection(&self, _name: &str) -> Result<(), QqlError> {
         Ok(())
     }
-    async fn query_batch(
-        &self,
-        _req: Vec<crate::pipeline::QueryPointsRequest>,
-    ) -> Result<Vec<Vec<ScoredPoint>>, QqlError> {
-        Ok(vec![])
-    }
     async fn create_field_index(&self, _req: CreateFieldIndexReq) -> Result<(), QqlError> {
         Ok(())
-    }
-    async fn count(&self, _req: CountPointsReq) -> Result<u64, QqlError> {
-        Ok(0)
     }
     async fn execute_route(&self, route: Route) -> Result<serde_json::Value, QqlError> {
         let path = route.path.clone();
         if path.contains("nonexistent") {
-            return Err(QqlError::execution("QQL-EXECUTION", "collection does not exist".to_string(), None));
+            return Err(QqlError::execution(
+                "QQL-EXECUTION",
+                "collection does not exist",
+                None,
+            ));
         }
         *self.last_route.lock().unwrap() = Some(route);
         Ok(serde_json::json!({"result": {"points": []}}))
     }
 }
-
 fn test_config() -> QqlConfig {
     QqlConfig {
         inference_mode: "cloud".to_string(),
@@ -350,33 +230,6 @@ async fn test_alter_collection_disable_quantization() {
     assert_eq!(req["quantization_config"]["disabled"], true);
 }
 
-#[test]
-fn test_point_id_helpers() {
-    use crate::executor::helpers::{point_id_string, to_point_id_static};
-    use qql_core::ast::Value;
-
-    // to_point_id_static
-    let id_str = to_point_id_static(&Value::Str(String::from("abc"))).unwrap();
-    assert_eq!(point_id_string(&id_str), "abc");
-
-    let id_num_str = to_point_id_static(&Value::Str(String::from("42"))).unwrap();
-    assert_eq!(point_id_string(&id_num_str), "42");
-
-    let id_int = to_point_id_static(&Value::Int(100)).unwrap();
-    assert_eq!(point_id_string(&id_int), "100");
-
-    let id_float = to_point_id_static(&Value::Float(99.0)).unwrap();
-    assert_eq!(point_id_string(&id_float), "99");
-
-    let id_neg = to_point_id_static(&Value::Int(-5));
-    assert!(id_neg.is_err());
-}
-
-
-
-
-
-
 #[tokio::test]
 async fn test_dml_missing_collection_errors() {
     let client = MockQdrantClient::default(); // exists = false
@@ -394,7 +247,6 @@ async fn test_dml_missing_collection_errors() {
     assert!(resp_update.is_err());
     assert!(resp_update.unwrap_err().message.contains("does not exist"));
 }
-
 
 #[tokio::test]
 async fn test_do_query_basic() {
