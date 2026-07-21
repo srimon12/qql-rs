@@ -1,9 +1,9 @@
 use alloc::boxed::Box;
 
 use crate::ast::{
-    CollectionConfig, CollectionParamsConfig, HnswRuntimeConfig, MultivectorConfig,
-    OptimizersRuntimeConfig, QuantizationConfig, QuantizationType, QuantizationUpdate, Value,
-    VectorsConfig,
+    CollectionConfig, CollectionParamsConfig, HnswRuntimeConfig, MultivectorComparator,
+    MultivectorConfig, OptimizersRuntimeConfig, QuantizationConfig, QuantizationType,
+    QuantizationUpdate, Value, VectorsConfig,
 };
 use crate::error::QqlError;
 use crate::token::TokenKind;
@@ -445,7 +445,7 @@ impl<'a> Parser<'a> {
             ));
         }
         Ok(MultivectorConfig {
-            comparator: "max_sim",
+            comparator: MultivectorComparator::MaxSim,
         })
     }
 }

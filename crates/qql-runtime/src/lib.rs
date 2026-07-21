@@ -5,8 +5,6 @@ pub mod embedder;
 pub mod executor;
 #[cfg(feature = "grpc")]
 pub mod grpc;
-pub use qql_core::filter_conv;
-pub use qql_core::offline;
 pub mod pipeline;
 pub mod qdrant;
 #[cfg(feature = "rest")]

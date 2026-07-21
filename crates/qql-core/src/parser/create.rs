@@ -1,7 +1,9 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use crate::ast::{CreateCollectionStmt, SparseVectorDef, Stmt, VectorDef, VectorDistance};
+use crate::ast::{
+    CollectionMode, CreateCollectionStmt, SparseVectorDef, Stmt, VectorDef, VectorDistance,
+};
 use crate::error::QqlError;
 use crate::token::TokenKind;
 
@@ -159,13 +161,20 @@ impl<'a> Parser<'a> {
 
         let config = self.parse_collection_config_blocks(false)?;
 
+        let mode = if rerank {
+            CollectionMode::Rerank
+        } else if hybrid {
+            CollectionMode::Hybrid {
+                dense_vector,
+                sparse_vector,
+            }
+        } else {
+            CollectionMode::Dense { model }
+        };
+
         Ok(Stmt::CreateCollection(Box::new(CreateCollectionStmt {
             collection,
-            hybrid,
-            rerank,
-            model,
-            dense_vector,
-            sparse_vector,
+            mode,
             vectors: explicit_vectors,
             sparse_vectors: explicit_sparse_vectors,
             config,

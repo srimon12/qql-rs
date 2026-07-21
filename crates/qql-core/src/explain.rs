@@ -1,161 +1,109 @@
-use crate::ast::{self, Stmt};
+use crate::ast::{CollectionMode, QueryCollection, QueryExpr, QueryInput, Stmt};
 use crate::error::QqlError;
 use crate::parser::Parser;
+use alloc::format;
+use alloc::string::String;
 
-/// Parse and explain a QQL query — pure AST formatting, no server needed.
-pub fn explain(query: &str) -> Result<String, QqlError> {
-    let stmt = Parser::parse(query)?;
-    explain_node(&stmt)
+pub fn explain(source: &str) -> Result<String, QqlError> {
+    let statement = Parser::parse(source)?;
+    Ok(explain_node(&statement))
 }
 
-/// Format an already-parsed AST node into a human-readable plan.
-pub fn explain_node(stmt: &Stmt) -> Result<String, QqlError> {
-    let mut plan = String::new();
-    explain_stmt(stmt, &mut plan);
-    plan.push_str("Action: Explain-only mode (no Qdrant server)\n");
-    Ok(plan)
-}
-
-fn explain_stmt(stmt: &Stmt, plan: &mut String) {
-    match stmt {
-        Stmt::ShowCollections => {
-            plan.push_str("Statement: SHOW COLLECTIONS\n");
-        }
-        Stmt::ShowCollection(collection) => {
-            plan.push_str(&format!("Statement: SHOW COLLECTION {}\n", collection));
-        }
-        Stmt::CreateCollection(s) => {
-            plan.push_str(&format!("Statement: CREATE COLLECTION {}\n", s.collection));
-            if let Some(model) = &s.model {
-                plan.push_str(&format!("Model: {}\n", model));
+pub fn explain_node(statement: &Stmt) -> String {
+    let mut output = String::new();
+    match statement {
+        Stmt::Query(query) => {
+            output.push_str("Statement: QUERY\n");
+            output.push_str(&format!("Intent: {}\n", query_intent(&query.expression)));
+            match &query.collection {
+                QueryCollection::Explicit(collection) => {
+                    output.push_str(&format!("Collection: {}\n", collection));
+                }
+                QueryCollection::Inherited => output.push_str("Collection: inherited\n"),
             }
-            if s.rerank {
-                plan.push_str("Type: HYBRID + RERANK (dense + sparse + ColBERT multivector)\n");
-            } else if s.hybrid {
-                plan.push_str("Type: HYBRID (dense + sparse)\n");
-            } else {
-                plan.push_str("Type: DENSE\n");
+            if !query.ctes.is_empty() {
+                output.push_str(&format!("CTEs: {}\n", query.ctes.len()));
             }
-            for v in &s.vectors {
-                plan.push_str(&format!("Vector: {}, Size: {}\n", v.name, v.size));
+            if query.filter.is_some() {
+                output.push_str("Filter: present\n");
+            }
+            if let Some(limit) = query.page.limit {
+                output.push_str(&format!("Limit: {}\n", limit));
             }
         }
-        Stmt::AlterCollection(s) => {
-            plan.push_str(&format!("Statement: ALTER COLLECTION {}\n", s.collection));
-        }
-        Stmt::DropCollection(s) => {
-            plan.push_str(&format!("Statement: DROP COLLECTION {}\n", s.collection));
-        }
-        Stmt::Upsert(s) => {
-            plan.push_str(&format!("Statement: UPSERT INTO {}\n", s.collection));
-            if let Some(model) = &s.model {
-                plan.push_str(&format!("Model: {}\n", model));
-            }
-            plan.push_str(&format!("Rows: {}\n", s.values_list.len()));
-        }
-        Stmt::Select(s) => {
-            plan.push_str(&format!(
-                "Statement: SELECT * FROM {} WHERE id = '{:?}'\n",
-                s.collection, s.point_id
-            ));
-        }
-        Stmt::Scroll(s) => {
-            plan.push_str(&format!(
-                "Statement: SCROLL FROM {} LIMIT {}\n",
-                s.collection, s.limit
-            ));
-        }
-        Stmt::Query(q) => {
-            let mode_str = match q.mode {
-                ast::QueryMode::Nearest => "NEAREST",
-                ast::QueryMode::Recommend => "RECOMMEND",
-                ast::QueryMode::Context => "CONTEXT",
-                ast::QueryMode::Discover => "DISCOVER",
-                ast::QueryMode::OrderBy => "ORDER BY",
-                ast::QueryMode::Sample => "SAMPLE",
-                ast::QueryMode::RelevanceFeedback => "RELEVANCE FEEDBACK",
+        Stmt::Scroll(statement) => output.push_str(&format!(
+            "Statement: SCROLL\nCollection: {}\nLimit: {}\n",
+            statement.collection, statement.limit
+        )),
+        Stmt::Upsert(statement) => output.push_str(&format!(
+            "Statement: UPSERT\nCollection: {}\nPoints: {}\n",
+            statement.collection,
+            statement.points.len()
+        )),
+        Stmt::CreateCollection(statement) => {
+            let mode = match statement.mode {
+                CollectionMode::Dense { .. } => "dense",
+                CollectionMode::Hybrid { .. } => "hybrid",
+                CollectionMode::Rerank => "rerank-oriented",
             };
-            let coll: &str = q.collection.as_deref().unwrap_or("<none>");
-            if !mode_str.is_empty() {
-                plan.push_str(&format!(
-                    "Statement: QUERY {} FROM {} LIMIT {}\n",
-                    mode_str, coll, q.limit
-                ));
-            } else {
-                plan.push_str(&format!(
-                    "Statement: QUERY FROM {} LIMIT {}\n",
-                    coll, q.limit
-                ));
-            }
-            if let Some(text) = &q.query_text {
-                plan.push_str(&format!("Query: '{}'\n", text));
-            }
-            if !q.raw_vector.is_empty() {
-                plan.push_str(&format!("Raw Vector: {:?}\n", q.raw_vector));
-            }
-            match q.query_type {
-                ast::QueryType::Hybrid => plan.push_str("Using: HYBRID\n"),
-                ast::QueryType::Sparse => plan.push_str("Using: SPARSE\n"),
-                ast::QueryType::Dense => {}
-            }
-            if let Some(u) = &q.using_ {
-                plan.push_str(&format!("Using: '{}'\n", u));
-            }
-            if let Some(m) = &q.model {
-                plan.push_str(&format!("Model: {}\n", m));
-            }
-            if q.offset > 0 {
-                plan.push_str(&format!("Offset: {}\n", q.offset));
-            }
-            if let Some(th) = &q.score_threshold {
-                plan.push_str(&format!("Score threshold: {}\n", th));
-            }
-            if let Some(gb) = &q.group_by {
-                plan.push_str(&format!("Group by: {}\n", gb));
-            }
-            if q.rerank {
-                plan.push_str("Rerank: enabled\n");
-            }
-            if !q.ctes.is_empty() {
-                plan.push_str(&format!("CTEs: {} defined\n", q.ctes.len()));
-            }
-            if !q.prefetch_refs.is_empty() {
-                plan.push_str(&format!("Prefetch refs: {}\n", q.prefetch_refs.len()));
-            }
-            if let Some(ft) = &q.fusion_type {
-                plan.push_str(&format!("Fusion: {}\n", ft));
-            }
-        }
-        Stmt::Delete(s) => {
-            if let Some(field) = &s.field {
-                plan.push_str(&format!(
-                    "Statement: DELETE FROM {} WHERE {} = '{:?}'\n",
-                    s.collection, field, s.value
-                ));
-            } else {
-                plan.push_str(&format!(
-                    "Statement: DELETE FROM {} WHERE id = '{:?}'\n",
-                    s.collection, s.point_id
-                ));
-            }
-        }
-        Stmt::UpdateVector(s) => {
-            plan.push_str(&format!(
-                "Statement: UPDATE {} SET VECTOR = [...] WHERE id = '{:?}'\n",
-                s.collection, s.point_id
+            output.push_str(&format!(
+                "Statement: CREATE COLLECTION\nCollection: {}\nDeclared mode: {}\n",
+                statement.collection, mode
             ));
         }
-        Stmt::UpdatePayload(s) => {
-            plan.push_str(&format!(
-                "Statement: UPDATE {} SET PAYLOAD = {{...}} WHERE id = '{:?}'\n",
-                s.collection, s.point_id
+        Stmt::CreateIndex(statement) => output.push_str(&format!(
+            "Statement: CREATE INDEX\nCollection: {}\nField: {}\n",
+            statement.collection, statement.field
+        )),
+        Stmt::AlterCollection(statement) => output.push_str(&format!(
+            "Statement: ALTER COLLECTION\nCollection: {}\n",
+            statement.collection
+        )),
+        Stmt::DropCollection(statement) => output.push_str(&format!(
+            "Statement: DROP COLLECTION\nCollection: {}\n",
+            statement.collection
+        )),
+        Stmt::ShowCollections => output.push_str("Statement: SHOW COLLECTIONS\n"),
+        Stmt::ShowCollection(collection) => {
+            output.push_str(&format!(
+                "Statement: SHOW COLLECTION\nCollection: {}\n",
+                collection
             ));
         }
-        Stmt::CreateIndex(s) => {
-            plan.push_str(&format!(
-                "Statement: CREATE INDEX ON COLLECTION {} FOR {} TYPE {}\n",
-                s.collection, s.field, s.field_type
-            ));
-        }
+        Stmt::Delete(statement) => output.push_str(&format!(
+            "Statement: DELETE\nCollection: {}\nSelector: typed point selector\n",
+            statement.collection
+        )),
+        Stmt::UpdateVector(statement) => output.push_str(&format!(
+            "Statement: UPDATE VECTOR\nCollection: {}\n",
+            statement.collection
+        )),
+        Stmt::UpdatePayload(statement) => output.push_str(&format!(
+            "Statement: UPDATE PAYLOAD\nCollection: {}\n",
+            statement.collection
+        )),
+    }
+    output
+}
+
+fn query_intent(expression: &QueryExpr) -> &'static str {
+    match expression {
+        QueryExpr::Points { .. } => "retrieve points by ID",
+        QueryExpr::Nearest { input, .. } => match input {
+            QueryInput::Text { .. } => "nearest neighbors from text",
+            QueryInput::Vector(_) => "nearest neighbors from a vector",
+            QueryInput::Point(_) => "nearest neighbors from a point",
+        },
+        QueryExpr::Recommend { .. } => "recommend from positive and negative examples",
+        QueryExpr::Context { .. } => "context search",
+        QueryExpr::Discover { .. } => "discovery search",
+        QueryExpr::OrderBy { .. } => "payload order query",
+        QueryExpr::SampleRandom => "random sample",
+        QueryExpr::Fusion { .. } => "fuse prefetched result sets",
+        QueryExpr::Formula { .. } => "formula-based scoring",
+        QueryExpr::RelevanceFeedback { .. } => "relevance feedback",
+        QueryExpr::Mmr { .. } => "maximal marginal relevance",
+        QueryExpr::Hybrid { .. } => "hybrid shorthand",
+        QueryExpr::Rerank { .. } => "explicit prefetched rerank",
     }
 }

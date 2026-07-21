@@ -10,7 +10,6 @@ use qql_core::parser;
 
 use crate::config::QqlConfig;
 use crate::embedder::Embedder;
-use crate::pipeline::QueryPointsRequest;
 
 pub const DENSE_VECTOR_NAME: &str = "dense";
 pub const SPARSE_VECTOR_NAME: &str = "sparse";
@@ -103,7 +102,7 @@ impl Executor {
     }
 
     pub fn explain_node(stmt: &Stmt) -> Result<String, QqlError> {
-        qql_core::explain::explain_node(stmt)
+        Ok(qql_core::explain::explain_node(stmt))
     }
 
     // --- explain_stmt removed --- moved to qql_core::explain
@@ -160,7 +159,6 @@ impl Executor {
             Stmt::AlterCollection(n) => self.do_alter_collection(*n).await,
             Stmt::DropCollection(n) => self.do_drop_collection(&n.collection).await,
             Stmt::Upsert(n) => self.do_upsert(*n).await,
-            Stmt::Select(n) => self.do_select(*n).await,
             Stmt::Scroll(n) => self.do_scroll(*n).await,
             Stmt::Query(n) => self.do_query(*n).await,
             Stmt::Delete(n) => self.do_delete(*n).await,
@@ -227,10 +225,9 @@ impl Executor {
             if let Stmt::Query(query_stmt) = stmt {
                 parsed_stmts.push(*query_stmt);
             } else {
-                return Err(QqlError::runtime(
+                return Err(QqlError::execution("QQL-EXECUTION", 
                     "query_batch only supports QUERY statements, got non-query statement"
-                        .to_string(),
-                ));
+                        .to_string(), None));
             }
         }
         self.query_batch_nodes(parsed_stmts).await
@@ -240,99 +237,10 @@ impl Executor {
         &self,
         stmts: Vec<qql_core::ast::QueryStmt>,
     ) -> Result<Vec<ExecResponse>, QqlError> {
-        let num_statements = stmts.len();
-        if num_statements == 0 {
-            return Ok(Vec::new());
-        }
-
-        // 1. Build state and pipeline for each query, and run their pipelines
-        let mut prepared = Vec::with_capacity(num_statements);
+        let mut results = Vec::with_capacity(stmts.len());
         for stmt in stmts {
-            let (mut state, pipeline) = self.build_query_state_and_pipeline(&stmt).await?;
-            pipeline.execute(&mut state).await?;
-            prepared.push((state, pipeline));
+            results.push(self.do_query(stmt).await?);
         }
-
-        // 2. Group flat queries by collection
-        struct CollectionBatch {
-            indices: Vec<usize>,
-            requests: Vec<QueryPointsRequest>,
-        }
-
-        let mut batches: HashMap<String, CollectionBatch> = HashMap::new();
-        let mut ordered_collections = Vec::new();
-        let mut results = vec![
-            ExecResponse {
-                ok: false,
-                operation: String::new(),
-                message: String::new(),
-                data: None,
-            };
-            num_statements
-        ];
-
-        for (i, (state, pipeline)) in prepared.iter().enumerate() {
-            if !state.group_by.is_empty() {
-                // Execute grouped query individually
-                let resp = self.execute_grouped_query(pipeline, state).await?;
-                results[i] = resp;
-            } else {
-                let coll = state.collection_name.clone();
-                if !batches.contains_key(&coll) {
-                    ordered_collections.push(coll.clone());
-                    batches.insert(
-                        coll.clone(),
-                        CollectionBatch {
-                            indices: Vec::new(),
-                            requests: Vec::new(),
-                        },
-                    );
-                }
-                let b = batches.get_mut(&coll).unwrap();
-                let mut req = pipeline.build_flat_request(state)?;
-                if req.with_payload.is_none() {
-                    req.with_payload = Some(crate::pipeline::WithPayload {
-                        enable: Some(true),
-                        include: Vec::new(),
-                        exclude: Vec::new(),
-                    });
-                }
-                b.indices.push(i);
-                b.requests.push(req);
-            }
-        }
-
-        // 3. Execute batched flat queries per collection
-        for coll in ordered_collections {
-            let batch = batches.remove(&coll).unwrap();
-            let batch_results = self.client.query_batch(batch.requests).await?;
-            for (j, pts) in batch_results.into_iter().enumerate() {
-                let orig_idx = batch.indices[j];
-                let formatted: Vec<SearchHit> = pts
-                    .into_iter()
-                    .map(|hit| {
-                        let payload_map = hit.payload.clone();
-                        SearchHit {
-                            id: crate::executor::helpers::point_id_string(&hit.id),
-                            score: hit.score,
-                            text: payload_map.as_ref().and_then(|p| {
-                                p.get("text")
-                                    .and_then(|v| v.as_str().map(|s| s.to_string()))
-                            }),
-                            payload: payload_map,
-                        }
-                    })
-                    .collect();
-
-                results[orig_idx] = ExecResponse {
-                    ok: true,
-                    operation: "QUERY".to_string(),
-                    message: format!("Found {} hits", formatted.len()),
-                    data: Some(serde_json::to_value(formatted).unwrap_or(serde_json::Value::Null)),
-                };
-            }
-        }
-
         Ok(results)
     }
 }

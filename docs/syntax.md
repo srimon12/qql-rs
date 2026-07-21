@@ -1,229 +1,199 @@
-# QQL Syntax Reference
+# Canonical QQL Grammar
 
-This document provides a comprehensive reference for the Qdrant Query Language (QQL) statement syntax and grammar.
+This is the canonical syntax implemented by `qql-core`. QQL follows Qdrant retrieval concepts rather than relational `SELECT` semantics. Keywords are case-insensitive.
 
----
+## Scripts
 
-## 1. Collection Management (DDL)
+```ebnf
+script       = [ statement, { ";", statement }, [ ";" ] ] ;
+statement    = query | scroll | upsert | update | delete | ddl ;
+```
 
-### Create Collection
-Initializes a new collection in Qdrant with optional dense/sparse configurations, vector dimension, distance metric, HNSW, or quantization options.
+Multiple statements require `;`. Leading semicolons, repeated semicolons, and adjacent unseparated statements are invalid.
+
+## Query
+
+`QUERY` is the universal retrieval entry point.
+
+```ebnf
+query        = [ "WITH", cte, { ",", cte } ],
+               "QUERY", query-expr,
+               "FROM", collection, query-tail ;
+
+cte          = name, "AS", "(", cte-query, ")" ;
+cte-query    = "QUERY", query-expr, [ "FROM", collection ], query-tail ;
+
+query-tail   = [ "USING", vector-name ],
+               [ "PREFETCH", "(", prefetch, { ",", prefetch }, ")" ],
+               [ "WHERE", filter ],
+               [ "PARAMS", search-params ],
+               [ "SCORE", "THRESHOLD", number ],
+               [ "GROUP", "BY", field,
+                   [ "SIZE", positive-integer ],
+                   [ "LOOKUP", "FROM", collection ] ],
+               [ "WITH", "PAYLOAD", payload-selector ],
+               [ "WITH", "VECTOR", vector-selector ],
+               [ "LIMIT", positive-integer ],
+               [ "OFFSET", non-negative-integer ] ;
+```
+
+Top-level queries require `FROM`. A CTE may omit it and inherit the outer collection. Clauses occur at most once and only in the order above. Search options use `PARAMS (...)`; generic query `WITH (...)` is invalid.
+
+### Query Expressions
+
+```ebnf
+query-expr   = points
+             | nearest
+             | recommend
+             | context
+             | discover
+             | order-query
+             | sample
+             | fusion
+             | formula
+             | feedback
+             | mmr
+             | hybrid
+             | rerank ;
+
+points       = "POINTS", "(", point-id, { ",", point-id }, ")" ;
+nearest      = [ "NEAREST" ], query-input ;
+query-input  = "TEXT", string, [ "MODEL", string ]
+             | "VECTOR", vector-value
+             | "POINT", point-id
+             | string ;
+
+recommend    = "RECOMMEND", "POSITIVE", point-id-list,
+               [ "NEGATIVE", point-id-list ],
+               [ "STRATEGY", ( "average_vector" | "best_score" | "sum_scores" ) ] ;
+context      = "CONTEXT", context-pairs ;
+discover     = "DISCOVER", "TARGET", query-input, "CONTEXT", context-pairs ;
+context-pairs = "(", "POSITIVE", query-input, "NEGATIVE", query-input,
+                { ",", "POSITIVE", query-input, "NEGATIVE", query-input }, ")" ;
+
+order-query  = "ORDER", "BY", field, [ "ASC" | "DESC" ] ;
+sample       = "SAMPLE", "RANDOM" ;
+fusion       = "FUSION", ( "RRF" | "DBSF" ) ;
+formula      = "FORMULA", formula-expr, [ "DEFAULTS", config-block ] ;
+
+feedback     = "RELEVANCE", "FEEDBACK", "TARGET", query-input,
+               "FEEDBACK", "(", feedback-item, { ",", feedback-item }, ")",
+               "STRATEGY", "NAIVE", "(", "a", "=", number, ",",
+               "b", "=", number, ",", "c", "=", number, ")" ;
+feedback-item = "(", query-input, ",", number, ")" ;
+
+mmr          = "MMR", query-input,
+               "DIVERSITY", number,
+               "CANDIDATES", positive-integer ;
+
+hybrid       = "HYBRID", ( "TEXT", string, [ "MODEL", string ] | string ),
+               [ "DENSE", vector-name ],
+               [ "SPARSE", vector-name ],
+               [ "FUSION", ( "RRF" | "DBSF" ) ] ;
+
+rerank       = "RERANK", rerank-input, "MODEL", string ;
+rerank-input = "TEXT", string | "VECTOR", vector-value | "POINT", point-id ;
+```
+
+`QUERY POINTS (...)` retrieves those points directly. `QUERY NEAREST POINT ...` uses a point as the similarity input. A bare integer after `QUERY` is invalid, so point retrieval and point similarity cannot be confused.
+
+Fusion requires a non-empty `PREFETCH`. Rerank requires an explicit input, `MODEL`, `USING`, and non-empty `PREFETCH`. MMR requires both `DIVERSITY` in `[0, 1]` and positive `CANDIDATES`. Core records hybrid intent but does not invent candidate counts or `LIMIT * 10` behavior.
+
+### Examples
 
 ```sql
--- Create a basic dense vector collection
-CREATE COLLECTION docs
+QUERY TEXT 'vector database' MODEL 'nomic-embed-text'
+FROM docs
+USING dense
+WHERE category = 'database'
+PARAMS (hnsw_ef = 128, exact = false)
+LIMIT 10;
 
--- Create a hybrid collection (dense + sparse)
-CREATE COLLECTION docs HYBRID
+QUERY POINTS (1, 2, 'point-a')
+FROM docs
+WITH PAYLOAD INCLUDE (title, url)
+WITH VECTOR false;
 
--- Create a hybrid collection with automatic late-stage reranking
-CREATE COLLECTION docs HYBRID RERANK
+WITH
+  dense AS (QUERY TEXT 'vector database' USING dense LIMIT 100),
+  sparse AS (QUERY TEXT 'vector database' USING sparse LIMIT 100)
+QUERY FUSION RRF
+FROM docs
+PREFETCH (dense, sparse)
+LIMIT 10;
 
--- Create a collection using a specific embedding model
-CREATE COLLECTION docs USING MODEL 'sentence-transformers/all-MiniLM-L6-v2'
+WITH candidates AS (QUERY TEXT 'vector database' USING dense LIMIT 100)
+QUERY RERANK TEXT 'vector database' MODEL 'reranker-v1'
+FROM docs
+USING colbert
+PREFETCH (candidates)
+LIMIT 10;
+```
 
--- Create a collection with custom named vectors and distance metrics
+## Prefetch
+
+```ebnf
+prefetch     = ( cte-name | cte-query ),
+               [ "WHERE", filter ],
+               [ "SCORE", "THRESHOLD", number ],
+               [ "LOOKUP", "FROM", collection, [ "VECTOR", vector-name ] ] ;
+```
+
+## Selectors And Params
+
+```ebnf
+payload-selector = "true" | "false"
+                 | "INCLUDE", name-list
+                 | "EXCLUDE", name-list ;
+vector-selector  = "true" | "false" | name-list ;
+name-list        = "(", name, { ",", name }, ")" ;
+search-params    = "(", search-param, { ",", search-param }, ")" ;
+search-param     = "hnsw_ef", "=", positive-integer
+                 | "exact", "=", boolean
+                 | "acorn", "=", boolean
+                 | "indexed_only", "=", boolean
+                 | "quantization", "=", object ;
+```
+
+Keys in payload objects, configuration blocks, formula defaults, and search parameters are unique case-insensitively.
+
+## Point Data
+
+```ebnf
+upsert       = "UPSERT", "INTO", collection, "VALUES",
+               point-object, { ",", point-object },
+               [ embedding-options ], [ embed-directives ] ;
+scroll       = "SCROLL", "FROM", collection,
+               [ "WHERE", filter ], [ "AFTER", point-id ],
+               "LIMIT", positive-integer ;
+delete       = "DELETE", "FROM", collection, "WHERE", filter ;
+update       = "UPDATE", collection, "SET",
+               ( "VECTOR", [ vector-name ], "=", vector-value,
+                 "WHERE", "id", "=", point-id
+               | "PAYLOAD", "=", object, "WHERE", filter ) ;
+
+vector-value = dense-vector | sparse-vector | multidense-vector ;
+dense-vector = "[", number, { ",", number }, "]" ;
+sparse-vector = "{", "indices", ":", integer-list, ",",
+                "values", ":", number-list, "}" ;
+multidense-vector = "[", dense-vector, { ",", dense-vector }, "]" ;
+```
+
+Every upsert point requires an unsigned integer or string `id`. Its optional `vector` may be one unnamed vector value or an object of named vector values. All other object entries remain arbitrary payload values.
+
+## DDL
+
+Collection creation/alteration/drop/show and payload index creation remain supported:
+
+```sql
 CREATE COLLECTION docs (
   dense VECTOR(384, COSINE),
-  colbert VECTOR(128, COSINE) WITH MULTIVECTOR (comparator = 'max_sim') WITH HNSW (m = 0)
-)
-```
+  sparse SPARSE,
+  colbert VECTOR(128, COSINE) WITH MULTIVECTOR (comparator = 'max_sim')
+) WITH HNSW (m = 16, ef_construct = 100);
 
-### Config Options
-Specify performance configurations such as HNSW or Quantization at the collection or vector level.
-
-```sql
--- Create with HNSW parameters
-CREATE COLLECTION docs WITH HNSW (m = 32, ef_construct = 100)
-
--- Create with Quantization parameters (product, scalar, binary, turbo)
-CREATE COLLECTION docs WITH QUANTIZATION (type = 'scalar', quantile = 0.95)
-CREATE COLLECTION docs WITH QUANTIZATION (type = 'turbo', bits = 2, always_ram = true)
-CREATE COLLECTION docs WITH QUANTIZATION (type = 'binary', always_ram = true)
-CREATE COLLECTION docs WITH QUANTIZATION (type = 'product')
-```
-
-### Alter Collection
-Dynamically modify runtime optimization and index configurations of an existing collection.
-
-```sql
-ALTER COLLECTION docs WITH VECTOR (on_disk = true)
-ALTER COLLECTION docs WITH HNSW (m = 32)
-ALTER COLLECTION docs WITH OPTIMIZERS (max_segment_size = 500000)
-ALTER COLLECTION docs WITH PARAMS (replication_factor = 3)
-ALTER COLLECTION docs WITH QUANTIZATION (type = 'scalar')
-ALTER COLLECTION docs WITH QUANTIZATION (disabled = true)
-```
-
-### Drop / Show
-```sql
-DROP COLLECTION docs
-SHOW COLLECTIONS
-SHOW COLLECTION docs
-```
-
----
-
-## 2. Index Management
-
-Optimize payload filtering by creating indexes on specific fields.
-
-```sql
-CREATE INDEX ON COLLECTION docs FOR category TYPE keyword
-CREATE INDEX ON COLLECTION docs FOR score TYPE float
-CREATE INDEX ON COLLECTION docs FOR created_at TYPE datetime
-
--- Advanced indexes with options
-CREATE INDEX ON docs FOR tags TYPE keyword WITH (is_tenant = true, on_disk = true)
-CREATE INDEX ON docs FOR content TYPE text WITH (
-  tokenizer = 'word',
-  min_token_len = 2,
-  max_token_len = 20,
-  lowercase = true,
-  phrase_matching = true
-)
-```
-
----
-
-## 3. Data Ingestion (UPSERT)
-
-Points require a unique identifier (unsigned integer or UUID string) and must provide target text for auto-embedding unless pre-computed vectors are supplied.
-
-```sql
--- Simple upsert
-UPSERT INTO docs VALUES {id: 1, text: 'Qdrant is a vector database', category: 'database'}
-
--- Multiple points upsert
-UPSERT INTO docs VALUES 
-  {id: '550e8400-e29b-41d4-a716-446655440000', text: 'Sentence 1'},
-  {id: '550e8400-e29b-41d4-a716-446655440001', text: 'Sentence 2'}
-
--- Direct vector upsert (bypass embedder)
-UPSERT INTO docs VALUES {
-  id: 2,
-  text: 'Custom embeddings',
-  vector: {
-    dense: [0.1, 0.2, 0.3],
-    colbert: [[0.1, 0.2], [0.3, 0.4]]
-  }
-}
-```
-
-### Ingestion Routing (EMBED)
-Route different payload fields to separate named vectors using the `EMBED` directive.
-
-```sql
-UPSERT INTO arxiv VALUES {
-  id: 'paper-1',
-  text: 'The body of the paper...',
-  title: 'An Analysis of Vector Retrieval'
-}
-EMBED text INTO dense_chunk,
-      title INTO dense_title USING MODEL 'sentence-transformers/all-MiniLM-L6-v2'
-```
-
----
-
-## 4. Query & Search (QUERY)
-
-Unified statement for semantic, vector, hybrid, and metadata retrieval.
-
-### Semantic Search (Nearest)
-```sql
-QUERY 'vector database optimization' FROM docs LIMIT 10
-QUERY 'vector database' FROM docs LIMIT 10 OFFSET 20 SCORE THRESHOLD 0.7
-```
-
-### Hybrid & Sparse Search
-```sql
--- Hybrid search combining dense + sparse models
-QUERY 'vector databases' FROM docs LIMIT 10 USING HYBRID
-
--- Custom fusion parameter tuning
-QUERY 'vector databases' FROM docs LIMIT 10 USING HYBRID FUSION RRF WITH (rrf_k = 60)
-
--- Query specifically using sparse or dense index
-QUERY 'vector databases' FROM docs LIMIT 10 USING SPARSE
-```
-
-### Recommendation and Discovery
-Explore the vector space using positive and negative point references.
-
-```sql
--- Recommend points close to id-1 but far from id-2
-QUERY RECOMMEND WITH (positive = ('id-1'), negative = ('id-2')) FROM docs LIMIT 10
-
--- Discovery search targeting id-1 relative to context pairs
-QUERY DISCOVER TARGET 'id-1' CONTEXT PAIRS (('id-2', 'id-3')) FROM docs LIMIT 10
-```
-
-### Common Table Expressions (CTEs) & Prefetch
-Build complex search pipelines combining multiple semantic vectors and fusing their results.
-
-```sql
-WITH
-  dense_search AS (QUERY 'vector databases' USING 'dense' LIMIT 100),
-  sparse_search AS (QUERY 'vector databases' USING 'sparse' LIMIT 100)
-QUERY 'vector databases' FROM docs LIMIT 10
-  PREFETCH (
-    dense_search WHERE category = 'tech' SCORE THRESHOLD 0.5,
-    sparse_search SCORE THRESHOLD 0.3
-  )
-  FUSION RRF
-```
-
----
-
-## 5. Point Operations (Get & Scroll)
-
-### Point Retrieval (SELECT)
-Retrieve a specific point directly by its ID.
-
-```sql
-SELECT * FROM docs WHERE id = '550e8400-e29b-41d4-a716-446655440000'
-SELECT * FROM docs WHERE id = 123
-```
-
-### Scrolling & Pagination (SCROLL)
-Iterate over points in a collection sequentially, optionally filtered.
-
-```sql
--- Scroll through the first 100 points
-SCROLL FROM docs LIMIT 100
-
--- Scroll with a filter and an offset point ID
-SCROLL FROM docs WHERE category = 'tech' AFTER 'id-100' LIMIT 50
-```
-
----
-
-## 6. Modifications (UPDATE & DELETE)
-
-### Update Operations
-Update vectors or payloads for existing points.
-
-```sql
--- Update a specific vector for a point
-UPDATE docs SET VECTOR = [0.1, 0.2, 0.3, 0.4] WHERE id = 1
-
--- Update a named vector
-UPDATE docs SET VECTOR 'colbert' = [[0.1, 0.2], [0.3, 0.4]] WHERE id = 1
-
--- Update payload for a specific point
-UPDATE docs SET PAYLOAD = {status: 'active', tags: ['updated']} WHERE id = 1
-
--- Update payload for all points matching a filter
-UPDATE docs SET PAYLOAD = {archived: true} WHERE status = 'expired'
-```
-
-### Delete Operations
-Remove points by ID or by metadata filter.
-
-```sql
--- Delete points matching a filter
-DELETE FROM docs WHERE status = 'archived'
-
--- Delete specific points by ID using the IN operator
-DELETE FROM docs WHERE id IN ('id-1', 'id-2')
+ALTER COLLECTION docs WITH VECTOR (on_disk = true);
+CREATE INDEX ON COLLECTION docs FOR title TYPE text WITH (lowercase = true);
+DROP COLLECTION docs;
+SHOW COLLECTIONS;
 ```

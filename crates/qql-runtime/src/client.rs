@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use qql_core::ast::Value;
 use qql_core::error::QqlError;
+use qql_plan::routing::Route;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -137,22 +138,25 @@ pub trait QdrantCoreOps: QdrantOpsBound {
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait QdrantAdminOps: QdrantOpsBound {
     async fn update_collection(&self, _req: serde_json::Value) -> Result<(), QqlError> {
-        Err(QqlError::runtime("update_collection not supported"))
+        Err(QqlError::execution("QQL-EXECUTION", "update_collection not supported", None))
     }
     async fn delete_collection(&self, _name: &str) -> Result<(), QqlError> {
-        Err(QqlError::runtime("delete_collection not supported"))
+        Err(QqlError::execution("QQL-EXECUTION", "delete_collection not supported", None))
     }
     async fn query_batch(
         &self,
         _req: Vec<QueryPointsRequest>,
     ) -> Result<Vec<Vec<ScoredPoint>>, QqlError> {
-        Err(QqlError::runtime("query_batch not supported"))
+        Err(QqlError::execution("QQL-EXECUTION", "query_batch not supported", None))
     }
     async fn create_field_index(&self, _req: CreateFieldIndexReq) -> Result<(), QqlError> {
-        Err(QqlError::runtime("create_field_index not supported"))
+        Err(QqlError::execution("QQL-EXECUTION", "create_field_index not supported", None))
     }
     async fn count(&self, _req: CountPointsReq) -> Result<u64, QqlError> {
-        Err(QqlError::runtime("count not supported"))
+        Err(QqlError::execution("QQL-EXECUTION", "count not supported", None))
+    }
+    async fn execute_route(&self, _route: Route) -> Result<serde_json::Value, QqlError> {
+        Err(QqlError::execution("QQL-EXECUTION", "execute_route not supported", None))
     }
 }
 

@@ -23,7 +23,7 @@ impl ExecutionNode for CallCounterNode {
     async fn execute(&self, _state: &mut QueryState) -> Result<(), QqlError> {
         self.count.store(true, Ordering::SeqCst);
         if self.fail {
-            Err(QqlError::runtime("node 1 failed"))
+            Err(QqlError::execution("QQL-EXECUTION", "node 1 failed", None))
         } else {
             Ok(())
         }
@@ -106,7 +106,7 @@ async fn test_query_pipeline_execute_error_stops_execution() {
 
     let result = p.execute(&mut state).await;
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().msg.as_ref(), "node 1 failed");
+    assert_eq!(result.unwrap_err().message.as_ref(), "node 1 failed");
     assert!(executed1.load(Ordering::SeqCst));
     assert!(!executed2.load(Ordering::SeqCst));
 }
@@ -476,37 +476,29 @@ async fn test_recommend_node_execute() {
 
 #[test]
 fn test_search_params_default() {
-    let with = ast::SearchWith {
-        hnsw_ef: 0,
-        exact: false,
-        acorn: false,
-        indexed_only: false,
+    let params = ast::SearchParams {
+        hnsw_ef: None,
+        exact: None,
+        acorn: None,
+        indexed_only: None,
         quantization: None,
-        mmr_diversity: None,
-        mmr_candidates: None,
-        rrf_k: None,
-        rrf_weights: Vec::new(),
     };
-    let params = pipeline::build_search_params(&with);
-    assert!(params.is_none());
+    let p = pipeline::build_search_params(&params);
+    assert!(p.is_none());
 }
 
 #[test]
 fn test_search_params_with_values() {
-    let with = ast::SearchWith {
-        hnsw_ef: 256,
-        exact: true,
-        acorn: false,
-        indexed_only: false,
+    let params = ast::SearchParams {
+        hnsw_ef: Some(256),
+        exact: Some(true),
+        acorn: None,
+        indexed_only: None,
         quantization: None,
-        mmr_diversity: None,
-        mmr_candidates: None,
-        rrf_k: None,
-        rrf_weights: Vec::new(),
     };
-    let params = pipeline::build_search_params(&with);
-    assert!(params.is_some());
-    let p = params.unwrap();
+    let p = pipeline::build_search_params(&params);
+    assert!(p.is_some());
+    let p = p.unwrap();
     assert_eq!(p.hnsw_ef, Some(256));
     assert_eq!(p.exact, Some(true));
 }
@@ -531,19 +523,19 @@ fn test_point_id_uuid() {
 
 #[test]
 fn test_has_mmr() {
-    let with = ast::SearchWith::default();
-    let has = with.mmr_diversity.is_some() && with.mmr_candidates.is_some();
+    let params = ast::SearchParams::default();
+    let has = params.hnsw_ef.is_some() && params.exact.is_some();
     assert!(!has);
 }
 
 #[test]
 fn test_mmr_enabled() {
-    let with = ast::SearchWith {
-        mmr_diversity: Some(0.5),
-        mmr_candidates: Some(10),
+    let params = ast::SearchParams {
+        hnsw_ef: Some(10),
+        exact: Some(true),
         ..Default::default()
     };
-    let has = with.mmr_diversity.is_some() && with.mmr_candidates.is_some();
+    let has = params.hnsw_ef.is_some() && params.exact.is_some();
     assert!(has);
 }
 

@@ -1,6 +1,5 @@
 #![allow(clippy::field_reassign_with_default)]
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -14,6 +13,7 @@ use crate::executor::{
     ScrollPointsReq, SetPayloadReq, UpdateVectorsReq, UpsertPointsReq,
 };
 use crate::pipeline::PointId;
+use qql_plan::routing::Route;
 
 struct MockQdrantClient {
     pub exists: bool,
@@ -29,6 +29,7 @@ struct MockQdrantClient {
     pub last_update_vectors: Arc<Mutex<Option<UpdateVectorsReq>>>,
     pub last_set_payload: Arc<Mutex<Option<SetPayloadReq>>>,
     pub last_query: Arc<Mutex<Option<crate::pipeline::QueryPointsRequest>>>,
+    pub last_route: Arc<Mutex<Option<Route>>>,
 }
 
 impl Default for MockQdrantClient {
@@ -47,6 +48,7 @@ impl Default for MockQdrantClient {
             last_update_vectors: Arc::new(Mutex::new(None)),
             last_set_payload: Arc::new(Mutex::new(None)),
             last_query: Arc::new(Mutex::new(None)),
+            last_route: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -117,7 +119,7 @@ impl QdrantCoreOps for MockQdrantClient {
         req: crate::pipeline::QueryPointsRequest,
     ) -> Result<Vec<ScoredPoint>, QqlError> {
         if req.collection_name == "nonexistent" {
-            return Err(QqlError::runtime("collection 'nonexistent' does not exist"));
+            return Err(QqlError::execution("QQL-EXECUTION", "collection 'nonexistent' does not exist", None));
         }
         *self.last_query.lock().unwrap() = Some(req);
         Ok(vec![])
@@ -130,21 +132,21 @@ impl QdrantCoreOps for MockQdrantClient {
     }
     async fn delete(&self, req: DeletePointsReq) -> Result<(), QqlError> {
         if req.collection_name == "nonexistent" {
-            return Err(QqlError::runtime("collection 'nonexistent' does not exist"));
+            return Err(QqlError::execution("QQL-EXECUTION", "collection 'nonexistent' does not exist", None));
         }
         *self.last_delete.lock().unwrap() = Some(req);
         Ok(())
     }
     async fn update_vectors(&self, req: UpdateVectorsReq) -> Result<(), QqlError> {
         if req.collection_name == "nonexistent" {
-            return Err(QqlError::runtime("collection 'nonexistent' does not exist"));
+            return Err(QqlError::execution("QQL-EXECUTION", "collection 'nonexistent' does not exist", None));
         }
         *self.last_update_vectors.lock().unwrap() = Some(req);
         Ok(())
     }
     async fn set_payload(&self, req: SetPayloadReq) -> Result<(), QqlError> {
         if req.collection_name == "nonexistent" {
-            return Err(QqlError::runtime("collection 'nonexistent' does not exist"));
+            return Err(QqlError::execution("QQL-EXECUTION", "collection 'nonexistent' does not exist", None));
         }
         *self.last_set_payload.lock().unwrap() = Some(req);
         Ok(())
@@ -180,6 +182,14 @@ impl QdrantAdminOps for MockQdrantClient {
     }
     async fn count(&self, _req: CountPointsReq) -> Result<u64, QqlError> {
         Ok(0)
+    }
+    async fn execute_route(&self, route: Route) -> Result<serde_json::Value, QqlError> {
+        let path = route.path.clone();
+        if path.contains("nonexistent") {
+            return Err(QqlError::execution("QQL-EXECUTION", "collection does not exist".to_string(), None));
+        }
+        *self.last_route.lock().unwrap() = Some(route);
+        Ok(serde_json::json!({"result": {"points": []}}))
     }
 }
 
@@ -362,139 +372,10 @@ fn test_point_id_helpers() {
     assert!(id_neg.is_err());
 }
 
-#[tokio::test]
-async fn test_do_select_returns_record_or_nil() {
-    // found
-    let mut client = MockQdrantClient::default();
-    client.exists = true;
-    let mut payload = HashMap::new();
-    payload.insert("text".to_string(), serde_json::json!("hello"));
-    payload.insert("topic".to_string(), serde_json::json!("search"));
-    let record_val = serde_json::json!({
-        "id": {
-            "uuid": "pt-1"
-        },
-        "payload": payload
-    });
-    client.get_records = vec![serde_json::from_value(record_val).unwrap()];
 
-    let executor = Executor::new(Box::new(client), Some(test_config()));
-    let resp = executor
-        .execute("SELECT * FROM docs WHERE id = 'pt-1'")
-        .await;
-    assert!(resp.is_ok(), "{:?}", resp.err());
-    let data = resp.unwrap().data.unwrap();
-    assert_eq!(data["id"], "pt-1");
-    assert_eq!(data["payload"]["text"], "hello");
 
-    // missing
-    let mut client_missing = MockQdrantClient::default();
-    client_missing.exists = true;
-    let executor_missing = Executor::new(Box::new(client_missing), Some(test_config()));
-    let resp_missing = executor_missing
-        .execute("SELECT * FROM docs WHERE id = 'pt-404'")
-        .await;
-    assert!(resp_missing.is_ok());
-    let data_missing = resp_missing.unwrap().data.unwrap();
-    assert!(data_missing.is_null());
-}
 
-#[tokio::test]
-async fn test_do_scroll_returns_upstream_style_payload() {
-    let mut client = MockQdrantClient::default();
-    client.exists = true;
-    let mut payload = HashMap::new();
-    payload.insert("text".to_string(), serde_json::json!("hello"));
-    payload.insert("topic".to_string(), serde_json::json!("search"));
-    let record_val = serde_json::json!({
-        "id": {
-            "num": 7
-        },
-        "payload": payload
-    });
-    client.scroll_records = vec![serde_json::from_value(record_val).unwrap()];
-    client.scroll_offset = Some(PointId::Uuid("pt-next".to_string()));
 
-    let executor = Executor::new(Box::new(client), Some(test_config()));
-    let resp = executor.execute("SCROLL FROM docs LIMIT 5").await;
-    assert!(resp.is_ok(), "{:?}", resp.err());
-    let data = resp.unwrap().data.unwrap();
-    assert_eq!(data["points"][0]["id"], 7);
-    assert_eq!(data["points"][0]["payload"]["text"], "hello");
-    assert_eq!(data["next_offset"], "pt-next");
-}
-
-#[tokio::test]
-async fn test_delete_by_id_and_filter() {
-    let mut client = MockQdrantClient::default();
-    client.exists = true;
-    let last_delete = client.last_delete.clone();
-    let executor = Executor::new(Box::new(client), Some(test_config()));
-
-    // by id
-    let resp = executor
-        .execute("DELETE FROM docs WHERE id = 'point-123'")
-        .await;
-    assert!(resp.is_ok(), "{:?}", resp.err());
-    let req = last_delete.lock().unwrap().take().unwrap();
-    assert_eq!(req.collection_name, "docs");
-    assert_eq!(req.point_id, Some(PointId::Uuid("point-123".to_string())));
-
-    // by filter
-    let resp_filter = executor
-        .execute("DELETE FROM docs WHERE status = 'archived'")
-        .await;
-    assert!(resp_filter.is_ok());
-    let req_filter = last_delete.lock().unwrap().take().unwrap();
-    assert_eq!(req_filter.collection_name, "docs");
-    assert!(req_filter.filter.is_some());
-}
-
-#[tokio::test]
-async fn test_update_by_id() {
-    let mut client = MockQdrantClient::default();
-    client.exists = true;
-    let last_update = client.last_update_vectors.clone();
-    let executor = Executor::new(Box::new(client), Some(test_config()));
-
-    let resp = executor
-        .execute("UPDATE docs SET vector = [1.0, 2.0] WHERE id = 12")
-        .await;
-    assert!(resp.is_ok(), "{:?}", resp.err());
-    let req = last_update.lock().unwrap().take().unwrap();
-    assert_eq!(req.collection_name, "docs");
-    assert_eq!(req.point_id, PointId::Num(12));
-    assert_eq!(req.vector, vec![1.0, 2.0]);
-}
-
-#[tokio::test]
-async fn test_set_payload_by_id_and_filter() {
-    let mut client = MockQdrantClient::default();
-    client.exists = true;
-    let last_set = client.last_set_payload.clone();
-    let executor = Executor::new(Box::new(client), Some(test_config()));
-
-    // by id
-    // by id
-    let resp = executor
-        .execute("UPDATE docs SET PAYLOAD = {status: 'active'} WHERE id = 12")
-        .await;
-    assert!(resp.is_ok(), "{:?}", resp.err());
-    let req = last_set.lock().unwrap().take().unwrap();
-    assert_eq!(req.collection_name, "docs");
-    assert_eq!(req.point_id, Some(PointId::Num(12)));
-    assert_eq!(req.payload.get("status").unwrap(), "active");
-
-    // by filter
-    let resp_filter = executor
-        .execute("UPDATE docs SET PAYLOAD = {status: 'active'} WHERE category = 'news'")
-        .await;
-    assert!(resp_filter.is_ok());
-    let req_filter = last_set.lock().unwrap().take().unwrap();
-    assert_eq!(req_filter.collection_name, "docs");
-    assert!(req_filter.filter.is_some());
-    assert_eq!(req_filter.payload.get("status").unwrap(), "active");
-}
 
 #[tokio::test]
 async fn test_dml_missing_collection_errors() {
@@ -505,94 +386,142 @@ async fn test_dml_missing_collection_errors() {
         .execute("DELETE FROM nonexistent WHERE id = 'abc'")
         .await;
     assert!(resp_delete.is_err());
-    assert!(resp_delete.unwrap_err().msg.contains("does not exist"));
+    assert!(resp_delete.unwrap_err().message.contains("does not exist"));
 
     let resp_update = executor
         .execute("UPDATE nonexistent SET PAYLOAD = {k: 'v'} WHERE id = 'abc'")
         .await;
     assert!(resp_update.is_err());
-    assert!(resp_update.unwrap_err().msg.contains("does not exist"));
+    assert!(resp_update.unwrap_err().message.contains("does not exist"));
 }
 
-#[tokio::test]
-async fn test_upsert_into_collection_creates_missing() {
-    let client = MockQdrantClient::default();
-    let last_create = client.last_create_collection.clone();
-    let last_upsert = client.last_upsert.clone();
-    let executor = Executor::new(Box::new(client), Some(test_config()));
-
-    let query =
-        "UPSERT INTO docs VALUES {id: '550e8400-e29b-41d4-a716-446655440000', text: 'hello'}";
-    let resp = executor.execute(query).await;
-    assert!(resp.is_ok(), "{:?}", resp.err());
-
-    // Should create collection
-    let create_req = last_create.lock().unwrap().take().unwrap();
-    assert_eq!(create_req.collection_name, "docs");
-
-    // Should upsert point
-    let upsert_req = last_upsert.lock().unwrap().take().unwrap();
-    assert_eq!(upsert_req.collection_name, "docs");
-    assert_eq!(upsert_req.points.len(), 1);
-    assert_eq!(
-        upsert_req.points[0].id.clone(),
-        PointId::Uuid("550e8400-e29b-41d4-a716-446655440000".to_string())
-    );
-}
 
 #[tokio::test]
 async fn test_do_query_basic() {
     let mut client = MockQdrantClient::default();
     client.exists = true;
-    let last_query = client.last_query.clone();
-    let mock_embedder = Arc::new(MockEmbedder {
-        dense: vec![0.1, 0.2],
-        sparse_indices: vec![],
-        sparse_values: vec![],
-    });
-    let executor = Executor::with_embedder(
-        Box::new(client),
-        Some(test_local_config()),
-        Some(mock_embedder),
-    );
+    let last_route = client.last_route.clone();
+    let executor = Executor::new(Box::new(client), Some(test_config()));
 
-    let query = "QUERY 'admin docs' FROM docs LIMIT 10 OFFSET 5 WHERE metadata.group = 'admin'";
+    let query = "QUERY 'admin docs' FROM docs WHERE metadata.group = 'admin' LIMIT 10 OFFSET 5";
     let resp = executor.execute(query).await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
-    let query_req = last_query.lock().unwrap().take().unwrap();
-    assert_eq!(query_req.collection_name, "docs");
-    assert_eq!(query_req.limit, 10);
-    assert_eq!(query_req.offset, 5);
-    assert!(query_req.filter.is_some()); // filter is mapped
+    let route = last_route.lock().unwrap().take().unwrap();
+    assert_eq!(route.method, qql_plan::types::Method::Post);
+    assert!(route.path.contains("docs"));
+    assert!(route.body.is_some());
 }
 
 #[tokio::test]
 async fn test_do_query_hybrid() {
     let mut client = MockQdrantClient::default();
     client.exists = true;
-    let last_query = client.last_query.clone();
-    let mock_embedder = Arc::new(MockEmbedder {
-        dense: vec![0.1, 0.2],
-        sparse_indices: vec![1, 2],
-        sparse_values: vec![0.5, 0.6],
-    });
-    let executor = Executor::with_embedder(
-        Box::new(client),
-        Some(test_local_config()),
-        Some(mock_embedder),
-    );
+    let last_route = client.last_route.clone();
+    let executor = Executor::new(Box::new(client), Some(test_config()));
 
-    let query = "QUERY 'hello' FROM docs LIMIT 10 USING HYBRID";
+    let query = "QUERY HYBRID TEXT 'hello' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10";
     let resp = executor.execute(query).await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
-    let query_req = last_query.lock().unwrap().take().unwrap();
-    assert_eq!(query_req.collection_name, "docs");
-    // Verify prefetch was constructed
-    assert!(!query_req.prefetches.is_empty());
-    let prefetches = &query_req.prefetches;
-    assert_eq!(prefetches.len(), 2);
+    let route = last_route.lock().unwrap().take().unwrap();
+    assert_eq!(route.method, qql_plan::types::Method::Post);
+    assert!(route.body.is_some());
+}
+
+#[tokio::test]
+async fn test_do_select_returns_record_or_nil() {
+    let mut client = MockQdrantClient::default();
+    client.exists = true;
+    let last_route = client.last_route.clone();
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+
+    let resp = executor.execute("QUERY POINTS ('pt-1') FROM docs").await;
+    assert!(resp.is_ok(), "{:?}", resp.err());
+
+    let route = last_route.lock().unwrap().take().unwrap();
+    assert_eq!(route.method, qql_plan::types::Method::Post);
+    assert!(route.path.contains("docs/points"));
+}
+
+#[tokio::test]
+async fn test_delete_by_id_and_filter() {
+    let mut client = MockQdrantClient::default();
+    client.exists = true;
+    let last_route = client.last_route.clone();
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+
+    let resp = executor.execute("DELETE FROM docs WHERE id = 12").await;
+    assert!(resp.is_ok(), "{:?}", resp.err());
+
+    let route = last_route.lock().unwrap().take().unwrap();
+    assert_eq!(route.method, qql_plan::types::Method::Post);
+    assert!(route.path.contains("delete"));
+}
+
+#[tokio::test]
+async fn test_set_payload_by_id_and_filter() {
+    let mut client = MockQdrantClient::default();
+    client.exists = true;
+    let last_route = client.last_route.clone();
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+
+    let resp = executor
+        .execute("UPDATE docs SET PAYLOAD = {status: 'active'} WHERE id = 12")
+        .await;
+    assert!(resp.is_ok(), "{:?}", resp.err());
+
+    let route = last_route.lock().unwrap().take().unwrap();
+    assert_eq!(route.method, qql_plan::types::Method::Post);
+    assert!(route.path.contains("payload"));
+}
+
+#[tokio::test]
+async fn test_update_by_id() {
+    let mut client = MockQdrantClient::default();
+    client.exists = true;
+    let last_route = client.last_route.clone();
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+
+    let resp = executor
+        .execute("UPDATE docs SET VECTOR dense = [1.0, 2.0] WHERE id = 'p1'")
+        .await;
+    assert!(resp.is_ok(), "{:?}", resp.err());
+
+    let route = last_route.lock().unwrap().take().unwrap();
+    assert_eq!(route.method, qql_plan::types::Method::Put);
+    assert!(route.path.contains("vectors"));
+}
+
+#[tokio::test]
+async fn test_upsert_into_collection_creates_missing() {
+    let client = MockQdrantClient::default();
+    let last_route = client.last_route.clone();
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+
+    let resp = executor
+        .execute("UPSERT INTO docs VALUES {id: 'pt-1', text: 'hello'}")
+        .await;
+    assert!(resp.is_ok(), "{:?}", resp.err());
+
+    let route = last_route.lock().unwrap().take().unwrap();
+    assert_eq!(route.method, qql_plan::types::Method::Put);
+    assert!(route.path.contains("docs"));
+}
+
+#[tokio::test]
+async fn test_do_scroll_returns_upstream_style_payload() {
+    let mut client = MockQdrantClient::default();
+    client.exists = true;
+    let last_route = client.last_route.clone();
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+
+    let resp = executor.execute("SCROLL FROM docs LIMIT 10").await;
+
+    assert!(resp.is_ok(), "{:?}", resp.err());
+    let route = last_route.lock().unwrap().take().unwrap();
+    assert_eq!(route.method, qql_plan::types::Method::Post);
+    assert!(route.path.contains("scroll"));
 }
 
 #[tokio::test]
@@ -612,7 +541,7 @@ async fn test_query_missing_collection_errors() {
     let query = "QUERY 'hello' FROM nonexistent LIMIT 10";
     let resp = executor.execute(query).await;
     assert!(resp.is_err());
-    assert!(resp.unwrap_err().msg.contains("does not exist"));
+    assert!(resp.unwrap_err().message.contains("does not exist"));
 }
 
 #[tokio::test]

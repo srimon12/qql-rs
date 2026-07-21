@@ -5,6 +5,7 @@ mod tests {
     use std::path::Path;
 
     use crate::pipeline::{QueryPointsRequest, QueryVariant, WithPayload};
+use qql_core::ast::ComparisonOp;
     use crate::rest::query_request_json;
 
     #[test]
@@ -109,7 +110,7 @@ mod tests {
         let expr = qql_core::ast::FormulaExpr::Case {
             cond: Box::new(qql_core::ast::FilterExpr::Compare {
                 field: String::from("priority"),
-                op: String::from("="),
+                op: ComparisonOp::Eq,
                 value: qql_core::ast::Value::Str(String::from("high")),
             }),
             then_: Box::new(qql_core::ast::FormulaExpr::Constant { value: 2.0 }),

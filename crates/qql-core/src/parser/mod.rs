@@ -2,24 +2,14 @@ pub mod alter_drop_show;
 pub mod config_parsers;
 pub mod config_validation;
 pub mod create;
-pub mod cte;
 pub mod filter;
 pub mod formula;
 pub mod helpers;
+pub mod point_ops;
 pub mod query;
-pub mod query_clauses;
-pub mod select;
 pub mod r#update;
 pub mod upsert;
 pub mod with_clause;
-
-pub use config_validation::{
-    check_deleted_threshold, config_bool, config_float_range, config_has_key,
-    config_max_optimization_threads, config_non_negative_u64, config_positive_u64, config_value,
-    merge_collection_config, validate_hnsw_value, validate_index_options,
-    validate_optimizers_value, validate_params_value, validate_vectors_value,
-};
-pub use with_clause::merge_search_with;
 
 use crate::ast::Stmt;
 use crate::error::QqlError;
@@ -27,6 +17,12 @@ use crate::lexer::Lexer;
 use crate::token::{Token, TokenKind};
 use alloc::string::String;
 use alloc::vec::Vec;
+pub use config_validation::{
+    check_deleted_threshold, config_bool, config_float_range, config_has_key,
+    config_max_optimization_threads, config_non_negative_u64, config_positive_u64, config_value,
+    merge_collection_config, validate_hnsw_value, validate_index_options,
+    validate_optimizers_value, validate_params_value, validate_vectors_value,
+};
 
 pub struct Parser<'a> {
     pub input: &'a str,
@@ -52,18 +48,6 @@ pub fn ascii_equal_lower(s: &str, lower: &str) -> bool {
         .iter()
         .zip(lower.as_bytes().iter())
         .all(|(a, b)| a.to_ascii_lowercase() == *b)
-}
-
-pub fn token_kind_to_op(kind: TokenKind) -> &'static str {
-    match kind {
-        TokenKind::Equals => "=",
-        TokenKind::NotEquals => "!=",
-        TokenKind::Gt => ">",
-        TokenKind::Gte => ">=",
-        TokenKind::Lt => "<",
-        TokenKind::Lte => "<=",
-        _ => "",
-    }
 }
 
 pub fn is_contextual_field_name(kind: TokenKind) -> bool {
@@ -108,6 +92,9 @@ impl<'a> Parser<'a> {
         let tokens = Self::lex(input)?;
         let mut parser = Parser::new(input, tokens);
         let stmt = parser.parse_stmt()?;
+        if parser.peek()?.kind == TokenKind::Semicolon {
+            parser.advance()?;
+        }
         parser.expect_end()?;
         Ok(stmt)
     }
@@ -116,6 +103,9 @@ impl<'a> Parser<'a> {
         let tokens = Self::lex(input)?;
         let mut parser = Parser::new(input, tokens);
         parser.parse_stmt()?;
+        if parser.peek()?.kind == TokenKind::Semicolon {
+            parser.advance()?;
+        }
         parser.expect_end()?;
         Ok(())
     }
@@ -123,15 +113,39 @@ impl<'a> Parser<'a> {
     pub fn parse_all(input: &'a str) -> Result<Vec<Stmt>, QqlError> {
         let tokens = Self::lex(input)?;
         let mut parser = Parser::new(input, tokens);
-        let mut stmts = Vec::new();
-        while parser.index < parser.tokens.len() {
-            if parser.tokens[parser.index].kind == TokenKind::Semicolon {
-                parser.index += 1;
-                continue;
-            }
-            stmts.push(parser.parse_stmt()?);
+        let mut statements = Vec::new();
+        if parser.peek()?.kind == TokenKind::Semicolon {
+            return Err(QqlError::parse(
+                "QQL-PARSE-EMPTY-STATEMENT",
+                "leading or empty statements are not allowed",
+                parser.peek()?.span,
+            ));
         }
-        Ok(stmts)
+
+        while parser.peek()?.kind != TokenKind::Eof {
+            statements.push(parser.parse_stmt()?);
+            match parser.peek()?.kind {
+                TokenKind::Semicolon => {
+                    parser.advance()?;
+                    if parser.peek()?.kind == TokenKind::Semicolon {
+                        return Err(QqlError::parse(
+                            "QQL-PARSE-EMPTY-STATEMENT",
+                            "repeated semicolons are not allowed",
+                            parser.peek()?.span,
+                        ));
+                    }
+                }
+                TokenKind::Eof => break,
+                _ => {
+                    return Err(QqlError::parse(
+                        "QQL-PARSE-SEPARATOR",
+                        "multiple statements must be separated by a semicolon",
+                        parser.peek()?.span,
+                    ));
+                }
+            }
+        }
+        Ok(statements)
     }
 
     fn lex(input: &'a str) -> Result<Vec<Token<'a>>, QqlError> {
@@ -144,16 +158,12 @@ impl<'a> Parser<'a> {
     }
 
     fn expect_end(&mut self) -> Result<(), QqlError> {
-        while self.index < self.tokens.len() && self.tokens[self.index].kind == TokenKind::Semicolon
-        {
-            self.index += 1;
-        }
-
         if self.index < self.tokens.len() {
             let tok = self.tokens[self.index];
-            return Err(QqlError::syntax(
+            return Err(QqlError::parse(
+                "QQL-PARSE-TRAILING",
                 alloc::format!("unexpected trailing token '{}'", tok.text),
-                tok.pos,
+                tok.span,
             ));
         }
 
@@ -168,15 +178,15 @@ impl<'a> Parser<'a> {
             TokenKind::Drop => self.parse_drop(),
             TokenKind::Show => self.parse_show(),
             TokenKind::Upsert => self.parse_upsert(),
-            TokenKind::Select => self.parse_select(),
             TokenKind::Scroll => self.parse_scroll(),
             TokenKind::Query => self.parse_query(),
             TokenKind::With => self.parse_query_with_cte(),
             TokenKind::Delete => self.parse_delete(),
             TokenKind::Update => self.parse_update(),
-            _ => Err(QqlError::syntax(
+            _ => Err(QqlError::parse(
+                "QQL-PARSE-STATEMENT",
                 alloc::format!("expected a QQL statement keyword, got '{}'", tok.text),
-                tok.pos,
+                tok.span,
             )),
         }
     }
@@ -187,7 +197,7 @@ impl<'a> Parser<'a> {
         if self.index < self.tokens.len() {
             Ok(self.tokens[self.index])
         } else {
-            Ok(Token::eof())
+            Ok(Token::eof(self.input.len()))
         }
     }
 
@@ -196,7 +206,7 @@ impl<'a> Parser<'a> {
         if idx < self.tokens.len() {
             self.tokens[idx]
         } else {
-            Token::eof()
+            Token::eof(self.input.len())
         }
     }
 
@@ -223,9 +233,10 @@ impl<'a> Parser<'a> {
     pub fn expect(&mut self, kind: TokenKind) -> Result<Token<'a>, QqlError> {
         let tok = self.peek()?;
         if tok.kind != kind {
-            return Err(QqlError::syntax(
+            return Err(QqlError::parse(
+                "QQL-PARSE-EXPECTED",
                 alloc::format!("expected {} but got '{}'", kind, tok.text),
-                tok.pos,
+                tok.span,
             ));
         }
         self.advance()
@@ -242,9 +253,10 @@ impl<'a> Parser<'a> {
             self.advance()?;
             Ok(tok.text.to_string())
         } else {
-            Err(QqlError::syntax(
+            Err(QqlError::parse(
+                "QQL-PARSE-IDENTIFIER",
                 alloc::format!("expected identifier or quoted name, got '{}'", tok.text),
-                tok.pos,
+                tok.span,
             ))
         }
     }
@@ -256,14 +268,15 @@ impl<'a> Parser<'a> {
         match tok.kind {
             TokenKind::String => {
                 self.advance()?;
-                Ok(crate::ast::Value::Str(tok.text.to_string()))
+                self.decode_string(tok).map(crate::ast::Value::Str)
             }
             TokenKind::Float => {
                 self.advance()?;
                 let v: f64 = tok.text.parse().map_err(|_| {
-                    QqlError::syntax(
+                    QqlError::parse(
+                        "QQL-PARSE-FLOAT",
                         alloc::format!("invalid float literal '{}'", tok.text),
-                        tok.pos,
+                        tok.span,
                     )
                 })?;
                 Ok(crate::ast::Value::Float(v))
@@ -271,9 +284,10 @@ impl<'a> Parser<'a> {
             TokenKind::Integer => {
                 self.advance()?;
                 let v: i64 = tok.text.parse().map_err(|_| {
-                    QqlError::syntax(
+                    QqlError::parse(
+                        "QQL-PARSE-INTEGER",
                         alloc::format!("invalid integer literal '{}'", tok.text),
-                        tok.pos,
+                        tok.span,
                     )
                 })?;
                 Ok(crate::ast::Value::Int(v))
@@ -298,10 +312,48 @@ impl<'a> Parser<'a> {
                 .parse_payload_dict()
                 .map(|items| crate::ast::Value::Dict(items.into_iter().collect())),
             TokenKind::Lbracket => self.parse_list().map(crate::ast::Value::List),
-            _ => Err(QqlError::syntax(
+            _ => Err(QqlError::parse(
+                "QQL-PARSE-VALUE",
                 alloc::format!("unexpected value token '{}'", tok.text),
-                tok.pos,
+                tok.span,
             )),
         }
+    }
+
+    fn decode_string(&self, token: Token<'a>) -> Result<String, QqlError> {
+        if !token.text.contains('\\') {
+            return Ok(token.text.to_string());
+        }
+        let mut decoded = String::with_capacity(token.text.len());
+        let mut chars = token.text.chars();
+        while let Some(ch) = chars.next() {
+            if ch != '\\' {
+                decoded.push(ch);
+                continue;
+            }
+            let escaped = chars.next().ok_or_else(|| {
+                QqlError::parse(
+                    "QQL-PARSE-ESCAPE",
+                    "unterminated escape sequence",
+                    token.span,
+                )
+            })?;
+            decoded.push(match escaped {
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                '\\' => '\\',
+                '\'' => '\'',
+                '"' => '"',
+                _ => {
+                    return Err(QqlError::parse(
+                        "QQL-PARSE-ESCAPE",
+                        alloc::format!("unsupported escape sequence \\{}", escaped),
+                        token.span,
+                    ));
+                }
+            });
+        }
+        Ok(decoded)
     }
 }

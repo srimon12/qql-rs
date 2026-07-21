@@ -1,6 +1,6 @@
-use crate::filter_conv::FilterConverter;
+use qql_plan::filter::lower_filter;
 use async_trait::async_trait;
-use qql_core::ast;
+use qql_core::ast::{self, ComparisonOp};
 use qql_core::error::QqlError;
 use std::collections::HashMap;
 
@@ -134,22 +134,19 @@ pub fn build_expression(expr: &ast::FormulaExpr) -> Result<serde_json::Value, Qq
                 "exp_decay" => "exp_decay",
                 "gauss_decay" => "gauss_decay",
                 "lin_decay" => "lin_decay",
-                _ => return Err(QqlError::runtime(format!("unknown decay kind: {}", kind))),
+                _ => return Err(QqlError::execution("QQL-EXECUTION", format!("unknown decay kind: {}", kind), None)),
             };
             Ok(serde_json::json!({decay_key: decay}))
         }
         ast::FormulaExpr::Case { cond, then_, else_ } => {
             let cond_expr = match cond.as_ref() {
-                ast::FilterExpr::Compare { field, op, value } if op == "=" => {
+                ast::FilterExpr::Compare { field, op: ComparisonOp::Eq, value } => {
                     build_match_condition_expression(field, std::slice::from_ref(value))?
                 }
                 _ => {
-                    let filter_converter = FilterConverter::new();
-                    let qdrant_filter = filter_converter
-                        .build_filter(cond)?
-                        .ok_or_else(|| QqlError::runtime("empty condition in CASE expression"))?;
+                    let qdrant_filter = lower_filter(cond);
                     let cond_json = serde_json::to_value(&qdrant_filter).map_err(|e| {
-                        QqlError::runtime(format!("failed to serialize filter: {}", e))
+                        QqlError::execution("QQL-EXECUTION", format!("failed to serialize filter: {}", e), None)
                     })?;
                     serde_json::json!({"filter": cond_json})
                 }
@@ -174,7 +171,7 @@ pub fn build_match_condition_expression(
     values: &[ast::Value],
 ) -> Result<serde_json::Value, QqlError> {
     if values.is_empty() {
-        return Err(QqlError::runtime("MATCH requires at least one value"));
+        return Err(QqlError::execution("QQL-EXECUTION", "MATCH requires at least one value", None));
     }
 
     if values.len() == 1 {
@@ -189,7 +186,7 @@ pub fn build_match_condition_expression(
                 serde_json::json!({"key": field, "range": {"gte": f, "lte": f}})
             }
             _ => {
-                return Err(QqlError::runtime("MATCH value must be a string or number"));
+                return Err(QqlError::execution("QQL-EXECUTION", "MATCH value must be a string or number", None));
             }
         };
         Ok(condition)
@@ -201,7 +198,7 @@ pub fn build_match_condition_expression(
                 for v in values {
                     match v {
                         ast::Value::Str(s) => keywords.push(s.as_str()),
-                        _ => return Err(QqlError::runtime("all MATCH values must be strings")),
+                        _ => return Err(QqlError::execution("QQL-EXECUTION", "all MATCH values must be strings", None)),
                     }
                 }
                 let condition = serde_json::json!({
@@ -215,7 +212,7 @@ pub fn build_match_condition_expression(
                     match v {
                         ast::Value::Int(i) => ints.push(*i),
                         ast::Value::Float(f) => ints.push(*f as i64),
-                        _ => return Err(QqlError::runtime("all MATCH values must be numbers")),
+                        _ => return Err(QqlError::execution("QQL-EXECUTION", "all MATCH values must be numbers", None)),
                     }
                 }
                 let condition = serde_json::json!({
@@ -223,7 +220,7 @@ pub fn build_match_condition_expression(
                 });
                 Ok(serde_json::json!({"condition": condition}))
             }
-            _ => Err(QqlError::runtime("MATCH values must be strings or numbers")),
+            _ => Err(QqlError::execution("QQL-EXECUTION", "MATCH values must be strings or numbers", None)),
         }
     }
 }

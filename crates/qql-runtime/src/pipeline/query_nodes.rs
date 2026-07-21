@@ -19,14 +19,12 @@ pub struct RecommendNode {
 impl ExecutionNode for RecommendNode {
     async fn execute(&self, state: &mut QueryState) -> Result<(), QqlError> {
         if state.has_mmr {
-            return Err(QqlError::runtime(
-                "MMR is supported only for standard NEAREST queries",
-            ));
+            return Err(QqlError::execution("QQL-EXECUTION", 
+                "MMR is supported only for standard NEAREST queries", None));
         }
         if self.positive_ids.is_empty() && self.negative_ids.is_empty() {
-            return Err(QqlError::runtime(
-                "RECOMMEND requires at least one POSITIVE or NEGATIVE ID",
-            ));
+            return Err(QqlError::execution("QQL-EXECUTION", 
+                "RECOMMEND requires at least one POSITIVE or NEGATIVE ID", None));
         }
 
         let mut pos = Vec::new();
@@ -87,7 +85,7 @@ impl ExecutionNode for DiscoverNode {
     async fn execute(&self, state: &mut QueryState) -> Result<(), QqlError> {
         let target = match &self.target {
             Some(v) => super::helpers::build_vector_input(state, v).await?,
-            None => return Err(QqlError::runtime("DISCOVER requires a target")),
+            None => return Err(QqlError::execution("QQL-EXECUTION", "DISCOVER requires a target", None)),
         };
         let pairs = build_context_pairs(state, &self.pairs).await?;
         state.target_query = Some(QueryVariant::Discover(DiscoverInput {
@@ -168,7 +166,7 @@ impl ExecutionNode for RelevanceFeedbackNode {
                         .map(|v| match v {
                             ast::Value::Float(f) => Ok(*f as f32),
                             ast::Value::Int(i) => Ok(*i as f32),
-                            _ => Err(QqlError::runtime("vector element is not a number")),
+                            _ => Err(QqlError::execution("QQL-EXECUTION", "vector element is not a number", None)),
                         })
                         .collect::<Result<Vec<f32>, QqlError>>()?;
                     Ok(VectorInput::Dense(vec))
@@ -181,12 +179,12 @@ impl ExecutionNode for RelevanceFeedbackNode {
         }
 
         let target_input = build_vector_input_from_value(&self.target)
-            .map_err(|e| QqlError::runtime(format!("relevance feedback target: {}", e)))?;
+            .map_err(|e| QqlError::execution("QQL-EXECUTION", format!("relevance feedback target: {}", e), None))?;
 
         let mut feedback_items = Vec::with_capacity(self.feedback.len());
         for (i, (example, score)) in self.feedback.iter().enumerate() {
             let example_input = build_vector_input_from_value(example).map_err(|e| {
-                QqlError::runtime(format!("relevance feedback example {}: {}", i, e))
+                QqlError::execution("QQL-EXECUTION", format!("relevance feedback example {}: {}", i, e), None)
             })?;
             feedback_items.push(FeedbackItem {
                 example: example_input,
@@ -234,10 +232,10 @@ impl ExecutionNode for FusionNode {
                 state.target_query = Some(QueryVariant::Fusion(FusionType::Dbsf));
             }
             _ => {
-                return Err(QqlError::runtime(format!(
+                return Err(QqlError::execution("QQL-EXECUTION", format!(
                     "unknown fusion mode '{}'; expected 'rrf' or 'dbsf'",
                     self.mode
-                )));
+                ), None));
             }
         }
 
@@ -254,9 +252,8 @@ pub struct RerankNode {
 impl ExecutionNode for RerankNode {
     async fn execute(&self, state: &mut QueryState) -> Result<(), QqlError> {
         if state.local_embed {
-            return Err(QqlError::runtime(
-                "RERANK is currently only available in cloud inference mode",
-            ));
+            return Err(QqlError::execution("QQL-EXECUTION", 
+                "RERANK is currently only available in cloud inference mode", None));
         }
 
         state.target_query = Some(QueryVariant::Document {

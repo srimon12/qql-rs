@@ -3,165 +3,274 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
-pub enum QueryMode {
-    Nearest,
-    Recommend,
-    Context,
-    Discover,
-    OrderBy,
-    Sample,
-    RelevanceFeedback,
+pub enum PointId {
+    Number(u64),
+    String(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
-pub enum QueryType {
-    Dense,
-    Sparse,
-    Hybrid,
+pub enum VectorValue {
+    Dense(Vec<f32>),
+    Sparse { indices: Vec<u32>, values: Vec<f32> },
+    MultiDense(Vec<Vec<f32>>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub enum PointVectors {
+    Unnamed(VectorValue),
+    Named(Vec<(String, VectorValue)>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub enum QueryInput {
+    Text { text: String, model: Option<String> },
+    Vector(VectorValue),
+    Point(PointId),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct ContextPair {
-    pub positive: Value,
-    pub negative: Value,
+    pub positive: QueryInput,
+    pub negative: QueryInput,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub enum RecommendStrategy {
+    AverageVector,
+    BestScore,
+    SumScores,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct FeedbackItem {
-    pub example: Value,
+    pub example: QueryInput,
     pub score: f64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
-pub enum FeedbackStrategyType {
-    Naive,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct FeedbackStrategy {
-    pub strategy_type: FeedbackStrategyType,
     pub a: f64,
     pub b: f64,
     pub c: f64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
-pub struct CTE {
-    pub name: String,
-    pub stmt: Box<QueryStmt>,
+pub enum OrderDirection {
+    Asc,
+    Desc,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub enum FusionMethod {
+    Rrf,
+    Dbsf,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
-pub struct PrefetchRef {
-    pub cte_name: String,
+pub enum QueryCollection {
+    Explicit(String),
+    Inherited,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub enum PrefetchSource {
+    Cte(String),
+    Query(Box<QueryStmt>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub struct LookupSpec {
+    pub collection: String,
+    pub vector: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub struct Prefetch {
+    pub source: PrefetchSource,
     pub filter: Option<Box<FilterExpr>>,
     pub score_threshold: Option<f64>,
-    pub lookup_from: Option<String>,
-    pub lookup_vector: Option<String>,
+    pub lookup: Option<LookupSpec>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub enum QueryExpr {
+    Points {
+        ids: Vec<PointId>,
+    },
+    Nearest {
+        input: QueryInput,
+        using: Option<String>,
+        prefetch: Vec<Prefetch>,
+    },
+    Recommend {
+        positive: Vec<QueryInput>,
+        negative: Vec<QueryInput>,
+        strategy: Option<RecommendStrategy>,
+        using: Option<String>,
+        prefetch: Vec<Prefetch>,
+    },
+    Context {
+        pairs: Vec<ContextPair>,
+        using: Option<String>,
+        prefetch: Vec<Prefetch>,
+    },
+    Discover {
+        target: QueryInput,
+        context: Vec<ContextPair>,
+        using: Option<String>,
+        prefetch: Vec<Prefetch>,
+    },
+    OrderBy {
+        field: String,
+        direction: OrderDirection,
+    },
+    SampleRandom,
+    Fusion {
+        method: FusionMethod,
+        prefetch: Vec<Prefetch>,
+    },
+    Formula {
+        expression: Box<FormulaExpr>,
+        defaults: Vec<(String, Value)>,
+        prefetch: Vec<Prefetch>,
+    },
+    RelevanceFeedback {
+        target: QueryInput,
+        feedback: Vec<FeedbackItem>,
+        strategy: FeedbackStrategy,
+        using: Option<String>,
+        prefetch: Vec<Prefetch>,
+    },
+    Mmr {
+        input: QueryInput,
+        diversity: f64,
+        candidates: u64,
+        using: Option<String>,
+        prefetch: Vec<Prefetch>,
+    },
+    Hybrid {
+        text: String,
+        model: Option<String>,
+        dense_vector: Option<String>,
+        sparse_vector: Option<String>,
+        fusion: FusionMethod,
+    },
+    Rerank {
+        input: QueryInput,
+        model: String,
+        using: String,
+        prefetch: Vec<Prefetch>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
-pub struct SearchWith {
-    pub hnsw_ef: u64,
-    pub exact: bool,
-    pub acorn: bool,
-    pub indexed_only: bool,
-    pub quantization: Option<Box<QuantizationSearchWith>>,
-    pub mmr_diversity: Option<f64>,
-    pub mmr_candidates: Option<u64>,
-    pub rrf_k: Option<u64>,
-    pub rrf_weights: Vec<f32>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
-pub struct QuantizationSearchWith {
+pub struct QuantizationSearchParams {
     pub ignore: Option<bool>,
     pub rescore: Option<bool>,
     pub oversampling: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
-pub struct PayloadSelector {
-    pub enable: Option<bool>,
-    pub include: Vec<String>,
-    pub exclude: Vec<String>,
+pub struct SearchParams {
+    pub hnsw_ef: Option<u64>,
+    pub exact: Option<bool>,
+    pub acorn: Option<bool>,
+    pub indexed_only: Option<bool>,
+    pub quantization: Option<QuantizationSearchParams>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
-pub struct VectorsSelector {
-    pub enable: Option<bool>,
-    pub vectors: Vec<String>,
+pub enum PayloadSelector {
+    All,
+    None,
+    Include(Vec<String>),
+    Exclude(Vec<String>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub enum VectorSelector {
+    All,
+    None,
+    Names(Vec<String>),
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub struct QueryOutput {
+    pub payload: Option<PayloadSelector>,
+    pub vectors: Option<VectorSelector>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub struct GroupSpec {
+    pub field: String,
+    pub size: Option<u64>,
+    pub lookup: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub struct PageSpec {
+    pub limit: Option<u64>,
+    pub offset: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub struct Cte {
+    pub name: String,
+    pub query: Box<QueryStmt>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct QueryStmt {
-    pub collection: Option<String>,
-    pub mode: QueryMode,
-    pub query_type: QueryType,
-    pub query_text: Option<String>,
-    pub query_id: Option<Value>,
-    pub raw_vector: Vec<f64>,
-    pub positive_ids: Vec<Value>,
-    pub negative_ids: Vec<Value>,
-    pub context_pairs: Vec<ContextPair>,
-    pub target: Option<Value>,
-    pub order_by_field: Option<String>,
-    pub order_by_asc: Option<bool>,
-    pub limit: i64,
-    pub offset: i64,
+    pub ctes: Vec<Cte>,
+    pub collection: QueryCollection,
+    pub expression: QueryExpr,
+    pub filter: Option<Box<FilterExpr>>,
+    pub params: Option<SearchParams>,
     pub score_threshold: Option<f64>,
-    pub strategy: Option<String>,
-    pub query_filter: Option<Box<FilterExpr>>,
-    pub group_by: Option<String>,
-    pub group_size: Option<i64>,
-    pub with_clause: Option<Box<SearchWith>>,
-    pub with_payload: Option<Box<PayloadSelector>>,
-    pub with_vector: Option<Box<VectorsSelector>>,
-    pub lookup_from: Option<String>,
-    pub lookup_vector: Option<String>,
-    pub with_lookup_collection: Option<String>,
-    pub using_: Option<String>,
-    pub model: Option<String>,
-    pub ctes: Vec<CTE>,
-    pub prefetch_refs: Vec<PrefetchRef>,
-    pub fusion_type: Option<String>,
-    pub rerank: bool,
-    pub rerank_model: Option<String>,
-    pub formula: Option<Box<FormulaExpr>>,
-    pub formula_defaults: Vec<(String, Value)>,
-    pub feedback_target: Option<Value>,
-    pub feedback_items: Vec<FeedbackItem>,
-    pub feedback_strategy: Option<Box<FeedbackStrategy>>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
-pub struct SelectStmt {
-    pub collection: String,
-    pub point_id: Value,
+    pub group: Option<GroupSpec>,
+    pub output: QueryOutput,
+    pub page: PageSpec,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct ScrollStmt {
     pub collection: String,
-    pub limit: i64,
-    pub query_filter: Option<Box<FilterExpr>>,
-    pub after: Option<Value>,
+    pub limit: u64,
+    pub filter: Option<Box<FilterExpr>>,
+    pub after: Option<PointId>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub enum EmbedKind {
+    Dense { model: Option<String> },
+    Sparse { model: Option<String> },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -169,21 +278,39 @@ pub struct ScrollStmt {
 pub struct EmbedDirective {
     pub source_field: String,
     pub target_vector: String,
-    pub model: Option<String>,
-    pub sparse_model: Option<String>,
+    pub kind: EmbedKind,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub enum EmbeddingSpec {
+    Dense {
+        model: Option<String>,
+        vector: Option<String>,
+    },
+    Hybrid {
+        dense_model: Option<String>,
+        dense_vector: Option<String>,
+        sparse_model: Option<String>,
+        sparse_vector: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub struct UpsertPoint {
+    pub id: PointId,
+    pub vectors: Option<PointVectors>,
+    pub payload: Vec<(String, Value)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct UpsertStmt {
     pub collection: String,
-    pub values_list: Vec<Vec<(String, Value)>>,
-    pub model: Option<String>,
-    pub hybrid: bool,
-    pub sparse_model: Option<String>,
-    pub dense_vector: Option<String>,
-    pub sparse_vector: Option<String>,
-    pub embed_directives: Vec<EmbedDirective>,
+    pub points: Vec<UpsertPoint>,
+    pub embedding: Option<EmbeddingSpec>,
+    pub embed: Vec<EmbedDirective>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -195,10 +322,16 @@ pub enum VectorDistance {
     Manhattan,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub enum MultivectorComparator {
+    MaxSim,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct MultivectorConfig {
-    pub comparator: &'static str,
+    pub comparator: MultivectorComparator,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -305,13 +438,22 @@ pub struct CollectionConfig {
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub enum CollectionMode {
+    Dense {
+        model: Option<String>,
+    },
+    Hybrid {
+        dense_vector: Option<String>,
+        sparse_vector: Option<String>,
+    },
+    Rerank,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct CreateCollectionStmt {
     pub collection: String,
-    pub hybrid: bool,
-    pub rerank: bool,
-    pub model: Option<String>,
-    pub dense_vector: Option<String>,
-    pub sparse_vector: Option<String>,
+    pub mode: CollectionMode,
     pub vectors: Vec<VectorDef>,
     pub sparse_vectors: Vec<SparseVectorDef>,
     pub config: Option<Box<CollectionConfig>>,
@@ -341,20 +483,25 @@ pub struct CreateIndexStmt {
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub enum PointSelector {
+    Id(PointId),
+    Ids(Vec<PointId>),
+    Filter(Box<FilterExpr>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct DeleteStmt {
     pub collection: String,
-    pub point_id: Option<Value>,
-    pub field: Option<String>,
-    pub value: Option<Value>,
-    pub query_filter: Option<Box<FilterExpr>>,
+    pub selector: PointSelector,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct UpdateVectorStmt {
     pub collection: String,
-    pub point_id: Value,
-    pub vector: Vec<f32>,
+    pub point_id: PointId,
+    pub vector: VectorValue,
     pub vector_name: Option<String>,
 }
 
@@ -362,8 +509,7 @@ pub struct UpdateVectorStmt {
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct UpdatePayloadStmt {
     pub collection: String,
-    pub point_id: Option<Value>,
-    pub query_filter: Option<Box<FilterExpr>>,
+    pub selector: PointSelector,
     pub payload: Vec<(String, Value)>,
 }
 
@@ -371,7 +517,6 @@ pub struct UpdatePayloadStmt {
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum Stmt {
     Query(Box<QueryStmt>),
-    Select(Box<SelectStmt>),
     Scroll(Box<ScrollStmt>),
     Upsert(Box<UpsertStmt>),
     CreateCollection(Box<CreateCollectionStmt>),

@@ -2,56 +2,52 @@ use crate::pipeline::{PointId, WithPayload, WithVector};
 use qql_core::ast::{self, Value};
 use qql_core::error::QqlError;
 
+#[allow(dead_code)]
 pub(crate) fn build_with_payload(sel: Option<&ast::PayloadSelector>) -> Option<WithPayload> {
     let sel = sel?;
-    if let Some(enable) = sel.enable {
-        return Some(WithPayload {
-            enable: Some(enable),
+    match sel {
+        ast::PayloadSelector::All => Some(WithPayload {
+            enable: Some(true),
             include: Vec::new(),
             exclude: Vec::new(),
-        });
-    }
-    if !sel.include.is_empty() {
-        return Some(WithPayload {
+        }),
+        ast::PayloadSelector::None => None,
+        ast::PayloadSelector::Include(fields) => Some(WithPayload {
             enable: None,
-            include: sel.include.iter().map(|s| s.to_string()).collect(),
+            include: fields.iter().map(|s| s.to_string()).collect(),
             exclude: Vec::new(),
-        });
-    }
-    if !sel.exclude.is_empty() {
-        return Some(WithPayload {
+        }),
+        ast::PayloadSelector::Exclude(fields) => Some(WithPayload {
             enable: None,
             include: Vec::new(),
-            exclude: sel.exclude.iter().map(|s| s.to_string()).collect(),
-        });
+            exclude: fields.iter().map(|s| s.to_string()).collect(),
+        }),
     }
-    None
 }
 
-pub(crate) fn build_with_vector(sel: Option<&ast::VectorsSelector>) -> Option<WithVector> {
+#[allow(dead_code)]
+pub(crate) fn build_with_vector(sel: Option<&ast::VectorSelector>) -> Option<WithVector> {
     let sel = sel?;
-    if let Some(enable) = sel.enable {
-        return Some(WithVector {
-            enable: Some(enable),
+    match sel {
+        ast::VectorSelector::All => Some(WithVector {
+            enable: Some(true),
             vectors: Vec::new(),
-        });
-    }
-    if !sel.vectors.is_empty() {
-        return Some(WithVector {
+        }),
+        ast::VectorSelector::None => None,
+        ast::VectorSelector::Names(vectors) => Some(WithVector {
             enable: None,
-            vectors: sel.vectors.iter().map(|s| s.to_string()).collect(),
-        });
-    }
-    None
-}
-
-pub(crate) fn has_mmr(with_clause: Option<&ast::SearchWith>) -> bool {
-    match with_clause {
-        Some(wc) => wc.mmr_diversity.is_some() || wc.mmr_candidates.is_some(),
-        None => false,
+            vectors: vectors.iter().map(|s| s.to_string()).collect(),
+        }),
     }
 }
 
+// TODO: MMR fields moved out of SearchParams; re-evaluate how to detect MMR
+#[allow(dead_code)]
+pub(crate) fn has_mmr(_params: Option<&ast::SearchParams>) -> bool {
+    false
+}
+
+#[allow(dead_code)]
 pub(crate) fn point_id_string(id: &PointId) -> String {
     match id {
         PointId::Num(n) => n.to_string(),
@@ -70,28 +66,27 @@ pub(crate) fn to_point_id_static(val: &ast::Value) -> Result<PointId, QqlError> 
         }
         Value::Int(i) => {
             if *i < 0 {
-                return Err(QqlError::runtime("negative ID not supported"));
+                return Err(QqlError::execution("QQL-EXECUTION", "negative ID not supported", None));
             }
             Ok(PointId::Num(*i as u64))
         }
         Value::Float(f) => {
             let v = *f;
             if v < 0.0 || v > (1u64 << 53) as f64 || v != (v as u64) as f64 {
-                return Err(QqlError::runtime(
-                    "unsupported point ID: non-integer or oversized float",
-                ));
+                return Err(QqlError::execution("QQL-EXECUTION", 
+                    "unsupported point ID: non-integer or oversized float", None));
             }
             Ok(PointId::Num(v as u64))
         }
-        _ => Err(QqlError::runtime(format!(
+        _ => Err(QqlError::execution("QQL-EXECUTION", format!(
             "unsupported point ID type: {:?}",
             val
-        ))),
+        ), None)),
     }
 }
 
 pub(crate) fn clone_value(val: &Value) -> Value {
-    val.to_static()
+    val.clone()
 }
 
 pub(crate) fn value_to_json(val: &Value) -> serde_json::Value {
@@ -150,10 +145,10 @@ pub(crate) fn build_quantization_config(
                 } else if (bits - 4.0).abs() < f64::EPSILON {
                     "bits4"
                 } else {
-                    return Err(QqlError::runtime(format!(
+                    return Err(QqlError::execution("QQL-EXECUTION", format!(
                         "unsupported TURBO bit depth {}; expected one of 1, 1.5, 2, or 4",
                         bits
-                    )));
+                    ), None));
                 };
                 config_map.insert("bits".to_string(), serde_json::json!(bit_str));
             }

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::executor::Executor;
 
 impl Executor {
+    #[allow(dead_code)]
     pub(crate) fn resolve_dense_model(&self, override_model: Option<&str>) -> String {
         if let Some(m) = override_model {
             if !m.is_empty() {
@@ -20,6 +21,7 @@ impl Executor {
         crate::executor::DENSE_MODEL_DEFAULT.to_string()
     }
 
+    #[allow(dead_code)]
     pub(crate) fn resolve_sparse_model(&self, override_model: Option<&str>) -> String {
         if let Some(m) = override_model {
             if !m.is_empty() {
@@ -51,6 +53,7 @@ impl Executor {
         mode == "local" || mode == "external"
     }
 
+    #[allow(dead_code)]
     pub(crate) fn cloud_model_options(&self) -> HashMap<String, String> {
         if self.uses_local_embeddings() {
             return HashMap::new();

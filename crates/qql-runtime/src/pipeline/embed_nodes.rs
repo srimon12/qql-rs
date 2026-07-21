@@ -20,13 +20,13 @@ impl ExecutionNode for DenseEmbedNode {
 
         if state.local_embed {
             let embedder = state.embedder.as_ref().ok_or_else(|| {
-                QqlError::runtime("local embedding requested but no Embedder provided")
+                QqlError::execution("QQL-EXECUTION", "local embedding requested but no Embedder provided", None)
             })?;
             let dense_vector = embedder
                 .embed_dense(&state.query_text, &self.model)
                 .await
                 .map_err(|e| {
-                    QqlError::runtime(format!("failed to embed dense search query: {}", e))
+                    QqlError::execution("QQL-EXECUTION", format!("failed to embed dense search query: {}", e), None)
                 })?;
             query = QueryVariant::Nearest(dense_vector.clone());
             mmr_nearest = if state.has_mmr {
@@ -64,7 +64,7 @@ impl ExecutionNode for DenseEmbedNode {
                 QueryVariant::MMR {
                     input: Box::new(QueryVariant::Nearest(match &input {
                         VectorInput::Dense(v) => v.clone(),
-                        _ => return Err(QqlError::runtime("MMR requires dense vector input")),
+                        _ => return Err(QqlError::execution("QQL-EXECUTION", "MMR requires dense vector input", None)),
                     })),
                     diversity: state.mmr_diversity,
                     candidates: state.mmr_candidates,
@@ -143,22 +143,21 @@ pub struct SparseEmbedNode {
 impl ExecutionNode for SparseEmbedNode {
     async fn execute(&self, state: &mut QueryState) -> Result<(), QqlError> {
         if state.has_mmr && !self.as_prefetch {
-            return Err(QqlError::runtime(
-                "MMR is supported only for standard NEAREST queries, not sparse-only queries",
-            ));
+            return Err(QqlError::execution("QQL-EXECUTION", 
+                "MMR is supported only for standard NEAREST queries, not sparse-only queries", None));
         }
 
         let query: QueryVariant;
 
         if state.local_embed {
             let embedder = state.embedder.as_ref().ok_or_else(|| {
-                QqlError::runtime("local embedding requested but no Embedder provided")
+                QqlError::execution("QQL-EXECUTION", "local embedding requested but no Embedder provided", None)
             })?;
             let sv = embedder
                 .embed_sparse(&state.query_text)
                 .await
                 .map_err(|e| {
-                    QqlError::runtime(format!("failed to embed sparse search query: {}", e))
+                    QqlError::execution("QQL-EXECUTION", format!("failed to embed sparse search query: {}", e), None)
                 })?;
             query = QueryVariant::Sparse(sv.indices, sv.values);
         } else {

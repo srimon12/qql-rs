@@ -28,7 +28,7 @@ impl GrpcQdrant {
             builder = builder.api_key(api_key);
         }
         let client = builder.build().map_err(|error| {
-            QqlError::runtime(format!("failed to build Qdrant gRPC client: {error}"))
+            QqlError::transport("QQL-TRANSPORT", format!("failed to build Qdrant gRPC client: {error}"), None)
         })?;
         Ok(Self { client })
     }
@@ -55,7 +55,7 @@ fn from_grpc_point_id(id: qdrant_client::qdrant::PointId) -> Result<PointId, Qql
         Some(qdrant_client::qdrant::point_id::PointIdOptions::Uuid(uuid)) => {
             Ok(PointId::Uuid(uuid))
         }
-        None => Err(QqlError::runtime("gRPC point ID is empty")),
+        None => Err(QqlError::backend("QQL-BACKEND", "gRPC point ID is empty", None)),
     }
 }
 
@@ -92,7 +92,7 @@ fn parse_json_condition(
 ) -> Result<qdrant_client::qdrant::Condition, QqlError> {
     let obj = val
         .as_object()
-        .ok_or_else(|| QqlError::runtime("condition must be a JSON object"))?;
+        .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "condition must be a JSON object", None))?;
 
     if let Some(is_null) = obj.get("is_null") {
         let key = is_null
@@ -280,10 +280,10 @@ fn parse_json_condition(
         });
     }
 
-    Err(QqlError::runtime(format!(
+    Err(QqlError::execution("QQL-EXECUTION", format!(
         "unknown condition JSON structure: {:?}",
         val
-    )))
+    ), None))
 }
 
 fn to_grpc_filter(
@@ -370,7 +370,7 @@ fn to_grpc_vectors(val: &serde_json::Value) -> Result<qdrant_client::qdrant::Vec
         });
     }
 
-    Err(QqlError::runtime("invalid vector format"))
+    Err(QqlError::execution("QQL-EXECUTION", "invalid vector format", None))
 }
 
 fn from_grpc_vector_output(vec: qdrant_client::qdrant::VectorOutput) -> serde_json::Value {
@@ -420,7 +420,7 @@ fn from_grpc_vectors_output(vectors: qdrant_client::qdrant::VectorsOutput) -> se
 
 fn from_grpc_scored_point(p: qdrant_client::qdrant::ScoredPoint) -> Result<ScoredPoint, QqlError> {
     let id =
-        p.id.ok_or_else(|| QqlError::runtime("gRPC scored point has no ID"))?;
+        p.id.ok_or_else(|| QqlError::execution("QQL-EXECUTION", "gRPC scored point has no ID", None))?;
     let id = from_grpc_point_id(id)?;
 
     let payload =
@@ -428,10 +428,10 @@ fn from_grpc_scored_point(p: qdrant_client::qdrant::ScoredPoint) -> Result<Score
             None
         } else {
             let payload_val = serde_json::to_value(&p.payload).map_err(|e| {
-                QqlError::runtime(format!("failed to serialize gRPC payload to JSON: {e}"))
+                QqlError::backend("QQL-BACKEND", format!("failed to serialize gRPC payload to JSON: {e}"), None)
             })?;
             Some(serde_json::from_value(payload_val).map_err(|e| {
-                QqlError::runtime(format!("failed to deserialize payload to map: {e}"))
+                QqlError::backend("QQL-BACKEND", format!("failed to deserialize payload to map: {e}"), None)
             })?)
         };
 
@@ -449,17 +449,17 @@ fn from_grpc_retrieved_point(
     p: qdrant_client::qdrant::RetrievedPoint,
 ) -> Result<RetrievedPoint, QqlError> {
     let id =
-        p.id.ok_or_else(|| QqlError::runtime("gRPC retrieved point has no ID"))?;
+        p.id.ok_or_else(|| QqlError::execution("QQL-EXECUTION", "gRPC retrieved point has no ID", None))?;
     let id = from_grpc_point_id(id)?;
 
     let payload = if p.payload.is_empty() {
         None
     } else {
         let payload_val = serde_json::to_value(&p.payload)
-            .map_err(|e| QqlError::runtime(format!("failed to serialize gRPC payload: {e}")))?;
+            .map_err(|e| QqlError::backend("QQL-BACKEND", format!("failed to serialize gRPC payload: {e}"), None))?;
         Some(
             serde_json::from_value(payload_val)
-                .map_err(|e| QqlError::runtime(format!("failed to deserialize payload: {e}")))?,
+                .map_err(|e| QqlError::backend("QQL-BACKEND", format!("failed to deserialize payload: {e}"), None))?,
         )
     };
 
@@ -566,35 +566,35 @@ fn parse_json_expression(
 ) -> Result<qdrant_client::qdrant::Expression, QqlError> {
     let obj = val
         .as_object()
-        .ok_or_else(|| QqlError::runtime("expression must be a JSON object"))?;
+        .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "expression must be a JSON object", None))?;
 
     let variant = if let Some(constant) = obj.get("constant") {
         let c = constant
             .as_f64()
-            .ok_or_else(|| QqlError::runtime("constant must be a float"))? as f32;
+            .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "constant must be a float", None))? as f32;
         qdrant_client::qdrant::expression::Variant::Constant(c)
     } else if let Some(variable) = obj.get("variable") {
         let v = variable
             .as_str()
-            .ok_or_else(|| QqlError::runtime("variable must be a string"))?
+            .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "variable must be a string", None))?
             .to_string();
         qdrant_client::qdrant::expression::Variant::Variable(v)
     } else if let Some(datetime) = obj.get("datetime") {
         let dt = datetime
             .as_str()
-            .ok_or_else(|| QqlError::runtime("datetime must be a string"))?
+            .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "datetime must be a string", None))?
             .to_string();
         qdrant_client::qdrant::expression::Variant::Datetime(dt)
     } else if let Some(datetime_key) = obj.get("datetime_key") {
         let dtk = datetime_key
             .as_str()
-            .ok_or_else(|| QqlError::runtime("datetime_key must be a string"))?
+            .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "datetime_key must be a string", None))?
             .to_string();
         qdrant_client::qdrant::expression::Variant::DatetimeKey(dtk)
     } else if let Some(sum) = obj.get("sum") {
         let arr = sum
             .as_array()
-            .ok_or_else(|| QqlError::runtime("sum must be an array"))?;
+            .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "sum must be an array", None))?;
         let expressions: Result<Vec<qdrant_client::qdrant::Expression>, QqlError> =
             arr.iter().map(parse_json_expression).collect();
         qdrant_client::qdrant::expression::Variant::Sum(qdrant_client::qdrant::SumExpression {
@@ -603,7 +603,7 @@ fn parse_json_expression(
     } else if let Some(mult) = obj.get("mult") {
         let arr = mult
             .as_array()
-            .ok_or_else(|| QqlError::runtime("mult must be an array"))?;
+            .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "mult must be an array", None))?;
         let expressions: Result<Vec<qdrant_client::qdrant::Expression>, QqlError> =
             arr.iter().map(parse_json_expression).collect();
         qdrant_client::qdrant::expression::Variant::Mult(qdrant_client::qdrant::MultExpression {
@@ -630,13 +630,13 @@ fn parse_json_expression(
     } else if let Some(pow) = obj.get("pow") {
         let pow_obj = pow
             .as_object()
-            .ok_or_else(|| QqlError::runtime("pow must be an object"))?;
+            .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "pow must be an object", None))?;
         let base = pow_obj
             .get("base")
-            .ok_or_else(|| QqlError::runtime("pow must have base"))?;
+            .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "pow must have base", None))?;
         let exponent = pow_obj
             .get("exponent")
-            .ok_or_else(|| QqlError::runtime("pow must have exponent"))?;
+            .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "pow must have exponent", None))?;
         qdrant_client::qdrant::expression::Variant::Pow(Box::new(
             qdrant_client::qdrant::PowExpression {
                 base: Some(Box::new(parse_json_expression(base)?)),
@@ -646,14 +646,14 @@ fn parse_json_expression(
     } else if let Some(geo_distance) = obj.get("geo_distance") {
         let gd_obj = geo_distance
             .as_object()
-            .ok_or_else(|| QqlError::runtime("geo_distance must be an object"))?;
+            .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "geo_distance must be an object", None))?;
         let origin = gd_obj
             .get("origin")
-            .ok_or_else(|| QqlError::runtime("geo_distance must have origin"))?;
+            .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "geo_distance must have origin", None))?;
         let to = gd_obj
             .get("to")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| QqlError::runtime("geo_distance must have to"))?
+            .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "geo_distance must have to", None))?
             .to_string();
         let lat = origin.get("lat").and_then(|v| v.as_f64()).unwrap_or(0.0);
         let lon = origin.get("lon").and_then(|v| v.as_f64()).unwrap_or(0.0);
@@ -669,13 +669,13 @@ fn parse_json_expression(
     } else if let Some(div) = obj.get("div") {
         let div_obj = div
             .as_object()
-            .ok_or_else(|| QqlError::runtime("div must be an object"))?;
+            .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "div must be an object", None))?;
         let left = div_obj
             .get("left")
-            .ok_or_else(|| QqlError::runtime("div must have left"))?;
+            .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "div must have left", None))?;
         let right = div_obj
             .get("right")
-            .ok_or_else(|| QqlError::runtime("div must have right"))?;
+            .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "div must have right", None))?;
         let by_zero_default = div_obj
             .get("by_zero_default")
             .and_then(|v| v.as_f64())
@@ -697,10 +697,10 @@ fn parse_json_expression(
         let decay = parse_decay_expression(lin_decay)?;
         qdrant_client::qdrant::expression::Variant::LinDecay(Box::new(decay))
     } else {
-        return Err(QqlError::runtime(format!(
+        return Err(QqlError::execution("QQL-EXECUTION", format!(
             "unknown expression JSON structure: {:?}",
             val
-        )));
+        ), None));
     };
 
     Ok(qdrant_client::qdrant::Expression {
@@ -713,10 +713,10 @@ fn parse_decay_expression(
 ) -> Result<qdrant_client::qdrant::DecayParamsExpression, QqlError> {
     let obj = val
         .as_object()
-        .ok_or_else(|| QqlError::runtime("decay must be an object"))?;
+        .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "decay must be an object", None))?;
     let x = obj
         .get("x")
-        .ok_or_else(|| QqlError::runtime("decay must have x"))?;
+        .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "decay must have x", None))?;
     let x_expr = parse_json_expression(x)?;
     let target_expr = obj.get("target").map(parse_json_expression).transpose()?;
     let scale = obj.get("scale").and_then(|v| v.as_f64()).map(|f| f as f32);
@@ -865,7 +865,7 @@ fn to_grpc_query(
             for (key, val) in defaults {
                 let val_json = serde_json::json!(val);
                 let grpc_val: qdrant_client::qdrant::Value = serde_json::from_value(val_json)
-                    .map_err(|e| QqlError::runtime(format!("invalid default value: {e}")))?;
+                    .map_err(|e| QqlError::execution("QQL-EXECUTION", format!("invalid default value: {e}"), None))?;
                 grpc_defaults.insert(key, grpc_val);
             }
             qdrant_client::qdrant::query::Variant::Formula(qdrant_client::qdrant::Formula {
@@ -909,7 +909,7 @@ fn to_grpc_query(
             let nearest = to_grpc_query(*input)?;
             let vector_input = match nearest.variant {
                 Some(qdrant_client::qdrant::query::Variant::Nearest(vi)) => Some(vi),
-                _ => return Err(QqlError::runtime("MMR inner query must be a nearest query")),
+                _ => return Err(QqlError::execution("QQL-EXECUTION", "MMR inner query must be a nearest query", None)),
             };
             qdrant_client::qdrant::query::Variant::NearestWithMmr(
                 qdrant_client::qdrant::NearestInputWithMmr {
@@ -1099,7 +1099,7 @@ fn parse_json_vectors_config(
             });
         }
     }
-    Err(QqlError::runtime("invalid vectors_config JSON"))
+    Err(QqlError::execution("QQL-EXECUTION", "invalid vectors_config JSON", None))
 }
 
 fn parse_json_vector_params(
@@ -1107,11 +1107,11 @@ fn parse_json_vector_params(
 ) -> Result<qdrant_client::qdrant::VectorParams, QqlError> {
     let obj = val
         .as_object()
-        .ok_or_else(|| QqlError::runtime("vector params must be an object"))?;
+        .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "vector params must be an object", None))?;
     let size = obj
         .get("size")
         .and_then(|v| v.as_u64())
-        .ok_or_else(|| QqlError::runtime("size is required in vector params"))?;
+        .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "size is required in vector params", None))?;
     let distance_str = obj
         .get("distance")
         .and_then(|v| v.as_str())
@@ -1123,9 +1123,9 @@ fn parse_json_vector_params(
         "euclid" | "euclidean" => qdrant_client::qdrant::Distance::Euclid as i32,
         "manhattan" => qdrant_client::qdrant::Distance::Manhattan as i32,
         _ => {
-            return Err(QqlError::runtime(format!(
+            return Err(QqlError::execution("QQL-EXECUTION", format!(
                 "unknown distance: {distance_str}"
-            )))
+            ), None))
         }
     };
     let on_disk = obj.get("on_disk").and_then(|v| v.as_bool());
@@ -1162,7 +1162,7 @@ fn parse_json_hnsw_config_diff(
 ) -> Result<qdrant_client::qdrant::HnswConfigDiff, QqlError> {
     let obj = val
         .as_object()
-        .ok_or_else(|| QqlError::runtime("hnsw_config must be an object"))?;
+        .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "hnsw_config must be an object", None))?;
     Ok(qdrant_client::qdrant::HnswConfigDiff {
         m: obj.get("m").and_then(|v| v.as_u64()),
         ef_construct: obj.get("ef_construct").and_then(|v| v.as_u64()),
@@ -1179,7 +1179,7 @@ fn parse_json_optimizers_config_diff(
 ) -> Result<qdrant_client::qdrant::OptimizersConfigDiff, QqlError> {
     let obj = val
         .as_object()
-        .ok_or_else(|| QqlError::runtime("optimizers_config must be an object"))?;
+        .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "optimizers_config must be an object", None))?;
     Ok(qdrant_client::qdrant::OptimizersConfigDiff {
         deleted_threshold: obj.get("deleted_threshold").and_then(|v| v.as_f64()),
         vacuum_min_vector_number: obj.get("vacuum_min_vector_number").and_then(|v| v.as_u64()),
@@ -1219,11 +1219,11 @@ fn parse_json_quantization_config(
 ) -> Result<qdrant_client::qdrant::QuantizationConfig, QqlError> {
     let obj = val
         .as_object()
-        .ok_or_else(|| QqlError::runtime("quantization_config must be an object"))?;
+        .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "quantization_config must be an object", None))?;
     let quantization = if let Some(scalar) = obj.get("scalar") {
         let scalar_obj = scalar
             .as_object()
-            .ok_or_else(|| QqlError::runtime("scalar quantization must be an object"))?;
+            .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "scalar quantization must be an object", None))?;
         let r#type = match scalar_obj
             .get("type")
             .and_then(|v| v.as_str())
@@ -1249,7 +1249,7 @@ fn parse_json_quantization_config(
     } else if let Some(product) = obj.get("product") {
         let product_obj = product
             .as_object()
-            .ok_or_else(|| QqlError::runtime("product quantization must be an object"))?;
+            .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "product quantization must be an object", None))?;
         let compression = match product_obj
             .get("compression")
             .and_then(|v| v.as_str())
@@ -1281,11 +1281,11 @@ fn parse_json_quantization_config_diff(
 ) -> Result<qdrant_client::qdrant::QuantizationConfigDiff, QqlError> {
     let obj = val
         .as_object()
-        .ok_or_else(|| QqlError::runtime("quantization_config must be an object"))?;
+        .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "quantization_config must be an object", None))?;
     let quantization = if let Some(scalar) = obj.get("scalar") {
         let scalar_obj = scalar
             .as_object()
-            .ok_or_else(|| QqlError::runtime("scalar quantization must be an object"))?;
+            .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "scalar quantization must be an object", None))?;
         let r#type = match scalar_obj
             .get("type")
             .and_then(|v| v.as_str())
@@ -1311,7 +1311,7 @@ fn parse_json_quantization_config_diff(
     } else if let Some(product) = obj.get("product") {
         let product_obj = product
             .as_object()
-            .ok_or_else(|| QqlError::runtime("product quantization must be an object"))?;
+            .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "product quantization must be an object", None))?;
         let compression = match product_obj
             .get("compression")
             .and_then(|v| v.as_str())
@@ -1344,7 +1344,7 @@ fn parse_json_collection_params_diff(
 ) -> Result<qdrant_client::qdrant::CollectionParamsDiff, QqlError> {
     let obj = val
         .as_object()
-        .ok_or_else(|| QqlError::runtime("params must be an object"))?;
+        .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "params must be an object", None))?;
     Ok(qdrant_client::qdrant::CollectionParamsDiff {
         replication_factor: obj
             .get("replication_factor")
@@ -1370,7 +1370,7 @@ impl QdrantCoreOps for GrpcQdrant {
             .client
             .list_collections()
             .await
-            .map_err(|e| QqlError::runtime(format!("gRPC list_collections failed: {e}")))?;
+            .map_err(|e| QqlError::execution("QQL-EXECUTION", format!("gRPC list_collections failed: {e}"), None))?;
         Ok(resp.collections.into_iter().map(|c| c.name).collect())
     }
 
@@ -1378,7 +1378,7 @@ impl QdrantCoreOps for GrpcQdrant {
         self.client
             .collection_exists(name)
             .await
-            .map_err(|e| QqlError::runtime(format!("gRPC collection_exists failed: {e}")))
+            .map_err(|e| QqlError::execution("QQL-EXECUTION", format!("gRPC collection_exists failed: {e}"), None))
     }
 
     async fn get_collection_info(&self, name: &str) -> Result<CollectionInfo, QqlError> {
@@ -1386,9 +1386,9 @@ impl QdrantCoreOps for GrpcQdrant {
             .client
             .collection_info(name)
             .await
-            .map_err(|e| QqlError::runtime(format!("gRPC collection_info failed: {e}")))?;
+            .map_err(|e| QqlError::execution("QQL-EXECUTION", format!("gRPC collection_info failed: {e}"), None))?;
         let info = resp.result.ok_or_else(|| {
-            QqlError::runtime(format!("collection_info for '{}' returned no result", name))
+            QqlError::execution("QQL-EXECUTION", format!("collection_info for '{}' returned no result", name), None)
         })?;
 
         let status = match info.status {
@@ -1578,7 +1578,7 @@ impl QdrantCoreOps for GrpcQdrant {
         self.client
             .create_collection(grpc_req)
             .await
-            .map_err(|e| QqlError::runtime(format!("gRPC create_collection failed: {e}")))?;
+            .map_err(|e| QqlError::execution("QQL-EXECUTION", format!("gRPC create_collection failed: {e}"), None))?;
         Ok(())
     }
 
@@ -1592,7 +1592,7 @@ impl QdrantCoreOps for GrpcQdrant {
                 let payload: qdrant_client::Payload = serde_json::from_value(
                     serde_json::Value::Object(point.payload.into_iter().collect()),
                 )
-                .map_err(|e| QqlError::runtime(format!("failed to parse payload: {e}")))?;
+                .map_err(|e| QqlError::execution("QQL-EXECUTION", format!("failed to parse payload: {e}"), None))?;
 
                 Ok(qdrant_client::qdrant::PointStruct {
                     id: Some(id),
@@ -1612,7 +1612,7 @@ impl QdrantCoreOps for GrpcQdrant {
         self.client
             .upsert_points(grpc_req)
             .await
-            .map_err(|e| QqlError::runtime(format!("gRPC upsert failed: {e}")))?;
+            .map_err(|e| QqlError::execution("QQL-EXECUTION", format!("gRPC upsert failed: {e}"), None))?;
         Ok(())
     }
 
@@ -1622,7 +1622,7 @@ impl QdrantCoreOps for GrpcQdrant {
             .client
             .query(grpc_req)
             .await
-            .map_err(|e| QqlError::runtime(format!("gRPC query failed: {e}")))?;
+            .map_err(|e| QqlError::execution("QQL-EXECUTION", format!("gRPC query failed: {e}"), None))?;
 
         let scored_points: Result<Vec<ScoredPoint>, QqlError> = resp
             .result
@@ -1641,11 +1641,11 @@ impl QdrantCoreOps for GrpcQdrant {
             .client
             .query_groups(grpc_req)
             .await
-            .map_err(|e| QqlError::runtime(format!("gRPC query_groups failed: {e}")))?;
+            .map_err(|e| QqlError::execution("QQL-EXECUTION", format!("gRPC query_groups failed: {e}"), None))?;
 
         let groups: Result<Vec<PointGroup>, QqlError> = resp
             .result
-            .ok_or_else(|| QqlError::runtime("query_groups returned no result"))?
+            .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "query_groups returned no result", None))?
             .groups
             .into_iter()
             .map(from_grpc_point_group)
@@ -1686,7 +1686,7 @@ impl QdrantCoreOps for GrpcQdrant {
         self.client
             .delete_points(grpc_req)
             .await
-            .map_err(|e| QqlError::runtime(format!("gRPC delete failed: {e}")))?;
+            .map_err(|e| QqlError::execution("QQL-EXECUTION", format!("gRPC delete failed: {e}"), None))?;
         Ok(())
     }
 
@@ -1711,7 +1711,7 @@ impl QdrantCoreOps for GrpcQdrant {
         self.client
             .update_vectors(grpc_req)
             .await
-            .map_err(|e| QqlError::runtime(format!("gRPC update_vectors failed: {e}")))?;
+            .map_err(|e| QqlError::execution("QQL-EXECUTION", format!("gRPC update_vectors failed: {e}"), None))?;
         Ok(())
     }
 
@@ -1720,7 +1720,7 @@ impl QdrantCoreOps for GrpcQdrant {
         for (key, val) in req.payload {
             let val_json = serde_json::json!(val);
             let grpc_val: qdrant_client::qdrant::Value = serde_json::from_value(val_json)
-                .map_err(|e| QqlError::runtime(format!("invalid payload value: {e}")))?;
+                .map_err(|e| QqlError::execution("QQL-EXECUTION", format!("invalid payload value: {e}"), None))?;
             payload.insert(key, grpc_val);
         }
 
@@ -1757,7 +1757,7 @@ impl QdrantCoreOps for GrpcQdrant {
         self.client
             .set_payload(grpc_req)
             .await
-            .map_err(|e| QqlError::runtime(format!("gRPC set_payload failed: {e}")))?;
+            .map_err(|e| QqlError::execution("QQL-EXECUTION", format!("gRPC set_payload failed: {e}"), None))?;
         Ok(())
     }
 
@@ -1785,7 +1785,7 @@ impl QdrantCoreOps for GrpcQdrant {
             .client
             .scroll(grpc_req)
             .await
-            .map_err(|e| QqlError::runtime(format!("gRPC scroll failed: {e}")))?;
+            .map_err(|e| QqlError::execution("QQL-EXECUTION", format!("gRPC scroll failed: {e}"), None))?;
 
         let points: Result<Vec<RetrievedPoint>, QqlError> = resp
             .result
@@ -1815,7 +1815,7 @@ impl QdrantCoreOps for GrpcQdrant {
             .client
             .get_points(grpc_req)
             .await
-            .map_err(|e| QqlError::runtime(format!("gRPC get failed: {e}")))?;
+            .map_err(|e| QqlError::execution("QQL-EXECUTION", format!("gRPC get failed: {e}"), None))?;
 
         let points: Result<Vec<RetrievedPoint>, QqlError> = resp
             .result
@@ -1833,7 +1833,7 @@ impl QdrantAdminOps for GrpcQdrant {
         let collection_name = req
             .get("collection_name")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| QqlError::runtime("collection_name is required"))?
+            .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "collection_name is required", None))?
             .to_string();
 
         let optimizers_config = req
@@ -1868,7 +1868,7 @@ impl QdrantAdminOps for GrpcQdrant {
         self.client
             .update_collection(grpc_req)
             .await
-            .map_err(|e| QqlError::runtime(format!("gRPC update_collection failed: {e}")))?;
+            .map_err(|e| QqlError::execution("QQL-EXECUTION", format!("gRPC update_collection failed: {e}"), None))?;
         Ok(())
     }
 
@@ -1876,7 +1876,7 @@ impl QdrantAdminOps for GrpcQdrant {
         self.client
             .delete_collection(name)
             .await
-            .map_err(|e| QqlError::runtime(format!("gRPC delete_collection failed: {e}")))?;
+            .map_err(|e| QqlError::execution("QQL-EXECUTION", format!("gRPC delete_collection failed: {e}"), None))?;
         Ok(())
     }
 
@@ -1905,7 +1905,7 @@ impl QdrantAdminOps for GrpcQdrant {
             .client
             .query_batch(grpc_req)
             .await
-            .map_err(|e| QqlError::runtime(format!("gRPC query_batch failed: {e}")))?;
+            .map_err(|e| QqlError::execution("QQL-EXECUTION", format!("gRPC query_batch failed: {e}"), None))?;
 
         let results: Result<Vec<Vec<ScoredPoint>>, QqlError> = resp
             .result
@@ -1938,10 +1938,10 @@ impl QdrantAdminOps for GrpcQdrant {
             "datetime" => qdrant_client::qdrant::FieldType::Datetime,
             "uuid" => qdrant_client::qdrant::FieldType::Uuid,
             _ => {
-                return Err(QqlError::runtime(format!(
+                return Err(QqlError::execution("QQL-EXECUTION", format!(
                     "unknown field type: {}",
                     req.field_type
-                )))
+                ), None))
             }
         } as i32;
 
@@ -2077,7 +2077,7 @@ impl QdrantAdminOps for GrpcQdrant {
         self.client
             .create_field_index(grpc_req)
             .await
-            .map_err(|e| QqlError::runtime(format!("gRPC create_field_index failed: {e}")))?;
+            .map_err(|e| QqlError::execution("QQL-EXECUTION", format!("gRPC create_field_index failed: {e}"), None))?;
         Ok(())
     }
 
@@ -2094,11 +2094,11 @@ impl QdrantAdminOps for GrpcQdrant {
             .client
             .count(grpc_req)
             .await
-            .map_err(|e| QqlError::runtime(format!("gRPC count failed: {e}")))?;
+            .map_err(|e| QqlError::execution("QQL-EXECUTION", format!("gRPC count failed: {e}"), None))?;
 
         let count = resp
             .result
-            .ok_or_else(|| QqlError::runtime("count returned no result"))?
+            .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "count returned no result", None))?
             .count;
 
         Ok(count)

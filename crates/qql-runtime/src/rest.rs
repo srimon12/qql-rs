@@ -7,6 +7,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 
 use qql_core::error::QqlError;
+use qql_plan::routing::Route;
 
 use crate::client::{
     CollectionInfo, CountPointsReq, CreateCollectionReq, CreateFieldIndexReq, DeletePointsReq,
@@ -34,12 +35,12 @@ impl RestQdrant {
             .timeout(Duration::from_secs(30))
             .connect_timeout(Duration::from_secs(10))
             .build()
-            .map_err(|error| QqlError::runtime(format!("failed to build REST client: {error}")))?;
+            .map_err(|error| QqlError::validation("QQL-RUNTIME", format!("failed to build REST client: {error}"), None))?;
 
         #[cfg(target_arch = "wasm32")]
         let client = Client::builder()
             .build()
-            .map_err(|error| QqlError::runtime(format!("failed to build REST client: {error}")))?;
+            .map_err(|error| QqlError::validation("QQL-RUNTIME", format!("failed to build REST client: {error}"), None))?;
 
         Self::with_client(url, api_key, client)
     }
@@ -51,7 +52,7 @@ impl RestQdrant {
     ) -> Result<Self, QqlError> {
         let base_url = url.into().trim_end_matches('/').to_owned();
         if base_url.is_empty() {
-            return Err(QqlError::runtime("Qdrant REST URL is required"));
+            return Err(QqlError::validation("QQL-RUNTIME", "Qdrant REST URL is required", None));
         }
         Ok(Self {
             base_url,
@@ -81,23 +82,23 @@ impl RestQdrant {
         let response = request
             .send()
             .await
-            .map_err(|error| QqlError::runtime(format!("Qdrant REST request failed: {error}")))?;
+            .map_err(|error| QqlError::validation("QQL-RUNTIME", format!("Qdrant REST request failed: {error}"), None))?;
         let status = response.status();
         let body = response.text().await.map_err(|error| {
-            QqlError::runtime(format!("failed to read Qdrant REST response: {error}"))
+            QqlError::validation("QQL-RUNTIME", format!("failed to read Qdrant REST response: {error}"), None)
         })?;
         if !status.is_success() {
             let detail: String = body.chars().take(4_096).collect();
-            return Err(QqlError::runtime(format!(
+            return Err(QqlError::validation("QQL-RUNTIME", format!(
                 "Qdrant REST request returned {status}: {detail}"
-            )));
+            ), None));
         }
 
         let envelope: Value = serde_json::from_str(&body)
-            .map_err(|error| QqlError::runtime(format!("invalid Qdrant REST response: {error}")))?;
+            .map_err(|error| QqlError::validation("QQL-RUNTIME", format!("invalid Qdrant REST response: {error}"), None))?;
         let result = envelope.get("result").cloned().unwrap_or(envelope);
         serde_json::from_value(result)
-            .map_err(|error| QqlError::runtime(format!("unexpected Qdrant REST response: {error}")))
+            .map_err(|error| QqlError::validation("QQL-RUNTIME", format!("unexpected Qdrant REST response: {error}"), None))
     }
 }
 
@@ -111,7 +112,7 @@ pub(crate) fn point_id_json(id: PointId) -> Value {
 fn points_result(value: Value) -> Result<Vec<ScoredPoint>, QqlError> {
     let points = value.get("points").cloned().unwrap_or(value);
     serde_json::from_value(points)
-        .map_err(|error| QqlError::runtime(format!("invalid Qdrant query result: {error}")))
+        .map_err(|error| QqlError::validation("QQL-RUNTIME", format!("invalid Qdrant query result: {error}"), None))
 }
 
 fn remove_nulls(value: &mut Value) {
@@ -133,7 +134,7 @@ fn remove_nulls(value: &mut Value) {
 
 pub(crate) fn query_request_json(request: &QueryPointsRequest) -> Result<Value, QqlError> {
     let mut body = serde_json::to_value(request).map_err(|error| {
-        QqlError::runtime(format!("failed to serialize query request: {error}"))
+        QqlError::validation("QQL-RUNTIME", format!("failed to serialize query request: {error}"), None)
     })?;
     remove_nulls(&mut body);
     Ok(body)
@@ -143,9 +144,9 @@ pub(crate) fn grouped_query_request_json(
     request: &QueryPointsGroupsRequest,
 ) -> Result<Value, QqlError> {
     let mut body = serde_json::to_value(request).map_err(|error| {
-        QqlError::runtime(format!(
+        QqlError::validation("QQL-RUNTIME", format!(
             "failed to serialize grouped query request: {error}"
-        ))
+        ), None)
     })?;
     remove_nulls(&mut body);
     Ok(body)
@@ -173,7 +174,7 @@ impl QdrantCoreOps for RestQdrant {
         value
             .get("exists")
             .and_then(Value::as_bool)
-            .ok_or_else(|| QqlError::runtime("Qdrant did not return collection existence"))
+            .ok_or_else(|| QqlError::validation("QQL-RUNTIME", "Qdrant did not return collection existence", None))
     }
 
     async fn get_collection_info(&self, name: &str) -> Result<CollectionInfo, QqlError> {
@@ -288,7 +289,7 @@ impl QdrantCoreOps for RestQdrant {
             )
             .await?;
         let groups = value.get("groups").cloned().unwrap_or(value);
-        serde_json::from_value(groups).map_err(|error| QqlError::runtime(error.to_string()))
+        serde_json::from_value(groups).map_err(|error| QqlError::validation("QQL-RUNTIME", error.to_string(), None))
     }
 
     async fn delete(&self, req: DeletePointsReq) -> Result<(), QqlError> {
@@ -336,7 +337,7 @@ impl QdrantCoreOps for RestQdrant {
         };
         let mut body = selector;
         body["payload"] = serde_json::to_value(req.payload)
-            .map_err(|error| QqlError::runtime(error.to_string()))?;
+            .map_err(|error| QqlError::validation("QQL-RUNTIME", error.to_string(), None))?;
         self.call::<Value>(
             Method::POST,
             &format!(
@@ -368,26 +369,26 @@ impl QdrantCoreOps for RestQdrant {
             .await?;
         let points = value.get("points").cloned().unwrap_or_else(|| json!([]));
         let points =
-            serde_json::from_value(points).map_err(|error| QqlError::runtime(error.to_string()))?;
+            serde_json::from_value(points).map_err(|error| QqlError::validation("QQL-RUNTIME", error.to_string(), None))?;
         let offset = match value.get("next_page_offset") {
             Some(v) if !v.is_null() => serde_json::from_value(v.clone())
                 .map(Some)
-                .map_err(|error| QqlError::runtime(format!("invalid scroll offset: {error}")))?,
+                .map_err(|error| QqlError::validation("QQL-RUNTIME", format!("invalid scroll offset: {error}"), None))?,
             _ => None,
         };
         Ok((points, offset))
     }
 
     async fn get(&self, req: GetPointsReq) -> Result<Vec<RetrievedPoint>, QqlError> {
-        let id = crate::executor::helpers::to_point_id_static(&req.point_id)?;
+        let id = crate::executor::helpers::value_to_json(&req.point_id);
         let points: Value = self
             .call(
                 Method::POST,
                 &format!("/collections/{}/points", req.collection_name),
-                Some(json!({ "ids": [point_id_json(id)], "with_payload": true })),
+                Some(json!({ "ids": [id], "with_payload": true })),
             )
             .await?;
-        serde_json::from_value(points).map_err(|error| QqlError::runtime(error.to_string()))
+        serde_json::from_value(points).map_err(|error| QqlError::validation("QQL-RUNTIME", error.to_string(), None))
     }
 }
 
@@ -398,7 +399,7 @@ impl QdrantAdminOps for RestQdrant {
         let name = req
             .get("collection_name")
             .and_then(Value::as_str)
-            .ok_or_else(|| QqlError::runtime("collection_name is required"))?
+            .ok_or_else(|| QqlError::validation("QQL-RUNTIME", "collection_name is required", None))?
             .to_owned();
         let mut body = req;
         body.as_object_mut()
@@ -461,6 +462,32 @@ impl QdrantAdminOps for RestQdrant {
         value
             .get("count")
             .and_then(Value::as_u64)
-            .ok_or_else(|| QqlError::runtime("Qdrant did not return a point count"))
+            .ok_or_else(|| QqlError::validation("QQL-RUNTIME", "Qdrant did not return a point count", None))
+    }
+
+    async fn execute_route(&self, route: Route) -> Result<Value, QqlError> {
+        let method = match route.method {
+            qql_plan::types::Method::Get => Method::GET,
+            qql_plan::types::Method::Post => Method::POST,
+            qql_plan::types::Method::Put => Method::PUT,
+            qql_plan::types::Method::Patch => Method::PATCH,
+            qql_plan::types::Method::Delete => Method::DELETE,
+        };
+
+        let mut path = route.path.clone();
+        if !route.query.is_empty() {
+            let qs: Vec<String> = route
+                .query
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect();
+            path.push('?');
+            path.push_str(&qs.join("&"));
+        }
+
+        let body: Option<Value> = route.body.as_ref().map(|b| b.to_json());
+
+        let result: Value = self.call(method, &path, body).await?;
+        Ok(result)
     }
 }

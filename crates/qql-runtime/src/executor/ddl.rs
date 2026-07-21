@@ -20,10 +20,10 @@ impl Executor {
     ) -> Result<ExecResponse, QqlError> {
         let exists = self.client.collection_exists(collection).await?;
         if !exists {
-            return Err(QqlError::runtime(format!(
+            return Err(QqlError::execution("QQL-EXECUTION", format!(
                 "collection '{}' does not exist",
                 collection
-            )));
+            ), None));
         }
 
         let info = self.client.get_collection_info(collection).await?;
@@ -51,6 +51,21 @@ impl Executor {
         stmt: ast::CreateCollectionStmt,
     ) -> Result<ExecResponse, QqlError> {
         let exists = self.client.collection_exists(&stmt.collection).await?;
+        let is_hybrid = matches!(stmt.mode, ast::CollectionMode::Hybrid { .. });
+        let is_rerank = matches!(stmt.mode, ast::CollectionMode::Rerank);
+        let model = match &stmt.mode {
+            ast::CollectionMode::Dense { model } => model.clone(),
+            _ => None,
+        };
+        let dense_vector_name = match &stmt.mode {
+            ast::CollectionMode::Hybrid { dense_vector, .. } => dense_vector.clone(),
+            _ => None,
+        };
+        let sparse_vector_name = match &stmt.mode {
+            ast::CollectionMode::Hybrid { sparse_vector, .. } => sparse_vector.clone(),
+            _ => None,
+        };
+
         if exists {
             return Ok(ExecResponse {
                 ok: true,
@@ -59,8 +74,8 @@ impl Executor {
                 data: Some(serde_json::json!({
                     "collection": stmt.collection,
                     "exists": true,
-                    "hybrid": stmt.hybrid,
-                    "rerank": stmt.rerank,
+                    "hybrid": is_hybrid,
+                    "rerank": is_rerank,
                 })),
             });
         }
@@ -121,10 +136,9 @@ impl Executor {
             create_req.vectors_config = Some(serde_json::Value::Object(params_map));
         } else {
             let dense_size = self
-                .resolve_dense_vector_size(stmt.model.as_deref())
+                .resolve_dense_vector_size(model.as_deref())
                 .await? as u64;
-            let dense_name = stmt
-                .dense_vector
+            let dense_name = dense_vector_name
                 .unwrap_or_else(|| super::DENSE_VECTOR_NAME.to_string());
             create_req.vectors_config = Some(serde_json::json!({
                 dense_name: {
@@ -140,9 +154,8 @@ impl Executor {
                 sparse_map.insert(sv.name.to_string(), serde_json::json!({"modifier": "idf"}));
             }
             create_req.sparse_vectors_config = Some(serde_json::Value::Object(sparse_map));
-        } else if stmt.hybrid || stmt.rerank {
-            let sparse_name = stmt
-                .sparse_vector
+        } else if is_hybrid || is_rerank {
+            let sparse_name = sparse_vector_name
                 .unwrap_or_else(|| super::SPARSE_VECTOR_NAME.to_string());
             create_req.sparse_vectors_config = Some(serde_json::json!({
                 sparse_name: {"modifier": "idf"}
@@ -255,12 +268,12 @@ impl Executor {
 
         let mut message = format!("Collection '{}' created", stmt.collection);
         if stmt.vectors.is_empty() {
-            if stmt.rerank {
+            if is_rerank {
                 message = format!(
                     "Collection '{}' created (hybrid: dense + sparse + ColBERT)",
                     stmt.collection
                 );
-            } else if stmt.hybrid {
+            } else if is_hybrid {
                 message = format!(
                     "Collection '{}' created (hybrid: dense + sparse)",
                     stmt.collection
@@ -279,8 +292,8 @@ impl Executor {
             data: Some(serde_json::json!({
                 "collection": stmt.collection,
                 "exists": false,
-                "hybrid": stmt.hybrid,
-                "rerank": stmt.rerank,
+                "hybrid": is_hybrid,
+                "rerank": is_rerank,
             })),
         })
     }
@@ -291,10 +304,10 @@ impl Executor {
     ) -> Result<ExecResponse, QqlError> {
         let exists = self.client.collection_exists(&stmt.collection).await?;
         if !exists {
-            return Err(QqlError::runtime(format!(
+            return Err(QqlError::execution("QQL-EXECUTION", format!(
                 "collection '{}' does not exist",
                 stmt.collection
-            )));
+            ), None));
         }
 
         let mut req_map = serde_json::Map::new();
@@ -440,10 +453,10 @@ impl Executor {
     ) -> Result<ExecResponse, QqlError> {
         let exists = self.client.collection_exists(collection).await?;
         if !exists {
-            return Err(QqlError::runtime(format!(
+            return Err(QqlError::execution("QQL-EXECUTION", format!(
                 "collection '{}' does not exist",
                 collection
-            )));
+            ), None));
         }
 
         self.client.delete_collection(collection).await?;

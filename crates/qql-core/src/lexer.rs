@@ -1,6 +1,6 @@
 use core::iter::Peekable;
 
-use crate::error::QqlError;
+use crate::error::{QqlError, Span};
 use crate::token::{lookup_keyword, Token, TokenKind};
 
 pub type TokenIter<'a> = Peekable<Lexer<'a>>;
@@ -21,7 +21,7 @@ impl<'a> Lexer<'a> {
         self.skip_whitespace();
 
         if self.pos >= self.input.len() {
-            return Ok(Token::new(TokenKind::Eof, "", self.pos));
+            return Ok(Token::new(TokenKind::Eof, "", Span::point(self.pos)));
         }
 
         let bytes = self.input.as_bytes();
@@ -53,7 +53,11 @@ impl<'a> Lexer<'a> {
                     self.read_identifier()
                 } else {
                     let err_msg = alloc::format!("Unexpected character '{}'", ch as char);
-                    Err(QqlError::syntax(err_msg, self.pos))
+                    Err(QqlError::lex(
+                        "QQL-LEX-CHAR",
+                        err_msg,
+                        Span::new(self.pos, self.pos + 1),
+                    ))
                 }
             }
         }
@@ -62,7 +66,11 @@ impl<'a> Lexer<'a> {
     fn single_char(&mut self, kind: TokenKind) -> Result<Token<'a>, QqlError> {
         let pos = self.pos;
         self.pos += 1;
-        Ok(Token::new(kind, &self.input[pos..pos + 1], pos))
+        Ok(Token::new(
+            kind,
+            &self.input[pos..pos + 1],
+            Span::new(pos, pos + 1),
+        ))
     }
 
     fn read_not_equals(&mut self) -> Result<Token<'a>, QqlError> {
@@ -73,10 +81,14 @@ impl<'a> Lexer<'a> {
             Ok(Token::new(
                 TokenKind::NotEquals,
                 &self.input[pos..pos + 2],
-                pos,
+                Span::new(pos, pos + 2),
             ))
         } else {
-            Err(QqlError::syntax("Unexpected character '!'", self.pos))
+            Err(QqlError::lex(
+                "QQL-LEX-CHAR",
+                "Unexpected character '!'",
+                Span::new(self.pos, self.pos + 1),
+            ))
         }
     }
 
@@ -85,7 +97,11 @@ impl<'a> Lexer<'a> {
         if self.pos + 1 < self.input.len() && bytes[self.pos + 1] == b'=' {
             let pos = self.pos;
             self.pos += 2;
-            Ok(Token::new(TokenKind::Gte, &self.input[pos..pos + 2], pos))
+            Ok(Token::new(
+                TokenKind::Gte,
+                &self.input[pos..pos + 2],
+                Span::new(pos, pos + 2),
+            ))
         } else {
             self.single_char(TokenKind::Gt)
         }
@@ -96,7 +112,11 @@ impl<'a> Lexer<'a> {
         if self.pos + 1 < self.input.len() && bytes[self.pos + 1] == b'=' {
             let pos = self.pos;
             self.pos += 2;
-            Ok(Token::new(TokenKind::Lte, &self.input[pos..pos + 2], pos))
+            Ok(Token::new(
+                TokenKind::Lte,
+                &self.input[pos..pos + 2],
+                Span::new(pos, pos + 2),
+            ))
         } else {
             self.single_char(TokenKind::Lt)
         }
@@ -120,7 +140,11 @@ impl<'a> Lexer<'a> {
             let bytes = self.input.as_bytes();
             if bytes[self.pos] == b'\\' {
                 if self.pos + 1 >= self.input.len() {
-                    return Err(QqlError::syntax("Unterminated string literal", start));
+                    return Err(QqlError::lex(
+                        "QQL-LEX-STRING",
+                        "unterminated string literal",
+                        Span::new(start, self.input.len()),
+                    ));
                 }
                 self.pos += 2;
                 continue;
@@ -128,12 +152,20 @@ impl<'a> Lexer<'a> {
             if bytes[self.pos] == quote {
                 let text = &self.input[content_start..self.pos];
                 self.pos += 1;
-                return Ok(Token::new(TokenKind::String, text, start));
+                return Ok(Token::new(
+                    TokenKind::String,
+                    text,
+                    Span::new(start, self.pos),
+                ));
             }
             self.pos += 1;
         }
 
-        Err(QqlError::syntax("Unterminated string literal", start))
+        Err(QqlError::lex(
+            "QQL-LEX-STRING",
+            "unterminated string literal",
+            Span::new(start, self.input.len()),
+        ))
     }
 
     fn read_number(&mut self) -> Result<Token<'a>, QqlError> {
@@ -158,13 +190,13 @@ impl<'a> Lexer<'a> {
             Ok(Token::new(
                 TokenKind::Float,
                 &self.input[start..self.pos],
-                start,
+                Span::new(start, self.pos),
             ))
         } else {
             Ok(Token::new(
                 TokenKind::Integer,
                 &self.input[start..self.pos],
-                start,
+                Span::new(start, self.pos),
             ))
         }
     }
@@ -212,11 +244,15 @@ impl<'a> Lexer<'a> {
 
         if !word.contains('.') {
             if let Some(kind) = lookup_keyword(word) {
-                return Ok(Token::new(kind, word, start));
+                return Ok(Token::new(kind, word, Span::new(start, self.pos)));
             }
         }
 
-        Ok(Token::new(TokenKind::Identifier, word, start))
+        Ok(Token::new(
+            TokenKind::Identifier,
+            word,
+            Span::new(start, self.pos),
+        ))
     }
 
     fn skip_whitespace(&mut self) {

@@ -1,117 +1,66 @@
 # qql-core
 
-Standalone lexer, parser, AST, and query transformers for Qdrant Query Language (QQL). Pure computation — no I/O, no network, no system calls.
+`qql-core` is the transport-free Qdrant Query Language frontend. It contains the lexer, strict parser, typed AST, validation, AST transforms, and intent-only explain output. It performs no I/O and does not generate Qdrant JSON.
 
-## Statement Types
+## Query Contract
 
-The parser produces a typed AST covering all QQL operations:
+`QUERY` is the only retrieval entry point. Direct point retrieval and similarity by point are distinct:
 
-| Statement | Description |
-|---|---|
-| `SHOW COLLECTIONS` | List all collections |
-| `SHOW COLLECTION name` | Describe a collection |
-| `CREATE COLLECTION ...` | Create with vectors, sparse, quantization, HNSW, optimizers |
-| `ALTER COLLECTION ...` | Update collection parameters |
-| `DROP COLLECTION name` | Delete a collection |
-| `INSERT INTO collection ...` | Insert points with vectors and payload |
-| `SELECT * FROM collection WHERE id = ...` | Get a point by ID |
-| `SCROLL collection LIMIT n` | Scroll through points |
-| `DELETE FROM collection WHERE ...` | Delete by ID, field, or filter |
-| `UPDATE collection SET VECTOR ... WHERE id = ...` | Update vectors |
-| `UPDATE collection SET PAYLOAD ... WHERE ...` | Set payload on matching points |
-| `CREATE INDEX ON collection FOR field TYPE ...` | Create payload index |
-| `QUERY 'text' FROM collection LIMIT n` | Vector search (dense, sparse, hybrid, recommend, discover, context, order by, sample, relevance feedback) |
+```sql
+QUERY POINTS (42, 'point-a') FROM docs WITH PAYLOAD true;
+QUERY NEAREST POINT 42 FROM docs USING dense LIMIT 10;
+```
 
-## Filter Expressions
+The typed `QueryExpr` enum covers nearest text/vector/point, recommend, context, discover, payload order, random sample, RRF/DBSF fusion, formula scoring, relevance feedback, MMR, hybrid shorthand, and explicit rerank. Fusion and rerank own their required prefetch topology in the AST rather than using flags.
 
-QQL WHERE clauses support complex filtering that maps directly to Qdrant's filter structure:
+Queries use one clause order:
 
-- **Comparisons**: `=`, `!=`, `>`, `>=`, `<`, `<=` on string, int, float, bool fields
-- **Set membership**: `IN (...)` and `NOT IN (...)` on any typed list
-- **Null/empty**: `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`
-- **Text matching**: `MATCH_TEXT`, `MATCH_ANY`, `MATCH_PHRASE`
-- **Geo**: `GEO_BOUNDING_BOX`, `GEO_RADIUS`
-- **Vector**: `HAS_VECTOR name`
-- **Nested**: `NESTED(key, condition)` for nested payload fields
-- **Values count**: `VALUES_COUNT(key) > n`
-- **Logic**: `AND`, `OR`, `NOT` (full precedence)
+```text
+QUERY <expression>
+FROM <collection>
+[USING <vector>]
+[PREFETCH (...)]
+[WHERE <filter>]
+[PARAMS (...)]
+[SCORE THRESHOLD <number>]
+[GROUP BY <field> [SIZE <positive integer>] [LOOKUP FROM <collection>]]
+[WITH PAYLOAD <selector>]
+[WITH VECTOR <selector>]
+[LIMIT <positive integer>]
+[OFFSET <non-negative integer>]
+```
 
-All filters compile to `FilterExpr` nodes in the AST. Runtime converts these to Qdrant's REST/gRPC filter shapes.
+See [`../../docs/syntax.md`](../../docs/syntax.md) for the canonical grammar.
 
-## Formula Expressions
+## Other Statements
 
-QQL supports scoring formulas for custom ranking:
+The AST also covers collection and payload-index DDL, typed UPSERT points, scrolling, vector/payload updates, and deletes. Point IDs are `PointId`; vectors are dense, sparse, or multidense; update/delete targets are one `PointSelector` enum.
 
-- Arithmetic: `+`, `-`, `*`, `/` (with default values), `^`
-- Functions: `abs(x)`, `pow(x, y)`
-- Variables: payload field references and `score`
-- Geo: `geo_distance(lat, lon, field)`
-- DateTime: `datetime(expr)`, `datetime_key(field)`
-- Decay: `exp_decay`, `gauss_decay`, `linear_decay`
-- CASE/WHEN: conditional expressions
-- Match conditions: `match_condition(filter_expr, value)`
+## Errors
 
-## Value Types
+Every error has an explicit `ErrorKind` (`Lex`, `Parse`, or `Validation`), stable code, message, and optional byte `Span { start, end }`.
+
+## Features
+
+- `serde`: AST/token/error serialization only.
+- `json`: enables `serde` and fallible host JSON conversion for `Value`.
+- `std`: implements `std::error::Error` for `QqlError`.
+
+## API
 
 ```rust
-pub enum Value<'a> {
-    Str(Cow<'a, str>),
-    Int(i64),
-    Float(f64),
-    Bool(bool),
-    Null,
-    List(Vec<Value<'a>>),
-    Dict(Vec<(Cow<'a, str>, Value<'a>)>),
+use qql_core::ast::{QueryExpr, Stmt};
+use qql_core::parser::Parser;
+
+let statement = Parser::parse("QUERY TEXT 'hello' FROM docs LIMIT 5;")?;
+if let Stmt::Query(query) = statement {
+    assert!(matches!(query.expression, QueryExpr::Nearest { .. }));
 }
+
+let script = Parser::parse_all(
+    "SHOW COLLECTIONS; QUERY POINTS (1, 2) FROM docs;",
+)?;
+# Ok::<(), qql_core::error::QqlError>(())
 ```
 
-## Transform / Filter Injection
-
-The `inject_filter` function recursively adds a filter condition to all query nodes — main statement and nested CTE prefetches. Designed for tenant isolation and row-level security.
-
-```rust
-use std::borrow::Cow;
-use qql_core::ast::{inject_filter, Value};
-use qql_core::parser::Parser;
-
-let mut stmt = Parser::parse("QUERY 'search' FROM docs LIMIT 10").unwrap();
-inject_filter(&mut stmt, "org_id", "=", &Value::Str(Cow::Borrowed("acme-corp")));
-```
-
-Also available for `SCROLL`, `DELETE`, `UPDATE ... SET PAYLOAD`, and
-`INSERT` statements. For `INSERT`, equality injection forces the field value
-into every payload row.
-
-## Parser API
-
-```rust
-use qql_core::parser::Parser;
-use qql_core::ast::Stmt;
-
-// Parse a single statement
-let stmt = Parser::parse("SHOW COLLECTIONS")?;
-
-// Parse multiple statements (semicolon-separated)
-let stmts = Parser::parse_all("INSERT INTO docs ...; QUERY 'text' FROM docs ...")?;
-
-// Validate with the same strict parser used by parse()
-let valid = Parser::parse("QUERY 'test' FROM docs LIMIT 10").is_ok();
-```
-
-## Usage
-
-```toml
-[dependencies]
-qql-core = "0.1"
-```
-
-```rust
-use qql_core::parser::Parser;
-use qql_core::ast::Stmt;
-
-let stmt = Parser::parse("QUERY 'hello' FROM docs LIMIT 5").unwrap();
-match stmt {
-    Stmt::Query(q) => println!("querying {} with {:?}", q.collection.unwrap(), q.query_text),
-    _ => println!("other statement"),
-}
-```
+Multiple statements require semicolons. A single trailing semicolon is optional; leading and repeated empty statements are rejected.
