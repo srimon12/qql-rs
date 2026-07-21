@@ -834,4 +834,29 @@ mod tests {
         assert_eq!(eof.text, "");
         assert_eq!(eof.pos, 0);
     }
+
+    #[test]
+    fn test_line_comment_skipped() {
+        let tokens = tokenize("-- this is a comment\nUPSERT INTO docs VALUES");
+        let kinds: Vec<TokenKind> = tokens.iter().map(|t| t.kind).collect();
+        assert_eq!(kinds, vec![
+            TokenKind::Upsert,
+            TokenKind::Into,
+            TokenKind::Identifier,
+            TokenKind::Values,
+        ]);
+    }
+
+    #[test]
+    fn test_comment_between_tokens() {
+        let tokens = tokenize("QUERY -- inline comment\nFROM docs LIMIT 10");
+        let kinds: Vec<TokenKind> = tokens.iter().map(|t| t.kind).collect();
+        assert_eq!(kinds, vec![
+            TokenKind::Query,
+            TokenKind::From,
+            TokenKind::Identifier,
+            TokenKind::Limit,
+            TokenKind::Integer,
+        ]);
+    }
 }

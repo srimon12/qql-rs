@@ -221,8 +221,22 @@ impl<'a> Lexer<'a> {
 
     fn skip_whitespace(&mut self) {
         let bytes = self.input.as_bytes();
-        while self.pos < self.input.len() && is_whitespace(bytes[self.pos]) {
-            self.pos += 1;
+        loop {
+            while self.pos < self.input.len() && is_whitespace(bytes[self.pos]) {
+                self.pos += 1;
+            }
+            // Skip `--` line comments
+            if self.pos + 1 < self.input.len()
+                && bytes[self.pos] == b'-'
+                && bytes[self.pos + 1] == b'-'
+            {
+                self.pos += 2;
+                while self.pos < self.input.len() && bytes[self.pos] != b'\n' {
+                    self.pos += 1;
+                }
+                continue;
+            }
+            break;
         }
     }
 }

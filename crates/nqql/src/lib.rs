@@ -342,11 +342,11 @@ pub async fn execute_stmt(
 
 #[napi]
 pub fn explain(query: String) -> napi::Result<String> {
-    qql::executor::Executor::explain(&query).map_err(|e| napi::Error::from_reason(e.to_string()))
+    qql_core::explain::explain(&query).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 #[napi]
 pub fn explain_stmt(stmt: &NapiStmt) -> napi::Result<String> {
-    qql::executor::Executor::explain_node(&stmt.inner)
+    qql_core::explain::explain_node(&stmt.inner)
         .map_err(|e| napi::Error::from_reason(e.to_string()))
 }

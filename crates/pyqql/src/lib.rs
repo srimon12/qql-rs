@@ -318,10 +318,10 @@ impl PyClient {
 
     fn explain(&self, query: &Bound<'_, PyAny>) -> PyResult<String> {
         if let Ok(py_stmt) = query.extract::<PyRef<PyStmt>>() {
-            qql::executor::Executor::explain_node(&py_stmt.inner)
+            qql_core::explain::explain_node(&py_stmt.inner)
                 .map_err(|e| pyo3::exceptions::PySyntaxError::new_err(e.to_string()))
         } else if let Ok(query_str) = query.extract::<String>() {
-            qql::executor::Executor::explain(&query_str)
+            qql_core::explain::explain(&query_str)
                 .map_err(|e| pyo3::exceptions::PySyntaxError::new_err(e.to_string()))
         } else {
             Err(pyo3::exceptions::PyTypeError::new_err(
@@ -398,10 +398,10 @@ fn execute_async<'py>(
 #[pyfunction]
 fn explain(query: &Bound<'_, PyAny>) -> PyResult<String> {
     if let Ok(py_stmt) = query.extract::<PyRef<PyStmt>>() {
-        qql::executor::Executor::explain_node(&py_stmt.inner)
+        qql_core::explain::explain_node(&py_stmt.inner)
             .map_err(|e| pyo3::exceptions::PySyntaxError::new_err(e.to_string()))
     } else if let Ok(query_str) = query.extract::<String>() {
-        qql::executor::Executor::explain(&query_str)
+        qql_core::explain::explain(&query_str)
             .map_err(|e| pyo3::exceptions::PySyntaxError::new_err(e.to_string()))
     } else {
         Err(pyo3::exceptions::PyTypeError::new_err(

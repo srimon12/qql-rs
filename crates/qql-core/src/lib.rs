@@ -2,6 +2,7 @@ extern crate alloc;
 
 pub mod ast;
 pub mod error;
+pub mod explain;
 pub mod lexer;
 pub mod parser;
 pub mod token;
@@ -26,3 +27,6 @@ mod ast_test;
 
 #[cfg(all(test, feature = "serde"))]
 mod filter_conv_test;
+
+#[cfg(all(test, feature = "serde"))]
+mod offline_test;

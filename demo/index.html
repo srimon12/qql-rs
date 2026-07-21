@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>QQL Playground</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #1a1a2e; --surface: #16213e; --editor: #0f0f23; --border: #2a2a4a;
+  --text: #e0e0ff; --text-dim: #8888aa; --accent: #7c3aed; --accent-bright: #a78bfa;
+  --green: #10b981; --red: #ef4444; --yellow: #f59e0b; --blue: #3b82f6;
+  --token-kw: #c792ea; --token-str: #c3e88d; --token-num: #ff5370; --token-id: #82aaff;
+  --token-comment: #546e7a; --token-op: #89ddff;
+}
+html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira Code', monospace; overflow: hidden; }
+a { color: var(--accent-bright); }
+
+/* ── Layout ── */
+.app { display: grid; grid-template-rows: 48px 1fr; height: 100vh; }
+.toolbar { display: flex; align-items: center; gap: 12px; padding: 0 16px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.toolbar .logo { font-weight: 700; font-size: 16px; color: var(--accent-bright); letter-spacing: 1px; }
+.toolbar .spacer { flex: 1; }
+.toolbar input { background: var(--editor); border: 1px solid var(--border); color: var(--text); padding: 4px 10px; border-radius: 4px; font-size: 12px; width: 220px; }
+.toolbar button { background: var(--accent); color: white; border: none; padding: 6px 16px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.toolbar button:hover { background: var(--accent-bright); }
+.toolbar button:disabled { opacity: 0.4; cursor: not-allowed; }
+.toolbar .status { font-size: 12px; padding: 4px 10px; border-radius: 4px; }
+.toolbar .status.ok { background: var(--green); color: #000; }
+.toolbar .status.err { background: var(--red); color: #fff; }
+
+.main { display: grid; grid-template-columns: 1fr 1fr; overflow: hidden; }
+.editor-panel { display: flex; flex-direction: column; background: var(--editor); border-right: 1px solid var(--border); overflow: hidden; }
+.editor-header { display: flex; align-items: center; padding: 8px 16px; background: var(--surface); border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-dim); gap: 8px; }
+.editor-header .tabs { display: flex; gap: 0; }
+.editor-header .tab { padding: 4px 14px; cursor: pointer; border-radius: 4px 4px 0 0; font-size: 12px; }
+.editor-header .tab.active { background: var(--editor); color: var(--text); }
+.editor-buttons { margin-left: auto; display: flex; gap: 6px; }
+.editor-buttons button { font-size: 11px; padding: 3px 10px; border: 1px solid var(--border); background: transparent; color: var(--text-dim); border-radius: 3px; cursor: pointer; }
+.editor-buttons button:hover { border-color: var(--accent); color: var(--text); }
+
+textarea#query-input {
+  flex: 1; width: 100%; padding: 16px; background: transparent; color: var(--text);
+  border: none; outline: none; resize: none; font: inherit; font-size: 14px; line-height: 1.6;
+  tab-size: 2; caret-color: var(--accent-bright);
+}
+textarea#query-input::placeholder { color: var(--text-dim); }
+
+.output-panel { display: flex; flex-direction: column; background: var(--surface); overflow: hidden; }
+.output-tabs { display: flex; padding: 8px 16px; gap: 2px; border-bottom: 1px solid var(--border); }
+.output-tabs .tab { padding: 6px 14px; cursor: pointer; border-radius: 4px; font-size: 12px; color: var(--text-dim); border: 1px solid transparent; }
+.output-tabs .tab.active { background: var(--border); color: var(--text); border-color: var(--border); }
+.output-content { flex: 1; overflow: auto; padding: 16px; font-size: 13px; line-height: 1.5; }
+
+/* ── Highlighted preview ── */
+.hl { white-space: pre-wrap; word-break: break-all; font-size: 13px; line-height: 1.6; padding: 12px; }
+.hl .kw { color: var(--token-kw); font-weight: 600; }
+.hl .str { color: var(--token-str); }
+.hl .num { color: var(--token-num); }
+.hl .id { color: var(--token-id); }
+.hl .cmt { color: var(--token-comment); font-style: italic; }
+.hl .op { color: var(--token-op); }
+.hl .err { color: var(--red); text-decoration: underline wavy; }
+
+/* ── Token table ── */
+.token-table { width: 100%; border-collapse: collapse; }
+.token-table th { text-align: left; padding: 6px 10px; background: var(--border); font-size: 11px; text-transform: uppercase; color: var(--text-dim); }
+.token-table td { padding: 4px 10px; font-size: 12px; border-bottom: 1px solid var(--border); }
+.token-table .token-kw { color: var(--token-kw); }
+.token-table .token-str { color: var(--token-str); }
+.token-table .token-num { color: var(--token-num); }
+
+/* ── AST / JSON ── */
+pre.json-output { white-space: pre-wrap; font-size: 12px; color: var(--token-str); background: var(--editor); padding: 12px; border-radius: 6px; overflow: auto; max-height: calc(100vh - 140px); }
+pre.plan-output { white-space: pre-wrap; font-size: 13px; color: var(--text); }
+
+/* ── Success/error ── */
+.success { color: var(--green); }
+.error { color: var(--red); }
+
+.embed-section { margin-top: 16px; padding: 12px; background: var(--editor); border-radius: 6px; }
+.embed-section label { font-size: 12px; color: var(--text-dim); display: block; margin-bottom: 4px; }
+.embed-section select, .embed-section input { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 6px 8px; border-radius: 4px; font-size: 12px; width: 100%; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- ── Toolbar ── -->
+  <div class="toolbar">
+    <span class="logo">QQL</span>
+    <input id="qdrant-url" type="text" value="http://localhost:6333" placeholder="Qdrant URL">
+    <input id="qdrant-key" type="text" placeholder="API Key (optional)" style="width:160px">
+    <button id="btn-connect">Connect</button>
+    <div class="spacer"></div>
+    <span id="validation-status" class="status">validating...</span>
+    <button id="btn-execute" disabled>Execute ▶</button>
+  </div>
+
+  <!-- ── Main ── -->
+  <div class="main">
+    <!-- Left: editor -->
+    <div class="editor-panel">
+      <div class="editor-header">
+        <div class="tabs">
+          <span class="tab active" data-tab="edit">Editor</span>
+          <span class="tab" data-tab="highlight">Highlight</span>
+        </div>
+        <div class="editor-buttons">
+          <button id="btn-sample-query">Sample Query</button>
+          <button id="btn-sample-upsert">Sample Upsert</button>
+          <button id="btn-sample-ddl">Sample DDL</button>
+          <button id="btn-sample-cte">Sample CTE</button>
+        </div>
+      </div>
+      <textarea id="query-input" placeholder="Type QQL here...&#10;&#10;Try: QUERY 'search' FROM docs LIMIT 10" spellcheck="false"></textarea>
+      <div id="highlight-view" class="hl" style="display:none; overflow:auto;"></div>
+    </div>
+
+    <!-- Right: output -->
+    <div class="output-panel">
+      <div class="output-tabs">
+        <span class="tab active" data-tab="explain">Explain</span>
+        <span class="tab" data-tab="compile">Compile</span>
+        <span class="tab" data-tab="tokens">Tokens</span>
+        <span class="tab" data-tab="ast">AST</span>
+        <span class="tab" data-tab="response">Response</span>
+      </div>
+      <div class="output-content" id="output-content">
+        <pre class="plan-output" id="output-explain"></pre>
+        <pre class="json-output" id="output-compile" style="display:none;"></pre>
+        <div id="output-tokens" style="display:none;"></div>
+        <pre class="json-output" id="output-ast" style="display:none;"></pre>
+        <pre class="json-output" id="output-response" style="display:none;"></pre>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="app.js?v=2"></script>
+</body>
+</html>
