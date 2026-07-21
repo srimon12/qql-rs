@@ -1,7 +1,4 @@
-pub async fn handle_doctor(
-    url: &str,
-    json: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn handle_doctor(url: &str, json: bool) -> Result<(), Box<dyn std::error::Error>> {
     let executor = executor(url)?;
     match executor.execute("SHOW COLLECTIONS").await {
         Ok(_) => {
@@ -421,7 +418,9 @@ pub async fn handle_edge(
         #[cfg(feature = "edge")]
         "fastembed" => {
             #[cfg(not(feature = "edge"))]
-            { return Err("fastembed support not compiled in".into()); }
+            {
+                return Err("fastembed support not compiled in".into());
+            }
             #[cfg(feature = "edge")]
             qql_edge::local_executor(data_dir, on_disk)
                 .map_err(|e| format!("edge init failed: {e}"))?
@@ -436,11 +435,7 @@ pub async fn handle_edge(
         }
 
         other => {
-            return Err(format!(
-                "unknown embedder '{}': use 'fastembed' or 'http'",
-                other
-            )
-            .into())
+            return Err(format!("unknown embedder '{}': use 'fastembed' or 'http'", other).into())
         }
     };
 

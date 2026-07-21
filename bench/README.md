@@ -23,10 +23,10 @@ Benchmarks are split into two categories:
 | 3 | Full | `QUERY 'vector search' FROM docs LIMIT 10 OFFSET 5 USING HYBRID RERANK WHERE topic = 'search' WITH (hnsw_ef = 128, exact = true)` |
 | 4 | CTE Prefetch | `WITH a AS (QUERY 'search' USING dense LIMIT 100 WHERE category = 'tech'), b AS (QUERY 'search' USING sparse LIMIT 100) QUERY 'search' FROM docs LIMIT 10 PREFETCH (a WHERE priority = 'high' SCORE THRESHOLD 0.8, b SCORE THRESHOLD 0.5) FUSION RRF` |
 | 5 | CreateCollection | `CREATE COLLECTION docs HYBRID WITH HNSW (m = 32, ef_construct = 100) WITH QUANTIZATION (type = 'scalar', quantile = 0.95)` |
-| 6 | Insert | `INSERT INTO docs VALUES {id: 1, text: 'hello world', category: 'tech'}, {id: 2, text: 'second document', category: 'science'}` |
+| 6 | Upsert | `UPSERT INTO docs VALUES {id: 1, text: 'hello world', category: 'tech'}, {id: 2, text: 'second document', category: 'science'}` |
 | 7 | DeleteWhere | `DELETE FROM docs WHERE category = 'archived'` |
 | 8 | OrderBy | `QUERY ORDER BY created_at DESC FROM docs LIMIT 20 WHERE status = 'active'` |
-| 9 | WithPayload | `QUERY 'search' FROM docs LIMIT 10 WITH PAYLOAD (include = ['title', 'body']) WITH VECTORS ('dense')` |
+| 9 | WithPayload | `QUERY 'search' FROM docs LIMIT 10 WITH PAYLOAD (include = ['title', 'body']) WITH VECTOR ('dense')` |
 
 ---
 
@@ -40,7 +40,7 @@ Benchmarks are split into two categories:
 | **Full** | 762,370 | 659,058 | 153,207 | 664,517 | 45,219 |
 | **CTE Prefetch** | 360,819 | 344,304 | 66,221 | 337,312 | 16,282 |
 | **CreateCollection** | 685,678 | 477,277 | 194,287 | 393,101 | 73,480 |
-| **Insert** | 756,855 | 730,834 | 196,979 | 508,451 | 86,938 |
+| **Upsert** | 756,855 | 730,834 | 196,979 | 508,451 | 86,938 |
 | **DeleteWhere** | 1,866,475 | 1,637,655 | 539,616 | 1,960,807 | 317,806 |
 | **OrderBy** | 1,029,932 | 969,849 | 190,271 | 1,020,497 | 53,242 |
 | **WithPayload** | 947,908 | 845,869 | 179,144 | 858,692 | 51,986 |
@@ -60,7 +60,7 @@ Benchmarks are split into two categories:
 | **Full** | **591,968** | 544,210 | 519,561 | 395,307 | 195,372 |
 | **CTE_Prefetch** | **308,657** | 321,546 | 309,577 | 237,292 | 163,404 |
 | **CreateCollection** | **598,104** | 588,675 | 516,832 | 565,599 | 262,059 |
-| **Insert** | **685,654** | 627,901 | 625,161 | 456,273 | 185,858 |
+| **Upsert** | **685,654** | 627,901 | 625,161 | 456,273 | 185,858 |
 | **DeleteWhere** | **1,215,619** | 984,827 | 1,041,469 | 992,423 | 469,121 |
 | **OrderBy** | **969,066** | 866,207 | 528,142 | 407,095 | 259,201 |
 | **WithPayload** | **786,091** | 651,419 | 657,634 | 662,425 | 292,933 |

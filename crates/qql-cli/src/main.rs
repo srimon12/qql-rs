@@ -174,9 +174,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             json,
         } => {
             commands::handle_edge(
-                &query, &data_dir, on_disk, &embedder,
-                embed_url.as_deref(), &embed_key, &embed_model, embed_dim, json,
-            ).await
+                &query,
+                &data_dir,
+                on_disk,
+                &embedder,
+                embed_url.as_deref(),
+                &embed_key,
+                &embed_model,
+                embed_dim,
+                json,
+            )
+            .await
         }
         Command::Version => commands::handle_version(),
     }

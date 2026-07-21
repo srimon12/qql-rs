@@ -394,9 +394,9 @@ impl<'a> Parser<'a> {
                         } else {
                             return Ok(());
                         }
-                    } else if self.peek()?.kind == TokenKind::Vectors {
+                    } else if self.peek()?.kind == TokenKind::Vector {
                         self.advance()?;
-                        if let Ok(parsed) = self.parse_with_vectors() {
+                        if let Ok(parsed) = self.parse_with_vector() {
                             stmt.with_vector = Some(parsed);
                         } else {
                             return Ok(());

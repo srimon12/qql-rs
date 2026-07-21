@@ -44,7 +44,7 @@ impl<'a> Parser<'a> {
                 self.advance()?;
                 self.parse_hnsw_config_block()
             }
-            TokenKind::Vectors => {
+            TokenKind::Vector => {
                 self.advance()?;
                 self.parse_vectors_config_block()
             }

@@ -1,6 +1,6 @@
 ---
 name: qql-skill
-description: "Use QQL to manage collections, insert documents, search, filter, rerank, recommend, and more. Use when Codex needs to write or review QQL statements for the Go CLI."
+description: "Use QQL to manage collections, upsert documents, search, filter, rerank, recommend, and more. Use when Codex needs to write or review QQL statements for the Go CLI."
 ---
 
 # QQL Skill
@@ -44,8 +44,8 @@ Translate user intent directly into QQL syntax:
 - Cross-collection group lookup -> add `WITH LOOKUP FROM <collection>` on grouped queries
 - Exact point lookup -> `SELECT * FROM <collection> WHERE id = <id>`
 - Browse points -> `SCROLL FROM <collection> [AFTER <id>] LIMIT <n>`
-- Batch ingest -> `INSERT INTO <collection> VALUES {...}, {...}`
-- Insert with pre-computed vectors -> `INSERT INTO <col> VALUES {'id': 1, 'vector': {'dense': [...], 'colbert': [[...]]}}`
+- Batch ingest -> `UPSERT INTO <collection> VALUES {...}, {...}`
+- Upsert with pre-computed vectors -> `UPSERT INTO <col> VALUES {'id': 1, 'vector': {'dense': [...], 'colbert': [[...]]}}`
 - Convert Python SDK to QQL -> `python3 sdks/python/qql_intercept.py your_script.py`
 - Convert REST JSON to QQL -> `qql-go convert payload.json`
 
@@ -85,13 +85,13 @@ CREATE INDEX ON COLLECTION <name> FOR <field> TYPE <keyword|integer|float|bool|u
   )]
 ```
 
-### Insert & Update
+### Upsert & Update
 ```sql
-INSERT INTO <name> VALUES { 'text': '...', 'category': '...' }, {...}, {...}
+UPSERT INTO <name> VALUES { 'text': '...', 'category': '...' }, {...}, {...}
   [USING [HYBRID [DENSE MODEL '<m>' SPARSE MODEL '<m>'] | MODEL '<m>']]
 
--- Insert with pre-computed named vectors (dense + multivector)
-INSERT INTO <name> VALUES { 'id': 1, 'text': '...', 'vector': {'dense': [0.1, 0.2], 'colbert': [[0.1, 0.2], [0.3, 0.4]]} }
+-- Upsert with pre-computed named vectors (dense + multivector)
+UPSERT INTO <name> VALUES { 'id': 1, 'text': '...', 'vector': {'dense': [0.1, 0.2], 'colbert': [[0.1, 0.2], [0.3, 0.4]]} }
 
 UPDATE <name> SET VECTOR ['vector_name'] = [<float>, ...] WHERE id = <id>
 UPDATE <name> SET PAYLOAD = {...} WHERE <filter_expression>
@@ -110,7 +110,7 @@ FROM <collection>
   [GROUP BY <field> [GROUP_SIZE <m>] [WITH LOOKUP FROM <collection>]]
   [WITH (hnsw_ef = <n>, exact = <bool>, acorn = <bool>, mmr_diversity = <f>, mmr_candidates = <n>, rrf_k = <n>, rrf_weights = [...])]
   [WITH PAYLOAD [true | false | (include = ['<field>', ...], exclude = ['<field>', ...])]]
-  [WITH VECTORS [true | false | ('<name>', ...)]]
+  [WITH VECTOR [true | false | ('<name>', ...)]]
   [BOOST (<expression>)]
   [DEFAULTS (<variable> = <float>, ...)]
   [RERANK [MODEL '<model>']]
@@ -175,7 +175,7 @@ For automation, use structured output:
 ```sql
 -- Comment
 CREATE COLLECTION my_collection
-INSERT INTO my_collection VALUES {'text': 'hello'}
+UPSERT INTO my_collection VALUES {'text': 'hello'}
 QUERY 'hello' FROM my_collection LIMIT 5
 ```
 
@@ -205,6 +205,6 @@ plan, err := qql.Explain("QUERY 'test' FROM docs LIMIT 5")
 ```
 
 ## Batch Operations
-- **Mixed statements** (INSERT, CREATE, QUERY): Use `ExecBatch` — sequential execution
+- **Mixed statements** (UPSERT, CREATE, QUERY): Use `ExecBatch` — sequential execution
 - **Pure QUERY batches**: Use `BatchQuery` — single round-trip via Qdrant's native `QueryBatch` API
-- **Bulk insert**: Use comma-separated `INSERT INTO <name> VALUES {...}, {...}`
+- **Bulk upsert**: Use comma-separated `UPSERT INTO <name> VALUES {...}, {...}`

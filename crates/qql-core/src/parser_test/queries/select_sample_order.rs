@@ -49,12 +49,12 @@ fn test_query_sample_with_filter() {
     }
 }
 
-// ── Query: WITH PAYLOAD / WITH VECTORS ───────────────────────
+// ── Query: WITH PAYLOAD / WITH VECTOR ───────────────────────
 
 #[test]
 fn test_query_with_payload_and_vectors() {
     let stmt = assert_parse_ok(
-            "QUERY 'search' FROM docs WITH PAYLOAD (include = ['title'], exclude = ['metadata']) WITH VECTORS true",
+            "QUERY 'search' FROM docs WITH PAYLOAD (include = ['title'], exclude = ['metadata']) WITH VECTOR true",
         );
     match stmt {
         Stmt::Query(q) => {
@@ -70,7 +70,7 @@ fn test_query_with_payload_and_vectors() {
     }
 
     let stmt2 = assert_parse_ok(
-        "QUERY 'search' FROM docs WITH PAYLOAD false WITH VECTORS ('dense', 'sparse')",
+        "QUERY 'search' FROM docs WITH PAYLOAD false WITH VECTOR ('dense', 'sparse')",
     );
     match stmt2 {
         Stmt::Query(q) => {
@@ -87,7 +87,7 @@ fn test_query_with_payload_and_vectors() {
 #[test]
 fn test_query_multiple_with_clauses() {
     let stmt = assert_parse_ok(
-            "QUERY 'search' FROM docs WITH MODEL 'foo' WITH PAYLOAD (include = ['title']) WITH VECTORS true WITH (exact = true)",
+            "QUERY 'search' FROM docs WITH MODEL 'foo' WITH PAYLOAD (include = ['title']) WITH VECTOR true WITH (exact = true)",
         );
     match stmt {
         Stmt::Query(q) => {
@@ -103,7 +103,7 @@ fn test_query_multiple_with_clauses() {
     }
 }
 
-// ── Query: WITH PAYLOAD/VECTORS errors ───────────────────────
+// ── Query: WITH PAYLOAD/VECTOR errors ───────────────────────
 
 #[test]
 fn test_query_with_payload_vectors_errors() {
@@ -114,9 +114,9 @@ fn test_query_with_payload_vectors_errors() {
     assert_parse_err("QUERY FROM docs WITH PAYLOAD (include = [123])");
     assert_parse_err("QUERY FROM docs WITH PAYLOAD (include = ['a'");
     assert_parse_err("QUERY FROM docs WITH PAYLOAD (include = ['a']");
-    assert_parse_err("QUERY FROM docs WITH VECTORS (123)");
-    assert_parse_err("QUERY FROM docs WITH VECTORS ('dense'");
-    assert_parse_err("QUERY FROM docs WITH VECTORS (['dense'])");
+    assert_parse_err("QUERY FROM docs WITH VECTOR (123)");
+    assert_parse_err("QUERY FROM docs WITH VECTOR ('dense'");
+    assert_parse_err("QUERY FROM docs WITH VECTOR (['dense'])");
     assert_parse_err("QUERY ORDER BY FROM docs");
     assert_parse_err("QUERY ORDER timestamp FROM docs");
 }

@@ -156,7 +156,7 @@ QUERY ORDER BY created_at DESC FROM articles
 
 **Problem:** You're searching a medical corpus with large payloads (full text, embeddings, metadata). You only need titles and scores for the UI, and you want the rerank vector back for downstream processing.
 
-**Why this works:** `WITH PAYLOAD` controls which fields are returned. `WITH VECTORS` controls which stored vectors come back. This reduces network transfer and deserialization overhead — critical when payloads are large.
+**Why this works:** `WITH PAYLOAD` controls which fields are returned. `WITH VECTOR` controls which stored vectors come back. This reduces network transfer and deserialization overhead — critical when payloads are large.
 
 ```sql
 QUERY 'acute bronchitis treatment protocols' FROM medical_records
@@ -165,13 +165,13 @@ QUERY 'acute bronchitis treatment protocols' FROM medical_records
   LIMIT 15
   RERANK
   WITH PAYLOAD (include = ['title', 'summary', 'evidence_level', 'url'], exclude = ['raw_text', 'embedding'])
-  WITH VECTORS ('colbert_rerank')
+  WITH VECTOR ('colbert_rerank')
   WITH (hnsw_ef = 256)
 ```
 
 **Key decisions:**
 - `include` + `exclude` — include the lightweight fields, explicitly exclude the heavy ones.
-- `WITH VECTORS ('colbert_rerank')` — returns the ColBERT multivector for downstream re-processing.
+- `WITH VECTOR ('colbert_rerank')` — returns the ColBERT multivector for downstream re-processing.
 - `hnsw_ef = 256` — higher recall at query time since we're doing hybrid + rerank.
 - `RERANK` applies ColBERT reranking after the hybrid retrieval.
 
@@ -428,14 +428,14 @@ results, _ := qql.BatchQuery(ctx, client, []string{
 
 **Key decisions:**
 - Use `BatchQuery` for pure QUERY batches — single round-trip to Qdrant.
-- Use `ExecBatch` for mixed statements (INSERT + QUERY + CREATE) — sequential execution.
+- Use `ExecBatch` for mixed statements (UPSERT + QUERY + CREATE) — sequential execution.
 - All queries in a `BatchQuery` must target the same collection.
 
 ---
 
 ## 17. Batch Ingest + Query Pipeline
 
-**Problem:** You need to set up a collection, insert data, and query it in a single pipeline.
+**Problem:** You need to set up a collection, upsert data, and query it in a single pipeline.
 
 **Why this works:** `ExecBatch` handles mixed statement types sequentially. Each statement is executed in order, and errors can be caught per-statement.
 
@@ -443,8 +443,8 @@ results, _ := qql.BatchQuery(ctx, client, []string{
 results, _ := qql.ExecBatch(ctx, client, []string{
     "CREATE COLLECTION medical HYBRID WITH HNSW (m = 32) WITH QUANTIZATION (type = 'turbo', bits = 2)",
     "CREATE INDEX ON COLLECTION medical FOR specialty TYPE keyword",
-    "INSERT INTO medical VALUES {'text': 'stroke protocol', 'specialty': 'neurology'} USING HYBRID",
-    "INSERT INTO medical VALUES {'text': 'cardiac arrest', 'specialty': 'cardiology'} USING HYBRID",
+    "UPSERT INTO medical VALUES {'text': 'stroke protocol', 'specialty': 'neurology'} USING HYBRID",
+    "UPSERT INTO medical VALUES {'text': 'cardiac arrest', 'specialty': 'cardiology'} USING HYBRID",
     "QUERY 'emergency' FROM medical LIMIT 5 USING HYBRID",
 }, true) // stopOnError = true
 ```
@@ -452,7 +452,7 @@ results, _ := qql.ExecBatch(ctx, client, []string{
 **Key decisions:**
 - `stopOnError = true` — stops at first failure (useful for setup scripts).
 - Each result has `ok`, `operation`, `message`, `data` fields.
-- Use comma-separated VALUES for bulk insert within a single INSERT statement.
+- Use comma-separated VALUES for bulk upsert within a single UPSERT statement.
 
 ---
 

@@ -271,7 +271,7 @@ impl<'a> Parser<'a> {
         }))
     }
 
-    pub fn parse_with_vectors(&mut self) -> Result<Box<VectorsSelector>, QqlError> {
+    pub fn parse_with_vector(&mut self) -> Result<Box<VectorsSelector>, QqlError> {
         if self.peek()?.kind == TokenKind::Identifier
             && (ascii_equal(self.peek()?.text, "TRUE") || ascii_equal(self.peek()?.text, "FALSE"))
         {

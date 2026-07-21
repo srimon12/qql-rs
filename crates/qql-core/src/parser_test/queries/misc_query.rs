@@ -296,7 +296,7 @@ fn test_query_relevance_feedback() {
 #[test]
 fn test_query_payload_vectors() {
     let stmt = assert_parse_ok(
-            "QUERY 'search' FROM docs WITH PAYLOAD (include = ['title'], exclude = ['metadata']) WITH VECTORS true",
+            "QUERY 'search' FROM docs WITH PAYLOAD (include = ['title'], exclude = ['metadata']) WITH VECTOR true",
         );
     match stmt {
         Stmt::Query(q) => {

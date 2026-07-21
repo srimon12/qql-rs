@@ -218,7 +218,7 @@ EXAMPLES = [
     },
     {
         "mode": "prefetch-rrf",
-        "when": "Use when you need multi-stage retrieval with separate dense and sparse prefetches combined via RRF.",
+        "when": "Use when you need multi-stage retrieval with separate dense and sparse prefetch legs combined via RRF.",
         "query": (
             "WITH a AS (QUERY 'search query' USING dense LIMIT 100),\n"
             "     b AS (QUERY 'search query' USING sparse LIMIT 100)\n"

@@ -132,7 +132,7 @@ const QUERIES: &[(&str, &str)] = &[
     ("Upsert", "UPSERT INTO docs VALUES {id: 1, text: 'hello world', category: 'tech'}, {id: 2, text: 'second document', category: 'science'}"),
     ("DeleteWhere", "DELETE FROM docs WHERE category = 'archived'"),
     ("OrderBy", "QUERY ORDER BY created_at DESC FROM docs LIMIT 20 WHERE status = 'active'"),
-    ("WithPayload", "QUERY 'search' FROM docs LIMIT 10 WITH PAYLOAD (include = ['title', 'body']) WITH VECTORS ('dense')"),
+    ("WithPayload", "QUERY 'search' FROM docs LIMIT 10 WITH PAYLOAD (include = ['title', 'body']) WITH VECTOR ('dense')"),
 ];
 
 async fn bench(executor: &Executor, _name: &str, q: &str, iterations: usize) -> Duration {

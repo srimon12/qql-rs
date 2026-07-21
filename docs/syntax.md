@@ -47,7 +47,7 @@ CREATE COLLECTION docs WITH QUANTIZATION (type = 'product')
 Dynamically modify runtime optimization and index configurations of an existing collection.
 
 ```sql
-ALTER COLLECTION docs WITH VECTORS (on_disk = true)
+ALTER COLLECTION docs WITH VECTOR (on_disk = true)
 ALTER COLLECTION docs WITH HNSW (m = 32)
 ALTER COLLECTION docs WITH OPTIMIZERS (max_segment_size = 500000)
 ALTER COLLECTION docs WITH PARAMS (replication_factor = 3)
@@ -86,21 +86,21 @@ CREATE INDEX ON docs FOR content TYPE text WITH (
 
 ---
 
-## 3. Data Ingestion (INSERT)
+## 3. Data Ingestion (UPSERT)
 
 Points require a unique identifier (unsigned integer or UUID string) and must provide target text for auto-embedding unless pre-computed vectors are supplied.
 
 ```sql
--- Simple insertion
-INSERT INTO docs VALUES {id: 1, text: 'Qdrant is a vector database', category: 'database'}
+-- Simple upsert
+UPSERT INTO docs VALUES {id: 1, text: 'Qdrant is a vector database', category: 'database'}
 
--- Multiple points insertion
-INSERT INTO docs VALUES 
+-- Multiple points upsert
+UPSERT INTO docs VALUES 
   {id: '550e8400-e29b-41d4-a716-446655440000', text: 'Sentence 1'},
   {id: '550e8400-e29b-41d4-a716-446655440001', text: 'Sentence 2'}
 
--- Direct vector insert (bypass embedder)
-INSERT INTO docs VALUES {
+-- Direct vector upsert (bypass embedder)
+UPSERT INTO docs VALUES {
   id: 2,
   text: 'Custom embeddings',
   vector: {
@@ -114,7 +114,7 @@ INSERT INTO docs VALUES {
 Route different payload fields to separate named vectors using the `EMBED` directive.
 
 ```sql
-INSERT INTO arxiv VALUES {
+UPSERT INTO arxiv VALUES {
   id: 'paper-1',
   text: 'The body of the paper...',
   title: 'An Analysis of Vector Retrieval'
@@ -158,7 +158,7 @@ QUERY RECOMMEND WITH (positive = ('id-1'), negative = ('id-2')) FROM docs LIMIT 
 QUERY DISCOVER TARGET 'id-1' CONTEXT PAIRS (('id-2', 'id-3')) FROM docs LIMIT 10
 ```
 
-### Common Table Expressions (CTEs) & Prefetches
+### Common Table Expressions (CTEs) & Prefetch
 Build complex search pipelines combining multiple semantic vectors and fusing their results.
 
 ```sql

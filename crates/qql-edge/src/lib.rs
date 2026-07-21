@@ -75,14 +75,12 @@ pub fn http_executor(
     dimension: usize,
 ) -> Result<Executor, qql_core::error::QqlError> {
     let client = Box::new(EdgeQdrant::new(data_dir, on_disk_payload));
-    let embedder = Some(
-        Arc::new(qql::embedder::HttpEmbedder::new(
-            endpoint.into(),
-            api_key.into(),
-            model.into(),
-            dimension,
-        )?) as Arc<dyn qql::embedder::Embedder>,
-    );
+    let embedder = Some(Arc::new(qql::embedder::HttpEmbedder::new(
+        endpoint.into(),
+        api_key.into(),
+        model.into(),
+        dimension,
+    )?) as Arc<dyn qql::embedder::Embedder>);
     let config = Some(QqlConfig::default());
     Ok(Executor::with_embedder(client, config, embedder))
 }

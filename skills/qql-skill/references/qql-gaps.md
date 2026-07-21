@@ -24,7 +24,7 @@ Prefer plain language:
 - Need single point by exact ID: use `SELECT * FROM <collection> WHERE id = ...`
 - Need to browse or export points page by page: use `SCROLL FROM <collection> ... LIMIT <n>`
 - Need pagination without similarity score: use `QUERY ORDER BY <field> [ASC|DESC] FROM <collection> LIMIT <n>`
-- Need to filter returned fields: use `WITH PAYLOAD (include=['f1'], exclude=['f2']) WITH VECTORS ('name')`
+- Need to filter returned fields: use `WITH PAYLOAD (include=['f1'], exclude=['f2']) WITH VECTOR ('name')`
 - Need recall tuning: use `WITH (hnsw_ef = ...)`
 - Need flat search pagination: use `QUERY ... LIMIT <n> OFFSET <n>`
 - Need low-score filtering: use `QUERY ... SCORE THRESHOLD <float|int>`
@@ -39,8 +39,8 @@ Prefer plain language:
 - Need cross-collection group lookup: use `QUERY ... GROUP BY <field> GROUP_SIZE <n> WITH LOOKUP FROM <collection>`
 - Need to patch metadata in place: use `UPDATE <collection> SET PAYLOAD = {...} WHERE ...`
 - Need to replace a stored vector: use `UPDATE <collection> SET VECTOR = [...] WHERE id = ...`
-- Need a runnable prototype: stay inside `CREATE`, `CREATE INDEX`, `INSERT`, `QUERY`, `DELETE`
-- Need batch insert: use comma-separated `INSERT INTO <name> VALUES {...}, {...}`
+- Need a runnable prototype: stay inside `CREATE`, `CREATE INDEX`, `UPSERT`, `QUERY`, `DELETE`
+- Need batch upsert: use comma-separated `UPSERT INTO <name> VALUES {...}, {...}`
 - Need script round-trip: use `qql-go execute` and `qql-go dump [--batch-size N]`
 - Need local inference without cloud: use `qql-go connect --inference-mode local`
 - Need score boosting: use `BOOST ($score + 0.3 * popularity)` or `BOOST (CASE WHEN ... THEN ... ELSE ... END)`

@@ -71,7 +71,6 @@ mod tests {
             ("TURBO", TokenKind::Turbo),
             ("BITS", TokenKind::Bits),
             ("HNSW", TokenKind::Hnsw),
-            ("VECTORS", TokenKind::Vectors),
             ("OPTIMIZERS", TokenKind::Optimizers),
             ("PARAMS", TokenKind::Params),
             ("DISABLED", TokenKind::Disabled),

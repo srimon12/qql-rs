@@ -37,10 +37,10 @@ def build_statements():
         stmts.append((f"index-{field}",
             f"CREATE INDEX ON COLLECTION {COLLECTION} FOR {field} TYPE {ftype}"))
 
-    # Inserts
+    # Upserts
     for pid, text, patient_id, specialty, priority, diagnosis, status, year in RECORDS:
-        stmts.append((f"insert-{pid}",
-            f"""INSERT INTO {COLLECTION} VALUES {{
+        stmts.append((f"upsert-{pid}",
+            f"""UPSERT INTO {COLLECTION} VALUES {{
   'id': {pid},
   'text': '{text}',
   'patient_id': '{patient_id}',
@@ -146,7 +146,7 @@ QUERY 'emergency critical neurological' FROM {COLLECTION} LIMIT 3 PREFETCH (a, b
     stmts.append(("order-by-year",
         f"QUERY ORDER BY year DESC FROM {COLLECTION} LIMIT 5"))
 
-    # WITH PAYLOAD / WITH VECTORS — field selection
+    # WITH PAYLOAD / WITH VECTOR — field selection
     stmts.append(("payload-exclude",
         f"QUERY 'acute stroke' FROM {COLLECTION} LIMIT 3 USING HYBRID WITH PAYLOAD (exclude = ['patient_id', 'diagnosis'])"))
 

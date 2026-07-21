@@ -43,7 +43,7 @@ Then type QQL directly:
 ```
 qql> SHOW COLLECTIONS;
 qql> QUERY 'similar to this' FROM docs LIMIT 10;
-qql> INSERT INTO docs (id, vector, payload) VALUES ...
+qql> UPSERT INTO docs (id, vector, payload) VALUES ...
 qql> exit
 ```
 
@@ -61,7 +61,7 @@ echo '{"collection": "docs", "limit": 5, "with_payload": true}' | qql convert -
 
 ### dump — Export a collection to .qql script
 
-Scans all points in a collection and generates QQL INSERT statements:
+Scans all points in a collection and generates QQL UPSERT statements:
 
 ```bash
 qql dump docs docs_export.qql
@@ -94,8 +94,8 @@ Set via environment variables:
 Statements are separated by semicolons. Supports all QQL statements:
 
 ```qql
-CREATE COLLECTION docs WITH VECTORS size 384 distance Cosine;
-INSERT INTO docs (id, vector, payload) VALUES
+CREATE COLLECTION docs WITH VECTOR size 384 distance Cosine;
+UPSERT INTO docs (id, vector, payload) VALUES
     (1, [0.1, 0.2, ...], {"text": "first document"}),
     (2, [0.3, 0.4, ...], {"text": "second document"});
 QUERY 'search' FROM docs LIMIT 10;

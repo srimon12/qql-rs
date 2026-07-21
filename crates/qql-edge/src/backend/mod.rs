@@ -418,9 +418,8 @@ impl QdrantAdminOps for EdgeQdrant {
             field_schema,
         };
 
-        let op = UpdateOperation::FieldIndexOperation(
-            FieldIndexOperations::CreateIndex(create_index),
-        );
+        let op =
+            UpdateOperation::FieldIndexOperation(FieldIndexOperations::CreateIndex(create_index));
 
         tokio::task::spawn_blocking(move || shard.update(op).map_err(edge_err))
             .await

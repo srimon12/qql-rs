@@ -4,7 +4,7 @@
 Showcases:
 - Creating collections with multivector config (ColBERT/ColPali)
 - HNSW m=0 to disable indexing for reranking vectors
-- Inserting with named dense + multivector vectors
+- Upserting with named dense + multivector vectors
 - Two-stage retrieval: prefetch with mean-pooled, rerank with original
 - Prefetch with different USING vectors
 - Convert command for REST JSON → QQL
@@ -39,7 +39,7 @@ def build_statements():
     stmts.append(("index-page",
         f"CREATE INDEX ON COLLECTION {COLLECTION} FOR page_number TYPE integer"))
 
-    # ── 3. Insert with named multivector vectors ────────────────
+    # ── 3. Upsert with named multivector vectors ────────────────
     # Each point has 3 vector representations:
     #   - original: full ColPali output (e.g., 1030 vectors of dim 128)
     #   - mean_pooling_columns: compressed by columns (e.g., 32 vectors)
@@ -68,7 +68,7 @@ def build_statements():
     ]
 
     for pid, title, page, orig, col_pool, row_pool in pages:
-        stmts.append((f"insert-page-{pid}", f"""INSERT INTO {COLLECTION} VALUES {{
+        stmts.append((f"upsert-page-{pid}", f"""UPSERT INTO {COLLECTION} VALUES {{
     'id': {pid},
     'title': '{title}',
     'page_number': {page},

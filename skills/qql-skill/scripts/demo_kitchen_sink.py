@@ -58,10 +58,10 @@ def build_statements():
         stmts.append((f"index-{field}",
             f"CREATE INDEX ON COLLECTION {COLLECTION} FOR {field} TYPE {ftype}"))
 
-    # --- Inserts ---
+    # --- Upserts ---
     for key, text, specialty, priority, diagnosis, status, year, score in RECORDS:
-        stmts.append((f"insert-{key}",
-            f"""INSERT INTO {COLLECTION} VALUES {{
+        stmts.append((f"upsert-{key}",
+            f"""UPSERT INTO {COLLECTION} VALUES {{
   'id': '{IDS[key]}',
   'text': '{text}',
   'patient_id': 'PT-{key.upper()[:4]}',
@@ -73,9 +73,9 @@ def build_statements():
   'score': {score}
 }} USING HYBRID"""))
 
-    # --- Bulk insert test (comma-separated VALUES) ---
-    stmts.append(("bulk-insert",
-        f"""INSERT INTO {COLLECTION} VALUES
+    # --- Bulk upsert test (comma-separated VALUES) ---
+    stmts.append(("bulk-upsert",
+        f"""UPSERT INTO {COLLECTION} VALUES
   {{'text': 'Routine follow-up for hypertension. Blood pressure well controlled on current medication.', 'specialty': 'cardiology', 'priority': 'low', 'status': 'reviewed', 'year': 2026, 'diagnosis': 'Hypertension follow-up', 'patient_id': 'PT-BULK1', 'score': 3.0}},
   {{'text': 'Post-operative wound check after laparoscopic cholecystectomy. Incision healing well, no signs of infection.', 'specialty': 'surgery', 'priority': 'low', 'status': 'discharged', 'year': 2026, 'diagnosis': 'Post-op wound check', 'patient_id': 'PT-BULK2', 'score': 3.5}}
 USING HYBRID"""))
@@ -197,7 +197,7 @@ QUERY 'emergency critical neurological' FROM {COLLECTION} LIMIT 3 PREFETCH (a, b
     stmts.append(("order-by-score",
         f"QUERY ORDER BY score ASC FROM {COLLECTION} LIMIT 5 WHERE priority = 'high'"))
 
-    # --- WITH PAYLOAD / WITH VECTORS — field selection ---
+    # --- WITH PAYLOAD / WITH VECTOR — field selection ---
     stmts.append(("payload-false",
         f"QUERY 'acute stroke' FROM {COLLECTION} LIMIT 3 USING HYBRID WITH PAYLOAD false"))
     stmts.append(("payload-include",
