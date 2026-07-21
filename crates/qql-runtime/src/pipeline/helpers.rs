@@ -53,14 +53,6 @@ pub fn to_point_id(val: &ast::Value) -> Result<PointId, QqlError> {
     }
 }
 
-#[allow(dead_code)]
-pub fn point_id_to_value(pid: &PointId) -> ast::Value {
-    match pid {
-        PointId::Num(n) => ast::Value::Int(*n as i64),
-        PointId::Uuid(s) => ast::Value::Str(s.clone()),
-    }
-}
-
 pub async fn build_vector_input(
     state: &QueryState,
     val: &ast::Value,

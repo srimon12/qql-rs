@@ -72,6 +72,34 @@ impl Executor {
 
     pub(crate) async fn do_upsert(&self, stmt: ast::UpsertStmt) -> Result<ExecResponse, QqlError> {
         let count = stmt.points.len();
+
+        if let Some(ref emb) = stmt.embedding {
+            let (model, is_hybrid, dense_vec, sparse_vec) = match emb {
+                ast::EmbeddingSpec::Dense { model, vector } => {
+                    (model.as_deref(), false, vector.as_deref(), None)
+                }
+                ast::EmbeddingSpec::Hybrid {
+                    dense_model,
+                    dense_vector,
+                    sparse_vector,
+                    ..
+                } => (
+                    dense_model.as_deref(),
+                    true,
+                    dense_vector.as_deref(),
+                    sparse_vector.as_deref(),
+                ),
+            };
+            self.ensure_collection_for_upsert(
+                &stmt.collection,
+                model,
+                is_hybrid,
+                dense_vec,
+                sparse_vec,
+            )
+            .await?;
+        }
+
         let r = route(&ast::Stmt::Upsert(Box::new(stmt)));
         self.client.execute_route(r).await?;
         Ok(ExecResponse {

@@ -1,11 +1,9 @@
-
 #[cfg(feature = "rest")]
 use crate::embedder::HttpEmbedder;
 use crate::executor::{CreateCollectionReq, Executor, VectorTopology};
 use qql_core::error::QqlError;
 
 impl Executor {
-    #[allow(dead_code)]
     pub(crate) async fn ensure_collection_for_upsert(
         &self,
         collection: &str,
@@ -80,7 +78,6 @@ impl Executor {
         Ok(topo)
     }
 
-    #[allow(dead_code)]
     pub(crate) async fn resolve_dense_vector_size(
         &self,
         model: Option<&str>,
@@ -107,8 +104,8 @@ impl Executor {
                     Ok(dim)
                 }
                 _ if model.is_none() => Ok(crate::executor::DENSE_VECTOR_SIZE as usize),
-                _ => Err(QqlError::validation(
-                    "QQL-RUNTIME",
+                _ => Err(QqlError::execution(
+                    "QQL-EMBEDDING-DIM",
                     "embedding_dimension must be configured when creating collections with USING MODEL in local inference mode",
                     None,
                 )),
@@ -129,8 +126,8 @@ impl Executor {
                 .map(|c| c.embedding_dimension == 0)
                 .unwrap_or(true)
         {
-            return Err(QqlError::validation(
-                "QQL-RUNTIME",
+            return Err(QqlError::execution(
+                "QQL-EMBEDDING-DIM",
                 "embedding_dimension must be configured when creating collections with USING MODEL",
                 None,
             ));

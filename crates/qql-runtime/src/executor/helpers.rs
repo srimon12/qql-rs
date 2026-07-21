@@ -2,7 +2,7 @@ use crate::pipeline::{PointId, WithPayload, WithVector};
 use qql_core::ast::{self, Value};
 use qql_core::error::QqlError;
 
-#[allow(dead_code)]
+#[allow(dead_code)] // helpers retained for pipeline compatibility
 pub(crate) fn build_with_payload(sel: Option<&ast::PayloadSelector>) -> Option<WithPayload> {
     let sel = sel?;
     match sel {
@@ -41,12 +41,6 @@ pub(crate) fn build_with_vector(sel: Option<&ast::VectorSelector>) -> Option<Wit
     }
 }
 
-// TODO: MMR fields moved out of SearchParams; re-evaluate how to detect MMR
-#[allow(dead_code)]
-pub(crate) fn has_mmr(_params: Option<&ast::SearchParams>) -> bool {
-    false
-}
-
 #[allow(dead_code)]
 pub(crate) fn point_id_string(id: &PointId) -> String {
     match id {
@@ -66,19 +60,19 @@ pub(crate) fn to_point_id_static(val: &ast::Value) -> Result<PointId, QqlError> 
         }
         Value::Int(i) => {
             if *i < 0 {
-                return Err(QqlError::execution("QQL-EXECUTION", "negative ID not supported", None));
+                return Err(QqlError::execution("QQL-POINT-ID", "negative ID not supported", None));
             }
             Ok(PointId::Num(*i as u64))
         }
         Value::Float(f) => {
             let v = *f;
             if v < 0.0 || v > (1u64 << 53) as f64 || v != (v as u64) as f64 {
-                return Err(QqlError::execution("QQL-EXECUTION", 
+                return Err(QqlError::execution("QQL-POINT-ID",
                     "unsupported point ID: non-integer or oversized float", None));
             }
             Ok(PointId::Num(v as u64))
         }
-        _ => Err(QqlError::execution("QQL-EXECUTION", format!(
+        _ => Err(QqlError::execution("QQL-POINT-ID", format!(
             "unsupported point ID type: {:?}",
             val
         ), None)),
@@ -95,7 +89,6 @@ pub(crate) fn value_to_json(val: &Value) -> serde_json::Value {
         Value::Int(i) => serde_json::Value::Number((*i).into()),
         Value::Float(f) => {
             serde_json::Value::Number(serde_json::Number::from_f64(*f).unwrap_or_else(|| {
-                // Fallback: NaN, Inf, or subnormal → serialize as 0
                 serde_json::Number::from_f64(0.0).unwrap_or(serde_json::Number::from(0))
             }))
         }
@@ -145,10 +138,14 @@ pub(crate) fn build_quantization_config(
                 } else if (bits - 4.0).abs() < f64::EPSILON {
                     "bits4"
                 } else {
-                    return Err(QqlError::execution("QQL-EXECUTION", format!(
-                        "unsupported TURBO bit depth {}; expected one of 1, 1.5, 2, or 4",
-                        bits
-                    ), None));
+                    return Err(QqlError::execution(
+                        "QQL-QUANTIZATION",
+                        format!(
+                            "unsupported TURBO bit depth {}; expected one of 1, 1.5, 2, or 4",
+                            bits
+                        ),
+                        None,
+                    ));
                 };
                 config_map.insert("bits".to_string(), serde_json::json!(bit_str));
             }

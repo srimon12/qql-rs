@@ -17,7 +17,7 @@ use qql_core::error::QqlError;
 pub use embed_nodes::{DenseEmbedNode, RawVectorNode, SparseEmbedNode};
 pub use formula_nodes::{build_expression, build_match_condition_expression};
 pub use helpers::{
-    build_search_params, build_vector_input, is_uuid, point_id_to_value, to_point_id,
+    build_search_params, build_vector_input, is_uuid, to_point_id,
 };
 pub use query_nodes::{
     ContextNode, ContextPairInput, DiscoverNode, FusionNode, OrderByNode, RecommendNode,
