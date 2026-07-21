@@ -89,6 +89,7 @@ pub fn explain_node(statement: &Stmt) -> String {
 fn query_intent(expression: &QueryExpr) -> &'static str {
     match expression {
         QueryExpr::Points { .. } => "retrieve points by ID",
+        QueryExpr::Nearest { mmr: Some(_), .. } => "maximal marginal relevance (MMR) search",
         QueryExpr::Nearest { input, .. } => match input {
             QueryInput::Text { .. } => "nearest neighbors from text",
             QueryInput::Vector(_) => "nearest neighbors from a vector",
@@ -102,7 +103,6 @@ fn query_intent(expression: &QueryExpr) -> &'static str {
         QueryExpr::Fusion { .. } => "fuse prefetched result sets",
         QueryExpr::Formula { .. } => "formula-based scoring",
         QueryExpr::RelevanceFeedback { .. } => "relevance feedback",
-        QueryExpr::Mmr { .. } => "maximal marginal relevance",
         QueryExpr::Hybrid { .. } => "hybrid shorthand",
         QueryExpr::Rerank { .. } => "explicit prefetched rerank",
     }

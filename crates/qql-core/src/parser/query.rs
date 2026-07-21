@@ -1,8 +1,8 @@
 use super::{ascii_equal, Parser};
 use crate::ast::{
     ContextPair, Cte, FeedbackItem, FeedbackStrategy, FilterExpr, FusionMethod, GroupSpec,
-    LookupSpec, OrderDirection, PageSpec, Prefetch, PrefetchSource, QueryCollection, QueryExpr,
-    QueryInput, QueryOutput, QueryStmt, RecommendStrategy, Stmt,
+    LookupSpec, MmrConfig, OrderDirection, PageSpec, Prefetch, PrefetchSource, QueryCollection,
+    QueryExpr, QueryInput, QueryOutput, QueryStmt, RecommendStrategy, Stmt,
 };
 use crate::error::{QqlError, Span};
 use crate::token::TokenKind;
@@ -218,6 +218,7 @@ impl<'a> Parser<'a> {
                 input,
                 using: None,
                 prefetch: Vec::new(),
+                mmr: None,
             });
         }
         if self.peek()?.kind == TokenKind::Recommend {
@@ -302,6 +303,7 @@ impl<'a> Parser<'a> {
             input,
             using: None,
             prefetch: Vec::new(),
+            mmr: None,
         })
     }
 
@@ -472,12 +474,14 @@ impl<'a> Parser<'a> {
         }
         self.expect_word("CANDIDATES")?;
         let candidates = self.parse_positive_u64("MMR candidates")?;
-        Ok(QueryExpr::Mmr {
+        Ok(QueryExpr::Nearest {
             input,
-            diversity,
-            candidates,
             using: None,
             prefetch: Vec::new(),
+            mmr: Some(Box::new(MmrConfig {
+                diversity,
+                candidates,
+            })),
         })
     }
 
@@ -680,11 +684,6 @@ fn attach_pipeline(
             using: target,
             prefetch: nested,
             ..
-        }
-        | QueryExpr::Mmr {
-            using: target,
-            prefetch: nested,
-            ..
         } => {
             *target = using;
             *nested = prefetch;
@@ -772,7 +771,6 @@ fn validate_prefetch_references(
         | QueryExpr::Fusion { prefetch, .. }
         | QueryExpr::Formula { prefetch, .. }
         | QueryExpr::RelevanceFeedback { prefetch, .. }
-        | QueryExpr::Mmr { prefetch, .. }
         | QueryExpr::Rerank { prefetch, .. } => prefetch,
         QueryExpr::Points { .. }
         | QueryExpr::OrderBy { .. }

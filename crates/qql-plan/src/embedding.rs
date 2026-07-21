@@ -37,7 +37,6 @@ fn collect_text_inputs(expr: &QueryExpr) -> Vec<&QueryInput> {
             all
         }
         QueryExpr::RelevanceFeedback { target, .. } => vec![target],
-        QueryExpr::Mmr { input, .. } => vec![input],
         QueryExpr::Rerank { input, .. } => vec![input],
         _ => Vec::new(),
     }

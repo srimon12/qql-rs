@@ -271,9 +271,22 @@ pub struct QuantizationSearchRequest {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct NearestQuery {
+    pub nearest: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mmr: Option<MmrQueryParams>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MmrQueryParams {
+    pub diversity: f64,
+    pub candidates_limit: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 pub enum QueryVariant {
-    Nearest { nearest: serde_json::Value },
+    Nearest(NearestQuery),
     Recommend { recommend: RecommendQuery },
     Context { context: Vec<ContextPair> },
     Discover { discover: DiscoverQuery },

@@ -92,7 +92,6 @@ fn expression_prefetch(expression: &mut QueryExpr) -> Option<&mut Vec<Prefetch>>
         | QueryExpr::Fusion { prefetch, .. }
         | QueryExpr::Formula { prefetch, .. }
         | QueryExpr::RelevanceFeedback { prefetch, .. }
-        | QueryExpr::Mmr { prefetch, .. }
         | QueryExpr::Rerank { prefetch, .. } => Some(prefetch),
         QueryExpr::Points { .. }
         | QueryExpr::OrderBy { .. }

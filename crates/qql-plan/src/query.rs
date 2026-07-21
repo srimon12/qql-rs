@@ -47,9 +47,15 @@ pub fn lower_query_input(input: &QueryInput) -> serde_json::Value {
 
 pub fn lower_query_expr(expr: &QueryExpr) -> QueryVariant {
     match expr {
-        QueryExpr::Nearest { input, .. } => QueryVariant::Nearest {
-            nearest: lower_query_input(input),
-        },
+        QueryExpr::Nearest { input, mmr, .. } => {
+            QueryVariant::Nearest(NearestQuery {
+                nearest: lower_query_input(input),
+                mmr: mmr.as_ref().map(|m| MmrQueryParams {
+                    diversity: m.diversity,
+                    candidates_limit: m.candidates,
+                }),
+            })
+        }
         QueryExpr::Recommend {
             positive,
             negative,
@@ -132,18 +138,17 @@ pub fn lower_query_expr(expr: &QueryExpr) -> QueryVariant {
                 strategy: None,
             },
         },
-        QueryExpr::Mmr { .. } => QueryVariant::Sample {
-            sample: "random".into(),
-        },
         QueryExpr::Hybrid { .. } => QueryVariant::Fusion {
             fusion: "rrf".into(),
         },
-        QueryExpr::Rerank { input, .. } => QueryVariant::Nearest {
+        QueryExpr::Rerank { input, .. } => QueryVariant::Nearest(NearestQuery {
             nearest: lower_query_input(input),
-        },
-        QueryExpr::Points { .. } => QueryVariant::Nearest {
+            mmr: None,
+        }),
+        QueryExpr::Points { .. } => QueryVariant::Nearest(NearestQuery {
             nearest: serde_json::Value::Array(Vec::new()),
-        },
+            mmr: None,
+        }),
     }
 }
 
@@ -238,8 +243,7 @@ fn expression_using(expr: &QueryExpr) -> Option<&String> {
         | QueryExpr::Recommend { using, .. }
         | QueryExpr::Context { using, .. }
         | QueryExpr::Discover { using, .. }
-        | QueryExpr::RelevanceFeedback { using, .. }
-        | QueryExpr::Mmr { using, .. } => using.as_ref(),
+        | QueryExpr::RelevanceFeedback { using, .. } => using.as_ref(),
         QueryExpr::Rerank { using, .. } => Some(using),
         _ => None,
     }
@@ -254,7 +258,6 @@ fn expression_prefetch(expr: &QueryExpr) -> &[qql_core::ast::Prefetch] {
         | QueryExpr::Fusion { prefetch, .. }
         | QueryExpr::Formula { prefetch, .. }
         | QueryExpr::RelevanceFeedback { prefetch, .. }
-        | QueryExpr::Mmr { prefetch, .. }
         | QueryExpr::Rerank { prefetch, .. } => prefetch,
         _ => &[],
     }

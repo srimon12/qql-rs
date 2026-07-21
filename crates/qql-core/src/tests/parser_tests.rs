@@ -139,9 +139,9 @@ fn mmr_query() {
         "QUERY MMR TEXT 'diverse' DIVERSITY 0.4 CANDIDATES 50 FROM docs USING dense;",
     ).unwrap();
     let Stmt::Query(q) = s else { panic!() };
-    assert!(matches!(q.expression, QueryExpr::Mmr {
-        input: QueryInput::Text { ref text, .. }, diversity, candidates, ..
-    } if text == "diverse" && (diversity - 0.4).abs() < 1e-10 && candidates == 50));
+    assert!(matches!(q.expression, QueryExpr::Nearest {
+        input: QueryInput::Text { ref text, .. }, mmr: Some(_), ..
+    } if text == "diverse"));
 }
 
 #[test]

@@ -35,6 +35,13 @@ pub enum QueryInput {
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub struct MmrConfig {
+    pub diversity: f64,
+    pub candidates: u64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct ContextPair {
     pub positive: QueryInput,
     pub negative: QueryInput,
@@ -117,6 +124,7 @@ pub enum QueryExpr {
         input: QueryInput,
         using: Option<String>,
         prefetch: Vec<Prefetch>,
+        mmr: Option<Box<MmrConfig>>,
     },
     Recommend {
         positive: Vec<QueryInput>,
@@ -154,13 +162,6 @@ pub enum QueryExpr {
         target: QueryInput,
         feedback: Vec<FeedbackItem>,
         strategy: FeedbackStrategy,
-        using: Option<String>,
-        prefetch: Vec<Prefetch>,
-    },
-    Mmr {
-        input: QueryInput,
-        diversity: f64,
-        candidates: u64,
         using: Option<String>,
         prefetch: Vec<Prefetch>,
     },
