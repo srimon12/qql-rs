@@ -1566,3 +1566,74 @@ fn multivec_comp_to_str(c: i32) -> &'static str {
         _ => "MaxSim",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use qql_core::parser::Parser;
+    use qql_plan::routing::route;
+
+    #[test]
+    fn test_grpc_route_conversion_all_statements() {
+        let statements = [
+            "QUERY 'search' FROM docs USING dense LIMIT 10;",
+            "QUERY POINTS (1, 2, 'uuid-str') FROM docs WITH PAYLOAD INCLUDE ('title');",
+            "SCROLL FROM docs WHERE status = 'active' LIMIT 50;",
+            "UPSERT INTO docs VALUES {id: 1, text: 'hello', category: 'tech'} USING DENSE MODEL 'm';",
+            "DELETE FROM docs WHERE category = 'old';",
+            "UPDATE docs SET VECTOR dense = [0.1, 0.2] WHERE id = 1;",
+            "UPDATE docs SET PAYLOAD = {status: 'ok'} WHERE id = 1;",
+            "CREATE COLLECTION docs (dense VECTOR(384, COSINE), sparse SPARSE);",
+            "ALTER COLLECTION docs WITH HNSW (m = 16);",
+            "DROP COLLECTION docs;",
+            "CREATE INDEX ON COLLECTION docs FOR title TYPE text;",
+            "SHOW COLLECTIONS;",
+            "SHOW COLLECTION docs;",
+        ];
+
+        for stmt_str in statements {
+            let stmt = Parser::parse(stmt_str)
+                .unwrap_or_else(|e| panic!("parse failed for {stmt_str}: {e}"));
+            let r = route(&stmt);
+            match &r.body {
+                Some(RequestBody::Query(req)) => {
+                    let grpc_req = to_query_points(req, "docs");
+                    assert!(
+                        grpc_req.is_ok(),
+                        "to_query_points failed for {stmt_str}: {:?}",
+                        grpc_req.err()
+                    );
+                }
+                Some(RequestBody::QueryGroups(req)) => {
+                    let grpc_req = to_query_groups(req, "docs");
+                    assert!(
+                        grpc_req.is_ok(),
+                        "to_query_groups failed for {stmt_str}: {:?}",
+                        grpc_req.err()
+                    );
+                }
+                Some(RequestBody::Points(req)) => {
+                    assert_eq!(req.ids.len(), 3);
+                }
+                Some(RequestBody::Scroll(req)) => {
+                    assert!(req.filter.is_some());
+                }
+                Some(RequestBody::Upsert(req)) => {
+                    assert_eq!(req.points.len(), 1);
+                }
+                Some(RequestBody::Delete(req)) => {
+                    assert!(req.filter.is_some());
+                }
+                Some(RequestBody::UpdateVector(_)) => {}
+                Some(RequestBody::UpdatePayload(_)) => {}
+                Some(RequestBody::CreateCollection(req)) => {
+                    assert!(req.vectors.is_some() || req.hnsw_config.is_some());
+                }
+                Some(RequestBody::CreateIndex(req)) => {
+                    assert_eq!(req.field_name, "title");
+                }
+                None => {}
+            }
+        }
+    }
+}

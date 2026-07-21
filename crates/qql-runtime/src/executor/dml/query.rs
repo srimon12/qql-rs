@@ -8,8 +8,30 @@ use qql_plan::routing::route;
 
 impl Executor {
     pub(crate) async fn do_query(&self, stmt: ast::QueryStmt) -> Result<ExecResponse, QqlError> {
+        let is_grouped = stmt.group.is_some();
         let r = route(&ast::Stmt::Query(Box::new(stmt)));
         let result = self.client.execute_route(r).await?;
+        if is_grouped
+            || result
+                .get("result")
+                .and_then(|r| r.get("groups"))
+                .is_some()
+            || result.get("groups").is_some()
+        {
+            let groups_count = result
+                .get("result")
+                .and_then(|r| r.get("groups"))
+                .or_else(|| result.get("groups"))
+                .and_then(|g| g.as_array())
+                .map(|arr| arr.len())
+                .unwrap_or(0);
+            return Ok(ExecResponse {
+                ok: true,
+                operation: "QUERY_GROUPS".to_string(),
+                message: format!("Found {} group(s)", groups_count),
+                data: Some(result),
+            });
+        }
         let hits = extract_search_hits(&result);
         Ok(ExecResponse {
             ok: true,
