@@ -44,6 +44,97 @@ pub fn lower_query_input(input: &QueryInput) -> serde_json::Value {
     }
 }
 
+pub fn lower_formula_expr(expr: &qql_core::ast::FormulaExpr) -> serde_json::Value {
+    match expr {
+        qql_core::ast::FormulaExpr::Constant { value } => serde_json::json!(value),
+        qql_core::ast::FormulaExpr::Variable { name } => {
+            if name == "score" {
+                serde_json::json!("$score")
+            } else {
+                serde_json::json!(name)
+            }
+        }
+        qql_core::ast::FormulaExpr::Sum { left, right } => serde_json::json!({
+            "sum": [lower_formula_expr(left), lower_formula_expr(right)]
+        }),
+        qql_core::ast::FormulaExpr::Sub { left, right } => serde_json::json!({
+            "sum": [lower_formula_expr(left), { "neg": lower_formula_expr(right) }]
+        }),
+        qql_core::ast::FormulaExpr::Mul { left, right } => serde_json::json!({
+            "mult": [lower_formula_expr(left), lower_formula_expr(right)]
+        }),
+        qql_core::ast::FormulaExpr::Div { left, right, .. } => serde_json::json!({
+            "div": {
+                "left": lower_formula_expr(left),
+                "right": lower_formula_expr(right)
+            }
+        }),
+        qql_core::ast::FormulaExpr::Neg { operand } => serde_json::json!({
+            "neg": lower_formula_expr(operand)
+        }),
+        qql_core::ast::FormulaExpr::Abs { x } => serde_json::json!({
+            "abs": lower_formula_expr(x)
+        }),
+        qql_core::ast::FormulaExpr::Sqrt { x } => serde_json::json!({
+            "sqrt": lower_formula_expr(x)
+        }),
+        qql_core::ast::FormulaExpr::Log { x } => serde_json::json!({
+            "log10": lower_formula_expr(x)
+        }),
+        qql_core::ast::FormulaExpr::Ln { x } => serde_json::json!({
+            "ln": lower_formula_expr(x)
+        }),
+        qql_core::ast::FormulaExpr::Exp { x } => serde_json::json!({
+            "exp": lower_formula_expr(x)
+        }),
+        qql_core::ast::FormulaExpr::Pow { base, exponent } => serde_json::json!({
+            "pow": {
+                "base": lower_formula_expr(base),
+                "exponent": lower_formula_expr(exponent)
+            }
+        }),
+        qql_core::ast::FormulaExpr::GeoDistance { lat, lon, field } => serde_json::json!({
+            "geo_distance": {
+                "origin": { "lat": lat, "lon": lon },
+                "to": field
+            }
+        }),
+        qql_core::ast::FormulaExpr::Decay { kind, x, target, scale, midpoint } => {
+            let mut params = serde_json::Map::new();
+            params.insert("x".into(), lower_formula_expr(x));
+            if let Some(t) = target {
+                params.insert("target".into(), lower_formula_expr(t));
+            }
+            if let Some(s) = scale {
+                params.insert("scale".into(), serde_json::json!(s));
+            }
+            if let Some(m) = midpoint {
+                params.insert("midpoint".into(), serde_json::json!(m));
+            }
+            let key = match kind.to_ascii_lowercase().as_str() {
+                "lin" | "lin_decay" => "lin_decay",
+                "exp" | "exp_decay" => "exp_decay",
+                _ => "gauss_decay",
+            };
+            serde_json::json!({ key: params })
+        }
+        qql_core::ast::FormulaExpr::Case { cond, then_, else_ } => {
+            let cond_val = match lower_filter(cond) {
+                FilterExpression::Single(clause) => serde_json::to_value(&*clause).unwrap_or_default(),
+                FilterExpression::Compound(comp) => serde_json::to_value(comp).unwrap_or_default(),
+            };
+            serde_json::json!({
+                "condition": {
+                    "cond": cond_val,
+                    "then_value": lower_formula_expr(then_),
+                    "else_value": lower_formula_expr(else_)
+                }
+            })
+        }
+        _ => serde_json::Value::Null,
+    }
+}
+
 pub fn lower_query_expr(expr: &QueryExpr) -> QueryVariant {
     match expr {
         QueryExpr::Nearest { input, mmr, .. } => QueryVariant::Nearest(NearestQuery {
@@ -128,7 +219,7 @@ pub fn lower_query_expr(expr: &QueryExpr) -> QueryVariant {
             defaults,
             ..
         } => {
-            let formula_val = serde_json::to_value(expression.as_ref()).unwrap_or_default();
+            let formula_val = lower_formula_expr(expression);
             let defaults_map = if defaults.is_empty() {
                 None
             } else {
@@ -244,6 +335,19 @@ fn lower_output_selector(
     (with_payload, with_vector)
 }
 
+fn top_level_filter(filter: &qql_core::ast::FilterExpr) -> FilterExpression {
+    let f = lower_filter(filter);
+    match f {
+        FilterExpression::Single(clause) => FilterExpression::Compound(FilterCompound {
+            must: vec![*clause],
+            must_not: Vec::new(),
+            should: Vec::new(),
+            min_should: None,
+        }),
+        other => other,
+    }
+}
+
 pub fn lower_query_request(query: &QueryStmt) -> QueryRequest {
     let (with_payload, with_vector) = lower_output_selector(&query.output);
     let (query_variant, using, prefetch) = build_query_with_prefetch(query);
@@ -252,7 +356,7 @@ pub fn lower_query_request(query: &QueryStmt) -> QueryRequest {
         query: query_variant,
         using,
         prefetch,
-        filter: query.filter.as_ref().map(|f| lower_filter(f)),
+        filter: query.filter.as_ref().map(|f| top_level_filter(f)),
         params: query.params.as_ref().and_then(lower_search_params),
         score_threshold: query.score_threshold,
         with_payload,
@@ -334,10 +438,26 @@ fn build_query_with_prefetch(
                 lookup_from: None,
                 prefetch: None,
             };
-            (
+            let variant = if let Some(params) = &query.params {
+                if params.rrf_k.is_some() || params.rrf_weights.is_some() {
+                    QueryVariant::Rrf(RrfQuery {
+                        rrf: RrfParams {
+                            k: params.rrf_k,
+                            weights: params.rrf_weights.clone(),
+                        },
+                    })
+                } else {
+                    QueryVariant::Fusion {
+                        fusion: fusion_name.into(),
+                    }
+                }
+            } else {
                 QueryVariant::Fusion {
                     fusion: fusion_name.into(),
-                },
+                }
+            };
+            (
+                variant,
                 None,
                 vec![dense_prefetch, sparse_prefetch],
             )
@@ -365,7 +485,21 @@ fn build_query_with_prefetch(
             )
         }
         _ => {
-            let variant = lower_query_expr(&query.expression);
+            let mut variant = lower_query_expr(&query.expression);
+            if let Some(params) = &query.params {
+                if params.rrf_k.is_some() || params.rrf_weights.is_some() {
+                    if let QueryVariant::Fusion { fusion } = &variant {
+                        if fusion == "rrf" {
+                            variant = QueryVariant::Rrf(RrfQuery {
+                                rrf: RrfParams {
+                                    k: params.rrf_k,
+                                    weights: params.rrf_weights.clone(),
+                                },
+                            });
+                        }
+                    }
+                }
+            }
             let using = expression_using(&query.expression).cloned();
             let prefetches: Vec<PrefetchRequest> = expression_prefetch(&query.expression)
                 .iter()

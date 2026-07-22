@@ -44,6 +44,19 @@ fn lower_point_vectors(vectors: &PointVectors) -> serde_json::Value {
     }
 }
 
+fn top_level_filter(filter: &qql_core::ast::FilterExpr) -> FilterExpression {
+    let f = lower_filter(filter);
+    match f {
+        FilterExpression::Single(clause) => FilterExpression::Compound(FilterCompound {
+            must: vec![*clause],
+            must_not: Vec::new(),
+            should: Vec::new(),
+            min_should: None,
+        }),
+        other => other,
+    }
+}
+
 pub fn lower_delete_request(stmt: &DeleteStmt) -> DeleteRequest {
     match &stmt.selector {
         PointSelector::Id(id) => DeleteRequest {
@@ -56,7 +69,7 @@ pub fn lower_delete_request(stmt: &DeleteStmt) -> DeleteRequest {
         },
         PointSelector::Filter(filter) => DeleteRequest {
             points: None,
-            filter: Some(lower_filter(filter)),
+            filter: Some(top_level_filter(filter)),
         },
     }
 }
@@ -82,7 +95,7 @@ pub fn lower_update_payload_request(stmt: &UpdatePayloadStmt) -> UpdatePayloadRe
     let (points, filter) = match &stmt.selector {
         PointSelector::Id(id) => (Some(vec![point_id_req(id)]), None),
         PointSelector::Ids(ids) => (Some(ids.iter().map(point_id_req).collect()), None),
-        PointSelector::Filter(filter) => (None, Some(lower_filter(filter))),
+        PointSelector::Filter(filter) => (None, Some(top_level_filter(filter))),
     };
     let mut payload = serde_json::Map::new();
     for (key, value) in &stmt.payload {
@@ -101,7 +114,7 @@ pub fn lower_scroll_request(
     after: Option<&qql_core::ast::PointId>,
 ) -> ScrollRequest {
     ScrollRequest {
-        filter: filter.map(lower_filter),
+        filter: filter.map(top_level_filter),
         offset: after.map(point_id_req),
         limit: Some(limit),
         with_payload: Some(PayloadSelectorReq::All(true)),
@@ -162,7 +175,7 @@ mod tests {
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(
             json["filter"],
-            serde_json::json!({"key": "status", "match": {"value": "inactive"}})
+            serde_json::json!({"must": [{"key": "status", "match": {"value": "inactive"}}]})
         );
     }
 

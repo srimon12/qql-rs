@@ -334,10 +334,24 @@ pub enum QueryVariant {
     Fusion {
         fusion: String,
     },
+    Rrf(RrfQuery),
     Formula(FormulaQuery),
     RelevanceFeedback {
         relevance_feedback: RelevanceFeedbackInput,
     },
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RrfParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub k: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub weights: Option<Vec<f64>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RrfQuery {
+    pub rrf: RrfParams,
 }
 
 #[derive(Debug, Clone, Serialize)]

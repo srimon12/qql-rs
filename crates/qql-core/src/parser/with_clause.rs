@@ -15,6 +15,8 @@ impl<'a> Parser<'a> {
                 "exact" => params.exact = Some(boolean(value, &key)?),
                 "acorn" => params.acorn = Some(boolean(value, &key)?),
                 "indexed_only" => params.indexed_only = Some(boolean(value, &key)?),
+                "rrf_k" | "k" => params.rrf_k = Some(positive_integer(value, &key)?),
+                "rrf_weights" | "weights" => params.rrf_weights = Some(float_list(value, &key)?),
                 "quantization" => {
                     params.quantization = Some(quantization(value)?);
                 }
@@ -167,4 +169,29 @@ fn quantization(value: Value) -> Result<QuantizationSearchParams, QqlError> {
         }
     }
     Ok(params)
+}
+
+fn float_list(value: Value, key: &str) -> Result<Vec<f64>, QqlError> {
+    let Value::List(items) = value else {
+        return Err(QqlError::validation(
+            "QQL-VALIDATION-SEARCH-PARAM",
+            alloc::format!("{} must be a list of numbers", key),
+            None,
+        ));
+    };
+    let mut res = Vec::new();
+    for item in items {
+        match item {
+            Value::Int(v) => res.push(v as f64),
+            Value::Float(v) => res.push(v),
+            _ => {
+                return Err(QqlError::validation(
+                    "QQL-VALIDATION-SEARCH-PARAM",
+                    alloc::format!("{} elements must be numbers", key),
+                    None,
+                ));
+            }
+        }
+    }
+    Ok(res)
 }

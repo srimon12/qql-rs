@@ -196,6 +196,8 @@ pub struct SearchParams {
     pub acorn: Option<bool>,
     pub indexed_only: Option<bool>,
     pub quantization: Option<QuantizationSearchParams>,
+    pub rrf_k: Option<u64>,
+    pub rrf_weights: Option<Vec<f64>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -259,11 +259,19 @@ fn executor(url: &str) -> Result<qql::executor::Executor, Box<dyn std::error::Er
         ))
     };
 
-    let embedder = if let Some(endpoint) = &config.embedding_endpoint {
+    let env_url = std::env::var("EMBED_URL").ok();
+    let embedder = if let Some(endpoint) = env_url.as_ref().or(config.embedding_endpoint.as_ref()) {
         if !endpoint.trim().is_empty() {
-            let api_key = config.embedding_api_key.clone().unwrap_or_default();
-            let model = config.embedding_model.clone().unwrap_or_default();
-            let dimension = config.embedding_dimension;
+            let api_key = std::env::var("EMBED_KEY")
+                .ok()
+                .unwrap_or_else(|| config.embedding_api_key.clone().unwrap_or_default());
+            let model = std::env::var("EMBED_MODEL")
+                .ok()
+                .unwrap_or_else(|| config.embedding_model.clone().unwrap_or_else(|| "all-minilm:l6-v2".to_string()));
+            let dimension = std::env::var("EMBED_DIM")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(if config.embedding_dimension > 0 { config.embedding_dimension } else { 384 });
             let http_emb =
                 qql::embedder::HttpEmbedder::new(endpoint.clone(), api_key, model, dimension)?;
             Some(std::sync::Arc::new(http_emb) as std::sync::Arc<dyn qql::embedder::Embedder>)

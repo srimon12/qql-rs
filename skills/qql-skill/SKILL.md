@@ -31,8 +31,8 @@ Translate user intent directly into QQL syntax:
 - Hybrid retrieval with DBSF fusion -> `QUERY HYBRID TEXT 'text' DENSE dense SPARSE sparse FUSION DBSF FROM <collection> LIMIT <n>`
 - Direct point retrieval by ID -> `QUERY POINTS (id1, id2, 'id3') FROM <collection>`
 - Recommendation by example -> `QUERY RECOMMEND POSITIVE (id1, id2) NEGATIVE (id3) STRATEGY average_vector FROM <collection> USING dense LIMIT <n>`
-- Context search -> `QUERY CONTEXT (POSITIVE id1 NEGATIVE id2) FROM <collection> USING dense LIMIT <n>`
-- Exploration / Discovery search -> `QUERY DISCOVER TARGET 'query_text' CONTEXT (POSITIVE id1 NEGATIVE id2) FROM <collection> USING dense LIMIT <n>`
+- Context search -> `QUERY CONTEXT (POSITIVE POINT id1 NEGATIVE POINT id2) FROM <collection> USING dense LIMIT <n>`
+- Exploration / Discovery search -> `QUERY DISCOVER TARGET POINT id1 CONTEXT (POSITIVE POINT id2 NEGATIVE POINT id3) FROM <collection> USING dense LIMIT <n>`
 - Relevance feedback search -> `QUERY RELEVANCE FEEDBACK TARGET 'query_text' FEEDBACK ((1, 0.9), (2, 0.1)) STRATEGY NAIVE (a=1.0, b=0.75, c=0.25) FROM <collection> USING dense LIMIT <n>`
 - Random sampling -> `QUERY SAMPLE RANDOM FROM <collection> LIMIT <n>`
 - Browse by payload field -> `QUERY ORDER BY <field> [ASC|DESC] FROM <collection> LIMIT <n>`

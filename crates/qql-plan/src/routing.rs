@@ -393,8 +393,8 @@ mod tests {
         let json = r.body_json().unwrap();
         assert_eq!(json["query"]["nearest"], "search");
         assert_eq!(json["using"], "dense");
-        assert_eq!(json["filter"]["key"], "status");
-        assert_eq!(json["filter"]["match"]["value"], "active");
+        assert_eq!(json["filter"]["must"][0]["key"], "status");
+        assert_eq!(json["filter"]["must"][0]["match"]["value"], "active");
         assert_eq!(json["params"]["hnsw_ef"], 256);
         assert_eq!(json["params"]["exact"], true);
         assert_eq!(json["score_threshold"], 0.5);

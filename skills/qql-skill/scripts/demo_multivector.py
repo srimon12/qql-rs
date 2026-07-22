@@ -25,12 +25,10 @@ def build_statements():
     stmts = []
 
     # ── 1. Create collection with 3 multivector vectors ─────────
-    # original: full ColPali representation (HNSW disabled for reranking)
-    # mean_pooling_columns / mean_pooling_rows: compressed for first-stage retrieval
     stmts.append(("create-collection", f"""CREATE COLLECTION {COLLECTION} (
-    original VECTOR(128, COSINE) WITH MULTIVECTOR (comparator = 'max_sim') WITH HNSW (m = 0),
-    mean_pooling_columns VECTOR(128, COSINE) WITH MULTIVECTOR (comparator = 'max_sim'),
-    mean_pooling_rows VECTOR(128, COSINE) WITH MULTIVECTOR (comparator = 'max_sim')
+    original VECTOR(3, COSINE) WITH MULTIVECTOR (comparator = 'max_sim') WITH HNSW (m = 0),
+    mean_pooling_columns VECTOR(3, COSINE) WITH MULTIVECTOR (comparator = 'max_sim'),
+    mean_pooling_rows VECTOR(3, COSINE) WITH MULTIVECTOR (comparator = 'max_sim')
 )"""))
 
     # ── 2. Create payload indexes ───────────────────────────────
@@ -40,10 +38,6 @@ def build_statements():
         f"CREATE INDEX ON COLLECTION {COLLECTION} FOR page_number TYPE integer"))
 
     # ── 3. Upsert with named multivector vectors ────────────────
-    # Each point has 3 vector representations:
-    #   - original: full ColPali output (e.g., 1030 vectors of dim 128)
-    #   - mean_pooling_columns: compressed by columns (e.g., 32 vectors)
-    #   - mean_pooling_rows: compressed by rows (e.g., 32 vectors)
     pages = [
         (1, "Introduction to Vector Databases", 1,
          [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]],
@@ -69,32 +63,30 @@ def build_statements():
 
     for pid, title, page, orig, col_pool, row_pool in pages:
         stmts.append((f"upsert-page-{pid}", f"""UPSERT INTO {COLLECTION} VALUES {{
-    'id': {pid},
-    'title': '{title}',
-    'page_number': {page},
-    'vector': {{
-        'original': {orig},
-        'mean_pooling_columns': {col_pool},
-        'mean_pooling_rows': {row_pool}
+    id: {pid},
+    title: '{title}',
+    page_number: {page},
+    vector: {{
+        original: {orig},
+        mean_pooling_columns: {col_pool},
+        mean_pooling_rows: {row_pool}
     }}
 }}"""))
 
     # ── 4. Two-stage retrieval: prefetch + rerank ───────────────
-    # Prefetch with mean-pooled vectors (fast, HNSW indexed)
-    # Rerank with original multivector (accurate, no HNSW)
     stmts.append(("pdf-retrieval-prefetch", f"""WITH
-    _pf0 AS (QUERY [0.1, 0.2, 0.3] USING 'mean_pooling_columns' LIMIT 100),
-    _pf1 AS (QUERY [0.1, 0.2, 0.3] USING 'mean_pooling_rows' LIMIT 100)
-QUERY [0.1, 0.2, 0.3] FROM {COLLECTION} USING 'original' LIMIT 5 PREFETCH (_pf0, _pf1)"""))
+    _pf0 AS (QUERY VECTOR [0.1, 0.2, 0.3] FROM {COLLECTION} USING mean_pooling_columns LIMIT 100),
+    _pf1 AS (QUERY VECTOR [0.1, 0.2, 0.3] FROM {COLLECTION} USING mean_pooling_rows LIMIT 100)
+QUERY VECTOR [0.1, 0.2, 0.3] FROM {COLLECTION} USING original PREFETCH (_pf0, _pf1) LIMIT 5"""))
 
     # ── 5. Single prefetch with filter ──────────────────────────
     stmts.append(("pdf-retrieval-filtered", f"""WITH
-    _pf0 AS (QUERY [0.1, 0.2, 0.3] USING 'mean_pooling_columns' LIMIT 50 WHERE page_number >= 2)
-QUERY [0.1, 0.2, 0.3] FROM {COLLECTION} USING 'original' LIMIT 3 PREFETCH (_pf0)"""))
+    _pf0 AS (QUERY VECTOR [0.1, 0.2, 0.3] FROM {COLLECTION} USING mean_pooling_columns WHERE page_number >= 2 LIMIT 50)
+QUERY VECTOR [0.1, 0.2, 0.3] FROM {COLLECTION} USING original PREFETCH (_pf0) LIMIT 3"""))
 
     # ── 6. Dense search on named vector ─────────────────────────
     stmts.append(("search-columns-only",
-        f"QUERY [0.1, 0.2, 0.3] FROM {COLLECTION} USING 'mean_pooling_columns' LIMIT 3"))
+        f"QUERY VECTOR [0.1, 0.2, 0.3] FROM {COLLECTION} USING mean_pooling_columns LIMIT 3"))
 
     # ── 7. Show collection ──────────────────────────────────────
     stmts.append(("show-collection", f"SHOW COLLECTION {COLLECTION}"))

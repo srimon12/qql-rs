@@ -466,11 +466,13 @@ fn to_query_variant(qv: &qql_plan::types::QueryVariant) -> Result<qdrant::Query,
         QueryVariant::Sample { .. } => Variant::Sample(0),
         QueryVariant::Fusion { fusion } => {
             let val = match fusion.as_str() {
-                "dbsf" => 1,
+                "rrf" => 1,
+                "dbsf" => 2,
                 _ => 0,
             };
             Variant::Fusion(val)
         }
+        QueryVariant::Rrf(_rrf_q) => Variant::Fusion(1),
         QueryVariant::Formula(fq) => Variant::Formula(qdrant::Formula {
             expression: to_formula_expression(&fq.formula),
             defaults: fq

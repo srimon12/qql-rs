@@ -232,9 +232,12 @@ QUERY TEXT 'incident response playbook' FROM runbooks
 **Problem:** Re-rank search results using payload signals (popularity, freshness) without an external reranker.
 
 ```sql
-QUERY FORMULA score + 0.3 * popularity + 0.1 * freshness DEFAULTS (popularity = 0.0, freshness = 0.0)
+WITH candidates AS (
+  QUERY TEXT 'vector database performance' FROM articles USING dense LIMIT 100
+)
+QUERY FORMULA (score * 0.7 + popularity * 0.3) DEFAULTS (popularity = 0.0)
   FROM articles
-  USING dense
+  PREFETCH (candidates)
   LIMIT 20;
 ```
 
@@ -242,12 +245,15 @@ QUERY FORMULA score + 0.3 * popularity + 0.1 * freshness DEFAULTS (popularity = 
 
 ## 12. Conditional Business Logic Scoring
 
-**Problem:** Apply different scoring logic for different content tiers — premium content gets a 2x boost, deprecated content sinks.
+**Problem:** Apply different scoring logic for different content tiers — premium content gets a 2.5x boost, low priority content is untouched.
 
 ```sql
-QUERY FORMULA score * (CASE WHEN category = 'premium' THEN 2.0 ELSE 1.0 END)
+WITH candidates AS (
+  QUERY TEXT 'clinical protocols' FROM documentation USING dense LIMIT 100
+)
+QUERY FORMULA (CASE WHEN priority = 'high' THEN score * 2.5 ELSE score END)
   FROM documentation
-  USING dense
+  PREFETCH (candidates)
   LIMIT 15;
 ```
 
@@ -255,12 +261,15 @@ QUERY FORMULA score * (CASE WHEN category = 'premium' THEN 2.0 ELSE 1.0 END)
 
 ## 13. Geo-Distance Decay
 
-**Problem:** Search for nearby restaurants, boosting closer providers with smooth Gaussian decay based on distance.
+**Problem:** Search for nearby emergency services, boosting closer providers with smooth Gaussian decay based on distance.
 
 ```sql
-QUERY FORMULA score * GAUSS_DECAY(GEO_DISTANCE(48.8566, 2.3522, location), 0.0, 5000.0, 0.5)
+WITH candidates AS (
+  QUERY TEXT 'emergency clinic' FROM restaurants USING dense LIMIT 100
+)
+QUERY FORMULA (score * GAUSS_DECAY(GEO_DISTANCE(48.8566, 2.3522, location), 0.0, 5000.0, 0.5)) DEFAULTS (location = {lat: 48.8566, lon: 2.3522})
   FROM restaurants
-  USING dense
+  PREFETCH (candidates)
   LIMIT 10;
 ```
 
@@ -271,9 +280,12 @@ QUERY FORMULA score * GAUSS_DECAY(GEO_DISTANCE(48.8566, 2.3522, location), 0.0, 
 **Problem:** Apply non-linear score transformations — logarithmic dampening for citation counts and square root for similarity scores.
 
 ```sql
-QUERY FORMULA SQRT(score) * LOG(citation_count + 1) DEFAULTS (citation_count = 0)
+WITH candidates AS (
+  QUERY TEXT 'quantum computing' FROM papers USING dense LIMIT 100
+)
+QUERY FORMULA (SQRT(score) * LOG(citation_count + 1)) DEFAULTS (citation_count = 0)
   FROM papers
-  USING dense
+  PREFETCH (candidates)
   LIMIT 20;
 ```
 
