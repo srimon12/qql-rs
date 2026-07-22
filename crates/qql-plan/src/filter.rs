@@ -7,19 +7,19 @@ pub fn lower_filter(filter: &FilterExpr) -> FilterExpression {
             must: operands.iter().map(lower_clause).collect(),
             must_not: Vec::new(),
             should: Vec::new(),
-            min_should: None,
+            shard_key: None,
         }),
         FilterExpr::Or { operands } => FilterExpression::Compound(FilterCompound {
             must: Vec::new(),
             must_not: Vec::new(),
             should: operands.iter().map(lower_clause).collect(),
-            min_should: None,
+            shard_key: None,
         }),
         FilterExpr::Not { operand } => FilterExpression::Compound(FilterCompound {
             must: Vec::new(),
             must_not: vec![lower_clause(operand)],
             should: Vec::new(),
-            min_should: None,
+            shard_key: None,
         }),
         other => FilterExpression::Single(Box::new(lower_clause(other))),
     }
@@ -32,7 +32,7 @@ pub fn top_level_filter(filter: &FilterExpr) -> FilterExpression {
             must: vec![*clause],
             must_not: Vec::new(),
             should: Vec::new(),
-            min_should: None,
+            shard_key: None,
         }),
         other => other,
     }
@@ -100,19 +100,19 @@ fn lower_clause(filter: &FilterExpr) -> FilterClause {
             must: operands.iter().map(lower_clause).collect(),
             must_not: Vec::new(),
             should: Vec::new(),
-            min_should: None,
+            shard_key: None,
         })),
         FilterExpr::Or { operands } => FilterClause::Filter(Box::new(FilterCompound {
             must: Vec::new(),
             must_not: Vec::new(),
             should: operands.iter().map(lower_clause).collect(),
-            min_should: None,
+            shard_key: None,
         })),
         FilterExpr::Not { operand } => FilterClause::Filter(Box::new(FilterCompound {
             must: Vec::new(),
             must_not: vec![lower_clause(operand)],
             should: Vec::new(),
-            min_should: None,
+            shard_key: None,
         })),
     }
 }

@@ -8,6 +8,7 @@ use serde_json::Value;
 use qql_core::error::QqlError;
 use qql_plan::routing::Route;
 use qql_plan::types::Method as PlanMethod;
+use qql_plan::QueryBatchRequest;
 
 use crate::backend::CollectionSchema;
 use crate::client::{CollectionInfo, CreateCollectionReq, CreateFieldIndexReq, QdrantOps};
@@ -315,5 +316,21 @@ impl QdrantOps for RestQdrant {
         }
 
         self.call_body(method, &path, route.body.as_ref()).await
+    }
+
+    async fn execute_query_batch(
+        &self,
+        collection: &str,
+        batch: &QueryBatchRequest,
+    ) -> Result<Vec<Value>, QqlError> {
+        let path = format!("/collections/{collection}/points/query/batch");
+        let value: Value = self
+            .call_body(Method::POST, &path, Some(batch))
+            .await?;
+        Ok(value
+            .get("result")
+            .and_then(|r| r.as_array())
+            .cloned()
+            .unwrap_or_default())
     }
 }

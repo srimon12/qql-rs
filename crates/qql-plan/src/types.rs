@@ -65,7 +65,14 @@ pub struct FilterCompound {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub should: Vec<FilterClause>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub min_should: Option<MinShould>,
+    pub shard_key: Option<String>,
+}
+
+/// Wraps multiple `QueryRequest`s for Qdrant's `/points/query/batch` endpoint.
+/// All queries must target the same collection.
+#[derive(Debug, Clone, Serialize)]
+pub struct QueryBatchRequest {
+    pub searches: Vec<QueryRequest>,
 }
 
 #[derive(Debug, Clone, Serialize)]

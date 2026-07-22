@@ -27,6 +27,7 @@ use qql::backend::{CollectionInfo, CollectionSchema};
 use qql::client::{CreateCollectionReq, CreateFieldIndexReq, QdrantOps};
 use qql_core::error::QqlError;
 use qql_plan::routing::{RequestBody, Route};
+use qql_plan::QueryBatchRequest;
 
 pub struct EdgeQdrant {
     base_path: PathBuf,
@@ -731,6 +732,25 @@ impl QdrantOps for EdgeQdrant {
                 )),
             },
         }
+    }
+
+    async fn execute_query_batch(
+        &self,
+        collection: &str,
+        batch: &QueryBatchRequest,
+    ) -> Result<Vec<serde_json::Value>, QqlError> {
+        let path = format!("/collections/{collection}/points/query");
+        let mut results = Vec::with_capacity(batch.searches.len());
+        for req in &batch.searches {
+            let route = Route {
+                method: qql_plan::types::Method::Post,
+                path: path.clone(),
+                query: Vec::new(),
+                body: Some(RequestBody::Query(Box::new(req.clone()))),
+            };
+            results.push(self.execute_route(route).await?);
+        }
+        Ok(results)
     }
 }
 

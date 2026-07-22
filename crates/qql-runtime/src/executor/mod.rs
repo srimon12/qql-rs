@@ -4,12 +4,13 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json;
 
-use qql_core::ast::Stmt;
+use qql_core::ast::{self, Stmt};
 use qql_core::error::QqlError;
 use qql_core::parser;
 
 use crate::config::QqlConfig;
 use crate::embedder::Embedder;
+use crate::executor::dml::query::extract_search_hits;
 
 pub const DENSE_VECTOR_NAME: &str = "dense";
 pub const SPARSE_VECTOR_NAME: &str = "sparse";
@@ -202,13 +203,82 @@ impl Executor {
         Ok(results)
     }
 
+    /// Execute pre-parsed statements.  Same-collection QUERY statements are
+    /// automatically grouped into one network call via Qdrant's batch endpoint.
     pub async fn execute_batch_nodes(
         &self,
         stmts: Vec<Stmt>,
         stop_on_error: bool,
     ) -> Result<Vec<ExecResponse>, QqlError> {
-        let mut results = Vec::with_capacity(stmts.len());
+        let mut results: Vec<ExecResponse> = Vec::with_capacity(stmts.len());
+
+        // ── Phase 1: separate queries from mutations ──────────────
+        let mut query_groups: HashMap<String, Vec<ast::QueryStmt>> = HashMap::new();
+        let mut non_queries: Vec<Stmt> = Vec::new();
+
         for stmt in stmts {
+            match stmt {
+                Stmt::Query(q) => {
+                    if let ast::QueryCollection::Explicit(ref name) = q.collection {
+                        query_groups.entry(name.clone()).or_default().push(*q);
+                    } else {
+                        non_queries.push(Stmt::Query(q));
+                    }
+                }
+                other => non_queries.push(other),
+            }
+        }
+
+        // ── Phase 2: execute batched queries ──────────────────────
+        for (_collection, queries) in query_groups {
+            let batches = qql_plan::routing::route_query_batch(&queries);
+            for (coll, batch) in batches {
+                match self
+                    .client
+                    .execute_query_batch(&coll, &batch)
+                    .await
+                {
+                    Ok(responses) => {
+                        for val in responses {
+                            let hits = extract_search_hits(&val);
+                            results.push(ExecResponse {
+                                ok: true,
+                                operation: "QUERY".to_string(),
+                                message: format!("Found {} hits", hits.len()),
+                                data: Some(serde_json::to_value(hits).unwrap_or_default()),
+                            });
+                        }
+                    }
+                    Err(e) => {
+                        if stop_on_error {
+                            return Err(e);
+                        }
+                        results.push(ExecResponse {
+                            ok: false,
+                            operation: "QUERY".to_string(),
+                            message: e.to_string(),
+                            data: None,
+                        });
+                    }
+                }
+            }
+            // Any queries that weren't batched (singletons, non-batchable variants)
+            // get executed individually.
+            let remaining: Vec<_> = queries
+                .into_iter()
+                .filter(|q| {
+                    // Keep queries that didn't go through the batch
+                    matches!(q.expression, ast::QueryExpr::Points { .. })
+                        || q.group.is_some()
+                })
+                .collect();
+            for q in remaining {
+                results.push(self.single_query_exec(q).await);
+            }
+        }
+
+        // ── Phase 3: execute non-query statements individually ───
+        for stmt in non_queries {
             match self.execute_node(stmt).await {
                 Ok(resp) => results.push(resp),
                 Err(err) => {
@@ -224,7 +294,20 @@ impl Executor {
                 }
             }
         }
+
         Ok(results)
+    }
+
+    async fn single_query_exec(&self, stmt: ast::QueryStmt) -> ExecResponse {
+        match self.do_query(stmt).await {
+            Ok(r) => r,
+            Err(e) => ExecResponse {
+                ok: false,
+                operation: "QUERY".to_string(),
+                message: e.to_string(),
+                data: None,
+            },
+        }
     }
 
     pub async fn query_batch(&self, queries: &[&str]) -> Result<Vec<ExecResponse>, QqlError> {

@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use qql_core::ast::Value;
 use qql_core::error::QqlError;
 use qql_plan::routing::Route;
+use qql_plan::QueryBatchRequest;
 use std::collections::HashMap;
 
 pub use crate::backend::{CollectionInfo, Filter as QdrantFilter, PointId, ScoredPoint};
@@ -89,4 +90,12 @@ pub trait QdrantOps: QdrantOpsBound {
         field_name: &str,
     ) -> Result<(), QqlError>;
     async fn execute_route(&self, route: Route) -> Result<serde_json::Value, QqlError>;
+
+    /// Send multiple `QueryRequest`s to the same collection in one network call
+    /// via Qdrant's `/points/query/batch` (REST) or `QueryBatch` (gRPC) endpoint.
+    async fn execute_query_batch(
+        &self,
+        collection: &str,
+        batch: &QueryBatchRequest,
+    ) -> Result<Vec<serde_json::Value>, QqlError>;
 }

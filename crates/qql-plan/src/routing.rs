@@ -6,7 +6,7 @@ use crate::mutation::{
 };
 use crate::query::lower_query_request;
 use crate::types::*;
-use qql_core::ast::{QueryCollection, QueryExpr, Stmt};
+use qql_core::ast::{QueryCollection, QueryExpr, QueryStmt, Stmt};
 
 #[derive(serde::Serialize)]
 #[serde(untagged)]
@@ -267,6 +267,37 @@ pub fn route(statement: &Stmt) -> Route {
             body: None,
         },
     }
+}
+
+/// Groups QUERY statements by collection and produces one `QueryBatchRequest`
+/// per unique collection.  Only standard queries (non-`Points`, non-grouped)
+/// are batched.  Returns an empty vec when fewer than 2 queries share a
+/// collection — single queries use the normal `route()` path.
+pub fn route_query_batch(stmts: &[QueryStmt]) -> Vec<(String, QueryBatchRequest)> {
+    let mut groups: std::collections::HashMap<String, Vec<QueryRequest>> =
+        std::collections::HashMap::new();
+
+    for stmt in stmts {
+        // Skip non-batchable variants — Points lookups and grouped queries
+        // use different Qdrant endpoints.
+        if matches!(stmt.expression, QueryExpr::Points { .. }) || stmt.group.is_some() {
+            continue;
+        }
+        let collection = match &stmt.collection {
+            QueryCollection::Explicit(name) => name.clone(),
+            QueryCollection::Inherited => continue,
+        };
+        groups
+            .entry(collection)
+            .or_default()
+            .push(lower_query_request(stmt));
+    }
+
+    groups
+        .into_iter()
+        .filter(|(_, reqs)| reqs.len() > 1) // single queries use the normal route
+        .map(|(collection, searches)| (collection, QueryBatchRequest { searches }))
+        .collect()
 }
 
 #[cfg(test)]

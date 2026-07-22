@@ -464,6 +464,37 @@ pub async fn execute_grpc_route(
     }
 }
 
+/// Convert a batch of QueryRequests and send them via gRPC `QueryBatch`.
+pub async fn execute_query_batch_grpc(
+    client: &crate::grpc::GrpcQdrant,
+    collection: &str,
+    batch: &qql_plan::QueryBatchRequest,
+) -> Result<Vec<serde_json::Value>, QqlError> {
+    let query_points: Result<Vec<_>, _> = batch
+        .searches
+        .iter()
+        .map(|req| to_query_points(req, collection))
+        .collect();
+    let query_points = query_points?;
+
+    let grpc_req = qdrant::QueryBatchPoints {
+        collection_name: collection.to_string(),
+        query_points,
+        ..Default::default()
+    };
+
+    let resp = client
+        .query_batch(grpc_req)
+        .await
+        .map_err(|e| QqlError::backend("QQL-GRPC", format!("query_batch: {e}"), None))?;
+
+    Ok(resp
+        .result
+        .into_iter()
+        .map(crate::grpc_route::batch_result_to_json)
+        .collect())
+}
+
 fn to_query_points(
     req: &qql_plan::types::QueryRequest,
     collection: &str,
@@ -1403,6 +1434,11 @@ fn groups_result_to_json(r: qdrant::GroupsResult) -> serde_json::Value {
     serde_json::json!({
         "groups": r.groups.into_iter().map(point_group_to_json).collect::<Vec<_>>(),
     })
+}
+
+fn batch_result_to_json(r: qdrant::BatchResult) -> serde_json::Value {
+    let points: Vec<_> = r.result.into_iter().map(scored_point_to_json).collect();
+    serde_json::json!({ "result": { "points": points } })
 }
 
 fn point_group_to_json(g: qdrant::PointGroup) -> serde_json::Value {

@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use qql_core::error::QqlError;
 use qql_plan::routing::Route;
+use qql_plan::QueryBatchRequest;
 
 use crate::client::{CollectionInfo, CreateCollectionReq, CreateFieldIndexReq, QdrantOps};
 use crate::config::QqlConfig;
@@ -18,6 +19,8 @@ struct MockQdrantClient {
     pub last_create_collection: Arc<Mutex<Option<CreateCollectionReq>>>,
     pub last_update_collection: Arc<Mutex<Option<serde_json::Value>>>,
     pub last_route: Arc<Mutex<Option<Route>>>,
+    pub batch_call_count: Arc<Mutex<usize>>,
+    pub last_batch_searches_count: Arc<Mutex<usize>>,
 }
 
 impl Default for MockQdrantClient {
@@ -29,6 +32,8 @@ impl Default for MockQdrantClient {
             last_create_collection: Arc::new(Mutex::new(None)),
             last_update_collection: Arc::new(Mutex::new(None)),
             last_route: Arc::new(Mutex::new(None)),
+            batch_call_count: Arc::new(Mutex::new(0)),
+            last_batch_searches_count: Arc::new(Mutex::new(0)),
         }
     }
 }
@@ -78,6 +83,20 @@ impl QdrantOps for MockQdrantClient {
         }
         *self.last_route.lock().unwrap() = Some(route);
         Ok(serde_json::json!({"result": {"points": []}}))
+    }
+
+    async fn execute_query_batch(
+        &self,
+        _collection: &str,
+        batch: &QueryBatchRequest,
+    ) -> Result<Vec<serde_json::Value>, QqlError> {
+        *self.batch_call_count.lock().unwrap() += 1;
+        *self.last_batch_searches_count.lock().unwrap() = batch.searches.len();
+        Ok(batch
+            .searches
+            .iter()
+            .map(|_| serde_json::json!({"result": {"points": []}}))
+            .collect())
     }
 }
 fn test_config() -> QqlConfig {
@@ -420,4 +439,34 @@ async fn test_upsert_bad_types() {
     let resp = executor.execute(query).await;
     // Actually, qql parser allows this since schema is flexible.
     assert!(resp.is_ok(), "{:?}", resp.err());
+}
+
+#[tokio::test]
+async fn test_batch_query_groups_same_collection() {
+    let mut client = MockQdrantClient::default();
+    client.info = Some(CollectionInfo::default()); // unnamed vector → passes check
+    let batch_count = client.batch_call_count.clone();
+    let searches_count = client.last_batch_searches_count.clone();
+
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+
+    let resp = qql_core::parser::Parser::parse_all(
+        "QUERY TEXT 'a' FROM docs USING dense LIMIT 1;\
+         QUERY TEXT 'b' FROM docs USING dense LIMIT 1;\
+         QUERY TEXT 'c' FROM docs USING dense LIMIT 1;",
+    )
+    .unwrap();
+    let results = executor.execute_batch_nodes(resp, false).await.unwrap();
+
+    // 3 queries, 3 results, 1 batch call
+    assert_eq!(results.len(), 3, "expected 3 results");
+    for r in &results {
+        assert!(r.ok, "result should be ok: {:?}", r);
+    }
+
+    let calls = *batch_count.lock().unwrap();
+    assert_eq!(calls, 1, "expected 1 batch call, got {calls}");
+
+    let count = *searches_count.lock().unwrap();
+    assert_eq!(count, 3, "expected 3 searches in batch, got {count}");
 }

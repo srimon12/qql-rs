@@ -240,7 +240,7 @@ fn check_named_vectors(collection: &str, info: &CollectionInfo) -> Result<(), Qq
     ))
 }
 
-fn extract_search_hits(result: &serde_json::Value) -> Vec<SearchHit> {
+pub(crate) fn extract_search_hits(result: &serde_json::Value) -> Vec<SearchHit> {
     let points = result
         .get("result")
         .and_then(|r| r.get("points"))
