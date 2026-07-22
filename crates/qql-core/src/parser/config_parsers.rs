@@ -313,27 +313,46 @@ impl<'a> Parser<'a> {
                 )?,
                 on_disk_payload: config_bool(&config, "on_disk_payload"),
                 shard_number: config_positive_u64(&config, "shard_number", self.peek()?.pos)?,
-                sharding_method: config_value(&config, "sharding_method").and_then(|v| match v {
-                    Value::Str(s) => Some(s.clone()),
-                    _ => None,
-                }),
-                shard_keys: config_value(&config, "shard_keys").and_then(|v| match v {
-                    Value::List(items) => {
-                        let keys: Vec<String> = items
-                            .iter()
-                            .filter_map(|item| match item {
-                                Value::Str(s) => Some(s.clone()),
-                                _ => None,
-                            })
-                            .collect();
-                        if keys.is_empty() {
-                            None
-                        } else {
-                            Some(keys)
-                        }
+                sharding_method: match config_value(&config, "sharding_method") {
+                    Some(Value::Str(s)) => Some(s.clone()),
+                    Some(_) => {
+                        return Err(QqlError::syntax(
+                            "sharding_method must be a string ('auto' or 'custom')",
+                            self.peek()?.pos,
+                        ));
                     }
-                    _ => None,
-                }),
+                    None => None,
+                },
+                shard_keys: match config_value(&config, "shard_keys") {
+                    Some(Value::List(items)) => {
+                        let mut keys = Vec::with_capacity(items.len());
+                        for item in items {
+                            match item {
+                                Value::Str(s) => keys.push(s.clone()),
+                                _ => {
+                                    return Err(QqlError::syntax(
+                                        "shard_keys entries must all be strings",
+                                        self.peek()?.pos,
+                                    ));
+                                }
+                            }
+                        }
+                        if keys.is_empty() {
+                            return Err(QqlError::syntax(
+                                "shard_keys must be a non-empty list of strings",
+                                self.peek()?.pos,
+                            ));
+                        }
+                        Some(keys)
+                    }
+                    Some(_) => {
+                        return Err(QqlError::syntax(
+                            "shard_keys must be a list of strings",
+                            self.peek()?.pos,
+                        ));
+                    }
+                    None => None,
+                },
             })),
             quantization: None,
             quantization_update: None,

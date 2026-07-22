@@ -23,10 +23,28 @@ fn extract_collection(path: &str) -> Result<String, QqlError> {
     }
 }
 
+fn shard_key_selector(key: &Option<String>) -> Option<qdrant::ShardKeySelector> {
+    key.as_ref().map(|k| qdrant::ShardKeySelector {
+        shard_keys: vec![qdrant::ShardKey {
+            key: Some(qdrant::shard_key::Key::Keyword(k.clone())),
+        }],
+        ..Default::default()
+    })
+}
+
+fn shard_key_from_route(route: &Route) -> Option<String> {
+    route
+        .query
+        .iter()
+        .find(|(k, _)| k == "shard_key")
+        .map(|(_, v)| v.clone())
+}
+
 pub async fn execute_grpc_route(
     client: &crate::grpc::GrpcQdrant,
     route: Route,
 ) -> Result<serde_json::Value, QqlError> {
+    let route_shard = shard_key_from_route(&route);
     match route.body {
         Some(RequestBody::Query(req)) => {
             let collection = extract_collection(&route.path)?;
@@ -84,6 +102,8 @@ pub async fn execute_grpc_route(
                 limit: req.limit.map(|l| l as u32),
                 with_payload: req.with_payload.as_ref().map(to_payload_selector),
                 with_vectors: req.with_vector.as_ref().map(to_vectors_selector),
+                shard_key_selector: shard_key_selector(&req.shard_key)
+                    .or_else(|| shard_key_selector(&route_shard)),
                 ..Default::default()
             };
             let resp = client
@@ -129,6 +149,8 @@ pub async fn execute_grpc_route(
                 collection_name: collection,
                 wait: Some(true),
                 points,
+                shard_key_selector: shard_key_selector(&req.shard_key)
+                    .or_else(|| shard_key_selector(&route_shard)),
                 ..Default::default()
             };
             client
@@ -160,6 +182,8 @@ pub async fn execute_grpc_route(
                 collection_name: collection,
                 wait: Some(true),
                 points: selector,
+                shard_key_selector: shard_key_selector(&req.shard_key)
+                    .or_else(|| shard_key_selector(&route_shard)),
                 ..Default::default()
             };
             client
@@ -366,6 +390,8 @@ pub async fn execute_grpc_route(
                 collection_name: collection,
                 filter: req.filter.as_ref().map(to_filter),
                 exact: req.exact,
+                shard_key_selector: shard_key_selector(&req.shard_key)
+                    .or_else(|| shard_key_selector(&route_shard)),
                 ..Default::default()
             };
             let resp = client
@@ -728,6 +754,7 @@ fn to_query_points(
         offset: req.offset,
         with_payload: req.with_payload.as_ref().map(to_payload_selector),
         with_vectors: req.with_vector.as_ref().map(to_vectors_selector),
+        shard_key_selector: shard_key_selector(&req.shard_key),
         ..Default::default()
     })
 }
@@ -760,6 +787,7 @@ fn to_query_groups(
                 with_vectors: wl.with_vectors.as_ref().map(to_vectors_selector),
             },
         }),
+        shard_key_selector: shard_key_selector(&req.shard_key),
         ..Default::default()
     })
 }
@@ -893,6 +921,26 @@ fn to_query_variant(qv: &qql_plan::types::QueryVariant) -> Result<qdrant::Query,
     })
 }
 
+fn looks_like_uuid(s: &str) -> bool {
+    // Qdrant string point IDs are UUIDs. Heuristic: 8-4-4-4-12 hex with dashes.
+    let b = s.as_bytes();
+    if b.len() != 36 {
+        return false;
+    }
+    let is_hex = |c: u8| c.is_ascii_hexdigit();
+    let positions_dash = [8usize, 13, 18, 23];
+    for (i, &c) in b.iter().enumerate() {
+        if positions_dash.contains(&i) {
+            if c != b'-' {
+                return false;
+            }
+        } else if !is_hex(c) {
+            return false;
+        }
+    }
+    true
+}
+
 fn to_vector_input(val: serde_json::Value) -> qdrant::VectorInput {
     use qdrant::vector_input::Variant;
     if let Some(n) = val.as_u64() {
@@ -903,6 +951,16 @@ fn to_vector_input(val: serde_json::Value) -> qdrant::VectorInput {
         };
     }
     if let Some(s) = val.as_str() {
+        // Bare strings are ExtendedPointId (UUID) on the OpenAPI wire, not documents.
+        // Free-text documents always serialize as {"text":..., "model":...}.
+        if looks_like_uuid(s) {
+            return qdrant::VectorInput {
+                variant: Some(Variant::Id(qdrant::PointId {
+                    point_id_options: Some(qdrant::point_id::PointIdOptions::Uuid(s.into())),
+                })),
+            };
+        }
+        // Non-UUID bare strings: treat as document text (plan legacy text without model).
         return qdrant::VectorInput {
             variant: Some(Variant::Document(qdrant::Document {
                 text: s.into(),
@@ -911,13 +969,25 @@ fn to_vector_input(val: serde_json::Value) -> qdrant::VectorInput {
         };
     }
     if let Some(arr) = val.as_array() {
-        let data: Vec<f32> = arr
-            .iter()
-            .filter_map(|v| v.as_f64().map(|f| f as f32))
-            .collect();
-        return qdrant::VectorInput {
-            variant: Some(Variant::Dense(qdrant::DenseVector { data })),
-        };
+        // Multidense: array of arrays
+        if arr.first().map(|v| v.is_array()).unwrap_or(false) {
+            if let Some(vectors) = arr
+                .iter()
+                .map(|row| {
+                    let data = json_f32_array(row.as_array()?)?;
+                    Some(qdrant::DenseVector { data })
+                })
+                .collect::<Option<Vec<_>>>()
+            {
+                return qdrant::VectorInput {
+                    variant: Some(Variant::MultiDense(qdrant::MultiDenseVector { vectors })),
+                };
+            }
+        } else if let Some(data) = json_f32_array(arr) {
+            return qdrant::VectorInput {
+                variant: Some(Variant::Dense(qdrant::DenseVector { data })),
+            };
+        }
     }
     if let Some(obj) = val.as_object() {
         if let Some(text) = obj.get("text").and_then(|v| v.as_str()) {
@@ -932,6 +1002,22 @@ fn to_vector_input(val: serde_json::Value) -> qdrant::VectorInput {
                     ..Default::default()
                 })),
             };
+        }
+        // Sparse query vector
+        if let (Some(indices), Some(values)) = (obj.get("indices"), obj.get("values")) {
+            if let (Some(idx_arr), Some(val_arr)) = (indices.as_array(), values.as_array()) {
+                if let (Some(indices), Some(values)) = (
+                    idx_arr
+                        .iter()
+                        .map(|v| v.as_u64().map(|n| n as u32))
+                        .collect::<Option<Vec<_>>>(),
+                    json_f32_array(val_arr),
+                ) {
+                    return qdrant::VectorInput {
+                        variant: Some(Variant::Sparse(qdrant::SparseVector { indices, values })),
+                    };
+                }
+            }
         }
     }
     qdrant::VectorInput { variant: None }
@@ -1040,6 +1126,51 @@ fn to_condition(clause: &FilterClause) -> qdrant::Condition {
     }
 }
 
+fn exact_list_match(values: &[serde_json::Value], any: bool) -> qdrant::Match {
+    use qdrant::r#match::MatchValue as Mv;
+    let all_strings = values.iter().all(|v| v.is_string());
+    let all_ints = values.iter().all(|v| v.as_i64().is_some() || v.as_u64().is_some());
+    if all_strings {
+        let strings: Vec<String> = values
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
+        return qdrant::Match {
+            match_value: Some(if any {
+                Mv::Keywords(qdrant::RepeatedStrings { strings })
+            } else {
+                Mv::ExceptKeywords(qdrant::RepeatedStrings { strings })
+            }),
+        };
+    }
+    if all_ints {
+        let integers: Vec<i64> = values
+            .iter()
+            .filter_map(|v| v.as_i64().or_else(|| v.as_u64().map(|n| n as i64)))
+            .collect();
+        return qdrant::Match {
+            match_value: Some(if any {
+                Mv::Integers(qdrant::RepeatedIntegers { integers })
+            } else {
+                Mv::ExceptIntegers(qdrant::RepeatedIntegers { integers })
+            }),
+        };
+    }
+    // Mixed types: keep keywords for string-only entries (lossy but never invent ints).
+    // Prefer empty over wrong semantics when types mix — still map strings.
+    let strings: Vec<String> = values
+        .iter()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect();
+    qdrant::Match {
+        match_value: Some(if any {
+            Mv::Keywords(qdrant::RepeatedStrings { strings })
+        } else {
+            Mv::ExceptKeywords(qdrant::RepeatedStrings { strings })
+        }),
+    }
+}
+
 fn to_match(mv: &MatchValue) -> qdrant::Match {
     use qdrant::r#match::MatchValue as Mv;
     match mv {
@@ -1066,22 +1197,8 @@ fn to_match(mv: &MatchValue) -> qdrant::Match {
         MatchValue::TextAny { text } => qdrant::Match {
             match_value: Some(Mv::TextAny(text.clone())),
         },
-        MatchValue::Any { any } => qdrant::Match {
-            match_value: Some(Mv::Keywords(qdrant::RepeatedStrings {
-                strings: any
-                    .iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect(),
-            })),
-        },
-        MatchValue::Except { except } => qdrant::Match {
-            match_value: Some(Mv::ExceptKeywords(qdrant::RepeatedStrings {
-                strings: except
-                    .iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect(),
-            })),
-        },
+        MatchValue::Any { any } => exact_list_match(any, true),
+        MatchValue::Except { except } => exact_list_match(except, false),
         MatchValue::Phrase { phrase } => qdrant::Match {
             match_value: Some(Mv::Phrase(phrase.clone())),
         },
@@ -1146,40 +1263,91 @@ fn to_search_params(params: &qql_plan::types::SearchParamsRequest) -> qdrant::Se
         hnsw_ef: params.hnsw_ef,
         exact: params.exact,
         indexed_only: params.indexed_only,
-        ..Default::default()
+        quantization: params.quantization.as_ref().map(|q| {
+            qdrant::QuantizationSearchParams {
+                ignore: q.ignore,
+                rescore: q.rescore,
+                oversampling: q.oversampling,
+            }
+        }),
+        acorn: params.acorn.as_ref().map(|a| qdrant::AcornSearchParams {
+            enable: Some(a.enable),
+            max_selectivity: a.max_selectivity,
+        }),
     }
 }
 
-fn to_vectors(val: serde_json::Value) -> Option<qdrant::Vectors> {
+fn json_f32_array(arr: &[serde_json::Value]) -> Option<Vec<f32>> {
+    let mut out = Vec::with_capacity(arr.len());
+    for v in arr {
+        out.push(v.as_f64()? as f32);
+    }
+    Some(out)
+}
+
+fn json_to_vector(val: &serde_json::Value) -> Option<qdrant::Vector> {
+    // Sparse: { "indices": [...], "values": [...] }
+    if let Some(obj) = val.as_object() {
+        if let (Some(indices), Some(values)) = (obj.get("indices"), obj.get("values")) {
+            let indices = indices
+                .as_array()?
+                .iter()
+                .map(|v| v.as_u64().map(|n| n as u32))
+                .collect::<Option<Vec<_>>>()?;
+            let values = json_f32_array(values.as_array()?)?;
+            return Some(qdrant::Vector {
+                vector: Some(qdrant::vector::Vector::Sparse(qdrant::SparseVector {
+                    indices,
+                    values,
+                })),
+                ..Default::default()
+            });
+        }
+    }
     if let Some(arr) = val.as_array() {
-        let data: Vec<f32> = arr
-            .iter()
-            .filter_map(|v| v.as_f64().map(|f| f as f32))
-            .collect();
-        let vector = qdrant::Vector {
+        // Multidense: [[f32, ...], ...]
+        if arr.first().map(|v| v.is_array()).unwrap_or(false) {
+            let vectors = arr
+                .iter()
+                .map(|row| {
+                    let data = json_f32_array(row.as_array()?)?;
+                    Some(qdrant::DenseVector { data })
+                })
+                .collect::<Option<Vec<_>>>()?;
+            return Some(qdrant::Vector {
+                vector: Some(qdrant::vector::Vector::MultiDense(
+                    qdrant::MultiDenseVector { vectors },
+                )),
+                ..Default::default()
+            });
+        }
+        // Dense
+        let data = json_f32_array(arr)?;
+        return Some(qdrant::Vector {
             vector: Some(qdrant::vector::Vector::Dense(qdrant::DenseVector { data })),
             ..Default::default()
-        };
+        });
+    }
+    None
+}
+
+fn to_vectors(val: serde_json::Value) -> Option<qdrant::Vectors> {
+    // Unnamed dense / sparse / multidense
+    if let Some(vector) = json_to_vector(&val) {
         return Some(qdrant::Vectors {
             vectors_options: Some(qdrant::vectors::VectorsOptions::Vector(vector)),
         });
     }
+    // Named map
     if let Some(obj) = val.as_object() {
         let mut map = std::collections::HashMap::new();
         for (name, v) in obj {
-            if let Some(arr) = v.as_array() {
-                let data: Vec<f32> = arr
-                    .iter()
-                    .filter_map(|f| f.as_f64().map(|x| x as f32))
-                    .collect();
-                map.insert(
-                    name.clone(),
-                    qdrant::Vector {
-                        vector: Some(qdrant::vector::Vector::Dense(qdrant::DenseVector { data })),
-                        ..Default::default()
-                    },
-                );
+            if let Some(vector) = json_to_vector(v) {
+                map.insert(name.clone(), vector);
             }
+        }
+        if map.is_empty() {
+            return None;
         }
         return Some(qdrant::Vectors {
             vectors_options: Some(qdrant::vectors::VectorsOptions::Vectors(
@@ -1192,17 +1360,25 @@ fn to_vectors(val: serde_json::Value) -> Option<qdrant::Vectors> {
 
 fn to_formula_expression(val: &serde_json::Value) -> Option<qdrant::Expression> {
     use qdrant::expression::Variant;
+    // OpenAPI Expression: bare number / bare string / one-key objects with snake_case keys.
     match val {
+        serde_json::Value::Number(n) => n.as_f64().map(|f| qdrant::Expression {
+            variant: Some(Variant::Constant(f as f32)),
+        }),
+        serde_json::Value::String(s) => Some(qdrant::Expression {
+            variant: Some(Variant::Variable(s.clone())),
+        }),
         serde_json::Value::Object(obj) if obj.len() == 1 => {
             let (key, val) = obj.iter().next()?;
             match key.as_str() {
-                "Constant" => val.as_f64().map(|f| qdrant::Expression {
+                // REST dialect (qql-plan output) + legacy PascalCase keys
+                "Constant" | "constant" => val.as_f64().map(|f| qdrant::Expression {
                     variant: Some(Variant::Constant(f as f32)),
                 }),
-                "Variable" => val.as_str().map(|s| qdrant::Expression {
+                "Variable" | "variable" => val.as_str().map(|s| qdrant::Expression {
                     variant: Some(Variant::Variable(s.to_string())),
                 }),
-                "Add" => {
+                "sum" | "Add" => {
                     let terms: Vec<qdrant::Expression> = val
                         .as_array()?
                         .iter()
@@ -1212,19 +1388,7 @@ fn to_formula_expression(val: &serde_json::Value) -> Option<qdrant::Expression> 
                         variant: Some(Variant::Sum(qdrant::SumExpression { sum: terms })),
                     })
                 }
-                "Subtract" => {
-                    let arr = val.as_array()?;
-                    let left = to_formula_expression(&arr[0])?;
-                    let right = qdrant::Expression {
-                        variant: Some(Variant::Neg(Box::new(to_formula_expression(&arr[1])?))),
-                    };
-                    Some(qdrant::Expression {
-                        variant: Some(Variant::Sum(qdrant::SumExpression {
-                            sum: vec![left, right],
-                        })),
-                    })
-                }
-                "Multiply" => {
+                "mult" | "Multiply" => {
                     let terms: Vec<qdrant::Expression> = val
                         .as_array()?
                         .iter()
@@ -1234,7 +1398,7 @@ fn to_formula_expression(val: &serde_json::Value) -> Option<qdrant::Expression> 
                         variant: Some(Variant::Mult(qdrant::MultExpression { mult: terms })),
                     })
                 }
-                "Divide" => {
+                "div" | "Divide" => {
                     let obj = val.as_object()?;
                     let left = to_formula_expression(obj.get("left")?)?;
                     let right = to_formula_expression(obj.get("right")?)?;
@@ -1250,78 +1414,91 @@ fn to_formula_expression(val: &serde_json::Value) -> Option<qdrant::Expression> 
                         }))),
                     })
                 }
-                "Negate" => {
+                "neg" | "Negate" => {
                     let inner = to_formula_expression(val)?;
                     Some(qdrant::Expression {
                         variant: Some(Variant::Neg(Box::new(inner))),
                     })
                 }
-                "Abs" => {
+                "abs" | "Abs" => {
                     let inner = to_formula_expression(val)?;
                     Some(qdrant::Expression {
                         variant: Some(Variant::Abs(Box::new(inner))),
                     })
                 }
-                "Sqrt" => {
+                "sqrt" | "Sqrt" => {
                     let inner = to_formula_expression(val)?;
                     Some(qdrant::Expression {
                         variant: Some(Variant::Sqrt(Box::new(inner))),
                     })
                 }
-                "Log10" => {
+                "log10" | "Log10" => {
                     let inner = to_formula_expression(val)?;
                     Some(qdrant::Expression {
                         variant: Some(Variant::Log10(Box::new(inner))),
                     })
                 }
-                "NaturalLog" => {
+                "ln" | "NaturalLog" => {
                     let inner = to_formula_expression(val)?;
                     Some(qdrant::Expression {
                         variant: Some(Variant::Ln(Box::new(inner))),
                     })
                 }
-                "Exp" => {
+                "exp" | "Exp" => {
                     let inner = to_formula_expression(val)?;
                     Some(qdrant::Expression {
                         variant: Some(Variant::Exp(Box::new(inner))),
                     })
                 }
-                "Pow" => {
-                    let arr = val.as_array()?;
-                    Some(qdrant::Expression {
-                        variant: Some(Variant::Pow(Box::new(qdrant::PowExpression {
-                            base: Some(Box::new(to_formula_expression(&arr[0])?)),
-                            exponent: Some(Box::new(to_formula_expression(&arr[1])?)),
-                        }))),
-                    })
-                }
-                "GeoDistance" => {
-                    let obj = val.as_object()?;
-                    if let (Some(origin_obj), Some(to_val)) = (obj.get("origin"), obj.get("field"))
-                    {
-                        let lat = origin_obj
-                            .get("latitude")
-                            .and_then(|v| v.as_f64())
-                            .unwrap_or(0.0);
-                        let lon = origin_obj
-                            .get("longitude")
-                            .and_then(|v| v.as_f64())
-                            .unwrap_or(0.0);
-                        let to = to_val.as_str().unwrap_or("").to_string();
+                "pow" | "Pow" => {
+                    if let Some(arr) = val.as_array() {
                         Some(qdrant::Expression {
-                            variant: Some(Variant::GeoDistance(qdrant::GeoDistance {
-                                origin: Some(qdrant::GeoPoint { lat, lon }),
-                                to,
-                            })),
+                            variant: Some(Variant::Pow(Box::new(qdrant::PowExpression {
+                                base: Some(Box::new(to_formula_expression(&arr[0])?)),
+                                exponent: Some(Box::new(to_formula_expression(&arr[1])?)),
+                            }))),
                         })
                     } else {
-                        None
+                        let obj = val.as_object()?;
+                        Some(qdrant::Expression {
+                            variant: Some(Variant::Pow(Box::new(qdrant::PowExpression {
+                                base: Some(Box::new(to_formula_expression(obj.get("base")?)?)),
+                                exponent: Some(Box::new(to_formula_expression(
+                                    obj.get("exponent")?,
+                                )?)),
+                            }))),
+                        })
                     }
                 }
-                "Decay" => {
+                "geo_distance" | "GeoDistance" => {
                     let obj = val.as_object()?;
-                    let kind_str = obj.get("kind")?.as_str()?;
-                    let x = to_formula_expression(obj.get("value")?)?;
+                    let origin = obj.get("origin")?;
+                    let lat = origin
+                        .get("lat")
+                        .or_else(|| origin.get("latitude"))
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.0);
+                    let lon = origin
+                        .get("lon")
+                        .or_else(|| origin.get("longitude"))
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.0);
+                    let to = obj
+                        .get("to")
+                        .or_else(|| obj.get("field"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    Some(qdrant::Expression {
+                        variant: Some(Variant::GeoDistance(qdrant::GeoDistance {
+                            origin: Some(qdrant::GeoPoint { lat, lon }),
+                            to,
+                        })),
+                    })
+                }
+                "exp_decay" | "gauss_decay" | "lin_decay" => {
+                    let obj = val.as_object()?;
+                    let x = to_formula_expression(obj.get("x")?)?;
                     let target = obj.get("target").and_then(to_formula_expression);
                     let scale = obj.get("scale").and_then(|v| v.as_f64()).map(|f| f as f32);
                     let midpoint = obj
@@ -1334,66 +1511,45 @@ fn to_formula_expression(val: &serde_json::Value) -> Option<qdrant::Expression> 
                         scale,
                         midpoint,
                     });
-                    let variant = match kind_str {
-                        "Exponential" => Variant::ExpDecay(decay),
-                        "Gaussian" => Variant::GaussDecay(decay),
-                        "Linear" => Variant::LinDecay(decay),
-                        _ => return None,
+                    let variant = match key.as_str() {
+                        "exp_decay" => Variant::ExpDecay(decay),
+                        "lin_decay" => Variant::LinDecay(decay),
+                        _ => Variant::GaussDecay(decay),
                     };
                     Some(qdrant::Expression {
                         variant: Some(variant),
                     })
                 }
-                "Case" => {
-                    let obj = val.as_object()?;
-                    let condition = obj.get("condition")?;
-                    let then_val = to_formula_expression(obj.get("then_value")?)?;
-                    let else_val = to_formula_expression(
-                        obj.get("else_value").unwrap_or(&serde_json::Value::Null),
-                    )?;
-                    let cond_expr: qdrant::Expression = to_condition_from_json(condition)
-                        .map(|c| qdrant::Expression {
-                            variant: Some(Variant::Condition(c)),
-                        })
-                        .unwrap_or_else(|| qdrant::Expression {
-                            variant: Some(Variant::Constant(1.0)),
-                        });
-                    let one = qdrant::Expression {
-                        variant: Some(Variant::Constant(1.0)),
-                    };
-                    let neg_cond = qdrant::Expression {
-                        variant: Some(Variant::Neg(Box::new(cond_expr.clone()))),
-                    };
-                    let one_minus_cond = qdrant::Expression {
-                        variant: Some(Variant::Sum(qdrant::SumExpression {
-                            sum: vec![one, neg_cond],
-                        })),
-                    };
-                    let then_branch = qdrant::Expression {
-                        variant: Some(Variant::Mult(qdrant::MultExpression {
-                            mult: vec![cond_expr, then_val],
-                        })),
-                    };
-                    let else_branch = qdrant::Expression {
-                        variant: Some(Variant::Mult(qdrant::MultExpression {
-                            mult: vec![one_minus_cond, else_val],
-                        })),
-                    };
-                    Some(qdrant::Expression {
-                        variant: Some(Variant::Sum(qdrant::SumExpression {
-                            sum: vec![then_branch, else_branch],
-                        })),
-                    })
-                }
-                "Match" => None,
-                "DateTime" => val.as_str().map(|s| qdrant::Expression {
+                "datetime" | "DateTime" => val.as_str().map(|s| qdrant::Expression {
                     variant: Some(Variant::Datetime(s.to_string())),
                 }),
-                "DateTimeField" => val.as_str().map(|s| qdrant::Expression {
+                "datetime_key" | "DateTimeField" => val.as_str().map(|s| qdrant::Expression {
                     variant: Some(Variant::DatetimeKey(s.to_string())),
                 }),
-                _ => None,
+                // Field condition used as boolean Expression (key + match/range/...)
+                "key" => {
+                    // Reconstruct single-key object for condition parser
+                    to_condition_from_json(&serde_json::Value::Object(obj.clone())).map(|c| {
+                        qdrant::Expression {
+                            variant: Some(Variant::Condition(c)),
+                        }
+                    })
+                }
+                _ => {
+                    // Try as a filter condition object (must/should/must_not or field clause).
+                    to_condition_from_json(val).map(|c| qdrant::Expression {
+                        variant: Some(Variant::Condition(c)),
+                    })
+                }
             }
+        }
+        // Multi-key objects: likely a field condition {key, match}
+        serde_json::Value::Object(obj) => {
+            to_condition_from_json(&serde_json::Value::Object(obj.clone())).map(|c| {
+                qdrant::Expression {
+                    variant: Some(Variant::Condition(c)),
+                }
+            })
         }
         _ => None,
     }

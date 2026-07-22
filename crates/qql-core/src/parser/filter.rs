@@ -110,7 +110,15 @@ impl<'a> Parser<'a> {
 
         if operator.kind == TokenKind::In {
             self.advance()?;
+            let list_start = self.peek()?.span.start;
             let values = self.parse_literal_list()?;
+            if values.is_empty() {
+                return Err(QqlError::parse(
+                    "QQL-PARSE-IN",
+                    "IN requires a non-empty value list",
+                    Span::new(list_start, self.peek()?.span.end),
+                ));
+            }
             return if point_id {
                 point_ids(values, field_token.span)
                     .map(|ids| FilterExpr::PointId(PointIdPredicate::In(ids)))
@@ -122,7 +130,15 @@ impl<'a> Parser<'a> {
         if operator.kind == TokenKind::Not {
             self.advance()?;
             self.expect(TokenKind::In)?;
+            let list_start = self.peek()?.span.start;
             let values = self.parse_literal_list()?;
+            if values.is_empty() {
+                return Err(QqlError::parse(
+                    "QQL-PARSE-IN",
+                    "NOT IN requires a non-empty value list",
+                    Span::new(list_start, self.peek()?.span.end),
+                ));
+            }
             let expression = if point_id {
                 FilterExpr::PointId(PointIdPredicate::In(point_ids(values, field_token.span)?))
             } else {

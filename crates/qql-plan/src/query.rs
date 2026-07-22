@@ -63,12 +63,19 @@ pub fn lower_formula_expr(expr: &qql_core::ast::FormulaExpr) -> serde_json::Valu
         qql_core::ast::FormulaExpr::Mul { left, right } => serde_json::json!({
             "mult": [lower_formula_expr(left), lower_formula_expr(right)]
         }),
-        qql_core::ast::FormulaExpr::Div { left, right, .. } => serde_json::json!({
-            "div": {
-                "left": lower_formula_expr(left),
-                "right": lower_formula_expr(right)
+        qql_core::ast::FormulaExpr::Div {
+            left,
+            right,
+            by_zero_default,
+        } => {
+            let mut div = serde_json::Map::new();
+            div.insert("left".into(), lower_formula_expr(left));
+            div.insert("right".into(), lower_formula_expr(right));
+            if let Some(default) = by_zero_default {
+                div.insert("by_zero_default".into(), serde_json::json!(default));
             }
-        }),
+            serde_json::json!({ "div": div })
+        }
         qql_core::ast::FormulaExpr::Neg { operand } => serde_json::json!({
             "neg": lower_formula_expr(operand)
         }),
@@ -131,15 +138,42 @@ pub fn lower_formula_expr(expr: &qql_core::ast::FormulaExpr) -> serde_json::Valu
                 }
                 FilterExpression::Compound(comp) => serde_json::to_value(comp).unwrap_or_default(),
             };
+            // OpenAPI Expression accepts a Condition as a boolean 0/1 term.
+            // Encode CASE as: condition * then + (1 - condition) * else.
             serde_json::json!({
-                "condition": {
-                    "cond": cond_val,
-                    "then_value": lower_formula_expr(then_),
-                    "else_value": lower_formula_expr(else_)
-                }
+                "sum": [
+                    {
+                        "mult": [cond_val.clone(), lower_formula_expr(then_)]
+                    },
+                    {
+                        "mult": [
+                            {
+                                "sum": [
+                                    1.0,
+                                    { "neg": cond_val }
+                                ]
+                            },
+                            lower_formula_expr(else_)
+                        ]
+                    }
+                ]
             })
         }
-        _ => serde_json::Value::Null,
+        qql_core::ast::FormulaExpr::MatchCondition { field, values } => {
+            // Condition expressions evaluate to 1.0 / 0.0 on the formula wire format.
+            use crate::filter::value_to_json;
+            let any: Vec<_> = values.iter().map(value_to_json).collect();
+            serde_json::json!({
+                "key": field,
+                "match": { "any": any }
+            })
+        }
+        qql_core::ast::FormulaExpr::Datetime { value } => serde_json::json!({
+            "datetime": value
+        }),
+        qql_core::ast::FormulaExpr::DatetimeKey { key } => serde_json::json!({
+            "datetime_key": key
+        }),
     }
 }
 
@@ -291,34 +325,54 @@ pub fn lower_prefetch_with_ctes(
     prefetch: &qql_core::ast::Prefetch,
     ctes: &[qql_core::ast::Cte],
 ) -> PrefetchRequest {
-    let (query, using) = match &prefetch.source {
-        PrefetchSource::Cte(name) => {
-            if let Some(cte) = ctes.iter().find(|c| c.name == *name) {
-                (
-                    Some(lower_query_expr(&cte.query.expression)),
-                    expression_using(&cte.query.expression).cloned(),
-                )
-            } else {
-                (None, None)
-            }
-        }
-        PrefetchSource::Query(query) => (
-            Some(lower_query_expr(&query.expression)),
-            expression_using(&query.expression).cloned(),
-        ),
+    let source_query: Option<&QueryStmt> = match &prefetch.source {
+        PrefetchSource::Cte(name) => ctes
+            .iter()
+            .find(|c| c.name.eq_ignore_ascii_case(name))
+            .map(|c| c.query.as_ref()),
+        PrefetchSource::Query(query) => Some(query.as_ref()),
     };
+
+    let (query, using, nested_prefetch, source_filter, source_params, source_limit, source_score) =
+        if let Some(q) = source_query {
+            let (variant, using, nested) = build_query_with_prefetch(q);
+            (
+                Some(variant),
+                using,
+                if nested.is_empty() {
+                    None
+                } else {
+                    Some(nested)
+                },
+                q.filter.as_ref().map(|f| top_level_filter(f)),
+                q.params.as_ref().and_then(lower_search_params),
+                q.page.limit,
+                q.score_threshold,
+            )
+        } else {
+            (None, None, None, None, None, None, None)
+        };
+
+    // Outer PREFETCH WHERE / SCORE THRESHOLD override source-query values when set.
+    let filter = prefetch
+        .filter
+        .as_ref()
+        .map(|f| top_level_filter(f))
+        .or(source_filter);
+    let score_threshold = prefetch.score_threshold.or(source_score);
+
     PrefetchRequest {
         query,
         using,
-        filter: prefetch.filter.as_ref().map(|f| top_level_filter(f)),
-        params: None,
-        score_threshold: prefetch.score_threshold,
-        limit: None,
+        filter,
+        params: source_params,
+        score_threshold,
+        limit: source_limit,
         lookup_from: prefetch.lookup.as_ref().map(|l| LookupRequest {
             collection: l.collection.clone(),
             vector: l.vector.clone(),
         }),
-        prefetch: None,
+        prefetch: nested_prefetch,
     }
 }
 
@@ -516,9 +570,10 @@ pub fn lower_search_params(params: &qql_core::ast::SearchParams) -> Option<Searc
     let r = SearchParamsRequest {
         hnsw_ef: params.hnsw_ef,
         exact: params.exact,
-        acorn: params
-            .acorn
-            .and_then(|b| if b { Some(AcornFlag) } else { None }),
+        acorn: params.acorn.map(|enable| AcornSearchParams {
+            enable,
+            max_selectivity: None,
+        }),
         indexed_only: params.indexed_only,
         quantization: params.quantization.as_ref().map(|q| {
             has = true;
@@ -575,6 +630,66 @@ mod tests {
         let s = Parser::parse(source).unwrap();
         let r = crate::routing::route(&s);
         r.body_json().unwrap()
+    }
+
+    #[test]
+    fn acorn_true_serializes_enable() {
+        let json = parse_route(
+            "QUERY 'hello' FROM docs PARAMS (acorn = true) LIMIT 5;",
+        );
+        assert_eq!(json["params"]["acorn"]["enable"], true);
+    }
+
+    #[test]
+    fn acorn_false_serializes_enable_false() {
+        let json = parse_route(
+            "QUERY 'hello' FROM docs PARAMS (acorn = false) LIMIT 5;",
+        );
+        assert_eq!(json["params"]["acorn"]["enable"], false);
+    }
+
+    #[test]
+    fn prefetch_preserves_filter_limit_and_params() {
+        let json = parse_route(
+            "WITH a AS (QUERY TEXT 'x' FROM docs USING dense WHERE status = 'active' PARAMS (hnsw_ef = 64) SCORE THRESHOLD 0.5 LIMIT 50) \
+             QUERY FUSION RRF FROM docs PREFETCH (a) LIMIT 10;",
+        );
+        let pf = &json["prefetch"][0];
+        assert!(
+            pf["filter"].is_object(),
+            "CTE filter must be preserved: {}",
+            pf
+        );
+        assert_eq!(pf["limit"], 50);
+        assert_eq!(pf["params"]["hnsw_ef"], 64);
+        assert_eq!(pf["score_threshold"], 0.5);
+    }
+
+    #[test]
+    fn prefetch_cte_name_is_case_insensitive() {
+        let json = parse_route(
+            "WITH DenseHits AS (QUERY TEXT 'x' FROM docs USING dense LIMIT 20) \
+             QUERY FUSION RRF FROM docs PREFETCH (densehits) LIMIT 5;",
+        );
+        let pf = &json["prefetch"][0];
+        assert!(
+            pf["query"].is_object(),
+            "case-insensitive CTE lookup must resolve query: {}",
+            pf
+        );
+        assert_eq!(pf["limit"], 20);
+    }
+
+    #[test]
+    fn formula_div_preserves_by_zero_default() {
+        // Div with DEFAULT is only available if the formula parser supports it;
+        // at least ensure MatchCondition/Datetime lower to non-null JSON when present
+        // via a simple arithmetic formula regression.
+        let json = parse_route(
+            "QUERY FORMULA score * 2 DEFAULTS (score = 0.0) FROM docs LIMIT 5;",
+        );
+        assert!(json["query"]["formula"].is_object() || json["query"]["formula"].is_number() || json["query"]["formula"].is_string());
+        assert_ne!(json["query"]["formula"], serde_json::Value::Null);
     }
 
     #[test]

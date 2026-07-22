@@ -179,7 +179,8 @@ pub fn validate_params_value(key: &str, value: &Value, pos: usize) -> Result<(),
         "replication_factor"
         | "write_consistency_factor"
         | "read_fan_out_factor"
-        | "read_fan_out_delay_ms" => {
+        | "read_fan_out_delay_ms"
+        | "shard_number" => {
             if !matches!(value, Value::Int(_)) {
                 return Err(QqlError::syntax(
                     alloc::format!("{} must be an integer", key),
@@ -193,6 +194,46 @@ pub fn validate_params_value(key: &str, value: &Value, pos: usize) -> Result<(),
                 pos,
             ));
         }
+        "sharding_method" => match value {
+            Value::Str(s)
+                if s.eq_ignore_ascii_case("auto") || s.eq_ignore_ascii_case("custom") => {}
+            Value::Str(_) => {
+                return Err(QqlError::syntax(
+                    "sharding_method must be 'auto' or 'custom'",
+                    pos,
+                ));
+            }
+            _ => {
+                return Err(QqlError::syntax(
+                    "sharding_method must be a string ('auto' or 'custom')",
+                    pos,
+                ));
+            }
+        },
+        "shard_keys" => match value {
+            Value::List(items) if items.is_empty() => {
+                return Err(QqlError::syntax(
+                    "shard_keys must be a non-empty list of strings",
+                    pos,
+                ));
+            }
+            Value::List(items) => {
+                for item in items {
+                    if !matches!(item, Value::Str(_)) {
+                        return Err(QqlError::syntax(
+                            "shard_keys entries must all be strings",
+                            pos,
+                        ));
+                    }
+                }
+            }
+            _ => {
+                return Err(QqlError::syntax(
+                    "shard_keys must be a list of strings",
+                    pos,
+                ));
+            }
+        },
         _ => {}
     }
     Ok(())

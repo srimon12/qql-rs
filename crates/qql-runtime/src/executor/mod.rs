@@ -185,32 +185,9 @@ impl Executor {
         }
     }
 
-    pub async fn execute_node(&self, mut stmt: Stmt) -> Result<ExecResponse, QqlError> {
-        if let Some(ref embedder) = self.embedder {
-            self.resolve_embeddings(&mut stmt, embedder.as_ref())
-                .await?;
-        }
-        match stmt {
-            Stmt::ShowCollections => self.do_show_collections().await,
-            Stmt::ShowCollection(collection) => self.do_show_collection(&collection).await,
-            Stmt::CreateCollection(n) => self.do_create_collection(*n).await,
-            Stmt::AlterCollection(n) => self.do_alter_collection(*n).await,
-            Stmt::DropCollection(n) => self.do_drop_collection(&n.collection).await,
-            Stmt::Upsert(n) => self.do_upsert(*n).await,
-            Stmt::Scroll(n) => self.do_scroll(*n).await,
-            Stmt::Query(n) => self.do_query(*n).await,
-            Stmt::Delete(n) => self.do_delete(*n).await,
-            Stmt::ClearPayload(n) => self.do_clear_payload(*n).await,
-            Stmt::DeleteVector(n) => self.do_delete_vector(*n).await,
-            Stmt::UpdateVector(n) => self.do_update_vector(*n).await,
-            Stmt::UpdatePayload(n) => self.do_update_payload(*n).await,
-            Stmt::CreateIndex(n) => self.do_create_index(*n).await,
-            Stmt::CreateShardKey(n) => self.do_create_shard_key(*n).await,
-            Stmt::DropShardKey(n) => self.do_drop_shard_key(*n).await,
-            Stmt::ShowShardKeys(collection) => self.do_show_shard_keys(&collection).await,
-            Stmt::DropIndex(n) => self.do_drop_index(*n).await,
-            Stmt::Count(n) => self.do_count(*n).await,
-        }
+    pub async fn execute_node(&self, stmt: Stmt) -> Result<ExecResponse, QqlError> {
+        let prepared = self.prepare_statement(stmt).await?;
+        self.dispatch_prepared(prepared).await
     }
 
     pub async fn execute_batch(
@@ -246,6 +223,10 @@ impl Executor {
     /// DELETE VECTOR) targeting the same collection are sent via
     /// `/points/batch`. All other statements execute individually.
     /// Statement order is preserved.
+    ///
+    /// Every statement is prepared (embeddings + schema checks) before
+    /// batch classification so single- and multi-statement paths share
+    /// the same preparation semantics.
     pub async fn execute_batch_nodes(
         &self,
         stmts: Vec<Stmt>,
@@ -255,16 +236,23 @@ impl Executor {
         use qql_plan::query::lower_query_request;
         use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 
-        let mut results: Vec<ExecResponse> = Vec::with_capacity(stmts.len());
+        // Prepare every statement first (RUN-001): embeddings, named-vector
+        // validation, and upsert collection topology.
+        let mut prepared = Vec::with_capacity(stmts.len());
+        for stmt in stmts {
+            prepared.push(self.prepare_statement(stmt).await?);
+        }
+
+        let mut results: Vec<ExecResponse> = Vec::with_capacity(prepared.len());
         let mut i = 0;
 
-        while i < stmts.len() {
+        while i < prepared.len() {
             // ── Contiguous mutation batch (same collection, 2+) ──
-            if let Some((coll, first_op)) = lower_update_operation(&stmts[i]) {
+            if let Some((coll, first_op)) = lower_update_operation(&prepared[i]) {
                 let mut ops = vec![first_op];
                 let mut j = i + 1;
-                while j < stmts.len() {
-                    match lower_update_operation(&stmts[j]) {
+                while j < prepared.len() {
+                    match lower_update_operation(&prepared[j]) {
                         Some((c, op)) if c == coll => {
                             ops.push(op);
                             j += 1;
@@ -273,11 +261,22 @@ impl Executor {
                     }
                 }
                 if ops.len() >= 2 {
+                    let expected = ops.len();
                     let op_names: Vec<&'static str> =
                         ops.iter().map(|o| o.operation_name()).collect();
                     let batch = UpdateBatchRequest { operations: ops };
                     match self.client.execute_update_batch(&coll, &batch).await {
                         Ok(responses) => {
+                            if responses.len() != expected {
+                                return Err(QqlError::transport(
+                                    "QQL-BATCH-CARDINALITY",
+                                    format!(
+                                        "update batch returned {} results for {expected} operations",
+                                        responses.len()
+                                    ),
+                                    None,
+                                ));
+                            }
                             for (k, val) in responses.into_iter().enumerate() {
                                 let name = op_names.get(k).copied().unwrap_or("MUTATION");
                                 results.push(ExecResponse {
@@ -285,19 +284,6 @@ impl Executor {
                                     operation: name.to_string(),
                                     message: format!("{name} ok (batched)"),
                                     data: Some(val),
-                                });
-                            }
-                            // Pad if server returned fewer results than ops
-                            while results.len() < i + (j - i) {
-                                let name = op_names
-                                    .get(results.len() - i)
-                                    .copied()
-                                    .unwrap_or("MUTATION");
-                                results.push(ExecResponse {
-                                    ok: true,
-                                    operation: name.to_string(),
-                                    message: format!("{name} ok (batched)"),
-                                    data: None,
                                 });
                             }
                         }
@@ -322,11 +308,11 @@ impl Executor {
             }
 
             // ── Contiguous query batch (same collection, 2+) ──
-            if let Some((coll, q0)) = batchable_query_stmt(&stmts[i]) {
+            if let Some((coll, q0)) = batchable_query_stmt(&prepared[i]) {
                 let mut queries = vec![q0];
                 let mut j = i + 1;
-                while j < stmts.len() {
-                    match batchable_query_stmt(&stmts[j]) {
+                while j < prepared.len() {
+                    match batchable_query_stmt(&prepared[j]) {
                         Some((c, q)) if c == coll => {
                             queries.push(q);
                             j += 1;
@@ -335,11 +321,22 @@ impl Executor {
                     }
                 }
                 if queries.len() >= 2 {
+                    let expected = queries.len();
                     let batch = QueryBatchRequest {
                         searches: queries.iter().map(lower_query_request).collect(),
                     };
                     match self.client.execute_query_batch(&coll, &batch).await {
                         Ok(responses) => {
+                            if responses.len() != expected {
+                                return Err(QqlError::transport(
+                                    "QQL-BATCH-CARDINALITY",
+                                    format!(
+                                        "query batch returned {} results for {expected} operations",
+                                        responses.len()
+                                    ),
+                                    None,
+                                ));
+                            }
                             for val in responses {
                                 let hits = extract_search_hits(&val);
                                 results.push(ExecResponse {
@@ -349,20 +346,12 @@ impl Executor {
                                     data: Some(serde_json::to_value(hits).unwrap_or_default()),
                                 });
                             }
-                            while results.len() < i + (j - i) {
-                                results.push(ExecResponse {
-                                    ok: true,
-                                    operation: "QUERY".to_string(),
-                                    message: "Found 0 hits".to_string(),
-                                    data: Some(serde_json::json!([])),
-                                });
-                            }
                         }
                         Err(e) => {
                             if stop_on_error {
                                 return Err(e);
                             }
-                            for _ in i..j {
+                            for _ in 0..expected {
                                 results.push(ExecResponse {
                                     ok: false,
                                     operation: "QUERY".to_string(),
@@ -377,8 +366,8 @@ impl Executor {
                 }
             }
 
-            // ── Individual statement ──
-            match self.execute_node(stmts[i].clone()).await {
+            // ── Individual statement (already prepared; skip re-prep) ──
+            match self.dispatch_prepared(prepared[i].clone()).await {
                 Ok(resp) => results.push(resp),
                 Err(err) => {
                     if stop_on_error {
@@ -396,6 +385,79 @@ impl Executor {
         }
 
         Ok(results)
+    }
+
+    /// Shared preparation: embeddings, named-vector validation, upsert collection prep.
+    async fn prepare_statement(&self, mut stmt: Stmt) -> Result<Stmt, QqlError> {
+        if let Some(ref embedder) = self.embedder {
+            self.resolve_embeddings(&mut stmt, embedder.as_ref())
+                .await?;
+        }
+
+        match &stmt {
+            Stmt::Query(q) => {
+                if let ast::QueryCollection::Explicit(ref collection_name) = q.collection {
+                    self.ensure_vector_name(collection_name, &q.expression)
+                        .await?;
+                }
+            }
+            Stmt::Upsert(u) => {
+                if let Some(ref emb) = u.embedding {
+                    let (model, is_hybrid, dense_vec, sparse_vec) = match emb {
+                        ast::EmbeddingSpec::Dense { model, vector } => {
+                            (model.as_deref(), false, vector.as_deref(), None)
+                        }
+                        ast::EmbeddingSpec::Hybrid {
+                            dense_model,
+                            dense_vector,
+                            sparse_vector,
+                            ..
+                        } => (
+                            dense_model.as_deref(),
+                            true,
+                            dense_vector.as_deref(),
+                            sparse_vector.as_deref(),
+                        ),
+                    };
+                    self.ensure_collection_for_upsert(
+                        &u.collection,
+                        model,
+                        is_hybrid,
+                        dense_vec,
+                        sparse_vec,
+                    )
+                    .await?;
+                }
+            }
+            _ => {}
+        }
+
+        Ok(stmt)
+    }
+
+    /// Dispatch a statement that has already been prepared.
+    async fn dispatch_prepared(&self, stmt: Stmt) -> Result<ExecResponse, QqlError> {
+        match stmt {
+            Stmt::ShowCollections => self.do_show_collections().await,
+            Stmt::ShowCollection(collection) => self.do_show_collection(&collection).await,
+            Stmt::CreateCollection(n) => self.do_create_collection(*n).await,
+            Stmt::AlterCollection(n) => self.do_alter_collection(*n).await,
+            Stmt::DropCollection(n) => self.do_drop_collection(&n.collection).await,
+            Stmt::Upsert(n) => self.do_upsert(*n).await,
+            Stmt::Scroll(n) => self.do_scroll(*n).await,
+            Stmt::Query(n) => self.do_query(*n).await,
+            Stmt::Delete(n) => self.do_delete(*n).await,
+            Stmt::ClearPayload(n) => self.do_clear_payload(*n).await,
+            Stmt::DeleteVector(n) => self.do_delete_vector(*n).await,
+            Stmt::UpdateVector(n) => self.do_update_vector(*n).await,
+            Stmt::UpdatePayload(n) => self.do_update_payload(*n).await,
+            Stmt::CreateIndex(n) => self.do_create_index(*n).await,
+            Stmt::CreateShardKey(n) => self.do_create_shard_key(*n).await,
+            Stmt::DropShardKey(n) => self.do_drop_shard_key(*n).await,
+            Stmt::ShowShardKeys(collection) => self.do_show_shard_keys(&collection).await,
+            Stmt::DropIndex(n) => self.do_drop_index(*n).await,
+            Stmt::Count(n) => self.do_count(*n).await,
+        }
     }
 }
 

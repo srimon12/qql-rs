@@ -87,13 +87,14 @@ async fn resolve_upsert_embeddings(
             if !targets.is_empty() {
                 let (indices, texts): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
                 let dense_vecs = embedder.embed_dense_batch(&texts, "default").await?;
+                ensure_batch_len(dense_vecs.len(), indices.len(), "default")?;
                 for ((idx, text), d_vec) in indices.into_iter().zip(texts).zip(dense_vecs) {
                     let point = &mut upsert.points[idx];
                     add_point_vector(
                         point,
                         DENSE_VECTOR_NAME,
                         VectorValue::Dense(d_vec),
-                    );
+                    )?;
                     let sparse_vec = embedder.embed_sparse(&text).await?;
                     add_point_vector(
                         point,
@@ -102,7 +103,7 @@ async fn resolve_upsert_embeddings(
                             indices: sparse_vec.indices,
                             values: sparse_vec.values,
                         },
-                    );
+                    )?;
                 }
             }
         }
@@ -132,9 +133,10 @@ async fn resolve_upsert_embeddings(
                         let (indices, texts): (Vec<usize>, Vec<String>) =
                             targets.into_iter().unzip();
                         let vecs = embedder.embed_dense_batch(&texts, model_name).await?;
+                        ensure_batch_len(vecs.len(), indices.len(), model_name)?;
                         for (idx, vec) in indices.into_iter().zip(vecs) {
                             let point = &mut upsert.points[idx];
-                            add_point_vector(point, vector_name, VectorValue::Dense(vec));
+                            add_point_vector(point, vector_name, VectorValue::Dense(vec))?;
                         }
                     }
                 }
@@ -142,8 +144,15 @@ async fn resolve_upsert_embeddings(
                     dense_model,
                     dense_vector,
                     sparse_vector,
-                    ..
+                    sparse_model,
                 } => {
+                    if sparse_model.is_some() {
+                        return Err(QqlError::execution(
+                            "QQL-EMBEDDING",
+                            "sparse model selection is not supported by the local BM25 sparse embedder; omit SPARSE MODEL",
+                            None,
+                        ));
+                    }
                     let d_model = dense_model.as_deref().unwrap_or("default");
                     let d_vec_name = dense_vector
                         .as_deref()
@@ -169,10 +178,11 @@ async fn resolve_upsert_embeddings(
                         let (indices, texts): (Vec<usize>, Vec<String>) =
                             targets.into_iter().unzip();
                         let dense_vecs = embedder.embed_dense_batch(&texts, d_model).await?;
+                        ensure_batch_len(dense_vecs.len(), indices.len(), d_model)?;
                         for ((idx, text), d_vec) in indices.into_iter().zip(texts).zip(dense_vecs) {
                             let sparse_vec = embedder.embed_sparse(&text).await?;
                             let point = &mut upsert.points[idx];
-                            add_point_vector(point, d_vec_name, VectorValue::Dense(d_vec));
+                            add_point_vector(point, d_vec_name, VectorValue::Dense(d_vec))?;
                             add_point_vector(
                                 point,
                                 s_vec_name,
@@ -180,7 +190,7 @@ async fn resolve_upsert_embeddings(
                                     indices: sparse_vec.indices,
                                     values: sparse_vec.values,
                                 },
-                            );
+                            )?;
                         }
                     }
                 }
@@ -210,12 +220,20 @@ async fn resolve_upsert_embeddings(
                         let (indices, texts): (Vec<usize>, Vec<String>) =
                             targets.into_iter().unzip();
                         let vecs = embedder.embed_dense_batch(&texts, m_name).await?;
+                        ensure_batch_len(vecs.len(), indices.len(), m_name)?;
                         for (idx, vec) in indices.into_iter().zip(vecs) {
                             let point = &mut upsert.points[idx];
-                            add_point_vector(point, target_vec_name, VectorValue::Dense(vec));
+                            add_point_vector(point, target_vec_name, VectorValue::Dense(vec))?;
                         }
                     }
-                    EmbedKind::Sparse { .. } => {
+                    EmbedKind::Sparse { model } => {
+                        if model.is_some() {
+                            return Err(QqlError::execution(
+                                "QQL-EMBEDDING",
+                                "sparse model selection is not supported by the local BM25 sparse embedder; omit MODEL on EMBED SPARSE",
+                                None,
+                            ));
+                        }
                         for (idx, text) in targets {
                             let s_vec = embedder.embed_sparse(&text).await?;
                             let point = &mut upsert.points[idx];
@@ -226,7 +244,7 @@ async fn resolve_upsert_embeddings(
                                     indices: s_vec.indices,
                                     values: s_vec.values,
                                 },
-                            );
+                            )?;
                         }
                     }
                 }
@@ -240,8 +258,9 @@ async fn resolve_upsert_embeddings(
 
 fn collect_query_dense_jobs(query: &QueryStmt, jobs: &mut Vec<(String, String)>) {
     collect_expr_dense_jobs(&query.expression, jobs);
+    // Recurse into nested CTE graphs (parser clones prior CTEs into later ones).
     for cte in &query.ctes {
-        collect_expr_dense_jobs(&cte.query.expression, jobs);
+        collect_query_dense_jobs(&cte.query, jobs);
     }
 }
 
@@ -331,11 +350,13 @@ fn collect_expr_dense_jobs(expr: &QueryExpr, jobs: &mut Vec<(String, String)>) {
         }
         QueryExpr::Rerank {
             input,
+            model,
             using,
             prefetch,
-            ..
         } => {
-            collect_input_dense_job(input, using.as_str(), jobs);
+            // `using` is the vector name; dense embedding uses the rerank `model`.
+            collect_input_dense_job(input, model.as_str(), jobs);
+            let _ = using;
             collect_prefetches_dense_jobs(prefetch, jobs);
         }
         _ => {}
@@ -409,8 +430,9 @@ fn apply_query_embeddings<'a>(
 ) -> BoxFut<'a, Result<(), QqlError>> {
     Box::pin(async move {
         apply_expr_embeddings(&mut query.expression, embedder, dense).await?;
+        // Recurse into nested CTE graphs so cloned prior CTEs are also resolved.
         for cte in &mut query.ctes {
-            apply_expr_embeddings(&mut cte.query.expression, embedder, dense).await?;
+            apply_query_embeddings(&mut cte.query, embedder, dense).await?;
         }
         Ok(())
     })
@@ -585,11 +607,17 @@ fn apply_expr_embeddings<'a>(
         }
         QueryExpr::Rerank {
             input,
+            model,
             using,
             prefetch,
-            ..
         } => {
-            apply_input(input, using.as_str(), embedder, dense).await?;
+            // Consume dense vectors under the rerank model; sparse only when using == "sparse".
+            let dense_key = if using == "sparse" {
+                using.as_str()
+            } else {
+                model.as_str()
+            };
+            apply_input(input, dense_key, embedder, dense).await?;
             apply_prefetches_embeddings(prefetch, embedder, dense).await?;
         }
         _ => {}
@@ -625,7 +653,24 @@ async fn apply_input(
     Ok(())
 }
 
-fn add_point_vector(point: &mut UpsertPoint, name: &str, vector: VectorValue) {
+fn ensure_batch_len(got: usize, expected: usize, model: &str) -> Result<(), QqlError> {
+    if got != expected {
+        return Err(QqlError::execution(
+            "QQL-EMBEDDING",
+            format!(
+                "embed_dense_batch returned {got} vectors for {expected} texts (model={model})"
+            ),
+            None,
+        ));
+    }
+    Ok(())
+}
+
+fn add_point_vector(
+    point: &mut UpsertPoint,
+    name: &str,
+    vector: VectorValue,
+) -> Result<(), QqlError> {
     match &mut point.vectors {
         Some(PointVectors::Named(list)) => {
             if let Some(existing) = list.iter_mut().find(|(k, _)| k == name) {
@@ -633,9 +678,19 @@ fn add_point_vector(point: &mut UpsertPoint, name: &str, vector: VectorValue) {
             } else {
                 list.push((name.to_string(), vector));
             }
+            Ok(())
         }
-        Some(PointVectors::Unnamed(_)) | None => {
+        Some(PointVectors::Unnamed(_)) => Err(QqlError::execution(
+            "QQL-EMBEDDING",
+            format!(
+                "cannot add named vector '{name}' to a point that already has an unnamed vector; \
+                 provide an explicit named-vector topology or omit EMBED for this point"
+            ),
+            None,
+        )),
+        None => {
             point.vectors = Some(PointVectors::Named(vec![(name.to_string(), vector)]));
+            Ok(())
         }
     }
 }

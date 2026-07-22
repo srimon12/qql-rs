@@ -13,6 +13,8 @@ pub mod sparse;
 
 #[cfg(test)]
 mod sparse_test;
+#[cfg(test)]
+mod resolve_test;
 
 pub use embedder::{Embedder, EmbedderBound, SparseEmbedder};
 pub use resolve::{resolve_embeddings, DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME};

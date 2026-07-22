@@ -2,7 +2,7 @@ use serde_json;
 
 use crate::client::CollectionInfo;
 use crate::executor::{ExecResponse, Executor, SearchHit};
-use qql_core::ast::{self, QueryCollection, QueryExpr};
+use qql_core::ast::{self, QueryExpr};
 use qql_core::error::QqlError;
 use qql_plan::routing::route;
 
@@ -11,7 +11,11 @@ impl Executor {
     /// named vectors.  Fetches the collection schema only when `USING` is omitted
     /// — a development-time mistake.  After the first error the developer adds
     /// `USING` and the happy-path short-circuit skips every subsequent query.
-    async fn ensure_vector_name(&self, collection: &str, expr: &QueryExpr) -> Result<(), QqlError> {
+    pub(crate) async fn ensure_vector_name(
+        &self,
+        collection: &str,
+        expr: &QueryExpr,
+    ) -> Result<(), QqlError> {
         // Only the five expression variants have an optional `using` field.
         let using: Option<&str> = match expr {
             QueryExpr::Nearest { using, .. }
@@ -31,14 +35,8 @@ impl Executor {
         check_named_vectors(collection, &info)
     }
 
+    /// Query dispatch after preparation (named-vector checks already done).
     pub(crate) async fn do_query(&self, stmt: ast::QueryStmt) -> Result<ExecResponse, QqlError> {
-        // Validate before routing so we can give a clear error instead of
-        // forwarding Qdrant's cryptic "Not existing vector name error: ".
-        if let QueryCollection::Explicit(ref collection_name) = stmt.collection {
-            self.ensure_vector_name(collection_name, &stmt.expression)
-                .await?;
-        }
-
         let is_grouped = stmt.group.is_some();
         let r = route(&ast::Stmt::Query(Box::new(stmt)));
         let result = self.client.execute_route(r).await?;
@@ -148,36 +146,9 @@ impl Executor {
         })
     }
 
+    /// Upsert dispatch after preparation (collection auto-create already done).
     pub(crate) async fn do_upsert(&self, stmt: ast::UpsertStmt) -> Result<ExecResponse, QqlError> {
         let count = stmt.points.len();
-
-        if let Some(ref emb) = stmt.embedding {
-            let (model, is_hybrid, dense_vec, sparse_vec) = match emb {
-                ast::EmbeddingSpec::Dense { model, vector } => {
-                    (model.as_deref(), false, vector.as_deref(), None)
-                }
-                ast::EmbeddingSpec::Hybrid {
-                    dense_model,
-                    dense_vector,
-                    sparse_vector,
-                    ..
-                } => (
-                    dense_model.as_deref(),
-                    true,
-                    dense_vector.as_deref(),
-                    sparse_vector.as_deref(),
-                ),
-            };
-            self.ensure_collection_for_upsert(
-                &stmt.collection,
-                model,
-                is_hybrid,
-                dense_vec,
-                sparse_vec,
-            )
-            .await?;
-        }
-
         let r = route(&ast::Stmt::Upsert(Box::new(stmt)));
         self.client.execute_route(r).await?;
         Ok(ExecResponse {

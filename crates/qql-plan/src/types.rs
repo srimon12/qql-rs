@@ -320,15 +320,13 @@ pub struct WithLookup {
     pub with_vectors: Option<VectorSelectorReq>,
 }
 
-#[derive(Debug, Clone)]
-pub struct AcornFlag;
-
-impl Serialize for AcornFlag {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeStruct;
-        let s = serializer.serialize_struct("AcornFlag", 0)?;
-        s.end()
-    }
+/// ACORN search params. OpenAPI defaults `enable` to false, so enabled state
+/// must be serialized explicitly as `{"enable": true}`.
+#[derive(Debug, Clone, Serialize)]
+pub struct AcornSearchParams {
+    pub enable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_selectivity: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -338,7 +336,7 @@ pub struct SearchParamsRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exact: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub acorn: Option<AcornFlag>,
+    pub acorn: Option<AcornSearchParams>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub indexed_only: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]

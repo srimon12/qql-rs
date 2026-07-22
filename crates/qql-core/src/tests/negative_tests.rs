@@ -120,6 +120,28 @@ fn id_predicate_inequality_rejected() {
 }
 
 #[test]
+fn empty_in_list_rejected() {
+    assert_parse_err!("QUERY POINTS (1) FROM docs WHERE tag IN ();", Parse);
+    assert_parse_err!("QUERY POINTS (1) FROM docs WHERE tag NOT IN ();", Parse);
+}
+
+#[test]
+fn invalid_shard_params_rejected() {
+    assert_parse_err!(
+        "CREATE COLLECTION docs VECTORS (dense size=4 distance=Cosine) WITH PARAMS (sharding_method = true);",
+        Parse
+    );
+    assert_parse_err!(
+        "CREATE COLLECTION docs VECTORS (dense size=4 distance=Cosine) WITH PARAMS (shard_keys = [\"a\", 42]);",
+        Parse
+    );
+    assert_parse_err!(
+        "CREATE COLLECTION docs VECTORS (dense size=4 distance=Cosine) WITH PARAMS (shard_number = true);",
+        Parse
+    );
+}
+
+#[test]
 fn match_any_requires_list() {
     assert!(Parser::parse("QUERY TEXT 'x' FROM docs WHERE tags MATCH ANY 'x y'").is_err());
 }
