@@ -460,6 +460,21 @@ pub enum CollectionMode {
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub struct ClearPayloadStmt {
+    pub collection: String,
+    pub selector: PointSelector,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub struct DeleteVectorStmt {
+    pub collection: String,
+    pub selector: PointSelector,
+    pub vector_names: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct CreateCollectionStmt {
     pub collection: String,
     pub mode: CollectionMode,
@@ -552,6 +567,8 @@ pub enum Stmt {
     ShowCollections,
     ShowCollection(String),
     Delete(Box<DeleteStmt>),
+    ClearPayload(Box<ClearPayloadStmt>),
+    DeleteVector(Box<DeleteVectorStmt>),
     UpdateVector(Box<UpdateVectorStmt>),
     UpdatePayload(Box<UpdatePayloadStmt>),
     Count(Box<CountStmt>),

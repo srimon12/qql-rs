@@ -181,6 +181,28 @@ impl GrpcQdrant {
             .map_err(|e| QqlError::backend("QQL-GRPC", format!("count: {e}"), None))
     }
 
+    pub async fn clear_payload(
+        &self,
+        req: qdrant::ClearPayloadPoints,
+    ) -> Result<qdrant::PointsOperationResponse, QqlError> {
+        let mut cl = qdrant::points_client::PointsClient::new(self.channel.clone());
+        cl.clear_payload(tonic::Request::new(req))
+            .await
+            .map(|r| r.into_inner())
+            .map_err(|e| QqlError::backend("QQL-GRPC", format!("clear_payload: {e}"), None))
+    }
+
+    pub async fn delete_vectors(
+        &self,
+        req: qdrant::DeletePointVectors,
+    ) -> Result<qdrant::PointsOperationResponse, QqlError> {
+        let mut cl = qdrant::points_client::PointsClient::new(self.channel.clone());
+        cl.delete_vectors(tonic::Request::new(req))
+            .await
+            .map(|r| r.into_inner())
+            .map_err(|e| QqlError::backend("QQL-GRPC", format!("delete_vectors: {e}"), None))
+    }
+
     pub async fn list_collections_raw(&self) -> Result<qdrant::ListCollectionsResponse, QqlError> {
         let mut cl = qdrant::collections_client::CollectionsClient::new(self.channel.clone());
         cl.list(tonic::Request::new(qdrant::ListCollectionsRequest {}))

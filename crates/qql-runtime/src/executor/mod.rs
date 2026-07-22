@@ -166,6 +166,8 @@ impl Executor {
             Stmt::Scroll(n) => self.do_scroll(*n).await,
             Stmt::Query(n) => self.do_query(*n).await,
             Stmt::Delete(n) => self.do_delete(*n).await,
+            Stmt::ClearPayload(n) => self.do_clear_payload(*n).await,
+            Stmt::DeleteVector(n) => self.do_delete_vector(*n).await,
             Stmt::UpdateVector(n) => self.do_update_vector(*n).await,
             Stmt::UpdatePayload(n) => self.do_update_payload(*n).await,
             Stmt::CreateIndex(n) => self.do_create_index(*n).await,

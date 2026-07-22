@@ -322,16 +322,18 @@ QUERY TEXT 'neurological assessment' FROM docs USING dense LIMIT 5;
 
 ---
 
-## 17. Full Setup, Indexing, and Ingestion Script
+## 17. Full Setup, Indexing, Ingestion, and Cleanup Script
 
-**Problem:** Create collection, payload indexes, upsert documents with auto-embedding, count points, and perform semantic query in a single QQL script.
+**Problem:** Create collection, payload indexes, upsert documents with auto-embedding, count points, clear payload, delete vectors, and drop everything in a single QQL script.
 
 ```sql
-CREATE COLLECTION medical (dense VECTOR(384, COSINE));
+CREATE COLLECTION medical (dense VECTOR(384, COSINE), colbert VECTOR(128, COSINE));
 CREATE INDEX ON COLLECTION medical FOR specialty TYPE keyword;
 UPSERT INTO medical VALUES {id: 1, text: 'stroke protocol', specialty: 'neurology'}, {id: 2, text: 'cardiac arrest', specialty: 'cardiology'} USING DENSE MODEL 'all-minilm:l6-v2';
 COUNT FROM medical WHERE specialty = 'neurology';
 QUERY TEXT 'emergency' FROM medical USING dense LIMIT 5;
+CLEAR PAYLOAD FROM medical WHERE id = 1;
+DELETE VECTOR colbert FROM medical WHERE id = 2;
 DROP INDEX ON COLLECTION medical FOR specialty;
 DROP COLLECTION medical;
 ```

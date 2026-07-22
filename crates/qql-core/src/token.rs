@@ -151,6 +151,7 @@ pub enum TokenKind {
     Minus,
     Slash,
     Count,
+    Clear,
     Semicolon,
     Eof,
 }
@@ -254,6 +255,7 @@ gen_as_str! {
     Star => "STAR",
     After => "AFTER",
     Count => "COUNT",
+    Clear => "CLEAR",
     Shard => "SHARD",
     Identifier => "IDENTIFIER",
     String => "STRING",
@@ -380,6 +382,7 @@ gen_keywords! {
     "AFTER" => TokenKind::After,
     "SHARD" => TokenKind::Shard,
     "COUNT" => TokenKind::Count,
+    "CLEAR" => TokenKind::Clear,
 }
 
 impl fmt::Display for TokenKind {

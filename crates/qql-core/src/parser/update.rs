@@ -1,7 +1,7 @@
 use super::Parser;
 use crate::ast::{
-    DeleteStmt, FilterExpr, PointIdPredicate, PointSelector, Stmt, UpdatePayloadStmt,
-    UpdateVectorStmt,
+    ClearPayloadStmt, DeleteStmt, DeleteVectorStmt, FilterExpr, PointIdPredicate, PointSelector,
+    Stmt, UpdatePayloadStmt, UpdateVectorStmt,
 };
 use crate::error::QqlError;
 use crate::token::TokenKind;
@@ -55,6 +55,26 @@ impl<'a> Parser<'a> {
 
     pub fn parse_delete(&mut self) -> Result<Stmt, QqlError> {
         self.expect(TokenKind::Delete)?;
+        // Check if this is DELETE VECTOR or DELETE FROM
+        if self.peek()?.kind == TokenKind::Vector {
+            self.advance()?; // consume VECTOR
+            let mut vector_names = Vec::new();
+            vector_names.push(self.parse_identifier()?);
+            while self.peek()?.kind == TokenKind::Comma {
+                self.advance()?;
+                vector_names.push(self.parse_identifier()?);
+            }
+            self.expect(TokenKind::From)?;
+            let collection = self.parse_identifier()?;
+            self.expect(TokenKind::Where)?;
+            let selector = selector_from_filter(self.parse_filter_expr()?);
+            return Ok(Stmt::DeleteVector(Box::new(DeleteVectorStmt {
+                collection,
+                selector,
+                vector_names,
+            })));
+        }
+        // DELETE FROM
         self.expect(TokenKind::From)?;
         let collection = self.parse_identifier()?;
         self.expect(TokenKind::Where)?;
@@ -69,6 +89,19 @@ impl<'a> Parser<'a> {
             collection,
             selector,
             shard_key,
+        })))
+    }
+
+    pub fn parse_clear(&mut self) -> Result<Stmt, QqlError> {
+        self.expect(TokenKind::Clear)?;
+        self.expect(TokenKind::Payload)?;
+        self.expect(TokenKind::From)?;
+        let collection = self.parse_identifier()?;
+        self.expect(TokenKind::Where)?;
+        let selector = selector_from_filter(self.parse_filter_expr()?);
+        Ok(Stmt::ClearPayload(Box::new(ClearPayloadStmt {
+            collection,
+            selector,
         })))
     }
 }

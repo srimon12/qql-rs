@@ -548,6 +548,23 @@ pub struct UpdatePayloadRequest {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ClearPayloadRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub points: Option<Vec<serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter: Option<FilterExpression>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DeleteVectorRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub points: Option<Vec<serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter: Option<FilterExpression>,
+    pub vector: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct CountRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<FilterExpression>,

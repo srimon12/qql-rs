@@ -2,8 +2,8 @@ use crate::filter::{point_id_req, top_level_filter, value_to_json};
 use crate::query::lower_vector_value;
 use crate::types::*;
 use qql_core::ast::{
-    DeleteStmt, EmbeddingSpec, PointSelector, PointVectors, UpdatePayloadStmt, UpdateVectorStmt,
-    UpsertPoint, UpsertStmt,
+    ClearPayloadStmt, DeleteStmt, DeleteVectorStmt, EmbeddingSpec, PointSelector, PointVectors,
+    UpdatePayloadStmt, UpdateVectorStmt, UpsertPoint, UpsertStmt,
 };
 
 pub fn lower_upsert_request(stmt: &UpsertStmt) -> UpsertRequest {
@@ -96,6 +96,43 @@ pub fn lower_update_payload_request(stmt: &UpdatePayloadStmt) -> UpdatePayloadRe
         points,
         filter,
         payload,
+    }
+}
+
+pub fn lower_clear_payload_request(stmt: &ClearPayloadStmt) -> ClearPayloadRequest {
+    match &stmt.selector {
+        PointSelector::Id(id) => ClearPayloadRequest {
+            points: Some(vec![point_id_req(id)]),
+            filter: None,
+        },
+        PointSelector::Ids(ids) => ClearPayloadRequest {
+            points: Some(ids.iter().map(point_id_req).collect()),
+            filter: None,
+        },
+        PointSelector::Filter(filter) => ClearPayloadRequest {
+            points: None,
+            filter: Some(top_level_filter(filter)),
+        },
+    }
+}
+
+pub fn lower_delete_vector_request(stmt: &DeleteVectorStmt) -> DeleteVectorRequest {
+    match &stmt.selector {
+        PointSelector::Id(id) => DeleteVectorRequest {
+            points: Some(vec![point_id_req(id)]),
+            filter: None,
+            vector: stmt.vector_names.clone(),
+        },
+        PointSelector::Ids(ids) => DeleteVectorRequest {
+            points: Some(ids.iter().map(point_id_req).collect()),
+            filter: None,
+            vector: stmt.vector_names.clone(),
+        },
+        PointSelector::Filter(filter) => DeleteVectorRequest {
+            points: None,
+            filter: Some(top_level_filter(filter)),
+            vector: stmt.vector_names.clone(),
+        },
     }
 }
 

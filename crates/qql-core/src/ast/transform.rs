@@ -18,6 +18,8 @@ pub fn inject_filter(
         Stmt::Scroll(scroll) => merge_filter(&mut scroll.filter, filter),
         Stmt::Delete(delete) => merge_selector(&mut delete.selector, filter),
         Stmt::Count(count) => merge_filter(&mut count.filter, filter),
+        Stmt::ClearPayload(clear) => merge_selector(&mut clear.selector, filter),
+        Stmt::DeleteVector(del_vec) => merge_selector(&mut del_vec.selector, filter),
         Stmt::UpdatePayload(update) => merge_selector(&mut update.selector, filter),
         Stmt::Upsert(upsert)
             if operator == ComparisonOp::Eq && !field.eq_ignore_ascii_case("id") =>

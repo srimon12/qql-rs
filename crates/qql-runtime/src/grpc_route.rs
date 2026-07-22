@@ -168,6 +168,71 @@ pub async fn execute_grpc_route(
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("delete: {e}"), None))?;
             Ok(serde_json::Value::Object(Default::default()))
         }
+        Some(RequestBody::ClearPayload(req)) => {
+            let collection = extract_collection(&route.path)?;
+            let selector = if let Some(points) = &req.points {
+                Some(qdrant::PointsSelector {
+                    points_selector_one_of: Some(
+                        qdrant::points_selector::PointsSelectorOneOf::Points(
+                            qdrant::PointsIdsList {
+                                ids: points.iter().map(to_point_id).collect(),
+                            },
+                        ),
+                    ),
+                })
+            } else {
+                req.filter.as_ref().map(|f| qdrant::PointsSelector {
+                    points_selector_one_of: Some(
+                        qdrant::points_selector::PointsSelectorOneOf::Filter(to_filter(f)),
+                    ),
+                })
+            };
+            let grpc_req = qdrant::ClearPayloadPoints {
+                collection_name: collection,
+                wait: Some(true),
+                points: selector,
+                ..Default::default()
+            };
+            client
+                .clear_payload(grpc_req)
+                .await
+                .map_err(|e| QqlError::backend("QQL-GRPC", format!("clear_payload: {e}"), None))?;
+            Ok(serde_json::Value::Object(Default::default()))
+        }
+        Some(RequestBody::DeleteVector(req)) => {
+            let collection = extract_collection(&route.path)?;
+            let selector = if let Some(points) = &req.points {
+                Some(qdrant::PointsSelector {
+                    points_selector_one_of: Some(
+                        qdrant::points_selector::PointsSelectorOneOf::Points(
+                            qdrant::PointsIdsList {
+                                ids: points.iter().map(to_point_id).collect(),
+                            },
+                        ),
+                    ),
+                })
+            } else {
+                req.filter.as_ref().map(|f| qdrant::PointsSelector {
+                    points_selector_one_of: Some(
+                        qdrant::points_selector::PointsSelectorOneOf::Filter(to_filter(f)),
+                    ),
+                })
+            };
+            let grpc_req = qdrant::DeletePointVectors {
+                collection_name: collection,
+                wait: Some(true),
+                points_selector: selector,
+                vectors: qdrant::VectorsSelector {
+                    names: req.vector.clone(),
+                },
+                ..Default::default()
+            };
+            client
+                .delete_vectors(grpc_req)
+                .await
+                .map_err(|e| QqlError::backend("QQL-GRPC", format!("delete_vectors: {e}"), None))?;
+            Ok(serde_json::Value::Object(Default::default()))
+        }
         Some(RequestBody::UpdateVector(req)) => {
             let collection = extract_collection(&route.path)?;
             let points: Vec<qdrant::PointVectors> = req

@@ -63,6 +63,7 @@ pub fn is_contextual_field_name(kind: TokenKind) -> bool {
             | TokenKind::Vector
             | TokenKind::By
             | TokenKind::Count
+            | TokenKind::Clear
     )
 }
 
@@ -78,6 +79,7 @@ fn is_contextual_identifier(kind: TokenKind) -> bool {
             | TokenKind::Sparse
             | TokenKind::Vector
             | TokenKind::Count
+            | TokenKind::Clear
     )
 }
 
@@ -184,6 +186,7 @@ impl<'a> Parser<'a> {
             TokenKind::Query => self.parse_query(),
             TokenKind::With => self.parse_query_with_cte(),
             TokenKind::Delete => self.parse_delete(),
+            TokenKind::Clear => self.parse_clear(),
             TokenKind::Update => self.parse_update(),
             TokenKind::Count => self.parse_count(),
             _ => Err(QqlError::parse(

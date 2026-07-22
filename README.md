@@ -197,6 +197,12 @@ COUNT FROM docs WHERE status = 'active';
 -- Manage payload indexes
 CREATE INDEX ON COLLECTION docs FOR title TYPE text WITH (lowercase = true);
 DROP INDEX ON COLLECTION docs FOR title;
+
+-- Clear payload fields
+CLEAR PAYLOAD FROM docs WHERE status = 'archived';
+
+-- Delete specific named vectors
+DELETE VECTOR colbert FROM docs WHERE id = 42;
 ```
 
 ### Multi-tenancy

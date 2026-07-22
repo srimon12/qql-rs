@@ -34,5 +34,5 @@ QQL_BIN=./target/release/qql uv run examples/edge-demo/main.py --dry-run
 | CTE | Multi-stage prefetch RRF fusion |
 | Recommend | Positive, negative, strategy |
 | Access | QUERY POINTS, SCROLL, ORDER BY, COUNT |
-| Mutations | UPDATE payload, DELETE by filter |
+| Mutations | UPDATE payload, DELETE by filter, CLEAR PAYLOAD, DELETE VECTOR |
 | Ops | SHOW COLLECTION, SHOW COLLECTIONS |

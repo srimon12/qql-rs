@@ -85,6 +85,14 @@ pub fn explain_node(statement: &Stmt) -> String {
             "Statement: DELETE\nCollection: {}\nSelector: typed point selector\n",
             statement.collection
         )),
+        Stmt::ClearPayload(statement) => output.push_str(&format!(
+            "Statement: CLEAR PAYLOAD\nCollection: {}\nSelector: typed point selector\n",
+            statement.collection
+        )),
+        Stmt::DeleteVector(statement) => output.push_str(&format!(
+            "Statement: DELETE VECTOR\nCollection: {}\nVectors: {:?}\nSelector: typed point selector\n",
+            statement.collection, statement.vector_names
+        )),
         Stmt::UpdateVector(statement) => output.push_str(&format!(
             "Statement: UPDATE VECTOR\nCollection: {}\n",
             statement.collection

@@ -60,6 +60,34 @@ impl Executor {
         })
     }
 
+    pub(crate) async fn do_clear_payload(
+        &self,
+        stmt: ast::ClearPayloadStmt,
+    ) -> Result<ExecResponse, QqlError> {
+        let r = route(&ast::Stmt::ClearPayload(Box::new(stmt)));
+        self.client.execute_route(r).await?;
+        Ok(ExecResponse {
+            ok: true,
+            operation: "CLEAR_PAYLOAD".to_string(),
+            message: "Payload cleared".to_string(),
+            data: None,
+        })
+    }
+
+    pub(crate) async fn do_delete_vector(
+        &self,
+        stmt: ast::DeleteVectorStmt,
+    ) -> Result<ExecResponse, QqlError> {
+        let r = route(&ast::Stmt::DeleteVector(Box::new(stmt)));
+        self.client.execute_route(r).await?;
+        Ok(ExecResponse {
+            ok: true,
+            operation: "DELETE_VECTOR".to_string(),
+            message: "Vector(s) deleted".to_string(),
+            data: None,
+        })
+    }
+
     pub(crate) async fn do_update_vector(
         &self,
         stmt: ast::UpdateVectorStmt,

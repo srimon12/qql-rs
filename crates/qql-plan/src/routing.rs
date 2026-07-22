@@ -1,7 +1,8 @@
 use crate::ddl::{lower_alter_collection, lower_create_collection, lower_create_index};
 use crate::mutation::{
-    lower_delete_request, lower_scroll_request, lower_update_payload_request,
-    lower_update_vector_request, lower_upsert_request,
+    lower_clear_payload_request, lower_delete_request, lower_delete_vector_request,
+    lower_scroll_request, lower_update_payload_request, lower_update_vector_request,
+    lower_upsert_request,
 };
 use crate::query::lower_query_request;
 use crate::types::*;
@@ -16,6 +17,8 @@ pub enum RequestBody {
     Scroll(Box<ScrollRequest>),
     Upsert(UpsertRequest),
     Delete(Box<DeleteRequest>),
+    ClearPayload(Box<ClearPayloadRequest>),
+    DeleteVector(Box<DeleteVectorRequest>),
     UpdateVector(UpdateVectorRequest),
     UpdatePayload(UpdatePayloadRequest),
     CreateCollection(Box<CreateCollectionRequest>),
@@ -156,6 +159,22 @@ pub fn route(statement: &Stmt) -> Route {
                 body: Some(RequestBody::Delete(Box::new(lower_delete_request(delete)))),
             }
         }
+        Stmt::ClearPayload(clear) => Route {
+            method: Method::Post,
+            path: format!("/collections/{}/points/payload/clear", clear.collection),
+            query: vec![("wait".into(), "true".into())],
+            body: Some(RequestBody::ClearPayload(Box::new(
+                lower_clear_payload_request(clear),
+            ))),
+        },
+        Stmt::DeleteVector(del_vec) => Route {
+            method: Method::Post,
+            path: format!("/collections/{}/points/vectors/delete", del_vec.collection),
+            query: vec![("wait".into(), "true".into())],
+            body: Some(RequestBody::DeleteVector(Box::new(
+                lower_delete_vector_request(del_vec),
+            ))),
+        },
         Stmt::UpdateVector(update) => Route {
             method: Method::Put,
             path: format!("/collections/{}/points/vectors", update.collection),

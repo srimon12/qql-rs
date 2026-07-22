@@ -45,6 +45,8 @@ Translate user intent directly into QQL syntax:
 - Browse points -> `SCROLL FROM <collection> [AFTER <id>] LIMIT <n>`
 - Batch ingest -> `UPSERT INTO <collection> VALUES {id: 1, text: '...'}, {id: 2, text: '...'}`
 - Delete points -> `DELETE FROM <collection> WHERE <filter>`
+- Clear payload -> `CLEAR PAYLOAD FROM <collection> WHERE <filter>`
+- Delete vectors -> `DELETE VECTOR <name> FROM <collection> WHERE id = N`
 - Count points -> `COUNT FROM <collection> WHERE <filter>`
 - Multi-tenant isolation -> `QUERY 'text' FROM <collection> WHERE tenant_id = 'honeywell' SHARD 'honeywell' LIMIT 10`
 
@@ -82,6 +84,12 @@ UPDATE docs SET PAYLOAD = {status: 'reviewed'} WHERE category = 'tech';
 
 -- Delete points
 DELETE FROM docs WHERE category = 'obsolete';
+
+-- Clear payload from points
+CLEAR PAYLOAD FROM docs WHERE status = 'archived';
+
+-- Delete specific vectors from points
+DELETE VECTOR colbert FROM docs WHERE id = 42;
 
 -- Count points with filter
 COUNT FROM docs WHERE status = 'active';

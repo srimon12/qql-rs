@@ -6,7 +6,7 @@ This is the canonical syntax implemented by `qql-core`. QQL follows Qdrant retri
 
 ```ebnf
 script       = [ statement, { ";", statement }, [ ";" ] ] ;
-statement    = query | scroll | upsert | update | delete | ddl | count | drop-index ;
+statement    = query | scroll | upsert | update | delete | ddl | count | clear-payload | delete-vectors | drop-index ;
 ```
 
 Multiple statements require `;`. Leading semicolons, repeated semicolons, and adjacent unseparated statements are invalid.
@@ -183,6 +183,10 @@ count        = "COUNT", "FROM", collection,
                [ "SHARD", string ] ;
 delete       = "DELETE", "FROM", collection, "WHERE", filter,
                [ "SHARD", string ] ;
+clear-payload = "CLEAR", "PAYLOAD", "FROM", collection,
+                "WHERE", filter ;
+delete-vectors = "DELETE", "VECTOR", name, { ",", name },
+                 "FROM", collection, "WHERE", filter ;
 update       = "UPDATE", collection, "SET",
                ( "VECTOR", [ vector-name ], "=", vector-value,
                  "WHERE", "id", "=", point-id
@@ -280,4 +284,17 @@ COUNT FROM docs WHERE status = 'active';
 
 -- Count with shard routing
 COUNT FROM sec10k WHERE tenant_id = 'honeywell' SHARD 'honeywell';
+```
+
+### Point Mutations
+
+```sql
+-- Clear payload fields from points
+CLEAR PAYLOAD FROM docs WHERE status = 'archived';
+
+-- Delete specific named vectors from points
+DELETE VECTOR colbert FROM docs WHERE id = 42;
+
+-- Delete multiple vectors at once
+DELETE VECTOR dense, sparse FROM docs WHERE status = 'deprecated';
 ```

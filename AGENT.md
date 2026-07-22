@@ -98,7 +98,7 @@ pub trait QdrantOps: Send + Sync {
 
 A single trait with 9 methods. All DML flows through `execute_route()`. DDL uses dedicated admin methods. Three implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant`.
 
-### Statement → Endpoint Matrix (16 routes)
+### Statement → Endpoint Matrix (18 routes)
 
 | QQL Statement | Endpoint | Method |
 |---|---|---|
@@ -109,6 +109,8 @@ A single trait with 9 methods. All DML flows through `execute_route()`. DDL uses
 | `COUNT ...` | `/points/count` | POST |
 | `UPSERT ...` | `/points` | PUT |
 | `DELETE ...` | `/points/delete` | POST |
+| `CLEAR PAYLOAD ...` | `/points/payload/clear` | POST |
+| `DELETE VECTOR ...` | `/points/vectors/delete` | POST |
 | `UPDATE ... VECTOR` | `/points/vectors` | PUT |
 | `UPDATE ... PAYLOAD` | `/points/payload` | POST |
 | `CREATE COLLECTION` | `/collections/{c}` | PUT |
