@@ -1,106 +1,94 @@
 # Rust SDK (`qql-core`, `qql-plan`, `qql`) Reference & Examples
 
-Native Rust libraries for parsing (`qql-core`), lowering/routing (`qql-plan`), and execution (`qql`).
+Three crates, three responsibilities. Use only what you need.
 
 ## Dependencies
 
 ```toml
 [dependencies]
-qql-core = "0.1"
-qql-plan = "0.1"
-qql = "0.1"        # package name for qql-runtime
+qql-core = "0.1"    # parser + inject_filter (no I/O, no networking)
+qql-plan = "0.1"    # AST → typed Route { method, path, body }
+qql = "0.1"         # runtime executor (REST, gRPC, embedding)
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
 ```
 
-## Quick Start & Executor Setup
+---
 
-```rust
-use std::sync::Arc;
-use qql::executor::Executor;
-use qql::rest::RestQdrant;
-use qql::grpc::GrpcQdrant;
-use qql::embedder::HttpEmbedder;
+## 1. Multi-Tenant Filter Injection + Route Compilation
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 1. Connect over REST or gRPC
-    let rest_ops = Box::new(RestQdrant::new("http://localhost:6333", None));
-    
-    // Optional: Connect embedder for automatic text -> vector resolution
-    let embedder = Arc::new(HttpEmbedder::new(
-        "http://localhost:11434/v1/embeddings".to_string(),
-        "".to_string(),
-        "all-minilm:l6-v2".to_string(),
-        384,
-    )?);
-
-    let executor = Executor::with_embedder(rest_ops, None, Some(embedder));
-
-    // 2. Execute QQL statements
-    let res = executor.execute("QUERY 'semantic search' FROM docs USING dense LIMIT 5").await?;
-    println!("Operation: {}, Message: {}", res.operation, res.message);
-
-    // 3. gRPC Client example
-    let grpc_ops = Box::new(GrpcQdrant::from_url("http://localhost:6334", None)?);
-    let grpc_exec = Executor::new(grpc_ops, None);
-    let grpc_res = grpc_exec.execute("QUERY POINTS (1, 2) FROM docs").await?;
-    println!("gRPC Points lookup: {:?}", grpc_res);
-
-    Ok(())
-}
-```
-
-## Pure AST Parsing, Filter Injection & Route Lowering
+Parse a user query, inject tenant isolation, lower to a typed REST route — zero network I/O.
 
 ```rust
 use qql_core::parser::Parser;
 use qql_core::ast::{self, ComparisonOp, Value};
 use qql_plan::routing::route;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 1. Parse statement string to Stmt
-    let mut stmt = Parser::parse("QUERY 'search' FROM docs USING dense LIMIT 10")?;
+fn tenant_route(user_query: &str, tenant: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let mut stmt = Parser::parse(user_query)?;
 
-    // 2. Inject security filter into AST
-    ast::inject_filter(&mut stmt, "tenant_id", ComparisonOp::Eq, Value::Str("acme".to_string()))?;
+    // Inject tenant filter — recurses into CTEs and prefetches
+    ast::inject_filter(&mut stmt, "tenant_id", ComparisonOp::Eq,
+                       Value::Str(tenant.to_string()))?;
 
-    // 3. Lower AST statement to typed Qdrant Route
-    let route = route(&stmt);
-    println!("Route Method: {:?}", route.method);
-    println!("Route Path: {}", route.path);
-    if let Some(json) = route.body_json() {
-        println!("Route Body JSON: {}", json);
+    // Lower to typed REST route (no Qdrant connection needed)
+    let r = route(&stmt);
+    assert_eq!(r.method.as_str(), "POST");
+
+    Ok(())
+}
+```
+
+---
+
+## 2. Execute with REST Client
+
+Full runtime: parse, optionally resolve embeddings, execute against Qdrant.
+
+```rust
+use qql::executor::Executor;
+use qql::rest::RestQdrant;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let ops = Box::new(RestQdrant::new("http://localhost:6333", None));
+    let exec = Executor::new(ops, None);
+
+    exec.execute("QUERY 'supply chain risks' FROM sec10k SHARD 'honeywell' LIMIT 10").await?;
+
+    Ok(())
+}
+```
+
+---
+
+## 3. Schema-as-Code
+
+Parse a `.qql` file and execute each statement — infrastructure defined in a version-controlled, language-agnostic format.
+
+```rust
+use qql_core::parser::Parser;
+use qql::executor::Executor;
+use qql::rest::RestQdrant;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let ops = Box::new(RestQdrant::new("http://localhost:6333", None));
+    let exec = Executor::new(ops, None);
+
+    let schema = r#"
+        CREATE COLLECTION docs HYBRID (dense VECTOR(768, COSINE), sparse SPARSE)
+          WITH HNSW (m = 16)
+          WITH PARAMS (replication_factor = 3, shard_number = 4);
+
+        CREATE INDEX ON COLLECTION docs FOR title TYPE text;
+        CREATE INDEX ON COLLECTION docs FOR tenant_id TYPE keyword WITH (is_tenant = true);
+    "#;
+
+    for stmt in Parser::parse_all(schema)? {
+        exec.execute_node(stmt).await?;
     }
 
     Ok(())
 }
 ```
-
-## Multi-Tenant Filter Injection with Shard Routing
-
-```rust
-use qql_core::parser::Parser;
-use qql_core::ast::{self, ComparisonOp, Value};
-use qql_plan::routing::route;
-use qql::executor::Executor;
-use qql::rest::RestQdrant;
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let tenant = "honeywell";
-    let user_query = "QUERY 'supply chain risks' FROM sec10k LIMIT 10";
-
-    // 1. Parse
-    let mut stmt = Parser::parse(user_query)?;
-
-    // 2. Inject tenant isolation filter
-    ast::inject_filter(&mut stmt, "tenant_id", ComparisonOp::Eq,
-                       Value::Str(tenant.to_string()))?;
-
-    // 3. Execute (shard key is passed via ?shard_key= query param)
-    let ops = Box::new(RestQdrant::new("http://localhost:6333", None));
-    let exec = Executor::new(ops, None);
-    let res = exec.execute_node(stmt).await?;
-
-    println!("{}", serde_json::to_string_pretty(&res)?);
-    Ok(())
-}

@@ -1,63 +1,81 @@
 # Node.js SDK (`nqql`) Reference & Examples
 
-Native Node.js bindings for QQL compiled with N-API (`napi-rs`).
+Native Node.js bindings via N-API (napi-rs).
 
-## Installation
+## Install
 
 ```bash
 npm install nqql
 ```
 
-## Quick Start & Client Configuration
+---
 
-```javascript
-const { Client, HttpEmbedder, parse, isValid, injectFilter, compileQuery, explain } = require('nqql');
+## 1. Multi-Tenant Filter Injection
 
-// 1. Initialize HTTP Embedder
-const embedder = new HttpEmbedder({
-    endpoint: "http://localhost:11434/v1/embeddings",
-    model: "all-minilm:l6-v2",
-    dimension: 384,
-    apiKey: ""
-});
+Parse user query, inject tenant isolation, execute.
 
-// 2. Initialize QQL Client
-const client = new Client({
-    url: "http://localhost:6333",
-    apiKey: null,
-    useGrpc: false,
-    embedder: embedder
-});
+```js
+const { parse, injectFilter, Client } = require('nqql');
 
-async function main() {
-    // 3. Execute QQL Query
-    const response = await client.execute("QUERY 'cardiology' FROM medical_records USING dense LIMIT 5");
-    console.log("Response:", response);
+const client = new Client({ url: "http://localhost:6333" });
 
-    // 4. Lower statement to Qdrant REST route object
-    const route = compileQuery("QUERY 'search' FROM docs USING dense LIMIT 10");
-    console.log("Method:", route.method, "Path:", route.path, "Payload:", route.payload);
-}
+// User query from UI / API
+const stmt = parse("QUERY 'supply chain risks' FROM sec10k SHARD 'honeywell' LIMIT 10");
 
-main();
+// Platform injects tenant filter — single call, recursive into CTEs and prefetches
+injectFilter(stmt, "tenant_id", "=", "honeywell");
+
+const result = await client.executeStmt(stmt);
 ```
 
-## AST Parsing, Validation & Filter Injection
+---
 
-```javascript
-const { parse, parseAll, isValid, injectFilter, tokenize } = require('nqql');
+## 2. Schema-as-Code
 
-// Parse statement to Stmt object
-const stmt = parse("QUERY 'search' FROM docs USING dense LIMIT 10");
+Parse and execute a `.qql` schema file — same file works from Node, Python, Rust, WASM.
 
-// Parse semicolon-separated script
-const scriptStmts = parseAll("CREATE COLLECTION docs (dense VECTOR(384, COSINE)); QUERY 'x' FROM docs;");
+```js
+const { parseAll, Client } = require('nqql');
 
-// Inject filter programmatically
-const secured = injectFilter("QUERY 'search' FROM docs LIMIT 10", "tenant_id", "=", "acme");
+const schema = `
+CREATE COLLECTION docs HYBRID (dense VECTOR(768, COSINE), sparse SPARSE)
+  WITH HNSW (m = 16)
+  WITH PARAMS (replication_factor = 3, shard_number = 4);
 
-// Validate syntax
-if (isValid("QUERY 'search' FROM docs")) {
-    console.log("Valid QQL statement");
+CREATE INDEX ON COLLECTION docs FOR title TYPE text;
+CREATE INDEX ON COLLECTION docs FOR tenant_id TYPE keyword WITH (is_tenant = true);
+`;
+
+const client = new Client({ url: "http://localhost:6333" });
+for (const stmt of parseAll(schema)) {
+    await client.executeStmt(stmt);
 }
+```
+
+---
+
+## 3. Complex Retrieval
+
+Multi-stage hybrid retrieval with CTE, Fusion, and Rerank.
+
+```js
+const { Client } = require('nqql');
+
+const client = new Client({ url: "http://localhost:6333" });
+
+const result = await client.execute(`
+  WITH
+    dense  AS (QUERY TEXT 'vector databases' USING dense  LIMIT 100),
+    sparse AS (QUERY TEXT 'vector databases' USING sparse LIMIT 100),
+    fused  AS (
+      QUERY FUSION RRF FROM docs
+        PREFETCH (dense WHERE priority = 'high', sparse)
+        LIMIT 50
+    )
+  QUERY RERANK TEXT 'vector databases' MODEL 'bge-reranker'
+    FROM docs
+    USING colbert
+    PREFETCH (fused)
+    LIMIT 10
+`);
 ```

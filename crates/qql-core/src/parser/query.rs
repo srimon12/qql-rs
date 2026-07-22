@@ -199,7 +199,7 @@ impl<'a> Parser<'a> {
             self.expect(TokenKind::As)?;
             self.expect(TokenKind::Lparen)?;
             self.expect(TokenKind::Query)?;
-            let query = self.parse_query_stmt(false, Vec::new())?;
+            let query = self.parse_query_stmt(false, ctes.clone())?;
             self.expect(TokenKind::Rparen)?;
             ctes.push(Cte {
                 name,

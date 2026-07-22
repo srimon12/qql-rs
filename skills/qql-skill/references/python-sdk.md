@@ -1,76 +1,82 @@
 # Python SDK (`pyqql`) Reference & Examples
 
-Native Python bindings for QQL compiled with PyO3.
+Native Python bindings via PyO3.
 
-## Installation
+## Install
 
 ```bash
 pip install pyqql
 ```
 
-## Quick Start & Client Configuration
+---
+
+## 1. Multi-Tenant Filter Injection
+
+Parse a user query, inject tenant isolation, execute — single call site, guaranteed safe.
 
 ```python
-import pyqql
+from pyqql import parse, inject_filter, Client
 
-# 1. Initialize HTTP Embedder (for Ollama, OpenAI, vLLM, TEI)
-embedder = pyqql.HttpEmbedder(
-    endpoint="http://localhost:11434/v1/embeddings",
-    model="all-minilm:l6-v2",
-    dimension=384,
-    api_key=""
-)
+client = Client("http://localhost:6333")
 
-# 2. Initialize QQL Client
-client = pyqql.Client(
-    url="http://localhost:6333",
-    api_key=None,
-    use_grpc=False,
-    embedder=embedder
-)
+# User query from UI / API
+stmt = parse("QUERY 'supply chain risks' FROM sec10k SHARD 'honeywell' LIMIT 10")
 
-# 3. Execute QQL Queries
-response = client.execute("QUERY 'cardiology' FROM medical_records USING dense LIMIT 5")
-print("Response data:", response)
+# Platform injects tenant filter — recurses into CTEs and prefetches
+inject_filter(stmt, "tenant_id", "=", "honeywell")
 
-# 4. Explain Execution Plan
-plan = client.explain("QUERY 'cardiology' FROM medical_records USING dense LIMIT 5")
-print("Execution plan:", plan)
+result = client.execute_stmt(stmt)
 ```
 
-## AST Parsing, Compilation & Filter Injection
+---
+
+## 2. Schema-as-Code
+
+The same `.qql` file works from Python, Rust, Node, and WASM. Parse, inspect, execute.
 
 ```python
-import pyqql
+from pyqql import parse_all, Client
 
-# Parse query string into typed Stmt object
-stmt = pyqql.parse("QUERY 'vector search' FROM docs USING dense LIMIT 10")
+schema = """
+CREATE COLLECTION docs HYBRID (dense VECTOR(768, COSINE), sparse SPARSE)
+  WITH HNSW (m = 16)
+  WITH PARAMS (replication_factor = 3, shard_number = 4);
 
-# Programmatically inject security or tenant filter into Stmt or query string
-secured_stmt = pyqql.inject_filter(stmt, "tenant_id", "=", "tenant_acme")
+CREATE INDEX ON COLLECTION docs FOR title TYPE text;
+CREATE INDEX ON COLLECTION docs FOR tenant_id TYPE keyword WITH (is_tenant = true);
+"""
 
-# Check if query is valid QQL
-if pyqql.is_valid("QUERY 'search' FROM docs"):
-    print("Valid QQL statement")
-
-# Compile statement to Qdrant REST route dictionary
-route = pyqql.compile_query("QUERY 'search' FROM docs USING dense LIMIT 10")
-print("Compiled route:", route["method"], route["path"], route["payload"])
-
-# Tokenize QQL query string
-tokens = pyqql.tokenize("QUERY 'search' FROM docs WHERE id = 1")
-for t in tokens:
-    print(t["kind"], t["text"], t["pos"])
+client = Client("http://localhost:6333")
+for stmt in parse_all(schema):
+    client.execute_stmt(stmt)
 ```
 
-## Batch Processing
+---
+
+## 3. Complex Retrieval
+
+Multi-stage hybrid retrieval with CTE, Fusion, and Rerank — one string.
 
 ```python
-import pyqql
+from pyqql import Client
 
-# Parse batch of queries in a single FFI boundary call
-stmts = pyqql.parse_batch([
-    "QUERY 'query 1' FROM docs USING dense LIMIT 5",
-    "QUERY 'query 2' FROM docs USING dense LIMIT 5",
-])
+client = Client("http://localhost:6333")
+
+query = """
+WITH
+  dense  AS (QUERY TEXT 'vector databases' USING dense  LIMIT 100),
+  sparse AS (QUERY TEXT 'vector databases' USING sparse LIMIT 100),
+  fused  AS (
+    QUERY FUSION RRF FROM docs
+      PREFETCH (dense WHERE priority = 'high', sparse)
+      LIMIT 50
+  )
+QUERY RERANK TEXT 'vector databases' MODEL 'bge-reranker'
+  FROM docs
+  USING colbert
+  PREFETCH (fused)
+  LIMIT 10
+"""
+
+result = client.execute(query)
 ```

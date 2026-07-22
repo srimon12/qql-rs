@@ -1,42 +1,76 @@
 # WebAssembly SDK (`qql-wasm`) Reference & Examples
 
-WebAssembly bindings for QQL compiled with `wasm-bindgen` for browser and edge environments (Cloudflare Workers, Vercel Edge, Deno, Bun).
+WASM bindings for browser and edge (Cloudflare Workers, Vercel Edge, Deno, Bun).
 
-## Installation
+## Install
 
 ```bash
 npm install qql-wasm
 ```
 
-## Quick Start in Browser / Edge
+---
 
-```javascript
-import init, { Client, parse, parse_all, isValid, inject_filter, compile, explain } from 'qql-wasm';
+## 1. Client-Side Validation & Filter Injection
 
-async function run() {
-    await init();
+Validate and inject filters in the browser — no server round-trip needed.
 
-    // 1. Initialize Client
-    const client = new Client("http://localhost:6333", null);
-    
-    // Optional: Configure OpenAI/Ollama embedder or Transformers.js embedder function
-    client.setOpenAIEmbedder("api-key", "text-embedding-3-small", 1536);
-    // Or custom browser transformer embedder:
-    // client.setEmbedder(async (texts) => myLocalTransformer(texts));
+```js
+import init, { parse, isValid, inject_filter } from 'qql-wasm';
 
-    // 2. Execute Query via browser fetch
-    const response = await client.execute("QUERY 'machine learning' FROM docs USING dense LIMIT 5");
-    console.log(response);
+await init();
 
-    // 3. Offline Route Compilation
-    const routeJson = compile("QUERY 'search' FROM docs USING dense LIMIT 10");
-    console.log("Compiled route:", routeJson);
-
-    // 4. AST Parsing & Safe Filter Injection
-    const ast = parse("QUERY 'search' FROM docs LIMIT 10");
-    const valid = isValid("QUERY 'search' FROM docs");
-    const safeAst = inject_filter("QUERY 'docs' FROM items LIMIT 10", "tenant_id", "=", "acme");
+// Validate user input instantly
+if (!isValid("QUERY 'machine learning' FROM papers LIMIT 20")) {
+    throw new Error("Invalid QQL");
 }
 
-run();
+// Parse into AST, inject tenant filter
+const stmt = parse("QUERY 'search' FROM docs LIMIT 10");
+inject_filter(stmt, "tenant_id", "=", "acme");
+```
+
+---
+
+## 2. Offline Route Compilation
+
+Lower QQL to a typed REST route object without a Qdrant connection.
+
+```js
+import init, { compile, parse_all } from 'qql-wasm';
+
+await init();
+
+// Compile a single statement to a route
+const route = compile("QUERY 'search' FROM docs USING dense LIMIT 10");
+// → { method: "POST", path: "/collections/docs/points/query", payload: {...} }
+
+// Compile a whole .qql script
+for (const stmt of parse_all(`
+  CREATE COLLECTION docs HYBRID (dense VECTOR(768, COSINE), sparse SPARSE)
+    WITH PARAMS (replication_factor = 3);
+  CREATE INDEX ON COLLECTION docs FOR tenant_id TYPE keyword WITH (is_tenant = true);
+`)) {
+    console.log(stmt);
+}
+```
+
+---
+
+## 3. Execute via Browser Fetch
+
+Full client from browser, with optional embedder for text-to-vector resolution.
+
+```js
+import init, { Client } from 'qql-wasm';
+
+await init();
+
+const client = new Client("http://localhost:6333", null);
+
+// Optional: configure embedder for automatic text → vector
+client.setOpenAIEmbedder("sk-...", "text-embedding-3-small", 1536);
+
+const result = await client.execute(
+    "QUERY 'vector databases' FROM docs USING dense LIMIT 10"
+);
 ```
