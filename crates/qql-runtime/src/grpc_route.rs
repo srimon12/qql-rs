@@ -531,8 +531,185 @@ pub async fn execute_query_batch_grpc(
     Ok(resp
         .result
         .into_iter()
-        .map(crate::grpc_route::batch_result_to_json)
+        .map(batch_result_to_json)
         .collect())
+}
+
+/// Convert a mutation batch and send via gRPC `UpdateBatch`.
+pub async fn execute_update_batch_grpc(
+    client: &crate::grpc::GrpcQdrant,
+    collection: &str,
+    batch: &qql_plan::UpdateBatchRequest,
+) -> Result<Vec<serde_json::Value>, QqlError> {
+    let operations: Vec<qdrant::PointsUpdateOperation> = batch
+        .operations
+        .iter()
+        .map(to_points_update_operation)
+        .collect();
+
+    let grpc_req = qdrant::UpdateBatchPoints {
+        collection_name: collection.to_string(),
+        wait: Some(true),
+        operations,
+        ..Default::default()
+    };
+
+    let resp = client
+        .update_batch(grpc_req)
+        .await
+        .map_err(|e| QqlError::backend("QQL-GRPC", format!("update_batch: {e}"), None))?;
+
+    Ok(resp
+        .result
+        .into_iter()
+        .map(update_result_to_json)
+        .collect())
+}
+
+fn to_points_update_operation(op: &qql_plan::UpdateOperation) -> qdrant::PointsUpdateOperation {
+    use qdrant::points_update_operation::{self, Operation};
+    use qql_plan::UpdateOperation;
+
+    let operation = match op {
+        UpdateOperation::Upsert { upsert } => {
+            let points: Vec<qdrant::PointStruct> = upsert
+                .points
+                .iter()
+                .map(|p| {
+                    let payload = p
+                        .payload
+                        .as_ref()
+                        .map(|pl| {
+                            pl.iter()
+                                .map(|(k, v)| (k.clone(), to_qdrant_value(v.clone())))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    qdrant::PointStruct {
+                        id: Some(to_point_id(&p.id)),
+                        vectors: p.vector.as_ref().and_then(|v| to_vectors(v.clone())),
+                        payload,
+                    }
+                })
+                .collect();
+            let shard_key_selector = upsert.shard_key.as_ref().map(|k| qdrant::ShardKeySelector {
+                shard_keys: vec![qdrant::ShardKey {
+                    key: Some(qdrant::shard_key::Key::Keyword(k.clone())),
+                }],
+                ..Default::default()
+            });
+            Operation::Upsert(points_update_operation::PointStructList {
+                points,
+                shard_key_selector,
+                update_filter: None,
+                update_mode: None,
+            })
+        }
+        UpdateOperation::Delete { delete } => {
+            let points = points_and_filter_selector(delete.points.as_ref(), delete.filter.as_ref());
+            let shard_key_selector = delete.shard_key.as_ref().map(|k| qdrant::ShardKeySelector {
+                shard_keys: vec![qdrant::ShardKey {
+                    key: Some(qdrant::shard_key::Key::Keyword(k.clone())),
+                }],
+                ..Default::default()
+            });
+            Operation::DeletePoints(points_update_operation::DeletePoints {
+                points,
+                shard_key_selector,
+            })
+        }
+        UpdateOperation::SetPayload { set_payload } => {
+            let payload_map: std::collections::HashMap<String, qdrant::Value> = set_payload
+                .payload
+                .iter()
+                .map(|(k, v)| (k.clone(), to_qdrant_value(v.clone())))
+                .collect();
+            Operation::SetPayload(points_update_operation::SetPayload {
+                payload: payload_map,
+                points_selector: points_and_filter_selector(
+                    set_payload.points.as_ref(),
+                    set_payload.filter.as_ref(),
+                ),
+                shard_key_selector: None,
+                key: None,
+            })
+        }
+        UpdateOperation::ClearPayload { clear_payload } => {
+            Operation::ClearPayload(points_update_operation::ClearPayload {
+                points: points_and_filter_selector(
+                    clear_payload.points.as_ref(),
+                    clear_payload.filter.as_ref(),
+                ),
+                shard_key_selector: None,
+            })
+        }
+        UpdateOperation::UpdateVectors { update_vectors } => {
+            let points: Vec<qdrant::PointVectors> = update_vectors
+                .points
+                .iter()
+                .map(|p| qdrant::PointVectors {
+                    id: Some(to_point_id(&p.id)),
+                    vectors: to_vectors(p.vector.clone()),
+                })
+                .collect();
+            Operation::UpdateVectors(points_update_operation::UpdateVectors {
+                points,
+                shard_key_selector: None,
+                update_filter: None,
+            })
+        }
+        UpdateOperation::DeleteVectors { delete_vectors } => {
+            Operation::DeleteVectors(points_update_operation::DeleteVectors {
+                points_selector: points_and_filter_selector(
+                    delete_vectors.points.as_ref(),
+                    delete_vectors.filter.as_ref(),
+                ),
+                vectors: Some(qdrant::VectorsSelector {
+                    names: delete_vectors.vector.clone(),
+                }),
+                shard_key_selector: None,
+            })
+        }
+    };
+
+    qdrant::PointsUpdateOperation {
+        operation: Some(operation),
+    }
+}
+
+fn points_and_filter_selector(
+    points: Option<&Vec<serde_json::Value>>,
+    filter: Option<&FilterExpression>,
+) -> Option<qdrant::PointsSelector> {
+    if let Some(points) = points {
+        Some(qdrant::PointsSelector {
+            points_selector_one_of: Some(qdrant::points_selector::PointsSelectorOneOf::Points(
+                qdrant::PointsIdsList {
+                    ids: points.iter().map(to_point_id).collect(),
+                },
+            )),
+        })
+    } else {
+        filter.map(|f| qdrant::PointsSelector {
+            points_selector_one_of: Some(qdrant::points_selector::PointsSelectorOneOf::Filter(
+                to_filter(f),
+            )),
+        })
+    }
+}
+
+fn update_result_to_json(r: qdrant::UpdateResult) -> serde_json::Value {
+    let status = match r.status() {
+        qdrant::UpdateStatus::Acknowledged => "acknowledged",
+        qdrant::UpdateStatus::Completed => "completed",
+        qdrant::UpdateStatus::ClockRejected => "clock_rejected",
+        qdrant::UpdateStatus::WaitTimeout => "wait_timeout",
+        qdrant::UpdateStatus::UnknownUpdateStatus => "unknown",
+    };
+    serde_json::json!({
+        "operation_id": r.operation_id,
+        "status": status,
+    })
 }
 
 fn to_query_points(

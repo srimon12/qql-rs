@@ -14,6 +14,11 @@ pub struct PyStmt {
 #[pymethods]
 impl PyStmt {
     fn inject_filter(&mut self, field: &str, op: &str, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        if op == "!=" || op == "neq" || op == "<>" {
+            return Err(PySyntaxError::new_err(
+                "inject_filter does not support '!='; inject equality and wrap with NOT, or rewrite the query",
+            ));
+        }
         let val = py_to_value(value)?;
         let cmp = str_to_comparison_op(op);
         ast::inject_filter(&mut self.inner, field, cmp, val)
@@ -91,6 +96,11 @@ fn inject_filter(
     op: &str,
     value: &Bound<'_, PyAny>,
 ) -> PyResult<PyStmt> {
+    if op == "!=" || op == "neq" || op == "<>" {
+        return Err(PySyntaxError::new_err(
+            "inject_filter does not support '!='; inject equality and wrap with NOT, or rewrite the query",
+        ));
+    }
     let val = py_to_value(value)?;
     let cmp = str_to_comparison_op(op);
     if let Ok(mut py_stmt) = query.extract::<PyRefMut<'_, PyStmt>>() {
@@ -576,7 +586,6 @@ fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
 fn str_to_comparison_op(op: &str) -> ComparisonOp {
     match op {
         "=" | "==" | "eq" => ComparisonOp::Eq,
-        "!=" | "neq" => ComparisonOp::Eq,
         ">" | "gt" => ComparisonOp::Gt,
         ">=" | "gte" => ComparisonOp::Gte,
         "<" | "lt" => ComparisonOp::Lt,

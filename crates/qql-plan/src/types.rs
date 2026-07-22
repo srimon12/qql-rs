@@ -75,6 +75,40 @@ pub struct QueryBatchRequest {
     pub searches: Vec<QueryRequest>,
 }
 
+/// Wire body for Qdrant's `POST /collections/{c}/points/batch` (mutation batch).
+/// Maps to OpenAPI `UpdateOperations` / gRPC `UpdateBatchPoints`.
+#[derive(Debug, Clone, Serialize)]
+pub struct UpdateBatchRequest {
+    pub operations: Vec<UpdateOperation>,
+}
+
+/// One entry in `UpdateOperations.operations` — OpenAPI `UpdateOperation`.
+/// Each variant is a single-key object matching the wire format exactly.
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum UpdateOperation {
+    Upsert { upsert: UpsertRequest },
+    Delete { delete: DeleteRequest },
+    SetPayload { set_payload: UpdatePayloadRequest },
+    ClearPayload { clear_payload: ClearPayloadRequest },
+    UpdateVectors { update_vectors: UpdateVectorRequest },
+    DeleteVectors { delete_vectors: DeleteVectorRequest },
+}
+
+impl UpdateOperation {
+    /// Human-readable operation name for executor responses.
+    pub fn operation_name(&self) -> &'static str {
+        match self {
+            UpdateOperation::Upsert { .. } => "UPSERT",
+            UpdateOperation::Delete { .. } => "DELETE",
+            UpdateOperation::SetPayload { .. } => "UPDATE_PAYLOAD",
+            UpdateOperation::ClearPayload { .. } => "CLEAR_PAYLOAD",
+            UpdateOperation::UpdateVectors { .. } => "UPDATE_VECTOR",
+            UpdateOperation::DeleteVectors { .. } => "DELETE_VECTOR",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct MinShould {
     pub conditions: Vec<FilterClause>,

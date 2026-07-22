@@ -19,9 +19,13 @@ impl Stmt {
         op: String,
         value: serde_json::Value,
     ) -> napi::Result<()> {
+        if op == "!=" || op == "neq" || op == "<>" {
+            return Err(napi::Error::from_reason(
+                "inject_filter does not support '!='; inject equality and wrap with NOT, or rewrite the query",
+            ));
+        }
         let cmp = match op.as_str() {
             "=" | "==" | "eq" => ComparisonOp::Eq,
-            "!=" | "neq" => ComparisonOp::Eq,
             ">" | "gt" => ComparisonOp::Gt,
             ">=" | "gte" => ComparisonOp::Gte,
             "<" | "lt" => ComparisonOp::Lt,
@@ -126,9 +130,13 @@ pub fn inject_filter(
     op: String,
     value: serde_json::Value,
 ) -> napi::Result<serde_json::Value> {
+    if op == "!=" || op == "neq" || op == "<>" {
+        return Err(napi::Error::from_reason(
+            "inject_filter does not support '!='; inject equality and wrap with NOT, or rewrite the query",
+        ));
+    }
     let cmp = match op.as_str() {
         "=" | "==" | "eq" => ComparisonOp::Eq,
-        "!=" | "neq" => ComparisonOp::Eq,
         ">" | "gt" => ComparisonOp::Gt,
         ">=" | "gte" => ComparisonOp::Gte,
         "<" | "lt" => ComparisonOp::Lt,

@@ -5,7 +5,7 @@ use crate::backend::CollectionSchema;
 use crate::client::{CollectionInfo, CreateCollectionReq, CreateFieldIndexReq, QdrantOps};
 use crate::qdrant_grpc::qdrant;
 use qql_core::error::QqlError;
-use qql_plan::QueryBatchRequest;
+use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 
 pub struct GrpcQdrant {
     channel: Channel,
@@ -71,6 +71,17 @@ impl GrpcQdrant {
             .await
             .map(|r| r.into_inner())
             .map_err(|e| QqlError::backend("QQL-GRPC", format!("query_batch: {e}"), None))
+    }
+
+    pub async fn update_batch(
+        &self,
+        req: qdrant::UpdateBatchPoints,
+    ) -> Result<qdrant::UpdateBatchResponse, QqlError> {
+        let mut cl = qdrant::points_client::PointsClient::new(self.channel.clone());
+        cl.update_batch(tonic::Request::new(req))
+            .await
+            .map(|r| r.into_inner())
+            .map_err(|e| QqlError::backend("QQL-GRPC", format!("update_batch: {e}"), None))
     }
 
     pub async fn get_points(
@@ -421,5 +432,13 @@ impl QdrantOps for GrpcQdrant {
         batch: &QueryBatchRequest,
     ) -> Result<Vec<serde_json::Value>, QqlError> {
         crate::grpc_route::execute_query_batch_grpc(self, collection, batch).await
+    }
+
+    async fn execute_update_batch(
+        &self,
+        collection: &str,
+        batch: &UpdateBatchRequest,
+    ) -> Result<Vec<serde_json::Value>, QqlError> {
+        crate::grpc_route::execute_update_batch_grpc(self, collection, batch).await
     }
 }

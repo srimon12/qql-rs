@@ -150,7 +150,8 @@ impl Executor {
 
     /// Execute a QQL query string.  Semicolon-delimited multi-statement
     /// scripts are automatically detected, parsed, and executed in batch —
-    /// same-collection QUERY statements are grouped into a single network call.
+    /// contiguous same-collection QUERY statements use `/points/query/batch`,
+    /// and contiguous same-collection mutations use `/points/batch`.
     pub async fn execute(&self, query: &str) -> Result<ExecResponse, QqlError> {
         match parser::Parser::parse_all(query) {
             Ok(mut statements) => match statements.len() {
@@ -237,78 +238,147 @@ impl Executor {
         Ok(results)
     }
 
-    /// Execute pre-parsed statements.  Same-collection QUERY statements are
-    /// automatically grouped into one network call via Qdrant's batch endpoint.
+    /// Execute pre-parsed statements with order-preserving smart batching.
+    ///
+    /// Contiguous runs of batchable QUERY statements targeting the same
+    /// collection are sent via `/points/query/batch`. Contiguous runs of
+    /// mutations (UPSERT, DELETE, UPDATE PAYLOAD/VECTOR, CLEAR PAYLOAD,
+    /// DELETE VECTOR) targeting the same collection are sent via
+    /// `/points/batch`. All other statements execute individually.
+    /// Statement order is preserved.
     pub async fn execute_batch_nodes(
         &self,
         stmts: Vec<Stmt>,
         stop_on_error: bool,
     ) -> Result<Vec<ExecResponse>, QqlError> {
+        use qql_plan::mutation::lower_update_operation;
+        use qql_plan::query::lower_query_request;
+        use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
+
         let mut results: Vec<ExecResponse> = Vec::with_capacity(stmts.len());
+        let mut i = 0;
 
-        // ── Phase 1: separate queries from mutations ──────────────
-        let mut query_groups: HashMap<String, Vec<ast::QueryStmt>> = HashMap::new();
-        let mut non_queries: Vec<Stmt> = Vec::new();
-
-        for stmt in stmts {
-            match stmt {
-                Stmt::Query(q) => {
-                    if let ast::QueryCollection::Explicit(ref name) = q.collection {
-                        query_groups.entry(name.clone()).or_default().push(*q);
-                    } else {
-                        non_queries.push(Stmt::Query(q));
+        while i < stmts.len() {
+            // ── Contiguous mutation batch (same collection, 2+) ──
+            if let Some((coll, first_op)) = lower_update_operation(&stmts[i]) {
+                let mut ops = vec![first_op];
+                let mut j = i + 1;
+                while j < stmts.len() {
+                    match lower_update_operation(&stmts[j]) {
+                        Some((c, op)) if c == coll => {
+                            ops.push(op);
+                            j += 1;
+                        }
+                        _ => break,
                     }
                 }
-                other => non_queries.push(other),
-            }
-        }
-
-        // ── Phase 2: execute batched queries ──────────────────────
-        for (_collection, queries) in query_groups {
-            let batches = qql_plan::routing::route_query_batch(&queries);
-            for (coll, batch) in batches {
-                match self.client.execute_query_batch(&coll, &batch).await {
-                    Ok(responses) => {
-                        for val in responses {
-                            let hits = extract_search_hits(&val);
-                            results.push(ExecResponse {
-                                ok: true,
-                                operation: "QUERY".to_string(),
-                                message: format!("Found {} hits", hits.len()),
-                                data: Some(serde_json::to_value(hits).unwrap_or_default()),
-                            });
+                if ops.len() >= 2 {
+                    let op_names: Vec<&'static str> =
+                        ops.iter().map(|o| o.operation_name()).collect();
+                    let batch = UpdateBatchRequest { operations: ops };
+                    match self.client.execute_update_batch(&coll, &batch).await {
+                        Ok(responses) => {
+                            for (k, val) in responses.into_iter().enumerate() {
+                                let name = op_names.get(k).copied().unwrap_or("MUTATION");
+                                results.push(ExecResponse {
+                                    ok: true,
+                                    operation: name.to_string(),
+                                    message: format!("{name} ok (batched)"),
+                                    data: Some(val),
+                                });
+                            }
+                            // Pad if server returned fewer results than ops
+                            while results.len() < i + (j - i) {
+                                let name = op_names
+                                    .get(results.len() - i)
+                                    .copied()
+                                    .unwrap_or("MUTATION");
+                                results.push(ExecResponse {
+                                    ok: true,
+                                    operation: name.to_string(),
+                                    message: format!("{name} ok (batched)"),
+                                    data: None,
+                                });
+                            }
+                        }
+                        Err(e) => {
+                            if stop_on_error {
+                                return Err(e);
+                            }
+                            for name in &op_names {
+                                results.push(ExecResponse {
+                                    ok: false,
+                                    operation: (*name).to_string(),
+                                    message: e.to_string(),
+                                    data: None,
+                                });
+                            }
                         }
                     }
-                    Err(e) => {
-                        if stop_on_error {
-                            return Err(e);
+                    i = j;
+                    continue;
+                }
+                // Single mutation — fall through to individual execute
+            }
+
+            // ── Contiguous query batch (same collection, 2+) ──
+            if let Some((coll, q0)) = batchable_query_stmt(&stmts[i]) {
+                let mut queries = vec![q0];
+                let mut j = i + 1;
+                while j < stmts.len() {
+                    match batchable_query_stmt(&stmts[j]) {
+                        Some((c, q)) if c == coll => {
+                            queries.push(q);
+                            j += 1;
                         }
-                        results.push(ExecResponse {
-                            ok: false,
-                            operation: "QUERY".to_string(),
-                            message: e.to_string(),
-                            data: None,
-                        });
+                        _ => break,
                     }
                 }
+                if queries.len() >= 2 {
+                    let batch = QueryBatchRequest {
+                        searches: queries.iter().map(lower_query_request).collect(),
+                    };
+                    match self.client.execute_query_batch(&coll, &batch).await {
+                        Ok(responses) => {
+                            for val in responses {
+                                let hits = extract_search_hits(&val);
+                                results.push(ExecResponse {
+                                    ok: true,
+                                    operation: "QUERY".to_string(),
+                                    message: format!("Found {} hits", hits.len()),
+                                    data: Some(serde_json::to_value(hits).unwrap_or_default()),
+                                });
+                            }
+                            while results.len() < i + (j - i) {
+                                results.push(ExecResponse {
+                                    ok: true,
+                                    operation: "QUERY".to_string(),
+                                    message: "Found 0 hits".to_string(),
+                                    data: Some(serde_json::json!([])),
+                                });
+                            }
+                        }
+                        Err(e) => {
+                            if stop_on_error {
+                                return Err(e);
+                            }
+                            for _ in i..j {
+                                results.push(ExecResponse {
+                                    ok: false,
+                                    operation: "QUERY".to_string(),
+                                    message: e.to_string(),
+                                    data: None,
+                                });
+                            }
+                        }
+                    }
+                    i = j;
+                    continue;
+                }
             }
-            // Any queries that weren't batched (singletons, non-batchable variants)
-            // get executed individually.
-            let remaining: Vec<_> = queries
-                .into_iter()
-                .filter(|q| {
-                    // Keep queries that didn't go through the batch
-                    matches!(q.expression, ast::QueryExpr::Points { .. }) || q.group.is_some()
-                })
-                .collect();
-            for q in remaining {
-                results.push(self.single_query_exec(q).await);
-            }
-        }
 
-        // ── Phase 3: execute non-query statements individually ───
-        for stmt in non_queries {
-            match self.execute_node(stmt).await {
+            // ── Individual statement ──
+            match self.execute_node(stmts[i].clone()).await {
                 Ok(resp) => results.push(resp),
                 Err(err) => {
                     if stop_on_error {
@@ -322,21 +392,27 @@ impl Executor {
                     });
                 }
             }
+            i += 1;
         }
 
         Ok(results)
     }
+}
 
-    async fn single_query_exec(&self, stmt: ast::QueryStmt) -> ExecResponse {
-        match self.do_query(stmt).await {
-            Ok(r) => r,
-            Err(e) => ExecResponse {
-                ok: false,
-                operation: "QUERY".to_string(),
-                message: e.to_string(),
-                data: None,
-            },
+/// Returns `(collection, QueryStmt)` when the statement is a batchable QUERY
+/// (not POINTS lookup, not GROUP BY, explicit collection).
+fn batchable_query_stmt(stmt: &Stmt) -> Option<(String, ast::QueryStmt)> {
+    match stmt {
+        Stmt::Query(q) => {
+            if matches!(q.expression, ast::QueryExpr::Points { .. }) || q.group.is_some() {
+                return None;
+            }
+            match &q.collection {
+                ast::QueryCollection::Explicit(name) => Some((name.clone(), (**q).clone())),
+                ast::QueryCollection::Inherited => None,
+            }
         }
+        _ => None,
     }
 }
 

@@ -27,7 +27,8 @@ use qql::backend::{CollectionInfo, CollectionSchema};
 use qql::client::{CreateCollectionReq, CreateFieldIndexReq, QdrantOps};
 use qql_core::error::QqlError;
 use qql_plan::routing::{RequestBody, Route};
-use qql_plan::QueryBatchRequest;
+use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
+use qql_plan::UpdateOperation as PlanUpdateOperation;
 
 pub struct EdgeQdrant {
     base_path: PathBuf,
@@ -756,6 +757,61 @@ impl QdrantOps for EdgeQdrant {
             results.push(self.execute_route(route).await?);
         }
         Ok(results)
+    }
+
+    async fn execute_update_batch(
+        &self,
+        collection: &str,
+        batch: &UpdateBatchRequest,
+    ) -> Result<Vec<serde_json::Value>, QqlError> {
+        // Edge has no native update-batch RPC — fan out to individual routes.
+        let mut results = Vec::with_capacity(batch.operations.len());
+        for op in &batch.operations {
+            let route = update_op_to_route(collection, op);
+            results.push(self.execute_route(route).await?);
+        }
+        Ok(results)
+    }
+}
+
+fn update_op_to_route(collection: &str, op: &PlanUpdateOperation) -> Route {
+    match op {
+        PlanUpdateOperation::Upsert { upsert } => Route {
+            method: qql_plan::types::Method::Put,
+            path: format!("/collections/{collection}/points"),
+            query: vec![("wait".into(), "true".into())],
+            body: Some(RequestBody::Upsert(upsert.clone())),
+        },
+        PlanUpdateOperation::Delete { delete } => Route {
+            method: qql_plan::types::Method::Post,
+            path: format!("/collections/{collection}/points/delete"),
+            query: vec![("wait".into(), "true".into())],
+            body: Some(RequestBody::Delete(Box::new(delete.clone()))),
+        },
+        PlanUpdateOperation::SetPayload { set_payload } => Route {
+            method: qql_plan::types::Method::Post,
+            path: format!("/collections/{collection}/points/payload"),
+            query: vec![("wait".into(), "true".into())],
+            body: Some(RequestBody::UpdatePayload(set_payload.clone())),
+        },
+        PlanUpdateOperation::ClearPayload { clear_payload } => Route {
+            method: qql_plan::types::Method::Post,
+            path: format!("/collections/{collection}/points/payload/clear"),
+            query: vec![("wait".into(), "true".into())],
+            body: Some(RequestBody::ClearPayload(Box::new(clear_payload.clone()))),
+        },
+        PlanUpdateOperation::UpdateVectors { update_vectors } => Route {
+            method: qql_plan::types::Method::Put,
+            path: format!("/collections/{collection}/points/vectors"),
+            query: vec![("wait".into(), "true".into())],
+            body: Some(RequestBody::UpdateVector(update_vectors.clone())),
+        },
+        PlanUpdateOperation::DeleteVectors { delete_vectors } => Route {
+            method: qql_plan::types::Method::Post,
+            path: format!("/collections/{collection}/points/vectors/delete"),
+            query: vec![("wait".into(), "true".into())],
+            body: Some(RequestBody::DeleteVector(Box::new(delete_vectors.clone()))),
+        },
     }
 }
 

@@ -65,7 +65,9 @@ const safe = inject_filter("QUERY 'search' FROM docs LIMIT 10", "tenant_id", "="
 
 Full client from browser, with optional embedder for text-to-vector resolution.
 `execute()` accepts a single string, a semicolon-delimited multi-statement string,
-or an array of strings.  `executeStmt()` accepts a pre-parsed `Stmt` object.
+or an array of strings. Contiguous same-collection QUERYs use `/points/query/batch`;
+contiguous mutations (UPSERT/DELETE/UPDATE/CLEAR/DELETE VECTOR) use `/points/batch`.
+`executeStmt()` accepts a pre-parsed `Stmt` object.
 
 ```js
 import init, { Client, Stmt } from 'qql-wasm';

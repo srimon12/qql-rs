@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use qql_core::error::QqlError;
 use qql_plan::routing::Route;
-use qql_plan::QueryBatchRequest;
+use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 
 use crate::client::{CollectionInfo, CreateCollectionReq, CreateFieldIndexReq, QdrantOps};
 use crate::config::QqlConfig;
@@ -21,6 +21,8 @@ struct MockQdrantClient {
     pub last_route: Arc<Mutex<Option<Route>>>,
     pub batch_call_count: Arc<Mutex<usize>>,
     pub last_batch_searches_count: Arc<Mutex<usize>>,
+    pub update_batch_call_count: Arc<Mutex<usize>>,
+    pub last_update_batch_ops_count: Arc<Mutex<usize>>,
 }
 
 impl Default for MockQdrantClient {
@@ -34,6 +36,8 @@ impl Default for MockQdrantClient {
             last_route: Arc::new(Mutex::new(None)),
             batch_call_count: Arc::new(Mutex::new(0)),
             last_batch_searches_count: Arc::new(Mutex::new(0)),
+            update_batch_call_count: Arc::new(Mutex::new(0)),
+            last_update_batch_ops_count: Arc::new(Mutex::new(0)),
         }
     }
 }
@@ -96,6 +100,25 @@ impl QdrantOps for MockQdrantClient {
             .searches
             .iter()
             .map(|_| serde_json::json!({"result": {"points": []}}))
+            .collect())
+    }
+
+    async fn execute_update_batch(
+        &self,
+        _collection: &str,
+        batch: &UpdateBatchRequest,
+    ) -> Result<Vec<serde_json::Value>, QqlError> {
+        *self.update_batch_call_count.lock().unwrap() += 1;
+        *self.last_update_batch_ops_count.lock().unwrap() = batch.operations.len();
+        Ok(batch
+            .operations
+            .iter()
+            .map(|op| {
+                serde_json::json!({
+                    "status": "completed",
+                    "operation": op.operation_name(),
+                })
+            })
             .collect())
     }
 }
@@ -469,4 +492,88 @@ async fn test_batch_query_groups_same_collection() {
 
     let count = *searches_count.lock().unwrap();
     assert_eq!(count, 3, "expected 3 searches in batch, got {count}");
+}
+
+#[tokio::test]
+async fn test_batch_mutations_same_collection() {
+    let client = MockQdrantClient::default();
+    let update_count = client.update_batch_call_count.clone();
+    let ops_count = client.last_update_batch_ops_count.clone();
+    let route_count = client.last_route.clone();
+
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+
+    let stmts = qql_core::parser::Parser::parse_all(
+        "UPSERT INTO docs VALUES {id: 1, title: 'a'};\
+         UPSERT INTO docs VALUES {id: 2, title: 'b'};\
+         DELETE FROM docs WHERE id = 3;",
+    )
+    .unwrap();
+    let results = executor.execute_batch_nodes(stmts, false).await.unwrap();
+
+    assert_eq!(results.len(), 3, "expected 3 results, got {}", results.len());
+    for r in &results {
+        assert!(r.ok, "result should be ok: {:?}", r);
+    }
+
+    let calls = *update_count.lock().unwrap();
+    assert_eq!(calls, 1, "expected 1 update-batch call, got {calls}");
+
+    let count = *ops_count.lock().unwrap();
+    assert_eq!(count, 3, "expected 3 ops in batch, got {count}");
+
+    // Individual routes should not have been used for these mutations
+    assert!(
+        route_count.lock().unwrap().is_none(),
+        "mutations should go through update batch, not execute_route"
+    );
+}
+
+#[tokio::test]
+async fn test_batch_preserves_order_mixed_query_and_mutation() {
+    let client = MockQdrantClient {
+        info: Some(CollectionInfo::default()),
+        ..Default::default()
+    };
+    let query_batch = client.batch_call_count.clone();
+    let update_batch = client.update_batch_call_count.clone();
+
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+
+    // Two mutations, then two queries — should batch each group separately
+    let stmts = qql_core::parser::Parser::parse_all(
+        "UPSERT INTO docs VALUES {id: 1};\
+         DELETE FROM docs WHERE id = 2;\
+         QUERY TEXT 'a' FROM docs USING dense LIMIT 1;\
+         QUERY TEXT 'b' FROM docs USING dense LIMIT 1;",
+    )
+    .unwrap();
+    let results = executor.execute_batch_nodes(stmts, false).await.unwrap();
+
+    assert_eq!(results.len(), 4);
+    assert_eq!(results[0].operation, "UPSERT");
+    assert_eq!(results[1].operation, "DELETE");
+    assert_eq!(results[2].operation, "QUERY");
+    assert_eq!(results[3].operation, "QUERY");
+
+    assert_eq!(*update_batch.lock().unwrap(), 1);
+    assert_eq!(*query_batch.lock().unwrap(), 1);
+}
+
+#[tokio::test]
+async fn test_single_mutation_not_batched() {
+    let client = MockQdrantClient::default();
+    let update_count = client.update_batch_call_count.clone();
+
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+    let stmts = qql_core::parser::Parser::parse_all("DELETE FROM docs WHERE id = 1;").unwrap();
+    let results = executor.execute_batch_nodes(stmts, false).await.unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert!(results[0].ok);
+    assert_eq!(
+        *update_count.lock().unwrap(),
+        0,
+        "single mutation must not use update batch"
+    );
 }

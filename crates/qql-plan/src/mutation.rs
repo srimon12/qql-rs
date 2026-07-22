@@ -3,7 +3,7 @@ use crate::query::lower_vector_value;
 use crate::types::*;
 use qql_core::ast::{
     ClearPayloadStmt, DeleteStmt, DeleteVectorStmt, EmbeddingSpec, PointSelector, PointVectors,
-    UpdatePayloadStmt, UpdateVectorStmt, UpsertPoint, UpsertStmt,
+    Stmt, UpdatePayloadStmt, UpdateVectorStmt, UpsertPoint, UpsertStmt,
 };
 
 pub fn lower_upsert_request(stmt: &UpsertStmt) -> UpsertRequest {
@@ -159,6 +159,73 @@ pub fn embedding_has_wait(spec: &EmbeddingSpec) -> bool {
     }
 }
 
+/// Lower a mutation statement into a collection name + wire `UpdateOperation`.
+/// Returns `None` for non-mutation statements (QUERY, DDL, SCROLL, COUNT, …).
+pub fn lower_update_operation(stmt: &Stmt) -> Option<(String, UpdateOperation)> {
+    match stmt {
+        Stmt::Upsert(u) => Some((
+            u.collection.clone(),
+            UpdateOperation::Upsert {
+                upsert: lower_upsert_request(u),
+            },
+        )),
+        Stmt::Delete(d) => Some((
+            d.collection.clone(),
+            UpdateOperation::Delete {
+                delete: lower_delete_request(d),
+            },
+        )),
+        Stmt::UpdatePayload(u) => Some((
+            u.collection.clone(),
+            UpdateOperation::SetPayload {
+                set_payload: lower_update_payload_request(u),
+            },
+        )),
+        Stmt::ClearPayload(c) => Some((
+            c.collection.clone(),
+            UpdateOperation::ClearPayload {
+                clear_payload: lower_clear_payload_request(c),
+            },
+        )),
+        Stmt::UpdateVector(u) => Some((
+            u.collection.clone(),
+            UpdateOperation::UpdateVectors {
+                update_vectors: lower_update_vector_request(u),
+            },
+        )),
+        Stmt::DeleteVector(d) => Some((
+            d.collection.clone(),
+            UpdateOperation::DeleteVectors {
+                delete_vectors: lower_delete_vector_request(d),
+            },
+        )),
+        _ => None,
+    }
+}
+
+/// Groups contiguous mutation statements by collection into `UpdateBatchRequest`s.
+/// Only returns groups with 2+ operations — singles use the normal `route()` path.
+/// Preserves relative order within each group.
+pub fn route_update_batch(stmts: &[Stmt]) -> Vec<(String, UpdateBatchRequest)> {
+    let mut groups: Vec<(String, Vec<UpdateOperation>)> = Vec::new();
+
+    for stmt in stmts {
+        let Some((collection, op)) = lower_update_operation(stmt) else {
+            continue;
+        };
+        match groups.last_mut() {
+            Some((coll, ops)) if coll == &collection => ops.push(op),
+            _ => groups.push((collection, vec![op])),
+        }
+    }
+
+    groups
+        .into_iter()
+        .filter(|(_, ops)| ops.len() > 1)
+        .map(|(collection, operations)| (collection, UpdateBatchRequest { operations }))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,6 +262,61 @@ mod tests {
         let req = lower_delete_request(d);
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["points"], serde_json::json!([1, 2]));
+    }
+
+    #[test]
+    fn update_operation_upsert_wire_shape() {
+        let s = parse_stmt("UPSERT INTO docs VALUES {id: 1, title: 'a'};");
+        let (coll, op) = lower_update_operation(&s).expect("upsert is batchable");
+        assert_eq!(coll, "docs");
+        let json = serde_json::to_value(&op).unwrap();
+        assert!(json.get("upsert").is_some(), "expected upsert key: {json}");
+        assert_eq!(json["upsert"]["points"][0]["id"], 1);
+    }
+
+    #[test]
+    fn update_batch_groups_same_collection() {
+        let stmts = vec![
+            parse_stmt("UPSERT INTO docs VALUES {id: 1, title: 'a'};"),
+            parse_stmt("DELETE FROM docs WHERE id = 2;"),
+            parse_stmt("UPDATE docs SET PAYLOAD = {status: 'ok'} WHERE id = 1;"),
+        ];
+        let batches = route_update_batch(&stmts);
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].0, "docs");
+        assert_eq!(batches[0].1.operations.len(), 3);
+        let json = serde_json::to_value(&batches[0].1).unwrap();
+        assert_eq!(json["operations"].as_array().unwrap().len(), 3);
+        assert!(json["operations"][0].get("upsert").is_some());
+        assert!(json["operations"][1].get("delete").is_some());
+        assert!(json["operations"][2].get("set_payload").is_some());
+    }
+
+    #[test]
+    fn update_batch_splits_collections() {
+        let stmts = vec![
+            parse_stmt("UPSERT INTO a VALUES {id: 1};"),
+            parse_stmt("UPSERT INTO b VALUES {id: 2};"),
+            parse_stmt("DELETE FROM a WHERE id = 1;"),
+        ];
+        // Contiguous grouping: [a], [b], [a] — none have len>1 alone so empty
+        // Actually a has only one op per contiguous run. route_update_batch
+        // groups by contiguous same-collection, so each group is size 1 → empty.
+        let batches = route_update_batch(&stmts);
+        assert!(batches.is_empty());
+
+        let stmts2 = vec![
+            parse_stmt("UPSERT INTO a VALUES {id: 1};"),
+            parse_stmt("DELETE FROM a WHERE id = 2;"),
+            parse_stmt("UPSERT INTO b VALUES {id: 3};"),
+            parse_stmt("DELETE FROM b WHERE id = 4;"),
+        ];
+        let batches2 = route_update_batch(&stmts2);
+        assert_eq!(batches2.len(), 2);
+        assert_eq!(batches2[0].0, "a");
+        assert_eq!(batches2[0].1.operations.len(), 2);
+        assert_eq!(batches2[1].0, "b");
+        assert_eq!(batches2[1].1.operations.len(), 2);
     }
 
     #[test]

@@ -7,7 +7,11 @@ WebAssembly bindings for the QQL parser, plan compiler, and browser execution en
 - **Browser-native**: Parse and compile QQL directly in browser applications
 - **Edge-native**: Run on Cloudflare Workers, Vercel Edge, Deno, or Bun
 - **Zero-copy routing**: Lower QQL statements directly to typed Qdrant REST routes via `qql-plan`
-- **Minimal footprint**: Highly optimized WASM binary (~150KB)
+- **Small footprint**: release builds use `wasm-opt -O`; parser-only
+  (`--no-default-features`) is smaller than the default client build.
+  Current release `.wasm` is typically a few hundred KB (not ~150KB as
+  older docs claimed) — measure with `ls -lh pkg/*.wasm` after
+  `wasm-pack build --release --target web`.
 
 ## Installation
 

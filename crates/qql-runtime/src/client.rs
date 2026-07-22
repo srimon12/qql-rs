@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use qql_core::ast::Value;
 use qql_core::error::QqlError;
 use qql_plan::routing::Route;
-use qql_plan::QueryBatchRequest;
+use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 use std::collections::HashMap;
 
 pub use crate::backend::{CollectionInfo, Filter as QdrantFilter, PointId, ScoredPoint};
@@ -97,5 +97,14 @@ pub trait QdrantOps: QdrantOpsBound {
         &self,
         collection: &str,
         batch: &QueryBatchRequest,
+    ) -> Result<Vec<serde_json::Value>, QqlError>;
+
+    /// Apply a series of point mutations in one network call via Qdrant's
+    /// `POST /points/batch` (REST) or `UpdateBatch` (gRPC) endpoint.
+    /// Returns one result per operation, in order.
+    async fn execute_update_batch(
+        &self,
+        collection: &str,
+        batch: &UpdateBatchRequest,
     ) -> Result<Vec<serde_json::Value>, QqlError>;
 }
