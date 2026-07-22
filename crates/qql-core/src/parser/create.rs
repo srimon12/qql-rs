@@ -2,7 +2,8 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use crate::ast::{
-    CollectionMode, CreateCollectionStmt, SparseVectorDef, Stmt, VectorDef, VectorDistance,
+    CollectionMode, CreateCollectionStmt, CreateShardKeyStmt, SparseVectorDef, Stmt, VectorDef,
+    VectorDistance,
 };
 use crate::error::QqlError;
 use crate::token::TokenKind;
@@ -15,6 +16,9 @@ impl<'a> Parser<'a> {
         let tok = self.peek()?;
         if tok.kind == TokenKind::Index {
             return self.parse_create_index();
+        }
+        if tok.kind == TokenKind::Shard {
+            return self.parse_create_shard_key();
         }
         self.expect(TokenKind::Collection)?;
         let collection = self.parse_identifier()?;
@@ -228,6 +232,45 @@ impl<'a> Parser<'a> {
             vectors: explicit_vectors,
             sparse_vectors: explicit_sparse_vectors,
             config,
+        })))
+    }
+
+    pub fn parse_create_shard_key(&mut self) -> Result<Stmt, QqlError> {
+        // Consume the SHARD token (parse_create() only peeked at it)
+        self.expect(TokenKind::Shard)?;
+        let shard_name = self.parse_string()?;
+        self.expect(TokenKind::On)?;
+        self.expect(TokenKind::Collection)?;
+        let collection = self.parse_identifier()?;
+        let mut shards_number = None;
+        let mut replication_factor = None;
+        if self.peek()?.kind == TokenKind::With {
+            let pos = self.peek()?.pos;
+            self.advance()?;
+            let opts = self.parse_config_block()?;
+            for (key, val) in &opts {
+                let key_lower = key.to_ascii_lowercase();
+                if key_lower == "shards_number" {
+                    if let crate::ast::Value::Int(n) = val {
+                        if *n > 0 {
+                            shards_number = Some(*n as u64);
+                        }
+                    }
+                } else if key_lower == "replication_factor" {
+                    if let crate::ast::Value::Int(n) = val {
+                        if *n > 0 {
+                            replication_factor = Some(*n as u64);
+                        }
+                    }
+                }
+            }
+            super::validate_index_options(&opts, pos)?;
+        }
+        Ok(Stmt::CreateShardKey(Box::new(CreateShardKeyStmt {
+            collection,
+            shard_key: shard_name,
+            shards_number,
+            replication_factor,
         })))
     }
 }

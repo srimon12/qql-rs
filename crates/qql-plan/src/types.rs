@@ -605,3 +605,12 @@ pub struct CreateIndexRequest {
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
 }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CreateShardKeyRequest {
+    pub shard_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shards_number: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replication_factor: Option<u64>,
+}

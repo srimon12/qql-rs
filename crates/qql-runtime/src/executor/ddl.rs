@@ -160,7 +160,19 @@ impl Executor {
                 if let Some(od) = params.on_disk_payload {
                     params_map.insert("on_disk_payload".to_string(), serde_json::json!(od));
                 }
-                create_req.params = Some(serde_json::Value::Object(params_map));
+                if let Some(rf_out) = params.read_fan_out_factor {
+                    params_map.insert("read_fan_out_factor".to_string(), serde_json::json!(rf_out));
+                }
+                if let Some(rf_delay) = params.read_fan_out_delay_ms {
+                    params_map.insert("read_fan_out_delay_ms".to_string(), serde_json::json!(rf_delay));
+                }
+                if !params_map.is_empty() {
+                    create_req.params = Some(serde_json::Value::Object(params_map));
+                }
+                // Shard configuration — passed directly as top-level fields
+                create_req.shard_number = params.shard_number;
+                create_req.sharding_method = params.sharding_method.clone();
+                create_req.shard_keys = params.shard_keys.clone();
             }
             if let Some(ref quant) = config.quantization {
                 let q_val = build_quantization_config(quant)?;
@@ -318,6 +330,20 @@ impl Executor {
             operation: "drop_collection".to_string(),
             message: format!("Collection '{}' dropped", collection),
             data: Some(serde_json::json!({"collection": collection})),
+        })
+    }
+
+    pub(crate) async fn do_create_shard_key(
+        &self,
+        stmt: ast::CreateShardKeyStmt,
+    ) -> Result<ExecResponse, QqlError> {
+        let r = qql_plan::routing::route(&ast::Stmt::CreateShardKey(Box::new(stmt)));
+        self.client.execute_route(r).await?;
+        Ok(ExecResponse {
+            ok: true,
+            operation: "create_shard_key".to_string(),
+            message: format!("Shard key created"),
+            data: None,
         })
     }
 

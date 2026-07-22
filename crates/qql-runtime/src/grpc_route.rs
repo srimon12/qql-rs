@@ -380,6 +380,28 @@ pub async fn execute_grpc_route(
                 "time": 0.0_f64,
             }))
         }
+        Some(RequestBody::CreateShardKey(req)) => {
+            let collection = extract_collection(&route.path)?;
+            let grpc_req = qdrant::CreateShardKeyRequest {
+                collection_name: collection,
+                request: Some(qdrant::CreateShardKey {
+                    shard_key: Some(qdrant::ShardKey {
+                        key: req.shard_key.clone(),
+                    }),
+                    shards_number: req.shards_number.map(|n| n as u32),
+                    replication_factor: req.replication_factor.map(|n| n as u32),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            client
+                .create_shard_key(grpc_req)
+                .await
+                .map_err(|e| {
+                    QqlError::backend("QQL-GRPC", format!("create_shard_key: {e}"), None)
+                })?;
+            Ok(serde_json::Value::Object(Default::default()))
+        }
         None => match route.method {
             qql_plan::types::Method::Get if route.path == "/collections" => {
                 let resp = client

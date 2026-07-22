@@ -172,10 +172,26 @@ impl QdrantOps for RestQdrant {
                 ),
             );
         }
-        // hnsw_config, optimizers_config, params, quantization_config are
-        // already included via the executor/ddl.rs in the vectors_config or
-        // as separate fields; the runtime CreateCollectionReq also carries
-        // hnsw_config, optimizers_config, quantization_config, and params.
+        // replication_factor and write_consistency_factor are sent as top-level
+        // fields in Qdrant REST API (not nested inside params)
+        if let Some(ref p) = req.params {
+            if let Some(rf) = p.get("replication_factor").and_then(|v| v.as_u64()) {
+                body.insert("replication_factor".into(), serde_json::Value::from(rf));
+            }
+            if let Some(wc) = p
+                .get("write_consistency_factor")
+                .and_then(|v| v.as_u64())
+            {
+                body.insert(
+                    "write_consistency_factor".into(),
+                    serde_json::Value::from(wc),
+                );
+            }
+            if let Some(od) = p.get("on_disk_payload").and_then(|v| v.as_bool()) {
+                body.insert("on_disk_payload".into(), serde_json::Value::Bool(od));
+            }
+        }
+        // hnsw_config, optimizers_config, quantization_config
         if let Some(ref v) = req.hnsw_config {
             body.insert("hnsw_config".into(), v.clone());
         }
@@ -184,9 +200,6 @@ impl QdrantOps for RestQdrant {
         }
         if let Some(ref v) = req.quantization_config {
             body.insert("quantization_config".into(), v.clone());
-        }
-        if let Some(ref v) = req.params {
-            body.insert("params".into(), v.clone());
         }
         self.call::<Value>(
             Method::PUT,

@@ -522,6 +522,15 @@ pub struct CountStmt {
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub struct CreateShardKeyStmt {
+    pub collection: String,
+    pub shard_key: String,
+    pub shards_number: Option<u64>,
+    pub replication_factor: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum PointSelector {
     Id(PointId),
     Ids(Vec<PointId>),
@@ -562,6 +571,7 @@ pub enum Stmt {
     CreateCollection(Box<CreateCollectionStmt>),
     CreateIndex(Box<CreateIndexStmt>),
     DropIndex(Box<DropIndexStmt>),
+    CreateShardKey(Box<CreateShardKeyStmt>),
     AlterCollection(Box<AlterCollectionStmt>),
     DropCollection(Box<DropCollectionStmt>),
     ShowCollections,

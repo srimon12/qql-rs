@@ -620,6 +620,13 @@ impl QdrantOps for EdgeQdrant {
                 self.create_field_index(create_index).await?;
                 Ok(Value::Object(Default::default()))
             }
+            Some(RequestBody::CreateShardKey(_req)) => {
+                Err(QqlError::execution(
+                    "QQL-EDGE",
+                    "create_shard_key not supported in edge mode (single node)",
+                    None,
+                ))
+            }
             Some(RequestBody::Count(req)) => {
                 let collection = extract_collection(&route.path)?;
                 let shard = self.open_shard(&collection).await?;

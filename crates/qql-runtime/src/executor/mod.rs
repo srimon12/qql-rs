@@ -171,6 +171,7 @@ impl Executor {
             Stmt::UpdateVector(n) => self.do_update_vector(*n).await,
             Stmt::UpdatePayload(n) => self.do_update_payload(*n).await,
             Stmt::CreateIndex(n) => self.do_create_index(*n).await,
+            Stmt::CreateShardKey(n) => self.do_create_shard_key(*n).await,
             Stmt::DropIndex(n) => self.do_drop_index(*n).await,
             Stmt::Count(n) => self.do_count(*n).await,
         }

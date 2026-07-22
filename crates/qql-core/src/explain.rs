@@ -55,6 +55,10 @@ pub fn explain_node(statement: &Stmt) -> String {
             "Statement: CREATE INDEX\nCollection: {}\nField: {}\n",
             statement.collection, statement.field
         )),
+        Stmt::CreateShardKey(statement) => output.push_str(&format!(
+            "Statement: CREATE SHARD KEY\nCollection: {}\nShard: {}\n",
+            statement.collection, statement.shard_key
+        )),
         Stmt::DropIndex(statement) => output.push_str(&format!(
             "Statement: DROP INDEX\nCollection: {}\nField: {}\n",
             statement.collection, statement.field

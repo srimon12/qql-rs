@@ -1,10 +1,70 @@
+# Qdrant 3-node cluster for testing shard-based multitenancy.
+#
+# Start:   docker compose up -d
+# Stop:    docker compose down
+# Wipe:    docker compose down -v
+#
+# Node 0 is the bootstrap node (port 6333/6334).
+# Nodes 1 and 2 join the cluster via bootstrap.
+
 services:
-  qdrant:
+  qdrant_node_0:
     image: qdrant/qdrant:latest
-    container_name: qdrant
+    container_name: qdrant_node_0
     restart: always
     ports:
-      - "6333:6333" # REST API & Dashboard
-      - "6334:6334" # gRPC API
+      - "6333:6333"   # REST API
+      - "6334:6334"   # gRPC API
+    environment:
+      - QDRANT__CLUSTER__ENABLED=true
     volumes:
-      - ./qdrant_storage:/qdrant/storage:z
+      - qdrant_node_0_data:/qdrant/storage
+    command:
+      - "./qdrant"
+      - "--uri"
+      - "http://qdrant_node_0:6335"
+
+  qdrant_node_1:
+    image: qdrant/qdrant:latest
+    container_name: qdrant_node_1
+    restart: always
+    ports:
+      - "7333:6333"
+      - "7334:6334"
+    environment:
+      - QDRANT__CLUSTER__ENABLED=true
+    volumes:
+      - qdrant_node_1_data:/qdrant/storage
+    command:
+      - "./qdrant"
+      - "--bootstrap"
+      - "http://qdrant_node_0:6335"
+      - "--uri"
+      - "http://qdrant_node_1:6335"
+    depends_on:
+      - qdrant_node_0
+
+  qdrant_node_2:
+    image: qdrant/qdrant:latest
+    container_name: qdrant_node_2
+    restart: always
+    ports:
+      - "8333:6333"
+      - "8334:6334"
+    environment:
+      - QDRANT__CLUSTER__ENABLED=true
+    volumes:
+      - qdrant_node_2_data:/qdrant/storage
+    command:
+      - "./qdrant"
+      - "--bootstrap"
+      - "http://qdrant_node_0:6335"
+      - "--uri"
+      - "http://qdrant_node_2:6335"
+    depends_on:
+      - qdrant_node_0
+
+volumes:
+  qdrant_node_0_data:
+  qdrant_node_1_data:
+  qdrant_node_2_data:
