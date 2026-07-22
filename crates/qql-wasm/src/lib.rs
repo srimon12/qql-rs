@@ -8,15 +8,26 @@ use wasm_bindgen::prelude::*;
 
 // ── Core: parsing ────────────────────────────────────────────────
 
+fn normalize_input(input: &str) -> std::borrow::Cow<'_, str> {
+    let trimmed = input.trim();
+    if !trimmed.is_empty() && !trimmed.ends_with(';') {
+        std::borrow::Cow::Owned(format!("{};", trimmed))
+    } else {
+        std::borrow::Cow::Borrowed(trimmed)
+    }
+}
+
 #[wasm_bindgen]
 pub fn parse(input: &str) -> Result<JsValue, JsValue> {
-    let stmt = Parser::parse(input).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let norm = normalize_input(input);
+    let stmt = Parser::parse(&norm).map_err(|e| JsValue::from_str(&e.to_string()))?;
     serde_wasm_bindgen::to_value(&stmt).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 #[wasm_bindgen]
 pub fn parse_all(input: &str) -> Result<JsValue, JsValue> {
-    let stmts = Parser::parse_all(input).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let norm = normalize_input(input);
+    let stmts = Parser::parse_all(&norm).map_err(|e| JsValue::from_str(&e.to_string()))?;
     serde_wasm_bindgen::to_value(&stmts).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
@@ -24,7 +35,8 @@ pub fn parse_all(input: &str) -> Result<JsValue, JsValue> {
 pub fn parse_batch(queries: Vec<String>) -> Result<JsValue, JsValue> {
     let results = js_sys::Array::new();
     for q in queries {
-        let stmt = Parser::parse(&q).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let norm = normalize_input(&q);
+        let stmt = Parser::parse(&norm).map_err(|e| JsValue::from_str(&e.to_string()))?;
         let v =
             serde_wasm_bindgen::to_value(&stmt).map_err(|e| JsValue::from_str(&e.to_string()))?;
         results.push(&v);
@@ -34,7 +46,8 @@ pub fn parse_batch(queries: Vec<String>) -> Result<JsValue, JsValue> {
 
 #[wasm_bindgen(js_name = isValid)]
 pub fn is_valid(input: &str) -> bool {
-    Parser::try_parse(input).is_ok()
+    let norm = normalize_input(input);
+    Parser::try_parse(&norm).is_ok()
 }
 
 #[wasm_bindgen]
@@ -64,6 +77,8 @@ pub fn inject_filter(
 
 // ── Core: tokenize ────────────────────────────────────────────────
 
+// ── Core: tokenize ────────────────────────────────────────────────
+
 #[wasm_bindgen]
 pub fn tokenize(input: &str) -> Result<Vec<JsValue>, JsValue> {
     let lexer = Lexer::new(input);
@@ -89,16 +104,101 @@ pub fn tokenize(input: &str) -> Result<Vec<JsValue>, JsValue> {
             &JsValue::from_f64(token.span.start as f64),
         )
         .unwrap();
+        js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("end"),
+            &JsValue::from_f64(token.span.end as f64),
+        )
+        .unwrap();
+        js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("len"),
+            &JsValue::from_f64(token.span.end.saturating_sub(token.span.start) as f64),
+        )
+        .unwrap();
         tokens.push(JsValue::from(obj));
     }
     Ok(tokens)
+}
+
+// ── Core: unified analyze ─────────────────────────────────────────
+
+#[wasm_bindgen]
+pub fn analyze(input: &str) -> JsValue {
+    let norm = normalize_input(input);
+    let mut tokens = Vec::new();
+    let lexer = Lexer::new(&norm);
+    for token_result in lexer {
+        if let Ok(t) = token_result {
+            tokens.push(serde_json::json!({
+                "kind": t.kind.as_str(),
+                "text": t.text,
+                "pos": t.span.start,
+                "end": t.span.end,
+                "len": t.span.end.saturating_sub(t.span.start),
+            }));
+        }
+    }
+
+    let stmts_res = Parser::parse_all(&norm);
+    match stmts_res {
+        Ok(stmts) => {
+            let ast_val = serde_json::to_value(&stmts).unwrap_or(serde_json::Value::Null);
+            let first_stmt = stmts.first();
+            let route_val = first_stmt
+                .map(|s| {
+                    let r = routing::route(s);
+                    serde_json::json!({
+                        "method": r.method.as_str(),
+                        "path": r.path,
+                        "payload": r.body_json().unwrap_or(serde_json::Value::Null),
+                    })
+                })
+                .unwrap_or(serde_json::Value::Null);
+
+            let explain_val = qql_core::explain::explain(&norm).unwrap_or_default();
+
+            let result = serde_json::json!({
+                "valid": true,
+                "statements_count": stmts.len(),
+                "tokens": tokens,
+                "ast": ast_val,
+                "route": route_val,
+                "explain": explain_val,
+                "error": serde_json::Value::Null,
+            });
+
+            serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
+        }
+        Err(err) => {
+            let err_json = serde_json::json!({
+                "code": err.code.as_ref(),
+                "message": err.message.as_ref(),
+                "start": err.span.map(|s| s.start),
+                "end": err.span.map(|s| s.end),
+            });
+
+            let result = serde_json::json!({
+                "valid": false,
+                "statements_count": 0,
+                "tokens": tokens,
+                "ast": serde_json::Value::Null,
+                "route": serde_json::Value::Null,
+                "explain": serde_json::Value::Null,
+                "error": err_json,
+            });
+
+            serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
+        }
+    }
 }
 
 // ── Core: compile & explain ───────────────────────────────────────
 
 #[wasm_bindgen]
 pub fn compile(query: &str) -> Result<String, JsValue> {
-    let stmt = Parser::parse(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let norm = normalize_input(query);
+    let stmt = Parser::parse(&norm).map_err(|e| JsValue::from_str(&e.to_string()))?;
     let route = routing::route(&stmt);
     let json_body = route.body_json();
     let output = serde_json::json!({
@@ -127,7 +227,8 @@ pub fn compile(query: &str) -> Result<String, JsValue> {
 
 #[wasm_bindgen]
 pub fn explain(query: &str) -> Result<String, JsValue> {
-    qql_core::explain::explain(query).map_err(|e| JsValue::from_str(&e.to_string()))
+    let norm = normalize_input(query);
+    qql_core::explain::explain(&norm).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 // ── Client: browser fetch-based execute with embedding ────────────

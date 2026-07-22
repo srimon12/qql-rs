@@ -47,16 +47,33 @@ impl<'a> Lexer<'a> {
             b'-' => self.read_minus_or_number(),
             b'"' | b'\'' => self.read_string(ch),
             _ => {
+                if self.input[self.pos..].starts_with('≥') {
+                    let pos = self.pos;
+                    self.pos += '≥'.len_utf8();
+                    return Ok(Token::new(TokenKind::Gte, &self.input[pos..self.pos], Span::new(pos, self.pos)));
+                }
+                if self.input[self.pos..].starts_with('≤') {
+                    let pos = self.pos;
+                    self.pos += '≤'.len_utf8();
+                    return Ok(Token::new(TokenKind::Lte, &self.input[pos..self.pos], Span::new(pos, self.pos)));
+                }
+                if self.input[self.pos..].starts_with('≠') {
+                    let pos = self.pos;
+                    self.pos += '≠'.len_utf8();
+                    return Ok(Token::new(TokenKind::NotEquals, &self.input[pos..self.pos], Span::new(pos, self.pos)));
+                }
                 if is_digit(ch) {
                     self.read_number()
                 } else if is_alpha(ch) || ch == b'_' || ch == b'$' {
                     self.read_identifier()
                 } else {
-                    let err_msg = alloc::format!("Unexpected character '{}'", ch as char);
+                    let c = self.input[self.pos..].chars().next().unwrap_or('?');
+                    let len = c.len_utf8();
+                    let err_msg = alloc::format!("Unexpected character '{}'", c);
                     Err(QqlError::lex(
                         "QQL-LEX-CHAR",
                         err_msg,
-                        Span::new(self.pos, self.pos + 1),
+                        Span::new(self.pos, self.pos + len),
                     ))
                 }
             }
@@ -214,26 +231,31 @@ impl<'a> Lexer<'a> {
             if self.pos >= self.input.len() {
                 break;
             }
-            let b = bytes[self.pos];
-            if b == b'.'
-                && self.pos + 1 < self.input.len()
-                && (is_alpha(bytes[self.pos + 1]) || bytes[self.pos + 1] == b'_')
-            {
-                self.pos += 1;
-                while self.pos < self.input.len()
-                    && (is_alnum(bytes[self.pos]) || bytes[self.pos] == b'_')
-                {
+            if self.input[self.pos..].starts_with('.') {
+                let rest = &self.input[self.pos + 1..];
+                let first_byte = rest.as_bytes().first().copied().unwrap_or(0);
+                if is_alpha(first_byte) || first_byte == b'_' {
                     self.pos += 1;
+                    while self.pos < self.input.len()
+                        && (is_alnum(self.input.as_bytes()[self.pos]) || self.input.as_bytes()[self.pos] == b'_')
+                    {
+                        self.pos += 1;
+                    }
+                } else {
+                    break;
                 }
-            } else if self.pos + 3 < self.input.len()
-                && &self.input[self.pos..self.pos + 3] == "[]."
-                && (is_alpha(bytes[self.pos + 3]) || bytes[self.pos + 3] == b'_')
-            {
-                self.pos += 3;
-                while self.pos < self.input.len()
-                    && (is_alnum(bytes[self.pos]) || bytes[self.pos] == b'_')
-                {
-                    self.pos += 1;
+            } else if self.input[self.pos..].starts_with("[].") {
+                let rest = &self.input[self.pos + 3..];
+                let first_byte = rest.as_bytes().first().copied().unwrap_or(0);
+                if is_alpha(first_byte) || first_byte == b'_' {
+                    self.pos += 3;
+                    while self.pos < self.input.len()
+                        && (is_alnum(self.input.as_bytes()[self.pos]) || self.input.as_bytes()[self.pos] == b'_')
+                    {
+                        self.pos += 1;
+                    }
+                } else {
+                    break;
                 }
             } else {
                 break;

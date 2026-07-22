@@ -1,284 +1,456 @@
-import init, { tokenize, parse, parse_all, compile, explain, isValid, Client } from './pkg/qql_wasm.js?v=2';
+import init, { analyze, Client } from './pkg/qql_wasm.js?v=4';
 
-// ── State ──
-let wasmReady = false;
-let client = null;
-let currentQuery = "QUERY 'search' FROM docs LIMIT 10";
-let timer = null;
+// ── Canonical QQL Presets (Valid Syntax with Trailing Semicolons) ────────────
 
-// ── Token coloring ──
-const KIND_CLASS = {
-  UPSERT: 'kw', INTO: 'kw', VALUES: 'kw', QUERY: 'kw', FROM: 'kw',
-  SELECT: 'kw', SCROLL: 'kw', CREATE: 'kw', COLLECTION: 'kw', COLLECTIONS: 'kw',
-  ALTER: 'kw', DROP: 'kw', SHOW: 'kw', DELETE: 'kw', UPDATE: 'kw',
-  SET: 'kw', VECTOR: 'kw', PAYLOAD: 'kw', WHERE: 'kw', INDEX: 'kw',
-  WITH: 'kw', USING: 'kw', MODEL: 'kw', HYBRID: 'kw', SPARSE: 'kw', DENSE: 'kw',
-  RERANK: 'kw', HNSW: 'kw', QUANTIZATION: 'kw', OPTIMIZERS: 'kw', PARAMS: 'kw',
-  PREFETCH: 'kw', FUSION: 'kw', RRF: 'kw', DBSF: 'kw', AS: 'kw',
-  LIMIT: 'kw', OFFSET: 'kw', GROUP: 'kw', BY: 'kw', GROUP_SIZE: 'kw',
-  EXACT: 'kw', ACORN: 'kw', BOOST: 'kw', DEFAULTS: 'kw', CASE: 'kw',
-  WHEN: 'kw', THEN: 'kw', ELSE: 'kw', END: 'kw', ON: 'kw', FOR: 'kw', TYPE: 'kw',
-  ORDER: 'kw', ASC: 'kw', DESC: 'kw', RECOMMEND: 'kw', DISCOVER: 'kw',
-  CONTEXT: 'kw', PAIRS: 'kw', TARGET: 'kw', SAMPLE: 'kw', STRATEGY: 'kw',
-  SCORE: 'kw', THRESHOLD: 'kw', LOOKUP: 'kw', TRUE: 'kw', FALSE: 'kw',
-  AND: 'op', OR: 'op', NOT: 'op', IN: 'op', BETWEEN: 'op',
-  IS: 'op', NULL: 'op', EMPTY: 'op', MATCH: 'op', ANY: 'op', PHRASE: 'op',
-  Lbrace: 'op', Rbrace: 'op', Lparen: 'op', Rparen: 'op', Comma: 'op',
-  Eq: 'op', Lt: 'op', Gt: 'op', Colon: 'op',
-  String: 'str', Number: 'num', Comment: 'cmt',
-  HAS_VECTOR: 'kw', VALUES_COUNT: 'kw', GEO_BBOX: 'kw', GEO_RADIUS: 'kw',
-  NESTED: 'kw', COSINE: 'kw', DOT: 'kw', EUCLID: 'kw', MANHATTAN: 'kw',
-  MULTIVECTOR: 'kw', EMBED: 'kw', AFTER: 'kw',
+const PRESETS = {
+  hybrid: `-- 🚀 Hybrid Search combining Dense & Sparse vector retrieval
+QUERY HYBRID TEXT 'vector similarity search'
+  DENSE dense
+  SPARSE sparse
+  FUSION RRF
+  FROM docs
+  WHERE category = 'ai' AND year >= 2024
+  LIMIT 10 OFFSET 0;`,
+
+  cte: `-- ⚡ CTE Multi-Stage Prefetch DAG Pipeline
+WITH
+  dense_stream AS (
+    QUERY 'deep learning index' FROM docs USING dense LIMIT 50
+    WHERE category = 'tech'
+  ),
+  sparse_stream AS (
+    QUERY 'deep learning index' FROM docs USING sparse LIMIT 50
+  )
+QUERY FUSION RRF FROM docs
+  PREFETCH (dense_stream SCORE THRESHOLD 0.6, sparse_stream SCORE THRESHOLD 0.3)
+  LIMIT 10;`,
+
+  recommend: `-- 🎯 Vector Recommendation based on Positive & Negative Point IDs
+QUERY RECOMMEND POSITIVE (1, 3) NEGATIVE (2)
+  STRATEGY average_vector
+  FROM docs
+  USING dense
+  LIMIT 5;`,
+
+  discover: `-- 🔄 Context & Discovery Search
+QUERY DISCOVER TARGET POINT 1
+  CONTEXT (POSITIVE POINT 2 NEGATIVE POINT 3)
+  FROM docs
+  USING dense
+  LIMIT 5;`,
+
+  grouped: `-- 📊 Grouped Aggregation Query
+QUERY 'vector database performance'
+  FROM docs
+  USING dense
+  GROUP BY category SIZE 3
+  LIMIT 10;`,
+
+  ddl: `-- 📦 Collection DDL with HNSW & Scalar Quantization
+CREATE COLLECTION products HYBRID
+  WITH HNSW (m = 32, ef_construct = 100)
+  WITH QUANTIZATION (type = 'scalar', quantile = 0.95);
+
+CREATE INDEX ON COLLECTION products FOR category TYPE keyword;
+CREATE INDEX ON COLLECTION products FOR price TYPE float;
+
+SHOW COLLECTIONS;`,
+
+  upsert: `-- 📝 Document Upsert with Payload (Auto-Embed text fields)
+UPSERT INTO docs VALUES
+  {id: 1, text: 'Qdrant is a high-performance vector database', category: 'ai', year: 2024},
+  {id: 2, text: 'Rust achieves memory safety without GC', category: 'systems', year: 2023};`,
+
+  mutation: `-- 🗑️ Payload Updates & Filter Deletion
+UPDATE docs SET PAYLOAD = {year: 2025} WHERE id = 2;
+
+DELETE FROM docs WHERE category = 'systems';`
 };
 
-function tokenClass(kind) {
-  return KIND_CLASS[kind] || 'id';
+// Token kind mapping to CSS classes
+const KIND_CLASS_MAP = {
+  String: 'hl-str',
+  Number: 'hl-num',
+  Comment: 'hl-cmt',
+  Eq: 'hl-op', Lt: 'hl-op', Gt: 'hl-op', Colon: 'hl-op',
+  Comma: 'hl-op', Lbrace: 'hl-op', Rbrace: 'hl-op',
+  Lparen: 'hl-op', Rparen: 'hl-op',
+  AND: 'hl-op', OR: 'hl-op', NOT: 'hl-op', IN: 'hl-op', BETWEEN: 'hl-op',
+  IS: 'hl-op', NULL: 'hl-op', EMPTY: 'hl-op', MATCH: 'hl-op', ANY: 'hl-op', PHRASE: 'hl-op'
+};
+
+const KEYWORD_KINDS = new Set([
+  'UPSERT', 'INTO', 'VALUES', 'QUERY', 'FROM', 'SELECT', 'SCROLL', 'CREATE',
+  'COLLECTION', 'COLLECTIONS', 'ALTER', 'DROP', 'SHOW', 'DELETE', 'UPDATE',
+  'SET', 'VECTOR', 'PAYLOAD', 'WHERE', 'INDEX', 'WITH', 'USING', 'MODEL',
+  'HYBRID', 'SPARSE', 'DENSE', 'RERANK', 'HNSW', 'QUANTIZATION', 'OPTIMIZERS',
+  'PARAMS', 'PREFETCH', 'FUSION', 'RRF', 'DBSF', 'AS', 'LIMIT', 'OFFSET',
+  'GROUP', 'BY', 'SIZE', 'EXACT', 'ACORN', 'BOOST', 'DEFAULTS', 'CASE',
+  'WHEN', 'THEN', 'ELSE', 'END', 'ON', 'FOR', 'TYPE', 'ORDER', 'ASC',
+  'DESC', 'RECOMMEND', 'DISCOVER', 'CONTEXT', 'PAIRS', 'TARGET', 'SAMPLE',
+  'STRATEGY', 'SCORE', 'THRESHOLD', 'LOOKUP', 'TRUE', 'FALSE', 'POINTS',
+  'HAS_VECTOR', 'VALUES_COUNT', 'GEO_BBOX', 'GEO_RADIUS', 'NESTED',
+  'COSINE', 'DOT', 'EUCLID', 'MANHATTAN', 'MULTIVECTOR', 'EMBED', 'AFTER'
+]);
+
+function getCssClassForToken(kind) {
+  if (KEYWORD_KINDS.has(kind)) return 'hl-kw';
+  return KIND_CLASS_MAP[kind] || 'hl-id';
 }
 
-async function debouncedRefresh() {
-  if (timer) clearTimeout(timer);
-  timer = setTimeout(refresh, 150);
+// ── State ─────────────────────────────────────────────────────────────────────
+
+let wasmReady = false;
+let client = null;
+let currentAnalysis = null;
+let debounceTimer = null;
+
+// ── DOM Elements ──────────────────────────────────────────────────────────────
+
+const queryInput = document.getElementById('query-input');
+const highlightLayer = document.getElementById('editor-highlight-layer');
+const lineNumbers = document.getElementById('line-numbers');
+const statusBadge = document.getElementById('status-badge');
+const statusIcon = document.getElementById('status-icon');
+const statusText = document.getElementById('status-text');
+const latencyTag = document.getElementById('latency-tag');
+const btnExecute = document.getElementById('btn-execute');
+const presetSelect = document.getElementById('preset-select');
+const errorFooter = document.getElementById('editor-error-footer');
+const errorMessageText = document.getElementById('error-message-text');
+
+// Modal Elements
+const settingsModal = document.getElementById('settings-modal');
+const btnOpenSettings = document.getElementById('btn-open-settings');
+const btnCloseSettings = document.getElementById('btn-close-settings');
+const btnSaveSettings = document.getElementById('btn-save-settings');
+
+const cfgQdrantUrl = document.getElementById('cfg-qdrant-url');
+const cfgQdrantKey = document.getElementById('cfg-qdrant-key');
+const cfgEmbedProvider = document.getElementById('cfg-embed-provider');
+const cfgEmbedUrl = document.getElementById('cfg-embed-url');
+const cfgEmbedModel = document.getElementById('cfg-embed-model');
+const cfgEmbedDim = document.getElementById('cfg-embed-dim');
+const cfgEmbedKey = document.getElementById('cfg-embed-key');
+const cfgStatusMsg = document.getElementById('cfg-status-msg');
+
+// Inspector Elements
+const routeCardContainer = document.getElementById('route-card-container');
+const routeMethod = document.getElementById('route-method');
+const routePath = document.getElementById('route-path');
+const routeSummary = document.getElementById('route-summary');
+const planExplanationBox = document.getElementById('plan-explanation-box');
+
+const codeWireJson = document.getElementById('code-wire-json');
+const codeAstJson = document.getElementById('code-ast-json');
+const tokensTableBody = document.getElementById('tokens-table-body');
+const explainBox = document.getElementById('explain-box');
+const codeResponseJson = document.getElementById('code-response-json');
+
+// ── Configure Client Instance ─────────────────────────────────────────────────
+
+function configureClient() {
+  const qdrantUrl = cfgQdrantUrl.value.trim() || "http://localhost:6333";
+  const qdrantKey = cfgQdrantKey.value.trim() || undefined;
+
+  client = new Client(qdrantUrl, qdrantKey);
+
+  const provider = cfgEmbedProvider.value;
+  if (provider === 'openai' || provider === 'remote') {
+    const embedUrl = cfgEmbedUrl.value.trim() || "http://localhost:11434/v1/embeddings";
+    const embedModel = cfgEmbedModel.value.trim() || "all-minilm:l6-v2";
+    const embedDim = parseInt(cfgEmbedDim.value.trim()) || 384;
+    const embedKey = cfgEmbedKey.value.trim() || "";
+
+    client.setOpenAIEmbedder(embedKey, embedModel, embedDim, embedUrl);
+    cfgStatusMsg.textContent = `✓ Configured: Qdrant (${qdrantUrl}) | Embedder (${embedModel} @ ${embedUrl})`;
+    cfgStatusMsg.style.color = "var(--accent-emerald)";
+  } else {
+    cfgStatusMsg.textContent = `✓ Configured: Qdrant (${qdrantUrl}) | No Embedder`;
+    cfgStatusMsg.style.color = "var(--accent-emerald)";
+  }
 }
 
-// ── Core refresh ──
-async function refresh() {
+// ── Unified Analysis & Live Highlight ─────────────────────────────────────────
+
+function performAnalysis() {
   if (!wasmReady) return;
-  const q = document.getElementById('query-input').value.trim();
-  currentQuery = q;
-  if (!q) {
-    setStatus('', '');
-    showHighlight('');
-    showTokens([]);
-    showExplain('');
-    showCompile(null);
-    showResponse(null);
+
+  const text = queryInput.value;
+  updateLineNumbers(text);
+
+  const t0 = performance.now();
+  const res = analyze(text);
+  const t1 = performance.now();
+
+  currentAnalysis = res;
+  latencyTag.textContent = `⚡ ${(t1 - t0).toFixed(2)} ms`;
+
+  // Render Live Highlight
+  renderHighlight(text, res.tokens, res.error);
+
+  // Update Status & Execute button state
+  if (res.valid) {
+    statusBadge.className = 'status-badge valid';
+    statusIcon.textContent = '✓';
+    statusText.textContent = res.statements_count > 1
+      ? `${res.statements_count} Statements`
+      : 'Valid';
+    errorFooter.style.display = 'none';
+    btnExecute.disabled = false;
+  } else {
+    statusBadge.className = 'status-badge error';
+    statusIcon.textContent = '✗';
+    statusText.textContent = res.error?.code || 'Error';
+    errorFooter.style.display = 'flex';
+    errorMessageText.textContent = res.error?.message
+      ? `${res.error.code}: ${res.error.message}`
+      : 'Parse error';
+    btnExecute.disabled = true;
+  }
+
+  // Update Inspector Views
+  updateInspectorViews(res);
+}
+
+function renderHighlight(sourceText, tokens, error) {
+  if (!tokens || tokens.length === 0) {
+    highlightLayer.innerHTML = escapeHtml(sourceText);
     return;
   }
 
-  // Tokenize
-  let tokens = [];
-  try { tokens = tokenize(q); } catch (e) {}
-  showHighlight(q, tokens);
-
-  // Validate (multi-statement aware)
-  let valid = false;
-  let multi = false;
-  try {
-    const stmts = parse_all(q);
-    valid = stmts.length > 0;
-    multi = stmts.length > 1;
-    showAST(multi ? stmts : (stmts[0] || null));
-  } catch (e) {
-    showAST(null, e);
-  }
-  setStatus(valid
-    ? (multi ? `✓ ${parse_all(q).length} statements` : '✓ Valid')
-    : '✗ Error', valid ? 'ok' : 'err');
-  document.getElementById('btn-execute').disabled = !valid || !client;
-
-  showTokens(tokens);
-
-  // Explain
-  try {
-    showExplain(explain(q));
-  } catch (e) {
-    if (multi) {
-      showExplain(`${new Set(parse_all(q).map(s => Object.keys(s).find(k => !k.startsWith('_') && typeof s[k] === 'object') || '?')).size} statement types\n(explain shows first statement only)`);
-    } else {
-      showExplain('Parse error:\n' + e);
-    }
-  }
-
-  // Compile
-  try {
-    showCompile(compile(q));
-  } catch (e) {
-    if (multi) {
-      showCompile(null, `Multi-statement script (${parse_all(q).length} statements). Select a single statement to compile.`);
-    } else {
-      showCompile(null, e);
-    }
-  }
-}
-
-// ── Display helpers ──
-function setStatus(text, cls) {
-  const el = document.getElementById('validation-status');
-  el.textContent = text || '...';
-  el.className = 'status ' + cls;
-}
-
-function showHighlight(source, tokens) {
-  const el = document.getElementById('highlight-view');
-  if (!tokens || !tokens.length) { el.innerHTML = ''; return; }
   let html = '';
   let lastPos = 0;
+  const errStart = error?.start;
+  const errEnd = error?.end;
+
   for (const t of tokens) {
-    if (t.pos > lastPos) html += escapeHtml(source.slice(lastPos, t.pos));
-    const cls = tokenClass(t.kind);
-    html += `<span class="${cls}">${escapeHtml(t.text)}</span>`;
-    lastPos = t.pos + t.text.length;
+    if (t.pos > lastPos) {
+      const skipped = sourceText.slice(lastPos, t.pos);
+      html += formatSegment(skipped, lastPos, errStart, errEnd);
+    }
+
+    const cssCls = getCssClassForToken(t.kind);
+    const tokenText = sourceText.slice(t.pos, t.end);
+    const formattedToken = escapeHtml(tokenText);
+
+    if (errStart !== undefined && errEnd !== undefined && t.pos >= errStart && t.end <= errEnd) {
+      html += `<span class="${cssCls} hl-err">${formattedToken}</span>`;
+    } else {
+      html += `<span class="${cssCls}">${formattedToken}</span>`;
+    }
+
+    lastPos = t.end;
   }
-  if (lastPos < source.length) html += escapeHtml(source.slice(lastPos));
-  el.innerHTML = html;
-}
 
-function showTokens(tokens) {
-  const el = document.getElementById('output-tokens');
-  if (!tokens || !tokens.length) { el.innerHTML = '<span style="color:var(--text-dim)">No tokens</span>'; return; }
-  let html = '<table class="token-table"><tr><th>Kind</th><th>Text</th><th>Pos</th></tr>';
-  for (const t of tokens) {
-    const cls = tokenClass(t.kind);
-    html += `<tr><td class="token-${cls}">${t.kind}</td><td>${escapeHtml(t.text)}</td><td>${t.pos}</td></tr>`;
+  if (lastPos < sourceText.length) {
+    const trailing = sourceText.slice(lastPos);
+    html += formatSegment(trailing, lastPos, errStart, errEnd);
   }
-  html += '</table>';
-  el.innerHTML = html;
+
+  if (sourceText.endsWith('\n')) {
+    html += '<br>';
+  }
+
+  highlightLayer.innerHTML = html;
 }
 
-function showExplain(text) {
-  document.getElementById('output-explain').textContent = text || '';
+function formatSegment(str, offset, errStart, errEnd) {
+  if (errStart !== undefined && errEnd !== undefined && offset < errEnd && (offset + str.length) > errStart) {
+    return `<span class="hl-err">${escapeHtml(str)}</span>`;
+  }
+  return escapeHtml(str);
 }
 
-function showCompile(val, err) {
-  const el = document.getElementById('output-compile');
-  if (err) { el.textContent = 'Error: ' + err; return; }
-  if (!val) { el.textContent = ''; return; }
-  // compile() now returns a JSON string
-  el.textContent = JSON.stringify(JSON.parse(val), null, 2);
+function updateLineNumbers(text) {
+  const count = text.split('\n').length;
+  let nums = '';
+  for (let i = 1; i <= count; i++) {
+    nums += i + '\n';
+  }
+  lineNumbers.textContent = nums;
 }
 
-function showAST(val, err) {
-  const el = document.getElementById('output-ast');
-  if (err) { el.textContent = 'Error: ' + err; return; }
-  el.textContent = val ? JSON.stringify(val, null, 2) : '';
+function escapeHtml(str) {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
-function showResponse(val) {
-  const el = document.getElementById('output-response');
-  if (!val) { el.textContent = ''; return; }
-  el.textContent = JSON.stringify(val, null, 2);
+// ── Sync Scroll between Textarea & Highlight Layer ─────────────────────────────
+
+queryInput.addEventListener('scroll', () => {
+  highlightLayer.scrollTop = queryInput.scrollTop;
+  highlightLayer.scrollLeft = queryInput.scrollLeft;
+  lineNumbers.scrollTop = queryInput.scrollTop;
+});
+
+// ── Inspector Views Update ─────────────────────────────────────────────────────
+
+function updateInspectorViews(analysis) {
+  // 1. Visual Plan View
+  if (analysis.route) {
+    const method = (analysis.route.method || 'GET').toLowerCase();
+    routeMethod.className = `http-method ${method}`;
+    routeMethod.textContent = (analysis.route.method || 'GET').toUpperCase();
+    routePath.textContent = analysis.route.path || '/';
+
+    routeSummary.textContent = analysis.statements_count > 1
+      ? `Script contains ${analysis.statements_count} statements. Showing first statement.`
+      : `Compiled QQL statement routed to Qdrant REST handler.`;
+
+    codeWireJson.textContent = JSON.stringify(analysis.route.payload, null, 2);
+  } else {
+    routeMethod.className = 'http-method get';
+    routeMethod.textContent = 'NONE';
+    routePath.textContent = '/';
+    routeSummary.textContent = analysis.error ? analysis.error.message : 'No route generated.';
+    codeWireJson.textContent = analysis.error ? JSON.stringify(analysis.error, null, 2) : '{}';
+  }
+
+  planExplanationBox.textContent = analysis.explain || analysis.error?.message || 'No plan explanation available.';
+  explainBox.textContent = analysis.explain || analysis.error?.message || 'No explanation available.';
+
+  // 2. AST View
+  codeAstJson.textContent = analysis.ast
+    ? JSON.stringify(analysis.ast, null, 2)
+    : (analysis.error ? JSON.stringify(analysis.error, null, 2) : '{}');
+
+  // 3. Tokens Table
+  if (analysis.tokens && analysis.tokens.length > 0) {
+    let rows = '';
+    for (const t of analysis.tokens) {
+      const cls = getCssClassForToken(t.kind);
+      rows += `<tr>
+        <td class="${cls}">${t.kind}</td>
+        <td>${escapeHtml(t.text)}</td>
+        <td>${t.pos}</td>
+        <td>${t.end}</td>
+        <td>${t.len}</td>
+      </tr>`;
+    }
+    tokensTableBody.innerHTML = rows;
+  } else {
+    tokensTableBody.innerHTML = `<tr><td colspan="5" style="color:var(--text-dim); text-align:center">No tokens generated</td></tr>`;
+  }
 }
 
-function escapeHtml(s) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
+// ── Tab Switching ─────────────────────────────────────────────────────────────
 
-// ── Tab switching ──
-function switchOutputTab(name) {
-  document.querySelectorAll('.output-tabs .tab').forEach(t => {
-    t.classList.toggle('active', t.dataset.tab === name);
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+
+    btn.classList.add('active');
+    const targetId = `tab-${btn.dataset.tab}`;
+    document.getElementById(targetId).classList.add('active');
   });
-  const ids = { explain: 'output-explain', compile: 'output-compile', tokens: 'output-tokens', ast: 'output-ast', response: 'output-response' };
-  for (const [k, id] of Object.entries(ids)) {
-    document.getElementById(id).style.display = k === name ? 'block' : 'none';
+});
+
+// ── Live Input Handler ────────────────────────────────────────────────────────
+
+queryInput.addEventListener('input', () => {
+  if (debounceTimer) clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(performAnalysis, 50);
+});
+
+// Tab key indent support
+queryInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    const start = queryInput.selectionStart;
+    const end = queryInput.selectionEnd;
+    queryInput.value = queryInput.value.substring(0, start) + '  ' + queryInput.value.substring(end);
+    queryInput.selectionStart = queryInput.selectionEnd = start + 2;
+    performAnalysis();
   }
-}
+});
 
-function switchEditorTab(name) {
-  document.querySelectorAll('.editor-header .tab').forEach(t => {
-    t.classList.toggle('active', t.dataset.tab === name);
-  });
-  document.getElementById('query-input').style.display = name === 'edit' ? 'block' : 'none';
-  document.getElementById('highlight-view').style.display = name === 'highlight' ? 'block' : 'none';
-}
+// ── Preset Selection ──────────────────────────────────────────────────────────
 
-// ── Connect ──
-async function connectQdrant() {
-  const url = document.getElementById('qdrant-url').value.trim();
-  const key = document.getElementById('qdrant-key').value.trim();
-  if (!url) return;
-  client = new Client(url, key || undefined);
-  document.getElementById('btn-execute').disabled = !isValid(currentQuery);
-  setStatus('✓ Connected', 'ok');
-}
+presetSelect.addEventListener('change', () => {
+  const val = presetSelect.value;
+  if (PRESETS[val]) {
+    queryInput.value = PRESETS[val];
+    performAnalysis();
+  }
+});
 
-// ── Execute ──
-async function executeQuery() {
-  if (!client) return;
-  const q = currentQuery;
-  if (!q) return;
+document.getElementById('btn-clear').addEventListener('click', () => {
+  queryInput.value = '';
+  performAnalysis();
+});
+
+document.getElementById('btn-format').addEventListener('click', () => {
+  performAnalysis();
+});
+
+// ── Modal Settings Control ────────────────────────────────────────────────────
+
+btnOpenSettings.addEventListener('click', () => {
+  settingsModal.classList.add('open');
+});
+
+btnCloseSettings.addEventListener('click', () => {
+  settingsModal.classList.remove('open');
+});
+
+btnSaveSettings.addEventListener('click', () => {
+  configureClient();
+  settingsModal.classList.remove('open');
+});
+
+// Close modal when clicking on backdrop
+settingsModal.addEventListener('click', (e) => {
+  if (e.target === settingsModal) {
+    settingsModal.classList.remove('open');
+  }
+});
+
+// ── Execute Button Action ─────────────────────────────────────────────────────
+
+btnExecute.addEventListener('click', async () => {
+  const text = queryInput.value.trim();
+  if (!text) return;
+
+  // Switch to Response Tab
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  document.querySelector('.tab-btn[data-tab="response"]').classList.add('active');
+  document.getElementById('tab-response').classList.add('active');
+
+  if (!client) {
+    configureClient();
+  }
+
   try {
-    const result = await client.execute(q);
-    showResponse(result);
-    switchOutputTab('response');
+    codeResponseJson.textContent = 'Executing via QQL WASM Client (Embedding -> Qdrant REST)...';
+    const res = await client.execute(text);
+    codeResponseJson.textContent = JSON.stringify(res, null, 2);
   } catch (e) {
-    showResponse({ error: String(e) });
-    switchOutputTab('response');
+    const route = currentAnalysis?.route;
+    codeResponseJson.textContent = JSON.stringify({
+      error: String(e),
+      note: "If Qdrant or Ollama is not running on localhost, check Settings (⚙️ Settings & Embedder).",
+      route: route || null
+    }, null, 2);
   }
-}
+});
 
-// ── Sample queries ──
-const SAMPLES = {
-  query: `-- Search with filters and payload selection
-QUERY 'vector database optimization' FROM docs
-  LIMIT 10 OFFSET 0
-  USING HYBRID
-  WHERE category = 'tech' AND year >= 2024
-  WITH PAYLOAD (include = ['title', 'url'], exclude = ['raw_text'])
-  WITH VECTOR ('dense')
-  RERANK
-  WITH (hnsw_ef = 256)`,
-  upsert: `-- Upsert documents with auto-embedding
-UPSERT INTO docs VALUES
-  {id: 1, text: 'Qdrant is a high-performance vector database', category: 'database', year: 2024},
-  {id: 2, text: 'Vector search enables semantic retrieval at scale', category: 'search', year: 2025}
-USING HYBRID`,
-  ddl: `-- Collection Management
-CREATE COLLECTION products HYBRID
-  WITH HNSW (m = 32, ef_construct = 100)
-  WITH QUANTIZATION (type = 'scalar', quantile = 0.95)
+// ── Application Main Entry Point ──────────────────────────────────────────────
 
-CREATE INDEX ON COLLECTION products FOR category TYPE keyword
-CREATE INDEX ON COLLECTION products FOR price TYPE float
-
-SHOW COLLECTIONS`,
-  cte: `-- Multi-stage retrieval with CTE prefetches
-WITH
-  dense AS (QUERY 'vector database performance' USING dense LIMIT 200
-            WHERE category = 'tech'),
-  sparse AS (QUERY 'vector database performance' USING sparse LIMIT 300)
-QUERY 'vector database performance' FROM articles LIMIT 10
-  PREFETCH (dense SCORE THRESHOLD 0.6, sparse SCORE THRESHOLD 0.3)
-  FUSION RRF
-  WITH (rrf_k = 20, rrf_weights = [0.6, 0.4])`
-};
-
-// ── Init ──
 async function main() {
   await init();
   wasmReady = true;
 
-  const ta = document.getElementById('query-input');
-  ta.value = "QUERY 'search' FROM docs LIMIT 10";
-  ta.addEventListener('input', debouncedRefresh);
+  // Prefill default client settings
+  configureClient();
 
-  document.getElementById('btn-connect').addEventListener('click', connectQdrant);
-  document.getElementById('btn-execute').addEventListener('click', executeQuery);
-
-  document.querySelectorAll('.output-tabs .tab').forEach(t => {
-    t.addEventListener('click', () => switchOutputTab(t.dataset.tab));
-  });
-  document.querySelectorAll('.editor-header .tab').forEach(t => {
-    t.addEventListener('click', () => switchEditorTab(t.dataset.tab));
-  });
-
-  document.getElementById('btn-sample-query').addEventListener('click', () => { ta.value = SAMPLES.query; ta.dispatchEvent(new Event('input')); });
-  document.getElementById('btn-sample-upsert').addEventListener('click', () => { ta.value = SAMPLES.upsert; ta.dispatchEvent(new Event('input')); });
-  document.getElementById('btn-sample-ddl').addEventListener('click', () => { ta.value = SAMPLES.ddl; ta.dispatchEvent(new Event('input')); });
-  document.getElementById('btn-sample-cte').addEventListener('click', () => { ta.value = SAMPLES.cte; ta.dispatchEvent(new Event('input')); });
-
-  // Tab key support in textarea
-  ta.addEventListener('keydown', (e) => {
-    if (e.key === 'Tab') {
-      e.preventDefault();
-      const start = ta.selectionStart, end = ta.selectionEnd;
-      ta.value = ta.value.substring(0, start) + '  ' + ta.value.substring(end);
-      ta.selectionStart = ta.selectionEnd = start + 2;
-      ta.dispatchEvent(new Event('input'));
-    }
-  });
-
-  await refresh();
+  // Load initial preset
+  queryInput.value = PRESETS.hybrid;
+  performAnalysis();
 }
 
 main().catch(console.error);

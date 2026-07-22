@@ -19,6 +19,14 @@ fn basic_keywords() {
 }
 
 #[test]
+fn unicode_comparison_operators() {
+    let t = tokens("year ≥ 2024 AND year ≤ 2030 AND id ≠ 5");
+    assert_eq!(t[1].0, TokenKind::Gte);
+    assert_eq!(t[5].0, TokenKind::Lte);
+    assert_eq!(t[9].0, TokenKind::NotEquals);
+}
+
+#[test]
 fn strings_with_escapes() {
     let t = tokens(r"'hello\nworld\t'");
     assert_eq!(t[0].0, TokenKind::String);
