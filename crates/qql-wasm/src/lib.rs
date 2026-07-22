@@ -75,6 +75,81 @@ pub fn inject_filter(
     serde_wasm_bindgen::to_value(&stmt).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
+// ── Stmt class ─────────────────────────────────────────────────────
+
+#[wasm_bindgen]
+pub struct Stmt {
+    inner: qql_core::ast::Stmt,
+}
+
+#[wasm_bindgen]
+impl Stmt {
+    /// Parse a QQL string into a Stmt object for programmatic manipulation.
+    #[wasm_bindgen(constructor)]
+    pub fn new(input: &str) -> Result<Stmt, JsValue> {
+        let inner = Parser::parse(input).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        Ok(Stmt { inner })
+    }
+
+    /// Inject a WHERE filter into this statement's AST (mutates in place).
+    #[wasm_bindgen(js_name = injectFilter)]
+    pub fn inject_filter(&mut self, field: &str, op: &str, value: JsValue) -> Result<(), JsValue> {
+        let serde_value: serde_json::Value = serde_wasm_bindgen::from_value(value)
+            .map_err(|e| JsValue::from_str(&format!("invalid value: {}", e)))?;
+        let val = Value::from_json(serde_value).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let cmp = match op {
+            "=" | "==" | "eq" => ComparisonOp::Eq,
+            "!=" | "neq" => ComparisonOp::Eq,
+            ">" | "gt" => ComparisonOp::Gt,
+            ">=" | "gte" => ComparisonOp::Gte,
+            "<" | "lt" => ComparisonOp::Lt,
+            "<=" | "lte" => ComparisonOp::Lte,
+            _ => ComparisonOp::Eq,
+        };
+        ast::inject_filter(&mut self.inner, field, cmp, val)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        Ok(())
+    }
+
+    /// Get or set the shard key (QUERY, COUNT, SCROLL, UPSERT, DELETE only).
+    #[wasm_bindgen(getter, js_name = shardKey)]
+    pub fn shard_key(&self) -> Option<String> {
+        match &self.inner {
+            ast::Stmt::Query(q) => q.shard_key.clone(),
+            ast::Stmt::Count(c) => c.shard_key.clone(),
+            ast::Stmt::Scroll(s) => s.shard_key.clone(),
+            ast::Stmt::Upsert(u) => u.shard_key.clone(),
+            ast::Stmt::Delete(d) => d.shard_key.clone(),
+            _ => None,
+        }
+    }
+
+    #[wasm_bindgen(setter, js_name = shardKey)]
+    pub fn set_shard_key(&mut self, key: Option<String>) {
+        let key = key.filter(|k| !k.is_empty());
+        match &mut self.inner {
+            ast::Stmt::Query(q) => q.shard_key = key,
+            ast::Stmt::Count(c) => c.shard_key = key,
+            ast::Stmt::Scroll(s) => s.shard_key = key,
+            ast::Stmt::Upsert(u) => u.shard_key = key,
+            ast::Stmt::Delete(d) => d.shard_key = key,
+            _ => {}
+        }
+    }
+
+    /// Serialise the AST to a JSON string.
+    #[wasm_bindgen(js_name = toJSON)]
+    pub fn to_json(&self) -> Result<String, JsValue> {
+        serde_json::to_string(&self.inner).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Serialise the AST to a JS object.
+    #[wasm_bindgen(js_name = toObject)]
+    pub fn to_object(&self) -> Result<JsValue, JsValue> {
+        serde_wasm_bindgen::to_value(&self.inner).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+}
+
 // ── Core: tokenize ────────────────────────────────────────────────
 
 // ── Core: tokenize ────────────────────────────────────────────────
@@ -211,6 +286,11 @@ pub fn compile(query: &str) -> Result<String, JsValue> {
             Some(qql_plan::routing::RequestBody::Delete(_)) => "delete",
             Some(qql_plan::routing::RequestBody::UpdateVector(_)) => "update_vector",
             Some(qql_plan::routing::RequestBody::UpdatePayload(_)) => "update_payload",
+            Some(qql_plan::routing::RequestBody::ClearPayload(_)) => "clear_payload",
+            Some(qql_plan::routing::RequestBody::DeleteVector(_)) => "delete_vector",
+            Some(qql_plan::routing::RequestBody::Count(_)) => "count",
+            Some(qql_plan::routing::RequestBody::CreateShardKey(_)) => "create_shard_key",
+            Some(qql_plan::routing::RequestBody::DropShardKey(_)) => "drop_shard_key",
             Some(qql_plan::routing::RequestBody::CreateCollection(_)) => "create_collection",
             Some(qql_plan::routing::RequestBody::CreateIndex(_)) => "create_index",
             None => match route.method {
@@ -554,22 +634,75 @@ impl Client {
     }
 
     /// Parse, compile, embed if needed, and POST to Qdrant's REST API.
+    /// Pass a string for a single query, or a string[] for batch execution.
     #[wasm_bindgen]
-    pub async fn execute(&self, query: &str) -> Result<JsValue, JsValue> {
-        let stmt = Parser::parse(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
-        let route = routing::route(&stmt);
-        let method_str = route.method.as_str();
-        let path = &route.path;
+    pub async fn execute(&self, query: JsValue) -> Result<JsValue, JsValue> {
+        if js_sys::Array::is_array(&query) {
+            let arr = js_sys::Array::from(&query);
+            let len = arr.length() as usize;
+            let mut results: Vec<serde_json::Value> = Vec::with_capacity(len);
+            for i in 0..len {
+                let item = arr.get(i as u32);
+                if let Some(s) = item.as_string() {
+                    match self.execute_single(&s).await {
+                        Ok(v) => {
+                            let val: serde_json::Value = serde_wasm_bindgen::from_value(v)
+                                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+                            results.push(val);
+                        }
+                        Err(e) => {
+                            results.push(serde_json::json!({"ok": false, "error": e.as_string().unwrap_or_default()}));
+                        }
+                    }
+                }
+            }
+            return serde_wasm_bindgen::to_value(&results)
+                .map_err(|e| JsValue::from_str(&e.to_string()));
+        }
+
+        if let Some(s) = query.as_string() {
+            return self.execute_single(&s).await;
+        }
+
+        Err(JsValue::from_str("query must be a string or string[]"))
+    }
+
+    /// Execute a pre-parsed Stmt object.  Injects embeddings for UPSERT
+    /// if an embedder is configured.
+    #[wasm_bindgen(js_name = executeStmt)]
+    pub async fn execute_stmt(&self, stmt: &Stmt) -> Result<JsValue, JsValue> {
+        let route = routing::route(&stmt.inner);
 
         let mut body = route.body_json();
+        if matches!(stmt.inner, qql_core::ast::Stmt::Upsert(_)) {
+            if let Some(ref mut payload) = body {
+                self.embed_upsert_points(payload).await?;
+            }
+        }
+        self.send_route(&route, body).await
+    }
 
-        // Inject embeddings for upsert statements if embedder is configured
+    async fn execute_single(&self, query: &str) -> Result<JsValue, JsValue> {
+        let stmt = Parser::parse(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let route = routing::route(&stmt);
+
+        let mut body = route.body_json();
         if matches!(stmt, qql_core::ast::Stmt::Upsert(_)) {
             if let Some(ref mut payload) = body {
                 self.embed_upsert_points(payload).await?;
             }
         }
 
+        self.send_route(&route, body).await
+    }
+
+    async fn send_route(
+        &self,
+        route: &routing::Route,
+        body: Option<serde_json::Value>,
+    ) -> Result<JsValue, JsValue> {
+        let method_str = route.method.as_str();
+        let path = &route.path;
         let body_str = body
             .as_ref()
             .map(|b| serde_json::to_string(b).map_err(|e| JsValue::from_str(&e.to_string())))

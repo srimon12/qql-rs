@@ -238,6 +238,7 @@ impl<'a> Parser<'a> {
     pub fn parse_create_shard_key(&mut self) -> Result<Stmt, QqlError> {
         // Consume the SHARD token (parse_create() only peeked at it)
         self.expect(TokenKind::Shard)?;
+        self.expect(TokenKind::Key)?;
         let shard_name = self.parse_string()?;
         self.expect(TokenKind::On)?;
         self.expect(TokenKind::Collection)?;
@@ -245,7 +246,6 @@ impl<'a> Parser<'a> {
         let mut shards_number = None;
         let mut replication_factor = None;
         if self.peek()?.kind == TokenKind::With {
-            let pos = self.peek()?.pos;
             self.advance()?;
             let opts = self.parse_config_block()?;
             for (key, val) in &opts {
@@ -264,7 +264,6 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
-            super::validate_index_options(&opts, pos)?;
         }
         Ok(Stmt::CreateShardKey(Box::new(CreateShardKeyStmt {
             collection,

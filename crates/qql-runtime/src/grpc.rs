@@ -227,6 +227,28 @@ impl GrpcQdrant {
             .map_err(|e| QqlError::backend("QQL-GRPC", format!("create_shard_key: {e}"), None))
     }
 
+    pub async fn delete_shard_key(
+        &self,
+        req: qdrant::DeleteShardKeyRequest,
+    ) -> Result<qdrant::DeleteShardKeyResponse, QqlError> {
+        let mut cl = qdrant::collections_client::CollectionsClient::new(self.channel.clone());
+        cl.delete_shard_key(tonic::Request::new(req))
+            .await
+            .map(|r| r.into_inner())
+            .map_err(|e| QqlError::backend("QQL-GRPC", format!("delete_shard_key: {e}"), None))
+    }
+
+    pub async fn list_shard_keys(
+        &self,
+        req: qdrant::ListShardKeysRequest,
+    ) -> Result<qdrant::ListShardKeysResponse, QqlError> {
+        let mut cl = qdrant::collections_client::CollectionsClient::new(self.channel.clone());
+        cl.list_shard_keys(tonic::Request::new(req))
+            .await
+            .map(|r| r.into_inner())
+            .map_err(|e| QqlError::backend("QQL-GRPC", format!("list_shard_keys: {e}"), None))
+    }
+
     pub async fn list_collections_raw(&self) -> Result<qdrant::ListCollectionsResponse, QqlError> {
         let mut cl = qdrant::collections_client::CollectionsClient::new(self.channel.clone());
         cl.list(tonic::Request::new(qdrant::ListCollectionsRequest {}))

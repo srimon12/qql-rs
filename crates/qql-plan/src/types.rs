@@ -621,3 +621,8 @@ pub struct CreateShardKeyRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub replication_factor: Option<u64>,
 }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DropShardKeyRequest {
+    pub shard_key: String,
+}

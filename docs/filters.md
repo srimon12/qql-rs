@@ -1,6 +1,6 @@
 # QQL Filter Reference
 
-Metadata filter expressions in `WHERE` clauses for `QUERY`, `COUNT`, `SCROLL`, `UPDATE`, `DELETE`, `CLEAR PAYLOAD`, and `DELETE VECTOR` statements.
+Metadata filter expressions in `WHERE` clauses for `QUERY`, `COUNT`, `SCROLL`, `DELETE`, `CLEAR PAYLOAD`, `DELETE VECTOR`, and `UPDATE ... SET PAYLOAD` statements. (The `UPDATE ... SET VECTOR` form uses point-ID equality only — general filters do not apply.)
 
 ---
 

@@ -10,7 +10,38 @@ npm install qql-wasm
 
 ---
 
-## 1. Client-Side Validation & Filter Injection
+## 1. Stmt Class — Parse Once, Reuse
+
+The `Stmt` class wraps a parsed AST. Manipulate it before execution.
+
+```js
+import init, { Stmt, inject_filter } from 'qql-wasm';
+
+await init();
+
+// Parse into a Stmt object
+const stmt = new Stmt("QUERY 'search' FROM docs USING dense LIMIT 10");
+
+// Read / write the shard key
+stmt.shardKey = "acme";
+console.log(stmt.shardKey);  // → "acme"
+
+// Inject a tenant filter (mutates in place)
+stmt.injectFilter("tenant_id", "=", "acme");
+
+// Serialise to JSON
+const json = stmt.toJSON();
+const obj = stmt.toObject();
+
+// Free parsing functions also available
+import { parse, parse_all } from 'qql-wasm';
+const ast = parse("QUERY 'hello' FROM docs LIMIT 5");
+const stmts = parse_all("Q1; Q2; Q3;");
+```
+
+---
+
+## 2. Client-Side Validation & Filter Injection
 
 Validate and inject filters in the browser — no server round-trip needed.
 
@@ -24,14 +55,54 @@ if (!isValid("QUERY 'machine learning' FROM papers LIMIT 20")) {
     throw new Error("Invalid QQL");
 }
 
-// Parse into AST, inject tenant filter
-const stmt = parse("QUERY 'search' FROM docs LIMIT 10");
-inject_filter(stmt, "tenant_id", "=", "acme");
+// Inject tenant filter into a raw query string
+const safe = inject_filter("QUERY 'search' FROM docs LIMIT 10", "tenant_id", "=", "acme");
 ```
 
 ---
 
-## 2. Offline Route Compilation
+## 3. Execute via Browser Fetch
+
+Full client from browser, with optional embedder for text-to-vector resolution.
+`execute()` accepts a single string, a semicolon-delimited multi-statement string,
+or an array of strings.  `executeStmt()` accepts a pre-parsed `Stmt` object.
+
+```js
+import init, { Client, Stmt } from 'qql-wasm';
+
+await init();
+
+const client = new Client("http://localhost:6333", null);
+client.setOpenAIEmbedder("sk-...", "text-embedding-3-small", 1536);
+
+// Single query
+const result = await client.execute(
+    "QUERY 'vector databases' FROM docs USING dense LIMIT 10"
+);
+
+// Multi-statement (semicolons auto-detected)
+const schemaResult = await client.execute(`
+    CREATE COLLECTION docs HYBRID (dense VECTOR(768, COSINE), sparse SPARSE)
+      WITH HNSW (m = 16);
+
+    CREATE INDEX ON COLLECTION docs FOR title TYPE text;
+`);
+
+// Batch — array of strings
+const results = await client.execute([
+    "QUERY 'a' FROM docs USING dense LIMIT 10",
+    "QUERY 'b' FROM docs USING dense LIMIT 10",
+]);
+
+// Execute a pre-parsed Stmt (skips the parse step)
+const stmt = new Stmt("QUERY 'search' FROM docs USING dense LIMIT 10");
+stmt.shardKey = "acme";
+const stmtResult = await client.executeStmt(stmt);
+```
+
+---
+
+## 4. Offline Route Compilation
 
 Lower QQL to a typed REST route object without a Qdrant connection.
 
@@ -40,37 +111,14 @@ import init, { compile, parse_all } from 'qql-wasm';
 
 await init();
 
-// Compile a single statement to a route
 const route = compile("QUERY 'search' FROM docs USING dense LIMIT 10");
-// → { method: "POST", path: "/collections/docs/points/query", payload: {...} }
+// → JSON string with stmt_type and payload
 
-// Compile a whole .qql script
 for (const stmt of parse_all(`
   CREATE COLLECTION docs HYBRID (dense VECTOR(768, COSINE), sparse SPARSE)
     WITH PARAMS (replication_factor = 3);
-  CREATE INDEX ON COLLECTION docs FOR tenant_id TYPE keyword WITH (is_tenant = true);
+  CREATE SHARD KEY 'acme' ON COLLECTION docs WITH (shards_number = 2);
 `)) {
     console.log(stmt);
 }
-```
-
----
-
-## 3. Execute via Browser Fetch
-
-Full client from browser, with optional embedder for text-to-vector resolution.
-
-```js
-import init, { Client } from 'qql-wasm';
-
-await init();
-
-const client = new Client("http://localhost:6333", null);
-
-// Optional: configure embedder for automatic text → vector
-client.setOpenAIEmbedder("sk-...", "text-embedding-3-small", 1536);
-
-const result = await client.execute(
-    "QUERY 'vector databases' FROM docs USING dense LIMIT 10"
-);
 ```

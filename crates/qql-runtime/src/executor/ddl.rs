@@ -350,6 +350,34 @@ impl Executor {
         })
     }
 
+    pub(crate) async fn do_drop_shard_key(
+        &self,
+        stmt: ast::DropShardKeyStmt,
+    ) -> Result<ExecResponse, QqlError> {
+        let r = qql_plan::routing::route(&ast::Stmt::DropShardKey(Box::new(stmt)));
+        self.client.execute_route(r).await?;
+        Ok(ExecResponse {
+            ok: true,
+            operation: "drop_shard_key".to_string(),
+            message: "Shard key dropped".to_string(),
+            data: None,
+        })
+    }
+
+    pub(crate) async fn do_show_shard_keys(
+        &self,
+        collection: &str,
+    ) -> Result<ExecResponse, QqlError> {
+        let r = qql_plan::routing::route(&ast::Stmt::ShowShardKeys(collection.to_string()));
+        let result = self.client.execute_route(r).await?;
+        Ok(ExecResponse {
+            ok: true,
+            operation: "show_shard_keys".to_string(),
+            message: format!("Shard keys for '{}'", collection),
+            data: Some(result),
+        })
+    }
+
     pub(crate) async fn do_create_index(
         &self,
         stmt: ast::CreateIndexStmt,

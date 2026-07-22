@@ -4,7 +4,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 #[derive(Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Value {
     Str(String),
     Int(i64),

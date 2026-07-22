@@ -626,6 +626,11 @@ impl QdrantOps for EdgeQdrant {
                 "create_shard_key not supported in edge mode (single node)",
                 None,
             )),
+            Some(RequestBody::DropShardKey(_req)) => Err(QqlError::execution(
+                "QQL-EDGE",
+                "drop_shard_key not supported in edge mode (single node)",
+                None,
+            )),
             Some(RequestBody::Count(req)) => {
                 let collection = extract_collection(&route.path)?;
                 let shard = self.open_shard(&collection).await?;

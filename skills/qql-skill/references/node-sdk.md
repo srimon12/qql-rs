@@ -25,31 +25,48 @@ const stmt = parse("QUERY 'supply chain risks' FROM sec10k SHARD 'honeywell' LIM
 // Platform injects tenant filter — single call, recursive into CTEs and prefetches
 injectFilter(stmt, "tenant_id", "=", "honeywell");
 
+// Set the shard key programmatically
+stmt.shardKey = "honeywell";
+
 const result = await client.executeStmt(stmt);
 ```
 
 ---
 
-## 2. Schema-as-Code
+## 2. Unified Execute
 
-Parse and execute a `.qql` schema file — same file works from Node, Python, Rust, WASM.
+`execute()` accepts a string, a Stmt, a multi-statement string (semicolons),
+or an array.  All paths auto-batch same-collection QUERY statements.
+Returns a JSON string.
 
 ```js
-const { parseAll, Client } = require('nqql');
-
-const schema = `
-CREATE COLLECTION docs HYBRID (dense VECTOR(768, COSINE), sparse SPARSE)
-  WITH HNSW (m = 16)
-  WITH PARAMS (replication_factor = 3, shard_number = 4);
-
-CREATE INDEX ON COLLECTION docs FOR title TYPE text;
-CREATE INDEX ON COLLECTION docs FOR tenant_id TYPE keyword WITH (is_tenant = true);
-`;
+const { parse, Client } = require('nqql');
 
 const client = new Client({ url: "http://localhost:6333" });
-for (const stmt of parseAll(schema)) {
-    await client.executeStmt(stmt);
-}
+
+// Single string
+const result = await client.execute("QUERY 'search' FROM docs USING dense LIMIT 10");
+
+// Pre-parsed Stmt — programmatic manipulation before execution
+const stmt = parse("QUERY 'search' FROM docs USING dense LIMIT 10");
+stmt.shardKey = "acme";
+const stmtResult = await client.execute(stmt);
+
+// Multi-statement (semicolons) — one call for DDL scripts
+const schema = await client.execute(`
+  CREATE COLLECTION docs HYBRID (dense VECTOR(768, COSINE), sparse SPARSE)
+    WITH HNSW (m = 16);
+
+  CREATE INDEX ON COLLECTION docs FOR title TYPE text;
+  CREATE SHARD KEY 'acme' ON COLLECTION docs WITH (shards_number = 2);
+`);
+
+// Batch — array of strings
+const results = await client.execute([
+    "QUERY 'a' FROM docs USING dense LIMIT 10",
+    "QUERY 'b' FROM docs USING dense LIMIT 10",
+]);
+// → 2 queries, 1 network call.  JSON.parse(results) for array
 ```
 
 ---

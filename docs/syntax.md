@@ -6,7 +6,8 @@ This is the canonical syntax implemented by `qql-core`. QQL follows Qdrant retri
 
 ```ebnf
 script       = [ statement, { ";", statement }, [ ";" ] ] ;
-statement    = query | scroll | upsert | update | delete | ddl | count | clear-payload | delete-vectors | drop-index ;
+statement    = query | scroll | upsert | update | delete | ddl | count
+             | clear-payload | delete-vectors | create-shard-key ;
 ```
 
 Multiple statements require `;`. Leading semicolons, repeated semicolons, and adjacent unseparated statements are invalid.
@@ -31,7 +32,7 @@ query-tail   = [ "USING", vector-name ],
                [ "SCORE", "THRESHOLD", number ],
                [ "GROUP", "BY", field,
                    [ "SIZE", positive-integer ],
-                   [ "LOOKUP", "FROM", collection ] ],
+                   [ "LOOKUP", "FROM", collection, [ "VECTOR", vector-name ] ] ],
                [ "WITH", "PAYLOAD", payload-selector ],
                [ "WITH", "VECTOR", vector-selector ],
                [ "LIMIT", positive-integer ],
@@ -100,7 +101,7 @@ rerank-input = "TEXT", string | "VECTOR", vector-value | "POINT", point-id ;
 
 `QUERY POINTS (...)` retrieves those points directly. `QUERY NEAREST POINT ...` uses a point as the similarity input. A bare integer after `QUERY` is invalid, so point retrieval and point similarity cannot be confused.
 
-Fusion requires a non-empty `PREFETCH`. Rerank requires an explicit input, `MODEL`, `USING`, and non-empty `PREFETCH`. MMR requires both `DIVERSITY` in `[0, 1]` and positive `CANDIDATES`. Core records hybrid intent but does not invent candidate counts or `LIMIT * 10` behavior.
+Fusion requires a non-empty `PREFETCH`. Rerank requires an explicit input, `MODEL`, `USING`, and non-empty `PREFETCH`. MMR requires both `DIVERSITY` in `[0, 1]` and positive `CANDIDATES`; it compiles to `QueryExpr::Nearest { mmr: Some(...) }` — MMR is a configuration of nearest-neighbour search, not a separate retrieval primitive. Core records hybrid intent but does not invent candidate counts or `LIMIT * 10` behaviour.
 
 ### Examples
 
@@ -172,8 +173,13 @@ Keys in payload objects, configuration blocks, formula defaults, and search para
 ```ebnf
 upsert       = "UPSERT", "INTO", collection, "VALUES",
                point-object, { ",", point-object },
-               [ embedding-options ], [ embed-directives ],
+               [ embedding-options ],
                [ "SHARD", string ] ;
+embedding-options = ( dense-embed | hybrid-embed ) ;
+dense-embed  = "USING", "DENSE", ( "MODEL", string | "VECTOR", string ) ;
+hybrid-embed = "USING", "HYBRID",
+               [ "DENSE", ( "MODEL", string | "VECTOR", string ) ],
+               [ "SPARSE", ( "MODEL", string | "VECTOR", string ) ] ;
 scroll       = "SCROLL", "FROM", collection,
                [ "WHERE", filter ], [ "AFTER", point-id ],
                [ "SHARD", string ],
@@ -201,7 +207,7 @@ multidense-vector = "[", dense-vector, { ",", dense-vector }, "]" ;
 
 Every upsert point requires an unsigned integer or string `id`. Its optional `vector` may be one unnamed vector value or an object of named vector values. All other object entries remain arbitrary payload values.
 
-`SHARD '<key>'` on UPSERT, SCROLL, or DELETE routes the operation to a specific shard group.
+`SHARD '<key>'` on UPSERT, SCROLL, DELETE, COUNT, or QUERY routes the operation to a specific shard group.
 
 ## DDL
 
@@ -209,9 +215,10 @@ Collection creation/alteration/drop/show and payload index management:
 
 ```ebnf
 create-collection = "CREATE", "COLLECTION", name,
-                    ( "DENSE", [ "MODEL", string ]
-                    | "HYBRID", [ "DENSE", name ], [ "SPARSE", name ]
-                    | "RERANK" ),
+                    [ "USING", [ "DENSE" ], "MODEL", string
+                    | "HYBRID", [ "RERANK" ],
+                        [ "DENSE", name, "VECTOR", vector-name ],
+                        [ "SPARSE", name, "VECTOR", vector-name ] ],
                     [ "(", vector-def, { ",", vector-def }, ")" ],
                     [ "(", sparse-def, { ",", sparse-def }, ")" ],
                     [ config-blocks ] ;
@@ -225,16 +232,32 @@ create-index    = "CREATE", "INDEX", "ON", "COLLECTION", name,
 drop-index      = "DROP", "INDEX", "ON", "COLLECTION", name,
                   "FOR", field ;
 
+create-shard-key = "CREATE", "SHARD", "KEY", string,
+                   "ON", "COLLECTION", name,
+                   [ "WITH", config-block ] ;
+
+create-shard-key = "CREATE", "SHARD", "KEY", string,
+                   "ON", "COLLECTION", name,
+                   [ "WITH", config-block ] ;
+
+drop-shard-key  = "DROP", "SHARD", "KEY", string,
+                  "ON", "COLLECTION", name ;
+
+show-shard-keys = "SHOW", "SHARD", "KEYS", "ON", "COLLECTION", name ;
+
 drop-collection = "DROP", "COLLECTION", name ;
 
 show            = "SHOW", "COLLECTIONS"
                 | "SHOW", "COLLECTION", name ;
 
-vector-def    = name, "VECTOR", "(", size, ",", distance, ")" ;
+vector-def    = name, "VECTOR", "(", size, ",", distance, ")"
+                [ "WITH", "MULTIVECTOR", "(", config-block, ")" ] ;
 sparse-def    = name, "SPARSE" ;
 config-blocks = "WITH", ( "HNSW" | "PARAMS" | "OPTIMIZERS" | "QUANTIZE"
                          | "VECTOR" ), config-block ;
 ```
+
+`USING [DENSE] MODEL '<model>'` creates a collection with a single dense vector whose dimension is inferred from the embedding model. `HYBRID` enables dense + sparse hybrid search; add `RERANK` for a second dense vector used by the `QUERY RERANK` expression. The `VECTOR` keyword separating the vector-config name from the vector-name value is required. All three syntax forms begin with `CREATE COLLECTION <name>` followed by at most one mode keyword group; `DENSE MODEL` without a preceding `USING` is rejected.
 
 ### Collection Params
 
@@ -270,6 +293,7 @@ CREATE COLLECTION docs (
 
 ALTER COLLECTION docs WITH VECTOR (on_disk = true);
 CREATE INDEX ON COLLECTION docs FOR title TYPE text WITH (lowercase = true);
+CREATE SHARD KEY 'acme' ON COLLECTION docs WITH (shards_number = 2);
 DROP INDEX ON COLLECTION docs FOR title;
 DROP COLLECTION docs;
 SHOW COLLECTIONS;

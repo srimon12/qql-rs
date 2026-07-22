@@ -102,6 +102,11 @@ impl Executor {
         qql_core::explain::explain(query)
     }
 
+    /// Explain every statement in a multi-statement script.
+    pub fn explain_all(query: &str) -> Result<String, QqlError> {
+        qql_core::explain::explain_all(query)
+    }
+
     pub fn explain_node(stmt: &Stmt) -> Result<String, QqlError> {
         Ok(qql_core::explain::explain_node(stmt))
     }
@@ -143,13 +148,40 @@ impl Executor {
         })
     }
 
-    pub fn parse_query(query: &str) -> Result<Stmt, QqlError> {
-        parser::Parser::parse(query)
-    }
-
+    /// Execute a QQL query string.  Semicolon-delimited multi-statement
+    /// scripts are automatically detected, parsed, and executed in batch —
+    /// same-collection QUERY statements are grouped into a single network call.
     pub async fn execute(&self, query: &str) -> Result<ExecResponse, QqlError> {
-        let stmt = Self::parse_query(query)?;
-        self.execute_node(stmt).await
+        match parser::Parser::parse_all(query) {
+            Ok(mut statements) => match statements.len() {
+                0 => Ok(ExecResponse {
+                    ok: true,
+                    operation: "EMPTY".to_string(),
+                    message: "empty script".to_string(),
+                    data: None,
+                }),
+                1 => self.execute_node(statements.remove(0)).await,
+                _ => {
+                    let results = self.execute_batch_nodes(statements, true).await?;
+                    let succeeded = results.iter().filter(|r| r.ok).count();
+                    Ok(ExecResponse {
+                        ok: true,
+                        operation: "SCRIPT".to_string(),
+                        message: format!(
+                            "Executed {} statement(s) ({} succeeded, {} failed)",
+                            results.len(),
+                            succeeded,
+                            results.len() - succeeded,
+                        ),
+                        data: Some(serde_json::to_value(&results).unwrap_or_default()),
+                    })
+                }
+            },
+            Err(_) => {
+                let stmt = parser::Parser::parse(query)?;
+                self.execute_node(stmt).await
+            }
+        }
     }
 
     pub async fn execute_node(&self, mut stmt: Stmt) -> Result<ExecResponse, QqlError> {
@@ -173,6 +205,8 @@ impl Executor {
             Stmt::UpdatePayload(n) => self.do_update_payload(*n).await,
             Stmt::CreateIndex(n) => self.do_create_index(*n).await,
             Stmt::CreateShardKey(n) => self.do_create_shard_key(*n).await,
+            Stmt::DropShardKey(n) => self.do_drop_shard_key(*n).await,
+            Stmt::ShowShardKeys(collection) => self.do_show_shard_keys(&collection).await,
             Stmt::DropIndex(n) => self.do_drop_index(*n).await,
             Stmt::Count(n) => self.do_count(*n).await,
         }
@@ -233,11 +267,7 @@ impl Executor {
         for (_collection, queries) in query_groups {
             let batches = qql_plan::routing::route_query_batch(&queries);
             for (coll, batch) in batches {
-                match self
-                    .client
-                    .execute_query_batch(&coll, &batch)
-                    .await
-                {
+                match self.client.execute_query_batch(&coll, &batch).await {
                     Ok(responses) => {
                         for val in responses {
                             let hits = extract_search_hits(&val);
@@ -268,8 +298,7 @@ impl Executor {
                 .into_iter()
                 .filter(|q| {
                     // Keep queries that didn't go through the batch
-                    matches!(q.expression, ast::QueryExpr::Points { .. })
-                        || q.group.is_some()
+                    matches!(q.expression, ast::QueryExpr::Points { .. }) || q.group.is_some()
                 })
                 .collect();
             for q in remaining {
@@ -308,35 +337,6 @@ impl Executor {
                 data: None,
             },
         }
-    }
-
-    pub async fn query_batch(&self, queries: &[&str]) -> Result<Vec<ExecResponse>, QqlError> {
-        let mut parsed_stmts = Vec::with_capacity(queries.len());
-        for q in queries {
-            let stmt = Self::parse_query(q)?;
-            if let Stmt::Query(query_stmt) = stmt {
-                parsed_stmts.push(*query_stmt);
-            } else {
-                return Err(QqlError::execution(
-                    "QQL-EXECUTION",
-                    "query_batch only supports QUERY statements, got non-query statement"
-                        .to_string(),
-                    None,
-                ));
-            }
-        }
-        self.query_batch_nodes(parsed_stmts).await
-    }
-
-    pub async fn query_batch_nodes(
-        &self,
-        stmts: Vec<qql_core::ast::QueryStmt>,
-    ) -> Result<Vec<ExecResponse>, QqlError> {
-        let mut results = Vec::with_capacity(stmts.len());
-        for stmt in stmts {
-            results.push(self.do_query(stmt).await?);
-        }
-        Ok(results)
     }
 }
 

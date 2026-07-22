@@ -41,13 +41,16 @@ Translate user intent directly into QQL syntax:
 - Rerank search -> `WITH c AS (QUERY 't' USING dense LIMIT 50) QUERY RERANK TEXT 't' MODEL 'bge-reranker' FROM <collection> USING colbert PREFETCH (c) LIMIT <n>`
 - MMR diversification -> `QUERY MMR 'query_text' DIVERSITY 0.5 CANDIDATES 100 FROM <collection> USING dense LIMIT <n>`
 - Formula / Score shaping -> `QUERY FORMULA score + 0.3 * popularity DEFAULTS (popularity = 1.0) FROM <collection> USING dense LIMIT <n>`
-- Grouped results -> add `GROUP BY <field> SIZE <m> LOOKUP FROM <collection>`
+- Grouped results -> add `GROUP BY <field> SIZE <m> LOOKUP FROM <collection> [VECTOR <name>]`
 - Browse points -> `SCROLL FROM <collection> [AFTER <id>] LIMIT <n>`
 - Batch ingest -> `UPSERT INTO <collection> VALUES {id: 1, text: '...'}, {id: 2, text: '...'}`
 - Delete points -> `DELETE FROM <collection> WHERE <filter>`
 - Clear payload -> `CLEAR PAYLOAD FROM <collection> WHERE <filter>`
 - Delete vectors -> `DELETE VECTOR <name> FROM <collection> WHERE id = N`
 - Count points -> `COUNT FROM <collection> WHERE <filter>`
+- Create shard key -> `CREATE SHARD KEY '<key>' ON COLLECTION <name> [WITH (shards_number = N, replication_factor = M)]`
+- Drop shard key -> `DROP SHARD KEY '<key>' ON COLLECTION <name>`
+- Show shard keys -> `SHOW SHARD KEYS ON COLLECTION <name>`
 - Multi-tenant isolation -> `QUERY 'text' FROM <collection> WHERE tenant_id = 'honeywell' SHARD 'honeywell' LIMIT 10`
 
 ## Canonical Grammar & Capabilities
@@ -65,6 +68,12 @@ CREATE INDEX ON COLLECTION docs FOR title TYPE text WITH (lowercase = true);
 DROP INDEX ON COLLECTION docs FOR title;
 SHOW COLLECTIONS;
 SHOW COLLECTION docs;
+
+-- Shard key lifecycle for multi-tenant custom sharding
+CREATE SHARD KEY 'acme' ON COLLECTION docs WITH (shards_number = 2);
+SHOW SHARD KEYS ON COLLECTION docs;
+DROP SHARD KEY 'acme' ON COLLECTION docs;
+
 DROP COLLECTION docs;
 ```
 

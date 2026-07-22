@@ -9,6 +9,24 @@ pub fn explain(source: &str) -> Result<String, QqlError> {
     Ok(explain_node(&statement))
 }
 
+/// Explain every statement in a semicolon-delimited script.
+/// Returns a concatenated plan, one section per statement.
+pub fn explain_all(source: &str) -> Result<String, QqlError> {
+    let statements = Parser::parse_all(source)?;
+    if statements.is_empty() {
+        return Ok(String::new());
+    }
+    let mut output = String::new();
+    for (i, stmt) in statements.iter().enumerate() {
+        if i > 0 {
+            output.push('\n');
+        }
+        output.push_str(&format!("--- Statement {} ---\n", i + 1));
+        output.push_str(&explain_node(stmt));
+    }
+    Ok(output)
+}
+
 pub fn explain_node(statement: &Stmt) -> String {
     let mut output = String::new();
     match statement {
@@ -58,6 +76,14 @@ pub fn explain_node(statement: &Stmt) -> String {
         Stmt::CreateShardKey(statement) => output.push_str(&format!(
             "Statement: CREATE SHARD KEY\nCollection: {}\nShard: {}\n",
             statement.collection, statement.shard_key
+        )),
+        Stmt::DropShardKey(statement) => output.push_str(&format!(
+            "Statement: DROP SHARD KEY\nCollection: {}\nShard: {}\n",
+            statement.collection, statement.shard_key
+        )),
+        Stmt::ShowShardKeys(collection) => output.push_str(&format!(
+            "Statement: SHOW SHARD KEYS\nCollection: {}\n",
+            collection
         )),
         Stmt::DropIndex(statement) => output.push_str(&format!(
             "Statement: DROP INDEX\nCollection: {}\nField: {}\n",

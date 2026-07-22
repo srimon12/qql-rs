@@ -399,6 +399,23 @@ pub async fn execute_grpc_route(
             })?;
             Ok(serde_json::Value::Object(Default::default()))
         }
+        Some(RequestBody::DropShardKey(req)) => {
+            let collection = extract_collection(&route.path)?;
+            let grpc_req = qdrant::DeleteShardKeyRequest {
+                collection_name: collection,
+                request: Some(qdrant::DeleteShardKey {
+                    shard_key: Some(qdrant::ShardKey {
+                        key: Some(qdrant::shard_key::Key::Keyword(req.shard_key.clone())),
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            client.delete_shard_key(grpc_req).await.map_err(|e| {
+                QqlError::backend("QQL-GRPC", format!("delete_shard_key: {e}"), None)
+            })?;
+            Ok(serde_json::Value::Object(Default::default()))
+        }
         None => match route.method {
             qql_plan::types::Method::Get if route.path == "/collections" => {
                 let resp = client
@@ -406,6 +423,29 @@ pub async fn execute_grpc_route(
                     .await
                     .map_err(|e| QqlError::backend("QQL-GRPC", format!("list: {e}"), None))?;
                 Ok(list_collections_response_to_json(resp))
+            }
+            qql_plan::types::Method::Get if route.path.ends_with("/shards") => {
+                let collection = extract_collection(&route.path)?;
+                let grpc_req = qdrant::ListShardKeysRequest {
+                    collection_name: collection,
+                    ..Default::default()
+                };
+                let resp = client.list_shard_keys(grpc_req).await.map_err(|e| {
+                    QqlError::backend("QQL-GRPC", format!("list_shard_keys: {e}"), None)
+                })?;
+                let keys: Vec<serde_json::Value> = resp
+                    .shard_keys
+                    .into_iter()
+                    .filter_map(|d| d.key)
+                    .map(|sk| match sk.key {
+                        Some(qdrant::shard_key::Key::Keyword(s)) => serde_json::Value::String(s),
+                        Some(qdrant::shard_key::Key::Number(n)) => {
+                            serde_json::Value::Number((n).into())
+                        }
+                        None => serde_json::Value::Null,
+                    })
+                    .collect();
+                Ok(serde_json::json!({ "result": { "shard_keys": keys } }))
             }
             qql_plan::types::Method::Get if route.path.starts_with("/collections/") => {
                 let collection = extract_collection(&route.path)?;
@@ -1806,6 +1846,7 @@ mod tests {
                 Some(RequestBody::DeleteVector(_)) => {}
                 Some(RequestBody::Count(_)) => {}
                 Some(RequestBody::CreateShardKey(_)) => {}
+                Some(RequestBody::DropShardKey(_)) => {}
                 None => {}
             }
         }

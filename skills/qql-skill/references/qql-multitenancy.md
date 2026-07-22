@@ -153,7 +153,22 @@ if let Stmt::Query(ref mut q) = stmt {
 }
 ```
 
-`inject_filter()` also works with `COUNT` statements — injected filters are merged into the `WHERE` clause automatically.
+`inject_filter()` works across all point-accessing statement types — injected filters are
+merged into the `WHERE` clause (or point selector) automatically:
+
+| Statement | How the filter is applied |
+|---|---|
+| `QUERY` | Merged into `filter`, recursively injected into all CTEs and prefetches |
+| `SCROLL` | Merged into the payload filter |
+| `DELETE` | Wrapped around the point selector (id list or existing filter) |
+| `COUNT` | Merged into the payload filter |
+| `CLEAR PAYLOAD` | Wrapped around the point selector |
+| `DELETE VECTOR` | Wrapped around the point selector |
+| `UPDATE ... PAYLOAD` | Wrapped around the point selector |
+| `UPSERT` | Injected directly into each point's payload (equality on non-id fields only) |
+
+DDL statements (`CREATE`, `ALTER`, `DROP`, `SHOW`, `CREATE INDEX`, `DROP INDEX`, `CREATE SHARD KEY`)
+are not affected — they operate at the collection level, not the point level.
 
 ## What Makes This Different
 
@@ -187,14 +202,10 @@ where the filter can be accidentally omitted.
 
 ## Verification
 
-```sql
--- Show the execution plan to verify tenant isolation
-EXPLAIN QUERY 'risk' FROM sec10k
-  WHERE tenant_id = 'honeywell' SHARD 'honeywell' LIMIT 10;
-```
+Use the `explain` function (Rust/Python/Node/WASM) or `qql explain` CLI to audit every query plan. The plan shows whether a filter is present — an auditable proof before execution:
 
-Output:
-```
+```bash
+$ qql explain "QUERY TEXT 'risk' FROM sec10k WHERE tenant_id = 'honeywell' LIMIT 10"
 Statement: QUERY
 Intent: nearest neighbors from text
 Collection: sec10k

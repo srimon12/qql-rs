@@ -324,9 +324,7 @@ impl QdrantOps for RestQdrant {
         batch: &QueryBatchRequest,
     ) -> Result<Vec<Value>, QqlError> {
         let path = format!("/collections/{collection}/points/query/batch");
-        let value: Value = self
-            .call_body(Method::POST, &path, Some(batch))
-            .await?;
+        let value: Value = self.call_body(Method::POST, &path, Some(batch)).await?;
         Ok(value
             .get("result")
             .and_then(|r| r.as_array())

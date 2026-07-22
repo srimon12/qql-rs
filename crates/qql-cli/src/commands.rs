@@ -344,7 +344,13 @@ pub fn handle_version() -> Result<(), Box<dyn std::error::Error>> {
 // ── Explain implementation ────────────────────────────────────
 
 fn explain_query(query: &str) -> Result<String, String> {
-    qql::executor::Executor::explain(query).map_err(|e| e.to_string())
+    // Try multi-statement first — if the input has semicolons we get a
+    // per-statement breakdown.  Falls back to single-statement for simple
+    // queries (parse_all rejects them with a confusing semicolon error).
+    match qql::executor::Executor::explain_all(query) {
+        Ok(plan) if !plan.is_empty() => Ok(plan),
+        Ok(_) | Err(_) => qql::executor::Executor::explain(query).map_err(|e| e.to_string()),
+    }
 }
 
 // ── REPL helpers ──────────────────────────────────────────────

@@ -25,6 +25,7 @@ pub enum RequestBody {
     CreateIndex(CreateIndexRequest),
     Count(Box<CountRequest>),
     CreateShardKey(Box<CreateShardKeyRequest>),
+    DropShardKey(Box<DropShardKeyRequest>),
 }
 
 impl RequestBody {
@@ -254,6 +255,14 @@ pub fn route(statement: &Stmt) -> Route {
                 },
             ))),
         },
+        Stmt::DropShardKey(sk) => Route {
+            method: Method::Post,
+            path: format!("/collections/{}/shards/delete", sk.collection),
+            query: Vec::new(),
+            body: Some(RequestBody::DropShardKey(Box::new(DropShardKeyRequest {
+                shard_key: sk.shard_key.clone(),
+            }))),
+        },
         Stmt::ShowCollections => Route {
             method: Method::Get,
             path: "/collections".into(),
@@ -263,6 +272,12 @@ pub fn route(statement: &Stmt) -> Route {
         Stmt::ShowCollection(collection) => Route {
             method: Method::Get,
             path: format!("/collections/{}", collection),
+            query: Vec::new(),
+            body: None,
+        },
+        Stmt::ShowShardKeys(collection) => Route {
+            method: Method::Get,
+            path: format!("/collections/{}/shards", collection),
             query: Vec::new(),
             body: None,
         },

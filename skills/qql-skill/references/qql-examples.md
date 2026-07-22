@@ -340,7 +340,30 @@ DROP COLLECTION medical;
 
 ---
 
-## 18. Time-Based Recency Decay
+## 18. Shard Key Lifecycle
+
+**Problem:** Create custom shard keys for a multi-tenant collection, list them, then drop one.
+
+```sql
+CREATE COLLECTION tenants HYBRID (dense VECTOR(768, COSINE), sparse SPARSE)
+WITH PARAMS (shard_number = 8, sharding_method = 'custom');
+
+CREATE SHARD KEY 'acme' ON COLLECTION tenants WITH (shards_number = 2);
+CREATE SHARD KEY 'globex' ON COLLECTION tenants WITH (shards_number = 2);
+
+-- List all shard keys
+SHOW SHARD KEYS ON COLLECTION tenants;
+
+-- Remove a shard key
+DROP SHARD KEY 'acme' ON COLLECTION tenants;
+
+SHOW SHARD KEYS ON COLLECTION tenants;
+DROP COLLECTION tenants;
+```
+
+---
+
+## 19. Time-Based Recency Decay
 
 **Problem:** Prioritize recent news articles using exponential decay based on publication timestamp.
 
@@ -353,7 +376,7 @@ QUERY FORMULA score * EXP_DECAY(published_at, 1735689600, 86400.0, 0.5)
 
 ---
 
-## 19. Geo-Distance Radius and Bounding Box Filtering
+## 20. Geo-Distance Radius and Bounding Box Filtering
 
 **Problem:** Filter and boost points based on geospatial bounding box and distance decay.
 
@@ -370,7 +393,7 @@ QUERY FORMULA score * GAUSS_DECAY(GEO_DISTANCE(48.8566, 2.3522, location), 0.0, 
 
 ---
 
-## 20. Maximal Marginal Relevance (MMR) Diversification
+## 21. Maximal Marginal Relevance (MMR) Diversification
 
 **Problem:** Balance similarity relevance against result diversity for dense queries.
 

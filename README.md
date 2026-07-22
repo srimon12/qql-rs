@@ -88,11 +88,11 @@ Every language binding exposes the same core set of functions:
 |----------|---------|-------------|
 | `parse(input)` | AST (`Stmt` object or dictionary) | Parse a single QQL statement |
 | `parse_all(input)` | `Vec<Stmt>` | Parse a semicolon-delimited script |
-| `parse_batch(queries)` | `Vec<Stmt>` | Batch-parse multiple queries (minimizes FFI overhead) |
+| `parse_batch(queries)` | `Vec<Stmt>` | Batch-parse multiple queries (minimises FFI overhead) |
 | `tokenize(input)` | `Vec<Token>` | Tokenize for highlighting, validation, or analysis |
 | `is_valid(input)` / `isValid` | `bool` | Lightweight syntax validation |
 | `inject_filter(query, field, op, value)` | AST | Programmatically inject a WHERE clause into statement AST |
-| `compile(query)` / `compile_query` | Route object | Lower QQL statement into typed `{ method, path, payload }` route |
+| `compile(query)` / `compile_query` | Route object | Lower QQL statement into a transport-neutral route. Python returns `{ method, path, payload }`; Node/WASM return `{ stmt_type, payload }`. |
 
 ---
 
@@ -107,17 +107,17 @@ and hope it works. QQL gives you **programmatic access to the query itself**:
 | **Inspect** | Read JSON manually | `parse()` → typed AST |
 | **Transform** | String concatenation | `inject_filter()` — safe, recursive |
 | **Audit** | Log raw SDK calls | `tokenize()` → structured tokens |
-| **Batch** | Sequential loop | `parse_all()` / `parse_batch()` — single FFI call |
+| **Batch** | Sequential network calls | `execute("Q1; Q2; Q3;")` — auto-detected, single wire-level batch call |
 
 ---
 
 ## Language Status
 
-| Crate / SDK | Language | parse | tokenize | is_valid | inject_filter | parse_all | parse_batch | Runtime Executor |
-|---|---|---|---|---|---|---|---|---|
+| Crate / SDK | Language | parse | tokenize | is_valid | inject_filter | parse_all | parse_batch | Runtime |
+|---|---|---|---|---|---|---|---|---|---|
 | **pyqql** | Python (PyO3) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **qql-core** | Rust parser | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
-| **qql-plan** | Rust planner | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| **qql-plan** | Rust lowering | — | — | — | — | — | — | — |
 | **qql** | Rust runtime | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **nqql** | Node.js (N-API) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **qql-wasm** | WebAssembly | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -131,11 +131,15 @@ The Rust runtime includes a CLI for execution, debugging, and data migration:
 ```bash
 cargo install qql-cli
 
-# Execute a query against Qdrant
+# Execute a single query against Qdrant
 qql exec "QUERY 'search' FROM docs USING dense LIMIT 10"
 
-# Explain the query plan
-qql explain "QUERY POINTS (1) FROM docs"
+# Execute multiple statements (semicolons auto-detected)
+qql exec "CREATE COLLECTION docs (dense VECTOR(384, COSINE)); \
+          CREATE INDEX ON COLLECTION docs FOR title TYPE text"
+
+# Explain the query plan — works on multi-statement too
+qql explain "QUERY POINTS (1) FROM docs; COUNT FROM docs"
 
 # Convert REST JSON payloads to QQL
 qql convert payload.json
@@ -203,6 +207,11 @@ CLEAR PAYLOAD FROM docs WHERE status = 'archived';
 
 -- Delete specific named vectors
 DELETE VECTOR colbert FROM docs WHERE id = 42;
+
+-- Create, list, and drop custom shard keys for multi-tenant isolation
+CREATE SHARD KEY 'acme' ON COLLECTION docs WITH (shards_number = 2);
+SHOW SHARD KEYS ON COLLECTION docs;
+DROP SHARD KEY 'acme' ON COLLECTION docs;
 ```
 
 ### Multi-tenancy
@@ -237,9 +246,13 @@ qql-core (parse → typed AST → explain → inject_filter)
 qql-plan (AST → typed RequestBody → Route { method, path, query, body })
     ↓
 qql-runtime (resolve_embeddings → execute_route via REST reqwest or gRPC tonic)
+    ↓
+qql-edge   (in-process HNSW via qdrant-edge + optional fastembed-rs — zero network)
 ```
 
-The parser gives you a typed AST. Lowering produces transport-neutral routes (`Route`). The runtime executes routes over REST or high-performance gRPC.
+The parser gives you a typed AST. Lowering produces transport-neutral routes (`Route`). The runtime executes routes over REST or high-performance gRPC. `qql-edge` runs entirely in-process — ideal for local dev, WASM, and embedded contexts.
+
+**Batch execution**: Multiple same-collection `QUERY` statements are automatically grouped into a single `POST /points/query/batch` (REST) or `QueryBatch` (gRPC) call — N queries in 1 network round-trip. No grammar changes required.
 
 ---
 
