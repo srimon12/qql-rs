@@ -33,3 +33,6 @@ qdrant_storage
 crates/nqql/index.node
 qdrant-lib-edge
 .fastembed_cache
+examples/medical-retrieval-ops/generated/eval.json
+examples/medical-retrieval-ops/generated/eval.json
+examples/medical-retrieval-ops/generated/eval.json
