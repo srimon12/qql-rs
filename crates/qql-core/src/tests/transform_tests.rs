@@ -96,3 +96,110 @@ fn inject_id_requires_equality() {
     let mut s = Parser::parse("QUERY TEXT 'x' FROM docs;").unwrap();
     assert!(crate::ast::inject_filter(&mut s, "id", ComparisonOp::Gt, Value::Int(5)).is_err());
 }
+
+// ── Security: injection resistance tests ────────────────────────
+
+#[test]
+fn injection_resists_logical_or_bypass() {
+    // Attacker tries to escape tenant boundary with OR
+    let mut s = Parser::parse(
+        "QUERY TEXT 'x' FROM docs WHERE status = 'public' OR tenant_id = 'globex';",
+    )
+    .unwrap();
+    crate::ast::inject_filter(
+        &mut s,
+        "tenant_id",
+        ComparisonOp::Eq,
+        Value::Str("acme".into()),
+    )
+    .unwrap();
+    let Stmt::Query(q) = s else { panic!() };
+    match *q.filter.unwrap() {
+        FilterExpr::And { operands } => {
+            assert_eq!(
+                operands.len(),
+                2,
+                "must wrap in AND with exactly 2 operands"
+            );
+            assert!(
+                matches!(operands[0], FilterExpr::Or { .. }),
+                "first operand must be the attacker's OR (structurally contained)"
+            );
+            assert!(
+                matches!(operands[1], FilterExpr::Compare { .. }),
+                "second operand must be the injected tenant filter"
+            );
+        }
+        other => panic!("expected AND wrapper, got {other:?}"),
+    }
+}
+
+#[test]
+fn injection_resists_negation_bypass() {
+    // Attacker writes NOT tenant_id = 'acme' — injection adds AND tenant_id = 'acme'
+    // Result: NOT acme AND acme → contradiction → zero results. Safe.
+    let mut s =
+        Parser::parse("QUERY TEXT 'x' FROM docs WHERE NOT tenant_id = 'acme';").unwrap();
+    crate::ast::inject_filter(
+        &mut s,
+        "tenant_id",
+        ComparisonOp::Eq,
+        Value::Str("acme".into()),
+    )
+    .unwrap();
+    let Stmt::Query(q) = s else { panic!() };
+    match *q.filter.unwrap() {
+        FilterExpr::And { operands } => {
+            assert_eq!(operands.len(), 2);
+            assert!(matches!(operands[0], FilterExpr::Not { .. }));
+            assert!(matches!(operands[1], FilterExpr::Compare { .. }));
+        }
+        other => panic!("expected AND wrapper, got {other:?}"),
+    }
+}
+
+#[test]
+fn injection_works_on_query_with_no_where_clause() {
+    // No WHERE clause → injection creates one
+    let mut s = Parser::parse("QUERY TEXT 'x' FROM docs LIMIT 10;").unwrap();
+    crate::ast::inject_filter(
+        &mut s,
+        "tenant_id",
+        ComparisonOp::Eq,
+        Value::Str("acme".into()),
+    )
+    .unwrap();
+    let Stmt::Query(q) = s else { panic!() };
+    assert!(q.filter.is_some());
+    assert!(matches!(*q.filter.unwrap(), FilterExpr::Compare { .. }));
+}
+
+#[test]
+fn injection_resists_standalone_and_bypass() {
+    // Attacker writes a legitimate-looking filter with AND — injection adds to it
+    // Result: (year = 2024 AND status = 'public') AND tenant_id = 'acme'
+    let mut s = Parser::parse(
+        "QUERY TEXT 'x' FROM docs WHERE year = 2024 AND status = 'public';",
+    )
+    .unwrap();
+    crate::ast::inject_filter(
+        &mut s,
+        "tenant_id",
+        ComparisonOp::Eq,
+        Value::Str("acme".into()),
+    )
+    .unwrap();
+    let Stmt::Query(q) = s else { panic!() };
+    match *q.filter.unwrap() {
+        FilterExpr::And { operands } => {
+            // Three operands: year=2024, status='public', tenant_id='acme'
+            // The original AND is flattened, so operands length depends on implementation
+            assert!(operands.len() >= 2, "must have at least 2 operands");
+            let has_tenant = operands.iter().any(|op| {
+                matches!(op, FilterExpr::Compare { field, .. } if field == "tenant_id")
+            });
+            assert!(has_tenant, "tenant_id filter must be present");
+        }
+        other => panic!("expected AND wrapper, got {other:?}"),
+    }
+}
