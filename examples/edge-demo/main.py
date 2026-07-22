@@ -12,7 +12,7 @@ Usage:
   python main.py
 
   # HTTP external provider (Ollama, OpenAI, etc.):
-  EMBEDDER=http EMBED_URL=http://localhost:11434/v1/embeddings \\
+  EMBEDDER=http EMBED_URL=http://localhost:11434/v1/embeddings \
   EMBED_MODEL=nomic-embed-text EMBED_DIM=768 python main.py
 
   # Dry-run (print QQL statements, do not execute):
@@ -100,7 +100,7 @@ def main() -> None:
     step("Index: year (INTEGER)", f"CREATE INDEX ON COLLECTION {COL} FOR year TYPE integer")
 
     # ── 2. Seed ───────────────────────────────────────────────────────────────
-    section("2. Seed (UPSERT INTO, HYBRID embeddings)")
+    section("2. Seed (UPSERT INTO)")
     DOCS = [
         (1, "Qdrant is a high-performance vector database for AI applications.", "database", 2024),
         (2, "Rust achieves memory safety without a garbage collector.", "systems", 2023),
@@ -116,20 +116,18 @@ def main() -> None:
             f"Upsert #{doc_id} ({tag})",
             f"UPSERT INTO {COL} VALUES {{"
             f"'id': {doc_id}, 'text': '{escaped}', 'tag': '{tag}', 'year': {year}"
-            f"}} USING HYBRID",
+            f"}}",
         )
 
     # ── 3. Search Modes ───────────────────────────────────────────────────────
     section("3. Search modes")
     QUERY = "vector similarity search"
     modes = [
-        ("Dense (semantic)", f"QUERY '{QUERY}' FROM {COL} LIMIT 3"),
-        ("Sparse BM25", f"QUERY '{QUERY}' FROM {COL} LIMIT 3 USING SPARSE"),
-        ("Hybrid RRF", f"QUERY '{QUERY}' FROM {COL} LIMIT 3 USING HYBRID"),
-        ("Hybrid DBSF", f"QUERY '{QUERY}' FROM {COL} LIMIT 3 USING HYBRID FUSION DBSF"),
-        ("RRF (k=30, weights)", f"QUERY '{QUERY}' FROM {COL} LIMIT 3 USING HYBRID WITH (rrf_k = 30, rrf_weights = [0.7, 0.3])"),
-        ("Exact (brute force)", f"QUERY '{QUERY}' FROM {COL} LIMIT 3 EXACT"),
-        ("MMR diversity", f"QUERY '{QUERY}' FROM {COL} LIMIT 5 USING HYBRID WITH (mmr_diversity = 0.5, mmr_candidates = 20)"),
+        ("Dense (semantic)", f"QUERY '{QUERY}' FROM {COL} USING dense LIMIT 3"),
+        ("Sparse BM25", f"QUERY '{QUERY}' FROM {COL} USING sparse LIMIT 3"),
+        ("Hybrid RRF", f"QUERY HYBRID TEXT '{QUERY}' DENSE dense SPARSE sparse FUSION RRF FROM {COL} LIMIT 3"),
+        ("Hybrid DBSF", f"QUERY HYBRID TEXT '{QUERY}' DENSE dense SPARSE sparse FUSION DBSF FROM {COL} LIMIT 3"),
+        ("Exact (brute force)", f"QUERY '{QUERY}' FROM {COL} USING dense PARAMS (exact = true) LIMIT 3"),
     ]
     for label, stmt in modes:
         r = step(label, stmt)
@@ -140,11 +138,11 @@ def main() -> None:
     # ── 4. Filters ────────────────────────────────────────────────────────────
     section("4. Filters")
     filter_cases = [
-        ("WHERE tag = 'database'", f"QUERY 'index' FROM {COL} LIMIT 5 WHERE tag = 'database'"),
-        ("WHERE year = 2024", f"QUERY 'search' FROM {COL} LIMIT 5 WHERE year = 2024"),
-        ("WHERE tag IN ('search','systems')", f"QUERY 'performance' FROM {COL} LIMIT 5 WHERE tag IN ('search', 'systems')"),
-        ("Score threshold 0.0", f"QUERY 'qdrant edge' FROM {COL} LIMIT 5 SCORE THRESHOLD 0.0 USING HYBRID"),
-        ("Offset pagination", f"QUERY 'vector database' FROM {COL} LIMIT 3 OFFSET 1"),
+        ("WHERE tag = 'database'", f"QUERY 'index' FROM {COL} USING dense WHERE tag = 'database' LIMIT 5"),
+        ("WHERE year = 2024", f"QUERY 'search' FROM {COL} USING dense WHERE year = 2024 LIMIT 5"),
+        ("WHERE tag IN ('search','systems')", f"QUERY 'performance' FROM {COL} USING dense WHERE tag IN ('search', 'systems') LIMIT 5"),
+        ("Score threshold 0.0", f"QUERY 'qdrant edge' FROM {COL} USING dense SCORE THRESHOLD 0.0 LIMIT 5"),
+        ("Offset pagination", f"QUERY 'vector database' FROM {COL} USING dense LIMIT 3 OFFSET 1"),
     ]
     for label, stmt in filter_cases:
         step(label, stmt)
@@ -153,31 +151,25 @@ def main() -> None:
     section("5. CTE-based Prefetch DAG (no server needed)")
     step(
         "Prefetch RRF (dense + sparse)",
-        f"WITH a AS (QUERY 'vector database' USING dense LIMIT 10), "
-        f"b AS (QUERY 'vector database' USING sparse LIMIT 10) "
-        f"QUERY 'vector database' FROM {COL} LIMIT 3 PREFETCH (a, b) FUSION RRF",
-    )
-    step(
-        "Prefetch RRF with params",
-        f"WITH a AS (QUERY 'search' USING dense LIMIT 10), "
-        f"b AS (QUERY 'search' USING sparse LIMIT 10) "
-        f"QUERY 'search' FROM {COL} LIMIT 3 PREFETCH (a, b) FUSION RRF WITH (rrf_k = 30, rrf_weights = [0.6, 0.4])",
+        f"WITH a AS (QUERY 'vector database' FROM {COL} USING dense LIMIT 10), "
+        f"b AS (QUERY 'vector database' FROM {COL} USING sparse LIMIT 10) "
+        f"QUERY FUSION RRF FROM {COL} PREFETCH (a, b) LIMIT 3",
     )
 
     # ── 6. Recommend ──────────────────────────────────────────────────────────
     section("6. Recommend")
-    step("Single positive (id=1)", f"QUERY RECOMMEND WITH (positive = (1)) FROM {COL} LIMIT 3")
-    step("Positive + negative", f"QUERY RECOMMEND WITH (positive = (3), negative = (2)) FROM {COL} LIMIT 3")
+    step("Single positive (id=1)", f"QUERY RECOMMEND POSITIVE (1) STRATEGY average_vector FROM {COL} USING dense LIMIT 3")
+    step("Positive + negative", f"QUERY RECOMMEND POSITIVE (3) NEGATIVE (2) STRATEGY average_vector FROM {COL} USING dense LIMIT 3")
 
     # ── 7. Point Access ───────────────────────────────────────────────────────
     section("7. Point access")
-    step("SELECT by id", f"SELECT * FROM {COL} WHERE id = 1")
+    step("QUERY POINTS by id", f"QUERY POINTS (1) FROM {COL} WITH PAYLOAD true")
     step("SCROLL all", f"SCROLL FROM {COL} LIMIT 5")
     step("SCROLL filtered", f"SCROLL FROM {COL} WHERE tag = 'database' LIMIT 5")
 
     # ── 8. Mutations ──────────────────────────────────────────────────────────
     section("8. Mutations")
-    step("UPDATE payload", f"UPDATE {COL} SET PAYLOAD = {{'year': 2025}} WHERE id = 2")
+    step("UPDATE payload", f"UPDATE {COL} SET PAYLOAD = {{year: 2025}} WHERE id = 2")
     step("DELETE by filter", f"DELETE FROM {COL} WHERE tag = 'systems'")
 
     # ── 9. Inspect ────────────────────────────────────────────────────────────

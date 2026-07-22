@@ -20,7 +20,7 @@ use tokio::sync::RwLock;
 
 use config_builder::build_edge_config;
 use conversions::{edge_err, from_edge_id, from_edge_record, to_edge_id};
-use query_converter::convert_query_request;
+use query_converter::convert_query_request_with_shard;
 use vector_parser::ToEdgeVector;
 
 use qql::backend::{CollectionInfo, CollectionSchema};
@@ -240,7 +240,7 @@ impl QdrantOps for EdgeQdrant {
                 let shard = self.open_shard(&collection).await?;
                 let results = tokio::task::spawn_blocking(
                     move || -> Result<Vec<qdrant_edge::ScoredPoint>, QqlError> {
-                        let edge_req = convert_query_request(&req)?;
+                        let edge_req = convert_query_request_with_shard(&req, &shard)?;
                         shard.search(edge_req).map_err(edge_err)
                     },
                 )
@@ -371,12 +371,15 @@ impl QdrantOps for EdgeQdrant {
                         .filter_map(|id| to_edge_id(id.clone()).ok())
                         .collect();
                     UpdateOperation::PointOperation(PointOperations::DeletePoints { ids })
-                } else if let Some(_filter) = &req.filter {
-                    return Err(QqlError::execution(
-                        "QQL-EDGE",
-                        "delete by filter not yet supported in edge mode",
-                        None,
-                    ));
+                } else if let Some(filter) = &req.filter {
+                    let mut filter_val = serde_json::to_value(filter)
+                        .map_err(|e| QqlError::execution("QQL-EDGE", format!("invalid filter: {e}"), None))?;
+                    if filter_val.get("key").is_some() {
+                        filter_val = serde_json::json!({ "must": [filter_val] });
+                    }
+                    let edge_filter: qdrant_edge::Filter = serde_json::from_value(filter_val)
+                        .map_err(|e| QqlError::execution("QQL-EDGE", format!("invalid filter format: {e}"), None))?;
+                    UpdateOperation::PointOperation(PointOperations::DeletePointsByFilter(edge_filter))
                 } else {
                     return Err(QqlError::execution(
                         "QQL-EDGE",

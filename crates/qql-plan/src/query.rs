@@ -185,16 +185,32 @@ pub fn lower_query_expr(expr: &QueryExpr) -> QueryVariant {
 }
 
 pub fn lower_prefetch(prefetch: &qql_core::ast::Prefetch) -> PrefetchRequest {
-    let query = match &prefetch.source {
-        PrefetchSource::Cte(_name) => None,
-        PrefetchSource::Query(query) => Some(lower_query_expr(&query.expression)),
+    lower_prefetch_with_ctes(prefetch, &[])
+}
+
+pub fn lower_prefetch_with_ctes(
+    prefetch: &qql_core::ast::Prefetch,
+    ctes: &[qql_core::ast::Cte],
+) -> PrefetchRequest {
+    let (query, using) = match &prefetch.source {
+        PrefetchSource::Cte(name) => {
+            if let Some(cte) = ctes.iter().find(|c| c.name == *name) {
+                (
+                    Some(lower_query_expr(&cte.query.expression)),
+                    expression_using(&cte.query.expression).cloned(),
+                )
+            } else {
+                (None, None)
+            }
+        }
+        PrefetchSource::Query(query) => (
+            Some(lower_query_expr(&query.expression)),
+            expression_using(&query.expression).cloned(),
+        ),
     };
     PrefetchRequest {
         query,
-        using: match &prefetch.source {
-            PrefetchSource::Query(q) => expression_using(&q.expression).cloned(),
-            PrefetchSource::Cte(_) => None,
-        },
+        using,
         filter: prefetch.filter.as_ref().map(|f| lower_filter(f)),
         params: None,
         score_threshold: prefetch.score_threshold,
@@ -353,7 +369,7 @@ fn build_query_with_prefetch(
             let using = expression_using(&query.expression).cloned();
             let prefetches: Vec<PrefetchRequest> = expression_prefetch(&query.expression)
                 .iter()
-                .map(lower_prefetch)
+                .map(|p| lower_prefetch_with_ctes(p, &query.ctes))
                 .collect();
             (variant, using, prefetches)
         }
