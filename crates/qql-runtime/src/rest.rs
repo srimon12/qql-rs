@@ -9,6 +9,7 @@ use qql_core::error::QqlError;
 use qql_plan::routing::Route;
 use qql_plan::types::Method as PlanMethod;
 
+use crate::backend::CollectionSchema;
 use crate::client::{CollectionInfo, CreateCollectionReq, CreateFieldIndexReq, QdrantOps};
 
 #[derive(Clone)]
@@ -140,9 +141,33 @@ impl QdrantOps for RestQdrant {
             .call(Method::GET, &format!("/collections/{name}"), None)
             .await?;
         let result = value.get("result").cloned().unwrap_or(value);
-        Ok(serde_json::from_value(result).map_err(|e| {
+
+        // Extract vector names from the raw Qdrant response.  Dense vectors
+        // are keys under config.params.vectors, sparse under
+        // config.params.sparse_vectors.
+        let mut schema = CollectionSchema::default();
+        if let Some(vectors) = result
+            .get("config")
+            .and_then(|c| c.get("params"))
+            .and_then(|p| p.get("vectors"))
+            .and_then(|v| v.as_object())
+        {
+            schema.dense_vectors = vectors.keys().cloned().collect();
+        }
+        if let Some(sparse) = result
+            .get("config")
+            .and_then(|c| c.get("params"))
+            .and_then(|p| p.get("sparse_vectors"))
+            .and_then(|v| v.as_object())
+        {
+            schema.sparse_vectors = sparse.keys().cloned().collect();
+        }
+
+        let mut info: CollectionInfo = serde_json::from_value(result).map_err(|e| {
             QqlError::backend("QQL-BACKEND", format!("parse collection info: {e}"), None)
-        })?)
+        })?;
+        info.schema = schema;
+        Ok(info)
     }
 
     async fn create_collection(&self, req: CreateCollectionReq) -> Result<(), QqlError> {
@@ -178,10 +203,7 @@ impl QdrantOps for RestQdrant {
             if let Some(rf) = p.get("replication_factor").and_then(|v| v.as_u64()) {
                 body.insert("replication_factor".into(), serde_json::Value::from(rf));
             }
-            if let Some(wc) = p
-                .get("write_consistency_factor")
-                .and_then(|v| v.as_u64())
-            {
+            if let Some(wc) = p.get("write_consistency_factor").and_then(|v| v.as_u64()) {
                 body.insert(
                     "write_consistency_factor".into(),
                     serde_json::Value::from(wc),

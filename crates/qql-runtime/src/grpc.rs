@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use tonic::transport::Channel;
 
+use crate::backend::CollectionSchema;
 use crate::client::{CollectionInfo, CreateCollectionReq, CreateFieldIndexReq, QdrantOps};
 use crate::qdrant_grpc::qdrant;
 use qql_core::error::QqlError;
@@ -266,11 +267,30 @@ impl QdrantOps for GrpcQdrant {
         let info = resp
             .result
             .ok_or_else(|| QqlError::backend("QQL-GRPC", "collection_info: no result", None))?;
+
+        // Extract vector names from the protobuf response so the executor can
+        // validate that `USING` is present for named-vector collections.
+        let mut schema = CollectionSchema::default();
+        if let Some(config) = &info.config {
+            if let Some(params) = &config.params {
+                if let Some(vc) = &params.vectors_config {
+                    if let Some(vc_cfg) = &vc.config {
+                        if let qdrant::vectors_config::Config::ParamsMap(map) = vc_cfg {
+                            schema.dense_vectors = map.map.keys().cloned().collect();
+                        }
+                    }
+                }
+                if let Some(sparse) = &params.sparse_vectors_config {
+                    schema.sparse_vectors = sparse.map.keys().cloned().collect();
+                }
+            }
+        }
+
         Ok(CollectionInfo {
             status: info.status.to_string(),
             points_count: info.points_count.unwrap_or(0),
             segments_count: 0,
-            schema: Default::default(),
+            schema,
             raw_json: None,
         })
     }

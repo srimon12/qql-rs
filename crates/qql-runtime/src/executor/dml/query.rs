@@ -1,12 +1,44 @@
 use serde_json;
 
+use crate::client::CollectionInfo;
 use crate::executor::{ExecResponse, Executor, SearchHit};
-use qql_core::ast;
+use qql_core::ast::{self, QueryCollection, QueryExpr};
 use qql_core::error::QqlError;
 use qql_plan::routing::route;
 
 impl Executor {
+    /// Check that the query has a vector name when the target collection uses
+    /// named vectors.  Fetches the collection schema only when `USING` is omitted
+    /// — a development-time mistake.  After the first error the developer adds
+    /// `USING` and the happy-path short-circuit skips every subsequent query.
+    async fn ensure_vector_name(&self, collection: &str, expr: &QueryExpr) -> Result<(), QqlError> {
+        // Only the five expression variants have an optional `using` field.
+        let using: Option<&str> = match expr {
+            QueryExpr::Nearest { using, .. }
+            | QueryExpr::Recommend { using, .. }
+            | QueryExpr::Context { using, .. }
+            | QueryExpr::Discover { using, .. }
+            | QueryExpr::RelevanceFeedback { using, .. } => using.as_deref(),
+            // Variants without a `using` or with a mandatory one — nothing to check.
+            _ => return Ok(()),
+        };
+
+        if using.is_some() {
+            return Ok(()); // happy path — zero overhead
+        }
+
+        let info = self.client.get_collection_info(collection).await?;
+        check_named_vectors(collection, &info)
+    }
+
     pub(crate) async fn do_query(&self, stmt: ast::QueryStmt) -> Result<ExecResponse, QqlError> {
+        // Validate before routing so we can give a clear error instead of
+        // forwarding Qdrant's cryptic "Not existing vector name error: ".
+        if let QueryCollection::Explicit(ref collection_name) = stmt.collection {
+            self.ensure_vector_name(collection_name, &stmt.expression)
+                .await?;
+        }
+
         let is_grouped = stmt.group.is_some();
         let r = route(&ast::Stmt::Query(Box::new(stmt)));
         let result = self.client.execute_route(r).await?;
@@ -172,6 +204,40 @@ impl Executor {
             data: Some(serde_json::json!({"count": point_count})),
         })
     }
+}
+
+/// If the collection has named vectors, `USING` is required and we return a
+/// clear error listing the available vector names.
+fn check_named_vectors(collection: &str, info: &CollectionInfo) -> Result<(), QqlError> {
+    let dense: Vec<&str> = info
+        .schema
+        .dense_vectors
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
+    let sparse: Vec<&str> = info
+        .schema
+        .sparse_vectors
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
+
+    if dense.is_empty() && sparse.is_empty() {
+        return Ok(()); // collection uses an unnamed default vector — no USING needed
+    }
+
+    let mut names = dense;
+    names.extend(sparse);
+    Err(QqlError::execution(
+        "QQL-MISSING-USING",
+        format!(
+            "Collection '{}' has named vectors but no USING clause was specified. \
+             Add USING <vector_name> to your query. Available vectors: {}",
+            collection,
+            names.join(", "),
+        ),
+        None,
+    ))
 }
 
 fn extract_search_hits(result: &serde_json::Value) -> Vec<SearchHit> {

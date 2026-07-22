@@ -102,10 +102,9 @@ fn inject_id_requires_equality() {
 #[test]
 fn injection_resists_logical_or_bypass() {
     // Attacker tries to escape tenant boundary with OR
-    let mut s = Parser::parse(
-        "QUERY TEXT 'x' FROM docs WHERE status = 'public' OR tenant_id = 'globex';",
-    )
-    .unwrap();
+    let mut s =
+        Parser::parse("QUERY TEXT 'x' FROM docs WHERE status = 'public' OR tenant_id = 'globex';")
+            .unwrap();
     crate::ast::inject_filter(
         &mut s,
         "tenant_id",
@@ -138,8 +137,7 @@ fn injection_resists_logical_or_bypass() {
 fn injection_resists_negation_bypass() {
     // Attacker writes NOT tenant_id = 'acme' — injection adds AND tenant_id = 'acme'
     // Result: NOT acme AND acme → contradiction → zero results. Safe.
-    let mut s =
-        Parser::parse("QUERY TEXT 'x' FROM docs WHERE NOT tenant_id = 'acme';").unwrap();
+    let mut s = Parser::parse("QUERY TEXT 'x' FROM docs WHERE NOT tenant_id = 'acme';").unwrap();
     crate::ast::inject_filter(
         &mut s,
         "tenant_id",
@@ -178,10 +176,8 @@ fn injection_works_on_query_with_no_where_clause() {
 fn injection_resists_standalone_and_bypass() {
     // Attacker writes a legitimate-looking filter with AND — injection adds to it
     // Result: (year = 2024 AND status = 'public') AND tenant_id = 'acme'
-    let mut s = Parser::parse(
-        "QUERY TEXT 'x' FROM docs WHERE year = 2024 AND status = 'public';",
-    )
-    .unwrap();
+    let mut s =
+        Parser::parse("QUERY TEXT 'x' FROM docs WHERE year = 2024 AND status = 'public';").unwrap();
     crate::ast::inject_filter(
         &mut s,
         "tenant_id",
@@ -195,9 +191,9 @@ fn injection_resists_standalone_and_bypass() {
             // Three operands: year=2024, status='public', tenant_id='acme'
             // The original AND is flattened, so operands length depends on implementation
             assert!(operands.len() >= 2, "must have at least 2 operands");
-            let has_tenant = operands.iter().any(|op| {
-                matches!(op, FilterExpr::Compare { field, .. } if field == "tenant_id")
-            });
+            let has_tenant = operands
+                .iter()
+                .any(|op| matches!(op, FilterExpr::Compare { field, .. } if field == "tenant_id"));
             assert!(has_tenant, "tenant_id filter must be present");
         }
         other => panic!("expected AND wrapper, got {other:?}"),

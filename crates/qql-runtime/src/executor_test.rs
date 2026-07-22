@@ -259,6 +259,8 @@ async fn test_dml_missing_collection_errors() {
 async fn test_do_query_basic() {
     let mut client = MockQdrantClient::default();
     client.exists = true;
+    // Simulate a collection with an unnamed default vector (no named vectors)
+    client.info = Some(CollectionInfo::default());
     let last_route = client.last_route.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
@@ -385,7 +387,10 @@ async fn test_do_scroll_returns_upstream_style_payload() {
 
 #[tokio::test]
 async fn test_query_missing_collection_errors() {
-    let client = MockQdrantClient::default(); // exists = false
+    let mut client = MockQdrantClient::default(); // exists = false
+                                                  // Provide an empty schema so the vector-name check passes; the actual
+                                                  // "not found" error comes from execute_route which checks the path.
+    client.info = Some(CollectionInfo::default());
     let mock_embedder = Arc::new(MockEmbedder {
         dense: vec![0.1, 0.2],
         sparse_indices: vec![],

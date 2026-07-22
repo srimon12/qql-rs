@@ -164,7 +164,10 @@ impl Executor {
                     params_map.insert("read_fan_out_factor".to_string(), serde_json::json!(rf_out));
                 }
                 if let Some(rf_delay) = params.read_fan_out_delay_ms {
-                    params_map.insert("read_fan_out_delay_ms".to_string(), serde_json::json!(rf_delay));
+                    params_map.insert(
+                        "read_fan_out_delay_ms".to_string(),
+                        serde_json::json!(rf_delay),
+                    );
                 }
                 if !params_map.is_empty() {
                     create_req.params = Some(serde_json::Value::Object(params_map));

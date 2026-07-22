@@ -246,11 +246,13 @@ pub fn route(statement: &Stmt) -> Route {
             method: Method::Put,
             path: format!("/collections/{}/shards", sk.collection),
             query: Vec::new(),
-            body: Some(RequestBody::CreateShardKey(Box::new(CreateShardKeyRequest {
-                shard_key: sk.shard_key.clone(),
-                shards_number: sk.shards_number,
-                replication_factor: sk.replication_factor,
-            }))),
+            body: Some(RequestBody::CreateShardKey(Box::new(
+                CreateShardKeyRequest {
+                    shard_key: sk.shard_key.clone(),
+                    shards_number: sk.shards_number,
+                    replication_factor: sk.replication_factor,
+                },
+            ))),
         },
         Stmt::ShowCollections => Route {
             method: Method::Get,

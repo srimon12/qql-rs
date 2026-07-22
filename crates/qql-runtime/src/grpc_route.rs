@@ -386,7 +386,7 @@ pub async fn execute_grpc_route(
                 collection_name: collection,
                 request: Some(qdrant::CreateShardKey {
                     shard_key: Some(qdrant::ShardKey {
-                        key: req.shard_key.clone(),
+                        key: Some(qdrant::shard_key::Key::Keyword(req.shard_key.clone())),
                     }),
                     shards_number: req.shards_number.map(|n| n as u32),
                     replication_factor: req.replication_factor.map(|n| n as u32),
@@ -394,12 +394,9 @@ pub async fn execute_grpc_route(
                 }),
                 ..Default::default()
             };
-            client
-                .create_shard_key(grpc_req)
-                .await
-                .map_err(|e| {
-                    QqlError::backend("QQL-GRPC", format!("create_shard_key: {e}"), None)
-                })?;
+            client.create_shard_key(grpc_req).await.map_err(|e| {
+                QqlError::backend("QQL-GRPC", format!("create_shard_key: {e}"), None)
+            })?;
             Ok(serde_json::Value::Object(Default::default()))
         }
         None => match route.method {
@@ -1769,6 +1766,10 @@ mod tests {
                 Some(RequestBody::CreateIndex(req)) => {
                     assert_eq!(req.field_name, "title");
                 }
+                Some(RequestBody::ClearPayload(_)) => {}
+                Some(RequestBody::DeleteVector(_)) => {}
+                Some(RequestBody::Count(_)) => {}
+                Some(RequestBody::CreateShardKey(_)) => {}
                 None => {}
             }
         }
