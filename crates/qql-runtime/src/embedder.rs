@@ -1,40 +1,21 @@
+//! Embedding adapters for the runtime.
+//!
+//! The shared [`Embedder`] trait and AST resolve live in `qql-embed`.
+//! This module re-exports them and provides [`HttpEmbedder`] (reqwest).
+
+#[cfg(feature = "rest")]
 use async_trait::async_trait;
 #[cfg(feature = "rest")]
 use reqwest::Client;
+#[cfg(feature = "rest")]
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "rest")]
 use qql_core::error::QqlError;
 
-use crate::sparse::{self, SparseVector};
-
-#[cfg(not(target_arch = "wasm32"))]
-pub trait EmbedderBound: Send + Sync {}
-#[cfg(not(target_arch = "wasm32"))]
-impl<T: Send + Sync> EmbedderBound for T {}
-
-#[cfg(target_arch = "wasm32")]
-pub trait EmbedderBound {}
-#[cfg(target_arch = "wasm32")]
-impl<T> EmbedderBound for T {}
-
-#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
-#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-pub trait Embedder: EmbedderBound {
-    async fn embed_dense(&self, text: &str, model: &str) -> Result<Vec<f32>, QqlError>;
-    async fn embed_sparse(&self, text: &str) -> Result<SparseVector, QqlError>;
-
-    async fn embed_dense_batch(
-        &self,
-        texts: &[String],
-        model: &str,
-    ) -> Result<Vec<Vec<f32>>, QqlError> {
-        let mut results = Vec::with_capacity(texts.len());
-        for text in texts {
-            results.push(self.embed_dense(text, model).await?);
-        }
-        Ok(results)
-    }
-}
+// Re-export shared API so existing `qql::embedder::Embedder` paths keep working.
+pub use qql_embed::embedder::{Embedder, EmbedderBound, SparseEmbedder};
+pub use qql_embed::SparseVector;
 
 #[cfg(feature = "rest")]
 #[derive(Debug, Clone, Serialize)]
@@ -56,6 +37,10 @@ struct EmbedData {
     embedding: Vec<f32>,
 }
 
+/// OpenAI-compatible HTTP embedder (`POST {"model","input":[...]}`).
+///
+/// Endpoint is **required** — no default URL. Works with OpenAI, Ollama
+/// `/v1/embeddings`, Cohere compatibility API, etc. Always batches in one request.
 #[cfg(feature = "rest")]
 pub struct HttpEmbedder {
     endpoint: String,
@@ -168,12 +153,9 @@ impl HttpEmbedder {
     }
 
     async fn embed_batch(&self, inputs: &[String]) -> Result<Vec<Vec<f32>>, QqlError> {
+        // One HTTP request for the full batch (OpenAI: up to 2048 inputs).
         if inputs.is_empty() {
-            return Err(QqlError::execution(
-                "QQL-EMBEDDING",
-                "inputs are required",
-                None,
-            ));
+            return Ok(Vec::new());
         }
 
         let body = EmbedRequest {
@@ -261,14 +243,6 @@ impl Embedder for HttpEmbedder {
     }
 
     async fn embed_sparse(&self, text: &str) -> Result<SparseVector, QqlError> {
-        Ok(sparse::build_query_default(text))
-    }
-}
-
-pub struct SparseEmbedder;
-
-impl SparseEmbedder {
-    pub async fn embed_sparse(text: &str) -> SparseVector {
-        sparse::build_query_default(text)
+        Ok(qql_embed::sparse::build_query_default(text))
     }
 }

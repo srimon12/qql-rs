@@ -12,7 +12,8 @@ const route = compile("QUERY 'search' FROM docs USING dense LIMIT 10");
 
 // 3. Execute via browser fetch
 const client = new Client("http://localhost:6333", null);
-client.setOpenAIEmbedder("sk-...", "text-embedding-3-small", 1536);
+// endpoint required — no default URL
+client.setHttpEmbedder("https://api.openai.com/v1/embeddings", "text-embedding-3-small", 1536, "sk-...");
 
 const result = await client.execute(
     "QUERY 'vector databases' FROM docs USING dense LIMIT 10"

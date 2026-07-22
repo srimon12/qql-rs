@@ -14,6 +14,7 @@ rest = ["qql/rest"]
 [dependencies]
 qql-core = { path = "../qql-core", features = ["serde", "json", "std"] }
 qql-plan = { path = "../qql-plan" }
+qql-embed = { path = "../qql-embed" }
 qql = { path = "../qql-runtime", default-features = false }
 
 fastembed = { version = "5", optional = true }

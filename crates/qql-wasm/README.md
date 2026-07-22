@@ -30,8 +30,15 @@ async function run() {
     // 1. Client configuration & Browser Execution
     const client = new Client("http://localhost:6333", null);
     
-    // Optional: Configure OpenAI/Ollama HTTP embedder or custom JS embedder (e.g. Transformers.js)
-    client.setOpenAIEmbedder("api-key", "text-embedding-3-small", 1536);
+    // Optional: OpenAI-compatible HTTP embedder (endpoint required — no default URL)
+    // OpenAI, Ollama `/v1/embeddings`, Mistral, Cohere compat, etc.
+    client.setHttpEmbedder(
+        "http://localhost:11434/v1/embeddings",
+        "nomic-embed-text",
+        768,
+        null, // api_key optional
+    );
+    // Or browser-side: client.setEmbedder(async (texts) => vectors);
 
     // Execute QQL statement via browser fetch
     const response = await client.execute("QUERY 'machine learning' FROM docs LIMIT 5");
@@ -58,9 +65,9 @@ run();
 | Export | Description |
 |---|---|
 | `Client(url, api_key)` | Browser client for compiling and executing QQL queries via fetch |
-| `client.setEmbedder(fn)` | Set custom JS embedder function (`async (texts) => vectors`) |
-| `client.setOpenAIEmbedder(...)` | Configure OpenAI / Ollama compatible HTTP embedder |
-| `client.execute(query)` | Execute QQL query directly against Qdrant from the browser |
+| `client.setEmbedder(fn)` | JS batch embedder: `async (texts: string[]) => number[][]` |
+| `client.setHttpEmbedder(endpoint, model, dim, apiKey?)` | OpenAI-compatible HTTP embedder (**endpoint required**, single batched POST) |
+| `client.execute(query)` | Execute QQL (query + upsert text auto-embedded when configured) |
 | `compile(input)` | Lower QQL statement to typed Qdrant REST route object |
 | `explain(input)` | Format query execution plan |
 | `parse(input)` | Parse single statement to AST object |

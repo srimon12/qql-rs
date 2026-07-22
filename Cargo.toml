@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/qql-core",
     "crates/qql-plan",
+    "crates/qql-embed",
     "crates/qql-runtime",
     "crates/qql-cli",
     "crates/qql-edge",

@@ -13,7 +13,8 @@ qql/ (workspace root)
 ├── crates/
 │   ├── qql-core/         # Lexer, parser, typed AST, semantic validation, explain, filter injection
 │   ├── qql-plan/         # Typed operation lowering: AST → Route { method, path, body }
-│   ├── qql-runtime/      # Executor (package name `qql`), REST & gRPC adapters, embedding resolution
+│   ├── qql-embed/        # Shared Embedder trait, sparse BM25, resolve_embeddings (batch dense)
+│   ├── qql-runtime/      # Executor (package name `qql`), REST & gRPC adapters, HttpEmbedder
 │   ├── qql-edge/         # Local executor: fastembed-rs + qdrant-edge (zero-network)
 │   ├── qql-cli/          # CLI binary and interactive REPL
 │   ├── pyqql/            # Python bindings (PyO3)
@@ -28,7 +29,9 @@ qql-core (parse → typed AST → explain → inject_filter)
     ↓
 qql-plan (AST → typed RequestBody enum → Route { method, path, body })
     ↓
-qql-runtime (resolve_embeddings → execute_route() via REST reqwest or gRPC tonic)
+qql-embed (resolve_embeddings via Embedder — shared by runtime / edge / wasm)
+    ↓
+qql-runtime (HttpEmbedder + execute_route() via REST reqwest or gRPC tonic)
 ```
 
 No JSON-as-IR. No duplicate planning. No compatibility shims. No custom serde renames.
@@ -39,7 +42,9 @@ No JSON-as-IR. No duplicate planning. No compatibility shims. No custom serde re
 
 * **`qql-plan`**: Transport-neutral lowering layer. Converts AST `Stmt` into a `Route { method: Method, path: String, body: Option<RequestBody> }`. All field names match the OpenAPI wire format — no `serde(rename)`. Contains typed filter, query, mutation, DDL, and embedding types. Depends ONLY on `qql-core`. No networking, no tokio, no reqwest.
 
-* **`qql-runtime`**: The executor and transport adapters. Package name is `qql`. The `Executor` holds a `Box<dyn QdrantOps>` (single unified trait) and optional `Embedder`. Handles automated text-to-vector embedding resolution (`resolve_embeddings`) before delegating DML operations to `qql_plan::routing::route()` → `client.execute_route()`. DDL operations call dedicated admin methods on `QdrantOps`. Features: `default = ["grpc", "rest"]`, `grpc`, `rest`.
+* **`qql-embed`**: Shared embedding layer. `Embedder` trait, local sparse BM25, and `resolve_embeddings(&mut Stmt, &dyn Embedder)` (collect dense jobs → `embed_dense_batch` by model → apply). No Qdrant I/O, no HTTP client. Used by runtime (`HttpEmbedder`), edge (`FastEmbedder`), and wasm (fetch/JS adapters).
+
+* **`qql-runtime`**: The executor and transport adapters. Package name is `qql`. The `Executor` holds a `Box<dyn QdrantOps>` (single unified trait) and optional `Embedder`. Calls `qql_embed::resolve_embeddings` before `qql_plan::routing::route()` → `client.execute_route()`. DDL uses dedicated admin methods on `QdrantOps`. Features: `default = ["grpc", "rest"]`, `grpc`, `rest`. Re-exports embed API via `qql::embedder` / `qql::sparse`.
 
 * **`qql-edge`**: In-process vector search using qdrant-edge + optional fastembed-rs. Zero network. Implements `QdrantOps` with `execute_route()` dispatching to `EdgeShard` operations. Uses `qdrant-edge` 0.7.x.
 

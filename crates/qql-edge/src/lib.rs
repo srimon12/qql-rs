@@ -36,6 +36,7 @@ pub use backend::EdgeQdrant;
 pub use embedder::FastEmbedder;
 
 use qql::config::QqlConfig;
+use qql::embedder::Embedder;
 use qql::executor::Executor;
 use std::sync::Arc;
 
@@ -49,7 +50,7 @@ pub fn local_executor(
     on_disk_payload: bool,
 ) -> Result<Executor, qql_core::error::QqlError> {
     let client = Box::new(EdgeQdrant::new(data_dir, on_disk_payload));
-    let embedder = Some(Arc::new(FastEmbedder::try_default()?) as Arc<dyn qql::embedder::Embedder>);
+    let embedder = Some(Arc::new(FastEmbedder::try_default()?) as Arc<dyn Embedder>);
     let config = Some(QqlConfig::default());
     Ok(Executor::with_embedder(client, config, embedder))
 }
@@ -80,19 +81,19 @@ pub fn http_executor(
         api_key.into(),
         model.into(),
         dimension,
-    )?) as Arc<dyn qql::embedder::Embedder>);
+    )?) as Arc<dyn Embedder>);
     let config = Some(QqlConfig::default());
     Ok(Executor::with_embedder(client, config, embedder))
 }
 
-/// Build an edge [`Executor`] with a fully custom [`qql::embedder::Embedder`].
+/// Build an edge [`Executor`] with a fully custom [`Embedder`].
 ///
 /// Use this to plug in GPU-backed embedders, caching layers, ensemble
 /// embedders, or any other custom implementation.
 pub fn custom_executor(
     data_dir: impl Into<std::path::PathBuf>,
     on_disk_payload: bool,
-    embedder: Arc<dyn qql::embedder::Embedder>,
+    embedder: Arc<dyn Embedder>,
 ) -> Result<Executor, qql_core::error::QqlError> {
     let client = Box::new(EdgeQdrant::new(data_dir, on_disk_payload));
     let config = Some(QqlConfig::default());

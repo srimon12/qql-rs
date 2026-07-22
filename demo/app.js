@@ -162,7 +162,7 @@ function configureClient() {
     const embedDim = parseInt(cfgEmbedDim.value.trim()) || 384;
     const embedKey = cfgEmbedKey.value.trim() || "";
 
-    client.setOpenAIEmbedder(embedKey, embedModel, embedDim, embedUrl);
+    client.setHttpEmbedder(embedUrl, embedModel, embedDim, embedKey || null);
     cfgStatusMsg.textContent = `✓ Configured: Qdrant (${qdrantUrl}) | Embedder (${embedModel} @ ${embedUrl})`;
     cfgStatusMsg.style.color = "var(--accent-emerald)";
   } else {

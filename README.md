@@ -245,14 +245,21 @@ qql-core (parse → typed AST → explain → inject_filter)
     ↓
 qql-plan (AST → typed RequestBody → Route { method, path, query, body })
     ↓
-qql-runtime (resolve_embeddings → execute_route via REST reqwest or gRPC tonic)
+qql-embed (shared resolve_embeddings + Embedder trait + sparse BM25)
     ↓
-qql-edge   (in-process HNSW via qdrant-edge + optional fastembed-rs — zero network)
+qql-runtime (HttpEmbedder + execute_route via REST/gRPC)
+    ↓
+qql-edge   (FastEmbedder + in-process HNSW — zero network)
 ```
 
-The parser gives you a typed AST. Lowering produces transport-neutral routes (`Route`). The runtime executes routes over REST or high-performance gRPC. `qql-edge` runs entirely in-process — ideal for local dev, WASM, and embedded contexts.
+The parser gives you a typed AST. Lowering produces transport-neutral routes (`Route`). Embedding rewrite is shared (`qql-embed`) so Python, Node, Rust, Edge, and WASM all batch dense texts the same way. The runtime executes routes over REST or gRPC. `qql-edge` runs entirely in-process.
 
-**Batch execution**: Multiple same-collection `QUERY` statements are automatically grouped into a single `POST /points/query/batch` (REST) or `QueryBatch` (gRPC) call — N queries in 1 network round-trip. No grammar changes required.
+**Batch execution**: Multi-statement scripts and list inputs are smart-batched automatically:
+
+- Contiguous same-collection `QUERY`s → `POST /points/query/batch` (REST) or `QueryBatch` (gRPC)
+- Contiguous same-collection mutations (`UPSERT`, `DELETE`, `UPDATE … PAYLOAD/VECTOR`, `CLEAR PAYLOAD`, `DELETE VECTOR`) → `POST /points/batch` (REST) or `UpdateBatch` (gRPC)
+
+Order is preserved. No grammar changes and no separate batch API — it all goes through `execute()`.
 
 ---
 

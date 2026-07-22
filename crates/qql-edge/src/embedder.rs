@@ -3,9 +3,8 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use fastembed::{EmbeddingModel, InitOptionsWithLength, TextEmbedding};
 
-use qql::embedder::Embedder;
-use qql::sparse::SparseVector;
 use qql_core::error::QqlError;
+use qql_embed::{Embedder, SparseVector};
 
 fn err(msg: impl Into<std::borrow::Cow<'static, str>>) -> QqlError {
     QqlError::execution("QQL-EDGE", msg, None)
@@ -93,6 +92,6 @@ impl Embedder for FastEmbedder {
     }
 
     async fn embed_sparse(&self, text: &str) -> Result<SparseVector, QqlError> {
-        Ok(qql::sparse::build_query_default(text))
+        Ok(qql_embed::sparse::build_query_default(text))
     }
 }

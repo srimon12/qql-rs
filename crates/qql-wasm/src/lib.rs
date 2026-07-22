@@ -1,8 +1,14 @@
 #[cfg(feature = "client")]
+use async_trait::async_trait;
+#[cfg(feature = "client")]
 use gloo_net::http::Request;
 use qql_core::ast::{self, ComparisonOp, Value};
+#[cfg(feature = "client")]
+use qql_core::error::QqlError;
 use qql_core::lexer::Lexer;
 use qql_core::parser::Parser;
+#[cfg(feature = "client")]
+use qql_embed::{Embedder, SparseVector};
 use qql_plan::routing;
 #[cfg(feature = "client")]
 use serde_json::json;
@@ -318,12 +324,10 @@ pub fn explain(query: &str) -> Result<String, JsValue> {
 #[cfg(feature = "client")]
 enum EmbedMode {
     None,
-    /// JS function: `async (texts: string[]) => number[][]`
+    /// JS function: `async (texts: string[]) => number[][]` (already batched).
     Js(js_sys::Function),
-    /// OpenAI-compatible: POST with Bearer auth, {"input": texts, "model": name}
-    /// response: {"data": [{"embedding": [...]}, ...]}
-    OpenAI,
-    /// Generic HTTP: POST with optional Bearer auth, custom body/response paths
+    /// OpenAI-compatible HTTP: POST `{"model", "input": string[]}`.
+    /// User must supply the full endpoint (OpenAI, Ollama `/v1/embeddings`, etc.).
     Http,
 }
 
@@ -333,18 +337,11 @@ pub struct Client {
     url: String,
     api_key: Option<String>,
 
-    // Embedding config
     embed_mode: EmbedMode,
     embed_endpoint: String,
     embed_api_key: Option<String>,
     embed_model: String,
     embed_dim: u32,
-    // Custom embedder: request body field name for texts (default: "input")
-    #[allow(dead_code)]
-    embed_request_field: String,
-    // Custom embedder: JSON path to vectors array (default: "data[*].embedding")
-    #[allow(dead_code)]
-    embed_response_path: String,
 }
 
 #[cfg(feature = "client")]
@@ -360,41 +357,57 @@ impl Client {
             embed_api_key: None,
             embed_model: String::new(),
             embed_dim: 0,
-            embed_request_field: "input".to_string(),
-            embed_response_path: "data[*].embedding".to_string(),
         }
     }
 
     // ── Embedder configuration ──────────────────────────────────
 
-    /// Set a JS embedder function: `async (texts: string[]) => number[][]`.
-    /// Use for Transformer.js or any browser-side embedding.
+    /// Set a JS embedder: `async (texts: string[]) => number[][]`.
+    /// Called with the full batch — do not loop one-by-one inside the callback
+    /// if your model supports batching (Transformers.js pipeline, etc.).
     #[wasm_bindgen(js_name = setEmbedder)]
     pub fn set_embedder(&mut self, fn_: js_sys::Function) {
         self.embed_mode = EmbedMode::Js(fn_);
     }
 
-    /// Set OpenAI-compatible embedding (e.g. OpenAI, Mistral, Cohere, local Ollama).
-    /// Uses Bearer auth. POSTs `{"model": model, "input": texts}`.
-    #[wasm_bindgen(js_name = setOpenAIEmbedder)]
-    pub fn set_openai_embedder(
+    /// OpenAI-compatible HTTP embedder. **No default URL** — pass the full
+    /// embeddings endpoint you intend to use, e.g.:
+    /// - `https://api.openai.com/v1/embeddings`
+    /// - `http://localhost:11434/v1/embeddings` (Ollama)
+    /// - any provider that accepts `{"model","input":[...]}` and returns
+    ///   `{"data":[{"embedding":[...],"index":0},...]}`.
+    ///
+    /// Always sends the whole text batch in one request (`input` as array).
+    #[wasm_bindgen(js_name = setHttpEmbedder)]
+    pub fn set_http_embedder(
         &mut self,
-        api_key: String,
+        endpoint: String,
         model: String,
-        dimensions: Option<u32>,
-        endpoint: Option<String>,
-    ) {
-        self.embed_mode = EmbedMode::OpenAI;
-        self.embed_endpoint =
-            endpoint.unwrap_or_else(|| "https://api.openai.com/v1/embeddings".to_string());
-        self.embed_api_key = Some(api_key);
+        dimension: u32,
+        api_key: Option<String>,
+    ) -> Result<(), JsValue> {
+        if endpoint.trim().is_empty() {
+            return Err(JsValue::from_str(
+                "setHttpEmbedder: endpoint is required (no default URL)",
+            ));
+        }
+        if model.trim().is_empty() {
+            return Err(JsValue::from_str("setHttpEmbedder: model is required"));
+        }
+        if dimension == 0 {
+            return Err(JsValue::from_str(
+                "setHttpEmbedder: dimension must be positive",
+            ));
+        }
+        self.embed_mode = EmbedMode::Http;
+        self.embed_endpoint = endpoint;
+        self.embed_api_key = api_key;
         self.embed_model = model;
-        self.embed_dim = dimensions.unwrap_or(0);
+        self.embed_dim = dimension;
+        Ok(())
     }
 
-    /// Set a generic remote HTTP embedding endpoint.
-    /// POSTs `{"model": model, "<input field>": texts}` with optional Bearer auth.
-    /// Expects vectors in response at the configured JSON path.
+    /// Alias for [`set_http_embedder`] — same OpenAI-compatible protocol.
     #[wasm_bindgen(js_name = setRemoteEmbedder)]
     pub fn set_remote_embedder(
         &mut self,
@@ -402,12 +415,8 @@ impl Client {
         model: String,
         dimension: u32,
         api_key: Option<String>,
-    ) {
-        self.embed_mode = EmbedMode::Http;
-        self.embed_endpoint = endpoint;
-        self.embed_api_key = api_key;
-        self.embed_model = model;
-        self.embed_dim = dimension;
+    ) -> Result<(), JsValue> {
+        self.set_http_embedder(endpoint, model, dimension, api_key)
     }
 
     /// Check whether any embedder is configured.
@@ -433,7 +442,7 @@ impl Client {
     }
 
     /// Embed a batch of texts. Returns vectors in the same order.
-    async fn embed_texts(&self, texts: Vec<String>) -> Result<Vec<Vec<f64>>, JsValue> {
+    async fn embed_texts(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>, JsValue> {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
@@ -452,7 +461,7 @@ impl Client {
                     .await
                     .map_err(|e| JsValue::from_str(&format!("embedder rejected: {:?}", e)))?;
 
-                let rows: Vec<Vec<f64>> = serde_wasm_bindgen::from_value(result).map_err(|e| {
+                let rows: Vec<Vec<f32>> = serde_wasm_bindgen::from_value(result).map_err(|e| {
                     JsValue::from_str(&format!("embedder returned invalid vectors: {}", e))
                 })?;
 
@@ -466,17 +475,11 @@ impl Client {
                 Ok(rows)
             }
 
-            EmbedMode::OpenAI => {
-                let body = json!({ "model": self.embed_model, "input": texts });
-                let resp = self.post_with_auth(&self.embed_endpoint, &body).await?;
-                Self::parse_openai_response(&resp, texts.len())
-            }
-
             EmbedMode::Http => {
+                // Single HTTP request: input = full array (OpenAI/Ollama/Cohere compat).
                 let body = json!({ "model": self.embed_model, "input": texts });
                 let resp = self.post_with_auth(&self.embed_endpoint, &body).await?;
-                Self::parse_remote_response(&resp, texts.len(), &self.embed_response_path)
-                    .map_err(|e| JsValue::from_str(&e))
+                Self::parse_openai_batch_response(&resp, texts.len(), self.embed_dim)
             }
 
             EmbedMode::None => Ok(Vec::new()),
@@ -520,122 +523,64 @@ impl Client {
             .map_err(|e| JsValue::from_str(&format!("invalid embedding API response: {}", e)))
     }
 
-    /// Parse OpenAI-style: `{"data": [{"embedding": [...], "index": 0}, ...]}`
-    fn parse_openai_response(
+    /// Parse OpenAI-compatible batch response:
+    /// `{"data":[{"embedding":[...],"index":0}, ...]}` — reorders by `index` when present.
+    fn parse_openai_batch_response(
         resp: &serde_json::Value,
         expected: usize,
-    ) -> Result<Vec<Vec<f64>>, JsValue> {
+        expected_dim: u32,
+    ) -> Result<Vec<Vec<f32>>, JsValue> {
         let data = resp["data"]
             .as_array()
-            .ok_or_else(|| JsValue::from_str("OpenAI response missing 'data' array"))?;
-        let mut out = Vec::with_capacity(data.len());
-        for item in data {
+            .ok_or_else(|| JsValue::from_str("embedding response missing 'data' array"))?;
+
+        let mut slots: Vec<Option<Vec<f32>>> = vec![None; expected];
+        for (fallback_i, item) in data.iter().enumerate() {
             let emb = item["embedding"]
                 .as_array()
                 .ok_or_else(|| JsValue::from_str("item missing 'embedding' array"))?;
-            out.push(emb.iter().map(|v| v.as_f64().unwrap_or(0.0)).collect());
-        }
-        if out.len() != expected {
-            return Err(JsValue::from_str(&format!(
-                "got {} vectors, expected {}",
-                out.len(),
-                expected
-            )));
-        }
-        Ok(out)
-    }
-
-    /// Parse a generic HTTP response at a JSON path like `data[*].embedding`.
-    fn parse_remote_response(
-        resp: &serde_json::Value,
-        expected: usize,
-        path: &str,
-    ) -> Result<Vec<Vec<f64>>, String> {
-        let parts: Vec<&str> = path.split('.').collect();
-        let star_pos = parts.iter().position(|p| *p == "[*]");
-
-        if let Some(pos) = star_pos {
-            // Walk to the array
-            let mut cur = resp;
-            for p in &parts[..pos] {
-                cur = cur
-                    .get(*p)
-                    .ok_or_else(|| format!("missing '{}' in response", p))?;
+            if expected_dim > 0 && emb.len() != expected_dim as usize {
+                return Err(JsValue::from_str(&format!(
+                    "embedding dimension mismatch: got {}, expected {}",
+                    emb.len(),
+                    expected_dim
+                )));
             }
-            let arr = cur
-                .as_array()
-                .ok_or_else(|| "expected array at [*]".to_string())?;
-
-            // Remaining path on each element
-            let tail = parts[pos + 1..].join(".");
-            let mut out = Vec::new();
-            for item in arr {
-                let v = Self::walk_path(item, &tail)?;
-                out.push(v);
+            let vec: Vec<f32> = emb.iter().map(|v| v.as_f64().unwrap_or(0.0) as f32).collect();
+            let idx = item["index"].as_u64().unwrap_or(fallback_i as u64) as usize;
+            if idx >= expected {
+                return Err(JsValue::from_str(&format!(
+                    "embedding index {idx} out of range (batch size {expected})"
+                )));
             }
-            if out.len() != expected {
-                return Err(format!("got {} vectors, expected {}", out.len(), expected));
+            if slots[idx].is_some() {
+                return Err(JsValue::from_str(&format!(
+                    "duplicate embedding index {idx}"
+                )));
             }
-            Ok(out)
-        } else {
-            let v = Self::walk_path(resp, path)?;
-            Ok(vec![v])
+            slots[idx] = Some(vec);
         }
-    }
 
-    fn walk_path(val: &serde_json::Value, path: &str) -> Result<Vec<f64>, String> {
-        let mut cur = val;
-        for p in path.split('.') {
-            cur = cur.get(p).ok_or_else(|| format!("missing '{}'", p))?;
-        }
-        cur.as_array()
-            .ok_or_else(|| "expected array".to_string())?
-            .iter()
-            .map(|v| v.as_f64().ok_or_else(|| "non-numeric".to_string()))
+        slots
+            .into_iter()
+            .enumerate()
+            .map(|(i, v)| {
+                v.ok_or_else(|| JsValue::from_str(&format!("missing embedding at index {i}")))
+            })
             .collect()
     }
 
-    /// Extract texts that need embedding from upsert JSON points,
-    /// embed them, and inject the resulting vectors back into the payload.
-    async fn embed_upsert_points(&self, payload: &mut serde_json::Value) -> Result<(), JsValue> {
+    /// Shared AST resolve via `qql-embed` (batched dense + local sparse).
+    async fn resolve_stmt_embeddings(
+        &self,
+        stmt: &mut qql_core::ast::Stmt,
+    ) -> Result<(), JsValue> {
         if !self.has_embedder() {
             return Ok(());
         }
-
-        let points = match payload["points"].as_array_mut() {
-            Some(p) => p,
-            None => return Ok(()),
-        };
-
-        // Collect all texts that need embedding across points
-        let mut text_indices: Vec<(usize, String)> = Vec::new();
-        for (pi, point) in points.iter().enumerate() {
-            // Skip points that already have vectors
-            if point.get("vector").is_some() {
-                continue;
-            }
-            if let Some(text) = point["payload"]["text"].as_str() {
-                if !text.is_empty() {
-                    text_indices.push((pi, text.to_string()));
-                }
-            }
-        }
-
-        if text_indices.is_empty() {
-            return Ok(());
-        }
-
-        let texts: Vec<String> = text_indices.iter().map(|(_, t)| t.clone()).collect();
-        let vectors = self.embed_texts(texts).await?;
-
-        // Inject vectors back into the points
-        for (idx, (pi, _)) in text_indices.iter().enumerate() {
-            let vec = &vectors[idx];
-            let vec_json: Vec<serde_json::Value> = vec.iter().map(|n| json!(n)).collect();
-            points[*pi]["vector"] = json!(vec_json);
-        }
-
-        Ok(())
+        qql_embed::resolve_embeddings(stmt, self)
+            .await
+            .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     /// Parse, compile, embed if needed, and POST to Qdrant's REST API.
@@ -827,14 +772,12 @@ impl Client {
         &self,
         stmt: &qql_core::ast::Stmt,
     ) -> Result<serde_json::Value, JsValue> {
-        let route = routing::route(stmt);
-        let mut body = route.body_json();
-        if matches!(stmt, qql_core::ast::Stmt::Upsert(_)) {
-            if let Some(ref mut payload) = body {
-                self.embed_upsert_points(payload).await?;
-            }
-        }
-        self.send_json(route.method.as_str(), &route.path, body).await
+        let mut stmt = stmt.clone();
+        self.resolve_stmt_embeddings(&mut stmt).await?;
+        let route = routing::route(&stmt);
+        let body = route.body_json();
+        self.send_json(route.method.as_str(), &route.path, body)
+            .await
     }
 
     async fn send_json(
@@ -916,5 +859,47 @@ fn wasm_batchable_query(
             }
         }
         _ => None,
+    }
+}
+
+// ── WASM dense embed collect/apply (mirrors runtime batching) ─────
+
+#[cfg(feature = "client")]
+
+// ── qql-embed::Embedder adapter (shared resolve path) ─────────────
+
+#[cfg(feature = "client")]
+#[async_trait(?Send)]
+impl Embedder for Client {
+    async fn embed_dense(&self, text: &str, _model: &str) -> Result<Vec<f32>, QqlError> {
+        let batch = self
+            .embed_texts(vec![text.to_string()])
+            .await
+            .map_err(|e| {
+                QqlError::execution(
+                    "QQL-EMBEDDING",
+                    e.as_string().unwrap_or_else(|| "embed failed".into()),
+                    None,
+                )
+            })?;
+        Ok(batch.into_iter().next().unwrap_or_default())
+    }
+
+    async fn embed_dense_batch(
+        &self,
+        texts: &[String],
+        _model: &str,
+    ) -> Result<Vec<Vec<f32>>, QqlError> {
+        self.embed_texts(texts.to_vec()).await.map_err(|e| {
+            QqlError::execution(
+                "QQL-EMBEDDING",
+                e.as_string().unwrap_or_else(|| "embed batch failed".into()),
+                None,
+            )
+        })
+    }
+
+    async fn embed_sparse(&self, text: &str) -> Result<SparseVector, QqlError> {
+        Ok(qql_embed::sparse::build_query_default(text))
     }
 }

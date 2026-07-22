@@ -1,0 +1,12 @@
+[package]
+name = "qql-embed"
+version.workspace = true
+edition.workspace = true
+description = "Shared QQL embedding: Embedder trait, sparse BM25, AST resolve_embeddings"
+
+[dependencies]
+qql-core = { path = "../qql-core", features = ["std"] }
+async-trait = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }

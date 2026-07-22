@@ -14,8 +14,7 @@ pub mod qdrant_grpc;
 pub mod rest;
 pub mod sparse;
 
-#[cfg(test)]
-mod sparse_test;
+// Sparse unit tests live in `qql-embed` (shared implementation).
 
 #[cfg(test)]
 mod contract_test;

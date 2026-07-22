@@ -75,7 +75,9 @@ import init, { Client, Stmt } from 'qql-wasm';
 await init();
 
 const client = new Client("http://localhost:6333", null);
-client.setOpenAIEmbedder("sk-...", "text-embedding-3-small", 1536);
+// Endpoint is required — no default OpenAI URL. Works with Ollama, OpenAI, etc.
+client.setHttpEmbedder("https://api.openai.com/v1/embeddings", "text-embedding-3-small", 1536, "sk-...");
+// Or: client.setEmbedder(async (texts) => /* batch embed */ vectors);
 
 // Single query
 const result = await client.execute(

@@ -11,6 +11,7 @@ rest = ["dep:reqwest", "dep:tokio", "tokio/rt"]
 [dependencies]
 qql-core = { path = "../qql-core", features = ["serde", "std"] }
 qql-plan = { path = "../qql-plan" }
+qql-embed = { path = "../qql-embed" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
