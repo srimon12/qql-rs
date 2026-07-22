@@ -67,8 +67,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let route = route(&stmt);
     println!("Route Method: {:?}", route.method);
     println!("Route Path: {}", route.path);
-    println!("Route Body JSON: {}", route.body_json().unwrap());
+    if let Some(json) = route.body_json() {
+        println!("Route Body JSON: {}", json);
+    }
 
     Ok(())
 }
 ```
+
+## Multi-Tenant Filter Injection with Shard Routing
+
+```rust
+use qql_core::parser::Parser;
+use qql_core::ast::{self, ComparisonOp, Value};
+use qql_plan::routing::route;
+use qql::executor::Executor;
+use qql::rest::RestQdrant;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let tenant = "honeywell";
+    let user_query = "QUERY 'supply chain risks' FROM sec10k LIMIT 10";
+
+    // 1. Parse
+    let mut stmt = Parser::parse(user_query)?;
+
+    // 2. Inject tenant isolation filter
+    ast::inject_filter(&mut stmt, "tenant_id", ComparisonOp::Eq,
+                       Value::Str(tenant.to_string()))?;
+
+    // 3. Execute (shard key is passed via ?shard_key= query param)
+    let ops = Box::new(RestQdrant::new("http://localhost:6333", None));
+    let exec = Executor::new(ops, None);
+    let res = exec.execute_node(stmt).await?;
+
+    println!("{}", serde_json::to_string_pretty(&res)?);
+    Ok(())
+}

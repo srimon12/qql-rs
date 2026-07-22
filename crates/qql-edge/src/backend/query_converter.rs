@@ -53,7 +53,12 @@ pub(crate) fn convert_query_request_with_shard(
                                         .as_ref()
                                         .map(convert_with_payload)
                                         .or(Some(WithPayloadInterface::Bool(true))),
-                                    with_vector: Some(req.with_vector.as_ref().map(convert_with_vector).unwrap_or(WithVector::Bool(false))),
+                                    with_vector: Some(
+                                        req.with_vector
+                                            .as_ref()
+                                            .map(convert_with_vector)
+                                            .unwrap_or(WithVector::Bool(false)),
+                                    ),
                                     score_threshold: req.score_threshold.map(|s| s as f32),
                                 });
                             }

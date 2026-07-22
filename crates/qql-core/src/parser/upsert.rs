@@ -58,11 +58,19 @@ impl<'a> Parser<'a> {
             Vec::new()
         };
 
+        let shard_key = if self.peek()?.kind == TokenKind::Shard {
+            self.advance()?;
+            Some(self.parse_string()?)
+        } else {
+            None
+        };
+
         Ok(Stmt::Upsert(Box::new(UpsertStmt {
             collection,
             points,
             embedding,
             embed,
+            shard_key,
         })))
     }
 

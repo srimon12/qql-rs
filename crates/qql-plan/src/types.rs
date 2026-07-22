@@ -232,6 +232,8 @@ pub struct QueryRequest {
     pub offset: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "lookup_from")]
     pub lookup_from: Option<LookupRequest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shard_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -258,6 +260,8 @@ pub struct QueryGroupsRequest {
     pub with_lookup: Option<WithLookupValue>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "lookup_from")]
     pub lookup_from: Option<LookupRequest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shard_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -480,6 +484,8 @@ pub struct ScrollRequest {
     pub with_vector: Option<VectorSelectorReq>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub order_by: Option<OrderByQuery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shard_key: Option<String>,
 }
 
 // ── Mutations ──────────────────────────────────────────────────
@@ -487,6 +493,8 @@ pub struct ScrollRequest {
 #[derive(Debug, Clone, Serialize)]
 pub struct UpsertRequest {
     pub points: Vec<UpsertPointRequest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shard_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -504,6 +512,8 @@ pub struct DeleteRequest {
     pub points: Option<Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<FilterExpression>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shard_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -544,6 +554,12 @@ pub struct CreateCollectionRequest {
     pub quantization_config: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vectors_config: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shard_number: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sharding_method: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shard_keys: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -65,6 +65,13 @@ impl<'a> Parser<'a> {
             None
         };
 
+        let shard_key = if self.peek()?.kind == TokenKind::Shard {
+            self.advance()?;
+            Some(self.parse_string()?)
+        } else {
+            None
+        };
+
         let params = if self.peek()?.kind == TokenKind::Params {
             self.advance()?;
             Some(self.parse_search_params()?)
@@ -170,6 +177,7 @@ impl<'a> Parser<'a> {
             group,
             output: QueryOutput { payload, vectors },
             page: PageSpec { limit, offset },
+            shard_key,
         })
     }
 

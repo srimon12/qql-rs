@@ -125,12 +125,16 @@ pub fn route(statement: &Stmt) -> Route {
                 scroll.limit,
                 scroll.filter.as_deref(),
                 scroll.after.as_ref(),
+                scroll.shard_key.clone(),
             )))),
         },
         Stmt::Upsert(upsert) => {
             let mut query = Vec::new();
             if upsert.embedding.is_some() {
                 query.push(("wait".into(), "true".into()));
+            }
+            if let Some(ref shard_key) = upsert.shard_key {
+                query.push(("shard_key".into(), shard_key.clone()));
             }
             Route {
                 method: Method::Put,
@@ -139,12 +143,18 @@ pub fn route(statement: &Stmt) -> Route {
                 body: Some(RequestBody::Upsert(lower_upsert_request(upsert))),
             }
         }
-        Stmt::Delete(delete) => Route {
-            method: Method::Post,
-            path: format!("/collections/{}/points/delete", delete.collection),
-            query: vec![("wait".into(), "true".into())],
-            body: Some(RequestBody::Delete(Box::new(lower_delete_request(delete)))),
-        },
+        Stmt::Delete(delete) => {
+            let mut query = vec![("wait".into(), "true".into())];
+            if let Some(ref shard_key) = delete.shard_key {
+                query.push(("shard_key".into(), shard_key.clone()));
+            }
+            Route {
+                method: Method::Post,
+                path: format!("/collections/{}/points/delete", delete.collection),
+                query,
+                body: Some(RequestBody::Delete(Box::new(lower_delete_request(delete)))),
+            }
+        }
         Stmt::UpdateVector(update) => Route {
             method: Method::Put,
             path: format!("/collections/{}/points/vectors", update.collection),

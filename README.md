@@ -176,7 +176,7 @@ QUERY FUSION RRF FROM docs
 
 ### Score shaping (Formula scoring)
 ```sql
-QUERY FORMULA score + 0.3 * popularity DEFAULTS (popularity = 1.0) FROM docs USING dense LIMIT 10;
+QUERY FORMULA score + 0.3 * popularity DEFAULTS (popularity = 1.0) FROM docs LIMIT 10;
 ```
 
 ### Filters
@@ -188,6 +188,28 @@ WHERE tenant_id = 'acme'
   AND tags IS NOT EMPTY
   AND content MATCH ANY ('hello', 'world')
 ```
+
+### Multi-tenancy
+
+```sql
+-- One collection, many tenants, zero cross-tenant leaks
+CREATE COLLECTION sec10k HYBRID (dense VECTOR(768, COSINE), sparse SPARSE)
+WITH PARAMS (
+  replication_factor = 2, shard_number = 8,
+  sharding_method = 'custom',
+  shard_keys = ['honeywell', 'ge', '3m', 'rtx']
+);
+
+CREATE INDEX ON COLLECTION sec10k FOR tenant_id
+  TYPE keyword WITH (is_tenant = true);
+
+QUERY 'supply chain risks' FROM sec10k
+  WHERE tenant_id = 'honeywell' SHARD 'honeywell' LIMIT 10;
+```
+
+Programmatic isolation via `inject_filter()` — a single call that recursively injects
+tenant filters into every sub-query, CTE, and prefetch across Python, Rust, Node, and WASM.
+[Full guide →](skills/qql-skill/references/qql-multitenancy.md)
 
 ---
 

@@ -50,17 +50,29 @@ impl<'a> Lexer<'a> {
                 if self.input[self.pos..].starts_with('≥') {
                     let pos = self.pos;
                     self.pos += '≥'.len_utf8();
-                    return Ok(Token::new(TokenKind::Gte, &self.input[pos..self.pos], Span::new(pos, self.pos)));
+                    return Ok(Token::new(
+                        TokenKind::Gte,
+                        &self.input[pos..self.pos],
+                        Span::new(pos, self.pos),
+                    ));
                 }
                 if self.input[self.pos..].starts_with('≤') {
                     let pos = self.pos;
                     self.pos += '≤'.len_utf8();
-                    return Ok(Token::new(TokenKind::Lte, &self.input[pos..self.pos], Span::new(pos, self.pos)));
+                    return Ok(Token::new(
+                        TokenKind::Lte,
+                        &self.input[pos..self.pos],
+                        Span::new(pos, self.pos),
+                    ));
                 }
                 if self.input[self.pos..].starts_with('≠') {
                     let pos = self.pos;
                     self.pos += '≠'.len_utf8();
-                    return Ok(Token::new(TokenKind::NotEquals, &self.input[pos..self.pos], Span::new(pos, self.pos)));
+                    return Ok(Token::new(
+                        TokenKind::NotEquals,
+                        &self.input[pos..self.pos],
+                        Span::new(pos, self.pos),
+                    ));
                 }
                 if is_digit(ch) {
                     self.read_number()
@@ -237,7 +249,8 @@ impl<'a> Lexer<'a> {
                 if is_alpha(first_byte) || first_byte == b'_' {
                     self.pos += 1;
                     while self.pos < self.input.len()
-                        && (is_alnum(self.input.as_bytes()[self.pos]) || self.input.as_bytes()[self.pos] == b'_')
+                        && (is_alnum(self.input.as_bytes()[self.pos])
+                            || self.input.as_bytes()[self.pos] == b'_')
                     {
                         self.pos += 1;
                     }
@@ -250,7 +263,8 @@ impl<'a> Lexer<'a> {
                 if is_alpha(first_byte) || first_byte == b'_' {
                     self.pos += 3;
                     while self.pos < self.input.len()
-                        && (is_alnum(self.input.as_bytes()[self.pos]) || self.input.as_bytes()[self.pos] == b'_')
+                        && (is_alnum(self.input.as_bytes()[self.pos])
+                            || self.input.as_bytes()[self.pos] == b'_')
                     {
                         self.pos += 1;
                     }

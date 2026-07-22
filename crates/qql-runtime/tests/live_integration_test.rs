@@ -31,7 +31,12 @@ async fn test_live_rest_and_grpc_with_ollama_embeddings() {
     let collection_name = "live_integration_docs";
 
     // 3. Clean up old collection if present
-    if rest_exec.ops().collection_exists(collection_name).await.unwrap_or(false) {
+    if rest_exec
+        .ops()
+        .collection_exists(collection_name)
+        .await
+        .unwrap_or(false)
+    {
         let _ = rest_exec
             .execute(&format!("DROP COLLECTION {collection_name};"))
             .await;
@@ -47,7 +52,11 @@ async fn test_live_rest_and_grpc_with_ollama_embeddings() {
     assert!(create_res.ok, "CREATE COLLECTION failed: {:?}", create_res);
 
     // Verify collection exists via gRPC
-    let exists = grpc_exec.ops().collection_exists(collection_name).await.unwrap();
+    let exists = grpc_exec
+        .ops()
+        .collection_exists(collection_name)
+        .await
+        .unwrap();
     assert!(exists, "Collection should exist over gRPC");
 
     // 5. Upsert documents with text embedding resolution over REST
@@ -85,11 +94,18 @@ async fn test_live_rest_and_grpc_with_ollama_embeddings() {
         .await
         .unwrap();
     assert!(grpc_search.ok, "gRPC search failed: {:?}", grpc_search);
-    assert!(grpc_search.data.is_some(), "gRPC Search data should be present");
+    assert!(
+        grpc_search.data.is_some(),
+        "gRPC Search data should be present"
+    );
 
     let grpc_hits = grpc_search.data.as_ref().unwrap().as_array().unwrap();
     assert!(!grpc_hits.is_empty(), "gRPC should return search hits");
-    println!("gRPC Search returned {} hits: {:?}", grpc_hits.len(), grpc_hits);
+    println!(
+        "gRPC Search returned {} hits: {:?}",
+        grpc_hits.len(),
+        grpc_hits
+    );
 
     // 8. Points lookup over gRPC
     let points_res = grpc_exec

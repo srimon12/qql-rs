@@ -38,7 +38,8 @@ impl Executor {
     fn resolve_prefetches<'a>(
         prefetches: &'a mut [qql_core::ast::Prefetch],
         embedder: &'a dyn Embedder,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), QqlError>> + Send + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), QqlError>> + Send + 'a>>
+    {
         Box::pin(async move {
             for pref in prefetches {
                 if let qql_core::ast::PrefetchSource::Query(ref mut sub_query) = pref.source {
@@ -54,7 +55,12 @@ impl Executor {
         embedder: &dyn Embedder,
     ) -> Result<(), QqlError> {
         match expr {
-            QueryExpr::Nearest { input, using, prefetch, .. } => {
+            QueryExpr::Nearest {
+                input,
+                using,
+                prefetch,
+                ..
+            } => {
                 let v_name = using.as_deref().unwrap_or("default");
                 Self::resolve_query_input(input, embedder, v_name).await?;
                 Self::resolve_prefetches(prefetch, embedder).await?;
@@ -75,7 +81,12 @@ impl Executor {
                 }
                 Self::resolve_prefetches(prefetch, embedder).await?;
             }
-            QueryExpr::Context { pairs, using, prefetch, .. } => {
+            QueryExpr::Context {
+                pairs,
+                using,
+                prefetch,
+                ..
+            } => {
                 let v_name = using.as_deref().unwrap_or("default");
                 for pair in pairs {
                     Self::resolve_query_input(&mut pair.positive, embedder, v_name).await?;
@@ -151,6 +162,7 @@ impl Executor {
                     group: None,
                     output: qql_core::ast::QueryOutput::default(),
                     page: qql_core::ast::PageSpec::default(),
+                    shard_key: None,
                 };
 
                 let sparse_sub_query = qql_core::ast::QueryStmt {
@@ -171,6 +183,7 @@ impl Executor {
                     group: None,
                     output: qql_core::ast::QueryOutput::default(),
                     page: qql_core::ast::PageSpec::default(),
+                    shard_key: None,
                 };
 
                 let prefetches = vec![
@@ -227,10 +240,8 @@ impl Executor {
             let mut targets = Vec::new();
             for (idx, point) in upsert.points.iter().enumerate() {
                 if point.vectors.is_none() {
-                    if let Some((_, qql_core::ast::Value::Str(text))) = point
-                        .payload
-                        .iter()
-                        .find(|(k, _)| {
+                    if let Some((_, qql_core::ast::Value::Str(text))) =
+                        point.payload.iter().find(|(k, _)| {
                             k.eq_ignore_ascii_case("text")
                                 || k.eq_ignore_ascii_case("body")
                                 || k.eq_ignore_ascii_case("content")
@@ -270,8 +281,9 @@ impl Executor {
             match spec {
                 EmbeddingSpec::Dense { model, vector } => {
                     let model_name = model.as_deref().unwrap_or("default");
-                    let vector_name =
-                        vector.as_deref().unwrap_or(crate::executor::DENSE_VECTOR_NAME);
+                    let vector_name = vector
+                        .as_deref()
+                        .unwrap_or(crate::executor::DENSE_VECTOR_NAME);
 
                     let mut targets = Vec::new();
                     for (idx, point) in upsert.points.iter().enumerate() {
@@ -287,7 +299,8 @@ impl Executor {
                     }
 
                     if !targets.is_empty() {
-                        let (indices, texts): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
+                        let (indices, texts): (Vec<usize>, Vec<String>) =
+                            targets.into_iter().unzip();
                         let vecs = embedder.embed_dense_batch(&texts, model_name).await?;
                         for (idx, vec) in indices.into_iter().zip(vecs) {
                             let point = &mut upsert.points[idx];
@@ -302,10 +315,12 @@ impl Executor {
                     ..
                 } => {
                     let d_model = dense_model.as_deref().unwrap_or("default");
-                    let d_vec_name =
-                        dense_vector.as_deref().unwrap_or(crate::executor::DENSE_VECTOR_NAME);
-                    let s_vec_name =
-                        sparse_vector.as_deref().unwrap_or(crate::executor::SPARSE_VECTOR_NAME);
+                    let d_vec_name = dense_vector
+                        .as_deref()
+                        .unwrap_or(crate::executor::DENSE_VECTOR_NAME);
+                    let s_vec_name = sparse_vector
+                        .as_deref()
+                        .unwrap_or(crate::executor::SPARSE_VECTOR_NAME);
 
                     let mut targets = Vec::new();
                     for (idx, point) in upsert.points.iter().enumerate() {
@@ -321,7 +336,8 @@ impl Executor {
                     }
 
                     if !targets.is_empty() {
-                        let (indices, texts): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
+                        let (indices, texts): (Vec<usize>, Vec<String>) =
+                            targets.into_iter().unzip();
                         let dense_vecs = embedder.embed_dense_batch(&texts, d_model).await?;
                         for ((idx, text), d_vec) in indices.into_iter().zip(texts).zip(dense_vecs) {
                             let sparse_vec = embedder.embed_sparse(&text).await?;
@@ -361,7 +377,8 @@ impl Executor {
                 match &directive.kind {
                     EmbedKind::Dense { model } => {
                         let m_name = model.as_deref().unwrap_or("default");
-                        let (indices, texts): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
+                        let (indices, texts): (Vec<usize>, Vec<String>) =
+                            targets.into_iter().unzip();
                         let vecs = embedder.embed_dense_batch(&texts, m_name).await?;
                         for (idx, vec) in indices.into_iter().zip(vecs) {
                             let point = &mut upsert.points[idx];

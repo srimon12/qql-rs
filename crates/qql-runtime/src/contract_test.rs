@@ -133,7 +133,8 @@ mod tests {
         }))
         .expect("failed to compile ScrollRequest schema from openapi.json");
 
-        let scroll_stmt = Parser::parse("SCROLL FROM docs WHERE status = 'active' LIMIT 50;").unwrap();
+        let scroll_stmt =
+            Parser::parse("SCROLL FROM docs WHERE status = 'active' LIMIT 50;").unwrap();
         let scroll_route = route(&scroll_stmt);
         let scroll_json = scroll_route.body_json().unwrap();
         let scroll_errors: Vec<_> = scroll_validator.iter_errors(&scroll_json).collect();
@@ -150,7 +151,9 @@ mod tests {
         }))
         .expect("failed to compile PointRequest schema from openapi.json");
 
-        let points_stmt = Parser::parse("QUERY POINTS (42, 'uuid-v4') FROM docs WITH PAYLOAD INCLUDE ('title');").unwrap();
+        let points_stmt =
+            Parser::parse("QUERY POINTS (42, 'uuid-v4') FROM docs WITH PAYLOAD INCLUDE ('title');")
+                .unwrap();
         let points_route = route(&points_stmt);
         let points_json = points_route.body_json().unwrap();
         let points_errors: Vec<_> = points_validator.iter_errors(&points_json).collect();

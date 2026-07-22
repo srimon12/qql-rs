@@ -128,6 +128,7 @@ pub enum TokenKind {
     Feedback,
     Star,
     After,
+    Shard,
     Identifier,
     String,
     Integer,
@@ -251,6 +252,7 @@ gen_as_str! {
     Feedback => "FEEDBACK",
     Star => "STAR",
     After => "AFTER",
+    Shard => "SHARD",
     Identifier => "IDENTIFIER",
     String => "STRING",
     Integer => "INTEGER",
@@ -374,6 +376,7 @@ gen_keywords! {
     "FEEDBACK" => TokenKind::Feedback,
     "STAR" => TokenKind::Star,
     "AFTER" => TokenKind::After,
+    "SHARD" => TokenKind::Shard,
 }
 
 impl fmt::Display for TokenKind {

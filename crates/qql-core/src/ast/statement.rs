@@ -258,6 +258,7 @@ pub struct QueryStmt {
     pub group: Option<GroupSpec>,
     pub output: QueryOutput,
     pub page: PageSpec,
+    pub shard_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -267,6 +268,7 @@ pub struct ScrollStmt {
     pub limit: u64,
     pub filter: Option<Box<FilterExpr>>,
     pub after: Option<PointId>,
+    pub shard_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -314,6 +316,7 @@ pub struct UpsertStmt {
     pub points: Vec<UpsertPoint>,
     pub embedding: Option<EmbeddingSpec>,
     pub embed: Vec<EmbedDirective>,
+    pub shard_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -426,6 +429,9 @@ pub struct CollectionParamsConfig {
     pub read_fan_out_factor: Option<u64>,
     pub read_fan_out_delay_ms: Option<u64>,
     pub on_disk_payload: Option<bool>,
+    pub shard_number: Option<u64>,
+    pub sharding_method: Option<String>,
+    pub shard_keys: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -497,6 +503,7 @@ pub enum PointSelector {
 pub struct DeleteStmt {
     pub collection: String,
     pub selector: PointSelector,
+    pub shard_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

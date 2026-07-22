@@ -153,6 +153,41 @@ impl QdrantOps for RestQdrant {
         if let Some(v) = &req.sparse_vectors_config {
             body.insert("sparse_vectors".into(), v.clone());
         }
+        if let Some(v) = req.shard_number {
+            body.insert("shard_number".into(), serde_json::Value::from(v));
+        }
+        if let Some(ref v) = req.sharding_method {
+            body.insert(
+                "sharding_method".into(),
+                serde_json::Value::String(v.clone()),
+            );
+        }
+        if let Some(ref v) = req.shard_keys {
+            body.insert(
+                "shard_keys".into(),
+                serde_json::Value::Array(
+                    v.iter()
+                        .map(|s| serde_json::Value::String(s.clone()))
+                        .collect(),
+                ),
+            );
+        }
+        // hnsw_config, optimizers_config, params, quantization_config are
+        // already included via the executor/ddl.rs in the vectors_config or
+        // as separate fields; the runtime CreateCollectionReq also carries
+        // hnsw_config, optimizers_config, quantization_config, and params.
+        if let Some(ref v) = req.hnsw_config {
+            body.insert("hnsw_config".into(), v.clone());
+        }
+        if let Some(ref v) = req.optimizers_config {
+            body.insert("optimizers_config".into(), v.clone());
+        }
+        if let Some(ref v) = req.quantization_config {
+            body.insert("quantization_config".into(), v.clone());
+        }
+        if let Some(ref v) = req.params {
+            body.insert("params".into(), v.clone());
+        }
         self.call::<Value>(
             Method::PUT,
             &format!("/collections/{}", req.collection_name),

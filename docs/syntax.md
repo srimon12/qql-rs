@@ -26,6 +26,7 @@ cte-query    = "QUERY", query-expr, [ "FROM", collection ], query-tail ;
 query-tail   = [ "USING", vector-name ],
                [ "PREFETCH", "(", prefetch, { ",", prefetch }, ")" ],
                [ "WHERE", filter ],
+               [ "SHARD", string ],
                [ "PARAMS", search-params ],
                [ "SCORE", "THRESHOLD", number ],
                [ "GROUP", "BY", field,
@@ -38,6 +39,8 @@ query-tail   = [ "USING", vector-name ],
 ```
 
 Top-level queries require `FROM`. A CTE may omit it and inherit the outer collection. Clauses occur at most once and only in the order above. Search options use `PARAMS (...)`; generic query `WITH (...)` is invalid.
+
+`SHARD '<key>'` routes the query to a specific shard group. It is optional and only needed when using custom sharding in a multi-tenant collection.
 
 ### Query Expressions
 
@@ -128,6 +131,13 @@ FROM docs
 USING colbert
 PREFETCH (candidates)
 LIMIT 10;
+
+-- Multi-tenant query with shard routing
+QUERY 'supply chain risks'
+FROM sec10k
+WHERE tenant_id = 'honeywell'
+SHARD 'honeywell'
+LIMIT 10;
 ```
 
 ## Prefetch
@@ -162,11 +172,14 @@ Keys in payload objects, configuration blocks, formula defaults, and search para
 ```ebnf
 upsert       = "UPSERT", "INTO", collection, "VALUES",
                point-object, { ",", point-object },
-               [ embedding-options ], [ embed-directives ] ;
+               [ embedding-options ], [ embed-directives ],
+               [ "SHARD", string ] ;
 scroll       = "SCROLL", "FROM", collection,
                [ "WHERE", filter ], [ "AFTER", point-id ],
+               [ "SHARD", string ],
                "LIMIT", positive-integer ;
-delete       = "DELETE", "FROM", collection, "WHERE", filter ;
+delete       = "DELETE", "FROM", collection, "WHERE", filter,
+               [ "SHARD", string ] ;
 update       = "UPDATE", collection, "SET",
                ( "VECTOR", [ vector-name ], "=", vector-value,
                  "WHERE", "id", "=", point-id
@@ -181,9 +194,51 @@ multidense-vector = "[", dense-vector, { ",", dense-vector }, "]" ;
 
 Every upsert point requires an unsigned integer or string `id`. Its optional `vector` may be one unnamed vector value or an object of named vector values. All other object entries remain arbitrary payload values.
 
+`SHARD '<key>'` on UPSERT, SCROLL, or DELETE routes the operation to a specific shard group.
+
 ## DDL
 
-Collection creation/alteration/drop/show and payload index creation remain supported:
+Collection creation/alteration/drop/show and payload index creation:
+
+```ebnf
+create-collection = "CREATE", "COLLECTION", name,
+                    ( "DENSE", [ "MODEL", string ]
+                    | "HYBRID", [ "DENSE", name ], [ "SPARSE", name ]
+                    | "RERANK" ),
+                    [ "(", vector-def, { ",", vector-def }, ")" ],
+                    [ "(", sparse-def, { ",", sparse-def }, ")" ],
+                    [ config-blocks ] ;
+
+vector-def    = name, "VECTOR", "(", size, ",", distance, ")" ;
+sparse-def    = name, "SPARSE" ;
+config-blocks = "WITH", ( "HNSW" | "PARAMS" | "OPTIMIZERS" | "QUANTIZE"
+                         | "VECTOR" ), config-block ;
+```
+
+### Collection Params
+
+Shard configuration for multi-tenant isolation:
+
+```sql
+CREATE COLLECTION sec10k HYBRID (dense VECTOR(768, COSINE), sparse SPARSE)
+WITH PARAMS (
+  replication_factor = 2,
+  shard_number = 8,
+  sharding_method = 'custom',
+  shard_keys = ['honeywell', 'ge', '3m', 'rtx']
+);
+```
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `replication_factor` | integer | Replica count per shard |
+| `write_consistency_factor` | integer | Min replicas for write ack |
+| `on_disk_payload` | boolean | Store payload on disk |
+| `shard_number` | integer | Total shard count |
+| `sharding_method` | string | `'auto'` or `'custom'` |
+| `shard_keys` | string list | Tenant identifiers for custom sharding |
+
+### DDL Examples
 
 ```sql
 CREATE COLLECTION docs (

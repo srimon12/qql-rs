@@ -18,6 +18,7 @@ Read these reference documents when you need details on specific topics:
 - [references/rust-sdk.md](references/rust-sdk.md) — Rust SDK (`qql`, `qql-core`, `qql-plan`) runtime & executor.
 - [references/qql-gaps.md](references/qql-gaps.md) — Read for feature mapping guidelines.
 - [references/qql-install.md](references/qql-install.md) — Read for installation and setup instructions across Python, Rust, Node.js, and CLI.
+- [references/qql-multitenancy.md](references/qql-multitenancy.md) — Complete multi-tenant guide: shard routing, filter injection, and tenant isolation.
 
 For runnable demo scripts, see `scripts/demo_retrieval_modes.py`, `scripts/demo_medical_records.py`, `scripts/demo_kitchen_sink.py`, and `scripts/demo_multivector.py`.
 
@@ -44,6 +45,7 @@ Translate user intent directly into QQL syntax:
 - Browse points -> `SCROLL FROM <collection> [AFTER <id>] LIMIT <n>`
 - Batch ingest -> `UPSERT INTO <collection> VALUES {id: 1, text: '...'}, {id: 2, text: '...'}`
 - Delete points -> `DELETE FROM <collection> WHERE <filter>`
+- Multi-tenant isolation -> `QUERY 'text' FROM <collection> WHERE tenant_id = 'honeywell' SHARD 'honeywell' LIMIT 10`
 
 ## Canonical Grammar & Capabilities
 
@@ -97,7 +99,43 @@ FROM <collection>
 [WITH VECTOR [true | false | (...)]]
 [LIMIT <n>]
 [OFFSET <n>];
+
+-- Optional shard routing for multi-tenant collections
+SHARD '<tenant_key>'    -- appears after WHERE, before PARAMS
 ```
+
+### Shard Routing & Multi-Tenancy
+
+For collections using custom sharding, append `SHARD '<key>'` to route queries and mutations to a specific tenant's shard group:
+
+```sql
+-- Create a multi-tenant collection with custom sharding
+CREATE COLLECTION sec10k HYBRID (dense VECTOR(768, COSINE), sparse SPARSE)
+WITH PARAMS (
+  replication_factor = 2,
+  shard_number = 8,
+  sharding_method = 'custom',
+  shard_keys = ['honeywell', 'ge', '3m', 'rtx']
+);
+
+-- Query isolated to one tenant
+QUERY 'supply chain risks' FROM sec10k
+WHERE tenant_id = 'honeywell'
+SHARD 'honeywell'
+LIMIT 10;
+
+-- Upsert with shard routing
+UPSERT INTO sec10k VALUES {id: 1, text: '...', tenant_id: 'honeywell'}
+SHARD 'honeywell';
+
+-- Scroll with shard routing
+SCROLL FROM sec10k WHERE tenant_id = 'honeywell' SHARD 'honeywell' LIMIT 100;
+
+-- Delete with shard routing
+DELETE FROM sec10k WHERE tenant_id = 'honeywell' SHARD 'honeywell';
+```
+
+Shard routing is optional — omit `SHARD` for auto-sharded collections.
 
 ### Filters (`WHERE` Clause)
 Supports standard comparison operators and predicates:

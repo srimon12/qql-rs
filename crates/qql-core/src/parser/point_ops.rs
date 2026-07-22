@@ -21,6 +21,12 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
+        let shard_key = if self.peek()?.kind == TokenKind::Shard {
+            self.advance()?;
+            Some(self.parse_string()?)
+        } else {
+            None
+        };
         self.expect(TokenKind::Limit)?;
         let limit = self.parse_positive_u64("SCROLL LIMIT")?;
         Ok(Stmt::Scroll(Box::new(ScrollStmt {
@@ -28,6 +34,7 @@ impl<'a> Parser<'a> {
             limit,
             filter,
             after,
+            shard_key,
         })))
     }
 }

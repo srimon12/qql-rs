@@ -459,7 +459,10 @@ fn build_optimizers_json(opt: &ast::OptimizersRuntimeConfig) -> serde_json::Valu
         map.insert("deleted_threshold".to_string(), serde_json::json!(dt));
     }
     if let Some(vm) = opt.vacuum_min_vector_number {
-        map.insert("vacuum_min_vector_number".to_string(), serde_json::json!(vm));
+        map.insert(
+            "vacuum_min_vector_number".to_string(),
+            serde_json::json!(vm),
+        );
     }
     if let Some(ds) = opt.default_segment_number {
         map.insert("default_segment_number".to_string(), serde_json::json!(ds));
@@ -481,9 +484,15 @@ fn build_optimizers_json(opt: &ast::OptimizersRuntimeConfig) -> serde_json::Valu
     }
     if let Some(ref t) = opt.max_optimization_threads {
         if t.auto_ {
-            map.insert("max_optimization_threads".to_string(), serde_json::json!("auto"));
+            map.insert(
+                "max_optimization_threads".to_string(),
+                serde_json::json!("auto"),
+            );
         } else {
-            map.insert("max_optimization_threads".to_string(), serde_json::json!(t.value));
+            map.insert(
+                "max_optimization_threads".to_string(),
+                serde_json::json!(t.value),
+            );
         }
     }
     serde_json::Value::Object(map)

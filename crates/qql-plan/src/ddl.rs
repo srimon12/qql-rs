@@ -11,6 +11,9 @@ pub fn lower_create_collection(stmt: &CreateCollectionStmt) -> CreateCollectionR
         params: None,
         quantization_config: None,
         vectors_config: None,
+        shard_number: None,
+        sharding_method: None,
+        shard_keys: None,
     };
 
     let mut vectors = serde_json::Map::new();
@@ -66,6 +69,9 @@ pub fn lower_alter_collection(stmt: &AlterCollectionStmt) -> CreateCollectionReq
         params: None,
         quantization_config: None,
         vectors_config: None,
+        shard_number: None,
+        sharding_method: None,
+        shard_keys: None,
     };
     if let Some(ref config) = stmt.config {
         fill_collection_config(&mut req, config);
@@ -127,6 +133,11 @@ fn fill_collection_config(
         if !pc.is_empty() {
             req.params = Some(serde_json::Value::Object(pc));
         }
+        if let Some(sn) = p.shard_number {
+            req.shard_number = Some(sn);
+        }
+        req.sharding_method = p.sharding_method.clone();
+        req.shard_keys = p.shard_keys.clone();
     }
     if let Some(ref q) = config.quantization {
         req.quantization_config = Some(lower_quantization_config_val(q));

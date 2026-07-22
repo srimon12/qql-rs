@@ -11,10 +11,7 @@ impl Executor {
         let r = route(&ast::Stmt::Query(Box::new(stmt)));
         let result = self.client.execute_route(r).await?;
         if is_grouped
-            || result
-                .get("result")
-                .and_then(|r| r.get("groups"))
-                .is_some()
+            || result.get("result").and_then(|r| r.get("groups")).is_some()
             || result.get("groups").is_some()
         {
             let groups_count = result
@@ -158,9 +155,8 @@ fn extract_search_hits(result: &serde_json::Value) -> Vec<SearchHit> {
                     .and_then(|p| p.get("text"))
                     .and_then(|t| t.as_str().map(|s| s.to_string())),
                 payload: hit.get("payload").and_then(|p| {
-                    p.as_object().map(|o| {
-                        o.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
-                    })
+                    p.as_object()
+                        .map(|o| o.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
                 }),
             })
             .collect(),

@@ -153,7 +153,8 @@ impl Executor {
 
     pub async fn execute_node(&self, mut stmt: Stmt) -> Result<ExecResponse, QqlError> {
         if let Some(ref embedder) = self.embedder {
-            self.resolve_embeddings(&mut stmt, embedder.as_ref()).await?;
+            self.resolve_embeddings(&mut stmt, embedder.as_ref())
+                .await?;
         }
         match stmt {
             Stmt::ShowCollections => self.do_show_collections().await,

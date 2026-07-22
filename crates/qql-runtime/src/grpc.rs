@@ -198,7 +198,11 @@ impl QdrantOps for GrpcQdrant {
         {
             Ok(resp) => Ok(resp.into_inner().result.map(|r| r.exists).unwrap_or(false)),
             Err(status) if status.code() == tonic::Code::NotFound => Ok(false),
-            Err(e) => Err(QqlError::backend("QQL-GRPC", format!("collection_exists: {e}"), None)),
+            Err(e) => Err(QqlError::backend(
+                "QQL-GRPC",
+                format!("collection_exists: {e}"),
+                None,
+            )),
         }
     }
 

@@ -27,6 +27,52 @@ impl<'a> Parser<'a> {
         let mut explicit_vectors: Vec<VectorDef> = Vec::new();
         let mut explicit_sparse_vectors: Vec<SparseVectorDef> = Vec::new();
 
+        // Parse mode keyword (HYBRID, RERANK, DENSE/USING MODEL) before vectors
+        if self.peek()?.kind == TokenKind::Hybrid {
+            self.advance()?;
+            hybrid = true;
+            if self.peek()?.kind == TokenKind::Rerank {
+                self.advance()?;
+                rerank = true;
+            } else {
+                while self.peek()?.kind == TokenKind::Dense
+                    || self.peek()?.kind == TokenKind::Sparse
+                {
+                    let mode = self.advance()?.kind;
+                    let tok = self.peek()?;
+                    if tok.kind == TokenKind::Vector
+                        || (tok.kind == TokenKind::Identifier && ascii_equal(tok.text, "VECTOR"))
+                    {
+                        self.advance()?;
+                        let v = self.parse_string()?;
+                        if mode == TokenKind::Dense {
+                            dense_vector = Some(v);
+                        } else {
+                            sparse_vector = Some(v);
+                        }
+                    } else {
+                        return Err(QqlError::syntax(
+                            "expected VECTOR after DENSE/SPARSE",
+                            self.peek()?.pos,
+                        ));
+                    }
+                }
+            }
+        } else if self.peek()?.kind == TokenKind::Using {
+            self.advance()?;
+            if self.peek()?.kind == TokenKind::Hybrid {
+                self.advance()?;
+                hybrid = true;
+                if self.peek()?.kind == TokenKind::Dense {
+                    self.advance()?;
+                    model = Some(self.parse_required_model_string()?);
+                }
+            } else {
+                model = Some(self.parse_required_model_string()?);
+            }
+        }
+
+        // Parse explicit vector definitions in parentheses
         if self.peek()?.kind == TokenKind::Lparen {
             self.advance()?;
             while self.peek()?.kind != TokenKind::Rparen && self.peek()?.kind != TokenKind::Eof {
@@ -115,47 +161,51 @@ impl<'a> Parser<'a> {
             self.expect(TokenKind::Rparen)?;
         }
 
-        if self.peek()?.kind == TokenKind::Hybrid {
-            self.advance()?;
-            hybrid = true;
-            if self.peek()?.kind == TokenKind::Rerank {
-                self.advance()?;
-                rerank = true;
-            } else {
-                while self.peek()?.kind == TokenKind::Dense
-                    || self.peek()?.kind == TokenKind::Sparse
-                {
-                    let mode = self.advance()?.kind;
-                    let tok = self.peek()?;
-                    if tok.kind == TokenKind::Vector
-                        || (tok.kind == TokenKind::Identifier && ascii_equal(tok.text, "VECTOR"))
-                    {
-                        self.advance()?;
-                        let v = self.parse_string()?;
-                        if mode == TokenKind::Dense {
-                            dense_vector = Some(v);
-                        } else {
-                            sparse_vector = Some(v);
-                        }
-                    } else {
-                        return Err(QqlError::syntax(
-                            "expected VECTOR after DENSE/SPARSE",
-                            self.peek()?.pos,
-                        ));
-                    }
-                }
-            }
-        } else if self.peek()?.kind == TokenKind::Using {
-            self.advance()?;
+        // Fallback HYBRID/DENSE mode check (only if not already set before vectors)
+        if !hybrid && !rerank && model.is_none() {
             if self.peek()?.kind == TokenKind::Hybrid {
                 self.advance()?;
                 hybrid = true;
-                if self.peek()?.kind == TokenKind::Dense {
+                if self.peek()?.kind == TokenKind::Rerank {
                     self.advance()?;
+                    rerank = true;
+                } else {
+                    while self.peek()?.kind == TokenKind::Dense
+                        || self.peek()?.kind == TokenKind::Sparse
+                    {
+                        let mode = self.advance()?.kind;
+                        let tok = self.peek()?;
+                        if tok.kind == TokenKind::Vector
+                            || (tok.kind == TokenKind::Identifier
+                                && ascii_equal(tok.text, "VECTOR"))
+                        {
+                            self.advance()?;
+                            let v = self.parse_string()?;
+                            if mode == TokenKind::Dense {
+                                dense_vector = Some(v);
+                            } else {
+                                sparse_vector = Some(v);
+                            }
+                        } else {
+                            return Err(QqlError::syntax(
+                                "expected VECTOR after DENSE/SPARSE",
+                                self.peek()?.pos,
+                            ));
+                        }
+                    }
+                }
+            } else if self.peek()?.kind == TokenKind::Using {
+                self.advance()?;
+                if self.peek()?.kind == TokenKind::Hybrid {
+                    self.advance()?;
+                    hybrid = true;
+                    if self.peek()?.kind == TokenKind::Dense {
+                        self.advance()?;
+                        model = Some(self.parse_required_model_string()?);
+                    }
+                } else {
                     model = Some(self.parse_required_model_string()?);
                 }
-            } else {
-                model = Some(self.parse_required_model_string()?);
             }
         }
 

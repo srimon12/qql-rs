@@ -59,9 +59,16 @@ impl<'a> Parser<'a> {
         let collection = self.parse_identifier()?;
         self.expect(TokenKind::Where)?;
         let selector = selector_from_filter(self.parse_filter_expr()?);
+        let shard_key = if self.peek()?.kind == TokenKind::Shard {
+            self.advance()?;
+            Some(self.parse_string()?)
+        } else {
+            None
+        };
         Ok(Stmt::Delete(Box::new(DeleteStmt {
             collection,
             selector,
+            shard_key,
         })))
     }
 }

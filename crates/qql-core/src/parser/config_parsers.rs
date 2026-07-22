@@ -259,11 +259,14 @@ impl<'a> Parser<'a> {
                 | "write_consistency_factor"
                 | "read_fan_out_factor"
                 | "read_fan_out_delay_ms"
-                | "on_disk_payload" => {}
+                | "on_disk_payload"
+                | "shard_number"
+                | "sharding_method"
+                | "shard_keys" => {}
                 _ => {
                     return Err(QqlError::syntax(
                         alloc::format!(
-                            "unknown PARAMS parameter '{}'. Expected: replication_factor, write_consistency_factor, read_fan_out_factor, read_fan_out_delay_ms, on_disk_payload",
+                            "unknown PARAMS parameter '{}'. Expected: replication_factor, write_consistency_factor, read_fan_out_factor, read_fan_out_delay_ms, on_disk_payload, shard_number, sharding_method, shard_keys",
                             key
                         ),
                         self.peek()?.pos,
@@ -309,6 +312,28 @@ impl<'a> Parser<'a> {
                     self.peek()?.pos,
                 )?,
                 on_disk_payload: config_bool(&config, "on_disk_payload"),
+                shard_number: config_positive_u64(&config, "shard_number", self.peek()?.pos)?,
+                sharding_method: config_value(&config, "sharding_method").and_then(|v| match v {
+                    Value::Str(s) => Some(s.clone()),
+                    _ => None,
+                }),
+                shard_keys: config_value(&config, "shard_keys").and_then(|v| match v {
+                    Value::List(items) => {
+                        let keys: Vec<String> = items
+                            .iter()
+                            .filter_map(|item| match item {
+                                Value::Str(s) => Some(s.clone()),
+                                _ => None,
+                            })
+                            .collect();
+                        if keys.is_empty() {
+                            None
+                        } else {
+                            Some(keys)
+                        }
+                    }
+                    _ => None,
+                }),
             })),
             quantization: None,
             quantization_update: None,

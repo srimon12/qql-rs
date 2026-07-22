@@ -20,6 +20,9 @@ pub struct CreateCollectionReq {
     pub optimizers_config: Option<serde_json::Value>,
     pub quantization_config: Option<serde_json::Value>,
     pub params: Option<serde_json::Value>,
+    pub shard_number: Option<u64>,
+    pub sharding_method: Option<String>,
+    pub shard_keys: Option<Vec<String>>,
 }
 
 impl CreateCollectionReq {
@@ -32,6 +35,9 @@ impl CreateCollectionReq {
             optimizers_config: None,
             quantization_config: None,
             params: None,
+            shard_number: None,
+            sharding_method: None,
+            shard_keys: None,
         }
     }
 }

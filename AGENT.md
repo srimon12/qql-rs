@@ -138,7 +138,7 @@ A single trait with 8 methods. All DML flows through `execute_route()`. DDL uses
 
 All generated route payloads are validated directly against Qdrant's official [`openapi.json`](file:///data/codebases/qql-rs/openapi.json) specification in `crates/qql-runtime/src/contract_test.rs`:
 
-1. **`Query` Schema Validation**: All 11 query expression variants are validated against `# /components/schemas/Query`.
+1. **`Query` Schema Validation**: All 12 query expression variants are validated against `# /components/schemas/Query`.
 2. **`Filter` Schema Validation**: All 17 filter expression variants (`Compare`, `Between`, `In`, `MatchText`, `MatchPhrase`, `MatchAny`, `IsNull`, `IsEmpty`, `HasVector`, `ValuesCount`, `Nested`, `GeoBoundingBox`, `GeoRadius`, `PointId`, and compound logic) are validated against `# /components/schemas/Filter`.
 3. **`PointRequest` & `ScrollRequest` Validation**: Validated against `# /components/schemas/PointRequest` and `# /components/schemas/ScrollRequest`.
 
@@ -165,7 +165,9 @@ pub fn inject_filter(
 ) -> Result<(), QqlError>
 ```
 
-Recursively injects into QueryStmt, all CTEs, and Scroll. Callers must convert their string operators before calling.
+Recursively injects into QueryStmt (including all CTEs and prefetches), Scroll, Delete,
+UpdatePayload, and Upsert (when `operator == Eq` and `field != "id"`, injects into point
+payloads). Callers must convert their string operators before calling.
 
 ---
 
@@ -177,6 +179,9 @@ Recursively injects into QueryStmt, all CTEs, and Scroll. Callers must convert t
 * `SELECT` is rejected as an unrecognized statement. Use `QUERY POINTS` for point retrieval.
 * Duplicate object keys, config keys, CTE names, and query clauses are rejected.
 * `QqlError` always carries an explicit `ErrorKind` and `Span`.
+* `SHARD '<key>'` routing is supported on QUERY, UPSERT, SCROLL, and DELETE for custom-sharded collections.
+* Collection creation supports `shard_number`, `sharding_method`, and `shard_keys` via `WITH PARAMS`.
+* Payload indexes support `is_tenant = true` for Qdrant-native tenant optimization.
 
 ---
 
@@ -189,6 +194,7 @@ Dedicated reference guides for each host SDK live under `skills/qql-skill/refere
 - **[`node-sdk.md`](file:///data/codebases/qql-rs/skills/qql-skill/references/node-sdk.md)**: Node.js `nqql` N-API client and `parseFastJson` usage.
 - **[`wasm-sdk.md`](file:///data/codebases/qql-rs/skills/qql-skill/references/wasm-sdk.md)**: WebAssembly `qql-wasm` browser & edge client.
 - **[`rust-sdk.md`](file:///data/codebases/qql-rs/skills/qql-skill/references/rust-sdk.md)**: Native Rust `qql` runtime & `qql-core` SDK reference.
+- **[`qql-multitenancy.md`](file:///data/codebases/qql-rs/skills/qql-skill/references/qql-multitenancy.md)**: Complete multi-tenant guide: shard routing, filter injection, `is_tenant` indexing.
 
 ---
 

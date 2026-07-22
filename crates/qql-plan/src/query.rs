@@ -99,7 +99,13 @@ pub fn lower_formula_expr(expr: &qql_core::ast::FormulaExpr) -> serde_json::Valu
                 "to": field
             }
         }),
-        qql_core::ast::FormulaExpr::Decay { kind, x, target, scale, midpoint } => {
+        qql_core::ast::FormulaExpr::Decay {
+            kind,
+            x,
+            target,
+            scale,
+            midpoint,
+        } => {
             let mut params = serde_json::Map::new();
             params.insert("x".into(), lower_formula_expr(x));
             if let Some(t) = target {
@@ -120,7 +126,9 @@ pub fn lower_formula_expr(expr: &qql_core::ast::FormulaExpr) -> serde_json::Valu
         }
         qql_core::ast::FormulaExpr::Case { cond, then_, else_ } => {
             let cond_val = match lower_filter(cond) {
-                FilterExpression::Single(clause) => serde_json::to_value(&*clause).unwrap_or_default(),
+                FilterExpression::Single(clause) => {
+                    serde_json::to_value(&*clause).unwrap_or_default()
+                }
                 FilterExpression::Compound(comp) => serde_json::to_value(comp).unwrap_or_default(),
             };
             serde_json::json!({
@@ -351,6 +359,7 @@ pub fn lower_query_request(query: &QueryStmt) -> QueryRequest {
         limit: query.page.limit,
         offset: query.page.offset,
         lookup_from: None,
+        shard_key: query.shard_key.clone(),
     }
 }
 
@@ -379,6 +388,7 @@ pub fn lower_query_groups_request(query: &QueryStmt) -> QueryGroupsRequest {
             .as_ref()
             .map(|coll| WithLookupValue::Collection(coll.clone())),
         lookup_from: None,
+        shard_key: query.shard_key.clone(),
     }
 }
 
@@ -443,11 +453,7 @@ fn build_query_with_prefetch(
                     fusion: fusion_name.into(),
                 }
             };
-            (
-                variant,
-                None,
-                vec![dense_prefetch, sparse_prefetch],
-            )
+            (variant, None, vec![dense_prefetch, sparse_prefetch])
         }
         QueryExpr::Rerank {
             input,

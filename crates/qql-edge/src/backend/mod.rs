@@ -372,14 +372,23 @@ impl QdrantOps for EdgeQdrant {
                         .collect();
                     UpdateOperation::PointOperation(PointOperations::DeletePoints { ids })
                 } else if let Some(filter) = &req.filter {
-                    let mut filter_val = serde_json::to_value(filter)
-                        .map_err(|e| QqlError::execution("QQL-EDGE", format!("invalid filter: {e}"), None))?;
+                    let mut filter_val = serde_json::to_value(filter).map_err(|e| {
+                        QqlError::execution("QQL-EDGE", format!("invalid filter: {e}"), None)
+                    })?;
                     if filter_val.get("key").is_some() {
                         filter_val = serde_json::json!({ "must": [filter_val] });
                     }
                     let edge_filter: qdrant_edge::Filter = serde_json::from_value(filter_val)
-                        .map_err(|e| QqlError::execution("QQL-EDGE", format!("invalid filter format: {e}"), None))?;
-                    UpdateOperation::PointOperation(PointOperations::DeletePointsByFilter(edge_filter))
+                        .map_err(|e| {
+                            QqlError::execution(
+                                "QQL-EDGE",
+                                format!("invalid filter format: {e}"),
+                                None,
+                            )
+                        })?;
+                    UpdateOperation::PointOperation(PointOperations::DeletePointsByFilter(
+                        edge_filter,
+                    ))
                 } else {
                     return Err(QqlError::execution(
                         "QQL-EDGE",
@@ -473,6 +482,9 @@ impl QdrantOps for EdgeQdrant {
                     optimizers_config: None,
                     quantization_config: None,
                     params: None,
+                    shard_number: None,
+                    sharding_method: None,
+                    shard_keys: None,
                 };
                 self.create_collection(create_req).await?;
                 Ok(Value::Object(Default::default()))

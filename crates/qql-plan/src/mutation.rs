@@ -9,6 +9,7 @@ use qql_core::ast::{
 pub fn lower_upsert_request(stmt: &UpsertStmt) -> UpsertRequest {
     UpsertRequest {
         points: stmt.points.iter().map(lower_upsert_point).collect(),
+        shard_key: stmt.shard_key.clone(),
     }
 }
 
@@ -49,14 +50,17 @@ pub fn lower_delete_request(stmt: &DeleteStmt) -> DeleteRequest {
         PointSelector::Id(id) => DeleteRequest {
             points: Some(vec![point_id_req(id)]),
             filter: None,
+            shard_key: stmt.shard_key.clone(),
         },
         PointSelector::Ids(ids) => DeleteRequest {
             points: Some(ids.iter().map(point_id_req).collect()),
             filter: None,
+            shard_key: stmt.shard_key.clone(),
         },
         PointSelector::Filter(filter) => DeleteRequest {
             points: None,
             filter: Some(top_level_filter(filter)),
+            shard_key: stmt.shard_key.clone(),
         },
     }
 }
@@ -99,6 +103,7 @@ pub fn lower_scroll_request(
     limit: u64,
     filter: Option<&qql_core::ast::FilterExpr>,
     after: Option<&qql_core::ast::PointId>,
+    shard_key: Option<String>,
 ) -> ScrollRequest {
     ScrollRequest {
         filter: filter.map(top_level_filter),
@@ -107,6 +112,7 @@ pub fn lower_scroll_request(
         with_payload: Some(PayloadSelectorReq::All(true)),
         with_vector: Some(VectorSelectorReq::All(false)),
         order_by: None,
+        shard_key,
     }
 }
 
@@ -196,7 +202,7 @@ mod tests {
     fn scroll_request() {
         let s = parse_stmt("SCROLL FROM docs LIMIT 50;");
         let Stmt::Scroll(ref sc) = s else { panic!() };
-        let req = lower_scroll_request(sc.limit, sc.filter.as_deref(), sc.after.as_ref());
+        let req = lower_scroll_request(sc.limit, sc.filter.as_deref(), sc.after.as_ref(), None);
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["limit"], 50);
     }
