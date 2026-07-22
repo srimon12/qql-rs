@@ -46,17 +46,12 @@ pub async fn handle_exec(
     url: &str,
     query: &str,
     json: bool,
+    quiet: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let executor = executor(url)?;
     let response = executor.execute(query).await?;
-    if json {
-        let s = serde_json::to_string_pretty(&response)?;
-        println!("{}", s);
-    } else {
-        println!("{}", response.message);
-        if let Some(data) = response.data {
-            println!("{}", serde_json::to_string_pretty(&data)?);
-        }
+    if !quiet {
+        crate::table::render_response(&response, json)?;
     }
     Ok(())
 }
@@ -216,9 +211,8 @@ pub async fn handle_connect(url: &str) -> Result<(), Box<dyn std::error::Error>>
 
         match executor.execute(&trimmed).await {
             Ok(response) => {
-                output::print_success(&response.message);
-                if let Some(data) = response.data {
-                    println!("{}", serde_json::to_string_pretty(&data)?);
+                if let Err(e) = crate::table::render_response(&response, false) {
+                    output::print_error(&format!("display error: {}", e));
                 }
             }
             Err(e) => output::print_error(&format!("execution error: {}", e)),
@@ -462,10 +456,7 @@ pub async fn handle_edge(
     if json {
         println!("{}", serde_json::to_string_pretty(&response)?);
     } else {
-        println!("{}", response.message);
-        if let Some(data) = response.data {
-            println!("{}", serde_json::to_string_pretty(&data)?);
-        }
+        crate::table::render_response(&response, false)?;
     }
 
     Ok(())

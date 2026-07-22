@@ -8,6 +8,7 @@ mod convert;
 mod dump;
 mod output;
 mod script;
+mod table;
 
 #[derive(Parser)]
 #[command(name = "qql", about = "Qdrant Query Language CLI")]
@@ -122,11 +123,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|| "http://localhost:6333".to_string());
 
     match cli.command {
-        Command::Exec {
-            query,
-            json,
-            quiet: _,
-        } => commands::handle_exec(&url, &query, json).await,
+        Command::Exec { query, json, quiet } => {
+            commands::handle_exec(&url, &query, json, quiet).await
+        }
         Command::Execute {
             file,
             stop_on_error,

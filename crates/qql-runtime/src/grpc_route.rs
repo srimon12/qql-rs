@@ -222,9 +222,9 @@ pub async fn execute_grpc_route(
                 collection_name: collection,
                 wait: Some(true),
                 points_selector: selector,
-                vectors: qdrant::VectorsSelector {
+                vectors: Some(qdrant::VectorsSelector {
                     names: req.vector.clone(),
-                },
+                }),
                 ..Default::default()
             };
             client

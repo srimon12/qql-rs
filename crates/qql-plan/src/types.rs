@@ -570,6 +570,7 @@ pub struct CountRequest {
     pub filter: Option<FilterExpression>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shard_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub exact: Option<bool>,
 }
 
