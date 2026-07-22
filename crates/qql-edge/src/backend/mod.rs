@@ -36,6 +36,14 @@ pub struct EdgeQdrant {
     shards: RwLock<HashMap<String, Arc<EdgeShard>>>,
 }
 
+fn mutation_response() -> Value {
+    serde_json::json!({
+        "result": { "status": "completed" },
+        "status": "ok",
+        "time": 0.0_f64,
+    })
+}
+
 impl std::fmt::Debug for EdgeQdrant {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EdgeQdrant")
@@ -383,7 +391,7 @@ impl QdrantOps for EdgeQdrant {
                         QqlError::execution("QQL-EDGE", format!("spawn_blocking: {e}"), None)
                     })??;
 
-                Ok(Value::Object(Default::default()))
+                Ok(mutation_response())
             }
             Some(RequestBody::Delete(req)) => {
                 let collection = extract_collection(&route.path)?;
@@ -427,7 +435,7 @@ impl QdrantOps for EdgeQdrant {
                         QqlError::execution("QQL-EDGE", format!("spawn_blocking: {e}"), None)
                     })??;
 
-                Ok(Value::Object(Default::default()))
+                Ok(mutation_response())
             }
             Some(RequestBody::ClearPayload(req)) => {
                 let collection = extract_collection(&route.path)?;
@@ -472,7 +480,7 @@ impl QdrantOps for EdgeQdrant {
                     .map_err(|e| {
                         QqlError::execution("QQL-EDGE", format!("spawn_blocking: {e}"), None)
                     })??;
-                Ok(Value::Object(Default::default()))
+                Ok(mutation_response())
             }
             Some(RequestBody::DeleteVector(req)) => {
                 let collection = extract_collection(&route.path)?;
@@ -520,7 +528,7 @@ impl QdrantOps for EdgeQdrant {
                     .map_err(|e| {
                         QqlError::execution("QQL-EDGE", format!("spawn_blocking: {e}"), None)
                     })??;
-                Ok(Value::Object(Default::default()))
+                Ok(mutation_response())
             }
             Some(RequestBody::UpdateVector(req)) => {
                 let collection = extract_collection(&route.path)?;
@@ -549,7 +557,7 @@ impl QdrantOps for EdgeQdrant {
                         QqlError::execution("QQL-EDGE", format!("spawn_blocking: {e}"), None)
                     })??;
 
-                Ok(Value::Object(Default::default()))
+                Ok(mutation_response())
             }
             Some(RequestBody::UpdatePayload(req)) => {
                 let collection = extract_collection(&route.path)?;
@@ -585,7 +593,7 @@ impl QdrantOps for EdgeQdrant {
                     QqlError::execution("QQL-EDGE", format!("spawn_blocking: {e}"), None)
                 })??;
 
-                Ok(Value::Object(Default::default()))
+                Ok(mutation_response())
             }
             Some(RequestBody::CreateCollection(req)) | Some(RequestBody::UpdateCollection(req)) => {
                 let create_req = CreateCollectionReq {
@@ -604,7 +612,7 @@ impl QdrantOps for EdgeQdrant {
                     shard_keys: None,
                 };
                 self.create_collection(create_req).await?;
-                Ok(Value::Object(Default::default()))
+                Ok(mutation_response())
             }
             Some(RequestBody::CreateIndex(req)) => {
                 let ft = req.field_schema.as_str();
@@ -625,7 +633,7 @@ impl QdrantOps for EdgeQdrant {
                     options: HashMap::new(),
                 };
                 self.create_field_index(create_index).await?;
-                Ok(Value::Object(Default::default()))
+                Ok(mutation_response())
             }
             Some(RequestBody::CreateShardKey(_req)) => Err(QqlError::execution(
                 "QQL-EDGE",

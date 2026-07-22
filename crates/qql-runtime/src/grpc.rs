@@ -390,10 +390,8 @@ impl QdrantOps for GrpcQdrant {
         if let Some(config) = &info.config {
             if let Some(params) = &config.params {
                 if let Some(vc) = &params.vectors_config {
-                    if let Some(vc_cfg) = &vc.config {
-                        if let qdrant::vectors_config::Config::ParamsMap(map) = vc_cfg {
-                            schema.dense_vectors = map.map.keys().cloned().collect();
-                        }
+                    if let Some(qdrant::vectors_config::Config::ParamsMap(map)) = &vc.config {
+                        schema.dense_vectors = map.map.keys().cloned().collect();
                     }
                 }
                 if let Some(sparse) = &params.sparse_vectors_config {

@@ -188,7 +188,8 @@ impl Executor {
 
     pub async fn execute_node(&self, stmt: Stmt) -> Result<ExecResponse, QqlError> {
         let prepared = self.prepare_statement(stmt).await?;
-        self.dispatch_prepared(prepared).await
+        let planned = plan(&prepared)?;
+        self.dispatch_planned(&planned).await
     }
 
     /// Parse every list entry to AST and run the unified prepared batch path.
@@ -407,6 +408,10 @@ impl Executor {
                 .await?;
         }
 
+        if let Stmt::CreateCollection(create) = &mut stmt {
+            self.prepare_create_collection(create).await?;
+        }
+
         match &stmt {
             Stmt::Query(q) => {
                 if let ast::QueryCollection::Explicit(ref collection_name) = q.collection {
@@ -448,29 +453,42 @@ impl Executor {
         Ok(stmt)
     }
 
-    /// Dispatch a statement that has already been prepared (single-statement path).
-    async fn dispatch_prepared(&self, stmt: Stmt) -> Result<ExecResponse, QqlError> {
-        match stmt {
-            Stmt::ShowCollections => self.do_show_collections().await,
-            Stmt::ShowCollection(collection) => self.do_show_collection(&collection).await,
-            Stmt::CreateCollection(n) => self.do_create_collection(*n).await,
-            Stmt::AlterCollection(n) => self.do_alter_collection(*n).await,
-            Stmt::DropCollection(n) => self.do_drop_collection(&n.collection).await,
-            Stmt::Upsert(n) => self.do_upsert(*n).await,
-            Stmt::Scroll(n) => self.do_scroll(*n).await,
-            Stmt::Query(n) => self.do_query(*n).await,
-            Stmt::Delete(n) => self.do_delete(*n).await,
-            Stmt::ClearPayload(n) => self.do_clear_payload(*n).await,
-            Stmt::DeleteVector(n) => self.do_delete_vector(*n).await,
-            Stmt::UpdateVector(n) => self.do_update_vector(*n).await,
-            Stmt::UpdatePayload(n) => self.do_update_payload(*n).await,
-            Stmt::CreateIndex(n) => self.do_create_index(*n).await,
-            Stmt::CreateShardKey(n) => self.do_create_shard_key(*n).await,
-            Stmt::DropShardKey(n) => self.do_drop_shard_key(*n).await,
-            Stmt::ShowShardKeys(collection) => self.do_show_shard_keys(&collection).await,
-            Stmt::DropIndex(n) => self.do_drop_index(*n).await,
-            Stmt::Count(n) => self.do_count(*n).await,
+    async fn prepare_create_collection(
+        &self,
+        create: &mut ast::CreateCollectionStmt,
+    ) -> Result<(), QqlError> {
+        if !create.vectors.is_empty() {
+            return Ok(());
         }
+
+        let (model, dense_name, sparse_name) = match &create.mode {
+            ast::CollectionMode::Dense { model } => (model.as_deref(), DENSE_VECTOR_NAME, None),
+            ast::CollectionMode::Hybrid {
+                dense_vector,
+                sparse_vector,
+            } => (
+                None,
+                dense_vector.as_deref().unwrap_or(DENSE_VECTOR_NAME),
+                Some(sparse_vector.as_deref().unwrap_or(SPARSE_VECTOR_NAME)),
+            ),
+            ast::CollectionMode::Rerank => (None, DENSE_VECTOR_NAME, Some(SPARSE_VECTOR_NAME)),
+        };
+        let dense_size = self.resolve_dense_vector_size(model).await? as u64;
+        create.vectors.push(ast::VectorDef {
+            name: dense_name.to_string(),
+            size: dense_size,
+            distance: ast::VectorDistance::Cosine,
+            hnsw: None,
+            quantization: None,
+            multivector: None,
+        });
+        if let Some(sparse_name) = sparse_name {
+            create.sparse_vectors.push(ast::SparseVectorDef {
+                name: sparse_name.to_string(),
+            });
+        }
+
+        Ok(())
     }
 
     /// Dispatch a planned DML/query operation via REST route projection.
@@ -532,6 +550,6 @@ impl Executor {
     }
 }
 
-pub(crate) mod ddl;
 pub(crate) mod dml;
+#[cfg(feature = "rest")]
 pub(crate) mod helpers;

@@ -103,10 +103,18 @@ impl RestQdrant {
                 None,
             ));
         }
-        serde_json::from_str(&text).map_err(|error| {
+        let value: Value = serde_json::from_str(&text).map_err(|error| {
             QqlError::backend(
                 "QQL-BACKEND",
                 format!("failed to parse Qdrant response: {error}"),
+                None,
+            )
+        })?;
+        validate_success_envelope(&value, path)?;
+        serde_json::from_value(value).map_err(|error| {
+            QqlError::backend(
+                "QQL-BACKEND",
+                format!("failed to decode Qdrant response: {error}"),
                 None,
             )
         })
@@ -351,16 +359,15 @@ impl QdrantOps for RestQdrant {
                 None,
             ));
         }
-        if text.is_empty() {
-            return Ok(Value::Object(Default::default()));
-        }
-        serde_json::from_str(&text).map_err(|e| {
+        let value: Value = serde_json::from_str(&text).map_err(|e| {
             QqlError::backend(
                 "QQL-BACKEND",
                 format!("invalid JSON response: {e}; body={text}"),
                 None,
             )
-        })
+        })?;
+        validate_success_envelope(&value, &route.path)?;
+        Ok(value)
     }
 
     async fn execute_query_batch(
@@ -370,11 +377,7 @@ impl QdrantOps for RestQdrant {
     ) -> Result<Vec<Value>, QqlError> {
         let path = format!("/collections/{collection}/points/query/batch");
         let value: Value = self.call_body(Method::POST, &path, Some(batch)).await?;
-        Ok(value
-            .get("result")
-            .and_then(|r| r.as_array())
-            .cloned()
-            .unwrap_or_default())
+        result_array(&value, &path)
     }
 
     async fn execute_update_batch(
@@ -384,10 +387,78 @@ impl QdrantOps for RestQdrant {
     ) -> Result<Vec<Value>, QqlError> {
         let path = format!("/collections/{collection}/points/batch?wait=true");
         let value: Value = self.call_body(Method::POST, &path, Some(batch)).await?;
-        Ok(value
-            .get("result")
-            .and_then(|r| r.as_array())
-            .cloned()
-            .unwrap_or_default())
+        result_array(&value, &path)
+    }
+}
+
+fn validate_success_envelope(value: &Value, operation: &str) -> Result<(), QqlError> {
+    let object = value.as_object().ok_or_else(|| {
+        QqlError::backend(
+            "QQL-BACKEND-ENVELOPE",
+            format!("{operation} returned a non-object JSON response"),
+            None,
+        )
+    })?;
+
+    if !object.contains_key("result") {
+        return Err(QqlError::backend(
+            "QQL-BACKEND-ENVELOPE",
+            format!("{operation} response is missing the result field"),
+            None,
+        ));
+    }
+
+    if object.get("status").and_then(Value::as_str) != Some("ok") {
+        return Err(QqlError::backend(
+            "QQL-BACKEND-ENVELOPE",
+            format!("{operation} response is missing status=ok"),
+            None,
+        ));
+    }
+
+    Ok(())
+}
+
+fn result_array(value: &Value, operation: &str) -> Result<Vec<Value>, QqlError> {
+    value
+        .get("result")
+        .and_then(Value::as_array)
+        .cloned()
+        .ok_or_else(|| {
+            QqlError::backend(
+                "QQL-BACKEND-ENVELOPE",
+                format!("{operation} response result must be an array"),
+                None,
+            )
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_qdrant_success_envelope() {
+        let value = serde_json::json!({
+            "result": [],
+            "status": "ok",
+            "time": 0.001,
+        });
+        assert!(validate_success_envelope(&value, "test").is_ok());
+        assert!(result_array(&value, "test").is_ok());
+    }
+
+    #[test]
+    fn rejects_missing_result() {
+        let value = serde_json::json!({ "status": "ok" });
+        let error = validate_success_envelope(&value, "test").unwrap_err();
+        assert_eq!(error.code, "QQL-BACKEND-ENVELOPE");
+    }
+
+    #[test]
+    fn rejects_non_ok_status() {
+        let value = serde_json::json!({ "result": [], "status": "error" });
+        let error = validate_success_envelope(&value, "test").unwrap_err();
+        assert_eq!(error.code, "QQL-BACKEND-ENVELOPE");
     }
 }

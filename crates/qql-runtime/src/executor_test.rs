@@ -16,8 +16,6 @@ struct MockQdrantClient {
     pub exists: bool,
     pub collections: Vec<String>,
     pub info: Option<CollectionInfo>,
-    pub last_create_collection: Arc<Mutex<Option<CreateCollectionReq>>>,
-    pub last_update_collection: Arc<Mutex<Option<serde_json::Value>>>,
     pub last_route: Arc<Mutex<Option<Route>>>,
     pub batch_call_count: Arc<Mutex<usize>>,
     pub last_batch_searches_count: Arc<Mutex<usize>>,
@@ -31,8 +29,6 @@ impl Default for MockQdrantClient {
             exists: false,
             collections: Vec::new(),
             info: None,
-            last_create_collection: Arc::new(Mutex::new(None)),
-            last_update_collection: Arc::new(Mutex::new(None)),
             last_route: Arc::new(Mutex::new(None)),
             batch_call_count: Arc::new(Mutex::new(0)),
             last_batch_searches_count: Arc::new(Mutex::new(0)),
@@ -56,11 +52,11 @@ impl QdrantOps for MockQdrantClient {
             .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "no mock info set", None))
     }
     async fn create_collection(&self, req: CreateCollectionReq) -> Result<(), QqlError> {
-        *self.last_create_collection.lock().unwrap() = Some(req);
+        let _ = req;
         Ok(())
     }
     async fn update_collection(&self, req: serde_json::Value) -> Result<(), QqlError> {
-        *self.last_update_collection.lock().unwrap() = Some(req);
+        let _ = req;
         Ok(())
     }
     async fn delete_collection(&self, _name: &str) -> Result<(), QqlError> {
@@ -158,54 +154,69 @@ impl crate::embedder::Embedder for MockEmbedder {
 #[tokio::test]
 async fn test_create_collection_with_hnsw_and_quantization() {
     let client = MockQdrantClient::default();
-    let last_create = client.last_create_collection.clone();
+    let last_route = client.last_route.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let query = "CREATE COLLECTION mycol WITH HNSW (m = 32, ef_construct = 100) WITH QUANTIZATION (type = 'scalar', always_ram = true, quantile = 0.99)";
     let resp = executor.execute(query).await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
-    let req_opt = last_create.lock().unwrap().take();
-    assert!(req_opt.is_some());
-    let req = req_opt.unwrap();
-    assert_eq!(req.collection_name, "mycol");
+    let route = last_route.lock().unwrap().take().unwrap();
+    assert_eq!(route.path, "/collections/mycol");
+    let req = route.body_json().unwrap();
+    assert_eq!(req["vectors"]["dense"]["size"], 384);
 
     // Check HNSW config serialization
-    let hnsw = req.hnsw_config.unwrap();
+    let hnsw = &req["hnsw_config"];
     assert_eq!(hnsw["m"], 32);
     assert_eq!(hnsw["ef_construct"], 100);
 
     // Check Quantization config serialization
-    let quant = req.quantization_config.unwrap();
-    assert!(quant.get("scalar").is_some());
-    let scalar = &quant["scalar"];
-    assert_eq!(scalar["type"], "int8");
-    assert_eq!(scalar["always_ram"], true);
-    assert_eq!(scalar["quantile"], 0.99);
+    let quant = &req["quantization_config"];
+    assert_eq!(quant["disabled"], false);
+    assert_eq!(quant["quantization_config"]["type"], "scalar");
+    assert_eq!(quant["quantization_config"]["always_ram"], true);
+    assert_eq!(quant["quantization_config"]["quantile"], 0.99);
+}
+
+#[tokio::test]
+async fn test_create_hybrid_materializes_default_schema() {
+    let client = MockQdrantClient::default();
+    let last_route = client.last_route.clone();
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+
+    executor
+        .execute("CREATE COLLECTION mycol HYBRID")
+        .await
+        .unwrap();
+
+    let route = last_route.lock().unwrap().take().unwrap();
+    let req = route.body_json().unwrap();
+    assert_eq!(req["vectors"]["dense"]["size"], 384);
+    assert_eq!(req["sparse_vectors"]["sparse"]["modifier"], "idf");
 }
 
 #[tokio::test]
 async fn test_create_collection_with_optimizers_and_params() {
     let client = MockQdrantClient::default();
-    let last_create = client.last_create_collection.clone();
+    let last_route = client.last_route.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let query = "CREATE COLLECTION mycol WITH OPTIMIZERS (deleted_threshold = 0.2, default_segment_number = 4, max_optimization_threads = 2) WITH PARAMS (replication_factor = 2, on_disk_payload = true)";
     let resp = executor.execute(query).await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
-    let req_opt = last_create.lock().unwrap().take();
-    assert!(req_opt.is_some());
-    let req = req_opt.unwrap();
+    let route = last_route.lock().unwrap().take().unwrap();
+    let req = route.body_json().unwrap();
 
     // Check Optimizers config serialization
-    let opt = req.optimizers_config.unwrap();
+    let opt = &req["optimizers_config"];
     assert_eq!(opt["deleted_threshold"], 0.2);
     assert_eq!(opt["default_segment_number"], 4);
     assert_eq!(opt["max_optimization_threads"], 2);
 
     // Check Params serialization
-    let params = req.params.unwrap();
+    let params = &req["params"];
     assert_eq!(params["replication_factor"], 2);
     assert_eq!(params["on_disk_payload"], true);
 }
@@ -213,18 +224,17 @@ async fn test_create_collection_with_optimizers_and_params() {
 #[tokio::test]
 async fn test_create_collection_with_named_vectors_hnsw_quant() {
     let client = MockQdrantClient::default();
-    let last_create = client.last_create_collection.clone();
+    let last_route = client.last_route.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let query = "CREATE COLLECTION mycol (dense_vec VECTOR(128, Cosine) WITH HNSW (m = 16) WITH QUANTIZATION (type = 'binary', always_ram = false))";
     let resp = executor.execute(query).await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
-    let req_opt = last_create.lock().unwrap().take();
-    assert!(req_opt.is_some());
-    let req = req_opt.unwrap();
+    let route = last_route.lock().unwrap().take().unwrap();
+    let req = route.body_json().unwrap();
 
-    let vectors = req.vectors_config.unwrap();
+    let vectors = &req["vectors"];
     assert!(vectors.get("dense_vec").is_some());
     let v_conf = &vectors["dense_vec"];
     assert_eq!(v_conf["size"], 128);
@@ -236,45 +246,49 @@ async fn test_create_collection_with_named_vectors_hnsw_quant() {
 
     // Check per-vector Quantization
     let quant = &v_conf["quantization_config"];
-    assert!(quant.get("binary").is_some());
-    assert_eq!(quant["binary"]["always_ram"], false);
+    assert_eq!(quant["type"], "binary");
+    assert_eq!(quant["always_ram"], false);
 }
 
 #[tokio::test]
 async fn test_alter_collection_quantization_and_hnsw() {
     let mut client = MockQdrantClient::default();
     client.exists = true;
-    let last_update = client.last_update_collection.clone();
+    let last_route = client.last_route.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let query = "ALTER COLLECTION mycol WITH HNSW (ef_construct = 150) WITH QUANTIZATION (type = 'product', always_ram = true)";
     let resp = executor.execute(query).await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
-    let req_opt = last_update.lock().unwrap().take();
-    assert!(req_opt.is_some());
-    let req = req_opt.unwrap();
+    let route = last_route.lock().unwrap().take().unwrap();
+    assert_eq!(route.path, "/collections/mycol");
+    let req = route.body_json().unwrap();
 
-    assert_eq!(req["collection_name"], "mycol");
     assert_eq!(req["hnsw_config"]["ef_construct"], 150);
-    assert_eq!(req["quantization_config"]["product"]["always_ram"], true);
-    assert_eq!(req["quantization_config"]["product"]["compression"], "x4");
+    assert_eq!(
+        req["quantization_config"]["quantization_config"]["type"],
+        "product"
+    );
+    assert_eq!(
+        req["quantization_config"]["quantization_config"]["always_ram"],
+        true
+    );
 }
 
 #[tokio::test]
 async fn test_alter_collection_disable_quantization() {
     let mut client = MockQdrantClient::default();
     client.exists = true;
-    let last_update = client.last_update_collection.clone();
+    let last_route = client.last_route.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let query = "ALTER COLLECTION mycol WITH QUANTIZATION (disabled = true)";
     let resp = executor.execute(query).await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
-    let req_opt = last_update.lock().unwrap().take();
-    assert!(req_opt.is_some());
-    let req = req_opt.unwrap();
+    let route = last_route.lock().unwrap().take().unwrap();
+    let req = route.body_json().unwrap();
 
     assert_eq!(req["quantization_config"]["disabled"], true);
 }

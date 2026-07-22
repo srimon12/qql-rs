@@ -45,8 +45,16 @@ pub struct Route {
 }
 
 impl Route {
+    pub fn try_body_json(&self) -> Result<Option<serde_json::Value>, qql_core::error::QqlError> {
+        self.body.as_ref().map(RequestBody::to_json).transpose()
+    }
+
+    /// Compatibility helper for callers that only need an optional body.
+    /// Request bodies contain JSON-safe values, so serialization failure is an
+    /// internal invariant violation rather than an absent body.
     pub fn body_json(&self) -> Option<serde_json::Value> {
-        self.body.as_ref().and_then(|b| b.to_json().ok())
+        self.try_body_json()
+            .expect("request body serialization must be infallible")
     }
 }
 

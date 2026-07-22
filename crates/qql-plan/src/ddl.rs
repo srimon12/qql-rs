@@ -47,7 +47,7 @@ pub fn lower_create_collection(stmt: &CreateCollectionStmt) -> CreateCollectionR
 
     let mut sparse = serde_json::Map::new();
     for sv in &stmt.sparse_vectors {
-        sparse.insert(sv.name.clone(), serde_json::json!({}));
+        sparse.insert(sv.name.clone(), serde_json::json!({"modifier": "idf"}));
     }
     if !sparse.is_empty() {
         req.sparse_vectors = Some(sparse);
@@ -55,6 +55,20 @@ pub fn lower_create_collection(stmt: &CreateCollectionStmt) -> CreateCollectionR
 
     if let Some(ref config) = stmt.config {
         fill_collection_config(&mut req, config);
+    }
+
+    if let Some(on_disk) = req
+        .vectors_config
+        .take()
+        .and_then(|config| config.get("on_disk").and_then(serde_json::Value::as_bool))
+    {
+        if let Some(vectors) = &mut req.vectors {
+            for vector in vectors.values_mut() {
+                if let Some(vector) = vector.as_object_mut() {
+                    vector.insert("on_disk".into(), serde_json::Value::Bool(on_disk));
+                }
+            }
+        }
     }
 
     req
