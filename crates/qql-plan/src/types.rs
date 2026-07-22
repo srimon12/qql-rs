@@ -2,6 +2,10 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use serde::Serialize;
 
+pub use crate::semantic::{
+    PlanFormula, PlanPointId, PlanPointVectors, PlanQueryInput, PlanVectorValue,
+};
+
 // ── Method ──────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -355,7 +359,7 @@ pub struct QuantizationSearchRequest {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct NearestQuery {
-    pub nearest: serde_json::Value,
+    pub nearest: PlanQueryInput,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mmr: Option<MmrQueryParams>,
 }
@@ -410,21 +414,21 @@ pub struct RrfQuery {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FormulaQuery {
-    pub formula: serde_json::Value,
+    pub formula: PlanFormula,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub defaults: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RelevanceFeedbackInput {
-    pub target: serde_json::Value,
+    pub target: PlanQueryInput,
     pub feedback: Vec<FeedbackItem>,
     pub strategy: FeedbackStrategy,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FeedbackItem {
-    pub example: serde_json::Value,
+    pub example: PlanQueryInput,
     pub score: f64,
 }
 
@@ -442,21 +446,21 @@ pub struct NaiveFeedbackStrategyParams {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RecommendQuery {
-    pub positive: Vec<serde_json::Value>,
-    pub negative: Vec<serde_json::Value>,
+    pub positive: Vec<PlanQueryInput>,
+    pub negative: Vec<PlanQueryInput>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub strategy: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ContextPair {
-    pub positive: serde_json::Value,
-    pub negative: serde_json::Value,
+    pub positive: PlanQueryInput,
+    pub negative: PlanQueryInput,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DiscoverQuery {
-    pub target: serde_json::Value,
+    pub target: PlanQueryInput,
     pub context: Vec<ContextPair>,
 }
 
@@ -496,7 +500,7 @@ pub struct LookupRequest {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct PointsRequest {
-    pub ids: Vec<serde_json::Value>,
+    pub ids: Vec<PlanPointId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub with_payload: Option<PayloadSelectorReq>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -525,7 +529,7 @@ pub struct ScrollRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<FilterExpression>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub offset: Option<serde_json::Value>,
+    pub offset: Option<PlanPointId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -549,9 +553,9 @@ pub struct UpsertRequest {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct UpsertPointRequest {
-    pub id: serde_json::Value,
+    pub id: PlanPointId,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub vector: Option<serde_json::Value>,
+    pub vector: Option<PlanPointVectors>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payload: Option<serde_json::Map<String, serde_json::Value>>,
 }
@@ -559,7 +563,7 @@ pub struct UpsertPointRequest {
 #[derive(Debug, Clone, Serialize)]
 pub struct DeleteRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub points: Option<Vec<serde_json::Value>>,
+    pub points: Option<Vec<PlanPointId>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<FilterExpression>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -573,14 +577,14 @@ pub struct UpdateVectorRequest {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct UpdateVectorPoint {
-    pub id: serde_json::Value,
-    pub vector: serde_json::Value,
+    pub id: PlanPointId,
+    pub vector: PlanPointVectors,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct UpdatePayloadRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub points: Option<Vec<serde_json::Value>>,
+    pub points: Option<Vec<PlanPointId>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<FilterExpression>,
     pub payload: serde_json::Map<String, serde_json::Value>,
@@ -589,7 +593,7 @@ pub struct UpdatePayloadRequest {
 #[derive(Debug, Clone, Serialize)]
 pub struct ClearPayloadRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub points: Option<Vec<serde_json::Value>>,
+    pub points: Option<Vec<PlanPointId>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<FilterExpression>,
 }
@@ -597,7 +601,7 @@ pub struct ClearPayloadRequest {
 #[derive(Debug, Clone, Serialize)]
 pub struct DeleteVectorRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub points: Option<Vec<serde_json::Value>>,
+    pub points: Option<Vec<PlanPointId>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<FilterExpression>,
     pub vector: Vec<String>,

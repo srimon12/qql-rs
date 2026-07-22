@@ -2,21 +2,41 @@ use qdrant_edge::{PointId, Record};
 use serde_json::Value;
 
 use qql_core::error::QqlError;
+use qql_plan::PlanPointId;
 
-pub(crate) fn to_edge_id(id: serde_json::Value) -> Result<PointId, QqlError> {
-    match id {
-        Value::Number(n) => n
-            .as_u64()
-            .map(PointId::NumId)
-            .ok_or_else(|| QqlError::execution("QQL-EDGE", "invalid point id number", None)),
-        Value::String(s) => uuid::Uuid::parse_str(&s).map(PointId::Uuid).map_err(|e| {
+pub(crate) fn to_edge_id(id: impl IntoPlanPointId) -> Result<PointId, QqlError> {
+    match id.into_plan_point_id() {
+        PlanPointId::Number(n) => Ok(PointId::NumId(n)),
+        PlanPointId::String(s) => uuid::Uuid::parse_str(&s).map(PointId::Uuid).map_err(|e| {
             QqlError::execution("QQL-EDGE", format!("invalid UUID point id: {e}"), None)
         }),
-        _ => Err(QqlError::execution(
-            "QQL-EDGE",
-            "unsupported point id type",
-            None,
-        )),
+    }
+}
+
+/// Accept typed plan IDs and legacy JSON values during the migration.
+pub(crate) trait IntoPlanPointId {
+    fn into_plan_point_id(self) -> PlanPointId;
+}
+
+impl IntoPlanPointId for PlanPointId {
+    fn into_plan_point_id(self) -> PlanPointId {
+        self
+    }
+}
+
+impl IntoPlanPointId for &PlanPointId {
+    fn into_plan_point_id(self) -> PlanPointId {
+        self.clone()
+    }
+}
+
+impl IntoPlanPointId for serde_json::Value {
+    fn into_plan_point_id(self) -> PlanPointId {
+        match self {
+            Value::Number(n) => PlanPointId::Number(n.as_u64().unwrap_or(0)),
+            Value::String(s) => PlanPointId::String(s),
+            _ => PlanPointId::Number(0),
+        }
     }
 }
 

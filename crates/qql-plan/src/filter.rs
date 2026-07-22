@@ -264,6 +264,10 @@ pub fn point_id_req(id: &qql_core::ast::PointId) -> serde_json::Value {
     }
 }
 
+pub fn point_id_req_typed(id: &qql_core::ast::PointId) -> crate::semantic::PlanPointId {
+    crate::semantic::PlanPointId::from(id)
+}
+
 fn geo_point_req(point: &GeoPoint) -> crate::types::GeoPoint {
     crate::types::GeoPoint {
         lat: point.lat,

@@ -198,6 +198,7 @@ pub fn compile_query(input: String) -> napi::Result<serde_json::Value> {
             Some(qql_plan::routing::RequestBody::CreateShardKey(_)) => "create_shard_key",
             Some(qql_plan::routing::RequestBody::DropShardKey(_)) => "drop_shard_key",
             Some(qql_plan::routing::RequestBody::CreateCollection(_)) => "create_collection",
+            Some(qql_plan::routing::RequestBody::UpdateCollection(_)) => "update_collection",
             Some(qql_plan::routing::RequestBody::CreateIndex(_)) => "create_index",
             None => match route.method {
                 qql_plan::types::Method::Get if route.path == "/collections" => "show_collections",
@@ -349,7 +350,10 @@ impl JsClient {
     pub async fn execute(&self, query: serde_json::Value) -> napi::Result<String> {
         match &query {
             serde_json::Value::String(s) => {
-                let res = self.inner.execute(s).await
+                let res = self
+                    .inner
+                    .execute(s)
+                    .await
                     .map_err(|e| napi::Error::from_reason(e.to_string()))?;
                 serde_json::to_string(&res).map_err(|e| napi::Error::from_reason(e.to_string()))
             }
@@ -359,26 +363,45 @@ impl JsClient {
                 }
                 // Check first element to decide string batch vs Stmt batch
                 if arr[0].is_string() {
-                    let strs: Vec<&str> = arr.iter()
-                        .map(|v| v.as_str().ok_or_else(|| napi::Error::from_reason("batch items must be strings")))
+                    let strs: Vec<&str> = arr
+                        .iter()
+                        .map(|v| {
+                            v.as_str().ok_or_else(|| {
+                                napi::Error::from_reason("batch items must be strings")
+                            })
+                        })
                         .collect::<napi::Result<_>>()?;
-                    let results = self.inner.execute_batch(&strs, true).await
+                    let results = self
+                        .inner
+                        .execute_batch(&strs, true)
+                        .await
                         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-                    serde_json::to_string(&results).map_err(|e| napi::Error::from_reason(e.to_string()))
+                    serde_json::to_string(&results)
+                        .map_err(|e| napi::Error::from_reason(e.to_string()))
                 } else {
-                    let stmts: Vec<ast::Stmt> = arr.iter()
-                        .map(|v| serde_json::from_value(v.clone())
-                            .map_err(|e| napi::Error::from_reason(format!("invalid Stmt: {e}"))))
+                    let stmts: Vec<ast::Stmt> = arr
+                        .iter()
+                        .map(|v| {
+                            serde_json::from_value(v.clone())
+                                .map_err(|e| napi::Error::from_reason(format!("invalid Stmt: {e}")))
+                        })
                         .collect::<napi::Result<_>>()?;
-                    let results = self.inner.execute_batch_nodes(stmts, true).await
+                    let results = self
+                        .inner
+                        .execute_batch_nodes(stmts, true)
+                        .await
                         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-                    serde_json::to_string(&results).map_err(|e| napi::Error::from_reason(e.to_string()))
+                    serde_json::to_string(&results)
+                        .map_err(|e| napi::Error::from_reason(e.to_string()))
                 }
             }
             _ => {
                 let s: ast::Stmt = serde_json::from_value(query)
                     .map_err(|e| napi::Error::from_reason(format!("invalid Stmt: {e}")))?;
-                let res = self.inner.execute_node(s).await
+                let res = self
+                    .inner
+                    .execute_node(s)
+                    .await
                     .map_err(|e| napi::Error::from_reason(e.to_string()))?;
                 serde_json::to_string(&res).map_err(|e| napi::Error::from_reason(e.to_string()))
             }

@@ -195,8 +195,8 @@ pub fn validate_params_value(key: &str, value: &Value, pos: usize) -> Result<(),
             ));
         }
         "sharding_method" => match value {
-            Value::Str(s)
-                if s.eq_ignore_ascii_case("auto") || s.eq_ignore_ascii_case("custom") => {}
+            Value::Str(s) if s.eq_ignore_ascii_case("auto") || s.eq_ignore_ascii_case("custom") => {
+            }
             Value::Str(_) => {
                 return Err(QqlError::syntax(
                     "sharding_method must be 'auto' or 'custom'",

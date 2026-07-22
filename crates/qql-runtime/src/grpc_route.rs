@@ -5,6 +5,7 @@ use qql_plan::types::{
     FilterClause, FilterCompound, FilterExpression, MatchValue, PayloadSelectorReq,
     VectorSelectorReq, WithLookupValue,
 };
+use qql_plan::{PlanPointId, PlanPointVectors, PlanQueryInput, PlanVectorValue};
 
 fn extract_collection(path: &str) -> Result<String, QqlError> {
     let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
@@ -128,7 +129,7 @@ pub async fn execute_grpc_route(
                 .iter()
                 .map(|p| {
                     let id = to_point_id(&p.id);
-                    let vectors = p.vector.as_ref().and_then(|v| to_vectors(v.clone()));
+                    let vectors = p.vector.as_ref().and_then(|v| to_vectors(v));
                     let payload = p
                         .payload
                         .as_ref()
@@ -264,7 +265,7 @@ pub async fn execute_grpc_route(
                 .iter()
                 .map(|p| qdrant::PointVectors {
                     id: Some(to_point_id(&p.id)),
-                    vectors: to_vectors(p.vector.clone()),
+                    vectors: to_vectors(&p.vector),
                 })
                 .collect();
             let grpc_req = qdrant::UpdatePointVectors {
@@ -316,6 +317,42 @@ pub async fn execute_grpc_route(
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("set_payload: {e}"), None))?;
             Ok(serde_json::Value::Object(Default::default()))
         }
+        Some(RequestBody::UpdateCollection(req)) => {
+            let collection = extract_collection(&route.path)?;
+            let grpc_req = qdrant::UpdateCollection {
+                collection_name: collection,
+                optimizers_config: req.optimizers_config.as_ref().map(|v| {
+                    qdrant::OptimizersConfigDiff {
+                        deleted_threshold: v.get("deleted_threshold").and_then(|x| x.as_f64()),
+                        vacuum_min_vector_number: v
+                            .get("vacuum_min_vector_number")
+                            .and_then(|x| x.as_u64()),
+                        default_segment_number: v
+                            .get("default_segment_number")
+                            .and_then(|x| x.as_u64()),
+                        max_segment_size: v.get("max_segment_size").and_then(|x| x.as_u64()),
+                        memmap_threshold: v.get("memmap_threshold").and_then(|x| x.as_u64()),
+                        indexing_threshold: v.get("indexing_threshold").and_then(|x| x.as_u64()),
+                        flush_interval_sec: v.get("flush_interval_sec").and_then(|x| x.as_u64()),
+                        ..Default::default()
+                    }
+                }),
+                hnsw_config: req.hnsw_config.as_ref().map(|v| qdrant::HnswConfigDiff {
+                    m: v.get("m").and_then(|x| x.as_u64()),
+                    ef_construct: v.get("ef_construct").and_then(|x| x.as_u64()),
+                    full_scan_threshold: v.get("full_scan_threshold").and_then(|x| x.as_u64()),
+                    max_indexing_threads: v.get("max_indexing_threads").and_then(|x| x.as_u64()),
+                    on_disk: v.get("on_disk").and_then(|x| x.as_bool()),
+                    payload_m: v.get("payload_m").and_then(|x| x.as_u64()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            client.update_collection_raw(grpc_req).await.map_err(|e| {
+                QqlError::backend("QQL-GRPC", format!("update_collection: {e}"), None)
+            })?;
+            Ok(serde_json::Value::Object(Default::default()))
+        }
         Some(RequestBody::CreateCollection(req)) => {
             let collection = extract_collection(&route.path)?;
             let grpc_req = qdrant::CreateCollection {
@@ -352,6 +389,65 @@ pub async fn execute_grpc_route(
                         )),
                     }
                 }),
+                sparse_vectors_config: req.sparse_vectors.as_ref().map(|sv| {
+                    let map = sv
+                        .iter()
+                        .map(|(name, _)| {
+                            (
+                                name.clone(),
+                                qdrant::SparseVectorParams {
+                                    ..Default::default()
+                                },
+                            )
+                        })
+                        .collect();
+                    qdrant::SparseVectorConfig { map }
+                }),
+                hnsw_config: req.hnsw_config.as_ref().map(|v| qdrant::HnswConfigDiff {
+                    m: v.get("m").and_then(|x| x.as_u64()),
+                    ef_construct: v.get("ef_construct").and_then(|x| x.as_u64()),
+                    full_scan_threshold: v.get("full_scan_threshold").and_then(|x| x.as_u64()),
+                    max_indexing_threads: v.get("max_indexing_threads").and_then(|x| x.as_u64()),
+                    on_disk: v.get("on_disk").and_then(|x| x.as_bool()),
+                    payload_m: v.get("payload_m").and_then(|x| x.as_u64()),
+                    ..Default::default()
+                }),
+                optimizers_config: req.optimizers_config.as_ref().map(|v| {
+                    qdrant::OptimizersConfigDiff {
+                        deleted_threshold: v.get("deleted_threshold").and_then(|x| x.as_f64()),
+                        vacuum_min_vector_number: v
+                            .get("vacuum_min_vector_number")
+                            .and_then(|x| x.as_u64()),
+                        default_segment_number: v
+                            .get("default_segment_number")
+                            .and_then(|x| x.as_u64()),
+                        max_segment_size: v.get("max_segment_size").and_then(|x| x.as_u64()),
+                        memmap_threshold: v.get("memmap_threshold").and_then(|x| x.as_u64()),
+                        indexing_threshold: v.get("indexing_threshold").and_then(|x| x.as_u64()),
+                        flush_interval_sec: v.get("flush_interval_sec").and_then(|x| x.as_u64()),
+                        ..Default::default()
+                    }
+                }),
+                shard_number: req
+                    .shard_number
+                    .or_else(|| {
+                        req.params
+                            .as_ref()
+                            .and_then(|p| p.get("shard_number"))
+                            .and_then(|v| v.as_u64())
+                    })
+                    .map(|n| n as u32),
+                replication_factor: req
+                    .params
+                    .as_ref()
+                    .and_then(|p| p.get("replication_factor"))
+                    .and_then(|v| v.as_u64())
+                    .map(|n| n as u32),
+                on_disk_payload: req
+                    .params
+                    .as_ref()
+                    .and_then(|p| p.get("on_disk_payload"))
+                    .and_then(|v| v.as_bool()),
                 ..Default::default()
             };
             client.create_collection_raw(grpc_req).await.map_err(|e| {
@@ -554,11 +650,7 @@ pub async fn execute_query_batch_grpc(
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("query_batch: {e}"), None))?;
 
-    Ok(resp
-        .result
-        .into_iter()
-        .map(batch_result_to_json)
-        .collect())
+    Ok(resp.result.into_iter().map(batch_result_to_json).collect())
 }
 
 /// Convert a mutation batch and send via gRPC `UpdateBatch`.
@@ -585,11 +677,7 @@ pub async fn execute_update_batch_grpc(
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("update_batch: {e}"), None))?;
 
-    Ok(resp
-        .result
-        .into_iter()
-        .map(update_result_to_json)
-        .collect())
+    Ok(resp.result.into_iter().map(update_result_to_json).collect())
 }
 
 fn to_points_update_operation(op: &qql_plan::UpdateOperation) -> qdrant::PointsUpdateOperation {
@@ -613,7 +701,7 @@ fn to_points_update_operation(op: &qql_plan::UpdateOperation) -> qdrant::PointsU
                         .unwrap_or_default();
                     qdrant::PointStruct {
                         id: Some(to_point_id(&p.id)),
-                        vectors: p.vector.as_ref().and_then(|v| to_vectors(v.clone())),
+                        vectors: p.vector.as_ref().and_then(|v| to_vectors(v)),
                         payload,
                     }
                 })
@@ -675,7 +763,7 @@ fn to_points_update_operation(op: &qql_plan::UpdateOperation) -> qdrant::PointsU
                 .iter()
                 .map(|p| qdrant::PointVectors {
                     id: Some(to_point_id(&p.id)),
-                    vectors: to_vectors(p.vector.clone()),
+                    vectors: to_vectors(&p.vector),
                 })
                 .collect();
             Operation::UpdateVectors(points_update_operation::UpdateVectors {
@@ -704,7 +792,7 @@ fn to_points_update_operation(op: &qql_plan::UpdateOperation) -> qdrant::PointsU
 }
 
 fn points_and_filter_selector(
-    points: Option<&Vec<serde_json::Value>>,
+    points: Option<&Vec<PlanPointId>>,
     filter: Option<&FilterExpression>,
 ) -> Option<qdrant::PointsSelector> {
     if let Some(points) = points {
@@ -818,18 +906,10 @@ fn to_query_variant(qv: &qql_plan::types::QueryVariant) -> Result<qdrant::Query,
     use qql_plan::types::QueryVariant;
 
     let variant = match qv {
-        QueryVariant::Nearest(nq) => Variant::Nearest(to_vector_input(nq.nearest.clone())),
+        QueryVariant::Nearest(nq) => Variant::Nearest(to_vector_input(&nq.nearest)),
         QueryVariant::Recommend { recommend } => Variant::Recommend(qdrant::RecommendInput {
-            positive: recommend
-                .positive
-                .iter()
-                .map(|v| to_vector_input(v.clone()))
-                .collect(),
-            negative: recommend
-                .negative
-                .iter()
-                .map(|v| to_vector_input(v.clone()))
-                .collect(),
+            positive: recommend.positive.iter().map(to_vector_input).collect(),
+            negative: recommend.negative.iter().map(to_vector_input).collect(),
             strategy: recommend.strategy.as_deref().map(|s| match s {
                 "average_vector" => qdrant::RecommendStrategy::AverageVector as i32,
                 "best_score" => qdrant::RecommendStrategy::BestScore as i32,
@@ -841,20 +921,20 @@ fn to_query_variant(qv: &qql_plan::types::QueryVariant) -> Result<qdrant::Query,
             pairs: context
                 .iter()
                 .map(|p| qdrant::ContextInputPair {
-                    positive: Some(to_vector_input(p.positive.clone())),
-                    negative: Some(to_vector_input(p.negative.clone())),
+                    positive: Some(to_vector_input(&p.positive)),
+                    negative: Some(to_vector_input(&p.negative)),
                 })
                 .collect(),
         }),
         QueryVariant::Discover { discover } => Variant::Discover(qdrant::DiscoverInput {
-            target: Some(to_vector_input(discover.target.clone())),
+            target: Some(to_vector_input(&discover.target)),
             context: Some(qdrant::ContextInput {
                 pairs: discover
                     .context
                     .iter()
                     .map(|p| qdrant::ContextInputPair {
-                        positive: Some(to_vector_input(p.positive.clone())),
-                        negative: Some(to_vector_input(p.negative.clone())),
+                        positive: Some(to_vector_input(&p.positive)),
+                        negative: Some(to_vector_input(&p.negative)),
                     })
                     .collect(),
             }),
@@ -882,7 +962,7 @@ fn to_query_variant(qv: &qql_plan::types::QueryVariant) -> Result<qdrant::Query,
         }
         QueryVariant::Rrf(_rrf_q) => Variant::Fusion(1),
         QueryVariant::Formula(fq) => Variant::Formula(qdrant::Formula {
-            expression: to_formula_expression(&fq.formula),
+            expression: to_formula_expression(&qql_plan::query::lower_formula_expr(&fq.formula.0)),
             defaults: fq
                 .defaults
                 .clone()
@@ -896,7 +976,7 @@ fn to_query_variant(qv: &qql_plan::types::QueryVariant) -> Result<qdrant::Query,
                 .feedback
                 .iter()
                 .map(|item| qdrant::FeedbackItem {
-                    example: Some(to_vector_input(item.example.clone())),
+                    example: Some(to_vector_input(&item.example)),
                     score: item.score as f32,
                 })
                 .collect();
@@ -910,7 +990,7 @@ fn to_query_variant(qv: &qql_plan::types::QueryVariant) -> Result<qdrant::Query,
                 )),
             });
             Variant::RelevanceFeedback(qdrant::RelevanceFeedbackInput {
-                target: Some(to_vector_input(relevance_feedback.target.clone())),
+                target: Some(to_vector_input(&relevance_feedback.target)),
                 feedback,
                 strategy,
             })
@@ -921,106 +1001,39 @@ fn to_query_variant(qv: &qql_plan::types::QueryVariant) -> Result<qdrant::Query,
     })
 }
 
-fn looks_like_uuid(s: &str) -> bool {
-    // Qdrant string point IDs are UUIDs. Heuristic: 8-4-4-4-12 hex with dashes.
-    let b = s.as_bytes();
-    if b.len() != 36 {
-        return false;
-    }
-    let is_hex = |c: u8| c.is_ascii_hexdigit();
-    let positions_dash = [8usize, 13, 18, 23];
-    for (i, &c) in b.iter().enumerate() {
-        if positions_dash.contains(&i) {
-            if c != b'-' {
-                return false;
-            }
-        } else if !is_hex(c) {
-            return false;
-        }
-    }
-    true
-}
-
-fn to_vector_input(val: serde_json::Value) -> qdrant::VectorInput {
+fn to_vector_input(input: &PlanQueryInput) -> qdrant::VectorInput {
     use qdrant::vector_input::Variant;
-    if let Some(n) = val.as_u64() {
-        return qdrant::VectorInput {
-            variant: Some(Variant::Id(qdrant::PointId {
-                point_id_options: Some(qdrant::point_id::PointIdOptions::Num(n)),
-            })),
-        };
-    }
-    if let Some(s) = val.as_str() {
-        // Bare strings are ExtendedPointId (UUID) on the OpenAPI wire, not documents.
-        // Free-text documents always serialize as {"text":..., "model":...}.
-        if looks_like_uuid(s) {
-            return qdrant::VectorInput {
-                variant: Some(Variant::Id(qdrant::PointId {
-                    point_id_options: Some(qdrant::point_id::PointIdOptions::Uuid(s.into())),
+    match input {
+        PlanQueryInput::Point(id) => qdrant::VectorInput {
+            variant: Some(Variant::Id(to_point_id(id))),
+        },
+        PlanQueryInput::Vector(PlanVectorValue::Dense(data)) => qdrant::VectorInput {
+            variant: Some(Variant::Dense(qdrant::DenseVector { data: data.clone() })),
+        },
+        PlanQueryInput::Vector(PlanVectorValue::Sparse { indices, values }) => {
+            qdrant::VectorInput {
+                variant: Some(Variant::Sparse(qdrant::SparseVector {
+                    indices: indices.clone(),
+                    values: values.clone(),
                 })),
-            };
+            }
         }
-        // Non-UUID bare strings: treat as document text (plan legacy text without model).
-        return qdrant::VectorInput {
+        PlanQueryInput::Vector(PlanVectorValue::MultiDense(rows)) => qdrant::VectorInput {
+            variant: Some(Variant::MultiDense(qdrant::MultiDenseVector {
+                vectors: rows
+                    .iter()
+                    .map(|row| qdrant::DenseVector { data: row.clone() })
+                    .collect(),
+            })),
+        },
+        PlanQueryInput::Document { text, model } => qdrant::VectorInput {
             variant: Some(Variant::Document(qdrant::Document {
-                text: s.into(),
+                text: text.clone(),
+                model: model.clone().unwrap_or_default(),
                 ..Default::default()
             })),
-        };
+        },
     }
-    if let Some(arr) = val.as_array() {
-        // Multidense: array of arrays
-        if arr.first().map(|v| v.is_array()).unwrap_or(false) {
-            if let Some(vectors) = arr
-                .iter()
-                .map(|row| {
-                    let data = json_f32_array(row.as_array()?)?;
-                    Some(qdrant::DenseVector { data })
-                })
-                .collect::<Option<Vec<_>>>()
-            {
-                return qdrant::VectorInput {
-                    variant: Some(Variant::MultiDense(qdrant::MultiDenseVector { vectors })),
-                };
-            }
-        } else if let Some(data) = json_f32_array(arr) {
-            return qdrant::VectorInput {
-                variant: Some(Variant::Dense(qdrant::DenseVector { data })),
-            };
-        }
-    }
-    if let Some(obj) = val.as_object() {
-        if let Some(text) = obj.get("text").and_then(|v| v.as_str()) {
-            return qdrant::VectorInput {
-                variant: Some(Variant::Document(qdrant::Document {
-                    text: text.into(),
-                    model: obj
-                        .get("model")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .into(),
-                    ..Default::default()
-                })),
-            };
-        }
-        // Sparse query vector
-        if let (Some(indices), Some(values)) = (obj.get("indices"), obj.get("values")) {
-            if let (Some(idx_arr), Some(val_arr)) = (indices.as_array(), values.as_array()) {
-                if let (Some(indices), Some(values)) = (
-                    idx_arr
-                        .iter()
-                        .map(|v| v.as_u64().map(|n| n as u32))
-                        .collect::<Option<Vec<_>>>(),
-                    json_f32_array(val_arr),
-                ) {
-                    return qdrant::VectorInput {
-                        variant: Some(Variant::Sparse(qdrant::SparseVector { indices, values })),
-                    };
-                }
-            }
-        }
-    }
-    qdrant::VectorInput { variant: None }
 }
 
 fn to_filter(fe: &FilterExpression) -> qdrant::Filter {
@@ -1106,7 +1119,7 @@ fn to_condition(clause: &FilterClause) -> qdrant::Condition {
         },
         FilterClause::HasId(h) => qdrant::Condition {
             condition_one_of: Some(ConditionOneOf::HasId(qdrant::HasIdCondition {
-                has_id: h.has_id.iter().map(to_point_id).collect(),
+                has_id: h.has_id.iter().map(to_point_id_json).collect(),
             })),
         },
         FilterClause::HasVector(v) => qdrant::Condition {
@@ -1129,7 +1142,9 @@ fn to_condition(clause: &FilterClause) -> qdrant::Condition {
 fn exact_list_match(values: &[serde_json::Value], any: bool) -> qdrant::Match {
     use qdrant::r#match::MatchValue as Mv;
     let all_strings = values.iter().all(|v| v.is_string());
-    let all_ints = values.iter().all(|v| v.as_i64().is_some() || v.as_u64().is_some());
+    let all_ints = values
+        .iter()
+        .all(|v| v.as_i64().is_some() || v.as_u64().is_some());
     if all_strings {
         let strings: Vec<String> = values
             .iter()
@@ -1205,7 +1220,18 @@ fn to_match(mv: &MatchValue) -> qdrant::Match {
     }
 }
 
-fn to_point_id(val: &serde_json::Value) -> qdrant::PointId {
+fn to_point_id(id: &PlanPointId) -> qdrant::PointId {
+    match id {
+        PlanPointId::Number(n) => qdrant::PointId {
+            point_id_options: Some(qdrant::point_id::PointIdOptions::Num(*n)),
+        },
+        PlanPointId::String(s) => qdrant::PointId {
+            point_id_options: Some(qdrant::point_id::PointIdOptions::Uuid(s.clone())),
+        },
+    }
+}
+
+fn to_point_id_json(val: &serde_json::Value) -> qdrant::PointId {
     match val {
         serde_json::Value::Number(n) => qdrant::PointId {
             point_id_options: Some(qdrant::point_id::PointIdOptions::Num(
@@ -1263,13 +1289,14 @@ fn to_search_params(params: &qql_plan::types::SearchParamsRequest) -> qdrant::Se
         hnsw_ef: params.hnsw_ef,
         exact: params.exact,
         indexed_only: params.indexed_only,
-        quantization: params.quantization.as_ref().map(|q| {
-            qdrant::QuantizationSearchParams {
+        quantization: params
+            .quantization
+            .as_ref()
+            .map(|q| qdrant::QuantizationSearchParams {
                 ignore: q.ignore,
                 rescore: q.rescore,
                 oversampling: q.oversampling,
-            }
-        }),
+            }),
         acorn: params.acorn.as_ref().map(|a| qdrant::AcornSearchParams {
             enable: Some(a.enable),
             max_selectivity: a.max_selectivity,
@@ -1277,85 +1304,54 @@ fn to_search_params(params: &qql_plan::types::SearchParamsRequest) -> qdrant::Se
     }
 }
 
-fn json_f32_array(arr: &[serde_json::Value]) -> Option<Vec<f32>> {
-    let mut out = Vec::with_capacity(arr.len());
-    for v in arr {
-        out.push(v.as_f64()? as f32);
-    }
-    Some(out)
-}
-
-fn json_to_vector(val: &serde_json::Value) -> Option<qdrant::Vector> {
-    // Sparse: { "indices": [...], "values": [...] }
-    if let Some(obj) = val.as_object() {
-        if let (Some(indices), Some(values)) = (obj.get("indices"), obj.get("values")) {
-            let indices = indices
-                .as_array()?
-                .iter()
-                .map(|v| v.as_u64().map(|n| n as u32))
-                .collect::<Option<Vec<_>>>()?;
-            let values = json_f32_array(values.as_array()?)?;
-            return Some(qdrant::Vector {
-                vector: Some(qdrant::vector::Vector::Sparse(qdrant::SparseVector {
-                    indices,
-                    values,
-                })),
-                ..Default::default()
-            });
-        }
-    }
-    if let Some(arr) = val.as_array() {
-        // Multidense: [[f32, ...], ...]
-        if arr.first().map(|v| v.is_array()).unwrap_or(false) {
-            let vectors = arr
-                .iter()
-                .map(|row| {
-                    let data = json_f32_array(row.as_array()?)?;
-                    Some(qdrant::DenseVector { data })
-                })
-                .collect::<Option<Vec<_>>>()?;
-            return Some(qdrant::Vector {
-                vector: Some(qdrant::vector::Vector::MultiDense(
-                    qdrant::MultiDenseVector { vectors },
-                )),
-                ..Default::default()
-            });
-        }
-        // Dense
-        let data = json_f32_array(arr)?;
-        return Some(qdrant::Vector {
-            vector: Some(qdrant::vector::Vector::Dense(qdrant::DenseVector { data })),
+fn plan_vector_to_proto(v: &PlanVectorValue) -> qdrant::Vector {
+    match v {
+        PlanVectorValue::Dense(data) => qdrant::Vector {
+            vector: Some(qdrant::vector::Vector::Dense(qdrant::DenseVector {
+                data: data.clone(),
+            })),
             ..Default::default()
-        });
+        },
+        PlanVectorValue::Sparse { indices, values } => qdrant::Vector {
+            vector: Some(qdrant::vector::Vector::Sparse(qdrant::SparseVector {
+                indices: indices.clone(),
+                values: values.clone(),
+            })),
+            ..Default::default()
+        },
+        PlanVectorValue::MultiDense(rows) => qdrant::Vector {
+            vector: Some(qdrant::vector::Vector::MultiDense(
+                qdrant::MultiDenseVector {
+                    vectors: rows
+                        .iter()
+                        .map(|row| qdrant::DenseVector { data: row.clone() })
+                        .collect(),
+                },
+            )),
+            ..Default::default()
+        },
     }
-    None
 }
 
-fn to_vectors(val: serde_json::Value) -> Option<qdrant::Vectors> {
-    // Unnamed dense / sparse / multidense
-    if let Some(vector) = json_to_vector(&val) {
-        return Some(qdrant::Vectors {
-            vectors_options: Some(qdrant::vectors::VectorsOptions::Vector(vector)),
-        });
-    }
-    // Named map
-    if let Some(obj) = val.as_object() {
-        let mut map = std::collections::HashMap::new();
-        for (name, v) in obj {
-            if let Some(vector) = json_to_vector(v) {
-                map.insert(name.clone(), vector);
-            }
-        }
-        if map.is_empty() {
-            return None;
-        }
-        return Some(qdrant::Vectors {
-            vectors_options: Some(qdrant::vectors::VectorsOptions::Vectors(
-                qdrant::NamedVectors { vectors: map },
+fn to_vectors(vectors: &PlanPointVectors) -> Option<qdrant::Vectors> {
+    match vectors {
+        PlanPointVectors::Unnamed(v) => Some(qdrant::Vectors {
+            vectors_options: Some(qdrant::vectors::VectorsOptions::Vector(
+                plan_vector_to_proto(v),
             )),
-        });
+        }),
+        PlanPointVectors::Named(entries) => {
+            let mut map = std::collections::HashMap::new();
+            for (name, v) in entries {
+                map.insert(name.clone(), plan_vector_to_proto(v));
+            }
+            Some(qdrant::Vectors {
+                vectors_options: Some(qdrant::vectors::VectorsOptions::Vectors(
+                    qdrant::NamedVectors { vectors: map },
+                )),
+            })
+        }
     }
-    None
 }
 
 fn to_formula_expression(val: &serde_json::Value) -> Option<qdrant::Expression> {
@@ -2172,6 +2168,7 @@ mod tests {
                 Some(RequestBody::CreateCollection(req)) => {
                     assert!(req.vectors.is_some() || req.hnsw_config.is_some());
                 }
+                Some(RequestBody::UpdateCollection(_)) => {}
                 Some(RequestBody::CreateIndex(req)) => {
                     assert_eq!(req.field_name, "title");
                 }

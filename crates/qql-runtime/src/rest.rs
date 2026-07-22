@@ -22,17 +22,34 @@ pub struct RestQdrant {
 
 impl RestQdrant {
     pub fn new(base_url: impl Into<String>, api_key: Option<String>) -> Self {
+        Self::with_timeout(base_url, api_key, Duration::from_secs(30))
+            .expect("failed to build reqwest client")
+    }
+
+    /// Construct with an explicit request timeout. Fallible so library
+    /// constructors never panic (RUN-015 / RUN-010).
+    pub fn with_timeout(
+        base_url: impl Into<String>,
+        api_key: Option<String>,
+        timeout: Duration,
+    ) -> Result<Self, QqlError> {
         let base_url = base_url.into();
         let client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .connect_timeout(Duration::from_secs(10))
+            .timeout(timeout)
+            .connect_timeout(Duration::from_secs(10).min(timeout))
             .build()
-            .expect("failed to build reqwest client");
-        Self {
+            .map_err(|e| {
+                QqlError::transport(
+                    "QQL-TRANSPORT",
+                    format!("failed to build HTTP client: {e}"),
+                    None,
+                )
+            })?;
+        Ok(Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             api_key,
             client,
-        }
+        })
     }
 
     pub fn with_client(base_url: String, api_key: Option<String>, client: Client) -> Self {
@@ -301,21 +318,49 @@ impl QdrantOps for RestQdrant {
             PlanMethod::Delete => Method::DELETE,
         };
 
-        let mut path = String::with_capacity(route.path.len() + 32);
-        path.push_str(&route.path);
+        // Build path without manual query encoding; use reqwest's query API (RUN-011).
+        let url = format!("{}{}", self.base_url, route.path);
+        let mut builder = match method {
+            Method::GET => self.client.get(&url),
+            Method::POST => self.client.post(&url),
+            Method::PUT => self.client.put(&url),
+            Method::PATCH => self.client.patch(&url),
+            Method::DELETE => self.client.delete(&url),
+            _ => self.client.request(method, &url),
+        };
         if !route.query.is_empty() {
-            path.push('?');
-            for (i, (k, v)) in route.query.iter().enumerate() {
-                if i > 0 {
-                    path.push('&');
-                }
-                path.push_str(k);
-                path.push('=');
-                path.push_str(v);
-            }
+            builder = builder.query(&route.query);
         }
-
-        self.call_body(method, &path, route.body.as_ref()).await
+        if let Some(ref key) = self.api_key {
+            builder = builder.header("api-key", key);
+        }
+        if let Some(body) = route.body.as_ref() {
+            builder = builder.json(body);
+        }
+        let resp = builder.send().await.map_err(|e| {
+            QqlError::transport("QQL-TRANSPORT", format!("REST request failed: {e}"), None)
+        })?;
+        let status = resp.status();
+        let text = resp.text().await.map_err(|e| {
+            QqlError::transport("QQL-TRANSPORT", format!("REST body read failed: {e}"), None)
+        })?;
+        if !status.is_success() {
+            return Err(QqlError::backend(
+                "QQL-BACKEND",
+                format!("REST {status}: {text}"),
+                None,
+            ));
+        }
+        if text.is_empty() {
+            return Ok(Value::Object(Default::default()));
+        }
+        serde_json::from_str(&text).map_err(|e| {
+            QqlError::backend(
+                "QQL-BACKEND",
+                format!("invalid JSON response: {e}; body={text}"),
+                None,
+            )
+        })
     }
 
     async fn execute_query_batch(

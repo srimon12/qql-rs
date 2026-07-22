@@ -63,12 +63,16 @@ async fn rerank_uses_model_not_vector_name() {
     let calls = mock.dense_calls.lock().unwrap();
     // At least one call must use the rerank model, never only the vector name as model.
     assert!(
-        calls.iter().any(|(m, t)| m == "colbert-v2" && t == "rerank-me"),
+        calls
+            .iter()
+            .any(|(m, t)| m == "colbert-v2" && t == "rerank-me"),
         "expected model=colbert-v2 for rerank text, got: {:?}",
         *calls
     );
     assert!(
-        !calls.iter().any(|(m, t)| m == "colbert" && t == "rerank-me"),
+        !calls
+            .iter()
+            .any(|(m, t)| m == "colbert" && t == "rerank-me"),
         "vector name must not be used as embedding model: {:?}",
         *calls
     );

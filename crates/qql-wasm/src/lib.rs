@@ -300,6 +300,7 @@ pub fn compile(query: &str) -> Result<String, JsValue> {
             Some(qql_plan::routing::RequestBody::CreateShardKey(_)) => "create_shard_key",
             Some(qql_plan::routing::RequestBody::DropShardKey(_)) => "drop_shard_key",
             Some(qql_plan::routing::RequestBody::CreateCollection(_)) => "create_collection",
+            Some(qql_plan::routing::RequestBody::UpdateCollection(_)) => "update_collection",
             Some(qql_plan::routing::RequestBody::CreateIndex(_)) => "create_index",
             None => match route.method {
                 qql_plan::types::Method::Get if route.path == "/collections" => "show_collections",
@@ -546,7 +547,10 @@ impl Client {
                     expected_dim
                 )));
             }
-            let vec: Vec<f32> = emb.iter().map(|v| v.as_f64().unwrap_or(0.0) as f32).collect();
+            let vec: Vec<f32> = emb
+                .iter()
+                .map(|v| v.as_f64().unwrap_or(0.0) as f32)
+                .collect();
             let idx = item["index"].as_u64().unwrap_or(fallback_i as u64) as usize;
             if idx >= expected {
                 return Err(JsValue::from_str(&format!(
@@ -571,10 +575,7 @@ impl Client {
     }
 
     /// Shared AST resolve via `qql-embed` (batched dense + local sparse).
-    async fn resolve_stmt_embeddings(
-        &self,
-        stmt: &mut qql_core::ast::Stmt,
-    ) -> Result<(), JsValue> {
+    async fn resolve_stmt_embeddings(&self, stmt: &mut qql_core::ast::Stmt) -> Result<(), JsValue> {
         if !self.has_embedder() {
             return Ok(());
         }
@@ -615,7 +616,8 @@ impl Client {
 
         if let Some(s) = query.as_string() {
             let val = self.execute_script(&s).await?;
-            return serde_wasm_bindgen::to_value(&val).map_err(|e| JsValue::from_str(&e.to_string()));
+            return serde_wasm_bindgen::to_value(&val)
+                .map_err(|e| JsValue::from_str(&e.to_string()));
         }
 
         Err(JsValue::from_str("query must be a string or string[]"))
@@ -656,9 +658,7 @@ impl Client {
         let mut i = 0;
         while i < stmts.len() {
             // Contiguous mutation batch
-            if let Some((coll, first_op)) =
-                qql_plan::mutation::lower_update_operation(&stmts[i])
-            {
+            if let Some((coll, first_op)) = qql_plan::mutation::lower_update_operation(&stmts[i]) {
                 let mut ops = vec![first_op];
                 let mut j = i + 1;
                 while j < stmts.len() {
@@ -721,9 +721,7 @@ impl Client {
                     let path = format!("/collections/{coll}/points/query/batch");
                     let body = serde_json::to_value(&batch)
                         .map_err(|e| JsValue::from_str(&e.to_string()))?;
-                    let resp = self
-                        .send_json("POST", &path, Some(body))
-                        .await?;
+                    let resp = self.send_json("POST", &path, Some(body)).await?;
                     let arr = resp
                         .get("result")
                         .and_then(|r| r.as_array())
@@ -842,9 +840,7 @@ impl Client {
 }
 
 #[cfg(feature = "client")]
-fn wasm_batchable_query(
-    stmt: &qql_core::ast::Stmt,
-) -> Option<(String, qql_core::ast::QueryStmt)> {
+fn wasm_batchable_query(stmt: &qql_core::ast::Stmt) -> Option<(String, qql_core::ast::QueryStmt)> {
     match stmt {
         qql_core::ast::Stmt::Query(q) => {
             if matches!(q.expression, qql_core::ast::QueryExpr::Points { .. }) || q.group.is_some()
@@ -865,9 +861,7 @@ fn wasm_batchable_query(
 // ── WASM dense embed collect/apply (mirrors runtime batching) ─────
 
 #[cfg(feature = "client")]
-
 // ── qql-embed::Embedder adapter (shared resolve path) ─────────────
-
 #[cfg(feature = "client")]
 #[async_trait(?Send)]
 impl Embedder for Client {

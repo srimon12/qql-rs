@@ -511,7 +511,12 @@ async fn test_batch_mutations_same_collection() {
     .unwrap();
     let results = executor.execute_batch_nodes(stmts, false).await.unwrap();
 
-    assert_eq!(results.len(), 3, "expected 3 results, got {}", results.len());
+    assert_eq!(
+        results.len(),
+        3,
+        "expected 3 results, got {}",
+        results.len()
+    );
     for r in &results {
         assert!(r.ok, "result should be ok: {:?}", r);
     }

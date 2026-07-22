@@ -27,8 +27,8 @@ use qql::backend::{CollectionInfo, CollectionSchema};
 use qql::client::{CreateCollectionReq, CreateFieldIndexReq, QdrantOps};
 use qql_core::error::QqlError;
 use qql_plan::routing::{RequestBody, Route};
-use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 use qql_plan::UpdateOperation as PlanUpdateOperation;
+use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 
 pub struct EdgeQdrant {
     base_path: PathBuf,
@@ -361,7 +361,12 @@ impl QdrantOps for EdgeQdrant {
                 let mut parsed_points = Vec::with_capacity(req.points.len());
                 for p in req.points {
                     let id = to_edge_id(p.id)?;
-                    let vector_struct = p.vector.unwrap_or_default().to_edge_vector()?;
+                    let vector_struct = p
+                        .vector
+                        .ok_or_else(|| {
+                            QqlError::execution("QQL-EDGE", "upsert point missing vector", None)
+                        })?
+                        .to_edge_vector()?;
                     let payload_val = Value::Object(p.payload.unwrap_or_default());
                     let ps = qdrant_edge::PointStruct::new(id, vector_struct, payload_val);
                     let psp: qdrant_edge::PointStructPersisted = ps.into();
@@ -582,7 +587,7 @@ impl QdrantOps for EdgeQdrant {
 
                 Ok(Value::Object(Default::default()))
             }
-            Some(RequestBody::CreateCollection(req)) => {
+            Some(RequestBody::CreateCollection(req)) | Some(RequestBody::UpdateCollection(req)) => {
                 let create_req = CreateCollectionReq {
                     collection_name: extract_collection(&route.path)?,
                     vectors_config: Some(serde_json::to_value(&req.vectors).unwrap_or_default()),

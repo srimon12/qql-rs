@@ -1,9 +1,4 @@
-use crate::ddl::{lower_alter_collection, lower_create_collection, lower_create_index};
-use crate::mutation::{
-    lower_clear_payload_request, lower_delete_request, lower_delete_vector_request,
-    lower_scroll_request, lower_update_payload_request, lower_update_vector_request,
-    lower_upsert_request,
-};
+use crate::plan::{plan, to_rest_route};
 use crate::query::lower_query_request;
 use crate::types::*;
 use qql_core::ast::{QueryCollection, QueryExpr, QueryStmt, Stmt};
@@ -22,6 +17,8 @@ pub enum RequestBody {
     UpdateVector(UpdateVectorRequest),
     UpdatePayload(UpdatePayloadRequest),
     CreateCollection(Box<CreateCollectionRequest>),
+    /// PATCH alter collection — distinct from create (PUT).
+    UpdateCollection(Box<CreateCollectionRequest>),
     CreateIndex(CreateIndexRequest),
     Count(Box<CountRequest>),
     CreateShardKey(Box<CreateShardKeyRequest>),
@@ -53,235 +50,28 @@ impl Route {
     }
 }
 
+/// Compatibility REST projection. Prefer [`crate::plan::plan`] +
+/// [`crate::plan::to_rest_route`] (or [`crate::plan::try_route`]) for new code.
+///
+/// Parser-validated statements always succeed. Programmatic malformed AST
+/// returns a planning error via `try_route`; this infallible wrapper falls
+/// back to an empty GET only for unexpected validation failures (should not
+/// occur for parser-produced statements).
 pub fn route(statement: &Stmt) -> Route {
-    match statement {
-        Stmt::Query(query) => {
-            let collection = match &query.collection {
-                QueryCollection::Explicit(name) => name.clone(),
-                QueryCollection::Inherited => String::new(),
-            };
-
-            if matches!(query.expression, QueryExpr::Points { .. }) {
-                // ... points lookup (same as before) ...
-                let ids = match &query.expression {
-                    QueryExpr::Points { ids } => ids,
-                    _ => unreachable!(),
-                };
-                let id_list: Vec<_> = ids
-                    .iter()
-                    .map(|id| match id {
-                        qql_core::ast::PointId::Number(n) => serde_json::Value::Number((*n).into()),
-                        qql_core::ast::PointId::String(s) => serde_json::Value::String(s.clone()),
-                    })
-                    .collect();
-                let with_payload = query.output.payload.as_ref().map(|p| match p {
-                    qql_core::ast::PayloadSelector::All => PayloadSelectorReq::All(true),
-                    qql_core::ast::PayloadSelector::None => PayloadSelectorReq::All(false),
-                    qql_core::ast::PayloadSelector::Include(fields) => {
-                        PayloadSelectorReq::Include {
-                            include: fields.clone(),
-                        }
-                    }
-                    qql_core::ast::PayloadSelector::Exclude(fields) => {
-                        PayloadSelectorReq::Exclude {
-                            exclude: fields.clone(),
-                        }
-                    }
-                });
-                let with_vector = query.output.vectors.as_ref().map(|v| match v {
-                    qql_core::ast::VectorSelector::All => VectorSelectorReq::All(true),
-                    qql_core::ast::VectorSelector::None => VectorSelectorReq::All(false),
-                    qql_core::ast::VectorSelector::Names(names) => {
-                        VectorSelectorReq::Names(names.clone())
-                    }
-                });
-
-                Route {
-                    method: Method::Post,
-                    path: format!("/collections/{}/points", collection),
-                    query: Vec::new(),
-                    body: Some(RequestBody::Points(PointsRequest {
-                        ids: id_list,
-                        with_payload,
-                        with_vector,
-                    })),
-                }
-            } else if query.group.is_some() {
-                let req = crate::query::lower_query_groups_request(query);
-                Route {
-                    method: Method::Post,
-                    path: format!("/collections/{}/points/query/groups", collection),
-                    query: Vec::new(),
-                    body: Some(RequestBody::QueryGroups(Box::new(req))),
-                }
-            } else {
-                Route {
-                    method: Method::Post,
-                    path: format!("/collections/{}/points/query", collection),
-                    query: Vec::new(),
-                    body: Some(RequestBody::Query(Box::new(lower_query_request(query)))),
-                }
-            }
-        }
-        Stmt::Scroll(scroll) => Route {
-            method: Method::Post,
-            path: format!("/collections/{}/points/scroll", scroll.collection),
-            query: Vec::new(),
-            body: Some(RequestBody::Scroll(Box::new(lower_scroll_request(
-                scroll.limit,
-                scroll.filter.as_deref(),
-                scroll.after.as_ref(),
-                scroll.shard_key.clone(),
-            )))),
-        },
-        Stmt::Upsert(upsert) => {
-            let mut query = Vec::new();
-            if upsert.embedding.is_some() {
-                query.push(("wait".into(), "true".into()));
-            }
-            if let Some(ref shard_key) = upsert.shard_key {
-                query.push(("shard_key".into(), shard_key.clone()));
-            }
-            Route {
-                method: Method::Put,
-                path: format!("/collections/{}/points", upsert.collection),
-                query,
-                body: Some(RequestBody::Upsert(lower_upsert_request(upsert))),
-            }
-        }
-        Stmt::Delete(delete) => {
-            let mut query = vec![("wait".into(), "true".into())];
-            if let Some(ref shard_key) = delete.shard_key {
-                query.push(("shard_key".into(), shard_key.clone()));
-            }
-            Route {
-                method: Method::Post,
-                path: format!("/collections/{}/points/delete", delete.collection),
-                query,
-                body: Some(RequestBody::Delete(Box::new(lower_delete_request(delete)))),
-            }
-        }
-        Stmt::ClearPayload(clear) => Route {
-            method: Method::Post,
-            path: format!("/collections/{}/points/payload/clear", clear.collection),
-            query: vec![("wait".into(), "true".into())],
-            body: Some(RequestBody::ClearPayload(Box::new(
-                lower_clear_payload_request(clear),
-            ))),
-        },
-        Stmt::DeleteVector(del_vec) => Route {
-            method: Method::Post,
-            path: format!("/collections/{}/points/vectors/delete", del_vec.collection),
-            query: vec![("wait".into(), "true".into())],
-            body: Some(RequestBody::DeleteVector(Box::new(
-                lower_delete_vector_request(del_vec),
-            ))),
-        },
-        Stmt::UpdateVector(update) => Route {
-            method: Method::Put,
-            path: format!("/collections/{}/points/vectors", update.collection),
-            query: vec![("wait".into(), "true".into())],
-            body: Some(RequestBody::UpdateVector(lower_update_vector_request(
-                update,
-            ))),
-        },
-        Stmt::UpdatePayload(update) => Route {
-            method: Method::Post,
-            path: format!("/collections/{}/points/payload", update.collection),
-            query: vec![("wait".into(), "true".into())],
-            body: Some(RequestBody::UpdatePayload(lower_update_payload_request(
-                update,
-            ))),
-        },
-        Stmt::CreateCollection(create) => Route {
-            method: Method::Put,
-            path: format!("/collections/{}", create.collection),
-            query: Vec::new(),
-            body: Some(RequestBody::CreateCollection(Box::new(
-                lower_create_collection(create),
-            ))),
-        },
-        Stmt::AlterCollection(alter) => Route {
-            method: Method::Patch,
-            path: format!("/collections/{}", alter.collection),
-            query: Vec::new(),
-            body: Some(RequestBody::CreateCollection(Box::new(
-                lower_alter_collection(alter),
-            ))),
-        },
-        Stmt::DropCollection(drop) => Route {
-            method: Method::Delete,
-            path: format!("/collections/{}", drop.collection),
-            query: Vec::new(),
-            body: None,
-        },
-        Stmt::CreateIndex(index) => Route {
-            method: Method::Put,
-            path: format!("/collections/{}/index", index.collection),
-            query: Vec::new(),
-            body: Some(RequestBody::CreateIndex(lower_create_index(index))),
-        },
-        Stmt::DropIndex(index) => Route {
-            method: Method::Delete,
-            path: format!("/collections/{}/index/{}", index.collection, index.field),
-            query: Vec::new(),
-            body: None,
-        },
-        Stmt::Count(count) => {
-            let filter = count
-                .filter
-                .as_ref()
-                .map(|f| crate::filter::top_level_filter(f));
-            Route {
-                method: Method::Post,
-                path: format!("/collections/{}/points/count", count.collection),
-                query: Vec::new(),
-                body: Some(RequestBody::Count(Box::new(CountRequest {
-                    filter,
-                    shard_key: count.shard_key.clone(),
-                    exact: None,
-                }))),
-            }
-        }
-        Stmt::CreateShardKey(sk) => Route {
-            method: Method::Put,
-            path: format!("/collections/{}/shards", sk.collection),
-            query: Vec::new(),
-            body: Some(RequestBody::CreateShardKey(Box::new(
-                CreateShardKeyRequest {
-                    shard_key: sk.shard_key.clone(),
-                    shards_number: sk.shards_number,
-                    replication_factor: sk.replication_factor,
-                },
-            ))),
-        },
-        Stmt::DropShardKey(sk) => Route {
-            method: Method::Post,
-            path: format!("/collections/{}/shards/delete", sk.collection),
-            query: Vec::new(),
-            body: Some(RequestBody::DropShardKey(Box::new(DropShardKeyRequest {
-                shard_key: sk.shard_key.clone(),
-            }))),
-        },
-        Stmt::ShowCollections => Route {
+    match plan(statement) {
+        Ok(op) => to_rest_route(&op),
+        Err(_) => Route {
             method: Method::Get,
-            path: "/collections".into(),
-            query: Vec::new(),
-            body: None,
-        },
-        Stmt::ShowCollection(collection) => Route {
-            method: Method::Get,
-            path: format!("/collections/{}", collection),
-            query: Vec::new(),
-            body: None,
-        },
-        Stmt::ShowShardKeys(collection) => Route {
-            method: Method::Get,
-            path: format!("/collections/{}/shards", collection),
+            path: String::new(),
             query: Vec::new(),
             body: None,
         },
     }
+}
+
+/// Fallible route construction (planner + REST projection).
+pub fn try_route(statement: &Stmt) -> Result<Route, qql_core::error::QqlError> {
+    crate::plan::try_route(statement)
 }
 
 /// Groups QUERY statements by collection and produces one `QueryBatchRequest`

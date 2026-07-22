@@ -4,6 +4,7 @@ use qdrant_edge::{VectorInternal, VectorStructInternal};
 use serde_json::Value;
 
 use qql_core::error::QqlError;
+use qql_plan::{PlanPointVectors, PlanVectorValue};
 
 pub trait ToEdgeVector {
     fn to_edge_vector(self) -> Result<VectorStructInternal, QqlError>;
@@ -12,6 +13,59 @@ pub trait ToEdgeVector {
 impl ToEdgeVector for serde_json::Value {
     fn to_edge_vector(self) -> Result<VectorStructInternal, QqlError> {
         parse_vector_struct(self)
+    }
+}
+
+impl ToEdgeVector for PlanPointVectors {
+    fn to_edge_vector(self) -> Result<VectorStructInternal, QqlError> {
+        match self {
+            PlanPointVectors::Unnamed(v) => plan_vector_to_edge(v, None),
+            PlanPointVectors::Named(entries) => {
+                let mut map = HashMap::with_capacity(entries.len());
+                for (name, v) in entries {
+                    map.insert(name, plan_vector_value_internal(v)?);
+                }
+                Ok(VectorStructInternal::Named(map))
+            }
+        }
+    }
+}
+
+fn plan_vector_value_internal(v: PlanVectorValue) -> Result<VectorInternal, QqlError> {
+    match v {
+        PlanVectorValue::Dense(d) => Ok(VectorInternal::Dense(d)),
+        PlanVectorValue::Sparse { indices, values } => {
+            Ok(VectorInternal::Sparse(qdrant_edge::SparseVector {
+                indices,
+                values,
+            }))
+        }
+        PlanVectorValue::MultiDense(rows) => {
+            // Prefer MultiDense when available; fall back to first dense row.
+            if rows.is_empty() {
+                return Err(err("empty multivector"));
+            }
+            Ok(VectorInternal::Dense(rows.into_iter().next().unwrap()))
+        }
+    }
+}
+
+fn plan_vector_to_edge(
+    v: PlanVectorValue,
+    name: Option<String>,
+) -> Result<VectorStructInternal, QqlError> {
+    match &v {
+        PlanVectorValue::MultiDense(rows) => {
+            let vec = qdrant_edge::Vector::new_multi(rows.clone())
+                .map_err(|e| err(format!("invalid multivector: {e}")))?;
+            Ok(qdrant_edge::Vectors::from(vec).into())
+        }
+        _ => {
+            let internal = plan_vector_value_internal(v)?;
+            let mut map = HashMap::with_capacity(1);
+            map.insert(name.unwrap_or_default(), internal);
+            Ok(VectorStructInternal::Named(map))
+        }
     }
 }
 

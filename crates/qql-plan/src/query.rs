@@ -1,47 +1,15 @@
-use crate::filter::{lower_filter, point_id_req, top_level_filter};
+use crate::filter::{lower_filter, top_level_filter};
 use crate::types::*;
 use qql_core::ast::{
     FusionMethod, OrderDirection, PrefetchSource, QueryExpr, QueryInput, QueryStmt, VectorValue,
 };
 
-pub fn lower_vector_value(value: &VectorValue) -> serde_json::Value {
-    match value {
-        VectorValue::Dense(values) => serde_json::Value::Array(
-            values
-                .iter()
-                .map(|v| serde_json::Value::from(*v as f64))
-                .collect(),
-        ),
-        VectorValue::Sparse { indices, values } => serde_json::json!({
-            "indices": indices,
-            "values": values,
-        }),
-        VectorValue::MultiDense(rows) => serde_json::Value::Array(
-            rows.iter()
-                .map(|row| {
-                    serde_json::Value::Array(
-                        row.iter()
-                            .map(|v| serde_json::Value::from(*v as f64))
-                            .collect(),
-                    )
-                })
-                .collect(),
-        ),
-    }
+pub fn lower_vector_value(value: &VectorValue) -> PlanVectorValue {
+    PlanVectorValue::from(value)
 }
 
-pub fn lower_query_input(input: &QueryInput) -> serde_json::Value {
-    match input {
-        QueryInput::Text { text, model } => {
-            if let Some(model) = model {
-                serde_json::json!({"text": text, "model": model})
-            } else {
-                serde_json::json!(text)
-            }
-        }
-        QueryInput::Vector(v) => lower_vector_value(v),
-        QueryInput::Point(id) => point_id_req(id),
-    }
+pub fn lower_query_input(input: &QueryInput) -> PlanQueryInput {
+    PlanQueryInput::from(input)
 }
 
 pub fn lower_formula_expr(expr: &qql_core::ast::FormulaExpr) -> serde_json::Value {
@@ -261,7 +229,6 @@ pub fn lower_query_expr(expr: &QueryExpr) -> QueryVariant {
             defaults,
             ..
         } => {
-            let formula_val = lower_formula_expr(expression);
             let defaults_map = if defaults.is_empty() {
                 None
             } else {
@@ -272,7 +239,7 @@ pub fn lower_query_expr(expr: &QueryExpr) -> QueryVariant {
                 Some(m)
             };
             QueryVariant::Formula(FormulaQuery {
-                formula: formula_val,
+                formula: PlanFormula(expression.as_ref().clone()),
                 defaults: defaults_map,
             })
         }
@@ -311,7 +278,8 @@ pub fn lower_query_expr(expr: &QueryExpr) -> QueryVariant {
             mmr: None,
         }),
         QueryExpr::Points { .. } => QueryVariant::Nearest(NearestQuery {
-            nearest: serde_json::Value::Array(Vec::new()),
+            // Placeholder only — Points lookups use GetPoints, not this variant.
+            nearest: PlanQueryInput::Vector(PlanVectorValue::Dense(Vec::new())),
             mmr: None,
         }),
     }
@@ -374,6 +342,12 @@ pub fn lower_prefetch_with_ctes(
         }),
         prefetch: nested_prefetch,
     }
+}
+
+pub fn lower_output_selector_public(
+    output: &qql_core::ast::QueryOutput,
+) -> (Option<PayloadSelectorReq>, Option<VectorSelectorReq>) {
+    lower_output_selector(output)
 }
 
 fn lower_output_selector(
@@ -517,9 +491,10 @@ fn build_query_with_prefetch(
         } => {
             let pf_requests: Vec<PrefetchRequest> = prefetch.iter().map(lower_prefetch).collect();
             let nearest_input = match input {
-                QueryInput::Text { text, .. } => {
-                    serde_json::json!({"text": text, "model": rerank_model})
-                }
+                QueryInput::Text { text, .. } => PlanQueryInput::Document {
+                    text: text.clone(),
+                    model: Some(rerank_model.clone()),
+                },
                 _ => lower_query_input(input),
             };
             (
@@ -557,11 +532,10 @@ fn build_query_with_prefetch(
     }
 }
 
-fn build_text_input(text: &str, model: &Option<String>) -> serde_json::Value {
-    if let Some(model) = model {
-        serde_json::json!({"text": text, "model": model})
-    } else {
-        serde_json::json!(text)
+fn build_text_input(text: &str, model: &Option<String>) -> PlanQueryInput {
+    PlanQueryInput::Document {
+        text: text.to_string(),
+        model: model.clone(),
     }
 }
 
@@ -634,17 +608,13 @@ mod tests {
 
     #[test]
     fn acorn_true_serializes_enable() {
-        let json = parse_route(
-            "QUERY 'hello' FROM docs PARAMS (acorn = true) LIMIT 5;",
-        );
+        let json = parse_route("QUERY 'hello' FROM docs PARAMS (acorn = true) LIMIT 5;");
         assert_eq!(json["params"]["acorn"]["enable"], true);
     }
 
     #[test]
     fn acorn_false_serializes_enable_false() {
-        let json = parse_route(
-            "QUERY 'hello' FROM docs PARAMS (acorn = false) LIMIT 5;",
-        );
+        let json = parse_route("QUERY 'hello' FROM docs PARAMS (acorn = false) LIMIT 5;");
         assert_eq!(json["params"]["acorn"]["enable"], false);
     }
 
@@ -685,10 +655,12 @@ mod tests {
         // Div with DEFAULT is only available if the formula parser supports it;
         // at least ensure MatchCondition/Datetime lower to non-null JSON when present
         // via a simple arithmetic formula regression.
-        let json = parse_route(
-            "QUERY FORMULA score * 2 DEFAULTS (score = 0.0) FROM docs LIMIT 5;",
+        let json = parse_route("QUERY FORMULA score * 2 DEFAULTS (score = 0.0) FROM docs LIMIT 5;");
+        assert!(
+            json["query"]["formula"].is_object()
+                || json["query"]["formula"].is_number()
+                || json["query"]["formula"].is_string()
         );
-        assert!(json["query"]["formula"].is_object() || json["query"]["formula"].is_number() || json["query"]["formula"].is_string());
         assert_ne!(json["query"]["formula"], serde_json::Value::Null);
     }
 
