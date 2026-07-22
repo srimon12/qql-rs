@@ -41,19 +41,21 @@ impl RestQdrant {
         }
     }
 
-    async fn call<T: DeserializeOwned>(
+    async fn call_body<B: serde::Serialize + ?Sized, T: DeserializeOwned>(
         &self,
         method: Method,
         path: &str,
-        body: Option<Value>,
+        body: Option<&B>,
     ) -> Result<T, QqlError> {
-        let url = format!("{}{path}", self.base_url);
-        let mut req = self.client.request(method, &url);
+        let mut url_buf = String::with_capacity(self.base_url.len() + path.len());
+        url_buf.push_str(&self.base_url);
+        url_buf.push_str(path);
+        let mut req = self.client.request(method, &url_buf);
         if let Some(ref key) = self.api_key {
             req = req.header("api-key", key);
         }
         if let Some(b) = body {
-            req = req.json(&b);
+            req = req.json(b);
         }
         let resp = req.send().await.map_err(|error| {
             QqlError::transport(
@@ -89,6 +91,15 @@ impl RestQdrant {
                 None,
             )
         })
+    }
+
+    async fn call<T: DeserializeOwned>(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+    ) -> Result<T, QqlError> {
+        self.call_body(method, path, body.as_ref()).await
     }
 }
 
@@ -205,18 +216,20 @@ impl QdrantOps for RestQdrant {
             PlanMethod::Delete => Method::DELETE,
         };
 
-        let mut path = route.path.clone();
+        let mut path = String::with_capacity(route.path.len() + 32);
+        path.push_str(&route.path);
         if !route.query.is_empty() {
-            let qs: Vec<String> = route
-                .query
-                .iter()
-                .map(|(k, v)| format!("{k}={v}"))
-                .collect();
             path.push('?');
-            path.push_str(&qs.join("&"));
+            for (i, (k, v)) in route.query.iter().enumerate() {
+                if i > 0 {
+                    path.push('&');
+                }
+                path.push_str(k);
+                path.push('=');
+                path.push_str(v);
+            }
         }
 
-        let body = route.body_json();
-        self.call(method, &path, body).await
+        self.call_body(method, &path, route.body.as_ref()).await
     }
 }

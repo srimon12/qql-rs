@@ -1,72 +1,50 @@
 ---
-description: Builds, reviews, and refactors Rust systems with ownership, safety, performance, and domain-aware design guidance.
+model: opencode-go/deepseek-v4-pro
 mode: primary
 color: warning
 temperature: 0.2
+description: Builds, reviews, and refactors Rust systems with ownership, safety, performance, and domain-aware design guidance.
 permission:
-  read: allow
-  glob: allow
-  grep: allow
-  list: allow
-  edit: allow
-  lsp: allow
-  bash:
-    "*": allow
-    "cargo check*": allow
-    "cargo test*": allow
-    "cargo clippy*": allow
-    "cargo fmt*": allow
-    "cargo build*": allow
-    "rustfmt *": allow
-    "git status*": allow
-    "git diff*": allow
-    "git log*": allow
   skill:
     "*": deny
-    "coding-guidelines": allow
-    "core-actionbook": allow
-    "core-agent-browser": allow
-    "core-dynamic-skills": allow
-    "core-fix-skill-docs": allow
-    "domain-cli": allow
-    "domain-cloud-native": allow
-    "domain-embedded": allow
-    "domain-fintech": allow
-    "domain-iot": allow
-    "domain-ml": allow
-    "domain-web": allow
-    "m01-ownership": allow
-    "m02-resource": allow
-    "m03-mutability": allow
-    "m04-zero-cost": allow
-    "m05-type-driven": allow
-    "m06-error-handling": allow
-    "m07-concurrency": allow
-    "m09-domain": allow
-    "m10-performance": allow
-    "m11-ecosystem": allow
-    "m12-lifecycle": allow
-    "m13-domain-error": allow
-    "m14-mental-model": allow
-    "m15-anti-pattern": allow
-    "meta-cognition-parallel": allow
-    "rust-call-graph": allow
-    "rust-code-navigator": allow
-    "rust-daily": allow
-    "rust-deps-visualizer": allow
-    "rust-learner": allow
-    "rust-refactor-helper": allow
-    "rust-router": allow
-    "rust-skill-creator": allow
-    "rust-symbol-analyzer": allow
-    "rust-trait-explorer": allow
-    "unsafe-checker": allow
-  task: allow
-  external_directory: allow
-  todowrite: allow
-  webfetch: allow
-  websearch: allow
-  question: allow
+    coding-guidelines: allow
+    core-actionbook: allow
+    core-agent-browser: allow
+    core-dynamic-skills: allow
+    core-fix-skill-docs: allow
+    domain-cli: allow
+    domain-cloud-native: allow
+    domain-embedded: allow
+    domain-fintech: allow
+    domain-iot: allow
+    domain-ml: allow
+    domain-web: allow
+    m01-ownership: allow
+    m02-resource: allow
+    m03-mutability: allow
+    m04-zero-cost: allow
+    m05-type-driven: allow
+    m06-error-handling: allow
+    m07-concurrency: allow
+    m09-domain: allow
+    m10-performance: allow
+    m11-ecosystem: allow
+    m12-lifecycle: allow
+    m13-domain-error: allow
+    m14-mental-model: allow
+    m15-anti-pattern: allow
+    meta-cognition-parallel: allow
+    rust-call-graph: allow
+    rust-code-navigator: allow
+    rust-daily: allow
+    rust-deps-visualizer: allow
+    rust-learner: allow
+    rust-refactor-helper: allow
+    rust-router: allow
+    rust-skill-creator: allow
+    rust-symbol-analyzer: allow
+    rust-trait-explorer: allow
+    unsafe-checker: allow
 ---
 
 You are the primary Rust engineering agent. Build, debug, review, and refactor reliable Rust systems using only the available Rust, architecture, and domain skills.

@@ -25,6 +25,19 @@ pub fn lower_filter(filter: &FilterExpr) -> FilterExpression {
     }
 }
 
+pub fn top_level_filter(filter: &FilterExpr) -> FilterExpression {
+    let f = lower_filter(filter);
+    match f {
+        FilterExpression::Single(clause) => FilterExpression::Compound(FilterCompound {
+            must: vec![*clause],
+            must_not: Vec::new(),
+            should: Vec::new(),
+            min_should: None,
+        }),
+        other => other,
+    }
+}
+
 fn lower_clause(filter: &FilterExpr) -> FilterClause {
     match filter {
         FilterExpr::PointId(predicate) => lower_point_id(predicate),

@@ -150,7 +150,7 @@ impl<'a> Parser<'a> {
 
     fn lex(input: &'a str) -> Result<Vec<Token<'a>>, QqlError> {
         let lexer = Lexer::new(input);
-        let mut tokens = Vec::new();
+        let mut tokens = Vec::with_capacity(input.len() / 6 + 1);
         for token_res in lexer {
             tokens.push(token_res?);
         }
@@ -244,14 +244,14 @@ impl<'a> Parser<'a> {
 
     // ── Identifier parsing ──────────────────────────────────────
 
-    pub fn parse_identifier(&mut self) -> Result<String, QqlError> {
+    pub fn parse_identifier_str(&mut self) -> Result<&'a str, QqlError> {
         let tok = self.peek()?;
         if tok.kind == TokenKind::Identifier
             || tok.kind == TokenKind::String
             || is_contextual_identifier(tok.kind)
         {
             self.advance()?;
-            Ok(tok.text.to_string())
+            Ok(tok.text)
         } else {
             Err(QqlError::parse(
                 "QQL-PARSE-IDENTIFIER",
@@ -259,6 +259,10 @@ impl<'a> Parser<'a> {
                 tok.span,
             ))
         }
+    }
+
+    pub fn parse_identifier(&mut self) -> Result<String, QqlError> {
+        self.parse_identifier_str().map(String::from)
     }
 
     // ── Value parsing ───────────────────────────────────────────

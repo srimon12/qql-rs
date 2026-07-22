@@ -1,4 +1,4 @@
-use crate::filter::{lower_filter, point_id_req, value_to_json};
+use crate::filter::{point_id_req, top_level_filter, value_to_json};
 use crate::query::lower_vector_value;
 use crate::types::*;
 use qql_core::ast::{
@@ -41,19 +41,6 @@ fn lower_point_vectors(vectors: &PointVectors) -> serde_json::Value {
             }
             serde_json::Value::Object(obj)
         }
-    }
-}
-
-fn top_level_filter(filter: &qql_core::ast::FilterExpr) -> FilterExpression {
-    let f = lower_filter(filter);
-    match f {
-        FilterExpression::Single(clause) => FilterExpression::Compound(FilterCompound {
-            must: vec![*clause],
-            must_not: Vec::new(),
-            should: Vec::new(),
-            min_should: None,
-        }),
-        other => other,
     }
 }
 

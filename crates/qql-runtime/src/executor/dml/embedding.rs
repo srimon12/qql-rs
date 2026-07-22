@@ -243,9 +243,9 @@ impl Executor {
                 }
             }
             if !targets.is_empty() {
-                let texts: Vec<String> = targets.iter().map(|(_, t)| t.clone()).collect();
+                let (indices, texts): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
                 let dense_vecs = embedder.embed_dense_batch(&texts, "default").await?;
-                for ((idx, text), d_vec) in targets.into_iter().zip(dense_vecs) {
+                for ((idx, text), d_vec) in indices.into_iter().zip(texts).zip(dense_vecs) {
                     let point = &mut upsert.points[idx];
                     add_point_vector(
                         point,
@@ -287,9 +287,9 @@ impl Executor {
                     }
 
                     if !targets.is_empty() {
-                        let texts: Vec<String> = targets.iter().map(|(_, t)| t.clone()).collect();
+                        let (indices, texts): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
                         let vecs = embedder.embed_dense_batch(&texts, model_name).await?;
-                        for ((idx, _), vec) in targets.into_iter().zip(vecs) {
+                        for (idx, vec) in indices.into_iter().zip(vecs) {
                             let point = &mut upsert.points[idx];
                             add_point_vector(point, vector_name, VectorValue::Dense(vec));
                         }
@@ -321,9 +321,9 @@ impl Executor {
                     }
 
                     if !targets.is_empty() {
-                        let texts: Vec<String> = targets.iter().map(|(_, t)| t.clone()).collect();
+                        let (indices, texts): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
                         let dense_vecs = embedder.embed_dense_batch(&texts, d_model).await?;
-                        for ((idx, text), d_vec) in targets.into_iter().zip(dense_vecs) {
+                        for ((idx, text), d_vec) in indices.into_iter().zip(texts).zip(dense_vecs) {
                             let sparse_vec = embedder.embed_sparse(&text).await?;
                             let point = &mut upsert.points[idx];
                             add_point_vector(point, d_vec_name, VectorValue::Dense(d_vec));
@@ -361,9 +361,9 @@ impl Executor {
                 match &directive.kind {
                     EmbedKind::Dense { model } => {
                         let m_name = model.as_deref().unwrap_or("default");
-                        let texts: Vec<String> = targets.iter().map(|(_, t)| t.clone()).collect();
+                        let (indices, texts): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
                         let vecs = embedder.embed_dense_batch(&texts, m_name).await?;
-                        for ((idx, _), vec) in targets.into_iter().zip(vecs) {
+                        for (idx, vec) in indices.into_iter().zip(vecs) {
                             let point = &mut upsert.points[idx];
                             add_point_vector(point, target_vec_name, VectorValue::Dense(vec));
                         }

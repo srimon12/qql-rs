@@ -1,5 +1,4 @@
 use serde_json;
-use std::collections::HashMap;
 
 use crate::executor::{ExecResponse, Executor, SearchHit};
 use qql_core::ast;
@@ -158,13 +157,9 @@ fn extract_search_hits(result: &serde_json::Value) -> Vec<SearchHit> {
                     .get("payload")
                     .and_then(|p| p.get("text"))
                     .and_then(|t| t.as_str().map(|s| s.to_string())),
-                payload: hit.get("payload").cloned().and_then(|p| {
+                payload: hit.get("payload").and_then(|p| {
                     p.as_object().map(|o| {
-                        let mut map = HashMap::new();
-                        for (k, v) in o {
-                            map.insert(k.clone(), v.clone());
-                        }
-                        map
+                        o.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
                     })
                 }),
             })

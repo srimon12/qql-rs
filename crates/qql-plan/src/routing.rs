@@ -7,6 +7,8 @@ use crate::query::lower_query_request;
 use crate::types::*;
 use qql_core::ast::{QueryCollection, QueryExpr, Stmt};
 
+#[derive(serde::Serialize)]
+#[serde(untagged)]
 pub enum RequestBody {
     Query(Box<QueryRequest>),
     QueryGroups(Box<QueryGroupsRequest>),
@@ -21,19 +23,14 @@ pub enum RequestBody {
 }
 
 impl RequestBody {
-    pub fn to_json(&self) -> serde_json::Value {
-        match self {
-            RequestBody::Query(r) => serde_json::to_value(r).unwrap(),
-            RequestBody::QueryGroups(r) => serde_json::to_value(r).unwrap(),
-            RequestBody::Points(r) => serde_json::to_value(r).unwrap(),
-            RequestBody::Scroll(r) => serde_json::to_value(r).unwrap(),
-            RequestBody::Upsert(r) => serde_json::to_value(r).unwrap(),
-            RequestBody::Delete(r) => serde_json::to_value(r).unwrap(),
-            RequestBody::UpdateVector(r) => serde_json::to_value(r).unwrap(),
-            RequestBody::UpdatePayload(r) => serde_json::to_value(r).unwrap(),
-            RequestBody::CreateCollection(r) => serde_json::to_value(r).unwrap(),
-            RequestBody::CreateIndex(r) => serde_json::to_value(r).unwrap(),
-        }
+    pub fn to_json(&self) -> Result<serde_json::Value, qql_core::error::QqlError> {
+        serde_json::to_value(self).map_err(|err| {
+            qql_core::error::QqlError::validation(
+                "QQL-PLAN-SERIALIZE",
+                alloc::format!("failed to serialize request body: {err}"),
+                None,
+            )
+        })
     }
 }
 
@@ -46,7 +43,7 @@ pub struct Route {
 
 impl Route {
     pub fn body_json(&self) -> Option<serde_json::Value> {
-        self.body.as_ref().map(|b| b.to_json())
+        self.body.as_ref().and_then(|b| b.to_json().ok())
     }
 }
 

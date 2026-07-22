@@ -111,8 +111,8 @@ impl Executor {
         self.client.as_ref()
     }
 
-    pub fn embedder(&self) -> Option<Arc<dyn Embedder>> {
-        self.embedder.clone()
+    pub fn embedder(&self) -> Option<&Arc<dyn Embedder>> {
+        self.embedder.as_ref()
     }
 
     pub fn config(&self) -> Option<&QqlConfig> {

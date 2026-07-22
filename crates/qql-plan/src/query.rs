@@ -1,4 +1,4 @@
-use crate::filter::{lower_filter, point_id_req};
+use crate::filter::{lower_filter, point_id_req, top_level_filter};
 use crate::types::*;
 use qql_core::ast::{
     FusionMethod, OrderDirection, PrefetchSource, QueryExpr, QueryInput, QueryStmt, VectorValue,
@@ -335,19 +335,6 @@ fn lower_output_selector(
     (with_payload, with_vector)
 }
 
-fn top_level_filter(filter: &qql_core::ast::FilterExpr) -> FilterExpression {
-    let f = lower_filter(filter);
-    match f {
-        FilterExpression::Single(clause) => FilterExpression::Compound(FilterCompound {
-            must: vec![*clause],
-            must_not: Vec::new(),
-            should: Vec::new(),
-            min_should: None,
-        }),
-        other => other,
-    }
-}
-
 pub fn lower_query_request(query: &QueryStmt) -> QueryRequest {
     let (with_payload, with_vector) = lower_output_selector(&query.output);
     let (query_variant, using, prefetch) = build_query_with_prefetch(query);
@@ -379,7 +366,7 @@ pub fn lower_query_groups_request(query: &QueryStmt) -> QueryGroupsRequest {
         query: query_variant,
         using,
         prefetch,
-        filter: query.filter.as_ref().map(|f| lower_filter(f)),
+        filter: query.filter.as_ref().map(|f| top_level_filter(f)),
         params: query.params.as_ref().and_then(lower_search_params),
         score_threshold: query.score_threshold,
         with_payload,

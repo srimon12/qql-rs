@@ -104,29 +104,7 @@ impl Executor {
                     );
                 }
                 if let Some(ref hnsw) = v.hnsw {
-                    let mut hnsw_map = serde_json::Map::new();
-                    if let Some(m) = hnsw.m {
-                        hnsw_map.insert("m".to_string(), serde_json::json!(m));
-                    }
-                    if let Some(ef) = hnsw.ef_construct {
-                        hnsw_map.insert("ef_construct".to_string(), serde_json::json!(ef));
-                    }
-                    if let Some(fs) = hnsw.full_scan_threshold {
-                        hnsw_map.insert("full_scan_threshold".to_string(), serde_json::json!(fs));
-                    }
-                    if let Some(mi) = hnsw.max_indexing_threads {
-                        hnsw_map.insert("max_indexing_threads".to_string(), serde_json::json!(mi));
-                    }
-                    if let Some(od) = hnsw.on_disk {
-                        hnsw_map.insert("on_disk".to_string(), serde_json::json!(od));
-                    }
-                    if let Some(pm) = hnsw.payload_m {
-                        hnsw_map.insert("payload_m".to_string(), serde_json::json!(pm));
-                    }
-                    vp_obj.insert(
-                        "hnsw_config".to_string(),
-                        serde_json::Value::Object(hnsw_map),
-                    );
+                    vp_obj.insert("hnsw_config".to_string(), build_hnsw_json(hnsw));
                 }
                 if let Some(ref quant) = v.quantization {
                     let q_val = build_quantization_config(quant)?;
@@ -163,70 +141,10 @@ impl Executor {
 
         if let Some(ref config) = stmt.config {
             if let Some(ref hnsw) = config.hnsw {
-                let mut hnsw_map = serde_json::Map::new();
-                if let Some(m) = hnsw.m {
-                    hnsw_map.insert("m".to_string(), serde_json::json!(m));
-                }
-                if let Some(ef) = hnsw.ef_construct {
-                    hnsw_map.insert("ef_construct".to_string(), serde_json::json!(ef));
-                }
-                if let Some(fs) = hnsw.full_scan_threshold {
-                    hnsw_map.insert("full_scan_threshold".to_string(), serde_json::json!(fs));
-                }
-                if let Some(mi) = hnsw.max_indexing_threads {
-                    hnsw_map.insert("max_indexing_threads".to_string(), serde_json::json!(mi));
-                }
-                if let Some(od) = hnsw.on_disk {
-                    hnsw_map.insert("on_disk".to_string(), serde_json::json!(od));
-                }
-                if let Some(pm) = hnsw.payload_m {
-                    hnsw_map.insert("payload_m".to_string(), serde_json::json!(pm));
-                }
-                create_req.hnsw_config = Some(serde_json::Value::Object(hnsw_map));
+                create_req.hnsw_config = Some(build_hnsw_json(hnsw));
             }
             if let Some(ref opt) = config.optimizers {
-                let mut opt_map = serde_json::Map::new();
-                if let Some(dt) = opt.deleted_threshold {
-                    opt_map.insert("deleted_threshold".to_string(), serde_json::json!(dt));
-                }
-                if let Some(vm) = opt.vacuum_min_vector_number {
-                    opt_map.insert(
-                        "vacuum_min_vector_number".to_string(),
-                        serde_json::json!(vm),
-                    );
-                }
-                if let Some(ds) = opt.default_segment_number {
-                    opt_map.insert("default_segment_number".to_string(), serde_json::json!(ds));
-                }
-                if let Some(ms) = opt.max_segment_size {
-                    opt_map.insert("max_segment_size".to_string(), serde_json::json!(ms));
-                }
-                if let Some(mt) = opt.memmap_threshold {
-                    opt_map.insert("memmap_threshold".to_string(), serde_json::json!(mt));
-                }
-                if let Some(it) = opt.indexing_threshold {
-                    opt_map.insert("indexing_threshold".to_string(), serde_json::json!(it));
-                }
-                if let Some(fi) = opt.flush_interval_sec {
-                    opt_map.insert("flush_interval_sec".to_string(), serde_json::json!(fi));
-                }
-                if let Some(pu) = opt.prevent_unoptimized {
-                    opt_map.insert("prevent_unoptimized".to_string(), serde_json::json!(pu));
-                }
-                if let Some(ref t) = opt.max_optimization_threads {
-                    if t.auto_ {
-                        opt_map.insert(
-                            "max_optimization_threads".to_string(),
-                            serde_json::json!("auto"),
-                        );
-                    } else {
-                        opt_map.insert(
-                            "max_optimization_threads".to_string(),
-                            serde_json::json!(t.value),
-                        );
-                    }
-                }
-                create_req.optimizers_config = Some(serde_json::Value::Object(opt_map));
+                create_req.optimizers_config = Some(build_optimizers_json(opt));
             }
             if let Some(ref params) = config.params {
                 let mut params_map = serde_json::Map::new();
@@ -318,76 +236,10 @@ impl Executor {
 
         if let Some(ref config) = stmt.config {
             if let Some(ref hnsw) = config.hnsw {
-                let mut hnsw_map = serde_json::Map::new();
-                if let Some(m) = hnsw.m {
-                    hnsw_map.insert("m".to_string(), serde_json::json!(m));
-                }
-                if let Some(ef) = hnsw.ef_construct {
-                    hnsw_map.insert("ef_construct".to_string(), serde_json::json!(ef));
-                }
-                if let Some(fs) = hnsw.full_scan_threshold {
-                    hnsw_map.insert("full_scan_threshold".to_string(), serde_json::json!(fs));
-                }
-                if let Some(mi) = hnsw.max_indexing_threads {
-                    hnsw_map.insert("max_indexing_threads".to_string(), serde_json::json!(mi));
-                }
-                if let Some(od) = hnsw.on_disk {
-                    hnsw_map.insert("on_disk".to_string(), serde_json::json!(od));
-                }
-                if let Some(pm) = hnsw.payload_m {
-                    hnsw_map.insert("payload_m".to_string(), serde_json::json!(pm));
-                }
-                req_map.insert(
-                    "hnsw_config".to_string(),
-                    serde_json::Value::Object(hnsw_map),
-                );
+                req_map.insert("hnsw_config".to_string(), build_hnsw_json(hnsw));
             }
             if let Some(ref opt) = config.optimizers {
-                let mut opt_map = serde_json::Map::new();
-                if let Some(dt) = opt.deleted_threshold {
-                    opt_map.insert("deleted_threshold".to_string(), serde_json::json!(dt));
-                }
-                if let Some(vm) = opt.vacuum_min_vector_number {
-                    opt_map.insert(
-                        "vacuum_min_vector_number".to_string(),
-                        serde_json::json!(vm),
-                    );
-                }
-                if let Some(ds) = opt.default_segment_number {
-                    opt_map.insert("default_segment_number".to_string(), serde_json::json!(ds));
-                }
-                if let Some(ms) = opt.max_segment_size {
-                    opt_map.insert("max_segment_size".to_string(), serde_json::json!(ms));
-                }
-                if let Some(mt) = opt.memmap_threshold {
-                    opt_map.insert("memmap_threshold".to_string(), serde_json::json!(mt));
-                }
-                if let Some(it) = opt.indexing_threshold {
-                    opt_map.insert("indexing_threshold".to_string(), serde_json::json!(it));
-                }
-                if let Some(fi) = opt.flush_interval_sec {
-                    opt_map.insert("flush_interval_sec".to_string(), serde_json::json!(fi));
-                }
-                if let Some(pu) = opt.prevent_unoptimized {
-                    opt_map.insert("prevent_unoptimized".to_string(), serde_json::json!(pu));
-                }
-                if let Some(ref t) = opt.max_optimization_threads {
-                    if t.auto_ {
-                        opt_map.insert(
-                            "max_optimization_threads".to_string(),
-                            serde_json::json!("auto"),
-                        );
-                    } else {
-                        opt_map.insert(
-                            "max_optimization_threads".to_string(),
-                            serde_json::json!(t.value),
-                        );
-                    }
-                }
-                req_map.insert(
-                    "optimizers_config".to_string(),
-                    serde_json::Value::Object(opt_map),
-                );
+                req_map.insert("optimizers_config".to_string(), build_optimizers_json(opt));
             }
             if let Some(ref params) = config.params {
                 let mut params_map = serde_json::Map::new();
@@ -576,4 +428,63 @@ fn extract_collection_diagnostics(name: &str, raw: &serde_json::Value) -> serde_
         "quantization": quantization,
         "payload_schema": payload_schema,
     })
+}
+
+fn build_hnsw_json(hnsw: &ast::HnswRuntimeConfig) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    if let Some(m) = hnsw.m {
+        map.insert("m".to_string(), serde_json::json!(m));
+    }
+    if let Some(ef) = hnsw.ef_construct {
+        map.insert("ef_construct".to_string(), serde_json::json!(ef));
+    }
+    if let Some(fs) = hnsw.full_scan_threshold {
+        map.insert("full_scan_threshold".to_string(), serde_json::json!(fs));
+    }
+    if let Some(mi) = hnsw.max_indexing_threads {
+        map.insert("max_indexing_threads".to_string(), serde_json::json!(mi));
+    }
+    if let Some(od) = hnsw.on_disk {
+        map.insert("on_disk".to_string(), serde_json::json!(od));
+    }
+    if let Some(pm) = hnsw.payload_m {
+        map.insert("payload_m".to_string(), serde_json::json!(pm));
+    }
+    serde_json::Value::Object(map)
+}
+
+fn build_optimizers_json(opt: &ast::OptimizersRuntimeConfig) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    if let Some(dt) = opt.deleted_threshold {
+        map.insert("deleted_threshold".to_string(), serde_json::json!(dt));
+    }
+    if let Some(vm) = opt.vacuum_min_vector_number {
+        map.insert("vacuum_min_vector_number".to_string(), serde_json::json!(vm));
+    }
+    if let Some(ds) = opt.default_segment_number {
+        map.insert("default_segment_number".to_string(), serde_json::json!(ds));
+    }
+    if let Some(ms) = opt.max_segment_size {
+        map.insert("max_segment_size".to_string(), serde_json::json!(ms));
+    }
+    if let Some(mt) = opt.memmap_threshold {
+        map.insert("memmap_threshold".to_string(), serde_json::json!(mt));
+    }
+    if let Some(it) = opt.indexing_threshold {
+        map.insert("indexing_threshold".to_string(), serde_json::json!(it));
+    }
+    if let Some(fi) = opt.flush_interval_sec {
+        map.insert("flush_interval_sec".to_string(), serde_json::json!(fi));
+    }
+    if let Some(pu) = opt.prevent_unoptimized {
+        map.insert("prevent_unoptimized".to_string(), serde_json::json!(pu));
+    }
+    if let Some(ref t) = opt.max_optimization_threads {
+        if t.auto_ {
+            map.insert("max_optimization_threads".to_string(), serde_json::json!("auto"));
+        } else {
+            map.insert("max_optimization_threads".to_string(), serde_json::json!(t.value));
+        }
+    }
+    serde_json::Value::Object(map)
 }
