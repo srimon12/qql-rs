@@ -5,6 +5,7 @@ Working example applications demonstrating QQL across all language bindings.
 | Directory | Language | Description |
 |-----------|----------|-------------|
 | `python/` | Python (pyqql) | inject_filter + Client + HttpEmbedder |
+| `sec10k-qql/` | Python (pyqql) | Full multitenant RAG: 4-tenant SEC 10-K filings with QQL (zero LlamaIndex) |
 | `rust/` | Rust (qql-core) | parse + inject_filter + route lower |
 | `nodejs/` | Node.js (nqql) | Client + injectFilter + HttpEmbedder |
 | `wasm/` | WASM (qql-wasm) | parse + compile + Client (browser fetch) |
