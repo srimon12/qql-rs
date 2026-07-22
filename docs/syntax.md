@@ -6,7 +6,7 @@ This is the canonical syntax implemented by `qql-core`. QQL follows Qdrant retri
 
 ```ebnf
 script       = [ statement, { ";", statement }, [ ";" ] ] ;
-statement    = query | scroll | upsert | update | delete | ddl ;
+statement    = query | scroll | upsert | update | delete | ddl | count | drop-index ;
 ```
 
 Multiple statements require `;`. Leading semicolons, repeated semicolons, and adjacent unseparated statements are invalid.
@@ -178,6 +178,9 @@ scroll       = "SCROLL", "FROM", collection,
                [ "WHERE", filter ], [ "AFTER", point-id ],
                [ "SHARD", string ],
                "LIMIT", positive-integer ;
+count        = "COUNT", "FROM", collection,
+               [ "WHERE", filter ],
+               [ "SHARD", string ] ;
 delete       = "DELETE", "FROM", collection, "WHERE", filter,
                [ "SHARD", string ] ;
 update       = "UPDATE", collection, "SET",
@@ -198,7 +201,7 @@ Every upsert point requires an unsigned integer or string `id`. Its optional `ve
 
 ## DDL
 
-Collection creation/alteration/drop/show and payload index creation:
+Collection creation/alteration/drop/show and payload index management:
 
 ```ebnf
 create-collection = "CREATE", "COLLECTION", name,
@@ -208,6 +211,20 @@ create-collection = "CREATE", "COLLECTION", name,
                     [ "(", vector-def, { ",", vector-def }, ")" ],
                     [ "(", sparse-def, { ",", sparse-def }, ")" ],
                     [ config-blocks ] ;
+
+alter-collection = "ALTER", "COLLECTION", name, config-blocks ;
+
+create-index    = "CREATE", "INDEX", "ON", "COLLECTION", name,
+                  "FOR", field, [ "TYPE", field-type ],
+                  [ "WITH", config-block ] ;
+
+drop-index      = "DROP", "INDEX", "ON", "COLLECTION", name,
+                  "FOR", field ;
+
+drop-collection = "DROP", "COLLECTION", name ;
+
+show            = "SHOW", "COLLECTIONS"
+                | "SHOW", "COLLECTION", name ;
 
 vector-def    = name, "VECTOR", "(", size, ",", distance, ")" ;
 sparse-def    = name, "SPARSE" ;
@@ -249,6 +266,18 @@ CREATE COLLECTION docs (
 
 ALTER COLLECTION docs WITH VECTOR (on_disk = true);
 CREATE INDEX ON COLLECTION docs FOR title TYPE text WITH (lowercase = true);
+DROP INDEX ON COLLECTION docs FOR title;
 DROP COLLECTION docs;
 SHOW COLLECTIONS;
+SHOW COLLECTION docs;
+```
+
+### Point Counting
+
+```sql
+-- Count with optional filter
+COUNT FROM docs WHERE status = 'active';
+
+-- Count with shard routing
+COUNT FROM sec10k WHERE tenant_id = 'honeywell' SHARD 'honeywell';
 ```

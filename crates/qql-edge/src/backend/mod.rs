@@ -233,6 +233,23 @@ impl QdrantOps for EdgeQdrant {
             .map_err(|e| QqlError::execution("QQL-EDGE", format!("spawn_blocking: {e}"), None))?
     }
 
+    async fn delete_field_index(
+        &self,
+        collection_name: &str,
+        field_name: &str,
+    ) -> Result<(), QqlError> {
+        let shard = self.open_shard(collection_name).await?;
+        let field_name_json: qdrant_edge::JsonPath =
+            serde_json::from_value(serde_json::Value::String(field_name.to_string()))
+                .map_err(|e| QqlError::execution("QQL-EDGE", format!("field name: {e}"), None))?;
+        let op = UpdateOperation::FieldIndexOperation(FieldIndexOperations::DeleteIndex(
+            field_name_json,
+        ));
+        tokio::task::spawn_blocking(move || shard.update(op).map_err(edge_err))
+            .await
+            .map_err(|e| QqlError::execution("QQL-EDGE", format!("spawn_blocking: {e}"), None))?
+    }
+
     async fn execute_route(&self, route: Route) -> Result<Value, QqlError> {
         match route.body {
             Some(RequestBody::Query(req)) => {
@@ -510,6 +527,36 @@ impl QdrantOps for EdgeQdrant {
                 self.create_field_index(create_index).await?;
                 Ok(Value::Object(Default::default()))
             }
+            Some(RequestBody::Count(req)) => {
+                let collection = extract_collection(&route.path)?;
+                let shard = self.open_shard(&collection).await?;
+                let filter: Option<qdrant_edge::Filter> = req.filter.as_ref().and_then(|f| {
+                    let filter_val = serde_json::to_value(f).ok()?;
+                    let val = if filter_val.get("key").is_some() {
+                        serde_json::json!({ "must": [filter_val] })
+                    } else {
+                        filter_val
+                    };
+                    serde_json::from_value(val).ok()
+                });
+                let count_req = qdrant_edge::CountRequest {
+                    filter,
+                    exact: req.exact.unwrap_or(true),
+                };
+                let count =
+                    tokio::task::spawn_blocking(move || shard.count(count_req).map_err(edge_err))
+                        .await
+                        .map_err(|e| {
+                            QqlError::execution("QQL-EDGE", format!("spawn_blocking: {e}"), None)
+                        })??;
+                Ok(serde_json::json!({
+                    "result": {
+                        "count": count,
+                    },
+                    "status": "ok",
+                    "time": 0.0,
+                }))
+            }
             None => match route.method {
                 qql_plan::types::Method::Get if route.path == "/collections" => {
                     let cols = self.list_collections().await?;
@@ -536,6 +583,36 @@ impl QdrantOps for EdgeQdrant {
                             },
                             "payload_schema": {},
                         },
+                        "status": "ok",
+                        "time": 0.0,
+                    }))
+                }
+                qql_plan::types::Method::Delete if route.path.contains("/index/") => {
+                    let segments: Vec<&str> =
+                        route.path.trim_start_matches('/').split('/').collect();
+                    let collection = segments
+                        .get(1)
+                        .ok_or_else(|| {
+                            QqlError::execution(
+                                "QQL-EDGE",
+                                "cannot extract collection from path",
+                                None,
+                            )
+                        })?
+                        .to_string();
+                    let field_name = segments
+                        .get(3)
+                        .ok_or_else(|| {
+                            QqlError::execution(
+                                "QQL-EDGE",
+                                "cannot extract field_name from path",
+                                None,
+                            )
+                        })?
+                        .to_string();
+                    self.delete_field_index(&collection, &field_name).await?;
+                    Ok(serde_json::json!({
+                        "result": true,
                         "status": "ok",
                         "time": 0.0,
                     }))

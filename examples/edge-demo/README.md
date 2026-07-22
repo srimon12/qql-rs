@@ -27,12 +27,12 @@ QQL_BIN=./target/release/qql uv run examples/edge-demo/main.py --dry-run
 
 | Section | Features |
 |---------|----------|
-| Schema | CREATE COLLECTION, CREATE INDEX |
+| Schema | CREATE COLLECTION, CREATE INDEX, DROP INDEX |
 | Seed | UPSERT with auto-embedding |
 | Search | Dense, Sparse, Hybrid RRF/DBSF, Exact |
 | Filters | WHERE eq, IN, year, score threshold, offset |
 | CTE | Multi-stage prefetch RRF fusion |
 | Recommend | Positive, negative, strategy |
-| Access | QUERY POINTS, SCROLL, ORDER BY |
+| Access | QUERY POINTS, SCROLL, ORDER BY, COUNT |
 | Mutations | UPDATE payload, DELETE by filter |
 | Ops | SHOW COLLECTION, SHOW COLLECTIONS |

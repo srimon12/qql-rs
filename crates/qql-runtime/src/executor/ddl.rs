@@ -345,6 +345,25 @@ impl Executor {
             data: None,
         })
     }
+
+    pub(crate) async fn do_drop_index(
+        &self,
+        stmt: ast::DropIndexStmt,
+    ) -> Result<ExecResponse, QqlError> {
+        self.client
+            .delete_field_index(&stmt.collection, &stmt.field)
+            .await?;
+
+        Ok(ExecResponse {
+            ok: true,
+            operation: "drop_index".to_string(),
+            message: format!(
+                "Index dropped on field '{}' from collection '{}'",
+                stmt.field, stmt.collection
+            ),
+            data: None,
+        })
+    }
 }
 
 fn extract_collection_diagnostics(name: &str, raw: &serde_json::Value) -> serde_json::Value {

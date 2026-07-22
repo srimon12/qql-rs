@@ -127,6 +127,23 @@ impl Executor {
             data: Some(serde_json::json!({"count": count})),
         })
     }
+
+    pub(crate) async fn do_count(&self, stmt: ast::CountStmt) -> Result<ExecResponse, QqlError> {
+        let r = route(&ast::Stmt::Count(Box::new(stmt)));
+        let result = self.client.execute_route(r).await?;
+        let point_count = result
+            .get("result")
+            .and_then(|r| r.get("count"))
+            .and_then(|c| c.as_u64())
+            .or_else(|| result.get("count").and_then(|c| c.as_u64()))
+            .unwrap_or(0);
+        Ok(ExecResponse {
+            ok: true,
+            operation: "COUNT".to_string(),
+            message: format!("{} point(s)", point_count),
+            data: Some(serde_json::json!({"count": point_count})),
+        })
+    }
 }
 
 fn extract_search_hits(result: &serde_json::Value) -> Vec<SearchHit> {

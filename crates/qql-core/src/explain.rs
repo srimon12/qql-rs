@@ -55,6 +55,17 @@ pub fn explain_node(statement: &Stmt) -> String {
             "Statement: CREATE INDEX\nCollection: {}\nField: {}\n",
             statement.collection, statement.field
         )),
+        Stmt::DropIndex(statement) => output.push_str(&format!(
+            "Statement: DROP INDEX\nCollection: {}\nField: {}\n",
+            statement.collection, statement.field
+        )),
+        Stmt::Count(statement) => {
+            output.push_str("Statement: COUNT\n");
+            output.push_str(&format!("Collection: {}\n", statement.collection));
+            if statement.filter.is_some() {
+                output.push_str("Filter: present\n");
+            }
+        }
         Stmt::AlterCollection(statement) => output.push_str(&format!(
             "Statement: ALTER COLLECTION\nCollection: {}\n",
             statement.collection

@@ -1,6 +1,6 @@
 # QQL Filter Reference
 
-Metadata filter expressions in `WHERE` clauses for `QUERY`, `SCROLL`, `UPDATE`, and `DELETE` statements.
+Metadata filter expressions in `WHERE` clauses for `QUERY`, `COUNT`, `SCROLL`, `UPDATE`, and `DELETE` statements.
 
 ---
 

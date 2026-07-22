@@ -242,6 +242,20 @@ impl QdrantOps for RestQdrant {
         Ok(())
     }
 
+    async fn delete_field_index(
+        &self,
+        collection_name: &str,
+        field_name: &str,
+    ) -> Result<(), QqlError> {
+        self.call::<Value>(
+            Method::DELETE,
+            &format!("/collections/{}/index/{}", collection_name, field_name),
+            None::<Value>,
+        )
+        .await?;
+        Ok(())
+    }
+
     async fn execute_route(&self, route: Route) -> Result<Value, QqlError> {
         let method = match route.method {
             PlanMethod::Get => Method::GET,

@@ -295,6 +295,26 @@ pub async fn execute_grpc_route(
             })?;
             Ok(serde_json::Value::Object(Default::default()))
         }
+        Some(RequestBody::Count(req)) => {
+            let collection = extract_collection(&route.path)?;
+            let grpc_req = qdrant::CountPoints {
+                collection_name: collection,
+                filter: req.filter.as_ref().map(to_filter),
+                exact: req.exact,
+                ..Default::default()
+            };
+            let resp = client
+                .count_points(grpc_req)
+                .await
+                .map_err(|e| QqlError::backend("QQL-GRPC", format!("count: {e}"), None))?;
+            Ok(serde_json::json!({
+                "result": {
+                    "count": resp.result.map(|r| r.count).unwrap_or(0),
+                },
+                "status": "ok",
+                "time": 0.0_f64,
+            }))
+        }
         None => match route.method {
             qql_plan::types::Method::Get if route.path == "/collections" => {
                 let resp = client
@@ -309,6 +329,34 @@ pub async fn execute_grpc_route(
                     QqlError::backend("QQL-GRPC", format!("get_collection: {e}"), None)
                 })?;
                 Ok(collection_info_to_json(resp))
+            }
+            qql_plan::types::Method::Delete if route.path.contains("/index/") => {
+                // DROP INDEX: /collections/{collection}/index/{field_name}
+                let segments: Vec<&str> = route.path.trim_start_matches('/').split('/').collect();
+                let collection = segments
+                    .get(1)
+                    .ok_or_else(|| {
+                        QqlError::execution("QQL-GRPC", "cannot extract collection from path", None)
+                    })?
+                    .to_string();
+                let field_name = segments
+                    .get(3)
+                    .ok_or_else(|| {
+                        QqlError::execution("QQL-GRPC", "cannot extract field_name from path", None)
+                    })?
+                    .to_string();
+                client
+                    .delete_field_index(qdrant::DeleteFieldIndexCollection {
+                        collection_name: collection,
+                        field_name,
+                        wait: Some(true),
+                        ..Default::default()
+                    })
+                    .await
+                    .map_err(|e| {
+                        QqlError::backend("QQL-GRPC", format!("delete_field_index: {e}"), None)
+                    })?;
+                Ok(serde_json::Value::Object(Default::default()))
             }
             qql_plan::types::Method::Delete if route.path.starts_with("/collections/") => {
                 let collection = extract_collection(&route.path)?;

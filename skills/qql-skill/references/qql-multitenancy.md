@@ -137,6 +137,11 @@ QUERY 'supply chain risks'
   WHERE tenant_id = 'honeywell'
   SHARD 'honeywell'
   LIMIT 10;
+
+-- Count tenant's documents
+COUNT FROM sec10k
+  WHERE tenant_id = 'honeywell'
+  SHARD 'honeywell';
 ```
 
 When you use `inject_filter()` to inject the `WHERE tenant_id = ...` clause, you can
@@ -147,6 +152,8 @@ if let Stmt::Query(ref mut q) = stmt {
     q.shard_key = Some(tenant.to_string());
 }
 ```
+
+`inject_filter()` also works with `COUNT` statements — injected filters are merged into the `WHERE` clause automatically.
 
 ## What Makes This Different
 

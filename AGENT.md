@@ -91,13 +91,14 @@ pub trait QdrantOps: Send + Sync {
     async fn update_collection(&self, req: serde_json::Value) -> Result<(), QqlError>;
     async fn delete_collection(&self, name: &str) -> Result<(), QqlError>;
     async fn create_field_index(&self, req: CreateFieldIndexReq) -> Result<(), QqlError>;
+    async fn delete_field_index(&self, collection_name: &str, field_name: &str) -> Result<(), QqlError>;
     async fn execute_route(&self, route: Route) -> Result<serde_json::Value, QqlError>;
 }
 ```
 
-A single trait with 8 methods. All DML flows through `execute_route()`. DDL uses dedicated admin methods. Three implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant`.
+A single trait with 9 methods. All DML flows through `execute_route()`. DDL uses dedicated admin methods. Three implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant`.
 
-### Statement → Endpoint Matrix (14 routes)
+### Statement → Endpoint Matrix (16 routes)
 
 | QQL Statement | Endpoint | Method |
 |---|---|---|
@@ -105,6 +106,7 @@ A single trait with 8 methods. All DML flows through `execute_route()`. DDL uses
 | `QUERY ... GROUP BY` | `/points/query/groups` | POST |
 | `QUERY POINTS (ids)` | `/points` | POST |
 | `SCROLL ...` | `/points/scroll` | POST |
+| `COUNT ...` | `/points/count` | POST |
 | `UPSERT ...` | `/points` | PUT |
 | `DELETE ...` | `/points/delete` | POST |
 | `UPDATE ... VECTOR` | `/points/vectors` | PUT |
@@ -113,6 +115,7 @@ A single trait with 8 methods. All DML flows through `execute_route()`. DDL uses
 | `ALTER COLLECTION` | `/collections/{c}` | PATCH |
 | `DROP COLLECTION` | `/collections/{c}` | DELETE |
 | `CREATE INDEX` | `/collections/{c}/index` | PUT |
+| `DROP INDEX` | `/collections/{c}/index/{field}` | DELETE |
 | `SHOW COLLECTIONS` | `/collections` | GET |
 | `SHOW COLLECTION` | `/collections/{c}` | GET |
 
@@ -165,7 +168,7 @@ pub fn inject_filter(
 ) -> Result<(), QqlError>
 ```
 
-Recursively injects into QueryStmt (including all CTEs and prefetches), Scroll, Delete,
+Recursively injects into QueryStmt (including all CTEs and prefetches), Scroll, Count, Delete,
 UpdatePayload, and Upsert (when `operator == Eq` and `field != "id"`, injects into point
 payloads). Callers must convert their string operators before calling.
 
@@ -179,7 +182,7 @@ payloads). Callers must convert their string operators before calling.
 * `SELECT` is rejected as an unrecognized statement. Use `QUERY POINTS` for point retrieval.
 * Duplicate object keys, config keys, CTE names, and query clauses are rejected.
 * `QqlError` always carries an explicit `ErrorKind` and `Span`.
-* `SHARD '<key>'` routing is supported on QUERY, UPSERT, SCROLL, and DELETE for custom-sharded collections.
+* `SHARD '<key>'` routing is supported on QUERY, COUNT, UPSERT, SCROLL, and DELETE for custom-sharded collections.
 * Collection creation supports `shard_number`, `sharding_method`, and `shard_keys` via `WITH PARAMS`.
 * Payload indexes support `is_tenant = true` for Qdrant-native tenant optimization.
 

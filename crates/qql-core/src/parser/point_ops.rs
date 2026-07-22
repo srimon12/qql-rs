@@ -1,5 +1,5 @@
 use super::Parser;
-use crate::ast::{ScrollStmt, Stmt};
+use crate::ast::{CountStmt, ScrollStmt, Stmt};
 use crate::error::QqlError;
 use crate::token::TokenKind;
 use alloc::boxed::Box;
@@ -34,6 +34,29 @@ impl<'a> Parser<'a> {
             limit,
             filter,
             after,
+            shard_key,
+        })))
+    }
+
+    pub fn parse_count(&mut self) -> Result<Stmt, QqlError> {
+        self.expect(TokenKind::Count)?;
+        self.expect(TokenKind::From)?;
+        let collection = self.parse_identifier()?;
+        let filter = if self.peek()?.kind == TokenKind::Where {
+            self.advance()?;
+            Some(Box::new(self.parse_filter_expr()?))
+        } else {
+            None
+        };
+        let shard_key = if self.peek()?.kind == TokenKind::Shard {
+            self.advance()?;
+            Some(self.parse_string()?)
+        } else {
+            None
+        };
+        Ok(Stmt::Count(Box::new(CountStmt {
+            collection,
+            filter,
             shard_key,
         })))
     }

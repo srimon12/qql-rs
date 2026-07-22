@@ -189,6 +189,16 @@ WHERE tenant_id = 'acme'
   AND content MATCH ANY ('hello', 'world')
 ```
 
+### DDL & Point Operations
+```sql
+-- Count points matching a filter
+COUNT FROM docs WHERE status = 'active';
+
+-- Manage payload indexes
+CREATE INDEX ON COLLECTION docs FOR title TYPE text WITH (lowercase = true);
+DROP INDEX ON COLLECTION docs FOR title;
+```
+
 ### Multi-tenancy
 
 ```sql

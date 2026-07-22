@@ -159,6 +159,28 @@ impl GrpcQdrant {
             .map_err(|e| QqlError::backend("QQL-GRPC", format!("create_field_index: {e}"), None))
     }
 
+    pub async fn delete_field_index(
+        &self,
+        req: qdrant::DeleteFieldIndexCollection,
+    ) -> Result<qdrant::PointsOperationResponse, QqlError> {
+        let mut cl = qdrant::points_client::PointsClient::new(self.channel.clone());
+        cl.delete_field_index(tonic::Request::new(req))
+            .await
+            .map(|r| r.into_inner())
+            .map_err(|e| QqlError::backend("QQL-GRPC", format!("delete_field_index: {e}"), None))
+    }
+
+    pub async fn count_points(
+        &self,
+        req: qdrant::CountPoints,
+    ) -> Result<qdrant::CountResponse, QqlError> {
+        let mut cl = qdrant::points_client::PointsClient::new(self.channel.clone());
+        cl.count(tonic::Request::new(req))
+            .await
+            .map(|r| r.into_inner())
+            .map_err(|e| QqlError::backend("QQL-GRPC", format!("count: {e}"), None))
+    }
+
     pub async fn list_collections_raw(&self) -> Result<qdrant::ListCollectionsResponse, QqlError> {
         let mut cl = qdrant::collections_client::CollectionsClient::new(self.channel.clone());
         cl.list(tonic::Request::new(qdrant::ListCollectionsRequest {}))
@@ -283,6 +305,18 @@ impl QdrantOps for GrpcQdrant {
         Err(QqlError::execution(
             "QQL-EXECUTION",
             "create_field_index: use execute_route for gRPC",
+            None,
+        ))
+    }
+
+    async fn delete_field_index(
+        &self,
+        _collection_name: &str,
+        _field_name: &str,
+    ) -> Result<(), QqlError> {
+        Err(QqlError::execution(
+            "QQL-EXECUTION",
+            "delete_field_index: use execute_route for gRPC",
             None,
         ))
     }

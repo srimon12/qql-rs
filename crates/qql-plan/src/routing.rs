@@ -20,6 +20,7 @@ pub enum RequestBody {
     UpdatePayload(UpdatePayloadRequest),
     CreateCollection(Box<CreateCollectionRequest>),
     CreateIndex(CreateIndexRequest),
+    Count(Box<CountRequest>),
 }
 
 impl RequestBody {
@@ -199,6 +200,28 @@ pub fn route(statement: &Stmt) -> Route {
             query: Vec::new(),
             body: Some(RequestBody::CreateIndex(lower_create_index(index))),
         },
+        Stmt::DropIndex(index) => Route {
+            method: Method::Delete,
+            path: format!("/collections/{}/index/{}", index.collection, index.field),
+            query: Vec::new(),
+            body: None,
+        },
+        Stmt::Count(count) => {
+            let filter = count
+                .filter
+                .as_ref()
+                .map(|f| crate::filter::top_level_filter(f));
+            Route {
+                method: Method::Post,
+                path: format!("/collections/{}/points/count", count.collection),
+                query: Vec::new(),
+                body: Some(RequestBody::Count(Box::new(CountRequest {
+                    filter,
+                    shard_key: count.shard_key.clone(),
+                    exact: None,
+                }))),
+            }
+        }
         Stmt::ShowCollections => Route {
             method: Method::Get,
             path: "/collections".into(),

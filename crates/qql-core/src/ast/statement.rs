@@ -492,6 +492,21 @@ pub struct CreateIndexStmt {
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub struct DropIndexStmt {
+    pub collection: String,
+    pub field: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+pub struct CountStmt {
+    pub collection: String,
+    pub filter: Option<Box<FilterExpr>>,
+    pub shard_key: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum PointSelector {
     Id(PointId),
     Ids(Vec<PointId>),
@@ -531,6 +546,7 @@ pub enum Stmt {
     Upsert(Box<UpsertStmt>),
     CreateCollection(Box<CreateCollectionStmt>),
     CreateIndex(Box<CreateIndexStmt>),
+    DropIndex(Box<DropIndexStmt>),
     AlterCollection(Box<AlterCollectionStmt>),
     DropCollection(Box<DropCollectionStmt>),
     ShowCollections,
@@ -538,4 +554,5 @@ pub enum Stmt {
     Delete(Box<DeleteStmt>),
     UpdateVector(Box<UpdateVectorStmt>),
     UpdatePayload(Box<UpdatePayloadStmt>),
+    Count(Box<CountStmt>),
 }

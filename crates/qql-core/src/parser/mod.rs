@@ -62,6 +62,7 @@ pub fn is_contextual_field_name(kind: TokenKind) -> bool {
             | TokenKind::Sparse
             | TokenKind::Vector
             | TokenKind::By
+            | TokenKind::Count
     )
 }
 
@@ -76,6 +77,7 @@ fn is_contextual_identifier(kind: TokenKind) -> bool {
             | TokenKind::Dense
             | TokenKind::Sparse
             | TokenKind::Vector
+            | TokenKind::Count
     )
 }
 
@@ -183,6 +185,7 @@ impl<'a> Parser<'a> {
             TokenKind::With => self.parse_query_with_cte(),
             TokenKind::Delete => self.parse_delete(),
             TokenKind::Update => self.parse_update(),
+            TokenKind::Count => self.parse_count(),
             _ => Err(QqlError::parse(
                 "QQL-PARSE-STATEMENT",
                 alloc::format!("expected a QQL statement keyword, got '{}'", tok.text),

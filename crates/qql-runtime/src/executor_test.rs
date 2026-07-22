@@ -60,6 +60,13 @@ impl QdrantOps for MockQdrantClient {
     async fn create_field_index(&self, _req: CreateFieldIndexReq) -> Result<(), QqlError> {
         Ok(())
     }
+    async fn delete_field_index(
+        &self,
+        _collection_name: &str,
+        _field_name: &str,
+    ) -> Result<(), QqlError> {
+        Ok(())
+    }
     async fn execute_route(&self, route: Route) -> Result<serde_json::Value, QqlError> {
         let path = route.path.clone();
         if path.contains("nonexistent") {

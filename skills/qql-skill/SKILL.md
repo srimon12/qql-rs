@@ -45,6 +45,7 @@ Translate user intent directly into QQL syntax:
 - Browse points -> `SCROLL FROM <collection> [AFTER <id>] LIMIT <n>`
 - Batch ingest -> `UPSERT INTO <collection> VALUES {id: 1, text: '...'}, {id: 2, text: '...'}`
 - Delete points -> `DELETE FROM <collection> WHERE <filter>`
+- Count points -> `COUNT FROM <collection> WHERE <filter>`
 - Multi-tenant isolation -> `QUERY 'text' FROM <collection> WHERE tenant_id = 'honeywell' SHARD 'honeywell' LIMIT 10`
 
 ## Canonical Grammar & Capabilities
@@ -59,6 +60,7 @@ CREATE COLLECTION docs (
 
 ALTER COLLECTION docs WITH VECTOR (on_disk = true);
 CREATE INDEX ON COLLECTION docs FOR title TYPE text WITH (lowercase = true);
+DROP INDEX ON COLLECTION docs FOR title;
 SHOW COLLECTIONS;
 SHOW COLLECTION docs;
 DROP COLLECTION docs;
@@ -80,6 +82,9 @@ UPDATE docs SET PAYLOAD = {status: 'reviewed'} WHERE category = 'tech';
 
 -- Delete points
 DELETE FROM docs WHERE category = 'obsolete';
+
+-- Count points with filter
+COUNT FROM docs WHERE status = 'active';
 ```
 
 ### Universal Query Syntax

@@ -310,7 +310,7 @@ pub fn lower_prefetch_with_ctes(
     PrefetchRequest {
         query,
         using,
-        filter: prefetch.filter.as_ref().map(|f| lower_filter(f)),
+        filter: prefetch.filter.as_ref().map(|f| top_level_filter(f)),
         params: None,
         score_threshold: prefetch.score_threshold,
         limit: None,
@@ -415,7 +415,7 @@ fn build_query_with_prefetch(
                     mmr: None,
                 })),
                 using: dense_vector.clone(),
-                filter: query.filter.as_ref().map(|f| lower_filter(f)),
+                filter: query.filter.as_ref().map(|f| top_level_filter(f)),
                 params: query.params.as_ref().and_then(lower_search_params),
                 score_threshold: query.score_threshold,
                 limit: Some(candidates),
@@ -428,7 +428,7 @@ fn build_query_with_prefetch(
                     mmr: None,
                 })),
                 using: sparse_vector.clone(),
-                filter: query.filter.as_ref().map(|f| lower_filter(f)),
+                filter: query.filter.as_ref().map(|f| top_level_filter(f)),
                 params: query.params.as_ref().and_then(lower_search_params),
                 score_threshold: query.score_threshold,
                 limit: Some(candidates),
@@ -516,7 +516,9 @@ pub fn lower_search_params(params: &qql_core::ast::SearchParams) -> Option<Searc
     let r = SearchParamsRequest {
         hnsw_ef: params.hnsw_ef,
         exact: params.exact,
-        acorn: params.acorn,
+        acorn: params
+            .acorn
+            .and_then(|b| if b { Some(AcornFlag) } else { None }),
         indexed_only: params.indexed_only,
         quantization: params.quantization.as_ref().map(|q| {
             has = true;

@@ -279,6 +279,17 @@ pub struct WithLookup {
     pub with_vectors: Option<VectorSelectorReq>,
 }
 
+#[derive(Debug, Clone)]
+pub struct AcornFlag;
+
+impl Serialize for AcornFlag {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let s = serializer.serialize_struct("AcornFlag", 0)?;
+        s.end()
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct SearchParamsRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -286,7 +297,7 @@ pub struct SearchParamsRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exact: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub acorn: Option<bool>,
+    pub acorn: Option<AcornFlag>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub indexed_only: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -536,7 +547,14 @@ pub struct UpdatePayloadRequest {
     pub payload: serde_json::Map<String, serde_json::Value>,
 }
 
-// ── DDL ────────────────────────────────────────────────────────
+#[derive(Debug, Clone, Serialize)]
+pub struct CountRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter: Option<FilterExpression>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shard_key: Option<String>,
+    pub exact: Option<bool>,
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CreateCollectionRequest {

@@ -83,5 +83,10 @@ pub trait QdrantOps: QdrantOpsBound {
     async fn update_collection(&self, req: serde_json::Value) -> Result<(), QqlError>;
     async fn delete_collection(&self, name: &str) -> Result<(), QqlError>;
     async fn create_field_index(&self, req: CreateFieldIndexReq) -> Result<(), QqlError>;
+    async fn delete_field_index(
+        &self,
+        collection_name: &str,
+        field_name: &str,
+    ) -> Result<(), QqlError>;
     async fn execute_route(&self, route: Route) -> Result<serde_json::Value, QqlError>;
 }
