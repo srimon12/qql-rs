@@ -225,8 +225,8 @@ pub fn analyze(input: &str) -> String {
     match stmts_res {
         Ok(stmts) => {
             let ast_val = serde_json::to_value(&stmts).unwrap_or(serde_json::Value::Null);
-            let first_stmt = stmts.first();
-            let route_val = first_stmt
+            let routes_val: Vec<_> = stmts
+                .iter()
                 .map(|s| {
                     let r = routing::route(s);
                     serde_json::json!({
@@ -235,7 +235,8 @@ pub fn analyze(input: &str) -> String {
                         "payload": r.body_json().unwrap_or(serde_json::Value::Null),
                     })
                 })
-                .unwrap_or(serde_json::Value::Null);
+                .collect();
+            let route_val = routes_val.first().cloned().unwrap_or(serde_json::Value::Null);
 
             let explain_val = qql_core::explain::explain(&norm).unwrap_or_default();
 
@@ -245,6 +246,7 @@ pub fn analyze(input: &str) -> String {
                 "tokens": tokens,
                 "ast": ast_val,
                 "route": route_val,
+                "routes": routes_val,
                 "explain": explain_val,
                 "error": serde_json::Value::Null,
             });

@@ -13,6 +13,7 @@ export type Preset = {
   id: PresetId
   label: string
   description: string
+  teaching: string
   query: string
 }
 
@@ -21,6 +22,7 @@ export const PRESETS: Preset[] = [
     id: "hybrid",
     label: "Hybrid RRF",
     description: "Dense + sparse fusion with shard routing",
+    teaching: "Combines dense semantic vectors and BM25-style sparse vectors into a single Reciprocal Rank Fusion (RRF) query with custom shard targeting.",
     query: `-- Hybrid Dense+Sparse RRF — RTX missile defense contracts
 -- Embeds text → queries both dense & sparse vectors → fuses with RRF
 QUERY HYBRID TEXT 'Raytheon missile defense contracts programs'
@@ -37,6 +39,7 @@ QUERY HYBRID TEXT 'Raytheon missile defense contracts programs'
     id: "multitenant",
     label: "Multi-Tenant Isolation",
     description: "Shard routing + tenant_id payload filter (defense in depth)",
+    teaching: "Demonstrates defense-in-depth isolation: physical custom shard routing (SHARD 'honeywell') paired with logical payload filtering (tenant_id = 'honeywell').",
     query: `-- Multi-tenant isolation — SEC 10-K SaaS pattern (honeywell)
 --
 -- Three layers (see skills/qql-skill/references/qql-multitenancy.md):
@@ -66,6 +69,7 @@ COUNT FROM sec10k
     id: "cte",
     label: "CTE Prefetch + Fusion",
     description: "Multi-stage prefetch DAG with score thresholds",
+    teaching: "Multi-stage execution DAG: Stage 1 pre-fetches candidate vectors in parallel with independent filters; Stage 2 fuses with per-stream score thresholds.",
     query: `-- CTE Prefetch DAG + Fusion + Score Threshold — Honeywell
 -- Stage 1: dense & sparse CTE pre-fetches with independent filters
 -- Stage 2: RRF fusion with per-stream score cutoffs
@@ -93,6 +97,7 @@ QUERY FUSION RRF FROM sec10k
     id: "formula",
     label: "Formula Boost",
     description: "Score multiplication with DEFAULTS fallback",
+    teaching: "Programmatic score rewrite: FORMULA multiplies candidate scores by mathematical expressions with safe default fallbacks.",
     query: `-- Formula Score Boosting — RTX financial results boosted 2x
 -- Stage 1: dense CTE pre-fetch finds financial chunks
 -- Stage 2: FORMULA multiplies every score by 2.0 with DEFAULTS fallback
@@ -113,6 +118,7 @@ QUERY FORMULA score * 2.0 DEFAULTS (score = 0.0)
     id: "grouped",
     label: "Grouped Aggregation",
     description: "GROUP BY with per-bucket size",
+    teaching: "Aggregates search hits into distinct buckets (e.g. per fiscal year) returning top N hits per bucket.",
     query: `-- Grouped Aggregation by Fiscal Year — RTX financials
 -- Hybrid RRF query with GROUP BY — 3 top hits per fiscal year
 QUERY HYBRID TEXT 'financial results revenue earnings'
@@ -128,6 +134,7 @@ QUERY HYBRID TEXT 'financial results revenue earnings'
     id: "mmr",
     label: "MMR Diversified",
     description: "Maximal Marginal Relevance diversity pruning",
+    teaching: "Maximal Marginal Relevance (MMR) balances relevance vs diversity to avoid near-duplicate search hits.",
     query: `-- MMR Diversified Results — 3M manufacturing innovation
 -- Maximal Marginal Relevance: DIVERSITY 0.5 avoids near-duplicates
 -- CANDIDATES 100 fetches a larger pool before diversity pruning
@@ -145,6 +152,7 @@ QUERY MMR TEXT 'manufacturing operations innovation products'
     id: "ddl",
     label: "SCROLL + COUNT",
     description: "Pagination and aggregation across tenants",
+    teaching: "Demonstrates multi-statement scripts: cursor-based SCROLL pagination followed by a global COUNT aggregation.",
     query: `-- SCROLL Pagination — GE filings with Cursor
 -- Scroll over GE's 2024+ chunks; use AFTER <point_id> to paginate
 SCROLL FROM sec10k
@@ -160,6 +168,7 @@ COUNT FROM sec10k
     id: "discover",
     label: "DBSF Fusion",
     description: "Distribution-Based Score Fusion alternative",
+    teaching: "Alternative fusion algorithm: Distribution-Based Score Fusion (DBSF) standardizes score distributions across streams.",
     query: `-- DBSF Alternative Fusion — Honeywell supply chain
 -- Distribution-Based Score Fusion instead of RRF
 QUERY HYBRID TEXT 'supply chain disruption risk shortages'
@@ -175,6 +184,7 @@ QUERY HYBRID TEXT 'supply chain disruption risk shortages'
     id: "mutation",
     label: "Upsert + Delete",
     description: "Point lifecycle: write then cleanup",
+    teaching: "Full point lifecycle in a multi-statement script: UPSERT inserts a point into a custom shard, followed by DELETE cleanup.",
     query: `-- Upsert + Cleanup — demo point lifecycle
 UPSERT INTO sec10k VALUES
   {id: 9999999, text: 'QQL: vector query language for Qdrant — WASM-powered',

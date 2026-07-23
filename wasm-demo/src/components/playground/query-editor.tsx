@@ -4,8 +4,9 @@ import { EditorView } from "@codemirror/view"
 import { linter, type Diagnostic } from "@codemirror/lint"
 import { keymap } from "@codemirror/view"
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands"
+import { autocompletion } from "@codemirror/autocomplete"
 import { useTheme } from "@/components/theme-provider"
-import { qqlLanguage } from "@/lib/qql-language"
+import { qqlLanguage, qqlCompletions } from "@/lib/qql-language"
 import { playgroundDark, playgroundLight } from "@/lib/editor-theme"
 import type { AnalysisResult } from "@/lib/qql-types"
 import { cn } from "@/lib/utils"
@@ -53,13 +54,11 @@ export function QueryEditor({
 
     return [
       qqlLanguage,
+      autocompletion({ override: [qqlCompletions] }),
       history(),
       EditorView.lineWrapping,
       errorLinter,
       keymap.of([
-        ...defaultKeymap,
-        ...historyKeymap,
-        indentWithTab,
         {
           key: "Mod-Enter",
           run: () => {
@@ -67,6 +66,23 @@ export function QueryEditor({
             return true
           },
         },
+        {
+          key: "Ctrl-Enter",
+          run: () => {
+            onExecute?.()
+            return true
+          },
+        },
+        {
+          key: "Cmd-Enter",
+          run: () => {
+            onExecute?.()
+            return true
+          },
+        },
+        ...defaultKeymap,
+        ...historyKeymap,
+        indentWithTab,
       ]),
       EditorView.theme({
         "&": { height: "100%", fontSize: "13.5px" },
@@ -95,7 +111,7 @@ export function QueryEditor({
           highlightActiveLineGutter: true,
           bracketMatching: true,
           closeBrackets: true,
-          autocompletion: false,
+          autocompletion: true,
           searchKeymap: true,
         }}
         onChange={onChange}

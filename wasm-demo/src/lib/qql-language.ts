@@ -213,3 +213,38 @@ const qqlParser: StreamParser<unknown> = {
 void OPERATORS
 
 export const qqlLanguage = StreamLanguage.define(qqlParser)
+
+export const qqlKeywordsList = Array.from(KEYWORDS).map((k) => k.toUpperCase())
+
+export const qqlCompletions = (context: { matchBefore: (reg: RegExp) => { from: number; text: string } | null; explicit: boolean; pos: number }) => {
+  const word = context.matchBefore(/\w+/)
+  if (!word && !context.explicit) return null
+
+  const completions = [
+    { label: "QUERY HYBRID TEXT", type: "snippet", apply: "QUERY HYBRID TEXT 'search term'\n  DENSE dense SPARSE sparse\n  FUSION RRF\n  FROM sec10k\n  LIMIT 5;", detail: "Hybrid RRF Query" },
+    { label: "QUERY TEXT", type: "snippet", apply: "QUERY TEXT 'search term'\n  FROM sec10k USING dense\n  LIMIT 5;", detail: "Text vector search" },
+    { label: "WITH", type: "keyword", detail: "CTE Prefetch block" },
+    { label: "PREFETCH", type: "keyword", detail: "Prefetch candidates stream" },
+    { label: "FUSION", type: "keyword", detail: "Fusion method (RRF/DBSF)" },
+    { label: "SHARD", type: "keyword", detail: "Physical shard target" },
+    { label: "WHERE", type: "keyword", detail: "Payload filter clause" },
+    { label: "LIMIT", type: "keyword", detail: "Result limit" },
+    { label: "SCORE THRESHOLD", type: "keyword", detail: "Score cutoff" },
+    { label: "GROUP BY", type: "keyword", detail: "Aggregation" },
+    { label: "FORMULA", type: "keyword", detail: "Score rewrite" },
+    { label: "MMR", type: "keyword", detail: "Diversity search" },
+    { label: "SCROLL FROM", type: "keyword", detail: "Pagination" },
+    { label: "COUNT FROM", type: "keyword", detail: "Aggregation count" },
+    { label: "UPSERT INTO", type: "keyword", detail: "Point write" },
+    { label: "DELETE FROM", type: "keyword", detail: "Point delete" },
+    ...qqlKeywordsList.map((k) => ({
+      label: k,
+      type: "keyword",
+    })),
+  ]
+
+  return {
+    from: word ? word.from : context.pos,
+    options: completions,
+  }
+}

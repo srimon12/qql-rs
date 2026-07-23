@@ -116,12 +116,23 @@ export async function ensureBrowserEmbedder(): Promise<FeaturePipe> {
     let pipe: FeaturePipe
     let device: EmbedDevice = "wasm"
 
+    let hasWebGPU = false
+    if (typeof navigator !== "undefined" && "gpu" in navigator && navigator.gpu) {
+      try {
+        const adapter = await navigator.gpu.requestAdapter()
+        hasWebGPU = Boolean(adapter)
+      } catch {
+        hasWebGPU = false
+      }
+    }
+
     try {
-      if (typeof navigator !== "undefined" && "gpu" in navigator) {
+      if (hasWebGPU) {
         try {
           pipe = await tryLoad(pipeline, "webgpu")
           device = "webgpu"
-        } catch {
+        } catch (gpuErr) {
+          console.warn("WebGPU init failed, falling back to WASM:", gpuErr)
           setStatus({ statusText: "WebGPU unavailable, using WASM…" })
           pipe = await tryLoad(pipeline, "wasm")
           device = "wasm"

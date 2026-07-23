@@ -10,6 +10,11 @@ import {
   Settings2Icon,
   SunIcon,
   ZapIcon,
+  ShieldCheckIcon,
+  Code2Icon,
+  Share2Icon,
+  CheckIcon,
+  CopyIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -37,6 +42,9 @@ import { useTheme } from "@/components/theme-provider"
 import { QueryEditor } from "@/components/playground/query-editor"
 import { Inspector } from "@/components/playground/inspector"
 import { SettingsDialog } from "@/components/playground/settings-dialog"
+import { AuditBar } from "@/components/playground/audit-bar"
+import { TenantSandbox } from "@/components/playground/tenant-sandbox"
+import { CodeExporter } from "@/components/playground/code-exporter"
 import { useQql } from "@/hooks/use-qql"
 import {
   DEFAULT_PRESET_ID,
@@ -63,6 +71,20 @@ function useDebouncedCallback<T extends (...args: never[]) => void>(
   )
 }
 
+function getInitialQuery(): string {
+  if (typeof window !== "undefined" && window.location.hash) {
+    const match = window.location.hash.match(/#q=(.+)/)
+    if (match && match[1]) {
+      try {
+        return decodeURIComponent(match[1])
+      } catch {
+        // Fallback to preset
+      }
+    }
+  }
+  return getPreset(DEFAULT_PRESET_ID)?.query ?? ""
+}
+
 export function App() {
   const { theme, setTheme } = useTheme()
   const {
@@ -82,12 +104,16 @@ export function App() {
   } = useQql()
 
   const [presetId, setPresetId] = useState<PresetId>(DEFAULT_PRESET_ID)
-  const [query, setQuery] = useState(
-    () => getPreset(DEFAULT_PRESET_ID)?.query ?? ""
-  )
+  const [query, setQuery] = useState(getInitialQuery)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsSaving, setSettingsSaving] = useState(false)
+  const [tenantSandboxOpen, setTenantSandboxOpen] = useState(false)
+  const [codeExporterOpen, setCodeExporterOpen] = useState(false)
+  const [copiedLink, setCopiedLink] = useState(false)
+  const [copiedQql, setCopiedQql] = useState(false)
   const [activeTab, setActiveTab] = useState("plan")
+
+  const activePreset = useMemo(() => getPreset(presetId), [presetId])
 
   const debouncedAnalyze = useDebouncedCallback((src: string) => {
     runAnalysis(src)
@@ -111,9 +137,36 @@ export function App() {
     runAnalysis(preset.query)
   }
 
-  const onExecute = async () => {
+  const onExecute = useCallback(async () => {
     setActiveTab("response")
     await execute(query)
+  }, [execute, query])
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault()
+        if (ready && analysis.valid && !executing) {
+          onExecute()
+        }
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [ready, analysis.valid, executing, onExecute])
+
+  const onCopyQql = () => {
+    if (!query) return
+    navigator.clipboard.writeText(query)
+    setCopiedQql(true)
+    setTimeout(() => setCopiedQql(false), 2000)
+  }
+
+  const onShareQuery = () => {
+    const url = `${window.location.origin}${window.location.pathname}#q=${encodeURIComponent(query)}`
+    navigator.clipboard.writeText(url)
+    setCopiedLink(true)
+    setTimeout(() => setCopiedLink(false), 2000)
   }
 
   const status = useMemo(() => {
@@ -138,7 +191,6 @@ export function App() {
     if (settings.embedProvider === "http") {
       return { label: "HTTP embed", variant: "secondary" as const }
     }
-    // browser
     if (browserStatus.state === "loading") {
       return {
         label: `MiniLM ${Math.round(browserStatus.progress)}%`,
@@ -201,7 +253,7 @@ export function App() {
               Preset
             </span>
             <Select value={presetId} onValueChange={onPresetChange}>
-              <SelectTrigger size="sm" className="max-w-[min(100%,280px)]">
+              <SelectTrigger size="sm" className="max-w-[min(100%,320px)]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -233,12 +285,28 @@ export function App() {
               {status.label}
             </Badge>
 
-            <span className="hidden font-mono text-[11px] text-muted-foreground tabular-nums md:inline">
+            <span className="hidden font-mono text-[11px] text-muted-foreground tabular-nums sm:inline">
               parse {latencyMs.toFixed(2)} ms
               {metrics?.totalMs != null && metrics.success
                 ? ` · exec ${metrics.totalMs.toFixed(0)} ms`
                 : ""}
             </span>
+
+            {/* Share Link */}
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    onClick={onShareQuery}
+                  />
+                }
+              >
+                {copiedLink ? <CheckIcon className="size-3.5 text-emerald-500" /> : <Share2Icon className="size-3.5" />}
+              </TooltipTrigger>
+              <TooltipContent>{copiedLink ? "Link Copied!" : "Share Query URL Link"}</TooltipContent>
+            </Tooltip>
 
             <Tooltip>
               <TooltipTrigger
@@ -269,28 +337,6 @@ export function App() {
               </TooltipTrigger>
               <TooltipContent>Toggle theme</TooltipContent>
             </Tooltip>
-
-            <Button
-              size="sm"
-              disabled={
-                !ready ||
-                !analysis.valid ||
-                executing ||
-                (settings.embedProvider === "browser" &&
-                  browserStatus.state === "error")
-              }
-              onClick={onExecute}
-            >
-              {executing ? (
-                <Loader2Icon
-                  className="animate-spin"
-                  data-icon="inline-start"
-                />
-              ) : (
-                <PlayIcon data-icon="inline-start" />
-              )}
-              Execute
-            </Button>
           </div>
         </header>
 
@@ -298,11 +344,64 @@ export function App() {
           <ResizablePanelGroup orientation="horizontal" className="h-full">
             <ResizablePanel defaultSize={52} minSize={30}>
               <section className="flex h-full min-h-0 flex-col">
-                <div className="flex shrink-0 items-center justify-between border-b px-3 py-1.5">
-                  <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b px-3 py-1.5 bg-muted/20">
+                  <span className="text-xs font-semibold tracking-wide text-muted-foreground uppercase font-mono">
                     Query editor · sec10k
                   </span>
-                  <div className="flex gap-1">
+                  <div className="flex items-center gap-1.5">
+                    {/* Execute right beside editor */}
+                    <Button
+                      size="sm"
+                      disabled={
+                        !ready ||
+                        !analysis.valid ||
+                        executing ||
+                        (settings.embedProvider === "browser" &&
+                          browserStatus.state === "error")
+                      }
+                      onClick={onExecute}
+                      className="gap-1.5 font-semibold text-xs"
+                    >
+                      {executing ? (
+                        <Loader2Icon className="size-3.5 animate-spin" />
+                      ) : (
+                        <PlayIcon className="size-3.5" />
+                      )}
+                      Execute
+                    </Button>
+
+                    <Separator orientation="vertical" className="h-5" />
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setTenantSandboxOpen(true)}
+                      className="text-emerald-600 dark:text-emerald-400 font-mono text-xs gap-1 bg-emerald-500/5 hover:bg-emerald-500/10 border-emerald-500/30"
+                    >
+                      <ShieldCheckIcon className="size-3.5" />
+                      Tenant Sandbox
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={onCopyQql}
+                      className="font-mono text-xs gap-1"
+                    >
+                      {copiedQql ? <CheckIcon className="size-3.5 text-emerald-500" /> : <CopyIcon className="size-3.5 text-primary" />}
+                      {copiedQql ? "Copied QQL" : "Copy QQL"}
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCodeExporterOpen(true)}
+                      className="font-mono text-xs gap-1"
+                    >
+                      <Code2Icon className="size-3.5 text-primary" />
+                      Copy SDK Code
+                    </Button>
+
                     <Button
                       variant="ghost"
                       size="xs"
@@ -310,8 +409,9 @@ export function App() {
                         setQuery("")
                         runAnalysis("")
                       }}
+                      className="text-muted-foreground"
                     >
-                      <EraserIcon data-icon="inline-start" />
+                      <EraserIcon className="size-3.5" />
                       Clear
                     </Button>
                   </div>
@@ -360,11 +460,15 @@ export function App() {
                 browserStatus={browserStatus}
                 embedProvider={settings.embedProvider}
                 qdrantUrl={settings.qdrantUrl}
+                teachingNote={activePreset?.teaching}
                 className="h-full"
               />
             </ResizablePanel>
           </ResizablePanelGroup>
         </main>
+
+        {/* Compiler Audit Bar */}
+        <AuditBar analysis={analysis} query={query} />
 
         <footer className="flex shrink-0 items-center justify-between gap-2 border-t px-3 py-1.5 text-[11px] text-muted-foreground">
           <span className="min-w-0 truncate">
@@ -395,6 +499,24 @@ export function App() {
               setSettingsSaving(false)
             }
           }}
+        />
+
+        <TenantSandbox
+          open={tenantSandboxOpen}
+          onOpenChange={setTenantSandboxOpen}
+          currentQuery={query}
+          onApplyQuery={(newQql) => {
+            setQuery(newQql)
+            runAnalysis(newQql)
+          }}
+        />
+
+        <CodeExporter
+          open={codeExporterOpen}
+          onOpenChange={setCodeExporterOpen}
+          query={query}
+          qdrantUrl={settings.qdrantUrl}
+          analysis={analysis}
         />
       </div>
     </TooltipProvider>

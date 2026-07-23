@@ -1,9 +1,11 @@
+import { useState } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { PlanView } from "@/components/playground/plan-view"
 import { TokensTable } from "@/components/playground/tokens-table"
 import { JsonViewer } from "@/components/playground/json-viewer"
 import { MetricsView } from "@/components/playground/metrics-view"
+import { ResultCards } from "@/components/playground/results-cards"
 import type { AnalysisResult, ExecMetrics } from "@/lib/qql-types"
 import type { BrowserEmbedderStatus } from "@/lib/browser-embedder"
 import { cn } from "@/lib/utils"
@@ -18,6 +20,7 @@ type InspectorProps = {
   browserStatus: BrowserEmbedderStatus
   embedProvider: string
   qdrantUrl: string
+  teachingNote?: string
   className?: string
 }
 
@@ -31,19 +34,32 @@ export function Inspector({
   browserStatus,
   embedProvider,
   qdrantUrl,
+  teachingNote,
   className,
 }: InspectorProps) {
-  const wireJson = analysis.route
-    ? JSON.stringify(analysis.route.payload ?? null, null, 2)
+  const [selectedStmtIndex, setSelectedStmtIndex] = useState(0)
+
+  const routes = analysis.routes && analysis.routes.length > 0
+    ? analysis.routes
+    : analysis.route ? [analysis.route] : []
+
+  const currentRoute = routes[selectedStmtIndex] ?? routes[0] ?? analysis.route
+
+  const wireJson = currentRoute
+    ? JSON.stringify(currentRoute.payload ?? null, null, 2)
     : analysis.error
       ? JSON.stringify(analysis.error, null, 2)
       : "{}"
 
-  const astJson = analysis.ast
-    ? JSON.stringify(analysis.ast, null, 2)
-    : analysis.error
-      ? JSON.stringify(analysis.error, null, 2)
-      : "{}"
+  let astJson = "{}"
+  if (Array.isArray(analysis.ast)) {
+    const currentAst = analysis.ast[selectedStmtIndex] ?? analysis.ast[0] ?? analysis.ast
+    astJson = JSON.stringify(currentAst, null, 2)
+  } else if (analysis.ast) {
+    astJson = JSON.stringify(analysis.ast, null, 2)
+  } else if (analysis.error) {
+    astJson = JSON.stringify(analysis.error, null, 2)
+  }
 
   return (
     <Tabs
@@ -51,7 +67,7 @@ export function Inspector({
       onValueChange={onTabChange}
       className={cn("flex h-full min-h-0 flex-col gap-0", className)}
     >
-      <div className="shrink-0 border-b px-3 pt-2 pb-0">
+      <div className="shrink-0 border-b px-3 pt-2 pb-0 flex items-center justify-between">
         <TabsList
           variant="line"
           className="h-auto w-full flex-wrap justify-start gap-0"
@@ -67,7 +83,12 @@ export function Inspector({
       </div>
 
       <TabsContent value="plan" className="min-h-0 overflow-auto p-3">
-        <PlanView analysis={analysis} />
+        <PlanView
+          analysis={analysis}
+          selectedStmtIndex={selectedStmtIndex}
+          onSelectStmtIndex={setSelectedStmtIndex}
+          teachingNote={teachingNote}
+        />
       </TabsContent>
 
       <TabsContent value="metrics" className="min-h-0 overflow-auto p-0">
@@ -105,11 +126,7 @@ export function Inspector({
       </TabsContent>
 
       <TabsContent value="response" className="min-h-0 overflow-hidden p-0">
-        <JsonViewer
-          value={response}
-          placeholder="// Execute a query to see the live Qdrant response"
-          className="h-full"
-        />
+        <ResultCards responseJson={response} className="h-full" />
       </TabsContent>
     </Tabs>
   )

@@ -25,6 +25,7 @@ export type AnalysisResult = {
   tokens: QqlToken[]
   ast: unknown
   route: QqlRoute | null
+  routes?: QqlRoute[]
   explain: string | null
   error: QqlError | null
 }
