@@ -2768,4 +2768,271 @@ mod tests {
         assert_eq!(text.max_token_len, Some(20));
         assert_eq!(text.stopwords.unwrap().custom, ["a", "the"]);
     }
+
+    // ── Field-level gRPC conversion tests ──────────────────────────
+
+    /// Query → gRPC with limit, offset, using, score_threshold
+    #[test]
+    fn query_points_field_level_basics() {
+        let stmt = Parser::parse(
+            "QUERY 'search' FROM my_coll USING dense SCORE THRESHOLD 0.7 LIMIT 10 OFFSET 5;",
+        )
+        .unwrap();
+        let r = route(&stmt);
+        let req = match r.body.as_ref().unwrap() {
+            RequestBody::Query(q) => q,
+            other => panic!("expected Query, got {:?}", std::mem::discriminant(other)),
+        };
+        let qp = to_query_points(req, "my_coll").unwrap();
+
+        assert_eq!(qp.collection_name, "my_coll");
+        assert_eq!(qp.limit, Some(10));
+        assert_eq!(qp.offset, Some(5));
+        assert_eq!(qp.using, Some("dense".into()));
+        assert_eq!(qp.score_threshold, Some(0.7f32));
+        // query variant should be Nearest with vector input
+        let query = qp.query.expect("query should be set");
+        assert!(matches!(
+            query.variant,
+            Some(qdrant::query::Variant::Nearest(_))
+        ));
+    }
+
+    /// Query with WITH PAYLOAD INCLUDE + WITH VECTOR → gRPC selectors
+    #[test]
+    fn query_points_with_payload_and_vectors() {
+        let stmt = Parser::parse(
+            "QUERY 'x' FROM docs WITH PAYLOAD INCLUDE ('title', 'url') WITH VECTOR (dense) LIMIT 5;",
+        )
+        .unwrap();
+        let r = route(&stmt);
+        let req = match r.body.as_ref().unwrap() {
+            RequestBody::Query(q) => q,
+            other => panic!("expected Query, got {:?}", std::mem::discriminant(other)),
+        };
+        let qp = to_query_points(req, "docs").unwrap();
+
+        // with_payload → selector_options.Include
+        let wp = qp.with_payload.expect("with_payload should be set");
+        match wp.selector_options.expect("selector_options should be set") {
+            qdrant::with_payload_selector::SelectorOptions::Include(inc) => {
+                assert!(inc.fields.contains(&"title".to_string()));
+                assert!(inc.fields.contains(&"url".to_string()));
+            }
+            other => panic!("expected Include, got {:?}", other),
+        }
+        // with_vectors → selector_options.Include
+        let wv = qp.with_vectors.expect("with_vectors should be set");
+        match wv.selector_options.expect("selector_options should be set") {
+            qdrant::with_vectors_selector::SelectorOptions::Include(inc) => {
+                assert_eq!(inc.names, vec!["dense"]);
+            }
+            other => panic!("expected Include, got {:?}", other),
+        }
+    }
+
+    /// Query with SHARD KEY → gRPC shard_key_selector
+    #[test]
+    fn query_points_shard_key() {
+        let stmt =
+            Parser::parse("QUERY 'x' FROM docs USING dense SHARD 'tenant-42' LIMIT 5;")
+                .unwrap();
+        let r = route(&stmt);
+        let req = match r.body.as_ref().unwrap() {
+            RequestBody::Query(q) => q,
+            other => panic!("expected Query, got {:?}", std::mem::discriminant(other)),
+        };
+        let qp = to_query_points(req, "docs").unwrap();
+
+        let sks = qp
+            .shard_key_selector
+            .expect("shard_key_selector should be set");
+        assert_eq!(sks.shard_keys.len(), 1);
+        match sks.shard_keys[0].key.as_ref().unwrap() {
+            qdrant::shard_key::Key::Keyword(k) => assert_eq!(k, "tenant-42"),
+            other => panic!("expected Keyword, got {:?}", other),
+        }
+    }
+
+    /// Query with WHERE → gRPC filter present with must conditions
+    #[test]
+    fn query_points_filter_equality() {
+        let stmt =
+            Parser::parse("QUERY 'x' FROM docs WHERE status = 'active' LIMIT 5;").unwrap();
+        let r = route(&stmt);
+        let req = match r.body.as_ref().unwrap() {
+            RequestBody::Query(q) => q,
+            other => panic!("expected Query, got {:?}", std::mem::discriminant(other)),
+        };
+        let qp = to_query_points(req, "docs").unwrap();
+
+        let filter = qp.filter.expect("filter should be set");
+        // Single condition wraps into must
+        let must = &filter.must;
+        assert_eq!(must.len(), 1, "expected 1 condition in must");
+        let cond = &must[0];
+        // condition_one_of should be Field with key="status"
+        match cond.condition_one_of.as_ref().unwrap() {
+            qdrant::condition::ConditionOneOf::Field(fc) => {
+                assert_eq!(fc.key, "status");
+                // match → Keyword("active")
+                let mv = fc.r#match.as_ref().expect("match should be set");
+                match mv.match_value.as_ref().unwrap() {
+                    qdrant::r#match::MatchValue::Keyword(kw) => assert_eq!(kw, "active"),
+                    _ => panic!("expected Keyword match"),
+                }
+            }
+            other => panic!("expected Field condition, got {:?}", other),
+        }
+    }
+
+    /// Query with AND → gRPC filter with 2 must conditions
+    #[test]
+    fn query_points_filter_range_compound() {
+        let stmt =
+            Parser::parse("QUERY 'x' FROM docs WHERE age >= 18 AND age < 65 LIMIT 5;").unwrap();
+        let r = route(&stmt);
+        let req = match r.body.as_ref().unwrap() {
+            RequestBody::Query(q) => q,
+            other => panic!("expected Query, got {:?}", std::mem::discriminant(other)),
+        };
+        let qp = to_query_points(req, "docs").unwrap();
+        let filter = qp.filter.expect("filter should be set");
+        let must = &filter.must;
+        assert_eq!(must.len(), 2, "expected 2 conditions for AND (>= and <)");
+        // Both should be Field conditions on key "age" with Range
+        for c in must {
+            match c.condition_one_of.as_ref().unwrap() {
+                qdrant::condition::ConditionOneOf::Field(fc) => {
+                    assert_eq!(fc.key, "age");
+                    assert!(
+                        fc.range.is_some(),
+                        "expected Range for age comparison"
+                    );
+                }
+                _ => panic!("expected Field condition"),
+            }
+        }
+    }
+
+    /// Group-by query → gRPC QueryPointGroups with lookup
+    #[test]
+    fn query_points_group_by_with_lookup() {
+        let stmt = Parser::parse(
+            "QUERY 'x' FROM docs GROUP BY category SIZE 3 LOOKUP FROM categories LIMIT 10;",
+        )
+        .unwrap();
+        let r = route(&stmt);
+        let req = match r.body.as_ref().unwrap() {
+            RequestBody::QueryGroups(g) => g,
+            other => panic!("expected QueryGroups, got {:?}", std::mem::discriminant(other)),
+        };
+        let qg = to_query_groups(req, "docs").unwrap();
+
+        assert_eq!(qg.group_by, "category");
+        assert_eq!(qg.group_size, Some(3));
+        assert_eq!(qg.limit, Some(10));
+        let lookup = qg.with_lookup.expect("with_lookup should be set");
+        assert_eq!(lookup.collection, "categories");
+    }
+
+    /// CreateCollection → gRPC vectors config + HNSW validation
+    #[test]
+    fn create_collection_vectors_and_hnsw() {
+        let stmt = Parser::parse(
+            "CREATE COLLECTION docs (dense VECTOR(384, COSINE)) WITH HNSW (m = 32, ef_construct = 100);",
+        )
+        .unwrap();
+        let r = route(&stmt);
+        let req = match r.body.as_ref().unwrap() {
+            RequestBody::CreateCollection(c) => c,
+            other => {
+                panic!("expected CreateCollection, got {:?}", std::mem::discriminant(other))
+            }
+        };
+
+        // vectors should contain dense → size 384, distance Cosine
+        let vectors = req.vectors.as_ref().expect("vectors should be set");
+        let dense = vectors
+            .get("dense")
+            .expect("dense vector config missing");
+        assert_eq!(dense["size"], 384);
+        assert_eq!(dense["distance"], "Cosine");
+
+        // HNSW → gRPC conversion with m + ef_construct
+        let hnsw_json = req.hnsw_config.as_ref().expect("hnsw_config should be set");
+        let hnsw = hnsw_config(hnsw_json);
+        assert_eq!(hnsw.m, Some(32));
+        assert_eq!(hnsw.ef_construct, Some(100));
+    }
+
+    /// Upsert → gRPC point count + shard key
+    #[test]
+    fn upsert_points_field_level() {
+        let stmt = Parser::parse(
+            "UPSERT INTO docs VALUES {id: 1, text: 'hello'}, {id: 2, text: 'world'};",
+        )
+        .unwrap();
+        let r = route(&stmt);
+        let req = match r.body.as_ref().unwrap() {
+            RequestBody::Upsert(u) => u,
+            other => panic!("expected Upsert, got {:?}", std::mem::discriminant(other)),
+        };
+
+        assert_eq!(req.points.len(), 2);
+        assert!(req.shard_key.is_none());
+    }
+
+    /// DELETE with compound filter → gRPC must conditions present
+    #[test]
+    fn delete_with_compound_filter() {
+        let stmt =
+            Parser::parse(
+                "DELETE FROM docs WHERE category = 'archived' AND priority < 3;",
+            )
+            .unwrap();
+        let r = route(&stmt);
+        let req = match r.body.as_ref().unwrap() {
+            RequestBody::Delete(d) => d,
+            other => panic!("expected Delete, got {:?}", std::mem::discriminant(other)),
+        };
+
+        let filter = req.filter.as_ref().expect("delete filter should be set");
+        match filter {
+            FilterExpression::Compound(fc) => {
+                assert_eq!(
+                    fc.must.len(),
+                    2,
+                    "expected 2 conditions in compound AND filter"
+                );
+            }
+            other => panic!("expected Compound filter, got {:?}", std::mem::discriminant(other)),
+        }
+    }
+
+    /// Order-by query → gRPC OrderBy variant + filter
+    #[test]
+    fn query_order_by_direction() {
+        let stmt = Parser::parse(
+            "QUERY ORDER BY created_at DESC FROM docs WHERE status = 'active' LIMIT 20;",
+        )
+        .unwrap();
+        let r = route(&stmt);
+        let req = match r.body.as_ref().unwrap() {
+            RequestBody::Query(q) => q,
+            other => panic!("expected Query, got {:?}", std::mem::discriminant(other)),
+        };
+        let qp = to_query_points(req, "docs").unwrap();
+
+        let query = qp.query.expect("query should be set");
+        match query.variant.expect("variant should be set") {
+            qdrant::query::Variant::OrderBy(ob) => {
+                assert_eq!(ob.key, "created_at");
+                assert_eq!(ob.direction, Some(qdrant::Direction::Desc as i32));
+            }
+            other => panic!("expected OrderBy variant, got {:?}", other),
+        }
+        // Filter should be present
+        assert!(qp.filter.is_some(), "filter should be set for WHERE clause");
+    }
 }
