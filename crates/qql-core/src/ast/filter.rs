@@ -94,4 +94,9 @@ pub enum FilterExpr {
         center: GeoPoint,
         radius: f64,
     },
+    GeoPolygon {
+        field: String,
+        exterior: Vec<GeoPoint>,
+        interiors: Vec<Vec<GeoPoint>>,
+    },
 }

@@ -115,6 +115,31 @@ fn invalid_geo_rejected() {
 }
 
 #[test]
+fn invalid_geo_polygon_rejected() {
+    let cases: &[&str] = &[
+        // exterior has fewer than 3 points
+        "QUERY TEXT 'x' FROM docs WHERE loc GEO_POLYGON {exterior: [{lat: 1, lon: 2}, {lat: 3, lon: 4}]};",
+        // exterior has invalid lat
+        "QUERY TEXT 'x' FROM docs WHERE loc GEO_POLYGON {exterior: [{lat: 91, lon: 0}, {lat: 0, lon: 0}, {lat: 0, lon: 0}]};",
+        // interior ring has fewer than 3 points
+        "QUERY TEXT 'x' FROM docs WHERE loc GEO_POLYGON {exterior: [{lat: 0, lon: 0}, {lat: 1, lon: 0}, {lat: 0, lon: 1}], interiors: [[{lat: 0, lon: 0}, {lat: 1, lon: 0}]]};",
+        // missing exterior key
+        "QUERY TEXT 'x' FROM docs WHERE loc GEO_POLYGON {};",
+        // exterior is not a list
+        "QUERY TEXT 'x' FROM docs WHERE loc GEO_POLYGON {exterior: {lat: 0, lon: 0}};",
+    ];
+    for source in cases {
+        let err = Parser::parse(source)
+            .expect_err(&format!("expected geo polygon error for: {}", source));
+        assert_eq!(
+            err.kind,
+            ErrorKind::Validation,
+            "unexpected error kind for: {source}"
+        );
+    }
+}
+
+#[test]
 fn id_predicate_inequality_rejected() {
     assert!(Parser::parse("QUERY TEXT 'x' FROM docs WHERE id > 4").is_err());
 }

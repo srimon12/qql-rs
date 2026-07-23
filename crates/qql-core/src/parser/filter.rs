@@ -197,6 +197,49 @@ impl<'a> Parser<'a> {
             });
         }
 
+        if operator.kind == TokenKind::GeoPolygon {
+            if point_id {
+                return Err(id_operator_error(operator.span));
+            }
+            self.advance()?;
+            let span = self.peek()?.span;
+            let Value::Dict(items) = self.parse_value()? else {
+                return Err(geo_error("GEO_POLYGON requires an object", span));
+            };
+            let exterior = geo_point_list(dict_value(&items, "exterior"), "exterior", span)?;
+            if exterior.len() < 3 {
+                return Err(geo_error(
+                    "exterior polygon ring must have at least 3 points",
+                    span,
+                ));
+            }
+            let interiors = match dict_value(&items, "interiors") {
+                Some(Value::List(rings)) => {
+                    let mut parsed = Vec::new();
+                    for ring in rings {
+                        let ring_points = geo_point_list_from_value(ring, "interior ring", span)?;
+                        if ring_points.len() < 3 {
+                            return Err(geo_error(
+                                "each interior polygon ring must have at least 3 points",
+                                span,
+                            ));
+                        }
+                        parsed.push(ring_points);
+                    }
+                    parsed
+                }
+                Some(_) => {
+                    return Err(geo_error("interiors must be a list of point-rings", span));
+                }
+                None => Vec::new(),
+            };
+            return Ok(FilterExpr::GeoPolygon {
+                field,
+                exterior,
+                interiors,
+            });
+        }
+
         if operator.kind == TokenKind::ValuesCount {
             if point_id {
                 return Err(id_operator_error(operator.span));
@@ -337,6 +380,38 @@ fn geo_point(value: Option<&Value>, name: &str, span: Span) -> Result<GeoPoint, 
         return Err(geo_error("longitude must be between -180 and 180", span));
     }
     Ok(GeoPoint { lat, lon })
+}
+
+/// Parse a `Value::List` of point-objects into a `Vec<GeoPoint>`.
+/// Returns an error if the value is not a list.
+fn geo_point_list(
+    value: Option<&Value>,
+    name: &str,
+    span: Span,
+) -> Result<Vec<GeoPoint>, QqlError> {
+    let Some(list) = value else {
+        return Err(geo_error(alloc::format!("{} is required", name), span));
+    };
+    geo_point_list_from_value(list, name, span)
+}
+
+/// Convert a single `Value` that must be a list of point-objects into `Vec<GeoPoint>`.
+fn geo_point_list_from_value(
+    value: &Value,
+    name: &str,
+    span: Span,
+) -> Result<Vec<GeoPoint>, QqlError> {
+    let Value::List(items) = value else {
+        return Err(geo_error(
+            alloc::format!("{} must be a list of geo-point objects", name),
+            span,
+        ));
+    };
+    items
+        .iter()
+        .enumerate()
+        .map(|(i, item)| geo_point(Some(item), &alloc::format!("{}[{}]", name, i), span))
+        .collect()
 }
 
 fn number(value: Option<&Value>, name: &str, span: Span) -> Result<f64, QqlError> {

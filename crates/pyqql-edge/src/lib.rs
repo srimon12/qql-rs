@@ -264,9 +264,7 @@ fn classify(query: &Bound<'_, PyAny>) -> PyResult<Input> {
             .map(|i| i.extract::<String>())
             .collect::<PyResult<_>>()
             .map_err(|_| {
-                pyo3::exceptions::PyTypeError::new_err(
-                    "list items must be strings or Stmt objects",
-                )
+                pyo3::exceptions::PyTypeError::new_err("list items must be strings or Stmt objects")
             })?;
         return Ok(Input::StrList(strs));
     }
@@ -348,6 +346,7 @@ async fn run_async(
 
 #[pyclass(name = "HttpEmbedder")]
 #[derive(Clone)]
+#[allow(dead_code)]
 struct PyHttpEmbedder {
     endpoint: String,
     api_key: String,

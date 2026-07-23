@@ -292,6 +292,10 @@ fn convert_condition(cond: &Value) -> Result<String, String> {
         return Ok(format!("{} GEO_RADIUS (...)", key));
     }
 
+    if let Some(_geo_polygon) = obj.get("geo_polygon").and_then(|v| v.as_object()) {
+        return Ok(format!("{} GEO_POLYGON (...)", key));
+    }
+
     Ok(String::new())
 }
 

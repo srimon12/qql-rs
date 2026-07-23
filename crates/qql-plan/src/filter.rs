@@ -96,6 +96,23 @@ fn lower_clause(filter: &FilterExpr) -> FilterClause {
                 radius: *radius,
             })
         }),
+        FilterExpr::GeoPolygon {
+            field,
+            exterior,
+            interiors,
+        } => field_condition(field, |fc| {
+            fc.geo_polygon = Some(GeoPolygon {
+                exterior: GeoLineString {
+                    points: exterior.iter().map(geo_point_req).collect(),
+                },
+                interiors: interiors
+                    .iter()
+                    .map(|ring| GeoLineString {
+                        points: ring.iter().map(geo_point_req).collect(),
+                    })
+                    .collect(),
+            })
+        }),
         FilterExpr::And { operands } => FilterClause::Filter(Box::new(FilterCompound {
             must: operands.iter().map(lower_clause).collect(),
             must_not: Vec::new(),
@@ -536,5 +553,59 @@ mod tests {
         let json = serde_json::to_value(lower_filter(&f)).unwrap();
         assert_eq!(json["key"], "area");
         assert_eq!(json["geo_bounding_box"]["top_left"]["lat"], 1.0);
+    }
+
+    #[test]
+    fn geo_polygon() {
+        let f = FilterExpr::GeoPolygon {
+            field: "area".into(),
+            exterior: vec![
+                qql_core::ast::GeoPoint {
+                    lat: -70.0,
+                    lon: -70.0,
+                },
+                qql_core::ast::GeoPoint {
+                    lat: 60.0,
+                    lon: -70.0,
+                },
+                qql_core::ast::GeoPoint {
+                    lat: 60.0,
+                    lon: 60.0,
+                },
+                qql_core::ast::GeoPoint {
+                    lat: -70.0,
+                    lon: 60.0,
+                },
+            ],
+            interiors: vec![vec![
+                qql_core::ast::GeoPoint {
+                    lat: -50.0,
+                    lon: -50.0,
+                },
+                qql_core::ast::GeoPoint {
+                    lat: 50.0,
+                    lon: -50.0,
+                },
+                qql_core::ast::GeoPoint {
+                    lat: 50.0,
+                    lon: 50.0,
+                },
+                qql_core::ast::GeoPoint {
+                    lat: -50.0,
+                    lon: 50.0,
+                },
+            ]],
+        };
+        let json = serde_json::to_value(lower_filter(&f)).unwrap();
+        assert_eq!(json["key"], "area");
+        let polygon = &json["geo_polygon"];
+        assert_eq!(polygon["exterior"]["points"][0]["lat"], -70.0);
+        assert_eq!(polygon["exterior"]["points"][0]["lon"], -70.0);
+        assert_eq!(polygon["exterior"]["points"].as_array().unwrap().len(), 4);
+        assert_eq!(polygon["interiors"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            polygon["interiors"][0]["points"].as_array().unwrap().len(),
+            4
+        );
     }
 }

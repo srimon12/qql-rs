@@ -132,11 +132,25 @@ WHERE location GEO_RADIUS {
   center: {lat: 52.5200, lon: 13.4050},
   radius: 1000.0
 }
-```
 
-> **Note**: `GEO_POLYGON` is defined in the plan-layer types (`GeoPolygon` in
-> `qql-plan/src/types.rs`) but is **not yet parsed from QQL syntax**. It can
-> be reached by programmatic AST construction or future parser extension.
+-- Geospatial filtering within a polygon (with optional interior holes)
+WHERE location GEO_POLYGON {
+  exterior: [
+    {lat: -70.0, lon: -70.0},
+    {lat:  60.0, lon: -70.0},
+    {lat:  60.0, lon:  60.0},
+    {lat: -70.0, lon:  60.0}
+  ],
+  interiors: [
+    [
+      {lat: -50.0, lon: -50.0},
+      {lat:  50.0, lon: -50.0},
+      {lat:  50.0, lon:  50.0},
+      {lat: -50.0, lon:  50.0}
+    ]
+  ]
+}
+```
 
 ---
 

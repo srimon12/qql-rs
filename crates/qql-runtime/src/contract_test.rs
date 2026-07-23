@@ -93,6 +93,7 @@ mod tests {
             ("nested", "QUERY 'x' FROM docs WHERE NESTED('reviews', rating > 4);"),
             ("geo bbox", "QUERY 'x' FROM docs WHERE location GEO_BBOX { top_left: {lat: 52.52, lon: 13.40}, bottom_right: {lat: 52.51, lon: 13.41} };"),
             ("geo radius", "QUERY 'x' FROM docs WHERE location GEO_RADIUS { center: {lat: 52.52, lon: 13.40}, radius: 1000.0 };"),
+            ("geo polygon", "QUERY 'x' FROM docs WHERE location GEO_POLYGON { exterior: [{lat: -70.0, lon: -70.0}, {lat: 60.0, lon: -70.0}, {lat: 60.0, lon: 60.0}, {lat: -70.0, lon: 60.0}] } ;"),
             ("point id eq", "QUERY 'x' FROM docs WHERE id = 42;"),
             ("point id in", "QUERY 'x' FROM docs WHERE id IN (1, 2, 3);"),
             ("compound or not", "QUERY 'x' FROM docs WHERE (status = 'a' OR status = 'b') AND NOT category = 'c';"),

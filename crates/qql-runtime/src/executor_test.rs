@@ -5,7 +5,6 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 use qql_core::error::QqlError;
-use qql_plan::routing::Route;
 use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 
 use crate::client::{CollectionInfo, CreateCollectionReq, CreateFieldIndexReq, QdrantOps};

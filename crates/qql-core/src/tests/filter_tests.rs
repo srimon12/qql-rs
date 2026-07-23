@@ -140,6 +140,33 @@ fn geo_bbox_filter() {
 }
 
 #[test]
+fn geo_polygon_filter() {
+    let f = filter_of(
+        "QUERY TEXT 'x' FROM docs WHERE area GEO_POLYGON {exterior: [{lat: -70, lon: -70}, {lat: 60, lon: -70}, {lat: 60, lon: 60}, {lat: -70, lon: 60}, {lat: -70, lon: -70}]};"
+    ).unwrap();
+    assert!(matches!(*f, FilterExpr::GeoPolygon { .. }));
+}
+
+#[test]
+fn geo_polygon_filter_with_holes() {
+    let f = filter_of(
+        "QUERY TEXT 'x' FROM docs WHERE area GEO_POLYGON {exterior: [{lat: -70, lon: -70}, {lat: 60, lon: -70}, {lat: 60, lon: 60}, {lat: -70, lon: 60}], interiors: [[{lat: -50, lon: -50}, {lat: 50, lon: -50}, {lat: 50, lon: 50}, {lat: -50, lon: 50}]]};"
+    ).unwrap();
+    match &*f {
+        FilterExpr::GeoPolygon {
+            exterior,
+            interiors,
+            ..
+        } => {
+            assert_eq!(exterior.len(), 4);
+            assert_eq!(interiors.len(), 1);
+            assert_eq!(interiors[0].len(), 4);
+        }
+        _ => panic!("expected GeoPolygon"),
+    }
+}
+
+#[test]
 fn id_predicate_simple() {
     let f = filter_of("QUERY TEXT 'x' FROM docs WHERE id = 42;").unwrap();
     assert!(matches!(*f, FilterExpr::PointId(PointIdPredicate::Eq(_))));

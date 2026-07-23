@@ -211,16 +211,14 @@ pub fn analyze(input: &str) -> String {
     let norm = normalize_input(input);
     let mut tokens = Vec::new();
     let lexer = Lexer::new(&norm);
-    for token_result in lexer {
-        if let Ok(t) = token_result {
-            tokens.push(serde_json::json!({
-                "kind": t.kind.as_str(),
-                "text": t.text,
-                "pos": t.span.start,
-                "end": t.span.end,
-                "len": t.span.end.saturating_sub(t.span.start),
-            }));
-        }
+    for t in lexer.flatten() {
+        tokens.push(serde_json::json!({
+            "kind": t.kind.as_str(),
+            "text": t.text,
+            "pos": t.span.start,
+            "end": t.span.end,
+            "len": t.span.end.saturating_sub(t.span.start),
+        }));
     }
 
     let stmts_res = Parser::parse_all(&norm);
@@ -622,14 +620,12 @@ impl Client {
                     }
                 }
             }
-            return serde_json::to_string(&results)
-                .map_err(|e| JsValue::from_str(&e.to_string()));
+            return serde_json::to_string(&results).map_err(|e| JsValue::from_str(&e.to_string()));
         }
 
         if let Some(s) = query.as_string() {
             let val = self.execute_script(&s).await?;
-            return serde_json::to_string(&val)
-                .map_err(|e| JsValue::from_str(&e.to_string()));
+            return serde_json::to_string(&val).map_err(|e| JsValue::from_str(&e.to_string()));
         }
 
         Err(JsValue::from_str("query must be a string or string[]"))
