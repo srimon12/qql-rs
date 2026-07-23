@@ -6,7 +6,6 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use qql_core::error::QqlError;
-use qql_plan::routing::Route;
 use qql_plan::types::Method as PlanMethod;
 use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 
@@ -328,7 +327,35 @@ impl QdrantOps for RestQdrant {
         Ok(())
     }
 
-    async fn execute_route(&self, route: Route) -> Result<Value, QqlError> {
+    async fn execute_planned(&self, op: &qql_plan::PlannedOperation) -> Result<Value, QqlError> {
+        let route = qql_plan::plan::to_rest_route(op);
+        self.execute_http(route).await
+    }
+
+    async fn execute_query_batch(
+        &self,
+        collection: &str,
+        batch: &QueryBatchRequest,
+    ) -> Result<Vec<Value>, QqlError> {
+        let path = format!("/collections/{collection}/points/query/batch");
+        let value: Value = self.call_body(Method::POST, &path, Some(batch)).await?;
+        result_array(&value, &path)
+    }
+
+    async fn execute_update_batch(
+        &self,
+        collection: &str,
+        batch: &UpdateBatchRequest,
+    ) -> Result<Vec<Value>, QqlError> {
+        let path = format!("/collections/{collection}/points/batch?wait=true");
+        let value: Value = self.call_body(Method::POST, &path, Some(batch)).await?;
+        result_array(&value, &path)
+    }
+}
+
+impl RestQdrant {
+    /// Low-level HTTP dispatch from a pre-built Route.
+    async fn execute_http(&self, route: qql_plan::routing::Route) -> Result<Value, QqlError> {
         let method = match route.method {
             PlanMethod::Get => Method::GET,
             PlanMethod::Post => Method::POST,
@@ -337,7 +364,6 @@ impl QdrantOps for RestQdrant {
             PlanMethod::Delete => Method::DELETE,
         };
 
-        // Build path without manual query encoding; use reqwest's query API (RUN-011).
         let url = format!("{}{}", self.base_url, route.path);
         let mut builder = match method {
             Method::GET => self.client.get(&url),
@@ -379,26 +405,6 @@ impl QdrantOps for RestQdrant {
         })?;
         validate_success_envelope(&value, &route.path)?;
         Ok(value)
-    }
-
-    async fn execute_query_batch(
-        &self,
-        collection: &str,
-        batch: &QueryBatchRequest,
-    ) -> Result<Vec<Value>, QqlError> {
-        let path = format!("/collections/{collection}/points/query/batch");
-        let value: Value = self.call_body(Method::POST, &path, Some(batch)).await?;
-        result_array(&value, &path)
-    }
-
-    async fn execute_update_batch(
-        &self,
-        collection: &str,
-        batch: &UpdateBatchRequest,
-    ) -> Result<Vec<Value>, QqlError> {
-        let path = format!("/collections/{collection}/points/batch?wait=true");
-        let value: Value = self.call_body(Method::POST, &path, Some(batch)).await?;
-        result_array(&value, &path)
     }
 }
 

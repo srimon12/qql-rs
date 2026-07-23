@@ -122,17 +122,20 @@ fn main() {
     let dest_path = Path::new(&out_dir).join("qdrant_types.rs");
     fs::write(dest_path, formatted).unwrap();
 
-    // ── Protobuf types (gRPC) ─────────────────────────────────────
+    // ── Protobuf types (gRPC) — only when grpc feature is active ──
 
-    let proto_dir = Path::new("proto");
-    println!("cargo:rerun-if-changed=proto/");
+    #[cfg(feature = "grpc")]
+    {
+        let proto_dir = Path::new("proto");
+        println!("cargo:rerun-if-changed=proto/");
 
-    tonic_prost_build::configure()
-        .build_server(false)
-        .build_client(true)
-        .compile_protos(
-            &[proto_dir.join("qdrant.proto")],
-            &[proto_dir.to_path_buf()],
-        )
-        .expect("Failed to compile proto files");
+        tonic_prost_build::configure()
+            .build_server(false)
+            .build_client(true)
+            .compile_protos(
+                &[proto_dir.join("qdrant.proto")],
+                &[proto_dir.to_path_buf()],
+            )
+            .expect("Failed to compile proto files");
+    }
 }

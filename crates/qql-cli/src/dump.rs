@@ -179,8 +179,8 @@ pub async fn dump_collection(
             stmt = Parser::parse(&scroll_qql_with_offset)?;
         }
 
-        let route = qql_plan::routing::route(&stmt);
-        let response = ops.execute_route(route).await?;
+        let op = qql_plan::plan::plan(&stmt)?;
+        let response = ops.execute_planned(&op).await?;
 
         let points = response
             .get("result")

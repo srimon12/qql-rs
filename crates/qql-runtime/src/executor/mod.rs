@@ -513,17 +513,15 @@ impl Executor {
         Ok(())
     }
 
-    /// Dispatch a planned DML/query operation via REST route projection.
+    /// Dispatch a planned operation — gRPC goes direct, REST goes through Route.
     async fn dispatch_planned(
         &self,
         op: &qql_plan::PlannedOperation,
     ) -> Result<ExecResponse, QqlError> {
-        use qql_plan::plan::to_rest_route;
         use qql_plan::PlannedOperation;
 
         let label = op.operation_label();
-        let route = to_rest_route(op);
-        let result = self.client.execute_route(route).await?;
+        let result = self.client.execute_planned(op).await?;
         let (message, data) = match op {
             PlannedOperation::Query { .. }
             | PlannedOperation::Scroll { .. }

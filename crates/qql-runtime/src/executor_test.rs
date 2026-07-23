@@ -16,7 +16,7 @@ struct MockQdrantClient {
     pub exists: bool,
     pub collections: Vec<String>,
     pub info: Option<CollectionInfo>,
-    pub last_route: Arc<Mutex<Option<Route>>>,
+    pub last_planned: Arc<Mutex<Option<qql_plan::PlannedOperation>>>,
     pub batch_call_count: Arc<Mutex<usize>>,
     pub last_batch_searches_count: Arc<Mutex<usize>>,
     pub update_batch_call_count: Arc<Mutex<usize>>,
@@ -29,7 +29,7 @@ impl Default for MockQdrantClient {
             exists: false,
             collections: Vec::new(),
             info: None,
-            last_route: Arc::new(Mutex::new(None)),
+            last_planned: Arc::new(Mutex::new(None)),
             batch_call_count: Arc::new(Mutex::new(0)),
             last_batch_searches_count: Arc::new(Mutex::new(0)),
             update_batch_call_count: Arc::new(Mutex::new(0)),
@@ -72,16 +72,19 @@ impl QdrantOps for MockQdrantClient {
     ) -> Result<(), QqlError> {
         Ok(())
     }
-    async fn execute_route(&self, route: Route) -> Result<serde_json::Value, QqlError> {
-        let path = route.path.clone();
-        if path.contains("nonexistent") {
+    async fn execute_planned(
+        &self,
+        op: &qql_plan::PlannedOperation,
+    ) -> Result<serde_json::Value, QqlError> {
+        let route = qql_plan::plan::to_rest_route(op);
+        if route.path.contains("nonexistent") {
             return Err(QqlError::execution(
                 "QQL-EXECUTION",
                 "collection does not exist",
                 None,
             ));
         }
-        *self.last_route.lock().unwrap() = Some(route);
+        *self.last_planned.lock().unwrap() = Some(op.clone());
         Ok(serde_json::json!({"result": {"points": []}}))
     }
 
@@ -154,14 +157,15 @@ impl crate::embedder::Embedder for MockEmbedder {
 #[tokio::test]
 async fn test_create_collection_with_hnsw_and_quantization() {
     let client = MockQdrantClient::default();
-    let last_route = client.last_route.clone();
+    let last_planned = client.last_planned.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let query = "CREATE COLLECTION mycol WITH HNSW (m = 32, ef_construct = 100) WITH QUANTIZATION (type = 'scalar', always_ram = true, quantile = 0.99)";
     let resp = executor.execute(query).await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
-    let route = last_route.lock().unwrap().take().unwrap();
+    let op = last_planned.lock().unwrap().take().unwrap();
+    let route = qql_plan::plan::to_rest_route(&op);
     assert_eq!(route.path, "/collections/mycol");
     let req = route.body_json().unwrap();
     assert_eq!(req["vectors"]["dense"]["size"], 384);
@@ -182,7 +186,7 @@ async fn test_create_collection_with_hnsw_and_quantization() {
 #[tokio::test]
 async fn test_create_hybrid_materializes_default_schema() {
     let client = MockQdrantClient::default();
-    let last_route = client.last_route.clone();
+    let last_planned = client.last_planned.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     executor
@@ -190,7 +194,8 @@ async fn test_create_hybrid_materializes_default_schema() {
         .await
         .unwrap();
 
-    let route = last_route.lock().unwrap().take().unwrap();
+    let op = last_planned.lock().unwrap().take().unwrap();
+    let route = qql_plan::plan::to_rest_route(&op);
     let req = route.body_json().unwrap();
     assert_eq!(req["vectors"]["dense"]["size"], 384);
     assert_eq!(req["sparse_vectors"]["sparse"]["modifier"], "idf");
@@ -199,14 +204,15 @@ async fn test_create_hybrid_materializes_default_schema() {
 #[tokio::test]
 async fn test_create_collection_with_optimizers_and_params() {
     let client = MockQdrantClient::default();
-    let last_route = client.last_route.clone();
+    let last_planned = client.last_planned.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let query = "CREATE COLLECTION mycol WITH OPTIMIZERS (deleted_threshold = 0.2, default_segment_number = 4, max_optimization_threads = 2) WITH PARAMS (replication_factor = 2, on_disk_payload = true)";
     let resp = executor.execute(query).await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
-    let route = last_route.lock().unwrap().take().unwrap();
+    let op = last_planned.lock().unwrap().take().unwrap();
+    let route = qql_plan::plan::to_rest_route(&op);
     let req = route.body_json().unwrap();
 
     // Check Optimizers config serialization
@@ -224,14 +230,15 @@ async fn test_create_collection_with_optimizers_and_params() {
 #[tokio::test]
 async fn test_create_collection_with_named_vectors_hnsw_quant() {
     let client = MockQdrantClient::default();
-    let last_route = client.last_route.clone();
+    let last_planned = client.last_planned.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let query = "CREATE COLLECTION mycol (dense_vec VECTOR(128, Cosine) WITH HNSW (m = 16) WITH QUANTIZATION (type = 'binary', always_ram = false))";
     let resp = executor.execute(query).await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
-    let route = last_route.lock().unwrap().take().unwrap();
+    let op = last_planned.lock().unwrap().take().unwrap();
+    let route = qql_plan::plan::to_rest_route(&op);
     let req = route.body_json().unwrap();
 
     let vectors = &req["vectors"];
@@ -254,14 +261,15 @@ async fn test_create_collection_with_named_vectors_hnsw_quant() {
 async fn test_alter_collection_quantization_and_hnsw() {
     let mut client = MockQdrantClient::default();
     client.exists = true;
-    let last_route = client.last_route.clone();
+    let last_planned = client.last_planned.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let query = "ALTER COLLECTION mycol WITH HNSW (ef_construct = 150) WITH QUANTIZATION (type = 'product', always_ram = true)";
     let resp = executor.execute(query).await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
-    let route = last_route.lock().unwrap().take().unwrap();
+    let op = last_planned.lock().unwrap().take().unwrap();
+    let route = qql_plan::plan::to_rest_route(&op);
     assert_eq!(route.path, "/collections/mycol");
     let req = route.body_json().unwrap();
 
@@ -280,14 +288,15 @@ async fn test_alter_collection_quantization_and_hnsw() {
 async fn test_alter_collection_disable_quantization() {
     let mut client = MockQdrantClient::default();
     client.exists = true;
-    let last_route = client.last_route.clone();
+    let last_planned = client.last_planned.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let query = "ALTER COLLECTION mycol WITH QUANTIZATION (disabled = true)";
     let resp = executor.execute(query).await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
-    let route = last_route.lock().unwrap().take().unwrap();
+    let op = last_planned.lock().unwrap().take().unwrap();
+    let route = qql_plan::plan::to_rest_route(&op);
     let req = route.body_json().unwrap();
 
     assert_eq!(req["quantization_config"]["disabled"], true);
@@ -317,14 +326,15 @@ async fn test_do_query_basic() {
     client.exists = true;
     // Simulate a collection with an unnamed default vector (no named vectors)
     client.info = Some(CollectionInfo::default());
-    let last_route = client.last_route.clone();
+    let last_planned = client.last_planned.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let query = "QUERY 'admin docs' FROM docs WHERE metadata.group = 'admin' LIMIT 10 OFFSET 5";
     let resp = executor.execute(query).await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
-    let route = last_route.lock().unwrap().take().unwrap();
+    let op = last_planned.lock().unwrap().take().unwrap();
+    let route = qql_plan::plan::to_rest_route(&op);
     assert_eq!(route.method, qql_plan::types::Method::Post);
     assert!(route.path.contains("docs"));
     assert!(route.body.is_some());
@@ -334,14 +344,15 @@ async fn test_do_query_basic() {
 async fn test_do_query_hybrid() {
     let mut client = MockQdrantClient::default();
     client.exists = true;
-    let last_route = client.last_route.clone();
+    let last_planned = client.last_planned.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let query = "QUERY HYBRID TEXT 'hello' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10";
     let resp = executor.execute(query).await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
-    let route = last_route.lock().unwrap().take().unwrap();
+    let op = last_planned.lock().unwrap().take().unwrap();
+    let route = qql_plan::plan::to_rest_route(&op);
     assert_eq!(route.method, qql_plan::types::Method::Post);
     assert!(route.body.is_some());
 }
@@ -350,13 +361,14 @@ async fn test_do_query_hybrid() {
 async fn test_do_select_returns_record_or_nil() {
     let mut client = MockQdrantClient::default();
     client.exists = true;
-    let last_route = client.last_route.clone();
+    let last_planned = client.last_planned.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let resp = executor.execute("QUERY POINTS ('pt-1') FROM docs").await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
-    let route = last_route.lock().unwrap().take().unwrap();
+    let op = last_planned.lock().unwrap().take().unwrap();
+    let route = qql_plan::plan::to_rest_route(&op);
     assert_eq!(route.method, qql_plan::types::Method::Post);
     assert!(route.path.contains("docs/points"));
 }
@@ -365,13 +377,14 @@ async fn test_do_select_returns_record_or_nil() {
 async fn test_delete_by_id_and_filter() {
     let mut client = MockQdrantClient::default();
     client.exists = true;
-    let last_route = client.last_route.clone();
+    let last_planned = client.last_planned.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let resp = executor.execute("DELETE FROM docs WHERE id = 12").await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
-    let route = last_route.lock().unwrap().take().unwrap();
+    let op = last_planned.lock().unwrap().take().unwrap();
+    let route = qql_plan::plan::to_rest_route(&op);
     assert_eq!(route.method, qql_plan::types::Method::Post);
     assert!(route.path.contains("delete"));
 }
@@ -380,7 +393,7 @@ async fn test_delete_by_id_and_filter() {
 async fn test_set_payload_by_id_and_filter() {
     let mut client = MockQdrantClient::default();
     client.exists = true;
-    let last_route = client.last_route.clone();
+    let last_planned = client.last_planned.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let resp = executor
@@ -388,7 +401,8 @@ async fn test_set_payload_by_id_and_filter() {
         .await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
-    let route = last_route.lock().unwrap().take().unwrap();
+    let op = last_planned.lock().unwrap().take().unwrap();
+    let route = qql_plan::plan::to_rest_route(&op);
     assert_eq!(route.method, qql_plan::types::Method::Post);
     assert!(route.path.contains("payload"));
 }
@@ -397,7 +411,7 @@ async fn test_set_payload_by_id_and_filter() {
 async fn test_update_by_id() {
     let mut client = MockQdrantClient::default();
     client.exists = true;
-    let last_route = client.last_route.clone();
+    let last_planned = client.last_planned.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let resp = executor
@@ -405,7 +419,8 @@ async fn test_update_by_id() {
         .await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
-    let route = last_route.lock().unwrap().take().unwrap();
+    let op = last_planned.lock().unwrap().take().unwrap();
+    let route = qql_plan::plan::to_rest_route(&op);
     assert_eq!(route.method, qql_plan::types::Method::Put);
     assert!(route.path.contains("vectors"));
 }
@@ -413,7 +428,7 @@ async fn test_update_by_id() {
 #[tokio::test]
 async fn test_upsert_into_collection_creates_missing() {
     let client = MockQdrantClient::default();
-    let last_route = client.last_route.clone();
+    let last_planned = client.last_planned.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let resp = executor
@@ -421,7 +436,8 @@ async fn test_upsert_into_collection_creates_missing() {
         .await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
-    let route = last_route.lock().unwrap().take().unwrap();
+    let op = last_planned.lock().unwrap().take().unwrap();
+    let route = qql_plan::plan::to_rest_route(&op);
     assert_eq!(route.method, qql_plan::types::Method::Put);
     assert!(route.path.contains("docs"));
 }
@@ -430,13 +446,14 @@ async fn test_upsert_into_collection_creates_missing() {
 async fn test_do_scroll_returns_upstream_style_payload() {
     let mut client = MockQdrantClient::default();
     client.exists = true;
-    let last_route = client.last_route.clone();
+    let last_planned = client.last_planned.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let resp = executor.execute("SCROLL FROM docs LIMIT 10").await;
 
     assert!(resp.is_ok(), "{:?}", resp.err());
-    let route = last_route.lock().unwrap().take().unwrap();
+    let op = last_planned.lock().unwrap().take().unwrap();
+    let route = qql_plan::plan::to_rest_route(&op);
     assert_eq!(route.method, qql_plan::types::Method::Post);
     assert!(route.path.contains("scroll"));
 }
@@ -513,7 +530,7 @@ async fn test_batch_mutations_same_collection() {
     let client = MockQdrantClient::default();
     let update_count = client.update_batch_call_count.clone();
     let ops_count = client.last_update_batch_ops_count.clone();
-    let route_count = client.last_route.clone();
+    let route_count = client.last_planned.clone();
 
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
