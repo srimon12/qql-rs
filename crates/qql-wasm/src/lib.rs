@@ -1,6 +1,6 @@
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
 use async_trait::async_trait;
-#[cfg(feature = "client")]
+#[cfg(all(feature = "client", target_arch = "wasm32"))]
 use gloo_net::http::Request;
 use qql_core::ast::{self, ComparisonOp, Value};
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
@@ -10,7 +10,7 @@ use qql_core::parser::Parser;
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
 use qql_embed::{Embedder, SparseVector};
 use qql_plan::routing;
-#[cfg(feature = "client")]
+#[cfg(all(feature = "client", target_arch = "wasm32"))]
 use serde_json::json;
 use wasm_bindgen::prelude::*;
 
@@ -322,7 +322,7 @@ pub fn explain(query: &str) -> Result<String, JsValue> {
 
 // ── Client: browser fetch-based execute with embedding ────────────
 
-#[cfg(feature = "client")]
+#[cfg(all(feature = "client", target_arch = "wasm32"))]
 enum EmbedMode {
     None,
     /// JS function: `async (texts: string[]) => number[][]` (already batched).
@@ -332,7 +332,7 @@ enum EmbedMode {
     Http,
 }
 
-#[cfg(feature = "client")]
+#[cfg(all(feature = "client", target_arch = "wasm32"))]
 #[wasm_bindgen]
 pub struct Client {
     url: String,
@@ -345,7 +345,7 @@ pub struct Client {
     embed_dim: u32,
 }
 
-#[cfg(feature = "client")]
+#[cfg(all(feature = "client", target_arch = "wasm32"))]
 #[wasm_bindgen]
 impl Client {
     #[wasm_bindgen(constructor)]
@@ -443,6 +443,7 @@ impl Client {
     }
 
     /// Embed a batch of texts. Returns vectors in the same order.
+    #[cfg(target_arch = "wasm32")]
     async fn embed_texts(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>, JsValue> {
         if texts.is_empty() {
             return Ok(Vec::new());
@@ -488,6 +489,7 @@ impl Client {
     }
 
     /// POST JSON with Bearer auth to embedding endpoint.
+    #[cfg(target_arch = "wasm32")]
     async fn post_with_auth(
         &self,
         url: &str,
@@ -526,6 +528,7 @@ impl Client {
 
     /// Parse OpenAI-compatible batch response:
     /// `{"data":[{"embedding":[...],"index":0}, ...]}` — reorders by `index` when present.
+    #[cfg(target_arch = "wasm32")]
     fn parse_openai_batch_response(
         resp: &serde_json::Value,
         expected: usize,
@@ -852,7 +855,7 @@ impl Client {
     }
 }
 
-#[cfg(feature = "client")]
+#[cfg(all(feature = "client", target_arch = "wasm32"))]
 fn wasm_batchable_query(stmt: &qql_core::ast::Stmt) -> Option<(String, qql_core::ast::QueryStmt)> {
     match stmt {
         qql_core::ast::Stmt::Query(q) => {
