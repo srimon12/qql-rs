@@ -4,6 +4,7 @@ use qql::embedder::HttpEmbedder;
 use qql::executor::Executor;
 
 #[tokio::test]
+#[ignore = "requires local Qdrant (6333/6334) and Ollama (11434) running"]
 async fn test_live_rest_and_grpc_with_ollama_embeddings() {
     let rest_url = "http://localhost:6333";
     let grpc_url = "http://localhost:6334";
