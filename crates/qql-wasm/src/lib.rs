@@ -586,7 +586,10 @@ impl Client {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    async fn resolve_stmt_embeddings(&self, _stmt: &mut qql_core::ast::Stmt) -> Result<(), JsValue> {
+    async fn resolve_stmt_embeddings(
+        &self,
+        _stmt: &mut qql_core::ast::Stmt,
+    ) -> Result<(), JsValue> {
         Ok(())
     }
 

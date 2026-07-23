@@ -1358,7 +1358,7 @@ fn to_query_variant(qv: &qql_plan::types::QueryVariant) -> Result<qdrant::Query,
         }
         QueryVariant::Rrf(_rrf_q) => Variant::Fusion(1),
         QueryVariant::Formula(fq) => Variant::Formula(qdrant::Formula {
-            expression: to_formula_expression(&qql_plan::query::lower_formula_expr(&fq.formula.0)),
+            expression: ast_formula_to_grpc(&fq.formula.0),
             defaults: fq
                 .defaults
                 .clone()
@@ -1747,6 +1747,146 @@ fn to_vectors(vectors: &PlanPointVectors) -> Option<qdrant::Vectors> {
                 )),
             })
         }
+    }
+}
+
+fn ast_formula_to_grpc(expr: &qql_core::ast::FormulaExpr) -> Option<qdrant::Expression> {
+    use qdrant::expression::Variant;
+    match expr {
+        qql_core::ast::FormulaExpr::Constant { value } => Some(qdrant::Expression {
+            variant: Some(Variant::Constant(*value as f32)),
+        }),
+        qql_core::ast::FormulaExpr::Variable { name } => Some(qdrant::Expression {
+            variant: Some(Variant::Variable(if name == "score" {
+                "$score".to_string()
+            } else {
+                name.clone()
+            })),
+        }),
+        qql_core::ast::FormulaExpr::Sum { left, right } => {
+            let l = ast_formula_to_grpc(left)?;
+            let r = ast_formula_to_grpc(right)?;
+            Some(qdrant::Expression {
+                variant: Some(Variant::Sum(qdrant::SumExpression { sum: vec![l, r] })),
+            })
+        }
+        qql_core::ast::FormulaExpr::Sub { left, right } => {
+            let l = ast_formula_to_grpc(left)?;
+            let r = ast_formula_to_grpc(right)?;
+            let neg_r = qdrant::Expression {
+                variant: Some(Variant::Neg(Box::new(r))),
+            };
+            Some(qdrant::Expression {
+                variant: Some(Variant::Sum(qdrant::SumExpression {
+                    sum: vec![l, neg_r],
+                })),
+            })
+        }
+        qql_core::ast::FormulaExpr::Mul { left, right } => {
+            let l = ast_formula_to_grpc(left)?;
+            let r = ast_formula_to_grpc(right)?;
+            Some(qdrant::Expression {
+                variant: Some(Variant::Mult(qdrant::MultExpression { mult: vec![l, r] })),
+            })
+        }
+        qql_core::ast::FormulaExpr::Div {
+            left,
+            right,
+            by_zero_default,
+        } => {
+            let l = ast_formula_to_grpc(left)?;
+            let r = ast_formula_to_grpc(right)?;
+            Some(qdrant::Expression {
+                variant: Some(Variant::Div(Box::new(qdrant::DivExpression {
+                    left: Some(Box::new(l)),
+                    right: Some(Box::new(r)),
+                    by_zero_default: by_zero_default.map(|f| f as f32),
+                }))),
+            })
+        }
+        qql_core::ast::FormulaExpr::Neg { operand } => {
+            let inner = ast_formula_to_grpc(operand)?;
+            Some(qdrant::Expression {
+                variant: Some(Variant::Neg(Box::new(inner))),
+            })
+        }
+        qql_core::ast::FormulaExpr::Abs { x } => {
+            let inner = ast_formula_to_grpc(x)?;
+            Some(qdrant::Expression {
+                variant: Some(Variant::Abs(Box::new(inner))),
+            })
+        }
+        qql_core::ast::FormulaExpr::Sqrt { x } => {
+            let inner = ast_formula_to_grpc(x)?;
+            Some(qdrant::Expression {
+                variant: Some(Variant::Sqrt(Box::new(inner))),
+            })
+        }
+        qql_core::ast::FormulaExpr::Log { x } => {
+            let inner = ast_formula_to_grpc(x)?;
+            Some(qdrant::Expression {
+                variant: Some(Variant::Log10(Box::new(inner))),
+            })
+        }
+        qql_core::ast::FormulaExpr::Ln { x } => {
+            let inner = ast_formula_to_grpc(x)?;
+            Some(qdrant::Expression {
+                variant: Some(Variant::Ln(Box::new(inner))),
+            })
+        }
+        qql_core::ast::FormulaExpr::Exp { x } => {
+            let inner = ast_formula_to_grpc(x)?;
+            Some(qdrant::Expression {
+                variant: Some(Variant::Exp(Box::new(inner))),
+            })
+        }
+        qql_core::ast::FormulaExpr::Pow { base, exponent } => {
+            let b = ast_formula_to_grpc(base)?;
+            let e = ast_formula_to_grpc(exponent)?;
+            Some(qdrant::Expression {
+                variant: Some(Variant::Pow(Box::new(qdrant::PowExpression {
+                    base: Some(Box::new(b)),
+                    exponent: Some(Box::new(e)),
+                }))),
+            })
+        }
+        qql_core::ast::FormulaExpr::GeoDistance { lat, lon, field } => Some(qdrant::Expression {
+            variant: Some(Variant::GeoDistance(qdrant::GeoDistance {
+                origin: Some(qdrant::GeoPoint {
+                    lat: *lat,
+                    lon: *lon,
+                }),
+                to: field.clone(),
+            })),
+        }),
+        qql_core::ast::FormulaExpr::Decay {
+            kind,
+            x,
+            target,
+            scale,
+            midpoint,
+        } => {
+            let x_expr = ast_formula_to_grpc(x)?;
+            let target_expr = match target {
+                Some(t) => Some(Box::new(ast_formula_to_grpc(t)?)),
+                None => None,
+            };
+            let decay = Box::new(qdrant::DecayParamsExpression {
+                x: Some(Box::new(x_expr)),
+                target: target_expr,
+                scale: scale.map(|f| f as f32),
+                midpoint: midpoint.map(|f| f as f32),
+            });
+            let variant = match kind.to_ascii_lowercase().as_str() {
+                "exp" | "exp_decay" => Variant::ExpDecay(decay),
+                "lin" | "lin_decay" => Variant::LinDecay(decay),
+                _ => Variant::GaussDecay(decay),
+            };
+            Some(qdrant::Expression {
+                variant: Some(variant),
+            })
+        }
+        _ => to_formula_expression(&qql_plan::query::lower_formula_expr(expr)),
     }
 }
 
