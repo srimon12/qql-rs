@@ -74,21 +74,15 @@ pub fn lower_create_collection(stmt: &CreateCollectionStmt) -> CreateCollectionR
     req
 }
 
-pub fn lower_alter_collection(stmt: &AlterCollectionStmt) -> CreateCollectionRequest {
-    let mut req = CreateCollectionRequest {
-        vectors: None,
-        sparse_vectors: None,
+pub fn lower_alter_collection(stmt: &AlterCollectionStmt) -> UpdateCollectionRequest {
+    let mut req = UpdateCollectionRequest {
         hnsw_config: None,
         optimizers_config: None,
         params: None,
         quantization_config: None,
-        vectors_config: None,
-        shard_number: None,
-        sharding_method: None,
-        shard_keys: None,
     };
     if let Some(ref config) = stmt.config {
-        fill_collection_config(&mut req, config);
+        fill_update_collection_config(&mut req, config);
     }
     req
 }
@@ -152,6 +146,56 @@ fn fill_collection_config(
         }
         req.sharding_method = p.sharding_method.clone();
         req.shard_keys = p.shard_keys.clone();
+    }
+    if let Some(ref q) = config.quantization {
+        req.quantization_config = Some(lower_quantization_config_val(q));
+    }
+    if let Some(ref qu) = config.quantization_update {
+        let mut qup = serde_json::Map::new();
+        qup.insert("disabled".into(), serde_json::Value::Bool(qu.disabled));
+        if let Some(ref qc) = qu.config {
+            qup.insert(
+                "quantization_config".into(),
+                lower_quantization_config_val(qc),
+            );
+        }
+        req.quantization_config = Some(serde_json::Value::Object(qup));
+    }
+}
+
+fn fill_update_collection_config(
+    req: &mut UpdateCollectionRequest,
+    config: &qql_core::ast::CollectionConfig,
+) {
+    if let Some(ref h) = config.hnsw {
+        req.hnsw_config = Some(lower_hnsw_config_val(h));
+    }
+    if let Some(ref o) = config.optimizers {
+        req.optimizers_config = Some(lower_optimizers_config_val(o));
+    }
+    if let Some(ref p) = config.params {
+        let mut pc = serde_json::Map::new();
+        if let Some(rf) = p.replication_factor {
+            pc.insert("replication_factor".into(), serde_json::Value::from(rf));
+        }
+        if let Some(wc) = p.write_consistency_factor {
+            pc.insert(
+                "write_consistency_factor".into(),
+                serde_json::Value::from(wc),
+            );
+        }
+        if let Some(rf) = p.read_fan_out_factor {
+            pc.insert("read_fan_out_factor".into(), serde_json::Value::from(rf));
+        }
+        if let Some(rd) = p.read_fan_out_delay_ms {
+            pc.insert("read_fan_out_delay_ms".into(), serde_json::Value::from(rd));
+        }
+        if let Some(od) = p.on_disk_payload {
+            pc.insert("on_disk_payload".into(), serde_json::Value::Bool(od));
+        }
+        if !pc.is_empty() {
+            req.params = Some(serde_json::Value::Object(pc));
+        }
     }
     if let Some(ref q) = config.quantization {
         req.quantization_config = Some(lower_quantization_config_val(q));

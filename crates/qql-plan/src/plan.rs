@@ -70,7 +70,7 @@ pub enum PlannedOperation {
     },
     UpdateCollection {
         collection: String,
-        request: CreateCollectionRequest,
+        request: UpdateCollectionRequest,
     },
     DropCollection {
         collection: String,

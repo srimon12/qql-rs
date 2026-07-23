@@ -23,6 +23,19 @@ pub fn config_bool(config: &[(String, Value)], key: &str) -> Option<bool> {
     }
 }
 
+use crate::error::Span;
+
+fn validation_err(
+    message: impl Into<alloc::borrow::Cow<'static, str>>,
+    position: usize,
+) -> QqlError {
+    QqlError::validation(
+        "QQL-VALIDATION-CONFIG",
+        message,
+        Some(Span::point(position)),
+    )
+}
+
 pub fn config_positive_u64(
     config: &[(String, Value)],
     key: &str,
@@ -32,7 +45,7 @@ pub fn config_positive_u64(
         None => Ok(None),
         Some(Value::Int(n)) if *n > 0 => Ok(Some(*n as u64)),
         Some(Value::Float(n)) if *n > 0.0 && *n == (*n as u64) as f64 => Ok(Some(*n as u64)),
-        _ => Err(QqlError::syntax(
+        _ => Err(validation_err(
             alloc::format!("{} must be a positive integer", key),
             pos,
         )),
@@ -48,7 +61,7 @@ pub fn config_non_negative_u64(
         None => Ok(None),
         Some(Value::Int(n)) if *n >= 0 => Ok(Some(*n as u64)),
         Some(Value::Float(n)) if *n >= 0.0 && *n == (*n as u64) as f64 => Ok(Some(*n as u64)),
-        _ => Err(QqlError::syntax(
+        _ => Err(validation_err(
             alloc::format!("{} must be a non-negative integer", key),
             pos,
         )),
@@ -103,14 +116,14 @@ pub fn validate_hnsw_value(key: &str, value: &Value, pos: usize) -> Result<(), Q
     match lower.as_str() {
         "m" | "ef_construct" | "full_scan_threshold" | "max_indexing_threads" | "payload_m" => {
             if !matches!(value, Value::Int(_)) {
-                return Err(QqlError::syntax(
+                return Err(validation_err(
                     alloc::format!("{} must be an integer", key),
                     pos,
                 ));
             }
         }
         "on_disk" | "inline_storage" if !matches!(value, Value::Bool(_)) => {
-            return Err(QqlError::syntax(
+            return Err(validation_err(
                 alloc::format!("{} must be true or false", key),
                 pos,
             ));
@@ -122,7 +135,7 @@ pub fn validate_hnsw_value(key: &str, value: &Value, pos: usize) -> Result<(), Q
 
 pub fn validate_vectors_value(key: &str, value: &Value, pos: usize) -> Result<(), QqlError> {
     if ascii_equal_lower(key, "on_disk") && !matches!(value, Value::Bool(_)) {
-        return Err(QqlError::syntax(
+        return Err(validation_err(
             alloc::format!("{} must be true or false", key),
             pos,
         ));
@@ -135,7 +148,7 @@ pub fn validate_optimizers_value(key: &str, value: &Value, pos: usize) -> Result
     match lower.as_str() {
         "deleted_threshold" => {
             if !matches!(value, Value::Int(_) | Value::Float(_)) {
-                return Err(QqlError::syntax(
+                return Err(validation_err(
                     alloc::format!("{} must be a number", key),
                     pos,
                 ));
@@ -148,7 +161,7 @@ pub fn validate_optimizers_value(key: &str, value: &Value, pos: usize) -> Result
         | "indexing_threshold"
         | "flush_interval_sec" => {
             if !matches!(value, Value::Int(_)) {
-                return Err(QqlError::syntax(
+                return Err(validation_err(
                     alloc::format!("{} must be an integer", key),
                     pos,
                 ));
@@ -156,14 +169,14 @@ pub fn validate_optimizers_value(key: &str, value: &Value, pos: usize) -> Result
         }
         "max_optimization_threads" => {
             if !matches!(value, Value::Int(_) | Value::Str(_)) {
-                return Err(QqlError::syntax(
+                return Err(validation_err(
                     alloc::format!("{} must be a positive integer or 'auto'", key),
                     pos,
                 ));
             }
         }
         "prevent_unoptimized" if !matches!(value, Value::Bool(_)) => {
-            return Err(QqlError::syntax(
+            return Err(validation_err(
                 alloc::format!("{} must be true or false", key),
                 pos,
             ));
@@ -182,14 +195,14 @@ pub fn validate_params_value(key: &str, value: &Value, pos: usize) -> Result<(),
         | "read_fan_out_delay_ms"
         | "shard_number" => {
             if !matches!(value, Value::Int(_)) {
-                return Err(QqlError::syntax(
+                return Err(validation_err(
                     alloc::format!("{} must be an integer", key),
                     pos,
                 ));
             }
         }
         "on_disk_payload" if !matches!(value, Value::Bool(_)) => {
-            return Err(QqlError::syntax(
+            return Err(validation_err(
                 alloc::format!("{} must be true or false", key),
                 pos,
             ));
@@ -198,13 +211,13 @@ pub fn validate_params_value(key: &str, value: &Value, pos: usize) -> Result<(),
             Value::Str(s) if s.eq_ignore_ascii_case("auto") || s.eq_ignore_ascii_case("custom") => {
             }
             Value::Str(_) => {
-                return Err(QqlError::syntax(
+                return Err(validation_err(
                     "sharding_method must be 'auto' or 'custom'",
                     pos,
                 ));
             }
             _ => {
-                return Err(QqlError::syntax(
+                return Err(validation_err(
                     "sharding_method must be a string ('auto' or 'custom')",
                     pos,
                 ));
@@ -212,7 +225,7 @@ pub fn validate_params_value(key: &str, value: &Value, pos: usize) -> Result<(),
         },
         "shard_keys" => match value {
             Value::List(items) if items.is_empty() => {
-                return Err(QqlError::syntax(
+                return Err(validation_err(
                     "shard_keys must be a non-empty list of strings",
                     pos,
                 ));
@@ -220,7 +233,7 @@ pub fn validate_params_value(key: &str, value: &Value, pos: usize) -> Result<(),
             Value::List(items) => {
                 for item in items {
                     if !matches!(item, Value::Str(_)) {
-                        return Err(QqlError::syntax(
+                        return Err(validation_err(
                             "shard_keys entries must all be strings",
                             pos,
                         ));
@@ -228,10 +241,7 @@ pub fn validate_params_value(key: &str, value: &Value, pos: usize) -> Result<(),
                 }
             }
             _ => {
-                return Err(QqlError::syntax(
-                    "shard_keys must be a list of strings",
-                    pos,
-                ));
+                return Err(validation_err("shard_keys must be a list of strings", pos));
             }
         },
         _ => {}

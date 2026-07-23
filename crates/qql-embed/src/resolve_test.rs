@@ -165,3 +165,25 @@ async fn sparse_model_is_rejected() {
         err
     );
 }
+
+#[tokio::test]
+async fn chained_cte_embeddings_not_duplicated() {
+    let mut stmt = Parser::parse(
+        "WITH a AS (QUERY TEXT 'first' USING dense LIMIT 10), \
+         b AS (QUERY TEXT 'second' USING dense PREFETCH (a) LIMIT 10) \
+         QUERY TEXT 'third' FROM docs USING dense PREFETCH (b) LIMIT 10;",
+    )
+    .unwrap();
+    let mock = MockEmbedder::default();
+    resolve_embeddings(&mut stmt, &mock).await.unwrap();
+    let calls = mock.dense_calls.lock().unwrap();
+    assert_eq!(
+        calls.len(),
+        3,
+        "expected exactly 3 dense embedding jobs (first, second, third), got: {:?}",
+        *calls
+    );
+    assert_eq!(calls[0].1, "first");
+    assert_eq!(calls[1].1, "second");
+    assert_eq!(calls[2].1, "third");
+}

@@ -5,7 +5,7 @@ use crate::ast::{
     MultivectorConfig, OptimizersRuntimeConfig, QuantizationConfig, QuantizationType,
     QuantizationUpdate, Value, VectorsConfig,
 };
-use crate::error::QqlError;
+use crate::error::{QqlError, Span};
 use crate::token::TokenKind;
 
 use super::{
@@ -14,6 +14,17 @@ use super::{
     merge_collection_config, validate_hnsw_value, validate_optimizers_value, validate_params_value,
     validate_vectors_value, Parser,
 };
+
+fn validation_err(
+    message: impl Into<alloc::borrow::Cow<'static, str>>,
+    position: usize,
+) -> QqlError {
+    QqlError::validation(
+        "QQL-VALIDATION-CONFIG",
+        message,
+        Some(Span::point(position)),
+    )
+}
 
 impl<'a> Parser<'a> {
     // ── Config blocks ───────────────────────────────────────────
@@ -63,7 +74,7 @@ impl<'a> Parser<'a> {
                 self.advance()?;
                 self.parse_quantization_config_block()
             }
-            _ => Err(QqlError::syntax(
+            _ => Err(validation_err(
                 alloc::format!(
                     "expected HNSW, VECTORS, OPTIMIZERS, PARAMS, or QUANTIZATION after WITH, got '{}'",
                     tok.text
@@ -86,7 +97,7 @@ impl<'a> Parser<'a> {
                 | "payload_m"
                 | "inline_storage" => {}
                 _ => {
-                    return Err(QqlError::syntax(
+                    return Err(validation_err(
                         alloc::format!(
                             "unknown HNSW parameter '{}'. Expected: m, ef_construct, full_scan_threshold, max_indexing_threads, on_disk, payload_m, inline_storage",
                             key
@@ -98,12 +109,13 @@ impl<'a> Parser<'a> {
             validate_hnsw_value(key, value, self.peek()?.pos)?;
         }
 
-        let m_val = config_non_negative_u64(&config, "m", self.peek()?.pos)?;
-        if let Some(m) = m_val {
-            if m != 0 && m < 4 {
-                return Err(QqlError::syntax("m must be 0 or >= 4", self.peek()?.pos));
+        if let Some(Value::Int(n)) = config_value(&config, "m") {
+            if *n != 0 && *n < 4 {
+                return Err(validation_err("m must be 0 or >= 4", self.peek()?.pos));
             }
         }
+
+        let m_val = config_non_negative_u64(&config, "m", self.peek()?.pos)?;
         let ef_construct = config_positive_u64(&config, "ef_construct", self.peek()?.pos)?;
         let full_scan_threshold =
             config_non_negative_u64(&config, "full_scan_threshold", self.peek()?.pos)?;
@@ -264,7 +276,7 @@ impl<'a> Parser<'a> {
                 | "sharding_method"
                 | "shard_keys" => {}
                 _ => {
-                    return Err(QqlError::syntax(
+                    return Err(validation_err(
                         alloc::format!(
                             "unknown PARAMS parameter '{}'. Expected: replication_factor, write_consistency_factor, read_fan_out_factor, read_fan_out_delay_ms, on_disk_payload, shard_number, sharding_method, shard_keys",
                             key
@@ -280,7 +292,7 @@ impl<'a> Parser<'a> {
             && (config_has_key(&config, "read_fan_out_factor")
                 || config_has_key(&config, "read_fan_out_delay_ms"))
         {
-            return Err(QqlError::syntax(
+            return Err(validation_err(
                     "WITH PARAMS (read_fan_out_factor, read_fan_out_delay_ms) is supported only for ALTER COLLECTION",
                     self.peek()?.pos,
                 ));
@@ -316,7 +328,7 @@ impl<'a> Parser<'a> {
                 sharding_method: match config_value(&config, "sharding_method") {
                     Some(Value::Str(s)) => Some(s.clone()),
                     Some(_) => {
-                        return Err(QqlError::syntax(
+                        return Err(validation_err(
                             "sharding_method must be a string ('auto' or 'custom')",
                             self.peek()?.pos,
                         ));
@@ -330,7 +342,7 @@ impl<'a> Parser<'a> {
                             match item {
                                 Value::Str(s) => keys.push(s.clone()),
                                 _ => {
-                                    return Err(QqlError::syntax(
+                                    return Err(validation_err(
                                         "shard_keys entries must all be strings",
                                         self.peek()?.pos,
                                     ));
@@ -338,7 +350,7 @@ impl<'a> Parser<'a> {
                             }
                         }
                         if keys.is_empty() {
-                            return Err(QqlError::syntax(
+                            return Err(validation_err(
                                 "shard_keys must be a non-empty list of strings",
                                 self.peek()?.pos,
                             ));
@@ -346,7 +358,7 @@ impl<'a> Parser<'a> {
                         Some(keys)
                     }
                     Some(_) => {
-                        return Err(QqlError::syntax(
+                        return Err(validation_err(
                             "shard_keys must be a list of strings",
                             self.peek()?.pos,
                         ));

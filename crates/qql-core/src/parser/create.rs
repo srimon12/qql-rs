@@ -76,6 +76,10 @@ impl<'a> Parser<'a> {
             }
         }
 
+        if self.peek()?.kind == TokenKind::Identifier && ascii_equal(self.peek()?.text, "VECTORS") {
+            self.advance()?;
+        }
+
         // Parse explicit vector definitions in parentheses
         if self.peek()?.kind == TokenKind::Lparen {
             self.advance()?;

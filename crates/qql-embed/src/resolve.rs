@@ -241,11 +241,10 @@ async fn resolve_upsert_embeddings(
 // ── Collect dense text jobs (model, text) in walk order ─────────────
 
 fn collect_query_dense_jobs(query: &QueryStmt, jobs: &mut Vec<(String, String)>) {
-    collect_expr_dense_jobs(&query.expression, jobs);
-    // Recurse into nested CTE graphs (parser clones prior CTEs into later ones).
     for cte in &query.ctes {
-        collect_query_dense_jobs(&cte.query, jobs);
+        collect_expr_dense_jobs(&cte.query.expression, jobs);
     }
+    collect_expr_dense_jobs(&query.expression, jobs);
 }
 
 fn collect_prefetches_dense_jobs(prefetches: &[Prefetch], jobs: &mut Vec<(String, String)>) {
@@ -264,7 +263,12 @@ fn collect_expr_dense_jobs(expr: &QueryExpr, jobs: &mut Vec<(String, String)>) {
             prefetch,
             ..
         } => {
-            collect_input_dense_job(input, using.as_deref().unwrap_or("default"), jobs);
+            collect_input_dense_job(
+                input,
+                using.as_deref().unwrap_or("default"),
+                "default",
+                jobs,
+            );
             collect_prefetches_dense_jobs(prefetch, jobs);
         }
         QueryExpr::Recommend {
@@ -276,7 +280,7 @@ fn collect_expr_dense_jobs(expr: &QueryExpr, jobs: &mut Vec<(String, String)>) {
         } => {
             let v = using.as_deref().unwrap_or("default");
             for input in positive.iter().chain(negative.iter()) {
-                collect_input_dense_job(input, v, jobs);
+                collect_input_dense_job(input, v, "default", jobs);
             }
             collect_prefetches_dense_jobs(prefetch, jobs);
         }
@@ -288,8 +292,8 @@ fn collect_expr_dense_jobs(expr: &QueryExpr, jobs: &mut Vec<(String, String)>) {
         } => {
             let v = using.as_deref().unwrap_or("default");
             for pair in pairs {
-                collect_input_dense_job(&pair.positive, v, jobs);
-                collect_input_dense_job(&pair.negative, v, jobs);
+                collect_input_dense_job(&pair.positive, v, "default", jobs);
+                collect_input_dense_job(&pair.negative, v, "default", jobs);
             }
             collect_prefetches_dense_jobs(prefetch, jobs);
         }
@@ -301,10 +305,10 @@ fn collect_expr_dense_jobs(expr: &QueryExpr, jobs: &mut Vec<(String, String)>) {
             ..
         } => {
             let v = using.as_deref().unwrap_or("default");
-            collect_input_dense_job(target, v, jobs);
+            collect_input_dense_job(target, v, "default", jobs);
             for pair in context {
-                collect_input_dense_job(&pair.positive, v, jobs);
-                collect_input_dense_job(&pair.negative, v, jobs);
+                collect_input_dense_job(&pair.positive, v, "default", jobs);
+                collect_input_dense_job(&pair.negative, v, "default", jobs);
             }
             collect_prefetches_dense_jobs(prefetch, jobs);
         }
@@ -319,9 +323,9 @@ fn collect_expr_dense_jobs(expr: &QueryExpr, jobs: &mut Vec<(String, String)>) {
             ..
         } => {
             let v = using.as_deref().unwrap_or("default");
-            collect_input_dense_job(target, v, jobs);
+            collect_input_dense_job(target, v, "default", jobs);
             for fb in feedback {
-                collect_input_dense_job(&fb.example, v, jobs);
+                collect_input_dense_job(&fb.example, v, "default", jobs);
             }
             collect_prefetches_dense_jobs(prefetch, jobs);
         }
@@ -335,20 +339,23 @@ fn collect_expr_dense_jobs(expr: &QueryExpr, jobs: &mut Vec<(String, String)>) {
             using,
             prefetch,
         } => {
-            // `using` is the vector name; dense embedding uses the rerank `model`.
-            collect_input_dense_job(input, model.as_str(), jobs);
-            let _ = using;
+            collect_input_dense_job(input, using.as_str(), model.as_str(), jobs);
             collect_prefetches_dense_jobs(prefetch, jobs);
         }
         _ => {}
     }
 }
 
-fn collect_input_dense_job(input: &QueryInput, using: &str, jobs: &mut Vec<(String, String)>) {
+fn collect_input_dense_job(
+    input: &QueryInput,
+    using: &str,
+    default_model: &str,
+    jobs: &mut Vec<(String, String)>,
+) {
     if let QueryInput::Text { text, model } = input {
         // Sparse vector space uses local sparse embedder, not dense HTTP batch.
         if using != "sparse" {
-            let m = model.as_deref().unwrap_or(using).to_string();
+            let m = model.as_deref().unwrap_or(default_model).to_string();
             jobs.push((m, text.clone()));
         }
     }
@@ -410,11 +417,10 @@ fn apply_query_embeddings<'a>(
     dense: DenseIter<'a>,
 ) -> BoxFut<'a, Result<(), QqlError>> {
     Box::pin(async move {
-        apply_expr_embeddings(&mut query.expression, embedder, dense).await?;
-        // Recurse into nested CTE graphs so cloned prior CTEs are also resolved.
         for cte in &mut query.ctes {
-            apply_query_embeddings(&mut cte.query, embedder, dense).await?;
+            apply_expr_embeddings(&mut cte.query.expression, embedder, dense).await?;
         }
+        apply_expr_embeddings(&mut query.expression, embedder, dense).await?;
         Ok(())
     })
 }

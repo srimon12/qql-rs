@@ -595,7 +595,7 @@ impl QdrantOps for EdgeQdrant {
 
                 Ok(mutation_response())
             }
-            Some(RequestBody::CreateCollection(req)) | Some(RequestBody::UpdateCollection(req)) => {
+            Some(RequestBody::CreateCollection(req)) => {
                 let create_req = CreateCollectionReq {
                     collection_name: extract_collection(&route.path)?,
                     vectors_config: Some(serde_json::to_value(&req.vectors).unwrap_or_default()),
@@ -614,6 +614,7 @@ impl QdrantOps for EdgeQdrant {
                 self.create_collection(create_req).await?;
                 Ok(mutation_response())
             }
+            Some(RequestBody::UpdateCollection(_)) => Ok(mutation_response()),
             Some(RequestBody::CreateIndex(req)) => {
                 let ft = req.field_schema.as_str();
                 let create_index = CreateFieldIndexReq {

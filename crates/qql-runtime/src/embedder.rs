@@ -152,14 +152,24 @@ impl HttpEmbedder {
         Ok(decoded)
     }
 
-    async fn embed_batch(&self, inputs: &[String]) -> Result<Vec<Vec<f32>>, QqlError> {
+    pub async fn embed_batch_with_model(
+        &self,
+        inputs: &[String],
+        model: &str,
+    ) -> Result<Vec<Vec<f32>>, QqlError> {
         // One HTTP request for the full batch (OpenAI: up to 2048 inputs).
         if inputs.is_empty() {
             return Ok(Vec::new());
         }
 
+        let model_name = if !model.is_empty() && model != "default" {
+            model.to_string()
+        } else {
+            self.model.clone()
+        };
+
         let body = EmbedRequest {
-            model: self.model.clone(),
+            model: model_name,
             input: inputs.to_vec(),
         };
 
@@ -223,23 +233,29 @@ impl HttpEmbedder {
 
         Ok(result)
     }
+
+    pub async fn embed_batch(&self, inputs: &[String]) -> Result<Vec<Vec<f32>>, QqlError> {
+        self.embed_batch_with_model(inputs, &self.model).await
+    }
 }
 
 #[cfg(feature = "rest")]
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl Embedder for HttpEmbedder {
-    async fn embed_dense(&self, text: &str, _model: &str) -> Result<Vec<f32>, QqlError> {
-        let results = self.embed_batch(&[text.to_string()]).await?;
+    async fn embed_dense(&self, text: &str, model: &str) -> Result<Vec<f32>, QqlError> {
+        let results = self
+            .embed_batch_with_model(&[text.to_string()], model)
+            .await?;
         Ok(results.into_iter().next().unwrap_or_default())
     }
 
     async fn embed_dense_batch(
         &self,
         texts: &[String],
-        _model: &str,
+        model: &str,
     ) -> Result<Vec<Vec<f32>>, QqlError> {
-        self.embed_batch(texts).await
+        self.embed_batch_with_model(texts, model).await
     }
 
     async fn embed_sparse(&self, text: &str) -> Result<SparseVector, QqlError> {

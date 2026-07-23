@@ -13,8 +13,7 @@ use crate::config::QqlConfig;
 use crate::embedder::Embedder;
 use crate::executor::dml::query::extract_search_hits;
 
-pub const DENSE_VECTOR_NAME: &str = "dense";
-pub const SPARSE_VECTOR_NAME: &str = "sparse";
+pub use qql_embed::resolve::{DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME};
 pub const RERANK_VECTOR_NAME: &str = "colbert";
 pub const DENSE_MODEL_DEFAULT: &str = "sentence-transformers/all-minilm-l6-v2";
 pub const SPARSE_MODEL_DEFAULT: &str = "qdrant/bm25";

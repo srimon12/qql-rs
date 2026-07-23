@@ -257,6 +257,7 @@ fn vector_params(value: &serde_json::Value) -> qdrant::VectorParams {
     }
 }
 
+#[allow(dead_code)]
 fn vector_params_diff(value: &serde_json::Value) -> qdrant::VectorParamsDiff {
     qdrant::VectorParamsDiff {
         hnsw_config: value.get("hnsw_config").map(hnsw_config),
@@ -267,6 +268,7 @@ fn vector_params_diff(value: &serde_json::Value) -> qdrant::VectorParamsDiff {
     }
 }
 
+#[allow(dead_code)]
 fn vectors_config_diff(value: &serde_json::Value) -> Option<qdrant::VectorsConfigDiff> {
     let object = value.as_object()?;
     let config = if object.contains_key("on_disk")
@@ -721,18 +723,10 @@ pub async fn execute_grpc_route(
                 optimizers_config: req.optimizers_config.as_ref().map(optimizers_config),
                 params: req.params.as_ref().map(collection_params_diff),
                 hnsw_config: req.hnsw_config.as_ref().map(hnsw_config),
-                vectors_config: req.vectors_config.as_ref().and_then(vectors_config_diff),
                 quantization_config: req
                     .quantization_config
                     .as_ref()
                     .and_then(quantization_config_diff),
-                sparse_vectors_config: req.sparse_vectors.as_ref().map(|v| {
-                    let map = v
-                        .iter()
-                        .map(|(name, value)| (name.clone(), sparse_vector_params(value)))
-                        .collect();
-                    qdrant::SparseVectorConfig { map }
-                }),
                 ..Default::default()
             };
             client.update_collection_raw(grpc_req).await.map_err(|e| {

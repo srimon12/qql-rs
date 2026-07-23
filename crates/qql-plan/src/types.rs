@@ -642,6 +642,18 @@ pub struct CreateCollectionRequest {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct UpdateCollectionRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub optimizers_config: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub params: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hnsw_config: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quantization_config: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct CreateIndexRequest {
     pub field_name: String,
     pub field_schema: String,

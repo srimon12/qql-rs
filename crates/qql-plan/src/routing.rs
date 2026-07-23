@@ -18,7 +18,7 @@ pub enum RequestBody {
     UpdatePayload(UpdatePayloadRequest),
     CreateCollection(Box<CreateCollectionRequest>),
     /// PATCH alter collection — distinct from create (PUT).
-    UpdateCollection(Box<CreateCollectionRequest>),
+    UpdateCollection(Box<UpdateCollectionRequest>),
     CreateIndex(CreateIndexRequest),
     Count(Box<CountRequest>),
     CreateShardKey(Box<CreateShardKeyRequest>),
