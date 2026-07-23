@@ -8,14 +8,14 @@ name = "qql"
 path = "src/main.rs"
 
 [features]
-default = ["grpc", "rest", "edge"]
+default = ["grpc", "rest"]
 grpc = ["qql/grpc"]
 rest = ["qql/rest"]
 # Local in-process qdrant-edge backend (no Qdrant server needed).
-# Enables qql-edge/http-embedding so --embedder=http works.
+# Opt-in — adds ~48 MB (fastembed/ONNX).  The primary edge API is
+# `pip install pyqql-edge`; use this feature only when you need edge
+# from the CLI binary.
 edge = ["qql-edge", "qql-edge/http-embedding"]
-# (kept for backwards-compat; same as edge now)
-edge-http = ["edge"]
 
 [dependencies]
 qql-core = { path = "../qql-core" }
