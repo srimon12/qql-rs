@@ -38,3 +38,4 @@ jobs:
   # pyqql: needs Python 3.12 + maturin + protoc
   # nqql:   needs Node.js + napi-rs
   # wasm:   needs wasm32-unknown-unknown target + wasm-pack
+
