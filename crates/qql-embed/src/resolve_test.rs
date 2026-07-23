@@ -1,7 +1,9 @@
 //! Focused regression tests for embedding resolution (EMBED-001..005).
 
 use async_trait::async_trait;
-use qql_core::ast::{PointId, PointVectors, Stmt, UpsertPoint, UpsertStmt, VectorValue};
+use qql_core::ast::{
+    PointId, PointVectors, QueryExpr, QueryInput, Stmt, UpsertPoint, UpsertStmt, VectorValue,
+};
 use qql_core::error::QqlError;
 use qql_core::parser::Parser;
 use std::sync::{Arc, Mutex};
@@ -186,4 +188,239 @@ async fn chained_cte_embeddings_not_duplicated() {
     assert_eq!(calls[0].1, "first");
     assert_eq!(calls[1].1, "second");
     assert_eq!(calls[2].1, "third");
+}
+
+// ── New test cases for resolve_embeddings ─────────────────────────────────
+
+#[tokio::test]
+async fn a_query_text_resolved_to_dense_vector() {
+    let mut stmt = Parser::parse("QUERY 'hello' FROM docs LIMIT 10").unwrap();
+    let mock = MockEmbedder::default();
+    resolve_embeddings(&mut stmt, &mock).await.unwrap();
+
+    let Stmt::Query(query) = &stmt else {
+        panic!("expected Query");
+    };
+    let QueryExpr::Nearest { input, .. } = &query.expression else {
+        panic!("expected Nearest");
+    };
+    assert_eq!(
+        *input,
+        QueryInput::Vector(VectorValue::Dense(vec![1.0, 2.0, 3.0]))
+    );
+}
+
+#[tokio::test]
+async fn b_upsert_text_resolved_to_dense_and_sparse() {
+    let mut stmt = Parser::parse(
+        "UPSERT INTO docs VALUES {id: 1, text: 'hi'}, {id: 2, text: 'bye'}",
+    )
+    .unwrap();
+    let mock = MockEmbedder::default();
+    resolve_embeddings(&mut stmt, &mock).await.unwrap();
+
+    let Stmt::Upsert(upsert) = &stmt else {
+        panic!("expected Upsert");
+    };
+    for (i, point) in upsert.points.iter().enumerate() {
+        let Some(PointVectors::Named(list)) = &point.vectors else {
+            panic!("point {i} expected named vectors");
+        };
+        assert!(
+            list.iter().any(|(k, v)| k == "dense"
+                && matches!(v, VectorValue::Dense(d) if d == &vec![1.0, 2.0, 3.0])),
+            "point {i} missing dense vector"
+        );
+        assert!(
+            list.iter().any(|(k, v)| k == "sparse"
+                && matches!(v, VectorValue::Sparse { indices, values }
+                    if indices == &vec![1] && values == &vec![1.0])),
+            "point {i} missing sparse vector"
+        );
+    }
+}
+
+#[tokio::test]
+async fn c_upsert_with_using_dense_model() {
+    let mut stmt = Parser::parse(
+        "UPSERT INTO docs VALUES {id: 1, text: 'hello'} USING DENSE MODEL 'test-model'",
+    )
+    .unwrap();
+    let mock = MockEmbedder::default();
+    resolve_embeddings(&mut stmt, &mock).await.unwrap();
+
+    let Stmt::Upsert(upsert) = &stmt else {
+        panic!("expected Upsert");
+    };
+    let Some(PointVectors::Named(list)) = &upsert.points[0].vectors else {
+        panic!("expected named vectors");
+    };
+    assert!(
+        list.iter().any(|(k, v)| k == "dense"
+            && matches!(v, VectorValue::Dense(d) if d == &vec![1.0, 2.0, 3.0])),
+        "expected dense vector"
+    );
+}
+
+#[tokio::test]
+async fn d_upsert_with_embed_sparse_directive() {
+    let mut stmt = Parser::parse(
+        "UPSERT INTO docs VALUES {id: 1, text: 'hello'} EMBED text INTO sparse USING SPARSE",
+    )
+    .unwrap();
+    let mock = MockEmbedder::default();
+    resolve_embeddings(&mut stmt, &mock).await.unwrap();
+
+    let Stmt::Upsert(upsert) = &stmt else {
+        panic!("expected Upsert");
+    };
+    let Some(PointVectors::Named(list)) = &upsert.points[0].vectors else {
+        panic!("expected named vectors");
+    };
+    assert!(
+        list.iter().any(|(k, v)| k == "sparse"
+            && matches!(v, VectorValue::Sparse { indices, values }
+                if indices == &vec![1] && values == &vec![1.0])),
+        "expected sparse vector"
+    );
+}
+
+#[tokio::test]
+async fn e_upsert_with_using_hybrid_dense_and_sparse() {
+    let mut stmt = Parser::parse(
+        "UPSERT INTO docs VALUES {id: 1, text: 'hello'} \
+         USING HYBRID DENSE MODEL 'd' SPARSE VECTOR s",
+    )
+    .unwrap();
+    let mock = MockEmbedder::default();
+    resolve_embeddings(&mut stmt, &mock).await.unwrap();
+
+    let Stmt::Upsert(upsert) = &stmt else {
+        panic!("expected Upsert");
+    };
+    let Some(PointVectors::Named(list)) = &upsert.points[0].vectors else {
+        panic!("expected named vectors");
+    };
+    assert!(
+        list.iter().any(|(k, v)| k == "dense"
+            && matches!(v, VectorValue::Dense(d) if d == &vec![1.0, 2.0, 3.0])),
+        "expected dense vector"
+    );
+    assert!(
+        list.iter().any(|(k, v)| k == "s"
+            && matches!(v, VectorValue::Sparse { indices, values }
+                if indices == &vec![1] && values == &vec![1.0])),
+        "expected sparse vector"
+    );
+}
+
+#[tokio::test]
+async fn f1_upsert_with_embed_directive_dense() {
+    let mut stmt = Parser::parse(
+        "UPSERT INTO docs VALUES {id: 1, text: 'hello'} EMBED text INTO vec USING MODEL 'test'",
+    )
+    .unwrap();
+    let mock = MockEmbedder::default();
+    resolve_embeddings(&mut stmt, &mock).await.unwrap();
+
+    let Stmt::Upsert(upsert) = &stmt else {
+        panic!("expected Upsert");
+    };
+    let Some(PointVectors::Named(list)) = &upsert.points[0].vectors else {
+        panic!("expected named vectors");
+    };
+    assert!(
+        list.iter().any(|(k, v)| k == "vec"
+            && matches!(v, VectorValue::Dense(d) if d == &vec![1.0, 2.0, 3.0])),
+        "expected dense vector named 'vec'"
+    );
+}
+
+#[tokio::test]
+async fn f2_upsert_with_embed_directive_sparse() {
+    let mut stmt = Parser::parse(
+        "UPSERT INTO docs VALUES {id: 1, text: 'hello'} EMBED text INTO vec USING SPARSE",
+    )
+    .unwrap();
+    let mock = MockEmbedder::default();
+    resolve_embeddings(&mut stmt, &mock).await.unwrap();
+
+    let Stmt::Upsert(upsert) = &stmt else {
+        panic!("expected Upsert");
+    };
+    let Some(PointVectors::Named(list)) = &upsert.points[0].vectors else {
+        panic!("expected named vectors");
+    };
+    assert!(
+        list.iter().any(|(k, v)| k == "vec"
+            && matches!(v, VectorValue::Sparse { indices, values }
+                if indices == &vec![1] && values == &vec![1.0])),
+        "expected sparse vector named 'vec'"
+    );
+}
+
+#[tokio::test]
+async fn g_preexisting_vector_preserved_without_spec() {
+    let mut stmt = Parser::parse(
+        "UPSERT INTO docs VALUES {id: 1, text: 'hello', vector: {dense: [0.5, 0.5, 0.5]}}",
+    )
+    .unwrap();
+    let mock = MockEmbedder::default();
+    resolve_embeddings(&mut stmt, &mock).await.unwrap();
+
+    let Stmt::Upsert(upsert) = &stmt else {
+        panic!("expected Upsert");
+    };
+    let Some(PointVectors::Named(list)) = &upsert.points[0].vectors else {
+        panic!("expected named vectors");
+    };
+    assert!(
+        list.iter().any(|(k, v)| k == "dense"
+            && matches!(v, VectorValue::Dense(d) if d == &vec![0.5, 0.5, 0.5])),
+        "pre-existing dense vector should be preserved unchanged"
+    );
+}
+
+#[tokio::test]
+async fn i_preprovided_query_vector_not_embedded() {
+    let mut stmt = Parser::parse(
+        "QUERY NEAREST VECTOR [0.1, 0.2] FROM docs LIMIT 10",
+    )
+    .unwrap();
+    let mock = MockEmbedder::default();
+    resolve_embeddings(&mut stmt, &mock).await.unwrap();
+
+    let Stmt::Query(query) = &stmt else {
+        panic!("expected Query");
+    };
+    let QueryExpr::Nearest { input, .. } = &query.expression else {
+        panic!("expected Nearest");
+    };
+    assert_eq!(
+        *input,
+        QueryInput::Vector(VectorValue::Dense(vec![0.1, 0.2]))
+    );
+}
+
+#[tokio::test]
+async fn j_query_with_using_dense() {
+    let mut stmt =
+        Parser::parse("QUERY 'hello' FROM docs USING dense LIMIT 10").unwrap();
+    let mock = MockEmbedder::default();
+    resolve_embeddings(&mut stmt, &mock).await.unwrap();
+
+    let Stmt::Query(query) = &stmt else {
+        panic!("expected Query");
+    };
+    let QueryExpr::Nearest {
+        input, using, ..
+    } = &query.expression
+    else {
+        panic!("expected Nearest");
+    };
+    assert_eq!(
+        *input,
+        QueryInput::Vector(VectorValue::Dense(vec![1.0, 2.0, 3.0]))
+    );
+    assert_eq!(using.as_deref(), Some("dense"));
 }
