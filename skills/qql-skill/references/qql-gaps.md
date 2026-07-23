@@ -6,10 +6,10 @@ Use this file when a request sounds reasonable in Qdrant terms but is still outs
 
 - Offset-style pagination for grouped search
 - MMR for `USING SPARSE` or `RECOMMEND`
-- Collection-level quantization toggles via QQL
-- ReadConsistency / Timeout controls via QQL syntax
+- ReadConsistency / Timeout controls via QQL syntax (timeout is in the Executor config layer, not the language)
 - `USING HYBRID` shorthand (use `QUERY HYBRID TEXT '...' DENSE ... SPARSE ...`)
 - Dynamic shard routing key resolution (shard key must be explicitly provided)
+- `max_selectivity` on `PARAMS (acorn = true)` -- the plan type has the field but it is not settable from QQL syntax yet
 
 ## What To Say
 
@@ -29,7 +29,7 @@ Prefer plain language:
 - Need recall tuning: use `PARAMS (hnsw_ef = ...)`
 - Need flat search pagination: use `QUERY ... LIMIT <n> OFFSET <n>`
 - Need low-score filtering: use `QUERY ... SCORE THRESHOLD <float>`
-- Need cross-collection lookup: use `QUERY ... LOOKUP FROM <collection> [VECTOR '<name>']`
+- Need cross-collection lookup: use `QUERY ... LOOKUP FROM <collection>`
 - Need keyword plus semantic retrieval: use `QUERY HYBRID TEXT 'text' DENSE dense SPARSE sparse FUSION RRF FROM <collection> LIMIT <n>`
 - Need parameterized RRF tuning: use `PARAMS (rrf_k = <n>, rrf_weights = [...])`
 - Need multi-stage retrieval with per-prefetch filters: use `WITH <name> AS (...) ... PREFETCH (name WHERE <filter> SCORE THRESHOLD <n>) FUSION RRF`
@@ -50,6 +50,8 @@ Prefer plain language:
 - Need conditional scoring: use `QUERY FORMULA ...` with CASE expressions
 - Need mathematical score shaping: use `QUERY FORMULA sqrt(score) * log(citations + 1) FROM ...`
 - Need multi-tenant isolation: use `SHARD '<key>'` on QUERY, UPSERT, SCROLL, DELETE
+- Need quantization-aware search: use `PARAMS (quantization = {ignore: false, rescore: true, oversampling: 2.0})`
+- Need API key authentication: pass `api_key` to SDK Client or set `QDRANT_API_KEY` env var
 
 ## Reminder
 

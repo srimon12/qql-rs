@@ -2,6 +2,8 @@
 
 Golden examples for crafting complex QQL queries. Every example presents a real retrieval problem, explains why the approach works, lists key architectural decisions, and provides pure canonical QQL code blocks.
 
+All examples are valid against the current QQL parser (function names are case-insensitive).
+
 ---
 
 ## 1. Multi-Stage Hybrid Retrieval with Per-Prefetch Tuning
@@ -27,7 +29,7 @@ QUERY FUSION RRF FROM articles
 ```
 
 **Key decisions:**
-- `dense`: High-precision leg retrieving 200 candidates filtered to tech articles published after Jan 1, 2025.
+- `dense`: High-precision leg retrieving 200 candidates filtered to tech articles.
 - `sparse`: Wide-net keyword leg retrieving 300 candidates with a lower score threshold (0.3).
 - `QUERY FUSION RRF`: Merges rankings seamlessly without requiring raw score normalization.
 
@@ -51,11 +53,6 @@ QUERY FUSION RRF FROM clinical_docs
   PREFETCH (narrow)
   LIMIT 5;
 ```
-
-**Key decisions:**
-- Stage 1 (`broad`): Semantic search over the emergency department.
-- Stage 2 (`narrow`): Keyword search restricted to `broad` candidates.
-- Final Output: Fused top 5 results delivered with microsecond latency.
 
 ---
 
@@ -85,10 +82,6 @@ QUERY FUSION RRF FROM incidents
   LIMIT 10;
 ```
 
-**Key decisions:**
-- Three prefetch legs: critical incidents (dense), general incidents (dense), keyword (sparse).
-- Each leg has its own score threshold to prune low-quality candidates before fusion.
-
 ---
 
 ## 4. Grouped Retrieval with Cross-Collection Lookup
@@ -104,10 +97,6 @@ QUERY TEXT 'machine learning optimization' FROM research_papers
   GROUP BY 'author_id' SIZE 5 LOOKUP FROM author_metadata
   LIMIT 20;
 ```
-
-**Key decisions:**
-- `GROUP BY 'author_id' SIZE 5`: Ensures diversity by capping at 5 papers per author.
-- `LOOKUP FROM author_metadata`: Pulls author collection attributes for each group header.
 
 ---
 
@@ -245,7 +234,7 @@ QUERY FORMULA (score * 0.7 + popularity * 0.3) DEFAULTS (popularity = 0.0)
 
 ## 12. Conditional Business Logic Scoring
 
-**Problem:** Apply different scoring logic for different content tiers — premium content gets a 2.5x boost, low priority content is untouched.
+**Problem:** Apply different scoring logic for different content tiers -- premium content gets a 2.5x boost, low priority content is untouched.
 
 ```sql
 WITH candidates AS (
@@ -277,7 +266,7 @@ QUERY FORMULA (score * GAUSS_DECAY(GEO_DISTANCE(48.8566, 2.3522, location), 0.0,
 
 ## 14. Mathematical Score Shaping
 
-**Problem:** Apply non-linear score transformations — logarithmic dampening for citation counts and square root for similarity scores.
+**Problem:** Apply non-linear score transformations -- logarithmic dampening for citation counts and square root for similarity scores.
 
 ```sql
 WITH candidates AS (
@@ -402,4 +391,30 @@ QUERY MMR 'emergency triage' DIVERSITY 0.5 CANDIDATES 100
   FROM docs
   USING dense
   LIMIT 10;
+```
+
+---
+
+## 22. Geo-Radius Filtering
+
+**Problem:** Find points within a radius of a geographic center point.
+
+```sql
+QUERY TEXT 'coffee shop' FROM places
+  USING dense
+  WHERE location GEO_RADIUS { center: {lat: 48.8566, lon: 2.3522}, radius: 5000 }
+  LIMIT 10;
+```
+
+---
+
+## 23. Quantization-Aware Search
+
+**Problem:** Control quantization behavior per query for faster search with optional rescore.
+
+```sql
+QUERY TEXT 'quantum computing' FROM papers
+  USING dense
+  PARAMS (quantization = {ignore: false, rescore: true, oversampling: 2.0})
+  LIMIT 20;
 ```

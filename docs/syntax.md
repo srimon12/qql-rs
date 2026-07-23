@@ -39,7 +39,7 @@ query-tail   = [ "USING", vector-name ],
                [ "OFFSET", non-negative-integer ] ;
 ```
 
-Top-level queries require `FROM`. A CTE may omit it and inherit the outer collection. Clauses occur at most once and only in the order above. Search options use `PARAMS (...)`; generic query `WITH (...)` is invalid.
+Top-level queries require `FROM`. A CTE may omit it and inherit the outer collection. Clauses occur at most once and only in the order above.
 
 `SHARD '<key>'` routes the query to a specific shard group. It is optional and only needed when using custom sharding in a multi-tenant collection.
 
@@ -101,7 +101,61 @@ rerank-input = "TEXT", string | "VECTOR", vector-value | "POINT", point-id ;
 
 `QUERY POINTS (...)` retrieves those points directly. `QUERY NEAREST POINT ...` uses a point as the similarity input. A bare integer after `QUERY` is invalid, so point retrieval and point similarity cannot be confused.
 
-Fusion requires a non-empty `PREFETCH`. Rerank requires an explicit input, `MODEL`, `USING`, and non-empty `PREFETCH`. MMR requires both `DIVERSITY` in `[0, 1]` and positive `CANDIDATES`; it compiles to `QueryExpr::Nearest { mmr: Some(...) }` — MMR is a configuration of nearest-neighbour search, not a separate retrieval primitive. Core records hybrid intent but does not invent candidate counts or `LIMIT * 10` behaviour.
+Fusion requires a non-empty `PREFETCH`. Rerank requires an explicit input, `MODEL`, `USING`, and non-empty `PREFETCH`. MMR requires both `DIVERSITY` in `[0, 1]` and positive `CANDIDATES`. Hybrid expands to two prefetches (dense + sparse) with `LIMIT * 10` candidate count, fused with RRF or DBSF.
+
+### Formula expressions
+
+```ebnf
+formula-expr = constant
+             | variable
+             | "(", formula-expr, ")"
+             | formula-expr, ("+" | "-" | "*" | "/"), formula-expr
+             | "-", formula-expr
+             | "ABS", "(", formula-expr, ")"
+             | "SQRT", "(", formula-expr, ")"
+             | "LOG", "(", formula-expr, ")"
+             | "LN", "(", formula-expr, ")"
+             | "EXP", "(", formula-expr, ")"
+             | "POW", "(", formula-expr, ",", formula-expr, ")"
+             | "GEO_DISTANCE", "(", lat, ",", lon, ",", field, ")"
+             | decay-function ;
+```
+
+The formula parser supports standard arithmetic operators with precedence and parentheses. The `$score` variable represents the query score. Decay functions:
+
+```ebnf
+decay-function = ("EXP_DECAY" | "GAUSS_DECAY" | "LIN_DECAY"),
+                 "(", formula-expr, [ ",", "TARGET", "=", formula-expr ],
+                 [ ",", "SCALE", "=", number ],
+                 [ ",", "MIDPOINT", "=", number ], ")" ;
+```
+
+The formula parser also supports `CASE WHEN ... THEN ... ELSE ... END` syntax and inline `MATCH` conditions:
+```sql
+QUERY FORMULA CASE WHEN tags MATCH ANY ('premium') THEN score * 2 ELSE score END
+DEFAULTS (score = 0.0) FROM docs LIMIT 10;
+```
+
+### Search params
+
+`PARAMS (...)` configures search execution:
+
+```ebnf
+search-params   = "(", search-param, { ",", search-param }, ")" ;
+search-param    = "hnsw_ef", "=", positive-integer
+                | "exact", "=", boolean
+                | "acorn", "=", boolean
+                | "indexed_only", "=", boolean
+                | "quantization", "=", object
+                | "rrf_k", "=", positive-integer
+                | "rrf_weights", "=", array ;
+```
+
+`acorn = true` enables ACORN (Adaptive Cardinality Estimator for ONgRN) which estimates filter selectivity and adapts HNSW search. When `acorn = false`, ACORN is explicitly disabled.
+
+`quantization` accepts a JSON object with `ignore`, `rescore`, and `oversampling` fields matching Qdrant's `QuantizationSearchParams`.
+
+`rrf_k` and `rrf_weights` control the Reciprocal Rank Fusion formula when `FUSION RRF` is used.
 
 ### Examples
 
@@ -110,7 +164,7 @@ QUERY TEXT 'vector database' MODEL 'nomic-embed-text'
 FROM docs
 USING dense
 WHERE category = 'database'
-PARAMS (hnsw_ef = 128, exact = false)
+PARAMS (hnsw_ef = 128, exact = false, acorn = true)
 LIMIT 10;
 
 QUERY POINTS (1, 2, 'point-a')
@@ -138,7 +192,7 @@ QUERY 'supply chain risks'
 FROM sec10k
 WHERE tenant_id = 'honeywell'
 SHARD 'honeywell'
-LIMIT 10;
+LIMIT 10;"
 ```
 
 ## Prefetch
@@ -150,6 +204,8 @@ prefetch     = ( cte-name | cte-query ),
                [ "LOOKUP", "FROM", collection, [ "VECTOR", vector-name ] ] ;
 ```
 
+CTE references are case-insensitive. Prefetch-level `WHERE` and `SCORE THRESHOLD` override the underlying CTE/query values when set.
+
 ## Selectors And Params
 
 ```ebnf
@@ -158,12 +214,6 @@ payload-selector = "true" | "false"
                  | "EXCLUDE", name-list ;
 vector-selector  = "true" | "false" | name-list ;
 name-list        = "(", name, { ",", name }, ")" ;
-search-params    = "(", search-param, { ",", search-param }, ")" ;
-search-param     = "hnsw_ef", "=", positive-integer
-                 | "exact", "=", boolean
-                 | "acorn", "=", boolean
-                 | "indexed_only", "=", boolean
-                 | "quantization", "=", object ;
 ```
 
 Keys in payload objects, configuration blocks, formula defaults, and search parameters are unique case-insensitively.
@@ -209,6 +259,25 @@ Every upsert point requires an unsigned integer or string `id`. Its optional `ve
 
 `SHARD '<key>'` on UPSERT, SCROLL, DELETE, COUNT, or QUERY routes the operation to a specific shard group.
 
+### Embed directive (fine-grained embedding control)
+
+```ebnf
+upsert       = "UPSERT", "INTO", collection, "VALUES",
+               point-object, { ",", point-object },
+               [ embedding-options ],
+               [ embed-directive, { ",", embed-directive } ],
+               [ "SHARD", string ] ;
+embed-directive = "EMBED", field, "INTO", vector-name,
+                  "USING", ( "DENSE" | "SPARSE" ), [ "MODEL", string ] ;
+```
+
+The `EMBED` directive maps a specific payload field to a named vector. Multiple directives within one `EMBED` clause are comma-separated:
+```sql
+UPSERT INTO docs VALUES {id: 1, title: 'doc title', body: 'doc body'}
+  EMBED title INTO title_vec USING MODEL 'small',
+         body INTO body_vec USING MODEL 'large';
+```
+
 ## DDL
 
 Collection creation/alteration/drop/show and payload index management:
@@ -231,10 +300,6 @@ create-index    = "CREATE", "INDEX", "ON", "COLLECTION", name,
 
 drop-index      = "DROP", "INDEX", "ON", "COLLECTION", name,
                   "FOR", field ;
-
-create-shard-key = "CREATE", "SHARD", "KEY", string,
-                   "ON", "COLLECTION", name,
-                   [ "WITH", config-block ] ;
 
 create-shard-key = "CREATE", "SHARD", "KEY", string,
                    "ON", "COLLECTION", name,
@@ -281,6 +346,8 @@ WITH PARAMS (
 | `shard_number` | integer | Total shard count |
 | `sharding_method` | string | `'auto'` or `'custom'` |
 | `shard_keys` | string list | Tenant identifiers for custom sharding |
+| `read_fan_out_factor` | integer | Read fan-out factor |
+| `read_fan_out_delay_ms` | integer | Read fan-out delay |
 
 ### DDL Examples
 
@@ -322,3 +389,16 @@ DELETE VECTOR colbert FROM docs WHERE id = 42;
 -- Delete multiple vectors at once
 DELETE VECTOR dense, sparse FROM docs WHERE status = 'deprecated';
 ```
+
+### Supported field index types
+
+| TYPE | Index variants |
+|------|----------------|
+| `keyword` | `is_tenant`, `on_disk`, `enable_hnsw` |
+| `integer` | `lookup`, `range`, `is_principal`, `on_disk`, `enable_hnsw` |
+| `float` | `on_disk`, `is_principal`, `enable_hnsw` |
+| `geo` | `on_disk`, `enable_hnsw` |
+| `text` | `tokenizer` (word/prefix/whitespace/multilingual), `lowercase`, `min_token_len`, `max_token_len`, `on_disk`, `stopwords`, `phrase_matching` |
+| `bool` | `on_disk`, `enable_hnsw` |
+| `datetime` | `on_disk`, `is_principal`, `enable_hnsw` |
+| `uuid` | `is_tenant`, `on_disk`, `enable_hnsw` |

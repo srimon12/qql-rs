@@ -33,9 +33,7 @@ if is_valid("CREATE COLLECTION docs (dense VECTOR(384, COSINE))"):
 # Inject security filters programmatically
 safe_stmt = inject_filter(
     "QUERY 'papers' FROM docs LIMIT 50",
-    "org_id",
-    "=",
-    "acme",
+    "org_id", "=", "acme",
 )
 
 # Tokenize for syntax highlighting or analysis
@@ -114,13 +112,18 @@ and hope it works. QQL gives you **programmatic access to the query itself**:
 ## Language Status
 
 | Crate / SDK | Language | parse | tokenize | is_valid | inject_filter | parse_all | parse_batch | Runtime |
-|---|---|---|---|---|---|---|---|---|---|
+|---|---|---|---|---|---|---|---|---|
 | **pyqql** | Python (PyO3) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **qql-core** | Rust parser | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | **qql-plan** | Rust lowering | — | — | — | — | — | — | — |
 | **qql** | Rust runtime | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **nqql** | Node.js (N-API) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **qql-wasm** | WebAssembly | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+> **Known limitation**: `qql-wasm` re-exports the parser and routing functions
+> but the WASM Client does not include the full executor pipeline
+> (`resolve_embeddings` is not bound via `#[wasm_bindgen]`). Runtime execution
+> in WASM delegates embedding to JS-side HTTP providers.
 
 ---
 
@@ -150,6 +153,138 @@ qql dump medical backup.qql
 
 ---
 
+## Architecture
+
+```
+                        ┌─────────────────────────────────────────────────┐
+                        │          qql-core (parser + AST)                │
+                        │  parse / tokenize / is_valid / inject_filter    │
+                        │  ErrorKind: Lex, Parse, Validation              │
+                        └──────────────────┬──────────────────────────────┘
+                                           │ Stmt
+                                           ▼
+                        ┌─────────────────────────────────────────────────┐
+                        │          qql-plan (lowering layer)              │
+                        │  plan() → PlannedOperation (canonical enum)     │
+                        │  to_rest_route() → Route (REST projection)      │
+                        │  try_route() = plan + to_rest_route             │
+                        │  Lowering: ddl, mutation, query, filter, embed  │
+                        │  Typed until transport: PlanPointId,            │
+                        │  PlanVectorValue, PlanQueryInput, PlanFormula   │
+                        └──────────────────┬──────────────────────────────┘
+                                           │ PlannedOperation / Route
+                                           ▼
+          ┌─────────────────────────────────┬──────────────────────────────┐
+          │                                 │                              │
+          ▼                                 ▼                              ▼
+┌─────────────────────┐   ┌──────────────────────────┐   ┌────────────────┐
+│  qql-runtime (qql)  │   │     qql-edge              │   │  qql-wasm      │
+│                     │   │  qdrant-edge (in-process)  │   │  (parse only)  │
+│  RestQdrant (reqwest)│   │  FastEmbedder (ONNX,CPU)  │   │                │
+│  GrpcQdrant (tonic)  │   │  HttpEmbedder (opt.)     │   │                │
+│  HttpEmbedder       │   │  local/http/custom exec   │   │                │
+└─────────────────────┘   └──────────────────────────┘   └────────────────┘
+          │                          │
+          ▼                          ▼
+    ┌──────────┐             In-process HNSW
+    │  Qdrant  │             (no network)
+    │ REST/gRPC│
+    └──────────┘
+```
+
+### Canonical execution flow: prepare → plan → batch → dispatch
+
+```
+Statement string
+    │
+    ▼
+1. Parse (qql-core Parser → Stmt)
+    │
+    ▼
+2. Prepare (executor: embeddings + schema validation)
+   ├─ resolve_embeddings: text → dense/sparse vectors (if embedder registered)
+   ├─ ensure_vector_name: validate USING against known named vectors
+   └─ ensure_collection_for_upsert: auto-create default dense/hybrid on first upsert
+    │
+    ▼
+3. Plan (qql-plan plan() → PlannedOperation)
+   └─ (or route() → Route for direct REST dispatch)
+    │
+    ▼
+4. Batch classify: group adjacent same-collection operations
+   ├─ Same-collection QUERY × 2+ → QueryBatchRequest → /points/query/batch
+   ├─ Same-collection UPSERT/DELETE/UPDATE× 2+ → UpdateBatchRequest → /points/batch
+   └─ Individual ops → dispatch each separately
+    │
+    ▼
+5. Dispatch (QdrantOps::execute_route / execute_query_batch / execute_update_batch)
+   ├─ REST: Route body → JSON → POST/PUT/DELETE
+   ├─ gRPC: PlannedOperation → typed protobuf → tonic
+   └─ Edge: PlannedOperation → qdrant-edge in-process API
+    │
+    ▼
+6. Response normalization
+   ├─ REST: extract result from {"result": ..., "status": "ok", "time": ...}
+   ├─ gRPC: synthesize same envelope from protobuf response
+   ├─ Edge: synthesize same envelope from in-process result
+   └─ Batch: strict cardinality check — response count must match operation count
+```
+
+Batch execution is automatic: multi-statement scripts and list inputs are
+smart-batched without grammar changes or separate API calls. Order is preserved.
+
+### Route is a REST projection
+
+`Route { method, path, query, body }` is derived from `PlannedOperation` via
+`to_rest_route()`. It is a REST projection, not the canonical representation.
+New code should prefer `plan()` for operation logic and use `to_rest_route()`
+only when serializing to the REST wire format.
+
+### gRPC DDL mapping — complete
+
+All DDL operations are mapped to typed protobuf:
+
+| Operation | gRPC RPC |
+|-----------|----------|
+| `CreateCollection` | `CreateCollection` (with deferred params + shard keys) |
+| `UpdateCollection` | `UpdateCollection` |
+| `DropCollection` | `DeleteCollection` |
+| `CreateIndex` | `CreateFieldIndexCollection` |
+| `DropIndex` | `DeleteFieldIndexCollection` |
+| `CreateShardKey` | `CreateShardKey` |
+| `DropShardKey` | `DeleteShardKey` |
+| `ListCollections` | `ListCollections` (raw) |
+| `GetCollection` | `CollectionInfo` (raw) |
+| `ListShardKeys` | `ListShardKeys` |
+
+gRPC uses JSON-intermediate extraction from the planner's typed request data
+(not raw Qdrant protobuf), converting `serde_json::Value` fields to typed
+protobuf oneofs. Both REST and gRPC produce the same response envelope.
+
+### Embedding resolution — shared across targets
+
+The embedding rewrite is shared (`qql-embed`) so Python, Node, Rust, Edge,
+and WASM all batch dense texts the same way. The `Embedder` trait is
+host-agnostic; implementations differ per target:
+
+- `HttpEmbedder` — OpenAI-compatible REST endpoint (Ollama, OpenAI, vLLM, TEI)
+- `SparseEmbedder` — local BM25 (hash-based, no dependencies)
+- `FastEmbedder` — ONNX inference via fastembed-rs (edge only)
+
+### Response envelope normalization
+
+All three backends normalize to:
+```json
+{ "result": { ... }, "status": "ok", "time": 0.001 }
+```
+
+- **REST**: `validate_success_envelope()` checks `result` present + `status == "ok"`
+- **gRPC**: `execute_grpc_route()` wraps each protobuf response in the same envelope
+- **Edge**: `backend/mod.rs` `mutation_response()` and query results follow same pattern
+- **Batch**: cardinality mismatch returns `QQL-BATCH-CARDINALITY` error
+
+---
+
 ## Syntax Highlights
 
 Full reference at [`docs/syntax.md`](docs/syntax.md).
@@ -164,9 +299,9 @@ QUERY TEXT 'keyword search' FROM docs USING sparse LIMIT 10;
 ### Recsys modes
 ```sql
 QUERY RECOMMEND POSITIVE (1) NEGATIVE (2) STRATEGY average_vector FROM docs USING dense LIMIT 10;
-QUERY CONTEXT (POSITIVE 1 NEGATIVE 2) FROM docs USING dense LIMIT 10;
-QUERY DISCOVER TARGET 'target_text' CONTEXT (POSITIVE 1 NEGATIVE 2) FROM docs USING dense LIMIT 10;
-QUERY RELEVANCE FEEDBACK TARGET 'query' FEEDBACK ((1, 0.9), (2, 0.1)) STRATEGY NAIVE (a=1.0, b=0.75, c=0.25) FROM docs USING dense LIMIT 10;
+QUERY CONTEXT (POSITIVE POINT 1 NEGATIVE POINT 2) FROM docs USING dense LIMIT 10;
+QUERY DISCOVER TARGET 'target_text' CONTEXT (POSITIVE POINT 1 NEGATIVE POINT 2) FROM docs USING dense LIMIT 10;
+QUERY RELEVANCE FEEDBACK TARGET POINT 42 FEEDBACK ((POINT 43, 0.5), (POINT 44, -0.2)) STRATEGY NAIVE (a=1.0, b=0.75, c=0.25) FROM docs USING dense LIMIT 10;
 ```
 
 ### Multi-stage retrieval (CTE + Prefetch + Fusion)
@@ -238,28 +373,62 @@ tenant filters into every sub-query, CTE, and prefetch across Python, Rust, Node
 
 ---
 
-## Architecture
+## API key & timeout behavior
+
+Both REST and gRPC clients accept an optional API key and configurable timeout:
+
+- `RestQdrant::new(url, api_key)` — 30s default timeout
+- `RestQdrant::with_timeout(url, api_key, timeout)` — explicit timeout
+- `GrpcQdrant::from_url(url, api_key)` — tonic default timeout
+- `GrpcQdrant::from_url_with_timeout(url, api_key, timeout)` — optional `Duration` timeout (None = tonic default)
+
+API keys are sent via:
+- REST: `api-key` header
+- gRPC: `ApiKeyInterceptor` (tonic interceptor, attaches `api-key` metadata)
+
+Pass `None` / `""` for unauthenticated local Qdrant instances.
+
+---
+
+## Typed vectors and formulas
+
+The planner preserves semantic distinctions until the transport boundary:
+
+- **`PlanVectorValue`**: `Dense(Vec<f32>)`, `Sparse { indices, values }`, `MultiDense(Vec<Vec<f32>>)`
+- **`PlanQueryInput`**: `Point(PlanPointId)`, `Vector(PlanVectorValue)`, `Document { text, model }`
+- **`PlanPointVectors`**: `Unnamed(PlanVectorValue)` or `Named(Vec<(String, PlanVectorValue)>)`
+- **`PlanFormula`**: typed formula tree (Constant/Variable/Sum/Sub/Mul/Div/Neg/Abs/Sqrt/Log/Ln/Exp/Pow/GeoDistance/Decay/Case/Datetime)
+
+REST serialization uses snake_case OpenAPI expression keys (`sum`, `mult`, `div`, `neg`, `geo_distance`, `exp_decay`, `gauss_decay`, `lin_decay`). gRPC converts the same typed formula tree to Qdrant's protobuf `Expression` oneofs.
+
+---
+
+## Collection preparation
+
+When embedding via `USING DENSE MODEL` or `USING HYBRID`, the executor
+auto-creates the target collection with a default schema if it does not exist:
+
+- **Dense only**: single `dense` vector with model-dimension inference
+- **Hybrid**: `dense` vector + `sparse` vector (BM25-based, no model)
+
+This applies only to UPSERT paths — `QUERY` against a non-existent collection
+returns a Qdrant error as expected.
+
+---
+
+## Batch cardinality
+
+Contiguous same-collection operations that share a batch family are sent as
+a single wire-level batch. The executor **strictly verifies** that the response
+count matches the operation count:
 
 ```
-qql-core (parse → typed AST → explain → inject_filter)
-    ↓
-qql-plan (AST → typed RequestBody → Route { method, path, query, body })
-    ↓
-qql-embed (shared resolve_embeddings + Embedder trait + sparse BM25)
-    ↓
-qql-runtime (HttpEmbedder + execute_route via REST/gRPC)
-    ↓
-qql-edge   (FastEmbedder + in-process HNSW — zero network)
+[UPSERT a, UPSERT b, DELETE c]  → 3 operations → must return 3 results
+Mismatch → QQL-BATCH-CARDINALITY error
 ```
 
-The parser gives you a typed AST. Lowering produces transport-neutral routes (`Route`). Embedding rewrite is shared (`qql-embed`) so Python, Node, Rust, Edge, and WASM all batch dense texts the same way. The runtime executes routes over REST or gRPC. `qql-edge` runs entirely in-process.
-
-**Batch execution**: Multi-statement scripts and list inputs are smart-batched automatically:
-
-- Contiguous same-collection `QUERY`s → `POST /points/query/batch` (REST) or `QueryBatch` (gRPC)
-- Contiguous same-collection mutations (`UPSERT`, `DELETE`, `UPDATE … PAYLOAD/VECTOR`, `CLEAR PAYLOAD`, `DELETE VECTOR`) → `POST /points/batch` (REST) or `UpdateBatch` (gRPC)
-
-Order is preserved. No grammar changes and no separate batch API — it all goes through `execute()`.
+This replaces the previous silent padding behavior. Single-statement paths
+and non-batchable operations are unaffected.
 
 ---
 
