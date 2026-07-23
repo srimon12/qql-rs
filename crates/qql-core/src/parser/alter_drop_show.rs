@@ -1,7 +1,9 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use crate::ast::{AlterCollectionStmt, CreateIndexStmt, DropCollectionStmt, Stmt};
+use crate::ast::{
+    AlterCollectionStmt, CreateIndexStmt, DropCollectionStmt, DropIndexStmt, DropShardKeyStmt, Stmt,
+};
 use crate::error::QqlError;
 use crate::token::TokenKind;
 
@@ -24,7 +26,31 @@ impl<'a> Parser<'a> {
     // ── DROP ────────────────────────────────────────────────────
 
     pub fn parse_drop(&mut self) -> Result<Stmt, QqlError> {
-        self.advance()?;
+        self.advance()?; // consume DROP
+        if self.peek()?.kind == TokenKind::Index {
+            self.advance()?; // consume INDEX
+            self.expect(TokenKind::On)?;
+            self.expect(TokenKind::Collection)?;
+            let collection = self.parse_identifier()?;
+            self.expect(TokenKind::For)?;
+            let field = self.parse_identifier()?;
+            return Ok(Stmt::DropIndex(Box::new(DropIndexStmt {
+                collection,
+                field,
+            })));
+        }
+        if self.peek()?.kind == TokenKind::Shard {
+            self.advance()?; // consume SHARD
+            self.expect(TokenKind::Key)?;
+            let shard_key = self.parse_string()?;
+            self.expect(TokenKind::On)?;
+            self.expect(TokenKind::Collection)?;
+            let collection = self.parse_identifier()?;
+            return Ok(Stmt::DropShardKey(Box::new(DropShardKeyStmt {
+                collection,
+                shard_key,
+            })));
+        }
         self.expect(TokenKind::Collection)?;
         let collection = self.parse_identifier()?;
         Ok(Stmt::DropCollection(Box::new(DropCollectionStmt {
@@ -45,9 +71,17 @@ impl<'a> Parser<'a> {
             let collection = self.parse_identifier()?;
             return Ok(Stmt::ShowCollection(collection));
         }
+        if self.peek()?.kind == TokenKind::Shard {
+            self.advance()?; // consume SHARD
+            self.expect(TokenKind::Keys)?;
+            self.expect(TokenKind::On)?;
+            self.expect(TokenKind::Collection)?;
+            let collection = self.parse_identifier()?;
+            return Ok(Stmt::ShowShardKeys(collection));
+        }
         Err(QqlError::syntax(
             alloc::format!(
-                "expected COLLECTION or COLLECTIONS after SHOW, got '{}'",
+                "expected COLLECTION, COLLECTIONS, or SHARD KEYS after SHOW, got '{}'",
                 self.peek()?.text
             ),
             self.peek()?.pos,

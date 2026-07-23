@@ -14,11 +14,11 @@ from pathlib import Path
 COLLECTION = os.environ.get("MEDICAL_RAG_COLLECTION", "medical_retrieval_ops")
 DEFAULT_PATH = Path(__file__).resolve().parent / "generated" / "benchmark-questions.json"
 MODES = {
-    "dense": lambda q, limit: f"QUERY '{q}' FROM {COLLECTION} LIMIT {limit}",
-    "sparse": lambda q, limit: f"QUERY '{q}' FROM {COLLECTION} LIMIT {limit} USING SPARSE",
-    "hybrid_rrf": lambda q, limit: f"QUERY '{q}' FROM {COLLECTION} LIMIT {limit} USING HYBRID",
-    "hybrid_dbsf": lambda q, limit: f"QUERY '{q}' FROM {COLLECTION} LIMIT {limit} USING HYBRID FUSION dbsf",
-    "exact": lambda q, limit: f"QUERY '{q}' FROM {COLLECTION} LIMIT {limit} EXACT",
+    "dense": lambda q, limit: f"QUERY '{escape_qql(q)}' FROM {COLLECTION} USING dense LIMIT {limit}",
+    "sparse": lambda q, limit: f"QUERY '{escape_qql(q)}' FROM {COLLECTION} USING sparse LIMIT {limit}",
+    "hybrid_rrf": lambda q, limit: f"QUERY HYBRID TEXT '{escape_qql(q)}' DENSE dense SPARSE sparse FUSION RRF FROM {COLLECTION} LIMIT {limit}",
+    "hybrid_dbsf": lambda q, limit: f"QUERY HYBRID TEXT '{escape_qql(q)}' DENSE dense SPARSE sparse FUSION DBSF FROM {COLLECTION} LIMIT {limit}",
+    "exact": lambda q, limit: f"QUERY '{escape_qql(q)}' FROM {COLLECTION} USING dense PARAMS (exact = true) LIMIT {limit}",
 }
 
 

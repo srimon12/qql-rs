@@ -10,7 +10,6 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-REPO_LOCAL_QQL_BIN = REPO_ROOT / ("qql-go.exe" if os.name == "nt" else "qql-go")
 
 
 def resolve_qql_bin() -> str:
@@ -18,11 +17,20 @@ def resolve_qql_bin() -> str:
     if override:
         return override
 
-    path_bin = shutil.which("qql-go")
-    if path_bin:
-        return path_bin
+    for name in ["qql", "qql-go"]:
+        path_bin = shutil.which(name)
+        if path_bin:
+            return path_bin
 
-    return str(REPO_LOCAL_QQL_BIN)
+    debug_bin = REPO_ROOT / "target" / "debug" / ("qql.exe" if os.name == "nt" else "qql")
+    if debug_bin.exists():
+        return str(debug_bin)
+
+    release_bin = REPO_ROOT / "target" / "release" / ("qql.exe" if os.name == "nt" else "qql")
+    if release_bin.exists():
+        return str(release_bin)
+
+    return str(debug_bin)
 
 
 QQL_BIN = resolve_qql_bin()
@@ -36,14 +44,21 @@ class Result:
 
 
 def execute_json(query: str) -> Result:
+    cmd = [QQL_BIN, "exec", "--json", query]
+    env = os.environ.copy()
+    env.setdefault("EMBEDDER", "http")
+    env.setdefault("EMBED_URL", "http://localhost:11434/v1/embeddings")
+    env.setdefault("EMBED_MODEL", "all-minilm:l6-v2")
+    env.setdefault("EMBED_DIM", "384")
     try:
         completed = subprocess.run(
-            [QQL_BIN, "exec", "--quiet", "--json", query],
+            cmd,
             capture_output=True,
             text=True,
+            env=env,
         )
     except FileNotFoundError as exc:
-        raise RuntimeError(f"Unable to run qql-go binary at {QQL_BIN}") from exc
+        raise RuntimeError(f"Unable to run qql binary at {QQL_BIN}") from exc
 
     stdout = completed.stdout.strip()
     stderr = completed.stderr.strip()

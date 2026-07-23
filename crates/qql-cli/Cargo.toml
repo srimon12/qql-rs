@@ -19,6 +19,7 @@ edge-http = ["edge"]
 
 [dependencies]
 qql-core = { path = "../qql-core" }
+qql-plan = { path = "../qql-plan" }
 qql = { path = "../qql-runtime", default-features = false }
 qql-edge = { path = "../qql-edge", optional = true }
 clap = { version = "4", features = ["derive"] }

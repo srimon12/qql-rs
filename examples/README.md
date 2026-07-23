@@ -1,37 +1,55 @@
-# QQL SDK Examples
+# QQL Examples
 
-Clean, production-ready SDK examples across Python, Node.js, WebAssembly, and Rust.
+Working example applications demonstrating QQL across all language bindings.
 
-## Examples Structure
+| Directory | Language | Description |
+|-----------|----------|-------------|
+| `python/` | Python (pyqql) | inject_filter + Client + HttpEmbedder |
+| `sec10k-qql/` | Python (pyqql) | Full multitenant RAG: 4-tenant SEC 10-K filings with QQL (zero LlamaIndex) |
+| `rust/` | Rust (qql-core) | parse + inject_filter + route lower |
+| `nodejs/` | Node.js (nqql) | Client + injectFilter + HttpEmbedder |
+| `wasm/` | WASM (qql-wasm) | parse + compile + Client (browser fetch) |
+| `edge-demo/` | Python (CLI) | Local qdrant-edge HNSW + hybrid search |
+| `medical-showcase/` | Python (CLI) | Full retrieval showcase: 12 records, all QQL features |
 
-Each language directory contains two unnumbered example scripts:
+## Run
 
-1. **`basic_to_medium`**: Connection initialization, basic execution, plan explanation, and AST filter injection.
-2. **`medium_to_expert`**: First-class HTTP embedding provider integration (`HttpEmbedder`), complex CTE prefetch DAGs with RRF fusion, and multi-tenant security gateways.
+All language examples require their respective SDK installed. The CLI-based examples
+(`edge-demo/`, `medical-showcase/`) use the `qql` binary:
 
-| Language | Basic to Medium | Medium to Expert |
-|---|---|---|
-| **Python** | `examples/python/basic_to_medium.py` | `examples/python/medium_to_expert.py` |
-| **Node.js** | `examples/nodejs/basic_to_medium.mjs` | `examples/nodejs/medium_to_expert.mjs` |
-| **WASM** | `examples/wasm/basic_to_medium.js` | `examples/wasm/medium_to_expert.js` |
-| **Rust** | `examples/rust/basic_to_medium` | `examples/rust/medium_to_expert` |
+```bash
+# Build the CLI
+cargo build --release -p qql-cli --no-default-features --features rest
 
-## Running Examples
+# Run the medical showcase
+QQL_BIN=./target/release/qql uv run examples/medical-showcase/main.py
+
+# Run with execution against Qdrant
+QQL_BIN=./target/release/qql uv run examples/medical-showcase/main.py --execute
+```
 
 ### Python
 ```bash
-python3 examples/python/basic_to_medium.py
-python3 examples/python/medium_to_expert.py
-```
-
-### Node.js
-```bash
-node examples/nodejs/basic_to_medium.mjs
-node examples/nodejs/medium_to_expert.mjs
+cd crates/pyqql && pip install -e .
+cd ../../examples/python
+python basic_to_medium.py
 ```
 
 ### Rust
 ```bash
-cargo run --manifest-path examples/rust/basic_to_medium/Cargo.toml
-cargo run --manifest-path examples/rust/medium_to_expert/Cargo.toml
+cd examples/rust/basic_to_medium
+cargo run
+```
+
+### Node.js
+```bash
+cd crates/nqql && npm install && npm run build
+cd ../../examples/nodejs
+node basic_to_medium.mjs
+```
+
+### WASM
+```bash
+cd crates/qql-wasm && wasm-pack build --target web
+# Then serve examples/wasm/ with any HTTP server
 ```

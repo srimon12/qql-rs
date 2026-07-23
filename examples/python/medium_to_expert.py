@@ -14,15 +14,15 @@ client = pyqql.Client("http://localhost:6333", embedder=embedder)
 # 2. Multi-tenant security gateway function
 def build_secured_ast(user_role: str, tenant_id: str, query: str) -> dict:
     # Inject tenant isolation filter into query AST
-    ast = pyqql.inject_filter(query, "tenant_id", "=", tenant_id)
-    return ast
+    ast_stmt = pyqql.inject_filter(query, "tenant_id", "=", tenant_id)
+    return ast_stmt.to_dict()
 
 # 3. Query execution & plan explanation
-raw_query = "QUERY 'acute myocardial infarction' FROM medical_records LIMIT 5 USING HYBRID"
+raw_query = "QUERY 'acute myocardial infarction' FROM medical_records USING dense LIMIT 5"
 
 secured_ast = build_secured_ast(user_role="viewer", tenant_id="hospital-east", query=raw_query)
 print("=== Injected AST Filter ===")
-print(secured_ast["Query"]["query_filter"])
+print(secured_ast["Query"]["filter"])
 
 print("\n=== Execution Plan ===")
 plan = client.explain(raw_query)

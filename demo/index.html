@@ -6,139 +6,814 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>QQL Playground</title>
+<title>QQL Playground — In-Browser Vector Search Engine</title>
+
+<!-- Modern Fonts -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
 <style>
-* { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
-  --bg: #1a1a2e; --surface: #16213e; --editor: #0f0f23; --border: #2a2a4a;
-  --text: #e0e0ff; --text-dim: #8888aa; --accent: #7c3aed; --accent-bright: #a78bfa;
-  --green: #10b981; --red: #ef4444; --yellow: #f59e0b; --blue: #3b82f6;
-  --token-kw: #c792ea; --token-str: #c3e88d; --token-num: #ff5370; --token-id: #82aaff;
-  --token-comment: #546e7a; --token-op: #89ddff;
+  --bg-dark: #090b16;
+  --bg-surface: #101426;
+  --bg-panel: #161b33;
+  --bg-editor: #0c0e1c;
+  --border-color: #242b4d;
+  
+  --text-main: #f1f5f9;
+  --text-muted: #94a3b8;
+  --text-dim: #64748b;
+  
+  --accent-purple: #8b5cf6;
+  --accent-purple-bright: #a78bfa;
+  --accent-cyan: #06b6d4;
+  --accent-emerald: #10b981;
+  --accent-amber: #f59e0b;
+  --accent-rose: #f43f5e;
+  
+  /* Token highlighting */
+  --token-kw: #c084fc;
+  --token-fn: #38bdf8;
+  --token-str: #4ade80;
+  --token-num: #fb7185;
+  --token-id: #e2e8f0;
+  --token-op: #38bdf8;
+  --token-comment: #64748b;
+  
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-code: 'JetBrains Mono', monospace;
 }
-html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira Code', monospace; overflow: hidden; }
-a { color: var(--accent-bright); }
 
-/* ── Layout ── */
-.app { display: grid; grid-template-rows: 48px 1fr; height: 100vh; }
-.toolbar { display: flex; align-items: center; gap: 12px; padding: 0 16px; background: var(--surface); border-bottom: 1px solid var(--border); }
-.toolbar .logo { font-weight: 700; font-size: 16px; color: var(--accent-bright); letter-spacing: 1px; }
-.toolbar .spacer { flex: 1; }
-.toolbar input { background: var(--editor); border: 1px solid var(--border); color: var(--text); padding: 4px 10px; border-radius: 4px; font-size: 12px; width: 220px; }
-.toolbar button { background: var(--accent); color: white; border: none; padding: 6px 16px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600; white-space: nowrap; }
-.toolbar button:hover { background: var(--accent-bright); }
-.toolbar button:disabled { opacity: 0.4; cursor: not-allowed; }
-.toolbar .status { font-size: 12px; padding: 4px 10px; border-radius: 4px; }
-.toolbar .status.ok { background: var(--green); color: #000; }
-.toolbar .status.err { background: var(--red); color: #fff; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
 
-.main { display: grid; grid-template-columns: 1fr 1fr; overflow: hidden; }
-.editor-panel { display: flex; flex-direction: column; background: var(--editor); border-right: 1px solid var(--border); overflow: hidden; }
-.editor-header { display: flex; align-items: center; padding: 8px 16px; background: var(--surface); border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-dim); gap: 8px; }
-.editor-header .tabs { display: flex; gap: 0; }
-.editor-header .tab { padding: 4px 14px; cursor: pointer; border-radius: 4px 4px 0 0; font-size: 12px; }
-.editor-header .tab.active { background: var(--editor); color: var(--text); }
-.editor-buttons { margin-left: auto; display: flex; gap: 6px; }
-.editor-buttons button { font-size: 11px; padding: 3px 10px; border: 1px solid var(--border); background: transparent; color: var(--text-dim); border-radius: 3px; cursor: pointer; }
-.editor-buttons button:hover { border-color: var(--accent); color: var(--text); }
+html, body {
+  height: 100%;
+  background: var(--bg-dark);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  overflow: hidden;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-dark); }
+::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent-purple); }
+
+/* Layout Shell */
+.app-container {
+  display: grid;
+  grid-template-rows: 56px 1fr;
+  height: 100vh;
+}
+
+/* Toolbar */
+.header-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 20px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-color);
+  backdrop-filter: blur(12px);
+  z-index: 10;
+}
+
+.brand-badge {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo-text {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  background: linear-gradient(135deg, var(--accent-purple-bright), var(--accent-cyan));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.wasm-pill {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  background: rgba(139, 92, 246, 0.15);
+  color: var(--accent-purple-bright);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+}
+
+.preset-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.preset-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+select.preset-dropdown {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: var(--font-sans);
+  outline: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+select.preset-dropdown:hover {
+  border-color: var(--accent-purple);
+}
+
+.btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-panel);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.btn:hover {
+  background: var(--border-color);
+  border-color: var(--accent-purple-bright);
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent-purple), #6d28d9);
+  color: #fff;
+  border: none;
+  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3);
+}
+
+.btn-primary:hover {
+  background: linear-gradient(135deg, var(--accent-purple-bright), var(--accent-purple));
+  box-shadow: 0 4px 16px rgba(139, 92, 246, 0.5);
+}
+
+.btn-primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.btn-settings {
+  position: relative;
+  background: rgba(139, 92, 246, 0.15);
+  border-color: rgba(139, 92, 246, 0.4);
+  color: var(--accent-purple-bright);
+}
+
+.btn-settings:hover {
+  background: rgba(139, 92, 246, 0.3);
+}
+
+.settings-pulse-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 8px;
+  height: 8px;
+  background: var(--accent-cyan);
+  border-radius: 50%;
+  box-shadow: 0 0 8px var(--accent-cyan);
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.7); }
+  70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(6, 182, 212, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(6, 182, 212, 0); }
+}
+
+.status-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.status-badge.valid {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--accent-emerald);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.status-badge.error {
+  background: rgba(244, 63, 94, 0.15);
+  color: var(--accent-rose);
+  border: 1px solid rgba(244, 63, 94, 0.3);
+}
+
+.latency-tag {
+  font-size: 11px;
+  font-family: var(--font-code);
+  color: var(--text-dim);
+}
+
+/* Workspace Grid */
+.main-workspace {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  overflow: hidden;
+}
+
+/* Left Editor */
+.editor-panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-editor);
+  border-right: 1px solid var(--border-color);
+  overflow: hidden;
+  position: relative;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.panel-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.editor-workspace {
+  flex: 1;
+  position: relative;
+  display: flex;
+  overflow: hidden;
+}
+
+.line-numbers {
+  width: 48px;
+  padding: 16px 0;
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border-color);
+  color: var(--text-dim);
+  font-family: var(--font-code);
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: right;
+  padding-right: 12px;
+  user-select: none;
+  overflow: hidden;
+}
+
+.editor-wrapper {
+  position: relative;
+  flex: 1;
+  height: 100%;
+  overflow: hidden;
+}
+
+.editor-highlight-layer, textarea#query-input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  padding: 16px;
+  font-family: var(--font-code);
+  font-size: 13.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  tab-size: 2;
+  border: none;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.editor-highlight-layer {
+  pointer-events: none;
+  color: var(--text-main);
+  overflow: auto;
+}
 
 textarea#query-input {
-  flex: 1; width: 100%; padding: 16px; background: transparent; color: var(--text);
-  border: none; outline: none; resize: none; font: inherit; font-size: 14px; line-height: 1.6;
-  tab-size: 2; caret-color: var(--accent-bright);
+  background: transparent;
+  color: transparent;
+  caret-color: var(--accent-cyan);
+  resize: none;
+  z-index: 2;
+  overflow: auto;
 }
-textarea#query-input::placeholder { color: var(--text-dim); }
 
-.output-panel { display: flex; flex-direction: column; background: var(--surface); overflow: hidden; }
-.output-tabs { display: flex; padding: 8px 16px; gap: 2px; border-bottom: 1px solid var(--border); }
-.output-tabs .tab { padding: 6px 14px; cursor: pointer; border-radius: 4px; font-size: 12px; color: var(--text-dim); border: 1px solid transparent; }
-.output-tabs .tab.active { background: var(--border); color: var(--text); border-color: var(--border); }
-.output-content { flex: 1; overflow: auto; padding: 16px; font-size: 13px; line-height: 1.5; }
+/* Syntax colors */
+.hl-kw { color: var(--token-kw); font-weight: 600; }
+.hl-fn { color: var(--token-fn); font-weight: 600; }
+.hl-str { color: var(--token-str); }
+.hl-num { color: var(--token-num); }
+.hl-id { color: var(--token-id); }
+.hl-op { color: var(--token-op); }
+.hl-cmt { color: var(--token-comment); font-style: italic; }
+.hl-err { text-decoration: underline wavy var(--accent-rose); text-underline-offset: 3px; background: rgba(244, 63, 94, 0.15); border-radius: 2px; }
 
-/* ── Highlighted preview ── */
-.hl { white-space: pre-wrap; word-break: break-all; font-size: 13px; line-height: 1.6; padding: 12px; }
-.hl .kw { color: var(--token-kw); font-weight: 600; }
-.hl .str { color: var(--token-str); }
-.hl .num { color: var(--token-num); }
-.hl .id { color: var(--token-id); }
-.hl .cmt { color: var(--token-comment); font-style: italic; }
-.hl .op { color: var(--token-op); }
-.hl .err { color: var(--red); text-decoration: underline wavy; }
+/* Error Footer */
+.editor-error-footer {
+  padding: 10px 16px;
+  background: rgba(244, 63, 94, 0.1);
+  border-top: 1px solid rgba(244, 63, 94, 0.3);
+  color: var(--accent-rose);
+  font-family: var(--font-code);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 
-/* ── Token table ── */
-.token-table { width: 100%; border-collapse: collapse; }
-.token-table th { text-align: left; padding: 6px 10px; background: var(--border); font-size: 11px; text-transform: uppercase; color: var(--text-dim); }
-.token-table td { padding: 4px 10px; font-size: 12px; border-bottom: 1px solid var(--border); }
-.token-table .token-kw { color: var(--token-kw); }
-.token-table .token-str { color: var(--token-str); }
-.token-table .token-num { color: var(--token-num); }
+/* Right Inspector */
+.inspector-panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface);
+  overflow: hidden;
+}
 
-/* ── AST / JSON ── */
-pre.json-output { white-space: pre-wrap; font-size: 12px; color: var(--token-str); background: var(--editor); padding: 12px; border-radius: 6px; overflow: auto; max-height: calc(100vh - 140px); }
-pre.plan-output { white-space: pre-wrap; font-size: 13px; color: var(--text); }
+.nav-tabs {
+  display: flex;
+  background: var(--bg-dark);
+  padding: 6px 12px 0 12px;
+  gap: 4px;
+  border-bottom: 1px solid var(--border-color);
+}
 
-/* ── Success/error ── */
-.success { color: var(--green); }
-.error { color: var(--red); }
+.tab-btn {
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
 
-.embed-section { margin-top: 16px; padding: 12px; background: var(--editor); border-radius: 6px; }
-.embed-section label { font-size: 12px; color: var(--text-dim); display: block; margin-bottom: 4px; }
-.embed-section select, .embed-section input { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 6px 8px; border-radius: 4px; font-size: 12px; width: 100%; margin-bottom: 8px; }
+.tab-btn:hover {
+  color: var(--text-main);
+  background: var(--bg-surface);
+}
+
+.tab-btn.active {
+  color: var(--accent-purple-bright);
+  background: var(--bg-panel);
+  border-color: var(--border-color);
+}
+
+.tab-content-container {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+}
+
+.tab-pane {
+  display: none;
+  height: 100%;
+}
+
+.tab-pane.active {
+  display: block;
+}
+
+.plan-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.route-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.route-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.http-method {
+  font-family: var(--font-code);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.http-method.post { background: rgba(16, 185, 129, 0.2); color: var(--accent-emerald); border: 1px solid rgba(16, 185, 129, 0.3); }
+.http-method.get { background: rgba(56, 189, 248, 0.2); color: var(--accent-cyan); border: 1px solid rgba(56, 189, 248, 0.3); }
+.http-method.delete { background: rgba(244, 63, 94, 0.2); color: var(--accent-rose); border: 1px solid rgba(244, 63, 94, 0.3); }
+
+.route-path {
+  font-family: var(--font-code);
+  font-size: 13px;
+  color: var(--accent-purple-bright);
+  font-weight: 600;
+}
+
+.explanation-box {
+  background: var(--bg-editor);
+  border-left: 3px solid var(--accent-purple);
+  padding: 12px 16px;
+  border-radius: 0 6px 6px 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-main);
+  white-space: pre-wrap;
+}
+
+pre.code-json {
+  font-family: var(--font-code);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--token-str);
+  background: var(--bg-editor);
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  overflow: auto;
+  max-height: 100%;
+}
+
+.token-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-family: var(--font-code);
+}
+
+.token-table th {
+  text-align: left;
+  padding: 8px 12px;
+  background: var(--bg-editor);
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-color);
+  text-transform: uppercase;
+  font-size: 11px;
+}
+
+.token-table td {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+/* Settings Modal */
+.modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(9, 11, 22, 0.75);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.25s ease;
+}
+
+.modal-backdrop.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.modal-card {
+  width: 520px;
+  max-width: 90vw;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 30px rgba(139, 92, 246, 0.2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.modal-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modal-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.modal-close:hover { color: var(--text-main); }
+
+.modal-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: 75vh;
+  overflow-y: auto;
+}
+
+.config-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--accent-purple-bright);
+  margin-bottom: 8px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.form-input {
+  background: var(--bg-editor);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: var(--font-code);
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.form-input:focus {
+  border-color: var(--accent-purple);
+  box-shadow: 0 0 8px rgba(139, 92, 246, 0.2);
+}
+
+.modal-footer {
+  padding: 16px 20px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
 </style>
 </head>
 <body>
-<div class="app">
-  <!-- ── Toolbar ── -->
-  <div class="toolbar">
-    <span class="logo">QQL</span>
-    <input id="qdrant-url" type="text" value="http://localhost:6333" placeholder="Qdrant URL">
-    <input id="qdrant-key" type="text" placeholder="API Key (optional)" style="width:160px">
-    <button id="btn-connect">Connect</button>
-    <div class="spacer"></div>
-    <span id="validation-status" class="status">validating...</span>
-    <button id="btn-execute" disabled>Execute ▶</button>
-  </div>
-
-  <!-- ── Main ── -->
-  <div class="main">
-    <!-- Left: editor -->
-    <div class="editor-panel">
-      <div class="editor-header">
-        <div class="tabs">
-          <span class="tab active" data-tab="edit">Editor</span>
-          <span class="tab" data-tab="highlight">Highlight</span>
-        </div>
-        <div class="editor-buttons">
-          <button id="btn-sample-query">Sample Query</button>
-          <button id="btn-sample-upsert">Sample Upsert</button>
-          <button id="btn-sample-ddl">Sample DDL</button>
-          <button id="btn-sample-cte">Sample CTE</button>
-        </div>
-      </div>
-      <textarea id="query-input" placeholder="Type QQL here...&#10;&#10;Try: QUERY 'search' FROM docs LIMIT 10" spellcheck="false"></textarea>
-      <div id="highlight-view" class="hl" style="display:none; overflow:auto;"></div>
+<div class="app-container">
+  <!-- ── Header Toolbar ── -->
+  <header class="header-toolbar">
+    <div class="brand-badge">
+      <span class="logo-text">QQL</span>
+      <span class="wasm-pill">WebAssembly ⚡</span>
     </div>
 
-    <!-- Right: output -->
-    <div class="output-panel">
-      <div class="output-tabs">
-        <span class="tab active" data-tab="explain">Explain</span>
-        <span class="tab" data-tab="compile">Compile</span>
-        <span class="tab" data-tab="tokens">Tokens</span>
-        <span class="tab" data-tab="ast">AST</span>
-        <span class="tab" data-tab="response">Response</span>
+    <div class="preset-container">
+      <span class="preset-label">Preset:</span>
+      <select id="preset-select" class="preset-dropdown">
+        <option value="hybrid">🚀 Hybrid Search (Dense + Sparse)</option>
+        <option value="cte">⚡ CTE Prefetch DAG Multi-Stage</option>
+        <option value="recommend">🎯 Vector Recommendation</option>
+        <option value="discover">🔄 Context & Discovery Search</option>
+        <option value="grouped">📊 Grouped Query Aggregation</option>
+        <option value="ddl">📦 Collection DDL & HNSW Index</option>
+        <option value="upsert">📝 Document Upsert & Auto-Embed</option>
+        <option value="mutation">🗑️ Payload Update & Filter Delete</option>
+      </select>
+    </div>
+
+    <button id="btn-open-settings" class="btn btn-settings">
+      <span class="settings-pulse-badge"></span>
+      ⚙️ Settings & Embedder
+    </button>
+
+    <div style="flex: 1"></div>
+
+    <div id="status-badge" class="status-badge valid">
+      <span id="status-icon">✓</span>
+      <span id="status-text">Valid</span>
+    </div>
+
+    <span id="latency-tag" class="latency-tag">⚡ 0.00 ms</span>
+
+    <button id="btn-execute" class="btn btn-primary">Execute ▶</button>
+  </header>
+
+  <!-- ── Main Workspace ── -->
+  <main class="main-workspace">
+    <!-- Left Panel: Interactive Code Editor -->
+    <section class="editor-panel">
+      <div class="panel-header">
+        <span class="panel-title">⚡ Query Editor</span>
+        <div style="display: flex; gap: 8px;">
+          <button id="btn-clear" class="btn" style="padding: 4px 10px; font-size: 11px">Clear</button>
+          <button id="btn-format" class="btn" style="padding: 4px 10px; font-size: 11px">Format</button>
+        </div>
       </div>
-      <div class="output-content" id="output-content">
-        <pre class="plan-output" id="output-explain"></pre>
-        <pre class="json-output" id="output-compile" style="display:none;"></pre>
-        <div id="output-tokens" style="display:none;"></div>
-        <pre class="json-output" id="output-ast" style="display:none;"></pre>
-        <pre class="json-output" id="output-response" style="display:none;"></pre>
+
+      <div class="editor-workspace">
+        <div id="line-numbers" class="line-numbers">1</div>
+        <div class="editor-wrapper">
+          <div id="editor-highlight-layer" class="editor-highlight-layer"></div>
+          <textarea id="query-input" spellcheck="false" placeholder="Type QQL query statement here..."></textarea>
+        </div>
       </div>
+
+      <div id="editor-error-footer" class="editor-error-footer" style="display: none;">
+        <span>❌</span>
+        <span id="error-message-text"></span>
+      </div>
+    </section>
+
+    <!-- Right Panel: Multi-Tab Inspector -->
+    <section class="inspector-panel">
+      <nav class="nav-tabs">
+        <button class="tab-btn active" data-tab="plan">🗺️ Visual Plan</button>
+        <button class="tab-btn" data-tab="wire">⚙️ Qdrant Wire JSON</button>
+        <button class="tab-btn" data-tab="ast">🌳 AST Tree</button>
+        <button class="tab-btn" data-tab="tokens">🔤 Lexer Tokens</button>
+        <button class="tab-btn" data-tab="explain">💡 Explanation</button>
+        <button class="tab-btn" data-tab="response">📡 Response</button>
+      </nav>
+
+      <div class="tab-content-container">
+        <!-- Visual Plan -->
+        <div id="tab-plan" class="tab-pane active">
+          <div class="plan-flow">
+            <div id="route-card-container" class="route-card">
+              <div class="route-header">
+                <span id="route-method" class="http-method post">POST</span>
+                <span id="route-path" class="route-path">/collections/docs/points/query</span>
+              </div>
+              <div id="route-summary" style="font-size: 12px; color: var(--text-muted)">
+                Routes directly to Qdrant REST API query execution pipeline.
+              </div>
+            </div>
+            <div class="explanation-box" id="plan-explanation-box"></div>
+          </div>
+        </div>
+
+        <!-- Wire JSON -->
+        <div id="tab-wire" class="tab-pane">
+          <pre id="code-wire-json" class="code-json"></pre>
+        </div>
+
+        <!-- AST Tree -->
+        <div id="tab-ast" class="tab-pane">
+          <pre id="code-ast-json" class="code-json"></pre>
+        </div>
+
+        <!-- Tokens -->
+        <div id="tab-tokens" class="tab-pane">
+          <table class="token-table">
+            <thead>
+              <tr>
+                <th>Kind</th>
+                <th>Literal Text</th>
+                <th>Span Start</th>
+                <th>Span End</th>
+                <th>Len</th>
+              </tr>
+            </thead>
+            <tbody id="tokens-table-body"></tbody>
+          </table>
+        </div>
+
+        <!-- Explanation -->
+        <div id="tab-explain" class="tab-pane">
+          <div class="explanation-box" id="explain-box"></div>
+        </div>
+
+        <!-- Response -->
+        <div id="tab-response" class="tab-pane">
+          <pre id="code-response-json" class="code-json"></pre>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- ── Settings & Embeddings Modal ── -->
+<div id="settings-modal" class="modal-backdrop">
+  <div class="modal-card">
+    <div class="modal-header">
+      <span class="modal-title">⚙️ Connection & Embeddings Settings</span>
+      <button id="btn-close-settings" class="modal-close">✕</button>
+    </div>
+
+    <div class="modal-body">
+      <!-- Section 1: Qdrant Server -->
+      <div>
+        <div class="config-section-title">1. Qdrant Vector Database</div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div class="form-group">
+            <label class="form-label">Qdrant REST URL</label>
+            <input id="cfg-qdrant-url" type="text" class="form-input" value="http://localhost:6333">
+          </div>
+          <div class="form-group">
+            <label class="form-label">API Key (optional)</label>
+            <input id="cfg-qdrant-key" type="password" class="form-input" placeholder="Optional">
+          </div>
+        </div>
+      </div>
+
+      <!-- Section 2: Embedder Configuration -->
+      <div>
+        <div class="config-section-title">2. In-Browser & Remote Embedding Engine</div>
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label class="form-label">Embedding Provider</label>
+          <select id="cfg-embed-provider" class="form-input">
+            <option value="openai">Ollama / OpenAI Compatible (HTTP POST)</option>
+            <option value="remote">Remote HTTP Endpoint</option>
+            <option value="none">None (Raw Vector Input)</option>
+          </select>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+          <div class="form-group">
+            <label class="form-label">Embedding Endpoint URL</label>
+            <input id="cfg-embed-url" type="text" class="form-input" value="http://localhost:11434/v1/embeddings">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Embedding Model</label>
+            <input id="cfg-embed-model" type="text" class="form-input" value="all-minilm:l6-v2">
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div class="form-group">
+            <label class="form-label">Vector Dimension</label>
+            <input id="cfg-embed-dim" type="number" class="form-input" value="384">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Embedder API Key (optional)</label>
+            <input id="cfg-embed-key" type="password" class="form-input" placeholder="Optional">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <span id="cfg-status-msg" style="font-size: 12px; color: var(--accent-emerald)">✓ Prefilled for local Ollama & Qdrant</span>
+      <button id="btn-save-settings" class="btn btn-primary">Save & Apply Config</button>
     </div>
   </div>
 </div>
 
-<script type="module" src="app.js?v=2"></script>
+<script type="module" src="app.js?v=4"></script>
 </body>
 </html>

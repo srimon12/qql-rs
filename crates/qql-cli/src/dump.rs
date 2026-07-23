@@ -2,8 +2,8 @@ use std::error::Error;
 use std::fs;
 use std::path::Path;
 
-use qql::client::ScrollPointsReq;
 use qql::executor::Executor;
+use qql_core::parser::Parser;
 
 fn escape_string(value: &str) -> String {
     value
@@ -157,25 +157,45 @@ pub async fn dump_collection(
 
     let mut written = 0;
     let mut skipped = 0;
-    let mut after = None;
+
+    let mut offset: Option<serde_json::Value> = None;
 
     loop {
-        let (points, next_after) = ops
-            .scroll(ScrollPointsReq {
-                collection_name: collection.to_string(),
-                limit: batch_size as u64,
-                filter: None,
-                after: after.clone(),
-            })
-            .await?;
+        let scroll_qql = format!("SCROLL FROM {} LIMIT {}", collection, batch_size);
+        let mut stmt = Parser::parse(&scroll_qql)?;
 
-        if points.is_empty() {
-            break;
+        // Inject the offset if we have one from a previous page
+        if let Some(ref after_id) = offset {
+            let scroll_qql_with_offset = format!(
+                "SCROLL FROM {} LIMIT {} OFFSET {}",
+                collection,
+                batch_size,
+                match after_id {
+                    serde_json::Value::Number(n) => n.to_string(),
+                    serde_json::Value::String(s) => format!("'{}'", s),
+                    _ => String::new(),
+                }
+            );
+            stmt = Parser::parse(&scroll_qql_with_offset)?;
         }
+
+        let route = qql_plan::routing::route(&stmt);
+        let response = ops.execute_route(route).await?;
+
+        let points = response
+            .get("result")
+            .and_then(|r| r.get("points"))
+            .and_then(|p| p.as_array())
+            .or_else(|| response.get("result").and_then(|r| r.as_array()));
+
+        let points = match points {
+            Some(p) if !p.is_empty() => p.to_vec(),
+            _ => break,
+        };
 
         let mut batch_records = Vec::new();
         for point in &points {
-            let payload = match &point.payload {
+            let payload = match point.get("payload") {
                 Some(p) => p,
                 None => {
                     skipped += 1;
@@ -184,13 +204,17 @@ pub async fn dump_collection(
             };
 
             let mut record = serde_json::Map::new();
-            record.insert("id".to_string(), serde_json::to_value(&point.id)?);
-
-            for (k, v) in payload {
-                record.insert(k.clone(), v.clone());
+            if let Some(id) = point.get("id") {
+                record.insert("id".to_string(), id.clone());
             }
 
-            if let Some(ref vec_val) = point.vector {
+            if let Some(obj) = payload.as_object() {
+                for (k, v) in obj {
+                    record.insert(k.clone(), v.clone());
+                }
+            }
+
+            if let Some(vec_val) = point.get("vector") {
                 if let Some(obj) = vec_val.as_object() {
                     for (vname, vdata) in obj {
                         let key = format!("_v_{}", vname.replace('_', "__"));
@@ -205,7 +229,7 @@ pub async fn dump_collection(
         }
 
         if !batch_records.is_empty() {
-            body.push_str(&format!("INSERT INTO {} VALUES\n", collection));
+            body.push_str(&format!("UPSERT INTO {} VALUES\n", collection));
             for (idx, rec) in batch_records.iter().enumerate() {
                 let rec_json =
                     serde_json::to_string_pretty(&serde_json::Value::Object(rec.clone()))?;
@@ -227,10 +251,12 @@ pub async fn dump_collection(
             body.push_str("\n\n");
         }
 
-        if next_after.is_none() {
+        // Get the next offset from the last point's ID
+        offset = points.last().and_then(|p| p.get("id").cloned());
+
+        if points.len() < batch_size as usize {
             break;
         }
-        after = next_after;
     }
 
     let header = format!("-- QQL dump for {}\n-- Points: {}\n\n", collection, written);

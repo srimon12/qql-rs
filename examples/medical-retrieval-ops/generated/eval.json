@@ -1,26 +1,25 @@
 {
   "dataset": "ChatMED-Project/RAGCare-QA",
   "collection": "medical_retrieval_ops",
-  "row_count": 50,
-  "full_dataset": false,
+  "row_count": 420,
   "chunk_size": 200,
   "benchmark_path": "benchmark-questions.json",
   "queries": {
     "main": {
-      "id": 1,
-      "question": "The main pathophysiological disorder in restrictive cardiomyopathy is: a.Impaired diastolic ventricular function b.Impaired ventricular contraction c.Pericardial constriction d.Thickened walls of both ventricles e.Functional tricuspid and mitral insufficiency",
-      "specialty": "Cardiology",
-      "tenant_id": "hospital-heart",
+      "id": 332,
+      "question": "1. Which of the following enzymes is directly involved in the iodination of tyrosyl residues in thyroglobulin within the thyroid follicle lumen? a) Iodotyrosine deiodinase b) Thyroid peroxidase c) 5\u2019-deiodinase type 2 d) Tyrosine hydroxylase",
+      "specialty": "general medicine",
+      "tenant_id": "hospital-general",
       "case_priority": "high",
       "case_status": "active",
-      "answer": "Impaired diastolic ventricular function"
+      "answer": "Thyroid peroxidase"
     },
     "related": {
-      "id": 2,
-      "question": "2. The following is NOT classified as a cardiomyopathy in the strict sense of the word: a.dilated cardiomyopathy b.arrhythmogenic right ventricular dysplasia c.hypertrophic cardiomyopathy d.severe aortic stenosis e.restrictive cardiomyopathy",
-      "specialty": "Cardiology",
-      "tenant_id": "hospital-heart",
-      "answer": "severe aortic stenosis"
+      "id": 151,
+      "question": "1. Which of the following is a common symptom of acromegaly? a) Galactorrhea b) Hypotension c) Sleep apnea d) Alopecia e) Dry skin",
+      "specialty": "general medicine",
+      "tenant_id": "hospital-general",
+      "answer": "Sleep apnea"
     }
   }
 }

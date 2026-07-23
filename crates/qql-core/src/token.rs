@@ -1,5 +1,7 @@
 use core::fmt;
 
+use crate::error::Span;
+
 // ── Token kind definitions ─────────────────────────────────────
 // All variants are listed ONCE in the `token_table!`.
 // Two helper macros consume that table to produce:
@@ -61,7 +63,6 @@ pub enum TokenKind {
     Drop,
     Show,
     Collections,
-    Select,
     Scroll,
     Recommend,
     Limit,
@@ -127,6 +128,9 @@ pub enum TokenKind {
     Feedback,
     Star,
     After,
+    Shard,
+    Key,
+    Keys,
     Identifier,
     String,
     Integer,
@@ -148,6 +152,8 @@ pub enum TokenKind {
     Plus,
     Minus,
     Slash,
+    Count,
+    Clear,
     Semicolon,
     Eof,
 }
@@ -185,7 +191,6 @@ gen_as_str! {
     Drop => "DROP",
     Show => "SHOW",
     Collections => "COLLECTIONS",
-    Select => "SELECT",
     Scroll => "SCROLL",
     Recommend => "RECOMMEND",
     Limit => "LIMIT",
@@ -251,6 +256,11 @@ gen_as_str! {
     Feedback => "FEEDBACK",
     Star => "STAR",
     After => "AFTER",
+    Count => "COUNT",
+    Clear => "CLEAR",
+    Shard => "SHARD",
+    Key => "KEY",
+    Keys => "KEYS",
     Identifier => "IDENTIFIER",
     String => "STRING",
     Integer => "INTEGER",
@@ -309,7 +319,6 @@ gen_keywords! {
     "DROP" => TokenKind::Drop,
     "SHOW" => TokenKind::Show,
     "COLLECTIONS" => TokenKind::Collections,
-    "SELECT" => TokenKind::Select,
     "SCROLL" => TokenKind::Scroll,
     "RECOMMEND" => TokenKind::Recommend,
     "LIMIT" => TokenKind::Limit,
@@ -375,6 +384,11 @@ gen_keywords! {
     "FEEDBACK" => TokenKind::Feedback,
     "STAR" => TokenKind::Star,
     "AFTER" => TokenKind::After,
+    "SHARD" => TokenKind::Shard,
+    "KEY" => TokenKind::Key,
+    "KEYS" => TokenKind::Keys,
+    "COUNT" => TokenKind::Count,
+    "CLEAR" => TokenKind::Clear,
 }
 
 impl fmt::Display for TokenKind {
@@ -388,19 +402,27 @@ impl fmt::Display for TokenKind {
 pub struct Token<'a> {
     pub kind: TokenKind,
     pub text: &'a str,
-    pub pos: usize,
+    pub span: Span,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub(crate) pos: usize,
 }
 
 impl<'a> Token<'a> {
-    pub fn new(kind: TokenKind, text: &'a str, pos: usize) -> Self {
-        Token { kind, text, pos }
+    pub fn new(kind: TokenKind, text: &'a str, span: Span) -> Self {
+        Token {
+            kind,
+            text,
+            pos: span.start,
+            span,
+        }
     }
 
-    pub fn eof() -> Self {
+    pub fn eof(position: usize) -> Self {
         Token {
             kind: TokenKind::Eof,
             text: "",
-            pos: 0,
+            span: Span::point(position),
+            pos: position,
         }
     }
 }

@@ -1,14 +1,39 @@
-use super::Value;
+use super::{PointId, Value};
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum ComparisonOp {
+    Eq,
+    Gt,
+    Gte,
+    Lt,
+    Lte,
+}
+
 #[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum PointIdPredicate {
+    Eq(PointId),
+    In(Vec<PointId>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct GeoPoint {
+    pub lat: f64,
+    pub lon: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum FilterExpr {
+    PointId(PointIdPredicate),
     Compare {
         field: String,
-        op: String,
+        op: ComparisonOp,
         value: Value,
     },
     Between {
@@ -20,20 +45,10 @@ pub enum FilterExpr {
         field: String,
         values: Vec<Value>,
     },
-    NotIn {
-        field: String,
-        values: Vec<Value>,
-    },
     IsNull {
         field: String,
     },
-    IsNotNull {
-        field: String,
-    },
     IsEmpty {
-        field: String,
-    },
-    IsNotEmpty {
         field: String,
     },
     MatchText {
@@ -42,7 +57,7 @@ pub enum FilterExpr {
     },
     MatchAny {
         field: String,
-        text: String,
+        values: Vec<Value>,
     },
     MatchPhrase {
         field: String,
@@ -66,20 +81,17 @@ pub enum FilterExpr {
     },
     ValuesCount {
         field: String,
-        op: String,
-        count: i64,
+        op: ComparisonOp,
+        count: u64,
     },
     GeoBoundingBox {
         field: String,
-        top_left_lat: f64,
-        top_left_lon: f64,
-        bottom_right_lat: f64,
-        bottom_right_lon: f64,
+        top_left: GeoPoint,
+        bottom_right: GeoPoint,
     },
     GeoRadius {
         field: String,
-        lat: f64,
-        lon: f64,
+        center: GeoPoint,
         radius: f64,
     },
 }

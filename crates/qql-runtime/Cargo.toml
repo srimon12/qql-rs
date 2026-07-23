@@ -5,18 +5,23 @@ edition.workspace = true
 
 [features]
 default = ["grpc", "rest"]
-grpc = ["dep:qdrant-client", "dep:tokio", "tokio/rt-multi-thread"]
+grpc = ["dep:tonic", "dep:tonic-prost", "dep:prost", "dep:prost-types", "dep:tokio", "tokio/rt-multi-thread"]
 rest = ["dep:reqwest", "dep:tokio", "tokio/rt"]
 
 [dependencies]
 qql-core = { path = "../qql-core", features = ["serde", "std"] }
+qql-plan = { path = "../qql-plan" }
+qql-embed = { path = "../qql-embed" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["serde"] }
-qdrant-client = { version = "1.18", default-features = false, optional = true, features = ["serde"] }
+tonic = { version = "0.14", default-features = false, features = ["channel", "codegen", "tls-ring", "tls-webpki-roots"], optional = true }
+tonic-prost = { version = "0.14", optional = true }
+prost = { version = "0.14", optional = true }
+prost-types = { version = "0.14", optional = true }
 tokio = { version = "1", features = ["macros", "time"], optional = true }
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 
@@ -26,6 +31,7 @@ serde_json = "1"
 schemars = "0.8"
 prettyplease = "0.2"
 syn = "2"
+tonic-prost-build = "0.14"
 
 [dev-dependencies]
 jsonschema = "0.26"

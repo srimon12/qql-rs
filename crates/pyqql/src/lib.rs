@@ -1,9 +1,8 @@
 use pyo3::exceptions::PySyntaxError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList};
-use qql_core::ast::{self, Value};
+use qql_core::ast::{self, ComparisonOp, Value};
 use qql_core::lexer::Lexer;
-use qql_core::offline;
 use qql_core::parser::Parser;
 
 #[pyclass(name = "Stmt")]
@@ -15,9 +14,47 @@ pub struct PyStmt {
 #[pymethods]
 impl PyStmt {
     fn inject_filter(&mut self, field: &str, op: &str, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        if op == "!=" || op == "neq" || op == "<>" {
+            return Err(PySyntaxError::new_err(
+                "inject_filter does not support '!='; inject equality and wrap with NOT, or rewrite the query",
+            ));
+        }
         let val = py_to_value(value)?;
-        ast::inject_filter(&mut self.inner, field, op, &val);
+        let cmp = str_to_comparison_op(op);
+        ast::inject_filter(&mut self.inner, field, cmp, val)
+            .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
         Ok(())
+    }
+
+    /// Get or set the shard key on QUERY, COUNT, SCROLL, UPSERT, and DELETE
+    /// statements.  Returns `None` (setter is no-op) for other statement types.
+    #[getter]
+    fn shard_key(&self) -> Option<String> {
+        match &self.inner {
+            ast::Stmt::Query(q) => q.shard_key.clone(),
+            ast::Stmt::Count(c) => c.shard_key.clone(),
+            ast::Stmt::Scroll(s) => s.shard_key.clone(),
+            ast::Stmt::Upsert(u) => u.shard_key.clone(),
+            ast::Stmt::Delete(d) => d.shard_key.clone(),
+            _ => None,
+        }
+    }
+
+    #[setter]
+    fn set_shard_key(&mut self, key: Option<String>) {
+        let key = key.filter(|k| !k.is_empty());
+        match &mut self.inner {
+            ast::Stmt::Query(q) => q.shard_key = key,
+            ast::Stmt::Count(c) => c.shard_key = key,
+            ast::Stmt::Scroll(s) => s.shard_key = key,
+            ast::Stmt::Upsert(u) => u.shard_key = key,
+            ast::Stmt::Delete(d) => d.shard_key = key,
+            _ => {}
+        }
+    }
+
+    fn to_json(&self) -> PyResult<String> {
+        serde_json::to_string(&self.inner).map_err(|e| PySyntaxError::new_err(e.to_string()))
     }
 
     fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
@@ -59,14 +96,22 @@ fn inject_filter(
     op: &str,
     value: &Bound<'_, PyAny>,
 ) -> PyResult<PyStmt> {
+    if op == "!=" || op == "neq" || op == "<>" {
+        return Err(PySyntaxError::new_err(
+            "inject_filter does not support '!='; inject equality and wrap with NOT, or rewrite the query",
+        ));
+    }
     let val = py_to_value(value)?;
+    let cmp = str_to_comparison_op(op);
     if let Ok(mut py_stmt) = query.extract::<PyRefMut<'_, PyStmt>>() {
-        ast::inject_filter(&mut py_stmt.inner, field, op, &val);
+        ast::inject_filter(&mut py_stmt.inner, field, cmp, val)
+            .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
         Ok(py_stmt.clone())
     } else if let Ok(query_str) = query.extract::<String>() {
         let mut stmt =
             Parser::parse(&query_str).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
-        ast::inject_filter(&mut stmt, field, op, &val);
+        ast::inject_filter(&mut stmt, field, cmp, val)
+            .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
         Ok(PyStmt { inner: stmt })
     } else {
         Err(pyo3::exceptions::PyTypeError::new_err(
@@ -84,7 +129,7 @@ fn tokenize<'py>(input: &str, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict
         let d = PyDict::new(py);
         d.set_item("kind", token.kind.as_str())?;
         d.set_item("text", token.text)?;
-        d.set_item("pos", token.pos as i64)?;
+        d.set_item("pos", token.span.start as i64)?;
         result.push(d);
     }
     Ok(result)
@@ -92,8 +137,14 @@ fn tokenize<'py>(input: &str, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict
 
 #[pyfunction]
 fn compile_query<'py>(py: Python<'py>, input: &str) -> PyResult<Bound<'py, PyAny>> {
-    let compiled = offline::compile(input).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
-    pythonize::pythonize(py, &compiled).map_err(|e| PySyntaxError::new_err(e.to_string()))
+    let stmt = Parser::parse(input).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+    let route = qql_plan::routing::route(&stmt);
+    let result = serde_json::json!({
+        "method": route.method.as_str(),
+        "path": route.path,
+        "payload": route.body_json().unwrap_or(serde_json::Value::Null),
+    });
+    pythonize::pythonize(py, &result).map_err(|e| PySyntaxError::new_err(e.to_string()))
 }
 
 #[pyclass(name = "HttpEmbedder")]
@@ -201,10 +252,7 @@ fn create_executor(
             ));
         }
     } else {
-        Box::new(
-            qql::rest::RestQdrant::new(url.to_string(), api_key)
-                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?,
-        )
+        Box::new(qql::rest::RestQdrant::new(url.to_string(), api_key))
     };
 
     let embedder_impl = if let Some(endpoint) = &config.embedding_endpoint {
@@ -249,29 +297,20 @@ impl PyClient {
         })
     }
 
+    /// Execute a QQL query string, a pre-parsed Stmt, or a list of either.
+    /// Lists of same-collection QUERY statements are automatically batched
+    /// into a single network call.
     fn execute<'py>(
         &self,
         py: Python<'py>,
         query: &Bound<'_, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let res = if let Ok(py_stmt) = query.extract::<PyRef<PyStmt>>() {
-            self.runtime
-                .block_on(self.inner.execute_node(py_stmt.inner.clone()))
-                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
-        } else if let Ok(query_str) = query.extract::<String>() {
-            self.runtime
-                .block_on(self.inner.execute(&query_str))
-                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
-        } else {
-            return Err(pyo3::exceptions::PyTypeError::new_err(
-                "query must be a string or a Stmt object",
-            ));
-        };
-
-        pythonize::pythonize(py, &res)
+        let out = self.classify_and_run(query)?;
+        pythonize::pythonize(py, &out)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
     }
 
+    /// Async variant — accepts the same input types as `execute`.
     #[pyo3(signature = (query))]
     fn execute_async<'py>(
         &self,
@@ -279,47 +318,22 @@ impl PyClient {
         query: Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
-        let is_stmt = query.extract::<PyRef<PyStmt>>().is_ok();
-        let query_str = if !is_stmt {
-            Some(query.extract::<String>()?)
-        } else {
-            None
-        };
-        let py_stmt = if is_stmt {
-            Some(query.extract::<PyRef<PyStmt>>()?.inner.clone())
-        } else {
-            None
-        };
-
+        let classified = self.classify(&query)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let res = if let Some(stmt) = py_stmt {
-                inner
-                    .execute_node(stmt)
-                    .await
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
-            } else if let Some(q_str) = query_str {
-                inner
-                    .execute(&q_str)
-                    .await
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
-            } else {
-                return Err(pyo3::exceptions::PyTypeError::new_err(
-                    "query must be a string or a Stmt object",
-                ));
-            };
-            let py_val = Python::with_gil(|py| {
-                pythonize::pythonize(py, &res)
+            let val = Self::run_async(&inner, classified)
+                .await
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            Python::with_gil(|py| {
+                pythonize::pythonize(py, &val)
                     .map(|b| b.unbind())
                     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
-            })?;
-            Ok(py_val)
+            })
         })
     }
 
     fn explain(&self, query: &Bound<'_, PyAny>) -> PyResult<String> {
         if let Ok(py_stmt) = query.extract::<PyRef<PyStmt>>() {
-            qql_core::explain::explain_node(&py_stmt.inner)
-                .map_err(|e| pyo3::exceptions::PySyntaxError::new_err(e.to_string()))
+            Ok(qql_core::explain::explain_node(&py_stmt.inner))
         } else if let Ok(query_str) = query.extract::<String>() {
             qql_core::explain::explain(&query_str)
                 .map_err(|e| pyo3::exceptions::PySyntaxError::new_err(e.to_string()))
@@ -330,6 +344,112 @@ impl PyClient {
         }
     }
 }
+// ── internal dispatch (plain impl) ────────────────────────────────
+
+enum Input {
+    String(String),
+    Stmt(ast::Stmt),
+    StrList(Vec<String>),
+    StmtList(Vec<ast::Stmt>),
+}
+
+impl PyClient {
+    fn classify(&self, query: &Bound<'_, PyAny>) -> PyResult<Input> {
+        if let Ok(list) = query.downcast::<pyo3::types::PyList>() {
+            if list.is_empty() {
+                return Ok(Input::StrList(Vec::new()));
+            }
+            let first = list.get_item(0)?;
+            if first.extract::<PyRef<'_, PyStmt>>().is_ok() {
+                let stmts: Vec<ast::Stmt> = list
+                    .iter()
+                    .map(|i| Ok(i.extract::<PyRef<'_, PyStmt>>()?.inner.clone()))
+                    .collect::<PyResult<_>>()?;
+                return Ok(Input::StmtList(stmts));
+            }
+            let strs: Vec<String> = list
+                .iter()
+                .map(|i| i.extract::<String>())
+                .collect::<PyResult<_>>()
+                .map_err(|_| {
+                    pyo3::exceptions::PyTypeError::new_err(
+                        "list items must be strings or Stmt objects",
+                    )
+                })?;
+            return Ok(Input::StrList(strs));
+        }
+        if let Ok(stmt) = query.extract::<PyRef<'_, PyStmt>>() {
+            return Ok(Input::Stmt(stmt.inner.clone()));
+        }
+        let s = query.extract::<String>().map_err(|_| {
+            pyo3::exceptions::PyTypeError::new_err(
+                "query must be a str, Stmt, list[str], or list[Stmt]",
+            )
+        })?;
+        Ok(Input::String(s))
+    }
+
+    fn classify_and_run(&self, query: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
+        match self.classify(query)? {
+            Input::String(s) => {
+                let res = self
+                    .runtime
+                    .block_on(self.inner.execute(&s))
+                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+                Ok(serde_json::to_value(&res).unwrap_or_default())
+            }
+            Input::Stmt(s) => {
+                let res = self
+                    .runtime
+                    .block_on(self.inner.execute_node(s))
+                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+                Ok(serde_json::to_value(&res).unwrap_or_default())
+            }
+            Input::StrList(strs) => {
+                let refs: Vec<&str> = strs.iter().map(|s| s.as_str()).collect();
+                let results = self
+                    .runtime
+                    .block_on(self.inner.execute_batch(&refs, true))
+                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+                Ok(serde_json::to_value(&results).unwrap_or_default())
+            }
+            Input::StmtList(stmts) => {
+                let results = self
+                    .runtime
+                    .block_on(self.inner.execute_batch_nodes(stmts, true))
+                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+                Ok(serde_json::to_value(&results).unwrap_or_default())
+            }
+        }
+    }
+
+    async fn run_async(
+        inner: &qql::executor::Executor,
+        input: Input,
+    ) -> Result<serde_json::Value, qql_core::error::QqlError> {
+        match input {
+            Input::String(s) => {
+                let res = inner.execute(&s).await?;
+                Ok(serde_json::to_value(&res).unwrap_or_default())
+            }
+            Input::Stmt(s) => {
+                let res = inner.execute_node(s).await?;
+                Ok(serde_json::to_value(&res).unwrap_or_default())
+            }
+            Input::StrList(strs) => {
+                let refs: Vec<&str> = strs.iter().map(|s| s.as_str()).collect();
+                let results = inner.execute_batch(&refs, true).await?;
+                Ok(serde_json::to_value(&results).unwrap_or_default())
+            }
+            Input::StmtList(stmts) => {
+                let results = inner.execute_batch_nodes(stmts, true).await?;
+                Ok(serde_json::to_value(&results).unwrap_or_default())
+            }
+        }
+    }
+}
+
+// ── free functions ────────────────────────────────────────────────
 
 #[pyfunction]
 #[pyo3(signature = (query, url="http://localhost:6333", api_key=None, use_grpc=false, embedder=None))]
@@ -398,8 +518,7 @@ fn execute_async<'py>(
 #[pyfunction]
 fn explain(query: &Bound<'_, PyAny>) -> PyResult<String> {
     if let Ok(py_stmt) = query.extract::<PyRef<PyStmt>>() {
-        qql_core::explain::explain_node(&py_stmt.inner)
-            .map_err(|e| pyo3::exceptions::PySyntaxError::new_err(e.to_string()))
+        Ok(qql_core::explain::explain_node(&py_stmt.inner))
     } else if let Ok(query_str) = query.extract::<String>() {
         qql_core::explain::explain(&query_str)
             .map_err(|e| pyo3::exceptions::PySyntaxError::new_err(e.to_string()))
@@ -462,4 +581,15 @@ fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
         return Ok(Value::Dict(items));
     }
     Err(PySyntaxError::new_err("unsupported filter value type"))
+}
+
+fn str_to_comparison_op(op: &str) -> ComparisonOp {
+    match op {
+        "=" | "==" | "eq" => ComparisonOp::Eq,
+        ">" | "gt" => ComparisonOp::Gt,
+        ">=" | "gte" => ComparisonOp::Gte,
+        "<" | "lt" => ComparisonOp::Lt,
+        "<=" | "lte" => ComparisonOp::Lte,
+        _ => ComparisonOp::Eq,
+    }
 }

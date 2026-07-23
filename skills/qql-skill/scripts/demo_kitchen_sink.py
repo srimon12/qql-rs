@@ -47,7 +47,7 @@ def build_statements():
 
     # --- Schema ---
     stmts.append(("create-collection",
-        f"CREATE COLLECTION {COLLECTION} HYBRID WITH HNSW (payload_m = 16) WITH QUANTIZATION (type = 'turbo', bits = 2, always_ram = true)"))
+        f"CREATE COLLECTION {COLLECTION} (dense VECTOR (384, COSINE), sparse SPARSE) HYBRID WITH HNSW (payload_m = 16) WITH QUANTIZATION (type = 'turbo', bits = 2, always_ram = true)"))
 
     for field, ftype in [
         ("specialty", "keyword"), ("priority", "keyword"), ("status", "keyword"),
@@ -82,110 +82,110 @@ USING HYBRID"""))
 
     # --- Dense search ---
     stmts.append(("search-dense",
-        f"QUERY 'acute stroke weakness slurred speech' FROM {COLLECTION} LIMIT 3"))
+        f"QUERY 'acute stroke weakness slurred speech' FROM {COLLECTION} USING dense LIMIT 3"))
     stmts.append(("search-dense-exact",
-        f"QUERY 'acute stroke weakness slurred speech' FROM {COLLECTION} LIMIT 3 EXACT"))
+        f"QUERY 'acute stroke weakness slurred speech' FROM {COLLECTION} USING dense PARAMS (exact = true) LIMIT 3"))
     stmts.append(("search-dense-by-id",
-        f"QUERY '{IDS['stroke']}' FROM {COLLECTION} LIMIT 1"))
+        f"QUERY POINTS ('{IDS['stroke']}') FROM {COLLECTION} WITH PAYLOAD true"))
 
     # --- Hybrid search ---
     stmts.append(("search-hybrid",
-        f"QUERY 'chest pain radiating arm troponin' FROM {COLLECTION} LIMIT 3 USING HYBRID"))
+        f"QUERY HYBRID TEXT 'chest pain radiating arm troponin' DENSE dense SPARSE sparse FUSION RRF FROM {COLLECTION} LIMIT 3"))
     stmts.append(("search-hybrid-dbsf",
-        f"QUERY 'chest pain radiating arm troponin' FROM {COLLECTION} LIMIT 3 USING HYBRID FUSION DBSF"))
+        f"QUERY HYBRID TEXT 'chest pain radiating arm troponin' DENSE dense SPARSE sparse FUSION DBSF FROM {COLLECTION} LIMIT 3"))
 
     # --- Parameterized RRF ---
     stmts.append(("search-hybrid-rrf-params",
-        f"QUERY 'emergency critical care' FROM {COLLECTION} LIMIT 3 USING HYBRID WITH (rrf_k = 30, rrf_weights = [0.7, 0.3])"))
+        f"QUERY HYBRID TEXT 'emergency critical care' DENSE dense SPARSE sparse FUSION RRF FROM {COLLECTION} WITH (rrf_k = 30, rrf_weights = [0.7, 0.3]) LIMIT 3"))
 
     # --- Sparse search ---
     stmts.append(("search-sparse",
-        f"QUERY 'fever cough consolidation antibiotics' FROM {COLLECTION} LIMIT 3 USING SPARSE"))
+        f"QUERY 'fever cough consolidation antibiotics' FROM {COLLECTION} USING sparse LIMIT 3"))
 
     # --- MMR ---
     stmts.append(("search-mmr",
-        f"QUERY 'neurological emergency triage' FROM {COLLECTION} LIMIT 5 USING HYBRID WITH (mmr_diversity = 0.5, mmr_candidates = 20)"))
+        f"QUERY MMR TEXT 'neurological emergency triage' DIVERSITY 0.5 CANDIDATES 20 FROM {COLLECTION} USING dense LIMIT 5"))
 
     # --- Score threshold ---
     stmts.append(("search-score-threshold",
-        f"QUERY 'emergency critical care' FROM {COLLECTION} LIMIT 10 SCORE THRESHOLD 0.3"))
+        f"QUERY 'emergency critical care' FROM {COLLECTION} USING dense SCORE THRESHOLD 0.3 LIMIT 10"))
 
     # --- Offset ---
     stmts.append(("search-offset",
-        f"QUERY 'patient treatment diagnosis' FROM {COLLECTION} LIMIT 3 OFFSET 3"))
+        f"QUERY 'patient treatment diagnosis' FROM {COLLECTION} USING dense LIMIT 3 OFFSET 3"))
 
     # --- Filters ---
     stmts.append(("filter-equality",
-        f"QUERY 'emergency' FROM {COLLECTION} LIMIT 3 USING HYBRID WHERE specialty = 'neurology'"))
+        f"QUERY 'emergency' FROM {COLLECTION} USING dense WHERE specialty = 'neurology' LIMIT 3"))
     stmts.append(("filter-in",
-        f"QUERY 'chest pain cardiac' FROM {COLLECTION} LIMIT 3 USING HYBRID WHERE priority IN ('high', 'medium')"))
+        f"QUERY 'chest pain cardiac' FROM {COLLECTION} USING dense WHERE priority IN ('high', 'medium') LIMIT 3"))
     stmts.append(("filter-between",
-        f"QUERY 'patient' FROM {COLLECTION} LIMIT 3 USING HYBRID WHERE year BETWEEN 2024 AND 2026"))
+        f"QUERY 'patient' FROM {COLLECTION} USING dense WHERE year BETWEEN 2024 AND 2026 LIMIT 3"))
     stmts.append(("filter-and",
-        f"QUERY 'emergency critical' FROM {COLLECTION} LIMIT 3 USING HYBRID WHERE priority = 'high' AND status = 'admitted'"))
+        f"QUERY 'emergency critical' FROM {COLLECTION} USING dense WHERE priority = 'high' AND status = 'admitted' LIMIT 3"))
     stmts.append(("filter-or",
-        f"QUERY 'breathing difficulty' FROM {COLLECTION} LIMIT 3 USING HYBRID WHERE specialty = 'pulmonology' OR specialty = 'cardiology'"))
+        f"QUERY 'breathing difficulty' FROM {COLLECTION} USING dense WHERE (specialty = 'pulmonology' OR specialty = 'cardiology') LIMIT 3"))
     stmts.append(("filter-not-in",
-        f"QUERY 'patient' FROM {COLLECTION} LIMIT 3 USING HYBRID WHERE status NOT IN ('discharged')"))
+        f"QUERY 'patient' FROM {COLLECTION} USING dense WHERE status NOT IN ('discharged') LIMIT 3"))
     stmts.append(("filter-combined",
-        f"QUERY 'acute emergency' FROM {COLLECTION} LIMIT 3 USING HYBRID WHERE priority IN ('high', 'medium') AND status = 'admitted' AND year >= 2024"))
+        f"QUERY 'acute emergency' FROM {COLLECTION} USING dense WHERE priority IN ('high', 'medium') AND status = 'admitted' AND year >= 2024 LIMIT 3"))
     stmts.append(("filter-null-check",
-        f"QUERY 'patient' FROM {COLLECTION} LIMIT 3 WHERE diagnosis IS NOT NULL"))
+        f"QUERY 'patient' FROM {COLLECTION} USING dense WHERE diagnosis IS NOT NULL LIMIT 3"))
     stmts.append(("filter-match-phrase",
-        f"QUERY 'chest pain' FROM {COLLECTION} LIMIT 3 WHERE diagnosis MATCH PHRASE 'chest pain'"))
+        f"QUERY 'chest pain' FROM {COLLECTION} USING dense WHERE diagnosis MATCH PHRASE 'chest pain' LIMIT 3"))
 
     # --- Query-time params ---
     stmts.append(("search-hnsw-ef",
-        f"QUERY 'stroke rehabilitation' FROM {COLLECTION} LIMIT 3 WITH (hnsw_ef = 256)"))
+        f"QUERY 'stroke rehabilitation' FROM {COLLECTION} USING dense PARAMS (hnsw_ef = 256) LIMIT 3"))
     stmts.append(("search-acorn",
-        f"QUERY 'emergency triage' FROM {COLLECTION} LIMIT 3 WHERE specialty = 'neurology' WITH (acorn = true)"))
+        f"QUERY 'emergency triage' FROM {COLLECTION} USING dense WHERE specialty = 'neurology' PARAMS (acorn = true) LIMIT 3"))
     stmts.append(("search-indexed-only",
-        f"QUERY 'patient' FROM {COLLECTION} LIMIT 3 WITH (indexed_only = true)"))
+        f"QUERY 'patient' FROM {COLLECTION} USING dense PARAMS (indexed_only = true) LIMIT 3"))
 
     # --- Grouped search ---
     stmts.append(("group-by-specialty",
-        f"QUERY 'emergency acute care' FROM {COLLECTION} LIMIT 4 GROUP BY 'specialty' GROUP_SIZE 2"))
+        f"QUERY 'emergency acute care' FROM {COLLECTION} USING dense GROUP BY specialty SIZE 2 LIMIT 4"))
     stmts.append(("group-by-priority",
-        f"QUERY 'patient treatment' FROM {COLLECTION} LIMIT 4 USING HYBRID GROUP BY 'priority' GROUP_SIZE 2"))
+        f"QUERY 'patient treatment' FROM {COLLECTION} USING dense GROUP BY priority SIZE 2 LIMIT 4"))
     stmts.append(("grouped-with-params",
-        f"QUERY 'critical care escalation' FROM {COLLECTION} LIMIT 4 USING HYBRID WITH (hnsw_ef = 128) GROUP BY 'specialty' GROUP_SIZE 2"))
+        f"QUERY 'critical care escalation' FROM {COLLECTION} USING dense PARAMS (hnsw_ef = 128) GROUP BY specialty SIZE 2 LIMIT 4"))
 
     # --- Recommend ---
     stmts.append(("recommend-stroke",
-        f"QUERY RECOMMEND WITH (positive = ('{IDS['stroke']}')) FROM {COLLECTION} LIMIT 3"))
+        f"QUERY RECOMMEND POSITIVE ('{IDS['stroke']}') FROM {COLLECTION} USING dense LIMIT 3"))
     stmts.append(("recommend-multi",
-        f"QUERY RECOMMEND WITH (positive = ('{IDS['stroke']}', '{IDS['meningitis']}'), negative = ('{IDS['headache']}')) FROM {COLLECTION} LIMIT 3"))
+        f"QUERY RECOMMEND POSITIVE ('{IDS['stroke']}', '{IDS['meningitis']}') NEGATIVE ('{IDS['headache']}') FROM {COLLECTION} USING dense LIMIT 3"))
     stmts.append(("recommend-strategy",
-        f"QUERY RECOMMEND WITH (positive = ('{IDS['stemi']}', '{IDS['sepsis']}')) FROM {COLLECTION} STRATEGY 'best_score' LIMIT 3"))
+        f"QUERY RECOMMEND POSITIVE ('{IDS['stemi']}', '{IDS['sepsis']}') STRATEGY best_score FROM {COLLECTION} USING dense LIMIT 3"))
 
     # --- Context ---
     stmts.append(("context-pairs",
-        f"QUERY CONTEXT PAIRS ('{IDS['stroke']}', '{IDS['headache']}'), ('{IDS['sepsis']}', '{IDS['pneumonia']}') FROM {COLLECTION} LIMIT 3"))
+        f"QUERY CONTEXT (POSITIVE POINT '{IDS['stroke']}' NEGATIVE POINT '{IDS['headache']}', POSITIVE POINT '{IDS['sepsis']}' NEGATIVE POINT '{IDS['pneumonia']}') FROM {COLLECTION} USING dense LIMIT 3"))
 
     # --- Discover ---
     stmts.append(("discover",
-        f"QUERY DISCOVER TARGET '{IDS['stroke']}' CONTEXT PAIRS ('{IDS['meningitis']}', '{IDS['headache']}') FROM {COLLECTION} LIMIT 3"))
+        f"QUERY DISCOVER TARGET POINT '{IDS['stroke']}' CONTEXT (POSITIVE POINT '{IDS['meningitis']}' NEGATIVE POINT '{IDS['headache']}') FROM {COLLECTION} USING dense LIMIT 3"))
 
     # --- CTE-based Prefetch DAG ---
     stmts.append(("prefetch-rrf",
-        f"""WITH a AS (QUERY 'emergency critical neurological' USING dense LIMIT 10), b AS (QUERY 'emergency critical neurological' USING sparse LIMIT 10)
-QUERY 'emergency critical neurological' FROM {COLLECTION} LIMIT 3 PREFETCH (a, b) FUSION RRF"""))
+        f"""WITH a AS (QUERY 'emergency critical neurological' FROM {COLLECTION} USING dense LIMIT 10), b AS (QUERY 'emergency critical neurological' FROM {COLLECTION} USING sparse LIMIT 10)
+QUERY FUSION RRF FROM {COLLECTION} PREFETCH (a, b) LIMIT 3"""))
     stmts.append(("prefetch-rrf-per-filter",
-        f"""WITH a AS (QUERY 'emergency critical neurological' USING dense LIMIT 20), b AS (QUERY 'emergency critical neurological' USING sparse LIMIT 20)
-QUERY 'emergency critical neurological' FROM {COLLECTION} LIMIT 3 PREFETCH (a WHERE priority = 'high' SCORE THRESHOLD 0.3, b SCORE THRESHOLD 0.1) FUSION RRF WITH (rrf_k = 20, rrf_weights = [0.6, 0.4])"""))
+        f"""WITH a AS (QUERY 'emergency critical neurological' FROM {COLLECTION} USING dense WHERE priority = 'high' SCORE THRESHOLD 0.3 LIMIT 20), b AS (QUERY 'emergency critical neurological' FROM {COLLECTION} USING sparse SCORE THRESHOLD 0.1 LIMIT 20)
+QUERY FUSION RRF FROM {COLLECTION} PREFETCH (a, b) PARAMS (rrf_k = 20, rrf_weights = [0.6, 0.4]) LIMIT 3"""))
     stmts.append(("prefetch-rrf-params",
-        f"""WITH a AS (QUERY 'emergency critical neurological' USING dense LIMIT 10 WHERE priority = 'high'), b AS (QUERY 'emergency critical neurological' USING sparse LIMIT 10 WITH (exact = true))
-QUERY 'emergency critical neurological' FROM {COLLECTION} LIMIT 3 PREFETCH (a, b) FUSION RRF WITH (rrf_k = 10, rrf_weights = [0.7, 0.3])"""))
+        f"""WITH a AS (QUERY 'emergency critical neurological' FROM {COLLECTION} USING dense WHERE priority = 'high' LIMIT 10), b AS (QUERY 'emergency critical neurological' FROM {COLLECTION} USING sparse PARAMS (exact = true) LIMIT 10)
+QUERY FUSION RRF FROM {COLLECTION} PREFETCH (a, b) PARAMS (rrf_k = 10, rrf_weights = [0.7, 0.3]) LIMIT 3"""))
 
     # --- Update ---
     stmts.append(("update-payload",
-        f"UPDATE {COLLECTION} SET PAYLOAD = {{'status': 'reviewed', 'care_path': 'stroke-alert'}} WHERE id = '{IDS['stroke']}'"))
+        f"UPDATE {COLLECTION} SET PAYLOAD = {{status: 'reviewed', care_path: 'stroke-alert'}} WHERE id = '{IDS['stroke']}'"))
     stmts.append(("update-filter",
-        f"UPDATE {COLLECTION} SET PAYLOAD = {{'status': 'archived'}} WHERE status = 'discharged'"))
+        f"UPDATE {COLLECTION} SET PAYLOAD = {{status: 'archived'}} WHERE status = 'discharged'"))
 
     # --- Select / Scroll ---
     stmts.append(("select-by-id",
-        f"SELECT * FROM {COLLECTION} WHERE id = '{IDS['stemi']}'"))
+        f"QUERY POINTS ('{IDS['stemi']}') FROM {COLLECTION} WITH PAYLOAD true"))
     stmts.append(("scroll-all",
         f"SCROLL FROM {COLLECTION} LIMIT 3"))
     stmts.append(("scroll-filtered",
@@ -195,25 +195,17 @@ QUERY 'emergency critical neurological' FROM {COLLECTION} LIMIT 3 PREFETCH (a, b
     stmts.append(("order-by-year",
         f"QUERY ORDER BY year DESC FROM {COLLECTION} LIMIT 5"))
     stmts.append(("order-by-score",
-        f"QUERY ORDER BY score ASC FROM {COLLECTION} LIMIT 5 WHERE priority = 'high'"))
+        f"QUERY ORDER BY score ASC FROM {COLLECTION} WHERE priority = 'high' LIMIT 5"))
 
     # --- WITH PAYLOAD / WITH VECTOR — field selection ---
     stmts.append(("payload-false",
-        f"QUERY 'acute stroke' FROM {COLLECTION} LIMIT 3 USING HYBRID WITH PAYLOAD false"))
+        f"QUERY 'acute stroke' FROM {COLLECTION} USING dense WITH PAYLOAD false LIMIT 3"))
     stmts.append(("payload-include",
-        f"QUERY 'emergency' FROM {COLLECTION} LIMIT 3 USING HYBRID WITH PAYLOAD (include = ['diagnosis', 'specialty'])"))
+        f"QUERY 'emergency' FROM {COLLECTION} USING dense WITH PAYLOAD INCLUDE (diagnosis, specialty) LIMIT 3"))
 
     # --- SAMPLE — random point sampling ---
     stmts.append(("sample-random",
-        f"QUERY SAMPLE FROM {COLLECTION} LIMIT 5"))
-
-    # --- BOOST — score boosting with formula ---
-    stmts.append(("boost-arithmetic",
-        f"QUERY 'emergency critical' FROM {COLLECTION} LIMIT 5 USING DENSE BOOST (score * 0.3)"))
-    stmts.append(("boost-conditional",
-        f"QUERY 'patient treatment' FROM {COLLECTION} LIMIT 5 USING DENSE BOOST (CASE WHEN priority = 'high' THEN 2.0 ELSE 1.0 END)"))
-    stmts.append(("boost-with-defaults",
-        f"QUERY 'neurological' FROM {COLLECTION} LIMIT 5 USING DENSE BOOST (score * 0.5) DEFAULTS (score = 1.0)"))
+        f"QUERY SAMPLE RANDOM FROM {COLLECTION} LIMIT 5"))
 
     # --- Delete ---
     stmts.append(("delete-by-filter",

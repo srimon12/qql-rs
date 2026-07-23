@@ -46,17 +46,12 @@ pub async fn handle_exec(
     url: &str,
     query: &str,
     json: bool,
+    quiet: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let executor = executor(url)?;
     let response = executor.execute(query).await?;
-    if json {
-        let s = serde_json::to_string_pretty(&response)?;
-        println!("{}", s);
-    } else {
-        println!("{}", response.message);
-        if let Some(data) = response.data {
-            println!("{}", serde_json::to_string_pretty(&data)?);
-        }
+    if !quiet {
+        crate::table::render_response(&response, json)?;
     }
     Ok(())
 }
@@ -216,9 +211,8 @@ pub async fn handle_connect(url: &str) -> Result<(), Box<dyn std::error::Error>>
 
         match executor.execute(&trimmed).await {
             Ok(response) => {
-                output::print_success(&response.message);
-                if let Some(data) = response.data {
-                    println!("{}", serde_json::to_string_pretty(&data)?);
+                if let Err(e) = crate::table::render_response(&response, false) {
+                    output::print_error(&format!("display error: {}", e));
                 }
             }
             Err(e) => output::print_error(&format!("execution error: {}", e)),
@@ -256,14 +250,29 @@ fn executor(url: &str) -> Result<qql::executor::Executor, Box<dyn std::error::Er
             std::env::var("QDRANT_API_KEY")
                 .ok()
                 .or_else(|| config.secret.clone()),
-        )?)
+        ))
     };
 
-    let embedder = if let Some(endpoint) = &config.embedding_endpoint {
+    let env_url = std::env::var("EMBED_URL").ok();
+    let embedder = if let Some(endpoint) = env_url.as_ref().or(config.embedding_endpoint.as_ref()) {
         if !endpoint.trim().is_empty() {
-            let api_key = config.embedding_api_key.clone().unwrap_or_default();
-            let model = config.embedding_model.clone().unwrap_or_default();
-            let dimension = config.embedding_dimension;
+            let api_key = std::env::var("EMBED_KEY")
+                .ok()
+                .unwrap_or_else(|| config.embedding_api_key.clone().unwrap_or_default());
+            let model = std::env::var("EMBED_MODEL").ok().unwrap_or_else(|| {
+                config
+                    .embedding_model
+                    .clone()
+                    .unwrap_or_else(|| "all-minilm:l6-v2".to_string())
+            });
+            let dimension = std::env::var("EMBED_DIM")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(if config.embedding_dimension > 0 {
+                    config.embedding_dimension
+                } else {
+                    384
+                });
             let http_emb =
                 qql::embedder::HttpEmbedder::new(endpoint.clone(), api_key, model, dimension)?;
             Some(std::sync::Arc::new(http_emb) as std::sync::Arc<dyn qql::embedder::Embedder>)
@@ -335,7 +344,13 @@ pub fn handle_version() -> Result<(), Box<dyn std::error::Error>> {
 // ── Explain implementation ────────────────────────────────────
 
 fn explain_query(query: &str) -> Result<String, String> {
-    qql::executor::Executor::explain(query).map_err(|e| e.to_string())
+    // Try multi-statement first — if the input has semicolons we get a
+    // per-statement breakdown.  Falls back to single-statement for simple
+    // queries (parse_all rejects them with a confusing semicolon error).
+    match qql::executor::Executor::explain_all(query) {
+        Ok(plan) if !plan.is_empty() => Ok(plan),
+        Ok(_) | Err(_) => qql::executor::Executor::explain(query).map_err(|e| e.to_string()),
+    }
 }
 
 // ── REPL helpers ──────────────────────────────────────────────
@@ -447,10 +462,7 @@ pub async fn handle_edge(
     if json {
         println!("{}", serde_json::to_string_pretty(&response)?);
     } else {
-        println!("{}", response.message);
-        if let Some(data) = response.data {
-            println!("{}", serde_json::to_string_pretty(&data)?);
-        }
+        crate::table::render_response(&response, false)?;
     }
 
     Ok(())

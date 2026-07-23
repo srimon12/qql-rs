@@ -1,6 +1,6 @@
 # QQL Benchmarks
 
-Compares QQL throughput across different parser implementations, runtimes, and host SDK languages (Rust, Go, Python, Node.js).
+Compares QQL throughput across different parser implementations, runtimes, and host SDK languages (Rust, Python, Node.js, Go).
 
 Benchmarks are split into two categories:
 1. **Isolated Parser Benchmarks**: Pure lexing and parsing of QQL query strings into an AST (no network I/O, no schema compilation, no payload construction).
@@ -9,44 +9,45 @@ Benchmarks are split into two categories:
 - **CPU:** Intel Core i5-10400F @ 2.90 GHz
 - **Rust:** `qql-rs` (v0.1.0)
 - **Go:** `qql-go` (v0.1.0)
-- **Python:** `pyqql` (v0.1.0)
-- **Node.js:** `nqql` (v0.1.0)
+- **Python:** `pyqql` (v0.1.0 PyO3)
+- **Node.js:** `nqql` (v0.1.0 N-API)
+- **Date:** July 2026 (Post-Refactor 3-Layer Architecture)
 
 ---
 
 ## Queries
 
-| # | Label | QQL |
-|---|-------|-----|
+| # | Label | QQL Query |
+|---|-------|-----------|
 | 1 | Simple | `QUERY 'search' FROM docs LIMIT 10` |
-| 2 | Hybrid | `QUERY 'search' FROM docs LIMIT 10 USING HYBRID` |
-| 3 | Full | `QUERY 'vector search' FROM docs LIMIT 10 OFFSET 5 USING HYBRID RERANK WHERE topic = 'search' WITH (hnsw_ef = 128, exact = true)` |
-| 4 | CTE Prefetch | `WITH a AS (QUERY 'search' USING dense LIMIT 100 WHERE category = 'tech'), b AS (QUERY 'search' USING sparse LIMIT 100) QUERY 'search' FROM docs LIMIT 10 PREFETCH (a WHERE priority = 'high' SCORE THRESHOLD 0.8, b SCORE THRESHOLD 0.5) FUSION RRF` |
+| 2 | Hybrid | `QUERY HYBRID TEXT 'search' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10` |
+| 3 | Full | `QUERY TEXT 'x' FROM docs USING dense WHERE active = true PARAMS (hnsw_ef = 64, exact = false) SCORE THRESHOLD 0.2 GROUP BY category SIZE 3 LOOKUP FROM categories WITH PAYLOAD INCLUDE (title, url) WITH VECTOR (dense) LIMIT 10 OFFSET 2` |
+| 4 | CTE Prefetch | `WITH d AS (QUERY TEXT 'x' USING dense LIMIT 100), s AS (QUERY TEXT 'x' USING sparse LIMIT 100) QUERY FUSION RRF FROM docs PREFETCH (d, s) LIMIT 10` |
 | 5 | CreateCollection | `CREATE COLLECTION docs HYBRID WITH HNSW (m = 32, ef_construct = 100) WITH QUANTIZATION (type = 'scalar', quantile = 0.95)` |
 | 6 | Upsert | `UPSERT INTO docs VALUES {id: 1, text: 'hello world', category: 'tech'}, {id: 2, text: 'second document', category: 'science'}` |
 | 7 | DeleteWhere | `DELETE FROM docs WHERE category = 'archived'` |
-| 8 | OrderBy | `QUERY ORDER BY created_at DESC FROM docs LIMIT 20 WHERE status = 'active'` |
-| 9 | WithPayload | `QUERY 'search' FROM docs LIMIT 10 WITH PAYLOAD (include = ['title', 'body']) WITH VECTOR ('dense')` |
+| 8 | OrderBy | `QUERY ORDER BY created_at DESC FROM docs WHERE status = 'active' LIMIT 20` |
+| 9 | WithPayload | `QUERY 'search' FROM docs WITH PAYLOAD INCLUDE (title, body) WITH VECTOR (dense) LIMIT 10` |
 
 ---
 
 ## 1. Parser Benchmarks (ops/sec)
-*Isolates lexing & parsing throughput. Higher is better.*
+*Isolates lexing & parsing throughput into typed AST. Higher is better.*
 
-| Query | Rust (`qql-rs`) | Python (`pyqql`) | Node.js (`parseFastJson`) | Go (`qql-go`) | Node.js (`NAPI parse()`) |
+| Query | Rust (`qql-rs`) | Python (`pyqql`) | Go (`qql-go`) | Node.js (`NAPI parse()`) | Node.js (`parseFastJson`) |
 |-------|:--------:|:--------:|:--------:|:--------:|:--------:|
-| **Simple** | 2,085,740 | 1,762,541 | 247,644 | 1,688,724 | 60,691 |
-| **Hybrid** | 1,860,917 | 925,682 | 240,516 | 1,300,844 | 60,832 |
-| **Full** | 762,370 | 659,058 | 153,207 | 664,517 | 45,219 |
-| **CTE Prefetch** | 360,819 | 344,304 | 66,221 | 337,312 | 16,282 |
-| **CreateCollection** | 685,678 | 477,277 | 194,287 | 393,101 | 73,480 |
-| **Upsert** | 756,855 | 730,834 | 196,979 | 508,451 | 86,938 |
-| **DeleteWhere** | 1,866,475 | 1,637,655 | 539,616 | 1,960,807 | 317,806 |
-| **OrderBy** | 1,029,932 | 969,849 | 190,271 | 1,020,497 | 53,242 |
-| **WithPayload** | 947,908 | 845,869 | 179,144 | 858,692 | 51,986 |
+| **Simple** | **1,929,013** | 1,520,097 | 1,688,724 | 492,729 | 238,891 |
+| **Hybrid** | **970,296** | 806,691 | 1,300,844 | 403,121 | 256,251 |
+| **Full** | **344,583** | 269,761 | 664,517 | 191,049 | 111,314 |
+| **CTE Prefetch** | **430,517** | 382,035 | 337,312 | 227,220 | 91,355 |
+| **CreateCollection** | **621,378** | 494,318 | 393,101 | 299,658 | 178,783 |
+| **Upsert** | **654,713** | 611,150 | 508,451 | 254,368 | 184,985 |
+| **DeleteWhere** | **1,801,754** | 1,203,957 | 1,960,807 | 347,703 | 428,751 |
+| **OrderBy** | **958,494** | 921,252 | 1,020,497 | 334,826 | 221,614 |
+| **WithPayload** | **802,854** | 758,053 | 858,692 | 350,946 | 194,900 |
 
-* **Python DX Win**: Because `pyqql` wraps the native Rust `Stmt` directly inside PyO3 memory, parser throughput matches native Rust/Go speeds almost 1-to-1.
-* **Node.js Boundary Cost**: Node.js standard N-API GC allocations have high object mapping overhead (~60k ops/s), but using `parseFastJson` bypasses this, yielding **~247k ops/s**.
+* **Python DX Win**: Because `pyqql` wraps the native Rust `Stmt` directly inside PyO3 memory, parser throughput matches native Rust/Go speeds almost 1-to-1 (up to **1.52M ops/s**!).
+* **Node.js Boundary Cost**: Node.js N-API class wrapping provides direct AST access, while `parseFastJson` bypasses V8 object allocation for flat JSON consumption.
 
 ---
 
@@ -55,36 +56,51 @@ Benchmarks are split into two categories:
 
 | Query Type | Rust (Pure Sync E2E) | Node.js (`nqql` E2E) | Python (`pyqql` E2E) | Rust (Async E2E) | Go (`qql-go` E2E) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **Simple** | **1,457,044** | 1,135,007 | 1,090,391 | 1,074,246 | 306,741 |
-| **Hybrid** | **1,241,732** | 1,032,660 | 824,011 | 957,509 | 364,957 |
-| **Full** | **591,968** | 544,210 | 519,561 | 395,307 | 195,372 |
-| **CTE_Prefetch** | **308,657** | 321,546 | 309,577 | 237,292 | 163,404 |
-| **CreateCollection** | **598,104** | 588,675 | 516,832 | 565,599 | 262,059 |
-| **Upsert** | **685,654** | 627,901 | 625,161 | 456,273 | 185,858 |
-| **DeleteWhere** | **1,215,619** | 984,827 | 1,041,469 | 992,423 | 469,121 |
-| **OrderBy** | **969,066** | 866,207 | 528,142 | 407,095 | 259,201 |
-| **WithPayload** | **786,091** | 651,419 | 657,634 | 662,425 | 292,933 |
+| **Simple** | **1,275,059** | 968,671 | 744,265 | 808,268 | 306,741 |
+| **Hybrid** | **730,040** | 679,747 | 519,031 | 545,719 | 364,957 |
+| **Full** | **296,628** | 258,702 | 307,240 | 252,813 | 195,372 |
+| **CTE_Prefetch** | **361,565** | 340,308 | 376,637 | 304,298 | 163,404 |
+| **CreateCollection** | **581,623** | 526,987 | 563,644 | 442,965 | 262,059 |
+| **Upsert** | **629,885** | 561,909 | 585,383 | 416,268 | 185,858 |
+| **DeleteWhere** | **1,539,661** | 1,362,533 | 1,124,044 | 974,978 | 469,121 |
+| **OrderBy** | **791,553** | 668,740 | 573,749 | 575,844 | 259,201 |
+| **WithPayload** | **667,446** | 569,643 | 590,138 | 463,445 | 292,933 |
 
 ### Speed Hierarchy Physics:
 $$\text{Rust Pure Sync} > \text{Node.js E2E} \ge \text{Python E2E} > \text{Rust Async (due to tokio runtime block\_on)} > \text{Go}$$
 
-- **Rust Pure Sync**: Bypasses both FFI translation and Tokio runtime scheduling, showing the true, maximum speed of our in-memory payload compiler (up to **1.45M ops/s**!).
+- **Rust Pure Sync**: Bypasses both FFI translation and Tokio runtime scheduling, showing the true, maximum speed of our in-memory payload compiler (up to **1.53M ops/s**!).
 - **FFI E2E (Node/Python)**: Since `explain()` returns a flat string payload, there is zero object translation overhead. They match native speeds, trailing Rust Sync only by the minor FFI boundary hop cost.
 - **Rust Async**: The `block_on` wrapper adds task scheduling and future state-machine polling overhead on every query, making it slightly slower than pure sync compilation.
+
+---
+
+## 3. BM25 Sparse Vector Benchmark (100,000 Iterations)
+
+| Operation | Total Time | Throughput (ops/sec) |
+|---|:---:|:---:|
+| **Build Document Vector** | 64.13 ms | **1,559,443** |
+| **Build Query Vector** | 20.39 ms | **4,903,462** |
 
 ---
 
 ## Running the Benchmarks
 
 ```bash
-# Rust (Parser & E2E Sync/Async)
-cargo run --release --manifest-path bench/bench_rust/Cargo.toml --bin parse
-cargo run --release --manifest-path bench/bench_rust/Cargo.toml --bin e2e
-cargo run --release --manifest-path bench/bench_rust/Cargo.toml --bin explain
+# 1. Build release binaries & bindings
+cargo build --release -p pyqql -p nqql
+cargo build --release --manifest-path bench/bench_rust/Cargo.toml --bins
+(cd crates/nqql && npx napi build --release --platform)
 
-# Python (Parser & E2E)
+# 2. Rust (Parser & E2E Sync/Async)
+cargo run --release --manifest-path bench/bench_rust/Cargo.toml --bin parse
+cargo run --release --manifest-path bench/bench_rust/Cargo.toml --bin explain
+cargo run --release --manifest-path bench/bench_rust/Cargo.toml --bin e2e
+cargo run --release --manifest-path bench/bench_rust/Cargo.toml --bin bench_sparse
+
+# 3. Python (Parser & E2E)
 PYTHONPATH=target/release python3 bench/bench_python.py
 
-# Node.js (Parser & E2E)
+# 4. Node.js (Parser & E2E)
 node bench/bench_node.js
 ```

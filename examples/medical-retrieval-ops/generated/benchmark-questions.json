@@ -298,5 +298,2225 @@
     "question": "18. What is a typical sign of hyperthyroidism? a) Cold, dry skin b) Weight loss c) Bradycardia d) Constipation e) Cold intolerance",
     "specialty": "Endocrinology",
     "limit": 5
+  },
+  {
+    "id": 51,
+    "question": "19. Which statement about thyroid hormones is correct? a) Most thyroid hormones circulate unbound in the blood b) T4 is more active than T3 in tissues c) Bound hormones are the only biologically active form d) Thyroid hormones are essential for normal brain development e) Monoiodotyrosine is more active than T3",
+    "specialty": "Endocrinology",
+    "limit": 5
+  },
+  {
+    "id": 52,
+    "question": "20. What is the treatment of choice for toxic nodular goiter (autonomous thyroid tissue)? a) L-thyroxine b) Radioactive iodine (I-131) c) High-dose corticosteroids d) Surgery is never an option e) Beta blockers alone",
+    "specialty": "Endocrinology",
+    "limit": 5
+  },
+  {
+    "id": 53,
+    "question": "21. What is typical of hypothyroid crisis (myxedema coma)? a) It is commonly encountered in clinical practice b) Mortality is low c) Treatment begins with high-dose intravenous L-thyroxine d) Diagnosis is always clinically obvious e) No glucocorticoids are needed",
+    "specialty": "Endocrinology",
+    "limit": 5
+  },
+  {
+    "id": 54,
+    "question": "22. Which symptom is typical in hyperthyroid crisis (thyrotoxic storm)? a) Hypothermia b) Constipation c) Hyperthermia d) Muscle weakness e) Bradycardia",
+    "specialty": "Endocrinology",
+    "limit": 5
+  },
+  {
+    "id": 55,
+    "question": "23. What is the approximate mortality rate in untreated hyperthyroid crisis? a) Below 5% b) Between 20% and 50% c) 0% with modern treatment d) Between 5% and 10% e) Above 80%",
+    "specialty": "Endocrinology",
+    "limit": 5
+  },
+  {
+    "id": 56,
+    "question": "24. What applies to treatment with radioactive iodine (I-131)? a) Only gamma rays are used b) Beta rays cause cellular necrosis c) Treatment is unsafe d) It is contraindicated in all elderly patients e) It is preferred in pregnant women",
+    "specialty": "Endocrinology",
+    "limit": 5
+  },
+  {
+    "id": 57,
+    "question": "25. What is typical for autonomous thyroid tissue? a) It is under normal regulatory control b) It results from rapid thyroid cell turnover c) It is more common in iodine-rich regions d) It results from mutations in the TSH receptor or G-protein e) It is suppressed by high iodine intake",
+    "specialty": "Endocrinology",
+    "limit": 5
+  },
+  {
+    "id": 58,
+    "question": "26. What should be the next step for a patient on long-term amiodarone who develops hypothyroidism? a) Stop amiodarone immediately b) Start methimazole c) Start glucocorticoids d) Begin treatment with L-thyroxine e) Monitor without intervention",
+    "specialty": "Endocrinology",
+    "limit": 5
+  },
+  {
+    "id": 59,
+    "question": "27. What is used to treat hyperthyroidism caused by iodine excess (Jod-Basedow phenomenon)? a) L-thyroxine b) Radioactive iodine c) High-dose thionamides (antithyroid drugs) d) Beta blockers alone e) Prednisone",
+    "specialty": "Endocrinology",
+    "limit": 5
+  },
+  {
+    "id": 60,
+    "question": "28. Which of the following is a known effect of amiodarone on the thyroid? a) It has a short half-life b) It is structurally unrelated to thyroid hormones c) It contains a large amount of iodine d) It depletes the body of iodine e) It causes only hypothyroidism",
+    "specialty": "Endocrinology",
+    "limit": 5
+  },
+  {
+    "id": 61,
+    "question": "1. The source of massive bleeding from a duodenal ulcer is most often: A. superior mesenteric artery B. portal vein C. inferior mesenteric artery D. gastroduodenal artery E. inferior vena cava",
+    "specialty": "Gastroenterology",
+    "limit": 5
+  },
+  {
+    "id": 62,
+    "question": "2. Which mucosal change represents a precancerous lesion? A. villous adenoma of the rectum B. polyps in Peutz-Jeghers syndrome C. angiodysplasia D. juvenile polyps in the colon E. solitary pedunculated polyp in the sigmoid colon, 5 mm in diameter",
+    "specialty": "Gastroenterology",
+    "limit": 5
+  },
+  {
+    "id": 63,
+    "question": "3. In acute cholecystitis we observe: A. A painful resistance under the right costal margin B. A mass in the epigastrium C. Polyuria D. Leukopenia E. Left-sided pleural effusion",
+    "specialty": "Gastroenterology",
+    "limit": 5
+  },
+  {
+    "id": 64,
+    "question": "4. Of the listed causes of mesenteric ischemia, which has the worst prognosis? A. mesenteric venous thrombosis B. non-occlusive mesenteric ischemia C. embolism D. chronic mesenteric ischemia E. thrombosis",
+    "specialty": "Gastroenterology",
+    "limit": 5
+  },
+  {
+    "id": 65,
+    "question": "5. Hematemesis is: A. vomiting of feculent material B. passing of fresh blood C. vomiting of bile D. vomiting of blood E. passing of black, tarry stools",
+    "specialty": "Gastroenterology",
+    "limit": 5
+  },
+  {
+    "id": 66,
+    "question": "6. The cause of epigastric pain can be outside of the abdomen: A. cerebrovascular insult (stroke) B. fracture of the first lumbar vertebra C. inferior wall myocardial infarction (MI) D. nephrolithiasis E. ectopic pregnancy",
+    "specialty": "Gastroenterology",
+    "limit": 5
+  },
+  {
+    "id": 67,
+    "question": "7. The most common source of lower gastrointestinal bleeding is: A. angiodysplasia B. diverticula in the ascending colon C. colonic varices D. diverticula in the sigmoid colon E. Crohn\u2019s disease",
+    "specialty": "Gastroenterology",
+    "limit": 5
+  },
+  {
+    "id": 68,
+    "question": "8. What is Virchow\u2019s node? A. enlarged lymph node in the left supraclavicular fossa B. enlarged lymph node in the left groin C. enlarged lymph node in the right axilla D. enlarged lymph node in the right groin E. enlarged lymph node in the left axilla",
+    "specialty": "Gastroenterology",
+    "limit": 5
+  },
+  {
+    "id": 69,
+    "question": "9. In blunt abdominal trauma, the most commonly injured organ is: A. stomach B. small intestine C. pancreas D. liver E. spleen",
+    "specialty": "Gastroenterology",
+    "limit": 5
+  },
+  {
+    "id": 70,
+    "question": "10. Sister Mary Joseph\u2019s sign is: A. enlarged lymph node above the left clavicle B. metastasis of gastric cancer at the umbilicus C. metastasis of breast cancer in the left axilla D. painful, palpable mass below the right costal margin E. retracted nipple of the left breast",
+    "specialty": "Gastroenterology",
+    "limit": 5
+  },
+  {
+    "id": 71,
+    "question": "11. Mark the most common method of conservative treatment of chronic pancreatitis! A. treatment of ascites B. pain relief C. treatment of steatorrhea D. treatment of diabetes E. pancreatic enzyme replacement",
+    "specialty": "Gastroenterology",
+    "limit": 5
+  },
+  {
+    "id": 72,
+    "question": "12. In Zollinger-Ellison syndrome, excessive secretion of: a) gastrin b) somatostatin c) VIP d) glucagon e) cholecystokinin",
+    "specialty": "Gastroenterology",
+    "limit": 5
+  },
+  {
+    "id": 73,
+    "question": "13. Pseudomembranous colitis is associated with the causative factor: a) use of antibiotics b) use of diuretics c) use of beta-blockers d) use of laxatives e) intravenous drug injection",
+    "specialty": "Gastroenterology",
+    "limit": 5
+  },
+  {
+    "id": 74,
+    "question": "14. The extraintestinal manifestations of Crohn's disease DO NOT include: a) arthritis b) ankylosing spondylitis c) iritis d) atopic dermatitis e) erythema nodosum",
+    "specialty": "Gastroenterology",
+    "limit": 5
+  },
+  {
+    "id": 75,
+    "question": "15. The most common cause of acute pancreatitis: a. choledocholithiasis (bile duct stones) b. infection c. hereditary pancreatitis d. hypercalcemia e. hyperlipidemia",
+    "specialty": "Gastroenterology",
+    "limit": 5
+  },
+  {
+    "id": 76,
+    "question": "16. The most common causes of gastric and duodenal peptic ulcers are: a. treatment with nonsteroidal anti-inflammatory drugs (NSAIDs) b. Zollinger-Ellison syndrome c. Crohn\u2019s disease d. treatment with calcium channel blockers e. treatment with vitamin K antagonists",
+    "specialty": "Gastroenterology",
+    "limit": 5
+  },
+  {
+    "id": 77,
+    "question": "17. Mark the most common cause of chronic inflammation of the pancreas: A. pancreas divisum B. obstruction C. alcohol D. injury E. hyperparathyroidism",
+    "specialty": "Gastroenterology",
+    "limit": 5
+  },
+  {
+    "id": 78,
+    "question": "18. We speak of occult bleeding when the patient loses daily: A. 500 ml of blood B. more than 100 ml of blood C. 200 - 300 ml of blood D. 10 to 20 ml of blood E. 50 to 100 ml of blood",
+    "specialty": "Gastroenterology",
+    "limit": 5
+  },
+  {
+    "id": 79,
+    "question": "19. The most common form, that is secondary peritonitis, occurs due to: A. meningitis B. lung infection C. mushroom poisoning D. immunosuppression of the patient E. perforation of a hollow organ",
+    "specialty": "Gastroenterology",
+    "limit": 5
+  },
+  {
+    "id": 80,
+    "question": "20. The diagnostic method for bleeding from the small intestine is: A. jejunoileography B. CT C. scintigraphy with labeled leukocytes D. capsule endoscopy E. colonoscopy",
+    "specialty": "Gastroenterology",
+    "limit": 5
+  },
+  {
+    "id": 81,
+    "question": "When do you not introduce an antihypertensive drug and try to lower blood pressure non-pharmacologically? a) in young people b) in mild arterial hypertension c) in the elderly d) in patients with organ damage e) in patients with diabetes mellitus",
+    "specialty": "Family medicine",
+    "limit": 5
+  },
+  {
+    "id": 82,
+    "question": "When do you immediately introduce therapy for newly diagnosed hypertension? a) measured blood pressure above 180/110 mmHg b) if the patient refuses to change their lifestyle habits c) if the patient has a family history of hypertension d) if the patient has a sedentary lifestyle e) if the patient is under stress",
+    "specialty": "Family medicine",
+    "limit": 5
+  },
+  {
+    "id": 83,
+    "question": "When do you immediately introduce therapy for newly diagnosed arterial hypertension? a) you suspect they won't attend follow-up appointments b) over 65 years old c) systolic blood pressure above 155 mmHg d) not willing to change their lifestyle e) diastolic blood pressure above 95 mmHg",
+    "specialty": "Family medicine",
+    "limit": 5
+  },
+  {
+    "id": 84,
+    "question": "Clinical case of hyperthyroidism. What is your first action? A. Determine TSH levels. B. Prescribe antithyroid medication. C. Order a thyroid ultrasound. D. Advise a low-iodine diet. E. Refer for radioactive iodine uptake test.",
+    "specialty": "Family medicine",
+    "limit": 5
+  },
+  {
+    "id": 85,
+    "question": "Acute gout attack. What do you prescribe to the patient? A. NSAID B. allopurinol C. acetylsalicylic acid D. diet E. glucocorticoids",
+    "specialty": "Family medicine",
+    "limit": 5
+  },
+  {
+    "id": 86,
+    "question": "Normal waist circumference for women? a) up to 80 cm b) over 90 cm c) between 80 and 88 cm d) over 100 cm e) up to 70 cm",
+    "specialty": "Family medicine",
+    "limit": 5
+  },
+  {
+    "id": 87,
+    "question": "The best method to visualize the ejection fraction of the heart. a) Echocardiography (Ultrasound) b) Thallium scintigraphy c) Chest X-ray d) ECG e) Cardiac MRI",
+    "specialty": "Family medicine",
+    "limit": 5
+  },
+  {
+    "id": 88,
+    "question": "Which classification helps us assess cardiovascular fitness? a) NYHA (New York Heart Association Classification) b) WHO (World Health Organization Classification) c) AHA (American Heart Association Classification) d) CCS (Canadian Cardiovascular Society Classification) e) METs (Metabolic Equivalents)",
+    "specialty": "Family medicine",
+    "limit": 5
+  },
+  {
+    "id": 89,
+    "question": "What is true for NYHA Class III? a) Symptoms are present even at rest. b) Patient has symptoms only with severe exertion. c) Symptoms appear only with moderate exertion. d) Patient is asymptomatic. e) Symptoms significantly limit daily activities.",
+    "specialty": "Family medicine",
+    "limit": 5
+  },
+  {
+    "id": 90,
+    "question": "Which medications are most helpful in heart failure? a) Calcium channel blockers b) Diuretics c) ACE inhibitors d) Beta-blockers e) Alpha-blockers",
+    "specialty": "Family medicine",
+    "limit": 5
+  },
+  {
+    "id": 91,
+    "question": "What do you do with a patient in whom you clinically suspect hypothyroidism? a) Prescribe Euthyrox b) Urgently refer to a thyroid specialist c) First, perform TSH, T3, and T4 measurements. d) Advise a high-iodine diet. e) Order a thyroid ultrasound.",
+    "specialty": "Family medicine",
+    "limit": 5
+  },
+  {
+    "id": 92,
+    "question": "What is NOT characteristic of hyperthyroidism? a) Irritability b) Palpitations c) Diarrhea d) Sleep disturbances e) Decreased appetite",
+    "specialty": "Family medicine",
+    "limit": 5
+  },
+  {
+    "id": 93,
+    "question": "Clinical case of hyperthyroidism. What is your first action? a) Determine TSH levels. b) Prescribe antithyroid medication. c) Order a thyroid ultrasound. d) Advise a low-iodine diet. e) Refer for radioactive iodine uptake test.",
+    "specialty": "Family medicine",
+    "limit": 5
+  },
+  {
+    "id": 94,
+    "question": "Which bacterium is the most common cause of community-acquired pneumonia? a) Pneumococcus (Streptococcus pneumoniae) b) Haemophilus influenzae c) Mycoplasma pneumoniae d) Chlamydophila pneumoniae e) Staphylococcus aureus",
+    "specialty": "Family medicine",
+    "limit": 5
+  },
+  {
+    "id": 95,
+    "question": "What is dyspnea? a) An objective measurement of respiratory rate. b) A subjective sensation of difficult breathing. c) A sudden, sharp pain in the chest. d) A medical term for coughing. e) The sound of wheezing during respiration.",
+    "specialty": "Family medicine",
+    "limit": 5
+  },
+  {
+    "id": 96,
+    "question": "Which measure is the most important in the context of arterial hypertension? a) Two meals a day b) Physical inactivity c) Reduce salt intake d) Increase alcohol consumption e) Avoid all forms of exercise",
+    "specialty": "Family medicine",
+    "limit": 5
+  },
+  {
+    "id": 97,
+    "question": "Most common causative agents of bronchitis? a) Viruses b) Streptococcus c) Pneumococcus d) Mycoplasma e) Fungi",
+    "specialty": "Family medicine",
+    "limit": 5
+  },
+  {
+    "id": 98,
+    "question": "How do we initially treat low back pain? a) With diazepam b) With tramadol c) Oral paracetamol d) Morphine i.m. e) Immobilization",
+    "specialty": "Family medicine",
+    "limit": 5
+  },
+  {
+    "id": 99,
+    "question": "Obesity is defined when BMI is greater than a) 20 kg/m2 b) 25 kg/m2 c) 27 kg/m2 d) 30 kg/m2 e) 35 kg/m2",
+    "specialty": "Family medicine",
+    "limit": 5
+  },
+  {
+    "id": 100,
+    "question": "What is true for NYHA Class II? a) Symptoms significantly limit daily activities. b) Symptoms are present even at rest. c) Ordinary physical activity results in fatigue, palpitation, dyspnea, or anginal pain. d) Patient has symptoms only with severe exertion. e) Patient is asymptomatic.",
+    "specialty": "Family medicine",
+    "limit": 5
+  },
+  {
+    "id": 101,
+    "question": "What is true for NYHA Class I? a) Symptoms significantly limit daily activities. b) Symptoms are present even at rest. c) Symptoms appear even with moderate exertion. d) No limitation of physical activity. Ordinary physical activity does not cause undue fatigue, palpitation, or dyspnea. e) Symptoms occur only with minimal exertion.",
+    "specialty": "Family medicine",
+    "limit": 5
+  },
+  {
+    "id": 102,
+    "question": "What is true for NYHA Class IV? a) Symptoms significantly limit daily activities. b) Patient has symptoms only with severe exertion. c) Symptoms appear only with moderate exertion. d) Symptoms are present even at rest. e) Patient is asymptomatic.",
+    "specialty": "Family medicine",
+    "limit": 5
+  },
+  {
+    "id": 103,
+    "question": "What is the limit for lower-risk drinking for men in Slovenia? a) Up to 7 units of alcohol weekly or up to 3 units on a single drinking occasion. b) Up to 10 units of alcohol weekly or up to 4 units on a single drinking occasion. c) Up to 14 units of alcohol weekly or up to 5 units on a single drinking occasion. d) Up to 21 units of alcohol weekly, with no limit per occasion. e) No specific limits, as long as it doesn't lead to intoxication.",
+    "specialty": "Family medicine",
+    "limit": 5
+  },
+  {
+    "id": 104,
+    "question": "For how many days retrospectively can a personal doctor issue sick leave in Slovenia? a) 30 days b) 14 days c) 7 days d) 3 days e) No retrospective issuance is allowed.",
+    "specialty": "Family medicine",
+    "limit": 5
+  },
+  {
+    "id": 105,
+    "question": "What applies to palliative care? a) It shortens life. b) It prolongs life. c) It prolongs life for a reasonable period. d) It neither shortens nor prolongs life. e) It is only for terminal illnesses.",
+    "specialty": "Family medicine",
+    "limit": 5
+  },
+  {
+    "id": 106,
+    "question": "What is the most important predictive factor for the development of diabetic foot? a) Uncontrolled glucose concentration b) Tight shoes c) Foot injury d) Elevated cholesterol e) Duration of diabetes mellitus",
+    "specialty": "Family medicine",
+    "limit": 5
+  },
+  {
+    "id": 107,
+    "question": "1. Which histological type of bladder cancer is the most common? a. Urothelial carcinoma b. Squamous cell carcinoma c. Adenocarcinoma d. Mesothelioma e. Small cell carcinoma",
+    "specialty": "Oncology",
+    "limit": 5
+  },
+  {
+    "id": 108,
+    "question": "2. Which screening test is most widely used worldwide for early detection of cervical cancer? a. Visual inspection with acetic acid (VIA) b. HPV DNA testing c. Endocervical curettage d. Papanicolaou (Pap) smear e. Colposcopic biopsy",
+    "specialty": "Oncology",
+    "limit": 5
+  },
+  {
+    "id": 109,
+    "question": "3. What is the most common malignancy in adult women in Slovenia? a. Ovarian cancer b. Cervical cancer c. Lung cancer d. Breast cancer e. Endometrial cancer",
+    "specialty": "Oncology",
+    "limit": 5
+  },
+  {
+    "id": 110,
+    "question": "4. After leukemia, which two solid tumors are most common in children? a. Hodgkin lymphoma and non-Hodgkin lymphoma b. Neuroblastoma and Wilms tumor c. Brain tumors (especially medulloblastoma) and neuroblastoma d. Osteosarcoma and Ewing sarcoma e. Rhabdomyosarcoma and hepatoblastoma",
+    "specialty": "Oncology",
+    "limit": 5
+  },
+  {
+    "id": 111,
+    "question": "5. Which tumor marker is most frequently elevated in hepatocellular carcinoma? a. Carcinoembryonic antigen (CEA) b. CA 19-9 c. Alpha-fetoprotein (AFP) d. CA 125 e. Beta-2 microglobulin",
+    "specialty": "Oncology",
+    "limit": 5
+  },
+  {
+    "id": 112,
+    "question": "6. In women under age 35, which imaging modality is first-line to distinguish cystic from solid breast lesions? a. Mammography b. MRI of the breast c. Breast ultrasound d. PET-CT e. Contrast-enhanced CT of the chest",
+    "specialty": "Oncology",
+    "limit": 5
+  },
+  {
+    "id": 113,
+    "question": "7. What is the approximate five-year overall survival rate for patients with papillary thyroid carcinoma in Slovenia? a. 50 % b. 60 % c. 70 % d. 80 % e. \u2265 90 %",
+    "specialty": "Oncology",
+    "limit": 5
+  },
+  {
+    "id": 114,
+    "question": "8. Which syndrome is characterized by medullary thyroid cancer, pheochromocytoma, and parathyroid hyperplasia? a. MEN 1 b. MEN 2A c. MEN 2B d. Li\u2013Fraumeni syndrome e. Von Hippel\u2013Lindau syndrome",
+    "specialty": "Oncology",
+    "limit": 5
+  },
+  {
+    "id": 115,
+    "question": "9. What is the term for a metastatic cancer in which no primary site can be identified by core (thick-needle) biopsy? a. Cancer of unknown primary (CUP) b. Primary mediastinal carcinoma c. Occult carcinoma d. Pancancer syndrome e. Embryonal carcinoma",
+    "specialty": "Oncology",
+    "limit": 5
+  },
+  {
+    "id": 116,
+    "question": "10. At what age does the SVIT colorectal-cancer screening program begin for men and women in Slovenia? a. 40 years b. 45 years c. 50 years d. 55 years e. 60 years",
+    "specialty": "Oncology",
+    "limit": 5
+  },
+  {
+    "id": 117,
+    "question": "11. Which of the following is one of the two most common nonmelanoma skin cancers? a. Merkel cell carcinoma b. Basal cell carcinoma c. Kaposi sarcoma d. Dermatofibrosarcoma protuberans e. Sebaceous carcinoma",
+    "specialty": "Oncology",
+    "limit": 5
+  },
+  {
+    "id": 118,
+    "question": "12. Among solid tumors in children, which is most frequently diagnosed? a. Wilms tumor b. Osteosarcoma c. Brain tumors d. Neuroblastoma e. Rhabdomyosarcoma",
+    "specialty": "Oncology",
+    "limit": 5
+  },
+  {
+    "id": 119,
+    "question": "13. Which staging system is used for Hodgkin lymphoma? a. Dukes staging b. Ann Arbor staging c. TNM staging d. FIGO staging e. Ranson\u2019s criteria",
+    "specialty": "Oncology",
+    "limit": 5
+  },
+  {
+    "id": 120,
+    "question": "14. Which growth factor is administered subcutaneously to reduce febrile neutropenia? a. Erythropoietin b. Interleukin-2 (IL-2) c. Granulocyte-colony stimulating factor (G-CSF) d. Granulocyte\u2013macrophage colony-stimulating factor (GM-CSF) e. Thrombopoietin analogs",
+    "specialty": "Oncology",
+    "limit": 5
+  },
+  {
+    "id": 121,
+    "question": "15. Which effect of whole-body irradiation is dose-dependent but has no threshold (i.e., stochastic)? a. Hair loss b. Radiation-induced fibrosis c. Radiation-induced second malignancy d. Acute radiation dermatitis e. Radiation pneumonitis",
+    "specialty": "Oncology",
+    "limit": 5
+  },
+  {
+    "id": 122,
+    "question": "16. What is the principal purpose of tumor lysis syndrome prophylaxis in hematologic malignancies? a. Prevent venous thromboembolism b. Prevent infection from neutropenia c. Prevent metabolic complications from rapid cell lysis d. Prevent mucositis e. Prevent cardiotoxicity",
+    "specialty": "Oncology",
+    "limit": 5
+  },
+  {
+    "id": 123,
+    "question": "17. What is the most common site of distant metastasis for breast cancer? a. Brain b. Liver c. Kidney d. Skin e. Bone",
+    "specialty": "Oncology",
+    "limit": 5
+  },
+  {
+    "id": 124,
+    "question": "18. What does \u201cadjuvant\u201d systemic therapy mean in oncology? a. Therapy given before any local treatment b. Palliative care only c. Therapy given after primary local treatment to eradicate micrometastases d. Therapy given to treat metastatic disease only e. Therapy given only for symptom control",
+    "specialty": "Oncology",
+    "limit": 5
+  },
+  {
+    "id": 125,
+    "question": "19. Which psychiatric symptom is most commonly seen immediately after an adult cancer diagnosis? a. Mania b. Anxiety c. Obsessive-compulsive behaviors d. Schizophrenia e. Dementia",
+    "specialty": "Oncology",
+    "limit": 5
+  },
+  {
+    "id": 126,
+    "question": "20. Which cytokine is secreted by many tumor cells to suppress local immune activity? a. IL-2 b. IFN-\u03b3 c. TNF-\u03b1 d. IL-10 e. GM-CSF",
+    "specialty": "Oncology",
+    "limit": 5
+  },
+  {
+    "id": 127,
+    "question": "21. Name two typical acute hematologic toxicities of adjuvant breast cancer chemotherapy. a. Thrombocytosis and polycythemia b. Neutropenia and anemia c. Eosinophilia and basophilia d. Leukemoid reaction and thrombocytopenia e. Pancytopenia and hemolytic anemia",
+    "specialty": "Oncology",
+    "limit": 5
+  },
+  {
+    "id": 128,
+    "question": "22. Which thyroid cancer subtype is most frequently diagnosed in children exposed to Chernobyl on neck ultrasound? a. Follicular thyroid carcinoma b. Medullary thyroid carcinoma c. Papillary thyroid carcinoma d. Anaplastic thyroid carcinoma e. Hurthle cell carcinoma",
+    "specialty": "Oncology",
+    "limit": 5
+  },
+  {
+    "id": 129,
+    "question": "23. Which of the following is the single most important risk factor for hepatocellular carcinoma worldwide? a. Chronic hepatitis C virus (HCV) infection b. Chronic hepatitis B virus (HBV) infection c. Nonalcoholic fatty liver disease (NAFLD) d. Excessive alcohol consumption e. Aflatoxin exposure",
+    "specialty": "Oncology",
+    "limit": 5
+  },
+  {
+    "id": 130,
+    "question": "24. What is the standard combined modality for treating localized glioblastoma (e.g., T1N0M0)? a. Surgical resection alone b. Radiotherapy alone c. Resection + radiotherapy with concurrent and adjuvant temozolomide d. Chemotherapy alone (lomustine-based) e. Stereotactic radiosurgery alone",
+    "specialty": "Oncology",
+    "limit": 5
+  },
+  {
+    "id": 131,
+    "question": "1. Which cranial nerve is most commonly affected first during uncal herniation? a) CN IV b) CN III c) CN V d) CN II e) CN VI",
+    "specialty": "Neurology",
+    "limit": 5
+  },
+  {
+    "id": 132,
+    "question": "What structure is typically damaged in Weber's syndrome? a) Medulla oblongata b) Pons c) Midbrain (mesencephalon) d) Subthalamic nucleus e) Basal ganglia",
+    "specialty": "Neurology",
+    "limit": 5
+  },
+  {
+    "id": 133,
+    "question": "A patient has difficulty closing the eye, mouth asymmetry, and cannot wrinkle the forehead on one side. Where is the facial nerve lesion? a) In the cerebellopontine angle b) In the brainstem nucleus c) After exiting the stylomastoid foramen d) In the internal acoustic meatus e) In the contralateral motor cortex",
+    "specialty": "Neurology",
+    "limit": 5
+  },
+  {
+    "id": 134,
+    "question": "Which clinical feature is typical of Wallenberg syndrome (lateral medullary syndrome)? a) Hemiplegia and facial droop b) Quadriplegia c) Bilateral vision loss d) Ipsilateral Horner's syndrome and contralateral pain and temperature loss e) Bilateral Babinski sign",
+    "specialty": "Neurology",
+    "limit": 5
+  },
+  {
+    "id": 135,
+    "question": "What cranial nerve nuclei are located in the pons? a) CN I, II, III b) CN V, VI, VII (and part of VIII) c) CN IX, X, XI d) CN III, IV e) CN II, IV, VI",
+    "specialty": "Neurology",
+    "limit": 5
+  },
+  {
+    "id": 136,
+    "question": "Which of the following is not part of the Papez circuit? a) Hippocampus b) Fornix c) Mammillary bodies d) Cingulum e) All listed structures are part of the Papez circuit",
+    "specialty": "Neurology",
+    "limit": 5
+  },
+  {
+    "id": 137,
+    "question": "What gait pattern is most likely in a patient with cerebellar ataxia? a) Festinating gait b) Steppage gait c) Waddling gait d) Wide-based, unsteady gait e) Spastic scissoring gait",
+    "specialty": "Neurology",
+    "limit": 5
+  },
+  {
+    "id": 138,
+    "question": "Which part of the brain is affected if a patient has constructional apraxia and cannot draw a clock? a) Dominant temporal lobe b) Non-dominant parietal lobe c) Dominant frontal lobe d) Cerebellum e) Occipital lobe",
+    "specialty": "Neurology",
+    "limit": 5
+  },
+  {
+    "id": 139,
+    "question": "A patient presents with ptosis, a dilated pupil, and an eye that looks \"down and out.\" Which nerve is most likely affected? a) CN VI b) CN IV c) CN III d) CN V1 e) CN II",
+    "specialty": "Neurology",
+    "limit": 5
+  },
+  {
+    "id": 140,
+    "question": "What is the likely diagnosis if a patient has bilateral pale optic discs and paresthesia in one leg, with brisk reflexes and an extensor plantar response? a) Single spinal lesion b) Diabetic polyneuropathy c) Diffuse central nervous system disorder d) Brainstem stroke e) Optic neuritis",
+    "specialty": "Neurology",
+    "limit": 5
+  },
+  {
+    "id": 141,
+    "question": "What neurological condition typically causes a \"claw hand\"? a) Radial nerve lesion b) Ulnar nerve lesion c) Median nerve lesion d) Cervical radiculopathy e) Musculocutaneous nerve lesion",
+    "specialty": "Neurology",
+    "limit": 5
+  },
+  {
+    "id": 142,
+    "question": "Which sensory fibers transmit vibration and proprioception? a) Thin, unmyelinated fibers b) Thin, myelinated fibers c) Thick, myelinated sensory fibers d) Thick, unmyelinated fibers e) Autonomic fibers",
+    "specialty": "Neurology",
+    "limit": 5
+  },
+  {
+    "id": 143,
+    "question": "What muscle is tested by the Froment\u2019s sign? a) Opponens pollicis b) Flexor pollicis longus c) Adductor pollicis (ulnar nerve) d) Abductor pollicis brevis e) First dorsal interosseous",
+    "specialty": "Neurology",
+    "limit": 5
+  },
+  {
+    "id": 144,
+    "question": "Which cranial nerve is responsible for lateral eye movement? a) CN III b) CN IV c) CN VI d) CN II e) CN V1",
+    "specialty": "Neurology",
+    "limit": 5
+  },
+  {
+    "id": 145,
+    "question": "Which type of memory is tested by asking a patient to repeat a series of digits backward? a) Semantic memory b) Working memory (attention) c) Episodic memory d) Long-term memory e) Prospective memory",
+    "specialty": "Neurology",
+    "limit": 5
+  },
+  {
+    "id": 146,
+    "question": "What does a positive Romberg test suggest? a) Cerebellar lesion b) Impaired proprioception or dorsal column dysfunction c) Vestibular disorder d) Cortical stroke e) Visual agnosia",
+    "specialty": "Neurology",
+    "limit": 5
+  },
+  {
+    "id": 147,
+    "question": "Which spinal level corresponds to the dermatome over the nipples? a) C6 b) T6 c) T4 d) T2 e) T10",
+    "specialty": "Neurology",
+    "limit": 5
+  },
+  {
+    "id": 148,
+    "question": "What is the main function of the basal ganglia? a) Sensory processing b) Coordination of movement and muscle tone c) Memory formation d) Visual tracking e) Language comprehension",
+    "specialty": "Neurology",
+    "limit": 5
+  },
+  {
+    "id": 149,
+    "question": "What is the primary neurotransmitter used in the parasympathetic nervous system? a) Dopamine b) Noradrenaline c) Acetylcholine d) Serotonin e) Glutamate",
+    "specialty": "Neurology",
+    "limit": 5
+  },
+  {
+    "id": 150,
+    "question": "What muscle is innervated by the long thoracic nerve? a) Rhomboid major b) Latissimus dorsi c) Trapezius d) Serratus anterior e) Levator scapulae",
+    "specialty": "Neurology",
+    "limit": 5
+  },
+  {
+    "id": 151,
+    "question": "1. Which of the following is a common symptom of acromegaly? a) Galactorrhea b) Hypotension c) Sleep apnea d) Alopecia e) Dry skin",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 152,
+    "question": "2. What is the most appropriate test to confirm a pituitary microadenoma? a) Visual field examination b) Serum calcium measurement c) MRI with gadolinium contrast d) CT of the cervical spine e) Serum aldosterone measurement",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 153,
+    "question": "3. What hormone imbalance is typically seen in a patient with Kallmann syndrome? a) Increased prolactin b) Increased TSH c) Decreased GnRH d) Decreased cortisol e) Increased aldosterone",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 154,
+    "question": "4. Which of the following is a feature of successfully treated acromegaly? a) IGF-1 concentration remains high b) MRI always shows residual tumor c) GH drops below 0.4 \u03bcg/L during OGTT d) GH rises during OGTT e) Mortality increases",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 155,
+    "question": "5. What is a known cause of increased serum prolactin concentration in a woman? a) Hyperthyroidism b) Ovarian failure c) Treatment with dopamine antagonists (e.g., phenothiazines) d) Vitamin D toxicity e) Estrogen deficiency",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 156,
+    "question": "6. What hormone is not primarily produced in the hypothalamus? a) GnRH b) ADH c) Somatostatin d) ACTH e) Oxytocin",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 157,
+    "question": "7. What is a known symptom of prolactinoma in women? a) Hirsutism b) Galactorrhea and amenorrhea c) Polyuria d) Facial flushing e) Hyperpigmentation",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 158,
+    "question": "8. What is a common complication of long-term glucocorticoid therapy that can be prevented or mitigated? a) Growth retardation in children b) Peptic ulcer c) Osteoporosis d) Suppression of the HPA axis e) Diabetes mellitus",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 159,
+    "question": "9. Which of the following is the most common pituitary tumor? a) ACTH-secreting adenoma b) TSH-secreting adenoma c) Prolactinoma d) Somatotropinoma e) Gonadotropinoma",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 160,
+    "question": "10. Which condition is most commonly associated with increased IGF-1 levels and elevated GH? a) Cushing syndrome b) Acromegaly c) Hypopituitarism d) Addison's disease e) Diabetes insipidus",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 161,
+    "question": "11. Which of the following symptoms is LEAST likely to be found in acromegaly? a) Hypertension b) Diabetes mellitus c) Skeletal muscle atrophy d) Cardiomyopathy e) Carpal tunnel syndrome",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 162,
+    "question": "12. What is the typical cause of central (neurogenic) diabetes insipidus? a) Kidney resistance to ADH b) Reduced or absent secretion of ADH from the posterior pituitary c) Excess aldosterone d) Primary polydipsia e) Hypercalcemia-induced nephrogenic DI",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 163,
+    "question": "13. What is a common imaging finding in patients with a pituitary adenoma compressing the optic chiasm? a) Normal visual fields b) Monocular blindness c) Bitemporal hemianopsia d) Papilledema e) Diplopia without visual field loss",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 164,
+    "question": "14. What is the best imaging technique for evaluating the hypothalamic-pituitary region? a) X-ray of the skull b) Ultrasound c) CT scan of the brain d) MRI of the hypothalamic-pituitary area e) Bone scintigraphy",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 165,
+    "question": "15. Which of the following is true regarding dopamine and prolactin? a) Dopamine stimulates prolactin release b) Dopamine has no effect on prolactin c) Prolactin increases dopamine release d) Dopamine inhibits prolactin secretion e) Dopamine is secreted by the anterior pituitary",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 166,
+    "question": "16. What is a typical biochemical marker of acromegaly during an oral glucose tolerance test (OGTT)? a) GH increases after glucose ingestion b) GH fails to suppress below 0.4 \u03bcg/L c) TSH decreases d) IGF-1 drops significantly e) Insulin secretion is absent",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 167,
+    "question": "17. Which of the following is NOT a local symptom of a pituitary tumor? a) Visual field deficits b) Hepatomegaly c) Cranial nerve involvement d) CSF rhinorrhea e) Headache",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 168,
+    "question": "18. What is the most appropriate initial treatment for a prolactinoma? a) Transsphenoidal surgery b) Radiotherapy c) Chemotherapy d) Dopamine agonists (e.g., cabergoline) e) Steroids",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 169,
+    "question": "19. Which hormone is secreted by the anterior pituitary? a) ADH b) Oxytocin c) TSH d) Melatonin e) Dopamine",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 170,
+    "question": "20. What is the best test to evaluate adrenal insufficiency in acute crisis? a) MRI of the adrenal glands b) Serum calcium c) Serum cortisol and ACTH d) 24-hour urinary cortisol e) DHEAS level",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 171,
+    "question": "21. What is the most appropriate acute treatment for adrenal crisis? a) 5% glucose orally b) High-dose L-thyroxine c) 100 mg hydrocortisone IV followed by 200\u2013300 mg in continuous infusion over 24h d) Beta-blockers e) TSH injection",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 172,
+    "question": "22. What condition is characterized by hyperpigmentation, weight loss, and hypotension? a) Cushing\u2019s syndrome b) Addison\u2019s disease c) Graves\u2019 disease d) Diabetes insipidus e) Acromegaly",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 173,
+    "question": "23. Which test is used to confirm primary aldosteronism? a) Plasma renin activity only b) 24-hour urinary cortisol c) Aldosterone/renin ratio d) Plasma ACTH e) Serum calcium",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 174,
+    "question": "24. Which of the following conditions is caused by an adrenal cortex tumor secreting cortisol? a) Addison\u2019s disease b) Cushing\u2019s syndrome c) Conn\u2019s syndrome d) Adrenogenital syndrome e) MEN I",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 175,
+    "question": "25. What is a common cause of secondary adrenal insufficiency? a) Long-term glucocorticoid therapy b) Autoimmune destruction of adrenal cortex c) Adrenal tuberculosis d) Congenital adrenal hyperplasia e) Adrenal metastases",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 176,
+    "question": "26. Which of the following is a true pituitary neoplasm? a) Glioma b) Germinoma c) Adenoma d) Cyst of Rathke's pouch e) Neuroblastoma",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 177,
+    "question": "27. Which of the following CT features is most specific for identifying a lipid-rich (benign) adrenal adenoma? a) Contrast washout delay b) Low attenuation (<10 Hounsfield units) c) Size above 6 cm d) High iodine uptake e) Cystic degeneration",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 178,
+    "question": "28. What lab finding is typical in untreated Cushing's syndrome? a) Hypoglycemia b) Vertebral fractures (due to osteoporosis) c) Low ACTH d) Hyperkalemia e) Low cortisol",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 179,
+    "question": "29. Which condition is associated with an aldosterone-secreting adrenal tumor? a) Cushing\u2019s disease b) Conn\u2019s syndrome (primary hyperaldosteronism) c) Addison\u2019s disease d) Pheochromocytoma e) Acromegaly",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 180,
+    "question": "30. What is the primary mechanism by which aldosterone increases blood pressure? a) Vasoconstriction b) Increased heart rate c) Sodium and water retention in distal tubules d) Inhibition of renin e) Potassium absorption",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 181,
+    "question": "31. Which condition typically shows elevated metanephrines and normetanephrines in plasma and/or urine? a) Addison\u2019s disease b) Cushing\u2019s syndrome c) Conn\u2019s syndrome d) Pheochromocytoma e) Acromegaly",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 182,
+    "question": "32. Pituitary tumors are generally treated surgically first, except: a) TSH adenomas b) Craniopharyngiomas (sometimes only palliative aspiration) c) Prolactinomas (treated with bromocriptine, cabergoline) d) Somatotrophic (growth\u2010hormone\u2013secreting) adenomas e) Meningiomas",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 183,
+    "question": "1. Which functional class according to the NYHA classification does a patient belong to who does not experience difficulty breathing with daily activities (washing, walking on level ground), but problems occur with moderate exertion (walking up one flight of stairs)? a. I b. II c. III d. IV e. V",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 184,
+    "question": "2. What is Brugada syndrome? a. A genetic disease, more common in males, associated with a high risk of sudden cardiac death b. A genetic disease affecting calcium channels, resulting in impaired heart muscle contraction c. The occurrence of atrial fibrillation in a structurally normal heart d. Altered conduction of electrical impulses through cardiomyocytes, manifested by a widened QRS complex e. None of the above",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 185,
+    "question": "3. What is Syndrome X? a. An X-linked heart disease b. Microvascular ischemic heart disease without involvement of the major coronary arteries c. Unspecified chest pain d. Neurovegetative dystonia e. Imaginary chest pain",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 186,
+    "question": "4. Which type of myocarditis is treated with a combination of cyclosporine and glucocorticoids? a. Giant cell myocarditis b. Any viral myocarditis c. Only fulminant viral myocarditis d. Patients with chronic myocarditis and dilated cardiomyopathy e. Patients with toxic myocarditis after cyclophosphamide treatment",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 187,
+    "question": "5. What is the target LDL-cholesterol level in secondary prevention? a. \u2264 1.3 mmol/L b. \u2264 1.5 mmol/L c. \u2264 1.8 mmol/L d. \u2264 2.0 mmol/L e. \u2264 2.5 mmol/L",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 188,
+    "question": "6. In a patient with heart failure and a chronic dry cough: a. We change the ACE inhibitor b. We do not start an ARB c. We immediately refer them to a pulmonologist d. We discontinue the beta\u2010blocker e. We replace the ACE inhibitor with an ARB",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 189,
+    "question": "7. Which radiopharmaceutical is used in cardiac scintigraphy to assess myocardial viability? a. Fluorine-labeled deoxyglucose (\u00b9\u2078F-FDG) b. Meta-iodobenzylguanidine (MIBG) c. Technetium-labeled erythrocytes d. Technetium-labeled palmitic acid e. Carbon-14 hydroxyephedrine (HED)",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 190,
+    "question": "8. The most common ECG finding in pulmonary embolism is: a. S\u2081Q\u2083T\u2083 pattern b. Left bundle\u2010branch block c. Negative T waves in the precordial leads d. Sinus tachycardia or atrial fibrillation with a rapid ventricular response e. Right bundle\u2010branch block",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 191,
+    "question": "9. A prominent venous v-wave is seen in: a. Constrictive pericarditis b. Cardiac tamponade c. Hypervolemia d. Mitral regurgitation e. Tricuspid regurgitation",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 192,
+    "question": "10. Which of the following is NOT seen on a chest radiograph in left-sided heart failure? a. Enlarged cardiac silhouette b. Redistribution of pulmonary blood flow to the upper lung fields (cephalization) c. Indistinct (blurred) vascular markings d. Kerley B lines e. Westermark\u2019s sign",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 193,
+    "question": "11. For typical pain in aortic dissection, the characteristic features are: a. It is severe, tearing b. It is mild, stabbing c. Pain begins suddenly d. Pain develops slowly e. Pain can migrate along the course of the aorta f. It changes with breathing and body position g. Pain most often radiates to the jaw h. Pain most often radiates to the back 1. a + c + e + h 2. a + c + f + g 3. b + d + g + h 4. a + d + e + h 5. b + c + e + f",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 194,
+    "question": "12. Which of the following is a contraindication to treating chronic heart failure with \u03b2-blockers? a. Resting heart rate < 70 /min b. Hypokalemia (< 3.5 mmol/L) c. Second-degree atrioventricular block d. Ankle edema e. Left ventricular ejection fraction < 30 %",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 195,
+    "question": "13. Which of the following is an electrocardiographic criterion for left ventricular hypertrophy? a. Positive R wave in V\u2081 b. QRS complex duration > 125 ms c. Right axis deviation d. Small R wave in aVL e. (S in V\u2081) + (R in V\u2085) > 35 mm (Sokolow\u2013Lyon index)",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 196,
+    "question": "14. Indications for transesophageal echocardiography include: a. Suspicion of endocarditis b. Annual follow-up in a patient with aortic stenosis c. Assessment of regurgitation of a prosthetic mitral valve d. Suspicion of an ascending aortic aneurysm e. Evaluation of cardiac function in secondary systemic arterial hypertension 1. b + d + e 2. a + b + c 3. a + c + e 4. a + c + d 5. c + d + e",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 197,
+    "question": "15. Arrhythmogenic right ventricular cardiomyopathy (ARVC) is: A. A result of replacement of the right ventricular myocardium with fat and connective tissue B. A consequence of excessive alcohol consumption C. Occurs only in patients with excessive body weight D. A result of primary pulmonary hypertension E. Associated with prolonged QT interval",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 198,
+    "question": "16. For a stress test (exercise ECG) to be considered positive for ischemia, which of the following must occur? a. Horizontal or down-sloping ST-segment depression on the ECG during exercise with concomitant chest pain b. Up-sloping ST-segment depression on the ECG during exercise without chest pain c. Systolic blood pressure rising to 200 mm Hg during exercise d. The QT interval shortening by 20% during exercise e. A bundle-branch block appearing during exercise",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 199,
+    "question": "17. Determine which heart chamber has the correctly stated normal pressure value. a. The mean pressure in the right atrium is 1\u20135 mmHg b. The systolic pressure in the pulmonary artery is 35\u201345 mmHg c. The pulmonary capillary wedge (occlusion) pressure is 20\u201325 mmHg d. The left ventricular end-diastolic pressure is 15\u201320 mmHg e. The left ventricular end-diastolic pressure is 50\u201380 mmHg",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 200,
+    "question": "18. Which of the following is characteristic of cardiogenic shock? a. It occurs in 2\u20133% of patients with acute myocardial infarction b. Hospital mortality of patients is 20 c. Oxygen extraction in the tissues is decreased d. Patients usually require endotracheal intubation and mechanical ventilation e. Metabolic acidosis with a normal anion gap",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 201,
+    "question": "19.For Wolff\u2013Parkinson\u2013White preexcitation, which of the following are true? (Choose the correct combination.) a. Because conduction occurs via an accessory pathway, the PR interval is prolonged b. In orthodromic tachycardia, the QRS complexes are normally narrow c. In antidromic tachycardia, the QRS complexes are widened d. Atrial fibrillation in WPW can be treated with digoxin e. Atrial fibrillation in WPW can be treated with verapamil 1. a + e 2. d + e 3. b + c 4. a + b 5. c + e",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 202,
+    "question": "20. How is induced hypothermia therapy performed in patients after cardiac arrest? a. Apply cold packs to the patient\u2019s head b. Cool the patient\u2019s core temperature to 35\u201336 \u00b0C for 6 hours c. Cool the patient\u2019s core temperature to 32\u201334 \u00b0C for 6 hours d. Cool the patient\u2019s core temperature to 32\u201334 \u00b0C for 24 hours e. Cool the patient\u2019s core temperature to 28 \u00b0C for 12 hours",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 203,
+    "question": "21. Thrombolytic therapy is absolutely contraindicated in a patient: A. with a peptic ulcer B. with a severe head injury 5 days ago and an inserted ICP electrode C. after cardiac arrest D. who is being treated with aspirin E. pregnant in the 6th month of pregnancy",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 204,
+    "question": "22. Which auscultation finding in a patient with mitral stenosis is almost always present? A. Low-frequency mid-diastolic rumble B. Accentuated first heart sound C. Presystolic murmur D. High-frequency Graham Steell murmur E. Holosystolic murmur at the apex",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 205,
+    "question": "23. In which patients do we need to be very careful when using spironolactone? A. In hypertensive patients B. In patients with renal failure C. In patients who are also receiving ACE inhibitors and other diuretics D. In diabetic patients with normal heart function E. In patients with hypokalemia 1. A and B 2. B and C 3. C and D 4. B, C, and D 5. D and E",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 206,
+    "question": "24. The main mechanism of treating heart failure with cardiac resynchronization therapy (CRT) is: A. Electroconversion B. Mechanical coordination of left ventricular contraction C. Shortening of the QRS duration and consequent mechanical synchronization of the left ventricle D. Prevention of arrhythmias by antitachycardia pacing E. Electrical stimulation to prevent bradycardias and the resulting cardiomyopathy",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 207,
+    "question": "25. Which conduction disturbances are not seen on a 12-lead ECG? A. First-degree AV block B. Third-degree AV block C. Left posterior hemiblock D. Left bundle branch block E. First-degree sinoatrial block",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 208,
+    "question": "26. When a vascular stent is inserted into a peripheral artery, it is true that: A. According to recommendations, single antiplatelet therapy with aspirin is sufficient B. 1-3 months of combined antiplatelet therapy with aspirin and clopidogrel is recommended C. Patients are prescribed anticoagulant therapy with warfarin D. A combination of antiplatelet and anticoagulant therapy is recommended E. Restenosis in peripheral artery stents does not occur",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 209,
+    "question": "27. For patients with peripheral artery disease (PAD) who have symptoms of intermittent claudication, the first step to improve functional capacity is: A. Immediate percutaneous transluminal angioplasty B. Immediate surgery with arterial bypass C. Interval walking training D. Treatment with hemorheological drugs E. Primary limb amputation",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 210,
+    "question": "28. The most appropriate decision for stress testing in perfusion scintigraphy is: A. Pharmacological stress testing for all patients, because it is the simplest and fastest B. Dynamic stress testing (on a bicycle or treadmill) for all patients C. For patients who cannot achieve sufficient dynamic stress, or who have a left bundle branch block or an implanted pacemaker, we perform pharmacological stress testing; others are stressed on a bicycle or treadmill D. We do not even think about this at all",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 211,
+    "question": "29. During reperfusion of the myocardium, in the dynamic changes of myoglobin or troponin concentration, we observe: A. A late and low peak concentration B. A rapid and high peak concentration C. Uneven fluctuations in concentration D. A continuous decrease in concentration E. A continuous increase in concentration",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 212,
+    "question": "30. CTA of the aorta (choose the INCORRECT statement): A. It is the method of choice in acute aortic syndrome B. It is less sensitive for detecting aortic dissection than classic aortic angiography C. It enables classification of aortic dissections into Stanford type A and type B D. It also allows visualization of the consequences or complications of aortic dissection, such as bowel ischemia or renal infarction",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 213,
+    "question": "31. A 60-year-old \u201cnatural healer\u201d was found confused near the forest. On examination, he was restless, had hallucinations, dilated pupils, and red, dry skin. His ECG showed sinus tachycardia. What condition would you suspect? A. Poisoning with deadly nightshade (Atropa belladonna) B. Ethanol poisoning C. Carbon monoxide poisoning D. Hyperthyroidism E. Snakebite from a venomous snake",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 214,
+    "question": "32.Which of the following treatments would you choose for a patient with hypokalemia [K\u207a = 2.5 mmol/l] and episodes of non-sustained ventricular tachycardia? A. Injection of calcium gluconate, infusion of insulin with glucose, oral administration of cation-exchange resin B. Oral treatment, 40 mmol KCl, repeated as needed C. Parenteral treatment, 10 mmol/h KCl, patient must be in the cardiology ward D. Parenteral treatment, 20 mmol/h KCl, patient must be in the intensive care unit E. Dialysis, patient must be in the intensive care unit",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 215,
+    "question": "33. A man with a known abdominal aortic aneurysm seeks medical help because for the past hour he has had severe pain in his right leg from the middle of the thigh downwards, accompanied by numbness. The leg appears obviously pale and cold. You feel a femoral pulse on the leg, but pulses lower down are absent. What is the diagnosis? a. advanced peripheral arterial disease that does not require immediate intervention b. rupture of the abdominal aortic aneurysm c. thromboembolism in the right common iliac artery d. thromboembolism in the right superficial femoral artery e. iliofemoral deep vein thrombosis",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 216,
+    "question": "34. On an arteriographic image, which of the following is characteristic of Buerger's disease? A. Large arteries of the pelvis and thigh are often affected B. Along the arterial occlusion, we see spiral (corkscrew) collaterals that develop from the vasa vasorum and run in the vessel wall C. Abundant atherosclerotic plaques in the arteries of the lower limbs D. Digital arteries in the hands and feet are never affected E. The angiographic image is the only criterion for diagnosing Buerger's disease",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 217,
+    "question": "35. What is the mortality of acute type A aortic dissection? A. All patients die immediately B. 10% per minute for the first 5 minutes, then 5% per hour C. 10% per hour for the first 5 hours, then 5% per hour D. 1-2% per hour for the first 48 hours E. Patients rarely die from late complications",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 218,
+    "question": "36. The so-called Beck\u2019s triad, characteristic of cardiac tamponade, means: A. Arterial hypertension, bradycardia, mydriasis B. Hypotension, decreased central venous pressure, loud first heart sound C. Hypotension, increased central venous pressure, muffled heart sounds D. Pulsus paradoxus, distended neck veins, third heart sound E. Tachycardia, sweating, full neck veins",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 219,
+    "question": "1. Scintigraphy with Tc-99m-labeled erythrocytes shows the source of bleeding when the bleeding rate is: A. 0.02 ml/min B. 0.05 ml/min C. 0.04 ml/min D. 0.03 ml/min E. 0.01 ml/min",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 220,
+    "question": "2. For neuroendocrine tumors of the small intestine, it is true that: A. They are benign tumors B. The only treatment option is surgical C. They are treated surgically, with chemotherapy, somatostatin analogs, and serotonin antagonists D. They always secrete serotonin E. They only occur in women",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 221,
+    "question": "3. Radical resection of the colon (R0 resection) in colorectal cancer means: A. removal of the colon segment with adequate safety margins in healthy tissue (no microscopic residual tumor, no macroscopic residual tumor) and removal of involved lymph nodes B. limited resection of part of the colon without removal of regional lymph nodes C. endoscopic resection of the tumor with a laser D. endoscopic resection of the tumor with coagulation E. enteroenteroanastomosis",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 222,
+    "question": "4. Truncal vagotomy in surgery for peptic ulcer disease means (mark the correct statement): A. severing the vagal fibers to the body of the stomach while preserving those to the antrum B. severing the branches of the vagus at the level of the cardia and performing a two-thirds resection of the stomach C. severing both trunks of the vagus nerve at the level of the cardia D. two-thirds resection of the stomach with Roux-en-Y anastomosis E. two-thirds resection of the stomach",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 223,
+    "question": "5. A young female patient has abdominal pain accompanied by vomiting and tenesmus, fever, and bloody diarrhea. What is the likely diagnosis? A. diverticulitis B. Crohn's disease C. ulcerative colitis D. Hirschsprung's disease E. acute appendicitis",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 224,
+    "question": "6. In the clinical diagnosis of peritonitis, we find: A. initially increased intestinal peristalsis, later paralytic ileus B. increased cholesterol C. hyperperistalsis of the intestine in the advanced form D. metabolic alkalosis E. polyuria",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 225,
+    "question": "7. Among the indications for surgical treatment of ulcerative colitis, we do not include: A. toxic megacolon B. extraintestinal manifestations (arthritis, osteoporosis) C. perforation D. failure of medical treatment (no response to 5-aminosalicylic acid, corticosteroids, cyclosporine, and biologics) E. bleeding",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 226,
+    "question": "8. What are precancerous changes of the gastric mucosa? a) atrophic gastritis b) intestinal metaplasia c) adenomatous polyp d) endocrine cell hyperplasia A) a, b B) a, b, c C) a, c D) b, c E) a, b, c, d",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 227,
+    "question": "9. Choose the correct statements that apply to cholecystolithiasis: T1. It is mostly asymptomatic and is discovered incidentally. T2. It can lead to colic with obstructive jaundice. T3. It is diagnosed with ultrasound. T4. Asymptomatic cholecystolithiasis is treated surgically. T5. Courvoisier\u2019s sign is characteristic. a. T3, T4, T5 b. T2, T4, T5 c. T2, T3, T4 d. T1, T2, T3",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 228,
+    "question": "10. Which of the following statements regarding gallbladder cancer is correct? A. The risk of gallbladder cancer is increased in patients with a diffusely calcified gallbladder compared to those with a partially calcified gallbladder. B. Screening for gallbladder cancer is recommended in patients with primary sclerosing cholangitis. C. 50% of patients with gallbladder cancer do not have gallstones. D. The risk of developing gallbladder cancer is higher with cholesterol stones than with pigment stones.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 229,
+    "question": "11. Characteristics of a pancreatic pseudocyst include: A. it is lined by epithelium of the pancreatic ducts B. it develops more often in biliary than in alcoholic pancreatitis C. it appears four or more weeks after disease onset D. all patients have symptoms attributable to the pseudocyst E. the pseudocyst is usually sterile Possible combinations: A. A and C B. A and B C. C and E D. B and C E. A and E",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 230,
+    "question": "12. A 32-year-old woman with obesity is being evaluated for retrosternal pain that has been present for the last three months. The pain worsens with food and at night. She currently smokes half a pack of cigarettes per day and drinks two glasses of wine a week. She is bothered by frequent belching. She denies weight loss, dysphagia, or hematemesis. Cardiovascular causes of the pain have been excluded. What is the best next step? a. therapeutic trial with proton pump inhibitors (PPIs) b. 24-hour esophageal pH monitoring c. gastroscopy d. contrast esophagography e. esophageal manometry",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 231,
+    "question": "13. How do we treat a patient with eosinophilic esophagitis? A. With topically acting corticosteroids B. With a proton-pump inhibitor C. Surgical esophagectomy D. With an elimination diet E. All of the above are correct",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 232,
+    "question": "14. A 56-year-old patient with colorectal adenocarcinoma will certainly receive adjuvant chemotherapy after surgical resection if the pathology report identifies the disease as stage 3. Which of the following findings describes stage 3 colorectal adenocarcinoma? a. tumor invades the muscularis propria, no lymph node involvement, no distant metastases b. tumor invades the muscularis propria, no mention of lymph nodes c. tumor invades the muscularis propria, lymph nodes are involved, no distant metastases d. tumor limited to the mucosa, no lymph node involvement, no distant metastases e. tumor invades the submucosa, lymph nodes are involved, no distant metastases",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 233,
+    "question": "15. A 48-year-old woman with known celiac disease presents with persistent abdominal pain, bloating, and diarrhea. Her celiac diagnosis was made 5 years ago, at which time her EMA and tTG levels were elevated. She reports strict adherence to a gluten-free diet since diagnosis. Her weight is stable. Repeat serum tissue transglutaminase levels are elevated. What is the most likely cause of her symptoms? A. Non-celiac gluten sensitivity B. Ulcerative jejunitis C. Refractory celiac disease D. Microscopic colitis E. Gluten ingestion",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 234,
+    "question": "16. A 62-year-old woman comes to the clinic because of diarrhea that started 3 days ago. She has also noticed blood in her stool twice; otherwise, she has been healthy. Seven days ago, she finished antibiotic treatment with amoxicillin and clavulanic acid for a dental root infection. What is the most likely diagnosis? a. she probably has ulcerative colitis (UC), so she should be immediately referred for colonoscopy with biopsies b. it is most likely hemorrhoidal bleeding, so she should be referred to a proctologist for hemorrhoid ligation c. it is most likely infectious colitis, so prescribe ciprofloxacin and arrange a follow-up d. it is antibiotic-associated diarrhea, so check for Clostridium difficile and its toxins A and B in stool e. none of the above",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 235,
+    "question": "17. Which of the following statements about anal carcinoma is NOT true? A. It is caused by HPV infection B. It is usually first treated with chemoradiotherapy C. Before starting treatment, it is necessary to delineate the extent of disease D. The disease is diagnosed by clinical examination E. It is an adenocarcinoma",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 236,
+    "question": "18. A 25-year-old man developed abdominal pain and frequent diarrhea, up to 5 times daily. He has not noticed blood in the stool. The diarrhea severely impacts him because he has to have bowel movements twice at night. After defecation, the abdominal pain subsides. He also has urgent urges to defecate, which strongly interferes with his daily activities. After three months, he visited a doctor and reported, in addition to the abdominal pain, marked fatigue and a weight loss from 85 to 81 kg over three months. On clinical examination, the abdomen was slightly tender in the ileocecal area, but no clear palpable mass was found. To differentiate between functional disorders and organic disease, in this age group, the most appropriate sequence of investigations is: a. CT, if findings are positive, then colonoscopy b. colonoscopy, if findings are positive, then fecal calprotectin to confirm the diagnosis c. fecal calprotectin, if negative, then colonoscopy d. fecal calprotectin, if positive, then colonoscopy e. colonoscopy, if findings are positive, then CT",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 237,
+    "question": "19. Najpomembnej\u0161a zna\u010dilnost ascitesa pri spontanem bakterijskem peritonitisu je (obkro\u017ei pravilni odgovor): a. Je gost, zelen in zna\u010dilnega vonja. b. Koncentracija LDH je vi\u0161ja od serumske. c. Povi\u0161ano \u0161tevilo nevtrofilnih granulocitov. d. Povi\u0161ana koncentracija proteinov v ascitesu. e. V ascitesu je koncentracija glukoze vsaj dvakrat ni\u017eja od serumske.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 238,
+    "question": "20. Acute pancreatitis (circle the correct answers, multiple correct): a) Ranson\u2019s criteria b) Glasgow criteria c) APACHE d) Child-Turcotte-Pugh classification A) a, b B) a, b, c C) a, c D) b, c E) c, d",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 239,
+    "question": "21. Systemic inflammatory response syndrome (SIRS) is a syndrome of the early phase of acute pancreatitis and is a predictive factor for: (Which answer is NOT correct?) A. Higher risk of local complications B. Higher risk of dysfunction of one or more organ systems C. Higher risk of infection of necrosis in the first 48 hours D. Higher risk of severe acute pancreatitis E. Higher risk of mortality",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 240,
+    "question": "22. Jaundice becomes clinically visible at a bilirubin concentration that: A. exceeds the upper limit of normal B. exceeds the upper limit of normal by 50% C. exceeds the upper limit of normal by 100% D. exceeds the upper limit of normal by 300% E. can also be within the normal range",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 241,
+    "question": "1. Which statements are correct for lymphomas? A. They are more common than acute leukemias B. The stage is determined using the Duke classification C. Non-Hodgkin lymphomas are more common than Hodgkin's D. At diagnosis, some patients do not require treatment A. Correct answers are: A, B, D B. Correct answers are: A, C, D C. Correct answers are: A, B, C, D D. Correct answers are: B, C, D",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 242,
+    "question": "2. What are two main late complications of anthracycline chemotherapy (e.g., doxorubicin)? a. Hepatic cirrhosis and renal failure b. Pulmonary fibrosis and neuropathy c. Cardiomyopathy and secondary leukemia d. Osteoporosis and diabetes mellitus e. Thrombosis and stroke",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 243,
+    "question": "3. According to WHO 1973, how are urothelial carcinoma differentiation grades defined? a. G1 \u2013 poorly differentiated; G2 \u2013 moderately differentiated; G3 \u2013 well differentiated b. G1 \u2013 well differentiated; G2 \u2013 moderately differentiated; G3 \u2013 poorly differentiated c. G1 \u2013 low mitotic index; G2 \u2013 moderate mitotic index; G3 \u2013 high mitotic index d. G1 \u2013 superficially invasive; G2 \u2013 muscle-invasive; G3 \u2013 metastasized e. G1 \u2013 papillary; G2 \u2013 nodular; G3 \u2013 flat",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 244,
+    "question": "4. Which three risk-factor categories contribute most to cancer burden in Slovenia (with approximate percentages)? a. Smoking 10 %, UV exposure 15 %, genetics 5 % b. Occupational exposures 20 %, diet 10 %, infections 5 % c. Overweight/poor diet/physical inactivity 30 %, smoking 16 %, infections 9 % d. Alcohol 5 %, obesity 5 %, family history 5 % e. Air pollution 1 %, processed meat 1 %, radon 1 %",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 245,
+    "question": "5. According to WHO 1998, papillary urothelial neoplasms are classified into which three categories? a. Papilloma, papillomatosis, carcinoma in situ b. Papillary urothelial neoplasm of low malignant potential (PUNLMP), low-grade urothelial carcinoma, and high-grade urothelial carcinoma c. Grade 1 papillary tumor, Grade 2 papillary tumor, Grade 3 papillary tumor d. Papillary adenoma, papillary carcinoma, micropapillary carcinoma e. Papillary hyperplasia, papillary dysplasia, papillary carcinoma",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 246,
+    "question": "6. Which radiolabeled agent is recommended for treating medullary thyroid carcinoma that overexpresses somatostatin receptors? a. Iodine-131 (radioiodine) b. I-131 MIBG (metaiodobenzylguanidine) c. Y-90 DOTATATE d. Tc-99m sestamibi e. Ga-68 DOTATOC",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 247,
+    "question": "7. What is the standard management for localized, muscle-invasive bladder cancer? a. Radical cystectomy with pelvic lymph node dissection (with or without neoadjuvant cisplatin-based chemotherapy) b. Partial cystectomy alone c. External-beam radiotherapy alone d. Transurethral resection plus intravesical BCG only e. Systemic immunotherapy alone",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 248,
+    "question": "8. In oropharyngeal squamous-cell carcinoma, which proteomic feature is typically associated with HPV positivity and better prognosis? a. Elevated EGFR expression b. High TP53 mutation burden c. High PD-L1 expression alone d. Low TP53 mutation burden and functional p53 e. Overexpression of HER2/neu",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 249,
+    "question": "9. If a thyroid fine-needle aspiration (FNA) is reported as \u201cfollicular neoplasm,\u201d what is the next optimal step? a. Start levothyroxine suppression therapy b. Repeat ultrasound-guided FNA in six weeks c. Molecular testing for BRAF mutation only d. Diagnostic lobectomy to evaluate capsular/vascular invasion e. Radioiodine ablation",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 250,
+    "question": "10. Which therapy is indicated for a gastrointestinal stromal tumor (GIST) with a primary KIT exon 11 mutation? a. Sunitinib b. Sorafenib c. Bevacizumab d. Everolimus e. Imatinib",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 251,
+    "question": "11. Which two advantages does brachytherapy have over external-beam radiotherapy (teletherapy)? a. Lower cost and shorter patient lifespan b. Higher localized dose to tumor with rapid dose falloff in nearby tissue, and shorter overall treatment time c. Less need for immobilization devices, and no risk of radiation exposure to staff d. No acute toxicity, and no late toxicity e. Eliminates the need for concurrent chemotherapy, and is always outpatient",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 252,
+    "question": "12. Which late radiation complication is most characteristic of hierarchical (rapidly dividing) tissues? a. Necrosis b. Xerostomia c. Mucositis d. Fibrosis e. Osteoradionecrosis",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 253,
+    "question": "13. Which immunophenotypic marker is relatively specific for diffuse large B-cell lymphoma (DLBCL)? a. CD3 b. CD15 c. CD19/CD20 d. CD30 e. CD10 only",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 254,
+    "question": "14. What is the principal difference in acute hematologic toxicity timing between whole-body irradiation (WBI) and localized radiotherapy? a. WBI causes rapid pancytopenia; localized causes focal marrow suppression that appears later b. Localized radiotherapy causes immediate pancytopenia; WBI does not affect blood counts c. Both WBI and localized radiotherapy cause identical timing of marrow aplasia d. WBI causes lymphopenia only; localized causes neutropenia only e. There is no hematologic effect from localized radiotherapy",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 255,
+    "question": "15. In small cell lung carcinoma (SCLC) with syndrome of inappropriate ADH secretion (SIADH), which laboratory abnormality is most typical? a. Hypernatremia b. Hyponatremia with inappropriately concentrated urine c. Hypokalemia with polyuria d. Hypercalcemia e. Hypophosphatemia",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 256,
+    "question": "16. Which of the following is NOT part of the initial workup for carcinoma of unknown primary (CUP)? a. Thorough history and physical examination b. Contrast-enhanced CT of chest/abdomen/pelvis c. Core\u2010needle biopsy with immunohistochemistry d. PET-CT in all cases regardless of initial CT findings e. Targeted molecular profiling if initial tests are inconclusive",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 257,
+    "question": "17. Which CT feature suggests that a pancreatic adenocarcinoma is unresectable? a. Tumor confined to the head of the pancreas only b. No vascular involvement and no metastases c. \u2265 180\u00b0 encasement of the superior mesenteric artery (SMA) d. Solitary 1 cm lesion in the tail of the pancreas e. Dilated pancreatic duct without a visible mass",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 258,
+    "question": "18. What are the most frequent metastatic sites for malignant melanoma? a. Colon, small intestine, kidney b. Lung, liver, brain, bone c. Prostate, bladder, ovary d. Spleen, pancreas, thyroid e. Esophagus, stomach, rectum",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 259,
+    "question": "19. In head\u2010and\u2010neck squamous\u2010cell carcinoma, what does \u201cfield cancerization\u201d refer to? a. A new primary arising outside the head\u2010and\u2010neck region b. Genetic alterations confined to a single tumor focus c. Metastasis from a remote organ to the head\u2010and\u2010neck region d. Dysplasia limited to the nasal cavity only e. Multiple primary tumors arising in a wide mucosal field after carcinogen exposure",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 260,
+    "question": "20. Which lung-cancer subtype most commonly secretes ectopic ADH, leading to SIADH? a. Non-small-cell lung cancer \u2013 adenocarcinoma b. Non-small-cell lung cancer \u2013 squamous cell carcinoma c. Small cell lung carcinoma (SCLC) d. Large cell lung carcinoma e. Bronchoalveolar carcinoma",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 261,
+    "question": "21. Which of the following is a common clinical feature of hypercalcemia in a patient with squamous-cell lung cancer? a. Polycythemia b. Polyuria and polydipsia c. Bradycardia and hypertension d. Weight gain from fluid retention e. Hypokalemia",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 262,
+    "question": "22. Which of the following laboratory changes is NOT a Criterion for tumor lysis syndrome (TLS)? a. Uric acid \u2265 476 \u00b5mol/L or 25 %\u2191 above baseline b. Potassium \u2265 6.0 mmol/L or 25 %\u2191 above baseline c. Phosphate \u2265 2.1 mmol/L or 25 %\u2191 above baseline d. Calcium \u2265 3.0 mmol/L or 25 %\u2191 above baseline e. Calcium \u2264 1.75 mmol/L or 25 %\u2193 below baseline",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 263,
+    "question": "23. What is the indication for preoperative chemoradiotherapy in rectal adenocarcinoma? a. T3\u2013T4 or node-positive (N+) tumors within 12 cm from the anal verge b. All rectal tumors regardless of stage c. T1N0M0 tumors only d. Tumors confined to the anal canal only e. Metastatic rectal cancer",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 264,
+    "question": "24. Which two immunomodulatory mechanisms allow tumors to escape host immune response? a. Upregulation of MHC class I and secretion of IL-2 b. Downregulation of PD-L1 and increased CD8+ T-cell infiltration c. Overexpression of Fas ligand alone d. Increased tumor antigenicity and activation of NK cells e. Secretion of immunosuppressive cytokines (e.g., IL-10, TGF-\u03b2) and downregulation of antigen presentation (MHC I loss)",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 265,
+    "question": "25. Which two high-penetrance genes are most commonly associated with hereditary nonpolyposis colorectal cancer (HNPCC/Lynch syndrome)? a. BRCA1 and BRCA2 b. MLH1 and MSH2 c. APC and TP53 d. PTEN and STK11 e. RB1 and VHL",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 266,
+    "question": "26. Approximately what is the five-year overall survival difference between localized versus metastatic non-small-cell lung cancer (NSCLC) with modern systemic therapy? a. Localized ~ 10 %, Metastatic ~ 5 % b. Localized ~ 25 %, Metastatic ~ 20 % c. Localized ~ 50 %, Metastatic ~ 5\u201310 % d. Localized ~ 70 %, Metastatic ~ 60 % e. Localized ~ 90 %, Metastatic ~ 80 %",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 267,
+    "question": "27. Which histologic subtype of lymphoma is most common in adults? a. Follicular lymphoma b. Mantle cell lymphoma c. Burkitt lymphoma d. Diffuse large B-cell lymphoma e. T-cell lymphoma, unspecified",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 268,
+    "question": "28. How does intensity-modulated radiotherapy (IMRT) improve the therapeutic ratio in head-and-neck cancer? a. By delivering uniform dose to a larger volume b. By increasing overall treatment time c. By delivering conformal high doses to tumor while sparing adjacent critical structures (e.g., salivary glands) d. By using lower photon energy only e. By eliminating the need for image guidance",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 269,
+    "question": "Urgent referral for a patient with acute low back pain (combination): a) If the pain lasts for more than 1 month. b) If the pain persists after physiotherapy. c) If no cause for the pain is found. d) If the patient presents with cauda equina syndrome or acute paresis. e) If the patient has a history of chronic back pain.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 270,
+    "question": "Which medication causes lower leg edema? a) Diuretic b) ACE inhibitor c) Calcium channel blockers d) Antidepressants e) Beta-blockers",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 271,
+    "question": "Which symptom is not found in acute glomerulonephritis - nephrotic syndrome? a) Hypertension b) Oliguria c) Edema d) Proteinuria e) Erythrocyturia",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 272,
+    "question": "Characteristics of temporal arteritis: a) Mild headache, normal temporal artery, normal inflammation parameters. b) Moderate headache, soft temporal artery, slightly elevated inflammation parameters. c) Severe headache, tender and hardened temporal artery, elevated inflammation parameters. d) No headache, no changes in temporal artery, normal inflammation parameters. e) Headache with visual disturbances only.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 273,
+    "question": "Antidote for morphine: a) Flumazenil b) Atropine c) Physostigmine d) Naloxone e) Activated charcoal",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 274,
+    "question": "Characteristics of simple low back pain a) Dull ache, constant, improves with movement. b) Radiating pain down the leg, numbness, weakness. c) Sharp, tearing pain, tingling, worse with coughing, straining, bending forward, or bending backward. d) Pain only present at night, accompanied by fever. e) Pain with swelling and redness of the lower back.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 275,
+    "question": "9. What is the primary non-pharmacologic recommendation for a patient with heart failure? b) Moderate physical activity a) Complete bed rest c) Start strength training d) Stop all medications e) High-protein diet",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 276,
+    "question": "10. Which symptom is NOT characteristic of NYHA Class II heart failure? a) Symptoms appear with moderate exertion b) No limitation in daily activities c) Relief of symptoms with rest d) Symptoms present at rest d) Occasional fatigue during exercise",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 277,
+    "question": ".1. Where do venous ulcers typically occur in varicose syndrome? a) On the toes b) On the medial ankle c) On the heel d) On the sole e) On the lateral thigh",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 278,
+    "question": "2. When do you try to lower blood pressure non-pharmacologically (without medication)? a) In elderly patients b) In mild arterial hypertension c) In malignant hypertension d) In acute hypertensive crisis e) In hypertensive emergency",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 279,
+    "question": "3. What is the INR target for patients with mechanical heart valves? a) 1.0\u20132.0 b) 2.5\u20133.5 c) 2.0\u20133.0 d) 3.5\u20134.0 e) 1.5\u20132.5",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 280,
+    "question": "4. What is the most reliable diagnostic method for suspected deep vein thrombosis? a) Phlebography b) CT c) MRI d) Chest X-ray e) D-dimer test",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 281,
+    "question": "7. What is a characteristic symptom of chronic critical limb ischemia? a) Red and swollen leg b) Constant leg pain lasting more than two weeks c) Intermittent claudication only d) Sudden onset of blue toes e) Swelling of the knee",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 282,
+    "question": "6. What is the most effective way to increase HDL cholesterol? a) Statin therapy b) Low-fat diet c) Omega-3 supplements d) Regular physical activity e) Avoidance of sugar",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 283,
+    "question": "8. Which of the following is not typical for bilateral leg swelling? a) Chronic kidney disease b) Deep vein thrombosis c) Heart failure d) Venous valve insufficiency e) Ascites",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 284,
+    "question": "What is the target blood pressure in diabetic patients? a) <150/90 mmHg b) <130/80 mmHg c) <140/100 mmHg d) 120/70 mmHg e) <160/85 mmHg",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 285,
+    "question": "10. What test confirms Enterobius vermicularis (pinworm) infection? a) Blood test b) Stool culture c) Colonoscopy d) Perianal swab with adhesive tape e) Urine analysis",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 286,
+    "question": "11. What is the most common cause of fever in children? a) Otitis media b) Viral respiratory infection c) Urinary tract infection d) Streptococcal angina e) Gastroenteritis",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 287,
+    "question": "12. What is the most reliable enzyme for diagnosing myocardial infarction? a) LDH b) CK c) Troponin d) AST e) ALT",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 288,
+    "question": "15. What are the key symptoms of acute limb ischemia? a) Red, swollen, warm limb b) Numbness with no pain c) Pale, cold, painful limb d) Only tingling sensation e) Elevated skin temperature",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 289,
+    "question": "What is the most typical symptom of scabies (Sarcoptes scabiei)? a) Fever b) Painful rash c) Intense itching, especially at night d) Joint pain e) Watery blisters on palms",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 290,
+    "question": "What condition is associated with a smooth, red tongue? a) Sj\u00f6gren\u2019s syndrome b) Pernicious anemia c) Candidiasis d) Hypothyroidism e) Iron deficiency without anemia",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 291,
+    "question": "What is the target HbA1c level in most diabetic patients? a) Below 8.5% b) As low as possible c) Between 7\u20138% d) Below 7% e) Exactly 7.5%",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 292,
+    "question": "Which medication should not be combined with sildenafil (Viagra)? a) Nitrates b) Beta blockers c) Calcium channel blockers d) ACE inhibitors e) Statins",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 293,
+    "question": "What is the initial treatment for a hypoglycemic coma? a) Oral glucose b) 5% glucose IV c) 50% glucose IV or intramuscular glucagon d) Insulin e) Fluids only",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 294,
+    "question": "What is the most common complication of streptococcal tonsillitis? a) Otitis media b) Acute glomerulonephritis c) Peritonsillar abscess d) Meningitis e) Rheumatic fever",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 295,
+    "question": "What is the best initial diagnostic method when a smoker presents with hemoptysis? a) Bronchoscopy b) Chest X-ray c) Lung biopsy d) Sputum culture e) CT scan",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 296,
+    "question": "Which condition most commonly leads to erectile dysfunction in diabetic men? a) Obesity b) Low testosterone c) Diabetic neuropathy d) High cholesterol e) Hypertension",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 297,
+    "question": "What is the main clinical feature of erythema migrans in Lyme disease? a) High fever b) Neurological symptoms c) Expanding red skin rash with central clearing d) Joint pain e) Swollen lymph nodes",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 298,
+    "question": "What is the most typical symptom of a peritonsillar abscess? a) Dry cough b) Difficulty swallowing c) Trismus and uvula deviation d) Persistent fever e) Enlarged tonsils without pain",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 299,
+    "question": "What is the main non-pharmacological recommendation for a hypertensive patient during hot weather with leg swelling? a) Start a diuretic b) Reduce water intake c) Elevate the legs and move to a cooler environment d) Add salt to the diet e) Increase physical activity outdoors",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 300,
+    "question": "What is the most common cause of sudden worsening in heart failure patients? a) Hyperlipidemia b) Infection c) Regular medication intake d) Sleeping pattern changes e) Depression",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 301,
+    "question": "What is the next step in a patient with atrial fibrillation, palpitations, and unknown thyroid status? a) Prescribe beta-blocker immediately b) Measure TSH levels c) Start anticoagulants d) Refer for cardioversion e) Do coronary angiography",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 302,
+    "question": "What is the target LDL cholesterol level in patients with cardiovascular disease? a) Below 2.5 mmol/L b) Below 2.0 mmol/L c) Below 1.5 mmol/L d) Above 3.0 mmol/L e) Exactly 2.0 mmol/L",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 303,
+    "question": "What is the most common cause of chest pain not related to ischemia? a) Angina pectoris b) Pericarditis c) Musculoskeletal chest wall pain d) Pulmonary embolism e) Aortic dissection",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 304,
+    "question": "What is the first step in managing a patient with a suspected pulmonary edema? a) Oral antibiotics b) Oxygen therapy and diuretics c) Corticosteroids d) Inhalers e) Bronchoscopy",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 305,
+    "question": "What is the diagnostic hallmark of atrial fibrillation on ECG? a) ST elevation b) Absence of P waves and irregular R-R intervals c) Long QT interval d) Fixed AV block e) Normal sinus rhythm",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 306,
+    "question": "Which antihypertensive class is also used to treat benign prostatic hyperplasia (BPH)? a) Beta blockers b) ACE inhibitors c) Alpha blockers d) Calcium channel blockers e) Diuretics",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 307,
+    "question": "What is the most common pathogen causing traveler\u2019s diarrhea? a) Rotavirus b) Salmonella c) Escherichia coli (E. coli) d) Giardia lamblia e) Shigella",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 308,
+    "question": "What is the most effective non-drug intervention for allergic rhinitis? a) Corticosteroids b) Allergen avoidance c) Antihistamines d) Decongestants e) Saline nasal rinses",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 309,
+    "question": "What is the correct action for a nosebleed at home? a) Tilt head back and lie down b) Sit upright, pinch the soft part of the nose, and lean forward c) Apply warm compress to the neck d) Drink warm fluids e) Use antihistamines",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 310,
+    "question": "A patient presents with vertical gaze palsy. Which brain structure is most likely affected? a) Pons b) Dorsal midbrain (mesencephalon) c) Internal capsule d) Basal ganglia e) Thalamus",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 311,
+    "question": "A lesion of the left medial longitudinal fasciculus (MLF) will result in: a) Impaired abduction of the right eye during leftward gaze b) Impaired adduction of the left eye during rightward gaze, with nystagmus of the right eye c) Complete bilateral ophthalmoplegia d) Vertical gaze palsy e) Impaired convergence",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 312,
+    "question": "A man with ataxia on one side of the body, dysarthria, ipsilateral Horner\u2019s syndrome, and contralateral body sensory loss most likely has: a) Medial medullary syndrome b) Weber syndrome c) Wallenberg syndrome (PICA infarct) d) Benedikt syndrome e) Locked-in syndrome",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 313,
+    "question": "24. A patient is unable to repeat spoken words but speaks fluently and understands language. What type of aphasia is this? a) Broca's aphasia b) Wernicke\u2019s aphasia c) Conduction aphasia d) Transcortical sensory aphasia e) Global aphasia",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 314,
+    "question": "What is the first imaging method in a patient who presents with sudden onset hemiparesis and gaze deviation? a) Non-contrast head CT b) Brain MRI with contrast c) Spinal MRI d) EEG e) Angiography",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 315,
+    "question": "What is the hallmark of internuclear ophthalmoplegia (INO)? a) Bilateral abduction deficit b) Vertical gaze limitation with nystagmus c) Impaired adduction of one eye with nystagmus of the abducting eye d) Bilateral ptosis and mydriasis e) Downward gaze paralysis",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 316,
+    "question": "Which neurological condition is characterized by constructional apraxia and dressing apraxia due to damage in the non-dominant parietal lobe? a) Wernicke\u2019s aphasia b) Hemispatial neglect syndrome c) Broca\u2019s aphasia d) Parkinson\u2019s disease e) Optic ataxia",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 317,
+    "question": "A patient presents with tongue deviation to the left and atrophy on that side. Where is the lesion? a) Right cerebral cortex b) Left facial nerve nucleus c) Left hypoglossal nerve d) Right corticospinal tract e) Right vagus nerve",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 318,
+    "question": "What is the characteristic gait of a patient with normotensive hydrocephalus? a) Steppage gait b) Waddling gait c) Ataxic gait d) Magnetic (marche \u00e0 petits pas) gait e) Festinating gait",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 319,
+    "question": "Which cranial nerve is not located in the cavernous sinus? a) CN III b) CN IV c) CN V1 d) CN VI e) CN II",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 320,
+    "question": "What neurological sign is seen in a patient who climbs up their thighs with their hands to stand up from the floor? a) Lhermitte\u2019s sign b) Gowers' sign c) Romberg sign d) Froment sign e) Babinski sign",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 321,
+    "question": "What syndrome results from a lesion affecting the corticospinal tract and CN III in the midbrain? a) Wallenberg syndrome b) Benedikt syndrome c) Weber syndrome d) Locked-in syndrome e) Medial medullary syndrome",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 322,
+    "question": "Which structure is primarily involved in recognizing faces? a) Angular gyrus b) Broca's area c) Fusiform gyrus d) Prefrontal cortex e) Parahippocampal gyrus",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 323,
+    "question": "Which gait is associated with peroneal nerve palsy? a) Festinating gait b) Steppage (high stepping) gait c) Ataxic gait d) Waddling gait e) Spastic scissoring gait",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 324,
+    "question": "What is the most appropriate imaging for suspected spinal cord compression with sensory level at the nipples (T4)? a) Brain MRI b) Lumbar puncture c) Cervical spine X-ray d) Thoracic spine MRI e) Thoracic CT without contrast",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 325,
+    "question": "What neurological disorder is characterized by increased muscle tone, brisk reflexes, and extensor plantar response? a) Lower motor neuron lesion b) Upper motor neuron lesion c) Neuropathy d) Myopathy e) Cerebellar syndrome",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 326,
+    "question": "Which type of aphasia is most likely if the patient speaks fluently, uses neologisms, cannot understand language, but can repeat? a) Broca\u2019s aphasia b) Transcortical sensory aphasia c) Conduction aphasia d) Global aphasia e) Wernicke\u2019s aphasia",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 327,
+    "question": "A patient has right hemiparesis and conjugate eye deviation to the left. Where is the lesion? a) Left frontal eye field b) Left parietal lobe c) Right brainstem d) Right occipital lobe e) Left cerebellar hemisphere",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 328,
+    "question": "What is a classic symptom of Friedreich\u2019s ataxia outside the nervous system? a) Hepatic failure b) Cardiomyopathy c) Cataract d) Retinopathy e) Cushingoid face",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 329,
+    "question": "What is the mechanism of Wallerian degeneration? a) Retrograde axonal degeneration b) Segmental demyelination c) Anterograde axonal degeneration distal to the injury d) Neuronal apoptosis in the cortex e) Mitochondrial toxicity",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 330,
+    "question": "What symptom combination is typical for transtentorial uncal herniation? a) Bilateral miosis and aphasia b) Ipsilateral fixed dilated pupil and contralateral hemiparesis c) Bilateral vision loss and normal consciousness d) Diplopia and central scotoma e) Hypotension and coma",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 331,
+    "question": "A patient presents with anosognosia and hemispatial neglect. Where is the lesion? a) Dominant parietal lobe b) Dominant frontal lobe c) Occipital cortex d) Non-dominant parietal lobe e) Basal ganglia",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 332,
+    "question": "1. Which of the following enzymes is directly involved in the iodination of tyrosyl residues in thyroglobulin within the thyroid follicle lumen? a) Iodotyrosine deiodinase b) Thyroid peroxidase c) 5\u2019-deiodinase type 2 d) Tyrosine hydroxylase",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 333,
+    "question": "2. Parathyroid hormone (PTH) exerts its effects via which intracellular second messenger pathway in renal tubular cells? a) IP3/DAG cascade only b) cAMP-dependent protein kinase A c) Direct G-protein coupled activation of phospholipase C d) Activation of nuclear steroid receptors",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 334,
+    "question": "3. The MEN1 tumor suppressor gene product, menin, interacts directly with which nuclear complex? a) Retinoblastoma (Rb) complex b) mTOR complex 1 c) MLL (Mixed Lineage Leukemia) histone methyltransferase complex d) APC complex",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 335,
+    "question": "4. In patients with sight-threatening thyroid eye disease who are unresponsive to glucocorticoids, the next step in therapy is: a) Rituximab b) Mycophenolate mofetil c) Orbital radiotherapy d) Teprotumumab (IGF-1R inhibitor monoclonal antibody)",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 336,
+    "question": "5. A mutation in which gene is most commonly associated with generalized glucocorticoid resistance (Chrousos syndrome)? a) NR3C1 (glucocorticoid receptor gene) b) POMC c) HSD11B1 d) CYP11B1",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 337,
+    "question": "6. Metyrapone inhibits the synthesis of cortisol by blocking which enzyme? a) 21-hydroxylase b) 11\u03b2-hydroxylase c) 17\u03b1-hydroxylase d) Aldosterone synthase",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 338,
+    "question": "7. Which subunit of the insulin receptor has intrinsic tyrosine kinase activity? a) \u03b1-subunit b) \u03b2-subunit c) IRS-1 d) PI3K",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 339,
+    "question": "8. In 17\u03b1-hydroxylase deficiency, the following profile is typical: a) Low cortisol, low mineralocorticoids, low androgens b) Low cortisol, high mineralocorticoids, low androgens c) High cortisol, high mineralocorticoids, high androgens d) High cortisol, low mineralocorticoids, high androgens",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 340,
+    "question": "9. Octreotide\u2019s mechanism in treating acromegaly primarily involves: a) Directly binding to GH-receptors b) Inhibiting GHRH secretion c) Mimicking somatostatin to suppress GH secretion d) Increasing GH receptor degradation",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 341,
+    "question": "10. The defect in pseudohypoparathyroidism type 1a involves which protein? a) \u03b1-subunit of Gs-protein (GNAS1 mutation) b) PTH receptor (PTHR1) c) Calcium-sensing receptor (CaSR) d) Vitamin D receptor",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 342,
+    "question": "1. The use of digitalis and verapamil is absolutely contraindicated in: a. Atrial fibrillation b. Atrial flutter c. Atrial tachycardia d. Atrial extrasystoles e. Atrial fibrillation in a patient with WPW\u2010type preexcitation",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 343,
+    "question": "2. An 80-year-old woman is brought to the internal medicine emergency department because for the first time in her life, she began to experience difficulty breathing and chest tightness when rapidly climbing stairs. She did not stop immediately, but then felt dizzy, collapsed, and briefly lost consciousness. Otherwise, she has been healthy until now, with only arterial hypertension, for which she is not receiving treatment. The ECG shows a sinus rhythm with signs of left ventricular hypertrophy and left atrial overload. On auscultation of the lungs, inspiratory crackles are heard bilaterally at the bases; over the heart there is a loud systolic murmur heard across the entire precordium, radiating into the carotid arteries. What is the most likely diagnosis? a. Stenosis of both internal carotid arteries b. Symptomatic aortic stenosis c. Acute heart failure due to left ventricular pump failure d. Atrial fibrillation with a tachycardic ventricular response e. Asymptomatic aortic stenosis",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 344,
+    "question": "3. Choose the characteristic effect of altered heart rate on valvular heart lesions (two correct answers): a. Sinus tachycardia worsens symptoms of mitral stenosis b. Sinus tachycardia improves symptoms of mitral stenosis c. Sinus tachycardia does not affect symptoms of mitral stenosis d. Sinus bradycardia improves symptoms of aortic regurgitation e. Sinus bradycardia increases symptoms of aortic regurgitation f. Sinus bradycardia does not affect symptoms of aortic regurgitation 1. a + e 2. a + b 3. b + d 4. c + f 5. d + f",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 345,
+    "question": "4. Which is the best investigative method for assessing the dynamic behavior of a mitral valve lesion? a. Ventriculography b. Invasive measurement of pulmonary artery pressure c. Stress echocardiography on a semi-recumbent cycle ergometer d. Cardiac magnetic resonance imaging e. Cardiac CT",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 346,
+    "question": "5. Characteristics of central venous pressure (CVP): a. In a healthy person it is between 10 and 20 mmHg b. It is decreased in pulmonary embolism c. The v-wave on the CVP tracing is increased in tricuspid insufficiency d. A cannon a-wave is a sign of atrioventricular dissociation e. In atrial fibrillation the a-wave on the CVP tracing is accentuated 1.a + b 2.a + c 3.b + d 4.c + d 5.c + e\"",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 347,
+    "question": "6. Which conditions cause left axis deviation? a. Obesity b. Anterior wall myocardial infarction c. Inferior wall myocardial infarction d. Left bundle\u2010branch block e. Right bundle\u2010branch block 1. a + c + d 2. a + b + c 3. b + c + d 4. a + d + e 5. b + c + e",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 348,
+    "question": "7. Infective endocarditis caused by viridans streptococci is treated with: a. Azithromycin, 5 days orally b. Amoxicillin/clavulanate, 14 days orally c. Amoxicillin/clavulanate, 14 days intravenously d. Penicillin G IV in combination with an aminoglycoside, 14 days e. Penicillin G IV, 4 weeks; with an aminoglycoside added for the first 14 days",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 349,
+    "question": "8. What measures improve the survival of a patient with ARDS? This concerns a 28-year-old man, 182 cm, 100 kg, with H1N1 influenza. His current PaO2 is 9.1 kPa, and we are ventilating him with 90% oxygen. A. Vt 800 ml, prone ventilation, as much spontaneous breathing on the ventilator as possible B. Vt 500 ml, prone ventilation, controlled modes of ventilation, conservative fluid intake C. Vt 500 ml, supine ventilation, corticosteroids, omega-3 fatty acids in the diet D. Any ventilator settings as long as SpO2 is above 92%",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 350,
+    "question": "9. In the PARADIGM-HF study, LCZ696 was used, which is a combination of: A. a neprilysin inhibitor and an ACE inhibitor B. an ACE inhibitor and an ARB C. a natriuretic peptide and an ACE inhibitor D. an ARB and a neprilysin inhibitor E. an ARB and a natriuretic peptide",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 351,
+    "question": "10. Which statements are true? A. In elderly patients with asymptomatic and compensated heart failure, the volume of distribution of water-soluble drugs is increased. B. Pharmacokinetic parameters of drugs are more influenced by liver and kidney function than by stabilized heart failure. C. Pharmacokinetic parameters of drugs are less influenced by liver and kidney function than by stabilized heart failure. D. In elderly patients with decompensated heart failure, the volume of distribution of lipid-soluble drugs is increased due to edema. E. In elderly patients with asymptomatic heart failure, plasma clearance of digoxin is increased.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 352,
+    "question": "11. We monitor treatment with low molecular weight heparin by measuring factor X (anti-Xa) activity in: A. All patients with pulmonary embolism B. Patients with renal failure and creatinine clearance below 60 ml/min C. Patients with liver failure D. Patients with a body weight over 100 kg E. Patients with a body weight under 50 kg 1. B and C 2. B, D, and E 3. A and B 4. A, D, and E 5. D and E",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 353,
+    "question": "12. A 63-year-old gentleman seeks medical help because at 5:32 PM he started experiencing severe pain in his entire right leg. The leg is white, pale, cold, and tingling. You record an ECG and find atrial fibrillation. The gentleman subsequently mentions that a month ago he visited his primary doctor because he \u201cforgot\u201d how to speak for an hour. The primary doctor referred him to a neurologist and an internist, but he didn\u2019t go because the symptoms resolved. What is the most likely diagnosis? A. Deep vein thrombosis of the right iliofemoral vein; he previously had a stroke B. Acute ischemia of the left lower limb due to an embolus from one of the brain arteries C. Acute ischemia of the right lower limb; he previously had a transient ischemic attack (TIA) D. Rupture of an abdominal aortic aneurysm; the speech disturbance was due to hypotension during bleeding E. Deep vein thrombosis of the right iliofemoral vein; he previously had a pulmonary embolism",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 354,
+    "question": "1. A 76-year-old man, previously without chronic illnesses and not on any regular medications, suddenly developed diffuse abdominal pain three hours ago, which rapidly progressed to unbearable intensity. He had one episode of passing bloody, loose stool. He appears distressed but is not dyspneic. Blood pressure is 145/78 mmHg, oxygen saturation 98%, breathing is normal, and his heart rhythm is irregular and tachycardic (rate 122/min). The abdomen is soft, and palpation does not exacerbate the pain; the aorta is palpable and narrow, pulses in the limbs are symmetrically palpable, and there is no edema. A plain abdominal X-ray shows no signs of perforation or ileus, and laboratory results do not significantly deviate from normal. After providing analgesia, the next step is (circle the correct answer): A. Emergency gastroscopy B. Hydration and observation C. Abdominal ultrasound examination D. CT with angiography E. Infusion, placement of a nasogastric tube, and enema",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 355,
+    "question": "2. A 62-year-old female patient, who has been treated for asthma, comes to the emergency department due to one day of pain under the right costal margin, accompanied by nausea and fever. She has vomited only once. She had no previous issues. She does not take regular medications. On examination, she is febrile and experiences pain under the right costal margin, especially on inspiration. Blood tests show leukocytosis of 16,500, elevated CRP of 89, and minimal increases in aminotransferases and alkaline phosphatase. An abdominal ultrasound reveals multiple gallstones with a thickened, hyperemic, and stratified wall. Which management approach would be most appropriate for this patient (circle the correct answer)? A. Cholecystectomy B. Percutaneous transhepatic biliary drainage C. Endoscopic retrograde cholangiography with papillotomy D. Antibiotic treatment, fasting E. Treatment with simultaneous liver and lung transplantation",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 356,
+    "question": "3. A 23-year-old woman with Crohn\u2019s disease in remission on biologic therapy wishes to become pregnant. Which of the following is the most appropriate management statement? A. Biologic drugs cross the placenta; however, due to the possibility of disease reactivation, we continue treatment, since studies have not shown significant side effects in the child. B. Biologic drugs do not cross the placenta and therefore discontinuing treatment is not sensible. C. We advise against pregnancy, since there is a high likelihood that the child will inherit the disease. D. The medication can be stopped, since it is better for the child not to be exposed to immunosuppressive drugs during pregnancy, even if the disease flares. E. We recommend contraception while on biologics, since it is necessary to stop the drugs for 2\u20134 half-lives before conceiving.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 357,
+    "question": "4. A 60-year-old woman with known gallstones suddenly developed severe epigastric pain that peaked after one hour and radiated beneath the right costal margin. She also experienced vomiting. Laboratory tests showed amylase, lipase, aminotransferases, and alkaline phosphatase at three times the normal values. Bilirubin was twice the normal level. There was leukocytosis and a moderately elevated CRP. Ultrasound revealed gallstones and a dilated common bile duct. Murphy\u2019s sign was positive. What is the diagnosis? A. Acute cholecystitis B. Acute cholangitis C. Acute pancreatitis D. Acute biliary pancreatitis",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 358,
+    "question": "5. A 58-year-old man with decompensated alcoholic cirrhosis is admitted non-electively with spontaneous bacterial peritonitis, hepatic encephalopathy, and acute renal failure requiring dialysis. According to the EASL-CLIF definition of acute-on-chronic liver failure (ACLF), what is the approximate 28-day mortality rate in ACLF? A. \u2264 5 % B. 10 % C. \u2265 20 % D. 50 % E. \u2265 70 %",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 359,
+    "question": "6. Which of the following is NOT one of the five cardinal features emphasized by the International Consensus Diagnostic Criteria (ICDC) for autoimmune pancreatitis (AIP)? A. Imaging of pancreatic parenchyma and duct B. Serology (e.g., serum IgG4) C. Other organ involvement (IgG4-related disease) D. Pancreatic histology E. Measurement of fecal elastase",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 360,
+    "question": "7. High-resolution manometry classifies achalasia into three subtypes. According to outcome data, which subtype achieves the highest combined success rate with pneumatic dilation (PD) or laparoscopic Heller myotomy (LHM)? A. Type I achalasia B. Type II achalasia C. Type III achalasia D. All subtypes respond equally E. None respond reliably",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 361,
+    "question": "8. In a 30-year-old patient being evaluated for celiac disease, which serologic test is recommended by the American College of Gastroenterology as the preferred initial screening test? A. IgA anti-endomysial antibody B. IgA anti-tissue transglutaminase (tTG) antibody C. IgG deamidated gliadin peptide antibody D. IgA antigliadin antibody E. IgG antigliadin antibody",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 362,
+    "question": "1. In GIST patients, why is imatinib preferred for a primary KIT exon 11 mutation, whereas sunitinib is chosen for a PDGFR-\u03b1 D842V mutation? a. Imatinib binds PDGFR-\u03b1 only; sunitinib binds KIT only. b. The exon 11 KIT mutation is resistant to sunitinib, while PDGFR-\u03b1 D842V is sensitive to imatinib. c. KIT exon 11 mutations respond well to imatinib\u2019s high-affinity binding; PDGFR-\u03b1 D842V has steric hindrance to imatinib, but sunitinib can inhibit that mutant. d. Both mutations respond equally to imatinib; sunitinib is used for cost reasons. e. Imatinib is indicated for wild-type GIST only; sunitinib for all KIT-mutated GIST.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 363,
+    "question": "2. In a resected Stage IIA pancreatic adenocarcinoma patient (negative margins, low CA 19-9, but positive perineural invasion), which adjuvant regimen (dose/schedule) is personalized, and what justifies inclusion or omission of radiotherapy? a. Gemcitabine monotherapy (1 g/m\u00b2 weekly \u00d7 3 weeks) with no radiotherapy because low CA 19-9 implies low risk. b. Modified FOLFIRINOX (oxaliplatin 85 mg/m\u00b2 IV Day 1; leucovorin 400 mg/m\u00b2 IV Day 1; irinotecan 150 mg/m\u00b2 IV Day 1; 5-FU 2400 mg/m\u00b2 infusion over 46 h Day 1) every two weeks for 12 cycles; radiotherapy added if tumor bed margins are close or perineural invasion is extensive. c. Capecitabine only (1250 mg/m\u00b2 orally twice daily) for 6 months; radiotherapy mandatory because any perineural invasion requires radiation. d. Cisplatin plus 5-FU infusion weekly \u00d7 6 weeks; radiotherapy always omitted if CA 19-9 is low. e. Erlotinib daily for 6 months; radiotherapy replaced by immunotherapy.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 364,
+    "question": "3. Which stepwise workup differentiates ALK-positive from ALK-negative anaplastic large-cell lymphoma (ALCL)? a. CD30 negativity by IHC \u2192 PI3K mutation testing \u2192 treat as T-cell leukemia b. CD20 positivity by IHC \u2192 BCL2 rearrangement by FISH \u2192 R-CHOP therapy c. CD30 positivity by IHC, followed by ALK IHC staining \u2192 if ALK IHC positive, do ALK break-apart FISH \u2192 if negative, test for DUSP22 and TP63 rearrangements d. Ki-67 staining \u2192 determine proliferation index; if > 60 %, treat as ALK-positive e. EBV-encoded RNA in situ hybridization; if positive, label as ALK-positive",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 365,
+    "question": "4. In the linear-quadratic model (\u03b1/\u03b2 model), which describes late-responding tissues and how do you calculate BED for 2 Gy \u00d7 30 fractions vs. 2.5 Gy \u00d7 25 fractions when \u03b1/\u03b2 = 3 Gy? a. \u03b1 \u2013 single-hit, \u03b2 \u2013 double-hit; BED\u2082Gy\u00d730 = 100 Gy\u2083; BED\u2082.\u2085Gy\u00d725 = 114.6 Gy\u2083 b. \u03b1 \u2013 repopulation, \u03b2 \u2013 repair; BED\u2082Gy\u00d730 = 90 Gy\u2083; BED\u2082.\u2085Gy\u00d725 = 110 Gy\u2083 c. \u03b1 \u2013 repair, \u03b2 \u2013 repopulation; BED\u2082Gy\u00d730 = 80 Gy\u2083; BED\u2082.\u2085Gy\u00d725 = 120 Gy\u2083 d. \u03b1 \u2013 oxygen effect, \u03b2 \u2013 reoxygenation; BED\u2082Gy\u00d730 = 100 Gy\u2081\u2080; BED\u2082.\u2085Gy\u00d725 = 115 Gy\u2081\u2080 e. \u03b1 \u2013 fractionation, \u03b2 \u2013 fraction size; BED\u2082Gy\u00d730 = 100 Gy\u2083; BED\u2082.\u2085Gy\u00d725 = 125 Gy\u2083",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 366,
+    "question": "5. How does microsatellite instability (MSI) influence immunotherapy selection in metastatic colorectal carcinoma (mCRC)? a. MSI-high tumors respond poorly to PD-1 blockade; choose VEGF inhibitors instead. b. MSI-high tumors respond well to PD-1 inhibitors (e.g., pembrolizumab or nivolumab) without upfront chemotherapy; expected immune-related toxicities include colitis and pneumonitis. c. MSI-low tumors should receive PD-1 inhibitors, while MSI-high should receive chemotherapy only. d. MSI status does not affect immunotherapy choice in colorectal cancer. e. MSI-high tumors require high-dose interleukin-2 instead of checkpoint inhibitors.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 367,
+    "question": "6. In a patient with FAP carrying a c.3927_3931delAAAGA APC mutation, what is the optimal timing and type of prophylactic surgery? a. Colectomy at age 50 followed by annual colonoscopy b. Endoscopic polypectomy alone; delay surgery until polyps become malignant c. Segmental colectomy at any age; no further surveillance needed d. Gastrectomy at age 30 due to high risk of gastric cancer in APC mutation e. Total proctocolectomy with ileal pouch\u2013anal anastomosis in late teens/early 20s; consider ileorectal anastomosis only if rectal polyp burden is low (< 20 polyps)",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 368,
+    "question": "7. Which epigenetic differences distinguish HPV-positive from HPV-negative head-and-neck squamous-cell carcinoma, correlating with PD-1 blockade response? a. HPV-negative: identical epigenetic profile as HPV-positive, no difference b. HPV-negative: increased histone acetylation only c. HPV-positive: global hypermethylation of repetitive sequences; HPV-negative: no methylation changes d. HPV-positive: promoter hypermethylation of tumor-suppressor genes and elevated H3K27me3, leading to higher PD-L1 expression and better response to PD-1 blockade; HPV-negative: more TP53 mutations and lower immune infiltration e. HPV-positive: decreased global methylation leading to poor immunotherapy response",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 369,
+    "question": "8. In a clinical trial for relapsed/refractory APL in elderly patients, how do arsenic trioxide (ATO) and all-trans retinoic acid (ATRA) differ pharmacokinetically and in toxicity? What dose modification is required for Grade 3 QT prolongation? a. ATO (0.15 mg/kg/day IV, t\u00bd ~ 10 h, renal clearance; causes QT prolongation\u2014hold until QTc < 450 ms and correct electrolytes, then resume at 50 % dose), ATRA (45 mg/m\u00b2/day PO, t\u00bd ~ 0.5 h, hepatic metabolism; causes differentiation syndrome); no modification needed for QT prolongation with ATRA. b. ATO (oral agent, no QT risk) vs. ATRA (IV infusion, causes hepatotoxicity only) c. Both ATO and ATRA have identical half-lives and toxicity profiles; no dose modification for QT prolongation. d. ATO (t\u00bd ~ 1 h, hepatic metabolism; causes neuropathy), ATRA (t\u00bd ~ 5 days, renal clearance; causes renal failure) e. ATO is only given intrathecally; ATRA only given subcutaneously; neither affects QT interval",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 370,
+    "question": "What neurological syndrome is characterized by vertical gaze palsy, convergence-retraction nystagmus, and eyelid retraction (Collier's sign)? a) Wallenberg syndrome b) Parinaud\u2019s syndrome (dorsal midbrain syndrome) c) Weber syndrome d) Locked-in syndrome e) Horner syndrome",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 371,
+    "question": "A patient with hemiplegia and complete facial palsy on the contralateral side likely has a lesion where? a) Internal capsule b) Cerebral cortex c) Brainstem (pons) d) Cerebellum e) Spinal cord",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 372,
+    "question": "Which combination of symptoms best localizes a lesion to the cerebellopontine angle? a) Facial droop, limb weakness, hemianopia b) Ipsilateral facial paralysis, sensorineural hearing loss, and absent corneal reflex c) Diplopia, dysarthria, dysphagia d) Contralateral hemiparesis and aphasia e) Vertical gaze palsy and internuclear ophthalmoplegia",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 373,
+    "question": "What is the pathophysiological mechanism behind Marcus Gunn pupil? a) Parasympathetic overactivation b) Relative afferent pupillary defect due to optic nerve damage c) Midbrain tectal lesion d) Sympathetic overactivity e) Compression of CN III nucleus",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 374,
+    "question": "What is the most probable diagnosis in a 77-year-old woman with acute bilateral blindness and asymmetric paraparesis with a T4 sensory level? a) Bilateral occipital infarcts b) Multiple sclerosis c) Anterior spinal artery syndrome d) Neuromyelitis optica (Devic's disease) e) Alzheimer's disease",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 375,
+    "question": "What syndrome presents with one-and-a-half eye movement abnormality (one eye can only abduct, the other cannot move horizontally)? a) Parinaud\u2019s syndrome b) Horner\u2019s syndrome c) Lesion of PPRF and MLF (one-and-a-half syndrome) d) Lateral medullary syndrome e) Oculomotor nerve palsy",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 376,
+    "question": "What is the significance of positive Babinski sign with muscle atrophy and fasciculations in the same limb? a) Pure lower motor neuron lesion b) Combined upper and lower motor neuron lesion (e.g., ALS) c) Brainstem stroke d) Multiple sclerosis e) Functional disorder",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 377,
+    "question": "A patient has homonymous upper quadrantanopia and fluent aphasia. How many lesions are needed to explain this? a) 1 lesion b) 2 lesions c) 1 lesion in the dominant temporal lobe (Meyer's loop + Wernicke\u2019s area) d) 3 lesions e) 2 lesions in separate hemispheres",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 378,
+    "question": "What is the appropriate action when a young woman starts oral contraceptives and her blood pressure rises from 120/80 to 160/110 after 6 weeks? a) Switch to a different contraceptive b) Discontinue the contraceptive c) Add antihypertensive therapy d) Monitor for another 6 weeks e) Reduce salt intake",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 379,
+    "question": "What are the most reliable diagnostic tests for diabetes mellitus? a) HbA1c and urinalysis b) Family history and symptoms c) Fasting plasma glucose, OGTT, and HbA1c d) Random blood glucose only e) Physical examination",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 380,
+    "question": "A 77-year-old woman presents with sudden bilateral blindness and asymmetric paraparesis with a T4 sensory level. What is the likely diagnosis? a) Anterior spinal artery syndrome b) Neuromyelitis optica (Devic\u2019s disease) c) Multiple sclerosis d) Bilateral occipital infarcts e) Transverse myelitis",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 381,
+    "question": "Which infection-related disease presents with cerebellar ataxia, hemiplegia, and multiple cranial nerve palsies, and may lead to splenic rupture? a) Cytomegalovirus infection b) Bacterial meningitis c) Infectious mononucleosis (EBV) d) Toxoplasmosis e) Herpes simplex encephalitis",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 382,
+    "question": "What condition presents with ipsilateral fixed dilated pupil, contralateral hemiparesis, and is a complication of uncal herniation? a) Cerebellar stroke b) Transtentorial herniation c) Subdural hematoma d) Central pontine myelinolysis e) Temporal epilepsy",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 383,
+    "question": "What is the most likely diagnosis in a patient with sudden-onset severe headache, neck stiffness, and negative CT scan? a) Tension-type headache b) Ischemic stroke c) Cluster headache d) Subarachnoid hemorrhage (requires lumbar puncture) e) Sinusitis",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 384,
+    "question": "What is the best long-term prophylaxis for recurrent deep vein thrombosis in a patient with a known hypercoagulable state? a) Aspirin 100 mg daily b) Fondaparinux c) Warfarin with INR monitoring d) Clopidogrel e) Compression stockings only",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 385,
+    "question": "Which clinical feature distinguishes neuroborreliosis from other causes of facial palsy? a) Bilateral ptosis b) Associated skin rash c) Bilateral facial nerve palsy d) Hyperacusis e) Sudden hearing loss",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 386,
+    "question": "A patient presents with hemineglect, anosognosia, and constructional apraxia. Which brain region is most likely affected? a) Dominant frontal lobe b) Non-dominant parietal lobe c) Basal ganglia d) Hippocampus e) Occipital cortex",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 387,
+    "question": "What is the most appropriate first step when hypertensive encephalopathy is suspected? a) MRI of the brain b) Immediate reduction of blood pressure with IV antihypertensives c) Start oral beta-blockers d) Lumbar puncture e) EEG",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 388,
+    "question": "Which symptom is most specific for temporal lobe epilepsy? a) Visual aura b) Focal motor seizures c) D\u00e9j\u00e0 vu sensation and olfactory hallucinations d) Unilateral tremor e) Bilateral myoclonus",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 389,
+    "question": "What neurological sign suggests a lesion in the frontal eye field? a) Pupillary dilatation b) Gaze deviation toward the side of the lesion c) Diplopia d) Nystagmus e) Downbeat nystagmus",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 390,
+    "question": "Which of the following most accurately localizes a lesion in Brown-S\u00e9quard syndrome? a) Bilateral loss of all modalities below the lesion b) Ipsilateral motor loss and contralateral loss of pain and temperature c) Ipsilateral loss of all modalities d) Contralateral hemiplegia e) Lower motor neuron signs bilaterally",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 391,
+    "question": "A patient presents with right facial weakness, hoarseness, loss of pain and temperature on the left body and right face, and Horner\u2019s syndrome. What is the most likely diagnosis? a) Medial medullary syndrome b) Cerebellar stroke c) Lateral medullary syndrome (Wallenberg syndrome) d) Multiple sclerosis e) Bell\u2019s palsy",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 392,
+    "question": "1. A 62-year-old patient with metastatic non\u2013small cell lung cancer (NSCLC) harboring an EGFR exon 19 deletion initially responds to first-generation EGFR tyrosine kinase inhibitor (TKI) therapy (erlotinib). After 14 months, disease progression is documented, and a biopsy reveals both an EGFR T790M mutation and a secondary C797S mutation in cis (on the same allele). Which of the following therapeutic strategies is most likely to overcome resistance mediated by these concurrent mutations? A. Switch to osimertinib monotherapy at standard dosing B. Combine afatinib with cetuximab C. Administer a fourth-generation EGFR TKI designed to bind C797S (e.g., EAI045) in combination with cetuximab D. Use brigatinib plus osimertinib E. Initiate combination chemoimmunotherapy (pemetrexed + carboplatin + pembrolizumab)",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 393,
+    "question": "2. In a patient with metastatic melanoma carrying a BRAF V600E mutation, combination therapy with a BRAF inhibitor (dabrafenib) and a MEK inhibitor (trametinib) initially induces a deep partial response. After 10 months, radiographic progression is seen in a liver lesion. Biopsy of the progressing lesion demonstrates reactivation of the MAPK pathway via alternative splicing of the BRAF transcript (p61BRAF V600E) and upregulation of PDGFR\u03b2 signaling. Which of the following best explains the mechanisms of resistance, and what next-line targeted approach is most rational? A. The spliced p61BRAF V600E isoform forms a constitutive dimer that is resistant to dabrafenib; switching to a next-generation RAF dimer inhibitor (e.g., PLX8394) plus a PI3K inhibitor is most rational. B. Upregulated PDGFR\u03b2 signals through PI3K/AKT, bypassing MAPK; adding high-dose vemurafenib (monomer-preferring RAF inhibitor) will overcome resistance. C. p61BRAF V600E lacks the RAS-binding domain, activating MEK downstream of RAF; monotherapy with a third-generation MEK inhibitor (binimetinib) is sufficient. D. PDGFR\u03b2 signaling activates JAK/STAT, leading to immune evasion; switching to checkpoint blockade (anti\u2013PD-1 + anti\u2013CTLA-4) with MEK inhibitor continuation is optimal. E. The splice variant leads to RAF dimerization that is insensitive to dabrafenib/trametinib; switching to a pan-RAF dimer inhibitor (e.g., tovorafenib) plus a PI3K pathway inhibitor (e.g., buparlisib) is the most logical next step.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 394,
+    "question": "3. A 48-year-old patient with relapsed diffuse large B-cell lymphoma (DLBCL), germinal center B-cell\u2013type, previously underwent CAR-T therapy targeting CD19 and achieved a complete remission. Six months later, the disease relapses; tumor sequencing shows loss of CD19 expression and emergence of a CD22\u207a/CD19\u207b clone. A biopsied subclone also harbors a TP53 G245D mutation and a MYD88 L265P mutation. Which of the following CAR-T or combination immunotherapy strategies best addresses both antigen escape and intrinsic resistance mechanisms? A. Infuse a bispecific CD19/CD22 CAR-T product that preferentially activates 4-1BB signaling and combine with a PD-1 blockade antibody. B. Sequential infusions of CD22-targeted CAR-T followed by CD79b ADC (polatuzumab vedotin) to counter TP53 loss, without PD-1 blockade. C. A dual-CAR vector encoding both CD19 and CD22 CARs (tandem CAR) with CD28 co-stimulation, combined with ibrutinib to inhibit MYD88-mediated NF-\u03baB activation. D. Infuse a CD22/CD123 bispecific CAR-T with transgenic IL-15 co-expression to enhance persistence, plus an MDM2 inhibitor to address TP53 G245D. E. Manufacture a trispecific CAR-T targeting CD19, CD22, and CD79b, incorporating a dominant negative TGF-\u03b2 receptor to overcome the immunosuppressive tumor microenvironment.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 395,
+    "question": "1. A 52-year-old patient presents with progressive muscle weakness and electromyographic evidence of denervation. Genetic testing reveals a heterozygous SOD1^A4V^ mutation. In the context of this mutation, which of the following molecular events is least likely to contribute to the pathogenesis of motor neuron degeneration? A. Misfolded SOD1^A4V^ protein forming aggregates that sequester BAG3, impairing chaperone-assisted selective autophagy. B. Activation of ER-resident protein kinase PERK leading to chronic phosphorylation of eIF2\u03b1 and downregulation of global protein synthesis. C. Excessive mitochondrial superoxide production resulting from gain of function of mutant SOD1 and triggering mitochondrial permeability transition pore (mPTP) opening. D. Upregulation of IRE1\u03b1\u2013XBP1s axis enhancing adaptive unfolded protein response (UPR) and promoting neuronal survival under misfolded-protein stress. E. Aberrant interaction between mutant SOD1 and VAPB in the mitochondria-associated membrane (MAM), disrupting calcium homeostasis.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 396,
+    "question": "2. A 45-year-old woman is diagnosed with IDH1-mutant, MGMT-methylated glioblastoma multiforme (GBM). She is being considered for an adjuvant targeted therapy regimen that exploits the metabolic vulnerability conferred by the IDH1 mutation. Which therapeutic approach below most directly targets the aberrant oncometabolite pathway in her tumor, and what downstream effect does it elicit? A. Administration of AG-120 (ivosidenib) to inhibit mutant IDH1 R132H, decreasing 2-hydroxyglutarate (2-HG) levels, thereby restoring TET2-mediated DNA demethylation and promoting differentiation. B. Use of vorasidenib to inhibit both mutant IDH1 and IDH2, leading to reduced \u03b1-ketoglutarate (\u03b1-KG) availability for prolyl hydroxylases, thereby stabilizing HIF-1\u03b1 and inducing tumor cell apoptosis. C. Combining AG-120 with decitabine to inhibit mutant IDH1 and simultaneously inhibit DNMT1, resulting in hypermethylation of promoters of pro-survival genes like BCL2. D. Targeting glutaminase with CB-839 to reduce glutamine-derived \u03b1-KG flux, indirectly limiting substrate availability for mutant IDH1 and reducing 2-HG, leading to increased histone demethylation. E. Administering AG-881 (vorasidenib) to potentiate the conversion of 2-HG back to \u03b1-KG, thereby rescuing normal histone demethylases (e.g., KDM4A) and inducing G1 cell-cycle arrest via upregulation of p21^CIP1/WAF1^.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 397,
+    "question": "3. A 29-year-old patient with relapsing-remitting multiple sclerosis (RRMS) has demonstrated disease activity despite first-line interferon-\u03b2 therapy. The neurologist considers switching to a therapy that selectively depletes CD19^+^ B cells while sparing CD27^+^ memory B cells to mitigate rebound CNS inflammatory activity. Which agent fits this profile most accurately, and what additional immunological consequence does its mechanism of action entail? A. Ocrelizumab \u2013 depletes CD20^+^ B cells, leading to reduced antigen presentation to autoreactive T cells and diminished Th17 differentiation. B. Ublituximab \u2013 glycoengineered anti-CD20 antibody that depletes CD20^+^ cells; additionally, its enhanced ADCC decreases CNS-infiltrating plasmablasts producing pathogenic IgG. C. Inebilizumab \u2013 humanized anti-CD19 monoclonal antibody that reduces both na\u00efve and memory B cells, resulting in decreased CNS CXCL13 gradient and impaired tertiary lymphoid structure formation. D. Ofatumumab \u2013 subcutaneous anti-CD20 agent whose selective binding to both small and large extracellular loops protects CD20^+^ regulatory B cells, leading to an increase in IL-10\u2013producing Bregs. E. CD19\u2013CAR T cells \u2013 engineered to eliminate all CD19^+^ B lineage cells within the CNS, which in turn increases regulatory T cell (Treg) expansion via a homeostatic proliferation mechanism mediated by elevated IL-2 levels.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 398,
+    "question": "1. A 35-year-old patient presents with early-onset dilated cardiomyopathy (DCM). Genetic testing reveals a heterozygous LMNA (lamin A/C) E203K missense mutation. Recent studies suggest that LMNA mutations can dysregulate nuclear\u2010envelope integrity and activate maladaptive MAPK signaling in cardiomyocytes. A novel therapeutic approach proposes using an allosteric MEK1/2 inhibitor to prevent downstream ERK1/2 hyperphosphorylation. Which of the following answer choices best describes the molecular cascade from LMNA mutation to the rationale for MEK inhibition in this setting? A. The E203K substitution in lamin A/C causes mislocalization of prelamin A, triggering nuclear\u2010envelope blebbing that directly overactivates Rac1; Rac1 allosterically activates RAF1, which then hyperphosphorylates MEK1/2; MEK1/2 inhibition prevents MAPK\u2010mediated transcription of pro-apoptotic genes. B. The LMNA E203K mutant protein weakens the lamina network, leading to increased mechanical strain on cardiomyocyte nuclei and chronic c\u2010Jun N\u2010terminal kinase (JNK) activation; JNK cross\u2010activates MEK5/ERK5, and MEK1/2 inhibition blocks this cross\u2010activation, reducing cardiomyocyte apoptosis. C. Disrupted lamin A/C (E203K) causes altered chromatin anchoring and misregulation of microRNA\u201021 transcription; elevated miR-21 enhances SPRY2 suppression, disinhibiting RAF1\u2192MEK1/2\u2192ERK1/2 signaling; selective MEK1/2 inhibition prevents ERK1/2 phosphorylation of downstream transcription factors (such as ELK1) that drive maladaptive remodeling. D. The E203K variant generates a toxic lamin A/C fragment that interacts with p38MAPK, leading to p38\u2010mediated phosphorylation of MEK3/6 and subsequent ERK1/2 activation; MEK1/2 inhibitors indirectly block p38 activation and restore normal sarcomeric gene expression. E. LMNA E203K impairs importin\u2010\u03b2\u2013mediated nuclear transport of NF\u03baB repressors, causing NF\u03baB to accumulate in the nucleus and transcriptionally upregulate MAP2K1 (MEK1) expression; direct MEK1/2 inhibition is required to turn off ERK5\u2010driven fibrotic gene programs.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 399,
+    "question": "2. A 28-year-old competitive athlete is diagnosed with obstructive hypertrophic cardiomyopathy (HCM) due to a pathogenic MYH7 (\u03b2\u2010myosin heavy chain) R403Q variant, which increases myofilament calcium sensitivity and ATPase activity. Mavacamten, a selective cardiac myosin inhibitor, is considered for therapy. Which answer correctly identifies the primary molecular mechanism by which mavacamten reduces hypercontractility in R403Q\u2010positive HCM? A. Mavacamten stabilizes the super\u2010relaxed (SRX) state of \u03b2\u2010myosin by allosteric binding to the converter domain, thereby reducing the number of myosin heads available to form cross\u2010bridges with actin and lowering ATP hydrolysis in late\u2010diastole. B. Mavacamten acts as an ATP\u2010competitive inhibitor at the myosin active site, directly reducing ATP turnover and preventing phosphorylation of myosin light chain-2 (MLC-2), which diminishes calcium sensitivity of troponin C. C. Mavacamten promotes phosphorylation of troponin I via PKC\u03b5 activation, which shifts troponin C\u2019s Ca\u00b2\u207a\u2010binding affinity leftward; this reduces cross\u2010bridge cycling velocity in systole. D. Mavacamten binds near the regulatory light chain (RLC) of \u03b2\u2010myosin, uncoupling the RLC\u2010mediated stretch activation from \u03b1\u2010actinin anchoring at the Z\u2010disc, thereby reducing myofilament calcium sensitivity. E. Mavacamten allosterically inhibits \u03b2\u2010myosin heavy chain (MYH7) gene transcription via epigenetic modulation of histone deacetylase 3 (HDAC3), lowering synthesis of mutant myosin and normalizing cross\u2010bridge kinetics.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 400,
+    "question": "3. A 42-year-old patient with homozygous familial hypercholesterolemia (HoFH) carries a null LDLR allele and a gain\u2010of\u2010function PCSK9 D374Y variant. Despite maximal statin and ezetimibe therapy, LDL\u2010C remains >300 mg/dL. The clinician considers novel lipid\u2010lowering strategies: (1) an siRNA\u2010based PCSK9 inhibitor (inclisiran), (2) a monoclonal antibody against PCSK9 (evolocumab), and (3) in vivo CRISPR\u2010base editing of PCSK9 in hepatocytes via an adenine base editor (ABE) delivered by LNPs. Which option correctly describes the mechanistic advantages and limitations of in vivo CRISPR\u2010ABE editing compared to inclisiran and evolocumab, specifically in the context of PCSK9 D374Y and null LDLR? A. CRISPR\u2010ABE editing of the PCSK9 D374Y allele in hepatocytes can permanently convert the aspartate codon 374 to asparagine (D374N), restoring normal auto\u2010inhibitory binding to LDLR and enhancing LDLR recycling; unlike inclisiran (transient RNAi) or evolocumab (antibody clearance), ABE achieves allele\u2010specific correction but is limited by potential off\u2010target adenine deamination in APOB and ANGPTL4 loci. B. CRISPR\u2010ABE introduces a premature stop codon at codon 374 (D374X), leading to nonsense\u2010mediated decay of PCSK9 mRNA; this builds permanent loss\u2010of\u2010function, bypassing the need for LDLR entirely via upregulated LRP1 receptor clearance. Inclisiran and evolocumab only reduce secreted PCSK9 temporarily and cannot address D374Y\u2019s increased affinity for LDLR. C. In vivo CRISPR\u2010ABE editing targets the PCSK9 promoter\u2019s sterol\u2010regulatory element (SRE), lowering PCSK9 transcription by preventing SREBP2 binding; this epigenetic change is heritable in hepatocyte lineages. Inclisiran acts post-transcriptionally and is reversible, while evolocumab only neutralizes circulating PCSK9 but cannot alter transcription. D. CRISPR\u2010ABE precisely converts the D374Y codon to D374\u2010silencing D374Y via an A\u2192G base edit, thus eliminating the gain\u2010of\u2010function protein. This results in up\u2010regulation of residual LDLR activity, but because the patient is homozygous null for LDLR, LDLR\u2010dependent clearance remains absent. In contrast, inclisiran and evolocumab lower both wild\u2010type and D374Y PCSK9, modestly upregulating LRP1\u2013mediated VLDL remnant clearance as a compensatory mechanism. E. CRISPR\u2010ABE editing of hepatocyte PCSK9 results in partial loss of function, exposing a neoepitope that leads to immunogenic clearance of edited hepatocytes; thus, although allele\u2010specific, it has high immunotoxicity risk. Inclisiran and evolocumab, by contrast, avoid immunotoxicity but cannot permanently suppress D374Y\u2019s exaggerated binding to LDLR, requiring lifelong dosing.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 401,
+    "question": "1. In amyotrophic lateral sclerosis (ALS), describe the prion-like propagation mechanism of TDP-43 via exosomal secretion and uptake. Specifically, explain how inhibition of neutral sphingomyelinase 2 (nSMase2) impacts neuronal TDP-43 aggregation and discuss the therapeutic implications of targeting exosome biogenesis in TDP-43 proteinopathies.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 402,
+    "question": "2. In tuberous sclerosis complex (TSC)\u2013associated epilepsy, decanoic acid has emerged as a novel modulator of mTORC1 activity. Describe the molecular mechanism by which decanoic acid reduces mTORC1 signaling in patient-derived astrocytes, and compare its potential advantages and limitations to the established use of everolimus for seizure control.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 403,
+    "question": "3. In frontotemporal dementia (FTD) linked to MAPT mutations, which splice-switching antisense oligonucleotide (ASO)\u2013mediated mechanism most directly restores endolysosomal and autophagic function by correcting 4R:3R tau isoform imbalance? A. Binding to exon 2 of MAPT pre-mRNA to promote inclusion of exon 3, thereby lowering overall tau expression levels B. Targeting the intronic splice enhancer upstream of exon 10 to induce exon 10 skipping, shifting tau production from 4R to 3R isoforms C. Hybridizing to the 3\u2032 untranslated region of MAPT mRNA to trigger RNase H\u2013mediated degradation of both 3R and 4R transcripts D. Binding to an exonic silencer within exon 11 to promote retention of exon 10, increasing 4R tau clearance via proteasomal degradation",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 404,
+    "question": "4. Upon binding of pathogenic anti\u2013AQP4 IgG to astrocytes in neuromyelitis optica spectrum disorder (NMOSD), which sequence of molecular events initiates astrocyte injury? A. Anti\u2013AQP4 IgG cross-links AQP4 at endfeet \u2192 immediate membrane attack complex (MAC) formation \u2192 AQP4 internalization \u2192 astrocyte necrosis B. Anti\u2013AQP4 IgG binding at endfeet \u2192 AQP4 internalization and degradation \u2192 astrocyte secretion of C3 \u2192 microglial C3a receptor engagement \u2192 amplification of complement cascade (C1q\u2192C3b\u2192MAC) \u2192 astrocyte lysis C. Anti\u2013AQP4 IgG binds AQP4 \u2192 astrocyte upregulation of glutamate transporters \u2192 glutamate excitotoxicity \u2192 delayed complement activation \u2192 astrocyte apoptosis D. Anti\u2013AQP4 IgG binding \u2192 AQP4 cluster stabilization at endfeet \u2192 direct activation of caspase pathways \u2192 astrocyte pyroptosis independent of complement",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 405,
+    "question": "1. Describe in detail how MRTX1133 selectively inhibits KRAS G12D in pancreatic adenocarcinoma cells, including its binding mechanism and downstream signaling effects, and discuss at least two combination strategies proposed to overcome MRTX1133 resistance.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 406,
+    "question": "2. Explain how the extracellular matrix (ECM) components\u2014specifically collagen and hyaluronic acid\u2014in the glioblastoma tumor microenvironment contribute to immunosuppression, and describe at least one therapeutic approach that leverages ECM modulation to enhance immunotherapy efficacy.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 407,
+    "question": "3. Which of the following mechanisms most accurately explains the preferential homing of breast cancer cells to the bone marrow, and which biomarker finding supports early detection of this process? A. \u03b21-Integrin overexpression on tumor cells binds directly to osteopontin in bone; elevated serum osteopontin levels. B. CXCL12 secreted by bone marrow stromal cells creates a chemotactic gradient for CXCR4-expressing tumor cells; increased plasma CXCL12 levels. C. RANKL overproduction in bone induces osteoclast activation, attracting tumor cells; elevated serum RANKL. D. Exosomal miR-21 from breast cancer cells primes bone niches; elevated exosomal miR-21 in peripheral blood.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 408,
+    "question": "4. Cadonilimab is a PD-1/CTLA-4 bispecific antibody under clinical investigation for various solid tumors. Which structural feature of cadonilimab is most responsible for its reduced systemic toxicity profile compared to separate PD-1 and CTLA-4 antibody combination therapy? A. High intrinsic binding avidity to both PD-1 and CTLA-4 leading to minimal off-target effects B. Tetravalent architecture that crosslinks tumor cells with T cells C. Fc-null design that prevents Fc receptor engagement D. Preferential binding to PD-1^+ activated T cells over resting T cells",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 409,
+    "question": "1. Describe the molecular mechanism by which the long non\u2010coding RNA MIAT regulates pathological cardiac hypertrophy through its interaction with the m^6A RNA methylation reader Ythdf2. Outline the downstream targets affected and the functional consequences on myocardial energy metabolism.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 410,
+    "question": "2. Explain how the dual SGLT1/SGLT2 inhibitor sotagliflozin exerts cardiovascular protection beyond glycemic control, detailing the unique molecular targets and clinical outcomes that distinguish it from selective SGLT2 inhibitors.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 411,
+    "question": "3. In arrhythmogenic right ventricular cardiomyopathy (ARVC), pathological fibrofatty replacement of myocardium most often begins in which location, and how does it progress? A. Subendocardial layer of the left ventricular free wall, progressing toward the epicardium B. Subepicardial region of the right ventricular free wall, then extending to subendocardial regions C. Mid\u2010myocardial interventricular septum, spreading outward to both endocardium and epicardium D. Subendocardial Purkinje fiber network, sparing the epicardium entirely",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 412,
+    "question": "4. Which statement best describes the mechanism of action of the investigational therapy NTLA-2001 in transthyretin amyloid cardiomyopathy (ATTR-CM)? A. AAV-mediated in vivo delivery of antisense oligonucleotides to degrade mutant TTR mRNA in hepatocytes B. Ex vivo CRISPR-Cas9 editing of patient fibroblasts to correct the TTR gene, followed by reimplantation C. In vivo CRISPR-Cas9\u2010mediated disruption of the TTR gene in hepatocytes, preventing TTR protein synthesis D. Monoclonal antibody infusion targeting circulating transthyretin fibrils to promote their clearance from myocardial tissue",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 413,
+    "question": "1. Explain how dual inhibition of SGLT1 and SGLT2 by sotagliflozin confers a unique reduction in both myocardial infarction and stroke, detailing molecular and hemodynamic mechanisms that distinguish it from selective SGLT2 inhibitors.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 414,
+    "question": "2. Describe, in molecular and cellular detail, how tirzepatide induces regression of hepatic fibrosis in human metabolic dysfunction\u2013associated steatohepatitis (MASH). In your answer, integrate (1) the dual GIP/GLP-1 receptor agonism\u2019s effects on hepatocyte lipid metabolism and lipotoxic stress, (2) mechanisms by which GLP-1R stimulation promotes hepatic stellate cell (HSC) deactivation\u2014specifically via cAMP-PKA-mediated inhibition of TGF-\u03b21/SMAD signaling and induction of HSC apoptosis\u2014and (3) the clinical histological evidence from the SYNERGY-NASH trial demonstrating fibrosis improvement at 52 weeks.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 415,
+    "question": "3. In classic congenital adrenal hyperplasia (CAH) due to 21-hydroxylase deficiency, crinecerfont has emerged as a novel agent to enable a block-and-replace treatment strategy. Which of the following best describes crinecerfont\u2019s mechanism of action in CAH management? A. Non-selective 11\u03b2-hydroxylase activation, restoring adrenal cortisol synthesis B. Corticotropin-releasing factor type 1 (CRF1) receptor antagonism, reducing ACTH drive C. Mineralocorticoid receptor agonism, enhancing aldosterone response D. 17\u03b1-hydroxylase inhibition, decreasing androgen precursor production",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 416,
+    "question": "4. In patients receiving immune checkpoint inhibitor (ICI) therapy, which pathway blockade has been shown to carry the highest risk ratio for developing thyroiditis? A. CTLA-4 B. PD-L1 C. PD-1 D. Combined PD-1 + CTLA-4",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 417,
+    "question": "1. Describe the mechanistic role of lncRNA\u2010SNHG11 in reprogramming glutaminolysis and its crosstalk with autophagy to drive hepatic stellate cell (HSC) activation and fibrogenesis in nonalcoholic steatohepatitis (NASH).",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 418,
+    "question": "2. Explain how lncRNA-H19 and its processed miR-675 modulate autophagy and lipotoxicity pathways in hepatocytes and hepatic stellate cells during NASH progression, based on 2024 insights.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 419,
+    "question": "3. In the context of recent (2024\u20132025) insights into long noncoding RNAs (lncRNAs) and microRNA (miRNA) interactions in NASH, which of the following multi-step regulatory networks best explains how lncRNA-Platr4 exerts anti-fibrotic effects in hepatic stellate cells (HSCs)? A. lncRNA-Platr4 recruits WDR5 to the COL1A1 promoter, leading to H3K4me3 enrichment and increased COL1A1 transcription. Concurrently, Platr4 is processed into miR-221-3p, which targets SMAD7 mRNA, further enhancing SMAD2/3 signaling. B. lncRNA-Platr4 acts as a competing endogenous RNA (ceRNA) for miR-34a, thereby derepressing SIRT1. Upregulated SIRT1 deacetylates FOXO1, promoting transcription of ATG5. Enhanced ATG5-dependent autophagy degrades TGF-\u03b2 receptors, reducing SMAD2/3 phosphorylation. C. lncRNA-Platr4 binds EZH2 and directs it to the PDGFR\u03b2 promoter, increasing H3K27me3 and silencing PDGFR\u03b2. Separately, Platr4 sponges miR-142-5p, leading to elevated PTEN expression. Elevated PTEN inhibits PI3K/Akt, which activates ULK1 to induce autophagy and degrade collagen precursors. D. lncRNA-Platr4 scaffolds the NLRP3 inflammasome components in HSCs, promoting IL-1\u03b2 maturation. In parallel, Platr4-derived miR-155 targets ATG16L1, blocking autophagosome elongation and sustaining inflammasome activity, leading to increased ECM deposition.",
+    "specialty": "general medicine",
+    "limit": 5
+  },
+  {
+    "id": 420,
+    "question": "4. Recent 2024\u20132025 data describe a novel miRNA (miR-576-5p) that is upregulated in HSCs from NASH patients and targets both ACVR2A (activin A receptor type 2A) and SMAD4. Considering its dual targeting and the known TGF-\u03b2/activin signaling network, which of the following multi-node regulatory cascades most accurately reflects how miR-576-5p influences HSC activation? A. miR-576-5p \u2192 ACVR2A\u2193 \u2192 Activin A signaling\u2193 \u2192 SMAD2/3 phosphorylation\u2193 \u2192 decreased fibronectin (FN1) expression; simultaneously, SMAD4\u2193 \u2192 reduced nuclear co-SMAD activity \u2192 decreased COL1A1 transcription. Net effect: HSC quiescence. B. miR-576-5p \u2192 ACVR2A\u2193 \u2192 compensatory TGF-\u03b2 receptor I (T\u03b2RI) activation\u2191 (due to ligand redistribution) \u2192 SMAD2/3 phosphorylation\u2191 \u2192 increased \u03b1-SMA expression; simultaneously, SMAD4\u2193 \u2192 incomplete SMAD2/3/4 complex formation \u2192 preferential non-canonical p38 MAPK signaling\u2191 \u2192 increased CTGF expression. Net effect: exaggerated fibrogenesis. C. miR-576-5p \u2192 ACVR2A\u2193 \u2192 enhanced BMP7 signaling (due to reduced competition) \u2192 SMAD1/5/8 phosphorylation\u2191 \u2192 PPAR\u03b3 expression\u2191 \u2192 HSC deactivation; simultaneously, SMAD4\u2193 \u2192 attenuated co-activation of TGF-\u03b2 target genes. Net effect: anti-fibrotic. D. miR-576-5p \u2192 ACVR2A\u2193 \u2192 Activin A signaling\u2193 \u2192 reduced SMAD2/3 activation; simultaneously, SMAD4\u2193 \u2192 blockade of SMAD4-SMAD2/3 nuclear translocation \u2192 shunting of free SMAD2/3 toward ERK activation via MAP3K7 \u2192 increased MMP2 expression. Net effect: matrix degradation.",
+    "specialty": "general medicine",
+    "limit": 5
   }
 ]

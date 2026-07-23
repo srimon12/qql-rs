@@ -11,7 +11,8 @@ print(plan)
 
 # 3. Inject tenant security filter into AST
 raw_query = "QUERY 'patient records' FROM medical_records LIMIT 10"
-ast = pyqql.inject_filter(raw_query, "tenant_id", "=", "acme-corp")
+ast_stmt = pyqql.inject_filter(raw_query, "tenant_id", "=", "acme-corp")
+ast_dict = ast_stmt.to_dict()
 
-print("\n=== Injected AST Dictionary ===")
-print(ast["Query"]["query_filter"])
+print("\n=== Injected AST Filter ===")
+print(ast_dict["Query"]["filter"])

@@ -11,32 +11,37 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use qdrant_edge::{
-    CreateIndex, EdgeConfigBuilder, EdgeShard, FieldIndexOperations, Filter as EdgeFilter,
-    PayloadFieldSchema, PayloadSchemaType, PointInsertOperations, PointOperations, UpdateOperation,
-    VectorInternal, VectorOperations, VectorStructInternal, VectorStructPersisted,
-    WithPayloadInterface, WithVector,
+    CreateIndex, EdgeConfigBuilder, EdgeShard, FieldIndexOperations, PayloadFieldSchema,
+    PayloadSchemaType, PointInsertOperations, PointOperations, UpdateOperation, VectorOperations,
+    VectorStructPersisted, WithPayloadInterface, WithVector,
 };
 use serde_json::Value;
 use tokio::sync::RwLock;
 
 use config_builder::build_edge_config;
-use conversions::{edge_err, from_edge_id, from_edge_record, from_edge_scored, to_edge_id};
-use query_converter::convert_query_request;
+use conversions::{edge_err, from_edge_id, from_edge_record, to_edge_id};
+use query_converter::convert_query_request_with_shard;
 use vector_parser::ToEdgeVector;
 
-use qql::backend::{CollectionInfo, CollectionSchema, PointGroup};
-use qql::client::{
-    CountPointsReq, CreateCollectionReq, CreateFieldIndexReq, DeletePointsReq, GetPointsReq,
-    QdrantAdminOps, QdrantCoreOps, RetrievedPoint, ScoredPoint, ScrollPointsReq, SetPayloadReq,
-    UpdateVectorsReq, UpsertPointsReq,
-};
-use qql::pipeline::{PointId as QqlPointId, QueryPointsGroupsRequest, QueryPointsRequest};
+use qql::backend::{CollectionInfo, CollectionSchema};
+use qql::client::{CreateCollectionReq, CreateFieldIndexReq, QdrantOps};
 use qql_core::error::QqlError;
+use qql_plan::routing::{RequestBody, Route};
+use qql_plan::UpdateOperation as PlanUpdateOperation;
+use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 
 pub struct EdgeQdrant {
     base_path: PathBuf,
     on_disk_payload: bool,
     shards: RwLock<HashMap<String, Arc<EdgeShard>>>,
+}
+
+fn mutation_response() -> Value {
+    serde_json::json!({
+        "result": { "status": "completed" },
+        "status": "ok",
+        "time": 0.0_f64,
+    })
 }
 
 impl std::fmt::Debug for EdgeQdrant {
@@ -71,7 +76,6 @@ impl EdgeQdrant {
         name: &str,
         req: Option<&CreateCollectionReq>,
     ) -> Result<Arc<EdgeShard>, QqlError> {
-        // Fast path: already cached
         {
             let shards = self.shards.read().await;
             if let Some(shard) = shards.get(name) {
@@ -79,7 +83,6 @@ impl EdgeQdrant {
             }
         }
 
-        // Slow path: load or create on blocking thread
         let path = self.collection_path(name);
         let on_disk = self.on_disk_payload;
         let config_res = req.map(|r| build_edge_config(r, on_disk));
@@ -87,8 +90,9 @@ impl EdgeQdrant {
             if path.join("segments").exists() {
                 EdgeShard::load(&path, None).map_err(edge_err)
             } else {
-                std::fs::create_dir_all(&path)
-                    .map_err(|e| QqlError::runtime(format!("create collection dir: {e}")))?;
+                std::fs::create_dir_all(&path).map_err(|e| {
+                    QqlError::execution("QQL-EDGE", format!("create collection dir: {e}"), None)
+                })?;
 
                 let config = match config_res {
                     Some(c) => c?,
@@ -99,7 +103,7 @@ impl EdgeQdrant {
             }
         })
         .await
-        .map_err(|e| QqlError::runtime(format!("spawn_blocking: {e}")))??;
+        .map_err(|e| QqlError::execution("QQL-EDGE", format!("spawn_blocking: {e}"), None))??;
 
         let shard = Arc::new(shard);
         self.shards
@@ -111,9 +115,7 @@ impl EdgeQdrant {
 }
 
 #[async_trait]
-impl QdrantCoreOps for EdgeQdrant {
-    // ── collections ─────────────────────────────────────────────────
-
+impl QdrantOps for EdgeQdrant {
     async fn list_collections(&self) -> Result<Vec<String>, QqlError> {
         let path = self.base_path.clone();
         tokio::task::spawn_blocking(move || -> Result<Vec<String>, QqlError> {
@@ -122,11 +124,11 @@ impl QdrantCoreOps for EdgeQdrant {
                 return Ok(cols);
             }
             let mut dir = std::fs::read_dir(&path)
-                .map_err(|e| QqlError::runtime(format!("read_dir: {e}")))?;
+                .map_err(|e| QqlError::execution("QQL-EDGE", format!("read_dir: {e}"), None))?;
             while let Some(entry) = dir
                 .next()
                 .transpose()
-                .map_err(|e| QqlError::runtime(format!("entry: {e}")))?
+                .map_err(|e| QqlError::execution("QQL-EDGE", format!("entry: {e}"), None))?
             {
                 if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
                     if let Some(name) = entry.file_name().to_str() {
@@ -140,7 +142,7 @@ impl QdrantCoreOps for EdgeQdrant {
             Ok(cols)
         })
         .await
-        .map_err(|e| QqlError::runtime(format!("spawn_blocking: {e}")))?
+        .map_err(|e| QqlError::execution("QQL-EDGE", format!("spawn_blocking: {e}"), None))?
     }
 
     async fn collection_exists(&self, name: &str) -> Result<bool, QqlError> {
@@ -157,7 +159,7 @@ impl QdrantCoreOps for EdgeQdrant {
             (info, dense, sparse)
         })
         .await
-        .map_err(|e| QqlError::runtime(format!("spawn_blocking: {e}")))?;
+        .map_err(|e| QqlError::execution("QQL-EDGE", format!("spawn_blocking: {e}"), None))?;
 
         Ok(CollectionInfo {
             status: "green".to_string(),
@@ -177,221 +179,36 @@ impl QdrantCoreOps for EdgeQdrant {
         Ok(())
     }
 
-    async fn upsert(&self, req: UpsertPointsReq) -> Result<(), QqlError> {
-        let shard = self.open_shard(&req.collection_name).await?;
-        let mut parsed_points = Vec::with_capacity(req.points.len());
-        for p in req.points {
-            let id = to_edge_id(p.id)?;
-            let vector_struct = p.vector.to_edge_vector()?;
-            let payload_val = Value::Object(p.payload.into_iter().collect());
-            let ps = qdrant_edge::PointStruct::new(id, vector_struct, payload_val);
-            let psp: qdrant_edge::PointStructPersisted = ps.into();
-            parsed_points.push(psp);
-        }
-
-        let op = UpdateOperation::PointOperation(PointOperations::UpsertPoints(
-            PointInsertOperations::PointsList(parsed_points),
-        ));
-
-        tokio::task::spawn_blocking(move || shard.update(op).map_err(edge_err))
-            .await
-            .map_err(|e| QqlError::runtime(format!("spawn_blocking: {e}")))?
-    }
-
-    async fn query(&self, req: QueryPointsRequest) -> Result<Vec<ScoredPoint>, QqlError> {
-        let shard = self.open_shard(&req.collection_name).await?;
-        let results = tokio::task::spawn_blocking(
-            move || -> Result<Vec<qdrant_edge::ScoredPoint>, QqlError> {
-                let edge_req = convert_query_request(req, &shard)?;
-                shard.query(edge_req).map_err(edge_err)
-            },
-        )
-        .await
-        .map_err(|e| QqlError::runtime(format!("spawn_blocking: {e}")))??;
-
-        Ok(results.into_iter().map(from_edge_scored).collect())
-    }
-
-    async fn query_groups(
-        &self,
-        _req: QueryPointsGroupsRequest,
-    ) -> Result<Vec<PointGroup>, QqlError> {
-        Err(QqlError::runtime("query_groups not supported in edge mode"))
-    }
-
-    async fn delete(&self, req: DeletePointsReq) -> Result<(), QqlError> {
-        let shard = self.open_shard(&req.collection_name).await?;
-        let operation = if let Some(id) = req.point_id {
-            let edge_id = to_edge_id(id)?;
-            UpdateOperation::PointOperation(PointOperations::DeletePoints { ids: vec![edge_id] })
-        } else if let Some(filter) = req.filter {
-            let edge_filter: EdgeFilter = serde_json::from_value(filter.0)
-                .map_err(|e| QqlError::runtime(format!("filter conversion: {e}")))?;
-            UpdateOperation::PointOperation(PointOperations::DeletePointsByFilter(edge_filter))
-        } else {
-            return Err(QqlError::runtime("delete requires point_id or filter"));
-        };
-
-        tokio::task::spawn_blocking(move || shard.update(operation).map_err(edge_err))
-            .await
-            .map_err(|e| QqlError::runtime(format!("spawn_blocking: {e}")))?
-    }
-
-    async fn update_vectors(&self, req: UpdateVectorsReq) -> Result<(), QqlError> {
-        let shard = self.open_shard(&req.collection_name).await?;
-        let id = to_edge_id(req.point_id)?;
-
-        let mut vectors = HashMap::with_capacity(1);
-        let vec_name = req.vector_name.unwrap_or_default();
-        vectors.insert(vec_name, VectorInternal::Dense(req.vector));
-
-        let pvp = qdrant_edge::PointVectorsPersisted {
-            id,
-            vector: VectorStructPersisted::from(VectorStructInternal::Named(vectors)),
-        };
-
-        let op = UpdateOperation::VectorOperation(VectorOperations::UpdateVectors(
-            qdrant_edge::UpdateVectorsOp {
-                points: vec![pvp],
-                update_filter: None,
-            },
-        ));
-
-        tokio::task::spawn_blocking(move || shard.update(op).map_err(edge_err))
-            .await
-            .map_err(|e| QqlError::runtime(format!("spawn_blocking: {e}")))?
-    }
-
-    async fn set_payload(&self, req: SetPayloadReq) -> Result<(), QqlError> {
-        let shard = self.open_shard(&req.collection_name).await?;
-        let payload = qdrant_edge::Payload(req.payload.into_iter().collect());
-
-        let op = if let Some(id) = req.point_id {
-            let edge_id = to_edge_id(id)?;
-            qdrant_edge::PayloadOps::SetPayload(qdrant_edge::SetPayloadOp {
-                payload,
-                points: Some(vec![edge_id]),
-                filter: None,
-                key: None,
-            })
-        } else if let Some(filter) = req.filter {
-            let edge_filter: EdgeFilter = serde_json::from_value(filter.0)
-                .map_err(|e| QqlError::runtime(format!("filter conversion: {e}")))?;
-            qdrant_edge::PayloadOps::SetPayload(qdrant_edge::SetPayloadOp {
-                payload,
-                points: None,
-                filter: Some(edge_filter),
-                key: None,
-            })
-        } else {
-            return Err(QqlError::runtime("set_payload requires point_id or filter"));
-        };
-
-        tokio::task::spawn_blocking(move || {
-            shard
-                .update(UpdateOperation::PayloadOperation(op))
-                .map_err(edge_err)
-        })
-        .await
-        .map_err(|e| QqlError::runtime(format!("spawn_blocking: {e}")))?
-    }
-
-    async fn scroll(
-        &self,
-        req: ScrollPointsReq,
-    ) -> Result<(Vec<RetrievedPoint>, Option<QqlPointId>), QqlError> {
-        let shard = self.open_shard(&req.collection_name).await?;
-        let filter: Option<EdgeFilter> = req
-            .filter
-            .map(|f| serde_json::from_value(f.0))
-            .transpose()
-            .map_err(|e| QqlError::runtime(format!("filter: {e}")))?;
-
-        let offset = req.after.map(to_edge_id).transpose()?;
-
-        let scroll_req = qdrant_edge::ScrollRequest {
-            offset,
-            limit: Some(req.limit as usize),
-            filter,
-            with_payload: Some(WithPayloadInterface::Bool(true)),
-            with_vector: WithVector::Bool(false),
-            order_by: None,
-        };
-
-        let (records, next) =
-            tokio::task::spawn_blocking(move || shard.scroll(scroll_req).map_err(edge_err))
-                .await
-                .map_err(|e| QqlError::runtime(format!("spawn_blocking: {e}")))??;
-
-        let retrieved = records.into_iter().map(from_edge_record).collect();
-        let next_offset = next.map(from_edge_id);
-        Ok((retrieved, next_offset))
-    }
-
-    async fn get(&self, req: GetPointsReq) -> Result<Vec<RetrievedPoint>, QqlError> {
-        let id = qql::pipeline::helpers::to_point_id(&req.point_id)
-            .map_err(|e| QqlError::runtime(format!("invalid point id: {e}")))?;
-        let edge_id = to_edge_id(id)?;
-
-        let shard = self.open_shard(&req.collection_name).await?;
-        let records = tokio::task::spawn_blocking(move || {
-            shard
-                .retrieve(
-                    &[edge_id],
-                    Some(WithPayloadInterface::Bool(true)),
-                    Some(WithVector::Bool(false)),
-                )
-                .map_err(edge_err)
-        })
-        .await
-        .map_err(|e| QqlError::runtime(format!("spawn_blocking: {e}")))??;
-
-        Ok(records.into_iter().map(from_edge_record).collect())
-    }
-}
-
-#[async_trait]
-impl QdrantAdminOps for EdgeQdrant {
-    async fn update_collection(&self, _req: Value) -> Result<(), QqlError> {
-        Err(QqlError::runtime(
+    async fn update_collection(&self, _req: serde_json::Value) -> Result<(), QqlError> {
+        Err(QqlError::execution(
+            "QQL-EDGE",
             "update_collection not supported in edge mode",
+            None,
         ))
     }
 
     async fn delete_collection(&self, name: &str) -> Result<(), QqlError> {
         let path = self.collection_path(name);
-        // Hold the cached Arc<EdgeShard> in scope through blocking removal so concurrent queries complete safely.
         let _shard = {
             let mut shards = self.shards.write().await;
             shards.remove(name)
         };
         tokio::task::spawn_blocking(move || {
             if path.exists() {
-                std::fs::remove_dir_all(&path)
-                    .map_err(|e| QqlError::runtime(format!("delete collection: {e}")))
+                std::fs::remove_dir_all(&path).map_err(|e| {
+                    QqlError::execution("QQL-EDGE", format!("delete collection: {e}"), None)
+                })
             } else {
                 Ok(())
             }
         })
         .await
-        .map_err(|e| QqlError::runtime(format!("spawn_blocking: {e}")))?
-    }
-
-    async fn query_batch(
-        &self,
-        req: Vec<QueryPointsRequest>,
-    ) -> Result<Vec<Vec<ScoredPoint>>, QqlError> {
-        let mut results = Vec::with_capacity(req.len());
-        for query in req {
-            results.push(self.query(query).await?);
-        }
-        Ok(results)
+        .map_err(|e| QqlError::execution("QQL-EDGE", format!("spawn_blocking: {e}"), None))?
     }
 
     async fn create_field_index(&self, req: CreateFieldIndexReq) -> Result<(), QqlError> {
         let shard = self.open_shard(&req.collection_name).await?;
 
-        // Map QQL field type string → qdrant-edge PayloadSchemaType
         let schema_type = match req.field_type.to_lowercase().as_str() {
             "keyword" => PayloadSchemaType::Keyword,
             "integer" | "int" => PayloadSchemaType::Integer,
@@ -400,18 +217,18 @@ impl QdrantAdminOps for EdgeQdrant {
             "geo" => PayloadSchemaType::Geo,
             "text" => PayloadSchemaType::Text,
             other => {
-                return Err(QqlError::runtime(format!(
-                    "unsupported field index type in edge mode: '{other}'. \
-                     Use: keyword, integer, float, bool, geo, text"
-                )))
+                return Err(QqlError::execution(
+                    "QQL-EDGE",
+                    format!("unsupported field index type: '{other}'"),
+                    None,
+                ))
             }
         };
 
         let field_schema = Some(PayloadFieldSchema::FieldType(schema_type));
-
         let field_name: qdrant_edge::JsonPath =
             serde_json::from_value(serde_json::Value::String(req.field.clone()))
-                .map_err(|e| QqlError::runtime(format!("field name: {e}")))?;
+                .map_err(|e| QqlError::execution("QQL-EDGE", format!("field name: {e}"), None))?;
 
         let create_index = CreateIndex {
             field_name,
@@ -423,24 +240,608 @@ impl QdrantAdminOps for EdgeQdrant {
 
         tokio::task::spawn_blocking(move || shard.update(op).map_err(edge_err))
             .await
-            .map_err(|e| QqlError::runtime(format!("spawn_blocking: {e}")))?
+            .map_err(|e| QqlError::execution("QQL-EDGE", format!("spawn_blocking: {e}"), None))?
     }
 
-    async fn count(&self, req: CountPointsReq) -> Result<u64, QqlError> {
-        let shard = self.open_shard(&req.collection_name).await?;
-        let filter: Option<EdgeFilter> = req
-            .filter
-            .map(|f| serde_json::from_value(f.0))
-            .transpose()
-            .map_err(|e| QqlError::runtime(format!("filter: {e}")))?;
-
-        let count_req = qdrant_edge::CountRequest {
-            filter,
-            exact: true,
-        };
-        let count = tokio::task::spawn_blocking(move || shard.count(count_req).map_err(edge_err))
+    async fn delete_field_index(
+        &self,
+        collection_name: &str,
+        field_name: &str,
+    ) -> Result<(), QqlError> {
+        let shard = self.open_shard(collection_name).await?;
+        let field_name_json: qdrant_edge::JsonPath =
+            serde_json::from_value(serde_json::Value::String(field_name.to_string()))
+                .map_err(|e| QqlError::execution("QQL-EDGE", format!("field name: {e}"), None))?;
+        let op = UpdateOperation::FieldIndexOperation(FieldIndexOperations::DeleteIndex(
+            field_name_json,
+        ));
+        tokio::task::spawn_blocking(move || shard.update(op).map_err(edge_err))
             .await
-            .map_err(|e| QqlError::runtime(format!("spawn_blocking: {e}")))??;
-        Ok(count as u64)
+            .map_err(|e| QqlError::execution("QQL-EDGE", format!("spawn_blocking: {e}"), None))?
+    }
+
+    async fn execute_route(&self, route: Route) -> Result<Value, QqlError> {
+        match route.body {
+            Some(RequestBody::Query(req)) => {
+                let collection = extract_collection(&route.path)?;
+                let shard = self.open_shard(&collection).await?;
+                let results = tokio::task::spawn_blocking(
+                    move || -> Result<Vec<qdrant_edge::ScoredPoint>, QqlError> {
+                        let edge_req = convert_query_request_with_shard(&req, &shard)?;
+                        shard.search(edge_req).map_err(edge_err)
+                    },
+                )
+                .await
+                .map_err(|e| {
+                    QqlError::execution("QQL-EDGE", format!("spawn_blocking: {e}"), None)
+                })??;
+
+                Ok(serde_json::json!({
+                    "result": results.into_iter().map(|sp| {
+                        let id = from_edge_id(&sp.id);
+                        let payload: Value = serde_json::to_value(&sp.payload).unwrap_or_default();
+                        serde_json::json!({
+                            "id": id,
+                            "score": sp.score,
+                            "payload": payload,
+                            "version": sp.version,
+                        })
+                    }).collect::<Vec<_>>(),
+                    "status": "ok",
+                    "time": 0.0,
+                }))
+            }
+            Some(RequestBody::QueryGroups(_)) => Err(QqlError::execution(
+                "QQL-EDGE",
+                "query_groups not supported in edge mode",
+                None,
+            )),
+            Some(RequestBody::Points(req)) => {
+                let collection = extract_collection(&route.path)?;
+                let shard = self.open_shard(&collection).await?;
+                let ids: Vec<qdrant_edge::PointId> = req
+                    .ids
+                    .iter()
+                    .filter_map(|id| to_edge_id(id.clone()).ok())
+                    .collect();
+
+                let records = tokio::task::spawn_blocking(move || {
+                    shard
+                        .retrieve(
+                            &ids,
+                            Some(WithPayloadInterface::Bool(true)),
+                            Some(WithVector::Bool(false)),
+                        )
+                        .map_err(edge_err)
+                })
+                .await
+                .map_err(|e| {
+                    QqlError::execution("QQL-EDGE", format!("spawn_blocking: {e}"), None)
+                })??;
+
+                Ok(serde_json::json!({
+                    "result": records.into_iter().map(from_edge_record).collect::<Vec<_>>(),
+                    "status": "ok",
+                    "time": 0.0,
+                }))
+            }
+            Some(RequestBody::Scroll(req)) => {
+                let collection = extract_collection(&route.path)?;
+                let shard = self.open_shard(&collection).await?;
+
+                let offset = req.offset.as_ref().and_then(|o| to_edge_id(o.clone()).ok());
+                let scroll_req = qdrant_edge::ScrollRequest {
+                    offset,
+                    limit: Some(req.limit.unwrap_or(10) as usize),
+                    filter: None,
+                    with_payload: Some(WithPayloadInterface::Bool(true)),
+                    with_vector: WithVector::Bool(false),
+                    order_by: None,
+                };
+
+                let (records, next) =
+                    tokio::task::spawn_blocking(move || shard.scroll(scroll_req).map_err(edge_err))
+                        .await
+                        .map_err(|e| {
+                            QqlError::execution("QQL-EDGE", format!("spawn_blocking: {e}"), None)
+                        })??;
+
+                let retrieved: Vec<Value> = records.into_iter().map(from_edge_record).collect();
+                let next_offset = next.map(|id| from_edge_id(&id));
+                let mut obj = serde_json::Map::new();
+                obj.insert("status".into(), serde_json::json!("ok"));
+                obj.insert("time".into(), serde_json::json!(0.0));
+                obj.insert(
+                    "result".into(),
+                    serde_json::json!({
+                        "points": retrieved,
+                    }),
+                );
+                if let Some(no) = next_offset {
+                    obj.insert("next_page_offset".into(), no);
+                }
+                Ok(Value::Object(obj))
+            }
+            Some(RequestBody::Upsert(req)) => {
+                let collection = extract_collection(&route.path)?;
+                let shard = self.open_shard(&collection).await?;
+
+                let mut parsed_points = Vec::with_capacity(req.points.len());
+                for p in req.points {
+                    let id = to_edge_id(p.id)?;
+                    let vector_struct = p
+                        .vector
+                        .ok_or_else(|| {
+                            QqlError::execution("QQL-EDGE", "upsert point missing vector", None)
+                        })?
+                        .to_edge_vector()?;
+                    let payload_val = Value::Object(p.payload.unwrap_or_default());
+                    let ps = qdrant_edge::PointStruct::new(id, vector_struct, payload_val);
+                    let psp: qdrant_edge::PointStructPersisted = ps.into();
+                    parsed_points.push(psp);
+                }
+
+                let op = UpdateOperation::PointOperation(PointOperations::UpsertPoints(
+                    PointInsertOperations::PointsList(parsed_points),
+                ));
+
+                tokio::task::spawn_blocking(move || shard.update(op).map_err(edge_err))
+                    .await
+                    .map_err(|e| {
+                        QqlError::execution("QQL-EDGE", format!("spawn_blocking: {e}"), None)
+                    })??;
+
+                Ok(mutation_response())
+            }
+            Some(RequestBody::Delete(req)) => {
+                let collection = extract_collection(&route.path)?;
+                let shard = self.open_shard(&collection).await?;
+
+                let operation = if let Some(points) = &req.points {
+                    let ids: Vec<qdrant_edge::PointId> = points
+                        .iter()
+                        .filter_map(|id| to_edge_id(id.clone()).ok())
+                        .collect();
+                    UpdateOperation::PointOperation(PointOperations::DeletePoints { ids })
+                } else if let Some(filter) = &req.filter {
+                    let mut filter_val = serde_json::to_value(filter).map_err(|e| {
+                        QqlError::execution("QQL-EDGE", format!("invalid filter: {e}"), None)
+                    })?;
+                    if filter_val.get("key").is_some() {
+                        filter_val = serde_json::json!({ "must": [filter_val] });
+                    }
+                    let edge_filter: qdrant_edge::Filter = serde_json::from_value(filter_val)
+                        .map_err(|e| {
+                            QqlError::execution(
+                                "QQL-EDGE",
+                                format!("invalid filter format: {e}"),
+                                None,
+                            )
+                        })?;
+                    UpdateOperation::PointOperation(PointOperations::DeletePointsByFilter(
+                        edge_filter,
+                    ))
+                } else {
+                    return Err(QqlError::execution(
+                        "QQL-EDGE",
+                        "delete requires point ids or filter",
+                        None,
+                    ));
+                };
+
+                tokio::task::spawn_blocking(move || shard.update(operation).map_err(edge_err))
+                    .await
+                    .map_err(|e| {
+                        QqlError::execution("QQL-EDGE", format!("spawn_blocking: {e}"), None)
+                    })??;
+
+                Ok(mutation_response())
+            }
+            Some(RequestBody::ClearPayload(req)) => {
+                let collection = extract_collection(&route.path)?;
+                let shard = self.open_shard(&collection).await?;
+
+                let operation = if let Some(points) = &req.points {
+                    let ids: Vec<qdrant_edge::PointId> = points
+                        .iter()
+                        .filter_map(|id| to_edge_id(id.clone()).ok())
+                        .collect();
+                    UpdateOperation::PayloadOperation(qdrant_edge::PayloadOps::ClearPayload {
+                        points: ids,
+                    })
+                } else if let Some(filter) = &req.filter {
+                    let mut filter_val = serde_json::to_value(filter).map_err(|e| {
+                        QqlError::execution("QQL-EDGE", format!("invalid filter: {e}"), None)
+                    })?;
+                    if filter_val.get("key").is_some() {
+                        filter_val = serde_json::json!({ "must": [filter_val] });
+                    }
+                    let edge_filter: qdrant_edge::Filter = serde_json::from_value(filter_val)
+                        .map_err(|e| {
+                            QqlError::execution(
+                                "QQL-EDGE",
+                                format!("invalid filter format: {e}"),
+                                None,
+                            )
+                        })?;
+                    UpdateOperation::PayloadOperation(
+                        qdrant_edge::PayloadOps::ClearPayloadByFilter(edge_filter),
+                    )
+                } else {
+                    return Err(QqlError::execution(
+                        "QQL-EDGE",
+                        "clear_payload requires point ids or filter",
+                        None,
+                    ));
+                };
+
+                tokio::task::spawn_blocking(move || shard.update(operation).map_err(edge_err))
+                    .await
+                    .map_err(|e| {
+                        QqlError::execution("QQL-EDGE", format!("spawn_blocking: {e}"), None)
+                    })??;
+                Ok(mutation_response())
+            }
+            Some(RequestBody::DeleteVector(req)) => {
+                let collection = extract_collection(&route.path)?;
+                let shard = self.open_shard(&collection).await?;
+                let vector_names: Vec<String> = req.vector.clone();
+
+                let operation = if let Some(points) = &req.points {
+                    let ids: Vec<qdrant_edge::PointId> = points
+                        .iter()
+                        .filter_map(|id| to_edge_id(id.clone()).ok())
+                        .collect();
+                    UpdateOperation::VectorOperation(VectorOperations::DeleteVectors(
+                        qdrant_edge::PointIdsList { points: ids },
+                        vector_names,
+                    ))
+                } else if let Some(filter) = &req.filter {
+                    let mut filter_val = serde_json::to_value(filter).map_err(|e| {
+                        QqlError::execution("QQL-EDGE", format!("invalid filter: {e}"), None)
+                    })?;
+                    if filter_val.get("key").is_some() {
+                        filter_val = serde_json::json!({ "must": [filter_val] });
+                    }
+                    let edge_filter: qdrant_edge::Filter = serde_json::from_value(filter_val)
+                        .map_err(|e| {
+                            QqlError::execution(
+                                "QQL-EDGE",
+                                format!("invalid filter format: {e}"),
+                                None,
+                            )
+                        })?;
+                    UpdateOperation::VectorOperation(VectorOperations::DeleteVectorsByFilter(
+                        edge_filter,
+                        vector_names,
+                    ))
+                } else {
+                    return Err(QqlError::execution(
+                        "QQL-EDGE",
+                        "delete_vectors requires point ids or filter",
+                        None,
+                    ));
+                };
+
+                tokio::task::spawn_blocking(move || shard.update(operation).map_err(edge_err))
+                    .await
+                    .map_err(|e| {
+                        QqlError::execution("QQL-EDGE", format!("spawn_blocking: {e}"), None)
+                    })??;
+                Ok(mutation_response())
+            }
+            Some(RequestBody::UpdateVector(req)) => {
+                let collection = extract_collection(&route.path)?;
+                let shard = self.open_shard(&collection).await?;
+
+                let mut pvps = Vec::with_capacity(req.points.len());
+                for pt in req.points {
+                    let id = to_edge_id(pt.id)?;
+                    let vector_struct = pt.vector.to_edge_vector()?;
+                    pvps.push(qdrant_edge::PointVectorsPersisted {
+                        id,
+                        vector: VectorStructPersisted::from(vector_struct),
+                    });
+                }
+
+                let op = UpdateOperation::VectorOperation(VectorOperations::UpdateVectors(
+                    qdrant_edge::UpdateVectorsOp {
+                        points: pvps,
+                        update_filter: None,
+                    },
+                ));
+
+                tokio::task::spawn_blocking(move || shard.update(op).map_err(edge_err))
+                    .await
+                    .map_err(|e| {
+                        QqlError::execution("QQL-EDGE", format!("spawn_blocking: {e}"), None)
+                    })??;
+
+                Ok(mutation_response())
+            }
+            Some(RequestBody::UpdatePayload(req)) => {
+                let collection = extract_collection(&route.path)?;
+                let shard = self.open_shard(&collection).await?;
+                let payload = qdrant_edge::Payload(req.payload.clone().into_iter().collect());
+
+                let op = if let Some(points) = &req.points {
+                    let ids: Vec<qdrant_edge::PointId> = points
+                        .iter()
+                        .filter_map(|id| to_edge_id(id.clone()).ok())
+                        .collect();
+                    qdrant_edge::PayloadOps::SetPayload(qdrant_edge::SetPayloadOp {
+                        payload,
+                        points: Some(ids),
+                        filter: None,
+                        key: None,
+                    })
+                } else {
+                    return Err(QqlError::execution(
+                        "QQL-EDGE",
+                        "set_payload by filter not yet supported in edge mode",
+                        None,
+                    ));
+                };
+
+                tokio::task::spawn_blocking(move || {
+                    shard
+                        .update(UpdateOperation::PayloadOperation(op))
+                        .map_err(edge_err)
+                })
+                .await
+                .map_err(|e| {
+                    QqlError::execution("QQL-EDGE", format!("spawn_blocking: {e}"), None)
+                })??;
+
+                Ok(mutation_response())
+            }
+            Some(RequestBody::CreateCollection(req)) => {
+                let create_req = CreateCollectionReq {
+                    collection_name: extract_collection(&route.path)?,
+                    vectors_config: Some(serde_json::to_value(&req.vectors).unwrap_or_default()),
+                    sparse_vectors_config: req
+                        .sparse_vectors
+                        .as_ref()
+                        .map(|sv| serde_json::to_value(sv).unwrap_or_default()),
+                    hnsw_config: None,
+                    optimizers_config: None,
+                    quantization_config: None,
+                    params: None,
+                    shard_number: None,
+                    sharding_method: None,
+                    shard_keys: None,
+                };
+                self.create_collection(create_req).await?;
+                Ok(mutation_response())
+            }
+            Some(RequestBody::UpdateCollection(_)) => Ok(mutation_response()),
+            Some(RequestBody::CreateIndex(req)) => {
+                let ft = req.field_schema.as_str();
+                let create_index = CreateFieldIndexReq {
+                    collection_name: extract_collection(&route.path)?,
+                    field: req.field_name.clone(),
+                    field_type: match ft {
+                        "keyword" | "uuid" => "keyword",
+                        "integer" | "int" => "integer",
+                        "float" => "float",
+                        "bool" | "boolean" => "bool",
+                        "geo" => "geo",
+                        "text" => "text",
+                        "datetime" => "integer",
+                        _ => "keyword",
+                    }
+                    .to_string(),
+                    options: HashMap::new(),
+                };
+                self.create_field_index(create_index).await?;
+                Ok(mutation_response())
+            }
+            Some(RequestBody::CreateShardKey(_req)) => Err(QqlError::execution(
+                "QQL-EDGE",
+                "create_shard_key not supported in edge mode (single node)",
+                None,
+            )),
+            Some(RequestBody::DropShardKey(_req)) => Err(QqlError::execution(
+                "QQL-EDGE",
+                "drop_shard_key not supported in edge mode (single node)",
+                None,
+            )),
+            Some(RequestBody::Count(req)) => {
+                let collection = extract_collection(&route.path)?;
+                let shard = self.open_shard(&collection).await?;
+                let filter: Option<qdrant_edge::Filter> = req.filter.as_ref().and_then(|f| {
+                    let filter_val = serde_json::to_value(f).ok()?;
+                    let val = if filter_val.get("key").is_some() {
+                        serde_json::json!({ "must": [filter_val] })
+                    } else {
+                        filter_val
+                    };
+                    serde_json::from_value(val).ok()
+                });
+                let count_req = qdrant_edge::CountRequest {
+                    filter,
+                    exact: req.exact.unwrap_or(true),
+                };
+                let count =
+                    tokio::task::spawn_blocking(move || shard.count(count_req).map_err(edge_err))
+                        .await
+                        .map_err(|e| {
+                            QqlError::execution("QQL-EDGE", format!("spawn_blocking: {e}"), None)
+                        })??;
+                Ok(serde_json::json!({
+                    "result": {
+                        "count": count,
+                    },
+                    "status": "ok",
+                    "time": 0.0,
+                }))
+            }
+            None => match route.method {
+                qql_plan::types::Method::Get if route.path == "/collections" => {
+                    let cols = self.list_collections().await?;
+                    Ok(serde_json::json!({
+                        "result": {
+                            "collections": cols.into_iter().map(|c| serde_json::json!({"name": c})).collect::<Vec<_>>(),
+                        },
+                        "status": "ok",
+                        "time": 0.0,
+                    }))
+                }
+                qql_plan::types::Method::Get if route.path.starts_with("/collections/") => {
+                    let collection = extract_collection(&route.path)?;
+                    let info = self.get_collection_info(&collection).await?;
+                    Ok(serde_json::json!({
+                        "result": {
+                            "status": info.status,
+                            "points_count": info.points_count,
+                            "segments_count": info.segments_count,
+                            "config": {
+                                "params": {
+                                    "vectors": serde_json::json!({}),
+                                }
+                            },
+                            "payload_schema": {},
+                        },
+                        "status": "ok",
+                        "time": 0.0,
+                    }))
+                }
+                qql_plan::types::Method::Delete if route.path.contains("/index/") => {
+                    let segments: Vec<&str> =
+                        route.path.trim_start_matches('/').split('/').collect();
+                    let collection = segments
+                        .get(1)
+                        .ok_or_else(|| {
+                            QqlError::execution(
+                                "QQL-EDGE",
+                                "cannot extract collection from path",
+                                None,
+                            )
+                        })?
+                        .to_string();
+                    let field_name = segments
+                        .get(3)
+                        .ok_or_else(|| {
+                            QqlError::execution(
+                                "QQL-EDGE",
+                                "cannot extract field_name from path",
+                                None,
+                            )
+                        })?
+                        .to_string();
+                    self.delete_field_index(&collection, &field_name).await?;
+                    Ok(serde_json::json!({
+                        "result": true,
+                        "status": "ok",
+                        "time": 0.0,
+                    }))
+                }
+                qql_plan::types::Method::Delete if route.path.starts_with("/collections/") => {
+                    let collection = extract_collection(&route.path)?;
+                    self.delete_collection(&collection).await?;
+                    Ok(serde_json::json!({
+                        "result": true,
+                        "status": "ok",
+                        "time": 0.0,
+                    }))
+                }
+                _ => Err(QqlError::execution(
+                    "QQL-EDGE",
+                    format!("unsupported: {} {}", route.method.as_str(), route.path),
+                    None,
+                )),
+            },
+        }
+    }
+
+    async fn execute_query_batch(
+        &self,
+        collection: &str,
+        batch: &QueryBatchRequest,
+    ) -> Result<Vec<serde_json::Value>, QqlError> {
+        let path = format!("/collections/{collection}/points/query");
+        let mut results = Vec::with_capacity(batch.searches.len());
+        for req in &batch.searches {
+            let route = Route {
+                method: qql_plan::types::Method::Post,
+                path: path.clone(),
+                query: Vec::new(),
+                body: Some(RequestBody::Query(Box::new(req.clone()))),
+            };
+            results.push(self.execute_route(route).await?);
+        }
+        Ok(results)
+    }
+
+    async fn execute_update_batch(
+        &self,
+        collection: &str,
+        batch: &UpdateBatchRequest,
+    ) -> Result<Vec<serde_json::Value>, QqlError> {
+        // Edge has no native update-batch RPC — fan out to individual routes.
+        let mut results = Vec::with_capacity(batch.operations.len());
+        for op in &batch.operations {
+            let route = update_op_to_route(collection, op);
+            results.push(self.execute_route(route).await?);
+        }
+        Ok(results)
+    }
+}
+
+fn update_op_to_route(collection: &str, op: &PlanUpdateOperation) -> Route {
+    match op {
+        PlanUpdateOperation::Upsert { upsert } => Route {
+            method: qql_plan::types::Method::Put,
+            path: format!("/collections/{collection}/points"),
+            query: vec![("wait".into(), "true".into())],
+            body: Some(RequestBody::Upsert(upsert.clone())),
+        },
+        PlanUpdateOperation::Delete { delete } => Route {
+            method: qql_plan::types::Method::Post,
+            path: format!("/collections/{collection}/points/delete"),
+            query: vec![("wait".into(), "true".into())],
+            body: Some(RequestBody::Delete(Box::new(delete.clone()))),
+        },
+        PlanUpdateOperation::SetPayload { set_payload } => Route {
+            method: qql_plan::types::Method::Post,
+            path: format!("/collections/{collection}/points/payload"),
+            query: vec![("wait".into(), "true".into())],
+            body: Some(RequestBody::UpdatePayload(set_payload.clone())),
+        },
+        PlanUpdateOperation::ClearPayload { clear_payload } => Route {
+            method: qql_plan::types::Method::Post,
+            path: format!("/collections/{collection}/points/payload/clear"),
+            query: vec![("wait".into(), "true".into())],
+            body: Some(RequestBody::ClearPayload(Box::new(clear_payload.clone()))),
+        },
+        PlanUpdateOperation::UpdateVectors { update_vectors } => Route {
+            method: qql_plan::types::Method::Put,
+            path: format!("/collections/{collection}/points/vectors"),
+            query: vec![("wait".into(), "true".into())],
+            body: Some(RequestBody::UpdateVector(update_vectors.clone())),
+        },
+        PlanUpdateOperation::DeleteVectors { delete_vectors } => Route {
+            method: qql_plan::types::Method::Post,
+            path: format!("/collections/{collection}/points/vectors/delete"),
+            query: vec![("wait".into(), "true".into())],
+            body: Some(RequestBody::DeleteVector(Box::new(delete_vectors.clone()))),
+        },
+    }
+}
+
+fn extract_collection(path: &str) -> Result<String, QqlError> {
+    let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+    if segments.len() >= 2
+        && segments[0] == "collections"
+        && segments[1] != "points"
+        && !segments[1].is_empty()
+    {
+        Ok(segments[1].to_string())
+    } else {
+        Err(QqlError::execution(
+            "QQL-EDGE",
+            format!("cannot extract collection from path: {path}"),
+            None,
+        ))
     }
 }

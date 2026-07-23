@@ -4,7 +4,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 #[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum FormulaExpr {
     Constant {
         value: f64,

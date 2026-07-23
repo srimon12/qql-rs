@@ -14,6 +14,7 @@ rest = ["qql/rest"]
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 qql-core = { path = "../qql-core", features = ["serde"] }
+qql-plan = { path = "../qql-plan" }
 qql = { path = "../qql-runtime", default-features = false }
 pyo3 = { version = "0.23", features = ["extension-module"] }
 pyo3-async-runtimes = { version = "0.23", features = ["tokio-runtime"] }

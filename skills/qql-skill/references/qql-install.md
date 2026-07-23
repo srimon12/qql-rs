@@ -1,99 +1,132 @@
-# qql-go Install Guide
+# QQL Installation
 
-Use this guide when the skill is installed on its own and the `qql-go` CLI is not available yet.
+## Rust CLI (`qql`)
 
-## Preferred install paths
-
-Install the latest release on macOS or Linux:
+### From Source
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/srimon12/qql-go/main/install.sh | sh
+git clone https://github.com/srimon12/qql-rs.git
+cd qql-rs
+cargo build --release -p qql-cli --no-default-features --features rest
+
+# Optional: install globally
+cargo install --path crates/qql-cli --no-default-features --features rest
 ```
 
-Install on Windows PowerShell:
+The binary will be at `target/release/qql`.
 
-```powershell
-irm https://raw.githubusercontent.com/srimon12/qql-go/main/install.ps1 | iex
-```
+### Features
 
-Install with Go:
+| Feature | Description |
+|---------|-------------|
+| `rest` | HTTP REST client (reqwest) -- enabled by default |
+| `grpc` | gRPC client (tonic) -- for Qdrant port 6334 |
+| `edge` | In-process execution via qdrant-edge (no server needed) |
+
+Build with gRPC: `cargo build --release -p qql-cli --no-default-features --features rest,grpc`
+
+Build with edge (local HNSW + fastembed): `cargo build --release -p qql-cli`
+
+### CLI Commands
 
 ```bash
-go install github.com/srimon12/qql-go/cmd/qql-go@latest
+# Execute a query
+qql exec "QUERY 'hello' FROM docs USING dense LIMIT 5" --json
+
+# Execute from file
+qql execute script.qql --stop-on-error
+
+# Explain (no Qdrant needed)
+qql explain "QUERY 'hello' FROM docs USING dense LIMIT 5"
+
+# Interactive REPL
+qql connect
+
+# Dump collection to QQL
+qql dump my_collection output.qql
+
+# Health check
+qql doctor
 ```
 
-Build from source:
+### Environment Variables
+
+- `QDRANT_URL` -- Qdrant REST endpoint (default: `http://localhost:6333`)
+- `QDRANT_API_KEY` -- API key for authenticated Qdrant
+
+### Verify Installation
 
 ```bash
-git clone https://github.com/srimon12/qql-go.git
-cd qql-go
-go build -o qql-go ./cmd/qql-go
+./target/release/qql version
 ```
 
-## Expected binary name
+## Rust Library (`qql`)
 
-The CLI binary is named:
+Add to `Cargo.toml`:
 
-- `qql-go` on macOS/Linux
-- `qql-go.exe` on Windows
+```toml
+[dependencies]
+qql = { path = "crates/qql-runtime" }
+qql-core = { path = "crates/qql-core" }
+qql-plan = { path = "crates/qql-plan" }
+```
 
-## PATH expectations
+### Basic Usage
 
-The helper script first checks:
+```rust
+use qql::executor::Executor;
 
-1. `QQL_BIN`
-2. `qql-go` on `PATH`
-3. a repo-local fallback
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let exec = Executor::rest("http://localhost:6333", None)?;
+    let res = exec.execute("SHOW COLLECTIONS").await?;
+    println!("{}", serde_json::to_string_pretty(&res)?);
+    Ok(())
+}
+```
 
-If `qql-go` is installed somewhere custom, set:
+## Python SDK (`pyqql`)
 
 ```bash
-export QQL_BIN=/absolute/path/to/qql-go
+pip install maturin
+cd crates/pyqql
+maturin develop --release
 ```
 
-On Windows:
+```python
+import pyqql
 
-```powershell
-$env:QQL_BIN = "C:\path\to\qql-go.exe"
+client = pyqql.Client("http://localhost:6333")
+result = client.execute("QUERY 'search' FROM docs USING dense LIMIT 5")
+print(result)
 ```
 
-## Local mode setup (self-hosted Qdrant + local embeddings)
+## Node.js SDK (`nqql`)
 
-`qql-go` supports three inference modes:
-
-- `local` — local Qdrant + local embedding server (default)
-- `cloud` — Qdrant Cloud inference
-- `external` — any Qdrant + external embedding endpoint
-
-For local mode, connect with the extra embedding flags:
-
-### Windows (PowerShell)
-```powershell
-qql-go connect `
-  --url http://localhost:6334 `
-  --inference-mode local `
-  --embedding-endpoint http://127.0.0.1:1234/v1/embeddings `
-  --embedding-key <embedding-api-key> `
-  --embedding-model text-embedding-all-minilm-l6-v2-embedding `
-  --embedding-dimension 384
-```
-
-### Linux / macOS (Bash)
 ```bash
-qql-go connect \
-  --url http://localhost:6334 \
-  --inference-mode local \
-  --embedding-endpoint http://127.0.0.1:1234/v1/embeddings \
-  --embedding-key <embedding-api-key> \
-  --embedding-model text-embedding-all-minilm-l6-v2-embedding \
-  --embedding-dimension 384
+cd crates/nqql
+npm install
+npm run build
 ```
 
-Requirements for local/external mode:
+```javascript
+const nqql = require('nqql');
+const client = new nqql.Client({ url: "http://localhost:6333" });
+const result = client.execute("QUERY 'search' FROM docs USING dense LIMIT 5");
+console.log(result);
+```
 
-- `--embedding-endpoint` — an embedding endpoint API (e.g., standard /v1/embeddings used by Ollama, LM Studio, Cohere, etc.)
-- `--embedding-key` — optional bearer token for hosted embedding providers
-- `--embedding-model` — the model name to pass in the request
-- `--embedding-dimension` — optional; auto-probed from the endpoint if omitted and reachable
+## WASM SDK (`qql-wasm`)
 
-For cloud mode, only `--url` (and `--secret` if needed) are required.
+```bash
+cd crates/qql-wasm
+wasm-pack build --target web
+```
+
+```javascript
+import init, { parse, Client } from './pkg/qql_wasm.js';
+
+await init();
+const result = await (new Client("http://localhost:6333")).execute("QUERY 'hello' FROM docs LIMIT 5");
+console.log(result);
+```

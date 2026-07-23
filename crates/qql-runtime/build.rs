@@ -31,6 +31,8 @@ fn sanitize_schema(value: &mut serde_json::Value) {
 }
 
 fn main() {
+    // ── OpenAPI types (REST) ──────────────────────────────────────
+
     println!("cargo:rerun-if-changed=../../openapi.json");
     println!("cargo:rerun-if-changed=build.rs");
 
@@ -38,14 +40,12 @@ fn main() {
     let mut openapi: serde_json::Value =
         serde_json::from_str(&content).expect("Invalid OpenAPI JSON");
 
-    // Sanitize the schema to prevent typify validation errors
     sanitize_schema(&mut openapi);
 
     let schemas = openapi["components"]["schemas"]
         .as_object_mut()
         .expect("No schemas found in OpenAPI file");
 
-    // Simplify ExtendedPointId to avoid conflicting TryFrom implementations
     schemas.insert(
         "ExtendedPointId".to_string(),
         serde_json::json!({
@@ -57,7 +57,6 @@ fn main() {
         }),
     );
 
-    // Simplify StartFrom to avoid conflicting TryFrom implementations
     schemas.insert(
         "StartFrom".to_string(),
         serde_json::json!({
@@ -70,15 +69,12 @@ fn main() {
         }),
     );
 
-    // Simplify Filter to avoid typify generating broken anyOf array wrappers
     if let Some(filter_schema) = schemas.get_mut("Filter") {
         if let Some(props) = filter_schema.pointer_mut("/properties") {
             if let Some(obj) = props.as_object_mut() {
                 let array_schema = serde_json::json!({
                     "type": "array",
-                    "items": {
-                        "$ref": "#/components/schemas/Condition"
-                    }
+                    "items": { "$ref": "#/components/schemas/Condition" }
                 });
                 if obj.contains_key("must") {
                     obj.insert("must".to_string(), array_schema.clone());
@@ -93,7 +89,6 @@ fn main() {
         }
     }
 
-    // Rename DocumentOptions to TextDocumentOptions to avoid recursive naming collision bug in typify
     if let Some(doc_options_schema) = schemas.remove("DocumentOptions") {
         schemas.insert("TextDocumentOptions".to_string(), doc_options_schema);
     }
@@ -126,4 +121,18 @@ fn main() {
     let out_dir = env::var_os("OUT_DIR").unwrap();
     let dest_path = Path::new(&out_dir).join("qdrant_types.rs");
     fs::write(dest_path, formatted).unwrap();
+
+    // ── Protobuf types (gRPC) ─────────────────────────────────────
+
+    let proto_dir = Path::new("proto");
+    println!("cargo:rerun-if-changed=proto/");
+
+    tonic_prost_build::configure()
+        .build_server(false)
+        .build_client(true)
+        .compile_protos(
+            &[proto_dir.join("qdrant.proto")],
+            &[proto_dir.to_path_buf()],
+        )
+        .expect("Failed to compile proto files");
 }

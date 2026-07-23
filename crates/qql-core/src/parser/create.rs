@@ -1,7 +1,10 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use crate::ast::{CreateCollectionStmt, SparseVectorDef, Stmt, VectorDef, VectorDistance};
+use crate::ast::{
+    CollectionMode, CreateCollectionStmt, CreateShardKeyStmt, SparseVectorDef, Stmt, VectorDef,
+    VectorDistance,
+};
 use crate::error::QqlError;
 use crate::token::TokenKind;
 
@@ -14,6 +17,9 @@ impl<'a> Parser<'a> {
         if tok.kind == TokenKind::Index {
             return self.parse_create_index();
         }
+        if tok.kind == TokenKind::Shard {
+            return self.parse_create_shard_key();
+        }
         self.expect(TokenKind::Collection)?;
         let collection = self.parse_identifier()?;
 
@@ -25,6 +31,56 @@ impl<'a> Parser<'a> {
         let mut explicit_vectors: Vec<VectorDef> = Vec::new();
         let mut explicit_sparse_vectors: Vec<SparseVectorDef> = Vec::new();
 
+        // Parse mode keyword (HYBRID, RERANK, DENSE/USING MODEL) before vectors
+        if self.peek()?.kind == TokenKind::Hybrid {
+            self.advance()?;
+            hybrid = true;
+            if self.peek()?.kind == TokenKind::Rerank {
+                self.advance()?;
+                rerank = true;
+            } else {
+                while self.peek()?.kind == TokenKind::Dense
+                    || self.peek()?.kind == TokenKind::Sparse
+                {
+                    let mode = self.advance()?.kind;
+                    let tok = self.peek()?;
+                    if tok.kind == TokenKind::Vector
+                        || (tok.kind == TokenKind::Identifier && ascii_equal(tok.text, "VECTOR"))
+                    {
+                        self.advance()?;
+                        let v = self.parse_string()?;
+                        if mode == TokenKind::Dense {
+                            dense_vector = Some(v);
+                        } else {
+                            sparse_vector = Some(v);
+                        }
+                    } else {
+                        return Err(QqlError::syntax(
+                            "expected VECTOR after DENSE/SPARSE",
+                            self.peek()?.pos,
+                        ));
+                    }
+                }
+            }
+        } else if self.peek()?.kind == TokenKind::Using {
+            self.advance()?;
+            if self.peek()?.kind == TokenKind::Hybrid {
+                self.advance()?;
+                hybrid = true;
+                if self.peek()?.kind == TokenKind::Dense {
+                    self.advance()?;
+                    model = Some(self.parse_required_model_string()?);
+                }
+            } else {
+                model = Some(self.parse_required_model_string()?);
+            }
+        }
+
+        if self.peek()?.kind == TokenKind::Identifier && ascii_equal(self.peek()?.text, "VECTORS") {
+            self.advance()?;
+        }
+
+        // Parse explicit vector definitions in parentheses
         if self.peek()?.kind == TokenKind::Lparen {
             self.advance()?;
             while self.peek()?.kind != TokenKind::Rparen && self.peek()?.kind != TokenKind::Eof {
@@ -113,62 +169,111 @@ impl<'a> Parser<'a> {
             self.expect(TokenKind::Rparen)?;
         }
 
-        if self.peek()?.kind == TokenKind::Hybrid {
-            self.advance()?;
-            hybrid = true;
-            if self.peek()?.kind == TokenKind::Rerank {
-                self.advance()?;
-                rerank = true;
-            } else {
-                while self.peek()?.kind == TokenKind::Dense
-                    || self.peek()?.kind == TokenKind::Sparse
-                {
-                    let mode = self.advance()?.kind;
-                    let tok = self.peek()?;
-                    if tok.kind == TokenKind::Vector
-                        || (tok.kind == TokenKind::Identifier && ascii_equal(tok.text, "VECTOR"))
-                    {
-                        self.advance()?;
-                        let v = self.parse_string()?;
-                        if mode == TokenKind::Dense {
-                            dense_vector = Some(v);
-                        } else {
-                            sparse_vector = Some(v);
-                        }
-                    } else {
-                        return Err(QqlError::syntax(
-                            "expected VECTOR after DENSE/SPARSE",
-                            self.peek()?.pos,
-                        ));
-                    }
-                }
-            }
-        } else if self.peek()?.kind == TokenKind::Using {
-            self.advance()?;
+        // Fallback HYBRID/DENSE mode check (only if not already set before vectors)
+        if !hybrid && !rerank && model.is_none() {
             if self.peek()?.kind == TokenKind::Hybrid {
                 self.advance()?;
                 hybrid = true;
-                if self.peek()?.kind == TokenKind::Dense {
+                if self.peek()?.kind == TokenKind::Rerank {
                     self.advance()?;
+                    rerank = true;
+                } else {
+                    while self.peek()?.kind == TokenKind::Dense
+                        || self.peek()?.kind == TokenKind::Sparse
+                    {
+                        let mode = self.advance()?.kind;
+                        let tok = self.peek()?;
+                        if tok.kind == TokenKind::Vector
+                            || (tok.kind == TokenKind::Identifier
+                                && ascii_equal(tok.text, "VECTOR"))
+                        {
+                            self.advance()?;
+                            let v = self.parse_string()?;
+                            if mode == TokenKind::Dense {
+                                dense_vector = Some(v);
+                            } else {
+                                sparse_vector = Some(v);
+                            }
+                        } else {
+                            return Err(QqlError::syntax(
+                                "expected VECTOR after DENSE/SPARSE",
+                                self.peek()?.pos,
+                            ));
+                        }
+                    }
+                }
+            } else if self.peek()?.kind == TokenKind::Using {
+                self.advance()?;
+                if self.peek()?.kind == TokenKind::Hybrid {
+                    self.advance()?;
+                    hybrid = true;
+                    if self.peek()?.kind == TokenKind::Dense {
+                        self.advance()?;
+                        model = Some(self.parse_required_model_string()?);
+                    }
+                } else {
                     model = Some(self.parse_required_model_string()?);
                 }
-            } else {
-                model = Some(self.parse_required_model_string()?);
             }
         }
 
         let config = self.parse_collection_config_blocks(false)?;
 
+        let mode = if rerank {
+            CollectionMode::Rerank
+        } else if hybrid {
+            CollectionMode::Hybrid {
+                dense_vector,
+                sparse_vector,
+            }
+        } else {
+            CollectionMode::Dense { model }
+        };
+
         Ok(Stmt::CreateCollection(Box::new(CreateCollectionStmt {
             collection,
-            hybrid,
-            rerank,
-            model,
-            dense_vector,
-            sparse_vector,
+            mode,
             vectors: explicit_vectors,
             sparse_vectors: explicit_sparse_vectors,
             config,
+        })))
+    }
+
+    pub fn parse_create_shard_key(&mut self) -> Result<Stmt, QqlError> {
+        // Consume the SHARD token (parse_create() only peeked at it)
+        self.expect(TokenKind::Shard)?;
+        self.expect(TokenKind::Key)?;
+        let shard_name = self.parse_string()?;
+        self.expect(TokenKind::On)?;
+        self.expect(TokenKind::Collection)?;
+        let collection = self.parse_identifier()?;
+        let mut shards_number = None;
+        let mut replication_factor = None;
+        if self.peek()?.kind == TokenKind::With {
+            self.advance()?;
+            let opts = self.parse_config_block()?;
+            for (key, val) in &opts {
+                let key_lower = key.to_ascii_lowercase();
+                if key_lower == "shards_number" {
+                    if let crate::ast::Value::Int(n) = val {
+                        if *n > 0 {
+                            shards_number = Some(*n as u64);
+                        }
+                    }
+                } else if key_lower == "replication_factor" {
+                    if let crate::ast::Value::Int(n) = val {
+                        if *n > 0 {
+                            replication_factor = Some(*n as u64);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(Stmt::CreateShardKey(Box::new(CreateShardKeyStmt {
+            collection,
+            shard_key: shard_name,
+            shards_number,
+            replication_factor,
         })))
     }
 }
