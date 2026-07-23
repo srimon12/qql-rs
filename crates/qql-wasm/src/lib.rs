@@ -207,7 +207,7 @@ pub fn tokenize(input: &str) -> Result<Vec<JsValue>, JsValue> {
 // ── Core: unified analyze ─────────────────────────────────────────
 
 #[wasm_bindgen]
-pub fn analyze(input: &str) -> JsValue {
+pub fn analyze(input: &str) -> String {
     let norm = normalize_input(input);
     let mut tokens = Vec::new();
     let lexer = Lexer::new(&norm);
@@ -251,7 +251,7 @@ pub fn analyze(input: &str) -> JsValue {
                 "error": serde_json::Value::Null,
             });
 
-            serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
+            serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
         }
         Err(err) => {
             let err_json = serde_json::json!({
@@ -271,7 +271,7 @@ pub fn analyze(input: &str) -> JsValue {
                 "error": err_json,
             });
 
-            serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
+            serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
         }
     }
 }
@@ -603,7 +603,7 @@ impl Client {
     ///   script (smart batching for same-collection queries/mutations)
     /// - `string[]` — each entry executed as above; results returned as array
     #[wasm_bindgen]
-    pub async fn execute(&self, query: JsValue) -> Result<JsValue, JsValue> {
+    pub async fn execute(&self, query: JsValue) -> Result<String, JsValue> {
         if js_sys::Array::is_array(&query) {
             let arr = js_sys::Array::from(&query);
             let len = arr.length() as usize;
@@ -622,13 +622,13 @@ impl Client {
                     }
                 }
             }
-            return serde_wasm_bindgen::to_value(&results)
+            return serde_json::to_string(&results)
                 .map_err(|e| JsValue::from_str(&e.to_string()));
         }
 
         if let Some(s) = query.as_string() {
             let val = self.execute_script(&s).await?;
-            return serde_wasm_bindgen::to_value(&val)
+            return serde_json::to_string(&val)
                 .map_err(|e| JsValue::from_str(&e.to_string()));
         }
 
@@ -638,9 +638,9 @@ impl Client {
     /// Execute a pre-parsed Stmt object.  Injects embeddings for UPSERT
     /// if an embedder is configured.
     #[wasm_bindgen(js_name = executeStmt)]
-    pub async fn execute_stmt(&self, stmt: &Stmt) -> Result<JsValue, JsValue> {
+    pub async fn execute_stmt(&self, stmt: &Stmt) -> Result<String, JsValue> {
         let val = self.execute_stmt_inner(&stmt.inner).await?;
-        serde_wasm_bindgen::to_value(&val).map_err(|e| JsValue::from_str(&e.to_string()))
+        serde_json::to_string(&val).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     /// Execute one or more statements with order-preserving smart batching.

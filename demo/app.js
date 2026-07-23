@@ -3,68 +3,111 @@ import init, { analyze, Client } from './pkg/qql_wasm.js?v=4';
 // ── Canonical QQL Presets (Valid Syntax with Trailing Semicolons) ────────────
 
 const PRESETS = {
-  hybrid: `-- 🚀 Hybrid Search combining Dense & Sparse vector retrieval
-QUERY HYBRID TEXT 'vector similarity search'
+  hybrid: `-- 🚀 Hybrid Dense+Sparse RRF — RTX missile defense contracts
+-- Embeds text → queries both dense & sparse vectors → fuses with RRF
+QUERY HYBRID TEXT 'Raytheon missile defense contracts programs'
   DENSE dense
   SPARSE sparse
   FUSION RRF
-  FROM docs
-  WHERE category = 'ai' AND year >= 2024
-  LIMIT 10 OFFSET 0;`,
+  FROM sec10k
+  WHERE fiscal_year >= 2024
+  SHARD 'rtx'
+  WITH PAYLOAD true
+  LIMIT 5;`,
 
-  cte: `-- ⚡ CTE Multi-Stage Prefetch DAG Pipeline
+  cte: `-- ⚡ CTE Prefetch DAG + Fusion + Score Threshold — Honeywell
+-- Stage 1: dense & sparse CTE pre-fetches with independent filters
+-- Stage 2: RRF fusion with per-stream score cutoffs
 WITH
-  dense_stream AS (
-    QUERY 'deep learning index' FROM docs USING dense LIMIT 50
-    WHERE category = 'tech'
+  dense_candidates AS (
+    QUERY TEXT 'supply chain disruption risk shortages'
+    FROM sec10k USING dense
+    WHERE fiscal_year >= 2024 LIMIT 100
   ),
-  sparse_stream AS (
-    QUERY 'deep learning index' FROM docs USING sparse LIMIT 50
+  sparse_candidates AS (
+    QUERY TEXT 'supply chain disruption risk shortages'
+    FROM sec10k USING sparse
+    WHERE fiscal_year >= 2024 LIMIT 100
   )
-QUERY FUSION RRF FROM docs
-  PREFETCH (dense_stream SCORE THRESHOLD 0.6, sparse_stream SCORE THRESHOLD 0.3)
-  LIMIT 10;`,
-
-  recommend: `-- 🎯 Vector Recommendation based on Positive & Negative Point IDs
-QUERY RECOMMEND POSITIVE (1, 3) NEGATIVE (2)
-  STRATEGY average_vector
-  FROM docs
-  USING dense
+QUERY FUSION RRF FROM sec10k
+  PREFETCH (
+    dense_candidates SCORE THRESHOLD 0.4,
+    sparse_candidates SCORE THRESHOLD 0.2
+  )
+  SHARD 'honeywell'
+  WITH PAYLOAD true
   LIMIT 5;`,
 
-  discover: `-- 🔄 Context & Discovery Search
-QUERY DISCOVER TARGET POINT 1
-  CONTEXT (POSITIVE POINT 2 NEGATIVE POINT 3)
-  FROM docs
-  USING dense
+  formula: `-- 🧮 Formula Score Boosting — RTX financial results boosted 2x
+-- Stage 1: dense CTE pre-fetch finds financial chunks
+-- Stage 2: FORMULA multiplies every score by 2.0 with DEFAULTS fallback
+WITH
+  candidates AS (
+    QUERY TEXT 'financial results revenue earnings growth margins'
+    FROM sec10k USING dense
+    WHERE fiscal_year >= 2024 LIMIT 30
+  )
+QUERY FORMULA score * 2.0 DEFAULTS (score = 0.0)
+  FROM sec10k
+  PREFETCH (candidates)
+  SHARD 'rtx'
+  WITH PAYLOAD true
   LIMIT 5;`,
 
-  grouped: `-- 📊 Grouped Aggregation Query
-QUERY 'vector database performance'
-  FROM docs
+  grouped: `-- 📊 Grouped Aggregation by Fiscal Year — RTX financials
+-- Hybrid RRF query with GROUP BY — 3 top hits per fiscal year
+QUERY HYBRID TEXT 'financial results revenue earnings'
+  DENSE dense SPARSE sparse
+  FUSION RRF
+  FROM sec10k
+  WHERE has_figures = true
+  SHARD 'rtx'
+  GROUP BY fiscal_year SIZE 3
+  LIMIT 20;`,
+
+  mmr: `-- 🎯 MMR Diversified Results — 3M manufacturing innovation
+-- Maximal Marginal Relevance: DIVERSITY 0.5 avoids near-duplicates
+-- CANDIDATES 100 fetches a larger pool before diversity pruning
+QUERY MMR TEXT 'manufacturing operations innovation products'
+  DIVERSITY 0.5 CANDIDATES 100
+  FROM sec10k
   USING dense
-  GROUP BY category SIZE 3
-  LIMIT 10;`,
+  WHERE fiscal_year >= 2024
+  SHARD '3m'
+  PARAMS (hnsw_ef = 256)
+  WITH PAYLOAD true
+  LIMIT 5;`,
 
-  ddl: `-- 📦 Collection DDL with HNSW & Scalar Quantization
-CREATE COLLECTION products HYBRID
-  WITH HNSW (m = 32, ef_construct = 100)
-  WITH QUANTIZATION (type = 'scalar', quantile = 0.95);
+  ddl: `-- 📜 SCROLL Pagination — GE filings with Cursor
+-- Scroll over GE's 2024+ chunks; use AFTER <point_id> to paginate
+SCROLL FROM sec10k
+  WHERE fiscal_year >= 2024
+  SHARD 'ge'
+  LIMIT 5;
 
-CREATE INDEX ON COLLECTION products FOR category TYPE keyword;
-CREATE INDEX ON COLLECTION products FOR price TYPE float;
+-- Count total chunks with financial figures across all companies
+COUNT FROM sec10k
+  WHERE has_figures = true AND fiscal_year >= 2024;`,
 
-SHOW COLLECTIONS;`,
+  discover: `-- 🔄 DBSF Alternative Fusion — Honeywell supply chain
+-- Distribution-Based Score Fusion instead of RRF
+QUERY HYBRID TEXT 'supply chain disruption risk shortages'
+  DENSE dense SPARSE sparse
+  FUSION DBSF
+  FROM sec10k
+  WHERE fiscal_year >= 2024
+  SHARD 'honeywell'
+  WITH PAYLOAD true
+  LIMIT 5;`,
 
-  upsert: `-- 📝 Document Upsert with Payload (Auto-Embed text fields)
-UPSERT INTO docs VALUES
-  {id: 1, text: 'Qdrant is a high-performance vector database', category: 'ai', year: 2024},
-  {id: 2, text: 'Rust achieves memory safety without GC', category: 'systems', year: 2023};`,
+  mutation: `-- 🗑️ Upsert + Cleanup — demo point lifecycle
+UPSERT INTO sec10k VALUES
+  {id: 9999999, text: 'QQL: vector query language for Qdrant — WASM-powered',
+   tenant_id: 'rtx', company: 'demo', fiscal_year: 2026}
+USING DENSE MODEL 'text-embedding-all-minilm-l6-v2-embedding'
+SHARD 'rtx';
 
-  mutation: `-- 🗑️ Payload Updates & Filter Deletion
-UPDATE docs SET PAYLOAD = {year: 2025} WHERE id = 2;
-
-DELETE FROM docs WHERE category = 'systems';`
+DELETE FROM sec10k WHERE id = 9999999 AND tenant_id = 'rtx';`
 };
 
 // Token kind mapping to CSS classes
@@ -180,7 +223,7 @@ function performAnalysis() {
   updateLineNumbers(text);
 
   const t0 = performance.now();
-  const res = analyze(text);
+  const res = JSON.parse(analyze(text));
   const t1 = performance.now();
 
   currentAnalysis = res;
@@ -427,7 +470,8 @@ btnExecute.addEventListener('click', async () => {
 
   try {
     codeResponseJson.textContent = 'Executing via QQL WASM Client (Embedding -> Qdrant REST)...';
-    const res = await client.execute(text);
+    const resJson = await client.execute(text);
+    const res = JSON.parse(resJson);
     codeResponseJson.textContent = JSON.stringify(res, null, 2);
   } catch (e) {
     const route = currentAnalysis?.route;

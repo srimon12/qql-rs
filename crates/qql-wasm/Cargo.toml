@@ -9,7 +9,7 @@ wasm-opt = false
 [package.metadata.wasm-pack.profile.release]
 # Shrink the .wasm binary; falls back gracefully if binaryen is missing at build time
 # only if you pass --no-opt. Prefer installing `wasm-opt` (binaryen) for release packs.
-wasm-opt = ["-O", "--enable-bulk-memory"]
+wasm-opt = ["-O", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
 
 [lib]
 crate-type = ["cdylib"]
