@@ -440,6 +440,483 @@ fn mutation_response() -> serde_json::Value {
     })
 }
 
+/// Dispatch a [`PlannedOperation`] directly to gRPC — **no Route, no JSON**.
+///
+/// This is the fast path for gRPC backends.  It matches each
+/// `PlannedOperation` variant and builds the corresponding tonic
+/// request from the already-typed fields.  There is no intermediate
+/// REST `Route` projection and no JSON serialisation/deserialisation.
+pub async fn execute_planned_grpc(
+    client: &crate::grpc::GrpcQdrant,
+    op: &qql_plan::PlannedOperation,
+) -> Result<serde_json::Value, QqlError> {
+    use qql_plan::PlannedOperation;
+    match op {
+        PlannedOperation::Query { collection, request } => {
+            let grpc_req = to_query_points(request, collection)?;
+            let resp = client
+                .query(grpc_req)
+                .await
+                .map_err(|e| QqlError::backend("QQL-GRPC", format!("query: {e}"), None))?;
+            Ok(serde_json::json!({
+                "result": resp.result.into_iter().map(scored_point_to_json).collect::<Vec<_>>(),
+                "status": "ok",
+                "time": resp.time,
+            }))
+        }
+        PlannedOperation::QueryGroups { collection, request } => {
+            let grpc_req = to_query_groups(request, collection)?;
+            let resp = client
+                .query_groups(grpc_req)
+                .await
+                .map_err(|e| QqlError::backend("QQL-GRPC", format!("query_groups: {e}"), None))?;
+            Ok(serde_json::json!({
+                "result": groups_result_to_json(resp.result.ok_or_else(|| QqlError::backend(
+                    "QQL-GRPC", "missing groups result", None,
+                ))?),
+                "status": "ok",
+                "time": resp.time,
+            }))
+        }
+        PlannedOperation::GetPoints { collection, request } => {
+            let grpc_req = qdrant::GetPoints {
+                collection_name: collection.clone(),
+                ids: request.ids.iter().map(to_point_id).collect(),
+                with_payload: request.with_payload.as_ref().map(to_payload_selector),
+                with_vectors: request.with_vector.as_ref().map(to_vectors_selector),
+                ..Default::default()
+            };
+            let resp = client
+                .get_points(grpc_req)
+                .await
+                .map_err(|e| QqlError::backend("QQL-GRPC", format!("get_points: {e}"), None))?;
+            Ok(serde_json::json!({
+                "result": resp.result.into_iter().map(retrieved_point_to_json).collect::<Vec<_>>(),
+                "status": "ok",
+                "time": resp.time,
+            }))
+        }
+        PlannedOperation::Scroll { collection, request } => {
+            let grpc_req = qdrant::ScrollPoints {
+                collection_name: collection.clone(),
+                filter: request.filter.as_ref().map(to_filter),
+                offset: request.offset.as_ref().map(to_point_id),
+                limit: request.limit.map(|l| l as u32),
+                with_payload: request.with_payload.as_ref().map(to_payload_selector),
+                with_vectors: request.with_vector.as_ref().map(to_vectors_selector),
+                shard_key_selector: shard_key_selector(&request.shard_key),
+                ..Default::default()
+            };
+            let resp = client
+                .scroll(grpc_req)
+                .await
+                .map_err(|e| QqlError::backend("QQL-GRPC", format!("scroll: {e}"), None))?;
+            let mut obj = serde_json::Map::new();
+            obj.insert("status".into(), serde_json::json!("ok"));
+            obj.insert("time".into(), serde_json::json!(resp.time));
+            obj.insert(
+                "result".into(),
+                serde_json::json!({
+                    "points": resp.result.into_iter().map(retrieved_point_to_json).collect::<Vec<_>>()
+                }),
+            );
+            if let Some(offset) = resp.next_page_offset {
+                obj.insert("next_page_offset".into(), point_id_to_json(&offset));
+            }
+            Ok(serde_json::Value::Object(obj))
+        }
+        PlannedOperation::Count { collection, request } => {
+            let grpc_req = qdrant::CountPoints {
+                collection_name: collection.clone(),
+                filter: request.filter.as_ref().map(to_filter),
+                exact: Some(true),
+                shard_key_selector: shard_key_selector(&request.shard_key),
+                ..Default::default()
+            };
+            let resp = client
+                .count_points(grpc_req)
+                .await
+                .map_err(|e| QqlError::backend("QQL-GRPC", format!("count: {e}"), None))?;
+            Ok(serde_json::json!({
+                "result": { "count": resp.result.unwrap_or_default().count },
+                "status": "ok",
+                "time": resp.time,
+            }))
+        }
+        PlannedOperation::Upsert {
+            collection,
+            request,
+            wait: _,
+        } => {
+            let points: Vec<qdrant::PointStruct> = request
+                .points
+                .iter()
+                .map(|p| {
+                    let id = to_point_id(&p.id);
+                    let vectors = p.vector.as_ref().and_then(to_vectors);
+                    let payload = p
+                        .payload
+                        .as_ref()
+                        .map(|pl| {
+                            pl.iter()
+                                .map(|(k, v)| (k.clone(), to_qdrant_value(v.clone())))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    qdrant::PointStruct {
+                        id: Some(id),
+                        vectors,
+                        payload,
+                    }
+                })
+                .collect();
+            let grpc_req = qdrant::UpsertPoints {
+                collection_name: collection.clone(),
+                wait: Some(true),
+                points,
+                shard_key_selector: shard_key_selector(&request.shard_key),
+                ..Default::default()
+            };
+            client
+                .upsert_points(grpc_req)
+                .await
+                .map_err(|e| QqlError::backend("QQL-GRPC", format!("upsert: {e}"), None))?;
+            Ok(mutation_response())
+        }
+        PlannedOperation::Delete { collection, request } => {
+            let selector =
+                points_and_filter_selector(request.points.as_ref(), request.filter.as_ref());
+            let grpc_req = qdrant::DeletePoints {
+                collection_name: collection.clone(),
+                wait: Some(true),
+                points: selector,
+                shard_key_selector: shard_key_selector(&request.shard_key),
+                ..Default::default()
+            };
+            client
+                .delete_points(grpc_req)
+                .await
+                .map_err(|e| QqlError::backend("QQL-GRPC", format!("delete: {e}"), None))?;
+            Ok(mutation_response())
+        }
+        PlannedOperation::ClearPayload { collection, request } => {
+            let selector =
+                points_and_filter_selector(request.points.as_ref(), request.filter.as_ref());
+            let grpc_req = qdrant::ClearPayloadPoints {
+                collection_name: collection.clone(),
+                wait: Some(true),
+                points: selector,
+                ..Default::default()
+            };
+            client
+                .clear_payload(grpc_req)
+                .await
+                .map_err(|e| QqlError::backend("QQL-GRPC", format!("clear_payload: {e}"), None))?;
+            Ok(mutation_response())
+        }
+        PlannedOperation::DeleteVectors { collection, request } => {
+            let selector =
+                points_and_filter_selector(request.points.as_ref(), request.filter.as_ref());
+            let grpc_req = qdrant::DeletePointVectors {
+                collection_name: collection.clone(),
+                wait: Some(true),
+                points_selector: selector,
+                vectors: Some(qdrant::VectorsSelector {
+                    names: request.vector.clone(),
+                }),
+                ..Default::default()
+            };
+            client
+                .delete_vectors(grpc_req)
+                .await
+                .map_err(|e| QqlError::backend("QQL-GRPC", format!("delete_vectors: {e}"), None))?;
+            Ok(mutation_response())
+        }
+        PlannedOperation::UpdateVectors { collection, request } => {
+            let points: Vec<qdrant::PointVectors> = request
+                .points
+                .iter()
+                .map(|p| qdrant::PointVectors {
+                    id: Some(to_point_id(&p.id)),
+                    vectors: to_vectors(&p.vector),
+                })
+                .collect();
+            let grpc_req = qdrant::UpdatePointVectors {
+                collection_name: collection.clone(),
+                wait: Some(true),
+                points,
+                ..Default::default()
+            };
+            client
+                .update_vectors(grpc_req)
+                .await
+                .map_err(|e| {
+                    QqlError::backend("QQL-GRPC", format!("update_vectors: {e}"), None)
+                })?;
+            Ok(mutation_response())
+        }
+        PlannedOperation::UpdatePayload { collection, request } => {
+            let selector =
+                points_and_filter_selector(request.points.as_ref(), request.filter.as_ref());
+            let payload_map: std::collections::HashMap<String, qdrant::Value> = request
+                .payload
+                .iter()
+                .map(|(k, v)| (k.clone(), to_qdrant_value(v.clone())))
+                .collect();
+            let grpc_req = qdrant::SetPayloadPoints {
+                collection_name: collection.clone(),
+                wait: Some(true),
+                payload: payload_map,
+                points_selector: selector,
+                ..Default::default()
+            };
+            client
+                .set_payload(grpc_req)
+                .await
+                .map_err(|e| QqlError::backend("QQL-GRPC", format!("set_payload: {e}"), None))?;
+            Ok(mutation_response())
+        }
+        PlannedOperation::CreateCollection { collection, request } => {
+            let deferred_params =
+                request
+                    .params
+                    .as_ref()
+                    .map(collection_params_diff)
+                    .filter(|params| {
+                        params.read_fan_out_factor.is_some()
+                            || params.read_fan_out_delay_ms.is_some()
+                    });
+            let grpc_req = qdrant::CreateCollection {
+                collection_name: collection.clone(),
+                vectors_config: request.vectors.as_ref().map(|v| {
+                    let map = v
+                        .iter()
+                        .map(|(name, cfg)| (name.clone(), vector_params(cfg)))
+                        .collect();
+                    qdrant::VectorsConfig {
+                        config: Some(qdrant::vectors_config::Config::ParamsMap(
+                            qdrant::VectorParamsMap { map },
+                        )),
+                    }
+                }),
+                sparse_vectors_config: request.sparse_vectors.as_ref().map(|sv| {
+                    let map = sv
+                        .iter()
+                        .map(|(name, cfg)| (name.clone(), sparse_vector_params(cfg)))
+                        .collect();
+                    qdrant::SparseVectorConfig { map }
+                }),
+                hnsw_config: request.hnsw_config.as_ref().map(hnsw_config),
+                optimizers_config: request.optimizers_config.as_ref().map(optimizers_config),
+                shard_number: request
+                    .shard_number
+                    .or_else(|| {
+                        request
+                            .params
+                            .as_ref()
+                            .and_then(|p| p.get("shard_number"))
+                            .and_then(|v| v.as_u64())
+                    })
+                    .map(|n| n as u32),
+                replication_factor: request
+                    .params
+                    .as_ref()
+                    .and_then(|p| p.get("replication_factor"))
+                    .and_then(|v| v.as_u64())
+                    .map(|n| n as u32),
+                on_disk_payload: request
+                    .params
+                    .as_ref()
+                    .and_then(|p| p.get("on_disk_payload"))
+                    .and_then(|v| v.as_bool()),
+                write_consistency_factor: request
+                    .params
+                    .as_ref()
+                    .and_then(|p| p.get("write_consistency_factor"))
+                    .and_then(serde_json::Value::as_u64)
+                    .map(|n| n as u32),
+                quantization_config: request
+                    .quantization_config
+                    .as_ref()
+                    .and_then(quantization_config),
+                sharding_method: request.sharding_method.as_ref().map(|method| {
+                    match method.to_ascii_lowercase().as_str() {
+                        "custom" => qdrant::ShardingMethod::Custom as i32,
+                        _ => qdrant::ShardingMethod::Auto as i32,
+                    }
+                }),
+                ..Default::default()
+            };
+            client.create_collection_raw(grpc_req).await.map_err(|e| {
+                QqlError::backend("QQL-GRPC", format!("create_collection: {e}"), None)
+            })?;
+            if let Some(params) = deferred_params {
+                client
+                    .update_collection_raw(qdrant::UpdateCollection {
+                        collection_name: collection.clone(),
+                        params: Some(params),
+                        ..Default::default()
+                    })
+                    .await
+                    .map_err(|e| {
+                        QqlError::backend(
+                            "QQL-GRPC",
+                            format!("update_collection_params: {e}"),
+                            None,
+                        )
+                    })?;
+            }
+            if let Some(shard_keys) = &request.shard_keys {
+                for shard_key in shard_keys {
+                    client
+                        .create_shard_key(qdrant::CreateShardKeyRequest {
+                            collection_name: collection.clone(),
+                            request: Some(qdrant::CreateShardKey {
+                                shard_key: Some(qdrant::ShardKey {
+                                    key: Some(qdrant::shard_key::Key::Keyword(
+                                        shard_key.clone(),
+                                    )),
+                                }),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        })
+                        .await
+                        .map_err(|e| {
+                            QqlError::backend(
+                                "QQL-GRPC",
+                                format!("create_shard_key {shard_key}: {e}"),
+                                None,
+                            )
+                        })?;
+                }
+            }
+            Ok(mutation_response())
+        }
+        PlannedOperation::UpdateCollection { collection, request } => {
+            let grpc_req = qdrant::UpdateCollection {
+                collection_name: collection.clone(),
+                optimizers_config: request.optimizers_config.as_ref().map(optimizers_config),
+                params: request.params.as_ref().map(collection_params_diff),
+                hnsw_config: request.hnsw_config.as_ref().map(hnsw_config),
+                quantization_config: request
+                    .quantization_config
+                    .as_ref()
+                    .and_then(quantization_config_diff),
+                ..Default::default()
+            };
+            client
+                .update_collection_raw(grpc_req)
+                .await
+                .map_err(|e| {
+                    QqlError::backend("QQL-GRPC", format!("update_collection: {e}"), None)
+                })?;
+            Ok(mutation_response())
+        }
+        PlannedOperation::DropCollection { collection } => {
+            let grpc_req = qdrant::DeleteCollection {
+                collection_name: collection.clone(),
+                ..Default::default()
+            };
+            client
+                .delete_collection_raw(grpc_req)
+                .await
+                .map_err(|e| {
+                    QqlError::backend("QQL-GRPC", format!("drop_collection: {e}"), None)
+                })?;
+            Ok(mutation_response())
+        }
+        PlannedOperation::CreateIndex { collection, request } => {
+            let field_type = match request.field_schema.as_str() {
+                "keyword" => qdrant::FieldType::Keyword as i32,
+                "integer" => qdrant::FieldType::Integer as i32,
+                "float" => qdrant::FieldType::Float as i32,
+                "geo" => qdrant::FieldType::Geo as i32,
+                "text" => qdrant::FieldType::Text as i32,
+                "bool" => qdrant::FieldType::Bool as i32,
+                "datetime" => qdrant::FieldType::Datetime as i32,
+                "uuid" => qdrant::FieldType::Uuid as i32,
+                _ => qdrant::FieldType::Keyword as i32,
+            };
+            let grpc_req = qdrant::CreateFieldIndexCollection {
+                collection_name: collection.clone(),
+                wait: Some(true),
+                field_name: request.field_name.clone(),
+                field_type: Some(field_type),
+                field_index_params: Some(payload_index_params(&request.field_schema, &request.extra)?),
+                ..Default::default()
+            };
+            client
+                .create_field_index(grpc_req)
+                .await
+                .map_err(|e| {
+                    QqlError::backend("QQL-GRPC", format!("create_index: {e}"), None)
+                })?;
+            Ok(mutation_response())
+        }
+        PlannedOperation::DropIndex { collection, field } => {
+            let grpc_req = qdrant::DeleteFieldIndexCollection {
+                collection_name: collection.clone(),
+                field_name: field.clone(),
+                ..Default::default()
+            };
+            client
+                .delete_field_index(grpc_req)
+                .await
+                .map_err(|e| {
+                    QqlError::backend("QQL-GRPC", format!("drop_index: {e}"), None)
+                })?;
+            Ok(mutation_response())
+        }
+        PlannedOperation::CreateShardKey { collection, request } => {
+            let grpc_req = qdrant::CreateShardKeyRequest {
+                collection_name: collection.clone(),
+                request: Some(qdrant::CreateShardKey {
+                    shard_key: Some(qdrant::ShardKey {
+                        key: Some(qdrant::shard_key::Key::Keyword(request.shard_key.clone())),
+                    }),
+                    shards_number: request.shards_number.map(|n| n as u32),
+                    replication_factor: request.replication_factor.map(|n| n as u32),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            client
+                .create_shard_key(grpc_req)
+                .await
+                .map_err(|e| {
+                    QqlError::backend("QQL-GRPC", format!("create_shard_key: {e}"), None)
+                })?;
+            Ok(mutation_response())
+        }
+        PlannedOperation::DropShardKey { collection, request } => {
+            let grpc_req = qdrant::DeleteShardKeyRequest {
+                collection_name: collection.clone(),
+                request: Some(qdrant::DeleteShardKey {
+                    shard_key: Some(qdrant::ShardKey {
+                        key: Some(qdrant::shard_key::Key::Keyword(request.shard_key.clone())),
+                    }),
+                }),
+                ..Default::default()
+            };
+            client
+                .delete_shard_key(grpc_req)
+                .await
+                .map_err(|e| {
+                    QqlError::backend("QQL-GRPC", format!("drop_shard_key: {e}"), None)
+                })?;
+            Ok(mutation_response())
+        }
+        // Read-only operations that need REST path (no gRPC direct equivalent)
+        PlannedOperation::ListCollections
+        | PlannedOperation::GetCollection { .. }
+        | PlannedOperation::ListShardKeys { .. } => {
+            let route = qql_plan::plan::to_rest_route(op);
+            execute_grpc_route(client, route).await
+        }
+    }
+}
+
 pub async fn execute_grpc_route(
     client: &crate::grpc::GrpcQdrant,
     route: Route,

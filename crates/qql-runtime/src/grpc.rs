@@ -495,6 +495,13 @@ impl QdrantOps for GrpcQdrant {
         crate::grpc_route::execute_grpc_route(self, route).await
     }
 
+    async fn execute_planned(
+        &self,
+        op: &qql_plan::PlannedOperation,
+    ) -> Result<serde_json::Value, QqlError> {
+        crate::grpc_route::execute_planned_grpc(self, op).await
+    }
+
     async fn execute_query_batch(
         &self,
         collection: &str,

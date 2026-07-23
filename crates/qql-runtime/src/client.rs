@@ -91,6 +91,19 @@ pub trait QdrantOps: QdrantOpsBound {
     ) -> Result<(), QqlError>;
     async fn execute_route(&self, route: Route) -> Result<serde_json::Value, QqlError>;
 
+    /// Execute a pre-planned operation directly — no REST Route projection.
+    ///
+    /// REST backends: `PlannedOperation` → `to_rest_route` → `execute_route` (default).
+    /// gRPC backends: override to go `PlannedOperation` → protobuf directly,
+    /// skipping the intermediate JSON serialisation/deserialisation hop.
+    async fn execute_planned(
+        &self,
+        op: &qql_plan::PlannedOperation,
+    ) -> Result<serde_json::Value, QqlError> {
+        let route = qql_plan::plan::to_rest_route(op);
+        self.execute_route(route).await
+    }
+
     /// Send multiple `QueryRequest`s to the same collection in one network call
     /// via Qdrant's `/points/query/batch` (REST) or `QueryBatch` (gRPC) endpoint.
     async fn execute_query_batch(
