@@ -1,13 +1,13 @@
-#[cfg(feature = "client")]
+#[cfg(all(feature = "client", target_arch = "wasm32"))]
 use async_trait::async_trait;
 #[cfg(feature = "client")]
 use gloo_net::http::Request;
 use qql_core::ast::{self, ComparisonOp, Value};
-#[cfg(feature = "client")]
+#[cfg(all(feature = "client", target_arch = "wasm32"))]
 use qql_core::error::QqlError;
 use qql_core::lexer::Lexer;
 use qql_core::parser::Parser;
-#[cfg(feature = "client")]
+#[cfg(all(feature = "client", target_arch = "wasm32"))]
 use qql_embed::{Embedder, SparseVector};
 use qql_plan::routing;
 #[cfg(feature = "client")]
@@ -575,6 +575,7 @@ impl Client {
     }
 
     /// Shared AST resolve via `qql-embed` (batched dense + local sparse).
+    #[cfg(target_arch = "wasm32")]
     async fn resolve_stmt_embeddings(&self, stmt: &mut qql_core::ast::Stmt) -> Result<(), JsValue> {
         if !self.has_embedder() {
             return Ok(());
@@ -582,6 +583,11 @@ impl Client {
         qql_embed::resolve_embeddings(stmt, self)
             .await
             .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn resolve_stmt_embeddings(&self, _stmt: &mut qql_core::ast::Stmt) -> Result<(), JsValue> {
+        Ok(())
     }
 
     /// Parse, compile, embed if needed, and POST to Qdrant's REST API.
@@ -704,12 +710,16 @@ impl Client {
 
             // Contiguous query batch
             if let Some((coll, q0)) = wasm_batchable_query(&stmts[i]) {
-                let mut searches = vec![qql_plan::query::lower_query_request(&q0)];
+                let req0 = qql_plan::query::lower_query_request(&q0)
+                    .map_err(|e| JsValue::from_str(&e.to_string()))?;
+                let mut searches = vec![req0];
                 let mut j = i + 1;
                 while j < stmts.len() {
                     match wasm_batchable_query(&stmts[j]) {
                         Some((c, q)) if c == coll => {
-                            searches.push(qql_plan::query::lower_query_request(&q));
+                            let req = qql_plan::query::lower_query_request(&q)
+                                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+                            searches.push(req);
                             j += 1;
                         }
                         _ => break,
@@ -860,9 +870,9 @@ fn wasm_batchable_query(stmt: &qql_core::ast::Stmt) -> Option<(String, qql_core:
 
 // ── WASM dense embed collect/apply (mirrors runtime batching) ─────
 
-#[cfg(feature = "client")]
+#[cfg(all(feature = "client", target_arch = "wasm32"))]
 // ── qql-embed::Embedder adapter (shared resolve path) ─────────────
-#[cfg(feature = "client")]
+#[cfg(all(feature = "client", target_arch = "wasm32"))]
 #[async_trait(?Send)]
 impl Embedder for Client {
     async fn embed_dense(&self, text: &str, _model: &str) -> Result<Vec<f32>, QqlError> {

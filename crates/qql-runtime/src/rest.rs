@@ -135,12 +135,19 @@ impl RestQdrant {
 impl QdrantOps for RestQdrant {
     async fn list_collections(&self) -> Result<Vec<String>, QqlError> {
         let value: Value = self.call(Method::GET, "/collections", None).await?;
+        validate_success_envelope(&value, "list_collections")?;
         let collections = value
             .get("result")
             .and_then(|r| r.get("collections"))
             .and_then(|c| c.as_array())
             .cloned()
-            .unwrap_or_default();
+            .ok_or_else(|| {
+                QqlError::backend(
+                    "QQL-BACKEND-ENVELOPE",
+                    "list_collections response result.collections missing or not an array",
+                    None,
+                )
+            })?;
         Ok(collections
             .iter()
             .filter_map(|c| c.get("name").and_then(Value::as_str).map(String::from))
@@ -152,11 +159,14 @@ impl QdrantOps for RestQdrant {
             .call::<Value>(Method::GET, &format!("/collections/{name}"), None)
             .await
         {
-            Ok(value) => Ok(value
-                .get("result")
-                .and_then(|r| r.get("status").or_else(|| r.get("exists")))
-                .map(|_| true)
-                .unwrap_or(true)),
+            Ok(value) => {
+                validate_success_envelope(&value, "collection_exists")?;
+                let status_ok = value
+                    .get("result")
+                    .and_then(|r| r.get("status").or_else(|| r.get("exists")))
+                    .is_some();
+                Ok(status_ok)
+            }
             Err(e) if e.message.contains("404") || e.message.contains("Not found") => Ok(false),
             Err(e) => Err(e),
         }
@@ -166,6 +176,7 @@ impl QdrantOps for RestQdrant {
         let value: Value = self
             .call(Method::GET, &format!("/collections/{name}"), None)
             .await?;
+        validate_success_envelope(&value, "get_collection_info")?;
         let result = value.get("result").cloned().unwrap_or(value);
 
         // Extract vector names from the raw Qdrant response.  Dense vectors

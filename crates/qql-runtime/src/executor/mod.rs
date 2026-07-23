@@ -186,6 +186,26 @@ impl Executor {
     }
 
     pub async fn execute_node(&self, stmt: Stmt) -> Result<ExecResponse, QqlError> {
+        if let Some(secs) = self.request_timeout() {
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(secs),
+                self.execute_node_inner(stmt),
+            )
+            .await
+            {
+                Ok(res) => res,
+                Err(_) => Err(QqlError::transport(
+                    "QQL-TIMEOUT",
+                    format!("operation timed out after {secs}s"),
+                    None,
+                )),
+            }
+        } else {
+            self.execute_node_inner(stmt).await
+        }
+    }
+
+    async fn execute_node_inner(&self, stmt: Stmt) -> Result<ExecResponse, QqlError> {
         let prepared = self.prepare_statement(stmt).await?;
         let planned = plan(&prepared)?;
         self.dispatch_planned(&planned).await
@@ -201,39 +221,42 @@ impl Executor {
     ) -> Result<Vec<ExecResponse>, QqlError> {
         let mut stmts = Vec::with_capacity(queries.len());
         for query in queries {
-            // Prefer multi-statement parse so each list entry can itself be a script.
             match parser::Parser::parse_all(query) {
                 Ok(parsed) => stmts.extend(parsed),
                 Err(first) => match parser::Parser::parse(query) {
                     Ok(stmt) => stmts.push(stmt),
-                    Err(_) => {
-                        if stop_on_error {
-                            return Err(first);
-                        }
-                        // Keep position: push a no-op marker via a failed single later.
-                        // Surface parse failure as a failed result by storing a
-                        // ShowCollections placeholder is wrong — re-parse fails hard.
-                        return Err(first);
-                    }
+                    Err(_) => return Err(first),
                 },
             }
         }
         self.execute_batch_nodes(stmts, stop_on_error).await
     }
 
-    /// Execute pre-parsed statements with order-preserving smart batching.
-    ///
-    /// Contiguous runs of batchable QUERY statements targeting the same
-    /// collection are sent via `/points/query/batch`. Contiguous runs of
-    /// mutations (UPSERT, DELETE, UPDATE PAYLOAD/VECTOR, CLEAR PAYLOAD,
-    /// DELETE VECTOR) targeting the same collection are sent via
-    /// `/points/batch`. All other statements execute individually.
-    /// Statement order is preserved.
-    ///
-    /// Every statement is prepared (embeddings + schema checks) before
-    /// batch classification so single- and multi-statement paths share
-    /// the same preparation semantics.
     pub async fn execute_batch_nodes(
+        &self,
+        stmts: Vec<Stmt>,
+        stop_on_error: bool,
+    ) -> Result<Vec<ExecResponse>, QqlError> {
+        if let Some(secs) = self.request_timeout() {
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(secs),
+                self.execute_batch_nodes_inner(stmts, stop_on_error),
+            )
+            .await
+            {
+                Ok(res) => res,
+                Err(_) => Err(QqlError::transport(
+                    "QQL-TIMEOUT",
+                    format!("batch execution timed out after {secs}s"),
+                    None,
+                )),
+            }
+        } else {
+            self.execute_batch_nodes_inner(stmts, stop_on_error).await
+        }
+    }
+
+    async fn execute_batch_nodes_inner(
         &self,
         stmts: Vec<Stmt>,
         stop_on_error: bool,
