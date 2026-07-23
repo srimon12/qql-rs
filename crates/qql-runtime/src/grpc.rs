@@ -488,13 +488,6 @@ impl QdrantOps for GrpcQdrant {
         ))
     }
 
-    async fn execute_route(
-        &self,
-        route: qql_plan::routing::Route,
-    ) -> Result<serde_json::Value, QqlError> {
-        crate::grpc_route::execute_grpc_route(self, route).await
-    }
-
     async fn execute_planned(
         &self,
         op: &qql_plan::PlannedOperation,

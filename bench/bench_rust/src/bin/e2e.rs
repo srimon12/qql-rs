@@ -2,7 +2,6 @@ use async_trait::async_trait;
 use qql::client::*;
 use qql::executor::Executor;
 use qql_core::error::QqlError;
-use qql_plan::routing::Route;
 use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 use std::time::{Duration, Instant};
 
@@ -38,7 +37,10 @@ impl QdrantOps for MockQdrant {
     ) -> Result<(), QqlError> {
         Ok(())
     }
-    async fn execute_route(&self, _route: Route) -> Result<serde_json::Value, QqlError> {
+    async fn execute_planned(
+        &self,
+        _op: &qql_plan::PlannedOperation,
+    ) -> Result<serde_json::Value, QqlError> {
         Ok(serde_json::json!({"result": [], "status": "ok", "time": 0.0}))
     }
     async fn execute_query_batch(
