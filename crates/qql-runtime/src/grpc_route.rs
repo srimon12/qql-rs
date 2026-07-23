@@ -426,7 +426,10 @@ pub async fn execute_planned_grpc(
 ) -> Result<serde_json::Value, QqlError> {
     use qql_plan::PlannedOperation;
     match op {
-        PlannedOperation::Query { collection, request } => {
+        PlannedOperation::Query {
+            collection,
+            request,
+        } => {
             let grpc_req = to_query_points(request, collection)?;
             let resp = client
                 .query(grpc_req)
@@ -438,7 +441,10 @@ pub async fn execute_planned_grpc(
                 "time": resp.time,
             }))
         }
-        PlannedOperation::QueryGroups { collection, request } => {
+        PlannedOperation::QueryGroups {
+            collection,
+            request,
+        } => {
             let grpc_req = to_query_groups(request, collection)?;
             let resp = client
                 .query_groups(grpc_req)
@@ -452,7 +458,10 @@ pub async fn execute_planned_grpc(
                 "time": resp.time,
             }))
         }
-        PlannedOperation::GetPoints { collection, request } => {
+        PlannedOperation::GetPoints {
+            collection,
+            request,
+        } => {
             let grpc_req = qdrant::GetPoints {
                 collection_name: collection.clone(),
                 ids: request.ids.iter().map(to_point_id).collect(),
@@ -470,7 +479,10 @@ pub async fn execute_planned_grpc(
                 "time": resp.time,
             }))
         }
-        PlannedOperation::Scroll { collection, request } => {
+        PlannedOperation::Scroll {
+            collection,
+            request,
+        } => {
             let grpc_req = qdrant::ScrollPoints {
                 collection_name: collection.clone(),
                 filter: request.filter.as_ref().map(to_filter),
@@ -499,7 +511,10 @@ pub async fn execute_planned_grpc(
             }
             Ok(serde_json::Value::Object(obj))
         }
-        PlannedOperation::Count { collection, request } => {
+        PlannedOperation::Count {
+            collection,
+            request,
+        } => {
             let grpc_req = qdrant::CountPoints {
                 collection_name: collection.clone(),
                 filter: request.filter.as_ref().map(to_filter),
@@ -557,7 +572,10 @@ pub async fn execute_planned_grpc(
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("upsert: {e}"), None))?;
             Ok(mutation_response())
         }
-        PlannedOperation::Delete { collection, request } => {
+        PlannedOperation::Delete {
+            collection,
+            request,
+        } => {
             let selector =
                 points_and_filter_selector(request.points.as_ref(), request.filter.as_ref());
             let grpc_req = qdrant::DeletePoints {
@@ -573,7 +591,10 @@ pub async fn execute_planned_grpc(
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("delete: {e}"), None))?;
             Ok(mutation_response())
         }
-        PlannedOperation::ClearPayload { collection, request } => {
+        PlannedOperation::ClearPayload {
+            collection,
+            request,
+        } => {
             let selector =
                 points_and_filter_selector(request.points.as_ref(), request.filter.as_ref());
             let grpc_req = qdrant::ClearPayloadPoints {
@@ -588,7 +609,10 @@ pub async fn execute_planned_grpc(
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("clear_payload: {e}"), None))?;
             Ok(mutation_response())
         }
-        PlannedOperation::DeleteVectors { collection, request } => {
+        PlannedOperation::DeleteVectors {
+            collection,
+            request,
+        } => {
             let selector =
                 points_and_filter_selector(request.points.as_ref(), request.filter.as_ref());
             let grpc_req = qdrant::DeletePointVectors {
@@ -606,7 +630,10 @@ pub async fn execute_planned_grpc(
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("delete_vectors: {e}"), None))?;
             Ok(mutation_response())
         }
-        PlannedOperation::UpdateVectors { collection, request } => {
+        PlannedOperation::UpdateVectors {
+            collection,
+            request,
+        } => {
             let points: Vec<qdrant::PointVectors> = request
                 .points
                 .iter()
@@ -624,12 +651,13 @@ pub async fn execute_planned_grpc(
             client
                 .update_vectors(grpc_req)
                 .await
-                .map_err(|e| {
-                    QqlError::backend("QQL-GRPC", format!("update_vectors: {e}"), None)
-                })?;
+                .map_err(|e| QqlError::backend("QQL-GRPC", format!("update_vectors: {e}"), None))?;
             Ok(mutation_response())
         }
-        PlannedOperation::UpdatePayload { collection, request } => {
+        PlannedOperation::UpdatePayload {
+            collection,
+            request,
+        } => {
             let selector =
                 points_and_filter_selector(request.points.as_ref(), request.filter.as_ref());
             let payload_map: std::collections::HashMap<String, qdrant::Value> = request
@@ -650,7 +678,10 @@ pub async fn execute_planned_grpc(
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("set_payload: {e}"), None))?;
             Ok(mutation_response())
         }
-        PlannedOperation::CreateCollection { collection, request } => {
+        PlannedOperation::CreateCollection {
+            collection,
+            request,
+        } => {
             let deferred_params =
                 request
                     .params
@@ -747,9 +778,7 @@ pub async fn execute_planned_grpc(
                             collection_name: collection.clone(),
                             request: Some(qdrant::CreateShardKey {
                                 shard_key: Some(qdrant::ShardKey {
-                                    key: Some(qdrant::shard_key::Key::Keyword(
-                                        shard_key.clone(),
-                                    )),
+                                    key: Some(qdrant::shard_key::Key::Keyword(shard_key.clone())),
                                 }),
                                 ..Default::default()
                             }),
@@ -767,7 +796,10 @@ pub async fn execute_planned_grpc(
             }
             Ok(mutation_response())
         }
-        PlannedOperation::UpdateCollection { collection, request } => {
+        PlannedOperation::UpdateCollection {
+            collection,
+            request,
+        } => {
             let grpc_req = qdrant::UpdateCollection {
                 collection_name: collection.clone(),
                 optimizers_config: request.optimizers_config.as_ref().map(optimizers_config),
@@ -779,12 +811,9 @@ pub async fn execute_planned_grpc(
                     .and_then(quantization_config_diff),
                 ..Default::default()
             };
-            client
-                .update_collection_raw(grpc_req)
-                .await
-                .map_err(|e| {
-                    QqlError::backend("QQL-GRPC", format!("update_collection: {e}"), None)
-                })?;
+            client.update_collection_raw(grpc_req).await.map_err(|e| {
+                QqlError::backend("QQL-GRPC", format!("update_collection: {e}"), None)
+            })?;
             Ok(mutation_response())
         }
         PlannedOperation::DropCollection { collection } => {
@@ -792,15 +821,15 @@ pub async fn execute_planned_grpc(
                 collection_name: collection.clone(),
                 ..Default::default()
             };
-            client
-                .delete_collection_raw(grpc_req)
-                .await
-                .map_err(|e| {
-                    QqlError::backend("QQL-GRPC", format!("drop_collection: {e}"), None)
-                })?;
+            client.delete_collection_raw(grpc_req).await.map_err(|e| {
+                QqlError::backend("QQL-GRPC", format!("drop_collection: {e}"), None)
+            })?;
             Ok(mutation_response())
         }
-        PlannedOperation::CreateIndex { collection, request } => {
+        PlannedOperation::CreateIndex {
+            collection,
+            request,
+        } => {
             let field_type = match request.field_schema.as_str() {
                 "keyword" => qdrant::FieldType::Keyword as i32,
                 "integer" => qdrant::FieldType::Integer as i32,
@@ -817,15 +846,16 @@ pub async fn execute_planned_grpc(
                 wait: Some(true),
                 field_name: request.field_name.clone(),
                 field_type: Some(field_type),
-                field_index_params: Some(payload_index_params(&request.field_schema, &request.extra)?),
+                field_index_params: Some(payload_index_params(
+                    &request.field_schema,
+                    &request.extra,
+                )?),
                 ..Default::default()
             };
             client
                 .create_field_index(grpc_req)
                 .await
-                .map_err(|e| {
-                    QqlError::backend("QQL-GRPC", format!("create_index: {e}"), None)
-                })?;
+                .map_err(|e| QqlError::backend("QQL-GRPC", format!("create_index: {e}"), None))?;
             Ok(mutation_response())
         }
         PlannedOperation::DropIndex { collection, field } => {
@@ -837,12 +867,13 @@ pub async fn execute_planned_grpc(
             client
                 .delete_field_index(grpc_req)
                 .await
-                .map_err(|e| {
-                    QqlError::backend("QQL-GRPC", format!("drop_index: {e}"), None)
-                })?;
+                .map_err(|e| QqlError::backend("QQL-GRPC", format!("drop_index: {e}"), None))?;
             Ok(mutation_response())
         }
-        PlannedOperation::CreateShardKey { collection, request } => {
+        PlannedOperation::CreateShardKey {
+            collection,
+            request,
+        } => {
             let grpc_req = qdrant::CreateShardKeyRequest {
                 collection_name: collection.clone(),
                 request: Some(qdrant::CreateShardKey {
@@ -855,15 +886,15 @@ pub async fn execute_planned_grpc(
                 }),
                 ..Default::default()
             };
-            client
-                .create_shard_key(grpc_req)
-                .await
-                .map_err(|e| {
-                    QqlError::backend("QQL-GRPC", format!("create_shard_key: {e}"), None)
-                })?;
+            client.create_shard_key(grpc_req).await.map_err(|e| {
+                QqlError::backend("QQL-GRPC", format!("create_shard_key: {e}"), None)
+            })?;
             Ok(mutation_response())
         }
-        PlannedOperation::DropShardKey { collection, request } => {
+        PlannedOperation::DropShardKey {
+            collection,
+            request,
+        } => {
             let grpc_req = qdrant::DeleteShardKeyRequest {
                 collection_name: collection.clone(),
                 request: Some(qdrant::DeleteShardKey {
@@ -876,9 +907,7 @@ pub async fn execute_planned_grpc(
             client
                 .delete_shard_key(grpc_req)
                 .await
-                .map_err(|e| {
-                    QqlError::backend("QQL-GRPC", format!("drop_shard_key: {e}"), None)
-                })?;
+                .map_err(|e| QqlError::backend("QQL-GRPC", format!("drop_shard_key: {e}"), None))?;
             Ok(mutation_response())
         }
         // Read-only operations — call gRPC client directly, no Route needed
@@ -890,9 +919,10 @@ pub async fn execute_planned_grpc(
             Ok(list_collections_response_to_json(resp))
         }
         PlannedOperation::GetCollection { collection } => {
-            let resp = client.collection_info_raw(collection.clone()).await.map_err(|e| {
-                QqlError::backend("QQL-GRPC", format!("get_collection: {e}"), None)
-            })?;
+            let resp = client
+                .collection_info_raw(collection.clone())
+                .await
+                .map_err(|e| QqlError::backend("QQL-GRPC", format!("get_collection: {e}"), None))?;
             Ok(collection_info_to_json(resp))
         }
         PlannedOperation::ListShardKeys { collection } => {
@@ -908,7 +938,9 @@ pub async fn execute_planned_grpc(
                 .filter_map(|d| d.key)
                 .map(|sk| match sk.key {
                     Some(qdrant::shard_key::Key::Keyword(s)) => serde_json::Value::String(s),
-                    Some(qdrant::shard_key::Key::Number(n)) => serde_json::Value::Number((n).into()),
+                    Some(qdrant::shard_key::Key::Number(n)) => {
+                        serde_json::Value::Number((n).into())
+                    }
                     None => serde_json::Value::Null,
                 })
                 .collect();
@@ -2734,8 +2766,7 @@ mod tests {
     #[test]
     fn query_points_shard_key() {
         let stmt =
-            Parser::parse("QUERY 'x' FROM docs USING dense SHARD 'tenant-42' LIMIT 5;")
-                .unwrap();
+            Parser::parse("QUERY 'x' FROM docs USING dense SHARD 'tenant-42' LIMIT 5;").unwrap();
         let r = route(&stmt);
         let req = match r.body.as_ref().unwrap() {
             RequestBody::Query(q) => q,
@@ -2756,8 +2787,7 @@ mod tests {
     /// Query with WHERE → gRPC filter present with must conditions
     #[test]
     fn query_points_filter_equality() {
-        let stmt =
-            Parser::parse("QUERY 'x' FROM docs WHERE status = 'active' LIMIT 5;").unwrap();
+        let stmt = Parser::parse("QUERY 'x' FROM docs WHERE status = 'active' LIMIT 5;").unwrap();
         let r = route(&stmt);
         let req = match r.body.as_ref().unwrap() {
             RequestBody::Query(q) => q,
@@ -2804,10 +2834,7 @@ mod tests {
             match c.condition_one_of.as_ref().unwrap() {
                 qdrant::condition::ConditionOneOf::Field(fc) => {
                     assert_eq!(fc.key, "age");
-                    assert!(
-                        fc.range.is_some(),
-                        "expected Range for age comparison"
-                    );
+                    assert!(fc.range.is_some(), "expected Range for age comparison");
                 }
                 _ => panic!("expected Field condition"),
             }
@@ -2824,7 +2851,10 @@ mod tests {
         let r = route(&stmt);
         let req = match r.body.as_ref().unwrap() {
             RequestBody::QueryGroups(g) => g,
-            other => panic!("expected QueryGroups, got {:?}", std::mem::discriminant(other)),
+            other => panic!(
+                "expected QueryGroups, got {:?}",
+                std::mem::discriminant(other)
+            ),
         };
         let qg = to_query_groups(req, "docs").unwrap();
 
@@ -2846,15 +2876,16 @@ mod tests {
         let req = match r.body.as_ref().unwrap() {
             RequestBody::CreateCollection(c) => c,
             other => {
-                panic!("expected CreateCollection, got {:?}", std::mem::discriminant(other))
+                panic!(
+                    "expected CreateCollection, got {:?}",
+                    std::mem::discriminant(other)
+                )
             }
         };
 
         // vectors should contain dense → size 384, distance Cosine
         let vectors = req.vectors.as_ref().expect("vectors should be set");
-        let dense = vectors
-            .get("dense")
-            .expect("dense vector config missing");
+        let dense = vectors.get("dense").expect("dense vector config missing");
         assert_eq!(dense["size"], 384);
         assert_eq!(dense["distance"], "Cosine");
 
@@ -2885,10 +2916,7 @@ mod tests {
     /// DELETE with compound filter → gRPC must conditions present
     #[test]
     fn delete_with_compound_filter() {
-        let stmt =
-            Parser::parse(
-                "DELETE FROM docs WHERE category = 'archived' AND priority < 3;",
-            )
+        let stmt = Parser::parse("DELETE FROM docs WHERE category = 'archived' AND priority < 3;")
             .unwrap();
         let r = route(&stmt);
         let req = match r.body.as_ref().unwrap() {
@@ -2905,7 +2933,10 @@ mod tests {
                     "expected 2 conditions in compound AND filter"
                 );
             }
-            other => panic!("expected Compound filter, got {:?}", std::mem::discriminant(other)),
+            other => panic!(
+                "expected Compound filter, got {:?}",
+                std::mem::discriminant(other)
+            ),
         }
     }
 

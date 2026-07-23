@@ -212,10 +212,8 @@ async fn a_query_text_resolved_to_dense_vector() {
 
 #[tokio::test]
 async fn b_upsert_text_resolved_to_dense_and_sparse() {
-    let mut stmt = Parser::parse(
-        "UPSERT INTO docs VALUES {id: 1, text: 'hi'}, {id: 2, text: 'bye'}",
-    )
-    .unwrap();
+    let mut stmt =
+        Parser::parse("UPSERT INTO docs VALUES {id: 1, text: 'hi'}, {id: 2, text: 'bye'}").unwrap();
     let mock = MockEmbedder::default();
     resolve_embeddings(&mut stmt, &mock).await.unwrap();
 
@@ -330,8 +328,9 @@ async fn f1_upsert_with_embed_directive_dense() {
         panic!("expected named vectors");
     };
     assert!(
-        list.iter().any(|(k, v)| k == "vec"
-            && matches!(v, VectorValue::Dense(d) if d == &vec![1.0, 2.0, 3.0])),
+        list.iter()
+            .any(|(k, v)| k == "vec"
+                && matches!(v, VectorValue::Dense(d) if d == &vec![1.0, 2.0, 3.0])),
         "expected dense vector named 'vec'"
     );
 }
@@ -383,10 +382,7 @@ async fn g_preexisting_vector_preserved_without_spec() {
 
 #[tokio::test]
 async fn i_preprovided_query_vector_not_embedded() {
-    let mut stmt = Parser::parse(
-        "QUERY NEAREST VECTOR [0.1, 0.2] FROM docs LIMIT 10",
-    )
-    .unwrap();
+    let mut stmt = Parser::parse("QUERY NEAREST VECTOR [0.1, 0.2] FROM docs LIMIT 10").unwrap();
     let mock = MockEmbedder::default();
     resolve_embeddings(&mut stmt, &mock).await.unwrap();
 
@@ -404,18 +400,14 @@ async fn i_preprovided_query_vector_not_embedded() {
 
 #[tokio::test]
 async fn j_query_with_using_dense() {
-    let mut stmt =
-        Parser::parse("QUERY 'hello' FROM docs USING dense LIMIT 10").unwrap();
+    let mut stmt = Parser::parse("QUERY 'hello' FROM docs USING dense LIMIT 10").unwrap();
     let mock = MockEmbedder::default();
     resolve_embeddings(&mut stmt, &mock).await.unwrap();
 
     let Stmt::Query(query) = &stmt else {
         panic!("expected Query");
     };
-    let QueryExpr::Nearest {
-        input, using, ..
-    } = &query.expression
-    else {
+    let QueryExpr::Nearest { input, using, .. } = &query.expression else {
         panic!("expected Nearest");
     };
     assert_eq!(

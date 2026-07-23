@@ -327,10 +327,7 @@ impl QdrantOps for RestQdrant {
         Ok(())
     }
 
-    async fn execute_planned(
-        &self,
-        op: &qql_plan::PlannedOperation,
-    ) -> Result<Value, QqlError> {
+    async fn execute_planned(&self, op: &qql_plan::PlannedOperation) -> Result<Value, QqlError> {
         let route = qql_plan::plan::to_rest_route(op);
         self.execute_http(route).await
     }

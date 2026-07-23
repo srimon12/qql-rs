@@ -605,7 +605,6 @@ impl EdgeQdrant {
             },
         }
     }
-
 }
 
 #[async_trait]
@@ -754,10 +753,7 @@ impl QdrantOps for EdgeQdrant {
             .map_err(|e| QqlError::execution("QQL-EDGE", format!("spawn_blocking: {e}"), None))?
     }
 
-    async fn execute_planned(
-        &self,
-        op: &qql_plan::PlannedOperation,
-    ) -> Result<Value, QqlError> {
+    async fn execute_planned(&self, op: &qql_plan::PlannedOperation) -> Result<Value, QqlError> {
         let route = qql_plan::plan::to_rest_route(op);
         self.execute_edge(route).await
     }
