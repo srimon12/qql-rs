@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import init, { analyze, Client } from "qql-wasm"
+import init, { analyze, Client, Stmt } from "qql-wasm"
 import type {
   AnalysisResult,
   ExecMetrics,
   PlaygroundSettings,
+  TenantConfig,
 } from "@/lib/qql-types"
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from "@/lib/qql-types"
 import {
@@ -22,6 +23,7 @@ function emptyAnalysis(): AnalysisResult {
     tokens: [],
     ast: null,
     route: null,
+    routes: [],
     explain: null,
     error: null,
   }
@@ -30,12 +32,18 @@ function emptyAnalysis(): AnalysisResult {
 function parseAnalysis(raw: string): AnalysisResult {
   try {
     const data = JSON.parse(raw) as AnalysisResult
+    const routes = Array.isArray(data.routes) && data.routes.length > 0
+      ? data.routes
+      : data.route
+        ? [data.route]
+        : []
     return {
       valid: Boolean(data.valid),
       statements_count: data.statements_count ?? 0,
       tokens: Array.isArray(data.tokens) ? data.tokens : [],
       ast: data.ast ?? null,
-      route: data.route ?? null,
+      route: data.route ?? routes[0] ?? null,
+      routes,
       explain: data.explain ?? null,
       error: data.error ?? null,
     }
@@ -149,7 +157,7 @@ export function useQql() {
   }, [configureClient])
 
   const runAnalysis = useCallback(
-    (source: string) => {
+    (source: string, tenantConfig?: TenantConfig) => {
       if (!ready) return emptyAnalysis()
       if (!source.trim()) {
         const empty = emptyAnalysis()
@@ -160,6 +168,46 @@ export function useQql() {
       }
 
       const t0 = performance.now()
+      if (tenantConfig?.enabled && tenantConfig.field.trim() && tenantConfig.value.trim()) {
+        try {
+          const stmt = new Stmt(source)
+          stmt.injectFilter(tenantConfig.field.trim(), tenantConfig.op || "=", tenantConfig.value.trim())
+          if (tenantConfig.shardKey.trim()) {
+            stmt.shardKey = tenantConfig.shardKey.trim()
+          }
+          const routeJson = stmt.compileRoute()
+          const parsedRoute = JSON.parse(routeJson) as { method: string; path: string; payload: unknown }
+          const baseResult = parseAnalysis(analyze(source))
+          const injectedRoute = {
+            method: parsedRoute.method,
+            path: parsedRoute.path,
+            payload: parsedRoute.payload,
+          }
+          const injectedResult: AnalysisResult = {
+            ...baseResult,
+            route: injectedRoute,
+            routes: [injectedRoute],
+            ast: stmt.toObject(),
+          }
+          const elapsed = performance.now() - t0
+          setParseMs(elapsed)
+          parseMsRef.current = elapsed
+          setAnalysis(injectedResult)
+          return injectedResult
+        } catch (err) {
+          const baseResult = parseAnalysis(analyze(source))
+          const errResult: AnalysisResult = {
+            ...baseResult,
+            error: {
+              code: "TENANT_ISOLATION",
+              message: `Tenant Injection Error: ${err instanceof Error ? err.message : String(err)}`,
+            },
+          }
+          setAnalysis(errResult)
+          return errResult
+        }
+      }
+
       const result = parseAnalysis(analyze(source))
       const elapsed = performance.now() - t0
       setParseMs(elapsed)
@@ -180,7 +228,7 @@ export function useQql() {
   )
 
   const execute = useCallback(
-    async (source: string) => {
+    async (source: string, tenantConfig?: TenantConfig) => {
       if (!ready) return
       const text = source.trim()
       if (!text) return
@@ -211,7 +259,22 @@ export function useQql() {
         }
 
         const t0 = performance.now()
-        const resJson = await clientRef.current!.execute(text)
+        let resJson = ""
+        if (tenantConfig?.enabled && tenantConfig.field.trim() && tenantConfig.value.trim()) {
+          try {
+            const stmt = new Stmt(text)
+            stmt.injectFilter(tenantConfig.field.trim(), tenantConfig.op || "=", tenantConfig.value.trim())
+            if (tenantConfig.shardKey.trim()) {
+              stmt.shardKey = tenantConfig.shardKey.trim()
+            }
+            resJson = await clientRef.current!.executeStmt(stmt)
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err)
+            throw new Error(`[Tenant Isolation Error] Failed to inject AST tenant directives: ${msg}. Query execution blocked for tenant security.`)
+          }
+        } else {
+          resJson = await clientRef.current!.execute(text)
+        }
         const totalMs = performance.now() - t0
 
         try {

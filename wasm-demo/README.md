@@ -6,15 +6,17 @@ This app replaces the older static `demo/` page (plain HTML + dual-layer highlig
 
 ---
 
-## Why this exists
+## Features & Capabilities
 
-| Capability | How |
+| Capability | Implementation |
 |---|---|
-| Offline parse / plan | `qql-wasm` (`analyze`, AST, route, explain, tokens) |
+| Offline parse & multi-statement plan | `qql-wasm` (`analyze`, AST, routes array, explain, tokenization) |
+| Tenant Isolation Sandbox | AST-native `inject_filter` & `shard_key` WASM mutation & wire diffing |
+| SDK Code Exporter | Multi-statement Python, Node.js, Rust SDK snippets & cURL export |
 | Offline embeddings (default) | Transformers.js · `Xenova/all-MiniLM-L6-v2` · **384-d** |
 | Optional remote embeddings | OpenAI-compatible HTTP (Ollama, LM Studio, OpenAI) |
-| Live search | Your Qdrant REST endpoint (e.g. local cluster + `sec10k`) |
-| Dev metrics | Parse, embed, network/Qdrant, total execute |
+| Live datasets & search | Live Qdrant REST (`berlin_airbnb` 2.5k listings & `sec10k`) |
+| Compiler Audit Bar | Real-time security strip for tenant WHERE filters & physical SHARD keys |
 
 **Default path:** no LM Studio / Ollama required for embeddings. Only Qdrant must be reachable for **Execute**.
 

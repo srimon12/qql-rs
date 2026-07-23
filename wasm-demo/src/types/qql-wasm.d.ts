@@ -30,6 +30,7 @@ declare module "qql-wasm" {
     constructor(input: string)
     toJSON(): string
     toObject(): unknown
+    compileRoute(): string
     get shardKey(): string | undefined
     set shardKey(value: string | null | undefined)
   }

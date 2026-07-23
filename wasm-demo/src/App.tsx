@@ -43,7 +43,7 @@ import { QueryEditor } from "@/components/playground/query-editor"
 import { Inspector } from "@/components/playground/inspector"
 import { SettingsDialog } from "@/components/playground/settings-dialog"
 import { AuditBar } from "@/components/playground/audit-bar"
-import { TenantSandbox } from "@/components/playground/tenant-sandbox"
+import { TenantControl } from "@/components/playground/tenant-sandbox"
 import { CodeExporter } from "@/components/playground/code-exporter"
 import { useQql } from "@/hooks/use-qql"
 import {
@@ -52,6 +52,7 @@ import {
   getPreset,
   type PresetId,
 } from "@/lib/presets"
+import type { InspectorTab, TenantConfig } from "@/lib/qql-types"
 import { BROWSER_EMBED_MODEL } from "@/lib/browser-embedder"
 
 function useDebouncedCallback<T extends (...args: never[]) => void>(
@@ -107,24 +108,33 @@ export function App() {
   const [query, setQuery] = useState(getInitialQuery)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsSaving, setSettingsSaving] = useState(false)
-  const [tenantSandboxOpen, setTenantSandboxOpen] = useState(false)
   const [codeExporterOpen, setCodeExporterOpen] = useState(false)
   const [copiedLink, setCopiedLink] = useState(false)
   const [copiedQql, setCopiedQql] = useState(false)
-  const [activeTab, setActiveTab] = useState("plan")
+  const [activeTab, setActiveTab] = useState<InspectorTab>("plan")
+  const [tenantConfig, setTenantConfig] = useState<TenantConfig>({
+    enabled: false,
+    field: "tenant_id",
+    op: "=",
+    value: "honeywell",
+    shardKey: "honeywell",
+  })
 
   const activePreset = useMemo(() => getPreset(presetId), [presetId])
 
   const debouncedAnalyze = useDebouncedCallback((src: string) => {
-    runAnalysis(src)
+    runAnalysis(src, tenantConfig)
   }, 80)
 
   useEffect(() => {
-    if (ready) runAnalysis(query)
-  }, [ready]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (ready) runAnalysis(query, tenantConfig)
+  }, [ready, query, tenantConfig]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const [selectedStmtIndex, setSelectedStmtIndex] = useState(0)
 
   const onQueryChange = (value: string) => {
     setQuery(value)
+    setSelectedStmtIndex(0)
     debouncedAnalyze(value)
   }
 
@@ -134,13 +144,14 @@ export function App() {
     if (!preset) return
     setPresetId(preset.id)
     setQuery(preset.query)
-    runAnalysis(preset.query)
+    setSelectedStmtIndex(0)
+    runAnalysis(preset.query, tenantConfig)
   }
 
   const onExecute = useCallback(async () => {
     setActiveTab("response")
-    await execute(query)
-  }, [execute, query])
+    await execute(query, tenantConfig)
+  }, [execute, query, tenantConfig])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -353,7 +364,11 @@ export function App() {
               <section className="flex h-full min-h-0 flex-col">
                 <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b px-3 py-1.5 bg-muted/20">
                   <span className="text-xs font-semibold tracking-wide text-muted-foreground uppercase font-mono">
-                    Query editor · sec10k
+                    Query editor · {(() => {
+                      const r = analysis.routes?.[0] ?? analysis.route
+                      const m = r?.path?.match(/\/collections\/([^/]+)/)
+                      return m ? m[1] : "sec10k"
+                    })()}
                   </span>
                   <div className="flex items-center gap-1.5">
                     {/* Execute right beside editor */}
@@ -379,15 +394,13 @@ export function App() {
 
                     <Separator orientation="vertical" className="h-5" />
 
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setTenantSandboxOpen(true)}
-                      className="text-emerald-600 dark:text-emerald-400 font-mono text-xs gap-1 bg-emerald-500/5 hover:bg-emerald-500/10 border-emerald-500/30"
-                    >
-                      <ShieldCheckIcon className="size-3.5" />
-                      Tenant Sandbox
-                    </Button>
+                    <TenantControl
+                      tenantConfig={tenantConfig}
+                      onUpdateConfig={(next) => {
+                        setTenantConfig(next)
+                        runAnalysis(query, next)
+                      }}
+                    />
 
                     <Button
                       variant="outline"
@@ -424,6 +437,26 @@ export function App() {
                   </div>
                 </div>
 
+                {tenantConfig.enabled && (
+                  <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-emerald-500/10 border-b border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-mono text-xs shrink-0 select-none">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheckIcon className="size-4 shrink-0 text-emerald-500" />
+                      <span className="font-bold">AST Directives Active:</span>
+                      <Badge variant="outline" className="font-mono text-[10px] bg-emerald-500/10 border-emerald-500/40 text-emerald-400">
+                        WHERE {tenantConfig.field} {tenantConfig.op} '{tenantConfig.value}'
+                      </Badge>
+                      {tenantConfig.shardKey.trim() && (
+                        <Badge variant="outline" className="font-mono text-[10px] bg-emerald-500/10 border-emerald-500/40 text-emerald-400">
+                          SHARD '{tenantConfig.shardKey}'
+                        </Badge>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-muted-foreground hidden sm:inline">
+                      🔒 Injected at AST layer on execute (Editor query stays pure)
+                    </span>
+                  </div>
+                )}
+
                 <div className="min-h-0 flex-1">
                   {ready ? (
                     <QueryEditor
@@ -459,7 +492,7 @@ export function App() {
             <ResizablePanel defaultSize={48} minSize={28}>
               <Inspector
                 analysis={analysis}
-                response={response}
+                responseJson={response}
                 activeTab={activeTab}
                 onTabChange={setActiveTab}
                 metrics={metrics}
@@ -468,6 +501,9 @@ export function App() {
                 embedProvider={settings.embedProvider}
                 qdrantUrl={settings.qdrantUrl}
                 teachingNote={activePreset?.teaching}
+                selectedStmtIndex={selectedStmtIndex}
+                onSelectStmtIndex={setSelectedStmtIndex}
+                tenantConfig={tenantConfig}
                 className="h-full"
               />
             </ResizablePanel>
@@ -486,7 +522,12 @@ export function App() {
               : settings.embedProvider === "http"
                 ? settings.embedModel
                 : "no embedder"}
-            {" · sec10k"}
+            {" · "}
+            {(() => {
+              const r = analysis.routes?.[0] ?? analysis.route
+              const m = r?.path?.match(/\/collections\/([^/]+)/)
+              return m ? m[1] : "sec10k"
+            })()}
           </span>
           <span className="hidden shrink-0 sm:inline">
             ⌘/Ctrl+Enter execute · d toggles theme
@@ -508,15 +549,7 @@ export function App() {
           }}
         />
 
-        <TenantSandbox
-          open={tenantSandboxOpen}
-          onOpenChange={setTenantSandboxOpen}
-          currentQuery={query}
-          onApplyQuery={(newQql) => {
-            setQuery(newQql)
-            runAnalysis(newQql)
-          }}
-        />
+
 
         <CodeExporter
           open={codeExporterOpen}
@@ -524,6 +557,7 @@ export function App() {
           query={query}
           qdrantUrl={settings.qdrantUrl}
           analysis={analysis}
+          selectedStmtIndex={selectedStmtIndex}
         />
       </div>
     </TooltipProvider>

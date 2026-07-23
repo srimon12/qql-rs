@@ -156,6 +156,19 @@ impl Stmt {
     pub fn to_object(&self) -> Result<JsValue, JsValue> {
         serde_wasm_bindgen::to_value(&self.inner).map_err(|e| JsValue::from_str(&e.to_string()))
     }
+
+    /// Compile this Stmt AST directly into a Qdrant REST route JSON payload.
+    #[wasm_bindgen(js_name = compileRoute)]
+    pub fn compile_route(&self) -> Result<String, JsValue> {
+        let route = routing::route(&self.inner);
+        let json_body = route.body_json();
+        let output = serde_json::json!({
+            "method": route.method.as_str(),
+            "path": route.path,
+            "payload": json_body.unwrap_or(serde_json::Value::Null),
+        });
+        serde_json::to_string_pretty(&output).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
 }
 
 // ── Core: tokenize ────────────────────────────────────────────────

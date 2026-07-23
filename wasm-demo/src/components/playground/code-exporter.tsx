@@ -17,6 +17,7 @@ type CodeExporterProps = {
   query: string
   qdrantUrl: string
   analysis: AnalysisResult
+  selectedStmtIndex?: number
 }
 
 export function CodeExporter({
@@ -25,6 +26,7 @@ export function CodeExporter({
   query,
   qdrantUrl,
   analysis,
+  selectedStmtIndex = 0,
 }: CodeExporterProps) {
   const [lang, setLang] = useState<"python" | "node" | "rust" | "curl">("python")
   const [copied, setCopied] = useState(false)
@@ -35,19 +37,27 @@ export function CodeExporter({
     const escapedQuery = query.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/"/g, '\\"')
     const pyQuery = query.replace(/\\/g, "\\\\").replace(/"""/g, '\\"""')
 
-    const restPath = analysis.route?.path ?? "/collections/sec10k/points/query"
-    const restMethod = (analysis.route?.method ?? "POST").toUpperCase()
-    const payloadStr = JSON.stringify(analysis.route?.payload ?? {}, null, 2)
+    const routes = analysis.routes && analysis.routes.length > 0
+      ? analysis.routes
+      : analysis.route
+        ? [analysis.route]
+        : []
+
+    const currentRoute = routes[selectedStmtIndex] ?? routes[0] ?? analysis.route
+    const restPath = currentRoute?.path ?? "/collections/berlin_airbnb/points/query"
+    const restMethod = (currentRoute?.method ?? "POST").toUpperCase()
+    const payloadStr = JSON.stringify(currentRoute?.payload ?? {}, null, 2)
 
     return {
       python: `# Install pyqql SDK: pip install pyqql
 from pyqql import Client
 
+# Connect to Qdrant cluster via pyqql client
 client = Client("${cleanUrl}")
 
+# Full script query (multi-statement batching supported)
 query_str = """${pyQuery}"""
 
-# Execute query against Qdrant cluster
 response = client.execute(query_str)
 print(response)`,
 
@@ -56,6 +66,7 @@ import { Client } from 'nqql';
 
 const client = new Client('${cleanUrl}');
 
+// Full script query string
 const queryStr = \`${escapedQuery}\`;
 
 async function run() {
@@ -65,25 +76,27 @@ async function run() {
 
 run().catch(console.error);`,
 
-      rust: `// Cargo.toml: qql = "0.1"
-use qql::Client;
+      rust: `// Cargo.toml: qql_core = "0.1", qql_plan = "0.1"
+use qql_core::parser::Parser;
+use qql_plan::routing::route;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = Client::new("${cleanUrl}", None);
-    let query_str = r#"${query}"#;
-
-    let response = client.execute(query_str).await?;
-    println!("{:#?}", response);
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let qql = r#"${query}"#;
+    let stmts = Parser::parse_all(qql)?;
+    
+    for (i, stmt) in stmts.iter().enumerate() {
+        let r = route(stmt);
+        println!("Statement #{}: {} {}", i + 1, r.method, r.path);
+    }
     Ok(())
 }`,
 
-      curl: `# Compiled REST route from QQL WASM planner
+      curl: `# Compiled REST route for Statement #${selectedStmtIndex + 1} of ${analysis.statements_count || 1}
 curl -X ${restMethod} "${cleanUrl}${restPath}" \\
   -H "Content-Type: application/json" \\
   -d '${payloadStr.replace(/'/g, "'\\''")}'`,
     }
-  }, [query, cleanUrl, analysis])
+  }, [query, cleanUrl, analysis, selectedStmtIndex])
 
   const activeSnippet = codeSnippets[lang]
 
@@ -98,51 +111,74 @@ curl -X ${restMethod} "${cleanUrl}${restPath}" \\
       <DialogContent className="sm:max-w-[900px] sm:w-[90vw] max-w-3xl max-h-[85vh] flex flex-col overflow-hidden p-6">
         <DialogHeader className="pb-2 border-b">
           <div className="flex items-center gap-2">
-            <Code2Icon className="size-5 text-primary" />
-            <DialogTitle className="text-lg font-semibold">
-              Copy as Production SDK Code
-            </DialogTitle>
+            <div className="size-8 rounded-md bg-primary/10 flex items-center justify-center">
+              <Code2Icon className="size-4 text-primary" />
+            </div>
+            <div>
+              <DialogTitle className="text-base font-semibold">SDK Code Exporter</DialogTitle>
+              <DialogDescription className="text-xs text-muted-foreground">
+                {lang === "python" || lang === "node"
+                  ? "Export full script execution snippet for Python (pyqql) and Node.js (nqql)."
+                  : `Export compiled REST route or Rust AST parser loop for Statement #${selectedStmtIndex + 1} of ${analysis.statements_count || 1}.`}
+              </DialogDescription>
+            </div>
           </div>
-          <DialogDescription className="text-xs text-muted-foreground">
-            Export this QQL statement into native SDK calls for Python, Node.js, Rust, or raw cURL.
-          </DialogDescription>
         </DialogHeader>
 
         <Tabs
           value={lang}
-          onValueChange={(v) => setLang(v as "python" | "node" | "rust" | "curl")}
-          className="flex-1 min-h-0 flex flex-col pt-2"
+          onValueChange={(v) => setLang(v as typeof lang)}
+          className="flex-1 min-h-0 flex flex-col pt-3"
         >
-          <TabsList className="w-full justify-start font-mono text-xs">
-            <TabsTrigger value="python">Python (pyqql)</TabsTrigger>
-            <TabsTrigger value="node">Node.js (nqql)</TabsTrigger>
-            <TabsTrigger value="rust">Rust (qql)</TabsTrigger>
-            <TabsTrigger value="curl">cURL REST</TabsTrigger>
-          </TabsList>
+          <div className="flex items-center justify-between gap-4 pb-3">
+            <TabsList className="grid grid-cols-4 w-[380px]">
+              <TabsTrigger value="python" className="text-xs font-mono">Python</TabsTrigger>
+              <TabsTrigger value="node" className="text-xs font-mono">Node.js</TabsTrigger>
+              <TabsTrigger value="rust" className="text-xs font-mono">Rust</TabsTrigger>
+              <TabsTrigger value="curl" className="text-xs font-mono">cURL</TabsTrigger>
+            </TabsList>
 
-          {Object.entries(codeSnippets).map(([key, code]) => (
-            <TabsContent key={key} value={key} className="flex-1 min-h-0 pt-3">
-              <div className="h-full rounded-lg border bg-card p-3 font-mono text-xs overflow-auto leading-relaxed">
-                <pre className="whitespace-pre-wrap">{code}</pre>
-              </div>
-            </TabsContent>
-          ))}
-        </Tabs>
-
-        <div className="flex items-center justify-between border-t pt-3 mt-3">
-          <span className="text-[11px] font-mono text-muted-foreground">
-            Endpoint: {cleanUrl}
-          </span>
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
-              Close
-            </Button>
-            <Button size="sm" onClick={handleCopy} className="gap-1.5 font-mono text-xs">
-              {copied ? <CheckIcon className="size-3.5 text-emerald-500" /> : <CopyIcon className="size-3.5" />}
-              {copied ? "Copied to Clipboard!" : `Copy ${lang.toUpperCase()} Code`}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleCopy}
+              className="font-mono text-xs gap-1.5 shrink-0"
+            >
+              {copied ? (
+                <CheckIcon className="size-3.5 text-emerald-500" />
+              ) : (
+                <CopyIcon className="size-3.5" />
+              )}
+              {copied ? "Copied Snippet" : "Copy Code"}
             </Button>
           </div>
-        </div>
+
+          <div className="flex-1 min-h-0 relative border rounded-md overflow-hidden bg-muted/40">
+            <TabsContent value="python" className="m-0 h-full">
+              <pre className="p-4 font-mono text-xs overflow-auto h-full text-foreground leading-relaxed">
+                {codeSnippets.python}
+              </pre>
+            </TabsContent>
+
+            <TabsContent value="node" className="m-0 h-full">
+              <pre className="p-4 font-mono text-xs overflow-auto h-full text-foreground leading-relaxed">
+                {codeSnippets.node}
+              </pre>
+            </TabsContent>
+
+            <TabsContent value="rust" className="m-0 h-full">
+              <pre className="p-4 font-mono text-xs overflow-auto h-full text-foreground leading-relaxed">
+                {codeSnippets.rust}
+              </pre>
+            </TabsContent>
+
+            <TabsContent value="curl" className="m-0 h-full">
+              <pre className="p-4 font-mono text-xs overflow-auto h-full text-foreground leading-relaxed">
+                {codeSnippets.curl}
+              </pre>
+            </TabsContent>
+          </div>
+        </Tabs>
       </DialogContent>
     </Dialog>
   )

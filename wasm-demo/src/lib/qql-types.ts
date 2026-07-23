@@ -30,6 +30,16 @@ export type AnalysisResult = {
   error: QqlError | null
 }
 
+export type InspectorTab = "plan" | "wire" | "ast" | "tokens" | "explain" | "response" | "metrics"
+
+export type TenantConfig = {
+  enabled: boolean
+  field: string
+  op: string
+  value: string
+  shardKey: string
+}
+
 /** Offline-first: browser MiniLM; HTTP is optional override. */
 export type EmbedProvider = "browser" | "http" | "none"
 

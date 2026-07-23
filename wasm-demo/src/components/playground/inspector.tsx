@@ -1,32 +1,36 @@
-import { useState } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { PlanView } from "@/components/playground/plan-view"
 import { TokensTable } from "@/components/playground/tokens-table"
+import { ShieldCheckIcon } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import { JsonViewer } from "@/components/playground/json-viewer"
 import { MetricsView } from "@/components/playground/metrics-view"
 import { ResultCards } from "@/components/playground/results-cards"
-import type { AnalysisResult, ExecMetrics } from "@/lib/qql-types"
+import type { AnalysisResult, ExecMetrics, InspectorTab, EmbedProvider, TenantConfig } from "@/lib/qql-types"
 import type { BrowserEmbedderStatus } from "@/lib/browser-embedder"
 import { cn } from "@/lib/utils"
 
 type InspectorProps = {
   analysis: AnalysisResult
-  response: string
-  activeTab: string
-  onTabChange: (tab: string) => void
+  responseJson: string
+  activeTab: InspectorTab
+  onTabChange: (tab: InspectorTab) => void
   metrics: ExecMetrics | null
   parseMs: number
   browserStatus: BrowserEmbedderStatus
-  embedProvider: string
+  embedProvider: EmbedProvider
   qdrantUrl: string
   teachingNote?: string
+  selectedStmtIndex?: number
+  onSelectStmtIndex?: (idx: number) => void
+  tenantConfig?: TenantConfig
   className?: string
 }
 
 export function Inspector({
   analysis,
-  response,
+  responseJson,
   activeTab,
   onTabChange,
   metrics,
@@ -35,9 +39,12 @@ export function Inspector({
   embedProvider,
   qdrantUrl,
   teachingNote,
+  selectedStmtIndex = 0,
+  onSelectStmtIndex,
+  tenantConfig,
   className,
 }: InspectorProps) {
-  const [selectedStmtIndex, setSelectedStmtIndex] = useState(0)
+  const setSelectedStmtIndex = onSelectStmtIndex ?? (() => {})
 
   const routes = analysis.routes && analysis.routes.length > 0
     ? analysis.routes
@@ -80,6 +87,13 @@ export function Inspector({
           <TabsTrigger value="explain">Explain</TabsTrigger>
           <TabsTrigger value="response">Response</TabsTrigger>
         </TabsList>
+
+        {tenantConfig?.enabled && (
+          <Badge variant="outline" className="font-mono text-[10px] bg-emerald-500/10 border-emerald-500/40 text-emerald-400 gap-1 shrink-0 ml-2">
+            <ShieldCheckIcon className="size-3 text-emerald-500" />
+            <span>AST Injected</span>
+          </Badge>
+        )}
       </div>
 
       <TabsContent value="plan" className="min-h-0 overflow-auto p-3">
@@ -126,7 +140,7 @@ export function Inspector({
       </TabsContent>
 
       <TabsContent value="response" className="min-h-0 overflow-hidden p-0">
-        <ResultCards responseJson={response} className="h-full" />
+        <ResultCards responseJson={responseJson} className="h-full" />
       </TabsContent>
     </Tabs>
   )
