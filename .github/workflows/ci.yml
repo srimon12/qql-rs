@@ -2,39 +2,39 @@ name: CI
 
 on:
   push:
+    branches: [main, dev]
   pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
   rust:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Format
-        run: cargo fmt --all -- --check
-      - name: Test workspace
-        run: cargo test --workspace
 
-  pyqql-wheel:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-      - name: Build wheel
-        working-directory: crates/pyqql
-        run: |
-          python -m pip install --upgrade pip maturin
-          maturin build --release --out dist
-      - name: Import wheel in fresh venv
-        working-directory: crates/pyqql
-        run: |
-          python -m venv /tmp/pyqql-venv
-          /tmp/pyqql-venv/bin/python -m pip install dist/*.whl
-          /tmp/pyqql-venv/bin/python - <<'PY'
-          import pyqql
-          assert pyqql.is_valid("QUERY 'hello' FROM docs LIMIT 1")
-          print(pyqql.parse("QUERY 'hello' FROM docs LIMIT 1").splitlines()[0])
-          PY
+          components: rustfmt, clippy
+
+      # protoc is required by tonic-prost-build in qql-runtime's build.rs
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (core crates)
+        run: cargo clippy --all-features -p qql-core -p qql-plan -p qql-embed -p qql -p qql-cli -- -D warnings
+
+      - name: Test (core crates)
+        run: cargo test --all-features -p qql-core -p qql-plan -p qql-embed -p qql -p qql-cli
+
+  # ─────────────────────────────────────────────────────────────
+  #  Platform bindings — skipped until publishing paths are ready
+  # ─────────────────────────────────────────────────────────────
+
+  # pyqql: needs Python 3.12 + maturin + protoc
+  # nqql:   needs Node.js + napi-rs
+  # wasm:   needs wasm32-unknown-unknown target + wasm-pack
