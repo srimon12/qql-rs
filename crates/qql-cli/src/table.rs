@@ -106,11 +106,7 @@ impl Table {
         for (i, cell) in cells.iter().enumerate() {
             let width = widths.get(i).copied().unwrap_or(0);
             let cell_width = cell.chars().count();
-            let padding = if width > cell_width {
-                width - cell_width
-            } else {
-                0
-            };
+            let padding = width.saturating_sub(cell_width);
             // Left pad with 1 space, right pad with remaining
             write!(w, " {} ", cell)?;
             if padding > 2 {
