@@ -7,15 +7,15 @@ edition.workspace = true
 crate-type = ["cdylib"]
 
 [features]
-default = ["rest"]
-grpc = ["qql/grpc"]
+default = ["rest", "grpc"]
 rest = ["qql/rest"]
+grpc = ["qql/grpc"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 qql-core = { path = "../qql-core", features = ["serde"] }
 qql-plan = { path = "../qql-plan" }
-qql = { path = "../qql-runtime", default-features = false }
+qql = { path = "../qql-runtime", default-features = false, features = ["rest", "grpc"] }
 pyo3 = { version = "0.23", features = ["extension-module"] }
 pyo3-async-runtimes = { version = "0.23", features = ["tokio-runtime"] }
 pythonize = "0.23"
