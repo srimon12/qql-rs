@@ -223,12 +223,13 @@ impl<'a> Parser<'a> {
             self.advance()?;
             if self.peek()?.kind == TokenKind::Any {
                 self.advance()?;
+                let list_tok = self.peek()?;
                 let values = self.parse_literal_list()?;
                 if values.is_empty() {
                     return Err(QqlError::parse(
                         "QQL-PARSE-MATCH-ANY",
                         "MATCH ANY requires a non-empty exact-value list",
-                        self.peek()?.span,
+                        list_tok.span,
                     ));
                 }
                 return Ok(FilterExpr::MatchAny { field, values });

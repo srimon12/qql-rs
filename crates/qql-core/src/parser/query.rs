@@ -392,6 +392,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_context_pairs(&mut self) -> Result<Vec<ContextPair>, QqlError> {
+        let paren_tok = self.peek()?;
         self.expect(TokenKind::Lparen)?;
         let mut pairs = Vec::new();
         loop {
@@ -410,7 +411,7 @@ impl<'a> Parser<'a> {
             return Err(QqlError::parse(
                 "QQL-PARSE-CONTEXT",
                 "CONTEXT requires at least one positive/negative pair",
-                self.peek()?.span,
+                paren_tok.span,
             ));
         }
         Ok(pairs)
@@ -472,12 +473,13 @@ impl<'a> Parser<'a> {
         self.expect_word("MMR")?;
         let input = self.parse_query_input()?;
         self.expect_word("DIVERSITY")?;
+        let div_tok = self.peek()?;
         let diversity = self.parse_numeric_literal()?;
         if !(0.0..=1.0).contains(&diversity) {
             return Err(QqlError::validation(
                 "QQL-VALIDATION-MMR",
                 "MMR diversity must be between 0 and 1",
-                Some(self.peek()?.span),
+                Some(div_tok.span),
             ));
         }
         self.expect_word("CANDIDATES")?;
@@ -495,12 +497,13 @@ impl<'a> Parser<'a> {
 
     fn parse_hybrid(&mut self) -> Result<QueryExpr, QqlError> {
         self.expect(TokenKind::Hybrid)?;
+        let input_tok = self.peek()?;
         let input = self.parse_query_input()?;
         let QueryInput::Text { text, model } = input else {
             return Err(QqlError::validation(
                 "QQL-VALIDATION-HYBRID",
                 "HYBRID shorthand requires a text input",
-                Some(self.peek()?.span),
+                Some(input_tok.span),
             ));
         };
         let dense_vector = if self.peek()?.kind == TokenKind::Dense {

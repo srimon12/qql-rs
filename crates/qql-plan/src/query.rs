@@ -3,6 +3,7 @@ use crate::types::*;
 use qql_core::ast::{
     FusionMethod, OrderDirection, PrefetchSource, QueryExpr, QueryInput, QueryStmt, VectorValue,
 };
+use qql_core::error::QqlError;
 
 pub fn lower_vector_value(value: &VectorValue) -> PlanVectorValue {
     PlanVectorValue::from(value)
@@ -303,20 +304,23 @@ pub fn lower_prefetch_with_ctes(
 
     let (query, using, nested_prefetch, source_filter, source_params, source_limit, source_score) =
         if let Some(q) = source_query {
-            let (variant, using, nested) = build_query_with_prefetch(q);
-            (
-                Some(variant),
-                using,
-                if nested.is_empty() {
-                    None
-                } else {
-                    Some(nested)
-                },
-                q.filter.as_ref().map(|f| top_level_filter(f)),
-                q.params.as_ref().and_then(lower_search_params),
-                q.page.limit,
-                q.score_threshold,
-            )
+            if let Ok((variant, using, nested)) = build_query_with_prefetch(q) {
+                (
+                    Some(variant),
+                    using,
+                    if nested.is_empty() {
+                        None
+                    } else {
+                        Some(nested)
+                    },
+                    q.filter.as_ref().map(|f| top_level_filter(f)),
+                    q.params.as_ref().and_then(lower_search_params),
+                    q.page.limit,
+                    q.score_threshold,
+                )
+            } else {
+                (None, None, None, None, None, None, None)
+            }
         } else {
             (None, None, None, None, None, None, None)
         };
@@ -371,11 +375,11 @@ fn lower_output_selector(
     (with_payload, with_vector)
 }
 
-pub fn lower_query_request(query: &QueryStmt) -> QueryRequest {
+pub fn lower_query_request(query: &QueryStmt) -> Result<QueryRequest, QqlError> {
     let (with_payload, with_vector) = lower_output_selector(&query.output);
-    let (query_variant, using, prefetch) = build_query_with_prefetch(query);
+    let (query_variant, using, prefetch) = build_query_with_prefetch(query)?;
 
-    QueryRequest {
+    Ok(QueryRequest {
         query: query_variant,
         using,
         prefetch,
@@ -388,18 +392,18 @@ pub fn lower_query_request(query: &QueryStmt) -> QueryRequest {
         offset: query.page.offset,
         lookup_from: None,
         shard_key: query.shard_key.clone(),
-    }
+    })
 }
 
-pub fn lower_query_groups_request(query: &QueryStmt) -> QueryGroupsRequest {
+pub fn lower_query_groups_request(query: &QueryStmt) -> Result<QueryGroupsRequest, QqlError> {
     let group = query
         .group
         .as_ref()
         .expect("group required for groups query");
     let (with_payload, with_vector) = lower_output_selector(&query.output);
-    let (query_variant, using, prefetch) = build_query_with_prefetch(query);
+    let (query_variant, using, prefetch) = build_query_with_prefetch(query)?;
 
-    QueryGroupsRequest {
+    Ok(QueryGroupsRequest {
         query: query_variant,
         using,
         prefetch,
@@ -417,12 +421,12 @@ pub fn lower_query_groups_request(query: &QueryStmt) -> QueryGroupsRequest {
             .map(|coll| WithLookupValue::Collection(coll.clone())),
         lookup_from: None,
         shard_key: query.shard_key.clone(),
-    }
+    })
 }
 
 fn build_query_with_prefetch(
     query: &QueryStmt,
-) -> (QueryVariant, Option<String>, Vec<PrefetchRequest>) {
+) -> Result<(QueryVariant, Option<String>, Vec<PrefetchRequest>), QqlError> {
     match &query.expression {
         QueryExpr::Hybrid {
             text,
@@ -481,7 +485,7 @@ fn build_query_with_prefetch(
                     fusion: fusion_name.into(),
                 }
             };
-            (variant, None, vec![dense_prefetch, sparse_prefetch])
+            Ok((variant, None, vec![dense_prefetch, sparse_prefetch]))
         }
         QueryExpr::Rerank {
             input,
@@ -489,6 +493,20 @@ fn build_query_with_prefetch(
             using,
             prefetch,
         } => {
+            if using.is_empty() {
+                return Err(QqlError::validation(
+                    "QQL-PLAN-RERANK-USING",
+                    "RERANK requires non-empty USING vector name",
+                    None,
+                ));
+            }
+            if prefetch.is_empty() {
+                return Err(QqlError::validation(
+                    "QQL-PLAN-RERANK-PREFETCH",
+                    "RERANK requires at least one PREFETCH",
+                    None,
+                ));
+            }
             let pf_requests: Vec<PrefetchRequest> = prefetch.iter().map(lower_prefetch).collect();
             let nearest_input = match input {
                 QueryInput::Text { text, .. } => PlanQueryInput::Document {
@@ -497,14 +515,14 @@ fn build_query_with_prefetch(
                 },
                 _ => lower_query_input(input),
             };
-            (
+            Ok((
                 QueryVariant::Nearest(NearestQuery {
                     nearest: nearest_input,
                     mmr: None,
                 }),
                 Some(using.clone()),
                 pf_requests,
-            )
+            ))
         }
         _ => {
             let mut variant = lower_query_expr(&query.expression);
@@ -523,11 +541,12 @@ fn build_query_with_prefetch(
                 }
             }
             let using = expression_using(&query.expression).cloned();
-            let prefetches: Vec<PrefetchRequest> = expression_prefetch(&query.expression)
+            let prefetches = expression_prefetch(&query.expression);
+            let pf_requests: Vec<PrefetchRequest> = prefetches
                 .iter()
                 .map(|p| lower_prefetch_with_ctes(p, &query.ctes))
                 .collect();
-            (variant, using, prefetches)
+            Ok((variant, using, pf_requests))
         }
     }
 }

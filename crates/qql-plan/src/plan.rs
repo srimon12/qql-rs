@@ -234,13 +234,13 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
             if query.group.is_some() {
                 return Ok(PlannedOperation::QueryGroups {
                     collection,
-                    request: lower_query_groups_request(query),
+                    request: lower_query_groups_request(query)?,
                 });
             }
 
             Ok(PlannedOperation::Query {
                 collection,
-                request: lower_query_request(query),
+                request: lower_query_request(query)?,
             })
         }
         Stmt::Scroll(scroll) => Ok(PlannedOperation::Scroll {
@@ -592,5 +592,84 @@ mod tests {
             alter_route.body,
             Some(RequestBody::UpdateCollection(_))
         ));
+    }
+
+    #[test]
+    fn plan_rejects_malformed_rerank() {
+        use qql_core::ast::{PageSpec, QueryInput, QueryOutput, QueryStmt};
+        let stmt_empty_using = Stmt::Query(Box::new(QueryStmt {
+            ctes: Vec::new(),
+            collection: QueryCollection::Explicit("docs".into()),
+            expression: QueryExpr::Rerank {
+                input: QueryInput::Text {
+                    text: "rerank text".into(),
+                    model: None,
+                },
+                model: "colbert-v2".into(),
+                using: String::new(),
+                prefetch: vec![qql_core::ast::Prefetch {
+                    source: qql_core::ast::PrefetchSource::Query(Box::new(QueryStmt {
+                        ctes: Vec::new(),
+                        collection: QueryCollection::Inherited,
+                        expression: QueryExpr::SampleRandom,
+                        filter: None,
+                        params: None,
+                        score_threshold: None,
+                        group: None,
+                        output: QueryOutput::default(),
+                        page: PageSpec {
+                            limit: Some(10),
+                            offset: None,
+                        },
+                        shard_key: None,
+                    })),
+                    filter: None,
+                    score_threshold: None,
+                    lookup: None,
+                }],
+            },
+            filter: None,
+            params: None,
+            score_threshold: None,
+            group: None,
+            output: QueryOutput::default(),
+            page: PageSpec {
+                limit: Some(5),
+                offset: None,
+            },
+            shard_key: None,
+        }));
+        assert_eq!(
+            plan(&stmt_empty_using).unwrap_err().kind,
+            qql_core::error::ErrorKind::Validation
+        );
+
+        let stmt_empty_prefetch = Stmt::Query(Box::new(QueryStmt {
+            ctes: Vec::new(),
+            collection: QueryCollection::Explicit("docs".into()),
+            expression: QueryExpr::Rerank {
+                input: QueryInput::Text {
+                    text: "rerank text".into(),
+                    model: None,
+                },
+                model: "colbert-v2".into(),
+                using: "dense".into(),
+                prefetch: Vec::new(),
+            },
+            filter: None,
+            params: None,
+            score_threshold: None,
+            group: None,
+            output: QueryOutput::default(),
+            page: PageSpec {
+                limit: Some(5),
+                offset: None,
+            },
+            shard_key: None,
+        }));
+        assert_eq!(
+            plan(&stmt_empty_prefetch).unwrap_err().kind,
+            qql_core::error::ErrorKind::Validation
+        );
     }
 }

@@ -1,15 +1,15 @@
-pub mod alter_drop_show;
-pub mod config_parsers;
-pub mod config_validation;
-pub mod create;
-pub mod filter;
-pub mod formula;
-pub mod helpers;
-pub mod point_ops;
-pub mod query;
-pub mod r#update;
-pub mod upsert;
-pub mod with_clause;
+pub(crate) mod alter_drop_show;
+pub(crate) mod config_parsers;
+pub(crate) mod config_validation;
+pub(crate) mod create;
+pub(crate) mod filter;
+pub(crate) mod formula;
+pub(crate) mod helpers;
+pub(crate) mod point_ops;
+pub(crate) mod query;
+pub(crate) mod r#update;
+pub(crate) mod upsert;
+pub(crate) mod with_clause;
 
 use crate::ast::Stmt;
 use crate::error::QqlError;

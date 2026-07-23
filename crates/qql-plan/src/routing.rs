@@ -100,10 +100,9 @@ pub fn route_query_batch(stmts: &[QueryStmt]) -> Vec<(String, QueryBatchRequest)
             QueryCollection::Explicit(name) => name.clone(),
             QueryCollection::Inherited => continue,
         };
-        groups
-            .entry(collection)
-            .or_default()
-            .push(lower_query_request(stmt));
+        if let Ok(req) = lower_query_request(stmt) {
+            groups.entry(collection).or_default().push(req);
+        }
     }
 
     groups

@@ -111,11 +111,19 @@ pub fn config_max_optimization_threads(
     }
 }
 
+pub fn is_integer_val(value: &Value) -> bool {
+    match value {
+        Value::Int(_) => true,
+        Value::Float(f) => *f >= 0.0 && *f == (*f as u64) as f64,
+        _ => false,
+    }
+}
+
 pub fn validate_hnsw_value(key: &str, value: &Value, pos: usize) -> Result<(), QqlError> {
     let lower = key.to_ascii_lowercase();
     match lower.as_str() {
         "m" | "ef_construct" | "full_scan_threshold" | "max_indexing_threads" | "payload_m" => {
-            if !matches!(value, Value::Int(_)) {
+            if !is_integer_val(value) {
                 return Err(validation_err(
                     alloc::format!("{} must be an integer", key),
                     pos,
@@ -160,7 +168,7 @@ pub fn validate_optimizers_value(key: &str, value: &Value, pos: usize) -> Result
         | "memmap_threshold"
         | "indexing_threshold"
         | "flush_interval_sec" => {
-            if !matches!(value, Value::Int(_)) {
+            if !is_integer_val(value) {
                 return Err(validation_err(
                     alloc::format!("{} must be an integer", key),
                     pos,
@@ -168,7 +176,7 @@ pub fn validate_optimizers_value(key: &str, value: &Value, pos: usize) -> Result
             }
         }
         "max_optimization_threads" => {
-            if !matches!(value, Value::Int(_) | Value::Str(_)) {
+            if !is_integer_val(value) && !matches!(value, Value::Str(_)) {
                 return Err(validation_err(
                     alloc::format!("{} must be a positive integer or 'auto'", key),
                     pos,
