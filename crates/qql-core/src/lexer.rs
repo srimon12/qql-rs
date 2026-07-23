@@ -179,6 +179,11 @@ impl<'a> Lexer<'a> {
                 continue;
             }
             if bytes[self.pos] == quote {
+                // SQL-style double single quotes ('') inside single-quoted strings
+                if quote == b'\'' && self.pos + 1 < self.input.len() && bytes[self.pos + 1] == b'\'' {
+                    self.pos += 2;
+                    continue;
+                }
                 let text = &self.input[content_start..self.pos];
                 self.pos += 1;
                 return Ok(Token::new(
@@ -207,15 +212,40 @@ impl<'a> Lexer<'a> {
             self.pos += 1;
         }
 
+        let mut is_float = false;
         if self.pos < self.input.len()
             && self.input.as_bytes()[self.pos] == b'.'
             && self.pos + 1 < self.input.len()
             && is_digit(self.input.as_bytes()[self.pos + 1])
         {
+            is_float = true;
             self.pos += 1;
             while self.pos < self.input.len() && is_digit(self.input.as_bytes()[self.pos]) {
                 self.pos += 1;
             }
+        }
+
+        // Handle scientific notation exponent (e/E, e-5, e+5)
+        if self.pos < self.input.len()
+            && (self.input.as_bytes()[self.pos] == b'e' || self.input.as_bytes()[self.pos] == b'E')
+        {
+            let next_pos = self.pos + 1;
+            if next_pos < self.input.len() {
+                let next_ch = self.input.as_bytes()[next_pos];
+                if is_digit(next_ch) || next_ch == b'+' || next_ch == b'-' {
+                    is_float = true;
+                    self.pos += 1; // consume 'e'/'E'
+                    if self.input.as_bytes()[self.pos] == b'+' || self.input.as_bytes()[self.pos] == b'-' {
+                        self.pos += 1; // consume '+' or '-'
+                    }
+                    while self.pos < self.input.len() && is_digit(self.input.as_bytes()[self.pos]) {
+                        self.pos += 1;
+                    }
+                }
+            }
+        }
+
+        if is_float {
             Ok(Token::new(
                 TokenKind::Float,
                 &self.input[start..self.pos],

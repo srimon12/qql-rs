@@ -184,6 +184,10 @@ impl<'a> Parser<'a> {
 
     pub fn parse_field_path(&mut self) -> Result<String, QqlError> {
         let token = self.peek()?;
+        if token.kind == TokenKind::String {
+            self.advance()?;
+            return self.decode_string(token);
+        }
         if token.kind != TokenKind::Identifier && !super::is_contextual_field_name(token.kind) {
             return Err(QqlError::parse(
                 "QQL-PARSE-FIELD",

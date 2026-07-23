@@ -46,16 +46,17 @@ fn check_named_vectors(collection: &str, info: &CollectionInfo) -> Result<(), Qq
         .map(String::as_str)
         .collect();
 
-    if dense.is_empty() && sparse.is_empty() {
+    let mut names = dense;
+    names.extend(sparse);
+
+    if names.len() <= 1 {
         return Ok(());
     }
 
-    let mut names = dense;
-    names.extend(sparse);
     Err(QqlError::execution(
         "QQL-MISSING-USING",
         format!(
-            "Collection '{}' has named vectors but no USING clause was specified. \
+            "Collection '{}' has multiple named vectors but no USING clause was specified. \
              Add USING <vector_name> to your query. Available vectors: {}",
             collection,
             names.join(", "),

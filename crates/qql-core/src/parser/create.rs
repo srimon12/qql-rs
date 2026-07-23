@@ -84,10 +84,21 @@ impl<'a> Parser<'a> {
         if self.peek()?.kind == TokenKind::Lparen {
             self.advance()?;
             while self.peek()?.kind != TokenKind::Rparen && self.peek()?.kind != TokenKind::Eof {
-                let name = self.parse_identifier()?;
+                let name_tok = self.peek()?;
+                let name = if name_tok.kind == TokenKind::Vector || ascii_equal(name_tok.text, "VECTOR") {
+                    String::from("dense")
+                } else {
+                    let id = self.parse_identifier()?;
+                    if self.peek()?.kind == TokenKind::Vector || ascii_equal(self.peek()?.text, "VECTOR") {
+                        self.advance()?;
+                    }
+                    id
+                };
 
-                if self.peek()?.kind == TokenKind::Vector {
-                    self.advance()?;
+                if self.peek()?.kind == TokenKind::Lparen || self.peek()?.kind == TokenKind::Vector || ascii_equal(self.peek()?.text, "VECTOR") {
+                    if self.peek()?.kind == TokenKind::Vector || ascii_equal(self.peek()?.text, "VECTOR") {
+                        self.advance()?;
+                    }
                     self.expect(TokenKind::Lparen)?;
                     let size_tok = self.peek()?;
                     let size = self.parse_numeric_literal()?;
@@ -242,7 +253,9 @@ impl<'a> Parser<'a> {
     pub fn parse_create_shard_key(&mut self) -> Result<Stmt, QqlError> {
         // Consume the SHARD token (parse_create() only peeked at it)
         self.expect(TokenKind::Shard)?;
-        self.expect(TokenKind::Key)?;
+        if self.peek()?.kind == TokenKind::Key {
+            self.advance()?;
+        }
         let shard_name = self.parse_string()?;
         self.expect(TokenKind::On)?;
         self.expect(TokenKind::Collection)?;

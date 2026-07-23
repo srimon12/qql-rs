@@ -1,5 +1,11 @@
 export type PresetId =
   | "hybrid"
+  | "berlin_radius"
+  | "berlin_bbox"
+  | "berlin_polygon"
+  | "berlin_formula"
+  | "berlin_superhost"
+  | "berlin_grouped"
   | "multitenant"
   | "cte"
   | "formula"
@@ -12,12 +18,119 @@ export type PresetId =
 export type Preset = {
   id: PresetId
   label: string
+  labelBadge?: string
   description: string
   teaching: string
   query: string
 }
 
 export const PRESETS: Preset[] = [
+  {
+    id: "berlin_radius",
+    label: "Berlin Geo Radius (Brandenburg)",
+    labelBadge: "GEO",
+    description: "Search 1.5km radius around Brandenburg Gate (Berlin)",
+    teaching: "Demonstrates QQL GEO_RADIUS payload filter: queries listings within a center point (lat/lon) radius while combining semantic vector search and price constraints.",
+    query: `-- Berlin Airbnb — Geo Radius 1.5km around Brandenburg Gate
+-- Combines semantic vector query with GEO_RADIUS payload filter & price cutoff
+QUERY TEXT 'cozy studio near historic landmarks and parks'
+  FROM berlin_airbnb
+  USING dense
+  WHERE location GEO_RADIUS {center: {lat: 52.5163, lon: 13.3777}, radius: 1500.0}
+    AND price <= 100.0
+  WITH PAYLOAD true
+  LIMIT 5;`,
+  },
+  {
+    id: "berlin_bbox",
+    label: "Berlin Geo BBox (Mitte Center)",
+    labelBadge: "GEO",
+    description: "Bounding box search across Mitte city center",
+    teaching: "Demonstrates QQL GEO_BBOX payload filter: queries listings within a rectangular bounding box defined by top_left and bottom_right lat/lon coordinates.",
+    query: `-- Berlin Airbnb — Geo Bounding Box over Mitte City Center
+-- Combines semantic search with GEO_BBOX coordinates & room_type filter
+QUERY TEXT 'spacious loft with balcony and fast wifi'
+  FROM berlin_airbnb
+  USING dense
+  WHERE location GEO_BBOX {top_left: {lat: 52.545, lon: 13.350}, bottom_right: {lat: 52.500, lon: 13.430}}
+    AND room_type = 'Entire home apt'
+  WITH PAYLOAD true
+  LIMIT 5;`,
+  },
+  {
+    id: "berlin_polygon",
+    label: "Berlin Geo Polygon (Kreuzberg)",
+    labelBadge: "GEO",
+    description: "Custom polygon boundary around Kreuzberg district",
+    teaching: "Demonstrates QQL GEO_POLYGON filter: queries listings inside a custom multi-point polygon boundary with rating thresholds.",
+    query: `-- Berlin Airbnb — Geo Polygon Boundary (Kreuzberg Nightlife District)
+-- Arbitrary multi-point polygon boundary ring with rating >= 4.7 filter
+QUERY TEXT 'artistic flat nightlife and coffee shops'
+  FROM berlin_airbnb
+  USING dense
+  WHERE location GEO_POLYGON {exterior: [{lat: 52.500, lon: 13.370}, {lat: 52.515, lon: 13.430}, {lat: 52.485, lon: 13.450}, {lat: 52.470, lon: 13.390}, {lat: 52.500, lon: 13.370}]}
+    AND rating >= 4.7
+  WITH PAYLOAD true
+  LIMIT 5;`,
+  },
+  {
+    id: "berlin_formula",
+    label: "Berlin Score Boost (Rating Formula)",
+    labelBadge: "FORMULA",
+    description: "Re-rank semantic vector search using payload rating signal",
+    teaching: "Demonstrates QQL QUERY FORMULA engine: multiplies candidate vector scores with payload metadata ratings using safe default fallbacks.",
+    query: `-- Berlin Airbnb — Formula Score Boosting (60% Vector + 40% Review Rating)
+-- Stage 1: Dense CTE retrieves candidate vector matches
+-- Stage 2: FORMULA engine re-ranks candidate scores by multiplying rating signals
+WITH
+  candidates AS (
+    QUERY TEXT 'cozy studio apartment near public transit'
+    FROM berlin_airbnb
+    USING dense
+    LIMIT 50
+  )
+QUERY FORMULA (score * 0.6 + rating * 0.4) DEFAULTS (rating = 4.5)
+  FROM berlin_airbnb
+  PREFETCH (candidates)
+  WITH PAYLOAD true
+  LIMIT 5;`,
+  },
+  {
+    id: "berlin_superhost",
+    label: "Berlin Superhost CASE Business Logic",
+    labelBadge: "CASE",
+    description: "Conditional 1.5x score boost for verified Superhosts",
+    teaching: "Demonstrates QQL conditional business logic: applies a CASE WHEN expression to boost Superhost listing scores by 1.5x during retrieval.",
+    query: `-- Berlin Airbnb — Conditional Business Logic (Superhost 1.5x Boost)
+-- Boosts vector match scores by 1.5x if host_is_superhost = true
+WITH
+  candidates AS (
+    QUERY TEXT 'spacious loft with balcony and fast wifi'
+    FROM berlin_airbnb
+    USING dense
+    LIMIT 50
+  )
+QUERY FORMULA (CASE WHEN superhost = true THEN score * 1.5 ELSE score END)
+  FROM berlin_airbnb
+  PREFETCH (candidates)
+  WITH PAYLOAD true
+  LIMIT 5;`,
+  },
+  {
+    id: "berlin_grouped",
+    label: "Berlin Grouped by Neighborhood",
+    labelBadge: "GROUP",
+    description: "Top 3 listings per Berlin neighborhood bucket",
+    teaching: "Demonstrates QQL GROUP BY aggregation: partitions search results into distinct neighborhood buckets returning the top N hits per neighborhood.",
+    query: `-- Berlin Airbnb — Grouped Aggregation by Neighborhood
+-- Vector search grouped by neighborhood returning top 3 hits per neighborhood
+QUERY TEXT 'quiet courtyard apartment'
+  FROM berlin_airbnb
+  USING dense
+  WHERE price <= 100.0
+  GROUP BY neighbourhood SIZE 3
+  LIMIT 15;`,
+  },
   {
     id: "hybrid",
     label: "Hybrid RRF",

@@ -44,6 +44,26 @@ fn string_span_covers_quotes() {
 }
 
 #[test]
+fn scientific_notation_floats() {
+    let t = tokens("1e-5 1.2e+3 1.0e-05 -5e2");
+    assert_eq!(t[0].0, TokenKind::Float);
+    assert_eq!(t[0].1, "1e-5");
+    assert_eq!(t[1].0, TokenKind::Float);
+    assert_eq!(t[1].1, "1.2e+3");
+    assert_eq!(t[2].0, TokenKind::Float);
+    assert_eq!(t[2].1, "1.0e-05");
+    assert_eq!(t[3].0, TokenKind::Float);
+    assert_eq!(t[3].1, "-5e2");
+}
+
+#[test]
+fn sql_style_escaped_strings() {
+    let t = tokens("'St. Peter''s Church'");
+    assert_eq!(t[0].0, TokenKind::String);
+    assert_eq!(t[0].1, "St. Peter''s Church");
+}
+
+#[test]
 fn numbers_integer_and_float() {
     let t = tokens("42 3.14 -5 -0.5");
     assert_eq!(t[0].0, TokenKind::Integer);
