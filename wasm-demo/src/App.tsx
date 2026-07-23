@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   AlertCircleIcon,
+  BrainCircuitIcon,
   CheckCircle2Icon,
   EraserIcon,
   Loader2Icon,
@@ -26,7 +27,12 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { useTheme } from "@/components/theme-provider"
 import { QueryEditor } from "@/components/playground/query-editor"
 import { Inspector } from "@/components/playground/inspector"
@@ -38,6 +44,7 @@ import {
   getPreset,
   type PresetId,
 } from "@/lib/presets"
+import { BROWSER_EMBED_MODEL } from "@/lib/browser-embedder"
 
 function useDebouncedCallback<T extends (...args: never[]) => void>(
   fn: T,
@@ -65,10 +72,13 @@ export function App() {
     updateSettings,
     analysis,
     latencyMs,
+    parseMs,
     response,
     executing,
     runAnalysis,
     execute,
+    metrics,
+    browserStatus,
   } = useQql()
 
   const [presetId, setPresetId] = useState<PresetId>(DEFAULT_PRESET_ID)
@@ -76,6 +86,7 @@ export function App() {
     () => getPreset(DEFAULT_PRESET_ID)?.query ?? ""
   )
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsSaving, setSettingsSaving] = useState(false)
   const [activeTab, setActiveTab] = useState("plan")
 
   const debouncedAnalyze = useDebouncedCallback((src: string) => {
@@ -120,6 +131,32 @@ export function App() {
     return { label: analysis.error?.code ?? "Error", ok: false }
   }, [ready, query, analysis])
 
+  const embedBadge = useMemo(() => {
+    if (settings.embedProvider === "none") {
+      return { label: "No embed", variant: "outline" as const }
+    }
+    if (settings.embedProvider === "http") {
+      return { label: "HTTP embed", variant: "secondary" as const }
+    }
+    // browser
+    if (browserStatus.state === "loading") {
+      return {
+        label: `MiniLM ${Math.round(browserStatus.progress)}%`,
+        variant: "secondary" as const,
+      }
+    }
+    if (browserStatus.state === "ready") {
+      return {
+        label: `MiniLM · ${browserStatus.device ?? "browser"}`,
+        variant: "default" as const,
+      }
+    }
+    if (browserStatus.state === "error") {
+      return { label: "Embed error", variant: "destructive" as const }
+    }
+    return { label: "MiniLM…", variant: "secondary" as const }
+  }, [settings.embedProvider, browserStatus])
+
   const toggleTheme = () => {
     const next =
       theme === "dark" ? "light" : theme === "light" ? "dark" : "dark"
@@ -141,13 +178,19 @@ export function App() {
   return (
     <TooltipProvider>
       <div className="flex h-svh flex-col overflow-hidden bg-background text-foreground">
-        {/* Toolbar */}
         <header className="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2 sm:gap-3 sm:px-4">
           <div className="flex items-center gap-2">
             <span className="text-base font-semibold tracking-tight">QQL</span>
             <Badge variant="secondary" className="gap-1 font-mono text-[10px]">
               <ZapIcon className="size-3" />
               WASM
+            </Badge>
+            <Badge
+              variant={embedBadge.variant}
+              className="hidden gap-1 font-mono text-[10px] sm:inline-flex"
+            >
+              <BrainCircuitIcon className="size-3" />
+              {embedBadge.label}
             </Badge>
           </div>
 
@@ -191,7 +234,10 @@ export function App() {
             </Badge>
 
             <span className="hidden font-mono text-[11px] text-muted-foreground tabular-nums md:inline">
-              {latencyMs.toFixed(2)} ms
+              parse {latencyMs.toFixed(2)} ms
+              {metrics?.totalMs != null && metrics.success
+                ? ` · exec ${metrics.totalMs.toFixed(0)} ms`
+                : ""}
             </span>
 
             <Tooltip>
@@ -212,7 +258,11 @@ export function App() {
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <Button variant="outline" size="icon-sm" onClick={toggleTheme} />
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    onClick={toggleTheme}
+                  />
                 }
               >
                 {theme === "dark" ? <SunIcon /> : <MoonIcon />}
@@ -222,11 +272,20 @@ export function App() {
 
             <Button
               size="sm"
-              disabled={!ready || !analysis.valid || executing}
+              disabled={
+                !ready ||
+                !analysis.valid ||
+                executing ||
+                (settings.embedProvider === "browser" &&
+                  browserStatus.state === "error")
+              }
               onClick={onExecute}
             >
               {executing ? (
-                <Loader2Icon className="animate-spin" data-icon="inline-start" />
+                <Loader2Icon
+                  className="animate-spin"
+                  data-icon="inline-start"
+                />
               ) : (
                 <PlayIcon data-icon="inline-start" />
               )}
@@ -235,14 +294,13 @@ export function App() {
           </div>
         </header>
 
-        {/* Workspace */}
         <main className="min-h-0 flex-1">
           <ResizablePanelGroup orientation="horizontal" className="h-full">
             <ResizablePanel defaultSize={52} minSize={30}>
               <section className="flex h-full min-h-0 flex-col">
                 <div className="flex shrink-0 items-center justify-between border-b px-3 py-1.5">
                   <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                    Query editor
+                    Query editor · sec10k
                   </span>
                   <div className="flex gap-1">
                     <Button
@@ -276,14 +334,16 @@ export function App() {
                   )}
                 </div>
 
-                {!analysis.valid && analysis.error?.message && query.trim() && (
-                  <div className="flex shrink-0 items-start gap-2 border-t border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-                    <AlertCircleIcon className="mt-0.5 size-3.5 shrink-0" />
-                    <span className="font-mono">
-                      {analysis.error.code}: {analysis.error.message}
-                    </span>
-                  </div>
-                )}
+                {!analysis.valid &&
+                  analysis.error?.message &&
+                  query.trim() && (
+                    <div className="flex shrink-0 items-start gap-2 border-t border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                      <AlertCircleIcon className="mt-0.5 size-3.5 shrink-0" />
+                      <span className="font-mono">
+                        {analysis.error.code}: {analysis.error.message}
+                      </span>
+                    </div>
+                  )}
               </section>
             </ResizablePanel>
 
@@ -295,20 +355,29 @@ export function App() {
                 response={response}
                 activeTab={activeTab}
                 onTabChange={setActiveTab}
+                metrics={metrics}
+                parseMs={parseMs}
+                browserStatus={browserStatus}
+                embedProvider={settings.embedProvider}
+                qdrantUrl={settings.qdrantUrl}
                 className="h-full"
               />
             </ResizablePanel>
           </ResizablePanelGroup>
         </main>
 
-        <footer className="flex shrink-0 items-center justify-between border-t px-3 py-1.5 text-[11px] text-muted-foreground">
-          <span>
+        <footer className="flex shrink-0 items-center justify-between gap-2 border-t px-3 py-1.5 text-[11px] text-muted-foreground">
+          <span className="min-w-0 truncate">
             {settings.qdrantUrl}
-            {settings.embedProvider !== "none"
-              ? ` · ${settings.embedModel}`
-              : " · no embedder"}
+            {" · "}
+            {settings.embedProvider === "browser"
+              ? `${BROWSER_EMBED_MODEL}${browserStatus.device ? ` · ${browserStatus.device}` : ""}`
+              : settings.embedProvider === "http"
+                ? settings.embedModel
+                : "no embedder"}
+            {" · sec10k"}
           </span>
-          <span className="hidden sm:inline">
+          <span className="hidden shrink-0 sm:inline">
             ⌘/Ctrl+Enter execute · d toggles theme
           </span>
         </footer>
@@ -317,7 +386,15 @@ export function App() {
           open={settingsOpen}
           onOpenChange={setSettingsOpen}
           settings={settings}
-          onSave={updateSettings}
+          saving={settingsSaving}
+          onSave={async (next) => {
+            setSettingsSaving(true)
+            try {
+              await updateSettings(next)
+            } finally {
+              setSettingsSaving(false)
+            }
+          }}
         />
       </div>
     </TooltipProvider>

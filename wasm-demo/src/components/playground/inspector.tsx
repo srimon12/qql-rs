@@ -3,7 +3,9 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { PlanView } from "@/components/playground/plan-view"
 import { TokensTable } from "@/components/playground/tokens-table"
 import { JsonViewer } from "@/components/playground/json-viewer"
-import type { AnalysisResult } from "@/lib/qql-types"
+import { MetricsView } from "@/components/playground/metrics-view"
+import type { AnalysisResult, ExecMetrics } from "@/lib/qql-types"
+import type { BrowserEmbedderStatus } from "@/lib/browser-embedder"
 import { cn } from "@/lib/utils"
 
 type InspectorProps = {
@@ -11,6 +13,11 @@ type InspectorProps = {
   response: string
   activeTab: string
   onTabChange: (tab: string) => void
+  metrics: ExecMetrics | null
+  parseMs: number
+  browserStatus: BrowserEmbedderStatus
+  embedProvider: string
+  qdrantUrl: string
   className?: string
 }
 
@@ -19,6 +26,11 @@ export function Inspector({
   response,
   activeTab,
   onTabChange,
+  metrics,
+  parseMs,
+  browserStatus,
+  embedProvider,
+  qdrantUrl,
   className,
 }: InspectorProps) {
   const wireJson = analysis.route
@@ -40,8 +52,12 @@ export function Inspector({
       className={cn("flex h-full min-h-0 flex-col gap-0", className)}
     >
       <div className="shrink-0 border-b px-3 pt-2 pb-0">
-        <TabsList variant="line" className="h-auto w-full flex-wrap justify-start gap-0">
+        <TabsList
+          variant="line"
+          className="h-auto w-full flex-wrap justify-start gap-0"
+        >
           <TabsTrigger value="plan">Plan</TabsTrigger>
+          <TabsTrigger value="metrics">Metrics</TabsTrigger>
           <TabsTrigger value="wire">Wire JSON</TabsTrigger>
           <TabsTrigger value="ast">AST</TabsTrigger>
           <TabsTrigger value="tokens">Tokens</TabsTrigger>
@@ -52,6 +68,18 @@ export function Inspector({
 
       <TabsContent value="plan" className="min-h-0 overflow-auto p-3">
         <PlanView analysis={analysis} />
+      </TabsContent>
+
+      <TabsContent value="metrics" className="min-h-0 overflow-auto p-0">
+        <ScrollArea className="h-full">
+          <MetricsView
+            metrics={metrics}
+            parseMs={parseMs}
+            browserStatus={browserStatus}
+            embedProvider={embedProvider}
+            qdrantUrl={qdrantUrl}
+          />
+        </ScrollArea>
       </TabsContent>
 
       <TabsContent value="wire" className="min-h-0 overflow-hidden p-0">

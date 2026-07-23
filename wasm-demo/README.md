@@ -1,56 +1,62 @@
 # QQL WASM Playground
 
-Browser playground for **qql-wasm**: write QQL, inspect the plan / wire JSON / AST / tokens, and execute against a live Qdrant instance with an optional OpenAI-compatible embedder.
+Browser playground for **qql-wasm**: write QQL, inspect plan / metrics / wire / AST / tokens, and execute against a live Qdrant cluster (SEC 10-K `sec10k` showcase).
+
+## Proposition
+
+| Layer | Default | Optional |
+|---|---|---|
+| Parse / plan | `qql-wasm` offline | — |
+| Embeddings | **In-browser** `Xenova/all-MiniLM-L6-v2` (384-d) via Transformers.js | HTTP OpenAI-compatible (Ollama / LM Studio) |
+| Search / storage | Your local Qdrant (`sec10k` shards) | — |
+
+Same embedding family as `examples/sec10k-qql` (all-MiniLM-L6-v2 · 384-d). No LM Studio required for Execute.
 
 ## Stack
 
-- Vite + React + TypeScript
-- pnpm
+- Vite + React + TypeScript + pnpm
 - shadcn/ui (Base UI)
-- CodeMirror 6 for the editor & JSON views
-- `qql-wasm` (linked from `../demo/pkg`)
+- CodeMirror 6
+- `@huggingface/transformers` (lazy-loaded)
+- `qql-wasm` (`file:../demo/pkg`)
 
 ## Setup
 
 ```bash
-# from repo root, ensure WASM pkg exists
-# (demo/pkg is produced by the qql-wasm build)
-
 cd wasm-demo
 pnpm install
 pnpm dev
 ```
 
-Open http://localhost:5173
+Open http://localhost:5173 — point **Settings → Qdrant** at `http://localhost:6333` (or your cluster).
 
-## Features
+First browser-embed run downloads MiniLM into the browser cache (WebGPU when available, else WASM).
 
-| Feature | Description |
+## Metrics tab
+
+| Metric | Meaning |
 |---|---|
-| Live analysis | `analyze()` on each keystroke (debounced) |
-| Syntax highlight | CodeMirror StreamLanguage for QQL keywords |
-| Error spans | CodeMirror lint diagnostics from parse errors |
-| Visual plan | REST method + path + explanation |
-| Wire JSON | Qdrant request body |
-| AST / Tokens | Full tree + lexer table |
-| Execute | WASM `Client` → embedder → Qdrant REST |
-| Presets | Hybrid, CTE, formula, group, MMR, scroll, DBSF, mutation |
-| Settings | Qdrant URL/key + embedder config (localStorage) |
+| Parse / plan | `analyze()` wall time |
+| Embed | time inside `setEmbedder` (MiniLM or HTTP) |
+| Network / Qdrant | approx `total − embed` |
+| Total execute | full `client.execute` wall time |
+| Model load | one-time pipeline load |
 
-## Refresh WASM package
+## Presets
 
-After rebuilding `qql-wasm`:
-
-```bash
-# copy/link into demo/pkg, then reinstall local dep
-pnpm add file:../demo/pkg
-```
+SEC 10-K shaped queries: Hybrid RRF, CTE fusion, formula boost, GROUP BY, MMR, SCROLL/COUNT, DBSF, upsert+delete — collection `sec10k`, shards `rtx` / `honeywell` / `3m` / `ge`.
 
 ## Scripts
 
 ```bash
-pnpm dev       # playground
-pnpm build     # production build
-pnpm preview   # preview build
+pnpm dev
+pnpm build
+pnpm preview
 pnpm typecheck
+```
+
+## Refresh WASM package
+
+```bash
+pnpm add file:../demo/pkg
 ```

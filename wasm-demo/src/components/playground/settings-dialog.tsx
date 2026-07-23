@@ -18,12 +18,17 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import type { EmbedProvider, PlaygroundSettings } from "@/lib/qql-types"
+import {
+  BROWSER_EMBED_DIM,
+  BROWSER_EMBED_MODEL,
+} from "@/lib/browser-embedder"
 
 type SettingsDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
   settings: PlaygroundSettings
-  onSave: (settings: PlaygroundSettings) => void
+  onSave: (settings: PlaygroundSettings) => void | Promise<void>
+  saving?: boolean
 }
 
 export function SettingsDialog({
@@ -31,6 +36,7 @@ export function SettingsDialog({
   onOpenChange,
   settings,
   onSave,
+  saving,
 }: SettingsDialogProps) {
   const [draft, setDraft] = useState(settings)
 
@@ -49,8 +55,9 @@ export function SettingsDialog({
         <DialogHeader>
           <DialogTitle>Connection & embeddings</DialogTitle>
           <DialogDescription>
-            Configure Qdrant REST and an OpenAI-compatible embedder. Settings
-            persist in localStorage.
+            Offline-first: all-MiniLM-L6-v2 runs in the browser (same 384-d
+            family as SEC 10-K). Point Qdrant at your local cluster for{" "}
+            <code className="font-mono text-xs">sec10k</code>.
           </DialogDescription>
         </DialogHeader>
 
@@ -59,8 +66,8 @@ export function SettingsDialog({
             <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
               Qdrant
             </h3>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="grid gap-1.5 sm:col-span-2">
+            <div className="grid gap-3">
+              <div className="grid gap-1.5">
                 <Label htmlFor="qdrant-url">REST URL</Label>
                 <Input
                   id="qdrant-url"
@@ -70,7 +77,7 @@ export function SettingsDialog({
                   className="font-mono text-xs"
                 />
               </div>
-              <div className="grid gap-1.5 sm:col-span-2">
+              <div className="grid gap-1.5">
                 <Label htmlFor="qdrant-key">API key (optional)</Label>
                 <Input
                   id="qdrant-key"
@@ -92,22 +99,51 @@ export function SettingsDialog({
               <Label>Provider</Label>
               <Select
                 value={draft.embedProvider}
-                onValueChange={(v) => set("embedProvider", v as EmbedProvider)}
+                onValueChange={(v) => {
+                  const p = v as EmbedProvider
+                  set("embedProvider", p)
+                  if (p === "browser") {
+                    set("embedDim", BROWSER_EMBED_DIM)
+                  }
+                }}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="openai">
-                    Ollama / OpenAI compatible
+                  <SelectItem value="browser">
+                    In-browser MiniLM (offline-first)
                   </SelectItem>
-                  <SelectItem value="remote">Remote HTTP endpoint</SelectItem>
-                  <SelectItem value="none">None (raw vectors)</SelectItem>
+                  <SelectItem value="http">
+                    External HTTP (Ollama / OpenAI / LM Studio)
+                  </SelectItem>
+                  <SelectItem value="none">None (raw vectors only)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
-            {draft.embedProvider !== "none" && (
+            {draft.embedProvider === "browser" && (
+              <div className="rounded-xl border bg-muted/40 p-3 text-xs leading-relaxed text-muted-foreground">
+                <p>
+                  Model:{" "}
+                  <code className="font-mono text-foreground">
+                    {BROWSER_EMBED_MODEL}
+                  </code>
+                </p>
+                <p className="mt-1">
+                  Output:{" "}
+                  <code className="font-mono text-foreground">
+                    {BROWSER_EMBED_DIM}-d
+                  </code>{" "}
+                  mean-pooled, L2-normalized — matches{" "}
+                  <code className="font-mono">sec10k</code> dense vectors.
+                  First load downloads weights into the browser cache
+                  (WebGPU when available, else WASM).
+                </p>
+              </div>
+            )}
+
+            {draft.embedProvider === "http" && (
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="grid gap-1.5 sm:col-span-2">
                   <Label htmlFor="embed-url">Endpoint URL</Label>
@@ -160,12 +196,13 @@ export function SettingsDialog({
             Cancel
           </Button>
           <Button
-            onClick={() => {
-              onSave(draft)
+            disabled={saving}
+            onClick={async () => {
+              await onSave(draft)
               onOpenChange(false)
             }}
           >
-            Save & apply
+            {saving ? "Applying…" : "Save & apply"}
           </Button>
         </DialogFooter>
       </DialogContent>
