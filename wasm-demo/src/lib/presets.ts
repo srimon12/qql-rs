@@ -1,11 +1,11 @@
 export type PresetId =
-  | "hybrid"
+  | "berlin_hybrid"
+  | "berlin_cte_formula"
   | "berlin_radius"
   | "berlin_bbox"
   | "berlin_polygon"
-  | "berlin_formula"
-  | "berlin_superhost"
   | "berlin_grouped"
+  | "hybrid"
   | "multitenant"
   | "cte"
   | "formula"
@@ -26,8 +26,48 @@ export type Preset = {
 
 export const PRESETS: Preset[] = [
   {
+    id: "berlin_hybrid",
+    label: "Berlin Hybrid (Dense + Sparse RRF)",
+    labelBadge: "HYBRID",
+    description: "Hybrid vector search combining dense embeddings + BM25 sparse vectors via RRF fusion",
+    teaching: "Demonstrates QQL QUERY HYBRID syntax: fuses dense neural retrieval and sparse BM25 keyword matching using Reciprocal Rank Fusion (RRF) alongside GEO_RADIUS location constraints.",
+    query: `-- Berlin Airbnb — Hybrid Dense + Sparse BM25 RRF Fusion
+-- Combines 384-d dense neural vectors & BM25 sparse keyword vectors
+QUERY HYBRID TEXT 'cozy studio near historic landmarks and parks'
+  DENSE dense SPARSE sparse
+  FUSION RRF
+  FROM berlin_airbnb
+  WHERE location GEO_RADIUS {center: {lat: 52.5163, lon: 13.3777}, radius: 1500.0}
+    AND price <= 120.0
+  WITH PAYLOAD true
+  LIMIT 5;`,
+  },
+  {
+    id: "berlin_cte_formula",
+    label: "Berlin CTE Multi-Stage (Superhost Boost)",
+    labelBadge: "CTE",
+    description: "Multi-stage CTE pipeline re-ranking candidate vector matches using CASE business logic",
+    teaching: "Demonstrates QQL CTE pipeline & QUERY FORMULA: Stage 1 retrieves candidate dense matches via CTE; Stage 2 applies a CASE WHEN expression to multiply Superhost scores by 1.5x.",
+    query: `-- Berlin Airbnb — Multi-Stage CTE Pipeline & Conditional Business Logic
+-- Stage 1: Dense CTE retrieves 50 candidate vector matches
+-- Stage 2: FORMULA engine applies conditional 1.5x score boost for verified Superhosts
+WITH
+  dense_candidates AS (
+    QUERY TEXT 'spacious loft with balcony and fast wifi'
+    FROM berlin_airbnb
+    USING dense
+    WHERE price <= 150.0
+    LIMIT 50
+  )
+QUERY FORMULA (CASE WHEN superhost = true THEN score * 1.5 ELSE score END)
+  FROM berlin_airbnb
+  PREFETCH (dense_candidates)
+  WITH PAYLOAD true
+  LIMIT 5;`,
+  },
+  {
     id: "berlin_radius",
-    label: "Berlin Geo Radius (Brandenburg)",
+    label: "Berlin Geo Radius (Brandenburg Gate)",
     labelBadge: "GEO",
     description: "Search 1.5km radius around Brandenburg Gate (Berlin)",
     teaching: "Demonstrates QQL GEO_RADIUS payload filter: queries listings within a center point (lat/lon) radius while combining semantic vector search and price constraints.",
@@ -43,7 +83,7 @@ QUERY TEXT 'cozy studio near historic landmarks and parks'
   },
   {
     id: "berlin_bbox",
-    label: "Berlin Geo BBox (Mitte Center)",
+    label: "Berlin Geo BBox (Mitte City Center)",
     labelBadge: "GEO",
     description: "Bounding box search across Mitte city center",
     teaching: "Demonstrates QQL GEO_BBOX payload filter: queries listings within a rectangular bounding box defined by top_left and bottom_right lat/lon coordinates.",
@@ -74,54 +114,11 @@ QUERY TEXT 'artistic flat nightlife and coffee shops'
   LIMIT 5;`,
   },
   {
-    id: "berlin_formula",
-    label: "Berlin Score Boost (Rating Formula)",
-    labelBadge: "FORMULA",
-    description: "Re-rank semantic vector search using payload rating signal",
-    teaching: "Demonstrates QQL QUERY FORMULA engine: multiplies candidate vector scores with payload metadata ratings using safe default fallbacks.",
-    query: `-- Berlin Airbnb — Formula Score Boosting (60% Vector + 40% Review Rating)
--- Stage 1: Dense CTE retrieves candidate vector matches
--- Stage 2: FORMULA engine re-ranks candidate scores by multiplying rating signals
-WITH
-  candidates AS (
-    QUERY TEXT 'cozy studio apartment near public transit'
-    FROM berlin_airbnb
-    USING dense
-    LIMIT 50
-  )
-QUERY FORMULA (score * 0.6 + rating * 0.4) DEFAULTS (rating = 4.5)
-  FROM berlin_airbnb
-  PREFETCH (candidates)
-  WITH PAYLOAD true
-  LIMIT 5;`,
-  },
-  {
-    id: "berlin_superhost",
-    label: "Berlin Superhost CASE Business Logic",
-    labelBadge: "CASE",
-    description: "Conditional 1.5x score boost for verified Superhosts",
-    teaching: "Demonstrates QQL conditional business logic: applies a CASE WHEN expression to boost Superhost listing scores by 1.5x during retrieval.",
-    query: `-- Berlin Airbnb — Conditional Business Logic (Superhost 1.5x Boost)
--- Boosts vector match scores by 1.5x if host_is_superhost = true
-WITH
-  candidates AS (
-    QUERY TEXT 'spacious loft with balcony and fast wifi'
-    FROM berlin_airbnb
-    USING dense
-    LIMIT 50
-  )
-QUERY FORMULA (CASE WHEN superhost = true THEN score * 1.5 ELSE score END)
-  FROM berlin_airbnb
-  PREFETCH (candidates)
-  WITH PAYLOAD true
-  LIMIT 5;`,
-  },
-  {
     id: "berlin_grouped",
     label: "Berlin Grouped by Neighborhood",
     labelBadge: "GROUP",
     description: "Top 3 listings per Berlin neighborhood bucket",
-    teaching: "Demonstrates QQL GROUP BY aggregation: partitions search results into distinct neighborhood buckets returning the top N hits per neighborhood.",
+    teaching: "Demonstrates QQL GROUP BY aggregation: partitions search results into distinct neighborhood buckets returning top N hits per neighborhood.",
     query: `-- Berlin Airbnb — Grouped Aggregation by Neighborhood
 -- Vector search grouped by neighborhood returning top 3 hits per neighborhood
 QUERY TEXT 'quiet courtyard apartment'

@@ -253,13 +253,20 @@ export function App() {
               Preset
             </span>
             <Select value={presetId} onValueChange={onPresetChange}>
-              <SelectTrigger size="sm" className="max-w-[min(100%,320px)]">
+              <SelectTrigger size="sm" className="w-[300px] sm:w-[420px] font-mono text-xs truncate">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="w-[360px] sm:w-[460px]">
                 {PRESETS.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.label}
+                  <SelectItem key={p.id} value={p.id} className="cursor-pointer py-1.5">
+                    <div className="flex items-center gap-2 w-full truncate">
+                      {p.labelBadge && (
+                        <Badge variant="outline" className="font-mono text-[9px] px-1 py-0 h-4 shrink-0 bg-primary/10 border-primary/30 text-primary">
+                          {p.labelBadge}
+                        </Badge>
+                      )}
+                      <span className="truncate font-mono text-xs">{p.label}</span>
+                    </div>
                   </SelectItem>
                 ))}
               </SelectContent>
