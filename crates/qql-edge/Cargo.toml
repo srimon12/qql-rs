@@ -8,8 +8,9 @@ description = "Local/edge QQL executor — fastembed-rs + qdrant-edge, zero netw
 default = ["fastembed-local"]
 # Local ONNX embedding via fastembed-rs (no network needed for inference)
 fastembed-local = ["fastembed"]
-# External OpenAI-compatible HTTP embedding provider
-rest = ["qql/rest"]
+# HTTP-based embedding provider (OpenAI-compatible API).
+# Enables qql/rest so HttpEmbedder (reqwest) is available.
+http-embedding = ["qql/rest"]
 
 [dependencies]
 qql-core = { path = "../qql-core", features = ["serde", "json", "std"] }

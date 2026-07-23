@@ -5,8 +5,8 @@ edition.workspace = true
 
 [features]
 default = ["grpc", "rest"]
-grpc = ["dep:tonic", "dep:tonic-prost", "dep:prost", "dep:prost-types", "dep:tokio", "tokio/rt-multi-thread"]
-rest = ["dep:reqwest", "dep:tokio", "tokio/rt"]
+grpc = ["dep:tonic", "dep:tonic-prost", "dep:prost", "dep:prost-types", "tokio/rt-multi-thread"]
+rest = ["dep:reqwest", "tokio/rt"]
 
 [dependencies]
 qql-core = { path = "../qql-core", features = ["serde", "std"] }
@@ -22,7 +22,7 @@ tonic = { version = "0.14", default-features = false, features = ["channel", "co
 tonic-prost = { version = "0.14", optional = true }
 prost = { version = "0.14", optional = true }
 prost-types = { version = "0.14", optional = true }
-tokio = { version = "1", features = ["macros", "time"], optional = true }
+tokio = { version = "1", features = ["macros", "time"] }
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 
 [build-dependencies]

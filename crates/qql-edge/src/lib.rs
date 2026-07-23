@@ -66,7 +66,7 @@ pub fn local_executor(
 /// - `api_key` — Bearer token. Pass `""` for unauthenticated local providers.
 /// - `model` — model name sent in the request body, e.g. `"text-embedding-3-small"`.
 /// - `dimension` — expected output dimension. Must match what the model returns.
-#[cfg(feature = "rest")]
+#[cfg(feature = "http-embedding")]
 pub fn http_executor(
     data_dir: impl Into<std::path::PathBuf>,
     on_disk_payload: bool,
