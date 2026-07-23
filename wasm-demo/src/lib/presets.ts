@@ -1,5 +1,6 @@
 export type PresetId =
   | "hybrid"
+  | "multitenant"
   | "cte"
   | "formula"
   | "grouped"
@@ -31,6 +32,35 @@ QUERY HYBRID TEXT 'Raytheon missile defense contracts programs'
   SHARD 'rtx'
   WITH PAYLOAD true
   LIMIT 5;`,
+  },
+  {
+    id: "multitenant",
+    label: "Multi-Tenant Isolation",
+    description: "Shard routing + tenant_id payload filter (defense in depth)",
+    query: `-- Multi-tenant isolation — SEC 10-K SaaS pattern (honeywell)
+--
+-- Three layers (see skills/qql-skill/references/qql-multitenancy.md):
+--   1. SHARD 'honeywell'           physical — only that custom shard is hit
+--   2. WHERE tenant_id = 'honeywell'  logical — payload filter (is_tenant index)
+--   3. inject_filter() in host SDKs   programmatic — filter always present
+--
+-- Both SHARD + tenant_id together: hard isolation + no cross-tenant leaks.
+
+-- Tenant-scoped hybrid search (dense + sparse RRF)
+QUERY HYBRID TEXT 'supply chain disruption risk shortages'
+  DENSE dense
+  SPARSE sparse
+  FUSION RRF
+  FROM sec10k
+  WHERE tenant_id = 'honeywell' AND fiscal_year >= 2024
+  SHARD 'honeywell'
+  WITH PAYLOAD true
+  LIMIT 5;
+
+-- Audit trail: point count for this tenant only (same dual isolation)
+COUNT FROM sec10k
+  WHERE tenant_id = 'honeywell'
+  SHARD 'honeywell';`,
   },
   {
     id: "cte",
