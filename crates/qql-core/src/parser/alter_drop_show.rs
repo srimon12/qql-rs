@@ -100,8 +100,7 @@ impl<'a> Parser<'a> {
         let mut field_type = String::from("keyword");
         if self.peek()?.kind == TokenKind::Type {
             self.advance()?;
-            let type_tok = self.expect(TokenKind::Identifier)?;
-            field_type = type_tok.text.to_ascii_lowercase();
+            field_type = self.parse_identifier()?.to_ascii_lowercase();
         }
         let mut options = Vec::new();
         if self.peek()?.kind == TokenKind::With {

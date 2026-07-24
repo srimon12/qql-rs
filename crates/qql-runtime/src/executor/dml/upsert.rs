@@ -69,7 +69,8 @@ impl Executor {
             }
         }
 
-        for vname in &info.schema.sparse_vectors {
+        for sv in &info.schema.sparse_vectors {
+            let vname = &sv.name;
             if vname == crate::executor::SPARSE_VECTOR_NAME {
                 topo.sparse_vector = Some(crate::executor::SPARSE_VECTOR_NAME.to_string());
             } else if topo.sparse_vector.is_none()

@@ -202,8 +202,11 @@ pub async fn handle_connect(url: &str) -> Result<(), Box<dyn std::error::Error>>
                 output::print_error("dump error: usage DUMP [COLLECTION] <name> <output.qql>");
                 continue;
             }
-            match handle_dump(url, dump_parts[0], dump_parts[1], 50).await {
-                Ok(msg) => output::print_success(&msg),
+            match handle_dump(url, dump_parts[0], dump_parts[1], 50, None).await {
+                Ok(stats) => output::print_success(&format!(
+                    "Dumped collection '{}' to {} ({} written, {} skipped, {} batches)",
+                    dump_parts[0], dump_parts[1], stats.written, stats.skipped, stats.batches
+                )),
                 Err(e) => output::print_error(&format!("dump error: {}", e)),
             }
             continue;
@@ -319,14 +322,10 @@ pub async fn handle_dump(
     collection: &str,
     output: &str,
     batch_size: u32,
-) -> Result<String, Box<dyn std::error::Error>> {
+    progress: Option<&(dyn Fn(dump::DumpProgress) + Sync)>,
+) -> Result<dump::DumpStats, Box<dyn std::error::Error>> {
     let exec = executor(url)?;
-    let (written, skipped) =
-        dump::dump_collection(&exec, collection, output, batch_size, "", "").await?;
-    Ok(format!(
-        "Dumped collection '{}' to {} ({} written, {} skipped)",
-        collection, output, written, skipped
-    ))
+    dump::dump_collection(&exec, collection, output, batch_size, progress).await
 }
 
 pub fn handle_version() -> Result<(), Box<dyn std::error::Error>> {
@@ -389,7 +388,7 @@ fn print_repl_help() {
 
   \x1b[33mSELECT\x1b[0m * \x1b[33mFROM\x1b[0m <name> \x1b[33mWHERE id =\x1b[0m '<id>|<int>'
 
-  \x1b[33mSCROLL FROM\x1b[0m <name> [\x1b[33mWHERE\x1b[0m <filter>] [\x1b[33mAFTER\x1b[0m '<id>'] \x1b[33mLIMIT\x1b[0m <n>
+  \x1b[33mSCROLL FROM\x1b[0m <name> [\x1b[33mWHERE\x1b[0m <filter>] [\x1b[33mAFTER\x1b[0m '<id>'] [\x1b[33mWITH VECTOR\x1b[0m] \x1b[33mLIMIT\x1b[0m <n>
 
   \x1b[33mDELETE FROM\x1b[0m <name> \x1b[33mWHERE\x1b[0m id = '<id>' | <field> = '<value>'
 
@@ -399,7 +398,7 @@ fn print_repl_help() {
   \x1b[36mexplain <query>\x1b[0m  Show query plan without executing
   \x1b[36mexecute <file>\x1b[0m  Run a .qql script file
   \x1b[36m\e <file>\x1b[0m        Shortcut for execute
-  \x1b[36mdump <name> <file>\x1b[0m  Dump a collection to a .qql script file
+  \x1b[36mdump <name> <file>\x1b[0m  Dump collection (schema + vectors + payload) to .qql
   \x1b[36mexit\x1b[0m, \x1b[36mquit\x1b[0m      Exit the shell
 
 \x1b[1mKeyboard Shortcuts:\x1b[0m

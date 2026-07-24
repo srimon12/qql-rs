@@ -269,6 +269,8 @@ pub struct ScrollStmt {
     pub filter: Option<Box<FilterExpr>>,
     pub after: Option<PointId>,
     pub shard_key: Option<String>,
+    /// Optional `WITH VECTOR` selector. Defaults to no vectors when `None`.
+    pub with_vector: Option<VectorSelector>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -349,12 +351,23 @@ pub struct VectorDef {
     pub hnsw: Option<Box<HnswRuntimeConfig>>,
     pub quantization: Option<Box<QuantizationConfig>>,
     pub multivector: Option<MultivectorConfig>,
+    pub vectors: Option<Box<VectorsConfig>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SparseIndexConfig {
+    pub full_scan_threshold: Option<u64>,
+    pub on_disk: Option<bool>,
+    pub datatype: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SparseVectorDef {
     pub name: String,
+    pub index: Option<Box<SparseIndexConfig>>,
+    pub modifier: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -373,6 +386,9 @@ pub struct QuantizationConfig {
     pub always_ram: bool,
     pub quantile: Option<f64>,
     pub turbo_bits: Option<f64>,
+    pub compression: Option<String>,
+    pub encoding: Option<String>,
+    pub query_encoding: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

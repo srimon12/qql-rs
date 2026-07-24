@@ -105,20 +105,55 @@ fn product_quantization(value: &serde_json::Value) -> qdrant::ProductQuantizatio
 }
 
 fn binary_quantization(value: &serde_json::Value) -> qdrant::BinaryQuantization {
-    let encoding = value
-        .get("encoding")
-        .and_then(serde_json::Value::as_str)
-        .map(|encoding| match encoding.to_ascii_lowercase().as_str() {
-            "twobits" | "two_bits" => qdrant::BinaryQuantizationEncoding::TwoBits as i32,
-            "oneandhalfbits" | "one_and_half_bits" => {
+    let encoding = value.get("encoding").and_then(|enc| {
+        // Accept string aliases and numeric shorthand (1 / 2 / 1.5).
+        let key = if let Some(s) = enc.as_str() {
+            s.to_ascii_lowercase()
+        } else if let Some(n) = enc.as_f64() {
+            if (n - 1.5).abs() < f64::EPSILON {
+                "1.5".into()
+            } else if (n - 2.0).abs() < f64::EPSILON {
+                "2".into()
+            } else {
+                "1".into()
+            }
+        } else {
+            return None;
+        };
+        Some(match key.as_str() {
+            "twobits" | "two_bits" | "2" | "twobitsencoding" => {
+                qdrant::BinaryQuantizationEncoding::TwoBits as i32
+            }
+            "oneandhalfbits" | "one_and_half_bits" | "1.5" => {
                 qdrant::BinaryQuantizationEncoding::OneAndHalfBits as i32
             }
             _ => qdrant::BinaryQuantizationEncoding::OneBit as i32,
+        })
+    });
+    let query_encoding = value
+        .get("query_encoding")
+        .and_then(serde_json::Value::as_str)
+        .map(|q| {
+            let setting = match q.to_ascii_lowercase().as_str() {
+                "binary" => qdrant::binary_quantization_query_encoding::Setting::Binary,
+                "scalar4bits" | "scalar4" => {
+                    qdrant::binary_quantization_query_encoding::Setting::Scalar4Bits
+                }
+                "scalar8bits" | "scalar8" => {
+                    qdrant::binary_quantization_query_encoding::Setting::Scalar8Bits
+                }
+                _ => qdrant::binary_quantization_query_encoding::Setting::Default,
+            };
+            qdrant::BinaryQuantizationQueryEncoding {
+                variant: Some(
+                    qdrant::binary_quantization_query_encoding::Variant::Setting(setting as i32),
+                ),
+            }
         });
     qdrant::BinaryQuantization {
         always_ram: json_bool(value, "always_ram"),
         encoding,
-        query_encoding: None,
+        query_encoding,
     }
 }
 
@@ -263,8 +298,24 @@ fn vectors_config_diff(value: &serde_json::Value) -> Option<qdrant::VectorsConfi
 }
 
 fn sparse_vector_params(value: &serde_json::Value) -> qdrant::SparseVectorParams {
+    let index = value.get("index").map(|idx| {
+        let datatype = idx
+            .get("datatype")
+            .and_then(serde_json::Value::as_str)
+            .map(|dt| match dt.to_ascii_lowercase().as_str() {
+                "float32" | "f32" => qdrant::Datatype::Float32 as i32,
+                "uint8" | "u8" => qdrant::Datatype::Uint8 as i32,
+                "float16" | "f16" => qdrant::Datatype::Float16 as i32,
+                _ => qdrant::Datatype::Default as i32,
+            });
+        qdrant::SparseIndexConfig {
+            full_scan_threshold: json_u64(idx, "full_scan_threshold"),
+            on_disk: json_bool(idx, "on_disk"),
+            datatype,
+        }
+    });
     qdrant::SparseVectorParams {
-        index: None,
+        index,
         modifier: value
             .get("modifier")
             .and_then(serde_json::Value::as_str)

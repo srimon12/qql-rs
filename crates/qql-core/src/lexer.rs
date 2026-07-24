@@ -180,7 +180,8 @@ impl<'a> Lexer<'a> {
             }
             if bytes[self.pos] == quote {
                 // SQL-style double single quotes ('') inside single-quoted strings
-                if quote == b'\'' && self.pos + 1 < self.input.len() && bytes[self.pos + 1] == b'\'' {
+                if quote == b'\'' && self.pos + 1 < self.input.len() && bytes[self.pos + 1] == b'\''
+                {
                     self.pos += 2;
                     continue;
                 }
@@ -235,7 +236,9 @@ impl<'a> Lexer<'a> {
                 if is_digit(next_ch) || next_ch == b'+' || next_ch == b'-' {
                     is_float = true;
                     self.pos += 1; // consume 'e'/'E'
-                    if self.input.as_bytes()[self.pos] == b'+' || self.input.as_bytes()[self.pos] == b'-' {
+                    if self.input.as_bytes()[self.pos] == b'+'
+                        || self.input.as_bytes()[self.pos] == b'-'
+                    {
                         self.pos += 1; // consume '+' or '-'
                     }
                     while self.pos < self.input.len() && is_digit(self.input.as_bytes()[self.pos]) {

@@ -250,6 +250,7 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
                 scroll.filter.as_deref(),
                 scroll.after.as_ref(),
                 scroll.shard_key.clone(),
+                scroll.with_vector.as_ref(),
             ),
         }),
         Stmt::Upsert(upsert) => Ok(PlannedOperation::Upsert {

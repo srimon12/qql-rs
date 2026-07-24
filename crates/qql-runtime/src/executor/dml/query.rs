@@ -43,7 +43,7 @@ fn check_named_vectors(collection: &str, info: &CollectionInfo) -> Result<(), Qq
         .schema
         .sparse_vectors
         .iter()
-        .map(String::as_str)
+        .map(|s| s.name.as_str())
         .collect();
 
     let mut names = dense;

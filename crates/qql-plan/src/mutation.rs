@@ -136,13 +136,22 @@ pub fn lower_scroll_request(
     filter: Option<&qql_core::ast::FilterExpr>,
     after: Option<&qql_core::ast::PointId>,
     shard_key: Option<String>,
+    with_vector: Option<&qql_core::ast::VectorSelector>,
 ) -> ScrollRequest {
+    let with_vector = match with_vector {
+        Some(qql_core::ast::VectorSelector::All) => Some(VectorSelectorReq::All(true)),
+        Some(qql_core::ast::VectorSelector::None) => Some(VectorSelectorReq::All(false)),
+        Some(qql_core::ast::VectorSelector::Names(names)) => {
+            Some(VectorSelectorReq::Names(names.clone()))
+        }
+        None => Some(VectorSelectorReq::All(false)),
+    };
     ScrollRequest {
         filter: filter.map(top_level_filter),
         offset: after.map(point_id_req_typed),
         limit: Some(limit),
         with_payload: Some(PayloadSelectorReq::All(true)),
-        with_vector: Some(VectorSelectorReq::All(false)),
+        with_vector,
         order_by: None,
         shard_key,
     }

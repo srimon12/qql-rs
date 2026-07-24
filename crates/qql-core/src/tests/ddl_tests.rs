@@ -137,10 +137,59 @@ fn scroll_basic() {
     let Stmt::Scroll(sc) = s else { panic!() };
     assert_eq!(sc.collection, "docs");
     assert_eq!(sc.limit, 50);
+    assert!(sc.with_vector.is_none());
 }
 
 #[test]
 fn scroll_with_filter() {
     let s = Parser::parse("SCROLL FROM docs WHERE active = true AFTER 10 LIMIT 20;").unwrap();
     assert!(matches!(s, Stmt::Scroll(_)));
+}
+
+#[test]
+fn scroll_with_vector_all() {
+    use crate::ast::VectorSelector;
+    let s = Parser::parse("SCROLL FROM docs WITH VECTOR LIMIT 10;").unwrap();
+    let Stmt::Scroll(sc) = s else { panic!() };
+    assert_eq!(sc.with_vector, Some(VectorSelector::All));
+}
+
+#[test]
+fn query_bare_with_vector_defaults_to_all() {
+    use crate::ast::{QueryOutput, VectorSelector};
+    let s = Parser::parse("QUERY 'hello' FROM docs WITH VECTOR LIMIT 10;").unwrap();
+    let Stmt::Query(q) = s else { panic!() };
+    assert_eq!(
+        q.output,
+        QueryOutput {
+            payload: None,
+            vectors: Some(VectorSelector::All),
+        }
+    );
+}
+
+#[test]
+fn create_index_accepts_quoted_type() {
+    let s = Parser::parse("CREATE INDEX ON COLLECTION docs FOR title TYPE 'text';").unwrap();
+    assert!(matches!(s, Stmt::CreateIndex(_)));
+}
+
+#[test]
+fn scroll_with_vector_true_and_after() {
+    use crate::ast::{PointId, VectorSelector};
+    let s = Parser::parse("SCROLL FROM docs AFTER 'abc-uuid' WITH VECTOR true LIMIT 5;").unwrap();
+    let Stmt::Scroll(sc) = s else { panic!() };
+    assert_eq!(sc.after, Some(PointId::String("abc-uuid".into())));
+    assert_eq!(sc.with_vector, Some(VectorSelector::All));
+}
+
+#[test]
+fn scroll_with_named_vectors() {
+    use crate::ast::VectorSelector;
+    let s = Parser::parse("SCROLL FROM docs WITH VECTOR (dense, sparse) LIMIT 3;").unwrap();
+    let Stmt::Scroll(sc) = s else { panic!() };
+    assert_eq!(
+        sc.with_vector,
+        Some(VectorSelector::Names(vec!["dense".into(), "sparse".into()]))
+    );
 }

@@ -9,7 +9,6 @@ use qql_core::error::QqlError;
 use qql_plan::types::Method as PlanMethod;
 use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 
-use crate::backend::CollectionSchema;
 use crate::client::{CollectionInfo, CreateCollectionReq, CreateFieldIndexReq, QdrantOps};
 
 #[derive(Clone)]
@@ -178,26 +177,7 @@ impl QdrantOps for RestQdrant {
         validate_success_envelope(&value, "get_collection_info")?;
         let result = value.get("result").cloned().unwrap_or(value);
 
-        // Extract vector names from the raw Qdrant response.  Dense vectors
-        // are keys under config.params.vectors, sparse under
-        // config.params.sparse_vectors.
-        let mut schema = CollectionSchema::default();
-        if let Some(vectors) = result
-            .get("config")
-            .and_then(|c| c.get("params"))
-            .and_then(|p| p.get("vectors"))
-            .and_then(|v| v.as_object())
-        {
-            schema.dense_vectors = vectors.keys().cloned().collect();
-        }
-        if let Some(sparse) = result
-            .get("config")
-            .and_then(|c| c.get("params"))
-            .and_then(|p| p.get("sparse_vectors"))
-            .and_then(|v| v.as_object())
-        {
-            schema.sparse_vectors = sparse.keys().cloned().collect();
-        }
+        let schema = crate::backend::schema_from_rest_result(&result);
 
         let mut info: CollectionInfo = serde_json::from_value(result).map_err(|e| {
             QqlError::backend("QQL-BACKEND", format!("parse collection info: {e}"), None)

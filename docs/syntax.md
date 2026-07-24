@@ -233,6 +233,7 @@ hybrid-embed = "USING", "HYBRID",
 scroll       = "SCROLL", "FROM", collection,
                [ "WHERE", filter ], [ "AFTER", point-id ],
                [ "SHARD", string ],
+               [ "WITH", "VECTOR", [ vector-selector ] ],
                "LIMIT", positive-integer ;
 count        = "COUNT", "FROM", collection,
                [ "WHERE", filter ],

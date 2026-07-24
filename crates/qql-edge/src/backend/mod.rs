@@ -648,7 +648,15 @@ impl QdrantOps for EdgeQdrant {
             let info = shard.info();
             let cfg = shard.config();
             let dense = cfg.vectors.keys().cloned().collect();
-            let sparse = cfg.sparse_vectors.keys().cloned().collect();
+            let sparse = cfg
+                .sparse_vectors
+                .keys()
+                .map(|k| qql::backend::SparseVectorSpec {
+                    name: k.clone(),
+                    index: None,
+                    modifier: None,
+                })
+                .collect();
             (info, dense, sparse)
         })
         .await
@@ -661,8 +669,8 @@ impl QdrantOps for EdgeQdrant {
             schema: CollectionSchema {
                 dense_vectors,
                 sparse_vectors,
+                ..Default::default()
             },
-            raw_json: None,
         })
     }
 

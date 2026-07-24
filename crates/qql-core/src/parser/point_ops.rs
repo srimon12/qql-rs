@@ -27,6 +27,15 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
+        // Optional: WITH VECTOR [true|false|(names)] — bare form means all vectors.
+        let with_vector =
+            if self.peek()?.kind == TokenKind::With && self.peek_nth(1).kind == TokenKind::Vector {
+                self.advance()?;
+                self.advance()?;
+                Some(self.parse_vector_selector()?)
+            } else {
+                None
+            };
         self.expect(TokenKind::Limit)?;
         let limit = self.parse_positive_u64("SCROLL LIMIT")?;
         Ok(Stmt::Scroll(Box::new(ScrollStmt {
@@ -35,6 +44,7 @@ impl<'a> Parser<'a> {
             filter,
             after,
             shard_key,
+            with_vector,
         })))
     }
 

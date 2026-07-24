@@ -55,6 +55,15 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Parse a vector selector after `WITH VECTOR`.
+    ///
+    /// Accepts:
+    /// - `true` / `false`
+    /// - `(name, …)` named list
+    /// - bare form (next token is not a selector) → [`VectorSelector::All`]
+    ///
+    /// Shared by QUERY and SCROLL so both accept `WITH VECTOR` without an
+    /// explicit selector.
     pub fn parse_vector_selector(&mut self) -> Result<VectorSelector, QqlError> {
         if let Some(value) = self.parse_selector_bool()? {
             return Ok(if value {
@@ -63,7 +72,10 @@ impl<'a> Parser<'a> {
                 VectorSelector::None
             });
         }
-        self.parse_name_list().map(VectorSelector::Names)
+        if self.peek()?.kind == TokenKind::Lparen {
+            return self.parse_name_list().map(VectorSelector::Names);
+        }
+        Ok(VectorSelector::All)
     }
 
     fn parse_selector_bool(&mut self) -> Result<Option<bool>, QqlError> {

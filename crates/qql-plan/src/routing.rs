@@ -313,7 +313,28 @@ mod tests {
         let r = route(&s);
         let json = r.body_json().unwrap();
         assert_eq!(json["with_payload"], true);
+        assert_eq!(json["with_vector"], false);
         assert!(json["limit"].as_u64().unwrap() > 0);
+    }
+
+    #[test]
+    fn scroll_with_vector_all() {
+        let s = Parser::parse("SCROLL FROM docs WITH VECTOR LIMIT 25;").unwrap();
+        let r = route(&s);
+        let json = r.body_json().unwrap();
+        assert_eq!(json["with_payload"], true);
+        assert_eq!(json["with_vector"], true);
+        assert_eq!(json["limit"], 25);
+    }
+
+    #[test]
+    fn scroll_with_vector_after_string_id() {
+        let s = Parser::parse("SCROLL FROM docs AFTER 'id-with-quote' WITH VECTOR true LIMIT 10;")
+            .unwrap();
+        let r = route(&s);
+        let json = r.body_json().unwrap();
+        assert_eq!(json["offset"], "id-with-quote");
+        assert_eq!(json["with_vector"], true);
     }
 
     #[test]

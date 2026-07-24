@@ -1,98 +1,94 @@
+//! First-class collection dump → `.qql` script exporter.
+//!
+//! Emits:
+//! 1. `CREATE COLLECTION` from typed vector schema (sizes, distances, sparse)
+//! 2. `CREATE INDEX` from typed payload index specs
+//! 3. Batched `UPSERT` with real `vector:` values (not re-embed stubs)
+//!
+//! Scroll uses cursor pagination and `with_vector: true` so every page
+//! includes stored vectors. Output is streamed to disk to bound memory.
+
 use std::error::Error;
-use std::fs;
+use std::fs::{self, File};
+use std::io::{BufWriter, Write};
 use std::path::Path;
 
+use qql::backend::{CollectionInfo, PayloadIndexSpec, VectorSpec};
 use qql::executor::Executor;
-use qql_core::parser::Parser;
+use qql_plan::semantic::PlanPointId;
+use qql_plan::types::{PayloadSelectorReq, ScrollRequest, VectorSelectorReq};
+use qql_plan::PlannedOperation;
+use serde_json::Value;
 
-fn escape_string(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('\'', "\\'")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-        .replace('\t', "\\t")
-        .replace('\0', "\\0")
+// ── Public API ──────────────────────────────────────────────────
+
+/// Result summary of a dump run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DumpStats {
+    pub written: usize,
+    pub skipped: usize,
+    pub batches: usize,
 }
 
-pub fn generate_create_statement(
-    collection: &str,
-    hybrid: bool,
-    dense_name: &str,
-    sparse_name: &str,
-    dense_model: &str,
-    sparse_model: &str,
-) -> String {
-    let mut stmt = format!("CREATE COLLECTION {}", collection);
-    if hybrid {
-        if !dense_model.is_empty() {
-            stmt.push_str(&format!(
-                " HYBRID DENSE MODEL '{}'",
-                escape_string(dense_model)
-            ));
-            if !sparse_model.is_empty() {
-                stmt.push_str(&format!(" SPARSE MODEL '{}'", escape_string(sparse_model)));
-            }
-        } else {
-            stmt.push_str(" HYBRID");
-            if dense_name != "dense" || sparse_name != "sparse" {
-                stmt.push_str(&format!(
-                    " DENSE VECTOR '{}' SPARSE VECTOR '{}'",
-                    escape_string(dense_name),
-                    escape_string(sparse_name)
-                ));
-            }
-        }
-    } else if !dense_model.is_empty() {
-        stmt.push_str(&format!(" USING MODEL '{}'", escape_string(dense_model)));
-    } else if dense_name != "dense" && !dense_name.is_empty() {
-        stmt.push_str(&format!(" VECTOR '{}'", escape_string(dense_name)));
-    }
-    stmt
+/// Progress details emitted after each batch during dump execution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DumpProgress {
+    pub collection: String,
+    pub written: usize,
+    pub skipped: usize,
+    pub batches: usize,
 }
 
-pub fn build_insert_using_clause(
-    hybrid: bool,
-    dense_name: &str,
-    sparse_name: &str,
-    dense_model: &str,
-    sparse_model: &str,
-) -> String {
-    if hybrid {
-        if !dense_model.is_empty() {
-            let mut parts = vec![" USING HYBRID".to_string()];
-            parts.push(format!("DENSE MODEL '{}'", escape_string(dense_model)));
-            if !sparse_model.is_empty() {
-                parts.push(format!("SPARSE MODEL '{}'", escape_string(sparse_model)));
-            }
-            return parts.join(" ");
-        }
-        if dense_name != "dense" || sparse_name != "sparse" {
-            return format!(
-                " USING HYBRID DENSE VECTOR '{}' SPARSE VECTOR '{}'",
-                escape_string(dense_name),
-                escape_string(sparse_name)
-            );
-        }
-        return " USING HYBRID".to_string();
-    }
-    if !dense_model.is_empty() {
-        return format!(" USING MODEL '{}'", escape_string(dense_model));
-    }
-    if dense_name != "dense" && !dense_name.is_empty() {
-        return format!(" USING VECTOR '{}'", escape_string(dense_name));
-    }
-    String::new()
-}
-
+/// Dump a collection to a `.qql` script file atomically.
+///
+/// Output is streamed to a temporary file (`.tmp`) and renamed to `output_path`
+/// on successful completion. If an error occurs, any pre-existing file at `output_path`
+/// is preserved untouched, and the temporary file is removed.
 pub async fn dump_collection(
     executor: &Executor,
     collection: &str,
     output_path: &str,
     batch_size: u32,
-    dense_model: &str,
-    sparse_model: &str,
-) -> Result<(usize, usize), Box<dyn Error>> {
+    progress: Option<&(dyn Fn(DumpProgress) + Sync)>,
+) -> Result<DumpStats, Box<dyn Error>> {
+    let tmp_path = format!("{}.tmp", output_path);
+    let res = dump_collection_inner(executor, collection, &tmp_path, batch_size, progress).await;
+    match res {
+        Ok(stats) => {
+            // Atomic replace when possible; fall back to copy on cross-device rename.
+            if let Err(rename_err) = fs::rename(&tmp_path, output_path) {
+                if let Err(copy_err) = fs::copy(&tmp_path, output_path) {
+                    // Keep .tmp for recovery; surface both failures.
+                    return Err(format!(
+                        "failed to finalize dump at '{}': rename error: {}; copy error: {}",
+                        output_path, rename_err, copy_err
+                    )
+                    .into());
+                }
+                let _ = fs::remove_file(&tmp_path);
+            }
+            Ok(stats)
+        }
+        Err(err) => {
+            if Path::new(&tmp_path).exists() {
+                let _ = fs::remove_file(&tmp_path);
+            }
+            Err(err)
+        }
+    }
+}
+
+async fn dump_collection_inner(
+    executor: &Executor,
+    collection: &str,
+    output_path: &str,
+    batch_size: u32,
+    progress: Option<&(dyn Fn(DumpProgress) + Sync)>,
+) -> Result<DumpStats, Box<dyn Error>> {
+    if batch_size == 0 {
+        return Err("batch_size must be >= 1".into());
+    }
+
     let ops = executor.ops();
 
     let exists = ops.collection_exists(collection).await?;
@@ -101,168 +97,1273 @@ pub async fn dump_collection(
     }
 
     let info = ops.get_collection_info(collection).await?;
-    let hybrid = !info.schema.sparse_vectors.is_empty();
-    let dense_name = info
-        .schema
-        .dense_vectors
-        .first()
-        .cloned()
-        .unwrap_or_else(|| "dense".to_string());
-    let sparse_name = info
-        .schema
-        .sparse_vectors
-        .first()
-        .cloned()
-        .unwrap_or_else(|| "sparse".to_string());
 
     if let Some(parent) = Path::new(output_path).parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    let mut body = String::new();
-    let create_line = generate_create_statement(
-        collection,
-        hybrid,
-        &dense_name,
-        &sparse_name,
-        dense_model,
-        sparse_model,
-    );
-    body.push_str(&create_line);
-    body.push_str("\n\n");
-
-    // Extract payload schema indexes if raw_json is available
-    if let Some(ref raw) = info.raw_json {
-        if let Some(payload_schema) = raw.get("payload_schema").and_then(|s| s.as_object()) {
-            let mut index_stmts = Vec::new();
-            for (field, meta) in payload_schema {
-                if let Some(data_type) = meta
-                    .get("data_type")
-                    .and_then(|t| t.as_str())
-                    .or_else(|| meta.get("type").and_then(|t| t.as_str()))
-                {
-                    index_stmts.push(format!(
-                        "CREATE INDEX ON COLLECTION {} FOR {} TYPE {}",
-                        collection, field, data_type
-                    ));
-                }
-            }
-            if !index_stmts.is_empty() {
-                index_stmts.sort();
-                body.push_str(&index_stmts.join("\n"));
-                body.push_str("\n\n");
-            }
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)?;
         }
     }
 
-    let mut written = 0;
-    let mut skipped = 0;
+    let file = File::create(output_path)?;
+    let mut out = BufWriter::new(file);
 
-    let mut offset: Option<serde_json::Value> = None;
+    writeln!(out, "-- QQL dump for {}", collection)?;
+    writeln!(out, "-- Generated by qql dump")?;
+    writeln!(out)?;
+
+    let create = generate_create_statement(collection, &info);
+    writeln!(out, "{};", create)?;
+    writeln!(out)?;
+
+    let indexes = generate_index_statements(collection, &info.schema.payload_indexes);
+    if !indexes.is_empty() {
+        for idx in &indexes {
+            writeln!(out, "{};", idx)?;
+        }
+        writeln!(out)?;
+    }
+
+    let mut written = 0usize;
+    let mut skipped = 0usize;
+    let mut batches = 0usize;
+    let mut after: Option<PlanPointId> = None;
 
     loop {
-        let scroll_qql = format!("SCROLL FROM {} LIMIT {}", collection, batch_size);
-        let mut stmt = Parser::parse(&scroll_qql)?;
-
-        // Inject the offset if we have one from a previous page
-        if let Some(ref after_id) = offset {
-            let scroll_qql_with_offset = format!(
-                "SCROLL FROM {} LIMIT {} OFFSET {}",
-                collection,
-                batch_size,
-                match after_id {
-                    serde_json::Value::Number(n) => n.to_string(),
-                    serde_json::Value::String(s) => format!("'{}'", s),
-                    _ => String::new(),
-                }
-            );
-            stmt = Parser::parse(&scroll_qql_with_offset)?;
-        }
-
-        let op = qql_plan::plan::plan(&stmt)?;
-        let response = ops.execute_planned(&op).await?;
-
-        let points = response
-            .get("result")
-            .and_then(|r| r.get("points"))
-            .and_then(|p| p.as_array())
-            .or_else(|| response.get("result").and_then(|r| r.as_array()));
-
-        let points = match points {
-            Some(p) if !p.is_empty() => p.to_vec(),
-            _ => break,
+        let op = PlannedOperation::Scroll {
+            collection: collection.to_string(),
+            request: ScrollRequest {
+                filter: None,
+                offset: after.clone(),
+                limit: Some(batch_size as u64),
+                with_payload: Some(PayloadSelectorReq::All(true)),
+                with_vector: Some(VectorSelectorReq::All(true)),
+                order_by: None,
+                shard_key: None,
+            },
         };
 
-        let mut batch_records = Vec::new();
+        let response = ops.execute_planned(&op).await?;
+        let (points, next) = extract_scroll_page(&response);
+
+        if points.is_empty() {
+            break;
+        }
+
+        let mut records = Vec::with_capacity(points.len());
         for point in &points {
-            let payload = match point.get("payload") {
-                Some(p) => p,
-                None => {
-                    skipped += 1;
-                    continue;
-                }
-            };
-
-            let mut record = serde_json::Map::new();
-            if let Some(id) = point.get("id") {
-                record.insert("id".to_string(), id.clone());
+            match point_to_upsert_object(point) {
+                Some(rec) => records.push(rec),
+                None => skipped += 1,
             }
-
-            if let Some(obj) = payload.as_object() {
-                for (k, v) in obj {
-                    record.insert(k.clone(), v.clone());
-                }
-            }
-
-            if let Some(vec_val) = point.get("vector") {
-                if let Some(obj) = vec_val.as_object() {
-                    for (vname, vdata) in obj {
-                        let key = format!("_v_{}", vname.replace('_', "__"));
-                        record.insert(key, vdata.clone());
-                    }
-                } else {
-                    record.insert("_v".to_string(), vec_val.clone());
-                }
-            }
-
-            batch_records.push(record);
         }
 
-        if !batch_records.is_empty() {
-            body.push_str(&format!("UPSERT INTO {} VALUES\n", collection));
-            for (idx, rec) in batch_records.iter().enumerate() {
-                let rec_json =
-                    serde_json::to_string_pretty(&serde_json::Value::Object(rec.clone()))?;
-                body.push_str("  ");
-                body.push_str(&rec_json.replace('\n', "\n  "));
-                if idx + 1 < batch_records.len() {
-                    body.push(',');
-                }
-                body.push('\n');
-                written += 1;
+        if !records.is_empty() {
+            write_upsert_batch(&mut out, collection, &records)?;
+            written += records.len();
+            batches += 1;
+
+            if let Some(cb) = progress {
+                cb(DumpProgress {
+                    collection: collection.to_string(),
+                    written,
+                    skipped,
+                    batches,
+                });
             }
-            body.push_str(&build_insert_using_clause(
-                hybrid,
-                &dense_name,
-                &sparse_name,
-                dense_model,
-                sparse_model,
-            ));
-            body.push_str("\n\n");
         }
 
-        // Get the next offset from the last point's ID
-        offset = points.last().and_then(|p| p.get("id").cloned());
+        // Prefer Qdrant's next_page_offset; fall back to last point id.
+        let prev_after = after;
+        after = next.or_else(|| {
+            points
+                .last()
+                .and_then(|p| p.get("id"))
+                .and_then(json_to_plan_point_id)
+        });
 
-        if points.len() < batch_size as usize {
+        // Guard against a stuck cursor (same offset on a full page → infinite loop).
+        if after.is_none()
+            || points.len() < batch_size as usize
+            || after.as_ref() == prev_after.as_ref()
+        {
             break;
         }
     }
 
-    let header = format!("-- QQL dump for {}\n-- Points: {}\n\n", collection, written);
-    let footer = format!("-- Written: {}\n-- Skipped: {}\n", written, skipped);
-    let final_output = format!("{}{}{}", header, body, footer);
+    writeln!(out)?;
+    writeln!(out, "-- Written: {}", written)?;
+    writeln!(out, "-- Skipped: {}", skipped)?;
+    writeln!(out, "-- Batches: {}", batches)?;
+    out.flush()?;
 
-    fs::write(output_path, final_output)?;
-    Ok((written, skipped))
+    Ok(DumpStats {
+        written,
+        skipped,
+        batches,
+    })
+}
+
+// ── Schema → CREATE ─────────────────────────────────────────────
+
+/// Build a `CREATE COLLECTION` statement from typed collection info.
+pub fn generate_create_statement(collection: &str, info: &CollectionInfo) -> String {
+    let coll = format_ident(collection);
+    let mut parts: Vec<String> = Vec::new();
+
+    for v in &info.schema.vectors {
+        parts.push(format_vector_part(v));
+    }
+
+    for sv in &info.schema.sparse_vectors {
+        parts.push(format_sparse_vector_part(sv));
+    }
+
+    let mut stmt = if parts.is_empty() {
+        format!("CREATE COLLECTION {}", coll)
+    } else {
+        format!("CREATE COLLECTION {} ({})", coll, parts.join(", "))
+    };
+
+    let mut with_parts = Vec::new();
+    let p = &info.schema.params;
+    if let Some(n) = p.shard_number {
+        with_parts.push(format!("shard_number = {}", n));
+    }
+    if let Some(ref m) = p.sharding_method {
+        with_parts.push(format!("sharding_method = '{}'", escape_string(m)));
+    }
+    if let Some(b) = p.on_disk_payload {
+        with_parts.push(format!("on_disk_payload = {}", b));
+    }
+    if let Some(r) = p.replication_factor {
+        with_parts.push(format!("replication_factor = {}", r));
+    }
+    if !with_parts.is_empty() {
+        stmt.push_str(&format!(" WITH PARAMS ({})", with_parts.join(", ")));
+    }
+
+    if let Some(ref hnsw) = info.schema.hnsw {
+        if let Some(block) = format_config_block("HNSW", hnsw, HNSW_KEYS) {
+            stmt.push_str(&block);
+        }
+    }
+
+    if let Some(ref opts_map) = info.schema.optimizers {
+        if let Some(block) = format_config_block("OPTIMIZERS", opts_map, OPTIMIZER_KEYS) {
+            stmt.push_str(&block);
+        }
+    }
+
+    if let Some(ref quant) = info.schema.quantization {
+        if let Some(quant_str) = format_quantization_spec(quant) {
+            stmt.push_str(&format!(" WITH QUANTIZATION ({})", quant_str));
+        }
+    }
+
+    stmt
+}
+
+const HNSW_KEYS: &[&str] = &[
+    "m",
+    "ef_construct",
+    "full_scan_threshold",
+    "max_indexing_threads",
+    "on_disk",
+    "payload_m",
+    "inline_storage",
+];
+
+const OPTIMIZER_KEYS: &[&str] = &[
+    "deleted_threshold",
+    "vacuum_min_vector_number",
+    "default_segment_number",
+    "max_segment_size",
+    "memmap_threshold",
+    "indexing_threshold",
+    "flush_interval_sec",
+    "max_optimization_threads",
+    "prevent_unoptimized",
+];
+
+fn format_config_block(
+    keyword: &str,
+    map: &serde_json::Map<String, Value>,
+    allowed: &[&str],
+) -> Option<String> {
+    let mut opts = Vec::new();
+    for key in allowed {
+        if let Some(val) = map.get(*key) {
+            if let Some(opt) = format_index_option(key, val) {
+                opts.push(opt);
+            }
+        }
+    }
+    if opts.is_empty() {
+        None
+    } else {
+        Some(format!(" WITH {} ({})", keyword, opts.join(", ")))
+    }
+}
+
+const SPARSE_INDEX_KEYS: &[&str] = &["full_scan_threshold", "on_disk", "datatype"];
+
+fn format_sparse_vector_part(sv: &qql::backend::SparseVectorSpec) -> String {
+    let mut part = format!("{} SPARSE", format_ident(&sv.name));
+    let mut with_opts = Vec::new();
+    if let Some(ref modifier) = sv.modifier {
+        // Canonicalize modifier for re-parse.
+        let m = match modifier.to_ascii_lowercase().as_str() {
+            "idf" => "idf".to_string(),
+            "none" => "none".to_string(),
+            _ => modifier.to_ascii_lowercase(),
+        };
+        with_opts.push(format!("modifier = '{}'", m));
+    }
+    if let Some(ref idx) = sv.index {
+        for key in SPARSE_INDEX_KEYS {
+            if let Some(val) = idx.get(*key) {
+                if *key == "datatype" {
+                    if let Some(dt) = val.as_str().and_then(normalize_sparse_datatype) {
+                        with_opts.push(format!("datatype = '{}'", dt));
+                    }
+                    continue;
+                }
+                if let Some(opt) = format_index_option(key, val) {
+                    with_opts.push(opt);
+                }
+            }
+        }
+    }
+    if !with_opts.is_empty() {
+        part.push_str(&format!(" WITH SPARSE ({})", with_opts.join(", ")));
+    }
+    part
+}
+
+fn normalize_sparse_datatype(s: &str) -> Option<&'static str> {
+    match s.to_ascii_lowercase().as_str() {
+        "float32" | "f32" => Some("float32"),
+        "uint8" | "u8" => Some("uint8"),
+        "float16" | "f16" => Some("float16"),
+        "default" => Some("default"),
+        _ => None,
+    }
+}
+
+fn format_vector_part(v: &VectorSpec) -> String {
+    let mut part = match &v.name {
+        None => format!("VECTOR({}, {})", v.size, distance_token(&v.distance)),
+        Some(name) => format!(
+            "{} VECTOR({}, {})",
+            format_ident(name),
+            v.size,
+            distance_token(&v.distance)
+        ),
+    };
+
+    if let Some(ref hnsw) = v.hnsw {
+        if let Some(block) = format_config_block("HNSW", hnsw, HNSW_KEYS) {
+            part.push_str(&block);
+        }
+    }
+
+    if let Some(ref quant) = v.quantization {
+        if let Some(quant_str) = format_quantization_spec(quant) {
+            part.push_str(&format!(" WITH QUANTIZATION ({})", quant_str));
+        }
+    }
+
+    if let Some(ref mv) = v.multivector {
+        let comp = mv
+            .get("comparator")
+            .and_then(|c| c.as_str())
+            .unwrap_or("max_sim");
+        part.push_str(&format!(" WITH MULTIVECTOR (comparator = '{}')", comp));
+    }
+
+    if let Some(on_disk) = v.on_disk {
+        part.push_str(&format!(" WITH VECTORS (on_disk = {})", on_disk));
+    }
+
+    part
+}
+
+/// Format a Qdrant quantization_config value as QQL
+/// `WITH QUANTIZATION (type = '…', …)` body options.
+///
+/// Accepts nested REST shapes (`{ "turbo": { … } }`) and flat
+/// `{ "type": "turbo", … }` forms. Emits `bits` (not `turbo_bits`) so the
+/// CREATE parser accepts turbo configs.
+fn format_quantization_spec(quant: &Value) -> Option<String> {
+    let obj = quant.as_object()?;
+
+    // Nested OpenAPI shapes: { scalar|product|binary|turbo: {…} }
+    for kind in ["scalar", "product", "binary", "turbo"] {
+        if let Some(inner) = obj.get(kind).and_then(|s| s.as_object()) {
+            return Some(format_quantization_opts(kind, inner));
+        }
+    }
+
+    // Flat form: { "type": "scalar", "quantile": 0.99, … }
+    if let Some(ty) = obj.get("type").and_then(|t| t.as_str()) {
+        return Some(format_quantization_opts(ty, obj));
+    }
+
+    if obj.get("disabled").and_then(|d| d.as_bool()) == Some(true) {
+        return Some("disabled = true".to_string());
+    }
+    None
+}
+
+fn format_quantization_opts(kind: &str, inner: &serde_json::Map<String, Value>) -> String {
+    let kind = kind.to_ascii_lowercase();
+    let mut opts = vec![format!("type = '{}'", kind)];
+
+    for (k, v) in inner {
+        if k == "type" {
+            continue;
+        }
+        // Turbo: normalize bits / turbo_bits → QQL `bits = N`
+        if kind == "turbo" && (k == "bits" || k == "turbo_bits") {
+            if let Some(bits) = normalize_turbo_bits(v) {
+                opts.push(format!("bits = {}", bits));
+            }
+            continue;
+        }
+        // Binary: normalize protobuf/REST encoding aliases → QQL snake_case
+        if kind == "binary" && k == "encoding" {
+            if let Some(enc) = normalize_binary_encoding(v) {
+                opts.push(format!("encoding = '{}'", enc));
+            }
+            continue;
+        }
+        if let Some(opt) = format_index_option(k, v) {
+            opts.push(opt);
+        }
+    }
+    opts.join(", ")
+}
+
+fn normalize_binary_encoding(v: &Value) -> Option<String> {
+    let raw = match v {
+        Value::String(s) => s.to_ascii_lowercase(),
+        Value::Number(n) => {
+            let f = n.as_f64()?;
+            if (f - 1.5).abs() < f64::EPSILON {
+                "1.5".into()
+            } else if (f - 2.0).abs() < f64::EPSILON {
+                "2".into()
+            } else if (f - 1.0).abs() < f64::EPSILON {
+                "1".into()
+            } else {
+                return None;
+            }
+        }
+        _ => return None,
+    };
+    Some(
+        match raw.as_str() {
+            "one_bit" | "onebit" | "1" => "one_bit",
+            "two_bits" | "twobits" | "2" => "two_bits",
+            "one_and_half_bits" | "oneandhalfbits" | "1.5" => "one_and_half_bits",
+            _ => return None,
+        }
+        .into(),
+    )
+}
+
+/// Map REST/gRPC turbo bit representations to QQL numeric `bits`.
+fn normalize_turbo_bits(v: &Value) -> Option<String> {
+    match v {
+        Value::Number(n) => {
+            let f = n.as_f64()?;
+            // Only the four legal turbo bit widths.
+            if (f - 1.0).abs() < f64::EPSILON
+                || (f - 1.5).abs() < f64::EPSILON
+                || (f - 2.0).abs() < f64::EPSILON
+                || (f - 4.0).abs() < f64::EPSILON
+            {
+                // Prefer compact integer rendering when whole.
+                if f.fract() == 0.0 {
+                    Some(format!("{}", f as i64))
+                } else {
+                    Some(format!("{}", f))
+                }
+            } else {
+                None
+            }
+        }
+        Value::String(s) => match s.to_ascii_lowercase().as_str() {
+            "bits1" | "1" => Some("1".into()),
+            "bits1_5" | "bits1.5" | "1.5" => Some("1.5".into()),
+            "bits2" | "2" => Some("2".into()),
+            "bits4" | "4" => Some("4".into()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn distance_token(distance: &str) -> &'static str {
+    match distance.to_ascii_lowercase().as_str() {
+        "dot" | "dotproduct" => "DOT",
+        "euclid" | "euclidean" => "EUCLID",
+        "manhattan" => "MANHATTAN",
+        _ => "COSINE",
+    }
+}
+
+// ── Indexes ─────────────────────────────────────────────────────
+
+/// Emit `CREATE INDEX` statements from typed payload index specs.
+pub fn generate_index_statements(collection: &str, indexes: &[PayloadIndexSpec]) -> Vec<String> {
+    let coll = format_ident(collection);
+    let mut stmts = Vec::with_capacity(indexes.len());
+
+    for idx in indexes {
+        let mut stmt = format!(
+            "CREATE INDEX ON COLLECTION {} FOR {} TYPE {}",
+            coll,
+            format_ident(&idx.field),
+            idx.data_type.to_ascii_lowercase()
+        );
+
+        let mut opts = Vec::new();
+        for (k, v) in &idx.params {
+            if let Some(opt) = format_index_option(k, v) {
+                opts.push(opt);
+            }
+        }
+        if let Some(tenant) = idx.is_tenant {
+            if !opts.iter().any(|o| o.starts_with("is_tenant")) {
+                opts.push(format!("is_tenant = {}", tenant));
+            }
+        }
+        if !opts.is_empty() {
+            opts.sort();
+            stmt.push_str(&format!(" WITH ({})", opts.join(", ")));
+        }
+        stmts.push(stmt);
+    }
+
+    stmts.sort();
+    stmts
+}
+
+fn format_index_option(key: &str, value: &Value) -> Option<String> {
+    match value {
+        Value::Bool(b) => Some(format!("{} = {}", key, b)),
+        Value::Number(n) => Some(format!("{} = {}", key, n)),
+        Value::String(s) => Some(format!("{} = '{}'", key, escape_string(s))),
+        Value::Array(arr)
+            if arr
+                .iter()
+                .all(|v| v.is_string() || v.is_number() || v.is_boolean()) =>
+        {
+            let items: Vec<String> = arr
+                .iter()
+                .map(|v| match v {
+                    Value::String(s) => format!("'{}'", escape_string(s)),
+                    Value::Number(n) => n.to_string(),
+                    Value::Bool(b) => b.to_string(),
+                    _ => String::new(),
+                })
+                .collect();
+            Some(format!("{} = [{}]", key, items.join(", ")))
+        }
+        _ => None,
+    }
+}
+
+// ── Point formatting ────────────────────────────────────────────
+
+/// Convert a scroll point JSON object into an UPSERT record object
+/// (`{id, vector?, …payload}`). Returns `None` only when the point has no usable `id`.
+pub fn point_to_upsert_object(point: &Value) -> Option<Value> {
+    let id = point.get("id")?.clone();
+    let mut map = serde_json::Map::new();
+    map.insert("id".into(), id);
+
+    if let Some(payload) = point.get("payload").and_then(|p| p.as_object()) {
+        for (k, v) in payload {
+            map.insert(k.clone(), v.clone());
+        }
+    }
+
+    if let Some(vector) = point.get("vector") {
+        if !vector.is_null() {
+            map.insert("vector".into(), vector.clone());
+        }
+    }
+
+    Some(Value::Object(map))
+}
+
+/// Format a batch of upsert records as a QQL `UPSERT INTO … VALUES …` statement.
+pub fn format_upsert_statement(collection: &str, records: &[Value]) -> String {
+    let mut body = format!("UPSERT INTO {} VALUES\n", format_ident(collection));
+    for (idx, rec) in records.iter().enumerate() {
+        body.push_str("  ");
+        body.push_str(&format_point_literal(rec));
+        if idx + 1 < records.len() {
+            body.push(',');
+        }
+        body.push('\n');
+    }
+    body
+}
+
+fn write_upsert_batch(
+    out: &mut impl Write,
+    collection: &str,
+    records: &[Value],
+) -> Result<(), Box<dyn Error>> {
+    write!(out, "{}", format_upsert_statement(collection, records))?;
+    writeln!(out, ";")?;
+    writeln!(out)?;
+    Ok(())
+}
+
+/// Render one point as a QQL object literal: `{id: …, vector: …, …}`.
+pub fn format_point_literal(point: &Value) -> String {
+    let Some(obj) = point.as_object() else {
+        return "{}".into();
+    };
+
+    let mut parts = Vec::new();
+
+    if let Some(id) = obj.get("id") {
+        parts.push(format!("id: {}", format_point_id_value(id)));
+    }
+    if let Some(vector) = obj.get("vector") {
+        parts.push(format!("vector: {}", format_qql_value(vector)));
+    }
+
+    let mut payload_keys: Vec<&String> = obj
+        .keys()
+        .filter(|k| k.as_str() != "id" && k.as_str() != "vector")
+        .collect();
+    payload_keys.sort();
+    for k in payload_keys {
+        if let Some(v) = obj.get(k) {
+            parts.push(format!("{}: {}", format_field_key(k), format_qql_value(v)));
+        }
+    }
+
+    format!("{{{}}}", parts.join(", "))
+}
+
+fn format_point_id_value(id: &Value) -> String {
+    match id {
+        Value::Number(n) => n.to_string(),
+        Value::String(s) => format!("'{}'", escape_string(s)),
+        other => format!("'{}'", escape_string(&other.to_string())),
+    }
+}
+
+fn format_field_key(key: &str) -> String {
+    if is_simple_ident(key) {
+        key.to_string()
+    } else {
+        format!("'{}'", escape_string(key))
+    }
+}
+
+pub fn format_qql_value(value: &Value) -> String {
+    match value {
+        Value::Null => "null".into(),
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => n.to_string(),
+        Value::String(s) => format!("'{}'", escape_string(s)),
+        Value::Array(arr) => {
+            let items: Vec<String> = arr.iter().map(format_qql_value).collect();
+            format!("[{}]", items.join(", "))
+        }
+        Value::Object(map) => {
+            if map.contains_key("indices") && map.contains_key("values") && map.len() == 2 {
+                return format!(
+                    "{{indices: {}, values: {}}}",
+                    format_qql_value(&map["indices"]),
+                    format_qql_value(&map["values"])
+                );
+            }
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort();
+            let items: Vec<String> = keys
+                .iter()
+                .map(|k| format!("{}: {}", format_field_key(k), format_qql_value(&map[*k])))
+                .collect();
+            format!("{{{}}}", items.join(", "))
+        }
+    }
+}
+
+// ── Scroll response parsing ─────────────────────────────────────
+
+/// Extract `(points, next_page_offset)` from a scroll response body.
+pub fn extract_scroll_page(response: &Value) -> (Vec<Value>, Option<PlanPointId>) {
+    let result = response.get("result").unwrap_or(response);
+
+    let points = result
+        .get("points")
+        .and_then(|p| p.as_array())
+        .cloned()
+        .or_else(|| result.as_array().cloned())
+        .unwrap_or_default();
+
+    let next = result
+        .get("next_page_offset")
+        .and_then(json_to_plan_point_id);
+
+    (points, next)
+}
+
+pub fn json_to_plan_point_id(v: &Value) -> Option<PlanPointId> {
+    match v {
+        Value::Number(n) => n.as_u64().map(PlanPointId::Number),
+        Value::String(s) => Some(PlanPointId::String(s.clone())),
+        _ => None,
+    }
+}
+
+// ── Ident / escape helpers ──────────────────────────────────────
+
+/// Escape a string for QQL single-quoted literals.
+///
+/// Only sequences recognized by `qql-core`'s `decode_string` are emitted:
+/// `\\`, `\'`, `\n`, `\r`, `\t`. Null bytes and other control chars are
+/// stripped so the dump remains round-trippable via `qql execute`.
+pub fn escape_string(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '\'' => out.push_str("\\'"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\0' => {} // unsupported by qql-core — drop rather than emit \0
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+fn is_simple_ident(s: &str) -> bool {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// Format a collection/field name for QQL. Simple idents stay bare; others are quoted.
+pub fn format_ident(name: &str) -> String {
+    if is_simple_ident(name) {
+        name.to_string()
+    } else {
+        format!("'{}'", escape_string(name))
+    }
+}
+
+// ── Tests ───────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use qql::backend::{CollectionParamsSpec, CollectionSchema, PayloadIndexSpec, VectorSpec};
+    use serde_json::json;
+
+    fn info_with_vectors(vectors: Vec<VectorSpec>, sparse: Vec<String>) -> CollectionInfo {
+        CollectionInfo {
+            status: "green".into(),
+            points_count: 0,
+            segments_count: 1,
+            schema: CollectionSchema {
+                dense_vectors: vectors.iter().filter_map(|v| v.name.clone()).collect(),
+                sparse_vectors: sparse
+                    .into_iter()
+                    .map(|name| qql::backend::SparseVectorSpec {
+                        name,
+                        index: None,
+                        modifier: None,
+                    })
+                    .collect(),
+                vectors,
+                payload_indexes: Vec::new(),
+                params: CollectionParamsSpec::default(),
+                hnsw: None,
+                optimizers: None,
+                quantization: None,
+            },
+        }
+    }
+
+    #[test]
+    fn escape_string_matches_qql_core() {
+        assert_eq!(escape_string(r#"a'b"#), r#"a\'b"#);
+        assert_eq!(escape_string("a\\b"), "a\\\\b");
+        assert_eq!(escape_string("a\nb"), "a\\nb");
+        assert_eq!(escape_string("a\tb"), "a\\tb");
+        // \0 is not supported by the parser — must not emit it.
+        assert_eq!(escape_string("a\0b"), "ab");
+        let lit = format!("'{}'", escape_string("line\nnext\tend"));
+        // Round-trip through the real decoder via a string literal in UPSERT.
+        let stmt = format!("UPSERT INTO docs VALUES {{id: 1, t: {}}};", lit);
+        qql_core::parser::Parser::parse(&stmt).expect("escaped string should parse");
+    }
+
+    #[test]
+    fn format_ident_quotes_special_names() {
+        assert_eq!(format_ident("docs"), "docs");
+        assert_eq!(format_ident("my-docs"), "'my-docs'");
+        assert_eq!(format_ident("weird name"), "'weird name'");
+    }
+
+    #[test]
+    fn create_unnamed_vector_collection() {
+        let info = info_with_vectors(
+            vec![VectorSpec {
+                name: None,
+                size: 4,
+                distance: "Cosine".into(),
+                hnsw: None,
+                quantization: None,
+                multivector: None,
+                on_disk: None,
+            }],
+            vec![],
+        );
+        let stmt = generate_create_statement("docs", &info);
+        assert_eq!(stmt, "CREATE COLLECTION docs (VECTOR(4, COSINE))");
+        qql_core::parser::Parser::parse(&format!("{};", stmt))
+            .expect("unnamed vector CREATE should parse");
+    }
+
+    #[test]
+    fn create_named_hybrid_collection() {
+        let mut info = info_with_vectors(
+            vec![
+                VectorSpec {
+                    name: Some("dense".into()),
+                    size: 384,
+                    distance: "Cosine".into(),
+                    hnsw: None,
+                    quantization: None,
+                    multivector: None,
+                    on_disk: None,
+                },
+                VectorSpec {
+                    name: Some("image".into()),
+                    size: 512,
+                    distance: "Dot".into(),
+                    hnsw: None,
+                    quantization: None,
+                    multivector: None,
+                    on_disk: None,
+                },
+            ],
+            vec!["sparse".into()],
+        );
+        info.schema.params = CollectionParamsSpec {
+            shard_number: Some(2),
+            sharding_method: None,
+            on_disk_payload: Some(true),
+            replication_factor: None,
+        };
+        let stmt = generate_create_statement("hybrid_docs", &info);
+        assert!(stmt.starts_with("CREATE COLLECTION hybrid_docs ("));
+        assert!(stmt.contains("dense VECTOR(384, COSINE)"));
+        assert!(stmt.contains("image VECTOR(512, DOT)"));
+        assert!(stmt.contains("sparse SPARSE"));
+        assert!(stmt.contains("WITH PARAMS ("));
+        assert!(stmt.contains("shard_number = 2"));
+        assert!(stmt.contains("on_disk_payload = true"));
+        qql_core::parser::Parser::parse(&format!("{};", stmt)).expect("create should parse");
+    }
+
+    #[test]
+    fn create_falls_back_when_no_schema() {
+        let info = CollectionInfo::default();
+        let stmt = generate_create_statement("empty", &info);
+        assert_eq!(stmt, "CREATE COLLECTION empty");
+    }
+
+    #[test]
+    fn indexes_from_typed_specs() {
+        let indexes = vec![
+            PayloadIndexSpec {
+                field: "title".into(),
+                data_type: "text".into(),
+                params: {
+                    let mut m = serde_json::Map::new();
+                    m.insert("tokenizer".into(), json!("word"));
+                    m.insert("lowercase".into(), json!(true));
+                    m
+                },
+                is_tenant: None,
+            },
+            PayloadIndexSpec {
+                field: "tenant_id".into(),
+                data_type: "keyword".into(),
+                params: serde_json::Map::new(),
+                is_tenant: Some(true),
+            },
+        ];
+        let stmts = generate_index_statements("docs", &indexes);
+        assert_eq!(stmts.len(), 2);
+        assert!(stmts[0].contains("FOR tenant_id TYPE keyword"));
+        assert!(stmts[0].contains("is_tenant = true"));
+        assert!(stmts[1].contains("FOR title TYPE text"));
+        assert!(stmts[1].contains("tokenizer = 'word'"));
+        assert!(stmts[1].contains("lowercase = true"));
+        for s in &stmts {
+            qql_core::parser::Parser::parse(&format!("{};", s)).expect("index should parse");
+        }
+    }
+
+    #[test]
+    fn point_to_upsert_keeps_vector_and_payload() {
+        let point = json!({
+            "id": 42,
+            "payload": { "title": "hello", "year": 2024 },
+            "vector": [0.1, 0.2, 0.3]
+        });
+        let rec = point_to_upsert_object(&point).unwrap();
+        assert_eq!(rec["id"], 42);
+        assert_eq!(rec["title"], "hello");
+        assert_eq!(rec["year"], 2024);
+        assert_eq!(rec["vector"], json!([0.1, 0.2, 0.3]));
+    }
+
+    #[test]
+    fn point_without_payload_still_exported() {
+        let point = json!({
+            "id": "uuid-1",
+            "vector": { "dense": [1.0, 2.0] }
+        });
+        let rec = point_to_upsert_object(&point).unwrap();
+        assert_eq!(rec["id"], "uuid-1");
+        assert!(rec.get("vector").is_some());
+    }
+
+    #[test]
+    fn point_without_id_is_skipped() {
+        let point = json!({ "payload": { "x": 1 } });
+        assert!(point_to_upsert_object(&point).is_none());
+    }
+
+    #[test]
+    fn format_point_literal_matches_upsert_grammar() {
+        let rec = json!({
+            "id": 1,
+            "title": "café",
+            "vector": [0.1, 0.2]
+        });
+        let lit = format_point_literal(&rec);
+        assert!(lit.starts_with("{id: 1, vector: [0.1, 0.2]"));
+        assert!(lit.contains("title: 'café'"));
+        let stmt = format!("UPSERT INTO docs VALUES {};", lit);
+        qql_core::parser::Parser::parse(&stmt).expect("upsert should parse");
+    }
+
+    #[test]
+    fn format_named_and_sparse_vectors() {
+        let rec = json!({
+            "id": "p1",
+            "vector": {
+                "dense": [0.5, 0.5],
+                "sparse": { "indices": [1, 7], "values": [0.2, 0.9] }
+            }
+        });
+        let lit = format_point_literal(&rec);
+        let stmt = format!("UPSERT INTO docs VALUES {};", lit);
+        qql_core::parser::Parser::parse(&stmt).expect("named+sparse upsert should parse");
+    }
+
+    #[test]
+    fn format_string_id_with_quote_escapes() {
+        let rec = json!({ "id": "o'reilly", "vector": [1.0] });
+        let lit = format_point_literal(&rec);
+        assert!(lit.contains("id: 'o\\'reilly'"));
+        let stmt = format!("UPSERT INTO docs VALUES {};", lit);
+        qql_core::parser::Parser::parse(&stmt).expect("escaped id should parse");
+    }
+
+    #[test]
+    fn format_upsert_batch_statement() {
+        let records = vec![
+            json!({"id": 1, "vector": [0.1], "t": "a"}),
+            json!({"id": 2, "vector": [0.2], "t": "b"}),
+        ];
+        let stmt = format_upsert_statement("docs", &records);
+        assert!(stmt.starts_with("UPSERT INTO docs VALUES\n"));
+        let full = format!("{};", stmt.trim_end());
+        qql_core::parser::Parser::parse(&full).expect("batch upsert should parse");
+    }
+
+    #[test]
+    fn extract_scroll_page_with_next_offset() {
+        let response = json!({
+            "result": {
+                "points": [
+                    { "id": 1, "vector": [0.1], "payload": {} },
+                    { "id": 2, "vector": [0.2], "payload": { "x": 1 } }
+                ],
+                "next_page_offset": 2
+            }
+        });
+        let (points, next) = extract_scroll_page(&response);
+        assert_eq!(points.len(), 2);
+        assert_eq!(next, Some(PlanPointId::Number(2)));
+    }
+
+    #[test]
+    fn extract_scroll_page_string_offset() {
+        let response = json!({
+            "result": {
+                "points": [{ "id": "a" }],
+                "next_page_offset": "a"
+            }
+        });
+        let (_, next) = extract_scroll_page(&response);
+        assert_eq!(next, Some(PlanPointId::String("a".into())));
+    }
+
+    #[test]
+    fn extract_empty_page() {
+        let response = json!({ "result": { "points": [] } });
+        let (points, next) = extract_scroll_page(&response);
+        assert!(points.is_empty());
+        assert!(next.is_none());
+    }
+
+    #[test]
+    fn dumped_script_splits_cleanly() {
+        let create = "CREATE COLLECTION docs (VECTOR(4, COSINE));";
+        let index = "CREATE INDEX ON COLLECTION docs FOR title TYPE text;";
+        let upsert =
+            "UPSERT INTO docs VALUES\n  {id: 1, vector: [0.1, 0.2, 0.3, 0.4], title: 'x'};";
+        let script = format!("{}\n\n{}\n\n{}\n", create, index, upsert);
+        let stmts = crate::script::split_statements(&script).expect("split");
+        assert_eq!(stmts.len(), 3);
+    }
+
+    #[test]
+    fn schema_from_rest_result_feeds_create() {
+        let result = json!({
+            "config": {
+                "params": {
+                    "vectors": { "size": 8, "distance": "Euclid" },
+                    "sparse_vectors": { "bm25": {} },
+                    "shard_number": 1
+                }
+            },
+            "payload_schema": {
+                "city": { "data_type": "keyword" }
+            }
+        });
+        let schema = qql::backend::schema_from_rest_result(&result);
+        let info = CollectionInfo {
+            status: "green".into(),
+            points_count: 0,
+            segments_count: 1,
+            schema,
+        };
+        let create = format!("{};", generate_create_statement("docs", &info));
+        qql_core::parser::Parser::parse(&create).expect("create from rest schema");
+        let indexes = generate_index_statements("docs", &info.schema.payload_indexes);
+        assert_eq!(indexes.len(), 1);
+        qql_core::parser::Parser::parse(&format!("{};", indexes[0])).expect("index from rest");
+    }
+
+    #[test]
+    fn create_vector_with_hnsw_and_quantization() {
+        let mut hnsw = serde_json::Map::new();
+        hnsw.insert("m".into(), json!(16));
+        hnsw.insert("ef_construct".into(), json!(100));
+
+        let info = info_with_vectors(
+            vec![VectorSpec {
+                name: Some("dense".into()),
+                size: 384,
+                distance: "Cosine".into(),
+                hnsw: Some(hnsw),
+                quantization: Some(json!({
+                    "scalar": {
+                        "type": "scalar",
+                        "quantile": 0.99,
+                        "always_ram": true
+                    }
+                })),
+                multivector: None,
+                on_disk: Some(true),
+            }],
+            vec![],
+        );
+        let stmt = generate_create_statement("docs", &info);
+        assert!(stmt.contains("WITH HNSW ("));
+        assert!(stmt.contains("m = 16"));
+        assert!(stmt.contains("ef_construct = 100"));
+        assert!(stmt.contains("WITH QUANTIZATION ("));
+        assert!(stmt.contains("type = 'scalar'"));
+        // Vector storage on_disk must be VECTORS, not folded into HNSW.
+        assert!(stmt.contains("WITH VECTORS (on_disk = true)"));
+        let hnsw_idx = stmt.find("WITH HNSW (").unwrap();
+        let hnsw_end = stmt[hnsw_idx..].find(')').unwrap() + hnsw_idx;
+        assert!(
+            !stmt[hnsw_idx..=hnsw_end].contains("on_disk"),
+            "vector on_disk leaked into HNSW block: {}",
+            &stmt[hnsw_idx..=hnsw_end]
+        );
+        qql_core::parser::Parser::parse(&format!("{};", stmt))
+            .expect("HNSW+quantization CREATE should parse");
+    }
+
+    #[test]
+    fn product_and_binary_quantization_roundtrip_parse() {
+        let product_stmt = "CREATE COLLECTION docs (v VECTOR(128, COSINE) WITH QUANTIZATION (type = 'product', compression = 'x16', always_ram = true));";
+        let parsed = qql_core::parser::Parser::parse(product_stmt)
+            .expect("product quantization CREATE should parse");
+        if let qql_core::ast::Stmt::CreateCollection(stmt) = parsed {
+            let q = stmt.vectors[0].quantization.as_ref().unwrap();
+            assert_eq!(q.qtype, qql_core::ast::QuantizationType::Product);
+            assert_eq!(q.compression.as_deref(), Some("x16"));
+            assert!(q.always_ram);
+        } else {
+            panic!("expected CreateCollection");
+        }
+
+        let binary_stmt = "CREATE COLLECTION docs (v VECTOR(128, COSINE) WITH QUANTIZATION (type = 'binary', encoding = 'two_bits', always_ram = true));";
+        let parsed = qql_core::parser::Parser::parse(binary_stmt)
+            .expect("binary quantization CREATE should parse");
+        if let qql_core::ast::Stmt::CreateCollection(stmt) = parsed {
+            let q = stmt.vectors[0].quantization.as_ref().unwrap();
+            assert_eq!(q.qtype, qql_core::ast::QuantizationType::Binary);
+            assert_eq!(q.encoding.as_deref(), Some("two_bits"));
+            assert!(q.always_ram);
+        } else {
+            panic!("expected CreateCollection");
+        }
+    }
+
+    #[test]
+    fn create_vector_with_turbo_quantization() {
+        let info = info_with_vectors(
+            vec![VectorSpec {
+                name: Some("dense".into()),
+                size: 768,
+                distance: "Cosine".into(),
+                hnsw: None,
+                // Nested REST/OpenAPI shape
+                quantization: Some(json!({
+                    "turbo": {
+                        "always_ram": true,
+                        "bits": "bits1_5"
+                    }
+                })),
+                multivector: None,
+                on_disk: None,
+            }],
+            vec![],
+        );
+        let stmt = generate_create_statement("docs", &info);
+        assert!(stmt.contains("WITH QUANTIZATION ("));
+        assert!(stmt.contains("type = 'turbo'"));
+        assert!(stmt.contains("bits = 1.5"));
+        assert!(stmt.contains("always_ram = true"));
+        qql_core::parser::Parser::parse(&format!("{};", stmt))
+            .expect("turbo quantization CREATE should parse");
+    }
+
+    #[test]
+    fn format_quantization_turbo_flat_and_nested() {
+        let nested = json!({"turbo": {"bits": 2, "always_ram": false}});
+        let s = format_quantization_spec(&nested).unwrap();
+        assert!(s.contains("type = 'turbo'"));
+        assert!(s.contains("bits = 2"));
+
+        let flat = json!({"type": "turbo", "turbo_bits": 4.0, "always_ram": true});
+        let s = format_quantization_spec(&flat).unwrap();
+        assert!(s.contains("type = 'turbo'"));
+        assert!(s.contains("bits = 4"));
+        assert!(!s.contains("turbo_bits"));
+    }
+
+    #[test]
+    fn format_quantization_product_and_binary() {
+        let product = json!({"product": {"compression": "x16", "always_ram": true}});
+        let s = format_quantization_spec(&product).unwrap();
+        assert!(s.contains("type = 'product'"));
+        assert!(s.contains("compression = 'x16'"));
+
+        let binary = json!({"binary": {"always_ram": false, "encoding": "two_bits"}});
+        let s = format_quantization_spec(&binary).unwrap();
+        assert!(s.contains("type = 'binary'"));
+        assert!(s.contains("encoding = 'two_bits'"));
+
+        // Protobuf-style enum names from gRPC adapters must normalize.
+        let binary_proto = json!({"binary": {"encoding": "TwoBits"}});
+        let s = format_quantization_spec(&binary_proto).unwrap();
+        assert!(s.contains("encoding = 'two_bits'"));
+    }
+
+    #[test]
+    fn binary_encoding_numeric_alias_parses_canonical() {
+        let stmt = "CREATE COLLECTION docs (v VECTOR(8, COSINE) WITH QUANTIZATION (type = 'binary', encoding = 2, query_encoding = 'scalar8bits'));";
+        let parsed = qql_core::parser::Parser::parse(stmt).expect("numeric encoding should parse");
+        if let qql_core::ast::Stmt::CreateCollection(c) = parsed {
+            let q = c.vectors[0].quantization.as_ref().unwrap();
+            assert_eq!(q.encoding.as_deref(), Some("two_bits"));
+            assert_eq!(q.query_encoding.as_deref(), Some("scalar8bits"));
+        } else {
+            panic!("expected CreateCollection");
+        }
+    }
+
+    #[test]
+    fn multivector_and_collection_level_blocks_roundtrip() {
+        let stmt = "CREATE COLLECTION docs (mv VECTOR(128, COSINE) WITH MULTIVECTOR (comparator = 'max_sim')) WITH HNSW (m = 16) WITH OPTIMIZERS (indexing_threshold = 20000);";
+        let parsed = qql_core::parser::Parser::parse(stmt)
+            .expect("multivector + collection blocks should parse");
+        if let qql_core::ast::Stmt::CreateCollection(c) = parsed {
+            assert_eq!(
+                c.vectors[0].multivector.as_ref().unwrap().comparator,
+                qql_core::ast::MultivectorComparator::MaxSim
+            );
+            let cfg = c.config.as_ref().unwrap();
+            assert_eq!(cfg.hnsw.as_ref().unwrap().m, Some(16));
+            assert_eq!(
+                cfg.optimizers.as_ref().unwrap().indexing_threshold,
+                Some(20000)
+            );
+        } else {
+            panic!("expected CreateCollection");
+        }
+    }
+
+    #[test]
+    fn dump_emits_multivector_collection_blocks_and_query_encoding() {
+        let mut hnsw = serde_json::Map::new();
+        hnsw.insert("m".into(), json!(16));
+        let mut optimizers = serde_json::Map::new();
+        optimizers.insert("indexing_threshold".into(), json!(20000));
+        optimizers.insert("max_optimization_threads".into(), json!("auto"));
+        // Noise keys that must not be emitted (would fail re-parse).
+        optimizers.insert("unknown_qdrant_field".into(), json!(1));
+
+        let mut multivector = serde_json::Map::new();
+        multivector.insert("comparator".into(), json!("max_sim"));
+
+        let mut info = info_with_vectors(
+            vec![VectorSpec {
+                name: Some("mv".into()),
+                size: 128,
+                distance: "Cosine".into(),
+                hnsw: None,
+                quantization: Some(json!({
+                    "binary": {
+                        "type": "binary",
+                        "encoding": "two_bits",
+                        "query_encoding": "scalar8bits",
+                        "always_ram": true
+                    }
+                })),
+                multivector: Some(multivector),
+                on_disk: Some(true),
+            }],
+            vec![],
+        );
+        info.schema.hnsw = Some(hnsw);
+        info.schema.optimizers = Some(optimizers);
+        info.schema.quantization = Some(json!({
+            "scalar": { "type": "scalar", "quantile": 0.99, "always_ram": true }
+        }));
+
+        let stmt = generate_create_statement("docs", &info);
+        assert!(stmt.contains("WITH MULTIVECTOR (comparator = 'max_sim')"));
+        assert!(stmt.contains("WITH VECTORS (on_disk = true)"));
+        assert!(stmt.contains("query_encoding = 'scalar8bits'"));
+        assert!(stmt.contains("WITH HNSW (m = 16)"));
+        assert!(stmt.contains("WITH OPTIMIZERS ("));
+        assert!(stmt.contains("indexing_threshold = 20000"));
+        assert!(stmt.contains("max_optimization_threads = 'auto'"));
+        assert!(!stmt.contains("unknown_qdrant_field"));
+        assert!(stmt.contains("WITH QUANTIZATION ("));
+        assert!(stmt.contains("type = 'scalar'"));
+
+        qql_core::parser::Parser::parse(&format!("{};", stmt))
+            .expect("full dump CREATE should re-parse");
+    }
+
+    #[test]
+    fn vector_on_disk_parses_into_vectors_config_not_hnsw() {
+        let stmt = "CREATE COLLECTION docs (v VECTOR(8, COSINE) WITH HNSW (m = 8, on_disk = false) WITH VECTORS (on_disk = true));";
+        let parsed = qql_core::parser::Parser::parse(stmt).expect("should parse");
+        let qql_core::ast::Stmt::CreateCollection(c) = parsed else {
+            panic!("expected CreateCollection");
+        };
+        assert_eq!(c.vectors[0].hnsw.as_ref().unwrap().on_disk, Some(false));
+        assert_eq!(c.vectors[0].vectors.as_ref().unwrap().on_disk, Some(true));
+    }
+
+    #[test]
+    fn sparse_vector_full_config_roundtrip() {
+        let stmt = "CREATE COLLECTION docs (bm25 SPARSE WITH SPARSE (modifier = 'idf', full_scan_threshold = 10000, on_disk = true, datatype = 'float32'));";
+        let parsed =
+            qql_core::parser::Parser::parse(stmt).expect("sparse vector full config should parse");
+        let qql_core::ast::Stmt::CreateCollection(c) = parsed else {
+            panic!("expected CreateCollection");
+        };
+        assert_eq!(c.sparse_vectors[0].name, "bm25");
+        assert_eq!(c.sparse_vectors[0].modifier.as_deref(), Some("idf"));
+        let idx = c.sparse_vectors[0].index.as_ref().unwrap();
+        assert_eq!(idx.full_scan_threshold, Some(10000));
+        assert_eq!(idx.on_disk, Some(true));
+        assert_eq!(idx.datatype.as_deref(), Some("float32"));
+    }
+
+    #[test]
+    fn sparse_with_sparse_and_index_blocks_merge() {
+        let stmt = "CREATE COLLECTION docs (bm25 SPARSE WITH SPARSE (modifier = 'idf') WITH INDEX (full_scan_threshold = 5000, on_disk = true));";
+        let parsed = qql_core::parser::Parser::parse(stmt).expect("merged sparse blocks");
+        let qql_core::ast::Stmt::CreateCollection(c) = parsed else {
+            panic!("expected CreateCollection");
+        };
+        assert_eq!(c.sparse_vectors[0].modifier.as_deref(), Some("idf"));
+        let idx = c.sparse_vectors[0].index.as_ref().unwrap();
+        assert_eq!(idx.full_scan_threshold, Some(5000));
+        assert_eq!(idx.on_disk, Some(true));
+    }
+
+    #[test]
+    fn dump_emits_sparse_full_config_and_sharding_method() {
+        let mut index = serde_json::Map::new();
+        index.insert("full_scan_threshold".into(), json!(10000));
+        index.insert("on_disk".into(), json!(true));
+        index.insert("datatype".into(), json!("Float32")); // protobuf-style → normalize
+        index.insert("unknown_field".into(), json!(1)); // must not be emitted
+
+        let mut info = CollectionInfo::default();
+        info.schema.sparse_vectors = vec![qql::backend::SparseVectorSpec {
+            name: "bm25".into(),
+            index: Some(index),
+            modifier: Some("idf".into()),
+        }];
+        info.schema.params.sharding_method = Some("custom".into());
+        info.schema.params.shard_number = Some(3);
+
+        let stmt = generate_create_statement("docs", &info);
+        assert!(stmt.contains("bm25 SPARSE WITH SPARSE ("));
+        assert!(stmt.contains("modifier = 'idf'"));
+        assert!(stmt.contains("full_scan_threshold = 10000"));
+        assert!(stmt.contains("on_disk = true"));
+        assert!(stmt.contains("datatype = 'float32'"));
+        assert!(!stmt.contains("unknown_field"));
+        assert!(stmt.contains("sharding_method = 'custom'"));
+        assert!(stmt.contains("shard_number = 3"));
+        qql_core::parser::Parser::parse(&format!("{};", stmt))
+            .expect("dumped sparse CREATE should re-parse");
+    }
 }

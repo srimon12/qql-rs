@@ -503,10 +503,13 @@ impl Executor {
             hnsw: None,
             quantization: None,
             multivector: None,
+            vectors: None,
         });
         if let Some(sparse_name) = sparse_name {
             create.sparse_vectors.push(ast::SparseVectorDef {
                 name: sparse_name.to_string(),
+                index: None,
+                modifier: None,
             });
         }
 

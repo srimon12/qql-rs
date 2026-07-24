@@ -85,18 +85,26 @@ impl<'a> Parser<'a> {
             self.advance()?;
             while self.peek()?.kind != TokenKind::Rparen && self.peek()?.kind != TokenKind::Eof {
                 let name_tok = self.peek()?;
-                let name = if name_tok.kind == TokenKind::Vector || ascii_equal(name_tok.text, "VECTOR") {
-                    String::from("dense")
-                } else {
-                    let id = self.parse_identifier()?;
-                    if self.peek()?.kind == TokenKind::Vector || ascii_equal(self.peek()?.text, "VECTOR") {
-                        self.advance()?;
-                    }
-                    id
-                };
+                let name =
+                    if name_tok.kind == TokenKind::Vector || ascii_equal(name_tok.text, "VECTOR") {
+                        String::from("dense")
+                    } else {
+                        let id = self.parse_identifier()?;
+                        if self.peek()?.kind == TokenKind::Vector
+                            || ascii_equal(self.peek()?.text, "VECTOR")
+                        {
+                            self.advance()?;
+                        }
+                        id
+                    };
 
-                if self.peek()?.kind == TokenKind::Lparen || self.peek()?.kind == TokenKind::Vector || ascii_equal(self.peek()?.text, "VECTOR") {
-                    if self.peek()?.kind == TokenKind::Vector || ascii_equal(self.peek()?.text, "VECTOR") {
+                if self.peek()?.kind == TokenKind::Lparen
+                    || self.peek()?.kind == TokenKind::Vector
+                    || ascii_equal(self.peek()?.text, "VECTOR")
+                {
+                    if self.peek()?.kind == TokenKind::Vector
+                        || ascii_equal(self.peek()?.text, "VECTOR")
+                    {
                         self.advance()?;
                     }
                     self.expect(TokenKind::Lparen)?;
@@ -128,6 +136,7 @@ impl<'a> Parser<'a> {
                     let mut hnsw = None;
                     let mut quant = None;
                     let mut multiv = None;
+                    let mut vec_cfg = None;
 
                     while self.peek()?.kind == TokenKind::With {
                         self.advance()?;
@@ -145,9 +154,15 @@ impl<'a> Parser<'a> {
                         {
                             self.advance()?;
                             multiv = Some(self.parse_multivector_config_block()?);
+                        } else if self.peek()?.kind == TokenKind::Vector
+                            || (self.peek()?.kind == TokenKind::Identifier
+                                && ascii_equal(self.peek()?.text, "VECTORS"))
+                        {
+                            self.advance()?;
+                            vec_cfg = self.parse_vectors_config_block()?.vectors;
                         } else {
                             return Err(QqlError::syntax(
-                                "expected HNSW, QUANTIZATION, or MULTIVECTOR after WITH for vector configuration",
+                                "expected HNSW, QUANTIZATION, MULTIVECTOR, or VECTORS after WITH for vector configuration",
                                 self.peek()?.pos,
                             ));
                         }
@@ -160,10 +175,53 @@ impl<'a> Parser<'a> {
                         hnsw,
                         quantization: quant,
                         multivector: multiv,
+                        vectors: vec_cfg,
                     });
                 } else if self.peek()?.kind == TokenKind::Sparse {
                     self.advance()?;
-                    explicit_sparse_vectors.push(SparseVectorDef { name });
+                    let mut index: Option<Box<crate::ast::SparseIndexConfig>> = None;
+                    let mut modifier = None;
+                    while self.peek()?.kind == TokenKind::With {
+                        self.advance()?;
+                        if self.peek()?.kind == TokenKind::Sparse
+                            || self.peek()?.kind == TokenKind::Index
+                            || (self.peek()?.kind == TokenKind::Identifier
+                                && (ascii_equal(self.peek()?.text, "SPARSE")
+                                    || ascii_equal(self.peek()?.text, "INDEX")))
+                        {
+                            self.advance()?;
+                            let (idx, mod_val) = self.parse_sparse_config_block()?;
+                            // Merge successive WITH SPARSE / WITH INDEX blocks.
+                            if let Some(new_idx) = idx {
+                                if let Some(ref mut existing) = index {
+                                    if new_idx.full_scan_threshold.is_some() {
+                                        existing.full_scan_threshold = new_idx.full_scan_threshold;
+                                    }
+                                    if new_idx.on_disk.is_some() {
+                                        existing.on_disk = new_idx.on_disk;
+                                    }
+                                    if new_idx.datatype.is_some() {
+                                        existing.datatype = new_idx.datatype.clone();
+                                    }
+                                } else {
+                                    index = Some(new_idx);
+                                }
+                            }
+                            if mod_val.is_some() {
+                                modifier = mod_val;
+                            }
+                        } else {
+                            return Err(QqlError::syntax(
+                                "expected SPARSE or INDEX after WITH for sparse vector configuration",
+                                self.peek()?.pos,
+                            ));
+                        }
+                    }
+                    explicit_sparse_vectors.push(SparseVectorDef {
+                        name,
+                        index,
+                        modifier,
+                    });
                 } else {
                     return Err(QqlError::syntax(
                         "expected VECTOR or SPARSE after vector name",

@@ -142,15 +142,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             output,
             batch_size,
             json,
-            quiet: _,
+            quiet,
         } => {
-            let msg = commands::handle_dump(&url, &collection, &output, batch_size).await?;
+            use std::io::Write;
+            let progress_fn = |p: dump::DumpProgress| {
+                eprint!("\rDumped {} points ({} batches)...", p.written, p.batches);
+                let _ = std::io::stderr().flush();
+            };
+            let progress_cb: Option<&(dyn Fn(dump::DumpProgress) + Sync)> = if !json && !quiet {
+                Some(&progress_fn)
+            } else {
+                None
+            };
+            let stats =
+                commands::handle_dump(&url, &collection, &output, batch_size, progress_cb).await?;
+            if !json && !quiet && stats.batches > 0 {
+                eprintln!();
+            }
+            let msg = format!(
+                "Dumped collection '{}' to {} ({} written, {} skipped, {} batches)",
+                collection, output, stats.written, stats.skipped, stats.batches
+            );
             if json {
                 println!(
                     "{}",
                     serde_json::json!({
                         "ok": true,
                         "operation": "dump",
+                        "collection": collection,
+                        "output": output,
+                        "written": stats.written,
+                        "skipped": stats.skipped,
+                        "batches": stats.batches,
                         "message": msg,
                     })
                 );

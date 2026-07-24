@@ -65,11 +65,25 @@ echo '{"collection": "docs", "limit": 5, "with_payload": true}' | qql convert
 
 ### dump — Export a collection to .qql script
 
-Scans all points in a collection and generates QQL UPSERT statements:
+Full collection export as a replayable `.qql` script:
+
+1. `CREATE COLLECTION` reconstructed from live vector schema (size, distance, sparse)
+2. `CREATE INDEX` statements from payload indexes (when reported by Qdrant)
+3. Batched `UPSERT` statements with real `vector:` values (not re-embed stubs)
+
+Uses cursor pagination (`AFTER` / `next_page_offset`) and requests vectors on every
+scroll page. Safe for multi-batch collections and streams to disk.
 
 ```bash
 qql dump docs docs_export.qql
 qql dump --batch-size 500 docs docs_export.qql
+qql dump docs out.qql --json   # machine-readable stats
+```
+
+Reload with:
+
+```bash
+qql execute docs_export.qql
 ```
 
 ### doctor — Check Qdrant connection health

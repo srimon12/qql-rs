@@ -33,11 +33,19 @@ pub fn lower_create_collection(stmt: &CreateCollectionStmt) -> CreateCollectionR
                 lower_quantization_config_val(quant),
             );
         }
-        if vd.multivector.is_some() {
+        if let Some(ref mv) = vd.multivector {
+            let comparator = match mv.comparator {
+                qql_core::ast::MultivectorComparator::MaxSim => "max_sim",
+            };
             v.insert(
                 "multivector_config".into(),
-                serde_json::json!({"comparator": "max_sim"}),
+                serde_json::json!({"comparator": comparator}),
             );
+        }
+        if let Some(ref vec_cfg) = vd.vectors {
+            if let Some(on_disk) = vec_cfg.on_disk {
+                v.insert("on_disk".into(), serde_json::Value::Bool(on_disk));
+            }
         }
         vectors.insert(vd.name.clone(), serde_json::Value::Object(v));
     }
@@ -47,7 +55,31 @@ pub fn lower_create_collection(stmt: &CreateCollectionStmt) -> CreateCollectionR
 
     let mut sparse = serde_json::Map::new();
     for sv in &stmt.sparse_vectors {
-        sparse.insert(sv.name.clone(), serde_json::json!({"modifier": "idf"}));
+        let mut opts = serde_json::Map::new();
+        if let Some(ref modifier) = sv.modifier {
+            opts.insert(
+                "modifier".into(),
+                serde_json::Value::String(modifier.clone()),
+            );
+        } else {
+            opts.insert("modifier".into(), serde_json::json!("idf"));
+        }
+        if let Some(ref idx) = sv.index {
+            let mut idx_map = serde_json::Map::new();
+            if let Some(fst) = idx.full_scan_threshold {
+                idx_map.insert("full_scan_threshold".into(), serde_json::Value::from(fst));
+            }
+            if let Some(od) = idx.on_disk {
+                idx_map.insert("on_disk".into(), serde_json::Value::Bool(od));
+            }
+            if let Some(ref dt) = idx.datatype {
+                idx_map.insert("datatype".into(), serde_json::Value::String(dt.clone()));
+            }
+            if !idx_map.is_empty() {
+                opts.insert("index".into(), serde_json::Value::Object(idx_map));
+            }
+        }
+        sparse.insert(sv.name.clone(), serde_json::Value::Object(opts));
     }
     if !sparse.is_empty() {
         req.sparse_vectors = Some(sparse);
@@ -271,10 +303,17 @@ pub fn lower_optimizers_config_val(
         obj.insert("flush_interval_sec".into(), serde_json::Value::from(fi));
     }
     if let Some(ref mot) = config.max_optimization_threads {
-        obj.insert(
-            "max_optimization_threads".into(),
-            serde_json::Value::from(mot.value),
-        );
+        if mot.auto_ {
+            obj.insert(
+                "max_optimization_threads".into(),
+                serde_json::Value::String("auto".into()),
+            );
+        } else {
+            obj.insert(
+                "max_optimization_threads".into(),
+                serde_json::Value::from(mot.value),
+            );
+        }
     }
     if let Some(pu) = config.prevent_unoptimized {
         obj.insert("prevent_unoptimized".into(), serde_json::Value::Bool(pu));
@@ -301,7 +340,27 @@ pub fn lower_quantization_config_val(
         obj.insert("quantile".into(), serde_json::Value::from(quantile));
     }
     if let Some(turbo_bits) = config.turbo_bits {
+        // Emit both keys: gRPC/plan use turbo_bits; REST/OpenAPI turbo config uses bits.
         obj.insert("turbo_bits".into(), serde_json::Value::from(turbo_bits));
+        obj.insert("bits".into(), serde_json::Value::from(turbo_bits));
+    }
+    if let Some(ref compression) = config.compression {
+        obj.insert(
+            "compression".into(),
+            serde_json::Value::String(compression.clone()),
+        );
+    }
+    if let Some(ref encoding) = config.encoding {
+        obj.insert(
+            "encoding".into(),
+            serde_json::Value::String(encoding.clone()),
+        );
+    }
+    if let Some(ref query_encoding) = config.query_encoding {
+        obj.insert(
+            "query_encoding".into(),
+            serde_json::Value::String(query_encoding.clone()),
+        );
     }
     serde_json::Value::Object(obj)
 }
@@ -362,5 +421,106 @@ mod tests {
         assert_eq!(json["field_name"], "title");
         assert_eq!(json["field_schema"], "text");
         assert_eq!(json["lowercase"], true);
+    }
+
+    #[test]
+    fn lower_product_quantization_includes_compression() {
+        let stmt = parse_stmt(
+            "CREATE COLLECTION docs (v VECTOR(128, COSINE) WITH QUANTIZATION (type = 'product', compression = 'x16', always_ram = true));",
+        );
+        let Stmt::CreateCollection(ref cc) = stmt else {
+            panic!()
+        };
+        let req = lower_create_collection(cc);
+        let json = serde_json::to_value(&req).unwrap();
+        let quant = &json["vectors"]["v"]["quantization_config"];
+        assert_eq!(quant["type"], "product");
+        assert_eq!(quant["compression"], "x16");
+        assert_eq!(quant["always_ram"], true);
+    }
+
+    #[test]
+    fn lower_binary_quantization_includes_encoding() {
+        let stmt = parse_stmt(
+            "CREATE COLLECTION docs (v VECTOR(128, COSINE) WITH QUANTIZATION (type = 'binary', encoding = 'two_bits', always_ram = true));",
+        );
+        let Stmt::CreateCollection(ref cc) = stmt else {
+            panic!()
+        };
+        let req = lower_create_collection(cc);
+        let json = serde_json::to_value(&req).unwrap();
+        let quant = &json["vectors"]["v"]["quantization_config"];
+        assert_eq!(quant["type"], "binary");
+        assert_eq!(quant["encoding"], "two_bits");
+        assert_eq!(quant["always_ram"], true);
+    }
+
+    #[test]
+    fn lower_turbo_quantization_includes_bits() {
+        let stmt = parse_stmt(
+            "CREATE COLLECTION docs (v VECTOR(128, COSINE) WITH QUANTIZATION (type = 'turbo', bits = 1.5, always_ram = true));",
+        );
+        let Stmt::CreateCollection(ref cc) = stmt else {
+            panic!()
+        };
+        let req = lower_create_collection(cc);
+        let json = serde_json::to_value(&req).unwrap();
+        let quant = &json["vectors"]["v"]["quantization_config"];
+        assert_eq!(quant["type"], "turbo");
+        assert_eq!(quant["bits"], 1.5);
+        assert_eq!(quant["turbo_bits"], 1.5);
+    }
+
+    #[test]
+    fn lower_vector_on_disk_and_query_encoding_and_multivector() {
+        let stmt = parse_stmt(
+            "CREATE COLLECTION docs (v VECTOR(64, COSINE) WITH MULTIVECTOR (comparator = 'max_sim') WITH VECTORS (on_disk = true) WITH QUANTIZATION (type = 'binary', encoding = 'two_bits', query_encoding = 'scalar4bits', always_ram = true));",
+        );
+        let Stmt::CreateCollection(ref cc) = stmt else {
+            panic!()
+        };
+        let req = lower_create_collection(cc);
+        let json = serde_json::to_value(&req).unwrap();
+        let v = &json["vectors"]["v"];
+        assert_eq!(v["on_disk"], true);
+        assert_eq!(v["multivector_config"]["comparator"], "max_sim");
+        assert_eq!(v["quantization_config"]["encoding"], "two_bits");
+        assert_eq!(v["quantization_config"]["query_encoding"], "scalar4bits");
+    }
+
+    #[test]
+    fn lower_optimizers_auto_threads() {
+        let stmt = parse_stmt(
+            "CREATE COLLECTION docs (v VECTOR(8, COSINE)) WITH OPTIMIZERS (max_optimization_threads = 'auto', indexing_threshold = 1000);",
+        );
+        let Stmt::CreateCollection(ref cc) = stmt else {
+            panic!()
+        };
+        let req = lower_create_collection(cc);
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(
+            json["optimizers_config"]["max_optimization_threads"],
+            "auto"
+        );
+        assert_eq!(json["optimizers_config"]["indexing_threshold"], 1000);
+    }
+
+    #[test]
+    fn lower_sparse_vector_full_config_and_sharding_method() {
+        let stmt = parse_stmt(
+            "CREATE COLLECTION docs (bm25 SPARSE WITH SPARSE (modifier = 'idf', full_scan_threshold = 10000, on_disk = true, datatype = 'float32')) WITH PARAMS (sharding_method = 'custom', shard_number = 2);",
+        );
+        let Stmt::CreateCollection(ref cc) = stmt else {
+            panic!()
+        };
+        let req = lower_create_collection(cc);
+        let json = serde_json::to_value(&req).unwrap();
+        let sparse = &json["sparse_vectors"]["bm25"];
+        assert_eq!(sparse["modifier"], "idf");
+        assert_eq!(sparse["index"]["full_scan_threshold"], 10000);
+        assert_eq!(sparse["index"]["on_disk"], true);
+        assert_eq!(sparse["index"]["datatype"], "float32");
+        assert_eq!(json["sharding_method"], "custom");
+        assert_eq!(json["shard_number"], 2);
     }
 }
