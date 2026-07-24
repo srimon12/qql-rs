@@ -13,11 +13,15 @@ export type AnalysisResult = WasmAnalysisResult
 export type InspectorTab =
   "plan" | "wire" | "ast" | "tokens" | "explain" | "response" | "metrics"
 
-export type TenantConfig = {
+export type PolicyValueType = "string" | "number" | "boolean"
+
+/** Host-enforced AST policy applied after parsing and before planning/execution. */
+export type PolicyConfig = {
   enabled: boolean
   field: string
   op: string
   value: string
+  valueType: PolicyValueType
   shardKey: string
 }
 

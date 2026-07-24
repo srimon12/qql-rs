@@ -1,31 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   AlertCircleIcon,
+  BookOpenIcon,
   BrainCircuitIcon,
   CheckCircle2Icon,
+  CheckIcon,
+  ChevronRightIcon,
+  Code2Icon,
+  CopyIcon,
   EraserIcon,
   Loader2Icon,
   MoonIcon,
   PlayIcon,
   Settings2Icon,
+  Share2Icon,
   SunIcon,
   ZapIcon,
-  ShieldCheckIcon,
-  Code2Icon,
-  Share2Icon,
-  CheckIcon,
-  CopyIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import {
   ResizableHandle,
   ResizablePanel,
@@ -43,17 +37,40 @@ import { QueryEditor } from "@/components/playground/query-editor"
 import { Inspector } from "@/components/playground/inspector"
 import { SettingsDialog } from "@/components/playground/settings-dialog"
 import { AuditBar } from "@/components/playground/audit-bar"
-import { TenantControl } from "@/components/playground/tenant-sandbox"
+import { PolicyControl } from "@/components/playground/policy-guardrails"
 import { CodeExporter } from "@/components/playground/code-exporter"
+import { PresetBrowser } from "@/components/playground/preset-browser"
 import { useQql } from "@/hooks/use-qql"
 import {
   DEFAULT_PRESET_ID,
-  PRESETS,
   getPreset,
+  getCategory,
   type PresetId,
 } from "@/lib/presets"
-import type { InspectorTab, TenantConfig } from "@/lib/qql-types"
-import { BROWSER_EMBED_MODEL } from "@/lib/browser-embedder"
+import type {
+  AnalysisResult,
+  InspectorTab,
+  PlaygroundSettings,
+  PolicyConfig,
+} from "@/lib/qql-types"
+import {
+  BROWSER_EMBED_MODEL,
+  type BrowserEmbedderStatus,
+} from "@/lib/browser-embedder"
+
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() => {
+    if (typeof window === "undefined") return false
+    return window.matchMedia(query).matches
+  })
+  useEffect(() => {
+    const mql = window.matchMedia(query)
+    const handler = (e: MediaQueryListEvent) => setMatches(e.matches)
+    mql.addEventListener("change", handler)
+    return () => mql.removeEventListener("change", handler)
+  }, [query])
+  return matches
+}
 
 function useDebouncedCallback<T extends (...args: never[]) => void>(
   fn: T,
@@ -64,7 +81,6 @@ function useDebouncedCallback<T extends (...args: never[]) => void>(
   useEffect(() => {
     fnRef.current = fn
   }, [fn])
-
   return useCallback(
     (...args: Parameters<T>) => {
       if (timerRef.current) clearTimeout(timerRef.current)
@@ -81,15 +97,176 @@ function getInitialQuery(): string {
       try {
         return decodeURIComponent(match[1])
       } catch {
-        // Fallback to preset
+        // hash decode failed, fall through
       }
     }
   }
   return getPreset(DEFAULT_PRESET_ID)?.query ?? ""
 }
 
+function formatPolicyValue(config: PolicyConfig): string {
+  if (config.valueType === "string") return `'${config.value}'`
+  if (config.valueType === "boolean") return config.value
+  return config.value
+}
+
+type EditorPanelProps = {
+  ready: boolean
+  query: string
+  analysis: AnalysisResult
+  executing: boolean
+  settings: PlaygroundSettings
+  browserStatus: BrowserEmbedderStatus
+  onQueryChange: (value: string) => void
+  onExecute: () => void
+  onCopyQql: () => void
+  copiedQql: boolean
+  onCodeExport: () => void
+  onClear: () => void
+  collectionName: string
+}
+
+function EditorPanel({
+  ready,
+  query,
+  analysis,
+  executing,
+  settings,
+  browserStatus,
+  onQueryChange,
+  onExecute,
+  onCopyQql,
+  copiedQql,
+  onCodeExport,
+  onClear,
+  collectionName,
+}: EditorPanelProps) {
+  return (
+    <section className="flex h-full min-h-0 flex-col" aria-label="Query editor">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b bg-muted/20 px-3 py-1.5">
+        <span className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+          Source
+          <span className="font-mono font-normal text-foreground/70 normal-case">
+            {" · "}
+            {collectionName}
+          </span>
+        </span>
+        <div className="flex items-center gap-1.5">
+          <Button
+            size="sm"
+            disabled={
+              !ready ||
+              !analysis.valid ||
+              executing ||
+              (settings.embedProvider === "browser" &&
+                browserStatus.state === "error")
+            }
+            onClick={onExecute}
+            className="gap-1.5 rounded-lg text-xs font-semibold"
+          >
+            {executing ? (
+              <Loader2Icon className="size-3.5 animate-spin" />
+            ) : (
+              <PlayIcon className="size-3.5" />
+            )}
+            Execute
+          </Button>
+
+          <Separator orientation="vertical" className="h-5" />
+
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={onCopyQql}
+                  aria-label="Copy QQL to clipboard"
+                />
+              }
+            >
+              {copiedQql ? (
+                <CheckIcon className="size-3.5 text-emerald-500" />
+              ) : (
+                <CopyIcon className="size-3.5" />
+              )}
+            </TooltipTrigger>
+            <TooltipContent>
+              {copiedQql ? "Copied QQL" : "Copy QQL"}
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={onCodeExport}
+                  aria-label="Export as SDK code"
+                />
+              }
+            >
+              <Code2Icon className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipContent>Copy SDK code</TooltipContent>
+          </Tooltip>
+
+          <Separator orientation="vertical" className="h-5" />
+
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={onClear}
+                  aria-label="Clear query"
+                  className="text-muted-foreground hover:text-foreground"
+                />
+              }
+            >
+              <EraserIcon className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipContent>Clear</TooltipContent>
+          </Tooltip>
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1">
+        {ready ? (
+          <QueryEditor
+            value={query}
+            onChange={onQueryChange}
+            analysis={analysis}
+            onExecute={onExecute}
+            className="h-full"
+          />
+        ) : (
+          <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
+            <Loader2Icon className="size-4 animate-spin" />
+            Loading qql-wasm
+          </div>
+        )}
+      </div>
+
+      {!analysis.valid && analysis.error?.message && query.trim() && (
+        <div className="flex shrink-0 items-start gap-2 border-t border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+          <AlertCircleIcon className="mt-0.5 size-3.5 shrink-0" />
+          <span className="font-mono">
+            {analysis.error.code}: {analysis.error.message}
+          </span>
+        </div>
+      )}
+    </section>
+  )
+}
+
 export function App() {
   const { theme, setTheme } = useTheme()
+  const isDesktop = useMediaQuery("(min-width: 768px)")
+  const [presetBrowserOpen, setPresetBrowserOpen] = useState(false)
+
   const {
     ready,
     initError,
@@ -114,23 +291,28 @@ export function App() {
   const [copiedLink, setCopiedLink] = useState(false)
   const [copiedQql, setCopiedQql] = useState(false)
   const [activeTab, setActiveTab] = useState<InspectorTab>("plan")
-  const [tenantConfig, setTenantConfig] = useState<TenantConfig>({
+  const [policyConfig, setPolicyConfig] = useState<PolicyConfig>({
     enabled: false,
     field: "tenant_id",
     op: "=",
     value: "honeywell",
+    valueType: "string",
     shardKey: "honeywell",
   })
 
   const activePreset = useMemo(() => getPreset(presetId), [presetId])
+  const activeCategory = useMemo(
+    () => (activePreset ? getCategory(activePreset.category) : undefined),
+    [activePreset]
+  )
 
   const debouncedAnalyze = useDebouncedCallback((src: string) => {
-    runAnalysis(src, tenantConfig)
+    runAnalysis(src, policyConfig)
   }, 80)
 
   useEffect(() => {
-    if (ready) runAnalysis(query, tenantConfig)
-  }, [ready, query, tenantConfig]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (ready) runAnalysis(query, policyConfig)
+  }, [ready]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [selectedStmtIndex, setSelectedStmtIndex] = useState(0)
 
@@ -140,23 +322,34 @@ export function App() {
     debouncedAnalyze(value)
   }
 
-  const onPresetChange = (id: string | null) => {
-    if (!id) return
+  const onPresetChange = (id: PresetId) => {
     const preset = getPreset(id)
     if (!preset) return
     setPresetId(preset.id)
     setQuery(preset.query)
     setSelectedStmtIndex(0)
-    runAnalysis(preset.query, tenantConfig)
+    runAnalysis(preset.query, policyConfig)
   }
 
   const onExecute = useCallback(async () => {
     setActiveTab("response")
-    await execute(query, tenantConfig)
-  }, [execute, query, tenantConfig])
+    await execute(query, policyConfig)
+  }, [execute, query, policyConfig])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+        const tag = (e.target as HTMLElement)?.tagName
+        const isEditable =
+          tag === "INPUT" ||
+          tag === "TEXTAREA" ||
+          (e.target as HTMLElement)?.isContentEditable
+        if (!isEditable) {
+          e.preventDefault()
+          setPresetBrowserOpen(true)
+        }
+        return
+      }
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
         e.preventDefault()
         if (ready && analysis.valid && !executing) {
@@ -183,7 +376,7 @@ export function App() {
   }
 
   const status = useMemo(() => {
-    if (!ready) return { label: "Loading WASM…", ok: false as boolean | null }
+    if (!ready) return { label: "Loading WASM", ok: null as boolean | null }
     if (!query.trim()) return { label: "Empty", ok: null }
     if (analysis.valid) {
       return {
@@ -219,7 +412,7 @@ export function App() {
     if (browserStatus.state === "error") {
       return { label: "Embed error", variant: "destructive" as const }
     }
-    return { label: "MiniLM…", variant: "secondary" as const }
+    return { label: "MiniLM", variant: "secondary" as const }
   }, [settings.embedProvider, browserStatus])
 
   const toggleTheme = () => {
@@ -227,6 +420,12 @@ export function App() {
       theme === "dark" ? "light" : theme === "light" ? "dark" : "dark"
     setTheme(next)
   }
+
+  const collectionName = useMemo(() => {
+    const r = analysis.routes?.[0] ?? analysis.route
+    const m = r?.path?.match(/\/collections\/([^/]+)/)
+    return m ? m[1] : "sec10k"
+  }, [analysis])
 
   if (initError) {
     return (
@@ -243,50 +442,45 @@ export function App() {
   return (
     <TooltipProvider>
       <div className="flex h-svh flex-col overflow-hidden bg-background text-foreground">
-        <header className="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2 sm:gap-3 sm:px-4">
-          <div className="flex items-center gap-2">
-            <span className="text-base font-semibold tracking-tight">QQL</span>
-            <Badge variant="secondary" className="gap-1 font-mono text-[10px]">
-              <ZapIcon className="size-3" />
+        {/* Primary header */}
+        <header
+          className="flex shrink-0 items-center gap-2 border-b px-2.5 py-1.5 sm:gap-3 sm:px-4 sm:py-2"
+          aria-label="Workbench header"
+        >
+          <div className="flex shrink-0 items-center gap-2">
+            <span
+              className="flex size-6 items-center justify-center rounded-lg bg-primary text-[10px] leading-none font-bold text-primary-foreground"
+              aria-hidden
+            >
+              Q
+            </span>
+            <span className="hidden text-sm font-semibold tracking-tight sm:inline">
+              QQL Workbench
+            </span>
+          </div>
+
+          <Separator orientation="vertical" className="hidden h-5 sm:block" />
+
+          <div className="flex shrink-0 items-center gap-1.5">
+            <Badge
+              variant="secondary"
+              className="h-5 gap-1 font-mono text-[10px]"
+            >
+              <ZapIcon className="size-2.5" />
               WASM
             </Badge>
             <Badge
               variant={embedBadge.variant}
-              className="hidden gap-1 font-mono text-[10px] sm:inline-flex"
+              className="hidden h-5 gap-1 font-mono text-[10px] sm:inline-flex"
             >
-              <BrainCircuitIcon className="size-3" />
+              <BrainCircuitIcon className="size-2.5" />
               {embedBadge.label}
             </Badge>
           </div>
 
-          <Separator orientation="vertical" className="hidden h-6 sm:block" />
+          <div className="flex-1" />
 
-          <div className="flex min-w-0 flex-1 items-center gap-2">
-            <span className="hidden text-xs text-muted-foreground sm:inline">
-              Preset
-            </span>
-            <Select value={presetId} onValueChange={onPresetChange}>
-              <SelectTrigger size="sm" className="w-[300px] sm:w-[420px] font-mono text-xs truncate">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="w-[360px] sm:w-[460px]">
-                {PRESETS.map((p) => (
-                  <SelectItem key={p.id} value={p.id} className="cursor-pointer py-1.5">
-                    <div className="flex items-center gap-2 w-full truncate">
-                      {p.labelBadge && (
-                        <Badge variant="outline" className="font-mono text-[9px] px-1 py-0 h-4 shrink-0 bg-primary/10 border-primary/30 text-primary">
-                          {p.labelBadge}
-                        </Badge>
-                      )}
-                      <span className="truncate font-mono text-xs">{p.label}</span>
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="flex items-center gap-1.5 sm:gap-2">
+          <div className="flex items-center gap-1 sm:gap-1.5">
             <Badge
               variant={
                 status.ok === true
@@ -295,50 +489,59 @@ export function App() {
                     ? "destructive"
                     : "outline"
               }
-              className="gap-1"
+              className="h-6 gap-1 text-[10px]"
             >
               {status.ok === true ? (
-                <CheckCircle2Icon className="size-3" />
+                <CheckCircle2Icon className="size-2.5" />
               ) : status.ok === false ? (
-                <AlertCircleIcon className="size-3" />
+                <AlertCircleIcon className="size-2.5" />
               ) : null}
               {status.label}
             </Badge>
 
-            <span className="hidden font-mono text-[11px] text-muted-foreground tabular-nums sm:inline">
-              parse {latencyMs.toFixed(2)} ms
+            <span className="hidden font-mono text-[10px] text-muted-foreground tabular-nums sm:inline">
+              parse {latencyMs.toFixed(1)} ms
               {metrics?.totalMs != null && metrics.success
                 ? ` · exec ${metrics.totalMs.toFixed(0)} ms`
                 : ""}
             </span>
 
-            {/* Share Link */}
+            <Separator orientation="vertical" className="hidden h-5 sm:block" />
+
             <Tooltip>
               <TooltipTrigger
                 render={
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="icon-sm"
                     onClick={onShareQuery}
+                    aria-label="Share query URL"
                   />
                 }
               >
-                {copiedLink ? <CheckIcon className="size-3.5 text-emerald-500" /> : <Share2Icon className="size-3.5" />}
+                {copiedLink ? (
+                  <CheckIcon className="size-3.5 text-emerald-500" />
+                ) : (
+                  <Share2Icon className="size-3.5" />
+                )}
               </TooltipTrigger>
-              <TooltipContent>{copiedLink ? "Link Copied!" : "Share Query URL Link"}</TooltipContent>
+              <TooltipContent>
+                {copiedLink ? "Link copied" : "Share query URL"}
+              </TooltipContent>
             </Tooltip>
 
             <Tooltip>
               <TooltipTrigger
                 render={
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="icon-sm"
                     onClick={() => setSettingsOpen(true)}
+                    aria-label="Settings"
                   />
                 }
               >
-                <Settings2Icon />
+                <Settings2Icon className="size-3.5" />
               </TooltipTrigger>
               <TooltipContent>Settings</TooltipContent>
             </Tooltip>
@@ -347,175 +550,236 @@ export function App() {
               <TooltipTrigger
                 render={
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="icon-sm"
                     onClick={toggleTheme}
+                    aria-label="Toggle color theme"
                   />
                 }
               >
-                {theme === "dark" ? <SunIcon /> : <MoonIcon />}
+                {theme === "dark" ? (
+                  <SunIcon className="size-3.5" />
+                ) : (
+                  <MoonIcon className="size-3.5" />
+                )}
               </TooltipTrigger>
               <TooltipContent>Toggle theme</TooltipContent>
             </Tooltip>
           </div>
         </header>
 
-        <main className="min-h-0 flex-1">
-          <ResizablePanelGroup orientation="horizontal" className="h-full">
-            <ResizablePanel defaultSize={52} minSize={30}>
-              <section className="flex h-full min-h-0 flex-col">
-                <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b px-3 py-1.5 bg-muted/20">
-                  <span className="text-xs font-semibold tracking-wide text-muted-foreground uppercase font-mono">
-                    Query editor · {(() => {
-                      const r = analysis.routes?.[0] ?? analysis.route
-                      const m = r?.path?.match(/\/collections\/([^/]+)/)
-                      return m ? m[1] : "sec10k"
-                    })()}
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    {/* Execute right beside editor */}
-                    <Button
-                      size="sm"
-                      disabled={
-                        !ready ||
-                        !analysis.valid ||
-                        executing ||
-                        (settings.embedProvider === "browser" &&
-                          browserStatus.state === "error")
-                      }
-                      onClick={onExecute}
-                      className="gap-1.5 font-semibold text-xs"
-                    >
-                      {executing ? (
-                        <Loader2Icon className="size-3.5 animate-spin" />
-                      ) : (
-                        <PlayIcon className="size-3.5" />
-                      )}
-                      Execute
-                    </Button>
+        {/* Scenario bar */}
+        <div
+          className="flex shrink-0 items-center gap-2 border-b bg-muted/20 px-2.5 py-1.5 sm:px-4"
+          role="toolbar"
+          aria-label="Scenario controls"
+        >
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setPresetBrowserOpen(true)}
+            className="h-7 shrink-0 gap-1.5 rounded-lg text-xs"
+            aria-label="Explore capabilities and query presets"
+          >
+            <BookOpenIcon className="size-3.5" />
+            <span className="hidden sm:inline">Explore capabilities</span>
+            <span className="sm:hidden">Explore</span>
+          </Button>
 
-                    <Separator orientation="vertical" className="h-5" />
-
-                    <TenantControl
-                      tenantConfig={tenantConfig}
-                      onUpdateConfig={(next) => {
-                        setTenantConfig(next)
-                        runAnalysis(query, next)
-                      }}
-                    />
-
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={onCopyQql}
-                      className="font-mono text-xs gap-1"
-                    >
-                      {copiedQql ? <CheckIcon className="size-3.5 text-emerald-500" /> : <CopyIcon className="size-3.5 text-primary" />}
-                      {copiedQql ? "Copied QQL" : "Copy QQL"}
-                    </Button>
-
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setCodeExporterOpen(true)}
-                      className="font-mono text-xs gap-1"
-                    >
-                      <Code2Icon className="size-3.5 text-primary" />
-                      Copy SDK Code
-                    </Button>
-
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      onClick={() => {
-                        setQuery("")
-                        runAnalysis("")
-                      }}
-                      className="text-muted-foreground"
-                    >
-                      <EraserIcon className="size-3.5" />
-                      Clear
-                    </Button>
-                  </div>
-                </div>
-
-                {tenantConfig.enabled && (
-                  <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-emerald-500/10 border-b border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-mono text-xs shrink-0 select-none">
-                    <div className="flex items-center gap-2">
-                      <ShieldCheckIcon className="size-4 shrink-0 text-emerald-500" />
-                      <span className="font-bold">AST Directives Active:</span>
-                      <Badge variant="outline" className="font-mono text-[10px] bg-emerald-500/10 border-emerald-500/40 text-emerald-400">
-                        WHERE {tenantConfig.field} {tenantConfig.op} '{tenantConfig.value}'
-                      </Badge>
-                      {tenantConfig.shardKey.trim() && (
-                        <Badge variant="outline" className="font-mono text-[10px] bg-emerald-500/10 border-emerald-500/40 text-emerald-400">
-                          SHARD '{tenantConfig.shardKey}'
-                        </Badge>
-                      )}
-                    </div>
-                    <span className="text-[10px] text-muted-foreground hidden sm:inline">
-                      🔒 Injected at AST layer on execute (Editor query stays pure)
-                    </span>
-                  </div>
+          {activePreset && (
+            <>
+              <Separator orientation="vertical" className="h-5" />
+              <button
+                onClick={() => setPresetBrowserOpen(true)}
+                className="flex min-w-0 items-center gap-2 rounded-lg px-2 py-1 text-left text-xs transition-colors hover:bg-accent/50"
+                aria-label={`Active scenario: ${activePreset.label}. Click to open capability library.`}
+              >
+                {activePreset.labelBadge && (
+                  <Badge
+                    variant="outline"
+                    className="h-4 shrink-0 border-primary/30 bg-primary/10 px-1 py-0 font-mono text-[9px] text-primary"
+                  >
+                    {activePreset.labelBadge}
+                  </Badge>
                 )}
+                <span className="truncate font-medium">
+                  {activePreset.label}
+                </span>
+                <span className="hidden max-w-[28rem] truncate text-muted-foreground lg:inline">
+                  {activePreset.description}
+                </span>
+                <span className="hidden text-muted-foreground sm:inline">
+                  <ChevronRightIcon className="size-3" />
+                </span>
+              </button>
 
-                <div className="min-h-0 flex-1">
-                  {ready ? (
-                    <QueryEditor
-                      value={query}
-                      onChange={onQueryChange}
-                      analysis={analysis}
-                      onExecute={onExecute}
-                      className="h-full"
-                    />
-                  ) : (
-                    <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
-                      <Loader2Icon className="size-4 animate-spin" />
-                      Loading qql-wasm…
-                    </div>
-                  )}
+              <div className="hidden items-center gap-2 text-[10px] text-muted-foreground md:flex">
+                {activeCategory && (
+                  <Badge
+                    variant="outline"
+                    className="h-5 rounded-md font-mono text-[9px]"
+                  >
+                    {activeCategory.label}
+                  </Badge>
+                )}
+                <span>{activePreset.dataset}</span>
+                <span className="capitalize">{activePreset.complexity}</span>
+              </div>
+
+              <span className="hidden flex-1 sm:block" />
+
+              <div className="hidden items-center gap-1 sm:flex">
+                <Separator orientation="vertical" className="h-5" />
+              </div>
+            </>
+          )}
+
+          <div className="flex-1" />
+
+          <PolicyControl
+            config={policyConfig}
+            onUpdateConfig={(next) => {
+              setPolicyConfig(next)
+              runAnalysis(query, next)
+            }}
+          />
+        </div>
+
+        {/* Policy enforcement strip */}
+        {policyConfig.enabled && (
+          <div className="flex shrink-0 items-center gap-2 border-b bg-emerald-500/5 px-2.5 py-1 sm:px-4">
+            <span className="shrink-0 text-[10px] font-semibold tracking-wider text-emerald-600 uppercase dark:text-emerald-400">
+              Host policy enforced
+            </span>
+            <Badge
+              variant="outline"
+              className="h-5 rounded-md border-emerald-500/30 bg-emerald-500/10 font-mono text-[10px] text-emerald-600 dark:text-emerald-400"
+            >
+              WHERE {policyConfig.field} {policyConfig.op}{" "}
+              {formatPolicyValue(policyConfig)}
+            </Badge>
+            {policyConfig.shardKey.trim() && (
+              <Badge
+                variant="outline"
+                className="h-5 rounded-md border-emerald-500/30 bg-emerald-500/10 font-mono text-[10px] text-emerald-600 dark:text-emerald-400"
+              >
+                SHARD '{policyConfig.shardKey}'
+              </Badge>
+            )}
+            <span className="hidden text-[10px] text-muted-foreground sm:inline">
+              Injected at AST layer on execute · Editor query stays pure
+            </span>
+          </div>
+        )}
+
+        {/* Main workspace */}
+        <main className="flex min-h-0 flex-1 flex-col" aria-label="Workspace">
+          {isDesktop ? (
+            <ResizablePanelGroup
+              orientation="horizontal"
+              className="flex-1"
+            >
+              <ResizablePanel defaultSize={52} minSize={30}>
+                <EditorPanel
+                  ready={ready}
+                  query={query}
+                  analysis={analysis}
+                  executing={executing}
+                  settings={settings}
+                  browserStatus={browserStatus}
+                  onQueryChange={onQueryChange}
+                  onExecute={onExecute}
+                  onCopyQql={onCopyQql}
+                  copiedQql={copiedQql}
+                  onCodeExport={() => setCodeExporterOpen(true)}
+                  onClear={() => {
+                    setQuery("")
+                    runAnalysis("")
+                  }}
+                  collectionName={collectionName}
+                />
+              </ResizablePanel>
+
+              <ResizableHandle withHandle />
+
+              <ResizablePanel defaultSize={48} minSize={28}>
+                <Inspector
+                  analysis={analysis}
+                  response={response}
+                  activeTab={activeTab}
+                  onTabChange={setActiveTab}
+                  metrics={metrics}
+                  parseMs={parseMs}
+                  browserStatus={browserStatus}
+                  embedProvider={settings.embedProvider}
+                  qdrantUrl={settings.qdrantUrl}
+                  teachingNote={activePreset?.teaching}
+                  selectedStmtIndex={selectedStmtIndex}
+                  onSelectStmtIndex={setSelectedStmtIndex}
+                  policyConfig={policyConfig}
+                  className="h-full"
+                />
+              </ResizablePanel>
+            </ResizablePanelGroup>
+          ) : (
+            <div className="flex flex-1 flex-col overflow-hidden">
+              <div className="min-h-0 flex-1">
+                <EditorPanel
+                  ready={ready}
+                  query={query}
+                  analysis={analysis}
+                  executing={executing}
+                  settings={settings}
+                  browserStatus={browserStatus}
+                  onQueryChange={onQueryChange}
+                  onExecute={onExecute}
+                  onCopyQql={onCopyQql}
+                  copiedQql={copiedQql}
+                  onCodeExport={() => setCodeExporterOpen(true)}
+                  onClear={() => {
+                    setQuery("")
+                    runAnalysis("")
+                  }}
+                  collectionName={collectionName}
+                />
+              </div>
+              <div className="flex min-h-0 flex-1 flex-col border-t">
+                <div className="flex shrink-0 items-center gap-2 border-b bg-muted/20 px-3 py-1.5">
+                  <span className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                    Compiled output
+                  </span>
                 </div>
-
-                {!analysis.valid &&
-                  analysis.error?.message &&
-                  query.trim() && (
-                    <div className="flex shrink-0 items-start gap-2 border-t border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-                      <AlertCircleIcon className="mt-0.5 size-3.5 shrink-0" />
-                      <span className="font-mono">
-                        {analysis.error.code}: {analysis.error.message}
-                      </span>
-                    </div>
-                  )}
-              </section>
-            </ResizablePanel>
-
-            <ResizableHandle withHandle />
-
-            <ResizablePanel defaultSize={48} minSize={28}>
-              <Inspector
-                analysis={analysis}
-                response={response}
-                activeTab={activeTab}
-                onTabChange={setActiveTab}
-                metrics={metrics}
-                parseMs={parseMs}
-                browserStatus={browserStatus}
-                embedProvider={settings.embedProvider}
-                qdrantUrl={settings.qdrantUrl}
-                teachingNote={activePreset?.teaching}
-                selectedStmtIndex={selectedStmtIndex}
-                onSelectStmtIndex={setSelectedStmtIndex}
-                tenantConfig={tenantConfig}
-                className="h-full"
-              />
-            </ResizablePanel>
-          </ResizablePanelGroup>
+                <div className="min-h-0 flex-1">
+                  <Inspector
+                    analysis={analysis}
+                    response={response}
+                    activeTab={activeTab}
+                    onTabChange={setActiveTab}
+                    metrics={metrics}
+                    parseMs={parseMs}
+                    browserStatus={browserStatus}
+                    embedProvider={settings.embedProvider}
+                    qdrantUrl={settings.qdrantUrl}
+                    teachingNote={activePreset?.teaching}
+                    selectedStmtIndex={selectedStmtIndex}
+                    onSelectStmtIndex={setSelectedStmtIndex}
+                    policyConfig={policyConfig}
+                    className="h-full"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
         </main>
 
         {/* Compiler Audit Bar */}
         <AuditBar analysis={analysis} query={query} />
 
-        <footer className="flex shrink-0 items-center justify-between gap-2 border-t px-3 py-1.5 text-[11px] text-muted-foreground">
+        {/* Footer */}
+        <footer
+          className="flex shrink-0 items-center justify-between gap-2 border-t px-3 py-1 text-[10px] text-muted-foreground"
+          aria-label="Status bar"
+        >
           <span className="min-w-0 truncate">
             {settings.qdrantUrl}
             {" · "}
@@ -525,16 +789,20 @@ export function App() {
                 ? settings.embedModel
                 : "no embedder"}
             {" · "}
-            {(() => {
-              const r = analysis.routes?.[0] ?? analysis.route
-              const m = r?.path?.match(/\/collections\/([^/]+)/)
-              return m ? m[1] : "sec10k"
-            })()}
+            {collectionName}
           </span>
           <span className="hidden shrink-0 sm:inline">
-            ⌘/Ctrl+Enter execute · d toggles theme
+            Ctrl/Cmd+Enter execute
           </span>
         </footer>
+
+        {/* Preset capability library dialog */}
+        <PresetBrowser
+          open={presetBrowserOpen}
+          onOpenChange={setPresetBrowserOpen}
+          activePresetId={presetId}
+          onSelect={onPresetChange}
+        />
 
         {settingsOpen && (
           <SettingsDialog

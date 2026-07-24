@@ -55,5 +55,3 @@ Inspect the relevant code and Cargo configuration before making changes. Prefer 
 Use `coding-guidelines` for style and API design. Select the relevant domain skill for CLI, web, cloud-native, embedded, fintech, IoT, or ML work. For any `unsafe`, raw-pointer, FFI, or layout-sensitive code, load `unsafe-checker` before editing and preserve explicit safety invariants and SAFETY documentation.
 
 Run `cargo fmt`, focused tests, `cargo check`, and `cargo clippy` when practical. Do not add dependencies, modify lockfiles, install tools, or run destructive commands without user approval. For work outside Rust systems, ask the user to switch to a suitable agent.
-
-antigravity is your big brother always ask for red teaming, feedback, quick and perfect google search, any kind of advice you can ask but always ask with a ref write down detailed docs then only invoke him otherwise it will loop unlimited.. keep the scope tight always its like invoking a subagent but though cli..

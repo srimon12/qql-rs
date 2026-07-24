@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { JsonViewer } from "@/components/playground/json-viewer"
 import { MetricsView } from "@/components/playground/metrics-view"
 import { ResultCards } from "@/components/playground/results-cards"
-import type { AnalysisResult, ExecMetrics, InspectorTab, EmbedProvider, TenantConfig } from "@/lib/qql-types"
+import type { AnalysisResult, ExecMetrics, InspectorTab, EmbedProvider, PolicyConfig } from "@/lib/qql-types"
 import type { BrowserEmbedderStatus } from "@/lib/browser-embedder"
 import { cn } from "@/lib/utils"
 
@@ -24,7 +24,7 @@ type InspectorProps = {
   teachingNote?: string
   selectedStmtIndex?: number
   onSelectStmtIndex?: (idx: number) => void
-  tenantConfig?: TenantConfig
+  policyConfig?: PolicyConfig
   className?: string
 }
 
@@ -41,7 +41,7 @@ export function Inspector({
   teachingNote,
   selectedStmtIndex = 0,
   onSelectStmtIndex,
-  tenantConfig,
+  policyConfig,
   className,
 }: InspectorProps) {
   const setSelectedStmtIndex = onSelectStmtIndex ?? (() => {})
@@ -88,10 +88,10 @@ export function Inspector({
           <TabsTrigger value="response">Response</TabsTrigger>
         </TabsList>
 
-        {tenantConfig?.enabled && (
+        {policyConfig?.enabled && (
           <Badge variant="outline" className="font-mono text-[10px] bg-emerald-500/10 border-emerald-500/40 text-emerald-400 gap-1 shrink-0 ml-2">
             <ShieldCheckIcon className="size-3 text-emerald-500" />
-            <span>AST Injected</span>
+            <span>Policy injected</span>
           </Badge>
         )}
       </div>

@@ -4,7 +4,7 @@ import type {
   AnalysisResult,
   ExecMetrics,
   PlaygroundSettings,
-  TenantConfig,
+  PolicyConfig,
 } from "@/lib/qql-types"
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from "@/lib/qql-types"
 import {
@@ -33,6 +33,18 @@ type EmbedProbe = {
   lastEmbedMs: number | null
   lastEmbedTexts: number
   lastEmbedDim: number
+}
+
+function parsePolicyValue(config: PolicyConfig): string | number | boolean {
+  if (config.valueType === "boolean") return config.value === "true"
+  if (config.valueType === "number") {
+    const number = Number(config.value)
+    if (!Number.isFinite(number)) {
+      throw new Error(`Policy value “${config.value}” is not a valid number`)
+    }
+    return number
+  }
+  return config.value.trim()
 }
 
 export function useQql() {
@@ -159,7 +171,7 @@ export function useQql() {
   }, [configureClient, retireClient])
 
   const runAnalysis = useCallback(
-    (source: string, tenantConfig?: TenantConfig) => {
+    (source: string, policyConfig?: PolicyConfig) => {
       if (!ready || !source.trim()) {
         const empty = emptyAnalysis()
         setAnalysis(empty)
@@ -183,9 +195,9 @@ export function useQql() {
 
         if (
           baseResult.valid &&
-          tenantConfig?.enabled &&
-          tenantConfig.field.trim() &&
-          tenantConfig.value.trim()
+          policyConfig?.enabled &&
+          policyConfig.field.trim() &&
+          policyConfig.value.trim()
         ) {
           if (baseResult.statements_count !== 1) {
             return finish({
@@ -194,9 +206,9 @@ export function useQql() {
               route: null,
               routes: [],
               error: {
-                code: "TENANT_MULTI_STATEMENT",
+                code: "POLICY_MULTI_STATEMENT",
                 message:
-                  "Tenant isolation currently accepts exactly one statement; split this script and execute each statement separately.",
+                  "Runtime policy injection accepts one statement at a time; split the script to enforce and execute each statement independently.",
                 start: null,
                 end: null,
               },
@@ -207,12 +219,12 @@ export function useQql() {
             const stmt = new Stmt(source)
             try {
               stmt.injectFilter(
-                tenantConfig.field.trim(),
-                tenantConfig.op || "=",
-                tenantConfig.value.trim()
+                policyConfig.field.trim(),
+                policyConfig.op || "=",
+                parsePolicyValue(policyConfig)
               )
-              if (tenantConfig.shardKey.trim()) {
-                stmt.shardKey = tenantConfig.shardKey.trim()
+              if (policyConfig.shardKey.trim()) {
+                stmt.shardKey = policyConfig.shardKey.trim()
               }
               const route = stmt.compileRoute()
               return finish({
@@ -231,8 +243,8 @@ export function useQql() {
               route: null,
               routes: [],
               error: {
-                code: "TENANT_ISOLATION",
-                message: `Tenant Injection Error: ${err instanceof Error ? err.message : String(err)}`,
+                code: "POLICY_INJECTION",
+                message: `Policy injection error: ${err instanceof Error ? err.message : String(err)}`,
                 start: null,
                 end: null,
               },
@@ -267,7 +279,7 @@ export function useQql() {
   )
 
   const execute = useCallback(
-    async (source: string, tenantConfig?: TenantConfig) => {
+    async (source: string, policyConfig?: PolicyConfig) => {
       if (!ready) return
       const text = source.trim()
       if (!text) return
@@ -296,24 +308,24 @@ export function useQql() {
         let report: unknown
 
         if (
-          tenantConfig?.enabled &&
-          tenantConfig.field.trim() &&
-          tenantConfig.value.trim()
+          policyConfig?.enabled &&
+          policyConfig.field.trim() &&
+          policyConfig.value.trim()
         ) {
           if (analysisRef.current.statements_count !== 1) {
             throw new Error(
-              "Tenant isolation refuses multi-statement execution; split the script and execute each statement separately."
+              "Runtime policy injection refuses multi-statement execution; split the script and execute each statement separately."
             )
           }
           const stmt = new Stmt(text)
           try {
             stmt.injectFilter(
-              tenantConfig.field.trim(),
-              tenantConfig.op || "=",
-              tenantConfig.value.trim()
+              policyConfig.field.trim(),
+              policyConfig.op || "=",
+              parsePolicyValue(policyConfig)
             )
-            if (tenantConfig.shardKey.trim()) {
-              stmt.shardKey = tenantConfig.shardKey.trim()
+            if (policyConfig.shardKey.trim()) {
+              stmt.shardKey = policyConfig.shardKey.trim()
             }
             report = await client.executeStmt(stmt)
           } finally {
