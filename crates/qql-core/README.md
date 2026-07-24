@@ -116,6 +116,22 @@ let script = Parser::parse_all(
 Multiple statements require `;`. A single trailing semicolon is optional;
 leading and repeated empty statements are rejected.
 
+## AST Filter Injection & Sandboxing (`inject_filter`)
+
+`inject_filter` is `qql-core`'s zero-trust AST modification engine. It allows gateways, API layers, and LLM runtimes to inject mandatory security, tenant, lifecycle (soft delete), safety, or environment filters across any QQL statement graph before planning:
+
+```rust
+use qql_core::ast::{inject_filter, ComparisonOp, Value};
+use qql_core::parser::Parser;
+
+let mut stmt = Parser::parse("QUERY 'laptops' FROM products LIMIT 10")?;
+
+// Programmatically enforce group isolation across query, CTEs, prefetches, & mutations
+inject_filter(&mut stmt, "group_id", ComparisonOp::Eq, Value::Str("org_99".into()))?;
+```
+
+For the complete guide on real-world policy patterns, see [docs/inject_filter.md](../../docs/inject_filter.md).
+
 ## Verification
 
 ```bash
