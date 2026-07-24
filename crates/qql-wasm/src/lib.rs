@@ -18,11 +18,28 @@ use wasm_bindgen::prelude::*;
 
 fn normalize_input(input: &str) -> std::borrow::Cow<'_, str> {
     let trimmed = input.trim();
-    if !trimmed.is_empty() && !trimmed.ends_with(';') {
-        std::borrow::Cow::Owned(format!("{};", trimmed))
+    if trimmed.is_empty() {
+        return std::borrow::Cow::Borrowed(trimmed);
+    }
+    if Parser::parse_all(trimmed).is_ok() {
+        return std::borrow::Cow::Borrowed(trimmed);
+    }
+    let with_semi = format!("{}\n;", trimmed);
+    if Parser::parse_all(&with_semi).is_ok() {
+        std::borrow::Cow::Owned(with_semi)
     } else {
         std::borrow::Cow::Borrowed(trimmed)
     }
+}
+
+thread_local! {
+    static SCRATCH_BUF: std::cell::RefCell<Vec<u8>> = std::cell::RefCell::new(Vec::with_capacity(8192));
+}
+
+/// Safely copies slice into a JS-owned Uint8Array, avoiding WASM memory reentrancy/relocation issues.
+fn safe_owned_uint8_array(bytes: &[u8]) -> js_sys::Uint8Array {
+    let view = unsafe { js_sys::Uint8Array::view(bytes) };
+    js_sys::Uint8Array::new(&view)
 }
 
 #[wasm_bindgen]
@@ -167,7 +184,38 @@ impl Stmt {
             "path": route.path,
             "payload": json_body.unwrap_or(serde_json::Value::Null),
         });
-        serde_json::to_string_pretty(&output).map_err(|e| JsValue::from_str(&e.to_string()))
+        serde_json::to_string(&output).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Compile this Stmt AST directly into a Qdrant REST route JS Object { method, path, payload }.
+    #[wasm_bindgen(js_name = compileRouteValue)]
+    pub fn compile_route_value(&self) -> Result<JsValue, JsValue> {
+        let route = routing::route(&self.inner);
+        let json_body = route.body_json();
+        let output = serde_json::json!({
+            "method": route.method.as_str(),
+            "path": route.path,
+            "payload": json_body.unwrap_or(serde_json::Value::Null),
+        });
+        to_js_value(&output)
+    }
+
+    /// Compile this Stmt AST into a JS-owned Uint8Array byte buffer.
+    #[wasm_bindgen(js_name = compileRouteBytes)]
+    pub fn compile_route_bytes(&self) -> Result<js_sys::Uint8Array, JsValue> {
+        let route = routing::route(&self.inner);
+        let json_body = route.body_json();
+        let output = serde_json::json!({
+            "method": route.method.as_str(),
+            "path": route.path,
+            "payload": json_body.unwrap_or(serde_json::Value::Null),
+        });
+        SCRATCH_BUF.with(|cell| {
+            let mut buf = cell.borrow_mut();
+            buf.clear();
+            serde_json::to_writer(&mut *buf, &output).map_err(|e| JsValue::from_str(&e.to_string()))?;
+            Ok(safe_owned_uint8_array(&buf))
+        })
     }
 }
 
@@ -219,8 +267,7 @@ pub fn tokenize(input: &str) -> Result<Vec<JsValue>, JsValue> {
 
 // ── Core: unified analyze ─────────────────────────────────────────
 
-#[wasm_bindgen]
-pub fn analyze(input: &str) -> String {
+fn build_analyze_value(input: &str) -> serde_json::Value {
     let norm = normalize_input(input);
     let mut tokens = Vec::new();
     let lexer = Lexer::new(&norm);
@@ -253,7 +300,7 @@ pub fn analyze(input: &str) -> String {
 
             let explain_val = qql_core::explain::explain(&norm).unwrap_or_default();
 
-            let result = serde_json::json!({
+            serde_json::json!({
                 "valid": true,
                 "statements_count": stmts.len(),
                 "tokens": tokens,
@@ -262,9 +309,7 @@ pub fn analyze(input: &str) -> String {
                 "routes": routes_val,
                 "explain": explain_val,
                 "error": serde_json::Value::Null,
-            });
-
-            serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
+            })
         }
         Err(err) => {
             let err_json = serde_json::json!({
@@ -274,7 +319,7 @@ pub fn analyze(input: &str) -> String {
                 "end": err.span.map(|s| s.end),
             });
 
-            let result = serde_json::json!({
+            serde_json::json!({
                 "valid": false,
                 "statements_count": 0,
                 "tokens": tokens,
@@ -282,55 +327,104 @@ pub fn analyze(input: &str) -> String {
                 "route": serde_json::Value::Null,
                 "explain": serde_json::Value::Null,
                 "error": err_json,
-            });
-
-            serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
+            })
         }
     }
 }
 
-// ── Core: compile & explain ───────────────────────────────────────
+fn to_js_value<T: serde::Serialize>(val: &T) -> Result<JsValue, JsValue> {
+    let serializer = serde_wasm_bindgen::Serializer::json_compatible();
+    val.serialize(&serializer).map_err(|e| JsValue::from_str(&e.to_string()))
+}
 
 #[wasm_bindgen]
-pub fn compile(query: &str) -> Result<String, JsValue> {
+pub fn analyze(input: &str) -> String {
+    let result = build_analyze_value(input);
+    serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
+}
+
+/// Returns unified analysis directly as a JS Object via serde_wasm_bindgen (zero string detour).
+#[wasm_bindgen(js_name = analyzeValue)]
+pub fn analyze_value(input: &str) -> Result<JsValue, JsValue> {
+    let val = build_analyze_value(input);
+    to_js_value(&val)
+}
+
+// ── Core: compile & explain ───────────────────────────────────────
+
+fn build_compile_output(query: &str) -> Result<serde_json::Value, JsValue> {
     let norm = normalize_input(query);
     let stmt = Parser::parse(&norm).map_err(|e| JsValue::from_str(&e.to_string()))?;
     let route = routing::route(&stmt);
     let json_body = route.body_json();
-    let output = serde_json::json!({
-        "stmt_type": match &route.body {
-            Some(qql_plan::routing::RequestBody::Query(_)) => "query",
-            Some(qql_plan::routing::RequestBody::QueryGroups(_)) => "query_groups",
-            Some(qql_plan::routing::RequestBody::Points(_)) => "points",
-            Some(qql_plan::routing::RequestBody::Scroll(_)) => "scroll",
-            Some(qql_plan::routing::RequestBody::Upsert(_)) => "upsert",
-            Some(qql_plan::routing::RequestBody::Delete(_)) => "delete",
-            Some(qql_plan::routing::RequestBody::UpdateVector(_)) => "update_vector",
-            Some(qql_plan::routing::RequestBody::UpdatePayload(_)) => "update_payload",
-            Some(qql_plan::routing::RequestBody::ClearPayload(_)) => "clear_payload",
-            Some(qql_plan::routing::RequestBody::DeleteVector(_)) => "delete_vector",
-            Some(qql_plan::routing::RequestBody::Count(_)) => "count",
-            Some(qql_plan::routing::RequestBody::CreateShardKey(_)) => "create_shard_key",
-            Some(qql_plan::routing::RequestBody::DropShardKey(_)) => "drop_shard_key",
-            Some(qql_plan::routing::RequestBody::CreateCollection(_)) => "create_collection",
-            Some(qql_plan::routing::RequestBody::UpdateCollection(_)) => "update_collection",
-            Some(qql_plan::routing::RequestBody::CreateIndex(_)) => "create_index",
-            None => match route.method {
-                qql_plan::types::Method::Get if route.path == "/collections" => "show_collections",
-                qql_plan::types::Method::Get => "show_collection",
-                qql_plan::types::Method::Delete => "drop_collection",
-                _ => "unknown",
-            },
+    let stmt_type = match &route.body {
+        Some(qql_plan::routing::RequestBody::Query(_)) => "query",
+        Some(qql_plan::routing::RequestBody::QueryGroups(_)) => "query_groups",
+        Some(qql_plan::routing::RequestBody::Points(_)) => "points",
+        Some(qql_plan::routing::RequestBody::Scroll(_)) => "scroll",
+        Some(qql_plan::routing::RequestBody::Upsert(_)) => "upsert",
+        Some(qql_plan::routing::RequestBody::Delete(_)) => "delete",
+        Some(qql_plan::routing::RequestBody::UpdateVector(_)) => "update_vector",
+        Some(qql_plan::routing::RequestBody::UpdatePayload(_)) => "update_payload",
+        Some(qql_plan::routing::RequestBody::ClearPayload(_)) => "clear_payload",
+        Some(qql_plan::routing::RequestBody::DeleteVector(_)) => "delete_vector",
+        Some(qql_plan::routing::RequestBody::Count(_)) => "count",
+        Some(qql_plan::routing::RequestBody::CreateShardKey(_)) => "create_shard_key",
+        Some(qql_plan::routing::RequestBody::DropShardKey(_)) => "drop_shard_key",
+        Some(qql_plan::routing::RequestBody::CreateCollection(_)) => "create_collection",
+        Some(qql_plan::routing::RequestBody::UpdateCollection(_)) => "update_collection",
+        Some(qql_plan::routing::RequestBody::CreateIndex(_)) => "create_index",
+        None => match route.method {
+            qql_plan::types::Method::Get if route.path == "/collections" => "show_collections",
+            qql_plan::types::Method::Get => "show_collection",
+            qql_plan::types::Method::Delete => "drop_collection",
+            _ => "unknown",
         },
+    };
+    Ok(serde_json::json!({
+        "stmt_type": stmt_type,
         "payload": json_body.unwrap_or(serde_json::Value::Null),
-    });
+    }))
+}
+
+/// Compiles QQL query into a compact JSON string payload.
+#[wasm_bindgen]
+pub fn compile(query: &str) -> Result<String, JsValue> {
+    let output = build_compile_output(query)?;
     serde_json::to_string(&output).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+/// Compiles QQL query directly into a JavaScript Object using serde_wasm_bindgen.
+/// Ideal for JS web apps and playground consumers.
+#[wasm_bindgen(js_name = compileValue)]
+pub fn compile_value(query: &str) -> Result<JsValue, JsValue> {
+    let output = build_compile_output(query)?;
+    to_js_value(&output)
+}
+
+/// Compiles QQL query into a safe, JS-owned Uint8Array byte buffer.
+#[wasm_bindgen(js_name = compileBytes)]
+pub fn compile_bytes(query: &str) -> Result<js_sys::Uint8Array, JsValue> {
+    let output = build_compile_output(query)?;
+    SCRATCH_BUF.with(|cell| {
+        let mut buf = cell.borrow_mut();
+        buf.clear();
+        serde_json::to_writer(&mut *buf, &output).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        Ok(safe_owned_uint8_array(&buf))
+    })
 }
 
 #[wasm_bindgen]
 pub fn explain(query: &str) -> Result<String, JsValue> {
     let norm = normalize_input(query);
     qql_core::explain::explain(&norm).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+#[wasm_bindgen(js_name = explainBytes)]
+pub fn explain_bytes(query: &str) -> Result<js_sys::Uint8Array, JsValue> {
+    let norm = normalize_input(query);
+    let exp_str = qql_core::explain::explain(&norm).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    Ok(safe_owned_uint8_array(exp_str.as_bytes()))
 }
 
 // ── Client: browser fetch-based execute with embedding ────────────

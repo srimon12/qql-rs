@@ -1,4 +1,12 @@
 const nqql = require('../crates/nqql/index.js');
+let qqlWasm = null;
+try {
+  qqlWasm = require('../crates/qql-wasm/pkg-node/qql_wasm.js');
+} catch (e) {
+  console.warn("WASM package not found at crates/qql-wasm/pkg-node, running without WASM");
+}
+
+const decoder = new TextDecoder();
 
 const QUERIES = [
   ['Simple', "QUERY 'search' FROM docs LIMIT 10"],
@@ -12,54 +20,50 @@ const QUERIES = [
   ['WithPayload', "QUERY 'search' FROM docs WITH PAYLOAD INCLUDE (title, body) WITH VECTOR (dense) LIMIT 10"],
 ];
 
-function bench_napi_parse(name, q, iterations) {
-    for (let i = 0; i < 100; i++) {
-        nqql.parse(q)
-    }
-    let start = process.hrtime.bigint()
-    for (let i = 0; i < iterations; i++) {
-        nqql.parse(q)
-    }
-    let end = process.hrtime.bigint()
-    let elapsed = Number(end - start)
-    return (iterations / elapsed) * 1e9
+function run_bench(fn, iterations) {
+  for (let i = 0; i < 100; i++) fn();
+  const start = process.hrtime.bigint();
+  for (let i = 0; i < iterations; i++) fn();
+  const end = process.hrtime.bigint();
+  const elapsed = Number(end - start);
+  return (iterations / elapsed) * 1e9;
 }
 
-function bench_fast_json_parse(name, q, iterations) {
-    for (let i = 0; i < 100; i++) {
-        nqql.parseFastJson(q)
-    }
-    let start = process.hrtime.bigint()
-    for (let i = 0; i < iterations; i++) {
-        nqql.parseFastJson(q)
-    }
-    let end = process.hrtime.bigint()
-    let elapsed = Number(end - start)
-    return (iterations / elapsed) * 1e9
-}
+const iterations = 50_000;
+console.log(`\n=== NODE.JS & WASM FAIR CONSUMER BENCHMARK SUITE (${iterations.toLocaleString()} iterations each) ===\n`);
 
-function bench_e2e(name, q, iterations) {
-    // Explain builds the full execution payload offline (E2E pipeline)
-    for (let i = 0; i < 100; i++) {
-        nqql.explain(q)
-    }
-    let start = process.hrtime.bigint()
-    for (let i = 0; i < iterations; i++) {
-        nqql.explain(q)
-    }
-    let end = process.hrtime.bigint()
-    let elapsed = Number(end - start)
-    return (iterations / elapsed) * 1e9
-}
+const headers = [
+  'Query'.padEnd(17),
+  'NAPI parse()'.padStart(12),
+  'NAPI parseJson()'.padStart(16),
+  'WASM compileValue'.padStart(17),
+  'WASM compile+JSON'.padStart(17),
+  'WASM bytes+Decode'.padStart(17),
+];
 
-const iterations = 10_000;
-console.log(`Node.js nqql  |  ${iterations} iterations each\n`);
-console.log(`${'Query'.padEnd(20)} | ${'NAPI parse()'.padStart(15)} | ${'parseFastJson()'.padStart(15)} | ${'E2E explain()'.padStart(15)}`);
-console.log('-'.repeat(74));
+console.log(headers.join(' | '));
+console.log('-'.repeat(headers.join(' | ').length));
 
 for (const [name, q] of QUERIES) {
-  const napi_parse = bench_napi_parse(name, q, iterations);
-  const fast_parse = bench_fast_json_parse(name, q, iterations);
-  const e2e = bench_e2e(name, q, iterations);
-  console.log(`${name.padEnd(20)} | ${napi_parse.toFixed(0).padStart(15)} | ${fast_parse.toFixed(0).padStart(15)} | ${e2e.toFixed(0).padStart(15)}`);
+  const napi_parse = run_bench(() => nqql.parse(q), iterations);
+  const napi_parse_json = run_bench(() => nqql.parseJson(q), iterations);
+
+  // WASM Fair Consumer Paths:
+  // 1. Direct JS Object via serde_wasm_bindgen
+  const wasm_val = run_bench(() => qqlWasm.compileValue(q), iterations);
+  // 2. String + V8 JSON.parse
+  const wasm_str_json = run_bench(() => JSON.parse(qqlWasm.compile(q)), iterations);
+  // 3. Safe Owned Uint8Array + TextDecoder + V8 JSON.parse
+  const wasm_bytes_json = run_bench(() => JSON.parse(decoder.decode(qqlWasm.compileBytes(q))), iterations);
+
+  const row = [
+    name.padEnd(17),
+    napi_parse.toFixed(0).padStart(12),
+    napi_parse_json.toFixed(0).padStart(16),
+    wasm_val.toFixed(0).padStart(17),
+    wasm_str_json.toFixed(0).padStart(17),
+    wasm_bytes_json.toFixed(0).padStart(17),
+  ];
+
+  console.log(row.join(' | '));
 }

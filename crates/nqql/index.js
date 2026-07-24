@@ -1,30 +1,31 @@
 const nativeBinding = require('./index.linux-x64-gnu.node');
 
 /**
- * Parses a QQL statement and returns the AST as a Stmt class instance.
+ * Parses a QQL statement into a JavaScript AST object using fast Rust-JSON serialization.
  */
 function parse(query) {
-    return nativeBinding.parse(query);
-}
-
-/**
- * Parses a QQL statement by serializing to JSON in Rust, then using `JSON.parse` in V8.
- * This skips `napi-rs` memory allocations and provides a significant performance 
- * boost (~236k ops/s).
- */
-function parseFastJson(query) {
     return JSON.parse(nativeBinding.parseJson(query));
 }
 
+/**
+ * Parses a QQL statement and returns the AST as a raw JSON string directly from Rust.
+ * Bypasses V8 object creation entirely (~1.15M ops/s). Ideal for HTTP/IPC forwarding.
+ */
+function parseJson(query) {
+    return nativeBinding.parseJson(query);
+}
+
+/**
+ * Parses multiple QQL statements into an array of JavaScript AST objects.
+ */
 function parseAll(queries) {
-    return nativeBinding.parseAll(queries);
+    return JSON.parse(nativeBinding.parseBatchJson(queries));
 }
 
+/**
+ * Parses an array of QQL queries into an array of JavaScript AST objects.
+ */
 function parseBatch(queries) {
-    return nativeBinding.parseBatch(queries);
-}
-
-function parseBatchFastJson(queries) {
     return JSON.parse(nativeBinding.parseBatchJson(queries));
 }
 
@@ -62,10 +63,9 @@ const HttpEmbedder = nativeBinding.HttpEmbedder;
 
 module.exports = {
     parse,
-    parseFastJson,
+    parseJson,
     parseAll,
     parseBatch,
-    parseBatchFastJson,
     isValid,
     injectFilter,
     tokenize,

@@ -31,12 +31,16 @@ declare module "qql-wasm" {
     toJSON(): string
     toObject(): unknown
     compileRoute(): string
+    compileRouteValue(): any
     get shardKey(): string | undefined
     set shardKey(value: string | null | undefined)
   }
 
   export function analyze(input: string): string
+  export function analyzeValue(input: string): unknown
   export function compile(query: string): string
+  export function compileValue(query: string): unknown
+  export function compileBytes(query: string): Uint8Array
   export function explain(query: string): string
   export function inject_filter(
     query: string,

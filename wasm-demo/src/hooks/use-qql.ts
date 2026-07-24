@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import init, { analyze, Client, Stmt } from "qql-wasm"
+import init, { analyzeValue, Client, Stmt } from "qql-wasm"
 import type {
   AnalysisResult,
   ExecMetrics,
@@ -29,33 +29,6 @@ function emptyAnalysis(): AnalysisResult {
   }
 }
 
-function parseAnalysis(raw: string): AnalysisResult {
-  try {
-    const data = JSON.parse(raw) as AnalysisResult
-    const routes = Array.isArray(data.routes) && data.routes.length > 0
-      ? data.routes
-      : data.route
-        ? [data.route]
-        : []
-    return {
-      valid: Boolean(data.valid),
-      statements_count: data.statements_count ?? 0,
-      tokens: Array.isArray(data.tokens) ? data.tokens : [],
-      ast: data.ast ?? null,
-      route: data.route ?? routes[0] ?? null,
-      routes,
-      explain: data.explain ?? null,
-      error: data.error ?? null,
-    }
-  } catch {
-    return {
-      ...emptyAnalysis(),
-      error: { code: "PARSE", message: "Failed to parse analyze() result" },
-    }
-  }
-}
-
-/** Mutable slot so setEmbedder can report timings without rebinding constantly. */
 type EmbedProbe = {
   lastEmbedMs: number | null
   lastEmbedTexts: number
@@ -65,25 +38,22 @@ type EmbedProbe = {
 export function useQql() {
   const [ready, setReady] = useState(false)
   const [initError, setInitError] = useState<string | null>(null)
-  const [settings, setSettingsState] =
-    useState<PlaygroundSettings>(DEFAULT_SETTINGS)
+  const [settings, setSettingsState] = useState<PlaygroundSettings>(DEFAULT_SETTINGS)
   const [analysis, setAnalysis] = useState<AnalysisResult>(emptyAnalysis)
   const [parseMs, setParseMs] = useState(0)
   const [response, setResponse] = useState<string>("")
   const [executing, setExecuting] = useState(false)
   const [metrics, setMetrics] = useState<ExecMetrics | null>(null)
-  const [browserStatus, setBrowserStatus] = useState<BrowserEmbedderStatus>(
-    () => ({
-      state: "idle",
-      model: BROWSER_EMBED_MODEL,
-      dim: BROWSER_EMBED_DIM,
-      device: null,
-      loadMs: null,
-      progress: 0,
-      statusText: "Not loaded",
-      error: null,
-    })
-  )
+  const [browserStatus, setBrowserStatus] = useState<BrowserEmbedderStatus>(() => ({
+    state: "idle",
+    model: BROWSER_EMBED_MODEL,
+    dim: BROWSER_EMBED_DIM,
+    device: null,
+    loadMs: null,
+    progress: 0,
+    statusText: "Not loaded",
+    error: null,
+  }))
 
   const clientRef = useRef<Client | null>(null)
   const settingsRef = useRef(settings)
@@ -105,7 +75,6 @@ export function useQql() {
     const client = new Client(url, key ?? null)
 
     if (cfg.embedProvider === "browser") {
-      // Lazy: MiniLM downloads on first embed call, not on page load
       const probe = probeRef.current
       client.setEmbedder(async (texts: string[]) => {
         const t0 = performance.now()
@@ -116,21 +85,18 @@ export function useQql() {
         return vectors
       })
     } else if (cfg.embedProvider === "http") {
-      const embedUrl =
-        cfg.embedUrl.trim() || "http://localhost:11434/v1/embeddings"
+      const embedUrl = cfg.embedUrl.trim() || "http://localhost:11434/v1/embeddings"
       const model = cfg.embedModel.trim() || "all-minilm:l6-v2"
       const dim = Number(cfg.embedDim) || 384
       const embedKey = cfg.embedKey.trim() || null
       client.setHttpEmbedder(embedUrl, model, dim, embedKey)
     }
-    // "none" → no embedder
 
     clientRef.current = client
   }, [])
 
   useEffect(() => {
     let cancelled = false
-
     ;(async () => {
       try {
         await init()
@@ -140,7 +106,6 @@ export function useQql() {
         try {
           await configureClient(cfg)
         } catch (embedErr) {
-          // WASM still usable for offline analyze; embed may fail later
           console.warn("Embedder init:", embedErr)
         }
         if (!cancelled) setReady(true)
@@ -158,8 +123,7 @@ export function useQql() {
 
   const runAnalysis = useCallback(
     (source: string, tenantConfig?: TenantConfig) => {
-      if (!ready) return emptyAnalysis()
-      if (!source.trim()) {
+      if (!ready || !source.trim()) {
         const empty = emptyAnalysis()
         setAnalysis(empty)
         setParseMs(0)
@@ -168,6 +132,8 @@ export function useQql() {
       }
 
       const t0 = performance.now()
+      const baseResult = (analyzeValue(source) ?? emptyAnalysis()) as AnalysisResult
+
       if (tenantConfig?.enabled && tenantConfig.field.trim() && tenantConfig.value.trim()) {
         try {
           const stmt = new Stmt(source)
@@ -175,15 +141,8 @@ export function useQql() {
           if (tenantConfig.shardKey.trim()) {
             stmt.shardKey = tenantConfig.shardKey.trim()
           }
-          const routeJson = stmt.compileRoute()
-          const parsedRoute = JSON.parse(routeJson) as { method: string; path: string; payload: unknown }
-          const baseResult = parseAnalysis(analyze(source))
-          const injectedRoute = {
-            method: parsedRoute.method,
-            path: parsedRoute.path,
-            payload: parsedRoute.payload,
-          }
-          const injectedResult: AnalysisResult = {
+          const injectedRoute = typeof stmt.compileRouteValue === "function" ? stmt.compileRouteValue() : JSON.parse(stmt.compileRoute())
+          const result: AnalysisResult = {
             ...baseResult,
             route: injectedRoute,
             routes: [injectedRoute],
@@ -192,10 +151,9 @@ export function useQql() {
           const elapsed = performance.now() - t0
           setParseMs(elapsed)
           parseMsRef.current = elapsed
-          setAnalysis(injectedResult)
-          return injectedResult
+          setAnalysis(result)
+          return result
         } catch (err) {
-          const baseResult = parseAnalysis(analyze(source))
           const errResult: AnalysisResult = {
             ...baseResult,
             error: {
@@ -208,12 +166,11 @@ export function useQql() {
         }
       }
 
-      const result = parseAnalysis(analyze(source))
       const elapsed = performance.now() - t0
       setParseMs(elapsed)
       parseMsRef.current = elapsed
-      setAnalysis(result)
-      return result
+      setAnalysis(baseResult)
+      return baseResult
     },
     [ready]
   )
@@ -234,44 +191,27 @@ export function useQql() {
       if (!text) return
 
       const cfg = settingsRef.current
-
       setExecuting(true)
-      setResponse(
-        cfg.embedProvider === "browser"
-          ? "Executing (in-browser MiniLM → Qdrant REST)…"
-          : cfg.embedProvider === "http"
-            ? "Executing (HTTP embedder → Qdrant REST)…"
-            : "Executing (no embedder → Qdrant REST)…"
-      )
+      setResponse("Executing query…")
 
-      // Reset embed probe for this run
       const probe = probeRef.current
       probe.lastEmbedMs = null
       probe.lastEmbedTexts = 0
 
       try {
-        if (!clientRef.current) {
-          await configureClient(cfg)
-        }
-
-        if (cfg.embedProvider === "browser" && !clientRef.current!.hasEmbedder()) {
+        if (!clientRef.current || (cfg.embedProvider === "browser" && !clientRef.current.hasEmbedder())) {
           await configureClient(cfg)
         }
 
         const t0 = performance.now()
         let resJson = ""
         if (tenantConfig?.enabled && tenantConfig.field.trim() && tenantConfig.value.trim()) {
-          try {
-            const stmt = new Stmt(text)
-            stmt.injectFilter(tenantConfig.field.trim(), tenantConfig.op || "=", tenantConfig.value.trim())
-            if (tenantConfig.shardKey.trim()) {
-              stmt.shardKey = tenantConfig.shardKey.trim()
-            }
-            resJson = await clientRef.current!.executeStmt(stmt)
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err)
-            throw new Error(`[Tenant Isolation Error] Failed to inject AST tenant directives: ${msg}. Query execution blocked for tenant security.`)
+          const stmt = new Stmt(text)
+          stmt.injectFilter(tenantConfig.field.trim(), tenantConfig.op || "=", tenantConfig.value.trim())
+          if (tenantConfig.shardKey.trim()) {
+            stmt.shardKey = tenantConfig.shardKey.trim()
           }
+          resJson = await clientRef.current!.executeStmt(stmt)
         } else {
           resJson = await clientRef.current!.execute(text)
         }
@@ -285,8 +225,7 @@ export function useQql() {
 
         const meta = getBrowserEmbedMeta()
         const embedMs = probe.lastEmbedMs
-        const networkMs =
-          embedMs != null ? Math.max(0, totalMs - embedMs) : totalMs
+        const networkMs = embedMs != null ? Math.max(0, totalMs - embedMs) : totalMs
 
         setMetrics({
           at: Date.now(),
@@ -298,18 +237,8 @@ export function useQql() {
           embedDim: probe.lastEmbedDim || cfg.embedDim || BROWSER_EMBED_DIM,
           totalMs,
           networkMs,
-          embedBackend:
-            cfg.embedProvider === "browser"
-              ? (meta.device ?? "browser")
-              : cfg.embedProvider === "http"
-                ? "http"
-                : "none",
-          embedModel:
-            cfg.embedProvider === "browser"
-              ? BROWSER_EMBED_MODEL
-              : cfg.embedProvider === "http"
-                ? cfg.embedModel
-                : "—",
+          embedBackend: cfg.embedProvider === "browser" ? (meta.device ?? "browser") : cfg.embedProvider === "http" ? "http" : "none",
+          embedModel: cfg.embedProvider === "browser" ? BROWSER_EMBED_MODEL : cfg.embedProvider === "http" ? cfg.embedModel : "—",
           success: true,
         })
       } catch (err) {
@@ -318,10 +247,6 @@ export function useQql() {
           JSON.stringify(
             {
               error: message,
-              note:
-                cfg.embedProvider === "browser"
-                  ? "Browser MiniLM failed or Qdrant is unreachable. Check the Metrics tab and Settings (Qdrant URL)."
-                  : "If Qdrant or the HTTP embedder is not running, open Settings.",
               route: analysisRef.current.route ?? null,
             },
             null,
@@ -339,10 +264,7 @@ export function useQql() {
           totalMs: 0,
           networkMs: null,
           embedBackend: cfg.embedProvider,
-          embedModel:
-            cfg.embedProvider === "browser"
-              ? BROWSER_EMBED_MODEL
-              : cfg.embedModel,
+          embedModel: cfg.embedProvider === "browser" ? BROWSER_EMBED_MODEL : cfg.embedModel,
           success: false,
           error: message,
         })
@@ -359,7 +281,6 @@ export function useQql() {
     settings,
     updateSettings,
     analysis,
-    /** alias used by App toolbar */
     latencyMs: parseMs,
     parseMs,
     response,
