@@ -1,8 +1,20 @@
 use napi_derive::napi;
 use qql_core::ast::{self, ComparisonOp, Value};
+use qql_core::error::QqlError;
 use qql_core::lexer::Lexer;
 use qql_core::parser::Parser;
 use qql_plan::routing;
+
+/// Serialize a QqlError to JSON so the JS wrapper can extract structured fields.
+fn to_napi_err(e: QqlError) -> napi::Error {
+    let json = serde_json::to_string(&e).unwrap_or_else(|_| e.to_string());
+    napi::Error::from_reason(json)
+}
+
+/// Convert a serde_json error to a napi error.
+fn serde_napi_err(e: serde_json::Error) -> napi::Error {
+    napi::Error::from_reason(e.to_string())
+}
 
 #[napi]
 #[derive(Clone)]
@@ -30,22 +42,25 @@ impl Stmt {
             ">=" | "gte" => ComparisonOp::Gte,
             "<" | "lt" => ComparisonOp::Lt,
             "<=" | "lte" => ComparisonOp::Lte,
-            _ => ComparisonOp::Eq,
+            _ => {
+                return Err(napi::Error::from_reason(format!(
+                    "unsupported comparison operator '{op}' (use =, >, >=, <, <=)"
+                )));
+            }
         };
-        let val = Value::from_json(value).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-        ast::inject_filter(&mut self.inner, &field, cmp, val)
-            .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+        let val = Value::from_json(value).map_err(to_napi_err)?;
+        ast::inject_filter(&mut self.inner, &field, cmp, val).map_err(to_napi_err)?;
         Ok(())
     }
 
     #[napi]
     pub fn to_object(&self) -> napi::Result<serde_json::Value> {
-        serde_json::to_value(&self.inner).map_err(|e| napi::Error::from_reason(e.to_string()))
+        serde_json::to_value(&self.inner).map_err(serde_napi_err)
     }
 
     #[napi]
     pub fn to_json(&self) -> napi::Result<String> {
-        serde_json::to_string(&self.inner).map_err(|e| napi::Error::from_reason(e.to_string()))
+        serde_json::to_string(&self.inner).map_err(serde_napi_err)
     }
 
     /// Get or set the shard key on QUERY, COUNT, SCROLL, UPSERT, and DELETE
@@ -77,50 +92,14 @@ impl Stmt {
 }
 
 #[napi]
-pub fn parse(input: String) -> napi::Result<Stmt> {
-    let stmt = Parser::parse(&input).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    Ok(Stmt { inner: stmt })
-}
-
-#[napi]
 pub fn parse_all(input: String) -> napi::Result<Vec<Stmt>> {
-    let stmts = Parser::parse_all(&input).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let stmts = Parser::parse_all(&input).map_err(to_napi_err)?;
     Ok(stmts.into_iter().map(|s| Stmt { inner: s }).collect())
 }
 
 #[napi]
-pub fn parse_batch(queries: Vec<String>) -> napi::Result<Vec<Stmt>> {
-    let mut results = Vec::with_capacity(queries.len());
-    for q in queries {
-        let stmt = Parser::parse(&q).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-        results.push(Stmt { inner: stmt });
-    }
-    Ok(results)
-}
-
-#[napi]
-pub fn parse_json(input: String) -> napi::Result<String> {
-    match Parser::parse(&input) {
-        Ok(stmt) => {
-            serde_json::to_string(&stmt).map_err(|e| napi::Error::from_reason(e.to_string()))
-        }
-        Err(e) => Err(napi::Error::from_reason(e.to_string())),
-    }
-}
-
-#[napi]
-pub fn parse_batch_json(queries: Vec<String>) -> napi::Result<String> {
-    let mut results = Vec::with_capacity(queries.len());
-    for q in queries {
-        let stmt = Parser::parse(&q).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-        results.push(stmt);
-    }
-    serde_json::to_string(&results).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
 pub fn is_valid(input: String) -> bool {
-    Parser::try_parse(&input).is_ok()
+    Parser::parse_all(&input).is_ok()
 }
 
 #[napi]
@@ -141,13 +120,16 @@ pub fn inject_filter(
         ">=" | "gte" => ComparisonOp::Gte,
         "<" | "lt" => ComparisonOp::Lt,
         "<=" | "lte" => ComparisonOp::Lte,
-        _ => ComparisonOp::Eq,
+        _ => {
+            return Err(napi::Error::from_reason(format!(
+                "unsupported comparison operator '{op}' (use =, >, >=, <, <=)"
+            )));
+        }
     };
-    let val = Value::from_json(value).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let mut stmt = Parser::parse(&query).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    ast::inject_filter(&mut stmt, &field, cmp, val)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    serde_json::to_value(&stmt).map_err(|e| napi::Error::from_reason(e.to_string()))
+    let val = Value::from_json(value).map_err(to_napi_err)?;
+    let mut stmt = Parser::parse(&query).map_err(to_napi_err)?;
+    ast::inject_filter(&mut stmt, &field, cmp, val).map_err(to_napi_err)?;
+    serde_json::to_value(&stmt).map_err(serde_napi_err)
 }
 
 #[napi]
@@ -180,7 +162,7 @@ pub fn tokenize(input: String) -> napi::Result<serde_json::Value> {
 
 #[napi]
 pub fn compile_query(input: String) -> napi::Result<serde_json::Value> {
-    let stmt = Parser::parse(&input).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let stmt = Parser::parse(&input).map_err(to_napi_err)?;
     let route = routing::route(&stmt);
     let output = serde_json::json!({
         "stmt_type": match &route.body {
@@ -207,52 +189,11 @@ pub fn compile_query(input: String) -> napi::Result<serde_json::Value> {
                 _ => "unknown",
             },
         },
+        "method": route.method.as_str(),
+        "path": route.path,
         "payload": route.body_json().unwrap_or(serde_json::Value::Null),
     });
     Ok(output)
-}
-
-#[napi(js_name = "HttpEmbedder")]
-#[derive(Clone)]
-pub struct JsHttpEmbedder {
-    pub endpoint: String,
-    pub api_key: String,
-    pub model: String,
-    pub dimension: u32,
-}
-
-#[napi]
-impl JsHttpEmbedder {
-    #[napi(constructor)]
-    pub fn new(options: serde_json::Value) -> napi::Result<Self> {
-        let ep = options
-            .get("endpoint")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string();
-        let key = options
-            .get("apiKey")
-            .or_else(|| options.get("api_key"))
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string();
-        let model = options
-            .get("model")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string();
-        let dim = options
-            .get("dimension")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u32;
-
-        Ok(JsHttpEmbedder {
-            endpoint: ep,
-            api_key: key,
-            model,
-            dimension: dim,
-        })
-    }
 }
 
 fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::executor::Executor> {
@@ -295,10 +236,7 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
     let client: Box<dyn qql::client::QdrantOps> = if grpc {
         #[cfg(feature = "grpc")]
         {
-            Box::new(
-                qql::grpc::GrpcQdrant::from_url(url_str, api_key)
-                    .map_err(|e| napi::Error::from_reason(e.to_string()))?,
-            )
+            Box::new(qql::grpc::GrpcQdrant::from_url(url_str, api_key).map_err(to_napi_err)?)
         }
         #[cfg(not(feature = "grpc"))]
         {
@@ -316,7 +254,7 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
             let model = config.embedding_model.clone().unwrap_or_default();
             let dim = config.embedding_dimension;
             let http_emb = qql::embedder::HttpEmbedder::new(endpoint.clone(), api_key, model, dim)
-                .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+                .map_err(to_napi_err)?;
             Some(std::sync::Arc::new(http_emb) as std::sync::Arc<dyn qql::embedder::Embedder>)
         } else {
             None
@@ -345,24 +283,34 @@ impl JsClient {
 
     /// Execute a QQL query string, a Stmt, or an array of either.
     /// Multi-statement strings (semicolons) and arrays are auto-batched.
-    /// Returns the raw JSON response string.
-    #[napi(ts_args_type = "query: string | Stmt | (string | Stmt)[]")]
-    pub async fn execute(&self, query: serde_json::Value) -> napi::Result<String> {
-        match &query {
+    /// Returns a stable ExecutionReport JSON string for the JavaScript wrapper
+    /// to deserialize into an object.
+    #[napi(
+        ts_args_type = "query: string | Stmt | string[] | Stmt[], options?: { onError?: 'stop' | 'continue' }"
+    )]
+    pub async fn execute(
+        &self,
+        query: serde_json::Value,
+        options: Option<serde_json::Value>,
+    ) -> napi::Result<String> {
+        let on_error = options
+            .as_ref()
+            .and_then(|o| o.get("onError"))
+            .and_then(|v| v.as_str())
+            .map(|s| match s {
+                "continue" => qql::executor::OnError::Continue,
+                _ => qql::executor::OnError::Stop,
+            })
+            .unwrap_or(qql::executor::OnError::Stop);
+
+        let report = match &query {
             serde_json::Value::String(s) => {
-                let res = self
-                    .inner
-                    .execute(s)
-                    .await
-                    .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-                serde_json::to_string(&res).map_err(|e| napi::Error::from_reason(e.to_string()))
+                self.inner.execute(s, on_error).await.map_err(to_napi_err)?
             }
             serde_json::Value::Array(arr) => {
                 if arr.is_empty() {
-                    return Ok("[]".into());
-                }
-                // Check first element to decide string batch vs Stmt batch
-                if arr[0].is_string() {
+                    qql::executor::ExecutionReport::empty()
+                } else if arr[0].is_string() {
                     let strs: Vec<&str> = arr
                         .iter()
                         .map(|v| {
@@ -371,13 +319,10 @@ impl JsClient {
                             })
                         })
                         .collect::<napi::Result<_>>()?;
-                    let results = self
-                        .inner
-                        .execute_batch(&strs, true)
+                    self.inner
+                        .execute_batch(&strs, on_error)
                         .await
-                        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-                    serde_json::to_string(&results)
-                        .map_err(|e| napi::Error::from_reason(e.to_string()))
+                        .map_err(to_napi_err)?
                 } else {
                     let stmts: Vec<ast::Stmt> = arr
                         .iter()
@@ -388,36 +333,37 @@ impl JsClient {
                         .collect::<napi::Result<_>>()?;
                     let results = self
                         .inner
-                        .execute_batch_nodes(stmts, true)
+                        .execute_batch_nodes(
+                            stmts,
+                            matches!(on_error, qql::executor::OnError::Stop),
+                        )
                         .await
-                        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-                    serde_json::to_string(&results)
-                        .map_err(|e| napi::Error::from_reason(e.to_string()))
+                        .map_err(to_napi_err)?;
+                    qql::executor::ExecutionReport::from_results(results)
                 }
             }
             _ => {
                 let s: ast::Stmt = serde_json::from_value(query)
                     .map_err(|e| napi::Error::from_reason(format!("invalid Stmt: {e}")))?;
-                let res = self
+                let results = self
                     .inner
-                    .execute_node(s)
+                    .execute_batch_nodes(vec![s], matches!(on_error, qql::executor::OnError::Stop))
                     .await
-                    .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-                serde_json::to_string(&res).map_err(|e| napi::Error::from_reason(e.to_string()))
+                    .map_err(to_napi_err)?;
+                qql::executor::ExecutionReport::from_results(results)
             }
-        }
+        };
+        serde_json::to_string(&report).map_err(serde_napi_err)
     }
 
     #[napi]
     pub fn explain(&self, query: String) -> napi::Result<String> {
-        qql::executor::Executor::explain(&query)
-            .map_err(|e| napi::Error::from_reason(e.to_string()))
+        qql::executor::Executor::explain(&query).map_err(to_napi_err)
     }
 
     #[napi]
     pub fn explain_stmt(&self, stmt: &Stmt) -> napi::Result<String> {
-        qql::executor::Executor::explain_node(&stmt.inner)
-            .map_err(|e| napi::Error::from_reason(e.to_string()))
+        qql::executor::Executor::explain_node(&stmt.inner).map_err(to_napi_err)
     }
 
     /// Compile a QQL query to its transport route (non-executing).
@@ -429,7 +375,7 @@ impl JsClient {
 
 #[napi]
 pub fn explain(query: String) -> napi::Result<String> {
-    qql_core::explain::explain(&query).map_err(|e| napi::Error::from_reason(e.to_string()))
+    qql_core::explain::explain(&query).map_err(to_napi_err)
 }
 
 #[napi]
@@ -437,11 +383,26 @@ pub fn explain_stmt(stmt: &Stmt) -> napi::Result<String> {
     Ok(qql_core::explain::explain_node(&stmt.inner))
 }
 
-#[napi(ts_args_type = "query: string | Stmt | (string | Stmt)[], options?: object")]
+/// Execute a pre-parsed Stmt directly via a new temporary client.
+#[napi(ts_args_type = "stmt: Stmt, options?: object")]
+pub async fn execute_stmt(stmt: &Stmt, options: Option<serde_json::Value>) -> napi::Result<String> {
+    let client = JsClient::new(options)?;
+    let resp = client
+        .inner
+        .execute_node(stmt.inner.clone())
+        .await
+        .map_err(to_napi_err)?;
+    let report = qql::executor::ExecutionReport::single(resp);
+    serde_json::to_string(&report).map_err(serde_napi_err)
+}
+
+#[napi(
+    ts_args_type = "query: string | Stmt | string[] | Stmt[], options?: { onError?: 'stop' | 'continue' }"
+)]
 pub async fn execute(
     query: serde_json::Value,
     options: Option<serde_json::Value>,
 ) -> napi::Result<String> {
-    let client = JsClient::new(options)?;
-    client.execute(query).await
+    let client = JsClient::new(options.clone())?;
+    client.execute(query, options).await
 }

@@ -23,10 +23,11 @@ def c():
 
 
 def run(qql_stmt, tenant=None):
-    stmt = pyqql.parse(qql_stmt)
+    stmt = pyqql.parse(qql_stmt)[0]
     if tenant:
         pyqql.inject_filter(stmt, "tenant_id", "=", tenant)
-    return c().execute(stmt).get("data", [])
+    report = c().execute(stmt)
+    return report["results"][0].get("data", [])
 
 
 def show(label, hits, n=5):
@@ -161,10 +162,10 @@ stmt = pyqql.parse(f"""
     QUERY 'financial results' FROM {C} USING dense
     SHARD 'rtx'
     GROUP BY fiscal_year SIZE 3 LIMIT 20
-""")
+""")[0]
 pyqql.inject_filter(stmt, "tenant_id", "=", "rtx")
 resp = c().execute(stmt)
-data = resp.get("data", {})
+data = resp["results"][0].get("data", {})
 groups = data.get("result", {}).get("groups", []) or data.get("groups", [])
 print(f"  ({len(groups)} groups)")
 for g in groups[:5]:
@@ -175,12 +176,12 @@ for g in groups[:5]:
 # ═══════════════════════════════════════════════════════════════════
 print("\n═══ 10. COUNT with metadata ═══")
 for t in config.TENANTS:
-    s = pyqql.parse(f"COUNT FROM {C}")
+    s = pyqql.parse(f"COUNT FROM {C}")[0]
     pyqql.inject_filter(s, "tenant_id", "=", t)
-    all_ = c().execute(s)["data"]["count"]
-    s2 = pyqql.parse(f"COUNT FROM {C} WHERE has_figures = true")
+    all_ = c().execute(s)["results"][0]["data"]["result"]["count"]
+    s2 = pyqql.parse(f"COUNT FROM {C} WHERE has_figures = true")[0]
     pyqql.inject_filter(s2, "tenant_id", "=", t)
-    fig_ = c().execute(s2)["data"]["count"]
+    fig_ = c().execute(s2)["results"][0]["data"]["result"]["count"]
     print(f"  {t:12s}: {all_:>5} total | {fig_:>5} with financial figures")
 
 # ═══════════════════════════════════════════════════════════════════

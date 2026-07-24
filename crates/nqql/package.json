@@ -3,14 +3,24 @@
   "version": "1.0.0",
   "description": "Node.js native bindings for the QQL parser, compiled using N-API (`napi-rs`).",
   "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "index.*.node",
+    "README.md"
+  ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "napi build --platform --no-js --release --dts native.d.ts",
+    "build:debug": "napi build --platform --no-js --dts native.d.ts",
+    "test": "npm run build:debug && node test.js",
+    "prepack": "npm run build"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
-  "dependencies": {
+  "devDependencies": {
     "@napi-rs/cli": "^3.7.2"
   }
 }

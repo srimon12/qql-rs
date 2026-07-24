@@ -74,12 +74,12 @@ qql-plan = { path = "crates/qql-plan" }
 ### Basic Usage
 
 ```rust
-use qql::executor::Executor;
+use qql::executor::{Executor, OnError};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let exec = Executor::rest("http://localhost:6333", None)?;
-    let res = exec.execute("SHOW COLLECTIONS").await?;
+    let res = exec.execute("SHOW COLLECTIONS", OnError::Stop).await?;
     println!("{}", serde_json::to_string_pretty(&res)?);
     Ok(())
 }
@@ -112,7 +112,7 @@ npm run build
 ```javascript
 const nqql = require('nqql');
 const client = new nqql.Client({ url: "http://localhost:6333" });
-const result = client.execute("QUERY 'search' FROM docs USING dense LIMIT 5");
+const result = await client.execute("QUERY 'search' FROM docs USING dense LIMIT 5");
 console.log(result);
 ```
 

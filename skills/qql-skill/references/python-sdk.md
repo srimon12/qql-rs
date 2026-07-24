@@ -20,7 +20,7 @@ from pyqql import parse, inject_filter, Client
 client = Client("http://localhost:6333")
 
 # User query from UI / API
-stmt = parse("QUERY 'supply chain risks' FROM sec10k SHARD 'honeywell' LIMIT 10")
+stmt = parse("QUERY 'supply chain risks' FROM sec10k SHARD 'honeywell' LIMIT 10")[0]
 
 # Platform injects tenant filter -- recurses into CTEs and prefetches
 inject_filter(stmt, "tenant_id", "=", "honeywell")
@@ -67,7 +67,7 @@ client = Client("http://localhost:6333", embedder={
 
 ## 3. Schema-as-Code + Multi-Statement
 
-`execute()` auto-detects semicolons -- no separate `parse_all` needed for execution. Same-collection QUERY statements are automatically grouped into a single network call.
+`execute()` and `parse()` auto-detect semicolon-delimited scripts. Same-collection QUERY statements are automatically grouped into a single network call.
 
 ```python
 from pyqql import Client
@@ -89,13 +89,13 @@ client.execute("""
 """)
 ```
 
-For programmatic manipulation (inspect/modify before executing), use `parse_all`:
+For programmatic manipulation (inspect/modify before executing), use `parse()`:
 
 ```python
-from pyqql import parse_all, Client
+from pyqql import parse, Client
 
 client = Client("http://localhost:6333")
-stmts = list(parse_all("Q1; Q2; Q3;"))
+stmts = parse("Q1; Q2; Q3;")
 
 # Inspect, inject filters, set shard keys...
 for stmt in stmts:
@@ -110,7 +110,11 @@ results = client.execute(stmts)
 
 ## 4. Batch Execution
 
-`execute()` accepts four input types. Lists and semicolon-delimited multi-statements are automatically batched -- same-collection QUERYs share a single network call.
+`execute()` accepts four input types. Lists and semicolon-delimited scripts are
+automatically batched. Pass `on_error="continue"` to collect per-statement
+failures; the default is `"stop"`.
+Every input form returns an `ExecutionReport` dict with `ok`, ordered
+`results`, `succeeded`, and `failed` fields.
 
 ```python
 from pyqql import parse, Client
@@ -121,7 +125,7 @@ client = Client("http://localhost:6333")
 result = client.execute("QUERY 'search' FROM docs USING dense LIMIT 10")
 
 # Single Stmt (pre-parsed, reusable)
-stmt = parse("QUERY 'search' FROM docs USING dense LIMIT 10")
+stmt = parse("QUERY 'search' FROM docs USING dense LIMIT 10")[0]
 result = client.execute(stmt)
 
 # Multi-statement (semicolons) -- simplest for scripts
@@ -140,7 +144,7 @@ results = client.execute([
 ])
 
 # Batch from pre-parsed Stmts (parse once, reuse)
-stmts = [parse(f"QUERY '{q}' FROM docs USING dense LIMIT 10") for q in ("a", "b", "c")]
+stmts = [parse(f"QUERY '{q}' FROM docs USING dense LIMIT 10")[0] for q in ("a", "b", "c")]
 results = client.execute(stmts)
 ```
 
@@ -153,7 +157,7 @@ The `Stmt` object supports programmatic modification before execution.
 ```python
 from pyqql import parse, inject_filter
 
-stmt = parse("QUERY 'search' FROM docs USING dense LIMIT 10")
+stmt = parse("QUERY 'search' FROM docs USING dense LIMIT 10")[0]
 
 # Read / write the shard key
 stmt.shard_key = "acme"
@@ -217,10 +221,9 @@ asyncio.run(main())
 ## 8. Free Functions
 
 ```python
-stmt = parse("QUERY 'x' FROM docs LIMIT 5")           # Parse single statement
-stmts = parse_all("Q1; Q2;")                           # Parse multi-statement script
-stmts = parse_batch(["Q1", "Q2"])                      # Parse batch
-ok = is_valid("QUERY 'x' FROM docs LIMIT 5")           # Validate without parsing
+stmt = parse("QUERY 'x' FROM docs LIMIT 5")[0]        # Parse one statement
+stmts = parse("Q1; Q2;")                              # Parse a script
+ok = is_valid("QUERY 'x' FROM docs LIMIT 5")           # Validate without returning the AST
 tokenized = tokenize("QUERY 'x' FROM docs LIMIT 5")    # Lex into tokens
 result = inject_filter(stmt, "tenant_id", "=", "acme") # Inject filter (mutates or returns new)
 route = compile_query("QUERY 'x' FROM docs LIMIT 5")   # Lower to REST route (no execute)

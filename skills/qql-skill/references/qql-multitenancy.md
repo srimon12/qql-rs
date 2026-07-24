@@ -80,7 +80,7 @@ UPSERT INTO sec10k VALUES
 from pyqql import parse, inject_filter, Client
 
 # User submits a query string
-stmt = parse("QUERY 'supply chain risks' FROM sec10k LIMIT 10")
+stmt = parse("QUERY 'supply chain risks' FROM sec10k LIMIT 10")[0]
 
 # Platform injects tenant isolation -- single call site, covers all paths
 inject_filter(stmt, "tenant_id", "=", "honeywell")
@@ -118,8 +118,8 @@ async fn execute_for_tenant(query: &str, tenant: &str) {
 ```js
 import { parse, injectFilter, Client } from 'nqql';
 
-const stmt = parse("QUERY 'supply chain risks' FROM sec10k LIMIT 10");
-injectFilter(stmt, "tenant_id", "=", "honeywell");
+const [stmt] = parse("QUERY 'supply chain risks' FROM sec10k LIMIT 10");
+stmt.injectFilter("tenant_id", "=", "honeywell");
 
 const client = new Client({ url: "http://localhost:6333" });
 const result = client.executeStmt(stmt);

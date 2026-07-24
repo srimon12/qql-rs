@@ -35,9 +35,7 @@ console.log(`\n=== NODE.JS & WASM FAIR CONSUMER BENCHMARK SUITE (${iterations.to
 const headers = [
   'Query'.padEnd(17),
   'NAPI parse()'.padStart(12),
-  'NAPI parseJson()'.padStart(16),
-  'WASM compileValue'.padStart(17),
-  'WASM compile+JSON'.padStart(17),
+  'WASM compile()'.padStart(17),
   'WASM bytes+Decode'.padStart(17),
 ];
 
@@ -46,22 +44,17 @@ console.log('-'.repeat(headers.join(' | ').length));
 
 for (const [name, q] of QUERIES) {
   const napi_parse = run_bench(() => nqql.parse(q), iterations);
-  const napi_parse_json = run_bench(() => nqql.parseJson(q), iterations);
 
   // WASM Fair Consumer Paths:
   // 1. Direct JS Object via serde_wasm_bindgen
-  const wasm_val = run_bench(() => qqlWasm.compileValue(q), iterations);
-  // 2. String + V8 JSON.parse
-  const wasm_str_json = run_bench(() => JSON.parse(qqlWasm.compile(q)), iterations);
-  // 3. Safe Owned Uint8Array + TextDecoder + V8 JSON.parse
+  const wasm_val = run_bench(() => qqlWasm.compile(q), iterations);
+  // 2. Safe Owned Uint8Array + TextDecoder + V8 JSON.parse
   const wasm_bytes_json = run_bench(() => JSON.parse(decoder.decode(qqlWasm.compileBytes(q))), iterations);
 
   const row = [
     name.padEnd(17),
     napi_parse.toFixed(0).padStart(12),
-    napi_parse_json.toFixed(0).padStart(16),
     wasm_val.toFixed(0).padStart(17),
-    wasm_str_json.toFixed(0).padStart(17),
     wasm_bytes_json.toFixed(0).padStart(17),
   ];
 

@@ -13,8 +13,13 @@ pub fn explain(source: &str) -> Result<String, QqlError> {
 /// Returns a concatenated plan, one section per statement.
 pub fn explain_all(source: &str) -> Result<String, QqlError> {
     let statements = Parser::parse_all(source)?;
+    Ok(explain_nodes(&statements))
+}
+
+/// Explain an already parsed sequence without parsing the source again.
+pub fn explain_nodes(statements: &[Stmt]) -> String {
     if statements.is_empty() {
-        return Ok(String::new());
+        return String::new();
     }
     let mut output = String::new();
     for (i, stmt) in statements.iter().enumerate() {
@@ -24,7 +29,7 @@ pub fn explain_all(source: &str) -> Result<String, QqlError> {
         output.push_str(&format!("--- Statement {} ---\n", i + 1));
         output.push_str(&explain_node(stmt));
     }
-    Ok(output)
+    output
 }
 
 pub fn explain_node(statement: &Stmt) -> String {

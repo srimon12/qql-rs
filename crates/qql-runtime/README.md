@@ -88,7 +88,7 @@ Single entry point for parsing, embedding, batching, and dispatch:
 
 ```rust
 use std::sync::Arc;
-use qql::executor::Executor;
+use qql::executor::{Executor, OnError};
 use qql::rest::RestQdrant;
 use qql::embedder::HttpEmbedder;
 
@@ -100,15 +100,19 @@ let embedder = Arc::new(HttpEmbedder::new(
 let executor = Executor::with_embedder(rest_ops, None, Some(embedder));
 
 // DDL
-executor.execute("CREATE COLLECTION docs (dense VECTOR(384, COSINE));").await?;
+executor.execute("CREATE COLLECTION docs (dense VECTOR(384, COSINE));", OnError::Stop).await?;
 
 // Upsert with auto-embedding
 executor.execute(
-    "UPSERT INTO docs VALUES {id: 1, text: 'vector database'} USING DENSE MODEL 'all-minilm:l6-v2';"
+    "UPSERT INTO docs VALUES {id: 1, text: 'vector database'} USING DENSE MODEL 'all-minilm:l6-v2';",
+    OnError::Stop,
 ).await?;
 
 // Query with auto-embedding
-let response = executor.execute("QUERY 'semantic search' FROM docs USING dense LIMIT 5;").await?;
+let response = executor.execute(
+    "QUERY 'semantic search' FROM docs USING dense LIMIT 5;",
+    OnError::Stop,
+).await?;
 ```
 
 ### prepare_statement — shared preparation

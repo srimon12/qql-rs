@@ -121,15 +121,48 @@ impl Table {
     }
 }
 
-/// Render an `ExecResponse` to stdout.
+/// Render an [`ExecutionReport`] to stdout.
 ///
 /// For QUERY/SCROLL responses: prints a table of id, score, and payload fields.
 /// For SHOW COLLECTIONS: prints a simple list.
 /// For SHOW COLLECTION: prints a key-value table.
 /// For COUNT: prints the count.
 /// For DDL/DML operations: prints only the message.
-/// When `json` is true, prints the full JSON response instead.
-pub fn render_response(
+/// When `json` is true, prints the full JSON report instead.
+pub fn render_report(
+    report: &qql::executor::ExecutionReport,
+    json: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if json {
+        let s = serde_json::to_string_pretty(report)?;
+        println!("{}", s);
+        return Ok(());
+    }
+
+    if report.results.is_empty() {
+        println!("(empty result)");
+        return Ok(());
+    }
+
+    if report.results.len() == 1 {
+        render_response(&report.results[0], false)?;
+    } else {
+        for (i, resp) in report.results.iter().enumerate() {
+            if i > 0 {
+                println!();
+            }
+            if report.results.len() > 1 {
+                println!("── statement {} ──", i + 1);
+            }
+            render_response(resp, false)?;
+        }
+        println!("{} succeeded, {} failed", report.succeeded, report.failed);
+    }
+    Ok(())
+}
+
+/// Render a single `ExecResponse` to stdout.
+fn render_response(
     response: &qql::executor::ExecResponse,
     json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {

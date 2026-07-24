@@ -16,11 +16,12 @@ Three embedding strategies produce an [`Executor`] backed by [`EdgeQdrant`]:
 
 ```rust
 use qql_edge::local_executor;
+use qql::executor::OnError;
 
 let mut executor = local_executor("/tmp/qql-edge-data", false)?;
-let resp = executor.execute("CREATE COLLECTION docs HYBRID").await?;
-let resp = executor.execute("UPSERT INTO docs VALUES {id: 1, text: 'hello world'}").await?;
-let resp = executor.execute("QUERY 'hello' FROM docs LIMIT 5;").await?;
+let resp = executor.execute("CREATE COLLECTION docs HYBRID", OnError::Stop).await?;
+let resp = executor.execute("UPSERT INTO docs VALUES {id: 1, text: 'hello world'}", OnError::Stop).await?;
+let resp = executor.execute("QUERY 'hello' FROM docs LIMIT 5;", OnError::Stop).await?;
 ```
 
 ## EdgeQdrant backend

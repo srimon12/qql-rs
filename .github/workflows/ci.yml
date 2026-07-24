@@ -7,6 +7,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  PYO3_USE_ABI3_FORWARD_COMPATIBILITY: 1
 
 jobs:
   rust:
@@ -18,24 +19,150 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      # protoc is required by tonic-prost-build in qql-runtime's build.rs
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
       - name: Format check
         run: cargo fmt --all -- --check
 
-      - name: Clippy (core crates)
-        run: cargo clippy --all-features -p qql-core -p qql-plan -p qql-embed -p qql -p qql-cli -- -D warnings
+      - name: Clippy (workspace)
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Test (core crates)
         run: cargo test --all-features -p qql-core -p qql-plan -p qql-embed -p qql -p qql-cli
 
+  # ── Platform binding build checks ─────────────────────────────
+  # Build and import the language artifacts so generated bindings and
+  # wrapper code cannot drift independently from the Rust crates.
+
+  pyqql-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build and test Python SDKs
+        run: |
+          python -m pip install ./crates/pyqql ./crates/pyqql-edge
+          python -m unittest discover -s crates/pyqql/tests -v
+          python -m unittest discover -s crates/pyqql-edge/tests -v
+
+  nqql-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Build and test nqql
+        working-directory: crates/nqql
+        run: |
+          npm install --no-audit --no-fund
+          npm test
+          npm pack --dry-run
+
+  wasm-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked --version 0.15.0
+      - name: Build qql-wasm package
+        run: wasm-pack build crates/qql-wasm --dev --target nodejs --out-dir /tmp/qql-wasm-pkg
+      - name: Smoke-test generated WASM API
+        run: |
+          grep -q 'Promise<ExecutionReport>' /tmp/qql-wasm-pkg/qql_wasm.d.ts
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          global.fetch = async () => new Response(
+            JSON.stringify({ result: { count: 2 } }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          );
+          const wasm = require('/tmp/qql-wasm-pkg/qql_wasm.js');
+          assert.equal(wasm.parse('COUNT FROM docs; COUNT FROM docs').length, 2);
+          assert.equal(wasm.parse_all, undefined);
+          assert.equal(wasm.analyzeValue, undefined);
+          assert.equal(wasm.compileValue, undefined);
+          assert.equal(wasm.analyze('COUNT FROM docs').valid, true);
+          assert.equal(wasm.compile('COUNT FROM docs').stmt_type, 'count');
+          (async () => {
+            const client = new wasm.Client('http://localhost:6333');
+            const report = await client.execute('COUNT FROM docs');
+            assert.equal(report.ok, true);
+            assert.equal(report.results[0].operation, 'COUNT');
+
+            let batchBody;
+            global.fetch = async (input, init) => {
+              const request = input instanceof Request
+                ? input
+                : new Request(input, init);
+              batchBody = await request.clone().json();
+              return new Response(
+                JSON.stringify({ result: [{ points: [] }, { points: [] }] }),
+                { status: 200, headers: { 'content-type': 'application/json' } },
+              );
+            };
+            client.setEmbedder((texts) => texts.map(() => [0.1, 0.2]));
+            const batchReport = await client.execute(
+              "QUERY 'a' FROM docs USING dense LIMIT 1;" +
+              "QUERY 'b' FROM docs USING dense LIMIT 1",
+            );
+            assert.equal(batchReport.succeeded, 2);
+            assert.equal(batchBody.searches[0].query.nearest.length, 2);
+            assert.ok(Math.abs(batchBody.searches[0].query.nearest[0] - 0.1) < 1e-6);
+          })().catch((error) => {
+            console.error(error);
+            process.exitCode = 1;
+          });
+          NODE
+
   # ─────────────────────────────────────────────────────────────
-  #  Platform bindings — skipped until publishing paths are ready
+  #  Platform binding release jobs — uncomment when publishing
+  #  paths (maturin / napi-rs / wasm-pack) are ready.
   # ─────────────────────────────────────────────────────────────
 
-  # pyqql: needs Python 3.12 + maturin + protoc
-  # nqql:   needs Node.js + napi-rs
-  # wasm:   needs wasm32-unknown-unknown target + wasm-pack
+  # pyqql-release:
+  #   needs: [rust]
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v5
+  #     - uses: dtolnay/rust-toolchain@stable
+  #     - uses: actions/setup-python@v5
+  #       with: { python-version: '3.12' }
+  #     - name: Build wheel
+  #       run: pip install maturin && maturin build -m crates/pyqql/Cargo.toml --release
 
+  # nqql-release:
+  #   needs: [rust]
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v5
+  #     - uses: dtolnay/rust-toolchain@stable
+  #     - uses: actions/setup-node@v4
+  #       with: { node-version: '20' }
+  #     - name: Build npm package
+  #       run: cd crates/nqql && npm install && npm run build
+
+  # wasm-release:
+  #   needs: [rust]
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v5
+  #     - uses: dtolnay/rust-toolchain@stable
+  #     - name: Install wasm target
+  #       run: rustup target add wasm32-unknown-unknown
+  #     - name: Build WASM
+  #       run: cargo build -p qql-wasm --target wasm32-unknown-unknown --release

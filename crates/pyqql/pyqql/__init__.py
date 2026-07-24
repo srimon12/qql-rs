@@ -1,27 +1,27 @@
 from .pyqql import (
     Client,
     HttpEmbedder,
+    Stmt,
     compile_query,
     execute,
+    execute_async,
     explain,
     inject_filter,
     is_valid,
     parse,
-    parse_all,
-    parse_batch,
     tokenize,
 )
 
 __all__ = [
     "Client",
     "HttpEmbedder",
+    "Stmt",
     "compile_query",
     "execute",
+    "execute_async",
     "explain",
     "inject_filter",
     "is_valid",
     "parse",
-    "parse_all",
-    "parse_batch",
     "tokenize",
 ]

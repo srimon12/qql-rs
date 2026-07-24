@@ -95,7 +95,7 @@ def main():
         WITH PARAMS (replication_factor=2, shard_number={len(config.TENANTS)*2},
                      sharding_method='custom')
     """)
-    for stmt in pyqql.parse_all(
+    for stmt in pyqql.parse(
         f"CREATE INDEX ON COLLECTION {config.COLLECTION} FOR tenant_id TYPE keyword WITH (is_tenant=true);"
         f"CREATE INDEX ON COLLECTION {config.COLLECTION} FOR fiscal_year TYPE integer;"
         f"CREATE INDEX ON COLLECTION {config.COLLECTION} FOR section TYPE keyword;"
@@ -110,10 +110,11 @@ def main():
     total = sum(ingest(client, t, y, u) for t, years in config.FILINGS.items() for y, u in years.items())
     print(f"\nIngested {total} chunks across {len(config.TENANTS)} tenants.")
     for t in config.TENANTS:
-        s = pyqql.parse(f"COUNT FROM {config.COLLECTION}")
+        s = pyqql.parse(f"COUNT FROM {config.COLLECTION}")[0]
         pyqql.inject_filter(s, "tenant_id", "=", t)
         r = client.execute(s)
-        print(f"  {t}: {r['data']['count']} points")
+        count = r["results"][0]["data"]["result"]["count"]
+        print(f"  {t}: {count} points")
 
 
 if __name__ == "__main__":

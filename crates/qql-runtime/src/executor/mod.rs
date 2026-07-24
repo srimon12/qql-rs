@@ -30,6 +30,106 @@ pub struct ExecResponse {
     pub data: Option<serde_json::Value>,
 }
 
+/// Canonical cross-SDK execution result.  Every `client.execute(…)` call
+/// returns this shape regardless of input type (string / Stmt / array).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionReport {
+    pub ok: bool,
+    pub results: Vec<ExecResponse>,
+    pub succeeded: usize,
+    pub failed: usize,
+}
+
+impl ExecutionReport {
+    /// Create from a collection of `ExecResponse`s.  `ok` is `failed == 0`.
+    pub fn from_results(results: Vec<ExecResponse>) -> Self {
+        let succeeded = results.iter().filter(|r| r.ok).count();
+        let failed = results.len() - succeeded;
+        Self {
+            ok: failed == 0,
+            results,
+            succeeded,
+            failed,
+        }
+    }
+
+    /// Convenience wrapper for a single `ExecResponse`.
+    pub fn single(resp: ExecResponse) -> Self {
+        let ok = resp.ok;
+        Self {
+            ok,
+            results: vec![resp],
+            succeeded: if ok { 1 } else { 0 },
+            failed: if ok { 0 } else { 1 },
+        }
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            ok: true,
+            results: Vec::new(),
+            succeeded: 0,
+            failed: 0,
+        }
+    }
+}
+
+/// Controls batch-execution behaviour when a statement fails.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum OnError {
+    /// Halt immediately on the first error (default).
+    #[default]
+    Stop,
+    /// Continue executing remaining statements, collecting error
+    /// responses alongside successes.
+    Continue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum BatchKey {
+    Query(String),
+    Mutation(String),
+}
+
+fn statement_batch_key(stmt: &Stmt) -> Option<BatchKey> {
+    match stmt {
+        Stmt::Query(query)
+            if query.group.is_none()
+                && !matches!(query.expression, ast::QueryExpr::Points { .. }) =>
+        {
+            match &query.collection {
+                ast::QueryCollection::Explicit(collection) => {
+                    Some(BatchKey::Query(collection.clone()))
+                }
+                ast::QueryCollection::Inherited => None,
+            }
+        }
+        Stmt::Upsert(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
+        Stmt::Delete(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
+        Stmt::UpdatePayload(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
+        Stmt::ClearPayload(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
+        Stmt::UpdateVector(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
+        Stmt::DeleteVector(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
+        _ => None,
+    }
+}
+
+fn planned_batch_key(operation: &qql_plan::PlannedOperation) -> Option<BatchKey> {
+    use qql_plan::{BatchFamily, PlannedOperation};
+
+    match operation.batch_family() {
+        BatchFamily::Query => match operation {
+            PlannedOperation::Query { collection, .. } => Some(BatchKey::Query(collection.clone())),
+            _ => None,
+        },
+        BatchFamily::Mutation => operation
+            .collection()
+            .map(|collection| BatchKey::Mutation(collection.to_owned())),
+        BatchFamily::Single => None,
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchHit {
     pub id: String,
@@ -152,37 +252,32 @@ impl Executor {
     /// scripts are automatically detected, parsed, and executed in batch —
     /// contiguous same-collection QUERY statements use `/points/query/batch`,
     /// and contiguous same-collection mutations use `/points/batch`.
-    pub async fn execute(&self, query: &str) -> Result<ExecResponse, QqlError> {
-        match parser::Parser::parse_all(query) {
-            Ok(mut statements) => match statements.len() {
-                0 => Ok(ExecResponse {
-                    ok: true,
-                    operation: "EMPTY".to_string(),
-                    message: "empty script".to_string(),
+    ///
+    /// Always returns a stable [`ExecutionReport`] for a single statement or
+    /// semicolon-delimited script.
+    pub async fn execute(
+        &self,
+        query: &str,
+        on_error: OnError,
+    ) -> Result<ExecutionReport, QqlError> {
+        let stop_on_error = matches!(on_error, OnError::Stop);
+        let statements = match parser::Parser::parse_all(query) {
+            Ok(statements) => statements,
+            Err(error) if stop_on_error => return Err(error),
+            Err(error) => {
+                return Ok(ExecutionReport::single(ExecResponse {
+                    ok: false,
+                    operation: "PARSE".to_string(),
+                    message: error.to_string(),
                     data: None,
-                }),
-                1 => self.execute_node(statements.remove(0)).await,
-                _ => {
-                    let results = self.execute_batch_nodes(statements, true).await?;
-                    let succeeded = results.iter().filter(|r| r.ok).count();
-                    Ok(ExecResponse {
-                        ok: true,
-                        operation: "SCRIPT".to_string(),
-                        message: format!(
-                            "Executed {} statement(s) ({} succeeded, {} failed)",
-                            results.len(),
-                            succeeded,
-                            results.len() - succeeded,
-                        ),
-                        data: Some(serde_json::to_value(&results).unwrap_or_default()),
-                    })
-                }
-            },
-            Err(_) => {
-                let stmt = parser::Parser::parse(query)?;
-                self.execute_node(stmt).await
+                }));
             }
+        };
+        if statements.is_empty() {
+            return Ok(ExecutionReport::empty());
         }
+        let results = self.execute_batch_nodes(statements, stop_on_error).await?;
+        Ok(ExecutionReport::from_results(results))
     }
 
     pub async fn execute_node(&self, stmt: Stmt) -> Result<ExecResponse, QqlError> {
@@ -217,19 +312,37 @@ impl Executor {
     pub async fn execute_batch(
         &self,
         queries: &[&str],
-        stop_on_error: bool,
-    ) -> Result<Vec<ExecResponse>, QqlError> {
-        let mut stmts = Vec::with_capacity(queries.len());
+        on_error: OnError,
+    ) -> Result<ExecutionReport, QqlError> {
+        let stop_on_error = matches!(on_error, OnError::Stop);
+        let mut pending = Vec::with_capacity(queries.len());
+        let mut results = Vec::with_capacity(queries.len());
         for query in queries {
             match parser::Parser::parse_all(query) {
-                Ok(parsed) => stmts.extend(parsed),
-                Err(first) => match parser::Parser::parse(query) {
-                    Ok(stmt) => stmts.push(stmt),
-                    Err(_) => return Err(first),
-                },
+                Ok(parsed) => pending.extend(parsed),
+                Err(error) => {
+                    if !pending.is_empty() {
+                        results.extend(
+                            self.execute_batch_nodes(core::mem::take(&mut pending), stop_on_error)
+                                .await?,
+                        );
+                    }
+                    if stop_on_error {
+                        return Err(error);
+                    }
+                    results.push(ExecResponse {
+                        ok: false,
+                        operation: "PARSE".to_string(),
+                        message: error.to_string(),
+                        data: None,
+                    });
+                }
             }
         }
-        self.execute_batch_nodes(stmts, stop_on_error).await
+        if !pending.is_empty() {
+            results.extend(self.execute_batch_nodes(pending, stop_on_error).await?);
+        }
+        Ok(ExecutionReport::from_results(results))
     }
 
     pub async fn execute_batch_nodes(
@@ -261,169 +374,260 @@ impl Executor {
         stmts: Vec<Stmt>,
         stop_on_error: bool,
     ) -> Result<Vec<ExecResponse>, QqlError> {
-        use qql_plan::mutation::planned_to_update_operation;
-        use qql_plan::plan::{plan, BatchFamily, PlannedOperation};
-        use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
+        let mut results = Vec::with_capacity(stmts.len());
+        let mut pending = Vec::new();
+        let mut pending_key: Option<BatchKey> = None;
 
-        // prepare → plan exactly once for every statement (Phase 2).
-        let mut planned: Vec<PlannedOperation> = Vec::with_capacity(stmts.len());
         for stmt in stmts {
-            let prepared = self.prepare_statement(stmt).await?;
-            planned.push(plan(&prepared)?);
-        }
+            let statement_key = statement_batch_key(&stmt);
 
-        let mut results: Vec<ExecResponse> = Vec::with_capacity(planned.len());
-        let mut i = 0;
-
-        while i < planned.len() {
-            // ── Contiguous mutation batch (same collection, 2+) ──
-            if planned[i].batch_family() == BatchFamily::Mutation {
-                if let Some((coll, first_op)) = planned_to_update_operation(&planned[i]) {
-                    let mut ops = vec![first_op];
-                    let mut j = i + 1;
-                    while j < planned.len() {
-                        match planned_to_update_operation(&planned[j]) {
-                            Some((c, op)) if c == coll => {
-                                ops.push(op);
-                                j += 1;
-                            }
-                            _ => break,
-                        }
-                    }
-                    if ops.len() >= 2 {
-                        let expected = ops.len();
-                        let op_names: Vec<&'static str> =
-                            ops.iter().map(|o| o.operation_name()).collect();
-                        let batch = UpdateBatchRequest { operations: ops };
-                        match self.client.execute_update_batch(&coll, &batch).await {
-                            Ok(responses) => {
-                                if responses.len() != expected {
-                                    return Err(QqlError::transport(
-                                        "QQL-BATCH-CARDINALITY",
-                                        format!(
-                                            "update batch returned {} results for {expected} operations",
-                                            responses.len()
-                                        ),
-                                        None,
-                                    ));
-                                }
-                                for (k, val) in responses.into_iter().enumerate() {
-                                    let name = op_names.get(k).copied().unwrap_or("MUTATION");
-                                    results.push(ExecResponse {
-                                        ok: true,
-                                        operation: name.to_string(),
-                                        message: format!("{name} ok (batched)"),
-                                        data: Some(val),
-                                    });
-                                }
-                            }
-                            Err(e) => {
-                                if stop_on_error {
-                                    return Err(e);
-                                }
-                                for name in &op_names {
-                                    results.push(ExecResponse {
-                                        ok: false,
-                                        operation: (*name).to_string(),
-                                        message: e.to_string(),
-                                        data: None,
-                                    });
-                                }
-                            }
-                        }
-                        i = j;
-                        continue;
-                    }
-                }
+            // A statement outside the current batch family is an execution
+            // barrier. Flush before preparing it because preparation may read
+            // or mutate backend state (for example UPSERT auto-creation).
+            if !pending.is_empty() && statement_key != pending_key {
+                self.flush_planned_group(&mut pending, stop_on_error, &mut results)
+                    .await?;
+                pending_key = None;
             }
 
-            // ── Contiguous query batch (same collection, 2+) ──
-            if let PlannedOperation::Query {
-                collection: coll,
-                request: q0,
-            } = &planned[i]
-            {
-                let coll = coll.clone();
-                let mut searches = vec![q0.clone()];
-                let mut j = i + 1;
-                while j < planned.len() {
-                    match &planned[j] {
-                        PlannedOperation::Query {
-                            collection: c,
-                            request,
-                        } if c == &coll => {
-                            searches.push(request.clone());
-                            j += 1;
-                        }
-                        _ => break,
-                    }
-                }
-                if searches.len() >= 2 {
-                    let expected = searches.len();
-                    let batch = QueryBatchRequest { searches };
-                    match self.client.execute_query_batch(&coll, &batch).await {
-                        Ok(responses) => {
-                            if responses.len() != expected {
-                                return Err(QqlError::transport(
-                                    "QQL-BATCH-CARDINALITY",
-                                    format!(
-                                        "query batch returned {} results for {expected} operations",
-                                        responses.len()
-                                    ),
-                                    None,
-                                ));
-                            }
-                            for val in responses {
-                                let hits = extract_search_hits(&val);
-                                results.push(ExecResponse {
-                                    ok: true,
-                                    operation: "QUERY".to_string(),
-                                    message: format!("Found {} hits", hits.len()),
-                                    data: Some(serde_json::to_value(hits).unwrap_or_default()),
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            if stop_on_error {
-                                return Err(e);
-                            }
-                            for _ in 0..expected {
-                                results.push(ExecResponse {
-                                    ok: false,
-                                    operation: "QUERY".to_string(),
-                                    message: e.to_string(),
-                                    data: None,
-                                });
-                            }
-                        }
-                    }
-                    i = j;
-                    continue;
-                }
-            }
-
-            // ── Individual planned operation ──
-            match self.dispatch_planned(&planned[i]).await {
-                Ok(resp) => results.push(resp),
-                Err(err) => {
+            let prepared = match self.prepare_statement(stmt).await {
+                Ok(p) => p,
+                Err(e) => {
+                    self.flush_planned_group(&mut pending, stop_on_error, &mut results)
+                        .await?;
+                    pending_key = None;
                     if stop_on_error {
-                        return Err(err);
+                        return Err(e);
                     }
                     results.push(ExecResponse {
                         ok: false,
-                        operation: "ERROR".to_string(),
-                        message: err.to_string(),
+                        operation: "PREPARE".to_string(),
+                        message: e.to_string(),
                         data: None,
                     });
+                    continue;
                 }
+            };
+
+            let planned = match plan(&prepared) {
+                Ok(planned) => planned,
+                Err(e) => {
+                    self.flush_planned_group(&mut pending, stop_on_error, &mut results)
+                        .await?;
+                    pending_key = None;
+                    if stop_on_error {
+                        return Err(e);
+                    }
+                    results.push(ExecResponse {
+                        ok: false,
+                        operation: "PLAN".to_string(),
+                        message: e.to_string(),
+                        data: None,
+                    });
+                    continue;
+                }
+            };
+
+            let key = planned_batch_key(&planned);
+            if key.is_none() {
+                self.flush_planned_group(&mut pending, stop_on_error, &mut results)
+                    .await?;
+                pending_key = None;
+                self.dispatch_or_collect(planned, stop_on_error, &mut results)
+                    .await?;
+                continue;
             }
-            i += 1;
+
+            if !pending.is_empty() && key != pending_key {
+                self.flush_planned_group(&mut pending, stop_on_error, &mut results)
+                    .await?;
+            }
+            pending_key = key;
+            pending.push(planned);
         }
 
+        self.flush_planned_group(&mut pending, stop_on_error, &mut results)
+            .await?;
         Ok(results)
     }
 
-    /// Shared preparation: embeddings, named-vector validation, upsert collection prep.
+    async fn dispatch_or_collect(
+        &self,
+        planned: qql_plan::PlannedOperation,
+        stop_on_error: bool,
+        results: &mut Vec<ExecResponse>,
+    ) -> Result<(), QqlError> {
+        match self.dispatch_planned(&planned).await {
+            Ok(response) => results.push(response),
+            Err(error) if stop_on_error => return Err(error),
+            Err(error) => results.push(ExecResponse {
+                ok: false,
+                operation: planned.operation_label().to_string(),
+                message: error.to_string(),
+                data: None,
+            }),
+        }
+        Ok(())
+    }
+
+    async fn flush_planned_group(
+        &self,
+        pending: &mut Vec<qql_plan::PlannedOperation>,
+        stop_on_error: bool,
+        results: &mut Vec<ExecResponse>,
+    ) -> Result<(), QqlError> {
+        use qql_plan::mutation::planned_to_update_operation;
+        use qql_plan::{PlannedOperation, QueryBatchRequest, UpdateBatchRequest};
+
+        if pending.is_empty() {
+            return Ok(());
+        }
+        if pending.len() == 1 {
+            let planned = pending.pop().expect("pending contains one operation");
+            return self
+                .dispatch_or_collect(planned, stop_on_error, results)
+                .await;
+        }
+
+        let operations = core::mem::take(pending);
+        match &operations[0] {
+            PlannedOperation::Query { collection, .. } => {
+                let collection = collection.clone();
+                let searches = operations
+                    .iter()
+                    .map(|operation| match operation {
+                        PlannedOperation::Query { request, .. } => Ok(request.clone()),
+                        _ => Err(QqlError::execution(
+                            "QQL-BATCH-INVARIANT",
+                            "query batch contained a non-query operation",
+                            None,
+                        )),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let expected = searches.len();
+                let batch = QueryBatchRequest { searches };
+                match self.client.execute_query_batch(&collection, &batch).await {
+                    Ok(responses) if responses.len() == expected => {
+                        for value in responses {
+                            let hits = extract_search_hits(&value);
+                            results.push(ExecResponse {
+                                ok: true,
+                                operation: "QUERY".to_string(),
+                                message: format!("Found {} hits", hits.len()),
+                                data: Some(serde_json::to_value(hits).unwrap_or_default()),
+                            });
+                        }
+                    }
+                    Ok(responses) => {
+                        let error = QqlError::transport(
+                            "QQL-BATCH-CARDINALITY",
+                            format!(
+                                "query batch returned {} results for {expected} operations",
+                                responses.len()
+                            ),
+                            None,
+                        );
+                        self.collect_batch_error(
+                            error,
+                            &vec!["QUERY"; expected],
+                            stop_on_error,
+                            results,
+                        )?;
+                    }
+                    Err(error) => self.collect_batch_error(
+                        error,
+                        &vec!["QUERY"; expected],
+                        stop_on_error,
+                        results,
+                    )?,
+                }
+            }
+            _ => {
+                let mut update_operations = Vec::with_capacity(operations.len());
+                let mut labels = Vec::with_capacity(operations.len());
+                let mut collection = None;
+                for operation in &operations {
+                    let Some((current_collection, update)) = planned_to_update_operation(operation)
+                    else {
+                        return Err(QqlError::execution(
+                            "QQL-BATCH-INVARIANT",
+                            "mutation batch contained a non-mutation operation",
+                            None,
+                        ));
+                    };
+                    if collection
+                        .as_ref()
+                        .is_some_and(|collection| collection != &current_collection)
+                    {
+                        return Err(QqlError::execution(
+                            "QQL-BATCH-INVARIANT",
+                            "mutation batch contained multiple collections",
+                            None,
+                        ));
+                    }
+                    collection.get_or_insert(current_collection);
+                    labels.push(update.operation_name());
+                    update_operations.push(update);
+                }
+                let collection = collection.unwrap_or_default();
+                let expected = update_operations.len();
+                let batch = UpdateBatchRequest {
+                    operations: update_operations,
+                };
+                match self.client.execute_update_batch(&collection, &batch).await {
+                    Ok(responses) if responses.len() == expected => {
+                        for (value, label) in responses.into_iter().zip(labels.iter()) {
+                            results.push(ExecResponse {
+                                ok: true,
+                                operation: (*label).to_string(),
+                                message: format!("{label} ok (batched)"),
+                                data: Some(value),
+                            });
+                        }
+                    }
+                    Ok(responses) => {
+                        let error = QqlError::transport(
+                            "QQL-BATCH-CARDINALITY",
+                            format!(
+                                "update batch returned {} results for {expected} operations",
+                                responses.len()
+                            ),
+                            None,
+                        );
+                        self.collect_batch_error(error, &labels, stop_on_error, results)?;
+                    }
+                    Err(error) => {
+                        self.collect_batch_error(error, &labels, stop_on_error, results)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn collect_batch_error(
+        &self,
+        error: QqlError,
+        labels: &[&str],
+        stop_on_error: bool,
+        results: &mut Vec<ExecResponse>,
+    ) -> Result<(), QqlError> {
+        if stop_on_error {
+            return Err(error);
+        }
+        let message = error.to_string();
+        results.extend(labels.iter().map(|label| ExecResponse {
+            ok: false,
+            operation: (*label).to_string(),
+            message: message.clone(),
+            data: None,
+        }));
+        Ok(())
+    }
+
+    /// Shared preparation: embeddings, named-vector validation, and UPSERT
+    /// collection auto-creation. Callers must preserve statement order because
+    /// preparation may read or mutate backend state.
     async fn prepare_statement(&self, mut stmt: Stmt) -> Result<Stmt, QqlError> {
         if let Some(ref embedder) = self.embedder {
             self.resolve_embeddings(&mut stmt, embedder.as_ref())

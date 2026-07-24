@@ -34,20 +34,20 @@ Benchmarks are split into two categories:
 ## 1. Parser Benchmarks (ops/sec)
 *Isolates lexing & parsing throughput into typed AST. Higher is better.*
 
-| Query | Rust (`qql-rs`) | Python (`pyqql`) | Go (`qql-go`) | Node.js (`parse()`) | Node.js (`parseJson()` raw) |
-|-------|:--------:|:--------:|:--------:|:--------:|:--------:|
-| **Simple** | **2,013,673** | 1,578,892 | 1,688,724 | 268,611 | 908,682 |
-| **Hybrid** | **967,512** | 662,547 | 1,300,844 | 250,493 | 606,070 |
-| **Full** | **342,320** | 281,751 | 664,517 | 107,158 | 241,670 |
-| **CTE Prefetch** | **412,878** | 426,369 | 337,312 | 88,663 | 254,547 |
-| **CreateCollection** | **632,640** | 552,779 | 393,101 | 166,466 | 355,057 |
-| **Upsert** | **665,708** | 504,412 | 508,451 | 179,549 | 376,016 |
-| **DeleteWhere** | **1,824,899** | 785,658 | 1,960,807 | 476,148 | 1,253,726 |
-| **OrderBy** | **1,100,388** | 794,345 | 1,020,497 | 235,700 | 582,836 |
-| **WithPayload** | **792,636** | 721,354 | 858,692 | 185,025 | 486,775 |
+| Query | Rust (`qql-rs`) | Python (`pyqql`) | Go (`qql-go`) | Node.js (`parse()`) |
+|-------|:--------:|:--------:|:--------:|:--------:|
+| **Simple** | **2,013,673** | 1,578,892 | 1,688,724 | 268,611 |
+| **Hybrid** | **967,512** | 662,547 | 1,300,844 | 250,493 |
+| **Full** | **342,320** | 281,751 | 664,517 | 107,158 |
+| **CTE Prefetch** | **412,878** | 426,369 | 337,312 | 88,663 |
+| **CreateCollection** | **632,640** | 552,779 | 393,101 | 166,466 |
+| **Upsert** | **665,708** | 504,412 | 508,451 | 179,549 |
+| **DeleteWhere** | **1,824,899** | 785,658 | 1,960,807 | 476,148 |
+| **OrderBy** | **1,100,388** | 794,345 | 1,020,497 | 235,700 |
+| **WithPayload** | **792,636** | 721,354 | 858,692 | 185,025 |
 
 * **Python DX Win**: Because `pyqql` wraps the native Rust `Stmt` directly inside PyO3 memory, parser throughput matches native Rust/Go speeds almost 1-to-1 (up to **1.58M ops/s**!).
-* **Node.js API Strategy**: `parse()` returns the parsed AST object, while `parseJson()` returns the raw JSON string directly from Rust—bypassing V8 object heap allocations for maximum forwarding throughput (up to **1.25M ops/s**).
+* **Node.js API Strategy**: `parse()` returns a stable array of native `Stmt` objects for both single statements and scripts.
 
 ---
 

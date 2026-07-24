@@ -50,10 +50,10 @@ const { parse, injectFilter, Client } = require('nqql');
 const client = new Client({ url: "http://localhost:6333" });
 
 // User query from UI / API
-const stmt = parse("QUERY 'supply chain risks' FROM sec10k SHARD 'honeywell' LIMIT 10");
+const [stmt] = parse("QUERY 'supply chain risks' FROM sec10k SHARD 'honeywell' LIMIT 10");
 
 // Platform injects tenant filter -- single call, recursive into CTEs and prefetches
-injectFilter(stmt, "tenant_id", "=", "honeywell");
+stmt.injectFilter("tenant_id", "=", "honeywell");
 
 // Set the shard key on the statement
 stmt.shardKey = "honeywell";
@@ -67,7 +67,8 @@ Note: `injectFilter` does not support `!=`. Use equality and wrap with `NOT`, or
 
 ## 3. Unified Execute
 
-`execute()` accepts a string, a Stmt, a multi-statement string (semicolons), or an array. All paths auto-batch same-collection QUERY statements. Returns a JSON string.
+`execute()` accepts a string, a Stmt, a multi-statement string, or an array. It returns an `ExecutionReport` object and auto-batches adjacent compatible statements.
+Pass `{ onError: "continue" }` to collect per-statement failures; the default is `"stop"`.
 
 ```js
 const { parse, Client } = require('nqql');
@@ -78,7 +79,7 @@ const client = new Client({ url: "http://localhost:6333" });
 const result = await client.execute("QUERY 'search' FROM docs USING dense LIMIT 10");
 
 // Pre-parsed Stmt -- programmatic manipulation before execution
-const stmt = parse("QUERY 'search' FROM docs USING dense LIMIT 10");
+const [stmt] = parse("QUERY 'search' FROM docs USING dense LIMIT 10");
 stmt.shardKey = "acme";
 const stmtResult = await client.execute(stmt);
 
@@ -96,7 +97,7 @@ const results = await client.execute([
     "QUERY 'a' FROM docs USING dense LIMIT 10",
     "QUERY 'b' FROM docs USING dense LIMIT 10",
 ]);
-// -> 2 queries, 1 network call. JSON.parse(results) for array
+// -> 2 queries, 1 network call, one ExecutionReport object
 ```
 
 ---
@@ -132,9 +133,9 @@ const result = await client.execute(`
 ## 5. Stmt Class
 
 ```js
-const { Stmt } = require('nqql');
+const { parse } = require('nqql');
 
-const stmt = new Stmt("QUERY 'search' FROM docs USING dense LIMIT 10");
+const [stmt] = parse("QUERY 'search' FROM docs USING dense LIMIT 10");
 
 // Read / write shard key
 stmt.shardKey = "acme";
@@ -153,18 +154,14 @@ console.log(stmt.toObject());
 ## 6. Free Functions
 
 ```js
-const { parse, parse_all, parse_batch, parse_json, parse_batch_json,
-        is_valid, inject_filter, tokenize, compile_query } = require('nqql');
+const { parse, isValid, injectFilter, tokenize, compileQuery } = require('nqql');
 
-parse("QUERY 'x' FROM docs LIMIT 5");             // Parse single statement
-parse_all("Q1; Q2;");                              // Parse multi-statement
-parse_batch(["Q1", "Q2"]);                         // Parse batch
-parse_json("Q1");                                  // Parse to JSON string
-parse_batch_json(["Q1", "Q2"]);                    // Parse batch to JSON
-is_valid("QUERY 'x' FROM docs LIMIT 5");           // Validate
-inject_filter("QUERY 'x' FROM docs", "tenant_id", "=", "acme");  // Inject filter on string
-tokenize("QUERY 'x'");                             // Lex to tokens
-compile_query("QUERY 'x' FROM docs LIMIT 5");      // Compile to route
+parse("QUERY 'x' FROM docs LIMIT 5");                    // Always Stmt[]
+parse("Q1; Q2;");                                        // Script -> Stmt[]
+isValid("QUERY 'x' FROM docs LIMIT 5");                  // Validate
+injectFilter("QUERY 'x' FROM docs", "tenant_id", "=", "acme");
+tokenize("QUERY 'x'");
+compileQuery("QUERY 'x' FROM docs LIMIT 5");
 ```
 
 ---

@@ -223,7 +223,7 @@ function performAnalysis() {
   updateLineNumbers(text);
 
   const t0 = performance.now();
-  const res = JSON.parse(analyze(text));
+  const res = analyze(text);
   const t1 = performance.now();
 
   currentAnalysis = res;
@@ -470,8 +470,7 @@ btnExecute.addEventListener('click', async () => {
 
   try {
     codeResponseJson.textContent = 'Executing via QQL WASM Client (Embedding -> Qdrant REST)...';
-    const resJson = await client.execute(text);
-    const res = JSON.parse(resJson);
+    const res = await client.execute(text);
     codeResponseJson.textContent = JSON.stringify(res, null, 2);
   } catch (e) {
     const route = currentAnalysis?.route;

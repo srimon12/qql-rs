@@ -185,7 +185,7 @@ QQL uses a three-phase execution pipeline shared by all SDKs and the CLI:
 ```
 Phase 1: Parse (qql-core)
   QQL string -> AST (Stmt enum)
-  Free functions: parse(), parse_all(), is_valid()
+  SDK free functions: parse(), is_valid()
 
 Phase 2: Plan (qql-plan)
   AST -> PlannedOperation (canonical, transport-neutral)
@@ -290,10 +290,13 @@ result = client.execute("QUERY 'semantic search' FROM docs USING dense LIMIT 5")
 
 ### Rust (`qql`)
 ```rust
-use qql::executor::Executor;
+use qql::executor::{Executor, OnError};
 
 let exec = Executor::rest("http://localhost:6333", None).unwrap();
-let res = exec.execute("QUERY 'search' FROM docs USING dense LIMIT 5").await.unwrap();
+let res = exec.execute(
+    "QUERY 'search' FROM docs USING dense LIMIT 5",
+    OnError::Stop,
+).await.unwrap();
 ```
 
 ### Node.js (`nqql`)

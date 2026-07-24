@@ -1,5 +1,6 @@
 #![allow(clippy::field_reassign_with_default)]
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -9,7 +10,7 @@ use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 
 use crate::client::{CollectionInfo, CreateCollectionReq, CreateFieldIndexReq, QdrantOps};
 use crate::config::QqlConfig;
-use crate::executor::Executor;
+use crate::executor::{Executor, OnError};
 
 struct MockQdrantClient {
     pub exists: bool,
@@ -20,6 +21,9 @@ struct MockQdrantClient {
     pub last_batch_searches_count: Arc<Mutex<usize>>,
     pub update_batch_call_count: Arc<Mutex<usize>>,
     pub last_update_batch_ops_count: Arc<Mutex<usize>>,
+    pub execute_planned_call_count: Arc<Mutex<usize>>,
+    pub create_collection_call_count: Arc<Mutex<usize>>,
+    pub created_collections: Arc<Mutex<HashSet<String>>>,
 }
 
 impl Default for MockQdrantClient {
@@ -33,6 +37,9 @@ impl Default for MockQdrantClient {
             last_batch_searches_count: Arc::new(Mutex::new(0)),
             update_batch_call_count: Arc::new(Mutex::new(0)),
             last_update_batch_ops_count: Arc::new(Mutex::new(0)),
+            execute_planned_call_count: Arc::new(Mutex::new(0)),
+            create_collection_call_count: Arc::new(Mutex::new(0)),
+            created_collections: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 }
@@ -42,8 +49,8 @@ impl QdrantOps for MockQdrantClient {
     async fn list_collections(&self) -> Result<Vec<String>, QqlError> {
         Ok(self.collections.clone())
     }
-    async fn collection_exists(&self, _name: &str) -> Result<bool, QqlError> {
-        Ok(self.exists)
+    async fn collection_exists(&self, name: &str) -> Result<bool, QqlError> {
+        Ok(self.exists || self.created_collections.lock().unwrap().contains(name))
     }
     async fn get_collection_info(&self, _name: &str) -> Result<CollectionInfo, QqlError> {
         self.info
@@ -51,7 +58,11 @@ impl QdrantOps for MockQdrantClient {
             .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "no mock info set", None))
     }
     async fn create_collection(&self, req: CreateCollectionReq) -> Result<(), QqlError> {
-        let _ = req;
+        *self.create_collection_call_count.lock().unwrap() += 1;
+        self.created_collections
+            .lock()
+            .unwrap()
+            .insert(req.collection_name);
         Ok(())
     }
     async fn update_collection(&self, req: serde_json::Value) -> Result<(), QqlError> {
@@ -75,6 +86,7 @@ impl QdrantOps for MockQdrantClient {
         &self,
         op: &qql_plan::PlannedOperation,
     ) -> Result<serde_json::Value, QqlError> {
+        *self.execute_planned_call_count.lock().unwrap() += 1;
         let route = qql_plan::plan::to_rest_route(op);
         if route.path.contains("nonexistent") {
             return Err(QqlError::execution(
@@ -134,6 +146,28 @@ fn test_local_config() -> QqlConfig {
     }
 }
 
+#[test]
+fn test_execution_report_counts_mixed_results() {
+    let report = crate::executor::ExecutionReport::from_results(vec![
+        crate::executor::ExecResponse {
+            ok: true,
+            operation: "QUERY".to_string(),
+            message: "ok".to_string(),
+            data: None,
+        },
+        crate::executor::ExecResponse {
+            ok: false,
+            operation: "QUERY".to_string(),
+            message: "failed".to_string(),
+            data: None,
+        },
+    ]);
+
+    assert!(!report.ok);
+    assert_eq!(report.succeeded, 1);
+    assert_eq!(report.failed, 1);
+}
+
 struct MockEmbedder {
     dense: Vec<f32>,
     sparse_indices: Vec<u32>,
@@ -160,7 +194,7 @@ async fn test_create_collection_with_hnsw_and_quantization() {
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let query = "CREATE COLLECTION mycol WITH HNSW (m = 32, ef_construct = 100) WITH QUANTIZATION (type = 'scalar', always_ram = true, quantile = 0.99)";
-    let resp = executor.execute(query).await;
+    let resp = executor.execute(query, OnError::Stop).await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
@@ -189,7 +223,7 @@ async fn test_create_hybrid_materializes_default_schema() {
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     executor
-        .execute("CREATE COLLECTION mycol HYBRID")
+        .execute("CREATE COLLECTION mycol HYBRID", OnError::Stop)
         .await
         .unwrap();
 
@@ -207,7 +241,7 @@ async fn test_create_collection_with_optimizers_and_params() {
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let query = "CREATE COLLECTION mycol WITH OPTIMIZERS (deleted_threshold = 0.2, default_segment_number = 4, max_optimization_threads = 2) WITH PARAMS (replication_factor = 2, on_disk_payload = true)";
-    let resp = executor.execute(query).await;
+    let resp = executor.execute(query, OnError::Stop).await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
@@ -233,7 +267,7 @@ async fn test_create_collection_with_named_vectors_hnsw_quant() {
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let query = "CREATE COLLECTION mycol (dense_vec VECTOR(128, Cosine) WITH HNSW (m = 16) WITH QUANTIZATION (type = 'binary', always_ram = false))";
-    let resp = executor.execute(query).await;
+    let resp = executor.execute(query, OnError::Stop).await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
@@ -264,7 +298,7 @@ async fn test_alter_collection_quantization_and_hnsw() {
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let query = "ALTER COLLECTION mycol WITH HNSW (ef_construct = 150) WITH QUANTIZATION (type = 'product', always_ram = true)";
-    let resp = executor.execute(query).await;
+    let resp = executor.execute(query, OnError::Stop).await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
@@ -291,7 +325,7 @@ async fn test_alter_collection_disable_quantization() {
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let query = "ALTER COLLECTION mycol WITH QUANTIZATION (disabled = true)";
-    let resp = executor.execute(query).await;
+    let resp = executor.execute(query, OnError::Stop).await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
@@ -307,13 +341,16 @@ async fn test_dml_missing_collection_errors() {
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let resp_delete = executor
-        .execute("DELETE FROM nonexistent WHERE id = 'abc'")
+        .execute("DELETE FROM nonexistent WHERE id = 'abc'", OnError::Stop)
         .await;
     assert!(resp_delete.is_err());
     assert!(resp_delete.unwrap_err().message.contains("does not exist"));
 
     let resp_update = executor
-        .execute("UPDATE nonexistent SET PAYLOAD = {k: 'v'} WHERE id = 'abc'")
+        .execute(
+            "UPDATE nonexistent SET PAYLOAD = {k: 'v'} WHERE id = 'abc'",
+            OnError::Stop,
+        )
         .await;
     assert!(resp_update.is_err());
     assert!(resp_update.unwrap_err().message.contains("does not exist"));
@@ -329,7 +366,7 @@ async fn test_do_query_basic() {
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let query = "QUERY 'admin docs' FROM docs WHERE metadata.group = 'admin' LIMIT 10 OFFSET 5";
-    let resp = executor.execute(query).await;
+    let resp = executor.execute(query, OnError::Stop).await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
@@ -347,7 +384,7 @@ async fn test_do_query_hybrid() {
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let query = "QUERY HYBRID TEXT 'hello' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10";
-    let resp = executor.execute(query).await;
+    let resp = executor.execute(query, OnError::Stop).await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
@@ -363,7 +400,9 @@ async fn test_do_select_returns_record_or_nil() {
     let last_planned = client.last_planned.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
-    let resp = executor.execute("QUERY POINTS ('pt-1') FROM docs").await;
+    let resp = executor
+        .execute("QUERY POINTS ('pt-1') FROM docs", OnError::Stop)
+        .await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
@@ -379,7 +418,9 @@ async fn test_delete_by_id_and_filter() {
     let last_planned = client.last_planned.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
-    let resp = executor.execute("DELETE FROM docs WHERE id = 12").await;
+    let resp = executor
+        .execute("DELETE FROM docs WHERE id = 12", OnError::Stop)
+        .await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
@@ -396,7 +437,10 @@ async fn test_set_payload_by_id_and_filter() {
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let resp = executor
-        .execute("UPDATE docs SET PAYLOAD = {status: 'active'} WHERE id = 12")
+        .execute(
+            "UPDATE docs SET PAYLOAD = {status: 'active'} WHERE id = 12",
+            OnError::Stop,
+        )
         .await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
@@ -414,7 +458,10 @@ async fn test_update_by_id() {
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let resp = executor
-        .execute("UPDATE docs SET VECTOR dense = [1.0, 2.0] WHERE id = 'p1'")
+        .execute(
+            "UPDATE docs SET VECTOR dense = [1.0, 2.0] WHERE id = 'p1'",
+            OnError::Stop,
+        )
         .await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
@@ -431,7 +478,10 @@ async fn test_upsert_into_collection_creates_missing() {
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let resp = executor
-        .execute("UPSERT INTO docs VALUES {id: 'pt-1', text: 'hello'}")
+        .execute(
+            "UPSERT INTO docs VALUES {id: 'pt-1', text: 'hello'}",
+            OnError::Stop,
+        )
         .await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
@@ -448,7 +498,9 @@ async fn test_do_scroll_returns_upstream_style_payload() {
     let last_planned = client.last_planned.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
-    let resp = executor.execute("SCROLL FROM docs LIMIT 10").await;
+    let resp = executor
+        .execute("SCROLL FROM docs LIMIT 10", OnError::Stop)
+        .await;
 
     assert!(resp.is_ok(), "{:?}", resp.err());
     let op = last_planned.lock().unwrap().take().unwrap();
@@ -475,7 +527,7 @@ async fn test_query_missing_collection_errors() {
     );
 
     let query = "QUERY 'hello' FROM nonexistent LIMIT 10";
-    let resp = executor.execute(query).await;
+    let resp = executor.execute(query, OnError::Stop).await;
     assert!(resp.is_err());
     assert!(resp.unwrap_err().message.contains("does not exist"));
 }
@@ -489,7 +541,7 @@ async fn test_upsert_bad_types() {
     // Wait, the parser catches syntax errors. But logic errors?
     // E.g., UPSERT with mismatching value lengths
     let query = "UPSERT INTO docs VALUES {id: 1}, {id: 2, text: 'a'}, {id: 3}";
-    let resp = executor.execute(query).await;
+    let resp = executor.execute(query, OnError::Stop).await;
     // Actually, qql parser allows this since schema is flexible.
     assert!(resp.is_ok(), "{:?}", resp.err());
 }
@@ -611,4 +663,150 @@ async fn test_single_mutation_not_batched() {
         0,
         "single mutation must not use update batch"
     );
+}
+
+#[tokio::test]
+async fn test_continue_preserves_failure_position_and_batch_boundary() {
+    let client = MockQdrantClient::default();
+    let update_batches = client.update_batch_call_count.clone();
+    let individual_calls = client.execute_planned_call_count.clone();
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+    let stmts = qql_core::parser::Parser::parse_all(
+        "DELETE FROM docs WHERE id = 1;\
+         QUERY TEXT 'missing schema' FROM docs LIMIT 1;\
+         DELETE FROM docs WHERE id = 2;",
+    )
+    .unwrap();
+
+    let results = executor.execute_batch_nodes(stmts, false).await.unwrap();
+
+    assert_eq!(results.len(), 3);
+    assert_eq!(results[0].operation, "DELETE");
+    assert!(results[0].ok);
+    assert_eq!(results[1].operation, "PREPARE");
+    assert!(!results[1].ok);
+    assert_eq!(results[2].operation, "DELETE");
+    assert!(results[2].ok);
+    assert_eq!(*update_batches.lock().unwrap(), 0);
+    assert_eq!(*individual_calls.lock().unwrap(), 2);
+}
+
+#[tokio::test]
+async fn test_stop_dispatches_prior_statement_before_later_prepare_failure() {
+    let client = MockQdrantClient::default();
+    let individual_calls = client.execute_planned_call_count.clone();
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+    let stmts = qql_core::parser::Parser::parse_all(
+        "DELETE FROM docs WHERE id = 1;\
+         QUERY TEXT 'missing schema' FROM docs LIMIT 1;",
+    )
+    .unwrap();
+
+    let error = executor
+        .execute_batch_nodes(stmts, true)
+        .await
+        .expect_err("the second statement should fail preparation");
+
+    assert!(error.message.contains("no mock info set"));
+    assert_eq!(*individual_calls.lock().unwrap(), 1);
+}
+
+#[tokio::test]
+async fn test_batch_upserts_keep_single_statement_auto_create_semantics() {
+    let client = MockQdrantClient::default();
+    let creates = client.create_collection_call_count.clone();
+    let update_batches = client.update_batch_call_count.clone();
+    let embedder = Arc::new(MockEmbedder {
+        dense: vec![0.1, 0.2],
+        sparse_indices: Vec::new(),
+        sparse_values: Vec::new(),
+    });
+    let mut config = test_config();
+    config.embedding_dimension = 2;
+    let executor = Executor::with_embedder(Box::new(client), Some(config), Some(embedder));
+    let stmts = qql_core::parser::Parser::parse_all(
+        "UPSERT INTO docs VALUES {id: 1, text: 'a'} USING DENSE MODEL 'mock';\
+         UPSERT INTO docs VALUES {id: 2, text: 'b'} USING DENSE MODEL 'mock';",
+    )
+    .unwrap();
+
+    let results = executor.execute_batch_nodes(stmts, true).await.unwrap();
+
+    assert_eq!(results.len(), 2);
+    assert!(results.iter().all(|result| result.ok));
+    assert_eq!(*creates.lock().unwrap(), 1);
+    assert_eq!(*update_batches.lock().unwrap(), 1);
+}
+
+#[tokio::test]
+async fn test_execute_batch_continue_collects_parse_errors_in_order() {
+    let client = MockQdrantClient::default();
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+
+    let report = executor
+        .execute_batch(
+            &[
+                "DELETE FROM docs WHERE id = 1",
+                "not qql",
+                "DELETE FROM docs WHERE id = 2",
+            ],
+            OnError::Continue,
+        )
+        .await
+        .unwrap();
+
+    assert!(!report.ok);
+    assert_eq!(report.succeeded, 2);
+    assert_eq!(report.failed, 1);
+    assert_eq!(report.results[0].operation, "DELETE");
+    assert_eq!(report.results[1].operation, "PARSE");
+    assert_eq!(report.results[2].operation, "DELETE");
+}
+
+#[tokio::test]
+async fn test_execute_batch_stop_dispatches_prior_entries_before_parse_failure() {
+    let client = MockQdrantClient::default();
+    let individual_calls = client.execute_planned_call_count.clone();
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+
+    let error = executor
+        .execute_batch(&["DELETE FROM docs WHERE id = 1", "not qql"], OnError::Stop)
+        .await
+        .expect_err("the second entry should fail parsing");
+
+    assert_eq!(error.code, "QQL-PARSE-STATEMENT");
+    assert_eq!(*individual_calls.lock().unwrap(), 1);
+}
+
+#[tokio::test]
+async fn test_execute_continue_returns_parse_failure_report() {
+    let executor = Executor::new(Box::new(MockQdrantClient::default()), Some(test_config()));
+
+    let report = executor
+        .execute("not qql", OnError::Continue)
+        .await
+        .expect("continue mode should report parse failures");
+
+    assert!(!report.ok);
+    assert_eq!(report.succeeded, 0);
+    assert_eq!(report.failed, 1);
+    assert_eq!(report.results[0].operation, "PARSE");
+}
+
+#[tokio::test]
+async fn test_execute_continue_returns_single_preparation_failure_report() {
+    let executor = Executor::new(Box::new(MockQdrantClient::default()), Some(test_config()));
+
+    let report = executor
+        .execute(
+            "QUERY TEXT 'missing schema' FROM docs LIMIT 1",
+            OnError::Continue,
+        )
+        .await
+        .expect("continue mode should report preparation failures");
+
+    assert!(!report.ok);
+    assert_eq!(report.succeeded, 0);
+    assert_eq!(report.failed, 1);
+    assert_eq!(report.results[0].operation, "PREPARE");
 }

@@ -1,80 +1,223 @@
-const nativeBinding = require('./index.linux-x64-gnu.node');
+function isMusl() {
+  if (process.platform !== 'linux') {
+    return false;
+  }
+  const report = process.report?.getReport?.();
+  return !report?.header?.glibcVersionRuntime;
+}
+
+function nativeFilename() {
+  const { platform, arch } = process;
+  if (platform === 'linux' && (arch === 'x64' || arch === 'arm64')) {
+    return `index.linux-${arch}-${isMusl() ? 'musl' : 'gnu'}.node`;
+  }
+  if (platform === 'darwin' && (arch === 'x64' || arch === 'arm64')) {
+    return `index.darwin-${arch}.node`;
+  }
+  if (platform === 'win32' && (arch === 'x64' || arch === 'arm64' || arch === 'ia32')) {
+    return `index.win32-${arch}-msvc.node`;
+  }
+  throw new Error(`nqql does not provide a native binary for ${platform}-${arch}`);
+}
+
+let nativeBinding;
+try {
+  nativeBinding = require(`./${nativeFilename()}`);
+} catch (platformError) {
+  try {
+    // Local development fallback for a non-platform napi build.
+    nativeBinding = require('./index.node');
+  } catch (_) {
+    throw platformError;
+  }
+}
+
+function buildError(raw) {
+  const message = raw instanceof Error ? raw.message : String(raw);
+  try {
+    const parsed = JSON.parse(message);
+    if (parsed && parsed.code) {
+      const error = new Error(parsed.message || message);
+      error.code = parsed.code;
+      error.kind = parsed.kind;
+      error.span = parsed.span ?? null;
+      return error;
+    }
+  } catch (_) {
+    // Non-QQL errors retain their original JS error and stack.
+  }
+  return raw instanceof Error ? raw : new Error(message);
+}
+
+function callNative(call) {
+  try {
+    return call();
+  } catch (error) {
+    throw buildError(error);
+  }
+}
+
+function normalizeQuery(query) {
+  if (query instanceof nativeBinding.Stmt) {
+    return query.toObject();
+  }
+  if (Array.isArray(query)) {
+    return query.map(normalizeQuery);
+  }
+  return query;
+}
+
+function validateOptions(options) {
+  if (
+    options !== undefined &&
+    options !== null &&
+    (typeof options !== 'object' || Array.isArray(options))
+  ) {
+    throw new TypeError('options must be an object');
+  }
+  const value = options?.onError;
+  if (value !== undefined && value !== 'stop' && value !== 'continue') {
+    throw new TypeError("options.onError must be 'stop' or 'continue'");
+  }
+  return options;
+}
+
+function normalizeClientOptions(options) {
+  if (!options) {
+    return undefined;
+  }
+  if (typeof options !== 'object' || Array.isArray(options)) {
+    throw new TypeError('client options must be an object');
+  }
+  return {
+    ...options,
+    embedder: options.embedder
+      ? {
+          endpoint: options.embedder.endpoint,
+          apiKey: options.embedder.apiKey,
+          model: options.embedder.model,
+          dimension: options.embedder.dimension,
+        }
+      : undefined,
+  };
+}
+
+class HttpEmbedder {
+  constructor(options) {
+    if (!options || typeof options.endpoint !== 'string' || !options.endpoint) {
+      throw new TypeError('HttpEmbedder requires a non-empty endpoint');
+    }
+    if (typeof options.model !== 'string' || !options.model) {
+      throw new TypeError('HttpEmbedder requires a non-empty model');
+    }
+    if (!Number.isSafeInteger(options.dimension) || options.dimension <= 0) {
+      throw new TypeError('HttpEmbedder dimension must be a positive integer');
+    }
+    if (options.apiKey !== undefined && typeof options.apiKey !== 'string') {
+      throw new TypeError('HttpEmbedder apiKey must be a string');
+    }
+    this.endpoint = options.endpoint;
+    this.apiKey = options.apiKey ?? '';
+    this.model = options.model;
+    this.dimension = options.dimension;
+  }
+}
 
 /**
- * Parses a QQL statement into a JavaScript AST object using fast Rust-JSON serialization.
+ * Parse one statement or a semicolon-delimited script.
+ * Always returns Stmt[].
  */
 function parse(query) {
-    return JSON.parse(nativeBinding.parseJson(query));
-}
-
-/**
- * Parses a QQL statement and returns the AST as a raw JSON string directly from Rust.
- * Bypasses V8 object creation entirely (~1.15M ops/s). Ideal for HTTP/IPC forwarding.
- */
-function parseJson(query) {
-    return nativeBinding.parseJson(query);
-}
-
-/**
- * Parses multiple QQL statements into an array of JavaScript AST objects.
- */
-function parseAll(queries) {
-    return JSON.parse(nativeBinding.parseBatchJson(queries));
-}
-
-/**
- * Parses an array of QQL queries into an array of JavaScript AST objects.
- */
-function parseBatch(queries) {
-    return JSON.parse(nativeBinding.parseBatchJson(queries));
+  return callNative(() => nativeBinding.parseAll(query));
 }
 
 function isValid(query) {
-    return nativeBinding.isValid(query);
+  return nativeBinding.isValid(query);
 }
 
 function injectFilter(query, field, op, value) {
-    return nativeBinding.injectFilter(query, field, op, value);
+  return callNative(() => nativeBinding.injectFilter(query, field, op, value));
 }
 
 function tokenize(query) {
-    return nativeBinding.tokenize(query);
+  return callNative(() => nativeBinding.tokenize(query));
 }
 
 function explain(query) {
-    return nativeBinding.explain(query);
+  return callNative(() => nativeBinding.explain(query));
 }
 
 function explainStmt(stmt) {
-    return nativeBinding.explainStmt(stmt);
+  return callNative(() => nativeBinding.explainStmt(stmt));
 }
 
-function execute(query, options) {
-    return nativeBinding.execute(query, options);
+function compileQuery(query) {
+  return callNative(() => nativeBinding.compileQuery(query));
 }
 
-function executeStmt(stmt, options) {
-    return nativeBinding.executeStmt(stmt, options);
+async function execute(query, options) {
+  try {
+    const raw = await nativeBinding.execute(
+      normalizeQuery(query),
+      normalizeClientOptions(validateOptions(options)),
+    );
+    return JSON.parse(raw);
+  } catch (error) {
+    throw buildError(error);
+  }
 }
 
-const Client = nativeBinding.Client;
-const Stmt = nativeBinding.Stmt;
-const HttpEmbedder = nativeBinding.HttpEmbedder;
+async function executeStmt(stmt, options) {
+  try {
+    return JSON.parse(
+      await nativeBinding.executeStmt(stmt, normalizeClientOptions(options)),
+    );
+  } catch (error) {
+    throw buildError(error);
+  }
+}
+
+class Client {
+  constructor(options) {
+    this._inner = new nativeBinding.Client(normalizeClientOptions(options));
+  }
+
+  async execute(query, options) {
+    try {
+      const raw = await this._inner.execute(
+        normalizeQuery(query),
+        validateOptions(options) || undefined,
+      );
+      return JSON.parse(raw);
+    } catch (error) {
+      throw buildError(error);
+    }
+  }
+
+  explain(query) {
+    return callNative(() => this._inner.explain(query));
+  }
+
+  explainStmt(stmt) {
+    return callNative(() => this._inner.explainStmt(stmt));
+  }
+
+  compile(query) {
+    return callNative(() => this._inner.compile(query));
+  }
+}
 
 module.exports = {
-    parse,
-    parseJson,
-    parseAll,
-    parseBatch,
-    isValid,
-    injectFilter,
-    tokenize,
-    explain,
-    explainStmt,
-    execute,
-    executeStmt,
-    Client,
-    Stmt,
-    HttpEmbedder,
-    nativeBinding
+  parse,
+  isValid,
+  injectFilter,
+  tokenize,
+  compileQuery,
+  explain,
+  explainStmt,
+  execute,
+  executeStmt,
+  Client,
+  Stmt: nativeBinding.Stmt,
+  HttpEmbedder,
 };

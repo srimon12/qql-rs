@@ -6,7 +6,7 @@
 //! import pyqql_edge
 //!
 //! # ── Parser (same API as pyqql) ──
-//! stmt = pyqql_edge.parse("QUERY 'hello' FROM docs LIMIT 10")
+//! stmt = pyqql_edge.parse("QUERY 'hello' FROM docs LIMIT 10")[0]
 //! tokens = pyqql_edge.tokenize("QUERY 'test' FROM docs")
 //! plan = pyqql_edge.explain("QUERY 'hello' FROM docs LIMIT 10")
 //!
@@ -41,7 +41,7 @@ impl PyStmt {
             ));
         }
         let val = py_to_value(value)?;
-        let cmp = str_to_comparison_op(op);
+        let cmp = str_to_comparison_op(op)?;
         ast::inject_filter(&mut self.inner, field, cmp, val)
             .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
         Ok(())
@@ -86,30 +86,14 @@ impl PyStmt {
 // ═══════════════════════════════════════════════════════════════════
 
 #[pyfunction]
-fn parse(input: &str) -> PyResult<PyStmt> {
-    let stmt = Parser::parse(input).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
-    Ok(PyStmt { inner: stmt })
-}
-
-#[pyfunction]
-fn parse_all(input: &str) -> PyResult<Vec<PyStmt>> {
+fn parse(input: &str) -> PyResult<Vec<PyStmt>> {
     let stmts = Parser::parse_all(input).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
     Ok(stmts.into_iter().map(|s| PyStmt { inner: s }).collect())
 }
 
 #[pyfunction]
-fn parse_batch(queries: Vec<String>) -> PyResult<Vec<PyStmt>> {
-    let mut results = Vec::with_capacity(queries.len());
-    for q in queries {
-        let stmt = Parser::parse(&q).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
-        results.push(PyStmt { inner: stmt });
-    }
-    Ok(results)
-}
-
-#[pyfunction]
 fn is_valid(input: &str) -> bool {
-    Parser::try_parse(input).is_ok()
+    Parser::parse_all(input).is_ok()
 }
 
 #[pyfunction]
@@ -125,7 +109,7 @@ fn inject_filter(
         ));
     }
     let val = py_to_value(value)?;
-    let cmp = str_to_comparison_op(op);
+    let cmp = str_to_comparison_op(op)?;
     if let Ok(mut py_stmt) = query.extract::<PyRefMut<'_, PyStmt>>() {
         ast::inject_filter(&mut py_stmt.inner, field, cmp, val)
             .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
@@ -196,25 +180,30 @@ struct PyClient {
 
 #[pymethods]
 impl PyClient {
+    #[pyo3(signature = (query, *, on_error="stop"))]
     fn execute<'py>(
         &self,
         py: Python<'py>,
         query: &Bound<'_, PyAny>,
+        on_error: &str,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let out = self.run(query)?;
+        let out = self.run(query, parse_on_error(on_error)?)?;
         pythonize::pythonize(py, &out)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
     }
 
+    #[pyo3(signature = (query, *, on_error="stop"))]
     fn execute_async<'py>(
         &self,
         py: Python<'py>,
         query: Bound<'py, PyAny>,
+        on_error: &str,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
         let input = classify(&query)?;
+        let on_error = parse_on_error(on_error)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let val = run_async(&inner, input)
+            let val = run_async(&inner, input, on_error)
                 .await
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
             Python::with_gil(|py| {
@@ -280,36 +269,43 @@ fn classify(query: &Bound<'_, PyAny>) -> PyResult<Input> {
 }
 
 impl PyClient {
-    fn run(&self, query: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
+    fn run(
+        &self,
+        query: &Bound<'_, PyAny>,
+        on_error: qql::executor::OnError,
+    ) -> PyResult<serde_json::Value> {
+        let stop = matches!(on_error, qql::executor::OnError::Stop);
         match classify(query)? {
             Input::String(s) => {
-                let res = self
+                let report = self
                     .runtime
-                    .block_on(self.inner.execute(&s))
+                    .block_on(self.inner.execute(&s, on_error))
                     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-                Ok(serde_json::to_value(&res).unwrap_or_default())
+                Ok(serde_json::to_value(&report).unwrap_or_default())
             }
             Input::Stmt(s) => {
-                let res = self
+                let results = self
                     .runtime
-                    .block_on(self.inner.execute_node(s))
+                    .block_on(self.inner.execute_batch_nodes(vec![s], stop))
                     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-                Ok(serde_json::to_value(&res).unwrap_or_default())
+                let report = qql::executor::ExecutionReport::from_results(results);
+                Ok(serde_json::to_value(&report).unwrap_or_default())
             }
             Input::StrList(strs) => {
                 let refs: Vec<&str> = strs.iter().map(|s| s.as_str()).collect();
-                let results = self
+                let report = self
                     .runtime
-                    .block_on(self.inner.execute_batch(&refs, true))
+                    .block_on(self.inner.execute_batch(&refs, on_error))
                     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-                Ok(serde_json::to_value(&results).unwrap_or_default())
+                Ok(serde_json::to_value(&report).unwrap_or_default())
             }
             Input::StmtList(stmts) => {
                 let results = self
                     .runtime
-                    .block_on(self.inner.execute_batch_nodes(stmts, true))
+                    .block_on(self.inner.execute_batch_nodes(stmts, stop))
                     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-                Ok(serde_json::to_value(&results).unwrap_or_default())
+                let report = qql::executor::ExecutionReport::from_results(results);
+                Ok(serde_json::to_value(&report).unwrap_or_default())
             }
         }
     }
@@ -318,58 +314,29 @@ impl PyClient {
 async fn run_async(
     inner: &qql::executor::Executor,
     input: Input,
+    on_error: qql::executor::OnError,
 ) -> Result<serde_json::Value, qql_core::error::QqlError> {
+    let stop = matches!(on_error, qql::executor::OnError::Stop);
     match input {
         Input::String(s) => {
-            let res = inner.execute(&s).await?;
-            Ok(serde_json::to_value(&res).unwrap_or_default())
+            let report = inner.execute(&s, on_error).await?;
+            Ok(serde_json::to_value(&report).unwrap_or_default())
         }
         Input::Stmt(s) => {
-            let res = inner.execute_node(s).await?;
-            Ok(serde_json::to_value(&res).unwrap_or_default())
+            let results = inner.execute_batch_nodes(vec![s], stop).await?;
+            let report = qql::executor::ExecutionReport::from_results(results);
+            Ok(serde_json::to_value(&report).unwrap_or_default())
         }
         Input::StrList(strs) => {
             let refs: Vec<&str> = strs.iter().map(|s| s.as_str()).collect();
-            let results = inner.execute_batch(&refs, true).await?;
-            Ok(serde_json::to_value(&results).unwrap_or_default())
+            let report = inner.execute_batch(&refs, on_error).await?;
+            Ok(serde_json::to_value(&report).unwrap_or_default())
         }
         Input::StmtList(stmts) => {
-            let results = inner.execute_batch_nodes(stmts, true).await?;
-            Ok(serde_json::to_value(&results).unwrap_or_default())
+            let results = inner.execute_batch_nodes(stmts, stop).await?;
+            let report = qql::executor::ExecutionReport::from_results(results);
+            Ok(serde_json::to_value(&report).unwrap_or_default())
         }
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════
-//  HttpEmbedder — for use with http_executor
-// ═══════════════════════════════════════════════════════════════════
-
-#[pyclass(name = "HttpEmbedder")]
-#[derive(Clone)]
-#[allow(dead_code)]
-struct PyHttpEmbedder {
-    endpoint: String,
-    api_key: String,
-    model: String,
-    dimension: usize,
-}
-
-#[pymethods]
-impl PyHttpEmbedder {
-    #[new]
-    #[pyo3(signature = (endpoint, model, dimension, api_key=None))]
-    fn new(
-        endpoint: &str,
-        model: &str,
-        dimension: usize,
-        api_key: Option<String>,
-    ) -> PyResult<Self> {
-        Ok(PyHttpEmbedder {
-            endpoint: endpoint.to_string(),
-            api_key: api_key.unwrap_or_default(),
-            model: model.to_string(),
-            dimension,
-        })
     }
 }
 
@@ -425,20 +392,27 @@ fn http_executor(
 #[pymodule]
 fn pyqql_edge(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyStmt>()?;
-    m.add_class::<PyHttpEmbedder>()?;
     m.add_class::<PyClient>()?;
     m.add_function(wrap_pyfunction!(local_executor, m)?)?;
     #[cfg(feature = "http-embedding")]
     m.add_function(wrap_pyfunction!(http_executor, m)?)?;
     m.add_function(wrap_pyfunction!(explain, m)?)?;
     m.add_function(wrap_pyfunction!(parse, m)?)?;
-    m.add_function(wrap_pyfunction!(parse_all, m)?)?;
-    m.add_function(wrap_pyfunction!(parse_batch, m)?)?;
     m.add_function(wrap_pyfunction!(is_valid, m)?)?;
     m.add_function(wrap_pyfunction!(inject_filter, m)?)?;
     m.add_function(wrap_pyfunction!(tokenize, m)?)?;
     m.add_function(wrap_pyfunction!(compile_query, m)?)?;
     Ok(())
+}
+
+fn parse_on_error(value: &str) -> PyResult<qql::executor::OnError> {
+    match value {
+        "stop" => Ok(qql::executor::OnError::Stop),
+        "continue" => Ok(qql::executor::OnError::Continue),
+        _ => Err(pyo3::exceptions::PyValueError::new_err(
+            "on_error must be 'stop' or 'continue'",
+        )),
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -481,13 +455,15 @@ fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
     Err(PySyntaxError::new_err("unsupported filter value type"))
 }
 
-fn str_to_comparison_op(op: &str) -> ComparisonOp {
+fn str_to_comparison_op(op: &str) -> PyResult<ComparisonOp> {
     match op {
-        "=" | "==" | "eq" => ComparisonOp::Eq,
-        ">" | "gt" => ComparisonOp::Gt,
-        ">=" | "gte" => ComparisonOp::Gte,
-        "<" | "lt" => ComparisonOp::Lt,
-        "<=" | "lte" => ComparisonOp::Lte,
-        _ => ComparisonOp::Eq,
+        "=" | "==" | "eq" => Ok(ComparisonOp::Eq),
+        ">" | "gt" => Ok(ComparisonOp::Gt),
+        ">=" | "gte" => Ok(ComparisonOp::Gte),
+        "<" | "lt" => Ok(ComparisonOp::Lt),
+        "<=" | "lte" => Ok(ComparisonOp::Lte),
+        _ => Err(PySyntaxError::new_err(format!(
+            "unsupported comparison operator '{op}' (use =, >, >=, <, <=)"
+        ))),
     }
 }

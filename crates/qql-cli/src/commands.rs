@@ -1,6 +1,9 @@
 pub async fn handle_doctor(url: &str, json: bool) -> Result<(), Box<dyn std::error::Error>> {
     let executor = executor(url)?;
-    match executor.execute("SHOW COLLECTIONS").await {
+    match executor
+        .execute("SHOW COLLECTIONS", qql::executor::OnError::Stop)
+        .await
+    {
         Ok(_) => {
             if json {
                 println!(
@@ -49,9 +52,11 @@ pub async fn handle_exec(
     quiet: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let executor = executor(url)?;
-    let response = executor.execute(query).await?;
+    let report = executor
+        .execute(query, qql::executor::OnError::Stop)
+        .await?;
     if !quiet {
-        crate::table::render_response(&response, json)?;
+        crate::table::render_report(&report, json)?;
     }
     Ok(())
 }
@@ -67,8 +72,24 @@ pub async fn handle_execute_file(
     let mut fail_count = 0;
 
     for (index, statement) in statements.iter().enumerate() {
-        match executor.execute(statement).await {
-            Ok(_) => ok_count += 1,
+        let on_err = if stop_on_error {
+            qql::executor::OnError::Stop
+        } else {
+            qql::executor::OnError::Continue
+        };
+        match executor.execute(statement, on_err).await {
+            Ok(report) => {
+                ok_count += report.succeeded;
+                fail_count += report.failed;
+                for result in report.results.iter().filter(|result| !result.ok) {
+                    output::print_error(&format!(
+                        "statement {} ({}): {}",
+                        index + 1,
+                        result.operation,
+                        result.message
+                    ));
+                }
+            }
             Err(error) => {
                 fail_count += 1;
                 output::print_error(&format!("statement {}: {}", index + 1, error));
@@ -112,7 +133,9 @@ pub fn handle_explain(query: &str) -> Result<(), Box<dyn std::error::Error>> {
 
 pub async fn handle_connect(url: &str) -> Result<(), Box<dyn std::error::Error>> {
     let executor = executor(url)?;
-    executor.execute("SHOW COLLECTIONS").await?;
+    executor
+        .execute("SHOW COLLECTIONS", qql::executor::OnError::Stop)
+        .await?;
     output::print_banner();
     output::print_success(&format!("Connected to \x1b[36m{}\x1b[0m", url));
     println!("Type \x1b[1mhelp\x1b[0m for available commands or \x1b[1mexit\x1b[0m to quit.\n");
@@ -212,9 +235,12 @@ pub async fn handle_connect(url: &str) -> Result<(), Box<dyn std::error::Error>>
             continue;
         }
 
-        match executor.execute(&trimmed).await {
-            Ok(response) => {
-                if let Err(e) = crate::table::render_response(&response, false) {
+        match executor
+            .execute(&trimmed, qql::executor::OnError::Stop)
+            .await
+        {
+            Ok(report) => {
+                if let Err(e) = crate::table::render_report(&report, false) {
                     output::print_error(&format!("display error: {}", e));
                 }
             }
@@ -453,15 +479,15 @@ pub async fn handle_edge(
         }
     };
 
-    let response = exec
-        .execute(query)
+    let report = exec
+        .execute(query, qql::executor::OnError::Stop)
         .await
         .map_err(|e| format!("edge query failed: {e}"))?;
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&response)?);
+        println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
-        crate::table::render_response(&response, false)?;
+        crate::table::render_report(&report, false)?;
     }
 
     Ok(())

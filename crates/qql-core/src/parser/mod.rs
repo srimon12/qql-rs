@@ -103,17 +103,6 @@ impl<'a> Parser<'a> {
         Ok(stmt)
     }
 
-    pub fn try_parse(input: &'a str) -> Result<(), QqlError> {
-        let tokens = Self::lex(input)?;
-        let mut parser = Parser::new(input, tokens);
-        parser.parse_stmt()?;
-        if parser.peek()?.kind == TokenKind::Semicolon {
-            parser.advance()?;
-        }
-        parser.expect_end()?;
-        Ok(())
-    }
-
     pub fn parse_all(input: &'a str) -> Result<Vec<Stmt>, QqlError> {
         let tokens = Self::lex(input)?;
         let mut parser = Parser::new(input, tokens);

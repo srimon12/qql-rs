@@ -14,21 +14,207 @@ use qql_plan::routing;
 use serde_json::json;
 use wasm_bindgen::prelude::*;
 
+#[wasm_bindgen(typescript_custom_section)]
+const EXECUTION_TYPES: &str = r#"
+export interface ExecuteOptions {
+  onError?: "stop" | "continue";
+}
+
+export interface ExecResponse {
+  ok: boolean;
+  operation: string;
+  message: string;
+  data: unknown | null;
+}
+
+export interface ExecutionReport {
+  ok: boolean;
+  results: ExecResponse[];
+  succeeded: number;
+  failed: number;
+}
+
+export interface Token {
+  kind: string;
+  text: string;
+  pos: number;
+  end: number;
+  len: number;
+}
+
+export interface CompiledRoute {
+  stmt_type: string;
+  method: string;
+  path: string;
+  payload: unknown | null;
+}
+
+export interface AnalysisError {
+  code: string;
+  message: string;
+  start: number | null;
+  end: number | null;
+}
+
+export interface AnalysisResult {
+  valid: boolean;
+  statements_count: number;
+  tokens: Token[];
+  ast: unknown[] | null;
+  route: CompiledRoute | null;
+  routes: CompiledRoute[];
+  explain: string | null;
+  error: AnalysisError | null;
+}
+"#;
+
 // ── Core: parsing ────────────────────────────────────────────────
 
-fn normalize_input(input: &str) -> std::borrow::Cow<'_, str> {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return std::borrow::Cow::Borrowed(trimmed);
+#[cfg(all(feature = "client", target_arch = "wasm32"))]
+mod report {
+    /// Internal execution report matching the qql-runtime contract.
+    /// Used so callers can access typed `succeeded`/`failed`/`results`
+    /// fields without chasing `serde_json::Value` keys.
+    #[derive(serde::Serialize)]
+    pub struct WasmReport {
+        pub ok: bool,
+        pub results: Vec<serde_json::Value>,
+        pub succeeded: usize,
+        pub failed: usize,
     }
-    if Parser::parse_all(trimmed).is_ok() {
-        return std::borrow::Cow::Borrowed(trimmed);
+
+    impl WasmReport {
+        pub fn from_results(results: Vec<serde_json::Value>) -> Self {
+            let succeeded = results
+                .iter()
+                .filter(|r| r.get("ok").and_then(|v| v.as_bool()).unwrap_or(false))
+                .count();
+            let failed = results.len() - succeeded;
+            Self {
+                ok: failed == 0,
+                results,
+                succeeded,
+                failed,
+            }
+        }
+
+        pub fn single(resp: serde_json::Value) -> Self {
+            let ok = resp.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+            Self {
+                ok,
+                results: vec![resp],
+                succeeded: if ok { 1 } else { 0 },
+                failed: if ok { 0 } else { 1 },
+            }
+        }
+
+        pub fn empty() -> Self {
+            Self {
+                ok: true,
+                results: Vec::new(),
+                succeeded: 0,
+                failed: 0,
+            }
+        }
     }
-    let with_semi = format!("{}\n;", trimmed);
-    if Parser::parse_all(&with_semi).is_ok() {
-        std::borrow::Cow::Owned(with_semi)
-    } else {
-        std::borrow::Cow::Borrowed(trimmed)
+
+    /// Build an ExecResponse-compatible JSON value.
+    pub fn exec_response(
+        ok: bool,
+        operation: &str,
+        message: &str,
+        data: Option<serde_json::Value>,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "ok": ok,
+            "operation": operation,
+            "message": message,
+            "data": data.unwrap_or(serde_json::Value::Null),
+        })
+    }
+}
+
+#[cfg(all(feature = "client", target_arch = "wasm32"))]
+use report::{exec_response, WasmReport};
+
+#[cfg(all(feature = "client", target_arch = "wasm32"))]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WasmOnError {
+    Stop,
+    Continue,
+}
+
+#[cfg(all(feature = "client", target_arch = "wasm32"))]
+#[derive(Clone, PartialEq, Eq)]
+enum WasmBatchKey {
+    Query(String),
+    Mutation(String),
+}
+
+#[cfg(all(feature = "client", target_arch = "wasm32"))]
+fn wasm_statement_batch_key(stmt: &qql_core::ast::Stmt) -> Option<WasmBatchKey> {
+    use qql_core::ast::{QueryCollection, QueryExpr, Stmt};
+
+    match stmt {
+        Stmt::Query(query)
+            if query.group.is_none() && !matches!(query.expression, QueryExpr::Points { .. }) =>
+        {
+            match &query.collection {
+                QueryCollection::Explicit(collection) => {
+                    Some(WasmBatchKey::Query(collection.clone()))
+                }
+                QueryCollection::Inherited => None,
+            }
+        }
+        Stmt::Upsert(stmt) => Some(WasmBatchKey::Mutation(stmt.collection.clone())),
+        Stmt::Delete(stmt) => Some(WasmBatchKey::Mutation(stmt.collection.clone())),
+        Stmt::UpdatePayload(stmt) => Some(WasmBatchKey::Mutation(stmt.collection.clone())),
+        Stmt::ClearPayload(stmt) => Some(WasmBatchKey::Mutation(stmt.collection.clone())),
+        Stmt::UpdateVector(stmt) => Some(WasmBatchKey::Mutation(stmt.collection.clone())),
+        Stmt::DeleteVector(stmt) => Some(WasmBatchKey::Mutation(stmt.collection.clone())),
+        _ => None,
+    }
+}
+
+#[cfg(all(feature = "client", target_arch = "wasm32"))]
+fn wasm_planned_batch_key(operation: &qql_plan::PlannedOperation) -> Option<WasmBatchKey> {
+    use qql_plan::{BatchFamily, PlannedOperation};
+
+    match operation.batch_family() {
+        BatchFamily::Query => match operation {
+            PlannedOperation::Query { collection, .. } => {
+                Some(WasmBatchKey::Query(collection.clone()))
+            }
+            _ => None,
+        },
+        BatchFamily::Mutation => operation
+            .collection()
+            .map(|collection| WasmBatchKey::Mutation(collection.to_owned())),
+        BatchFamily::Single => None,
+    }
+}
+
+#[cfg(all(feature = "client", target_arch = "wasm32"))]
+fn parse_on_error(options: Option<JsValue>) -> Result<WasmOnError, JsValue> {
+    let Some(options) = options else {
+        return Ok(WasmOnError::Stop);
+    };
+    if options.is_null() || options.is_undefined() {
+        return Ok(WasmOnError::Stop);
+    }
+    if !options.is_object() {
+        return Err(JsValue::from_str("options must be an object"));
+    }
+    let value = js_sys::Reflect::get(&options, &JsValue::from_str("onError"))?;
+    if value.is_undefined() {
+        return Ok(WasmOnError::Stop);
+    }
+    match value.as_string().as_deref() {
+        Some("stop") => Ok(WasmOnError::Stop),
+        Some("continue") => Ok(WasmOnError::Continue),
+        _ => Err(JsValue::from_str(
+            "options.onError must be 'stop' or 'continue'",
+        )),
     }
 }
 
@@ -42,37 +228,16 @@ fn safe_owned_uint8_array(bytes: &[u8]) -> js_sys::Uint8Array {
     js_sys::Uint8Array::new(&view)
 }
 
-#[wasm_bindgen]
+#[wasm_bindgen(unchecked_return_type = "unknown[]")]
 pub fn parse(input: &str) -> Result<JsValue, JsValue> {
-    let norm = normalize_input(input);
-    let stmt = Parser::parse(&norm).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    serde_wasm_bindgen::to_value(&stmt).map_err(|e| JsValue::from_str(&e.to_string()))
-}
-
-#[wasm_bindgen]
-pub fn parse_all(input: &str) -> Result<JsValue, JsValue> {
-    let norm = normalize_input(input);
-    let stmts = Parser::parse_all(&norm).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    serde_wasm_bindgen::to_value(&stmts).map_err(|e| JsValue::from_str(&e.to_string()))
-}
-
-#[wasm_bindgen]
-pub fn parse_batch(queries: Vec<String>) -> Result<JsValue, JsValue> {
-    let results = js_sys::Array::new();
-    for q in queries {
-        let norm = normalize_input(&q);
-        let stmt = Parser::parse(&norm).map_err(|e| JsValue::from_str(&e.to_string()))?;
-        let v =
-            serde_wasm_bindgen::to_value(&stmt).map_err(|e| JsValue::from_str(&e.to_string()))?;
-        results.push(&v);
-    }
-    Ok(results.into())
+    // Always parse as a script — returns a list even for single statements.
+    let stmts = Parser::parse_all(input).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    to_js_value(&stmts)
 }
 
 #[wasm_bindgen(js_name = isValid)]
 pub fn is_valid(input: &str) -> bool {
-    let norm = normalize_input(input);
-    Parser::try_parse(&norm).is_ok()
+    Parser::parse_all(input).is_ok()
 }
 
 #[wasm_bindgen]
@@ -89,7 +254,7 @@ pub fn inject_filter(
     let mut stmt = Parser::parse(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
     ast::inject_filter(&mut stmt, field, cmp, val)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
-    serde_wasm_bindgen::to_value(&stmt).map_err(|e| JsValue::from_str(&e.to_string()))
+    to_js_value(&stmt)
 }
 
 fn parse_comparison_op(op: &str) -> Result<ComparisonOp, JsValue> {
@@ -171,28 +336,16 @@ impl Stmt {
     /// Serialise the AST to a JS object.
     #[wasm_bindgen(js_name = toObject)]
     pub fn to_object(&self) -> Result<JsValue, JsValue> {
-        serde_wasm_bindgen::to_value(&self.inner).map_err(|e| JsValue::from_str(&e.to_string()))
+        to_js_value(&self.inner)
     }
 
-    /// Compile this Stmt AST directly into a Qdrant REST route JSON payload.
-    #[wasm_bindgen(js_name = compileRoute)]
-    pub fn compile_route(&self) -> Result<String, JsValue> {
+    /// Compile this Stmt AST directly into a Qdrant REST route object.
+    #[wasm_bindgen(js_name = compileRoute, unchecked_return_type = "CompiledRoute")]
+    pub fn compile_route(&self) -> Result<JsValue, JsValue> {
         let route = routing::route(&self.inner);
         let json_body = route.body_json();
         let output = serde_json::json!({
-            "method": route.method.as_str(),
-            "path": route.path,
-            "payload": json_body.unwrap_or(serde_json::Value::Null),
-        });
-        serde_json::to_string(&output).map_err(|e| JsValue::from_str(&e.to_string()))
-    }
-
-    /// Compile this Stmt AST directly into a Qdrant REST route JS Object { method, path, payload }.
-    #[wasm_bindgen(js_name = compileRouteValue)]
-    pub fn compile_route_value(&self) -> Result<JsValue, JsValue> {
-        let route = routing::route(&self.inner);
-        let json_body = route.body_json();
-        let output = serde_json::json!({
+            "stmt_type": route_statement_type(&route),
             "method": route.method.as_str(),
             "path": route.path,
             "payload": json_body.unwrap_or(serde_json::Value::Null),
@@ -206,6 +359,7 @@ impl Stmt {
         let route = routing::route(&self.inner);
         let json_body = route.body_json();
         let output = serde_json::json!({
+            "stmt_type": route_statement_type(&route),
             "method": route.method.as_str(),
             "path": route.path,
             "payload": json_body.unwrap_or(serde_json::Value::Null),
@@ -213,13 +367,12 @@ impl Stmt {
         SCRATCH_BUF.with(|cell| {
             let mut buf = cell.borrow_mut();
             buf.clear();
-            serde_json::to_writer(&mut *buf, &output).map_err(|e| JsValue::from_str(&e.to_string()))?;
+            serde_json::to_writer(&mut *buf, &output)
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
             Ok(safe_owned_uint8_array(&buf))
         })
     }
 }
-
-// ── Core: tokenize ────────────────────────────────────────────────
 
 // ── Core: tokenize ────────────────────────────────────────────────
 
@@ -268,9 +421,8 @@ pub fn tokenize(input: &str) -> Result<Vec<JsValue>, JsValue> {
 // ── Core: unified analyze ─────────────────────────────────────────
 
 fn build_analyze_value(input: &str) -> serde_json::Value {
-    let norm = normalize_input(input);
     let mut tokens = Vec::new();
-    let lexer = Lexer::new(&norm);
+    let lexer = Lexer::new(input);
     for t in lexer.flatten() {
         tokens.push(serde_json::json!({
             "kind": t.kind.as_str(),
@@ -281,7 +433,7 @@ fn build_analyze_value(input: &str) -> serde_json::Value {
         }));
     }
 
-    let stmts_res = Parser::parse_all(&norm);
+    let stmts_res = Parser::parse_all(input);
     match stmts_res {
         Ok(stmts) => {
             let ast_val = serde_json::to_value(&stmts).unwrap_or(serde_json::Value::Null);
@@ -290,15 +442,19 @@ fn build_analyze_value(input: &str) -> serde_json::Value {
                 .map(|s| {
                     let r = routing::route(s);
                     serde_json::json!({
+                        "stmt_type": route_statement_type(&r),
                         "method": r.method.as_str(),
                         "path": r.path,
                         "payload": r.body_json().unwrap_or(serde_json::Value::Null),
                     })
                 })
                 .collect();
-            let route_val = routes_val.first().cloned().unwrap_or(serde_json::Value::Null);
+            let route_val = routes_val
+                .first()
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
 
-            let explain_val = qql_core::explain::explain(&norm).unwrap_or_default();
+            let explain_val = qql_core::explain::explain_nodes(&stmts);
 
             serde_json::json!({
                 "valid": true,
@@ -325,6 +481,7 @@ fn build_analyze_value(input: &str) -> serde_json::Value {
                 "tokens": tokens,
                 "ast": serde_json::Value::Null,
                 "route": serde_json::Value::Null,
+                "routes": [],
                 "explain": serde_json::Value::Null,
                 "error": err_json,
             })
@@ -334,30 +491,20 @@ fn build_analyze_value(input: &str) -> serde_json::Value {
 
 fn to_js_value<T: serde::Serialize>(val: &T) -> Result<JsValue, JsValue> {
     let serializer = serde_wasm_bindgen::Serializer::json_compatible();
-    val.serialize(&serializer).map_err(|e| JsValue::from_str(&e.to_string()))
+    val.serialize(&serializer)
+        .map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
-#[wasm_bindgen]
-pub fn analyze(input: &str) -> String {
-    let result = build_analyze_value(input);
-    serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
-}
-
-/// Returns unified analysis directly as a JS Object via serde_wasm_bindgen (zero string detour).
-#[wasm_bindgen(js_name = analyzeValue)]
-pub fn analyze_value(input: &str) -> Result<JsValue, JsValue> {
+#[wasm_bindgen(unchecked_return_type = "AnalysisResult")]
+pub fn analyze(input: &str) -> Result<JsValue, JsValue> {
     let val = build_analyze_value(input);
     to_js_value(&val)
 }
 
 // ── Core: compile & explain ───────────────────────────────────────
 
-fn build_compile_output(query: &str) -> Result<serde_json::Value, JsValue> {
-    let norm = normalize_input(query);
-    let stmt = Parser::parse(&norm).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    let route = routing::route(&stmt);
-    let json_body = route.body_json();
-    let stmt_type = match &route.body {
+fn route_statement_type(route: &qql_plan::routing::Route) -> &'static str {
+    match &route.body {
         Some(qql_plan::routing::RequestBody::Query(_)) => "query",
         Some(qql_plan::routing::RequestBody::QueryGroups(_)) => "query_groups",
         Some(qql_plan::routing::RequestBody::Points(_)) => "points",
@@ -380,24 +527,24 @@ fn build_compile_output(query: &str) -> Result<serde_json::Value, JsValue> {
             qql_plan::types::Method::Delete => "drop_collection",
             _ => "unknown",
         },
-    };
+    }
+}
+
+fn build_compile_output(query: &str) -> Result<serde_json::Value, JsValue> {
+    let stmt = Parser::parse(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let route = routing::route(&stmt);
+    let json_body = route.body_json();
     Ok(serde_json::json!({
-        "stmt_type": stmt_type,
+        "stmt_type": route_statement_type(&route),
+        "method": route.method.as_str(),
+        "path": route.path,
         "payload": json_body.unwrap_or(serde_json::Value::Null),
     }))
 }
 
-/// Compiles QQL query into a compact JSON string payload.
-#[wasm_bindgen]
-pub fn compile(query: &str) -> Result<String, JsValue> {
-    let output = build_compile_output(query)?;
-    serde_json::to_string(&output).map_err(|e| JsValue::from_str(&e.to_string()))
-}
-
-/// Compiles QQL query directly into a JavaScript Object using serde_wasm_bindgen.
-/// Ideal for JS web apps and playground consumers.
-#[wasm_bindgen(js_name = compileValue)]
-pub fn compile_value(query: &str) -> Result<JsValue, JsValue> {
+/// Compile one QQL statement into a JavaScript route object.
+#[wasm_bindgen(unchecked_return_type = "CompiledRoute")]
+pub fn compile(query: &str) -> Result<JsValue, JsValue> {
     let output = build_compile_output(query)?;
     to_js_value(&output)
 }
@@ -416,14 +563,13 @@ pub fn compile_bytes(query: &str) -> Result<js_sys::Uint8Array, JsValue> {
 
 #[wasm_bindgen]
 pub fn explain(query: &str) -> Result<String, JsValue> {
-    let norm = normalize_input(query);
-    qql_core::explain::explain(&norm).map_err(|e| JsValue::from_str(&e.to_string()))
+    qql_core::explain::explain(query).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 #[wasm_bindgen(js_name = explainBytes)]
 pub fn explain_bytes(query: &str) -> Result<js_sys::Uint8Array, JsValue> {
-    let norm = normalize_input(query);
-    let exp_str = qql_core::explain::explain(&norm).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let exp_str =
+        qql_core::explain::explain(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
     Ok(safe_owned_uint8_array(exp_str.as_bytes()))
 }
 
@@ -474,7 +620,13 @@ impl Client {
     /// Called with the full batch — do not loop one-by-one inside the callback
     /// if your model supports batching (Transformers.js pipeline, etc.).
     #[wasm_bindgen(js_name = setEmbedder)]
-    pub fn set_embedder(&mut self, fn_: js_sys::Function) {
+    pub fn set_embedder(
+        &mut self,
+        #[wasm_bindgen(
+            unchecked_param_type = "(texts: string[]) => Promise<number[][]> | number[][]"
+        )]
+        fn_: js_sys::Function,
+    ) {
         self.embed_mode = EmbedMode::Js(fn_);
     }
 
@@ -562,13 +714,17 @@ impl Client {
                 for t in &texts {
                     array.push(&JsValue::from_str(t));
                 }
-                let promise = fn_
+                let returned = fn_
                     .call1(&JsValue::NULL, &array)
                     .map_err(|e| JsValue::from_str(&format!("embedder call failed: {:?}", e)))?;
 
-                let result = wasm_bindgen_futures::JsFuture::from(js_sys::Promise::from(promise))
-                    .await
-                    .map_err(|e| JsValue::from_str(&format!("embedder rejected: {:?}", e)))?;
+                let result = if returned.is_instance_of::<js_sys::Promise>() {
+                    wasm_bindgen_futures::JsFuture::from(js_sys::Promise::from(returned))
+                        .await
+                        .map_err(|e| JsValue::from_str(&format!("embedder rejected: {:?}", e)))?
+                } else {
+                    returned
+                };
 
                 let rows: Vec<Vec<f32>> = serde_wasm_bindgen::from_value(result).map_err(|e| {
                     JsValue::from_str(&format!("embedder returned invalid vectors: {}", e))
@@ -705,36 +861,63 @@ impl Client {
 
     /// Parse, compile, embed if needed, and POST to Qdrant's REST API.
     ///
-    /// Accepts:
-    /// - `string` — single statement or semicolon-delimited multi-statement
-    ///   script (smart batching for same-collection queries/mutations)
-    /// - `string[]` — each entry executed as above; results returned as array
-    #[wasm_bindgen]
-    pub async fn execute(&self, query: JsValue) -> Result<String, JsValue> {
+    /// Accepts a string (single statement or semicolon-delimited script) or
+    /// a `string[]`. Always returns a stable `ExecutionReport` object:
+    /// `{ "ok": bool, "results": [...], "succeeded": N, "failed": M }`.
+    #[wasm_bindgen(unchecked_return_type = "ExecutionReport")]
+    pub async fn execute(
+        &self,
+        #[wasm_bindgen(unchecked_param_type = "string | string[]")] query: JsValue,
+        #[wasm_bindgen(unchecked_optional_param_type = "ExecuteOptions")] options: Option<JsValue>,
+    ) -> Result<JsValue, JsValue> {
+        let on_error = parse_on_error(options)?;
         if js_sys::Array::is_array(&query) {
             let arr = js_sys::Array::from(&query);
             let len = arr.length() as usize;
-            let mut results: Vec<serde_json::Value> = Vec::with_capacity(len);
+            let mut all_results: Vec<serde_json::Value> = Vec::new();
+            let mut succeeded = 0usize;
+            let mut failed = 0usize;
             for i in 0..len {
                 let item = arr.get(i as u32);
-                if let Some(s) = item.as_string() {
-                    match self.execute_script(&s).await {
-                        Ok(v) => results.push(v),
-                        Err(e) => {
-                            results.push(serde_json::json!({
-                                "ok": false,
-                                "error": e.as_string().unwrap_or_default()
-                            }));
+                let s = item.as_string().ok_or_else(|| {
+                    JsValue::from_str(&format!(
+                        "array item at index {} must be a string, got {:?}",
+                        i,
+                        item.js_typeof()
+                    ))
+                })?;
+                match self.execute_script(&s, on_error).await {
+                    Ok(report) => {
+                        succeeded += report.succeeded;
+                        failed += report.failed;
+                        all_results.extend(report.results);
+                    }
+                    Err(e) => {
+                        if on_error == WasmOnError::Stop {
+                            return Err(e);
                         }
+                        failed += 1;
+                        all_results.push(exec_response(
+                            false,
+                            "ERROR",
+                            &e.as_string().unwrap_or_default(),
+                            None,
+                        ));
                     }
                 }
             }
-            return serde_json::to_string(&results).map_err(|e| JsValue::from_str(&e.to_string()));
+            let report = WasmReport {
+                ok: failed == 0,
+                results: all_results,
+                succeeded,
+                failed,
+            };
+            return to_js_value(&report);
         }
 
         if let Some(s) = query.as_string() {
-            let val = self.execute_script(&s).await?;
-            return serde_json::to_string(&val).map_err(|e| JsValue::from_str(&e.to_string()));
+            let report = self.execute_script(&s, on_error).await?;
+            return to_js_value(&report);
         }
 
         Err(JsValue::from_str("query must be a string or string[]"))
@@ -742,161 +925,294 @@ impl Client {
 
     /// Execute a pre-parsed Stmt object.  Injects embeddings for UPSERT
     /// if an embedder is configured.
-    #[wasm_bindgen(js_name = executeStmt)]
-    pub async fn execute_stmt(&self, stmt: &Stmt) -> Result<String, JsValue> {
+    #[wasm_bindgen(js_name = executeStmt, unchecked_return_type = "ExecutionReport")]
+    pub async fn execute_stmt(&self, stmt: &Stmt) -> Result<JsValue, JsValue> {
         let val = self.execute_stmt_inner(&stmt.inner).await?;
-        serde_json::to_string(&val).map_err(|e| JsValue::from_str(&e.to_string()))
+        let report = WasmReport::single(val);
+        to_js_value(&report)
     }
 
     /// Execute one or more statements with order-preserving smart batching.
-    async fn execute_script(&self, query: &str) -> Result<serde_json::Value, JsValue> {
-        let norm = normalize_input(query);
-        let stmts = match Parser::parse_all(&norm) {
-            Ok(s) if !s.is_empty() => s,
-            Ok(_) => {
-                return Ok(serde_json::json!({
-                    "ok": true,
-                    "operation": "EMPTY",
-                    "message": "empty script",
-                }));
+    /// Returns a JSON value shaped like ExecutionReport.
+    async fn execute_script(
+        &self,
+        query: &str,
+        on_error: WasmOnError,
+    ) -> Result<WasmReport, JsValue> {
+        let stmts = match Parser::parse_all(query) {
+            Ok(stmts) => stmts,
+            Err(error) if on_error == WasmOnError::Stop => {
+                return Err(JsValue::from_str(&error.to_string()));
             }
-            Err(_) => {
-                // Fall back to single-statement parse for better error messages
-                let stmt = Parser::parse(&norm).map_err(|e| JsValue::from_str(&e.to_string()))?;
-                vec![stmt]
+            Err(error) => {
+                return Ok(WasmReport::single(exec_response(
+                    false,
+                    "PARSE",
+                    &error.to_string(),
+                    None,
+                )));
             }
         };
-
-        if stmts.len() == 1 {
-            return self.execute_stmt_inner(&stmts[0]).await;
+        if stmts.is_empty() {
+            return Ok(WasmReport::empty());
         }
 
-        let mut results = Vec::with_capacity(stmts.len());
-        let mut i = 0;
-        while i < stmts.len() {
-            // Contiguous mutation batch
-            if let Some((coll, first_op)) = qql_plan::mutation::lower_update_operation(&stmts[i]) {
-                let mut ops = vec![first_op];
-                let mut j = i + 1;
-                while j < stmts.len() {
-                    match qql_plan::mutation::lower_update_operation(&stmts[j]) {
-                        Some((c, op)) if c == coll => {
-                            ops.push(op);
-                            j += 1;
-                        }
-                        _ => break,
-                    }
-                }
-                if ops.len() >= 2 {
-                    let op_names: Vec<&'static str> =
-                        ops.iter().map(|o| o.operation_name()).collect();
-                    let batch = qql_plan::UpdateBatchRequest { operations: ops };
-                    let path = format!("/collections/{coll}/points/batch?wait=true");
-                    let body = serde_json::to_value(&batch)
-                        .map_err(|e| JsValue::from_str(&e.to_string()))?;
-                    let resp = self.send_json("POST", &path, Some(body)).await?;
-                    let arr = resp
-                        .get("result")
-                        .and_then(|r| r.as_array())
-                        .cloned()
-                        .unwrap_or_default();
-                    for (k, val) in arr.into_iter().enumerate() {
-                        results.push(serde_json::json!({
-                            "ok": true,
-                            "operation": op_names.get(k).copied().unwrap_or("MUTATION"),
-                            "data": val,
-                        }));
-                    }
-                    while results.len() < j {
-                        let name = op_names
-                            .get(results.len().saturating_sub(i))
-                            .copied()
-                            .unwrap_or("MUTATION");
-                        results.push(serde_json::json!({"ok": true, "operation": name}));
-                    }
-                    i = j;
-                    continue;
-                }
+        let mut results: Vec<serde_json::Value> = Vec::with_capacity(stmts.len());
+        let mut pending = Vec::new();
+        let mut pending_key: Option<WasmBatchKey> = None;
+
+        for stmt in stmts {
+            let statement_key = wasm_statement_batch_key(&stmt);
+            if !pending.is_empty() && statement_key != pending_key {
+                self.flush_planned_group(&mut pending, on_error, &mut results)
+                    .await?;
+                pending_key = None;
             }
 
-            // Contiguous query batch
-            if let Some((coll, q0)) = wasm_batchable_query(&stmts[i]) {
-                let req0 = qql_plan::query::lower_query_request(&q0)
-                    .map_err(|e| JsValue::from_str(&e.to_string()))?;
-                let mut searches = vec![req0];
-                let mut j = i + 1;
-                while j < stmts.len() {
-                    match wasm_batchable_query(&stmts[j]) {
-                        Some((c, q)) if c == coll => {
-                            let req = qql_plan::query::lower_query_request(&q)
-                                .map_err(|e| JsValue::from_str(&e.to_string()))?;
-                            searches.push(req);
-                            j += 1;
-                        }
-                        _ => break,
+            let planned = match self.prepare_operation(&stmt).await {
+                Ok(planned) => planned,
+                Err(error) => {
+                    self.flush_planned_group(&mut pending, on_error, &mut results)
+                        .await?;
+                    pending_key = None;
+                    if on_error == WasmOnError::Stop {
+                        return Err(error);
                     }
-                }
-                if searches.len() >= 2 {
-                    let n = searches.len();
-                    let batch = qql_plan::QueryBatchRequest { searches };
-                    let path = format!("/collections/{coll}/points/query/batch");
-                    let body = serde_json::to_value(&batch)
-                        .map_err(|e| JsValue::from_str(&e.to_string()))?;
-                    let resp = self.send_json("POST", &path, Some(body)).await?;
-                    let arr = resp
-                        .get("result")
-                        .and_then(|r| r.as_array())
-                        .cloned()
-                        .unwrap_or_default();
-                    for val in arr {
-                        results.push(serde_json::json!({
-                            "ok": true,
-                            "operation": "QUERY",
-                            "data": val,
-                        }));
-                    }
-                    while results.len() < i + n {
-                        results.push(serde_json::json!({
-                            "ok": true,
-                            "operation": "QUERY",
-                            "data": {"points": []},
-                        }));
-                    }
-                    i = j;
+                    results.push(exec_response(
+                        false,
+                        "PREPARE",
+                        &error.as_string().unwrap_or_default(),
+                        None,
+                    ));
                     continue;
                 }
+            };
+
+            let key = wasm_planned_batch_key(&planned);
+            if key.is_none() {
+                self.flush_planned_group(&mut pending, on_error, &mut results)
+                    .await?;
+                pending_key = None;
+                self.dispatch_or_collect(planned, on_error, &mut results)
+                    .await?;
+                continue;
             }
 
-            match self.execute_stmt_inner(&stmts[i]).await {
-                Ok(v) => results.push(v),
-                Err(e) => {
-                    results.push(serde_json::json!({
-                        "ok": false,
-                        "error": e.as_string().unwrap_or_default(),
-                    }));
-                }
+            if !pending.is_empty() && key != pending_key {
+                self.flush_planned_group(&mut pending, on_error, &mut results)
+                    .await?;
             }
-            i += 1;
+            pending_key = key;
+            pending.push(planned);
         }
 
-        Ok(serde_json::json!({
-            "ok": true,
-            "operation": "SCRIPT",
-            "message": format!("Executed {} statement(s)", results.len()),
-            "data": results,
-        }))
+        self.flush_planned_group(&mut pending, on_error, &mut results)
+            .await?;
+        Ok(WasmReport::from_results(results))
+    }
+
+    async fn prepare_operation(
+        &self,
+        stmt: &qql_core::ast::Stmt,
+    ) -> Result<qql_plan::PlannedOperation, JsValue> {
+        let mut stmt = stmt.clone();
+        self.resolve_stmt_embeddings(&mut stmt).await?;
+        qql_plan::plan(&stmt).map_err(|error| JsValue::from_str(&error.to_string()))
+    }
+
+    async fn execute_planned_inner(
+        &self,
+        operation: &qql_plan::PlannedOperation,
+    ) -> Result<serde_json::Value, JsValue> {
+        let route = qql_plan::to_rest_route(operation);
+        let result = self
+            .send_json(route.method.as_str(), &route.path, route.body_json())
+            .await?;
+        Ok(wasm_success_response(operation, result))
+    }
+
+    async fn dispatch_or_collect(
+        &self,
+        operation: qql_plan::PlannedOperation,
+        on_error: WasmOnError,
+        results: &mut Vec<serde_json::Value>,
+    ) -> Result<(), JsValue> {
+        match self.execute_planned_inner(&operation).await {
+            Ok(response) => results.push(response),
+            Err(error) if on_error == WasmOnError::Stop => return Err(error),
+            Err(error) => results.push(exec_response(
+                false,
+                operation.operation_label(),
+                &error.as_string().unwrap_or_default(),
+                None,
+            )),
+        }
+        Ok(())
+    }
+
+    async fn flush_planned_group(
+        &self,
+        pending: &mut Vec<qql_plan::PlannedOperation>,
+        on_error: WasmOnError,
+        results: &mut Vec<serde_json::Value>,
+    ) -> Result<(), JsValue> {
+        use qql_plan::mutation::planned_to_update_operation;
+        use qql_plan::{PlannedOperation, QueryBatchRequest, UpdateBatchRequest};
+
+        if pending.is_empty() {
+            return Ok(());
+        }
+        if pending.len() == 1 {
+            let operation = pending.pop().expect("pending contains one operation");
+            return self.dispatch_or_collect(operation, on_error, results).await;
+        }
+
+        let operations = core::mem::take(pending);
+        match &operations[0] {
+            PlannedOperation::Query { collection, .. } => {
+                let collection = collection.clone();
+                let searches = operations
+                    .iter()
+                    .map(|operation| match operation {
+                        PlannedOperation::Query { request, .. } => Ok(request.clone()),
+                        _ => Err(JsValue::from_str(
+                            "QQL-BATCH-INVARIANT: query batch contained a non-query operation",
+                        )),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let expected = searches.len();
+                let batch = QueryBatchRequest { searches };
+                let path = format!("/collections/{collection}/points/query/batch");
+                let body = serde_json::to_value(&batch)
+                    .map_err(|error| JsValue::from_str(&error.to_string()))?;
+                match self.send_json("POST", &path, Some(body)).await {
+                    Ok(response) => {
+                        let values = response
+                            .get("result")
+                            .and_then(serde_json::Value::as_array)
+                            .cloned()
+                            .unwrap_or_default();
+                        if values.len() != expected {
+                            let error = JsValue::from_str(&format!(
+                                "QQL-BATCH-CARDINALITY: query batch returned {} results for {expected} operations",
+                                values.len()
+                            ));
+                            self.collect_batch_error(
+                                error,
+                                &vec!["QUERY"; expected],
+                                on_error,
+                                results,
+                            )?;
+                        } else {
+                            for value in values {
+                                let hits = wasm_search_hits(&value);
+                                let count = hits.as_array().map_or(0, Vec::len);
+                                results.push(exec_response(
+                                    true,
+                                    "QUERY",
+                                    &format!("Found {count} hits"),
+                                    Some(hits),
+                                ));
+                            }
+                        }
+                    }
+                    Err(error) => self.collect_batch_error(
+                        error,
+                        &vec!["QUERY"; expected],
+                        on_error,
+                        results,
+                    )?,
+                }
+            }
+            _ => {
+                let mut updates = Vec::with_capacity(operations.len());
+                let mut labels = Vec::with_capacity(operations.len());
+                let mut collection = None;
+                for operation in &operations {
+                    let Some((current_collection, update)) = planned_to_update_operation(operation)
+                    else {
+                        return Err(JsValue::from_str(
+                            "QQL-BATCH-INVARIANT: mutation batch contained a non-mutation operation",
+                        ));
+                    };
+                    if collection
+                        .as_ref()
+                        .is_some_and(|collection| collection != &current_collection)
+                    {
+                        return Err(JsValue::from_str(
+                            "QQL-BATCH-INVARIANT: mutation batch contained multiple collections",
+                        ));
+                    }
+                    collection.get_or_insert(current_collection);
+                    labels.push(update.operation_name());
+                    updates.push(update);
+                }
+                let collection = collection.unwrap_or_default();
+                let expected = updates.len();
+                let batch = UpdateBatchRequest {
+                    operations: updates,
+                };
+                let path = format!("/collections/{collection}/points/batch?wait=true");
+                let body = serde_json::to_value(&batch)
+                    .map_err(|error| JsValue::from_str(&error.to_string()))?;
+                match self.send_json("POST", &path, Some(body)).await {
+                    Ok(response) => {
+                        let values = response
+                            .get("result")
+                            .and_then(serde_json::Value::as_array)
+                            .cloned()
+                            .unwrap_or_default();
+                        if values.len() != expected {
+                            let error = JsValue::from_str(&format!(
+                                "QQL-BATCH-CARDINALITY: update batch returned {} results for {expected} operations",
+                                values.len()
+                            ));
+                            self.collect_batch_error(error, &labels, on_error, results)?;
+                        } else {
+                            for (value, label) in values.into_iter().zip(labels.iter()) {
+                                results.push(exec_response(
+                                    true,
+                                    label,
+                                    &format!("{label} ok (batched)"),
+                                    Some(value),
+                                ));
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        self.collect_batch_error(error, &labels, on_error, results)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn collect_batch_error(
+        &self,
+        error: JsValue,
+        labels: &[&str],
+        on_error: WasmOnError,
+        results: &mut Vec<serde_json::Value>,
+    ) -> Result<(), JsValue> {
+        if on_error == WasmOnError::Stop {
+            return Err(error);
+        }
+        let message = error.as_string().unwrap_or_default();
+        results.extend(
+            labels
+                .iter()
+                .map(|label| exec_response(false, label, &message, None)),
+        );
+        Ok(())
     }
 
     async fn execute_stmt_inner(
         &self,
         stmt: &qql_core::ast::Stmt,
     ) -> Result<serde_json::Value, JsValue> {
-        let mut stmt = stmt.clone();
-        self.resolve_stmt_embeddings(&mut stmt).await?;
-        let route = routing::route(&stmt);
-        let body = route.body_json();
-        self.send_json(route.method.as_str(), &route.path, body)
-            .await
+        let operation = self.prepare_operation(stmt).await?;
+        self.execute_planned_inner(&operation).await
     }
 
     async fn send_json(
@@ -939,18 +1255,10 @@ impl Client {
         serde_json::from_str(&text).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
-    /// Parse → route → return the JSON payload without executing.
-    #[wasm_bindgen]
-    pub fn compile(&self, query: &str) -> Result<String, JsValue> {
-        let stmt = Parser::parse(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
-        let route = routing::route(&stmt);
-        let json_body = route.body_json();
-        let output = serde_json::json!({
-            "method": route.method.as_str(),
-            "path": route.path,
-            "payload": json_body.unwrap_or(serde_json::Value::Null),
-        });
-        serde_json::to_string(&output).map_err(|e| JsValue::from_str(&e.to_string()))
+    /// Parse and compile one statement without executing it.
+    #[wasm_bindgen(unchecked_return_type = "CompiledRoute")]
+    pub fn compile(&self, query: &str) -> Result<JsValue, JsValue> {
+        compile(query)
     }
 
     /// Parse and explain the query — no server needed.
@@ -961,22 +1269,89 @@ impl Client {
 }
 
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
-fn wasm_batchable_query(stmt: &qql_core::ast::Stmt) -> Option<(String, qql_core::ast::QueryStmt)> {
-    match stmt {
-        qql_core::ast::Stmt::Query(q) => {
-            if matches!(q.expression, qql_core::ast::QueryExpr::Points { .. }) || q.group.is_some()
-            {
-                return None;
-            }
-            match &q.collection {
-                qql_core::ast::QueryCollection::Explicit(name) => {
-                    Some((name.clone(), (**q).clone()))
-                }
-                qql_core::ast::QueryCollection::Inherited => None,
-            }
+fn wasm_search_hits(result: &serde_json::Value) -> serde_json::Value {
+    let points = result
+        .get("result")
+        .and_then(|value| value.get("points"))
+        .and_then(serde_json::Value::as_array)
+        .or_else(|| result.get("points").and_then(serde_json::Value::as_array))
+        .or_else(|| result.get("result").and_then(serde_json::Value::as_array));
+
+    serde_json::Value::Array(
+        points
+            .into_iter()
+            .flatten()
+            .map(|hit| {
+                let id = hit
+                    .get("id")
+                    .map(|id| match id {
+                        serde_json::Value::String(value) => value.clone(),
+                        serde_json::Value::Number(value) => value.to_string(),
+                        _ => id.to_string(),
+                    })
+                    .unwrap_or_default();
+                let payload = hit
+                    .get("payload")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
+                let text = payload
+                    .get("text")
+                    .and_then(serde_json::Value::as_str)
+                    .map(serde_json::Value::from)
+                    .unwrap_or(serde_json::Value::Null);
+                serde_json::json!({
+                    "id": id,
+                    "score": hit.get("score").and_then(serde_json::Value::as_f64).unwrap_or(0.0),
+                    "text": text,
+                    "payload": payload,
+                })
+            })
+            .collect(),
+    )
+}
+
+#[cfg(all(feature = "client", target_arch = "wasm32"))]
+fn wasm_success_response(
+    operation: &qql_plan::PlannedOperation,
+    result: serde_json::Value,
+) -> serde_json::Value {
+    use qql_plan::PlannedOperation;
+
+    let label = operation.operation_label();
+    let (message, data) = match operation {
+        PlannedOperation::Query { .. }
+        | PlannedOperation::Scroll { .. }
+        | PlannedOperation::GetPoints { .. } => {
+            let hits = wasm_search_hits(&result);
+            let count = hits.as_array().map_or(0, Vec::len);
+            (format!("Found {count} hits"), Some(hits))
         }
-        _ => None,
-    }
+        PlannedOperation::QueryGroups { .. } => {
+            let count = result
+                .get("result")
+                .and_then(|value| value.get("groups"))
+                .or_else(|| result.get("groups"))
+                .and_then(serde_json::Value::as_array)
+                .map_or(0, Vec::len);
+            (format!("Found {count} group(s)"), Some(result))
+        }
+        PlannedOperation::Count { .. } => {
+            let count = result
+                .get("result")
+                .and_then(|value| value.get("count"))
+                .or_else(|| result.get("count"))
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0);
+            (format!("Count: {count}"), Some(result))
+        }
+        PlannedOperation::Upsert { request, .. } => (
+            format!("Upserted {} point(s)", request.points.len()),
+            Some(serde_json::json!({"count": request.points.len()})),
+        ),
+        PlannedOperation::ListShardKeys { .. } => ("Shard keys listed".to_string(), Some(result)),
+        _ => (format!("{label} ok"), None),
+    };
+    exec_response(true, label, &message, data)
 }
 
 // ── WASM dense embed collect/apply (mirrors runtime batching) ─────

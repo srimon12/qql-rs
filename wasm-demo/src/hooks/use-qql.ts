@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import init, { analyzeValue, Client, Stmt } from "qql-wasm"
+import init, { analyze, Client, Stmt } from "qql-wasm"
 import type {
   AnalysisResult,
   ExecMetrics,
@@ -132,7 +132,7 @@ export function useQql() {
       }
 
       const t0 = performance.now()
-      const baseResult = (analyzeValue(source) ?? emptyAnalysis()) as AnalysisResult
+      const baseResult = (analyze(source) ?? emptyAnalysis()) as AnalysisResult
 
       if (tenantConfig?.enabled && tenantConfig.field.trim() && tenantConfig.value.trim()) {
         try {
@@ -141,7 +141,7 @@ export function useQql() {
           if (tenantConfig.shardKey.trim()) {
             stmt.shardKey = tenantConfig.shardKey.trim()
           }
-          const injectedRoute = typeof stmt.compileRouteValue === "function" ? stmt.compileRouteValue() : JSON.parse(stmt.compileRoute())
+          const injectedRoute = stmt.compileRoute()
           const result: AnalysisResult = {
             ...baseResult,
             route: injectedRoute,
@@ -204,24 +204,20 @@ export function useQql() {
         }
 
         const t0 = performance.now()
-        let resJson = ""
+        let report
         if (tenantConfig?.enabled && tenantConfig.field.trim() && tenantConfig.value.trim()) {
           const stmt = new Stmt(text)
           stmt.injectFilter(tenantConfig.field.trim(), tenantConfig.op || "=", tenantConfig.value.trim())
           if (tenantConfig.shardKey.trim()) {
             stmt.shardKey = tenantConfig.shardKey.trim()
           }
-          resJson = await clientRef.current!.executeStmt(stmt)
+          report = await clientRef.current!.executeStmt(stmt)
         } else {
-          resJson = await clientRef.current!.execute(text)
+          report = await clientRef.current!.execute(text)
         }
         const totalMs = performance.now() - t0
 
-        try {
-          setResponse(JSON.stringify(JSON.parse(resJson), null, 2))
-        } catch {
-          setResponse(resJson)
-        }
+        setResponse(JSON.stringify(report, null, 2))
 
         const meta = getBrowserEmbedMeta()
         const embedMs = probe.lastEmbedMs

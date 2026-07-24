@@ -56,7 +56,7 @@ plan = client.explain("QUERY 'cardiology' FROM medical_records USING dense LIMIT
 print(plan)
 
 # 2. Pure AST Parsing & Filter Injection
-stmt = pyqql.parse("QUERY 'vector database' FROM docs USING dense LIMIT 10")
+stmt = pyqql.parse("QUERY 'vector database' FROM docs USING dense LIMIT 10")[0]
 valid = pyqql.is_valid("QUERY 'test' FROM docs")
 secured_stmt = pyqql.inject_filter("QUERY 'patients' FROM medical LIMIT 5", "org_id", "=", "acme-corp")
 
@@ -74,6 +74,10 @@ route = pyqql.compile_query("QUERY 'search' FROM docs LIMIT 10")
 # route = { "method": "POST", "path": "/collections/docs/points/query", "payload": {...} }
 ```
 
+All execution methods return an `ExecutionReport` dict:
+`{"ok": bool, "results": list, "succeeded": int, "failed": int}`. The
+`results` list always contains one entry per executed statement.
+
 ## API Summary
 
 | Export | Description |
@@ -81,16 +85,14 @@ route = pyqql.compile_query("QUERY 'search' FROM docs LIMIT 10")
 | `Client(url, api_key, use_grpc, embedder)` | Client for executing QQL against a live Qdrant database |
 | `HttpEmbedder(endpoint, model, dimension, api_key)` | First-class HTTP embedding provider configuration |
 | `Stmt` | Parsed statement object with `inject_filter()`, `to_json()`, `to_dict()`, `shard_key` property |
-| `parse(input)` | Parse single statement to typed `Stmt` object |
-| `parse_all(input)` | Parse semicolon-delimited script into a list of `Stmt` objects |
-| `parse_batch(queries)` | Batch-parse multiple query strings |
+| `parse(input)` | Parse one statement or a semicolon-delimited script into a list of `Stmt` objects |
 | `is_valid(input)` | Validate QQL syntax |
 | `inject_filter(query, field, op, value)` | Inject tenant filter into statement AST (accepts str or Stmt) |
 | `tokenize(input)` | Tokenize QQL string for syntax highlighting or inspection |
 | `compile_query(input)` | Lower QQL statement into typed `{ method, path, payload }` route dict |
 | `explain(query)` | Inspect the execution plan without executing network calls (accepts str or Stmt) |
-| `execute(query, url, api_key, use_grpc, embedder)` | Free-function convenience execute |
-| `execute_async(query, url, api_key, use_grpc, embedder)` | Free-function async execute |
-| `Client.execute(query)` | Execute a string, Stmt, list[str], or list[Stmt] (auto-batched) |
-| `Client.execute_async(query)` | Async variant of execute |
+| `execute(query, ..., on_error="stop")` | Free-function convenience execute |
+| `execute_async(query, ..., on_error="stop")` | Free-function async execute |
+| `Client.execute(query, on_error="stop")` | Execute a string, Stmt, list[str], or list[Stmt] |
+| `Client.execute_async(query, on_error="stop")` | Async variant of execute |
 | `Client.explain(query)` | Inspect execution plan (accepts str or Stmt) |

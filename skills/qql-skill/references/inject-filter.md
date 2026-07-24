@@ -52,7 +52,7 @@ inject_filter(&mut stmt, "group_id", ComparisonOp::Eq, Value::Str("grp_123".into
 ```python
 import pyqql
 
-stmt = pyqql.parse("QUERY 'laptops' FROM products LIMIT 10")
+stmt = pyqql.parse("QUERY 'laptops' FROM products LIMIT 10")[0]
 pyqql.inject_filter(stmt, "group_id", "=", "grp_123")
 ```
 
@@ -60,8 +60,8 @@ pyqql.inject_filter(stmt, "group_id", "=", "grp_123")
 ```javascript
 const nqql = require('nqql');
 
-const stmt = nqql.parse("QUERY 'laptops' FROM products LIMIT 10");
-nqql.injectFilter(stmt, "group_id", "=", "grp_123");
+const [stmt] = nqql.parse("QUERY 'laptops' FROM products LIMIT 10");
+stmt.injectFilter("group_id", "=", "grp_123");
 ```
 
 ### WASM (`qql-wasm`)
@@ -69,6 +69,10 @@ nqql.injectFilter(stmt, "group_id", "=", "grp_123");
 import init, { parse, inject_filter } from 'qql-wasm';
 
 await init();
-let stmt = parse("QUERY 'laptops' FROM products LIMIT 10");
-inject_filter(stmt, "group_id", "=", "grp_123");
+const stmt = inject_filter(
+  "QUERY 'laptops' FROM products LIMIT 10",
+  "group_id",
+  "=",
+  "grp_123",
+);
 ```

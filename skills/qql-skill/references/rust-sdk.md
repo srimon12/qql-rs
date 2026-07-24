@@ -54,14 +54,17 @@ fn tenant_route(user_query: &str, tenant: &str) -> Result<(), Box<dyn std::error
 Full runtime: parse, optionally resolve embeddings, execute against Qdrant.
 
 ```rust
-use qql::executor::Executor;
+use qql::executor::{Executor, OnError};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Convenience constructors -- REST or gRPC with optional API key
     let exec = Executor::rest("http://localhost:6333", Some("my-api-key".into()))?;
 
-    exec.execute("QUERY 'supply chain risks' FROM sec10k SHARD 'honeywell' LIMIT 10").await?;
+    exec.execute(
+        "QUERY 'supply chain risks' FROM sec10k SHARD 'honeywell' LIMIT 10",
+        OnError::Stop,
+    ).await?;
 
     Ok(())
 }
@@ -70,7 +73,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 Prefer `Executor::rest()` or `Executor::grpc()` over manual construction. If you need a custom HTTP client, use the four-argument constructor:
 
 ```rust
-use qql::executor::Executor;
+use qql::executor::{Executor, OnError};
 use qql::rest::RestQdrant;
 
 let client = RestQdrant::with_client(
@@ -166,7 +169,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         CREATE INDEX ON COLLECTION docs FOR title TYPE text;
         CREATE INDEX ON COLLECTION docs FOR tenant_id TYPE keyword WITH (is_tenant = true);
         CREATE SHARD KEY 'acme' ON COLLECTION docs WITH (shards_number = 2);
-    "#).await?;
+    "#, OnError::Stop).await?;
 
     Ok(())
 }

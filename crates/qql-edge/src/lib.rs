@@ -16,10 +16,11 @@
 //!
 //! ```rust,no_run
 //! use qql_edge::local_executor;
+//! use qql::executor::OnError;
 //!
 //! # async fn example() -> Result<(), qql_core::error::QqlError> {
 //! let mut executor = local_executor("/tmp/qql-edge-data", false)?;
-//! let resp = executor.execute("CREATE COLLECTION docs HYBRID").await?;
+//! let resp = executor.execute("CREATE COLLECTION docs HYBRID", OnError::Stop).await?;
 //! # Ok(())
 //! # }
 //! ```

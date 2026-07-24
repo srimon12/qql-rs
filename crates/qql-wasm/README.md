@@ -19,7 +19,7 @@ npm install qql-wasm
 ## Quick Start
 
 ```javascript
-import init, { Client, Stmt, parse, parse_all, isValid, inject_filter, compile, explain, analyze } from 'qql-wasm';
+import init, { Client, Stmt, parse, isValid, inject_filter, compile, explain, analyze } from 'qql-wasm';
 
 async function run() {
     await init();
@@ -52,8 +52,8 @@ async function run() {
     const stmtResponse = await client.executeStmt(stmt);
 
     // 3. Compile / Explain (offline)
-    const routeJson = compile("QUERY 'search' FROM docs LIMIT 10");
-    console.log("Compiled route:", routeJson);
+    const route = compile("QUERY 'search' FROM docs LIMIT 10");
+    console.log("Compiled route:", route);
 
     const plan = explain("QUERY 'search' FROM docs LIMIT 10");
     console.log("Execution plan:", plan);
@@ -71,7 +71,7 @@ async function run() {
     const ast = parse("QUERY 'search' FROM docs LIMIT 10");
     const valid = isValid("QUERY 'search' FROM docs");
     const safeAst = inject_filter("QUERY 'docs' FROM items LIMIT 10", "tenant_id", "=", "acme");
-    const batchAsts = parse_all("QUERY 'a' FROM c LIMIT 1; QUERY 'b' FROM c LIMIT 1");
+    const batchAsts = parse("QUERY 'a' FROM c LIMIT 1; QUERY 'b' FROM c LIMIT 1");
     const tokenList = tokenize("QUERY 'search' FROM docs");
 }
 
@@ -84,14 +84,12 @@ run();
 
 | Export | Description |
 |---|---|
-| `parse(input)` | Parse single statement to AST object |
-| `parse_all(input)` | Parse semicolon-delimited script to array of AST objects |
-| `parse_batch(queries)` | Batch-parse array of query strings |
+| `parse(input)` | Parse QQL source into an array of AST objects (single or multi-statement) |
 | `isValid(input)` | Validate QQL syntax |
 | `inject_filter(query, field, op, value)` | Inject tenant filter into statement AST |
 | `tokenize(input)` | Tokenize QQL string — each token has `kind`, `text`, `pos`, `end`, `len` |
-| `analyze(input)` | Unity API — returns `{ valid, statements_count, tokens, ast, route, explain, error }` |
-| `compile(input)` | Lower QQL statement to typed Qdrant REST route JSON string |
+| `analyze(input)` | Unity API — returns `{ valid, statements_count, tokens, ast, route, routes, explain, error }` |
+| `compile(input)` | Lower QQL statement to a typed Qdrant REST route object |
 | `explain(input)` | Format query execution plan |
 
 ### `Stmt` class
@@ -113,9 +111,9 @@ run();
 | `client.setHttpEmbedder(endpoint, model, dim, apiKey?)` | OpenAI-compatible HTTP embedder (**endpoint required**) |
 | `client.setRemoteEmbedder(endpoint, model, dim, apiKey?)` | Alias for `setHttpEmbedder` |
 | `client.hasEmbedder()` | Check whether any embedder is configured |
-| `client.execute(query)` | Execute string or string[] (smart-batches same-collection stmts) |
-| `client.executeStmt(stmt)` | Execute a pre-parsed Stmt object |
-| `client.compile(query)` | Lower QQL to route JSON (same as free `compile`) |
+| `client.execute(query, options?)` | Execute string or string[] and return an `ExecutionReport` object; `options.onError` is `stop` or `continue` |
+| `client.executeStmt(stmt)` | Execute a pre-parsed Stmt object and return an `ExecutionReport` object |
+| `client.compile(query)` | Lower QQL to a route object (same as free `compile`) |
 | `client.explain(query)` | Format execution plan (same as free `explain`) |
 
 ## Feature Flags

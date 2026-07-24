@@ -179,7 +179,7 @@ def main():
         f"CREATE INDEX ON COLLECTION {config.COLLECTION} FOR reviews_count TYPE integer;",
     ]
     for q in index_queries:
-        for stmt in pyqql.parse_all(q):
+        for stmt in pyqql.parse(q):
             try:
                 client.execute(stmt)
             except Exception as e:

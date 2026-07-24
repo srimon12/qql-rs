@@ -21,14 +21,14 @@ LM = "http://127.0.0.1:1234"
 def run_qql(qql, tenant, year=None):
     """Execute QQL with tenant + optional year isolation."""
     tenant = tenant.lower().strip()  # Qdrant shard keys are lowercase
-    stmt = pyqql.parse(qql)
+    stmt = pyqql.parse(qql)[0]
     pyqql.inject_filter(stmt, "tenant_id", "=", tenant)
     if year:
         pyqql.inject_filter(stmt, "fiscal_year", "=", year)
     e = pyqql.HttpEmbedder(f"{LM}/v1/embeddings", config.EMBED_MODEL, config.EMBED_DIM)
     client = pyqql.Client(config.QDRANT_URL, embedder=e)
     resp = client.execute(stmt)
-    return resp.get("data", [])
+    return resp["results"][0].get("data", [])
 
 
 def format_hits(hits):

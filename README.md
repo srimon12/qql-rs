@@ -24,7 +24,7 @@ pip install pyqql
 from pyqql import parse, tokenize, is_valid, inject_filter, Client, HttpEmbedder
 
 # Parse any QQL statement into an AST
-stmt = parse("QUERY 'machine learning' FROM papers USING dense LIMIT 20 WHERE year >= 2024")
+stmt = parse("QUERY 'machine learning' FROM papers USING dense LIMIT 20 WHERE year >= 2024")[0]
 
 # Check if a query is valid without returning the AST
 if is_valid("CREATE COLLECTION docs (dense VECTOR(384, COSINE))"):
@@ -84,13 +84,32 @@ Every language binding exposes the same core set of functions:
 
 | Function | Returns | Description |
 |----------|---------|-------------|
-| `parse(input)` | AST (`Stmt` object or dictionary) | Parse a single QQL statement |
-| `parse_all(input)` | `Vec<Stmt>` | Parse a semicolon-delimited script |
-| `parse_batch(queries)` | `Vec<Stmt>` | Batch-parse multiple queries (minimises FFI overhead) |
+| `parse(input)` | List of AST statements | Parse one statement or a semicolon-delimited script |
 | `tokenize(input)` | `Vec<Token>` | Tokenize for highlighting, validation, or analysis |
-| `is_valid(input)` / `isValid` | `bool` | Lightweight syntax validation |
+| `is_valid(input)` / `isValid` | `bool` | Parse and validate the complete source without returning its AST |
 | `inject_filter(query, field, op, value)` | AST | Programmatically inject a WHERE clause into statement AST |
-| `compile(query)` / `compile_query` | Route object | Lower QQL statement into a transport-neutral route. Python returns `{ method, path, payload }`; Node/WASM return `{ stmt_type, payload }`. |
+| `compile(query)` / `compile_query` | Route object | Lower one QQL statement into `{ method, path, payload }` (`stmt_type` is also included in Node/WASM). |
+
+The language SDKs expose one cardinality-stable `parse()` operation. Rust keeps
+the explicit `Parser::parse()` and `Parser::parse_all()` methods because their
+static return types are intentionally different.
+
+Every SDK execution entry point returns the same cardinality-stable report:
+
+```json
+{
+  "ok": true,
+  "results": [
+    { "ok": true, "operation": "QUERY", "message": "Found 2 hits", "data": [] }
+  ],
+  "succeeded": 1,
+  "failed": 0
+}
+```
+
+Use `on_error="continue"` in Python or `{ onError: "continue" }` in
+Node/WASM to retain failures in statement order. The default is to stop and
+raise on the first failure.
 
 ---
 
@@ -111,19 +130,19 @@ and hope it works. QQL gives you **programmatic access to the query itself**:
 
 ## Language Status
 
-| Crate / SDK | Language | parse | tokenize | is_valid | inject_filter | parse_all | parse_batch | Runtime |
-|---|---|---|---|---|---|---|---|---|
-| **pyqql** | Python (PyO3) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **qql-core** | Rust parser | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
-| **qql-plan** | Rust lowering | — | — | — | — | — | — | — |
-| **qql** | Rust runtime | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **nqql** | Node.js (N-API) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **qql-wasm** | WebAssembly | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Crate / SDK | Language | parse | tokenize | is_valid | inject_filter | Runtime |
+|---|---|---|---|---|---|---|---|
+| **pyqql** | Python (PyO3) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **pyqql-edge** | Python (PyO3, local) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **qql-core** | Rust parser | ✅ | ✅ | ✅ | ✅ | — |
+| **qql-plan** | Rust lowering | — | — | — | — | — |
+| **qql** | Rust runtime | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **nqql** | Node.js (N-API) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **qql-wasm** | WebAssembly | ✅ | ✅ | ✅ | ✅ | ✅ |
 
-> **Known limitation**: `qql-wasm` re-exports the parser and routing functions
-> but the WASM Client does not include the full executor pipeline
-> (`resolve_embeddings` is not bound via `#[wasm_bindgen]`). Runtime execution
-> in WASM delegates embedding to JS-side HTTP providers.
+> **WASM transport**: `qql-wasm` executes through Qdrant's REST API. Embeddings
+> can be supplied by a JavaScript callback or an OpenAI-compatible HTTP
+> endpoint; gRPC is available only in the native SDKs.
 
 ---
 

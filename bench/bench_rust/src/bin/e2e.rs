@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use qql::client::*;
-use qql::executor::Executor;
+use qql::executor::{Executor, OnError};
 use qql_core::error::QqlError;
 use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 use std::time::{Duration, Instant};
@@ -73,12 +73,12 @@ const QUERIES: &[(&str, &str)] = &[
 
 async fn bench(executor: &Executor, _name: &str, q: &str, iterations: usize) -> Duration {
     for _ in 0..100 {
-        let _ = executor.execute(q).await;
+        let _ = executor.execute(q, OnError::Stop).await;
     }
 
     let start = Instant::now();
     for _ in 0..iterations {
-        let _ = executor.execute(q).await;
+        let _ = executor.execute(q, OnError::Stop).await;
     }
     start.elapsed()
 }

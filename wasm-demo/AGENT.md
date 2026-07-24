@@ -72,7 +72,7 @@ wasm-demo/
 
 ```
 User types QQL
-    → debounced analyze(source)          # qql-wasm, sync JSON string
+    → debounced analyze(source)          # qql-wasm, sync AnalysisResult object
     → AnalysisResult { valid, tokens, ast, route, explain, error }
     → CodeMirror lint from error.start/end
     → Inspector tabs update
@@ -93,11 +93,11 @@ User hits Execute
 import init, { analyze, Client } from "qql-wasm"
 await init()
 
-const json = analyze(qql)           // stringified AnalysisResult
+const analysis = analyze(qql)       // AnalysisResult object
 const client = new Client(url, apiKey | null)
 client.setEmbedder(async (texts: string[]) => number[][])
 client.setHttpEmbedder(endpoint, model, dim, apiKey | null)
-const resJson = await client.execute(qql)  // string
+const report = await client.execute(qql)   // ExecutionReport object
 ```
 
 Constructor is **positional** `(url?, api_key?)` — not an options object (unlike nqql).

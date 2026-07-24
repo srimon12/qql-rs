@@ -23,8 +23,7 @@ npm install nqql
 ```javascript
 const {
   Client, HttpEmbedder, Stmt,
-  parse, parseAll, parseBatch,
-  parseFastJson, parseBatchFastJson,
+  parse,
   isValid, injectFilter, tokenize,
   compileQuery, explain, explainStmt,
   execute, executeStmt
@@ -54,7 +53,8 @@ const plan = client.explain("QUERY 'cardiology' FROM medical_records USING dense
 console.log(plan);
 
 // 2. Pure AST Parsing & Filter Injection
-const stmt = parse("QUERY 'full text match' FROM articles LIMIT 10");
+// parse() always returns an array of Stmt objects
+const stmts = parse("QUERY 'full text match' FROM articles LIMIT 10");
 const valid = isValid("QUERY 'test' FROM docs");
 const secured = injectFilter("QUERY 'search' FROM docs LIMIT 10", "org_id", "=", "acme-corp");
 
@@ -62,10 +62,7 @@ const secured = injectFilter("QUERY 'search' FROM docs LIMIT 10", "org_id", "=",
 const route = compileQuery("QUERY 'search' FROM docs LIMIT 10");
 console.log("Compiled route:", route);  // { stmt_type, payload }
 
-// 4. Fast JSON parse (skips N-API object allocation)
-const stmtJson = parseFastJson("QUERY 'hello' FROM docs LIMIT 10");
-
-// 5. Free-function convenience execute
+// 4. Free-function convenience execute
 const result2 = await execute("SHOW COLLECTIONS", { url: "http://localhost:6333" });
 ```
 
@@ -78,11 +75,7 @@ const result2 = await execute("SHOW COLLECTIONS", { url: "http://localhost:6333"
 | `HttpEmbedder(options)` | First-class HTTP embedding provider configuration |
 | `Stmt` | Parsed statement object (`injectFilter`, `toObject`, `toJSON`, `shardKey` property) |
 | **Parsing** | |
-| `parse(input)` | Parse single statement to AST `Stmt` object |
-| `parseAll(input)` | Parse semicolon-delimited script to array of `Stmt` objects |
-| `parseBatch(queries)` | Batch-parse array of query strings |
-| `parseFastJson(query)` | Parse single statement, returns JSON string (avoids N-API object alloc) |
-| `parseBatchFastJson(queries)` | Batch-parse, returns JSON string |
+| `parse(input)` | Parse one statement or a script into an array of `Stmt` objects |
 | `isValid(input)` | Validate QQL syntax |
 | `tokenize(input)` | Tokenize QQL input string |
 | **Filter / Route** | |
@@ -92,12 +85,12 @@ const result2 = await execute("SHOW COLLECTIONS", { url: "http://localhost:6333"
 | `explain(query)` | Inspect the execution plan without executing network calls |
 | `explainStmt(stmt)` | Explain a pre-parsed Stmt object |
 | **Execute** | |
-| `execute(query, options?)` | Free-function async execute (returns JSON string) |
+| `execute(query, options?)` | Execute and return `ExecutionReport`; `options.onError` is `stop` or `continue` |
 | `executeStmt(stmt, options?)` | Free-function execute a pre-parsed Stmt |
 | `Client.explain(query)` | Explain query via Client |
 | `Client.explainStmt(stmt)` | Explain Stmt via Client |
 | `Client.compile(query)` | Compile query to route via Client |
-| `Client.execute(query)` | Execute string, Stmt, or array (auto-batched) — returns JSON string |
+| `Client.execute(query, options?)` | Execute string, Stmt, or array; `options.onError` controls failure policy |
 
 ### Client options
 
@@ -111,7 +104,7 @@ const result2 = await execute("SHOW COLLECTIONS", { url: "http://localhost:6333"
 ## Stmt class
 
 ```javascript
-const stmt = new Stmt("QUERY 'search' FROM docs LIMIT 10");
+const [stmt] = parse("QUERY 'search' FROM docs LIMIT 10");
 stmt.injectFilter("tenant_id", "=", "acme-corp");
 stmt.shardKey = "shard-01";             // setter (QUERY/COUNT/SCROLL/UPSERT/DELETE only)
 const obj = stmt.toObject();            // JS object

@@ -20,7 +20,7 @@ impl PyStmt {
             ));
         }
         let val = py_to_value(value)?;
-        let cmp = str_to_comparison_op(op);
+        let cmp = str_to_comparison_op(op)?;
         ast::inject_filter(&mut self.inner, field, cmp, val)
             .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
         Ok(())
@@ -62,31 +62,17 @@ impl PyStmt {
     }
 }
 
+/// Parse a QQL source into a list of Stmt objects.
+/// Accepts single statements and semicolon-delimited scripts.
 #[pyfunction]
-fn parse(input: &str) -> PyResult<PyStmt> {
-    let stmt = Parser::parse(input).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
-    Ok(PyStmt { inner: stmt })
-}
-
-#[pyfunction]
-fn parse_all(input: &str) -> PyResult<Vec<PyStmt>> {
+fn parse(input: &str) -> PyResult<Vec<PyStmt>> {
     let stmts = Parser::parse_all(input).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
     Ok(stmts.into_iter().map(|s| PyStmt { inner: s }).collect())
 }
 
 #[pyfunction]
-fn parse_batch(queries: Vec<String>) -> PyResult<Vec<PyStmt>> {
-    let mut results = Vec::with_capacity(queries.len());
-    for q in queries {
-        let stmt = Parser::parse(&q).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
-        results.push(PyStmt { inner: stmt });
-    }
-    Ok(results)
-}
-
-#[pyfunction]
 fn is_valid(input: &str) -> bool {
-    Parser::try_parse(input).is_ok()
+    Parser::parse_all(input).is_ok()
 }
 
 #[pyfunction]
@@ -102,7 +88,7 @@ fn inject_filter(
         ));
     }
     let val = py_to_value(value)?;
-    let cmp = str_to_comparison_op(op);
+    let cmp = str_to_comparison_op(op)?;
     if let Ok(mut py_stmt) = query.extract::<PyRefMut<'_, PyStmt>>() {
         ast::inject_filter(&mut py_stmt.inner, field, cmp, val)
             .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
@@ -166,6 +152,21 @@ impl PyHttpEmbedder {
         dimension: usize,
         api_key: Option<String>,
     ) -> PyResult<Self> {
+        if endpoint.trim().is_empty() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "embedding endpoint is required",
+            ));
+        }
+        if model.trim().is_empty() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "embedding model is required",
+            ));
+        }
+        if dimension == 0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "embedding dimension must be positive",
+            ));
+        }
         Ok(PyHttpEmbedder {
             endpoint: endpoint.to_string(),
             api_key: api_key.unwrap_or_default(),
@@ -196,18 +197,50 @@ fn extract_embedder_config(
             model = Some(py_emb.model.clone());
             dim = Some(py_emb.dimension);
         } else if let Ok(dict) = emb.downcast::<PyDict>() {
-            if let Some(v) = dict.get_item("endpoint")? {
-                ep = v.extract::<String>().ok();
+            ep = Some(
+                dict.get_item("endpoint")?
+                    .ok_or_else(|| {
+                        pyo3::exceptions::PyValueError::new_err("embedder.endpoint is required")
+                    })?
+                    .extract::<String>()?,
+            );
+            model = Some(
+                dict.get_item("model")?
+                    .ok_or_else(|| {
+                        pyo3::exceptions::PyValueError::new_err("embedder.model is required")
+                    })?
+                    .extract::<String>()?,
+            );
+            dim = Some(
+                dict.get_item("dimension")?
+                    .ok_or_else(|| {
+                        pyo3::exceptions::PyValueError::new_err("embedder.dimension is required")
+                    })?
+                    .extract::<usize>()?,
+            );
+            ep_key = dict
+                .get_item("api_key")?
+                .map(|value| value.extract::<String>())
+                .transpose()?;
+            if ep.as_ref().is_some_and(|value| value.trim().is_empty()) {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "embedder.endpoint must not be empty",
+                ));
             }
-            if let Some(v) = dict.get_item("api_key")? {
-                ep_key = v.extract::<String>().ok();
+            if model.as_ref().is_some_and(|value| value.trim().is_empty()) {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "embedder.model must not be empty",
+                ));
             }
-            if let Some(v) = dict.get_item("model")? {
-                model = v.extract::<String>().ok();
+            if dim == Some(0) {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "embedder.dimension must be positive",
+                ));
             }
-            if let Some(v) = dict.get_item("dimension")? {
-                dim = v.extract::<usize>().ok();
-            }
+        } else {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "embedder must be an HttpEmbedder or dict",
+            ));
         }
     }
     Ok((ep, ep_key, model, dim))
@@ -300,27 +333,32 @@ impl PyClient {
     /// Execute a QQL query string, a pre-parsed Stmt, or a list of either.
     /// Lists of same-collection QUERY statements are automatically batched
     /// into a single network call.
+    #[pyo3(signature = (query, *, on_error="stop"))]
     fn execute<'py>(
         &self,
         py: Python<'py>,
         query: &Bound<'_, PyAny>,
+        on_error: &str,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let out = self.classify_and_run(query)?;
+        let oe = parse_on_error(on_error)?;
+        let out = self.classify_and_run(query, oe)?;
         pythonize::pythonize(py, &out)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
     }
 
     /// Async variant — accepts the same input types as `execute`.
-    #[pyo3(signature = (query))]
+    #[pyo3(signature = (query, *, on_error="stop"))]
     fn execute_async<'py>(
         &self,
         py: Python<'py>,
         query: Bound<'py, PyAny>,
+        on_error: &str,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
+        let oe = parse_on_error(on_error)?;
         let classified = self.classify(&query)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let val = Self::run_async(&inner, classified)
+            let val = Self::run_async(&inner, classified, oe)
                 .await
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
             Python::with_gil(|py| {
@@ -389,36 +427,43 @@ impl PyClient {
         Ok(Input::String(s))
     }
 
-    fn classify_and_run(&self, query: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
+    fn classify_and_run(
+        &self,
+        query: &Bound<'_, PyAny>,
+        on_error: qql::executor::OnError,
+    ) -> PyResult<serde_json::Value> {
+        let stop = matches!(on_error, qql::executor::OnError::Stop);
         match self.classify(query)? {
             Input::String(s) => {
-                let res = self
+                let report = self
                     .runtime
-                    .block_on(self.inner.execute(&s))
+                    .block_on(self.inner.execute(&s, on_error))
                     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-                Ok(serde_json::to_value(&res).unwrap_or_default())
+                Ok(serde_json::to_value(&report).unwrap_or_default())
             }
             Input::Stmt(s) => {
-                let res = self
+                let results = self
                     .runtime
-                    .block_on(self.inner.execute_node(s))
+                    .block_on(self.inner.execute_batch_nodes(vec![s], stop))
                     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-                Ok(serde_json::to_value(&res).unwrap_or_default())
+                let report = qql::executor::ExecutionReport::from_results(results);
+                Ok(serde_json::to_value(&report).unwrap_or_default())
             }
             Input::StrList(strs) => {
                 let refs: Vec<&str> = strs.iter().map(|s| s.as_str()).collect();
-                let results = self
+                let report = self
                     .runtime
-                    .block_on(self.inner.execute_batch(&refs, true))
+                    .block_on(self.inner.execute_batch(&refs, on_error))
                     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-                Ok(serde_json::to_value(&results).unwrap_or_default())
+                Ok(serde_json::to_value(&report).unwrap_or_default())
             }
             Input::StmtList(stmts) => {
                 let results = self
                     .runtime
-                    .block_on(self.inner.execute_batch_nodes(stmts, true))
+                    .block_on(self.inner.execute_batch_nodes(stmts, stop))
                     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-                Ok(serde_json::to_value(&results).unwrap_or_default())
+                let report = qql::executor::ExecutionReport::from_results(results);
+                Ok(serde_json::to_value(&report).unwrap_or_default())
             }
         }
     }
@@ -426,24 +471,28 @@ impl PyClient {
     async fn run_async(
         inner: &qql::executor::Executor,
         input: Input,
+        on_error: qql::executor::OnError,
     ) -> Result<serde_json::Value, qql_core::error::QqlError> {
+        let stop = matches!(on_error, qql::executor::OnError::Stop);
         match input {
             Input::String(s) => {
-                let res = inner.execute(&s).await?;
-                Ok(serde_json::to_value(&res).unwrap_or_default())
+                let report = inner.execute(&s, on_error).await?;
+                Ok(serde_json::to_value(&report).unwrap_or_default())
             }
             Input::Stmt(s) => {
-                let res = inner.execute_node(s).await?;
-                Ok(serde_json::to_value(&res).unwrap_or_default())
+                let results = inner.execute_batch_nodes(vec![s], stop).await?;
+                let report = qql::executor::ExecutionReport::from_results(results);
+                Ok(serde_json::to_value(&report).unwrap_or_default())
             }
             Input::StrList(strs) => {
                 let refs: Vec<&str> = strs.iter().map(|s| s.as_str()).collect();
-                let results = inner.execute_batch(&refs, true).await?;
-                Ok(serde_json::to_value(&results).unwrap_or_default())
+                let report = inner.execute_batch(&refs, on_error).await?;
+                Ok(serde_json::to_value(&report).unwrap_or_default())
             }
             Input::StmtList(stmts) => {
-                let results = inner.execute_batch_nodes(stmts, true).await?;
-                Ok(serde_json::to_value(&results).unwrap_or_default())
+                let results = inner.execute_batch_nodes(stmts, stop).await?;
+                let report = qql::executor::ExecutionReport::from_results(results);
+                Ok(serde_json::to_value(&report).unwrap_or_default())
             }
         }
     }
@@ -452,7 +501,7 @@ impl PyClient {
 // ── free functions ────────────────────────────────────────────────
 
 #[pyfunction]
-#[pyo3(signature = (query, url="http://localhost:6333", api_key=None, use_grpc=false, embedder=None))]
+#[pyo3(signature = (query, *, url="http://localhost:6333", api_key=None, use_grpc=false, embedder=None, on_error="stop"))]
 fn execute<'py>(
     py: Python<'py>,
     query: &Bound<'_, PyAny>,
@@ -460,13 +509,14 @@ fn execute<'py>(
     api_key: Option<String>,
     use_grpc: bool,
     embedder: Option<&Bound<'_, PyAny>>,
+    on_error: &str,
 ) -> PyResult<Bound<'py, PyAny>> {
     let client = PyClient::new(url, api_key, use_grpc, embedder)?;
-    client.execute(py, query)
+    client.execute(py, query, on_error)
 }
 
 #[pyfunction]
-#[pyo3(signature = (query, url="http://localhost:6333", api_key=None, use_grpc=false, embedder=None))]
+#[pyo3(signature = (query, *, url="http://localhost:6333", api_key=None, use_grpc=false, embedder=None, on_error="stop"))]
 fn execute_async<'py>(
     py: Python<'py>,
     query: Bound<'py, PyAny>,
@@ -474,45 +524,20 @@ fn execute_async<'py>(
     api_key: Option<String>,
     use_grpc: bool,
     embedder: Option<&Bound<'_, PyAny>>,
+    on_error: &str,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let (inner, rt) = create_executor(url, api_key, use_grpc, embedder)?;
-    let inner_arc = std::sync::Arc::new(inner);
-    let is_stmt = query.extract::<PyRef<PyStmt>>().is_ok();
-    let query_str = if !is_stmt {
-        Some(query.extract::<String>()?)
-    } else {
-        None
-    };
-    let py_stmt = if is_stmt {
-        Some(query.extract::<PyRef<PyStmt>>()?.inner.clone())
-    } else {
-        None
-    };
+    let client = PyClient::new(url, api_key, use_grpc, embedder)?;
+    client.execute_async(py, query, on_error)
+}
 
-    pyo3_async_runtimes::tokio::future_into_py(py, async move {
-        let res = if let Some(stmt) = py_stmt {
-            inner_arc
-                .execute_node(stmt)
-                .await
-                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
-        } else if let Some(q_str) = query_str {
-            inner_arc
-                .execute(&q_str)
-                .await
-                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
-        } else {
-            return Err(pyo3::exceptions::PyTypeError::new_err(
-                "query must be a string or a Stmt object",
-            ));
-        };
-        let _rt_keepalive = rt;
-        let py_val = Python::with_gil(|py| {
-            pythonize::pythonize(py, &res)
-                .map(|b| b.unbind())
-                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
-        })?;
-        Ok(py_val)
-    })
+fn parse_on_error(s: &str) -> PyResult<qql::executor::OnError> {
+    match s {
+        "stop" => Ok(qql::executor::OnError::Stop),
+        "continue" => Ok(qql::executor::OnError::Continue),
+        _ => Err(pyo3::exceptions::PyValueError::new_err(
+            "on_error must be 'stop' or 'continue'",
+        )),
+    }
 }
 
 #[pyfunction]
@@ -538,8 +563,6 @@ fn pyqql(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(execute_async, m)?)?;
     m.add_function(wrap_pyfunction!(explain, m)?)?;
     m.add_function(wrap_pyfunction!(parse, m)?)?;
-    m.add_function(wrap_pyfunction!(parse_all, m)?)?;
-    m.add_function(wrap_pyfunction!(parse_batch, m)?)?;
     m.add_function(wrap_pyfunction!(is_valid, m)?)?;
     m.add_function(wrap_pyfunction!(inject_filter, m)?)?;
     m.add_function(wrap_pyfunction!(tokenize, m)?)?;
@@ -583,13 +606,15 @@ fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
     Err(PySyntaxError::new_err("unsupported filter value type"))
 }
 
-fn str_to_comparison_op(op: &str) -> ComparisonOp {
+fn str_to_comparison_op(op: &str) -> PyResult<ComparisonOp> {
     match op {
-        "=" | "==" | "eq" => ComparisonOp::Eq,
-        ">" | "gt" => ComparisonOp::Gt,
-        ">=" | "gte" => ComparisonOp::Gte,
-        "<" | "lt" => ComparisonOp::Lt,
-        "<=" | "lte" => ComparisonOp::Lte,
-        _ => ComparisonOp::Eq,
+        "=" | "==" | "eq" => Ok(ComparisonOp::Eq),
+        ">" | "gt" => Ok(ComparisonOp::Gt),
+        ">=" | "gte" => Ok(ComparisonOp::Gte),
+        "<" | "lt" => Ok(ComparisonOp::Lt),
+        "<=" | "lte" => Ok(ComparisonOp::Lte),
+        _ => Err(PySyntaxError::new_err(format!(
+            "unsupported comparison operator '{op}' (use =, >, >=, <, <=)"
+        ))),
     }
 }

@@ -84,7 +84,11 @@ Check whether an embedder is configured: `client.hasEmbedder()`
 
 ## 3. Execute
 
-`execute()` accepts a single string, a semicolon-delimited multi-statement string, or an array of strings. Contiguous same-collection QUERYs use `/points/query/batch`; contiguous mutations (UPSERT/DELETE/UPDATE/CLEAR/DELETE VECTOR) use `/points/batch`.
+`execute()` accepts a string, a semicolon-delimited script, or an array of
+strings. Pass `{ onError: "continue" }` to collect per-statement failures; the
+default is `"stop"`. Adjacent compatible operations use Qdrant batch endpoints.
+Every execution path returns an `ExecutionReport` object with `ok`, `results`,
+`succeeded`, and `failed` fields.
 
 ```js
 // Single query
@@ -165,13 +169,13 @@ Note: `inject_filter` does not support `!=`. Use equality and wrap with `NOT`, o
 Lower QQL to a typed REST route object without a Qdrant connection.
 
 ```js
-import init, { compile, parse_all } from 'qql-wasm';
+import init, { compile, parse } from 'qql-wasm';
 await init();
 
 const route = compile("QUERY 'search' FROM docs USING dense LIMIT 10");
-// -> JSON string with stmt_type and payload
+// -> { stmt_type, method, path, payload }
 
-for (const stmt of parse_all(`
+for (const stmt of parse(`
   CREATE COLLECTION docs HYBRID (dense VECTOR(768, COSINE), sparse SPARSE)
     WITH PARAMS (replication_factor = 3);
   CREATE SHARD KEY 'acme' ON COLLECTION docs WITH (shards_number = 2);
@@ -199,16 +203,15 @@ const result = analyze("QUERY 'search' FROM docs USING dense LIMIT 10");
 ## 8. Free Functions
 
 ```js
-import init, { parse, parse_all, parse_batch, isValid, inject_filter,
+import init, { parse, isValid, inject_filter,
               tokenize, compile, explain } from 'qql-wasm';
 await init();
 
-parse("QUERY 'x' FROM docs LIMIT 5");                  // Parse to JS object
-parse_all("Q1; Q2;");                                    // Parse multi-statement
-parse_batch(["Q1", "Q2"]);                               // Parse batch
+parse("QUERY 'x' FROM docs LIMIT 5");                  // Always returns an array
+parse("Q1; Q2;");                                      // Parse multi-statement
 isValid("QUERY 'x' FROM docs LIMIT 5");                  // Validate
 inject_filter("QUERY 'x'", "tenant_id", "=", "acme");   // Inject filter (string -> object)
 tokenize("QUERY 'x'");                                   // Lex to tokens array
-compile("QUERY 'x' FROM docs LIMIT 5");                  // Compile to route JSON string
+compile("QUERY 'x' FROM docs LIMIT 5");                  // Compile to a route object
 explain("QUERY 'x' FROM docs LIMIT 5");                  // Explain plan string
 ```
