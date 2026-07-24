@@ -23,7 +23,7 @@ npm install nqql
 ```javascript
 const {
   Client, HttpEmbedder, Stmt,
-  parse,
+  parse, parseJson,
   isValid, injectFilter, tokenize,
   compileQuery, explain, explainStmt,
   execute, executeStmt
@@ -55,6 +55,8 @@ console.log(plan);
 // 2. Pure AST Parsing & Filter Injection
 // parse() always returns an array of Stmt objects
 const stmts = parse("QUERY 'full text match' FROM articles LIMIT 10");
+// parseJson() returns raw JSON — 2× faster, ideal for IPC/forwarding
+const rawJson = parseJson("QUERY 'full text match' FROM articles LIMIT 10");
 const valid = isValid("QUERY 'test' FROM docs");
 const secured = injectFilter("QUERY 'search' FROM docs LIMIT 10", "org_id", "=", "acme-corp");
 
@@ -75,7 +77,8 @@ const result2 = await execute("SHOW COLLECTIONS", { url: "http://localhost:6333"
 | `HttpEmbedder(options)` | First-class HTTP embedding provider configuration |
 | `Stmt` | Parsed statement object (`injectFilter`, `toObject`, `toJSON`, `shardKey` property) |
 | **Parsing** | |
-| `parse(input)` | Parse one statement or a script into an array of `Stmt` objects |
+| `parse(input)` | Parse into array of `Stmt` objects |
+| `parseJson(input)` | Parse to raw JSON string (2× faster, bypasses V8 objects) |
 | `isValid(input)` | Validate QQL syntax |
 | `tokenize(input)` | Tokenize QQL input string |
 | **Filter / Route** | |

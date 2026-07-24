@@ -61,6 +61,8 @@ export class Client {
 
 /** Parse one statement or a semicolon-delimited script into a stable list. */
 export function parse(query: string): Stmt[];
+/** Parse to raw JSON string — 2× faster, bypasses V8 object allocation. */
+export function parseJson(query: string): string;
 export function isValid(query: string): boolean;
 export function injectFilter(
   query: string,

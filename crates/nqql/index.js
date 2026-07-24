@@ -131,6 +131,14 @@ function parse(query) {
   return callNative(() => nativeBinding.parseAll(query));
 }
 
+/**
+ * Fast raw JSON parse — bypasses V8 object allocation entirely.
+ * Returns a JSON string of the AST array.  Ideal for HTTP/IPC forwarding.
+ */
+function parseJson(query) {
+  return callNative(() => nativeBinding.parseAllJson(query));
+}
+
 function isValid(query) {
   return nativeBinding.isValid(query);
 }
@@ -209,6 +217,7 @@ class Client {
 
 module.exports = {
   parse,
+  parseJson,
   isValid,
   injectFilter,
   tokenize,

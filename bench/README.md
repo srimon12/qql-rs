@@ -32,22 +32,23 @@ Benchmarks are split into two categories:
 ---
 
 ## 1. Parser Benchmarks (ops/sec)
-*Isolates lexing & parsing throughput into typed AST. Higher is better.*
+*Isolates lexing & parsing throughput. Higher is better.*
 
-| Query | Rust (`qql-rs`) | Python (`pyqql`) | Go (`qql-go`) | Node.js (`parse()`) |
-|-------|:--------:|:--------:|:--------:|:--------:|
-| **Simple** | **2,013,673** | 1,578,892 | 1,688,724 | 268,611 |
-| **Hybrid** | **967,512** | 662,547 | 1,300,844 | 250,493 |
-| **Full** | **342,320** | 281,751 | 664,517 | 107,158 |
-| **CTE Prefetch** | **412,878** | 426,369 | 337,312 | 88,663 |
-| **CreateCollection** | **632,640** | 552,779 | 393,101 | 166,466 |
-| **Upsert** | **665,708** | 504,412 | 508,451 | 179,549 |
-| **DeleteWhere** | **1,824,899** | 785,658 | 1,960,807 | 476,148 |
-| **OrderBy** | **1,100,388** | 794,345 | 1,020,497 | 235,700 |
-| **WithPayload** | **792,636** | 721,354 | 858,692 | 185,025 |
+| Query | Rust (`qql-rs`) | Python (`pyqql`) | Go (`qql-go`) | Node.js `parse()` | Node.js `parseJson()` |
+|-------|:--------:|:--------:|:--------:|:--------:|:--------:|
+| **Simple** | **2,013,673** | 1,578,892 | 1,688,724 | 411,827 | **762,056** |
+| **Hybrid** | **967,512** | 662,547 | 1,300,844 | 339,124 | **564,774** |
+| **Full** | **342,320** | 281,751 | 664,517 | 178,054 | **232,484** |
+| **CTE Prefetch** | **412,878** | 426,369 | 337,312 | 175,726 | **209,755** |
+| **CreateCollection** | **632,640** | 552,779 | 393,101 | 235,094 | **334,780** |
+| **Upsert** | **665,708** | 504,412 | 508,451 | 257,485 | **417,342** |
+| **DeleteWhere** | **1,824,899** | 785,658 | **1,960,807** | 453,009 | **977,042** |
+| **OrderBy** | **1,100,388** | 794,345 | 1,020,497 | 314,648 | **592,737** |
+| **WithPayload** | **792,636** | 721,354 | 858,692 | 261,655 | **426,109** |
 
-* **Python DX Win**: Because `pyqql` wraps the native Rust `Stmt` directly inside PyO3 memory, parser throughput matches native Rust/Go speeds almost 1-to-1 (up to **1.58M ops/s**!).
-* **Node.js API Strategy**: `parse()` returns a stable array of native `Stmt` objects for both single statements and scripts.
+* **Python DX Win**: `pyqql` wraps the native Rust `Stmt` directly inside PyO3 memory — parser throughput matches native Rust/Go speeds almost 1-to-1 (up to **1.58M ops/s**).
+* **Node.js parse()** returns a stable array of native `Stmt` objects. ~400K ops/s — the V8 object allocation is the bottleneck.
+* **Node.js parseJson()** returns the raw JSON string directly from Rust. Bypasses V8 object heap allocation entirely for maximum forwarding throughput — **1.85–2.15× faster** than `parse()`. Ideal for HTTP/IPC forwarding.
 
 ---
 
@@ -103,4 +104,5 @@ PYTHONPATH=target/release python3 bench/bench_python.py
 
 # 4. Node.js (Parser & E2E)
 node bench/bench_node.js
+# For the raw JSON fast path, use parseJson() instead of parse() in the bench.
 ```

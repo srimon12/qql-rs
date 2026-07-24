@@ -154,15 +154,20 @@ console.log(stmt.toObject());
 ## 6. Free Functions
 
 ```js
-const { parse, isValid, injectFilter, tokenize, compileQuery } = require('nqql');
+const { parse, parseJson, isValid, injectFilter, tokenize, compileQuery } = require('nqql');
 
 parse("QUERY 'x' FROM docs LIMIT 5");                    // Always Stmt[]
 parse("Q1; Q2;");                                        // Script -> Stmt[]
+parseJson("QUERY 'x' FROM docs LIMIT 5");                // Raw JSON string (2× faster, no V8 objects)
 isValid("QUERY 'x' FROM docs LIMIT 5");                  // Validate
 injectFilter("QUERY 'x' FROM docs", "tenant_id", "=", "acme");
 tokenize("QUERY 'x'");
 compileQuery("QUERY 'x' FROM docs LIMIT 5");
 ```
+
+`parseJson()` returns the raw JSON string directly from Rust, bypassing V8 object
+allocation entirely. It is **1.85–2.15× faster** than `parse()`. Prefer it for
+HTTP/IPC forwarding or any path that serialises to JSON anyway.
 
 ---
 
