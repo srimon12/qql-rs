@@ -339,10 +339,10 @@ pub fn lower_quantization_config_val(
     if let Some(quantile) = config.quantile {
         obj.insert("quantile".into(), serde_json::Value::from(quantile));
     }
-    if let Some(turbo_bits) = config.turbo_bits {
+    if let Some(bits) = config.bits {
         // Emit both keys: gRPC/plan use turbo_bits; REST/OpenAPI turbo config uses bits.
-        obj.insert("turbo_bits".into(), serde_json::Value::from(turbo_bits));
-        obj.insert("bits".into(), serde_json::Value::from(turbo_bits));
+        obj.insert("turbo_bits".into(), serde_json::Value::from(bits));
+        obj.insert("bits".into(), serde_json::Value::from(bits));
     }
     if let Some(ref compression) = config.compression {
         obj.insert(

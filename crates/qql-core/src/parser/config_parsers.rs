@@ -437,7 +437,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        let mut turbo_bits: Option<f64> = None;
+        let mut bits: Option<f64> = None;
         if qtype == QuantizationType::Turbo {
             if let Some(v) = config_value(&config, "bits") {
                 let bits_val = match v {
@@ -452,7 +452,7 @@ impl<'a> Parser<'a> {
                             self.peek()?.pos,
                         ));
                     }
-                    turbo_bits = Some(b);
+                    bits = Some(b);
                 }
             }
         }
@@ -529,7 +529,7 @@ impl<'a> Parser<'a> {
             qtype,
             always_ram,
             quantile,
-            turbo_bits,
+            bits,
             compression,
             encoding,
             query_encoding,

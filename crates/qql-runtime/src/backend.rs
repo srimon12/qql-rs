@@ -194,11 +194,7 @@ pub struct CollectionSchema {
     pub quantization: Option<serde_json::Value>,
 }
 
-impl CollectionSchema {
-    pub fn sparse_vector_names(&self) -> Vec<String> {
-        self.sparse_vectors.iter().map(|s| s.name.clone()).collect()
-    }
-}
+impl CollectionSchema {}
 
 /// Transport-neutral collection metadata consumed by the executor.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

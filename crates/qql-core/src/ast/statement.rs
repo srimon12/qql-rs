@@ -385,7 +385,7 @@ pub struct QuantizationConfig {
     pub qtype: QuantizationType,
     pub always_ram: bool,
     pub quantile: Option<f64>,
-    pub turbo_bits: Option<f64>,
+    pub bits: Option<f64>,
     pub compression: Option<String>,
     pub encoding: Option<String>,
     pub query_encoding: Option<String>,
