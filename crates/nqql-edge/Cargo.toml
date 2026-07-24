@@ -1,0 +1,26 @@
+[package]
+name = "nqql-edge"
+version.workspace = true
+edition.workspace = true
+description = "Node.js native bindings for QQL edge executor — qdrant-edge + fastembed, zero network"
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+default = ["fastembed-local"]
+# Local ONNX embedding via fastembed-rs (downloads models on first use — never shipped in npm package)
+fastembed-local = ["qql-edge/fastembed-local"]
+# HTTP-based embedding provider (OpenAI-compatible API)
+http-embedding = ["qql-edge/http-embedding"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+qql-core = { path = "../qql-core", features = ["serde", "json"] }
+qql-plan = { path = "../qql-plan" }
+qql = { path = "../qql-runtime", default-features = false }
+qql-edge = { path = "../qql-edge" }
+napi = { version = "2", features = ["napi8", "serde-json", "async"] }
+napi-derive = "2"
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

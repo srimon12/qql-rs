@@ -1,229 +1,224 @@
+use qdrant_edge::external::ordered_float::OrderedFloat;
 use qdrant_edge::{
-    NamedQuery, QueryEnum, SearchParams, VectorInternal, WithPayloadInterface, WithVector,
+    Fusion, NamedQuery, PayloadSelectorExclude, PayloadSelectorInclude, Prefetch, QueryEnum,
+    QueryRequest, ScoringQuery, SearchParams, VectorInternal, WithPayloadInterface, WithVector,
 };
 
 use qql_core::error::QqlError;
 use qql_plan::types::{
-    PayloadSelectorReq, QueryRequest, QueryVariant, SearchParamsRequest, VectorSelectorReq,
+    PayloadSelectorReq, PrefetchRequest, QueryRequest as PlanQueryRequest, QueryVariant,
+    SearchParamsRequest, VectorSelectorReq,
 };
 
-pub(crate) fn convert_query_request_with_shard(
-    req: &QueryRequest,
-    shard: &qdrant_edge::EdgeShard,
-) -> Result<qdrant_edge::SearchRequest, QqlError> {
-    if let QueryVariant::Recommend { recommend: ref rq } = req.query {
-        if let Some(pos_val) = rq.positive.first() {
-            use qql_plan::PlanQueryInput;
-            if let PlanQueryInput::Point(pid) = pos_val {
-                if let Ok(point_id) = crate::backend::conversions::to_edge_id(pid) {
-                    if let Ok(records) = shard.retrieve(
-                        &[point_id],
-                        Some(WithPayloadInterface::Bool(true)),
-                        Some(WithVector::Bool(true)),
-                    ) {
-                        if let Some(record) = records.into_iter().next() {
-                            if let Some(vector_struct) = record.vector {
-                                let dense_vec = match vector_struct {
-                                    qdrant_edge::VectorStructInternal::Single(v) => Some(v),
-                                    qdrant_edge::VectorStructInternal::Named(map) => {
-                                        let vec_name = req.using.as_deref().unwrap_or("dense");
-                                        map.get(vec_name).and_then(|vi| match vi {
-                                            VectorInternal::Dense(v) => Some(v.clone()),
-                                            _ => None,
-                                        })
-                                    }
-                                    _ => None,
-                                };
-                                if let Some(vec) = dense_vec {
-                                    let query = QueryEnum::Nearest(NamedQuery {
-                                        query: VectorInternal::Dense(vec),
-                                        using: req.using.clone(),
-                                    });
-                                    let filter = req
-                                        .filter
-                                        .as_ref()
-                                        .and_then(|f| serde_json::to_value(f).ok())
-                                        .and_then(|v| serde_json::from_value(v).ok());
-                                    return Ok(qdrant_edge::SearchRequest {
-                                        query,
-                                        filter,
-                                        params: req.params.as_ref().map(convert_search_params),
-                                        limit: req.limit.unwrap_or(10) as usize,
-                                        offset: req.offset.unwrap_or(0) as usize,
-                                        with_payload: req
-                                            .with_payload
-                                            .as_ref()
-                                            .map(convert_with_payload)
-                                            .or(Some(WithPayloadInterface::Bool(true))),
-                                        with_vector: Some(
-                                            req.with_vector
-                                                .as_ref()
-                                                .map(convert_with_vector)
-                                                .unwrap_or(WithVector::Bool(false)),
-                                        ),
-                                        score_threshold: req.score_threshold.map(|s| s as f32),
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+pub(crate) fn convert_query_request(request: &PlanQueryRequest) -> Result<QueryRequest, QqlError> {
+    if request.shard_key.is_some() {
+        return Err(unsupported_shard());
     }
-
-    convert_query_request(req)
-}
-
-pub(crate) fn convert_query_request(
-    req: &QueryRequest,
-) -> Result<qdrant_edge::SearchRequest, QqlError> {
-    let query = extract_query(&req.query, req, None)?;
-    let filter = req
-        .filter
-        .as_ref()
-        .and_then(|f| serde_json::to_value(f).ok())
-        .and_then(|v| serde_json::from_value(v).ok());
-    let params = req.params.as_ref().map(convert_search_params);
-    let limit = req.limit.unwrap_or(10) as usize;
-    let with_payload = req
-        .with_payload
-        .as_ref()
-        .map(convert_with_payload)
-        .or(Some(WithPayloadInterface::Bool(true)));
-    let with_vector = req.with_vector.as_ref().map(convert_with_vector);
-
-    Ok(qdrant_edge::SearchRequest {
-        query,
-        filter,
-        params,
-        limit,
-        offset: req.offset.unwrap_or(0) as usize,
-        with_payload,
-        with_vector: Some(with_vector.unwrap_or(WithVector::Bool(false))),
-        score_threshold: req.score_threshold.map(|s| s as f32),
+    Ok(QueryRequest {
+        prefetches: request
+            .prefetch
+            .iter()
+            .map(convert_prefetch)
+            .collect::<Result<_, _>>()?,
+        query: Some(convert_query(&request.query, request.using.as_deref())?),
+        filter: convert_filter(request.filter.as_ref())?,
+        score_threshold: request
+            .score_threshold
+            .map(|score| OrderedFloat(score as f32)),
+        limit: usize::try_from(request.limit.unwrap_or(10)).map_err(limit_error)?,
+        offset: usize::try_from(request.offset.unwrap_or(0)).map_err(limit_error)?,
+        params: request
+            .params
+            .as_ref()
+            .map(convert_search_params)
+            .transpose()?,
+        with_vector: request
+            .with_vector
+            .as_ref()
+            .map(convert_with_vector)
+            .unwrap_or(WithVector::Bool(false)),
+        with_payload: request
+            .with_payload
+            .as_ref()
+            .map(convert_with_payload)
+            .transpose()?
+            .unwrap_or(WithPayloadInterface::Bool(true)),
     })
 }
 
-fn extract_query(
-    qv: &QueryVariant,
-    req: &QueryRequest,
-    using_override: Option<String>,
-) -> Result<QueryEnum, QqlError> {
-    let effective_using = using_override.or_else(|| req.using.clone());
-    match qv {
-        QueryVariant::Nearest(nq) => {
+fn convert_prefetch(request: &PrefetchRequest) -> Result<Prefetch, QqlError> {
+    Ok(Prefetch {
+        prefetches: request
+            .prefetch
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .map(convert_prefetch)
+            .collect::<Result<_, _>>()?,
+        query: request
+            .query
+            .as_ref()
+            .map(|query| convert_query(query, request.using.as_deref()))
+            .transpose()?,
+        limit: usize::try_from(request.limit.unwrap_or(10)).map_err(limit_error)?,
+        params: request
+            .params
+            .as_ref()
+            .map(convert_search_params)
+            .transpose()?,
+        filter: convert_filter(request.filter.as_ref())?,
+        score_threshold: request
+            .score_threshold
+            .map(|score| OrderedFloat(score as f32)),
+    })
+}
+
+fn convert_query(query: &QueryVariant, using: Option<&str>) -> Result<ScoringQuery, QqlError> {
+    match query {
+        QueryVariant::Nearest(nearest) => {
             use qql_plan::{PlanQueryInput, PlanVectorValue};
-            match &nq.nearest {
-                PlanQueryInput::Vector(PlanVectorValue::Dense(data)) => {
-                    if data.is_empty() {
-                        return Err(QqlError::execution("QQL-EDGE", "empty dense vector", None));
-                    }
-                    Ok(QueryEnum::Nearest(NamedQuery {
-                        query: VectorInternal::Dense(data.clone()),
-                        using: effective_using,
-                    }))
+            let vector = match &nearest.nearest {
+                PlanQueryInput::Vector(PlanVectorValue::Dense(values)) if !values.is_empty() => {
+                    VectorInternal::Dense(values.clone())
                 }
                 PlanQueryInput::Vector(PlanVectorValue::Sparse { indices, values }) => {
-                    Ok(QueryEnum::Nearest(NamedQuery {
-                        query: VectorInternal::Sparse(qdrant_edge::SparseVector {
-                            indices: indices.clone(),
-                            values: values.clone(),
-                        }),
-                        using: effective_using,
-                    }))
+                    VectorInternal::Sparse(qdrant_edge::SparseVector {
+                        indices: indices.clone(),
+                        values: values.clone(),
+                    })
                 }
-                PlanQueryInput::Point(pid) => Err(QqlError::execution(
-                    "QQL-EDGE",
-                    format!(
-                        "nearest point-id query requires resolution (id={pid:?}); use recommend path"
-                    ),
-                    None,
-                )),
-                PlanQueryInput::Document { .. } => Err(QqlError::execution(
-                    "QQL-EDGE",
-                    "nearest document input requires client-side embedding before edge execution",
-                    None,
-                )),
-                PlanQueryInput::Vector(PlanVectorValue::MultiDense(_)) => Err(QqlError::execution(
-                    "QQL-EDGE",
-                    "multidense nearest not yet supported in edge mode",
-                    None,
-                )),
-            }
-        }
-        QueryVariant::Fusion { .. } => {
-            if let Some(pref) = req.prefetch.first() {
-                if let Some(ref q) = pref.query {
-                    extract_query(q, req, pref.using.clone())
-                } else {
-                    Err(QqlError::execution(
-                        "QQL-EDGE",
-                        "prefetch stream missing query",
-                        None,
-                    ))
+                PlanQueryInput::Vector(PlanVectorValue::MultiDense(_)) => {
+                    return Err(edge_error(
+                        "multidense queries are not supported in edge mode",
+                    ));
                 }
-            } else {
-                Err(QqlError::execution(
-                    "QQL-EDGE",
-                    "fusion query requires at least one prefetch stream",
-                    None,
-                ))
-            }
+                PlanQueryInput::Point(_) => {
+                    return Err(edge_error(
+                        "point-reference queries are not supported in edge mode; provide a vector",
+                    ));
+                }
+                PlanQueryInput::Document { .. } => {
+                    return Err(edge_error(
+                        "text input reached edge execution without client-side embedding",
+                    ));
+                }
+                PlanQueryInput::Vector(PlanVectorValue::Dense(_)) => {
+                    return Err(edge_error("dense query vector cannot be empty"));
+                }
+            };
+            Ok(ScoringQuery::Vector(QueryEnum::Nearest(NamedQuery {
+                query: vector,
+                using: using.map(str::to_string),
+            })))
         }
-        QueryVariant::Recommend { .. } => Err(QqlError::execution(
-            "QQL-EDGE",
-            "recommendation query requires point vector resolution",
-            None,
-        )),
-        _ => Err(QqlError::execution(
-            "QQL-EDGE",
-            "unsupported query variant in edge mode",
-            None,
-        )),
-    }
-}
-
-pub(crate) fn convert_search_params(p: &SearchParamsRequest) -> SearchParams {
-    SearchParams {
-        hnsw_ef: p.hnsw_ef.map(|v| v as usize),
-        exact: p.exact.unwrap_or(false),
-        quantization: p
-            .quantization
-            .as_ref()
-            .map(|q| qdrant_edge::QuantizationSearchParams {
-                ignore: q.ignore.unwrap_or(false),
-                rescore: q.rescore,
-                oversampling: q.oversampling,
+        QueryVariant::Fusion { fusion } => match fusion.as_str() {
+            "rrf" => Ok(ScoringQuery::Fusion(Fusion::Rrf {
+                k: 2,
+                weights: None,
+            })),
+            "dbsf" => Ok(ScoringQuery::Fusion(Fusion::Dbsf)),
+            other => Err(edge_error(format!("unsupported fusion method '{other}'"))),
+        },
+        QueryVariant::Rrf(rrf) => Ok(ScoringQuery::Fusion(Fusion::Rrf {
+            k: usize::try_from(rrf.rrf.k.unwrap_or(2)).map_err(limit_error)?,
+            weights: rrf.rrf.weights.as_ref().map(|weights| {
+                weights
+                    .iter()
+                    .map(|weight| OrderedFloat(*weight as f32))
+                    .collect()
             }),
-        indexed_only: p.indexed_only.unwrap_or(false),
+        })),
+        QueryVariant::Recommend { .. } => Err(edge_error(
+            "recommendation queries are not yet supported in edge mode",
+        )),
+        _ => Err(edge_error("query variant is not supported in edge mode")),
+    }
+}
+
+pub(crate) fn convert_search_params(
+    params: &SearchParamsRequest,
+) -> Result<SearchParams, QqlError> {
+    Ok(SearchParams {
+        hnsw_ef: params
+            .hnsw_ef
+            .map(usize::try_from)
+            .transpose()
+            .map_err(limit_error)?,
+        exact: params.exact.unwrap_or(false),
+        quantization: params.quantization.as_ref().map(|quantization| {
+            qdrant_edge::QuantizationSearchParams {
+                ignore: quantization.ignore.unwrap_or(false),
+                rescore: quantization.rescore,
+                oversampling: quantization.oversampling,
+            }
+        }),
+        indexed_only: params.indexed_only.unwrap_or(false),
         acorn: None,
+    })
+}
+
+pub(crate) fn convert_with_payload(
+    selector: &PayloadSelectorReq,
+) -> Result<WithPayloadInterface, QqlError> {
+    match selector {
+        PayloadSelectorReq::All(value) => Ok(WithPayloadInterface::Bool(*value)),
+        PayloadSelectorReq::Include { include } => Ok(PayloadSelectorInclude::new(
+            include
+                .iter()
+                .map(|path| parse_json_path(path))
+                .collect::<Result<_, _>>()?,
+        )
+        .into()),
+        PayloadSelectorReq::Exclude { exclude } => Ok(PayloadSelectorExclude::new(
+            exclude
+                .iter()
+                .map(|path| parse_json_path(path))
+                .collect::<Result<_, _>>()?,
+        )
+        .into()),
     }
 }
 
-pub(crate) fn convert_with_payload(ps: &PayloadSelectorReq) -> WithPayloadInterface {
-    match ps {
-        PayloadSelectorReq::All(b) => WithPayloadInterface::Bool(*b),
-        PayloadSelectorReq::Include { include } => {
-            let paths: Vec<qdrant_edge::JsonPath> = include
-                .iter()
-                .map(|s| serde_json::from_value(serde_json::Value::String(s.clone())).unwrap())
-                .collect();
-            WithPayloadInterface::Fields(paths)
-        }
-        PayloadSelectorReq::Exclude { exclude } => {
-            let paths: Vec<qdrant_edge::JsonPath> = exclude
-                .iter()
-                .map(|s| serde_json::from_value(serde_json::Value::String(s.clone())).unwrap())
-                .collect();
-            WithPayloadInterface::Fields(paths)
-        }
+pub(crate) fn convert_with_vector(selector: &VectorSelectorReq) -> WithVector {
+    match selector {
+        VectorSelectorReq::All(value) => WithVector::Bool(*value),
+        VectorSelectorReq::Names(names) => WithVector::Selector(names.clone()),
     }
 }
 
-pub(crate) fn convert_with_vector(vs: &VectorSelectorReq) -> WithVector {
-    match vs {
-        VectorSelectorReq::All(b) => WithVector::Bool(*b),
-        VectorSelectorReq::Names(_) => WithVector::Bool(true),
+fn convert_filter(
+    filter: Option<&impl serde::Serialize>,
+) -> Result<Option<qdrant_edge::Filter>, QqlError> {
+    let Some(filter) = filter else {
+        return Ok(None);
+    };
+    let mut value = serde_json::to_value(filter)
+        .map_err(|error| edge_error(format!("invalid filter: {error}")))?;
+    if value.get("key").is_some() {
+        value = serde_json::json!({ "must": [value] });
     }
+    serde_json::from_value(value)
+        .map(Some)
+        .map_err(|error| edge_error(format!("invalid filter format: {error}")))
+}
+
+fn parse_json_path(path: &str) -> Result<qdrant_edge::JsonPath, QqlError> {
+    serde_json::from_value(serde_json::Value::String(path.to_string()))
+        .map_err(|error| edge_error(format!("invalid payload path '{path}': {error}")))
+}
+
+fn limit_error(error: std::num::TryFromIntError) -> QqlError {
+    edge_error(format!("limit is too large for this platform: {error}"))
+}
+
+fn unsupported_shard() -> QqlError {
+    QqlError::execution(
+        "QQL-EDGE-UNSUPPORTED-SHARD",
+        "SHARD routing is available only with clustered Qdrant backends, not qql-edge",
+        None,
+    )
+}
+
+fn edge_error(message: impl Into<String>) -> QqlError {
+    QqlError::execution("QQL-EDGE", message.into(), None)
 }

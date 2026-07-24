@@ -68,8 +68,11 @@ impl<'a> Parser<'a> {
                 self.advance()?;
                 hybrid = true;
                 if self.peek()?.kind == TokenKind::Dense {
-                    self.advance()?;
-                    model = Some(self.parse_required_model_string()?);
+                    return Err(QqlError::validation(
+                        "QQL-VALIDATION-CREATE-MODEL",
+                        "HYBRID does not accept a single dense MODEL; configure the executor model or provide explicit vector dimensions",
+                        Some(self.peek()?.span),
+                    ));
                 }
             } else {
                 model = Some(self.parse_required_model_string()?);
@@ -236,54 +239,6 @@ impl<'a> Parser<'a> {
                 }
             }
             self.expect(TokenKind::Rparen)?;
-        }
-
-        // Fallback HYBRID/DENSE mode check (only if not already set before vectors)
-        if !hybrid && !rerank && model.is_none() {
-            if self.peek()?.kind == TokenKind::Hybrid {
-                self.advance()?;
-                hybrid = true;
-                if self.peek()?.kind == TokenKind::Rerank {
-                    self.advance()?;
-                    rerank = true;
-                } else {
-                    while self.peek()?.kind == TokenKind::Dense
-                        || self.peek()?.kind == TokenKind::Sparse
-                    {
-                        let mode = self.advance()?.kind;
-                        let tok = self.peek()?;
-                        if tok.kind == TokenKind::Vector
-                            || (tok.kind == TokenKind::Identifier
-                                && ascii_equal(tok.text, "VECTOR"))
-                        {
-                            self.advance()?;
-                            let v = self.parse_string()?;
-                            if mode == TokenKind::Dense {
-                                dense_vector = Some(v);
-                            } else {
-                                sparse_vector = Some(v);
-                            }
-                        } else {
-                            return Err(QqlError::syntax(
-                                "expected VECTOR after DENSE/SPARSE",
-                                self.peek()?.pos,
-                            ));
-                        }
-                    }
-                }
-            } else if self.peek()?.kind == TokenKind::Using {
-                self.advance()?;
-                if self.peek()?.kind == TokenKind::Hybrid {
-                    self.advance()?;
-                    hybrid = true;
-                    if self.peek()?.kind == TokenKind::Dense {
-                        self.advance()?;
-                        model = Some(self.parse_required_model_string()?);
-                    }
-                } else {
-                    model = Some(self.parse_required_model_string()?);
-                }
-            }
         }
 
         let config = self.parse_collection_config_blocks(false)?;

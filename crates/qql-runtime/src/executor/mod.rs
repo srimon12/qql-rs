@@ -217,6 +217,12 @@ impl Executor {
         self.client.as_ref()
     }
 
+    /// Flush and release backend-owned resources. This is especially important
+    /// for embedded backends before deleting their data directory.
+    pub async fn close(&self) -> Result<(), QqlError> {
+        self.client.close().await
+    }
+
     pub fn embedder(&self) -> Option<&Arc<dyn Embedder>> {
         self.embedder.as_ref()
     }
@@ -629,6 +635,20 @@ impl Executor {
     /// collection auto-creation. Callers must preserve statement order because
     /// preparation may read or mutate backend state.
     async fn prepare_statement(&self, mut stmt: Stmt) -> Result<Stmt, QqlError> {
+        let upsert_schema = match &mut stmt {
+            Stmt::Query(query) => {
+                if let ast::QueryCollection::Explicit(collection) = &query.collection {
+                    let collection = collection.clone();
+                    self.configure_query_vectors(&collection, query).await?;
+                }
+                None
+            }
+            Stmt::Upsert(upsert) if self.embedder.is_some() => {
+                self.configure_upsert_embeddings(upsert).await?
+            }
+            _ => None,
+        };
+
         if let Some(ref embedder) = self.embedder {
             self.resolve_embeddings(&mut stmt, embedder.as_ref())
                 .await?;
@@ -638,42 +658,41 @@ impl Executor {
             self.prepare_create_collection(create).await?;
         }
 
-        match &stmt {
-            Stmt::Query(q) => {
-                if let ast::QueryCollection::Explicit(ref collection_name) = q.collection {
-                    self.ensure_vector_name(collection_name, &q.expression)
-                        .await?;
-                }
+        if let Stmt::Upsert(u) = &stmt {
+            if let Some(ref emb) = u.embedding {
+                let (model, has_dense, has_sparse, dense_vec, sparse_vec) = match emb {
+                    ast::EmbeddingSpec::Dense { model, vector } => {
+                        (model.as_deref(), true, false, vector.as_deref(), None)
+                    }
+                    ast::EmbeddingSpec::Sparse { model, vector } => {
+                        (model.as_deref(), false, true, None, vector.as_deref())
+                    }
+                    ast::EmbeddingSpec::Hybrid {
+                        dense_model,
+                        dense_vector,
+                        sparse_vector,
+                        ..
+                    } => (
+                        dense_model.as_deref(),
+                        true,
+                        true,
+                        dense_vector.as_deref(),
+                        sparse_vector.as_deref(),
+                    ),
+                };
+                self.ensure_collection_for_upsert(
+                    &u.collection,
+                    model,
+                    has_dense,
+                    has_sparse,
+                    dense_vec,
+                    sparse_vec,
+                )
+                .await?;
             }
-            Stmt::Upsert(u) => {
-                if let Some(ref emb) = u.embedding {
-                    let (model, is_hybrid, dense_vec, sparse_vec) = match emb {
-                        ast::EmbeddingSpec::Dense { model, vector } => {
-                            (model.as_deref(), false, vector.as_deref(), None)
-                        }
-                        ast::EmbeddingSpec::Hybrid {
-                            dense_model,
-                            dense_vector,
-                            sparse_vector,
-                            ..
-                        } => (
-                            dense_model.as_deref(),
-                            true,
-                            dense_vector.as_deref(),
-                            sparse_vector.as_deref(),
-                        ),
-                    };
-                    self.ensure_collection_for_upsert(
-                        &u.collection,
-                        model,
-                        is_hybrid,
-                        dense_vec,
-                        sparse_vec,
-                    )
-                    .await?;
-                }
+            if let Some(info) = upsert_schema.as_ref() {
+                self.validate_embedded_upsert(u, info)?;
             }
-            _ => {}
         }
 
         Ok(stmt)
@@ -683,7 +702,38 @@ impl Executor {
         &self,
         create: &mut ast::CreateCollectionStmt,
     ) -> Result<(), QqlError> {
+        if let ast::CollectionMode::Dense { model: Some(model) } = &create.mode {
+            if let Some(embedder) = self.embedder.as_deref() {
+                if !embedder.accepts_model(model) {
+                    return Err(QqlError::execution(
+                        "QQL-EMBEDDING-MODEL",
+                        format!("embedding model '{model}' is not available from the configured embedder"),
+                        None,
+                    ));
+                }
+            }
+        }
         if !create.vectors.is_empty() {
+            if let ast::CollectionMode::Dense { model: Some(model) } = &create.mode {
+                let expected = self.resolve_dense_vector_size(Some(model)).await? as u64;
+                if create.vectors.len() == 1 && create.vectors[0].size != expected {
+                    return Err(QqlError::execution(
+                        "QQL-EMBEDDING-DIM",
+                        format!(
+                            "collection vector dimension {} does not match embedding model '{model}' dimension {expected}",
+                            create.vectors[0].size
+                        ),
+                        None,
+                    ));
+                }
+            }
+            return Ok(());
+        }
+        if !create.sparse_vectors.is_empty()
+            && matches!(create.mode, ast::CollectionMode::Dense { model: None })
+        {
+            // An explicit sparse definition is a valid sparse-only collection;
+            // do not silently add the default dense vector to it.
             return Ok(());
         }
 

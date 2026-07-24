@@ -243,6 +243,10 @@ impl HttpEmbedder {
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl Embedder for HttpEmbedder {
+    fn dimension(&self) -> Option<usize> {
+        Some(self.dimension)
+    }
+
     async fn embed_dense(&self, text: &str, model: &str) -> Result<Vec<f32>, QqlError> {
         let results = self
             .embed_batch_with_model(&[text.to_string()], model)

@@ -23,6 +23,18 @@ pub trait Embedder: EmbedderBound {
     async fn embed_dense(&self, text: &str, model: &str) -> Result<Vec<f32>, QqlError>;
     async fn embed_sparse(&self, text: &str) -> Result<SparseVector, QqlError>;
 
+    /// Dense output dimension when it is known without running inference.
+    /// Custom and remote embedders may return `None`.
+    fn dimension(&self) -> Option<usize> {
+        None
+    }
+
+    /// Whether this embedder can satisfy a requested model identifier.
+    /// Dynamic providers may return `true` for every model.
+    fn accepts_model(&self, _model: &str) -> bool {
+        true
+    }
+
     /// Embed many texts in one shot. Default loops `embed_dense`; override for
     /// real batching (OpenAI-compatible `input: [...]`, fastembed batch, etc.).
     async fn embed_dense_batch(

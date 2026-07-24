@@ -174,6 +174,7 @@ impl PlannedOperation {
         match self {
             PlannedOperation::Query { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::QueryGroups { request, .. } => request.shard_key.as_deref(),
+            PlannedOperation::GetPoints { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::Scroll { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::Count { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::Upsert { request, .. } => request.shard_key.as_deref(),
@@ -194,6 +195,7 @@ pub enum BatchFamily {
 pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
     match statement {
         Stmt::Query(query) => {
+            validate_query_stmt(query)?;
             let collection = match &query.collection {
                 QueryCollection::Explicit(name) if !name.is_empty() => name.clone(),
                 QueryCollection::Explicit(_) => {
@@ -227,6 +229,7 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
                         ids,
                         with_payload,
                         with_vector,
+                        shard_key: query.shard_key.clone(),
                     },
                 });
             }
@@ -253,11 +256,14 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
                 scroll.with_vector.as_ref(),
             ),
         }),
-        Stmt::Upsert(upsert) => Ok(PlannedOperation::Upsert {
-            collection: upsert.collection.clone(),
-            request: lower_upsert_request(upsert),
-            wait: upsert.embedding.is_some() || !upsert.embed.is_empty(),
-        }),
+        Stmt::Upsert(upsert) => {
+            validate_embedding_spec(upsert)?;
+            Ok(PlannedOperation::Upsert {
+                collection: upsert.collection.clone(),
+                request: lower_upsert_request(upsert),
+                wait: upsert.embedding.is_some() || !upsert.embed.is_empty(),
+            })
+        }
         Stmt::Delete(delete) => Ok(PlannedOperation::Delete {
             collection: delete.collection.clone(),
             request: lower_delete_request(delete),
@@ -333,6 +339,138 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
             collection: collection.clone(),
         }),
     }
+}
+
+fn validate_embedding_spec(upsert: &qql_core::ast::UpsertStmt) -> Result<(), QqlError> {
+    let Some(spec) = &upsert.embedding else {
+        return Ok(());
+    };
+    let invalid = match spec {
+        qql_core::ast::EmbeddingSpec::Dense { model, vector }
+        | qql_core::ast::EmbeddingSpec::Sparse { model, vector } => {
+            model.is_none() && vector.is_none()
+        }
+        qql_core::ast::EmbeddingSpec::Hybrid {
+            dense_model,
+            dense_vector,
+            sparse_model,
+            sparse_vector,
+        } => {
+            (dense_model.is_none() && dense_vector.is_none())
+                || (sparse_model.is_none() && sparse_vector.is_none())
+        }
+    };
+    if invalid {
+        return Err(QqlError::validation(
+            "QQL-PLAN-EMBEDDING",
+            "each embedding target requires MODEL or VECTOR",
+            None,
+        ));
+    }
+    Ok(())
+}
+
+fn validate_query_stmt(query: &qql_core::ast::QueryStmt) -> Result<(), QqlError> {
+    for cte in &query.ctes {
+        validate_query_stmt(&cte.query)?;
+    }
+    validate_query_expr(&query.expression)?;
+
+    let has_rrf_params = query
+        .params
+        .as_ref()
+        .is_some_and(|params| params.rrf_k.is_some() || params.rrf_weights.is_some());
+    let accepts_rrf_params = matches!(
+        &query.expression,
+        QueryExpr::Fusion {
+            method: qql_core::ast::FusionMethod::Rrf,
+            ..
+        } | QueryExpr::Hybrid {
+            fusion: qql_core::ast::FusionMethod::Rrf,
+            ..
+        }
+    );
+    if has_rrf_params && !accepts_rrf_params {
+        return Err(QqlError::validation(
+            "QQL-PLAN-RRF-PARAMS",
+            "rrf_k and rrf_weights are valid only with RRF fusion",
+            None,
+        ));
+    }
+    if let Some(weights) = query
+        .params
+        .as_ref()
+        .and_then(|params| params.rrf_weights.as_ref())
+    {
+        let prefetch_count = match &query.expression {
+            QueryExpr::Fusion { prefetch, .. } | QueryExpr::Rerank { prefetch, .. } => {
+                prefetch.len()
+            }
+            QueryExpr::Hybrid { .. } => 2,
+            _ => 0,
+        };
+        if prefetch_count > 0 && weights.len() != prefetch_count {
+            return Err(QqlError::validation(
+                "QQL-PLAN-RRF-WEIGHTS",
+                format!(
+                    "rrf_weights contains {} values but fusion has {} prefetches",
+                    weights.len(),
+                    prefetch_count
+                ),
+                None,
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_query_expr(expression: &QueryExpr) -> Result<(), QqlError> {
+    let prefetch = match expression {
+        QueryExpr::Nearest { prefetch, .. }
+        | QueryExpr::Recommend { prefetch, .. }
+        | QueryExpr::Context { prefetch, .. }
+        | QueryExpr::Discover { prefetch, .. }
+        | QueryExpr::Fusion { prefetch, .. }
+        | QueryExpr::Formula { prefetch, .. }
+        | QueryExpr::RelevanceFeedback { prefetch, .. }
+        | QueryExpr::Rerank { prefetch, .. } => prefetch,
+        QueryExpr::Points { .. }
+        | QueryExpr::OrderBy { .. }
+        | QueryExpr::SampleRandom
+        | QueryExpr::Hybrid { .. } => return Ok(()),
+    };
+
+    match expression {
+        QueryExpr::Fusion { .. } if prefetch.is_empty() => {
+            return Err(QqlError::validation(
+                "QQL-PLAN-FUSION-PREFETCH",
+                "FUSION requires at least one prefetch",
+                None,
+            ));
+        }
+        QueryExpr::Rerank { using, .. } if using.is_empty() => {
+            return Err(QqlError::validation(
+                "QQL-PLAN-RERANK-USING",
+                "RERANK requires a non-empty USING vector name",
+                None,
+            ));
+        }
+        QueryExpr::Rerank { .. } if prefetch.is_empty() => {
+            return Err(QqlError::validation(
+                "QQL-PLAN-RERANK-PREFETCH",
+                "RERANK requires at least one prefetch",
+                None,
+            ));
+        }
+        _ => {}
+    }
+
+    for item in prefetch {
+        if let qql_core::ast::PrefetchSource::Query(query) = &item.source {
+            validate_query_stmt(query)?;
+        }
+    }
+    Ok(())
 }
 
 /// REST projection of a planned operation (HTTP method/path/query/body).

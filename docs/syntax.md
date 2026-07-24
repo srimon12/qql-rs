@@ -225,8 +225,9 @@ upsert       = "UPSERT", "INTO", collection, "VALUES",
                point-object, { ",", point-object },
                [ embedding-options ],
                [ "SHARD", string ] ;
-embedding-options = ( dense-embed | hybrid-embed ) ;
+embedding-options = ( dense-embed | sparse-embed | hybrid-embed ) ;
 dense-embed  = "USING", "DENSE", ( "MODEL", string | "VECTOR", string ) ;
+sparse-embed = "USING", "SPARSE", ( "MODEL", string | "VECTOR", string ) ;
 hybrid-embed = "USING", "HYBRID",
                [ "DENSE", ( "MODEL", string | "VECTOR", string ) ],
                [ "SPARSE", ( "MODEL", string | "VECTOR", string ) ] ;
@@ -258,7 +259,7 @@ multidense-vector = "[", dense-vector, { ",", dense-vector }, "]" ;
 
 Every upsert point requires an unsigned integer or string `id`. Its optional `vector` may be one unnamed vector value or an object of named vector values. All other object entries remain arbitrary payload values.
 
-`SHARD '<key>'` on UPSERT, SCROLL, DELETE, COUNT, or QUERY routes the operation to a specific shard group.
+`SHARD '<key>'` on UPSERT, SCROLL, DELETE, COUNT, or QUERY routes the operation to a specific shard group. It is a clustered-Qdrant feature; `qql-edge` rejects it explicitly because edge storage is single-node.
 
 ### Embed directive (fine-grained embedding control)
 
@@ -323,7 +324,9 @@ config-blocks = "WITH", ( "HNSW" | "PARAMS" | "OPTIMIZERS" | "QUANTIZE"
                          | "VECTOR" ), config-block ;
 ```
 
-`USING [DENSE] MODEL '<model>'` creates a collection with a single dense vector whose dimension is inferred from the embedding model. `HYBRID` enables dense + sparse hybrid search; add `RERANK` for a second dense vector used by the `QUERY RERANK` expression. The `VECTOR` keyword separating the vector-config name from the vector-name value is required. All three syntax forms begin with `CREATE COLLECTION <name>` followed by at most one mode keyword group; `DENSE MODEL` without a preceding `USING` is rejected.
+`USING [DENSE] MODEL '<model>'` creates a collection with a single dense vector whose dimension is inferred from the embedding model. `USING SPARSE VECTOR '<name>'` is available for sparse-only ingestion. `HYBRID` enables dense + sparse hybrid search; add `RERANK` for a second dense vector used by the `QUERY RERANK` expression. The `VECTOR` keyword separating the vector-config name from the vector-name value is required. All three syntax forms begin with `CREATE COLLECTION <name>` followed by at most one mode keyword group; `DENSE MODEL` without a preceding `USING` is rejected.
+
+When an UPSERT contains text but no embedding clause, the executor inspects the existing collection schema and emits only the compatible vector type. A dense-only collection receives dense vectors, a sparse-only collection receives sparse vectors, and a dense+sparse collection receives both. Ambiguous multi-vector schemas require an explicit `USING` or `EMBED` directive.
 
 ### Collection Params
 

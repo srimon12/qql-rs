@@ -12,6 +12,20 @@ fn nearest_text_is_default_shorthand() {
 }
 
 #[test]
+fn sparse_upsert_embedding_is_explicit() {
+    let stmt =
+        Parser::parse("UPSERT INTO docs VALUES {id: 1, text: 'hello'} USING SPARSE VECTOR sparse")
+            .unwrap();
+    let crate::ast::Stmt::Upsert(upsert) = stmt else {
+        panic!("expected upsert");
+    };
+    assert!(matches!(
+        upsert.embedding,
+        Some(crate::ast::EmbeddingSpec::Sparse { .. })
+    ));
+}
+
+#[test]
 fn nearest_explicit_text_with_model() {
     let s = Parser::parse("QUERY TEXT 'search' MODEL 'all-minilm' FROM docs;").unwrap();
     let Stmt::Query(q) = s else { panic!() };

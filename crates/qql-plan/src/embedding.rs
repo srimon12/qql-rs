@@ -80,7 +80,12 @@ fn extract_upsert_jobs(upsert: &UpsertStmt, jobs: &mut Vec<EmbeddingJob>) {
                 point
                     .payload
                     .iter()
-                    .find(|(k, _)| k.eq_ignore_ascii_case(field))
+                    .find(|(k, _)| {
+                        k.eq_ignore_ascii_case(field)
+                            || (field.eq_ignore_ascii_case("text")
+                                && (k.eq_ignore_ascii_case("body")
+                                    || k.eq_ignore_ascii_case("content")))
+                    })
                     .and_then(|(_, v)| match v {
                         qql_core::ast::Value::Str(s) => Some(s.clone()),
                         _ => None,
@@ -98,6 +103,17 @@ fn extract_upsert_jobs(upsert: &UpsertStmt, jobs: &mut Vec<EmbeddingJob>) {
                         texts,
                         model: model.clone(),
                         kind: EmbeddingKind::Dense,
+                        destinations: Vec::new(),
+                    });
+                }
+            }
+            EmbeddingSpec::Sparse { model, vector: _ } => {
+                let texts = extract_texts("text");
+                if !texts.is_empty() {
+                    jobs.push(EmbeddingJob {
+                        texts,
+                        model: model.clone(),
+                        kind: EmbeddingKind::Sparse,
                         destinations: Vec::new(),
                     });
                 }

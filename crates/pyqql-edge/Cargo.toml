@@ -8,7 +8,9 @@ description = "QQL local edge executor for Python — qdrant-edge + fastembed, z
 crate-type = ["cdylib"]
 
 [features]
-default = ["http-embedding"]
+default = ["fastembed-local", "http-embedding"]
+# Local ONNX embedding via fastembed-rs.
+fastembed-local = ["qql-edge/fastembed-local"]
 # HTTP-based embedding provider (OpenAI-compatible API).
 http-embedding = ["qql-edge/http-embedding"]
 
@@ -16,7 +18,7 @@ http-embedding = ["qql-edge/http-embedding"]
 qql-core = { path = "../qql-core", features = ["serde"] }
 qql-plan = { path = "../qql-plan" }
 qql = { path = "../qql-runtime", default-features = false }
-qql-edge = { path = "../qql-edge" }
+qql-edge = { path = "../qql-edge", default-features = false }
 pyo3 = { version = "0.23", features = ["extension-module"] }
 pyo3-async-runtimes = { version = "0.23", features = ["tokio-runtime"] }
 pythonize = "0.23"

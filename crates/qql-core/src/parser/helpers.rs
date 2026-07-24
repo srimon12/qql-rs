@@ -38,7 +38,8 @@ impl<'a> Parser<'a> {
         }
         self.advance()?;
         if self.peek()?.kind != TokenKind::Hybrid {
-            if self.peek()?.kind == TokenKind::Dense {
+            let sparse = self.peek()?.kind == TokenKind::Sparse;
+            if self.peek()?.kind == TokenKind::Dense || sparse {
                 self.advance()?;
             }
             let model = self.parse_optional_model_string()?;
@@ -50,7 +51,11 @@ impl<'a> Parser<'a> {
                     self.peek()?.span,
                 ));
             }
-            return Ok(Some(EmbeddingSpec::Dense { model, vector }));
+            return Ok(Some(if sparse {
+                EmbeddingSpec::Sparse { model, vector }
+            } else {
+                EmbeddingSpec::Dense { model, vector }
+            }));
         }
 
         self.advance()?;

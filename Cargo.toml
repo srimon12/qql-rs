@@ -11,6 +11,7 @@ members = [
     "crates/pyqql",
     "crates/pyqql-edge",
     "crates/nqql",
+    "crates/nqql-edge",
 ]
 
 [workspace.package]

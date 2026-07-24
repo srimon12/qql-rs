@@ -1,15 +1,126 @@
+use crate::backend::{CollectionInfo, VectorSpec};
 use crate::client::{CreateCollectionReq, VectorTopology};
 #[cfg(feature = "rest")]
 use crate::embedder::HttpEmbedder;
 use crate::executor::Executor;
+use qql_core::ast::{EmbeddingSpec, PointVectors, UpsertStmt, Value, VectorValue};
 use qql_core::error::QqlError;
 
 impl Executor {
+    /// Infer implicit text embedding from the existing collection topology.
+    /// New collections retain the historical hybrid default, while existing
+    /// dense-only and sparse-only collections receive only compatible vectors.
+    pub(crate) async fn configure_upsert_embeddings(
+        &self,
+        upsert: &mut UpsertStmt,
+    ) -> Result<Option<CollectionInfo>, QqlError> {
+        let needs_implicit = upsert.embedding.is_none()
+            && upsert.embed.is_empty()
+            && upsert.points.iter().any(|point| {
+                point.vectors.is_none()
+                    && point.payload.iter().any(|(key, value)| {
+                        matches!(value, Value::Str(text) if !text.is_empty())
+                            && (key.eq_ignore_ascii_case("text")
+                                || key.eq_ignore_ascii_case("body")
+                                || key.eq_ignore_ascii_case("content"))
+                    })
+            });
+
+        if !needs_implicit {
+            return Ok(None);
+        }
+        if !self.client.collection_exists(&upsert.collection).await? {
+            if needs_implicit {
+                upsert.embedding = Some(EmbeddingSpec::Hybrid {
+                    dense_model: None,
+                    dense_vector: Some(crate::executor::DENSE_VECTOR_NAME.to_string()),
+                    sparse_model: None,
+                    sparse_vector: Some(crate::executor::SPARSE_VECTOR_NAME.to_string()),
+                });
+            }
+            return Ok(None);
+        }
+
+        let info = self.client.get_collection_info(&upsert.collection).await?;
+        if needs_implicit {
+            let dense = dense_targets(&info);
+            let sparse: Vec<String> = info
+                .schema
+                .sparse_vectors
+                .iter()
+                .map(|vector| vector.name.clone())
+                .collect();
+            upsert.embedding = Some(match (dense.as_slice(), sparse.as_slice()) {
+                ([dense], []) => EmbeddingSpec::Dense {
+                    model: None,
+                    vector: Some(dense.clone()),
+                },
+                ([], [sparse]) => EmbeddingSpec::Sparse {
+                    model: None,
+                    vector: Some(sparse.clone()),
+                },
+                ([dense], [sparse]) => EmbeddingSpec::Hybrid {
+                    dense_model: None,
+                    dense_vector: Some(dense.clone()),
+                    sparse_model: None,
+                    sparse_vector: Some(sparse.clone()),
+                },
+                _ => {
+                    return Err(QqlError::execution(
+                        "QQL-EMBEDDING-TOPOLOGY",
+                        format!(
+                            "cannot infer text embedding targets for collection '{}': {} dense and {} sparse vectors. Add USING DENSE/SPARSE/HYBRID or explicit EMBED directives",
+                            upsert.collection,
+                            dense.len(),
+                            sparse.len()
+                        ),
+                        None,
+                    ));
+                }
+            });
+        }
+        Ok(Some(info))
+    }
+
+    pub(crate) fn validate_embedded_upsert(
+        &self,
+        upsert: &UpsertStmt,
+        info: &CollectionInfo,
+    ) -> Result<(), QqlError> {
+        let dense_specs = &info.schema.vectors;
+        for point in &upsert.points {
+            let Some(vectors) = &point.vectors else {
+                continue;
+            };
+            match vectors {
+                PointVectors::Unnamed(value) => {
+                    if let Some(spec) = dense_specs.iter().find(|spec| spec.name.is_none()) {
+                        validate_vector_value(&upsert.collection, "<default>", value, spec)?;
+                    }
+                }
+                PointVectors::Named(values) => {
+                    for (name, value) in values {
+                        if let VectorValue::Dense(_) | VectorValue::MultiDense(_) = value {
+                            if let Some(spec) = dense_specs
+                                .iter()
+                                .find(|spec| spec.name.as_deref().unwrap_or("") == name)
+                            {
+                                validate_vector_value(&upsert.collection, name, value, spec)?;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) async fn ensure_collection_for_upsert(
         &self,
         collection: &str,
         model: Option<&str>,
-        requested_hybrid: bool,
+        requested_dense: bool,
+        requested_sparse: bool,
         explicit_dense: Option<&str>,
         explicit_sparse: Option<&str>,
     ) -> Result<bool, QqlError> {
@@ -18,18 +129,19 @@ impl Executor {
             return Ok(false);
         }
 
-        let dense_size = self.resolve_dense_vector_size(model).await?;
-        let dense_name = explicit_dense.unwrap_or(crate::executor::DENSE_VECTOR_NAME);
-
         let mut create_req = CreateCollectionReq::new(collection.to_string());
-        create_req.vectors_config = Some(serde_json::json!({
-            dense_name: {
-                "size": dense_size,
-                "distance": "Cosine"
-            }
-        }));
+        if requested_dense {
+            let dense_size = self.resolve_dense_vector_size(model).await?;
+            let dense_name = explicit_dense.unwrap_or(crate::executor::DENSE_VECTOR_NAME);
+            create_req.vectors_config = Some(serde_json::json!({
+                dense_name: {
+                    "size": dense_size,
+                    "distance": "Cosine"
+                }
+            }));
+        }
 
-        if requested_hybrid {
+        if requested_sparse {
             let sparse_name = explicit_sparse.unwrap_or(crate::executor::SPARSE_VECTOR_NAME);
             create_req.sparse_vectors_config = Some(serde_json::json!({
                 sparse_name: {
@@ -90,6 +202,14 @@ impl Executor {
         &self,
         model: Option<&str>,
     ) -> Result<usize, QqlError> {
+        if let Some(dimension) = self
+            .embedder
+            .as_deref()
+            .and_then(crate::embedder::Embedder::dimension)
+        {
+            return Ok(dimension);
+        }
+
         if self.uses_local_embeddings() {
             if let Some(ref cfg) = self.config {
                 if cfg.embedding_dimension > 0 {
@@ -143,4 +263,42 @@ impl Executor {
 
         Ok(crate::executor::DENSE_VECTOR_SIZE as usize)
     }
+}
+
+fn dense_targets(info: &CollectionInfo) -> Vec<String> {
+    if info.schema.vectors.is_empty() {
+        info.schema.dense_vectors.clone()
+    } else {
+        info.schema
+            .vectors
+            .iter()
+            .map(|vector| vector.name.clone().unwrap_or_default())
+            .collect()
+    }
+}
+
+fn validate_vector_value(
+    collection: &str,
+    name: &str,
+    value: &VectorValue,
+    spec: &VectorSpec,
+) -> Result<(), QqlError> {
+    let dimensions = match value {
+        VectorValue::Dense(vector) => Some(vector.len()),
+        VectorValue::MultiDense(rows) => rows.first().map(Vec::len),
+        VectorValue::Sparse { .. } => None,
+    };
+    if let Some(got) = dimensions {
+        if got != spec.size as usize {
+            return Err(QqlError::execution(
+                "QQL-EMBEDDING-DIM",
+                format!(
+                    "embedding dimension mismatch for collection '{collection}' vector '{name}': model produced {got}, collection expects {}",
+                    spec.size
+                ),
+                None,
+            ));
+        }
+    }
+    Ok(())
 }

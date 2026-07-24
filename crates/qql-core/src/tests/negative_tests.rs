@@ -31,6 +31,15 @@ fn top_level_query_requires_from() {
 }
 
 #[test]
+fn scripts_have_a_bounded_statement_count() {
+    let script = std::iter::repeat_n("COUNT FROM docs", crate::parser::MAX_STATEMENTS + 1)
+        .collect::<Vec<_>>()
+        .join(";");
+    let error = Parser::parse_all(&script).expect_err("statement limit must be enforced");
+    assert_eq!(error.code, "QQL-PARSE-STATEMENT-LIMIT");
+}
+
+#[test]
 fn clause_ordering_violations() {
     let invalid = [
         "QUERY TEXT 'x' FROM docs LIMIT 10 WHERE active = true;",

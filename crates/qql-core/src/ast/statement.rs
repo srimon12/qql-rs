@@ -295,6 +295,10 @@ pub enum EmbeddingSpec {
         model: Option<String>,
         vector: Option<String>,
     },
+    Sparse {
+        model: Option<String>,
+        vector: Option<String>,
+    },
     Hybrid {
         dense_model: Option<String>,
         dense_vector: Option<String>,

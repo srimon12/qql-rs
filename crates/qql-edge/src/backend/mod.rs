@@ -16,11 +16,13 @@ use qdrant_edge::{
     VectorStructPersisted, WithPayloadInterface, WithVector,
 };
 use serde_json::Value;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 use config_builder::build_edge_config;
-use conversions::{edge_err, from_edge_id, from_edge_record, to_edge_id};
-use query_converter::convert_query_request_with_shard;
+use conversions::{
+    edge_err, from_edge_id, from_edge_record, from_edge_scored_point, to_edge_id, to_edge_ids,
+};
+use query_converter::{convert_query_request, convert_with_payload, convert_with_vector};
 use vector_parser::ToEdgeVector;
 
 use qql::backend::{CollectionInfo, CollectionSchema};
@@ -34,6 +36,7 @@ pub struct EdgeQdrant {
     base_path: PathBuf,
     on_disk_payload: bool,
     shards: RwLock<HashMap<String, Arc<EdgeShard>>>,
+    opening: Mutex<HashMap<String, Arc<Mutex<()>>>>,
 }
 
 fn mutation_response() -> Value {
@@ -59,7 +62,27 @@ impl EdgeQdrant {
             base_path: base_path.into(),
             on_disk_payload,
             shards: RwLock::new(HashMap::new()),
+            opening: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Release all open shards. Call before deleting `base_path` so qdrant-edge
+    /// can flush while the directory still exists. Idempotent.
+    pub async fn close(&self) -> Result<(), QqlError> {
+        let shards: Vec<Arc<EdgeShard>> = {
+            let mut open = self.shards.write().await;
+            open.drain().map(|(_, shard)| shard).collect()
+        };
+        tokio::task::spawn_blocking(move || drop(shards))
+            .await
+            .map_err(|error| {
+                QqlError::execution(
+                    "QQL-EDGE",
+                    format!("failed to close edge shards: {error}"),
+                    None,
+                )
+            })?;
+        Ok(())
     }
 
     fn collection_path(&self, name: &str) -> PathBuf {
@@ -76,6 +99,22 @@ impl EdgeQdrant {
         name: &str,
         req: Option<&CreateCollectionReq>,
     ) -> Result<Arc<EdgeShard>, QqlError> {
+        {
+            let shards = self.shards.read().await;
+            if let Some(shard) = shards.get(name) {
+                return Ok(Arc::clone(shard));
+            }
+        }
+
+        let opening = {
+            let mut opening = self.opening.lock().await;
+            Arc::clone(
+                opening
+                    .entry(name.to_string())
+                    .or_insert_with(|| Arc::new(Mutex::new(()))),
+            )
+        };
+        let _opening_guard = opening.lock().await;
         {
             let shards = self.shards.read().await;
             if let Some(shard) = shards.get(name) {
@@ -119,8 +158,8 @@ impl EdgeQdrant {
                 let shard = self.open_shard(&collection).await?;
                 let results = tokio::task::spawn_blocking(
                     move || -> Result<Vec<qdrant_edge::ScoredPoint>, QqlError> {
-                        let edge_req = convert_query_request_with_shard(&req, &shard)?;
-                        shard.search(edge_req).map_err(edge_err)
+                        let edge_req = convert_query_request(&req)?;
+                        shard.query(edge_req).map_err(edge_err)
                     },
                 )
                 .await
@@ -129,16 +168,7 @@ impl EdgeQdrant {
                 })??;
 
                 Ok(serde_json::json!({
-                    "result": results.into_iter().map(|sp| {
-                        let id = from_edge_id(&sp.id);
-                        let payload: Value = serde_json::to_value(&sp.payload).unwrap_or_default();
-                        serde_json::json!({
-                            "id": id,
-                            "score": sp.score,
-                            "payload": payload,
-                            "version": sp.version,
-                        })
-                    }).collect::<Vec<_>>(),
+                    "result": results.into_iter().map(from_edge_scored_point).collect::<Vec<_>>(),
                     "status": "ok",
                     "time": 0.0,
                 }))
@@ -149,21 +179,25 @@ impl EdgeQdrant {
                 None,
             )),
             Some(RequestBody::Points(req)) => {
+                reject_shard(req.shard_key.as_deref())?;
                 let collection = extract_collection(&route.path)?;
                 let shard = self.open_shard(&collection).await?;
-                let ids: Vec<qdrant_edge::PointId> = req
-                    .ids
-                    .iter()
-                    .filter_map(|id| to_edge_id(id.clone()).ok())
-                    .collect();
+                let ids = to_edge_ids(req.ids.iter())?;
+                let with_payload = req
+                    .with_payload
+                    .as_ref()
+                    .map(convert_with_payload)
+                    .transpose()?
+                    .unwrap_or(WithPayloadInterface::Bool(true));
+                let with_vector = req
+                    .with_vector
+                    .as_ref()
+                    .map(convert_with_vector)
+                    .unwrap_or(WithVector::Bool(false));
 
                 let records = tokio::task::spawn_blocking(move || {
                     shard
-                        .retrieve(
-                            &ids,
-                            Some(WithPayloadInterface::Bool(true)),
-                            Some(WithVector::Bool(false)),
-                        )
+                        .retrieve(&ids, Some(with_payload), Some(with_vector))
                         .map_err(edge_err)
                 })
                 .await
@@ -178,16 +212,31 @@ impl EdgeQdrant {
                 }))
             }
             Some(RequestBody::Scroll(req)) => {
+                reject_shard(req.shard_key.as_deref())?;
                 let collection = extract_collection(&route.path)?;
                 let shard = self.open_shard(&collection).await?;
 
-                let offset = req.offset.as_ref().and_then(|o| to_edge_id(o.clone()).ok());
+                let offset = match req.offset.as_ref() {
+                    Some(o) => Some(to_edge_id(o.clone())?),
+                    None => None,
+                };
+                let filter = convert_edge_filter(req.filter.as_ref())?;
                 let scroll_req = qdrant_edge::ScrollRequest {
                     offset,
                     limit: Some(req.limit.unwrap_or(10) as usize),
-                    filter: None,
-                    with_payload: Some(WithPayloadInterface::Bool(true)),
-                    with_vector: WithVector::Bool(false),
+                    filter,
+                    with_payload: Some(
+                        req.with_payload
+                            .as_ref()
+                            .map(convert_with_payload)
+                            .transpose()?
+                            .unwrap_or(WithPayloadInterface::Bool(true)),
+                    ),
+                    with_vector: req
+                        .with_vector
+                        .as_ref()
+                        .map(convert_with_vector)
+                        .unwrap_or(WithVector::Bool(false)),
                     order_by: None,
                 };
 
@@ -215,6 +264,7 @@ impl EdgeQdrant {
                 Ok(Value::Object(obj))
             }
             Some(RequestBody::Upsert(req)) => {
+                reject_shard(req.shard_key.as_deref())?;
                 let collection = extract_collection(&route.path)?;
                 let shard = self.open_shard(&collection).await?;
 
@@ -246,30 +296,17 @@ impl EdgeQdrant {
                 Ok(mutation_response())
             }
             Some(RequestBody::Delete(req)) => {
+                reject_shard(req.shard_key.as_deref())?;
                 let collection = extract_collection(&route.path)?;
                 let shard = self.open_shard(&collection).await?;
 
                 let operation = if let Some(points) = &req.points {
-                    let ids: Vec<qdrant_edge::PointId> = points
-                        .iter()
-                        .filter_map(|id| to_edge_id(id.clone()).ok())
-                        .collect();
+                    let ids = to_edge_ids(points.iter())?;
                     UpdateOperation::PointOperation(PointOperations::DeletePoints { ids })
                 } else if let Some(filter) = &req.filter {
-                    let mut filter_val = serde_json::to_value(filter).map_err(|e| {
-                        QqlError::execution("QQL-EDGE", format!("invalid filter: {e}"), None)
+                    let edge_filter = convert_edge_filter(Some(filter))?.ok_or_else(|| {
+                        QqlError::execution("QQL-EDGE", "delete filter converted to empty", None)
                     })?;
-                    if filter_val.get("key").is_some() {
-                        filter_val = serde_json::json!({ "must": [filter_val] });
-                    }
-                    let edge_filter: qdrant_edge::Filter = serde_json::from_value(filter_val)
-                        .map_err(|e| {
-                            QqlError::execution(
-                                "QQL-EDGE",
-                                format!("invalid filter format: {e}"),
-                                None,
-                            )
-                        })?;
                     UpdateOperation::PointOperation(PointOperations::DeletePointsByFilter(
                         edge_filter,
                     ))
@@ -294,28 +331,18 @@ impl EdgeQdrant {
                 let shard = self.open_shard(&collection).await?;
 
                 let operation = if let Some(points) = &req.points {
-                    let ids: Vec<qdrant_edge::PointId> = points
-                        .iter()
-                        .filter_map(|id| to_edge_id(id.clone()).ok())
-                        .collect();
+                    let ids = to_edge_ids(points.iter())?;
                     UpdateOperation::PayloadOperation(qdrant_edge::PayloadOps::ClearPayload {
                         points: ids,
                     })
                 } else if let Some(filter) = &req.filter {
-                    let mut filter_val = serde_json::to_value(filter).map_err(|e| {
-                        QqlError::execution("QQL-EDGE", format!("invalid filter: {e}"), None)
+                    let edge_filter = convert_edge_filter(Some(filter))?.ok_or_else(|| {
+                        QqlError::execution(
+                            "QQL-EDGE",
+                            "clear_payload filter converted to empty",
+                            None,
+                        )
                     })?;
-                    if filter_val.get("key").is_some() {
-                        filter_val = serde_json::json!({ "must": [filter_val] });
-                    }
-                    let edge_filter: qdrant_edge::Filter = serde_json::from_value(filter_val)
-                        .map_err(|e| {
-                            QqlError::execution(
-                                "QQL-EDGE",
-                                format!("invalid filter format: {e}"),
-                                None,
-                            )
-                        })?;
                     UpdateOperation::PayloadOperation(
                         qdrant_edge::PayloadOps::ClearPayloadByFilter(edge_filter),
                     )
@@ -340,29 +367,19 @@ impl EdgeQdrant {
                 let vector_names: Vec<String> = req.vector.clone();
 
                 let operation = if let Some(points) = &req.points {
-                    let ids: Vec<qdrant_edge::PointId> = points
-                        .iter()
-                        .filter_map(|id| to_edge_id(id.clone()).ok())
-                        .collect();
+                    let ids = to_edge_ids(points.iter())?;
                     UpdateOperation::VectorOperation(VectorOperations::DeleteVectors(
                         qdrant_edge::PointIdsList { points: ids },
                         vector_names,
                     ))
                 } else if let Some(filter) = &req.filter {
-                    let mut filter_val = serde_json::to_value(filter).map_err(|e| {
-                        QqlError::execution("QQL-EDGE", format!("invalid filter: {e}"), None)
+                    let edge_filter = convert_edge_filter(Some(filter))?.ok_or_else(|| {
+                        QqlError::execution(
+                            "QQL-EDGE",
+                            "delete_vectors filter converted to empty",
+                            None,
+                        )
                     })?;
-                    if filter_val.get("key").is_some() {
-                        filter_val = serde_json::json!({ "must": [filter_val] });
-                    }
-                    let edge_filter: qdrant_edge::Filter = serde_json::from_value(filter_val)
-                        .map_err(|e| {
-                            QqlError::execution(
-                                "QQL-EDGE",
-                                format!("invalid filter format: {e}"),
-                                None,
-                            )
-                        })?;
                     UpdateOperation::VectorOperation(VectorOperations::DeleteVectorsByFilter(
                         edge_filter,
                         vector_names,
@@ -417,20 +434,30 @@ impl EdgeQdrant {
                 let payload = qdrant_edge::Payload(req.payload.clone().into_iter().collect());
 
                 let op = if let Some(points) = &req.points {
-                    let ids: Vec<qdrant_edge::PointId> = points
-                        .iter()
-                        .filter_map(|id| to_edge_id(id.clone()).ok())
-                        .collect();
+                    let ids = to_edge_ids(points.iter())?;
                     qdrant_edge::PayloadOps::SetPayload(qdrant_edge::SetPayloadOp {
                         payload,
                         points: Some(ids),
                         filter: None,
                         key: None,
                     })
+                } else if let Some(filter) = &req.filter {
+                    qdrant_edge::PayloadOps::SetPayload(qdrant_edge::SetPayloadOp {
+                        payload,
+                        points: None,
+                        filter: Some(convert_edge_filter(Some(filter))?.ok_or_else(|| {
+                            QqlError::execution(
+                                "QQL-EDGE",
+                                "set_payload filter converted to empty",
+                                None,
+                            )
+                        })?),
+                        key: None,
+                    })
                 } else {
                     return Err(QqlError::execution(
                         "QQL-EDGE",
-                        "set_payload by filter not yet supported in edge mode",
+                        "set_payload requires point ids or a filter",
                         None,
                     ));
                 };
@@ -448,39 +475,65 @@ impl EdgeQdrant {
                 Ok(mutation_response())
             }
             Some(RequestBody::CreateCollection(req)) => {
+                reject_collection_sharding(
+                    req.shard_number,
+                    req.sharding_method.as_deref(),
+                    req.shard_keys.as_deref(),
+                )?;
+                if req.params.is_some() {
+                    return Err(QqlError::execution(
+                        "QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS",
+                        "collection PARAMS are not supported by qql-edge; configure edge storage through LocalExecutorOptions",
+                        None,
+                    ));
+                }
                 let create_req = CreateCollectionReq {
                     collection_name: extract_collection(&route.path)?,
-                    vectors_config: Some(serde_json::to_value(&req.vectors).unwrap_or_default()),
+                    vectors_config: req
+                        .vectors
+                        .as_ref()
+                        .map(|vectors| serde_json::to_value(vectors).unwrap_or_default()),
                     sparse_vectors_config: req
                         .sparse_vectors
                         .as_ref()
                         .map(|sv| serde_json::to_value(sv).unwrap_or_default()),
-                    hnsw_config: None,
-                    optimizers_config: None,
-                    quantization_config: None,
-                    params: None,
-                    shard_number: None,
-                    sharding_method: None,
-                    shard_keys: None,
+                    hnsw_config: req.hnsw_config,
+                    optimizers_config: req.optimizers_config,
+                    quantization_config: req.quantization_config,
+                    params: req.params,
+                    shard_number: req.shard_number,
+                    sharding_method: req.sharding_method,
+                    shard_keys: req.shard_keys,
                 };
                 self.create_collection(create_req).await?;
                 Ok(mutation_response())
             }
-            Some(RequestBody::UpdateCollection(_)) => Ok(mutation_response()),
+            Some(RequestBody::UpdateCollection(_)) => Err(QqlError::execution(
+                "QQL-EDGE-UNSUPPORTED-ALTER",
+                "ALTER COLLECTION is not supported by qql-edge",
+                None,
+            )),
             Some(RequestBody::CreateIndex(req)) => {
                 let ft = req.field_schema.as_str();
                 let create_index = CreateFieldIndexReq {
                     collection_name: extract_collection(&route.path)?,
                     field: req.field_name.clone(),
                     field_type: match ft {
-                        "keyword" | "uuid" => "keyword",
+                        "keyword" => "keyword",
+                        "uuid" => "uuid",
                         "integer" | "int" => "integer",
                         "float" => "float",
                         "bool" | "boolean" => "bool",
                         "geo" => "geo",
                         "text" => "text",
-                        "datetime" => "integer",
-                        _ => "keyword",
+                        "datetime" => "datetime",
+                        other => {
+                            return Err(QqlError::execution(
+                                "QQL-EDGE-UNSUPPORTED-INDEX",
+                                format!("unsupported edge field index type '{other}'"),
+                                None,
+                            ));
+                        }
                     }
                     .to_string(),
                     options: HashMap::new(),
@@ -499,17 +552,10 @@ impl EdgeQdrant {
                 None,
             )),
             Some(RequestBody::Count(req)) => {
+                reject_shard(req.shard_key.as_deref())?;
                 let collection = extract_collection(&route.path)?;
                 let shard = self.open_shard(&collection).await?;
-                let filter: Option<qdrant_edge::Filter> = req.filter.as_ref().and_then(|f| {
-                    let filter_val = serde_json::to_value(f).ok()?;
-                    let val = if filter_val.get("key").is_some() {
-                        serde_json::json!({ "must": [filter_val] })
-                    } else {
-                        filter_val
-                    };
-                    serde_json::from_value(val).ok()
-                });
+                let filter = convert_edge_filter(req.filter.as_ref())?;
                 let count_req = qdrant_edge::CountRequest {
                     filter,
                     exact: req.exact.unwrap_or(true),
@@ -549,7 +595,8 @@ impl EdgeQdrant {
                             "segments_count": info.segments_count,
                             "config": {
                                 "params": {
-                                    "vectors": serde_json::json!({}),
+                                     "vectors": edge_vectors_json(&info.schema.vectors)?,
+                                    "sparse_vectors": edge_sparse_vectors_json(&info.schema.sparse_vectors),
                                 }
                             },
                             "payload_schema": {},
@@ -609,6 +656,10 @@ impl EdgeQdrant {
 
 #[async_trait]
 impl QdrantOps for EdgeQdrant {
+    async fn close(&self) -> Result<(), QqlError> {
+        EdgeQdrant::close(self).await
+    }
+
     async fn list_collections(&self) -> Result<Vec<String>, QqlError> {
         let path = self.base_path.clone();
         tokio::task::spawn_blocking(move || -> Result<Vec<String>, QqlError> {
@@ -623,7 +674,9 @@ impl QdrantOps for EdgeQdrant {
                 .transpose()
                 .map_err(|e| QqlError::execution("QQL-EDGE", format!("entry: {e}"), None))?
             {
-                if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                if entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
+                    && entry.path().join("segments").is_dir()
+                {
                     if let Some(name) = entry.file_name().to_str() {
                         if !name.starts_with('.') {
                             cols.push(name.to_string());
@@ -644,23 +697,48 @@ impl QdrantOps for EdgeQdrant {
 
     async fn get_collection_info(&self, name: &str) -> Result<CollectionInfo, QqlError> {
         let shard = self.open_shard(name).await?;
-        let (info, dense_vectors, sparse_vectors) = tokio::task::spawn_blocking(move || {
-            let info = shard.info();
-            let cfg = shard.config();
-            let dense = cfg.vectors.keys().cloned().collect();
-            let sparse = cfg
-                .sparse_vectors
-                .keys()
-                .map(|k| qql::backend::SparseVectorSpec {
-                    name: k.clone(),
-                    index: None,
-                    modifier: None,
-                })
-                .collect();
-            (info, dense, sparse)
-        })
-        .await
-        .map_err(|e| QqlError::execution("QQL-EDGE", format!("spawn_blocking: {e}"), None))?;
+        let (info, dense_vectors, sparse_vectors, vectors) =
+            tokio::task::spawn_blocking(move || {
+                let info = shard.info();
+                let cfg = shard.config();
+                let dense = cfg
+                    .vectors
+                    .keys()
+                    .filter(|name| !name.is_empty())
+                    .cloned()
+                    .collect();
+                let vectors = cfg
+                    .vectors
+                    .iter()
+                    .map(|(name, params)| qql::backend::VectorSpec {
+                        name: (!name.is_empty()).then(|| name.clone()),
+                        size: params.size as u64,
+                        distance: match params.distance {
+                            qdrant_edge::Distance::Cosine => "Cosine",
+                            qdrant_edge::Distance::Dot => "Dot",
+                            qdrant_edge::Distance::Euclid => "Euclid",
+                            qdrant_edge::Distance::Manhattan => "Manhattan",
+                        }
+                        .to_string(),
+                        hnsw: None,
+                        quantization: None,
+                        multivector: None,
+                        on_disk: params.on_disk,
+                    })
+                    .collect();
+                let sparse = cfg
+                    .sparse_vectors
+                    .keys()
+                    .map(|k| qql::backend::SparseVectorSpec {
+                        name: k.clone(),
+                        index: None,
+                        modifier: None,
+                    })
+                    .collect();
+                (info, dense, sparse, vectors)
+            })
+            .await
+            .map_err(|e| QqlError::execution("QQL-EDGE", format!("spawn_blocking: {e}"), None))?;
 
         Ok(CollectionInfo {
             status: "green".to_string(),
@@ -669,12 +747,20 @@ impl QdrantOps for EdgeQdrant {
             schema: CollectionSchema {
                 dense_vectors,
                 sparse_vectors,
+                vectors,
                 ..Default::default()
             },
         })
     }
 
     async fn create_collection(&self, req: CreateCollectionReq) -> Result<(), QqlError> {
+        if self.collection_exists(&req.collection_name).await? {
+            return Err(QqlError::execution(
+                "QQL-EDGE-COLLECTION-EXISTS",
+                format!("collection '{}' already exists", req.collection_name),
+                None,
+            ));
+        }
         self.open_shard_with_req(&req.collection_name, Some(&req))
             .await?;
         Ok(())
@@ -690,10 +776,21 @@ impl QdrantOps for EdgeQdrant {
 
     async fn delete_collection(&self, name: &str) -> Result<(), QqlError> {
         let path = self.collection_path(name);
-        let _shard = {
+        let shard = {
             let mut shards = self.shards.write().await;
             shards.remove(name)
         };
+        if let Some(shard) = shard {
+            tokio::task::spawn_blocking(move || drop(shard))
+                .await
+                .map_err(|error| {
+                    QqlError::execution(
+                        "QQL-EDGE",
+                        format!("close collection before delete: {error}"),
+                        None,
+                    )
+                })?;
+        }
         tokio::task::spawn_blocking(move || {
             if path.exists() {
                 std::fs::remove_dir_all(&path).map_err(|e| {
@@ -712,11 +809,13 @@ impl QdrantOps for EdgeQdrant {
 
         let schema_type = match req.field_type.to_lowercase().as_str() {
             "keyword" => PayloadSchemaType::Keyword,
+            "uuid" => PayloadSchemaType::Uuid,
             "integer" | "int" => PayloadSchemaType::Integer,
             "float" => PayloadSchemaType::Float,
             "bool" | "boolean" => PayloadSchemaType::Bool,
             "geo" => PayloadSchemaType::Geo,
             "text" => PayloadSchemaType::Text,
+            "datetime" => PayloadSchemaType::Datetime,
             other => {
                 return Err(QqlError::execution(
                     "QQL-EDGE",
@@ -762,6 +861,7 @@ impl QdrantOps for EdgeQdrant {
     }
 
     async fn execute_planned(&self, op: &qql_plan::PlannedOperation) -> Result<Value, QqlError> {
+        reject_shard(op.shard_key())?;
         let route = qql_plan::plan::to_rest_route(op);
         self.execute_edge(route).await
     }
@@ -770,6 +870,9 @@ impl QdrantOps for EdgeQdrant {
         collection: &str,
         batch: &QueryBatchRequest,
     ) -> Result<Vec<serde_json::Value>, QqlError> {
+        for request in &batch.searches {
+            reject_shard(request.shard_key.as_deref())?;
+        }
         let path = format!("/collections/{collection}/points/query");
         let mut results = Vec::with_capacity(batch.searches.len());
         for req in &batch.searches {
@@ -792,6 +895,15 @@ impl QdrantOps for EdgeQdrant {
         // Edge has no native update-batch RPC — fan out to individual routes.
         let mut results = Vec::with_capacity(batch.operations.len());
         for op in &batch.operations {
+            match op {
+                PlanUpdateOperation::Upsert { upsert } => {
+                    reject_shard(upsert.shard_key.as_deref())?;
+                }
+                PlanUpdateOperation::Delete { delete } => {
+                    reject_shard(delete.shard_key.as_deref())?;
+                }
+                _ => {}
+            }
             let route = update_op_to_route(collection, op);
             results.push(self.execute_edge(route).await?);
         }
@@ -855,4 +967,102 @@ fn extract_collection(path: &str) -> Result<String, QqlError> {
             None,
         ))
     }
+}
+
+fn reject_shard(shard_key: Option<&str>) -> Result<(), QqlError> {
+    if shard_key.is_some() {
+        return Err(QqlError::execution(
+            "QQL-EDGE-UNSUPPORTED-SHARD",
+            "SHARD routing is available only with clustered Qdrant backends, not qql-edge",
+            None,
+        ));
+    }
+    Ok(())
+}
+
+fn reject_collection_sharding(
+    shard_number: Option<u64>,
+    sharding_method: Option<&str>,
+    shard_keys: Option<&[String]>,
+) -> Result<(), QqlError> {
+    if shard_number.is_some() || sharding_method.is_some() || shard_keys.is_some() {
+        return Err(QqlError::execution(
+            "QQL-EDGE-UNSUPPORTED-SHARD",
+            "collection sharding options are available only with clustered Qdrant backends, not qql-edge",
+            None,
+        ));
+    }
+    Ok(())
+}
+
+fn edge_vectors_json(vectors: &[qql::backend::VectorSpec]) -> Result<Value, QqlError> {
+    if let [vector] = vectors {
+        if vector.name.is_none() {
+            return Ok(serde_json::json!({
+                "size": vector.size,
+                "distance": vector.distance,
+            }));
+        }
+    }
+    if vectors.iter().any(|vector| vector.name.is_none()) {
+        return Err(QqlError::execution(
+            "QQL-EDGE",
+            "multiple dense vectors must have explicit names in edge mode",
+            None,
+        ));
+    }
+    let entries = vectors
+        .iter()
+        .map(|vector| {
+            let name = vector.name.clone().ok_or_else(|| {
+                QqlError::execution("QQL-EDGE", "dense vector is missing a name", None)
+            })?;
+            Ok((
+                name,
+                serde_json::json!({
+                    "size": vector.size,
+                    "distance": vector.distance,
+                }),
+            ))
+        })
+        .collect::<Result<serde_json::Map<String, Value>, QqlError>>()?;
+    Ok(Value::Object(entries))
+}
+
+fn edge_sparse_vectors_json(vectors: &[qql::backend::SparseVectorSpec]) -> Value {
+    Value::Object(
+        vectors
+            .iter()
+            .map(|vector| {
+                (
+                    vector.name.clone(),
+                    serde_json::json!({
+                        "modifier": vector.modifier,
+                    }),
+                )
+            })
+            .collect(),
+    )
+}
+
+/// Convert a plan-layer filter into a qdrant-edge `Filter`.
+///
+/// Bare condition objects (`{"key": ...}`) are wrapped as `{"must": [...]}`
+/// so they match the Filter schema. Conversion failures return an error —
+/// previously COUNT/DELETE silently dropped malformed filters via `.ok()`.
+fn convert_edge_filter(
+    filter: Option<&impl serde::Serialize>,
+) -> Result<Option<qdrant_edge::Filter>, QqlError> {
+    let Some(filter) = filter else {
+        return Ok(None);
+    };
+    let mut filter_val = serde_json::to_value(filter)
+        .map_err(|e| QqlError::execution("QQL-EDGE", format!("invalid filter: {e}"), None))?;
+    if filter_val.get("key").is_some() {
+        filter_val = serde_json::json!({ "must": [filter_val] });
+    }
+    let edge_filter: qdrant_edge::Filter = serde_json::from_value(filter_val).map_err(|e| {
+        QqlError::execution("QQL-EDGE", format!("invalid filter format: {e}"), None)
+    })?;
+    Ok(Some(edge_filter))
 }

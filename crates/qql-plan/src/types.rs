@@ -505,6 +505,8 @@ pub struct PointsRequest {
     pub with_payload: Option<PayloadSelectorReq>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub with_vector: Option<VectorSelectorReq>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shard_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

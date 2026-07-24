@@ -518,6 +518,7 @@ pub async fn execute_planned_grpc(
                 ids: request.ids.iter().map(to_point_id).collect(),
                 with_payload: request.with_payload.as_ref().map(to_payload_selector),
                 with_vectors: request.with_vector.as_ref().map(to_vectors_selector),
+                shard_key_selector: shard_key_selector(&request.shard_key),
                 ..Default::default()
             };
             let resp = client

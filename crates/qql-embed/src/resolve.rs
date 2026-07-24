@@ -107,18 +107,7 @@ async fn resolve_upsert_embeddings(
                 let model_name = model.as_deref().unwrap_or("default");
                 let vector_name = vector.as_deref().unwrap_or(DENSE_VECTOR_NAME);
 
-                let mut targets = Vec::new();
-                for (idx, point) in upsert.points.iter().enumerate() {
-                    if let Some((_, qql_core::ast::Value::Str(text))) = point
-                        .payload
-                        .iter()
-                        .find(|(k, _)| k.eq_ignore_ascii_case("text"))
-                    {
-                        if !text.is_empty() {
-                            targets.push((idx, text.clone()));
-                        }
-                    }
-                }
+                let targets = collect_default_text_targets(&upsert.points);
 
                 if !targets.is_empty() {
                     let (indices, texts): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
@@ -128,6 +117,27 @@ async fn resolve_upsert_embeddings(
                         let point = &mut upsert.points[idx];
                         add_point_vector(point, vector_name, VectorValue::Dense(vec))?;
                     }
+                }
+            }
+            EmbeddingSpec::Sparse { model, vector } => {
+                if model.is_some() {
+                    return Err(QqlError::execution(
+                        "QQL-EMBEDDING",
+                        "sparse model selection is not supported by the local BM25 sparse embedder; omit MODEL",
+                        None,
+                    ));
+                }
+                let vector_name = vector.as_deref().unwrap_or(SPARSE_VECTOR_NAME);
+                for (idx, text) in collect_default_text_targets(&upsert.points) {
+                    let sparse_vec = embedder.embed_sparse(&text).await?;
+                    add_point_vector(
+                        &mut upsert.points[idx],
+                        vector_name,
+                        VectorValue::Sparse {
+                            indices: sparse_vec.indices,
+                            values: sparse_vec.values,
+                        },
+                    )?;
                 }
             }
             EmbeddingSpec::Hybrid {
@@ -147,18 +157,7 @@ async fn resolve_upsert_embeddings(
                 let d_vec_name = dense_vector.as_deref().unwrap_or(DENSE_VECTOR_NAME);
                 let s_vec_name = sparse_vector.as_deref().unwrap_or(SPARSE_VECTOR_NAME);
 
-                let mut targets = Vec::new();
-                for (idx, point) in upsert.points.iter().enumerate() {
-                    if let Some((_, qql_core::ast::Value::Str(text))) = point
-                        .payload
-                        .iter()
-                        .find(|(k, _)| k.eq_ignore_ascii_case("text"))
-                    {
-                        if !text.is_empty() {
-                            targets.push((idx, text.clone()));
-                        }
-                    }
-                }
+                let targets = collect_default_text_targets(&upsert.points);
 
                 if !targets.is_empty() {
                     let (indices, texts): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
@@ -655,11 +654,53 @@ fn ensure_batch_len(got: usize, expected: usize, model: &str) -> Result<(), QqlE
     Ok(())
 }
 
+fn collect_default_text_targets(points: &[UpsertPoint]) -> Vec<(usize, String)> {
+    points
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, point)| {
+            point
+                .payload
+                .iter()
+                .find(|(key, value)| {
+                    matches!(value, qql_core::ast::Value::Str(text) if !text.is_empty())
+                        && (key.eq_ignore_ascii_case("text")
+                            || key.eq_ignore_ascii_case("body")
+                            || key.eq_ignore_ascii_case("content"))
+                })
+                .and_then(|(_, value)| match value {
+                    qql_core::ast::Value::Str(text) => Some((idx, text.clone())),
+                    _ => None,
+                })
+        })
+        .collect()
+}
+
 fn add_point_vector(
     point: &mut UpsertPoint,
     name: &str,
     vector: VectorValue,
 ) -> Result<(), QqlError> {
+    if name.is_empty() {
+        return match &mut point.vectors {
+            Some(PointVectors::Unnamed(existing)) => {
+                *existing = vector;
+                Ok(())
+            }
+            Some(PointVectors::Named(list)) => {
+                if let Some(existing) = list.iter_mut().find(|(key, _)| key.is_empty()) {
+                    existing.1 = vector;
+                } else {
+                    list.push((String::new(), vector));
+                }
+                Ok(())
+            }
+            None => {
+                point.vectors = Some(PointVectors::Unnamed(vector));
+                Ok(())
+            }
+        };
+    }
     match &mut point.vectors {
         Some(PointVectors::Named(list)) => {
             if let Some(existing) = list.iter_mut().find(|(k, _)| k == name) {

@@ -31,6 +31,10 @@ crates/nqql/package-lock.json
 qdrant_storage
 crates/nqql/index.node
 crates/nqql/native.d.ts
+crates/nqql-edge/index.*.node
+crates/nqql-edge/index.node
+crates/nqql-edge/native.d.ts
+crates/nqql-edge/package-lock.json
 qdrant-lib-edge
 .fastembed_cache
 examples/medical-retrieval-ops/generated/eval.json

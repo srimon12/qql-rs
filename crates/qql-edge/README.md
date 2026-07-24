@@ -8,9 +8,11 @@ Three embedding strategies produce an [`Executor`] backed by [`EdgeQdrant`]:
 
 | Constructor | Embedder | Use case |
 |------------|----------|----------|
-| `local_executor()` | `FastEmbedder` (ONNX, local CPU) | Fully offline |
+| `local_executor()` | `FastEmbedder` (ONNX, default BGE small 384-d) | Fully offline |
+| `local_executor_with_options()` | `FastEmbedder` + model/cache selection | Pick ONNX model |
 | `http_executor()` | `HttpEmbedder` (OpenAI-compatible) | Local model, remote API |
 | `custom_executor()` | Any `Arc<dyn Embedder>` | GPU, ensemble, caching |
+| `list_embedding_models()` | — | Discover ONNX models + dims |
 
 ## Quick start
 
@@ -22,6 +24,7 @@ let mut executor = local_executor("/tmp/qql-edge-data", false)?;
 let resp = executor.execute("CREATE COLLECTION docs HYBRID", OnError::Stop).await?;
 let resp = executor.execute("UPSERT INTO docs VALUES {id: 1, text: 'hello world'}", OnError::Stop).await?;
 let resp = executor.execute("QUERY 'hello' FROM docs LIMIT 5;", OnError::Stop).await?;
+executor.close().await?; // flush before deleting the data directory
 ```
 
 ## EdgeQdrant backend
@@ -32,9 +35,10 @@ configured `base_path`.
 
 ### Supported operations
 
-All 21 `PlannedOperation` variants, plus `QueryBatchRequest` and
-`UpdateBatchRequest`. The edge backend follows the same response envelope
-convention as REST and gRPC: `{ "result": ..., "status": "ok", "time": 0.0 }`.
+The supported point, mutation, collection, index, query, and batch operations
+use the same response envelope as REST and gRPC: `{ "result": ..., "status": "ok", "time": 0.0 }`.
+Unsupported clustered or server-only operations return an explicit
+`QqlError`; they are never acknowledged as no-ops.
 
 ### Response normalization
 
@@ -62,6 +66,8 @@ When neither feature is enabled, only `custom_executor()` is available.
   advanced quantization types); operations that require these will fail at
   the `QqlError` level
 - Shard keys are not supported in edge mode (no sharding in qdrant-edge)
+- `GROUP BY`, `ALTER COLLECTION`, recommendation queries, and shard DDL are
+  rejected explicitly in edge mode
 
 ## Verification
 
@@ -70,5 +76,5 @@ When neither feature is enabled, only `custom_executor()` is available.
 cargo test -p qql-edge --features fastembed-local -- --test-threads=2
 
 # HTTP executor only
-cargo test -p qql-edge --features rest -- --test-threads=2
+cargo test -p qql-edge --features http-embedding -- --test-threads=2
 ```

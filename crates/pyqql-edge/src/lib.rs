@@ -11,16 +11,18 @@
 //! plan = pyqql_edge.explain("QUERY 'hello' FROM docs LIMIT 10")
 //!
 //! # ── Edge execution ──
-//! exec = pyqql_edge.local_executor("./qdrant_data")
+//! exec = pyqql_edge.local_executor("./qdrant_data", model="BGESmallENV15")
 //! result = exec.execute("QUERY 'hello' FROM docs LIMIT 10")
+//! models = pyqql_edge.list_embedding_models()
 //! ```
 
-use pyo3::exceptions::PySyntaxError;
+use pyo3::exceptions::{PyRuntimeError, PySyntaxError};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList};
 use qql_core::ast::{self, ComparisonOp, Value};
 use qql_core::lexer::Lexer;
 use qql_core::parser::Parser;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 // ═══════════════════════════════════════════════════════════════════
 //  Stmt class — mirrors pyqql.PyStmt
@@ -42,8 +44,7 @@ impl PyStmt {
         }
         let val = py_to_value(value)?;
         let cmp = str_to_comparison_op(op)?;
-        ast::inject_filter(&mut self.inner, field, cmp, val)
-            .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+        ast::inject_filter(&mut self.inner, field, cmp, val).map_err(qql_py_syntax_error)?;
         Ok(())
     }
 
@@ -87,8 +88,17 @@ impl PyStmt {
 
 #[pyfunction]
 fn parse(input: &str) -> PyResult<Vec<PyStmt>> {
-    let stmts = Parser::parse_all(input).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+    let stmts = Parser::parse_all(input).map_err(qql_py_syntax_error)?;
     Ok(stmts.into_iter().map(|s| PyStmt { inner: s }).collect())
+}
+
+/// Parse a script and return the canonical AST JSON without creating Python
+/// objects for every node.
+#[pyfunction]
+fn parse_json(input: &str) -> PyResult<String> {
+    let statements = Parser::parse_all(input).map_err(qql_py_error)?;
+    serde_json::to_string(&statements)
+        .map_err(|error| PyRuntimeError::new_err(format!("serialize AST: {error}")))
 }
 
 #[pyfunction]
@@ -111,14 +121,11 @@ fn inject_filter(
     let val = py_to_value(value)?;
     let cmp = str_to_comparison_op(op)?;
     if let Ok(mut py_stmt) = query.extract::<PyRefMut<'_, PyStmt>>() {
-        ast::inject_filter(&mut py_stmt.inner, field, cmp, val)
-            .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+        ast::inject_filter(&mut py_stmt.inner, field, cmp, val).map_err(qql_py_syntax_error)?;
         Ok(py_stmt.clone())
     } else if let Ok(query_str) = query.extract::<String>() {
-        let mut stmt =
-            Parser::parse(&query_str).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
-        ast::inject_filter(&mut stmt, field, cmp, val)
-            .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+        let mut stmt = Parser::parse(&query_str).map_err(qql_py_syntax_error)?;
+        ast::inject_filter(&mut stmt, field, cmp, val).map_err(qql_py_syntax_error)?;
         Ok(PyStmt { inner: stmt })
     } else {
         Err(pyo3::exceptions::PyTypeError::new_err(
@@ -132,7 +139,7 @@ fn tokenize<'py>(input: &str, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict
     let lexer = Lexer::new(input);
     let mut result = Vec::new();
     for token_result in lexer {
-        let token = token_result.map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+        let token = token_result.map_err(qql_py_syntax_error)?;
         let d = PyDict::new(py);
         d.set_item("kind", token.kind.as_str())?;
         d.set_item("text", token.text)?;
@@ -144,9 +151,10 @@ fn tokenize<'py>(input: &str, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict
 
 #[pyfunction]
 fn compile_query<'py>(py: Python<'py>, input: &str) -> PyResult<Bound<'py, PyAny>> {
-    let stmt = Parser::parse(input).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+    let stmt = Parser::parse(input).map_err(qql_py_syntax_error)?;
     let route = qql_plan::routing::route(&stmt);
     let result = serde_json::json!({
+        "stmt_type": stmt_type(&stmt),
         "method": route.method.as_str(),
         "path": route.path,
         "payload": route.body_json().unwrap_or(serde_json::Value::Null),
@@ -159,8 +167,7 @@ fn explain(query: &Bound<'_, PyAny>) -> PyResult<String> {
     if let Ok(py_stmt) = query.extract::<PyRef<PyStmt>>() {
         Ok(qql_core::explain::explain_node(&py_stmt.inner))
     } else if let Ok(query_str) = query.extract::<String>() {
-        qql_core::explain::explain(&query_str)
-            .map_err(|e| pyo3::exceptions::PySyntaxError::new_err(e.to_string()))
+        qql_core::explain::explain(&query_str).map_err(qql_py_syntax_error)
     } else {
         Err(pyo3::exceptions::PyTypeError::new_err(
             "query must be a string or a Stmt object",
@@ -176,6 +183,7 @@ fn explain(query: &Bound<'_, PyAny>) -> PyResult<String> {
 struct PyClient {
     inner: std::sync::Arc<qql::executor::Executor>,
     runtime: tokio::runtime::Runtime,
+    closed: AtomicBool,
 }
 
 #[pymethods]
@@ -187,6 +195,9 @@ impl PyClient {
         query: &Bound<'_, PyAny>,
         on_error: &str,
     ) -> PyResult<Bound<'py, PyAny>> {
+        if self.closed.load(Ordering::Acquire) {
+            return Err(PyRuntimeError::new_err("client is closed"));
+        }
         let out = self.run(query, parse_on_error(on_error)?)?;
         pythonize::pythonize(py, &out)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
@@ -199,6 +210,9 @@ impl PyClient {
         query: Bound<'py, PyAny>,
         on_error: &str,
     ) -> PyResult<Bound<'py, PyAny>> {
+        if self.closed.load(Ordering::Acquire) {
+            return Err(PyRuntimeError::new_err("client is closed"));
+        }
         let inner = self.inner.clone();
         let input = classify(&query)?;
         let on_error = parse_on_error(on_error)?;
@@ -218,13 +232,36 @@ impl PyClient {
         if let Ok(py_stmt) = query.extract::<PyRef<PyStmt>>() {
             Ok(qql_core::explain::explain_node(&py_stmt.inner))
         } else if let Ok(query_str) = query.extract::<String>() {
-            qql_core::explain::explain(&query_str)
-                .map_err(|e| pyo3::exceptions::PySyntaxError::new_err(e.to_string()))
+            qql_core::explain::explain(&query_str).map_err(qql_py_syntax_error)
         } else {
             Err(pyo3::exceptions::PyTypeError::new_err(
                 "query must be a string or a Stmt object",
             ))
         }
+    }
+
+    /// Flush and release edge storage. Idempotent.
+    fn close(&self) -> PyResult<()> {
+        if self.closed.swap(true, Ordering::AcqRel) {
+            return Ok(());
+        }
+        self.runtime
+            .block_on(self.inner.close())
+            .map_err(qql_py_error)
+    }
+
+    fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __exit__(
+        &self,
+        _ty: &Bound<'_, PyAny>,
+        _value: &Bound<'_, PyAny>,
+        _traceback: &Bound<'_, PyAny>,
+    ) -> PyResult<bool> {
+        self.close()?;
+        Ok(false)
     }
 }
 
@@ -344,16 +381,127 @@ async fn run_async(
 //  Executor constructors — edge-only, no REST/gRPC
 // ═══════════════════════════════════════════════════════════════════
 
+/// Create a fully-local edge executor backed by fastembed-rs and qdrant-edge.
+///
+/// Args:
+///     data_dir: path for on-disk qdrant-edge storage
+///     on_disk_payload: store payloads on disk (default True)
+///     model: local ONNX model. Accepts enum names (``BGESmallENV15``), HF
+///         codes (``Xenova/bge-small-en-v1.5``), or short aliases
+///         (``bge-small-en-v1.5``). Default: BGESmallENV15 (384-d).
+///     cache_dir: override model cache directory
+///     show_download_progress: show HuggingFace download progress (default False)
+#[cfg(feature = "fastembed-local")]
 #[pyfunction]
-#[pyo3(signature = (data_dir, on_disk_payload=true))]
-fn local_executor(data_dir: &str, on_disk_payload: bool) -> PyResult<PyClient> {
-    let exec = qql_edge::local_executor(data_dir, on_disk_payload)
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+#[pyo3(signature = (data_dir, on_disk_payload=true, *, model=None, cache_dir=None, show_download_progress=false))]
+fn local_executor(
+    data_dir: &str,
+    on_disk_payload: bool,
+    model: Option<String>,
+    cache_dir: Option<String>,
+    show_download_progress: bool,
+) -> PyResult<PyClient> {
+    let exec = qql_edge::local_executor_with_options(
+        data_dir,
+        qql_edge::LocalExecutorOptions {
+            on_disk_payload,
+            model,
+            cache_dir: cache_dir.map(std::path::PathBuf::from),
+            show_download_progress,
+        },
+    )
+    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
     let rt = tokio::runtime::Runtime::new()
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
     Ok(PyClient {
         inner: std::sync::Arc::new(exec),
         runtime: rt,
+        closed: AtomicBool::new(false),
+    })
+}
+
+/// List dense ONNX models available for ``local_executor(model=...)``.
+///
+/// Returns a list of dicts: ``{name, model_code, dim, description}``.
+#[cfg(feature = "fastembed-local")]
+#[pyfunction]
+fn list_embedding_models(py: Python<'_>) -> PyResult<Bound<'_, PyList>> {
+    let models = qql_edge::list_embedding_models();
+    let out = PyList::empty(py);
+    for m in models {
+        let d = PyDict::new(py);
+        d.set_item("name", m.name)?;
+        d.set_item("model_code", m.model_code)?;
+        d.set_item("dim", m.dim)?;
+        d.set_item("description", m.description)?;
+        out.append(d)?;
+    }
+    Ok(out)
+}
+
+/// One-shot local execution. Prefer a long-lived `Client` for repeated calls
+/// so the model and edge shards stay open.
+#[cfg(feature = "fastembed-local")]
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+#[pyo3(signature = (query, *, data_dir="./qdrant_data", on_disk_payload=true, model=None, cache_dir=None, show_download_progress=false, on_error="stop"))]
+fn execute<'py>(
+    py: Python<'py>,
+    query: &Bound<'_, PyAny>,
+    data_dir: &str,
+    on_disk_payload: bool,
+    model: Option<String>,
+    cache_dir: Option<String>,
+    show_download_progress: bool,
+    on_error: &str,
+) -> PyResult<Bound<'py, PyAny>> {
+    let client = local_executor(
+        data_dir,
+        on_disk_payload,
+        model,
+        cache_dir,
+        show_download_progress,
+    )?;
+    let report = client.run(query, parse_on_error(on_error)?)?;
+    client.close()?;
+    pythonize::pythonize(py, &report).map_err(|error| PyRuntimeError::new_err(error.to_string()))
+}
+
+/// One-shot asynchronous local execution with the same options as `execute`.
+#[cfg(feature = "fastembed-local")]
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+#[pyo3(signature = (query, *, data_dir="./qdrant_data", on_disk_payload=true, model=None, cache_dir=None, show_download_progress=false, on_error="stop"))]
+fn execute_async<'py>(
+    py: Python<'py>,
+    query: Bound<'py, PyAny>,
+    data_dir: &str,
+    on_disk_payload: bool,
+    model: Option<String>,
+    cache_dir: Option<String>,
+    show_download_progress: bool,
+    on_error: &str,
+) -> PyResult<Bound<'py, PyAny>> {
+    let input = classify(&query)?;
+    let on_error = parse_on_error(on_error)?;
+    let client = local_executor(
+        data_dir,
+        on_disk_payload,
+        model,
+        cache_dir,
+        show_download_progress,
+    )?;
+    let inner = client.inner.clone();
+    pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        let result = run_async(&inner, input, on_error).await;
+        let close_result = inner.close().await;
+        let value = result.map_err(qql_py_error)?;
+        close_result.map_err(qql_py_error)?;
+        Python::with_gil(|py| {
+            pythonize::pythonize(py, &value)
+                .map(|bound| bound.unbind())
+                .map_err(|error| PyRuntimeError::new_err(error.to_string()))
+        })
     })
 }
 
@@ -382,6 +530,7 @@ fn http_executor(
     Ok(PyClient {
         inner: std::sync::Arc::new(exec),
         runtime: rt,
+        closed: AtomicBool::new(false),
     })
 }
 
@@ -393,16 +542,72 @@ fn http_executor(
 fn pyqql_edge(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyStmt>()?;
     m.add_class::<PyClient>()?;
+    #[cfg(feature = "fastembed-local")]
     m.add_function(wrap_pyfunction!(local_executor, m)?)?;
+    #[cfg(feature = "fastembed-local")]
+    m.add_function(wrap_pyfunction!(list_embedding_models, m)?)?;
+    #[cfg(feature = "fastembed-local")]
+    m.add_function(wrap_pyfunction!(execute, m)?)?;
+    #[cfg(feature = "fastembed-local")]
+    m.add_function(wrap_pyfunction!(execute_async, m)?)?;
     #[cfg(feature = "http-embedding")]
     m.add_function(wrap_pyfunction!(http_executor, m)?)?;
     m.add_function(wrap_pyfunction!(explain, m)?)?;
     m.add_function(wrap_pyfunction!(parse, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_json, m)?)?;
     m.add_function(wrap_pyfunction!(is_valid, m)?)?;
     m.add_function(wrap_pyfunction!(inject_filter, m)?)?;
     m.add_function(wrap_pyfunction!(tokenize, m)?)?;
     m.add_function(wrap_pyfunction!(compile_query, m)?)?;
     Ok(())
+}
+
+fn stmt_type(stmt: &ast::Stmt) -> &'static str {
+    match stmt {
+        ast::Stmt::Query(_) => "QUERY",
+        ast::Stmt::Scroll(_) => "SCROLL",
+        ast::Stmt::Upsert(_) => "UPSERT",
+        ast::Stmt::UpdateVector(_) | ast::Stmt::UpdatePayload(_) => "UPDATE",
+        ast::Stmt::Delete(_) | ast::Stmt::DeleteVector(_) => "DELETE",
+        ast::Stmt::ClearPayload(_) => "CLEAR PAYLOAD",
+        ast::Stmt::Count(_) => "COUNT",
+        ast::Stmt::CreateCollection(_)
+        | ast::Stmt::CreateIndex(_)
+        | ast::Stmt::CreateShardKey(_) => "CREATE",
+        ast::Stmt::AlterCollection(_) => "ALTER",
+        ast::Stmt::DropCollection(_) | ast::Stmt::DropIndex(_) | ast::Stmt::DropShardKey(_) => {
+            "DROP"
+        }
+        ast::Stmt::ShowCollections | ast::Stmt::ShowCollection(_) | ast::Stmt::ShowShardKeys(_) => {
+            "SHOW"
+        }
+    }
+}
+
+fn qql_py_error(error: qql_core::error::QqlError) -> pyo3::PyErr {
+    attach_qql_error(PyRuntimeError::new_err(error.to_string()), error)
+}
+
+fn qql_py_syntax_error(error: qql_core::error::QqlError) -> pyo3::PyErr {
+    attach_qql_error(PySyntaxError::new_err(error.to_string()), error)
+}
+
+fn attach_qql_error(py_error: pyo3::PyErr, error: qql_core::error::QqlError) -> pyo3::PyErr {
+    Python::with_gil(|py| {
+        let value = py_error.value(py);
+        let _ = value.setattr("code", error.code.as_ref());
+        let _ = value.setattr("kind", format!("{:?}", error.kind));
+        let span = if let Some(span) = error.span {
+            let span_dict = PyDict::new(py);
+            let _ = span_dict.set_item("start", span.start);
+            let _ = span_dict.set_item("end", span.end);
+            span_dict.into_any()
+        } else {
+            py.None().into_bound(py)
+        };
+        let _ = value.setattr("span", span);
+    });
+    py_error
 }
 
 fn parse_on_error(value: &str) -> PyResult<qql::executor::OnError> {

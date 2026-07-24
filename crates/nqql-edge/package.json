@@ -1,0 +1,34 @@
+{
+  "name": "nqql-edge",
+  "version": "1.0.0",
+  "description": "Node.js native bindings for the QQL edge executor — qdrant-edge + fastembed, zero network",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "index.*.node",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "napi build --platform --no-js --release --dts native.d.ts",
+    "build:debug": "napi build --platform --no-js --dts native.d.ts",
+    "test": "npm run build:debug && node test.js",
+    "prepack": "npm run build"
+  },
+  "keywords": [
+    "qql",
+    "qdrant",
+    "vector-search",
+    "edge",
+    "local",
+    "fastembed",
+    "embedding"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@napi-rs/cli": "^3.7.4"
+  }
+}

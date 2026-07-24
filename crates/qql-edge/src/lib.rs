@@ -9,6 +9,7 @@
 //! | Function | Embedder | Network? |
 //! |---|---|---|
 //! | [`local_executor`] | fastembed (ONNX, local CPU) | ❌ none |
+//! | [`local_executor_with_options`] | fastembed + model/cache selection | ❌ none |
 //! | [`http_executor`] | OpenAI-compatible HTTP endpoint | ✅ provider only |
 //! | [`custom_executor`] | Any `Arc<dyn Embedder>` | up to you |
 //!
@@ -34,26 +35,82 @@ mod embedder;
 
 pub use backend::EdgeQdrant;
 #[cfg(feature = "fastembed-local")]
-pub use embedder::FastEmbedder;
+pub use embedder::{
+    list_embedding_models, resolve_embedding_model, EmbeddingModelInfo, FastEmbedder,
+    FastEmbedderOptions,
+};
 
 use qql::config::QqlConfig;
 use qql::embedder::Embedder;
 use qql::executor::Executor;
+use std::path::PathBuf;
 use std::sync::Arc;
+
+/// Options for [`local_executor_with_options`].
+#[derive(Debug, Clone, Default)]
+pub struct LocalExecutorOptions {
+    /// Store payloads on disk (default: `true` when constructed via bindings;
+    /// this struct defaults to `false` for Rust ergonomics matching the
+    /// historical `local_executor(path, false)` tests).
+    pub on_disk_payload: bool,
+    /// Local ONNX model name. See [`resolve_embedding_model`] for accepted forms.
+    /// `None` → default `BGESmallENV15` (384-d).
+    #[cfg(feature = "fastembed-local")]
+    pub model: Option<String>,
+    /// Override fastembed model cache directory.
+    #[cfg(feature = "fastembed-local")]
+    pub cache_dir: Option<PathBuf>,
+    /// Show HuggingFace download progress bars (default: `false`).
+    #[cfg(feature = "fastembed-local")]
+    pub show_download_progress: bool,
+}
 
 /// Build a fully-local [`Executor`] backed by fastembed-rs and qdrant-edge.
 ///
-/// No network calls are made at all — embedding runs on-device via ONNX.
+/// Uses the default embedding model (`BGESmallENV15`, 384-d). Prefer
+/// [`local_executor_with_options`] when you need a different model or cache dir.
+///
+/// No network calls are made at inference time — embedding runs on-device via ONNX.
 /// Models are downloaded from HuggingFace on first use and cached locally.
 #[cfg(feature = "fastembed-local")]
 pub fn local_executor(
-    data_dir: impl Into<std::path::PathBuf>,
+    data_dir: impl Into<PathBuf>,
     on_disk_payload: bool,
 ) -> Result<Executor, qql_core::error::QqlError> {
-    let client = Box::new(EdgeQdrant::new(data_dir, on_disk_payload));
-    let embedder = Some(Arc::new(FastEmbedder::try_default()?) as Arc<dyn Embedder>);
-    let config = Some(QqlConfig::default());
-    Ok(Executor::with_embedder(client, config, embedder))
+    local_executor_with_options(
+        data_dir,
+        LocalExecutorOptions {
+            on_disk_payload,
+            ..Default::default()
+        },
+    )
+}
+
+/// Build a fully-local [`Executor`] with explicit model / cache options.
+#[cfg(feature = "fastembed-local")]
+pub fn local_executor_with_options(
+    data_dir: impl Into<PathBuf>,
+    opts: LocalExecutorOptions,
+) -> Result<Executor, qql_core::error::QqlError> {
+    let client = Box::new(EdgeQdrant::new(data_dir, opts.on_disk_payload));
+    let embedder = FastEmbedder::try_with_options(FastEmbedderOptions {
+        model: opts.model,
+        cache_dir: opts.cache_dir,
+        show_download_progress: opts.show_download_progress,
+    })?;
+
+    // Pin collection vector size to the actual model dimension. Without this,
+    // CREATE COLLECTION HYBRID always falls back to the hard-coded 384 and any
+    // non-default model (768 / 1024-d) silently dimension-mismatches on upsert.
+    let config = QqlConfig {
+        inference_mode: "local".to_string(),
+        embedding_dimension: embedder.dimension(),
+        embedding_model: Some(embedder.model_name().to_string()),
+        ..Default::default()
+    };
+
+    let embedder = Some(Arc::new(embedder) as Arc<dyn Embedder>);
+    Ok(Executor::with_embedder(client, Some(config), embedder))
 }
 
 /// Build an edge [`Executor`] that calls an external OpenAI-compatible embedding
@@ -69,7 +126,7 @@ pub fn local_executor(
 /// - `dimension` — expected output dimension. Must match what the model returns.
 #[cfg(feature = "http-embedding")]
 pub fn http_executor(
-    data_dir: impl Into<std::path::PathBuf>,
+    data_dir: impl Into<PathBuf>,
     on_disk_payload: bool,
     endpoint: impl Into<String>,
     api_key: impl Into<String>,
@@ -77,26 +134,163 @@ pub fn http_executor(
     dimension: usize,
 ) -> Result<Executor, qql_core::error::QqlError> {
     let client = Box::new(EdgeQdrant::new(data_dir, on_disk_payload));
+    let model = model.into();
     let embedder = Some(Arc::new(qql::embedder::HttpEmbedder::new(
         endpoint.into(),
         api_key.into(),
-        model.into(),
+        model.clone(),
         dimension,
     )?) as Arc<dyn Embedder>);
-    let config = Some(QqlConfig::default());
-    Ok(Executor::with_embedder(client, config, embedder))
+    let config = QqlConfig {
+        inference_mode: "local".to_string(),
+        embedding_dimension: dimension,
+        embedding_model: Some(model),
+        embedding_endpoint: None, // edge uses the Arc embedder, not config probing
+        ..Default::default()
+    };
+    Ok(Executor::with_embedder(client, Some(config), embedder))
 }
 
 /// Build an edge [`Executor`] with a fully custom [`Embedder`].
 ///
 /// Use this to plug in GPU-backed embedders, caching layers, ensemble
 /// embedders, or any other custom implementation.
+///
+/// **Callers must set `embedding_dimension` on a [`QqlConfig`] themselves** if
+/// they rely on `CREATE COLLECTION HYBRID` auto-sizing — pass the config via
+/// [`Executor::with_embedder`] if the defaults (384) are wrong for your model.
 pub fn custom_executor(
-    data_dir: impl Into<std::path::PathBuf>,
+    data_dir: impl Into<PathBuf>,
     on_disk_payload: bool,
     embedder: Arc<dyn Embedder>,
 ) -> Result<Executor, qql_core::error::QqlError> {
+    custom_executor_with_dimension(data_dir, on_disk_payload, embedder, None)
+}
+
+/// Build an edge [`Executor`] with a custom embedder and an optional explicit
+/// dense dimension. The embedder-reported dimension takes precedence.
+pub fn custom_executor_with_dimension(
+    data_dir: impl Into<PathBuf>,
+    on_disk_payload: bool,
+    embedder: Arc<dyn Embedder>,
+    dimension: Option<usize>,
+) -> Result<Executor, qql_core::error::QqlError> {
     let client = Box::new(EdgeQdrant::new(data_dir, on_disk_payload));
-    let config = Some(QqlConfig::default());
-    Ok(Executor::with_embedder(client, config, Some(embedder)))
+    let config = QqlConfig {
+        inference_mode: "local".to_string(),
+        embedding_dimension: embedder.dimension().or(dimension).unwrap_or(0),
+        ..Default::default()
+    };
+    Ok(Executor::with_embedder(
+        client,
+        Some(config),
+        Some(embedder),
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use qql::embedder::Embedder;
+    use qql::executor::OnError;
+    use qql_core::error::QqlError;
+    use qql_embed::sparse::SparseVector;
+
+    struct TestEmbedder;
+
+    #[async_trait]
+    impl Embedder for TestEmbedder {
+        fn dimension(&self) -> Option<usize> {
+            Some(3)
+        }
+
+        async fn embed_dense(&self, _text: &str, _model: &str) -> Result<Vec<f32>, QqlError> {
+            Ok(vec![1.0, 0.0, 0.0])
+        }
+
+        async fn embed_sparse(&self, _text: &str) -> Result<SparseVector, QqlError> {
+            Ok(SparseVector {
+                indices: vec![1],
+                values: vec![1.0],
+            })
+        }
+    }
+
+    #[test]
+    fn custom_edge_executor_is_schema_aware_and_rejects_shards() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        runtime.block_on(async {
+            let data_dir =
+                std::env::temp_dir().join(format!("qql-edge-test-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&data_dir);
+            let executor =
+                custom_executor(&data_dir, false, Arc::new(TestEmbedder)).expect("custom executor");
+
+            let report = executor
+                .execute("CREATE COLLECTION docs HYBRID", OnError::Stop)
+                .await
+                .expect("create collection");
+            assert!(report.ok);
+            let report = executor
+                .execute(
+                    "UPSERT INTO docs VALUES {id: 1, text: 'hello'}",
+                    OnError::Stop,
+                )
+                .await
+                .expect("schema-aware upsert");
+            assert!(report.ok);
+            let report = executor
+                .execute("QUERY 'hello' FROM docs LIMIT 1", OnError::Stop)
+                .await
+                .expect("schema-aware query");
+            assert!(report.ok);
+            let report = executor
+                .execute(
+                    "CREATE COLLECTION dense_only (dense VECTOR(3, COSINE))",
+                    OnError::Stop,
+                )
+                .await
+                .expect("create dense-only collection");
+            assert!(report.ok);
+            let report = executor
+                .execute(
+                    "UPSERT INTO dense_only VALUES {id: 2, body: 'dense only'}",
+                    OnError::Stop,
+                )
+                .await
+                .expect("dense-only auto-embed");
+            assert!(report.ok);
+            let report = executor
+                .execute(
+                    "CREATE COLLECTION sparse_only (sparse SPARSE)",
+                    OnError::Stop,
+                )
+                .await
+                .expect("create sparse-only collection");
+            assert!(report.ok);
+            let report = executor
+                .execute(
+                    "UPSERT INTO sparse_only VALUES {id: 3, content: 'sparse only'}",
+                    OnError::Stop,
+                )
+                .await
+                .expect("sparse-only auto-embed");
+            assert!(report.ok);
+            let report = executor
+                .execute(
+                    "QUERY 'hello' FROM docs SHARD 'tenant-a' LIMIT 1",
+                    OnError::Continue,
+                )
+                .await
+                .expect("edge should report unsupported shard");
+            assert!(!report.ok);
+            assert!(report.results[0].message.contains("UNSUPPORTED-SHARD"));
+            executor.close().await.expect("close edge executor");
+            let _ = std::fs::remove_dir_all(data_dir);
+        });
+    }
 }

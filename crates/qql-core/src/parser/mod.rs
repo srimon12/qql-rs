@@ -30,6 +30,10 @@ pub struct Parser<'a> {
     index: usize,
 }
 
+/// Hard upper bound for one parsed script. Callers that need larger imports
+/// should split them into bounded batches before parsing.
+pub const MAX_STATEMENTS: usize = 256;
+
 pub fn ascii_equal(s: &str, upper: &str) -> bool {
     if s.len() != upper.len() {
         return false;
@@ -116,6 +120,13 @@ impl<'a> Parser<'a> {
         }
 
         while parser.peek()?.kind != TokenKind::Eof {
+            if statements.len() >= MAX_STATEMENTS {
+                return Err(QqlError::parse(
+                    "QQL-PARSE-STATEMENT-LIMIT",
+                    alloc::format!("a script may contain at most {MAX_STATEMENTS} statements"),
+                    parser.peek()?.span,
+                ));
+            }
             statements.push(parser.parse_stmt()?);
             match parser.peek()?.kind {
                 TokenKind::Semicolon => {

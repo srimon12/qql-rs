@@ -76,6 +76,12 @@ impl<T> QdrantOpsBound for T {}
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait QdrantOps: QdrantOpsBound {
+    /// Flush and release backend resources. Network backends may use the
+    /// default no-op; embedded backends should override this method.
+    async fn close(&self) -> Result<(), QqlError> {
+        Ok(())
+    }
+
     async fn list_collections(&self) -> Result<Vec<String>, QqlError>;
     async fn collection_exists(&self, name: &str) -> Result<bool, QqlError>;
     async fn get_collection_info(&self, name: &str) -> Result<CollectionInfo, QqlError>;

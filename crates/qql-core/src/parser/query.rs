@@ -654,6 +654,7 @@ impl<'a> Parser<'a> {
             TokenKind::Using
                 | TokenKind::Prefetch
                 | TokenKind::Where
+                | TokenKind::Shard
                 | TokenKind::Params
                 | TokenKind::Score
                 | TokenKind::Group
@@ -832,7 +833,7 @@ fn validate_common_clauses(
     {
         return Err(QqlError::validation(
             "QQL-VALIDATION-POINTS-CLAUSE",
-            "QUERY POINTS accepts only output selectors",
+            "QUERY POINTS accepts only output selectors and SHARD",
             Some(span),
         ));
     }

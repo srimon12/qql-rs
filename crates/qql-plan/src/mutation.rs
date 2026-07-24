@@ -159,7 +159,9 @@ pub fn lower_scroll_request(
 
 pub fn embedding_has_wait(spec: &EmbeddingSpec) -> bool {
     match spec {
-        EmbeddingSpec::Dense { .. } | EmbeddingSpec::Hybrid { .. } => true,
+        EmbeddingSpec::Dense { .. }
+        | EmbeddingSpec::Sparse { .. }
+        | EmbeddingSpec::Hybrid { .. } => true,
     }
 }
 

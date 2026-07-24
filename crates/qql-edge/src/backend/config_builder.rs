@@ -26,11 +26,32 @@ pub(crate) fn build_edge_config(
             builder = builder.vector(String::new(), params);
         } else if let Some(map) = vc.as_object() {
             for (name, params) in map {
-                let size = params.get("size").and_then(|v| v.as_u64()).unwrap_or(128) as usize;
+                let size = params
+                    .get("size")
+                    .and_then(|value| value.as_u64())
+                    .ok_or_else(|| {
+                        edge_config_error(format!(
+                            "vector '{name}' requires a positive integer size"
+                        ))
+                    })?;
+                let size = usize::try_from(size).map_err(|error| {
+                    edge_config_error(format!("vector '{name}' size is too large: {error}"))
+                })?;
                 let distance = match params.get("distance").and_then(|v| v.as_str()) {
                     Some("Cosine") | Some("cosine") => qdrant_edge::Distance::Cosine,
                     Some("Dot") | Some("dot") => qdrant_edge::Distance::Dot,
-                    _ => qdrant_edge::Distance::Euclid,
+                    Some("Euclid") | Some("euclid") => qdrant_edge::Distance::Euclid,
+                    Some("Manhattan") | Some("manhattan") => qdrant_edge::Distance::Manhattan,
+                    Some(other) => {
+                        return Err(edge_config_error(format!(
+                            "vector '{name}' has unsupported distance '{other}'"
+                        )))
+                    }
+                    None => {
+                        return Err(edge_config_error(format!(
+                            "vector '{name}' requires a distance"
+                        )))
+                    }
                 };
                 let edge_params = qdrant_edge::EdgeVectorParams {
                     size,
@@ -47,6 +68,8 @@ pub(crate) fn build_edge_config(
                     builder = builder.vector(name.clone(), edge_params);
                 }
             }
+        } else {
+            return Err(edge_config_error("invalid dense vector configuration"));
         }
     }
 
@@ -58,26 +81,34 @@ pub(crate) fn build_edge_config(
             for (name, params) in map {
                 builder = builder.sparse_vector(name, params);
             }
+        } else {
+            return Err(edge_config_error("invalid sparse vector configuration"));
         }
     }
 
     if let Some(ref hc) = req.hnsw_config {
-        if let Ok(hnsw) = serde_json::from_value::<qdrant_edge::HnswIndexConfig>(hc.clone()) {
-            builder = builder.hnsw_config(hnsw);
-        }
+        let hnsw = serde_json::from_value::<qdrant_edge::HnswIndexConfig>(hc.clone())
+            .map_err(|error| edge_config_error(format!("invalid HNSW configuration: {error}")))?;
+        builder = builder.hnsw_config(hnsw);
     }
 
     if let Some(ref qc) = req.quantization_config {
-        if let Ok(quant) = serde_json::from_value::<qdrant_edge::QuantizationConfig>(qc.clone()) {
-            builder = builder.quantization_config(quant);
-        }
+        let quant = serde_json::from_value::<qdrant_edge::QuantizationConfig>(qc.clone()).map_err(
+            |error| edge_config_error(format!("invalid quantization configuration: {error}")),
+        )?;
+        builder = builder.quantization_config(quant);
     }
 
     if let Some(ref oc) = req.optimizers_config {
-        if let Ok(opt) = serde_json::from_value::<qdrant_edge::EdgeOptimizersConfig>(oc.clone()) {
-            builder = builder.optimizers(opt);
-        }
+        let opt = serde_json::from_value::<qdrant_edge::EdgeOptimizersConfig>(oc.clone()).map_err(
+            |error| edge_config_error(format!("invalid optimizer configuration: {error}")),
+        )?;
+        builder = builder.optimizers(opt);
     }
 
     Ok(builder.build())
+}
+
+fn edge_config_error(message: impl Into<String>) -> QqlError {
+    QqlError::execution("QQL-EDGE-CONFIG", message.into(), None)
 }

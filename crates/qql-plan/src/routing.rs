@@ -115,6 +115,7 @@ pub fn route_query_batch(stmts: &[QueryStmt]) -> Vec<(String, QueryBatchRequest)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{plan, PlannedOperation};
     use qql_core::parser::Parser;
 
     #[test]
@@ -132,6 +133,21 @@ mod tests {
         let r = route(&s);
         assert_eq!(r.method, Method::Post);
         assert_eq!(r.path, "/collections/docs/points");
+    }
+
+    #[test]
+    fn points_lookup_preserves_cluster_shard_key() {
+        let statement = Parser::parse("QUERY POINTS (42) FROM docs SHARD 'tenant-a';").unwrap();
+        let operation = plan::plan(&statement).unwrap();
+        let PlannedOperation::GetPoints { request, .. } = operation else {
+            panic!("expected point lookup");
+        };
+        assert_eq!(request.shard_key.as_deref(), Some("tenant-a"));
+        assert!(route(&statement)
+            .body_json()
+            .unwrap()
+            .to_string()
+            .contains("tenant-a"));
     }
 
     #[test]
