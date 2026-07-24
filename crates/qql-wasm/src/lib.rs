@@ -490,9 +490,12 @@ fn build_analyze_value(input: &str) -> serde_json::Value {
 }
 
 fn to_js_value<T: serde::Serialize>(val: &T) -> Result<JsValue, JsValue> {
+    // The JSON-compatible serializer emits plain JavaScript objects/arrays,
+    // including for serde_json::Value. Keep serialized JSON/bytes behind
+    // explicit APIs such as compileBytes, not the default JS-facing contract.
     let serializer = serde_wasm_bindgen::Serializer::json_compatible();
     val.serialize(&serializer)
-        .map_err(|e| JsValue::from_str(&e.to_string()))
+        .map_err(|error| JsValue::from_str(&error.to_string()))
 }
 
 #[wasm_bindgen(unchecked_return_type = "AnalysisResult")]

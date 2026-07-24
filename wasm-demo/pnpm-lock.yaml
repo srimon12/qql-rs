@@ -65,9 +65,6 @@ importers:
       next-themes:
         specifier: ^0.4.6
         version: 0.4.6(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
-      qql-wasm:
-        specifier: file:../demo/pkg
-        version: file:../demo/pkg
       react:
         specifier: ^19.2.6
         version: 19.2.8
@@ -2290,9 +2287,6 @@ packages:
   punycode@2.3.1:
     resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
     engines: {node: '>=6'}
-
-  qql-wasm@file:../demo/pkg:
-    resolution: {directory: ../demo/pkg, type: directory}
 
   qs@6.15.3:
     resolution: {integrity: sha512-O9gl3zCl5h5blw1KGUzQKhA5oUXSl8rwUIM5o0S3nCXMliSvy5Dzx7/DJcI+SwgICv+IneSZwhBh1oSyEHA71A==}
@@ -4702,8 +4696,6 @@ snapshots:
       ipaddr.js: 1.9.1
 
   punycode@2.3.1: {}
-
-  qql-wasm@file:../demo/pkg: {}
 
   qs@6.15.3:
     dependencies:

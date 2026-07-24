@@ -22,7 +22,8 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "qql-wasm": ["../demo/pkg/qql_wasm.d.ts"]
     }
   },
   "include": ["src"]

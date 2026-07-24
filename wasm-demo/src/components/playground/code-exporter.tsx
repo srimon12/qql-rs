@@ -58,20 +58,22 @@ client = Client("${cleanUrl}")
 # Full script query (multi-statement batching supported)
 query_str = """${pyQuery}"""
 
-response = client.execute(query_str)
-print(response)`,
+report = client.execute(query_str)
+# report is a dict: { "ok": bool, "results": [...], "succeeded": N, "failed": M }
+print(report)`,
 
       node: `// Install nqql SDK: npm install nqql
 import { Client } from 'nqql';
 
 const client = new Client('${cleanUrl}');
 
-// Full script query string
+// Full script query string (multi-statement supported)
 const queryStr = \`${escapedQuery}\`;
 
 async function run() {
-  const response = await client.execute(queryStr);
-  console.log(JSON.stringify(response, null, 2));
+  const report = await client.execute(queryStr);
+  // report is: { ok, results: ExecResponse[], succeeded, failed }
+  console.log(JSON.stringify(report, null, 2));
 }
 
 run().catch(console.error);`,

@@ -9,6 +9,9 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      // Consume wasm-pack output directly. pnpm copies `file:` dependencies
+      // into its store, which can leave Vite running an older WASM binary.
+      "qql-wasm": path.resolve(__dirname, "../demo/pkg/qql_wasm.js"),
     },
   },
   optimizeDeps: {

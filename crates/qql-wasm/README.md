@@ -5,9 +5,10 @@ WebAssembly bindings for the QQL parser, plan compiler, and browser execution en
 ## Features
 
 - **Browser-native**: Parse and compile QQL directly in browser applications
-- **Edge-native**: Run on Cloudflare Workers, Vercel Edge, Deno, or Bun
-- **Zero-copy routing**: Lower QQL statements directly to typed Qdrant REST routes via `qql-plan`
-- **Offline analysis**: Unity API `analyze()` returns tokens, AST, route, explain string, and errors in one call
+- **JS-hosted edge runtimes**: Package with the appropriate `wasm-bindgen`
+  target for runtimes such as Workers, Deno, or Bun
+- **Shared routing**: Lower QQL statements through the same `qql-plan` route compiler
+- **Offline analysis**: Unified API `analyze()` returns tokens, AST, route, explain string, and errors in one call
 - **Small footprint**: `--no-default-features` builds exclude the HTTP client, producing a parser/compiler-only binary
 
 ## Installation
@@ -50,6 +51,7 @@ async function run() {
     // Execute pre-parsed Stmt
     const stmt = new Stmt("QUERY 'search' FROM docs LIMIT 10");
     const stmtResponse = await client.executeStmt(stmt);
+    stmt.free();
 
     // 3. Compile / Explain (offline)
     const route = compile("QUERY 'search' FROM docs LIMIT 10");
@@ -66,6 +68,7 @@ async function run() {
     myStmt.injectFilter("tenant_id", "=", "acme");
     myStmt.shardKey = "shard-01";
     console.log(myStmt.toJSON(), myStmt.toObject());
+    myStmt.free();
 
     // 5. Pure AST Parsing & Validation
     const ast = parse("QUERY 'search' FROM docs LIMIT 10");
@@ -73,6 +76,7 @@ async function run() {
     const safeAst = inject_filter("QUERY 'docs' FROM items LIMIT 10", "tenant_id", "=", "acme");
     const batchAsts = parse("QUERY 'a' FROM c LIMIT 1; QUERY 'b' FROM c LIMIT 1");
     const tokenList = tokenize("QUERY 'search' FROM docs");
+    client.free();
 }
 
 run();
@@ -129,5 +133,17 @@ cargo build -p qql-wasm --target wasm32-unknown-unknown --no-default-features
 
 ## Limitations
 
-- **`async_trait(?Send)`**: The WASM `Client` impl uses `#[async_trait(?Send)]` because `wasm32-unknown-unknown` targets lack the `Send` marker. Building the WASM crate natively for a host target (e.g., `wasm32-wasip1`) will fail with a `Send` mismatch on the `Embedder` trait. Always target `wasm32-unknown-unknown` when building with `wasm-pack`.
-- **`.wasm` size**: Release builds with `wasm-opt -O` are typically a few hundred KB. Measure with `ls -lh pkg/*.wasm` after `wasm-pack build --release --target web`.
+This crate produces portable WebAssembly bytecode, but its host ABI is
+JavaScript-specific: exported values use `wasm-bindgen`, and the optional
+client uses browser-compatible `fetch` through `gloo-net`. It is therefore not
+a standalone WASI command.
+
+- Build browser packages with `--target web`, bundler packages with
+  `--target bundler`, and Node packages with `--target nodejs`.
+- A Wasmtime/WASI or component-model distribution should be a separate adapter
+  over `qql-core` and `qql-plan`, with a string/byte or WIT interface and its
+  own HTTP host implementation.
+- **`async_trait(?Send)`**: The current client is intentionally single-threaded
+  for `wasm32-unknown-unknown`; it does not build as `wasm32-wasip1`.
+- **`.wasm` size**: Measure both the raw and compressed release artifact;
+  `wasm-opt -O` is configured for release packages.

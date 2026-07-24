@@ -38,29 +38,32 @@ type EmbedProbe = {
 export function useQql() {
   const [ready, setReady] = useState(false)
   const [initError, setInitError] = useState<string | null>(null)
-  const [settings, setSettingsState] = useState<PlaygroundSettings>(DEFAULT_SETTINGS)
+  const [settings, setSettingsState] =
+    useState<PlaygroundSettings>(DEFAULT_SETTINGS)
   const [analysis, setAnalysis] = useState<AnalysisResult>(emptyAnalysis)
   const [parseMs, setParseMs] = useState(0)
-  const [response, setResponse] = useState<string>("")
+  const [response, setResponse] = useState<unknown>(null)
   const [executing, setExecuting] = useState(false)
   const [metrics, setMetrics] = useState<ExecMetrics | null>(null)
-  const [browserStatus, setBrowserStatus] = useState<BrowserEmbedderStatus>(() => ({
-    state: "idle",
-    model: BROWSER_EMBED_MODEL,
-    dim: BROWSER_EMBED_DIM,
-    device: null,
-    loadMs: null,
-    progress: 0,
-    statusText: "Not loaded",
-    error: null,
-  }))
+  const [browserStatus, setBrowserStatus] = useState<BrowserEmbedderStatus>(
+    () => ({
+      state: "idle",
+      model: BROWSER_EMBED_MODEL,
+      dim: BROWSER_EMBED_DIM,
+      device: null,
+      loadMs: null,
+      progress: 0,
+      statusText: "Not loaded",
+      error: null,
+    })
+  )
 
   const clientRef = useRef<Client | null>(null)
   const settingsRef = useRef(settings)
-  settingsRef.current = settings
   const parseMsRef = useRef(0)
   const analysisRef = useRef(analysis)
-  analysisRef.current = analysis
+  const activeExecutionsRef = useRef(0)
+  const retiredClientsRef = useRef<Client[]>([])
   const probeRef = useRef<EmbedProbe>({
     lastEmbedMs: null,
     lastEmbedTexts: 0,
@@ -68,32 +71,64 @@ export function useQql() {
   })
 
   useEffect(() => subscribeBrowserEmbedder(setBrowserStatus), [])
+  useEffect(() => {
+    settingsRef.current = settings
+  }, [settings])
+  useEffect(() => {
+    analysisRef.current = analysis
+  }, [analysis])
 
-  const configureClient = useCallback(async (cfg: PlaygroundSettings) => {
-    const url = cfg.qdrantUrl.trim() || "http://localhost:6333"
-    const key = cfg.qdrantKey.trim() || undefined
-    const client = new Client(url, key ?? null)
-
-    if (cfg.embedProvider === "browser") {
-      const probe = probeRef.current
-      client.setEmbedder(async (texts: string[]) => {
-        const t0 = performance.now()
-        const vectors = await browserEmbedderFn(texts)
-        probe.lastEmbedMs = performance.now() - t0
-        probe.lastEmbedTexts = texts.length
-        probe.lastEmbedDim = vectors[0]?.length ?? BROWSER_EMBED_DIM
-        return vectors
-      })
-    } else if (cfg.embedProvider === "http") {
-      const embedUrl = cfg.embedUrl.trim() || "http://localhost:11434/v1/embeddings"
-      const model = cfg.embedModel.trim() || "all-minilm:l6-v2"
-      const dim = Number(cfg.embedDim) || 384
-      const embedKey = cfg.embedKey.trim() || null
-      client.setHttpEmbedder(embedUrl, model, dim, embedKey)
-    }
-
-    clientRef.current = client
+  const releaseRetiredClients = useCallback(() => {
+    if (activeExecutionsRef.current !== 0) return
+    for (const client of retiredClientsRef.current) client.free()
+    retiredClientsRef.current = []
   }, [])
+
+  const retireClient = useCallback(
+    (client: Client | null) => {
+      if (!client) return
+      retiredClientsRef.current.push(client)
+      releaseRetiredClients()
+    },
+    [releaseRetiredClients]
+  )
+
+  const configureClient = useCallback(
+    async (cfg: PlaygroundSettings) => {
+      const url = cfg.qdrantUrl.trim() || "http://localhost:6333"
+      const key = cfg.qdrantKey.trim() || undefined
+      const client = new Client(url, key ?? null)
+
+      try {
+        if (cfg.embedProvider === "browser") {
+          const probe = probeRef.current
+          client.setEmbedder(async (texts: string[]) => {
+            const t0 = performance.now()
+            const vectors = await browserEmbedderFn(texts)
+            probe.lastEmbedMs = performance.now() - t0
+            probe.lastEmbedTexts = texts.length
+            probe.lastEmbedDim = vectors[0]?.length ?? BROWSER_EMBED_DIM
+            return vectors
+          })
+        } else if (cfg.embedProvider === "http") {
+          const embedUrl =
+            cfg.embedUrl.trim() || "http://localhost:11434/v1/embeddings"
+          const model = cfg.embedModel.trim() || "all-minilm:l6-v2"
+          const dim = Number(cfg.embedDim) || 384
+          const embedKey = cfg.embedKey.trim() || null
+          client.setHttpEmbedder(embedUrl, model, dim, embedKey)
+        }
+      } catch (error) {
+        client.free()
+        throw error
+      }
+
+      const previous = clientRef.current
+      clientRef.current = client
+      retireClient(previous)
+    },
+    [retireClient]
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -118,8 +153,10 @@ export function useQql() {
 
     return () => {
       cancelled = true
+      retireClient(clientRef.current)
+      clientRef.current = null
     }
-  }, [configureClient])
+  }, [configureClient, retireClient])
 
   const runAnalysis = useCallback(
     (source: string, tenantConfig?: TenantConfig) => {
@@ -132,45 +169,89 @@ export function useQql() {
       }
 
       const t0 = performance.now()
-      const baseResult = (analyze(source) ?? emptyAnalysis()) as AnalysisResult
-
-      if (tenantConfig?.enabled && tenantConfig.field.trim() && tenantConfig.value.trim()) {
-        try {
-          const stmt = new Stmt(source)
-          stmt.injectFilter(tenantConfig.field.trim(), tenantConfig.op || "=", tenantConfig.value.trim())
-          if (tenantConfig.shardKey.trim()) {
-            stmt.shardKey = tenantConfig.shardKey.trim()
-          }
-          const injectedRoute = stmt.compileRoute()
-          const result: AnalysisResult = {
-            ...baseResult,
-            route: injectedRoute,
-            routes: [injectedRoute],
-            ast: stmt.toObject(),
-          }
-          const elapsed = performance.now() - t0
-          setParseMs(elapsed)
-          parseMsRef.current = elapsed
-          setAnalysis(result)
-          return result
-        } catch (err) {
-          const errResult: AnalysisResult = {
-            ...baseResult,
-            error: {
-              code: "TENANT_ISOLATION",
-              message: `Tenant Injection Error: ${err instanceof Error ? err.message : String(err)}`,
-            },
-          }
-          setAnalysis(errResult)
-          return errResult
-        }
+      const finish = (result: AnalysisResult) => {
+        const elapsed = performance.now() - t0
+        setParseMs(elapsed)
+        parseMsRef.current = elapsed
+        setAnalysis(result)
+        analysisRef.current = result
+        return result
       }
 
-      const elapsed = performance.now() - t0
-      setParseMs(elapsed)
-      parseMsRef.current = elapsed
-      setAnalysis(baseResult)
-      return baseResult
+      try {
+        const baseResult = analyze(source) as AnalysisResult
+
+        if (
+          baseResult.valid &&
+          tenantConfig?.enabled &&
+          tenantConfig.field.trim() &&
+          tenantConfig.value.trim()
+        ) {
+          if (baseResult.statements_count !== 1) {
+            return finish({
+              ...baseResult,
+              valid: false,
+              route: null,
+              routes: [],
+              error: {
+                code: "TENANT_MULTI_STATEMENT",
+                message:
+                  "Tenant isolation currently accepts exactly one statement; split this script and execute each statement separately.",
+                start: null,
+                end: null,
+              },
+            })
+          }
+
+          try {
+            const stmt = new Stmt(source)
+            try {
+              stmt.injectFilter(
+                tenantConfig.field.trim(),
+                tenantConfig.op || "=",
+                tenantConfig.value.trim()
+              )
+              if (tenantConfig.shardKey.trim()) {
+                stmt.shardKey = tenantConfig.shardKey.trim()
+              }
+              const route = stmt.compileRoute()
+              return finish({
+                ...baseResult,
+                route,
+                routes: [route],
+                ast: [stmt.toObject()],
+              })
+            } finally {
+              stmt.free()
+            }
+          } catch (err) {
+            return finish({
+              ...baseResult,
+              valid: false,
+              route: null,
+              routes: [],
+              error: {
+                code: "TENANT_ISOLATION",
+                message: `Tenant Injection Error: ${err instanceof Error ? err.message : String(err)}`,
+                start: null,
+                end: null,
+              },
+            })
+          }
+        }
+
+        return finish(baseResult)
+      } catch (err) {
+        return finish({
+          ...emptyAnalysis(),
+          error: {
+            code: "WASM_ANALYZE",
+            message: err instanceof Error ? err.message : String(err),
+            start: null,
+            end: null,
+          },
+        })
+      }
     },
     [ready]
   )
@@ -178,6 +259,7 @@ export function useQql() {
   const updateSettings = useCallback(
     async (next: PlaygroundSettings) => {
       setSettingsState(next)
+      settingsRef.current = next
       saveSettings(next)
       await configureClient(next)
     },
@@ -192,36 +274,62 @@ export function useQql() {
 
       const cfg = settingsRef.current
       setExecuting(true)
-      setResponse("Executing query…")
 
       const probe = probeRef.current
       probe.lastEmbedMs = null
       probe.lastEmbedTexts = 0
+      let acquiredClient = false
 
       try {
-        if (!clientRef.current || (cfg.embedProvider === "browser" && !clientRef.current.hasEmbedder())) {
+        if (
+          !clientRef.current ||
+          (cfg.embedProvider === "browser" && !clientRef.current.hasEmbedder())
+        ) {
           await configureClient(cfg)
         }
+        const client = clientRef.current
+        if (!client) throw new Error("QQL WASM client is not initialized")
+        activeExecutionsRef.current += 1
+        acquiredClient = true
 
         const t0 = performance.now()
-        let report
-        if (tenantConfig?.enabled && tenantConfig.field.trim() && tenantConfig.value.trim()) {
-          const stmt = new Stmt(text)
-          stmt.injectFilter(tenantConfig.field.trim(), tenantConfig.op || "=", tenantConfig.value.trim())
-          if (tenantConfig.shardKey.trim()) {
-            stmt.shardKey = tenantConfig.shardKey.trim()
+        let report: unknown
+
+        if (
+          tenantConfig?.enabled &&
+          tenantConfig.field.trim() &&
+          tenantConfig.value.trim()
+        ) {
+          if (analysisRef.current.statements_count !== 1) {
+            throw new Error(
+              "Tenant isolation refuses multi-statement execution; split the script and execute each statement separately."
+            )
           }
-          report = await clientRef.current!.executeStmt(stmt)
+          const stmt = new Stmt(text)
+          try {
+            stmt.injectFilter(
+              tenantConfig.field.trim(),
+              tenantConfig.op || "=",
+              tenantConfig.value.trim()
+            )
+            if (tenantConfig.shardKey.trim()) {
+              stmt.shardKey = tenantConfig.shardKey.trim()
+            }
+            report = await client.executeStmt(stmt)
+          } finally {
+            stmt.free()
+          }
         } else {
-          report = await clientRef.current!.execute(text)
+          report = await client.execute(text)
         }
         const totalMs = performance.now() - t0
 
-        setResponse(JSON.stringify(report, null, 2))
+        setResponse(report)
 
         const meta = getBrowserEmbedMeta()
         const embedMs = probe.lastEmbedMs
-        const networkMs = embedMs != null ? Math.max(0, totalMs - embedMs) : totalMs
+        const networkMs =
+          embedMs != null ? Math.max(0, totalMs - embedMs) : totalMs
 
         setMetrics({
           at: Date.now(),
@@ -233,22 +341,26 @@ export function useQql() {
           embedDim: probe.lastEmbedDim || cfg.embedDim || BROWSER_EMBED_DIM,
           totalMs,
           networkMs,
-          embedBackend: cfg.embedProvider === "browser" ? (meta.device ?? "browser") : cfg.embedProvider === "http" ? "http" : "none",
-          embedModel: cfg.embedProvider === "browser" ? BROWSER_EMBED_MODEL : cfg.embedProvider === "http" ? cfg.embedModel : "—",
+          embedBackend:
+            cfg.embedProvider === "browser"
+              ? (meta.device ?? "browser")
+              : cfg.embedProvider === "http"
+                ? "http"
+                : "none",
+          embedModel:
+            cfg.embedProvider === "browser"
+              ? BROWSER_EMBED_MODEL
+              : cfg.embedProvider === "http"
+                ? cfg.embedModel
+                : "—",
           success: true,
         })
       } catch (err) {
         const message = String(err)
-        setResponse(
-          JSON.stringify(
-            {
-              error: message,
-              route: analysisRef.current.route ?? null,
-            },
-            null,
-            2
-          )
-        )
+        setResponse({
+          error: message,
+          route: analysisRef.current.route ?? null,
+        })
         setMetrics({
           at: Date.now(),
           parseMs: parseMsRef.current,
@@ -260,15 +372,22 @@ export function useQql() {
           totalMs: 0,
           networkMs: null,
           embedBackend: cfg.embedProvider,
-          embedModel: cfg.embedProvider === "browser" ? BROWSER_EMBED_MODEL : cfg.embedModel,
+          embedModel:
+            cfg.embedProvider === "browser"
+              ? BROWSER_EMBED_MODEL
+              : cfg.embedModel,
           success: false,
           error: message,
         })
       } finally {
+        if (acquiredClient) {
+          activeExecutionsRef.current -= 1
+          releaseRetiredClients()
+        }
         setExecuting(false)
       }
     },
-    [ready, configureClient]
+    [ready, configureClient, releaseRetiredClients]
   )
 
   return {

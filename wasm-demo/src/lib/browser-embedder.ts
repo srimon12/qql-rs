@@ -20,8 +20,12 @@ export type BrowserEmbedderStatus = {
   error: string | null
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type FeaturePipe = (texts: string | string[], opts?: Record<string, unknown>) => Promise<any>
+type FeatureOutput = {
+  tolist(): number[] | number[][]
+  dispose?: () => void
+}
+
+type FeaturePipe = (texts: string | string[], opts?: Record<string, unknown>) => Promise<FeatureOutput>
 
 type LoadListener = (status: BrowserEmbedderStatus) => void
 
@@ -114,7 +118,7 @@ export async function ensureBrowserEmbedder(): Promise<FeaturePipe> {
     setStatus({ statusText: "Loading all-MiniLM-L6-v2…" })
 
     let pipe: FeaturePipe
-    let device: EmbedDevice = "wasm"
+    let device: EmbedDevice
 
     let hasWebGPU = false
     if (typeof navigator !== "undefined" && "gpu" in navigator && navigator.gpu) {

@@ -145,7 +145,6 @@ const qqlParser: StreamParser<unknown> = {
 
     // Block comment
     if (stream.match("/*")) {
-      // eslint-disable-next-line no-empty
       while (!stream.match("*/") && !stream.eol()) {
         stream.next()
       }

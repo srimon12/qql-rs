@@ -173,25 +173,22 @@ Embed timing uses a mutable `probeRef` closed over by `setEmbedder` — keep tha
 `vite.config.ts`:
 
 - Alias `@` → `./src`
+- Alias `qql-wasm` → `../demo/pkg/qql_wasm.js`
 - `optimizeDeps.exclude`: `qql-wasm`, `@huggingface/transformers`
 - `assetsInclude: ["**/*.wasm"]`
-- `server.fs.allow` parent monorepo for linked `demo/pkg`
+- `server.fs.allow` parent monorepo for generated `demo/pkg`
 - COOP/COEP headers for WASM threads where needed (`credentialless` + `same-origin`)
 
-Linked package:
-
-```json
-"qql-wasm": "file:../demo/pkg"
-```
-
-After rebuilding wasm:
+The Vite alias reads wasm-pack output directly, avoiding pnpm's copied `file:`
+dependency cache. `pnpm dev` and `pnpm build` rebuild the correct artifact
+through lifecycle scripts. To rebuild it directly:
 
 ```bash
-# from repo: produce demo/pkg then
-pnpm add file:../demo/pkg
+pnpm wasm:build
 ```
 
-Ambient types: `src/types/qql-wasm.d.ts` (package `index.d.ts` may be incomplete).
+TypeScript resolves `qql-wasm` to the generated `demo/pkg/qql_wasm.d.ts`;
+do not add a handwritten duplicate of the wasm-pack contract.
 
 ---
 

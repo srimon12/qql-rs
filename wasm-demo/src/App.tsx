@@ -61,7 +61,9 @@ function useDebouncedCallback<T extends (...args: never[]) => void>(
 ) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const fnRef = useRef(fn)
-  fnRef.current = fn
+  useEffect(() => {
+    fnRef.current = fn
+  }, [fn])
 
   return useCallback(
     (...args: Parameters<T>) => {
@@ -492,7 +494,7 @@ export function App() {
             <ResizablePanel defaultSize={48} minSize={28}>
               <Inspector
                 analysis={analysis}
-                responseJson={response}
+                response={response}
                 activeTab={activeTab}
                 onTabChange={setActiveTab}
                 metrics={metrics}
@@ -534,22 +536,22 @@ export function App() {
           </span>
         </footer>
 
-        <SettingsDialog
-          open={settingsOpen}
-          onOpenChange={setSettingsOpen}
-          settings={settings}
-          saving={settingsSaving}
-          onSave={async (next) => {
-            setSettingsSaving(true)
-            try {
-              await updateSettings(next)
-            } finally {
-              setSettingsSaving(false)
-            }
-          }}
-        />
-
-
+        {settingsOpen && (
+          <SettingsDialog
+            open
+            onOpenChange={setSettingsOpen}
+            settings={settings}
+            saving={settingsSaving}
+            onSave={async (next) => {
+              setSettingsSaving(true)
+              try {
+                await updateSettings(next)
+              } finally {
+                setSettingsSaving(false)
+              }
+            }}
+          />
+        )}
 
         <CodeExporter
           open={codeExporterOpen}

@@ -78,6 +78,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.13.1
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked --version 0.15.0
       - name: Build qql-wasm package
@@ -96,13 +99,24 @@ jobs:
           assert.equal(wasm.parse_all, undefined);
           assert.equal(wasm.analyzeValue, undefined);
           assert.equal(wasm.compileValue, undefined);
-          assert.equal(wasm.analyze('COUNT FROM docs').valid, true);
-          assert.equal(wasm.compile('COUNT FROM docs').stmt_type, 'count');
+          const analysis = wasm.analyze('COUNT FROM docs');
+          assert.equal(typeof analysis, 'object');
+          assert.equal(analysis.valid, true);
+          const invalid = wasm.analyze('NOT QQL');
+          assert.equal(typeof invalid, 'object');
+          assert.equal(invalid.valid, false);
+          assert.equal(typeof invalid.error.code, 'string');
+          const compiled = wasm.compile('COUNT FROM docs');
+          assert.equal(typeof compiled, 'object');
+          assert.equal(compiled.stmt_type, 'count');
           (async () => {
             const client = new wasm.Client('http://localhost:6333');
             const report = await client.execute('COUNT FROM docs');
+            assert.equal(typeof report, 'object');
             assert.equal(report.ok, true);
             assert.equal(report.results[0].operation, 'COUNT');
+            assert.equal(report.results[0].data.result.count, 2);
+            assert.deepEqual(JSON.parse(JSON.stringify(report)), report);
 
             let batchBody;
             global.fetch = async (input, init) => {
@@ -123,11 +137,16 @@ jobs:
             assert.equal(batchReport.succeeded, 2);
             assert.equal(batchBody.searches[0].query.nearest.length, 2);
             assert.ok(Math.abs(batchBody.searches[0].query.nearest[0] - 0.1) < 1e-6);
+            client.free();
           })().catch((error) => {
             console.error(error);
             process.exitCode = 1;
           });
           NODE
+      - name: Build browser playground against generated WASM
+        run: |
+          pnpm --dir wasm-demo install --frozen-lockfile
+          pnpm --dir wasm-demo build
 
   # ─────────────────────────────────────────────────────────────
   #  Platform binding release jobs — uncomment when publishing

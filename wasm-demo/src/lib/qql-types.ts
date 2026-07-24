@@ -1,36 +1,17 @@
-export type QqlToken = {
-  kind: string
-  text: string
-  pos: number
-  end: number
-  len: number
-}
+import type {
+  AnalysisError,
+  AnalysisResult as WasmAnalysisResult,
+  CompiledRoute,
+  Token,
+} from "qql-wasm"
 
-export type QqlError = {
-  code?: string
-  message?: string
-  start?: number
-  end?: number
-}
+export type QqlToken = Token
+export type QqlError = AnalysisError
+export type QqlRoute = CompiledRoute
+export type AnalysisResult = WasmAnalysisResult
 
-export type QqlRoute = {
-  method?: string
-  path?: string
-  payload?: unknown
-}
-
-export type AnalysisResult = {
-  valid: boolean
-  statements_count: number
-  tokens: QqlToken[]
-  ast: unknown
-  route: QqlRoute | null
-  routes?: QqlRoute[]
-  explain: string | null
-  error: QqlError | null
-}
-
-export type InspectorTab = "plan" | "wire" | "ast" | "tokens" | "explain" | "response" | "metrics"
+export type InspectorTab =
+  "plan" | "wire" | "ast" | "tokens" | "explain" | "response" | "metrics"
 
 export type TenantConfig = {
   enabled: boolean
@@ -103,11 +84,7 @@ export function loadSettings(): PlaygroundSettings {
     const raw = localStorage.getItem(SETTINGS_STORAGE_KEY)
     // also try v1 key once
     const legacy = localStorage.getItem("qql-playground-settings")
-    const parsed = raw
-      ? JSON.parse(raw)
-      : legacy
-        ? JSON.parse(legacy)
-        : null
+    const parsed = raw ? JSON.parse(raw) : legacy ? JSON.parse(legacy) : null
     if (!parsed) return { ...DEFAULT_SETTINGS }
     return {
       ...DEFAULT_SETTINGS,

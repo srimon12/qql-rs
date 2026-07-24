@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils"
 
 type InspectorProps = {
   analysis: AnalysisResult
-  responseJson: string
+  response: unknown
   activeTab: InspectorTab
   onTabChange: (tab: InspectorTab) => void
   metrics: ExecMetrics | null
@@ -30,7 +30,7 @@ type InspectorProps = {
 
 export function Inspector({
   analysis,
-  responseJson,
+  response,
   activeTab,
   onTabChange,
   metrics,
@@ -140,7 +140,7 @@ export function Inspector({
       </TabsContent>
 
       <TabsContent value="response" className="min-h-0 overflow-hidden p-0">
-        <ResultCards responseJson={responseJson} className="h-full" />
+        <ResultCards response={response} className="h-full" />
       </TabsContent>
     </Tabs>
   )

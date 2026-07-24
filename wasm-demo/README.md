@@ -32,7 +32,7 @@ Embedding family matches `examples/sec10k-qql` (all-MiniLM-L6-v2 · 384-d cosine
 - **pnpm** (do not use npm for this package)
 - Qdrant with the `sec10k` collection if you want the showcase presets to hit real data  
   (see `examples/sec10k-qql/`)
-- Built WASM package at `demo/pkg` (linked as `qql-wasm`)
+- Rust, the `wasm32-unknown-unknown` target, and `wasm-pack` 0.15+
 
 ### Run
 
@@ -55,10 +55,12 @@ Open **http://localhost:5173**
 
 | Command | Purpose |
 |---|---|
-| `pnpm dev` | Vite dev server |
-| `pnpm build` | Production build (`dist/`) |
+| `pnpm dev` | Rebuild development WASM, then start Vite |
+| `pnpm build` | Rebuild release WASM, then create `dist/` |
+| `pnpm wasm:build` | Rebuild `demo/pkg` in development mode |
+| `pnpm wasm:build:release` | Rebuild `demo/pkg` in release mode |
 | `pnpm preview` | Serve production build |
-| `pnpm typecheck` | `tsc --noEmit` |
+| `pnpm typecheck` | Rebuild development WASM, then run `tsc --noEmit` |
 | `pnpm lint` | ESLint |
 | `pnpm format` | Prettier |
 
@@ -140,7 +142,7 @@ Multi-tenancy background: `skills/qql-skill/references/qql-multitenancy.md`.
 
 | Package / path | Role |
 |---|---|
-| `qql-wasm` (`file:../demo/pkg`) | Parser, planner, browser Client |
+| `qql-wasm` (Vite alias to `../demo/pkg/qql_wasm.js`) | Parser, planner, browser Client |
 | `@huggingface/transformers` | In-browser MiniLM (code-split) |
 | `@uiw/react-codemirror` + `@codemirror/*` | Editor + JSON viewers |
 | shadcn/ui + Tailwind 4 | UI (do not reinvent components) |
@@ -149,10 +151,11 @@ Multi-tenancy background: `skills/qql-skill/references/qql-multitenancy.md`.
 
 ## Refresh the WASM package
 
-After rebuilding `crates/qql-wasm` and copying into `demo/pkg`:
+The dev and production build commands rebuild WASM automatically. To rebuild
+it without starting Vite:
 
 ```bash
-pnpm add file:../demo/pkg
+pnpm wasm:build
 ```
 
 ---
@@ -171,7 +174,7 @@ A one-click collection bootstrap is **not** in this app yet. The intended path i
 | “No vectors” / embed errors | Wait for MiniLM download; check Metrics tab; try WebGPU browser |
 | Dim mismatch | Collection must be **384-d** for default MiniLM |
 | HTTP embedder fails | Endpoint must accept `{ model, input: string[] }` |
-| Stale WASM behavior | Re-link `demo/pkg`, hard-refresh browser |
+| Stale WASM behavior | Run `pnpm wasm:build`, restart Vite, then hard-refresh |
 | pnpm build-script policy | `pnpm-workspace.yaml` sets `allowBuilds` for optional native deps (ORT node unused in browser) |
 
 ---

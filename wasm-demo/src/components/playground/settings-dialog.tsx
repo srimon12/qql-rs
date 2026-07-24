@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import {
   Dialog,
   DialogContent,
@@ -39,10 +39,6 @@ export function SettingsDialog({
   saving,
 }: SettingsDialogProps) {
   const [draft, setDraft] = useState(settings)
-
-  useEffect(() => {
-    if (open) setDraft(settings)
-  }, [open, settings])
 
   const set = <K extends keyof PlaygroundSettings>(
     key: K,
