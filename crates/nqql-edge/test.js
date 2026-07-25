@@ -213,8 +213,8 @@ console.log("  ✓ Client.compile");
   const id2 = uuid(2);
   r = await exec.execute(
     `UPSERT INTO nqql_test VALUES ` +
-      `{id: "${id1}", text: "Rust is a systems programming language that runs blazingly fast", meta: {cat: "tech"}}, ` +
-      `{id: "${id2}", text: "Python is great for data science and machine learning", meta: {cat: "tech"}}`,
+      `{id: "${id1}", text: "Rust is a systems programming language that runs blazingly fast", created_at: 1, meta: {cat: "tech"}}, ` +
+      `{id: "${id2}", text: "Python is great for data science and machine learning", created_at: 2, meta: {cat: "tech"}}`,
   );
   assert.strictEqual(r.ok, true, JSON.stringify(r));
   console.log("  ✓ UPSERT 2 documents (text → ONNX embedding)");
@@ -251,10 +251,45 @@ console.log("  ✓ Client.compile");
 
   // Numeric point IDs must work (qdrant-edge NumId)
   r = await exec.execute(
-    `UPSERT INTO nqql_test VALUES {id: 42, text: "numeric id works fine for edge"}`,
+    `UPSERT INTO nqql_test VALUES {id: 42, text: "numeric id works fine for edge", created_at: 3}`,
   );
   assert.strictEqual(r.ok, true, `numeric id upsert: ${JSON.stringify(r)}`);
   console.log("  ✓ UPSERT with numeric id=42");
+
+  // Native qdrant-edge scoring/rescore variants.
+  r = await exec.execute(
+    "QUERY MMR TEXT 'fast programming' DIVERSITY 0.4 CANDIDATES 10 FROM nqql_test USING dense LIMIT 1",
+  );
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  console.log("  ✓ native MMR query");
+
+  r = await exec.execute("QUERY SAMPLE RANDOM FROM nqql_test LIMIT 1");
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  console.log("  ✓ native random sample query");
+
+  r = await exec.execute("CREATE INDEX ON COLLECTION nqql_test FOR created_at TYPE integer");
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  r = await exec.execute("QUERY ORDER BY created_at DESC FROM nqql_test LIMIT 1");
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  console.log("  ✓ native order-by query");
+
+  r = await exec.execute(
+    "WITH candidates AS (QUERY TEXT 'fast programming' USING dense LIMIT 10) " +
+      "QUERY FORMULA $score * 2 DEFAULTS (score = 0.0) FROM nqql_test " +
+      "PREFETCH (candidates) LIMIT 1",
+  );
+  assert.strictEqual(r.ok, true, JSON.stringify(r));
+  console.log("  ✓ native formula rescore query");
+
+  for (const query of [
+    "QUERY CONTEXT (POSITIVE TEXT 'fast' NEGATIVE TEXT 'slow') FROM nqql_test USING dense LIMIT 1",
+    "QUERY DISCOVER TARGET TEXT 'fast' CONTEXT (POSITIVE TEXT 'fast' NEGATIVE TEXT 'slow') FROM nqql_test USING dense LIMIT 1",
+    "QUERY RELEVANCE FEEDBACK TARGET TEXT 'fast' FEEDBACK ((TEXT 'fast', 0.8)) STRATEGY NAIVE (a = 1, b = 1, c = 1) FROM nqql_test USING dense LIMIT 1",
+  ]) {
+    r = await exec.execute(query);
+    assert.strictEqual(r.ok, true, JSON.stringify(r));
+  }
+  console.log("  ✓ native context, discover, and relevance-feedback queries");
 
   // ═════════════════════════════════════════════════════════════════
   //  5. Red-team: grammar / edge constraints that bite people
@@ -329,6 +364,16 @@ console.log("  ✓ Client.compile");
   );
   assert.strictEqual(r.ok, false, "query_groups should fail in edge");
   console.log("  ✓ GROUP BY rejected in edge mode");
+
+  // The original qdrant-edge API accepts vectors for recommendations, while
+  // QQL's public RECOMMEND syntax supplies point references. Do not add a
+  // client-side point-to-vector lookup here; reject it explicitly.
+  r = await exec.execute(
+    "QUERY RECOMMEND POSITIVE (42) STRATEGY best_score FROM nqql_test USING dense LIMIT 1",
+    { onError: "continue" },
+  );
+  assertFails(r, "point-reference");
+  console.log("  ✓ point-reference recommendation rejected explicitly");
 
   // 5h. Mismatched USING MODEL on a locked local embedder
   r = await exec.execute(

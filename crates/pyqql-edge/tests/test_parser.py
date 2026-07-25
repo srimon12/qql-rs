@@ -166,8 +166,8 @@ class TestEdgeExecutor(unittest.TestCase):
             id1, id2 = _uuid(1), _uuid(2)
             r = edge.exec.execute(
                 f'UPSERT INTO py_test VALUES '
-                f'{{id: "{id1}", text: "Rust is a systems programming language that runs blazingly fast"}}, '
-                f'{{id: "{id2}", text: "Python is great for data science and machine learning"}}'
+                f'{{id: "{id1}", text: "Rust is a systems programming language that runs blazingly fast", created_at: 1}}, '
+                f'{{id: "{id2}", text: "Python is great for data science and machine learning", created_at: 2}}'
             )
             self.assertTrue(r["ok"], r)
 
@@ -197,6 +197,51 @@ class TestEdgeExecutor(unittest.TestCase):
             count = r["results"][0]["data"]["result"]["count"]
             self.assertEqual(count, 2)  # id1 + numeric 7
 
+    def test_native_query_variants(self):
+        with _EdgeCase() as edge:
+            self.assertTrue(edge.exec.execute("CREATE COLLECTION variants HYBRID")["ok"])
+            self.assertTrue(
+                edge.exec.execute(
+                    f'UPSERT INTO variants VALUES {{id: "{_uuid(1)}", text: "hello", created_at: 1}}'
+                )["ok"]
+            )
+
+            r = edge.exec.execute(
+                "QUERY MMR TEXT 'hello' DIVERSITY 0.4 CANDIDATES 10 "
+                "FROM variants USING dense LIMIT 1"
+            )
+            self.assertTrue(r["ok"], r)
+
+            r = edge.exec.execute("QUERY SAMPLE RANDOM FROM variants LIMIT 1")
+            self.assertTrue(r["ok"], r)
+
+            r = edge.exec.execute(
+                "CREATE INDEX ON COLLECTION variants FOR created_at TYPE integer"
+            )
+            self.assertTrue(r["ok"], r)
+            r = edge.exec.execute("QUERY ORDER BY created_at DESC FROM variants LIMIT 1")
+            self.assertTrue(r["ok"], r)
+
+            r = edge.exec.execute(
+                "WITH candidates AS (QUERY TEXT 'hello' USING dense LIMIT 10) "
+                "QUERY FORMULA $score * 2 DEFAULTS (score = 0.0) FROM variants "
+                "PREFETCH (candidates) LIMIT 1"
+            )
+            self.assertTrue(r["ok"], r)
+
+            for query in (
+                "QUERY CONTEXT (POSITIVE TEXT 'hello' NEGATIVE TEXT 'bad') "
+                "FROM variants USING dense LIMIT 1",
+                "QUERY DISCOVER TARGET TEXT 'hello' CONTEXT "
+                "(POSITIVE TEXT 'hello' NEGATIVE TEXT 'bad') "
+                "FROM variants USING dense LIMIT 1",
+                "QUERY RELEVANCE FEEDBACK TARGET TEXT 'hello' FEEDBACK "
+                "((TEXT 'hello', 0.8)) STRATEGY NAIVE (a = 1, b = 1, c = 1) "
+                "FROM variants USING dense LIMIT 1",
+            ):
+                r = edge.exec.execute(query)
+                self.assertTrue(r["ok"], r)
+
     def test_non_uuid_string_id_rejected(self):
         with _EdgeCase() as edge:
             edge.exec.execute("CREATE COLLECTION t HYBRID")
@@ -217,7 +262,7 @@ class TestEdgeExecutor(unittest.TestCase):
             r = edge.exec.execute(
                 "QUERY 'hello' FROM t LIMIT 1", on_error="continue"
             )
-            self.assertFalse(r["ok"])
+            self.assertTrue(r["ok"], r)
 
     def test_group_by_unsupported(self):
         with _EdgeCase() as edge:
@@ -227,6 +272,17 @@ class TestEdgeExecutor(unittest.TestCase):
                 on_error="continue",
             )
             self.assertFalse(r["ok"])
+
+    def test_point_reference_recommendation_rejected(self):
+        with _EdgeCase() as edge:
+            edge.exec.execute("CREATE COLLECTION t HYBRID")
+            r = edge.exec.execute(
+                "QUERY RECOMMEND POSITIVE (1) STRATEGY best_score "
+                "FROM t USING dense LIMIT 1",
+                on_error="continue",
+            )
+            self.assertFalse(r["ok"])
+            self.assertIn("point-reference", r["results"][0]["message"])
 
     def test_model_mismatch_rejected(self):
         with _EdgeCase() as edge:

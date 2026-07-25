@@ -22,7 +22,9 @@ use config_builder::build_edge_config;
 use conversions::{
     edge_err, from_edge_id, from_edge_record, from_edge_scored_point, to_edge_id, to_edge_ids,
 };
-use query_converter::{convert_query_request, convert_with_payload, convert_with_vector};
+use query_converter::{
+    convert_order_by_interface, convert_query_request, convert_with_payload, convert_with_vector,
+};
 use vector_parser::ToEdgeVector;
 
 use qql::backend::{CollectionInfo, CollectionSchema};
@@ -237,7 +239,11 @@ impl EdgeQdrant {
                         .as_ref()
                         .map(convert_with_vector)
                         .unwrap_or(WithVector::Bool(false)),
-                    order_by: None,
+                    order_by: req
+                        .order_by
+                        .as_ref()
+                        .map(convert_order_by_interface)
+                        .transpose()?,
                 };
 
                 let (records, next) =

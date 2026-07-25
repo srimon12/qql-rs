@@ -54,7 +54,7 @@ against the operation count.
 ### Features
 
 - `fastembed-local`: ONNX-based local embedding via `fastembed-rs` (default)
-- `rest`: HTTP-based embedding via `reqwest` (for `http_executor`)
+- `http-embedding`: HTTP-based embedding via `reqwest` (for `http_executor`)
 
 When neither feature is enabled, only `custom_executor()` is available.
 
@@ -62,12 +62,15 @@ When neither feature is enabled, only `custom_executor()` is available.
 
 - No `UPDATE ... SET VECTOR` via batch — uses individual route dispatch
 - gRPC is not available in edge mode (no protobuf dependency)
-- Edge `qdrant-edge` does not support all Qdrant features (e.g., geo-filtering,
-  advanced quantization types); operations that require these will fail at
-  the `QqlError` level
+- Edge uses qdrant-edge's native query engine for nearest, sparse, MMR,
+  recommendation (`best_score`/`sum_scores`), context, discover, sample,
+  formula, relevance-feedback, and order-by queries; point-reference and
+  text inputs that cannot be embedded locally are rejected
 - Shard keys are not supported in edge mode (no sharding in qdrant-edge)
-- `GROUP BY`, `ALTER COLLECTION`, recommendation queries, and shard DDL are
+- `GROUP BY`, `ALTER COLLECTION`, collection `PARAMS`, and shard DDL are
   rejected explicitly in edge mode
+- Recommendation's `average_vector` strategy is not available in qdrant-edge;
+  use `best_score` or `sum_scores`
 
 ## Verification
 
