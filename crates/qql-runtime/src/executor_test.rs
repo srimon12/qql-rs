@@ -105,6 +105,17 @@ impl QdrantOps for MockQdrantClient {
             ));
         }
         *self.last_planned.lock().unwrap() = Some(op.clone());
+        if matches!(op, qql_plan::PlannedOperation::ListCollections) {
+            return Ok(serde_json::json!({
+                "result": {
+                    "collections": self
+                        .collections
+                        .iter()
+                        .map(|name| serde_json::json!({"name": name}))
+                        .collect::<Vec<_>>(),
+                }
+            }));
+        }
         Ok(serde_json::json!({"result": {"points": []}}))
     }
 
@@ -220,6 +231,26 @@ impl crate::embedder::Embedder for MockEmbedder {
             values: self.sparse_values.clone(),
         })
     }
+}
+
+#[tokio::test]
+async fn show_collections_preserves_backend_data() {
+    let client = MockQdrantClient {
+        collections: vec!["alpha".into(), "beta".into()],
+        ..Default::default()
+    };
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+
+    let report = executor
+        .execute("SHOW COLLECTIONS", OnError::Stop)
+        .await
+        .unwrap();
+
+    assert_eq!(report.results[0].operation, "SHOW_COLLECTIONS");
+    assert_eq!(
+        report.results[0].data.as_ref().unwrap()["result"]["collections"],
+        serde_json::json!([{"name": "alpha"}, {"name": "beta"}])
+    );
 }
 
 #[tokio::test]

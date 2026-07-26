@@ -808,6 +808,16 @@ impl Executor {
                     .unwrap_or(0);
                 (format!("Count: {count}"), Some(result))
             }
+            PlannedOperation::ListCollections => {
+                let count = result
+                    .get("result")
+                    .and_then(|value| value.get("collections"))
+                    .or_else(|| result.get("collections"))
+                    .and_then(serde_json::Value::as_array)
+                    .map_or(0, Vec::len);
+                (format!("Found {count} collection(s)"), Some(result))
+            }
+            PlannedOperation::GetCollection { .. } => (format!("{label} ok"), Some(result)),
             PlannedOperation::Upsert { request, .. } => {
                 let n = request.points.len();
                 (

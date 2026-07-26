@@ -1,14 +1,59 @@
-//! ASCII table printer for QQL CLI output.
+//! `psql`-style table printer for QQL CLI output.
 //!
-//! Produces `psql`-style bordered tables. Self-contained — zero dependencies.
+//! Produces unbordered, aligned tables with a row-count footer.
 //! Detects columns automatically from `ExecResponse.data` payloads.
 
 use std::io::{self, Write};
+use unicode_width::UnicodeWidthStr;
 
-/// A bordered ASCII table that auto-sizes columns.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Alignment {
+    Left,
+    Right,
+}
+
+#[derive(Debug)]
+enum QueryColumnSource {
+    Metadata(&'static str),
+    Payload(String),
+}
+
+#[derive(Debug)]
+struct QueryColumn {
+    label: String,
+    source: QueryColumnSource,
+}
+
+#[derive(Debug)]
+struct Cell {
+    value: String,
+    alignment: Alignment,
+}
+
+impl Cell {
+    fn text(value: impl Into<String>) -> Self {
+        Self {
+            value: escape_controls(&value.into()),
+            alignment: Alignment::Left,
+        }
+    }
+
+    fn from_json(value: Option<&serde_json::Value>) -> Self {
+        let alignment = match value {
+            Some(serde_json::Value::Number(_)) => Alignment::Right,
+            _ => Alignment::Left,
+        };
+
+        let mut cell = Self::text(value.map(stringify_value).unwrap_or_default());
+        cell.alignment = alignment;
+        cell
+    }
+}
+
+/// A `psql`-style table that auto-sizes columns.
 pub struct Table {
     columns: Vec<String>,
-    rows: Vec<Vec<String>>,
+    rows: Vec<Vec<Cell>>,
 }
 
 impl Table {
@@ -20,6 +65,12 @@ impl Table {
     }
 
     pub fn add_row(&mut self, row: Vec<String>) {
+        self.add_cells(row.into_iter().map(Cell::text).collect());
+    }
+
+    fn add_cells(&mut self, mut row: Vec<Cell>) {
+        row.truncate(self.columns.len());
+        row.resize_with(self.columns.len(), || Cell::text(""));
         self.rows.push(row);
     }
 
@@ -31,32 +82,28 @@ impl Table {
 
     /// Print the table to stdout.
     pub fn print(&self) -> io::Result<()> {
+        let stdout = io::stdout();
+        let mut handle = stdout.lock();
+        self.render(&mut handle)
+    }
+
+    fn render(&self, w: &mut impl Write) -> io::Result<()> {
         if self.columns.is_empty() {
             return Ok(());
         }
 
         let widths = self.compute_widths();
-        let stdout = io::stdout();
-        let mut handle = stdout.lock();
+        let alignments = self.compute_alignments();
 
-        // Top border
-        self.write_border(&mut handle, &widths, '╭', '┬', '╮')?;
+        self.write_header(w, &widths)?;
+        self.write_separator(w, &widths)?;
 
-        // Header
-        self.write_row(&mut handle, &widths, &self.columns)?;
-
-        // Header-data separator
-        self.write_border(&mut handle, &widths, '├', '┼', '┤')?;
-
-        // Data rows
         for row in &self.rows {
-            self.write_row(&mut handle, &widths, row)?;
+            self.write_row(w, &widths, &alignments, row)?;
         }
 
-        // Bottom border
-        self.write_border(&mut handle, &widths, '╰', '┴', '╯')?;
-
-        writeln!(handle)?;
+        let label = if self.rows.len() == 1 { "row" } else { "rows" };
+        writeln!(w, "({} {label})", self.rows.len())?;
         Ok(())
     }
 
@@ -64,61 +111,116 @@ impl Table {
         let n = self.columns.len();
         let mut widths = vec![0usize; n];
         for (i, col) in self.columns.iter().enumerate() {
-            widths[i] = col.len();
+            widths[i] = display_width(col);
         }
         for row in &self.rows {
             for (i, cell) in row.iter().enumerate() {
-                if i < n && cell.len() > widths[i] {
-                    widths[i] = cell.len();
+                let width = display_width(&cell.value);
+                if i < n && width > widths[i] {
+                    widths[i] = width;
                 }
             }
-        }
-        // Add padding
-        for w in &mut widths {
-            *w += 2; // one space on each side
         }
         widths
     }
 
-    fn write_border(
+    fn compute_alignments(&self) -> Vec<Alignment> {
+        self.columns
+            .iter()
+            .enumerate()
+            .map(|(column_index, _)| {
+                let has_value = self
+                    .rows
+                    .iter()
+                    .map(|row| &row[column_index])
+                    .any(|cell| !cell.value.is_empty());
+                let all_numbers = self
+                    .rows
+                    .iter()
+                    .map(|row| &row[column_index])
+                    .filter(|cell| !cell.value.is_empty())
+                    .all(|cell| cell.alignment == Alignment::Right);
+                if has_value && all_numbers {
+                    Alignment::Right
+                } else {
+                    Alignment::Left
+                }
+            })
+            .collect()
+    }
+
+    fn write_header(&self, w: &mut impl Write, widths: &[usize]) -> io::Result<()> {
+        for (i, (column, width)) in self.columns.iter().zip(widths).enumerate() {
+            if i > 0 {
+                write!(w, "|")?;
+            }
+            write!(w, " {} ", center(column, *width))?;
+        }
+        writeln!(w)
+    }
+
+    fn write_separator(&self, w: &mut impl Write, widths: &[usize]) -> io::Result<()> {
+        for (i, width) in widths.iter().enumerate() {
+            if i > 0 {
+                write!(w, "+")?;
+            }
+            for _ in 0..(*width + 2) {
+                write!(w, "-")?;
+            }
+        }
+        writeln!(w)
+    }
+
+    fn write_row(
         &self,
         w: &mut impl Write,
         widths: &[usize],
-        left: char,
-        mid: char,
-        right: char,
+        alignments: &[Alignment],
+        cells: &[Cell],
     ) -> io::Result<()> {
-        write!(w, "{}", left)?;
-        for (i, width) in widths.iter().enumerate() {
+        for (i, ((cell, width), alignment)) in cells.iter().zip(widths).zip(alignments).enumerate()
+        {
             if i > 0 {
-                write!(w, "{}", mid)?;
+                write!(w, "|")?;
             }
-            for _ in 0..*width {
-                write!(w, "─")?;
+            let padding = width.saturating_sub(display_width(&cell.value));
+            match alignment {
+                Alignment::Left => write!(w, " {}{} ", cell.value, " ".repeat(padding))?,
+                Alignment::Right => write!(w, " {}{} ", " ".repeat(padding), cell.value)?,
             }
         }
-        writeln!(w, "{}", right)?;
-        Ok(())
+        writeln!(w)
     }
+}
 
-    fn write_row(&self, w: &mut impl Write, widths: &[usize], cells: &[String]) -> io::Result<()> {
-        write!(w, "│")?;
-        for (i, cell) in cells.iter().enumerate() {
-            let width = widths.get(i).copied().unwrap_or(0);
-            let cell_width = cell.chars().count();
-            let padding = width.saturating_sub(cell_width);
-            // Left pad with 1 space, right pad with remaining
-            write!(w, " {} ", cell)?;
-            if padding > 2 {
-                for _ in 0..padding - 2 {
-                    write!(w, " ")?;
-                }
-            }
-            write!(w, "│")?;
+/// Returns the terminal-cell width according to Unicode Standard Annex #11.
+fn display_width(value: &str) -> usize {
+    UnicodeWidthStr::width(value)
+}
+
+/// Escapes control characters so a value cannot break table structure or emit
+/// terminal control sequences. Printable Unicode remains unchanged.
+fn escape_controls(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        if character.is_control() {
+            escaped.extend(character.escape_default());
+        } else {
+            escaped.push(character);
         }
-        writeln!(w)?;
-        Ok(())
     }
+    escaped
+}
+
+fn center(value: &str, width: usize) -> String {
+    let padding = width.saturating_sub(display_width(value));
+    let left = padding / 2;
+    format!(
+        "{}{}{}",
+        " ".repeat(left),
+        value,
+        " ".repeat(padding - left)
+    )
 }
 
 /// Render an [`ExecutionReport`] to stdout.
@@ -183,10 +285,10 @@ fn render_response(
             print_count(&response.data);
         }
         "SHOW_COLLECTIONS" => {
-            print_collections_list(&response.data);
+            print_collections_list(&response.data)?;
         }
         "SHOW_COLLECTION" | "show_collection" => {
-            print_collection_info(&response.data);
+            print_collection_info(&response.data)?;
         }
         _ => {
             // DDL/DML: just print the message
@@ -211,15 +313,14 @@ fn print_query_table(data: &Option<serde_json::Value>) -> Result<(), Box<dyn std
     }
 
     let columns = detect_query_columns(&hits);
-    let mut table = Table::new(columns.iter().map(|s| s.to_string()).collect());
+    let mut table = Table::new(columns.iter().map(|column| column.label.clone()).collect());
 
     for hit in &hits {
-        let mut row = Vec::new();
+        let mut row = Vec::with_capacity(columns.len());
         for col in &columns {
-            let val = hit.get(col).map(stringify_value).unwrap_or_default();
-            row.push(val);
+            row.push(query_cell(hit, col));
         }
-        table.add_row(row);
+        table.add_cells(row);
     }
 
     table.print()?;
@@ -265,50 +366,77 @@ fn print_groups_table(data: &Option<serde_json::Value>) -> Result<(), Box<dyn st
 }
 
 fn print_count(data: &Option<serde_json::Value>) {
-    let count = data
-        .as_ref()
-        .and_then(|d| d.get("count"))
-        .and_then(|c| c.as_u64())
-        .unwrap_or(0);
-    println!("  count: {}", count);
+    println!("  count: {}", count_value(data));
 }
 
-fn print_collections_list(data: &Option<serde_json::Value>) {
-    let cols: Vec<&str> = data
-        .as_ref()
-        .and_then(|d| d.get("collections"))
-        .and_then(|c| c.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
-        .unwrap_or_default();
+fn print_collections_list(
+    data: &Option<serde_json::Value>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let cols = collection_names(data);
 
     if cols.is_empty() {
         println!("(no collections)");
-        return;
+        return Ok(());
     }
 
     let mut table = Table::new(vec!["Collection".into()]);
     for name in cols {
-        table.add_row(vec![name.to_string()]);
+        table.add_row(vec![name]);
     }
-    let _ = table.print();
+    table.print()?;
+    Ok(())
 }
 
-fn print_collection_info(data: &Option<serde_json::Value>) {
-    let Some(obj) = data.as_ref().and_then(|d| d.as_object()) else {
+fn print_collection_info(
+    data: &Option<serde_json::Value>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(obj) = result_value(data).and_then(serde_json::Value::as_object) else {
         if let Some(d) = data {
-            println!("{}", serde_json::to_string_pretty(d).unwrap_or_default());
+            println!("{}", serde_json::to_string_pretty(d)?);
         }
-        return;
+        return Ok(());
     };
 
     let mut table = Table::new(vec!["Property".into(), "Value".into()]);
     for (key, val) in obj {
         table.add_row(vec![key.clone(), stringify_value(val)]);
     }
-    let _ = table.print();
+    table.print()?;
+    Ok(())
 }
 
 // ── helpers ──────────────────────────────────────────────────────
+
+/// Returns Qdrant's `result` object when present, otherwise the response.
+fn result_value(data: &Option<serde_json::Value>) -> Option<&serde_json::Value> {
+    data.as_ref()
+        .map(|value| value.get("result").unwrap_or(value))
+}
+
+fn count_value(data: &Option<serde_json::Value>) -> u64 {
+    result_value(data)
+        .and_then(|value| value.get("count"))
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0)
+}
+
+fn collection_names(data: &Option<serde_json::Value>) -> Vec<String> {
+    result_value(data)
+        .and_then(|value| value.get("collections"))
+        .and_then(serde_json::Value::as_array)
+        .map(|collections| {
+            collections
+                .iter()
+                .filter_map(|collection| {
+                    collection
+                        .as_str()
+                        .or_else(|| collection.get("name").and_then(serde_json::Value::as_str))
+                })
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
 
 fn extract_hits(
     data: &Option<serde_json::Value>,
@@ -335,26 +463,57 @@ fn extract_hits(
         .unwrap_or_default()
 }
 
-fn detect_query_columns(hits: &[serde_json::Map<String, serde_json::Value>]) -> Vec<String> {
-    let mut cols = vec!["id".to_string(), "score".to_string()];
+fn detect_query_columns(hits: &[serde_json::Map<String, serde_json::Value>]) -> Vec<QueryColumn> {
+    let mut cols = vec![QueryColumn {
+        label: "id".into(),
+        source: QueryColumnSource::Metadata("id"),
+    }];
+    if hits.iter().any(|hit| hit.contains_key("score")) {
+        cols.push(QueryColumn {
+            label: "score".into(),
+            source: QueryColumnSource::Metadata("score"),
+        });
+    }
 
-    // Collect payload keys from the first few hits
+    // Payload keys form the remaining logical columns. Inspect every result:
+    // sampling silently loses fields that occur only in later hits.
     let mut payload_keys = std::collections::BTreeSet::new();
-    for hit in hits.iter().take(5) {
+    for hit in hits {
         if let Some(payload) = hit.get("payload").and_then(|p| p.as_object()) {
             for key in payload.keys() {
-                // Skip deeply nested objects — show only simple values
-                if let Some(val) = payload.get(key) {
-                    if val.is_string() || val.is_number() || val.is_boolean() {
-                        payload_keys.insert(key.clone());
-                    }
-                }
+                payload_keys.insert(key.clone());
             }
         }
     }
 
-    cols.extend(payload_keys);
+    for key in payload_keys {
+        // `id` and `score` identify point metadata. Prefix colliding payload
+        // keys so the table remains unambiguous.
+        let mut label = if matches!(key.as_str(), "id" | "score") {
+            format!("payload.{key}")
+        } else {
+            key.clone()
+        };
+        while cols.iter().any(|column| column.label == label) {
+            label = format!("payload.{label}");
+        }
+        cols.push(QueryColumn {
+            label,
+            source: QueryColumnSource::Payload(key),
+        });
+    }
     cols
+}
+
+fn query_cell(hit: &serde_json::Map<String, serde_json::Value>, column: &QueryColumn) -> Cell {
+    let value = match &column.source {
+        QueryColumnSource::Metadata(key) => hit.get(*key),
+        QueryColumnSource::Payload(key) => hit
+            .get("payload")
+            .and_then(serde_json::Value::as_object)
+            .and_then(|payload| payload.get(key)),
+    };
+    Cell::from_json(value)
 }
 
 fn stringify_value(val: &serde_json::Value) -> String {
@@ -363,15 +522,7 @@ fn stringify_value(val: &serde_json::Value) -> String {
         serde_json::Value::Number(n) => n.to_string(),
         serde_json::Value::Bool(b) => b.to_string(),
         serde_json::Value::Null => String::new(),
-        _ => {
-            // Truncate complex objects
-            let s = serde_json::to_string(val).unwrap_or_default();
-            if s.len() > 60 {
-                format!("{}…", &s[..59])
-            } else {
-                s
-            }
-        }
+        _ => serde_json::to_string(val).unwrap_or_default(),
     }
 }
 
@@ -380,27 +531,81 @@ mod tests {
     use super::*;
 
     #[test]
-    fn table_renders_borders() {
+    fn table_renders_psql_layout() {
         let mut table = Table::new(vec!["id".into(), "score".into()]);
-        table.add_row(vec!["42".into(), "0.95".into()]);
-        table.add_row(vec!["7".into(), "0.80".into()]);
+        table.add_cells(vec![
+            Cell::text("42"),
+            Cell {
+                value: "0.95".into(),
+                alignment: Alignment::Right,
+            },
+        ]);
 
-        // Table prints to real stdout — verify it doesn't panic
-        let result = std::panic::catch_unwind(|| {
-            table.print().unwrap();
-        });
-        assert!(result.is_ok());
+        let mut output = Vec::new();
+        table.render(&mut output).unwrap();
+
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            " id | score \n----+-------\n 42 |  0.95 \n(1 row)\n"
+        );
     }
 
     #[test]
-    fn empty_table_no_panic() {
+    fn empty_table_renders_header_and_zero_row_footer() {
         let table = Table::new(vec!["id".into()]);
         assert!(table.is_empty());
-        // print of empty table just prints borders with no rows
-        let result = std::panic::catch_unwind(|| {
-            table.print().unwrap();
-        });
-        assert!(result.is_ok());
+
+        let mut output = Vec::new();
+        table.render(&mut output).unwrap();
+
+        assert_eq!(String::from_utf8(output).unwrap(), " id \n----\n(0 rows)\n");
+    }
+
+    #[test]
+    fn rows_are_normalized_to_the_declared_columns() {
+        let mut table = Table::new(vec!["one".into(), "two".into()]);
+        table.add_row(vec!["value".into()]);
+
+        let mut output = Vec::new();
+        table.render(&mut output).unwrap();
+
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "  one  | two \n-------+-----\n value |     \n(1 row)\n"
+        );
+    }
+
+    #[test]
+    fn unicode_cells_align_using_terminal_width() {
+        let mut table = Table::new(vec!["city".into(), "status".into()]);
+        table.add_row(vec!["東京".into(), "ready".into()]);
+        table.add_row(vec!["Oslo".into(), "👩‍🔬".into()]);
+
+        let mut output = Vec::new();
+        table.render(&mut output).unwrap();
+
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            " city | status \n------+--------\n 東京 | ready  \n Oslo | 👩‍🔬     \n(2 rows)\n"
+        );
+    }
+
+    #[test]
+    fn control_characters_are_escaped_before_rendering() {
+        assert_eq!(escape_controls("line\n\t\u{1b}"), r"line\n\t\u{1b}");
+    }
+
+    #[test]
+    fn qdrant_result_envelopes_render_collection_names_and_counts() {
+        let collections = Some(serde_json::json!({
+            "result": {
+                "collections": [{"name": "berlin_airbnb"}, {"name": "sec10k"}]
+            }
+        }));
+        let count = Some(serde_json::json!({"result": {"count": 2500}}));
+
+        assert_eq!(collection_names(&collections), ["berlin_airbnb", "sec10k"]);
+        assert_eq!(count_value(&count), 2500);
     }
 
     #[test]
@@ -425,11 +630,55 @@ mod tests {
             m
         }];
         let cols = detect_query_columns(&hits);
-        assert!(cols.contains(&"id".to_string()));
-        assert!(cols.contains(&"score".to_string()));
-        assert!(cols.contains(&"title".to_string()));
-        assert!(cols.contains(&"year".to_string()));
-        // nested is skipped (it's an object, not simple)
-        assert!(!cols.contains(&"nested".to_string()));
+        let labels = cols
+            .iter()
+            .map(|column| column.label.as_str())
+            .collect::<Vec<_>>();
+        assert!(labels.contains(&"id"));
+        assert!(labels.contains(&"score"));
+        assert!(labels.contains(&"title"));
+        assert!(labels.contains(&"year"));
+        // JSON values are retained instead of being silently omitted.
+        assert!(labels.contains(&"nested"));
+    }
+
+    #[test]
+    fn query_cells_read_payload_fields_and_preserve_json() {
+        let hit = serde_json::json!({
+            "id": "abc",
+            "score": 0.95,
+            "payload": {
+                "title": "hello",
+                "year": 2024,
+                "nested": {"deep": true}
+            }
+        });
+        let hit = hit.as_object().unwrap();
+        let columns = detect_query_columns(std::slice::from_ref(hit));
+        let column = |label| columns.iter().find(|column| column.label == label).unwrap();
+
+        assert_eq!(query_cell(hit, column("id")).value, "abc");
+        assert_eq!(query_cell(hit, column("score")).value, "0.95");
+        assert_eq!(query_cell(hit, column("title")).value, "hello");
+        assert_eq!(query_cell(hit, column("year")).value, "2024");
+        assert_eq!(query_cell(hit, column("nested")).value, r#"{"deep":true}"#);
+        assert_eq!(query_cell(hit, column("year")).alignment, Alignment::Right);
+    }
+
+    #[test]
+    fn colliding_payload_keys_are_labeled_and_read_unambiguously() {
+        let hit = serde_json::json!({
+            "id": "point-1",
+            "score": 0.95,
+            "payload": {"id": "external-id", "score": 10}
+        });
+        let hit = hit.as_object().unwrap();
+        let columns = detect_query_columns(std::slice::from_ref(hit));
+        let column = |label| columns.iter().find(|column| column.label == label).unwrap();
+
+        assert!(columns.iter().any(|column| column.label == "payload.id"));
+        assert!(columns.iter().any(|column| column.label == "payload.score"));
+        assert_eq!(query_cell(hit, column("payload.id")).value, "external-id");
+        assert_eq!(query_cell(hit, column("payload.score")).value, "10");
     }
 }
