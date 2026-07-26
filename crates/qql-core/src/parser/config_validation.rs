@@ -264,7 +264,7 @@ pub fn merge_collection_config(
 ) -> Result<(), QqlError> {
     if new.vectors.is_some() {
         if current.vectors.is_some() {
-            return Err(QqlError::syntax("VECTORS clause may only appear once", pos));
+            return Err(QqlError::syntax("VECTOR clause may only appear once", pos));
         }
         current.vectors = new.vectors;
     }
@@ -337,7 +337,7 @@ pub fn validate_index_options(options: &[(String, Value)], pos: usize) -> Result
         let lower = k.to_ascii_lowercase();
         match lower.as_str() {
             "is_tenant" | "on_disk" | "enable_hnsw" | "lowercase" | "ascii_folding"
-            | "phrase_matching" => {
+            | "phrase_matching" | "lookup" | "range" | "is_principal" => {
                 if !matches!(v, Value::Bool(_)) {
                     return Err(QqlError::syntax(
                         alloc::format!("{} must be true or false", k),

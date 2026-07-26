@@ -1,0 +1,1806 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "Compare": {
+            "field": "field",
+            "op": "Eq",
+            "value": {
+              "Str": "value"
+            }
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "Not": {
+            "operand": {
+              "Compare": {
+                "field": "field",
+                "op": "Eq",
+                "value": {
+                  "Str": "value"
+                }
+              }
+            }
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "Compare": {
+            "field": "count",
+            "op": "Gt",
+            "value": {
+              "Int": 10
+            }
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "Compare": {
+            "field": "count",
+            "op": "Gte",
+            "value": {
+              "Int": 10
+            }
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "Compare": {
+            "field": "count",
+            "op": "Lt",
+            "value": {
+              "Int": 100
+            }
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "Compare": {
+            "field": "count",
+            "op": "Lte",
+            "value": {
+              "Int": 100
+            }
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "Compare": {
+            "field": "score",
+            "op": "Eq",
+            "value": {
+              "Float": 3.14
+            }
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "Compare": {
+            "field": "flag",
+            "op": "Eq",
+            "value": {
+              "Bool": true
+            }
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "Between": {
+            "field": "count",
+            "high": {
+              "Int": 100
+            },
+            "low": {
+              "Int": 10
+            }
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "Between": {
+            "field": "score",
+            "high": {
+              "Float": 1.0
+            },
+            "low": {
+              "Float": 0.5
+            }
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "In": {
+            "field": "status",
+            "values": [
+              {
+                "Str": "active"
+              },
+              {
+                "Str": "pending"
+              }
+            ]
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "In": {
+            "field": "year",
+            "values": [
+              {
+                "Int": 2024
+              },
+              {
+                "Int": 2025
+              }
+            ]
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "Not": {
+            "operand": {
+              "In": {
+                "field": "status",
+                "values": [
+                  {
+                    "Str": "deleted"
+                  },
+                  {
+                    "Str": "archived"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "IsNull": {
+            "field": "description"
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "Not": {
+            "operand": {
+              "IsNull": {
+                "field": "description"
+              }
+            }
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "IsEmpty": {
+            "field": "tags"
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "Not": {
+            "operand": {
+              "IsEmpty": {
+                "field": "tags"
+              }
+            }
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "MatchText": {
+            "field": "content",
+            "text": "hello world"
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "MatchAny": {
+            "field": "content",
+            "values": [
+              {
+                "Str": "hello"
+              },
+              {
+                "Str": "world"
+              }
+            ]
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "MatchPhrase": {
+            "field": "content",
+            "text": "vector database"
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "And": {
+            "operands": [
+              {
+                "Compare": {
+                  "field": "a",
+                  "op": "Eq",
+                  "value": {
+                    "Int": 1
+                  }
+                }
+              },
+              {
+                "Compare": {
+                  "field": "b",
+                  "op": "Eq",
+                  "value": {
+                    "Int": 2
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "Or": {
+            "operands": [
+              {
+                "Compare": {
+                  "field": "a",
+                  "op": "Eq",
+                  "value": {
+                    "Int": 1
+                  }
+                }
+              },
+              {
+                "Compare": {
+                  "field": "b",
+                  "op": "Eq",
+                  "value": {
+                    "Int": 2
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "Not": {
+            "operand": {
+              "Compare": {
+                "field": "a",
+                "op": "Eq",
+                "value": {
+                  "Int": 1
+                }
+              }
+            }
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "And": {
+            "operands": [
+              {
+                "Or": {
+                  "operands": [
+                    {
+                      "Compare": {
+                        "field": "a",
+                        "op": "Eq",
+                        "value": {
+                          "Int": 1
+                        }
+                      }
+                    },
+                    {
+                      "Compare": {
+                        "field": "b",
+                        "op": "Eq",
+                        "value": {
+                          "Int": 2
+                        }
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "Compare": {
+                  "field": "c",
+                  "op": "Eq",
+                  "value": {
+                    "Int": 3
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "And": {
+            "operands": [
+              {
+                "Compare": {
+                  "field": "status",
+                  "op": "Eq",
+                  "value": {
+                    "Str": "published"
+                  }
+                }
+              },
+              {
+                "Or": {
+                  "operands": [
+                    {
+                      "Compare": {
+                        "field": "score",
+                        "op": "Gt",
+                        "value": {
+                          "Float": 0.5
+                        }
+                      }
+                    },
+                    {
+                      "Not": {
+                        "operand": {
+                          "IsEmpty": {
+                            "field": "tags"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "Nested": {
+            "filter": {
+              "Compare": {
+                "field": "rating",
+                "op": "Gt",
+                "value": {
+                  "Int": 4
+                }
+              }
+            },
+            "path": "reviews"
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "Nested": {
+            "filter": {
+              "And": {
+                "operands": [
+                  {
+                    "Compare": {
+                      "field": "by",
+                      "op": "Eq",
+                      "value": {
+                        "Str": "root"
+                      }
+                    }
+                  },
+                  {
+                    "Compare": {
+                      "field": "seq",
+                      "op": "Lte",
+                      "value": {
+                        "Int": 2
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            "path": "overwritten_in"
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "And": {
+            "operands": [
+              {
+                "Compare": {
+                  "field": "branch",
+                  "op": "Eq",
+                  "value": {
+                    "Str": "root"
+                  }
+                }
+              },
+              {
+                "Not": {
+                  "operand": {
+                    "Nested": {
+                      "filter": {
+                        "Compare": {
+                          "field": "by",
+                          "op": "Eq",
+                          "value": {
+                            "Str": "root"
+                          }
+                        }
+                      },
+                      "path": "overwritten_in"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "PointId": {
+            "Eq": {
+              "Number": 42
+            }
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "PointId": {
+            "Eq": {
+              "String": "uuid-here"
+            }
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "PointId": {
+            "In": [
+              {
+                "Number": 1
+              },
+              {
+                "Number": 2
+              },
+              {
+                "Number": 3
+              }
+            ]
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "HasVector": {
+            "name": "dense"
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "ValuesCount": {
+            "count": 2,
+            "field": "tags",
+            "op": "Gte"
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "ValuesCount": {
+            "count": 0,
+            "field": "categories",
+            "op": "Eq"
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "GeoBoundingBox": {
+            "bottom_right": {
+              "lat": 52.51,
+              "lon": 13.415
+            },
+            "field": "location",
+            "top_left": {
+              "lat": 52.52,
+              "lon": 13.405
+            }
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "GeoRadius": {
+            "center": {
+              "lat": 52.52,
+              "lon": 13.405
+            },
+            "field": "location",
+            "radius": 1000.0
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "GeoPolygon": {
+            "exterior": [
+              {
+                "lat": -70.0,
+                "lon": -70.0
+              },
+              {
+                "lat": 60.0,
+                "lon": -70.0
+              },
+              {
+                "lat": 60.0,
+                "lon": 60.0
+              },
+              {
+                "lat": -70.0,
+                "lon": 60.0
+              }
+            ],
+            "field": "location",
+            "interiors": []
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "GeoPolygon": {
+            "exterior": [
+              {
+                "lat": -70.0,
+                "lon": -70.0
+              },
+              {
+                "lat": 60.0,
+                "lon": -70.0
+              },
+              {
+                "lat": 60.0,
+                "lon": 60.0
+              },
+              {
+                "lat": -70.0,
+                "lon": 60.0
+              }
+            ],
+            "field": "location",
+            "interiors": [
+              [
+                {
+                  "lat": -50.0,
+                  "lon": -50.0
+                },
+                {
+                  "lat": 50.0,
+                  "lon": -50.0
+                },
+                {
+                  "lat": 50.0,
+                  "lon": 50.0
+                },
+                {
+                  "lat": -50.0,
+                  "lon": 50.0
+                }
+              ]
+            ]
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    }
+  ]
+}

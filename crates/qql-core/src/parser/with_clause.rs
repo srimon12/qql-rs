@@ -1,11 +1,11 @@
-use super::Parser;
+use super::AstLowerer;
 use crate::ast::{PayloadSelector, QuantizationSearchParams, SearchParams, Value, VectorSelector};
 use crate::error::QqlError;
 use crate::token::TokenKind;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-impl<'a> Parser<'a> {
+impl<'a> AstLowerer<'a> {
     pub fn parse_search_params(&mut self) -> Result<SearchParams, QqlError> {
         let values = self.parse_config_block()?;
         let mut params = SearchParams::default();
@@ -15,8 +15,8 @@ impl<'a> Parser<'a> {
                 "exact" => params.exact = Some(boolean(value, &key)?),
                 "acorn" => params.acorn = Some(boolean(value, &key)?),
                 "indexed_only" => params.indexed_only = Some(boolean(value, &key)?),
-                "rrf_k" | "k" => params.rrf_k = Some(positive_integer(value, &key)?),
-                "rrf_weights" | "weights" => params.rrf_weights = Some(float_list(value, &key)?),
+                "rrf_k" => params.rrf_k = Some(positive_integer(value, &key)?),
+                "rrf_weights" => params.rrf_weights = Some(float_list(value, &key)?),
                 "quantization" => {
                     params.quantization = Some(quantization(value)?);
                 }

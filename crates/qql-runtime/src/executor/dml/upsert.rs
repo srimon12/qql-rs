@@ -1,5 +1,5 @@
 use crate::backend::{CollectionInfo, VectorSpec};
-use crate::client::{CreateCollectionReq, VectorTopology};
+use crate::client::CreateCollectionReq;
 #[cfg(feature = "rest")]
 use crate::embedder::HttpEmbedder;
 use crate::executor::Executor;
@@ -26,7 +26,8 @@ impl Executor {
                     })
             });
 
-        if !needs_implicit {
+        let has_embedding = upsert.embedding.is_some() || !upsert.embed.is_empty();
+        if !needs_implicit && !has_embedding {
             return Ok(None);
         }
         if !self.client.collection_exists(&upsert.collection).await? {
@@ -79,6 +80,7 @@ impl Executor {
                 }
             });
         }
+        resolve_explicit_embedding_targets(upsert, &info)?;
         Ok(Some(info))
     }
 
@@ -154,50 +156,6 @@ impl Executor {
         Ok(true)
     }
 
-    #[allow(dead_code)]
-    pub(crate) async fn resolve_vector_topology(
-        &self,
-        collection: &str,
-    ) -> Result<VectorTopology, QqlError> {
-        let info = self.client.get_collection_info(collection).await?;
-        let mut topo = VectorTopology {
-            dense_vector: None,
-            sparse_vector: None,
-            rerank_vector: None,
-        };
-
-        for vname in &info.schema.dense_vectors {
-            if vname == crate::executor::DENSE_VECTOR_NAME {
-                topo.dense_vector = Some(crate::executor::DENSE_VECTOR_NAME.to_string());
-            } else if vname == crate::executor::RERANK_VECTOR_NAME {
-                topo.rerank_vector = Some(crate::executor::RERANK_VECTOR_NAME.to_string());
-            } else if topo.dense_vector.is_none()
-                || topo
-                    .dense_vector
-                    .as_ref()
-                    .is_some_and(|name| name.is_empty())
-            {
-                topo.dense_vector = Some(vname.clone());
-            }
-        }
-
-        for sv in &info.schema.sparse_vectors {
-            let vname = &sv.name;
-            if vname == crate::executor::SPARSE_VECTOR_NAME {
-                topo.sparse_vector = Some(crate::executor::SPARSE_VECTOR_NAME.to_string());
-            } else if topo.sparse_vector.is_none()
-                || topo
-                    .sparse_vector
-                    .as_ref()
-                    .is_some_and(|name| name.is_empty())
-            {
-                topo.sparse_vector = Some(vname.clone());
-            }
-        }
-
-        Ok(topo)
-    }
-
     pub(crate) async fn resolve_dense_vector_size(
         &self,
         model: Option<&str>,
@@ -266,7 +224,7 @@ impl Executor {
 }
 
 fn dense_targets(info: &CollectionInfo) -> Vec<String> {
-    if info.schema.vectors.is_empty() {
+    let targets = if info.schema.vectors.is_empty() {
         info.schema.dense_vectors.clone()
     } else {
         info.schema
@@ -274,7 +232,122 @@ fn dense_targets(info: &CollectionInfo) -> Vec<String> {
             .iter()
             .map(|vector| vector.name.clone().unwrap_or_default())
             .collect()
+    };
+    if targets.is_empty() && info.schema.sparse_vectors.is_empty() {
+        vec![String::new()]
+    } else {
+        targets
     }
+}
+
+fn resolve_explicit_embedding_targets(
+    upsert: &mut UpsertStmt,
+    info: &CollectionInfo,
+) -> Result<(), QqlError> {
+    let dense = dense_targets(info);
+    let sparse = info
+        .schema
+        .sparse_vectors
+        .iter()
+        .map(|vector| vector.name.clone())
+        .collect::<Vec<_>>();
+
+    if let Some(spec) = &mut upsert.embedding {
+        match spec {
+            EmbeddingSpec::Dense { vector, .. } => {
+                resolve_embedding_target(&upsert.collection, vector, &dense, "dense")?;
+            }
+            EmbeddingSpec::Sparse { vector, .. } => {
+                resolve_embedding_target(&upsert.collection, vector, &sparse, "sparse")?;
+            }
+            EmbeddingSpec::Hybrid {
+                dense_vector,
+                sparse_vector,
+                ..
+            } => {
+                resolve_embedding_target(&upsert.collection, dense_vector, &dense, "dense")?;
+                resolve_embedding_target(&upsert.collection, sparse_vector, &sparse, "sparse")?;
+            }
+        }
+    }
+
+    for directive in &upsert.embed {
+        let (available, kind) = match directive.kind {
+            qql_core::ast::EmbedKind::Dense { .. } => (&dense, "dense"),
+            qql_core::ast::EmbedKind::Sparse { .. } => (&sparse, "sparse"),
+        };
+        if !available
+            .iter()
+            .any(|candidate| candidate == &directive.target_vector)
+        {
+            return Err(embedding_target_error(
+                &upsert.collection,
+                &directive.target_vector,
+                available,
+                kind,
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn resolve_embedding_target(
+    collection: &str,
+    target: &mut Option<String>,
+    available: &[String],
+    kind: &str,
+) -> Result<(), QqlError> {
+    if let Some(name) = target {
+        if available.iter().any(|candidate| candidate == name) {
+            return Ok(());
+        }
+        return Err(embedding_target_error(collection, name, available, kind));
+    }
+    if available.len() != 1 {
+        return Err(QqlError::execution(
+            "QQL-EMBEDDING-TOPOLOGY",
+            format!(
+                "cannot infer a {kind} embedding target for collection '{collection}': available {kind} vectors are {}",
+                display_vector_names(available)
+            ),
+            None,
+        ));
+    }
+    *target = Some(available[0].clone());
+    Ok(())
+}
+
+fn embedding_target_error(
+    collection: &str,
+    target: &str,
+    available: &[String],
+    kind: &str,
+) -> QqlError {
+    QqlError::execution(
+        "QQL-EMBEDDING-TARGET",
+        format!(
+            "{kind} vector '{target}' does not exist in collection '{collection}'. Available {kind} vectors: {}",
+            display_vector_names(available)
+        ),
+        None,
+    )
+}
+
+fn display_vector_names(names: &[String]) -> String {
+    if names.is_empty() {
+        return "<none>".to_string();
+    }
+    names
+        .iter()
+        .map(|name| {
+            if name.is_empty() {
+                "<default>"
+            } else {
+                name.as_str()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn validate_vector_value(

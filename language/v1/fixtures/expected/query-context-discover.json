@@ -1,0 +1,247 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Context": {
+            "pairs": [
+              {
+                "negative": {
+                  "Point": {
+                    "Number": 2
+                  }
+                },
+                "positive": {
+                  "Point": {
+                    "Number": 1
+                  }
+                }
+              }
+            ],
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Context": {
+            "pairs": [
+              {
+                "negative": {
+                  "Point": {
+                    "Number": 2
+                  }
+                },
+                "positive": {
+                  "Point": {
+                    "Number": 1
+                  }
+                }
+              },
+              {
+                "negative": {
+                  "Point": {
+                    "Number": 4
+                  }
+                },
+                "positive": {
+                  "Point": {
+                    "Number": 3
+                  }
+                }
+              }
+            ],
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Context": {
+            "pairs": [
+              {
+                "negative": {
+                  "Text": {
+                    "model": null,
+                    "text": "bad"
+                  }
+                },
+                "positive": {
+                  "Text": {
+                    "model": null,
+                    "text": "good"
+                  }
+                }
+              }
+            ],
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Discover": {
+            "context": [
+              {
+                "negative": {
+                  "Point": {
+                    "Number": 3
+                  }
+                },
+                "positive": {
+                  "Point": {
+                    "Number": 2
+                  }
+                }
+              }
+            ],
+            "prefetch": [],
+            "target": {
+              "Point": {
+                "Number": 1
+              }
+            },
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Discover": {
+            "context": [
+              {
+                "negative": {
+                  "Point": {
+                    "Number": 2
+                  }
+                },
+                "positive": {
+                  "Point": {
+                    "Number": 1
+                  }
+                }
+              },
+              {
+                "negative": {
+                  "Point": {
+                    "Number": 4
+                  }
+                },
+                "positive": {
+                  "Point": {
+                    "Number": 3
+                  }
+                }
+              }
+            ],
+            "prefetch": [],
+            "target": {
+              "Text": {
+                "model": null,
+                "text": "search"
+              }
+            },
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    }
+  ]
+}

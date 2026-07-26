@@ -1,0 +1,140 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "Scroll": {
+        "after": null,
+        "collection": "docs",
+        "filter": null,
+        "limit": 50,
+        "shard_key": null,
+        "with_vector": null
+      }
+    },
+    {
+      "Scroll": {
+        "after": null,
+        "collection": "docs",
+        "filter": {
+          "Compare": {
+            "field": "status",
+            "op": "Eq",
+            "value": {
+              "Str": "active"
+            }
+          }
+        },
+        "limit": 50,
+        "shard_key": null,
+        "with_vector": null
+      }
+    },
+    {
+      "Scroll": {
+        "after": {
+          "Number": 42
+        },
+        "collection": "docs",
+        "filter": null,
+        "limit": 50,
+        "shard_key": null,
+        "with_vector": null
+      }
+    },
+    {
+      "Scroll": {
+        "after": {
+          "String": "page-2"
+        },
+        "collection": "docs",
+        "filter": {
+          "Compare": {
+            "field": "status",
+            "op": "Eq",
+            "value": {
+              "Str": "archived"
+            }
+          }
+        },
+        "limit": 50,
+        "shard_key": null,
+        "with_vector": null
+      }
+    },
+    {
+      "Scroll": {
+        "after": null,
+        "collection": "docs",
+        "filter": null,
+        "limit": 50,
+        "shard_key": null,
+        "with_vector": "None"
+      }
+    },
+    {
+      "Scroll": {
+        "after": null,
+        "collection": "docs",
+        "filter": null,
+        "limit": 50,
+        "shard_key": null,
+        "with_vector": "All"
+      }
+    },
+    {
+      "Scroll": {
+        "after": null,
+        "collection": "docs",
+        "filter": null,
+        "limit": 50,
+        "shard_key": null,
+        "with_vector": {
+          "Names": [
+            "dense",
+            "sparse"
+          ]
+        }
+      }
+    },
+    {
+      "Scroll": {
+        "after": null,
+        "collection": "docs",
+        "filter": {
+          "Compare": {
+            "field": "category",
+            "op": "Eq",
+            "value": {
+              "Str": "tech"
+            }
+          }
+        },
+        "limit": 50,
+        "shard_key": null,
+        "with_vector": {
+          "Names": [
+            "dense"
+          ]
+        }
+      }
+    },
+    {
+      "Scroll": {
+        "after": null,
+        "collection": "sec10k",
+        "filter": {
+          "Compare": {
+            "field": "tenant_id",
+            "op": "Eq",
+            "value": {
+              "Str": "honeywell"
+            }
+          }
+        },
+        "limit": 50,
+        "shard_key": "honeywell",
+        "with_vector": null
+      }
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+[package]
+name = "qql-grammar-gen"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]

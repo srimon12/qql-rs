@@ -1,0 +1,72 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "Count": {
+        "collection": "docs",
+        "filter": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Count": {
+        "collection": "docs",
+        "filter": {
+          "Compare": {
+            "field": "status",
+            "op": "Eq",
+            "value": {
+              "Str": "active"
+            }
+          }
+        },
+        "shard_key": null
+      }
+    },
+    {
+      "Count": {
+        "collection": "sec10k",
+        "filter": {
+          "Compare": {
+            "field": "tenant_id",
+            "op": "Eq",
+            "value": {
+              "Str": "honeywell"
+            }
+          }
+        },
+        "shard_key": "honeywell"
+      }
+    },
+    {
+      "Count": {
+        "collection": "docs",
+        "filter": {
+          "And": {
+            "operands": [
+              {
+                "Compare": {
+                  "field": "status",
+                  "op": "Eq",
+                  "value": {
+                    "Str": "published"
+                  }
+                }
+              },
+              {
+                "Compare": {
+                  "field": "year",
+                  "op": "Gte",
+                  "value": {
+                    "Int": 2024
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "shard_key": null
+      }
+    }
+  ]
+}

@@ -117,7 +117,7 @@ Clauses must appear in the exact required order (enforced at parse time):
 [WITH cte_name AS (QUERY ...), ...]
 QUERY <expression>
 FROM <collection>
-[USING <vector_name>]
+[USING <vector_name> [AS DENSE | AS SPARSE]]
 [PREFETCH (cte_ref [WHERE <filter>] [SCORE THRESHOLD <number>], ...)]
 [WHERE <filter_expression>]
 [SHARD '<tenant_key>']

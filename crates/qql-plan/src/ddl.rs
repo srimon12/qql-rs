@@ -474,7 +474,7 @@ mod tests {
     #[test]
     fn lower_vector_on_disk_and_query_encoding_and_multivector() {
         let stmt = parse_stmt(
-            "CREATE COLLECTION docs (v VECTOR(64, COSINE) WITH MULTIVECTOR (comparator = 'max_sim') WITH VECTORS (on_disk = true) WITH QUANTIZATION (type = 'binary', encoding = 'two_bits', query_encoding = 'scalar4bits', always_ram = true));",
+            "CREATE COLLECTION docs (v VECTOR(64, COSINE) WITH MULTIVECTOR (comparator = 'max_sim') WITH VECTOR (on_disk = true) WITH QUANTIZATION (type = 'binary', encoding = 'two_bits', query_encoding = 'scalar4bits', always_ram = true));",
         );
         let Stmt::CreateCollection(ref cc) = stmt else {
             panic!()

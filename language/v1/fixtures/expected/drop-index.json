@@ -1,0 +1,17 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "DropIndex": {
+        "collection": "docs",
+        "field": "status"
+      }
+    },
+    {
+      "DropIndex": {
+        "collection": "docs",
+        "field": "year"
+      }
+    }
+  ]
+}

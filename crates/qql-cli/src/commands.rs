@@ -401,7 +401,7 @@ fn print_repl_help() {
         r#"
 \x1b[1mAvailable Statements:\x1b[0m
 
-  \x1b[33mINSERT INTO\x1b[0m COLLECTION <name> \x1b[33mVALUES\x1b[0m {{'text': '...', ...}}
+  \x1b[33mUPSERT INTO\x1b[0m <name> \x1b[33mVALUES\x1b[0m {{id: 1, text: '...', ...}}
 
   \x1b[33mCREATE COLLECTION\x1b[0m <name> [\x1b[33mHYBRID\x1b[0m [\x1b[33mRERANK\x1b[0m]]
 
@@ -409,10 +409,10 @@ fn print_repl_help() {
 
   \x1b[33mSHOW COLLECTIONS\x1b[0m
 
-  \x1b[33mQUERY\x1b[0m ['<text>' | <id> | NEAREST '<text>' | ...]
-      \x1b[33mFROM\x1b[0m <collection> \x1b[33mLIMIT\x1b[0m <n>
+  \x1b[33mQUERY\x1b[0m ['<text>' | NEAREST POINT <id> | ...]
+      \x1b[33mFROM\x1b[0m <collection> [\x1b[33mUSING\x1b[0m <vector> [\x1b[33mAS DENSE|SPARSE\x1b[0m]] \x1b[33mLIMIT\x1b[0m <n>
 
-  \x1b[33mSELECT\x1b[0m * \x1b[33mFROM\x1b[0m <name> \x1b[33mWHERE id =\x1b[0m '<id>|<int>'
+  \x1b[33mQUERY POINTS\x1b[0m (<id>, ...) \x1b[33mFROM\x1b[0m <name> [\x1b[33mWITH PAYLOAD true\x1b[0m]
 
   \x1b[33mSCROLL FROM\x1b[0m <name> [\x1b[33mWHERE\x1b[0m <filter>] [\x1b[33mAFTER\x1b[0m '<id>'] [\x1b[33mWITH VECTOR\x1b[0m] \x1b[33mLIMIT\x1b[0m <n>
 

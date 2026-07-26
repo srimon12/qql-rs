@@ -8,9 +8,9 @@ use crate::ast::{
 use crate::error::QqlError;
 use crate::token::TokenKind;
 
-use super::{ascii_equal, Parser};
+use super::{ascii_equal, AstLowerer};
 
-impl<'a> Parser<'a> {
+impl<'a> AstLowerer<'a> {
     pub fn parse_create(&mut self) -> Result<Stmt, QqlError> {
         self.advance()?;
         let tok = self.peek()?;
@@ -48,7 +48,7 @@ impl<'a> Parser<'a> {
                         || (tok.kind == TokenKind::Identifier && ascii_equal(tok.text, "VECTOR"))
                     {
                         self.advance()?;
-                        let v = self.parse_string()?;
+                        let v = self.parse_identifier()?;
                         if mode == TokenKind::Dense {
                             dense_vector = Some(v);
                         } else {
@@ -75,41 +75,21 @@ impl<'a> Parser<'a> {
                     ));
                 }
             } else {
+                if self.peek()?.kind == TokenKind::Dense {
+                    self.advance()?;
+                }
                 model = Some(self.parse_required_model_string()?);
             }
-        }
-
-        if self.peek()?.kind == TokenKind::Identifier && ascii_equal(self.peek()?.text, "VECTORS") {
-            self.advance()?;
         }
 
         // Parse explicit vector definitions in parentheses
         if self.peek()?.kind == TokenKind::Lparen {
             self.advance()?;
             while self.peek()?.kind != TokenKind::Rparen && self.peek()?.kind != TokenKind::Eof {
-                let name_tok = self.peek()?;
-                let name =
-                    if name_tok.kind == TokenKind::Vector || ascii_equal(name_tok.text, "VECTOR") {
-                        String::from("dense")
-                    } else {
-                        let id = self.parse_identifier()?;
-                        if self.peek()?.kind == TokenKind::Vector
-                            || ascii_equal(self.peek()?.text, "VECTOR")
-                        {
-                            self.advance()?;
-                        }
-                        id
-                    };
+                let name = self.parse_identifier()?;
 
-                if self.peek()?.kind == TokenKind::Lparen
-                    || self.peek()?.kind == TokenKind::Vector
-                    || ascii_equal(self.peek()?.text, "VECTOR")
-                {
-                    if self.peek()?.kind == TokenKind::Vector
-                        || ascii_equal(self.peek()?.text, "VECTOR")
-                    {
-                        self.advance()?;
-                    }
+                if self.peek()?.kind == TokenKind::Vector {
+                    self.advance()?;
                     self.expect(TokenKind::Lparen)?;
                     let size_tok = self.peek()?;
                     let size = self.parse_numeric_literal()?;
@@ -146,9 +126,8 @@ impl<'a> Parser<'a> {
                         if self.peek()?.kind == TokenKind::Hnsw {
                             self.advance()?;
                             hnsw = self.parse_hnsw_config_block()?.hnsw;
-                        } else if self.peek()?.kind == TokenKind::Quantize
-                            || (self.peek()?.kind == TokenKind::Identifier
-                                && ascii_equal(self.peek()?.text, "QUANTIZATION"))
+                        } else if self.peek()?.kind == TokenKind::Identifier
+                            && ascii_equal(self.peek()?.text, "QUANTIZATION")
                         {
                             self.advance()?;
                             quant = self.parse_quantization_config_block()?.quantization;
@@ -157,15 +136,12 @@ impl<'a> Parser<'a> {
                         {
                             self.advance()?;
                             multiv = Some(self.parse_multivector_config_block()?);
-                        } else if self.peek()?.kind == TokenKind::Vector
-                            || (self.peek()?.kind == TokenKind::Identifier
-                                && ascii_equal(self.peek()?.text, "VECTORS"))
-                        {
+                        } else if self.peek()?.kind == TokenKind::Vector {
                             self.advance()?;
                             vec_cfg = self.parse_vectors_config_block()?.vectors;
                         } else {
                             return Err(QqlError::syntax(
-                                "expected HNSW, QUANTIZATION, MULTIVECTOR, or VECTORS after WITH for vector configuration",
+                                "expected HNSW, QUANTIZATION, MULTIVECTOR, or VECTOR after WITH for vector configuration",
                                 self.peek()?.pos,
                             ));
                         }
@@ -188,9 +164,6 @@ impl<'a> Parser<'a> {
                         self.advance()?;
                         if self.peek()?.kind == TokenKind::Sparse
                             || self.peek()?.kind == TokenKind::Index
-                            || (self.peek()?.kind == TokenKind::Identifier
-                                && (ascii_equal(self.peek()?.text, "SPARSE")
-                                    || ascii_equal(self.peek()?.text, "INDEX")))
                         {
                             self.advance()?;
                             let (idx, mod_val) = self.parse_sparse_config_block()?;
@@ -266,9 +239,7 @@ impl<'a> Parser<'a> {
     pub fn parse_create_shard_key(&mut self) -> Result<Stmt, QqlError> {
         // Consume the SHARD token (parse_create() only peeked at it)
         self.expect(TokenKind::Shard)?;
-        if self.peek()?.kind == TokenKind::Key {
-            self.advance()?;
-        }
+        self.expect(TokenKind::Key)?;
         let shard_name = self.parse_string()?;
         self.expect(TokenKind::On)?;
         self.expect(TokenKind::Collection)?;

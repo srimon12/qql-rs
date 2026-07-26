@@ -1,0 +1,15 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "DropCollection": {
+        "collection": "docs"
+      }
+    },
+    {
+      "DropCollection": {
+        "collection": "old_data"
+      }
+    }
+  ]
+}

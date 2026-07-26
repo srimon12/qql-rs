@@ -1,0 +1,226 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "CreateIndex": {
+        "collection": "docs",
+        "field": "status",
+        "field_type": "keyword",
+        "options": []
+      }
+    },
+    {
+      "CreateIndex": {
+        "collection": "docs",
+        "field": "tags",
+        "field_type": "keyword",
+        "options": [
+          [
+            "is_tenant",
+            {
+              "Bool": true
+            }
+          ],
+          [
+            "on_disk",
+            {
+              "Bool": true
+            }
+          ],
+          [
+            "enable_hnsw",
+            {
+              "Bool": false
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "CreateIndex": {
+        "collection": "docs",
+        "field": "year",
+        "field_type": "integer",
+        "options": []
+      }
+    },
+    {
+      "CreateIndex": {
+        "collection": "docs",
+        "field": "year",
+        "field_type": "integer",
+        "options": [
+          [
+            "lookup",
+            {
+              "Bool": true
+            }
+          ],
+          [
+            "range",
+            {
+              "Bool": true
+            }
+          ],
+          [
+            "is_principal",
+            {
+              "Bool": true
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "CreateIndex": {
+        "collection": "docs",
+        "field": "score",
+        "field_type": "float",
+        "options": [
+          [
+            "on_disk",
+            {
+              "Bool": true
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "CreateIndex": {
+        "collection": "docs",
+        "field": "location",
+        "field_type": "geo",
+        "options": [
+          [
+            "enable_hnsw",
+            {
+              "Bool": true
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "CreateIndex": {
+        "collection": "docs",
+        "field": "content",
+        "field_type": "text",
+        "options": [
+          [
+            "tokenizer",
+            {
+              "Str": "word"
+            }
+          ],
+          [
+            "min_token_len",
+            {
+              "Int": 2
+            }
+          ],
+          [
+            "max_token_len",
+            {
+              "Int": 20
+            }
+          ],
+          [
+            "lowercase",
+            {
+              "Bool": true
+            }
+          ],
+          [
+            "phrase_matching",
+            {
+              "Bool": true
+            }
+          ],
+          [
+            "stopwords",
+            {
+              "List": [
+                {
+                  "Str": "en"
+                }
+              ]
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "CreateIndex": {
+        "collection": "docs",
+        "field": "content",
+        "field_type": "text",
+        "options": [
+          [
+            "tokenizer",
+            {
+              "Str": "multilingual"
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "CreateIndex": {
+        "collection": "docs",
+        "field": "is_active",
+        "field_type": "bool",
+        "options": [
+          [
+            "on_disk",
+            {
+              "Bool": true
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "CreateIndex": {
+        "collection": "docs",
+        "field": "created_at",
+        "field_type": "datetime",
+        "options": [
+          [
+            "on_disk",
+            {
+              "Bool": true
+            }
+          ],
+          [
+            "is_principal",
+            {
+              "Bool": true
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "CreateIndex": {
+        "collection": "docs",
+        "field": "user_id",
+        "field_type": "uuid",
+        "options": [
+          [
+            "is_tenant",
+            {
+              "Bool": true
+            }
+          ],
+          [
+            "on_disk",
+            {
+              "Bool": true
+            }
+          ]
+        ]
+      }
+    }
+  ]
+}

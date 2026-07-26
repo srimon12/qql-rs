@@ -1,4 +1,4 @@
-use super::Parser;
+use super::AstLowerer;
 use crate::ast::{
     ClearPayloadStmt, DeleteStmt, DeleteVectorStmt, FilterExpr, PointIdPredicate, PointSelector,
     Stmt, UpdatePayloadStmt, UpdateVectorStmt,
@@ -7,7 +7,7 @@ use crate::error::QqlError;
 use crate::token::TokenKind;
 use alloc::boxed::Box;
 
-impl<'a> Parser<'a> {
+impl<'a> AstLowerer<'a> {
     pub fn parse_update(&mut self) -> Result<Stmt, QqlError> {
         self.expect(TokenKind::Update)?;
         let collection = self.parse_identifier()?;

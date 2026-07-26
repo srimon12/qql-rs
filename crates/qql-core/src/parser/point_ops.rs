@@ -1,10 +1,10 @@
-use super::Parser;
+use super::AstLowerer;
 use crate::ast::{CountStmt, ScrollStmt, Stmt};
 use crate::error::QqlError;
 use crate::token::TokenKind;
 use alloc::boxed::Box;
 
-impl<'a> Parser<'a> {
+impl<'a> AstLowerer<'a> {
     pub fn parse_scroll(&mut self) -> Result<Stmt, QqlError> {
         self.expect(TokenKind::Scroll)?;
         self.expect(TokenKind::From)?;

@@ -1,0 +1,270 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "hello"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "hello"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Count": {
+        "collection": "docs",
+        "filter": {
+          "Compare": {
+            "field": "status",
+            "op": "Eq",
+            "value": {
+              "Str": "active"
+            }
+          }
+        },
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "docs",
+        "embed": [],
+        "embedding": null,
+        "points": [
+          {
+            "id": {
+              "Number": 1
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "sample"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": null
+      }
+    },
+    {
+      "Count": {
+        "collection": "docs",
+        "filter": {
+          "Compare": {
+            "field": "status",
+            "op": "Eq",
+            "value": {
+              "Str": "active"
+            }
+          }
+        },
+        "shard_key": null
+      }
+    },
+    {
+      "CreateCollection": {
+        "collection": "test",
+        "config": {
+          "hnsw": {
+            "ef_construct": null,
+            "full_scan_threshold": null,
+            "inline_storage": null,
+            "m": 16,
+            "max_indexing_threads": null,
+            "on_disk": null,
+            "payload_m": null
+          },
+          "optimizers": null,
+          "params": null,
+          "quantization": null,
+          "quantization_update": null,
+          "vectors": null
+        },
+        "mode": {
+          "Dense": {
+            "model": null
+          }
+        },
+        "sparse_vectors": [],
+        "vectors": [
+          {
+            "distance": "Cosine",
+            "hnsw": null,
+            "multivector": null,
+            "name": "dense",
+            "quantization": null,
+            "size": 384,
+            "vectors": null
+          }
+        ]
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "test",
+        "embed": [],
+        "embedding": null,
+        "points": [
+          {
+            "id": {
+              "Number": 1
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "first"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": null
+      }
+    },
+    {
+      "CreateIndex": {
+        "collection": "test",
+        "field": "text",
+        "field_type": "keyword",
+        "options": []
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "test"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "search"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 5,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "DropCollection": {
+        "collection": "test"
+      }
+    }
+  ]
+}

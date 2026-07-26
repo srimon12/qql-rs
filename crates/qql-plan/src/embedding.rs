@@ -1,5 +1,7 @@
 use crate::types::{EmbeddingJob, EmbeddingKind};
-use qql_core::ast::{EmbedKind, EmbeddingSpec, QueryExpr, QueryInput, QueryStmt, Stmt, UpsertStmt};
+use qql_core::ast::{
+    EmbedKind, EmbeddingSpec, QueryExpr, QueryInput, QueryStmt, Stmt, UpsertStmt, VectorKind,
+};
 
 pub fn extract_jobs(statement: &Stmt) -> Vec<EmbeddingJob> {
     let mut jobs = Vec::new();
@@ -59,15 +61,34 @@ fn extract_expression_jobs(expr: &QueryExpr, jobs: &mut Vec<EmbeddingJob>) {
         return;
     }
 
+    let kind = expression_vector_kind(expr);
     for input in collect_text_inputs(expr) {
         if let QueryInput::Text { text, model } = input {
             jobs.push(EmbeddingJob {
                 texts: vec![text.clone()],
                 model: model.clone(),
-                kind: EmbeddingKind::Dense,
+                kind: match kind {
+                    VectorKind::Dense => EmbeddingKind::Dense,
+                    VectorKind::Sparse => EmbeddingKind::Sparse,
+                },
                 destinations: Vec::new(),
             });
         }
+    }
+}
+
+fn expression_vector_kind(expr: &QueryExpr) -> VectorKind {
+    match expr {
+        QueryExpr::Nearest { using, .. }
+        | QueryExpr::Recommend { using, .. }
+        | QueryExpr::Context { using, .. }
+        | QueryExpr::Discover { using, .. }
+        | QueryExpr::RelevanceFeedback { using, .. } => using
+            .as_ref()
+            .and_then(|target| target.kind)
+            .unwrap_or(VectorKind::Dense),
+        QueryExpr::Rerank { .. } => VectorKind::Dense,
+        _ => VectorKind::Dense,
     }
 }
 

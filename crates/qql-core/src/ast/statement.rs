@@ -33,6 +33,20 @@ pub enum QueryInput {
     Point(PointId),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum VectorKind {
+    Dense,
+    Sparse,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct VectorTarget {
+    pub name: String,
+    pub kind: Option<VectorKind>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MmrConfig {
@@ -122,7 +136,7 @@ pub enum QueryExpr {
     },
     Nearest {
         input: QueryInput,
-        using: Option<String>,
+        using: Option<VectorTarget>,
         prefetch: Vec<Prefetch>,
         mmr: Option<Box<MmrConfig>>,
     },
@@ -130,18 +144,18 @@ pub enum QueryExpr {
         positive: Vec<QueryInput>,
         negative: Vec<QueryInput>,
         strategy: Option<RecommendStrategy>,
-        using: Option<String>,
+        using: Option<VectorTarget>,
         prefetch: Vec<Prefetch>,
     },
     Context {
         pairs: Vec<ContextPair>,
-        using: Option<String>,
+        using: Option<VectorTarget>,
         prefetch: Vec<Prefetch>,
     },
     Discover {
         target: QueryInput,
         context: Vec<ContextPair>,
-        using: Option<String>,
+        using: Option<VectorTarget>,
         prefetch: Vec<Prefetch>,
     },
     OrderBy {
@@ -162,7 +176,7 @@ pub enum QueryExpr {
         target: QueryInput,
         feedback: Vec<FeedbackItem>,
         strategy: FeedbackStrategy,
-        using: Option<String>,
+        using: Option<VectorTarget>,
         prefetch: Vec<Prefetch>,
     },
     Hybrid {
@@ -175,7 +189,7 @@ pub enum QueryExpr {
     Rerank {
         input: QueryInput,
         model: String,
-        using: String,
+        using: Option<VectorTarget>,
         prefetch: Vec<Prefetch>,
     },
 }

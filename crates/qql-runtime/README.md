@@ -13,7 +13,7 @@ Statement string
     │
     ▼ [2] PREPARE
     │   ├─ resolve_embeddings: text → vectors (if embedder registered)
-    │   ├─ ensure_vector_name: validate USING against collection schema
+    │   ├─ resolve vector targets: validate names and infer roles from collection schema
     │   └─ ensure_collection_for_upsert: auto-create default schema
     │
     ▼ [3] Plan (qql_plan::plan::plan → PlannedOperation)
@@ -110,7 +110,7 @@ executor.execute(
 
 // Query with auto-embedding
 let response = executor.execute(
-    "QUERY 'semantic search' FROM docs USING dense LIMIT 5;",
+    "QUERY 'semantic search' FROM docs USING semantic_v2 AS DENSE LIMIT 5;",
     OnError::Stop,
 ).await?;
 ```
@@ -121,7 +121,7 @@ The `prepare_statement` method (called before every `execute_node` and in
 `execute_batch_nodes`) performs:
 
 1. **`resolve_embeddings`**: text → dense/sparse vectors (if embedder registered)
-2. **`ensure_vector_name`**: for QUERY — validates `USING <vector>` exists in the collection schema
+2. **vector target resolution**: validates named targets and infers dense/sparse roles from collection schema; ambiguous schemas fail closed
 3. **`ensure_collection_for_upsert`**: for UPSERT — auto-creates collection with default dense/hybrid schema when embedding model is specified
 
 ### Batch execution — strict cardinality

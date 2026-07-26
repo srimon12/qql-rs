@@ -1,0 +1,66 @@
+-- query-cte-fusion.qql — CTEs and fusion
+
+-- Two CTEs with explicit FROM
+WITH
+  dense AS (QUERY TEXT 'machine learning' FROM docs USING semantic_v2 AS DENSE LIMIT 100),
+  sparse AS (QUERY TEXT 'machine learning' FROM docs USING lexical_v2 AS SPARSE LIMIT 100)
+QUERY FUSION RRF
+FROM docs
+PREFETCH (dense, sparse)
+LIMIT 10;
+
+-- CTEs with inherited FROM
+WITH
+  dense AS (QUERY TEXT 'machine learning' USING semantic_v2 AS DENSE LIMIT 100),
+  sparse AS (QUERY TEXT 'machine learning' USING lexical_v2 AS SPARSE LIMIT 100)
+QUERY FUSION DBSF
+FROM docs
+PREFETCH (dense, sparse)
+LIMIT 10;
+
+-- Prefetch with per-prefetch WHERE and SCORE THRESHOLD
+WITH
+  dense AS (QUERY TEXT 'search' USING dense LIMIT 200),
+  sparse AS (QUERY TEXT 'search' USING bm25 LIMIT 300)
+QUERY FUSION RRF
+FROM docs
+PREFETCH (
+  dense WHERE category = 'tech' SCORE THRESHOLD 0.6,
+  sparse SCORE THRESHOLD 0.3
+)
+LIMIT 10;
+
+-- Prefetch with LOOKUP FROM
+WITH
+  dense AS (QUERY TEXT 'search' USING dense LIMIT 100)
+QUERY FUSION RRF
+FROM docs
+PREFETCH (dense LOOKUP FROM other VECTOR 'dense')
+LIMIT 10;
+
+-- Rerank with CTE prefetch
+WITH candidates AS (QUERY TEXT 'vector database' USING dense LIMIT 100)
+QUERY RERANK TEXT 'vector database' MODEL 'reranker-v1'
+FROM docs
+USING colbert
+PREFETCH (candidates)
+LIMIT 10;
+
+-- CTE referencing previous CTE (daisy-chain)
+WITH
+  first AS (QUERY TEXT 'query' USING dense LIMIT 100),
+  second AS (QUERY TEXT 'query' USING bm25 LIMIT 100)
+QUERY FUSION RRF
+FROM docs
+PREFETCH (first, second)
+LIMIT 10;
+
+-- Parameterized RRF
+WITH
+  dense AS (QUERY TEXT 'search' USING dense LIMIT 200),
+  sparse AS (QUERY TEXT 'search' USING bm25 LIMIT 300)
+QUERY FUSION RRF
+FROM docs
+PREFETCH (dense, sparse)
+PARAMS (rrf_k = 30, rrf_weights = [0.7, 0.3])
+LIMIT 10;

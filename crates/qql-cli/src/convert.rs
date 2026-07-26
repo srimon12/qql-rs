@@ -462,7 +462,7 @@ fn convert_upsert(input: &Value, collection: &str) -> Result<Vec<String>, String
         }
 
         let values = build_payload_dict(&payload);
-        stmts.push(format!("INSERT INTO {} VALUES {}", collection, values));
+        stmts.push(format!("UPSERT INTO {} VALUES {}", collection, values));
     }
 
     if stmts.is_empty() {
@@ -814,7 +814,7 @@ fn convert_get_points(input: &Value, collection: &str) -> Result<Vec<String>, St
 
     let stmts: Vec<String> = ids
         .iter()
-        .map(|id| format!("SELECT * FROM {} WHERE id = {}", collection, format_id(id)))
+        .map(|id| format!("QUERY POINTS ({}) FROM {}", format_id(id), collection))
         .collect();
 
     Ok(stmts)
@@ -1291,4 +1291,47 @@ fn has_filter_field(
         ));
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{convert_get_points, convert_upsert};
+    use qql_core::parser::Parser;
+    use serde_json::json;
+
+    #[test]
+    fn upsert_conversion_emits_canonical_qql() {
+        let statements = convert_upsert(
+            &json!({
+                "points": [{
+                    "id": 1,
+                    "vector": [0.1, 0.2],
+                    "payload": {"title": "hello"}
+                }]
+            }),
+            "docs",
+        )
+        .expect("upsert conversion");
+
+        assert_eq!(statements.len(), 1);
+        assert!(statements[0].starts_with("UPSERT INTO docs VALUES "));
+        Parser::parse(&format!("{};", statements[0])).expect("generated UPSERT should parse");
+    }
+
+    #[test]
+    fn point_lookup_conversion_emits_canonical_qql() {
+        let statements =
+            convert_get_points(&json!({"ids": [1, "point-2"]}), "docs").expect("point conversion");
+
+        assert_eq!(
+            statements,
+            [
+                "QUERY POINTS (1) FROM docs",
+                "QUERY POINTS ('point-2') FROM docs"
+            ]
+        );
+        for statement in statements {
+            Parser::parse(&format!("{statement};")).expect("generated QUERY POINTS should parse");
+        }
+    }
 }

@@ -1,6 +1,9 @@
-# Canonical QQL Grammar
+# QQL Syntax Guide
 
-This is the canonical syntax implemented by `qql-core`. QQL follows Qdrant retrieval concepts rather than relational `SELECT` semantics. Keywords are case-insensitive.
+This guide is illustrative. The executable
+[`language/v1/grammar.pest`](../language/v1/grammar.pest) is the canonical
+syntax and is compiled into `qql-core`. QQL follows Qdrant retrieval concepts
+rather than relational `SELECT` semantics. Keywords are case-insensitive.
 
 ## Scripts
 
@@ -24,7 +27,7 @@ query        = [ "WITH", cte, { ",", cte } ],
 cte          = name, "AS", "(", cte-query, ")" ;
 cte-query    = "QUERY", query-expr, [ "FROM", collection ], query-tail ;
 
-query-tail   = [ "USING", vector-name ],
+query-tail   = [ "USING", vector-name, [ "AS", vector-kind ] ],
                [ "PREFETCH", "(", prefetch, { ",", prefetch }, ")" ],
                [ "WHERE", filter ],
                [ "SHARD", string ],
@@ -37,11 +40,19 @@ query-tail   = [ "USING", vector-name ],
                [ "WITH", "VECTOR", vector-selector ],
                [ "LIMIT", positive-integer ],
                [ "OFFSET", non-negative-integer ] ;
+vector-kind  = "DENSE" | "SPARSE" ;
 ```
 
 Top-level queries require `FROM`. A CTE may omit it and inherit the outer collection. Clauses occur at most once and only in the order above.
 
 `SHARD '<key>'` routes the query to a specific shard group. It is optional and only needed when using custom sharding in a multi-tenant collection.
+
+Vector names are application-defined; `dense` and `sparse` are defaults, not
+reserved names. `AS DENSE` or `AS SPARSE` declares the role of an arbitrary
+named vector, for example `USING lexical_v2 AS SPARSE`. Without `AS`, the
+executor resolves the named vector's role from the collection schema. When
+`USING` is omitted, execution succeeds only if the schema has exactly one
+compatible vector; ambiguous schemas require an explicit target.
 
 ### Query Expressions
 
@@ -226,11 +237,15 @@ upsert       = "UPSERT", "INTO", collection, "VALUES",
                [ embedding-options ],
                [ "SHARD", string ] ;
 embedding-options = ( dense-embed | sparse-embed | hybrid-embed ) ;
-dense-embed  = "USING", "DENSE", ( "MODEL", string | "VECTOR", string ) ;
-sparse-embed = "USING", "SPARSE", ( "MODEL", string | "VECTOR", string ) ;
+dense-embed  = "USING",
+               ( "DENSE", [ "MODEL", string ], [ "VECTOR", vector-name ]
+               | "MODEL", string, [ "VECTOR", vector-name ]
+               | "VECTOR", vector-name ) ;
+sparse-embed = "USING", "SPARSE",
+               [ "MODEL", string ], [ "VECTOR", vector-name ] ;
 hybrid-embed = "USING", "HYBRID",
-               [ "DENSE", ( "MODEL", string | "VECTOR", string ) ],
-               [ "SPARSE", ( "MODEL", string | "VECTOR", string ) ] ;
+               [ "DENSE", [ "MODEL", string ], [ "VECTOR", vector-name ] ],
+               [ "SPARSE", [ "MODEL", string ], [ "VECTOR", vector-name ] ] ;
 scroll       = "SCROLL", "FROM", collection,
                [ "WHERE", filter ], [ "AFTER", point-id ],
                [ "SHARD", string ],
@@ -270,10 +285,15 @@ upsert       = "UPSERT", "INTO", collection, "VALUES",
                [ embed-directive, { ",", embed-directive } ],
                [ "SHARD", string ] ;
 embed-directive = "EMBED", field, "INTO", vector-name,
-                  "USING", ( "DENSE" | "SPARSE" ), [ "MODEL", string ] ;
+                  [ "USING",
+                    ( ( "DENSE" | "SPARSE" ), [ "MODEL", string ]
+                    | "MODEL", string ) ] ;
 ```
 
-The `EMBED` directive maps a specific payload field to a named vector. Multiple directives within one `EMBED` clause are comma-separated:
+The `EMBED` directive maps a specific payload field to a named vector. Its
+default role is dense; `USING SPARSE` selects sparse embedding, while
+`USING MODEL '<name>'` is shorthand for a dense model. Multiple directives
+within one `EMBED` clause are comma-separated:
 ```sql
 UPSERT INTO docs VALUES {id: 1, title: 'doc title', body: 'doc body'}
   EMBED title INTO title_vec USING MODEL 'small',
@@ -287,11 +307,13 @@ Collection creation/alteration/drop/show and payload index management:
 ```ebnf
 create-collection = "CREATE", "COLLECTION", name,
                     [ "USING", [ "DENSE" ], "MODEL", string
-                    | "HYBRID", [ "RERANK" ],
-                        [ "DENSE", name, "VECTOR", vector-name ],
-                        [ "SPARSE", name, "VECTOR", vector-name ] ],
-                    [ "(", vector-def, { ",", vector-def }, ")" ],
-                    [ "(", sparse-def, { ",", sparse-def }, ")" ],
+                    | "USING", "HYBRID"
+                    | "HYBRID",
+                        [ "RERANK"
+                        | [ "DENSE", "VECTOR", vector-name ],
+                          [ "SPARSE", "VECTOR", vector-name ] ] ],
+                    [ "(", collection-vector-def,
+                        { ",", collection-vector-def }, ")" ],
                     [ config-blocks ] ;
 
 alter-collection = "ALTER", "COLLECTION", name, config-blocks ;
@@ -320,13 +342,14 @@ show            = "SHOW", "COLLECTIONS"
 vector-def    = name, "VECTOR", "(", size, ",", distance, ")"
                 [ "WITH", "MULTIVECTOR", "(", config-block, ")" ] ;
 sparse-def    = name, "SPARSE" ;
-config-blocks = "WITH", ( "HNSW" | "PARAMS" | "OPTIMIZERS" | "QUANTIZE"
+collection-vector-def = vector-def | sparse-def ;
+config-blocks = "WITH", ( "HNSW" | "PARAMS" | "OPTIMIZERS" | "QUANTIZATION"
                          | "VECTOR" ), config-block ;
 ```
 
-`USING [DENSE] MODEL '<model>'` creates a collection with a single dense vector whose dimension is inferred from the embedding model. `USING SPARSE VECTOR '<name>'` is available for sparse-only ingestion. `HYBRID` enables dense + sparse hybrid search; add `RERANK` for a second dense vector used by the `QUERY RERANK` expression. The `VECTOR` keyword separating the vector-config name from the vector-name value is required. All three syntax forms begin with `CREATE COLLECTION <name>` followed by at most one mode keyword group; `DENSE MODEL` without a preceding `USING` is rejected.
+`USING [DENSE] MODEL '<model>'` creates a collection with a single dense vector whose dimension is inferred from the embedding model. `USING HYBRID` creates the default dense+sparse topology. `HYBRID DENSE VECTOR semantic_v2 SPARSE VECTOR lexical_v2` assigns arbitrary names to those roles; add `RERANK` for the default rerank topology. All forms begin with `CREATE COLLECTION <name>` followed by at most one mode keyword group; `DENSE MODEL` without a preceding `USING` is rejected.
 
-When an UPSERT contains text but no embedding clause, the executor inspects the existing collection schema and emits only the compatible vector type. A dense-only collection receives dense vectors, a sparse-only collection receives sparse vectors, and a dense+sparse collection receives both. Ambiguous multi-vector schemas require an explicit `USING` or `EMBED` directive.
+When an UPSERT contains text but no embedding clause, the executor inspects the existing collection schema and emits the compatible vector types. `USING DENSE`, `USING SPARSE`, and `USING HYBRID` can also omit target names and rely on schema inference. A role is inferred only when exactly one matching target exists; ambiguous schemas require `VECTOR <name>` or an explicit `EMBED` directive. The executor never infers a role merely from a vector being named `dense` or `sparse`.
 
 ### Collection Params
 

@@ -1,0 +1,121 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "sec10k"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "supply chain risks"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "Compare": {
+            "field": "tenant_id",
+            "op": "Eq",
+            "value": {
+              "Str": "honeywell"
+            }
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": "honeywell"
+      }
+    },
+    {
+      "Count": {
+        "collection": "sec10k",
+        "filter": {
+          "Compare": {
+            "field": "tenant_id",
+            "op": "Eq",
+            "value": {
+              "Str": "honeywell"
+            }
+          }
+        },
+        "shard_key": "honeywell"
+      }
+    },
+    {
+      "Scroll": {
+        "after": null,
+        "collection": "sec10k",
+        "filter": {
+          "Compare": {
+            "field": "tenant_id",
+            "op": "Eq",
+            "value": {
+              "Str": "ge"
+            }
+          }
+        },
+        "limit": 50,
+        "shard_key": "ge",
+        "with_vector": null
+      }
+    },
+    {
+      "Delete": {
+        "collection": "sec10k",
+        "selector": {
+          "Filter": {
+            "Compare": {
+              "field": "tenant_id",
+              "op": "Eq",
+              "value": {
+                "Str": "3m"
+              }
+            }
+          }
+        },
+        "shard_key": "3m"
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "sec10k",
+        "embed": [],
+        "embedding": null,
+        "points": [
+          {
+            "id": {
+              "Number": 1
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "test"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": "acme"
+      }
+    }
+  ]
+}

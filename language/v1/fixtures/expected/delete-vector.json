@@ -1,0 +1,57 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "DeleteVector": {
+        "collection": "docs",
+        "selector": {
+          "Id": {
+            "Number": 42
+          }
+        },
+        "vector_names": [
+          "colbert"
+        ]
+      }
+    },
+    {
+      "DeleteVector": {
+        "collection": "docs",
+        "selector": {
+          "Filter": {
+            "Compare": {
+              "field": "status",
+              "op": "Eq",
+              "value": {
+                "Str": "deprecated"
+              }
+            }
+          }
+        },
+        "vector_names": [
+          "dense",
+          "sparse"
+        ]
+      }
+    },
+    {
+      "DeleteVector": {
+        "collection": "docs",
+        "selector": {
+          "Filter": {
+            "Compare": {
+              "field": "status",
+              "op": "Eq",
+              "value": {
+                "Str": "archived"
+              }
+            }
+          }
+        },
+        "vector_names": [
+          "colbert"
+        ]
+      }
+    }
+  ]
+}

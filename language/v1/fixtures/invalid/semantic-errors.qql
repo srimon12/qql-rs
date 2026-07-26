@@ -1,0 +1,33 @@
+-- semantic-errors.qql — structurally recognizable but invalid programs
+
+-- @case duplicate-cte-name
+-- @error QQL-PARSE-DUPLICATE-CTE
+WITH
+  a AS (QUERY TEXT 'x' USING semantic_v2 AS DENSE LIMIT 10),
+  a AS (QUERY TEXT 'y' USING lexical_v2 AS SPARSE LIMIT 10)
+QUERY FUSION RRF FROM docs PREFETCH (a) LIMIT 10;
+
+-- @case undefined-cte
+-- @error QQL-VALIDATION-PREFETCH-CTE
+QUERY FUSION RRF FROM docs PREFETCH (undefined_cte) LIMIT 10;
+
+-- @case duplicate-object-key
+-- @error QQL-PARSE-DUPLICATE-KEY
+UPSERT INTO docs VALUES {id: 1, id: 2};
+
+-- @case fusion-without-prefetch
+-- @error QQL-VALIDATION-FUSION-PREFETCH
+QUERY FUSION RRF FROM docs LIMIT 10;
+
+-- @case rerank-without-prefetch
+-- @error QQL-VALIDATION-RERANK-PREFETCH
+QUERY RERANK TEXT 'test' MODEL 'reranker' FROM docs
+USING colbert AS DENSE LIMIT 10;
+
+-- @case points-with-limit
+-- @error QQL-VALIDATION-POINTS-CLAUSE
+QUERY POINTS (1, 2) FROM docs LIMIT 10;
+
+-- @case upsert-without-id
+-- @error QQL-VALIDATION-UPSERT-ID
+UPSERT INTO docs VALUES {text: 'hello'};

@@ -1,0 +1,178 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Points": {
+            "ids": [
+              {
+                "Number": 1
+              }
+            ]
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": null,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Points": {
+            "ids": [
+              {
+                "Number": 1
+              },
+              {
+                "Number": 2
+              },
+              {
+                "Number": 3
+              }
+            ]
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": null,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Points": {
+            "ids": [
+              {
+                "String": "a1b2c3"
+              },
+              {
+                "String": "d4e5f6"
+              }
+            ]
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": null,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Points": {
+            "ids": [
+              {
+                "Number": 1
+              },
+              {
+                "String": "uuid-here"
+              },
+              {
+                "Number": 100
+              }
+            ]
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": null,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Points": {
+            "ids": [
+              {
+                "Number": 1
+              },
+              {
+                "Number": 2
+              }
+            ]
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": {
+            "Include": [
+              "title",
+              "url"
+            ]
+          },
+          "vectors": "None"
+        },
+        "page": {
+          "limit": null,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    }
+  ]
+}

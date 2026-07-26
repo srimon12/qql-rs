@@ -12,7 +12,7 @@ use super::{
     ascii_equal, ascii_equal_lower, config_bool, config_float_range, config_has_key,
     config_max_optimization_threads, config_non_negative_u64, config_positive_u64, config_value,
     merge_collection_config, validate_hnsw_value, validate_optimizers_value, validate_params_value,
-    validate_vectors_value, Parser,
+    validate_vectors_value, AstLowerer,
 };
 
 fn validation_err(
@@ -26,7 +26,7 @@ fn validation_err(
     )
 }
 
-impl<'a> Parser<'a> {
+impl<'a> AstLowerer<'a> {
     // ── Config blocks ───────────────────────────────────────────
 
     pub fn parse_collection_config_blocks(
@@ -67,16 +67,13 @@ impl<'a> Parser<'a> {
                 self.advance()?;
                 self.parse_collection_params_config_block(for_alter)
             }
-            _ if tok.kind == TokenKind::Quantize
-                || (tok.kind == TokenKind::Identifier
-                    && ascii_equal(tok.text, "QUANTIZATION")) =>
-            {
+            _ if tok.kind == TokenKind::Identifier && ascii_equal(tok.text, "QUANTIZATION") => {
                 self.advance()?;
                 self.parse_quantization_config_block()
             }
             _ => Err(validation_err(
                 alloc::format!(
-                    "expected HNSW, VECTORS, OPTIMIZERS, PARAMS, or QUANTIZATION after WITH, got '{}'",
+                    "expected HNSW, VECTOR, OPTIMIZERS, PARAMS, or QUANTIZATION after WITH, got '{}'",
                     tok.text
                 ),
                 tok.pos,
@@ -146,7 +143,7 @@ impl<'a> Parser<'a> {
         for (key, value) in &config {
             if !ascii_equal_lower(key, "on_disk") {
                 return Err(QqlError::syntax(
-                    alloc::format!("unknown VECTORS parameter '{}'. Expected: on_disk", key),
+                    alloc::format!("unknown VECTOR parameter '{}'. Expected: on_disk", key),
                     self.peek()?.pos,
                 ));
             }

@@ -1,12 +1,12 @@
 use super::helpers::point_id_from_value;
-use super::{ascii_equal, Parser};
+use super::{ascii_equal, AstLowerer};
 use crate::ast::{EmbedDirective, EmbedKind, PointVectors, Stmt, UpsertPoint, UpsertStmt, Value};
 use crate::error::QqlError;
 use crate::token::TokenKind;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-impl<'a> Parser<'a> {
+impl<'a> AstLowerer<'a> {
     pub fn parse_upsert(&mut self) -> Result<Stmt, QqlError> {
         let span = self.expect(TokenKind::Upsert)?.span;
         self.expect(TokenKind::Into)?;
@@ -88,10 +88,21 @@ impl<'a> Parser<'a> {
                     EmbedKind::Sparse {
                         model: self.parse_optional_model_string()?,
                     }
-                } else {
+                } else if self.peek()?.kind == TokenKind::Dense {
+                    self.advance()?;
+                    EmbedKind::Dense {
+                        model: self.parse_optional_model_string()?,
+                    }
+                } else if self.peek()?.kind == TokenKind::Model {
                     EmbedKind::Dense {
                         model: Some(self.parse_required_model_string()?),
                     }
+                } else {
+                    return Err(QqlError::parse(
+                        "QQL-PARSE-EMBED",
+                        "EMBED USING requires DENSE, SPARSE, or MODEL",
+                        self.peek()?.span,
+                    ));
                 }
             } else {
                 EmbedKind::Dense { model: None }

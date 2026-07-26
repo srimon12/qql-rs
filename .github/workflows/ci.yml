@@ -31,6 +31,19 @@ jobs:
       - name: Test (core crates)
         run: cargo test --all-features -p qql-core -p qql-plan -p qql-embed -p qql -p qql-cli
 
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Check generated grammar
+        run: cargo run -p qql-grammar-gen -- check
+
+      - name: Check QQL language conformance
+        run: cargo run -p qql-conformance -- check language/v1
+
   # ── Platform binding build checks ─────────────────────────────
   # Build and import the language artifacts so generated bindings and
   # wrapper code cannot drift independently from the Rust crates.

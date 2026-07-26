@@ -352,7 +352,7 @@ fn normalize_sparse_datatype(s: &str) -> Option<&'static str> {
 
 fn format_vector_part(v: &VectorSpec) -> String {
     let mut part = match &v.name {
-        None => format!("VECTOR({}, {})", v.size, distance_token(&v.distance)),
+        None => format!("dense VECTOR({}, {})", v.size, distance_token(&v.distance)),
         Some(name) => format!(
             "{} VECTOR({}, {})",
             format_ident(name),
@@ -382,7 +382,7 @@ fn format_vector_part(v: &VectorSpec) -> String {
     }
 
     if let Some(on_disk) = v.on_disk {
-        part.push_str(&format!(" WITH VECTORS (on_disk = {})", on_disk));
+        part.push_str(&format!(" WITH VECTOR (on_disk = {})", on_disk));
     }
 
     part
@@ -836,7 +836,7 @@ mod tests {
             vec![],
         );
         let stmt = generate_create_statement("docs", &info);
-        assert_eq!(stmt, "CREATE COLLECTION docs (VECTOR(4, COSINE))");
+        assert_eq!(stmt, "CREATE COLLECTION docs (dense VECTOR(4, COSINE))");
         qql_core::parser::Parser::parse(&format!("{};", stmt))
             .expect("unnamed vector CREATE should parse");
     }
@@ -1041,7 +1041,7 @@ mod tests {
 
     #[test]
     fn dumped_script_splits_cleanly() {
-        let create = "CREATE COLLECTION docs (VECTOR(4, COSINE));";
+        let create = "CREATE COLLECTION docs (dense VECTOR(4, COSINE));";
         let index = "CREATE INDEX ON COLLECTION docs FOR title TYPE text;";
         let upsert =
             "UPSERT INTO docs VALUES\n  {id: 1, vector: [0.1, 0.2, 0.3, 0.4], title: 'x'};";
@@ -1108,8 +1108,8 @@ mod tests {
         assert!(stmt.contains("ef_construct = 100"));
         assert!(stmt.contains("WITH QUANTIZATION ("));
         assert!(stmt.contains("type = 'scalar'"));
-        // Vector storage on_disk must be VECTORS, not folded into HNSW.
-        assert!(stmt.contains("WITH VECTORS (on_disk = true)"));
+        // Vector storage on_disk must use VECTOR, not be folded into HNSW.
+        assert!(stmt.contains("WITH VECTOR (on_disk = true)"));
         let hnsw_idx = stmt.find("WITH HNSW (").unwrap();
         let hnsw_end = stmt[hnsw_idx..].find(')').unwrap() + hnsw_idx;
         assert!(
@@ -1283,7 +1283,7 @@ mod tests {
 
         let stmt = generate_create_statement("docs", &info);
         assert!(stmt.contains("WITH MULTIVECTOR (comparator = 'max_sim')"));
-        assert!(stmt.contains("WITH VECTORS (on_disk = true)"));
+        assert!(stmt.contains("WITH VECTOR (on_disk = true)"));
         assert!(stmt.contains("query_encoding = 'scalar8bits'"));
         assert!(stmt.contains("WITH HNSW (m = 16)"));
         assert!(stmt.contains("WITH OPTIMIZERS ("));
@@ -1299,7 +1299,7 @@ mod tests {
 
     #[test]
     fn vector_on_disk_parses_into_vectors_config_not_hnsw() {
-        let stmt = "CREATE COLLECTION docs (v VECTOR(8, COSINE) WITH HNSW (m = 8, on_disk = false) WITH VECTORS (on_disk = true));";
+        let stmt = "CREATE COLLECTION docs (v VECTOR(8, COSINE) WITH HNSW (m = 8, on_disk = false) WITH VECTOR (on_disk = true));";
         let parsed = qql_core::parser::Parser::parse(stmt).expect("should parse");
         let qql_core::ast::Stmt::CreateCollection(c) = parsed else {
             panic!("expected CreateCollection");

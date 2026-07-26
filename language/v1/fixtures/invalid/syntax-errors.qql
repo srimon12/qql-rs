@@ -1,0 +1,70 @@
+-- syntax-errors.qql — malformed or legacy QQL programs
+
+-- @case top-level-query-missing-from
+-- @error QQL-VALIDATION-FROM
+QUERY 'search' LIMIT 10;
+
+-- @case bare-query-number
+-- @error QQL-PARSE-QUERY-INPUT
+QUERY 42 FROM docs LIMIT 10;
+
+-- @case clause-out-of-order
+-- @error QQL-PARSE-CLAUSE-ORDER
+QUERY 'search' FROM docs WHERE status = 'active' PREFETCH (c) LIMIT 10;
+
+-- @case invalid-vector-kind
+-- @error QQL-PARSE-VECTOR-KIND
+QUERY 'search' FROM docs USING lexical_v2 AS HYBRID LIMIT 10;
+
+-- @case empty-statement
+-- @error QQL-PARSE-EMPTY-STATEMENT
+;
+
+-- @case unmatched-parenthesis
+-- @error QQL-PARSE-EXPECTED
+QUERY 'search' FROM docs WHERE (status = 'active' LIMIT 10;
+
+-- @case unterminated-string
+-- @error QQL-LEX-STRING
+QUERY 'unterminated FROM docs LIMIT 10;
+
+-- @case legacy-select
+-- @error QQL-PARSE-STATEMENT
+SELECT * FROM docs WHERE id = 42;
+
+-- @case legacy-insert
+-- @error QQL-PARSE-STATEMENT
+INSERT INTO docs VALUES {id: 1};
+
+-- @case legacy-boost
+BOOST ($score * 2);
+
+-- @case legacy-collection-vectors-prefix
+CREATE COLLECTION docs VECTORS (dense VECTOR (4, COSINE));
+
+-- @case legacy-implicit-vector-name
+CREATE COLLECTION docs (VECTOR (4, COSINE));
+
+-- @case legacy-omitted-vector-keyword
+CREATE COLLECTION docs (dense (4, COSINE));
+
+-- @case legacy-vector-config-plural
+CREATE COLLECTION docs (
+  dense VECTOR (4, COSINE) WITH VECTORS (on_disk = true)
+);
+
+-- @case legacy-quantize
+ALTER COLLECTION docs WITH QUANTIZE (type = 'scalar');
+
+-- @case legacy-shard-without-key
+CREATE SHARD 'tenant' ON COLLECTION docs;
+
+-- @case legacy-short-rrf-k
+QUERY TEXT 'x' FROM docs PARAMS (k = 30);
+
+-- @case legacy-short-rrf-weights
+QUERY TEXT 'x' FROM docs PARAMS (weights = [1.0]);
+
+-- @case legacy-quoted-index-type
+-- @error QQL-PARSE-INDEX-TYPE
+CREATE INDEX ON COLLECTION docs FOR title TYPE 'text';

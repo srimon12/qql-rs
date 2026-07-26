@@ -1,8 +1,9 @@
-use super::{ascii_equal, Parser};
+use super::{ascii_equal, AstLowerer};
 use crate::ast::{
     ContextPair, Cte, FeedbackItem, FeedbackStrategy, FilterExpr, FusionMethod, GroupSpec,
     LookupSpec, MmrConfig, OrderDirection, PageSpec, Prefetch, PrefetchSource, QueryCollection,
-    QueryExpr, QueryInput, QueryOutput, QueryStmt, RecommendStrategy, Stmt,
+    QueryExpr, QueryInput, QueryOutput, QueryStmt, RecommendStrategy, Stmt, VectorKind,
+    VectorTarget,
 };
 use crate::error::{QqlError, Span};
 use crate::token::TokenKind;
@@ -10,7 +11,7 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-impl<'a> Parser<'a> {
+impl<'a> AstLowerer<'a> {
     pub fn parse_query(&mut self) -> Result<Stmt, QqlError> {
         self.expect(TokenKind::Query)?;
         self.parse_query_stmt(true, Vec::new())
@@ -46,7 +47,30 @@ impl<'a> Parser<'a> {
 
         let using = if self.peek()?.kind == TokenKind::Using {
             self.advance()?;
-            Some(self.parse_identifier()?)
+            let name = self.parse_identifier()?;
+            let kind = if self.peek()?.kind == TokenKind::As {
+                self.advance()?;
+                Some(match self.peek()?.kind {
+                    TokenKind::Dense => {
+                        self.advance()?;
+                        VectorKind::Dense
+                    }
+                    TokenKind::Sparse => {
+                        self.advance()?;
+                        VectorKind::Sparse
+                    }
+                    _ => {
+                        return Err(QqlError::parse(
+                            "QQL-PARSE-VECTOR-KIND",
+                            "USING <vector> AS requires DENSE or SPARSE",
+                            self.peek()?.span,
+                        ));
+                    }
+                })
+            } else {
+                None
+            };
+            Some(VectorTarget { name, kind })
         } else {
             None
         };
@@ -548,7 +572,7 @@ impl<'a> Parser<'a> {
         Ok(QueryExpr::Rerank {
             input,
             model,
-            using: String::new(),
+            using: None,
             prefetch: Vec::new(),
         })
     }
@@ -667,7 +691,7 @@ impl<'a> Parser<'a> {
 
 fn attach_pipeline(
     expression: &mut QueryExpr,
-    using: Option<String>,
+    using: Option<VectorTarget>,
     prefetch: Vec<Prefetch>,
     span: Span,
 ) -> Result<(), QqlError> {
@@ -738,7 +762,7 @@ fn attach_pipeline(
                     Some(span),
                 ));
             }
-            *target = using;
+            *target = Some(using);
             *nested = prefetch;
         }
         QueryExpr::Points { .. }
@@ -758,7 +782,7 @@ fn attach_pipeline(
     Ok(())
 }
 
-fn reject_using(using: Option<String>, span: Span) -> Result<(), QqlError> {
+fn reject_using(using: Option<VectorTarget>, span: Span) -> Result<(), QqlError> {
     if using.is_some() {
         Err(QqlError::validation(
             "QQL-VALIDATION-USING",

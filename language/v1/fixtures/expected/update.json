@@ -1,0 +1,142 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "UpdatePayload": {
+        "collection": "docs",
+        "payload": [
+          [
+            "status",
+            {
+              "Str": "reviewed"
+            }
+          ]
+        ],
+        "selector": {
+          "Id": {
+            "Number": 42
+          }
+        }
+      }
+    },
+    {
+      "UpdatePayload": {
+        "collection": "docs",
+        "payload": [
+          [
+            "status",
+            {
+              "Str": "reviewed"
+            }
+          ]
+        ],
+        "selector": {
+          "Filter": {
+            "Compare": {
+              "field": "status",
+              "op": "Eq",
+              "value": {
+                "Str": "pending"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "UpdatePayload": {
+        "collection": "docs",
+        "payload": [
+          [
+            "status",
+            {
+              "Str": "reviewed"
+            }
+          ],
+          [
+            "reviewer",
+            {
+              "Str": "admin"
+            }
+          ]
+        ],
+        "selector": {
+          "Id": {
+            "Number": 42
+          }
+        }
+      }
+    },
+    {
+      "UpdateVector": {
+        "collection": "docs",
+        "point_id": {
+          "Number": 42
+        },
+        "vector": {
+          "Dense": [
+            0.1,
+            0.2,
+            0.3
+          ]
+        },
+        "vector_name": null
+      }
+    },
+    {
+      "UpdateVector": {
+        "collection": "docs",
+        "point_id": {
+          "Number": 42
+        },
+        "vector": {
+          "Dense": [
+            0.1,
+            0.2,
+            0.3
+          ]
+        },
+        "vector_name": "dense"
+      }
+    },
+    {
+      "UpdateVector": {
+        "collection": "docs",
+        "point_id": {
+          "Number": 42
+        },
+        "vector": {
+          "Sparse": {
+            "indices": [
+              0,
+              3
+            ],
+            "values": [
+              0.5,
+              0.8
+            ]
+          }
+        },
+        "vector_name": "sparse"
+      }
+    },
+    {
+      "UpdatePayload": {
+        "collection": "docs",
+        "payload": [
+          [
+            "status",
+            {
+              "Str": "updated"
+            }
+          ]
+        ],
+        "selector": {
+          "Id": {
+            "String": "a1b2c3d4"
+          }
+        }
+      }
+    }
+  ]
+}

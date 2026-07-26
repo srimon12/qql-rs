@@ -15,6 +15,31 @@ fn create_collection_with_sparse() {
 }
 
 #[test]
+fn create_collection_explicit_dense_model() {
+    let s = Parser::parse("CREATE COLLECTION docs USING DENSE MODEL 'all-minilm:l6-v2';").unwrap();
+    assert!(matches!(s, Stmt::CreateCollection(_)));
+}
+
+#[test]
+fn create_hybrid_with_arbitrary_vector_names() {
+    let stmt = Parser::parse(
+        "CREATE COLLECTION docs HYBRID \
+         DENSE VECTOR semantic_v2 SPARSE VECTOR lexical_v2;",
+    )
+    .unwrap();
+    let Stmt::CreateCollection(create) = stmt else {
+        panic!("expected CREATE COLLECTION");
+    };
+    assert!(matches!(
+        create.mode,
+        crate::ast::CollectionMode::Hybrid {
+            dense_vector: Some(ref dense),
+            sparse_vector: Some(ref sparse),
+        } if dense == "semantic_v2" && sparse == "lexical_v2"
+    ));
+}
+
+#[test]
 fn create_collection_with_hnsw() {
     let s = Parser::parse(
         "CREATE COLLECTION docs (d VECTOR(128, EUCLID)) WITH HNSW (m = 16, ef_construct = 100);",
@@ -49,6 +74,16 @@ fn create_index() {
     let s = Parser::parse(
         "CREATE INDEX ON COLLECTION docs FOR title TYPE text WITH (lowercase = true, tokenizer = 'word');",
     ).unwrap();
+    assert!(matches!(s, Stmt::CreateIndex(_)));
+}
+
+#[test]
+fn create_index_numeric_options() {
+    let s = Parser::parse(
+        "CREATE INDEX ON COLLECTION docs FOR year TYPE integer \
+         WITH (lookup = true, range = true, is_principal = true);",
+    )
+    .unwrap();
     assert!(matches!(s, Stmt::CreateIndex(_)));
 }
 
@@ -98,10 +133,31 @@ fn upsert_with_embedding() {
 }
 
 #[test]
+fn upsert_embedding_targets_may_be_inferred() {
+    for source in [
+        "UPSERT INTO docs VALUES {id: 1, text: 'hello'} USING DENSE;",
+        "UPSERT INTO docs VALUES {id: 1, text: 'hello'} USING SPARSE;",
+        "UPSERT INTO docs VALUES {id: 1, text: 'hello'} USING HYBRID;",
+    ] {
+        assert!(matches!(Parser::parse(source), Ok(Stmt::Upsert(_))));
+    }
+}
+
+#[test]
 fn upsert_with_embed_directive() {
     let s = Parser::parse(
         "UPSERT INTO docs VALUES {id: 1, title: 'doc'} EMBED title INTO dense_vec USING MODEL 'embed';",
     ).unwrap();
+    assert!(matches!(s, Stmt::Upsert(_)));
+}
+
+#[test]
+fn embed_directive_accepts_explicit_dense_role_without_model() {
+    let s = Parser::parse(
+        "UPSERT INTO docs VALUES {id: 1, title: 'doc'} \
+         EMBED title INTO semantic_v2 USING DENSE;",
+    )
+    .unwrap();
     assert!(matches!(s, Stmt::Upsert(_)));
 }
 
@@ -169,9 +225,10 @@ fn query_bare_with_vector_defaults_to_all() {
 }
 
 #[test]
-fn create_index_accepts_quoted_type() {
-    let s = Parser::parse("CREATE INDEX ON COLLECTION docs FOR title TYPE 'text';").unwrap();
-    assert!(matches!(s, Stmt::CreateIndex(_)));
+fn create_index_rejects_legacy_quoted_type() {
+    let error =
+        Parser::parse("CREATE INDEX ON COLLECTION docs FOR title TYPE 'text';").unwrap_err();
+    assert_eq!(error.code, "QQL-PARSE-INDEX-TYPE");
 }
 
 #[test]

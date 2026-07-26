@@ -1,12 +1,12 @@
 use super::helpers::point_id_from_value;
-use super::{ascii_equal, Parser};
+use super::{ascii_equal, AstLowerer};
 use crate::ast::{ComparisonOp, FilterExpr, GeoPoint, PointIdPredicate, Value};
 use crate::error::{QqlError, Span};
 use crate::token::TokenKind;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-impl<'a> Parser<'a> {
+impl<'a> AstLowerer<'a> {
     pub fn parse_filter_expr(&mut self) -> Result<FilterExpr, QqlError> {
         let first = self.parse_filter_and()?;
         if self.peek()?.kind != TokenKind::Or {

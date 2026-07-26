@@ -1,0 +1,37 @@
+-- type-errors.qql — invalid values and incompatible typed forms
+
+-- @case mmr-diversity-above-one
+-- @error QQL-VALIDATION-MMR
+QUERY MMR TEXT 'test' DIVERSITY 1.5 CANDIDATES 100
+FROM docs USING semantic_v2 AS DENSE LIMIT 10;
+
+-- @case mmr-diversity-below-zero
+-- @error QQL-VALIDATION-MMR
+QUERY MMR TEXT 'test' DIVERSITY -0.1 CANDIDATES 100
+FROM docs USING semantic_v2 AS DENSE LIMIT 10;
+
+-- @case mmr-candidates-zero
+-- @error QQL-PARSE-POSITIVE-INTEGER
+QUERY MMR TEXT 'test' DIVERSITY 0.5 CANDIDATES 0
+FROM docs USING semantic_v2 AS DENSE LIMIT 10;
+
+-- @case limit-zero
+-- @error QQL-PARSE-POSITIVE-INTEGER
+QUERY 'test' FROM docs LIMIT 0;
+
+-- @case offset-negative
+-- @error QQL-PARSE-NONNEGATIVE-INTEGER
+QUERY 'test' FROM docs LIMIT 10 OFFSET -1;
+
+-- @case vector-size-zero
+-- @error QQL-PARSE-SYNTAX
+CREATE COLLECTION test (semantic_v2 VECTOR(0, COSINE));
+
+-- @case dense-input-declared-sparse
+-- @error QQL-PLAN-VECTOR-KIND
+QUERY VECTOR [0.1, 0.2] FROM docs USING lexical_v2 AS SPARSE LIMIT 10;
+
+-- @case sparse-input-declared-dense
+-- @error QQL-PLAN-VECTOR-KIND
+QUERY VECTOR {indices: [1, 4], values: [0.5, 0.8]}
+FROM docs USING semantic_v2 AS DENSE LIMIT 10;

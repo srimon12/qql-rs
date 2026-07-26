@@ -7,7 +7,7 @@ use crate::ast::{FormulaExpr, Value};
 use crate::error::QqlError;
 use crate::token::TokenKind;
 
-use super::{ascii_equal, Parser};
+use super::{ascii_equal, AstLowerer};
 
 // ── Precedence constants ────────────────────────────────────────
 
@@ -37,8 +37,8 @@ fn is_formula_kwarg_key(kind: TokenKind) -> bool {
     )
 }
 
-type PrefixParseFn = fn(&mut Parser<'_>) -> Result<FormulaExpr, QqlError>;
-type InfixParseFn = fn(&mut Parser<'_>, FormulaExpr) -> Result<FormulaExpr, QqlError>;
+type PrefixParseFn = fn(&mut AstLowerer<'_>) -> Result<FormulaExpr, QqlError>;
+type InfixParseFn = fn(&mut AstLowerer<'_>, FormulaExpr) -> Result<FormulaExpr, QqlError>;
 
 fn formula_prefix_parse_fn(kind: TokenKind) -> Option<PrefixParseFn> {
     match kind {
@@ -65,7 +65,7 @@ fn formula_infix_parse_fn(kind: TokenKind) -> Option<InfixParseFn> {
     }
 }
 
-impl<'a> Parser<'a> {
+impl<'a> AstLowerer<'a> {
     pub fn parse_formula_expr(&mut self, precedence: u8) -> Result<FormulaExpr, QqlError> {
         let tok = self.peek()?;
         let prefix = formula_prefix_parse_fn(tok.kind).ok_or_else(|| {
@@ -95,7 +95,7 @@ impl<'a> Parser<'a> {
 
 // ── Prefix parse functions ──────────────────────────────────────
 
-fn parse_formula_identifier_or_func(p: &mut Parser<'_>) -> Result<FormulaExpr, QqlError> {
+fn parse_formula_identifier_or_func(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, QqlError> {
     let tok = p.advance()?;
     let val = tok.text.to_string();
     let lower = val.to_ascii_lowercase();
@@ -108,7 +108,7 @@ fn parse_formula_identifier_or_func(p: &mut Parser<'_>) -> Result<FormulaExpr, Q
     Ok(FormulaExpr::Variable { name: val })
 }
 
-fn parse_formula_constant(p: &mut Parser<'_>) -> Result<FormulaExpr, QqlError> {
+fn parse_formula_constant(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, QqlError> {
     let tok = p.advance()?;
     let v: f64 = tok
         .text
@@ -117,7 +117,7 @@ fn parse_formula_constant(p: &mut Parser<'_>) -> Result<FormulaExpr, QqlError> {
     Ok(FormulaExpr::Constant { value: v })
 }
 
-fn parse_formula_prefix_expression(p: &mut Parser<'_>) -> Result<FormulaExpr, QqlError> {
+fn parse_formula_prefix_expression(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, QqlError> {
     p.advance()?;
     let right = p.parse_formula_expr(PRECEDENCE_PREFIX)?;
     Ok(FormulaExpr::Neg {
@@ -128,7 +128,7 @@ fn parse_formula_prefix_expression(p: &mut Parser<'_>) -> Result<FormulaExpr, Qq
 // ── Infix parse functions ───────────────────────────────────────
 
 fn parse_formula_infix_expression(
-    p: &mut Parser<'_>,
+    p: &mut AstLowerer<'_>,
     left: FormulaExpr,
 ) -> Result<FormulaExpr, QqlError> {
     let tok = p.advance()?;
@@ -174,14 +174,14 @@ fn parse_formula_infix_expression(
     }
 }
 
-fn parse_formula_grouped_expression(p: &mut Parser<'_>) -> Result<FormulaExpr, QqlError> {
+fn parse_formula_grouped_expression(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, QqlError> {
     p.advance()?;
     let expr = p.parse_formula_expr(PRECEDENCE_LOWEST)?;
     p.expect(TokenKind::Rparen)?;
     Ok(expr)
 }
 
-fn parse_formula_case_expression(p: &mut Parser<'_>) -> Result<FormulaExpr, QqlError> {
+fn parse_formula_case_expression(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, QqlError> {
     p.advance()?;
     p.expect(TokenKind::When)?;
     let cond = p.parse_filter_expr()?;
@@ -200,7 +200,7 @@ fn parse_formula_case_expression(p: &mut Parser<'_>) -> Result<FormulaExpr, QqlE
 // ── Function call dispatcher ────────────────────────────────────
 
 fn parse_formula_function_call(
-    p: &mut Parser<'_>,
+    p: &mut AstLowerer<'_>,
     func_name: &str,
     pos: usize,
 ) -> Result<FormulaExpr, QqlError> {
@@ -474,7 +474,9 @@ type FormulaArgs = (Vec<FormulaExpr>, Vec<(String, FormulaExpr)>);
 
 // ── Argument parsing (standalone function) ──────────────────────
 
-fn parse_formula_call_arguments_and_kwargs(p: &mut Parser<'_>) -> Result<FormulaArgs, QqlError> {
+fn parse_formula_call_arguments_and_kwargs(
+    p: &mut AstLowerer<'_>,
+) -> Result<FormulaArgs, QqlError> {
     let mut args = Vec::new();
     let mut kwargs = Vec::new();
 

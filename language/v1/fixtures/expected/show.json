@@ -1,0 +1,12 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    "ShowCollections",
+    {
+      "ShowCollection": "docs"
+    },
+    {
+      "ShowCollection": "sec10k"
+    }
+  ]
+}

@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use qql_core::error::QqlError;
 use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 
+use crate::backend::{SparseVectorSpec, VectorSpec};
 use crate::client::{CollectionInfo, CreateCollectionReq, CreateFieldIndexReq, QdrantOps};
 use crate::config::QqlConfig;
 use crate::executor::{Executor, OnError};
@@ -52,10 +53,18 @@ impl QdrantOps for MockQdrantClient {
     async fn collection_exists(&self, name: &str) -> Result<bool, QqlError> {
         Ok(self.exists || self.created_collections.lock().unwrap().contains(name))
     }
-    async fn get_collection_info(&self, _name: &str) -> Result<CollectionInfo, QqlError> {
-        self.info
-            .clone()
-            .ok_or_else(|| QqlError::execution("QQL-EXECUTION", "no mock info set", None))
+    async fn get_collection_info(&self, name: &str) -> Result<CollectionInfo, QqlError> {
+        if let Some(info) = &self.info {
+            return Ok(info.clone());
+        }
+        if self.created_collections.lock().unwrap().contains(name) {
+            return Ok(collection_with_vectors(&["dense"], &["sparse"]));
+        }
+        Err(QqlError::execution(
+            "QQL-EXECUTION",
+            "no mock info set",
+            None,
+        ))
     }
     async fn create_collection(&self, req: CreateCollectionReq) -> Result<(), QqlError> {
         *self.create_collection_call_count.lock().unwrap() += 1;
@@ -144,6 +153,32 @@ fn test_local_config() -> QqlConfig {
         inference_mode: "local".to_string(),
         ..Default::default()
     }
+}
+
+fn collection_with_vectors(dense: &[&str], sparse: &[&str]) -> CollectionInfo {
+    let mut info = CollectionInfo::default();
+    info.schema.vectors = dense
+        .iter()
+        .map(|name| VectorSpec {
+            name: Some((*name).to_string()),
+            size: 3,
+            distance: "Cosine".to_string(),
+            hnsw: None,
+            quantization: None,
+            multivector: None,
+            on_disk: None,
+        })
+        .collect();
+    info.schema.dense_vectors = dense.iter().map(|name| (*name).to_string()).collect();
+    info.schema.sparse_vectors = sparse
+        .iter()
+        .map(|name| SparseVectorSpec {
+            name: (*name).to_string(),
+            index: None,
+            modifier: Some("idf".to_string()),
+        })
+        .collect();
+    info
 }
 
 #[test]
@@ -394,6 +429,143 @@ async fn test_do_query_hybrid() {
 }
 
 #[tokio::test]
+async fn text_query_resolves_arbitrary_sparse_vector_by_schema() {
+    let mut client = MockQdrantClient::default();
+    client.exists = true;
+    client.info = Some(collection_with_vectors(&["semantic_v2"], &["lexical_v2"]));
+    let last_planned = client.last_planned.clone();
+    let embedder = Arc::new(MockEmbedder {
+        dense: vec![0.1, 0.2, 0.3],
+        sparse_indices: vec![1, 7],
+        sparse_values: vec![0.4, 0.8],
+    });
+    let executor =
+        Executor::with_embedder(Box::new(client), Some(test_local_config()), Some(embedder));
+
+    executor
+        .execute(
+            "QUERY TEXT 'hello' FROM docs USING lexical_v2 LIMIT 10",
+            OnError::Stop,
+        )
+        .await
+        .unwrap();
+
+    let op = last_planned.lock().unwrap().take().unwrap();
+    let route = qql_plan::plan::to_rest_route(&op);
+    let body = route.body_json().unwrap();
+    assert_eq!(body["using"], "lexical_v2");
+    assert_eq!(
+        body["query"]["nearest"]["indices"],
+        serde_json::json!([1, 7])
+    );
+    let values = body["query"]["nearest"]["values"].as_array().unwrap();
+    assert!((values[0].as_f64().unwrap() - 0.4).abs() < 1e-6);
+    assert!((values[1].as_f64().unwrap() - 0.8).abs() < 1e-6);
+}
+
+#[tokio::test]
+async fn text_query_infers_only_arbitrary_dense_vector() {
+    let mut client = MockQdrantClient::default();
+    client.exists = true;
+    client.info = Some(collection_with_vectors(&["semantic_v2"], &[]));
+    let last_planned = client.last_planned.clone();
+    let embedder = Arc::new(MockEmbedder {
+        dense: vec![0.1, 0.2, 0.3],
+        sparse_indices: vec![],
+        sparse_values: vec![],
+    });
+    let executor =
+        Executor::with_embedder(Box::new(client), Some(test_local_config()), Some(embedder));
+
+    executor
+        .execute("QUERY TEXT 'hello' FROM docs LIMIT 10", OnError::Stop)
+        .await
+        .unwrap();
+
+    let op = last_planned.lock().unwrap().take().unwrap();
+    let route = qql_plan::plan::to_rest_route(&op);
+    assert_eq!(route.body_json().unwrap()["using"], "semantic_v2");
+}
+
+#[tokio::test]
+async fn text_query_rejects_ambiguous_vector_topology() {
+    let mut client = MockQdrantClient::default();
+    client.exists = true;
+    client.info = Some(collection_with_vectors(
+        &["semantic_v1", "semantic_v2"],
+        &[],
+    ));
+    let embedder = Arc::new(MockEmbedder {
+        dense: vec![0.1, 0.2, 0.3],
+        sparse_indices: vec![],
+        sparse_values: vec![],
+    });
+    let executor =
+        Executor::with_embedder(Box::new(client), Some(test_local_config()), Some(embedder));
+
+    let error = executor
+        .execute("QUERY TEXT 'hello' FROM docs LIMIT 10", OnError::Stop)
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "QQL-MISSING-USING");
+}
+
+#[tokio::test]
+async fn hybrid_upsert_infers_arbitrary_named_targets() {
+    let mut client = MockQdrantClient::default();
+    client.exists = true;
+    client.info = Some(collection_with_vectors(&["semantic_v2"], &["lexical_v2"]));
+    let last_planned = client.last_planned.clone();
+    let embedder = Arc::new(MockEmbedder {
+        dense: vec![0.1, 0.2, 0.3],
+        sparse_indices: vec![1],
+        sparse_values: vec![0.5],
+    });
+    let executor =
+        Executor::with_embedder(Box::new(client), Some(test_local_config()), Some(embedder));
+
+    executor
+        .execute(
+            "UPSERT INTO docs VALUES {id: 1, text: 'hello'} USING HYBRID",
+            OnError::Stop,
+        )
+        .await
+        .unwrap();
+
+    let op = last_planned.lock().unwrap().take().unwrap();
+    let route = qql_plan::plan::to_rest_route(&op);
+    let vector = &route.body_json().unwrap()["points"][0]["vector"];
+    assert!(vector.get("semantic_v2").is_some());
+    assert!(vector.get("lexical_v2").is_some());
+}
+
+#[tokio::test]
+async fn upsert_rejects_ambiguous_inferred_embedding_target() {
+    let mut client = MockQdrantClient::default();
+    client.exists = true;
+    client.info = Some(collection_with_vectors(
+        &["semantic_v1", "semantic_v2"],
+        &[],
+    ));
+    let embedder = Arc::new(MockEmbedder {
+        dense: vec![0.1, 0.2, 0.3],
+        sparse_indices: vec![],
+        sparse_values: vec![],
+    });
+    let executor =
+        Executor::with_embedder(Box::new(client), Some(test_local_config()), Some(embedder));
+
+    let error = executor
+        .execute(
+            "UPSERT INTO docs VALUES {id: 1, text: 'hello'} USING DENSE",
+            OnError::Stop,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "QQL-EMBEDDING-TOPOLOGY");
+}
+
+#[tokio::test]
 async fn test_do_select_returns_record_or_nil() {
     let mut client = MockQdrantClient::default();
     client.exists = true;
@@ -556,9 +728,9 @@ async fn test_batch_query_groups_same_collection() {
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let resp = qql_core::parser::Parser::parse_all(
-        "QUERY TEXT 'a' FROM docs USING dense LIMIT 1;\
-         QUERY TEXT 'b' FROM docs USING dense LIMIT 1;\
-         QUERY TEXT 'c' FROM docs USING dense LIMIT 1;",
+        "QUERY TEXT 'a' FROM docs USING dense AS DENSE LIMIT 1;\
+         QUERY TEXT 'b' FROM docs USING dense AS DENSE LIMIT 1;\
+         QUERY TEXT 'c' FROM docs USING dense AS DENSE LIMIT 1;",
     )
     .unwrap();
     let results = executor.execute_batch_nodes(resp, false).await.unwrap();
@@ -631,8 +803,8 @@ async fn test_batch_preserves_order_mixed_query_and_mutation() {
     let stmts = qql_core::parser::Parser::parse_all(
         "UPSERT INTO docs VALUES {id: 1};\
          DELETE FROM docs WHERE id = 2;\
-         QUERY TEXT 'a' FROM docs USING dense LIMIT 1;\
-         QUERY TEXT 'b' FROM docs USING dense LIMIT 1;",
+         QUERY TEXT 'a' FROM docs USING dense AS DENSE LIMIT 1;\
+         QUERY TEXT 'b' FROM docs USING dense AS DENSE LIMIT 1;",
     )
     .unwrap();
     let results = executor.execute_batch_nodes(stmts, false).await.unwrap();
@@ -717,12 +889,12 @@ async fn test_batch_upserts_keep_single_statement_auto_create_semantics() {
     let creates = client.create_collection_call_count.clone();
     let update_batches = client.update_batch_call_count.clone();
     let embedder = Arc::new(MockEmbedder {
-        dense: vec![0.1, 0.2],
+        dense: vec![0.1, 0.2, 0.3],
         sparse_indices: Vec::new(),
         sparse_values: Vec::new(),
     });
     let mut config = test_config();
-    config.embedding_dimension = 2;
+    config.embedding_dimension = 3;
     let executor = Executor::with_embedder(Box::new(client), Some(config), Some(embedder));
     let stmts = qql_core::parser::Parser::parse_all(
         "UPSERT INTO docs VALUES {id: 1, text: 'a'} USING DENSE MODEL 'mock';\

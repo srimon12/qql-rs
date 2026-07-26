@@ -414,5 +414,31 @@ async fn j_query_with_using_dense() {
         *input,
         QueryInput::Vector(VectorValue::Dense(vec![1.0, 2.0, 3.0]))
     );
-    assert_eq!(using.as_deref(), Some("dense"));
+    assert_eq!(
+        using.as_ref().map(|target| target.name.as_str()),
+        Some("dense")
+    );
+}
+
+#[tokio::test]
+async fn query_with_arbitrary_sparse_vector_name_uses_sparse_embedding() {
+    let mut stmt =
+        Parser::parse("QUERY 'hello' FROM docs USING lexical_v2 AS SPARSE LIMIT 10").unwrap();
+    let mock = MockEmbedder::default();
+    resolve_embeddings(&mut stmt, &mock).await.unwrap();
+
+    let Stmt::Query(query) = &stmt else {
+        panic!("expected Query");
+    };
+    let QueryExpr::Nearest { input, using, .. } = &query.expression else {
+        panic!("expected Nearest");
+    };
+    assert!(matches!(
+        input,
+        QueryInput::Vector(VectorValue::Sparse { .. })
+    ));
+    assert_eq!(
+        using.as_ref().map(|target| target.name.as_str()),
+        Some("lexical_v2")
+    );
 }

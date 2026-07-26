@@ -493,7 +493,14 @@ fn build_query_with_prefetch(
             using,
             prefetch,
         } => {
-            if using.is_empty() {
+            let using = using.as_ref().ok_or_else(|| {
+                QqlError::validation(
+                    "QQL-PLAN-RERANK-USING",
+                    "RERANK requires USING vector name",
+                    None,
+                )
+            })?;
+            if using.name.is_empty() {
                 return Err(QqlError::validation(
                     "QQL-PLAN-RERANK-USING",
                     "RERANK requires non-empty USING vector name",
@@ -520,7 +527,7 @@ fn build_query_with_prefetch(
                     nearest: nearest_input,
                     mmr: None,
                 }),
-                Some(using.clone()),
+                Some(using.name.clone()),
                 pf_requests,
             ))
         }
@@ -540,7 +547,7 @@ fn build_query_with_prefetch(
                     }
                 }
             }
-            let using = expression_using(&query.expression).cloned();
+            let using = expression_using(&query.expression).map(str::to_owned);
             let prefetches = expression_prefetch(&query.expression);
             let pf_requests: Vec<PrefetchRequest> = prefetches
                 .iter()
@@ -589,14 +596,14 @@ pub fn lower_search_params(params: &qql_core::ast::SearchParams) -> Option<Searc
     }
 }
 
-fn expression_using(expr: &QueryExpr) -> Option<&String> {
+fn expression_using(expr: &QueryExpr) -> Option<&str> {
     match expr {
         QueryExpr::Nearest { using, .. }
         | QueryExpr::Recommend { using, .. }
         | QueryExpr::Context { using, .. }
         | QueryExpr::Discover { using, .. }
-        | QueryExpr::RelevanceFeedback { using, .. } => using.as_ref(),
-        QueryExpr::Rerank { using, .. } => Some(using),
+        | QueryExpr::RelevanceFeedback { using, .. }
+        | QueryExpr::Rerank { using, .. } => using.as_ref().map(|target| target.name.as_str()),
         _ => None,
     }
 }

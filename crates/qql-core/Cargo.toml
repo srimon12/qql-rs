@@ -10,6 +10,8 @@ json = ["serde", "dep:serde_json"]
 std = []
 
 [dependencies]
+pest = { version = "2.8.6", default-features = false }
+pest_derive = { version = "2.8.6", default-features = false }
 phf = { version = "0.11", features = ["macros"] }
 serde = { version = "1.0", features = ["derive"], optional = true }
 serde_json = { version = "1", default-features = false, features = ["alloc"], optional = true }

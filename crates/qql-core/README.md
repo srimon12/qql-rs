@@ -4,6 +4,12 @@ Transport-free QQL frontend: lexer, strict parser, typed AST, validation,
 AST transforms (`inject_filter`), and intent-only explain output.
 Performs no I/O and does not generate Qdrant JSON.
 
+The accepted syntax is generated from the workspace canonical grammar at
+[`language/v1/grammar.pest`](../../language/v1/grammar.pest). Change that file,
+run `cargo run -p qql-grammar-gen -- generate`, and then update AST lowering.
+The generated file under `grammar/` is checked in for standalone crate
+packaging and must not be edited manually.
+
 ## Parser
 
 The parser produces one of these [`Statement`] variants:
@@ -50,7 +56,7 @@ required prefetch topology in the AST.
 ```
 QUERY <expression>
 FROM <collection>
-[USING <vector>]
+[USING <vector> [AS DENSE | AS SPARSE]]
 [PREFETCH (...)]
 [WHERE <filter>]
 [SHARD '<key>']
@@ -64,6 +70,9 @@ FROM <collection>
 ```
 
 Each clause occurs at most once and only in this order.
+
+Vector names are arbitrary. `AS DENSE` / `AS SPARSE` is an explicit role
+annotation; without it, execution resolves the role from collection schema.
 
 ## Search params (PARAMS)
 

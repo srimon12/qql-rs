@@ -7,9 +7,9 @@ use crate::ast::{
 use crate::error::QqlError;
 use crate::token::TokenKind;
 
-use super::Parser;
+use super::AstLowerer;
 
-impl<'a> Parser<'a> {
+impl<'a> AstLowerer<'a> {
     // ── ALTER ───────────────────────────────────────────────────
 
     pub fn parse_alter(&mut self) -> Result<Stmt, QqlError> {
@@ -100,6 +100,14 @@ impl<'a> Parser<'a> {
         let mut field_type = String::from("keyword");
         if self.peek()?.kind == TokenKind::Type {
             self.advance()?;
+            let field_type_token = self.peek()?;
+            if field_type_token.kind == TokenKind::String {
+                return Err(QqlError::parse(
+                    "QQL-PARSE-INDEX-TYPE",
+                    "index TYPE must be an unquoted canonical type name",
+                    field_type_token.span,
+                ));
+            }
             field_type = self.parse_identifier()?.to_ascii_lowercase();
         }
         let mut options = Vec::new();

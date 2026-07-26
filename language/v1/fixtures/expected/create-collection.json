@@ -1,0 +1,508 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "CreateCollection": {
+        "collection": "docs",
+        "config": null,
+        "mode": {
+          "Dense": {
+            "model": "all-MiniLM-L6-v2"
+          }
+        },
+        "sparse_vectors": [],
+        "vectors": []
+      }
+    },
+    {
+      "CreateCollection": {
+        "collection": "docs",
+        "config": null,
+        "mode": {
+          "Dense": {
+            "model": "nomic-embed-text"
+          }
+        },
+        "sparse_vectors": [],
+        "vectors": []
+      }
+    },
+    {
+      "CreateCollection": {
+        "collection": "docs",
+        "config": null,
+        "mode": {
+          "Hybrid": {
+            "dense_vector": null,
+            "sparse_vector": null
+          }
+        },
+        "sparse_vectors": [],
+        "vectors": []
+      }
+    },
+    {
+      "CreateCollection": {
+        "collection": "docs",
+        "config": null,
+        "mode": "Rerank",
+        "sparse_vectors": [],
+        "vectors": []
+      }
+    },
+    {
+      "CreateCollection": {
+        "collection": "docs",
+        "config": null,
+        "mode": {
+          "Hybrid": {
+            "dense_vector": "semantic_v2",
+            "sparse_vector": "lexical_v2"
+          }
+        },
+        "sparse_vectors": [],
+        "vectors": []
+      }
+    },
+    {
+      "CreateCollection": {
+        "collection": "docs",
+        "config": null,
+        "mode": {
+          "Dense": {
+            "model": null
+          }
+        },
+        "sparse_vectors": [
+          {
+            "index": null,
+            "modifier": null,
+            "name": "sparse"
+          }
+        ],
+        "vectors": [
+          {
+            "distance": "Cosine",
+            "hnsw": null,
+            "multivector": null,
+            "name": "dense",
+            "quantization": null,
+            "size": 384,
+            "vectors": null
+          }
+        ]
+      }
+    },
+    {
+      "CreateCollection": {
+        "collection": "docs",
+        "config": {
+          "hnsw": {
+            "ef_construct": 100,
+            "full_scan_threshold": null,
+            "inline_storage": null,
+            "m": 16,
+            "max_indexing_threads": null,
+            "on_disk": null,
+            "payload_m": null
+          },
+          "optimizers": null,
+          "params": null,
+          "quantization": null,
+          "quantization_update": null,
+          "vectors": null
+        },
+        "mode": {
+          "Dense": {
+            "model": null
+          }
+        },
+        "sparse_vectors": [],
+        "vectors": [
+          {
+            "distance": "Cosine",
+            "hnsw": null,
+            "multivector": null,
+            "name": "dense",
+            "quantization": null,
+            "size": 768,
+            "vectors": null
+          }
+        ]
+      }
+    },
+    {
+      "CreateCollection": {
+        "collection": "docs",
+        "config": {
+          "hnsw": null,
+          "optimizers": null,
+          "params": null,
+          "quantization": {
+            "always_ram": false,
+            "bits": null,
+            "compression": null,
+            "encoding": null,
+            "qtype": "Scalar",
+            "quantile": 0.95,
+            "query_encoding": null
+          },
+          "quantization_update": {
+            "config": {
+              "always_ram": false,
+              "bits": null,
+              "compression": null,
+              "encoding": null,
+              "qtype": "Scalar",
+              "quantile": 0.95,
+              "query_encoding": null
+            },
+            "disabled": false
+          },
+          "vectors": null
+        },
+        "mode": {
+          "Dense": {
+            "model": null
+          }
+        },
+        "sparse_vectors": [],
+        "vectors": [
+          {
+            "distance": "Cosine",
+            "hnsw": null,
+            "multivector": null,
+            "name": "dense",
+            "quantization": null,
+            "size": 384,
+            "vectors": null
+          }
+        ]
+      }
+    },
+    {
+      "CreateCollection": {
+        "collection": "docs",
+        "config": {
+          "hnsw": null,
+          "optimizers": null,
+          "params": null,
+          "quantization": {
+            "always_ram": true,
+            "bits": 2.0,
+            "compression": null,
+            "encoding": null,
+            "qtype": "Turbo",
+            "quantile": null,
+            "query_encoding": null
+          },
+          "quantization_update": {
+            "config": {
+              "always_ram": true,
+              "bits": 2.0,
+              "compression": null,
+              "encoding": null,
+              "qtype": "Turbo",
+              "quantile": null,
+              "query_encoding": null
+            },
+            "disabled": false
+          },
+          "vectors": null
+        },
+        "mode": {
+          "Dense": {
+            "model": null
+          }
+        },
+        "sparse_vectors": [],
+        "vectors": [
+          {
+            "distance": "Cosine",
+            "hnsw": null,
+            "multivector": null,
+            "name": "dense",
+            "quantization": null,
+            "size": 384,
+            "vectors": null
+          }
+        ]
+      }
+    },
+    {
+      "CreateCollection": {
+        "collection": "docs",
+        "config": {
+          "hnsw": null,
+          "optimizers": null,
+          "params": null,
+          "quantization": {
+            "always_ram": true,
+            "bits": null,
+            "compression": null,
+            "encoding": null,
+            "qtype": "Binary",
+            "quantile": null,
+            "query_encoding": null
+          },
+          "quantization_update": {
+            "config": {
+              "always_ram": true,
+              "bits": null,
+              "compression": null,
+              "encoding": null,
+              "qtype": "Binary",
+              "quantile": null,
+              "query_encoding": null
+            },
+            "disabled": false
+          },
+          "vectors": null
+        },
+        "mode": {
+          "Dense": {
+            "model": null
+          }
+        },
+        "sparse_vectors": [],
+        "vectors": [
+          {
+            "distance": "Cosine",
+            "hnsw": null,
+            "multivector": null,
+            "name": "dense",
+            "quantization": null,
+            "size": 384,
+            "vectors": null
+          }
+        ]
+      }
+    },
+    {
+      "CreateCollection": {
+        "collection": "docs",
+        "config": {
+          "hnsw": null,
+          "optimizers": null,
+          "params": null,
+          "quantization": {
+            "always_ram": false,
+            "bits": null,
+            "compression": null,
+            "encoding": null,
+            "qtype": "Product",
+            "quantile": null,
+            "query_encoding": null
+          },
+          "quantization_update": {
+            "config": {
+              "always_ram": false,
+              "bits": null,
+              "compression": null,
+              "encoding": null,
+              "qtype": "Product",
+              "quantile": null,
+              "query_encoding": null
+            },
+            "disabled": false
+          },
+          "vectors": null
+        },
+        "mode": {
+          "Dense": {
+            "model": null
+          }
+        },
+        "sparse_vectors": [],
+        "vectors": [
+          {
+            "distance": "Cosine",
+            "hnsw": null,
+            "multivector": null,
+            "name": "dense",
+            "quantization": null,
+            "size": 384,
+            "vectors": null
+          }
+        ]
+      }
+    },
+    {
+      "CreateCollection": {
+        "collection": "docs",
+        "config": null,
+        "mode": {
+          "Dense": {
+            "model": null
+          }
+        },
+        "sparse_vectors": [
+          {
+            "index": null,
+            "modifier": null,
+            "name": "sparse"
+          }
+        ],
+        "vectors": [
+          {
+            "distance": "Cosine",
+            "hnsw": null,
+            "multivector": null,
+            "name": "dense",
+            "quantization": {
+              "always_ram": false,
+              "bits": null,
+              "compression": null,
+              "encoding": null,
+              "qtype": "Scalar",
+              "quantile": null,
+              "query_encoding": null
+            },
+            "size": 384,
+            "vectors": null
+          }
+        ]
+      }
+    },
+    {
+      "CreateCollection": {
+        "collection": "docs",
+        "config": null,
+        "mode": {
+          "Dense": {
+            "model": null
+          }
+        },
+        "sparse_vectors": [],
+        "vectors": [
+          {
+            "distance": "Cosine",
+            "hnsw": null,
+            "multivector": null,
+            "name": "dense",
+            "quantization": null,
+            "size": 384,
+            "vectors": null
+          },
+          {
+            "distance": "Cosine",
+            "hnsw": {
+              "ef_construct": null,
+              "full_scan_threshold": null,
+              "inline_storage": null,
+              "m": 0,
+              "max_indexing_threads": null,
+              "on_disk": null,
+              "payload_m": null
+            },
+            "multivector": {
+              "comparator": "MaxSim"
+            },
+            "name": "colbert",
+            "quantization": null,
+            "size": 128,
+            "vectors": null
+          }
+        ]
+      }
+    },
+    {
+      "CreateCollection": {
+        "collection": "sec10k",
+        "config": {
+          "hnsw": {
+            "ef_construct": 100,
+            "full_scan_threshold": null,
+            "inline_storage": null,
+            "m": 16,
+            "max_indexing_threads": null,
+            "on_disk": null,
+            "payload_m": null
+          },
+          "optimizers": null,
+          "params": {
+            "on_disk_payload": null,
+            "read_fan_out_delay_ms": null,
+            "read_fan_out_factor": null,
+            "replication_factor": 2,
+            "shard_keys": [
+              "honeywell",
+              "ge",
+              "3m",
+              "rtx"
+            ],
+            "shard_number": 8,
+            "sharding_method": "custom",
+            "write_consistency_factor": null
+          },
+          "quantization": null,
+          "quantization_update": null,
+          "vectors": null
+        },
+        "mode": {
+          "Dense": {
+            "model": null
+          }
+        },
+        "sparse_vectors": [
+          {
+            "index": null,
+            "modifier": null,
+            "name": "sparse"
+          }
+        ],
+        "vectors": [
+          {
+            "distance": "Cosine",
+            "hnsw": null,
+            "multivector": null,
+            "name": "dense",
+            "quantization": null,
+            "size": 768,
+            "vectors": null
+          }
+        ]
+      }
+    },
+    {
+      "CreateCollection": {
+        "collection": "docs",
+        "config": {
+          "hnsw": null,
+          "optimizers": {
+            "default_segment_number": null,
+            "deleted_threshold": null,
+            "flush_interval_sec": null,
+            "indexing_threshold": null,
+            "max_optimization_threads": null,
+            "max_segment_size": 500000,
+            "memmap_threshold": null,
+            "prevent_unoptimized": null,
+            "vacuum_min_vector_number": null
+          },
+          "params": null,
+          "quantization": null,
+          "quantization_update": null,
+          "vectors": null
+        },
+        "mode": {
+          "Dense": {
+            "model": null
+          }
+        },
+        "sparse_vectors": [],
+        "vectors": [
+          {
+            "distance": "Cosine",
+            "hnsw": null,
+            "multivector": null,
+            "name": "dense",
+            "quantization": null,
+            "size": 384,
+            "vectors": null
+          }
+        ]
+      }
+    }
+  ]
+}

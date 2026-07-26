@@ -162,13 +162,13 @@ fn empty_in_list_rejected() {
 #[test]
 fn invalid_shard_params_rejected() {
     assert_validation_err!(
-        "CREATE COLLECTION docs VECTORS (dense VECTOR (4, Cosine)) WITH PARAMS (sharding_method = true);"
+        "CREATE COLLECTION docs (dense VECTOR (4, Cosine)) WITH PARAMS (sharding_method = true);"
     );
     assert_validation_err!(
-        "CREATE COLLECTION docs VECTORS (dense VECTOR (4, Cosine)) WITH PARAMS (shard_keys = [\"a\", 42]);"
+        "CREATE COLLECTION docs (dense VECTOR (4, Cosine)) WITH PARAMS (shard_keys = [\"a\", 42]);"
     );
     assert_validation_err!(
-        "CREATE COLLECTION docs VECTORS (dense VECTOR (4, Cosine)) WITH PARAMS (shard_number = true);"
+        "CREATE COLLECTION docs (dense VECTOR (4, Cosine)) WITH PARAMS (shard_number = true);"
     );
 }
 

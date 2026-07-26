@@ -1,6 +1,9 @@
 use crate::client::CollectionInfo;
 use crate::executor::{Executor, SearchHit};
-use qql_core::ast::{Prefetch, PrefetchSource, QueryExpr, QueryInput, QueryStmt, VectorValue};
+use qql_core::ast::{
+    Prefetch, PrefetchSource, QueryExpr, QueryInput, QueryStmt, VectorKind, VectorTarget,
+    VectorValue,
+};
 use qql_core::error::QqlError;
 
 impl Executor {
@@ -44,10 +47,13 @@ fn expression_requires_schema(expression: &QueryExpr) -> bool {
         }
         | QueryExpr::RelevanceFeedback {
             using, prefetch, ..
-        } => using.is_none() || prefetch.iter().any(prefetch_requires_schema),
-        QueryExpr::Rerank { prefetch, .. }
-        | QueryExpr::Fusion { prefetch, .. }
-        | QueryExpr::Formula { prefetch, .. } => prefetch.iter().any(prefetch_requires_schema),
+        } => target_requires_schema(using) || prefetch.iter().any(prefetch_requires_schema),
+        QueryExpr::Rerank {
+            using, prefetch, ..
+        } => target_requires_schema(using) || prefetch.iter().any(prefetch_requires_schema),
+        QueryExpr::Fusion { prefetch, .. } | QueryExpr::Formula { prefetch, .. } => {
+            prefetch.iter().any(prefetch_requires_schema)
+        }
         QueryExpr::Hybrid {
             dense_vector,
             sparse_vector,
@@ -55,6 +61,10 @@ fn expression_requires_schema(expression: &QueryExpr) -> bool {
         } => dense_vector.is_none() || sparse_vector.is_none(),
         QueryExpr::Points { .. } | QueryExpr::OrderBy { .. } | QueryExpr::SampleRandom => false,
     }
+}
+
+fn target_requires_schema(target: &Option<VectorTarget>) -> bool {
+    target.as_ref().is_none_or(|target| target.kind.is_none())
 }
 
 fn prefetch_requires_schema(prefetch: &Prefetch) -> bool {
@@ -100,26 +110,42 @@ impl QueryTopology {
         self.dense.iter().chain(&self.sparse).map(String::as_str)
     }
 
-    fn select(&self, kind: InputKind) -> Option<&str> {
+    fn select(&self, kind: Option<VectorKind>) -> Option<(&str, VectorKind)> {
         let candidates = match kind {
-            InputKind::Dense => &self.dense,
-            InputKind::Sparse => &self.sparse,
-            InputKind::Unknown => {
+            Some(VectorKind::Dense) => &self.dense,
+            Some(VectorKind::Sparse) => &self.sparse,
+            None => {
                 if self.dense.len() + self.sparse.len() == 1 {
-                    return self.all().next();
+                    return self
+                        .dense
+                        .first()
+                        .map(|name| (name.as_str(), VectorKind::Dense))
+                        .or_else(|| {
+                            self.sparse
+                                .first()
+                                .map(|name| (name.as_str(), VectorKind::Sparse))
+                        });
                 }
                 return None;
             }
         };
-        (candidates.len() == 1).then(|| candidates[0].as_str())
+        (candidates.len() == 1).then(|| {
+            (
+                candidates[0].as_str(),
+                kind.expect("typed candidate selection has a vector kind"),
+            )
+        })
     }
-}
 
-#[derive(Debug, Clone, Copy)]
-enum InputKind {
-    Dense,
-    Sparse,
-    Unknown,
+    fn kind_of(&self, name: &str) -> Option<VectorKind> {
+        if self.dense.iter().any(|candidate| candidate == name) {
+            Some(VectorKind::Dense)
+        } else if self.sparse.iter().any(|candidate| candidate == name) {
+            Some(VectorKind::Sparse)
+        } else {
+            None
+        }
+    }
 }
 
 fn configure_query(
@@ -155,12 +181,7 @@ fn configure_expr(
             prefetch,
             ..
         } => {
-            let kind = positive
-                .iter()
-                .chain(negative.iter())
-                .next()
-                .map(input_kind)
-                .unwrap_or(InputKind::Unknown);
+            let kind = merge_input_kinds(positive.iter().chain(negative.iter()))?;
             resolve_using(collection, using, kind, topology)?;
             configure_prefetches(collection, prefetch, topology)
         }
@@ -169,26 +190,41 @@ fn configure_expr(
             using,
             prefetch,
         } => {
-            let kind = pairs
-                .first()
-                .map(|pair| input_kind(&pair.positive))
-                .unwrap_or(InputKind::Unknown);
+            let kind = merge_input_kinds(
+                pairs
+                    .iter()
+                    .flat_map(|pair| [&pair.positive, &pair.negative]),
+            )?;
             resolve_using(collection, using, kind, topology)?;
             configure_prefetches(collection, prefetch, topology)
         }
         QueryExpr::Discover {
             target,
+            context,
             using,
             prefetch,
-            ..
+        } => {
+            let kind = merge_input_kinds(
+                core::iter::once(&*target).chain(
+                    context
+                        .iter()
+                        .flat_map(|pair| [&pair.positive, &pair.negative]),
+                ),
+            )?;
+            resolve_using(collection, using, kind, topology)?;
+            configure_prefetches(collection, prefetch, topology)
         }
-        | QueryExpr::RelevanceFeedback {
+        QueryExpr::RelevanceFeedback {
             target,
+            feedback,
             using,
             prefetch,
             ..
         } => {
-            resolve_using(collection, using, input_kind(target), topology)?;
+            let kind = merge_input_kinds(
+                core::iter::once(&*target).chain(feedback.iter().map(|item| &item.example)),
+            )?;
+            resolve_using(collection, using, kind, topology)?;
             configure_prefetches(collection, prefetch, topology)
         }
         QueryExpr::Fusion { prefetch, .. } | QueryExpr::Formula { prefetch, .. } => {
@@ -197,7 +233,7 @@ fn configure_expr(
         QueryExpr::Rerank {
             using, prefetch, ..
         } => {
-            validate_using(collection, using, topology)?;
+            resolve_using(collection, using, Some(VectorKind::Dense), topology)?;
             configure_prefetches(collection, prefetch, topology)
         }
         QueryExpr::Hybrid {
@@ -225,28 +261,63 @@ fn configure_prefetches(
     Ok(())
 }
 
-fn input_kind(input: &QueryInput) -> InputKind {
+fn input_kind(input: &QueryInput) -> Option<VectorKind> {
     match input {
-        QueryInput::Text { .. } | QueryInput::Vector(VectorValue::Dense(_)) => InputKind::Dense,
-        QueryInput::Vector(VectorValue::Sparse { .. }) => InputKind::Sparse,
-        QueryInput::Vector(VectorValue::MultiDense(_)) | QueryInput::Point(_) => InputKind::Unknown,
+        QueryInput::Text { .. } | QueryInput::Point(_) => None,
+        QueryInput::Vector(VectorValue::Dense(_) | VectorValue::MultiDense(_)) => {
+            Some(VectorKind::Dense)
+        }
+        QueryInput::Vector(VectorValue::Sparse { .. }) => Some(VectorKind::Sparse),
     }
+}
+
+fn merge_input_kinds<'a>(
+    inputs: impl IntoIterator<Item = &'a QueryInput>,
+) -> Result<Option<VectorKind>, QqlError> {
+    let mut resolved = None;
+    for input in inputs {
+        let Some(kind) = input_kind(input) else {
+            continue;
+        };
+        if resolved.is_some_and(|current| current != kind) {
+            return Err(QqlError::validation(
+                "QQL-VALIDATION-VECTOR-KIND",
+                "query inputs cannot mix dense and sparse vector values",
+                None,
+            ));
+        }
+        resolved = Some(kind);
+    }
+    Ok(resolved)
 }
 
 fn resolve_using(
     collection: &str,
-    using: &mut Option<String>,
-    kind: InputKind,
+    using: &mut Option<VectorTarget>,
+    required_kind: Option<VectorKind>,
     topology: &QueryTopology,
 ) -> Result<(), QqlError> {
-    if let Some(name) = using.as_deref() {
-        return validate_using(collection, name, topology);
+    if let Some(target) = using {
+        let actual_kind = topology.kind_of(&target.name).ok_or_else(|| {
+            let available: Vec<String> = topology.all().map(str::to_string).collect();
+            unknown_vector_error(collection, &target.name, &available)
+        })?;
+        if target.kind.is_some_and(|hint| hint != actual_kind)
+            || required_kind.is_some_and(|required| required != actual_kind)
+        {
+            return Err(vector_kind_error(collection, &target.name, actual_kind));
+        }
+        target.kind = Some(actual_kind);
+        return Ok(());
     }
-    let Some(name) = topology.select(kind) else {
+    let Some((name, kind)) = topology.select(required_kind) else {
         return Err(missing_using_error(collection, topology));
     };
     if !name.is_empty() {
-        *using = Some(name.to_string());
+        *using = Some(VectorTarget {
+            name: name.to_string(),
+            kind: Some(kind),
+        });
     }
     Ok(())
 }
@@ -277,15 +348,6 @@ fn resolve_required_vector(
     Ok(())
 }
 
-fn validate_using(collection: &str, using: &str, topology: &QueryTopology) -> Result<(), QqlError> {
-    if topology.all().any(|name| name == using) {
-        Ok(())
-    } else {
-        let available: Vec<String> = topology.all().map(str::to_string).collect();
-        Err(unknown_vector_error(collection, using, &available))
-    }
-}
-
 fn missing_using_error(collection: &str, topology: &QueryTopology) -> QqlError {
     let names: Vec<String> = topology.all().map(str::to_string).collect();
     QqlError::execution(
@@ -293,6 +355,20 @@ fn missing_using_error(collection: &str, topology: &QueryTopology) -> QqlError {
         format!(
             "Collection '{collection}' has an ambiguous vector topology. Add USING <vector_name>. Available vectors: {}",
             display_names(&names)
+        ),
+        None,
+    )
+}
+
+fn vector_kind_error(collection: &str, name: &str, actual: VectorKind) -> QqlError {
+    QqlError::execution(
+        "QQL-VECTOR-KIND",
+        format!(
+            "Vector '{name}' in collection '{collection}' is {}, which is incompatible with this query",
+            match actual {
+                VectorKind::Dense => "dense",
+                VectorKind::Sparse => "sparse",
+            }
         ),
         None,
     )

@@ -1,11 +1,11 @@
-use super::{ascii_equal, Parser};
-use crate::ast::{EmbeddingSpec, PointId, PointVectors, Value, VectorValue};
+use super::AstLowerer;
+use crate::ast::{EmbeddingSpec, PointId, Value, VectorValue};
 use crate::error::{QqlError, Span};
 use crate::token::{Token, TokenKind};
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-impl<'a> Parser<'a> {
+impl<'a> AstLowerer<'a> {
     pub fn parse_string(&mut self) -> Result<String, QqlError> {
         let token = self.expect(TokenKind::String)?;
         self.decode_string(token)
@@ -41,16 +41,17 @@ impl<'a> Parser<'a> {
             let sparse = self.peek()?.kind == TokenKind::Sparse;
             if self.peek()?.kind == TokenKind::Dense || sparse {
                 self.advance()?;
-            }
-            let model = self.parse_optional_model_string()?;
-            let vector = self.parse_optional_vector_name()?;
-            if model.is_none() && vector.is_none() {
+            } else if self.peek()?.kind != TokenKind::Model
+                && self.peek()?.kind != TokenKind::Vector
+            {
                 return Err(QqlError::parse(
                     "QQL-PARSE-EMBEDDING",
-                    "USING requires MODEL or VECTOR",
+                    "USING requires DENSE, SPARSE, HYBRID, MODEL, or VECTOR",
                     self.peek()?.span,
                 ));
             }
+            let model = self.parse_optional_model_string()?;
+            let vector = self.parse_optional_vector_name()?;
             return Ok(Some(if sparse {
                 EmbeddingSpec::Sparse { model, vector }
             } else {
@@ -70,13 +71,6 @@ impl<'a> Parser<'a> {
             self.advance()?;
             let model = self.parse_optional_model_string()?;
             let vector = self.parse_optional_vector_name()?;
-            if model.is_none() && vector.is_none() {
-                return Err(QqlError::parse(
-                    "QQL-PARSE-EMBEDDING",
-                    "DENSE and SPARSE require MODEL or VECTOR",
-                    self.peek()?.span,
-                ));
-            }
             if expected == TokenKind::Dense {
                 dense_model = model;
                 dense_vector = vector;
@@ -155,18 +149,6 @@ impl<'a> Parser<'a> {
             ));
         }
         Ok(value)
-    }
-
-    pub fn parse_number(&mut self) -> Result<Value, QqlError> {
-        let token = self.peek()?;
-        match token.kind {
-            TokenKind::Integer | TokenKind::Float => self.parse_value(),
-            _ => Err(QqlError::parse(
-                "QQL-PARSE-NUMBER",
-                alloc::format!("expected a number, got '{}'", token.text),
-                token.span,
-            )),
-        }
     }
 
     pub fn parse_literal_list(&mut self) -> Result<Vec<Value>, QqlError> {
@@ -322,24 +304,6 @@ impl<'a> Parser<'a> {
         Ok(values)
     }
 
-    pub fn parse_bool(&mut self) -> Result<bool, QqlError> {
-        let token = self.peek()?;
-        if token.kind == TokenKind::Identifier {
-            self.advance()?;
-            if ascii_equal(token.text, "TRUE") {
-                return Ok(true);
-            }
-            if ascii_equal(token.text, "FALSE") {
-                return Ok(false);
-            }
-        }
-        Err(QqlError::parse(
-            "QQL-PARSE-BOOL",
-            alloc::format!("expected TRUE or FALSE, got '{}'", token.text),
-            token.span,
-        ))
-    }
-
     pub fn parse_numeric_literal(&mut self) -> Result<f64, QqlError> {
         let token = self.peek()?;
         if !matches!(token.kind, TokenKind::Integer | TokenKind::Float) {
@@ -393,25 +357,6 @@ impl<'a> Parser<'a> {
         let span = self.peek()?.span;
         let value = self.parse_value()?;
         vector_from_value(value, span)
-    }
-
-    pub fn parse_point_vectors(&mut self) -> Result<PointVectors, QqlError> {
-        let span = self.peek()?.span;
-        let value = self.parse_value()?;
-        match value {
-            Value::Dict(items)
-                if !items.iter().any(|(key, _)| {
-                    key.eq_ignore_ascii_case("indices") || key.eq_ignore_ascii_case("values")
-                }) =>
-            {
-                let vectors = items
-                    .into_iter()
-                    .map(|(name, value)| vector_from_value(value, span).map(|value| (name, value)))
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(PointVectors::Named(vectors))
-            }
-            other => vector_from_value(other, span).map(PointVectors::Unnamed),
-        }
     }
 }
 

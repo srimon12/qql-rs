@@ -4,7 +4,7 @@ use std::pin::Pin;
 
 use qql_core::ast::{
     EmbedKind, EmbeddingSpec, PointVectors, Prefetch, PrefetchSource, QueryExpr, QueryInput,
-    QueryStmt, Stmt, UpsertPoint, UpsertStmt, VectorValue,
+    QueryStmt, Stmt, UpsertPoint, UpsertStmt, VectorKind, VectorTarget, VectorValue,
 };
 use qql_core::error::QqlError;
 
@@ -262,12 +262,7 @@ fn collect_expr_dense_jobs(expr: &QueryExpr, jobs: &mut Vec<(String, String)>) {
             prefetch,
             ..
         } => {
-            collect_input_dense_job(
-                input,
-                using.as_deref().unwrap_or("default"),
-                "default",
-                jobs,
-            );
+            collect_input_dense_job(input, target_kind(using), "default", jobs);
             collect_prefetches_dense_jobs(prefetch, jobs);
         }
         QueryExpr::Recommend {
@@ -277,9 +272,8 @@ fn collect_expr_dense_jobs(expr: &QueryExpr, jobs: &mut Vec<(String, String)>) {
             prefetch,
             ..
         } => {
-            let v = using.as_deref().unwrap_or("default");
             for input in positive.iter().chain(negative.iter()) {
-                collect_input_dense_job(input, v, "default", jobs);
+                collect_input_dense_job(input, target_kind(using), "default", jobs);
             }
             collect_prefetches_dense_jobs(prefetch, jobs);
         }
@@ -289,10 +283,9 @@ fn collect_expr_dense_jobs(expr: &QueryExpr, jobs: &mut Vec<(String, String)>) {
             prefetch,
             ..
         } => {
-            let v = using.as_deref().unwrap_or("default");
             for pair in pairs {
-                collect_input_dense_job(&pair.positive, v, "default", jobs);
-                collect_input_dense_job(&pair.negative, v, "default", jobs);
+                collect_input_dense_job(&pair.positive, target_kind(using), "default", jobs);
+                collect_input_dense_job(&pair.negative, target_kind(using), "default", jobs);
             }
             collect_prefetches_dense_jobs(prefetch, jobs);
         }
@@ -303,11 +296,10 @@ fn collect_expr_dense_jobs(expr: &QueryExpr, jobs: &mut Vec<(String, String)>) {
             prefetch,
             ..
         } => {
-            let v = using.as_deref().unwrap_or("default");
-            collect_input_dense_job(target, v, "default", jobs);
+            collect_input_dense_job(target, target_kind(using), "default", jobs);
             for pair in context {
-                collect_input_dense_job(&pair.positive, v, "default", jobs);
-                collect_input_dense_job(&pair.negative, v, "default", jobs);
+                collect_input_dense_job(&pair.positive, target_kind(using), "default", jobs);
+                collect_input_dense_job(&pair.negative, target_kind(using), "default", jobs);
             }
             collect_prefetches_dense_jobs(prefetch, jobs);
         }
@@ -321,10 +313,9 @@ fn collect_expr_dense_jobs(expr: &QueryExpr, jobs: &mut Vec<(String, String)>) {
             prefetch,
             ..
         } => {
-            let v = using.as_deref().unwrap_or("default");
-            collect_input_dense_job(target, v, "default", jobs);
+            collect_input_dense_job(target, target_kind(using), "default", jobs);
             for fb in feedback {
-                collect_input_dense_job(&fb.example, v, "default", jobs);
+                collect_input_dense_job(&fb.example, target_kind(using), "default", jobs);
             }
             collect_prefetches_dense_jobs(prefetch, jobs);
         }
@@ -335,10 +326,10 @@ fn collect_expr_dense_jobs(expr: &QueryExpr, jobs: &mut Vec<(String, String)>) {
         QueryExpr::Rerank {
             input,
             model,
-            using,
             prefetch,
+            ..
         } => {
-            collect_input_dense_job(input, using.as_str(), model.as_str(), jobs);
+            collect_input_dense_job(input, VectorKind::Dense, model.as_str(), jobs);
             collect_prefetches_dense_jobs(prefetch, jobs);
         }
         _ => {}
@@ -347,13 +338,12 @@ fn collect_expr_dense_jobs(expr: &QueryExpr, jobs: &mut Vec<(String, String)>) {
 
 fn collect_input_dense_job(
     input: &QueryInput,
-    using: &str,
+    kind: VectorKind,
     default_model: &str,
     jobs: &mut Vec<(String, String)>,
 ) {
     if let QueryInput::Text { text, model } = input {
-        // Sparse vector space uses local sparse embedder, not dense HTTP batch.
-        if using != "sparse" {
+        if kind == VectorKind::Dense {
             let m = model.as_deref().unwrap_or(default_model).to_string();
             jobs.push((m, text.clone()));
         }
@@ -452,13 +442,7 @@ fn apply_expr_embeddings<'a>(
                 prefetch,
                 ..
             } => {
-                apply_input(
-                    input,
-                    using.as_deref().unwrap_or("default"),
-                    embedder,
-                    dense,
-                )
-                .await?;
+                apply_input(input, target_kind(using), embedder, dense).await?;
                 apply_prefetches_embeddings(prefetch, embedder, dense).await?;
             }
             QueryExpr::Recommend {
@@ -468,9 +452,8 @@ fn apply_expr_embeddings<'a>(
                 prefetch,
                 ..
             } => {
-                let v = using.as_deref().unwrap_or("default");
                 for input in positive.iter_mut().chain(negative.iter_mut()) {
-                    apply_input(input, v, embedder, dense).await?;
+                    apply_input(input, target_kind(using), embedder, dense).await?;
                 }
                 apply_prefetches_embeddings(prefetch, embedder, dense).await?;
             }
@@ -480,10 +463,9 @@ fn apply_expr_embeddings<'a>(
                 prefetch,
                 ..
             } => {
-                let v = using.as_deref().unwrap_or("default");
                 for pair in pairs {
-                    apply_input(&mut pair.positive, v, embedder, dense).await?;
-                    apply_input(&mut pair.negative, v, embedder, dense).await?;
+                    apply_input(&mut pair.positive, target_kind(using), embedder, dense).await?;
+                    apply_input(&mut pair.negative, target_kind(using), embedder, dense).await?;
                 }
                 apply_prefetches_embeddings(prefetch, embedder, dense).await?;
             }
@@ -494,11 +476,10 @@ fn apply_expr_embeddings<'a>(
                 prefetch,
                 ..
             } => {
-                let v = using.as_deref().unwrap_or("default");
-                apply_input(target, v, embedder, dense).await?;
+                apply_input(target, target_kind(using), embedder, dense).await?;
                 for pair in context {
-                    apply_input(&mut pair.positive, v, embedder, dense).await?;
-                    apply_input(&mut pair.negative, v, embedder, dense).await?;
+                    apply_input(&mut pair.positive, target_kind(using), embedder, dense).await?;
+                    apply_input(&mut pair.negative, target_kind(using), embedder, dense).await?;
                 }
                 apply_prefetches_embeddings(prefetch, embedder, dense).await?;
             }
@@ -512,10 +493,9 @@ fn apply_expr_embeddings<'a>(
                 prefetch,
                 ..
             } => {
-                let v = using.as_deref().unwrap_or("default");
-                apply_input(target, v, embedder, dense).await?;
+                apply_input(target, target_kind(using), embedder, dense).await?;
                 for fb in feedback {
-                    apply_input(&mut fb.example, v, embedder, dense).await?;
+                    apply_input(&mut fb.example, target_kind(using), embedder, dense).await?;
                 }
                 apply_prefetches_embeddings(prefetch, embedder, dense).await?;
             }
@@ -542,7 +522,10 @@ fn apply_expr_embeddings<'a>(
                     collection: qql_core::ast::QueryCollection::Inherited,
                     expression: QueryExpr::Nearest {
                         input: QueryInput::Vector(VectorValue::Dense(d_vec)),
-                        using: Some(d_vec_name.to_string()),
+                        using: Some(VectorTarget {
+                            name: d_vec_name.to_string(),
+                            kind: Some(VectorKind::Dense),
+                        }),
                         prefetch: Vec::new(),
                         mmr: None,
                     },
@@ -562,7 +545,10 @@ fn apply_expr_embeddings<'a>(
                             indices: s_vec.indices,
                             values: s_vec.values,
                         }),
-                        using: Some(s_vec_name.to_string()),
+                        using: Some(VectorTarget {
+                            name: s_vec_name.to_string(),
+                            kind: Some(VectorKind::Sparse),
+                        }),
                         prefetch: Vec::new(),
                         mmr: None,
                     },
@@ -595,17 +581,11 @@ fn apply_expr_embeddings<'a>(
             }
             QueryExpr::Rerank {
                 input,
-                model,
-                using,
+                model: _,
                 prefetch,
+                ..
             } => {
-                // Consume dense vectors under the rerank model; sparse only when using == "sparse".
-                let dense_key = if using == "sparse" {
-                    using.as_str()
-                } else {
-                    model.as_str()
-                };
-                apply_input(input, dense_key, embedder, dense).await?;
+                apply_input(input, VectorKind::Dense, embedder, dense).await?;
                 apply_prefetches_embeddings(prefetch, embedder, dense).await?;
             }
             _ => {}
@@ -616,12 +596,12 @@ fn apply_expr_embeddings<'a>(
 
 async fn apply_input(
     input: &mut QueryInput,
-    using: &str,
+    kind: VectorKind,
     embedder: &dyn Embedder,
     dense: DenseIter<'_>,
 ) -> Result<(), QqlError> {
     if let QueryInput::Text { text, .. } = input {
-        if using == "sparse" {
+        if kind == VectorKind::Sparse {
             let s_vec = embedder.embed_sparse(text).await?;
             *input = QueryInput::Vector(VectorValue::Sparse {
                 indices: s_vec.indices,
@@ -639,6 +619,13 @@ async fn apply_input(
         }
     }
     Ok(())
+}
+
+fn target_kind(target: &Option<VectorTarget>) -> VectorKind {
+    target
+        .as_ref()
+        .and_then(|target| target.kind)
+        .unwrap_or(VectorKind::Dense)
 }
 
 fn ensure_batch_len(got: usize, expected: usize, model: &str) -> Result<(), QqlError> {

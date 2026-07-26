@@ -7,6 +7,7 @@ pub(crate) mod formula;
 pub(crate) mod helpers;
 pub(crate) mod point_ops;
 pub(crate) mod query;
+mod syntax;
 pub(crate) mod r#update;
 pub(crate) mod upsert;
 pub(crate) mod with_clause;
@@ -24,7 +25,13 @@ pub use config_validation::{
     validate_optimizers_value, validate_params_value, validate_vectors_value,
 };
 
-pub struct Parser<'a> {
+/// Canonical QQL parser facade.
+///
+/// Syntax acceptance is generated from `language/v1/grammar.pest`. The
+/// private [`AstLowerer`] converts accepted source into the typed QQL AST.
+pub struct Parser;
+
+pub(crate) struct AstLowerer<'a> {
     pub input: &'a str,
     tokens: Vec<Token<'a>>,
     index: usize,
@@ -87,8 +94,22 @@ fn is_contextual_identifier(kind: TokenKind) -> bool {
     )
 }
 
-impl<'a> Parser<'a> {
-    pub fn new(input: &'a str, tokens: Vec<Token<'a>>) -> Self {
+impl Parser {
+    pub fn parse(input: &str) -> Result<Stmt, QqlError> {
+        let statement = AstLowerer::lower_statement(input)?;
+        syntax::validate_statement(input)?;
+        Ok(statement)
+    }
+
+    pub fn parse_all(input: &str) -> Result<Vec<Stmt>, QqlError> {
+        let statements = AstLowerer::lower_script(input)?;
+        syntax::validate_script(input)?;
+        Ok(statements)
+    }
+}
+
+impl<'a> AstLowerer<'a> {
+    fn new(input: &'a str, tokens: Vec<Token<'a>>) -> Self {
         Self {
             input,
             tokens,
@@ -96,9 +117,9 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse(input: &'a str) -> Result<Stmt, QqlError> {
+    fn lower_statement(input: &'a str) -> Result<Stmt, QqlError> {
         let tokens = Self::lex(input)?;
-        let mut parser = Parser::new(input, tokens);
+        let mut parser = AstLowerer::new(input, tokens);
         let stmt = parser.parse_stmt()?;
         if parser.peek()?.kind == TokenKind::Semicolon {
             parser.advance()?;
@@ -107,9 +128,9 @@ impl<'a> Parser<'a> {
         Ok(stmt)
     }
 
-    pub fn parse_all(input: &'a str) -> Result<Vec<Stmt>, QqlError> {
+    fn lower_script(input: &'a str) -> Result<Vec<Stmt>, QqlError> {
         let tokens = Self::lex(input)?;
-        let mut parser = Parser::new(input, tokens);
+        let mut parser = AstLowerer::new(input, tokens);
         let mut statements = Vec::new();
         if parser.peek()?.kind == TokenKind::Semicolon {
             return Err(QqlError::parse(
@@ -216,18 +237,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn save_pos(&self) -> usize {
-        self.index
-    }
-
-    pub fn restore_pos(&mut self, saved: usize) {
-        self.index = saved;
-    }
-
-    pub fn peek_kind(&mut self) -> Result<TokenKind, QqlError> {
-        self.peek().map(|t| t.kind)
-    }
-
     pub fn advance(&mut self) -> Result<Token<'a>, QqlError> {
         let tok = self.peek()?;
         if self.index < self.tokens.len() {
@@ -331,12 +340,22 @@ impl<'a> Parser<'a> {
     }
 
     fn decode_string(&self, token: Token<'a>) -> Result<String, QqlError> {
-        if !token.text.contains('\\') {
+        let single_quoted = self
+            .input
+            .as_bytes()
+            .get(token.span.start)
+            .is_some_and(|quote| *quote == b'\'');
+        if !(token.text.contains('\\') || single_quoted && token.text.contains("''")) {
             return Ok(token.text.to_string());
         }
         let mut decoded = String::with_capacity(token.text.len());
-        let mut chars = token.text.chars();
+        let mut chars = token.text.chars().peekable();
         while let Some(ch) = chars.next() {
+            if single_quoted && ch == '\'' && chars.peek() == Some(&'\'') {
+                chars.next();
+                decoded.push('\'');
+                continue;
+            }
             if ch != '\\' {
                 decoded.push(ch);
                 continue;

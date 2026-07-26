@@ -12,6 +12,22 @@ fn nearest_text_is_default_shorthand() {
 }
 
 #[test]
+fn sql_style_doubled_quote_is_decoded() {
+    let stmt = Parser::parse("QUERY 'St. Peter''s Church' FROM docs LIMIT 1;").unwrap();
+    let Stmt::Query(query) = stmt else {
+        panic!("expected QUERY");
+    };
+    let QueryExpr::Nearest {
+        input: QueryInput::Text { text, .. },
+        ..
+    } = query.expression
+    else {
+        panic!("expected nearest text query");
+    };
+    assert_eq!(text, "St. Peter's Church");
+}
+
+#[test]
 fn sparse_upsert_embedding_is_explicit() {
     let stmt =
         Parser::parse("UPSERT INTO docs VALUES {id: 1, text: 'hello'} USING SPARSE VECTOR sparse")
@@ -41,7 +57,7 @@ fn nearest_vector() {
     let Stmt::Query(q) = s else { panic!() };
     assert!(matches!(q.expression, QueryExpr::Nearest {
         input: QueryInput::Vector(_), using: Some(ref u), ..
-    } if u == "dense"));
+    } if u.name == "dense"));
     assert_eq!(q.page.limit, Some(5));
 }
 
@@ -51,7 +67,7 @@ fn nearest_point() {
     let Stmt::Query(q) = s else { panic!() };
     assert!(matches!(q.expression, QueryExpr::Nearest {
         input: QueryInput::Point(crate::ast::PointId::Number(42)), using: Some(ref u), ..
-    } if u == "dense"));
+    } if u.name == "dense"));
 }
 
 #[test]
@@ -194,7 +210,24 @@ fn rerank_query() {
     let Stmt::Query(q) = s else { panic!() };
     assert!(matches!(q.expression, QueryExpr::Rerank {
         ref model, ref using, ..
-    } if model == "reranker" && using == "colbert"));
+    } if model == "reranker" && using.as_ref().is_some_and(|target| target.name == "colbert")));
+}
+
+#[test]
+fn using_can_declare_an_arbitrary_sparse_vector() {
+    let s = Parser::parse("QUERY TEXT 'search' FROM docs USING lexical_v2 AS SPARSE LIMIT 10;")
+        .unwrap();
+    let Stmt::Query(q) = s else { panic!() };
+    assert!(matches!(
+        q.expression,
+        QueryExpr::Nearest {
+            using: Some(crate::ast::VectorTarget {
+                ref name,
+                kind: Some(crate::ast::VectorKind::Sparse),
+            }),
+            ..
+        } if name == "lexical_v2"
+    ));
 }
 
 #[test]
@@ -208,6 +241,24 @@ fn query_clauses_full_order() {
 #[test]
 fn select_is_rejected() {
     assert!(Parser::parse("SELECT * FROM docs WHERE id = 42").is_err());
+}
+
+#[test]
+fn removed_pre_v1_aliases_are_rejected() {
+    for source in [
+        "INSERT INTO docs VALUES {id: 1}",
+        "BOOST ($score * 2)",
+        "CREATE COLLECTION docs VECTORS (dense VECTOR (4, COSINE))",
+        "CREATE COLLECTION docs (VECTOR (4, COSINE))",
+        "CREATE COLLECTION docs (dense (4, COSINE))",
+        "CREATE COLLECTION docs (dense VECTOR (4, COSINE) WITH VECTORS (on_disk = true))",
+        "ALTER COLLECTION docs WITH QUANTIZE (type = 'scalar')",
+        "CREATE SHARD 'tenant' ON COLLECTION docs",
+        "QUERY TEXT 'x' FROM docs PARAMS (k = 30)",
+        "QUERY TEXT 'x' FROM docs PARAMS (weights = [1.0])",
+    ] {
+        assert!(Parser::parse(source).is_err(), "{source}");
+    }
 }
 
 #[test]

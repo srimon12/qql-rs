@@ -12,7 +12,9 @@ use crate::mutation::{
 use crate::query::{lower_query_groups_request, lower_query_request};
 use crate::routing::{RequestBody, Route};
 use crate::types::*;
-use qql_core::ast::{QueryCollection, QueryExpr, Stmt};
+use qql_core::ast::{
+    QueryCollection, QueryExpr, QueryInput, Stmt, VectorKind, VectorTarget, VectorValue,
+};
 use qql_core::error::QqlError;
 
 /// Canonical planned operation. Batch compatibility is determined from this
@@ -256,14 +258,11 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
                 scroll.with_vector.as_ref(),
             ),
         }),
-        Stmt::Upsert(upsert) => {
-            validate_embedding_spec(upsert)?;
-            Ok(PlannedOperation::Upsert {
-                collection: upsert.collection.clone(),
-                request: lower_upsert_request(upsert),
-                wait: upsert.embedding.is_some() || !upsert.embed.is_empty(),
-            })
-        }
+        Stmt::Upsert(upsert) => Ok(PlannedOperation::Upsert {
+            collection: upsert.collection.clone(),
+            request: lower_upsert_request(upsert),
+            wait: upsert.embedding.is_some() || !upsert.embed.is_empty(),
+        }),
         Stmt::Delete(delete) => Ok(PlannedOperation::Delete {
             collection: delete.collection.clone(),
             request: lower_delete_request(delete),
@@ -341,35 +340,6 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
     }
 }
 
-fn validate_embedding_spec(upsert: &qql_core::ast::UpsertStmt) -> Result<(), QqlError> {
-    let Some(spec) = &upsert.embedding else {
-        return Ok(());
-    };
-    let invalid = match spec {
-        qql_core::ast::EmbeddingSpec::Dense { model, vector }
-        | qql_core::ast::EmbeddingSpec::Sparse { model, vector } => {
-            model.is_none() && vector.is_none()
-        }
-        qql_core::ast::EmbeddingSpec::Hybrid {
-            dense_model,
-            dense_vector,
-            sparse_model,
-            sparse_vector,
-        } => {
-            (dense_model.is_none() && dense_vector.is_none())
-                || (sparse_model.is_none() && sparse_vector.is_none())
-        }
-    };
-    if invalid {
-        return Err(QqlError::validation(
-            "QQL-PLAN-EMBEDDING",
-            "each embedding target requires MODEL or VECTOR",
-            None,
-        ));
-    }
-    Ok(())
-}
-
 fn validate_query_stmt(query: &qql_core::ast::QueryStmt) -> Result<(), QqlError> {
     for cte in &query.ctes {
         validate_query_stmt(&cte.query)?;
@@ -425,6 +395,7 @@ fn validate_query_stmt(query: &qql_core::ast::QueryStmt) -> Result<(), QqlError>
 }
 
 fn validate_query_expr(expression: &QueryExpr) -> Result<(), QqlError> {
+    validate_query_target_kinds(expression)?;
     let prefetch = match expression {
         QueryExpr::Nearest { prefetch, .. }
         | QueryExpr::Recommend { prefetch, .. }
@@ -448,7 +419,7 @@ fn validate_query_expr(expression: &QueryExpr) -> Result<(), QqlError> {
                 None,
             ));
         }
-        QueryExpr::Rerank { using, .. } if using.is_empty() => {
+        QueryExpr::Rerank { using: None, .. } => {
             return Err(QqlError::validation(
                 "QQL-PLAN-RERANK-USING",
                 "RERANK requires a non-empty USING vector name",
@@ -471,6 +442,86 @@ fn validate_query_expr(expression: &QueryExpr) -> Result<(), QqlError> {
         }
     }
     Ok(())
+}
+
+fn validate_query_target_kinds(expression: &QueryExpr) -> Result<(), QqlError> {
+    let (target, inputs): (Option<&VectorTarget>, Vec<&QueryInput>) = match expression {
+        QueryExpr::Nearest { input, using, .. } => (using.as_ref(), vec![input]),
+        QueryExpr::Recommend {
+            positive,
+            negative,
+            using,
+            ..
+        } => (
+            using.as_ref(),
+            positive.iter().chain(negative.iter()).collect(),
+        ),
+        QueryExpr::Context { pairs, using, .. } => (
+            using.as_ref(),
+            pairs
+                .iter()
+                .flat_map(|pair| [&pair.positive, &pair.negative])
+                .collect(),
+        ),
+        QueryExpr::Discover {
+            target,
+            context,
+            using,
+            ..
+        } => {
+            let mut inputs = vec![target];
+            inputs.extend(
+                context
+                    .iter()
+                    .flat_map(|pair| [&pair.positive, &pair.negative]),
+            );
+            (using.as_ref(), inputs)
+        }
+        QueryExpr::RelevanceFeedback {
+            target,
+            feedback,
+            using,
+            ..
+        } => {
+            let mut inputs = vec![target];
+            inputs.extend(feedback.iter().map(|item| &item.example));
+            (using.as_ref(), inputs)
+        }
+        QueryExpr::Rerank { input, using, .. } => {
+            if using
+                .as_ref()
+                .and_then(|target| target.kind)
+                .is_some_and(|kind| kind != VectorKind::Dense)
+            {
+                return Err(query_kind_error("RERANK requires a dense vector target"));
+            }
+            (using.as_ref(), vec![input])
+        }
+        _ => return Ok(()),
+    };
+
+    let Some(target_kind) = target.and_then(|target| target.kind) else {
+        return Ok(());
+    };
+    for input in inputs {
+        let input_kind = match input {
+            QueryInput::Vector(VectorValue::Dense(_) | VectorValue::MultiDense(_)) => {
+                Some(VectorKind::Dense)
+            }
+            QueryInput::Vector(VectorValue::Sparse { .. }) => Some(VectorKind::Sparse),
+            QueryInput::Text { .. } | QueryInput::Point(_) => None,
+        };
+        if input_kind.is_some_and(|kind| kind != target_kind) {
+            return Err(query_kind_error(
+                "query input vector type does not match the USING vector kind",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn query_kind_error(message: &'static str) -> QqlError {
+    QqlError::validation("QQL-PLAN-VECTOR-KIND", message, None)
 }
 
 /// REST projection of a planned operation (HTTP method/path/query/body).
@@ -735,7 +786,9 @@ mod tests {
 
     #[test]
     fn plan_rejects_malformed_rerank() {
-        use qql_core::ast::{PageSpec, QueryInput, QueryOutput, QueryStmt};
+        use qql_core::ast::{
+            PageSpec, QueryInput, QueryOutput, QueryStmt, VectorKind, VectorTarget,
+        };
         let stmt_empty_using = Stmt::Query(Box::new(QueryStmt {
             ctes: Vec::new(),
             collection: QueryCollection::Explicit("docs".into()),
@@ -745,7 +798,7 @@ mod tests {
                     model: None,
                 },
                 model: "colbert-v2".into(),
-                using: String::new(),
+                using: None,
                 prefetch: vec![qql_core::ast::Prefetch {
                     source: qql_core::ast::PrefetchSource::Query(Box::new(QueryStmt {
                         ctes: Vec::new(),
@@ -792,7 +845,10 @@ mod tests {
                     model: None,
                 },
                 model: "colbert-v2".into(),
-                using: "dense".into(),
+                using: Some(VectorTarget {
+                    name: "dense".into(),
+                    kind: Some(VectorKind::Dense),
+                }),
                 prefetch: Vec::new(),
             },
             filter: None,

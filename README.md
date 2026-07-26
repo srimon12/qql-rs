@@ -130,6 +130,11 @@ and hope it works. QQL gives you **programmatic access to the query itself**:
 
 ## Language Status
 
+QQL 1.0 is defined in [`language/v1`](language/v1). Its
+[`grammar.pest`](language/v1/grammar.pest) is the only handwritten core syntax
+grammar; `qql-grammar-gen` produces the parser input compiled by `qql-core`.
+There is no legacy or compatibility parser.
+
 | Crate / SDK | Language | parse | tokenize | is_valid | inject_filter | Runtime |
 |---|---|---|---|---|---|---|---|
 | **pyqql** | Python (PyO3) | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -176,7 +181,7 @@ qql dump medical backup.qql
 
 ```
                         ┌─────────────────────────────────────────────────┐
-                        │          qql-core (parser + AST)                │
+                        │    generated QQL grammar → qql-core AST         │
                         │  parse / tokenize / is_valid / inject_filter    │
                         │  ErrorKind: Lex, Parse, Validation              │
                         └──────────────────┬──────────────────────────────┘
@@ -222,7 +227,7 @@ Statement string
     ▼
 2. Prepare (executor: embeddings + schema validation)
    ├─ resolve_embeddings: text → dense/sparse vectors (if embedder registered)
-   ├─ ensure_vector_name: validate USING against known named vectors
+   ├─ resolve vector targets: validate names and infer dense/sparse roles from schema
    └─ ensure_collection_for_upsert: auto-create default dense/hybrid on first upsert
     │
     ▼
@@ -312,8 +317,13 @@ Full reference at [`docs/syntax.md`](docs/syntax.md).
 ```sql
 QUERY 'semantic search' FROM docs USING dense LIMIT 10;
 QUERY HYBRID TEXT 'hybrid search' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10;
-QUERY TEXT 'keyword search' FROM docs USING sparse LIMIT 10;
+QUERY TEXT 'keyword search' FROM docs USING lexical_v2 AS SPARSE LIMIT 10;
 ```
+
+Named vectors are first-class. A target such as `semantic_v2` or `lexical_v2`
+does not derive its role from its spelling: use `AS DENSE` / `AS SPARSE`, or
+let the runtime inspect the collection schema. Omitting `USING` is allowed only
+when exactly one compatible vector exists.
 
 ### Recsys modes
 ```sql
@@ -433,6 +443,10 @@ auto-creates the target collection with a default schema if it does not exist:
 This applies only to UPSERT paths — `QUERY` against a non-existent collection
 returns a Qdrant error as expected.
 
+For existing collections, these names are not special. The runtime resolves
+arbitrary named-vector targets from the collection schema and rejects ambiguous
+inference instead of silently choosing the first vector.
+
 ---
 
 ## Batch cardinality
@@ -462,4 +476,14 @@ PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 cargo test --workspace --all-targets
 
 # Check clippy
 PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 cargo clippy --workspace --all-targets -- -D warnings
+
+# Regenerate the qql-core parser input after changing the canonical grammar
+cargo run -p qql-grammar-gen -- generate
+
+# Verify generated grammar and the in-repository language contract
+cargo run -p qql-grammar-gen -- check
+cargo run -p qql-conformance -- check language/v1
+
+# Regenerate snapshots after an intentional language change
+cargo run -p qql-conformance -- generate language/v1
 ```

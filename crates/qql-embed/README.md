@@ -36,7 +36,8 @@ Resolution happens in these cases:
 
 | Statement | Input source | Output |
 |-----------|-------------|--------|
-| `QUERY 'text'` | Bare string or `TEXT '...'` | Query input rewrites to dense vector |
+| `QUERY 'text' ... USING name AS DENSE` | Bare string or `TEXT '...'` | Query input rewrites to dense vector |
+| `QUERY 'text' ... USING name AS SPARSE` | Bare string or `TEXT '...'` | Query input rewrites to sparse vector |
 | `QUERY HYBRID TEXT '...'` | Hybrid text | Dense + sparse vector pair |
 | `UPSERT ... USING DENSE MODEL 'm'` | Payload `text` field | Dense vector per point |
 | `UPSERT ... USING HYBRID` | Payload `text` field | Dense + sparse vectors per point |
@@ -46,12 +47,17 @@ Resolution happens in these cases:
 | `QUERY NEAREST VECTOR [...]` | — | No embedding needed |
 | `QUERY NEAREST POINT 42` | — | No embedding needed |
 
-### Default vector names
+### Vector roles and default names
+
+Query targets carry a typed optional role (`DENSE` or `SPARSE`). Arbitrary
+names such as `semantic_v2` and `lexical_v2` are supported; embedding behavior
+never depends on a target literally being named `dense` or `sparse`.
 
 - `DENSE_VECTOR_NAME`: `"dense"` (constant)
 - `SPARSE_VECTOR_NAME`: `"sparse"` (constant)
 
-These are used when no explicit `USING` name is specified in `UPSERT ... EMBED`.
+These constants are used only when materializing a new default topology or when
+an explicit target has not yet been resolved by the runtime.
 
 ## SparseEmbedder — local BM25
 

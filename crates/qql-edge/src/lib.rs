@@ -244,7 +244,10 @@ mod tests {
                 .expect("schema-aware upsert");
             assert!(report.ok);
             let report = executor
-                .execute("QUERY 'hello' FROM docs LIMIT 1", OnError::Stop)
+                .execute(
+                    "QUERY 'hello' FROM docs USING dense AS DENSE LIMIT 1",
+                    OnError::Stop,
+                )
                 .await
                 .expect("schema-aware query");
             assert!(report.ok);
@@ -282,7 +285,7 @@ mod tests {
             assert!(report.ok);
             let report = executor
                 .execute(
-                    "QUERY 'hello' FROM docs SHARD 'tenant-a' LIMIT 1",
+                    "QUERY 'hello' FROM docs USING dense AS DENSE SHARD 'tenant-a' LIMIT 1",
                     OnError::Continue,
                 )
                 .await
