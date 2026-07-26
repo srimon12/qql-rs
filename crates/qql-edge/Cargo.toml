@@ -2,7 +2,16 @@
 name = "qql-edge"
 version.workspace = true
 edition.workspace = true
-description = "Local/edge QQL executor — fastembed-rs + qdrant-edge, zero network hops"
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Embedded QQL executor backed by qdrant-edge and optional local FastEmbed inference"
+documentation = "https://docs.rs/qql-edge"
+readme = "README.md"
+keywords = ["qql", "qdrant", "vector-search", "embeddings", "edge"]
+categories = ["database"]
 
 [features]
 default = ["fastembed-local"]
@@ -13,10 +22,10 @@ fastembed-local = ["fastembed"]
 http-embedding = ["qql/rest"]
 
 [dependencies]
-qql-core = { path = "../qql-core", features = ["serde", "json", "std"] }
-qql-plan = { path = "../qql-plan" }
-qql-embed = { path = "../qql-embed" }
-qql = { path = "../qql-runtime", default-features = false }
+qql-core = { version = "0.1.0", path = "../qql-core", features = ["serde", "json", "std"] }
+qql-plan = { version = "0.1.0", path = "../qql-plan" }
+qql-embed = { version = "0.1.0", path = "../qql-embed" }
+qql = { version = "0.1.0", path = "../qql-runtime", default-features = false }
 
 fastembed = { version = "5", optional = true }
 qdrant-edge = "0.7"

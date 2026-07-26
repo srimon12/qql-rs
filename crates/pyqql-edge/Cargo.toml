@@ -2,7 +2,13 @@
 name = "pyqql-edge"
 version.workspace = true
 edition.workspace = true
-description = "QQL local edge executor for Python — qdrant-edge + fastembed, zero network"
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Native Python bindings for local QQL execution with qdrant-edge and FastEmbed"
+publish = false
 
 [lib]
 crate-type = ["cdylib"]
@@ -15,11 +21,11 @@ fastembed-local = ["qql-edge/fastembed-local"]
 http-embedding = ["qql-edge/http-embedding"]
 
 [dependencies]
-qql-core = { path = "../qql-core", features = ["serde"] }
-qql-plan = { path = "../qql-plan" }
-qql = { path = "../qql-runtime", default-features = false }
-qql-edge = { path = "../qql-edge", default-features = false }
-pyo3 = { version = "0.23", features = ["extension-module"] }
+qql-core = { version = "0.1.0", path = "../qql-core", features = ["serde"] }
+qql-plan = { version = "0.1.0", path = "../qql-plan" }
+qql = { version = "0.1.0", path = "../qql-runtime", default-features = false }
+qql-edge = { version = "0.1.0", path = "../qql-edge", default-features = false }
+pyo3 = { version = "0.23", features = ["extension-module", "abi3-py38"] }
 pyo3-async-runtimes = { version = "0.23", features = ["tokio-runtime"] }
 pythonize = "0.23"
 serde_json = "1"

@@ -2,6 +2,16 @@
 name = "qql-core"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Parser, typed AST, validation, and transformations for the Qdrant Query Language"
+documentation = "https://docs.rs/qql-core"
+readme = "README.md"
+keywords = ["qql", "qdrant", "parser", "query-language", "vector-search"]
+categories = ["parser-implementations", "database"]
 
 [features]
 default = []

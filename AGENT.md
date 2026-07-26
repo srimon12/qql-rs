@@ -171,7 +171,9 @@ Three implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant`. The gRPC adapte
 
 ## 2. OpenAPI Schema Contract Testing
 
-All generated route payloads are validated directly against Qdrant's official [`openapi.json`](file:///data/codebases/qql-rs/openapi.json) specification in `crates/qql-runtime/src/contract_test.rs`:
+All generated route payloads are validated directly against Qdrant's official
+`crates/qql-runtime/openapi.json` specification in
+`crates/qql-runtime/src/contract_test.rs`:
 
 1. **`Query` Schema Validation**: All 12 query expression variants are validated against `# /components/schemas/Query`.
 2. **`Filter` Schema Validation**: All 17 filter expression variants are validated against `# /components/schemas/Filter`.

@@ -2,6 +2,16 @@
 name = "qql-cli"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Command-line interface, REPL, converter, and migration tools for QQL"
+documentation = "https://docs.rs/qql-cli"
+readme = "README.md"
+keywords = ["qql", "qdrant", "cli", "vector-search", "query-language"]
+categories = ["command-line-utilities", "database"]
 
 [[bin]]
 name = "qql"
@@ -12,16 +22,15 @@ default = ["grpc", "rest"]
 grpc = ["qql/grpc"]
 rest = ["qql/rest"]
 # Local in-process qdrant-edge backend (no Qdrant server needed).
-# Opt-in — adds ~48 MB (fastembed/ONNX).  The primary edge API is
-# `pip install pyqql-edge`; use this feature only when you need edge
-# from the CLI binary.
+# Opt-in because FastEmbed and ONNX materially increase compile time and
+# the optimized CLI binary size.
 edge = ["qql-edge", "qql-edge/http-embedding"]
 
 [dependencies]
-qql-core = { path = "../qql-core" }
-qql-plan = { path = "../qql-plan" }
-qql = { path = "../qql-runtime", default-features = false }
-qql-edge = { path = "../qql-edge", optional = true }
+qql-core = { version = "0.1.0", path = "../qql-core" }
+qql-plan = { version = "0.1.0", path = "../qql-plan" }
+qql = { version = "0.1.0", path = "../qql-runtime", default-features = false }
+qql-edge = { version = "0.1.0", path = "../qql-edge", optional = true }
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 serde = { version = "1", features = ["derive"] }

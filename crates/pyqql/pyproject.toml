@@ -6,6 +6,29 @@ build-backend = "maturin"
 name = "pyqql"
 version = "0.1.0"
 requires-python = ">=3.8"
-description = "QQL parser — Qdrant Query Language native parser via Rust"
+description = "Native Python bindings for the Qdrant Query Language parser and runtime"
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Srimon Danguria", email = "srimon12mckv@gmail.com" },
+]
+keywords = ["qql", "qdrant", "vector-search", "query-language", "database"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/srimon12/qql-rs"
+Repository = "https://github.com/srimon12/qql-rs"
+Issues = "https://github.com/srimon12/qql-rs/issues"
+Documentation = "https://github.com/srimon12/qql-rs/tree/main/crates/pyqql"
+
+[tool.maturin]
+bindings = "pyo3"
+module-name = "pyqql.pyqql"
+strip = true
+exclude = ["pyqql/**/__pycache__", "pyqql/**/*.pyc"]

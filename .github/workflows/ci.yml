@@ -2,15 +2,35 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
+    branches: [dev]
   pull_request:
+    branches: [main, dev]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
   PYO3_USE_ABI3_FORWARD_COMPATIBILITY: 1
 
 jobs:
+  branch-policy:
+    name: Branch policy
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require dev as the source branch for main
+        if: ${{ github.base_ref == 'main' && github.head_ref != 'dev' }}
+        run: |
+          echo "Pull requests into main must come from the dev branch."
+          exit 1
+
   rust:
+    name: Rust
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -19,19 +39,17 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-
       - name: Format check
         run: cargo fmt --all -- --check
 
-      - name: Clippy (workspace)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Clippy (published Rust crates)
+        run: cargo clippy --locked --all-features -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli --all-targets -- -D warnings
 
-      - name: Test (core crates)
-        run: cargo test --all-features -p qql-core -p qql-plan -p qql-embed -p qql -p qql-cli
+      - name: Test (published Rust crates)
+        run: cargo test --locked --all-features -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli
 
   conformance:
+    name: Conformance
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -39,22 +57,21 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Check generated grammar
-        run: cargo run -p qql-grammar-gen -- check
+        run: cargo run --locked -p qql-grammar-gen -- check
 
       - name: Check QQL language conformance
-        run: cargo run -p qql-conformance -- check language/v1
+        run: cargo run --locked -p qql-conformance -- check language/v1
 
   # ── Platform binding build checks ─────────────────────────────
   # Build and import the language artifacts so generated bindings and
   # wrapper code cannot drift independently from the Rust crates.
 
   pyqql-check:
+    name: Python bindings
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-      - name: Install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -65,30 +82,34 @@ jobs:
           python -m unittest discover -s crates/pyqql-edge/tests -v
 
   nqql-check:
+    name: Node binding (${{ matrix.package }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [nqql, nqql-edge]
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: '20'
-      - name: Install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-      - name: Build and test nqql
-        working-directory: crates/nqql
+          node-version: '22.13.1'
+      - name: Build and test ${{ matrix.package }}
+        working-directory: crates/${{ matrix.package }}
         run: |
-          npm install --no-audit --no-fund
+          npm install --no-package-lock --omit=optional --no-audit --no-fund
           npm test
-          npm pack --dry-run
+          npm pack --dry-run --ignore-scripts
 
   wasm-check:
+    name: WASM and playground
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22.13.1'
       - uses: pnpm/action-setup@v4
@@ -183,7 +204,7 @@ jobs:
   #   steps:
   #     - uses: actions/checkout@v5
   #     - uses: dtolnay/rust-toolchain@stable
-  #     - uses: actions/setup-node@v4
+  #     - uses: actions/setup-node@v7
   #       with: { node-version: '20' }
   #     - name: Build npm package
   #       run: cd crates/nqql && npm install && npm run build

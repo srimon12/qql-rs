@@ -1,24 +1,14 @@
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::path::Path;
 
     use qql_core::parser::Parser;
     use qql_plan::routing::route;
 
     fn load_openapi_json() -> Option<serde_json::Value> {
-        let paths = ["../../openapi.json", "openapi.json"];
-        for p in &paths {
-            let path = Path::new(p);
-            if path.exists() {
-                if let Ok(content) = fs::read_to_string(path) {
-                    if let Ok(json) = serde_json::from_str(&content) {
-                        return Some(json);
-                    }
-                }
-            }
-        }
-        None
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("openapi.json");
+        let content = fs::read_to_string(path).ok()?;
+        serde_json::from_str(&content).ok()
     }
 
     #[test]

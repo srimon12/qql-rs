@@ -5,10 +5,13 @@ Command-line interface and interactive REPL for QQL. Connects to Qdrant, execute
 ## Installation
 
 ```bash
-# Default build (grpc + rest + edge)
+# Default build (gRPC + REST)
 cargo build --release -p qql-cli
 
-# REST-only (smaller binary, no gRPC or edge dependencies)
+# Full build with local edge execution
+cargo build --release -p qql-cli --features edge
+
+# REST-only (smaller binary)
 cargo build --release -p qql-cli --no-default-features --features rest
 
 # binary at target/release/qql
@@ -93,19 +96,42 @@ qql doctor
 qql doctor --json
 ```
 
-### edge — Run QQL against local qdrant-edge (no server)
+### --edge — Run normal commands against local qdrant-edge
 
-Requires `edge` feature (included in default build). Embeddings via local ONNX (`fastembed`) or HTTP provider:
+The edge backend is an optional feature because FastEmbed and ONNX materially
+increase compile time and binary size. Configure it once:
 
 ```bash
-# fastembed — local ONNX inference, fully offline
-qql edge "QUERY 'vector search' FROM docs USING dense LIMIT 5" --data-dir /tmp/my-edge
+# Local ONNX embeddings
+qql config edge \
+  --data-dir ./qql-data \
+  --model bge-small-en-v1.5 \
+  --cache-dir ~/.cache/fastembed
 
-# HTTP embedder (Ollama, OpenAI, etc.)
-qql edge "QUERY 'search' FROM docs LIMIT 5" --embedder http \
+# Or an OpenAI-compatible HTTP embedder
+qql config edge \
+  --data-dir ./qql-data \
+  --embedder http \
   --embed-url http://localhost:11434/v1/embeddings \
   --embed-model nomic-embed-text --embed-dim 768
 ```
+
+Then select the configured backend with the global flag:
+
+```bash
+qql --edge exec "QUERY 'vector search' FROM docs USING dense LIMIT 5"
+qql --edge execute migration.qql
+qql --edge connect
+qql --edge dump docs docs.qql
+qql --edge doctor
+```
+
+Configuration is stored at `~/.qql/edge.json`. CLI selection has the normal
+precedence: environment overrides the saved file, while `--edge` selects the
+backend. Supported overrides are `QQL_EDGE_DATA_DIR`,
+`QQL_EDGE_ON_DISK`, `QQL_EDGE_EMBEDDER`, `QQL_EDGE_MODEL`,
+`QQL_EDGE_CACHE_DIR`, `EMBED_URL`, `EMBED_KEY`, `EMBED_MODEL`, and
+`EMBED_DIM`.
 
 ### version — Print version info
 
@@ -149,7 +175,7 @@ Persistent config loaded from `~/.qql/config.json` (auto-created on first use). 
 |---------|---------|-------------|
 | `rest` | yes | Qdrant REST API transport |
 | `grpc` | yes | Qdrant gRPC transport (auto-selected when URL contains `:6334`) |
-| `edge` | yes | In-process qdrant-edge backend (no server required) |
+| `edge` | no | In-process qdrant-edge backend and local FastEmbed inference |
 
 ## .qql Script Format
 

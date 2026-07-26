@@ -13,10 +13,10 @@ Native Python bindings for the Qdrant Query Language (QQL) parser, router, and e
 - **Shard key**: Read/write the shard key on QUERY, COUNT, SCROLL, UPSERT, and DELETE statements
 - **Validation**: Check if a query string is valid QQL
 
-## Limitations
+## Compatibility
 
-- **Python <= 3.13**: PyO3 0.23 without ABI3 requires Python ≤ 3.13. Use a virtualenv with Python 3.12 or 3.13.
-- **gRPC**: gRPC transport is available when building with `--features grpc`. The default build uses REST only.
+- **Python 3.8+**: Published wheels use Python's stable ABI (`abi3-py38`) and support Python 3.8 and newer.
+- **REST and gRPC**: Published wheels include both transports by default.
 
 ## Installation
 

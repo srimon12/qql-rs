@@ -6,29 +6,38 @@ function isMusl() {
   return !report?.header?.glibcVersionRuntime;
 }
 
-function nativeFilename() {
+function nativeTarget() {
   const { platform, arch } = process;
-  if (platform === 'linux' && (arch === 'x64' || arch === 'arm64')) {
-    return `index.linux-${arch}-${isMusl() ? 'musl' : 'gnu'}.node`;
+  if (platform === 'linux' && arch === 'x64') {
+    if (isMusl()) {
+      throw new Error('nqql 0.1.0 does not provide a Linux musl binary');
+    }
+    return 'linux-x64-gnu';
   }
   if (platform === 'darwin' && (arch === 'x64' || arch === 'arm64')) {
-    return `index.darwin-${arch}.node`;
+    return `darwin-${arch}`;
   }
-  if (platform === 'win32' && (arch === 'x64' || arch === 'arm64' || arch === 'ia32')) {
-    return `index.win32-${arch}-msvc.node`;
+  if (platform === 'win32' && arch === 'x64') {
+    return 'win32-x64-msvc';
   }
   throw new Error(`nqql does not provide a native binary for ${platform}-${arch}`);
 }
 
+const target = nativeTarget();
 let nativeBinding;
 try {
-  nativeBinding = require(`./${nativeFilename()}`);
-} catch (platformError) {
+  nativeBinding = require(`./index.${target}.node`);
+} catch (localError) {
   try {
-    // Local development fallback for a non-platform napi build.
-    nativeBinding = require('./index.node');
-  } catch (_) {
-    throw platformError;
+    nativeBinding = require(`nqql-${target}`);
+  } catch (packageError) {
+    try {
+      // Local development fallback for a non-platform napi build.
+      nativeBinding = require('./index.node');
+    } catch (_) {
+      packageError.cause = localError;
+      throw packageError;
+    }
   }
 }
 
