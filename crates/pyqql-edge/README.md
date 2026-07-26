@@ -38,7 +38,7 @@ result = exec.execute("QUERY 'hello' FROM docs USING dense LIMIT 10", on_error="
 |--------|---------|
 | Point IDs | Integers or UUIDs only — `"doc-1"` is rejected |
 | Text UPSERT into an existing collection | Auto-embedding follows the schema: dense-only gets dense, sparse-only gets sparse, hybrid gets both |
-| `QUERY 'text'` on HYBRID | Automatically selects the only dense vector; ambiguous topologies still require `USING` |
+| `QUERY 'text'` on HYBRID | Dense+sparse topology is ambiguous, so specify the target with `USING <vector_name>` |
 | `GROUP BY` / shard keys | Rejected clearly; never silently ignored in edge mode |
 | Model locked at `local_executor()` | `USING MODEL 'other'` mismatches fail |
 | Client lifetime | Call `close()` (or use Python `with Client`) before deleting `data_dir` |

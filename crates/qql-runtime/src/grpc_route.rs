@@ -109,7 +109,8 @@ fn binary_quantization(value: &serde_json::Value) -> qdrant::BinaryQuantization 
         // Accept string aliases and numeric shorthand (1 / 2 / 1.5).
         let key = if let Some(s) = enc.as_str() {
             s.to_ascii_lowercase()
-        } else if let Some(n) = enc.as_f64() {
+        } else {
+            let n = enc.as_f64()?;
             if (n - 1.5).abs() < f64::EPSILON {
                 "1.5".into()
             } else if (n - 2.0).abs() < f64::EPSILON {
@@ -117,8 +118,6 @@ fn binary_quantization(value: &serde_json::Value) -> qdrant::BinaryQuantization 
             } else {
                 "1".into()
             }
-        } else {
-            return None;
         };
         Some(match key.as_str() {
             "twobits" | "two_bits" | "2" | "twobitsencoding" => {

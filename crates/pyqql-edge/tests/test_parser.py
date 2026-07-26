@@ -253,7 +253,7 @@ class TestEdgeExecutor(unittest.TestCase):
             msg = r["results"][0]["message"].lower()
             self.assertIn("uuid", msg)
 
-    def test_query_without_using_on_hybrid(self):
+    def test_query_without_using_on_hybrid_is_rejected(self):
         with _EdgeCase() as edge:
             edge.exec.execute("CREATE COLLECTION t HYBRID")
             edge.exec.execute(
@@ -262,7 +262,9 @@ class TestEdgeExecutor(unittest.TestCase):
             r = edge.exec.execute(
                 "QUERY 'hello' FROM t LIMIT 1", on_error="continue"
             )
-            self.assertTrue(r["ok"], r)
+            self.assertFalse(r["ok"], r)
+            self.assertEqual(r["results"][0]["operation"], "PREPARE")
+            self.assertIn("QQL-MISSING-USING", r["results"][0]["message"])
 
     def test_group_by_unsupported(self):
         with _EdgeCase() as edge:
