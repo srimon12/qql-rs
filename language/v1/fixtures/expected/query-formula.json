@@ -1,0 +1,860 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Formula": {
+            "defaults": [
+              [
+                "score",
+                {
+                  "Float": 0.0
+                }
+              ]
+            ],
+            "expression": {
+              "Mul": {
+                "left": {
+                  "Variable": {
+                    "name": "$score"
+                  }
+                },
+                "right": {
+                  "Constant": {
+                    "value": 2.0
+                  }
+                }
+              }
+            },
+            "prefetch": []
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Formula": {
+            "defaults": [
+              [
+                "score",
+                {
+                  "Float": 0.0
+                }
+              ]
+            ],
+            "expression": {
+              "Sum": {
+                "left": {
+                  "Variable": {
+                    "name": "$score"
+                  }
+                },
+                "right": {
+                  "Mul": {
+                    "left": {
+                      "Constant": {
+                        "value": 0.3
+                      }
+                    },
+                    "right": {
+                      "Variable": {
+                        "name": "popularity"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "prefetch": []
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [
+          {
+            "name": "candidates",
+            "query": {
+              "collection": "Inherited",
+              "ctes": [],
+              "expression": {
+                "Nearest": {
+                  "input": {
+                    "Text": {
+                      "model": null,
+                      "text": "search"
+                    }
+                  },
+                  "mmr": null,
+                  "prefetch": [],
+                  "using": {
+                    "kind": null,
+                    "name": "dense"
+                  }
+                }
+              },
+              "filter": null,
+              "group": null,
+              "output": {
+                "payload": null,
+                "vectors": null
+              },
+              "page": {
+                "limit": 100,
+                "offset": null
+              },
+              "params": null,
+              "score_threshold": null,
+              "shard_key": null
+            }
+          }
+        ],
+        "expression": {
+          "Formula": {
+            "defaults": [
+              [
+                "score",
+                {
+                  "Float": 0.0
+                }
+              ]
+            ],
+            "expression": {
+              "Mul": {
+                "left": {
+                  "Variable": {
+                    "name": "$score"
+                  }
+                },
+                "right": {
+                  "Constant": {
+                    "value": 2.0
+                  }
+                }
+              }
+            },
+            "prefetch": [
+              {
+                "filter": null,
+                "lookup": null,
+                "score_threshold": null,
+                "source": {
+                  "Cte": "candidates"
+                }
+              }
+            ]
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Formula": {
+            "defaults": [
+              [
+                "score",
+                {
+                  "Float": 0.0
+                }
+              ]
+            ],
+            "expression": {
+              "Mul": {
+                "left": {
+                  "Sqrt": {
+                    "x": {
+                      "Variable": {
+                        "name": "$score"
+                      }
+                    }
+                  }
+                },
+                "right": {
+                  "Constant": {
+                    "value": 10.0
+                  }
+                }
+              }
+            },
+            "prefetch": []
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Formula": {
+            "defaults": [
+              [
+                "score",
+                {
+                  "Float": 0.0
+                }
+              ]
+            ],
+            "expression": {
+              "Log": {
+                "x": {
+                  "Sum": {
+                    "left": {
+                      "Variable": {
+                        "name": "$score"
+                      }
+                    },
+                    "right": {
+                      "Constant": {
+                        "value": 1.0
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "prefetch": []
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Formula": {
+            "defaults": [
+              [
+                "score",
+                {
+                  "Float": 0.0
+                }
+              ]
+            ],
+            "expression": {
+              "Pow": {
+                "base": {
+                  "Abs": {
+                    "x": {
+                      "Variable": {
+                        "name": "$score"
+                      }
+                    }
+                  }
+                },
+                "exponent": {
+                  "Constant": {
+                    "value": 2.0
+                  }
+                }
+              }
+            },
+            "prefetch": []
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Formula": {
+            "defaults": [
+              [
+                "score",
+                {
+                  "Float": 0.0
+                }
+              ]
+            ],
+            "expression": {
+              "Mul": {
+                "left": {
+                  "Variable": {
+                    "name": "$score"
+                  }
+                },
+                "right": {
+                  "Div": {
+                    "by_zero_default": null,
+                    "left": {
+                      "Constant": {
+                        "value": 1.0
+                      }
+                    },
+                    "right": {
+                      "Sum": {
+                        "left": {
+                          "Constant": {
+                            "value": 1.0
+                          }
+                        },
+                        "right": {
+                          "GeoDistance": {
+                            "field": "location",
+                            "lat": 52.52,
+                            "lon": 13.405
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "prefetch": []
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Formula": {
+            "defaults": [
+              [
+                "score",
+                {
+                  "Float": 0.0
+                }
+              ]
+            ],
+            "expression": {
+              "Case": {
+                "cond": {
+                  "MatchAny": {
+                    "field": "premium",
+                    "values": [
+                      {
+                        "Str": "true"
+                      }
+                    ]
+                  }
+                },
+                "else_": {
+                  "Variable": {
+                    "name": "$score"
+                  }
+                },
+                "then_": {
+                  "Mul": {
+                    "left": {
+                      "Variable": {
+                        "name": "$score"
+                      }
+                    },
+                    "right": {
+                      "Constant": {
+                        "value": 2.0
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "prefetch": []
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Formula": {
+            "defaults": [
+              [
+                "score",
+                {
+                  "Float": 0.0
+                }
+              ]
+            ],
+            "expression": {
+              "Mul": {
+                "left": {
+                  "Variable": {
+                    "name": "$score"
+                  }
+                },
+                "right": {
+                  "Constant": {
+                    "value": 2.0
+                  }
+                }
+              }
+            },
+            "prefetch": []
+          }
+        },
+        "filter": {
+          "Compare": {
+            "field": "status",
+            "op": "Eq",
+            "value": {
+              "Str": "published"
+            }
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Formula": {
+            "defaults": [
+              [
+                "score",
+                {
+                  "Float": 0.0
+                }
+              ]
+            ],
+            "expression": {
+              "Decay": {
+                "kind": "exp_decay",
+                "midpoint": null,
+                "scale": null,
+                "target": null,
+                "x": {
+                  "Variable": {
+                    "name": "relevance_score"
+                  }
+                }
+              }
+            },
+            "prefetch": []
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Formula": {
+            "defaults": [
+              [
+                "score",
+                {
+                  "Float": 0.0
+                }
+              ]
+            ],
+            "expression": {
+              "Decay": {
+                "kind": "gauss_decay",
+                "midpoint": null,
+                "scale": null,
+                "target": null,
+                "x": {
+                  "Variable": {
+                    "name": "popularity"
+                  }
+                }
+              }
+            },
+            "prefetch": []
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Formula": {
+            "defaults": [
+              [
+                "score",
+                {
+                  "Float": 0.0
+                }
+              ]
+            ],
+            "expression": {
+              "Decay": {
+                "kind": "lin_decay",
+                "midpoint": null,
+                "scale": null,
+                "target": null,
+                "x": {
+                  "Variable": {
+                    "name": "age_days"
+                  }
+                }
+              }
+            },
+            "prefetch": []
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Formula": {
+            "defaults": [
+              [
+                "score",
+                {
+                  "Float": 0.0
+                }
+              ]
+            ],
+            "expression": {
+              "Datetime": {
+                "value": "2026-01-01"
+              }
+            },
+            "prefetch": []
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Formula": {
+            "defaults": [
+              [
+                "score",
+                {
+                  "Float": 0.0
+                }
+              ]
+            ],
+            "expression": {
+              "DatetimeKey": {
+                "key": "published_at"
+              }
+            },
+            "prefetch": []
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Formula": {
+            "defaults": [
+              [
+                "score",
+                {
+                  "Float": 0.0
+                }
+              ]
+            ],
+            "expression": {
+              "Div": {
+                "by_zero_default": null,
+                "left": {
+                  "Sum": {
+                    "left": {
+                      "Mul": {
+                        "left": {
+                          "Variable": {
+                            "name": "$score"
+                          }
+                        },
+                        "right": {
+                          "Log": {
+                            "x": {
+                              "Sum": {
+                                "left": {
+                                  "Variable": {
+                                    "name": "popularity"
+                                  }
+                                },
+                                "right": {
+                                  "Constant": {
+                                    "value": 1.0
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "right": {
+                      "Mul": {
+                        "left": {
+                          "Constant": {
+                            "value": 0.5
+                          }
+                        },
+                        "right": {
+                          "Variable": {
+                            "name": "recency"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "right": {
+                  "Constant": {
+                    "value": 2.0
+                  }
+                }
+              }
+            },
+            "prefetch": []
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    }
+  ]
+}

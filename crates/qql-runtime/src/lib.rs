@@ -1,17 +1,22 @@
+pub mod backend;
+pub mod client;
 pub mod config;
 pub mod embedder;
 pub mod executor;
-pub mod filter_conv;
-pub mod pipeline;
+#[cfg(feature = "grpc")]
+pub mod grpc;
+#[cfg(feature = "grpc")]
+mod grpc_route;
 pub mod qdrant;
+#[cfg(feature = "grpc")]
+pub mod qdrant_grpc;
+#[cfg(feature = "rest")]
+pub mod rest;
 pub mod sparse;
 
-#[cfg(test)]
-mod pipeline_test;
-#[cfg(test)]
-mod sparse_test;
+// Sparse unit tests live in `qql-embed` (shared implementation).
 
 #[cfg(test)]
-mod executor_test;
+mod contract_test;
 #[cfg(test)]
-mod filter_conv_test;
+mod executor_test;

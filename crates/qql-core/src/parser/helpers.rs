@@ -1,434 +1,463 @@
-use super::{ascii_equal, EmbeddingOptions, Parser};
-use crate::ast::Value;
-use crate::error::QqlError;
-use crate::token::TokenKind;
+use super::AstLowerer;
+use crate::ast::{EmbeddingSpec, PointId, Value, VectorValue};
+use crate::error::{QqlError, Span};
+use crate::token::{Token, TokenKind};
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-impl<'a> Parser<'a> {
-    // ── String pointer helpers ──────────────────────────────────
-
-    pub fn parse_string_ptr(&mut self) -> Result<&'a str, QqlError> {
-        let tok = self.expect(TokenKind::String)?;
-        Ok(tok.text)
+impl<'a> AstLowerer<'a> {
+    pub fn parse_string(&mut self) -> Result<String, QqlError> {
+        let token = self.expect(TokenKind::String)?;
+        self.decode_string(token)
     }
 
-    pub fn parse_required_model_string(&mut self) -> Result<&'a str, QqlError> {
+    pub fn parse_required_model_string(&mut self) -> Result<String, QqlError> {
         self.expect(TokenKind::Model)?;
-        self.parse_string_ptr()
+        self.parse_string()
     }
 
-    pub fn parse_optional_model_string(&mut self) -> Result<Option<&'a str>, QqlError> {
+    pub fn parse_optional_model_string(&mut self) -> Result<Option<String>, QqlError> {
         if self.peek()?.kind != TokenKind::Model {
             return Ok(None);
         }
         self.advance()?;
-        self.parse_string_ptr().map(Some)
+        self.parse_string().map(Some)
     }
 
-    pub fn parse_optional_vector_string(&mut self) -> Result<Option<&'a str>, QqlError> {
-        let tok = self.peek()?;
-        if tok.kind == TokenKind::Vector
-            || (tok.kind == TokenKind::Identifier && ascii_equal(tok.text, "VECTOR"))
-        {
-            self.advance()?;
-            return self.parse_string_ptr().map(Some);
-        }
-        Ok(None)
-    }
-
-    // ── Embedding options ───────────────────────────────────────
-
-    pub fn parse_embedding_options(&mut self) -> Result<EmbeddingOptions<'a>, QqlError> {
-        if self.peek()?.kind != TokenKind::Using {
-            return Ok(EmbeddingOptions {
-                model: None,
-                hybrid: false,
-                sparse_model: None,
-                dense_vector: None,
-                sparse_vector: None,
-            });
+    pub fn parse_optional_vector_name(&mut self) -> Result<Option<String>, QqlError> {
+        if self.peek()?.kind != TokenKind::Vector {
+            return Ok(None);
         }
         self.advance()?;
-
-        if self.peek()?.kind != TokenKind::Hybrid {
-            if self.peek()?.kind == TokenKind::Dense {
-                self.advance()?;
-            }
-            let mut dense_vector = self.parse_optional_vector_string()?;
-            let mut model = self.parse_optional_model_string()?;
-            if dense_vector.is_none() {
-                dense_vector = self.parse_optional_vector_string()?;
-            }
-            if model.is_none() && dense_vector.is_none() {
-                model = Some(self.parse_required_model_string()?);
-            }
-            return Ok(EmbeddingOptions {
-                model,
-                hybrid: false,
-                sparse_model: None,
-                dense_vector,
-                sparse_vector: None,
-            });
-        }
-
-        self.advance()?; // consume HYBRID
-        let mut model: Option<&'a str> = None;
-        let mut sparse_model: Option<&'a str> = None;
-        let mut dense_vector: Option<&'a str> = None;
-        let mut sparse_vector: Option<&'a str> = None;
-
-        while self.peek()?.kind == TokenKind::Dense || self.peek()?.kind == TokenKind::Sparse {
-            let mode = self.advance()?.kind;
-            let mut current_vector = self.parse_optional_vector_string()?;
-            let current_model = self.parse_optional_model_string()?;
-            if current_vector.is_none() {
-                current_vector = self.parse_optional_vector_string()?;
-            }
-            if current_model.is_none() && current_vector.is_none() {
-                return Err(QqlError::syntax(
-                    "expected MODEL or VECTOR after DENSE/SPARSE",
-                    self.peek()?.pos,
-                ));
-            }
-            if mode == TokenKind::Dense {
-                model = current_model;
-                dense_vector = current_vector;
-            } else {
-                sparse_model = current_model;
-                sparse_vector = current_vector;
-            }
-        }
-
-        Ok(EmbeddingOptions {
-            model,
-            hybrid: true,
-            sparse_model,
-            dense_vector,
-            sparse_vector,
-        })
+        self.parse_identifier().map(Some)
     }
 
-    // ── Point ID helpers ────────────────────────────────────────
+    pub fn parse_embedding_options(&mut self) -> Result<Option<EmbeddingSpec>, QqlError> {
+        if self.peek()?.kind != TokenKind::Using {
+            return Ok(None);
+        }
+        self.advance()?;
+        if self.peek()?.kind != TokenKind::Hybrid {
+            let sparse = self.peek()?.kind == TokenKind::Sparse;
+            if self.peek()?.kind == TokenKind::Dense || sparse {
+                self.advance()?;
+            } else if self.peek()?.kind != TokenKind::Model
+                && self.peek()?.kind != TokenKind::Vector
+            {
+                return Err(QqlError::parse(
+                    "QQL-PARSE-EMBEDDING",
+                    "USING requires DENSE, SPARSE, HYBRID, MODEL, or VECTOR",
+                    self.peek()?.span,
+                ));
+            }
+            let model = self.parse_optional_model_string()?;
+            let vector = self.parse_optional_vector_name()?;
+            return Ok(Some(if sparse {
+                EmbeddingSpec::Sparse { model, vector }
+            } else {
+                EmbeddingSpec::Dense { model, vector }
+            }));
+        }
 
-    pub fn parse_point_id_value(&mut self, context: &str) -> Result<Value<'a>, QqlError> {
-        let tok = self.peek()?;
-        match tok.kind {
+        self.advance()?;
+        let mut dense_model = None;
+        let mut dense_vector = None;
+        let mut sparse_model = None;
+        let mut sparse_vector = None;
+        for expected in [TokenKind::Dense, TokenKind::Sparse] {
+            if self.peek()?.kind != expected {
+                continue;
+            }
+            self.advance()?;
+            let model = self.parse_optional_model_string()?;
+            let vector = self.parse_optional_vector_name()?;
+            if expected == TokenKind::Dense {
+                dense_model = model;
+                dense_vector = vector;
+            } else {
+                sparse_model = model;
+                sparse_vector = vector;
+            }
+        }
+        Ok(Some(EmbeddingSpec::Hybrid {
+            dense_model,
+            dense_vector,
+            sparse_model,
+            sparse_vector,
+        }))
+    }
+
+    pub fn parse_point_id(&mut self, context: &str) -> Result<PointId, QqlError> {
+        let token = self.peek()?;
+        match token.kind {
             TokenKind::String => {
                 self.advance()?;
-                Ok(Value::Str(alloc::borrow::Cow::Borrowed(tok.text)))
+                self.decode_string(token).map(PointId::String)
             }
             TokenKind::Integer => {
                 self.advance()?;
-                let v: i64 = tok.text.parse().map_err(|_| {
-                    QqlError::syntax(alloc::format!("invalid integer '{}'", tok.text), tok.pos)
-                })?;
-                Ok(Value::Int(v))
+                token.text.parse::<u64>().map(PointId::Number).map_err(|_| {
+                    QqlError::parse(
+                        "QQL-PARSE-POINT-ID",
+                        alloc::format!(
+                            "{} requires an unsigned integer or string point ID",
+                            context
+                        ),
+                        token.span,
+                    )
+                })
             }
-            _ => Err(QqlError::syntax(
+            _ => Err(QqlError::parse(
+                "QQL-PARSE-POINT-ID",
                 alloc::format!(
-                    "{} requires a string or integer point id, got '{}'",
-                    context,
-                    tok.text
+                    "{} requires an unsigned integer or string point ID",
+                    context
                 ),
-                tok.pos,
+                token.span,
             )),
         }
     }
 
-    pub fn parse_point_id_list(&mut self) -> Result<Vec<Value<'a>>, QqlError> {
-        let values = self.parse_literal_list()?;
-        for v in &values {
-            match v {
-                Value::Str(_) | Value::Int(_) => {}
-                _ => {
-                    return Err(QqlError::syntax(
-                        "point ids must be strings or integers",
-                        self.peek()?.pos,
-                    ));
-                }
-            }
+    pub fn parse_point_id_list(&mut self) -> Result<Vec<PointId>, QqlError> {
+        self.expect(TokenKind::Lparen)?;
+        let mut ids = Vec::new();
+        if self.peek()?.kind == TokenKind::Rparen {
+            return Err(QqlError::parse(
+                "QQL-PARSE-POINT-IDS",
+                "point ID list cannot be empty",
+                self.peek()?.span,
+            ));
         }
+        loop {
+            ids.push(self.parse_point_id("point ID list")?);
+            if self.peek()?.kind != TokenKind::Comma {
+                break;
+            }
+            self.advance()?;
+        }
+        self.expect(TokenKind::Rparen)?;
+        Ok(ids)
+    }
+
+    pub fn parse_literal(&mut self) -> Result<Value, QqlError> {
+        let value = self.parse_value()?;
+        if matches!(value, Value::Dict(_) | Value::List(_)) {
+            return Err(QqlError::parse(
+                "QQL-PARSE-LITERAL",
+                "expected a scalar literal",
+                self.peek()?.span,
+            ));
+        }
+        Ok(value)
+    }
+
+    pub fn parse_literal_list(&mut self) -> Result<Vec<Value>, QqlError> {
+        self.expect(TokenKind::Lparen)?;
+        let mut values = Vec::new();
+        if self.peek()?.kind == TokenKind::Rparen {
+            self.advance()?;
+            return Ok(values);
+        }
+        loop {
+            values.push(self.parse_literal()?);
+            if self.peek()?.kind != TokenKind::Comma {
+                break;
+            }
+            self.advance()?;
+        }
+        self.expect(TokenKind::Rparen)?;
         Ok(values)
     }
 
-    // ── Literal / Number helpers ────────────────────────────────
-
-    pub fn parse_literal(&mut self) -> Result<Value<'a>, QqlError> {
-        let tok = self.peek()?;
-        match tok.kind {
-            TokenKind::String => {
-                self.advance()?;
-                Ok(Value::Str(alloc::borrow::Cow::Borrowed(tok.text)))
-            }
-            TokenKind::Integer => {
-                self.advance()?;
-                let v: i64 = tok.text.parse().map_err(|_| {
-                    QqlError::syntax(alloc::format!("invalid integer '{}'", tok.text), tok.pos)
-                })?;
-                Ok(Value::Int(v))
-            }
-            TokenKind::Float => {
-                self.advance()?;
-                let v: f64 = tok.text.parse().map_err(|_| {
-                    QqlError::syntax(alloc::format!("invalid float '{}'", tok.text), tok.pos)
-                })?;
-                Ok(Value::Float(v))
-            }
-            TokenKind::Identifier => {
-                self.advance()?;
-                if ascii_equal(tok.text, "TRUE") {
-                    Ok(Value::Bool(true))
-                } else if ascii_equal(tok.text, "FALSE") {
-                    Ok(Value::Bool(false))
-                } else {
-                    Err(QqlError::syntax(
-                        alloc::format!("expected a literal value, got '{}'", tok.text),
-                        tok.pos,
-                    ))
-                }
-            }
-            _ => Err(QqlError::syntax(
-                alloc::format!("expected a literal value, got '{}'", tok.text),
-                tok.pos,
-            )),
-        }
-    }
-
-    pub fn parse_number(&mut self) -> Result<Value<'a>, QqlError> {
-        let tok = self.peek()?;
-        match tok.kind {
-            TokenKind::Integer => {
-                self.advance()?;
-                let v: i64 = tok.text.parse().map_err(|_| {
-                    QqlError::syntax(alloc::format!("invalid integer '{}'", tok.text), tok.pos)
-                })?;
-                Ok(Value::Int(v))
-            }
-            TokenKind::Float => {
-                self.advance()?;
-                let v: f64 = tok.text.parse().map_err(|_| {
-                    QqlError::syntax(alloc::format!("invalid float '{}'", tok.text), tok.pos)
-                })?;
-                Ok(Value::Float(v))
-            }
-            _ => Err(QqlError::syntax(
-                alloc::format!("expected a number, got '{}'", tok.text),
-                tok.pos,
-            )),
-        }
-    }
-
-    pub fn parse_literal_list(&mut self) -> Result<Vec<Value<'a>>, QqlError> {
-        self.expect(TokenKind::Lparen)?;
-        let mut items = Vec::new();
-        if self.peek()?.kind == TokenKind::Rparen {
+    pub fn parse_field_path(&mut self) -> Result<String, QqlError> {
+        let token = self.peek()?;
+        if token.kind == TokenKind::String {
             self.advance()?;
-            return Ok(items);
+            return self.decode_string(token);
         }
-        loop {
-            let val = self.parse_literal()?;
-            items.push(val);
-            if self.peek()?.kind == TokenKind::Comma {
-                self.advance()?;
-                if self.peek()?.kind == TokenKind::Rparen {
-                    break;
-                }
-            } else {
-                break;
-            }
-        }
-        self.expect(TokenKind::Rparen)?;
-        Ok(items)
-    }
-
-    // ── Field path ──────────────────────────────────────────────
-
-    pub fn parse_field_path(&mut self) -> Result<&'a str, QqlError> {
-        let tok = self.peek()?;
-        if tok.kind != TokenKind::Identifier && !super::is_contextual_field_name(tok.kind) {
-            return Err(QqlError::syntax(
-                alloc::format!("expected a field name, got '{}'", tok.text),
-                tok.pos,
+        if token.kind != TokenKind::Identifier && !super::is_contextual_field_name(token.kind) {
+            return Err(QqlError::parse(
+                "QQL-PARSE-FIELD",
+                alloc::format!("expected a field name, got '{}'", token.text),
+                token.span,
             ));
         }
         self.advance()?;
-        Ok(tok.text)
+        Ok(token.text.to_string())
     }
 
-    // ── Dict / Config / List helpers ────────────────────────────
-
-    pub fn parse_payload_dict(&mut self) -> Result<Vec<(&'a str, Value<'a>)>, QqlError> {
+    pub fn parse_payload_dict(&mut self) -> Result<Vec<(String, Value)>, QqlError> {
         self.expect(TokenKind::Lbrace)?;
-        let mut result = Vec::new();
+        let mut values = Vec::new();
         if self.peek()?.kind == TokenKind::Rbrace {
             self.advance()?;
-            return Ok(result);
+            return Ok(values);
         }
         loop {
-            let key_tok = self.peek()?;
-            if key_tok.kind != TokenKind::String
-                && key_tok.kind != TokenKind::Identifier
-                && key_tok.kind != TokenKind::Id
+            let key_token = self.parse_object_key()?;
+            let key = if key_token.kind == TokenKind::String {
+                self.decode_string(key_token)?
+            } else {
+                key_token.text.to_string()
+            };
+            if values
+                .iter()
+                .any(|(candidate, _): &(String, Value)| candidate.eq_ignore_ascii_case(&key))
             {
-                return Err(QqlError::syntax(
-                    alloc::format!("expected string key in dict, got '{}'", key_tok.text),
-                    key_tok.pos,
+                return Err(QqlError::parse(
+                    "QQL-PARSE-DUPLICATE-KEY",
+                    alloc::format!("duplicate payload key '{}'", key),
+                    key_token.span,
                 ));
             }
-            self.advance()?;
-            let key = key_tok.text;
             self.expect(TokenKind::Colon)?;
-            let value = self.parse_value()?;
-            result.push((key, value));
-            if self.peek()?.kind == TokenKind::Comma {
-                self.advance()?;
-                if self.peek()?.kind == TokenKind::Rbrace {
-                    break;
-                }
-            } else {
+            values.push((key, self.parse_value()?));
+            if self.peek()?.kind != TokenKind::Comma {
+                break;
+            }
+            self.advance()?;
+            if self.peek()?.kind == TokenKind::Rbrace {
                 break;
             }
         }
         self.expect(TokenKind::Rbrace)?;
-        Ok(result)
+        Ok(values)
     }
 
-    pub fn parse_config_block(&mut self) -> Result<Vec<(&'a str, Value<'a>)>, QqlError> {
+    pub fn parse_config_block(&mut self) -> Result<Vec<(String, Value)>, QqlError> {
         self.expect(TokenKind::Lparen)?;
-        let mut result = Vec::new();
+        let mut values = Vec::new();
         if self.peek()?.kind == TokenKind::Rparen {
             self.advance()?;
-            return Ok(result);
+            return Ok(values);
         }
         loop {
-            let key_tok = self.peek()?;
-            match key_tok.kind {
-                TokenKind::Lparen
-                | TokenKind::Rparen
-                | TokenKind::Equals
-                | TokenKind::Comma
-                | TokenKind::Eof => {
-                    return Err(QqlError::syntax(
-                        alloc::format!("expected configuration key, got '{}'", key_tok.text),
-                        key_tok.pos,
-                    ));
-                }
-                _ => {}
+            let key_token = self.parse_object_key()?;
+            let key = key_token.text.to_string();
+            if values
+                .iter()
+                .any(|(candidate, _): &(String, Value)| candidate.eq_ignore_ascii_case(&key))
+            {
+                return Err(QqlError::parse(
+                    "QQL-PARSE-DUPLICATE-KEY",
+                    alloc::format!("duplicate configuration key '{}'", key),
+                    key_token.span,
+                ));
+            }
+            self.expect(TokenKind::Equals)?;
+            values.push((key, self.parse_value()?));
+            if self.peek()?.kind != TokenKind::Comma {
+                break;
             }
             self.advance()?;
-            let key = key_tok.text;
-            self.expect(TokenKind::Equals)?;
-            let value = self.parse_value()?;
-            result.push((key, value));
-            if self.peek()?.kind == TokenKind::Comma {
-                self.advance()?;
-                if self.peek()?.kind == TokenKind::Rparen {
-                    break;
-                }
-            } else {
+            if self.peek()?.kind == TokenKind::Rparen {
                 break;
             }
         }
         self.expect(TokenKind::Rparen)?;
-        Ok(result)
+        Ok(values)
     }
 
-    pub fn parse_list(&mut self) -> Result<Vec<Value<'a>>, QqlError> {
+    fn parse_object_key(&mut self) -> Result<Token<'a>, QqlError> {
+        let token = self.peek()?;
+        if matches!(
+            token.kind,
+            TokenKind::Lbrace
+                | TokenKind::Rbrace
+                | TokenKind::Lbracket
+                | TokenKind::Rbracket
+                | TokenKind::Lparen
+                | TokenKind::Rparen
+                | TokenKind::Colon
+                | TokenKind::Comma
+                | TokenKind::Equals
+                | TokenKind::Semicolon
+                | TokenKind::Eof
+        ) {
+            return Err(QqlError::parse(
+                "QQL-PARSE-OBJECT-KEY",
+                alloc::format!("expected an object key, got '{}'", token.text),
+                token.span,
+            ));
+        }
+        self.advance()
+    }
+
+    pub fn parse_list(&mut self) -> Result<Vec<Value>, QqlError> {
         self.expect(TokenKind::Lbracket)?;
-        let mut items = Vec::new();
+        let mut values = Vec::new();
         if self.peek()?.kind == TokenKind::Rbracket {
             self.advance()?;
-            return Ok(items);
+            return Ok(values);
         }
         loop {
-            let value = self.parse_value()?;
-            items.push(value);
-            if self.peek()?.kind == TokenKind::Comma {
-                self.advance()?;
-                if self.peek()?.kind == TokenKind::Rbracket {
-                    break;
-                }
-            } else {
+            values.push(self.parse_value()?);
+            if self.peek()?.kind != TokenKind::Comma {
+                break;
+            }
+            self.advance()?;
+            if self.peek()?.kind == TokenKind::Rbracket {
                 break;
             }
         }
         self.expect(TokenKind::Rbracket)?;
-        Ok(items)
-    }
-
-    // ── Boolean / Numeric helpers ───────────────────────────────
-
-    pub fn parse_bool(&mut self) -> Result<bool, QqlError> {
-        let tok = self.peek()?;
-        if tok.kind == TokenKind::Identifier {
-            self.advance()?;
-            if ascii_equal(tok.text, "TRUE") {
-                return Ok(true);
-            }
-            if ascii_equal(tok.text, "FALSE") {
-                return Ok(false);
-            }
-        }
-        Err(QqlError::syntax(
-            alloc::format!("expected TRUE or FALSE, got '{}'", tok.text),
-            tok.pos,
-        ))
+        Ok(values)
     }
 
     pub fn parse_numeric_literal(&mut self) -> Result<f64, QqlError> {
-        let tok = self.peek()?;
-        match tok.kind {
-            TokenKind::Integer => {
-                self.advance()?;
-                tok.text.parse::<i64>().map(|v| v as f64).map_err(|_| {
-                    QqlError::syntax(alloc::format!("invalid integer '{}'", tok.text), tok.pos)
-                })
-            }
-            TokenKind::Float => {
-                self.advance()?;
-                tok.text.parse::<f64>().map_err(|_| {
-                    QqlError::syntax(alloc::format!("invalid float '{}'", tok.text), tok.pos)
-                })
-            }
-            _ => Err(QqlError::syntax(
-                alloc::format!("expected a number, got '{}'", tok.text),
-                tok.pos,
-            )),
+        let token = self.peek()?;
+        if !matches!(token.kind, TokenKind::Integer | TokenKind::Float) {
+            return Err(QqlError::parse(
+                "QQL-PARSE-NUMBER",
+                alloc::format!("expected a number, got '{}'", token.text),
+                token.span,
+            ));
         }
+        self.advance()?;
+        token.text.parse::<f64>().map_err(|_| {
+            QqlError::parse(
+                "QQL-PARSE-NUMBER",
+                alloc::format!("invalid number '{}'", token.text),
+                token.span,
+            )
+        })
     }
 
-    // ── Vector helpers ──────────────────────────────────────────
+    pub fn parse_positive_u64(&mut self, label: &str) -> Result<u64, QqlError> {
+        let token = self.expect(TokenKind::Integer)?;
+        let value = token.text.parse::<u64>().map_err(|_| {
+            QqlError::parse(
+                "QQL-PARSE-POSITIVE-INTEGER",
+                alloc::format!("{} must be a positive integer", label),
+                token.span,
+            )
+        })?;
+        if value == 0 {
+            return Err(QqlError::parse(
+                "QQL-PARSE-POSITIVE-INTEGER",
+                alloc::format!("{} must be a positive integer", label),
+                token.span,
+            ));
+        }
+        Ok(value)
+    }
 
-    pub fn parse_raw_vector(&mut self) -> Result<Vec<f64>, QqlError> {
-        self.expect(TokenKind::Lbracket)?;
-        let mut vec = Vec::new();
-        while self.peek()?.kind != TokenKind::Rbracket && self.peek()?.kind != TokenKind::Eof {
-            let tok = self.peek()?;
-            if tok.kind != TokenKind::Float && tok.kind != TokenKind::Integer {
-                return Err(QqlError::syntax(
-                    alloc::format!("expected numeric value in raw vector, got '{}'", tok.text),
-                    tok.pos,
+    pub fn parse_non_negative_u64(&mut self, label: &str) -> Result<u64, QqlError> {
+        let token = self.expect(TokenKind::Integer)?;
+        token.text.parse::<u64>().map_err(|_| {
+            QqlError::parse(
+                "QQL-PARSE-NONNEGATIVE-INTEGER",
+                alloc::format!("{} must be a non-negative integer", label),
+                token.span,
+            )
+        })
+    }
+
+    pub fn parse_vector_value(&mut self) -> Result<VectorValue, QqlError> {
+        let span = self.peek()?.span;
+        let value = self.parse_value()?;
+        vector_from_value(value, span)
+    }
+}
+
+pub fn point_id_from_value(value: Value, span: Span) -> Result<PointId, QqlError> {
+    match value {
+        Value::Int(value) if value >= 0 => Ok(PointId::Number(value as u64)),
+        Value::Str(value) => Ok(PointId::String(value)),
+        _ => Err(QqlError::validation(
+            "QQL-VALIDATION-POINT-ID",
+            "point IDs must be unsigned integers or strings",
+            Some(span),
+        )),
+    }
+}
+
+pub(super) fn vector_from_value(value: Value, span: Span) -> Result<VectorValue, QqlError> {
+    match value {
+        Value::List(values) if values.iter().all(|value| matches!(value, Value::List(_))) => values
+            .into_iter()
+            .map(|value| match value {
+                Value::List(row) => numeric_vector(row, span),
+                _ => unreachable!(),
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .and_then(|rows| {
+                if rows.is_empty() {
+                    Err(vector_error("multidense vector cannot be empty", span))
+                } else {
+                    Ok(VectorValue::MultiDense(rows))
+                }
+            }),
+        Value::List(values) => numeric_vector(values, span).and_then(|values| {
+            if values.is_empty() {
+                Err(vector_error("dense vector cannot be empty", span))
+            } else {
+                Ok(VectorValue::Dense(values))
+            }
+        }),
+        Value::Dict(items) => {
+            let indices = items
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case("indices"))
+                .map(|(_, value)| value);
+            let values = items
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case("values"))
+                .map(|(_, value)| value);
+            let (Some(Value::List(indices)), Some(Value::List(values))) = (indices, values) else {
+                return Err(vector_error(
+                    "sparse vectors require indices and values lists",
+                    span,
+                ));
+            };
+            let indices = indices
+                .iter()
+                .map(|value| match value {
+                    Value::Int(value) if *value >= 0 => u32::try_from(*value)
+                        .map_err(|_| vector_error("sparse vector index is out of range", span)),
+                    _ => Err(vector_error(
+                        "sparse vector indices must be non-negative integers",
+                        span,
+                    )),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let values = numeric_vector(values.clone(), span)?;
+            if indices.is_empty() || indices.len() != values.len() {
+                return Err(vector_error(
+                    "sparse vector indices and values must be non-empty and have equal length",
+                    span,
                 ));
             }
-            let f = self.parse_numeric_literal()?;
-            vec.push(f);
-            if self.peek()?.kind == TokenKind::Comma {
-                self.advance()?;
-            }
+            Ok(VectorValue::Sparse { indices, values })
         }
-        self.expect(TokenKind::Rbracket)?;
-        Ok(vec)
+        _ => Err(vector_error(
+            "vector must be a dense list, sparse object, or list of dense lists",
+            span,
+        )),
     }
+}
 
-    pub fn coerce_vector_values(&self, values: Vec<Value<'a>>) -> Result<Vec<f32>, QqlError> {
-        let mut vector = Vec::with_capacity(values.len());
-        for v in values {
-            match v {
-                Value::Int(i) => vector.push(i as f32),
-                Value::Float(f) => vector.push(f as f32),
-                _ => return Err(QqlError::syntax("vector elements must be numeric", 0)),
+fn numeric_vector(values: Vec<Value>, span: Span) -> Result<Vec<f32>, QqlError> {
+    values
+        .into_iter()
+        .map(|value| {
+            let value = match value {
+                Value::Int(value) => value as f64,
+                Value::Float(value) => value,
+                _ => return Err(vector_error("vector elements must be numeric", span)),
+            };
+            let converted = value as f32;
+            if !value.is_finite() || !converted.is_finite() {
+                return Err(vector_error(
+                    "vector elements must be finite f32 values",
+                    span,
+                ));
             }
-        }
-        Ok(vector)
-    }
+            Ok(converted)
+        })
+        .collect()
+}
+
+fn vector_error(message: &'static str, span: Span) -> QqlError {
+    QqlError::validation("QQL-VALIDATION-VECTOR", message, Some(span))
 }

@@ -2,9 +2,26 @@
 name = "qql-core"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Parser, typed AST, validation, and transformations for the Qdrant Query Language"
+documentation = "https://docs.rs/qql-core"
+readme = "README.md"
+keywords = ["qql", "qdrant", "parser", "query-language", "vector-search"]
+categories = ["parser-implementations", "database"]
 
 [features]
 default = []
+serde = ["dep:serde"]
+json = ["serde", "dep:serde_json"]
+std = []
 
 [dependencies]
+pest = { version = "2.8.6", default-features = false }
+pest_derive = { version = "2.8.6", default-features = false }
 phf = { version = "0.11", features = ["macros"] }
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1", default-features = false, features = ["alloc"], optional = true }

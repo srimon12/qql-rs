@@ -1,0 +1,249 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "vector database"
+              }
+            },
+            "mmr": {
+              "candidates": 100,
+              "diversity": 0.7
+            },
+            "prefetch": [],
+            "using": {
+              "kind": null,
+              "name": "dense"
+            }
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Vector": {
+                "Dense": [
+                  0.1,
+                  0.2,
+                  0.3
+                ]
+              }
+            },
+            "mmr": {
+              "candidates": 50,
+              "diversity": 0.5
+            },
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Point": {
+                "Number": 42
+              }
+            },
+            "mmr": {
+              "candidates": 200,
+              "diversity": 0.8
+            },
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "search"
+              }
+            },
+            "mmr": {
+              "candidates": 100,
+              "diversity": 0.6
+            },
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "Compare": {
+            "field": "category",
+            "op": "Eq",
+            "value": {
+              "Str": "tech"
+            }
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [
+          {
+            "name": "candidates",
+            "query": {
+              "collection": "Inherited",
+              "ctes": [],
+              "expression": {
+                "Nearest": {
+                  "input": {
+                    "Text": {
+                      "model": null,
+                      "text": "search"
+                    }
+                  },
+                  "mmr": null,
+                  "prefetch": [],
+                  "using": {
+                    "kind": null,
+                    "name": "dense"
+                  }
+                }
+              },
+              "filter": null,
+              "group": null,
+              "output": {
+                "payload": null,
+                "vectors": null
+              },
+              "page": {
+                "limit": 200,
+                "offset": null
+              },
+              "params": null,
+              "score_threshold": null,
+              "shard_key": null
+            }
+          }
+        ],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "search"
+              }
+            },
+            "mmr": {
+              "candidates": 100,
+              "diversity": 0.6
+            },
+            "prefetch": [
+              {
+                "filter": null,
+                "lookup": null,
+                "score_threshold": null,
+                "source": {
+                  "Cte": "candidates"
+                }
+              }
+            ],
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    }
+  ]
+}

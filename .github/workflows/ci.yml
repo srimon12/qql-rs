@@ -1,0 +1,221 @@
+name: CI
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [main, dev]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  PYO3_USE_ABI3_FORWARD_COMPATIBILITY: 1
+
+jobs:
+  branch-policy:
+    name: Branch policy
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require dev as the source branch for main
+        if: ${{ github.base_ref == 'main' && github.head_ref != 'dev' }}
+        run: |
+          echo "Pull requests into main must come from the dev branch."
+          exit 1
+
+  rust:
+    name: Rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (published Rust crates)
+        run: cargo clippy --locked --all-features -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli --all-targets -- -D warnings
+
+      - name: Test (published Rust crates)
+        run: cargo test --locked --all-features -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli
+
+  conformance:
+    name: Conformance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Check generated grammar
+        run: cargo run --locked -p qql-grammar-gen -- check
+
+      - name: Check QQL language conformance
+        run: cargo run --locked -p qql-conformance -- check language/v1
+
+  # ── Platform binding build checks ─────────────────────────────
+  # Build and import the language artifacts so generated bindings and
+  # wrapper code cannot drift independently from the Rust crates.
+
+  pyqql-check:
+    name: Python bindings
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build and test Python SDKs
+        run: |
+          python -m pip install ./crates/pyqql ./crates/pyqql-edge
+          python -m unittest discover -s crates/pyqql/tests -v
+          python -m unittest discover -s crates/pyqql-edge/tests -v
+
+  nqql-check:
+    name: Node binding (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [nqql, nqql-edge]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.13.1'
+      - name: Build and test ${{ matrix.package }}
+        working-directory: crates/${{ matrix.package }}
+        run: |
+          npm install --no-package-lock --omit=optional --no-audit --no-fund
+          npm test
+          npm pack --dry-run --ignore-scripts
+
+  wasm-check:
+    name: WASM and playground
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.13.1'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.13.1
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked --version 0.15.0
+      - name: Build qql-wasm package
+        run: wasm-pack build crates/qql-wasm --dev --target nodejs --out-dir /tmp/qql-wasm-pkg
+      - name: Smoke-test generated WASM API
+        run: |
+          grep -q 'Promise<ExecutionReport>' /tmp/qql-wasm-pkg/qql_wasm.d.ts
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          global.fetch = async () => new Response(
+            JSON.stringify({ result: { count: 2 } }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          );
+          const wasm = require('/tmp/qql-wasm-pkg/qql_wasm.js');
+          assert.equal(wasm.parse('COUNT FROM docs; COUNT FROM docs').length, 2);
+          assert.equal(wasm.parse_all, undefined);
+          assert.equal(wasm.analyzeValue, undefined);
+          assert.equal(wasm.compileValue, undefined);
+          const analysis = wasm.analyze('COUNT FROM docs');
+          assert.equal(typeof analysis, 'object');
+          assert.equal(analysis.valid, true);
+          const invalid = wasm.analyze('NOT QQL');
+          assert.equal(typeof invalid, 'object');
+          assert.equal(invalid.valid, false);
+          assert.equal(typeof invalid.error.code, 'string');
+          const compiled = wasm.compile('COUNT FROM docs');
+          assert.equal(typeof compiled, 'object');
+          assert.equal(compiled.stmt_type, 'count');
+          (async () => {
+            const client = new wasm.Client('http://localhost:6333');
+            const report = await client.execute('COUNT FROM docs');
+            assert.equal(typeof report, 'object');
+            assert.equal(report.ok, true);
+            assert.equal(report.results[0].operation, 'COUNT');
+            assert.equal(report.results[0].data.result.count, 2);
+            assert.deepEqual(JSON.parse(JSON.stringify(report)), report);
+
+            let batchBody;
+            global.fetch = async (input, init) => {
+              const request = input instanceof Request
+                ? input
+                : new Request(input, init);
+              batchBody = await request.clone().json();
+              return new Response(
+                JSON.stringify({ result: [{ points: [] }, { points: [] }] }),
+                { status: 200, headers: { 'content-type': 'application/json' } },
+              );
+            };
+            client.setEmbedder((texts) => texts.map(() => [0.1, 0.2]));
+            const batchReport = await client.execute(
+              "QUERY 'a' FROM docs USING dense LIMIT 1;" +
+              "QUERY 'b' FROM docs USING dense LIMIT 1",
+            );
+            assert.equal(batchReport.succeeded, 2);
+            assert.equal(batchBody.searches[0].query.nearest.length, 2);
+            assert.ok(Math.abs(batchBody.searches[0].query.nearest[0] - 0.1) < 1e-6);
+            client.free();
+          })().catch((error) => {
+            console.error(error);
+            process.exitCode = 1;
+          });
+          NODE
+      - name: Build browser playground against generated WASM
+        run: |
+          pnpm --dir wasm-demo install --frozen-lockfile
+          pnpm --dir wasm-demo build
+
+  # ─────────────────────────────────────────────────────────────
+  #  Platform binding release jobs — uncomment when publishing
+  #  paths (maturin / napi-rs / wasm-pack) are ready.
+  # ─────────────────────────────────────────────────────────────
+
+  # pyqql-release:
+  #   needs: [rust]
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v5
+  #     - uses: dtolnay/rust-toolchain@stable
+  #     - uses: actions/setup-python@v5
+  #       with: { python-version: '3.12' }
+  #     - name: Build wheel
+  #       run: pip install maturin && maturin build -m crates/pyqql/Cargo.toml --release
+
+  # nqql-release:
+  #   needs: [rust]
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v5
+  #     - uses: dtolnay/rust-toolchain@stable
+  #     - uses: actions/setup-node@v7
+  #       with: { node-version: '20' }
+  #     - name: Build npm package
+  #       run: cd crates/nqql && npm install && npm run build
+
+  # wasm-release:
+  #   needs: [rust]
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v5
+  #     - uses: dtolnay/rust-toolchain@stable
+  #     - name: Install wasm target
+  #       run: rustup target add wasm32-unknown-unknown
+  #     - name: Build WASM
+  #       run: cargo build -p qql-wasm --target wasm32-unknown-unknown --release

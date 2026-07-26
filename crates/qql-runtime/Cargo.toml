@@ -2,18 +2,47 @@
 name = "qql"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "QQL runtime and executor for Qdrant REST and gRPC"
+documentation = "https://docs.rs/qql"
+readme = "README.md"
+keywords = ["qql", "qdrant", "vector-search", "query-language", "database"]
+categories = ["database", "api-bindings"]
+
+[features]
+default = ["grpc", "rest"]
+grpc = ["dep:tonic", "dep:tonic-prost", "dep:prost", "dep:prost-types", "tokio/rt-multi-thread"]
+rest = ["dep:reqwest", "tokio/rt"]
 
 [dependencies]
-qql-core = { path = "../qql-core" }
-tokio = { version = "1", features = ["full"] }
+qql-core = { version = "0.1.0", path = "../qql-core", features = ["serde", "std"] }
+qql-plan = { version = "0.1.0", path = "../qql-plan" }
+qql-embed = { version = "0.1.0", path = "../qql-embed" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["serde"] }
+tonic = { version = "0.14", default-features = false, features = ["channel", "codegen", "tls-ring", "tls-webpki-roots"], optional = true }
+tonic-prost = { version = "0.14", optional = true }
+prost = { version = "0.14", optional = true }
+prost-types = { version = "0.14", optional = true }
+tokio = { version = "1", features = ["macros", "time"] }
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 
 [build-dependencies]
 typify = "0.7"
 serde_json = "1"
 schemars = "0.8"
+prettyplease = "0.2"
+syn = "2"
+tonic-prost-build = "0.14"
+protoc-bin-vendored = "3"
+
+[dev-dependencies]
+jsonschema = "0.26"

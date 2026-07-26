@@ -1,0 +1,30 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "CreateShardKey": {
+        "collection": "docs",
+        "replication_factor": null,
+        "shard_key": "acme",
+        "shards_number": 2
+      }
+    },
+    {
+      "CreateShardKey": {
+        "collection": "docs",
+        "replication_factor": null,
+        "shard_key": "default",
+        "shards_number": null
+      }
+    },
+    {
+      "DropShardKey": {
+        "collection": "docs",
+        "shard_key": "acme"
+      }
+    },
+    {
+      "ShowShardKeys": "docs"
+    }
+  ]
+}

@@ -1,17 +1,26 @@
 use clap::Parser;
+use std::path::PathBuf;
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 mod commands;
+mod config;
 mod convert;
 mod dump;
 mod output;
 mod script;
+mod table;
 
 #[derive(Parser)]
 #[command(name = "qql", about = "Qdrant Query Language CLI")]
 struct Cli {
+    /// Qdrant REST URL. Overrides QDRANT_URL when supplied.
+    #[arg(long, global = true)]
+    url: Option<String>,
+    /// Execute supported commands against the configured in-process edge backend.
+    #[arg(long, global = true)]
+    edge: bool,
     #[command(subcommand)]
     command: Command,
 }
@@ -25,6 +34,9 @@ enum Command {
         /// Output as JSON
         #[arg(long)]
         json: bool,
+        /// Quiet mode
+        #[arg(long, short)]
+        quiet: bool,
     },
     /// Execute multiple QQL queries from a file
     Execute {
@@ -35,13 +47,17 @@ enum Command {
         stop_on_error: bool,
     },
     /// Explain a QQL query (show execution plan)
-    Explain { query: String },
-    /// Start interactive REPL connected to Qdrant
-    Connect {
-        /// Qdrant gRPC URL
-        #[arg(long, default_value = "http://localhost:6334")]
-        url: String,
+    Explain {
+        query: String,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+        /// Quiet mode
+        #[arg(long, short)]
+        quiet: bool,
     },
+    /// Start interactive REPL connected to Qdrant
+    Connect,
     /// Convert REST JSON payload to QQL
     Convert {
         /// Path to JSON file (or stdin if omitted)
@@ -53,32 +69,171 @@ enum Command {
         output: String,
         #[arg(long, default_value = "100")]
         batch_size: u32,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+        /// Quiet mode
+        #[arg(long, short)]
+        quiet: bool,
+    },
+    /// Check Qdrant connection health
+    Doctor {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+        /// Quiet mode
+        #[arg(long, short)]
+        quiet: bool,
+    },
+    /// Configure persistent CLI settings.
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommand,
     },
     /// Show version
     Version,
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[derive(clap::Subcommand)]
+enum ConfigCommand {
+    /// Configure the local qdrant-edge backend used by --edge.
+    Edge {
+        /// Directory for persistent qdrant-edge data.
+        #[arg(long)]
+        data_dir: Option<PathBuf>,
+        /// Keep payloads in memory instead of persisting them to disk.
+        #[arg(long)]
+        in_memory: bool,
+        /// Embedding backend: fastembed or an OpenAI-compatible HTTP endpoint.
+        #[arg(long, default_value = "fastembed")]
+        embedder: String,
+        /// Local FastEmbed model name or alias.
+        #[arg(long)]
+        model: Option<String>,
+        /// Directory used for downloaded FastEmbed models.
+        #[arg(long)]
+        cache_dir: Option<PathBuf>,
+        /// Show model download progress.
+        #[arg(long)]
+        show_download_progress: bool,
+        /// OpenAI-compatible embedding endpoint used by the HTTP backend.
+        #[arg(long)]
+        embed_url: Option<String>,
+        /// API key used by the HTTP embedding backend.
+        #[arg(long, default_value = "")]
+        embed_key: String,
+        /// Model name sent to the HTTP embedding backend.
+        #[arg(long, default_value = "nomic-embed-text")]
+        embed_model: String,
+        /// Expected HTTP embedding dimension.
+        #[arg(long, default_value_t = 768)]
+        embed_dim: usize,
+    },
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
+    let use_edge = cli.edge;
+    let url = cli
+        .url
+        .or_else(|| std::env::var("QDRANT_URL").ok())
+        .unwrap_or_else(|| "http://localhost:6333".to_string());
 
     match cli.command {
-        Command::Exec { query, json } => commands::handle_exec(&query, json),
+        Command::Exec { query, json, quiet } => {
+            commands::handle_exec(&url, use_edge, &query, json, quiet).await
+        }
         Command::Execute {
             file,
             stop_on_error,
-        } => commands::handle_execute_file(&file, stop_on_error),
-        Command::Explain { query } => commands::handle_explain(&query),
-        Command::Connect { url } => commands::handle_connect(&url),
+        } => commands::handle_execute_file(&url, use_edge, &file, stop_on_error).await,
+        Command::Explain {
+            query,
+            json: _,
+            quiet: _,
+        } => commands::handle_explain(&query),
+        Command::Connect => commands::handle_connect(&url, use_edge).await,
         Command::Convert { file } => commands::handle_convert(file.as_deref()),
         Command::Dump {
             collection,
             output,
             batch_size,
+            json,
+            quiet,
         } => {
-            let msg = commands::handle_dump(&collection, &output, batch_size)?;
-            println!("{}", msg);
+            use std::io::Write;
+            let progress_fn = |p: dump::DumpProgress| {
+                eprint!("\rDumped {} points ({} batches)...", p.written, p.batches);
+                let _ = std::io::stderr().flush();
+            };
+            let progress_cb: Option<&(dyn Fn(dump::DumpProgress) + Sync)> = if !json && !quiet {
+                Some(&progress_fn)
+            } else {
+                None
+            };
+            let stats = commands::handle_dump(
+                &url,
+                use_edge,
+                &collection,
+                &output,
+                batch_size,
+                progress_cb,
+            )
+            .await?;
+            if !json && !quiet && stats.batches > 0 {
+                eprintln!();
+            }
+            let msg = format!(
+                "Dumped collection '{}' to {} ({} written, {} skipped, {} batches)",
+                collection, output, stats.written, stats.skipped, stats.batches
+            );
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "ok": true,
+                        "operation": "dump",
+                        "collection": collection,
+                        "output": output,
+                        "written": stats.written,
+                        "skipped": stats.skipped,
+                        "batches": stats.batches,
+                        "message": msg,
+                    })
+                );
+            } else {
+                println!("{}", msg);
+            }
             Ok(())
         }
+        Command::Doctor { json, quiet: _ } => commands::handle_doctor(&url, use_edge, json).await,
+        Command::Config {
+            command:
+                ConfigCommand::Edge {
+                    data_dir,
+                    in_memory,
+                    embedder,
+                    model,
+                    cache_dir,
+                    show_download_progress,
+                    embed_url,
+                    embed_key,
+                    embed_model,
+                    embed_dim,
+                },
+        } => commands::handle_configure_edge(config::EdgeConfig {
+            data_dir: data_dir.unwrap_or_else(|| config::EdgeConfig::default().data_dir),
+            on_disk_payload: !in_memory,
+            embedder,
+            model,
+            cache_dir,
+            show_download_progress,
+            embed_url,
+            embed_key,
+            embed_model,
+            embed_dimension: embed_dim,
+        }),
         Command::Version => commands::handle_version(),
     }
 }

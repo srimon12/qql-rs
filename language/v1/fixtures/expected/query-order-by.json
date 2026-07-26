@@ -1,0 +1,121 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "products"
+        },
+        "ctes": [],
+        "expression": {
+          "OrderBy": {
+            "direction": "Asc",
+            "field": "price"
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "posts"
+        },
+        "ctes": [],
+        "expression": {
+          "OrderBy": {
+            "direction": "Desc",
+            "field": "created_at"
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "products"
+        },
+        "ctes": [],
+        "expression": {
+          "OrderBy": {
+            "direction": "Asc",
+            "field": "price"
+          }
+        },
+        "filter": {
+          "Compare": {
+            "field": "category",
+            "op": "Eq",
+            "value": {
+              "Str": "electronics"
+            }
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "products"
+        },
+        "ctes": [],
+        "expression": {
+          "OrderBy": {
+            "direction": "Desc",
+            "field": "rating"
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": 20
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    }
+  ]
+}

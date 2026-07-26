@@ -1,0 +1,16 @@
+-- query-context-discover.qql — Context and Discover queries
+
+-- Context query
+QUERY CONTEXT (POSITIVE POINT 1 NEGATIVE POINT 2) FROM docs LIMIT 10;
+
+-- Context with multiple pairs
+QUERY CONTEXT (POSITIVE POINT 1 NEGATIVE POINT 2, POSITIVE POINT 3 NEGATIVE POINT 4) FROM docs LIMIT 10;
+
+-- Context with query inputs
+QUERY CONTEXT (POSITIVE TEXT 'good' NEGATIVE TEXT 'bad') FROM docs LIMIT 10;
+
+-- Discover query
+QUERY DISCOVER TARGET POINT 1 CONTEXT (POSITIVE POINT 2 NEGATIVE POINT 3) FROM docs LIMIT 10;
+
+-- Discover with multiple context pairs
+QUERY DISCOVER TARGET TEXT 'search' CONTEXT (POSITIVE POINT 1 NEGATIVE POINT 2, POSITIVE POINT 3 NEGATIVE POINT 4) FROM docs LIMIT 10;

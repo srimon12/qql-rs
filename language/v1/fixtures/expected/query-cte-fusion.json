@@ -1,0 +1,959 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [
+          {
+            "name": "dense",
+            "query": {
+              "collection": {
+                "Explicit": "docs"
+              },
+              "ctes": [],
+              "expression": {
+                "Nearest": {
+                  "input": {
+                    "Text": {
+                      "model": null,
+                      "text": "machine learning"
+                    }
+                  },
+                  "mmr": null,
+                  "prefetch": [],
+                  "using": {
+                    "kind": "Dense",
+                    "name": "semantic_v2"
+                  }
+                }
+              },
+              "filter": null,
+              "group": null,
+              "output": {
+                "payload": null,
+                "vectors": null
+              },
+              "page": {
+                "limit": 100,
+                "offset": null
+              },
+              "params": null,
+              "score_threshold": null,
+              "shard_key": null
+            }
+          },
+          {
+            "name": "sparse",
+            "query": {
+              "collection": {
+                "Explicit": "docs"
+              },
+              "ctes": [
+                {
+                  "name": "dense",
+                  "query": {
+                    "collection": {
+                      "Explicit": "docs"
+                    },
+                    "ctes": [],
+                    "expression": {
+                      "Nearest": {
+                        "input": {
+                          "Text": {
+                            "model": null,
+                            "text": "machine learning"
+                          }
+                        },
+                        "mmr": null,
+                        "prefetch": [],
+                        "using": {
+                          "kind": "Dense",
+                          "name": "semantic_v2"
+                        }
+                      }
+                    },
+                    "filter": null,
+                    "group": null,
+                    "output": {
+                      "payload": null,
+                      "vectors": null
+                    },
+                    "page": {
+                      "limit": 100,
+                      "offset": null
+                    },
+                    "params": null,
+                    "score_threshold": null,
+                    "shard_key": null
+                  }
+                }
+              ],
+              "expression": {
+                "Nearest": {
+                  "input": {
+                    "Text": {
+                      "model": null,
+                      "text": "machine learning"
+                    }
+                  },
+                  "mmr": null,
+                  "prefetch": [],
+                  "using": {
+                    "kind": "Sparse",
+                    "name": "lexical_v2"
+                  }
+                }
+              },
+              "filter": null,
+              "group": null,
+              "output": {
+                "payload": null,
+                "vectors": null
+              },
+              "page": {
+                "limit": 100,
+                "offset": null
+              },
+              "params": null,
+              "score_threshold": null,
+              "shard_key": null
+            }
+          }
+        ],
+        "expression": {
+          "Fusion": {
+            "method": "Rrf",
+            "prefetch": [
+              {
+                "filter": null,
+                "lookup": null,
+                "score_threshold": null,
+                "source": {
+                  "Cte": "dense"
+                }
+              },
+              {
+                "filter": null,
+                "lookup": null,
+                "score_threshold": null,
+                "source": {
+                  "Cte": "sparse"
+                }
+              }
+            ]
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [
+          {
+            "name": "dense",
+            "query": {
+              "collection": "Inherited",
+              "ctes": [],
+              "expression": {
+                "Nearest": {
+                  "input": {
+                    "Text": {
+                      "model": null,
+                      "text": "machine learning"
+                    }
+                  },
+                  "mmr": null,
+                  "prefetch": [],
+                  "using": {
+                    "kind": "Dense",
+                    "name": "semantic_v2"
+                  }
+                }
+              },
+              "filter": null,
+              "group": null,
+              "output": {
+                "payload": null,
+                "vectors": null
+              },
+              "page": {
+                "limit": 100,
+                "offset": null
+              },
+              "params": null,
+              "score_threshold": null,
+              "shard_key": null
+            }
+          },
+          {
+            "name": "sparse",
+            "query": {
+              "collection": "Inherited",
+              "ctes": [
+                {
+                  "name": "dense",
+                  "query": {
+                    "collection": "Inherited",
+                    "ctes": [],
+                    "expression": {
+                      "Nearest": {
+                        "input": {
+                          "Text": {
+                            "model": null,
+                            "text": "machine learning"
+                          }
+                        },
+                        "mmr": null,
+                        "prefetch": [],
+                        "using": {
+                          "kind": "Dense",
+                          "name": "semantic_v2"
+                        }
+                      }
+                    },
+                    "filter": null,
+                    "group": null,
+                    "output": {
+                      "payload": null,
+                      "vectors": null
+                    },
+                    "page": {
+                      "limit": 100,
+                      "offset": null
+                    },
+                    "params": null,
+                    "score_threshold": null,
+                    "shard_key": null
+                  }
+                }
+              ],
+              "expression": {
+                "Nearest": {
+                  "input": {
+                    "Text": {
+                      "model": null,
+                      "text": "machine learning"
+                    }
+                  },
+                  "mmr": null,
+                  "prefetch": [],
+                  "using": {
+                    "kind": "Sparse",
+                    "name": "lexical_v2"
+                  }
+                }
+              },
+              "filter": null,
+              "group": null,
+              "output": {
+                "payload": null,
+                "vectors": null
+              },
+              "page": {
+                "limit": 100,
+                "offset": null
+              },
+              "params": null,
+              "score_threshold": null,
+              "shard_key": null
+            }
+          }
+        ],
+        "expression": {
+          "Fusion": {
+            "method": "Dbsf",
+            "prefetch": [
+              {
+                "filter": null,
+                "lookup": null,
+                "score_threshold": null,
+                "source": {
+                  "Cte": "dense"
+                }
+              },
+              {
+                "filter": null,
+                "lookup": null,
+                "score_threshold": null,
+                "source": {
+                  "Cte": "sparse"
+                }
+              }
+            ]
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [
+          {
+            "name": "dense",
+            "query": {
+              "collection": "Inherited",
+              "ctes": [],
+              "expression": {
+                "Nearest": {
+                  "input": {
+                    "Text": {
+                      "model": null,
+                      "text": "search"
+                    }
+                  },
+                  "mmr": null,
+                  "prefetch": [],
+                  "using": {
+                    "kind": null,
+                    "name": "dense"
+                  }
+                }
+              },
+              "filter": null,
+              "group": null,
+              "output": {
+                "payload": null,
+                "vectors": null
+              },
+              "page": {
+                "limit": 200,
+                "offset": null
+              },
+              "params": null,
+              "score_threshold": null,
+              "shard_key": null
+            }
+          },
+          {
+            "name": "sparse",
+            "query": {
+              "collection": "Inherited",
+              "ctes": [
+                {
+                  "name": "dense",
+                  "query": {
+                    "collection": "Inherited",
+                    "ctes": [],
+                    "expression": {
+                      "Nearest": {
+                        "input": {
+                          "Text": {
+                            "model": null,
+                            "text": "search"
+                          }
+                        },
+                        "mmr": null,
+                        "prefetch": [],
+                        "using": {
+                          "kind": null,
+                          "name": "dense"
+                        }
+                      }
+                    },
+                    "filter": null,
+                    "group": null,
+                    "output": {
+                      "payload": null,
+                      "vectors": null
+                    },
+                    "page": {
+                      "limit": 200,
+                      "offset": null
+                    },
+                    "params": null,
+                    "score_threshold": null,
+                    "shard_key": null
+                  }
+                }
+              ],
+              "expression": {
+                "Nearest": {
+                  "input": {
+                    "Text": {
+                      "model": null,
+                      "text": "search"
+                    }
+                  },
+                  "mmr": null,
+                  "prefetch": [],
+                  "using": {
+                    "kind": null,
+                    "name": "bm25"
+                  }
+                }
+              },
+              "filter": null,
+              "group": null,
+              "output": {
+                "payload": null,
+                "vectors": null
+              },
+              "page": {
+                "limit": 300,
+                "offset": null
+              },
+              "params": null,
+              "score_threshold": null,
+              "shard_key": null
+            }
+          }
+        ],
+        "expression": {
+          "Fusion": {
+            "method": "Rrf",
+            "prefetch": [
+              {
+                "filter": {
+                  "Compare": {
+                    "field": "category",
+                    "op": "Eq",
+                    "value": {
+                      "Str": "tech"
+                    }
+                  }
+                },
+                "lookup": null,
+                "score_threshold": 0.6,
+                "source": {
+                  "Cte": "dense"
+                }
+              },
+              {
+                "filter": null,
+                "lookup": null,
+                "score_threshold": 0.3,
+                "source": {
+                  "Cte": "sparse"
+                }
+              }
+            ]
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [
+          {
+            "name": "dense",
+            "query": {
+              "collection": "Inherited",
+              "ctes": [],
+              "expression": {
+                "Nearest": {
+                  "input": {
+                    "Text": {
+                      "model": null,
+                      "text": "search"
+                    }
+                  },
+                  "mmr": null,
+                  "prefetch": [],
+                  "using": {
+                    "kind": null,
+                    "name": "dense"
+                  }
+                }
+              },
+              "filter": null,
+              "group": null,
+              "output": {
+                "payload": null,
+                "vectors": null
+              },
+              "page": {
+                "limit": 100,
+                "offset": null
+              },
+              "params": null,
+              "score_threshold": null,
+              "shard_key": null
+            }
+          }
+        ],
+        "expression": {
+          "Fusion": {
+            "method": "Rrf",
+            "prefetch": [
+              {
+                "filter": null,
+                "lookup": {
+                  "collection": "other",
+                  "vector": "dense"
+                },
+                "score_threshold": null,
+                "source": {
+                  "Cte": "dense"
+                }
+              }
+            ]
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [
+          {
+            "name": "candidates",
+            "query": {
+              "collection": "Inherited",
+              "ctes": [],
+              "expression": {
+                "Nearest": {
+                  "input": {
+                    "Text": {
+                      "model": null,
+                      "text": "vector database"
+                    }
+                  },
+                  "mmr": null,
+                  "prefetch": [],
+                  "using": {
+                    "kind": null,
+                    "name": "dense"
+                  }
+                }
+              },
+              "filter": null,
+              "group": null,
+              "output": {
+                "payload": null,
+                "vectors": null
+              },
+              "page": {
+                "limit": 100,
+                "offset": null
+              },
+              "params": null,
+              "score_threshold": null,
+              "shard_key": null
+            }
+          }
+        ],
+        "expression": {
+          "Rerank": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "vector database"
+              }
+            },
+            "model": "reranker-v1",
+            "prefetch": [
+              {
+                "filter": null,
+                "lookup": null,
+                "score_threshold": null,
+                "source": {
+                  "Cte": "candidates"
+                }
+              }
+            ],
+            "using": {
+              "kind": null,
+              "name": "colbert"
+            }
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [
+          {
+            "name": "first",
+            "query": {
+              "collection": "Inherited",
+              "ctes": [],
+              "expression": {
+                "Nearest": {
+                  "input": {
+                    "Text": {
+                      "model": null,
+                      "text": "query"
+                    }
+                  },
+                  "mmr": null,
+                  "prefetch": [],
+                  "using": {
+                    "kind": null,
+                    "name": "dense"
+                  }
+                }
+              },
+              "filter": null,
+              "group": null,
+              "output": {
+                "payload": null,
+                "vectors": null
+              },
+              "page": {
+                "limit": 100,
+                "offset": null
+              },
+              "params": null,
+              "score_threshold": null,
+              "shard_key": null
+            }
+          },
+          {
+            "name": "second",
+            "query": {
+              "collection": "Inherited",
+              "ctes": [
+                {
+                  "name": "first",
+                  "query": {
+                    "collection": "Inherited",
+                    "ctes": [],
+                    "expression": {
+                      "Nearest": {
+                        "input": {
+                          "Text": {
+                            "model": null,
+                            "text": "query"
+                          }
+                        },
+                        "mmr": null,
+                        "prefetch": [],
+                        "using": {
+                          "kind": null,
+                          "name": "dense"
+                        }
+                      }
+                    },
+                    "filter": null,
+                    "group": null,
+                    "output": {
+                      "payload": null,
+                      "vectors": null
+                    },
+                    "page": {
+                      "limit": 100,
+                      "offset": null
+                    },
+                    "params": null,
+                    "score_threshold": null,
+                    "shard_key": null
+                  }
+                }
+              ],
+              "expression": {
+                "Nearest": {
+                  "input": {
+                    "Text": {
+                      "model": null,
+                      "text": "query"
+                    }
+                  },
+                  "mmr": null,
+                  "prefetch": [],
+                  "using": {
+                    "kind": null,
+                    "name": "bm25"
+                  }
+                }
+              },
+              "filter": null,
+              "group": null,
+              "output": {
+                "payload": null,
+                "vectors": null
+              },
+              "page": {
+                "limit": 100,
+                "offset": null
+              },
+              "params": null,
+              "score_threshold": null,
+              "shard_key": null
+            }
+          }
+        ],
+        "expression": {
+          "Fusion": {
+            "method": "Rrf",
+            "prefetch": [
+              {
+                "filter": null,
+                "lookup": null,
+                "score_threshold": null,
+                "source": {
+                  "Cte": "first"
+                }
+              },
+              {
+                "filter": null,
+                "lookup": null,
+                "score_threshold": null,
+                "source": {
+                  "Cte": "second"
+                }
+              }
+            ]
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [
+          {
+            "name": "dense",
+            "query": {
+              "collection": "Inherited",
+              "ctes": [],
+              "expression": {
+                "Nearest": {
+                  "input": {
+                    "Text": {
+                      "model": null,
+                      "text": "search"
+                    }
+                  },
+                  "mmr": null,
+                  "prefetch": [],
+                  "using": {
+                    "kind": null,
+                    "name": "dense"
+                  }
+                }
+              },
+              "filter": null,
+              "group": null,
+              "output": {
+                "payload": null,
+                "vectors": null
+              },
+              "page": {
+                "limit": 200,
+                "offset": null
+              },
+              "params": null,
+              "score_threshold": null,
+              "shard_key": null
+            }
+          },
+          {
+            "name": "sparse",
+            "query": {
+              "collection": "Inherited",
+              "ctes": [
+                {
+                  "name": "dense",
+                  "query": {
+                    "collection": "Inherited",
+                    "ctes": [],
+                    "expression": {
+                      "Nearest": {
+                        "input": {
+                          "Text": {
+                            "model": null,
+                            "text": "search"
+                          }
+                        },
+                        "mmr": null,
+                        "prefetch": [],
+                        "using": {
+                          "kind": null,
+                          "name": "dense"
+                        }
+                      }
+                    },
+                    "filter": null,
+                    "group": null,
+                    "output": {
+                      "payload": null,
+                      "vectors": null
+                    },
+                    "page": {
+                      "limit": 200,
+                      "offset": null
+                    },
+                    "params": null,
+                    "score_threshold": null,
+                    "shard_key": null
+                  }
+                }
+              ],
+              "expression": {
+                "Nearest": {
+                  "input": {
+                    "Text": {
+                      "model": null,
+                      "text": "search"
+                    }
+                  },
+                  "mmr": null,
+                  "prefetch": [],
+                  "using": {
+                    "kind": null,
+                    "name": "bm25"
+                  }
+                }
+              },
+              "filter": null,
+              "group": null,
+              "output": {
+                "payload": null,
+                "vectors": null
+              },
+              "page": {
+                "limit": 300,
+                "offset": null
+              },
+              "params": null,
+              "score_threshold": null,
+              "shard_key": null
+            }
+          }
+        ],
+        "expression": {
+          "Fusion": {
+            "method": "Rrf",
+            "prefetch": [
+              {
+                "filter": null,
+                "lookup": null,
+                "score_threshold": null,
+                "source": {
+                  "Cte": "dense"
+                }
+              },
+              {
+                "filter": null,
+                "lookup": null,
+                "score_threshold": null,
+                "source": {
+                  "Cte": "sparse"
+                }
+              }
+            ]
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": {
+          "acorn": null,
+          "exact": null,
+          "hnsw_ef": null,
+          "indexed_only": null,
+          "quantization": null,
+          "rrf_k": 30,
+          "rrf_weights": [
+            0.7,
+            0.3
+          ]
+        },
+        "score_threshold": null,
+        "shard_key": null
+      }
+    }
+  ]
+}

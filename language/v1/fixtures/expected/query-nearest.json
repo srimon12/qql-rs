@@ -1,0 +1,385 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "vector database"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "St. Peter's Church"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 5,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": "nomic-embed-text",
+                "text": "machine learning"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": {
+              "kind": "Dense",
+              "name": "semantic_v2"
+            }
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "keyword search"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": {
+              "kind": "Sparse",
+              "name": "lexical_v2"
+            }
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Vector": {
+                "Dense": [
+                  0.1,
+                  0.2,
+                  0.3
+                ]
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Point": {
+                "Number": 42
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "search"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": {
+              "kind": "Dense",
+              "name": "semantic_v2"
+            }
+          }
+        },
+        "filter": {
+          "Compare": {
+            "field": "status",
+            "op": "Eq",
+            "value": {
+              "Str": "published"
+            }
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": {
+            "Include": [
+              "title",
+              "url"
+            ]
+          },
+          "vectors": "None"
+        },
+        "page": {
+          "limit": 20,
+          "offset": 10
+        },
+        "params": null,
+        "score_threshold": 0.5,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "search"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": {
+          "acorn": true,
+          "exact": false,
+          "hnsw_ef": 128,
+          "indexed_only": null,
+          "quantization": null,
+          "rrf_k": null,
+          "rrf_weights": null
+        },
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "search"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": {
+          "field": "category",
+          "lookup": null,
+          "size": 5
+        },
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 20,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "search"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": {
+          "field": "category",
+          "lookup": "categories",
+          "size": 5
+        },
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 20,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    }
+  ]
+}

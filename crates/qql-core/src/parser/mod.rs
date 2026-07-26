@@ -1,43 +1,45 @@
-pub mod alter_drop_show;
-pub mod config_parsers;
-pub mod config_validation;
-pub mod create;
-pub mod cte;
-pub mod filter;
-pub mod formula;
-pub mod helpers;
-pub mod insert;
-pub mod query;
-pub mod query_clauses;
-pub mod select;
-pub mod r#update;
-pub mod with_clause;
+pub(crate) mod alter_drop_show;
+pub(crate) mod config_parsers;
+pub(crate) mod config_validation;
+pub(crate) mod create;
+pub(crate) mod filter;
+pub(crate) mod formula;
+pub(crate) mod helpers;
+pub(crate) mod point_ops;
+pub(crate) mod query;
+mod syntax;
+pub(crate) mod r#update;
+pub(crate) mod upsert;
+pub(crate) mod with_clause;
 
+use crate::ast::Stmt;
+use crate::error::QqlError;
+use crate::lexer::Lexer;
+use crate::token::{Token, TokenKind};
+use alloc::string::String;
+use alloc::vec::Vec;
 pub use config_validation::{
     check_deleted_threshold, config_bool, config_float_range, config_has_key,
     config_max_optimization_threads, config_non_negative_u64, config_positive_u64, config_value,
     merge_collection_config, validate_hnsw_value, validate_index_options,
     validate_optimizers_value, validate_params_value, validate_vectors_value,
 };
-pub use with_clause::merge_search_with;
 
-use crate::ast::{Stmt, Value};
-use crate::error::QqlError;
-use crate::lexer::Lexer;
-use crate::token::{Token, TokenKind};
+/// Canonical QQL parser facade.
+///
+/// Syntax acceptance is generated from `language/v1/grammar.pest`. The
+/// private [`AstLowerer`] converts accepted source into the typed QQL AST.
+pub struct Parser;
 
-pub struct Parser<'a> {
-    tokens: alloc::vec::Vec<Token<'a>>,
+pub(crate) struct AstLowerer<'a> {
+    pub input: &'a str,
+    tokens: Vec<Token<'a>>,
     index: usize,
 }
 
-pub struct EmbeddingOptions<'a> {
-    pub model: Option<&'a str>,
-    pub hybrid: bool,
-    pub sparse_model: Option<&'a str>,
-    pub dense_vector: Option<&'a str>,
-    pub sparse_vector: Option<&'a str>,
-}
+/// Hard upper bound for one parsed script. Callers that need larger imports
+/// should split them into bounded batches before parsing.
+pub const MAX_STATEMENTS: usize = 256;
 
 pub fn ascii_equal(s: &str, upper: &str) -> bool {
     if s.len() != upper.len() {
@@ -59,18 +61,6 @@ pub fn ascii_equal_lower(s: &str, lower: &str) -> bool {
         .all(|(a, b)| a.to_ascii_lowercase() == *b)
 }
 
-pub fn token_kind_to_op(kind: TokenKind) -> &'static str {
-    match kind {
-        TokenKind::Equals => "=",
-        TokenKind::NotEquals => "!=",
-        TokenKind::Gt => ">",
-        TokenKind::Gte => ">=",
-        TokenKind::Lt => "<",
-        TokenKind::Lte => "<=",
-        _ => "",
-    }
-}
-
 pub fn is_contextual_field_name(kind: TokenKind) -> bool {
     matches!(
         kind,
@@ -83,6 +73,8 @@ pub fn is_contextual_field_name(kind: TokenKind) -> bool {
             | TokenKind::Sparse
             | TokenKind::Vector
             | TokenKind::By
+            | TokenKind::Count
+            | TokenKind::Clear
     )
 }
 
@@ -97,59 +89,131 @@ fn is_contextual_identifier(kind: TokenKind) -> bool {
             | TokenKind::Dense
             | TokenKind::Sparse
             | TokenKind::Vector
+            | TokenKind::Count
+            | TokenKind::Clear
     )
 }
 
-impl<'a> Parser<'a> {
-    pub fn new(tokens: alloc::vec::Vec<Token<'a>>) -> Self {
-        Self { tokens, index: 0 }
+impl Parser {
+    pub fn parse(input: &str) -> Result<Stmt, QqlError> {
+        let statement = AstLowerer::lower_statement(input)?;
+        syntax::validate_statement(input)?;
+        Ok(statement)
     }
 
-    pub fn parse(input: &'a str) -> Result<Stmt<'a>, QqlError> {
-        let lexer = Lexer::new(input);
-        let mut tokens = alloc::vec::Vec::new();
-        for token_res in lexer {
-            tokens.push(token_res?);
+    pub fn parse_all(input: &str) -> Result<Vec<Stmt>, QqlError> {
+        let statements = AstLowerer::lower_script(input)?;
+        syntax::validate_script(input)?;
+        Ok(statements)
+    }
+}
+
+impl<'a> AstLowerer<'a> {
+    fn new(input: &'a str, tokens: Vec<Token<'a>>) -> Self {
+        Self {
+            input,
+            tokens,
+            index: 0,
         }
-        let mut parser = Parser::new(tokens);
-        parser.parse_stmt()
     }
 
-    pub fn parse_all(input: &'a str) -> Result<alloc::vec::Vec<Stmt<'a>>, QqlError> {
-        let lexer = Lexer::new(input);
-        let mut tokens = alloc::vec::Vec::new();
-        for token_res in lexer {
-            tokens.push(token_res?);
+    fn lower_statement(input: &'a str) -> Result<Stmt, QqlError> {
+        let tokens = Self::lex(input)?;
+        let mut parser = AstLowerer::new(input, tokens);
+        let stmt = parser.parse_stmt()?;
+        if parser.peek()?.kind == TokenKind::Semicolon {
+            parser.advance()?;
         }
-        let mut parser = Parser::new(tokens);
-        let mut stmts = alloc::vec::Vec::new();
-        while parser.index < parser.tokens.len() {
-            if parser.tokens[parser.index].kind == TokenKind::Semicolon {
-                parser.index += 1;
-                continue;
+        parser.expect_end()?;
+        Ok(stmt)
+    }
+
+    fn lower_script(input: &'a str) -> Result<Vec<Stmt>, QqlError> {
+        let tokens = Self::lex(input)?;
+        let mut parser = AstLowerer::new(input, tokens);
+        let mut statements = Vec::new();
+        if parser.peek()?.kind == TokenKind::Semicolon {
+            return Err(QqlError::parse(
+                "QQL-PARSE-EMPTY-STATEMENT",
+                "leading or empty statements are not allowed",
+                parser.peek()?.span,
+            ));
+        }
+
+        while parser.peek()?.kind != TokenKind::Eof {
+            if statements.len() >= MAX_STATEMENTS {
+                return Err(QqlError::parse(
+                    "QQL-PARSE-STATEMENT-LIMIT",
+                    alloc::format!("a script may contain at most {MAX_STATEMENTS} statements"),
+                    parser.peek()?.span,
+                ));
             }
-            stmts.push(parser.parse_stmt()?);
+            statements.push(parser.parse_stmt()?);
+            match parser.peek()?.kind {
+                TokenKind::Semicolon => {
+                    parser.advance()?;
+                    if parser.peek()?.kind == TokenKind::Semicolon {
+                        return Err(QqlError::parse(
+                            "QQL-PARSE-EMPTY-STATEMENT",
+                            "repeated semicolons are not allowed",
+                            parser.peek()?.span,
+                        ));
+                    }
+                }
+                TokenKind::Eof => break,
+                _ => {
+                    return Err(QqlError::parse(
+                        "QQL-PARSE-SEPARATOR",
+                        "multiple statements must be separated by a semicolon",
+                        parser.peek()?.span,
+                    ));
+                }
+            }
         }
-        Ok(stmts)
+        Ok(statements)
     }
 
-    pub fn parse_stmt(&mut self) -> Result<Stmt<'a>, QqlError> {
+    fn lex(input: &'a str) -> Result<Vec<Token<'a>>, QqlError> {
+        let lexer = Lexer::new(input);
+        let mut tokens = Vec::with_capacity(input.len() / 6 + 1);
+        for token_res in lexer {
+            tokens.push(token_res?);
+        }
+        Ok(tokens)
+    }
+
+    fn expect_end(&mut self) -> Result<(), QqlError> {
+        if self.index < self.tokens.len() {
+            let tok = self.tokens[self.index];
+            return Err(QqlError::parse(
+                "QQL-PARSE-TRAILING",
+                alloc::format!("unexpected trailing token '{}'", tok.text),
+                tok.span,
+            ));
+        }
+
+        Ok(())
+    }
+
+    pub fn parse_stmt(&mut self) -> Result<Stmt, QqlError> {
         let tok = self.peek()?;
         match tok.kind {
             TokenKind::Create => self.parse_create(),
             TokenKind::Alter => self.parse_alter(),
             TokenKind::Drop => self.parse_drop(),
             TokenKind::Show => self.parse_show(),
-            TokenKind::Insert => self.parse_insert(),
-            TokenKind::Select => self.parse_select(),
+            TokenKind::Upsert => self.parse_upsert(),
             TokenKind::Scroll => self.parse_scroll(),
             TokenKind::Query => self.parse_query(),
             TokenKind::With => self.parse_query_with_cte(),
             TokenKind::Delete => self.parse_delete(),
+            TokenKind::Clear => self.parse_clear(),
             TokenKind::Update => self.parse_update(),
-            _ => Err(QqlError::syntax(
+            TokenKind::Count => self.parse_count(),
+            _ => Err(QqlError::parse(
+                "QQL-PARSE-STATEMENT",
                 alloc::format!("expected a QQL statement keyword, got '{}'", tok.text),
-                tok.pos,
+                tok.span,
             )),
         }
     }
@@ -160,20 +224,17 @@ impl<'a> Parser<'a> {
         if self.index < self.tokens.len() {
             Ok(self.tokens[self.index])
         } else {
-            Ok(Token::eof())
+            Ok(Token::eof(self.input.len()))
         }
     }
 
-    pub fn save_pos(&self) -> usize {
-        self.index
-    }
-
-    pub fn restore_pos(&mut self, saved: usize) {
-        self.index = saved;
-    }
-
-    pub fn peek_kind(&mut self) -> Result<TokenKind, QqlError> {
-        self.peek().map(|t| t.kind)
+    pub fn peek_nth(&self, offset: usize) -> Token<'a> {
+        let idx = self.index + offset;
+        if idx < self.tokens.len() {
+            self.tokens[idx]
+        } else {
+            Token::eof(self.input.len())
+        }
     }
 
     pub fn advance(&mut self) -> Result<Token<'a>, QqlError> {
@@ -187,9 +248,10 @@ impl<'a> Parser<'a> {
     pub fn expect(&mut self, kind: TokenKind) -> Result<Token<'a>, QqlError> {
         let tok = self.peek()?;
         if tok.kind != kind {
-            return Err(QqlError::syntax(
+            return Err(QqlError::parse(
+                "QQL-PARSE-EXPECTED",
                 alloc::format!("expected {} but got '{}'", kind, tok.text),
-                tok.pos,
+                tok.span,
             ));
         }
         self.advance()
@@ -197,7 +259,7 @@ impl<'a> Parser<'a> {
 
     // ── Identifier parsing ──────────────────────────────────────
 
-    pub fn parse_identifier(&mut self) -> Result<&'a str, QqlError> {
+    pub fn parse_identifier_str(&mut self) -> Result<&'a str, QqlError> {
         let tok = self.peek()?;
         if tok.kind == TokenKind::Identifier
             || tok.kind == TokenKind::String
@@ -206,71 +268,121 @@ impl<'a> Parser<'a> {
             self.advance()?;
             Ok(tok.text)
         } else {
-            Err(QqlError::syntax(
+            Err(QqlError::parse(
+                "QQL-PARSE-IDENTIFIER",
                 alloc::format!("expected identifier or quoted name, got '{}'", tok.text),
-                tok.pos,
+                tok.span,
             ))
         }
     }
 
+    pub fn parse_identifier(&mut self) -> Result<String, QqlError> {
+        self.parse_identifier_str().map(String::from)
+    }
+
     // ── Value parsing ───────────────────────────────────────────
 
-    pub fn parse_value(&mut self) -> Result<Value<'a>, QqlError> {
+    pub fn parse_value(&mut self) -> Result<crate::ast::Value, QqlError> {
         let tok = self.peek()?;
         match tok.kind {
             TokenKind::String => {
                 self.advance()?;
-                Ok(Value::Str(alloc::borrow::Cow::Borrowed(tok.text)))
+                self.decode_string(tok).map(crate::ast::Value::Str)
             }
             TokenKind::Float => {
                 self.advance()?;
                 let v: f64 = tok.text.parse().map_err(|_| {
-                    QqlError::syntax(
+                    QqlError::parse(
+                        "QQL-PARSE-FLOAT",
                         alloc::format!("invalid float literal '{}'", tok.text),
-                        tok.pos,
+                        tok.span,
                     )
                 })?;
-                Ok(Value::Float(v))
+                Ok(crate::ast::Value::Float(v))
             }
             TokenKind::Integer => {
                 self.advance()?;
                 let v: i64 = tok.text.parse().map_err(|_| {
-                    QqlError::syntax(
+                    QqlError::parse(
+                        "QQL-PARSE-INTEGER",
                         alloc::format!("invalid integer literal '{}'", tok.text),
-                        tok.pos,
+                        tok.span,
                     )
                 })?;
-                Ok(Value::Int(v))
+                Ok(crate::ast::Value::Int(v))
             }
             TokenKind::Null => {
                 self.advance()?;
-                Ok(Value::Null)
+                Ok(crate::ast::Value::Null)
             }
             TokenKind::Identifier => {
                 self.advance()?;
                 if ascii_equal(tok.text, "TRUE") {
-                    Ok(Value::Bool(true))
+                    Ok(crate::ast::Value::Bool(true))
                 } else if ascii_equal(tok.text, "FALSE") {
-                    Ok(Value::Bool(false))
+                    Ok(crate::ast::Value::Bool(false))
                 } else if ascii_equal(tok.text, "NULL") {
-                    Ok(Value::Null)
+                    Ok(crate::ast::Value::Null)
                 } else {
-                    Ok(Value::Str(alloc::borrow::Cow::Borrowed(tok.text)))
+                    Ok(crate::ast::Value::Str(tok.text.to_string()))
                 }
             }
-            TokenKind::Lbrace => self.parse_payload_dict().map(|items| {
-                Value::Dict(
-                    items
-                        .into_iter()
-                        .map(|(k, v)| (alloc::borrow::Cow::Borrowed(k), v))
-                        .collect(),
-                )
-            }),
-            TokenKind::Lbracket => self.parse_list().map(Value::List),
-            _ => Err(QqlError::syntax(
+            TokenKind::Lbrace => self
+                .parse_payload_dict()
+                .map(|items| crate::ast::Value::Dict(items.into_iter().collect())),
+            TokenKind::Lbracket => self.parse_list().map(crate::ast::Value::List),
+            _ => Err(QqlError::parse(
+                "QQL-PARSE-VALUE",
                 alloc::format!("unexpected value token '{}'", tok.text),
-                tok.pos,
+                tok.span,
             )),
         }
+    }
+
+    fn decode_string(&self, token: Token<'a>) -> Result<String, QqlError> {
+        let single_quoted = self
+            .input
+            .as_bytes()
+            .get(token.span.start)
+            .is_some_and(|quote| *quote == b'\'');
+        if !(token.text.contains('\\') || single_quoted && token.text.contains("''")) {
+            return Ok(token.text.to_string());
+        }
+        let mut decoded = String::with_capacity(token.text.len());
+        let mut chars = token.text.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if single_quoted && ch == '\'' && chars.peek() == Some(&'\'') {
+                chars.next();
+                decoded.push('\'');
+                continue;
+            }
+            if ch != '\\' {
+                decoded.push(ch);
+                continue;
+            }
+            let escaped = chars.next().ok_or_else(|| {
+                QqlError::parse(
+                    "QQL-PARSE-ESCAPE",
+                    "unterminated escape sequence",
+                    token.span,
+                )
+            })?;
+            decoded.push(match escaped {
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                '\\' => '\\',
+                '\'' => '\'',
+                '"' => '"',
+                _ => {
+                    return Err(QqlError::parse(
+                        "QQL-PARSE-ESCAPE",
+                        alloc::format!("unsupported escape sequence \\{}", escaped),
+                        token.span,
+                    ));
+                }
+            });
+        }
+        Ok(decoded)
     }
 }

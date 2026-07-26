@@ -1,0 +1,20 @@
+-- query-multitenant.qql — Multi-tenant queries with shard routing
+
+-- Shard-routed query
+QUERY 'supply chain risks'
+FROM sec10k
+WHERE tenant_id = 'honeywell'
+SHARD 'honeywell'
+LIMIT 10;
+
+-- Shard-routed count
+COUNT FROM sec10k WHERE tenant_id = 'honeywell' SHARD 'honeywell';
+
+-- Shard-routed scroll
+SCROLL FROM sec10k WHERE tenant_id = 'ge' SHARD 'ge' LIMIT 50;
+
+-- Shard-routed delete
+DELETE FROM sec10k WHERE tenant_id = '3m' SHARD '3m';
+
+-- Shard-routed upsert
+UPSERT INTO sec10k VALUES {id: 1, text: 'test'} SHARD 'acme';

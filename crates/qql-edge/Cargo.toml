@@ -1,0 +1,37 @@
+[package]
+name = "qql-edge"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Embedded QQL executor backed by qdrant-edge and optional local FastEmbed inference"
+documentation = "https://docs.rs/qql-edge"
+readme = "README.md"
+keywords = ["qql", "qdrant", "vector-search", "embeddings", "edge"]
+categories = ["database"]
+
+[features]
+default = ["fastembed-local"]
+# Local ONNX embedding via fastembed-rs (no network needed for inference)
+fastembed-local = ["fastembed"]
+# HTTP-based embedding provider (OpenAI-compatible API).
+# Enables qql/rest so HttpEmbedder (reqwest) is available.
+http-embedding = ["qql/rest"]
+
+[dependencies]
+qql-core = { version = "0.1.0", path = "../qql-core", features = ["serde", "json", "std"] }
+qql-plan = { version = "0.1.0", path = "../qql-plan" }
+qql-embed = { version = "0.1.0", path = "../qql-embed" }
+qql = { version = "0.1.0", path = "../qql-runtime", default-features = false }
+
+fastembed = { version = "5", optional = true }
+qdrant-edge = "0.7"
+
+tokio = { version = "1", features = ["rt", "sync"] }
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["serde"] }

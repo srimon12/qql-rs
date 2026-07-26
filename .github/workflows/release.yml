@@ -1,0 +1,537 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  PYO3_USE_ABI3_FORWARD_COMPATIBILITY: 1
+
+jobs:
+  gate:
+    name: Release gate
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Resolve and validate release version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            git fetch origin main
+            git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+              echo "Release tags must point to a commit already merged into main."
+              exit 1
+            }
+          else
+            version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
+          fi
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]] || {
+            echo "Invalid release version: $version"
+            exit 1
+          }
+          python3 scripts/check_release.py --version "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Check generated grammar
+        run: cargo run --locked -p qql-grammar-gen -- check
+
+      - name: Check language conformance
+        run: cargo run --locked -p qql-conformance -- check language/v1
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check published Rust crates
+        run: cargo clippy --locked --all-features -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli --all-targets -- -D warnings
+
+      - name: Test parser, planner, runtime, and CLI
+        run: cargo test --locked --all-features -p qql-core -p qql-plan -p qql-embed -p qql -p qql-cli
+
+      - name: Compile edge tests
+        run: cargo test --locked --all-features -p qql-edge --no-run
+
+  package-crates:
+    name: Package crates.io artifacts
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Package qql-core
+        run: cargo package --locked -p qql-core
+
+      - name: Package dependent crates
+        run: |
+          # These dependencies do not exist on crates.io before the first
+          # release. Package their source archives without resolving the
+          # workspace lockfile; the publish job verifies each crate after its
+          # dependencies have propagated through the registry.
+          cargo package --locked --no-verify --exclude-lockfile -p qql-plan
+          cargo package --locked --no-verify --exclude-lockfile -p qql-embed
+          cargo package --locked --no-verify --exclude-lockfile -p qql
+          cargo package --locked --no-verify --exclude-lockfile -p qql-edge
+          cargo package --locked --no-verify --exclude-lockfile -p qql-cli
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: crates-${{ needs.gate.outputs.version }}
+          path: target/package/*.crate
+          if-no-files-found: error
+
+  build-cli:
+    name: CLI (${{ matrix.target }})
+    needs: gate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            exe: ""
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            exe: ""
+          - os: macos-15
+            target: aarch64-apple-darwin
+            exe: ""
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            exe: ".exe"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build full qql CLI
+        run: cargo build --locked --release --all-features -p qql-cli --target ${{ matrix.target }}
+
+      - name: Package CLI archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="qql-${{ needs.gate.outputs.version }}-${{ matrix.target }}"
+          mkdir -p "dist/$archive"
+          cp "target/${{ matrix.target }}/release/qql${{ matrix.exe }}" "dist/$archive/"
+          cp LICENSE README.md "dist/$archive/"
+          tar -C dist -czf "dist/$archive.tar.gz" "$archive"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: cli-${{ matrix.target }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  build-python:
+    name: Python wheels (${{ matrix.target }})
+    needs: gate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            manylinux: "2_28"
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            manylinux: auto
+          - os: macos-15
+            target: aarch64-apple-darwin
+            manylinux: auto
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            manylinux: auto
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build pyqql
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          command: build
+          args: --release --locked --out dist --manifest-path crates/pyqql/Cargo.toml
+
+      - name: Build pyqql-edge
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          command: build
+          args: --release --locked --out dist --manifest-path crates/pyqql-edge/Cargo.toml
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: python-${{ matrix.target }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  build-node:
+    name: Node bindings (${{ matrix.target }})
+    needs: gate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.13.1"
+
+      - name: Install nqql build dependencies
+        working-directory: crates/nqql
+        run: npm install --no-package-lock --omit=optional --no-audit --no-fund
+
+      - name: Build nqql
+        working-directory: crates/nqql
+        run: npm run build -- --target ${{ matrix.target }}
+
+      - name: Install nqql-edge build dependencies
+        working-directory: crates/nqql-edge
+        run: npm install --no-package-lock --omit=optional --no-audit --no-fund
+
+      - name: Build nqql-edge
+        working-directory: crates/nqql-edge
+        run: npm run build -- --target ${{ matrix.target }}
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: node-core-${{ matrix.target }}
+          path: crates/nqql/index.*.node
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: node-edge-${{ matrix.target }}
+          path: crates/nqql-edge/index.*.node
+          if-no-files-found: error
+
+  package-node:
+    name: Package npm native bindings
+    needs: [gate, build-node]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.13.1"
+
+      - name: Install packaging tools
+        run: |
+          npm install --prefix crates/nqql --no-package-lock --omit=optional --no-audit --no-fund
+          npm install --prefix crates/nqql-edge --no-package-lock --omit=optional --no-audit --no-fund
+
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: node-core-*
+          path: crates/nqql/artifacts
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: node-edge-*
+          path: crates/nqql-edge/artifacts
+          merge-multiple: true
+
+      - name: Assemble platform packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          for package in nqql nqql-edge; do
+            (
+              cd "crates/$package"
+              npx napi create-npm-dirs
+              npx napi artifacts --output-dir artifacts --npm-dir npm
+            )
+          done
+
+      - name: Pack root and platform packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for package in nqql nqql-edge; do
+            cp LICENSE "crates/$package/LICENSE"
+            for platform in "crates/$package"/npm/*; do
+              cp LICENSE "$platform/LICENSE"
+              npm pack "$platform" --ignore-scripts --pack-destination "$GITHUB_WORKSPACE/dist"
+            done
+            find "crates/$package" -maxdepth 1 -name 'index.*.node' -delete
+            npm pack "crates/$package" --ignore-scripts --pack-destination "$GITHUB_WORKSPACE/dist"
+          done
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: node-packages-${{ needs.gate.outputs.version }}
+          path: dist/*.tgz
+          if-no-files-found: error
+
+  build-wasm:
+    name: Package qql-wasm
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.13.1"
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked --version 0.15.0
+
+      - name: Build web package
+        run: wasm-pack build crates/qql-wasm --release --target web --out-dir "$GITHUB_WORKSPACE/dist/qql-wasm"
+
+      - name: Include license and pack
+        run: |
+          cp LICENSE dist/qql-wasm/LICENSE
+          npm pack dist/qql-wasm --ignore-scripts --pack-destination dist
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: wasm-package-${{ needs.gate.outputs.version }}
+          path: dist/*.tgz
+          if-no-files-found: error
+
+  publish-crates:
+    name: Publish crates.io
+    needs: [gate, package-crates, build-cli, build-python, package-node, build-wasm]
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish dependency chain
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+          VERSION: ${{ needs.gate.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          wait_for_crate() {
+            local crate="$1"
+            for attempt in $(seq 1 30); do
+              if cargo info "${crate}@${VERSION}" >/dev/null 2>&1; then
+                return 0
+              fi
+              sleep 10
+            done
+            echo "Timed out waiting for ${crate}@${VERSION} on crates.io"
+            return 1
+          }
+
+          cargo publish --locked -p qql-core
+          wait_for_crate qql-core
+
+          cargo publish --locked -p qql-plan
+          cargo publish --locked -p qql-embed
+          wait_for_crate qql-plan
+          wait_for_crate qql-embed
+
+          cargo publish --locked -p qql
+          wait_for_crate qql
+
+          cargo publish --locked -p qql-edge
+          wait_for_crate qql-edge
+
+          cargo publish --locked -p qql-cli
+
+  publish-pyqql:
+    name: Publish pyqql to PyPI
+    needs: [gate, package-crates, build-cli, build-python, package-node, build-wasm]
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    environment: release-pyqql
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: python-*
+          path: dist
+          merge-multiple: true
+
+      - name: Keep only pyqql wheels
+        shell: bash
+        run: |
+          shopt -s nullglob
+          rm -f dist/*pyqql_edge*
+          shopt -u nullglob
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          verbose: true
+
+  publish-pyqql-edge:
+    name: Publish pyqql-edge to PyPI
+    needs: [gate, package-crates, build-cli, build-python, package-node, build-wasm]
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    environment: release-pyqql-edge
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: python-*
+          path: dist
+          merge-multiple: true
+
+      - name: Keep only pyqql-edge wheels
+        shell: bash
+        run: |
+          shopt -s nullglob
+          rm -f dist/pyqql-*.whl
+          shopt -u nullglob
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          verbose: true
+
+  publish-node:
+    name: Publish npm native bindings
+    needs: [gate, package-crates, build-cli, build-python, package-node, build-wasm]
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.13.1"
+          registry-url: "https://registry.npmjs.org"
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: node-packages-${{ needs.gate.outputs.version }}
+          path: dist
+
+      - name: Publish platform packages, then root packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ needs.gate.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for package in dist/*-linux-*.tgz dist/*-darwin-*.tgz dist/*-win32-*.tgz; do
+            npm publish "$package" --access public --provenance --ignore-scripts
+          done
+          npm publish "dist/nqql-${VERSION}.tgz" --access public --provenance --ignore-scripts
+          npm publish "dist/nqql-edge-${VERSION}.tgz" --access public --provenance --ignore-scripts
+
+  publish-wasm:
+    name: Publish qql-wasm to npm
+    needs: [gate, package-crates, build-cli, build-python, package-node, build-wasm]
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.13.1"
+          registry-url: "https://registry.npmjs.org"
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: wasm-package-${{ needs.gate.outputs.version }}
+          path: dist
+
+      - name: Publish qql-wasm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish dist/*.tgz --access public --provenance --ignore-scripts
+
+  github-release:
+    name: Publish GitHub release
+    needs: [gate, publish-crates, publish-pyqql, publish-pyqql-edge, publish-node, publish-wasm, build-cli]
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: cli-*
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: release-artifacts
+        run: sha256sum *.tar.gz > SHA256SUMS
+
+      - name: Generate release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          previous="$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)"
+          {
+            echo "QQL ${{ needs.gate.outputs.version }}"
+            echo
+            if [[ -n "$previous" ]]; then
+              echo "## Changes since $previous"
+              git log --oneline --no-merges "$previous..HEAD"
+            else
+              echo "## First release"
+              echo
+              echo "Initial release of the QQL language, Rust crates, native Python and Node.js bindings, WebAssembly package, edge runtime, and CLI."
+            fi
+          } > release-notes.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: QQL ${{ needs.gate.outputs.version }}
+          body_path: release-notes.md
+          files: release-artifacts/*
+          prerelease: ${{ contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}

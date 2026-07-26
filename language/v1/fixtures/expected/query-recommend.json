@@ -1,0 +1,351 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "products"
+        },
+        "ctes": [],
+        "expression": {
+          "Recommend": {
+            "negative": [],
+            "positive": [
+              {
+                "Point": {
+                  "Number": 1
+                }
+              },
+              {
+                "Point": {
+                  "Number": 2
+                }
+              },
+              {
+                "Point": {
+                  "Number": 3
+                }
+              }
+            ],
+            "prefetch": [],
+            "strategy": null,
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "products"
+        },
+        "ctes": [],
+        "expression": {
+          "Recommend": {
+            "negative": [
+              {
+                "Point": {
+                  "Number": 3
+                }
+              }
+            ],
+            "positive": [
+              {
+                "Point": {
+                  "Number": 1
+                }
+              },
+              {
+                "Point": {
+                  "Number": 2
+                }
+              }
+            ],
+            "prefetch": [],
+            "strategy": null,
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "products"
+        },
+        "ctes": [],
+        "expression": {
+          "Recommend": {
+            "negative": [],
+            "positive": [
+              {
+                "Point": {
+                  "Number": 1
+                }
+              }
+            ],
+            "prefetch": [],
+            "strategy": "BestScore",
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "products"
+        },
+        "ctes": [],
+        "expression": {
+          "Recommend": {
+            "negative": [
+              {
+                "Point": {
+                  "Number": 2
+                }
+              }
+            ],
+            "positive": [
+              {
+                "Point": {
+                  "Number": 1
+                }
+              }
+            ],
+            "prefetch": [],
+            "strategy": "AverageVector",
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "products"
+        },
+        "ctes": [],
+        "expression": {
+          "Recommend": {
+            "negative": [
+              {
+                "Point": {
+                  "Number": 2
+                }
+              }
+            ],
+            "positive": [
+              {
+                "Point": {
+                  "Number": 1
+                }
+              }
+            ],
+            "prefetch": [],
+            "strategy": "BestScore",
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "products"
+        },
+        "ctes": [],
+        "expression": {
+          "Recommend": {
+            "negative": [
+              {
+                "Point": {
+                  "Number": 2
+                }
+              }
+            ],
+            "positive": [
+              {
+                "Point": {
+                  "Number": 1
+                }
+              }
+            ],
+            "prefetch": [],
+            "strategy": "SumScores",
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "products"
+        },
+        "ctes": [],
+        "expression": {
+          "Recommend": {
+            "negative": [
+              {
+                "Point": {
+                  "Number": 3
+                }
+              }
+            ],
+            "positive": [
+              {
+                "Point": {
+                  "Number": 1
+                }
+              },
+              {
+                "Point": {
+                  "Number": 2
+                }
+              }
+            ],
+            "prefetch": [],
+            "strategy": null,
+            "using": null
+          }
+        },
+        "filter": {
+          "Compare": {
+            "field": "category",
+            "op": "Eq",
+            "value": {
+              "Str": "electronics"
+            }
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "products"
+        },
+        "ctes": [],
+        "expression": {
+          "Recommend": {
+            "negative": [],
+            "positive": [
+              {
+                "Point": {
+                  "Number": 1
+                }
+              }
+            ],
+            "prefetch": [],
+            "strategy": null,
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": 0.8,
+        "shard_key": null
+      }
+    }
+  ]
+}

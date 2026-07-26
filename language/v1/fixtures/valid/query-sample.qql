@@ -1,0 +1,10 @@
+-- query-sample.qql — Random sampling
+
+-- Sample random
+QUERY SAMPLE RANDOM FROM docs LIMIT 10;
+
+-- With filter
+QUERY SAMPLE RANDOM FROM docs WHERE status = 'active' LIMIT 10;
+
+-- With vector selector
+QUERY SAMPLE RANDOM FROM docs WITH VECTOR false LIMIT 10;

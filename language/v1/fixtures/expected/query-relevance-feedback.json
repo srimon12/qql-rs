@@ -1,0 +1,171 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "RelevanceFeedback": {
+            "feedback": [
+              {
+                "example": {
+                  "Vector": {
+                    "Dense": [
+                      0.1,
+                      0.2
+                    ]
+                  }
+                },
+                "score": 1.0
+              },
+              {
+                "example": {
+                  "Vector": {
+                    "Dense": [
+                      0.3,
+                      0.4
+                    ]
+                  }
+                },
+                "score": -1.0
+              }
+            ],
+            "prefetch": [],
+            "strategy": {
+              "a": 1.0,
+              "b": 0.5,
+              "c": 0.2
+            },
+            "target": {
+              "Text": {
+                "model": null,
+                "text": "search"
+              }
+            },
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "RelevanceFeedback": {
+            "feedback": [
+              {
+                "example": {
+                  "Point": {
+                    "Number": 1
+                  }
+                },
+                "score": 2.0
+              },
+              {
+                "example": {
+                  "Point": {
+                    "Number": 2
+                  }
+                },
+                "score": -0.5
+              }
+            ],
+            "prefetch": [],
+            "strategy": {
+              "a": 1.0,
+              "b": 0.5,
+              "c": 0.2
+            },
+            "target": {
+              "Point": {
+                "Number": 42
+              }
+            },
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "RelevanceFeedback": {
+            "feedback": [
+              {
+                "example": {
+                  "Text": {
+                    "model": null,
+                    "text": "relevant"
+                  }
+                },
+                "score": 1.5
+              }
+            ],
+            "prefetch": [],
+            "strategy": {
+              "a": 1.0,
+              "b": 0.5,
+              "c": 0.2
+            },
+            "target": {
+              "Text": {
+                "model": null,
+                "text": "query"
+              }
+            },
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    }
+  ]
+}

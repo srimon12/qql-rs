@@ -1,0 +1,34 @@
+-- create-index.qql — CREATE INDEX statements
+
+-- Keyword index
+CREATE INDEX ON COLLECTION docs FOR status TYPE keyword;
+
+-- Keyword with options
+CREATE INDEX ON COLLECTION docs FOR tags TYPE keyword WITH (is_tenant = true, on_disk = true, enable_hnsw = false);
+
+-- Integer index
+CREATE INDEX ON COLLECTION docs FOR year TYPE integer;
+
+-- Integer with options
+CREATE INDEX ON COLLECTION docs FOR year TYPE integer WITH (lookup = true, range = true, is_principal = true);
+
+-- Float index
+CREATE INDEX ON COLLECTION docs FOR score TYPE float WITH (on_disk = true);
+
+-- Geo index
+CREATE INDEX ON COLLECTION docs FOR location TYPE geo WITH (enable_hnsw = true);
+
+-- Text index
+CREATE INDEX ON COLLECTION docs FOR content TYPE text WITH (tokenizer = 'word', min_token_len = 2, max_token_len = 20, lowercase = true, phrase_matching = true, stopwords = ['en']);
+
+-- Text index with multilingual tokenizer
+CREATE INDEX ON COLLECTION docs FOR content TYPE text WITH (tokenizer = 'multilingual');
+
+-- Bool index
+CREATE INDEX ON COLLECTION docs FOR is_active TYPE bool WITH (on_disk = true);
+
+-- Datetime index
+CREATE INDEX ON COLLECTION docs FOR created_at TYPE datetime WITH (on_disk = true, is_principal = true);
+
+-- UUID index
+CREATE INDEX ON COLLECTION docs FOR user_id TYPE uuid WITH (is_tenant = true, on_disk = true);

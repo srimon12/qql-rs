@@ -1,5 +1,6 @@
 use qql_core::error::QqlError;
 use qql_core::lexer::Lexer;
+use qql_core::parser::Parser;
 use qql_core::token::TokenKind;
 
 pub fn strip_comments(text: &str) -> String {
@@ -13,25 +14,22 @@ pub fn strip_comments(text: &str) -> String {
         let ch = bytes[i];
 
         if in_string {
-            out.push(ch as char);
-            if ch == b'\\' && i + 1 < bytes.len() {
-                out.push(bytes[i + 1] as char);
-                i += 2;
+            push_input_char(&mut out, text, &mut i);
+            if ch == b'\\' && i < bytes.len() {
+                push_input_char(&mut out, text, &mut i);
                 continue;
             }
             if ch == quote_char {
                 in_string = false;
                 quote_char = 0;
             }
-            i += 1;
             continue;
         }
 
         if ch == b'\'' || ch == b'"' {
             in_string = true;
             quote_char = ch;
-            out.push(ch as char);
-            i += 1;
+            push_input_char(&mut out, text, &mut i);
             continue;
         }
 
@@ -43,26 +41,32 @@ pub fn strip_comments(text: &str) -> String {
             continue;
         }
 
-        out.push(ch as char);
-        i += 1;
+        push_input_char(&mut out, text, &mut i);
     }
 
     out
 }
 
-fn is_statement_starter(kind: TokenKind) -> bool {
+fn push_input_char(output: &mut String, input: &str, index: &mut usize) {
+    let ch = input[*index..]
+        .chars()
+        .next()
+        .expect("index is always within the input while copying a character");
+    output.push(ch);
+    *index += ch.len_utf8();
+}
+
+fn is_contextual_identifier(kind: TokenKind) -> bool {
     matches!(
         kind,
-        TokenKind::Insert
-            | TokenKind::Create
-            | TokenKind::Alter
-            | TokenKind::Drop
-            | TokenKind::Show
-            | TokenKind::Query
-            | TokenKind::Select
-            | TokenKind::Scroll
-            | TokenKind::Delete
-            | TokenKind::Update
+        TokenKind::Offset
+            | TokenKind::Score
+            | TokenKind::Threshold
+            | TokenKind::Lookup
+            | TokenKind::Id
+            | TokenKind::Dense
+            | TokenKind::Sparse
+            | TokenKind::Vector
     )
 }
 
@@ -78,23 +82,57 @@ pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
         tokens.push(tok);
     }
 
-    let mut starts: Vec<usize> = Vec::new();
+    let mut starts = Vec::new();
     let mut depth: i32 = 0;
-    for tok in &tokens {
-        if depth == 0 && is_statement_starter(tok.kind) {
-            starts.push(tok.pos);
+    let mut in_with_cte = false;
+    for (i, tok) in tokens.iter().enumerate() {
+        // After a WITH ... AS (...) CTE block, suppress the next QUERY/FUSION
+        // from being treated as a new statement starter — it is the main query
+        // of the WITH statement.
+        if in_with_cte && depth == 0 && matches!(tok.kind, TokenKind::Query | TokenKind::Fusion) {
+            in_with_cte = false;
+        } else {
+            let is_starter = match tok.kind {
+                TokenKind::Upsert
+                | TokenKind::Create
+                | TokenKind::Alter
+                | TokenKind::Drop
+                | TokenKind::Show
+                | TokenKind::Query
+                | TokenKind::Scroll
+                | TokenKind::Delete
+                | TokenKind::Update => true,
+                TokenKind::With if i + 2 < tokens.len() => {
+                    let next1 = &tokens[i + 1];
+                    let next2 = &tokens[i + 2];
+                    let next1_is_ident = next1.kind == TokenKind::Identifier
+                        || next1.kind == TokenKind::String
+                        || is_contextual_identifier(next1.kind);
+                    next1_is_ident && next2.kind == TokenKind::As
+                }
+                _ => false,
+            };
+
+            if depth == 0 && is_starter {
+                starts.push(tok.span.start);
+                if tok.kind == TokenKind::With {
+                    in_with_cte = true;
+                }
+            }
         }
+
         match tok.kind {
             TokenKind::Lbrace | TokenKind::Lbracket | TokenKind::Lparen => depth += 1,
             TokenKind::Rbrace | TokenKind::Rbracket | TokenKind::Rparen => {
                 depth -= 1;
                 if depth < 0 {
-                    return Err(QqlError::syntax(
+                    return Err(QqlError::parse(
+                        "QQL-PARSE",
                         format!(
                             "unexpected '{}' at position {} (unmatched closing delimiter)",
-                            tok.text, tok.pos
+                            tok.text, tok.span.start,
                         ),
-                        tok.pos,
+                        tok.span,
                     ));
                 }
             }
@@ -102,9 +140,10 @@ pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
         }
     }
     if depth > 0 {
-        return Err(QqlError::syntax(
+        return Err(QqlError::parse(
+            "QQL-PARSE",
             format!("unexpected end of input: {} unclosed delimiter(s)", depth),
-            0,
+            qql_core::error::Span::new(0, cleaned.len()),
         ));
     }
 
@@ -112,16 +151,21 @@ pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
         return Ok(Vec::new());
     }
 
-    let mut statements = Vec::with_capacity(starts.len());
-    for i in 0..starts.len() {
-        let start = starts[i];
-        let end = if i + 1 < starts.len() {
-            starts[i + 1]
+    let mut statements = Vec::new();
+    for (idx, &start) in starts.iter().enumerate() {
+        let end = if idx + 1 < starts.len() {
+            starts[idx + 1]
         } else {
             cleaned.len()
         };
-        let stmt = cleaned[start..end].trim();
+
+        let mut stmt = cleaned[start..end].trim();
+        if stmt.ends_with(';') {
+            stmt = stmt[..stmt.len() - 1].trim();
+        }
+
         if !stmt.is_empty() {
+            Parser::parse(stmt)?;
             statements.push(stmt.to_string());
         }
     }
@@ -131,7 +175,7 @@ pub fn split_statements(text: &str) -> Result<Vec<String>, QqlError> {
 
 pub fn read_script(path: &str) -> Result<Vec<String>, QqlError> {
     let data = std::fs::read_to_string(path)
-        .map_err(|e| QqlError::runtime(format!("cannot read file: {}", e)))?;
+        .map_err(|e| QqlError::execution("QQL-CLI", format!("cannot read file: {e}"), None))?;
     split_statements(&data)
 }
 
@@ -157,4 +201,28 @@ where
         }
     }
     Ok((ok_count, fail_count))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_statements;
+
+    #[test]
+    fn splits_top_level_semicolons_without_breaking_ctes() {
+        let script = "WITH dense AS (QUERY 'search' LIMIT 10) QUERY 'search' FROM docs PREFETCH (dense); SHOW COLLECTIONS;";
+
+        let statements = split_statements(script).expect("script should parse");
+
+        assert_eq!(statements.len(), 2);
+        assert!(statements[0].starts_with("WITH dense"));
+        assert_eq!(statements[1], "SHOW COLLECTIONS");
+    }
+
+    #[test]
+    fn preserves_unicode_string_literals() {
+        let statements =
+            split_statements("QUERY 'café' FROM docs LIMIT 1;").expect("script should parse");
+
+        assert_eq!(statements, ["QUERY 'café' FROM docs LIMIT 1"]);
+    }
 }

@@ -1,0 +1,8 @@
+[project]
+name = "sec10k-qql"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "html2text>=2024.2.26",
+    "requests>=2.31.0",
+]

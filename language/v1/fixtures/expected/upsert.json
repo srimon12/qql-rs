@@ -1,0 +1,568 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "Upsert": {
+        "collection": "docs",
+        "embed": [],
+        "embedding": null,
+        "points": [
+          {
+            "id": {
+              "Number": 1
+            },
+            "payload": [
+              [
+                "title",
+                {
+                  "Str": "Hello"
+                }
+              ],
+              [
+                "body",
+                {
+                  "Str": "World"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": null
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "docs",
+        "embed": [],
+        "embedding": null,
+        "points": [
+          {
+            "id": {
+              "Number": 1
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "hello"
+                }
+              ]
+            ],
+            "vectors": null
+          },
+          {
+            "id": {
+              "Number": 2
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "world"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": null
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "docs",
+        "embed": [],
+        "embedding": {
+          "Hybrid": {
+            "dense_model": null,
+            "dense_vector": null,
+            "sparse_model": null,
+            "sparse_vector": null
+          }
+        },
+        "points": [
+          {
+            "id": {
+              "Number": 1
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "hello"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": null
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "docs",
+        "embed": [],
+        "embedding": {
+          "Dense": {
+            "model": "all-MiniLM-L6-v2",
+            "vector": null
+          }
+        },
+        "points": [
+          {
+            "id": {
+              "Number": 1
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "hello"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": null
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "docs",
+        "embed": [],
+        "embedding": {
+          "Sparse": {
+            "model": "qdrant/bm25",
+            "vector": null
+          }
+        },
+        "points": [
+          {
+            "id": {
+              "Number": 1
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "hello"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": null
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "docs",
+        "embed": [],
+        "embedding": {
+          "Hybrid": {
+            "dense_model": "all-MiniLM-L6-v2",
+            "dense_vector": null,
+            "sparse_model": "qdrant/bm25",
+            "sparse_vector": null
+          }
+        },
+        "points": [
+          {
+            "id": {
+              "Number": 1
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "hello"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": null
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "docs",
+        "embed": [],
+        "embedding": {
+          "Hybrid": {
+            "dense_model": null,
+            "dense_vector": null,
+            "sparse_model": null,
+            "sparse_vector": null
+          }
+        },
+        "points": [
+          {
+            "id": {
+              "Number": 2
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "inferred targets"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": null
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "docs",
+        "embed": [],
+        "embedding": {
+          "Hybrid": {
+            "dense_model": null,
+            "dense_vector": "semantic_v2",
+            "sparse_model": null,
+            "sparse_vector": "lexical_v2"
+          }
+        },
+        "points": [
+          {
+            "id": {
+              "Number": 3
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "named targets"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": null
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "docs",
+        "embed": [],
+        "embedding": null,
+        "points": [
+          {
+            "id": {
+              "Number": 1
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "hello"
+                }
+              ]
+            ],
+            "vectors": {
+              "Named": [
+                [
+                  "dense",
+                  {
+                    "Dense": [
+                      0.1,
+                      0.2,
+                      0.3
+                    ]
+                  }
+                ]
+              ]
+            }
+          }
+        ],
+        "shard_key": null
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "docs",
+        "embed": [],
+        "embedding": null,
+        "points": [
+          {
+            "id": {
+              "Number": 1
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "hello"
+                }
+              ]
+            ],
+            "vectors": {
+              "Named": [
+                [
+                  "colbert",
+                  {
+                    "MultiDense": [
+                      [
+                        0.1,
+                        0.2
+                      ],
+                      [
+                        0.3,
+                        0.4
+                      ]
+                    ]
+                  }
+                ]
+              ]
+            }
+          }
+        ],
+        "shard_key": null
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "arxiv",
+        "embed": [
+          {
+            "kind": {
+              "Dense": {
+                "model": null
+              }
+            },
+            "source_field": "text",
+            "target_vector": "dense_chunk"
+          },
+          {
+            "kind": {
+              "Dense": {
+                "model": null
+              }
+            },
+            "source_field": "title",
+            "target_vector": "dense_title"
+          },
+          {
+            "kind": {
+              "Dense": {
+                "model": null
+              }
+            },
+            "source_field": "abstract",
+            "target_vector": "dense_abstract"
+          },
+          {
+            "kind": {
+              "Sparse": {
+                "model": null
+              }
+            },
+            "source_field": "title",
+            "target_vector": "sparse_title"
+          }
+        ],
+        "embedding": null,
+        "points": [
+          {
+            "id": {
+              "String": "2104.01234"
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "chunk text"
+                }
+              ],
+              [
+                "title",
+                {
+                  "Str": "Paper Title"
+                }
+              ],
+              [
+                "abstract",
+                {
+                  "Str": "Full abstract"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": null
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "docs",
+        "embed": [
+          {
+            "kind": {
+              "Dense": {
+                "model": "all-MiniLM-L6-v2"
+              }
+            },
+            "source_field": "text",
+            "target_vector": "dense_chunk"
+          },
+          {
+            "kind": {
+              "Sparse": {
+                "model": "qdrant/bm25"
+              }
+            },
+            "source_field": "title",
+            "target_vector": "sparse_title"
+          }
+        ],
+        "embedding": null,
+        "points": [
+          {
+            "id": {
+              "Number": 1
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "hello"
+                }
+              ],
+              [
+                "title",
+                {
+                  "Str": "World"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": null
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "sec10k",
+        "embed": [],
+        "embedding": null,
+        "points": [
+          {
+            "id": {
+              "Number": 1
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "test"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": "tenant-a"
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "docs",
+        "embed": [],
+        "embedding": null,
+        "points": [
+          {
+            "id": {
+              "String": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "document"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": null
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "docs",
+        "embed": [],
+        "embedding": null,
+        "points": [
+          {
+            "id": {
+              "Number": 1
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "with vector"
+                }
+              ]
+            ],
+            "vectors": {
+              "Unnamed": {
+                "Dense": [
+                  0.1,
+                  0.2,
+                  0.3
+                ]
+              }
+            }
+          }
+        ],
+        "shard_key": null
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "docs",
+        "embed": [],
+        "embedding": null,
+        "points": [
+          {
+            "id": {
+              "Number": 1
+            },
+            "payload": [],
+            "vectors": {
+              "Unnamed": {
+                "Sparse": {
+                  "indices": [
+                    0,
+                    3,
+                    5
+                  ],
+                  "values": [
+                    0.5,
+                    0.8,
+                    0.2
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "shard_key": null
+      }
+    }
+  ]
+}

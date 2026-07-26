@@ -47,10 +47,17 @@ impl QqlConfig {
     pub fn config_dir() -> Result<PathBuf, QqlError> {
         let home = std::env::var("HOME")
             .or_else(|_| std::env::var("USERPROFILE"))
-            .map_err(|_| QqlError::runtime("could not find home directory"))?;
+            .map_err(|_| {
+                QqlError::execution("QQL-CONFIG", "could not find home directory", None)
+            })?;
         let dir = PathBuf::from(home).join(".qql");
-        std::fs::create_dir_all(&dir)
-            .map_err(|e| QqlError::runtime(format!("could not create config directory: {}", e)))?;
+        std::fs::create_dir_all(&dir).map_err(|e| {
+            QqlError::execution(
+                "QQL-CONFIG",
+                format!("could not create config directory: {}", e),
+                None,
+            )
+        })?;
         Ok(dir)
     }
 
@@ -63,19 +70,27 @@ impl QqlConfig {
         if !path.exists() {
             return Ok(None);
         }
-        let data = std::fs::read_to_string(&path)
-            .map_err(|e| QqlError::runtime(format!("failed to read config: {}", e)))?;
-        let config: QqlConfig = serde_json::from_str(&data)
-            .map_err(|e| QqlError::runtime(format!("failed to parse config: {}", e)))?;
+        let data = std::fs::read_to_string(&path).map_err(|e| {
+            QqlError::execution("QQL-CONFIG", format!("failed to read config: {}", e), None)
+        })?;
+        let config: QqlConfig = serde_json::from_str(&data).map_err(|e| {
+            QqlError::execution("QQL-CONFIG", format!("failed to parse config: {}", e), None)
+        })?;
         Ok(Some(config))
     }
 
     pub fn save(&self) -> Result<(), QqlError> {
         let path = Self::config_path()?;
-        let data = serde_json::to_string_pretty(self)
-            .map_err(|e| QqlError::runtime(format!("failed to serialize config: {}", e)))?;
-        std::fs::write(&path, data)
-            .map_err(|e| QqlError::runtime(format!("failed to write config: {}", e)))?;
+        let data = serde_json::to_string_pretty(self).map_err(|e| {
+            QqlError::execution(
+                "QQL-CONFIG",
+                format!("failed to serialize config: {}", e),
+                None,
+            )
+        })?;
+        std::fs::write(&path, data).map_err(|e| {
+            QqlError::execution("QQL-CONFIG", format!("failed to write config: {}", e), None)
+        })?;
         Ok(())
     }
 }

@@ -1,46 +1,55 @@
-# QQL SDK Examples
+# QQL Examples
 
-Each language directory contains 4 examples — **basic, medium, expert,
-high-perf** — that showcase the QQL parser SDK in progressively more
-powerful patterns.
+Working example applications demonstrating QQL across all language bindings.
 
-## Levels
+| Directory | Language | Description |
+|-----------|----------|-------------|
+| `python/` | Python (pyqql) | inject_filter + Client + HttpEmbedder |
+| `sec10k-qql/` | Python (pyqql) | Full multitenant RAG: 4-tenant SEC 10-K filings with QQL (zero LlamaIndex) |
+| `rust/` | Rust (qql-core) | parse + inject_filter + route lower |
+| `nodejs/` | Node.js (nqql) | Client + injectFilter + HttpEmbedder |
+| `wasm/` | WASM (qql-wasm) | parse + compile + Client (browser fetch) |
+| `edge-demo/` | Python (CLI) | Local qdrant-edge HNSW + hybrid search |
+| `medical-showcase/` | Python (CLI) | Full retrieval showcase: 12 records, all QQL features |
 
-| # | Level | APIs shown | What it demonstrates |
-|---|-------|------------|---------------------|
-| 01 | Basic | `parse`, `tokenize`, `is_valid` | QQL is an inspectable, programmable language |
-| 02 | Medium | `inject_filter` | Programmatic WHERE injection — QQL's superpower |
-| 03 | Expert | Gateway pattern | Multi-tenant query rewriting with auth policies |
-| 04 | High-Perf | `parse_all`, `parse_batch` | Script parsing and batch FFI for throughput |
+## Run
 
-## Running
+All language examples require their respective SDK installed. The CLI-based examples
+(`edge-demo/`, `medical-showcase/`) use the `qql` binary:
+
+```bash
+# Build the CLI
+cargo build --release -p qql-cli --no-default-features --features rest
+
+# Run the medical showcase
+QQL_BIN=./target/release/qql uv run examples/medical-showcase/main.py
+
+# Run with execution against Qdrant
+QQL_BIN=./target/release/qql uv run examples/medical-showcase/main.py --execute
+```
 
 ### Python
 ```bash
-pip install pyqql
-# Or: PYTHONPATH=target/release python3 examples/python/01_basic_parse.py
-for f in examples/python/*.py; do python3 "$f"; done
+cd crates/pyqql && pip install -e .
+cd ../../examples/python
+python basic_to_medium.py
+```
+
+### Rust
+```bash
+cd examples/rust/basic_to_medium
+cargo run
 ```
 
 ### Node.js
 ```bash
-npm install nqql
-# Or: cp target/release/libnqql.so target/release/nqql.node
-for f in examples/nodejs/*.mjs; do node "$f"; done
+cd crates/nqql && npm install && npm run build
+cd ../../examples/nodejs
+node basic_to_medium.mjs
 ```
 
-### Go
-Use the standalone [qql-go](https://github.com/srimon12/qql-go) library for Go bindings.
-
-### Rust
-```bash
-for f in examples/rust/*/Cargo.toml; do
-  cargo run --manifest-path "$f"
-done
-```
-
-### WASM (Browser)
+### WASM
 ```bash
 cd crates/qql-wasm && wasm-pack build --target web
-# Then serve examples/wasm/ and open in browser
+# Then serve examples/wasm/ with any HTTP server
 ```

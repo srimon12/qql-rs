@@ -1,0 +1,49 @@
+-- query-formula.qql — Formula-based scoring
+
+-- Simple arithmetic
+QUERY FORMULA $score * 2 DEFAULTS (score = 0.0) FROM docs LIMIT 10;
+
+-- With payload field
+QUERY FORMULA $score + 0.3 * popularity DEFAULTS (score = 0.0) FROM docs LIMIT 10;
+
+-- With prefetch
+WITH candidates AS (QUERY TEXT 'search' USING dense LIMIT 100)
+QUERY FORMULA $score * 2 DEFAULTS (score = 0.0)
+FROM docs
+PREFETCH (candidates)
+LIMIT 10;
+
+-- Math functions
+QUERY FORMULA SQRT($score) * 10 DEFAULTS (score = 0.0) FROM docs LIMIT 10;
+QUERY FORMULA LOG($score + 1) DEFAULTS (score = 0.0) FROM docs LIMIT 10;
+QUERY FORMULA POW(ABS($score), 2) DEFAULTS (score = 0.0) FROM docs LIMIT 10;
+
+-- Geo distance in formula
+QUERY FORMULA $score * (1.0 / (1.0 + GEO_DISTANCE(52.52, 13.405, location)))
+DEFAULTS (score = 0.0)
+FROM docs LIMIT 10;
+
+-- CASE WHEN (matches are parsed as MATCH ANY in formula context)
+QUERY FORMULA CASE WHEN premium MATCH ANY ('true') THEN $score * 2 ELSE $score END
+DEFAULTS (score = 0.0)
+FROM docs LIMIT 10;
+
+-- With filter
+QUERY FORMULA $score * 2 DEFAULTS (score = 0.0)
+FROM docs
+WHERE status = 'published'
+LIMIT 10;
+
+-- Decay functions
+QUERY FORMULA EXP_DECAY(relevance_score, SCALE = 30) DEFAULTS (score = 0.0) FROM docs LIMIT 10;
+QUERY FORMULA GAUSS_DECAY(popularity, TARGET = 100, SCALE = 10, MIDPOINT = 0.5) DEFAULTS (score = 0.0) FROM docs LIMIT 10;
+QUERY FORMULA LIN_DECAY(age_days, TARGET = 0, SCALE = 365) DEFAULTS (score = 0.0) FROM docs LIMIT 10;
+
+-- Datetime in formula
+QUERY FORMULA datetime('2026-01-01') DEFAULTS (score = 0.0) FROM docs LIMIT 10;
+QUERY FORMULA datetime_key('published_at') DEFAULTS (score = 0.0) FROM docs LIMIT 10;
+
+-- Complex formula
+QUERY FORMULA ($score * LOG(popularity + 1) + 0.5 * recency) / 2
+DEFAULTS (score = 0.0)
+FROM docs LIMIT 10;

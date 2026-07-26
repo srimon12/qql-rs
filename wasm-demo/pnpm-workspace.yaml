@@ -1,0 +1,8 @@
+packages: []
+
+allowBuilds:
+  esbuild: true
+  msw: false
+  onnxruntime-node: false
+  protobufjs: false
+  sharp: false

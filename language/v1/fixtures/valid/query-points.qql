@@ -1,0 +1,18 @@
+-- query-points.qql — Direct point retrieval
+
+-- Single point
+QUERY POINTS (1) FROM docs;
+
+-- Multiple points (integer)
+QUERY POINTS (1, 2, 3) FROM docs;
+
+-- Multiple points (string UUID)
+QUERY POINTS ('a1b2c3', 'd4e5f6') FROM docs;
+
+-- Mixed integer and string point IDs
+QUERY POINTS (1, 'uuid-here', 100) FROM docs;
+
+-- With payload and vector selectors
+QUERY POINTS (1, 2) FROM docs
+WITH PAYLOAD INCLUDE (title, url)
+WITH VECTOR false;

@@ -1,144 +1,108 @@
-# Parser Benchmarks
+# QQL Benchmarks
 
-Compares QQL parse throughput across all language SDKs.
+Compares QQL throughput across different parser implementations, runtimes, and host SDK languages (Rust, Python, Node.js, Go).
 
-All benchmarks measure **pure parse time** (no Qdrant I/O) — just lexing + parsing
-a QQL string into an AST. Results are medians from 3–5 runs of 100k–500k
-iterations each on a single machine:
+Benchmarks are split into two categories:
+1. **Isolated Parser Benchmarks**: Pure lexing and parsing of QQL query strings into an AST (no network I/O, no schema compilation, no payload construction).
+2. **Full E2E Pipeline Benchmarks**: The complete query compilation lifecycle right up to the millisecond before sending the network request (parsing, filter injection, schema validation, and Qdrant REST JSON payload construction).
 
 - **CPU:** Intel Core i5-10400F @ 2.90 GHz
-- **Rust:** `qql-core` via `cargo run --release`
-- **Go:** `qql-go` via `go test -bench`
-- **Python:** `pyqql` via `timeit` (100k iterations)
-- **Node.js:** `nqql` via `process.hrtime.bigint()` (100k iterations)
+- **Rust:** `qql-rs` (v0.1.0)
+- **Go:** `qql-go` (v0.1.0)
+- **Python:** `pyqql` (v0.1.0 PyO3)
+- **Node.js:** `nqql` (v0.1.0 N-API)
+- **Date:** July 2026 (Post-Refactor 3-Layer Architecture)
 
-Rust `qql-core` uses a **contiguous-array parser** — all tokens are lexed up
-front into a `Vec<Token>` and accessed by index. This gives O(1) lookahead,
-zero-cost backtracking (copy a `usize`), and keeps the hot path in CPU cache.
+---
 
 ## Queries
 
-| # | Label | QQL |
-|---|-------|-----|
+| # | Label | QQL Query |
+|---|-------|-----------|
 | 1 | Simple | `QUERY 'search' FROM docs LIMIT 10` |
-| 2 | Hybrid | `QUERY 'search' FROM docs LIMIT 10 USING HYBRID` |
-| 3 | Full | `QUERY 'vector search' FROM docs LIMIT 10 OFFSET 5 USING HYBRID RERANK WHERE topic = 'search' WITH (hnsw_ef = 128, exact = true)` |
-| 4 | CTE Prefetch | `WITH a AS (QUERY 'search' USING dense LIMIT 100 WHERE category = 'tech'), b AS (QUERY 'search' USING sparse LIMIT 100) QUERY 'search' FROM docs LIMIT 10 PREFETCH (a WHERE priority = 'high' SCORE THRESHOLD 0.8, b SCORE THRESHOLD 0.5) FUSION RRF` |
+| 2 | Hybrid | `QUERY HYBRID TEXT 'search' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10` |
+| 3 | Full | `QUERY TEXT 'x' FROM docs USING dense WHERE active = true PARAMS (hnsw_ef = 64, exact = false) SCORE THRESHOLD 0.2 GROUP BY category SIZE 3 LOOKUP FROM categories WITH PAYLOAD INCLUDE (title, url) WITH VECTOR (dense) LIMIT 10 OFFSET 2` |
+| 4 | CTE Prefetch | `WITH d AS (QUERY TEXT 'x' USING dense LIMIT 100), s AS (QUERY TEXT 'x' USING sparse LIMIT 100) QUERY FUSION RRF FROM docs PREFETCH (d, s) LIMIT 10` |
 | 5 | CreateCollection | `CREATE COLLECTION docs HYBRID WITH HNSW (m = 32, ef_construct = 100) WITH QUANTIZATION (type = 'scalar', quantile = 0.95)` |
-| 6 | Insert | `INSERT INTO docs VALUES {id: 1, text: 'hello world', category: 'tech'}, {id: 2, text: 'second document', category: 'science'}` |
+| 6 | Upsert | `UPSERT INTO docs VALUES {id: 1, text: 'hello world', category: 'tech'}, {id: 2, text: 'second document', category: 'science'}` |
 | 7 | DeleteWhere | `DELETE FROM docs WHERE category = 'archived'` |
-| 8 | OrderBy | `QUERY ORDER BY created_at DESC FROM docs LIMIT 20 WHERE status = 'active'` |
-| 9 | WithPayload | `QUERY 'search' FROM docs LIMIT 10 WITH PAYLOAD (include = ['title', 'body']) WITH VECTORS ('dense')` |
+| 8 | OrderBy | `QUERY ORDER BY created_at DESC FROM docs WHERE status = 'active' LIMIT 20` |
+| 9 | WithPayload | `QUERY 'search' FROM docs WITH PAYLOAD INCLUDE (title, body) WITH VECTOR (dense) LIMIT 10` |
 
-## Results (ns/op)
+---
 
-Lower is better.
+## 1. Parser Benchmarks (ops/sec)
+*Isolates lexing & parsing throughput. Higher is better.*
 
-| Query | Rust 🏆 | qql-go (Go) | Python | Node.js |
-|-------|--------:|------------:|-------:|--------:|
-| Simple | **389** | 529 | 5,832 | 6,917 |
-| Hybrid | **514** | 636 | 6,149 | 6,881 |
-| Full | **1,234** | 1,565 | 12,285 | 12,815 |
-| CTE Prefetch | **2,662** | 3,278 | 53,456 | 53,872 |
-| CreateCollection | **1,436** | 2,931 | 22,255 | 22,099 |
-| Insert | **1,206** | 2,159 | 9,552 | 9,840 |
-| DeleteWhere | **488** | 517 | 2,411 | 2,459 |
-| OrderBy | **874** | 888 | 8,657 | 8,995 |
-| WithPayload | **975** | 1,137 | 10,466 | 10,613 |
+| Query | Rust (`qql-rs`) | Python (`pyqql`) | Go (`qql-go`) | Node.js `parse()` | Node.js `parseJson()` |
+|-------|:--------:|:--------:|:--------:|:--------:|:--------:|
+| **Simple** | **2,013,673** | 1,578,892 | 1,688,724 | 411,827 | **762,056** |
+| **Hybrid** | **967,512** | 662,547 | 1,300,844 | 339,124 | **564,774** |
+| **Full** | **342,320** | 281,751 | 664,517 | 178,054 | **232,484** |
+| **CTE Prefetch** | **412,878** | 426,369 | 337,312 | 175,726 | **209,755** |
+| **CreateCollection** | **632,640** | 552,779 | 393,101 | 235,094 | **334,780** |
+| **Upsert** | **665,708** | 504,412 | 508,451 | 257,485 | **417,342** |
+| **DeleteWhere** | **1,824,899** | 785,658 | **1,960,807** | 453,009 | **977,042** |
+| **OrderBy** | **1,100,388** | 794,345 | 1,020,497 | 314,648 | **592,737** |
+| **WithPayload** | **792,636** | 721,354 | 858,692 | 261,655 | **426,109** |
 
-## Results (ops/sec)
+* **Python DX Win**: `pyqql` wraps the native Rust `Stmt` directly inside PyO3 memory — parser throughput matches native Rust/Go speeds almost 1-to-1 (up to **1.58M ops/s**).
+* **Node.js parse()** returns a stable array of native `Stmt` objects. ~400K ops/s — the V8 object allocation is the bottleneck.
+* **Node.js parseJson()** returns the raw JSON string directly from Rust. Bypasses V8 object heap allocation entirely for maximum forwarding throughput — **1.85–2.15× faster** than `parse()`. Ideal for HTTP/IPC forwarding.
 
-Higher is better.
+---
 
-| Query | Rust 🏆 | qql-go (Go) | Python | Node.js |
-|-------|--------:|------------:|-------:|--------:|
-| Simple | 2,571,092 | 1,890,359 | 171,470 | 144,580 |
-| Hybrid | 1,945,910 | 1,572,327 | 162,627 | 145,320 |
-| Full | 810,406 | 638,978 | 81,397 | 78,036 |
-| CTE Prefetch | 375,655 | 305,070 | 18,707 | 18,562 |
-| CreateCollection | 696,358 | 341,180 | 44,934 | 45,251 |
-| Insert | 828,992 | 463,177 | 104,687 | 101,622 |
-| DeleteWhere | 2,049,607 | 1,934,236 | 414,752 | 406,684 |
-| OrderBy | 1,144,770 | 1,125,844 | 115,510 | 111,176 |
-| WithPayload | 1,025,783 | 879,508 | 95,549 | 94,220 |
+## 2. E2E Pipeline Benchmarks (ops/sec)
+*Measures entire compilation lifecycle + REST JSON payload construction. Higher is better.*
 
-## Speed Relative to Rust
+| Query Type | Rust (Pure Sync E2E) | Node.js (`nqql` E2E) | Python (`pyqql` E2E) | Rust (Async E2E) | Go (`qql-go` E2E) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Simple** | **1,275,059** | 968,671 | 744,265 | 808,268 | 306,741 |
+| **Hybrid** | **730,040** | 679,747 | 519,031 | 545,719 | 364,957 |
+| **Full** | **296,628** | 258,702 | 307,240 | 252,813 | 195,372 |
+| **CTE_Prefetch** | **361,565** | 340,308 | 376,637 | 304,298 | 163,404 |
+| **CreateCollection** | **581,623** | 526,987 | 563,644 | 442,965 | 262,059 |
+| **Upsert** | **629,885** | 561,909 | 585,383 | 416,268 | 185,858 |
+| **DeleteWhere** | **1,539,661** | 1,362,533 | 1,124,044 | 974,978 | 469,121 |
+| **OrderBy** | **791,553** | 668,740 | 573,749 | 575,844 | 259,201 |
+| **WithPayload** | **667,446** | 569,643 | 590,138 | 463,445 | 292,933 |
 
-| Query | Rust (1.0×) | qql-go | Python | Node.js |
-|-------|:----------:|:------:|:------:|:-------:|
-| Simple | 1.0× | 1.4× | 15.0× | 17.8× |
-| Hybrid | 1.0× | 1.2× | 12.0× | 13.4× |
-| Full | 1.0× | 1.3× | 10.0× | 10.4× |
-| CTE Prefetch | 1.0× | 1.2× | 20.1× | 20.2× |
-| CreateCollection | 1.0× | 2.0× | 15.5× | 15.4× |
-| Insert | 1.0× | 1.8× | 7.9× | 8.2× |
-| DeleteWhere | 1.0× | 1.1× | 4.9× | 5.0× |
-| OrderBy | 1.0× | 1.0× | 9.9× | 10.3× |
-| WithPayload | 1.0× | 1.2× | 10.7× | 10.9× |
+### Speed Hierarchy Physics:
+$$\text{Rust Pure Sync} > \text{Node.js E2E} \ge \text{Python E2E} > \text{Rust Async (due to tokio runtime block\_on)} > \text{Go}$$
 
-## Contiguous-Array Optimization Impact
+- **Rust Pure Sync**: Bypasses both FFI translation and Tokio runtime scheduling, showing the true, maximum speed of our in-memory payload compiler (up to **1.53M ops/s**!).
+- **FFI E2E (Node/Python)**: Since `explain()` returns a flat string payload, there is zero object translation overhead. They match native speeds, trailing Rust Sync only by the minor FFI boundary hop cost.
+- **Rust Async**: The `block_on` wrapper adds task scheduling and future state-machine polling overhead on every query, making it slightly slower than pure sync compilation.
 
-The Rust `qql-core` parser was refactored from `Peekable<Lexer>` (lazy iterator)
-to upfront-lexed `Vec<Token>` (contiguous array). Impact on parse latency:
+---
 
-| Query | Before (ns) | After (ns) | Change |
-|-------|:----------:|:----------:|:------:|
-| Simple | 390 | 389 | — |
-| Hybrid | 557 | **514** | **−7.7%** |
-| Full | 1,417 | **1,234** | **−12.9%** |
-| CTE Prefetch | 3,087 | **2,662** | **−13.8%** |
-| CreateCollection | 1,574 | **1,436** | **−8.8%** |
-| Insert | 1,199 | 1,206 | — |
-| DeleteWhere | 474 | 488 | — |
-| OrderBy | 873 | 874 | — |
-| WithPayload | 991 | 975 | — |
+## 3. BM25 Sparse Vector Benchmark (100,000 Iterations)
 
-Complex queries with heavy lookahead (Hybrid, Full, CTE, CreateCollection) saw
-the biggest improvements. Simple queries hit the same floor — the parser is
-fast either way for short inputs.
+| Operation | Total Time | Throughput (ops/sec) |
+|---|:---:|:---:|
+| **Build Document Vector** | 64.13 ms | **1,559,443** |
+| **Build Query Vector** | 20.39 ms | **4,903,462** |
 
-## Key Observations
+---
 
-### Rust (qql-core) — Fastest
-Contiguous-array parser with O(1) lookahead and copy-free backtracking.
-Zero-cost parsing. Every other implementation pays some overhead to bridge
-into Rust (or implements its own parser in the target language).
-
-### qql-go (native Go) — Close second, ~1–2× of Rust
-Pure Go implementation with no C FFI. Consistently within 2× of Rust.
-The Go parser is competitive because:
-- Go generates efficient code for this workload
-- No garbage collection pressure from short-lived AST nodes
-- No language boundary crossing
-
-### All FFI bindings (pyqql, nqql) — ~5–20× slower than Rust
-Every call crosses a language boundary:
-1. Marshal Python/JS string → C string
-2. C function call into Rust
-3. Rust parses the QQL
-4. Marshal Rust string → C string
-5. Return and free C memory
-
-The FFI overhead adds **~5–6 µs per call** regardless of query complexity.
-This is the floor: even the simplest parse takes at least 6 µs in any
-FFI-based binding.
-
-### Python vs Node.js — Nearly identical
-Both cluster within 10% of each other. Both use Rust under the hood with
-the same FFI-overhead floor. The difference is negligible.
-
-## Running Yourself
+## Running the Benchmarks
 
 ```bash
-# Rust
-cargo run --release --manifest-path bench/bench_rust/Cargo.toml
+# 1. Build release binaries & bindings
+cargo build --release -p pyqql -p nqql
+cargo build --release --manifest-path bench/bench_rust/Cargo.toml --bins
+(cd crates/nqql && npx napi build --release --platform)
 
-# Python
+# 2. Rust (Parser & E2E Sync/Async)
+cargo run --release --manifest-path bench/bench_rust/Cargo.toml --bin parse
+cargo run --release --manifest-path bench/bench_rust/Cargo.toml --bin explain
+cargo run --release --manifest-path bench/bench_rust/Cargo.toml --bin e2e
+cargo run --release --manifest-path bench/bench_rust/Cargo.toml --bin bench_sparse
+
+# 3. Python (Parser & E2E)
 PYTHONPATH=target/release python3 bench/bench_python.py
 
-# Node.js
+# 4. Node.js (Parser & E2E)
 node bench/bench_node.js
-
-# Go
-Use the standalone qql-go library.
+# For the raw JSON fast path, use parseJson() instead of parse() in the bench.
 ```

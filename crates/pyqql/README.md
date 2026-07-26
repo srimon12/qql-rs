@@ -1,14 +1,22 @@
 # pyqql
 
-Native Python bindings for the Qdrant Query Language (QQL) parser, compiled with PyO3.
+Native Python bindings for the Qdrant Query Language (QQL) parser, router, and execution engine, compiled with PyO3 0.23.
 
 ## Features
 
-- **Native parsing**: Rust-speed QQL parsing in Python
-- **AST dictionaries**: Parsed queries as typed Python dicts
-- **Filter injection**: Add tenant isolation filters to parsed ASTs
+- **Live Qdrant Execution**: Connect to live Qdrant instances over REST (default) or gRPC
+- **Automated Embedding Inference**: Integrate custom HTTP embedder models (Ollama, OpenAI, vLLM, TEI) for text-to-vector search
+- **Zero-Copy Route Lowering**: Lower QQL queries to typed `{ method, path, payload }` route dicts via `compile_query`
+- **Native parsing**: Rust-speed QQL parsing in Python returning typed `Stmt` objects or Python dicts
+- **Filter injection**: Add tenant isolation filters programmatically
+- **Smart batching**: Auto-batches contiguous same-collection query/mutation statements into single network calls
+- **Shard key**: Read/write the shard key on QUERY, COUNT, SCROLL, UPSERT, and DELETE statements
 - **Validation**: Check if a query string is valid QQL
-- **Batch parsing**: Parse multiple queries at once
+
+## Compatibility
+
+- **Python 3.8+**: Published wheels use Python's stable ABI (`abi3-py38`) and support Python 3.8 and newer.
+- **REST and gRPC**: Published wheels include both transports by default.
 
 ## Installation
 
@@ -16,42 +24,75 @@ Native Python bindings for the Qdrant Query Language (QQL) parser, compiled with
 pip install pyqql
 ```
 
-## Usage
+## Quick Start
 
 ```python
 import pyqql
 
-# Parse to AST dict
-ast = pyqql.parse("QUERY 'vector database' FROM docs LIMIT 10")
-print(ast)
+# 1. Connect to live Qdrant with optional custom embedding provider (e.g. Ollama)
+embedder = pyqql.HttpEmbedder(
+    endpoint="http://localhost:11434/v1/embeddings",
+    model="all-minilm:l6-v2",
+    dimension=384,
+    api_key=""
+)
 
-# Parse multiple statements
-stmts = pyqql.parse_all("INSERT INTO docs ...; QUERY 'text' FROM docs ...")
+client = pyqql.Client(
+    url="http://localhost:6333",
+    api_key="optional-qdrant-secret",
+    use_grpc=False,
+    embedder=embedder
+)
 
-# Parse batch (list of queries)
-results = pyqql.parse_batch([
-    "QUERY 'ml' FROM docs LIMIT 5",
-    "QUERY 'nlp' FROM docs LIMIT 5",
-])
+# Execute QQL query (auto-embeds text to vector)
+result = client.execute("QUERY 'cardiology' FROM medical_records USING dense LIMIT 5")
+print(result)
 
-# Validate without parsing
-valid = pyqql.is_valid("SELECT * FROM docs WHERE id = 1")
+# Async variant
+future = client.execute_async("QUERY 'cardiology' FROM medical_records USING dense LIMIT 5")
 
-# Inject security filter into AST
-stmt = pyqql.parse("QUERY 'patients' FROM medical LIMIT 5")
-pyqql.inject_filter(stmt, "org_id", "=", "acme-corp")
+# Explain query execution plan
+plan = client.explain("QUERY 'cardiology' FROM medical_records USING dense LIMIT 5")
+print(plan)
 
-# Tokenize query string
-tokens = pyqql.tokenize("QUERY 'hello' FROM docs LIMIT 5")
+# 2. Pure AST Parsing & Filter Injection
+stmt = pyqql.parse("QUERY 'vector database' FROM docs USING dense LIMIT 10")[0]
+valid = pyqql.is_valid("QUERY 'test' FROM docs")
+secured_stmt = pyqql.inject_filter("QUERY 'patients' FROM medical LIMIT 5", "org_id", "=", "acme-corp")
+
+# 3. Working with Stmt objects
+ast_dict = stmt.to_dict()                    # Python dict
+ast_json = stmt.to_json()                    # JSON string
+stmt.shard_key = "shard-01"                  # setter (QUERY/COUNT/SCROLL/UPSERT/DELETE only)
+stmt.inject_filter("tenant_id", "=", "acme") # mutate in-place
+
+# 4. Free-function execute (convenience)
+result = pyqql.execute("SHOW COLLECTIONS", url="http://localhost:6333")
+
+# 5. Lower to Qdrant route without executing
+route = pyqql.compile_query("QUERY 'search' FROM docs LIMIT 10")
+# route = { "method": "POST", "path": "/collections/docs/points/query", "payload": {...} }
 ```
 
-## API
+All execution methods return an `ExecutionReport` dict:
+`{"ok": bool, "results": list, "succeeded": int, "failed": int}`. The
+`results` list always contains one entry per executed statement.
 
-| Function | Returns | Description |
-|---|---|---|
-| `parse(input)` | `dict` | Parse single statement → AST dict |
-| `parse_all(input)` | `list[dict]` | Parse multiple semicolon-separated statements |
-| `parse_batch(queries)` | `list[dict]` | Parse a list of query strings |
-| `is_valid(input)` | `bool` | Check if query string is valid QQL |
-| `inject_filter(query, field, op, value)` | `str` | Inject filter into query AST |
-| `tokenize(input)` | `str` | Tokenize query string |
+## API Summary
+
+| Export | Description |
+|---|---|
+| `Client(url, api_key, use_grpc, embedder)` | Client for executing QQL against a live Qdrant database |
+| `HttpEmbedder(endpoint, model, dimension, api_key)` | First-class HTTP embedding provider configuration |
+| `Stmt` | Parsed statement object with `inject_filter()`, `to_json()`, `to_dict()`, `shard_key` property |
+| `parse(input)` | Parse one statement or a semicolon-delimited script into a list of `Stmt` objects |
+| `is_valid(input)` | Validate QQL syntax |
+| `inject_filter(query, field, op, value)` | Inject tenant filter into statement AST (accepts str or Stmt) |
+| `tokenize(input)` | Tokenize QQL string for syntax highlighting or inspection |
+| `compile_query(input)` | Lower QQL statement into typed `{ method, path, payload }` route dict |
+| `explain(query)` | Inspect the execution plan without executing network calls (accepts str or Stmt) |
+| `execute(query, ..., on_error="stop")` | Free-function convenience execute |
+| `execute_async(query, ..., on_error="stop")` | Free-function async execute |
+| `Client.execute(query, on_error="stop")` | Execute a string, Stmt, list[str], or list[Stmt] |
+| `Client.execute_async(query, on_error="stop")` | Async variant of execute |
+| `Client.explain(query)` | Inspect execution plan (accepts str or Stmt) |

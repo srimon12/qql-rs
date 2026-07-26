@@ -1,0 +1,134 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "AlterCollection": {
+        "collection": "docs",
+        "config": {
+          "hnsw": null,
+          "optimizers": null,
+          "params": null,
+          "quantization": null,
+          "quantization_update": null,
+          "vectors": {
+            "on_disk": true
+          }
+        }
+      }
+    },
+    {
+      "AlterCollection": {
+        "collection": "docs",
+        "config": {
+          "hnsw": {
+            "ef_construct": null,
+            "full_scan_threshold": null,
+            "inline_storage": null,
+            "m": 32,
+            "max_indexing_threads": null,
+            "on_disk": null,
+            "payload_m": null
+          },
+          "optimizers": null,
+          "params": null,
+          "quantization": null,
+          "quantization_update": null,
+          "vectors": null
+        }
+      }
+    },
+    {
+      "AlterCollection": {
+        "collection": "docs",
+        "config": {
+          "hnsw": null,
+          "optimizers": {
+            "default_segment_number": null,
+            "deleted_threshold": null,
+            "flush_interval_sec": null,
+            "indexing_threshold": null,
+            "max_optimization_threads": null,
+            "max_segment_size": 500000,
+            "memmap_threshold": null,
+            "prevent_unoptimized": null,
+            "vacuum_min_vector_number": null
+          },
+          "params": null,
+          "quantization": null,
+          "quantization_update": null,
+          "vectors": null
+        }
+      }
+    },
+    {
+      "AlterCollection": {
+        "collection": "docs",
+        "config": {
+          "hnsw": null,
+          "optimizers": null,
+          "params": {
+            "on_disk_payload": null,
+            "read_fan_out_delay_ms": null,
+            "read_fan_out_factor": null,
+            "replication_factor": 3,
+            "shard_keys": null,
+            "shard_number": null,
+            "sharding_method": null,
+            "write_consistency_factor": null
+          },
+          "quantization": null,
+          "quantization_update": null,
+          "vectors": null
+        }
+      }
+    },
+    {
+      "AlterCollection": {
+        "collection": "docs",
+        "config": {
+          "hnsw": null,
+          "optimizers": null,
+          "params": null,
+          "quantization": {
+            "always_ram": false,
+            "bits": null,
+            "compression": null,
+            "encoding": null,
+            "qtype": "Scalar",
+            "quantile": null,
+            "query_encoding": null
+          },
+          "quantization_update": {
+            "config": {
+              "always_ram": false,
+              "bits": null,
+              "compression": null,
+              "encoding": null,
+              "qtype": "Scalar",
+              "quantile": null,
+              "query_encoding": null
+            },
+            "disabled": false
+          },
+          "vectors": null
+        }
+      }
+    },
+    {
+      "AlterCollection": {
+        "collection": "docs",
+        "config": {
+          "hnsw": null,
+          "optimizers": null,
+          "params": null,
+          "quantization": null,
+          "quantization_update": {
+            "config": null,
+            "disabled": true
+          },
+          "vectors": null
+        }
+      }
+    }
+  ]
+}

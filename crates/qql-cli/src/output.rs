@@ -1,11 +1,4 @@
 #[derive(serde::Serialize)]
-pub struct ExecResponse {
-    pub ok: bool,
-    pub operation: String,
-    pub message: String,
-}
-
-#[derive(serde::Serialize)]
 pub struct ExplainResponse {
     pub ok: bool,
     pub query: String,
@@ -17,8 +10,8 @@ pub struct ScriptResponse {
     pub ok: bool,
     pub command: String,
     pub path: String,
-    pub succeeded: u32,
-    pub failed: u32,
+    pub succeeded: usize,
+    pub failed: usize,
     pub message: String,
 }
 

@@ -1,0 +1,13 @@
+[package]
+name = "qql-grammar-gen"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Repository-only generator for the qql-core parser grammar"
+publish = false
+
+[dependencies]

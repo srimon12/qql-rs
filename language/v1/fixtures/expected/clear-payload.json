@@ -1,0 +1,52 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "ClearPayload": {
+        "collection": "docs",
+        "selector": {
+          "Filter": {
+            "Compare": {
+              "field": "status",
+              "op": "Eq",
+              "value": {
+                "Str": "archived"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "ClearPayload": {
+        "collection": "docs",
+        "selector": {
+          "Filter": {
+            "And": {
+              "operands": [
+                {
+                  "Compare": {
+                    "field": "status",
+                    "op": "Eq",
+                    "value": {
+                      "Str": "deleted"
+                    }
+                  }
+                },
+                {
+                  "Compare": {
+                    "field": "created_year",
+                    "op": "Lt",
+                    "value": {
+                      "Int": 2020
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  ]
+}

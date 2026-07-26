@@ -1,21 +1,19 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json;
 
-use qql_core::ast::{Stmt, Value};
+use qql_core::ast::{self, Stmt};
 use qql_core::error::QqlError;
 use qql_core::parser;
+use qql_plan::plan;
 
 use crate::config::QqlConfig;
 use crate::embedder::Embedder;
-pub type QdrantFilter = crate::qdrant::Filter;
-use crate::pipeline::{PointId, QueryPointsGroupsRequest, QueryPointsRequest};
+use crate::executor::dml::query::extract_search_hits;
 
-pub const DENSE_VECTOR_NAME: &str = "dense";
-pub const SPARSE_VECTOR_NAME: &str = "sparse";
+pub use qql_embed::resolve::{DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME};
 pub const RERANK_VECTOR_NAME: &str = "colbert";
 pub const DENSE_MODEL_DEFAULT: &str = "sentence-transformers/all-minilm-l6-v2";
 pub const SPARSE_MODEL_DEFAULT: &str = "qdrant/bm25";
@@ -32,6 +30,106 @@ pub struct ExecResponse {
     pub data: Option<serde_json::Value>,
 }
 
+/// Canonical cross-SDK execution result.  Every `client.execute(…)` call
+/// returns this shape regardless of input type (string / Stmt / array).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionReport {
+    pub ok: bool,
+    pub results: Vec<ExecResponse>,
+    pub succeeded: usize,
+    pub failed: usize,
+}
+
+impl ExecutionReport {
+    /// Create from a collection of `ExecResponse`s.  `ok` is `failed == 0`.
+    pub fn from_results(results: Vec<ExecResponse>) -> Self {
+        let succeeded = results.iter().filter(|r| r.ok).count();
+        let failed = results.len() - succeeded;
+        Self {
+            ok: failed == 0,
+            results,
+            succeeded,
+            failed,
+        }
+    }
+
+    /// Convenience wrapper for a single `ExecResponse`.
+    pub fn single(resp: ExecResponse) -> Self {
+        let ok = resp.ok;
+        Self {
+            ok,
+            results: vec![resp],
+            succeeded: if ok { 1 } else { 0 },
+            failed: if ok { 0 } else { 1 },
+        }
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            ok: true,
+            results: Vec::new(),
+            succeeded: 0,
+            failed: 0,
+        }
+    }
+}
+
+/// Controls batch-execution behaviour when a statement fails.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum OnError {
+    /// Halt immediately on the first error (default).
+    #[default]
+    Stop,
+    /// Continue executing remaining statements, collecting error
+    /// responses alongside successes.
+    Continue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum BatchKey {
+    Query(String),
+    Mutation(String),
+}
+
+fn statement_batch_key(stmt: &Stmt) -> Option<BatchKey> {
+    match stmt {
+        Stmt::Query(query)
+            if query.group.is_none()
+                && !matches!(query.expression, ast::QueryExpr::Points { .. }) =>
+        {
+            match &query.collection {
+                ast::QueryCollection::Explicit(collection) => {
+                    Some(BatchKey::Query(collection.clone()))
+                }
+                ast::QueryCollection::Inherited => None,
+            }
+        }
+        Stmt::Upsert(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
+        Stmt::Delete(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
+        Stmt::UpdatePayload(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
+        Stmt::ClearPayload(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
+        Stmt::UpdateVector(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
+        Stmt::DeleteVector(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
+        _ => None,
+    }
+}
+
+fn planned_batch_key(operation: &qql_plan::PlannedOperation) -> Option<BatchKey> {
+    use qql_plan::{BatchFamily, PlannedOperation};
+
+    match operation.batch_family() {
+        BatchFamily::Query => match operation {
+            PlannedOperation::Query { collection, .. } => Some(BatchKey::Query(collection.clone())),
+            _ => None,
+        },
+        BatchFamily::Mutation => operation
+            .collection()
+            .map(|collection| BatchKey::Mutation(collection.to_owned())),
+        BatchFamily::Single => None,
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchHit {
     pub id: String,
@@ -46,172 +144,37 @@ pub struct GroupedSearchResult {
     pub hits: Vec<SearchHit>,
 }
 
-#[derive(Debug, Clone)]
-pub struct VectorTopology {
-    pub dense_vector: Option<String>,
-    pub sparse_vector: Option<String>,
-    pub rerank_vector: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateCollectionReq {
-    pub collection_name: String,
-    pub vectors_config: Option<serde_json::Value>,
-    pub sparse_vectors_config: Option<serde_json::Value>,
-    pub hnsw_config: Option<serde_json::Value>,
-    pub optimizers_config: Option<serde_json::Value>,
-    pub quantization_config: Option<serde_json::Value>,
-    pub params: Option<serde_json::Value>,
-}
-
-impl CreateCollectionReq {
-    pub fn new(name: String) -> Self {
-        CreateCollectionReq {
-            collection_name: name,
-            vectors_config: None,
-            sparse_vectors_config: None,
-            hnsw_config: None,
-            optimizers_config: None,
-            quantization_config: None,
-            params: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct UpsertPointsReq {
-    pub collection_name: String,
-    pub points: Vec<PointStruct>,
-}
-
-pub type PointStruct = crate::qdrant::PointStruct;
-pub type ScoredPoint = crate::qdrant::ScoredPoint;
-pub type PointGroup = crate::qdrant::PointGroup;
-pub type RetrievedPoint = crate::qdrant::Record;
-pub type CollectionInfo = crate::qdrant::CollectionInfo;
-pub type CollectionConfig = crate::qdrant::CollectionConfig;
-pub type CollectionParams = crate::qdrant::CollectionParams;
-pub type VectorsConfigType = crate::qdrant::VectorsConfig;
-pub type VectorParams = crate::qdrant::VectorParams;
-pub type SparseVectorConfig = crate::qdrant::SparseVectorParams;
-pub type PayloadSchemaInfo = crate::qdrant::PayloadIndexInfo;
-
-impl From<PointId> for crate::qdrant::ExtendedPointId {
-    fn from(id: PointId) -> Self {
-        match id {
-            PointId::Num(num) => crate::qdrant::ExtendedPointId {
-                num: Some(num),
-                uuid: None,
-            },
-            PointId::Uuid(uuid) => crate::qdrant::ExtendedPointId {
-                num: None,
-                uuid: Some(uuid),
-            },
-        }
-    }
-}
-
-impl From<crate::qdrant::ExtendedPointId> for PointId {
-    fn from(id: crate::qdrant::ExtendedPointId) -> Self {
-        if let Some(num) = id.num {
-            PointId::Num(num)
-        } else if let Some(uuid) = id.uuid {
-            PointId::Uuid(uuid)
-        } else {
-            PointId::Num(0)
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct DeletePointsReq {
-    pub collection_name: String,
-    pub filter: Option<QdrantFilter>,
-    pub point_id: Option<PointId>,
-}
-
-#[derive(Debug, Clone)]
-pub struct UpdateVectorsReq {
-    pub collection_name: String,
-    pub point_id: PointId,
-    pub vector: Vec<f32>,
-    pub vector_name: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct SetPayloadReq {
-    pub collection_name: String,
-    pub point_id: Option<PointId>,
-    pub filter: Option<QdrantFilter>,
-    pub payload: HashMap<String, serde_json::Value>,
-}
-
-#[derive(Debug, Clone)]
-pub struct CreateFieldIndexReq {
-    pub collection_name: String,
-    pub field: String,
-    pub field_type: String,
-    pub options: HashMap<String, Value<'static>>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ScrollPointsReq {
-    pub collection_name: String,
-    pub limit: u64,
-    pub filter: Option<QdrantFilter>,
-    pub after: Option<PointId>,
-}
-
-#[derive(Debug, Clone)]
-pub struct CountPointsReq {
-    pub collection_name: String,
-    pub filter: Option<QdrantFilter>,
-}
-
-#[async_trait]
-pub trait QdrantOperations: Send + Sync {
-    async fn list_collections(&self) -> Result<Vec<String>, QqlError>;
-    async fn collection_exists(&self, name: &str) -> Result<bool, QqlError>;
-    async fn get_collection_info(&self, name: &str) -> Result<CollectionInfo, QqlError>;
-    async fn create_collection(&self, req: CreateCollectionReq) -> Result<(), QqlError>;
-    async fn update_collection(&self, req: serde_json::Value) -> Result<(), QqlError>;
-    async fn delete_collection(&self, name: &str) -> Result<(), QqlError>;
-    async fn upsert(&self, req: UpsertPointsReq) -> Result<(), QqlError>;
-    async fn query(&self, req: QueryPointsRequest) -> Result<Vec<ScoredPoint>, QqlError>;
-    async fn query_groups(
-        &self,
-        req: QueryPointsGroupsRequest,
-    ) -> Result<Vec<PointGroup>, QqlError>;
-    async fn query_batch(
-        &self,
-        req: Vec<QueryPointsRequest>,
-    ) -> Result<Vec<Vec<ScoredPoint>>, QqlError>;
-    async fn delete(&self, req: DeletePointsReq) -> Result<(), QqlError>;
-    async fn update_vectors(&self, req: UpdateVectorsReq) -> Result<(), QqlError>;
-    async fn set_payload(&self, req: SetPayloadReq) -> Result<(), QqlError>;
-    async fn create_field_index(&self, req: CreateFieldIndexReq) -> Result<(), QqlError>;
-    async fn scroll(
-        &self,
-        req: ScrollPointsReq,
-    ) -> Result<(Vec<RetrievedPoint>, Option<PointId>), QqlError>;
-    async fn count(&self, req: CountPointsReq) -> Result<u64, QqlError>;
-    async fn get(&self, req: GetPointsReq) -> Result<Vec<RetrievedPoint>, QqlError>;
-}
-
-#[derive(Debug, Clone)]
-pub struct GetPointsReq {
-    pub collection_name: String,
-    pub point_id: Value<'static>,
-}
+pub use crate::client::*;
 
 pub struct Executor {
-    pub(crate) client: Box<dyn QdrantOperations>,
+    pub(crate) client: Box<dyn QdrantOps>,
     pub(crate) config: Option<QqlConfig>,
     pub(crate) embedder: Option<Arc<dyn Embedder>>,
 }
 
 impl Executor {
-    pub fn new(client: Box<dyn QdrantOperations>, config: Option<QqlConfig>) -> Self {
+    /// Creates an executor backed by Qdrant's REST API.
+    ///
+    /// The backend owns a reusable HTTP client. Applications that need custom
+    /// proxy, TLS, tracing, or pool settings can construct `RestQdrant` with
+    /// their own `reqwest::Client` and pass it to [`Self::new`] instead.
+    #[cfg(feature = "rest")]
+    pub fn rest(url: impl Into<String>, api_key: Option<String>) -> Result<Self, QqlError> {
+        Ok(Self::new(
+            Box::new(crate::rest::RestQdrant::new(url, api_key)),
+            None,
+        ))
+    }
+
+    #[cfg(feature = "grpc")]
+    pub fn grpc(url: &str, api_key: Option<String>) -> Result<Self, QqlError> {
+        Ok(Self::new(
+            Box::new(crate::grpc::GrpcQdrant::from_url(url, api_key)?),
+            None,
+        ))
+    }
+
+    pub fn new(client: Box<dyn QdrantOps>, config: Option<QqlConfig>) -> Self {
         Executor {
             client,
             config,
@@ -220,7 +183,7 @@ impl Executor {
     }
 
     pub fn with_embedder(
-        client: Box<dyn QdrantOperations>,
+        client: Box<dyn QdrantOps>,
         config: Option<QqlConfig>,
         embedder: Option<Arc<dyn Embedder>>,
     ) -> Self {
@@ -231,165 +194,37 @@ impl Executor {
         }
     }
 
-    pub fn explain(query: &str) -> Result<String, QqlError> {
-        let stmt = qql_core::parser::Parser::parse(query)?;
-        let mut plan = String::new();
-        Self::explain_stmt(&stmt, &mut plan);
-        plan.push_str("Action: Explain-only mode (no Qdrant server)\n");
-        Ok(plan)
-    }
-
-    fn explain_stmt(stmt: &Stmt, plan: &mut String) {
-        match stmt {
-            Stmt::ShowCollections => {
-                plan.push_str("Statement: SHOW COLLECTIONS\n");
-            }
-            Stmt::ShowCollection(collection) => {
-                plan.push_str(&format!("Statement: SHOW COLLECTION {}\n", collection));
-            }
-            Stmt::CreateCollection(s) => {
-                plan.push_str(&format!("Statement: CREATE COLLECTION {}\n", s.collection));
-                if let Some(model) = &s.model {
-                    plan.push_str(&format!("Model: {}\n", model));
-                }
-                if s.rerank {
-                    plan.push_str("Type: HYBRID + RERANK (dense + sparse + ColBERT multivector)\n");
-                } else if s.hybrid {
-                    plan.push_str("Type: HYBRID (dense + sparse)\n");
-                } else {
-                    plan.push_str("Type: DENSE\n");
-                }
-                for v in &s.vectors {
-                    plan.push_str(&format!("Vector: {}, Size: {}\n", v.name, v.size));
-                }
-            }
-            Stmt::AlterCollection(s) => {
-                plan.push_str(&format!("Statement: ALTER COLLECTION {}\n", s.collection));
-            }
-            Stmt::DropCollection(s) => {
-                plan.push_str(&format!("Statement: DROP COLLECTION {}\n", s.collection));
-            }
-            Stmt::Insert(s) => {
-                plan.push_str(&format!("Statement: INSERT INTO {}\n", s.collection));
-                if let Some(model) = &s.model {
-                    plan.push_str(&format!("Model: {}\n", model));
-                }
-                plan.push_str(&format!("Rows: {}\n", s.values_list.len()));
-            }
-            Stmt::Select(s) => {
-                plan.push_str(&format!(
-                    "Statement: SELECT * FROM {} WHERE id = '{:?}'\n",
-                    s.collection, s.point_id
-                ));
-            }
-            Stmt::Scroll(s) => {
-                plan.push_str(&format!(
-                    "Statement: SCROLL FROM {} LIMIT {}\n",
-                    s.collection, s.limit
-                ));
-            }
-            Stmt::Query(q) => {
-                let mode_str = match q.mode {
-                    qql_core::ast::QueryMode::OrderBy => "ORDER BY",
-                    qql_core::ast::QueryMode::Sample => "SAMPLE",
-                    qql_core::ast::QueryMode::RelevanceFeedback => "RELEVANCE FEEDBACK",
-                    _ => "",
-                };
-                let coll = q
-                    .collection
-                    .as_ref()
-                    .map(|c| c.as_ref())
-                    .unwrap_or("<none>");
-                if !mode_str.is_empty() {
-                    plan.push_str(&format!(
-                        "Statement: QUERY {} FROM {} LIMIT {}\n",
-                        mode_str, coll, q.limit
-                    ));
-                } else {
-                    plan.push_str(&format!(
-                        "Statement: QUERY FROM {} LIMIT {}\n",
-                        coll, q.limit
-                    ));
-                }
-                if let Some(text) = &q.query_text {
-                    plan.push_str(&format!("Query: '{}'\n", text));
-                }
-                if !q.raw_vector.is_empty() {
-                    plan.push_str(&format!("Raw Vector: {:?}\n", q.raw_vector));
-                }
-                match q.query_type {
-                    qql_core::ast::QueryType::Hybrid => plan.push_str("Using: HYBRID\n"),
-                    qql_core::ast::QueryType::Sparse => plan.push_str("Using: SPARSE\n"),
-                    qql_core::ast::QueryType::Dense => {}
-                }
-                if let Some(u) = &q.using_ {
-                    plan.push_str(&format!("Using: '{}'\n", u));
-                }
-                if let Some(m) = &q.model {
-                    plan.push_str(&format!("Model: {}\n", m));
-                }
-                if q.offset > 0 {
-                    plan.push_str(&format!("Offset: {}\n", q.offset));
-                }
-                if let Some(th) = &q.score_threshold {
-                    plan.push_str(&format!("Score threshold: {}\n", th));
-                }
-                if let Some(gb) = &q.group_by {
-                    plan.push_str(&format!("Group by: {}\n", gb));
-                }
-                if q.rerank {
-                    plan.push_str("Rerank: enabled\n");
-                }
-                if !q.ctes.is_empty() {
-                    plan.push_str(&format!("CTEs: {} defined\n", q.ctes.len()));
-                }
-                if !q.prefetch_refs.is_empty() {
-                    plan.push_str(&format!("Prefetch refs: {}\n", q.prefetch_refs.len()));
-                }
-                if let Some(ft) = &q.fusion_type {
-                    plan.push_str(&format!("Fusion: {}\n", ft));
-                }
-            }
-            Stmt::Delete(s) => {
-                if let Some(field) = &s.field {
-                    plan.push_str(&format!(
-                        "Statement: DELETE FROM {} WHERE {} = '{:?}'\n",
-                        s.collection, field, s.value
-                    ));
-                } else {
-                    plan.push_str(&format!(
-                        "Statement: DELETE FROM {} WHERE id = '{:?}'\n",
-                        s.collection, s.point_id
-                    ));
-                }
-            }
-            Stmt::UpdateVector(s) => {
-                plan.push_str(&format!(
-                    "Statement: UPDATE {} SET VECTOR = [...] WHERE id = '{:?}'\n",
-                    s.collection, s.point_id
-                ));
-            }
-            Stmt::UpdatePayload(s) => {
-                plan.push_str(&format!(
-                    "Statement: UPDATE {} SET PAYLOAD = {{...}} WHERE id = '{:?}'\n",
-                    s.collection, s.point_id
-                ));
-            }
-            Stmt::CreateIndex(s) => {
-                plan.push_str(&format!(
-                    "Statement: CREATE INDEX ON COLLECTION {} FOR {} TYPE {}\n",
-                    s.collection, s.field, s.field_type
-                ));
-            }
-        }
-    }
-
-    pub fn client(&self) -> &dyn QdrantOperations {
+    pub fn ops(&self) -> &dyn QdrantOps {
         self.client.as_ref()
     }
 
-    pub fn embedder(&self) -> Option<Arc<dyn Embedder>> {
-        self.embedder.clone()
+    pub fn explain(query: &str) -> Result<String, QqlError> {
+        qql_core::explain::explain(query)
+    }
+
+    /// Explain every statement in a multi-statement script.
+    pub fn explain_all(query: &str) -> Result<String, QqlError> {
+        qql_core::explain::explain_all(query)
+    }
+
+    pub fn explain_node(stmt: &Stmt) -> Result<String, QqlError> {
+        Ok(qql_core::explain::explain_node(stmt))
+    }
+
+    // --- explain_stmt removed --- moved to qql_core::explain
+
+    pub fn client(&self) -> &dyn QdrantOps {
+        self.client.as_ref()
+    }
+
+    /// Flush and release backend-owned resources. This is especially important
+    /// for embedded backends before deleting their data directory.
+    pub async fn close(&self) -> Result<(), QqlError> {
+        self.client.close().await
+    }
+
+    pub fn embedder(&self) -> Option<&Arc<dyn Embedder>> {
+        self.embedder.as_ref()
     }
 
     pub fn config(&self) -> Option<&QqlConfig> {
@@ -419,206 +254,589 @@ impl Executor {
         })
     }
 
-    pub fn parse_query(query: &str) -> Result<Stmt<'_>, QqlError> {
-        parser::Parser::parse(query)
+    /// Execute a QQL query string.  Semicolon-delimited multi-statement
+    /// scripts are automatically detected, parsed, and executed in batch —
+    /// contiguous same-collection QUERY statements use `/points/query/batch`,
+    /// and contiguous same-collection mutations use `/points/batch`.
+    ///
+    /// Always returns a stable [`ExecutionReport`] for a single statement or
+    /// semicolon-delimited script.
+    pub async fn execute(
+        &self,
+        query: &str,
+        on_error: OnError,
+    ) -> Result<ExecutionReport, QqlError> {
+        let stop_on_error = matches!(on_error, OnError::Stop);
+        let statements = match parser::Parser::parse_all(query) {
+            Ok(statements) => statements,
+            Err(error) if stop_on_error => return Err(error),
+            Err(error) => {
+                return Ok(ExecutionReport::single(ExecResponse {
+                    ok: false,
+                    operation: "PARSE".to_string(),
+                    message: error.to_string(),
+                    data: None,
+                }));
+            }
+        };
+        if statements.is_empty() {
+            return Ok(ExecutionReport::empty());
+        }
+        let results = self.execute_batch_nodes(statements, stop_on_error).await?;
+        Ok(ExecutionReport::from_results(results))
     }
 
-    pub async fn execute(&self, query: &str) -> Result<ExecResponse, QqlError> {
-        let stmt = Self::parse_query(query)?;
-        self.execute_node(stmt).await
-    }
-
-    pub async fn execute_node(&self, stmt: Stmt<'_>) -> Result<ExecResponse, QqlError> {
-        match stmt {
-            Stmt::ShowCollections => self.do_show_collections().await,
-            Stmt::ShowCollection(collection) => self.do_show_collection(collection).await,
-            Stmt::CreateCollection(n) => self.do_create_collection(*n).await,
-            Stmt::AlterCollection(n) => self.do_alter_collection(*n).await,
-            Stmt::DropCollection(n) => self.do_drop_collection(n.collection).await,
-            Stmt::Insert(n) => self.do_insert(*n).await,
-            Stmt::Select(n) => self.do_select(*n).await,
-            Stmt::Scroll(n) => self.do_scroll(*n).await,
-            Stmt::Query(n) => self.do_query(*n).await,
-            Stmt::Delete(n) => self.do_delete(*n).await,
-            Stmt::UpdateVector(n) => self.do_update_vector(*n).await,
-            Stmt::UpdatePayload(n) => self.do_update_payload(*n).await,
-            Stmt::CreateIndex(n) => self.do_create_index(*n).await,
+    pub async fn execute_node(&self, stmt: Stmt) -> Result<ExecResponse, QqlError> {
+        if let Some(secs) = self.request_timeout() {
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(secs),
+                self.execute_node_inner(stmt),
+            )
+            .await
+            {
+                Ok(res) => res,
+                Err(_) => Err(QqlError::transport(
+                    "QQL-TIMEOUT",
+                    format!("operation timed out after {secs}s"),
+                    None,
+                )),
+            }
+        } else {
+            self.execute_node_inner(stmt).await
         }
     }
 
+    async fn execute_node_inner(&self, stmt: Stmt) -> Result<ExecResponse, QqlError> {
+        let prepared = self.prepare_statement(stmt).await?;
+        let planned = plan(&prepared)?;
+        self.dispatch_planned(&planned).await
+    }
+
+    /// Parse every list entry to AST and run the unified prepared batch path.
+    /// Contiguous same-collection operations are smart-batched just as for
+    /// multi-statement scripts (RUN-013).
     pub async fn execute_batch(
         &self,
         queries: &[&str],
-        stop_on_error: bool,
-    ) -> Result<Vec<ExecResponse>, QqlError> {
+        on_error: OnError,
+    ) -> Result<ExecutionReport, QqlError> {
+        let stop_on_error = matches!(on_error, OnError::Stop);
+        let mut pending = Vec::with_capacity(queries.len());
         let mut results = Vec::with_capacity(queries.len());
         for query in queries {
-            match self.execute(query).await {
-                Ok(resp) => results.push(resp),
-                Err(err) => {
+            match parser::Parser::parse_all(query) {
+                Ok(parsed) => pending.extend(parsed),
+                Err(error) => {
+                    if !pending.is_empty() {
+                        results.extend(
+                            self.execute_batch_nodes(core::mem::take(&mut pending), stop_on_error)
+                                .await?,
+                        );
+                    }
                     if stop_on_error {
-                        return Err(err);
+                        return Err(error);
                     }
                     results.push(ExecResponse {
                         ok: false,
-                        operation: "ERROR".to_string(),
-                        message: err.to_string(),
+                        operation: "PARSE".to_string(),
+                        message: error.to_string(),
                         data: None,
                     });
                 }
             }
         }
-        Ok(results)
+        if !pending.is_empty() {
+            results.extend(self.execute_batch_nodes(pending, stop_on_error).await?);
+        }
+        Ok(ExecutionReport::from_results(results))
     }
 
     pub async fn execute_batch_nodes(
         &self,
-        stmts: Vec<Stmt<'_>>,
+        stmts: Vec<Stmt>,
+        stop_on_error: bool,
+    ) -> Result<Vec<ExecResponse>, QqlError> {
+        if let Some(secs) = self.request_timeout() {
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(secs),
+                self.execute_batch_nodes_inner(stmts, stop_on_error),
+            )
+            .await
+            {
+                Ok(res) => res,
+                Err(_) => Err(QqlError::transport(
+                    "QQL-TIMEOUT",
+                    format!("batch execution timed out after {secs}s"),
+                    None,
+                )),
+            }
+        } else {
+            self.execute_batch_nodes_inner(stmts, stop_on_error).await
+        }
+    }
+
+    async fn execute_batch_nodes_inner(
+        &self,
+        stmts: Vec<Stmt>,
         stop_on_error: bool,
     ) -> Result<Vec<ExecResponse>, QqlError> {
         let mut results = Vec::with_capacity(stmts.len());
+        let mut pending = Vec::new();
+        let mut pending_key: Option<BatchKey> = None;
+
         for stmt in stmts {
-            match self.execute_node(stmt).await {
-                Ok(resp) => results.push(resp),
-                Err(err) => {
+            let statement_key = statement_batch_key(&stmt);
+
+            // A statement outside the current batch family is an execution
+            // barrier. Flush before preparing it because preparation may read
+            // or mutate backend state (for example UPSERT auto-creation).
+            if !pending.is_empty() && statement_key != pending_key {
+                self.flush_planned_group(&mut pending, stop_on_error, &mut results)
+                    .await?;
+                pending_key = None;
+            }
+
+            let prepared = match self.prepare_statement(stmt).await {
+                Ok(p) => p,
+                Err(e) => {
+                    self.flush_planned_group(&mut pending, stop_on_error, &mut results)
+                        .await?;
+                    pending_key = None;
                     if stop_on_error {
-                        return Err(err);
+                        return Err(e);
                     }
                     results.push(ExecResponse {
                         ok: false,
-                        operation: "ERROR".to_string(),
-                        message: err.to_string(),
+                        operation: "PREPARE".to_string(),
+                        message: e.to_string(),
                         data: None,
                     });
+                    continue;
                 }
-            }
-        }
-        Ok(results)
-    }
-
-    pub async fn query_batch(&self, queries: &[&str]) -> Result<Vec<ExecResponse>, QqlError> {
-        let mut parsed_stmts = Vec::with_capacity(queries.len());
-        for q in queries {
-            let stmt = Self::parse_query(q)?;
-            if let Stmt::Query(query_stmt) = stmt {
-                parsed_stmts.push(*query_stmt);
-            } else {
-                return Err(QqlError::runtime(
-                    "query_batch only supports QUERY statements, got non-query statement"
-                        .to_string(),
-                ));
-            }
-        }
-        self.query_batch_nodes(parsed_stmts).await
-    }
-
-    pub async fn query_batch_nodes(
-        &self,
-        stmts: Vec<qql_core::ast::QueryStmt<'_>>,
-    ) -> Result<Vec<ExecResponse>, QqlError> {
-        let num_statements = stmts.len();
-        if num_statements == 0 {
-            return Ok(Vec::new());
-        }
-
-        // 1. Build state and pipeline for each query, and run their pipelines
-        let mut prepared = Vec::with_capacity(num_statements);
-        for stmt in stmts {
-            let (mut state, pipeline) = self.build_query_state_and_pipeline(&stmt).await?;
-            pipeline.execute(&mut state).await?;
-            prepared.push((state, pipeline));
-        }
-
-        // 2. Group flat queries by collection
-        struct CollectionBatch {
-            indices: Vec<usize>,
-            requests: Vec<QueryPointsRequest>,
-        }
-
-        let mut batches: HashMap<String, CollectionBatch> = HashMap::new();
-        let mut ordered_collections = Vec::new();
-        let mut results = vec![
-            ExecResponse {
-                ok: false,
-                operation: String::new(),
-                message: String::new(),
-                data: None,
             };
-            num_statements
-        ];
 
-        for (i, (state, pipeline)) in prepared.iter().enumerate() {
-            if !state.group_by.is_empty() {
-                // Execute grouped query individually
-                let resp = self.execute_grouped_query(pipeline, state).await?;
-                results[i] = resp;
-            } else {
-                let coll = state.collection_name.clone();
-                if !batches.contains_key(&coll) {
-                    ordered_collections.push(coll.clone());
-                    batches.insert(
-                        coll.clone(),
-                        CollectionBatch {
-                            indices: Vec::new(),
-                            requests: Vec::new(),
-                        },
-                    );
+            let planned = match plan(&prepared) {
+                Ok(planned) => planned,
+                Err(e) => {
+                    self.flush_planned_group(&mut pending, stop_on_error, &mut results)
+                        .await?;
+                    pending_key = None;
+                    if stop_on_error {
+                        return Err(e);
+                    }
+                    results.push(ExecResponse {
+                        ok: false,
+                        operation: "PLAN".to_string(),
+                        message: e.to_string(),
+                        data: None,
+                    });
+                    continue;
                 }
-                let b = batches.get_mut(&coll).unwrap();
-                let mut req = pipeline.build_flat_request(state)?;
-                if req.with_payload.is_none() {
-                    req.with_payload = Some(
-                        crate::pipeline::WithPayload {
-                            enable: Some(true),
-                            include: Vec::new(),
-                            exclude: Vec::new(),
-                        }
-                        .into(),
-                    );
-                }
-                b.indices.push(i);
-                b.requests.push(req);
+            };
+
+            let key = planned_batch_key(&planned);
+            if key.is_none() {
+                self.flush_planned_group(&mut pending, stop_on_error, &mut results)
+                    .await?;
+                pending_key = None;
+                self.dispatch_or_collect(planned, stop_on_error, &mut results)
+                    .await?;
+                continue;
             }
+
+            if !pending.is_empty() && key != pending_key {
+                self.flush_planned_group(&mut pending, stop_on_error, &mut results)
+                    .await?;
+            }
+            pending_key = key;
+            pending.push(planned);
         }
 
-        // 3. Execute batched flat queries per collection
-        for coll in ordered_collections {
-            let batch = batches.remove(&coll).unwrap();
-            let batch_results = self.client.query_batch(batch.requests).await?;
-            for (j, pts) in batch_results.into_iter().enumerate() {
-                let orig_idx = batch.indices[j];
-                let formatted: Vec<SearchHit> = pts
-                    .into_iter()
-                    .map(|hit| {
-                        let payload_map: Option<HashMap<String, serde_json::Value>> =
-                            hit.payload.as_ref().and_then(|p| {
-                                serde_json::from_value(serde_json::to_value(p).unwrap()).ok()
-                            });
-                        SearchHit {
-                            id: crate::executor::helpers::point_id_string(&hit.id.clone().into()),
-                            score: hit.score,
-                            text: payload_map.as_ref().and_then(|p| {
-                                p.get("text")
-                                    .and_then(|v| v.as_str().map(|s| s.to_string()))
-                            }),
-                            payload: payload_map,
-                        }
-                    })
-                    .collect();
-
-                results[orig_idx] = ExecResponse {
-                    ok: true,
-                    operation: "QUERY".to_string(),
-                    message: format!("Found {} hits", formatted.len()),
-                    data: Some(serde_json::to_value(formatted).unwrap_or(serde_json::Value::Null)),
-                };
-            }
-        }
-
+        self.flush_planned_group(&mut pending, stop_on_error, &mut results)
+            .await?;
         Ok(results)
+    }
+
+    async fn dispatch_or_collect(
+        &self,
+        planned: qql_plan::PlannedOperation,
+        stop_on_error: bool,
+        results: &mut Vec<ExecResponse>,
+    ) -> Result<(), QqlError> {
+        match self.dispatch_planned(&planned).await {
+            Ok(response) => results.push(response),
+            Err(error) if stop_on_error => return Err(error),
+            Err(error) => results.push(ExecResponse {
+                ok: false,
+                operation: planned.operation_label().to_string(),
+                message: error.to_string(),
+                data: None,
+            }),
+        }
+        Ok(())
+    }
+
+    async fn flush_planned_group(
+        &self,
+        pending: &mut Vec<qql_plan::PlannedOperation>,
+        stop_on_error: bool,
+        results: &mut Vec<ExecResponse>,
+    ) -> Result<(), QqlError> {
+        use qql_plan::mutation::planned_to_update_operation;
+        use qql_plan::{PlannedOperation, QueryBatchRequest, UpdateBatchRequest};
+
+        if pending.is_empty() {
+            return Ok(());
+        }
+        if pending.len() == 1 {
+            let planned = pending.pop().expect("pending contains one operation");
+            return self
+                .dispatch_or_collect(planned, stop_on_error, results)
+                .await;
+        }
+
+        let operations = core::mem::take(pending);
+        match &operations[0] {
+            PlannedOperation::Query { collection, .. } => {
+                let collection = collection.clone();
+                let searches = operations
+                    .iter()
+                    .map(|operation| match operation {
+                        PlannedOperation::Query { request, .. } => Ok(request.clone()),
+                        _ => Err(QqlError::execution(
+                            "QQL-BATCH-INVARIANT",
+                            "query batch contained a non-query operation",
+                            None,
+                        )),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let expected = searches.len();
+                let batch = QueryBatchRequest { searches };
+                match self.client.execute_query_batch(&collection, &batch).await {
+                    Ok(responses) if responses.len() == expected => {
+                        for value in responses {
+                            let hits = extract_search_hits(&value);
+                            results.push(ExecResponse {
+                                ok: true,
+                                operation: "QUERY".to_string(),
+                                message: format!("Found {} hits", hits.len()),
+                                data: Some(serde_json::to_value(hits).unwrap_or_default()),
+                            });
+                        }
+                    }
+                    Ok(responses) => {
+                        let error = QqlError::transport(
+                            "QQL-BATCH-CARDINALITY",
+                            format!(
+                                "query batch returned {} results for {expected} operations",
+                                responses.len()
+                            ),
+                            None,
+                        );
+                        self.collect_batch_error(
+                            error,
+                            &vec!["QUERY"; expected],
+                            stop_on_error,
+                            results,
+                        )?;
+                    }
+                    Err(error) => self.collect_batch_error(
+                        error,
+                        &vec!["QUERY"; expected],
+                        stop_on_error,
+                        results,
+                    )?,
+                }
+            }
+            _ => {
+                let mut update_operations = Vec::with_capacity(operations.len());
+                let mut labels = Vec::with_capacity(operations.len());
+                let mut collection = None;
+                for operation in &operations {
+                    let Some((current_collection, update)) = planned_to_update_operation(operation)
+                    else {
+                        return Err(QqlError::execution(
+                            "QQL-BATCH-INVARIANT",
+                            "mutation batch contained a non-mutation operation",
+                            None,
+                        ));
+                    };
+                    if collection
+                        .as_ref()
+                        .is_some_and(|collection| collection != &current_collection)
+                    {
+                        return Err(QqlError::execution(
+                            "QQL-BATCH-INVARIANT",
+                            "mutation batch contained multiple collections",
+                            None,
+                        ));
+                    }
+                    collection.get_or_insert(current_collection);
+                    labels.push(update.operation_name());
+                    update_operations.push(update);
+                }
+                let collection = collection.unwrap_or_default();
+                let expected = update_operations.len();
+                let batch = UpdateBatchRequest {
+                    operations: update_operations,
+                };
+                match self.client.execute_update_batch(&collection, &batch).await {
+                    Ok(responses) if responses.len() == expected => {
+                        for (value, label) in responses.into_iter().zip(labels.iter()) {
+                            results.push(ExecResponse {
+                                ok: true,
+                                operation: (*label).to_string(),
+                                message: format!("{label} ok (batched)"),
+                                data: Some(value),
+                            });
+                        }
+                    }
+                    Ok(responses) => {
+                        let error = QqlError::transport(
+                            "QQL-BATCH-CARDINALITY",
+                            format!(
+                                "update batch returned {} results for {expected} operations",
+                                responses.len()
+                            ),
+                            None,
+                        );
+                        self.collect_batch_error(error, &labels, stop_on_error, results)?;
+                    }
+                    Err(error) => {
+                        self.collect_batch_error(error, &labels, stop_on_error, results)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn collect_batch_error(
+        &self,
+        error: QqlError,
+        labels: &[&str],
+        stop_on_error: bool,
+        results: &mut Vec<ExecResponse>,
+    ) -> Result<(), QqlError> {
+        if stop_on_error {
+            return Err(error);
+        }
+        let message = error.to_string();
+        results.extend(labels.iter().map(|label| ExecResponse {
+            ok: false,
+            operation: (*label).to_string(),
+            message: message.clone(),
+            data: None,
+        }));
+        Ok(())
+    }
+
+    /// Shared preparation: embeddings, named-vector validation, and UPSERT
+    /// collection auto-creation. Callers must preserve statement order because
+    /// preparation may read or mutate backend state.
+    async fn prepare_statement(&self, mut stmt: Stmt) -> Result<Stmt, QqlError> {
+        let upsert_schema = match &mut stmt {
+            Stmt::Query(query) => {
+                if let ast::QueryCollection::Explicit(collection) = &query.collection {
+                    let collection = collection.clone();
+                    self.configure_query_vectors(&collection, query).await?;
+                }
+                None
+            }
+            Stmt::Upsert(upsert) if self.embedder.is_some() => {
+                self.configure_upsert_embeddings(upsert).await?
+            }
+            _ => None,
+        };
+
+        if let Some(ref embedder) = self.embedder {
+            self.resolve_embeddings(&mut stmt, embedder.as_ref())
+                .await?;
+        }
+
+        if let Stmt::CreateCollection(create) = &mut stmt {
+            self.prepare_create_collection(create).await?;
+        }
+
+        if let Stmt::Upsert(u) = &stmt {
+            if let Some(ref emb) = u.embedding {
+                let (model, has_dense, has_sparse, dense_vec, sparse_vec) = match emb {
+                    ast::EmbeddingSpec::Dense { model, vector } => {
+                        (model.as_deref(), true, false, vector.as_deref(), None)
+                    }
+                    ast::EmbeddingSpec::Sparse { model, vector } => {
+                        (model.as_deref(), false, true, None, vector.as_deref())
+                    }
+                    ast::EmbeddingSpec::Hybrid {
+                        dense_model,
+                        dense_vector,
+                        sparse_vector,
+                        ..
+                    } => (
+                        dense_model.as_deref(),
+                        true,
+                        true,
+                        dense_vector.as_deref(),
+                        sparse_vector.as_deref(),
+                    ),
+                };
+                self.ensure_collection_for_upsert(
+                    &u.collection,
+                    model,
+                    has_dense,
+                    has_sparse,
+                    dense_vec,
+                    sparse_vec,
+                )
+                .await?;
+            }
+            if let Some(info) = upsert_schema.as_ref() {
+                self.validate_embedded_upsert(u, info)?;
+            }
+        }
+
+        Ok(stmt)
+    }
+
+    async fn prepare_create_collection(
+        &self,
+        create: &mut ast::CreateCollectionStmt,
+    ) -> Result<(), QqlError> {
+        if let ast::CollectionMode::Dense { model: Some(model) } = &create.mode {
+            if let Some(embedder) = self.embedder.as_deref() {
+                if !embedder.accepts_model(model) {
+                    return Err(QqlError::execution(
+                        "QQL-EMBEDDING-MODEL",
+                        format!("embedding model '{model}' is not available from the configured embedder"),
+                        None,
+                    ));
+                }
+            }
+        }
+        if !create.vectors.is_empty() {
+            if let ast::CollectionMode::Dense { model: Some(model) } = &create.mode {
+                let expected = self.resolve_dense_vector_size(Some(model)).await? as u64;
+                if create.vectors.len() == 1 && create.vectors[0].size != expected {
+                    return Err(QqlError::execution(
+                        "QQL-EMBEDDING-DIM",
+                        format!(
+                            "collection vector dimension {} does not match embedding model '{model}' dimension {expected}",
+                            create.vectors[0].size
+                        ),
+                        None,
+                    ));
+                }
+            }
+            return Ok(());
+        }
+        if !create.sparse_vectors.is_empty()
+            && matches!(create.mode, ast::CollectionMode::Dense { model: None })
+        {
+            // An explicit sparse definition is a valid sparse-only collection;
+            // do not silently add the default dense vector to it.
+            return Ok(());
+        }
+
+        let (model, dense_name, sparse_name) = match &create.mode {
+            ast::CollectionMode::Dense { model } => (model.as_deref(), DENSE_VECTOR_NAME, None),
+            ast::CollectionMode::Hybrid {
+                dense_vector,
+                sparse_vector,
+            } => (
+                None,
+                dense_vector.as_deref().unwrap_or(DENSE_VECTOR_NAME),
+                Some(sparse_vector.as_deref().unwrap_or(SPARSE_VECTOR_NAME)),
+            ),
+            ast::CollectionMode::Rerank => (None, DENSE_VECTOR_NAME, Some(SPARSE_VECTOR_NAME)),
+        };
+        let dense_size = self.resolve_dense_vector_size(model).await? as u64;
+        create.vectors.push(ast::VectorDef {
+            name: dense_name.to_string(),
+            size: dense_size,
+            distance: ast::VectorDistance::Cosine,
+            hnsw: None,
+            quantization: None,
+            multivector: None,
+            vectors: None,
+        });
+        if let Some(sparse_name) = sparse_name {
+            create.sparse_vectors.push(ast::SparseVectorDef {
+                name: sparse_name.to_string(),
+                index: None,
+                modifier: None,
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Dispatch a planned operation — gRPC goes direct, REST goes through Route.
+    async fn dispatch_planned(
+        &self,
+        op: &qql_plan::PlannedOperation,
+    ) -> Result<ExecResponse, QqlError> {
+        use qql_plan::PlannedOperation;
+
+        let label = op.operation_label();
+        let result = self.client.execute_planned(op).await?;
+        let (message, data) = match op {
+            PlannedOperation::Query { .. }
+            | PlannedOperation::Scroll { .. }
+            | PlannedOperation::GetPoints { .. } => {
+                let hits = extract_search_hits(&result);
+                (
+                    format!("Found {} hits", hits.len()),
+                    Some(serde_json::to_value(hits).unwrap_or_default()),
+                )
+            }
+            PlannedOperation::QueryGroups { .. } => {
+                let groups_count = result
+                    .get("result")
+                    .and_then(|r| r.get("groups"))
+                    .or_else(|| result.get("groups"))
+                    .and_then(|g| g.as_array())
+                    .map(|a| a.len())
+                    .unwrap_or(0);
+                (format!("Found {groups_count} group(s)"), Some(result))
+            }
+            PlannedOperation::Count { .. } => {
+                let count = result
+                    .get("result")
+                    .and_then(|r| r.get("count"))
+                    .and_then(|c| c.as_u64())
+                    .or_else(|| result.get("count").and_then(|c| c.as_u64()))
+                    .unwrap_or(0);
+                (format!("Count: {count}"), Some(result))
+            }
+            PlannedOperation::ListCollections => {
+                let count = result
+                    .get("result")
+                    .and_then(|value| value.get("collections"))
+                    .or_else(|| result.get("collections"))
+                    .and_then(serde_json::Value::as_array)
+                    .map_or(0, Vec::len);
+                (format!("Found {count} collection(s)"), Some(result))
+            }
+            PlannedOperation::GetCollection { .. } => (format!("{label} ok"), Some(result)),
+            PlannedOperation::Upsert { request, .. } => {
+                let n = request.points.len();
+                (
+                    format!("Upserted {n} point(s)"),
+                    Some(serde_json::json!({"count": n})),
+                )
+            }
+            PlannedOperation::ListShardKeys { .. } => ("Shard keys listed".into(), Some(result)),
+            _ => (format!("{label} ok"), None),
+        };
+        Ok(ExecResponse {
+            ok: true,
+            operation: label.into(),
+            message,
+            data,
+        })
     }
 }
 
-pub(crate) mod ddl;
 pub(crate) mod dml;
+#[cfg(feature = "rest")]
 pub(crate) mod helpers;

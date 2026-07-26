@@ -1,21 +1,32 @@
 use alloc::boxed::Box;
 
 use crate::ast::{
-    CollectionConfig, CollectionParamsConfig, HnswRuntimeConfig, MultivectorConfig,
-    OptimizersRuntimeConfig, QuantizationConfig, QuantizationType, QuantizationUpdate, Value,
-    VectorsConfig,
+    CollectionConfig, CollectionParamsConfig, HnswRuntimeConfig, MultivectorComparator,
+    MultivectorConfig, OptimizersRuntimeConfig, QuantizationConfig, QuantizationType,
+    QuantizationUpdate, SparseIndexConfig, Value, VectorsConfig,
 };
-use crate::error::QqlError;
+use crate::error::{QqlError, Span};
 use crate::token::TokenKind;
 
 use super::{
     ascii_equal, ascii_equal_lower, config_bool, config_float_range, config_has_key,
     config_max_optimization_threads, config_non_negative_u64, config_positive_u64, config_value,
     merge_collection_config, validate_hnsw_value, validate_optimizers_value, validate_params_value,
-    validate_vectors_value, Parser,
+    validate_vectors_value, AstLowerer,
 };
 
-impl<'a> Parser<'a> {
+fn validation_err(
+    message: impl Into<alloc::borrow::Cow<'static, str>>,
+    position: usize,
+) -> QqlError {
+    QqlError::validation(
+        "QQL-VALIDATION-CONFIG",
+        message,
+        Some(Span::point(position)),
+    )
+}
+
+impl<'a> AstLowerer<'a> {
     // ── Config blocks ───────────────────────────────────────────
 
     pub fn parse_collection_config_blocks(
@@ -44,7 +55,7 @@ impl<'a> Parser<'a> {
                 self.advance()?;
                 self.parse_hnsw_config_block()
             }
-            TokenKind::Vectors => {
+            TokenKind::Vector => {
                 self.advance()?;
                 self.parse_vectors_config_block()
             }
@@ -56,16 +67,13 @@ impl<'a> Parser<'a> {
                 self.advance()?;
                 self.parse_collection_params_config_block(for_alter)
             }
-            _ if tok.kind == TokenKind::Quantize
-                || (tok.kind == TokenKind::Identifier
-                    && ascii_equal(tok.text, "QUANTIZATION")) =>
-            {
+            _ if tok.kind == TokenKind::Identifier && ascii_equal(tok.text, "QUANTIZATION") => {
                 self.advance()?;
                 self.parse_quantization_config_block()
             }
-            _ => Err(QqlError::syntax(
+            _ => Err(validation_err(
                 alloc::format!(
-                    "expected HNSW, VECTORS, OPTIMIZERS, PARAMS, or QUANTIZATION after WITH, got '{}'",
+                    "expected HNSW, VECTOR, OPTIMIZERS, PARAMS, or QUANTIZATION after WITH, got '{}'",
                     tok.text
                 ),
                 tok.pos,
@@ -86,7 +94,7 @@ impl<'a> Parser<'a> {
                 | "payload_m"
                 | "inline_storage" => {}
                 _ => {
-                    return Err(QqlError::syntax(
+                    return Err(validation_err(
                         alloc::format!(
                             "unknown HNSW parameter '{}'. Expected: m, ef_construct, full_scan_threshold, max_indexing_threads, on_disk, payload_m, inline_storage",
                             key
@@ -98,12 +106,13 @@ impl<'a> Parser<'a> {
             validate_hnsw_value(key, value, self.peek()?.pos)?;
         }
 
-        let m_val = config_non_negative_u64(&config, "m", self.peek()?.pos)?;
-        if let Some(m) = m_val {
-            if m != 0 && m < 4 {
-                return Err(QqlError::syntax("m must be 0 or >= 4", self.peek()?.pos));
+        if let Some(Value::Int(n)) = config_value(&config, "m") {
+            if *n != 0 && *n < 4 {
+                return Err(validation_err("m must be 0 or >= 4", self.peek()?.pos));
             }
         }
+
+        let m_val = config_non_negative_u64(&config, "m", self.peek()?.pos)?;
         let ef_construct = config_positive_u64(&config, "ef_construct", self.peek()?.pos)?;
         let full_scan_threshold =
             config_non_negative_u64(&config, "full_scan_threshold", self.peek()?.pos)?;
@@ -134,7 +143,7 @@ impl<'a> Parser<'a> {
         for (key, value) in &config {
             if !ascii_equal_lower(key, "on_disk") {
                 return Err(QqlError::syntax(
-                    alloc::format!("unknown VECTORS parameter '{}'. Expected: on_disk", key),
+                    alloc::format!("unknown VECTOR parameter '{}'. Expected: on_disk", key),
                     self.peek()?.pos,
                 ));
             }
@@ -259,11 +268,14 @@ impl<'a> Parser<'a> {
                 | "write_consistency_factor"
                 | "read_fan_out_factor"
                 | "read_fan_out_delay_ms"
-                | "on_disk_payload" => {}
+                | "on_disk_payload"
+                | "shard_number"
+                | "sharding_method"
+                | "shard_keys" => {}
                 _ => {
-                    return Err(QqlError::syntax(
+                    return Err(validation_err(
                         alloc::format!(
-                            "unknown PARAMS parameter '{}'. Expected: replication_factor, write_consistency_factor, read_fan_out_factor, read_fan_out_delay_ms, on_disk_payload",
+                            "unknown PARAMS parameter '{}'. Expected: replication_factor, write_consistency_factor, read_fan_out_factor, read_fan_out_delay_ms, on_disk_payload, shard_number, sharding_method, shard_keys",
                             key
                         ),
                         self.peek()?.pos,
@@ -277,7 +289,7 @@ impl<'a> Parser<'a> {
             && (config_has_key(&config, "read_fan_out_factor")
                 || config_has_key(&config, "read_fan_out_delay_ms"))
         {
-            return Err(QqlError::syntax(
+            return Err(validation_err(
                     "WITH PARAMS (read_fan_out_factor, read_fan_out_delay_ms) is supported only for ALTER COLLECTION",
                     self.peek()?.pos,
                 ));
@@ -309,6 +321,47 @@ impl<'a> Parser<'a> {
                     self.peek()?.pos,
                 )?,
                 on_disk_payload: config_bool(&config, "on_disk_payload"),
+                shard_number: config_positive_u64(&config, "shard_number", self.peek()?.pos)?,
+                sharding_method: match config_value(&config, "sharding_method") {
+                    Some(Value::Str(s)) => Some(s.clone()),
+                    Some(_) => {
+                        return Err(validation_err(
+                            "sharding_method must be a string ('auto' or 'custom')",
+                            self.peek()?.pos,
+                        ));
+                    }
+                    None => None,
+                },
+                shard_keys: match config_value(&config, "shard_keys") {
+                    Some(Value::List(items)) => {
+                        let mut keys = Vec::with_capacity(items.len());
+                        for item in items {
+                            match item {
+                                Value::Str(s) => keys.push(s.clone()),
+                                _ => {
+                                    return Err(validation_err(
+                                        "shard_keys entries must all be strings",
+                                        self.peek()?.pos,
+                                    ));
+                                }
+                            }
+                        }
+                        if keys.is_empty() {
+                            return Err(validation_err(
+                                "shard_keys must be a non-empty list of strings",
+                                self.peek()?.pos,
+                            ));
+                        }
+                        Some(keys)
+                    }
+                    Some(_) => {
+                        return Err(validation_err(
+                            "shard_keys must be a list of strings",
+                            self.peek()?.pos,
+                        ));
+                    }
+                    None => None,
+                },
             })),
             quantization: None,
             quantization_update: None,
@@ -381,7 +434,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        let mut turbo_bits: Option<f64> = None;
+        let mut bits: Option<f64> = None;
         if qtype == QuantizationType::Turbo {
             if let Some(v) = config_value(&config, "bits") {
                 let bits_val = match v {
@@ -396,7 +449,75 @@ impl<'a> Parser<'a> {
                             self.peek()?.pos,
                         ));
                     }
-                    turbo_bits = Some(b);
+                    bits = Some(b);
+                }
+            }
+        }
+
+        let mut compression: Option<String> = None;
+        if qtype == QuantizationType::Product {
+            if let Some(Value::Str(c)) = config_value(&config, "compression") {
+                let c_lower = c.to_ascii_lowercase();
+                if matches!(c_lower.as_str(), "x4" | "x8" | "x16" | "x32" | "x64") {
+                    compression = Some(c_lower);
+                } else {
+                    return Err(QqlError::syntax(
+                        "compression must be x4, x8, x16, x32, or x64 for PRODUCT quantization",
+                        self.peek()?.pos,
+                    ));
+                }
+            }
+        }
+
+        let mut encoding: Option<String> = None;
+        let mut query_encoding: Option<String> = None;
+        if qtype == QuantizationType::Binary {
+            if let Some(e) = config_value(&config, "encoding") {
+                let raw = match e {
+                    Value::Str(s) => s.to_ascii_lowercase(),
+                    Value::Int(n) => n.to_string(),
+                    Value::Float(f) => {
+                        if (*f - 1.5).abs() < f64::EPSILON {
+                            "1.5".into()
+                        } else if f.fract() == 0.0 {
+                            format!("{}", *f as i64)
+                        } else {
+                            f.to_string()
+                        }
+                    }
+                    _ => {
+                        return Err(QqlError::syntax(
+                            "encoding must be a string or number for BINARY quantization",
+                            self.peek()?.pos,
+                        ));
+                    }
+                };
+                // Canonicalize aliases so dump/plan always see one_bit|two_bits|one_and_half_bits.
+                encoding = Some(match raw.as_str() {
+                    "one_bit" | "onebit" | "1" => "one_bit".into(),
+                    "two_bits" | "twobits" | "2" => "two_bits".into(),
+                    "one_and_half_bits" | "oneandhalfbits" | "1.5" => "one_and_half_bits".into(),
+                    _ => {
+                        return Err(QqlError::syntax(
+                            "encoding must be one_bit (1), two_bits (2), or one_and_half_bits (1.5) for BINARY quantization",
+                            self.peek()?.pos,
+                        ));
+                    }
+                });
+            }
+
+            if let Some(Value::Str(qe)) = config_value(&config, "query_encoding") {
+                let qe_lower = qe.to_ascii_lowercase();
+                if matches!(
+                    qe_lower.as_str(),
+                    "default" | "binary" | "scalar4bits" | "scalar8bits"
+                ) {
+                    query_encoding = Some(qe_lower);
+                } else {
+                    return Err(QqlError::syntax(
+                        "query_encoding must be default, binary, scalar4bits, or scalar8bits for BINARY quantization",
+                        self.peek()?.pos,
+                    ));
                 }
             }
         }
@@ -405,7 +526,10 @@ impl<'a> Parser<'a> {
             qtype,
             always_ram,
             quantile,
-            turbo_bits,
+            bits,
+            compression,
+            encoding,
+            query_encoding,
         };
 
         Ok(CollectionConfig {
@@ -445,7 +569,79 @@ impl<'a> Parser<'a> {
             ));
         }
         Ok(MultivectorConfig {
-            comparator: "max_sim",
+            comparator: MultivectorComparator::MaxSim,
         })
+    }
+
+    pub fn parse_sparse_config_block(
+        &mut self,
+    ) -> Result<(Option<Box<SparseIndexConfig>>, Option<String>), QqlError> {
+        let config = self.parse_config_block()?;
+        for (key, _) in &config {
+            let lower = key.to_ascii_lowercase();
+            if !matches!(
+                lower.as_str(),
+                "modifier" | "full_scan_threshold" | "on_disk" | "datatype"
+            ) {
+                return Err(QqlError::syntax(
+                    alloc::format!(
+                        "unknown SPARSE/INDEX parameter '{}'. Expected: modifier, full_scan_threshold, on_disk, datatype",
+                        key
+                    ),
+                    self.peek()?.pos,
+                ));
+            }
+        }
+
+        let mut modifier = None;
+        if let Some(Value::Str(m)) = config_value(&config, "modifier") {
+            let m_lower = m.to_ascii_lowercase();
+            if matches!(m_lower.as_str(), "none" | "idf") {
+                modifier = Some(m_lower);
+            } else {
+                return Err(QqlError::syntax(
+                    "modifier must be none or idf for SPARSE vector",
+                    self.peek()?.pos,
+                ));
+            }
+        }
+        let full_scan_threshold =
+            config_non_negative_u64(&config, "full_scan_threshold", self.peek()?.pos)?;
+        let on_disk = config_bool(&config, "on_disk");
+        let datatype = match config_value(&config, "datatype") {
+            Some(Value::Str(s)) => {
+                let s_lower = s.to_ascii_lowercase();
+                match s_lower.as_str() {
+                    "float32" | "f32" => Some("float32".into()),
+                    "uint8" | "u8" => Some("uint8".into()),
+                    "float16" | "f16" => Some("float16".into()),
+                    "default" => Some("default".into()),
+                    _ => {
+                        return Err(QqlError::syntax(
+                            "datatype must be float32, uint8, float16, or default for SPARSE index",
+                            self.peek()?.pos,
+                        ));
+                    }
+                }
+            }
+            Some(_) => {
+                return Err(QqlError::syntax(
+                    "datatype must be a string for SPARSE index",
+                    self.peek()?.pos,
+                ));
+            }
+            None => None,
+        };
+
+        let index = if full_scan_threshold.is_some() || on_disk.is_some() || datatype.is_some() {
+            Some(Box::new(SparseIndexConfig {
+                full_scan_threshold,
+                on_disk,
+                datatype,
+            }))
+        } else {
+            None
+        };
+        Ok((index, modifier))
     }
 }

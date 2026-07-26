@@ -1,0 +1,256 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [
+          {
+            "name": "candidates",
+            "query": {
+              "collection": "Inherited",
+              "ctes": [],
+              "expression": {
+                "Nearest": {
+                  "input": {
+                    "Text": {
+                      "model": null,
+                      "text": "vector database"
+                    }
+                  },
+                  "mmr": null,
+                  "prefetch": [],
+                  "using": {
+                    "kind": null,
+                    "name": "dense"
+                  }
+                }
+              },
+              "filter": null,
+              "group": null,
+              "output": {
+                "payload": null,
+                "vectors": null
+              },
+              "page": {
+                "limit": 100,
+                "offset": null
+              },
+              "params": null,
+              "score_threshold": null,
+              "shard_key": null
+            }
+          }
+        ],
+        "expression": {
+          "Rerank": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "vector database"
+              }
+            },
+            "model": "reranker-v1",
+            "prefetch": [
+              {
+                "filter": null,
+                "lookup": null,
+                "score_threshold": null,
+                "source": {
+                  "Cte": "candidates"
+                }
+              }
+            ],
+            "using": {
+              "kind": "Dense",
+              "name": "colbert"
+            }
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [
+          {
+            "name": "candidates",
+            "query": {
+              "collection": "Inherited",
+              "ctes": [],
+              "expression": {
+                "Nearest": {
+                  "input": {
+                    "Vector": {
+                      "Dense": [
+                        0.1,
+                        0.2
+                      ]
+                    }
+                  },
+                  "mmr": null,
+                  "prefetch": [],
+                  "using": {
+                    "kind": null,
+                    "name": "dense"
+                  }
+                }
+              },
+              "filter": null,
+              "group": null,
+              "output": {
+                "payload": null,
+                "vectors": null
+              },
+              "page": {
+                "limit": 100,
+                "offset": null
+              },
+              "params": null,
+              "score_threshold": null,
+              "shard_key": null
+            }
+          }
+        ],
+        "expression": {
+          "Rerank": {
+            "input": {
+              "Vector": {
+                "Dense": [
+                  0.1,
+                  0.2
+                ]
+              }
+            },
+            "model": "reranker-v1",
+            "prefetch": [
+              {
+                "filter": null,
+                "lookup": null,
+                "score_threshold": null,
+                "source": {
+                  "Cte": "candidates"
+                }
+              }
+            ],
+            "using": {
+              "kind": "Dense",
+              "name": "colbert"
+            }
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [
+          {
+            "name": "candidates",
+            "query": {
+              "collection": "Inherited",
+              "ctes": [],
+              "expression": {
+                "Nearest": {
+                  "input": {
+                    "Point": {
+                      "Number": 42
+                    }
+                  },
+                  "mmr": null,
+                  "prefetch": [],
+                  "using": {
+                    "kind": null,
+                    "name": "dense"
+                  }
+                }
+              },
+              "filter": null,
+              "group": null,
+              "output": {
+                "payload": null,
+                "vectors": null
+              },
+              "page": {
+                "limit": 100,
+                "offset": null
+              },
+              "params": null,
+              "score_threshold": null,
+              "shard_key": null
+            }
+          }
+        ],
+        "expression": {
+          "Rerank": {
+            "input": {
+              "Point": {
+                "Number": 42
+              }
+            },
+            "model": "reranker-v1",
+            "prefetch": [
+              {
+                "filter": null,
+                "lookup": null,
+                "score_threshold": null,
+                "source": {
+                  "Cte": "candidates"
+                }
+              }
+            ],
+            "using": {
+              "kind": "Dense",
+              "name": "colbert"
+            }
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    }
+  ]
+}

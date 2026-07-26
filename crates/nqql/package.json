@@ -1,0 +1,65 @@
+{
+  "name": "nqql",
+  "version": "0.1.0",
+  "description": "Native Node.js bindings for the Qdrant Query Language parser and runtime.",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "index.*.node",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "napi build --platform --no-js --release --dts native.d.ts",
+    "build:debug": "napi build --platform --no-js --dts native.d.ts",
+    "test": "npm run build:debug && node test.js",
+    "prepublishOnly": "napi prepublish -t npm"
+  },
+  "keywords": [
+    "qql",
+    "qdrant",
+    "vector-search",
+    "query-language",
+    "database"
+  ],
+  "author": {
+    "name": "Srimon Danguria",
+    "email": "srimon12mckv@gmail.com"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/srimon12/qql-rs.git",
+    "directory": "crates/nqql"
+  },
+  "homepage": "https://github.com/srimon12/qql-rs#readme",
+  "bugs": {
+    "url": "https://github.com/srimon12/qql-rs/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "commonjs",
+  "napi": {
+    "binaryName": "index",
+    "targets": [
+      "x86_64-unknown-linux-gnu",
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-pc-windows-msvc"
+    ]
+  },
+  "optionalDependencies": {
+    "nqql-linux-x64-gnu": "0.1.0",
+    "nqql-darwin-x64": "0.1.0",
+    "nqql-darwin-arm64": "0.1.0",
+    "nqql-win32-x64-msvc": "0.1.0"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "3.7.4"
+  }
+}

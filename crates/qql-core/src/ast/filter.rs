@@ -1,83 +1,102 @@
-use super::Value;
+use super::{PointId, Value};
 use alloc::boxed::Box;
+use alloc::string::String;
 use alloc::vec::Vec;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum ComparisonOp {
+    Eq,
+    Gt,
+    Gte,
+    Lt,
+    Lte,
+}
+
 #[derive(Debug, Clone, PartialEq)]
-pub enum FilterExpr<'a> {
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum PointIdPredicate {
+    Eq(PointId),
+    In(Vec<PointId>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct GeoPoint {
+    pub lat: f64,
+    pub lon: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum FilterExpr {
+    PointId(PointIdPredicate),
     Compare {
-        field: &'a str,
-        op: &'a str,
-        value: Value<'a>,
+        field: String,
+        op: ComparisonOp,
+        value: Value,
     },
     Between {
-        field: &'a str,
-        low: Value<'a>,
-        high: Value<'a>,
+        field: String,
+        low: Value,
+        high: Value,
     },
     In {
-        field: &'a str,
-        values: Vec<Value<'a>>,
-    },
-    NotIn {
-        field: &'a str,
-        values: Vec<Value<'a>>,
+        field: String,
+        values: Vec<Value>,
     },
     IsNull {
-        field: &'a str,
-    },
-    IsNotNull {
-        field: &'a str,
+        field: String,
     },
     IsEmpty {
-        field: &'a str,
-    },
-    IsNotEmpty {
-        field: &'a str,
+        field: String,
     },
     MatchText {
-        field: &'a str,
-        text: &'a str,
+        field: String,
+        text: String,
     },
     MatchAny {
-        field: &'a str,
-        text: &'a str,
+        field: String,
+        values: Vec<Value>,
     },
     MatchPhrase {
-        field: &'a str,
-        text: &'a str,
+        field: String,
+        text: String,
     },
     And {
-        operands: Vec<FilterExpr<'a>>,
+        operands: Vec<FilterExpr>,
     },
     Or {
-        operands: Vec<FilterExpr<'a>>,
+        operands: Vec<FilterExpr>,
     },
     Not {
-        operand: Box<FilterExpr<'a>>,
+        operand: Box<FilterExpr>,
     },
     Nested {
-        path: &'a str,
-        filter: Box<FilterExpr<'a>>,
+        path: String,
+        filter: Box<FilterExpr>,
     },
     HasVector {
-        name: &'a str,
+        name: String,
     },
     ValuesCount {
-        field: &'a str,
-        op: &'a str,
-        count: i64,
+        field: String,
+        op: ComparisonOp,
+        count: u64,
     },
     GeoBoundingBox {
-        field: &'a str,
-        top_left_lat: f64,
-        top_left_lon: f64,
-        bottom_right_lat: f64,
-        bottom_right_lon: f64,
+        field: String,
+        top_left: GeoPoint,
+        bottom_right: GeoPoint,
     },
     GeoRadius {
-        field: &'a str,
-        lat: f64,
-        lon: f64,
+        field: String,
+        center: GeoPoint,
         radius: f64,
+    },
+    GeoPolygon {
+        field: String,
+        exterior: Vec<GeoPoint>,
+        interiors: Vec<Vec<GeoPoint>>,
     },
 }
