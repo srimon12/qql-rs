@@ -2,6 +2,13 @@
 name = "nqql"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Native Node.js bindings for the QQL parser and Qdrant runtime"
+publish = false
 
 [lib]
 crate-type = ["cdylib"]
@@ -13,9 +20,9 @@ grpc = ["qql/grpc"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
-qql-core = { path = "../qql-core", features = ["serde", "json"] }
-qql-plan = { path = "../qql-plan" }
-qql = { path = "../qql-runtime", default-features = false, features = ["rest", "grpc"] }
+qql-core = { version = "0.1.0", path = "../qql-core", features = ["serde", "json"] }
+qql-plan = { version = "0.1.0", path = "../qql-plan" }
+qql = { version = "0.1.0", path = "../qql-runtime", default-features = false, features = ["rest", "grpc"] }
 napi = { version = "2", features = ["napi8", "serde-json", "async"] }
 napi-derive = "2"
 serde_json = "1"

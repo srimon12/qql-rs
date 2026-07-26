@@ -2,6 +2,13 @@
 name = "pyqql"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Native Python bindings for the QQL parser and Qdrant runtime"
+publish = false
 
 [lib]
 crate-type = ["cdylib"]
@@ -13,10 +20,10 @@ grpc = ["qql/grpc"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
-qql-core = { path = "../qql-core", features = ["serde"] }
-qql-plan = { path = "../qql-plan" }
-qql = { path = "../qql-runtime", default-features = false, features = ["rest", "grpc"] }
-pyo3 = { version = "0.23", features = ["extension-module"] }
+qql-core = { version = "0.1.0", path = "../qql-core", features = ["serde"] }
+qql-plan = { version = "0.1.0", path = "../qql-plan" }
+qql = { version = "0.1.0", path = "../qql-runtime", default-features = false }
+pyo3 = { version = "0.23", features = ["extension-module", "abi3-py38"] }
 pyo3-async-runtimes = { version = "0.23", features = ["tokio-runtime"] }
 pythonize = "0.23"
 serde_json = "1"

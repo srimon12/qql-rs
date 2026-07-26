@@ -1,7 +1,7 @@
 {
   "name": "nqql-edge",
-  "version": "1.0.0",
-  "description": "Node.js native bindings for the QQL edge executor — qdrant-edge + fastembed, zero network",
+  "version": "0.1.0",
+  "description": "Local QQL execution for Node.js with qdrant-edge and FastEmbed.",
   "main": "index.js",
   "types": "index.d.ts",
   "files": [
@@ -14,7 +14,7 @@
     "build": "napi build --platform --no-js --release --dts native.d.ts",
     "build:debug": "napi build --platform --no-js --dts native.d.ts",
     "test": "npm run build:debug && node test.js",
-    "prepack": "npm run build"
+    "prepublishOnly": "napi prepublish -t npm"
   },
   "keywords": [
     "qql",
@@ -25,10 +25,43 @@
     "fastembed",
     "embedding"
   ],
-  "author": "",
-  "license": "ISC",
+  "author": {
+    "name": "Srimon Danguria",
+    "email": "srimon12mckv@gmail.com"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/srimon12/qql-rs.git",
+    "directory": "crates/nqql-edge"
+  },
+  "homepage": "https://github.com/srimon12/qql-rs#readme",
+  "bugs": {
+    "url": "https://github.com/srimon12/qql-rs/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "commonjs",
+  "napi": {
+    "binaryName": "index",
+    "targets": [
+      "x86_64-unknown-linux-gnu",
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-pc-windows-msvc"
+    ]
+  },
+  "optionalDependencies": {
+    "nqql-edge-linux-x64-gnu": "0.1.0",
+    "nqql-edge-darwin-x64": "0.1.0",
+    "nqql-edge-darwin-arm64": "0.1.0",
+    "nqql-edge-win32-x64-msvc": "0.1.0"
+  },
   "devDependencies": {
-    "@napi-rs/cli": "^3.7.4"
+    "@napi-rs/cli": "3.7.4"
   }
 }

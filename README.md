@@ -175,6 +175,19 @@ qql convert payload.json
 qql dump medical backup.qql
 ```
 
+Local edge execution is available through the optional CLI feature. Configure
+the storage and embedding backend once, then select it with `--edge`:
+
+```bash
+cargo install qql-cli --features edge
+qql config edge --data-dir ./qql-data --model bge-small-en-v1.5
+qql --edge exec "SHOW COLLECTIONS"
+qql --edge connect
+```
+
+Release archives contain the full CLI, including edge support. A normal
+`cargo install qql-cli` remains smaller and includes REST and gRPC only.
+
 ---
 
 ## Architecture
@@ -465,7 +478,11 @@ and non-batchable operations are unaffected.
 
 ---
 
-## Contributing
+## Contributing and releases
+
+Development flows from topic branches into `dev`, then from `dev` into `main`
+for releases. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the branch policy and
+[`RELEASING.md`](RELEASING.md) for the synchronized package release procedure.
 
 ```bash
 # Build everything
@@ -487,3 +504,7 @@ cargo run -p qql-conformance -- check language/v1
 # Regenerate snapshots after an intentional language change
 cargo run -p qql-conformance -- generate language/v1
 ```
+
+## License
+
+QQL is licensed under the [MIT License](LICENSE).

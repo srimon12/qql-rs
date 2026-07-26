@@ -2,15 +2,25 @@
 name = "qql-plan"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Typed QQL execution plans and Qdrant route lowering"
+documentation = "https://docs.rs/qql-plan"
+readme = "README.md"
+keywords = ["qql", "qdrant", "query-planner", "vector-search"]
+categories = ["database"]
 
 [features]
 default = []
 
 [dependencies]
-qql-core = { path = "../qql-core", features = ["serde"] }
+qql-core = { version = "0.1.0", path = "../qql-core", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1" }
 
 [dev-dependencies]
-qql-core = { path = "../qql-core", features = ["serde"] }
+qql-core = { version = "0.1.0", path = "../qql-core", features = ["serde"] }
 serde_json = { version = "1" }

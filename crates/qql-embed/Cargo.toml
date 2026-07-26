@@ -2,10 +2,19 @@
 name = "qql-embed"
 version.workspace = true
 edition.workspace = true
-description = "Shared QQL embedding: Embedder trait, sparse BM25, AST resolve_embeddings"
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Shared dense and sparse embedding resolution for QQL runtimes"
+documentation = "https://docs.rs/qql-embed"
+readme = "README.md"
+keywords = ["qql", "qdrant", "embeddings", "vector-search", "bm25"]
+categories = ["database", "algorithms"]
 
 [dependencies]
-qql-core = { path = "../qql-core", features = ["std"] }
+qql-core = { version = "0.1.0", path = "../qql-core", features = ["std"] }
 async-trait = "0.1"
 
 [dev-dependencies]

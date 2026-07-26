@@ -1,36 +1,51 @@
-pub async fn handle_doctor(url: &str, json: bool) -> Result<(), Box<dyn std::error::Error>> {
-    let executor = executor(url)?;
-    match executor
+pub async fn handle_doctor(
+    url: &str,
+    use_edge: bool,
+    json: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let executor = executor(url, use_edge)?;
+    let result = executor
         .execute("SHOW COLLECTIONS", qql::executor::OnError::Stop)
-        .await
-    {
+        .await;
+    executor.close().await?;
+    match result {
         Ok(_) => {
+            let target = if use_edge {
+                "the local edge backend".to_string()
+            } else {
+                format!("Qdrant at {url}")
+            };
             if json {
                 println!(
                     "{}",
                     serde_json::json!({
                         "ok": true,
                         "healthy": true,
-                        "message": format!("Connected to Qdrant at {url}")
+                        "message": format!("Connected to {target}")
                     })
                 );
             } else {
-                println!("Connected to Qdrant at {url} (healthy)");
+                println!("Connected to {target} (healthy)");
             }
             Ok(())
         }
         Err(e) => {
+            let target = if use_edge {
+                "the local edge backend".to_string()
+            } else {
+                format!("Qdrant at {url}")
+            };
             if json {
                 println!(
                     "{}",
                     serde_json::json!({
                         "ok": false,
                         "healthy": false,
-                        "error": format!("Failed to connect to Qdrant at {url}: {e}")
+                        "error": format!("Failed to connect to {target}: {e}")
                     })
                 );
             } else {
-                println!("Failed to connect to Qdrant at {url}: {e}");
+                println!("Failed to connect to {target}: {e}");
             }
             Err(e.into())
         }
@@ -41,20 +56,21 @@ use crate::dump;
 use crate::output;
 use crate::script;
 
-const VERSION: &str = "0.1.0";
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 // ── Public handlers ───────────────────────────────────────────
 
 pub async fn handle_exec(
     url: &str,
+    use_edge: bool,
     query: &str,
     json: bool,
     quiet: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let executor = executor(url)?;
-    let report = executor
-        .execute(query, qql::executor::OnError::Stop)
-        .await?;
+    let executor = executor(url, use_edge)?;
+    let result = executor.execute(query, qql::executor::OnError::Stop).await;
+    executor.close().await?;
+    let report = result?;
     if !quiet {
         crate::table::render_report(&report, json)?;
     }
@@ -63,13 +79,15 @@ pub async fn handle_exec(
 
 pub async fn handle_execute_file(
     url: &str,
+    use_edge: bool,
     path: &str,
     stop_on_error: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let statements = script::read_script(path).map_err(|e| format!("{}", e))?;
-    let executor = executor(url)?;
+    let executor = executor(url, use_edge)?;
     let mut ok_count = 0;
     let mut fail_count = 0;
+    let mut fatal_error = None;
 
     for (index, statement) in statements.iter().enumerate() {
         let on_err = if stop_on_error {
@@ -94,10 +112,15 @@ pub async fn handle_execute_file(
                 fail_count += 1;
                 output::print_error(&format!("statement {}: {}", index + 1, error));
                 if stop_on_error {
-                    return Err(format!("statement {} failed: {}", index + 1, error).into());
+                    fatal_error = Some(format!("statement {} failed: {}", index + 1, error));
+                    break;
                 }
             }
         }
+    }
+    executor.close().await?;
+    if let Some(error) = fatal_error {
+        return Err(error.into());
     }
 
     let msg = format!(
@@ -131,13 +154,18 @@ pub fn handle_explain(query: &str) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-pub async fn handle_connect(url: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let executor = executor(url)?;
-    executor
+pub async fn handle_connect(url: &str, use_edge: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let executor = executor(url, use_edge)?;
+    let initial = executor
         .execute("SHOW COLLECTIONS", qql::executor::OnError::Stop)
-        .await?;
+        .await;
+    if let Err(error) = initial {
+        executor.close().await?;
+        return Err(error.into());
+    }
     output::print_banner();
-    output::print_success(&format!("Connected to \x1b[36m{}\x1b[0m", url));
+    let target = if use_edge { "local edge" } else { url };
+    output::print_success(&format!("Connected to \x1b[36m{}\x1b[0m", target));
     println!("Type \x1b[1mhelp\x1b[0m for available commands or \x1b[1mexit\x1b[0m to quit.\n");
 
     let mut rl = rustyline::DefaultEditor::new()?;
@@ -225,7 +253,7 @@ pub async fn handle_connect(url: &str) -> Result<(), Box<dyn std::error::Error>>
                 output::print_error("dump error: usage DUMP [COLLECTION] <name> <output.qql>");
                 continue;
             }
-            match handle_dump(url, dump_parts[0], dump_parts[1], 50, None).await {
+            match dump::dump_collection(&executor, dump_parts[0], dump_parts[1], 50, None).await {
                 Ok(stats) => output::print_success(&format!(
                     "Dumped collection '{}' to {} ({} written, {} skipped, {} batches)",
                     dump_parts[0], dump_parts[1], stats.written, stats.skipped, stats.batches
@@ -248,10 +276,27 @@ pub async fn handle_connect(url: &str) -> Result<(), Box<dyn std::error::Error>>
         }
     }
 
+    executor.close().await?;
     Ok(())
 }
 
-fn executor(url: &str) -> Result<qql::executor::Executor, Box<dyn std::error::Error>> {
+fn executor(
+    url: &str,
+    use_edge: bool,
+) -> Result<qql::executor::Executor, Box<dyn std::error::Error>> {
+    if use_edge {
+        #[cfg(feature = "edge")]
+        {
+            return edge_executor();
+        }
+        #[cfg(not(feature = "edge"))]
+        {
+            return Err(
+                "edge support is not installed; reinstall qql-cli with --features edge".into(),
+            );
+        }
+    }
+
     let config = qql::config::QqlConfig::load()?.unwrap_or_default();
 
     #[cfg(feature = "grpc")]
@@ -319,6 +364,41 @@ fn executor(url: &str) -> Result<qql::executor::Executor, Box<dyn std::error::Er
     ))
 }
 
+#[cfg(feature = "edge")]
+fn edge_executor() -> Result<qql::executor::Executor, Box<dyn std::error::Error>> {
+    let config = crate::config::EdgeConfig::load()?.apply_environment();
+    match config.embedder.as_str() {
+        "fastembed" => {
+            let options = qql_edge::LocalExecutorOptions {
+                on_disk_payload: config.on_disk_payload,
+                model: config.model,
+                cache_dir: config.cache_dir,
+                show_download_progress: config.show_download_progress,
+            };
+            qql_edge::local_executor_with_options(config.data_dir, options)
+                .map_err(|error| format!("edge initialization failed: {error}").into())
+        }
+        "http" => {
+            let endpoint = config.embed_url.ok_or(
+                "the edge HTTP embedder requires embed_url; run `qql config edge --embedder http --embed-url <URL>`",
+            )?;
+            qql_edge::http_executor(
+                config.data_dir,
+                config.on_disk_payload,
+                endpoint,
+                config.embed_key,
+                config.embed_model,
+                config.embed_dimension,
+            )
+            .map_err(|error| format!("edge initialization failed: {error}").into())
+        }
+        other => Err(format!(
+            "unknown configured edge embedder '{other}'; expected 'fastembed' or 'http'"
+        )
+        .into()),
+    }
+}
+
 pub fn handle_convert(path: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
     let input = if let Some(p) = path {
         std::fs::read_to_string(p).map_err(|e| format!("cannot read file: {}", e))?
@@ -345,13 +425,34 @@ pub fn handle_convert(path: Option<&str>) -> Result<(), Box<dyn std::error::Erro
 
 pub async fn handle_dump(
     url: &str,
+    use_edge: bool,
     collection: &str,
     output: &str,
     batch_size: u32,
     progress: Option<&(dyn Fn(dump::DumpProgress) + Sync)>,
 ) -> Result<dump::DumpStats, Box<dyn std::error::Error>> {
-    let exec = executor(url)?;
-    dump::dump_collection(&exec, collection, output, batch_size, progress).await
+    let executor = executor(url, use_edge)?;
+    let result = dump::dump_collection(&executor, collection, output, batch_size, progress).await;
+    executor.close().await?;
+    result
+}
+
+pub fn handle_configure_edge(
+    config: crate::config::EdgeConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if config.embedder != "fastembed" && config.embedder != "http" {
+        return Err("edge embedder must be 'fastembed' or 'http'".into());
+    }
+    if config.embedder == "http" && config.embed_url.is_none() {
+        return Err("--embed-url is required when --embedder http is selected".into());
+    }
+    if config.embed_dimension == 0 {
+        return Err("--embed-dim must be greater than zero".into());
+    }
+    let path = config.save()?;
+    println!("Saved edge configuration to {}", path.display());
+    println!("Use it with: qql --edge exec \"SHOW COLLECTIONS\"");
+    Ok(())
 }
 
 pub fn handle_version() -> Result<(), Box<dyn std::error::Error>> {
@@ -433,62 +534,4 @@ fn print_repl_help() {
   Ctrl-D         Exit shell
 "#
     );
-}
-
-/// Run a single QQL statement against a local qdrant-edge instance.
-///
-/// The edge executor runs entirely in-process — no Qdrant server is needed.
-/// Embeddings are handled by either:
-/// - `fastembed` — local ONNX inference (default, no network)
-/// - `http`      — any OpenAI-compatible endpoint (Ollama, OpenAI, etc.)
-#[cfg(feature = "edge")]
-#[allow(clippy::too_many_arguments)]
-pub async fn handle_edge(
-    query: &str,
-    data_dir: &str,
-    on_disk: bool,
-    embedder: &str,
-    embed_url: Option<&str>,
-    embed_key: &str,
-    embed_model: &str,
-    embed_dim: usize,
-    json: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let exec = match embedder {
-        #[cfg(feature = "edge")]
-        "fastembed" => {
-            #[cfg(not(feature = "edge"))]
-            {
-                return Err("fastembed support not compiled in".into());
-            }
-            #[cfg(feature = "edge")]
-            qql_edge::local_executor(data_dir, on_disk)
-                .map_err(|e| format!("edge init failed: {e}"))?
-        }
-
-        "http" => {
-            let url = embed_url.ok_or(
-                "HTTP embedder requires --embed-url (e.g. http://localhost:11434/v1/embeddings)",
-            )?;
-            qql_edge::http_executor(data_dir, on_disk, url, embed_key, embed_model, embed_dim)
-                .map_err(|e| format!("edge init failed: {e}"))?
-        }
-
-        other => {
-            return Err(format!("unknown embedder '{}': use 'fastembed' or 'http'", other).into())
-        }
-    };
-
-    let report = exec
-        .execute(query, qql::executor::OnError::Stop)
-        .await
-        .map_err(|e| format!("edge query failed: {e}"))?;
-
-    if json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
-    } else {
-        crate::table::render_report(&report, false)?;
-    }
-
-    Ok(())
 }

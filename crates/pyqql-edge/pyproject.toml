@@ -6,7 +6,29 @@ build-backend = "maturin"
 name = "pyqql-edge"
 version = "0.1.0"
 requires-python = ">=3.8"
-description = "QQL parser — Qdrant Query Language native parser via Rust"
+description = "Local QQL execution for Python with qdrant-edge and FastEmbed"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Srimon Danguria", email = "srimon12mckv@gmail.com" },
+]
+keywords = ["qql", "qdrant", "vector-search", "embeddings", "edge"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/srimon12/qql-rs"
+Repository = "https://github.com/srimon12/qql-rs"
+Issues = "https://github.com/srimon12/qql-rs/issues"
+Documentation = "https://github.com/srimon12/qql-rs/tree/main/crates/pyqql-edge"
+
 [tool.maturin]
+bindings = "pyo3"
 module-name = "pyqql_edge.pyqql_edge"
+strip = true
+exclude = ["pyqql_edge/**/__pycache__", "pyqql_edge/**/*.pyc"]

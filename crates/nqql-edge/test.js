@@ -313,13 +313,13 @@ console.log("  ✓ Client.compile");
   assertFails(r, "uuid");
   console.log("  ✓ DELETE non-UUID string id rejected");
 
-  // 5c. A single dense vector can be inferred even when the collection is hybrid.
+  // 5c. Hybrid topology is ambiguous: callers must select dense or sparse.
   r = await exec.execute(
     "QUERY 'anything' FROM nqql_test LIMIT 1",
     { onError: "continue" },
   );
-  assert.strictEqual(r.ok, true, JSON.stringify(r));
-  console.log("  ✓ QUERY infers the only dense vector on HYBRID");
+  assertFails(r, "ambiguous vector topology");
+  console.log("  ✓ QUERY requires USING for ambiguous HYBRID topology");
 
   // 5d. Implicit embedding follows the collection's dense-only topology.
   {

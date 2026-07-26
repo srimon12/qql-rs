@@ -33,10 +33,10 @@ fn sanitize_schema(value: &mut serde_json::Value) {
 fn main() {
     // ── OpenAPI types (REST) ──────────────────────────────────────
 
-    println!("cargo:rerun-if-changed=../../openapi.json");
+    println!("cargo:rerun-if-changed=openapi.json");
     println!("cargo:rerun-if-changed=build.rs");
 
-    let content = fs::read_to_string("../../openapi.json").expect("Failed to read openapi.json");
+    let content = fs::read_to_string("openapi.json").expect("Failed to read openapi.json");
     let mut openapi: serde_json::Value =
         serde_json::from_str(&content).expect("Invalid OpenAPI JSON");
 
@@ -128,6 +128,10 @@ fn main() {
     {
         let proto_dir = Path::new("proto");
         println!("cargo:rerun-if-changed=proto/");
+
+        let protoc = protoc_bin_vendored::protoc_bin_path()
+            .expect("failed to locate the vendored protoc binary");
+        env::set_var("PROTOC", protoc);
 
         tonic_prost_build::configure()
             .build_server(false)

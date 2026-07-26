@@ -2,6 +2,16 @@
 name = "qql"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "QQL runtime and executor for Qdrant REST and gRPC"
+documentation = "https://docs.rs/qql"
+readme = "README.md"
+keywords = ["qql", "qdrant", "vector-search", "query-language", "database"]
+categories = ["database", "api-bindings"]
 
 [features]
 default = ["grpc", "rest"]
@@ -9,9 +19,9 @@ grpc = ["dep:tonic", "dep:tonic-prost", "dep:prost", "dep:prost-types", "tokio/r
 rest = ["dep:reqwest", "tokio/rt"]
 
 [dependencies]
-qql-core = { path = "../qql-core", features = ["serde", "std"] }
-qql-plan = { path = "../qql-plan" }
-qql-embed = { path = "../qql-embed" }
+qql-core = { version = "0.1.0", path = "../qql-core", features = ["serde", "std"] }
+qql-plan = { version = "0.1.0", path = "../qql-plan" }
+qql-embed = { version = "0.1.0", path = "../qql-embed" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
@@ -32,6 +42,7 @@ schemars = "0.8"
 prettyplease = "0.2"
 syn = "2"
 tonic-prost-build = "0.14"
+protoc-bin-vendored = "3"
 
 [dev-dependencies]
 jsonschema = "0.26"
