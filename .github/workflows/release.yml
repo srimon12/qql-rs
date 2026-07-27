@@ -527,7 +527,7 @@ jobs:
               echo "${spec} is already published; skipping."
               return 0
             fi
-            npm publish "$package" --access public --provenance --ignore-scripts
+            npm publish "./$package" --access public --provenance --ignore-scripts
           }
 
           shopt -s nullglob
@@ -581,7 +581,7 @@ jobs:
           if npm view "$spec" version >/dev/null 2>&1; then
             echo "${spec} is already published; skipping."
           else
-            npm publish "$package" --access public --provenance --ignore-scripts
+            npm publish "./$package" --access public --provenance --ignore-scripts
           fi
 
   github-release:
