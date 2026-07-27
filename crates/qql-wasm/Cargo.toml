@@ -13,6 +13,9 @@ keywords = ["qql", "qdrant", "wasm", "vector-search", "query-language"]
 categories = ["wasm", "database"]
 publish = false
 
+[package.metadata.wasm-pack]
+scope = "veristamp"
+
 [package.metadata.wasm-pack.profile.dev]
 wasm-opt = false
 

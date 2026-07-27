@@ -10,7 +10,7 @@ the corresponding Git tag is `v0.1.1`. The QQL language specification version
 |---|---|
 | crates.io | `qql-core`, `qql-plan`, `qql-embed`, `qql`, `qql-edge`, `qql-cli` |
 | PyPI | `pyqql`, `pyqql-edge` |
-| npm | `nqql`, `nqql-edge`, `qql-wasm` |
+| npm | `@veristamp/nqql`, `@veristamp/nqql-edge`, `@veristamp/qql-wasm` |
 | GitHub Releases | Default REST/gRPC `qql` CLI archives and checksums |
 
 `qql-conformance`, `qql-grammar-gen`, and the Rust implementation crates for
@@ -59,16 +59,16 @@ The npm account must own the root package names and every generated platform
 package name:
 
 ```text
-nqql
-nqql-linux-x64-gnu
-nqql-darwin-x64
-nqql-darwin-arm64
-nqql-win32-x64-msvc
-nqql-edge
-nqql-edge-linux-x64-gnu
-nqql-edge-darwin-arm64
-nqql-edge-win32-x64-msvc
-qql-wasm
+@veristamp/nqql
+@veristamp/nqql-linux-x64-gnu
+@veristamp/nqql-darwin-x64
+@veristamp/nqql-darwin-arm64
+@veristamp/nqql-win32-x64-msvc
+@veristamp/nqql-edge
+@veristamp/nqql-edge-linux-x64-gnu
+@veristamp/nqql-edge-darwin-arm64
+@veristamp/nqql-edge-win32-x64-msvc
+@veristamp/qql-wasm
 ```
 
 Do not create the first tag until all package names and publishing identities
@@ -177,9 +177,9 @@ cargo install qql-cli@0.1.1 --locked
 python -m pip install pyqql==0.1.1
 python -m pip install pyqql-edge==0.1.1
 
-npm view nqql@0.1.1
-npm view nqql-edge@0.1.1
-npm view qql-wasm@0.1.1
+npm view @veristamp/nqql@0.1.1
+npm view @veristamp/nqql-edge@0.1.1
+npm view @veristamp/qql-wasm@0.1.1
 ```
 
 Install the CLI archive on at least one platform and verify

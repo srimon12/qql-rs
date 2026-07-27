@@ -5,7 +5,7 @@ WASM bindings for browser and edge (Cloudflare Workers, Vercel Edge, Deno, Bun).
 ## Install
 
 ```bash
-npm install qql-wasm
+npm install @veristamp/qql-wasm
 ```
 
 ## Wasm Initialization
@@ -13,7 +13,7 @@ npm install qql-wasm
 All functions require calling `init()` first. The WASM binary must be served alongside your application.
 
 ```js
-import init from 'qql-wasm';
+import init from '@veristamp/qql-wasm';
 await init();
 ```
 
@@ -24,7 +24,7 @@ await init();
 The `Client` constructor takes separate `url` and `api_key` arguments (not an options object):
 
 ```js
-import init, { Client } from 'qql-wasm';
+import init, { Client } from '@veristamp/qql-wasm';
 await init();
 
 // Minimal -- defaults to http://localhost:6333
@@ -123,7 +123,7 @@ const stmtResult = await client.executeStmt(stmt);
 The `Stmt` class wraps a parsed AST. Manipulate it before execution.
 
 ```js
-import init, { Stmt } from 'qql-wasm';
+import init, { Stmt } from '@veristamp/qql-wasm';
 await init();
 
 // Parse into a Stmt object
@@ -148,7 +148,7 @@ const obj = stmt.toObject();
 Validate and inject filters in the browser -- no server round-trip needed.
 
 ```js
-import init, { parse, isValid, inject_filter } from 'qql-wasm';
+import init, { parse, isValid, inject_filter } from '@veristamp/qql-wasm';
 await init();
 
 // Validate user input instantly
@@ -169,7 +169,7 @@ Note: `inject_filter` does not support `!=`. Use equality and wrap with `NOT`, o
 Lower QQL to a typed REST route object without a Qdrant connection.
 
 ```js
-import init, { compile, parse } from 'qql-wasm';
+import init, { compile, parse } from '@veristamp/qql-wasm';
 await init();
 
 const route = compile("QUERY 'search' FROM docs USING dense LIMIT 10");
@@ -191,7 +191,7 @@ for (const stmt of parse(`
 The `analyze()` function returns a comprehensive result with tokens, AST, route, and explanation in one call:
 
 ```js
-import init, { analyze } from 'qql-wasm';
+import init, { analyze } from '@veristamp/qql-wasm';
 await init();
 
 const result = analyze("QUERY 'search' FROM docs USING dense LIMIT 10");
@@ -204,7 +204,7 @@ const result = analyze("QUERY 'search' FROM docs USING dense LIMIT 10");
 
 ```js
 import init, { parse, isValid, inject_filter,
-              tokenize, compile, explain } from 'qql-wasm';
+              tokenize, compile, explain } from '@veristamp/qql-wasm';
 await init();
 
 parse("QUERY 'x' FROM docs LIMIT 5");                  // Always returns an array

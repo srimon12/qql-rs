@@ -250,14 +250,14 @@ let res = exec.execute(
 
 ### Node.js (`nqql`)
 ```js
-const { Client } = require('nqql');
+const { Client } = require('@veristamp/nqql');
 const client = new Client({ url: "http://localhost:6333" });
 const result = await client.execute("QUERY 'search' FROM docs USING dense LIMIT 5");
 ```
 
 ### WebAssembly (`qql-wasm`)
 ```js
-import init, { Client } from 'qql-wasm';
+import init, { Client } from '@veristamp/qql-wasm';
 await init();
 const client = new Client("http://localhost:6333", null);
 const result = await client.execute("QUERY 'search' FROM docs USING dense LIMIT 5");
