@@ -269,7 +269,7 @@ const result = await client.execute("QUERY 'search' FROM docs USING dense LIMIT 
 
 ### WebAssembly (`qql-wasm`)
 ```js
-import init, { Client } from '@veristamp/qql-wasm';
+import init, { Client } from 'qql-wasm';
 await init();
 const client = new Client("http://localhost:6333", null);
 const result = await client.execute("QUERY 'search' FROM docs USING dense LIMIT 5");

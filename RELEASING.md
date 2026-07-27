@@ -10,7 +10,7 @@ the corresponding Git tag is `v0.1.2`. The QQL language specification version
 |---|---|
 | crates.io | `qql-core`, `qql-plan`, `qql-embed`, `qql`, `qql-edge`, `qql-cli` |
 | PyPI | `pyqql`, `pyqql-edge` |
-| npm | `@veristamp/nqql`, `@veristamp/nqql-edge`, `@veristamp/qql-wasm` |
+| npm | `@veristamp/nqql`, `@veristamp/nqql-edge`, `qql-wasm` |
 | GitHub Releases | Default REST/gRPC `qql` CLI archives and checksums |
 
 `qql-conformance`, `qql-grammar-gen`, and the Rust implementation crates for
@@ -68,7 +68,7 @@ package name:
 @veristamp/nqql-edge-linux-x64-gnu
 @veristamp/nqql-edge-darwin-arm64
 @veristamp/nqql-edge-win32-x64-msvc
-@veristamp/qql-wasm
+qql-wasm
 ```
 
 Do not create the first tag until all package names and publishing identities
@@ -179,7 +179,7 @@ python -m pip install pyqql-edge==0.1.2
 
 npm view @veristamp/nqql@0.1.2
 npm view @veristamp/nqql-edge@0.1.2
-npm view @veristamp/qql-wasm@0.1.2
+npm view qql-wasm@0.1.2
 ```
 
 Install the CLI archive on at least one platform and verify

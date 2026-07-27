@@ -179,7 +179,7 @@ nqql.injectFilter(stmt, "group_id", "=", "org_99");
 
 ### WebAssembly (`qql-wasm`)
 ```javascript
-import init, { parse, inject_filter } from '@veristamp/qql-wasm';
+import init, { parse, inject_filter } from 'qql-wasm';
 
 await init();
 let stmt = parse("QUERY 'laptops' FROM products LIMIT 10");
