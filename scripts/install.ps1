@@ -1,5 +1,5 @@
 # QQL CLI Installer Script for Windows PowerShell
-# Usage: iwr -useb https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.ps1 | iex
+# Usage: irm https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 

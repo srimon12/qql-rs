@@ -29,7 +29,7 @@
 curl -fsSL https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.sh | sh
 
 # Windows (PowerShell)
-iwr -useb https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.ps1 | iex
 ```
 
 #### 📦 Language SDKs
@@ -46,6 +46,12 @@ npm install @veristamp/qql-wasm
 
 # Rust
 cargo add qql qql-core
+```
+
+#### 🤖 AI Agent Skill (Cursor, Claude Code, codex etc)
+
+```bash
+npx skills add srimon12/qql-rs --skill qql-skill
 ```
 
 ---
