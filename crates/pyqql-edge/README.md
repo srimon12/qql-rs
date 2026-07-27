@@ -32,6 +32,10 @@ result = exec.execute("QUERY 'hello' FROM docs USING dense LIMIT 10", on_error="
 `execute()` and `execute_async()` return the same `ExecutionReport` dict as
 `pyqql`: `ok`, ordered `results`, `succeeded`, and `failed`.
 
+Prebuilt wheels are provided for Linux x64, Windows x64, and Apple Silicon
+macOS. ONNX Runtime does not provide the required macOS Intel artifact, so
+`pyqql-edge` does not publish a Darwin x64 wheel.
+
 ## Edge gotchas
 
 | Gotcha | Reality |

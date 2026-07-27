@@ -1,8 +1,7 @@
 name: CI
 
 on:
-  push:
-    branches: [dev]
+  workflow_dispatch:
   pull_request:
     branches: [main, dev]
 
@@ -18,22 +17,11 @@ env:
   PYO3_USE_ABI3_FORWARD_COMPATIBILITY: 1
 
 jobs:
-  branch-policy:
-    name: Branch policy
-    if: ${{ github.event_name == 'pull_request' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Require dev as the source branch for main
-        if: ${{ github.base_ref == 'main' && github.head_ref != 'dev' }}
-        run: |
-          echo "Pull requests into main must come from the dev branch."
-          exit 1
-
   rust:
     name: Rust
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -52,7 +40,7 @@ jobs:
     name: Conformance
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -70,9 +58,9 @@ jobs:
     name: Python bindings
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Build and test Python SDKs
@@ -89,7 +77,7 @@ jobs:
       matrix:
         package: [nqql, nqql-edge]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-node@v7
         with:
@@ -105,14 +93,14 @@ jobs:
     name: WASM and playground
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
       - uses: actions/setup-node@v7
         with:
           node-version: '22.13.1'
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.13.1
       - name: Install wasm-pack
@@ -181,41 +169,3 @@ jobs:
         run: |
           pnpm --dir wasm-demo install --frozen-lockfile
           pnpm --dir wasm-demo build
-
-  # ─────────────────────────────────────────────────────────────
-  #  Platform binding release jobs — uncomment when publishing
-  #  paths (maturin / napi-rs / wasm-pack) are ready.
-  # ─────────────────────────────────────────────────────────────
-
-  # pyqql-release:
-  #   needs: [rust]
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v5
-  #     - uses: dtolnay/rust-toolchain@stable
-  #     - uses: actions/setup-python@v5
-  #       with: { python-version: '3.12' }
-  #     - name: Build wheel
-  #       run: pip install maturin && maturin build -m crates/pyqql/Cargo.toml --release
-
-  # nqql-release:
-  #   needs: [rust]
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v5
-  #     - uses: dtolnay/rust-toolchain@stable
-  #     - uses: actions/setup-node@v7
-  #       with: { node-version: '20' }
-  #     - name: Build npm package
-  #       run: cd crates/nqql && npm install && npm run build
-
-  # wasm-release:
-  #   needs: [rust]
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v5
-  #     - uses: dtolnay/rust-toolchain@stable
-  #     - name: Install wasm target
-  #       run: rustup target add wasm32-unknown-unknown
-  #     - name: Build WASM
-  #       run: cargo build -p qql-wasm --target wasm32-unknown-unknown --release
