@@ -535,12 +535,23 @@ float = @{
 }
 exponent = @{ (^"e" | ^"E") ~ ("+" | "-")? ~ ASCII_DIGIT+ }
 
-string = _{ single_quoted_string | double_quoted_string }
+string = _{ triple_quoted_string | raw_string | backtick_string | single_quoted_string | double_quoted_string }
+triple_quoted_string = @{
+    ("'''" ~ (!"'''" ~ ANY)* ~ "'''")
+    | ("\"\"\"" ~ (!"\"\"\"" ~ ANY)* ~ "\"\"\"")
+}
+raw_string = @{
+    ("r'" ~ (!"'" ~ ANY)* ~ "'")
+    | ("r\"" ~ (!"\"" ~ ANY)* ~ "\"")
+}
+backtick_string = @{
+    "`" ~ (!"`" ~ ANY)* ~ "`"
+}
 single_quoted_string = @{
     "'"
     ~ (
         "''"
-        | "\\" ~ ("\\" | "'" | "\"" | "n" | "r" | "t")
+        | "\\" ~ ("\\" | "'" | "\"" | "n" | "r" | "t" | "$")
         | !("'" | "\\") ~ ANY
     )*
     ~ "'"
@@ -548,7 +559,7 @@ single_quoted_string = @{
 double_quoted_string = @{
     "\""
     ~ (
-        "\\" ~ ("\\" | "'" | "\"" | "n" | "r" | "t")
+        "\\" ~ ("\\" | "'" | "\"" | "n" | "r" | "t" | "$")
         | !("\"" | "\\") ~ ANY
     )*
     ~ "\""

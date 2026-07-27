@@ -374,6 +374,7 @@ impl<'a> AstLowerer<'a> {
                 '\\' => '\\',
                 '\'' => '\'',
                 '"' => '"',
+                '$' => '$',
                 _ => {
                     return Err(QqlError::parse(
                         "QQL-PARSE-ESCAPE",
