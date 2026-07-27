@@ -1,7 +1,7 @@
 # QQL release procedure
 
-All public packages use one repository version. The first release is `0.1.0`;
-the corresponding Git tag is `v0.1.0`. The QQL language specification version
+All public packages use one repository version. The current release is `0.1.1`;
+the corresponding Git tag is `v0.1.1`. The QQL language specification version
 (`1.0`) is independent from the package release version.
 
 ## Published artifacts
@@ -11,7 +11,7 @@ the corresponding Git tag is `v0.1.0`. The QQL language specification version
 | crates.io | `qql-core`, `qql-plan`, `qql-embed`, `qql`, `qql-edge`, `qql-cli` |
 | PyPI | `pyqql`, `pyqql-edge` |
 | npm | `nqql`, `nqql-edge`, `qql-wasm` |
-| GitHub Releases | Full-featured `qql` CLI archives and checksums |
+| GitHub Releases | Default REST/gRPC `qql` CLI archives and checksums |
 
 `qql-conformance`, `qql-grammar-gen`, and the Rust implementation crates for
 Python, Node.js, and WASM set `publish = false` and must never be sent to
@@ -40,9 +40,9 @@ The first npm release needs a short-lived granular access token because npm
 trusted publishing can only be attached after a package exists. Create a token
 with package read/write access, permission to bypass 2FA for CI, and the
 shortest practical expiration. Store it in the `release` GitHub environment.
-After `0.1.0` creates every root and platform package, configure npm trusted
-publishing for `srimon12/qql-rs`, workflow `release.yml`, environment
-`release`, then remove `NPM_TOKEN`.
+After the first successful npm release creates every root and platform package,
+configure npm trusted publishing for `srimon12/qql-rs`, workflow `release.yml`,
+environment `release`, then remove `NPM_TOKEN`.
 
 Configure PyPI trusted publishers for both `pyqql` and `pyqql-edge`:
 
@@ -66,7 +66,6 @@ nqql-darwin-arm64
 nqql-win32-x64-msvc
 nqql-edge
 nqql-edge-linux-x64-gnu
-nqql-edge-darwin-x64
 nqql-edge-darwin-arm64
 nqql-edge-win32-x64-msvc
 qql-wasm
@@ -106,7 +105,7 @@ server-side branch rules are therefore mandatory.
 5. Validate synchronized metadata:
 
    ```bash
-   python3 scripts/check_release.py --version 0.1.0
+   python3 scripts/check_release.py --version 0.1.1
    ```
 
 6. Open a pull request into `dev` and let CI pass.
@@ -132,14 +131,14 @@ Install the artifacts in clean temporary projects before approving the release.
    ```bash
    git switch main
    git pull --ff-only origin main
-   python3 scripts/check_release.py --version 0.1.0
+   python3 scripts/check_release.py --version 0.1.1
    ```
 
 4. Create an annotated tag on that exact commit:
 
    ```bash
-   git tag -a v0.1.0 -m "QQL 0.1.0"
-   git push origin v0.1.0
+   git tag -a v0.1.1 -m "QQL 0.1.1"
+   git push origin v0.1.1
    ```
 
 Only the tag push can publish. The release gate verifies that:
@@ -170,17 +169,17 @@ are published before their root dispatcher packages.
 After the workflow succeeds:
 
 ```bash
-cargo info qql-core@0.1.0
-cargo info qql@0.1.0
-cargo info qql-edge@0.1.0
-cargo install qql-cli@0.1.0 --locked
+cargo info --registry crates-io qql-core@0.1.1
+cargo info --registry crates-io qql@0.1.1
+cargo info --registry crates-io qql-edge@0.1.1
+cargo install qql-cli@0.1.1 --locked
 
-python -m pip install pyqql==0.1.0
-python -m pip install pyqql-edge==0.1.0
+python -m pip install pyqql==0.1.1
+python -m pip install pyqql-edge==0.1.1
 
-npm view nqql@0.1.0
-npm view nqql-edge@0.1.0
-npm view qql-wasm@0.1.0
+npm view nqql@0.1.1
+npm view nqql-edge@0.1.1
+npm view qql-wasm@0.1.1
 ```
 
 Install the CLI archive on at least one platform and verify
