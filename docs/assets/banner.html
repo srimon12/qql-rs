@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>QQL Banner</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Mona+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0a0c12;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: "Mona Sans", system-ui, sans-serif;
+    }
+
+    .banner {
+      position: relative;
+      width: 1200px;
+      height: 420px;
+      overflow: hidden;
+      background:
+        radial-gradient(ellipse 70% 90% at 12% 50%, rgba(220, 36, 76, 0.18) 0%, transparent 55%),
+        radial-gradient(ellipse 50% 80% at 88% 40%, rgba(96, 71, 255, 0.16) 0%, transparent 50%),
+        radial-gradient(ellipse 40% 50% at 55% 100%, rgba(220, 36, 76, 0.08) 0%, transparent 50%),
+        linear-gradient(160deg, #0b0f19 0%, #10152a 45%, #0b0f19 100%);
+      color: #ffffff;
+      border-radius: 0;
+    }
+
+    /* subtle grid */
+    .banner::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: radial-gradient(ellipse 80% 70% at 50% 50%, #000 20%, transparent 80%);
+      pointer-events: none;
+    }
+
+    /* constellation / vector nodes */
+    .nodes {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.55;
+    }
+
+    .content {
+      position: relative;
+      z-index: 2;
+      height: 100%;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      padding: 48px 64px;
+      gap: 32px;
+    }
+
+    .left {
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      max-width: 720px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      width: fit-content;
+      padding: 6px 12px 6px 8px;
+      border-radius: 999px;
+      background: rgba(220, 36, 76, 0.12);
+      border: 1px solid rgba(220, 36, 76, 0.35);
+      color: #ff6b8a;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #dc244c;
+      box-shadow: 0 0 10px rgba(220, 36, 76, 0.8);
+    }
+
+    .title-row {
+      display: flex;
+      align-items: center;
+      gap: 22px;
+    }
+
+    .qdrant-mark {
+      width: 72px;
+      height: 84px;
+      flex-shrink: 0;
+      filter: drop-shadow(0 8px 24px rgba(220, 36, 76, 0.35));
+    }
+
+    .wordmark {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .wordmark h1 {
+      font-size: 92px;
+      font-weight: 800;
+      line-height: 0.92;
+      letter-spacing: -0.04em;
+      background: linear-gradient(135deg, #ffffff 0%, #f0f3fa 40%, #c8b8ff 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+
+    .wordmark .sub {
+      font-size: 18px;
+      font-weight: 500;
+      color: rgba(240, 243, 250, 0.72);
+      letter-spacing: 0.02em;
+    }
+
+    .tagline {
+      font-size: 22px;
+      font-weight: 500;
+      line-height: 1.35;
+      color: rgba(255, 255, 255, 0.88);
+      max-width: 560px;
+    }
+
+    .tagline strong {
+      color: #ffffff;
+      font-weight: 700;
+    }
+
+    .tagline .accent {
+      color: #dc244c;
+      font-weight: 700;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 4px;
+    }
+
+    .chip {
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+      color: rgba(255, 255, 255, 0.78);
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      padding: 7px 12px;
+    }
+
+    .chip.blue {
+      color: #b8adff;
+      border-color: rgba(96, 71, 255, 0.4);
+      background: rgba(96, 71, 255, 0.12);
+    }
+
+    .chip.red {
+      color: #ff8aa3;
+      border-color: rgba(220, 36, 76, 0.35);
+      background: rgba(220, 36, 76, 0.1);
+    }
+
+    .code-card {
+      width: 360px;
+      background: rgba(11, 15, 25, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 16px;
+      box-shadow:
+        0 20px 50px rgba(0, 0, 0, 0.45),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      backdrop-filter: blur(12px);
+      overflow: hidden;
+    }
+
+    .code-card .bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 12px 14px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .code-card .bar span {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.15);
+    }
+
+    .code-card .bar span:nth-child(1) { background: #dc244c; }
+    .code-card .bar span:nth-child(2) { background: #f5a524; }
+    .code-card .bar span:nth-child(3) { background: #3dd68c; }
+
+    .code-card .bar .label {
+      margin-left: auto;
+      width: auto;
+      height: auto;
+      border-radius: 0;
+      background: none;
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.4);
+      letter-spacing: 0.04em;
+    }
+
+    .code-card pre {
+      padding: 18px 18px 20px;
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: 13.5px;
+      line-height: 1.55;
+      color: #d7dce8;
+      white-space: pre-wrap;
+    }
+
+    .kw { color: #ff6b8a; font-weight: 600; }
+    .str { color: #8bdcff; }
+    .id { color: #c8b8ff; }
+    .num { color: #f5c26b; }
+    .op { color: rgba(255, 255, 255, 0.45); }
+
+    .glow-ring {
+      position: absolute;
+      right: -80px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 420px;
+      height: 420px;
+      border-radius: 50%;
+      border: 1px solid rgba(96, 71, 255, 0.15);
+      box-shadow:
+        0 0 80px rgba(96, 71, 255, 0.08),
+        inset 0 0 60px rgba(220, 36, 76, 0.05);
+      pointer-events: none;
+    }
+
+    .glow-ring::after {
+      content: "";
+      position: absolute;
+      inset: 48px;
+      border-radius: 50%;
+      border: 1px solid rgba(220, 36, 76, 0.12);
+    }
+
+    .footer-line {
+      position: absolute;
+      left: 64px;
+      right: 64px;
+      bottom: 0;
+      height: 3px;
+      background: linear-gradient(90deg, #dc244c 0%, #6047ff 55%, transparent 100%);
+      opacity: 0.9;
+    }
+  </style>
+</head>
+<body>
+  <div class="banner" id="banner">
+    <svg class="nodes" viewBox="0 0 1200 420" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <linearGradient id="line" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="#dc244c" stop-opacity="0.0"/>
+          <stop offset="40%" stop-color="#dc244c" stop-opacity="0.45"/>
+          <stop offset="100%" stop-color="#6047ff" stop-opacity="0.35"/>
+        </linearGradient>
+      </defs>
+      <!-- vector graph lines -->
+      <g stroke="url(#line)" stroke-width="1.2" fill="none">
+        <path d="M80 90 L180 140 L260 80 L360 160 L480 100"/>
+        <path d="M200 300 L320 250 L420 310 L540 240 L680 290"/>
+        <path d="M980 80 L1080 140 L1140 90"/>
+        <path d="M900 320 L1000 280 L1100 340"/>
+        <path d="M70 220 L150 250 L230 210"/>
+      </g>
+      <!-- nodes -->
+      <g fill="#dc244c">
+        <circle cx="80" cy="90" r="3.5" opacity="0.8"/>
+        <circle cx="180" cy="140" r="4.5" opacity="0.9"/>
+        <circle cx="260" cy="80" r="3" opacity="0.7"/>
+        <circle cx="360" cy="160" r="5" opacity="1"/>
+        <circle cx="480" cy="100" r="3.5" opacity="0.75"/>
+        <circle cx="200" cy="300" r="3" opacity="0.7"/>
+        <circle cx="320" cy="250" r="4" opacity="0.85"/>
+        <circle cx="420" cy="310" r="3.5" opacity="0.8"/>
+        <circle cx="540" cy="240" r="4.5" opacity="0.9"/>
+        <circle cx="680" cy="290" r="3" opacity="0.65"/>
+      </g>
+      <g fill="#6047ff">
+        <circle cx="980" cy="80" r="3.5" opacity="0.75"/>
+        <circle cx="1080" cy="140" r="4" opacity="0.85"/>
+        <circle cx="1140" cy="90" r="3" opacity="0.7"/>
+        <circle cx="900" cy="320" r="3.5" opacity="0.75"/>
+        <circle cx="1000" cy="280" r="4.5" opacity="0.9"/>
+        <circle cx="1100" cy="340" r="3" opacity="0.7"/>
+        <circle cx="70" cy="220" r="3" opacity="0.65"/>
+        <circle cx="150" cy="250" r="3.5" opacity="0.75"/>
+        <circle cx="230" cy="210" r="3" opacity="0.7"/>
+      </g>
+    </svg>
+
+    <div class="glow-ring"></div>
+
+    <div class="content">
+      <div class="left">
+        <div class="eyebrow">
+          <span class="dot"></span>
+          Declarative Vector Search
+        </div>
+
+        <div class="title-row">
+          <img
+            class="qdrant-mark"
+            src="qdrant-brandmark-red.svg"
+            alt="Qdrant"
+            width="72"
+            height="84"
+          />
+          <div class="wordmark">
+            <h1>QQL</h1>
+            <div class="sub">Query Language for Qdrant</div>
+          </div>
+        </div>
+
+        <p class="tagline">
+          <strong>QQL is to <span class="accent">Qdrant</span></strong>
+          what SQL is to Postgres.
+        </p>
+
+        <div class="meta">
+          <span class="chip red">QUERY · UPSERT · FILTER</span>
+          <span class="chip blue">Rust · Python · Node · WASM</span>
+          <span class="chip">REST + gRPC + Edge</span>
+        </div>
+      </div>
+
+      <div class="code-card" aria-hidden="true">
+        <div class="bar">
+          <span></span><span></span><span></span>
+          <div class="label">search.qql</div>
+        </div>
+        <pre><span class="kw">QUERY</span> <span class="str">'chest pain'</span>
+  <span class="kw">FROM</span> <span class="id">medical</span>
+  <span class="kw">USING DENSE MODEL</span> <span class="str">'nomic'</span>
+  <span class="kw">ON FIELD</span> <span class="id">title</span>
+  <span class="kw">INTO</span> <span class="id">title_vec</span>
+  <span class="kw">LIMIT</span> <span class="num">5</span>
+  <span class="kw">WHERE</span> <span class="id">department</span> <span class="op">=</span> <span class="str">'cardio'</span><span class="op">;</span></pre>
+      </div>
+    </div>
+
+    <div class="footer-line"></div>
+  </div>
+</body>
+</html>
