@@ -15,13 +15,9 @@ use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 /// The error code is `QQL-GRPC` and the message includes the original status
 /// message. The gRPC status code is attached via `.with_field("grpc_code", ...)`.
 fn grpc_error(operation: &str, status: tonic::Status) -> QqlError {
-    QqlError::backend(
-        "QQL-GRPC",
-        format!("{operation}: {status}"),
-        None,
-    )
-    .with_field("grpc_code", format!("{}", status.code() as i32))
-    .with_field("operation", operation.to_string())
+    QqlError::backend("QQL-GRPC", format!("{operation}: {status}"), None)
+        .with_field("grpc_code", format!("{}", status.code() as i32))
+        .with_field("operation", operation.to_string())
 }
 
 pub struct GrpcQdrant {
@@ -393,16 +389,14 @@ impl QdrantOps for GrpcQdrant {
 
     async fn get_collection_info(&self, name: &str) -> Result<CollectionInfo, QqlError> {
         let resp = self.collection_info_raw(name.to_string()).await?;
-        let info = resp
-            .result
-            .ok_or_else(|| {
-                QqlError::backend(
-                    "QQL-GRPC-NO-RESULT",
-                    "collection_info response missing result field",
-                    None,
-                )
-                .with_collection(name.to_string())
-            })?;
+        let info = resp.result.ok_or_else(|| {
+            QqlError::backend(
+                "QQL-GRPC-NO-RESULT",
+                "collection_info response missing result field",
+                None,
+            )
+            .with_collection(name.to_string())
+        })?;
 
         Ok(CollectionInfo {
             status: info.status.to_string(),

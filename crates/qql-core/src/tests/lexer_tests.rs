@@ -45,11 +45,17 @@ fn strings_with_escapes() {
 fn raw_and_triple_quoted_and_backtick_strings() {
     let t = tokens(r"r'QUERY $QUERY_TEXT FROM docs USING dense LIMIT $LIMIT;'");
     assert_eq!(t[0].0, TokenKind::String);
-    assert_eq!(t[0].1, r"QUERY $QUERY_TEXT FROM docs USING dense LIMIT $LIMIT;");
+    assert_eq!(
+        t[0].1,
+        r"QUERY $QUERY_TEXT FROM docs USING dense LIMIT $LIMIT;"
+    );
 
     let t = tokens("'''QUERY '$QUERY_TEXT'\nFROM berlin_airbnb\nLIMIT $LIMIT;'''");
     assert_eq!(t[0].0, TokenKind::String);
-    assert_eq!(t[0].1, "QUERY '$QUERY_TEXT'\nFROM berlin_airbnb\nLIMIT $LIMIT;");
+    assert_eq!(
+        t[0].1,
+        "QUERY '$QUERY_TEXT'\nFROM berlin_airbnb\nLIMIT $LIMIT;"
+    );
 
     let t = tokens("`QUERY '$QUERY_TEXT'`");
     assert_eq!(t[0].0, TokenKind::String);

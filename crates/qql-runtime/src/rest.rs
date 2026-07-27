@@ -371,20 +371,12 @@ impl RestQdrant {
             builder = builder.json(body);
         }
         let resp = builder.send().await.map_err(|e| {
-            QqlError::transport(
-                "QQL-TRANSPORT",
-                format!("REST request failed: {e}"),
-                None,
-            )
-            .with_url(url.clone())
+            QqlError::transport("QQL-TRANSPORT", format!("REST request failed: {e}"), None)
+                .with_url(url.clone())
         })?;
         let status = resp.status();
         let text = resp.text().await.map_err(|e| {
-            QqlError::transport(
-                "QQL-TRANSPORT",
-                format!("REST body read failed: {e}"),
-                None,
-            )
+            QqlError::transport("QQL-TRANSPORT", format!("REST body read failed: {e}"), None)
         })?;
         if !status.is_success() {
             return Err(QqlError::backend(

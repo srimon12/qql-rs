@@ -288,16 +288,18 @@ fn parse_upsert_on_field_and_multi_spec() {
         "UPSERT INTO docs VALUES {id: 1, text: 'hello', title: 'world'} USING DENSE MODEL 'nomic' ON FIELD title INTO title_vec;",
     ).unwrap();
     match stmt {
-        Stmt::Upsert(u) => {
-            match u.embedding.unwrap() {
-                EmbeddingSpec::Dense { model, vector, field } => {
-                    assert_eq!(model.as_deref(), Some("nomic"));
-                    assert_eq!(vector.as_deref(), Some("title_vec"));
-                    assert_eq!(field.as_deref(), Some("title"));
-                }
-                _ => panic!("expected Dense embedding spec"),
+        Stmt::Upsert(u) => match u.embedding.unwrap() {
+            EmbeddingSpec::Dense {
+                model,
+                vector,
+                field,
+            } => {
+                assert_eq!(model.as_deref(), Some("nomic"));
+                assert_eq!(vector.as_deref(), Some("title_vec"));
+                assert_eq!(field.as_deref(), Some("title"));
             }
-        }
+            _ => panic!("expected Dense embedding spec"),
+        },
         _ => panic!("expected Upsert statement"),
     }
 
@@ -305,30 +307,36 @@ fn parse_upsert_on_field_and_multi_spec() {
         "UPSERT INTO docs VALUES {id: 1, text: 'hello', title: 'world'} USING DENSE MODEL 'm1' ON FIELD text INTO dense, DENSE MODEL 'm2' ON FIELD title INTO title_vec;",
     ).unwrap();
     match multi_stmt {
-        Stmt::Upsert(u) => {
-            match u.embedding.unwrap() {
-                EmbeddingSpec::Multi(specs) => {
-                    assert_eq!(specs.len(), 2);
-                    match &specs[0] {
-                        EmbeddingSpec::Dense { model, vector, field } => {
-                            assert_eq!(model.as_deref(), Some("m1"));
-                            assert_eq!(vector.as_deref(), Some("dense"));
-                            assert_eq!(field.as_deref(), Some("text"));
-                        }
-                        _ => panic!("expected Dense spec"),
+        Stmt::Upsert(u) => match u.embedding.unwrap() {
+            EmbeddingSpec::Multi(specs) => {
+                assert_eq!(specs.len(), 2);
+                match &specs[0] {
+                    EmbeddingSpec::Dense {
+                        model,
+                        vector,
+                        field,
+                    } => {
+                        assert_eq!(model.as_deref(), Some("m1"));
+                        assert_eq!(vector.as_deref(), Some("dense"));
+                        assert_eq!(field.as_deref(), Some("text"));
                     }
-                    match &specs[1] {
-                        EmbeddingSpec::Dense { model, vector, field } => {
-                            assert_eq!(model.as_deref(), Some("m2"));
-                            assert_eq!(vector.as_deref(), Some("title_vec"));
-                            assert_eq!(field.as_deref(), Some("title"));
-                        }
-                        _ => panic!("expected Dense spec"),
-                    }
+                    _ => panic!("expected Dense spec"),
                 }
-                _ => panic!("expected Multi embedding spec"),
+                match &specs[1] {
+                    EmbeddingSpec::Dense {
+                        model,
+                        vector,
+                        field,
+                    } => {
+                        assert_eq!(model.as_deref(), Some("m2"));
+                        assert_eq!(vector.as_deref(), Some("title_vec"));
+                        assert_eq!(field.as_deref(), Some("title"));
+                    }
+                    _ => panic!("expected Dense spec"),
+                }
             }
-        }
+            _ => panic!("expected Multi embedding spec"),
+        },
         _ => panic!("expected Upsert statement"),
     }
 }
@@ -341,27 +349,37 @@ fn parse_upsert_with_dollar_and_pattern_strings() {
     let Stmt::Upsert(u) = stmt else { panic!() };
     let (_, val) = &u.points[0].payload[0];
     match val {
-        crate::ast::Value::Str(s) => assert_eq!(s, "QUERY $QUERY_TEXT FROM docs USING dense LIMIT $LIMIT"),
+        crate::ast::Value::Str(s) => {
+            assert_eq!(s, "QUERY $QUERY_TEXT FROM docs USING dense LIMIT $LIMIT")
+        }
         _ => panic!("expected string payload"),
     }
 
     let raw_stmt = Parser::parse(
         r"UPSERT INTO qql_memory VALUES { id: 'abc', pattern_text: r'QUERY $QUERY_TEXT FROM docs USING dense LIMIT $LIMIT' };"
     ).unwrap();
-    let Stmt::Upsert(u_raw) = raw_stmt else { panic!() };
+    let Stmt::Upsert(u_raw) = raw_stmt else {
+        panic!()
+    };
     let (_, val_raw) = &u_raw.points[0].payload[0];
     match val_raw {
-        crate::ast::Value::Str(s) => assert_eq!(s, "QUERY $QUERY_TEXT FROM docs USING dense LIMIT $LIMIT"),
+        crate::ast::Value::Str(s) => {
+            assert_eq!(s, "QUERY $QUERY_TEXT FROM docs USING dense LIMIT $LIMIT")
+        }
         _ => panic!("expected string payload"),
     }
 
     let triple_stmt = Parser::parse(
         "UPSERT INTO qql_memory VALUES { id: 'abc', pattern_text: '''QUERY '$QUERY_TEXT'\nFROM berlin_airbnb\nLIMIT $LIMIT;''' };"
     ).unwrap();
-    let Stmt::Upsert(u_triple) = triple_stmt else { panic!() };
+    let Stmt::Upsert(u_triple) = triple_stmt else {
+        panic!()
+    };
     let (_, val_triple) = &u_triple.points[0].payload[0];
     match val_triple {
-        crate::ast::Value::Str(s) => assert_eq!(s, "QUERY '$QUERY_TEXT'\nFROM berlin_airbnb\nLIMIT $LIMIT;"),
+        crate::ast::Value::Str(s) => {
+            assert_eq!(s, "QUERY '$QUERY_TEXT'\nFROM berlin_airbnb\nLIMIT $LIMIT;")
+        }
         _ => panic!("expected string payload"),
     }
 }

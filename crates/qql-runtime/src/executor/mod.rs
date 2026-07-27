@@ -660,9 +660,15 @@ impl Executor {
 
         if let Stmt::Upsert(u) = &stmt {
             if let Some(ref emb) = u.embedding {
-                fn collect_specs<'a>(
-                    spec: &'a ast::EmbeddingSpec,
-                ) -> Vec<(Option<&'a str>, bool, bool, Option<&'a str>, Option<&'a str>)> {
+                type SpecTuple<'a> = (
+                    Option<&'a str>,
+                    bool,
+                    bool,
+                    Option<&'a str>,
+                    Option<&'a str>,
+                );
+
+                fn collect_specs(spec: &ast::EmbeddingSpec) -> Vec<SpecTuple<'_>> {
                     match spec {
                         ast::EmbeddingSpec::Dense { model, vector, .. } => {
                             vec![(model.as_deref(), true, false, vector.as_deref(), None)]

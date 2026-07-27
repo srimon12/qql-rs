@@ -52,10 +52,7 @@ pub struct ErrorField {
 }
 
 impl ErrorField {
-    pub fn new(
-        key: impl Into<Cow<'static, str>>,
-        value: impl Into<Cow<'static, str>>,
-    ) -> Self {
+    pub fn new(key: impl Into<Cow<'static, str>>, value: impl Into<Cow<'static, str>>) -> Self {
         Self {
             key: key.into(),
             value: value.into(),

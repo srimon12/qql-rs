@@ -472,8 +472,12 @@ async fn test_on_field_explicit_resolution() {
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].1, "title text");
 
-    let Stmt::Upsert(upsert) = &stmt else { panic!("expected Upsert"); };
-    let Some(PointVectors::Named(list)) = &upsert.points[0].vectors else { panic!("expected named vectors"); };
+    let Stmt::Upsert(upsert) = &stmt else {
+        panic!("expected Upsert");
+    };
+    let Some(PointVectors::Named(list)) = &upsert.points[0].vectors else {
+        panic!("expected named vectors");
+    };
     assert!(list.iter().any(|(k, _)| k == "title_vec"));
 }
 
@@ -490,11 +494,12 @@ async fn test_on_field_missing_errors_loudly() {
 
 #[tokio::test]
 async fn test_no_text_field_errors_loudly() {
-    let mut stmt = Parser::parse(
-        "UPSERT INTO docs VALUES {id: 1, score: 99} USING DENSE MODEL 'test-model'",
-    )
-    .unwrap();
+    let mut stmt =
+        Parser::parse("UPSERT INTO docs VALUES {id: 1, score: 99} USING DENSE MODEL 'test-model'")
+            .unwrap();
     let mock = MockEmbedder::default();
     let err = resolve_embeddings(&mut stmt, &mock).await.unwrap_err();
-    assert!(err.message.contains("Expected one of: text, body, content, title, description, name, summary, document"));
+    assert!(err.message.contains(
+        "Expected one of: text, body, content, title, description, name, summary, document"
+    ));
 }

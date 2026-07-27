@@ -127,6 +127,7 @@ impl<'a> AstLowerer<'a> {
         }
     }
 
+    #[allow(clippy::type_complexity)]
     fn parse_embedding_spec_modifiers(
         &mut self,
     ) -> Result<(Option<String>, Option<String>, Option<String>), QqlError> {

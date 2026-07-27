@@ -51,11 +51,7 @@ fn mutation_response() -> Value {
 
 /// Helper: create a spawn_blocking error with the operation name for context.
 fn spawn_error(operation: &str, error: impl std::fmt::Display) -> QqlError {
-    QqlError::execution(
-        "QQL-EDGE-SPAWN",
-        format!("{operation}: {error}"),
-        None,
-    )
+    QqlError::execution("QQL-EDGE-SPAWN", format!("{operation}: {error}"), None)
 }
 
 impl std::fmt::Debug for EdgeQdrant {
@@ -665,7 +661,11 @@ impl EdgeQdrant {
                 }
                 _ => Err(QqlError::execution(
                     "QQL-EDGE-UNSUPPORTED-ROUTE",
-                    format!("unsupported route: {} {}", route.method.as_str(), route.path),
+                    format!(
+                        "unsupported route: {} {}",
+                        route.method.as_str(),
+                        route.path
+                    ),
                     None,
                 )),
             },
@@ -693,17 +693,13 @@ impl QdrantOps for EdgeQdrant {
                     None,
                 )
             })?;
-            while let Some(entry) = dir
-                .next()
-                .transpose()
-                .map_err(|e| {
-                    QqlError::execution(
-                        "QQL-EDGE-DIR-ENTRY",
-                        format!("failed to read directory entry: {e}"),
-                        None,
-                    )
-                })?
-            {
+            while let Some(entry) = dir.next().transpose().map_err(|e| {
+                QqlError::execution(
+                    "QQL-EDGE-DIR-ENTRY",
+                    format!("failed to read directory entry: {e}"),
+                    None,
+                )
+            })? {
                 if entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
                     && entry.path().join("segments").is_dir()
                 {
@@ -865,16 +861,15 @@ impl QdrantOps for EdgeQdrant {
 
         let field_schema = Some(PayloadFieldSchema::FieldType(schema_type));
         let field_name: qdrant_edge::JsonPath =
-            serde_json::from_value(serde_json::Value::String(req.field.clone()))
-                .map_err(|e| {
-                    QqlError::execution(
-                        "QQL-EDGE-FIELD-NAME",
-                        format!("invalid field name: {e}"),
-                        None,
-                    )
-                    .with_collection(req.collection_name.clone())
-                    .with_field_name(req.field.clone())
-                })?;
+            serde_json::from_value(serde_json::Value::String(req.field.clone())).map_err(|e| {
+                QqlError::execution(
+                    "QQL-EDGE-FIELD-NAME",
+                    format!("invalid field name: {e}"),
+                    None,
+                )
+                .with_collection(req.collection_name.clone())
+                .with_field_name(req.field.clone())
+            })?;
 
         let create_index = CreateIndex {
             field_name,
@@ -895,17 +890,18 @@ impl QdrantOps for EdgeQdrant {
         field_name: &str,
     ) -> Result<(), QqlError> {
         let shard = self.open_shard(collection_name).await?;
-        let field_name_json: qdrant_edge::JsonPath =
-            serde_json::from_value(serde_json::Value::String(field_name.to_string()))
-                .map_err(|e| {
-                    QqlError::execution(
-                        "QQL-EDGE-FIELD-NAME",
-                        format!("invalid field name: {e}"),
-                        None,
-                    )
-                    .with_collection(collection_name.to_string())
-                    .with_field_name(field_name.to_string())
-                })?;
+        let field_name_json: qdrant_edge::JsonPath = serde_json::from_value(
+            serde_json::Value::String(field_name.to_string()),
+        )
+        .map_err(|e| {
+            QqlError::execution(
+                "QQL-EDGE-FIELD-NAME",
+                format!("invalid field name: {e}"),
+                None,
+            )
+            .with_collection(collection_name.to_string())
+            .with_field_name(field_name.to_string())
+        })?;
         let op = UpdateOperation::FieldIndexOperation(FieldIndexOperations::DeleteIndex(
             field_name_json,
         ));

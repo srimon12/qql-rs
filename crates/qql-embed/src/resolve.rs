@@ -739,15 +739,13 @@ fn collect_default_text_targets(points: &[UpsertPoint]) -> Vec<(usize, String)> 
         .enumerate()
         .filter_map(|(idx, point)| {
             for &candidate in DEFAULT_TEXT_FIELDS_ORDERED {
-                if let Some((_, value)) = point
+                if let Some((_, qql_core::ast::Value::Str(text))) = point
                     .payload
                     .iter()
                     .find(|(key, _)| key.eq_ignore_ascii_case(candidate))
                 {
-                    if let qql_core::ast::Value::Str(text) = value {
-                        if !text.is_empty() {
-                            return Some((idx, text.clone()));
-                        }
+                    if !text.is_empty() {
+                        return Some((idx, text.clone()));
                     }
                 }
             }
