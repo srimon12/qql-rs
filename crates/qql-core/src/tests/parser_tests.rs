@@ -1,4 +1,4 @@
-use crate::ast::{FusionMethod, QueryCollection, QueryExpr, QueryInput, Stmt};
+use crate::ast::{EmbeddingSpec, FusionMethod, QueryCollection, QueryExpr, QueryInput, Stmt};
 use crate::parser::Parser;
 
 #[test]
@@ -280,4 +280,55 @@ fn parse_all_semicolons_required() {
         2
     );
     assert!(Parser::parse_all("SHOW COLLECTIONS SHOW COLLECTION docs").is_err());
+}
+
+#[test]
+fn parse_upsert_on_field_and_multi_spec() {
+    let stmt = Parser::parse(
+        "UPSERT INTO docs VALUES {id: 1, text: 'hello', title: 'world'} USING DENSE MODEL 'nomic' ON FIELD title INTO title_vec;",
+    ).unwrap();
+    match stmt {
+        Stmt::Upsert(u) => {
+            match u.embedding.unwrap() {
+                EmbeddingSpec::Dense { model, vector, field } => {
+                    assert_eq!(model.as_deref(), Some("nomic"));
+                    assert_eq!(vector.as_deref(), Some("title_vec"));
+                    assert_eq!(field.as_deref(), Some("title"));
+                }
+                _ => panic!("expected Dense embedding spec"),
+            }
+        }
+        _ => panic!("expected Upsert statement"),
+    }
+
+    let multi_stmt = Parser::parse(
+        "UPSERT INTO docs VALUES {id: 1, text: 'hello', title: 'world'} USING DENSE MODEL 'm1' ON FIELD text INTO dense, DENSE MODEL 'm2' ON FIELD title INTO title_vec;",
+    ).unwrap();
+    match multi_stmt {
+        Stmt::Upsert(u) => {
+            match u.embedding.unwrap() {
+                EmbeddingSpec::Multi(specs) => {
+                    assert_eq!(specs.len(), 2);
+                    match &specs[0] {
+                        EmbeddingSpec::Dense { model, vector, field } => {
+                            assert_eq!(model.as_deref(), Some("m1"));
+                            assert_eq!(vector.as_deref(), Some("dense"));
+                            assert_eq!(field.as_deref(), Some("text"));
+                        }
+                        _ => panic!("expected Dense spec"),
+                    }
+                    match &specs[1] {
+                        EmbeddingSpec::Dense { model, vector, field } => {
+                            assert_eq!(model.as_deref(), Some("m2"));
+                            assert_eq!(vector.as_deref(), Some("title_vec"));
+                            assert_eq!(field.as_deref(), Some("title"));
+                        }
+                        _ => panic!("expected Dense spec"),
+                    }
+                }
+                _ => panic!("expected Multi embedding spec"),
+            }
+        }
+        _ => panic!("expected Upsert statement"),
+    }
 }

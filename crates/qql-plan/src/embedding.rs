@@ -116,51 +116,7 @@ fn extract_upsert_jobs(upsert: &UpsertStmt, jobs: &mut Vec<EmbeddingJob>) {
     };
 
     if let Some(ref spec) = upsert.embedding {
-        match spec {
-            EmbeddingSpec::Dense { model, vector: _ } => {
-                let texts = extract_texts("text");
-                if !texts.is_empty() {
-                    jobs.push(EmbeddingJob {
-                        texts,
-                        model: model.clone(),
-                        kind: EmbeddingKind::Dense,
-                        destinations: Vec::new(),
-                    });
-                }
-            }
-            EmbeddingSpec::Sparse { model, vector: _ } => {
-                let texts = extract_texts("text");
-                if !texts.is_empty() {
-                    jobs.push(EmbeddingJob {
-                        texts,
-                        model: model.clone(),
-                        kind: EmbeddingKind::Sparse,
-                        destinations: Vec::new(),
-                    });
-                }
-            }
-            EmbeddingSpec::Hybrid {
-                dense_model,
-                sparse_model,
-                ..
-            } => {
-                let texts = extract_texts("text");
-                if !texts.is_empty() {
-                    jobs.push(EmbeddingJob {
-                        texts: texts.clone(),
-                        model: dense_model.clone(),
-                        kind: EmbeddingKind::Dense,
-                        destinations: Vec::new(),
-                    });
-                    jobs.push(EmbeddingJob {
-                        texts,
-                        model: sparse_model.clone(),
-                        kind: EmbeddingKind::Sparse,
-                        destinations: Vec::new(),
-                    });
-                }
-            }
-        }
+        process_plan_embedding_spec(upsert, spec, jobs);
     }
 
     for directive in &upsert.embed {
@@ -176,6 +132,99 @@ fn extract_upsert_jobs(upsert: &UpsertStmt, jobs: &mut Vec<EmbeddingJob>) {
                 kind,
                 destinations: Vec::new(),
             });
+        }
+    }
+}
+
+fn process_plan_embedding_spec(
+    upsert: &UpsertStmt,
+    spec: &EmbeddingSpec,
+    jobs: &mut Vec<EmbeddingJob>,
+) {
+    let extract_texts = |target_field: &str| -> Vec<String> {
+        upsert
+            .points
+            .iter()
+            .filter_map(|point| {
+                point
+                    .payload
+                    .iter()
+                    .find(|(k, _)| {
+                        k.eq_ignore_ascii_case(target_field)
+                            || (target_field.eq_ignore_ascii_case("text")
+                                && (k.eq_ignore_ascii_case("body")
+                                    || k.eq_ignore_ascii_case("content")
+                                    || k.eq_ignore_ascii_case("title")
+                                    || k.eq_ignore_ascii_case("description")
+                                    || k.eq_ignore_ascii_case("name")
+                                    || k.eq_ignore_ascii_case("summary")
+                                    || k.eq_ignore_ascii_case("document")))
+                    })
+                    .and_then(|(_, v)| match v {
+                        qql_core::ast::Value::Str(s) => Some(s.clone()),
+                        _ => None,
+                    })
+            })
+            .collect()
+    };
+
+    match spec {
+        EmbeddingSpec::Multi(specs) => {
+            for sub_spec in specs {
+                process_plan_embedding_spec(upsert, sub_spec, jobs);
+            }
+        }
+        EmbeddingSpec::Dense { model, field, .. } => {
+            let f = field.as_deref().unwrap_or("text");
+            let texts = extract_texts(f);
+            if !texts.is_empty() {
+                jobs.push(EmbeddingJob {
+                    texts,
+                    model: model.clone(),
+                    kind: EmbeddingKind::Dense,
+                    destinations: Vec::new(),
+                });
+            }
+        }
+        EmbeddingSpec::Sparse { model, field, .. } => {
+            let f = field.as_deref().unwrap_or("text");
+            let texts = extract_texts(f);
+            if !texts.is_empty() {
+                jobs.push(EmbeddingJob {
+                    texts,
+                    model: model.clone(),
+                    kind: EmbeddingKind::Sparse,
+                    destinations: Vec::new(),
+                });
+            }
+        }
+        EmbeddingSpec::Hybrid {
+            dense_model,
+            dense_field,
+            sparse_model,
+            sparse_field,
+            ..
+        } => {
+            let df = dense_field.as_deref().unwrap_or("text");
+            let sf = sparse_field.as_deref().unwrap_or("text");
+            let d_texts = extract_texts(df);
+            let s_texts = extract_texts(sf);
+            if !d_texts.is_empty() {
+                jobs.push(EmbeddingJob {
+                    texts: d_texts,
+                    model: dense_model.clone(),
+                    kind: EmbeddingKind::Dense,
+                    destinations: Vec::new(),
+                });
+            }
+            if !s_texts.is_empty() {
+                jobs.push(EmbeddingJob {
+                    texts: s_texts,
+                    model: sparse_model.clone(),
+                    kind: EmbeddingKind::Sparse,
+                    destinations: Vec::new(),
+                });
+            }
         }
     }
 }

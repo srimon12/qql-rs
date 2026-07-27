@@ -101,84 +101,8 @@ async fn resolve_upsert_embeddings(
         }
     }
 
-    if let Some(ref spec) = upsert.embedding {
-        match spec {
-            EmbeddingSpec::Dense { model, vector } => {
-                let model_name = model.as_deref().unwrap_or("default");
-                let vector_name = vector.as_deref().unwrap_or(DENSE_VECTOR_NAME);
-
-                let targets = collect_default_text_targets(&upsert.points);
-
-                if !targets.is_empty() {
-                    let (indices, texts): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
-                    let vecs = embedder.embed_dense_batch(&texts, model_name).await?;
-                    ensure_batch_len(vecs.len(), indices.len(), model_name)?;
-                    for (idx, vec) in indices.into_iter().zip(vecs) {
-                        let point = &mut upsert.points[idx];
-                        add_point_vector(point, vector_name, VectorValue::Dense(vec))?;
-                    }
-                }
-            }
-            EmbeddingSpec::Sparse { model, vector } => {
-                if model.is_some() {
-                    return Err(QqlError::execution(
-                        "QQL-EMBEDDING",
-                        "sparse model selection is not supported by the local BM25 sparse embedder; omit MODEL",
-                        None,
-                    ));
-                }
-                let vector_name = vector.as_deref().unwrap_or(SPARSE_VECTOR_NAME);
-                for (idx, text) in collect_default_text_targets(&upsert.points) {
-                    let sparse_vec = embedder.embed_sparse(&text).await?;
-                    add_point_vector(
-                        &mut upsert.points[idx],
-                        vector_name,
-                        VectorValue::Sparse {
-                            indices: sparse_vec.indices,
-                            values: sparse_vec.values,
-                        },
-                    )?;
-                }
-            }
-            EmbeddingSpec::Hybrid {
-                dense_model,
-                dense_vector,
-                sparse_vector,
-                sparse_model,
-            } => {
-                if sparse_model.is_some() {
-                    return Err(QqlError::execution(
-                            "QQL-EMBEDDING",
-                            "sparse model selection is not supported by the local BM25 sparse embedder; omit SPARSE MODEL",
-                            None,
-                        ));
-                }
-                let d_model = dense_model.as_deref().unwrap_or("default");
-                let d_vec_name = dense_vector.as_deref().unwrap_or(DENSE_VECTOR_NAME);
-                let s_vec_name = sparse_vector.as_deref().unwrap_or(SPARSE_VECTOR_NAME);
-
-                let targets = collect_default_text_targets(&upsert.points);
-
-                if !targets.is_empty() {
-                    let (indices, texts): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
-                    let dense_vecs = embedder.embed_dense_batch(&texts, d_model).await?;
-                    ensure_batch_len(dense_vecs.len(), indices.len(), d_model)?;
-                    for ((idx, text), d_vec) in indices.into_iter().zip(texts).zip(dense_vecs) {
-                        let sparse_vec = embedder.embed_sparse(&text).await?;
-                        let point = &mut upsert.points[idx];
-                        add_point_vector(point, d_vec_name, VectorValue::Dense(d_vec))?;
-                        add_point_vector(
-                            point,
-                            s_vec_name,
-                            VectorValue::Sparse {
-                                indices: sparse_vec.indices,
-                                values: sparse_vec.values,
-                            },
-                        )?;
-                    }
-                }
-            }
-        }
+    if let Some(spec) = upsert.embedding.clone() {
+        resolve_single_embedding_spec(upsert, &spec, embedder).await?;
     }
 
     for directive in &upsert.embed {
@@ -641,24 +565,193 @@ fn ensure_batch_len(got: usize, expected: usize, model: &str) -> Result<(), QqlE
     Ok(())
 }
 
+async fn resolve_single_embedding_spec(
+    upsert: &mut UpsertStmt,
+    spec: &EmbeddingSpec,
+    embedder: &dyn Embedder,
+) -> Result<(), QqlError> {
+    match spec {
+        EmbeddingSpec::Multi(specs) => {
+            for sub_spec in specs {
+                Box::pin(resolve_single_embedding_spec(upsert, sub_spec, embedder)).await?;
+            }
+        }
+        EmbeddingSpec::Dense {
+            model,
+            vector,
+            field,
+        } => {
+            let model_name = model.as_deref().unwrap_or("default");
+            let vector_name = vector.as_deref().unwrap_or(DENSE_VECTOR_NAME);
+
+            let targets = collect_text_targets(&upsert.points, field.as_deref());
+
+            if targets.is_empty() {
+                let actual_fields = upsert
+                    .points
+                    .first()
+                    .map(|p| {
+                        p.payload
+                            .iter()
+                            .map(|(k, _)| k.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_default();
+
+                let err_msg = if let Some(f) = field {
+                    format!(
+                        "USING DENSE MODEL specified with ON FIELD '{f}' but no matching text payload field found. Found fields: {actual_fields}"
+                    )
+                } else {
+                    format!(
+                        "USING DENSE MODEL specified but no text payload field found. Expected one of: {}. Found fields: {actual_fields}",
+                        DEFAULT_TEXT_FIELDS_ORDERED.join(", ")
+                    )
+                };
+
+                return Err(QqlError::execution("QQL-EMBEDDING", err_msg, None));
+            }
+
+            let (indices, texts): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
+            let vecs = embedder.embed_dense_batch(&texts, model_name).await?;
+            ensure_batch_len(vecs.len(), indices.len(), model_name)?;
+            for (idx, vec) in indices.into_iter().zip(vecs) {
+                let point = &mut upsert.points[idx];
+                add_point_vector(point, vector_name, VectorValue::Dense(vec))?;
+            }
+        }
+        EmbeddingSpec::Sparse {
+            model,
+            vector,
+            field,
+        } => {
+            if model.is_some() {
+                return Err(QqlError::execution(
+                    "QQL-EMBEDDING",
+                    "sparse model selection is not supported by the local BM25 sparse embedder; omit MODEL",
+                    None,
+                ));
+            }
+            let vector_name = vector.as_deref().unwrap_or(SPARSE_VECTOR_NAME);
+            let targets = collect_text_targets(&upsert.points, field.as_deref());
+            for (idx, text) in targets {
+                let sparse_vec = embedder.embed_sparse(&text).await?;
+                add_point_vector(
+                    &mut upsert.points[idx],
+                    vector_name,
+                    VectorValue::Sparse {
+                        indices: sparse_vec.indices,
+                        values: sparse_vec.values,
+                    },
+                )?;
+            }
+        }
+        EmbeddingSpec::Hybrid {
+            dense_model,
+            dense_vector,
+            dense_field,
+            sparse_model,
+            sparse_vector,
+            sparse_field,
+        } => {
+            if sparse_model.is_some() {
+                return Err(QqlError::execution(
+                    "QQL-EMBEDDING",
+                    "sparse model selection is not supported by the local BM25 sparse embedder; omit SPARSE MODEL",
+                    None,
+                ));
+            }
+            let d_model = dense_model.as_deref().unwrap_or("default");
+            let d_vec_name = dense_vector.as_deref().unwrap_or(DENSE_VECTOR_NAME);
+            let s_vec_name = sparse_vector.as_deref().unwrap_or(SPARSE_VECTOR_NAME);
+
+            let dense_targets = collect_text_targets(&upsert.points, dense_field.as_deref());
+            let sparse_targets = collect_text_targets(&upsert.points, sparse_field.as_deref());
+
+            if !dense_targets.is_empty() {
+                let (indices, texts): (Vec<usize>, Vec<String>) = dense_targets.into_iter().unzip();
+                let dense_vecs = embedder.embed_dense_batch(&texts, d_model).await?;
+                ensure_batch_len(dense_vecs.len(), indices.len(), d_model)?;
+                for (idx, d_vec) in indices.into_iter().zip(dense_vecs) {
+                    let point = &mut upsert.points[idx];
+                    add_point_vector(point, d_vec_name, VectorValue::Dense(d_vec))?;
+                }
+            }
+
+            for (idx, text) in sparse_targets {
+                let sparse_vec = embedder.embed_sparse(&text).await?;
+                let point = &mut upsert.points[idx];
+                add_point_vector(
+                    point,
+                    s_vec_name,
+                    VectorValue::Sparse {
+                        indices: sparse_vec.indices,
+                        values: sparse_vec.values,
+                    },
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+const DEFAULT_TEXT_FIELDS_ORDERED: &[&str] = &[
+    "text",
+    "body",
+    "content",
+    "title",
+    "description",
+    "name",
+    "summary",
+    "document",
+];
+
+fn collect_text_targets(
+    points: &[UpsertPoint],
+    field_override: Option<&str>,
+) -> Vec<(usize, String)> {
+    if let Some(target_field) = field_override {
+        points
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, point)| {
+                point.payload.iter().find_map(|(key, value)| {
+                    if key.eq_ignore_ascii_case(target_field) {
+                        if let qql_core::ast::Value::Str(text) = value {
+                            if !text.is_empty() {
+                                return Some((idx, text.clone()));
+                            }
+                        }
+                    }
+                    None
+                })
+            })
+            .collect()
+    } else {
+        collect_default_text_targets(points)
+    }
+}
+
 fn collect_default_text_targets(points: &[UpsertPoint]) -> Vec<(usize, String)> {
     points
         .iter()
         .enumerate()
         .filter_map(|(idx, point)| {
-            point
-                .payload
-                .iter()
-                .find(|(key, value)| {
-                    matches!(value, qql_core::ast::Value::Str(text) if !text.is_empty())
-                        && (key.eq_ignore_ascii_case("text")
-                            || key.eq_ignore_ascii_case("body")
-                            || key.eq_ignore_ascii_case("content"))
-                })
-                .and_then(|(_, value)| match value {
-                    qql_core::ast::Value::Str(text) => Some((idx, text.clone())),
-                    _ => None,
-                })
+            for &candidate in DEFAULT_TEXT_FIELDS_ORDERED {
+                if let Some((_, value)) = point
+                    .payload
+                    .iter()
+                    .find(|(key, _)| key.eq_ignore_ascii_case(candidate))
+                {
+                    if let qql_core::ast::Value::Str(text) = value {
+                        if !text.is_empty() {
+                            return Some((idx, text.clone()));
+                        }
+                    }
+                }
+            }
+            None
         })
         .collect()
 }

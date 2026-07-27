@@ -99,6 +99,7 @@ async fn upsert_batch_cardinality_mismatch_errors() {
         embedding: Some(qql_core::ast::EmbeddingSpec::Dense {
             model: Some("m".into()),
             vector: Some("dense".into()),
+            field: None,
         }),
         embed: vec![],
         shard_key: None,
@@ -127,6 +128,7 @@ async fn unnamed_vector_topology_conflict_rejected() {
         embedding: Some(qql_core::ast::EmbeddingSpec::Dense {
             model: Some("m".into()),
             vector: Some("dense".into()),
+            field: None,
         }),
         embed: vec![],
         shard_key: None,
@@ -441,4 +443,58 @@ async fn query_with_arbitrary_sparse_vector_name_uses_sparse_embedding() {
         using.as_ref().map(|target| target.name.as_str()),
         Some("lexical_v2")
     );
+}
+
+#[tokio::test]
+async fn test_deterministic_field_priority() {
+    let mut stmt = Parser::parse(
+        "UPSERT INTO docs VALUES {id: 1, title: 'title text', text: 'primary text'} USING DENSE MODEL 'test-model'",
+    )
+    .unwrap();
+    let mock = MockEmbedder::default();
+    resolve_embeddings(&mut stmt, &mock).await.unwrap();
+
+    let calls = mock.dense_calls.lock().unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].1, "primary text");
+}
+
+#[tokio::test]
+async fn test_on_field_explicit_resolution() {
+    let mut stmt = Parser::parse(
+        "UPSERT INTO docs VALUES {id: 1, text: 'primary text', title: 'title text'} USING DENSE MODEL 'test-model' ON FIELD title INTO title_vec",
+    )
+    .unwrap();
+    let mock = MockEmbedder::default();
+    resolve_embeddings(&mut stmt, &mock).await.unwrap();
+
+    let calls = mock.dense_calls.lock().unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].1, "title text");
+
+    let Stmt::Upsert(upsert) = &stmt else { panic!("expected Upsert"); };
+    let Some(PointVectors::Named(list)) = &upsert.points[0].vectors else { panic!("expected named vectors"); };
+    assert!(list.iter().any(|(k, _)| k == "title_vec"));
+}
+
+#[tokio::test]
+async fn test_on_field_missing_errors_loudly() {
+    let mut stmt = Parser::parse(
+        "UPSERT INTO docs VALUES {id: 1, text: 'primary text'} USING DENSE MODEL 'test-model' ON FIELD missing_field",
+    )
+    .unwrap();
+    let mock = MockEmbedder::default();
+    let err = resolve_embeddings(&mut stmt, &mock).await.unwrap_err();
+    assert!(err.message.contains("ON FIELD 'missing_field'"));
+}
+
+#[tokio::test]
+async fn test_no_text_field_errors_loudly() {
+    let mut stmt = Parser::parse(
+        "UPSERT INTO docs VALUES {id: 1, score: 99} USING DENSE MODEL 'test-model'",
+    )
+    .unwrap();
+    let mock = MockEmbedder::default();
+    let err = resolve_embeddings(&mut stmt, &mock).await.unwrap_err();
+    assert!(err.message.contains("Expected one of: text, body, content, title, description, name, summary, document"));
 }

@@ -91,6 +91,18 @@ UPSERT INTO docs VALUES
   {id: 2, text: 'Rust programming language', category: 'programming'}
   USING DENSE MODEL 'all-minilm:l6-v2';
 
+-- Explicit target payload field and named destination vector
+UPSERT INTO docs VALUES
+  {id: 1, text: 'primary text', title: 'Qdrant Overview', category: 'tech'}
+  USING DENSE MODEL 'all-minilm' ON FIELD title INTO title_vec;
+
+-- Multiple target fields mapped to distinct named vectors
+UPSERT INTO docs VALUES
+  {id: 1, text: 'primary text', title: 'Qdrant Overview'}
+  USING
+    DENSE MODEL 'all-minilm' ON FIELD text INTO dense,
+    DENSE MODEL 'all-minilm' ON FIELD title INTO title_vec;
+
 -- Update vector by point ID
 UPDATE docs SET VECTOR dense = [0.1, 0.2, 0.3] WHERE id = 1;
 
