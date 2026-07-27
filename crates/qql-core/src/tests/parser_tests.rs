@@ -370,8 +370,9 @@ fn parse_upsert_with_dollar_and_pattern_strings() {
     }
 
     let raw_backslash_stmt = Parser::parse(
-        r"UPSERT INTO qql_memory VALUES { id: 'abc', pattern_text: r'path\to\$file' };"
-    ).unwrap();
+        r"UPSERT INTO qql_memory VALUES { id: 'abc', pattern_text: r'path\to\$file' };",
+    )
+    .unwrap();
     let Stmt::Upsert(u_raw_bs) = raw_backslash_stmt else {
         panic!()
     };
