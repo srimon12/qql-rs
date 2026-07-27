@@ -1,0 +1,124 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "Upsert": {
+        "collection": "docs",
+        "embed": [],
+        "embedding": {
+          "Dense": {
+            "field": "title",
+            "model": "nomic",
+            "vector": "title_vec"
+          }
+        },
+        "points": [
+          {
+            "id": {
+              "Number": 1
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "hello"
+                }
+              ],
+              [
+                "title",
+                {
+                  "Str": "world"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": null
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "docs",
+        "embed": [],
+        "embedding": {
+          "Multi": [
+            {
+              "Dense": {
+                "field": "text",
+                "model": "m1",
+                "vector": "dense"
+              }
+            },
+            {
+              "Dense": {
+                "field": "title",
+                "model": "m2",
+                "vector": "title_vec"
+              }
+            }
+          ]
+        },
+        "points": [
+          {
+            "id": {
+              "Number": 1
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "hello"
+                }
+              ],
+              [
+                "title",
+                {
+                  "Str": "world"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": null
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "docs",
+        "embed": [],
+        "embedding": {
+          "Sparse": {
+            "field": "body",
+            "model": null,
+            "vector": "sparse_vec"
+          }
+        },
+        "points": [
+          {
+            "id": {
+              "Number": 1
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "hello"
+                }
+              ],
+              [
+                "body",
+                {
+                  "Str": "body text"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": null
+      }
+    }
+  ]
+}

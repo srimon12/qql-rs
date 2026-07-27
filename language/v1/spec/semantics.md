@@ -16,9 +16,7 @@ also be digits. A dotted path (`metadata.author`) or array path
 (`items[].price`) is emitted as one identifier. A quoted string is accepted
 where the grammar uses `name`, allowing keywords and punctuation in names.
 
-Strings may use single or double quotes. The escapes `\\`, `\'`, `\"`, `\n`,
-`\r`, and `\t` are supported. A doubled single quote inside a single-quoted
-string (`'it''s'`) represents one quote. Strings are UTF-8.
+Strings may use single (`'...'`) or double (`"..."`) quotes, raw quotes (`r'...'`, `r"..."`), triple-quoted multiline delimiters (`'''...'''`, `"""..."""`), or backtick delimiters (`` `...` ``). The escapes `\\`, `\'`, `\"`, `\n`, `\r`, `\t`, and `\$` are supported in standard single/double quoted strings. A doubled single quote inside a single-quoted string (`'it''s'`) represents one quote. Raw and triple-quoted strings preserve literal contents, `$PARAM` references, and internal quotes verbatim. Strings are UTF-8.
 
 Integers are signed decimal values. Floats use a decimal fraction and/or an
 `e`/`E` exponent. `≥`, `≤`, and `≠` normalize to `>=`, `<=`, and `!=`.
@@ -94,12 +92,13 @@ For an existing collection:
 
 - `USING DENSE`, `USING SPARSE`, and each side of `USING HYBRID` may omit
   `VECTOR`; omission succeeds only when exactly one vector of that role exists.
-- `VECTOR name` must name a vector of the requested role.
+- `VECTOR name` or `INTO name` names a destination vector of the requested role.
+- `ON FIELD field` explicitly names the target payload text field to embed.
+- Multiple comma-separated embedding specs may be specified (e.g. `USING DENSE MODEL 'm1' ON FIELD text INTO dense, DENSE MODEL 'm2' ON FIELD title INTO title_vec`).
+- When `ON FIELD` is omitted, default payload text field resolution follows a deterministic priority order: `text` > `body` > `content` > `title` > `description` > `name` > `summary` > `document`.
 - Each `EMBED field INTO name` directive targets exactly the named vector;
   `USING SPARSE` selects sparse embedding, while the default is dense.
-- An UPSERT with text in `text`, `body`, or `content`, no supplied vector, and
-  no embedding clause infers a dense-only, sparse-only, or one-dense plus
-  one-sparse topology. Any other topology is ambiguous.
+- An UPSERT with no explicit `ON FIELD` or `EMBED` directive infers text from the payload using the deterministic priority order. If no matching text payload field exists, resolution fails with an error (`QQL-EMBEDDING`).
 
 For a missing collection, implicit text ingestion creates the conventional
 `dense` + `sparse` topology. Explicit creation/embedding names are preserved.

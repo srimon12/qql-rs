@@ -75,8 +75,10 @@
         "embed": [],
         "embedding": {
           "Hybrid": {
+            "dense_field": null,
             "dense_model": null,
             "dense_vector": null,
+            "sparse_field": null,
             "sparse_model": null,
             "sparse_vector": null
           }
@@ -106,6 +108,7 @@
         "embed": [],
         "embedding": {
           "Dense": {
+            "field": null,
             "model": "all-MiniLM-L6-v2",
             "vector": null
           }
@@ -135,6 +138,7 @@
         "embed": [],
         "embedding": {
           "Sparse": {
+            "field": null,
             "model": "qdrant/bm25",
             "vector": null
           }
@@ -164,8 +168,10 @@
         "embed": [],
         "embedding": {
           "Hybrid": {
+            "dense_field": null,
             "dense_model": "all-MiniLM-L6-v2",
             "dense_vector": null,
+            "sparse_field": null,
             "sparse_model": "qdrant/bm25",
             "sparse_vector": null
           }
@@ -195,8 +201,10 @@
         "embed": [],
         "embedding": {
           "Hybrid": {
+            "dense_field": null,
             "dense_model": null,
             "dense_vector": null,
+            "sparse_field": null,
             "sparse_model": null,
             "sparse_vector": null
           }
@@ -226,8 +234,10 @@
         "embed": [],
         "embedding": {
           "Hybrid": {
+            "dense_field": null,
             "dense_model": null,
             "dense_vector": "semantic_v2",
+            "sparse_field": null,
             "sparse_model": null,
             "sparse_vector": "lexical_v2"
           }

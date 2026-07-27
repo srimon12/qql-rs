@@ -92,79 +92,50 @@ fn expression_vector_kind(expr: &QueryExpr) -> VectorKind {
     }
 }
 
-fn extract_upsert_jobs(upsert: &UpsertStmt, jobs: &mut Vec<EmbeddingJob>) {
-    let extract_texts = |field: &str| -> Vec<String> {
-        upsert
-            .points
-            .iter()
-            .filter_map(|point| {
-                point
-                    .payload
-                    .iter()
-                    .find(|(k, _)| {
-                        k.eq_ignore_ascii_case(field)
-                            || (field.eq_ignore_ascii_case("text")
-                                && (k.eq_ignore_ascii_case("body")
-                                    || k.eq_ignore_ascii_case("content")))
-                    })
-                    .and_then(|(_, v)| match v {
-                        qql_core::ast::Value::Str(s) => Some(s.clone()),
-                        _ => None,
-                    })
-            })
-            .collect()
+const DEFAULT_TEXT_FIELDS_ORDERED: &[&str] = &[
+    "text",
+    "body",
+    "content",
+    "title",
+    "description",
+    "name",
+    "summary",
+    "document",
+];
+
+fn extract_payload_texts(points: &[qql_core::ast::UpsertPoint], field: &str) -> Vec<String> {
+    let candidate_fields: &[&str] = if field.eq_ignore_ascii_case("text") {
+        DEFAULT_TEXT_FIELDS_ORDERED
+    } else {
+        std::slice::from_ref(&field)
     };
 
+    points
+        .iter()
+        .filter_map(|point| {
+            for &cand in candidate_fields {
+                if let Some((_, qql_core::ast::Value::Str(s))) = point
+                    .payload
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case(cand))
+                {
+                    if !s.is_empty() {
+                        return Some(s.clone());
+                    }
+                }
+            }
+            None
+        })
+        .collect()
+}
+
+fn extract_upsert_jobs(upsert: &UpsertStmt, jobs: &mut Vec<EmbeddingJob>) {
     if let Some(ref spec) = upsert.embedding {
-        match spec {
-            EmbeddingSpec::Dense { model, vector: _ } => {
-                let texts = extract_texts("text");
-                if !texts.is_empty() {
-                    jobs.push(EmbeddingJob {
-                        texts,
-                        model: model.clone(),
-                        kind: EmbeddingKind::Dense,
-                        destinations: Vec::new(),
-                    });
-                }
-            }
-            EmbeddingSpec::Sparse { model, vector: _ } => {
-                let texts = extract_texts("text");
-                if !texts.is_empty() {
-                    jobs.push(EmbeddingJob {
-                        texts,
-                        model: model.clone(),
-                        kind: EmbeddingKind::Sparse,
-                        destinations: Vec::new(),
-                    });
-                }
-            }
-            EmbeddingSpec::Hybrid {
-                dense_model,
-                sparse_model,
-                ..
-            } => {
-                let texts = extract_texts("text");
-                if !texts.is_empty() {
-                    jobs.push(EmbeddingJob {
-                        texts: texts.clone(),
-                        model: dense_model.clone(),
-                        kind: EmbeddingKind::Dense,
-                        destinations: Vec::new(),
-                    });
-                    jobs.push(EmbeddingJob {
-                        texts,
-                        model: sparse_model.clone(),
-                        kind: EmbeddingKind::Sparse,
-                        destinations: Vec::new(),
-                    });
-                }
-            }
-        }
+        process_plan_embedding_spec(upsert, spec, jobs);
     }
 
     for directive in &upsert.embed {
-        let texts = extract_texts(&directive.source_field);
+        let texts = extract_payload_texts(&upsert.points, &directive.source_field);
         if !texts.is_empty() {
             let (kind, model) = match &directive.kind {
                 EmbedKind::Dense { model } => (EmbeddingKind::Dense, model.clone()),
@@ -176,6 +147,72 @@ fn extract_upsert_jobs(upsert: &UpsertStmt, jobs: &mut Vec<EmbeddingJob>) {
                 kind,
                 destinations: Vec::new(),
             });
+        }
+    }
+}
+
+fn process_plan_embedding_spec(
+    upsert: &UpsertStmt,
+    spec: &EmbeddingSpec,
+    jobs: &mut Vec<EmbeddingJob>,
+) {
+    match spec {
+        EmbeddingSpec::Multi(specs) => {
+            for sub_spec in specs {
+                process_plan_embedding_spec(upsert, sub_spec, jobs);
+            }
+        }
+        EmbeddingSpec::Dense { model, field, .. } => {
+            let f = field.as_deref().unwrap_or("text");
+            let texts = extract_payload_texts(&upsert.points, f);
+            if !texts.is_empty() {
+                jobs.push(EmbeddingJob {
+                    texts,
+                    model: model.clone(),
+                    kind: EmbeddingKind::Dense,
+                    destinations: Vec::new(),
+                });
+            }
+        }
+        EmbeddingSpec::Sparse { model, field, .. } => {
+            let f = field.as_deref().unwrap_or("text");
+            let texts = extract_payload_texts(&upsert.points, f);
+            if !texts.is_empty() {
+                jobs.push(EmbeddingJob {
+                    texts,
+                    model: model.clone(),
+                    kind: EmbeddingKind::Sparse,
+                    destinations: Vec::new(),
+                });
+            }
+        }
+        EmbeddingSpec::Hybrid {
+            dense_model,
+            dense_field,
+            sparse_model,
+            sparse_field,
+            ..
+        } => {
+            let df = dense_field.as_deref().unwrap_or("text");
+            let sf = sparse_field.as_deref().unwrap_or("text");
+            let d_texts = extract_payload_texts(&upsert.points, df);
+            let s_texts = extract_payload_texts(&upsert.points, sf);
+            if !d_texts.is_empty() {
+                jobs.push(EmbeddingJob {
+                    texts: d_texts,
+                    model: dense_model.clone(),
+                    kind: EmbeddingKind::Dense,
+                    destinations: Vec::new(),
+                });
+            }
+            if !s_texts.is_empty() {
+                jobs.push(EmbeddingJob {
+                    texts: s_texts,
+                    model: sparse_model.clone(),
+                    kind: EmbeddingKind::Sparse,
+                    destinations: Vec::new(),
+                });
+            }
         }
     }
 }

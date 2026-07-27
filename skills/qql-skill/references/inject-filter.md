@@ -58,7 +58,7 @@ pyqql.inject_filter(stmt, "group_id", "=", "grp_123")
 
 ### Node.js (`nqql`)
 ```javascript
-const nqql = require('nqql');
+const nqql = require('@veristamp/nqql');
 
 const [stmt] = nqql.parse("QUERY 'laptops' FROM products LIMIT 10");
 stmt.injectFilter("group_id", "=", "grp_123");
@@ -66,7 +66,7 @@ stmt.injectFilter("group_id", "=", "grp_123");
 
 ### WASM (`qql-wasm`)
 ```javascript
-import init, { parse, inject_filter } from 'qql-wasm';
+import init, { parse, inject_filter } from '@veristamp/qql-wasm';
 
 await init();
 const stmt = inject_filter(

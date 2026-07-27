@@ -80,6 +80,7 @@ impl RestQdrant {
                 format!("HTTP request failed: {error}"),
                 None,
             )
+            .with_url(url_buf.clone())
         })?;
         let status = resp.status();
         let text = resp.text().await.map_err(|error| {
@@ -88,6 +89,7 @@ impl RestQdrant {
                 format!("failed to read response body: {error}"),
                 None,
             )
+            .with_url(url_buf.clone())
         })?;
         if !status.is_success() {
             let detail = if text.len() > 4096 {
@@ -96,25 +98,29 @@ impl RestQdrant {
                 &text
             };
             return Err(QqlError::backend(
-                "QQL-BACKEND",
+                "QQL-BACKEND-HTTP",
                 format!("Qdrant returned {status}: {detail}"),
                 None,
-            ));
+            )
+            .with_status(status.as_u16())
+            .with_url(url_buf.clone()));
         }
         let value: Value = serde_json::from_str(&text).map_err(|error| {
             QqlError::backend(
-                "QQL-BACKEND",
+                "QQL-BACKEND-JSON",
                 format!("failed to parse Qdrant response: {error}"),
                 None,
             )
+            .with_url(url_buf.clone())
         })?;
         validate_success_envelope(&value, path)?;
         serde_json::from_value(value).map_err(|error| {
             QqlError::backend(
-                "QQL-BACKEND",
+                "QQL-BACKEND-JSON",
                 format!("failed to decode Qdrant response: {error}"),
                 None,
             )
+            .with_url(url_buf.clone())
         })
     }
 
@@ -180,7 +186,12 @@ impl QdrantOps for RestQdrant {
         let schema = crate::backend::schema_from_rest_result(&result);
 
         let mut info: CollectionInfo = serde_json::from_value(result).map_err(|e| {
-            QqlError::backend("QQL-BACKEND", format!("parse collection info: {e}"), None)
+            QqlError::backend(
+                "QQL-BACKEND-JSON",
+                format!("parse collection info: {e}"),
+                None,
+            )
+            .with_collection(name.to_string())
         })?;
         info.schema = schema;
         Ok(info)
@@ -364,6 +375,7 @@ impl RestQdrant {
         }
         let resp = builder.send().await.map_err(|e| {
             QqlError::transport("QQL-TRANSPORT", format!("REST request failed: {e}"), None)
+                .with_url(url.clone())
         })?;
         let status = resp.status();
         let text = resp.text().await.map_err(|e| {
@@ -371,14 +383,16 @@ impl RestQdrant {
         })?;
         if !status.is_success() {
             return Err(QqlError::backend(
-                "QQL-BACKEND",
+                "QQL-BACKEND-HTTP",
                 format!("REST {status}: {text}"),
                 None,
-            ));
+            )
+            .with_status(status.as_u16())
+            .with_url(url));
         }
         let value: Value = serde_json::from_str(&text).map_err(|e| {
             QqlError::backend(
-                "QQL-BACKEND",
+                "QQL-BACKEND-JSON",
                 format!("invalid JSON response: {e}; body={text}"),
                 None,
             )

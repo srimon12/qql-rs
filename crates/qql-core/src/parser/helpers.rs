@@ -24,6 +24,7 @@ impl<'a> AstLowerer<'a> {
         self.parse_string().map(Some)
     }
 
+    #[allow(dead_code)]
     pub fn parse_optional_vector_name(&mut self) -> Result<Option<String>, QqlError> {
         if self.peek()?.kind != TokenKind::Vector {
             return Ok(None);
@@ -37,54 +38,130 @@ impl<'a> AstLowerer<'a> {
             return Ok(None);
         }
         self.advance()?;
-        if self.peek()?.kind != TokenKind::Hybrid {
-            let sparse = self.peek()?.kind == TokenKind::Sparse;
-            if self.peek()?.kind == TokenKind::Dense || sparse {
-                self.advance()?;
-            } else if self.peek()?.kind != TokenKind::Model
-                && self.peek()?.kind != TokenKind::Vector
-            {
-                return Err(QqlError::parse(
-                    "QQL-PARSE-EMBEDDING",
-                    "USING requires DENSE, SPARSE, HYBRID, MODEL, or VECTOR",
-                    self.peek()?.span,
-                ));
-            }
-            let model = self.parse_optional_model_string()?;
-            let vector = self.parse_optional_vector_name()?;
-            return Ok(Some(if sparse {
-                EmbeddingSpec::Sparse { model, vector }
-            } else {
-                EmbeddingSpec::Dense { model, vector }
-            }));
-        }
 
-        self.advance()?;
-        let mut dense_model = None;
-        let mut dense_vector = None;
-        let mut sparse_model = None;
-        let mut sparse_vector = None;
-        for expected in [TokenKind::Dense, TokenKind::Sparse] {
-            if self.peek()?.kind != expected {
-                continue;
+        let mut specs = Vec::new();
+        loop {
+            let spec = self.parse_single_embedding_spec()?;
+            specs.push(spec);
+            if self.peek()?.kind != TokenKind::Comma {
+                break;
             }
             self.advance()?;
-            let model = self.parse_optional_model_string()?;
-            let vector = self.parse_optional_vector_name()?;
-            if expected == TokenKind::Dense {
-                dense_model = model;
-                dense_vector = vector;
+        }
+
+        if specs.len() == 1 {
+            Ok(Some(specs.remove(0)))
+        } else {
+            Ok(Some(EmbeddingSpec::Multi(specs)))
+        }
+    }
+
+    fn parse_single_embedding_spec(&mut self) -> Result<EmbeddingSpec, QqlError> {
+        if self.peek()?.kind == TokenKind::Hybrid {
+            self.advance()?;
+            let mut dense_model = None;
+            let mut dense_vector = None;
+            let mut dense_field = None;
+            let mut sparse_model = None;
+            let mut sparse_vector = None;
+            let mut sparse_field = None;
+            let mut has_dense = false;
+            let mut has_sparse = false;
+
+            while self.peek()?.kind == TokenKind::Dense || self.peek()?.kind == TokenKind::Sparse {
+                let is_d = self.peek()?.kind == TokenKind::Dense;
+                if (is_d && has_dense) || (!is_d && has_sparse) {
+                    return Err(QqlError::parse(
+                        "QQL-PARSE-EMBEDDING",
+                        "duplicate clause in HYBRID embedding spec",
+                        self.peek()?.span,
+                    ));
+                }
+                self.advance()?;
+                let (model, vector, field) = self.parse_embedding_spec_modifiers()?;
+                if is_d {
+                    has_dense = true;
+                    dense_model = model;
+                    dense_vector = vector;
+                    dense_field = field;
+                } else {
+                    has_sparse = true;
+                    sparse_model = model;
+                    sparse_vector = vector;
+                    sparse_field = field;
+                }
+            }
+
+            return Ok(EmbeddingSpec::Hybrid {
+                dense_model,
+                dense_vector,
+                dense_field,
+                sparse_model,
+                sparse_vector,
+                sparse_field,
+            });
+        }
+
+        let is_sparse = self.peek()?.kind == TokenKind::Sparse;
+        if self.peek()?.kind == TokenKind::Dense || is_sparse {
+            self.advance()?;
+        } else if self.peek()?.kind != TokenKind::Model
+            && self.peek()?.kind != TokenKind::Vector
+            && self.peek()?.kind != TokenKind::Into
+            && self.peek()?.kind != TokenKind::On
+        {
+            return Err(QqlError::parse(
+                "QQL-PARSE-EMBEDDING",
+                "USING requires DENSE, SPARSE, HYBRID, MODEL, VECTOR, INTO, or ON FIELD",
+                self.peek()?.span,
+            ));
+        }
+
+        let (model, vector, field) = self.parse_embedding_spec_modifiers()?;
+
+        if is_sparse {
+            Ok(EmbeddingSpec::Sparse {
+                model,
+                vector,
+                field,
+            })
+        } else {
+            Ok(EmbeddingSpec::Dense {
+                model,
+                vector,
+                field,
+            })
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn parse_embedding_spec_modifiers(
+        &mut self,
+    ) -> Result<(Option<String>, Option<String>, Option<String>), QqlError> {
+        let mut model = None;
+        let mut vector = None;
+        let mut field = None;
+
+        loop {
+            let kind = self.peek()?.kind;
+            if kind == TokenKind::Model && model.is_none() {
+                self.advance()?;
+                model = Some(self.parse_string()?);
+            } else if (kind == TokenKind::Vector || kind == TokenKind::Into) && vector.is_none() {
+                self.advance()?;
+                vector = Some(self.parse_identifier()?);
+            } else if kind == TokenKind::On && field.is_none() {
+                self.advance()?;
+                if self.peek()?.kind == TokenKind::Field {
+                    self.advance()?;
+                }
+                field = Some(self.parse_identifier()?);
             } else {
-                sparse_model = model;
-                sparse_vector = vector;
+                break;
             }
         }
-        Ok(Some(EmbeddingSpec::Hybrid {
-            dense_model,
-            dense_vector,
-            sparse_model,
-            sparse_vector,
-        }))
+
+        Ok((model, vector, field))
     }
 
     pub fn parse_point_id(&mut self, context: &str) -> Result<PointId, QqlError> {

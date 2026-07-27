@@ -35,8 +35,10 @@ impl Executor {
                 upsert.embedding = Some(EmbeddingSpec::Hybrid {
                     dense_model: None,
                     dense_vector: Some(crate::executor::DENSE_VECTOR_NAME.to_string()),
+                    dense_field: None,
                     sparse_model: None,
                     sparse_vector: Some(crate::executor::SPARSE_VECTOR_NAME.to_string()),
+                    sparse_field: None,
                 });
             }
             return Ok(None);
@@ -55,16 +57,20 @@ impl Executor {
                 ([dense], []) => EmbeddingSpec::Dense {
                     model: None,
                     vector: Some(dense.clone()),
+                    field: None,
                 },
                 ([], [sparse]) => EmbeddingSpec::Sparse {
                     model: None,
                     vector: Some(sparse.clone()),
+                    field: None,
                 },
                 ([dense], [sparse]) => EmbeddingSpec::Hybrid {
                     dense_model: None,
                     dense_vector: Some(dense.clone()),
+                    dense_field: None,
                     sparse_model: None,
                     sparse_vector: Some(sparse.clone()),
+                    sparse_field: None,
                 },
                 _ => {
                     return Err(QqlError::execution(
@@ -253,22 +259,36 @@ fn resolve_explicit_embedding_targets(
         .collect::<Vec<_>>();
 
     if let Some(spec) = &mut upsert.embedding {
-        match spec {
-            EmbeddingSpec::Dense { vector, .. } => {
-                resolve_embedding_target(&upsert.collection, vector, &dense, "dense")?;
+        fn resolve_spec(
+            collection: &str,
+            spec: &mut EmbeddingSpec,
+            dense: &[String],
+            sparse: &[String],
+        ) -> Result<(), QqlError> {
+            match spec {
+                EmbeddingSpec::Dense { vector, .. } => {
+                    resolve_embedding_target(collection, vector, dense, "dense")?;
+                }
+                EmbeddingSpec::Sparse { vector, .. } => {
+                    resolve_embedding_target(collection, vector, sparse, "sparse")?;
+                }
+                EmbeddingSpec::Hybrid {
+                    dense_vector,
+                    sparse_vector,
+                    ..
+                } => {
+                    resolve_embedding_target(collection, dense_vector, dense, "dense")?;
+                    resolve_embedding_target(collection, sparse_vector, sparse, "sparse")?;
+                }
+                EmbeddingSpec::Multi(specs) => {
+                    for s in specs {
+                        resolve_spec(collection, s, dense, sparse)?;
+                    }
+                }
             }
-            EmbeddingSpec::Sparse { vector, .. } => {
-                resolve_embedding_target(&upsert.collection, vector, &sparse, "sparse")?;
-            }
-            EmbeddingSpec::Hybrid {
-                dense_vector,
-                sparse_vector,
-                ..
-            } => {
-                resolve_embedding_target(&upsert.collection, dense_vector, &dense, "dense")?;
-                resolve_embedding_target(&upsert.collection, sparse_vector, &sparse, "sparse")?;
-            }
+            Ok(())
         }
+        resolve_spec(&upsert.collection, spec, &dense, &sparse)?;
     }
 
     for directive in &upsert.embed {

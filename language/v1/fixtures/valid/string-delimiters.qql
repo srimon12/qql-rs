@@ -1,0 +1,23 @@
+-- string-delimiters.qql — Additive minor features: raw, triple-quoted, backtick, and \$ escape strings
+
+-- Raw string literal
+UPSERT INTO docs VALUES {id: 1, text: r'QUERY $QUERY_TEXT FROM docs USING dense LIMIT $LIMIT;'};
+
+-- Double-quoted raw string literal
+UPSERT INTO docs VALUES {id: 1, text: r"QUERY $QUERY_TEXT FROM docs USING dense LIMIT $LIMIT;"};
+
+-- Triple-quoted single multiline string literal
+UPSERT INTO docs VALUES {id: 1, text: '''QUERY '$QUERY_TEXT' München Café 🚀
+FROM docs
+LIMIT $LIMIT;'''};
+
+-- Triple-quoted double multiline string literal
+UPSERT INTO docs VALUES {id: 1, text: """QUERY "$QUERY_TEXT" Café & Restaurant
+FROM docs
+LIMIT $LIMIT;"""};
+
+-- Backtick string literal
+UPSERT INTO docs VALUES {id: 1, text: `QUERY '$QUERY_TEXT' FROM docs`};
+
+-- Escaped dollar sign in single-quoted string
+UPSERT INTO docs VALUES {id: 1, text: 'price is \$100 for \$QUERY_TEXT'};

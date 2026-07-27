@@ -19,14 +19,16 @@ class TestPyQql(unittest.TestCase):
 
     def test_explain(self):
         query = "QUERY 'hello' FROM docs LIMIT 10"
-        plan = pyqql.explain(query)
-        self.assertIn("Statement: QUERY", plan)
-        self.assertIn("Collection: docs", plan)
+        res = pyqql.explain(query)
+        self.assertTrue(res["ok"])
+        self.assertIn("Statement: QUERY", res["plan"])
+        self.assertIn("Collection: docs", res["plan"])
 
     def test_client_instantiation(self):
         client = pyqql.Client("http://localhost:6333", use_grpc=False)
-        plan = client.explain("QUERY 'hello' FROM docs LIMIT 10")
-        self.assertIn("Collection: docs", plan)
+        res = client.explain("QUERY 'hello' FROM docs LIMIT 10")
+        self.assertTrue(res["ok"])
+        self.assertIn("Collection: docs", res["plan"])
 
     def test_client_first_class_embedder(self):
         embedder = pyqql.HttpEmbedder(
@@ -38,8 +40,9 @@ class TestPyQql(unittest.TestCase):
         client = pyqql.Client(
             "http://localhost:6333", api_key="test-key", embedder=embedder
         )
-        plan = client.explain("QUERY 'hello' FROM docs LIMIT 10")
-        self.assertIn("Statement: QUERY", plan)
+        res = client.explain("QUERY 'hello' FROM docs LIMIT 10")
+        self.assertTrue(res["ok"])
+        self.assertIn("Statement: QUERY", res["plan"])
 
     def test_client_dict_embedder(self):
         client = pyqql.Client(
@@ -50,8 +53,9 @@ class TestPyQql(unittest.TestCase):
                 "dimension": 768,
             },
         )
-        plan = client.explain("QUERY 'hello' FROM docs LIMIT 10")
-        self.assertIn("Statement: QUERY", plan)
+        res = client.explain("QUERY 'hello' FROM docs LIMIT 10")
+        self.assertTrue(res["ok"])
+        self.assertIn("Statement: QUERY", res["plan"])
 
     def test_embedder_validation(self):
         with self.assertRaisesRegex(ValueError, "model is required"):

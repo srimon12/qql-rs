@@ -15,7 +15,7 @@ Node.js native bindings for the QQL parser, plan compiler, and execution engine,
 ## Installation
 
 ```bash
-npm install nqql
+npm install @veristamp/nqql
 ```
 
 ## Quick Start
@@ -27,7 +27,7 @@ const {
   isValid, injectFilter, tokenize,
   compileQuery, explain, explainStmt,
   execute, executeStmt
-} = require('nqql');
+} = require('@veristamp/nqql');
 
 // 1. Connect to live Qdrant with optional embedding provider
 const embedder = new HttpEmbedder({

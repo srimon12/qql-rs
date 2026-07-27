@@ -13,7 +13,7 @@ pub(crate) fn to_edge_id(id: impl IntoPlanPointId) -> Result<PointId, QqlError> 
             // id (the previous filter_map(...ok()) path deleted half a batch).
             uuid::Uuid::parse_str(&s).map(PointId::Uuid).map_err(|e| {
                 QqlError::execution(
-                    "QQL-EDGE",
+                    "QQL-EDGE-INVALID-POINT-ID",
                     format!(
                         "invalid point id '{s}': edge mode accepts unsigned integers or UUIDs only ({e})"
                     ),
@@ -125,6 +125,8 @@ fn edge_vector_to_json(vector: qdrant_edge::VectorStructInternal) -> Value {
     }
 }
 
+/// Wrap a `qdrant-edge` library error. These are low-level failures from the
+/// in-process HNSW engine (I/O, index corruption, lock poisoning, etc.).
 pub(crate) fn edge_err(e: impl std::fmt::Display) -> QqlError {
-    QqlError::execution("QQL-EDGE", format!("qdrant-edge: {e}"), None)
+    QqlError::execution("QQL-EDGE-LIB", format!("qdrant-edge: {e}"), None)
 }

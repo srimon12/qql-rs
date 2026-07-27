@@ -9,6 +9,17 @@ use crate::qdrant_grpc::qdrant;
 use qql_core::error::QqlError;
 use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 
+/// Convert a [`tonic::Status`] into a structured `QqlError` that preserves
+/// the gRPC status code and operation name as machine-readable context.
+///
+/// The error code is `QQL-GRPC` and the message includes the original status
+/// message. The gRPC status code is attached via `.with_field("grpc_code", ...)`.
+fn grpc_error(operation: &str, status: tonic::Status) -> QqlError {
+    QqlError::backend("QQL-GRPC", format!("{operation}: {status}"), None)
+        .with_field("grpc_code", format!("{}", status.code() as i32))
+        .with_field("operation", operation.to_string())
+}
+
 pub struct GrpcQdrant {
     channel: Channel,
     api_key: Option<String>,
@@ -110,7 +121,7 @@ impl GrpcQdrant {
         cl.query(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| QqlError::backend("QQL-GRPC", format!("query: {e}"), None))
+            .map_err(|e| grpc_error("query", e))
     }
 
     pub async fn query_groups(
@@ -121,7 +132,7 @@ impl GrpcQdrant {
         cl.query_groups(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| QqlError::backend("QQL-GRPC", format!("query_groups: {e}"), None))
+            .map_err(|e| grpc_error("query_groups", e))
     }
 
     pub async fn query_batch(
@@ -132,7 +143,7 @@ impl GrpcQdrant {
         cl.query_batch(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| QqlError::backend("QQL-GRPC", format!("query_batch: {e}"), None))
+            .map_err(|e| grpc_error("query_batch", e))
     }
 
     pub async fn update_batch(
@@ -143,7 +154,7 @@ impl GrpcQdrant {
         cl.update_batch(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| QqlError::backend("QQL-GRPC", format!("update_batch: {e}"), None))
+            .map_err(|e| grpc_error("update_batch", e))
     }
 
     pub async fn get_points(
@@ -154,7 +165,7 @@ impl GrpcQdrant {
         cl.get(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| QqlError::backend("QQL-GRPC", format!("get_points: {e}"), None))
+            .map_err(|e| grpc_error("get_points", e))
     }
 
     pub async fn scroll(
@@ -165,7 +176,7 @@ impl GrpcQdrant {
         cl.scroll(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| QqlError::backend("QQL-GRPC", format!("scroll: {e}"), None))
+            .map_err(|e| grpc_error("scroll", e))
     }
 
     pub async fn upsert_points(
@@ -176,7 +187,7 @@ impl GrpcQdrant {
         cl.upsert(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| QqlError::backend("QQL-GRPC", format!("upsert: {e}"), None))
+            .map_err(|e| grpc_error("upsert", e))
     }
 
     pub async fn delete_points(
@@ -187,7 +198,7 @@ impl GrpcQdrant {
         cl.delete(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| QqlError::backend("QQL-GRPC", format!("delete: {e}"), None))
+            .map_err(|e| grpc_error("delete", e))
     }
 
     pub async fn update_vectors(
@@ -198,7 +209,7 @@ impl GrpcQdrant {
         cl.update_vectors(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| QqlError::backend("QQL-GRPC", format!("update_vectors: {e}"), None))
+            .map_err(|e| grpc_error("update_vectors", e))
     }
 
     pub async fn set_payload(
@@ -209,7 +220,7 @@ impl GrpcQdrant {
         cl.set_payload(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| QqlError::backend("QQL-GRPC", format!("set_payload: {e}"), None))
+            .map_err(|e| grpc_error("set_payload", e))
     }
 
     pub async fn create_collection_raw(
@@ -220,7 +231,7 @@ impl GrpcQdrant {
         cl.create(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| QqlError::backend("QQL-GRPC", format!("create_collection: {e}"), None))
+            .map_err(|e| grpc_error("create_collection", e))
     }
 
     pub async fn update_collection_raw(
@@ -231,7 +242,7 @@ impl GrpcQdrant {
         cl.update(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| QqlError::backend("QQL-GRPC", format!("update_collection: {e}"), None))
+            .map_err(|e| grpc_error("update_collection", e))
     }
 
     pub async fn delete_collection_raw(
@@ -242,7 +253,7 @@ impl GrpcQdrant {
         cl.delete(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| QqlError::backend("QQL-GRPC", format!("delete_collection: {e}"), None))
+            .map_err(|e| grpc_error("delete_collection", e))
     }
 
     pub async fn create_field_index(
@@ -253,7 +264,7 @@ impl GrpcQdrant {
         cl.create_field_index(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| QqlError::backend("QQL-GRPC", format!("create_field_index: {e}"), None))
+            .map_err(|e| grpc_error("create_field_index", e))
     }
 
     pub async fn delete_field_index(
@@ -264,7 +275,7 @@ impl GrpcQdrant {
         cl.delete_field_index(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| QqlError::backend("QQL-GRPC", format!("delete_field_index: {e}"), None))
+            .map_err(|e| grpc_error("delete_field_index", e))
     }
 
     pub async fn count_points(
@@ -275,7 +286,7 @@ impl GrpcQdrant {
         cl.count(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| QqlError::backend("QQL-GRPC", format!("count: {e}"), None))
+            .map_err(|e| grpc_error("count", e))
     }
 
     pub async fn clear_payload(
@@ -286,7 +297,7 @@ impl GrpcQdrant {
         cl.clear_payload(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| QqlError::backend("QQL-GRPC", format!("clear_payload: {e}"), None))
+            .map_err(|e| grpc_error("clear_payload", e))
     }
 
     pub async fn delete_vectors(
@@ -297,7 +308,7 @@ impl GrpcQdrant {
         cl.delete_vectors(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| QqlError::backend("QQL-GRPC", format!("delete_vectors: {e}"), None))
+            .map_err(|e| grpc_error("delete_vectors", e))
     }
 
     pub async fn create_shard_key(
@@ -308,7 +319,7 @@ impl GrpcQdrant {
         cl.create_shard_key(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| QqlError::backend("QQL-GRPC", format!("create_shard_key: {e}"), None))
+            .map_err(|e| grpc_error("create_shard_key", e))
     }
 
     pub async fn delete_shard_key(
@@ -319,7 +330,7 @@ impl GrpcQdrant {
         cl.delete_shard_key(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| QqlError::backend("QQL-GRPC", format!("delete_shard_key: {e}"), None))
+            .map_err(|e| grpc_error("delete_shard_key", e))
     }
 
     pub async fn list_shard_keys(
@@ -330,7 +341,7 @@ impl GrpcQdrant {
         cl.list_shard_keys(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| QqlError::backend("QQL-GRPC", format!("list_shard_keys: {e}"), None))
+            .map_err(|e| grpc_error("list_shard_keys", e))
     }
 
     pub async fn list_collections_raw(&self) -> Result<qdrant::ListCollectionsResponse, QqlError> {
@@ -338,7 +349,7 @@ impl GrpcQdrant {
         cl.list(tonic::Request::new(qdrant::ListCollectionsRequest {}))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| QqlError::backend("QQL-GRPC", format!("list_collections: {e}"), None))
+            .map_err(|e| grpc_error("list_collections", e))
     }
 
     pub async fn collection_info_raw(
@@ -351,7 +362,7 @@ impl GrpcQdrant {
         }))
         .await
         .map(|r| r.into_inner())
-        .map_err(|e| QqlError::backend("QQL-GRPC", format!("collection_info: {e}"), None))
+        .map_err(|e| grpc_error("collection_info", e))
     }
 }
 
@@ -372,19 +383,20 @@ impl QdrantOps for GrpcQdrant {
         {
             Ok(resp) => Ok(resp.into_inner().result.map(|r| r.exists).unwrap_or(false)),
             Err(status) if status.code() == tonic::Code::NotFound => Ok(false),
-            Err(e) => Err(QqlError::backend(
-                "QQL-GRPC",
-                format!("collection_exists: {e}"),
-                None,
-            )),
+            Err(e) => Err(grpc_error("collection_exists", e)),
         }
     }
 
     async fn get_collection_info(&self, name: &str) -> Result<CollectionInfo, QqlError> {
         let resp = self.collection_info_raw(name.to_string()).await?;
-        let info = resp
-            .result
-            .ok_or_else(|| QqlError::backend("QQL-GRPC", "collection_info: no result", None))?;
+        let info = resp.result.ok_or_else(|| {
+            QqlError::backend(
+                "QQL-GRPC-NO-RESULT",
+                "collection_info response missing result field",
+                None,
+            )
+            .with_collection(name.to_string())
+        })?;
 
         Ok(CollectionInfo {
             status: info.status.to_string(),

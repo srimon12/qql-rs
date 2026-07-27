@@ -14,13 +14,13 @@ WebAssembly bindings for the QQL parser, plan compiler, and browser execution en
 ## Installation
 
 ```bash
-npm install qql-wasm
+npm install @veristamp/qql-wasm
 ```
 
 ## Quick Start
 
 ```javascript
-import init, { Client, Stmt, parse, isValid, inject_filter, compile, explain, analyze } from 'qql-wasm';
+import init, { Client, Stmt, parse, isValid, inject_filter, compile, explain, analyze } from '@veristamp/qql-wasm';
 
 async function run() {
     await init();

@@ -530,6 +530,10 @@ jobs:
             npm publish "./$package" --access public --provenance --ignore-scripts
           }
 
+          # Publish platform packages first.
+          # One failure must NOT prevent the remaining packages or the
+          # meta package from being published.
+          echo "=== Publishing platform packages ==="
           shopt -s nullglob
           platform_packages=(
             dist/*-linux-*.tgz
@@ -537,11 +541,50 @@ jobs:
             dist/*-win32-*.tgz
           )
           shopt -u nullglob
+
+          failed_platforms=()
           for package in "${platform_packages[@]}"; do
-            publish_if_missing "$package"
+            if publish_if_missing "$package"; then
+              echo "  OK: $package"
+            else
+              echo "  FAILED: $package (continuing)"
+              failed_platforms+=("$package")
+            fi
+            sleep 8
           done
-          publish_if_missing "dist/nqql-${VERSION}.tgz"
-          publish_if_missing "dist/nqql-edge-${VERSION}.tgz"
+
+          # Always attempt to publish the meta packages regardless of
+          # platform package failures.
+          echo "=== Publishing meta packages ==="
+          meta_failures=0
+          shopt -s nullglob
+          meta_packages=(
+            dist/*nqql-${VERSION}.tgz
+            dist/*nqql-edge-${VERSION}.tgz
+          )
+          shopt -u nullglob
+
+          for meta in "${meta_packages[@]}"; do
+            if publish_if_missing "$meta"; then
+              echo "  OK: $meta"
+            else
+              echo "  FAILED: $meta"
+              meta_failures=$((meta_failures + 1))
+            fi
+          done
+
+          if [[ ${#failed_platforms[@]} -gt 0 ]]; then
+            echo ""
+            echo "::warning::Some platform packages failed to publish:"
+            for pkg in "${failed_platforms[@]}"; do
+              echo "::warning::  - $pkg"
+            done
+          fi
+
+          if [[ $meta_failures -gt 0 ]]; then
+            echo "::error::Meta package(s) failed to publish!"
+            exit 1
+          fi
 
   publish-wasm:
     name: Publish qql-wasm to npm

@@ -45,36 +45,39 @@ impl<'a> Lexer<'a> {
             b'/' => self.single_char(TokenKind::Slash),
             b';' => self.single_char(TokenKind::Semicolon),
             b'-' => self.read_minus_or_number(),
+            b'`' => self.read_backtick_string(),
             b'"' | b'\'' => self.read_string(ch),
             _ => {
-                if self.input[self.pos..].starts_with('≥') {
+                if (ch == b'r' || ch == b'R')
+                    && self.pos + 1 < self.input.len()
+                    && (bytes[self.pos + 1] == b'\'' || bytes[self.pos + 1] == b'"')
+                {
+                    self.read_raw_string(bytes[self.pos + 1])
+                } else if self.input[self.pos..].starts_with('≥') {
                     let pos = self.pos;
                     self.pos += '≥'.len_utf8();
-                    return Ok(Token::new(
+                    Ok(Token::new(
                         TokenKind::Gte,
                         &self.input[pos..self.pos],
                         Span::new(pos, self.pos),
-                    ));
-                }
-                if self.input[self.pos..].starts_with('≤') {
+                    ))
+                } else if self.input[self.pos..].starts_with('≤') {
                     let pos = self.pos;
                     self.pos += '≤'.len_utf8();
-                    return Ok(Token::new(
+                    Ok(Token::new(
                         TokenKind::Lte,
                         &self.input[pos..self.pos],
                         Span::new(pos, self.pos),
-                    ));
-                }
-                if self.input[self.pos..].starts_with('≠') {
+                    ))
+                } else if self.input[self.pos..].starts_with('≠') {
                     let pos = self.pos;
                     self.pos += '≠'.len_utf8();
-                    return Ok(Token::new(
+                    Ok(Token::new(
                         TokenKind::NotEquals,
                         &self.input[pos..self.pos],
                         Span::new(pos, self.pos),
-                    ));
-                }
-                if is_digit(ch) {
+                    ))
+                } else if is_digit(ch) {
                     self.read_number()
                 } else if is_alpha(ch) || ch == b'_' || ch == b'$' {
                     self.read_identifier()
@@ -162,6 +165,12 @@ impl<'a> Lexer<'a> {
 
     fn read_string(&mut self, quote: u8) -> Result<Token<'a>, QqlError> {
         let start = self.pos;
+        if (quote == b'\'' && self.input[self.pos..].starts_with("'''"))
+            || (quote == b'"' && self.input[self.pos..].starts_with("\"\"\""))
+        {
+            return self.read_triple_quoted_string(quote);
+        }
+
         self.pos += 1;
         let content_start = self.pos;
 
@@ -199,6 +208,80 @@ impl<'a> Lexer<'a> {
         Err(QqlError::lex(
             "QQL-LEX-STRING",
             "unterminated string literal",
+            Span::new(start, self.input.len()),
+        ))
+    }
+
+    fn read_triple_quoted_string(&mut self, quote: u8) -> Result<Token<'a>, QqlError> {
+        let start = self.pos;
+        self.pos += 3;
+        let content_start = self.pos;
+        let delimiter = if quote == b'\'' { "'''" } else { "\"\"\"" };
+
+        if let Some(rel_pos) = self.input[self.pos..].find(delimiter) {
+            let content_end = self.pos + rel_pos;
+            let text = &self.input[content_start..content_end];
+            self.pos = content_end + 3;
+            return Ok(Token::new(
+                TokenKind::String,
+                text,
+                Span::new(start, self.pos),
+            ));
+        }
+
+        Err(QqlError::lex(
+            "QQL-LEX-STRING",
+            "unterminated triple-quoted string literal",
+            Span::new(start, self.input.len()),
+        ))
+    }
+
+    fn read_raw_string(&mut self, quote: u8) -> Result<Token<'a>, QqlError> {
+        let start = self.pos;
+        self.pos += 2;
+        let content_start = self.pos;
+
+        while self.pos < self.input.len() {
+            if self.input.as_bytes()[self.pos] == quote {
+                let text = &self.input[content_start..self.pos];
+                self.pos += 1;
+                return Ok(Token::new(
+                    TokenKind::String,
+                    text,
+                    Span::new(start, self.pos),
+                ));
+            }
+            self.pos += 1;
+        }
+
+        Err(QqlError::lex(
+            "QQL-LEX-STRING",
+            "unterminated raw string literal",
+            Span::new(start, self.input.len()),
+        ))
+    }
+
+    fn read_backtick_string(&mut self) -> Result<Token<'a>, QqlError> {
+        let start = self.pos;
+        self.pos += 1;
+        let content_start = self.pos;
+
+        while self.pos < self.input.len() {
+            if self.input.as_bytes()[self.pos] == b'`' {
+                let text = &self.input[content_start..self.pos];
+                self.pos += 1;
+                return Ok(Token::new(
+                    TokenKind::String,
+                    text,
+                    Span::new(start, self.pos),
+                ));
+            }
+            self.pos += 1;
+        }
+
+        Err(QqlError::lex(
+            "QQL-LEX-STRING",
+            "unterminated backtick string literal",
             Span::new(start, self.input.len()),
         ))
     }
