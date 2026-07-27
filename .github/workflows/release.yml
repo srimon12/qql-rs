@@ -341,10 +341,10 @@ jobs:
             cp LICENSE "crates/$package/LICENSE"
             for platform in "crates/$package"/npm/*; do
               cp LICENSE "$platform/LICENSE"
-              npm pack "$platform" --ignore-scripts --pack-destination "$GITHUB_WORKSPACE/dist"
+              npm pack "./$platform" --ignore-scripts --pack-destination "$GITHUB_WORKSPACE/dist"
             done
             find "crates/$package" -maxdepth 1 -name 'index.*.node' -delete
-            npm pack "crates/$package" --ignore-scripts --pack-destination "$GITHUB_WORKSPACE/dist"
+            npm pack "./crates/$package" --ignore-scripts --pack-destination "$GITHUB_WORKSPACE/dist"
           done
 
       - uses: actions/upload-artifact@v7
