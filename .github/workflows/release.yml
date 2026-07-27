@@ -557,9 +557,14 @@ jobs:
           # platform package failures.
           echo "=== Publishing meta packages ==="
           meta_failures=0
-          for meta in \
-            "dist/veristamp-nqql-${VERSION}.tgz" \
-            "dist/veristamp-nqql-edge-${VERSION}.tgz"; do
+          shopt -s nullglob
+          meta_packages=(
+            dist/*nqql-${VERSION}.tgz
+            dist/*nqql-edge-${VERSION}.tgz
+          )
+          shopt -u nullglob
+
+          for meta in "${meta_packages[@]}"; do
             if publish_if_missing "$meta"; then
               echo "  OK: $meta"
             else
@@ -568,15 +573,17 @@ jobs:
             fi
           done
 
-          if [[ ${#failed_platforms[@]} -gt 0 || $meta_failures -gt 0 ]]; then
+          if [[ ${#failed_platforms[@]} -gt 0 ]]; then
             echo ""
-            echo "::warning::Some packages failed to publish:"
+            echo "::warning::Some platform packages failed to publish:"
             for pkg in "${failed_platforms[@]}"; do
               echo "::warning::  - $pkg"
             done
-            if [[ $meta_failures -gt 0 ]]; then
-              echo "::warning::  - meta package(s)"
-            fi
+          fi
+
+          if [[ $meta_failures -gt 0 ]]; then
+            echo "::error::Meta package(s) failed to publish!"
+            exit 1
           fi
 
   publish-wasm:
