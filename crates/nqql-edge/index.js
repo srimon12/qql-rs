@@ -14,8 +14,13 @@ function nativeTarget() {
     }
     return 'linux-x64-gnu';
   }
-  if (platform === 'darwin' && (arch === 'x64' || arch === 'arm64')) {
-    return `darwin-${arch}`;
+  if (platform === 'darwin' && arch === 'arm64') {
+    return 'darwin-arm64';
+  }
+  if (platform === 'darwin' && arch === 'x64') {
+    throw new Error(
+      'nqql-edge 0.1.0 does not provide a macOS Intel binary because ONNX Runtime no longer ships the required x86_64 artifact',
+    );
   }
   if (platform === 'win32' && arch === 'x64') {
     return 'win32-x64-msvc';

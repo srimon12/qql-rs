@@ -13,6 +13,10 @@ npm install nqql-edge
 Embedding models are downloaded on first use and cached locally. Model weights
 are not included in the npm package.
 
+Prebuilt native packages are provided for Linux x64 (glibc), Windows x64, and
+Apple Silicon macOS. ONNX Runtime does not provide the required macOS Intel
+artifact, so `nqql-edge` does not publish a Darwin x64 package.
+
 ## Quick start
 
 ```javascript

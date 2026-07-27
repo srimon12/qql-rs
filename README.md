@@ -185,8 +185,8 @@ qql --edge exec "SHOW COLLECTIONS"
 qql --edge connect
 ```
 
-Release archives contain the full CLI, including edge support. A normal
-`cargo install qql-cli` remains smaller and includes REST and gRPC only.
+Release archives contain the default CLI with REST and gRPC support. Local edge
+execution remains opt-in through `cargo install qql-cli --features edge`.
 
 ---
 

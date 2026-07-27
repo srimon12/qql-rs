@@ -58,6 +58,11 @@ against the operation count.
 
 When neither feature is enabled, only `custom_executor()` is available.
 
+`fastembed-local` supports Linux x86-64, Windows x86-64, and Apple Silicon
+macOS. ONNX Runtime does not publish the required macOS Intel artifact, so
+Intel Mac users should disable default features and use `http-embedding` or
+`custom_executor()`.
+
 ## Boundaries
 
 - No `UPDATE ... SET VECTOR` via batch — uses individual route dispatch
