@@ -75,9 +75,10 @@ class TestParser(unittest.TestCase):
         )
 
     def test_explain(self):
-        plan = pyqql_edge.explain("QUERY 'hello' FROM docs LIMIT 10")
-        self.assertIn("Statement: QUERY", plan)
-        self.assertIn("Collection: docs", plan)
+        res = pyqql_edge.explain("QUERY 'hello' FROM docs LIMIT 10")
+        self.assertTrue(res["ok"])
+        self.assertIn("Statement: QUERY", res["plan"])
+        self.assertIn("Collection: docs", res["plan"])
 
     def test_parse_script(self):
         results = pyqql_edge.parse(
@@ -149,8 +150,9 @@ class TestEdgeExecutor(unittest.TestCase):
     def test_local_executor_basics(self):
         with _EdgeCase() as edge:
             self.assertIsInstance(edge.exec, pyqql_edge.Client)
-            plan = edge.exec.explain("QUERY 'hello' FROM docs LIMIT 10")
-            self.assertIn("Statement: QUERY", plan)
+            res = edge.exec.explain("QUERY 'hello' FROM docs LIMIT 10")
+            self.assertTrue(res["ok"])
+            self.assertIn("Statement: QUERY", res["plan"])
             with self.assertRaises(ValueError):
                 edge.exec.execute("SHOW COLLECTIONS", on_error="typo")
             report = edge.exec.execute("invalid syntax", on_error="continue")
