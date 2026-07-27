@@ -369,17 +369,9 @@ impl PyClient {
         })
     }
 
-    fn explain(&self, query: &Bound<'_, PyAny>) -> PyResult<String> {
-        if let Ok(py_stmt) = query.extract::<PyRef<PyStmt>>() {
-            Ok(qql_core::explain::explain_node(&py_stmt.inner))
-        } else if let Ok(query_str) = query.extract::<String>() {
-            qql_core::explain::explain(&query_str)
-                .map_err(|e| pyo3::exceptions::PySyntaxError::new_err(e.to_string()))
-        } else {
-            Err(pyo3::exceptions::PyTypeError::new_err(
-                "query must be a string or a Stmt object",
-            ))
-        }
+    fn explain(&self, query: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+        let py = query.py();
+        do_explain(py, query)
     }
 }
 // ── internal dispatch (plain impl) ────────────────────────────────
@@ -540,18 +532,40 @@ fn parse_on_error(s: &str) -> PyResult<qql::executor::OnError> {
     }
 }
 
-#[pyfunction]
-fn explain(query: &Bound<'_, PyAny>) -> PyResult<String> {
-    if let Ok(py_stmt) = query.extract::<PyRef<PyStmt>>() {
+fn do_explain(py: Python<'_>, query: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    let query_str: String;
+    let plan_result = if let Ok(py_stmt) = query.extract::<PyRef<PyStmt>>() {
+        query_str = String::from("<Stmt>");
         Ok(qql_core::explain::explain_node(&py_stmt.inner))
-    } else if let Ok(query_str) = query.extract::<String>() {
-        qql_core::explain::explain(&query_str)
-            .map_err(|e| pyo3::exceptions::PySyntaxError::new_err(e.to_string()))
+    } else if let Ok(s) = query.extract::<String>() {
+        query_str = s.clone();
+        qql_core::explain::explain(&s)
     } else {
-        Err(pyo3::exceptions::PyTypeError::new_err(
+        return Err(pyo3::exceptions::PyTypeError::new_err(
             "query must be a string or a Stmt object",
-        ))
+        ));
+    };
+
+    let dict = PyDict::new(py);
+    match plan_result {
+        Ok(plan) => {
+            dict.set_item("ok", true)?;
+            dict.set_item("query", query_str)?;
+            dict.set_item("plan", plan)?;
+        }
+        Err(e) => {
+            dict.set_item("ok", false)?;
+            dict.set_item("query", query_str)?;
+            dict.set_item("error", e.to_string())?;
+        }
     }
+    Ok(dict.into())
+}
+
+#[pyfunction]
+fn explain(query: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    let py = query.py();
+    do_explain(py, query)
 }
 
 #[pymodule]
