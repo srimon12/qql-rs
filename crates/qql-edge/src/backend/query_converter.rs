@@ -564,7 +564,7 @@ fn unsupported_shard() -> QqlError {
 }
 
 fn edge_error(message: impl Into<String>) -> QqlError {
-    QqlError::execution("QQL-EDGE", message.into(), None)
+    QqlError::execution("QQL-EDGE-QUERY", message.into(), None)
 }
 
 #[cfg(test)]
