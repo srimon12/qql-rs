@@ -200,57 +200,6 @@ Phase 3: Execute (qql-runtime)
 
 DDL (`CREATE COLLECTION`, `ALTER`, `CREATE INDEX`, etc.) and DML (`QUERY`, `UPSERT`, `DELETE`, etc.) all flow through the same plan-then-dispatch path. The old `executor/ddl.rs` has been removed; all operations use `to_rest_route()` or the gRPC route dispatcher.
 
-### Smart Batching (RUN-013)
-
-The executor automatically groups contiguous same-collection operations:
-
-- **QUERY batch**: contiguous `QUERY` statements on the same collection are sent via `POST /collections/{c}/points/query/batch` (one network call for N queries).
-- **Mutation batch**: contiguous UPSERT/DELETE/UPDATE PAYLOAD/VECTOR/CLEAR PAYLOAD/DELETE VECTOR on the same collection are sent via `POST /collections/{c}/points/batch?wait=true`.
-- All other statements execute individually. Statement order is preserved.
-
-Batching works for all input forms:
-- Semicolon-delimited multi-statement strings (`"Q1; Q2; Q3;"`)
-- Arrays of strings (`["Q1", "Q2"]`)
-- Pre-parsed statement arrays
-- The `nqql`, `pyqql`, and `qql-wasm` SDKs all use the same batch path
-
-Batch cardinality is validated: if Qdrant returns N+1 results for N operations, `QQL-BATCH-CARDINALITY` error is raised. `execute_batch_nodes` accepts `stop_on_error` to control whether a failing statement halts the entire batch.
-
-### Convenience Constructors
-
-The Rust executor provides pre-configured constructors (feature-gated: `rest` (default) and `grpc`):
-
-```rust
-// Requires --features rest (default)
-let exec = Executor::rest("http://localhost:6333", Some("api-key".into())).unwrap();
-// Requires --features grpc
-let exec = Executor::grpc("http://localhost:6334", Some("api-key".into())).unwrap();
-```
-
-### API Key Support (RUN-009)
-
-Both REST and gRPC clients accept an optional API key:
-
-- **REST**: `RestQdrant::new(url, api_key)` sends `api-key` header on every request
-- **gRPC**: `GrpcQdrant::from_url(url, api_key)` uses an `ApiKeyInterceptor` that attaches `api-key` to gRPC metadata
-- **wasm**: `Client(url, api_key)` sends `api-key` header via browser fetch
-- **nqql**: Client constructor accepts `{url, apiKey}` in options object
-- **pyqql**: Client constructor accepts `api_key` keyword argument
-
-### Response Envelope Validation
-
-The REST client validates Qdrant's success envelope `{"result":..., "status":"ok"}` and returns `QQL-BACKEND-ENVELOPE` errors for malformed responses. This catches proxy errors, upstream failures, and misrouted requests early.
-
-### gRPC Route Execution
-
-`execute_grpc_route()` handles every statement type via protobuf conversion. Key details:
-
-- `UpdateCollection` (ALTER) is converted with `vectors_config_diff` for per-vector param updates, using `update_collection_raw()` on `GrpcQdrant`
-- `CreateCollection` propagates top-level `on_disk` from `WITH VECTOR (on_disk = true)` to each vector config; sets sparse vector modifier to `"idf"`; creates shard keys sequentially after collection creation
-- Shard key support on `QUERY`, `COUNT`, `SCROLL`, `UPSERT`, `DELETE`, and related DML operations
-- Quantization config supports scalar, binary (with `encoding: onebit|twobits|oneandhalfbits`), product (with `compression: x4|x8|x16|x32|x64`), and turbo (with `bits`)
-- Index types: keyword, integer, float, geo, text, bool, datetime, uuid — each with type-specific options
-- `COUNT` supports `exact` parameter for precise vs approximate counts
 
 ### Backend Limitations
 
