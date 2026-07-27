@@ -105,7 +105,7 @@ server-side branch rules are therefore mandatory.
 5. Validate synchronized metadata:
 
    ```bash
-   python3 scripts/check_release.py --version 0.1.1
+   python3 scripts/check_release.py --version 0.1.2
    ```
 
 6. Open a pull request into `dev` and let CI pass.
@@ -131,14 +131,14 @@ Install the artifacts in clean temporary projects before approving the release.
    ```bash
    git switch main
    git pull --ff-only origin main
-   python3 scripts/check_release.py --version 0.1.1
+   python3 scripts/check_release.py --version 0.1.2
    ```
 
 4. Create an annotated tag on that exact commit:
 
    ```bash
-   git tag -a v0.1.1 -m "QQL 0.1.1"
-   git push origin v0.1.1
+   git tag -a v0.1.2 -m "QQL 0.1.2"
+   git push origin v0.1.2
    ```
 
 Only the tag push can publish. The release gate verifies that:
@@ -169,17 +169,17 @@ are published before their root dispatcher packages.
 After the workflow succeeds:
 
 ```bash
-cargo info --registry crates-io qql-core@0.1.1
-cargo info --registry crates-io qql@0.1.1
-cargo info --registry crates-io qql-edge@0.1.1
-cargo install qql-cli@0.1.1 --locked
+cargo info --registry crates-io qql-core@0.1.2
+cargo info --registry crates-io qql@0.1.2
+cargo info --registry crates-io qql-edge@0.1.2
+cargo install qql-cli@0.1.2 --locked
 
-python -m pip install pyqql==0.1.1
-python -m pip install pyqql-edge==0.1.1
+python -m pip install pyqql==0.1.2
+python -m pip install pyqql-edge==0.1.2
 
-npm view @veristamp/nqql@0.1.1
-npm view @veristamp/nqql-edge@0.1.1
-npm view @veristamp/qql-wasm@0.1.1
+npm view @veristamp/nqql@0.1.2
+npm view @veristamp/nqql-edge@0.1.2
+npm view @veristamp/qql-wasm@0.1.2
 ```
 
 Install the CLI archive on at least one platform and verify

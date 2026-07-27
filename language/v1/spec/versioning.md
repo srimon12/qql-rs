@@ -1,6 +1,6 @@
 # QQL versioning policy
 
-QQL uses `MAJOR.MINOR`. The current language version is `1.0`; the canonical AST
+QQL uses `MAJOR.MINOR`. The current language version is `1.1`; the canonical AST
 schema identifier is independently fixed as `qql.ast/v1`.
 
 ## Compatibility rule

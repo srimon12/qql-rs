@@ -49,9 +49,7 @@ impl<'a> AstLowerer<'a> {
             self.advance()?;
         }
 
-        if specs.is_empty() {
-            Ok(None)
-        } else if specs.len() == 1 {
+        if specs.len() == 1 {
             Ok(Some(specs.remove(0)))
         } else {
             Ok(Some(EmbeddingSpec::Multi(specs)))
@@ -67,18 +65,27 @@ impl<'a> AstLowerer<'a> {
             let mut sparse_model = None;
             let mut sparse_vector = None;
             let mut sparse_field = None;
+            let mut has_dense = false;
+            let mut has_sparse = false;
 
-            for expected in [TokenKind::Dense, TokenKind::Sparse] {
-                if self.peek()?.kind != expected {
-                    continue;
+            while self.peek()?.kind == TokenKind::Dense || self.peek()?.kind == TokenKind::Sparse {
+                let is_d = self.peek()?.kind == TokenKind::Dense;
+                if (is_d && has_dense) || (!is_d && has_sparse) {
+                    return Err(QqlError::parse(
+                        "QQL-PARSE-EMBEDDING",
+                        "duplicate clause in HYBRID embedding spec",
+                        self.peek()?.span,
+                    ));
                 }
                 self.advance()?;
                 let (model, vector, field) = self.parse_embedding_spec_modifiers()?;
-                if expected == TokenKind::Dense {
+                if is_d {
+                    has_dense = true;
                     dense_model = model;
                     dense_vector = vector;
                     dense_field = field;
                 } else {
+                    has_sparse = true;
                     sparse_model = model;
                     sparse_vector = vector;
                     sparse_field = field;
@@ -145,9 +152,7 @@ impl<'a> AstLowerer<'a> {
                 vector = Some(self.parse_identifier()?);
             } else if kind == TokenKind::On && field.is_none() {
                 self.advance()?;
-                if self.peek()?.kind == TokenKind::Field
-                    || self.peek()?.text.eq_ignore_ascii_case("FIELD")
-                {
+                if self.peek()?.kind == TokenKind::Field {
                     self.advance()?;
                 }
                 field = Some(self.parse_identifier()?);

@@ -694,14 +694,39 @@ impl Executor {
                     }
                 }
 
-                for (model, has_dense, has_sparse, dense_vec, sparse_vec) in collect_specs(emb) {
+                let specs = collect_specs(emb);
+                if !specs.is_empty() {
+                    let mut aggregated_dense = false;
+                    let mut aggregated_sparse = false;
+                    let mut main_model = None;
+                    let mut main_dense_vec = None;
+                    let mut main_sparse_vec = None;
+
+                    for (model, has_dense, has_sparse, dense_vec, sparse_vec) in specs {
+                        if has_dense {
+                            aggregated_dense = true;
+                            if main_dense_vec.is_none() {
+                                main_dense_vec = dense_vec;
+                            }
+                        }
+                        if has_sparse {
+                            aggregated_sparse = true;
+                            if main_sparse_vec.is_none() {
+                                main_sparse_vec = sparse_vec;
+                            }
+                        }
+                        if main_model.is_none() && model.is_some() {
+                            main_model = model;
+                        }
+                    }
+
                     self.ensure_collection_for_upsert(
                         &u.collection,
-                        model,
-                        has_dense,
-                        has_sparse,
-                        dense_vec,
-                        sparse_vec,
+                        main_model,
+                        aggregated_dense,
+                        aggregated_sparse,
+                        main_dense_vec,
+                        main_sparse_vec,
                     )
                     .await?;
                 }

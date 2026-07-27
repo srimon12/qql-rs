@@ -63,7 +63,7 @@
               [
                 "text",
                 {
-                  "Str": "QUERY '$QUERY_TEXT'\nFROM docs\nLIMIT $LIMIT;"
+                  "Str": "QUERY '$QUERY_TEXT' München Café 🚀\nFROM docs\nLIMIT $LIMIT;"
                 }
               ]
             ],
@@ -87,7 +87,7 @@
               [
                 "text",
                 {
-                  "Str": "QUERY \"$QUERY_TEXT\"\nFROM docs\nLIMIT $LIMIT;"
+                  "Str": "QUERY \"$QUERY_TEXT\" Café & Restaurant\nFROM docs\nLIMIT $LIMIT;"
                 }
               ]
             ],

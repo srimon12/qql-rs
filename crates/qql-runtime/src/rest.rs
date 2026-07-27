@@ -89,6 +89,7 @@ impl RestQdrant {
                 format!("failed to read response body: {error}"),
                 None,
             )
+            .with_url(url_buf.clone())
         })?;
         if !status.is_success() {
             let detail = if text.len() > 4096 {
@@ -110,6 +111,7 @@ impl RestQdrant {
                 format!("failed to parse Qdrant response: {error}"),
                 None,
             )
+            .with_url(url_buf.clone())
         })?;
         validate_success_envelope(&value, path)?;
         serde_json::from_value(value).map_err(|error| {
@@ -118,6 +120,7 @@ impl RestQdrant {
                 format!("failed to decode Qdrant response: {error}"),
                 None,
             )
+            .with_url(url_buf.clone())
         })
     }
 

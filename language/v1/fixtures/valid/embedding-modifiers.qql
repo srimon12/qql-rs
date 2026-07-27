@@ -7,4 +7,4 @@ UPSERT INTO docs VALUES {id: 1, text: 'hello', title: 'world'} USING DENSE MODEL
 UPSERT INTO docs VALUES {id: 1, text: 'hello', title: 'world'} USING DENSE MODEL 'm1' ON FIELD text INTO dense, DENSE MODEL 'm2' ON FIELD title INTO title_vec;
 
 -- Explicit field targeting for sparse model
-UPSERT INTO docs VALUES {id: 1, text: 'hello', body: 'body text'} USING SPARSE MODEL 'bm25' ON FIELD body INTO sparse_vec;
+UPSERT INTO docs VALUES {id: 1, text: 'hello', body: 'body text'} USING SPARSE ON FIELD body INTO sparse_vec;

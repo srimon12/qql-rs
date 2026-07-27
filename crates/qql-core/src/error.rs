@@ -78,7 +78,6 @@ pub struct QqlError {
     pub span: Option<Span>,
     /// Structured key-value metadata providing machine-readable context
     /// (e.g. `collection`, `status_code`, `field_name`, `url`).
-    #[cfg_attr(feature = "serde", serde(default))]
     pub fields: Vec<ErrorField>,
     /// Causal error that led to this one (error chaining).
     #[cfg_attr(feature = "serde", serde(skip))]

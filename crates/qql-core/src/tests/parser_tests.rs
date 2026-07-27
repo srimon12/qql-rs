@@ -369,6 +369,20 @@ fn parse_upsert_with_dollar_and_pattern_strings() {
         _ => panic!("expected string payload"),
     }
 
+    let raw_backslash_stmt = Parser::parse(
+        r"UPSERT INTO qql_memory VALUES { id: 'abc', pattern_text: r'path\to\$file' };"
+    ).unwrap();
+    let Stmt::Upsert(u_raw_bs) = raw_backslash_stmt else {
+        panic!()
+    };
+    let (_, val_raw_bs) = &u_raw_bs.points[0].payload[0];
+    match val_raw_bs {
+        crate::ast::Value::Str(s) => {
+            assert_eq!(s, r"path\to\$file");
+        }
+        _ => panic!("expected string payload"),
+    }
+
     let triple_stmt = Parser::parse(
         "UPSERT INTO qql_memory VALUES { id: 'abc', pattern_text: '''QUERY '$QUERY_TEXT'\nFROM berlin_airbnb\nLIMIT $LIMIT;''' };"
     ).unwrap();

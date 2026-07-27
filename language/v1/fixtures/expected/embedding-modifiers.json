@@ -91,7 +91,7 @@
         "embedding": {
           "Sparse": {
             "field": "body",
-            "model": "bm25",
+            "model": null,
             "vector": "sparse_vec"
           }
         },

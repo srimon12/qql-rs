@@ -218,17 +218,15 @@ impl<'a> Lexer<'a> {
         let content_start = self.pos;
         let delimiter = if quote == b'\'' { "'''" } else { "\"\"\"" };
 
-        while self.pos < self.input.len() {
-            if self.input[self.pos..].starts_with(delimiter) {
-                let text = &self.input[content_start..self.pos];
-                self.pos += 3;
-                return Ok(Token::new(
-                    TokenKind::String,
-                    text,
-                    Span::new(start, self.pos),
-                ));
-            }
-            self.pos += 1;
+        if let Some(rel_pos) = self.input[self.pos..].find(delimiter) {
+            let content_end = self.pos + rel_pos;
+            let text = &self.input[content_start..content_end];
+            self.pos = content_end + 3;
+            return Ok(Token::new(
+                TokenKind::String,
+                text,
+                Span::new(start, self.pos),
+            ));
         }
 
         Err(QqlError::lex(

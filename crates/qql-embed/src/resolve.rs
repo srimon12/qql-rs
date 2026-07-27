@@ -102,7 +102,8 @@ async fn resolve_upsert_embeddings(
     }
 
     if let Some(spec) = upsert.embedding.clone() {
-        resolve_single_embedding_spec(upsert, &spec, embedder).await?;
+        let mut seen_vectors = std::collections::HashSet::new();
+        resolve_single_embedding_spec(upsert, &spec, embedder, &mut seen_vectors).await?;
     }
 
     for directive in &upsert.embed {
@@ -569,11 +570,18 @@ async fn resolve_single_embedding_spec(
     upsert: &mut UpsertStmt,
     spec: &EmbeddingSpec,
     embedder: &dyn Embedder,
+    seen_vectors: &mut std::collections::HashSet<String>,
 ) -> Result<(), QqlError> {
     match spec {
         EmbeddingSpec::Multi(specs) => {
             for sub_spec in specs {
-                Box::pin(resolve_single_embedding_spec(upsert, sub_spec, embedder)).await?;
+                Box::pin(resolve_single_embedding_spec(
+                    upsert,
+                    sub_spec,
+                    embedder,
+                    seen_vectors,
+                ))
+                .await?;
             }
         }
         EmbeddingSpec::Dense {
@@ -583,35 +591,10 @@ async fn resolve_single_embedding_spec(
         } => {
             let model_name = model.as_deref().unwrap_or("default");
             let vector_name = vector.as_deref().unwrap_or(DENSE_VECTOR_NAME);
+            check_and_insert_vector_name(seen_vectors, vector_name)?;
 
             let targets = collect_text_targets(&upsert.points, field.as_deref());
-
-            if targets.is_empty() {
-                let actual_fields = upsert
-                    .points
-                    .first()
-                    .map(|p| {
-                        p.payload
-                            .iter()
-                            .map(|(k, _)| k.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    })
-                    .unwrap_or_default();
-
-                let err_msg = if let Some(f) = field {
-                    format!(
-                        "USING DENSE MODEL specified with ON FIELD '{f}' but no matching text payload field found. Found fields: {actual_fields}"
-                    )
-                } else {
-                    format!(
-                        "USING DENSE MODEL specified but no text payload field found. Expected one of: {}. Found fields: {actual_fields}",
-                        DEFAULT_TEXT_FIELDS_ORDERED.join(", ")
-                    )
-                };
-
-                return Err(QqlError::execution("QQL-EMBEDDING", err_msg, None));
-            }
+            validate_non_empty_targets(upsert, &targets, "DENSE", field.as_deref())?;
 
             let (indices, texts): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
             let vecs = embedder.embed_dense_batch(&texts, model_name).await?;
@@ -634,7 +617,11 @@ async fn resolve_single_embedding_spec(
                 ));
             }
             let vector_name = vector.as_deref().unwrap_or(SPARSE_VECTOR_NAME);
+            check_and_insert_vector_name(seen_vectors, vector_name)?;
+
             let targets = collect_text_targets(&upsert.points, field.as_deref());
+            validate_non_empty_targets(upsert, &targets, "SPARSE", field.as_deref())?;
+
             for (idx, text) in targets {
                 let sparse_vec = embedder.embed_sparse(&text).await?;
                 add_point_vector(
@@ -666,17 +653,21 @@ async fn resolve_single_embedding_spec(
             let d_vec_name = dense_vector.as_deref().unwrap_or(DENSE_VECTOR_NAME);
             let s_vec_name = sparse_vector.as_deref().unwrap_or(SPARSE_VECTOR_NAME);
 
+            check_and_insert_vector_name(seen_vectors, d_vec_name)?;
+            check_and_insert_vector_name(seen_vectors, s_vec_name)?;
+
             let dense_targets = collect_text_targets(&upsert.points, dense_field.as_deref());
             let sparse_targets = collect_text_targets(&upsert.points, sparse_field.as_deref());
 
-            if !dense_targets.is_empty() {
-                let (indices, texts): (Vec<usize>, Vec<String>) = dense_targets.into_iter().unzip();
-                let dense_vecs = embedder.embed_dense_batch(&texts, d_model).await?;
-                ensure_batch_len(dense_vecs.len(), indices.len(), d_model)?;
-                for (idx, d_vec) in indices.into_iter().zip(dense_vecs) {
-                    let point = &mut upsert.points[idx];
-                    add_point_vector(point, d_vec_name, VectorValue::Dense(d_vec))?;
-                }
+            validate_non_empty_targets(upsert, &dense_targets, "DENSE", dense_field.as_deref())?;
+            validate_non_empty_targets(upsert, &sparse_targets, "SPARSE", sparse_field.as_deref())?;
+
+            let (indices, texts): (Vec<usize>, Vec<String>) = dense_targets.into_iter().unzip();
+            let dense_vecs = embedder.embed_dense_batch(&texts, d_model).await?;
+            ensure_batch_len(dense_vecs.len(), indices.len(), d_model)?;
+            for (idx, d_vec) in indices.into_iter().zip(dense_vecs) {
+                let point = &mut upsert.points[idx];
+                add_point_vector(point, d_vec_name, VectorValue::Dense(d_vec))?;
             }
 
             for (idx, text) in sparse_targets {
@@ -692,6 +683,55 @@ async fn resolve_single_embedding_spec(
                 )?;
             }
         }
+    }
+    Ok(())
+}
+
+fn validate_non_empty_targets(
+    upsert: &UpsertStmt,
+    targets: &[(usize, String)],
+    kind: &str,
+    field: Option<&str>,
+) -> Result<(), QqlError> {
+    if targets.is_empty() {
+        let actual_fields = upsert
+            .points
+            .first()
+            .map(|p| {
+                p.payload
+                    .iter()
+                    .map(|(k, _)| k.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .unwrap_or_default();
+
+        let err_msg = if let Some(f) = field {
+            format!(
+                "USING {kind} MODEL specified with ON FIELD '{f}' but no matching text payload field found. Found fields: {actual_fields}"
+            )
+        } else {
+            format!(
+                "USING {kind} MODEL specified but no text payload field found. Expected one of: {}. Found fields: {actual_fields}",
+                DEFAULT_TEXT_FIELDS_ORDERED.join(", ")
+            )
+        };
+
+        return Err(QqlError::execution("QQL-EMBEDDING", err_msg, None));
+    }
+    Ok(())
+}
+
+fn check_and_insert_vector_name(
+    seen_vectors: &mut std::collections::HashSet<String>,
+    vector_name: &str,
+) -> Result<(), QqlError> {
+    if !seen_vectors.insert(vector_name.to_string()) {
+        return Err(QqlError::execution(
+            "QQL-EMBEDDING",
+            format!("duplicate target vector '{vector_name}' in multi-spec embedding clause"),
+            None,
+        ));
     }
     Ok(())
 }

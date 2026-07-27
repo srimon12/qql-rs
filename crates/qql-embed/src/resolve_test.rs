@@ -503,3 +503,29 @@ async fn test_no_text_field_errors_loudly() {
         "Expected one of: text, body, content, title, description, name, summary, document"
     ));
 }
+
+#[tokio::test]
+async fn test_multi_spec_field_resolution() {
+    let mut stmt = Parser::parse(
+        "UPSERT INTO docs VALUES {id: 1, title: 'header', body: 'content text'} USING DENSE MODEL 'm1' ON FIELD title INTO t_vec, DENSE MODEL 'm2' ON FIELD body INTO b_vec",
+    )
+    .unwrap();
+    let mock = MockEmbedder::default();
+    resolve_embeddings(&mut stmt, &mock).await.unwrap();
+
+    let calls = mock.dense_calls.lock().unwrap();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0].1, "header");
+    assert_eq!(calls[1].1, "content text");
+}
+
+#[tokio::test]
+async fn test_duplicate_target_vector_error() {
+    let mut stmt = Parser::parse(
+        "UPSERT INTO docs VALUES {id: 1, text: 'hello'} USING DENSE MODEL 'm1' INTO vec1, DENSE MODEL 'm2' INTO vec1",
+    )
+    .unwrap();
+    let mock = MockEmbedder::default();
+    let err = resolve_embeddings(&mut stmt, &mock).await.unwrap_err();
+    assert!(err.message.contains("duplicate target vector 'vec1'"));
+}

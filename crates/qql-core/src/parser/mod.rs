@@ -344,14 +344,19 @@ impl<'a> AstLowerer<'a> {
     }
 
     fn decode_string(&self, token: Token<'a>) -> Result<String, QqlError> {
-        let single_quoted = self
+        let first_byte = self
             .input
             .as_bytes()
             .get(token.span.start)
-            .is_some_and(|quote| *quote == b'\'');
-        if !(token.text.contains('\\') || single_quoted && token.text.contains("''")) {
+            .copied()
+            .unwrap_or(0);
+        let is_raw_or_backtick = first_byte == b'r' || first_byte == b'`';
+        if is_raw_or_backtick
+            || !(token.text.contains('\\') || first_byte == b'\'' && token.text.contains("''"))
+        {
             return Ok(token.text.to_string());
         }
+        let single_quoted = first_byte == b'\'';
         let mut decoded = String::with_capacity(token.text.len());
         let mut chars = token.text.chars().peekable();
         while let Some(ch) = chars.next() {

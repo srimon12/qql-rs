@@ -7,12 +7,12 @@ UPSERT INTO docs VALUES {id: 1, text: r'QUERY $QUERY_TEXT FROM docs USING dense 
 UPSERT INTO docs VALUES {id: 1, text: r"QUERY $QUERY_TEXT FROM docs USING dense LIMIT $LIMIT;"};
 
 -- Triple-quoted single multiline string literal
-UPSERT INTO docs VALUES {id: 1, text: '''QUERY '$QUERY_TEXT'
+UPSERT INTO docs VALUES {id: 1, text: '''QUERY '$QUERY_TEXT' München Café 🚀
 FROM docs
 LIMIT $LIMIT;'''};
 
 -- Triple-quoted double multiline string literal
-UPSERT INTO docs VALUES {id: 1, text: """QUERY "$QUERY_TEXT"
+UPSERT INTO docs VALUES {id: 1, text: """QUERY "$QUERY_TEXT" Café & Restaurant
 FROM docs
 LIMIT $LIMIT;"""};
 

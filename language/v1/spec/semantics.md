@@ -98,7 +98,7 @@ For an existing collection:
 - When `ON FIELD` is omitted, default payload text field resolution follows a deterministic priority order: `text` > `body` > `content` > `title` > `description` > `name` > `summary` > `document`.
 - Each `EMBED field INTO name` directive targets exactly the named vector;
   `USING SPARSE` selects sparse embedding, while the default is dense.
-- An UPSERT with no explicit `ON FIELD` or `EMBED` directive infers text from the payload using the deterministic priority order. If no matching text payload field exists, resolution fails with an error (`QQL-EMBED-MISSING-FIELD`).
+- An UPSERT with no explicit `ON FIELD` or `EMBED` directive infers text from the payload using the deterministic priority order. If no matching text payload field exists, resolution fails with an error (`QQL-EMBEDDING`).
 
 For a missing collection, implicit text ingestion creates the conventional
 `dense` + `sparse` topology. Explicit creation/embedding names are preserved.

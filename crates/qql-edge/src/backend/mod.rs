@@ -52,6 +52,7 @@ fn mutation_response() -> Value {
 /// Helper: create a spawn_blocking error with the operation name for context.
 fn spawn_error(operation: &str, error: impl std::fmt::Display) -> QqlError {
     QqlError::execution("QQL-EDGE-SPAWN", format!("{operation}: {error}"), None)
+        .with_field("operation", operation.to_string())
 }
 
 impl std::fmt::Debug for EdgeQdrant {
