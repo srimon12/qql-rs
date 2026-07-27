@@ -1,8 +1,8 @@
 # QQL release procedure
 
-All public packages use one repository version. The current release is `0.1.1`;
-the corresponding Git tag is `v0.1.1`. The QQL language specification version
-(`1.0`) is independent from the package release version.
+All public packages use one repository version. The current release is `0.1.2`;
+the corresponding Git tag is `v0.1.2`. The QQL language specification version
+(`1.1`) is independent from the package release version.
 
 ## Published artifacts
 
