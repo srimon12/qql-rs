@@ -70,7 +70,7 @@ fn plan_vector_to_edge(
 }
 
 fn err(msg: impl Into<std::borrow::Cow<'static, str>>) -> QqlError {
-    QqlError::execution("QQL-EDGE", msg, None)
+    QqlError::execution("QQL-EDGE-VECTOR", msg, None)
 }
 
 pub(crate) fn parse_vector_struct(

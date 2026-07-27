@@ -10,7 +10,7 @@ function nativeTarget() {
   const { platform, arch } = process;
   if (platform === 'linux' && arch === 'x64') {
     if (isMusl()) {
-      throw new Error('nqql 0.1.0 does not provide a Linux musl binary');
+      throw new Error('nqql 0.1.1 does not provide a Linux musl binary');
     }
     return 'linux-x64-gnu';
   }

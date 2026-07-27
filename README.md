@@ -43,10 +43,10 @@ for t in tokenize("QUERY 'search' FROM docs WHERE id = 1"):
 
 ### Node.js
 ```bash
-npm install nqql
+npm install @veristamp/nqql
 ```
 ```js
-import { parse, injectFilter, isValid, Client } from 'nqql';
+import { parse, injectFilter, isValid, Client } from '@veristamp/nqql';
 
 const ast = parse("QUERY 'search' FROM docs USING dense LIMIT 10");
 const safe = injectFilter("QUERY 'x' FROM docs LIMIT 5", "tenant_id", "=", "acme");
@@ -70,7 +70,7 @@ if let ast::Stmt::Query(q) = &stmt {
 
 ### WASM (Browser)
 ```js
-import init, { Client, parse, tokenize, isValid } from 'qql-wasm';
+import init, { Client, parse, tokenize, isValid } from '@veristamp/qql-wasm';
 
 const ast = parse("QUERY 'hello' FROM docs LIMIT 5");
 const tokens = tokenize("CREATE COLLECTION docs (dense VECTOR(384, COSINE))");

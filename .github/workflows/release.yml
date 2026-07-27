@@ -420,7 +420,7 @@ jobs:
           wait_for_crate() {
             local crate="$1"
             for attempt in $(seq 1 30); do
-              if cargo info "${crate}@${VERSION}" >/dev/null 2>&1; then
+              if cargo info --registry crates-io "${crate}@${VERSION}" >/dev/null 2>&1; then
                 return 0
               fi
               sleep 10
@@ -431,11 +431,11 @@ jobs:
 
           publish_crate() {
             local crate="$1"
-            if cargo info "${crate}@${VERSION}" >/dev/null 2>&1; then
+            if cargo info --registry crates-io "${crate}@${VERSION}" >/dev/null 2>&1; then
               echo "${crate}@${VERSION} is already published; skipping."
               return 0
             fi
-            cargo publish --locked -p "$crate"
+            cargo publish --locked --registry crates-io -p "$crate"
             wait_for_crate "$crate"
           }
 
@@ -530,6 +530,10 @@ jobs:
             npm publish "./$package" --access public --provenance --ignore-scripts
           }
 
+          # Publish platform packages first.
+          # One failure must NOT prevent the remaining packages or the
+          # meta package from being published.
+          echo "=== Publishing platform packages ==="
           shopt -s nullglob
           platform_packages=(
             dist/*-linux-*.tgz
@@ -537,11 +541,43 @@ jobs:
             dist/*-win32-*.tgz
           )
           shopt -u nullglob
+
+          failed_platforms=()
           for package in "${platform_packages[@]}"; do
-            publish_if_missing "$package"
+            if publish_if_missing "$package"; then
+              echo "  OK: $package"
+            else
+              echo "  FAILED: $package (continuing)"
+              failed_platforms+=("$package")
+            fi
+            sleep 8
           done
-          publish_if_missing "dist/nqql-${VERSION}.tgz"
-          publish_if_missing "dist/nqql-edge-${VERSION}.tgz"
+
+          # Always attempt to publish the meta packages regardless of
+          # platform package failures.
+          echo "=== Publishing meta packages ==="
+          meta_failures=0
+          for meta in \
+            "dist/veristamp-nqql-${VERSION}.tgz" \
+            "dist/veristamp-nqql-edge-${VERSION}.tgz"; do
+            if publish_if_missing "$meta"; then
+              echo "  OK: $meta"
+            else
+              echo "  FAILED: $meta"
+              meta_failures=$((meta_failures + 1))
+            fi
+          done
+
+          if [[ ${#failed_platforms[@]} -gt 0 || $meta_failures -gt 0 ]]; then
+            echo ""
+            echo "::warning::Some packages failed to publish:"
+            for pkg in "${failed_platforms[@]}"; do
+              echo "::warning::  - $pkg"
+            done
+            if [[ $meta_failures -gt 0 ]]; then
+              echo "::warning::  - meta package(s)"
+            fi
+          fi
 
   publish-wasm:
     name: Publish qql-wasm to npm

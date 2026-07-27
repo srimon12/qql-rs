@@ -5,7 +5,7 @@ Native Node.js bindings via N-API (napi-rs).
 ## Install
 
 ```bash
-npm install nqql
+npm install @veristamp/nqql
 ```
 
 ---
@@ -15,7 +15,7 @@ npm install nqql
 The `Client` constructor accepts a single options object:
 
 ```js
-const { Client } = require('nqql');
+const { Client } = require('@veristamp/nqql');
 
 // Minimal
 const client = new Client({ url: "http://localhost:6333" });
@@ -45,7 +45,7 @@ const client = new Client({
 Parse user query, inject tenant isolation, execute.
 
 ```js
-const { parse, injectFilter, Client } = require('nqql');
+const { parse, injectFilter, Client } = require('@veristamp/nqql');
 
 const client = new Client({ url: "http://localhost:6333" });
 
@@ -71,7 +71,7 @@ Note: `injectFilter` does not support `!=`. Use equality and wrap with `NOT`, or
 Pass `{ onError: "continue" }` to collect per-statement failures; the default is `"stop"`.
 
 ```js
-const { parse, Client } = require('nqql');
+const { parse, Client } = require('@veristamp/nqql');
 
 const client = new Client({ url: "http://localhost:6333" });
 
@@ -107,7 +107,7 @@ const results = await client.execute([
 Multi-stage hybrid retrieval with CTE, Fusion, and Rerank.
 
 ```js
-const { Client } = require('nqql');
+const { Client } = require('@veristamp/nqql');
 
 const client = new Client({ url: "http://localhost:6333" });
 
@@ -133,7 +133,7 @@ const result = await client.execute(`
 ## 5. Stmt Class
 
 ```js
-const { parse } = require('nqql');
+const { parse } = require('@veristamp/nqql');
 
 const [stmt] = parse("QUERY 'search' FROM docs USING dense LIMIT 10");
 
@@ -154,7 +154,7 @@ console.log(stmt.toObject());
 ## 6. Free Functions
 
 ```js
-const { parse, parseJson, isValid, injectFilter, tokenize, compileQuery } = require('nqql');
+const { parse, parseJson, isValid, injectFilter, tokenize, compileQuery } = require('@veristamp/nqql');
 
 parse("QUERY 'x' FROM docs LIMIT 5");                    // Always Stmt[]
 parse("Q1; Q2;");                                        // Script -> Stmt[]
@@ -176,7 +176,7 @@ HTTP/IPC forwarding or any path that serialises to JSON anyway.
 A top-level `execute()` function creates a temporary client per call:
 
 ```js
-const { execute } = require('nqql');
+const { execute } = require('@veristamp/nqql');
 
 // Single query
 const result = await execute("QUERY 'search' FROM docs USING dense LIMIT 10");

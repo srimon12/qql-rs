@@ -10,7 +10,7 @@ function nativeTarget() {
   const { platform, arch } = process;
   if (platform === 'linux' && arch === 'x64') {
     if (isMusl()) {
-      throw new Error('nqql-edge 0.1.0 does not provide a Linux musl binary');
+      throw new Error('nqql-edge 0.1.1 does not provide a Linux musl binary');
     }
     return 'linux-x64-gnu';
   }
@@ -19,7 +19,7 @@ function nativeTarget() {
   }
   if (platform === 'darwin' && arch === 'x64') {
     throw new Error(
-      'nqql-edge 0.1.0 does not provide a macOS Intel binary because ONNX Runtime no longer ships the required x86_64 artifact',
+      'nqql-edge 0.1.1 does not provide a macOS Intel binary because ONNX Runtime no longer ships the required x86_64 artifact',
     );
   }
   if (platform === 'win32' && arch === 'x64') {

@@ -75,6 +75,8 @@ pub fn is_contextual_field_name(kind: TokenKind) -> bool {
             | TokenKind::By
             | TokenKind::Count
             | TokenKind::Clear
+            | TokenKind::Field
+            | TokenKind::Into
     )
 }
 
@@ -91,6 +93,8 @@ fn is_contextual_identifier(kind: TokenKind) -> bool {
             | TokenKind::Vector
             | TokenKind::Count
             | TokenKind::Clear
+            | TokenKind::Field
+            | TokenKind::Into
     )
 }
 
@@ -374,6 +378,7 @@ impl<'a> AstLowerer<'a> {
                 '\\' => '\\',
                 '\'' => '\'',
                 '"' => '"',
+                '$' => '$',
                 _ => {
                     return Err(QqlError::parse(
                         "QQL-PARSE-ESCAPE",

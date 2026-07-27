@@ -91,6 +91,18 @@ UPSERT INTO docs VALUES
   {id: 2, text: 'Rust programming language', category: 'programming'}
   USING DENSE MODEL 'all-minilm:l6-v2';
 
+-- Explicit target payload field and named destination vector
+UPSERT INTO docs VALUES
+  {id: 1, text: 'primary text', title: 'Qdrant Overview', category: 'tech'}
+  USING DENSE MODEL 'all-minilm' ON FIELD title INTO title_vec;
+
+-- Multiple target fields mapped to distinct named vectors
+UPSERT INTO docs VALUES
+  {id: 1, text: 'primary text', title: 'Qdrant Overview'}
+  USING
+    DENSE MODEL 'all-minilm' ON FIELD text INTO dense,
+    DENSE MODEL 'all-minilm' ON FIELD title INTO title_vec;
+
 -- Update vector by point ID
 UPDATE docs SET VECTOR dense = [0.1, 0.2, 0.3] WHERE id = 1;
 
@@ -250,14 +262,14 @@ let res = exec.execute(
 
 ### Node.js (`nqql`)
 ```js
-const { Client } = require('nqql');
+const { Client } = require('@veristamp/nqql');
 const client = new Client({ url: "http://localhost:6333" });
 const result = await client.execute("QUERY 'search' FROM docs USING dense LIMIT 5");
 ```
 
 ### WebAssembly (`qql-wasm`)
 ```js
-import init, { Client } from 'qql-wasm';
+import init, { Client } from '@veristamp/qql-wasm';
 await init();
 const client = new Client("http://localhost:6333", null);
 const result = await client.execute("QUERY 'search' FROM docs USING dense LIMIT 5");

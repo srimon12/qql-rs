@@ -116,7 +116,7 @@ async fn execute_for_tenant(query: &str, tenant: &str) {
 ### Node.js
 
 ```js
-import { parse, injectFilter, Client } from 'nqql';
+import { parse, injectFilter, Client } from '@veristamp/nqql';
 
 const [stmt] = parse("QUERY 'supply chain risks' FROM sec10k LIMIT 10");
 stmt.injectFilter("tenant_id", "=", "honeywell");

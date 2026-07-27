@@ -110,7 +110,7 @@ npm run build
 ```
 
 ```javascript
-const nqql = require('nqql');
+const nqql = require('@veristamp/nqql');
 const client = new nqql.Client({ url: "http://localhost:6333" });
 const result = await client.execute("QUERY 'search' FROM docs USING dense LIMIT 5");
 console.log(result);

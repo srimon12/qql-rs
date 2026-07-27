@@ -171,7 +171,7 @@ pyqql.inject_filter(stmt, "group_id", "=", "org_99")
 
 ### Node.js (`nqql`)
 ```javascript
-const nqql = require('nqql');
+const nqql = require('@veristamp/nqql');
 
 const stmt = nqql.parse("QUERY 'laptops' FROM products LIMIT 10");
 nqql.injectFilter(stmt, "group_id", "=", "org_99");
@@ -179,7 +179,7 @@ nqql.injectFilter(stmt, "group_id", "=", "org_99");
 
 ### WebAssembly (`qql-wasm`)
 ```javascript
-import init, { parse, inject_filter } from 'qql-wasm';
+import init, { parse, inject_filter } from '@veristamp/qql-wasm';
 
 await init();
 let stmt = parse("QUERY 'laptops' FROM products LIMIT 10");

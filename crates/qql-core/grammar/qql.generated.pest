@@ -283,16 +283,21 @@ upsert = {
 }
 
 embedding_options = {
-    ^"USING"
-    ~ (
-        ^"DENSE" ~ (^"MODEL" ~ string)? ~ (^"VECTOR" ~ vector_name)?
-        | ^"SPARSE" ~ (^"MODEL" ~ string)? ~ (^"VECTOR" ~ vector_name)?
-        | ^"MODEL" ~ string ~ (^"VECTOR" ~ vector_name)?
-        | ^"VECTOR" ~ vector_name
-        | ^"HYBRID"
-          ~ (^"DENSE" ~ (^"MODEL" ~ string)? ~ (^"VECTOR" ~ vector_name)?)?
-          ~ (^"SPARSE" ~ (^"MODEL" ~ string)? ~ (^"VECTOR" ~ vector_name)?)?
-    )
+    ^"USING" ~ single_embedding_spec ~ ("," ~ single_embedding_spec)*
+}
+
+single_embedding_spec = _{
+    ^"HYBRID"
+      ~ (^"DENSE" ~ spec_modifier*)?
+      ~ (^"SPARSE" ~ spec_modifier*)?
+    | (^"DENSE" | ^"SPARSE") ~ spec_modifier*
+    | spec_modifier+
+}
+
+spec_modifier = _{
+    ^"MODEL" ~ string
+    | (^"VECTOR" | ^"INTO") ~ vector_name
+    | ^"ON" ~ ^"FIELD"? ~ field
 }
 
 embed_clause = { ^"EMBED" ~ embed_directive ~ ("," ~ embed_directive)* }
@@ -530,12 +535,23 @@ float = @{
 }
 exponent = @{ (^"e" | ^"E") ~ ("+" | "-")? ~ ASCII_DIGIT+ }
 
-string = _{ single_quoted_string | double_quoted_string }
+string = _{ triple_quoted_string | raw_string | backtick_string | single_quoted_string | double_quoted_string }
+triple_quoted_string = @{
+    ("'''" ~ (!"'''" ~ ANY)* ~ "'''")
+    | ("\"\"\"" ~ (!"\"\"\"" ~ ANY)* ~ "\"\"\"")
+}
+raw_string = @{
+    ("r'" ~ (!"'" ~ ANY)* ~ "'")
+    | ("r\"" ~ (!"\"" ~ ANY)* ~ "\"")
+}
+backtick_string = @{
+    "`" ~ (!"`" ~ ANY)* ~ "`"
+}
 single_quoted_string = @{
     "'"
     ~ (
         "''"
-        | "\\" ~ ("\\" | "'" | "\"" | "n" | "r" | "t")
+        | "\\" ~ ("\\" | "'" | "\"" | "n" | "r" | "t" | "$")
         | !("'" | "\\") ~ ANY
     )*
     ~ "'"
@@ -543,7 +559,7 @@ single_quoted_string = @{
 double_quoted_string = @{
     "\""
     ~ (
-        "\\" ~ ("\\" | "'" | "\"" | "n" | "r" | "t")
+        "\\" ~ ("\\" | "'" | "\"" | "n" | "r" | "t" | "$")
         | !("\"" | "\\") ~ ANY
     )*
     ~ "\""

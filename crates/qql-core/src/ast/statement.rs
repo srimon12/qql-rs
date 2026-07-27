@@ -308,17 +308,22 @@ pub enum EmbeddingSpec {
     Dense {
         model: Option<String>,
         vector: Option<String>,
+        field: Option<String>,
     },
     Sparse {
         model: Option<String>,
         vector: Option<String>,
+        field: Option<String>,
     },
     Hybrid {
         dense_model: Option<String>,
         dense_vector: Option<String>,
+        dense_field: Option<String>,
         sparse_model: Option<String>,
         sparse_vector: Option<String>,
+        sparse_field: Option<String>,
     },
+    Multi(Vec<EmbeddingSpec>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

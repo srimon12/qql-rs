@@ -660,35 +660,51 @@ impl Executor {
 
         if let Stmt::Upsert(u) = &stmt {
             if let Some(ref emb) = u.embedding {
-                let (model, has_dense, has_sparse, dense_vec, sparse_vec) = match emb {
-                    ast::EmbeddingSpec::Dense { model, vector } => {
-                        (model.as_deref(), true, false, vector.as_deref(), None)
+                type SpecTuple<'a> = (
+                    Option<&'a str>,
+                    bool,
+                    bool,
+                    Option<&'a str>,
+                    Option<&'a str>,
+                );
+
+                fn collect_specs(spec: &ast::EmbeddingSpec) -> Vec<SpecTuple<'_>> {
+                    match spec {
+                        ast::EmbeddingSpec::Dense { model, vector, .. } => {
+                            vec![(model.as_deref(), true, false, vector.as_deref(), None)]
+                        }
+                        ast::EmbeddingSpec::Sparse { model, vector, .. } => {
+                            vec![(model.as_deref(), false, true, None, vector.as_deref())]
+                        }
+                        ast::EmbeddingSpec::Hybrid {
+                            dense_model,
+                            dense_vector,
+                            sparse_vector,
+                            ..
+                        } => vec![(
+                            dense_model.as_deref(),
+                            true,
+                            true,
+                            dense_vector.as_deref(),
+                            sparse_vector.as_deref(),
+                        )],
+                        ast::EmbeddingSpec::Multi(specs) => {
+                            specs.iter().flat_map(collect_specs).collect()
+                        }
                     }
-                    ast::EmbeddingSpec::Sparse { model, vector } => {
-                        (model.as_deref(), false, true, None, vector.as_deref())
-                    }
-                    ast::EmbeddingSpec::Hybrid {
-                        dense_model,
-                        dense_vector,
-                        sparse_vector,
-                        ..
-                    } => (
-                        dense_model.as_deref(),
-                        true,
-                        true,
-                        dense_vector.as_deref(),
-                        sparse_vector.as_deref(),
-                    ),
-                };
-                self.ensure_collection_for_upsert(
-                    &u.collection,
-                    model,
-                    has_dense,
-                    has_sparse,
-                    dense_vec,
-                    sparse_vec,
-                )
-                .await?;
+                }
+
+                for (model, has_dense, has_sparse, dense_vec, sparse_vec) in collect_specs(emb) {
+                    self.ensure_collection_for_upsert(
+                        &u.collection,
+                        model,
+                        has_dense,
+                        has_sparse,
+                        dense_vec,
+                        sparse_vec,
+                    )
+                    .await?;
+                }
             }
             if let Some(info) = upsert_schema.as_ref() {
                 self.validate_embedded_upsert(u, info)?;

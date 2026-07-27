@@ -10,7 +10,7 @@ use qql_core::error::QqlError;
 use qql_embed::{Embedder, SparseVector};
 
 fn err(msg: impl Into<std::borrow::Cow<'static, str>>) -> QqlError {
-    QqlError::execution("QQL-EDGE", msg, None)
+    QqlError::execution("QQL-EDGE-EMBED", msg, None)
 }
 
 /// Public description of a local ONNX embedding model.
