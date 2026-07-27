@@ -42,7 +42,7 @@ pip install pyqql pyqql-edge
 npm install @veristamp/nqql @veristamp/nqql-edge
 
 # WebAssembly
-npm install @veristamp/qql-wasm
+npm install qql-wasm
 
 # Rust
 cargo add qql qql-core
