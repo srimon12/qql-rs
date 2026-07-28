@@ -51,7 +51,7 @@ impl<'a> AstLowerer<'a> {
     pub fn parse_count(&mut self) -> Result<Stmt, QqlError> {
         self.expect(TokenKind::Count)?;
         self.expect(TokenKind::From)?;
-        let collection = self.parse_identifier()?;
+        let collection = crate::ast::QueryCollection::Explicit(self.parse_identifier()?);
         let filter = if self.peek()?.kind == TokenKind::Where {
             self.advance()?;
             Some(Box::new(self.parse_filter_expr()?))

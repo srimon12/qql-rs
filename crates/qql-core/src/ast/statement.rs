@@ -554,7 +554,7 @@ pub struct DropIndexStmt {
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CountStmt {
-    pub collection: String,
+    pub collection: QueryCollection,
     pub filter: Option<Box<FilterExpr>>,
     pub shard_key: Option<String>,
 }
@@ -609,7 +609,7 @@ pub struct UpdatePayloadStmt {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize))]
 pub enum Stmt {
     Query(Box<QueryStmt>),
     Scroll(Box<ScrollStmt>),
@@ -630,4 +630,64 @@ pub enum Stmt {
     UpdateVector(Box<UpdateVectorStmt>),
     UpdatePayload(Box<UpdatePayloadStmt>),
     Count(Box<CountStmt>),
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for Stmt {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeMap;
+        match self {
+            Stmt::Query(s) => serializer.serialize_newtype_variant("Stmt", 0, "Query", s),
+            Stmt::Scroll(s) => serializer.serialize_newtype_variant("Stmt", 1, "Scroll", s),
+            Stmt::Upsert(s) => serializer.serialize_newtype_variant("Stmt", 2, "Upsert", s),
+            Stmt::CreateCollection(s) => {
+                serializer.serialize_newtype_variant("Stmt", 3, "CreateCollection", s)
+            }
+            Stmt::CreateIndex(s) => {
+                serializer.serialize_newtype_variant("Stmt", 4, "CreateIndex", s)
+            }
+            Stmt::DropIndex(s) => serializer.serialize_newtype_variant("Stmt", 5, "DropIndex", s),
+            Stmt::CreateShardKey(s) => {
+                serializer.serialize_newtype_variant("Stmt", 6, "CreateShardKey", s)
+            }
+            Stmt::DropShardKey(s) => {
+                serializer.serialize_newtype_variant("Stmt", 7, "DropShardKey", s)
+            }
+            Stmt::AlterCollection(s) => {
+                serializer.serialize_newtype_variant("Stmt", 8, "AlterCollection", s)
+            }
+            Stmt::DropCollection(s) => {
+                serializer.serialize_newtype_variant("Stmt", 9, "DropCollection", s)
+            }
+            Stmt::ShowCollections => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                let empty = std::collections::BTreeMap::<String, String>::new();
+                map.serialize_entry("ShowCollections", &empty)?;
+                map.end()
+            }
+            Stmt::ShowCollection(s) => {
+                serializer.serialize_newtype_variant("Stmt", 11, "ShowCollection", s)
+            }
+            Stmt::ShowShardKeys(s) => {
+                serializer.serialize_newtype_variant("Stmt", 12, "ShowShardKeys", s)
+            }
+            Stmt::Delete(s) => serializer.serialize_newtype_variant("Stmt", 13, "Delete", s),
+            Stmt::ClearPayload(s) => {
+                serializer.serialize_newtype_variant("Stmt", 14, "ClearPayload", s)
+            }
+            Stmt::DeleteVector(s) => {
+                serializer.serialize_newtype_variant("Stmt", 15, "DeleteVector", s)
+            }
+            Stmt::UpdateVector(s) => {
+                serializer.serialize_newtype_variant("Stmt", 16, "UpdateVector", s)
+            }
+            Stmt::UpdatePayload(s) => {
+                serializer.serialize_newtype_variant("Stmt", 17, "UpdatePayload", s)
+            }
+            Stmt::Count(s) => serializer.serialize_newtype_variant("Stmt", 18, "Count", s),
+        }
+    }
 }
