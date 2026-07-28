@@ -1,12 +1,12 @@
 # pyqql
 
-Native Python bindings for the Qdrant Query Language (QQL) parser, router, and execution engine, compiled with PyO3 0.23.
+Native Python bindings for the Qdrant Query Language (QQL) parser, router, and execution engine, compiled with PyO3.
 
 ## Features
 
 - **Live Qdrant Execution**: Connect to live Qdrant instances over REST (default) or gRPC
 - **Automated Embedding Inference**: Integrate custom HTTP embedder models (Ollama, OpenAI, vLLM, TEI) for text-to-vector search
-- **Zero-Copy Route Lowering**: Lower QQL queries to typed `{ method, path, payload }` route dicts via `compile_query`
+- **Native Route Lowering**: Lower QQL queries to typed `{ method, path, payload }` route dicts via `compile_query`
 - **Native parsing**: Rust-speed QQL parsing in Python returning typed `Stmt` objects or Python dicts
 - **Filter injection**: Add tenant isolation filters programmatically
 - **Smart batching**: Auto-batches contiguous same-collection query/mutation statements into single network calls
@@ -27,6 +27,7 @@ pip install pyqql
 ## Quick Start
 
 ```python
+import asyncio
 import pyqql
 
 # 1. Connect to live Qdrant with optional custom embedding provider (e.g. Ollama)
@@ -48,12 +49,16 @@ client = pyqql.Client(
 result = client.execute("QUERY 'cardiology' FROM medical_records USING dense LIMIT 5")
 print(result)
 
-# Async variant
-future = client.execute_async("QUERY 'cardiology' FROM medical_records USING dense LIMIT 5")
-
 # Explain query execution plan
 plan = client.explain("QUERY 'cardiology' FROM medical_records USING dense LIMIT 5")
 print(plan)
+
+# Async execution example
+async def main():
+    report = await client.execute_async("QUERY 'cardiology' FROM medical_records USING dense LIMIT 5")
+    print(report)
+
+asyncio.run(main())
 
 # 2. Pure AST Parsing & Filter Injection
 stmt = pyqql.parse("QUERY 'vector database' FROM docs USING dense LIMIT 10")[0]
@@ -74,9 +79,48 @@ route = pyqql.compile_query("QUERY 'search' FROM docs LIMIT 10")
 # route = { "method": "POST", "path": "/collections/docs/points/query", "payload": {...} }
 ```
 
-All execution methods return an `ExecutionReport` dict:
-`{"ok": bool, "results": list, "succeeded": int, "failed": int}`. The
-`results` list always contains one entry per executed statement.
+## Execution Results & Error Handling
+
+### ExecutionReport Format
+
+All execution methods return an `ExecutionReport` dictionary:
+
+```python
+{
+    "ok": True,
+    "results": [
+        {
+            "ok": True,
+            "operation": "QUERY",
+            "message": "Found 5 hits",
+            "data": [...]
+        }
+    ],
+    "succeeded": 1,
+    "failed": 0
+}
+```
+
+### Failure Policy (`on_error`)
+
+| Policy | Behavior |
+|---|---|
+| `"stop"` (default) | Halts execution on the first error and raises a Python exception. |
+| `"continue"` | Continues executing remaining statements, collecting failures into `results` with `ok: False`. |
+
+### Exceptions
+
+`pyqql` raises standard Python exception types:
+- `SyntaxError` — QQL parse or lex errors.
+- `TypeError` — Invalid option or argument types.
+- `ValueError` — Invalid configuration values or unaccepted filter operators.
+- `RuntimeError` — Network transport or Qdrant backend failures.
+
+## Filter Injection Operators
+
+`inject_filter` accepts comparison operators:
+- **Accepted**: `=`, `==`, `eq`, `>`, `gt`, `>=`, `gte`, `<`, `lt`, `<=`, `lte`
+- **Rejected**: `!=`, `neq`, `<>`, `in`, `is_null` (raises `SyntaxError` — wrap with `NOT` or write in QQL query)
 
 ## API Summary
 
@@ -96,3 +140,11 @@ All execution methods return an `ExecutionReport` dict:
 | `Client.execute(query, on_error="stop")` | Execute a string, Stmt, list[str], or list[Stmt] |
 | `Client.execute_async(query, on_error="stop")` | Async variant of execute |
 | `Client.explain(query)` | Inspect execution plan (accepts str or Stmt) |
+| `__version__` | Package runtime version string |
+
+## Documentation Links
+
+- [QQL Syntax Guide](https://github.com/srimon12/qql-rs/blob/main/docs/syntax.md)
+- [Filter Documentation](https://github.com/srimon12/qql-rs/blob/main/docs/filters.md)
+- [Filter Injection Guide](https://github.com/srimon12/qql-rs/blob/main/docs/inject_filter.md)
+- [Changelog](https://github.com/srimon12/qql-rs/blob/main/CHANGELOG.md)

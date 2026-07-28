@@ -45,7 +45,9 @@
     },
     {
       "Count": {
-        "collection": "sec10k",
+        "collection": {
+          "Explicit": "sec10k"
+        },
         "filter": {
           "Compare": {
             "field": "tenant_id",

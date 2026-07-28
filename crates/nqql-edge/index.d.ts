@@ -1,6 +1,7 @@
 export class Stmt {
   injectFilter(field: string, op: string, value: unknown): void;
   toObject(): unknown;
+  toJson(): string;
   toJSON(): string;
   shardKey?: string | null;
 }
@@ -104,7 +105,7 @@ export class Client {
 /** Parse one statement or a semicolon-delimited script into a stable list. */
 export function parse(query: string): Stmt[];
 
-/** Parse to raw JSON string — 2× faster, bypasses V8 object allocation. */
+/** Parse to raw JSON string — bypasses V8 object allocation. */
 export function parseJson(query: string): string;
 
 export function isValid(query: string): boolean;
@@ -172,3 +173,6 @@ export function executeStmt(
   stmt: Stmt,
   options?: StandaloneOptions,
 ): Promise<ExecutionReport>;
+
+export const version: string;
+export const __version__: string;

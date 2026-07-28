@@ -739,6 +739,7 @@ async fn test_query_missing_collection_errors() {
 async fn test_upsert_bad_types() {
     let mut client = MockQdrantClient::default();
     client.exists = true;
+    client.info = Some(CollectionInfo::default());
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     // Wait, the parser catches syntax errors. But logic errors?

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::error::{QqlError, Span};
 use pest::error::InputLocation;
 use pest::Parser as _;

@@ -95,7 +95,7 @@ For programmatic manipulation (inspect/modify before executing), use `parse()`:
 from pyqql import parse, Client
 
 client = Client("http://localhost:6333")
-stmts = parse("Q1; Q2; Q3;")
+stmts = parse("QUERY 'a' FROM docs LIMIT 5; QUERY 'b' FROM docs LIMIT 5")
 
 # Inspect, inject filters, set shard keys...
 for stmt in stmts:
@@ -222,7 +222,7 @@ asyncio.run(main())
 
 ```python
 stmt = parse("QUERY 'x' FROM docs LIMIT 5")[0]        # Parse one statement
-stmts = parse("Q1; Q2;")                              # Parse a script
+stmts = parse("QUERY 'a' FROM docs; COUNT FROM docs")        # Parse a script
 ok = is_valid("QUERY 'x' FROM docs LIMIT 5")           # Validate without returning the AST
 tokenized = tokenize("QUERY 'x' FROM docs LIMIT 5")    # Lex into tokens
 result = inject_filter(stmt, "tenant_id", "=", "acme") # Inject filter (mutates or returns new)

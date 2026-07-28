@@ -1,5 +1,7 @@
 """Python package surface for the native :mod:`pyqql_edge` extension."""
 
+__version__ = "0.1.3"
+
 from .pyqql_edge import (  # type: ignore[attr-defined]
     Client,
     Stmt,
@@ -40,4 +42,5 @@ __all__ = [
     "parse",
     "parse_json",
     "tokenize",
+    "__version__",
 ]

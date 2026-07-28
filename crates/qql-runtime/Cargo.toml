@@ -19,9 +19,9 @@ grpc = ["dep:tonic", "dep:tonic-prost", "dep:prost", "dep:prost-types", "tokio/r
 rest = ["dep:reqwest", "tokio/rt"]
 
 [dependencies]
-qql-core = { version = "0.1.2", path = "../qql-core", features = ["serde", "std"] }
-qql-plan = { version = "0.1.2", path = "../qql-plan" }
-qql-embed = { version = "0.1.2", path = "../qql-embed" }
+qql-core = { version = "0.1.3", path = "../qql-core", features = ["serde", "std"] }
+qql-plan = { version = "0.1.3", path = "../qql-plan" }
+qql-embed = { version = "0.1.3", path = "../qql-embed" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }

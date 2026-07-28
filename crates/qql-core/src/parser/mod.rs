@@ -100,15 +100,11 @@ fn is_contextual_identifier(kind: TokenKind) -> bool {
 
 impl Parser {
     pub fn parse(input: &str) -> Result<Stmt, QqlError> {
-        let statement = AstLowerer::lower_statement(input)?;
-        syntax::validate_statement(input)?;
-        Ok(statement)
+        AstLowerer::lower_statement(input)
     }
 
     pub fn parse_all(input: &str) -> Result<Vec<Stmt>, QqlError> {
-        let statements = AstLowerer::lower_script(input)?;
-        syntax::validate_script(input)?;
-        Ok(statements)
+        AstLowerer::lower_script(input)
     }
 }
 

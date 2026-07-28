@@ -1,3 +1,5 @@
+__version__ = "0.1.3"
+
 from .pyqql import (
     Client,
     HttpEmbedder,
@@ -24,4 +26,5 @@ __all__ = [
     "is_valid",
     "parse",
     "tokenize",
+    "__version__",
 ]
