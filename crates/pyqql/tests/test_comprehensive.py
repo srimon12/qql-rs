@@ -18,9 +18,23 @@ Covers:
 import asyncio
 import json
 import unittest
+import urllib.request
 import uuid
 
 import pyqql
+
+
+def _qdrant_available():
+    """Check if Qdrant is reachable at localhost:6333."""
+    try:
+        req = urllib.request.Request("http://localhost:6333/healthz")
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
+
+_qdrant_ok = _qdrant_available()
 
 
 # ============================================================================
@@ -331,6 +345,7 @@ class TestInjectFilter(unittest.TestCase):
 # Category E: Client (remote, REST)
 # ============================================================================
 
+@unittest.skipUnless(_qdrant_ok, "Qdrant not available at localhost:6333")
 class TestClient(unittest.TestCase):
     """E: Test the Client class against live Qdrant."""
 
@@ -480,6 +495,7 @@ class TestHttpEmbedder(unittest.TestCase):
 E2E_COLLECTION = "pyqql_fresh_e2e_test"
 
 
+@unittest.skipUnless(_qdrant_ok, "Qdrant not available at localhost:6333")
 class TestE2EPipeline(unittest.TestCase):
     """G: End-to-end pipeline against live Qdrant with existing collections.
 
@@ -585,6 +601,7 @@ class TestE2EPipeline(unittest.TestCase):
 # Category H: Script-level execute
 # ============================================================================
 
+@unittest.skipUnless(_qdrant_ok, "Qdrant not available at localhost:6333")
 class TestScriptExecute(unittest.TestCase):
     """H: Test multi-statement execution via Client.execute()."""
 
