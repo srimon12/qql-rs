@@ -165,16 +165,24 @@ inject_filter(
 ```python
 import pyqql
 
-stmt = pyqql.parse("QUERY 'laptops' FROM products LIMIT 10")
-pyqql.inject_filter(stmt, "group_id", "=", "org_99")
+# Option 1: Using free function with Stmt object or query string
+stmts = pyqql.parse("QUERY 'laptops' FROM products LIMIT 10")
+pyqql.inject_filter(stmts[0], "group_id", "=", "org_99")
+
+# Option 2: Using Stmt method
+stmts[0].inject_filter("group_id", "=", "org_99")
 ```
 
 ### Node.js (`nqql`)
 ```javascript
 const nqql = require('@veristamp/nqql');
 
-const stmt = nqql.parse("QUERY 'laptops' FROM products LIMIT 10");
-nqql.injectFilter(stmt, "group_id", "=", "org_99");
+// Option 1: Free function with query string (returns AST object)
+const ast = nqql.injectFilter("QUERY 'laptops' FROM products LIMIT 10", "group_id", "=", "org_99");
+
+// Option 2: Stmt instance method (mutates Stmt in place)
+const stmts = nqql.parse("QUERY 'laptops' FROM products LIMIT 10");
+stmts[0].injectFilter("group_id", "=", "org_99");
 ```
 
 ### WebAssembly (`qql-wasm`)
@@ -182,6 +190,18 @@ nqql.injectFilter(stmt, "group_id", "=", "org_99");
 import init, { parse, inject_filter } from 'qql-wasm';
 
 await init();
-let stmt = parse("QUERY 'laptops' FROM products LIMIT 10");
-inject_filter(stmt, "group_id", "=", "org_99");
+let stmts = parse("QUERY 'laptops' FROM products LIMIT 10");
+let modified = inject_filter(stmts[0], "group_id", "=", "org_99");
 ```
+
+## Operator Support Matrix
+
+| Operator | Aliases | Status | Note |
+|---|---|---|---|
+| Equality | `=`, `==`, `eq` | ✅ Supported | Injects `key = value` |
+| Greater than | `>`, `gt` | ✅ Supported | Injects `key > value` |
+| Greater/equal | `>=`, `gte` | ✅ Supported | Injects `key >= value` |
+| Less than | `<`, `lt` | ✅ Supported | Injects `key < value` |
+| Less/equal | `<=`, `lte` | ✅ Supported | Injects `key <= value` |
+| Inequality | `!=`, `neq`, `<>` | ❌ Rejected | Wrap equality with `NOT (...)` in query string |
+| Inclusion / Null | `in`, `is_null`, etc. | ❌ Rejected | Write explicit QQL `WHERE` clause |
