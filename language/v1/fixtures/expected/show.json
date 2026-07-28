@@ -1,7 +1,9 @@
 {
   "schema": "qql.ast/v1",
   "statements": [
-    "ShowCollections",
+    {
+      "ShowCollections": {}
+    },
     {
       "ShowCollection": "docs"
     },

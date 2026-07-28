@@ -71,7 +71,9 @@
     },
     {
       "Count": {
-        "collection": "docs",
+        "collection": {
+          "Explicit": "docs"
+        },
         "filter": {
           "Compare": {
             "field": "status",
@@ -144,7 +146,9 @@
     },
     {
       "Count": {
-        "collection": "docs",
+        "collection": {
+          "Explicit": "docs"
+        },
         "filter": {
           "Compare": {
             "field": "status",

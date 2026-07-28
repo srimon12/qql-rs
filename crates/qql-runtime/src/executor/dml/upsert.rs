@@ -32,14 +32,23 @@ impl Executor {
             .any(|p| matches!(p.vectors, Some(PointVectors::Unnamed(_))));
         let has_embedding = upsert.embedding.is_some() || !upsert.embed.is_empty();
         if !needs_implicit && !has_embedding {
-            if has_unnamed_vectors && self.client.collection_exists(&upsert.collection).await.unwrap_or(false) {
+            if has_unnamed_vectors
+                && self
+                    .client
+                    .collection_exists(&upsert.collection)
+                    .await
+                    .unwrap_or(false)
+            {
                 if let Ok(info) = self.client.get_collection_info(&upsert.collection).await {
                     let dense = dense_targets(&info);
                     if dense.len() == 1 && !dense[0].is_empty() {
                         let dense_name = &dense[0];
                         for point in &mut upsert.points {
                             if let Some(PointVectors::Unnamed(vv)) = &point.vectors {
-                                point.vectors = Some(PointVectors::Named(vec![(dense_name.clone(), vv.clone())]));
+                                point.vectors = Some(PointVectors::Named(vec![(
+                                    dense_name.clone(),
+                                    vv.clone(),
+                                )]));
                             }
                         }
                     }
