@@ -29,7 +29,7 @@ try {
   nativeBinding = require(`./index.${target}.node`);
 } catch (localError) {
   try {
-    nativeBinding = require(`nqql-${target}`);
+    nativeBinding = require(`@veristamp/nqql-${target}`);
   } catch (packageError) {
     try {
       // Local development fallback for a non-platform napi build.
@@ -39,6 +39,12 @@ try {
       throw packageError;
     }
   }
+}
+
+if (nativeBinding.Stmt && !nativeBinding.Stmt.prototype.toJSON) {
+  nativeBinding.Stmt.prototype.toJSON = function () {
+    return this.toJson();
+  };
 }
 
 function buildError(raw) {
@@ -100,10 +106,12 @@ function normalizeClientOptions(options) {
   }
   return {
     ...options,
+    apiKey: options.apiKey ?? options.api_key,
+    useGrpc: options.useGrpc ?? options.use_grpc,
     embedder: options.embedder
       ? {
           endpoint: options.embedder.endpoint,
-          apiKey: options.embedder.apiKey,
+          apiKey: options.embedder.apiKey ?? options.embedder.api_key,
           model: options.embedder.model,
           dimension: options.embedder.dimension,
         }
@@ -122,11 +130,12 @@ class HttpEmbedder {
     if (!Number.isSafeInteger(options.dimension) || options.dimension <= 0) {
       throw new TypeError('HttpEmbedder dimension must be a positive integer');
     }
-    if (options.apiKey !== undefined && typeof options.apiKey !== 'string') {
+    const apiKey = options.apiKey ?? options.api_key;
+    if (apiKey !== undefined && typeof apiKey !== 'string') {
       throw new TypeError('HttpEmbedder apiKey must be a string');
     }
     this.endpoint = options.endpoint;
-    this.apiKey = options.apiKey ?? '';
+    this.apiKey = apiKey ?? '';
     this.model = options.model;
     this.dimension = options.dimension;
   }
@@ -224,6 +233,8 @@ class Client {
   }
 }
 
+const pkg = require('./package.json');
+
 module.exports = {
   parse,
   parseJson,
@@ -238,4 +249,6 @@ module.exports = {
   Client,
   Stmt: nativeBinding.Stmt,
   HttpEmbedder,
+  version: pkg.version,
+  __version__: pkg.version,
 };
