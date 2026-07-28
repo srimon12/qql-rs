@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.3] - 2026-07-28
+
+### 🔴 Critical
+- **`0b3f443`** — `fix(rust)`: Unify AST serialization (`ShowCollections` → `{"ShowCollections": {}}`, `CountStmt.collection` → `QueryCollection::Explicit`) and fix HYBRID UPSERT named-vector mapping.
+- **`ab73e7b`** — `fix(sdk)`: Fix scoped binary loading, add `toJSON` alias, support `apiKey`/`api_key` aliases, export `version`/`__version__`, update TypeScript declarations, expand all READMEs with ExecutionReport schema, error docs, and operator matrix.
+- **`167816c`** — `fix`: Restore correct platform names in npm `optionalDependencies`.
+
+### 🚀 Added
+- **`ab73e7b`** — Add 290 comprehensive tests across nqql (104), pyqql (104), nqql-edge (42), pyqql-edge (40).
+- **`dbb839b`** — `test(nqql)`: Skip live Qdrant tests in CI.
+- **`eb6e0c3`** — `test(pyqql)`: Skip live Qdrant tests in CI.
+- **`c252bcd`** — `chore(release)`: Bump version to 0.1.3; add centralized root `VERSION` file; update `check_release.py`.
+
+### 🔒 Changed & Scoped
+- **`e9873d8`** — `ci`: Switch npm publishing to OIDC Trusted Publishers.
+
+### 📚 Documentation
+- **`6ecaaca`** — `docs`: Fix `parseFastJson` → `parseJson`, update `inject_filter.md` examples, replace invalid placeholders in skill references.
+- **`86af6c0`** — `docs(changelog)`: Add 0.1.3 release notes.
+
+### 🛠️ Maintenance
+- **`c95cf31`** — `chore`: Apply `cargo fmt` and regenerate conformance snapshots.
+- **`27282f4`** — `chore`: Update `Cargo.lock` for version bump.
+
+---
+
 ## [0.1.2] - 2026-07-28
 
 ### 🚀 Added
