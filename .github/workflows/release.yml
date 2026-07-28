@@ -375,6 +375,7 @@ jobs:
       - name: Include license and pack
         run: |
           cp LICENSE dist/qql-wasm/LICENSE
+          node -e 'const p = require("./dist/qql-wasm/package.json"); p.repository = { type: "git", url: "https://github.com/srimon12/qql-rs.git" }; p.publishConfig = { access: "public" }; require("fs").writeFileSync("./dist/qql-wasm/package.json", JSON.stringify(p, null, 2));'
           npm pack ./dist/qql-wasm --ignore-scripts --pack-destination dist
 
       - uses: actions/upload-artifact@v7
