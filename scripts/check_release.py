@@ -143,12 +143,19 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--version",
-        help="Expected release version. Defaults to workspace.package.version.",
+        help="Expected release version. Defaults to the VERSION file at the repo root.",
     )
     args = parser.parse_args()
 
-    root = load_toml(ROOT / "Cargo.toml")
-    expected = args.version or root["workspace"]["package"]["version"]
+    if args.version:
+        expected = args.version
+    else:
+        version_file = ROOT / "VERSION"
+        if version_file.is_file():
+            expected = version_file.read_text().strip()
+        else:
+            root_toml = load_toml(ROOT / "Cargo.toml")
+            expected = root_toml["workspace"]["package"]["version"]
     if expected.startswith("v"):
         expected = expected[1:]
 
