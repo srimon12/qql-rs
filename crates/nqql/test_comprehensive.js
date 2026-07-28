@@ -7,6 +7,8 @@
 // Run: node test_comprehensive.js
 // ============================================================================
 
+(async () => {
+
 const assert = require('assert');
 const nqql = require('./index.js');
 
@@ -16,6 +18,22 @@ const TEST_COLLECTION = 'nqql_fresh_test';
 let passed = 0;
 let failed = 0;
 let skipped = 0;
+
+let qdrantAvailable = false;
+
+async function checkQdrant() {
+  try {
+    const resp = await fetch(`${QDRANT_URL}/healthz`, { signal: AbortSignal.timeout(2000) });
+    qdrantAvailable = resp.ok;
+  } catch (_) {
+    qdrantAvailable = false;
+  }
+  if (qdrantAvailable) {
+    console.log(`  Qdrant available at ${QDRANT_URL}\n`);
+  } else {
+    console.log(`  Qdrant NOT available at ${QDRANT_URL} — live execution tests will be skipped\n`);
+  }
+}
 
 function test(name, fn) {
   try {
@@ -41,7 +59,26 @@ async function testAsync(name, fn) {
   }
 }
 
+function testLive(name, fn) {
+  if (!qdrantAvailable) {
+    console.log(`  - ${name} (no Qdrant)`);
+    skipped++;
+    return;
+  }
+  test(name, fn);
+}
+
+async function testLiveAsync(name, fn) {
+  if (!qdrantAvailable) {
+    console.log(`  - ${name} (no Qdrant)`);
+    skipped++;
+    return;
+  }
+  await testAsync(name, fn);
+}
+
 async function ensureCleanCollection(client) {
+  if (!qdrantAvailable) return;
   try { await client.execute(`DROP COLLECTION ${TEST_COLLECTION}`); } catch (_) {}
 }
 
@@ -358,6 +395,8 @@ test('injectFilter supported ops inventory', () => {
 // ============================================================================
 console.log('\n========== E. Client (Remote REST) ==========');
 
+await checkQdrant();
+
 const client = new nqql.Client({ url: QDRANT_URL, useGrpc: false });
 
 test('Client is instance of Client', () => {
@@ -388,19 +427,13 @@ test('Client.compile returns route object', () => {
   assert.strictEqual(route.stmt_type, 'query');
 });
 
-test('Client.execute SHOW COLLECTIONS', async () => {
-  await testAsync('Client.execute SHOW COLLECTIONS', async () => {
-    const result = await client.execute('SHOW COLLECTIONS');
-    assert.strictEqual(result.ok, true);
-    assert.ok(Array.isArray(result.results));
-    assert.strictEqual(typeof result.succeeded, 'number');
-    assert.strictEqual(typeof result.failed, 'number');
-    assert.strictEqual(result.results[0].operation, 'SHOW_COLLECTIONS');
-  });
-  // Run it now
+testLiveAsync('Client.execute SHOW COLLECTIONS', async () => {
   const result = await client.execute('SHOW COLLECTIONS');
   assert.strictEqual(result.ok, true);
   assert.ok(Array.isArray(result.results));
+  assert.strictEqual(typeof result.succeeded, 'number');
+  assert.strictEqual(typeof result.failed, 'number');
+  assert.strictEqual(result.results[0].operation, 'SHOW_COLLECTIONS');
 });
 
 test('Client.execute onError "typo" rejects', async () => {
@@ -613,26 +646,29 @@ async function runE2E() {
   }
 }
 
-(async () => {
-  try {
-    await runE2E();
-  } catch (e) {
-    console.log(`  ✗ E2E suite failed: ${e.message}`);
-    failed++;
-    // Clean up
-    try { await e2eClient.execute(`DROP COLLECTION ${TEST_COLLECTION}`); } catch (_) {}
+  if (qdrantAvailable) {
+    try {
+      await runE2E();
+    } catch (e) {
+      console.log(`  ✗ E2E suite failed: ${e.message}`);
+      failed++;
+      try { await e2eClient.execute(`DROP COLLECTION ${TEST_COLLECTION}`); } catch (_) {}
+    }
+  } else {
+    console.log('  - E2E pipeline (no Qdrant)');
+    skipped++;
   }
 
   // ============================================================================
   console.log('\n========== I. Standalone execute Paths ==========');
 
-  await testAsync('standalone execute("SHOW COLLECTIONS")', async () => {
+  await testLiveAsync('standalone execute("SHOW COLLECTIONS")', async () => {
     const result = await nqql.execute('SHOW COLLECTIONS', { url: QDRANT_URL, useGrpc: false });
     assert.strictEqual(result.ok, true);
     assert.ok(Array.isArray(result.results));
   });
 
-  await testAsync('standalone executeStmt(stmt)', async () => {
+  await testLiveAsync('standalone executeStmt(stmt)', async () => {
     const stmt = nqql.parse('SHOW COLLECTIONS')[0];
     const result = await nqql.executeStmt(stmt, { url: QDRANT_URL, useGrpc: false });
     assert.strictEqual(result.ok, true);
@@ -763,4 +799,4 @@ async function runE2E() {
     console.log('All tests passed!\n');
     process.exit(0);
   }
-})();
+})().catch(e => { console.error(e); process.exit(1); });
