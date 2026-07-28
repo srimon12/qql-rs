@@ -96,7 +96,12 @@ pub fn explain_node(statement: &Stmt) -> String {
         )),
         Stmt::Count(statement) => {
             output.push_str("Statement: COUNT\n");
-            output.push_str(&format!("Collection: {}\n", statement.collection));
+            match &statement.collection {
+                QueryCollection::Explicit(collection) => {
+                    output.push_str(&format!("Collection: {}\n", collection));
+                }
+                QueryCollection::Inherited => output.push_str("Collection: inherited\n"),
+            }
             if statement.filter.is_some() {
                 output.push_str("Filter: present\n");
             }

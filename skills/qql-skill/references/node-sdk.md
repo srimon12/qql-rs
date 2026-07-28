@@ -157,7 +157,7 @@ console.log(stmt.toObject());
 const { parse, parseJson, isValid, injectFilter, tokenize, compileQuery } = require('@veristamp/nqql');
 
 parse("QUERY 'x' FROM docs LIMIT 5");                    // Always Stmt[]
-parse("Q1; Q2;");                                        // Script -> Stmt[]
+parse("QUERY 'x' FROM docs LIMIT 5; COUNT FROM docs");   // Script -> Stmt[]
 parseJson("QUERY 'x' FROM docs LIMIT 5");                // Raw JSON string (2× faster, no V8 objects)
 isValid("QUERY 'x' FROM docs LIMIT 5");                  // Validate
 injectFilter("QUERY 'x' FROM docs", "tenant_id", "=", "acme");

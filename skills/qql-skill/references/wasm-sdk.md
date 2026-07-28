@@ -208,7 +208,7 @@ import init, { parse, isValid, inject_filter,
 await init();
 
 parse("QUERY 'x' FROM docs LIMIT 5");                  // Always returns an array
-parse("Q1; Q2;");                                      // Parse multi-statement
+parse("QUERY 'x' FROM docs; COUNT FROM docs");           // Parse multi-statement
 isValid("QUERY 'x' FROM docs LIMIT 5");                  // Validate
 inject_filter("QUERY 'x'", "tenant_id", "=", "acme");   // Inject filter (string -> object)
 tokenize("QUERY 'x'");                                   // Lex to tokens array

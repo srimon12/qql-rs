@@ -34,7 +34,7 @@ try {
   nativeBinding = require(`./index.${target}.node`);
 } catch (localError) {
   try {
-    nativeBinding = require(`nqql-edge-${target}`);
+    nativeBinding = require(`@veristamp/nqql-edge-${target}`);
   } catch (packageError) {
     try {
       // Local development fallback for a non-platform napi build.
@@ -44,6 +44,12 @@ try {
       throw packageError;
     }
   }
+}
+
+if (nativeBinding.Stmt && !nativeBinding.Stmt.prototype.toJSON) {
+  nativeBinding.Stmt.prototype.toJSON = function () {
+    return this.toJson();
+  };
 }
 
 function buildError(raw) {
@@ -333,6 +339,8 @@ class Client {
   }
 }
 
+const pkg = require('./package.json');
+
 module.exports = {
   parse,
   parseJson,
@@ -349,4 +357,6 @@ module.exports = {
   httpExecutor,
   Client,
   Stmt: nativeBinding.Stmt,
+  version: pkg.version,
+  __version__: pkg.version,
 };

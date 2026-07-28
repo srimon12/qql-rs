@@ -303,12 +303,16 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
             field: index.field.clone(),
         }),
         Stmt::Count(count) => {
+            let collection = match &count.collection {
+                qql_core::ast::QueryCollection::Explicit(name) => name.clone(),
+                qql_core::ast::QueryCollection::Inherited => String::new(),
+            };
             let filter = count
                 .filter
                 .as_ref()
                 .map(|f| crate::filter::top_level_filter(f));
             Ok(PlannedOperation::Count {
-                collection: count.collection.clone(),
+                collection,
                 request: CountRequest {
                     filter,
                     shard_key: count.shard_key.clone(),

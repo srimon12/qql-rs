@@ -1,6 +1,7 @@
 export class Stmt {
   injectFilter(field: string, op: string, value: unknown): void;
   toObject(): unknown;
+  toJson(): string;
   toJSON(): string;
   shardKey?: string | null;
 }
@@ -33,13 +34,16 @@ export interface CompiledRoute {
 export interface ClientOptions {
   url?: string;
   apiKey?: string;
+  api_key?: string;
   useGrpc?: boolean;
+  use_grpc?: boolean;
   embedder?: HttpEmbedder | HttpEmbedderOptions;
 }
 
 export interface HttpEmbedderOptions {
   endpoint: string;
   apiKey?: string;
+  api_key?: string;
   model: string;
   dimension: number;
 }
@@ -61,7 +65,7 @@ export class Client {
 
 /** Parse one statement or a semicolon-delimited script into a stable list. */
 export function parse(query: string): Stmt[];
-/** Parse to raw JSON string — 2× faster, bypasses V8 object allocation. */
+/** Parse to raw JSON string — bypasses V8 object allocation. */
 export function parseJson(query: string): string;
 export function isValid(query: string): boolean;
 export function injectFilter(
@@ -84,3 +88,5 @@ export function executeStmt(
   stmt: Stmt,
   options?: ClientOptions,
 ): Promise<ExecutionReport>;
+export const version: string;
+export const __version__: string;

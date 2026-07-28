@@ -643,9 +643,7 @@ impl Executor {
                 }
                 None
             }
-            Stmt::Upsert(upsert) if self.embedder.is_some() => {
-                self.configure_upsert_embeddings(upsert).await?
-            }
+            Stmt::Upsert(upsert) => self.configure_upsert_embeddings(upsert).await?,
             _ => None,
         };
 

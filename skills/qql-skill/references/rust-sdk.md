@@ -110,7 +110,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // -> 3 queries, 1 network call (auto-grouped by collection)
 
     // Batch from pre-parsed Stmts
-    let stmts = Parser::parse_all("Q1; Q2; Q3;")?;
+    let stmts = Parser::parse_all("COUNT FROM docs; COUNT FROM sec10k")?;
     let results = exec.execute_batch_nodes(stmts, true).await?;
 
     Ok(())

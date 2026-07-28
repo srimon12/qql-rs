@@ -3,14 +3,18 @@
   "statements": [
     {
       "Count": {
-        "collection": "docs",
+        "collection": {
+          "Explicit": "docs"
+        },
         "filter": null,
         "shard_key": null
       }
     },
     {
       "Count": {
-        "collection": "docs",
+        "collection": {
+          "Explicit": "docs"
+        },
         "filter": {
           "Compare": {
             "field": "status",
@@ -25,7 +29,9 @@
     },
     {
       "Count": {
-        "collection": "sec10k",
+        "collection": {
+          "Explicit": "sec10k"
+        },
         "filter": {
           "Compare": {
             "field": "tenant_id",
@@ -40,7 +46,9 @@
     },
     {
       "Count": {
-        "collection": "docs",
+        "collection": {
+          "Explicit": "docs"
+        },
         "filter": {
           "And": {
             "operands": [

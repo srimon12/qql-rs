@@ -13,7 +13,7 @@
   "scripts": {
     "build": "napi build --platform --no-js --release --dts native.d.ts",
     "build:debug": "napi build --platform --no-js --dts native.d.ts",
-    "test": "npm run build:debug && node test.js",
+    "test": "npm run build:debug && node test.js && node test_comprehensive.js",
     "prepublishOnly": "napi prepublish -t npm"
   },
   "keywords": [
