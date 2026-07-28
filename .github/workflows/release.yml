@@ -510,7 +510,6 @@ jobs:
 
       - name: Publish platform packages, then root packages
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           VERSION: ${{ needs.gate.outputs.version }}
         shell: bash
         run: |
@@ -607,8 +606,6 @@ jobs:
           path: dist
 
       - name: Publish qql-wasm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
