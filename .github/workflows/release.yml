@@ -526,7 +526,11 @@ jobs:
               echo "${spec} is already published; skipping."
               return 0
             fi
-            npm publish "./$package" --access public --provenance --ignore-scripts
+            local tmpdir
+            tmpdir="$(mktemp -d)"
+            tar -xzf "$package" -C "$tmpdir"
+            npm publish "$tmpdir/package" --access public --provenance --ignore-scripts
+            rm -rf "$tmpdir"
           }
 
           # Publish platform packages first.
@@ -621,7 +625,10 @@ jobs:
           if npm view "$spec" version >/dev/null 2>&1; then
             echo "${spec} is already published; skipping."
           else
-            npm publish "./$package" --access public --provenance --ignore-scripts
+            tmpdir="$(mktemp -d)"
+            tar -xzf "$package" -C "$tmpdir"
+            npm publish "$tmpdir/package" --access public --provenance --ignore-scripts
+            rm -rf "$tmpdir"
           fi
 
   github-release:
