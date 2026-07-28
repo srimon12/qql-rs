@@ -341,6 +341,7 @@ jobs:
             cp LICENSE "crates/$package/LICENSE"
             for platform in "crates/$package"/npm/*; do
               cp LICENSE "$platform/LICENSE"
+              node -e 'const p = require("./'"$platform"'/package.json"); p.repository = { type: "git", url: "https://github.com/srimon12/qql-rs.git" }; p.publishConfig = { access: "public" }; require("fs").writeFileSync("./'"$platform"'/package.json", JSON.stringify(p, null, 2));'
               npm pack "./$platform" --ignore-scripts --pack-destination "$GITHUB_WORKSPACE/dist"
             done
             find "crates/$package" -maxdepth 1 -name 'index.*.node' -delete
@@ -502,7 +503,6 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "22.13.1"
-          registry-url: "https://registry.npmjs.org"
 
       - uses: actions/download-artifact@v8
         with:
@@ -530,8 +530,13 @@ jobs:
             local tmpdir
             tmpdir="$(mktemp -d)"
             tar -xzf "$package" -C "$tmpdir"
-            npm publish "$tmpdir/package" --access public --provenance --ignore-scripts
-            rm -rf "$tmpdir"
+            if npm publish "$tmpdir/package" --access public --provenance --ignore-scripts; then
+              rm -rf "$tmpdir"
+              return 0
+            else
+              rm -rf "$tmpdir"
+              return 1
+            fi
           }
 
           # Publish platform packages first.
@@ -603,7 +608,6 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "22.13.1"
-          registry-url: "https://registry.npmjs.org"
 
       - uses: actions/download-artifact@v8
         with:
