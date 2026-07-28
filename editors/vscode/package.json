@@ -5,6 +5,11 @@
   "version": "0.1.0",
   "publisher": "srimon12",
   "license": "MIT",
+  "icon": "icon.png",
+  "galleryBanner": {
+    "color": "#0B0F19",
+    "theme": "dark"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/srimon12/qql-rs",
@@ -13,7 +18,8 @@
   "homepage": "https://github.com/srimon12/qql-rs",
   "categories": [
     "Programming Languages",
-    "Linters"
+    "Linters",
+    "Snippets"
   ],
   "keywords": [
     "qql",

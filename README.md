@@ -48,6 +48,18 @@ npm install qql-wasm
 cargo add qql qql-core
 ```
 
+#### 🧩 VS Code / Cursor Extension
+
+```bash
+# Marketplace (when published)
+code --install-extension srimon12.qql-lang
+
+# Or install the local VSIX from this repo
+code --install-extension editors/vscode/qql-lang-0.1.0.vsix
+```
+
+Syntax highlighting, live WASM diagnostics, and keyword/snippet completions for `.qql` files. See [`editors/vscode`](editors/vscode).
+
 #### 🤖 AI Agent Skill (Cursor, Claude Code, codex etc)
 
 ```bash

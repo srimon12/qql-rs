@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { initWasm, analyzeQql } from "./wasm";
 import { createDiagnosticCollection, updateDiagnostics } from "./diagnostics";
+import { QqlCompletionProvider } from "./completions";
 
 let diagnosticCollection: vscode.DiagnosticCollection;
 let wasmReady = false;
@@ -16,6 +17,12 @@ export function activate(context: vscode.ExtensionContext) {
       `QQL: WASM parser failed to load — diagnostics disabled. ${err}`
     );
   }
+
+  // ── Completions (keywords + snippets) ─────────────────────────
+  const completionProvider = vscode.languages.registerCompletionItemProvider(
+    { language: "qql" },
+    new QqlCompletionProvider()
+  );
 
   // ── Diagnostics ───────────────────────────────────────────────
   diagnosticCollection = createDiagnosticCollection();
@@ -49,6 +56,7 @@ export function activate(context: vscode.ExtensionContext) {
   }
 
   context.subscriptions.push(
+    completionProvider,
     vscode.workspace.onDidOpenTextDocument((doc) => {
       if (doc.languageId === "qql") triggerDiagnostics(doc);
     }),

@@ -1,6 +1,14 @@
-# QQL — Qdrant Query Language for VS Code
+<div align="center">
 
-Syntax highlighting, live linting, and autocompletion for [QQL](https://github.com/srimon12/qql-rs) — a SQL-like query language for the [Qdrant](https://qdrant.tech) vector database. QQL is to Qdrant what SQL is to Postgres.
+  <img src="https://raw.githubusercontent.com/srimon12/qql-rs/main/docs/assets/qql-banner.png" alt="QQL Banner" width="600" />
+
+  # QQL — Qdrant Query Language for VS Code
+
+  Syntax highlighting, live linting, and autocompletion for [QQL](https://github.com/srimon12/qql-rs) — a SQL-like query language for the [Qdrant](https://qdrant.tech) vector database.
+
+  **QQL is to Qdrant what SQL is to Postgres.**
+
+</div>
 
 ---
 
