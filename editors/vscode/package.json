@@ -1,0 +1,70 @@
+{
+  "name": "qql-lang",
+  "displayName": "QQL — Qdrant Query Language",
+  "description": "Syntax highlighting, linting, and autocompletion for QQL (Qdrant Query Language)",
+  "version": "0.1.0",
+  "publisher": "srimon12",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/srimon12/qql-rs",
+    "directory": "editors/vscode"
+  },
+  "homepage": "https://github.com/srimon12/qql-rs",
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
+  "keywords": [
+    "qql",
+    "qdrant",
+    "vector-database",
+    "vector-search",
+    "query-language",
+    "semantic-search"
+  ],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "activationEvents": [
+    "onLanguage:qql"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "qql",
+        "aliases": [
+          "QQL",
+          "qql"
+        ],
+        "extensions": [
+          ".qql"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "qql",
+        "scopeName": "source.qql",
+        "path": "./syntaxes/qql.tmLanguage.json"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "tsc -p tsconfig.json",
+    "build": "node scripts/build.mjs",
+    "watch": "tsc --watch",
+    "lint": "eslint src --ext ts",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.5.0"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "name": "qql-wasm",
+  "collaborators": [
+    "Srimon Danguria <srimon12mckv@gmail.com>"
+  ],
+  "description": "WebAssembly bindings for QQL parsing, planning, and Qdrant execution",
+  "version": "0.1.2",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/srimon12/qql-rs"
+  },
+  "files": [
+    "qql_wasm_bg.wasm",
+    "qql_wasm.js",
+    "qql_wasm.d.ts"
+  ],
+  "main": "qql_wasm.js",
+  "homepage": "https://github.com/srimon12/qql-rs",
+  "types": "qql_wasm.d.ts",
+  "keywords": [
+    "qql",
+    "qdrant",
+    "wasm",
+    "vector-search",
+    "query-language"
+  ]
+}
