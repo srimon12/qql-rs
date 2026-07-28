@@ -55,9 +55,9 @@
   },
   "optionalDependencies": {
     "@veristamp/nqql-linux-x64-gnu": "0.1.3",
-    "@veristamp/nqql-linux-x64-gnu": "0.1.3",
-    "@veristamp/nqql-linux-x64-gnu": "0.1.3",
-    "@veristamp/nqql-linux-x64-gnu": "0.1.3"
+    "@veristamp/nqql-darwin-x64": "0.1.3",
+    "@veristamp/nqql-darwin-arm64": "0.1.3",
+    "@veristamp/nqql-win32-x64-msvc": "0.1.3"
   },
   "devDependencies": {
     "@napi-rs/cli": "3.7.4"
