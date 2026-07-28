@@ -515,6 +515,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          rm -f ~/.npmrc /home/runner/work/_temp/.npmrc 2>/dev/null || true
 
           publish_if_missing() {
             local package="$1"
@@ -523,14 +524,14 @@ jobs:
               tar -xOf "$package" package/package.json |
                 node -e 'let input=""; process.stdin.on("data", chunk => input += chunk); process.stdin.on("end", () => { const pkg = JSON.parse(input); console.log(`${pkg.name}@${pkg.version}`); });'
             )"
-            if npm view "$spec" version >/dev/null 2>&1; then
+            if npm view "$spec" version --registry https://registry.npmjs.org >/dev/null 2>&1; then
               echo "${spec} is already published; skipping."
               return 0
             fi
             local tmpdir
             tmpdir="$(mktemp -d)"
             tar -xzf "$package" -C "$tmpdir"
-            if npm publish "$tmpdir/package" --access public --provenance --ignore-scripts; then
+            if npm publish "$tmpdir/package" --access public --provenance --registry https://registry.npmjs.org --ignore-scripts; then
               rm -rf "$tmpdir"
               return 0
             else
@@ -618,6 +619,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          rm -f ~/.npmrc /home/runner/work/_temp/.npmrc 2>/dev/null || true
           package="$(find dist -maxdepth 1 -name '*.tgz' -print -quit)"
           [[ -n "$package" ]] || {
             echo "No qql-wasm package was downloaded."
@@ -627,12 +629,12 @@ jobs:
             tar -xOf "$package" package/package.json |
               node -e 'let input=""; process.stdin.on("data", chunk => input += chunk); process.stdin.on("end", () => { const pkg = JSON.parse(input); console.log(`${pkg.name}@${pkg.version}`); });'
           )"
-          if npm view "$spec" version >/dev/null 2>&1; then
+          if npm view "$spec" version --registry https://registry.npmjs.org >/dev/null 2>&1; then
             echo "${spec} is already published; skipping."
           else
             tmpdir="$(mktemp -d)"
             tar -xzf "$package" -C "$tmpdir"
-            npm publish "$tmpdir/package" --access public --provenance --ignore-scripts
+            npm publish "$tmpdir/package" --access public --provenance --registry https://registry.npmjs.org --ignore-scripts
             rm -rf "$tmpdir"
           fi
 
