@@ -139,6 +139,14 @@ jobs:
 
             let batchBody;
             global.fetch = async (input, init) => {
+              const url = typeof input === 'string' ? input : input.url;
+              // Schema-first topology resolution: GET /collections/{name}
+              if (!init || init.method === 'GET' || !init.body) {
+                return new Response(
+                  JSON.stringify({ result: { config: { params: { vectors: { dense: { size: 2, distance: "Cosine" } } } } } }),
+                  { status: 200, headers: { 'content-type': 'application/json' } },
+                );
+              }
               const request = input instanceof Request
                 ? input
                 : new Request(input, init);
