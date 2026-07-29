@@ -10,7 +10,9 @@ rather than relational `SELECT` semantics. Keywords are case-insensitive.
 ```ebnf
 script       = [ statement, { ";", statement }, [ ";" ] ] ;
 statement    = query | scroll | upsert | update | delete | ddl | count
-             | clear-payload | delete-vectors | create-shard-key ;
+             | clear-payload | delete-vectors
+             | create-shard-key | drop-shard-key | show-shard-keys
+             | drop-index | show ;
 ```
 
 Multiple statements require `;`. Leading semicolons, repeated semicolons, and adjacent unseparated statements are invalid.
@@ -379,13 +381,16 @@ count        = "COUNT", "FROM", collection,
 delete       = "DELETE", "FROM", collection, "WHERE", filter,
                [ "SHARD", string ] ;
 clear-payload = "CLEAR", "PAYLOAD", "FROM", collection,
-                "WHERE", filter ;
+                "WHERE", filter,
+                [ "SHARD", string ] ;
 delete-vectors = "DELETE", "VECTOR", name, { ",", name },
-                 "FROM", collection, "WHERE", filter ;
+                 "FROM", collection, "WHERE", filter,
+                 [ "SHARD", string ] ;
 update       = "UPDATE", collection, "SET",
                ( "VECTOR", [ vector-name ], "=", vector-value,
-                 "WHERE", "id", "=", point-id
-               | "PAYLOAD", "=", object, "WHERE", filter ) ;
+                 "WHERE", "id", "=", point-id, [ "SHARD", string ]
+               | "PAYLOAD", "=", object, "WHERE", filter,
+                 [ "SHARD", string ] ) ;
 
 vector-value = dense-vector | sparse-vector | multidense-vector ;
 dense-vector = "[", number, { ",", number }, "]" ;
@@ -396,7 +401,7 @@ multidense-vector = "[", dense-vector, { ",", dense-vector }, "]" ;
 
 Every upsert point requires an unsigned integer or string `id`. Its optional `vector` may be one unnamed vector value or an object of named vector values. All other object entries remain arbitrary payload values.
 
-`SHARD '<key>'` on UPSERT, SCROLL, DELETE, COUNT, or QUERY routes the operation to a specific shard group. It is a clustered-Qdrant feature; `qql-edge` rejects it explicitly because edge storage is single-node.
+`SHARD '<key>'` on QUERY, SCROLL, COUNT, UPSERT, DELETE, CLEAR PAYLOAD, DELETE VECTOR, UPDATE … VECTOR, or UPDATE … PAYLOAD routes the operation to a specific shard group. It is a clustered-Qdrant feature; `qql-edge` rejects it explicitly because edge storage is single-node.
 
 ### Embed directive (fine-grained embedding control)
 

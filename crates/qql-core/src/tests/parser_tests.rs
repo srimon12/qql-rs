@@ -341,6 +341,47 @@ fn inject_shard_key_sets_query_and_ctes() {
 }
 
 #[test]
+fn mutation_shard_key_parses_and_injects() {
+    use crate::ast::inject_shard_key;
+
+    let clear = Parser::parse("CLEAR PAYLOAD FROM docs WHERE id = 1 SHARD 'tenant-a';").unwrap();
+    let Stmt::ClearPayload(c) = clear else {
+        panic!("expected ClearPayload");
+    };
+    assert_eq!(c.shard_key.as_deref(), Some("tenant-a"));
+
+    let del_vec =
+        Parser::parse("DELETE VECTOR dense FROM docs WHERE id = 1 SHARD 'tenant-b';").unwrap();
+    let Stmt::DeleteVector(d) = del_vec else {
+        panic!("expected DeleteVector");
+    };
+    assert_eq!(d.shard_key.as_deref(), Some("tenant-b"));
+
+    let upd_vec =
+        Parser::parse("UPDATE docs SET VECTOR dense = [0.1, 0.2] WHERE id = 1 SHARD 'tenant-c';")
+            .unwrap();
+    let Stmt::UpdateVector(u) = upd_vec else {
+        panic!("expected UpdateVector");
+    };
+    assert_eq!(u.shard_key.as_deref(), Some("tenant-c"));
+
+    let upd_pay =
+        Parser::parse("UPDATE docs SET PAYLOAD = {\"a\": 1} WHERE id = 1 SHARD 'tenant-d';")
+            .unwrap();
+    let Stmt::UpdatePayload(p) = upd_pay else {
+        panic!("expected UpdatePayload");
+    };
+    assert_eq!(p.shard_key.as_deref(), Some("tenant-d"));
+
+    let mut inject_target = Parser::parse("CLEAR PAYLOAD FROM docs WHERE id = 2;").unwrap();
+    inject_shard_key(&mut inject_target, "injected").unwrap();
+    let Stmt::ClearPayload(c) = inject_target else {
+        panic!("expected ClearPayload after inject");
+    };
+    assert_eq!(c.shard_key.as_deref(), Some("injected"));
+}
+
+#[test]
 fn cross_rerank_parses() {
     let stmt = Parser::parse(
         "WITH c AS (QUERY TEXT 'q' FROM docs USING dense LIMIT 50) \

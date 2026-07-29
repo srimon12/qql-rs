@@ -32,8 +32,8 @@ impl PyStmt {
             .map_err(|e| PySyntaxError::new_err(e.to_string()))
     }
 
-    /// Get or set the shard key on QUERY, COUNT, SCROLL, UPSERT, and DELETE
-    /// statements.  Returns `None` (setter is no-op) for other statement types.
+    /// Get or set the shard key on statements that support custom sharding.
+    /// Returns `None` (setter is no-op) for other statement types.
     #[getter]
     fn shard_key(&self) -> Option<String> {
         match &self.inner {
@@ -42,6 +42,10 @@ impl PyStmt {
             ast::Stmt::Scroll(s) => s.shard_key.clone(),
             ast::Stmt::Upsert(u) => u.shard_key.clone(),
             ast::Stmt::Delete(d) => d.shard_key.clone(),
+            ast::Stmt::ClearPayload(c) => c.shard_key.clone(),
+            ast::Stmt::DeleteVector(d) => d.shard_key.clone(),
+            ast::Stmt::UpdateVector(u) => u.shard_key.clone(),
+            ast::Stmt::UpdatePayload(u) => u.shard_key.clone(),
             _ => None,
         }
     }
@@ -55,6 +59,10 @@ impl PyStmt {
             ast::Stmt::Scroll(s) => s.shard_key = key,
             ast::Stmt::Upsert(u) => u.shard_key = key,
             ast::Stmt::Delete(d) => d.shard_key = key,
+            ast::Stmt::ClearPayload(c) => c.shard_key = key,
+            ast::Stmt::DeleteVector(d) => d.shard_key = key,
+            ast::Stmt::UpdateVector(u) => u.shard_key = key,
+            ast::Stmt::UpdatePayload(u) => u.shard_key = key,
             _ => {}
         }
     }
@@ -150,8 +158,10 @@ fn tokenize<'py>(input: &str, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict
 #[pyfunction]
 fn compile_query<'py>(py: Python<'py>, input: &str) -> PyResult<Bound<'py, PyAny>> {
     let stmt = Parser::parse(input).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
-    let route = qql_plan::routing::route(&stmt);
+    let (stmt_type, route) = qql_plan::routing::compile_statement(&stmt)
+        .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
     let result = serde_json::json!({
+        "stmt_type": stmt_type,
         "method": route.method.as_str(),
         "path": route.path,
         "payload": route.body_json().unwrap_or(serde_json::Value::Null),
@@ -443,6 +453,11 @@ impl PyClient {
     fn explain(&self, query: &Bound<'_, PyAny>) -> PyResult<PyObject> {
         let py = query.py();
         do_explain(py, query)
+    }
+
+    /// Compile a QQL query to its transport route without executing (parity with nqql).
+    fn compile<'py>(&self, py: Python<'py>, query: &str) -> PyResult<Bound<'py, PyAny>> {
+        compile_query(py, query)
     }
 }
 // ── internal dispatch (plain impl) ────────────────────────────────

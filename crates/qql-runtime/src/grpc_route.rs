@@ -261,6 +261,19 @@ fn distance(value: &serde_json::Value) -> i32 {
     }
 }
 
+/// Map OpenAPI / JSON datatype strings onto the protobuf `Datatype` enum.
+fn datatype_from_json(value: &serde_json::Value) -> Option<i32> {
+    value
+        .get("datatype")
+        .and_then(serde_json::Value::as_str)
+        .map(|dt| match dt.to_ascii_lowercase().as_str() {
+            "float32" | "f32" => qdrant::Datatype::Float32 as i32,
+            "uint8" | "u8" => qdrant::Datatype::Uint8 as i32,
+            "float16" | "f16" => qdrant::Datatype::Float16 as i32,
+            _ => qdrant::Datatype::Default as i32,
+        })
+}
+
 pub(crate) fn vector_params(value: &serde_json::Value) -> qdrant::VectorParams {
     qdrant::VectorParams {
         size: json_u64(value, "size").unwrap_or(0),
@@ -270,7 +283,7 @@ pub(crate) fn vector_params(value: &serde_json::Value) -> qdrant::VectorParams {
             .get("quantization_config")
             .and_then(quantization_config),
         on_disk: json_bool(value, "on_disk"),
-        datatype: None,
+        datatype: datatype_from_json(value),
         multivector_config: value
             .get("multivector_config")
             .map(|_| qdrant::MultiVectorConfig {
@@ -311,21 +324,10 @@ fn vectors_config_diff(value: &serde_json::Value) -> Option<qdrant::VectorsConfi
 }
 
 pub(crate) fn sparse_vector_params(value: &serde_json::Value) -> qdrant::SparseVectorParams {
-    let index = value.get("index").map(|idx| {
-        let datatype = idx
-            .get("datatype")
-            .and_then(serde_json::Value::as_str)
-            .map(|dt| match dt.to_ascii_lowercase().as_str() {
-                "float32" | "f32" => qdrant::Datatype::Float32 as i32,
-                "uint8" | "u8" => qdrant::Datatype::Uint8 as i32,
-                "float16" | "f16" => qdrant::Datatype::Float16 as i32,
-                _ => qdrant::Datatype::Default as i32,
-            });
-        qdrant::SparseIndexConfig {
-            full_scan_threshold: json_u64(idx, "full_scan_threshold"),
-            on_disk: json_bool(idx, "on_disk"),
-            datatype,
-        }
+    let index = value.get("index").map(|idx| qdrant::SparseIndexConfig {
+        full_scan_threshold: json_u64(idx, "full_scan_threshold"),
+        on_disk: json_bool(idx, "on_disk"),
+        datatype: datatype_from_json(idx),
     });
     qdrant::SparseVectorParams {
         index,
@@ -470,7 +472,30 @@ fn text_index_params(
     })
 }
 
-fn mutation_response() -> serde_json::Value {
+/// Build a REST-shaped mutation envelope from a gRPC `PointsOperationResponse`.
+fn mutation_response_from(resp: qdrant::PointsOperationResponse) -> serde_json::Value {
+    let result = resp
+        .result
+        .map(update_result_to_json)
+        .unwrap_or_else(|| serde_json::json!({ "status": "completed" }));
+    serde_json::json!({
+        "result": result,
+        "status": "ok",
+        "time": resp.time,
+    })
+}
+
+/// REST-shaped envelope for collection-level mutations (create/update/drop).
+fn collection_mutation_response(resp: qdrant::CollectionOperationResponse) -> serde_json::Value {
+    serde_json::json!({
+        "result": resp.result,
+        "status": "ok",
+        "time": resp.time,
+    })
+}
+
+/// Fallback when the gRPC response type carries no timing (shard-key ops).
+fn mutation_response_ok() -> serde_json::Value {
     serde_json::json!({
         "result": { "status": "completed" },
         "status": "ok",
@@ -631,11 +656,11 @@ pub async fn execute_planned_grpc(
                 shard_key_selector: shard_key_selector(&request.shard_key),
                 ..Default::default()
             };
-            client
+            let resp = client
                 .upsert_points(grpc_req)
                 .await
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("upsert: {e}"), None))?;
-            Ok(mutation_response())
+            Ok(mutation_response_from(resp))
         }
         PlannedOperation::Delete {
             collection,
@@ -650,11 +675,11 @@ pub async fn execute_planned_grpc(
                 shard_key_selector: shard_key_selector(&request.shard_key),
                 ..Default::default()
             };
-            client
+            let resp = client
                 .delete_points(grpc_req)
                 .await
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("delete: {e}"), None))?;
-            Ok(mutation_response())
+            Ok(mutation_response_from(resp))
         }
         PlannedOperation::ClearPayload {
             collection,
@@ -666,13 +691,14 @@ pub async fn execute_planned_grpc(
                 collection_name: collection.clone(),
                 wait: Some(true),
                 points: selector,
+                shard_key_selector: shard_key_selector(&request.shard_key),
                 ..Default::default()
             };
-            client
+            let resp = client
                 .clear_payload(grpc_req)
                 .await
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("clear_payload: {e}"), None))?;
-            Ok(mutation_response())
+            Ok(mutation_response_from(resp))
         }
         PlannedOperation::DeleteVectors {
             collection,
@@ -687,13 +713,14 @@ pub async fn execute_planned_grpc(
                 vectors: Some(qdrant::VectorsSelector {
                     names: request.vector.clone(),
                 }),
+                shard_key_selector: shard_key_selector(&request.shard_key),
                 ..Default::default()
             };
-            client
+            let resp = client
                 .delete_vectors(grpc_req)
                 .await
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("delete_vectors: {e}"), None))?;
-            Ok(mutation_response())
+            Ok(mutation_response_from(resp))
         }
         PlannedOperation::UpdateVectors {
             collection,
@@ -711,13 +738,14 @@ pub async fn execute_planned_grpc(
                 collection_name: collection.clone(),
                 wait: Some(true),
                 points,
+                shard_key_selector: shard_key_selector(&request.shard_key),
                 ..Default::default()
             };
-            client
+            let resp = client
                 .update_vectors(grpc_req)
                 .await
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("update_vectors: {e}"), None))?;
-            Ok(mutation_response())
+            Ok(mutation_response_from(resp))
         }
         PlannedOperation::UpdatePayload {
             collection,
@@ -735,13 +763,14 @@ pub async fn execute_planned_grpc(
                 wait: Some(true),
                 payload: payload_map,
                 points_selector: selector,
+                shard_key_selector: shard_key_selector(&request.shard_key),
                 ..Default::default()
             };
-            client
+            let resp = client
                 .set_payload(grpc_req)
                 .await
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("set_payload: {e}"), None))?;
-            Ok(mutation_response())
+            Ok(mutation_response_from(resp))
         }
         PlannedOperation::CreateCollection {
             collection,
@@ -817,7 +846,7 @@ pub async fn execute_planned_grpc(
                 }),
                 ..Default::default()
             };
-            client.create_collection_raw(grpc_req).await.map_err(|e| {
+            let resp = client.create_collection_raw(grpc_req).await.map_err(|e| {
                 QqlError::backend("QQL-GRPC", format!("create_collection: {e}"), None)
             })?;
             if let Some(params) = deferred_params {
@@ -859,7 +888,7 @@ pub async fn execute_planned_grpc(
                         })?;
                 }
             }
-            Ok(mutation_response())
+            Ok(collection_mutation_response(resp))
         }
         PlannedOperation::UpdateCollection {
             collection,
@@ -876,20 +905,20 @@ pub async fn execute_planned_grpc(
                     .and_then(quantization_config_diff),
                 ..Default::default()
             };
-            client.update_collection_raw(grpc_req).await.map_err(|e| {
+            let resp = client.update_collection_raw(grpc_req).await.map_err(|e| {
                 QqlError::backend("QQL-GRPC", format!("update_collection: {e}"), None)
             })?;
-            Ok(mutation_response())
+            Ok(collection_mutation_response(resp))
         }
         PlannedOperation::DropCollection { collection } => {
             let grpc_req = qdrant::DeleteCollection {
                 collection_name: collection.clone(),
                 ..Default::default()
             };
-            client.delete_collection_raw(grpc_req).await.map_err(|e| {
+            let resp = client.delete_collection_raw(grpc_req).await.map_err(|e| {
                 QqlError::backend("QQL-GRPC", format!("drop_collection: {e}"), None)
             })?;
-            Ok(mutation_response())
+            Ok(collection_mutation_response(resp))
         }
         PlannedOperation::CreateIndex {
             collection,
@@ -917,11 +946,11 @@ pub async fn execute_planned_grpc(
                 )?),
                 ..Default::default()
             };
-            client
+            let resp = client
                 .create_field_index(grpc_req)
                 .await
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("create_index: {e}"), None))?;
-            Ok(mutation_response())
+            Ok(mutation_response_from(resp))
         }
         PlannedOperation::DropIndex { collection, field } => {
             let grpc_req = qdrant::DeleteFieldIndexCollection {
@@ -929,11 +958,11 @@ pub async fn execute_planned_grpc(
                 field_name: field.clone(),
                 ..Default::default()
             };
-            client
+            let resp = client
                 .delete_field_index(grpc_req)
                 .await
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("drop_index: {e}"), None))?;
-            Ok(mutation_response())
+            Ok(mutation_response_from(resp))
         }
         PlannedOperation::CreateShardKey {
             collection,
@@ -954,7 +983,7 @@ pub async fn execute_planned_grpc(
             client.create_shard_key(grpc_req).await.map_err(|e| {
                 QqlError::backend("QQL-GRPC", format!("create_shard_key: {e}"), None)
             })?;
-            Ok(mutation_response())
+            Ok(mutation_response_ok())
         }
         PlannedOperation::DropShardKey {
             collection,
@@ -973,7 +1002,7 @@ pub async fn execute_planned_grpc(
                 .delete_shard_key(grpc_req)
                 .await
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("drop_shard_key: {e}"), None))?;
-            Ok(mutation_response())
+            Ok(mutation_response_ok())
         }
         // Read-only operations — call gRPC client directly, no Route needed
         PlannedOperation::ListCollections => {
@@ -1141,7 +1170,7 @@ fn to_points_update_operation(op: &qql_plan::UpdateOperation) -> qdrant::PointsU
                     set_payload.points.as_ref(),
                     set_payload.filter.as_ref(),
                 ),
-                shard_key_selector: None,
+                shard_key_selector: shard_key_selector(&set_payload.shard_key),
                 key: None,
             })
         }
@@ -1151,7 +1180,7 @@ fn to_points_update_operation(op: &qql_plan::UpdateOperation) -> qdrant::PointsU
                     clear_payload.points.as_ref(),
                     clear_payload.filter.as_ref(),
                 ),
-                shard_key_selector: None,
+                shard_key_selector: shard_key_selector(&clear_payload.shard_key),
             })
         }
         UpdateOperation::UpdateVectors { update_vectors } => {
@@ -1165,7 +1194,7 @@ fn to_points_update_operation(op: &qql_plan::UpdateOperation) -> qdrant::PointsU
                 .collect();
             Operation::UpdateVectors(points_update_operation::UpdateVectors {
                 points,
-                shard_key_selector: None,
+                shard_key_selector: shard_key_selector(&update_vectors.shard_key),
                 update_filter: None,
             })
         }
@@ -1178,7 +1207,7 @@ fn to_points_update_operation(op: &qql_plan::UpdateOperation) -> qdrant::PointsU
                 vectors: Some(qdrant::VectorsSelector {
                     names: delete_vectors.vector.clone(),
                 }),
-                shard_key_selector: None,
+                shard_key_selector: shard_key_selector(&delete_vectors.shard_key),
             })
         }
     };
@@ -1445,6 +1474,15 @@ pub(crate) fn to_vector_input(input: &PlanQueryInput) -> qdrant::VectorInput {
         PlanQueryInput::Document { text, model } => qdrant::VectorInput {
             variant: Some(Variant::Document(qdrant::Document {
                 text: text.clone(),
+                model: model.clone().unwrap_or_default(),
+                ..Default::default()
+            })),
+        },
+        PlanQueryInput::Image { image, model } => qdrant::VectorInput {
+            variant: Some(Variant::Image(qdrant::Image {
+                image: Some(qdrant::Value {
+                    kind: Some(qdrant::value::Kind::StringValue(image.clone())),
+                }),
                 model: model.clone().unwrap_or_default(),
                 ..Default::default()
             })),
@@ -2678,6 +2716,29 @@ mod tests {
     use super::*;
     use qql_core::parser::Parser;
     use qql_plan::routing::{route, RequestBody};
+
+    #[test]
+    fn dense_vector_params_propagates_datatype() {
+        let params = vector_params(&serde_json::json!({
+            "size": 128,
+            "distance": "Cosine",
+            "datatype": "uint8",
+        }));
+        assert_eq!(params.datatype, Some(qdrant::Datatype::Uint8 as i32));
+
+        let f16 = vector_params(&serde_json::json!({
+            "size": 64,
+            "distance": "Dot",
+            "datatype": "float16",
+        }));
+        assert_eq!(f16.datatype, Some(qdrant::Datatype::Float16 as i32));
+
+        let none = vector_params(&serde_json::json!({
+            "size": 32,
+            "distance": "Cosine",
+        }));
+        assert_eq!(none.datatype, None);
+    }
 
     #[test]
     fn test_grpc_route_conversion_all_statements() {

@@ -484,7 +484,8 @@ impl std::fmt::Debug for FastEmbedder {
     }
 }
 
-/// List every dense text model fastembed can load, plus offline multi (BGE-M3).
+/// List dense text models, offline multi (BGE-M3 / ColBERT), and image models
+/// (CLIP vision, …) that fastembed can load.
 pub fn list_embedding_models() -> Vec<EmbeddingModelInfo> {
     let mut models: Vec<EmbeddingModelInfo> = TextEmbedding::list_supported_models()
         .into_iter()

@@ -339,6 +339,7 @@ delete_vectors = {
     ~ vector_name ~ ("," ~ vector_name)*
     ~ ^"FROM" ~ collection
     ~ ^"WHERE" ~ filter
+    ~ (^"SHARD" ~ string)?
 }
 delete = {
     ^"DELETE" ~ ^"FROM" ~ collection
@@ -348,6 +349,7 @@ delete = {
 clear_payload = {
     ^"CLEAR" ~ ^"PAYLOAD" ~ ^"FROM" ~ collection
     ~ ^"WHERE" ~ filter
+    ~ (^"SHARD" ~ string)?
 }
 
 update = {
@@ -355,8 +357,10 @@ update = {
     ~ (
         ^"VECTOR" ~ vector_name? ~ "=" ~ vector_value
         ~ ^"WHERE" ~ ^"id" ~ "=" ~ point_id
+        ~ (^"SHARD" ~ string)?
         | ^"PAYLOAD" ~ "=" ~ object
         ~ ^"WHERE" ~ filter
+        ~ (^"SHARD" ~ string)?
     )
 }
 

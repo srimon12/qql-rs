@@ -47,10 +47,10 @@ pub fn inject_filter(
 /// `ShardKeySelector`). QQL has no `$param` shard syntax — multi-tenant hosts
 /// call this after resolving the tenant id (or set `shard_key` on the AST).
 ///
-/// Applies to statements that already carry `shard_key` in the AST:
-/// `QUERY`, `SCROLL`, `COUNT`, `UPSERT`, `DELETE`. Recurses into CTEs and
-/// nested prefetch queries. No-op for DDL and statements without shard routing
-/// (e.g. `CLEAR PAYLOAD`, `UPDATE` today).
+/// Applies to statements that carry `shard_key` in the AST: `QUERY`, `SCROLL`,
+/// `COUNT`, `UPSERT`, `DELETE`, `CLEAR PAYLOAD`, `DELETE VECTOR`,
+/// `UPDATE … VECTOR`, and `UPDATE … PAYLOAD`. Recurses into CTEs and nested
+/// prefetch queries. No-op for DDL.
 pub fn inject_shard_key(statement: &mut Stmt, shard_key: &str) -> Result<(), QqlError> {
     if shard_key.is_empty() {
         return Err(QqlError::validation(
@@ -66,6 +66,10 @@ pub fn inject_shard_key(statement: &mut Stmt, shard_key: &str) -> Result<(), Qql
         Stmt::Count(count) => count.shard_key = Some(key),
         Stmt::Upsert(upsert) => upsert.shard_key = Some(key),
         Stmt::Delete(delete) => delete.shard_key = Some(key),
+        Stmt::ClearPayload(clear) => clear.shard_key = Some(key),
+        Stmt::DeleteVector(delete) => delete.shard_key = Some(key),
+        Stmt::UpdateVector(update) => update.shard_key = Some(key),
+        Stmt::UpdatePayload(update) => update.shard_key = Some(key),
         _ => {}
     }
     Ok(())

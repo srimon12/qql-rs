@@ -286,6 +286,9 @@ fn plan_input_to_vector_internal(input: &PlanQueryInput) -> Result<VectorInterna
         PlanQueryInput::Document { .. } => Err(edge_error(
             "text input reached edge execution without client-side embedding",
         )),
+        PlanQueryInput::Image { .. } => Err(edge_error(
+            "image input reached edge execution without client-side embedding",
+        )),
     }
 }
 

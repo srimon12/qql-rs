@@ -82,21 +82,16 @@ async fn resolve_upsert_embeddings(
             }
         }
         if !targets.is_empty() {
+            // Topology-unaware fallback: dense only. Hybrid/sparse targets must
+            // be set by the executor (configure_upsert_embeddings) or explicit
+            // USING / EMBED directives before calling resolve_embeddings — so
+            // dense-only collections never receive orphan sparse vectors.
             let (indices, texts): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
             let dense_vecs = embedder.embed_dense_batch(&texts, "default").await?;
             ensure_batch_len(dense_vecs.len(), indices.len(), "default")?;
-            for ((idx, text), d_vec) in indices.into_iter().zip(texts).zip(dense_vecs) {
+            for (idx, d_vec) in indices.into_iter().zip(dense_vecs) {
                 let point = &mut upsert.points[idx];
                 add_point_vector(point, DENSE_VECTOR_NAME, VectorValue::Dense(d_vec))?;
-                let sparse_vec = embedder.embed_sparse(&text).await?;
-                add_point_vector(
-                    point,
-                    SPARSE_VECTOR_NAME,
-                    VectorValue::Sparse {
-                        indices: sparse_vec.indices,
-                        values: sparse_vec.values,
-                    },
-                )?;
             }
         }
     }

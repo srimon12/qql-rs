@@ -90,6 +90,18 @@ pub fn try_route(statement: &Stmt) -> Result<Route, qql_core::error::QqlError> {
     crate::plan::try_route(statement)
 }
 
+/// Compile a statement into route JSON fields used by host SDKs.
+///
+/// Returns `(stmt_type, method, path, payload)` using the planner's typed
+/// `compile_stmt_type` so body-less routes are never misclassified.
+pub fn compile_statement(
+    statement: &Stmt,
+) -> Result<(&'static str, Route), qql_core::error::QqlError> {
+    let op = plan(statement)?;
+    let stmt_type = op.compile_stmt_type();
+    Ok((stmt_type, to_rest_route(&op)))
+}
+
 /// Groups QUERY statements by collection and produces one `QueryBatchRequest`
 /// per unique collection.  Only standard queries (non-`Points`, non-grouped)
 /// are batched.  Returns an empty vec when fewer than 2 queries share a
@@ -156,6 +168,63 @@ mod tests {
             .unwrap()
             .to_string()
             .contains("tenant-a"));
+    }
+
+    #[test]
+    fn compile_stmt_type_disambiguates_bodyless_routes() {
+        let cases = [
+            ("DROP INDEX ON COLLECTION docs FOR title;", "drop_index"),
+            ("SHOW SHARD KEYS ON COLLECTION docs;", "show_shard_keys"),
+            ("DROP COLLECTION docs;", "drop_collection"),
+            ("SHOW COLLECTION docs;", "show_collection"),
+            ("SHOW COLLECTIONS;", "show_collections"),
+        ];
+        for (qql, expected) in cases {
+            let stmt = Parser::parse(qql).unwrap();
+            let (stmt_type, _) = compile_statement(&stmt).unwrap();
+            assert_eq!(stmt_type, expected, "qql={qql}");
+        }
+    }
+
+    #[test]
+    fn mutation_shard_keys_lower_and_project() {
+        let cases = [
+            ("CLEAR PAYLOAD FROM docs WHERE id = 1 SHARD 't1';", "t1"),
+            (
+                "DELETE VECTOR dense FROM docs WHERE id = 1 SHARD 't2';",
+                "t2",
+            ),
+            (
+                "UPDATE docs SET VECTOR dense = [0.1, 0.2] WHERE id = 1 SHARD 't3';",
+                "t3",
+            ),
+            (
+                "UPDATE docs SET PAYLOAD = {\"k\": 1} WHERE id = 1 SHARD 't4';",
+                "t4",
+            ),
+        ];
+        for (qql, expected) in cases {
+            let statement = Parser::parse(qql).unwrap();
+            let operation = plan::plan(&statement).unwrap();
+            assert_eq!(
+                operation.shard_key(),
+                Some(expected),
+                "plan.shard_key for {qql}"
+            );
+            let r = to_rest_route(&operation);
+            assert!(
+                r.query
+                    .iter()
+                    .any(|(k, v)| k == "shard_key" && v == expected),
+                "REST query param for {qql}: {:?}",
+                r.query
+            );
+            let body = r.body_json().unwrap().to_string();
+            assert!(
+                body.contains(expected),
+                "REST body should include shard_key for {qql}: {body}"
+            );
+        }
     }
 
     #[test]

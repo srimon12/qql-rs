@@ -19,13 +19,20 @@ pub struct RestQdrant {
 }
 
 impl RestQdrant {
+    /// Construct with a 30s request timeout.
+    ///
+    /// Never panics (RUN-015 / RUN-010). If the timed client builder fails
+    /// (effectively unreachable on stock reqwest), falls back to
+    /// [`Client::new`]. Prefer [`Self::with_timeout`] when client-build
+    /// failures must surface as errors.
     pub fn new(base_url: impl Into<String>, api_key: Option<String>) -> Self {
-        Self::with_timeout(base_url, api_key, Duration::from_secs(30))
-            .expect("failed to build reqwest client")
+        let base_url = base_url.into();
+        Self::with_timeout(base_url.clone(), api_key.clone(), Duration::from_secs(30))
+            .unwrap_or_else(|_| Self::with_client(base_url, api_key, Client::new()))
     }
 
     /// Construct with an explicit request timeout. Fallible so library
-    /// constructors never panic (RUN-015 / RUN-010).
+    /// callers can surface client-build failures without panicking.
     pub fn with_timeout(
         base_url: impl Into<String>,
         api_key: Option<String>,
@@ -284,6 +291,13 @@ impl QdrantOps for RestQdrant {
     }
 
     async fn execute_planned(&self, op: &qql_plan::PlannedOperation) -> Result<Value, QqlError> {
+        if matches!(op, qql_plan::PlannedOperation::CrossRerank { .. }) {
+            return Err(QqlError::execution(
+                "QQL-CROSS-RERANK",
+                "CROSS RERANK is client-side and cannot be executed as a single Qdrant REST route",
+                None,
+            ));
+        }
         let route = qql_plan::plan::to_rest_route(op);
         self.execute_http(route).await
     }

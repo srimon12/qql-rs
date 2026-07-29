@@ -28,7 +28,7 @@ let op = plan(&stmt)?;               // → PlannedOperation::Query { .. }
 let route = to_rest_route(&op);      // → Route (REST projection)
 ```
 
-The [`plan`] function returns a [`PlannedOperation`] enum with 21 variants
+The [`plan`] function returns a [`PlannedOperation`] enum with 22 variants
 covering all query, mutation, and DDL operations. Each variant carries typed
 request parameters (not raw JSON).
 
@@ -54,6 +54,7 @@ request parameters (not raw JSON).
 | `ListShardKeys` | SHOW SHARD KEYS | GET /collections/{c}/shards | Single |
 | `ListCollections` | SHOW COLLECTIONS | GET /collections | Single |
 | `GetCollection` | SHOW COLLECTION | GET /collections/{c} | Single |
+| `CrossRerank` | QUERY CROSS RERANK | client-side (not a single Qdrant route) | Single |
 
 ### Route — REST projection
 
@@ -77,7 +78,8 @@ REST routes are produced by `to_rest_route()`. New code should use
 
 gRPC routes bypass `Route` entirely. The runtime's `grpc_route::execute_grpc_route`
 reads `Route.body` (which carries the same typed request data produced by the planner)
-and maps directly to protobuf. All 21 operation variants are supported.
+and maps directly to protobuf. All 22 operation variants are supported
+(`CrossRerank` is client-side and never sent as a Qdrant route).
 
 ### Batch compatibility
 

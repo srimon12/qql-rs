@@ -195,37 +195,13 @@ pub fn tokenize(input: String) -> napi::Result<serde_json::Value> {
 #[napi]
 pub fn compile_query(input: String) -> napi::Result<serde_json::Value> {
     let stmt = Parser::parse(&input).map_err(to_napi_err)?;
-    let route = routing::route(&stmt);
-    let output = serde_json::json!({
-        "stmt_type": match &route.body {
-            Some(routing::RequestBody::Query(_)) => "query",
-            Some(routing::RequestBody::QueryGroups(_)) => "query_groups",
-            Some(routing::RequestBody::Points(_)) => "points",
-            Some(routing::RequestBody::Scroll(_)) => "scroll",
-            Some(routing::RequestBody::Upsert(_)) => "upsert",
-            Some(routing::RequestBody::Delete(_)) => "delete",
-            Some(routing::RequestBody::UpdateVector(_)) => "update_vector",
-            Some(routing::RequestBody::UpdatePayload(_)) => "update_payload",
-            Some(routing::RequestBody::ClearPayload(_)) => "clear_payload",
-            Some(routing::RequestBody::DeleteVector(_)) => "delete_vector",
-            Some(routing::RequestBody::Count(_)) => "count",
-            Some(routing::RequestBody::CreateShardKey(_)) => "create_shard_key",
-            Some(routing::RequestBody::DropShardKey(_)) => "drop_shard_key",
-            Some(routing::RequestBody::CreateCollection(_)) => "create_collection",
-            Some(routing::RequestBody::UpdateCollection(_)) => "update_collection",
-            Some(routing::RequestBody::CreateIndex(_)) => "create_index",
-            None => match route.method {
-                qql_plan::types::Method::Get if route.path == "/collections" => "show_collections",
-                qql_plan::types::Method::Get => "show_collection",
-                qql_plan::types::Method::Delete => "drop_collection",
-                _ => "unknown",
-            },
-        },
+    let (stmt_type, route) = routing::compile_statement(&stmt).map_err(to_napi_err)?;
+    Ok(serde_json::json!({
+        "stmt_type": stmt_type,
         "method": route.method.as_str(),
         "path": route.path,
         "payload": route.body_json().unwrap_or(serde_json::Value::Null),
-    });
-    Ok(output)
+    }))
 }
 
 // ═══════════════════════════════════════════════════════════════════

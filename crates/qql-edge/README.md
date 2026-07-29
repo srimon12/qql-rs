@@ -12,7 +12,7 @@ Three embedding strategies produce an [`Executor`] backed by [`EdgeQdrant`]:
 | `local_executor_with_options()` | Dense ONNX + optional **multi** (`multi_model: "bge-m3"`) | Offline dense + ColBERT |
 | `http_executor()` / `http_executor_with_multi()` | `HttpEmbedder` (OpenAI-compatible) | Remote dense / multi APIs |
 | `custom_executor()` | Any `Arc<dyn Embedder>` | GPU, ensemble, caching |
-| `list_embedding_models()` | — | Dense ONNX + multi (BGE-M3) catalog |
+| `list_embedding_models()` | — | Dense ONNX + multi (BGE-M3) + image (CLIP vision) catalog |
 
 ### FastEmbed roles (do not conflate)
 

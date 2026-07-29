@@ -4222,7 +4222,6 @@ version = "0.1.3"
 dependencies = [
  "async-trait",
  "chrono",
- "futures-util",
  "jsonschema",
  "prettyplease",
  "prost",

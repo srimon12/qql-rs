@@ -617,6 +617,8 @@ pub struct DeleteRequest {
 #[derive(Debug, Clone, Serialize)]
 pub struct UpdateVectorRequest {
     pub points: Vec<UpdateVectorPoint>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shard_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -632,6 +634,8 @@ pub struct UpdatePayloadRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<FilterExpression>,
     pub payload: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shard_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -640,6 +644,8 @@ pub struct ClearPayloadRequest {
     pub points: Option<Vec<PlanPointId>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<FilterExpression>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shard_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -649,6 +655,8 @@ pub struct DeleteVectorRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<FilterExpression>,
     pub vector: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shard_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

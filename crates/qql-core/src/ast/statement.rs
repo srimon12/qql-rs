@@ -577,6 +577,7 @@ pub enum CollectionMode {
 pub struct ClearPayloadStmt {
     pub collection: String,
     pub selector: PointSelector,
+    pub shard_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -585,6 +586,7 @@ pub struct DeleteVectorStmt {
     pub collection: String,
     pub selector: PointSelector,
     pub vector_names: Vec<String>,
+    pub shard_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -673,6 +675,7 @@ pub struct UpdateVectorStmt {
     pub point_id: PointId,
     pub vector: VectorValue,
     pub vector_name: Option<String>,
+    pub shard_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -681,6 +684,7 @@ pub struct UpdatePayloadStmt {
     pub collection: String,
     pub selector: PointSelector,
     pub payload: Vec<(String, Value)>,
+    pub shard_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -56,6 +56,10 @@ impl PyStmt {
             ast::Stmt::Scroll(s) => s.shard_key.clone(),
             ast::Stmt::Upsert(u) => u.shard_key.clone(),
             ast::Stmt::Delete(d) => d.shard_key.clone(),
+            ast::Stmt::ClearPayload(c) => c.shard_key.clone(),
+            ast::Stmt::DeleteVector(d) => d.shard_key.clone(),
+            ast::Stmt::UpdateVector(u) => u.shard_key.clone(),
+            ast::Stmt::UpdatePayload(u) => u.shard_key.clone(),
             _ => None,
         }
     }
@@ -69,6 +73,10 @@ impl PyStmt {
             ast::Stmt::Scroll(s) => s.shard_key = key,
             ast::Stmt::Upsert(u) => u.shard_key = key,
             ast::Stmt::Delete(d) => d.shard_key = key,
+            ast::Stmt::ClearPayload(c) => c.shard_key = key,
+            ast::Stmt::DeleteVector(d) => d.shard_key = key,
+            ast::Stmt::UpdateVector(u) => u.shard_key = key,
+            ast::Stmt::UpdatePayload(u) => u.shard_key = key,
             _ => {}
         }
     }
@@ -152,9 +160,10 @@ fn tokenize<'py>(input: &str, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict
 #[pyfunction]
 fn compile_query<'py>(py: Python<'py>, input: &str) -> PyResult<Bound<'py, PyAny>> {
     let stmt = Parser::parse(input).map_err(qql_py_syntax_error)?;
-    let route = qql_plan::routing::route(&stmt);
+    let (stmt_type, route) = qql_plan::routing::compile_statement(&stmt)
+        .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
     let result = serde_json::json!({
-        "stmt_type": stmt_type(&stmt),
+        "stmt_type": stmt_type,
         "method": route.method.as_str(),
         "path": route.path,
         "payload": route.body_json().unwrap_or(serde_json::Value::Null),
@@ -590,29 +599,8 @@ fn pyqql_edge(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(inject_filter, m)?)?;
     m.add_function(wrap_pyfunction!(tokenize, m)?)?;
     m.add_function(wrap_pyfunction!(compile_query, m)?)?;
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
-}
-
-fn stmt_type(stmt: &ast::Stmt) -> &'static str {
-    match stmt {
-        ast::Stmt::Query(_) => "QUERY",
-        ast::Stmt::Scroll(_) => "SCROLL",
-        ast::Stmt::Upsert(_) => "UPSERT",
-        ast::Stmt::UpdateVector(_) | ast::Stmt::UpdatePayload(_) => "UPDATE",
-        ast::Stmt::Delete(_) | ast::Stmt::DeleteVector(_) => "DELETE",
-        ast::Stmt::ClearPayload(_) => "CLEAR PAYLOAD",
-        ast::Stmt::Count(_) => "COUNT",
-        ast::Stmt::CreateCollection(_)
-        | ast::Stmt::CreateIndex(_)
-        | ast::Stmt::CreateShardKey(_) => "CREATE",
-        ast::Stmt::AlterCollection(_) => "ALTER",
-        ast::Stmt::DropCollection(_) | ast::Stmt::DropIndex(_) | ast::Stmt::DropShardKey(_) => {
-            "DROP"
-        }
-        ast::Stmt::ShowCollections | ast::Stmt::ShowCollection(_) | ast::Stmt::ShowShardKeys(_) => {
-            "SHOW"
-        }
-    }
 }
 
 fn qql_py_error(error: qql_core::error::QqlError) -> pyo3::PyErr {

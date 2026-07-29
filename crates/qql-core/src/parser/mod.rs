@@ -27,8 +27,10 @@ pub use config_validation::{
 
 /// Canonical QQL parser facade.
 ///
-/// Syntax acceptance is generated from `language/v1/grammar.pest`. The
-/// private [`AstLowerer`] converts accepted source into the typed QQL AST.
+/// Parsing is performed by the hand-written [`AstLowerer`] (lexer → tokens →
+/// typed AST). The pest grammar under `language/v1/grammar.pest` is the
+/// human-authored acceptance grammar used for documentation and optional
+/// syntax checks (`parser::syntax`); it is not the production lowerer.
 pub struct Parser;
 
 pub(crate) struct AstLowerer<'a> {

@@ -378,7 +378,8 @@ fn distance_str(d: VectorDistance) -> String {
 //
 // CreateCollection OpenAPI fields are top-level (replication_factor, …), not a
 // nested `params` object. QuantizationConfig is nested (`{ "scalar": {…} }`).
-// `shard_keys` is not part of CreateCollection — create keys via /shards after.
+// Plan IR may carry `shard_keys`; the REST projection creates them via the
+// /shards endpoint after collection create (not as a CreateCollection field).
 // Internal plan IR keeps flat `type: "scalar"|…` for gRPC converters.
 
 /// OpenAPI PUT `/collections/{c}` body from plan IR.

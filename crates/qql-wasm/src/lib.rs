@@ -316,7 +316,7 @@ impl Stmt {
             .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
-    /// Get or set the shard key (QUERY, COUNT, SCROLL, UPSERT, DELETE only).
+    /// Get or set the shard key on statements that support custom sharding.
     #[wasm_bindgen(getter, js_name = shardKey)]
     pub fn shard_key(&self) -> Option<String> {
         match &self.inner {
@@ -325,6 +325,10 @@ impl Stmt {
             ast::Stmt::Scroll(s) => s.shard_key.clone(),
             ast::Stmt::Upsert(u) => u.shard_key.clone(),
             ast::Stmt::Delete(d) => d.shard_key.clone(),
+            ast::Stmt::ClearPayload(c) => c.shard_key.clone(),
+            ast::Stmt::DeleteVector(d) => d.shard_key.clone(),
+            ast::Stmt::UpdateVector(u) => u.shard_key.clone(),
+            ast::Stmt::UpdatePayload(u) => u.shard_key.clone(),
             _ => None,
         }
     }
@@ -338,6 +342,10 @@ impl Stmt {
             ast::Stmt::Scroll(s) => s.shard_key = key,
             ast::Stmt::Upsert(u) => u.shard_key = key,
             ast::Stmt::Delete(d) => d.shard_key = key,
+            ast::Stmt::ClearPayload(c) => c.shard_key = key,
+            ast::Stmt::DeleteVector(d) => d.shard_key = key,
+            ast::Stmt::UpdateVector(u) => u.shard_key = key,
+            ast::Stmt::UpdatePayload(u) => u.shard_key = key,
             _ => {}
         }
     }
@@ -357,13 +365,13 @@ impl Stmt {
     /// Compile this Stmt AST directly into a Qdrant REST route object.
     #[wasm_bindgen(js_name = compileRoute, unchecked_return_type = "CompiledRoute")]
     pub fn compile_route(&self) -> Result<JsValue, JsValue> {
-        let route = routing::route(&self.inner);
-        let json_body = route.body_json();
+        let (stmt_type, route) = routing::compile_statement(&self.inner)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
         let output = serde_json::json!({
-            "stmt_type": route_statement_type(&route),
+            "stmt_type": stmt_type,
             "method": route.method.as_str(),
             "path": route.path,
-            "payload": json_body.unwrap_or(serde_json::Value::Null),
+            "payload": route.body_json().unwrap_or(serde_json::Value::Null),
         });
         to_js_value(&output)
     }
@@ -371,13 +379,13 @@ impl Stmt {
     /// Compile this Stmt AST into a JS-owned Uint8Array byte buffer.
     #[wasm_bindgen(js_name = compileRouteBytes)]
     pub fn compile_route_bytes(&self) -> Result<js_sys::Uint8Array, JsValue> {
-        let route = routing::route(&self.inner);
-        let json_body = route.body_json();
+        let (stmt_type, route) = routing::compile_statement(&self.inner)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
         let output = serde_json::json!({
-            "stmt_type": route_statement_type(&route),
+            "stmt_type": stmt_type,
             "method": route.method.as_str(),
             "path": route.path,
-            "payload": json_body.unwrap_or(serde_json::Value::Null),
+            "payload": route.body_json().unwrap_or(serde_json::Value::Null),
         });
         SCRATCH_BUF.with(|cell| {
             let mut buf = cell.borrow_mut();
@@ -454,14 +462,14 @@ fn build_analyze_value(input: &str) -> serde_json::Value {
             let ast_val = serde_json::to_value(&stmts).unwrap_or(serde_json::Value::Null);
             let routes_val: Vec<_> = stmts
                 .iter()
-                .map(|s| {
-                    let r = routing::route(s);
-                    serde_json::json!({
-                        "stmt_type": route_statement_type(&r),
+                .filter_map(|s| {
+                    let (stmt_type, r) = routing::compile_statement(s).ok()?;
+                    Some(serde_json::json!({
+                        "stmt_type": stmt_type,
                         "method": r.method.as_str(),
                         "path": r.path,
                         "payload": r.body_json().unwrap_or(serde_json::Value::Null),
-                    })
+                    }))
                 })
                 .collect();
             let route_val = routes_val
@@ -521,42 +529,15 @@ pub fn analyze(input: &str) -> Result<JsValue, JsValue> {
 
 // ── Core: compile & explain ───────────────────────────────────────
 
-fn route_statement_type(route: &qql_plan::routing::Route) -> &'static str {
-    match &route.body {
-        Some(qql_plan::routing::RequestBody::Query(_)) => "query",
-        Some(qql_plan::routing::RequestBody::QueryGroups(_)) => "query_groups",
-        Some(qql_plan::routing::RequestBody::Points(_)) => "points",
-        Some(qql_plan::routing::RequestBody::Scroll(_)) => "scroll",
-        Some(qql_plan::routing::RequestBody::Upsert(_)) => "upsert",
-        Some(qql_plan::routing::RequestBody::Delete(_)) => "delete",
-        Some(qql_plan::routing::RequestBody::UpdateVector(_)) => "update_vector",
-        Some(qql_plan::routing::RequestBody::UpdatePayload(_)) => "update_payload",
-        Some(qql_plan::routing::RequestBody::ClearPayload(_)) => "clear_payload",
-        Some(qql_plan::routing::RequestBody::DeleteVector(_)) => "delete_vector",
-        Some(qql_plan::routing::RequestBody::Count(_)) => "count",
-        Some(qql_plan::routing::RequestBody::CreateShardKey(_)) => "create_shard_key",
-        Some(qql_plan::routing::RequestBody::DropShardKey(_)) => "drop_shard_key",
-        Some(qql_plan::routing::RequestBody::CreateCollection(_)) => "create_collection",
-        Some(qql_plan::routing::RequestBody::UpdateCollection(_)) => "update_collection",
-        Some(qql_plan::routing::RequestBody::CreateIndex(_)) => "create_index",
-        None => match route.method {
-            qql_plan::types::Method::Get if route.path == "/collections" => "show_collections",
-            qql_plan::types::Method::Get => "show_collection",
-            qql_plan::types::Method::Delete => "drop_collection",
-            _ => "unknown",
-        },
-    }
-}
-
 fn build_compile_output(query: &str) -> Result<serde_json::Value, JsValue> {
     let stmt = Parser::parse(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    let route = routing::route(&stmt);
-    let json_body = route.body_json();
+    let (stmt_type, route) =
+        routing::compile_statement(&stmt).map_err(|e| JsValue::from_str(&e.to_string()))?;
     Ok(serde_json::json!({
-        "stmt_type": route_statement_type(&route),
+        "stmt_type": stmt_type,
         "method": route.method.as_str(),
         "path": route.path,
-        "payload": json_body.unwrap_or(serde_json::Value::Null),
+        "payload": route.body_json().unwrap_or(serde_json::Value::Null),
     }))
 }
 

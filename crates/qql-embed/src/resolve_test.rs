@@ -331,7 +331,9 @@ async fn a_query_text_resolved_to_dense_vector() {
 }
 
 #[tokio::test]
-async fn b_upsert_text_resolved_to_dense_and_sparse() {
+async fn b_upsert_text_resolved_to_dense_only_without_topology() {
+    // Topology-unaware fallback is dense-only. Hybrid/sparse must be set by
+    // the executor (schema-aware configure) or explicit USING/EMBED directives.
     let mut stmt =
         Parser::parse("UPSERT INTO docs VALUES {id: 1, text: 'hi'}, {id: 2, text: 'bye'}").unwrap();
     let mock = MockEmbedder::default();
@@ -350,10 +352,8 @@ async fn b_upsert_text_resolved_to_dense_and_sparse() {
             "point {i} missing dense vector"
         );
         assert!(
-            list.iter().any(|(k, v)| k == "sparse"
-                && matches!(v, VectorValue::Sparse { indices, values }
-                    if indices == &vec![1] && values == &vec![1.0])),
-            "point {i} missing sparse vector"
+            list.iter().all(|(k, _)| k != "sparse"),
+            "point {i} must not receive orphan sparse vector without topology"
         );
     }
 }

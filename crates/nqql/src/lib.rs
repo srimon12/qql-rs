@@ -186,37 +186,13 @@ pub fn tokenize(input: String) -> napi::Result<serde_json::Value> {
 #[napi]
 pub fn compile_query(input: String) -> napi::Result<serde_json::Value> {
     let stmt = Parser::parse(&input).map_err(to_napi_err)?;
-    let route = routing::route(&stmt);
-    let output = serde_json::json!({
-        "stmt_type": match &route.body {
-            Some(qql_plan::routing::RequestBody::Query(_)) => "query",
-            Some(qql_plan::routing::RequestBody::QueryGroups(_)) => "query_groups",
-            Some(qql_plan::routing::RequestBody::Points(_)) => "points",
-            Some(qql_plan::routing::RequestBody::Scroll(_)) => "scroll",
-            Some(qql_plan::routing::RequestBody::Upsert(_)) => "upsert",
-            Some(qql_plan::routing::RequestBody::Delete(_)) => "delete",
-            Some(qql_plan::routing::RequestBody::UpdateVector(_)) => "update_vector",
-            Some(qql_plan::routing::RequestBody::UpdatePayload(_)) => "update_payload",
-            Some(qql_plan::routing::RequestBody::ClearPayload(_)) => "clear_payload",
-            Some(qql_plan::routing::RequestBody::DeleteVector(_)) => "delete_vector",
-            Some(qql_plan::routing::RequestBody::Count(_)) => "count",
-            Some(qql_plan::routing::RequestBody::CreateShardKey(_)) => "create_shard_key",
-            Some(qql_plan::routing::RequestBody::DropShardKey(_)) => "drop_shard_key",
-            Some(qql_plan::routing::RequestBody::CreateCollection(_)) => "create_collection",
-            Some(qql_plan::routing::RequestBody::UpdateCollection(_)) => "update_collection",
-            Some(qql_plan::routing::RequestBody::CreateIndex(_)) => "create_index",
-            None => match route.method {
-                qql_plan::types::Method::Get if route.path == "/collections" => "show_collections",
-                qql_plan::types::Method::Get => "show_collection",
-                qql_plan::types::Method::Delete => "drop_collection",
-                _ => "unknown",
-            },
-        },
+    let (stmt_type, route) = routing::compile_statement(&stmt).map_err(to_napi_err)?;
+    Ok(serde_json::json!({
+        "stmt_type": stmt_type,
         "method": route.method.as_str(),
         "path": route.path,
         "payload": route.body_json().unwrap_or(serde_json::Value::Null),
-    });
-    Ok(output)
+    }))
 }
 
 fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::executor::Executor> {

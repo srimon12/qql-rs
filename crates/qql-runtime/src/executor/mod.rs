@@ -913,7 +913,14 @@ impl Executor {
                 )
             }
             PlannedOperation::ListShardKeys { .. } => ("Shard keys listed".into(), Some(result)),
-            PlannedOperation::CrossRerank { .. } => unreachable!("handled above"),
+            PlannedOperation::CrossRerank { .. } => {
+                // Defensive: early return above must handle this variant.
+                return Err(QqlError::execution(
+                    "QQL-CROSS-RERANK",
+                    "CROSS RERANK must be executed client-side, not via a Qdrant route",
+                    None,
+                ));
+            }
             _ => (format!("{label} ok"), None),
         };
         Ok(ExecResponse {
@@ -973,18 +980,23 @@ impl Executor {
         let mut docs = Vec::with_capacity(hits.len());
         let mut keep_idx = Vec::with_capacity(hits.len());
         for (i, hit) in hits.iter().enumerate() {
-            let text = hit
+            // Only use `hit.text` when the requested field is the conventional
+            // "text" payload key. Falling back for other fields (e.g. `body`)
+            // silently reranks against the wrong content.
+            let from_payload = hit
                 .payload
                 .as_ref()
                 .and_then(|p| p.get(field))
-                .and_then(|v| v.as_str())
-                .or(hit.text.as_deref())
-                .unwrap_or("")
-                .to_string();
+                .and_then(|v| v.as_str());
+            let text = match from_payload {
+                Some(s) if !s.is_empty() => s,
+                _ if field.eq_ignore_ascii_case("text") => hit.text.as_deref().unwrap_or(""),
+                _ => "",
+            };
             if text.is_empty() {
                 continue;
             }
-            docs.push(text);
+            docs.push(text.to_string());
             keep_idx.push(i);
         }
         if docs.is_empty() {

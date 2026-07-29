@@ -26,6 +26,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
 async-trait = "0.1"
+# Required by typify-generated OpenAPI types (`qdrant_types.rs` in OUT_DIR).
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["serde"] }
 tonic = { version = "0.14", default-features = false, features = ["channel", "codegen", "tls-ring", "tls-webpki-roots"], optional = true }
@@ -33,7 +34,6 @@ tonic-prost = { version = "0.14", optional = true }
 prost = { version = "0.14", optional = true }
 prost-types = { version = "0.14", optional = true }
 tokio = { version = "1", features = ["macros", "time"] }
-futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 
 [build-dependencies]
 typify = "0.7"

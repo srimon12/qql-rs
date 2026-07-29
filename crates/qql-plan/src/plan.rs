@@ -143,6 +143,37 @@ impl PlannedOperation {
         }
     }
 
+    /// Stable snake_case type id for SDK `compile()` / route metadata.
+    ///
+    /// Prefer this over inferring type from REST method+path (body-less routes
+    /// like DROP INDEX and SHOW SHARD KEYS share method+shape with other ops).
+    pub fn compile_stmt_type(&self) -> &'static str {
+        match self {
+            PlannedOperation::Query { .. } => "query",
+            PlannedOperation::QueryGroups { .. } => "query_groups",
+            PlannedOperation::GetPoints { .. } => "points",
+            PlannedOperation::Scroll { .. } => "scroll",
+            PlannedOperation::Count { .. } => "count",
+            PlannedOperation::Upsert { .. } => "upsert",
+            PlannedOperation::Delete { .. } => "delete",
+            PlannedOperation::UpdatePayload { .. } => "update_payload",
+            PlannedOperation::ClearPayload { .. } => "clear_payload",
+            PlannedOperation::UpdateVectors { .. } => "update_vector",
+            PlannedOperation::DeleteVectors { .. } => "delete_vector",
+            PlannedOperation::CreateCollection { .. } => "create_collection",
+            PlannedOperation::UpdateCollection { .. } => "update_collection",
+            PlannedOperation::DropCollection { .. } => "drop_collection",
+            PlannedOperation::CreateIndex { .. } => "create_index",
+            PlannedOperation::DropIndex { .. } => "drop_index",
+            PlannedOperation::CreateShardKey { .. } => "create_shard_key",
+            PlannedOperation::DropShardKey { .. } => "drop_shard_key",
+            PlannedOperation::ListShardKeys { .. } => "show_shard_keys",
+            PlannedOperation::ListCollections => "show_collections",
+            PlannedOperation::GetCollection { .. } => "show_collection",
+            PlannedOperation::CrossRerank { .. } => "cross_rerank",
+        }
+    }
+
     /// Collection targeted by this operation, when applicable.
     pub fn collection(&self) -> Option<&str> {
         match self {
@@ -197,6 +228,12 @@ impl PlannedOperation {
             PlannedOperation::Count { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::Upsert { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::Delete { request, .. } => request.shard_key.as_deref(),
+            PlannedOperation::UpdatePayload { request, .. } => request.shard_key.as_deref(),
+            PlannedOperation::ClearPayload { request, .. } => request.shard_key.as_deref(),
+            PlannedOperation::UpdateVectors { request, .. } => request.shard_key.as_deref(),
+            PlannedOperation::DeleteVectors { request, .. } => request.shard_key.as_deref(),
+            PlannedOperation::CreateShardKey { request, .. } => Some(request.shard_key.as_str()),
+            PlannedOperation::DropShardKey { request, .. } => Some(request.shard_key.as_str()),
             _ => None,
         }
     }
@@ -789,39 +826,63 @@ pub fn to_rest_route(op: &PlannedOperation) -> Route {
         PlannedOperation::ClearPayload {
             collection,
             request,
-        } => Route {
-            method: Method::Post,
-            path: format!("/collections/{collection}/points/payload/clear"),
-            query: vec![("wait".into(), "true".into())],
-            body: Some(RequestBody::ClearPayload(Box::new(request.clone()))),
-        },
+        } => {
+            let mut query = vec![("wait".into(), "true".into())];
+            if let Some(ref sk) = request.shard_key {
+                query.push(("shard_key".into(), sk.clone()));
+            }
+            Route {
+                method: Method::Post,
+                path: format!("/collections/{collection}/points/payload/clear"),
+                query,
+                body: Some(RequestBody::ClearPayload(Box::new(request.clone()))),
+            }
+        }
         PlannedOperation::DeleteVectors {
             collection,
             request,
-        } => Route {
-            method: Method::Post,
-            path: format!("/collections/{collection}/points/vectors/delete"),
-            query: vec![("wait".into(), "true".into())],
-            body: Some(RequestBody::DeleteVector(Box::new(request.clone()))),
-        },
+        } => {
+            let mut query = vec![("wait".into(), "true".into())];
+            if let Some(ref sk) = request.shard_key {
+                query.push(("shard_key".into(), sk.clone()));
+            }
+            Route {
+                method: Method::Post,
+                path: format!("/collections/{collection}/points/vectors/delete"),
+                query,
+                body: Some(RequestBody::DeleteVector(Box::new(request.clone()))),
+            }
+        }
         PlannedOperation::UpdateVectors {
             collection,
             request,
-        } => Route {
-            method: Method::Put,
-            path: format!("/collections/{collection}/points/vectors"),
-            query: vec![("wait".into(), "true".into())],
-            body: Some(RequestBody::UpdateVector(request.clone())),
-        },
+        } => {
+            let mut query = vec![("wait".into(), "true".into())];
+            if let Some(ref sk) = request.shard_key {
+                query.push(("shard_key".into(), sk.clone()));
+            }
+            Route {
+                method: Method::Put,
+                path: format!("/collections/{collection}/points/vectors"),
+                query,
+                body: Some(RequestBody::UpdateVector(request.clone())),
+            }
+        }
         PlannedOperation::UpdatePayload {
             collection,
             request,
-        } => Route {
-            method: Method::Post,
-            path: format!("/collections/{collection}/points/payload"),
-            query: vec![("wait".into(), "true".into())],
-            body: Some(RequestBody::UpdatePayload(request.clone())),
-        },
+        } => {
+            let mut query = vec![("wait".into(), "true".into())];
+            if let Some(ref sk) = request.shard_key {
+                query.push(("shard_key".into(), sk.clone()));
+            }
+            Route {
+                method: Method::Post,
+                path: format!("/collections/{collection}/points/payload"),
+                query,
+                body: Some(RequestBody::UpdatePayload(request.clone())),
+            }
+        }
         PlannedOperation::CreateCollection {
             collection,
             request,
