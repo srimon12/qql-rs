@@ -823,7 +823,7 @@ impl Executor {
         }
 
         let label = op.operation_label();
-        let result = self.client.execute_planned(op).await?;
+        let mut result = self.client.execute_planned(op).await?;
         let (message, data) = match op {
             PlannedOperation::Query { .. }
             | PlannedOperation::Scroll { .. }
@@ -834,7 +834,22 @@ impl Executor {
                     Some(serde_json::to_value(hits).unwrap_or_default()),
                 )
             }
-            PlannedOperation::QueryGroups { .. } => {
+            PlannedOperation::QueryGroups { request, .. } => {
+                if let Some(offset) = request.group_offset {
+                    let offset = offset as usize;
+                    let groups_opt = if result.get("result").is_some() {
+                        result.get_mut("result").and_then(|r| r.get_mut("groups"))
+                    } else {
+                        result.get_mut("groups")
+                    };
+                    if let Some(groups) = groups_opt.and_then(|g| g.as_array_mut()) {
+                        if offset < groups.len() {
+                            groups.drain(0..offset);
+                        } else {
+                            groups.clear();
+                        }
+                    }
+                }
                 let groups_count = result
                     .get("result")
                     .and_then(|r| r.get("groups"))

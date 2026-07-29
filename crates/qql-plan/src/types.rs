@@ -297,6 +297,8 @@ pub struct QueryGroupsRequest {
     pub timeout: Option<u64>,
     #[serde(skip)]
     pub consistency: Option<ReadConsistencyParam>,
+    #[serde(skip)]
+    pub group_offset: Option<u64>,
 }
 
 /// Wire form of OpenAPI `ReadConsistency` for REST query strings / gRPC.

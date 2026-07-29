@@ -35,6 +35,25 @@ assert.strictEqual(route.method, "POST");
 assert.strictEqual(route.path, "/collections/docs/points/query");
 assert(route.payload && typeof route.payload === "object");
 
+// Test DELETE PAYLOAD compilation contract
+const deletePayloadRoute = nqql.compileQuery(
+  "DELETE PAYLOAD draft, temp_token FROM docs WHERE status = 'archived' SHARD 'tenant_1'"
+);
+assert.strictEqual(deletePayloadRoute.stmt_type, "delete_payload");
+assert.strictEqual(deletePayloadRoute.method, "POST");
+assert.strictEqual(deletePayloadRoute.path, "/collections/docs/points/payload/delete");
+assert.deepStrictEqual(deletePayloadRoute.payload.keys, ["draft", "temp_token"]);
+
+// Test COUNT WITH (exact = true)
+const countRoute = nqql.compileQuery("COUNT FROM docs WHERE active = true WITH (exact = true)");
+assert.strictEqual(countRoute.stmt_type, "count");
+assert.strictEqual(countRoute.payload.exact, true);
+
+// Test GROUP BY OFFSET effective limit
+const groupRoute = nqql.compileQuery("QUERY 'test' FROM docs GROUP BY category LIMIT 10 OFFSET 5");
+assert.strictEqual(groupRoute.stmt_type, "query_groups");
+assert.strictEqual(groupRoute.payload.limit, 15);
+
 // Test explain
 const plan = nqql.explain("QUERY 'hello' FROM docs LIMIT 10");
 assert(plan.includes("Statement: QUERY"));

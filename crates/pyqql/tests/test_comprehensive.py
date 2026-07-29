@@ -853,6 +853,32 @@ class TestEdgeCases(unittest.TestCase):
         self.assertIn("CreateCollection", d)
         self.assertEqual(d["CreateCollection"]["collection"], "mytest")
 
+    def test_j24_delete_payload_compile(self):
+        """DELETE PAYLOAD statement compiles to /points/payload/delete route."""
+        cq = pyqql.compile_query(
+            "DELETE PAYLOAD draft, temp_token FROM docs WHERE status = 'archived' SHARD 'tenant_1'"
+        )
+        self.assertEqual(cq["method"], "POST")
+        self.assertEqual(cq["path"], "/collections/docs/points/payload/delete")
+        self.assertEqual(cq["payload"]["keys"], ["draft", "temp_token"])
+
+    def test_j25_count_exact_compile(self):
+        """COUNT statement with exact = true compiles exact flag."""
+        cq = pyqql.compile_query(
+            "COUNT FROM docs WHERE active = true WITH (exact = true)"
+        )
+        self.assertEqual(cq["method"], "POST")
+        self.assertTrue(cq["payload"]["exact"])
+
+    def test_j26_group_by_offset_compile(self):
+        """GROUP BY statement with OFFSET computes effective limit (limit + offset)."""
+        cq = pyqql.compile_query(
+            "QUERY TEXT 'search' FROM docs GROUP BY category LIMIT 10 OFFSET 5"
+        )
+        self.assertEqual(cq["method"], "POST")
+        self.assertIn("/query/groups", cq["path"])
+        self.assertEqual(cq["payload"]["limit"], 15)
+
 
 # ============================================================================
 # Main

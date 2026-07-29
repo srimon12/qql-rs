@@ -58,17 +58,32 @@ impl<'a> AstLowerer<'a> {
         } else {
             None
         };
-        let shard_key = if self.peek()?.kind == TokenKind::Shard {
-            self.advance()?;
-            Some(self.parse_string()?)
-        } else {
-            None
-        };
+        let mut shard_key = None;
+        let mut exact = None;
+        loop {
+            match self.peek()?.kind {
+                TokenKind::Shard => {
+                    self.advance()?;
+                    shard_key = Some(self.parse_string()?);
+                }
+                TokenKind::With => {
+                    self.advance()?;
+                    let opts = self.parse_config_block()?;
+                    exact = opts.into_iter()
+                        .find(|(k, _)| k.eq_ignore_ascii_case("exact"))
+                        .and_then(|(_, v)| match v {
+                            crate::ast::Value::Bool(b) => Some(b),
+                            _ => None,
+                        });
+                }
+                _ => break,
+            }
+        }
         Ok(Stmt::Count(Box::new(CountStmt {
             collection,
             filter,
             shard_key,
-            exact: None,
+            exact,
         })))
     }
 }

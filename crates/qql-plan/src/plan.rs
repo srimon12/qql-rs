@@ -580,26 +580,6 @@ fn validate_query_expr(expression: &QueryExpr) -> Result<(), QqlError> {
 }
 
 fn validate_query_target_kinds(expression: &QueryExpr) -> Result<(), QqlError> {
-    // MMR is dense-only; fail closed on sparse USING (clearer than backend errors).
-    if let QueryExpr::Nearest {
-        mmr: Some(_),
-        using,
-        ..
-    } = expression
-    {
-        if using
-            .as_ref()
-            .and_then(|target| target.kind)
-            .is_some_and(|kind| kind == VectorKind::Sparse)
-        {
-            return Err(QqlError::validation(
-                "QQL-PLAN-MMR-SPARSE",
-                "MMR requires a dense vector target (USING … AS DENSE or a dense named vector). \
-                 Sparse MMR is not supported.",
-                None,
-            ));
-        }
-    }
 
     let (target, inputs): (Option<&VectorTarget>, Vec<&QueryInput>) = match expression {
         QueryExpr::Nearest { input, using, .. } => (using.as_ref(), vec![input]),
@@ -1193,5 +1173,53 @@ mod tests {
             plan(&stmt_empty_prefetch).unwrap_err().kind,
             qql_core::error::ErrorKind::Validation
         );
+    }
+
+    #[test]
+    fn delete_payload_planning_and_routing() {
+        let stmt = qql_core::parser::Parser::parse(
+            "DELETE PAYLOAD draft, temp_token FROM docs WHERE status = 'archived' SHARD 'tenant_1';",
+        )
+        .unwrap();
+        let op = plan(&stmt).unwrap();
+
+        assert_eq!(op.operation_label(), "DELETE_PAYLOAD");
+        assert_eq!(op.compile_stmt_type(), "delete_payload");
+        assert_eq!(op.collection(), Some("docs"));
+        assert_eq!(op.shard_key(), Some("tenant_1"));
+
+        if let PlannedOperation::DeletePayload { collection, request } = &op {
+            assert_eq!(collection, "docs");
+            assert_eq!(request.keys, vec!["draft", "temp_token"]);
+            assert_eq!(request.shard_key.as_deref(), Some("tenant_1"));
+            assert!(request.filter.is_some());
+        } else {
+            panic!("expected DeletePayload operation");
+        }
+
+        let route = crate::to_rest_route(&op).unwrap();
+        assert_eq!(route.method, crate::Method::Post);
+        assert_eq!(route.path, "/collections/docs/points/payload/delete");
+    }
+
+    #[test]
+    fn count_exact_planning() {
+        let stmt = qql_core::parser::Parser::parse(
+            "COUNT FROM docs WHERE active = true WITH (exact = true) SHARD 'tenant_2';",
+        )
+        .unwrap();
+        let op = plan(&stmt).unwrap();
+
+        assert_eq!(op.operation_label(), "COUNT");
+        assert_eq!(op.collection(), Some("docs"));
+        assert_eq!(op.shard_key(), Some("tenant_2"));
+
+        if let PlannedOperation::Count { request, .. } = op {
+            assert_eq!(request.exact, Some(true));
+            assert_eq!(request.shard_key.as_deref(), Some("tenant_2"));
+            assert!(request.filter.is_some());
+        } else {
+            panic!("expected Count operation");
+        }
     }
 }
