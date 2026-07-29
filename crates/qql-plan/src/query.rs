@@ -381,9 +381,6 @@ pub fn lower_query_request(query: &QueryStmt) -> Result<QueryRequest, QqlError> 
     let (with_payload, with_vector) = lower_output_selector(&query.output);
     let (query_variant, using, prefetch) = build_query_with_prefetch(query)?;
 
-    validate_inference_inputs_for_variant(&query_variant)?;
-    validate_inference_inputs_prefetches(&prefetch)?;
-
     let (timeout, consistency) = lower_request_opts(query.params.as_ref());
     Ok(QueryRequest {
         query: query_variant,
@@ -418,9 +415,6 @@ pub fn lower_query_groups_request(query: &QueryStmt) -> Result<QueryGroupsReques
 
     let (with_payload, with_vector) = lower_output_selector(&query.output);
     let (query_variant, using, prefetch) = build_query_with_prefetch(query)?;
-
-    validate_inference_inputs_for_variant(&query_variant)?;
-    validate_inference_inputs_prefetches(&prefetch)?;
 
     let (timeout, consistency) = lower_request_opts(query.params.as_ref());
     Ok(QueryGroupsRequest {
@@ -598,82 +592,6 @@ fn build_text_input(text: &str, model: &Option<String>) -> PlanQueryInput {
 }
 
 /// Validate that all [`PlanQueryInput::Document`] and [`PlanQueryInput::Image`]
-/// instances carry a non-empty model. Server-side inference requires a model;
-/// without it the REST body would be invalid per the OpenAPI `Document`/`Image`
-/// schemas (both require `"model"` of `minLength: 1`).
-///
-/// Client-side embedding resolves inputs to vectors before planning, so a
-/// Document/Image reaching this point means server inference was intended.
-fn validate_inference_inputs_for_variant(variant: &QueryVariant) -> Result<(), QqlError> {
-    let inputs: Vec<&PlanQueryInput> = match variant {
-        QueryVariant::Nearest(n) => vec![&n.nearest],
-        QueryVariant::Recommend { recommend: r } => {
-            r.positive.iter().chain(r.negative.iter()).collect()
-        }
-        QueryVariant::Context { context: ctx } => ctx
-            .iter()
-            .flat_map(|p| [&p.positive, &p.negative])
-            .collect(),
-        QueryVariant::Discover { discover: d } => {
-            let mut v: Vec<&PlanQueryInput> = d
-                .context
-                .iter()
-                .flat_map(|p| [&p.positive, &p.negative])
-                .collect();
-            v.push(&d.target);
-            v
-        }
-        QueryVariant::RelevanceFeedback {
-            relevance_feedback: rf,
-        } => {
-            let mut v: Vec<&PlanQueryInput> = rf.feedback.iter().map(|fi| &fi.example).collect();
-            v.push(&rf.target);
-            v
-        }
-        QueryVariant::OrderBy { .. }
-        | QueryVariant::Sample { .. }
-        | QueryVariant::Fusion { .. }
-        | QueryVariant::Rrf(_)
-        | QueryVariant::Formula(_) => return Ok(()),
-    };
-
-    for input in inputs {
-        check_inference_input(input)?;
-    }
-    Ok(())
-}
-
-fn check_inference_input(input: &PlanQueryInput) -> Result<(), QqlError> {
-    match input {
-        PlanQueryInput::Document { model, .. } | PlanQueryInput::Image { model, .. } => {
-            let has_model = model.as_ref().is_some_and(|m| !m.is_empty());
-            if !has_model {
-                return Err(QqlError::validation(
-                    "QQL-PLAN-INFERENCE",
-                    "Document/Image input requires a MODEL for server-side inference; \
-                     resolve client-side before planning or supply MODEL in the query",
-                    None,
-                ));
-            }
-        }
-        PlanQueryInput::Point(_) | PlanQueryInput::Vector(_) => {}
-    }
-    Ok(())
-}
-
-/// Recurse through a prefetch chain, validating all inference inputs.
-fn validate_inference_inputs_prefetches(prefetches: &[PrefetchRequest]) -> Result<(), QqlError> {
-    for pf in prefetches {
-        if let Some(ref qv) = pf.query {
-            validate_inference_inputs_for_variant(qv)?;
-        }
-        if let Some(ref nested) = pf.prefetch {
-            validate_inference_inputs_prefetches(nested)?;
-        }
-    }
-    Ok(())
-}
-
 pub fn lower_search_params(params: &qql_core::ast::SearchParams) -> Option<SearchParamsRequest> {
     // Body-only OpenAPI SearchParams — timeout/consistency are request-level.
     let mut has = false;
@@ -966,17 +884,16 @@ mod tests {
     }
 
     #[test]
-    fn nearest_text_requires_model() {
-        // Bare text without MODEL is rejected at plan time because the
-        // OpenAPI Document schema requires both "text" and "model" fields.
-        let err =
-            crate::plan::plan(&Parser::parse("QUERY 'hello world' FROM docs LIMIT 5;").unwrap())
-                .unwrap_err();
-        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+    fn nearest_text_without_model_plans_successfully() {
+        // Bare text without MODEL now succeeds at plan time — MODEL is
+        // filled by the executor/embedder, not the transport-agnostic plan layer.
+        let result = crate::plan::plan(
+            &Parser::parse("QUERY TEXT 'hello' FROM docs USING dense LIMIT 5;").unwrap(),
+        );
         assert!(
-            err.message.contains("MODEL") || err.message.contains("model"),
-            "error should mention MODEL requirement: {}",
-            err.message
+            result.is_ok(),
+            "plan should succeed without MODEL: {}",
+            result.unwrap_err()
         );
     }
 
@@ -1128,25 +1045,31 @@ mod tests {
     }
 
     #[test]
-    fn unmodeled_document_rejected_at_plan() {
-        let err =
-            crate::plan::plan(&Parser::parse("QUERY 'bare string' FROM docs LIMIT 5;").unwrap())
-                .unwrap_err();
-        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
-        assert!(err.message.contains("MODEL") || err.message.contains("model"));
+    fn document_without_model_plans_successfully() {
+        // Plan layer is transport-agnostic — MODEL is filled downstream.
+        let result = crate::plan::plan(
+            &Parser::parse("QUERY 'bare string' FROM docs USING dense LIMIT 5;").unwrap(),
+        );
+        assert!(
+            result.is_ok(),
+            "plan should succeed without MODEL: {}",
+            result.unwrap_err()
+        );
     }
 
     #[test]
-    fn hybrid_without_model_rejected_at_plan() {
-        let err = crate::plan::plan(
+    fn hybrid_without_model_plans_successfully() {
+        let result = crate::plan::plan(
             &Parser::parse(
                 "QUERY HYBRID TEXT 'search' DENSE d SPARSE s FUSION RRF FROM docs LIMIT 10;",
             )
             .unwrap(),
-        )
-        .unwrap_err();
-        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
-        assert!(err.message.contains("MODEL") || err.message.contains("model"));
+        );
+        assert!(
+            result.is_ok(),
+            "plan should succeed without MODEL: {}",
+            result.unwrap_err()
+        );
     }
 
     #[test]

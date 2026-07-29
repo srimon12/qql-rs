@@ -697,44 +697,42 @@ mod tests {
 
     /// Document WITHOUT model must fail planning with a clear validation error.
     #[test]
-    fn document_without_model_fails_planning() {
-        let err = plan(&Parser::parse("QUERY 'hello' FROM docs LIMIT 5;").unwrap()).unwrap_err();
-        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+    fn document_without_model_plans_successfully() {
+        // Plan layer is transport-agnostic — MODEL is filled by the executor.
+        let result =
+            plan(&Parser::parse("QUERY 'hello' FROM docs USING dense LIMIT 5;").unwrap());
         assert!(
-            err.message.contains("MODEL") || err.message.contains("model"),
-            "error must mention MODEL: {}",
-            err.message
+            result.is_ok(),
+            "plan should succeed without MODEL: {}",
+            result.unwrap_err()
         );
-        assert_eq!(err.code, "QQL-PLAN-INFERENCE");
     }
 
-    /// Image WITHOUT model must fail planning with a clear validation error.
+    /// Image WITHOUT model now plans successfully — MODEL resolution
+    /// happens at the executor layer, not in the plan IR.
     #[test]
-    fn image_without_model_fails_planning() {
-        let err = plan(
+    fn image_without_model_plans_successfully() {
+        let result = plan(
             &Parser::parse(
                 "QUERY IMAGE 'https://example.com/photo.jpg' FROM docs USING image_vec LIMIT 5;",
             )
             .unwrap(),
-        )
-        .unwrap_err();
-        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
-        assert!(
-            err.message.contains("MODEL") || err.message.contains("model"),
-            "error must mention MODEL: {}",
-            err.message
         );
-        assert_eq!(err.code, "QQL-PLAN-INFERENCE");
+        assert!(
+            result.is_ok(),
+            "plan should succeed without MODEL: {}",
+            result.unwrap_err()
+        );
     }
 
-    /// Document/Image with explicit MODEL '' (empty) also fails planning
-    /// because the OpenAPI schema requires `minLength: 1`.
+    /// Document with explicit MODEL '' (empty) plans successfully —
+    /// the plan IR preserves the value; the executor validates it.
     #[test]
-    fn document_with_empty_model_fails_planning() {
-        let err = plan(&Parser::parse("QUERY TEXT 'hello' MODEL '' FROM docs LIMIT 5;").unwrap())
-            .unwrap_err();
-        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
-        assert_eq!(err.code, "QQL-PLAN-INFERENCE");
+    fn document_with_empty_model_plans_successfully() {
+        let result = plan(
+            &Parser::parse("QUERY TEXT 'hello' MODEL '' FROM docs USING dense LIMIT 5;").unwrap(),
+        );
+        assert!(result.is_ok());
     }
 
     /// HYBRID requires MODEL so both dense and sparse prefetches get a valid
