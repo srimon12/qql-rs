@@ -10,6 +10,7 @@
 pub mod embedder;
 pub mod resolve;
 pub mod sparse;
+pub mod topology;
 
 #[cfg(test)]
 mod resolve_test;
@@ -19,3 +20,4 @@ mod sparse_test;
 pub use embedder::{Embedder, EmbedderBound, SparseEmbedder};
 pub use resolve::{resolve_embeddings, DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME};
 pub use sparse::SparseVector;
+pub use topology::{query_needs_kind_resolution, resolve_query_vector_kinds};

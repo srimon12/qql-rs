@@ -61,7 +61,10 @@ fn extract_expression_jobs(expr: &QueryExpr, jobs: &mut Vec<EmbeddingJob>) {
         return;
     }
 
-    let kind = expression_vector_kind(expr);
+    let Some(kind) = expression_vector_kind(expr) else {
+        // USING name without resolved kind — skip rather than invent Dense.
+        return;
+    };
     for input in collect_text_inputs(expr) {
         if let QueryInput::Text { text, model } = input {
             jobs.push(EmbeddingJob {
@@ -77,18 +80,20 @@ fn extract_expression_jobs(expr: &QueryExpr, jobs: &mut Vec<EmbeddingJob>) {
     }
 }
 
-fn expression_vector_kind(expr: &QueryExpr) -> VectorKind {
+/// Kind for offline job extraction. Returns `None` when `USING name` has no
+/// resolved kind (caller must not invent dense).
+fn expression_vector_kind(expr: &QueryExpr) -> Option<VectorKind> {
     match expr {
         QueryExpr::Nearest { using, .. }
         | QueryExpr::Recommend { using, .. }
         | QueryExpr::Context { using, .. }
         | QueryExpr::Discover { using, .. }
-        | QueryExpr::RelevanceFeedback { using, .. } => using
-            .as_ref()
-            .and_then(|target| target.kind)
-            .unwrap_or(VectorKind::Dense),
-        QueryExpr::Rerank { .. } => VectorKind::Dense,
-        _ => VectorKind::Dense,
+        | QueryExpr::RelevanceFeedback { using, .. } => match using {
+            None => Some(VectorKind::Dense),
+            Some(target) => target.kind,
+        },
+        QueryExpr::Rerank { .. } => Some(VectorKind::Dense),
+        _ => Some(VectorKind::Dense),
     }
 }
 

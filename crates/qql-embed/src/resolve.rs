@@ -44,7 +44,7 @@ async fn resolve_query_embeddings(
     embedder: &dyn Embedder,
 ) -> Result<(), QqlError> {
     let mut dense_jobs: Vec<(String, String)> = Vec::new();
-    collect_query_dense_jobs(query, &mut dense_jobs);
+    collect_query_dense_jobs(query, &mut dense_jobs)?;
 
     let dense_vecs = batch_dense_by_model(embedder, &dense_jobs).await?;
     let mut dense_iter = dense_vecs.into_iter();
@@ -164,22 +164,32 @@ async fn resolve_upsert_embeddings(
 
 // ── Collect dense text jobs (model, text) in walk order ─────────────
 
-fn collect_query_dense_jobs(query: &QueryStmt, jobs: &mut Vec<(String, String)>) {
+fn collect_query_dense_jobs(
+    query: &QueryStmt,
+    jobs: &mut Vec<(String, String)>,
+) -> Result<(), QqlError> {
     for cte in &query.ctes {
-        collect_expr_dense_jobs(&cte.query.expression, jobs);
+        collect_expr_dense_jobs(&cte.query.expression, jobs)?;
     }
-    collect_expr_dense_jobs(&query.expression, jobs);
+    collect_expr_dense_jobs(&query.expression, jobs)
 }
 
-fn collect_prefetches_dense_jobs(prefetches: &[Prefetch], jobs: &mut Vec<(String, String)>) {
+fn collect_prefetches_dense_jobs(
+    prefetches: &[Prefetch],
+    jobs: &mut Vec<(String, String)>,
+) -> Result<(), QqlError> {
     for pref in prefetches {
         if let PrefetchSource::Query(sub) = &pref.source {
-            collect_query_dense_jobs(sub, jobs);
+            collect_query_dense_jobs(sub, jobs)?;
         }
     }
+    Ok(())
 }
 
-fn collect_expr_dense_jobs(expr: &QueryExpr, jobs: &mut Vec<(String, String)>) {
+fn collect_expr_dense_jobs(
+    expr: &QueryExpr,
+    jobs: &mut Vec<(String, String)>,
+) -> Result<(), QqlError> {
     match expr {
         QueryExpr::Nearest {
             input,
@@ -187,8 +197,8 @@ fn collect_expr_dense_jobs(expr: &QueryExpr, jobs: &mut Vec<(String, String)>) {
             prefetch,
             ..
         } => {
-            collect_input_dense_job(input, target_kind(using), "default", jobs);
-            collect_prefetches_dense_jobs(prefetch, jobs);
+            collect_input_dense_job(input, require_target_kind(using)?, "default", jobs);
+            collect_prefetches_dense_jobs(prefetch, jobs)?;
         }
         QueryExpr::Recommend {
             positive,
@@ -197,10 +207,11 @@ fn collect_expr_dense_jobs(expr: &QueryExpr, jobs: &mut Vec<(String, String)>) {
             prefetch,
             ..
         } => {
+            let kind = require_target_kind(using)?;
             for input in positive.iter().chain(negative.iter()) {
-                collect_input_dense_job(input, target_kind(using), "default", jobs);
+                collect_input_dense_job(input, kind, "default", jobs);
             }
-            collect_prefetches_dense_jobs(prefetch, jobs);
+            collect_prefetches_dense_jobs(prefetch, jobs)?;
         }
         QueryExpr::Context {
             pairs,
@@ -208,11 +219,12 @@ fn collect_expr_dense_jobs(expr: &QueryExpr, jobs: &mut Vec<(String, String)>) {
             prefetch,
             ..
         } => {
+            let kind = require_target_kind(using)?;
             for pair in pairs {
-                collect_input_dense_job(&pair.positive, target_kind(using), "default", jobs);
-                collect_input_dense_job(&pair.negative, target_kind(using), "default", jobs);
+                collect_input_dense_job(&pair.positive, kind, "default", jobs);
+                collect_input_dense_job(&pair.negative, kind, "default", jobs);
             }
-            collect_prefetches_dense_jobs(prefetch, jobs);
+            collect_prefetches_dense_jobs(prefetch, jobs)?;
         }
         QueryExpr::Discover {
             target,
@@ -221,15 +233,16 @@ fn collect_expr_dense_jobs(expr: &QueryExpr, jobs: &mut Vec<(String, String)>) {
             prefetch,
             ..
         } => {
-            collect_input_dense_job(target, target_kind(using), "default", jobs);
+            let kind = require_target_kind(using)?;
+            collect_input_dense_job(target, kind, "default", jobs);
             for pair in context {
-                collect_input_dense_job(&pair.positive, target_kind(using), "default", jobs);
-                collect_input_dense_job(&pair.negative, target_kind(using), "default", jobs);
+                collect_input_dense_job(&pair.positive, kind, "default", jobs);
+                collect_input_dense_job(&pair.negative, kind, "default", jobs);
             }
-            collect_prefetches_dense_jobs(prefetch, jobs);
+            collect_prefetches_dense_jobs(prefetch, jobs)?;
         }
         QueryExpr::Fusion { prefetch, .. } | QueryExpr::Formula { prefetch, .. } => {
-            collect_prefetches_dense_jobs(prefetch, jobs);
+            collect_prefetches_dense_jobs(prefetch, jobs)?;
         }
         QueryExpr::RelevanceFeedback {
             target,
@@ -238,11 +251,12 @@ fn collect_expr_dense_jobs(expr: &QueryExpr, jobs: &mut Vec<(String, String)>) {
             prefetch,
             ..
         } => {
-            collect_input_dense_job(target, target_kind(using), "default", jobs);
+            let kind = require_target_kind(using)?;
+            collect_input_dense_job(target, kind, "default", jobs);
             for fb in feedback {
-                collect_input_dense_job(&fb.example, target_kind(using), "default", jobs);
+                collect_input_dense_job(&fb.example, kind, "default", jobs);
             }
-            collect_prefetches_dense_jobs(prefetch, jobs);
+            collect_prefetches_dense_jobs(prefetch, jobs)?;
         }
         QueryExpr::Hybrid { text, model, .. } => {
             let m = model.as_deref().unwrap_or("default").to_string();
@@ -255,10 +269,11 @@ fn collect_expr_dense_jobs(expr: &QueryExpr, jobs: &mut Vec<(String, String)>) {
             ..
         } => {
             collect_input_dense_job(input, VectorKind::Dense, model.as_str(), jobs);
-            collect_prefetches_dense_jobs(prefetch, jobs);
+            collect_prefetches_dense_jobs(prefetch, jobs)?;
         }
         _ => {}
     }
+    Ok(())
 }
 
 fn collect_input_dense_job(
@@ -367,7 +382,7 @@ fn apply_expr_embeddings<'a>(
                 prefetch,
                 ..
             } => {
-                apply_input(input, target_kind(using), embedder, dense).await?;
+                apply_input(input, require_target_kind(using)?, embedder, dense).await?;
                 apply_prefetches_embeddings(prefetch, embedder, dense).await?;
             }
             QueryExpr::Recommend {
@@ -377,8 +392,9 @@ fn apply_expr_embeddings<'a>(
                 prefetch,
                 ..
             } => {
+                let kind = require_target_kind(using)?;
                 for input in positive.iter_mut().chain(negative.iter_mut()) {
-                    apply_input(input, target_kind(using), embedder, dense).await?;
+                    apply_input(input, kind, embedder, dense).await?;
                 }
                 apply_prefetches_embeddings(prefetch, embedder, dense).await?;
             }
@@ -388,9 +404,10 @@ fn apply_expr_embeddings<'a>(
                 prefetch,
                 ..
             } => {
+                let kind = require_target_kind(using)?;
                 for pair in pairs {
-                    apply_input(&mut pair.positive, target_kind(using), embedder, dense).await?;
-                    apply_input(&mut pair.negative, target_kind(using), embedder, dense).await?;
+                    apply_input(&mut pair.positive, kind, embedder, dense).await?;
+                    apply_input(&mut pair.negative, kind, embedder, dense).await?;
                 }
                 apply_prefetches_embeddings(prefetch, embedder, dense).await?;
             }
@@ -401,10 +418,11 @@ fn apply_expr_embeddings<'a>(
                 prefetch,
                 ..
             } => {
-                apply_input(target, target_kind(using), embedder, dense).await?;
+                let kind = require_target_kind(using)?;
+                apply_input(target, kind, embedder, dense).await?;
                 for pair in context {
-                    apply_input(&mut pair.positive, target_kind(using), embedder, dense).await?;
-                    apply_input(&mut pair.negative, target_kind(using), embedder, dense).await?;
+                    apply_input(&mut pair.positive, kind, embedder, dense).await?;
+                    apply_input(&mut pair.negative, kind, embedder, dense).await?;
                 }
                 apply_prefetches_embeddings(prefetch, embedder, dense).await?;
             }
@@ -418,9 +436,10 @@ fn apply_expr_embeddings<'a>(
                 prefetch,
                 ..
             } => {
-                apply_input(target, target_kind(using), embedder, dense).await?;
+                let kind = require_target_kind(using)?;
+                apply_input(target, kind, embedder, dense).await?;
                 for fb in feedback {
-                    apply_input(&mut fb.example, target_kind(using), embedder, dense).await?;
+                    apply_input(&mut fb.example, kind, embedder, dense).await?;
                 }
                 apply_prefetches_embeddings(prefetch, embedder, dense).await?;
             }
@@ -546,11 +565,19 @@ async fn apply_input(
     Ok(())
 }
 
-fn target_kind(target: &Option<VectorTarget>) -> VectorKind {
-    target
-        .as_ref()
-        .and_then(|target| target.kind)
-        .unwrap_or(VectorKind::Dense)
+/// Resolve the embed kind for a `USING` target.
+///
+/// - No `USING` → dense (offline default for bare text nearest).
+/// - `USING name AS kind` or schema-filled `kind` → that kind.
+/// - `USING name` with `kind: None` → error (never silent dense default).
+fn require_target_kind(target: &Option<VectorTarget>) -> Result<VectorKind, QqlError> {
+    match target {
+        None => Ok(VectorKind::Dense),
+        Some(t) => match t.kind {
+            Some(kind) => Ok(kind),
+            None => Err(crate::topology::unknown_using_kind_error(&t.name)),
+        },
+    }
 }
 
 fn ensure_batch_len(got: usize, expected: usize, model: &str) -> Result<(), QqlError> {

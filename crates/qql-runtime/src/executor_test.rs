@@ -495,6 +495,58 @@ async fn text_query_resolves_arbitrary_sparse_vector_by_schema() {
 }
 
 #[tokio::test]
+async fn cte_prefetch_using_sparse_embeds_sparse_via_schema() {
+    // Regression: USING sparse without AS SPARSE must not dense-embed.
+    let mut client = MockQdrantClient::default();
+    client.exists = true;
+    client.info = Some(collection_with_vectors(&["dense"], &["sparse"]));
+    let last_planned = client.last_planned.clone();
+    let embedder = Arc::new(MockEmbedder {
+        dense: vec![0.1, 0.2, 0.3],
+        sparse_indices: vec![2, 9],
+        sparse_values: vec![0.5, 0.9],
+    });
+    let executor =
+        Executor::with_embedder(Box::new(client), Some(test_local_config()), Some(embedder));
+
+    executor
+        .execute(
+            "WITH d AS (QUERY TEXT 'x' USING dense LIMIT 100), \
+             s AS (QUERY TEXT 'x' USING sparse LIMIT 100) \
+             QUERY FUSION RRF FROM docs PREFETCH (d, s) LIMIT 10",
+            OnError::Stop,
+        )
+        .await
+        .unwrap();
+
+    let op = last_planned.lock().unwrap().take().unwrap();
+    let route = qql_plan::plan::to_rest_route(&op);
+    let body = route.body_json().unwrap();
+    let prefetch = body["prefetch"].as_array().expect("fusion prefetch");
+    assert_eq!(prefetch.len(), 2);
+
+    // Prefetch 0: dense arm
+    assert_eq!(prefetch[0]["using"], "dense");
+    assert!(
+        prefetch[0]["query"]["nearest"].is_array(),
+        "dense arm must be a dense vector array, got {}",
+        prefetch[0]["query"]["nearest"]
+    );
+
+    // Prefetch 1: sparse arm — indices/values, not a dense float array
+    assert_eq!(prefetch[1]["using"], "sparse");
+    assert_eq!(
+        prefetch[1]["query"]["nearest"]["indices"],
+        serde_json::json!([2, 9])
+    );
+    let values = prefetch[1]["query"]["nearest"]["values"]
+        .as_array()
+        .expect("sparse values");
+    assert!((values[0].as_f64().unwrap() - 0.5).abs() < 1e-6);
+    assert!((values[1].as_f64().unwrap() - 0.9).abs() < 1e-6);
+}
+
+#[tokio::test]
 async fn text_query_infers_only_arbitrary_dense_vector() {
     let mut client = MockQdrantClient::default();
     client.exists = true;

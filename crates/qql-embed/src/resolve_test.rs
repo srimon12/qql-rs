@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use crate::embedder::Embedder;
 use crate::resolve::resolve_embeddings;
 use crate::sparse::SparseVector;
+use crate::topology::resolve_query_vector_kinds;
 
 #[derive(Default)]
 struct MockEmbedder {
@@ -56,8 +57,8 @@ impl Embedder for MockEmbedder {
 #[tokio::test]
 async fn rerank_uses_model_not_vector_name() {
     let mut stmt = Parser::parse(
-        "WITH c AS (QUERY TEXT 'x' USING dense LIMIT 100) \
-         QUERY RERANK TEXT 'rerank-me' MODEL 'colbert-v2' FROM docs USING colbert PREFETCH (c) LIMIT 10;",
+        "WITH c AS (QUERY TEXT 'x' USING dense AS DENSE LIMIT 100) \
+         QUERY RERANK TEXT 'rerank-me' MODEL 'colbert-v2' FROM docs USING colbert AS DENSE PREFETCH (c) LIMIT 10;",
     )
     .unwrap();
     let mock = MockEmbedder::default();
@@ -173,9 +174,9 @@ async fn sparse_model_is_rejected() {
 #[tokio::test]
 async fn chained_cte_embeddings_not_duplicated() {
     let mut stmt = Parser::parse(
-        "WITH a AS (QUERY TEXT 'first' USING dense LIMIT 10), \
-         b AS (QUERY TEXT 'second' USING dense PREFETCH (a) LIMIT 10) \
-         QUERY TEXT 'third' FROM docs USING dense PREFETCH (b) LIMIT 10;",
+        "WITH a AS (QUERY TEXT 'first' USING dense AS DENSE LIMIT 10), \
+         b AS (QUERY TEXT 'second' USING dense AS DENSE PREFETCH (a) LIMIT 10) \
+         QUERY TEXT 'third' FROM docs USING dense AS DENSE PREFETCH (b) LIMIT 10;",
     )
     .unwrap();
     let mock = MockEmbedder::default();
@@ -402,7 +403,7 @@ async fn i_preprovided_query_vector_not_embedded() {
 
 #[tokio::test]
 async fn j_query_with_using_dense() {
-    let mut stmt = Parser::parse("QUERY 'hello' FROM docs USING dense LIMIT 10").unwrap();
+    let mut stmt = Parser::parse("QUERY 'hello' FROM docs USING dense AS DENSE LIMIT 10").unwrap();
     let mock = MockEmbedder::default();
     resolve_embeddings(&mut stmt, &mock).await.unwrap();
 
@@ -419,6 +420,45 @@ async fn j_query_with_using_dense() {
     assert_eq!(
         using.as_ref().map(|target| target.name.as_str()),
         Some("dense")
+    );
+}
+
+#[tokio::test]
+async fn using_without_kind_fails_closed_offline() {
+    let mut stmt = Parser::parse("QUERY TEXT 'x' FROM docs USING sparse LIMIT 10").unwrap();
+    let mock = MockEmbedder::default();
+    let err = resolve_embeddings(&mut stmt, &mock).await.unwrap_err();
+    assert_eq!(err.code, "QQL-VECTOR-KIND");
+    assert!(
+        err.message.contains("unknown") || err.message.contains("AS DENSE|SPARSE"),
+        "expected clear kind error, got: {}",
+        err.message
+    );
+}
+
+#[tokio::test]
+async fn using_sparse_embeds_sparse_after_topology_resolution() {
+    let mut stmt = Parser::parse("QUERY TEXT 'x' FROM docs USING sparse LIMIT 10").unwrap();
+    let Stmt::Query(query) = &mut stmt else {
+        panic!("expected Query");
+    };
+    resolve_query_vector_kinds("docs", query, &["dense".into()], &["sparse".into()]).unwrap();
+    let mock = MockEmbedder::default();
+    resolve_embeddings(&mut stmt, &mock).await.unwrap();
+
+    let Stmt::Query(query) = &stmt else {
+        panic!("expected Query");
+    };
+    let QueryExpr::Nearest { input, using, .. } = &query.expression else {
+        panic!("expected Nearest");
+    };
+    assert!(matches!(
+        input,
+        QueryInput::Vector(VectorValue::Sparse { .. })
+    ));
+    assert_eq!(
+        using.as_ref().map(|t| (t.name.as_str(), t.kind)),
+        Some(("sparse", Some(qql_core::ast::VectorKind::Sparse)))
     );
 }
 

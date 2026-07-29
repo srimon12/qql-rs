@@ -1019,8 +1019,54 @@ impl Client {
         stmt: &qql_core::ast::Stmt,
     ) -> Result<qql_plan::PlannedOperation, JsValue> {
         let mut stmt = stmt.clone();
+        // Schema-first: fill USING kinds from collection topology before
+        // embedding so `USING sparse` embeds sparse, not dense-by-default.
+        self.resolve_stmt_vector_kinds(&mut stmt).await?;
         self.resolve_stmt_embeddings(&mut stmt).await?;
         qql_plan::plan(&stmt).map_err(|error| JsValue::from_str(&error.to_string()))
+    }
+
+    /// Fetch collection topology and resolve `USING` vector kinds.
+    #[cfg(target_arch = "wasm32")]
+    async fn resolve_stmt_vector_kinds(
+        &self,
+        stmt: &mut qql_core::ast::Stmt,
+    ) -> Result<(), JsValue> {
+        let qql_core::ast::Stmt::Query(query) = stmt else {
+            return Ok(());
+        };
+        let qql_core::ast::QueryCollection::Explicit(collection) = &query.collection else {
+            return Ok(());
+        };
+        if !qql_embed::query_needs_kind_resolution(query) {
+            return Ok(());
+        }
+        let collection = collection.clone();
+        let (dense, sparse) = self.fetch_vector_topology(&collection).await?;
+        qql_embed::resolve_query_vector_kinds(&collection, query, &dense, &sparse)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn resolve_stmt_vector_kinds(
+        &self,
+        _stmt: &mut qql_core::ast::Stmt,
+    ) -> Result<(), JsValue> {
+        Ok(())
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn fetch_vector_topology(
+        &self,
+        collection: &str,
+    ) -> Result<(Vec<String>, Vec<String>), JsValue> {
+        let path = format!("/collections/{collection}");
+        let body = self.send_json("GET", &path, None).await?;
+        let result = body
+            .get("result")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        Ok(vector_names_from_collection_result(&result))
     }
 
     async fn execute_planned_inner(
@@ -1269,6 +1315,42 @@ impl Client {
     pub fn explain(&self, query: &str) -> Result<String, JsValue> {
         qql_core::explain::explain(query).map_err(|e| JsValue::from_str(&e.to_string()))
     }
+}
+
+/// Extract named dense/sparse vector names from a Qdrant collection `result` object.
+#[cfg(all(feature = "client", target_arch = "wasm32"))]
+fn vector_names_from_collection_result(result: &serde_json::Value) -> (Vec<String>, Vec<String>) {
+    let params = result.get("config").and_then(|c| c.get("params"));
+    let mut dense = Vec::new();
+    if let Some(vectors) = params
+        .and_then(|p| p.get("vectors"))
+        .and_then(|v| v.as_object())
+    {
+        if vectors.contains_key("size") && vectors.contains_key("distance") {
+            // Unnamed default dense vector.
+            dense.clear();
+        } else {
+            for name in vectors.keys() {
+                if matches!(
+                    name.as_str(),
+                    "size" | "distance" | "hnsw_config" | "quantization_config" | "on_disk"
+                ) {
+                    continue;
+                }
+                dense.push(name.clone());
+            }
+            dense.sort();
+        }
+    }
+    let mut sparse = Vec::new();
+    if let Some(map) = params
+        .and_then(|p| p.get("sparse_vectors"))
+        .and_then(|v| v.as_object())
+    {
+        sparse.extend(map.keys().cloned());
+        sparse.sort();
+    }
+    (dense, sparse)
 }
 
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
