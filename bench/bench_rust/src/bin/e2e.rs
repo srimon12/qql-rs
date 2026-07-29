@@ -18,16 +18,28 @@ impl QdrantOps for MockQdrant {
     async fn get_collection_info(&self, _name: &str) -> Result<CollectionInfo, QqlError> {
         Ok(CollectionInfo::default())
     }
-    async fn create_collection(&self, _req: CreateCollectionReq) -> Result<(), QqlError> {
+    async fn create_collection(
+        &self,
+        _collection_name: &str,
+        _req: &qql_plan::CreateCollectionRequest,
+    ) -> Result<(), QqlError> {
         Ok(())
     }
-    async fn update_collection(&self, _req: serde_json::Value) -> Result<(), QqlError> {
+    async fn update_collection(
+        &self,
+        _collection_name: &str,
+        _req: &qql_plan::UpdateCollectionRequest,
+    ) -> Result<(), QqlError> {
         Ok(())
     }
     async fn delete_collection(&self, _name: &str) -> Result<(), QqlError> {
         Ok(())
     }
-    async fn create_field_index(&self, _req: CreateFieldIndexReq) -> Result<(), QqlError> {
+    async fn create_field_index(
+        &self,
+        _collection_name: &str,
+        _req: &qql_plan::CreateIndexRequest,
+    ) -> Result<(), QqlError> {
         Ok(())
     }
     async fn delete_field_index(

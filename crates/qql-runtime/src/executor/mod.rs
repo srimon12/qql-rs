@@ -1011,5 +1011,3 @@ impl Executor {
 }
 
 pub(crate) mod dml;
-#[cfg(feature = "rest")]
-pub(crate) mod helpers;

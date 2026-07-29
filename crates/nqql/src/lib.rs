@@ -196,7 +196,11 @@ pub fn compile_query(input: String) -> napi::Result<serde_json::Value> {
                 payload,
             )
         }
-        None => (serde_json::Value::Null, serde_json::Value::Null, serde_json::Value::Null),
+        None => (
+            serde_json::Value::Null,
+            serde_json::Value::Null,
+            serde_json::Value::Null,
+        ),
     };
     Ok(serde_json::json!({
         "stmt_type": compiled.stmt_type,

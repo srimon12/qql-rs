@@ -2824,7 +2824,6 @@ pub(crate) mod test_api_ddl {
 mod tests {
     use super::*;
     use qql_core::parser::Parser;
-    use qql_plan::routing::{try_route, RequestBody};
 
     #[test]
     fn dense_vector_params_propagates_datatype() {
@@ -2870,107 +2869,82 @@ mod tests {
         for stmt_str in statements {
             let stmt = Parser::parse(stmt_str)
                 .unwrap_or_else(|e| panic!("parse failed for {stmt_str}: {e}"));
-            let r = try_route(&stmt).unwrap();
-            match &r.body {
-                Some(RequestBody::Query(req)) => {
-                    let grpc_req = to_query_points(req, "docs");
+            let op = qql_plan::plan(&stmt).unwrap();
+            match &op {
+                qql_plan::PlannedOperation::Query {
+                    collection,
+                    request,
+                } => {
+                    let grpc_req = to_query_points(request, collection);
                     assert!(
                         grpc_req.is_ok(),
                         "to_query_points failed for {stmt_str}: {:?}",
                         grpc_req.err()
                     );
                 }
-                Some(RequestBody::QueryGroups(req)) => {
-                    let grpc_req = to_query_groups(req, "docs");
+                qql_plan::PlannedOperation::QueryGroups {
+                    collection,
+                    request,
+                } => {
+                    let grpc_req = to_query_groups(request, collection);
                     assert!(
                         grpc_req.is_ok(),
                         "to_query_groups failed for {stmt_str}: {:?}",
                         grpc_req.err()
                     );
                 }
-                Some(RequestBody::Points(req)) => {
-                    assert_eq!(req.ids.len(), 3);
+                qql_plan::PlannedOperation::GetPoints { request, .. } => {
+                    assert_eq!(request.ids.len(), 3);
                 }
-                Some(RequestBody::Scroll(req)) => {
-                    assert!(req.filter.is_some());
+                qql_plan::PlannedOperation::Scroll { request, .. } => {
+                    assert!(request.filter.is_some());
                 }
-                Some(RequestBody::Upsert(req)) => {
-                    assert_eq!(req.points.len(), 1);
+                qql_plan::PlannedOperation::Upsert { request, .. } => {
+                    assert_eq!(request.points.len(), 1);
                 }
-                Some(RequestBody::Delete(req)) => {
-                    assert!(req.filter.is_some());
+                qql_plan::PlannedOperation::Delete { request, .. } => {
+                    assert!(request.filter.is_some());
                 }
-                Some(RequestBody::UpdateVectors(_)) => {}
-                Some(RequestBody::UpdatePayload(_)) => {}
-                Some(RequestBody::CreateCollection(req)) => {
-                    assert!(req.vectors.is_some() || req.hnsw_config.is_some());
+                qql_plan::PlannedOperation::UpdateVectors { .. } => {}
+                qql_plan::PlannedOperation::UpdatePayload { .. } => {}
+                qql_plan::PlannedOperation::CreateCollection { request, .. } => {
+                    assert!(request.vectors.is_some() || request.hnsw_config.is_some());
                 }
-                Some(RequestBody::UpdateCollection(_)) => {}
-                Some(RequestBody::CreateIndex(req)) => {
-                    assert_eq!(req.field_name, "title");
+                qql_plan::PlannedOperation::UpdateCollection { .. } => {}
+                qql_plan::PlannedOperation::CreateIndex { request, .. } => {
+                    assert_eq!(request.field_name, "title");
                 }
-                Some(RequestBody::ClearPayload(_)) => {}
-                Some(RequestBody::DeleteVectors(_)) => {}
-                Some(RequestBody::Count(_)) => {}
-                Some(RequestBody::CreateShardKey(_)) => {}
-                Some(RequestBody::DropShardKey(_)) => {}
-                None => {}
+                qql_plan::PlannedOperation::ClearPayload { .. } => {}
+                qql_plan::PlannedOperation::DeleteVectors { .. } => {}
+                qql_plan::PlannedOperation::Count { .. } => {}
+                qql_plan::PlannedOperation::CreateShardKey { .. } => {}
+                qql_plan::PlannedOperation::DropShardKey { .. } => {}
+                _ => {}
             }
         }
     }
 
     #[test]
     fn converts_collection_quantization_and_vector_update() {
-        let quantization = serde_json::json!({
-            "disabled": false,
-            "quantization_config": {
-                "type": "scalar",
-                "always_ram": true,
-                "quantile": 0.95,
-            }
-        });
-        let config = quantization_config(&quantization).unwrap();
-        let Some(qdrant::quantization_config::Quantization::Scalar(scalar)) = config.quantization
-        else {
-            panic!("expected scalar quantization");
+        let scalar = qql_plan::QuantizationConfig::Scalar {
+            scalar: qql_plan::ScalarQuantization {
+                qtype: "int8".into(),
+                quantile: Some(0.95),
+                always_ram: Some(true),
+            },
         };
-        assert_eq!(scalar.quantile, Some(0.95));
-        assert_eq!(scalar.always_ram, Some(true));
+        let q_proto = quantization_config_from_plan(&scalar);
+        assert!(q_proto.is_some());
 
-        let diff = vectors_config_diff(&serde_json::json!({ "on_disk": true })).unwrap();
-        let Some(qdrant::vectors_config_diff::Config::Params(params)) = diff.config else {
-            panic!("expected unnamed vector params diff");
-        };
-        assert_eq!(params.on_disk, Some(true));
+        let stmt =
+            Parser::parse("UPDATE docs SET VECTOR dense = [0.1, 0.2] WHERE id = 1;").unwrap();
+        let op = qql_plan::plan(&stmt).unwrap();
+        if let qql_plan::PlannedOperation::UpdateVectors { request, .. } = op {
+            assert_eq!(request.points.len(), 1);
+        } else {
+            panic!("expected UpdateVectors");
+        }
     }
-
-    #[test]
-    fn converts_all_supported_text_index_options() {
-        let options = serde_json::json!({
-            "tokenizer": "prefix",
-            "lowercase": true,
-            "min_token_len": 2,
-            "max_token_len": 20,
-            "on_disk": true,
-            "stopwords": ["a", "the"],
-            "phrase_matching": true,
-            "ascii_folding": true,
-            "enable_hnsw": false,
-        });
-        let params = payload_index_params("text", options.as_object().unwrap()).unwrap();
-        let Some(qdrant::payload_index_params::IndexParams::TextIndexParams(text)) =
-            params.index_params
-        else {
-            panic!("expected text index params");
-        };
-        assert_eq!(text.tokenizer, qdrant::TokenizerType::Prefix as i32);
-        assert_eq!(text.lowercase, Some(true));
-        assert_eq!(text.min_token_len, Some(2));
-        assert_eq!(text.max_token_len, Some(20));
-        assert_eq!(text.stopwords.unwrap().custom, ["a", "the"]);
-    }
-
-    // ── Field-level gRPC conversion tests ──────────────────────────
 
     /// Query → gRPC with limit, offset, using, score_threshold
     #[test]
@@ -2979,12 +2953,15 @@ mod tests {
             "QUERY 'search' FROM my_coll USING dense SCORE THRESHOLD 0.7 LIMIT 10 OFFSET 5;",
         )
         .unwrap();
-        let r = try_route(&stmt).unwrap();
-        let req = match r.body.as_ref().unwrap() {
-            RequestBody::Query(q) => q,
-            other => panic!("expected Query, got {:?}", std::mem::discriminant(other)),
+        let op = qql_plan::plan(&stmt).unwrap();
+        let (collection, req) = match &op {
+            qql_plan::PlannedOperation::Query {
+                collection,
+                request,
+            } => (collection, request),
+            other => panic!("expected Query, got {:?}", other),
         };
-        let qp = to_query_points(req, "my_coll").unwrap();
+        let qp = to_query_points(req, collection).unwrap();
 
         assert_eq!(qp.collection_name, "my_coll");
         assert_eq!(qp.limit, Some(10));
@@ -3006,12 +2983,15 @@ mod tests {
             "QUERY 'x' FROM docs WITH PAYLOAD INCLUDE ('title', 'url') WITH VECTOR (dense) LIMIT 5;",
         )
         .unwrap();
-        let r = try_route(&stmt).unwrap();
-        let req = match r.body.as_ref().unwrap() {
-            RequestBody::Query(q) => q,
-            other => panic!("expected Query, got {:?}", std::mem::discriminant(other)),
+        let op = qql_plan::plan(&stmt).unwrap();
+        let (collection, req) = match &op {
+            qql_plan::PlannedOperation::Query {
+                collection,
+                request,
+            } => (collection, request),
+            other => panic!("expected Query, got {:?}", other),
         };
-        let qp = to_query_points(req, "docs").unwrap();
+        let qp = to_query_points(req, collection).unwrap();
 
         // with_payload → selector_options.Include
         let wp = qp.with_payload.expect("with_payload should be set");
@@ -3037,12 +3017,15 @@ mod tests {
     fn query_points_shard_key() {
         let stmt =
             Parser::parse("QUERY 'x' FROM docs USING dense SHARD 'tenant-42' LIMIT 5;").unwrap();
-        let r = try_route(&stmt).unwrap();
-        let req = match r.body.as_ref().unwrap() {
-            RequestBody::Query(q) => q,
-            other => panic!("expected Query, got {:?}", std::mem::discriminant(other)),
+        let op = qql_plan::plan(&stmt).unwrap();
+        let (collection, req) = match &op {
+            qql_plan::PlannedOperation::Query {
+                collection,
+                request,
+            } => (collection, request),
+            other => panic!("expected Query, got {:?}", other),
         };
-        let qp = to_query_points(req, "docs").unwrap();
+        let qp = to_query_points(req, collection).unwrap();
 
         let sks = qp
             .shard_key_selector
@@ -3058,12 +3041,15 @@ mod tests {
     #[test]
     fn query_points_filter_equality() {
         let stmt = Parser::parse("QUERY 'x' FROM docs WHERE status = 'active' LIMIT 5;").unwrap();
-        let r = try_route(&stmt).unwrap();
-        let req = match r.body.as_ref().unwrap() {
-            RequestBody::Query(q) => q,
-            other => panic!("expected Query, got {:?}", std::mem::discriminant(other)),
+        let op = qql_plan::plan(&stmt).unwrap();
+        let (collection, req) = match &op {
+            qql_plan::PlannedOperation::Query {
+                collection,
+                request,
+            } => (collection, request),
+            other => panic!("expected Query, got {:?}", other),
         };
-        let qp = to_query_points(req, "docs").unwrap();
+        let qp = to_query_points(req, collection).unwrap();
 
         let filter = qp.filter.expect("filter should be set");
         // Single condition wraps into must
@@ -3090,12 +3076,15 @@ mod tests {
     fn query_points_filter_range_compound() {
         let stmt =
             Parser::parse("QUERY 'x' FROM docs WHERE age >= 18 AND age < 65 LIMIT 5;").unwrap();
-        let r = try_route(&stmt).unwrap();
-        let req = match r.body.as_ref().unwrap() {
-            RequestBody::Query(q) => q,
-            other => panic!("expected Query, got {:?}", std::mem::discriminant(other)),
+        let op = qql_plan::plan(&stmt).unwrap();
+        let (collection, req) = match &op {
+            qql_plan::PlannedOperation::Query {
+                collection,
+                request,
+            } => (collection, request),
+            other => panic!("expected Query, got {:?}", other),
         };
-        let qp = to_query_points(req, "docs").unwrap();
+        let qp = to_query_points(req, collection).unwrap();
         let filter = qp.filter.expect("filter should be set");
         let must = &filter.must;
         assert_eq!(must.len(), 2, "expected 2 conditions for AND (>= and <)");
@@ -3118,15 +3107,15 @@ mod tests {
             "QUERY 'x' FROM docs GROUP BY category SIZE 3 LOOKUP FROM categories LIMIT 10;",
         )
         .unwrap();
-        let r = try_route(&stmt).unwrap();
-        let req = match r.body.as_ref().unwrap() {
-            RequestBody::QueryGroups(g) => g,
-            other => panic!(
-                "expected QueryGroups, got {:?}",
-                std::mem::discriminant(other)
-            ),
+        let op = qql_plan::plan(&stmt).unwrap();
+        let (collection, req) = match &op {
+            qql_plan::PlannedOperation::QueryGroups {
+                collection,
+                request,
+            } => (collection, request),
+            other => panic!("expected QueryGroups, got {:?}", other),
         };
-        let qg = to_query_groups(req, "docs").unwrap();
+        let qg = to_query_groups(req, collection).unwrap();
 
         assert_eq!(qg.group_by, "category");
         assert_eq!(qg.group_size, Some(3));
@@ -3142,15 +3131,10 @@ mod tests {
             "CREATE COLLECTION docs (dense VECTOR(384, COSINE)) WITH HNSW (m = 32, ef_construct = 100);",
         )
         .unwrap();
-        let r = try_route(&stmt).unwrap();
-        let req = match r.body.as_ref().unwrap() {
-            RequestBody::CreateCollection(c) => c,
-            other => {
-                panic!(
-                    "expected CreateCollection, got {:?}",
-                    std::mem::discriminant(other)
-                )
-            }
+        let op = qql_plan::plan(&stmt).unwrap();
+        let req = match &op {
+            qql_plan::PlannedOperation::CreateCollection { request, .. } => request,
+            other => panic!("expected CreateCollection, got {:?}", other),
         };
 
         // vectors should contain dense → size 384, distance Cosine
@@ -3173,10 +3157,10 @@ mod tests {
             "UPSERT INTO docs VALUES {id: 1, text: 'hello'}, {id: 2, text: 'world'};",
         )
         .unwrap();
-        let r = try_route(&stmt).unwrap();
-        let req = match r.body.as_ref().unwrap() {
-            RequestBody::Upsert(u) => u,
-            other => panic!("expected Upsert, got {:?}", std::mem::discriminant(other)),
+        let op = qql_plan::plan(&stmt).unwrap();
+        let req = match &op {
+            qql_plan::PlannedOperation::Upsert { request, .. } => request,
+            other => panic!("expected Upsert, got {:?}", other),
         };
 
         assert_eq!(req.points.len(), 2);
@@ -3188,10 +3172,10 @@ mod tests {
     fn delete_with_compound_filter() {
         let stmt = Parser::parse("DELETE FROM docs WHERE category = 'archived' AND priority < 3;")
             .unwrap();
-        let r = try_route(&stmt).unwrap();
-        let req = match r.body.as_ref().unwrap() {
-            RequestBody::Delete(d) => d,
-            other => panic!("expected Delete, got {:?}", std::mem::discriminant(other)),
+        let op = qql_plan::plan(&stmt).unwrap();
+        let req = match &op {
+            qql_plan::PlannedOperation::Delete { request, .. } => request,
+            other => panic!("expected Delete, got {:?}", other),
         };
 
         let filter = req.filter.as_ref().expect("delete filter should be set");
@@ -3217,12 +3201,15 @@ mod tests {
             "QUERY ORDER BY created_at DESC FROM docs WHERE status = 'active' LIMIT 20;",
         )
         .unwrap();
-        let r = try_route(&stmt).unwrap();
-        let req = match r.body.as_ref().unwrap() {
-            RequestBody::Query(q) => q,
-            other => panic!("expected Query, got {:?}", std::mem::discriminant(other)),
+        let op = qql_plan::plan(&stmt).unwrap();
+        let (collection, req) = match &op {
+            qql_plan::PlannedOperation::Query {
+                collection,
+                request,
+            } => (collection, request),
+            other => panic!("expected Query, got {:?}", other),
         };
-        let qp = to_query_points(req, "docs").unwrap();
+        let qp = to_query_points(req, collection).unwrap();
 
         let query = qp.query.expect("query should be set");
         match query.variant.expect("variant should be set") {

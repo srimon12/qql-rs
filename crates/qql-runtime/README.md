@@ -45,12 +45,12 @@ pub trait QdrantOps: Send + Sync {
     async fn list_collections(&self) -> Result<Vec<String>, QqlError>;
     async fn collection_exists(&self, name: &str) -> Result<bool, QqlError>;
     async fn get_collection_info(&self, name: &str) -> Result<CollectionInfo, QqlError>;
-    async fn create_collection(&self, req: CreateCollectionReq) -> Result<(), QqlError>;
-    async fn update_collection(&self, req: serde_json::Value) -> Result<(), QqlError>;
+    async fn create_collection(&self, collection_name: &str, req: &qql_plan::CreateCollectionRequest) -> Result<(), QqlError>;
+    async fn update_collection(&self, collection_name: &str, req: &qql_plan::UpdateCollectionRequest) -> Result<(), QqlError>;
     async fn delete_collection(&self, name: &str) -> Result<(), QqlError>;
-    async fn create_field_index(&self, req: CreateFieldIndexReq) -> Result<(), QqlError>;
+    async fn create_field_index(&self, collection_name: &str, req: &qql_plan::CreateIndexRequest) -> Result<(), QqlError>;
     async fn delete_field_index(&self, collection_name: &str, field_name: &str) -> Result<(), QqlError>;
-    async fn execute_route(&self, route: Route) -> Result<serde_json::Value, QqlError>;
+    async fn execute_planned(&self, op: &qql_plan::PlannedOperation) -> Result<serde_json::Value, QqlError>;
     async fn execute_query_batch(&self, collection: &str, batch: &QueryBatchRequest) -> Result<Vec<Value>, QqlError>;
     async fn execute_update_batch(&self, collection: &str, batch: &UpdateBatchRequest) -> Result<Vec<Value>, QqlError>;
 }

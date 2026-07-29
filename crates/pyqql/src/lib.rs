@@ -169,7 +169,11 @@ fn compile_query<'py>(py: Python<'py>, input: &str) -> PyResult<Bound<'py, PyAny
                 payload,
             )
         }
-        None => (serde_json::Value::Null, serde_json::Value::Null, serde_json::Value::Null),
+        None => (
+            serde_json::Value::Null,
+            serde_json::Value::Null,
+            serde_json::Value::Null,
+        ),
     };
     let result = serde_json::json!({
         "stmt_type": compiled.stmt_type,

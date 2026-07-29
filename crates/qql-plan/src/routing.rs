@@ -2,67 +2,18 @@ use crate::plan::{plan, to_rest_route};
 use crate::types::*;
 use qql_core::ast::Stmt;
 
-#[derive(Debug, serde::Serialize)]
-#[serde(untagged)]
-pub enum RequestBody {
-    Query(Box<QueryRequest>),
-    QueryGroups(Box<QueryGroupsRequest>),
-    Points(PointsRequest),
-    Scroll(Box<ScrollRequest>),
-    Upsert(UpsertRequest),
-    Delete(Box<DeleteRequest>),
-    ClearPayload(Box<ClearPayloadRequest>),
-    DeleteVectors(Box<DeleteVectorRequest>),
-    UpdateVectors(UpdateVectorRequest),
-    UpdatePayload(UpdatePayloadRequest),
-    CreateCollection(Box<CreateCollectionRequest>),
-    /// PATCH alter collection — distinct from create (PUT).
-    UpdateCollection(Box<UpdateCollectionRequest>),
-    CreateIndex(CreateIndexRequest),
-    Count(Box<CountRequest>),
-    CreateShardKey(Box<CreateShardKeyRequest>),
-    DropShardKey(Box<DropShardKeyRequest>),
-}
-
-impl RequestBody {
-    pub fn to_json(&self) -> Result<serde_json::Value, qql_core::error::QqlError> {
-        // DDL create/update use OpenAPI wire projection (flattened params,
-        // nested quantization). Other bodies serialize as plan IR.
-        let value = match self {
-            RequestBody::CreateCollection(req) => crate::ddl::create_collection_rest_body(req),
-            RequestBody::UpdateCollection(req) => crate::ddl::update_collection_rest_body(req),
-            RequestBody::CreateIndex(req) => crate::ddl::create_index_rest_body(req),
-            other => serde_json::to_value(other).map_err(|err| {
-                qql_core::error::QqlError::validation(
-                    "QQL-PLAN-SERIALIZE",
-                    alloc::format!("failed to serialize request body: {err}"),
-                    None,
-                )
-            })?,
-        };
-        Ok(value)
-    }
-}
-
 #[derive(Debug)]
 pub struct Route {
     pub method: Method,
     pub path: String,
     pub query: Vec<(String, String)>,
-    pub body: Option<RequestBody>,
+    pub body: Option<serde_json::Value>,
 }
 
 impl Route {
-    pub fn try_body_json(&self) -> Result<Option<serde_json::Value>, qql_core::error::QqlError> {
-        self.body.as_ref().map(RequestBody::to_json).transpose()
-    }
-
-    /// Compatibility helper for callers that only need an optional body.
-    /// Request bodies contain JSON-safe values, so serialization failure is an
-    /// internal invariant violation rather than an absent body.
+    /// Serialized JSON body, or None for bodyless routes.
     pub fn body_json(&self) -> Option<serde_json::Value> {
-        self.try_body_json()
-            .expect("request body serialization must be infallible")
+        self.body.clone()
     }
 }
 

@@ -9,7 +9,7 @@ use qql_core::error::QqlError;
 use qql_plan::types::Method as PlanMethod;
 use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 
-use crate::client::{CollectionInfo, CreateCollectionReq, CreateFieldIndexReq, QdrantOps};
+use crate::client::{CollectionInfo, QdrantOps};
 
 #[derive(Clone)]
 pub struct RestQdrant {
@@ -204,50 +204,24 @@ impl QdrantOps for RestQdrant {
         Ok(info)
     }
 
-    async fn create_collection(&self, req: CreateCollectionReq) -> Result<(), QqlError> {
-        // Reuse plan OpenAPI projection so implicit upsert creates match
-        // execute_planned CREATE COLLECTION wire shape.
-        // Auto-create only sets vectors/sparse_vectors — config fields are None.
-        let plan_req = qql_plan::types::CreateCollectionRequest {
-            vectors: req
-                .vectors_config
-                .as_ref()
-                .and_then(|v| v.as_object().cloned()),
-            sparse_vectors: req
-                .sparse_vectors_config
-                .as_ref()
-                .and_then(|v| v.as_object().cloned()),
-            hnsw_config: None,
-            optimizers_config: None,
-            params: req.params.clone(),
-            quantization_config: None,
-            vectors_config: None,
-            shard_number: req.shard_number,
-            sharding_method: req.sharding_method.clone(),
-            shard_keys: req.shard_keys.clone(),
-        };
-        self.create_collection_planned(&req.collection_name, &plan_req)
-            .await
+    async fn create_collection(
+        &self,
+        collection_name: &str,
+        req: &qql_plan::CreateCollectionRequest,
+    ) -> Result<(), QqlError> {
+        self.create_collection_planned(collection_name, req).await
     }
 
-    async fn update_collection(&self, req: serde_json::Value) -> Result<(), QqlError> {
-        let collection_name = req
-            .get("collection_name")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                QqlError::execution("QQL-EXECUTION", "collection_name required", None)
-            })?;
-        let mut body = req.clone();
-        if let Some(obj) = body.as_object_mut() {
-            obj.remove("collection_name");
-        }
-        self.call::<Value>(
-            Method::PATCH,
-            &format!("/collections/{collection_name}"),
-            Some(body),
-        )
-        .await?;
-        Ok(())
+    async fn update_collection(
+        &self,
+        collection_name: &str,
+        req: &qql_plan::UpdateCollectionRequest,
+    ) -> Result<(), QqlError> {
+        let op = qql_plan::PlannedOperation::UpdateCollection {
+            collection: collection_name.to_string(),
+            request: req.clone(),
+        };
+        self.execute_planned(&op).await.map(|_| ())
     }
 
     async fn delete_collection(&self, name: &str) -> Result<(), QqlError> {
@@ -256,25 +230,16 @@ impl QdrantOps for RestQdrant {
         Ok(())
     }
 
-    async fn create_field_index(&self, req: CreateFieldIndexReq) -> Result<(), QqlError> {
-        // OpenAPI: options live under field_schema when present.
-        let mut extra = serde_json::Map::new();
-        for (k, v) in req.options {
-            extra.insert(k, crate::executor::helpers::value_to_json(&v));
-        }
-        let plan_req = qql_plan::types::CreateIndexRequest {
-            field_name: req.field,
-            field_schema: req.field_type,
-            extra,
+    async fn create_field_index(
+        &self,
+        collection_name: &str,
+        req: &qql_plan::CreateIndexRequest,
+    ) -> Result<(), QqlError> {
+        let op = qql_plan::PlannedOperation::CreateIndex {
+            collection: collection_name.to_string(),
+            request: req.clone(),
         };
-        let body = qql_plan::ddl::create_index_rest_body(&plan_req);
-        self.call::<Value>(
-            Method::PUT,
-            &format!("/collections/{}/index", req.collection_name),
-            Some(body),
-        )
-        .await?;
-        Ok(())
+        self.execute_planned(&op).await.map(|_| ())
     }
 
     async fn delete_field_index(
@@ -282,16 +247,26 @@ impl QdrantOps for RestQdrant {
         collection_name: &str,
         field_name: &str,
     ) -> Result<(), QqlError> {
-        self.call::<Value>(
-            Method::DELETE,
-            &format!("/collections/{}/index/{}", collection_name, field_name),
-            None::<Value>,
-        )
-        .await?;
-        Ok(())
+        let op = qql_plan::PlannedOperation::DropIndex {
+            collection: collection_name.to_string(),
+            field: field_name.to_string(),
+        };
+        self.execute_planned(&op).await.map(|_| ())
     }
 
     async fn execute_planned(&self, op: &qql_plan::PlannedOperation) -> Result<Value, QqlError> {
+        if let qql_plan::PlannedOperation::CreateCollection {
+            collection,
+            request,
+        } = op
+        {
+            self.create_collection_planned(collection, request).await?;
+            return Ok(serde_json::json!({
+                "result": true,
+                "status": "ok",
+                "time": 0.0,
+            }));
+        }
         let route = qql_plan::plan::to_rest_route(op).map_err(|err| match err {
             qql_plan::RestProjectionError::ClientSideOnly { stmt_type } => QqlError::execution(
                 "QQL-REST-CLIENT-SIDE",
@@ -366,22 +341,6 @@ impl RestQdrant {
 
     /// Low-level HTTP dispatch from a pre-built Route.
     async fn execute_http(&self, route: qql_plan::routing::Route) -> Result<Value, QqlError> {
-        // Multi-step CREATE COLLECTION (params fan-out + shard keys) like gRPC.
-        if let Some(qql_plan::routing::RequestBody::CreateCollection(req)) = &route.body {
-            let collection = route
-                .path
-                .trim_start_matches("/collections/")
-                .split('/')
-                .next()
-                .unwrap_or("");
-            self.create_collection_planned(collection, req).await?;
-            return Ok(serde_json::json!({
-                "result": true,
-                "status": "ok",
-                "time": 0.0,
-            }));
-        }
-
         let method = match route.method {
             PlanMethod::Get => Method::GET,
             PlanMethod::Post => Method::POST,
@@ -405,9 +364,8 @@ impl RestQdrant {
         if let Some(ref key) = self.api_key {
             builder = builder.header("api-key", key);
         }
-        // Prefer OpenAPI wire JSON (DDL create/update custom projection).
-        if let Some(body) = route.try_body_json()? {
-            builder = builder.json(&body);
+        if let Some(ref body) = route.body {
+            builder = builder.json(body);
         }
         let resp = builder.send().await.map_err(|e| {
             QqlError::transport("QQL-TRANSPORT", format!("REST request failed: {e}"), None)

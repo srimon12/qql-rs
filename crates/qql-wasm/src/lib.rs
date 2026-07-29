@@ -464,7 +464,6 @@ pub fn analyze(input: &str) -> Result<JsValue, JsValue> {
 
 // ── Core: compile & explain ───────────────────────────────────────
 
-
 fn compiled_route_json(compiled: &qql_plan::CompiledStatement) -> serde_json::Value {
     match &compiled.route {
         Some(route) => serde_json::json!({

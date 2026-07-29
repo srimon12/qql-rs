@@ -10,7 +10,7 @@ use crate::mutation::{
     lower_upsert_request,
 };
 use crate::query::{lower_query_groups_request, lower_query_request};
-use crate::routing::{RequestBody, Route};
+use crate::routing::Route;
 use crate::types::*;
 use qql_core::ast::{
     QueryCollection, QueryExpr, QueryInput, Stmt, VectorKind, VectorTarget, VectorValue,
@@ -795,35 +795,54 @@ pub enum RestProjectionError {
 ///
 /// Client-side operations such as [`PlannedOperation::CrossRerank`] return
 /// [`RestProjectionError::ClientSideOnly`] — they must not invent a Qdrant path.
+/// REST projection of a planned operation.
+///
+/// Returns `RestProjectionError::ClientSideOnly` for operations that have no
+/// single Qdrant REST endpoint (e.g. CROSS RERANK).
 pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError> {
+    /// Serialize a plan struct to JSON for the REST body.
+    fn body<T: serde::Serialize>(req: &T) -> Option<serde_json::Value> {
+        Some(serde_json::to_value(req).unwrap_or_default())
+    }
+
+    /// Read-op query params: timeout, consistency.
+    fn read_query(
+        timeout: Option<u64>,
+        consistency: Option<&crate::types::ReadConsistencyParam>,
+    ) -> Vec<(String, String)> {
+        let mut q = Vec::new();
+        crate::query::push_read_opts(&mut q, timeout, consistency);
+        q
+    }
+
+    /// Mutation query params: wait + optional shard_key.
+    fn mut_query(shard_key: Option<&str>) -> Vec<(String, String)> {
+        let mut q = vec![("wait".into(), "true".into())];
+        if let Some(sk) = shard_key {
+            q.push(("shard_key".into(), sk.to_owned()));
+        }
+        q
+    }
+
     Ok(match op {
         PlannedOperation::Query {
             collection,
             request,
-        } => {
-            // OpenAPI: timeout + consistency are query params on POST …/points/query
-            let mut query = Vec::new();
-            crate::query::push_read_opts(&mut query, request.timeout, request.consistency.as_ref());
-            Route {
-                method: Method::Post,
-                path: format!("/collections/{collection}/points/query"),
-                query,
-                body: Some(RequestBody::Query(Box::new(request.clone()))),
-            }
-        }
+        } => Route {
+            method: Method::Post,
+            path: format!("/collections/{collection}/points/query"),
+            query: read_query(request.timeout, request.consistency.as_ref()),
+            body: body(request),
+        },
         PlannedOperation::QueryGroups {
             collection,
             request,
-        } => {
-            let mut query = Vec::new();
-            crate::query::push_read_opts(&mut query, request.timeout, request.consistency.as_ref());
-            Route {
-                method: Method::Post,
-                path: format!("/collections/{collection}/points/query/groups"),
-                query,
-                body: Some(RequestBody::QueryGroups(Box::new(request.clone()))),
-            }
-        }
+        } => Route {
+            method: Method::Post,
+            path: format!("/collections/{collection}/points/query/groups"),
+            query: read_query(request.timeout, request.consistency.as_ref()),
+            body: body(request),
+        },
         PlannedOperation::GetPoints {
             collection,
             request,
@@ -831,7 +850,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             method: Method::Post,
             path: format!("/collections/{collection}/points"),
             query: Vec::new(),
-            body: Some(RequestBody::Points(request.clone())),
+            body: body(request),
         },
         PlannedOperation::Scroll {
             collection,
@@ -840,7 +859,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             method: Method::Post,
             path: format!("/collections/{collection}/points/scroll"),
             query: Vec::new(),
-            body: Some(RequestBody::Scroll(Box::new(request.clone()))),
+            body: body(request),
         },
         PlannedOperation::Count {
             collection,
@@ -849,7 +868,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             method: Method::Post,
             path: format!("/collections/{collection}/points/count"),
             query: Vec::new(),
-            body: Some(RequestBody::Count(Box::new(request.clone()))),
+            body: body(request),
         },
         PlannedOperation::Upsert {
             collection,
@@ -867,84 +886,55 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
                 method: Method::Put,
                 path: format!("/collections/{collection}/points"),
                 query,
-                body: Some(RequestBody::Upsert(request.clone())),
+                body: body(request),
             }
         }
         PlannedOperation::Delete {
             collection,
             request,
-        } => {
-            let mut query = vec![("wait".into(), "true".into())];
-            if let Some(ref sk) = request.shard_key {
-                query.push(("shard_key".into(), sk.clone()));
-            }
-            Route {
-                method: Method::Post,
-                path: format!("/collections/{collection}/points/delete"),
-                query,
-                body: Some(RequestBody::Delete(Box::new(request.clone()))),
-            }
-        }
+        } => Route {
+            method: Method::Post,
+            path: format!("/collections/{collection}/points/delete"),
+            query: mut_query(request.shard_key.as_deref()),
+            body: body(request),
+        },
         PlannedOperation::ClearPayload {
             collection,
             request,
-        } => {
-            let mut query = vec![("wait".into(), "true".into())];
-            if let Some(ref sk) = request.shard_key {
-                query.push(("shard_key".into(), sk.clone()));
-            }
-            Route {
-                method: Method::Post,
-                path: format!("/collections/{collection}/points/payload/clear"),
-                query,
-                body: Some(RequestBody::ClearPayload(Box::new(request.clone()))),
-            }
-        }
+        } => Route {
+            method: Method::Post,
+            path: format!("/collections/{collection}/points/payload/clear"),
+            query: mut_query(request.shard_key.as_deref()),
+            body: body(request),
+        },
         PlannedOperation::DeleteVectors {
             collection,
             request,
-        } => {
-            let mut query = vec![("wait".into(), "true".into())];
-            if let Some(ref sk) = request.shard_key {
-                query.push(("shard_key".into(), sk.clone()));
-            }
-            Route {
-                method: Method::Post,
-                path: format!("/collections/{collection}/points/vectors/delete"),
-                query,
-                body: Some(RequestBody::DeleteVectors(Box::new(request.clone()))),
-            }
-        }
+        } => Route {
+            method: Method::Post,
+            path: format!("/collections/{collection}/points/vectors/delete"),
+            query: mut_query(request.shard_key.as_deref()),
+            body: body(request),
+        },
         PlannedOperation::UpdateVectors {
             collection,
             request,
-        } => {
-            let mut query = vec![("wait".into(), "true".into())];
-            if let Some(ref sk) = request.shard_key {
-                query.push(("shard_key".into(), sk.clone()));
-            }
-            Route {
-                method: Method::Put,
-                path: format!("/collections/{collection}/points/vectors"),
-                query,
-                body: Some(RequestBody::UpdateVectors(request.clone())),
-            }
-        }
+        } => Route {
+            method: Method::Put,
+            path: format!("/collections/{collection}/points/vectors"),
+            query: mut_query(request.shard_key.as_deref()),
+            body: body(request),
+        },
         PlannedOperation::UpdatePayload {
             collection,
             request,
-        } => {
-            let mut query = vec![("wait".into(), "true".into())];
-            if let Some(ref sk) = request.shard_key {
-                query.push(("shard_key".into(), sk.clone()));
-            }
-            Route {
-                method: Method::Post,
-                path: format!("/collections/{collection}/points/payload"),
-                query,
-                body: Some(RequestBody::UpdatePayload(request.clone())),
-            }
-        }
+        } => Route {
+            method: Method::Post,
+            path: format!("/collections/{collection}/points/payload"),
+            query: mut_query(request.shard_key.as_deref()),
+            body: body(request),
+        },
+        // DDL: REST shapes differ from plan IR — use OpenAPI projection fns
         PlannedOperation::CreateCollection {
             collection,
             request,
@@ -952,7 +942,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             method: Method::Put,
             path: format!("/collections/{collection}"),
             query: Vec::new(),
-            body: Some(RequestBody::CreateCollection(Box::new(request.clone()))),
+            body: Some(crate::ddl::create_collection_rest_body(request)),
         },
         PlannedOperation::UpdateCollection {
             collection,
@@ -961,13 +951,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             method: Method::Patch,
             path: format!("/collections/{collection}"),
             query: Vec::new(),
-            body: Some(RequestBody::UpdateCollection(Box::new(request.clone()))),
-        },
-        PlannedOperation::DropCollection { collection } => Route {
-            method: Method::Delete,
-            path: format!("/collections/{collection}"),
-            query: Vec::new(),
-            body: None,
+            body: Some(crate::ddl::update_collection_rest_body(request)),
         },
         PlannedOperation::CreateIndex {
             collection,
@@ -976,13 +960,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             method: Method::Put,
             path: format!("/collections/{collection}/index"),
             query: Vec::new(),
-            body: Some(RequestBody::CreateIndex(request.clone())),
-        },
-        PlannedOperation::DropIndex { collection, field } => Route {
-            method: Method::Delete,
-            path: format!("/collections/{collection}/index/{field}"),
-            query: Vec::new(),
-            body: None,
+            body: Some(crate::ddl::create_index_rest_body(request)),
         },
         PlannedOperation::CreateShardKey {
             collection,
@@ -991,7 +969,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             method: Method::Put,
             path: format!("/collections/{collection}/shards"),
             query: Vec::new(),
-            body: Some(RequestBody::CreateShardKey(Box::new(request.clone()))),
+            body: body(request),
         },
         PlannedOperation::DropShardKey {
             collection,
@@ -1000,7 +978,20 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             method: Method::Post,
             path: format!("/collections/{collection}/shards/delete"),
             query: Vec::new(),
-            body: Some(RequestBody::DropShardKey(Box::new(request.clone()))),
+            body: body(request),
+        },
+        // Bodyless
+        PlannedOperation::DropCollection { collection } => Route {
+            method: Method::Delete,
+            path: format!("/collections/{collection}"),
+            query: Vec::new(),
+            body: None,
+        },
+        PlannedOperation::DropIndex { collection, field } => Route {
+            method: Method::Delete,
+            path: format!("/collections/{collection}/index/{field}"),
+            query: Vec::new(),
+            body: None,
         },
         PlannedOperation::ListCollections => Route {
             method: Method::Get,
@@ -1027,8 +1018,6 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
         }
     })
 }
-
-/// Plan + REST projection. Fails on plan errors or client-side-only ops.
 pub fn try_route(statement: &Stmt) -> Result<Route, QqlError> {
     let op = plan(statement)?;
     to_rest_route(&op).map_err(|err| match err {
@@ -1077,7 +1066,7 @@ mod tests {
         let op = plan(&stmt).unwrap();
         let route = to_rest_route(&op).expect("rest route");
         assert_eq!(route.path, "/collections/docs/points/query");
-        assert!(matches!(route.body, Some(RequestBody::Query(_))));
+        assert!(route.body.is_some());
     }
 
     #[test]
@@ -1095,10 +1084,7 @@ mod tests {
         ));
         let alter_route = try_route(&alter).unwrap();
         assert_eq!(alter_route.method, Method::Patch);
-        assert!(matches!(
-            alter_route.body,
-            Some(RequestBody::UpdateCollection(_))
-        ));
+        assert!(alter_route.body.is_some());
     }
 
     #[test]

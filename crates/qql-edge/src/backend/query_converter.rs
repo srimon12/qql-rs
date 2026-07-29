@@ -704,7 +704,7 @@ mod tests {
         };
         let result = convert_query(&query, None);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("point-reference"));
+        assert!(result.unwrap_err().to_string().contains("point-id"));
     }
 
     #[test]

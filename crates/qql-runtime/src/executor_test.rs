@@ -9,7 +9,7 @@ use qql_core::error::QqlError;
 use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 
 use crate::backend::{SparseVectorSpec, VectorSpec};
-use crate::client::{CollectionInfo, CreateCollectionReq, CreateFieldIndexReq, QdrantOps};
+use crate::client::{CollectionInfo, QdrantOps};
 use crate::config::QqlConfig;
 use crate::executor::{Executor, OnError};
 
@@ -66,22 +66,33 @@ impl QdrantOps for MockQdrantClient {
             None,
         ))
     }
-    async fn create_collection(&self, req: CreateCollectionReq) -> Result<(), QqlError> {
+    async fn create_collection(
+        &self,
+        collection_name: &str,
+        _req: &qql_plan::CreateCollectionRequest,
+    ) -> Result<(), QqlError> {
         *self.create_collection_call_count.lock().unwrap() += 1;
         self.created_collections
             .lock()
             .unwrap()
-            .insert(req.collection_name);
+            .insert(collection_name.to_string());
         Ok(())
     }
-    async fn update_collection(&self, req: serde_json::Value) -> Result<(), QqlError> {
-        let _ = req;
+    async fn update_collection(
+        &self,
+        _collection_name: &str,
+        _req: &qql_plan::UpdateCollectionRequest,
+    ) -> Result<(), QqlError> {
         Ok(())
     }
     async fn delete_collection(&self, _name: &str) -> Result<(), QqlError> {
         Ok(())
     }
-    async fn create_field_index(&self, _req: CreateFieldIndexReq) -> Result<(), QqlError> {
+    async fn create_field_index(
+        &self,
+        _collection_name: &str,
+        _req: &qql_plan::CreateIndexRequest,
+    ) -> Result<(), QqlError> {
         Ok(())
     }
     async fn delete_field_index(
