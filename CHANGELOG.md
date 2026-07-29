@@ -68,7 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI table mode renders CROSS_RERANK results; REST/edge reject bare CrossRerank routes.
 
 ### 📚 Documentation
-- Rewritten skill references: expanded `qql-examples.md` (25 examples), new `qql-multitenancy.md`, new `qql-install.md`, updated all SDK references (Python, Node, Rust, WASM) with `inject_shard_key`, batch execution, and Stmt manipulation.
+- Skill references: `SKILL.md` updated with 1.2 features, `qql-examples.md` expanded with multivector/reranker examples, `qql-gaps.md` updated (closed gaps dropped), `qql-multitenancy.md` expanded with `inject_shard_key` patterns. SDK references (Python, Node, Rust, WASM) updated with `inject_shard_key` and batch execution.
 - All crate READMEs updated with accurate API tables and feature documentation.
 - `language/v1` bumped to 1.2 with 3 new valid fixtures, 3 new AST snapshots, and updated semantics spec.
 
