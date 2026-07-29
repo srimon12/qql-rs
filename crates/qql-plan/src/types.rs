@@ -211,7 +211,7 @@ pub struct KeyOnly {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct HasIdCondition {
-    pub has_id: Vec<serde_json::Value>,
+    pub has_id: Vec<crate::semantic::PlanPointId>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -647,6 +647,84 @@ pub struct CountRequest {
     pub exact: Option<bool>,
 }
 
+/// HNSW index configuration for collection creation/update.
+#[derive(Debug, Clone, Serialize)]
+pub struct HnswConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub m: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ef_construct: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub full_scan_threshold: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_indexing_threads: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on_disk: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payload_m: Option<u64>,
+}
+
+/// Segment optimizer configuration for collection creation/update.
+#[derive(Debug, Clone, Serialize)]
+pub struct OptimizersConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_threshold: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vacuum_min_vector_number: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_segment_number: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_segment_size: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memmap_threshold: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub indexing_threshold: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flush_interval_sec: Option<u64>,
+    /// Either a `u64` number or the string `"auto"` (REST-only; gRPC ignores "auto").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_optimization_threads: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prevent_unoptimized: Option<bool>,
+}
+
+/// Vector quantization config (scalar/product/binary).
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum QuantizationConfig {
+    Scalar { scalar: ScalarQuantization },
+    Product { product: ProductQuantization },
+    Binary { binary: BinaryQuantization },
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ScalarQuantization {
+    /// Qdrant REST/OpenAPI expects `"int8"` for scalar quantization type.
+    #[serde(rename = "type")]
+    pub qtype: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quantile: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub always_ram: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProductQuantization {
+    pub compression: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub always_ram: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BinaryQuantization {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub always_ram: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encoding: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query_encoding: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct CreateCollectionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -654,13 +732,13 @@ pub struct CreateCollectionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sparse_vectors: Option<serde_json::Map<String, serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub hnsw_config: Option<serde_json::Value>,
+    pub hnsw_config: Option<HnswConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub optimizers_config: Option<serde_json::Value>,
+    pub optimizers_config: Option<OptimizersConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub quantization_config: Option<serde_json::Value>,
+    pub quantization_config: Option<QuantizationConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vectors_config: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -674,11 +752,12 @@ pub struct CreateCollectionRequest {
 #[derive(Debug, Clone, Serialize)]
 pub struct UpdateCollectionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub optimizers_config: Option<serde_json::Value>,
+    pub optimizers_config: Option<OptimizersConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub hnsw_config: Option<serde_json::Value>,
+    pub hnsw_config: Option<HnswConfig>,
+    /// PATCH envelope for update (`{disabled, quantization_config}`) — JSON.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quantization_config: Option<serde_json::Value>,
 }

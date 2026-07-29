@@ -912,7 +912,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
                 method: Method::Post,
                 path: format!("/collections/{collection}/points/vectors/delete"),
                 query,
-                body: Some(RequestBody::DeleteVector(Box::new(request.clone()))),
+                body: Some(RequestBody::DeleteVectors(Box::new(request.clone()))),
             }
         }
         PlannedOperation::UpdateVectors {
@@ -927,7 +927,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
                 method: Method::Put,
                 path: format!("/collections/{collection}/points/vectors"),
                 query,
-                body: Some(RequestBody::UpdateVector(request.clone())),
+                body: Some(RequestBody::UpdateVectors(request.clone())),
             }
         }
         PlannedOperation::UpdatePayload {

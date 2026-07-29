@@ -23,6 +23,122 @@ fn json_bool(value: &serde_json::Value, key: &str) -> Option<bool> {
     value.get(key).and_then(serde_json::Value::as_bool)
 }
 
+// ── Typed plan-to-gRPC converters (no JSON intermediate) ─────────────
+
+pub(crate) fn hnsw_config_from_plan(cfg: &qql_plan::HnswConfig) -> qdrant::HnswConfigDiff {
+    qdrant::HnswConfigDiff {
+        m: cfg.m,
+        ef_construct: cfg.ef_construct,
+        full_scan_threshold: cfg.full_scan_threshold,
+        max_indexing_threads: cfg.max_indexing_threads,
+        on_disk: cfg.on_disk,
+        payload_m: cfg.payload_m,
+        ..Default::default()
+    }
+}
+
+pub(crate) fn optimizers_config_from_plan(
+    cfg: &qql_plan::OptimizersConfig,
+) -> qdrant::OptimizersConfigDiff {
+    let max_optimization_threads = cfg
+        .max_optimization_threads
+        .as_ref()
+        .and_then(|v| v.as_u64())
+        .map(|value| qdrant::MaxOptimizationThreads {
+            variant: Some(qdrant::max_optimization_threads::Variant::Value(value)),
+        })
+        .or_else(|| {
+            cfg.max_optimization_threads
+                .as_ref()
+                .and_then(|v| v.as_str())
+                .filter(|s| s.eq_ignore_ascii_case("auto"))
+                .map(|_| qdrant::MaxOptimizationThreads {
+                    variant: Some(qdrant::max_optimization_threads::Variant::Setting(
+                        qdrant::max_optimization_threads::Setting::Auto as i32,
+                    )),
+                })
+        });
+
+    qdrant::OptimizersConfigDiff {
+        deleted_threshold: cfg.deleted_threshold,
+        vacuum_min_vector_number: cfg.vacuum_min_vector_number,
+        default_segment_number: cfg.default_segment_number,
+        max_segment_size: cfg.max_segment_size,
+        memmap_threshold: cfg.memmap_threshold,
+        indexing_threshold: cfg.indexing_threshold,
+        flush_interval_sec: cfg.flush_interval_sec,
+        max_optimization_threads,
+        prevent_unoptimized: cfg.prevent_unoptimized,
+        ..Default::default()
+    }
+}
+
+pub(crate) fn quantization_config_from_plan(
+    cfg: &qql_plan::QuantizationConfig,
+) -> Option<qdrant::QuantizationConfig> {
+    match cfg {
+        qql_plan::QuantizationConfig::Scalar { scalar } => Some(qdrant::QuantizationConfig {
+            quantization: Some(qdrant::quantization_config::Quantization::Scalar(
+                qdrant::ScalarQuantization {
+                    r#type: qdrant::QuantizationType::Int8 as i32,
+                    quantile: scalar.quantile.map(|v| v as f32),
+                    always_ram: scalar.always_ram,
+                },
+            )),
+        }),
+        qql_plan::QuantizationConfig::Product { product } => {
+            let compression = match product.compression.to_ascii_lowercase().as_str() {
+                "x8" => qdrant::CompressionRatio::X8,
+                "x16" => qdrant::CompressionRatio::X16,
+                "x32" => qdrant::CompressionRatio::X32,
+                "x64" => qdrant::CompressionRatio::X64,
+                _ => qdrant::CompressionRatio::X4,
+            };
+            Some(qdrant::QuantizationConfig {
+                quantization: Some(qdrant::quantization_config::Quantization::Product(
+                    qdrant::ProductQuantization {
+                        compression: compression as i32,
+                        always_ram: product.always_ram,
+                    },
+                )),
+            })
+        }
+        qql_plan::QuantizationConfig::Binary { binary } => {
+            let encoding = binary.encoding.as_deref().map(|e| {
+                let key = e.to_ascii_lowercase();
+                match key.as_str() {
+                    "two_bits" | "2" => qdrant::BinaryQuantizationEncoding::TwoBits as i32,
+                    "one_and_half_bits" | "1.5" => {
+                        qdrant::BinaryQuantizationEncoding::OneAndHalfBits as i32
+                    }
+                    _ => qdrant::BinaryQuantizationEncoding::OneBit as i32,
+                }
+            });
+            let query_encoding = binary.query_encoding.as_deref().map(|_qe| {
+                qdrant::BinaryQuantizationQueryEncoding {
+                    variant: Some(
+                        qdrant::binary_quantization_query_encoding::Variant::Setting(
+                            qdrant::binary_quantization_query_encoding::Setting::Default as i32,
+                        ),
+                    ),
+                }
+            });
+            Some(qdrant::QuantizationConfig {
+                quantization: Some(qdrant::quantization_config::Quantization::Binary(
+                    qdrant::BinaryQuantization {
+                        always_ram: binary.always_ram,
+                        encoding,
+                        query_encoding,
+                    },
+                )),
+            })
+        }
+    }
+}
+
+// ── Legacy JSON-to-gRPC converters (still used for PATCH quantization,
+//     sparse vector params, and backward compat) ───────────────────────
+
 pub(crate) fn hnsw_config(value: &serde_json::Value) -> qdrant::HnswConfigDiff {
     qdrant::HnswConfigDiff {
         m: json_u64(value, "m"),
@@ -35,6 +151,7 @@ pub(crate) fn hnsw_config(value: &serde_json::Value) -> qdrant::HnswConfigDiff {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn optimizers_config(value: &serde_json::Value) -> qdrant::OptimizersConfigDiff {
     let max_optimization_threads = value
         .get("max_optimization_threads")
@@ -525,7 +642,9 @@ pub async fn execute_planned_grpc(
                 .await
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("query: {e}"), None))?;
             Ok(serde_json::json!({
-                "result": resp.result.into_iter().map(scored_point_to_json).collect::<Vec<_>>(),
+                "result": {
+                    "points": resp.result.into_iter().map(scored_point_to_json).collect::<Vec<_>>()
+                },
                 "status": "ok",
                 "time": resp.time,
             }))
@@ -805,8 +924,11 @@ pub async fn execute_planned_grpc(
                         .collect();
                     qdrant::SparseVectorConfig { map }
                 }),
-                hnsw_config: request.hnsw_config.as_ref().map(hnsw_config),
-                optimizers_config: request.optimizers_config.as_ref().map(optimizers_config),
+                hnsw_config: request.hnsw_config.as_ref().map(hnsw_config_from_plan),
+                optimizers_config: request
+                    .optimizers_config
+                    .as_ref()
+                    .map(optimizers_config_from_plan),
                 shard_number: request
                     .shard_number
                     .or_else(|| {
@@ -837,7 +959,7 @@ pub async fn execute_planned_grpc(
                 quantization_config: request
                     .quantization_config
                     .as_ref()
-                    .and_then(quantization_config),
+                    .and_then(quantization_config_from_plan),
                 sharding_method: request.sharding_method.as_ref().map(|method| {
                     match method.to_ascii_lowercase().as_str() {
                         "custom" => qdrant::ShardingMethod::Custom as i32,
@@ -896,9 +1018,12 @@ pub async fn execute_planned_grpc(
         } => {
             let grpc_req = qdrant::UpdateCollection {
                 collection_name: collection.clone(),
-                optimizers_config: request.optimizers_config.as_ref().map(optimizers_config),
+                optimizers_config: request
+                    .optimizers_config
+                    .as_ref()
+                    .map(optimizers_config_from_plan),
                 params: request.params.as_ref().map(collection_params_diff),
-                hnsw_config: request.hnsw_config.as_ref().map(hnsw_config),
+                hnsw_config: request.hnsw_config.as_ref().map(hnsw_config_from_plan),
                 quantization_config: request
                     .quantization_config
                     .as_ref()
@@ -1573,7 +1698,7 @@ fn to_condition(clause: &FilterClause) -> qdrant::Condition {
         },
         FilterClause::HasId(h) => qdrant::Condition {
             condition_one_of: Some(ConditionOneOf::HasId(qdrant::HasIdCondition {
-                has_id: h.has_id.iter().map(to_point_id_json).collect(),
+                has_id: h.has_id.iter().map(to_point_id).collect(),
             })),
         },
         FilterClause::HasVector(v) => qdrant::Condition {
@@ -1681,22 +1806,6 @@ fn to_point_id(id: &PlanPointId) -> qdrant::PointId {
         },
         PlanPointId::String(s) => qdrant::PointId {
             point_id_options: Some(qdrant::point_id::PointIdOptions::Uuid(s.clone())),
-        },
-    }
-}
-
-fn to_point_id_json(val: &serde_json::Value) -> qdrant::PointId {
-    match val {
-        serde_json::Value::Number(n) => qdrant::PointId {
-            point_id_options: Some(qdrant::point_id::PointIdOptions::Num(
-                n.as_u64().unwrap_or(0),
-            )),
-        },
-        serde_json::Value::String(s) => qdrant::PointId {
-            point_id_options: Some(qdrant::point_id::PointIdOptions::Uuid(s.clone())),
-        },
-        _ => qdrant::PointId {
-            point_id_options: None,
         },
     }
 }
@@ -2791,7 +2900,7 @@ mod tests {
                 Some(RequestBody::Delete(req)) => {
                     assert!(req.filter.is_some());
                 }
-                Some(RequestBody::UpdateVector(_)) => {}
+                Some(RequestBody::UpdateVectors(_)) => {}
                 Some(RequestBody::UpdatePayload(_)) => {}
                 Some(RequestBody::CreateCollection(req)) => {
                     assert!(req.vectors.is_some() || req.hnsw_config.is_some());
@@ -2801,7 +2910,7 @@ mod tests {
                     assert_eq!(req.field_name, "title");
                 }
                 Some(RequestBody::ClearPayload(_)) => {}
-                Some(RequestBody::DeleteVector(_)) => {}
+                Some(RequestBody::DeleteVectors(_)) => {}
                 Some(RequestBody::Count(_)) => {}
                 Some(RequestBody::CreateShardKey(_)) => {}
                 Some(RequestBody::DropShardKey(_)) => {}
@@ -3052,7 +3161,7 @@ mod tests {
 
         // HNSW → gRPC conversion with m + ef_construct
         let hnsw_json = req.hnsw_config.as_ref().expect("hnsw_config should be set");
-        let hnsw = hnsw_config(hnsw_json);
+        let hnsw = hnsw_config_from_plan(hnsw_json);
         assert_eq!(hnsw.m, Some(32));
         assert_eq!(hnsw.ef_construct, Some(100));
     }

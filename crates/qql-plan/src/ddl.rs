@@ -145,10 +145,10 @@ fn fill_collection_config(
         }
     }
     if let Some(ref h) = config.hnsw {
-        req.hnsw_config = Some(lower_hnsw_config_val(h));
+        req.hnsw_config = Some(lower_hnsw_config(h));
     }
     if let Some(ref o) = config.optimizers {
-        req.optimizers_config = Some(lower_optimizers_config_val(o));
+        req.optimizers_config = Some(lower_optimizers_config(o));
     }
     if let Some(ref p) = config.params {
         let mut pc = serde_json::Map::new();
@@ -180,18 +180,7 @@ fn fill_collection_config(
         req.shard_keys = p.shard_keys.clone();
     }
     if let Some(ref q) = config.quantization {
-        req.quantization_config = Some(lower_quantization_config_val(q));
-    }
-    if let Some(ref qu) = config.quantization_update {
-        let mut qup = serde_json::Map::new();
-        qup.insert("disabled".into(), serde_json::Value::Bool(qu.disabled));
-        if let Some(ref qc) = qu.config {
-            qup.insert(
-                "quantization_config".into(),
-                lower_quantization_config_val(qc),
-            );
-        }
-        req.quantization_config = Some(serde_json::Value::Object(qup));
+        req.quantization_config = Some(lower_quantization_config(q));
     }
 }
 
@@ -200,10 +189,10 @@ fn fill_update_collection_config(
     config: &qql_core::ast::CollectionConfig,
 ) {
     if let Some(ref h) = config.hnsw {
-        req.hnsw_config = Some(lower_hnsw_config_val(h));
+        req.hnsw_config = Some(lower_hnsw_config(h));
     }
     if let Some(ref o) = config.optimizers {
-        req.optimizers_config = Some(lower_optimizers_config_val(o));
+        req.optimizers_config = Some(lower_optimizers_config(o));
     }
     if let Some(ref p) = config.params {
         let mut pc = serde_json::Map::new();
@@ -241,7 +230,19 @@ fn fill_update_collection_config(
                 lower_quantization_config_val(qc),
             );
         }
+        // quantization_update w/ disabled is a REST PATCH shape.
         req.quantization_config = Some(serde_json::Value::Object(qup));
+    }
+}
+
+pub fn lower_hnsw_config(config: &qql_core::ast::HnswRuntimeConfig) -> HnswConfig {
+    HnswConfig {
+        m: config.m,
+        ef_construct: config.ef_construct,
+        full_scan_threshold: config.full_scan_threshold,
+        max_indexing_threads: config.max_indexing_threads,
+        on_disk: config.on_disk,
+        payload_m: config.payload_m,
     }
 }
 
@@ -269,6 +270,29 @@ pub fn lower_hnsw_config_val(config: &qql_core::ast::HnswRuntimeConfig) -> serde
         obj.insert("inline_storage".into(), serde_json::Value::Bool(inline));
     }
     serde_json::Value::Object(obj)
+}
+
+pub fn lower_optimizers_config(
+    config: &qql_core::ast::OptimizersRuntimeConfig,
+) -> OptimizersConfig {
+    let max_threads = config.max_optimization_threads.as_ref().map(|mot| {
+        if mot.auto_ {
+            serde_json::Value::String("auto".into())
+        } else {
+            serde_json::Value::from(mot.value)
+        }
+    });
+    OptimizersConfig {
+        deleted_threshold: config.deleted_threshold,
+        vacuum_min_vector_number: config.vacuum_min_vector_number,
+        default_segment_number: config.default_segment_number,
+        max_segment_size: config.max_segment_size,
+        memmap_threshold: config.memmap_threshold,
+        indexing_threshold: config.indexing_threshold,
+        flush_interval_sec: config.flush_interval_sec,
+        max_optimization_threads: max_threads,
+        prevent_unoptimized: config.prevent_unoptimized,
+    }
 }
 
 pub fn lower_optimizers_config_val(
@@ -319,6 +343,38 @@ pub fn lower_optimizers_config_val(
         obj.insert("prevent_unoptimized".into(), serde_json::Value::Bool(pu));
     }
     serde_json::Value::Object(obj)
+}
+
+pub fn lower_quantization_config(config: &qql_core::ast::QuantizationConfig) -> QuantizationConfig {
+    match config.qtype {
+        qql_core::ast::QuantizationType::Scalar => QuantizationConfig::Scalar {
+            scalar: ScalarQuantization {
+                qtype: "int8".into(),
+                quantile: config.quantile,
+                always_ram: Some(config.always_ram),
+            },
+        },
+        qql_core::ast::QuantizationType::Product => QuantizationConfig::Product {
+            product: ProductQuantization {
+                compression: config.compression.clone().unwrap_or_default(),
+                always_ram: Some(config.always_ram),
+            },
+        },
+        qql_core::ast::QuantizationType::Binary => QuantizationConfig::Binary {
+            binary: BinaryQuantization {
+                always_ram: Some(config.always_ram),
+                encoding: config.encoding.clone(),
+                query_encoding: config.query_encoding.clone(),
+            },
+        },
+        _ => QuantizationConfig::Scalar {
+            scalar: ScalarQuantization {
+                qtype: "int8".into(),
+                quantile: config.quantile,
+                always_ram: Some(config.always_ram),
+            },
+        },
+    }
 }
 
 pub fn lower_quantization_config_val(
@@ -400,13 +456,22 @@ pub fn create_collection_rest_body(req: &CreateCollectionRequest) -> serde_json:
         );
     }
     if let Some(hnsw) = &req.hnsw_config {
-        body.insert("hnsw_config".into(), hnsw.clone());
+        body.insert(
+            "hnsw_config".into(),
+            serde_json::to_value(hnsw).unwrap_or_default(),
+        );
     }
     if let Some(opt) = &req.optimizers_config {
-        body.insert("optimizers_config".into(), opt.clone());
+        body.insert(
+            "optimizers_config".into(),
+            serde_json::to_value(opt).unwrap_or_default(),
+        );
     }
     if let Some(q) = &req.quantization_config {
-        body.insert("quantization_config".into(), nest_quantization_for_rest(q));
+        body.insert(
+            "quantization_config".into(),
+            serde_json::to_value(q).unwrap_or_default(),
+        );
     }
     if let Some(n) = req.shard_number {
         body.insert("shard_number".into(), serde_json::Value::from(n));
@@ -483,10 +548,16 @@ pub fn create_index_rest_body(req: &CreateIndexRequest) -> serde_json::Value {
 pub fn update_collection_rest_body(req: &UpdateCollectionRequest) -> serde_json::Value {
     let mut body = serde_json::Map::new();
     if let Some(hnsw) = &req.hnsw_config {
-        body.insert("hnsw_config".into(), hnsw.clone());
+        body.insert(
+            "hnsw_config".into(),
+            serde_json::to_value(hnsw).unwrap_or_default(),
+        );
     }
     if let Some(opt) = &req.optimizers_config {
-        body.insert("optimizers_config".into(), opt.clone());
+        body.insert(
+            "optimizers_config".into(),
+            serde_json::to_value(opt).unwrap_or_default(),
+        );
     }
     if let Some(params) = &req.params {
         body.insert("params".into(), params.clone());

@@ -55,9 +55,7 @@ pub(crate) fn extract_search_hits(result: &serde_json::Value) -> Vec<SearchHit> 
     let points = result
         .get("result")
         .and_then(|r| r.get("points"))
-        .and_then(serde_json::Value::as_array)
-        .or_else(|| result.get("points").and_then(serde_json::Value::as_array))
-        .or_else(|| result.get("result").and_then(serde_json::Value::as_array));
+        .and_then(serde_json::Value::as_array);
 
     match points {
         Some(pts) => pts

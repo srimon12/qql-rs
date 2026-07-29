@@ -180,7 +180,9 @@ impl EdgeQdrant {
                 .map_err(|e| spawn_error("query", e))??;
 
                 Ok(serde_json::json!({
-                    "result": results.into_iter().map(from_edge_scored_point).collect::<Vec<_>>(),
+                    "result": {
+                        "points": results.into_iter().map(from_edge_scored_point).collect::<Vec<_>>()
+                    },
                     "status": "ok",
                     "time": 0.0,
                 }))
@@ -377,7 +379,7 @@ impl EdgeQdrant {
                     .map_err(|e| spawn_error("clear_payload", e))??;
                 Ok(mutation_response())
             }
-            Some(RequestBody::DeleteVector(req)) => {
+            Some(RequestBody::DeleteVectors(req)) => {
                 reject_shard(req.shard_key.as_deref())?;
                 let collection = extract_collection(&route.path)?;
                 let shard = self.open_shard(&collection).await?;
@@ -416,7 +418,7 @@ impl EdgeQdrant {
                     .map_err(|e| spawn_error("delete_vectors", e))??;
                 Ok(mutation_response())
             }
-            Some(RequestBody::UpdateVector(req)) => {
+            Some(RequestBody::UpdateVectors(req)) => {
                 reject_shard(req.shard_key.as_deref())?;
                 let collection = extract_collection(&route.path)?;
                 let shard = self.open_shard(&collection).await?;
@@ -510,9 +512,9 @@ impl EdgeQdrant {
                         .sparse_vectors
                         .as_ref()
                         .map(|sv| serde_json::to_value(sv).unwrap_or_default()),
-                    hnsw_config: req.hnsw_config,
-                    optimizers_config: req.optimizers_config,
-                    quantization_config: req.quantization_config,
+                    hnsw_config: req.hnsw_config.as_ref().map(|v| serde_json::to_value(v).unwrap_or_default()),
+                    optimizers_config: req.optimizers_config.as_ref().map(|v| serde_json::to_value(v).unwrap_or_default()),
+                    quantization_config: req.quantization_config.as_ref().map(|v| serde_json::to_value(v).unwrap_or_default()),
                     params: req.params,
                     shard_number: req.shard_number,
                     sharding_method: req.sharding_method,
@@ -989,13 +991,13 @@ fn update_op_to_route(collection: &str, op: &PlanUpdateOperation) -> Route {
             method: qql_plan::types::Method::Put,
             path: format!("/collections/{collection}/points/vectors"),
             query: vec![("wait".into(), "true".into())],
-            body: Some(RequestBody::UpdateVector(update_vectors.clone())),
+            body: Some(RequestBody::UpdateVectors(update_vectors.clone())),
         },
         PlanUpdateOperation::DeleteVectors { delete_vectors } => Route {
             method: qql_plan::types::Method::Post,
             path: format!("/collections/{collection}/points/vectors/delete"),
             query: vec![("wait".into(), "true".into())],
-            body: Some(RequestBody::DeleteVector(Box::new(delete_vectors.clone()))),
+            body: Some(RequestBody::DeleteVectors(Box::new(delete_vectors.clone()))),
         },
     }
 }

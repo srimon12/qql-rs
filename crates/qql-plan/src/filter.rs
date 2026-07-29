@@ -156,8 +156,8 @@ fn field_condition(field: &str, f: impl FnOnce(&mut FieldCondition)) -> FilterCl
 
 fn lower_point_id(predicate: &PointIdPredicate) -> FilterClause {
     let ids = match predicate {
-        PointIdPredicate::Eq(id) => vec![point_id_req(id)],
-        PointIdPredicate::In(ids) => ids.iter().map(point_id_req).collect(),
+        PointIdPredicate::Eq(id) => vec![point_id_req_typed(id)],
+        PointIdPredicate::In(ids) => ids.iter().map(point_id_req_typed).collect(),
     };
     FilterClause::HasId(HasIdCondition { has_id: ids })
 }
@@ -271,13 +271,6 @@ pub fn value_to_json(value: &Value) -> serde_json::Value {
             }
             serde_json::Value::Object(map)
         }
-    }
-}
-
-pub fn point_id_req(id: &qql_core::ast::PointId) -> serde_json::Value {
-    match id {
-        qql_core::ast::PointId::Number(n) => serde_json::Value::Number((*n).into()),
-        qql_core::ast::PointId::String(s) => serde_json::Value::String(s.clone()),
     }
 }
 

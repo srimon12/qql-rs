@@ -207,6 +207,7 @@ impl QdrantOps for RestQdrant {
     async fn create_collection(&self, req: CreateCollectionReq) -> Result<(), QqlError> {
         // Reuse plan OpenAPI projection so implicit upsert creates match
         // execute_planned CREATE COLLECTION wire shape.
+        // Auto-create only sets vectors/sparse_vectors — config fields are None.
         let plan_req = qql_plan::types::CreateCollectionRequest {
             vectors: req
                 .vectors_config
@@ -216,10 +217,10 @@ impl QdrantOps for RestQdrant {
                 .sparse_vectors_config
                 .as_ref()
                 .and_then(|v| v.as_object().cloned()),
-            hnsw_config: req.hnsw_config.clone(),
-            optimizers_config: req.optimizers_config.clone(),
+            hnsw_config: None,
+            optimizers_config: None,
             params: req.params.clone(),
-            quantization_config: req.quantization_config.clone(),
+            quantization_config: None,
             vectors_config: None,
             shard_number: req.shard_number,
             sharding_method: req.sharding_method.clone(),
