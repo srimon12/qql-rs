@@ -10,11 +10,14 @@ abstract `QdrantOps` trait over REST, gRPC, or edge backends.
 Statement string
     │
     ▼ [1] Parse (qql-core Parser → Stmt)
+    │     USING name without AS → kind: null (not invented at parse time)
     │
-    ▼ [2] PREPARE
-    │   ├─ resolve_embeddings: text → vectors (if embedder registered)
-    │   ├─ resolve vector targets: validate names and infer roles from collection schema
-    │   └─ ensure_collection_for_upsert: auto-create default schema
+    ▼ [2] PREPARE (order matters)
+    │   ├─ configure_query_vectors: collection schema → dense/sparse/multi flags
+    │   │    (USING sparse embeds sparse; multivector names set multi=true)
+    │   ├─ resolve_embeddings: text → Dense | Sparse | MultiDense
+    │   │    (unknown kind fails with QQL-VECTOR-KIND — no silent dense default)
+    │   └─ ensure_collection_for_upsert: auto-create default schema when needed
     │
     ▼ [3] Plan (qql_plan::plan::plan → PlannedOperation)
     │   └─ Transport: to_rest_route (REST) or match PlannedOperation → protobuf (gRPC)
@@ -120,9 +123,18 @@ let response = executor.execute(
 The `prepare_statement` method (called before every `execute_node` and in
 `execute_batch_nodes`) performs:
 
-1. **`resolve_embeddings`**: text → dense/sparse vectors (if embedder registered)
-2. **vector target resolution**: validates named targets and infers dense/sparse roles from collection schema; ambiguous schemas fail closed
-3. **`ensure_collection_for_upsert`**: for UPSERT — auto-creates collection with default dense/hybrid schema when embedding model is specified
+1. **vector target resolution** (`configure_query_vectors`): validates named
+   targets against collection schema; fills dense/sparse kinds and multivector
+   flags from `multivector_config`. Ambiguous topologies fail closed
+   (`QQL-MISSING-USING`). Explicit `AS DENSE|SPARSE|MULTI` is kept when the
+   name is not present on a minimal mock schema.
+2. **`resolve_embeddings`**: text → dense / sparse / multi-dense (if embedder
+   registered). Multivector targets call `Embedder::embed_multi`.
+3. **`ensure_collection_for_upsert`**: for UPSERT — auto-creates collection with
+   default dense/hybrid (or hybrid+rerank multivector) schema when needed
+
+`CREATE COLLECTION … HYBRID RERANK` materializes conventional `dense` + `sparse`
++ `colbert` (MaxSim multivector) topology.
 
 ### Batch execution — strict cardinality
 

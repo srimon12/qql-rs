@@ -131,9 +131,65 @@ QUERY TEXT 'acute bronchitis treatment protocols' FROM medical_records
   USING dense
   WHERE specialty = 'pulmonology' AND evidence_level IN ('A', 'B')
   WITH PAYLOAD INCLUDE (title, summary, evidence_level, url)
-  WITH VECTOR (colbert_rerank)
+  WITH VECTOR (colbert)
   LIMIT 15;
 ```
+
+---
+
+## 6b. ColBERT Multivector Nearest and Rerank
+
+**Problem:** Late-interaction retrieval: store token-level multivectors and either search with them directly or rerank dense candidates.
+
+**Why this works:** Multivector is a **dense role with multi shape**, not a third sparse/dense kind. Schema marks `colbert` via `WITH MULTIVECTOR`; runtime sets `multi` before embedding so TEXT becomes `MultiDense` (`[[f32,…],…]`). Offline without schema, use `AS MULTI`.
+
+```sql
+CREATE COLLECTION docs (
+  dense VECTOR(384, COSINE),
+  sparse SPARSE,
+  colbert VECTOR(128, COSINE) WITH MULTIVECTOR (comparator = 'max_sim')
+);
+
+-- Schema-driven: USING colbert alone is enough at execute time
+QUERY TEXT 'vector database latency'
+FROM docs
+USING colbert
+LIMIT 10;
+
+-- Explicit offline / no schema
+QUERY TEXT 'vector database latency'
+FROM docs
+USING colbert AS MULTI
+LIMIT 10;
+
+-- Precomputed multi-dense query vector
+QUERY NEAREST VECTOR [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]
+FROM docs
+USING colbert
+LIMIT 10;
+
+-- Dense first stage + ColBERT late-interaction rerank
+WITH candidates AS (
+  QUERY TEXT 'vector database latency' FROM docs USING dense LIMIT 100
+)
+QUERY RERANK TEXT 'vector database latency' MODEL 'answerai-colbert-small-v1'
+FROM docs
+USING colbert
+PREFETCH (candidates)
+LIMIT 10;
+
+-- Precomputed multivector on upsert
+UPSERT INTO docs VALUES {
+  id: 1,
+  text: 'chunk text',
+  vector: { dense: [0.1, 0.2, 0.3], colbert: [[0.1, 0.2], [0.3, 0.4]] }
+};
+```
+
+**Key decisions:**
+- Kind is dense; shape is multi (`MultiDense`).
+- Host embedder must implement `embed_multi` for TEXT → multivector; otherwise pass `VECTOR [[...]]` or precomputed upsert vectors.
+- `USING sparse` in a CTE never silently dense-embeds when schema marks sparse.
 
 ---
 
@@ -316,7 +372,10 @@ QUERY TEXT 'neurological assessment' FROM docs USING dense LIMIT 5;
 **Problem:** Create collection, payload indexes, upsert documents with auto-embedding, count points, clear payload, delete vectors, and drop everything in a single QQL script.
 
 ```sql
-CREATE COLLECTION medical (dense VECTOR(384, COSINE), colbert VECTOR(128, COSINE));
+CREATE COLLECTION medical (
+  dense VECTOR(384, COSINE),
+  colbert VECTOR(128, COSINE) WITH MULTIVECTOR (comparator = 'max_sim')
+);
 CREATE INDEX ON COLLECTION medical FOR specialty TYPE keyword;
 UPSERT INTO medical VALUES {id: 1, text: 'stroke protocol', specialty: 'neurology'}, {id: 2, text: 'cardiac arrest', specialty: 'cardiology'} USING DENSE MODEL 'all-minilm:l6-v2';
 COUNT FROM medical WHERE specialty = 'neurology';

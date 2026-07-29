@@ -51,7 +51,11 @@ fn tenant_route(user_query: &str, tenant: &str) -> Result<(), Box<dyn std::error
 
 ## 2. Execute with REST or gRPC Client
 
-Full runtime: parse, optionally resolve embeddings, execute against Qdrant.
+Full runtime: parse → **schema vector kind resolution** → embeddings → plan →
+dispatch. `USING dense` / `USING sparse` / multivector names work without `AS`
+when the collection exists; kinds and multivector flags come from schema.
+`USING name` alone without schema fails closed (`QQL-VECTOR-KIND`). Multivector
+TEXT needs a host `Embedder::embed_multi` (or precomputed `VECTOR [[...]]`).
 
 ```rust
 use qql::executor::{Executor, OnError};
@@ -65,6 +69,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "QUERY 'supply chain risks' FROM sec10k SHARD 'honeywell' LIMIT 10",
         OnError::Stop,
     ).await?;
+
+    // Schema-driven sparse + multivector (no AS required when collection exists)
+    // exec.execute("QUERY TEXT 'q' FROM docs USING sparse LIMIT 10", OnError::Stop).await?;
+    // exec.execute("QUERY TEXT 'q' FROM docs USING colbert LIMIT 10", OnError::Stop).await?;
 
     Ok(())
 }

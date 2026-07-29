@@ -73,12 +73,21 @@ For Transformers.js, custom providers, or in-browser models:
 ```js
 client.setEmbedder(async (texts) => {
     // Called with the full batch -- batch inside the callback
+    // Return number[][] of single dense vectors (one row per text).
     const embeddings = await myModel.embed(texts);
     return embeddings;  // number[][]
 });
 ```
 
 Check whether an embedder is configured: `client.hasEmbedder()`
+
+**Prepare order:** on `execute`, WASM fetches collection topology (dense /
+sparse / multivector names), fills `USING` kinds, then embeds. So
+`USING sparse` and multivector `USING colbert` work without `AS` when Qdrant
+is reachable. ColBERT multi-vector TEXT embedding requires a host that
+implements multi-vector embed (default HTTP embedder is single dense only);
+pass precomputed `VECTOR [[...], ...]` or use `AS MULTI` with a multi-capable
+embedder when available.
 
 ---
 

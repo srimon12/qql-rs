@@ -19,9 +19,13 @@ across repositories.
 `grammar.pest` is the only handwritten core syntax grammar. The generated copy
 under `crates/qql-core/grammar` must never be edited directly.
 
-The grammar owns syntax only. Collection-schema inference and other
-schema-dependent validation remain in `qql-plan` and are specified in
-`spec/semantics.md`.
+The grammar owns syntax only. Collection-schema inference (dense vs sparse vs
+multivector flags), embedding, and other schema-dependent validation live in
+`qql-embed` / `qql-runtime` and are specified in `spec/semantics.md`.
+
+`USING name AS MULTI` / `AS MULTIVECTOR` is part of the grammar (dense multivector
+role). Parse still stores untyped `USING name` with `kind: null` until execution
+prep fills roles from the collection schema.
 
 ## Generation
 

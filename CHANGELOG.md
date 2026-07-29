@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### 🚀 Added
+- Multivector / ColBERT path: `USING name AS MULTI`, schema `multivector_config` → `MultiDense`, `Embedder::embed_multi`, `RERANK` multivector targets, `HYBRID RERANK` materializes `colbert` MaxSim vector.
+- Schema-first `USING` resolution before embedding; fail-closed `QQL-VECTOR-KIND` when kind is unknown offline.
+
+### 📚 Documentation
+- Update `docs/syntax.md`, skills (`SKILL.md`, examples, gaps, Python/Node/Rust/WASM SDKs), crate READMEs (`qql-core`, `qql-embed`, `qql-runtime`, `qql-plan`, `qql-cli`), `AGENT.md`, and `language/v1` notes for vector roles + multivector.
+
+---
+
 ## [0.1.3] - 2026-07-28
 
 ### 🔴 Critical

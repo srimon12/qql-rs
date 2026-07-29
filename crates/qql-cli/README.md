@@ -120,6 +120,7 @@ Then select the configured backend with the global flag:
 
 ```bash
 qql --edge exec "QUERY 'vector search' FROM docs USING dense LIMIT 5"
+# Schema fills USING roles (dense/sparse/multi); offline/explicit: AS DENSE|SPARSE|MULTI
 qql --edge execute migration.qql
 qql --edge connect
 qql --edge dump docs docs.qql

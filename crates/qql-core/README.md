@@ -56,7 +56,7 @@ required prefetch topology in the AST.
 ```
 QUERY <expression>
 FROM <collection>
-[USING <vector> [AS DENSE | AS SPARSE]]
+[USING <vector> [AS DENSE | AS SPARSE | AS MULTI | AS MULTIVECTOR]]
 [PREFETCH (...)]
 [WHERE <filter>]
 [SHARD '<key>']
@@ -71,8 +71,11 @@ FROM <collection>
 
 Each clause occurs at most once and only in this order.
 
-Vector names are arbitrary. `AS DENSE` / `AS SPARSE` is an explicit role
-annotation; without it, execution resolves the role from collection schema.
+Vector names are arbitrary (`dense` / `sparse` / `colbert` are conventions, not
+reserved). `AS DENSE` / `AS SPARSE` declare embed role; `AS MULTI` marks a dense
+**multivector** target (ColBERT-style). Without `AS`, the executor resolves kind
+and multivector flags from collection schema before embedding. Parse keeps
+untyped targets as `kind: null` (source fidelity).
 
 ## Search params (PARAMS)
 

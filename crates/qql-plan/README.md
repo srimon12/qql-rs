@@ -115,8 +115,8 @@ All typed request types live in [`crate::types`]:
 These types preserve semantic distinctions that JSON shape inference cannot recover:
 
 - `PlanPointId`: `Number(u64)` or `String` — serialized as bare number or string
-- `PlanVectorValue`: `Dense`, `Sparse { indices, values }`, or `MultiDense`
-- `PlanQueryInput`: `Point`, `Vector`, or `Document { text, model }`
+- `PlanVectorValue`: `Dense`, `Sparse { indices, values }`, or `MultiDense` (ColBERT-style array-of-vectors; REST serializes as nested arrays)
+- `PlanQueryInput`: `Point`, `Vector`, or `Document { text, model }` (text should already be embedded by prepare before plan when an embedder is present)
 - `PlanPointVectors`: `Unnamed(PlanVectorValue)` or `Named(Vec<(String, PlanVectorValue)>)`
 - `PlanFormula`: typed formula tree — REST uses snake_case OpenAPI keys via custom serialization
 

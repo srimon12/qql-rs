@@ -10,6 +10,19 @@ Use this file when a request sounds reasonable in Qdrant terms but is still outs
 - `USING HYBRID` shorthand (use `QUERY HYBRID TEXT '...' DENSE ... SPARSE ...`)
 - Dynamic shard routing key resolution (shard key must be explicitly provided)
 - `max_selectivity` on `PARAMS (acorn = true)` -- the plan type has the field but it is not settable from QQL syntax yet
+- Built-in ColBERT host models: `Embedder::embed_multi` is required for multivector TEXT embedding; default implementations error with `QQL-EMBEDDING-MULTI` until the host supplies a multi-vector model (HttpEmbedder / FastEmbedder do not invent ColBERT weights)
+- UPSERT auto-embed into multivector slots from plain text (pass precomputed `vector: { colbert: [[...], ...] }` or extend the host)
+
+## Vector roles — do not invent
+
+These are **supported** (do not claim they need raw SDK work):
+
+- `USING name` without `AS` when executing against a live collection (schema fills dense/sparse/multi)
+- `USING name AS MULTI` for ColBERT-style multivector query text
+- `QUERY RERANK … USING colbert` with multivector schema + host `embed_multi`
+- Precomputed multi-dense: `VECTOR [[...], [...]]` and upsert `vector: { colbert: [[...]] }`
+
+Do **not** invent name-based heuristics (`*sparse*` → sparse). Kind comes from schema or `AS …`.
 
 ## What To Say
 
@@ -34,7 +47,9 @@ Prefer plain language:
 - Need parameterized RRF tuning: use `PARAMS (rrf_k = <n>, rrf_weights = [...])`
 - Need multi-stage retrieval with per-prefetch filters: use `WITH <name> AS (...) ... PREFETCH (name WHERE <filter> SCORE THRESHOLD <n>) FUSION RRF`
 - Need hybrid DBSF fusion: use `QUERY HYBRID TEXT 'text' DENSE dense SPARSE sparse FUSION DBSF FROM <collection> LIMIT <n>`
-- Need better ordering: use `QUERY RERANK TEXT 'query' MODEL 'reranker' FROM <collection> USING colbert PREFETCH (...) LIMIT <n>`
+- Need better ordering / late interaction: use `QUERY RERANK TEXT 'query' MODEL 'colbert-model' FROM <collection> USING colbert PREFETCH (...) LIMIT <n>` (collection needs multivector `colbert`; host must implement `embed_multi`)
+- Need multivector nearest without schema: use `USING colbert AS MULTI`
+- Need multivector nearest with schema: use `USING colbert` (no `AS` required)
 - Need filtering: create an index first (`CREATE INDEX ON COLLECTION <name> FOR <field> TYPE <type>`), then use `WHERE`
 - Need grouped top results by field: use `QUERY ... GROUP BY <field> SIZE <n>`
 - Need cross-collection group lookup: use `QUERY ... GROUP BY <field> SIZE <n> LOOKUP FROM <collection>`

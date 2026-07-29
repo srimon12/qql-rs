@@ -40,22 +40,37 @@ query-tail   = [ "USING", vector-name, [ "AS", vector-kind ] ],
                [ "WITH", "VECTOR", vector-selector ],
                [ "LIMIT", positive-integer ],
                [ "OFFSET", non-negative-integer ] ;
-vector-kind  = "DENSE" | "SPARSE" ;
+vector-kind  = "DENSE" | "SPARSE" | "MULTI" | "MULTIVECTOR" ;
 ```
 
 Top-level queries require `FROM`. A CTE may omit it and inherit the outer collection. Clauses occur at most once and only in the order above.
 
 `SHARD '<key>'` routes the query to a specific shard group. It is optional and only needed when using custom sharding in a multi-tenant collection.
 
-Vector names are application-defined; `dense` and `sparse` are defaults, not
-reserved names. `AS DENSE` or `AS SPARSE` declares the role of an arbitrary
-named vector, for example `USING lexical_v2 AS SPARSE`. `AS MULTI` /
-`AS MULTIVECTOR` marks a dense multivector target (ColBERT-style); the role is
-still dense and embedding produces a multi-dense value. Without `AS`, the
-executor resolves the named vector's role from the collection schema (including
-multivector flags from `multivector_config`). When `USING` is omitted, execution
-succeeds only if the schema has exactly one compatible vector; ambiguous schemas
-require an explicit target.
+### Vector targets and embedding roles
+
+Vector names are application-defined; `dense`, `sparse`, and `colbert` are
+conventional defaults, **not reserved**. Kind never comes from name spelling
+(e.g. a vector named `sparse` is sparse only if the collection schema says so).
+
+| Form | Meaning |
+|---|---|
+| `USING name` | Executor looks up `name` on the collection schema: dense, sparse, or dense+multivector |
+| `USING name AS DENSE` | Explicit single-vector dense embed |
+| `USING name AS SPARSE` | Explicit sparse (BM25-style) embed |
+| `USING name AS MULTI` / `AS MULTIVECTOR` | Explicit dense **multivector** (ColBERT-style) → `MultiDense` |
+
+Without `AS`, schema resolution runs **before** embedding and sets:
+
+- dense vs sparse role;
+- multivector flag when the named dense vector has `multivector_config` (e.g. `max_sim`).
+
+When `USING` is omitted, execution succeeds only if the schema has exactly one
+compatible vector; ambiguous topologies fail with `QQL-MISSING-USING`.
+
+Offline embedding (no collection schema) requires an explicit `AS …` role.
+`USING name` alone without prep fails with `QQL-VECTOR-KIND` rather than
+silently dense-embedding.
 
 ### Query Expressions
 
@@ -115,7 +130,7 @@ rerank-input = "TEXT", string | "VECTOR", vector-value | "POINT", point-id ;
 
 `QUERY POINTS (...)` retrieves those points directly. `QUERY NEAREST POINT ...` uses a point as the similarity input. A bare integer after `QUERY` is invalid, so point retrieval and point similarity cannot be confused.
 
-Fusion requires a non-empty `PREFETCH`. Rerank requires an explicit input, `MODEL`, `USING`, and non-empty `PREFETCH`. MMR requires both `DIVERSITY` in `[0, 1]` and positive `CANDIDATES`. Hybrid expands to two prefetches (dense + sparse) with `LIMIT * 10` candidate count, fused with RRF or DBSF.
+Fusion requires a non-empty `PREFETCH`. Rerank requires an explicit input, `MODEL`, `USING`, and non-empty `PREFETCH`; the `USING` target must be dense (single-vector or multivector). When the target is multivector, `RERANK TEXT` embeds via multi-vector embedding into `MultiDense`. MMR requires both `DIVERSITY` in `[0, 1]` and positive `CANDIDATES`. Hybrid expands to two prefetches (dense + sparse) with `LIMIT * 10` candidate count, fused with RRF or DBSF.
 
 ### Formula expressions
 
@@ -195,10 +210,21 @@ PREFETCH (dense, sparse)
 LIMIT 10;
 
 WITH candidates AS (QUERY TEXT 'vector database' USING dense LIMIT 100)
-QUERY RERANK TEXT 'vector database' MODEL 'reranker-v1'
+QUERY RERANK TEXT 'vector database' MODEL 'answerai-colbert-small-v1'
 FROM docs
 USING colbert
 PREFETCH (candidates)
+LIMIT 10;
+
+-- Multivector nearest (schema has colbert WITH MULTIVECTOR, or use AS MULTI offline)
+QUERY TEXT 'late interaction query'
+FROM docs
+USING colbert
+LIMIT 10;
+
+QUERY NEAREST VECTOR [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]
+FROM docs
+USING colbert AS MULTI
 LIMIT 10;
 
 -- Multi-tenant query with shard routing
@@ -206,7 +232,7 @@ QUERY 'supply chain risks'
 FROM sec10k
 WHERE tenant_id = 'honeywell'
 SHARD 'honeywell'
-LIMIT 10;"
+LIMIT 10;
 ```
 
 ## Prefetch
@@ -350,9 +376,19 @@ config-blocks = "WITH", ( "HNSW" | "PARAMS" | "OPTIMIZERS" | "QUANTIZATION"
                          | "VECTOR" ), config-block ;
 ```
 
-`USING [DENSE] MODEL '<model>'` creates a collection with a single dense vector whose dimension is inferred from the embedding model. `USING HYBRID` creates the default dense+sparse topology. `HYBRID DENSE VECTOR semantic_v2 SPARSE VECTOR lexical_v2` assigns arbitrary names to those roles; add `RERANK` for the default rerank topology. All forms begin with `CREATE COLLECTION <name>` followed by at most one mode keyword group; `DENSE MODEL` without a preceding `USING` is rejected.
+`USING [DENSE] MODEL '<model>'` creates a collection with a single dense vector whose dimension is inferred from the embedding model. `USING HYBRID` creates the default dense+sparse topology. `HYBRID DENSE VECTOR semantic_v2 SPARSE VECTOR lexical_v2` assigns arbitrary names to those roles; `HYBRID RERANK` materializes conventional dense + sparse + `colbert` multivector (MaxSim) topology. All forms begin with `CREATE COLLECTION <name>` followed by at most one mode keyword group; `DENSE MODEL` without a preceding `USING` is rejected.
 
 When an UPSERT contains text but no embedding clause, the executor inspects the existing collection schema and emits the compatible vector types. `USING DENSE`, `USING SPARSE`, and `USING HYBRID` can also omit target names and rely on schema inference. A role is inferred only when exactly one matching target exists; ambiguous schemas require `VECTOR <name>` or an explicit `EMBED` directive. The executor never infers a role merely from a vector being named `dense` or `sparse`.
+
+Pre-computed multivectors use nested arrays:
+
+```sql
+UPSERT INTO docs VALUES {
+  id: 1,
+  text: 'chunk',
+  vector: { colbert: [[0.1, 0.2], [0.3, 0.4]] }
+};
+```
 
 ### Collection Params
 
