@@ -49,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **SDK & CLI**:
 - `pyqql.Client.compile()` parity with nqql; all SDK `compile()` return stable `stmt_type` labels
 - `inject_shard_key()` available on all SDKs (Python, Node, Rust, WASM) plus `Stmt.shard_key` getter/setter
-- Edge SDKs: new `nqql-edge` and `pyqql-edge` packages with full local execution, `FastEmbedder` (dense/sparse/multi/image/reranker ONNX model slots), and `EdgeUnsupported` error catalog
+- Edge SDKs: `nqql-edge` and `pyqql-edge` now support multi-model `FastEmbedder` (dense/sparse/multi/image/reranker ONNX slots), `localExecutor`/`httpExecutor` constructors, and `EdgeUnsupported` error catalog
 - WASM: `Stmt` class, `analyze()` (parse+explain+route in one call), `compileBytes()`/`explainBytes()`, smart batching
 - CLI: `qql doctor` (connection health + embedder snapshot), `qql config edge`, `--edge` flag for local execution, psql-style table output
 
