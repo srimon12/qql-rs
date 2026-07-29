@@ -10,14 +10,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### 🏗️ Architecture
+- **Transport-Independent Plan IR**: `qql-plan` is now 100% transport-agnostic and free of REST/gRPC client types. `PlannedOperation` is the single source of truth IR lowered directly by `qql-runtime` (`RestQdrant`, `GrpcQdrant`) and `qql-edge` (`EdgeQdrant`) without intermediate serialization round-trips.
+- **Universal Batch Key**: Standardized `statement_batch_key(stmt)` and `PlannedOperation::batch_key(&self)` exported from `qql-plan` root for cross-crate request batching.
+- **Model-Aware Sparse Embedder & Single-Pass Joint Embeddings**:
+  - Updated `Embedder::embed_sparse` to accept `(text: &str, model: &str)`, enabling model-aware sparse model routing (`USING SPARSE MODEL 'splade'`).
+  - Added `embed_joint` / `embed_joint_batch` and `JointEmbeddingOutput` struct to `Embedder` trait for BGE-M3 single-pass joint dense+sparse+multi embedding.
 - **Single production parser**: remove pest/`syntax.rs` from `qql-core`; `AstLowerer` is the only runtime frontend. `language/v1/grammar.pest` remains the language contract for docs/CI (`qql-grammar-gen`).
 - **Single embedding owner**: remove dead `qql-plan` embedding job extractor; embeddings live only in `qql-embed`.
 - **Plan is the IR**: `to_rest_route` is fallible; CROSS RERANK no longer invents a fake Qdrant path. SDK `compile_statement` returns `CompiledStatement { stmt_type, route: Option<Route> }`.
 - Deprecate silent `routing::route()` empty-GET fallback; prefer `try_route` / `compile_statement`.
 - Remove dead `client::CollectionSchema` duplicate.
-- `inject_shard_key` fails closed on unsupported statement types (no silent no-op for DDL).
+- `inject_shard_key` and `inject_filter` fail closed on unsupported statement types (no silent no-op for DDL).
 
 ### 🚀 Added
+- **Full Qdrant Feature Coverage**:
+  - **`FilterCompound.shard_key`**: Wired top-level and nested `shard_key` propagation into `FilterCompound` across query, count, scroll, and prefetch plans.
+  - **`QueryRequest.lookup_from`**: Extracted lookup collection and vector specifications into `QueryRequest.lookup_from` (`LookupRequest`).
+  - **`CountRequest.exact`**: Added `pub exact: Option<bool>` to `CountStmt` in `qql-core` and wired `CountRequest.exact` for exact point count queries (`COUNT FROM coll WITH (exact = true)`).
+- **`ACORN` Search Parameter**: Added `acorn: { enable, max_selectivity }` to `SearchParams` AST and `qql-plan`.
+- **`USING HYBRID` Syntax**: Added `USING HYBRID` shorthand syntax expanding to dense + sparse prefetch queries.
+- **`CROSS RERANK` Syntax**: Added cross-encoder pair scoring with `CROSS RERANK` grammar parsing.
+- **Image Embeddings (CLIP)**: Added `QueryInput::Image` parsing and vision embedding support.
 - Multivector / ColBERT path: `USING name AS MULTI`, schema `multivector_config` → `MultiDense`, `Embedder::embed_multi`, `RERANK` multivector targets, `HYBRID RERANK` materializes `colbert` MaxSim vector.
 - Schema-first `USING` resolution before embedding; fail-closed `QQL-VECTOR-KIND` when kind is unknown offline.
 - `SHARD '<key>'` on CLEAR PAYLOAD, DELETE VECTOR, UPDATE … VECTOR, and UPDATE … PAYLOAD (AST + plan + REST/gRPC).
@@ -31,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CROSS RERANK no longer falls back to payload `text` when a different FIELD is requested.
 - SDK `compile()` no longer mislabels DROP INDEX as `drop_collection` or SHOW SHARD KEYS as `show_collection`.
 - gRPC mutation envelopes carry real server `time` from `PointsOperationResponse`.
+- Binding structure parity: `PyStmt::to_dict` in `pyqql` updated to use `serde_json::to_value` before `pythonize` for 100% dictionary alignment with `to_json()`.
 - CLI table mode renders CROSS_RERANK results.
 - REST/edge reject bare CrossRerank routes; client-side path is required.
 

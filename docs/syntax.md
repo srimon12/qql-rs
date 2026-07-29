@@ -538,6 +538,9 @@ SHOW COLLECTION docs;
 -- Count with optional filter
 COUNT FROM docs WHERE status = 'active';
 
+-- Count with exact match option
+COUNT FROM docs WHERE status = 'active' WITH (exact = true);
+
 -- Count with shard routing
 COUNT FROM sec10k WHERE tenant_id = 'honeywell' SHARD 'honeywell';
 ```

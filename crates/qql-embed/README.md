@@ -12,12 +12,15 @@ No Qdrant I/O, no HTTP client, no transport code. Used by `qql-runtime`
 ```rust
 pub trait Embedder: Send + Sync {
     async fn embed_dense(&self, text: &str, model: &str) -> Result<Vec<f32>>;
-    async fn embed_sparse(&self, text: &str) -> Result<SparseVector>;
+    async fn embed_sparse(&self, text: &str, model: &str) -> Result<SparseVector>;
     /// Dense embedding — batch API, grouped by model.
     async fn embed_dense_batch(&self, texts: &[String], model: &str) -> Result<Vec<Vec<f32>>>;
     /// Multivector (ColBERT-style). Default returns QQL-EMBEDDING-MULTI.
     async fn embed_multi(&self, text: &str, model: &str) -> Result<Vec<Vec<f32>>>;
     async fn embed_multi_batch(&self, texts: &[String], model: &str) -> Result<Vec<Vec<Vec<f32>>>>;
+    /// Single-pass joint embeddings (dense + sparse + multi in one pass for BGE-M3).
+    async fn embed_joint(&self, text: &str, model: &str) -> Result<JointEmbeddingOutput>;
+    async fn embed_joint_batch(&self, texts: &[String], model: &str) -> Result<Vec<JointEmbeddingOutput>>;
 }
 ```
 

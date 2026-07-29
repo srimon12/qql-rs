@@ -130,7 +130,6 @@ These types preserve semantic distinctions that JSON shape inference cannot reco
 | `mutation` | Upsert, Delete, Scroll, ClearPayload, DeleteVector, UpdateVector, UpdatePayload |
 | `query` | Query expressions, prefetch, formula, search params |
 | `filter` | Filter expressions: comparison, range, match, geo, nested, has_id, has_vector |
-| `embedding` | Embedding job extraction for embedder dispatch |
 
 ## Features
 
