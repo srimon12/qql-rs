@@ -34,29 +34,25 @@ Create a GitHub Actions environment named `release`, restrict its deployment
 policy to tags matching `v*`, and add:
 
 - `CRATES_IO_TOKEN` for the crates.io publishing account;
-- `NPM_TOKEN` for the first npm publication.
+- `NPM_TOKEN` only for the first npm publication (optional after OIDC is wired).
 
-The first npm release needs a short-lived granular access token because npm
-trusted publishing can only be attached after a package exists. Create a token
-with package read/write access, permission to bypass 2FA for CI, and the
-shortest practical expiration. Store it in the `release` GitHub environment.
-After the first successful npm release creates every root and platform package,
-configure npm trusted publishing for `srimon12/qql-rs`, workflow `release.yml`,
-environment `release`, then remove `NPM_TOKEN`.
+### npm Trusted Publishing (required after first publish)
 
-Configure PyPI trusted publishers for both `pyqql` and `pyqql-edge`:
+npm Trusted Publishing is **per package**. Configuring only the meta packages
+is not enough — every platform package also needs its own Trusted Publisher.
 
-- owner/repository: `srimon12/qql-rs`;
-- workflow: `release.yml`;
-- environment: `release`.
+For **each** of the packages listed below, on npmjs.com → Package → Settings →
+Trusted Publisher, set **exactly**:
 
-For projects that do not exist on PyPI yet, create pending trusted publishers
-before pushing the first tag. Create one pending publisher for `pyqql` and a
-second for `pyqql-edge`; PyPI will create each project on its first successful
-OIDC publication, so no PyPI API token is required.
+| Field | Value |
+|---|---|
+| Organization or user | `srimon12` |
+| Repository | `qql-rs` |
+| Workflow filename | `release.yml` (filename only, including extension) |
+| Environment name | `release` |
+| Allowed actions | `npm publish` |
 
-The npm account must own the root package names and every generated platform
-package name:
+Packages that must each have a Trusted Publisher:
 
 ```text
 @veristamp/nqql
@@ -70,6 +66,44 @@ package name:
 @veristamp/nqql-edge-win32-x64-msvc
 qql-wasm
 ```
+
+The first npm release still needs a short-lived granular access token because
+npm can only attach Trusted Publishing after a package exists. Create a token
+with package read/write access, permission to bypass 2FA for CI, and the
+shortest practical expiration. Store it in the `release` GitHub environment for
+that first publish only. After every package exists and Trusted Publishers are
+configured, remove `NPM_TOKEN` — the release workflow authenticates via OIDC
+(`id-token: write`) and does not use `NODE_AUTH_TOKEN`.
+
+**CI requirements for OIDC** (enforced in `release.yml`):
+
+- Node.js ≥ 22.14 (workflow uses Node 24 for publish jobs)
+- npm CLI ≥ 11.5.1 (`npm install -g npm@latest` before publish)
+- Job permission `id-token: write`
+- GitHub-hosted runners only (self-hosted is not supported by npm OIDC)
+- Do **not** point `actions/setup-node` at a token-backed `registry-url` for
+  publish jobs; an empty `_authToken` in `.npmrc` blocks OIDC and yields
+  `ENEEDAUTH`
+
+### PyPI Trusted Publishing
+
+Configure PyPI trusted publishers for both packages. The release workflow uses
+separate GitHub environments:
+
+| Package | GitHub environment |
+|---|---|
+| `pyqql` | `release-pyqql` |
+| `pyqql-edge` | `release-pyqql-edge` |
+
+For each pending/active publisher on PyPI:
+
+- owner/repository: `srimon12/qql-rs`
+- workflow: `release.yml`
+- environment: match the table above
+
+For projects that do not exist on PyPI yet, create pending trusted publishers
+before pushing the first tag. PyPI creates each project on its first successful
+OIDC publication, so no PyPI API token is required.
 
 Do not create the first tag until all package names and publishing identities
 have been verified.

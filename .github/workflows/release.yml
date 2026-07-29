@@ -500,9 +500,37 @@ jobs:
       contents: read
       id-token: write
     steps:
+      # npm Trusted Publishing (OIDC) requires npm CLI >= 11.5.1 and
+      # Node >= 22.14. Node 22.13.x ships npm 10.x, which never attempts
+      # OIDC and fails with ENEEDAUTH. Use Node 24 + pin-upgrade npm.
       - uses: actions/setup-node@v7
         with:
-          node-version: "22.13.1"
+          node-version: "24"
+          package-manager-cache: false
+
+      - name: Ensure npm supports OIDC trusted publishing
+        run: |
+          set -euo pipefail
+          npm install -g npm@latest
+          npm --version
+          node -e '
+            const [maj, min, pat] = require("child_process")
+              .execSync("npm --version", { encoding: "utf8" })
+              .trim()
+              .split(".")
+              .map(Number);
+            const ok =
+              maj > 11 ||
+              (maj === 11 && min > 5) ||
+              (maj === 11 && min === 5 && pat >= 1);
+            if (!ok) {
+              console.error(
+                `npm ${maj}.${min}.${pat} is too old for Trusted Publishing; need >= 11.5.1`
+              );
+              process.exit(1);
+            }
+            console.log(`npm ${maj}.${min}.${pat} supports Trusted Publishing`);
+          '
 
       - uses: actions/download-artifact@v8
         with:
@@ -515,6 +543,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          # Do not write a token-based .npmrc. Empty NODE_AUTH_TOKEN from
+          # setup-node registry-url blocks OIDC and yields ENEEDAUTH.
+          # Trusted Publishing exchanges the GitHub OIDC id-token at publish time.
+          unset NODE_AUTH_TOKEN || true
           rm -f ~/.npmrc /home/runner/work/_temp/.npmrc 2>/dev/null || true
 
           publish_if_missing() {
@@ -531,7 +564,13 @@ jobs:
             local tmpdir
             tmpdir="$(mktemp -d)"
             tar -xzf "$package" -C "$tmpdir"
-            if npm publish "$tmpdir/package" --access public --provenance --registry https://registry.npmjs.org --ignore-scripts; then
+            # --provenance is automatic under Trusted Publishing; keep it
+            # explicit so re-runs remain auditable.
+            if npm publish "$tmpdir/package" \
+              --access public \
+              --provenance \
+              --registry https://registry.npmjs.org \
+              --ignore-scripts; then
               rm -rf "$tmpdir"
               return 0
             else
@@ -540,9 +579,9 @@ jobs:
             fi
           }
 
-          # Publish platform packages first.
-          # One failure must NOT prevent the remaining packages or the
-          # meta package from being published.
+          # Platform packages must publish before the meta packages that list
+          # them as optionalDependencies. Fail the job if any package fails so
+          # a half-published release cannot look successful.
           echo "=== Publishing platform packages ==="
           shopt -s nullglob
           platform_packages=(
@@ -552,47 +591,51 @@ jobs:
           )
           shopt -u nullglob
 
-          failed_platforms=()
+          if [[ ${#platform_packages[@]} -eq 0 ]]; then
+            echo "::error::No platform package tarballs found under dist/"
+            ls -la dist || true
+            exit 1
+          fi
+
+          failed=()
           for package in "${platform_packages[@]}"; do
             if publish_if_missing "$package"; then
               echo "  OK: $package"
             else
-              echo "  FAILED: $package (continuing)"
-              failed_platforms+=("$package")
+              echo "  FAILED: $package"
+              failed+=("$package")
             fi
-            sleep 8
+            sleep 5
           done
 
-          # Always attempt to publish the meta packages regardless of
-          # platform package failures.
           echo "=== Publishing meta packages ==="
-          meta_failures=0
           shopt -s nullglob
+          # Exact meta tarball names produced by `npm pack` for the scoped roots.
           meta_packages=(
-            dist/*nqql-${VERSION}.tgz
-            dist/*nqql-edge-${VERSION}.tgz
+            "dist/veristamp-nqql-${VERSION}.tgz"
+            "dist/veristamp-nqql-edge-${VERSION}.tgz"
           )
           shopt -u nullglob
 
           for meta in "${meta_packages[@]}"; do
+            if [[ ! -f "$meta" ]]; then
+              echo "::error::Expected meta package missing: $meta"
+              failed+=("$meta")
+              continue
+            fi
             if publish_if_missing "$meta"; then
               echo "  OK: $meta"
             else
               echo "  FAILED: $meta"
-              meta_failures=$((meta_failures + 1))
+              failed+=("$meta")
             fi
           done
 
-          if [[ ${#failed_platforms[@]} -gt 0 ]]; then
-            echo ""
-            echo "::warning::Some platform packages failed to publish:"
-            for pkg in "${failed_platforms[@]}"; do
-              echo "::warning::  - $pkg"
+          if [[ ${#failed[@]} -gt 0 ]]; then
+            echo "::error::npm publish failed for ${#failed[@]} package(s):"
+            for pkg in "${failed[@]}"; do
+              echo "::error::  - $pkg"
             done
-          fi
-
-          if [[ $meta_failures -gt 0 ]]; then
-            echo "::error::Meta package(s) failed to publish!"
             exit 1
           fi
 
@@ -608,7 +651,32 @@ jobs:
     steps:
       - uses: actions/setup-node@v7
         with:
-          node-version: "22.13.1"
+          node-version: "24"
+          package-manager-cache: false
+
+      - name: Ensure npm supports OIDC trusted publishing
+        run: |
+          set -euo pipefail
+          npm install -g npm@latest
+          npm --version
+          node -e '
+            const [maj, min, pat] = require("child_process")
+              .execSync("npm --version", { encoding: "utf8" })
+              .trim()
+              .split(".")
+              .map(Number);
+            const ok =
+              maj > 11 ||
+              (maj === 11 && min > 5) ||
+              (maj === 11 && min === 5 && pat >= 1);
+            if (!ok) {
+              console.error(
+                `npm ${maj}.${min}.${pat} is too old for Trusted Publishing; need >= 11.5.1`
+              );
+              process.exit(1);
+            }
+            console.log(`npm ${maj}.${min}.${pat} supports Trusted Publishing`);
+          '
 
       - uses: actions/download-artifact@v8
         with:
@@ -619,6 +687,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          unset NODE_AUTH_TOKEN || true
           rm -f ~/.npmrc /home/runner/work/_temp/.npmrc 2>/dev/null || true
           package="$(find dist -maxdepth 1 -name '*.tgz' -print -quit)"
           [[ -n "$package" ]] || {
@@ -634,7 +703,11 @@ jobs:
           else
             tmpdir="$(mktemp -d)"
             tar -xzf "$package" -C "$tmpdir"
-            npm publish "$tmpdir/package" --access public --provenance --registry https://registry.npmjs.org --ignore-scripts
+            npm publish "$tmpdir/package" \
+              --access public \
+              --provenance \
+              --registry https://registry.npmjs.org \
+              --ignore-scripts
             rm -rf "$tmpdir"
           fi
 
