@@ -24,14 +24,7 @@ impl<'a> AstLowerer<'a> {
         self.parse_string().map(Some)
     }
 
-    #[allow(dead_code)]
-    pub fn parse_optional_vector_name(&mut self) -> Result<Option<String>, QqlError> {
-        if self.peek()?.kind != TokenKind::Vector {
-            return Ok(None);
-        }
-        self.advance()?;
-        self.parse_identifier().map(Some)
-    }
+
 
     pub fn parse_embedding_options(&mut self) -> Result<Option<EmbeddingSpec>, QqlError> {
         if self.peek()?.kind != TokenKind::Using {

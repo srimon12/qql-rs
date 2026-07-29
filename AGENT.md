@@ -55,7 +55,7 @@ Canonical plan is `PlannedOperation` (transport-neutral). `Route { method, path,
 
 * **`qql-core`**: The parser, lexer, typed AST (`QueryExpr` enum, `FilterExpr`, `ComparisonOp`, etc.), AST transforms (`inject_filter`), and explain formatting. Performs NO network or file I/O. Has NO knowledge of Qdrant endpoints, REST JSON shapes, or transport protocols. Features: `default = []`, `serde`, `json`, `std`. Uses owned `String` types throughout — no lifetime parameters on input.
 
-* **`qql-plan`**: Transport-neutral lowering layer. Contains the fallible planner `plan()` returning `PlannedOperation`, typed filter/query/mutation/DDL/embedding types (`PlanPointId`, `PlanVectorValue`, `PlanQueryInput`), and `to_rest_route()` for the REST projection. `Route` and `RequestBody` are REST-specific. Depends ONLY on `qql-core`. No networking, no tokio, no reqwest.
+* **`qql-plan`**: Transport-neutral lowering layer. Contains the fallible planner `plan()` returning `PlannedOperation`, typed filter/query/mutation/DDL types (`PlanPointId`, `PlanVectorValue`, `PlanQueryInput`), and `to_rest_route()` for the **optional** REST projection. Also provides `BatchKey` + `statement_batch_key()` + `PlannedOperation::batch_key()` for executor sharing (Rust + WASM). `Route` and `RequestBody` are REST-specific. Depends ONLY on `qql-core`. No networking, no tokio, no reqwest.
 
 * **`qql-embed`**: Shared embedding layer. `Embedder` trait (`embed_dense` / `embed_sparse` / `embed_multi`), local sparse BM25, `resolve_query_vector_kinds` (schema topology → dense/sparse/multi flags), and `resolve_embeddings` (TEXT → Dense | Sparse | MultiDense). Unknown `USING` kinds fail closed (`QQL-VECTOR-KIND`). No Qdrant I/O. Used by runtime (`HttpEmbedder`), edge (`FastEmbedder`), and wasm (fetch/JS adapters).
 
@@ -84,6 +84,9 @@ The following old abstractions have been permanently removed — do NOT reintrod
 - `QqlError::syntax()` — replaced by `QqlError::parse(code, message, span)`
 - `executor/ddl.rs` — DDL now flows through `qql_plan::plan` → REST projection / gRPC route
 - `CompiledQuery` / `offline.rs` — eliminated; `routing::route()` is a compatibility wrapper around `plan()` + `to_rest_route()`
+- `parser/syntax.rs` (pest grammar runtime) — removed from production runtime; pest lives only as a CI contract checker via `qql-grammar-gen`
+- `qql-plan/src/embedding.rs` (embedding job extraction) — removed; embeddings are solely owned by `qql-embed`
+- `CollectionSchema` (client.rs) — removed duplicate; backend schema is the only source
 
 ### Current QueryExpr Variants (12 total)
 
@@ -110,16 +113,16 @@ pub trait QdrantOps: Send + Sync {
     async fn list_collections(&self) -> Result<Vec<String>, QqlError>;
     async fn collection_exists(&self, name: &str) -> Result<bool, QqlError>;
     async fn get_collection_info(&self, name: &str) -> Result<CollectionInfo, QqlError>;
-    async fn create_collection(&self, req: CreateCollectionReq) -> Result<(), QqlError>;
-    async fn update_collection(&self, req: serde_json::Value) -> Result<(), QqlError>;
+    async fn create_collection(&self, collection_name: &str, req: &qql_plan::CreateCollectionRequest) -> Result<(), QqlError>;
+    async fn update_collection(&self, collection_name: &str, req: &qql_plan::UpdateCollectionRequest) -> Result<(), QqlError>;
     async fn delete_collection(&self, name: &str) -> Result<(), QqlError>;
-    async fn create_field_index(&self, req: CreateFieldIndexReq) -> Result<(), QqlError>;
+    async fn create_field_index(&self, collection_name: &str, req: &qql_plan::CreateIndexRequest) -> Result<(), QqlError>;
     async fn delete_field_index(&self, collection_name: &str, field_name: &str) -> Result<(), QqlError>;
 
-    // DML via REST route projection
-    async fn execute_route(&self, route: Route) -> Result<serde_json::Value, QqlError>;
+    // Execution via PlannedOperation IR
+    async fn execute_planned(&self, op: &qql_plan::PlannedOperation) -> Result<serde_json::Value, QqlError>;
 
-    // Batch methods (added after original 9)
+    // Batch methods
     async fn execute_query_batch(&self, collection: &str, batch: &QueryBatchRequest) -> Result<Vec<serde_json::Value>, QqlError>;
     async fn execute_update_batch(&self, collection: &str, batch: &UpdateBatchRequest) -> Result<Vec<serde_json::Value>, QqlError>;
 }
@@ -208,6 +211,10 @@ pub fn inject_filter(
 Recursively injects into QueryStmt (including all CTEs and prefetches), Scroll, Count, Delete,
 UpdatePayload, and Upsert (when `operator == Eq` and `field != "id"`, injects into point
 payloads). Callers must convert their string operators before calling.
+
+**Fail-closed**: Returns a validation error (`QQL-VALIDATION-FILTER-INJECT`) for unsupported
+statement types (DDL, SHOW, UpdateVector, non-Eq Upsert). Unlike earlier versions that
+silently no-oped, this prevents accidental policy bypass.
 
 ---
 
