@@ -26,15 +26,27 @@ pub fn lower_filter(filter: &FilterExpr) -> FilterExpression {
 }
 
 pub fn top_level_filter(filter: &FilterExpr) -> FilterExpression {
+    top_level_filter_with_shard(filter, None)
+}
+
+pub fn top_level_filter_with_shard(
+    filter: &FilterExpr,
+    shard_key: Option<&str>,
+) -> FilterExpression {
     let f = lower_filter(filter);
     match f {
         FilterExpression::Single(clause) => FilterExpression::Compound(FilterCompound {
             must: vec![*clause],
             must_not: Vec::new(),
             should: Vec::new(),
-            shard_key: None,
+            shard_key: shard_key.map(|s| s.to_string()),
         }),
-        other => other,
+        FilterExpression::Compound(mut compound) => {
+            if compound.shard_key.is_none() {
+                compound.shard_key = shard_key.map(|s| s.to_string());
+            }
+            FilterExpression::Compound(compound)
+        }
     }
 }
 

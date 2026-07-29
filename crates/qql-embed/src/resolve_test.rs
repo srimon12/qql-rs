@@ -41,7 +41,7 @@ impl Embedder for MockEmbedder {
         Ok(vec![1.0, 2.0, 3.0])
     }
 
-    async fn embed_sparse(&self, _text: &str) -> Result<SparseVector, QqlError> {
+    async fn embed_sparse(&self, _text: &str, _model: &str) -> Result<SparseVector, QqlError> {
         Ok(SparseVector {
             indices: vec![1],
             values: vec![1.0],
@@ -261,31 +261,13 @@ async fn as_multi_query_calls_embed_multi() {
 }
 
 #[tokio::test]
-async fn sparse_model_is_rejected() {
-    let mut stmt = Stmt::Upsert(Box::new(UpsertStmt {
-        collection: "docs".into(),
-        points: vec![UpsertPoint {
-            id: PointId::Number(1),
-            vectors: None,
-            payload: vec![("text".into(), qql_core::ast::Value::Str("hello".into()))],
-        }],
-        embedding: None,
-        embed: vec![qql_core::ast::EmbedDirective {
-            source_field: "text".into(),
-            target_vector: "sparse".into(),
-            kind: qql_core::ast::EmbedKind::Sparse {
-                model: Some("other".into()),
-            },
-        }],
-        shard_key: None,
-    }));
+async fn sparse_model_is_accepted() {
+    let mut stmt = Parser::parse(
+        "UPSERT INTO docs VALUES {id: 1, text: 'hello'} USING SPARSE MODEL 'splade';",
+    )
+    .unwrap();
     let mock = MockEmbedder::default();
-    let err = resolve_embeddings(&mut stmt, &mock).await.unwrap_err();
-    assert!(
-        err.message.to_ascii_lowercase().contains("sparse model"),
-        "expected sparse model rejection, got: {}",
-        err
-    );
+    resolve_embeddings(&mut stmt, &mock).await.unwrap();
 }
 
 #[tokio::test]

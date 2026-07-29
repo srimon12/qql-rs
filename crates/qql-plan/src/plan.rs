@@ -426,13 +426,13 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
             let filter = count
                 .filter
                 .as_ref()
-                .map(|f| crate::filter::top_level_filter(f));
+                .map(|f| crate::filter::top_level_filter_with_shard(f, count.shard_key.as_deref()));
             Ok(PlannedOperation::Count {
                 collection,
                 request: CountRequest {
                     filter,
                     shard_key: count.shard_key.clone(),
-                    exact: None,
+                    exact: count.exact,
                 },
             })
         }

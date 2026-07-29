@@ -72,7 +72,8 @@ impl PyStmt {
     }
 
     fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let val = serde_json::to_value(&self.inner).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+        let val =
+            serde_json::to_value(&self.inner).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
         pythonize::pythonize(py, &val).map_err(|e| PySyntaxError::new_err(e.to_string()))
     }
 }

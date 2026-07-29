@@ -130,15 +130,9 @@ async fn resolve_upsert_embeddings(
                     }
                 }
                 EmbedKind::Sparse { model } => {
-                    if model.is_some() {
-                        return Err(QqlError::execution(
-                                "QQL-EMBEDDING",
-                                "sparse model selection is not supported by the local BM25 sparse embedder; omit MODEL on EMBED SPARSE",
-                                None,
-                            ));
-                    }
+                    let m = model.as_deref().unwrap_or("default");
                     for (idx, text) in targets {
-                        let s_vec = embedder.embed_sparse(&text).await?;
+                        let s_vec = embedder.embed_sparse(&text, m).await?;
                         let point = &mut upsert.points[idx];
                         add_point_vector(
                             point,
@@ -524,7 +518,7 @@ fn apply_expr_embeddings<'a>(
                         None,
                     )
                 })?;
-                let s_vec = embedder.embed_sparse(text).await?;
+                let s_vec = embedder.embed_sparse(text, "default").await?;
                 let d_vec_name = dense_vector.as_deref().unwrap_or(DENSE_VECTOR_NAME);
                 let s_vec_name = sparse_vector.as_deref().unwrap_or(SPARSE_VECTOR_NAME);
 
@@ -652,7 +646,7 @@ async fn apply_input(
         QueryInput::Text { text, model } => {
             let model_name = model.as_deref().unwrap_or(default_model);
             if target.kind == VectorKind::Sparse {
-                let s_vec = embedder.embed_sparse(text).await?;
+                let s_vec = embedder.embed_sparse(text, model_name).await?;
                 *input = QueryInput::Vector(VectorValue::Sparse {
                     indices: s_vec.indices,
                     values: s_vec.values,
@@ -768,13 +762,7 @@ async fn resolve_single_embedding_spec(
             vector,
             field,
         } => {
-            if model.is_some() {
-                return Err(QqlError::execution(
-                    "QQL-EMBEDDING",
-                    "sparse model selection is not supported by the local BM25 sparse embedder; omit MODEL",
-                    None,
-                ));
-            }
+            let model_name = model.as_deref().unwrap_or("default");
             let vector_name = vector.as_deref().unwrap_or(SPARSE_VECTOR_NAME);
             check_and_insert_vector_name(seen_vectors, vector_name)?;
 
@@ -782,7 +770,7 @@ async fn resolve_single_embedding_spec(
             validate_non_empty_targets(upsert, &targets, "SPARSE", field.as_deref())?;
 
             for (idx, text) in targets {
-                let sparse_vec = embedder.embed_sparse(&text).await?;
+                let sparse_vec = embedder.embed_sparse(&text, model_name).await?;
                 add_point_vector(
                     &mut upsert.points[idx],
                     vector_name,
@@ -801,14 +789,8 @@ async fn resolve_single_embedding_spec(
             sparse_vector,
             sparse_field,
         } => {
-            if sparse_model.is_some() {
-                return Err(QqlError::execution(
-                    "QQL-EMBEDDING",
-                    "sparse model selection is not supported by the local BM25 sparse embedder; omit SPARSE MODEL",
-                    None,
-                ));
-            }
             let d_model = dense_model.as_deref().unwrap_or("default");
+            let s_model = sparse_model.as_deref().unwrap_or("default");
             let d_vec_name = dense_vector.as_deref().unwrap_or(DENSE_VECTOR_NAME);
             let s_vec_name = sparse_vector.as_deref().unwrap_or(SPARSE_VECTOR_NAME);
 
@@ -830,7 +812,7 @@ async fn resolve_single_embedding_spec(
             }
 
             for (idx, text) in sparse_targets {
-                let sparse_vec = embedder.embed_sparse(&text).await?;
+                let sparse_vec = embedder.embed_sparse(&text, s_model).await?;
                 let point = &mut upsert.points[idx];
                 add_point_vector(
                     point,

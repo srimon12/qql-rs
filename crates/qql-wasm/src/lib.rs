@@ -1437,7 +1437,7 @@ impl Embedder for Client {
         })
     }
 
-    async fn embed_sparse(&self, text: &str) -> Result<SparseVector, QqlError> {
+    async fn embed_sparse(&self, text: &str, _model: &str) -> Result<SparseVector, QqlError> {
         Ok(qql_embed::sparse::build_query_default(text))
     }
 }

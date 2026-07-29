@@ -1,4 +1,4 @@
-use crate::filter::{lower_filter, top_level_filter};
+use crate::filter::{lower_filter, top_level_filter, top_level_filter_with_shard};
 use crate::types::*;
 use qql_core::ast::{
     FusionMethod, OrderDirection, PrefetchSource, QueryExpr, QueryInput, QueryStmt, VectorValue,
@@ -385,7 +385,10 @@ pub fn lower_query_request(query: &QueryStmt) -> Result<QueryRequest, QqlError> 
         query: query_variant,
         using,
         prefetch,
-        filter: query.filter.as_ref().map(|f| top_level_filter(f)),
+        filter: query
+            .filter
+            .as_ref()
+            .map(|f| top_level_filter_with_shard(f, query.shard_key.as_deref())),
         params: query.params.as_ref().and_then(lower_search_params),
         score_threshold: query.score_threshold,
         with_payload,
@@ -421,7 +424,10 @@ pub fn lower_query_groups_request(query: &QueryStmt) -> Result<QueryGroupsReques
         query: query_variant,
         using,
         prefetch,
-        filter: query.filter.as_ref().map(|f| top_level_filter(f)),
+        filter: query
+            .filter
+            .as_ref()
+            .map(|f| top_level_filter_with_shard(f, query.shard_key.as_deref())),
         params: query.params.as_ref().and_then(lower_search_params),
         score_threshold: query.score_threshold,
         with_payload,
@@ -463,7 +469,10 @@ fn build_query_with_prefetch(
                     mmr: None,
                 })),
                 using: dense_vector.clone(),
-                filter: query.filter.as_ref().map(|f| top_level_filter(f)),
+                filter: query
+                    .filter
+                    .as_ref()
+                    .map(|f| top_level_filter_with_shard(f, query.shard_key.as_deref())),
                 params: query.params.as_ref().and_then(lower_search_params),
                 score_threshold: query.score_threshold,
                 limit: Some(candidates),
@@ -476,7 +485,10 @@ fn build_query_with_prefetch(
                     mmr: None,
                 })),
                 using: sparse_vector.clone(),
-                filter: query.filter.as_ref().map(|f| top_level_filter(f)),
+                filter: query
+                    .filter
+                    .as_ref()
+                    .map(|f| top_level_filter_with_shard(f, query.shard_key.as_deref())),
                 params: query.params.as_ref().and_then(lower_search_params),
                 score_threshold: query.score_threshold,
                 limit: Some(candidates),

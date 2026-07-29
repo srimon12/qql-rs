@@ -68,6 +68,7 @@ impl<'a> AstLowerer<'a> {
             collection,
             filter,
             shard_key,
+            exact: None,
         })))
     }
 }

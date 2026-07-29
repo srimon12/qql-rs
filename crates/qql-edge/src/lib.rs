@@ -291,7 +291,7 @@ mod tests {
             Ok(vec![1.0, 0.0, 0.0])
         }
 
-        async fn embed_sparse(&self, _text: &str) -> Result<SparseVector, QqlError> {
+        async fn embed_sparse(&self, _text: &str, _model: &str) -> Result<SparseVector, QqlError> {
             Ok(SparseVector {
                 indices: vec![1],
                 values: vec![1.0],

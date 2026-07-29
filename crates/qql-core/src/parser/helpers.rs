@@ -24,8 +24,6 @@ impl<'a> AstLowerer<'a> {
         self.parse_string().map(Some)
     }
 
-
-
     pub fn parse_embedding_options(&mut self) -> Result<Option<EmbeddingSpec>, QqlError> {
         if self.peek()?.kind != TokenKind::Using {
             return Ok(None);

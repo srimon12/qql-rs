@@ -634,6 +634,7 @@ pub struct CountStmt {
     pub collection: QueryCollection,
     pub filter: Option<Box<FilterExpr>>,
     pub shard_key: Option<String>,
+    pub exact: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

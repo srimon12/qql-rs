@@ -22,7 +22,51 @@ impl<T> EmbedderBound for T {}
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait Embedder: EmbedderBound {
     async fn embed_dense(&self, text: &str, model: &str) -> Result<Vec<f32>, QqlError>;
-    async fn embed_sparse(&self, text: &str) -> Result<SparseVector, QqlError>;
+
+    /// Sparse embedding (BM25 or Splade / BGE-M3 sparse model).
+    /// Default implementation uses local BM25 hashing.
+    async fn embed_sparse(&self, text: &str, _model: &str) -> Result<SparseVector, QqlError> {
+        Ok(sparse::build_query_default(text))
+    }
+
+    /// Batch sparse embedding. Default loops [`embed_sparse`].
+    async fn embed_sparse_batch(
+        &self,
+        texts: &[String],
+        model: &str,
+    ) -> Result<Vec<SparseVector>, QqlError> {
+        let mut results = Vec::with_capacity(texts.len());
+        for text in texts {
+            results.push(self.embed_sparse(text, model).await?);
+        }
+        Ok(results)
+    }
+
+    /// Single-pass joint multi-modal / BGE-M3 embedding (dense + sparse + multi-vectors).
+    /// Default implementation delegates to separate dense, sparse, and multi calls.
+    async fn embed_joint(&self, text: &str, model: &str) -> Result<JointEmbeddingOutput, QqlError> {
+        let dense = self.embed_dense(text, model).await.ok();
+        let sparse = self.embed_sparse(text, model).await.ok();
+        let multi = self.embed_multi(text, model).await.ok();
+        Ok(JointEmbeddingOutput {
+            dense,
+            sparse,
+            multi,
+        })
+    }
+
+    /// Batch joint embedding. Default loops [`embed_joint`].
+    async fn embed_joint_batch(
+        &self,
+        texts: &[String],
+        model: &str,
+    ) -> Result<Vec<JointEmbeddingOutput>, QqlError> {
+        let mut results = Vec::with_capacity(texts.len());
+        for text in texts {
+            results.push(self.embed_joint(text, model).await?);
+        }
+        Ok(results)
+    }
 
     /// Dense output dimension when it is known without running inference.
     /// Custom and remote embedders may return `None`.
@@ -171,10 +215,19 @@ pub fn cross_rerank_unsupported_error(model: &str) -> QqlError {
     )
 }
 
+/// Output container for single-pass joint multi-modal / BGE-M3 embedding.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct JointEmbeddingOutput {
+    pub dense: Option<Vec<f32>>,
+    pub sparse: Option<SparseVector>,
+    pub multi: Option<Vec<Vec<f32>>>,
+}
+
 /// Local sparse-only helper (no dense model).
 pub struct SparseEmbedder;
 
 impl SparseEmbedder {
+    /// Generate a local BM25-style sparse vector representation for `text`.
     pub fn embed_sparse(text: &str) -> SparseVector {
         sparse::build_query_default(text)
     }

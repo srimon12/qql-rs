@@ -666,7 +666,7 @@ impl Embedder for HttpEmbedder {
         self.embed_batch_with_model(texts, model).await
     }
 
-    async fn embed_sparse(&self, text: &str) -> Result<SparseVector, QqlError> {
+    async fn embed_sparse(&self, text: &str, _model: &str) -> Result<SparseVector, QqlError> {
         Ok(qql_embed::sparse::build_query_default(text))
     }
 
