@@ -713,10 +713,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            route
-                .query
-                .iter()
-                .any(|(k, v)| k == "timeout" && v == "30"),
+            route.query.iter().any(|(k, v)| k == "timeout" && v == "30"),
             "timeout query param missing: {:?}",
             route.query
         );

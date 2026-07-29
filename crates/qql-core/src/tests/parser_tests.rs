@@ -309,10 +309,9 @@ fn max_selectivity_requires_acorn() {
 #[test]
 fn params_timeout_and_consistency() {
     use crate::ast::ReadConsistency;
-    let s = Parser::parse(
-        "QUERY 'x' FROM docs PARAMS (timeout = 30, consistency = majority) LIMIT 5;",
-    )
-    .unwrap();
+    let s =
+        Parser::parse("QUERY 'x' FROM docs PARAMS (timeout = 30, consistency = majority) LIMIT 5;")
+            .unwrap();
     let Stmt::Query(q) = s else { panic!() };
     let p = q.params.as_ref().unwrap();
     assert_eq!(p.timeout, Some(30));

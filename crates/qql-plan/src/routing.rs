@@ -27,13 +27,21 @@ pub enum RequestBody {
 
 impl RequestBody {
     pub fn to_json(&self) -> Result<serde_json::Value, qql_core::error::QqlError> {
-        serde_json::to_value(self).map_err(|err| {
-            qql_core::error::QqlError::validation(
-                "QQL-PLAN-SERIALIZE",
-                alloc::format!("failed to serialize request body: {err}"),
-                None,
-            )
-        })
+        // DDL create/update use OpenAPI wire projection (flattened params,
+        // nested quantization). Other bodies serialize as plan IR.
+        let value = match self {
+            RequestBody::CreateCollection(req) => crate::ddl::create_collection_rest_body(req),
+            RequestBody::UpdateCollection(req) => crate::ddl::update_collection_rest_body(req),
+            RequestBody::CreateIndex(req) => crate::ddl::create_index_rest_body(req),
+            other => serde_json::to_value(other).map_err(|err| {
+                qql_core::error::QqlError::validation(
+                    "QQL-PLAN-SERIALIZE",
+                    alloc::format!("failed to serialize request body: {err}"),
+                    None,
+                )
+            })?,
+        };
+        Ok(value)
     }
 }
 

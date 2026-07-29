@@ -15,10 +15,12 @@ missing** features that already ship.
 | Multivector / ColBERT (`AS MULTI`, MaxSim `RERANK`) | **Opt-in** `multi_model` / multi HTTP |
 | CLIP `IMAGE` + CLIP text dense | **Opt-in** `image_model` (local **paths** only) |
 | Cross-encoder `CROSS RERANK` | **Opt-in** `reranker_model` / `rerank_endpoint` |
-| `GROUP BY` / query groups | **No** — `QQL-EDGE-QUERY-GROUPS`; use remote Qdrant |
-| `SHARD`, `ALTER COLLECTION`, ACORN | **No** — hard error; use remote Qdrant |
+| `GROUP BY` / query groups | **No** — `QQL-EDGE-UNSUPPORTED-GROUP-BY`; use remote Qdrant |
+| `SHARD`, `ALTER COLLECTION`, ACORN | **No** — `QQL-EDGE-UNSUPPORTED-*` catalog; use remote Qdrant |
 | Batch query/update | Fan-out only (not one native batch RPC) |
 | `PARAMS (timeout / consistency)` | No-op / N/A on single-node edge |
+
+Edge unsupported codes are stable (see `crates/qql-edge/README.md`).
 
 `qql doctor` prints which hosts are loaded: dense / multi / image / cross_rerank.
 
@@ -30,7 +32,7 @@ missing** features that already ship.
 |---|---|---|
 | Grouped pagination | **No OFFSET with `GROUP BY`**. Qdrant OpenAPI `QueryGroupsRequest` has no `offset`. Fail-closed: `QQL-PLAN-GROUP-OFFSET`. | Use `LIMIT` only on groups. Do not invent group cursor syntax until Qdrant supports it. |
 | MMR | **Dense nearest only**. Sparse → `QQL-PLAN-MMR-SPARSE`. | Do not use MMR on sparse/recommend. |
-| Edge `GROUP BY` | Rejected offline (`QQL-EDGE-QUERY-GROUPS`). | Same QQL works on remote Qdrant; offline: filter + `LIMIT`. |
+| Edge `GROUP BY` | Rejected offline (`QQL-EDGE-UNSUPPORTED-GROUP-BY`). | Same QQL works on remote Qdrant; offline: filter + `LIMIT`. |
 
 ---
 

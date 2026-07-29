@@ -3,6 +3,7 @@
 pub mod config_builder;
 pub mod conversions;
 pub mod query_converter;
+pub mod unsupported;
 pub mod vector_parser;
 
 use std::collections::HashMap;
@@ -25,6 +26,7 @@ use conversions::{
 use query_converter::{
     convert_order_by_interface, convert_query_request, convert_with_payload, convert_with_vector,
 };
+use unsupported::{reject_collection_sharding, reject_shard_key, EdgeUnsupported};
 use vector_parser::ToEdgeVector;
 
 use qql::backend::{CollectionInfo, CollectionSchema};
@@ -183,13 +185,7 @@ impl EdgeQdrant {
                     "time": 0.0,
                 }))
             }
-            Some(RequestBody::QueryGroups(_)) => Err(QqlError::execution(
-                "QQL-EDGE-QUERY-GROUPS",
-                "GROUP BY / query groups is not supported offline (qdrant-edge has no \
-                 /points/query/groups). Use remote Qdrant for grouped search, or rewrite as \
-                 filter + LIMIT (no GROUP BY).",
-                None,
-            )),
+            Some(RequestBody::QueryGroups(_)) => Err(EdgeUnsupported::GroupBy.error()),
             Some(RequestBody::Points(req)) => {
                 reject_shard(req.shard_key.as_deref())?;
                 let collection = extract_collection(&route.path)?;
@@ -498,11 +494,7 @@ impl EdgeQdrant {
                     req.shard_keys.as_deref(),
                 )?;
                 if req.params.is_some() {
-                    return Err(QqlError::execution(
-                        "QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS",
-                        "collection PARAMS are not supported by qql-edge; configure edge storage through LocalExecutorOptions",
-                        None,
-                    ));
+                    return Err(EdgeUnsupported::CollectionParams.error());
                 }
                 let create_req = CreateCollectionReq {
                     collection_name: extract_collection(&route.path)?,
@@ -525,11 +517,7 @@ impl EdgeQdrant {
                 self.create_collection(create_req).await?;
                 Ok(mutation_response())
             }
-            Some(RequestBody::UpdateCollection(_)) => Err(QqlError::execution(
-                "QQL-EDGE-UNSUPPORTED-ALTER",
-                "ALTER COLLECTION is not supported by qql-edge",
-                None,
-            )),
+            Some(RequestBody::UpdateCollection(_)) => Err(EdgeUnsupported::AlterCollection.error()),
             Some(RequestBody::CreateIndex(req)) => {
                 let ft = req.field_schema.as_str();
                 let create_index = CreateFieldIndexReq {
@@ -559,16 +547,8 @@ impl EdgeQdrant {
                 self.create_field_index(create_index).await?;
                 Ok(mutation_response())
             }
-            Some(RequestBody::CreateShardKey(_req)) => Err(QqlError::execution(
-                "QQL-EDGE-UNSUPPORTED-SHARD-KEY",
-                "create_shard_key not supported in edge mode (single node)",
-                None,
-            )),
-            Some(RequestBody::DropShardKey(_req)) => Err(QqlError::execution(
-                "QQL-EDGE-UNSUPPORTED-SHARD-KEY",
-                "drop_shard_key not supported in edge mode (single node)",
-                None,
-            )),
+            Some(RequestBody::CreateShardKey(_req)) => Err(EdgeUnsupported::ShardKeyDdl.error()),
+            Some(RequestBody::DropShardKey(_req)) => Err(EdgeUnsupported::ShardKeyDdl.error()),
             Some(RequestBody::Count(req)) => {
                 reject_shard(req.shard_key.as_deref())?;
                 let collection = extract_collection(&route.path)?;
@@ -662,15 +642,15 @@ impl EdgeQdrant {
                         "time": 0.0,
                     }))
                 }
-                _ => Err(QqlError::execution(
-                    "QQL-EDGE-UNSUPPORTED-ROUTE",
-                    format!(
-                        "unsupported route: {} {}",
-                        route.method.as_str(),
-                        route.path
-                    ),
-                    None,
-                )),
+                _ => {
+                    let mut err = EdgeUnsupported::Route {
+                        path_hint: "this HTTP route",
+                    }
+                    .error();
+                    err = err
+                        .with_field("route", format!("{} {}", route.method.as_str(), route.path));
+                    Err(err)
+                }
             },
         }
     }
@@ -806,11 +786,7 @@ impl QdrantOps for EdgeQdrant {
     }
 
     async fn update_collection(&self, _req: serde_json::Value) -> Result<(), QqlError> {
-        Err(QqlError::execution(
-            "QQL-EDGE-UNSUPPORTED-UPDATE",
-            "update_collection not supported in edge mode",
-            None,
-        ))
+        Err(EdgeUnsupported::AlterCollection.error())
     }
 
     async fn delete_collection(&self, name: &str) -> Result<(), QqlError> {
@@ -1032,29 +1008,7 @@ fn extract_collection(path: &str) -> Result<String, QqlError> {
 }
 
 fn reject_shard(shard_key: Option<&str>) -> Result<(), QqlError> {
-    if shard_key.is_some() {
-        return Err(QqlError::execution(
-            "QQL-EDGE-UNSUPPORTED-SHARD",
-            "SHARD routing is available only with clustered Qdrant backends, not qql-edge",
-            None,
-        ));
-    }
-    Ok(())
-}
-
-fn reject_collection_sharding(
-    shard_number: Option<u64>,
-    sharding_method: Option<&str>,
-    shard_keys: Option<&[String]>,
-) -> Result<(), QqlError> {
-    if shard_number.is_some() || sharding_method.is_some() || shard_keys.is_some() {
-        return Err(QqlError::execution(
-            "QQL-EDGE-UNSUPPORTED-SHARD",
-            "collection sharding options are available only with clustered Qdrant backends, not qql-edge",
-            None,
-        ));
-    }
-    Ok(())
+    reject_shard_key(shard_key)
 }
 
 fn edge_vectors_json(vectors: &[qql::backend::VectorSpec]) -> Result<Value, QqlError> {

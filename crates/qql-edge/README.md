@@ -116,12 +116,26 @@ Intel Mac users should disable default features and use `http-embedding` or
   and text inputs that cannot be embedded locally are rejected
 - Multivector + `CROSS RERANK` work only when the matching models are opted in
 - `IMAGE` expects local filesystem paths (no remote URL fetch)
-- Shard keys are not supported in edge mode (no sharding in qdrant-edge)
-- `GROUP BY`, `ALTER COLLECTION`, collection `PARAMS`, ACORN, and shard DDL
-  are rejected explicitly — use remote Qdrant for those
-- Recommendation's `average_vector` strategy is not available in qdrant-edge;
-  use `best_score` or `sum_scores`
 - Query/update “batch” is fan-out, not a single native batch RPC
+
+### Unsupported product surface (stable codes)
+
+Offline rejects use a fixed catalog (`backend/unsupported.rs`). Messages include
+**why** and **use remote Qdrant** when applicable:
+
+| Code | Feature |
+|---|---|
+| `QQL-EDGE-UNSUPPORTED-GROUP-BY` | `GROUP BY` / query groups |
+| `QQL-EDGE-UNSUPPORTED-SHARD` | `SHARD` routing or collection sharding options |
+| `QQL-EDGE-UNSUPPORTED-SHARD-KEY` | `CREATE`/`DROP SHARD KEY` |
+| `QQL-EDGE-UNSUPPORTED-ALTER` | `ALTER COLLECTION` |
+| `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | collection `WITH PARAMS` (replication, …) |
+| `QQL-EDGE-UNSUPPORTED-ACORN` | `PARAMS (acorn = …)` |
+| `QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY` | `RECOMMEND STRATEGY average_vector` (use `best_score` / `sum_scores`) |
+| `QQL-EDGE-UNSUPPORTED-POINT-REF` | point-id query inputs without embedded vectors |
+| `QQL-EDGE-UNSUPPORTED-ROUTE` | unmapped REST projection |
+
+Operational errors (`QQL-EDGE-SPAWN`, filter convert, etc.) stay separate.
 
 ## Verification
 

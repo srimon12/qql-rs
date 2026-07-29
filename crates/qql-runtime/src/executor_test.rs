@@ -293,12 +293,11 @@ async fn test_create_collection_with_hnsw_and_quantization() {
     assert_eq!(hnsw["m"], 32);
     assert_eq!(hnsw["ef_construct"], 100);
 
-    // Check Quantization config serialization
+    // OpenAPI QuantizationConfig: { "scalar": { "type": "int8", … } }
     let quant = &req["quantization_config"];
-    assert_eq!(quant["disabled"], false);
-    assert_eq!(quant["quantization_config"]["type"], "scalar");
-    assert_eq!(quant["quantization_config"]["always_ram"], true);
-    assert_eq!(quant["quantization_config"]["quantile"], 0.99);
+    assert_eq!(quant["scalar"]["type"], "int8");
+    assert_eq!(quant["scalar"]["always_ram"], true);
+    assert_eq!(quant["scalar"]["quantile"], 0.99);
 }
 
 #[tokio::test]
@@ -339,10 +338,10 @@ async fn test_create_collection_with_optimizers_and_params() {
     assert_eq!(opt["default_segment_number"], 4);
     assert_eq!(opt["max_optimization_threads"], 2);
 
-    // Check Params serialization
-    let params = &req["params"];
-    assert_eq!(params["replication_factor"], 2);
-    assert_eq!(params["on_disk_payload"], true);
+    // OpenAPI CreateCollection: replication_factor / on_disk_payload are top-level
+    assert_eq!(req["replication_factor"], 2);
+    assert_eq!(req["on_disk_payload"], true);
+    assert!(req.get("params").is_none());
 }
 
 #[tokio::test]
@@ -369,10 +368,9 @@ async fn test_create_collection_with_named_vectors_hnsw_quant() {
     let hnsw = &v_conf["hnsw_config"];
     assert_eq!(hnsw["m"], 16);
 
-    // Check per-vector Quantization
+    // OpenAPI nested binary quantization on vector params
     let quant = &v_conf["quantization_config"];
-    assert_eq!(quant["type"], "binary");
-    assert_eq!(quant["always_ram"], false);
+    assert_eq!(quant["binary"]["always_ram"], false);
 }
 
 #[tokio::test]
@@ -392,14 +390,9 @@ async fn test_alter_collection_quantization_and_hnsw() {
     let req = route.body_json().unwrap();
 
     assert_eq!(req["hnsw_config"]["ef_construct"], 150);
-    assert_eq!(
-        req["quantization_config"]["quantization_config"]["type"],
-        "product"
-    );
-    assert_eq!(
-        req["quantization_config"]["quantization_config"]["always_ram"],
-        true
-    );
+    // OpenAPI: product quantization nested under `product`
+    assert_eq!(req["quantization_config"]["product"]["always_ram"], true);
+    assert_eq!(req["quantization_config"]["product"]["compression"], "x4");
 }
 
 #[tokio::test]
@@ -417,7 +410,8 @@ async fn test_alter_collection_disable_quantization() {
     let route = qql_plan::plan::to_rest_route(&op);
     let req = route.body_json().unwrap();
 
-    assert_eq!(req["quantization_config"]["disabled"], true);
+    // OpenAPI QuantizationConfigDiff disabled variant is the string "Disabled"
+    assert_eq!(req["quantization_config"], "Disabled");
 }
 
 #[tokio::test]

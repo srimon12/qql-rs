@@ -704,11 +704,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Route {
         } => {
             // OpenAPI: timeout + consistency are query params on POST …/points/query
             let mut query = Vec::new();
-            crate::query::push_read_opts(
-                &mut query,
-                request.timeout,
-                request.consistency.as_ref(),
-            );
+            crate::query::push_read_opts(&mut query, request.timeout, request.consistency.as_ref());
             Route {
                 method: Method::Post,
                 path: format!("/collections/{collection}/points/query"),
@@ -721,11 +717,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Route {
             request,
         } => {
             let mut query = Vec::new();
-            crate::query::push_read_opts(
-                &mut query,
-                request.timeout,
-                request.consistency.as_ref(),
-            );
+            crate::query::push_read_opts(&mut query, request.timeout, request.consistency.as_ref());
             Route {
                 method: Method::Post,
                 path: format!("/collections/{collection}/points/query/groups"),

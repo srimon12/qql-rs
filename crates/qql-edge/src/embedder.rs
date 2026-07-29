@@ -845,8 +845,9 @@ impl Embedder for FastEmbedder {
         let Some(ref multi) = self.multi else {
             return Err(qql_embed::multi_unsupported_error(model));
         };
-        if !self.accepts_multi_model(model)
-            && !(model.is_empty() || model.eq_ignore_ascii_case("default"))
+        if !(self.accepts_multi_model(model)
+            || model.is_empty()
+            || model.eq_ignore_ascii_case("default"))
         {
             return Err(err(format!(
                 "local multi embedder is locked to '{}' ({}); cannot satisfy MODEL '{model}'",
@@ -878,8 +879,9 @@ impl Embedder for FastEmbedder {
         let Some(ref image) = self.image else {
             return Err(qql_embed::image_unsupported_error(model));
         };
-        if !self.accepts_image_model(model)
-            && !(model.is_empty() || model.eq_ignore_ascii_case("default"))
+        if !(self.accepts_image_model(model)
+            || model.is_empty()
+            || model.eq_ignore_ascii_case("default"))
         {
             return Err(err(format!(
                 "local image embedder is locked to '{}' ({}); cannot satisfy MODEL '{model}'",
@@ -917,8 +919,9 @@ impl Embedder for FastEmbedder {
         let Some(ref image) = self.image else {
             return Err(qql_embed::image_unsupported_error(model));
         };
-        if !self.accepts_image_model(model)
-            && !(model.is_empty() || model.eq_ignore_ascii_case("default"))
+        if !(self.accepts_image_model(model)
+            || model.is_empty()
+            || model.eq_ignore_ascii_case("default"))
         {
             return Err(err(format!(
                 "local image embedder is locked to '{}' ({}); cannot satisfy MODEL '{model}'",
@@ -955,8 +958,9 @@ impl Embedder for FastEmbedder {
         let Some(ref reranker) = self.reranker else {
             return Err(qql_embed::cross_rerank_unsupported_error(model));
         };
-        if !self.accepts_reranker_model(model)
-            && !(model.is_empty() || model.eq_ignore_ascii_case("default"))
+        if !(self.accepts_reranker_model(model)
+            || model.is_empty()
+            || model.eq_ignore_ascii_case("default"))
         {
             return Err(err(format!(
                 "local reranker is locked to '{}' ({}); cannot satisfy MODEL '{model}'",

@@ -23,7 +23,7 @@ fn json_bool(value: &serde_json::Value, key: &str) -> Option<bool> {
     value.get(key).and_then(serde_json::Value::as_bool)
 }
 
-fn hnsw_config(value: &serde_json::Value) -> qdrant::HnswConfigDiff {
+pub(crate) fn hnsw_config(value: &serde_json::Value) -> qdrant::HnswConfigDiff {
     qdrant::HnswConfigDiff {
         m: json_u64(value, "m"),
         ef_construct: json_u64(value, "ef_construct"),
@@ -35,7 +35,7 @@ fn hnsw_config(value: &serde_json::Value) -> qdrant::HnswConfigDiff {
     }
 }
 
-fn optimizers_config(value: &serde_json::Value) -> qdrant::OptimizersConfigDiff {
+pub(crate) fn optimizers_config(value: &serde_json::Value) -> qdrant::OptimizersConfigDiff {
     let max_optimization_threads = value
         .get("max_optimization_threads")
         .and_then(|threads| {
@@ -178,24 +178,36 @@ fn turbo_quantization(value: &serde_json::Value) -> qdrant::TurboQuantization {
     }
 }
 
-fn quantization_config(value: &serde_json::Value) -> Option<qdrant::QuantizationConfig> {
+pub(crate) fn quantization_config(value: &serde_json::Value) -> Option<qdrant::QuantizationConfig> {
     let value = value.get("quantization_config").unwrap_or(value);
-    let value = value
-        .get("config")
-        .or_else(|| value.get("scalar"))
-        .or_else(|| value.get("binary"))
-        .or_else(|| value.get("product"))
-        .or_else(|| value.get("turbo"))
-        .unwrap_or(value);
-    let kind = value.get("type").and_then(serde_json::Value::as_str)?;
-    let quantization = match kind.to_ascii_lowercase().as_str() {
-        "scalar" => qdrant::quantization_config::Quantization::Scalar(scalar_quantization(value)),
-        "product" => {
-            qdrant::quantization_config::Quantization::Product(product_quantization(value))
+    // Accept nested OpenAPI `{ "scalar": {…} }` and flat IR `{ "type": "scalar", … }`.
+    let (kind, payload) = if let Some(obj) = value.as_object() {
+        if let Some(inner) = obj.get("scalar") {
+            ("scalar", inner)
+        } else if let Some(inner) = obj.get("product") {
+            ("product", inner)
+        } else if let Some(inner) = obj.get("binary") {
+            ("binary", inner)
+        } else if let Some(inner) = obj.get("turbo").or_else(|| obj.get("turboquant")) {
+            ("turbo", inner)
+        } else {
+            let kind = obj.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            (kind, value)
         }
-        "binary" => qdrant::quantization_config::Quantization::Binary(binary_quantization(value)),
+    } else {
+        return None;
+    };
+    let quantization = match kind.to_ascii_lowercase().as_str() {
+        // Nested OpenAPI uses ScalarType `int8`; flat IR uses `scalar`.
+        "scalar" | "int8" => {
+            qdrant::quantization_config::Quantization::Scalar(scalar_quantization(payload))
+        }
+        "product" => {
+            qdrant::quantization_config::Quantization::Product(product_quantization(payload))
+        }
+        "binary" => qdrant::quantization_config::Quantization::Binary(binary_quantization(payload)),
         "turbo" | "turboquant" => {
-            qdrant::quantization_config::Quantization::Turboquant(turbo_quantization(value))
+            qdrant::quantization_config::Quantization::Turboquant(turbo_quantization(payload))
         }
         _ => return None,
     };
@@ -205,7 +217,9 @@ fn quantization_config(value: &serde_json::Value) -> Option<qdrant::Quantization
 }
 
 fn quantization_config_diff(value: &serde_json::Value) -> Option<qdrant::QuantizationConfigDiff> {
-    if value.get("disabled").and_then(serde_json::Value::as_bool) == Some(true) {
+    if value.as_str() == Some("Disabled")
+        || value.get("disabled").and_then(serde_json::Value::as_bool) == Some(true)
+    {
         return Some(qdrant::QuantizationConfigDiff {
             quantization: Some(qdrant::quantization_config_diff::Quantization::Disabled(
                 qdrant::Disabled {},
@@ -247,7 +261,7 @@ fn distance(value: &serde_json::Value) -> i32 {
     }
 }
 
-fn vector_params(value: &serde_json::Value) -> qdrant::VectorParams {
+pub(crate) fn vector_params(value: &serde_json::Value) -> qdrant::VectorParams {
     qdrant::VectorParams {
         size: json_u64(value, "size").unwrap_or(0),
         distance: distance(value),
@@ -296,7 +310,7 @@ fn vectors_config_diff(value: &serde_json::Value) -> Option<qdrant::VectorsConfi
     })
 }
 
-fn sparse_vector_params(value: &serde_json::Value) -> qdrant::SparseVectorParams {
+pub(crate) fn sparse_vector_params(value: &serde_json::Value) -> qdrant::SparseVectorParams {
     let index = value.get("index").map(|idx| {
         let datatype = idx
             .get("datatype")
@@ -325,7 +339,7 @@ fn sparse_vector_params(value: &serde_json::Value) -> qdrant::SparseVectorParams
     }
 }
 
-fn collection_params_diff(value: &serde_json::Value) -> qdrant::CollectionParamsDiff {
+pub(crate) fn collection_params_diff(value: &serde_json::Value) -> qdrant::CollectionParamsDiff {
     qdrant::CollectionParamsDiff {
         replication_factor: json_u64(value, "replication_factor").map(|n| n as u32),
         write_consistency_factor: json_u64(value, "write_consistency_factor").map(|n| n as u32),
@@ -1209,7 +1223,7 @@ fn update_result_to_json(r: qdrant::UpdateResult) -> serde_json::Value {
     })
 }
 
-fn to_query_points(
+pub(crate) fn to_query_points(
     req: &qql_plan::types::QueryRequest,
     collection: &str,
 ) -> Result<qdrant::QueryPoints, QqlError> {
@@ -1403,7 +1417,7 @@ fn to_query_variant(qv: &qql_plan::types::QueryVariant) -> Result<qdrant::Query,
     })
 }
 
-fn to_vector_input(input: &PlanQueryInput) -> qdrant::VectorInput {
+pub(crate) fn to_vector_input(input: &PlanQueryInput) -> qdrant::VectorInput {
     use qdrant::vector_input::Variant;
     match input {
         PlanQueryInput::Point(id) => qdrant::VectorInput {
@@ -2646,6 +2660,17 @@ fn multivec_comp_to_str(c: i32) -> &'static str {
         0 => "MaxSim",
         _ => "MaxSim",
     }
+}
+
+/// Test-only re-exports for REST/gRPC parity contract tests.
+#[cfg(test)]
+pub(crate) mod test_api {
+    pub(crate) use super::{to_query_points, to_vector_input};
+}
+
+#[cfg(test)]
+pub(crate) mod test_api_ddl {
+    pub(crate) use super::vector_params;
 }
 
 #[cfg(test)]

@@ -198,65 +198,28 @@ impl QdrantOps for RestQdrant {
     }
 
     async fn create_collection(&self, req: CreateCollectionReq) -> Result<(), QqlError> {
-        let mut body = serde_json::Map::new();
-        if let Some(v) = &req.vectors_config {
-            body.insert("vectors".into(), v.clone());
-        }
-        if let Some(v) = &req.sparse_vectors_config {
-            body.insert("sparse_vectors".into(), v.clone());
-        }
-        if let Some(v) = req.shard_number {
-            body.insert("shard_number".into(), serde_json::Value::from(v));
-        }
-        if let Some(ref v) = req.sharding_method {
-            body.insert(
-                "sharding_method".into(),
-                serde_json::Value::String(v.clone()),
-            );
-        }
-        if let Some(ref v) = req.shard_keys {
-            body.insert(
-                "shard_keys".into(),
-                serde_json::Value::Array(
-                    v.iter()
-                        .map(|s| serde_json::Value::String(s.clone()))
-                        .collect(),
-                ),
-            );
-        }
-        // replication_factor and write_consistency_factor are sent as top-level
-        // fields in Qdrant REST API (not nested inside params)
-        if let Some(ref p) = req.params {
-            if let Some(rf) = p.get("replication_factor").and_then(|v| v.as_u64()) {
-                body.insert("replication_factor".into(), serde_json::Value::from(rf));
-            }
-            if let Some(wc) = p.get("write_consistency_factor").and_then(|v| v.as_u64()) {
-                body.insert(
-                    "write_consistency_factor".into(),
-                    serde_json::Value::from(wc),
-                );
-            }
-            if let Some(od) = p.get("on_disk_payload").and_then(|v| v.as_bool()) {
-                body.insert("on_disk_payload".into(), serde_json::Value::Bool(od));
-            }
-        }
-        // hnsw_config, optimizers_config, quantization_config
-        if let Some(ref v) = req.hnsw_config {
-            body.insert("hnsw_config".into(), v.clone());
-        }
-        if let Some(ref v) = req.optimizers_config {
-            body.insert("optimizers_config".into(), v.clone());
-        }
-        if let Some(ref v) = req.quantization_config {
-            body.insert("quantization_config".into(), v.clone());
-        }
-        self.call::<Value>(
-            Method::PUT,
-            &format!("/collections/{}", req.collection_name),
-            Some(Value::Object(body)),
-        )
-        .await?;
-        Ok(())
+        // Reuse plan OpenAPI projection so implicit upsert creates match
+        // execute_planned CREATE COLLECTION wire shape.
+        let plan_req = qql_plan::types::CreateCollectionRequest {
+            vectors: req
+                .vectors_config
+                .as_ref()
+                .and_then(|v| v.as_object().cloned()),
+            sparse_vectors: req
+                .sparse_vectors_config
+                .as_ref()
+                .and_then(|v| v.as_object().cloned()),
+            hnsw_config: req.hnsw_config.clone(),
+            optimizers_config: req.optimizers_config.clone(),
+            params: req.params.clone(),
+            quantization_config: req.quantization_config.clone(),
+            vectors_config: None,
+            shard_number: req.shard_number,
+            sharding_method: req.sharding_method.clone(),
+            shard_keys: req.shard_keys.clone(),
+        };
+        self.create_collection_planned(&req.collection_name, &plan_req)
+            .await
     }
 
     async fn update_collection(&self, req: serde_json::Value) -> Result<(), QqlError> {
@@ -286,15 +249,17 @@ impl QdrantOps for RestQdrant {
     }
 
     async fn create_field_index(&self, req: CreateFieldIndexReq) -> Result<(), QqlError> {
-        let mut body = serde_json::json!({
-            "field_name": req.field,
-            "field_schema": req.field_type,
-        });
-        if let Some(obj) = body.as_object_mut() {
-            for (k, v) in req.options {
-                obj.insert(k, crate::executor::helpers::value_to_json(&v));
-            }
+        // OpenAPI: options live under field_schema when present.
+        let mut extra = serde_json::Map::new();
+        for (k, v) in req.options {
+            extra.insert(k, crate::executor::helpers::value_to_json(&v));
         }
+        let plan_req = qql_plan::types::CreateIndexRequest {
+            field_name: req.field,
+            field_schema: req.field_type,
+            extra,
+        };
+        let body = qql_plan::ddl::create_index_rest_body(&plan_req);
         self.call::<Value>(
             Method::PUT,
             &format!("/collections/{}/index", req.collection_name),
@@ -345,8 +310,64 @@ impl QdrantOps for RestQdrant {
 }
 
 impl RestQdrant {
+    /// CREATE COLLECTION with OpenAPI body + optional deferred params / shard keys
+    /// (parity with gRPC multi-step create).
+    async fn create_collection_planned(
+        &self,
+        collection: &str,
+        req: &qql_plan::types::CreateCollectionRequest,
+    ) -> Result<(), QqlError> {
+        let body = qql_plan::ddl::create_collection_rest_body(req);
+        self.call::<Value>(
+            Method::PUT,
+            &format!("/collections/{collection}"),
+            Some(body),
+        )
+        .await?;
+
+        if let Some(params_patch) = qql_plan::ddl::create_collection_deferred_params_rest(req) {
+            self.call::<Value>(
+                Method::PATCH,
+                &format!("/collections/{collection}"),
+                Some(params_patch),
+            )
+            .await?;
+        }
+
+        if let Some(keys) = &req.shard_keys {
+            for key in keys {
+                let shard_body = serde_json::json!({
+                    "shard_key": key,
+                });
+                self.call::<Value>(
+                    Method::PUT,
+                    &format!("/collections/{collection}/shards"),
+                    Some(shard_body),
+                )
+                .await?;
+            }
+        }
+        Ok(())
+    }
+
     /// Low-level HTTP dispatch from a pre-built Route.
     async fn execute_http(&self, route: qql_plan::routing::Route) -> Result<Value, QqlError> {
+        // Multi-step CREATE COLLECTION (params fan-out + shard keys) like gRPC.
+        if let Some(qql_plan::routing::RequestBody::CreateCollection(req)) = &route.body {
+            let collection = route
+                .path
+                .trim_start_matches("/collections/")
+                .split('/')
+                .next()
+                .unwrap_or("");
+            self.create_collection_planned(collection, req).await?;
+            return Ok(serde_json::json!({
+                "result": true,
+                "status": "ok",
+                "time": 0.0,
+            }));
+        }
+
         let method = match route.method {
             PlanMethod::Get => Method::GET,
             PlanMethod::Post => Method::POST,
@@ -370,8 +391,9 @@ impl RestQdrant {
         if let Some(ref key) = self.api_key {
             builder = builder.header("api-key", key);
         }
-        if let Some(body) = route.body.as_ref() {
-            builder = builder.json(body);
+        // Prefer OpenAPI wire JSON (DDL create/update custom projection).
+        if let Some(body) = route.try_body_json()? {
+            builder = builder.json(&body);
         }
         let resp = builder.send().await.map_err(|e| {
             QqlError::transport("QQL-TRANSPORT", format!("REST request failed: {e}"), None)

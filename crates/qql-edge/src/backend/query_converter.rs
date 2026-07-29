@@ -120,9 +120,10 @@ fn convert_query(query: &QueryVariant, using: Option<&str>) -> Result<ScoringQue
                     using: using.map(str::to_string),
                 }),
                 "average_vector" => {
-                    return Err(edge_error(
-                        "recommendation strategy 'average_vector' is not supported in edge mode",
-                    ));
+                    return Err(
+                        crate::backend::unsupported::EdgeUnsupported::RecommendAverageVector
+                            .error(),
+                    );
                 }
                 other => {
                     return Err(edge_error(format!(
@@ -279,9 +280,9 @@ fn plan_input_to_vector_internal(input: &PlanQueryInput) -> Result<VectorInterna
         PlanQueryInput::Vector(PlanVectorValue::Dense(_)) => {
             Err(edge_error("dense query vector cannot be empty"))
         }
-        PlanQueryInput::Point(_) => Err(edge_error(
-            "point-reference queries are not supported in edge mode; provide a vector",
-        )),
+        PlanQueryInput::Point(_) => {
+            Err(crate::backend::unsupported::EdgeUnsupported::PointReferenceQuery.error())
+        }
         PlanQueryInput::Document { .. } => Err(edge_error(
             "text input reached edge execution without client-side embedding",
         )),
@@ -464,9 +465,7 @@ pub(crate) fn convert_search_params(
     params: &SearchParamsRequest,
 ) -> Result<SearchParams, QqlError> {
     if params.acorn.is_some() {
-        return Err(edge_error(
-            "ACORN search parameters are not supported in edge mode",
-        ));
+        return Err(crate::backend::unsupported::EdgeUnsupported::Acorn.error());
     }
     Ok(SearchParams {
         hnsw_ef: params
@@ -561,11 +560,7 @@ fn limit_error(error: std::num::TryFromIntError) -> QqlError {
 }
 
 fn unsupported_shard() -> QqlError {
-    QqlError::execution(
-        "QQL-EDGE-UNSUPPORTED-SHARD",
-        "SHARD routing is available only with clustered Qdrant backends, not qql-edge",
-        None,
-    )
+    crate::backend::unsupported::EdgeUnsupported::ShardRouting.error()
 }
 
 fn edge_error(message: impl Into<String>) -> QqlError {

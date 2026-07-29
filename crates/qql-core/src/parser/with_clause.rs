@@ -263,9 +263,7 @@ fn read_consistency(value: Value, key: &str) -> Result<ReadConsistency, QqlError
         },
         _ => Err(QqlError::validation(
             "QQL-VALIDATION-CONSISTENCY",
-            alloc::format!(
-                "{key} must be a non-negative integer factor, or majority|quorum|all"
-            ),
+            alloc::format!("{key} must be a non-negative integer factor, or majority|quorum|all"),
             None,
         )),
     }
