@@ -681,6 +681,15 @@ pub struct UpdateVectorStmt {
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct DeletePayloadStmt {
+    pub collection: String,
+    pub keys: Vec<String>,
+    pub selector: PointSelector,
+    pub shard_key: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct UpdatePayloadStmt {
     pub collection: String,
     pub selector: PointSelector,
@@ -706,6 +715,7 @@ pub enum Stmt {
     ShowShardKeys(String),
     Delete(Box<DeleteStmt>),
     ClearPayload(Box<ClearPayloadStmt>),
+    DeletePayload(Box<DeletePayloadStmt>),
     DeleteVector(Box<DeleteVectorStmt>),
     UpdateVector(Box<UpdateVectorStmt>),
     UpdatePayload(Box<UpdatePayloadStmt>),
@@ -758,16 +768,19 @@ impl serde::Serialize for Stmt {
             Stmt::ClearPayload(s) => {
                 serializer.serialize_newtype_variant("Stmt", 14, "ClearPayload", s)
             }
+            Stmt::DeletePayload(s) => {
+                serializer.serialize_newtype_variant("Stmt", 15, "DeletePayload", s)
+            }
             Stmt::DeleteVector(s) => {
-                serializer.serialize_newtype_variant("Stmt", 15, "DeleteVector", s)
+                serializer.serialize_newtype_variant("Stmt", 16, "DeleteVector", s)
             }
             Stmt::UpdateVector(s) => {
-                serializer.serialize_newtype_variant("Stmt", 16, "UpdateVector", s)
+                serializer.serialize_newtype_variant("Stmt", 17, "UpdateVector", s)
             }
             Stmt::UpdatePayload(s) => {
-                serializer.serialize_newtype_variant("Stmt", 17, "UpdatePayload", s)
+                serializer.serialize_newtype_variant("Stmt", 18, "UpdatePayload", s)
             }
-            Stmt::Count(s) => serializer.serialize_newtype_variant("Stmt", 18, "Count", s),
+            Stmt::Count(s) => serializer.serialize_newtype_variant("Stmt", 19, "Count", s),
         }
     }
 }

@@ -5,9 +5,9 @@
 
 use crate::ddl::{lower_alter_collection, lower_create_collection, lower_create_index};
 use crate::mutation::{
-    lower_clear_payload_request, lower_delete_request, lower_delete_vector_request,
-    lower_scroll_request, lower_update_payload_request, lower_update_vector_request,
-    lower_upsert_request,
+    lower_clear_payload_request, lower_delete_payload_request, lower_delete_request,
+    lower_delete_vector_request, lower_scroll_request, lower_update_payload_request,
+    lower_update_vector_request, lower_upsert_request,
 };
 use crate::query::{lower_query_groups_request, lower_query_request};
 use crate::routing::Route;
@@ -57,6 +57,10 @@ pub enum PlannedOperation {
     ClearPayload {
         collection: String,
         request: ClearPayloadRequest,
+    },
+    DeletePayload {
+        collection: String,
+        request: DeletePayloadRequest,
     },
     UpdateVectors {
         collection: String,
@@ -127,6 +131,7 @@ impl PlannedOperation {
             PlannedOperation::Delete { .. } => "DELETE",
             PlannedOperation::UpdatePayload { .. } => "UPDATE_PAYLOAD",
             PlannedOperation::ClearPayload { .. } => "CLEAR_PAYLOAD",
+            PlannedOperation::DeletePayload { .. } => "DELETE_PAYLOAD",
             PlannedOperation::UpdateVectors { .. } => "UPDATE_VECTOR",
             PlannedOperation::DeleteVectors { .. } => "DELETE_VECTOR",
             PlannedOperation::CreateCollection { .. } => "CREATE_COLLECTION",
@@ -158,6 +163,7 @@ impl PlannedOperation {
             PlannedOperation::Delete { .. } => "delete",
             PlannedOperation::UpdatePayload { .. } => "update_payload",
             PlannedOperation::ClearPayload { .. } => "clear_payload",
+            PlannedOperation::DeletePayload { .. } => "delete_payload",
             PlannedOperation::UpdateVectors { .. } => "update_vector",
             PlannedOperation::DeleteVectors { .. } => "delete_vector",
             PlannedOperation::CreateCollection { .. } => "create_collection",
@@ -186,6 +192,7 @@ impl PlannedOperation {
             | PlannedOperation::Delete { collection, .. }
             | PlannedOperation::UpdatePayload { collection, .. }
             | PlannedOperation::ClearPayload { collection, .. }
+            | PlannedOperation::DeletePayload { collection, .. }
             | PlannedOperation::UpdateVectors { collection, .. }
             | PlannedOperation::DeleteVectors { collection, .. }
             | PlannedOperation::CreateCollection { collection, .. }
@@ -210,6 +217,7 @@ impl PlannedOperation {
             | PlannedOperation::Delete { .. }
             | PlannedOperation::UpdatePayload { .. }
             | PlannedOperation::ClearPayload { .. }
+            | PlannedOperation::DeletePayload { .. }
             | PlannedOperation::UpdateVectors { .. }
             | PlannedOperation::DeleteVectors { .. } => BatchFamily::Mutation,
             // Pair scoring is not batchable with plain queries.
@@ -248,6 +256,7 @@ impl PlannedOperation {
             PlannedOperation::Delete { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::UpdatePayload { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::ClearPayload { request, .. } => request.shard_key.as_deref(),
+            PlannedOperation::DeletePayload { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::UpdateVectors { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::DeleteVectors { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::CreateShardKey { request, .. } => Some(request.shard_key.as_str()),
@@ -292,6 +301,7 @@ pub fn statement_batch_key(stmt: &Stmt) -> Option<BatchKey> {
         Stmt::Delete(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
         Stmt::UpdatePayload(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
         Stmt::ClearPayload(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
+        Stmt::DeletePayload(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
         Stmt::UpdateVector(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
         Stmt::DeleteVector(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
         _ => None,
@@ -386,6 +396,10 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
         Stmt::ClearPayload(clear) => Ok(PlannedOperation::ClearPayload {
             collection: clear.collection.clone(),
             request: lower_clear_payload_request(clear),
+        }),
+        Stmt::DeletePayload(del) => Ok(PlannedOperation::DeletePayload {
+            collection: del.collection.clone(),
+            request: lower_delete_payload_request(del),
         }),
         Stmt::DeleteVector(del_vec) => Ok(PlannedOperation::DeleteVectors {
             collection: del_vec.collection.clone(),
@@ -904,6 +918,15 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
         } => Route {
             method: Method::Post,
             path: format!("/collections/{collection}/points/payload/clear"),
+            query: mut_query(request.shard_key.as_deref()),
+            body: body(request),
+        },
+        PlannedOperation::DeletePayload {
+            collection,
+            request,
+        } => Route {
+            method: Method::Post,
+            path: format!("/collections/{collection}/points/payload/delete"),
             query: mut_query(request.shard_key.as_deref()),
             body: body(request),
         },

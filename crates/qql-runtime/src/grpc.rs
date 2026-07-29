@@ -300,6 +300,17 @@ impl GrpcQdrant {
             .map_err(|e| grpc_error("clear_payload", e))
     }
 
+    pub async fn delete_payload(
+        &self,
+        req: qdrant::DeletePayloadPoints,
+    ) -> Result<qdrant::PointsOperationResponse, QqlError> {
+        let mut cl = self.points_client();
+        cl.delete_payload(tonic::Request::new(req))
+            .await
+            .map(|r| r.into_inner())
+            .map_err(|e| grpc_error("delete_payload", e))
+    }
+
     pub async fn delete_vectors(
         &self,
         req: qdrant::DeletePointVectors,

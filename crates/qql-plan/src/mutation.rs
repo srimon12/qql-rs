@@ -2,8 +2,8 @@ use crate::filter::{point_id_req_typed, top_level_filter, value_to_json};
 use crate::query::lower_vector_value;
 use crate::types::*;
 use qql_core::ast::{
-    ClearPayloadStmt, DeleteStmt, DeleteVectorStmt, PointSelector, Stmt, UpdatePayloadStmt,
-    UpdateVectorStmt, UpsertPoint, UpsertStmt,
+    ClearPayloadStmt, DeletePayloadStmt, DeleteStmt, DeleteVectorStmt, PointSelector, Stmt,
+    UpdatePayloadStmt, UpdateVectorStmt, UpsertPoint, UpsertStmt,
 };
 
 pub fn lower_upsert_request(stmt: &UpsertStmt) -> UpsertRequest {
@@ -107,6 +107,29 @@ pub fn lower_clear_payload_request(stmt: &ClearPayloadStmt) -> ClearPayloadReque
             shard_key: stmt.shard_key.clone(),
         },
         PointSelector::Filter(filter) => ClearPayloadRequest {
+            points: None,
+            filter: Some(top_level_filter(filter)),
+            shard_key: stmt.shard_key.clone(),
+        },
+    }
+}
+
+pub fn lower_delete_payload_request(stmt: &DeletePayloadStmt) -> DeletePayloadRequest {
+    match &stmt.selector {
+        PointSelector::Id(id) => DeletePayloadRequest {
+            keys: stmt.keys.clone(),
+            points: Some(vec![point_id_req_typed(id)]),
+            filter: None,
+            shard_key: stmt.shard_key.clone(),
+        },
+        PointSelector::Ids(ids) => DeletePayloadRequest {
+            keys: stmt.keys.clone(),
+            points: Some(ids.iter().map(point_id_req_typed).collect()),
+            filter: None,
+            shard_key: stmt.shard_key.clone(),
+        },
+        PointSelector::Filter(filter) => DeletePayloadRequest {
+            keys: stmt.keys.clone(),
             points: None,
             filter: Some(top_level_filter(filter)),
             shard_key: stmt.shard_key.clone(),

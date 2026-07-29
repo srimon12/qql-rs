@@ -553,7 +553,7 @@ fn convert_filter(filter: Option<&impl serde::Serialize>) -> Result<Option<Filte
         .map_err(|error| edge_error(format!("invalid filter format: {error}")))
 }
 
-fn parse_json_path(path: &str) -> Result<JsonPath, QqlError> {
+pub(crate) fn parse_json_path(path: &str) -> Result<JsonPath, QqlError> {
     serde_json::from_value(serde_json::Value::String(path.to_string()))
         .map_err(|error| edge_error(format!("invalid payload path '{path}': {error}")))
 }

@@ -24,7 +24,7 @@ use conversions::{
     edge_err, from_edge_id, from_edge_record, from_edge_scored_point, to_edge_id, to_edge_ids,
 };
 use query_converter::{
-    convert_order_by_interface, convert_query_request, convert_with_payload, convert_with_vector,
+    convert_order_by_interface, convert_query_request, convert_with_payload, convert_with_vector, parse_json_path,
 };
 use unsupported::{reject_collection_sharding, reject_shard_key, EdgeUnsupported};
 use vector_parser::ToEdgeVector;
@@ -400,6 +400,50 @@ impl EdgeQdrant {
         tokio::task::spawn_blocking(move || shard.update(operation).map_err(edge_err))
             .await
             .map_err(|e| spawn_error("clear_payload", e))??;
+        Ok(mutation_response())
+    }
+
+    async fn execute_edge_delete_payload(
+        &self,
+        collection: &str,
+        req: &qql_plan::types::DeletePayloadRequest,
+    ) -> Result<Value, QqlError> {
+        reject_shard(req.shard_key.as_deref())?;
+        let shard = self.open_shard(collection).await?;
+
+        let points = req
+            .points
+            .as_ref()
+            .map(|pts| to_edge_ids(pts.iter()))
+            .transpose()?;
+        let filter = convert_edge_filter(req.filter.as_ref())?;
+
+        if points.is_none() && filter.is_none() {
+            return Err(QqlError::execution(
+                "QQL-EDGE-DELETE-PAYLOAD-REQUIRES-TARGET",
+                "delete_payload requires point ids or a filter",
+                None,
+            )
+            .with_collection(collection.to_string()));
+        }
+
+        let keys: Vec<qdrant_edge::JsonPath> = req
+            .keys
+            .iter()
+            .map(|k| parse_json_path(k))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let operation = UpdateOperation::PayloadOperation(qdrant_edge::PayloadOps::DeletePayload(
+            qdrant_edge::DeletePayloadOp {
+                keys,
+                points,
+                filter,
+            },
+        ));
+
+        tokio::task::spawn_blocking(move || shard.update(operation).map_err(edge_err))
+            .await
+            .map_err(|e| spawn_error("delete_payload", e))??;
         Ok(mutation_response())
     }
 
@@ -847,6 +891,10 @@ impl QdrantOps for EdgeQdrant {
                 collection,
                 request,
             } => self.execute_edge_clear_payload(collection, request).await,
+            DeletePayload {
+                collection,
+                request,
+            } => self.execute_edge_delete_payload(collection, request).await,
             UpdateVectors {
                 collection,
                 request,

@@ -47,6 +47,8 @@ pub struct FilterCompound {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub should: Vec<FilterClause>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_should: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub shard_key: Option<String>,
 }
 
@@ -627,6 +629,17 @@ pub struct ClearPayloadRequest {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct DeletePayloadRequest {
+    pub keys: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub points: Option<Vec<PlanPointId>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter: Option<FilterExpression>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shard_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct DeleteVectorRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub points: Option<Vec<PlanPointId>>,
@@ -662,6 +675,8 @@ pub struct HnswConfig {
     pub on_disk: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payload_m: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inline_storage: Option<bool>,
 }
 
 /// Segment optimizer configuration for collection creation/update.

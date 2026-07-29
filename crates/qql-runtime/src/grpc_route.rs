@@ -819,6 +819,26 @@ pub async fn execute_planned_grpc(
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("clear_payload: {e}"), None))?;
             Ok(mutation_response_from(resp))
         }
+        PlannedOperation::DeletePayload {
+            collection,
+            request,
+        } => {
+            let selector =
+                points_and_filter_selector(request.points.as_ref(), request.filter.as_ref());
+            let grpc_req = qdrant::DeletePayloadPoints {
+                collection_name: collection.clone(),
+                wait: Some(true),
+                keys: request.keys.clone(),
+                points_selector: selector,
+                shard_key_selector: shard_key_selector(&request.shard_key),
+                ..Default::default()
+            };
+            let resp = client
+                .delete_payload(grpc_req)
+                .await
+                .map_err(|e| QqlError::backend("QQL-GRPC", format!("delete_payload: {e}"), None))?;
+            Ok(mutation_response_from(resp))
+        }
         PlannedOperation::DeleteVectors {
             collection,
             request,

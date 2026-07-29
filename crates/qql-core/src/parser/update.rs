@@ -1,7 +1,7 @@
 use super::AstLowerer;
 use crate::ast::{
-    ClearPayloadStmt, DeleteStmt, DeleteVectorStmt, FilterExpr, PointIdPredicate, PointSelector,
-    Stmt, UpdatePayloadStmt, UpdateVectorStmt,
+    ClearPayloadStmt, DeletePayloadStmt, DeleteStmt, DeleteVectorStmt, FilterExpr,
+    PointIdPredicate, PointSelector, Stmt, UpdatePayloadStmt, UpdateVectorStmt,
 };
 use crate::error::QqlError;
 use crate::token::TokenKind;
@@ -69,6 +69,26 @@ impl<'a> AstLowerer<'a> {
 
     pub fn parse_delete(&mut self) -> Result<Stmt, QqlError> {
         self.expect(TokenKind::Delete)?;
+        if self.peek()?.kind == TokenKind::Payload {
+            self.advance()?; // consume PAYLOAD
+            let mut keys = Vec::new();
+            keys.push(self.parse_identifier()?);
+            while self.peek()?.kind == TokenKind::Comma {
+                self.advance()?;
+                keys.push(self.parse_identifier()?);
+            }
+            self.expect(TokenKind::From)?;
+            let collection = self.parse_identifier()?;
+            self.expect(TokenKind::Where)?;
+            let selector = selector_from_filter(self.parse_filter_expr()?);
+            let shard_key = self.parse_optional_shard_key()?;
+            return Ok(Stmt::DeletePayload(Box::new(DeletePayloadStmt {
+                collection,
+                keys,
+                selector,
+                shard_key,
+            })));
+        }
         // Check if this is DELETE VECTOR or DELETE FROM
         if self.peek()?.kind == TokenKind::Vector {
             self.advance()?; // consume VECTOR

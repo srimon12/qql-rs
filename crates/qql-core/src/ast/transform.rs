@@ -19,6 +19,7 @@ pub fn inject_filter(
         Stmt::Delete(delete) => merge_selector(&mut delete.selector, filter),
         Stmt::Count(count) => merge_filter(&mut count.filter, filter),
         Stmt::ClearPayload(clear) => merge_selector(&mut clear.selector, filter),
+        Stmt::DeletePayload(del) => merge_selector(&mut del.selector, filter),
         Stmt::DeleteVector(del_vec) => merge_selector(&mut del_vec.selector, filter),
         Stmt::UpdatePayload(update) => merge_selector(&mut update.selector, filter),
         Stmt::Upsert(upsert)
@@ -76,6 +77,7 @@ pub fn inject_shard_key(statement: &mut Stmt, shard_key: &str) -> Result<(), Qql
         Stmt::Upsert(upsert) => upsert.shard_key = Some(key),
         Stmt::Delete(delete) => delete.shard_key = Some(key),
         Stmt::ClearPayload(clear) => clear.shard_key = Some(key),
+        Stmt::DeletePayload(del) => del.shard_key = Some(key),
         Stmt::DeleteVector(delete) => delete.shard_key = Some(key),
         Stmt::UpdateVector(update) => update.shard_key = Some(key),
         Stmt::UpdatePayload(update) => update.shard_key = Some(key),
@@ -101,6 +103,7 @@ fn stmt_kind(statement: &Stmt) -> &'static str {
         Stmt::Upsert(_) => "UPSERT",
         Stmt::Delete(_) => "DELETE",
         Stmt::ClearPayload(_) => "CLEAR PAYLOAD",
+        Stmt::DeletePayload(_) => "DELETE PAYLOAD",
         Stmt::DeleteVector(_) => "DELETE VECTOR",
         Stmt::UpdateVector(_) => "UPDATE VECTOR",
         Stmt::UpdatePayload(_) => "UPDATE PAYLOAD",

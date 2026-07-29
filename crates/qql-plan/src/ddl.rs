@@ -243,6 +243,7 @@ pub fn lower_hnsw_config(config: &qql_core::ast::HnswRuntimeConfig) -> HnswConfi
         max_indexing_threads: config.max_indexing_threads,
         on_disk: config.on_disk,
         payload_m: config.payload_m,
+        inline_storage: None,
     }
 }
 
