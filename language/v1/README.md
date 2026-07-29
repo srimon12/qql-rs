@@ -27,6 +27,13 @@ multivector flags), embedding, and other schema-dependent validation live in
 role). Parse still stores untyped `USING name` with `kind: null` until execution
 prep fills roles from the collection schema.
 
+`USING HYBRID [DENSE n] [SPARSE n] [FUSION …]` is accepted on query tails and
+lowers to the same `QueryExpr::Hybrid` AST as front-form `QUERY HYBRID TEXT …`.
+
+Product / implementation gaps (edge limits, remaining UX) live in the workspace
+[`gaps.md`](../../gaps.md) and agent summary
+[`skills/qql-skill/references/qql-gaps.md`](../../skills/qql-skill/references/qql-gaps.md).
+
 ## Generation
 
 After changing `grammar.pest`, regenerate the parser input:

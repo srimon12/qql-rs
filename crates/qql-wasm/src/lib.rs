@@ -257,6 +257,14 @@ pub fn inject_filter(
     to_js_value(&stmt)
 }
 
+/// Inject a shard key for multi-tenant routing (QUERY/SCROLL/COUNT/UPSERT/DELETE + CTEs).
+#[wasm_bindgen(js_name = injectShardKey)]
+pub fn inject_shard_key(query: &str, shard_key: &str) -> Result<JsValue, JsValue> {
+    let mut stmt = Parser::parse(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    ast::inject_shard_key(&mut stmt, shard_key).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    to_js_value(&stmt)
+}
+
 fn parse_comparison_op(op: &str) -> Result<ComparisonOp, JsValue> {
     match op {
         "=" | "==" | "eq" => Ok(ComparisonOp::Eq),
@@ -299,6 +307,13 @@ impl Stmt {
         ast::inject_filter(&mut self.inner, field, cmp, val)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
         Ok(())
+    }
+
+    /// Multi-tenant shard routing: set shard key on this statement (+ nested CTEs).
+    #[wasm_bindgen(js_name = injectShardKey)]
+    pub fn inject_shard_key(&mut self, shard_key: &str) -> Result<(), JsValue> {
+        ast::inject_shard_key(&mut self.inner, shard_key)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     /// Get or set the shard key (QUERY, COUNT, SCROLL, UPSERT, DELETE only).

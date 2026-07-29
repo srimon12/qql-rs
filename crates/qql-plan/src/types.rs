@@ -279,6 +279,12 @@ pub struct QueryRequest {
     pub lookup_from: Option<LookupRequest>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shard_key: Option<String>,
+    /// OpenAPI query param / proto field — not body JSON.
+    #[serde(skip)]
+    pub timeout: Option<u64>,
+    /// OpenAPI query param / proto field — not body JSON.
+    #[serde(skip)]
+    pub consistency: Option<ReadConsistencyParam>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -307,6 +313,42 @@ pub struct QueryGroupsRequest {
     pub lookup_from: Option<LookupRequest>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shard_key: Option<String>,
+    #[serde(skip)]
+    pub timeout: Option<u64>,
+    #[serde(skip)]
+    pub consistency: Option<ReadConsistencyParam>,
+}
+
+/// Wire form of OpenAPI `ReadConsistency` for REST query strings / gRPC.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReadConsistencyParam {
+    Factor(u64),
+    Majority,
+    Quorum,
+    All,
+}
+
+impl ReadConsistencyParam {
+    /// REST query value: integer factor or majority|quorum|all.
+    pub fn to_query_value(&self) -> String {
+        match self {
+            Self::Factor(n) => n.to_string(),
+            Self::Majority => "majority".into(),
+            Self::Quorum => "quorum".into(),
+            Self::All => "all".into(),
+        }
+    }
+}
+
+impl From<&qql_core::ast::ReadConsistency> for ReadConsistencyParam {
+    fn from(value: &qql_core::ast::ReadConsistency) -> Self {
+        match value {
+            qql_core::ast::ReadConsistency::Factor(n) => Self::Factor(*n),
+            qql_core::ast::ReadConsistency::Majority => Self::Majority,
+            qql_core::ast::ReadConsistency::Quorum => Self::Quorum,
+            qql_core::ast::ReadConsistency::All => Self::All,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

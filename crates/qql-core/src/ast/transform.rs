@@ -41,6 +41,50 @@ pub fn inject_filter(
     Ok(())
 }
 
+/// Inject a custom shard key for multi-tenant routing (host-side, no language bind params).
+///
+/// Qdrant accepts `shard_key` on query/mutation bodies (OpenAPI / proto
+/// `ShardKeySelector`). QQL has no `$param` shard syntax — multi-tenant hosts
+/// call this after resolving the tenant id (or set `shard_key` on the AST).
+///
+/// Applies to statements that already carry `shard_key` in the AST:
+/// `QUERY`, `SCROLL`, `COUNT`, `UPSERT`, `DELETE`. Recurses into CTEs and
+/// nested prefetch queries. No-op for DDL and statements without shard routing
+/// (e.g. `CLEAR PAYLOAD`, `UPDATE` today).
+pub fn inject_shard_key(statement: &mut Stmt, shard_key: &str) -> Result<(), QqlError> {
+    if shard_key.is_empty() {
+        return Err(QqlError::validation(
+            "QQL-VALIDATION-SHARD-KEY",
+            "shard key must be a non-empty string",
+            None,
+        ));
+    }
+    let key = shard_key.to_string();
+    match statement {
+        Stmt::Query(query) => inject_query_shard(query, &key),
+        Stmt::Scroll(scroll) => scroll.shard_key = Some(key),
+        Stmt::Count(count) => count.shard_key = Some(key),
+        Stmt::Upsert(upsert) => upsert.shard_key = Some(key),
+        Stmt::Delete(delete) => delete.shard_key = Some(key),
+        _ => {}
+    }
+    Ok(())
+}
+
+fn inject_query_shard(query: &mut QueryStmt, key: &str) {
+    query.shard_key = Some(key.to_string());
+    for cte in &mut query.ctes {
+        inject_query_shard(&mut cte.query, key);
+    }
+    if let Some(prefetches) = expression_prefetch(&mut query.expression) {
+        for prefetch in prefetches {
+            if let PrefetchSource::Query(nested) = &mut prefetch.source {
+                inject_query_shard(nested, key);
+            }
+        }
+    }
+}
+
 fn build_filter(field: &str, operator: ComparisonOp, value: Value) -> Result<FilterExpr, QqlError> {
     if field.eq_ignore_ascii_case("id") {
         if operator != ComparisonOp::Eq {

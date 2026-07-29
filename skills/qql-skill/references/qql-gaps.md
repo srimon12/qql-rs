@@ -1,38 +1,71 @@
 # QQL Gaps (agent-facing)
 
-Engineering detail: repo root [`gaps.md`](../../../gaps.md).
+Engineering source of truth: repo root [`gaps.md`](../../../gaps.md).
+
+Use this file so you **do not invent syntax** for open items and **do not claim
+missing** features that already ship.
+
+---
 
 ## Edge (important)
 
-Edge supports dense/sparse/hybrid by default. **Multivector, CLIP vision, and cross-encoder need opt-in models** (`multi_model`, `image_model`, `reranker_model`). Edge does **not** support `GROUP BY`, shard keys, `ALTER COLLECTION`, or ACORN.
-
-## Not supported / incomplete (do not invent syntax)
-
-| Area | Gap |
+| Capability | Status |
 |---|---|
-| Pagination | No OFFSET for **grouped** search |
-| MMR | Not for sparse / recommend (dense nearest only) |
-| Timeout / consistency | Not in QQL syntax (executor config only) |
-| Hybrid shorthand | **Supported**: `USING HYBRID` or `QUERY HYBRID TEXT …` (same expand) |
-| ACORN | `acorn = true` but no `max_selectivity` from syntax |
-| Shard | Key must be explicit string (no dynamic resolution) |
-| Edge | No GROUP BY, no SHARD, batch is fan-out |
+| Dense / sparse / hybrid FUSION | **Yes** (default) |
+| Multivector / ColBERT (`AS MULTI`, MaxSim `RERANK`) | **Opt-in** `multi_model` / multi HTTP |
+| CLIP `IMAGE` + CLIP text dense | **Opt-in** `image_model` (local **paths** only) |
+| Cross-encoder `CROSS RERANK` | **Opt-in** `reranker_model` / `rerank_endpoint` |
+| `GROUP BY` / query groups | **No** — `QQL-EDGE-QUERY-GROUPS`; use remote Qdrant |
+| `SHARD`, `ALTER COLLECTION`, ACORN | **No** — hard error; use remote Qdrant |
+| Batch query/update | Fan-out only (not one native batch RPC) |
+| `PARAMS (timeout / consistency)` | No-op / N/A on single-node edge |
 
-## Supported (do not claim missing)
+`qql doctor` prints which hosts are loaded: dense / multi / image / cross_rerank.
 
-- Schema-first `USING name` / `AS DENSE|SPARSE|MULTI`
-- Multivector ColBERT path + late-interaction `RERANK … USING colbert PREFETCH`
-- CLIP: `TEXT` + `IMAGE` (dense), not multi
-- Cross-encoder: `CROSS RERANK TEXT '…' MODEL '…' ON FIELD text PREFETCH (…)`
-- Offline edge multi/image/rerank when models configured
+---
+
+## Open / incomplete (do not invent syntax)
+
+| Area | Reality | Agent rule |
+|---|---|---|
+| Grouped pagination | **No OFFSET with `GROUP BY`**. Qdrant OpenAPI `QueryGroupsRequest` has no `offset`. Fail-closed: `QQL-PLAN-GROUP-OFFSET`. | Use `LIMIT` only on groups. Do not invent group cursor syntax until Qdrant supports it. |
+| MMR | **Dense nearest only**. Sparse → `QQL-PLAN-MMR-SPARSE`. | Do not use MMR on sparse/recommend. |
+| Edge `GROUP BY` | Rejected offline (`QQL-EDGE-QUERY-GROUPS`). | Same QQL works on remote Qdrant; offline: filter + `LIMIT`. |
+
+---
+
+## Closed / supported (do not list as gaps)
+
+| Area | Use this |
+|---|---|
+| Hybrid shorthand | `USING HYBRID` or `QUERY HYBRID TEXT …` (same expand) |
+| Request timeout | `PARAMS (timeout = 30)` → REST `?timeout=30` / gRPC `timeout` (seconds) |
+| Read consistency | `PARAMS (consistency = majority\|quorum\|all\|N)` → OpenAPI `ReadConsistency` |
+| ACORN params (remote) | `PARAMS (acorn = true, max_selectivity = 0.4)` — not on edge |
+| Dynamic shard (host) | `inject_shard_key(stmt, tenant)` / `stmt.inject_shard_key(tenant)` — or literal `SHARD '…'` |
+| Schema-first vectors | `USING name` / `AS DENSE\|SPARSE\|MULTI` |
+| Multivector / late interaction | `USING colbert` / `AS MULTI`; `RERANK … PREFETCH` |
+| CLIP | `QUERY IMAGE '…'` / `TEXT` into same dense space |
+| Cross-encoder | `CROSS RERANK TEXT '…' MODEL '…' ON FIELD text PREFETCH (…)` |
+| Doctor hosts | `qql doctor` → dense/multi/image/cross_rerank |
+
+---
 
 ## Practical fallbacks
 
-- Late interaction: `QUERY RERANK … USING colbert PREFETCH (…)`
-- Pair rerank: `QUERY CROSS RERANK TEXT 'q' MODEL 'bge-reranker-base' ON FIELD text PREFETCH (c) LIMIT n`
-- CLIP: dense vectors + `QUERY IMAGE '/path.jpg' …` / `QUERY TEXT '…' MODEL 'clip-…'`
-- Edge without groups: filter + LIMIT, or use remote Qdrant for `GROUP BY`
+| Need | Pattern |
+|---|---|
+| Hybrid | `QUERY 'q' FROM docs USING HYBRID LIMIT 10` |
+| Cluster timeout | `PARAMS (timeout = 30)` on QUERY |
+| Replica reads | `PARAMS (consistency = majority)` |
+| Multi-tenant shard | `inject_shard_key(stmt, tenant)` + `inject_filter(…, tenant_id, …)` |
+| Faceted page 2 (groups) | **Not in Qdrant** — do not invent OFFSET for groups |
+| Edge without groups | `WHERE` + `LIMIT`, or remote Qdrant for `GROUP BY` |
+
+---
 
 ## Reminder
 
-Do not invent syntax for open gaps.
+- Open gaps: do **not** invent syntax (especially group OFFSET — blocked on Qdrant).
+- Closed items: prefer the supported forms above.
+- Wire shapes: always check `crates/qql-runtime/openapi.json` and `proto/`.

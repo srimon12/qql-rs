@@ -76,6 +76,11 @@ Each clause occurs at most once and only in this order.
 to `QueryExpr::Hybrid` (dense + sparse prefetches fused with RRF/DBSF). It only
 applies to text nearest queries.
 
+Planner fail-closed limits (not silent drops):
+
+- `GROUP BY` + non-zero `OFFSET` → `QQL-PLAN-GROUP-OFFSET`
+- `MMR` with `USING … AS SPARSE` → `QQL-PLAN-MMR-SPARSE` (dense nearest only)
+
 Vector names are arbitrary (`dense` / `sparse` / `colbert` are conventions, not
 reserved). `AS DENSE` / `AS SPARSE` declare embed role; `AS MULTI` marks a dense
 **multivector** target (ColBERT-style). Without `AS`, the executor resolves kind
@@ -93,6 +98,8 @@ search-param = "hnsw_ef", "=", integer
              | "quantization", "=", object
              | "rrf_k", "=", integer
              | "rrf_weights", "=", array
+             | "timeout", "=", positive-integer  -- request-level seconds
+             | "consistency", "=", factor | majority | quorum | all
 ```
 
 `acorn` (Adaptive Cardinality Estimator for ONgRN) controls approximate search
@@ -100,8 +107,19 @@ selectivity estimation. When `acorn = true`, Qdrant uses ACORN to estimate
 filter cardinality and adapt the search strategy. Optional `max_selectivity`
 (in `(0, 1]`) caps that estimate: `PARAMS (acorn = true, max_selectivity = 0.4)`.
 
+`timeout` and `consistency` are **request-level** (OpenAPI query params /
+gRPC fields), not body `SearchParams`. Plan projects them to REST `?timeout=`
+/ `?consistency=` and gRPC `timeout` / `read_consistency`.
+
 `quantization` accepts an object matching the Qdrant QuantizationSearchParams
 schema: `{ "ignore": bool, "rescore": bool, "oversampling": float }`.
+
+Host multi-tenant routing without string-building QQL:
+
+```rust
+use qql_core::ast::inject_shard_key;
+inject_shard_key(&mut stmt, "tenant-a")?;
+```
 
 ## Errors
 

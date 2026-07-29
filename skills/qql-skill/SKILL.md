@@ -16,7 +16,7 @@ Read these reference documents when you need details on specific topics:
 - [references/node-sdk.md](references/node-sdk.md) — Node.js SDK (`nqql`) client and N-API methods.
 - [references/wasm-sdk.md](references/wasm-sdk.md) — WebAssembly SDK (`qql-wasm`) browser & edge client.
 - [references/rust-sdk.md](references/rust-sdk.md) — Rust SDK (`qql`, `qql-core`, `qql-plan`) runtime & executor.
-- [references/qql-gaps.md](references/qql-gaps.md) — Read for feature mapping guidelines.
+- [references/qql-gaps.md](references/qql-gaps.md) — **Open vs closed** features; do not invent open syntax; do not claim closed items are missing.
 - [references/qql-install.md](references/qql-install.md) — Read for installation and setup instructions across Python, Rust, Node.js, and CLI.
 - [references/qql-multitenancy.md](references/qql-multitenancy.md) — Complete multi-tenant guide: shard routing, filter injection, and tenant isolation.
 
@@ -139,7 +139,8 @@ FROM <collection>
 [PREFETCH (cte_ref [WHERE <filter>] [SCORE THRESHOLD <number>], ...)]
 [WHERE <filter_expression>]
 [SHARD '<tenant_key>']
-[PARAMS (hnsw_ef = <n>, exact = <bool>, acorn = <bool>, indexed_only = <bool>)]
+[PARAMS (hnsw_ef = <n>, exact = <bool>, acorn = <bool>, max_selectivity = <0–1>,
+         indexed_only = <bool>, timeout = <seconds>, consistency = majority|quorum|all|<n>)]
 [SCORE THRESHOLD <number>]
 [GROUP BY <field> [SIZE <n>] [LOOKUP FROM <collection>]]
 [WITH PAYLOAD [true | false | INCLUDE (...) | EXCLUDE (...)]]
@@ -149,6 +150,15 @@ FROM <collection>
 ```
 
 `SHARD` appears after `WHERE` and before `PARAMS`. Clause order violations produce parse errors.
+
+**Limits (see [qql-gaps.md](references/qql-gaps.md)):**
+
+- `OFFSET` is **not** allowed with `GROUP BY` (`QQL-PLAN-GROUP-OFFSET`) — Qdrant groups API has no offset.
+- `MMR` is **dense nearest only** (sparse → `QQL-PLAN-MMR-SPARSE`).
+- `max_selectivity` requires `acorn = true` (remote Qdrant; not edge).
+- `timeout` / `consistency` are request-level (OpenAPI query params / gRPC fields); not on edge.
+- Edge has **no** `GROUP BY` — use remote Qdrant or filter + `LIMIT`.
+- Dynamic shard: host `inject_shard_key(stmt, tenant)` (no `$bind` syntax).
 
 **Vector roles (critical for embedding):**
 

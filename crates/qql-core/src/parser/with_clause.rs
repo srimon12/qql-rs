@@ -1,5 +1,7 @@
 use super::AstLowerer;
-use crate::ast::{PayloadSelector, QuantizationSearchParams, SearchParams, Value, VectorSelector};
+use crate::ast::{
+    PayloadSelector, QuantizationSearchParams, ReadConsistency, SearchParams, Value, VectorSelector,
+};
 use crate::error::QqlError;
 use crate::token::TokenKind;
 use alloc::string::String;
@@ -23,6 +25,10 @@ impl<'a> AstLowerer<'a> {
                 "quantization" => {
                     params.quantization = Some(quantization(value)?);
                 }
+                // OpenAPI query param / proto field — seconds, minimum 1.
+                "timeout" => params.timeout = Some(positive_integer(value, &key)?),
+                // OpenAPI ReadConsistency: factor N or majority|quorum|all.
+                "consistency" => params.consistency = Some(read_consistency(value, &key)?),
                 _ => {
                     return Err(QqlError::validation(
                         "QQL-VALIDATION-SEARCH-PARAM",
@@ -239,4 +245,28 @@ fn unit_interval(value: Value, key: &str) -> Result<f64, QqlError> {
         ));
     }
     Ok(value)
+}
+
+/// OpenAPI `ReadConsistency`: integer factor or majority|quorum|all.
+fn read_consistency(value: Value, key: &str) -> Result<ReadConsistency, QqlError> {
+    match value {
+        Value::Int(v) if v >= 0 => Ok(ReadConsistency::Factor(v as u64)),
+        Value::Str(s) => match s.to_ascii_lowercase().as_str() {
+            "majority" => Ok(ReadConsistency::Majority),
+            "quorum" => Ok(ReadConsistency::Quorum),
+            "all" => Ok(ReadConsistency::All),
+            _ => Err(QqlError::validation(
+                "QQL-VALIDATION-CONSISTENCY",
+                "consistency must be a non-negative integer factor, or majority|quorum|all",
+                None,
+            )),
+        },
+        _ => Err(QqlError::validation(
+            "QQL-VALIDATION-CONSISTENCY",
+            alloc::format!(
+                "{key} must be a non-negative integer factor, or majority|quorum|all"
+            ),
+            None,
+        )),
+    }
 }

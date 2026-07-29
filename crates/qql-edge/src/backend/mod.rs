@@ -185,7 +185,9 @@ impl EdgeQdrant {
             }
             Some(RequestBody::QueryGroups(_)) => Err(QqlError::execution(
                 "QQL-EDGE-QUERY-GROUPS",
-                "query_groups not supported in edge mode",
+                "GROUP BY / query groups is not supported offline (qdrant-edge has no \
+                 /points/query/groups). Use remote Qdrant for grouped search, or rewrite as \
+                 filter + LIMIT (no GROUP BY).",
                 None,
             )),
             Some(RequestBody::Points(req)) => {

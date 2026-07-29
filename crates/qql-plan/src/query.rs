@@ -384,6 +384,7 @@ pub fn lower_query_request(query: &QueryStmt) -> Result<QueryRequest, QqlError> 
     let (with_payload, with_vector) = lower_output_selector(&query.output);
     let (query_variant, using, prefetch) = build_query_with_prefetch(query)?;
 
+    let (timeout, consistency) = lower_request_opts(query.params.as_ref());
     Ok(QueryRequest {
         query: query_variant,
         using,
@@ -397,6 +398,8 @@ pub fn lower_query_request(query: &QueryStmt) -> Result<QueryRequest, QqlError> 
         offset: query.page.offset,
         lookup_from: None,
         shard_key: query.shard_key.clone(),
+        timeout,
+        consistency,
     })
 }
 
@@ -417,6 +420,7 @@ pub fn lower_query_groups_request(query: &QueryStmt) -> Result<QueryGroupsReques
     let (with_payload, with_vector) = lower_output_selector(&query.output);
     let (query_variant, using, prefetch) = build_query_with_prefetch(query)?;
 
+    let (timeout, consistency) = lower_request_opts(query.params.as_ref());
     Ok(QueryGroupsRequest {
         query: query_variant,
         using,
@@ -435,6 +439,8 @@ pub fn lower_query_groups_request(query: &QueryStmt) -> Result<QueryGroupsReques
             .map(|coll| WithLookupValue::Collection(coll.clone())),
         lookup_from: None,
         shard_key: query.shard_key.clone(),
+        timeout,
+        consistency,
     })
 }
 
@@ -580,6 +586,7 @@ fn build_text_input(text: &str, model: &Option<String>) -> PlanQueryInput {
 }
 
 pub fn lower_search_params(params: &qql_core::ast::SearchParams) -> Option<SearchParamsRequest> {
+    // Body-only OpenAPI SearchParams — timeout/consistency are request-level.
     let mut has = false;
     let r = SearchParamsRequest {
         hnsw_ef: params.hnsw_ef,
@@ -607,6 +614,33 @@ pub fn lower_search_params(params: &qql_core::ast::SearchParams) -> Option<Searc
         Some(r)
     } else {
         None
+    }
+}
+
+/// Extract request-level opts (OpenAPI query params / proto fields).
+pub fn lower_request_opts(
+    params: Option<&qql_core::ast::SearchParams>,
+) -> (Option<u64>, Option<ReadConsistencyParam>) {
+    match params {
+        Some(p) => (
+            p.timeout,
+            p.consistency.as_ref().map(ReadConsistencyParam::from),
+        ),
+        None => (None, None),
+    }
+}
+
+/// Append OpenAPI query params for timeout + consistency.
+pub fn push_read_opts(
+    query: &mut Vec<(String, String)>,
+    timeout: Option<u64>,
+    consistency: Option<&ReadConsistencyParam>,
+) {
+    if let Some(secs) = timeout {
+        query.push(("timeout".into(), secs.to_string()));
+    }
+    if let Some(c) = consistency {
+        query.push(("consistency".into(), c.to_query_value()));
     }
 }
 
@@ -666,6 +700,54 @@ mod tests {
         );
         assert_eq!(json["params"]["acorn"]["enable"], true);
         assert_eq!(json["params"]["acorn"]["max_selectivity"], 0.4);
+    }
+
+    #[test]
+    fn timeout_and_consistency_are_rest_query_params_not_body() {
+        // OpenAPI: timeout + consistency are query params on POST …/points/query.
+        let route = crate::plan::try_route(
+            &Parser::parse(
+                "QUERY 'hello' FROM docs PARAMS (timeout = 30, consistency = majority) LIMIT 5;",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            route
+                .query
+                .iter()
+                .any(|(k, v)| k == "timeout" && v == "30"),
+            "timeout query param missing: {:?}",
+            route.query
+        );
+        assert!(
+            route
+                .query
+                .iter()
+                .any(|(k, v)| k == "consistency" && v == "majority"),
+            "consistency query param missing: {:?}",
+            route.query
+        );
+        let body = route.body_json().expect("body");
+        assert!(body.get("timeout").is_none(), "timeout must not be body");
+        assert!(
+            body.get("consistency").is_none(),
+            "consistency must not be body"
+        );
+        // Body params only for HNSW etc. — absent when only request-level opts.
+        assert!(body.get("params").is_none() || body["params"].as_object().unwrap().is_empty());
+    }
+
+    #[test]
+    fn consistency_factor_serializes_as_integer_query_param() {
+        let route = crate::plan::try_route(
+            &Parser::parse("QUERY 'hello' FROM docs PARAMS (consistency = 2) LIMIT 5;").unwrap(),
+        )
+        .unwrap();
+        assert!(route
+            .query
+            .iter()
+            .any(|(k, v)| k == "consistency" && v == "2"));
     }
 
     #[test]

@@ -96,6 +96,9 @@ let exec = Executor::new(Box::new(client), None);
 
 `RestQdrant::with_timeout(url, api_key, timeout)` constructs with an explicit duration.
 
+**Note:** Statement-level timeout / read consistency is **not** QQL syntax yet
+(no `PARAMS (timeout = …)`). Use client/executor timeouts as above.
+
 ---
 
 ## 3. Batch Execution

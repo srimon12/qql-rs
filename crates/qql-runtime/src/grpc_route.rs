@@ -1226,6 +1226,9 @@ fn to_query_points(
         with_payload: req.with_payload.as_ref().map(to_payload_selector),
         with_vectors: req.with_vector.as_ref().map(to_vectors_selector),
         shard_key_selector: shard_key_selector(&req.shard_key),
+        // Proto QueryPoints.timeout / read_consistency (not SearchParams body).
+        timeout: req.timeout,
+        read_consistency: req.consistency.as_ref().map(to_read_consistency),
         ..Default::default()
     })
 }
@@ -1259,8 +1262,24 @@ fn to_query_groups(
             },
         }),
         shard_key_selector: shard_key_selector(&req.shard_key),
+        timeout: req.timeout,
+        read_consistency: req.consistency.as_ref().map(to_read_consistency),
         ..Default::default()
     })
+}
+
+fn to_read_consistency(c: &qql_plan::types::ReadConsistencyParam) -> qdrant::ReadConsistency {
+    use qdrant::read_consistency::Value as RcValue;
+    use qql_plan::types::ReadConsistencyParam;
+    let value = match c {
+        ReadConsistencyParam::Factor(n) => RcValue::Factor(*n),
+        ReadConsistencyParam::Majority => {
+            RcValue::Type(qdrant::ReadConsistencyType::Majority as i32)
+        }
+        ReadConsistencyParam::Quorum => RcValue::Type(qdrant::ReadConsistencyType::Quorum as i32),
+        ReadConsistencyParam::All => RcValue::Type(qdrant::ReadConsistencyType::All as i32),
+    };
+    qdrant::ReadConsistency { value: Some(value) }
 }
 
 fn to_prefetch(pf: &qql_plan::types::PrefetchRequest) -> qdrant::PrefetchQuery {

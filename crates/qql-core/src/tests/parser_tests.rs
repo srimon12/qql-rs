@@ -307,6 +307,41 @@ fn max_selectivity_requires_acorn() {
 }
 
 #[test]
+fn params_timeout_and_consistency() {
+    use crate::ast::ReadConsistency;
+    let s = Parser::parse(
+        "QUERY 'x' FROM docs PARAMS (timeout = 30, consistency = majority) LIMIT 5;",
+    )
+    .unwrap();
+    let Stmt::Query(q) = s else { panic!() };
+    let p = q.params.as_ref().unwrap();
+    assert_eq!(p.timeout, Some(30));
+    assert_eq!(p.consistency, Some(ReadConsistency::Majority));
+
+    let s = Parser::parse("QUERY 'x' FROM docs PARAMS (consistency = 2) LIMIT 5;").unwrap();
+    let Stmt::Query(q) = s else { panic!() };
+    assert_eq!(
+        q.params.as_ref().unwrap().consistency,
+        Some(ReadConsistency::Factor(2))
+    );
+}
+
+#[test]
+fn inject_shard_key_sets_query_and_ctes() {
+    use crate::ast::inject_shard_key;
+    let mut stmt = Parser::parse(
+        "WITH c AS (QUERY TEXT 'x' USING dense LIMIT 10) \
+         QUERY FUSION RRF FROM docs PREFETCH (c) LIMIT 5;",
+    )
+    .unwrap();
+    inject_shard_key(&mut stmt, "acme").unwrap();
+    let Stmt::Query(q) = &stmt else { panic!() };
+    assert_eq!(q.shard_key.as_deref(), Some("acme"));
+    assert_eq!(q.ctes[0].query.shard_key.as_deref(), Some("acme"));
+    assert!(inject_shard_key(&mut stmt, "").is_err());
+}
+
+#[test]
 fn cross_rerank_parses() {
     let stmt = Parser::parse(
         "WITH c AS (QUERY TEXT 'q' FROM docs USING dense LIMIT 50) \

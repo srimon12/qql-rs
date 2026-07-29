@@ -227,6 +227,24 @@ pub struct QuantizationSearchParams {
     pub oversampling: Option<f64>,
 }
 
+/// Read consistency for Qdrant point reads.
+///
+/// OpenAPI `ReadConsistency` / proto `ReadConsistency`: either a replica
+/// **factor** `N`, or a named mode (`majority` / `quorum` / `all`).
+/// REST: query param on `/points/query` etc. gRPC: `read_consistency` field.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum ReadConsistency {
+    /// Send requests to N nodes; keep points present on all of them.
+    Factor(u64),
+    /// N/2+1 random requests; points present on all of them.
+    Majority,
+    /// All nodes; points present on a majority.
+    Quorum,
+    /// All nodes; points present on all of them.
+    All,
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SearchParams {
@@ -239,6 +257,11 @@ pub struct SearchParams {
     pub quantization: Option<QuantizationSearchParams>,
     pub rrf_k: Option<u64>,
     pub rrf_weights: Option<Vec<f64>>,
+    /// Request-level timeout in **seconds** (OpenAPI query param / proto field).
+    /// Not part of body `SearchParams`.
+    pub timeout: Option<u64>,
+    /// Request-level read consistency (OpenAPI query param / proto field).
+    pub consistency: Option<ReadConsistency>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

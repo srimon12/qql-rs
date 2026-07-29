@@ -146,12 +146,15 @@ its `USING` and `PREFETCH` pipeline in the canonical AST.
 | fusion | Requires at least one `PREFETCH`. |
 | formula | May score a prefetch or payload-derived expression. |
 | relevance feedback | Requires non-empty feedback and `NAIVE(a,b,c)`. |
-| MMR | `DIVERSITY` is finite and in `[0,1]`; `CANDIDATES` is positive. |
+| MMR | `DIVERSITY` is finite and in `[0,1]`; `CANDIDATES` is positive. MMR applies to dense nearest only; sparse `USING` fails with `QQL-PLAN-MMR-SPARSE`. |
 | hybrid | Expands to dense and sparse prefetches fused by RRF (default) or DBSF. Surface forms: front-form `QUERY HYBRID TEXT …` and tail-form `QUERY TEXT … USING HYBRID …` lower to the same `Hybrid` AST. `USING HYBRID` requires a text nearest expression (no MMR, no non-text inputs). Omitted dense/sparse names resolve from schema (exactly one of each role). |
 | rerank | Requires `USING`, a model, and non-empty `PREFETCH`. |
 
 `LIMIT`, group size, `hnsw_ef`, and `rrf_k` are positive integers. `OFFSET`
 and `VALUES_COUNT` are non-negative. Score thresholds are finite.
+
+`GROUP BY` is incompatible with non-zero `OFFSET` (`QQL-PLAN-GROUP-OFFSET`):
+Qdrant’s query/groups request has no group offset.
 
 A group lookup names a collection only. A prefetch lookup may additionally
 name a vector because it changes the lookup input for that prefetch.
@@ -163,6 +166,15 @@ name a vector because it changes the lookup input for that prefetch.
 means all vectors; it also accepts `true`, `false`, or a non-empty name list.
 
 ### 4.2 Search parameters
+
+Request-level options (not body `SearchParams` on the wire):
+
+| Key | Rule | Wire (OpenAPI / proto) |
+|---|---|---|
+| `timeout` | Positive integer seconds | REST query `timeout`; gRPC `timeout` |
+| `consistency` | Factor ≥ 0, or `majority` / `quorum` / `all` | REST query `consistency`; gRPC `read_consistency` |
+
+Body search parameters (OpenAPI `SearchParams`):
 
 `PARAMS` accepts:
 
@@ -300,6 +312,9 @@ invalid fixtures are normative for those cases.
 | `QQL-VALIDATION-POINTS-CLAUSE` | Unsupported clause on POINTS |
 | `QQL-VALIDATION-UPSERT-ID` | UPSERT row lacks valid ID |
 | `QQL-VALIDATION-MMR` | MMR diversity is invalid |
+| `QQL-VALIDATION-HYBRID` | Invalid `USING HYBRID` / `QUERY HYBRID` combination |
+| `QQL-PLAN-GROUP-OFFSET` | Non-zero `OFFSET` with `GROUP BY` |
+| `QQL-PLAN-MMR-SPARSE` | MMR with sparse vector target |
 | `QQL-PLAN-VECTOR-KIND` | Structural input and declared role disagree |
 | `QQL-MISSING-USING` | Schema inference is ambiguous |
 | `QQL-UNKNOWN-VECTOR` | Explicit name does not exist |

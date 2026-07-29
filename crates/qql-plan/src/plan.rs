@@ -701,21 +701,38 @@ pub fn to_rest_route(op: &PlannedOperation) -> Route {
         PlannedOperation::Query {
             collection,
             request,
-        } => Route {
-            method: Method::Post,
-            path: format!("/collections/{collection}/points/query"),
-            query: Vec::new(),
-            body: Some(RequestBody::Query(Box::new(request.clone()))),
-        },
+        } => {
+            // OpenAPI: timeout + consistency are query params on POST …/points/query
+            let mut query = Vec::new();
+            crate::query::push_read_opts(
+                &mut query,
+                request.timeout,
+                request.consistency.as_ref(),
+            );
+            Route {
+                method: Method::Post,
+                path: format!("/collections/{collection}/points/query"),
+                query,
+                body: Some(RequestBody::Query(Box::new(request.clone()))),
+            }
+        }
         PlannedOperation::QueryGroups {
             collection,
             request,
-        } => Route {
-            method: Method::Post,
-            path: format!("/collections/{collection}/points/query/groups"),
-            query: Vec::new(),
-            body: Some(RequestBody::QueryGroups(Box::new(request.clone()))),
-        },
+        } => {
+            let mut query = Vec::new();
+            crate::query::push_read_opts(
+                &mut query,
+                request.timeout,
+                request.consistency.as_ref(),
+            );
+            Route {
+                method: Method::Post,
+                path: format!("/collections/{collection}/points/query/groups"),
+                query,
+                body: Some(RequestBody::QueryGroups(Box::new(request.clone()))),
+            }
+        }
         PlannedOperation::GetPoints {
             collection,
             request,

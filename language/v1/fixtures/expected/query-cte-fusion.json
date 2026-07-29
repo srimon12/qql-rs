@@ -959,6 +959,7 @@
         },
         "params": {
           "acorn": null,
+          "consistency": null,
           "exact": null,
           "hnsw_ef": null,
           "indexed_only": null,
@@ -968,7 +969,8 @@
           "rrf_weights": [
             0.7,
             0.3
-          ]
+          ],
+          "timeout": null
         },
         "score_threshold": null,
         "shard_key": null

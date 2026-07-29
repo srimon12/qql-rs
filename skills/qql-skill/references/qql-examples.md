@@ -62,6 +62,22 @@ QUERY FUSION RRF FROM clinical_docs
 
 **Why this works:** Instead of a single hybrid query, you split into multiple CTEs with different filters and score thresholds. RRF merges candidate streams into a single ranked list.
 
+For the simple dense+sparse case without per-leg filters, prefer the hybrid
+shorthand (same plan expand as `QUERY HYBRID`):
+
+```sql
+QUERY TEXT 'kubernetes deployment' FROM incidents
+  USING HYBRID DENSE dense SPARSE sparse FUSION RRF
+  LIMIT 10;
+
+-- Defaults: schema must resolve unique dense + sparse; FUSION defaults to RRF
+QUERY 'kubernetes deployment' FROM incidents USING HYBRID LIMIT 10;
+
+-- Equivalent front-form
+QUERY HYBRID TEXT 'kubernetes deployment' DENSE dense SPARSE sparse FUSION RRF
+  FROM incidents LIMIT 10;
+```
+
 ```sql
 WITH
   high_priority AS (
@@ -89,6 +105,10 @@ QUERY FUSION RRF FROM incidents
 **Problem:** You search in collection `research_papers`, but the group IDs (e.g. author names) live in a separate `author_metadata` collection. You want top-5 results per author without duplicate author dominance in the result feed.
 
 **Why this works:** `GROUP BY` partitions hits by payload field, while `LOOKUP FROM` resolves grouping metadata cross-collection.
+
+**Limit:** `OFFSET` is **not** allowed with `GROUP BY` (`QQL-PLAN-GROUP-OFFSET`).
+Page groups with `LIMIT` only, or filter group keys. Edge rejects `GROUP BY`
+entirely — use remote Qdrant for grouped search.
 
 ```sql
 QUERY TEXT 'machine learning optimization' FROM research_papers
@@ -190,6 +210,23 @@ UPSERT INTO docs VALUES {
 - Kind is dense; shape is multi (`MultiDense`).
 - Host embedder must implement `embed_multi` for TEXT → multivector; otherwise pass `VECTOR [[...]]` or precomputed upsert vectors.
 - `USING sparse` in a CTE never silently dense-embeds when schema marks sparse.
+
+### 6c. Cross-encoder pair rerank (`CROSS RERANK`)
+
+**Problem:** Reorder dense candidates with a pair scorer `(query, doc_text)` — not MaxSim multivector.
+
+**Why this works:** `CROSS RERANK` runs PREFETCH, reads document text from `ON FIELD` (default `text`), scores pairs client-side. Distinct from late-interaction `RERANK … USING colbert`. Host needs `rerank_pairs` (edge `reranker_model` or HTTP `rerank_endpoint`).
+
+```sql
+WITH candidates AS (
+  QUERY TEXT 'vector database latency' FROM docs USING dense LIMIT 50
+)
+QUERY CROSS RERANK TEXT 'vector database latency' MODEL 'bge-reranker-base'
+  ON FIELD text
+  FROM docs
+  PREFETCH (candidates)
+  LIMIT 10;
+```
 
 ---
 
@@ -445,6 +482,9 @@ QUERY FORMULA score * GAUSS_DECAY(GEO_DISTANCE(48.8566, 2.3522, location), 0.0, 
 
 **Problem:** Balance similarity relevance against result diversity for dense queries.
 
+**Limit:** MMR is **dense nearest only**. `USING … AS SPARSE` fails with
+`QQL-PLAN-MMR-SPARSE`. Do not use MMR on sparse or recommend queries.
+
 ```sql
 QUERY MMR 'emergency triage' DIVERSITY 0.5 CANDIDATES 100
   FROM docs
@@ -477,3 +517,47 @@ QUERY TEXT 'quantum computing' FROM papers
   PARAMS (quantization = {ignore: false, rescore: true, oversampling: 2.0})
   LIMIT 20;
 ```
+
+---
+
+## 24. ACORN Search Params (remote Qdrant)
+
+**Problem:** Filtered HNSW search should adapt to filter selectivity via ACORN.
+
+**Limit:** Supported on remote Qdrant REST/gRPC. **Not** supported on edge.
+`max_selectivity` requires `acorn = true` and is in `(0, 1]`.
+
+```sql
+QUERY TEXT 'filtered product search' FROM products
+  USING dense
+  WHERE category = 'electronics' AND in_stock = true
+  PARAMS (hnsw_ef = 128, acorn = true, max_selectivity = 0.4)
+  LIMIT 20;
+```
+
+---
+
+## 25. Request timeout and read consistency
+
+**Problem:** Cap how long a query may run and control replica read consistency
+on a clustered Qdrant deployment.
+
+**Why this works:** OpenAPI puts `timeout` and `consistency` on the **request**
+(query string for REST; fields on `QueryPoints` for gRPC), not inside body
+`SearchParams`. QQL accepts them in `PARAMS` and lowers accordingly.
+
+```sql
+QUERY TEXT 'incident response' FROM runbooks
+  USING dense
+  PARAMS (timeout = 30, consistency = majority, hnsw_ef = 64)
+  LIMIT 10;
+
+-- Factor form: require agreement from N replicas
+QUERY TEXT 'incident response' FROM runbooks
+  USING dense
+  PARAMS (consistency = 2)
+  LIMIT 10;
+```
+
+**Limit:** Single-node edge does not use cluster consistency; timeout is a
+server-side override on remote Qdrant (client HTTP timeout is separate).

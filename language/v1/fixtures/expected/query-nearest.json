@@ -297,13 +297,15 @@
         },
         "params": {
           "acorn": true,
+          "consistency": null,
           "exact": false,
           "hnsw_ef": 128,
           "indexed_only": null,
           "max_selectivity": null,
           "quantization": null,
           "rrf_k": null,
-          "rrf_weights": null
+          "rrf_weights": null,
+          "timeout": null
         },
         "score_threshold": null,
         "shard_key": null

@@ -20,10 +20,11 @@ Three embedding strategies produce an [`Executor`] backed by [`EdgeQdrant`]:
 |---|---|
 | `TextEmbedding` (BGE, MiniLM, CLIP **text**, …) | Dense (`TEXT`) |
 | `ImageEmbedding` (CLIP vision, …) | Dense (`IMAGE` / `image_model`) |
-| `Bgem3Embedding.colbert` | **Multi** (`MultiDense`) — offline late interaction |
-| `TextRerank` (bge-reranker, …) | Cross-encoder — not QQL `RERANK` yet |
+| `Bgem3Embedding.colbert` | **Multi** (`MultiDense`) — offline late interaction / MaxSim `RERANK` |
+| `TextRerank` (bge-reranker, …) | **`CROSS RERANK`** pair scorer (client-side; not late-interaction `RERANK`) |
 
-CLIP is dual-encoder dense. Multivector is ColBERT bags only.
+CLIP is dual-encoder dense. Multivector is ColBERT bags only. Late-interaction
+`RERANK` uses multi; cross-encoder uses `CROSS RERANK` + `reranker_model`.
 
 ```rust
 // Offline CLIP text + vision
@@ -53,16 +54,18 @@ let resp = executor.execute("CREATE COLLECTION docs HYBRID", OnError::Stop).awai
 let resp = executor.execute("UPSERT INTO docs VALUES {id: 1, text: 'hello world'}", OnError::Stop).await?;
 let resp = executor.execute("QUERY 'hello' FROM docs LIMIT 5;", OnError::Stop).await?;
 
-// Dense + offline ColBERT multi (downloads BGE-M3 on first multi embed)
+// Dense + offline ColBERT multi + cross-encoder (downloads on first use)
 let mut multi_exec = local_executor_with_options(
     "/tmp/qql-edge-multi",
     LocalExecutorOptions {
         multi_model: Some("bge-m3".into()),
+        reranker_model: Some("bge-reranker-base".into()),
         ..Default::default()
     },
 )?;
 // CREATE … colbert VECTOR(1024, COSINE) WITH MULTIVECTOR (comparator = 'max_sim')
-// then QUERY … USING colbert / QUERY RERANK … USING colbert
+// QUERY … USING colbert / QUERY RERANK … USING colbert PREFETCH (…)
+// QUERY CROSS RERANK TEXT 'q' MODEL 'bge-reranker-base' ON FIELD text PREFETCH (c) …
 
 executor.close().await?; // flush before deleting the data directory
 ```
@@ -107,15 +110,18 @@ Intel Mac users should disable default features and use `http-embedding` or
 
 - No `UPDATE ... SET VECTOR` via batch — uses individual route dispatch
 - gRPC is not available in edge mode (no protobuf dependency)
-- Edge uses qdrant-edge's native query engine for nearest, sparse, MMR,
-  recommendation (`best_score`/`sum_scores`), context, discover, sample,
-  formula, relevance-feedback, and order-by queries; point-reference and
-  text inputs that cannot be embedded locally are rejected
+- Edge uses qdrant-edge's native query engine for nearest, sparse, hybrid,
+  MMR (dense), recommendation (`best_score`/`sum_scores`), context, discover,
+  sample, formula, relevance-feedback, and order-by queries; point-reference
+  and text inputs that cannot be embedded locally are rejected
+- Multivector + `CROSS RERANK` work only when the matching models are opted in
+- `IMAGE` expects local filesystem paths (no remote URL fetch)
 - Shard keys are not supported in edge mode (no sharding in qdrant-edge)
-- `GROUP BY`, `ALTER COLLECTION`, collection `PARAMS`, and shard DDL are
-  rejected explicitly in edge mode
+- `GROUP BY`, `ALTER COLLECTION`, collection `PARAMS`, ACORN, and shard DDL
+  are rejected explicitly — use remote Qdrant for those
 - Recommendation's `average_vector` strategy is not available in qdrant-edge;
   use `best_score` or `sum_scores`
+- Query/update “batch” is fan-out, not a single native batch RPC
 
 ## Verification
 

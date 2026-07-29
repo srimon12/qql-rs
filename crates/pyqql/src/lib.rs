@@ -26,6 +26,12 @@ impl PyStmt {
         Ok(())
     }
 
+    /// Set shard key for multi-tenant routing (QUERY/SCROLL/COUNT/UPSERT/DELETE + CTEs).
+    fn inject_shard_key(&mut self, shard_key: &str) -> PyResult<()> {
+        ast::inject_shard_key(&mut self.inner, shard_key)
+            .map_err(|e| PySyntaxError::new_err(e.to_string()))
+    }
+
     /// Get or set the shard key on QUERY, COUNT, SCROLL, UPSERT, and DELETE
     /// statements.  Returns `None` (setter is no-op) for other statement types.
     #[getter]
@@ -97,6 +103,26 @@ fn inject_filter(
         let mut stmt =
             Parser::parse(&query_str).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
         ast::inject_filter(&mut stmt, field, cmp, val)
+            .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+        Ok(PyStmt { inner: stmt })
+    } else {
+        Err(pyo3::exceptions::PyTypeError::new_err(
+            "query must be a string or a Stmt object",
+        ))
+    }
+}
+
+/// Inject a shard key into a QQL string or Stmt (host multi-tenant routing).
+#[pyfunction]
+fn inject_shard_key(query: &Bound<'_, PyAny>, shard_key: &str) -> PyResult<PyStmt> {
+    if let Ok(mut py_stmt) = query.extract::<PyRefMut<'_, PyStmt>>() {
+        ast::inject_shard_key(&mut py_stmt.inner, shard_key)
+            .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+        Ok(py_stmt.clone())
+    } else if let Ok(query_str) = query.extract::<String>() {
+        let mut stmt =
+            Parser::parse(&query_str).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+        ast::inject_shard_key(&mut stmt, shard_key)
             .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
         Ok(PyStmt { inner: stmt })
     } else {
@@ -624,6 +650,7 @@ fn pyqql(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse, m)?)?;
     m.add_function(wrap_pyfunction!(is_valid, m)?)?;
     m.add_function(wrap_pyfunction!(inject_filter, m)?)?;
+    m.add_function(wrap_pyfunction!(inject_shard_key, m)?)?;
     m.add_function(wrap_pyfunction!(tokenize, m)?)?;
     m.add_function(wrap_pyfunction!(compile_query, m)?)?;
     Ok(())

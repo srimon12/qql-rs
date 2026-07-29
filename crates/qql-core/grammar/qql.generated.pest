@@ -460,14 +460,22 @@ vector_selector = _{ boolean | name_list }
 name_list = { "(" ~ name ~ ("," ~ name)* ~ ")" }
 
 search_params = { "(" ~ search_param ~ ("," ~ search_param)* ~ ")" }
+// Body SearchParams (hnsw_ef, acorn, …) vs request-level opts (timeout, consistency).
+// OpenAPI: timeout/consistency are URL query params on /points/query (not body fields).
+// Proto QueryPoints: optional timeout + read_consistency.
 search_param = _{
       ^"hnsw_ef" ~ "=" ~ positive_integer
     | ^"exact" ~ "=" ~ boolean
     | ^"acorn" ~ "=" ~ boolean
+    | ^"max_selectivity" ~ "=" ~ positive_number
     | ^"indexed_only" ~ "=" ~ boolean
     | ^"rrf_k" ~ "=" ~ positive_integer
     | ^"rrf_weights" ~ "=" ~ number_list
     | ^"quantization" ~ "=" ~ quantization_search
+    // Request-level (REST query string / gRPC fields) — seconds, min 1
+    | ^"timeout" ~ "=" ~ positive_integer
+    // ReadConsistency: integer factor N, or majority | quorum | all
+    | ^"consistency" ~ "=" ~ (positive_integer | string | ^"majority" | ^"quorum" | ^"all")
 }
 quantization_search = {
     "{"

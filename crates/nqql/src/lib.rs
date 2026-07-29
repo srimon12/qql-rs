@@ -53,6 +53,12 @@ impl Stmt {
         Ok(())
     }
 
+    /// Multi-tenant shard routing: set shard key on QUERY/SCROLL/COUNT/UPSERT/DELETE + CTEs.
+    #[napi]
+    pub fn inject_shard_key(&mut self, shard_key: String) -> napi::Result<()> {
+        ast::inject_shard_key(&mut self.inner, &shard_key).map_err(to_napi_err)
+    }
+
     #[napi]
     pub fn to_object(&self) -> napi::Result<serde_json::Value> {
         serde_json::to_value(&self.inner).map_err(serde_napi_err)
@@ -138,6 +144,14 @@ pub fn inject_filter(
     let val = Value::from_json(value).map_err(to_napi_err)?;
     let mut stmt = Parser::parse(&query).map_err(to_napi_err)?;
     ast::inject_filter(&mut stmt, &field, cmp, val).map_err(to_napi_err)?;
+    serde_json::to_value(&stmt).map_err(serde_napi_err)
+}
+
+/// Inject a shard key into a QQL string (host multi-tenant routing).
+#[napi]
+pub fn inject_shard_key(query: String, shard_key: String) -> napi::Result<serde_json::Value> {
+    let mut stmt = Parser::parse(&query).map_err(to_napi_err)?;
+    ast::inject_shard_key(&mut stmt, &shard_key).map_err(to_napi_err)?;
     serde_json::to_value(&stmt).map_err(serde_napi_err)
 }
 

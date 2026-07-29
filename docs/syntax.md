@@ -159,7 +159,16 @@ LIMIT 10;
 
 `CROSS RERANK` runs the PREFETCH stage(s), extracts document text from `ON FIELD` (default `text`), scores `(query, doc)` pairs client-side, and reorders hits. It does **not** use Qdrant MaxSim. Host needs `rerank_pairs` (edge `reranker_model` or HTTP `rerank_endpoint`).
 
-MMR requires both `DIVERSITY` in `[0, 1]` and positive `CANDIDATES`. Hybrid expands to two prefetches (dense + sparse) with `LIMIT * 10` candidate count, fused with RRF or DBSF.
+MMR requires both `DIVERSITY` in `[0, 1]` and positive `CANDIDATES`. MMR is **dense
+nearest only**: `USING … AS SPARSE` fails closed with `QQL-PLAN-MMR-SPARSE`.
+Recommend / sparse MMR is not supported.
+
+Hybrid expands to two prefetches (dense + sparse) with `LIMIT * 10` candidate
+count, fused with RRF or DBSF.
+
+`GROUP BY` uses Qdrant’s query/groups API. **`OFFSET` is not valid with
+`GROUP BY`** (fail-closed: `QQL-PLAN-GROUP-OFFSET`). Page groups with `LIMIT`
+only, or constrain group keys with `WHERE`.
 
 **Hybrid shorthand** has two equivalent surface forms that lower to the same
 `QueryExpr::Hybrid` AST (and the same dense+sparse fusion plan):
@@ -229,14 +238,34 @@ search-param    = "hnsw_ef", "=", positive-integer
                 | "indexed_only", "=", boolean
                 | "quantization", "=", object
                 | "rrf_k", "=", positive-integer
-                | "rrf_weights", "=", array ;
+                | "rrf_weights", "=", array
+                | "timeout", "=", positive-integer
+                | "consistency", "=", ( positive-integer | "majority" | "quorum" | "all" | string ) ;
 ```
 
-`acorn = true` enables ACORN (Adaptive Cardinality Estimator for ONgRN) which estimates filter selectivity and adapts HNSW search. When `acorn = false`, ACORN is explicitly disabled. Optional `max_selectivity` is a number in `(0, 1]` and **requires** `acorn = true` (e.g. `PARAMS (acorn = true, max_selectivity = 0.4)`).
+**Body vs request-level** (from Qdrant OpenAPI / proto):
+
+| Param | Wire | Notes |
+|---|---|---|
+| `hnsw_ef`, `exact`, `acorn`, `max_selectivity`, `indexed_only`, `quantization` | JSON body `params` | OpenAPI `SearchParams` |
+| `rrf_k`, `rrf_weights` | Fusion body when RRF | |
+| `timeout` | REST **query string** `?timeout=N` / gRPC `timeout` field | Seconds, min 1; overrides global server timeout for this request |
+| `consistency` | REST **query string** `?consistency=` / gRPC `read_consistency` | Factor `N`, or `majority` \| `quorum` \| `all` (OpenAPI `ReadConsistency`) |
+
+`acorn = true` enables ACORN which estimates filter selectivity and adapts HNSW search. When `acorn = false`, ACORN is explicitly disabled. Optional `max_selectivity` is a number in `(0, 1]` and **requires** `acorn = true` (e.g. `PARAMS (acorn = true, max_selectivity = 0.4)`). **Not supported on edge.**
 
 `quantization` accepts a JSON object with `ignore`, `rescore`, and `oversampling` fields matching Qdrant's `QuantizationSearchParams`.
 
 `rrf_k` and `rrf_weights` control the Reciprocal Rank Fusion formula when `FUSION RRF` is used.
+
+```sql
+-- Request timeout 30s + majority read consistency (remote Qdrant)
+QUERY TEXT 'search' FROM docs USING dense
+  PARAMS (timeout = 30, consistency = majority, hnsw_ef = 64)
+  LIMIT 10;
+```
+
+Edge ignores request-level timeout/consistency (single-node, no cluster reads).
 
 ### Examples
 
