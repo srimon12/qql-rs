@@ -17,6 +17,7 @@ impl<T> EmbedderBound for T {}
 ///
 /// Dense calls should batch when possible (`embed_dense_batch` → one HTTP
 /// request or one ONNX batch). Sparse defaults to local BM25-style hashing.
+/// Multivector (ColBERT-style) uses [`embed_multi`] → `Vec<Vec<f32>>`.
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait Embedder: EmbedderBound {
@@ -45,6 +46,35 @@ pub trait Embedder: EmbedderBound {
         let mut results = Vec::with_capacity(texts.len());
         for text in texts {
             results.push(self.embed_dense(text, model).await?);
+        }
+        Ok(results)
+    }
+
+    /// Multivector embedding (ColBERT-style late interaction).
+    ///
+    /// Returns one dense vector per token/segment. Default rejects so hosts
+    /// that only support single-vector dense must opt in explicitly.
+    async fn embed_multi(&self, text: &str, model: &str) -> Result<Vec<Vec<f32>>, QqlError> {
+        let _ = text;
+        Err(QqlError::execution(
+            "QQL-EMBEDDING-MULTI",
+            format!(
+                "multi-vector embedding is not supported by this embedder (model='{model}'); \
+                 provide VECTOR [[...], ...] or use an embedder that implements embed_multi"
+            ),
+            None,
+        ))
+    }
+
+    /// Batch multivector embedding. Default loops [`embed_multi`].
+    async fn embed_multi_batch(
+        &self,
+        texts: &[String],
+        model: &str,
+    ) -> Result<Vec<Vec<Vec<f32>>>, QqlError> {
+        let mut results = Vec::with_capacity(texts.len());
+        for text in texts {
+            results.push(self.embed_multi(text, model).await?);
         }
         Ok(results)
     }

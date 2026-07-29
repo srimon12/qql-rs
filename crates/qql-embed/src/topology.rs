@@ -3,6 +3,9 @@
 //! Language rule: parse leaves untyped targets as `kind: None`. Execution prep
 //! fills kinds from the collection schema (dense vs sparse name lists). Call
 //! [`resolve_query_vector_kinds`] before [`crate::resolve_embeddings`].
+//!
+//! Multivector (ColBERT) names are still **dense** for kind purposes; they set
+//! [`qql_core::ast::VectorTarget::multi`] so embedding produces `MultiDense`.
 
 use qql_core::ast::{
     Prefetch, PrefetchSource, QueryExpr, QueryInput, QueryStmt, VectorKind, VectorTarget,
@@ -19,40 +22,74 @@ pub fn query_needs_kind_resolution(query: &QueryStmt) -> bool {
         || expression_needs_kind_resolution(&query.expression)
 }
 
-/// Fill `USING` kinds (and omitted targets) from dense/sparse vector names.
+/// Dense / sparse / multivector name lists for a collection.
+#[derive(Debug, Clone, Default)]
+pub struct TopologyNames {
+    pub dense: Vec<String>,
+    pub sparse: Vec<String>,
+    /// Subset of dense names that have multivector config (ColBERT-style).
+    pub multivector: Vec<String>,
+}
+
+/// Fill `USING` kinds (and omitted targets) from collection topology.
 ///
-/// `dense` / `sparse` are the named vectors declared on the collection.
 /// An empty dense list with an empty sparse list is treated as Qdrant's
 /// unnamed default dense vector.
 pub fn resolve_query_vector_kinds(
     collection: &str,
     query: &mut QueryStmt,
+    topology: &TopologyNames,
+) -> Result<(), QqlError> {
+    let topo = QueryTopology::from_names(topology);
+    configure_query(collection, query, &topo)
+}
+
+/// Convenience when only dense/sparse lists are known (no multivector flags).
+pub fn resolve_query_vector_kinds_simple(
+    collection: &str,
+    query: &mut QueryStmt,
     dense: &[String],
     sparse: &[String],
 ) -> Result<(), QqlError> {
-    let topology = QueryTopology::from_names(dense, sparse);
-    configure_query(collection, query, &topology)
+    resolve_query_vector_kinds(
+        collection,
+        query,
+        &TopologyNames {
+            dense: dense.to_vec(),
+            sparse: sparse.to_vec(),
+            multivector: Vec::new(),
+        },
+    )
 }
 
 #[derive(Debug)]
 struct QueryTopology {
     dense: Vec<String>,
     sparse: Vec<String>,
+    multivector: Vec<String>,
 }
 
 impl QueryTopology {
-    fn from_names(dense: &[String], sparse: &[String]) -> Self {
-        let mut dense = dense.to_vec();
-        let sparse = sparse.to_vec();
+    fn from_names(names: &TopologyNames) -> Self {
+        let mut dense = names.dense.clone();
+        let sparse = names.sparse.clone();
+        let multivector = names.multivector.clone();
         if dense.is_empty() && sparse.is_empty() {
-            // Unnamed default dense vector (empty schema / default collection).
             dense.push(String::new());
         }
-        Self { dense, sparse }
+        Self {
+            dense,
+            sparse,
+            multivector,
+        }
     }
 
     fn all(&self) -> impl Iterator<Item = &str> {
         self.dense.iter().chain(&self.sparse).map(String::as_str)
+    }
+
+    fn is_multi(&self, name: &str) -> bool {
+        self.multivector.iter().any(|n| n == name)
     }
 
     fn select(&self, kind: Option<VectorKind>) -> Option<(&str, VectorKind)> {
@@ -126,7 +163,15 @@ fn expression_needs_kind_resolution(expression: &QueryExpr) -> bool {
 }
 
 fn target_needs_kind(target: &Option<VectorTarget>) -> bool {
-    target.as_ref().is_none_or(|target| target.kind.is_none())
+    // Always re-resolve when multi may still need schema (kind set but multi false
+    // and name is multivector). Cheap if already complete.
+    match target {
+        None => true,
+        Some(t) if t.kind.is_none() => true,
+        // kind known but multi not set — schema may still mark multivector names.
+        Some(t) if t.kind == Some(VectorKind::Dense) && !t.multi => true,
+        Some(_) => false,
+    }
 }
 
 fn prefetch_needs_kind(prefetch: &Prefetch) -> bool {
@@ -286,14 +331,34 @@ fn resolve_using(
     topology: &QueryTopology,
 ) -> Result<(), QqlError> {
     if let Some(target) = using {
-        let actual_kind = topology.kind_of(&target.name).ok_or_else(|| {
+        let Some(actual_kind) = topology.kind_of(&target.name) else {
+            // Name not on the collection topology.
+            // Keep an already-declared AS kind (offline / empty mock schema).
+            // Only error when kind is still unknown.
+            if target.kind.is_some() {
+                return Ok(());
+            }
             let available: Vec<String> = topology.all().map(str::to_string).collect();
-            unknown_vector_error(collection, &target.name, &available)
-        })?;
+            return Err(unknown_vector_error(collection, &target.name, &available));
+        };
         if target.kind.is_some_and(|hint| hint != actual_kind)
             || required_kind.is_some_and(|required| required != actual_kind)
         {
             return Err(vector_kind_error(collection, &target.name, actual_kind));
+        }
+        // Explicit AS MULTI stays multi; schema may upgrade dense → multi.
+        if topology.is_multi(&target.name) {
+            target.multi = true;
+        }
+        if target.multi && actual_kind != VectorKind::Dense {
+            return Err(QqlError::execution(
+                "QQL-VECTOR-KIND",
+                format!(
+                    "Vector '{}' in collection '{collection}' cannot be multivector (not dense)",
+                    target.name
+                ),
+                None,
+            ));
         }
         target.kind = Some(actual_kind);
         return Ok(());
@@ -305,6 +370,7 @@ fn resolve_using(
         *using = Some(VectorTarget {
             name: name.to_string(),
             kind: Some(kind),
+            multi: topology.is_multi(name),
         });
     }
     Ok(())
@@ -386,7 +452,7 @@ pub fn unknown_using_kind_error(name: &str) -> QqlError {
     QqlError::execution(
         "QQL-VECTOR-KIND",
         format!(
-            "vector kind for '{name}' is unknown; use `USING {name} AS DENSE|SPARSE` or resolve kinds from the collection schema before embedding"
+            "vector kind for '{name}' is unknown; use `USING {name} AS DENSE|SPARSE|MULTI` or resolve kinds from the collection schema before embedding"
         ),
         None,
     )

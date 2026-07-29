@@ -26,6 +26,7 @@
                   "prefetch": [],
                   "using": {
                     "kind": "Dense",
+                    "multi": false,
                     "name": "semantic_v2"
                   }
                 }
@@ -71,6 +72,7 @@
                         "prefetch": [],
                         "using": {
                           "kind": "Dense",
+                          "multi": false,
                           "name": "semantic_v2"
                         }
                       }
@@ -103,6 +105,7 @@
                   "prefetch": [],
                   "using": {
                     "kind": "Sparse",
+                    "multi": false,
                     "name": "lexical_v2"
                   }
                 }
@@ -184,6 +187,7 @@
                   "prefetch": [],
                   "using": {
                     "kind": "Dense",
+                    "multi": false,
                     "name": "semantic_v2"
                   }
                 }
@@ -225,6 +229,7 @@
                         "prefetch": [],
                         "using": {
                           "kind": "Dense",
+                          "multi": false,
                           "name": "semantic_v2"
                         }
                       }
@@ -257,6 +262,7 @@
                   "prefetch": [],
                   "using": {
                     "kind": "Sparse",
+                    "multi": false,
                     "name": "lexical_v2"
                   }
                 }
@@ -338,6 +344,7 @@
                   "prefetch": [],
                   "using": {
                     "kind": null,
+                    "multi": false,
                     "name": "dense"
                   }
                 }
@@ -379,6 +386,7 @@
                         "prefetch": [],
                         "using": {
                           "kind": null,
+                          "multi": false,
                           "name": "dense"
                         }
                       }
@@ -411,6 +419,7 @@
                   "prefetch": [],
                   "using": {
                     "kind": null,
+                    "multi": false,
                     "name": "bm25"
                   }
                 }
@@ -500,6 +509,7 @@
                   "prefetch": [],
                   "using": {
                     "kind": null,
+                    "multi": false,
                     "name": "dense"
                   }
                 }
@@ -576,6 +586,7 @@
                   "prefetch": [],
                   "using": {
                     "kind": null,
+                    "multi": false,
                     "name": "dense"
                   }
                 }
@@ -617,6 +628,7 @@
             ],
             "using": {
               "kind": null,
+              "multi": false,
               "name": "colbert"
             }
           }
@@ -659,6 +671,7 @@
                   "prefetch": [],
                   "using": {
                     "kind": null,
+                    "multi": false,
                     "name": "dense"
                   }
                 }
@@ -700,6 +713,7 @@
                         "prefetch": [],
                         "using": {
                           "kind": null,
+                          "multi": false,
                           "name": "dense"
                         }
                       }
@@ -732,6 +746,7 @@
                   "prefetch": [],
                   "using": {
                     "kind": null,
+                    "multi": false,
                     "name": "bm25"
                   }
                 }
@@ -813,6 +828,7 @@
                   "prefetch": [],
                   "using": {
                     "kind": null,
+                    "multi": false,
                     "name": "dense"
                   }
                 }
@@ -854,6 +870,7 @@
                         "prefetch": [],
                         "using": {
                           "kind": null,
+                          "multi": false,
                           "name": "dense"
                         }
                       }
@@ -886,6 +903,7 @@
                   "prefetch": [],
                   "using": {
                     "kind": null,
+                    "multi": false,
                     "name": "bm25"
                   }
                 }

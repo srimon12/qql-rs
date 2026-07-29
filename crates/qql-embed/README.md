@@ -38,7 +38,8 @@ Resolution happens in these cases:
 |-----------|-------------|--------|
 | `QUERY 'text' ... USING name AS DENSE` | Bare string or `TEXT '...'` | Query input rewrites to dense vector |
 | `QUERY 'text' ... USING name AS SPARSE` | Bare string or `TEXT '...'` | Query input rewrites to sparse vector |
-| `QUERY 'text' ... USING name` (no `AS`) | Bare string or `TEXT '...'` | **Errors** unless kinds were filled by `resolve_query_vector_kinds` from collection schema first |
+| `QUERY 'text' ... USING name AS MULTI` | Bare string or `TEXT '...'` | Multivector embed → `MultiDense` (ColBERT-style) |
+| `QUERY 'text' ... USING name` (no `AS`) | Bare string or `TEXT '...'` | **Errors** unless kinds were filled by `resolve_query_vector_kinds` from collection schema first (schema may also set multivector) |
 | `QUERY HYBRID TEXT '...'` | Hybrid text | Dense + sparse vector pair |
 | `UPSERT ... USING DENSE MODEL 'm'` | Payload `text` field | Dense vector per point |
 | `UPSERT ... USING HYBRID` | Payload `text` field | Dense + sparse vectors per point |

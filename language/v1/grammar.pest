@@ -58,7 +58,9 @@ query_tail = {
 }
 
 vector_target = { vector_name ~ (^"AS" ~ vector_kind)? }
-vector_kind = { ^"DENSE" | ^"SPARSE" }
+// MULTI / MULTIVECTOR mark a dense multivector target (ColBERT-style).
+// Role is still dense; multi is a shape flag, not a third sparse/dense kind.
+vector_kind = { ^"DENSE" | ^"SPARSE" | ^"MULTI" | ^"MULTIVECTOR" }
 
 group_clause = {
     ^"GROUP" ~ ^"BY" ~ field

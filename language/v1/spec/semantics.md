@@ -55,11 +55,17 @@ materialized; they are not reserved and receive no selection priority.
 A query target is represented as:
 
 ```text
-USING <name> [AS DENSE | AS SPARSE]
+USING <name> [AS DENSE | AS SPARSE | AS MULTI | AS MULTIVECTOR]
 ```
 
 The name answers “which vector?” and the optional role answers “what kind of
 embedding/query input?”. They are independent.
+
+`AS MULTI` / `AS MULTIVECTOR` mark a **dense multivector** target (ColBERT-style
+late interaction). Multivector is not a third kind beside dense/sparse: the
+role remains dense and the query input shape is multi-dense
+(`[[f32, …], …]`). Collection schema may also mark named dense vectors as
+multivector when they carry `multivector_config` (e.g. `max_sim`).
 
 ### 3.1 Query target resolution
 
@@ -76,10 +82,11 @@ Resolution occurs before text embedding:
    contain exactly one vector in total.
 5. Otherwise inference is ambiguous and fails with `QQL-MISSING-USING`.
 
-`RERANK` always requires a dense target. `HYBRID` resolves its dense and sparse
-names independently; each omitted name requires exactly one named candidate of
-the corresponding role. Mixed dense and sparse structural inputs in one query
-expression are invalid.
+`RERANK` always requires a dense target (single-vector or multivector). When
+the target is multivector, text is embedded via multi-vector embedding into
+`MultiDense`. `HYBRID` resolves its dense and sparse names independently; each
+omitted name requires exactly one named candidate of the corresponding role.
+Mixed dense and sparse structural inputs in one query expression are invalid.
 
 The parse-time canonical AST records only source information. Therefore an
 explicit `AS` appears as `kind: "Dense"` or `"Sparse"`, an untyped explicit

@@ -1042,8 +1042,8 @@ impl Client {
             return Ok(());
         }
         let collection = collection.clone();
-        let (dense, sparse) = self.fetch_vector_topology(&collection).await?;
-        qql_embed::resolve_query_vector_kinds(&collection, query, &dense, &sparse)
+        let topology = self.fetch_vector_topology(&collection).await?;
+        qql_embed::resolve_query_vector_kinds(&collection, query, &topology)
             .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
@@ -1059,7 +1059,7 @@ impl Client {
     async fn fetch_vector_topology(
         &self,
         collection: &str,
-    ) -> Result<(Vec<String>, Vec<String>), JsValue> {
+    ) -> Result<qql_embed::TopologyNames, JsValue> {
         let path = format!("/collections/{collection}");
         let body = self.send_json("GET", &path, None).await?;
         let result = body
@@ -1317,11 +1317,12 @@ impl Client {
     }
 }
 
-/// Extract named dense/sparse vector names from a Qdrant collection `result` object.
+/// Extract named dense/sparse/multivector names from a Qdrant collection `result` object.
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
-fn vector_names_from_collection_result(result: &serde_json::Value) -> (Vec<String>, Vec<String>) {
+fn vector_names_from_collection_result(result: &serde_json::Value) -> qql_embed::TopologyNames {
     let params = result.get("config").and_then(|c| c.get("params"));
     let mut dense = Vec::new();
+    let mut multivector = Vec::new();
     if let Some(vectors) = params
         .and_then(|p| p.get("vectors"))
         .and_then(|v| v.as_object())
@@ -1330,16 +1331,25 @@ fn vector_names_from_collection_result(result: &serde_json::Value) -> (Vec<Strin
             // Unnamed default dense vector.
             dense.clear();
         } else {
-            for name in vectors.keys() {
+            for (name, cfg) in vectors {
                 if matches!(
                     name.as_str(),
-                    "size" | "distance" | "hnsw_config" | "quantization_config" | "on_disk"
+                    "size"
+                        | "distance"
+                        | "hnsw_config"
+                        | "quantization_config"
+                        | "on_disk"
+                        | "multivector_config"
                 ) {
                     continue;
                 }
                 dense.push(name.clone());
+                if cfg.get("multivector_config").is_some() {
+                    multivector.push(name.clone());
+                }
             }
             dense.sort();
+            multivector.sort();
         }
     }
     let mut sparse = Vec::new();
@@ -1350,7 +1360,11 @@ fn vector_names_from_collection_result(result: &serde_json::Value) -> (Vec<Strin
         sparse.extend(map.keys().cloned());
         sparse.sort();
     }
-    (dense, sparse)
+    qql_embed::TopologyNames {
+        dense,
+        sparse,
+        multivector,
+    }
 }
 
 #[cfg(all(feature = "client", target_arch = "wasm32"))]

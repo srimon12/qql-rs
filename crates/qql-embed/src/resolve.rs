@@ -197,7 +197,7 @@ fn collect_expr_dense_jobs(
             prefetch,
             ..
         } => {
-            collect_input_dense_job(input, require_target_kind(using)?, "default", jobs);
+            collect_input_dense_job(input, require_embed_target(using)?, "default", jobs);
             collect_prefetches_dense_jobs(prefetch, jobs)?;
         }
         QueryExpr::Recommend {
@@ -207,9 +207,9 @@ fn collect_expr_dense_jobs(
             prefetch,
             ..
         } => {
-            let kind = require_target_kind(using)?;
+            let target = require_embed_target(using)?;
             for input in positive.iter().chain(negative.iter()) {
-                collect_input_dense_job(input, kind, "default", jobs);
+                collect_input_dense_job(input, target, "default", jobs);
             }
             collect_prefetches_dense_jobs(prefetch, jobs)?;
         }
@@ -219,10 +219,10 @@ fn collect_expr_dense_jobs(
             prefetch,
             ..
         } => {
-            let kind = require_target_kind(using)?;
+            let target = require_embed_target(using)?;
             for pair in pairs {
-                collect_input_dense_job(&pair.positive, kind, "default", jobs);
-                collect_input_dense_job(&pair.negative, kind, "default", jobs);
+                collect_input_dense_job(&pair.positive, target, "default", jobs);
+                collect_input_dense_job(&pair.negative, target, "default", jobs);
             }
             collect_prefetches_dense_jobs(prefetch, jobs)?;
         }
@@ -233,11 +233,11 @@ fn collect_expr_dense_jobs(
             prefetch,
             ..
         } => {
-            let kind = require_target_kind(using)?;
-            collect_input_dense_job(target, kind, "default", jobs);
+            let emb = require_embed_target(using)?;
+            collect_input_dense_job(target, emb, "default", jobs);
             for pair in context {
-                collect_input_dense_job(&pair.positive, kind, "default", jobs);
-                collect_input_dense_job(&pair.negative, kind, "default", jobs);
+                collect_input_dense_job(&pair.positive, emb, "default", jobs);
+                collect_input_dense_job(&pair.negative, emb, "default", jobs);
             }
             collect_prefetches_dense_jobs(prefetch, jobs)?;
         }
@@ -251,10 +251,10 @@ fn collect_expr_dense_jobs(
             prefetch,
             ..
         } => {
-            let kind = require_target_kind(using)?;
-            collect_input_dense_job(target, kind, "default", jobs);
+            let emb = require_embed_target(using)?;
+            collect_input_dense_job(target, emb, "default", jobs);
             for fb in feedback {
-                collect_input_dense_job(&fb.example, kind, "default", jobs);
+                collect_input_dense_job(&fb.example, emb, "default", jobs);
             }
             collect_prefetches_dense_jobs(prefetch, jobs)?;
         }
@@ -265,10 +265,22 @@ fn collect_expr_dense_jobs(
         QueryExpr::Rerank {
             input,
             model,
+            using,
             prefetch,
             ..
         } => {
-            collect_input_dense_job(input, VectorKind::Dense, model.as_str(), jobs);
+            // RERANK uses the MODEL string for dense/multi, not "default".
+            let mut emb = require_embed_target(using)?;
+            // RERANK is always dense-family; multi comes from USING / schema.
+            if emb.kind == VectorKind::Sparse {
+                return Err(QqlError::execution(
+                    "QQL-VECTOR-KIND",
+                    "RERANK requires a dense (or multivector) target, not sparse",
+                    None,
+                ));
+            }
+            emb.kind = VectorKind::Dense;
+            collect_input_dense_job(input, emb, model.as_str(), jobs);
             collect_prefetches_dense_jobs(prefetch, jobs)?;
         }
         _ => {}
@@ -276,14 +288,16 @@ fn collect_expr_dense_jobs(
     Ok(())
 }
 
+/// Only single-vector dense TEXT inputs join the dense batch; sparse and multi
+/// are applied one-by-one later.
 fn collect_input_dense_job(
     input: &QueryInput,
-    kind: VectorKind,
+    target: EmbedTarget,
     default_model: &str,
     jobs: &mut Vec<(String, String)>,
 ) {
     if let QueryInput::Text { text, model } = input {
-        if kind == VectorKind::Dense {
+        if target.kind == VectorKind::Dense && !target.multi {
             let m = model.as_deref().unwrap_or(default_model).to_string();
             jobs.push((m, text.clone()));
         }
@@ -382,7 +396,14 @@ fn apply_expr_embeddings<'a>(
                 prefetch,
                 ..
             } => {
-                apply_input(input, require_target_kind(using)?, embedder, dense).await?;
+                apply_input(
+                    input,
+                    require_embed_target(using)?,
+                    "default",
+                    embedder,
+                    dense,
+                )
+                .await?;
                 apply_prefetches_embeddings(prefetch, embedder, dense).await?;
             }
             QueryExpr::Recommend {
@@ -392,9 +413,9 @@ fn apply_expr_embeddings<'a>(
                 prefetch,
                 ..
             } => {
-                let kind = require_target_kind(using)?;
+                let target = require_embed_target(using)?;
                 for input in positive.iter_mut().chain(negative.iter_mut()) {
-                    apply_input(input, kind, embedder, dense).await?;
+                    apply_input(input, target, "default", embedder, dense).await?;
                 }
                 apply_prefetches_embeddings(prefetch, embedder, dense).await?;
             }
@@ -404,10 +425,10 @@ fn apply_expr_embeddings<'a>(
                 prefetch,
                 ..
             } => {
-                let kind = require_target_kind(using)?;
+                let target = require_embed_target(using)?;
                 for pair in pairs {
-                    apply_input(&mut pair.positive, kind, embedder, dense).await?;
-                    apply_input(&mut pair.negative, kind, embedder, dense).await?;
+                    apply_input(&mut pair.positive, target, "default", embedder, dense).await?;
+                    apply_input(&mut pair.negative, target, "default", embedder, dense).await?;
                 }
                 apply_prefetches_embeddings(prefetch, embedder, dense).await?;
             }
@@ -418,11 +439,11 @@ fn apply_expr_embeddings<'a>(
                 prefetch,
                 ..
             } => {
-                let kind = require_target_kind(using)?;
-                apply_input(target, kind, embedder, dense).await?;
+                let emb = require_embed_target(using)?;
+                apply_input(target, emb, "default", embedder, dense).await?;
                 for pair in context {
-                    apply_input(&mut pair.positive, kind, embedder, dense).await?;
-                    apply_input(&mut pair.negative, kind, embedder, dense).await?;
+                    apply_input(&mut pair.positive, emb, "default", embedder, dense).await?;
+                    apply_input(&mut pair.negative, emb, "default", embedder, dense).await?;
                 }
                 apply_prefetches_embeddings(prefetch, embedder, dense).await?;
             }
@@ -436,10 +457,10 @@ fn apply_expr_embeddings<'a>(
                 prefetch,
                 ..
             } => {
-                let kind = require_target_kind(using)?;
-                apply_input(target, kind, embedder, dense).await?;
+                let emb = require_embed_target(using)?;
+                apply_input(target, emb, "default", embedder, dense).await?;
                 for fb in feedback {
-                    apply_input(&mut fb.example, kind, embedder, dense).await?;
+                    apply_input(&mut fb.example, emb, "default", embedder, dense).await?;
                 }
                 apply_prefetches_embeddings(prefetch, embedder, dense).await?;
             }
@@ -469,6 +490,7 @@ fn apply_expr_embeddings<'a>(
                         using: Some(VectorTarget {
                             name: d_vec_name.to_string(),
                             kind: Some(VectorKind::Dense),
+                            multi: false,
                         }),
                         prefetch: Vec::new(),
                         mmr: None,
@@ -492,6 +514,7 @@ fn apply_expr_embeddings<'a>(
                         using: Some(VectorTarget {
                             name: s_vec_name.to_string(),
                             kind: Some(VectorKind::Sparse),
+                            multi: false,
                         }),
                         prefetch: Vec::new(),
                         mmr: None,
@@ -525,11 +548,14 @@ fn apply_expr_embeddings<'a>(
             }
             QueryExpr::Rerank {
                 input,
-                model: _,
+                model,
+                using,
                 prefetch,
                 ..
             } => {
-                apply_input(input, VectorKind::Dense, embedder, dense).await?;
+                let mut emb = require_embed_target(using)?;
+                emb.kind = VectorKind::Dense;
+                apply_input(input, emb, model.as_str(), embedder, dense).await?;
                 apply_prefetches_embeddings(prefetch, embedder, dense).await?;
             }
             _ => {}
@@ -540,41 +566,68 @@ fn apply_expr_embeddings<'a>(
 
 async fn apply_input(
     input: &mut QueryInput,
-    kind: VectorKind,
+    target: EmbedTarget,
+    default_model: &str,
     embedder: &dyn Embedder,
     dense: DenseIter<'_>,
 ) -> Result<(), QqlError> {
-    if let QueryInput::Text { text, .. } = input {
-        if kind == VectorKind::Sparse {
-            let s_vec = embedder.embed_sparse(text).await?;
-            *input = QueryInput::Vector(VectorValue::Sparse {
-                indices: s_vec.indices,
-                values: s_vec.values,
-            });
-        } else {
-            let vec = dense.next().ok_or_else(|| {
-                QqlError::execution(
-                    "QQL-EMBEDDING",
-                    "internal error: ran out of dense embeddings",
-                    None,
-                )
-            })?;
-            *input = QueryInput::Vector(VectorValue::Dense(vec));
-        }
+    let QueryInput::Text { text, model } = input else {
+        return Ok(());
+    };
+    let model_name = model.as_deref().unwrap_or(default_model);
+    if target.kind == VectorKind::Sparse {
+        let s_vec = embedder.embed_sparse(text).await?;
+        *input = QueryInput::Vector(VectorValue::Sparse {
+            indices: s_vec.indices,
+            values: s_vec.values,
+        });
+        return Ok(());
     }
+    if target.multi {
+        let rows = embedder.embed_multi(text, model_name).await?;
+        if rows.is_empty() {
+            return Err(QqlError::execution(
+                "QQL-EMBEDDING-MULTI",
+                "embed_multi returned an empty multivector",
+                None,
+            ));
+        }
+        *input = QueryInput::Vector(VectorValue::MultiDense(rows));
+        return Ok(());
+    }
+    let vec = dense.next().ok_or_else(|| {
+        QqlError::execution(
+            "QQL-EMBEDDING",
+            "internal error: ran out of dense embeddings",
+            None,
+        )
+    })?;
+    *input = QueryInput::Vector(VectorValue::Dense(vec));
     Ok(())
 }
 
-/// Resolve the embed kind for a `USING` target.
+#[derive(Debug, Clone, Copy)]
+struct EmbedTarget {
+    kind: VectorKind,
+    multi: bool,
+}
+
+/// Resolve embed target for a `USING` clause.
 ///
-/// - No `USING` → dense (offline default for bare text nearest).
-/// - `USING name AS kind` or schema-filled `kind` → that kind.
-/// - `USING name` with `kind: None` → error (never silent dense default).
-fn require_target_kind(target: &Option<VectorTarget>) -> Result<VectorKind, QqlError> {
+/// - No `USING` → single dense.
+/// - `USING name AS …` / schema-filled kind → that kind; `multi` from AS MULTI or schema.
+/// - `USING name` with `kind: None` → error.
+fn require_embed_target(target: &Option<VectorTarget>) -> Result<EmbedTarget, QqlError> {
     match target {
-        None => Ok(VectorKind::Dense),
+        None => Ok(EmbedTarget {
+            kind: VectorKind::Dense,
+            multi: false,
+        }),
         Some(t) => match t.kind {
-            Some(kind) => Ok(kind),
+            Some(kind) => Ok(EmbedTarget {
+                kind,
+                multi: t.multi,
+            }),
             None => Err(crate::topology::unknown_using_kind_error(&t.name)),
         },
     }

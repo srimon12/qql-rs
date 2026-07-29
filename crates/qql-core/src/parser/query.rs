@@ -48,29 +48,37 @@ impl<'a> AstLowerer<'a> {
         let using = if self.peek()?.kind == TokenKind::Using {
             self.advance()?;
             let name = self.parse_identifier()?;
-            let kind = if self.peek()?.kind == TokenKind::As {
+            let (kind, multi) = if self.peek()?.kind == TokenKind::As {
                 self.advance()?;
-                Some(match self.peek()?.kind {
+                match self.peek()?.kind {
                     TokenKind::Dense => {
                         self.advance()?;
-                        VectorKind::Dense
+                        (Some(VectorKind::Dense), false)
                     }
                     TokenKind::Sparse => {
                         self.advance()?;
-                        VectorKind::Sparse
+                        (Some(VectorKind::Sparse), false)
+                    }
+                    // Slight additive form: AS MULTI | AS MULTIVECTOR → dense multivector.
+                    // Matched as bare words so we avoid a new reserved keyword.
+                    _ if ascii_equal(self.peek()?.text, "MULTI")
+                        || ascii_equal(self.peek()?.text, "MULTIVECTOR") =>
+                    {
+                        self.advance()?;
+                        (Some(VectorKind::Dense), true)
                     }
                     _ => {
                         return Err(QqlError::parse(
                             "QQL-PARSE-VECTOR-KIND",
-                            "USING <vector> AS requires DENSE or SPARSE",
+                            "USING <vector> AS requires DENSE, SPARSE, or MULTI",
                             self.peek()?.span,
                         ));
                     }
-                })
+                }
             } else {
-                None
+                (None, false)
             };
-            Some(VectorTarget { name, kind })
+            Some(VectorTarget { name, kind, multi })
         } else {
             None
         };

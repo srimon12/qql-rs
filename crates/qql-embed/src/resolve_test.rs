@@ -11,11 +11,12 @@ use std::sync::{Arc, Mutex};
 use crate::embedder::Embedder;
 use crate::resolve::resolve_embeddings;
 use crate::sparse::SparseVector;
-use crate::topology::resolve_query_vector_kinds;
+use crate::topology::{resolve_query_vector_kinds, TopologyNames};
 
 #[derive(Default)]
 struct MockEmbedder {
     dense_calls: Arc<Mutex<Vec<(String, String)>>>, // (model, text)
+    multi_calls: Arc<Mutex<Vec<(String, String)>>>,
     dense_batch_override: Option<Vec<Vec<f32>>>,
 }
 
@@ -51,6 +52,14 @@ impl Embedder for MockEmbedder {
             return Ok(override_vecs.clone());
         }
         Ok(texts.iter().map(|_| vec![1.0, 2.0, 3.0]).collect())
+    }
+
+    async fn embed_multi(&self, text: &str, model: &str) -> Result<Vec<Vec<f32>>, QqlError> {
+        self.multi_calls
+            .lock()
+            .unwrap()
+            .push((model.to_string(), text.to_string()));
+        Ok(vec![vec![0.1, 0.2], vec![0.3, 0.4], vec![0.5, 0.6]])
     }
 }
 
@@ -442,7 +451,16 @@ async fn using_sparse_embeds_sparse_after_topology_resolution() {
     let Stmt::Query(query) = &mut stmt else {
         panic!("expected Query");
     };
-    resolve_query_vector_kinds("docs", query, &["dense".into()], &["sparse".into()]).unwrap();
+    resolve_query_vector_kinds(
+        "docs",
+        query,
+        &TopologyNames {
+            dense: vec!["dense".into()],
+            sparse: vec!["sparse".into()],
+            multivector: Vec::new(),
+        },
+    )
+    .unwrap();
     let mock = MockEmbedder::default();
     resolve_embeddings(&mut stmt, &mock).await.unwrap();
 
@@ -459,6 +477,90 @@ async fn using_sparse_embeds_sparse_after_topology_resolution() {
     assert_eq!(
         using.as_ref().map(|t| (t.name.as_str(), t.kind)),
         Some(("sparse", Some(qql_core::ast::VectorKind::Sparse)))
+    );
+}
+
+#[tokio::test]
+async fn using_as_multi_embeds_multidense() {
+    let mut stmt =
+        Parser::parse("QUERY TEXT 'colbert query' FROM docs USING colbert AS MULTI LIMIT 10")
+            .unwrap();
+    let mock = MockEmbedder::default();
+    resolve_embeddings(&mut stmt, &mock).await.unwrap();
+
+    let Stmt::Query(query) = &stmt else {
+        panic!("expected Query");
+    };
+    let QueryExpr::Nearest { input, using, .. } = &query.expression else {
+        panic!("expected Nearest");
+    };
+    match input {
+        QueryInput::Vector(VectorValue::MultiDense(rows)) => {
+            assert_eq!(rows.len(), 3);
+            assert_eq!(rows[0], vec![0.1, 0.2]);
+        }
+        other => panic!("expected MultiDense, got {other:?}"),
+    }
+    assert!(using.as_ref().is_some_and(|t| t.multi));
+    assert_eq!(mock.dense_calls.lock().unwrap().len(), 0);
+    assert_eq!(mock.multi_calls.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn schema_multivector_name_marks_multi_and_embeds() {
+    let mut stmt = Parser::parse("QUERY TEXT 'q' FROM docs USING colbert LIMIT 10").unwrap();
+    let Stmt::Query(query) = &mut stmt else {
+        panic!("expected Query");
+    };
+    resolve_query_vector_kinds(
+        "docs",
+        query,
+        &TopologyNames {
+            dense: vec!["dense".into(), "colbert".into()],
+            sparse: Vec::new(),
+            multivector: vec!["colbert".into()],
+        },
+    )
+    .unwrap();
+    let QueryExpr::Nearest { using, .. } = &query.expression else {
+        panic!("expected Nearest");
+    };
+    assert!(using.as_ref().is_some_and(|t| t.multi));
+    assert_eq!(
+        using.as_ref().and_then(|t| t.kind),
+        Some(qql_core::ast::VectorKind::Dense)
+    );
+
+    let mock = MockEmbedder::default();
+    resolve_embeddings(&mut stmt, &mock).await.unwrap();
+    let Stmt::Query(query) = &stmt else {
+        panic!("expected Query");
+    };
+    let QueryExpr::Nearest { input, .. } = &query.expression else {
+        panic!("expected Nearest");
+    };
+    assert!(matches!(
+        input,
+        QueryInput::Vector(VectorValue::MultiDense(_))
+    ));
+}
+
+#[tokio::test]
+async fn rerank_with_multivector_using_embeds_multi() {
+    let mut stmt = Parser::parse(
+        "WITH c AS (QUERY TEXT 'x' USING dense AS DENSE LIMIT 100) \
+         QUERY RERANK TEXT 'rerank-me' MODEL 'colbert-v2' FROM docs USING colbert AS MULTI PREFETCH (c) LIMIT 10;",
+    )
+    .unwrap();
+    let mock = MockEmbedder::default();
+    resolve_embeddings(&mut stmt, &mock).await.unwrap();
+    let multi = mock.multi_calls.lock().unwrap();
+    assert!(
+        multi
+            .iter()
+            .any(|(m, t)| m == "colbert-v2" && t == "rerank-me"),
+        "expected multi embed with colbert model, got: {:?}",
+        *multi
     );
 }
 

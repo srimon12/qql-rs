@@ -776,8 +776,10 @@ impl Executor {
             return Ok(());
         }
 
-        let (model, dense_name, sparse_name) = match &create.mode {
-            ast::CollectionMode::Dense { model } => (model.as_deref(), DENSE_VECTOR_NAME, None),
+        let (model, dense_name, sparse_name, with_colbert) = match &create.mode {
+            ast::CollectionMode::Dense { model } => {
+                (model.as_deref(), DENSE_VECTOR_NAME, None, false)
+            }
             ast::CollectionMode::Hybrid {
                 dense_vector,
                 sparse_vector,
@@ -785,8 +787,12 @@ impl Executor {
                 None,
                 dense_vector.as_deref().unwrap_or(DENSE_VECTOR_NAME),
                 Some(sparse_vector.as_deref().unwrap_or(SPARSE_VECTOR_NAME)),
+                false,
             ),
-            ast::CollectionMode::Rerank => (None, DENSE_VECTOR_NAME, Some(SPARSE_VECTOR_NAME)),
+            // Conventional dense + sparse + ColBERT multivector topology.
+            ast::CollectionMode::Rerank => {
+                (None, DENSE_VECTOR_NAME, Some(SPARSE_VECTOR_NAME), true)
+            }
         };
         let dense_size = self.resolve_dense_vector_size(model).await? as u64;
         create.vectors.push(ast::VectorDef {
@@ -803,6 +809,19 @@ impl Executor {
                 name: sparse_name.to_string(),
                 index: None,
                 modifier: None,
+            });
+        }
+        if with_colbert {
+            create.vectors.push(ast::VectorDef {
+                name: RERANK_VECTOR_NAME.to_string(),
+                size: RERANK_VECTOR_SIZE,
+                distance: ast::VectorDistance::Cosine,
+                hnsw: None,
+                quantization: None,
+                multivector: Some(ast::MultivectorConfig {
+                    comparator: ast::MultivectorComparator::MaxSim,
+                }),
+                vectors: None,
             });
         }
 

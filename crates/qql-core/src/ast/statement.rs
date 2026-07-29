@@ -45,6 +45,11 @@ pub enum VectorKind {
 pub struct VectorTarget {
     pub name: String,
     pub kind: Option<VectorKind>,
+    /// Multivector (ColBERT-style) dense target. Filled at parse only via
+    /// `AS MULTI`, or at execution prep from collection schema
+    /// (`multivector_config`). Not a third `VectorKind` — still dense.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub multi: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

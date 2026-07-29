@@ -224,9 +224,28 @@ fn using_can_declare_an_arbitrary_sparse_vector() {
             using: Some(crate::ast::VectorTarget {
                 ref name,
                 kind: Some(crate::ast::VectorKind::Sparse),
+                multi: false,
             }),
             ..
         } if name == "lexical_v2"
+    ));
+}
+
+#[test]
+fn using_as_multi_marks_dense_multivector() {
+    let s =
+        Parser::parse("QUERY TEXT 'search' FROM docs USING colbert AS MULTI LIMIT 10;").unwrap();
+    let Stmt::Query(q) = s else { panic!() };
+    assert!(matches!(
+        q.expression,
+        QueryExpr::Nearest {
+            using: Some(crate::ast::VectorTarget {
+                ref name,
+                kind: Some(crate::ast::VectorKind::Dense),
+                multi: true,
+            }),
+            ..
+        } if name == "colbert"
     ));
 }
 

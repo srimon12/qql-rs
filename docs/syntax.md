@@ -49,10 +49,13 @@ Top-level queries require `FROM`. A CTE may omit it and inherit the outer collec
 
 Vector names are application-defined; `dense` and `sparse` are defaults, not
 reserved names. `AS DENSE` or `AS SPARSE` declares the role of an arbitrary
-named vector, for example `USING lexical_v2 AS SPARSE`. Without `AS`, the
-executor resolves the named vector's role from the collection schema. When
-`USING` is omitted, execution succeeds only if the schema has exactly one
-compatible vector; ambiguous schemas require an explicit target.
+named vector, for example `USING lexical_v2 AS SPARSE`. `AS MULTI` /
+`AS MULTIVECTOR` marks a dense multivector target (ColBERT-style); the role is
+still dense and embedding produces a multi-dense value. Without `AS`, the
+executor resolves the named vector's role from the collection schema (including
+multivector flags from `multivector_config`). When `USING` is omitted, execution
+succeeds only if the schema has exactly one compatible vector; ambiguous schemas
+require an explicit target.
 
 ### Query Expressions
 

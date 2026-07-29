@@ -852,6 +852,7 @@ mod tests {
                 using: Some(VectorTarget {
                     name: "dense".into(),
                     kind: Some(VectorKind::Dense),
+                    multi: false,
                 }),
                 prefetch: Vec::new(),
             },

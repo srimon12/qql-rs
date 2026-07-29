@@ -167,17 +167,32 @@ fn test_local_config() -> QqlConfig {
 }
 
 fn collection_with_vectors(dense: &[&str], sparse: &[&str]) -> CollectionInfo {
+    collection_with_vectors_multi(dense, sparse, &[])
+}
+
+fn collection_with_vectors_multi(
+    dense: &[&str],
+    sparse: &[&str],
+    multivector: &[&str],
+) -> CollectionInfo {
     let mut info = CollectionInfo::default();
     info.schema.vectors = dense
         .iter()
-        .map(|name| VectorSpec {
-            name: Some((*name).to_string()),
-            size: 3,
-            distance: "Cosine".to_string(),
-            hnsw: None,
-            quantization: None,
-            multivector: None,
-            on_disk: None,
+        .map(|name| {
+            let is_multi = multivector.iter().any(|m| m == name);
+            VectorSpec {
+                name: Some((*name).to_string()),
+                size: if is_multi { 128 } else { 3 },
+                distance: "Cosine".to_string(),
+                hnsw: None,
+                quantization: None,
+                multivector: is_multi.then(|| {
+                    let mut m = serde_json::Map::new();
+                    m.insert("comparator".into(), serde_json::json!("max_sim"));
+                    m
+                }),
+                on_disk: None,
+            }
         })
         .collect();
     info.schema.dense_vectors = dense.iter().map(|name| (*name).to_string()).collect();
@@ -218,6 +233,7 @@ struct MockEmbedder {
     dense: Vec<f32>,
     sparse_indices: Vec<u32>,
     sparse_values: Vec<f32>,
+    multi: Vec<Vec<f32>>,
 }
 
 #[async_trait]
@@ -230,6 +246,9 @@ impl crate::embedder::Embedder for MockEmbedder {
             indices: self.sparse_indices.clone(),
             values: self.sparse_values.clone(),
         })
+    }
+    async fn embed_multi(&self, _text: &str, _model: &str) -> Result<Vec<Vec<f32>>, QqlError> {
+        Ok(self.multi.clone())
     }
 }
 
@@ -469,6 +488,7 @@ async fn text_query_resolves_arbitrary_sparse_vector_by_schema() {
         dense: vec![0.1, 0.2, 0.3],
         sparse_indices: vec![1, 7],
         sparse_values: vec![0.4, 0.8],
+        multi: vec![vec![0.1, 0.2], vec![0.3, 0.4]],
     });
     let executor =
         Executor::with_embedder(Box::new(client), Some(test_local_config()), Some(embedder));
@@ -505,6 +525,7 @@ async fn cte_prefetch_using_sparse_embeds_sparse_via_schema() {
         dense: vec![0.1, 0.2, 0.3],
         sparse_indices: vec![2, 9],
         sparse_values: vec![0.5, 0.9],
+        multi: vec![vec![0.1, 0.2], vec![0.3, 0.4]],
     });
     let executor =
         Executor::with_embedder(Box::new(client), Some(test_local_config()), Some(embedder));
@@ -547,6 +568,50 @@ async fn cte_prefetch_using_sparse_embeds_sparse_via_schema() {
 }
 
 #[tokio::test]
+async fn text_query_multivector_embeds_multi_via_schema() {
+    let mut client = MockQdrantClient::default();
+    client.exists = true;
+    client.info = Some(collection_with_vectors_multi(
+        &["dense", "colbert"],
+        &[],
+        &["colbert"],
+    ));
+    let last_planned = client.last_planned.clone();
+    let embedder = Arc::new(MockEmbedder {
+        dense: vec![0.1, 0.2, 0.3],
+        sparse_indices: vec![],
+        sparse_values: vec![],
+        multi: vec![vec![0.11, 0.22], vec![0.33, 0.44], vec![0.55, 0.66]],
+    });
+    let executor =
+        Executor::with_embedder(Box::new(client), Some(test_local_config()), Some(embedder));
+
+    executor
+        .execute(
+            "QUERY TEXT 'late interaction' FROM docs USING colbert LIMIT 10",
+            OnError::Stop,
+        )
+        .await
+        .unwrap();
+
+    let op = last_planned.lock().unwrap().take().unwrap();
+    let route = qql_plan::plan::to_rest_route(&op);
+    let body = route.body_json().unwrap();
+    assert_eq!(body["using"], "colbert");
+    // MultiDense serializes as array-of-arrays under nearest.
+    let nearest = &body["query"]["nearest"];
+    assert!(
+        nearest.is_array(),
+        "expected multi-dense array, got {nearest}"
+    );
+    let rows = nearest.as_array().unwrap();
+    assert_eq!(rows.len(), 3);
+    let first = rows[0].as_array().expect("row 0");
+    assert!((first[0].as_f64().unwrap() - 0.11).abs() < 1e-5);
+    assert!((first[1].as_f64().unwrap() - 0.22).abs() < 1e-5);
+}
+
+#[tokio::test]
 async fn text_query_infers_only_arbitrary_dense_vector() {
     let mut client = MockQdrantClient::default();
     client.exists = true;
@@ -556,6 +621,7 @@ async fn text_query_infers_only_arbitrary_dense_vector() {
         dense: vec![0.1, 0.2, 0.3],
         sparse_indices: vec![],
         sparse_values: vec![],
+        multi: vec![vec![0.1, 0.2], vec![0.3, 0.4]],
     });
     let executor =
         Executor::with_embedder(Box::new(client), Some(test_local_config()), Some(embedder));
@@ -582,6 +648,7 @@ async fn text_query_rejects_ambiguous_vector_topology() {
         dense: vec![0.1, 0.2, 0.3],
         sparse_indices: vec![],
         sparse_values: vec![],
+        multi: vec![vec![0.1, 0.2], vec![0.3, 0.4]],
     });
     let executor =
         Executor::with_embedder(Box::new(client), Some(test_local_config()), Some(embedder));
@@ -603,6 +670,7 @@ async fn hybrid_upsert_infers_arbitrary_named_targets() {
         dense: vec![0.1, 0.2, 0.3],
         sparse_indices: vec![1],
         sparse_values: vec![0.5],
+        multi: vec![vec![0.1, 0.2], vec![0.3, 0.4]],
     });
     let executor =
         Executor::with_embedder(Box::new(client), Some(test_local_config()), Some(embedder));
@@ -634,6 +702,7 @@ async fn upsert_rejects_ambiguous_inferred_embedding_target() {
         dense: vec![0.1, 0.2, 0.3],
         sparse_indices: vec![],
         sparse_values: vec![],
+        multi: vec![vec![0.1, 0.2], vec![0.3, 0.4]],
     });
     let executor =
         Executor::with_embedder(Box::new(client), Some(test_local_config()), Some(embedder));
@@ -774,6 +843,7 @@ async fn test_query_missing_collection_errors() {
         dense: vec![0.1, 0.2],
         sparse_indices: vec![],
         sparse_values: vec![],
+        multi: vec![vec![0.1, 0.2], vec![0.3, 0.4]],
     });
     let executor = Executor::with_embedder(
         Box::new(client),
@@ -976,6 +1046,7 @@ async fn test_batch_upserts_keep_single_statement_auto_create_semantics() {
         dense: vec![0.1, 0.2, 0.3],
         sparse_indices: Vec::new(),
         sparse_values: Vec::new(),
+        multi: vec![vec![0.1, 0.2], vec![0.3, 0.4]],
     });
     let mut config = test_config();
     config.embedding_dimension = 3;

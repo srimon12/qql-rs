@@ -2,7 +2,7 @@ use crate::client::CollectionInfo;
 use crate::executor::{Executor, SearchHit};
 use qql_core::ast::QueryStmt;
 use qql_core::error::QqlError;
-use qql_embed::{query_needs_kind_resolution, resolve_query_vector_kinds};
+use qql_embed::{query_needs_kind_resolution, resolve_query_vector_kinds, TopologyNames};
 
 impl Executor {
     /// Resolve omitted vector names from the collection schema and validate
@@ -16,12 +16,12 @@ impl Executor {
             return Ok(());
         }
         let info = self.client.get_collection_info(collection).await?;
-        let (dense, sparse) = topology_names_from_info(&info);
-        resolve_query_vector_kinds(collection, query, &dense, &sparse)
+        let topology = topology_names_from_info(&info);
+        resolve_query_vector_kinds(collection, query, &topology)
     }
 }
 
-fn topology_names_from_info(info: &CollectionInfo) -> (Vec<String>, Vec<String>) {
+pub(crate) fn topology_names_from_info(info: &CollectionInfo) -> TopologyNames {
     let dense = if info.schema.vectors.is_empty() {
         info.schema.dense_vectors.clone()
     } else {
@@ -37,7 +37,18 @@ fn topology_names_from_info(info: &CollectionInfo) -> (Vec<String>, Vec<String>)
         .iter()
         .map(|vector| vector.name.clone())
         .collect();
-    (dense, sparse)
+    let multivector = info
+        .schema
+        .vectors
+        .iter()
+        .filter(|v| v.multivector.is_some())
+        .filter_map(|v| v.name.clone())
+        .collect();
+    TopologyNames {
+        dense,
+        sparse,
+        multivector,
+    }
 }
 
 pub(crate) fn extract_search_hits(result: &serde_json::Value) -> Vec<SearchHit> {

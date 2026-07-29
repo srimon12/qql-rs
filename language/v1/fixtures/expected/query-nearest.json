@@ -87,6 +87,7 @@
             "prefetch": [],
             "using": {
               "kind": "Dense",
+              "multi": false,
               "name": "semantic_v2"
             }
           }
@@ -124,6 +125,7 @@
             "prefetch": [],
             "using": {
               "kind": "Sparse",
+              "multi": false,
               "name": "lexical_v2"
             }
           }
@@ -231,6 +233,7 @@
             "prefetch": [],
             "using": {
               "kind": "Dense",
+              "multi": false,
               "name": "semantic_v2"
             }
           }
@@ -374,6 +377,44 @@
         },
         "page": {
           "limit": 20,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "search"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": {
+              "kind": "Dense",
+              "multi": true,
+              "name": "colbert"
+            }
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
           "offset": null
         },
         "params": null,
