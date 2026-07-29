@@ -56,7 +56,8 @@ required prefetch topology in the AST.
 ```
 QUERY <expression>
 FROM <collection>
-[USING <vector> [AS DENSE | AS SPARSE | AS MULTI | AS MULTIVECTOR]]
+[USING HYBRID [DENSE <vector>] [SPARSE <vector>] [FUSION RRF|DBSF]
+ | USING <vector> [AS DENSE | AS SPARSE | AS MULTI | AS MULTIVECTOR]]
 [PREFETCH (...)]
 [WHERE <filter>]
 [SHARD '<key>']
@@ -70,6 +71,10 @@ FROM <collection>
 ```
 
 Each clause occurs at most once and only in this order.
+
+`USING HYBRID` is equivalent to front-form `QUERY HYBRID TEXT …`: parse expands
+to `QueryExpr::Hybrid` (dense + sparse prefetches fused with RRF/DBSF). It only
+applies to text nearest queries.
 
 Vector names are arbitrary (`dense` / `sparse` / `colbert` are conventions, not
 reserved). `AS DENSE` / `AS SPARSE` declare embed role; `AS MULTI` marks a dense

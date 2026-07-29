@@ -753,6 +753,34 @@ mod tests {
     }
 
     #[test]
+    fn using_hybrid_expands_like_front_form() {
+        let front = parse_route(
+            "QUERY HYBRID TEXT 'ai search' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10;",
+        );
+        let tail = parse_route(
+            "QUERY TEXT 'ai search' FROM docs USING HYBRID DENSE dense SPARSE sparse FUSION RRF LIMIT 10;",
+        );
+        assert_eq!(front, tail);
+        assert_eq!(tail["query"]["fusion"], "rrf");
+        assert_eq!(tail["prefetch"].as_array().unwrap().len(), 2);
+        assert_eq!(tail["prefetch"][0]["using"], "dense");
+        assert_eq!(tail["prefetch"][1]["using"], "sparse");
+        // Candidate overfetch: LIMIT * 10
+        assert_eq!(tail["prefetch"][0]["limit"], 100);
+        assert_eq!(tail["prefetch"][1]["limit"], 100);
+    }
+
+    #[test]
+    fn using_hybrid_dbsf_and_defaults() {
+        let json =
+            parse_route("QUERY 'q' FROM docs USING HYBRID DENSE d SPARSE s FUSION DBSF LIMIT 5;");
+        assert_eq!(json["query"]["fusion"], "dbsf");
+        assert_eq!(json["prefetch"][0]["using"], "d");
+        assert_eq!(json["prefetch"][1]["using"], "s");
+        assert_eq!(json["prefetch"][0]["limit"], 50);
+    }
+
+    #[test]
     fn nearest_text_is_string() {
         let json = parse_route("QUERY 'hello world' FROM docs LIMIT 5;");
         assert_eq!(json["query"]["nearest"], "hello world");

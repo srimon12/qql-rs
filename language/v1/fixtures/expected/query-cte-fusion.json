@@ -962,6 +962,7 @@
           "exact": null,
           "hnsw_ef": null,
           "indexed_only": null,
+          "max_selectivity": null,
           "quantization": null,
           "rrf_k": 30,
           "rrf_weights": [

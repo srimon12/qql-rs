@@ -147,7 +147,7 @@ its `USING` and `PREFETCH` pipeline in the canonical AST.
 | formula | May score a prefetch or payload-derived expression. |
 | relevance feedback | Requires non-empty feedback and `NAIVE(a,b,c)`. |
 | MMR | `DIVERSITY` is finite and in `[0,1]`; `CANDIDATES` is positive. |
-| hybrid | Expands to dense and sparse prefetches fused by RRF (default) or DBSF. |
+| hybrid | Expands to dense and sparse prefetches fused by RRF (default) or DBSF. Surface forms: front-form `QUERY HYBRID TEXT …` and tail-form `QUERY TEXT … USING HYBRID …` lower to the same `Hybrid` AST. `USING HYBRID` requires a text nearest expression (no MMR, no non-text inputs). Omitted dense/sparse names resolve from schema (exactly one of each role). |
 | rerank | Requires `USING`, a model, and non-empty `PREFETCH`. |
 
 `LIMIT`, group size, `hnsw_ef`, and `rrf_k` are positive integers. `OFFSET`

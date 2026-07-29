@@ -293,6 +293,20 @@ mod tests {
     }
 
     #[test]
+    fn using_hybrid_extracts_dense_and_sparse() {
+        let stmt = Parser::parse(
+            "QUERY TEXT 'database' FROM docs USING HYBRID DENSE dense SPARSE sparse;",
+        )
+        .unwrap();
+        let jobs = extract_jobs(&stmt);
+        assert_eq!(jobs.len(), 2);
+        assert_eq!(jobs[0].kind, EmbeddingKind::Dense);
+        assert_eq!(jobs[0].texts, vec!["database".to_string()]);
+        assert_eq!(jobs[1].kind, EmbeddingKind::Sparse);
+        assert_eq!(jobs[1].texts, vec!["database".to_string()]);
+    }
+
+    #[test]
     fn upsert_embedding_dense_extracts_texts() {
         let stmt = Parser::parse(
             "UPSERT INTO docs VALUES {id: 1, text: 'hello'}, {id: 2, text: 'world'} USING DENSE MODEL 'nomic';",

@@ -45,40 +45,48 @@ impl<'a> AstLowerer<'a> {
             QueryCollection::Inherited
         };
 
+        // USING HYBRID [DENSE n] [SPARSE n] [FUSION …]  — expands to QueryExpr::Hybrid
+        // USING <name> [AS DENSE|SPARSE|MULTI]         — single named-vector target
         let using = if self.peek()?.kind == TokenKind::Using {
             self.advance()?;
-            let name = self.parse_identifier()?;
-            let (kind, multi) = if self.peek()?.kind == TokenKind::As {
-                self.advance()?;
-                match self.peek()?.kind {
-                    TokenKind::Dense => {
-                        self.advance()?;
-                        (Some(VectorKind::Dense), false)
-                    }
-                    TokenKind::Sparse => {
-                        self.advance()?;
-                        (Some(VectorKind::Sparse), false)
-                    }
-                    // Slight additive form: AS MULTI | AS MULTIVECTOR → dense multivector.
-                    // Matched as bare words so we avoid a new reserved keyword.
-                    _ if ascii_equal(self.peek()?.text, "MULTI")
-                        || ascii_equal(self.peek()?.text, "MULTIVECTOR") =>
-                    {
-                        self.advance()?;
-                        (Some(VectorKind::Dense), true)
-                    }
-                    _ => {
-                        return Err(QqlError::parse(
-                            "QQL-PARSE-VECTOR-KIND",
-                            "USING <vector> AS requires DENSE, SPARSE, or MULTI",
-                            self.peek()?.span,
-                        ));
-                    }
-                }
+            if self.peek()?.kind == TokenKind::Hybrid {
+                let hybrid_using = self.parse_hybrid_using()?;
+                expand_using_hybrid(&mut expression, hybrid_using, expression_span)?;
+                None
             } else {
-                (None, false)
-            };
-            Some(VectorTarget { name, kind, multi })
+                let name = self.parse_identifier()?;
+                let (kind, multi) = if self.peek()?.kind == TokenKind::As {
+                    self.advance()?;
+                    match self.peek()?.kind {
+                        TokenKind::Dense => {
+                            self.advance()?;
+                            (Some(VectorKind::Dense), false)
+                        }
+                        TokenKind::Sparse => {
+                            self.advance()?;
+                            (Some(VectorKind::Sparse), false)
+                        }
+                        // Slight additive form: AS MULTI | AS MULTIVECTOR → dense multivector.
+                        // Matched as bare words so we avoid a new reserved keyword.
+                        _ if ascii_equal(self.peek()?.text, "MULTI")
+                            || ascii_equal(self.peek()?.text, "MULTIVECTOR") =>
+                        {
+                            self.advance()?;
+                            (Some(VectorKind::Dense), true)
+                        }
+                        _ => {
+                            return Err(QqlError::parse(
+                                "QQL-PARSE-VECTOR-KIND",
+                                "USING <vector> AS requires DENSE, SPARSE, or MULTI",
+                                self.peek()?.span,
+                            ));
+                        }
+                    }
+                } else {
+                    (None, false)
+                };
+                Some(VectorTarget { name, kind, multi })
+            }
         } else {
             None
         };
@@ -549,6 +557,28 @@ impl<'a> AstLowerer<'a> {
                 Some(input_tok.span),
             ));
         };
+        let HybridUsing {
+            dense_vector,
+            sparse_vector,
+            fusion,
+        } = self.parse_hybrid_modifiers()?;
+        Ok(QueryExpr::Hybrid {
+            text,
+            model,
+            dense_vector,
+            sparse_vector,
+            fusion,
+        })
+    }
+
+    /// Parse `HYBRID [DENSE n] [SPARSE n] [FUSION method]` after the `USING` keyword.
+    fn parse_hybrid_using(&mut self) -> Result<HybridUsing, QqlError> {
+        self.expect(TokenKind::Hybrid)?;
+        self.parse_hybrid_modifiers()
+    }
+
+    /// Shared optional dense/sparse/fusion modifiers for front-form and USING HYBRID.
+    fn parse_hybrid_modifiers(&mut self) -> Result<HybridUsing, QqlError> {
         let dense_vector = if self.peek()?.kind == TokenKind::Dense {
             self.advance()?;
             Some(self.parse_identifier()?)
@@ -567,9 +597,7 @@ impl<'a> AstLowerer<'a> {
         } else {
             FusionMethod::Rrf
         };
-        Ok(QueryExpr::Hybrid {
-            text,
-            model,
+        Ok(HybridUsing {
             dense_vector,
             sparse_vector,
             fusion,
@@ -737,6 +765,54 @@ impl<'a> AstLowerer<'a> {
                 | TokenKind::Limit
                 | TokenKind::Offset
         ))
+    }
+}
+
+/// Optional clauses after `HYBRID` / `USING HYBRID`.
+struct HybridUsing {
+    dense_vector: Option<String>,
+    sparse_vector: Option<String>,
+    fusion: FusionMethod,
+}
+
+/// Expand `QUERY TEXT … USING HYBRID …` into the same `QueryExpr::Hybrid` AST
+/// as front-form `QUERY HYBRID TEXT …`. Plan/embed paths already lower Hybrid.
+fn expand_using_hybrid(
+    expression: &mut QueryExpr,
+    hybrid: HybridUsing,
+    span: Span,
+) -> Result<(), QqlError> {
+    match expression {
+        QueryExpr::Nearest {
+            input: QueryInput::Text { text, model },
+            using: None,
+            prefetch,
+            mmr: None,
+        } if prefetch.is_empty() => {
+            *expression = QueryExpr::Hybrid {
+                text: core::mem::take(text),
+                model: model.take(),
+                dense_vector: hybrid.dense_vector,
+                sparse_vector: hybrid.sparse_vector,
+                fusion: hybrid.fusion,
+            };
+            Ok(())
+        }
+        QueryExpr::Nearest { mmr: Some(_), .. } => Err(QqlError::validation(
+            "QQL-VALIDATION-HYBRID",
+            "USING HYBRID cannot combine with MMR; use dense nearest with MMR or HYBRID without MMR",
+            Some(span),
+        )),
+        QueryExpr::Hybrid { .. } => Err(QqlError::validation(
+            "QQL-VALIDATION-HYBRID",
+            "USING HYBRID is redundant with QUERY HYBRID; use one form only",
+            Some(span),
+        )),
+        _ => Err(QqlError::validation(
+            "QQL-VALIDATION-HYBRID",
+            "USING HYBRID requires a text nearest query (QUERY TEXT '…' or QUERY '…')",
+            Some(span),
+        )),
     }
 }
 

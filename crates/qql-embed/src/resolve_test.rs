@@ -249,10 +249,8 @@ async fn upsert_image_spec_calls_embed_image() {
 
 #[tokio::test]
 async fn as_multi_query_calls_embed_multi() {
-    let mut stmt = Parser::parse(
-        "QUERY TEXT 'q' FROM docs USING colbert AS MULTI LIMIT 5;",
-    )
-    .unwrap();
+    let mut stmt =
+        Parser::parse("QUERY TEXT 'q' FROM docs USING colbert AS MULTI LIMIT 5;").unwrap();
     let mock = MockEmbedder::default();
     resolve_embeddings(&mut stmt, &mock).await.unwrap();
     let multi = mock.multi_calls.lock().unwrap();

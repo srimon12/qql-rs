@@ -27,7 +27,7 @@ query        = [ "WITH", cte, { ",", cte } ],
 cte          = name, "AS", "(", cte-query, ")" ;
 cte-query    = "QUERY", query-expr, [ "FROM", collection ], query-tail ;
 
-query-tail   = [ "USING", vector-name, [ "AS", vector-kind ] ],
+query-tail   = [ "USING", hybrid-using | vector-target ],
                [ "PREFETCH", "(", prefetch, { ",", prefetch }, ")" ],
                [ "WHERE", filter ],
                [ "SHARD", string ],
@@ -40,6 +40,9 @@ query-tail   = [ "USING", vector-name, [ "AS", vector-kind ] ],
                [ "WITH", "VECTOR", vector-selector ],
                [ "LIMIT", positive-integer ],
                [ "OFFSET", non-negative-integer ] ;
+vector-target = vector-name, [ "AS", vector-kind ] ;
+hybrid-using  = "HYBRID", [ "DENSE", vector-name ], [ "SPARSE", vector-name ],
+                [ "FUSION", ( "RRF" | "DBSF" ) ] ;
 vector-kind  = "DENSE" | "SPARSE" | "MULTI" | "MULTIVECTOR" ;
 ```
 
@@ -59,6 +62,7 @@ conventional defaults, **not reserved**. Kind never comes from name spelling
 | `USING name AS DENSE` | Explicit single-vector dense embed (MiniLM, CLIP text, …) |
 | `USING name AS SPARSE` | Explicit sparse (BM25-style) embed |
 | `USING name AS MULTI` / `AS MULTIVECTOR` | Explicit dense **multivector bag** (ColBERT / BGE-M3 ColBERT) → `MultiDense` — **not** CLIP |
+| `USING HYBRID [DENSE n] [SPARSE n] [FUSION RRF\|DBSF]` | Expand text nearest → dense+sparse fusion (`QueryExpr::Hybrid`, same as `QUERY HYBRID`) |
 
 ### Query inputs (modality)
 
@@ -156,6 +160,28 @@ LIMIT 10;
 `CROSS RERANK` runs the PREFETCH stage(s), extracts document text from `ON FIELD` (default `text`), scores `(query, doc)` pairs client-side, and reorders hits. It does **not** use Qdrant MaxSim. Host needs `rerank_pairs` (edge `reranker_model` or HTTP `rerank_endpoint`).
 
 MMR requires both `DIVERSITY` in `[0, 1]` and positive `CANDIDATES`. Hybrid expands to two prefetches (dense + sparse) with `LIMIT * 10` candidate count, fused with RRF or DBSF.
+
+**Hybrid shorthand** has two equivalent surface forms that lower to the same
+`QueryExpr::Hybrid` AST (and the same dense+sparse fusion plan):
+
+```sql
+-- Front-form (expression keyword)
+QUERY HYBRID TEXT 'vector database' DENSE dense SPARSE bm25 FUSION RRF
+FROM docs LIMIT 10;
+
+-- Tail-form (USING clause) — natural when starting from a nearest query
+QUERY TEXT 'vector database' FROM docs
+USING HYBRID DENSE dense SPARSE bm25 FUSION RRF
+LIMIT 10;
+
+-- Defaults: omit DENSE/SPARSE names (schema must resolve unique dense + sparse),
+-- FUSION defaults to RRF
+QUERY 'vector database' FROM docs USING HYBRID LIMIT 10;
+```
+
+`USING HYBRID` requires a text nearest expression (`QUERY TEXT '…'` or bare
+`QUERY '…'`). It cannot combine with `MMR`, non-text inputs, or a second
+`QUERY HYBRID` expression.
 
 ### Formula expressions
 

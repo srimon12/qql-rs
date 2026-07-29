@@ -13,7 +13,7 @@ Edge supports dense/sparse/hybrid by default. **Multivector, CLIP vision, and cr
 | Pagination | No OFFSET for **grouped** search |
 | MMR | Not for sparse / recommend (dense nearest only) |
 | Timeout / consistency | Not in QQL syntax (executor config only) |
-| Hybrid shorthand | No `USING HYBRID` — use `QUERY HYBRID TEXT …` |
+| Hybrid shorthand | **Supported**: `USING HYBRID` or `QUERY HYBRID TEXT …` (same expand) |
 | ACORN | `acorn = true` but no `max_selectivity` from syntax |
 | Shard | Key must be explicit string (no dynamic resolution) |
 | Edge | No GROUP BY, no SHARD, batch is fan-out |

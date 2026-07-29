@@ -203,6 +203,73 @@ fn hybrid_shorthand() {
 }
 
 #[test]
+fn using_hybrid_shorthand_expands_to_hybrid() {
+    // Tail form: QUERY TEXT … USING HYBRID … → same AST as QUERY HYBRID TEXT …
+    let s = Parser::parse(
+        "QUERY TEXT 'search' FROM docs USING HYBRID DENSE dense SPARSE sparse FUSION RRF LIMIT 10;",
+    )
+    .unwrap();
+    let Stmt::Query(q) = s else { panic!() };
+    assert!(matches!(
+        q.expression,
+        QueryExpr::Hybrid {
+            ref text,
+            dense_vector: Some(ref d),
+            sparse_vector: Some(ref sp),
+            fusion: FusionMethod::Rrf,
+            model: None,
+        } if text == "search" && d == "dense" && sp == "sparse"
+    ));
+}
+
+#[test]
+fn using_hybrid_defaults_fusion_rrf_and_omitted_names() {
+    let s = Parser::parse("QUERY 'search' FROM docs USING HYBRID LIMIT 10;").unwrap();
+    let Stmt::Query(q) = s else { panic!() };
+    assert!(matches!(
+        q.expression,
+        QueryExpr::Hybrid {
+            ref text,
+            dense_vector: None,
+            sparse_vector: None,
+            fusion: FusionMethod::Rrf,
+            model: None,
+        } if text == "search"
+    ));
+}
+
+#[test]
+fn using_hybrid_preserves_model_and_dbsf() {
+    let s = Parser::parse(
+        "QUERY TEXT 'q' MODEL 'nomic' FROM docs USING HYBRID DENSE d SPARSE s FUSION DBSF LIMIT 5;",
+    )
+    .unwrap();
+    let Stmt::Query(q) = s else { panic!() };
+    assert!(matches!(
+        q.expression,
+        QueryExpr::Hybrid {
+            ref text,
+            model: Some(ref m),
+            dense_vector: Some(ref d),
+            sparse_vector: Some(ref sp),
+            fusion: FusionMethod::Dbsf,
+        } if text == "q" && m == "nomic" && d == "d" && sp == "s"
+    ));
+}
+
+#[test]
+fn using_hybrid_rejects_non_text_nearest() {
+    assert!(Parser::parse("QUERY VECTOR [0.1, 0.2] FROM docs USING HYBRID LIMIT 10;").is_err());
+    assert!(Parser::parse("QUERY IMAGE '/tmp/a.png' FROM docs USING HYBRID LIMIT 10;").is_err());
+    assert!(Parser::parse(
+        "QUERY MMR TEXT 'x' DIVERSITY 0.5 CANDIDATES 20 FROM docs USING HYBRID LIMIT 10;"
+    )
+    .is_err());
+    // Front-form already Hybrid — USING HYBRID is redundant/invalid.
+    assert!(Parser::parse("QUERY HYBRID TEXT 'x' FROM docs USING HYBRID LIMIT 10;").is_err());
+}
+
+#[test]
 fn rerank_query() {
     let s = Parser::parse(
         "WITH c AS (QUERY TEXT 'x' USING dense LIMIT 100) QUERY RERANK TEXT 'x' MODEL 'reranker' FROM docs USING colbert PREFETCH (c) LIMIT 10;",
@@ -234,9 +301,8 @@ fn using_can_declare_an_arbitrary_sparse_vector() {
 #[test]
 fn max_selectivity_requires_acorn() {
     assert!(Parser::parse("QUERY 'x' FROM docs PARAMS (max_selectivity = 0.5) LIMIT 1;").is_err());
-    let ok = Parser::parse(
-        "QUERY 'x' FROM docs PARAMS (acorn = true, max_selectivity = 0.5) LIMIT 1;",
-    );
+    let ok =
+        Parser::parse("QUERY 'x' FROM docs PARAMS (acorn = true, max_selectivity = 0.5) LIMIT 1;");
     assert!(ok.is_ok(), "{ok:?}");
 }
 

@@ -28,8 +28,8 @@ Translate user intent directly into QQL syntax:
 
 - Semantic similarity -> `QUERY 'text' FROM <collection> USING dense LIMIT <n>` (schema resolves dense; or `AS DENSE` offline)
 - Keyword / sparse retrieval -> `QUERY 'text' FROM <collection> USING sparse LIMIT <n>` (schema resolves sparse; or `AS SPARSE` offline)
-- Hybrid retrieval (dense + sparse) -> `QUERY HYBRID TEXT 'text' DENSE dense SPARSE sparse FUSION RRF FROM <collection> LIMIT <n>`
-- Hybrid retrieval with DBSF fusion -> `QUERY HYBRID TEXT 'text' DENSE dense SPARSE sparse FUSION DBSF FROM <collection> LIMIT <n>`
+- Hybrid retrieval (dense + sparse) -> `QUERY TEXT 'text' FROM <collection> USING HYBRID DENSE dense SPARSE sparse FUSION RRF LIMIT <n>` (or front-form `QUERY HYBRID TEXT 'text' DENSE dense SPARSE sparse FUSION RRF FROM <collection> LIMIT <n>`)
+- Hybrid retrieval with DBSF fusion -> `QUERY TEXT 'text' FROM <collection> USING HYBRID DENSE dense SPARSE sparse FUSION DBSF LIMIT <n>`
 - Multivector / ColBERT nearest -> `QUERY TEXT 't' FROM <collection> USING colbert LIMIT <n>` when collection has multivector config; offline use `USING colbert AS MULTI`
 - Late-interaction rerank (ColBERT MaxSim) -> `WITH c AS (QUERY 't' USING dense LIMIT 50) QUERY RERANK TEXT 't' MODEL 'answerai-colbert-small-v1' FROM <collection> USING colbert PREFETCH (c) LIMIT <n>`
 - Cross-encoder pair rerank -> `WITH c AS (QUERY 't' USING dense LIMIT 50) QUERY CROSS RERANK TEXT 't' MODEL 'bge-reranker-base' ON FIELD text FROM <collection> PREFETCH (c) LIMIT <n>`
@@ -134,7 +134,8 @@ Clauses must appear in the exact required order (enforced at parse time):
 [WITH cte_name AS (QUERY ...), ...]
 QUERY <expression>
 FROM <collection>
-[USING <vector_name> [AS DENSE | AS SPARSE | AS MULTI | AS MULTIVECTOR]]
+[USING HYBRID [DENSE <vector>] [SPARSE <vector>] [FUSION RRF|DBSF]
+ | USING <vector_name> [AS DENSE | AS SPARSE | AS MULTI | AS MULTIVECTOR]]
 [PREFETCH (cte_ref [WHERE <filter>] [SCORE THRESHOLD <number>], ...)]
 [WHERE <filter_expression>]
 [SHARD '<tenant_key>']
@@ -157,6 +158,7 @@ FROM <collection>
 | `USING name AS DENSE` | Single dense embed (MiniLM, CLIP text, …) — one `Vec<f32>` |
 | `USING name AS SPARSE` | Sparse BM25-style embed |
 | `USING name AS MULTI` | Multivector / ColBERT bag → `[[f32,…],…]` via `embed_multi` (BGE-M3 ColBERT, not CLIP) |
+| `USING HYBRID …` | Expand text nearest → dense+sparse fusion (same AST as `QUERY HYBRID`) |
 | No `USING` | Schema must have exactly one compatible vector |
 
 Offline/embed-only paths without schema require an explicit `AS …`. Leaving kind unknown fails with `QQL-VECTOR-KIND` (never silent dense default for named targets).

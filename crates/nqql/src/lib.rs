@@ -299,8 +299,8 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
 
     let embedder = if let Some(endpoint) = &config.embedding_endpoint {
         if !endpoint.trim().is_empty() {
-            let http_emb = qql::embedder::HttpEmbedder::try_with_options(
-                qql::embedder::HttpEmbedderOptions {
+            let http_emb =
+                qql::embedder::HttpEmbedder::try_with_options(qql::embedder::HttpEmbedderOptions {
                     endpoint: endpoint.clone(),
                     api_key: config.embedding_api_key.clone().unwrap_or_default(),
                     model: config.embedding_model.clone().unwrap_or_default(),
@@ -316,9 +316,8 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
                     rerank_endpoint: config.rerank_endpoint.clone(),
                     rerank_api_key: config.rerank_api_key.clone(),
                     rerank_model: config.rerank_model.clone(),
-                },
-            )
-            .map_err(to_napi_err)?;
+                })
+                .map_err(to_napi_err)?;
             Some(std::sync::Arc::new(http_emb) as std::sync::Arc<dyn qql::embedder::Embedder>)
         } else {
             None

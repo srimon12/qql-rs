@@ -378,14 +378,12 @@ fn resolve_explicit_embedding_targets(
         let multi = multivector_targets(info);
         // Multi targets are still dense names on the schema; allow MULTI VECTOR
         // to resolve against dense when multivector list is empty (offline).
-        let multi_or_dense = if multi.is_empty() { dense.clone() } else { multi };
-        resolve_spec(
-            &upsert.collection,
-            spec,
-            &dense,
-            &sparse,
-            &multi_or_dense,
-        )?;
+        let multi_or_dense = if multi.is_empty() {
+            dense.clone()
+        } else {
+            multi
+        };
+        resolve_spec(&upsert.collection, spec, &dense, &sparse, &multi_or_dense)?;
     }
 
     let multi = multivector_targets(info);

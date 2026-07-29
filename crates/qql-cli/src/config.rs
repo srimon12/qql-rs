@@ -139,8 +139,8 @@ impl EdgeConfig {
         if let Some(value) = env_string("QQL_EDGE_IMAGE_MODEL") {
             self.image_model = Some(value);
         }
-        if let Some(value) = env_string("QQL_EDGE_RERANKER_MODEL")
-            .or_else(|| env_string("RERANK_MODEL"))
+        if let Some(value) =
+            env_string("QQL_EDGE_RERANKER_MODEL").or_else(|| env_string("RERANK_MODEL"))
         {
             self.reranker_model = Some(value);
         }

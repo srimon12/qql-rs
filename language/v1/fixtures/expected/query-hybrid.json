@@ -158,6 +158,96 @@
         "score_threshold": 0.5,
         "shard_key": null
       }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Hybrid": {
+            "dense_vector": "dense",
+            "fusion": "Rrf",
+            "model": null,
+            "sparse_vector": "bm25",
+            "text": "vector database"
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Hybrid": {
+            "dense_vector": null,
+            "fusion": "Rrf",
+            "model": null,
+            "sparse_vector": null,
+            "text": "search query"
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Hybrid": {
+            "dense_vector": "dense",
+            "fusion": "Dbsf",
+            "model": "nomic-embed-text",
+            "sparse_vector": "bm25",
+            "text": "machine learning"
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
     }
   ]
 }

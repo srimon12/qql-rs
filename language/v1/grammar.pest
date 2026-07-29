@@ -44,7 +44,9 @@ cte = { name ~ ^"AS" ~ "(" ~ cte_query ~ ")" }
 cte_query = { ^"QUERY" ~ query_expr ~ (^"FROM" ~ collection)? ~ query_tail }
 
 query_tail = {
-    (^"USING" ~ vector_target)?
+    // USING HYBRID expands nearest text → dense+sparse fusion (same as QUERY HYBRID).
+    // USING <name> [AS kind] targets a single named vector.
+    (^"USING" ~ (hybrid_using | vector_target))?
     ~ (^"PREFETCH" ~ "(" ~ prefetch ~ ("," ~ prefetch)* ~ ")")?
     ~ (^"WHERE" ~ filter)?
     ~ (^"SHARD" ~ string)?
@@ -55,6 +57,15 @@ query_tail = {
     ~ (^"WITH" ~ ^"VECTOR" ~ vector_selector?)?
     ~ (^"LIMIT" ~ positive_integer)?
     ~ (^"OFFSET" ~ non_negative_integer)?
+}
+
+// Tail-form hybrid: QUERY TEXT '…' FROM c USING HYBRID [DENSE n] [SPARSE n] [FUSION …]
+// Canonical AST is QueryExpr::Hybrid (same expand as front-form QUERY HYBRID).
+hybrid_using = {
+    ^"HYBRID"
+    ~ (^"DENSE" ~ vector_name)?
+    ~ (^"SPARSE" ~ vector_name)?
+    ~ (^"FUSION" ~ fusion_method)?
 }
 
 vector_target = { vector_name ~ (^"AS" ~ vector_kind)? }

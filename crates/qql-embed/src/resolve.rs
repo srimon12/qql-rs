@@ -184,8 +184,7 @@ async fn resolve_upsert_embeddings(
                 }
                 EmbedKind::Image { model } => {
                     let m_name = model.as_deref().unwrap_or("default");
-                    let (indices, sources): (Vec<usize>, Vec<String>) =
-                        targets.into_iter().unzip();
+                    let (indices, sources): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
                     let vecs = embedder.embed_image_batch(&sources, m_name).await?;
                     if vecs.len() != indices.len() {
                         return Err(QqlError::execution(

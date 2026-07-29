@@ -618,7 +618,10 @@ fn plan_cross_rerank(
     for pref in prefetch {
         let mut sub = match &pref.source {
             PrefetchSource::Cte(name) => {
-                let cte = outer.ctes.iter().find(|c| c.name.eq_ignore_ascii_case(name));
+                let cte = outer
+                    .ctes
+                    .iter()
+                    .find(|c| c.name.eq_ignore_ascii_case(name));
                 let Some(cte) = cte else {
                     return Err(QqlError::validation(
                         "QQL-PLAN-CROSS-RERANK-CTE",

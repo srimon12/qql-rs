@@ -199,15 +199,11 @@ impl HttpEmbedder {
     }
 
     pub fn multi_enabled(&self) -> bool {
-        self.multi_model.is_some()
-            || self.multi_endpoint.is_some()
-            || self.multi_dimension > 0
+        self.multi_model.is_some() || self.multi_endpoint.is_some() || self.multi_dimension > 0
     }
 
     pub fn image_enabled(&self) -> bool {
-        self.image_model.is_some()
-            || self.image_endpoint.is_some()
-            || self.image_dimension > 0
+        self.image_model.is_some() || self.image_endpoint.is_some() || self.image_dimension > 0
     }
 
     pub fn rerank_enabled(&self) -> bool {
@@ -220,7 +216,9 @@ impl HttpEmbedder {
             input: vec![input.to_string()],
         };
 
-        let resp = self.do_request(&self.endpoint, &self.api_key, &body).await?;
+        let resp = self
+            .do_request(&self.endpoint, &self.api_key, &body)
+            .await?;
 
         if resp.data.is_empty() {
             return Err(QqlError::execution(
@@ -232,16 +230,13 @@ impl HttpEmbedder {
 
         match &resp.data[0].embedding {
             EmbeddingPayload::Dense(v) => Ok(v.len()),
-            EmbeddingPayload::Multi(rows) => rows
-                .first()
-                .map(Vec::len)
-                .ok_or_else(|| {
-                    QqlError::execution(
-                        "QQL-EMBEDDING",
-                        "embedding response multivector was empty",
-                        None,
-                    )
-                }),
+            EmbeddingPayload::Multi(rows) => rows.first().map(Vec::len).ok_or_else(|| {
+                QqlError::execution(
+                    "QQL-EMBEDDING",
+                    "embedding response multivector was empty",
+                    None,
+                )
+            }),
         }
     }
 
@@ -793,16 +788,9 @@ impl Embedder for HttpEmbedder {
         let mut scores = vec![0.0f32; documents.len()];
         let mut seen = vec![false; documents.len()];
         for item in results {
-            let idx = item
-                .get("index")
-                .and_then(|v| v.as_u64())
-                .ok_or_else(|| {
-                    QqlError::execution(
-                        "QQL-RERANK-CROSS",
-                        "rerank result missing index",
-                        None,
-                    )
-                })? as usize;
+            let idx = item.get("index").and_then(|v| v.as_u64()).ok_or_else(|| {
+                QqlError::execution("QQL-RERANK-CROSS", "rerank result missing index", None)
+            })? as usize;
             if idx >= documents.len() {
                 return Err(QqlError::execution(
                     "QQL-RERANK-CROSS",

@@ -28,10 +28,16 @@ pub enum PointVectors {
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum QueryInput {
-    Text { text: String, model: Option<String> },
+    Text {
+        text: String,
+        model: Option<String>,
+    },
     /// Image path or URL for dense embedding (CLIP vision, etc.).
     /// Resolved to [`VectorValue::Dense`] before plan/dispatch.
-    Image { source: String, model: Option<String> },
+    Image {
+        source: String,
+        model: Option<String>,
+    },
     Vector(VectorValue),
     Point(PointId),
 }
@@ -311,12 +317,20 @@ pub struct ScrollStmt {
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum EmbedKind {
-    Dense { model: Option<String> },
-    Sparse { model: Option<String> },
+    Dense {
+        model: Option<String>,
+    },
+    Sparse {
+        model: Option<String>,
+    },
     /// Multivector / ColBERT bag (`embed_multi` → MultiDense).
-    Multi { model: Option<String> },
+    Multi {
+        model: Option<String>,
+    },
     /// Image / CLIP vision path or URL → dense vector (`embed_image`).
-    Image { model: Option<String> },
+    Image {
+        model: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use fastembed::{
     Bgem3Embedding, Bgem3InitOptions, Bgem3Model, EmbeddingModel, ImageEmbedding,
-    ImageEmbeddingModel, ImageInitOptions, InitOptionsWithLength, RerankInitOptions,
-    RerankerModel, TextEmbedding, TextRerank,
+    ImageEmbeddingModel, ImageInitOptions, InitOptionsWithLength, RerankInitOptions, RerankerModel,
+    TextEmbedding, TextRerank,
 };
 
 use qql_core::error::QqlError;
@@ -193,10 +193,10 @@ impl FastEmbedder {
                     }
                     multi_init =
                         multi_init.with_show_download_progress(opts.show_download_progress);
-                    let model = Arc::new(Mutex::new(
-                        Bgem3Embedding::try_new(multi_init)
-                            .map_err(|e| err(format!("fastembed multi (BGE-M3) init failed: {e}")))?,
-                    ));
+                    let model =
+                        Arc::new(Mutex::new(Bgem3Embedding::try_new(multi_init).map_err(
+                            |e| err(format!("fastembed multi (BGE-M3) init failed: {e}")),
+                        )?));
                     let mut cache = multi_cache()
                         .lock()
                         .map_err(|e| err(format!("fastembed multi cache poisoned: {e}")))?;
@@ -238,11 +238,9 @@ impl FastEmbedder {
                     }
                     image_init =
                         image_init.with_show_download_progress(opts.show_download_progress);
-                    let model = Arc::new(Mutex::new(
-                        ImageEmbedding::try_new(image_init).map_err(|e| {
-                            err(format!("fastembed image (CLIP vision) init failed: {e}"))
-                        })?,
-                    ));
+                    let model = Arc::new(Mutex::new(ImageEmbedding::try_new(image_init).map_err(
+                        |e| err(format!("fastembed image (CLIP vision) init failed: {e}")),
+                    )?));
                     let mut cache = image_cache()
                         .lock()
                         .map_err(|e| err(format!("fastembed image cache poisoned: {e}")))?;
@@ -281,10 +279,10 @@ impl FastEmbedder {
                         init = init.with_cache_dir(dir.clone());
                     }
                     init = init.with_show_download_progress(opts.show_download_progress);
-                    let model = Arc::new(Mutex::new(
-                        TextRerank::try_new(init)
-                            .map_err(|e| err(format!("fastembed TextRerank init failed: {e}")))?,
-                    ));
+                    let model =
+                        Arc::new(Mutex::new(TextRerank::try_new(init).map_err(|e| {
+                            err(format!("fastembed TextRerank init failed: {e}"))
+                        })?));
                     let mut cache = rerank_cache()
                         .lock()
                         .map_err(|e| err(format!("fastembed rerank cache poisoned: {e}")))?;
@@ -593,13 +591,7 @@ pub fn resolve_multi_model(name: &str) -> Result<Bgem3Model, QqlError> {
 fn is_multi_alias(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
-        "bge-m3"
-            | "bgem3"
-            | "bgem3q"
-            | "colbert"
-            | "multi"
-            | "multivector"
-            | "late-interaction"
+        "bge-m3" | "bgem3" | "bgem3q" | "colbert" | "multi" | "multivector" | "late-interaction"
     )
 }
 
@@ -687,17 +679,24 @@ fn short_alias_matches(requested: &str, model_code: &str) -> bool {
         }
     }
     // Strip common suffixes people omit when referring to a converted model.
-    ["-onnx-q", "-onnx", "-q4_k_m", "-q8_0", "-onnx-int8", "-int8"]
-        .iter()
-        .any(|suffix| {
-            code.strip_suffix(suffix)
+    [
+        "-onnx-q",
+        "-onnx",
+        "-q4_k_m",
+        "-q8_0",
+        "-onnx-int8",
+        "-int8",
+    ]
+    .iter()
+    .any(|suffix| {
+        code.strip_suffix(suffix)
+            .is_some_and(|base| req.eq_ignore_ascii_case(base))
+            || code
+                .rsplit('/')
+                .next()
+                .and_then(|slug| slug.strip_suffix(suffix))
                 .is_some_and(|base| req.eq_ignore_ascii_case(base))
-                || code
-                    .rsplit('/')
-                    .next()
-                    .and_then(|slug| slug.strip_suffix(suffix))
-                    .is_some_and(|base| req.eq_ignore_ascii_case(base))
-        })
+    })
 }
 
 #[async_trait]

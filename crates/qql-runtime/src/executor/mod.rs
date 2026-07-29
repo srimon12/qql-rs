@@ -821,8 +821,7 @@ impl Executor {
                 .and_then(crate::embedder::Embedder::multi_dimension)
                 .or_else(|| {
                     self.config.as_ref().and_then(|c| {
-                        (c.multi_embedding_dimension > 0)
-                            .then_some(c.multi_embedding_dimension)
+                        (c.multi_embedding_dimension > 0).then_some(c.multi_embedding_dimension)
                     })
                 })
                 .unwrap_or(RERANK_VECTOR_SIZE as usize) as u64;
