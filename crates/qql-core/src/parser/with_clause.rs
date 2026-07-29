@@ -14,6 +14,9 @@ impl<'a> AstLowerer<'a> {
                 "hnsw_ef" => params.hnsw_ef = Some(positive_integer(value, &key)?),
                 "exact" => params.exact = Some(boolean(value, &key)?),
                 "acorn" => params.acorn = Some(boolean(value, &key)?),
+                "max_selectivity" => {
+                    params.max_selectivity = Some(unit_interval(value, &key)?);
+                }
                 "indexed_only" => params.indexed_only = Some(boolean(value, &key)?),
                 "rrf_k" => params.rrf_k = Some(positive_integer(value, &key)?),
                 "rrf_weights" => params.rrf_weights = Some(float_list(value, &key)?),
@@ -28,6 +31,13 @@ impl<'a> AstLowerer<'a> {
                     ));
                 }
             }
+        }
+        if params.max_selectivity.is_some() && params.acorn != Some(true) {
+            return Err(QqlError::validation(
+                "QQL-VALIDATION-ACORN-SELECTIVITY",
+                "max_selectivity requires PARAMS (acorn = true, …)",
+                None,
+            ));
         }
         Ok(params)
     }
@@ -206,4 +216,27 @@ fn float_list(value: Value, key: &str) -> Result<Vec<f64>, QqlError> {
         }
     }
     Ok(res)
+}
+
+/// Number in (0, 1] for ACORN max_selectivity.
+fn unit_interval(value: Value, key: &str) -> Result<f64, QqlError> {
+    let value = match value {
+        Value::Int(v) => v as f64,
+        Value::Float(v) => v,
+        _ => {
+            return Err(QqlError::validation(
+                "QQL-VALIDATION-SEARCH-PARAM",
+                alloc::format!("{key} must be a number"),
+                None,
+            ));
+        }
+    };
+    if !value.is_finite() || value <= 0.0 || value > 1.0 {
+        return Err(QqlError::validation(
+            "QQL-VALIDATION-SEARCH-PARAM",
+            alloc::format!("{key} must be a finite number in (0, 1]"),
+            None,
+        ));
+    }
+    Ok(value)
 }

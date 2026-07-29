@@ -227,6 +227,8 @@ pub struct SearchParams {
     pub hnsw_ef: Option<u64>,
     pub exact: Option<bool>,
     pub acorn: Option<bool>,
+    /// ACORN selectivity ceiling in (0, 1]. Only valid with `acorn = true`.
+    pub max_selectivity: Option<f64>,
     pub indexed_only: Option<bool>,
     pub quantization: Option<QuantizationSearchParams>,
     pub rrf_k: Option<u64>,

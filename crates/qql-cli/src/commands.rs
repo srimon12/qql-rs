@@ -4,6 +4,7 @@ pub async fn handle_doctor(
     json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let executor = executor(url, use_edge)?;
+    let hosts = doctor_host_summary(executor.config(), use_edge);
     let result = executor
         .execute("SHOW COLLECTIONS", qql::executor::OnError::Stop)
         .await;
@@ -21,11 +22,13 @@ pub async fn handle_doctor(
                     serde_json::json!({
                         "ok": true,
                         "healthy": true,
-                        "message": format!("Connected to {target}")
+                        "message": format!("Connected to {target}"),
+                        "hosts": hosts,
                     })
                 );
             } else {
                 println!("Connected to {target} (healthy)");
+                print_doctor_hosts(&hosts);
             }
             Ok(())
         }
@@ -41,13 +44,129 @@ pub async fn handle_doctor(
                     serde_json::json!({
                         "ok": false,
                         "healthy": false,
-                        "error": format!("Failed to connect to {target}: {e}")
+                        "error": format!("Failed to connect to {target}: {e}"),
+                        "hosts": hosts,
                     })
                 );
             } else {
                 println!("Failed to connect to {target}: {e}");
+                print_doctor_hosts(&hosts);
             }
             Err(e.into())
+        }
+    }
+}
+
+/// Snapshot of embedding / rerank hosts for doctor UX (no model download).
+fn doctor_host_summary(
+    config: Option<&qql::config::QqlConfig>,
+    use_edge: bool,
+) -> serde_json::Value {
+    let Some(cfg) = config else {
+        return serde_json::json!({
+            "backend": if use_edge { "edge" } else { "remote" },
+            "dense": false,
+            "multi": false,
+            "image": false,
+            "cross_rerank": false,
+            "hints": ["no QqlConfig on executor — embedding hosts unknown"],
+        });
+    };
+    let dense = cfg.embedding_model.as_ref().is_some_and(|m| !m.is_empty())
+        || cfg
+            .embedding_endpoint
+            .as_ref()
+            .is_some_and(|e| !e.trim().is_empty())
+        || use_edge;
+    let multi = cfg
+        .multi_embedding_model
+        .as_ref()
+        .is_some_and(|m| !m.is_empty())
+        || cfg
+            .multi_embedding_endpoint
+            .as_ref()
+            .is_some_and(|e| !e.trim().is_empty());
+    let image = cfg
+        .image_embedding_model
+        .as_ref()
+        .is_some_and(|m| !m.is_empty())
+        || cfg
+            .image_embedding_endpoint
+            .as_ref()
+            .is_some_and(|e| !e.trim().is_empty());
+    let cross = cfg.rerank_model.as_ref().is_some_and(|m| !m.is_empty())
+        || cfg
+            .rerank_endpoint
+            .as_ref()
+            .is_some_and(|e| !e.trim().is_empty());
+
+    let mut hints = Vec::new();
+    if !multi {
+        hints.push(
+            "ColBERT / AS MULTI / multivector RERANK needs multi_model or multi_embedding_* config",
+        );
+    }
+    if !image {
+        hints.push("IMAGE / CLIP vision needs image_model or image_embedding_* config");
+    }
+    if !cross {
+        hints.push("CROSS RERANK needs reranker_model or rerank_endpoint / rerank_model");
+    }
+    if use_edge {
+        hints.push("edge has no GROUP BY, SHARD keys, ALTER COLLECTION, or ACORN");
+    }
+
+    serde_json::json!({
+        "backend": if use_edge { "edge" } else { "remote" },
+        "dense": dense,
+        "dense_model": cfg.embedding_model,
+        "multi": multi,
+        "multi_model": cfg.multi_embedding_model,
+        "image": image,
+        "image_model": cfg.image_embedding_model,
+        "cross_rerank": cross,
+        "rerank_model": cfg.rerank_model,
+        "hints": hints,
+    })
+}
+
+fn print_doctor_hosts(hosts: &serde_json::Value) {
+    println!(
+        "Hosts: dense={} multi={} image={} cross_rerank={}",
+        hosts
+            .get("dense")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        hosts
+            .get("multi")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        hosts
+            .get("image")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        hosts
+            .get("cross_rerank")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+    );
+    if let Some(m) = hosts.get("dense_model").and_then(|v| v.as_str()) {
+        println!("  dense_model: {m}");
+    }
+    if let Some(m) = hosts.get("multi_model").and_then(|v| v.as_str()) {
+        println!("  multi_model: {m}");
+    }
+    if let Some(m) = hosts.get("image_model").and_then(|v| v.as_str()) {
+        println!("  image_model: {m}");
+    }
+    if let Some(m) = hosts.get("rerank_model").and_then(|v| v.as_str()) {
+        println!("  rerank_model: {m}");
+    }
+    if let Some(hints) = hosts.get("hints").and_then(|v| v.as_array()) {
+        for h in hints {
+            if let Some(s) = h.as_str() {
+                println!("  hint: {s}");
+            }
         }
     }
 }

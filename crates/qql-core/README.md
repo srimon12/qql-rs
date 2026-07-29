@@ -83,6 +83,7 @@ untyped targets as `kind: null` (source fidelity).
 search-param = "hnsw_ef", "=", integer
              | "exact", "=", boolean
              | "acorn", "=", boolean
+             | "max_selectivity", "=", number   -- requires acorn = true; range (0, 1]
              | "indexed_only", "=", boolean
              | "quantization", "=", object
              | "rrf_k", "=", integer
@@ -91,7 +92,8 @@ search-param = "hnsw_ef", "=", integer
 
 `acorn` (Adaptive Cardinality Estimator for ONgRN) controls approximate search
 selectivity estimation. When `acorn = true`, Qdrant uses ACORN to estimate
-filter cardinality and adapt the search strategy.
+filter cardinality and adapt the search strategy. Optional `max_selectivity`
+(in `(0, 1]`) caps that estimate: `PARAMS (acorn = true, max_selectivity = 0.4)`.
 
 `quantization` accepts an object matching the Qdrant QuantizationSearchParams
 schema: `{ "ignore": bool, "rescore": bool, "oversampling": float }`.

@@ -263,6 +263,7 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
             }
 
             if query.group.is_some() {
+                // Surface GROUP BY + OFFSET before lowering so callers always get a plan error.
                 return Ok(PlannedOperation::QueryGroups {
                     collection,
                     request: lower_query_groups_request(query)?,
@@ -476,6 +477,27 @@ fn validate_query_expr(expression: &QueryExpr) -> Result<(), QqlError> {
 }
 
 fn validate_query_target_kinds(expression: &QueryExpr) -> Result<(), QqlError> {
+    // MMR is dense-only; fail closed on sparse USING (clearer than backend errors).
+    if let QueryExpr::Nearest {
+        mmr: Some(_),
+        using,
+        ..
+    } = expression
+    {
+        if using
+            .as_ref()
+            .and_then(|target| target.kind)
+            .is_some_and(|kind| kind == VectorKind::Sparse)
+        {
+            return Err(QqlError::validation(
+                "QQL-PLAN-MMR-SPARSE",
+                "MMR requires a dense vector target (USING … AS DENSE or a dense named vector). \
+                 Sparse MMR is not supported.",
+                None,
+            ));
+        }
+    }
+
     let (target, inputs): (Option<&VectorTarget>, Vec<&QueryInput>) = match expression {
         QueryExpr::Nearest { input, using, .. } => (using.as_ref(), vec![input]),
         QueryExpr::Recommend {

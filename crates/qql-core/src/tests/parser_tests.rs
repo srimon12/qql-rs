@@ -232,6 +232,15 @@ fn using_can_declare_an_arbitrary_sparse_vector() {
 }
 
 #[test]
+fn max_selectivity_requires_acorn() {
+    assert!(Parser::parse("QUERY 'x' FROM docs PARAMS (max_selectivity = 0.5) LIMIT 1;").is_err());
+    let ok = Parser::parse(
+        "QUERY 'x' FROM docs PARAMS (acorn = true, max_selectivity = 0.5) LIMIT 1;",
+    );
+    assert!(ok.is_ok(), "{ok:?}");
+}
+
+#[test]
 fn cross_rerank_parses() {
     let stmt = Parser::parse(
         "WITH c AS (QUERY TEXT 'q' FROM docs USING dense LIMIT 50) \

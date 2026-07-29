@@ -199,13 +199,14 @@ search-params   = "(", search-param, { ",", search-param }, ")" ;
 search-param    = "hnsw_ef", "=", positive-integer
                 | "exact", "=", boolean
                 | "acorn", "=", boolean
+                | "max_selectivity", "=", number
                 | "indexed_only", "=", boolean
                 | "quantization", "=", object
                 | "rrf_k", "=", positive-integer
                 | "rrf_weights", "=", array ;
 ```
 
-`acorn = true` enables ACORN (Adaptive Cardinality Estimator for ONgRN) which estimates filter selectivity and adapts HNSW search. When `acorn = false`, ACORN is explicitly disabled.
+`acorn = true` enables ACORN (Adaptive Cardinality Estimator for ONgRN) which estimates filter selectivity and adapts HNSW search. When `acorn = false`, ACORN is explicitly disabled. Optional `max_selectivity` is a number in `(0, 1]` and **requires** `acorn = true` (e.g. `PARAMS (acorn = true, max_selectivity = 0.4)`).
 
 `quantization` accepts a JSON object with `ignore`, `rescore`, and `oversampling` fields matching Qdrant's `QuantizationSearchParams`.
 
@@ -218,7 +219,7 @@ QUERY TEXT 'vector database' MODEL 'nomic-embed-text'
 FROM docs
 USING dense
 WHERE category = 'database'
-PARAMS (hnsw_ef = 128, exact = false, acorn = true)
+PARAMS (hnsw_ef = 128, exact = false, acorn = true, max_selectivity = 0.4)
 LIMIT 10;
 
 QUERY POINTS (1, 2, 'point-a')

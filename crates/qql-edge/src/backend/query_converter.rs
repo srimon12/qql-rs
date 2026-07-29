@@ -862,12 +862,15 @@ mod tests {
     }
 
     #[test]
-    fn test_multidense_rejected() {
+    fn test_multidense_accepted() {
         let result = plan_input_to_vector_internal(&PlanQueryInput::Vector(
             PlanVectorValue::MultiDense(vec![vec![1.0, 2.0], vec![3.0, 4.0]]),
         ));
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("multidense"));
+        assert!(result.is_ok(), "edge must accept MultiDense query vectors");
+        match result.unwrap() {
+            VectorInternal::MultiDense(_) => {}
+            other => panic!("expected MultiDense, got {other:?}"),
+        }
     }
 
     #[test]

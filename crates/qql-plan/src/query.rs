@@ -405,6 +405,15 @@ pub fn lower_query_groups_request(query: &QueryStmt) -> Result<QueryGroupsReques
         .group
         .as_ref()
         .expect("group required for groups query");
+    // Qdrant QueryGroupsRequest has no offset; fail closed instead of silent drop.
+    if query.page.offset.is_some_and(|o| o > 0) {
+        return Err(QqlError::validation(
+            "QQL-PLAN-GROUP-OFFSET",
+            "OFFSET is not supported with GROUP BY (Qdrant query/groups has no group offset). \
+             Page groups with LIMIT only, or filter to a subset of group keys.",
+            None,
+        ));
+    }
     let (with_payload, with_vector) = lower_output_selector(&query.output);
     let (query_variant, using, prefetch) = build_query_with_prefetch(query)?;
 
@@ -577,7 +586,7 @@ pub fn lower_search_params(params: &qql_core::ast::SearchParams) -> Option<Searc
         exact: params.exact,
         acorn: params.acorn.map(|enable| AcornSearchParams {
             enable,
-            max_selectivity: None,
+            max_selectivity: params.max_selectivity,
         }),
         indexed_only: params.indexed_only,
         quantization: params.quantization.as_ref().map(|q| {
@@ -648,6 +657,42 @@ mod tests {
     fn acorn_false_serializes_enable_false() {
         let json = parse_route("QUERY 'hello' FROM docs PARAMS (acorn = false) LIMIT 5;");
         assert_eq!(json["params"]["acorn"]["enable"], false);
+    }
+
+    #[test]
+    fn acorn_max_selectivity_serializes() {
+        let json = parse_route(
+            "QUERY 'hello' FROM docs PARAMS (acorn = true, max_selectivity = 0.4) LIMIT 5;",
+        );
+        assert_eq!(json["params"]["acorn"]["enable"], true);
+        assert_eq!(json["params"]["acorn"]["max_selectivity"], 0.4);
+    }
+
+    #[test]
+    fn group_by_with_offset_is_rejected() {
+        let err = crate::plan::plan(
+            &Parser::parse("QUERY TEXT 'x' FROM docs GROUP BY topic LIMIT 10 OFFSET 5;").unwrap(),
+        )
+        .unwrap_err();
+        assert!(
+            err.code.contains("GROUP-OFFSET") || err.message.contains("OFFSET"),
+            "expected group offset error, got {err}"
+        );
+    }
+
+    #[test]
+    fn mmr_with_sparse_using_is_rejected() {
+        let err = crate::plan::plan(
+            &Parser::parse(
+                "QUERY MMR TEXT 'q' DIVERSITY 0.5 CANDIDATES 20 FROM docs USING sparse AS SPARSE LIMIT 5;",
+            )
+            .unwrap(),
+        )
+        .unwrap_err();
+        assert!(
+            err.code.contains("MMR") || err.message.to_ascii_lowercase().contains("mmr"),
+            "expected MMR sparse error, got {err}"
+        );
     }
 
     #[test]
