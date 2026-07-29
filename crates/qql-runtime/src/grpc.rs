@@ -4,7 +4,7 @@ use tonic::transport::Channel;
 use crate::backend::{
     CollectionParamsSpec, CollectionSchema, PayloadIndexSpec, SparseVectorSpec, VectorSpec,
 };
-use crate::client::{CollectionInfo, CreateCollectionReq, CreateFieldIndexReq, QdrantOps};
+use crate::client::{CollectionInfo, QdrantOps};
 use crate::qdrant_grpc::qdrant;
 use qql_core::error::QqlError;
 use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
@@ -300,6 +300,17 @@ impl GrpcQdrant {
             .map_err(|e| grpc_error("clear_payload", e))
     }
 
+    pub async fn delete_payload(
+        &self,
+        req: qdrant::DeletePayloadPoints,
+    ) -> Result<qdrant::PointsOperationResponse, QqlError> {
+        let mut cl = self.points_client();
+        cl.delete_payload(tonic::Request::new(req))
+            .await
+            .map(|r| r.into_inner())
+            .map_err(|e| grpc_error("delete_payload", e))
+    }
+
     pub async fn delete_vectors(
         &self,
         req: qdrant::DeletePointVectors,
@@ -406,83 +417,59 @@ impl QdrantOps for GrpcQdrant {
         })
     }
 
-    async fn create_collection(&self, req: CreateCollectionReq) -> Result<(), QqlError> {
-        let vectors_config = req.vectors_config.and_then(|v| {
-            let obj = v.as_object()?;
-            let mut map = std::collections::HashMap::new();
-            for (name, cfg) in obj {
-                let size = cfg.get("size").and_then(|s| s.as_u64()).unwrap_or(384);
-                let dist = cfg
-                    .get("distance")
-                    .and_then(|d| d.as_str())
-                    .map(|d| match d {
-                        "Cosine" => qdrant::Distance::Cosine as i32,
-                        "Euclid" => qdrant::Distance::Euclid as i32,
-                        "Dot" => qdrant::Distance::Dot as i32,
-                        "Manhattan" => qdrant::Distance::Manhattan as i32,
-                        _ => qdrant::Distance::Cosine as i32,
-                    })
-                    .unwrap_or(qdrant::Distance::Cosine as i32);
-                map.insert(
-                    name.clone(),
-                    qdrant::VectorParams {
-                        size,
-                        distance: dist,
-                        ..Default::default()
-                    },
-                );
-            }
-            Some(qdrant::VectorsConfig {
-                config: Some(qdrant::vectors_config::Config::ParamsMap(
-                    qdrant::VectorParamsMap { map },
-                )),
-            })
-        });
-
-        self.create_collection_raw(qdrant::CreateCollection {
-            collection_name: req.collection_name,
-            vectors_config,
-            ..Default::default()
-        })
-        .await
-        .map(|_| ())
+    async fn create_collection(
+        &self,
+        collection_name: &str,
+        req: &qql_plan::CreateCollectionRequest,
+    ) -> Result<(), QqlError> {
+        let op = qql_plan::PlannedOperation::CreateCollection {
+            collection: collection_name.to_string(),
+            request: req.clone(),
+        };
+        self.execute_planned(&op).await.map(|_| ())
     }
 
-    async fn update_collection(&self, _req: serde_json::Value) -> Result<(), QqlError> {
-        Err(QqlError::execution(
-            "QQL-EXECUTION",
-            "update_collection: use execute_route for gRPC",
-            None,
-        ))
+    async fn update_collection(
+        &self,
+        collection_name: &str,
+        req: &qql_plan::UpdateCollectionRequest,
+    ) -> Result<(), QqlError> {
+        let op = qql_plan::PlannedOperation::UpdateCollection {
+            collection: collection_name.to_string(),
+            request: req.clone(),
+        };
+        self.execute_planned(&op).await.map(|_| ())
     }
 
     async fn delete_collection(&self, name: &str) -> Result<(), QqlError> {
-        self.delete_collection_raw(qdrant::DeleteCollection {
-            collection_name: name.to_string(),
-            ..Default::default()
-        })
-        .await
-        .map(|_| ())
+        let op = qql_plan::PlannedOperation::DropCollection {
+            collection: name.to_string(),
+        };
+        self.execute_planned(&op).await.map(|_| ())
     }
 
-    async fn create_field_index(&self, _req: CreateFieldIndexReq) -> Result<(), QqlError> {
-        Err(QqlError::execution(
-            "QQL-EXECUTION",
-            "create_field_index: use execute_route for gRPC",
-            None,
-        ))
+    async fn create_field_index(
+        &self,
+        collection_name: &str,
+        req: &qql_plan::CreateIndexRequest,
+    ) -> Result<(), QqlError> {
+        let op = qql_plan::PlannedOperation::CreateIndex {
+            collection: collection_name.to_string(),
+            request: req.clone(),
+        };
+        self.execute_planned(&op).await.map(|_| ())
     }
 
     async fn delete_field_index(
         &self,
-        _collection_name: &str,
-        _field_name: &str,
+        collection_name: &str,
+        field_name: &str,
     ) -> Result<(), QqlError> {
-        Err(QqlError::execution(
-            "QQL-EXECUTION",
-            "delete_field_index: use execute_route for gRPC",
-            None,
-        ))
+        let op = qql_plan::PlannedOperation::DropIndex {
+            collection: collection_name.to_string(),
+            field: field_name.to_string(),
+        };
+        self.execute_planned(&op).await.map(|_| ())
     }
 
     async fn execute_planned(

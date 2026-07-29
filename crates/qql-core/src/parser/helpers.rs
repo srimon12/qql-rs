@@ -24,15 +24,6 @@ impl<'a> AstLowerer<'a> {
         self.parse_string().map(Some)
     }
 
-    #[allow(dead_code)]
-    pub fn parse_optional_vector_name(&mut self) -> Result<Option<String>, QqlError> {
-        if self.peek()?.kind != TokenKind::Vector {
-            return Ok(None);
-        }
-        self.advance()?;
-        self.parse_identifier().map(Some)
-    }
-
     pub fn parse_embedding_options(&mut self) -> Result<Option<EmbeddingSpec>, QqlError> {
         if self.peek()?.kind != TokenKind::Using {
             return Ok(None);
@@ -102,8 +93,12 @@ impl<'a> AstLowerer<'a> {
             });
         }
 
+        // MULTI / MULTIVECTOR / IMAGE as bare words (same as AS MULTI — not reserved).
+        let is_multi = super::ascii_equal(self.peek()?.text, "MULTI")
+            || super::ascii_equal(self.peek()?.text, "MULTIVECTOR");
+        let is_image = super::ascii_equal(self.peek()?.text, "IMAGE");
         let is_sparse = self.peek()?.kind == TokenKind::Sparse;
-        if self.peek()?.kind == TokenKind::Dense || is_sparse {
+        if self.peek()?.kind == TokenKind::Dense || is_sparse || is_multi || is_image {
             self.advance()?;
         } else if self.peek()?.kind != TokenKind::Model
             && self.peek()?.kind != TokenKind::Vector
@@ -112,14 +107,26 @@ impl<'a> AstLowerer<'a> {
         {
             return Err(QqlError::parse(
                 "QQL-PARSE-EMBEDDING",
-                "USING requires DENSE, SPARSE, HYBRID, MODEL, VECTOR, INTO, or ON FIELD",
+                "USING requires DENSE, SPARSE, HYBRID, MULTI, IMAGE, MODEL, VECTOR, INTO, or ON FIELD",
                 self.peek()?.span,
             ));
         }
 
         let (model, vector, field) = self.parse_embedding_spec_modifiers()?;
 
-        if is_sparse {
+        if is_multi {
+            Ok(EmbeddingSpec::MultiVector {
+                model,
+                vector,
+                field,
+            })
+        } else if is_image {
+            Ok(EmbeddingSpec::Image {
+                model,
+                vector,
+                field,
+            })
+        } else if is_sparse {
             Ok(EmbeddingSpec::Sparse {
                 model,
                 vector,

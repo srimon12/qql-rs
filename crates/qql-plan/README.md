@@ -28,7 +28,7 @@ let op = plan(&stmt)?;               // → PlannedOperation::Query { .. }
 let route = to_rest_route(&op);      // → Route (REST projection)
 ```
 
-The [`plan`] function returns a [`PlannedOperation`] enum with 21 variants
+The [`plan`] function returns a [`PlannedOperation`] enum with 22 variants
 covering all query, mutation, and DDL operations. Each variant carries typed
 request parameters (not raw JSON).
 
@@ -54,6 +54,7 @@ request parameters (not raw JSON).
 | `ListShardKeys` | SHOW SHARD KEYS | GET /collections/{c}/shards | Single |
 | `ListCollections` | SHOW COLLECTIONS | GET /collections | Single |
 | `GetCollection` | SHOW COLLECTION | GET /collections/{c} | Single |
+| `CrossRerank` | QUERY CROSS RERANK | client-side (not a single Qdrant route) | Single |
 
 ### Route — REST projection
 
@@ -77,7 +78,8 @@ REST routes are produced by `to_rest_route()`. New code should use
 
 gRPC routes bypass `Route` entirely. The runtime's `grpc_route::execute_grpc_route`
 reads `Route.body` (which carries the same typed request data produced by the planner)
-and maps directly to protobuf. All 21 operation variants are supported.
+and maps directly to protobuf. All 22 operation variants are supported
+(`CrossRerank` is client-side and never sent as a Qdrant route).
 
 ### Batch compatibility
 
@@ -115,8 +117,8 @@ All typed request types live in [`crate::types`]:
 These types preserve semantic distinctions that JSON shape inference cannot recover:
 
 - `PlanPointId`: `Number(u64)` or `String` — serialized as bare number or string
-- `PlanVectorValue`: `Dense`, `Sparse { indices, values }`, or `MultiDense`
-- `PlanQueryInput`: `Point`, `Vector`, or `Document { text, model }`
+- `PlanVectorValue`: `Dense`, `Sparse { indices, values }`, or `MultiDense` (ColBERT-style array-of-vectors; REST serializes as nested arrays)
+- `PlanQueryInput`: `Point`, `Vector`, or `Document { text, model }` (text should already be embedded by prepare before plan when an embedder is present)
 - `PlanPointVectors`: `Unnamed(PlanVectorValue)` or `Named(Vec<(String, PlanVectorValue)>)`
 - `PlanFormula`: typed formula tree — REST uses snake_case OpenAPI keys via custom serialization
 
@@ -128,7 +130,6 @@ These types preserve semantic distinctions that JSON shape inference cannot reco
 | `mutation` | Upsert, Delete, Scroll, ClearPayload, DeleteVector, UpdateVector, UpdatePayload |
 | `query` | Query expressions, prefetch, formula, search params |
 | `filter` | Filter expressions: comparison, range, match, geo, nested, has_id, has_vector |
-| `embedding` | Embedding job extraction for embedder dispatch |
 
 ## Features
 

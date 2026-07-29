@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.4] - 2026-07-30
+
+### 🏗️ Architecture
+- **Transport-agnostic Plan IR**: `qql-plan` is now free of REST/gRPC client types. `PlannedOperation` is the single source of truth, lowered directly by every backend (`RestQdrant`, `GrpcQdrant`, `EdgeQdrant`). `to_rest_route()` is fallible and `compile_statement()` returns `CompiledStatement { stmt_type, route }` for reliable SDK metadata.
+- **Single parser frontend**: Removed the pest runtime parser; `AstLowerer` is the sole production parser. `language/v1/grammar.pest` remains the canonical language contract, fed through `qql-grammar-gen` for docs and CI.
+- **Single embedding owner**: All embedding logic now concentrated in `qql-embed` (removed the duplicate from `qql-plan`). `Embedder` trait covers dense, sparse, multi (ColBERT), image (CLIP), cross-encoder rerank, and joint (BGE-M3 single-pass) embeddings.
+- **Universal batch key**: `statement_batch_key()` and `PlannedOperation::batch_key()` enable cross-crate smart batching — contiguous same-collection queries and mutations are grouped automatically.
+- **Fail-closed injection**: `inject_shard_key` and `inject_filter` now reject unsupported statement types with clear errors instead of silently no-oping on DDL.
+
+### 🔴 Breaking Changes
+- **`USING name` is fail-closed**: `USING name` without `AS DENSE|SPARSE|MULTI` now requires schema resolution. When the vector kind is unknown (offline, no topology), it fails with `QQL-VECTOR-KIND` instead of silently defaulting to dense.
+- **`route()` deprecated**: Use `try_route()` or `compile_statement()`. The old `route()` panics on client-side-only operations like `CROSS RERANK`.
+- **Edge error hardening**: Previously-silent failures at the edge layer now produce explicit errors: non-UUID string point IDs (`QQL-EDGE-INVALID-POINT-ID`), empty dense query vectors, point-reference queries (`QQL-EDGE-UNSUPPORTED-POINT-REF`), `RECOMMEND STRATEGY average_vector`, and bare `CROSS RERANK` routes (`ClientSideOnly`).
+- **`embed_sparse` model gate**: The default `embed_sparse` now rejects non-empty, non-`"default"` model names. Implement `embed_sparse(model)` on your embedder to support model-aware sparse routing (e.g. SPLADE, BGE-M3).
+- **Auto-embed dense-only without topology**: UPSERT auto-embedding without explicit `USING` or topology now produces dense vectors only — no orphan sparse vectors are injected into dense-only collections.
+
+### 🚀 Added
+
+**QQL 1.2 Language** (additive — all v1.1 syntax remains valid):
+- `DELETE PAYLOAD key1, key2 FROM collection WHERE filter` — targeted payload key deletion
+- `USING HYBRID DENSE n SPARSE n FUSION RRF` — tail-form hybrid shorthand (expands to same AST as `QUERY HYBRID`)
+- `CROSS RERANK TEXT 'q' MODEL 'x' ON FIELD f` — cross-encoder pair scoring (client-side)
+- `QUERY IMAGE '/path.jpg' MODEL 'clip-vit'` — CLIP vision embedding input
+- `USING name AS MULTI` / `AS MULTIVECTOR` — ColBERT late-interaction multivector target
+- `RERANK TEXT 'q' MODEL 'r' USING colbert PREFETCH (c)` — late-interaction MaxSim rerank
+- `PARAMS (acorn = true, max_selectivity = 0.5)` — ACORN search parameter
+- `PARAMS (timeout = 5, consistency = 'majority')` — request-level timeout and read consistency
+- `COUNT FROM coll WITH (exact = true)` — exact point counting
+- `SHARD '<key>'` on all DML statements (COUNT, SCROLL, UPSERT, DELETE, CLEAR PAYLOAD, DELETE VECTOR, UPDATE … VECTOR/PAYLOAD) and `CREATE/DROP/SHOW SHARD KEY` DDL
+- `SCROLL … WITH VECTOR [true|false|(names)]` — optional vector selector on scroll
+
+**Vectors & Embeddings**:
+- Schema-first `USING` resolution — the executor queries the collection topology to fill vector kinds before embedding, enabling `USING sparse` to work without explicit `AS SPARSE` annotation
+- Multivector (ColBERT) pipeline: collection `MULTIVECTOR (comparator = max_sim)` config → `embed_multi` → `MultiDense` queries → `RERANK` late-interaction scoring
+- Image (CLIP) pipeline: `QUERY IMAGE` / `UPSERT USING IMAGE` → `embed_image` → dense vector search
+- Cross-encoder reranking: `CROSS RERANK` → `rerank_pairs()` → client-side pair scoring against prefetch candidates
+- `embed_joint` / `JointEmbeddingOutput` for BGE-M3 single-pass dense+sparse+multi embedding
+- Model-aware sparse embedding: `embed_sparse(text, model)` enables SPLADE/BGE-M3 sparse routing
+
+**SDK & CLI**:
+- `pyqql.Client.compile()` parity with nqql; all SDK `compile()` return stable `stmt_type` labels
+- `inject_shard_key()` available on all SDKs (Python, Node, Rust, WASM) plus `Stmt.shard_key` getter/setter
+- Edge SDKs: `nqql-edge` and `pyqql-edge` now support multi-model `FastEmbedder` (dense/sparse/multi/image/reranker ONNX slots), `localExecutor`/`httpExecutor` constructors, and `EdgeUnsupported` error catalog
+- WASM: `Stmt` class, `analyze()` (parse+explain+route in one call), `compileBytes()`/`explainBytes()`, smart batching
+- CLI: `qql doctor` (connection health + embedder snapshot), `qql config edge`, `--edge` flag for local execution, psql-style table output
+
+**Query & Config**:
+- Filter improvements: `min_should` conjunction threshold, filter-level shard key propagation, lookup collection support
+- `HNSW.inline_storage` config, `stemmer` support on text index creation
+- `GROUP BY` with `OFFSET` (via `group_offset`), `MMR` with sparse vector targets
+- Full REST/gRPC parity: all query variants, formula expressions, geo and nested/match filters
+
+### 🐛 Fixed
+- gRPC dense `vector_params` now propagates OpenAPI `datatype` (uint8 / float16 / float32).
+- CROSS RERANK no longer falls back to payload `text` when a different FIELD is requested.
+- SDK `compile()` no longer mislabels DROP INDEX as `drop_collection` or SHOW SHARD KEYS as `show_collection`.
+- gRPC mutation envelopes carry real server `time` from `PointsOperationResponse`.
+- `PyStmt::to_dict` in pyqql uses `serde_json::to_value` before `pythonize` for full dictionary alignment with `to_json()`.
+- CLI table mode renders CROSS_RERANK results; REST/edge reject bare CrossRerank routes.
+
+### 📚 Documentation
+- Skill references: `SKILL.md` updated with 1.2 features, `qql-examples.md` expanded with multivector/reranker examples, `qql-gaps.md` updated (closed gaps dropped), `qql-multitenancy.md` expanded with `inject_shard_key` patterns. SDK references (Python, Node, Rust, WASM) updated with `inject_shard_key` and batch execution.
+- All crate READMEs updated with accurate API tables and feature documentation.
+- `language/v1` bumped to 1.2 with 3 new valid fixtures, 3 new AST snapshots, and updated semantics spec.
+
+---
+
 ## [0.1.3] - 2026-07-28
 
 ### 🔴 Critical

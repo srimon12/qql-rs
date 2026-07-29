@@ -16,7 +16,7 @@ Read these reference documents when you need details on specific topics:
 - [references/node-sdk.md](references/node-sdk.md) — Node.js SDK (`nqql`) client and N-API methods.
 - [references/wasm-sdk.md](references/wasm-sdk.md) — WebAssembly SDK (`qql-wasm`) browser & edge client.
 - [references/rust-sdk.md](references/rust-sdk.md) — Rust SDK (`qql`, `qql-core`, `qql-plan`) runtime & executor.
-- [references/qql-gaps.md](references/qql-gaps.md) — Read for feature mapping guidelines.
+- [references/qql-gaps.md](references/qql-gaps.md) — **Open vs closed** features; do not invent open syntax; do not claim closed items are missing.
 - [references/qql-install.md](references/qql-install.md) — Read for installation and setup instructions across Python, Rust, Node.js, and CLI.
 - [references/qql-multitenancy.md](references/qql-multitenancy.md) — Complete multi-tenant guide: shard routing, filter injection, and tenant isolation.
 
@@ -26,10 +26,13 @@ For runnable demo scripts, see `scripts/demo_retrieval_modes.py`, `scripts/demo_
 
 Translate user intent directly into QQL syntax:
 
-- Semantic similarity -> `QUERY 'text' FROM <collection> USING dense LIMIT <n>`
-- Keyword / sparse retrieval -> `QUERY 'text' FROM <collection> USING sparse LIMIT <n>`
-- Hybrid retrieval (dense + sparse) -> `QUERY HYBRID TEXT 'text' DENSE dense SPARSE sparse FUSION RRF FROM <collection> LIMIT <n>`
-- Hybrid retrieval with DBSF fusion -> `QUERY HYBRID TEXT 'text' DENSE dense SPARSE sparse FUSION DBSF FROM <collection> LIMIT <n>`
+- Semantic similarity -> `QUERY 'text' FROM <collection> USING dense LIMIT <n>` (schema resolves dense; or `AS DENSE` offline)
+- Keyword / sparse retrieval -> `QUERY 'text' FROM <collection> USING sparse LIMIT <n>` (schema resolves sparse; or `AS SPARSE` offline)
+- Hybrid retrieval (dense + sparse) -> `QUERY TEXT 'text' FROM <collection> USING HYBRID DENSE dense SPARSE sparse FUSION RRF LIMIT <n>` (or front-form `QUERY HYBRID TEXT 'text' DENSE dense SPARSE sparse FUSION RRF FROM <collection> LIMIT <n>`)
+- Hybrid retrieval with DBSF fusion -> `QUERY TEXT 'text' FROM <collection> USING HYBRID DENSE dense SPARSE sparse FUSION DBSF LIMIT <n>`
+- Multivector / ColBERT nearest -> `QUERY TEXT 't' FROM <collection> USING colbert LIMIT <n>` when collection has multivector config; offline use `USING colbert AS MULTI`
+- Late-interaction rerank (ColBERT MaxSim) -> `WITH c AS (QUERY 't' USING dense LIMIT 50) QUERY RERANK TEXT 't' MODEL 'answerai-colbert-small-v1' FROM <collection> USING colbert PREFETCH (c) LIMIT <n>`
+- Cross-encoder pair rerank -> `WITH c AS (QUERY 't' USING dense LIMIT 50) QUERY CROSS RERANK TEXT 't' MODEL 'bge-reranker-base' ON FIELD text FROM <collection> PREFETCH (c) LIMIT <n>`
 - Direct point retrieval by ID -> `QUERY POINTS (id1, id2, 'id3') FROM <collection>`
 - Recommendation by example -> `QUERY RECOMMEND POSITIVE (id1, id2) NEGATIVE (id3) STRATEGY average_vector FROM <collection> USING dense LIMIT <n>`
 - Context search -> `QUERY CONTEXT (POSITIVE POINT id1 NEGATIVE POINT id2) FROM <collection> USING dense LIMIT <n>`
@@ -38,7 +41,9 @@ Translate user intent directly into QQL syntax:
 - Random sampling -> `QUERY SAMPLE RANDOM FROM <collection> LIMIT <n>`
 - Browse by payload field -> `QUERY ORDER BY <field> [ASC|DESC] FROM <collection> LIMIT <n>`
 - Multi-stage retrieval -> `WITH c1 AS (QUERY 't' USING dense LIMIT 100), c2 AS (QUERY 't' USING sparse LIMIT 100) QUERY FUSION RRF FROM <collection> PREFETCH (c1, c2) LIMIT <n>`
-- Rerank search -> `WITH c AS (QUERY 't' USING dense LIMIT 50) QUERY RERANK TEXT 't' MODEL 'bge-reranker' FROM <collection> USING colbert PREFETCH (c) LIMIT <n>`
+- CLIP text→image -> `QUERY TEXT '…' MODEL 'Qdrant/clip-ViT-B-32-text' FROM <coll> USING image LIMIT <n>`
+- CLIP image query -> `QUERY IMAGE '/path.jpg' MODEL 'Qdrant/clip-ViT-B-32-vision' FROM <coll> USING image LIMIT <n>`
+- CLIP image upsert -> `UPSERT … USING IMAGE MODEL 'clip-vision' ON FIELD image INTO image`
 - MMR diversification -> `QUERY MMR 'query_text' DIVERSITY 0.5 CANDIDATES 100 FROM <collection> USING dense LIMIT <n>`
 - Formula / Score shaping -> `QUERY FORMULA score + 0.3 * popularity DEFAULTS (popularity = 1.0) FROM <collection> USING dense LIMIT <n>`
 - Grouped results -> add `GROUP BY <field> SIZE <m> LOOKUP FROM <collection>`
@@ -46,8 +51,9 @@ Translate user intent directly into QQL syntax:
 - Batch ingest -> `UPSERT INTO <collection> VALUES {id: 1, text: '...'}, {id: 2, text: '...'}`
 - Delete points -> `DELETE FROM <collection> WHERE <filter>`
 - Clear payload -> `CLEAR PAYLOAD FROM <collection> WHERE <filter>`
+- Delete payload keys -> `DELETE PAYLOAD <key1, key2> FROM <collection> WHERE <filter>`
 - Delete vectors -> `DELETE VECTOR <name> FROM <collection> WHERE id = N`
-- Count points -> `COUNT FROM <collection> WHERE <filter>`
+- Count points -> `COUNT FROM <collection> WHERE <filter>` (or `COUNT FROM <collection> WITH (exact = true)` for exact count)
 - Create shard key -> `CREATE SHARD KEY '<key>' ON COLLECTION <name> [WITH (shards_number = N, replication_factor = M)]`
 - Drop shard key -> `DROP SHARD KEY '<key>' ON COLLECTION <name>`
 - Show shard keys -> `SHOW SHARD KEYS ON COLLECTION <name>`
@@ -129,11 +135,13 @@ Clauses must appear in the exact required order (enforced at parse time):
 [WITH cte_name AS (QUERY ...), ...]
 QUERY <expression>
 FROM <collection>
-[USING <vector_name> [AS DENSE | AS SPARSE]]
+[USING HYBRID [DENSE <vector>] [SPARSE <vector>] [FUSION RRF|DBSF]
+ | USING <vector_name> [AS DENSE | AS SPARSE | AS MULTI | AS MULTIVECTOR]]
 [PREFETCH (cte_ref [WHERE <filter>] [SCORE THRESHOLD <number>], ...)]
 [WHERE <filter_expression>]
 [SHARD '<tenant_key>']
-[PARAMS (hnsw_ef = <n>, exact = <bool>, acorn = <bool>, indexed_only = <bool>)]
+[PARAMS (hnsw_ef = <n>, exact = <bool>, acorn = <bool>, max_selectivity = <0–1>,
+         indexed_only = <bool>, timeout = <seconds>, consistency = majority|quorum|all|<n>)]
 [SCORE THRESHOLD <number>]
 [GROUP BY <field> [SIZE <n>] [LOOKUP FROM <collection>]]
 [WITH PAYLOAD [true | false | INCLUDE (...) | EXCLUDE (...)]]
@@ -143,6 +151,28 @@ FROM <collection>
 ```
 
 `SHARD` appears after `WHERE` and before `PARAMS`. Clause order violations produce parse errors.
+
+**Limits (see [qql-gaps.md](references/qql-gaps.md)):**
+
+- `OFFSET` **is** now supported with `GROUP BY` (maps to Qdrant's `group_offset`).
+- `MMR` now supports sparse vectors (`USING … AS SPARSE` with MMR is supported).
+- `max_selectivity` requires `acorn = true` (remote Qdrant; not edge).
+- `timeout` / `consistency` are request-level (OpenAPI query params / gRPC fields); not on edge.
+- Edge has **no** `GROUP BY` — use remote Qdrant or filter + `LIMIT`.
+- Dynamic shard: host `inject_shard_key(stmt, tenant)` (no `$bind` syntax).
+
+**Vector roles (critical for embedding):**
+
+| Form | Behavior |
+|---|---|
+| `USING name` | Runtime looks up `name` on collection schema (dense / sparse / multivector). Names are **not** special-cased by spelling. |
+| `USING name AS DENSE` | Single dense embed (MiniLM, CLIP text, …) — one `Vec<f32>` |
+| `USING name AS SPARSE` | Sparse BM25-style embed |
+| `USING name AS MULTI` | Multivector / ColBERT bag → `[[f32,…],…]` via `embed_multi` (BGE-M3 ColBERT, not CLIP) |
+| `USING HYBRID …` | Expand text nearest → dense+sparse fusion (same AST as `QUERY HYBRID`) |
+| No `USING` | Schema must have exactly one compatible vector |
+
+Offline/embed-only paths without schema require an explicit `AS …`. Leaving kind unknown fails with `QQL-VECTOR-KIND` (never silent dense default for named targets).
 
 ### Shard Routing & Multi-Tenancy
 
@@ -192,25 +222,32 @@ Supports standard comparison operators and predicates:
 
 ## Query Planning & Execution Architecture
 
-QQL uses a three-phase execution pipeline shared by all SDKs and the CLI:
+QQL uses a prepare → plan → dispatch pipeline shared by all SDKs and the CLI:
 
 ```
 Phase 1: Parse (qql-core)
   QQL string -> AST (Stmt enum)
-  SDK free functions: parse(), is_valid()
+  USING name without AS keeps kind: null (source fidelity)
 
-Phase 2: Plan (qql-plan)
+Phase 2: Prepare (qql-runtime / WASM Client)
+  1. Schema topology: resolve USING kinds + multivector flags
+     (dense / sparse names + multivector_config → multi)
+  2. Embeddings (qql-embed): text → Dense | Sparse | MultiDense
+     - kind unknown without schema → QQL-VECTOR-KIND (fail closed)
+     - multi targets call Embedder::embed_multi
+
+Phase 3: Plan (qql-plan)
   AST -> PlannedOperation (canonical, transport-neutral)
+  MultiDense serializes as array-of-arrays on REST / multi_dense on gRPC
   to_rest_route() -> Route { method, path, body }
-  route_query_batch() -> groups QUERYs by collection for /points/query/batch
 
-Phase 3: Execute (qql-runtime)
-  PreparedStatement -> plan() -> dispatch_planned()
+Phase 4: Dispatch
   Smart batching: same-collection QUERYs -> /points/query/batch,
                    same-collection mutations -> /points/batch
+  REST / gRPC / Edge backends
 ```
 
-DDL (`CREATE COLLECTION`, `ALTER`, `CREATE INDEX`, etc.) and DML (`QUERY`, `UPSERT`, `DELETE`, etc.) all flow through the same plan-then-dispatch path. The old `executor/ddl.rs` has been removed; all operations use `to_rest_route()` or the gRPC route dispatcher.
+DDL (`CREATE COLLECTION`, `ALTER`, `CREATE INDEX`, etc.) and DML (`QUERY`, `UPSERT`, `DELETE`, etc.) all flow through the same plan-then-dispatch path.
 
 
 ### Backend Limitations

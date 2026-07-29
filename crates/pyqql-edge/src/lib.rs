@@ -56,6 +56,10 @@ impl PyStmt {
             ast::Stmt::Scroll(s) => s.shard_key.clone(),
             ast::Stmt::Upsert(u) => u.shard_key.clone(),
             ast::Stmt::Delete(d) => d.shard_key.clone(),
+            ast::Stmt::ClearPayload(c) => c.shard_key.clone(),
+            ast::Stmt::DeleteVector(d) => d.shard_key.clone(),
+            ast::Stmt::UpdateVector(u) => u.shard_key.clone(),
+            ast::Stmt::UpdatePayload(u) => u.shard_key.clone(),
             _ => None,
         }
     }
@@ -69,6 +73,10 @@ impl PyStmt {
             ast::Stmt::Scroll(s) => s.shard_key = key,
             ast::Stmt::Upsert(u) => u.shard_key = key,
             ast::Stmt::Delete(d) => d.shard_key = key,
+            ast::Stmt::ClearPayload(c) => c.shard_key = key,
+            ast::Stmt::DeleteVector(d) => d.shard_key = key,
+            ast::Stmt::UpdateVector(u) => u.shard_key = key,
+            ast::Stmt::UpdatePayload(u) => u.shard_key = key,
             _ => {}
         }
     }
@@ -152,12 +160,28 @@ fn tokenize<'py>(input: &str, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict
 #[pyfunction]
 fn compile_query<'py>(py: Python<'py>, input: &str) -> PyResult<Bound<'py, PyAny>> {
     let stmt = Parser::parse(input).map_err(qql_py_syntax_error)?;
-    let route = qql_plan::routing::route(&stmt);
+    let compiled = qql_plan::routing::compile_statement(&stmt)
+        .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+    let (method, path, payload) = match compiled.route {
+        Some(route) => {
+            let payload = route.body_json().unwrap_or(serde_json::Value::Null);
+            (
+                serde_json::Value::String(route.method.as_str().into()),
+                serde_json::Value::String(route.path),
+                payload,
+            )
+        }
+        None => (
+            serde_json::Value::Null,
+            serde_json::Value::Null,
+            serde_json::Value::Null,
+        ),
+    };
     let result = serde_json::json!({
-        "stmt_type": stmt_type(&stmt),
-        "method": route.method.as_str(),
-        "path": route.path,
-        "payload": route.body_json().unwrap_or(serde_json::Value::Null),
+        "stmt_type": compiled.stmt_type,
+        "method": method,
+        "path": path,
+        "payload": payload,
     });
     pythonize::pythonize(py, &result).map_err(|e| PySyntaxError::new_err(e.to_string()))
 }
@@ -409,11 +433,16 @@ async fn run_async(
 ///     show_download_progress: show HuggingFace download progress (default False)
 #[cfg(feature = "fastembed-local")]
 #[pyfunction]
-#[pyo3(signature = (data_dir, on_disk_payload=true, *, model=None, cache_dir=None, show_download_progress=false))]
+#[allow(clippy::too_many_arguments)]
+#[pyo3(signature = (data_dir, on_disk_payload=true, *, model=None, sparse_model=None, multi_model=None, image_model=None, reranker_model=None, cache_dir=None, show_download_progress=false))]
 fn local_executor(
     data_dir: &str,
     on_disk_payload: bool,
     model: Option<String>,
+    sparse_model: Option<String>,
+    multi_model: Option<String>,
+    image_model: Option<String>,
+    reranker_model: Option<String>,
     cache_dir: Option<String>,
     show_download_progress: bool,
 ) -> PyResult<PyClient> {
@@ -422,6 +451,10 @@ fn local_executor(
         qql_edge::LocalExecutorOptions {
             on_disk_payload,
             model,
+            sparse_model,
+            multi_model,
+            image_model,
+            reranker_model,
             cache_dir: cache_dir.map(std::path::PathBuf::from),
             show_download_progress,
         },
@@ -447,6 +480,8 @@ fn list_embedding_models(py: Python<'_>) -> PyResult<Bound<'_, PyList>> {
     for m in models {
         let d = PyDict::new(py);
         d.set_item("name", m.name)?;
+        d.set_item("multi", m.multi)?;
+        d.set_item("image", m.image)?;
         d.set_item("model_code", m.model_code)?;
         d.set_item("dim", m.dim)?;
         d.set_item("description", m.description)?;
@@ -460,13 +495,17 @@ fn list_embedding_models(py: Python<'_>) -> PyResult<Bound<'_, PyList>> {
 #[cfg(feature = "fastembed-local")]
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
-#[pyo3(signature = (query, *, data_dir="./qdrant_data", on_disk_payload=true, model=None, cache_dir=None, show_download_progress=false, on_error="stop"))]
+#[pyo3(signature = (query, *, data_dir="./qdrant_data", on_disk_payload=true, model=None, sparse_model=None, multi_model=None, image_model=None, reranker_model=None, cache_dir=None, show_download_progress=false, on_error="stop"))]
 fn execute<'py>(
     py: Python<'py>,
     query: &Bound<'_, PyAny>,
     data_dir: &str,
     on_disk_payload: bool,
     model: Option<String>,
+    sparse_model: Option<String>,
+    multi_model: Option<String>,
+    image_model: Option<String>,
+    reranker_model: Option<String>,
     cache_dir: Option<String>,
     show_download_progress: bool,
     on_error: &str,
@@ -475,6 +514,10 @@ fn execute<'py>(
         data_dir,
         on_disk_payload,
         model,
+        sparse_model,
+        multi_model,
+        image_model,
+        reranker_model,
         cache_dir,
         show_download_progress,
     )?;
@@ -487,13 +530,17 @@ fn execute<'py>(
 #[cfg(feature = "fastembed-local")]
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
-#[pyo3(signature = (query, *, data_dir="./qdrant_data", on_disk_payload=true, model=None, cache_dir=None, show_download_progress=false, on_error="stop"))]
+#[pyo3(signature = (query, *, data_dir="./qdrant_data", on_disk_payload=true, model=None, sparse_model=None, multi_model=None, image_model=None, reranker_model=None, cache_dir=None, show_download_progress=false, on_error="stop"))]
 fn execute_async<'py>(
     py: Python<'py>,
     query: Bound<'py, PyAny>,
     data_dir: &str,
     on_disk_payload: bool,
     model: Option<String>,
+    sparse_model: Option<String>,
+    multi_model: Option<String>,
+    image_model: Option<String>,
+    reranker_model: Option<String>,
     cache_dir: Option<String>,
     show_download_progress: bool,
     on_error: &str,
@@ -504,6 +551,10 @@ fn execute_async<'py>(
         data_dir,
         on_disk_payload,
         model,
+        sparse_model,
+        multi_model,
+        image_model,
+        reranker_model,
         cache_dir,
         show_download_progress,
     )?;
@@ -575,29 +626,8 @@ fn pyqql_edge(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(inject_filter, m)?)?;
     m.add_function(wrap_pyfunction!(tokenize, m)?)?;
     m.add_function(wrap_pyfunction!(compile_query, m)?)?;
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
-}
-
-fn stmt_type(stmt: &ast::Stmt) -> &'static str {
-    match stmt {
-        ast::Stmt::Query(_) => "QUERY",
-        ast::Stmt::Scroll(_) => "SCROLL",
-        ast::Stmt::Upsert(_) => "UPSERT",
-        ast::Stmt::UpdateVector(_) | ast::Stmt::UpdatePayload(_) => "UPDATE",
-        ast::Stmt::Delete(_) | ast::Stmt::DeleteVector(_) => "DELETE",
-        ast::Stmt::ClearPayload(_) => "CLEAR PAYLOAD",
-        ast::Stmt::Count(_) => "COUNT",
-        ast::Stmt::CreateCollection(_)
-        | ast::Stmt::CreateIndex(_)
-        | ast::Stmt::CreateShardKey(_) => "CREATE",
-        ast::Stmt::AlterCollection(_) => "ALTER",
-        ast::Stmt::DropCollection(_) | ast::Stmt::DropIndex(_) | ast::Stmt::DropShardKey(_) => {
-            "DROP"
-        }
-        ast::Stmt::ShowCollections | ast::Stmt::ShowCollection(_) | ast::Stmt::ShowShardKeys(_) => {
-            "SHOW"
-        }
-    }
 }
 
 fn qql_py_error(error: qql_core::error::QqlError) -> pyo3::PyErr {

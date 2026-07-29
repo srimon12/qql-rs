@@ -372,7 +372,7 @@ console.log("  ✓ Client.compile");
     "QUERY RECOMMEND POSITIVE (42) STRATEGY best_score FROM nqql_test USING dense LIMIT 1",
     { onError: "continue" },
   );
-  assertFails(r, "point-reference");
+  assertFails(r, "point-id");
   console.log("  ✓ point-reference recommendation rejected explicitly");
 
   // 5h. Mismatched USING MODEL on a locked local embedder

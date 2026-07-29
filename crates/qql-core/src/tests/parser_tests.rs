@@ -203,6 +203,73 @@ fn hybrid_shorthand() {
 }
 
 #[test]
+fn using_hybrid_shorthand_expands_to_hybrid() {
+    // Tail form: QUERY TEXT … USING HYBRID … → same AST as QUERY HYBRID TEXT …
+    let s = Parser::parse(
+        "QUERY TEXT 'search' FROM docs USING HYBRID DENSE dense SPARSE sparse FUSION RRF LIMIT 10;",
+    )
+    .unwrap();
+    let Stmt::Query(q) = s else { panic!() };
+    assert!(matches!(
+        q.expression,
+        QueryExpr::Hybrid {
+            ref text,
+            dense_vector: Some(ref d),
+            sparse_vector: Some(ref sp),
+            fusion: FusionMethod::Rrf,
+            model: None,
+        } if text == "search" && d == "dense" && sp == "sparse"
+    ));
+}
+
+#[test]
+fn using_hybrid_defaults_fusion_rrf_and_omitted_names() {
+    let s = Parser::parse("QUERY 'search' FROM docs USING HYBRID LIMIT 10;").unwrap();
+    let Stmt::Query(q) = s else { panic!() };
+    assert!(matches!(
+        q.expression,
+        QueryExpr::Hybrid {
+            ref text,
+            dense_vector: None,
+            sparse_vector: None,
+            fusion: FusionMethod::Rrf,
+            model: None,
+        } if text == "search"
+    ));
+}
+
+#[test]
+fn using_hybrid_preserves_model_and_dbsf() {
+    let s = Parser::parse(
+        "QUERY TEXT 'q' MODEL 'nomic' FROM docs USING HYBRID DENSE d SPARSE s FUSION DBSF LIMIT 5;",
+    )
+    .unwrap();
+    let Stmt::Query(q) = s else { panic!() };
+    assert!(matches!(
+        q.expression,
+        QueryExpr::Hybrid {
+            ref text,
+            model: Some(ref m),
+            dense_vector: Some(ref d),
+            sparse_vector: Some(ref sp),
+            fusion: FusionMethod::Dbsf,
+        } if text == "q" && m == "nomic" && d == "d" && sp == "s"
+    ));
+}
+
+#[test]
+fn using_hybrid_rejects_non_text_nearest() {
+    assert!(Parser::parse("QUERY VECTOR [0.1, 0.2] FROM docs USING HYBRID LIMIT 10;").is_err());
+    assert!(Parser::parse("QUERY IMAGE '/tmp/a.png' FROM docs USING HYBRID LIMIT 10;").is_err());
+    assert!(Parser::parse(
+        "QUERY MMR TEXT 'x' DIVERSITY 0.5 CANDIDATES 20 FROM docs USING HYBRID LIMIT 10;"
+    )
+    .is_err());
+    // Front-form already Hybrid — USING HYBRID is redundant/invalid.
+    assert!(Parser::parse("QUERY HYBRID TEXT 'x' FROM docs USING HYBRID LIMIT 10;").is_err());
+}
+
+#[test]
 fn rerank_query() {
     let s = Parser::parse(
         "WITH c AS (QUERY TEXT 'x' USING dense LIMIT 100) QUERY RERANK TEXT 'x' MODEL 'reranker' FROM docs USING colbert PREFETCH (c) LIMIT 10;",
@@ -224,9 +291,185 @@ fn using_can_declare_an_arbitrary_sparse_vector() {
             using: Some(crate::ast::VectorTarget {
                 ref name,
                 kind: Some(crate::ast::VectorKind::Sparse),
+                multi: false,
             }),
             ..
         } if name == "lexical_v2"
+    ));
+}
+
+#[test]
+fn max_selectivity_requires_acorn() {
+    assert!(Parser::parse("QUERY 'x' FROM docs PARAMS (max_selectivity = 0.5) LIMIT 1;").is_err());
+    let ok =
+        Parser::parse("QUERY 'x' FROM docs PARAMS (acorn = true, max_selectivity = 0.5) LIMIT 1;");
+    assert!(ok.is_ok(), "{ok:?}");
+}
+
+#[test]
+fn params_timeout_and_consistency() {
+    use crate::ast::ReadConsistency;
+    let s =
+        Parser::parse("QUERY 'x' FROM docs PARAMS (timeout = 30, consistency = majority) LIMIT 5;")
+            .unwrap();
+    let Stmt::Query(q) = s else { panic!() };
+    let p = q.params.as_ref().unwrap();
+    assert_eq!(p.timeout, Some(30));
+    assert_eq!(p.consistency, Some(ReadConsistency::Majority));
+
+    let s = Parser::parse("QUERY 'x' FROM docs PARAMS (consistency = 2) LIMIT 5;").unwrap();
+    let Stmt::Query(q) = s else { panic!() };
+    assert_eq!(
+        q.params.as_ref().unwrap().consistency,
+        Some(ReadConsistency::Factor(2))
+    );
+}
+
+#[test]
+fn inject_shard_key_sets_query_and_ctes() {
+    use crate::ast::inject_shard_key;
+    let mut stmt = Parser::parse(
+        "WITH c AS (QUERY TEXT 'x' USING dense LIMIT 10) \
+         QUERY FUSION RRF FROM docs PREFETCH (c) LIMIT 5;",
+    )
+    .unwrap();
+    inject_shard_key(&mut stmt, "acme").unwrap();
+    let Stmt::Query(q) = &stmt else { panic!() };
+    assert_eq!(q.shard_key.as_deref(), Some("acme"));
+    assert_eq!(q.ctes[0].query.shard_key.as_deref(), Some("acme"));
+    assert!(inject_shard_key(&mut stmt, "").is_err());
+}
+
+#[test]
+fn mutation_shard_key_parses_and_injects() {
+    use crate::ast::inject_shard_key;
+
+    let clear = Parser::parse("CLEAR PAYLOAD FROM docs WHERE id = 1 SHARD 'tenant-a';").unwrap();
+    let Stmt::ClearPayload(c) = clear else {
+        panic!("expected ClearPayload");
+    };
+    assert_eq!(c.shard_key.as_deref(), Some("tenant-a"));
+
+    let del_vec =
+        Parser::parse("DELETE VECTOR dense FROM docs WHERE id = 1 SHARD 'tenant-b';").unwrap();
+    let Stmt::DeleteVector(d) = del_vec else {
+        panic!("expected DeleteVector");
+    };
+    assert_eq!(d.shard_key.as_deref(), Some("tenant-b"));
+
+    let upd_vec =
+        Parser::parse("UPDATE docs SET VECTOR dense = [0.1, 0.2] WHERE id = 1 SHARD 'tenant-c';")
+            .unwrap();
+    let Stmt::UpdateVector(u) = upd_vec else {
+        panic!("expected UpdateVector");
+    };
+    assert_eq!(u.shard_key.as_deref(), Some("tenant-c"));
+
+    let upd_pay =
+        Parser::parse("UPDATE docs SET PAYLOAD = {\"a\": 1} WHERE id = 1 SHARD 'tenant-d';")
+            .unwrap();
+    let Stmt::UpdatePayload(p) = upd_pay else {
+        panic!("expected UpdatePayload");
+    };
+    assert_eq!(p.shard_key.as_deref(), Some("tenant-d"));
+
+    let mut inject_target = Parser::parse("CLEAR PAYLOAD FROM docs WHERE id = 2;").unwrap();
+    inject_shard_key(&mut inject_target, "injected").unwrap();
+    let Stmt::ClearPayload(c) = inject_target else {
+        panic!("expected ClearPayload after inject");
+    };
+    assert_eq!(c.shard_key.as_deref(), Some("injected"));
+}
+
+#[test]
+fn cross_rerank_parses() {
+    let stmt = Parser::parse(
+        "WITH c AS (QUERY TEXT 'q' FROM docs USING dense LIMIT 50) \
+         QUERY CROSS RERANK TEXT 'q' MODEL 'bge-reranker-base' ON FIELD body \
+         FROM docs PREFETCH (c) LIMIT 10;",
+    )
+    .unwrap();
+    match stmt {
+        Stmt::Query(q) => match &q.expression {
+            QueryExpr::CrossRerank {
+                query,
+                model,
+                field,
+                prefetch,
+            } => {
+                assert_eq!(query, "q");
+                assert_eq!(model, "bge-reranker-base");
+                assert_eq!(field.as_deref(), Some("body"));
+                assert_eq!(prefetch.len(), 1);
+            }
+            other => panic!("expected CrossRerank, got {other:?}"),
+        },
+        other => panic!("expected query, got {other:?}"),
+    }
+}
+
+#[test]
+fn image_query_input_parses() {
+    let stmt = Parser::parse(
+        "QUERY IMAGE '/data/photo.jpg' MODEL 'clip-vision' FROM products USING image AS DENSE LIMIT 5;",
+    )
+    .unwrap();
+    match stmt {
+        Stmt::Query(q) => match &q.expression {
+            QueryExpr::Nearest {
+                input: QueryInput::Image { source, model },
+                using: Some(u),
+                ..
+            } => {
+                assert_eq!(source, "/data/photo.jpg");
+                assert_eq!(model.as_deref(), Some("clip-vision"));
+                assert_eq!(u.name, "image");
+            }
+            other => panic!("expected IMAGE nearest, got {other:?}"),
+        },
+        other => panic!("expected query, got {other:?}"),
+    }
+}
+
+#[test]
+fn upsert_using_image_parses() {
+    let stmt = Parser::parse(
+        "UPSERT INTO products VALUES {id: 1, image: '/a.jpg'} \
+         USING IMAGE MODEL 'clip-vision' ON FIELD image INTO image;",
+    )
+    .unwrap();
+    match stmt {
+        Stmt::Upsert(u) => match &u.embedding {
+            Some(EmbeddingSpec::Image {
+                model,
+                vector,
+                field,
+            }) => {
+                assert_eq!(model.as_deref(), Some("clip-vision"));
+                assert_eq!(vector.as_deref(), Some("image"));
+                assert_eq!(field.as_deref(), Some("image"));
+            }
+            other => panic!("expected IMAGE embedding spec, got {other:?}"),
+        },
+        other => panic!("expected upsert, got {other:?}"),
+    }
+}
+
+#[test]
+fn using_as_multi_marks_dense_multivector() {
+    let s =
+        Parser::parse("QUERY TEXT 'search' FROM docs USING colbert AS MULTI LIMIT 10;").unwrap();
+    let Stmt::Query(q) = s else { panic!() };
+    assert!(matches!(
+        q.expression,
+        QueryExpr::Nearest {
+            using: Some(crate::ast::VectorTarget {
+                ref name,
+                kind: Some(crate::ast::VectorKind::Dense),
+                multi: true,
+            }),
+            ..
+        } if name == "colbert"
     ));
 }
 

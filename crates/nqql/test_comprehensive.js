@@ -483,6 +483,55 @@ test('HttpEmbedder Infinity dimension rejected', () => {
   );
 });
 
+// Rerank config acceptance — RT-05: remote embedder config must accept
+// rerankEndpoint, rerankApiKey, rerankModel and wire them to the native Client.
+test('HttpEmbedder accepts rerank fields (camelCase)', () => {
+  const e = new nqql.HttpEmbedder({
+    endpoint: 'http://localhost:8080/v1/embeddings',
+    model: 'test-model',
+    dimension: 768,
+    rerankEndpoint: 'http://localhost:8080/rerank',
+    rerankModel: 'test-reranker',
+    rerankApiKey: 'rk-test',
+  });
+  assert.strictEqual(e.endpoint, 'http://localhost:8080/v1/embeddings');
+  assert.strictEqual(e.model, 'test-model');
+  assert.strictEqual(e.dimension, 768);
+  // Regression RT-05: rerank properties are stored on the wrapper instance
+  assert.strictEqual(e.rerankEndpoint, 'http://localhost:8080/rerank');
+  assert.strictEqual(e.rerankModel, 'test-reranker');
+  assert.strictEqual(e.rerankApiKey, 'rk-test');
+});
+
+test('HttpEmbedder accepts rerank fields (snake_case aliases)', () => {
+  const e = new nqql.HttpEmbedder({
+    endpoint: 'http://localhost:8080/v1/embeddings',
+    model: 'test-model',
+    dimension: 768,
+    rerank_endpoint: 'http://localhost:8080/rerank-snake',
+    rerank_model: 'test-reranker-snake',
+    rerank_api_key: 'rk-snake',
+  });
+  assert.strictEqual(e.rerankEndpoint, 'http://localhost:8080/rerank-snake');
+  assert.strictEqual(e.rerankModel, 'test-reranker-snake');
+  assert.strictEqual(e.rerankApiKey, 'rk-snake');
+});
+
+test('Client with embedder (including rerank fields) constructs w/o error', () => {
+  const e = new nqql.HttpEmbedder({
+    endpoint: 'http://localhost:8080/v1/embeddings',
+    model: 'test-model',
+    dimension: 768,
+    rerankEndpoint: 'http://localhost:8080/rerank',
+    rerankModel: 'test-reranker',
+    rerankApiKey: 'rk-test',
+  });
+  const c = new nqql.Client({ url: QDRANT_URL, embedder: e, useGrpc: false });
+  assert.ok(c instanceof nqql.Client);
+  const plan = c.explain('QUERY TEXT "hello" FROM docs LIMIT 5');
+  assert.ok(plan.length > 0);
+});
+
 // ============================================================================
 console.log('\n========== G. compileQuery Route Contract ==========');
 

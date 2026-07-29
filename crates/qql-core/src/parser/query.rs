@@ -45,32 +45,48 @@ impl<'a> AstLowerer<'a> {
             QueryCollection::Inherited
         };
 
+        // USING HYBRID [DENSE n] [SPARSE n] [FUSION …]  — expands to QueryExpr::Hybrid
+        // USING <name> [AS DENSE|SPARSE|MULTI]         — single named-vector target
         let using = if self.peek()?.kind == TokenKind::Using {
             self.advance()?;
-            let name = self.parse_identifier()?;
-            let kind = if self.peek()?.kind == TokenKind::As {
-                self.advance()?;
-                Some(match self.peek()?.kind {
-                    TokenKind::Dense => {
-                        self.advance()?;
-                        VectorKind::Dense
-                    }
-                    TokenKind::Sparse => {
-                        self.advance()?;
-                        VectorKind::Sparse
-                    }
-                    _ => {
-                        return Err(QqlError::parse(
-                            "QQL-PARSE-VECTOR-KIND",
-                            "USING <vector> AS requires DENSE or SPARSE",
-                            self.peek()?.span,
-                        ));
-                    }
-                })
-            } else {
+            if self.peek()?.kind == TokenKind::Hybrid {
+                let hybrid_using = self.parse_hybrid_using()?;
+                expand_using_hybrid(&mut expression, hybrid_using, expression_span)?;
                 None
-            };
-            Some(VectorTarget { name, kind })
+            } else {
+                let name = self.parse_identifier()?;
+                let (kind, multi) = if self.peek()?.kind == TokenKind::As {
+                    self.advance()?;
+                    match self.peek()?.kind {
+                        TokenKind::Dense => {
+                            self.advance()?;
+                            (Some(VectorKind::Dense), false)
+                        }
+                        TokenKind::Sparse => {
+                            self.advance()?;
+                            (Some(VectorKind::Sparse), false)
+                        }
+                        // Slight additive form: AS MULTI | AS MULTIVECTOR → dense multivector.
+                        // Matched as bare words so we avoid a new reserved keyword.
+                        _ if ascii_equal(self.peek()?.text, "MULTI")
+                            || ascii_equal(self.peek()?.text, "MULTIVECTOR") =>
+                        {
+                            self.advance()?;
+                            (Some(VectorKind::Dense), true)
+                        }
+                        _ => {
+                            return Err(QqlError::parse(
+                                "QQL-PARSE-VECTOR-KIND",
+                                "USING <vector> AS requires DENSE, SPARSE, or MULTI",
+                                self.peek()?.span,
+                            ));
+                        }
+                    }
+                } else {
+                    (None, false)
+                };
+                Some(VectorTarget { name, kind, multi })
+            }
         } else {
             None
         };
@@ -327,6 +343,10 @@ impl<'a> AstLowerer<'a> {
         if self.peek()?.kind == TokenKind::Hybrid {
             return self.parse_hybrid();
         }
+        // CROSS RERANK (pair scorer) before bare RERANK (late-interaction).
+        if self.peek_word("CROSS")? {
+            return self.parse_cross_rerank();
+        }
         if self.peek()?.kind == TokenKind::Rerank {
             return self.parse_rerank();
         }
@@ -346,6 +366,13 @@ impl<'a> AstLowerer<'a> {
             let model = self.parse_optional_model_string()?;
             return Ok(QueryInput::Text { text, model });
         }
+        // IMAGE is a bare word (not reserved) — local path or URL for CLIP vision.
+        if self.peek_word("IMAGE")? {
+            self.advance()?;
+            let source = self.parse_string()?;
+            let model = self.parse_optional_model_string()?;
+            return Ok(QueryInput::Image { source, model });
+        }
         if self.peek()?.kind == TokenKind::Vector {
             self.advance()?;
             return self.parse_vector_value().map(QueryInput::Vector);
@@ -361,7 +388,7 @@ impl<'a> AstLowerer<'a> {
         }
         Err(QqlError::parse(
             "QQL-PARSE-QUERY-INPUT",
-            "query input requires TEXT, VECTOR, or POINT",
+            "query input requires TEXT, IMAGE, VECTOR, or POINT",
             self.peek()?.span,
         ))
     }
@@ -530,6 +557,28 @@ impl<'a> AstLowerer<'a> {
                 Some(input_tok.span),
             ));
         };
+        let HybridUsing {
+            dense_vector,
+            sparse_vector,
+            fusion,
+        } = self.parse_hybrid_modifiers()?;
+        Ok(QueryExpr::Hybrid {
+            text,
+            model,
+            dense_vector,
+            sparse_vector,
+            fusion,
+        })
+    }
+
+    /// Parse `HYBRID [DENSE n] [SPARSE n] [FUSION method]` after the `USING` keyword.
+    fn parse_hybrid_using(&mut self) -> Result<HybridUsing, QqlError> {
+        self.expect(TokenKind::Hybrid)?;
+        self.parse_hybrid_modifiers()
+    }
+
+    /// Shared optional dense/sparse/fusion modifiers for front-form and USING HYBRID.
+    fn parse_hybrid_modifiers(&mut self) -> Result<HybridUsing, QqlError> {
         let dense_vector = if self.peek()?.kind == TokenKind::Dense {
             self.advance()?;
             Some(self.parse_identifier()?)
@@ -548,12 +597,42 @@ impl<'a> AstLowerer<'a> {
         } else {
             FusionMethod::Rrf
         };
-        Ok(QueryExpr::Hybrid {
-            text,
-            model,
+        Ok(HybridUsing {
             dense_vector,
             sparse_vector,
             fusion,
+        })
+    }
+
+    fn parse_cross_rerank(&mut self) -> Result<QueryExpr, QqlError> {
+        // CROSS is a bare word (not reserved).
+        self.advance()?;
+        self.expect(TokenKind::Rerank)?;
+        let query = if self.peek_word("TEXT")? {
+            self.advance()?;
+            self.parse_string()?
+        } else if self.peek()?.kind == TokenKind::String {
+            self.parse_string()?
+        } else {
+            return Err(QqlError::parse(
+                "QQL-PARSE-CROSS-RERANK",
+                "CROSS RERANK requires TEXT '…' or a string query",
+                self.peek()?.span,
+            ));
+        };
+        let model = self.parse_required_model_string()?;
+        let field = if self.peek()?.kind == TokenKind::On {
+            self.advance()?;
+            self.expect(TokenKind::Field)?;
+            Some(self.parse_identifier()?)
+        } else {
+            None
+        };
+        Ok(QueryExpr::CrossRerank {
+            query,
+            model,
+            field,
+            prefetch: Vec::new(),
         })
     }
 
@@ -689,6 +768,54 @@ impl<'a> AstLowerer<'a> {
     }
 }
 
+/// Optional clauses after `HYBRID` / `USING HYBRID`.
+struct HybridUsing {
+    dense_vector: Option<String>,
+    sparse_vector: Option<String>,
+    fusion: FusionMethod,
+}
+
+/// Expand `QUERY TEXT … USING HYBRID …` into the same `QueryExpr::Hybrid` AST
+/// as front-form `QUERY HYBRID TEXT …`. Plan/embed paths already lower Hybrid.
+fn expand_using_hybrid(
+    expression: &mut QueryExpr,
+    hybrid: HybridUsing,
+    span: Span,
+) -> Result<(), QqlError> {
+    match expression {
+        QueryExpr::Nearest {
+            input: QueryInput::Text { text, model },
+            using: None,
+            prefetch,
+            mmr: None,
+        } if prefetch.is_empty() => {
+            *expression = QueryExpr::Hybrid {
+                text: core::mem::take(text),
+                model: model.take(),
+                dense_vector: hybrid.dense_vector,
+                sparse_vector: hybrid.sparse_vector,
+                fusion: hybrid.fusion,
+            };
+            Ok(())
+        }
+        QueryExpr::Nearest { mmr: Some(_), .. } => Err(QqlError::validation(
+            "QQL-VALIDATION-HYBRID",
+            "USING HYBRID cannot combine with MMR; use dense nearest with MMR or HYBRID without MMR",
+            Some(span),
+        )),
+        QueryExpr::Hybrid { .. } => Err(QqlError::validation(
+            "QQL-VALIDATION-HYBRID",
+            "USING HYBRID is redundant with QUERY HYBRID; use one form only",
+            Some(span),
+        )),
+        _ => Err(QqlError::validation(
+            "QQL-VALIDATION-HYBRID",
+            "USING HYBRID requires a text nearest query (QUERY TEXT '…' or QUERY '…')",
+            Some(span),
+        )),
+    }
+}
+
 fn attach_pipeline(
     expression: &mut QueryExpr,
     using: Option<VectorTarget>,
@@ -765,6 +892,20 @@ fn attach_pipeline(
             *target = Some(using);
             *nested = prefetch;
         }
+        QueryExpr::CrossRerank {
+            prefetch: nested, ..
+        } => {
+            // Pair scorer: no vector USING; PREFETCH supplies candidates.
+            reject_using(using, span)?;
+            if prefetch.is_empty() {
+                return Err(QqlError::validation(
+                    "QQL-VALIDATION-CROSS-RERANK-PREFETCH",
+                    "CROSS RERANK requires PREFETCH (candidate stage)",
+                    Some(span),
+                ));
+            }
+            *nested = prefetch;
+        }
         QueryExpr::Points { .. }
         | QueryExpr::OrderBy { .. }
         | QueryExpr::SampleRandom
@@ -807,7 +948,8 @@ fn validate_prefetch_references(
         | QueryExpr::Fusion { prefetch, .. }
         | QueryExpr::Formula { prefetch, .. }
         | QueryExpr::RelevanceFeedback { prefetch, .. }
-        | QueryExpr::Rerank { prefetch, .. } => prefetch,
+        | QueryExpr::Rerank { prefetch, .. }
+        | QueryExpr::CrossRerank { prefetch, .. } => prefetch,
         QueryExpr::Points { .. }
         | QueryExpr::OrderBy { .. }
         | QueryExpr::SampleRandom

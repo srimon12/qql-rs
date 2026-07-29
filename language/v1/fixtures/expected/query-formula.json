@@ -129,6 +129,7 @@
                   "prefetch": [],
                   "using": {
                     "kind": null,
+                    "multi": false,
                     "name": "dense"
                   }
                 }

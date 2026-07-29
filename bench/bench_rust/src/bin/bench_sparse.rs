@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::{hint::black_box, time::Instant};
 
 fn main() {
     let doc_text = "The quick brown fox jumps over the lazy dog near the riverbank with acute fever and cough symptoms.";
@@ -8,19 +8,19 @@ fn main() {
 
     // Warmup
     for _ in 0..1_000 {
-        let _ = qql::sparse::build_document_default(doc_text);
-        let _ = qql::sparse::build_query(query_text);
+        black_box(qql::sparse::build_document_default(doc_text));
+        black_box(qql::sparse::build_query(query_text));
     }
 
     let start = Instant::now();
     for _ in 0..iterations {
-        let _ = qql::sparse::build_document_default(doc_text);
+        black_box(qql::sparse::build_document_default(doc_text));
     }
     let elapsed_doc = start.elapsed();
 
     let start = Instant::now();
     for _ in 0..iterations {
-        let _ = qql::sparse::build_query(query_text);
+        black_box(qql::sparse::build_query(query_text));
     }
     let elapsed_query = start.elapsed();
 

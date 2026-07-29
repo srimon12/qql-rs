@@ -10,4 +10,7 @@ COUNT FROM docs WHERE status = 'active';
 COUNT FROM sec10k WHERE tenant_id = 'honeywell' SHARD 'honeywell';
 
 -- Count with complex filter
-COUNT FROM docs WHERE status = 'published' AND year >= 2024;
+  COUNT FROM docs WHERE status = 'published' AND year >= 2024;
+
+  -- Count with exact flag
+  COUNT FROM docs WHERE active = true WITH (exact = true);

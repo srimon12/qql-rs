@@ -23,7 +23,123 @@ fn json_bool(value: &serde_json::Value, key: &str) -> Option<bool> {
     value.get(key).and_then(serde_json::Value::as_bool)
 }
 
-fn hnsw_config(value: &serde_json::Value) -> qdrant::HnswConfigDiff {
+// ── Typed plan-to-gRPC converters (no JSON intermediate) ─────────────
+
+pub(crate) fn hnsw_config_from_plan(cfg: &qql_plan::HnswConfig) -> qdrant::HnswConfigDiff {
+    qdrant::HnswConfigDiff {
+        m: cfg.m,
+        ef_construct: cfg.ef_construct,
+        full_scan_threshold: cfg.full_scan_threshold,
+        max_indexing_threads: cfg.max_indexing_threads,
+        on_disk: cfg.on_disk,
+        payload_m: cfg.payload_m,
+        ..Default::default()
+    }
+}
+
+pub(crate) fn optimizers_config_from_plan(
+    cfg: &qql_plan::OptimizersConfig,
+) -> qdrant::OptimizersConfigDiff {
+    let max_optimization_threads = cfg
+        .max_optimization_threads
+        .as_ref()
+        .and_then(|v| v.as_u64())
+        .map(|value| qdrant::MaxOptimizationThreads {
+            variant: Some(qdrant::max_optimization_threads::Variant::Value(value)),
+        })
+        .or_else(|| {
+            cfg.max_optimization_threads
+                .as_ref()
+                .and_then(|v| v.as_str())
+                .filter(|s| s.eq_ignore_ascii_case("auto"))
+                .map(|_| qdrant::MaxOptimizationThreads {
+                    variant: Some(qdrant::max_optimization_threads::Variant::Setting(
+                        qdrant::max_optimization_threads::Setting::Auto as i32,
+                    )),
+                })
+        });
+
+    qdrant::OptimizersConfigDiff {
+        deleted_threshold: cfg.deleted_threshold,
+        vacuum_min_vector_number: cfg.vacuum_min_vector_number,
+        default_segment_number: cfg.default_segment_number,
+        max_segment_size: cfg.max_segment_size,
+        memmap_threshold: cfg.memmap_threshold,
+        indexing_threshold: cfg.indexing_threshold,
+        flush_interval_sec: cfg.flush_interval_sec,
+        max_optimization_threads,
+        prevent_unoptimized: cfg.prevent_unoptimized,
+        ..Default::default()
+    }
+}
+
+pub(crate) fn quantization_config_from_plan(
+    cfg: &qql_plan::QuantizationConfig,
+) -> Option<qdrant::QuantizationConfig> {
+    match cfg {
+        qql_plan::QuantizationConfig::Scalar { scalar } => Some(qdrant::QuantizationConfig {
+            quantization: Some(qdrant::quantization_config::Quantization::Scalar(
+                qdrant::ScalarQuantization {
+                    r#type: qdrant::QuantizationType::Int8 as i32,
+                    quantile: scalar.quantile.map(|v| v as f32),
+                    always_ram: scalar.always_ram,
+                },
+            )),
+        }),
+        qql_plan::QuantizationConfig::Product { product } => {
+            let compression = match product.compression.to_ascii_lowercase().as_str() {
+                "x8" => qdrant::CompressionRatio::X8,
+                "x16" => qdrant::CompressionRatio::X16,
+                "x32" => qdrant::CompressionRatio::X32,
+                "x64" => qdrant::CompressionRatio::X64,
+                _ => qdrant::CompressionRatio::X4,
+            };
+            Some(qdrant::QuantizationConfig {
+                quantization: Some(qdrant::quantization_config::Quantization::Product(
+                    qdrant::ProductQuantization {
+                        compression: compression as i32,
+                        always_ram: product.always_ram,
+                    },
+                )),
+            })
+        }
+        qql_plan::QuantizationConfig::Binary { binary } => {
+            let encoding = binary.encoding.as_deref().map(|e| {
+                let key = e.to_ascii_lowercase();
+                match key.as_str() {
+                    "two_bits" | "2" => qdrant::BinaryQuantizationEncoding::TwoBits as i32,
+                    "one_and_half_bits" | "1.5" => {
+                        qdrant::BinaryQuantizationEncoding::OneAndHalfBits as i32
+                    }
+                    _ => qdrant::BinaryQuantizationEncoding::OneBit as i32,
+                }
+            });
+            let query_encoding = binary.query_encoding.as_deref().map(|_qe| {
+                qdrant::BinaryQuantizationQueryEncoding {
+                    variant: Some(
+                        qdrant::binary_quantization_query_encoding::Variant::Setting(
+                            qdrant::binary_quantization_query_encoding::Setting::Default as i32,
+                        ),
+                    ),
+                }
+            });
+            Some(qdrant::QuantizationConfig {
+                quantization: Some(qdrant::quantization_config::Quantization::Binary(
+                    qdrant::BinaryQuantization {
+                        always_ram: binary.always_ram,
+                        encoding,
+                        query_encoding,
+                    },
+                )),
+            })
+        }
+    }
+}
+
+// ── Legacy JSON-to-gRPC converters (still used for PATCH quantization,
+//     sparse vector params, and backward compat) ───────────────────────
+
+pub(crate) fn hnsw_config(value: &serde_json::Value) -> qdrant::HnswConfigDiff {
     qdrant::HnswConfigDiff {
         m: json_u64(value, "m"),
         ef_construct: json_u64(value, "ef_construct"),
@@ -35,7 +151,8 @@ fn hnsw_config(value: &serde_json::Value) -> qdrant::HnswConfigDiff {
     }
 }
 
-fn optimizers_config(value: &serde_json::Value) -> qdrant::OptimizersConfigDiff {
+#[allow(dead_code)]
+pub(crate) fn optimizers_config(value: &serde_json::Value) -> qdrant::OptimizersConfigDiff {
     let max_optimization_threads = value
         .get("max_optimization_threads")
         .and_then(|threads| {
@@ -178,24 +295,35 @@ fn turbo_quantization(value: &serde_json::Value) -> qdrant::TurboQuantization {
     }
 }
 
-fn quantization_config(value: &serde_json::Value) -> Option<qdrant::QuantizationConfig> {
+pub(crate) fn quantization_config(value: &serde_json::Value) -> Option<qdrant::QuantizationConfig> {
     let value = value.get("quantization_config").unwrap_or(value);
-    let value = value
-        .get("config")
-        .or_else(|| value.get("scalar"))
-        .or_else(|| value.get("binary"))
-        .or_else(|| value.get("product"))
-        .or_else(|| value.get("turbo"))
-        .unwrap_or(value);
-    let kind = value.get("type").and_then(serde_json::Value::as_str)?;
-    let quantization = match kind.to_ascii_lowercase().as_str() {
-        "scalar" => qdrant::quantization_config::Quantization::Scalar(scalar_quantization(value)),
-        "product" => {
-            qdrant::quantization_config::Quantization::Product(product_quantization(value))
+    // Accept nested OpenAPI `{ "scalar": {…} }` and flat IR `{ "type": "scalar", … }`.
+    let (kind, payload) = {
+        let obj = value.as_object()?;
+        if let Some(inner) = obj.get("scalar") {
+            ("scalar", inner)
+        } else if let Some(inner) = obj.get("product") {
+            ("product", inner)
+        } else if let Some(inner) = obj.get("binary") {
+            ("binary", inner)
+        } else if let Some(inner) = obj.get("turbo").or_else(|| obj.get("turboquant")) {
+            ("turbo", inner)
+        } else {
+            let kind = obj.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            (kind, value)
         }
-        "binary" => qdrant::quantization_config::Quantization::Binary(binary_quantization(value)),
+    };
+    let quantization = match kind.to_ascii_lowercase().as_str() {
+        // Nested OpenAPI uses ScalarType `int8`; flat IR uses `scalar`.
+        "scalar" | "int8" => {
+            qdrant::quantization_config::Quantization::Scalar(scalar_quantization(payload))
+        }
+        "product" => {
+            qdrant::quantization_config::Quantization::Product(product_quantization(payload))
+        }
+        "binary" => qdrant::quantization_config::Quantization::Binary(binary_quantization(payload)),
         "turbo" | "turboquant" => {
-            qdrant::quantization_config::Quantization::Turboquant(turbo_quantization(value))
+            qdrant::quantization_config::Quantization::Turboquant(turbo_quantization(payload))
         }
         _ => return None,
     };
@@ -205,7 +333,9 @@ fn quantization_config(value: &serde_json::Value) -> Option<qdrant::Quantization
 }
 
 fn quantization_config_diff(value: &serde_json::Value) -> Option<qdrant::QuantizationConfigDiff> {
-    if value.get("disabled").and_then(serde_json::Value::as_bool) == Some(true) {
+    if value.as_str() == Some("Disabled")
+        || value.get("disabled").and_then(serde_json::Value::as_bool) == Some(true)
+    {
         return Some(qdrant::QuantizationConfigDiff {
             quantization: Some(qdrant::quantization_config_diff::Quantization::Disabled(
                 qdrant::Disabled {},
@@ -247,7 +377,20 @@ fn distance(value: &serde_json::Value) -> i32 {
     }
 }
 
-fn vector_params(value: &serde_json::Value) -> qdrant::VectorParams {
+/// Map OpenAPI / JSON datatype strings onto the protobuf `Datatype` enum.
+fn datatype_from_json(value: &serde_json::Value) -> Option<i32> {
+    value
+        .get("datatype")
+        .and_then(serde_json::Value::as_str)
+        .map(|dt| match dt.to_ascii_lowercase().as_str() {
+            "float32" | "f32" => qdrant::Datatype::Float32 as i32,
+            "uint8" | "u8" => qdrant::Datatype::Uint8 as i32,
+            "float16" | "f16" => qdrant::Datatype::Float16 as i32,
+            _ => qdrant::Datatype::Default as i32,
+        })
+}
+
+pub(crate) fn vector_params(value: &serde_json::Value) -> qdrant::VectorParams {
     qdrant::VectorParams {
         size: json_u64(value, "size").unwrap_or(0),
         distance: distance(value),
@@ -256,7 +399,7 @@ fn vector_params(value: &serde_json::Value) -> qdrant::VectorParams {
             .get("quantization_config")
             .and_then(quantization_config),
         on_disk: json_bool(value, "on_disk"),
-        datatype: None,
+        datatype: datatype_from_json(value),
         multivector_config: value
             .get("multivector_config")
             .map(|_| qdrant::MultiVectorConfig {
@@ -296,22 +439,11 @@ fn vectors_config_diff(value: &serde_json::Value) -> Option<qdrant::VectorsConfi
     })
 }
 
-fn sparse_vector_params(value: &serde_json::Value) -> qdrant::SparseVectorParams {
-    let index = value.get("index").map(|idx| {
-        let datatype = idx
-            .get("datatype")
-            .and_then(serde_json::Value::as_str)
-            .map(|dt| match dt.to_ascii_lowercase().as_str() {
-                "float32" | "f32" => qdrant::Datatype::Float32 as i32,
-                "uint8" | "u8" => qdrant::Datatype::Uint8 as i32,
-                "float16" | "f16" => qdrant::Datatype::Float16 as i32,
-                _ => qdrant::Datatype::Default as i32,
-            });
-        qdrant::SparseIndexConfig {
-            full_scan_threshold: json_u64(idx, "full_scan_threshold"),
-            on_disk: json_bool(idx, "on_disk"),
-            datatype,
-        }
+pub(crate) fn sparse_vector_params(value: &serde_json::Value) -> qdrant::SparseVectorParams {
+    let index = value.get("index").map(|idx| qdrant::SparseIndexConfig {
+        full_scan_threshold: json_u64(idx, "full_scan_threshold"),
+        on_disk: json_bool(idx, "on_disk"),
+        datatype: datatype_from_json(idx),
     });
     qdrant::SparseVectorParams {
         index,
@@ -325,7 +457,7 @@ fn sparse_vector_params(value: &serde_json::Value) -> qdrant::SparseVectorParams
     }
 }
 
-fn collection_params_diff(value: &serde_json::Value) -> qdrant::CollectionParamsDiff {
+pub(crate) fn collection_params_diff(value: &serde_json::Value) -> qdrant::CollectionParamsDiff {
     qdrant::CollectionParamsDiff {
         replication_factor: json_u64(value, "replication_factor").map(|n| n as u32),
         write_consistency_factor: json_u64(value, "write_consistency_factor").map(|n| n as u32),
@@ -456,7 +588,30 @@ fn text_index_params(
     })
 }
 
-fn mutation_response() -> serde_json::Value {
+/// Build a REST-shaped mutation envelope from a gRPC `PointsOperationResponse`.
+fn mutation_response_from(resp: qdrant::PointsOperationResponse) -> serde_json::Value {
+    let result = resp
+        .result
+        .map(update_result_to_json)
+        .unwrap_or_else(|| serde_json::json!({ "status": "completed" }));
+    serde_json::json!({
+        "result": result,
+        "status": "ok",
+        "time": resp.time,
+    })
+}
+
+/// REST-shaped envelope for collection-level mutations (create/update/drop).
+fn collection_mutation_response(resp: qdrant::CollectionOperationResponse) -> serde_json::Value {
+    serde_json::json!({
+        "result": resp.result,
+        "status": "ok",
+        "time": resp.time,
+    })
+}
+
+/// Fallback when the gRPC response type carries no timing (shard-key ops).
+fn mutation_response_ok() -> serde_json::Value {
     serde_json::json!({
         "result": { "status": "completed" },
         "status": "ok",
@@ -486,7 +641,9 @@ pub async fn execute_planned_grpc(
                 .await
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("query: {e}"), None))?;
             Ok(serde_json::json!({
-                "result": resp.result.into_iter().map(scored_point_to_json).collect::<Vec<_>>(),
+                "result": {
+                    "points": resp.result.into_iter().map(scored_point_to_json).collect::<Vec<_>>()
+                },
                 "status": "ok",
                 "time": resp.time,
             }))
@@ -617,11 +774,11 @@ pub async fn execute_planned_grpc(
                 shard_key_selector: shard_key_selector(&request.shard_key),
                 ..Default::default()
             };
-            client
+            let resp = client
                 .upsert_points(grpc_req)
                 .await
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("upsert: {e}"), None))?;
-            Ok(mutation_response())
+            Ok(mutation_response_from(resp))
         }
         PlannedOperation::Delete {
             collection,
@@ -636,11 +793,11 @@ pub async fn execute_planned_grpc(
                 shard_key_selector: shard_key_selector(&request.shard_key),
                 ..Default::default()
             };
-            client
+            let resp = client
                 .delete_points(grpc_req)
                 .await
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("delete: {e}"), None))?;
-            Ok(mutation_response())
+            Ok(mutation_response_from(resp))
         }
         PlannedOperation::ClearPayload {
             collection,
@@ -652,13 +809,34 @@ pub async fn execute_planned_grpc(
                 collection_name: collection.clone(),
                 wait: Some(true),
                 points: selector,
+                shard_key_selector: shard_key_selector(&request.shard_key),
                 ..Default::default()
             };
-            client
+            let resp = client
                 .clear_payload(grpc_req)
                 .await
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("clear_payload: {e}"), None))?;
-            Ok(mutation_response())
+            Ok(mutation_response_from(resp))
+        }
+        PlannedOperation::DeletePayload {
+            collection,
+            request,
+        } => {
+            let selector =
+                points_and_filter_selector(request.points.as_ref(), request.filter.as_ref());
+            let grpc_req = qdrant::DeletePayloadPoints {
+                collection_name: collection.clone(),
+                wait: Some(true),
+                keys: request.keys.clone(),
+                points_selector: selector,
+                shard_key_selector: shard_key_selector(&request.shard_key),
+                ..Default::default()
+            };
+            let resp = client
+                .delete_payload(grpc_req)
+                .await
+                .map_err(|e| QqlError::backend("QQL-GRPC", format!("delete_payload: {e}"), None))?;
+            Ok(mutation_response_from(resp))
         }
         PlannedOperation::DeleteVectors {
             collection,
@@ -673,13 +851,14 @@ pub async fn execute_planned_grpc(
                 vectors: Some(qdrant::VectorsSelector {
                     names: request.vector.clone(),
                 }),
+                shard_key_selector: shard_key_selector(&request.shard_key),
                 ..Default::default()
             };
-            client
+            let resp = client
                 .delete_vectors(grpc_req)
                 .await
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("delete_vectors: {e}"), None))?;
-            Ok(mutation_response())
+            Ok(mutation_response_from(resp))
         }
         PlannedOperation::UpdateVectors {
             collection,
@@ -697,13 +876,14 @@ pub async fn execute_planned_grpc(
                 collection_name: collection.clone(),
                 wait: Some(true),
                 points,
+                shard_key_selector: shard_key_selector(&request.shard_key),
                 ..Default::default()
             };
-            client
+            let resp = client
                 .update_vectors(grpc_req)
                 .await
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("update_vectors: {e}"), None))?;
-            Ok(mutation_response())
+            Ok(mutation_response_from(resp))
         }
         PlannedOperation::UpdatePayload {
             collection,
@@ -721,13 +901,14 @@ pub async fn execute_planned_grpc(
                 wait: Some(true),
                 payload: payload_map,
                 points_selector: selector,
+                shard_key_selector: shard_key_selector(&request.shard_key),
                 ..Default::default()
             };
-            client
+            let resp = client
                 .set_payload(grpc_req)
                 .await
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("set_payload: {e}"), None))?;
-            Ok(mutation_response())
+            Ok(mutation_response_from(resp))
         }
         PlannedOperation::CreateCollection {
             collection,
@@ -762,8 +943,11 @@ pub async fn execute_planned_grpc(
                         .collect();
                     qdrant::SparseVectorConfig { map }
                 }),
-                hnsw_config: request.hnsw_config.as_ref().map(hnsw_config),
-                optimizers_config: request.optimizers_config.as_ref().map(optimizers_config),
+                hnsw_config: request.hnsw_config.as_ref().map(hnsw_config_from_plan),
+                optimizers_config: request
+                    .optimizers_config
+                    .as_ref()
+                    .map(optimizers_config_from_plan),
                 shard_number: request
                     .shard_number
                     .or_else(|| {
@@ -794,7 +978,7 @@ pub async fn execute_planned_grpc(
                 quantization_config: request
                     .quantization_config
                     .as_ref()
-                    .and_then(quantization_config),
+                    .and_then(quantization_config_from_plan),
                 sharding_method: request.sharding_method.as_ref().map(|method| {
                     match method.to_ascii_lowercase().as_str() {
                         "custom" => qdrant::ShardingMethod::Custom as i32,
@@ -803,7 +987,7 @@ pub async fn execute_planned_grpc(
                 }),
                 ..Default::default()
             };
-            client.create_collection_raw(grpc_req).await.map_err(|e| {
+            let resp = client.create_collection_raw(grpc_req).await.map_err(|e| {
                 QqlError::backend("QQL-GRPC", format!("create_collection: {e}"), None)
             })?;
             if let Some(params) = deferred_params {
@@ -845,7 +1029,7 @@ pub async fn execute_planned_grpc(
                         })?;
                 }
             }
-            Ok(mutation_response())
+            Ok(collection_mutation_response(resp))
         }
         PlannedOperation::UpdateCollection {
             collection,
@@ -853,29 +1037,32 @@ pub async fn execute_planned_grpc(
         } => {
             let grpc_req = qdrant::UpdateCollection {
                 collection_name: collection.clone(),
-                optimizers_config: request.optimizers_config.as_ref().map(optimizers_config),
+                optimizers_config: request
+                    .optimizers_config
+                    .as_ref()
+                    .map(optimizers_config_from_plan),
                 params: request.params.as_ref().map(collection_params_diff),
-                hnsw_config: request.hnsw_config.as_ref().map(hnsw_config),
+                hnsw_config: request.hnsw_config.as_ref().map(hnsw_config_from_plan),
                 quantization_config: request
                     .quantization_config
                     .as_ref()
                     .and_then(quantization_config_diff),
                 ..Default::default()
             };
-            client.update_collection_raw(grpc_req).await.map_err(|e| {
+            let resp = client.update_collection_raw(grpc_req).await.map_err(|e| {
                 QqlError::backend("QQL-GRPC", format!("update_collection: {e}"), None)
             })?;
-            Ok(mutation_response())
+            Ok(collection_mutation_response(resp))
         }
         PlannedOperation::DropCollection { collection } => {
             let grpc_req = qdrant::DeleteCollection {
                 collection_name: collection.clone(),
                 ..Default::default()
             };
-            client.delete_collection_raw(grpc_req).await.map_err(|e| {
+            let resp = client.delete_collection_raw(grpc_req).await.map_err(|e| {
                 QqlError::backend("QQL-GRPC", format!("drop_collection: {e}"), None)
             })?;
-            Ok(mutation_response())
+            Ok(collection_mutation_response(resp))
         }
         PlannedOperation::CreateIndex {
             collection,
@@ -903,11 +1090,11 @@ pub async fn execute_planned_grpc(
                 )?),
                 ..Default::default()
             };
-            client
+            let resp = client
                 .create_field_index(grpc_req)
                 .await
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("create_index: {e}"), None))?;
-            Ok(mutation_response())
+            Ok(mutation_response_from(resp))
         }
         PlannedOperation::DropIndex { collection, field } => {
             let grpc_req = qdrant::DeleteFieldIndexCollection {
@@ -915,11 +1102,11 @@ pub async fn execute_planned_grpc(
                 field_name: field.clone(),
                 ..Default::default()
             };
-            client
+            let resp = client
                 .delete_field_index(grpc_req)
                 .await
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("drop_index: {e}"), None))?;
-            Ok(mutation_response())
+            Ok(mutation_response_from(resp))
         }
         PlannedOperation::CreateShardKey {
             collection,
@@ -940,7 +1127,7 @@ pub async fn execute_planned_grpc(
             client.create_shard_key(grpc_req).await.map_err(|e| {
                 QqlError::backend("QQL-GRPC", format!("create_shard_key: {e}"), None)
             })?;
-            Ok(mutation_response())
+            Ok(mutation_response_ok())
         }
         PlannedOperation::DropShardKey {
             collection,
@@ -959,7 +1146,7 @@ pub async fn execute_planned_grpc(
                 .delete_shard_key(grpc_req)
                 .await
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("drop_shard_key: {e}"), None))?;
-            Ok(mutation_response())
+            Ok(mutation_response_ok())
         }
         // Read-only operations — call gRPC client directly, no Route needed
         PlannedOperation::ListCollections => {
@@ -1001,6 +1188,11 @@ pub async fn execute_planned_grpc(
                 "time": 0.0_f64,
             }))
         }
+        PlannedOperation::CrossRerank { .. } => Err(QqlError::execution(
+            "QQL-RERANK-CROSS",
+            "CROSS RERANK is executed client-side by the Executor, not as a single gRPC route",
+            None,
+        )),
     }
 }
 
@@ -1122,7 +1314,7 @@ fn to_points_update_operation(op: &qql_plan::UpdateOperation) -> qdrant::PointsU
                     set_payload.points.as_ref(),
                     set_payload.filter.as_ref(),
                 ),
-                shard_key_selector: None,
+                shard_key_selector: shard_key_selector(&set_payload.shard_key),
                 key: None,
             })
         }
@@ -1132,7 +1324,7 @@ fn to_points_update_operation(op: &qql_plan::UpdateOperation) -> qdrant::PointsU
                     clear_payload.points.as_ref(),
                     clear_payload.filter.as_ref(),
                 ),
-                shard_key_selector: None,
+                shard_key_selector: shard_key_selector(&clear_payload.shard_key),
             })
         }
         UpdateOperation::UpdateVectors { update_vectors } => {
@@ -1146,7 +1338,7 @@ fn to_points_update_operation(op: &qql_plan::UpdateOperation) -> qdrant::PointsU
                 .collect();
             Operation::UpdateVectors(points_update_operation::UpdateVectors {
                 points,
-                shard_key_selector: None,
+                shard_key_selector: shard_key_selector(&update_vectors.shard_key),
                 update_filter: None,
             })
         }
@@ -1159,7 +1351,7 @@ fn to_points_update_operation(op: &qql_plan::UpdateOperation) -> qdrant::PointsU
                 vectors: Some(qdrant::VectorsSelector {
                     names: delete_vectors.vector.clone(),
                 }),
-                shard_key_selector: None,
+                shard_key_selector: shard_key_selector(&delete_vectors.shard_key),
             })
         }
     };
@@ -1204,7 +1396,7 @@ fn update_result_to_json(r: qdrant::UpdateResult) -> serde_json::Value {
     })
 }
 
-fn to_query_points(
+pub(crate) fn to_query_points(
     req: &qql_plan::types::QueryRequest,
     collection: &str,
 ) -> Result<qdrant::QueryPoints, QqlError> {
@@ -1221,6 +1413,9 @@ fn to_query_points(
         with_payload: req.with_payload.as_ref().map(to_payload_selector),
         with_vectors: req.with_vector.as_ref().map(to_vectors_selector),
         shard_key_selector: shard_key_selector(&req.shard_key),
+        // Proto QueryPoints.timeout / read_consistency (not SearchParams body).
+        timeout: req.timeout,
+        read_consistency: req.consistency.as_ref().map(to_read_consistency),
         ..Default::default()
     })
 }
@@ -1254,8 +1449,24 @@ fn to_query_groups(
             },
         }),
         shard_key_selector: shard_key_selector(&req.shard_key),
+        timeout: req.timeout,
+        read_consistency: req.consistency.as_ref().map(to_read_consistency),
         ..Default::default()
     })
+}
+
+fn to_read_consistency(c: &qql_plan::types::ReadConsistencyParam) -> qdrant::ReadConsistency {
+    use qdrant::read_consistency::Value as RcValue;
+    use qql_plan::types::ReadConsistencyParam;
+    let value = match c {
+        ReadConsistencyParam::Factor(n) => RcValue::Factor(*n),
+        ReadConsistencyParam::Majority => {
+            RcValue::Type(qdrant::ReadConsistencyType::Majority as i32)
+        }
+        ReadConsistencyParam::Quorum => RcValue::Type(qdrant::ReadConsistencyType::Quorum as i32),
+        ReadConsistencyParam::All => RcValue::Type(qdrant::ReadConsistencyType::All as i32),
+    };
+    qdrant::ReadConsistency { value: Some(value) }
 }
 
 fn to_prefetch(pf: &qql_plan::types::PrefetchRequest) -> qdrant::PrefetchQuery {
@@ -1379,7 +1590,7 @@ fn to_query_variant(qv: &qql_plan::types::QueryVariant) -> Result<qdrant::Query,
     })
 }
 
-fn to_vector_input(input: &PlanQueryInput) -> qdrant::VectorInput {
+pub(crate) fn to_vector_input(input: &PlanQueryInput) -> qdrant::VectorInput {
     use qdrant::vector_input::Variant;
     match input {
         PlanQueryInput::Point(id) => qdrant::VectorInput {
@@ -1407,6 +1618,15 @@ fn to_vector_input(input: &PlanQueryInput) -> qdrant::VectorInput {
         PlanQueryInput::Document { text, model } => qdrant::VectorInput {
             variant: Some(Variant::Document(qdrant::Document {
                 text: text.clone(),
+                model: model.clone().unwrap_or_default(),
+                ..Default::default()
+            })),
+        },
+        PlanQueryInput::Image { image, model } => qdrant::VectorInput {
+            variant: Some(Variant::Image(qdrant::Image {
+                image: Some(qdrant::Value {
+                    kind: Some(qdrant::value::Kind::StringValue(image.clone())),
+                }),
                 model: model.clone().unwrap_or_default(),
                 ..Default::default()
             })),
@@ -1497,7 +1717,7 @@ fn to_condition(clause: &FilterClause) -> qdrant::Condition {
         },
         FilterClause::HasId(h) => qdrant::Condition {
             condition_one_of: Some(ConditionOneOf::HasId(qdrant::HasIdCondition {
-                has_id: h.has_id.iter().map(to_point_id_json).collect(),
+                has_id: h.has_id.iter().map(to_point_id).collect(),
             })),
         },
         FilterClause::HasVector(v) => qdrant::Condition {
@@ -1605,22 +1825,6 @@ fn to_point_id(id: &PlanPointId) -> qdrant::PointId {
         },
         PlanPointId::String(s) => qdrant::PointId {
             point_id_options: Some(qdrant::point_id::PointIdOptions::Uuid(s.clone())),
-        },
-    }
-}
-
-fn to_point_id_json(val: &serde_json::Value) -> qdrant::PointId {
-    match val {
-        serde_json::Value::Number(n) => qdrant::PointId {
-            point_id_options: Some(qdrant::point_id::PointIdOptions::Num(
-                n.as_u64().unwrap_or(0),
-            )),
-        },
-        serde_json::Value::String(s) => qdrant::PointId {
-            point_id_options: Some(qdrant::point_id::PointIdOptions::Uuid(s.clone())),
-        },
-        _ => qdrant::PointId {
-            point_id_options: None,
         },
     }
 }
@@ -2624,16 +2828,49 @@ fn multivec_comp_to_str(c: i32) -> &'static str {
     }
 }
 
+/// Test-only re-exports for REST/gRPC parity contract tests.
+#[cfg(test)]
+pub(crate) mod test_api {
+    pub(crate) use super::{to_query_points, to_vector_input};
+}
+
+#[cfg(test)]
+pub(crate) mod test_api_ddl {
+    pub(crate) use super::vector_params;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use qql_core::parser::Parser;
-    use qql_plan::routing::{route, RequestBody};
+
+    #[test]
+    fn dense_vector_params_propagates_datatype() {
+        let params = vector_params(&serde_json::json!({
+            "size": 128,
+            "distance": "Cosine",
+            "datatype": "uint8",
+        }));
+        assert_eq!(params.datatype, Some(qdrant::Datatype::Uint8 as i32));
+
+        let f16 = vector_params(&serde_json::json!({
+            "size": 64,
+            "distance": "Dot",
+            "datatype": "float16",
+        }));
+        assert_eq!(f16.datatype, Some(qdrant::Datatype::Float16 as i32));
+
+        let none = vector_params(&serde_json::json!({
+            "size": 32,
+            "distance": "Cosine",
+        }));
+        assert_eq!(none.datatype, None);
+    }
 
     #[test]
     fn test_grpc_route_conversion_all_statements() {
         let statements = [
-            "QUERY 'search' FROM docs USING dense LIMIT 10;",
+            "QUERY TEXT 'search' MODEL 'test-model' FROM docs USING dense LIMIT 10;",
             "QUERY POINTS (1, 2, 'uuid-str') FROM docs WITH PAYLOAD INCLUDE ('title');",
             "SCROLL FROM docs WHERE status = 'active' LIMIT 50;",
             "UPSERT INTO docs VALUES {id: 1, text: 'hello', category: 'tech'} USING DENSE MODEL 'm';",
@@ -2651,121 +2888,99 @@ mod tests {
         for stmt_str in statements {
             let stmt = Parser::parse(stmt_str)
                 .unwrap_or_else(|e| panic!("parse failed for {stmt_str}: {e}"));
-            let r = route(&stmt);
-            match &r.body {
-                Some(RequestBody::Query(req)) => {
-                    let grpc_req = to_query_points(req, "docs");
+            let op = qql_plan::plan(&stmt).unwrap();
+            match &op {
+                qql_plan::PlannedOperation::Query {
+                    collection,
+                    request,
+                } => {
+                    let grpc_req = to_query_points(request, collection);
                     assert!(
                         grpc_req.is_ok(),
                         "to_query_points failed for {stmt_str}: {:?}",
                         grpc_req.err()
                     );
                 }
-                Some(RequestBody::QueryGroups(req)) => {
-                    let grpc_req = to_query_groups(req, "docs");
+                qql_plan::PlannedOperation::QueryGroups {
+                    collection,
+                    request,
+                } => {
+                    let grpc_req = to_query_groups(request, collection);
                     assert!(
                         grpc_req.is_ok(),
                         "to_query_groups failed for {stmt_str}: {:?}",
                         grpc_req.err()
                     );
                 }
-                Some(RequestBody::Points(req)) => {
-                    assert_eq!(req.ids.len(), 3);
+                qql_plan::PlannedOperation::GetPoints { request, .. } => {
+                    assert_eq!(request.ids.len(), 3);
                 }
-                Some(RequestBody::Scroll(req)) => {
-                    assert!(req.filter.is_some());
+                qql_plan::PlannedOperation::Scroll { request, .. } => {
+                    assert!(request.filter.is_some());
                 }
-                Some(RequestBody::Upsert(req)) => {
-                    assert_eq!(req.points.len(), 1);
+                qql_plan::PlannedOperation::Upsert { request, .. } => {
+                    assert_eq!(request.points.len(), 1);
                 }
-                Some(RequestBody::Delete(req)) => {
-                    assert!(req.filter.is_some());
+                qql_plan::PlannedOperation::Delete { request, .. } => {
+                    assert!(request.filter.is_some());
                 }
-                Some(RequestBody::UpdateVector(_)) => {}
-                Some(RequestBody::UpdatePayload(_)) => {}
-                Some(RequestBody::CreateCollection(req)) => {
-                    assert!(req.vectors.is_some() || req.hnsw_config.is_some());
+                qql_plan::PlannedOperation::UpdateVectors { .. } => {}
+                qql_plan::PlannedOperation::UpdatePayload { .. } => {}
+                qql_plan::PlannedOperation::CreateCollection { request, .. } => {
+                    assert!(request.vectors.is_some() || request.hnsw_config.is_some());
                 }
-                Some(RequestBody::UpdateCollection(_)) => {}
-                Some(RequestBody::CreateIndex(req)) => {
-                    assert_eq!(req.field_name, "title");
+                qql_plan::PlannedOperation::UpdateCollection { .. } => {}
+                qql_plan::PlannedOperation::CreateIndex { request, .. } => {
+                    assert_eq!(request.field_name, "title");
                 }
-                Some(RequestBody::ClearPayload(_)) => {}
-                Some(RequestBody::DeleteVector(_)) => {}
-                Some(RequestBody::Count(_)) => {}
-                Some(RequestBody::CreateShardKey(_)) => {}
-                Some(RequestBody::DropShardKey(_)) => {}
-                None => {}
+                qql_plan::PlannedOperation::ClearPayload { .. } => {}
+                qql_plan::PlannedOperation::DeleteVectors { .. } => {}
+                qql_plan::PlannedOperation::Count { .. } => {}
+                qql_plan::PlannedOperation::CreateShardKey { .. } => {}
+                qql_plan::PlannedOperation::DropShardKey { .. } => {}
+                _ => {}
             }
         }
     }
 
     #[test]
     fn converts_collection_quantization_and_vector_update() {
-        let quantization = serde_json::json!({
-            "disabled": false,
-            "quantization_config": {
-                "type": "scalar",
-                "always_ram": true,
-                "quantile": 0.95,
-            }
-        });
-        let config = quantization_config(&quantization).unwrap();
-        let Some(qdrant::quantization_config::Quantization::Scalar(scalar)) = config.quantization
-        else {
-            panic!("expected scalar quantization");
+        let scalar = qql_plan::QuantizationConfig::Scalar {
+            scalar: qql_plan::ScalarQuantization {
+                qtype: "int8".into(),
+                quantile: Some(0.95),
+                always_ram: Some(true),
+            },
         };
-        assert_eq!(scalar.quantile, Some(0.95));
-        assert_eq!(scalar.always_ram, Some(true));
+        let q_proto = quantization_config_from_plan(&scalar);
+        assert!(q_proto.is_some());
 
-        let diff = vectors_config_diff(&serde_json::json!({ "on_disk": true })).unwrap();
-        let Some(qdrant::vectors_config_diff::Config::Params(params)) = diff.config else {
-            panic!("expected unnamed vector params diff");
-        };
-        assert_eq!(params.on_disk, Some(true));
+        let stmt =
+            Parser::parse("UPDATE docs SET VECTOR dense = [0.1, 0.2] WHERE id = 1;").unwrap();
+        let op = qql_plan::plan(&stmt).unwrap();
+        if let qql_plan::PlannedOperation::UpdateVectors { request, .. } = op {
+            assert_eq!(request.points.len(), 1);
+        } else {
+            panic!("expected UpdateVectors");
+        }
     }
-
-    #[test]
-    fn converts_all_supported_text_index_options() {
-        let options = serde_json::json!({
-            "tokenizer": "prefix",
-            "lowercase": true,
-            "min_token_len": 2,
-            "max_token_len": 20,
-            "on_disk": true,
-            "stopwords": ["a", "the"],
-            "phrase_matching": true,
-            "ascii_folding": true,
-            "enable_hnsw": false,
-        });
-        let params = payload_index_params("text", options.as_object().unwrap()).unwrap();
-        let Some(qdrant::payload_index_params::IndexParams::TextIndexParams(text)) =
-            params.index_params
-        else {
-            panic!("expected text index params");
-        };
-        assert_eq!(text.tokenizer, qdrant::TokenizerType::Prefix as i32);
-        assert_eq!(text.lowercase, Some(true));
-        assert_eq!(text.min_token_len, Some(2));
-        assert_eq!(text.max_token_len, Some(20));
-        assert_eq!(text.stopwords.unwrap().custom, ["a", "the"]);
-    }
-
-    // ── Field-level gRPC conversion tests ──────────────────────────
 
     /// Query → gRPC with limit, offset, using, score_threshold
     #[test]
     fn query_points_field_level_basics() {
         let stmt = Parser::parse(
-            "QUERY 'search' FROM my_coll USING dense SCORE THRESHOLD 0.7 LIMIT 10 OFFSET 5;",
+            "QUERY TEXT 'search' MODEL 'test-model' FROM my_coll USING dense SCORE THRESHOLD 0.7 LIMIT 10 OFFSET 5;",
         )
         .unwrap();
-        let r = route(&stmt);
-        let req = match r.body.as_ref().unwrap() {
-            RequestBody::Query(q) => q,
-            other => panic!("expected Query, got {:?}", std::mem::discriminant(other)),
+        let op = qql_plan::plan(&stmt).unwrap();
+        let (collection, req) = match &op {
+            qql_plan::PlannedOperation::Query {
+                collection,
+                request,
+            } => (collection, request),
+            other => panic!("expected Query, got {:?}", other),
         };
-        let qp = to_query_points(req, "my_coll").unwrap();
+        let qp = to_query_points(req, collection).unwrap();
 
         assert_eq!(qp.collection_name, "my_coll");
         assert_eq!(qp.limit, Some(10));
@@ -2784,15 +2999,18 @@ mod tests {
     #[test]
     fn query_points_with_payload_and_vectors() {
         let stmt = Parser::parse(
-            "QUERY 'x' FROM docs WITH PAYLOAD INCLUDE ('title', 'url') WITH VECTOR (dense) LIMIT 5;",
+            "QUERY TEXT 'x' MODEL 'test-model' FROM docs WITH PAYLOAD INCLUDE ('title', 'url') WITH VECTOR (dense) LIMIT 5;",
         )
         .unwrap();
-        let r = route(&stmt);
-        let req = match r.body.as_ref().unwrap() {
-            RequestBody::Query(q) => q,
-            other => panic!("expected Query, got {:?}", std::mem::discriminant(other)),
+        let op = qql_plan::plan(&stmt).unwrap();
+        let (collection, req) = match &op {
+            qql_plan::PlannedOperation::Query {
+                collection,
+                request,
+            } => (collection, request),
+            other => panic!("expected Query, got {:?}", other),
         };
-        let qp = to_query_points(req, "docs").unwrap();
+        let qp = to_query_points(req, collection).unwrap();
 
         // with_payload → selector_options.Include
         let wp = qp.with_payload.expect("with_payload should be set");
@@ -2816,14 +3034,19 @@ mod tests {
     /// Query with SHARD KEY → gRPC shard_key_selector
     #[test]
     fn query_points_shard_key() {
-        let stmt =
-            Parser::parse("QUERY 'x' FROM docs USING dense SHARD 'tenant-42' LIMIT 5;").unwrap();
-        let r = route(&stmt);
-        let req = match r.body.as_ref().unwrap() {
-            RequestBody::Query(q) => q,
-            other => panic!("expected Query, got {:?}", std::mem::discriminant(other)),
+        let stmt = Parser::parse(
+            "QUERY TEXT 'x' MODEL 'test-model' FROM docs USING dense SHARD 'tenant-42' LIMIT 5;",
+        )
+        .unwrap();
+        let op = qql_plan::plan(&stmt).unwrap();
+        let (collection, req) = match &op {
+            qql_plan::PlannedOperation::Query {
+                collection,
+                request,
+            } => (collection, request),
+            other => panic!("expected Query, got {:?}", other),
         };
-        let qp = to_query_points(req, "docs").unwrap();
+        let qp = to_query_points(req, collection).unwrap();
 
         let sks = qp
             .shard_key_selector
@@ -2838,13 +3061,19 @@ mod tests {
     /// Query with WHERE → gRPC filter present with must conditions
     #[test]
     fn query_points_filter_equality() {
-        let stmt = Parser::parse("QUERY 'x' FROM docs WHERE status = 'active' LIMIT 5;").unwrap();
-        let r = route(&stmt);
-        let req = match r.body.as_ref().unwrap() {
-            RequestBody::Query(q) => q,
-            other => panic!("expected Query, got {:?}", std::mem::discriminant(other)),
+        let stmt = Parser::parse(
+            "QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE status = 'active' LIMIT 5;",
+        )
+        .unwrap();
+        let op = qql_plan::plan(&stmt).unwrap();
+        let (collection, req) = match &op {
+            qql_plan::PlannedOperation::Query {
+                collection,
+                request,
+            } => (collection, request),
+            other => panic!("expected Query, got {:?}", other),
         };
-        let qp = to_query_points(req, "docs").unwrap();
+        let qp = to_query_points(req, collection).unwrap();
 
         let filter = qp.filter.expect("filter should be set");
         // Single condition wraps into must
@@ -2869,14 +3098,19 @@ mod tests {
     /// Query with AND → gRPC filter with 2 must conditions
     #[test]
     fn query_points_filter_range_compound() {
-        let stmt =
-            Parser::parse("QUERY 'x' FROM docs WHERE age >= 18 AND age < 65 LIMIT 5;").unwrap();
-        let r = route(&stmt);
-        let req = match r.body.as_ref().unwrap() {
-            RequestBody::Query(q) => q,
-            other => panic!("expected Query, got {:?}", std::mem::discriminant(other)),
+        let stmt = Parser::parse(
+            "QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE age >= 18 AND age < 65 LIMIT 5;",
+        )
+        .unwrap();
+        let op = qql_plan::plan(&stmt).unwrap();
+        let (collection, req) = match &op {
+            qql_plan::PlannedOperation::Query {
+                collection,
+                request,
+            } => (collection, request),
+            other => panic!("expected Query, got {:?}", other),
         };
-        let qp = to_query_points(req, "docs").unwrap();
+        let qp = to_query_points(req, collection).unwrap();
         let filter = qp.filter.expect("filter should be set");
         let must = &filter.must;
         assert_eq!(must.len(), 2, "expected 2 conditions for AND (>= and <)");
@@ -2896,18 +3130,18 @@ mod tests {
     #[test]
     fn query_points_group_by_with_lookup() {
         let stmt = Parser::parse(
-            "QUERY 'x' FROM docs GROUP BY category SIZE 3 LOOKUP FROM categories LIMIT 10;",
+            "QUERY TEXT 'x' MODEL 'test-model' FROM docs GROUP BY category SIZE 3 LOOKUP FROM categories LIMIT 10;",
         )
         .unwrap();
-        let r = route(&stmt);
-        let req = match r.body.as_ref().unwrap() {
-            RequestBody::QueryGroups(g) => g,
-            other => panic!(
-                "expected QueryGroups, got {:?}",
-                std::mem::discriminant(other)
-            ),
+        let op = qql_plan::plan(&stmt).unwrap();
+        let (collection, req) = match &op {
+            qql_plan::PlannedOperation::QueryGroups {
+                collection,
+                request,
+            } => (collection, request),
+            other => panic!("expected QueryGroups, got {:?}", other),
         };
-        let qg = to_query_groups(req, "docs").unwrap();
+        let qg = to_query_groups(req, collection).unwrap();
 
         assert_eq!(qg.group_by, "category");
         assert_eq!(qg.group_size, Some(3));
@@ -2923,15 +3157,10 @@ mod tests {
             "CREATE COLLECTION docs (dense VECTOR(384, COSINE)) WITH HNSW (m = 32, ef_construct = 100);",
         )
         .unwrap();
-        let r = route(&stmt);
-        let req = match r.body.as_ref().unwrap() {
-            RequestBody::CreateCollection(c) => c,
-            other => {
-                panic!(
-                    "expected CreateCollection, got {:?}",
-                    std::mem::discriminant(other)
-                )
-            }
+        let op = qql_plan::plan(&stmt).unwrap();
+        let req = match &op {
+            qql_plan::PlannedOperation::CreateCollection { request, .. } => request,
+            other => panic!("expected CreateCollection, got {:?}", other),
         };
 
         // vectors should contain dense → size 384, distance Cosine
@@ -2942,7 +3171,7 @@ mod tests {
 
         // HNSW → gRPC conversion with m + ef_construct
         let hnsw_json = req.hnsw_config.as_ref().expect("hnsw_config should be set");
-        let hnsw = hnsw_config(hnsw_json);
+        let hnsw = hnsw_config_from_plan(hnsw_json);
         assert_eq!(hnsw.m, Some(32));
         assert_eq!(hnsw.ef_construct, Some(100));
     }
@@ -2954,10 +3183,10 @@ mod tests {
             "UPSERT INTO docs VALUES {id: 1, text: 'hello'}, {id: 2, text: 'world'};",
         )
         .unwrap();
-        let r = route(&stmt);
-        let req = match r.body.as_ref().unwrap() {
-            RequestBody::Upsert(u) => u,
-            other => panic!("expected Upsert, got {:?}", std::mem::discriminant(other)),
+        let op = qql_plan::plan(&stmt).unwrap();
+        let req = match &op {
+            qql_plan::PlannedOperation::Upsert { request, .. } => request,
+            other => panic!("expected Upsert, got {:?}", other),
         };
 
         assert_eq!(req.points.len(), 2);
@@ -2969,10 +3198,10 @@ mod tests {
     fn delete_with_compound_filter() {
         let stmt = Parser::parse("DELETE FROM docs WHERE category = 'archived' AND priority < 3;")
             .unwrap();
-        let r = route(&stmt);
-        let req = match r.body.as_ref().unwrap() {
-            RequestBody::Delete(d) => d,
-            other => panic!("expected Delete, got {:?}", std::mem::discriminant(other)),
+        let op = qql_plan::plan(&stmt).unwrap();
+        let req = match &op {
+            qql_plan::PlannedOperation::Delete { request, .. } => request,
+            other => panic!("expected Delete, got {:?}", other),
         };
 
         let filter = req.filter.as_ref().expect("delete filter should be set");
@@ -2998,12 +3227,15 @@ mod tests {
             "QUERY ORDER BY created_at DESC FROM docs WHERE status = 'active' LIMIT 20;",
         )
         .unwrap();
-        let r = route(&stmt);
-        let req = match r.body.as_ref().unwrap() {
-            RequestBody::Query(q) => q,
-            other => panic!("expected Query, got {:?}", std::mem::discriminant(other)),
+        let op = qql_plan::plan(&stmt).unwrap();
+        let (collection, req) = match &op {
+            qql_plan::PlannedOperation::Query {
+                collection,
+                request,
+            } => (collection, request),
+            other => panic!("expected Query, got {:?}", other),
         };
-        let qp = to_query_points(req, "docs").unwrap();
+        let qp = to_query_points(req, collection).unwrap();
 
         let query = qp.query.expect("query should be set");
         match query.variant.expect("variant should be set") {

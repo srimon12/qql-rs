@@ -1,5 +1,8 @@
 use qql::executor::Executor;
-use std::time::{Duration, Instant};
+use std::{
+    hint::black_box,
+    time::{Duration, Instant},
+};
 
 const QUERIES: &[(&str, &str)] = &[
     ("Simple", "QUERY 'search' FROM docs LIMIT 10"),
@@ -16,19 +19,22 @@ const QUERIES: &[(&str, &str)] = &[
 fn bench(_name: &str, q: &str, iterations: usize) -> Duration {
     // warmup
     for _ in 0..100 {
-        let _ = Executor::explain(q);
+        black_box(Executor::explain(q).expect("benchmark query must explain"));
     }
 
     let start = Instant::now();
     for _ in 0..iterations {
-        let _ = Executor::explain(q);
+        black_box(Executor::explain(q).expect("benchmark query must explain"));
     }
     start.elapsed()
 }
 
 fn main() {
     let iterations = 100_000;
-    println!("Rust qql-runtime Pure Sync Compile (explain)  |  {} iterations each\n", iterations);
+    println!(
+        "Rust qql-runtime Pure Sync Compile (explain)  |  {} iterations each\n",
+        iterations
+    );
     println!("{:<20} {:>12} {:>12}", "Query", "ns/op", "ops/s");
     println!("{}", "-".repeat(46));
 

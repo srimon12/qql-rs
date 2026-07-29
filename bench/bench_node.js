@@ -18,10 +18,12 @@ const QUERIES = [
   ['WithPayload', "QUERY 'search' FROM docs WITH PAYLOAD INCLUDE (title, body) WITH VECTOR (dense) LIMIT 10"],
 ];
 
+let sink;
+
 function run_bench(fn, iterations) {
-  for (let i = 0; i < 100; i++) fn();
+  for (let i = 0; i < 1_000; i++) sink = fn();
   const start = process.hrtime.bigint();
-  for (let i = 0; i < iterations; i++) fn();
+  for (let i = 0; i < iterations; i++) sink = fn();
   const end = process.hrtime.bigint();
   const elapsed = Number(end - start);
   return (iterations / elapsed) * 1e9;
@@ -34,7 +36,7 @@ const headers = [
   'Query'.padEnd(18),
   'NAPI parse()'.padStart(13),
   'NAPI parseJson()'.padStart(17),
-  'WASM compileValue()'.padStart(20),
+  ...(qqlWasm ? ['WASM parse()'.padStart(20)] : []),
 ];
 
 console.log(headers.join(' | '));
@@ -45,14 +47,14 @@ for (const [name, q] of QUERIES) {
   const napi_obj = run_bench(() => nqql.parse(q), iterations);
   // NAPI: raw JSON string (bypasses V8 object allocation)
   const napi_json = run_bench(() => nqql.parseJson(q), iterations);
-  // WASM: direct JS objects via serde_wasm_bindgen (zero string detour)
-  const wasm_val = run_bench(() => qqlWasm.compileValue(q), iterations);
+  // WASM: direct JS objects via serde_wasm_bindgen.
+  const wasm_val = qqlWasm ? run_bench(() => qqlWasm.parse(q), iterations) : null;
 
   const row = [
     name.padEnd(18),
     napi_obj.toFixed(0).padStart(13),
     napi_json.toFixed(0).padStart(17),
-    wasm_val.toFixed(0).padStart(20),
+    ...(wasm_val === null ? [] : [wasm_val.toFixed(0).padStart(20)]),
   ];
 
   console.log(row.join(' | '));

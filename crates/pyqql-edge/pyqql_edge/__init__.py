@@ -1,6 +1,6 @@
 """Python package surface for the native :mod:`pyqql_edge` extension."""
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 
 from .pyqql_edge import (  # type: ignore[attr-defined]
     Client,

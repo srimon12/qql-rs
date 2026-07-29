@@ -5,12 +5,12 @@
 
 use crate::ddl::{lower_alter_collection, lower_create_collection, lower_create_index};
 use crate::mutation::{
-    lower_clear_payload_request, lower_delete_request, lower_delete_vector_request,
-    lower_scroll_request, lower_update_payload_request, lower_update_vector_request,
-    lower_upsert_request,
+    lower_clear_payload_request, lower_delete_payload_request, lower_delete_request,
+    lower_delete_vector_request, lower_scroll_request, lower_update_payload_request,
+    lower_update_vector_request, lower_upsert_request,
 };
 use crate::query::{lower_query_groups_request, lower_query_request};
-use crate::routing::{RequestBody, Route};
+use crate::routing::Route;
 use crate::types::*;
 use qql_core::ast::{
     QueryCollection, QueryExpr, QueryInput, Stmt, VectorKind, VectorTarget, VectorValue,
@@ -58,6 +58,10 @@ pub enum PlannedOperation {
         collection: String,
         request: ClearPayloadRequest,
     },
+    DeletePayload {
+        collection: String,
+        request: DeletePayloadRequest,
+    },
     UpdateVectors {
         collection: String,
         request: UpdateVectorRequest,
@@ -100,6 +104,18 @@ pub enum PlannedOperation {
     GetCollection {
         collection: String,
     },
+    /// Client-side cross-encoder: run candidate queries, score pairs, reorder.
+    CrossRerank {
+        collection: String,
+        query: String,
+        model: String,
+        /// Payload field holding document text for pair scoring.
+        field: String,
+        limit: u64,
+        offset: u64,
+        /// Candidate ANN stages already planned as normal queries.
+        candidates: Vec<(String, QueryRequest)>,
+    },
 }
 
 impl PlannedOperation {
@@ -115,6 +131,7 @@ impl PlannedOperation {
             PlannedOperation::Delete { .. } => "DELETE",
             PlannedOperation::UpdatePayload { .. } => "UPDATE_PAYLOAD",
             PlannedOperation::ClearPayload { .. } => "CLEAR_PAYLOAD",
+            PlannedOperation::DeletePayload { .. } => "DELETE_PAYLOAD",
             PlannedOperation::UpdateVectors { .. } => "UPDATE_VECTOR",
             PlannedOperation::DeleteVectors { .. } => "DELETE_VECTOR",
             PlannedOperation::CreateCollection { .. } => "CREATE_COLLECTION",
@@ -127,6 +144,39 @@ impl PlannedOperation {
             PlannedOperation::ListShardKeys { .. } => "SHOW_SHARD_KEYS",
             PlannedOperation::ListCollections => "SHOW_COLLECTIONS",
             PlannedOperation::GetCollection { .. } => "SHOW_COLLECTION",
+            PlannedOperation::CrossRerank { .. } => "CROSS_RERANK",
+        }
+    }
+
+    /// Stable snake_case type id for SDK `compile()` / route metadata.
+    ///
+    /// Prefer this over inferring type from REST method+path (body-less routes
+    /// like DROP INDEX and SHOW SHARD KEYS share method+shape with other ops).
+    pub fn compile_stmt_type(&self) -> &'static str {
+        match self {
+            PlannedOperation::Query { .. } => "query",
+            PlannedOperation::QueryGroups { .. } => "query_groups",
+            PlannedOperation::GetPoints { .. } => "points",
+            PlannedOperation::Scroll { .. } => "scroll",
+            PlannedOperation::Count { .. } => "count",
+            PlannedOperation::Upsert { .. } => "upsert",
+            PlannedOperation::Delete { .. } => "delete",
+            PlannedOperation::UpdatePayload { .. } => "update_payload",
+            PlannedOperation::ClearPayload { .. } => "clear_payload",
+            PlannedOperation::DeletePayload { .. } => "delete_payload",
+            PlannedOperation::UpdateVectors { .. } => "update_vector",
+            PlannedOperation::DeleteVectors { .. } => "delete_vector",
+            PlannedOperation::CreateCollection { .. } => "create_collection",
+            PlannedOperation::UpdateCollection { .. } => "update_collection",
+            PlannedOperation::DropCollection { .. } => "drop_collection",
+            PlannedOperation::CreateIndex { .. } => "create_index",
+            PlannedOperation::DropIndex { .. } => "drop_index",
+            PlannedOperation::CreateShardKey { .. } => "create_shard_key",
+            PlannedOperation::DropShardKey { .. } => "drop_shard_key",
+            PlannedOperation::ListShardKeys { .. } => "show_shard_keys",
+            PlannedOperation::ListCollections => "show_collections",
+            PlannedOperation::GetCollection { .. } => "show_collection",
+            PlannedOperation::CrossRerank { .. } => "cross_rerank",
         }
     }
 
@@ -142,6 +192,7 @@ impl PlannedOperation {
             | PlannedOperation::Delete { collection, .. }
             | PlannedOperation::UpdatePayload { collection, .. }
             | PlannedOperation::ClearPayload { collection, .. }
+            | PlannedOperation::DeletePayload { collection, .. }
             | PlannedOperation::UpdateVectors { collection, .. }
             | PlannedOperation::DeleteVectors { collection, .. }
             | PlannedOperation::CreateCollection { collection, .. }
@@ -152,7 +203,8 @@ impl PlannedOperation {
             | PlannedOperation::CreateShardKey { collection, .. }
             | PlannedOperation::DropShardKey { collection, .. }
             | PlannedOperation::ListShardKeys { collection }
-            | PlannedOperation::GetCollection { collection } => Some(collection.as_str()),
+            | PlannedOperation::GetCollection { collection }
+            | PlannedOperation::CrossRerank { collection, .. } => Some(collection.as_str()),
             PlannedOperation::ListCollections => None,
         }
     }
@@ -165,9 +217,30 @@ impl PlannedOperation {
             | PlannedOperation::Delete { .. }
             | PlannedOperation::UpdatePayload { .. }
             | PlannedOperation::ClearPayload { .. }
+            | PlannedOperation::DeletePayload { .. }
             | PlannedOperation::UpdateVectors { .. }
             | PlannedOperation::DeleteVectors { .. } => BatchFamily::Mutation,
+            // Pair scoring is not batchable with plain queries.
+            PlannedOperation::CrossRerank { .. } => BatchFamily::Single,
             _ => BatchFamily::Single,
+        }
+    }
+
+    /// Batch grouping key (collection + family) for executor dispatch.
+    ///
+    /// Returns `None` for single-shot operations that cannot be grouped.
+    pub fn batch_key(&self) -> Option<BatchKey> {
+        match self.batch_family() {
+            BatchFamily::Query => match self {
+                PlannedOperation::Query { collection, .. } => {
+                    Some(BatchKey::Query(collection.clone()))
+                }
+                _ => None,
+            },
+            BatchFamily::Mutation => self
+                .collection()
+                .map(|collection| BatchKey::Mutation(collection.to_owned())),
+            BatchFamily::Single => None,
         }
     }
 
@@ -181,6 +254,13 @@ impl PlannedOperation {
             PlannedOperation::Count { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::Upsert { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::Delete { request, .. } => request.shard_key.as_deref(),
+            PlannedOperation::UpdatePayload { request, .. } => request.shard_key.as_deref(),
+            PlannedOperation::ClearPayload { request, .. } => request.shard_key.as_deref(),
+            PlannedOperation::DeletePayload { request, .. } => request.shard_key.as_deref(),
+            PlannedOperation::UpdateVectors { request, .. } => request.shard_key.as_deref(),
+            PlannedOperation::DeleteVectors { request, .. } => request.shard_key.as_deref(),
+            PlannedOperation::CreateShardKey { request, .. } => Some(request.shard_key.as_str()),
+            PlannedOperation::DropShardKey { request, .. } => Some(request.shard_key.as_str()),
             _ => None,
         }
     }
@@ -191,6 +271,41 @@ pub enum BatchFamily {
     Query,
     Mutation,
     Single,
+}
+
+/// Grouping key for statement/operation batching (same collection + family).
+///
+/// Used by executors to collect adjacent operations into query/mutation
+/// batches before flushing to the backend.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BatchKey {
+    Query(String),
+    Mutation(String),
+}
+
+/// Batch grouping key for a raw AST statement (before preparation/planning).
+///
+/// Returns `None` for statements that are never batchable (DDL, SHOW, group
+/// queries, point-ID lookups, etc.).
+pub fn statement_batch_key(stmt: &Stmt) -> Option<BatchKey> {
+    match stmt {
+        Stmt::Query(query)
+            if query.group.is_none() && !matches!(query.expression, QueryExpr::Points { .. }) =>
+        {
+            match &query.collection {
+                QueryCollection::Explicit(collection) => Some(BatchKey::Query(collection.clone())),
+                QueryCollection::Inherited => None,
+            }
+        }
+        Stmt::Upsert(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
+        Stmt::Delete(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
+        Stmt::UpdatePayload(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
+        Stmt::ClearPayload(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
+        Stmt::DeletePayload(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
+        Stmt::UpdateVector(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
+        Stmt::DeleteVector(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
+        _ => None,
+    }
 }
 
 /// Fallible planner — the single source of truth for statement → operation.
@@ -236,7 +351,18 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
                 });
             }
 
+            if let QueryExpr::CrossRerank {
+                query: qtext,
+                model,
+                field,
+                prefetch,
+            } = &query.expression
+            {
+                return plan_cross_rerank(query, &collection, qtext, model, field, prefetch);
+            }
+
             if query.group.is_some() {
+                // GROUP BY is routed to QueryGroups which supports both LIMIT and OFFSET (via group_offset).
                 return Ok(PlannedOperation::QueryGroups {
                     collection,
                     request: lower_query_groups_request(query)?,
@@ -270,6 +396,10 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
         Stmt::ClearPayload(clear) => Ok(PlannedOperation::ClearPayload {
             collection: clear.collection.clone(),
             request: lower_clear_payload_request(clear),
+        }),
+        Stmt::DeletePayload(del) => Ok(PlannedOperation::DeletePayload {
+            collection: del.collection.clone(),
+            request: lower_delete_payload_request(del),
         }),
         Stmt::DeleteVector(del_vec) => Ok(PlannedOperation::DeleteVectors {
             collection: del_vec.collection.clone(),
@@ -310,13 +440,13 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
             let filter = count
                 .filter
                 .as_ref()
-                .map(|f| crate::filter::top_level_filter(f));
+                .map(|f| crate::filter::top_level_filter_with_shard(f, count.shard_key.as_deref()));
             Ok(PlannedOperation::Count {
                 collection,
                 request: CountRequest {
                     filter,
                     shard_key: count.shard_key.clone(),
-                    exact: None,
+                    exact: count.exact,
                 },
             })
         }
@@ -377,9 +507,9 @@ fn validate_query_stmt(query: &qql_core::ast::QueryStmt) -> Result<(), QqlError>
         .and_then(|params| params.rrf_weights.as_ref())
     {
         let prefetch_count = match &query.expression {
-            QueryExpr::Fusion { prefetch, .. } | QueryExpr::Rerank { prefetch, .. } => {
-                prefetch.len()
-            }
+            QueryExpr::Fusion { prefetch, .. }
+            | QueryExpr::Rerank { prefetch, .. }
+            | QueryExpr::CrossRerank { prefetch, .. } => prefetch.len(),
             QueryExpr::Hybrid { .. } => 2,
             _ => 0,
         };
@@ -408,7 +538,8 @@ fn validate_query_expr(expression: &QueryExpr) -> Result<(), QqlError> {
         | QueryExpr::Fusion { prefetch, .. }
         | QueryExpr::Formula { prefetch, .. }
         | QueryExpr::RelevanceFeedback { prefetch, .. }
-        | QueryExpr::Rerank { prefetch, .. } => prefetch,
+        | QueryExpr::Rerank { prefetch, .. }
+        | QueryExpr::CrossRerank { prefetch, .. } => prefetch,
         QueryExpr::Points { .. }
         | QueryExpr::OrderBy { .. }
         | QueryExpr::SampleRandom
@@ -513,7 +644,7 @@ fn validate_query_target_kinds(expression: &QueryExpr) -> Result<(), QqlError> {
                 Some(VectorKind::Dense)
             }
             QueryInput::Vector(VectorValue::Sparse { .. }) => Some(VectorKind::Sparse),
-            QueryInput::Text { .. } | QueryInput::Point(_) => None,
+            QueryInput::Text { .. } | QueryInput::Image { .. } | QueryInput::Point(_) => None,
         };
         if input_kind.is_some_and(|kind| kind != target_kind) {
             return Err(query_kind_error(
@@ -528,17 +659,173 @@ fn query_kind_error(message: &'static str) -> QqlError {
     QqlError::validation("QQL-PLAN-VECTOR-KIND", message, None)
 }
 
+fn plan_cross_rerank(
+    outer: &qql_core::ast::QueryStmt,
+    collection: &str,
+    query_text: &str,
+    model: &str,
+    field: &Option<String>,
+    prefetch: &[qql_core::ast::Prefetch],
+) -> Result<PlannedOperation, QqlError> {
+    use qql_core::ast::{PrefetchSource, QueryCollection};
+
+    if prefetch.is_empty() {
+        return Err(QqlError::validation(
+            "QQL-PLAN-CROSS-RERANK-PREFETCH",
+            "CROSS RERANK requires at least one PREFETCH",
+            None,
+        ));
+    }
+    if query_text.is_empty() {
+        return Err(QqlError::validation(
+            "QQL-PLAN-CROSS-RERANK-QUERY",
+            "CROSS RERANK query text must not be empty",
+            None,
+        ));
+    }
+    if model.is_empty() {
+        return Err(QqlError::validation(
+            "QQL-PLAN-CROSS-RERANK-MODEL",
+            "CROSS RERANK MODEL must not be empty",
+            None,
+        ));
+    }
+    let field = field
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("text")
+        .to_string();
+
+    let mut candidates = Vec::with_capacity(prefetch.len());
+    for pref in prefetch {
+        let mut sub = match &pref.source {
+            PrefetchSource::Cte(name) => {
+                let cte = outer
+                    .ctes
+                    .iter()
+                    .find(|c| c.name.eq_ignore_ascii_case(name));
+                let Some(cte) = cte else {
+                    return Err(QqlError::validation(
+                        "QQL-PLAN-CROSS-RERANK-CTE",
+                        format!("PREFETCH references unknown CTE '{name}'"),
+                        None,
+                    ));
+                };
+                (*cte.query).clone()
+            }
+            PrefetchSource::Query(q) => (**q).clone(),
+        };
+        if matches!(sub.collection, QueryCollection::Inherited) {
+            sub.collection = QueryCollection::Explicit(collection.to_string());
+        }
+        // Candidate stage needs document text for pair scoring.
+        ensure_payload_field(&mut sub, &field);
+        if let Some(f) = &pref.filter {
+            sub.filter = Some(f.clone());
+        }
+        let planned = plan(&Stmt::Query(Box::new(sub)))?;
+        match planned {
+            PlannedOperation::Query {
+                collection: c,
+                request,
+            } => candidates.push((c, request)),
+            other => {
+                return Err(QqlError::validation(
+                    "QQL-PLAN-CROSS-RERANK-CANDIDATE",
+                    format!(
+                        "CROSS RERANK prefetch must plan as a search query, got {}",
+                        other.operation_label()
+                    ),
+                    None,
+                ));
+            }
+        }
+    }
+
+    Ok(PlannedOperation::CrossRerank {
+        collection: collection.to_string(),
+        query: query_text.to_string(),
+        model: model.to_string(),
+        field,
+        limit: outer.page.limit.unwrap_or(10),
+        offset: outer.page.offset.unwrap_or(0),
+        candidates,
+    })
+}
+
+fn ensure_payload_field(query: &mut qql_core::ast::QueryStmt, field: &str) {
+    use qql_core::ast::{PayloadSelector, QueryOutput};
+    match &mut query.output {
+        QueryOutput {
+            payload: None | Some(PayloadSelector::None),
+            ..
+        } => {
+            query.output.payload = Some(PayloadSelector::Include(vec![field.to_string()]));
+        }
+        QueryOutput {
+            payload: Some(PayloadSelector::Include(fields)),
+            ..
+        } => {
+            if !fields.iter().any(|f| f.eq_ignore_ascii_case(field)) {
+                fields.push(field.to_string());
+            }
+        }
+        QueryOutput {
+            payload: Some(PayloadSelector::All | PayloadSelector::Exclude(_)),
+            ..
+        } => {}
+    }
+}
+
+/// Why a planned operation cannot become a single Qdrant REST route.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RestProjectionError {
+    /// Client-side only (e.g. CROSS RERANK). Compile still exposes `stmt_type`.
+    ClientSideOnly { stmt_type: &'static str },
+}
+
 /// REST projection of a planned operation (HTTP method/path/query/body).
-pub fn to_rest_route(op: &PlannedOperation) -> Route {
-    match op {
+///
+/// Client-side operations such as [`PlannedOperation::CrossRerank`] return
+/// [`RestProjectionError::ClientSideOnly`] — they must not invent a Qdrant path.
+/// REST projection of a planned operation.
+///
+/// Returns `RestProjectionError::ClientSideOnly` for operations that have no
+/// single Qdrant REST endpoint (e.g. CROSS RERANK).
+pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError> {
+    /// Serialize a plan struct to JSON for the REST body.
+    fn body<T: serde::Serialize>(req: &T) -> Option<serde_json::Value> {
+        Some(serde_json::to_value(req).unwrap_or_default())
+    }
+
+    /// Read-op query params: timeout, consistency.
+    fn read_query(
+        timeout: Option<u64>,
+        consistency: Option<&crate::types::ReadConsistencyParam>,
+    ) -> Vec<(String, String)> {
+        let mut q = Vec::new();
+        crate::query::push_read_opts(&mut q, timeout, consistency);
+        q
+    }
+
+    /// Mutation query params: wait + optional shard_key.
+    fn mut_query(shard_key: Option<&str>) -> Vec<(String, String)> {
+        let mut q = vec![("wait".into(), "true".into())];
+        if let Some(sk) = shard_key {
+            q.push(("shard_key".into(), sk.to_owned()));
+        }
+        q
+    }
+
+    Ok(match op {
         PlannedOperation::Query {
             collection,
             request,
         } => Route {
             method: Method::Post,
             path: format!("/collections/{collection}/points/query"),
-            query: Vec::new(),
-            body: Some(RequestBody::Query(Box::new(request.clone()))),
+            query: read_query(request.timeout, request.consistency.as_ref()),
+            body: body(request),
         },
         PlannedOperation::QueryGroups {
             collection,
@@ -546,8 +833,8 @@ pub fn to_rest_route(op: &PlannedOperation) -> Route {
         } => Route {
             method: Method::Post,
             path: format!("/collections/{collection}/points/query/groups"),
-            query: Vec::new(),
-            body: Some(RequestBody::QueryGroups(Box::new(request.clone()))),
+            query: read_query(request.timeout, request.consistency.as_ref()),
+            body: body(request),
         },
         PlannedOperation::GetPoints {
             collection,
@@ -556,7 +843,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Route {
             method: Method::Post,
             path: format!("/collections/{collection}/points"),
             query: Vec::new(),
-            body: Some(RequestBody::Points(request.clone())),
+            body: body(request),
         },
         PlannedOperation::Scroll {
             collection,
@@ -565,7 +852,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Route {
             method: Method::Post,
             path: format!("/collections/{collection}/points/scroll"),
             query: Vec::new(),
-            body: Some(RequestBody::Scroll(Box::new(request.clone()))),
+            body: body(request),
         },
         PlannedOperation::Count {
             collection,
@@ -574,7 +861,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Route {
             method: Method::Post,
             path: format!("/collections/{collection}/points/count"),
             query: Vec::new(),
-            body: Some(RequestBody::Count(Box::new(request.clone()))),
+            body: body(request),
         },
         PlannedOperation::Upsert {
             collection,
@@ -592,32 +879,35 @@ pub fn to_rest_route(op: &PlannedOperation) -> Route {
                 method: Method::Put,
                 path: format!("/collections/{collection}/points"),
                 query,
-                body: Some(RequestBody::Upsert(request.clone())),
+                body: body(request),
             }
         }
         PlannedOperation::Delete {
             collection,
             request,
-        } => {
-            let mut query = vec![("wait".into(), "true".into())];
-            if let Some(ref sk) = request.shard_key {
-                query.push(("shard_key".into(), sk.clone()));
-            }
-            Route {
-                method: Method::Post,
-                path: format!("/collections/{collection}/points/delete"),
-                query,
-                body: Some(RequestBody::Delete(Box::new(request.clone()))),
-            }
-        }
+        } => Route {
+            method: Method::Post,
+            path: format!("/collections/{collection}/points/delete"),
+            query: mut_query(request.shard_key.as_deref()),
+            body: body(request),
+        },
         PlannedOperation::ClearPayload {
             collection,
             request,
         } => Route {
             method: Method::Post,
             path: format!("/collections/{collection}/points/payload/clear"),
-            query: vec![("wait".into(), "true".into())],
-            body: Some(RequestBody::ClearPayload(Box::new(request.clone()))),
+            query: mut_query(request.shard_key.as_deref()),
+            body: body(request),
+        },
+        PlannedOperation::DeletePayload {
+            collection,
+            request,
+        } => Route {
+            method: Method::Post,
+            path: format!("/collections/{collection}/points/payload/delete"),
+            query: mut_query(request.shard_key.as_deref()),
+            body: body(request),
         },
         PlannedOperation::DeleteVectors {
             collection,
@@ -625,8 +915,8 @@ pub fn to_rest_route(op: &PlannedOperation) -> Route {
         } => Route {
             method: Method::Post,
             path: format!("/collections/{collection}/points/vectors/delete"),
-            query: vec![("wait".into(), "true".into())],
-            body: Some(RequestBody::DeleteVector(Box::new(request.clone()))),
+            query: mut_query(request.shard_key.as_deref()),
+            body: body(request),
         },
         PlannedOperation::UpdateVectors {
             collection,
@@ -634,8 +924,8 @@ pub fn to_rest_route(op: &PlannedOperation) -> Route {
         } => Route {
             method: Method::Put,
             path: format!("/collections/{collection}/points/vectors"),
-            query: vec![("wait".into(), "true".into())],
-            body: Some(RequestBody::UpdateVector(request.clone())),
+            query: mut_query(request.shard_key.as_deref()),
+            body: body(request),
         },
         PlannedOperation::UpdatePayload {
             collection,
@@ -643,9 +933,10 @@ pub fn to_rest_route(op: &PlannedOperation) -> Route {
         } => Route {
             method: Method::Post,
             path: format!("/collections/{collection}/points/payload"),
-            query: vec![("wait".into(), "true".into())],
-            body: Some(RequestBody::UpdatePayload(request.clone())),
+            query: mut_query(request.shard_key.as_deref()),
+            body: body(request),
         },
+        // DDL: REST shapes differ from plan IR — use OpenAPI projection fns
         PlannedOperation::CreateCollection {
             collection,
             request,
@@ -653,7 +944,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Route {
             method: Method::Put,
             path: format!("/collections/{collection}"),
             query: Vec::new(),
-            body: Some(RequestBody::CreateCollection(Box::new(request.clone()))),
+            body: Some(crate::ddl::create_collection_rest_body(request)),
         },
         PlannedOperation::UpdateCollection {
             collection,
@@ -662,13 +953,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Route {
             method: Method::Patch,
             path: format!("/collections/{collection}"),
             query: Vec::new(),
-            body: Some(RequestBody::UpdateCollection(Box::new(request.clone()))),
-        },
-        PlannedOperation::DropCollection { collection } => Route {
-            method: Method::Delete,
-            path: format!("/collections/{collection}"),
-            query: Vec::new(),
-            body: None,
+            body: Some(crate::ddl::update_collection_rest_body(request)),
         },
         PlannedOperation::CreateIndex {
             collection,
@@ -677,13 +962,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Route {
             method: Method::Put,
             path: format!("/collections/{collection}/index"),
             query: Vec::new(),
-            body: Some(RequestBody::CreateIndex(request.clone())),
-        },
-        PlannedOperation::DropIndex { collection, field } => Route {
-            method: Method::Delete,
-            path: format!("/collections/{collection}/index/{field}"),
-            query: Vec::new(),
-            body: None,
+            body: Some(crate::ddl::create_index_rest_body(request)),
         },
         PlannedOperation::CreateShardKey {
             collection,
@@ -692,7 +971,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Route {
             method: Method::Put,
             path: format!("/collections/{collection}/shards"),
             query: Vec::new(),
-            body: Some(RequestBody::CreateShardKey(Box::new(request.clone()))),
+            body: body(request),
         },
         PlannedOperation::DropShardKey {
             collection,
@@ -701,7 +980,20 @@ pub fn to_rest_route(op: &PlannedOperation) -> Route {
             method: Method::Post,
             path: format!("/collections/{collection}/shards/delete"),
             query: Vec::new(),
-            body: Some(RequestBody::DropShardKey(Box::new(request.clone()))),
+            body: body(request),
+        },
+        // Bodyless
+        PlannedOperation::DropCollection { collection } => Route {
+            method: Method::Delete,
+            path: format!("/collections/{collection}"),
+            query: Vec::new(),
+            body: None,
+        },
+        PlannedOperation::DropIndex { collection, field } => Route {
+            method: Method::Delete,
+            path: format!("/collections/{collection}/index/{field}"),
+            query: Vec::new(),
+            body: None,
         },
         PlannedOperation::ListCollections => Route {
             method: Method::Get,
@@ -721,13 +1013,25 @@ pub fn to_rest_route(op: &PlannedOperation) -> Route {
             query: Vec::new(),
             body: None,
         },
-    }
+        PlannedOperation::CrossRerank { .. } => {
+            return Err(RestProjectionError::ClientSideOnly {
+                stmt_type: "cross_rerank",
+            });
+        }
+    })
 }
-
-/// Compatibility: plan + REST projection. Returns a planning error as a
-/// validation failure rather than panicking on malformed programmatic AST.
 pub fn try_route(statement: &Stmt) -> Result<Route, QqlError> {
-    plan(statement).map(|op| to_rest_route(&op))
+    let op = plan(statement)?;
+    to_rest_route(&op).map_err(|err| match err {
+        RestProjectionError::ClientSideOnly { stmt_type } => QqlError::validation(
+            "QQL-REST-CLIENT-SIDE",
+            format!(
+                "{stmt_type} is client-side and has no single Qdrant REST route; \
+                 execute via the runtime CROSS RERANK path"
+            ),
+            None,
+        ),
+    })
 }
 
 #[cfg(test)]
@@ -760,11 +1064,11 @@ mod tests {
 
     #[test]
     fn plan_and_route_agree_on_query() {
-        let stmt = Parser::parse("QUERY 'hello' FROM docs LIMIT 5;").unwrap();
+        let stmt = Parser::parse("QUERY TEXT 'hello' MODEL 'e5' FROM docs LIMIT 5;").unwrap();
         let op = plan(&stmt).unwrap();
-        let route = to_rest_route(&op);
+        let route = to_rest_route(&op).expect("rest route");
         assert_eq!(route.path, "/collections/docs/points/query");
-        assert!(matches!(route.body, Some(RequestBody::Query(_))));
+        assert!(route.body.is_some());
     }
 
     #[test]
@@ -782,10 +1086,7 @@ mod tests {
         ));
         let alter_route = try_route(&alter).unwrap();
         assert_eq!(alter_route.method, Method::Patch);
-        assert!(matches!(
-            alter_route.body,
-            Some(RequestBody::UpdateCollection(_))
-        ));
+        assert!(alter_route.body.is_some());
     }
 
     #[test]
@@ -852,6 +1153,7 @@ mod tests {
                 using: Some(VectorTarget {
                     name: "dense".into(),
                     kind: Some(VectorKind::Dense),
+                    multi: false,
                 }),
                 prefetch: Vec::new(),
             },
@@ -870,5 +1172,57 @@ mod tests {
             plan(&stmt_empty_prefetch).unwrap_err().kind,
             qql_core::error::ErrorKind::Validation
         );
+    }
+
+    #[test]
+    fn delete_payload_planning_and_routing() {
+        let stmt = qql_core::parser::Parser::parse(
+            "DELETE PAYLOAD draft, temp_token FROM docs WHERE status = 'archived' SHARD 'tenant_1';",
+        )
+        .unwrap();
+        let op = plan(&stmt).unwrap();
+
+        assert_eq!(op.operation_label(), "DELETE_PAYLOAD");
+        assert_eq!(op.compile_stmt_type(), "delete_payload");
+        assert_eq!(op.collection(), Some("docs"));
+        assert_eq!(op.shard_key(), Some("tenant_1"));
+
+        if let PlannedOperation::DeletePayload {
+            collection,
+            request,
+        } = &op
+        {
+            assert_eq!(collection, "docs");
+            assert_eq!(request.keys, vec!["draft", "temp_token"]);
+            assert_eq!(request.shard_key.as_deref(), Some("tenant_1"));
+            assert!(request.filter.is_some());
+        } else {
+            panic!("expected DeletePayload operation");
+        }
+
+        let route = crate::to_rest_route(&op).unwrap();
+        assert_eq!(route.method, crate::Method::Post);
+        assert_eq!(route.path, "/collections/docs/points/payload/delete");
+    }
+
+    #[test]
+    fn count_exact_planning() {
+        let stmt = qql_core::parser::Parser::parse(
+            "COUNT FROM docs WHERE active = true WITH (exact = true) SHARD 'tenant_2';",
+        )
+        .unwrap();
+        let op = plan(&stmt).unwrap();
+
+        assert_eq!(op.operation_label(), "COUNT");
+        assert_eq!(op.collection(), Some("docs"));
+        assert_eq!(op.shard_key(), Some("tenant_2"));
+
+        if let PlannedOperation::Count { request, .. } = op {
+            assert_eq!(request.exact, Some(true));
+            assert_eq!(request.shard_key.as_deref(), Some("tenant_2"));
+            assert!(request.filter.is_some());
+        } else {
+            panic!("expected Count operation");
+        }
     }
 }

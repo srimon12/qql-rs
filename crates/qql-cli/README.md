@@ -89,12 +89,25 @@ Reload with:
 qql execute docs_export.qql
 ```
 
-### doctor — Check Qdrant connection health
+### doctor — Check Qdrant connection health + embedding hosts
 
 ```bash
 qql doctor
 qql doctor --json
+qql --edge doctor
 ```
+
+Prints connectivity and which embedding/rerank **hosts** are configured:
+
+| Flag | Meaning |
+|---|---|
+| `dense` | Dense text embedder model/endpoint present |
+| `multi` | Multivector / ColBERT (`multi_model` or multi HTTP) |
+| `image` | CLIP vision (`image_model` or image HTTP) |
+| `cross_rerank` | Cross-encoder (`reranker_model` / `rerank_endpoint`) |
+
+Missing multi/image/cross hosts include short config hints (features fail only
+when used if hosts are absent).
 
 ### --edge — Run normal commands against local qdrant-edge
 
@@ -120,6 +133,7 @@ Then select the configured backend with the global flag:
 
 ```bash
 qql --edge exec "QUERY 'vector search' FROM docs USING dense LIMIT 5"
+# Schema fills USING roles (dense/sparse/multi); offline/explicit: AS DENSE|SPARSE|MULTI
 qql --edge execute migration.qql
 qql --edge connect
 qql --edge dump docs docs.qql
@@ -165,9 +179,18 @@ Persistent config loaded from `~/.qql/config.json` (auto-created on first use). 
   "secret": null,
   "embedding_endpoint": "http://localhost:11434/v1/embeddings",
   "embedding_model": "nomic-embed-text",
-  "embedding_dimension": 768
+  "embedding_dimension": 768,
+  "multi_embedding_model": "bge-m3",
+  "image_embedding_model": "clip-vision",
+  "rerank_model": "bge-reranker-base"
 }
 ```
+
+Optional multi / image / rerank endpoints mirror dense (`multi_embedding_endpoint`,
+`image_embedding_endpoint`, `rerank_endpoint`). Edge offline models:
+`QQL_EDGE_MULTI_MODEL`, `QQL_EDGE_IMAGE_MODEL`, `QQL_EDGE_RERANKER_MODEL`.
+
+`qql doctor` reports which of dense / multi / image / cross_rerank are configured.
 
 ## Feature Flags
 

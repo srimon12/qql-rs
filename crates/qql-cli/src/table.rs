@@ -275,7 +275,7 @@ fn render_response(
     }
 
     match response.operation.as_str() {
-        "QUERY" | "SCROLL" => {
+        "QUERY" | "SCROLL" | "CROSS_RERANK" => {
             print_query_table(&response.data)?;
         }
         "QUERY_GROUPS" => {

@@ -114,6 +114,9 @@ function normalizeClientOptions(options) {
           apiKey: options.embedder.apiKey ?? options.embedder.api_key,
           model: options.embedder.model,
           dimension: options.embedder.dimension,
+          rerankEndpoint: options.embedder.rerankEndpoint ?? options.embedder.rerank_endpoint,
+          rerankApiKey: options.embedder.rerankApiKey ?? options.embedder.rerank_api_key,
+          rerankModel: options.embedder.rerankModel ?? options.embedder.rerank_model,
         }
       : undefined,
   };
@@ -138,6 +141,9 @@ class HttpEmbedder {
     this.apiKey = apiKey ?? '';
     this.model = options.model;
     this.dimension = options.dimension;
+    this.rerankEndpoint = options.rerankEndpoint ?? options.rerank_endpoint ?? '';
+    this.rerankApiKey = options.rerankApiKey ?? options.rerank_api_key ?? '';
+    this.rerankModel = options.rerankModel ?? options.rerank_model ?? '';
   }
 }
 

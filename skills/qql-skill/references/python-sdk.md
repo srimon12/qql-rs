@@ -177,6 +177,21 @@ print(stmt.to_dict())
 
 Multi-stage hybrid retrieval with CTE, Fusion, and Rerank.
 
+Vector roles: `USING dense` / `USING sparse` / `USING colbert` without `AS`
+are resolved from the **collection schema** before embedding (dense, sparse, or
+multivector). Offline or explicit roles use `AS DENSE`, `AS SPARSE`, or
+`AS MULTI`. Names are not special-cased by spelling.
+
+Hybrid shorthand (dense + sparse fusion, same expand as `QUERY HYBRID`):
+
+```python
+client.execute(
+    "QUERY TEXT 'vector databases' FROM docs "
+    "USING HYBRID DENSE dense SPARSE sparse FUSION RRF LIMIT 10"
+)
+# or: "QUERY 'vector databases' FROM docs USING HYBRID LIMIT 10"
+```
+
 ```python
 from pyqql import Client
 
@@ -191,7 +206,7 @@ WITH
       PREFETCH (dense WHERE priority = 'high', sparse)
       LIMIT 50
   )
-QUERY RERANK TEXT 'vector databases' MODEL 'bge-reranker'
+QUERY RERANK TEXT 'vector databases' MODEL 'answerai-colbert-small-v1'
   FROM docs
   USING colbert
   PREFETCH (fused)
@@ -199,6 +214,15 @@ QUERY RERANK TEXT 'vector databases' MODEL 'bge-reranker'
 """
 
 result = client.execute(query)
+
+# Multivector nearest (collection has colbert WITH MULTIVECTOR)
+# client.execute("QUERY TEXT 'q' FROM docs USING colbert LIMIT 10")
+# Offline without schema: "... USING colbert AS MULTI LIMIT 10"
+#
+# Cross-encoder (client-side pair scorer; host needs rerank_pairs):
+# WITH c AS (QUERY TEXT 'q' FROM docs USING dense LIMIT 50)
+# QUERY CROSS RERANK TEXT 'q' MODEL 'bge-reranker-base' ON FIELD text
+#   FROM docs PREFETCH (c) LIMIT 10
 ```
 
 ---

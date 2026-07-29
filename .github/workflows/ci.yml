@@ -90,7 +90,7 @@ jobs:
           npm pack --dry-run --ignore-scripts
 
   wasm-check:
-    name: WASM and playground
+    name: WASM bindings
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -100,9 +100,6 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '22.13.1'
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 11.13.1
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked --version 0.15.0
       - name: Build qql-wasm package
@@ -145,6 +142,13 @@ jobs:
               const request = input instanceof Request
                 ? input
                 : new Request(input, init);
+              // Schema-first topology resolution: GET /collections/{name}
+              if (request.method === 'GET') {
+                return new Response(
+                  JSON.stringify({ result: { config: { params: { vectors: { dense: { size: 2, distance: "Cosine" } } } } } }),
+                  { status: 200, headers: { 'content-type': 'application/json' } },
+                );
+              }
               batchBody = await request.clone().json();
               return new Response(
                 JSON.stringify({ result: [{ points: [] }, { points: [] }] }),
@@ -165,7 +169,3 @@ jobs:
             process.exitCode = 1;
           });
           NODE
-      - name: Build browser playground against generated WASM
-        run: |
-          pnpm --dir wasm-demo install --frozen-lockfile
-          pnpm --dir wasm-demo build

@@ -44,7 +44,7 @@ async fn resolve_query_embeddings(
     embedder: &dyn Embedder,
 ) -> Result<(), QqlError> {
     let mut dense_jobs: Vec<(String, String)> = Vec::new();
-    collect_query_dense_jobs(query, &mut dense_jobs);
+    collect_query_dense_jobs(query, &mut dense_jobs)?;
 
     let dense_vecs = batch_dense_by_model(embedder, &dense_jobs).await?;
     let mut dense_iter = dense_vecs.into_iter();
@@ -82,21 +82,16 @@ async fn resolve_upsert_embeddings(
             }
         }
         if !targets.is_empty() {
+            // Topology-unaware fallback: dense only. Hybrid/sparse targets must
+            // be set by the executor (configure_upsert_embeddings) or explicit
+            // USING / EMBED directives before calling resolve_embeddings — so
+            // dense-only collections never receive orphan sparse vectors.
             let (indices, texts): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
             let dense_vecs = embedder.embed_dense_batch(&texts, "default").await?;
             ensure_batch_len(dense_vecs.len(), indices.len(), "default")?;
-            for ((idx, text), d_vec) in indices.into_iter().zip(texts).zip(dense_vecs) {
+            for (idx, d_vec) in indices.into_iter().zip(dense_vecs) {
                 let point = &mut upsert.points[idx];
                 add_point_vector(point, DENSE_VECTOR_NAME, VectorValue::Dense(d_vec))?;
-                let sparse_vec = embedder.embed_sparse(&text).await?;
-                add_point_vector(
-                    point,
-                    SPARSE_VECTOR_NAME,
-                    VectorValue::Sparse {
-                        indices: sparse_vec.indices,
-                        values: sparse_vec.values,
-                    },
-                )?;
             }
         }
     }
@@ -135,15 +130,9 @@ async fn resolve_upsert_embeddings(
                     }
                 }
                 EmbedKind::Sparse { model } => {
-                    if model.is_some() {
-                        return Err(QqlError::execution(
-                                "QQL-EMBEDDING",
-                                "sparse model selection is not supported by the local BM25 sparse embedder; omit MODEL on EMBED SPARSE",
-                                None,
-                            ));
-                    }
+                    let m = model.as_deref().unwrap_or("default");
                     for (idx, text) in targets {
-                        let s_vec = embedder.embed_sparse(&text).await?;
+                        let s_vec = embedder.embed_sparse(&text, m).await?;
                         let point = &mut upsert.points[idx];
                         add_point_vector(
                             point,
@@ -155,6 +144,53 @@ async fn resolve_upsert_embeddings(
                         )?;
                     }
                 }
+                EmbedKind::Multi { model } => {
+                    let m_name = model.as_deref().unwrap_or("default");
+                    let (indices, texts): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
+                    let bags = embedder.embed_multi_batch(&texts, m_name).await?;
+                    if bags.len() != indices.len() {
+                        return Err(QqlError::execution(
+                            "QQL-EMBEDDING-MULTI",
+                            format!(
+                                "embed_multi_batch returned {} bags for {} texts (model={m_name})",
+                                bags.len(),
+                                indices.len()
+                            ),
+                            None,
+                        ));
+                    }
+                    for (idx, rows) in indices.into_iter().zip(bags) {
+                        if rows.is_empty() {
+                            return Err(QqlError::execution(
+                                "QQL-EMBEDDING-MULTI",
+                                "embed_multi returned an empty multivector",
+                                None,
+                            ));
+                        }
+                        let point = &mut upsert.points[idx];
+                        add_point_vector(point, target_vec_name, VectorValue::MultiDense(rows))?;
+                    }
+                }
+                EmbedKind::Image { model } => {
+                    let m_name = model.as_deref().unwrap_or("default");
+                    let (indices, sources): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
+                    let vecs = embedder.embed_image_batch(&sources, m_name).await?;
+                    if vecs.len() != indices.len() {
+                        return Err(QqlError::execution(
+                            "QQL-EMBEDDING-IMAGE",
+                            format!(
+                                "embed_image_batch returned {} vectors for {} sources (model={m_name})",
+                                vecs.len(),
+                                indices.len()
+                            ),
+                            None,
+                        ));
+                    }
+                    for (idx, vec) in indices.into_iter().zip(vecs) {
+                        let point = &mut upsert.points[idx];
+                        add_point_vector(point, target_vec_name, VectorValue::Dense(vec))?;
+                    }
+                }
             }
         }
     }
@@ -164,22 +200,32 @@ async fn resolve_upsert_embeddings(
 
 // ── Collect dense text jobs (model, text) in walk order ─────────────
 
-fn collect_query_dense_jobs(query: &QueryStmt, jobs: &mut Vec<(String, String)>) {
+fn collect_query_dense_jobs(
+    query: &QueryStmt,
+    jobs: &mut Vec<(String, String)>,
+) -> Result<(), QqlError> {
     for cte in &query.ctes {
-        collect_expr_dense_jobs(&cte.query.expression, jobs);
+        collect_expr_dense_jobs(&cte.query.expression, jobs)?;
     }
-    collect_expr_dense_jobs(&query.expression, jobs);
+    collect_expr_dense_jobs(&query.expression, jobs)
 }
 
-fn collect_prefetches_dense_jobs(prefetches: &[Prefetch], jobs: &mut Vec<(String, String)>) {
+fn collect_prefetches_dense_jobs(
+    prefetches: &[Prefetch],
+    jobs: &mut Vec<(String, String)>,
+) -> Result<(), QqlError> {
     for pref in prefetches {
         if let PrefetchSource::Query(sub) = &pref.source {
-            collect_query_dense_jobs(sub, jobs);
+            collect_query_dense_jobs(sub, jobs)?;
         }
     }
+    Ok(())
 }
 
-fn collect_expr_dense_jobs(expr: &QueryExpr, jobs: &mut Vec<(String, String)>) {
+fn collect_expr_dense_jobs(
+    expr: &QueryExpr,
+    jobs: &mut Vec<(String, String)>,
+) -> Result<(), QqlError> {
     match expr {
         QueryExpr::Nearest {
             input,
@@ -187,8 +233,8 @@ fn collect_expr_dense_jobs(expr: &QueryExpr, jobs: &mut Vec<(String, String)>) {
             prefetch,
             ..
         } => {
-            collect_input_dense_job(input, target_kind(using), "default", jobs);
-            collect_prefetches_dense_jobs(prefetch, jobs);
+            collect_input_dense_job(input, require_embed_target(using)?, "default", jobs);
+            collect_prefetches_dense_jobs(prefetch, jobs)?;
         }
         QueryExpr::Recommend {
             positive,
@@ -197,10 +243,11 @@ fn collect_expr_dense_jobs(expr: &QueryExpr, jobs: &mut Vec<(String, String)>) {
             prefetch,
             ..
         } => {
+            let target = require_embed_target(using)?;
             for input in positive.iter().chain(negative.iter()) {
-                collect_input_dense_job(input, target_kind(using), "default", jobs);
+                collect_input_dense_job(input, target, "default", jobs);
             }
-            collect_prefetches_dense_jobs(prefetch, jobs);
+            collect_prefetches_dense_jobs(prefetch, jobs)?;
         }
         QueryExpr::Context {
             pairs,
@@ -208,11 +255,12 @@ fn collect_expr_dense_jobs(expr: &QueryExpr, jobs: &mut Vec<(String, String)>) {
             prefetch,
             ..
         } => {
+            let target = require_embed_target(using)?;
             for pair in pairs {
-                collect_input_dense_job(&pair.positive, target_kind(using), "default", jobs);
-                collect_input_dense_job(&pair.negative, target_kind(using), "default", jobs);
+                collect_input_dense_job(&pair.positive, target, "default", jobs);
+                collect_input_dense_job(&pair.negative, target, "default", jobs);
             }
-            collect_prefetches_dense_jobs(prefetch, jobs);
+            collect_prefetches_dense_jobs(prefetch, jobs)?;
         }
         QueryExpr::Discover {
             target,
@@ -221,15 +269,16 @@ fn collect_expr_dense_jobs(expr: &QueryExpr, jobs: &mut Vec<(String, String)>) {
             prefetch,
             ..
         } => {
-            collect_input_dense_job(target, target_kind(using), "default", jobs);
+            let emb = require_embed_target(using)?;
+            collect_input_dense_job(target, emb, "default", jobs);
             for pair in context {
-                collect_input_dense_job(&pair.positive, target_kind(using), "default", jobs);
-                collect_input_dense_job(&pair.negative, target_kind(using), "default", jobs);
+                collect_input_dense_job(&pair.positive, emb, "default", jobs);
+                collect_input_dense_job(&pair.negative, emb, "default", jobs);
             }
-            collect_prefetches_dense_jobs(prefetch, jobs);
+            collect_prefetches_dense_jobs(prefetch, jobs)?;
         }
         QueryExpr::Fusion { prefetch, .. } | QueryExpr::Formula { prefetch, .. } => {
-            collect_prefetches_dense_jobs(prefetch, jobs);
+            collect_prefetches_dense_jobs(prefetch, jobs)?;
         }
         QueryExpr::RelevanceFeedback {
             target,
@@ -238,37 +287,57 @@ fn collect_expr_dense_jobs(expr: &QueryExpr, jobs: &mut Vec<(String, String)>) {
             prefetch,
             ..
         } => {
-            collect_input_dense_job(target, target_kind(using), "default", jobs);
+            let emb = require_embed_target(using)?;
+            collect_input_dense_job(target, emb, "default", jobs);
             for fb in feedback {
-                collect_input_dense_job(&fb.example, target_kind(using), "default", jobs);
+                collect_input_dense_job(&fb.example, emb, "default", jobs);
             }
-            collect_prefetches_dense_jobs(prefetch, jobs);
+            collect_prefetches_dense_jobs(prefetch, jobs)?;
         }
         QueryExpr::Hybrid { text, model, .. } => {
             let m = model.as_deref().unwrap_or("default").to_string();
             jobs.push((m, text.clone()));
         }
+        QueryExpr::CrossRerank { prefetch, .. } => {
+            // Query string is scored by the pair model, not embedded.
+            collect_prefetches_dense_jobs(prefetch, jobs)?;
+        }
         QueryExpr::Rerank {
             input,
             model,
+            using,
             prefetch,
             ..
         } => {
-            collect_input_dense_job(input, VectorKind::Dense, model.as_str(), jobs);
-            collect_prefetches_dense_jobs(prefetch, jobs);
+            // RERANK uses the MODEL string for dense/multi, not "default".
+            let mut emb = require_embed_target(using)?;
+            // RERANK is always dense-family; multi comes from USING / schema.
+            if emb.kind == VectorKind::Sparse {
+                return Err(QqlError::execution(
+                    "QQL-VECTOR-KIND",
+                    "RERANK requires a dense (or multivector) target, not sparse",
+                    None,
+                ));
+            }
+            emb.kind = VectorKind::Dense;
+            collect_input_dense_job(input, emb, model.as_str(), jobs);
+            collect_prefetches_dense_jobs(prefetch, jobs)?;
         }
         _ => {}
     }
+    Ok(())
 }
 
+/// Only single-vector dense TEXT inputs join the dense batch; sparse and multi
+/// are applied one-by-one later.
 fn collect_input_dense_job(
     input: &QueryInput,
-    kind: VectorKind,
+    target: EmbedTarget,
     default_model: &str,
     jobs: &mut Vec<(String, String)>,
 ) {
     if let QueryInput::Text { text, model } = input {
-        if kind == VectorKind::Dense {
+        if target.kind == VectorKind::Dense && !target.multi {
             let m = model.as_deref().unwrap_or(default_model).to_string();
             jobs.push((m, text.clone()));
         }
@@ -367,7 +436,14 @@ fn apply_expr_embeddings<'a>(
                 prefetch,
                 ..
             } => {
-                apply_input(input, target_kind(using), embedder, dense).await?;
+                apply_input(
+                    input,
+                    require_embed_target(using)?,
+                    "default",
+                    embedder,
+                    dense,
+                )
+                .await?;
                 apply_prefetches_embeddings(prefetch, embedder, dense).await?;
             }
             QueryExpr::Recommend {
@@ -377,8 +453,9 @@ fn apply_expr_embeddings<'a>(
                 prefetch,
                 ..
             } => {
+                let target = require_embed_target(using)?;
                 for input in positive.iter_mut().chain(negative.iter_mut()) {
-                    apply_input(input, target_kind(using), embedder, dense).await?;
+                    apply_input(input, target, "default", embedder, dense).await?;
                 }
                 apply_prefetches_embeddings(prefetch, embedder, dense).await?;
             }
@@ -388,9 +465,10 @@ fn apply_expr_embeddings<'a>(
                 prefetch,
                 ..
             } => {
+                let target = require_embed_target(using)?;
                 for pair in pairs {
-                    apply_input(&mut pair.positive, target_kind(using), embedder, dense).await?;
-                    apply_input(&mut pair.negative, target_kind(using), embedder, dense).await?;
+                    apply_input(&mut pair.positive, target, "default", embedder, dense).await?;
+                    apply_input(&mut pair.negative, target, "default", embedder, dense).await?;
                 }
                 apply_prefetches_embeddings(prefetch, embedder, dense).await?;
             }
@@ -401,10 +479,11 @@ fn apply_expr_embeddings<'a>(
                 prefetch,
                 ..
             } => {
-                apply_input(target, target_kind(using), embedder, dense).await?;
+                let emb = require_embed_target(using)?;
+                apply_input(target, emb, "default", embedder, dense).await?;
                 for pair in context {
-                    apply_input(&mut pair.positive, target_kind(using), embedder, dense).await?;
-                    apply_input(&mut pair.negative, target_kind(using), embedder, dense).await?;
+                    apply_input(&mut pair.positive, emb, "default", embedder, dense).await?;
+                    apply_input(&mut pair.negative, emb, "default", embedder, dense).await?;
                 }
                 apply_prefetches_embeddings(prefetch, embedder, dense).await?;
             }
@@ -418,9 +497,10 @@ fn apply_expr_embeddings<'a>(
                 prefetch,
                 ..
             } => {
-                apply_input(target, target_kind(using), embedder, dense).await?;
+                let emb = require_embed_target(using)?;
+                apply_input(target, emb, "default", embedder, dense).await?;
                 for fb in feedback {
-                    apply_input(&mut fb.example, target_kind(using), embedder, dense).await?;
+                    apply_input(&mut fb.example, emb, "default", embedder, dense).await?;
                 }
                 apply_prefetches_embeddings(prefetch, embedder, dense).await?;
             }
@@ -438,7 +518,7 @@ fn apply_expr_embeddings<'a>(
                         None,
                     )
                 })?;
-                let s_vec = embedder.embed_sparse(text).await?;
+                let s_vec = embedder.embed_sparse(text, "default").await?;
                 let d_vec_name = dense_vector.as_deref().unwrap_or(DENSE_VECTOR_NAME);
                 let s_vec_name = sparse_vector.as_deref().unwrap_or(SPARSE_VECTOR_NAME);
 
@@ -450,6 +530,7 @@ fn apply_expr_embeddings<'a>(
                         using: Some(VectorTarget {
                             name: d_vec_name.to_string(),
                             kind: Some(VectorKind::Dense),
+                            multi: false,
                         }),
                         prefetch: Vec::new(),
                         mmr: None,
@@ -473,6 +554,7 @@ fn apply_expr_embeddings<'a>(
                         using: Some(VectorTarget {
                             name: s_vec_name.to_string(),
                             kind: Some(VectorKind::Sparse),
+                            multi: false,
                         }),
                         prefetch: Vec::new(),
                         mmr: None,
@@ -506,11 +588,17 @@ fn apply_expr_embeddings<'a>(
             }
             QueryExpr::Rerank {
                 input,
-                model: _,
+                model,
+                using,
                 prefetch,
                 ..
             } => {
-                apply_input(input, VectorKind::Dense, embedder, dense).await?;
+                let mut emb = require_embed_target(using)?;
+                emb.kind = VectorKind::Dense;
+                apply_input(input, emb, model.as_str(), embedder, dense).await?;
+                apply_prefetches_embeddings(prefetch, embedder, dense).await?;
+            }
+            QueryExpr::CrossRerank { prefetch, .. } => {
                 apply_prefetches_embeddings(prefetch, embedder, dense).await?;
             }
             _ => {}
@@ -521,18 +609,62 @@ fn apply_expr_embeddings<'a>(
 
 async fn apply_input(
     input: &mut QueryInput,
-    kind: VectorKind,
+    target: EmbedTarget,
+    default_model: &str,
     embedder: &dyn Embedder,
     dense: DenseIter<'_>,
 ) -> Result<(), QqlError> {
-    if let QueryInput::Text { text, .. } = input {
-        if kind == VectorKind::Sparse {
-            let s_vec = embedder.embed_sparse(text).await?;
-            *input = QueryInput::Vector(VectorValue::Sparse {
-                indices: s_vec.indices,
-                values: s_vec.values,
-            });
-        } else {
+    match input {
+        QueryInput::Image { source, model } => {
+            // Images always produce single-vector dense (CLIP vision, etc.).
+            if target.kind == VectorKind::Sparse {
+                return Err(QqlError::execution(
+                    "QQL-VECTOR-KIND",
+                    "IMAGE input requires a dense target, not sparse",
+                    None,
+                ));
+            }
+            if target.multi {
+                return Err(QqlError::execution(
+                    "QQL-VECTOR-KIND",
+                    "IMAGE input produces single-vector dense, not multivector; use TEXT with AS MULTI for ColBERT",
+                    None,
+                ));
+            }
+            let model_name = model.as_deref().unwrap_or(default_model);
+            let vec = embedder.embed_image(source, model_name).await?;
+            if vec.is_empty() {
+                return Err(QqlError::execution(
+                    "QQL-EMBEDDING-IMAGE",
+                    "embed_image returned an empty vector",
+                    None,
+                ));
+            }
+            *input = QueryInput::Vector(VectorValue::Dense(vec));
+            Ok(())
+        }
+        QueryInput::Text { text, model } => {
+            let model_name = model.as_deref().unwrap_or(default_model);
+            if target.kind == VectorKind::Sparse {
+                let s_vec = embedder.embed_sparse(text, model_name).await?;
+                *input = QueryInput::Vector(VectorValue::Sparse {
+                    indices: s_vec.indices,
+                    values: s_vec.values,
+                });
+                return Ok(());
+            }
+            if target.multi {
+                let rows = embedder.embed_multi(text, model_name).await?;
+                if rows.is_empty() {
+                    return Err(QqlError::execution(
+                        "QQL-EMBEDDING-MULTI",
+                        "embed_multi returned an empty multivector",
+                        None,
+                    ));
+                }
+                *input = QueryInput::Vector(VectorValue::MultiDense(rows));
+                return Ok(());
+            }
             let vec = dense.next().ok_or_else(|| {
                 QqlError::execution(
                     "QQL-EMBEDDING",
@@ -541,16 +673,37 @@ async fn apply_input(
                 )
             })?;
             *input = QueryInput::Vector(VectorValue::Dense(vec));
+            Ok(())
         }
+        QueryInput::Vector(_) | QueryInput::Point(_) => Ok(()),
     }
-    Ok(())
 }
 
-fn target_kind(target: &Option<VectorTarget>) -> VectorKind {
-    target
-        .as_ref()
-        .and_then(|target| target.kind)
-        .unwrap_or(VectorKind::Dense)
+#[derive(Debug, Clone, Copy)]
+struct EmbedTarget {
+    kind: VectorKind,
+    multi: bool,
+}
+
+/// Resolve embed target for a `USING` clause.
+///
+/// - No `USING` → single dense.
+/// - `USING name AS …` / schema-filled kind → that kind; `multi` from AS MULTI or schema.
+/// - `USING name` with `kind: None` → error.
+fn require_embed_target(target: &Option<VectorTarget>) -> Result<EmbedTarget, QqlError> {
+    match target {
+        None => Ok(EmbedTarget {
+            kind: VectorKind::Dense,
+            multi: false,
+        }),
+        Some(t) => match t.kind {
+            Some(kind) => Ok(EmbedTarget {
+                kind,
+                multi: t.multi,
+            }),
+            None => Err(crate::topology::unknown_using_kind_error(&t.name)),
+        },
+    }
 }
 
 fn ensure_batch_len(got: usize, expected: usize, model: &str) -> Result<(), QqlError> {
@@ -609,13 +762,7 @@ async fn resolve_single_embedding_spec(
             vector,
             field,
         } => {
-            if model.is_some() {
-                return Err(QqlError::execution(
-                    "QQL-EMBEDDING",
-                    "sparse model selection is not supported by the local BM25 sparse embedder; omit MODEL",
-                    None,
-                ));
-            }
+            let model_name = model.as_deref().unwrap_or("default");
             let vector_name = vector.as_deref().unwrap_or(SPARSE_VECTOR_NAME);
             check_and_insert_vector_name(seen_vectors, vector_name)?;
 
@@ -623,7 +770,7 @@ async fn resolve_single_embedding_spec(
             validate_non_empty_targets(upsert, &targets, "SPARSE", field.as_deref())?;
 
             for (idx, text) in targets {
-                let sparse_vec = embedder.embed_sparse(&text).await?;
+                let sparse_vec = embedder.embed_sparse(&text, model_name).await?;
                 add_point_vector(
                     &mut upsert.points[idx],
                     vector_name,
@@ -642,14 +789,8 @@ async fn resolve_single_embedding_spec(
             sparse_vector,
             sparse_field,
         } => {
-            if sparse_model.is_some() {
-                return Err(QqlError::execution(
-                    "QQL-EMBEDDING",
-                    "sparse model selection is not supported by the local BM25 sparse embedder; omit SPARSE MODEL",
-                    None,
-                ));
-            }
             let d_model = dense_model.as_deref().unwrap_or("default");
+            let s_model = sparse_model.as_deref().unwrap_or("default");
             let d_vec_name = dense_vector.as_deref().unwrap_or(DENSE_VECTOR_NAME);
             let s_vec_name = sparse_vector.as_deref().unwrap_or(SPARSE_VECTOR_NAME);
 
@@ -671,7 +812,7 @@ async fn resolve_single_embedding_spec(
             }
 
             for (idx, text) in sparse_targets {
-                let sparse_vec = embedder.embed_sparse(&text).await?;
+                let sparse_vec = embedder.embed_sparse(&text, s_model).await?;
                 let point = &mut upsert.points[idx];
                 add_point_vector(
                     point,
@@ -680,6 +821,79 @@ async fn resolve_single_embedding_spec(
                         indices: sparse_vec.indices,
                         values: sparse_vec.values,
                     },
+                )?;
+            }
+        }
+        EmbeddingSpec::MultiVector {
+            model,
+            vector,
+            field,
+        } => {
+            let model_name = model.as_deref().unwrap_or("default");
+            let vector_name = vector.as_deref().unwrap_or("colbert");
+            check_and_insert_vector_name(seen_vectors, vector_name)?;
+
+            let targets = collect_text_targets(&upsert.points, field.as_deref());
+            validate_non_empty_targets(upsert, &targets, "MULTI", field.as_deref())?;
+
+            let (indices, texts): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
+            let bags = embedder.embed_multi_batch(&texts, model_name).await?;
+            if bags.len() != indices.len() {
+                return Err(QqlError::execution(
+                    "QQL-EMBEDDING-MULTI",
+                    format!(
+                        "embed_multi_batch returned {} bags for {} texts (model={model_name})",
+                        bags.len(),
+                        indices.len()
+                    ),
+                    None,
+                ));
+            }
+            for (idx, rows) in indices.into_iter().zip(bags) {
+                if rows.is_empty() {
+                    return Err(QqlError::execution(
+                        "QQL-EMBEDDING-MULTI",
+                        "embed_multi returned an empty multivector",
+                        None,
+                    ));
+                }
+                add_point_vector(
+                    &mut upsert.points[idx],
+                    vector_name,
+                    VectorValue::MultiDense(rows),
+                )?;
+            }
+        }
+        EmbeddingSpec::Image {
+            model,
+            vector,
+            field,
+        } => {
+            let model_name = model.as_deref().unwrap_or("default");
+            let vector_name = vector.as_deref().unwrap_or("image");
+            check_and_insert_vector_name(seen_vectors, vector_name)?;
+
+            let targets = collect_image_targets(&upsert.points, field.as_deref());
+            validate_non_empty_targets(upsert, &targets, "IMAGE", field.as_deref())?;
+
+            let (indices, sources): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
+            let vecs = embedder.embed_image_batch(&sources, model_name).await?;
+            if vecs.len() != indices.len() {
+                return Err(QqlError::execution(
+                    "QQL-EMBEDDING-IMAGE",
+                    format!(
+                        "embed_image_batch returned {} vectors for {} sources (model={model_name})",
+                        vecs.len(),
+                        indices.len()
+                    ),
+                    None,
+                ));
+            }
+            for (idx, vec) in indices.into_iter().zip(vecs) {
+                add_point_vector(
+                    &mut upsert.points[idx],
+                    vector_name,
+                    VectorValue::Dense(vec),
                 )?;
             }
         }
@@ -746,6 +960,61 @@ const DEFAULT_TEXT_FIELDS_ORDERED: &[&str] = &[
     "summary",
     "document",
 ];
+
+const DEFAULT_IMAGE_FIELDS_ORDERED: &[&str] = &[
+    "image",
+    "image_path",
+    "image_url",
+    "photo",
+    "picture",
+    "img",
+    "path",
+    "url",
+];
+
+/// Collect image path/URL payload fields for IMAGE embedding specs.
+fn collect_image_targets(
+    points: &[UpsertPoint],
+    field_override: Option<&str>,
+) -> Vec<(usize, String)> {
+    if let Some(target_field) = field_override {
+        points
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, point)| {
+                point.payload.iter().find_map(|(key, value)| {
+                    if key.eq_ignore_ascii_case(target_field) {
+                        if let qql_core::ast::Value::Str(source) = value {
+                            if !source.is_empty() {
+                                return Some((idx, source.clone()));
+                            }
+                        }
+                    }
+                    None
+                })
+            })
+            .collect()
+    } else {
+        points
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, point)| {
+                for &candidate in DEFAULT_IMAGE_FIELDS_ORDERED {
+                    if let Some((_, qql_core::ast::Value::Str(source))) = point
+                        .payload
+                        .iter()
+                        .find(|(key, _)| key.eq_ignore_ascii_case(candidate))
+                    {
+                        if !source.is_empty() {
+                            return Some((idx, source.clone()));
+                        }
+                    }
+                }
+                None
+            })
+            .collect()
+    }
+}
 
 fn collect_text_targets(
     points: &[UpsertPoint],

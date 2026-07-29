@@ -1,5 +1,6 @@
 #![allow(clippy::field_reassign_with_default)]
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -9,7 +10,7 @@ use qql_core::error::QqlError;
 use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 
 use crate::backend::{SparseVectorSpec, VectorSpec};
-use crate::client::{CollectionInfo, CreateCollectionReq, CreateFieldIndexReq, QdrantOps};
+use crate::client::{CollectionInfo, QdrantOps};
 use crate::config::QqlConfig;
 use crate::executor::{Executor, OnError};
 
@@ -25,6 +26,9 @@ struct MockQdrantClient {
     pub execute_planned_call_count: Arc<Mutex<usize>>,
     pub create_collection_call_count: Arc<Mutex<usize>>,
     pub created_collections: Arc<Mutex<HashSet<String>>>,
+    /// Per-collection mock points returned by `execute_planned` when non-empty.
+    /// Key: collection name, Value: JSON object with a "points" array.
+    pub point_map: Arc<Mutex<HashMap<String, serde_json::Value>>>,
 }
 
 impl Default for MockQdrantClient {
@@ -41,6 +45,7 @@ impl Default for MockQdrantClient {
             execute_planned_call_count: Arc::new(Mutex::new(0)),
             create_collection_call_count: Arc::new(Mutex::new(0)),
             created_collections: Arc::new(Mutex::new(HashSet::new())),
+            point_map: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -66,22 +71,33 @@ impl QdrantOps for MockQdrantClient {
             None,
         ))
     }
-    async fn create_collection(&self, req: CreateCollectionReq) -> Result<(), QqlError> {
+    async fn create_collection(
+        &self,
+        collection_name: &str,
+        _req: &qql_plan::CreateCollectionRequest,
+    ) -> Result<(), QqlError> {
         *self.create_collection_call_count.lock().unwrap() += 1;
         self.created_collections
             .lock()
             .unwrap()
-            .insert(req.collection_name);
+            .insert(collection_name.to_string());
         Ok(())
     }
-    async fn update_collection(&self, req: serde_json::Value) -> Result<(), QqlError> {
-        let _ = req;
+    async fn update_collection(
+        &self,
+        _collection_name: &str,
+        _req: &qql_plan::UpdateCollectionRequest,
+    ) -> Result<(), QqlError> {
         Ok(())
     }
     async fn delete_collection(&self, _name: &str) -> Result<(), QqlError> {
         Ok(())
     }
-    async fn create_field_index(&self, _req: CreateFieldIndexReq) -> Result<(), QqlError> {
+    async fn create_field_index(
+        &self,
+        _collection_name: &str,
+        _req: &qql_plan::CreateIndexRequest,
+    ) -> Result<(), QqlError> {
         Ok(())
     }
     async fn delete_field_index(
@@ -96,7 +112,15 @@ impl QdrantOps for MockQdrantClient {
         op: &qql_plan::PlannedOperation,
     ) -> Result<serde_json::Value, QqlError> {
         *self.execute_planned_call_count.lock().unwrap() += 1;
-        let route = qql_plan::plan::to_rest_route(op);
+        *self.last_planned.lock().unwrap() = Some(op.clone());
+        if let qql_plan::PlannedOperation::CreateCollection { collection, .. } = op {
+            self.created_collections
+                .lock()
+                .unwrap()
+                .insert(collection.clone());
+            return Ok(serde_json::json!({"result": true, "status": "ok", "time": 0.0}));
+        }
+        let route = qql_plan::plan::to_rest_route(op).expect("rest route");
         if route.path.contains("nonexistent") {
             return Err(QqlError::execution(
                 "QQL-EXECUTION",
@@ -104,7 +128,6 @@ impl QdrantOps for MockQdrantClient {
                 None,
             ));
         }
-        *self.last_planned.lock().unwrap() = Some(op.clone());
         if matches!(op, qql_plan::PlannedOperation::ListCollections) {
             return Ok(serde_json::json!({
                 "result": {
@@ -115,6 +138,12 @@ impl QdrantOps for MockQdrantClient {
                         .collect::<Vec<_>>(),
                 }
             }));
+        }
+        // Return per-collection mock points when configured.
+        if let qql_plan::PlannedOperation::Query { collection, .. } = op {
+            if let Some(points) = self.point_map.lock().unwrap().get(collection) {
+                return Ok(points.clone());
+            }
         }
         Ok(serde_json::json!({"result": {"points": []}}))
     }
@@ -167,17 +196,32 @@ fn test_local_config() -> QqlConfig {
 }
 
 fn collection_with_vectors(dense: &[&str], sparse: &[&str]) -> CollectionInfo {
+    collection_with_vectors_multi(dense, sparse, &[])
+}
+
+fn collection_with_vectors_multi(
+    dense: &[&str],
+    sparse: &[&str],
+    multivector: &[&str],
+) -> CollectionInfo {
     let mut info = CollectionInfo::default();
     info.schema.vectors = dense
         .iter()
-        .map(|name| VectorSpec {
-            name: Some((*name).to_string()),
-            size: 3,
-            distance: "Cosine".to_string(),
-            hnsw: None,
-            quantization: None,
-            multivector: None,
-            on_disk: None,
+        .map(|name| {
+            let is_multi = multivector.iter().any(|m| m == name);
+            VectorSpec {
+                name: Some((*name).to_string()),
+                size: if is_multi { 128 } else { 3 },
+                distance: "Cosine".to_string(),
+                hnsw: None,
+                quantization: None,
+                multivector: is_multi.then(|| {
+                    let mut m = serde_json::Map::new();
+                    m.insert("comparator".into(), serde_json::json!("max_sim"));
+                    m
+                }),
+                on_disk: None,
+            }
         })
         .collect();
     info.schema.dense_vectors = dense.iter().map(|name| (*name).to_string()).collect();
@@ -218,6 +262,7 @@ struct MockEmbedder {
     dense: Vec<f32>,
     sparse_indices: Vec<u32>,
     sparse_values: Vec<f32>,
+    multi: Vec<Vec<f32>>,
 }
 
 #[async_trait]
@@ -225,11 +270,27 @@ impl crate::embedder::Embedder for MockEmbedder {
     async fn embed_dense(&self, _text: &str, _model: &str) -> Result<Vec<f32>, QqlError> {
         Ok(self.dense.clone())
     }
-    async fn embed_sparse(&self, _text: &str) -> Result<crate::sparse::SparseVector, QqlError> {
+    async fn embed_sparse(
+        &self,
+        _text: &str,
+        _model: &str,
+    ) -> Result<crate::sparse::SparseVector, QqlError> {
         Ok(crate::sparse::SparseVector {
             indices: self.sparse_indices.clone(),
             values: self.sparse_values.clone(),
         })
+    }
+    async fn embed_multi(&self, _text: &str, _model: &str) -> Result<Vec<Vec<f32>>, QqlError> {
+        Ok(self.multi.clone())
+    }
+    async fn rerank_pairs(
+        &self,
+        _query: &str,
+        documents: &[String],
+        _model: &str,
+    ) -> Result<Vec<f32>, QqlError> {
+        // Return descending scores: the first document gets the highest score.
+        Ok((0..documents.len()).map(|i| 1.0 - i as f32 * 0.1).collect())
     }
 }
 
@@ -264,7 +325,7 @@ async fn test_create_collection_with_hnsw_and_quantization() {
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     assert_eq!(route.path, "/collections/mycol");
     let req = route.body_json().unwrap();
     assert_eq!(req["vectors"]["dense"]["size"], 384);
@@ -274,12 +335,11 @@ async fn test_create_collection_with_hnsw_and_quantization() {
     assert_eq!(hnsw["m"], 32);
     assert_eq!(hnsw["ef_construct"], 100);
 
-    // Check Quantization config serialization
+    // OpenAPI QuantizationConfig: { "scalar": { "type": "int8", … } }
     let quant = &req["quantization_config"];
-    assert_eq!(quant["disabled"], false);
-    assert_eq!(quant["quantization_config"]["type"], "scalar");
-    assert_eq!(quant["quantization_config"]["always_ram"], true);
-    assert_eq!(quant["quantization_config"]["quantile"], 0.99);
+    assert_eq!(quant["scalar"]["type"], "int8");
+    assert_eq!(quant["scalar"]["always_ram"], true);
+    assert_eq!(quant["scalar"]["quantile"], 0.99);
 }
 
 #[tokio::test]
@@ -294,7 +354,7 @@ async fn test_create_hybrid_materializes_default_schema() {
         .unwrap();
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     let req = route.body_json().unwrap();
     assert_eq!(req["vectors"]["dense"]["size"], 384);
     assert_eq!(req["sparse_vectors"]["sparse"]["modifier"], "idf");
@@ -311,7 +371,7 @@ async fn test_create_collection_with_optimizers_and_params() {
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     let req = route.body_json().unwrap();
 
     // Check Optimizers config serialization
@@ -320,10 +380,10 @@ async fn test_create_collection_with_optimizers_and_params() {
     assert_eq!(opt["default_segment_number"], 4);
     assert_eq!(opt["max_optimization_threads"], 2);
 
-    // Check Params serialization
-    let params = &req["params"];
-    assert_eq!(params["replication_factor"], 2);
-    assert_eq!(params["on_disk_payload"], true);
+    // OpenAPI CreateCollection: replication_factor / on_disk_payload are top-level
+    assert_eq!(req["replication_factor"], 2);
+    assert_eq!(req["on_disk_payload"], true);
+    assert!(req.get("params").is_none());
 }
 
 #[tokio::test]
@@ -337,7 +397,7 @@ async fn test_create_collection_with_named_vectors_hnsw_quant() {
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     let req = route.body_json().unwrap();
 
     let vectors = &req["vectors"];
@@ -350,10 +410,9 @@ async fn test_create_collection_with_named_vectors_hnsw_quant() {
     let hnsw = &v_conf["hnsw_config"];
     assert_eq!(hnsw["m"], 16);
 
-    // Check per-vector Quantization
+    // OpenAPI nested binary quantization on vector params
     let quant = &v_conf["quantization_config"];
-    assert_eq!(quant["type"], "binary");
-    assert_eq!(quant["always_ram"], false);
+    assert_eq!(quant["binary"]["always_ram"], false);
 }
 
 #[tokio::test]
@@ -368,19 +427,14 @@ async fn test_alter_collection_quantization_and_hnsw() {
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     assert_eq!(route.path, "/collections/mycol");
     let req = route.body_json().unwrap();
 
     assert_eq!(req["hnsw_config"]["ef_construct"], 150);
-    assert_eq!(
-        req["quantization_config"]["quantization_config"]["type"],
-        "product"
-    );
-    assert_eq!(
-        req["quantization_config"]["quantization_config"]["always_ram"],
-        true
-    );
+    // OpenAPI: product quantization nested under `product`
+    assert_eq!(req["quantization_config"]["product"]["always_ram"], true);
+    assert_eq!(req["quantization_config"]["product"]["compression"], "x4");
 }
 
 #[tokio::test]
@@ -395,10 +449,11 @@ async fn test_alter_collection_disable_quantization() {
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     let req = route.body_json().unwrap();
 
-    assert_eq!(req["quantization_config"]["disabled"], true);
+    // OpenAPI QuantizationConfigDiff disabled variant is the string "Disabled"
+    assert_eq!(req["quantization_config"], "Disabled");
 }
 
 #[tokio::test]
@@ -431,12 +486,12 @@ async fn test_do_query_basic() {
     let last_planned = client.last_planned.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
-    let query = "QUERY 'admin docs' FROM docs WHERE metadata.group = 'admin' LIMIT 10 OFFSET 5";
+    let query = "QUERY TEXT 'admin docs' MODEL 'test-model' FROM docs WHERE metadata.group = 'admin' LIMIT 10 OFFSET 5";
     let resp = executor.execute(query, OnError::Stop).await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     assert_eq!(route.method, qql_plan::types::Method::Post);
     assert!(route.path.contains("docs"));
     assert!(route.body.is_some());
@@ -449,12 +504,12 @@ async fn test_do_query_hybrid() {
     let last_planned = client.last_planned.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
-    let query = "QUERY HYBRID TEXT 'hello' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10";
+    let query = "QUERY HYBRID TEXT 'hello' MODEL 'test-model' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10";
     let resp = executor.execute(query, OnError::Stop).await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     assert_eq!(route.method, qql_plan::types::Method::Post);
     assert!(route.body.is_some());
 }
@@ -469,20 +524,21 @@ async fn text_query_resolves_arbitrary_sparse_vector_by_schema() {
         dense: vec![0.1, 0.2, 0.3],
         sparse_indices: vec![1, 7],
         sparse_values: vec![0.4, 0.8],
+        multi: vec![vec![0.1, 0.2], vec![0.3, 0.4]],
     });
     let executor =
         Executor::with_embedder(Box::new(client), Some(test_local_config()), Some(embedder));
 
     executor
         .execute(
-            "QUERY TEXT 'hello' FROM docs USING lexical_v2 LIMIT 10",
+            "QUERY TEXT 'hello' MODEL 'test-model' FROM docs USING lexical_v2 LIMIT 10",
             OnError::Stop,
         )
         .await
         .unwrap();
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     let body = route.body_json().unwrap();
     assert_eq!(body["using"], "lexical_v2");
     assert_eq!(
@@ -495,6 +551,103 @@ async fn text_query_resolves_arbitrary_sparse_vector_by_schema() {
 }
 
 #[tokio::test]
+async fn cte_prefetch_using_sparse_embeds_sparse_via_schema() {
+    // Regression: USING sparse without AS SPARSE must not dense-embed.
+    let mut client = MockQdrantClient::default();
+    client.exists = true;
+    client.info = Some(collection_with_vectors(&["dense"], &["sparse"]));
+    let last_planned = client.last_planned.clone();
+    let embedder = Arc::new(MockEmbedder {
+        dense: vec![0.1, 0.2, 0.3],
+        sparse_indices: vec![2, 9],
+        sparse_values: vec![0.5, 0.9],
+        multi: vec![vec![0.1, 0.2], vec![0.3, 0.4]],
+    });
+    let executor =
+        Executor::with_embedder(Box::new(client), Some(test_local_config()), Some(embedder));
+
+    executor
+        .execute(
+            "WITH d AS (QUERY TEXT 'x' MODEL 'test-model' USING dense LIMIT 100), \
+             s AS (QUERY TEXT 'x' MODEL 'test-model' USING sparse LIMIT 100) \
+             QUERY FUSION RRF FROM docs PREFETCH (d, s) LIMIT 10",
+            OnError::Stop,
+        )
+        .await
+        .unwrap();
+
+    let op = last_planned.lock().unwrap().take().unwrap();
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
+    let body = route.body_json().unwrap();
+    let prefetch = body["prefetch"].as_array().expect("fusion prefetch");
+    assert_eq!(prefetch.len(), 2);
+
+    // Prefetch 0: dense arm
+    assert_eq!(prefetch[0]["using"], "dense");
+    assert!(
+        prefetch[0]["query"]["nearest"].is_array(),
+        "dense arm must be a dense vector array, got {}",
+        prefetch[0]["query"]["nearest"]
+    );
+
+    // Prefetch 1: sparse arm — indices/values, not a dense float array
+    assert_eq!(prefetch[1]["using"], "sparse");
+    assert_eq!(
+        prefetch[1]["query"]["nearest"]["indices"],
+        serde_json::json!([2, 9])
+    );
+    let values = prefetch[1]["query"]["nearest"]["values"]
+        .as_array()
+        .expect("sparse values");
+    assert!((values[0].as_f64().unwrap() - 0.5).abs() < 1e-6);
+    assert!((values[1].as_f64().unwrap() - 0.9).abs() < 1e-6);
+}
+
+#[tokio::test]
+async fn text_query_multivector_embeds_multi_via_schema() {
+    let mut client = MockQdrantClient::default();
+    client.exists = true;
+    client.info = Some(collection_with_vectors_multi(
+        &["dense", "colbert"],
+        &[],
+        &["colbert"],
+    ));
+    let last_planned = client.last_planned.clone();
+    let embedder = Arc::new(MockEmbedder {
+        dense: vec![0.1, 0.2, 0.3],
+        sparse_indices: vec![],
+        sparse_values: vec![],
+        multi: vec![vec![0.11, 0.22], vec![0.33, 0.44], vec![0.55, 0.66]],
+    });
+    let executor =
+        Executor::with_embedder(Box::new(client), Some(test_local_config()), Some(embedder));
+
+    executor
+        .execute(
+            "QUERY TEXT 'late interaction' MODEL 'test-model' FROM docs USING colbert LIMIT 10",
+            OnError::Stop,
+        )
+        .await
+        .unwrap();
+
+    let op = last_planned.lock().unwrap().take().unwrap();
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
+    let body = route.body_json().unwrap();
+    assert_eq!(body["using"], "colbert");
+    // MultiDense serializes as array-of-arrays under nearest.
+    let nearest = &body["query"]["nearest"];
+    assert!(
+        nearest.is_array(),
+        "expected multi-dense array, got {nearest}"
+    );
+    let rows = nearest.as_array().unwrap();
+    assert_eq!(rows.len(), 3);
+    let first = rows[0].as_array().expect("row 0");
+    assert!((first[0].as_f64().unwrap() - 0.11).abs() < 1e-5);
+    assert!((first[1].as_f64().unwrap() - 0.22).abs() < 1e-5);
+}
+
+#[tokio::test]
 async fn text_query_infers_only_arbitrary_dense_vector() {
     let mut client = MockQdrantClient::default();
     client.exists = true;
@@ -504,17 +657,21 @@ async fn text_query_infers_only_arbitrary_dense_vector() {
         dense: vec![0.1, 0.2, 0.3],
         sparse_indices: vec![],
         sparse_values: vec![],
+        multi: vec![vec![0.1, 0.2], vec![0.3, 0.4]],
     });
     let executor =
         Executor::with_embedder(Box::new(client), Some(test_local_config()), Some(embedder));
 
     executor
-        .execute("QUERY TEXT 'hello' FROM docs LIMIT 10", OnError::Stop)
+        .execute(
+            "QUERY TEXT 'hello' MODEL 'test-model' FROM docs LIMIT 10",
+            OnError::Stop,
+        )
         .await
         .unwrap();
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     assert_eq!(route.body_json().unwrap()["using"], "semantic_v2");
 }
 
@@ -530,12 +687,16 @@ async fn text_query_rejects_ambiguous_vector_topology() {
         dense: vec![0.1, 0.2, 0.3],
         sparse_indices: vec![],
         sparse_values: vec![],
+        multi: vec![vec![0.1, 0.2], vec![0.3, 0.4]],
     });
     let executor =
         Executor::with_embedder(Box::new(client), Some(test_local_config()), Some(embedder));
 
     let error = executor
-        .execute("QUERY TEXT 'hello' FROM docs LIMIT 10", OnError::Stop)
+        .execute(
+            "QUERY TEXT 'hello' MODEL 'test-model' FROM docs LIMIT 10",
+            OnError::Stop,
+        )
         .await
         .unwrap_err();
     assert_eq!(error.code, "QQL-MISSING-USING");
@@ -551,6 +712,7 @@ async fn hybrid_upsert_infers_arbitrary_named_targets() {
         dense: vec![0.1, 0.2, 0.3],
         sparse_indices: vec![1],
         sparse_values: vec![0.5],
+        multi: vec![vec![0.1, 0.2], vec![0.3, 0.4]],
     });
     let executor =
         Executor::with_embedder(Box::new(client), Some(test_local_config()), Some(embedder));
@@ -564,7 +726,7 @@ async fn hybrid_upsert_infers_arbitrary_named_targets() {
         .unwrap();
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     let vector = &route.body_json().unwrap()["points"][0]["vector"];
     assert!(vector.get("semantic_v2").is_some());
     assert!(vector.get("lexical_v2").is_some());
@@ -582,6 +744,7 @@ async fn upsert_rejects_ambiguous_inferred_embedding_target() {
         dense: vec![0.1, 0.2, 0.3],
         sparse_indices: vec![],
         sparse_values: vec![],
+        multi: vec![vec![0.1, 0.2], vec![0.3, 0.4]],
     });
     let executor =
         Executor::with_embedder(Box::new(client), Some(test_local_config()), Some(embedder));
@@ -609,7 +772,7 @@ async fn test_do_select_returns_record_or_nil() {
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     assert_eq!(route.method, qql_plan::types::Method::Post);
     assert!(route.path.contains("docs/points"));
 }
@@ -627,7 +790,7 @@ async fn test_delete_by_id_and_filter() {
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     assert_eq!(route.method, qql_plan::types::Method::Post);
     assert!(route.path.contains("delete"));
 }
@@ -648,7 +811,7 @@ async fn test_set_payload_by_id_and_filter() {
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     assert_eq!(route.method, qql_plan::types::Method::Post);
     assert!(route.path.contains("payload"));
 }
@@ -669,7 +832,7 @@ async fn test_update_by_id() {
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     assert_eq!(route.method, qql_plan::types::Method::Put);
     assert!(route.path.contains("vectors"));
 }
@@ -689,7 +852,7 @@ async fn test_upsert_into_collection_creates_missing() {
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     assert_eq!(route.method, qql_plan::types::Method::Put);
     assert!(route.path.contains("docs"));
 }
@@ -707,7 +870,7 @@ async fn test_do_scroll_returns_upstream_style_payload() {
 
     assert!(resp.is_ok(), "{:?}", resp.err());
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     assert_eq!(route.method, qql_plan::types::Method::Post);
     assert!(route.path.contains("scroll"));
 }
@@ -722,6 +885,7 @@ async fn test_query_missing_collection_errors() {
         dense: vec![0.1, 0.2],
         sparse_indices: vec![],
         sparse_values: vec![],
+        multi: vec![vec![0.1, 0.2], vec![0.3, 0.4]],
     });
     let executor = Executor::with_embedder(
         Box::new(client),
@@ -729,7 +893,7 @@ async fn test_query_missing_collection_errors() {
         Some(mock_embedder),
     );
 
-    let query = "QUERY 'hello' FROM nonexistent LIMIT 10";
+    let query = "QUERY TEXT 'hello' MODEL 'test-model' FROM nonexistent LIMIT 10";
     let resp = executor.execute(query, OnError::Stop).await;
     assert!(resp.is_err());
     assert!(resp.unwrap_err().message.contains("does not exist"));
@@ -760,9 +924,9 @@ async fn test_batch_query_groups_same_collection() {
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let resp = qql_core::parser::Parser::parse_all(
-        "QUERY TEXT 'a' FROM docs USING dense AS DENSE LIMIT 1;\
-         QUERY TEXT 'b' FROM docs USING dense AS DENSE LIMIT 1;\
-         QUERY TEXT 'c' FROM docs USING dense AS DENSE LIMIT 1;",
+        "QUERY TEXT 'a' MODEL 'test-model' FROM docs USING dense AS DENSE LIMIT 1;\
+         QUERY TEXT 'b' MODEL 'test-model' FROM docs USING dense AS DENSE LIMIT 1;\
+         QUERY TEXT 'c' MODEL 'test-model' FROM docs USING dense AS DENSE LIMIT 1;",
     )
     .unwrap();
     let results = executor.execute_batch_nodes(resp, false).await.unwrap();
@@ -835,8 +999,8 @@ async fn test_batch_preserves_order_mixed_query_and_mutation() {
     let stmts = qql_core::parser::Parser::parse_all(
         "UPSERT INTO docs VALUES {id: 1};\
          DELETE FROM docs WHERE id = 2;\
-         QUERY TEXT 'a' FROM docs USING dense AS DENSE LIMIT 1;\
-         QUERY TEXT 'b' FROM docs USING dense AS DENSE LIMIT 1;",
+         QUERY TEXT 'a' MODEL 'test-model' FROM docs USING dense AS DENSE LIMIT 1;\
+         QUERY TEXT 'b' MODEL 'test-model' FROM docs USING dense AS DENSE LIMIT 1;",
     )
     .unwrap();
     let results = executor.execute_batch_nodes(stmts, false).await.unwrap();
@@ -877,7 +1041,7 @@ async fn test_continue_preserves_failure_position_and_batch_boundary() {
     let executor = Executor::new(Box::new(client), Some(test_config()));
     let stmts = qql_core::parser::Parser::parse_all(
         "DELETE FROM docs WHERE id = 1;\
-         QUERY TEXT 'missing schema' FROM docs LIMIT 1;\
+         QUERY TEXT 'missing schema' MODEL 'test-model' FROM docs LIMIT 1;\
          DELETE FROM docs WHERE id = 2;",
     )
     .unwrap();
@@ -902,7 +1066,7 @@ async fn test_stop_dispatches_prior_statement_before_later_prepare_failure() {
     let executor = Executor::new(Box::new(client), Some(test_config()));
     let stmts = qql_core::parser::Parser::parse_all(
         "DELETE FROM docs WHERE id = 1;\
-         QUERY TEXT 'missing schema' FROM docs LIMIT 1;",
+         QUERY TEXT 'missing schema' MODEL 'test-model' FROM docs LIMIT 1;",
     )
     .unwrap();
 
@@ -918,12 +1082,13 @@ async fn test_stop_dispatches_prior_statement_before_later_prepare_failure() {
 #[tokio::test]
 async fn test_batch_upserts_keep_single_statement_auto_create_semantics() {
     let client = MockQdrantClient::default();
-    let creates = client.create_collection_call_count.clone();
+    let creates = client.execute_planned_call_count.clone();
     let update_batches = client.update_batch_call_count.clone();
     let embedder = Arc::new(MockEmbedder {
         dense: vec![0.1, 0.2, 0.3],
         sparse_indices: Vec::new(),
         sparse_values: Vec::new(),
+        multi: vec![vec![0.1, 0.2], vec![0.3, 0.4]],
     });
     let mut config = test_config();
     config.embedding_dimension = 3;
@@ -1003,7 +1168,7 @@ async fn test_execute_continue_returns_single_preparation_failure_report() {
 
     let report = executor
         .execute(
-            "QUERY TEXT 'missing schema' FROM docs LIMIT 1",
+            "QUERY TEXT 'missing schema' MODEL 'test-model' FROM docs LIMIT 1",
             OnError::Continue,
         )
         .await
@@ -1013,4 +1178,94 @@ async fn test_execute_continue_returns_single_preparation_failure_report() {
     assert_eq!(report.succeeded, 0);
     assert_eq!(report.failed, 1);
     assert_eq!(report.results[0].operation, "PREPARE");
+}
+
+/// RT-04: CROSS RERANK with same-ID candidates from different collections
+/// must preserve both hits using (collection, id) identity, not just point id.
+#[tokio::test]
+async fn cross_rerank_preserves_same_id_different_collections() {
+    let mut client = MockQdrantClient::default();
+    client.exists = true;
+    // Both collections use a simple dense-only topology.
+    client.info = Some(collection_with_vectors(&["dense"], &[]));
+    // Same point id "1" exists in both collections with different body text.
+    client.point_map.lock().unwrap().insert(
+        "coll_a".to_string(),
+        serde_json::json!({"result": {"points": [
+            {"id": "1", "score": 0.9, "payload": {"body": "alpha body text"}}
+        ]}}),
+    );
+    client.point_map.lock().unwrap().insert(
+        "coll_b".to_string(),
+        serde_json::json!({"result": {"points": [
+            {"id": "1", "score": 0.8, "payload": {"body": "beta body text"}}
+        ]}}),
+    );
+
+    let embedder = Arc::new(MockEmbedder {
+        dense: vec![0.1, 0.2, 0.3],
+        sparse_indices: vec![],
+        sparse_values: vec![],
+        multi: vec![vec![0.1, 0.2], vec![0.3, 0.4]],
+    });
+    let executor =
+        Executor::with_embedder(Box::new(client), Some(test_local_config()), Some(embedder));
+
+    let report = executor
+        .execute(
+            "WITH c1 AS (QUERY TEXT 'hello' MODEL 'test-model' FROM coll_a USING dense AS DENSE LIMIT 5), \
+             c2 AS (QUERY TEXT 'hello' MODEL 'test-model' FROM coll_b USING dense AS DENSE LIMIT 5) \
+             QUERY CROSS RERANK TEXT 'hello' MODEL 'mock' ON FIELD body \
+             FROM coll_a PREFETCH (c1, c2) LIMIT 10",
+            OnError::Stop,
+        )
+        .await
+        .expect("CROSS RERANK should succeed");
+
+    assert!(report.ok, "report should be ok: {report:?}");
+    assert_eq!(report.results.len(), 1);
+    assert_eq!(report.results[0].operation, "CROSS_RERANK");
+    let data = report.results[0].data.as_ref().expect("should have data");
+    let hits = data.as_array().expect("data should be an array of hits");
+
+    // Both same-ID candidates from different collections survive dedup.
+    assert_eq!(
+        hits.len(),
+        2,
+        "expected 2 hits (one per collection), got {}: {hits:?}",
+        hits.len()
+    );
+
+    // Verify each hit carries the correct source collection.
+    let collections: Vec<&str> = hits
+        .iter()
+        .map(|h| h["collection"].as_str().unwrap_or(""))
+        .collect();
+    assert!(
+        collections.contains(&"coll_a"),
+        "missing coll_a in results: {collections:?}"
+    );
+    assert!(
+        collections.contains(&"coll_b"),
+        "missing coll_b in results: {collections:?}"
+    );
+
+    // Verify the id is "1" for both.
+    let ids: Vec<&str> = hits
+        .iter()
+        .map(|h| h["id"].as_str().unwrap_or(""))
+        .collect();
+    assert_eq!(
+        ids.iter().filter(|id| **id == "1").count(),
+        2,
+        "both hits should have id '1'"
+    );
+
+    // Verify the reranker scored them (scores come from MockEmbedder::rerank_pairs).
+    for hit in hits {
+        let score = hit["score"]
+            .as_f64()
+            .expect("hit should have a numeric score");
+        assert!(score > 0.0, "score should be positive, got {score}");
+    }
 }

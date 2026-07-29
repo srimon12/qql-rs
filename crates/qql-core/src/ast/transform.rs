@@ -19,6 +19,7 @@ pub fn inject_filter(
         Stmt::Delete(delete) => merge_selector(&mut delete.selector, filter),
         Stmt::Count(count) => merge_filter(&mut count.filter, filter),
         Stmt::ClearPayload(clear) => merge_selector(&mut clear.selector, filter),
+        Stmt::DeletePayload(del) => merge_selector(&mut del.selector, filter),
         Stmt::DeleteVector(del_vec) => merge_selector(&mut del_vec.selector, filter),
         Stmt::UpdatePayload(update) => merge_selector(&mut update.selector, filter),
         Stmt::Upsert(upsert)
@@ -36,9 +37,101 @@ pub fn inject_filter(
                 }
             }
         }
-        _ => {}
+        other => {
+            return Err(QqlError::validation(
+                "QQL-VALIDATION-FILTER-INJECT",
+                format!(
+                    "inject_filter does not apply to this statement type ({})",
+                    stmt_kind(other)
+                ),
+                None,
+            ));
+        }
     }
     Ok(())
+}
+
+/// Inject a custom shard key for multi-tenant routing (host-side, no language bind params).
+///
+/// Qdrant accepts `shard_key` on query/mutation bodies (OpenAPI / proto
+/// `ShardKeySelector`). QQL has no `$param` shard syntax — multi-tenant hosts
+/// call this after resolving the tenant id (or set `shard_key` on the AST).
+///
+/// Applies to statements that carry `shard_key` in the AST: `QUERY`, `SCROLL`,
+/// `COUNT`, `UPSERT`, `DELETE`, `CLEAR PAYLOAD`, `DELETE VECTOR`,
+/// `UPDATE … VECTOR`, and `UPDATE … PAYLOAD`. Recurses into CTEs and nested
+/// prefetch queries. Returns a validation error for DDL / SHOW (fail closed).
+pub fn inject_shard_key(statement: &mut Stmt, shard_key: &str) -> Result<(), QqlError> {
+    if shard_key.is_empty() {
+        return Err(QqlError::validation(
+            "QQL-VALIDATION-SHARD-KEY",
+            "shard key must be a non-empty string",
+            None,
+        ));
+    }
+    let key = shard_key.to_string();
+    match statement {
+        Stmt::Query(query) => inject_query_shard(query, &key),
+        Stmt::Scroll(scroll) => scroll.shard_key = Some(key),
+        Stmt::Count(count) => count.shard_key = Some(key),
+        Stmt::Upsert(upsert) => upsert.shard_key = Some(key),
+        Stmt::Delete(delete) => delete.shard_key = Some(key),
+        Stmt::ClearPayload(clear) => clear.shard_key = Some(key),
+        Stmt::DeletePayload(del) => del.shard_key = Some(key),
+        Stmt::DeleteVector(delete) => delete.shard_key = Some(key),
+        Stmt::UpdateVector(update) => update.shard_key = Some(key),
+        Stmt::UpdatePayload(update) => update.shard_key = Some(key),
+        other => {
+            return Err(QqlError::validation(
+                "QQL-VALIDATION-SHARD-KEY",
+                format!(
+                    "inject_shard_key does not apply to this statement type ({})",
+                    stmt_kind(other)
+                ),
+                None,
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn stmt_kind(statement: &Stmt) -> &'static str {
+    match statement {
+        Stmt::Query(_) => "QUERY",
+        Stmt::Scroll(_) => "SCROLL",
+        Stmt::Count(_) => "COUNT",
+        Stmt::Upsert(_) => "UPSERT",
+        Stmt::Delete(_) => "DELETE",
+        Stmt::ClearPayload(_) => "CLEAR PAYLOAD",
+        Stmt::DeletePayload(_) => "DELETE PAYLOAD",
+        Stmt::DeleteVector(_) => "DELETE VECTOR",
+        Stmt::UpdateVector(_) => "UPDATE VECTOR",
+        Stmt::UpdatePayload(_) => "UPDATE PAYLOAD",
+        Stmt::CreateCollection(_) => "CREATE COLLECTION",
+        Stmt::AlterCollection(_) => "ALTER COLLECTION",
+        Stmt::DropCollection(_) => "DROP COLLECTION",
+        Stmt::CreateIndex(_) => "CREATE INDEX",
+        Stmt::DropIndex(_) => "DROP INDEX",
+        Stmt::CreateShardKey(_) => "CREATE SHARD KEY",
+        Stmt::DropShardKey(_) => "DROP SHARD KEY",
+        Stmt::ShowCollections => "SHOW COLLECTIONS",
+        Stmt::ShowCollection(_) => "SHOW COLLECTION",
+        Stmt::ShowShardKeys(_) => "SHOW SHARD KEYS",
+    }
+}
+
+fn inject_query_shard(query: &mut QueryStmt, key: &str) {
+    query.shard_key = Some(key.to_string());
+    for cte in &mut query.ctes {
+        inject_query_shard(&mut cte.query, key);
+    }
+    if let Some(prefetches) = expression_prefetch(&mut query.expression) {
+        for prefetch in prefetches {
+            if let PrefetchSource::Query(nested) = &mut prefetch.source {
+                inject_query_shard(nested, key);
+            }
+        }
+    }
 }
 
 fn build_filter(field: &str, operator: ComparisonOp, value: Value) -> Result<FilterExpr, QqlError> {
@@ -95,7 +188,8 @@ fn expression_prefetch(expression: &mut QueryExpr) -> Option<&mut Vec<Prefetch>>
         | QueryExpr::Fusion { prefetch, .. }
         | QueryExpr::Formula { prefetch, .. }
         | QueryExpr::RelevanceFeedback { prefetch, .. }
-        | QueryExpr::Rerank { prefetch, .. } => Some(prefetch),
+        | QueryExpr::Rerank { prefetch, .. }
+        | QueryExpr::CrossRerank { prefetch, .. } => Some(prefetch),
         QueryExpr::Points { .. }
         | QueryExpr::OrderBy { .. }
         | QueryExpr::SampleRandom

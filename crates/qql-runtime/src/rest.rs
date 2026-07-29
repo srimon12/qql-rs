@@ -9,7 +9,7 @@ use qql_core::error::QqlError;
 use qql_plan::types::Method as PlanMethod;
 use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 
-use crate::client::{CollectionInfo, CreateCollectionReq, CreateFieldIndexReq, QdrantOps};
+use crate::client::{CollectionInfo, QdrantOps};
 
 #[derive(Clone)]
 pub struct RestQdrant {
@@ -19,13 +19,20 @@ pub struct RestQdrant {
 }
 
 impl RestQdrant {
+    /// Construct with a 30s request timeout.
+    ///
+    /// Never panics (RUN-015 / RUN-010). If the timed client builder fails
+    /// (effectively unreachable on stock reqwest), falls back to
+    /// [`Client::new`]. Prefer [`Self::with_timeout`] when client-build
+    /// failures must surface as errors.
     pub fn new(base_url: impl Into<String>, api_key: Option<String>) -> Self {
-        Self::with_timeout(base_url, api_key, Duration::from_secs(30))
-            .expect("failed to build reqwest client")
+        let base_url = base_url.into();
+        Self::with_timeout(base_url.clone(), api_key.clone(), Duration::from_secs(30))
+            .unwrap_or_else(|_| Self::with_client(base_url, api_key, Client::new()))
     }
 
     /// Construct with an explicit request timeout. Fallible so library
-    /// constructors never panic (RUN-015 / RUN-010).
+    /// callers can surface client-build failures without panicking.
     pub fn with_timeout(
         base_url: impl Into<String>,
         api_key: Option<String>,
@@ -197,86 +204,24 @@ impl QdrantOps for RestQdrant {
         Ok(info)
     }
 
-    async fn create_collection(&self, req: CreateCollectionReq) -> Result<(), QqlError> {
-        let mut body = serde_json::Map::new();
-        if let Some(v) = &req.vectors_config {
-            body.insert("vectors".into(), v.clone());
-        }
-        if let Some(v) = &req.sparse_vectors_config {
-            body.insert("sparse_vectors".into(), v.clone());
-        }
-        if let Some(v) = req.shard_number {
-            body.insert("shard_number".into(), serde_json::Value::from(v));
-        }
-        if let Some(ref v) = req.sharding_method {
-            body.insert(
-                "sharding_method".into(),
-                serde_json::Value::String(v.clone()),
-            );
-        }
-        if let Some(ref v) = req.shard_keys {
-            body.insert(
-                "shard_keys".into(),
-                serde_json::Value::Array(
-                    v.iter()
-                        .map(|s| serde_json::Value::String(s.clone()))
-                        .collect(),
-                ),
-            );
-        }
-        // replication_factor and write_consistency_factor are sent as top-level
-        // fields in Qdrant REST API (not nested inside params)
-        if let Some(ref p) = req.params {
-            if let Some(rf) = p.get("replication_factor").and_then(|v| v.as_u64()) {
-                body.insert("replication_factor".into(), serde_json::Value::from(rf));
-            }
-            if let Some(wc) = p.get("write_consistency_factor").and_then(|v| v.as_u64()) {
-                body.insert(
-                    "write_consistency_factor".into(),
-                    serde_json::Value::from(wc),
-                );
-            }
-            if let Some(od) = p.get("on_disk_payload").and_then(|v| v.as_bool()) {
-                body.insert("on_disk_payload".into(), serde_json::Value::Bool(od));
-            }
-        }
-        // hnsw_config, optimizers_config, quantization_config
-        if let Some(ref v) = req.hnsw_config {
-            body.insert("hnsw_config".into(), v.clone());
-        }
-        if let Some(ref v) = req.optimizers_config {
-            body.insert("optimizers_config".into(), v.clone());
-        }
-        if let Some(ref v) = req.quantization_config {
-            body.insert("quantization_config".into(), v.clone());
-        }
-        self.call::<Value>(
-            Method::PUT,
-            &format!("/collections/{}", req.collection_name),
-            Some(Value::Object(body)),
-        )
-        .await?;
-        Ok(())
+    async fn create_collection(
+        &self,
+        collection_name: &str,
+        req: &qql_plan::CreateCollectionRequest,
+    ) -> Result<(), QqlError> {
+        self.create_collection_planned(collection_name, req).await
     }
 
-    async fn update_collection(&self, req: serde_json::Value) -> Result<(), QqlError> {
-        let collection_name = req
-            .get("collection_name")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                QqlError::execution("QQL-EXECUTION", "collection_name required", None)
-            })?;
-        let mut body = req.clone();
-        if let Some(obj) = body.as_object_mut() {
-            obj.remove("collection_name");
-        }
-        self.call::<Value>(
-            Method::PATCH,
-            &format!("/collections/{collection_name}"),
-            Some(body),
-        )
-        .await?;
-        Ok(())
+    async fn update_collection(
+        &self,
+        collection_name: &str,
+        req: &qql_plan::UpdateCollectionRequest,
+    ) -> Result<(), QqlError> {
+        let op = qql_plan::PlannedOperation::UpdateCollection {
+            collection: collection_name.to_string(),
+            request: req.clone(),
+        };
+        self.execute_planned(&op).await.map(|_| ())
     }
 
     async fn delete_collection(&self, name: &str) -> Result<(), QqlError> {
@@ -285,23 +230,16 @@ impl QdrantOps for RestQdrant {
         Ok(())
     }
 
-    async fn create_field_index(&self, req: CreateFieldIndexReq) -> Result<(), QqlError> {
-        let mut body = serde_json::json!({
-            "field_name": req.field,
-            "field_schema": req.field_type,
-        });
-        if let Some(obj) = body.as_object_mut() {
-            for (k, v) in req.options {
-                obj.insert(k, crate::executor::helpers::value_to_json(&v));
-            }
-        }
-        self.call::<Value>(
-            Method::PUT,
-            &format!("/collections/{}/index", req.collection_name),
-            Some(body),
-        )
-        .await?;
-        Ok(())
+    async fn create_field_index(
+        &self,
+        collection_name: &str,
+        req: &qql_plan::CreateIndexRequest,
+    ) -> Result<(), QqlError> {
+        let op = qql_plan::PlannedOperation::CreateIndex {
+            collection: collection_name.to_string(),
+            request: req.clone(),
+        };
+        self.execute_planned(&op).await.map(|_| ())
     }
 
     async fn delete_field_index(
@@ -309,17 +247,33 @@ impl QdrantOps for RestQdrant {
         collection_name: &str,
         field_name: &str,
     ) -> Result<(), QqlError> {
-        self.call::<Value>(
-            Method::DELETE,
-            &format!("/collections/{}/index/{}", collection_name, field_name),
-            None::<Value>,
-        )
-        .await?;
-        Ok(())
+        let op = qql_plan::PlannedOperation::DropIndex {
+            collection: collection_name.to_string(),
+            field: field_name.to_string(),
+        };
+        self.execute_planned(&op).await.map(|_| ())
     }
 
     async fn execute_planned(&self, op: &qql_plan::PlannedOperation) -> Result<Value, QqlError> {
-        let route = qql_plan::plan::to_rest_route(op);
+        if let qql_plan::PlannedOperation::CreateCollection {
+            collection,
+            request,
+        } = op
+        {
+            self.create_collection_planned(collection, request).await?;
+            return Ok(serde_json::json!({
+                "result": true,
+                "status": "ok",
+                "time": 0.0,
+            }));
+        }
+        let route = qql_plan::plan::to_rest_route(op).map_err(|err| match err {
+            qql_plan::RestProjectionError::ClientSideOnly { stmt_type } => QqlError::execution(
+                "QQL-REST-CLIENT-SIDE",
+                format!("{stmt_type} cannot be executed as a single REST route"),
+                None,
+            ),
+        })?;
         self.execute_http(route).await
     }
 
@@ -345,6 +299,46 @@ impl QdrantOps for RestQdrant {
 }
 
 impl RestQdrant {
+    /// CREATE COLLECTION with OpenAPI body + optional deferred params / shard keys
+    /// (parity with gRPC multi-step create).
+    async fn create_collection_planned(
+        &self,
+        collection: &str,
+        req: &qql_plan::types::CreateCollectionRequest,
+    ) -> Result<(), QqlError> {
+        let body = qql_plan::ddl::create_collection_rest_body(req);
+        self.call::<Value>(
+            Method::PUT,
+            &format!("/collections/{collection}"),
+            Some(body),
+        )
+        .await?;
+
+        if let Some(params_patch) = qql_plan::ddl::create_collection_deferred_params_rest(req) {
+            self.call::<Value>(
+                Method::PATCH,
+                &format!("/collections/{collection}"),
+                Some(params_patch),
+            )
+            .await?;
+        }
+
+        if let Some(keys) = &req.shard_keys {
+            for key in keys {
+                let shard_body = serde_json::json!({
+                    "shard_key": key,
+                });
+                self.call::<Value>(
+                    Method::PUT,
+                    &format!("/collections/{collection}/shards"),
+                    Some(shard_body),
+                )
+                .await?;
+            }
+        }
+        Ok(())
+    }
+
     /// Low-level HTTP dispatch from a pre-built Route.
     async fn execute_http(&self, route: qql_plan::routing::Route) -> Result<Value, QqlError> {
         let method = match route.method {
@@ -370,7 +364,7 @@ impl RestQdrant {
         if let Some(ref key) = self.api_key {
             builder = builder.header("api-key", key);
         }
-        if let Some(body) = route.body.as_ref() {
+        if let Some(ref body) = route.body {
             builder = builder.json(body);
         }
         let resp = builder.send().await.map_err(|e| {

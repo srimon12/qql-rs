@@ -106,6 +106,10 @@ const results = await client.execute([
 
 Multi-stage hybrid retrieval with CTE, Fusion, and Rerank.
 
+`USING dense` / `USING sparse` / `USING colbert` without `AS` are resolved from
+the collection schema before embedding. Use `AS DENSE`, `AS SPARSE`, or
+`AS MULTI` when you need an explicit role (or offline embed without schema).
+
 ```js
 const { Client } = require('@veristamp/nqql');
 
@@ -120,12 +124,16 @@ const result = await client.execute(`
         PREFETCH (dense WHERE priority = 'high', sparse)
         LIMIT 50
     )
-  QUERY RERANK TEXT 'vector databases' MODEL 'bge-reranker'
+  QUERY RERANK TEXT 'vector databases' MODEL 'answerai-colbert-small-v1'
     FROM docs
     USING colbert
     PREFETCH (fused)
     LIMIT 10
 `);
+
+// Multivector nearest (schema has colbert WITH MULTIVECTOR):
+// await client.execute("QUERY TEXT 'q' FROM docs USING colbert LIMIT 10");
+// Offline: "... USING colbert AS MULTI LIMIT 10"
 ```
 
 ---

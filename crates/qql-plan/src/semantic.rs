@@ -89,8 +89,8 @@ impl Serialize for PlanVectorValue {
 
 // ── Query / vector input ────────────────────────────────────────
 
-/// Semantic query input — preserves point / dense / sparse / multi / document
-/// distinctions that JSON shape inference cannot recover.
+/// Semantic query input — preserves point / dense / sparse / multi / document /
+/// image distinctions that JSON shape inference cannot recover.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlanQueryInput {
     Point(PlanPointId),
@@ -99,6 +99,13 @@ pub enum PlanQueryInput {
     /// bare string for REST compatibility with historical QQL output.
     Document {
         text: String,
+        model: Option<String>,
+    },
+    /// OpenAPI `Image` inference input (image URL or base64 + model).
+    /// Prefer resolving to a dense [`PlanQueryInput::Vector`] client-side when
+    /// the host has an image embedder; otherwise the wire form is preserved.
+    Image {
+        image: String,
         model: Option<String>,
     },
 }
@@ -114,6 +121,10 @@ impl From<&qql_core::ast::QueryInput> for PlanQueryInput {
                 text: text.clone(),
                 model: model.clone(),
             },
+            qql_core::ast::QueryInput::Image { source, model } => PlanQueryInput::Image {
+                image: source.clone(),
+                model: model.clone(),
+            },
         }
     }
 }
@@ -123,14 +134,25 @@ impl Serialize for PlanQueryInput {
         match self {
             PlanQueryInput::Point(id) => id.serialize(serializer),
             PlanQueryInput::Vector(v) => v.serialize(serializer),
-            PlanQueryInput::Document { text, model: None } => serializer.serialize_str(text),
-            PlanQueryInput::Document {
-                text,
-                model: Some(model),
-            } => {
+            PlanQueryInput::Document { text, model } => {
+                // OpenAPI Document requires both "text" and "model" fields.
+                // Planning validation rejects model-less Documents before we
+                // reach serialization; keep a safe fallback to prevent a bare
+                // string from ever leaking to the REST wire.
                 let mut map = serializer.serialize_map(Some(2))?;
                 map.serialize_entry("text", text)?;
-                map.serialize_entry("model", model)?;
+                map.serialize_entry("model", &model.as_deref().unwrap_or(""))?;
+                map.end()
+            }
+            PlanQueryInput::Image { image, model } => {
+                // OpenAPI Image requires both "image" and "model" fields.
+                // gRPC proto Image uses a Value for the image field; REST
+                // always serializes as an object with two string members.
+                // Planning validation rejects model-less Images before we
+                // reach serialization; keep a safe fallback for the model key.
+                let mut map = serializer.serialize_map(Some(2))?;
+                map.serialize_entry("image", image)?;
+                map.serialize_entry("model", &model.as_deref().unwrap_or(""))?;
                 map.end()
             }
         }
