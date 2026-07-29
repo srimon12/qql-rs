@@ -66,6 +66,10 @@ pub struct HttpEmbedderOptions {
     pub image_model: Option<String>,
     /// Expected dense dim for image responses (CLIP = 512). `0` uses dense dim.
     pub image_dimension: usize,
+    /// Cross-encoder pair-rerank endpoint (Cohere-compatible).
+    pub rerank_endpoint: Option<String>,
+    pub rerank_api_key: Option<String>,
+    pub rerank_model: Option<String>,
 }
 
 /// OpenAI-compatible HTTP embedder (`POST {"model","input":[...]}`).
@@ -90,6 +94,9 @@ pub struct HttpEmbedder {
     image_api_key: Option<String>,
     image_model: Option<String>,
     image_dimension: usize,
+    rerank_endpoint: Option<String>,
+    rerank_api_key: Option<String>,
+    rerank_model: Option<String>,
     client: Client,
 }
 
@@ -154,6 +161,9 @@ impl HttpEmbedder {
             image_api_key: opts.image_api_key,
             image_model: opts.image_model.filter(|s| !s.trim().is_empty()),
             image_dimension: opts.image_dimension,
+            rerank_endpoint: opts.rerank_endpoint.filter(|s| !s.trim().is_empty()),
+            rerank_api_key: opts.rerank_api_key,
+            rerank_model: opts.rerank_model.filter(|s| !s.trim().is_empty()),
             client,
         })
     }
@@ -198,6 +208,10 @@ impl HttpEmbedder {
         self.image_model.is_some()
             || self.image_endpoint.is_some()
             || self.image_dimension > 0
+    }
+
+    pub fn rerank_enabled(&self) -> bool {
+        self.rerank_endpoint.is_some() || self.rerank_model.is_some()
     }
 
     pub async fn probe_dimension(&self, input: &str) -> Result<usize, QqlError> {
@@ -701,5 +715,116 @@ impl Embedder for HttpEmbedder {
         model: &str,
     ) -> Result<Vec<Vec<f32>>, QqlError> {
         self.embed_image_batch_with_model(sources, model).await
+    }
+
+    async fn rerank_pairs(
+        &self,
+        query: &str,
+        documents: &[String],
+        model: &str,
+    ) -> Result<Vec<f32>, QqlError> {
+        if documents.is_empty() {
+            return Ok(Vec::new());
+        }
+        if !self.rerank_enabled() {
+            return Err(qql_embed::cross_rerank_unsupported_error(model));
+        }
+        let endpoint = self
+            .rerank_endpoint
+            .as_deref()
+            .ok_or_else(|| qql_embed::cross_rerank_unsupported_error(model))?;
+        let model_name = if !model.is_empty() && model != "default" {
+            model.to_string()
+        } else {
+            self.rerank_model
+                .clone()
+                .unwrap_or_else(|| "rerank".to_string())
+        };
+        let api_key = self
+            .rerank_api_key
+            .as_deref()
+            .unwrap_or(self.api_key.as_str());
+
+        // Cohere-compatible: { model, query, documents } → results[{index,relevance_score}]
+        let body = serde_json::json!({
+            "model": model_name,
+            "query": query,
+            "documents": documents,
+        });
+        let mut req = self.client.post(endpoint).json(&body);
+        if !api_key.is_empty() {
+            req = req.header("Authorization", format!("Bearer {api_key}"));
+        }
+        let resp = req.send().await.map_err(|e| {
+            QqlError::execution(
+                "QQL-RERANK-CROSS",
+                format!("failed to call rerank endpoint: {e}"),
+                None,
+            )
+        })?;
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(QqlError::execution(
+                "QQL-RERANK-CROSS",
+                format!("rerank endpoint returned {status}: {text}"),
+                None,
+            ));
+        }
+        let value: serde_json::Value = resp.json().await.map_err(|e| {
+            QqlError::execution(
+                "QQL-RERANK-CROSS",
+                format!("failed to decode rerank response: {e}"),
+                None,
+            )
+        })?;
+        // Accept results[] with index + relevance_score | score
+        let results = value
+            .get("results")
+            .or_else(|| value.get("data"))
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| {
+                QqlError::execution(
+                    "QQL-RERANK-CROSS",
+                    "rerank response missing results array",
+                    None,
+                )
+            })?;
+        let mut scores = vec![0.0f32; documents.len()];
+        let mut seen = vec![false; documents.len()];
+        for item in results {
+            let idx = item
+                .get("index")
+                .and_then(|v| v.as_u64())
+                .ok_or_else(|| {
+                    QqlError::execution(
+                        "QQL-RERANK-CROSS",
+                        "rerank result missing index",
+                        None,
+                    )
+                })? as usize;
+            if idx >= documents.len() {
+                return Err(QqlError::execution(
+                    "QQL-RERANK-CROSS",
+                    format!("rerank result index {idx} out of range"),
+                    None,
+                ));
+            }
+            let score = item
+                .get("relevance_score")
+                .or_else(|| item.get("score"))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0) as f32;
+            scores[idx] = score;
+            seen[idx] = true;
+        }
+        if seen.iter().any(|s| !*s) {
+            return Err(QqlError::execution(
+                "QQL-RERANK-CROSS",
+                "rerank response did not cover all documents",
+                None,
+            ));
+        }
+        Ok(scores)
     }
 }

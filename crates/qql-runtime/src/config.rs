@@ -53,6 +53,14 @@ pub struct QqlConfig {
     /// Dense dim for image embeds (CLIP ViT-B/32 = 512).
     #[serde(default)]
     pub image_embedding_dimension: usize,
+    /// Cross-encoder / pair-rerank HTTP endpoint (Cohere-style or compatible).
+    #[serde(default)]
+    pub rerank_endpoint: Option<String>,
+    #[serde(default)]
+    pub rerank_api_key: Option<String>,
+    /// Default cross-encoder model (e.g. `BAAI/bge-reranker-base`).
+    #[serde(default)]
+    pub rerank_model: Option<String>,
     #[serde(default)]
     pub no_verify: bool,
     #[serde(default)]

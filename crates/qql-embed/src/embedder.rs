@@ -98,6 +98,21 @@ pub trait Embedder: EmbedderBound {
         }
         Ok(results)
     }
+
+    /// Cross-encoder pair scores: `(query, documents[i]) → score`.
+    ///
+    /// Returns one score per document **in the same order** as `documents`
+    /// (not sorted). Hosts that return ranked results must unpermute.
+    /// Default rejects until the host opts in (edge `TextRerank`, HTTP rerank API).
+    async fn rerank_pairs(
+        &self,
+        query: &str,
+        documents: &[String],
+        model: &str,
+    ) -> Result<Vec<f32>, QqlError> {
+        let _ = (query, documents);
+        Err(cross_rerank_unsupported_error(model))
+    }
 }
 
 /// Error when multi-vector embedding is requested but the host has no multi path.
@@ -133,6 +148,24 @@ pub fn image_unsupported_error(model: &str) -> QqlError {
              Configure an image/CLIP vision embedder (image_embedding_model / edge image_model, \
              or image_embedding_endpoint), pass a precomputed VECTOR [...], \
              or use UPSERT USING IMAGE ON FIELD <path_field>."
+        ),
+        None,
+    )
+}
+
+/// Error when cross-encoder pair rerank is requested without a scorer host.
+pub fn cross_rerank_unsupported_error(model: &str) -> QqlError {
+    let model_note = if model.is_empty() || model.eq_ignore_ascii_case("default") {
+        "no model specified".to_string()
+    } else {
+        format!("model='{model}'")
+    };
+    QqlError::execution(
+        "QQL-RERANK-CROSS",
+        format!(
+            "cross-encoder pair scoring is not available ({model_note}). \
+             Configure a rerank host (rerank_endpoint / rerank_model, or edge \
+             reranker_model for offline TextRerank / bge-reranker)."
         ),
         None,
     )

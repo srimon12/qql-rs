@@ -31,7 +31,8 @@ Translate user intent directly into QQL syntax:
 - Hybrid retrieval (dense + sparse) -> `QUERY HYBRID TEXT 'text' DENSE dense SPARSE sparse FUSION RRF FROM <collection> LIMIT <n>`
 - Hybrid retrieval with DBSF fusion -> `QUERY HYBRID TEXT 'text' DENSE dense SPARSE sparse FUSION DBSF FROM <collection> LIMIT <n>`
 - Multivector / ColBERT nearest -> `QUERY TEXT 't' FROM <collection> USING colbert LIMIT <n>` when collection has multivector config; offline use `USING colbert AS MULTI`
-- Late-interaction rerank (ColBERT MaxSim, **not** cross-encoder) -> `WITH c AS (QUERY 't' USING dense LIMIT 50) QUERY RERANK TEXT 't' MODEL 'answerai-colbert-small-v1' FROM <collection> USING colbert PREFETCH (c) LIMIT <n>`
+- Late-interaction rerank (ColBERT MaxSim) -> `WITH c AS (QUERY 't' USING dense LIMIT 50) QUERY RERANK TEXT 't' MODEL 'answerai-colbert-small-v1' FROM <collection> USING colbert PREFETCH (c) LIMIT <n>`
+- Cross-encoder pair rerank -> `WITH c AS (QUERY 't' USING dense LIMIT 50) QUERY CROSS RERANK TEXT 't' MODEL 'bge-reranker-base' ON FIELD text FROM <collection> PREFETCH (c) LIMIT <n>`
 - Direct point retrieval by ID -> `QUERY POINTS (id1, id2, 'id3') FROM <collection>`
 - Recommendation by example -> `QUERY RECOMMEND POSITIVE (id1, id2) NEGATIVE (id3) STRATEGY average_vector FROM <collection> USING dense LIMIT <n>`
 - Context search -> `QUERY CONTEXT (POSITIVE POINT id1 NEGATIVE POINT id2) FROM <collection> USING dense LIMIT <n>`

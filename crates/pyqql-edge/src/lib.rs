@@ -409,13 +409,14 @@ async fn run_async(
 ///     show_download_progress: show HuggingFace download progress (default False)
 #[cfg(feature = "fastembed-local")]
 #[pyfunction]
-#[pyo3(signature = (data_dir, on_disk_payload=true, *, model=None, multi_model=None, image_model=None, cache_dir=None, show_download_progress=false))]
+#[pyo3(signature = (data_dir, on_disk_payload=true, *, model=None, multi_model=None, image_model=None, reranker_model=None, cache_dir=None, show_download_progress=false))]
 fn local_executor(
     data_dir: &str,
     on_disk_payload: bool,
     model: Option<String>,
     multi_model: Option<String>,
     image_model: Option<String>,
+    reranker_model: Option<String>,
     cache_dir: Option<String>,
     show_download_progress: bool,
 ) -> PyResult<PyClient> {
@@ -426,6 +427,7 @@ fn local_executor(
             model,
             multi_model,
             image_model,
+            reranker_model,
             cache_dir: cache_dir.map(std::path::PathBuf::from),
             show_download_progress,
         },

@@ -1001,6 +1001,11 @@ pub async fn execute_planned_grpc(
                 "time": 0.0_f64,
             }))
         }
+        PlannedOperation::CrossRerank { .. } => Err(QqlError::execution(
+            "QQL-RERANK-CROSS",
+            "CROSS RERANK is executed client-side by the Executor, not as a single gRPC route",
+            None,
+        )),
     }
 }
 

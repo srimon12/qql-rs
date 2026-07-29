@@ -150,9 +150,10 @@ fn expression_needs_kind_resolution(expression: &QueryExpr) -> bool {
         QueryExpr::Rerank {
             using, prefetch, ..
         } => target_needs_kind(using) || prefetch.iter().any(prefetch_needs_kind),
-        QueryExpr::Fusion { prefetch, .. } | QueryExpr::Formula { prefetch, .. } => {
-            prefetch.iter().any(prefetch_needs_kind)
-        }
+        // Cross-encoder has no USING vector; only nested prefetches need topology.
+        QueryExpr::CrossRerank { prefetch, .. }
+        | QueryExpr::Fusion { prefetch, .. }
+        | QueryExpr::Formula { prefetch, .. } => prefetch.iter().any(prefetch_needs_kind),
         QueryExpr::Hybrid {
             dense_vector,
             sparse_vector,
@@ -267,6 +268,9 @@ fn configure_expr(
             using, prefetch, ..
         } => {
             resolve_using(collection, using, Some(VectorKind::Dense), topology)?;
+            configure_prefetches(collection, prefetch, topology)
+        }
+        QueryExpr::CrossRerank { prefetch, .. } => {
             configure_prefetches(collection, prefetch, topology)
         }
         QueryExpr::Hybrid {

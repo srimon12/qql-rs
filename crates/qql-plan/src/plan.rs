@@ -100,6 +100,18 @@ pub enum PlannedOperation {
     GetCollection {
         collection: String,
     },
+    /// Client-side cross-encoder: run candidate queries, score pairs, reorder.
+    CrossRerank {
+        collection: String,
+        query: String,
+        model: String,
+        /// Payload field holding document text for pair scoring.
+        field: String,
+        limit: u64,
+        offset: u64,
+        /// Candidate ANN stages already planned as normal queries.
+        candidates: Vec<(String, QueryRequest)>,
+    },
 }
 
 impl PlannedOperation {
@@ -127,6 +139,7 @@ impl PlannedOperation {
             PlannedOperation::ListShardKeys { .. } => "SHOW_SHARD_KEYS",
             PlannedOperation::ListCollections => "SHOW_COLLECTIONS",
             PlannedOperation::GetCollection { .. } => "SHOW_COLLECTION",
+            PlannedOperation::CrossRerank { .. } => "CROSS_RERANK",
         }
     }
 
@@ -152,7 +165,8 @@ impl PlannedOperation {
             | PlannedOperation::CreateShardKey { collection, .. }
             | PlannedOperation::DropShardKey { collection, .. }
             | PlannedOperation::ListShardKeys { collection }
-            | PlannedOperation::GetCollection { collection } => Some(collection.as_str()),
+            | PlannedOperation::GetCollection { collection }
+            | PlannedOperation::CrossRerank { collection, .. } => Some(collection.as_str()),
             PlannedOperation::ListCollections => None,
         }
     }
@@ -167,6 +181,8 @@ impl PlannedOperation {
             | PlannedOperation::ClearPayload { .. }
             | PlannedOperation::UpdateVectors { .. }
             | PlannedOperation::DeleteVectors { .. } => BatchFamily::Mutation,
+            // Pair scoring is not batchable with plain queries.
+            PlannedOperation::CrossRerank { .. } => BatchFamily::Single,
             _ => BatchFamily::Single,
         }
     }
@@ -234,6 +250,16 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
                         shard_key: query.shard_key.clone(),
                     },
                 });
+            }
+
+            if let QueryExpr::CrossRerank {
+                query: qtext,
+                model,
+                field,
+                prefetch,
+            } = &query.expression
+            {
+                return plan_cross_rerank(query, &collection, qtext, model, field, prefetch);
             }
 
             if query.group.is_some() {
@@ -377,9 +403,9 @@ fn validate_query_stmt(query: &qql_core::ast::QueryStmt) -> Result<(), QqlError>
         .and_then(|params| params.rrf_weights.as_ref())
     {
         let prefetch_count = match &query.expression {
-            QueryExpr::Fusion { prefetch, .. } | QueryExpr::Rerank { prefetch, .. } => {
-                prefetch.len()
-            }
+            QueryExpr::Fusion { prefetch, .. }
+            | QueryExpr::Rerank { prefetch, .. }
+            | QueryExpr::CrossRerank { prefetch, .. } => prefetch.len(),
             QueryExpr::Hybrid { .. } => 2,
             _ => 0,
         };
@@ -408,7 +434,8 @@ fn validate_query_expr(expression: &QueryExpr) -> Result<(), QqlError> {
         | QueryExpr::Fusion { prefetch, .. }
         | QueryExpr::Formula { prefetch, .. }
         | QueryExpr::RelevanceFeedback { prefetch, .. }
-        | QueryExpr::Rerank { prefetch, .. } => prefetch,
+        | QueryExpr::Rerank { prefetch, .. }
+        | QueryExpr::CrossRerank { prefetch, .. } => prefetch,
         QueryExpr::Points { .. }
         | QueryExpr::OrderBy { .. }
         | QueryExpr::SampleRandom
@@ -526,6 +553,121 @@ fn validate_query_target_kinds(expression: &QueryExpr) -> Result<(), QqlError> {
 
 fn query_kind_error(message: &'static str) -> QqlError {
     QqlError::validation("QQL-PLAN-VECTOR-KIND", message, None)
+}
+
+fn plan_cross_rerank(
+    outer: &qql_core::ast::QueryStmt,
+    collection: &str,
+    query_text: &str,
+    model: &str,
+    field: &Option<String>,
+    prefetch: &[qql_core::ast::Prefetch],
+) -> Result<PlannedOperation, QqlError> {
+    use qql_core::ast::{PrefetchSource, QueryCollection};
+
+    if prefetch.is_empty() {
+        return Err(QqlError::validation(
+            "QQL-PLAN-CROSS-RERANK-PREFETCH",
+            "CROSS RERANK requires at least one PREFETCH",
+            None,
+        ));
+    }
+    if query_text.is_empty() {
+        return Err(QqlError::validation(
+            "QQL-PLAN-CROSS-RERANK-QUERY",
+            "CROSS RERANK query text must not be empty",
+            None,
+        ));
+    }
+    if model.is_empty() {
+        return Err(QqlError::validation(
+            "QQL-PLAN-CROSS-RERANK-MODEL",
+            "CROSS RERANK MODEL must not be empty",
+            None,
+        ));
+    }
+    let field = field
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("text")
+        .to_string();
+
+    let mut candidates = Vec::with_capacity(prefetch.len());
+    for pref in prefetch {
+        let mut sub = match &pref.source {
+            PrefetchSource::Cte(name) => {
+                let cte = outer.ctes.iter().find(|c| c.name.eq_ignore_ascii_case(name));
+                let Some(cte) = cte else {
+                    return Err(QqlError::validation(
+                        "QQL-PLAN-CROSS-RERANK-CTE",
+                        format!("PREFETCH references unknown CTE '{name}'"),
+                        None,
+                    ));
+                };
+                (*cte.query).clone()
+            }
+            PrefetchSource::Query(q) => (**q).clone(),
+        };
+        if matches!(sub.collection, QueryCollection::Inherited) {
+            sub.collection = QueryCollection::Explicit(collection.to_string());
+        }
+        // Candidate stage needs document text for pair scoring.
+        ensure_payload_field(&mut sub, &field);
+        if let Some(f) = &pref.filter {
+            sub.filter = Some(f.clone());
+        }
+        let planned = plan(&Stmt::Query(Box::new(sub)))?;
+        match planned {
+            PlannedOperation::Query {
+                collection: c,
+                request,
+            } => candidates.push((c, request)),
+            other => {
+                return Err(QqlError::validation(
+                    "QQL-PLAN-CROSS-RERANK-CANDIDATE",
+                    format!(
+                        "CROSS RERANK prefetch must plan as a search query, got {}",
+                        other.operation_label()
+                    ),
+                    None,
+                ));
+            }
+        }
+    }
+
+    Ok(PlannedOperation::CrossRerank {
+        collection: collection.to_string(),
+        query: query_text.to_string(),
+        model: model.to_string(),
+        field,
+        limit: outer.page.limit.unwrap_or(10),
+        offset: outer.page.offset.unwrap_or(0),
+        candidates,
+    })
+}
+
+fn ensure_payload_field(query: &mut qql_core::ast::QueryStmt, field: &str) {
+    use qql_core::ast::{PayloadSelector, QueryOutput};
+    match &mut query.output {
+        QueryOutput {
+            payload: None | Some(PayloadSelector::None),
+            ..
+        } => {
+            query.output.payload = Some(PayloadSelector::Include(vec![field.to_string()]));
+        }
+        QueryOutput {
+            payload: Some(PayloadSelector::Include(fields)),
+            ..
+        } => {
+            if !fields.iter().any(|f| f.eq_ignore_ascii_case(field)) {
+                fields.push(field.to_string());
+            }
+        }
+        QueryOutput {
+            payload: Some(PayloadSelector::All | PayloadSelector::Exclude(_)),
+            ..
+        } => {}
+    }
 }
 
 /// REST projection of a planned operation (HTTP method/path/query/body).
@@ -718,6 +860,13 @@ pub fn to_rest_route(op: &PlannedOperation) -> Route {
         PlannedOperation::ListShardKeys { collection } => Route {
             method: Method::Get,
             path: format!("/collections/{collection}/shards"),
+            query: Vec::new(),
+            body: None,
+        },
+        // CrossRerank is client-side; never projected as a single Qdrant route.
+        PlannedOperation::CrossRerank { collection, .. } => Route {
+            method: Method::Post,
+            path: format!("/collections/{collection}/points/query"),
             query: Vec::new(),
             body: None,
         },

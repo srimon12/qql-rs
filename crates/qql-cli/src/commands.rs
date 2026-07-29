@@ -373,6 +373,15 @@ fn executor(
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(config.image_embedding_dimension);
+            let rerank_endpoint = std::env::var("RERANK_URL")
+                .ok()
+                .or_else(|| config.rerank_endpoint.clone());
+            let rerank_api_key = std::env::var("RERANK_KEY")
+                .ok()
+                .or_else(|| config.rerank_api_key.clone());
+            let rerank_model = std::env::var("RERANK_MODEL")
+                .ok()
+                .or_else(|| config.rerank_model.clone());
             let http_emb = qql::embedder::HttpEmbedder::try_with_options(
                 qql::embedder::HttpEmbedderOptions {
                     endpoint: endpoint.clone(),
@@ -387,6 +396,9 @@ fn executor(
                     image_api_key,
                     image_model,
                     image_dimension,
+                    rerank_endpoint,
+                    rerank_api_key,
+                    rerank_model,
                 },
             )?;
             Some(std::sync::Arc::new(http_emb) as std::sync::Arc<dyn qql::embedder::Embedder>)
@@ -414,6 +426,7 @@ fn edge_executor() -> Result<qql::executor::Executor, Box<dyn std::error::Error>
                 model: config.model,
                 multi_model: config.multi_model.or(config.multi_embed_model.clone()),
                 image_model: config.image_model.or(config.image_embed_model.clone()),
+                reranker_model: config.reranker_model.clone(),
                 cache_dir: config.cache_dir,
                 show_download_progress: config.show_download_progress,
             };
@@ -440,6 +453,9 @@ fn edge_executor() -> Result<qql::executor::Executor, Box<dyn std::error::Error>
                     image_api_key: config.image_embed_key,
                     image_model: config.image_embed_model,
                     image_dimension: config.image_embed_dimension,
+                    rerank_endpoint: None,
+                    rerank_api_key: None,
+                    rerank_model: config.reranker_model,
                 },
             )
             .map_err(|error| format!("edge initialization failed: {error}").into())

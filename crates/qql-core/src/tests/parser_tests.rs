@@ -232,6 +232,33 @@ fn using_can_declare_an_arbitrary_sparse_vector() {
 }
 
 #[test]
+fn cross_rerank_parses() {
+    let stmt = Parser::parse(
+        "WITH c AS (QUERY TEXT 'q' FROM docs USING dense LIMIT 50) \
+         QUERY CROSS RERANK TEXT 'q' MODEL 'bge-reranker-base' ON FIELD body \
+         FROM docs PREFETCH (c) LIMIT 10;",
+    )
+    .unwrap();
+    match stmt {
+        Stmt::Query(q) => match &q.expression {
+            QueryExpr::CrossRerank {
+                query,
+                model,
+                field,
+                prefetch,
+            } => {
+                assert_eq!(query, "q");
+                assert_eq!(model, "bge-reranker-base");
+                assert_eq!(field.as_deref(), Some("body"));
+                assert_eq!(prefetch.len(), 1);
+            }
+            other => panic!("expected CrossRerank, got {other:?}"),
+        },
+        other => panic!("expected query, got {other:?}"),
+    }
+}
+
+#[test]
 fn image_query_input_parses() {
     let stmt = Parser::parse(
         "QUERY IMAGE '/data/photo.jpg' MODEL 'clip-vision' FROM products USING image AS DENSE LIMIT 5;",

@@ -335,6 +335,9 @@ fn create_executor(
                     image_api_key: config.image_embedding_api_key.clone(),
                     image_model: config.image_embedding_model.clone(),
                     image_dimension: config.image_embedding_dimension,
+                    rerank_endpoint: config.rerank_endpoint.clone(),
+                    rerank_api_key: config.rerank_api_key.clone(),
+                    rerank_model: config.rerank_model.clone(),
                 },
             )
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;

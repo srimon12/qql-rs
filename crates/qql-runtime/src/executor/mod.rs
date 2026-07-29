@@ -849,6 +849,22 @@ impl Executor {
     ) -> Result<ExecResponse, QqlError> {
         use qql_plan::PlannedOperation;
 
+        // Client-side pair scorer: never a single Qdrant route.
+        if let PlannedOperation::CrossRerank {
+            collection: _,
+            query,
+            model,
+            field,
+            limit,
+            offset,
+            candidates,
+        } = op
+        {
+            return self
+                .execute_cross_rerank(query, model, field, *limit, *offset, candidates)
+                .await;
+        }
+
         let label = op.operation_label();
         let result = self.client.execute_planned(op).await?;
         let (message, data) = match op {
@@ -898,6 +914,7 @@ impl Executor {
                 )
             }
             PlannedOperation::ListShardKeys { .. } => ("Shard keys listed".into(), Some(result)),
+            PlannedOperation::CrossRerank { .. } => unreachable!("handled above"),
             _ => (format!("{label} ok"), None),
         };
         Ok(ExecResponse {
@@ -905,6 +922,121 @@ impl Executor {
             operation: label.into(),
             message,
             data,
+        })
+    }
+
+    /// Run candidate ANN stages, score (query, doc_text) with a cross-encoder, reorder.
+    async fn execute_cross_rerank(
+        &self,
+        query: &str,
+        model: &str,
+        field: &str,
+        limit: u64,
+        offset: u64,
+        candidates: &[(String, qql_plan::QueryRequest)],
+    ) -> Result<ExecResponse, QqlError> {
+        use std::collections::HashMap;
+
+        let embedder = self.embedder.as_ref().ok_or_else(|| {
+            QqlError::execution(
+                "QQL-RERANK-CROSS",
+                "CROSS RERANK requires a configured embedder with pair scoring \
+                 (rerank_endpoint / edge reranker_model)",
+                None,
+            )
+        })?;
+
+        let mut by_id: HashMap<String, SearchHit> = HashMap::new();
+        for (collection, request) in candidates {
+            let op = qql_plan::PlannedOperation::Query {
+                collection: collection.clone(),
+                request: request.clone(),
+            };
+            let raw = self.client.execute_planned(&op).await?;
+            for hit in extract_search_hits(&raw) {
+                by_id.entry(hit.id.clone()).or_insert(hit);
+            }
+        }
+
+        if by_id.is_empty() {
+            return Ok(ExecResponse {
+                ok: true,
+                operation: "CROSS_RERANK".into(),
+                message: "Found 0 hits".into(),
+                data: Some(serde_json::json!([])),
+            });
+        }
+
+        // Stable order for scoring (then re-sort by pair score).
+        let mut hits: Vec<SearchHit> = by_id.into_values().collect();
+        hits.sort_by(|a, b| a.id.cmp(&b.id));
+
+        let mut docs = Vec::with_capacity(hits.len());
+        let mut keep_idx = Vec::with_capacity(hits.len());
+        for (i, hit) in hits.iter().enumerate() {
+            let text = hit
+                .payload
+                .as_ref()
+                .and_then(|p| p.get(field))
+                .and_then(|v| v.as_str())
+                .or(hit.text.as_deref())
+                .unwrap_or("")
+                .to_string();
+            if text.is_empty() {
+                continue;
+            }
+            docs.push(text);
+            keep_idx.push(i);
+        }
+        if docs.is_empty() {
+            return Err(QqlError::execution(
+                "QQL-RERANK-CROSS-FIELD",
+                format!(
+                    "CROSS RERANK found candidates but none had non-empty payload field '{field}'. \
+                     Ensure UPSERT stores text on that field and PREFETCH returns WITH PAYLOAD."
+                ),
+                None,
+            ));
+        }
+
+        let scores = embedder.rerank_pairs(query, &docs, model).await?;
+        if scores.len() != docs.len() {
+            return Err(QqlError::execution(
+                "QQL-RERANK-CROSS",
+                format!(
+                    "rerank_pairs returned {} scores for {} documents",
+                    scores.len(),
+                    docs.len()
+                ),
+                None,
+            ));
+        }
+
+        let mut ranked: Vec<(f32, SearchHit)> = keep_idx
+            .into_iter()
+            .zip(scores)
+            .map(|(i, score)| {
+                let mut h = hits[i].clone();
+                h.score = score;
+                (score, h)
+            })
+            .collect();
+        ranked.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+        let skip = offset as usize;
+        let take = limit as usize;
+        let out: Vec<SearchHit> = ranked
+            .into_iter()
+            .skip(skip)
+            .take(take)
+            .map(|(_, h)| h)
+            .collect();
+        let n = out.len();
+        Ok(ExecResponse {
+            ok: true,
+            operation: "CROSS_RERANK".into(),
+            message: format!("Found {n} hits (cross-encoder)"),
+            data: Some(serde_json::to_value(out).unwrap_or_default()),
         })
     }
 }

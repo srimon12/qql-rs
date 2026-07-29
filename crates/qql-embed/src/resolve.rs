@@ -310,6 +310,10 @@ fn collect_expr_dense_jobs(
             let m = model.as_deref().unwrap_or("default").to_string();
             jobs.push((m, text.clone()));
         }
+        QueryExpr::CrossRerank { prefetch, .. } => {
+            // Query string is scored by the pair model, not embedded.
+            collect_prefetches_dense_jobs(prefetch, jobs)?;
+        }
         QueryExpr::Rerank {
             input,
             model,
@@ -604,6 +608,9 @@ fn apply_expr_embeddings<'a>(
                 let mut emb = require_embed_target(using)?;
                 emb.kind = VectorKind::Dense;
                 apply_input(input, emb, model.as_str(), embedder, dense).await?;
+                apply_prefetches_embeddings(prefetch, embedder, dense).await?;
+            }
+            QueryExpr::CrossRerank { prefetch, .. } => {
                 apply_prefetches_embeddings(prefetch, embedder, dense).await?;
             }
             _ => {}

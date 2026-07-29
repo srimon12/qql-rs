@@ -335,6 +335,10 @@ impl<'a> AstLowerer<'a> {
         if self.peek()?.kind == TokenKind::Hybrid {
             return self.parse_hybrid();
         }
+        // CROSS RERANK (pair scorer) before bare RERANK (late-interaction).
+        if self.peek_word("CROSS")? {
+            return self.parse_cross_rerank();
+        }
         if self.peek()?.kind == TokenKind::Rerank {
             return self.parse_rerank();
         }
@@ -572,6 +576,38 @@ impl<'a> AstLowerer<'a> {
         })
     }
 
+    fn parse_cross_rerank(&mut self) -> Result<QueryExpr, QqlError> {
+        // CROSS is a bare word (not reserved).
+        self.advance()?;
+        self.expect(TokenKind::Rerank)?;
+        let query = if self.peek_word("TEXT")? {
+            self.advance()?;
+            self.parse_string()?
+        } else if self.peek()?.kind == TokenKind::String {
+            self.parse_string()?
+        } else {
+            return Err(QqlError::parse(
+                "QQL-PARSE-CROSS-RERANK",
+                "CROSS RERANK requires TEXT '…' or a string query",
+                self.peek()?.span,
+            ));
+        };
+        let model = self.parse_required_model_string()?;
+        let field = if self.peek()?.kind == TokenKind::On {
+            self.advance()?;
+            self.expect(TokenKind::Field)?;
+            Some(self.parse_identifier()?)
+        } else {
+            None
+        };
+        Ok(QueryExpr::CrossRerank {
+            query,
+            model,
+            field,
+            prefetch: Vec::new(),
+        })
+    }
+
     fn parse_rerank(&mut self) -> Result<QueryExpr, QqlError> {
         self.expect(TokenKind::Rerank)?;
         let input = if self.peek_word("TEXT")? {
@@ -780,6 +816,20 @@ fn attach_pipeline(
             *target = Some(using);
             *nested = prefetch;
         }
+        QueryExpr::CrossRerank {
+            prefetch: nested, ..
+        } => {
+            // Pair scorer: no vector USING; PREFETCH supplies candidates.
+            reject_using(using, span)?;
+            if prefetch.is_empty() {
+                return Err(QqlError::validation(
+                    "QQL-VALIDATION-CROSS-RERANK-PREFETCH",
+                    "CROSS RERANK requires PREFETCH (candidate stage)",
+                    Some(span),
+                ));
+            }
+            *nested = prefetch;
+        }
         QueryExpr::Points { .. }
         | QueryExpr::OrderBy { .. }
         | QueryExpr::SampleRandom
@@ -822,7 +872,8 @@ fn validate_prefetch_references(
         | QueryExpr::Fusion { prefetch, .. }
         | QueryExpr::Formula { prefetch, .. }
         | QueryExpr::RelevanceFeedback { prefetch, .. }
-        | QueryExpr::Rerank { prefetch, .. } => prefetch,
+        | QueryExpr::Rerank { prefetch, .. }
+        | QueryExpr::CrossRerank { prefetch, .. } => prefetch,
         QueryExpr::Points { .. }
         | QueryExpr::OrderBy { .. }
         | QueryExpr::SampleRandom

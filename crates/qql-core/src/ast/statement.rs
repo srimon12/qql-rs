@@ -200,6 +200,17 @@ pub enum QueryExpr {
         using: Option<VectorTarget>,
         prefetch: Vec<Prefetch>,
     },
+    /// Cross-encoder pair rerank: score query against PREFETCH document texts.
+    /// Not sent to Qdrant as MaxSim — executor scores client-side then reorders.
+    CrossRerank {
+        /// Query string scored against each document.
+        query: String,
+        /// Cross-encoder model id (e.g. bge-reranker-base).
+        model: String,
+        /// Payload field holding document text (default `"text"` at resolve time).
+        field: Option<String>,
+        prefetch: Vec<Prefetch>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

@@ -278,6 +278,11 @@ pub fn lower_query_expr(expr: &QueryExpr) -> QueryVariant {
             nearest: lower_query_input(input),
             mmr: None,
         }),
+        // CrossRerank is planned as PlannedOperation::CrossRerank, not a QueryVariant.
+        QueryExpr::CrossRerank { .. } => QueryVariant::Nearest(NearestQuery {
+            nearest: PlanQueryInput::Vector(PlanVectorValue::Dense(Vec::new())),
+            mmr: None,
+        }),
         QueryExpr::Points { .. } => QueryVariant::Nearest(NearestQuery {
             // Placeholder only — Points lookups use GetPoints, not this variant.
             nearest: PlanQueryInput::Vector(PlanVectorValue::Dense(Vec::new())),
@@ -617,7 +622,8 @@ fn expression_prefetch(expr: &QueryExpr) -> &[qql_core::ast::Prefetch] {
         | QueryExpr::Fusion { prefetch, .. }
         | QueryExpr::Formula { prefetch, .. }
         | QueryExpr::RelevanceFeedback { prefetch, .. }
-        | QueryExpr::Rerank { prefetch, .. } => prefetch,
+        | QueryExpr::Rerank { prefetch, .. }
+        | QueryExpr::CrossRerank { prefetch, .. } => prefetch,
         _ => &[],
     }
 }

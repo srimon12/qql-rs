@@ -13,6 +13,8 @@ pub struct EdgeConfig {
     pub multi_model: Option<String>,
     /// Offline CLIP vision model (e.g. `"clip-vision"`).
     pub image_model: Option<String>,
+    /// Offline cross-encoder model (e.g. `"bge-reranker-base"`).
+    pub reranker_model: Option<String>,
     pub cache_dir: Option<PathBuf>,
     pub show_download_progress: bool,
     pub embed_url: Option<String>,
@@ -41,6 +43,7 @@ impl Default for EdgeConfig {
             model: None,
             multi_model: None,
             image_model: None,
+            reranker_model: None,
             cache_dir: None,
             show_download_progress: false,
             embed_url: None,
@@ -135,6 +138,11 @@ impl EdgeConfig {
         }
         if let Some(value) = env_string("QQL_EDGE_IMAGE_MODEL") {
             self.image_model = Some(value);
+        }
+        if let Some(value) = env_string("QQL_EDGE_RERANKER_MODEL")
+            .or_else(|| env_string("RERANK_MODEL"))
+        {
+            self.reranker_model = Some(value);
         }
         if let Some(value) = env_string("QQL_EDGE_CACHE_DIR") {
             self.cache_dir = Some(PathBuf::from(value));

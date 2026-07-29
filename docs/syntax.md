@@ -141,7 +141,21 @@ rerank-input = "TEXT", string | "VECTOR", vector-value | "POINT", point-id ;
 
 `QUERY POINTS (...)` retrieves those points directly. `QUERY NEAREST POINT ...` uses a point as the similarity input. A bare integer after `QUERY` is invalid, so point retrieval and point similarity cannot be confused.
 
-Fusion requires a non-empty `PREFETCH`. Rerank requires an explicit input, `MODEL`, `USING`, and non-empty `PREFETCH`; the `USING` target must be dense (single-vector or multivector). When the target is multivector, `RERANK TEXT` embeds via multi-vector embedding into `MultiDense`. MMR requires both `DIVERSITY` in `[0, 1]` and positive `CANDIDATES`. Hybrid expands to two prefetches (dense + sparse) with `LIMIT * 10` candidate count, fused with RRF or DBSF.
+Fusion requires a non-empty `PREFETCH`. **Late-interaction** `RERANK` requires an explicit input, `MODEL`, `USING`, and non-empty `PREFETCH`; the `USING` target must be dense (single-vector or multivector). When the target is multivector, `RERANK TEXT` embeds via multi-vector embedding into `MultiDense`.
+
+**Cross-encoder** pair scoring is a separate form:
+
+```sql
+WITH c AS (QUERY TEXT 'q' FROM docs USING dense LIMIT 50)
+QUERY CROSS RERANK TEXT 'q' MODEL 'bge-reranker-base' ON FIELD text
+FROM docs
+PREFETCH (c)
+LIMIT 10;
+```
+
+`CROSS RERANK` runs the PREFETCH stage(s), extracts document text from `ON FIELD` (default `text`), scores `(query, doc)` pairs client-side, and reorders hits. It does **not** use Qdrant MaxSim. Host needs `rerank_pairs` (edge `reranker_model` or HTTP `rerank_endpoint`).
+
+MMR requires both `DIVERSITY` in `[0, 1]` and positive `CANDIDATES`. Hybrid expands to two prefetches (dense + sparse) with `LIMIT * 10` candidate count, fused with RRF or DBSF.
 
 ### Formula expressions
 

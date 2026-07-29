@@ -65,6 +65,9 @@ pub struct LocalExecutorOptions {
     /// Pair with dense CLIP text (`model: Some("ClipVitB32".into())`) for multimodal.
     #[cfg(feature = "fastembed-local")]
     pub image_model: Option<String>,
+    /// Offline cross-encoder (`bge-reranker-base`, `BGERerankerBase`, …).
+    #[cfg(feature = "fastembed-local")]
+    pub reranker_model: Option<String>,
     /// Override fastembed model cache directory.
     #[cfg(feature = "fastembed-local")]
     pub cache_dir: Option<PathBuf>,
@@ -105,6 +108,7 @@ pub fn local_executor_with_options(
         model: opts.model,
         multi_model: opts.multi_model,
         image_model: opts.image_model,
+        reranker_model: opts.reranker_model,
         cache_dir: opts.cache_dir,
         show_download_progress: opts.show_download_progress,
     })?;
@@ -122,6 +126,7 @@ pub fn local_executor_with_options(
         multi_embedding_dimension: multi_dim,
         image_embedding_model: embedder.image_model_code().map(str::to_string),
         image_embedding_dimension: image_dim,
+        rerank_model: embedder.reranker_model_code().map(str::to_string),
         ..Default::default()
     };
 
@@ -215,6 +220,9 @@ pub fn http_executor_with_options(
         image_embedding_api_key: opts.image_api_key.clone(),
         image_embedding_model: opts.image_model.clone(),
         image_embedding_dimension: opts.image_dimension,
+        rerank_endpoint: opts.rerank_endpoint.clone(),
+        rerank_api_key: opts.rerank_api_key.clone(),
+        rerank_model: opts.rerank_model.clone(),
         ..Default::default()
     };
     let embedder = qql::embedder::HttpEmbedder::try_with_options(opts)?;

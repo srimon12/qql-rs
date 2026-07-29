@@ -313,6 +313,9 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
                     image_api_key: config.image_embedding_api_key.clone(),
                     image_model: config.image_embedding_model.clone(),
                     image_dimension: config.image_embedding_dimension,
+                    rerank_endpoint: config.rerank_endpoint.clone(),
+                    rerank_api_key: config.rerank_api_key.clone(),
+                    rerank_model: config.rerank_model.clone(),
                 },
             )
             .map_err(to_napi_err)?;

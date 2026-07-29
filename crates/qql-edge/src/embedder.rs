@@ -6,7 +6,8 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use fastembed::{
     Bgem3Embedding, Bgem3InitOptions, Bgem3Model, EmbeddingModel, ImageEmbedding,
-    ImageEmbeddingModel, ImageInitOptions, InitOptionsWithLength, TextEmbedding,
+    ImageEmbeddingModel, ImageInitOptions, InitOptionsWithLength, RerankInitOptions,
+    RerankerModel, TextEmbedding, TextRerank,
 };
 
 use qql_core::error::QqlError;
@@ -47,6 +48,8 @@ pub struct FastEmbedderOptions {
     /// Offline image / CLIP vision model. Accepts `ClipVitB32`,
     /// `Qdrant/clip-ViT-B-32-vision`, `clip-vision`. Pairs with dense CLIP text.
     pub image_model: Option<String>,
+    /// Offline cross-encoder reranker (`bge-reranker-base`, `BGERerankerBase`, …).
+    pub reranker_model: Option<String>,
     /// Override model cache directory. `None` → fastembed default
     /// (`FASTEMBED_CACHE_DIR` / `HF_HOME` / `./.fastembed_cache`).
     pub cache_dir: Option<PathBuf>,
@@ -77,15 +80,23 @@ struct ImageSlot {
     dim: usize,
 }
 
+struct RerankSlot {
+    model: Arc<Mutex<TextRerank>>,
+    model_name: String,
+    model_code: String,
+}
+
 pub struct FastEmbedder {
     dense: DenseSlot,
     multi: Option<MultiSlot>,
     image: Option<ImageSlot>,
+    reranker: Option<RerankSlot>,
 }
 
 static DENSE_CACHE: OnceLock<Mutex<HashMap<String, Arc<Mutex<TextEmbedding>>>>> = OnceLock::new();
 static MULTI_CACHE: OnceLock<Mutex<HashMap<String, Arc<Mutex<Bgem3Embedding>>>>> = OnceLock::new();
 static IMAGE_CACHE: OnceLock<Mutex<HashMap<String, Arc<Mutex<ImageEmbedding>>>>> = OnceLock::new();
+static RERANK_CACHE: OnceLock<Mutex<HashMap<String, Arc<Mutex<TextRerank>>>>> = OnceLock::new();
 
 fn dense_cache() -> &'static Mutex<HashMap<String, Arc<Mutex<TextEmbedding>>>> {
     DENSE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
@@ -99,12 +110,17 @@ fn image_cache() -> &'static Mutex<HashMap<String, Arc<Mutex<ImageEmbedding>>>> 
     IMAGE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+fn rerank_cache() -> &'static Mutex<HashMap<String, Arc<Mutex<TextRerank>>>> {
+    RERANK_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 impl FastEmbedder {
     pub fn try_new(options: InitOptionsWithLength<EmbeddingModel>) -> Result<Self, QqlError> {
         Self::try_with_options(FastEmbedderOptions {
             model: Some(format!("{:?}", options.model_name)),
             multi_model: None,
             image_model: None,
+            reranker_model: None,
             cache_dir: None,
             show_download_progress: false,
         })
@@ -245,6 +261,47 @@ impl FastEmbedder {
             }
         };
 
+        let reranker = match opts.reranker_model.as_deref() {
+            None | Some("") => None,
+            Some(name) => {
+                let rm = resolve_reranker_model(name)?;
+                let info = TextRerank::get_model_info(&rm);
+                let rerank_name = format!("{:?}", rm);
+                let rerank_code = info.model_code.clone();
+                let handle = rerank_cache()
+                    .lock()
+                    .map_err(|e| err(format!("fastembed rerank cache poisoned: {e}")))?
+                    .get(&rerank_name)
+                    .cloned();
+                let arc = if let Some(model) = handle {
+                    model
+                } else {
+                    let mut init = RerankInitOptions::new(rm);
+                    if let Some(ref dir) = opts.cache_dir {
+                        init = init.with_cache_dir(dir.clone());
+                    }
+                    init = init.with_show_download_progress(opts.show_download_progress);
+                    let model = Arc::new(Mutex::new(
+                        TextRerank::try_new(init)
+                            .map_err(|e| err(format!("fastembed TextRerank init failed: {e}")))?,
+                    ));
+                    let mut cache = rerank_cache()
+                        .lock()
+                        .map_err(|e| err(format!("fastembed rerank cache poisoned: {e}")))?;
+                    Arc::clone(
+                        cache
+                            .entry(rerank_name.clone())
+                            .or_insert_with(|| Arc::clone(&model)),
+                    )
+                };
+                Some(RerankSlot {
+                    model: arc,
+                    model_name: rerank_name,
+                    model_code: rerank_code,
+                })
+            }
+        };
+
         Ok(Self {
             dense: DenseSlot {
                 model: dense_model_arc,
@@ -254,6 +311,7 @@ impl FastEmbedder {
             },
             multi,
             image,
+            reranker,
         })
     }
 
@@ -311,6 +369,28 @@ impl FastEmbedder {
 
     pub fn has_image(&self) -> bool {
         self.image.is_some()
+    }
+
+    pub fn has_reranker(&self) -> bool {
+        self.reranker.is_some()
+    }
+
+    pub fn reranker_model_code(&self) -> Option<&str> {
+        self.reranker.as_ref().map(|m| m.model_code.as_str())
+    }
+
+    fn accepts_reranker_model(&self, requested: &str) -> bool {
+        let Some(ref r) = self.reranker else {
+            return false;
+        };
+        let req = requested.trim();
+        if req.is_empty() || req.eq_ignore_ascii_case("default") {
+            return true;
+        }
+        req.eq_ignore_ascii_case(&r.model_name)
+            || req.eq_ignore_ascii_case(&r.model_code)
+            || short_alias_matches(req, &r.model_code)
+            || is_reranker_alias(req)
     }
 
     /// Whether a QQL `USING MODEL '…'` / `MODEL '…'` string refers to this embedder.
@@ -556,6 +636,41 @@ fn is_image_alias(name: &str) -> bool {
             | "clip-vit-b-32-vision"
             | "image"
             | "vision"
+    )
+}
+
+/// Resolve offline cross-encoder model id.
+pub fn resolve_reranker_model(name: &str) -> Result<RerankerModel, QqlError> {
+    let name = name.trim();
+    if name.is_empty() || is_reranker_alias(name) {
+        return Ok(RerankerModel::default());
+    }
+    if let Ok(m) = name.parse::<RerankerModel>() {
+        return Ok(m);
+    }
+    for info in TextRerank::list_supported_models() {
+        if info.model_code.eq_ignore_ascii_case(name)
+            || short_alias_matches(name, &info.model_code)
+            || format!("{:?}", info.model).eq_ignore_ascii_case(name)
+        {
+            return Ok(info.model);
+        }
+    }
+    Err(err(format!(
+        "unknown reranker model '{name}'. Examples: bge-reranker-base, BGERerankerBase, \
+         BAAI/bge-reranker-base, jina-reranker-v1-turbo-en"
+    )))
+}
+
+fn is_reranker_alias(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "rerank"
+            | "reranker"
+            | "cross-encoder"
+            | "cross_encoder"
+            | "bge-reranker"
+            | "bge-reranker-base"
     )
 }
 
@@ -827,5 +942,51 @@ impl Embedder for FastEmbedder {
         .map_err(|e| err(format!("spawn_blocking failed: {e}")))??;
 
         Ok(embeddings)
+    }
+
+    async fn rerank_pairs(
+        &self,
+        query: &str,
+        documents: &[String],
+        model: &str,
+    ) -> Result<Vec<f32>, QqlError> {
+        if documents.is_empty() {
+            return Ok(vec![]);
+        }
+        let Some(ref reranker) = self.reranker else {
+            return Err(qql_embed::cross_rerank_unsupported_error(model));
+        };
+        if !self.accepts_reranker_model(model)
+            && !(model.is_empty() || model.eq_ignore_ascii_case("default"))
+        {
+            return Err(err(format!(
+                "local reranker is locked to '{}' ({}); cannot satisfy MODEL '{model}'",
+                reranker.model_name, reranker.model_code
+            )));
+        }
+
+        let model_arc = reranker.model.clone();
+        let q = query.to_string();
+        let docs = documents.to_vec();
+
+        let ranked = tokio::task::spawn_blocking(move || {
+            let mut model = model_arc
+                .lock()
+                .map_err(|e| err(format!("fastembed rerank mutex poisoned: {e}")))?;
+            model
+                .rerank(q, docs, false, None)
+                .map_err(|e| err(format!("fastembed TextRerank failed: {e}")))
+        })
+        .await
+        .map_err(|e| err(format!("spawn_blocking failed: {e}")))??;
+
+        // Unpermute to original document order.
+        let mut scores = vec![0.0f32; documents.len()];
+        for item in ranked {
+            if item.index < scores.len() {
+                scores[item.index] = item.score;
+            }
+        }
+        Ok(scores)
     }
 }

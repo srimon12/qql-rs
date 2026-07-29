@@ -164,6 +164,7 @@ fn query_intent(expression: &QueryExpr) -> &'static str {
         QueryExpr::Formula { .. } => "formula-based scoring",
         QueryExpr::RelevanceFeedback { .. } => "relevance feedback",
         QueryExpr::Hybrid { .. } => "hybrid shorthand",
-        QueryExpr::Rerank { .. } => "explicit prefetched rerank",
+        QueryExpr::Rerank { .. } => "late-interaction prefetched rerank",
+        QueryExpr::CrossRerank { .. } => "cross-encoder pair rerank of prefetched candidates",
     }
 }

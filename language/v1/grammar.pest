@@ -80,6 +80,8 @@ query_expr = _{
     | feedback
     | mmr
     | hybrid
+    // Cross-encoder pair scorer (client-side). Distinct from late-interaction RERANK.
+    | cross_rerank
     | rerank
     | nearest
 }
@@ -144,6 +146,15 @@ hybrid = {
     ~ (^"FUSION" ~ fusion_method)?
 }
 
+// Cross-encoder: score (query, doc_text) pairs from PREFETCH hits.
+// ON FIELD names the payload key holding document text (default: text).
+cross_rerank = {
+    ^"CROSS" ~ ^"RERANK"
+    ~ (^"TEXT" ~ string | string)
+    ~ ^"MODEL" ~ string
+    ~ (^"ON" ~ ^"FIELD" ~ field)?
+}
+// Late-interaction / multivector MaxSim (not cross-encoder).
 rerank = { ^"RERANK" ~ rerank_input ~ ^"MODEL" ~ string }
 rerank_input = _{
       ^"TEXT" ~ string

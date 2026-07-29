@@ -116,6 +116,9 @@ enum ConfigCommand {
         /// Offline CLIP vision model for fastembed (e.g. clip-vision).
         #[arg(long)]
         image_model: Option<String>,
+        /// Offline cross-encoder model (e.g. bge-reranker-base).
+        #[arg(long)]
+        reranker_model: Option<String>,
         /// Directory used for downloaded FastEmbed models.
         #[arg(long)]
         cache_dir: Option<PathBuf>,
@@ -247,6 +250,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     model,
                     multi_model,
                     image_model,
+                    reranker_model,
                     cache_dir,
                     show_download_progress,
                     embed_url,
@@ -269,6 +273,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             model,
             multi_model,
             image_model,
+            reranker_model,
             cache_dir,
             show_download_progress,
             embed_url,

@@ -399,6 +399,8 @@ pub struct LocalExecutorOptions {
     pub multi_model: Option<String>,
     /// Offline CLIP vision model, e.g. `"clip-vision"` / `"ClipVitB32"`.
     pub image_model: Option<String>,
+    /// Offline cross-encoder, e.g. `"bge-reranker-base"`.
+    pub reranker_model: Option<String>,
     /// Override model cache directory (default: fastembed / HF cache).
     pub cache_dir: Option<String>,
     /// Show HuggingFace download progress (default `false`).
@@ -435,6 +437,7 @@ pub fn local_executor(
             model: opts.model,
             multi_model: opts.multi_model,
             image_model: opts.image_model,
+            reranker_model: opts.reranker_model,
             cache_dir: opts.cache_dir.map(std::path::PathBuf::from),
             show_download_progress: opts.show_download_progress.unwrap_or(false),
         },
@@ -527,6 +530,10 @@ fn standalone_local_opts(options: Option<&serde_json::Value>) -> LocalExecutorOp
             .map(|s| s.to_string()),
         image_model: options
             .and_then(|o| o.get("imageModel").or_else(|| o.get("image_model")))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        reranker_model: options
+            .and_then(|o| o.get("rerankerModel").or_else(|| o.get("reranker_model")))
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
         cache_dir: options

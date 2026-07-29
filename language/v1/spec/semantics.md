@@ -63,6 +63,14 @@ Query inputs:
 - `IMAGE 'path-or-url' [MODEL '…']` — embed image via host vision model → **dense**
   (CLIP vision; not multivector)
 - `VECTOR …` / `POINT …` — no embedding
+
+Rerank forms:
+
+- `RERANK … MODEL '…' USING <dense|multi> PREFETCH (…)` — late-interaction MaxSim
+  (query embed against candidates in Qdrant).
+- `CROSS RERANK TEXT '…' MODEL '…' [ON FIELD f] PREFETCH (…)` — cross-encoder
+  pair scores on payload field `f` (default `text`), reordered client-side.
+  Requires host `rerank_pairs`. No `USING` vector.
 ```
 
 The name answers “which vector?” and the optional role answers “what kind of
