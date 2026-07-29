@@ -96,6 +96,14 @@ impl QdrantOps for MockQdrantClient {
         op: &qql_plan::PlannedOperation,
     ) -> Result<serde_json::Value, QqlError> {
         *self.execute_planned_call_count.lock().unwrap() += 1;
+        *self.last_planned.lock().unwrap() = Some(op.clone());
+        if let qql_plan::PlannedOperation::CreateCollection { collection, .. } = op {
+            self.created_collections
+                .lock()
+                .unwrap()
+                .insert(collection.clone());
+            return Ok(serde_json::json!({"result": true, "status": "ok", "time": 0.0}));
+        }
         let route = qql_plan::plan::to_rest_route(op).expect("rest route");
         if route.path.contains("nonexistent") {
             return Err(QqlError::execution(
@@ -104,7 +112,6 @@ impl QdrantOps for MockQdrantClient {
                 None,
             ));
         }
-        *self.last_planned.lock().unwrap() = Some(op.clone());
         if matches!(op, qql_plan::PlannedOperation::ListCollections) {
             return Ok(serde_json::json!({
                 "result": {
@@ -1034,7 +1041,7 @@ async fn test_stop_dispatches_prior_statement_before_later_prepare_failure() {
 #[tokio::test]
 async fn test_batch_upserts_keep_single_statement_auto_create_semantics() {
     let client = MockQdrantClient::default();
-    let creates = client.create_collection_call_count.clone();
+    let creates = client.execute_planned_call_count.clone();
     let update_batches = client.update_batch_call_count.clone();
     let embedder = Arc::new(MockEmbedder {
         dense: vec![0.1, 0.2, 0.3],

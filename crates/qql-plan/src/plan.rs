@@ -218,6 +218,24 @@ impl PlannedOperation {
         }
     }
 
+    /// Batch grouping key (collection + family) for executor dispatch.
+    ///
+    /// Returns `None` for single-shot operations that cannot be grouped.
+    pub fn batch_key(&self) -> Option<BatchKey> {
+        match self.batch_family() {
+            BatchFamily::Query => match self {
+                PlannedOperation::Query { collection, .. } => {
+                    Some(BatchKey::Query(collection.clone()))
+                }
+                _ => None,
+            },
+            BatchFamily::Mutation => self
+                .collection()
+                .map(|collection| BatchKey::Mutation(collection.to_owned())),
+            BatchFamily::Single => None,
+        }
+    }
+
     /// Shard key carried on the plan, when present.
     pub fn shard_key(&self) -> Option<&str> {
         match self {
@@ -244,6 +262,40 @@ pub enum BatchFamily {
     Query,
     Mutation,
     Single,
+}
+
+/// Grouping key for statement/operation batching (same collection + family).
+///
+/// Used by executors to collect adjacent operations into query/mutation
+/// batches before flushing to the backend.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BatchKey {
+    Query(String),
+    Mutation(String),
+}
+
+/// Batch grouping key for a raw AST statement (before preparation/planning).
+///
+/// Returns `None` for statements that are never batchable (DDL, SHOW, group
+/// queries, point-ID lookups, etc.).
+pub fn statement_batch_key(stmt: &Stmt) -> Option<BatchKey> {
+    match stmt {
+        Stmt::Query(query)
+            if query.group.is_none() && !matches!(query.expression, QueryExpr::Points { .. }) =>
+        {
+            match &query.collection {
+                QueryCollection::Explicit(collection) => Some(BatchKey::Query(collection.clone())),
+                QueryCollection::Inherited => None,
+            }
+        }
+        Stmt::Upsert(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
+        Stmt::Delete(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
+        Stmt::UpdatePayload(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
+        Stmt::ClearPayload(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
+        Stmt::UpdateVector(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
+        Stmt::DeleteVector(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
+        _ => None,
+    }
 }
 
 /// Fallible planner — the single source of truth for statement → operation.
@@ -736,9 +788,7 @@ fn ensure_payload_field(query: &mut qql_core::ast::QueryStmt, field: &str) {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RestProjectionError {
     /// Client-side only (e.g. CROSS RERANK). Compile still exposes `stmt_type`.
-    ClientSideOnly {
-        stmt_type: &'static str,
-    },
+    ClientSideOnly { stmt_type: &'static str },
 }
 
 /// REST projection of a planned operation (HTTP method/path/query/body).

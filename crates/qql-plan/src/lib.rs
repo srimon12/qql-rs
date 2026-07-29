@@ -17,7 +17,8 @@ pub mod semantic;
 pub mod types;
 
 pub use plan::{
-    plan, to_rest_route, try_route, BatchFamily, PlannedOperation, RestProjectionError,
+    plan, statement_batch_key, to_rest_route, try_route, BatchFamily, BatchKey, PlannedOperation,
+    RestProjectionError,
 };
 pub use routing::{compile_statement, CompiledStatement};
 pub use semantic::{PlanFormula, PlanPointId, PlanPointVectors, PlanQueryInput, PlanVectorValue};

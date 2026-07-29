@@ -36,7 +36,16 @@ pub fn inject_filter(
                 }
             }
         }
-        _ => {}
+        other => {
+            return Err(QqlError::validation(
+                "QQL-VALIDATION-FILTER-INJECT",
+                format!(
+                    "inject_filter does not apply to this statement type ({})",
+                    stmt_kind(other)
+                ),
+                None,
+            ));
+        }
     }
     Ok(())
 }

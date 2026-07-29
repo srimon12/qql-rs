@@ -86,49 +86,7 @@ pub enum OnError {
     Continue,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum BatchKey {
-    Query(String),
-    Mutation(String),
-}
-
-fn statement_batch_key(stmt: &Stmt) -> Option<BatchKey> {
-    match stmt {
-        Stmt::Query(query)
-            if query.group.is_none()
-                && !matches!(query.expression, ast::QueryExpr::Points { .. }) =>
-        {
-            match &query.collection {
-                ast::QueryCollection::Explicit(collection) => {
-                    Some(BatchKey::Query(collection.clone()))
-                }
-                ast::QueryCollection::Inherited => None,
-            }
-        }
-        Stmt::Upsert(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
-        Stmt::Delete(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
-        Stmt::UpdatePayload(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
-        Stmt::ClearPayload(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
-        Stmt::UpdateVector(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
-        Stmt::DeleteVector(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
-        _ => None,
-    }
-}
-
-fn planned_batch_key(operation: &qql_plan::PlannedOperation) -> Option<BatchKey> {
-    use qql_plan::{BatchFamily, PlannedOperation};
-
-    match operation.batch_family() {
-        BatchFamily::Query => match operation {
-            PlannedOperation::Query { collection, .. } => Some(BatchKey::Query(collection.clone())),
-            _ => None,
-        },
-        BatchFamily::Mutation => operation
-            .collection()
-            .map(|collection| BatchKey::Mutation(collection.to_owned())),
-        BatchFamily::Single => None,
-    }
-}
+use qql_plan::{statement_batch_key, BatchKey};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchHit {
@@ -434,7 +392,7 @@ impl Executor {
                 }
             };
 
-            let key = planned_batch_key(&planned);
+            let key = planned.batch_key();
             if key.is_none() {
                 self.flush_planned_group(&mut pending, stop_on_error, &mut results)
                     .await?;

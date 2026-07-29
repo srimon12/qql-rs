@@ -1,5 +1,4 @@
 use crate::backend::{CollectionInfo, VectorSpec};
-use crate::client::CreateCollectionReq;
 #[cfg(feature = "rest")]
 use crate::embedder::HttpEmbedder;
 use crate::executor::Executor;
@@ -144,28 +143,49 @@ impl Executor {
             return Ok(false);
         }
 
-        let mut create_req = CreateCollectionReq::new(collection.to_string());
+        use qql_plan::{types::CreateCollectionRequest, PlannedOperation};
+        let mut req = CreateCollectionRequest {
+            vectors: None,
+            sparse_vectors: None,
+            hnsw_config: None,
+            optimizers_config: None,
+            params: None,
+            quantization_config: None,
+            vectors_config: None,
+            shard_number: None,
+            sharding_method: None,
+            shard_keys: None,
+        };
         if requested_dense {
             let dense_size = self.resolve_dense_vector_size(model).await?;
             let dense_name = explicit_dense.unwrap_or(crate::executor::DENSE_VECTOR_NAME);
-            create_req.vectors_config = Some(serde_json::json!({
-                dense_name: {
+            let mut vectors = serde_json::Map::new();
+            vectors.insert(
+                dense_name.to_string(),
+                serde_json::json!({
                     "size": dense_size,
                     "distance": "Cosine"
-                }
-            }));
+                }),
+            );
+            req.vectors = Some(vectors);
         }
-
         if requested_sparse {
             let sparse_name = explicit_sparse.unwrap_or(crate::executor::SPARSE_VECTOR_NAME);
-            create_req.sparse_vectors_config = Some(serde_json::json!({
-                sparse_name: {
+            let mut sparse = serde_json::Map::new();
+            sparse.insert(
+                sparse_name.to_string(),
+                serde_json::json!({
                     "modifier": "idf"
-                }
-            }));
+                }),
+            );
+            req.sparse_vectors = Some(sparse);
         }
 
-        self.client.create_collection(create_req).await?;
+        let op = PlannedOperation::CreateCollection {
+            collection: collection.to_string(),
+            request: req,
+        };
+        self.client.execute_planned(&op).await?;
         Ok(true)
     }
 

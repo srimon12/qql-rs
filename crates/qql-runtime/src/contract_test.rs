@@ -526,7 +526,10 @@ mod tests {
             "CREATE COLLECTION docs (v VECTOR(64, COSINE) WITH QUANTIZATION (type = 'product', compression = 'x16', always_ram = true) WITH MULTIVECTOR (comparator = 'max_sim'));",
         )
         .unwrap();
-        let body2 = to_rest_route(&plan(&create2).unwrap()).expect("rest").body_json().unwrap();
+        let body2 = to_rest_route(&plan(&create2).unwrap())
+            .expect("rest")
+            .body_json()
+            .unwrap();
         assert_eq!(
             body2["vectors"]["v"]["quantization_config"]["product"]["compression"],
             "x16"
@@ -541,7 +544,10 @@ mod tests {
             "ALTER COLLECTION docs WITH HNSW (ef_construct = 200) WITH PARAMS (replication_factor = 3) WITH QUANTIZATION (type = 'binary', encoding = 'two_bits');",
         )
         .unwrap();
-        let alter_body = to_rest_route(&plan(&alter).unwrap()).expect("rest").body_json().unwrap();
+        let alter_body = to_rest_route(&plan(&alter).unwrap())
+            .expect("rest")
+            .body_json()
+            .unwrap();
         assert_eq!(alter_body["params"]["replication_factor"], 3);
         assert_eq!(
             alter_body["quantization_config"]["binary"]["encoding"],
@@ -551,7 +557,10 @@ mod tests {
 
         let disable =
             Parser::parse("ALTER COLLECTION docs WITH QUANTIZATION (disabled = true);").unwrap();
-        let disable_body = to_rest_route(&plan(&disable).unwrap()).expect("rest").body_json().unwrap();
+        let disable_body = to_rest_route(&plan(&disable).unwrap())
+            .expect("rest")
+            .body_json()
+            .unwrap();
         assert_eq!(disable_body["quantization_config"], "Disabled");
         validate_ref(&openapi, "UpdateCollection", &disable_body);
     }
@@ -565,7 +574,10 @@ mod tests {
             "CREATE INDEX ON COLLECTION docs FOR title TYPE text WITH (lowercase = true, tokenizer = 'word', min_token_len = 2);",
         )
         .unwrap();
-        let body = to_rest_route(&plan(&stmt).unwrap()).expect("rest").body_json().unwrap();
+        let body = to_rest_route(&plan(&stmt).unwrap())
+            .expect("rest")
+            .body_json()
+            .unwrap();
         assert_eq!(body["field_name"], "title");
         assert_eq!(body["field_schema"]["type"], "text");
         assert_eq!(body["field_schema"]["lowercase"], true);

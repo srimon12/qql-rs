@@ -145,56 +145,6 @@ enum WasmOnError {
 }
 
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
-#[derive(Clone, PartialEq, Eq)]
-enum WasmBatchKey {
-    Query(String),
-    Mutation(String),
-}
-
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
-fn wasm_statement_batch_key(stmt: &qql_core::ast::Stmt) -> Option<WasmBatchKey> {
-    use qql_core::ast::{QueryCollection, QueryExpr, Stmt};
-
-    match stmt {
-        Stmt::Query(query)
-            if query.group.is_none() && !matches!(query.expression, QueryExpr::Points { .. }) =>
-        {
-            match &query.collection {
-                QueryCollection::Explicit(collection) => {
-                    Some(WasmBatchKey::Query(collection.clone()))
-                }
-                QueryCollection::Inherited => None,
-            }
-        }
-        Stmt::Upsert(stmt) => Some(WasmBatchKey::Mutation(stmt.collection.clone())),
-        Stmt::Delete(stmt) => Some(WasmBatchKey::Mutation(stmt.collection.clone())),
-        Stmt::UpdatePayload(stmt) => Some(WasmBatchKey::Mutation(stmt.collection.clone())),
-        Stmt::ClearPayload(stmt) => Some(WasmBatchKey::Mutation(stmt.collection.clone())),
-        Stmt::UpdateVector(stmt) => Some(WasmBatchKey::Mutation(stmt.collection.clone())),
-        Stmt::DeleteVector(stmt) => Some(WasmBatchKey::Mutation(stmt.collection.clone())),
-        _ => None,
-    }
-}
-
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
-fn wasm_planned_batch_key(operation: &qql_plan::PlannedOperation) -> Option<WasmBatchKey> {
-    use qql_plan::{BatchFamily, PlannedOperation};
-
-    match operation.batch_family() {
-        BatchFamily::Query => match operation {
-            PlannedOperation::Query { collection, .. } => {
-                Some(WasmBatchKey::Query(collection.clone()))
-            }
-            _ => None,
-        },
-        BatchFamily::Mutation => operation
-            .collection()
-            .map(|collection| WasmBatchKey::Mutation(collection.to_owned())),
-        BatchFamily::Single => None,
-    }
-}
-
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
 fn parse_on_error(options: Option<JsValue>) -> Result<WasmOnError, JsValue> {
     let Some(options) = options else {
         return Ok(WasmOnError::Stop);
@@ -936,6 +886,8 @@ impl Client {
         query: &str,
         on_error: WasmOnError,
     ) -> Result<WasmReport, JsValue> {
+        use qql_plan::{statement_batch_key, BatchKey};
+
         let stmts = match Parser::parse_all(query) {
             Ok(stmts) => stmts,
             Err(error) if on_error == WasmOnError::Stop => {
@@ -956,10 +908,10 @@ impl Client {
 
         let mut results: Vec<serde_json::Value> = Vec::with_capacity(stmts.len());
         let mut pending = Vec::new();
-        let mut pending_key: Option<WasmBatchKey> = None;
+        let mut pending_key: Option<BatchKey> = None;
 
         for stmt in stmts {
-            let statement_key = wasm_statement_batch_key(&stmt);
+            let statement_key = statement_batch_key(&stmt);
             if !pending.is_empty() && statement_key != pending_key {
                 self.flush_planned_group(&mut pending, on_error, &mut results)
                     .await?;
@@ -985,7 +937,7 @@ impl Client {
                 }
             };
 
-            let key = wasm_planned_batch_key(&planned);
+            let key = planned.batch_key();
             if key.is_none() {
                 self.flush_planned_group(&mut pending, on_error, &mut results)
                     .await?;

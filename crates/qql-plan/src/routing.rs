@@ -99,15 +99,10 @@ pub struct CompiledStatement {
 ///
 /// Always sets `stmt_type` from [`crate::plan::PlannedOperation::compile_stmt_type`].
 /// REST path/method/payload are present only when a real Qdrant route exists.
-pub fn compile_statement(
-    statement: &Stmt,
-) -> Result<CompiledStatement, qql_core::error::QqlError> {
+pub fn compile_statement(statement: &Stmt) -> Result<CompiledStatement, qql_core::error::QqlError> {
     let op = plan(statement)?;
     let stmt_type = op.compile_stmt_type();
-    let route = match to_rest_route(&op) {
-        Ok(route) => Some(route),
-        Err(crate::plan::RestProjectionError::ClientSideOnly { .. }) => None,
-    };
+    let route = to_rest_route(&op).ok();
     Ok(CompiledStatement { stmt_type, route })
 }
 
@@ -172,7 +167,8 @@ mod tests {
             panic!("expected point lookup");
         };
         assert_eq!(request.shard_key.as_deref(), Some("tenant-a"));
-        assert!(try_route(&statement).unwrap()
+        assert!(try_route(&statement)
+            .unwrap()
             .body_json()
             .unwrap()
             .to_string()
