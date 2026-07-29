@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### 🏗️ Architecture
 - **Transport-agnostic Plan IR**: `qql-plan` is now free of REST/gRPC client types. `PlannedOperation` is the single source of truth, lowered directly by every backend (`RestQdrant`, `GrpcQdrant`, `EdgeQdrant`). `to_rest_route()` is fallible and `compile_statement()` returns `CompiledStatement { stmt_type, route }` for reliable SDK metadata.
 - **Single parser frontend**: Removed the pest runtime parser; `AstLowerer` is the sole production parser. `language/v1/grammar.pest` remains the canonical language contract, fed through `qql-grammar-gen` for docs and CI.
-- **Single embedding owner**: Extracted all embedding logic into the new `qql-embed` crate (was spread across `qql-plan`). `Embedder` trait now covers dense, sparse, multi (ColBERT), image (CLIP), cross-encoder rerank, and joint (BGE-M3 single-pass) embeddings.
+- **Single embedding owner**: All embedding logic now concentrated in `qql-embed` (removed the duplicate from `qql-plan`). `Embedder` trait covers dense, sparse, multi (ColBERT), image (CLIP), cross-encoder rerank, and joint (BGE-M3 single-pass) embeddings.
 - **Universal batch key**: `statement_batch_key()` and `PlannedOperation::batch_key()` enable cross-crate smart batching — contiguous same-collection queries and mutations are grouped automatically.
 - **Fail-closed injection**: `inject_shard_key` and `inject_filter` now reject unsupported statement types with clear errors instead of silently no-oping on DDL.
 
@@ -54,10 +54,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI: `qql doctor` (connection health + embedder snapshot), `qql config edge`, `--edge` flag for local execution, psql-style table output
 
 **Query & Config**:
-- `min_should` filter conjunction threshold, `FilterCompound.shard_key`, `QueryRequest.lookup_from`
-- `HNSW.inline_storage` config, `stemmer` validation on text index creation
+- Filter improvements: `min_should` conjunction threshold, filter-level shard key propagation, lookup collection support
+- `HNSW.inline_storage` config, `stemmer` support on text index creation
 - `GROUP BY` with `OFFSET` (via `group_offset`), `MMR` with sparse vector targets
-- Full REST/gRPC parity for all query variants, formula expressions, and geo/nested/match filters
+- Full REST/gRPC parity: all query variants, formula expressions, geo and nested/match filters
 
 ### 🐛 Fixed
 - gRPC dense `vector_params` now propagates OpenAPI `datatype` (uint8 / float16 / float32).
