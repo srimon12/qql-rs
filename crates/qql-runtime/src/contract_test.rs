@@ -699,8 +699,7 @@ mod tests {
     #[test]
     fn document_without_model_plans_successfully() {
         // Plan layer is transport-agnostic — MODEL is filled by the executor.
-        let result =
-            plan(&Parser::parse("QUERY 'hello' FROM docs USING dense LIMIT 5;").unwrap());
+        let result = plan(&Parser::parse("QUERY 'hello' FROM docs USING dense LIMIT 5;").unwrap());
         assert!(
             result.is_ok(),
             "plan should succeed without MODEL: {}",
