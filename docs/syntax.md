@@ -105,11 +105,13 @@ query-expr   = points
              | feedback
              | mmr
              | hybrid
+             | cross-rerank
              | rerank ;
 
 points       = "POINTS", "(", point-id, { ",", point-id }, ")" ;
 nearest      = [ "NEAREST" ], query-input ;
 query-input  = "TEXT", string, [ "MODEL", string ]
+             | "IMAGE", string, [ "MODEL", string ]
              | "VECTOR", vector-value
              | "POINT", point-id
              | string ;
@@ -142,6 +144,8 @@ hybrid       = "HYBRID", ( "TEXT", string, [ "MODEL", string ] | string ),
                [ "SPARSE", vector-name ],
                [ "FUSION", ( "RRF" | "DBSF" ) ] ;
 
+cross-rerank = "CROSS", "RERANK", ( "TEXT", string | string ), "MODEL", string,
+               [ "ON", "FIELD", field ] ;
 rerank       = "RERANK", rerank-input, "MODEL", string ;
 rerank-input = "TEXT", string | "VECTOR", vector-value | "POINT", point-id ;
 ```

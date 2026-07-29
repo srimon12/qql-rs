@@ -110,6 +110,9 @@ enum ConfigCommand {
         /// Local FastEmbed dense model name or alias.
         #[arg(long)]
         model: Option<String>,
+        /// Offline sparse model for fastembed (e.g. splade, bge-m3).
+        #[arg(long)]
+        sparse_model: Option<String>,
         /// Offline multivector model for fastembed (e.g. bge-m3).
         #[arg(long)]
         multi_model: Option<String>,
@@ -247,6 +250,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 in_memory,
                 embedder,
                 model,
+                sparse_model,
                 multi_model,
                 image_model,
                 reranker_model,
@@ -269,6 +273,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 on_disk_payload: !in_memory,
                 embedder,
                 model,
+                sparse_model,
                 multi_model,
                 image_model,
                 reranker_model,

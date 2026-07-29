@@ -94,6 +94,11 @@ pub struct SearchHit {
     pub score: f32,
     pub text: Option<String>,
     pub payload: Option<HashMap<String, serde_json::Value>>,
+    /// Source collection. Populated by cross-collection operations (e.g.
+    /// CROSS RERANK) so results are unambiguous when multiple collections
+    /// share the same point id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collection: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -925,19 +930,22 @@ impl Executor {
             )
         })?;
 
-        let mut by_id: HashMap<String, SearchHit> = HashMap::new();
+        let mut by_key: HashMap<(String, String), SearchHit> = HashMap::new();
         for (collection, request) in candidates {
             let op = qql_plan::PlannedOperation::Query {
                 collection: collection.clone(),
                 request: request.clone(),
             };
             let raw = self.client.execute_planned(&op).await?;
-            for hit in extract_search_hits(&raw) {
-                by_id.entry(hit.id.clone()).or_insert(hit);
+            for mut hit in extract_search_hits(&raw) {
+                hit.collection = Some(collection.clone());
+                by_key
+                    .entry((collection.clone(), hit.id.clone()))
+                    .or_insert(hit);
             }
         }
 
-        if by_id.is_empty() {
+        if by_key.is_empty() {
             return Ok(ExecResponse {
                 ok: true,
                 operation: "CROSS_RERANK".into(),
@@ -947,8 +955,14 @@ impl Executor {
         }
 
         // Stable order for scoring (then re-sort by pair score).
-        let mut hits: Vec<SearchHit> = by_id.into_values().collect();
-        hits.sort_by(|a, b| a.id.cmp(&b.id));
+        let mut hits: Vec<SearchHit> = by_key.into_values().collect();
+        hits.sort_by(|a, b| {
+            a.collection
+                .as_deref()
+                .unwrap_or("")
+                .cmp(b.collection.as_deref().unwrap_or(""))
+                .then_with(|| a.id.cmp(&b.id))
+        });
 
         let mut docs = Vec::with_capacity(hits.len());
         let mut keep_idx = Vec::with_capacity(hits.len());

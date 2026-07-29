@@ -351,6 +351,15 @@ fn create_executor(
             if let Ok(Some(v)) = dict.get_item("image_dimension") {
                 config.image_embedding_dimension = v.extract::<usize>()?;
             }
+            if let Ok(Some(v)) = dict.get_item("rerank_endpoint") {
+                config.rerank_endpoint = Some(v.extract::<String>()?);
+            }
+            if let Ok(Some(v)) = dict.get_item("rerank_api_key") {
+                config.rerank_api_key = Some(v.extract::<String>()?);
+            }
+            if let Ok(Some(v)) = dict.get_item("rerank_model") {
+                config.rerank_model = Some(v.extract::<String>()?);
+            }
         }
     }
 

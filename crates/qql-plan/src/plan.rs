@@ -580,7 +580,6 @@ fn validate_query_expr(expression: &QueryExpr) -> Result<(), QqlError> {
 }
 
 fn validate_query_target_kinds(expression: &QueryExpr) -> Result<(), QqlError> {
-
     let (target, inputs): (Option<&VectorTarget>, Vec<&QueryInput>) = match expression {
         QueryExpr::Nearest { input, using, .. } => (using.as_ref(), vec![input]),
         QueryExpr::Recommend {
@@ -1065,7 +1064,7 @@ mod tests {
 
     #[test]
     fn plan_and_route_agree_on_query() {
-        let stmt = Parser::parse("QUERY 'hello' FROM docs LIMIT 5;").unwrap();
+        let stmt = Parser::parse("QUERY TEXT 'hello' MODEL 'e5' FROM docs LIMIT 5;").unwrap();
         let op = plan(&stmt).unwrap();
         let route = to_rest_route(&op).expect("rest route");
         assert_eq!(route.path, "/collections/docs/points/query");
@@ -1188,7 +1187,11 @@ mod tests {
         assert_eq!(op.collection(), Some("docs"));
         assert_eq!(op.shard_key(), Some("tenant_1"));
 
-        if let PlannedOperation::DeletePayload { collection, request } = &op {
+        if let PlannedOperation::DeletePayload {
+            collection,
+            request,
+        } = &op
+        {
             assert_eq!(collection, "docs");
             assert_eq!(request.keys, vec!["draft", "temp_token"]);
             assert_eq!(request.shard_key.as_deref(), Some("tenant_1"));

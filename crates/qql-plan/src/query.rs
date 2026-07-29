@@ -1,4 +1,5 @@
 use crate::filter::{lower_filter, top_level_filter, top_level_filter_with_shard};
+use crate::semantic::PlanQueryInput;
 use crate::types::*;
 use qql_core::ast::{
     FusionMethod, OrderDirection, PrefetchSource, QueryExpr, QueryInput, QueryStmt, VectorValue,
@@ -380,6 +381,9 @@ pub fn lower_query_request(query: &QueryStmt) -> Result<QueryRequest, QqlError> 
     let (with_payload, with_vector) = lower_output_selector(&query.output);
     let (query_variant, using, prefetch) = build_query_with_prefetch(query)?;
 
+    validate_inference_inputs_for_variant(&query_variant)?;
+    validate_inference_inputs_prefetches(&prefetch)?;
+
     let (timeout, consistency) = lower_request_opts(query.params.as_ref());
     Ok(QueryRequest {
         query: query_variant,
@@ -414,6 +418,9 @@ pub fn lower_query_groups_request(query: &QueryStmt) -> Result<QueryGroupsReques
 
     let (with_payload, with_vector) = lower_output_selector(&query.output);
     let (query_variant, using, prefetch) = build_query_with_prefetch(query)?;
+
+    validate_inference_inputs_for_variant(&query_variant)?;
+    validate_inference_inputs_prefetches(&prefetch)?;
 
     let (timeout, consistency) = lower_request_opts(query.params.as_ref());
     Ok(QueryGroupsRequest {
@@ -478,7 +485,7 @@ fn build_query_with_prefetch(
             };
             let sparse_prefetch = PrefetchRequest {
                 query: Some(QueryVariant::Nearest(NearestQuery {
-                    nearest: build_text_input(text, &None),
+                    nearest: build_text_input(text, model),
                     mmr: None,
                 })),
                 using: sparse_vector.clone(),
@@ -588,6 +595,83 @@ fn build_text_input(text: &str, model: &Option<String>) -> PlanQueryInput {
         text: text.to_string(),
         model: model.clone(),
     }
+}
+
+/// Validate that all [`PlanQueryInput::Document`] and [`PlanQueryInput::Image`]
+/// instances carry a non-empty model. Server-side inference requires a model;
+/// without it the REST body would be invalid per the OpenAPI `Document`/`Image`
+/// schemas (both require `"model"` of `minLength: 1`).
+///
+/// Client-side embedding resolves inputs to vectors before planning, so a
+/// Document/Image reaching this point means server inference was intended.
+fn validate_inference_inputs_for_variant(variant: &QueryVariant) -> Result<(), QqlError> {
+    let inputs: Vec<&PlanQueryInput> = match variant {
+        QueryVariant::Nearest(n) => vec![&n.nearest],
+        QueryVariant::Recommend { recommend: r } => {
+            r.positive.iter().chain(r.negative.iter()).collect()
+        }
+        QueryVariant::Context { context: ctx } => ctx
+            .iter()
+            .flat_map(|p| [&p.positive, &p.negative])
+            .collect(),
+        QueryVariant::Discover { discover: d } => {
+            let mut v: Vec<&PlanQueryInput> = d
+                .context
+                .iter()
+                .flat_map(|p| [&p.positive, &p.negative])
+                .collect();
+            v.push(&d.target);
+            v
+        }
+        QueryVariant::RelevanceFeedback {
+            relevance_feedback: rf,
+        } => {
+            let mut v: Vec<&PlanQueryInput> = rf.feedback.iter().map(|fi| &fi.example).collect();
+            v.push(&rf.target);
+            v
+        }
+        QueryVariant::OrderBy { .. }
+        | QueryVariant::Sample { .. }
+        | QueryVariant::Fusion { .. }
+        | QueryVariant::Rrf(_)
+        | QueryVariant::Formula(_) => return Ok(()),
+    };
+
+    for input in inputs {
+        check_inference_input(input)?;
+    }
+    Ok(())
+}
+
+fn check_inference_input(input: &PlanQueryInput) -> Result<(), QqlError> {
+    match input {
+        PlanQueryInput::Document { model, .. } | PlanQueryInput::Image { model, .. } => {
+            let has_model = model.as_ref().is_some_and(|m| !m.is_empty());
+            if !has_model {
+                return Err(QqlError::validation(
+                    "QQL-PLAN-INFERENCE",
+                    "Document/Image input requires a MODEL for server-side inference; \
+                     resolve client-side before planning or supply MODEL in the query",
+                    None,
+                ));
+            }
+        }
+        PlanQueryInput::Point(_) | PlanQueryInput::Vector(_) => {}
+    }
+    Ok(())
+}
+
+/// Recurse through a prefetch chain, validating all inference inputs.
+fn validate_inference_inputs_prefetches(prefetches: &[PrefetchRequest]) -> Result<(), QqlError> {
+    for pf in prefetches {
+        if let Some(ref qv) = pf.query {
+            validate_inference_inputs_for_variant(qv)?;
+        }
+        if let Some(ref nested) = pf.prefetch {
+            validate_inference_inputs_prefetches(nested)?;
+        }
+    }
+    Ok(())
 }
 
 pub fn lower_search_params(params: &qql_core::ast::SearchParams) -> Option<SearchParamsRequest> {
@@ -700,20 +784,22 @@ mod tests {
 
     #[test]
     fn acorn_true_serializes_enable() {
-        let json = parse_route("QUERY 'hello' FROM docs PARAMS (acorn = true) LIMIT 5;");
+        let json =
+            parse_route("QUERY TEXT 'hello' MODEL 'e5' FROM docs PARAMS (acorn = true) LIMIT 5;");
         assert_eq!(json["params"]["acorn"]["enable"], true);
     }
 
     #[test]
     fn acorn_false_serializes_enable_false() {
-        let json = parse_route("QUERY 'hello' FROM docs PARAMS (acorn = false) LIMIT 5;");
+        let json =
+            parse_route("QUERY TEXT 'hello' MODEL 'e5' FROM docs PARAMS (acorn = false) LIMIT 5;");
         assert_eq!(json["params"]["acorn"]["enable"], false);
     }
 
     #[test]
     fn acorn_max_selectivity_serializes() {
         let json = parse_route(
-            "QUERY 'hello' FROM docs PARAMS (acorn = true, max_selectivity = 0.4) LIMIT 5;",
+            "QUERY TEXT 'hello' MODEL 'e5' FROM docs PARAMS (acorn = true, max_selectivity = 0.4) LIMIT 5;",
         );
         assert_eq!(json["params"]["acorn"]["enable"], true);
         assert_eq!(json["params"]["acorn"]["max_selectivity"], 0.4);
@@ -724,7 +810,7 @@ mod tests {
         // OpenAPI: timeout + consistency are query params on POST …/points/query.
         let route = crate::plan::try_route(
             &Parser::parse(
-                "QUERY 'hello' FROM docs PARAMS (timeout = 30, consistency = majority) LIMIT 5;",
+                "QUERY TEXT 'hello' MODEL 'e5' FROM docs PARAMS (timeout = 30, consistency = majority) LIMIT 5;",
             )
             .unwrap(),
         )
@@ -755,7 +841,10 @@ mod tests {
     #[test]
     fn consistency_factor_serializes_as_integer_query_param() {
         let route = crate::plan::try_route(
-            &Parser::parse("QUERY 'hello' FROM docs PARAMS (consistency = 2) LIMIT 5;").unwrap(),
+            &Parser::parse(
+                "QUERY TEXT 'hello' MODEL 'e5' FROM docs PARAMS (consistency = 2) LIMIT 5;",
+            )
+            .unwrap(),
         )
         .unwrap();
         assert!(route
@@ -767,7 +856,8 @@ mod tests {
     #[test]
     fn group_by_with_offset_is_supported() {
         let op = crate::plan::plan(
-            &Parser::parse("QUERY TEXT 'x' FROM docs GROUP BY topic LIMIT 10 OFFSET 5;").unwrap(),
+            &Parser::parse("QUERY TEXT 'x' MODEL 'e5' FROM docs GROUP BY topic LIMIT 10 OFFSET 5;")
+                .unwrap(),
         )
         .unwrap();
         if let crate::plan::PlannedOperation::QueryGroups { request, .. } = op {
@@ -782,7 +872,7 @@ mod tests {
     fn mmr_with_sparse_using_is_supported() {
         let op = crate::plan::plan(
             &Parser::parse(
-                "QUERY MMR TEXT 'q' DIVERSITY 0.5 CANDIDATES 20 FROM docs USING sparse AS SPARSE LIMIT 5;",
+                "QUERY MMR TEXT 'q' MODEL 'e5' DIVERSITY 0.5 CANDIDATES 20 FROM docs USING sparse AS SPARSE LIMIT 5;",
             )
             .unwrap(),
         );
@@ -792,7 +882,7 @@ mod tests {
     #[test]
     fn prefetch_preserves_filter_limit_and_params() {
         let json = parse_route(
-            "WITH a AS (QUERY TEXT 'x' FROM docs USING dense WHERE status = 'active' PARAMS (hnsw_ef = 64) SCORE THRESHOLD 0.5 LIMIT 50) \
+            "WITH a AS (QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE status = 'active' PARAMS (hnsw_ef = 64) SCORE THRESHOLD 0.5 LIMIT 50) \
              QUERY FUSION RRF FROM docs PREFETCH (a) LIMIT 10;",
         );
         let pf = &json["prefetch"][0];
@@ -809,7 +899,7 @@ mod tests {
     #[test]
     fn prefetch_cte_name_is_case_insensitive() {
         let json = parse_route(
-            "WITH DenseHits AS (QUERY TEXT 'x' FROM docs USING dense LIMIT 20) \
+            "WITH DenseHits AS (QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense LIMIT 20) \
              QUERY FUSION RRF FROM docs PREFETCH (densehits) LIMIT 5;",
         );
         let pf = &json["prefetch"][0];
@@ -838,7 +928,7 @@ mod tests {
     #[test]
     fn hybrid_expands_to_prefetches() {
         let json = parse_route(
-            "QUERY HYBRID TEXT 'ai search' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10;",
+            "QUERY HYBRID TEXT 'ai search' MODEL 'bge' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10;",
         );
         assert_eq!(json["query"]["fusion"], "rrf");
         assert!(json["query"].get("nearest").is_none());
@@ -849,10 +939,10 @@ mod tests {
     #[test]
     fn using_hybrid_expands_like_front_form() {
         let front = parse_route(
-            "QUERY HYBRID TEXT 'ai search' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10;",
+            "QUERY HYBRID TEXT 'ai search' MODEL 'bge' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10;",
         );
         let tail = parse_route(
-            "QUERY TEXT 'ai search' FROM docs USING HYBRID DENSE dense SPARSE sparse FUSION RRF LIMIT 10;",
+            "QUERY TEXT 'ai search' MODEL 'bge' FROM docs USING HYBRID DENSE dense SPARSE sparse FUSION RRF LIMIT 10;",
         );
         assert_eq!(front, tail);
         assert_eq!(tail["query"]["fusion"], "rrf");
@@ -866,8 +956,9 @@ mod tests {
 
     #[test]
     fn using_hybrid_dbsf_and_defaults() {
-        let json =
-            parse_route("QUERY 'q' FROM docs USING HYBRID DENSE d SPARSE s FUSION DBSF LIMIT 5;");
+        let json = parse_route(
+            "QUERY TEXT 'q' MODEL 'bge' FROM docs USING HYBRID DENSE d SPARSE s FUSION DBSF LIMIT 5;",
+        );
         assert_eq!(json["query"]["fusion"], "dbsf");
         assert_eq!(json["prefetch"][0]["using"], "d");
         assert_eq!(json["prefetch"][1]["using"], "s");
@@ -875,9 +966,18 @@ mod tests {
     }
 
     #[test]
-    fn nearest_text_is_string() {
-        let json = parse_route("QUERY 'hello world' FROM docs LIMIT 5;");
-        assert_eq!(json["query"]["nearest"], "hello world");
+    fn nearest_text_requires_model() {
+        // Bare text without MODEL is rejected at plan time because the
+        // OpenAPI Document schema requires both "text" and "model" fields.
+        let err =
+            crate::plan::plan(&Parser::parse("QUERY 'hello world' FROM docs LIMIT 5;").unwrap())
+                .unwrap_err();
+        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+        assert!(
+            err.message.contains("MODEL") || err.message.contains("model"),
+            "error should mention MODEL requirement: {}",
+            err.message
+        );
     }
 
     #[test]
@@ -897,9 +997,10 @@ mod tests {
     #[test]
     fn nearest_with_mmr() {
         let json = parse_route(
-            "QUERY MMR TEXT 'query' DIVERSITY 0.4 CANDIDATES 100 FROM docs USING dense LIMIT 5;",
+            "QUERY MMR TEXT 'query' MODEL 'embedder' DIVERSITY 0.4 CANDIDATES 100 FROM docs USING dense LIMIT 5;",
         );
-        assert_eq!(json["query"]["nearest"], "query");
+        assert_eq!(json["query"]["nearest"]["text"], "query");
+        assert_eq!(json["query"]["nearest"]["model"], "embedder");
         assert_eq!(json["query"]["mmr"]["diversity"], 0.4);
         assert_eq!(json["query"]["mmr"]["candidates_limit"], 100);
     }
@@ -946,15 +1047,16 @@ mod tests {
     #[test]
     fn prefetch_serializes_lookup_from() {
         let json = parse_route(
-            "QUERY NEAREST POINT 42 FROM docs USING dense PREFETCH (QUERY TEXT 'x' FROM docs USING dense LIMIT 50) LIMIT 10;",
+            "QUERY NEAREST POINT 42 FROM docs USING dense PREFETCH (QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense LIMIT 50) LIMIT 10;",
         );
         let pf = &json["prefetch"][0];
-        assert_eq!(pf["query"]["nearest"], "x");
+        assert_eq!(pf["query"]["nearest"]["text"], "x");
+        assert_eq!(pf["query"]["nearest"]["model"], "e5");
     }
 
     #[test]
     fn query_request_no_group_fields() {
-        let json = parse_route("QUERY 'hello' FROM docs LIMIT 5;");
+        let json = parse_route("QUERY TEXT 'hello' MODEL 'e5' FROM docs LIMIT 5;");
         assert!(json.get("group_by").is_none());
         assert!(json.get("group_size").is_none());
     }
@@ -962,7 +1064,7 @@ mod tests {
     #[test]
     fn grouped_request_has_group_fields() {
         let json = parse_route(
-            "QUERY 'news' FROM docs GROUP BY topic SIZE 5 LOOKUP FROM topics LIMIT 20;",
+            "QUERY TEXT 'news' MODEL 'e5' FROM docs GROUP BY topic SIZE 5 LOOKUP FROM topics LIMIT 20;",
         );
         assert_eq!(json["group_by"], "topic");
         assert_eq!(json["group_size"], 5);
@@ -985,7 +1087,7 @@ mod tests {
     #[test]
     fn fusion_query() {
         let json = parse_route(
-            "WITH a AS (QUERY 'x' FROM docs USING dense LIMIT 100) QUERY FUSION RRF FROM docs PREFETCH (a) LIMIT 10;",
+            "WITH a AS (QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense LIMIT 100) QUERY FUSION RRF FROM docs PREFETCH (a) LIMIT 10;",
         );
         assert_eq!(json["query"]["fusion"], "rrf");
     }
@@ -1016,12 +1118,59 @@ mod tests {
     #[test]
     fn rerank_has_prefetches_and_model() {
         let json = parse_route(
-            "QUERY RERANK TEXT 'travel tips' MODEL 'colbert-v2' FROM docs USING colbert PREFETCH (QUERY 'travel tips' FROM docs USING dense LIMIT 50) LIMIT 10;",
+            "QUERY RERANK TEXT 'travel tips' MODEL 'colbert-v2' FROM docs USING colbert PREFETCH (QUERY TEXT 'travel tips' MODEL 'e5' FROM docs USING dense LIMIT 50) LIMIT 10;",
         );
         assert_eq!(json["using"], "colbert");
         let nearest = &json["query"]["nearest"];
         assert_eq!(nearest["text"], "travel tips");
         assert_eq!(nearest["model"], "colbert-v2");
         assert_eq!(json["prefetch"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn unmodeled_document_rejected_at_plan() {
+        let err =
+            crate::plan::plan(&Parser::parse("QUERY 'bare string' FROM docs LIMIT 5;").unwrap())
+                .unwrap_err();
+        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+        assert!(err.message.contains("MODEL") || err.message.contains("model"));
+    }
+
+    #[test]
+    fn hybrid_without_model_rejected_at_plan() {
+        let err = crate::plan::plan(
+            &Parser::parse(
+                "QUERY HYBRID TEXT 'search' DENSE d SPARSE s FUSION RRF FROM docs LIMIT 10;",
+            )
+            .unwrap(),
+        )
+        .unwrap_err();
+        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+        assert!(err.message.contains("MODEL") || err.message.contains("model"));
+    }
+
+    #[test]
+    fn document_and_image_with_model_are_objects() {
+        // Verify that modelled Document is always an object, never a bare string.
+        let doc_json = parse_route("QUERY TEXT 'doc text' MODEL 'my-model' FROM docs LIMIT 5;");
+        let nearest = &doc_json["query"]["nearest"];
+        assert!(
+            nearest.is_object(),
+            "modelled Document must be object: {nearest}"
+        );
+        assert_eq!(nearest["text"], "doc text");
+        assert_eq!(nearest["model"], "my-model");
+
+        // Verify that modelled Image is always an object with both image and model.
+        let img_json = parse_route(
+            "QUERY IMAGE 'https://img.example.com/cat.jpg' MODEL 'clip-vision' FROM docs USING img LIMIT 5;",
+        );
+        let img_nearest = &img_json["query"]["nearest"];
+        assert!(
+            img_nearest.is_object(),
+            "modelled Image must be object: {img_nearest}"
+        );
+        assert_eq!(img_nearest["image"], "https://img.example.com/cat.jpg");
+        assert_eq!(img_nearest["model"], "clip-vision");
     }
 }

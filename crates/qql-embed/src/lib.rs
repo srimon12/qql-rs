@@ -18,8 +18,8 @@ mod resolve_test;
 mod sparse_test;
 
 pub use embedder::{
-    cross_rerank_unsupported_error, image_unsupported_error, multi_unsupported_error, Embedder,
-    EmbedderBound, SparseEmbedder,
+    cross_rerank_unsupported_error, image_unsupported_error, multi_unsupported_error,
+    sparse_model_unsupported_error, Embedder, EmbedderBound, JointEmbeddingOutput, SparseEmbedder,
 };
 pub use resolve::{resolve_embeddings, DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME};
 pub use sparse::SparseVector;

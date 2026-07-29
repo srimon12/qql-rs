@@ -487,6 +487,44 @@ class TestHttpEmbedder(unittest.TestCase):
         result = client.explain('QUERY "hello" FROM docs LIMIT 5')
         self.assertTrue(result["ok"])
 
+    def test_f7_dict_embedder_with_rerank_fields_accepted(self):
+        """RT-05: remote embedder config with rerank_* fields must not error."""
+        embedder_dict = {
+            "endpoint": "http://localhost:8080/v1/embeddings",
+            "model": "text-embedding-3-small",
+            "dimension": 1536,
+            "rerank_endpoint": "http://localhost:8080/rerank",
+            "rerank_api_key": "rk-test-key",
+            "rerank_model": "test-reranker",
+        }
+        client = pyqql.Client(url="http://localhost:6333", embedder=embedder_dict)
+        result = client.explain('QUERY "hello" FROM docs LIMIT 5')
+        self.assertTrue(result["ok"])
+
+    def test_f8_dict_embedder_rerank_multi_image_all_together(self):
+        """RT-05: full remote embedder config with all optional fields accepted."""
+        embedder_dict = {
+            "endpoint": "http://localhost:8080/v1/embeddings",
+            "model": "text-embedding-3-small",
+            "dimension": 1536,
+            "api_key": "emb-key",
+            "multi_endpoint": "http://localhost:8080/v1/multi",
+            "multi_api_key": "multi-key",
+            "multi_model": "colbert-model",
+            "multi_dimension": 96,
+            "image_endpoint": "http://localhost:8080/v1/images",
+            "image_api_key": "img-key",
+            "image_model": "clip-model",
+            "image_dimension": 512,
+            "rerank_endpoint": "http://localhost:8080/rerank",
+            "rerank_api_key": "rk-key",
+            "rerank_model": "bge-reranker",
+        }
+        client = pyqql.Client(url="http://localhost:6333", embedder=embedder_dict)
+        self.assertIsNotNone(client)
+        result = client.explain('QUERY "hello" FROM docs LIMIT 5')
+        self.assertTrue(result["ok"])
+
 
 # ============================================================================
 # Category G: Full E2E pipeline against live Qdrant

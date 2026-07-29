@@ -9,22 +9,25 @@ Three embedding strategies produce an [`Executor`] backed by [`EdgeQdrant`]:
 | Constructor | Embedder | Use case |
 |------------|----------|----------|
 | `local_executor()` | `FastEmbedder` (ONNX, default BGE small 384-d) | Fully offline dense |
-| `local_executor_with_options()` | Dense ONNX + optional **multi** (`multi_model: "bge-m3"`) | Offline dense + ColBERT |
+| `local_executor_with_options()` | Dense + optional **sparse** (`sparse_model`), **multi** (`multi_model`), **image** (`image_model`), **reranker** (`reranker_model`) | Offline dense + sparse + ColBERT + CLIP + cross-encoder |
 | `http_executor()` / `http_executor_with_multi()` | `HttpEmbedder` (OpenAI-compatible) | Remote dense / multi APIs |
 | `custom_executor()` | Any `Arc<dyn Embedder>` | GPU, ensemble, caching |
-| `list_embedding_models()` | — | Dense ONNX + multi (BGE-M3) + image (CLIP vision) catalog |
+| `list_embedding_models()` | — | Dense + sparse (SPLADE) + multi (BGE-M3) + image (CLIP vision) catalog |
 
 ### FastEmbed roles (do not conflate)
 
 | FastEmbed | QQL |
 |---|---|
 | `TextEmbedding` (BGE, MiniLM, CLIP **text**, …) | Dense (`TEXT`) |
+| `SparseTextEmbedding` (SPLADE, BGE-M3 sparse) | **Sparse** (`USING SPARSE MODEL '…'`) — real ONNX inference when `sparse_model` is set |
 | `ImageEmbedding` (CLIP vision, …) | Dense (`IMAGE` / `image_model`) |
-| `Bgem3Embedding.colbert` | **Multi** (`MultiDense`) — offline late interaction / MaxSim `RERANK` |
+| `Bgem3Embedding` (joint dense + sparse + ColBERT) | **Multi** (`MultiDense` via `multi_model`) + single-pass `embed_joint` |
 | `TextRerank` (bge-reranker, …) | **`CROSS RERANK`** pair scorer (client-side; not late-interaction `RERANK`) |
 
 CLIP is dual-encoder dense. Multivector is ColBERT bags only. Late-interaction
 `RERANK` uses multi; cross-encoder uses `CROSS RERANK` + `reranker_model`.
+Sparse defaults to local BM25 hash; set `sparse_model` for real SPLADE/BGE-M3
+sparse inference.
 
 ```rust
 // Offline CLIP text + vision
@@ -114,7 +117,8 @@ Intel Mac users should disable default features and use `http-embedding` or
   MMR (dense), recommendation (`best_score`/`sum_scores`), context, discover,
   sample, formula, relevance-feedback, and order-by queries; point-reference
   and text inputs that cannot be embedded locally are rejected
-- Multivector + `CROSS RERANK` work only when the matching models are opted in
+- Model-based sparse inference, multivector, and `CROSS RERANK` require the matching models to be opted in
+- Sparse (`sparse_model`) defaults to local BM25 hash; opt in with `sparse_model: Some("splade".into())` for real ONNX sparse inference
 - `IMAGE` expects local filesystem paths (no remote URL fetch)
 - Query/update “batch” is fan-out, not a single native batch RPC
 

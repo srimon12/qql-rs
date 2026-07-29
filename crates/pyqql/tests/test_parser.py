@@ -57,6 +57,23 @@ class TestPyQql(unittest.TestCase):
         self.assertTrue(res["ok"])
         self.assertIn("Statement: QUERY", res["plan"])
 
+    def test_client_dict_embedder_with_rerank(self):
+        """RT-05: remote embedder config with rerank_* fields accepted."""
+        client = pyqql.Client(
+            "http://localhost:6333",
+            embedder={
+                "endpoint": "http://localhost:11434/v1/embeddings",
+                "model": "nomic-embed-text",
+                "dimension": 768,
+                "rerank_endpoint": "http://localhost:11434/rerank",
+                "rerank_api_key": "rk-key",
+                "rerank_model": "test-reranker",
+            },
+        )
+        res = client.explain("QUERY 'hello' FROM docs LIMIT 10")
+        self.assertTrue(res["ok"])
+        self.assertIn("Statement: QUERY", res["plan"])
+
     def test_embedder_validation(self):
         with self.assertRaisesRegex(ValueError, "model is required"):
             pyqql.HttpEmbedder(

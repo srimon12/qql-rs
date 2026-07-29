@@ -163,7 +163,21 @@ QUERY TEXT 'acute bronchitis treatment protocols' FROM medical_records
 
 **Why this works:** Multivector is a **dense role with multi shape**, not a third sparse/dense kind. Schema marks `colbert` via `WITH MULTIVECTOR`; runtime sets `multi` before embedding so TEXT becomes `MultiDense` (`[[f32,…],…]`). Offline without schema, use `AS MULTI`.
 
+**Dimension note:** The vector dimension of a multivector column must match the
+selected model's token dimension. BGE-M3 outputs 1024-dimensional tokens; the
+`edge` `multi_model: "bge-m3"` path produces 1024-d bags. Smaller
+late-interaction models such as `answerai-colbert-small-v1` output 128-d tokens.
+Set `VECTOR(dim, COSINE)` accordingly.
+
 ```sql
+-- BGE-M3 (1024-d tokens, compatible with edge multi_model: "bge-m3"):
+CREATE COLLECTION docs_bge (
+  dense VECTOR(384, COSINE),
+  sparse SPARSE,
+  colbert VECTOR(1024, COSINE) WITH MULTIVECTOR (comparator = 'max_sim')
+);
+
+-- Smaller ColBERT model (128-d tokens):
 CREATE COLLECTION docs (
   dense VECTOR(384, COSINE),
   sparse SPARSE,
@@ -208,6 +222,7 @@ UPSERT INTO docs VALUES {
 
 **Key decisions:**
 - Kind is dense; shape is multi (`MultiDense`).
+- Token dimension depends on model: BGE-M3 → 1024-d, smaller ColBERT models → 128-d. Match `VECTOR(dim, ...)` to the actual model.
 - Host embedder must implement `embed_multi` for TEXT → multivector; otherwise pass `VECTOR [[...]]` or precomputed upsert vectors.
 - `USING sparse` in a CTE never silently dense-embeds when schema marks sparse.
 

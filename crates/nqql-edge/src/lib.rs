@@ -386,6 +386,9 @@ pub struct LocalExecutorOptions {
     /// (`Xenova/bge-small-en-v1.5`), or short aliases (`bge-small-en-v1.5`).
     /// Default: `BGESmallENV15` (384-d).
     pub model: Option<String>,
+    /// Offline sparse model (SPLADE or BGE-M3 via SparseTextEmbedding), e.g. `"splade"`.
+    /// `None` → local BM25 hashing for sparse requests.
+    pub sparse_model: Option<String>,
     /// Offline multivector model (BGE-M3 ColBERT), e.g. `"bge-m3"`.
     pub multi_model: Option<String>,
     /// Offline CLIP vision model, e.g. `"clip-vision"` / `"ClipVitB32"`.
@@ -426,6 +429,7 @@ pub fn local_executor(
         qql_edge::LocalExecutorOptions {
             on_disk_payload: opts.on_disk_payload.unwrap_or(true),
             model: opts.model,
+            sparse_model: opts.sparse_model,
             multi_model: opts.multi_model,
             image_model: opts.image_model,
             reranker_model: opts.reranker_model,
@@ -513,6 +517,10 @@ fn standalone_local_opts(options: Option<&serde_json::Value>) -> LocalExecutorOp
             .and_then(|v| v.as_bool()),
         model: options
             .and_then(|o| o.get("model"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        sparse_model: options
+            .and_then(|o| o.get("sparseModel").or_else(|| o.get("sparse_model")))
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
         multi_model: options
@@ -643,4 +651,46 @@ pub async fn execute(
         )?
     };
     client.execute(query, options).await
+}
+
+#[cfg(test)]
+#[cfg(feature = "fastembed-local")]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_executor_options_default_has_no_sparse_model() {
+        let opts = LocalExecutorOptions::default();
+        assert!(opts.sparse_model.is_none());
+    }
+
+    #[test]
+    fn local_executor_options_with_sparse_model() {
+        let opts = LocalExecutorOptions {
+            sparse_model: Some("splade".into()),
+            ..Default::default()
+        };
+        assert_eq!(opts.sparse_model.as_deref(), Some("splade"));
+    }
+
+    #[test]
+    fn standalone_local_opts_camel_case_sparse_model() {
+        let opts = serde_json::json!({ "sparseModel": "bge-m3" });
+        let lo = standalone_local_opts(Some(&opts));
+        assert_eq!(lo.sparse_model.as_deref(), Some("bge-m3"));
+    }
+
+    #[test]
+    fn standalone_local_opts_snake_case_sparse_model() {
+        let opts = serde_json::json!({ "sparse_model": "splade" });
+        let lo = standalone_local_opts(Some(&opts));
+        assert_eq!(lo.sparse_model.as_deref(), Some("splade"));
+    }
+
+    #[test]
+    fn standalone_local_opts_no_sparse_model_is_none() {
+        let opts = serde_json::json!({});
+        let lo = standalone_local_opts(Some(&opts));
+        assert!(lo.sparse_model.is_none());
+    }
 }

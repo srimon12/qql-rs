@@ -57,6 +57,11 @@ pub struct LocalExecutorOptions {
     /// `None` → default `BGESmallENV15` (384-d).
     #[cfg(feature = "fastembed-local")]
     pub model: Option<String>,
+    /// Offline sparse model (SPLADE or BGE-M3 via `SparseTextEmbedding`).
+    /// e.g. `"splade"`, `"bge-m3"`. When set, `embed_sparse` uses real ONNX
+    /// inference. `None` → local BM25 hashing for sparse requests.
+    #[cfg(feature = "fastembed-local")]
+    pub sparse_model: Option<String>,
     /// Offline multivector model (BGE-M3 ColBERT). e.g. `"bge-m3"`.
     /// When set, `embed_multi` / multivector RERANK work with no network.
     #[cfg(feature = "fastembed-local")]
@@ -106,6 +111,7 @@ pub fn local_executor_with_options(
     let client = Box::new(EdgeQdrant::new(data_dir, opts.on_disk_payload));
     let embedder = FastEmbedder::try_with_options(FastEmbedderOptions {
         model: opts.model,
+        sparse_model: opts.sparse_model,
         multi_model: opts.multi_model,
         image_model: opts.image_model,
         reranker_model: opts.reranker_model,
@@ -122,6 +128,7 @@ pub fn local_executor_with_options(
         inference_mode: "local".to_string(),
         embedding_dimension: embedder.dimension(),
         embedding_model: Some(embedder.model_name().to_string()),
+        sparse_inference_model: embedder.sparse_model_code().map(str::to_string),
         multi_embedding_model: embedder.multi_model_code().map(str::to_string),
         multi_embedding_dimension: multi_dim,
         image_embedding_model: embedder.image_model_code().map(str::to_string),
@@ -297,6 +304,23 @@ mod tests {
                 values: vec![1.0],
             })
         }
+    }
+
+    #[test]
+    #[cfg(feature = "fastembed-local")]
+    fn local_executor_options_default_has_no_sparse_model() {
+        let opts = LocalExecutorOptions::default();
+        assert!(opts.sparse_model.is_none());
+    }
+
+    #[test]
+    #[cfg(feature = "fastembed-local")]
+    fn local_executor_options_with_sparse_model() {
+        let opts = LocalExecutorOptions {
+            sparse_model: Some("splade".into()),
+            ..Default::default()
+        };
+        assert_eq!(opts.sparse_model.as_deref(), Some("splade"));
     }
 
     #[test]

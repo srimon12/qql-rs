@@ -58,7 +58,10 @@ mod tests {
         // Core variants + multi / hybrid / formula / groups-related nearest.
         let query_cases: &[(&str, &str)] = &[
             ("sample", "QUERY SAMPLE RANDOM FROM docs LIMIT 10;"),
-            ("nearest text", "QUERY 'stroke' FROM docs LIMIT 10;"),
+            (
+                "nearest text",
+                "QUERY TEXT 'stroke' MODEL 'e5' FROM docs LIMIT 10;",
+            ),
             (
                 "nearest vector",
                 "QUERY NEAREST VECTOR [0.1, 0.2] FROM docs USING dense LIMIT 5;",
@@ -89,23 +92,23 @@ mod tests {
             ),
             (
                 "fusion",
-                "WITH a AS (QUERY 'x' FROM docs USING dense LIMIT 100) QUERY FUSION RRF FROM docs PREFETCH (a) LIMIT 10;",
+                "WITH a AS (QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense LIMIT 100) QUERY FUSION RRF FROM docs PREFETCH (a) LIMIT 10;",
             ),
             (
                 "hybrid",
-                "QUERY HYBRID TEXT 'x' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10;",
+                "QUERY HYBRID TEXT 'x' MODEL 'bge' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10;",
             ),
             (
                 "using hybrid",
-                "QUERY TEXT 'x' FROM docs USING HYBRID DENSE dense SPARSE sparse FUSION DBSF LIMIT 10;",
+                "QUERY TEXT 'x' MODEL 'bge' FROM docs USING HYBRID DENSE dense SPARSE sparse FUSION DBSF LIMIT 10;",
             ),
             (
                 "mmr",
-                "QUERY MMR TEXT 'x' DIVERSITY 0.4 CANDIDATES 100 FROM docs USING dense LIMIT 5;",
+                "QUERY MMR TEXT 'x' MODEL 'embedder' DIVERSITY 0.4 CANDIDATES 100 FROM docs USING dense LIMIT 5;",
             ),
             (
                 "rerank late-interaction",
-                "QUERY RERANK TEXT 'travel' MODEL 'colbert' FROM docs USING colbert PREFETCH (QUERY 'travel' FROM docs USING dense LIMIT 50) LIMIT 10;",
+                "QUERY RERANK TEXT 'travel' MODEL 'colbert' FROM docs USING colbert PREFETCH (QUERY TEXT 'travel' MODEL 'e5' FROM docs USING dense LIMIT 50) LIMIT 10;",
             ),
             (
                 "formula",
@@ -151,7 +154,7 @@ mod tests {
         // Hybrid expands to fusion + two prefetches — body is QueryRequest-shaped.
         {
             let stmt = Parser::parse(
-                "QUERY TEXT 'x' FROM docs USING HYBRID DENSE dense SPARSE sparse LIMIT 10;",
+                "QUERY TEXT 'x' MODEL 'bge' FROM docs USING HYBRID DENSE dense SPARSE sparse LIMIT 10;",
             )
             .unwrap();
             let json = try_route(&stmt).unwrap().body_json().unwrap();
@@ -163,7 +166,7 @@ mod tests {
         // Groups request (no offset) validates as QueryGroupsRequest.
         {
             let stmt = Parser::parse(
-                "QUERY TEXT 'x' FROM docs USING dense GROUP BY topic SIZE 3 LIMIT 10;",
+                "QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense GROUP BY topic SIZE 3 LIMIT 10;",
             )
             .unwrap();
             let json = try_route(&stmt).unwrap().body_json().unwrap();
@@ -194,7 +197,7 @@ mod tests {
         // CROSS RERANK is not a Qdrant Query body — plan only.
         {
             let stmt = Parser::parse(
-                "WITH c AS (QUERY TEXT 'q' FROM docs USING dense LIMIT 50) \
+                "WITH c AS (QUERY TEXT 'q' MODEL 'test-model' FROM docs USING dense LIMIT 50) \
                  QUERY CROSS RERANK TEXT 'q' MODEL 'bge-reranker-base' ON FIELD text \
                  FROM docs PREFETCH (c) LIMIT 10;",
             )
@@ -230,50 +233,77 @@ mod tests {
         .expect("failed to compile Filter schema from openapi.json");
 
         let filter_cases: &[(&str, &str)] = &[
-            ("equality", "QUERY 'x' FROM docs WHERE status = 'active';"),
+            (
+                "equality",
+                "QUERY TEXT 'x' MODEL 'e5' FROM docs WHERE status = 'active';",
+            ),
             (
                 "inequality range",
-                "QUERY 'x' FROM docs WHERE age >= 21 AND score < 100.0;",
+                "QUERY TEXT 'x' MODEL 'e5' FROM docs WHERE age >= 21 AND score < 100.0;",
             ),
-            ("between", "QUERY 'x' FROM docs WHERE age BETWEEN 20 AND 30;"),
-            ("in list", "QUERY 'x' FROM docs WHERE tag IN ('a', 'b', 'c');"),
-            ("is null", "QUERY 'x' FROM docs WHERE deleted_at IS NULL;"),
-            ("is empty", "QUERY 'x' FROM docs WHERE tags IS EMPTY;"),
-            ("match text", "QUERY 'x' FROM docs WHERE body MATCH 'hello world';"),
+            (
+                "between",
+                "QUERY TEXT 'x' MODEL 'e5' FROM docs WHERE age BETWEEN 20 AND 30;",
+            ),
+            (
+                "in list",
+                "QUERY TEXT 'x' MODEL 'e5' FROM docs WHERE tag IN ('a', 'b', 'c');",
+            ),
+            (
+                "is null",
+                "QUERY TEXT 'x' MODEL 'e5' FROM docs WHERE deleted_at IS NULL;",
+            ),
+            (
+                "is empty",
+                "QUERY TEXT 'x' MODEL 'e5' FROM docs WHERE tags IS EMPTY;",
+            ),
+            (
+                "match text",
+                "QUERY TEXT 'x' MODEL 'e5' FROM docs WHERE body MATCH 'hello world';",
+            ),
             (
                 "match phrase",
-                "QUERY 'x' FROM docs WHERE body MATCH PHRASE 'hello world';",
+                "QUERY TEXT 'x' MODEL 'e5' FROM docs WHERE body MATCH PHRASE 'hello world';",
             ),
             (
                 "match any",
-                "QUERY 'x' FROM docs WHERE body MATCH ANY ('hello', 'world');",
+                "QUERY TEXT 'x' MODEL 'e5' FROM docs WHERE body MATCH ANY ('hello', 'world');",
             ),
-            ("has vector", "QUERY 'x' FROM docs WHERE HAS_VECTOR 'dense';"),
+            (
+                "has vector",
+                "QUERY TEXT 'x' MODEL 'e5' FROM docs WHERE HAS_VECTOR 'dense';",
+            ),
             (
                 "values count",
-                "QUERY 'x' FROM docs WHERE tags VALUES_COUNT >= 2;",
+                "QUERY TEXT 'x' MODEL 'e5' FROM docs WHERE tags VALUES_COUNT >= 2;",
             ),
             (
                 "nested",
-                "QUERY 'x' FROM docs WHERE NESTED('reviews', rating > 4);",
+                "QUERY TEXT 'x' MODEL 'e5' FROM docs WHERE NESTED('reviews', rating > 4);",
             ),
             (
                 "geo bbox",
-                "QUERY 'x' FROM docs WHERE location GEO_BBOX { top_left: {lat: 52.52, lon: 13.40}, bottom_right: {lat: 52.51, lon: 13.41} };",
+                "QUERY TEXT 'x' MODEL 'e5' FROM docs WHERE location GEO_BBOX { top_left: {lat: 52.52, lon: 13.40}, bottom_right: {lat: 52.51, lon: 13.41} };",
             ),
             (
                 "geo radius",
-                "QUERY 'x' FROM docs WHERE location GEO_RADIUS { center: {lat: 52.52, lon: 13.40}, radius: 1000.0 };",
+                "QUERY TEXT 'x' MODEL 'e5' FROM docs WHERE location GEO_RADIUS { center: {lat: 52.52, lon: 13.40}, radius: 1000.0 };",
             ),
             (
                 "geo polygon",
-                "QUERY 'x' FROM docs WHERE location GEO_POLYGON { exterior: [{lat: -70.0, lon: -70.0}, {lat: 60.0, lon: -70.0}, {lat: 60.0, lon: 60.0}, {lat: -70.0, lon: 60.0}] } ;",
+                "QUERY TEXT 'x' MODEL 'e5' FROM docs WHERE location GEO_POLYGON { exterior: [{lat: -70.0, lon: -70.0}, {lat: 60.0, lon: -70.0}, {lat: 60.0, lon: 60.0}, {lat: -70.0, lon: 60.0}] } ;",
             ),
-            ("point id eq", "QUERY 'x' FROM docs WHERE id = 42;"),
-            ("point id in", "QUERY 'x' FROM docs WHERE id IN (1, 2, 3);"),
+            (
+                "point id eq",
+                "QUERY TEXT 'x' MODEL 'e5' FROM docs WHERE id = 42;",
+            ),
+            (
+                "point id in",
+                "QUERY TEXT 'x' MODEL 'e5' FROM docs WHERE id IN (1, 2, 3);",
+            ),
             (
                 "compound or not",
-                "QUERY 'x' FROM docs WHERE (status = 'a' OR status = 'b') AND NOT category = 'c';",
+                "QUERY TEXT 'x' MODEL 'e5' FROM docs WHERE (status = 'a' OR status = 'b') AND NOT category = 'c';",
             ),
         ];
 
@@ -395,7 +425,7 @@ mod tests {
     #[test]
     fn rest_grpc_hybrid_prefetch_parity() {
         let stmt = Parser::parse(
-            "QUERY HYBRID TEXT 'search' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10;",
+            "QUERY HYBRID TEXT 'search' MODEL 'bge' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10;",
         )
         .unwrap();
         let op = plan(&stmt).unwrap();
@@ -620,5 +650,117 @@ mod tests {
         let hnsw = req.hnsw_config.as_ref().map(|_| ());
         let _ = hnsw;
         assert!(req.optimizers_config.is_some());
+    }
+
+    // ── RT-01: Document/Image inference validation ────────────────
+
+    /// Document WITH model serializes as a valid OpenAPI Document object
+    /// `{"text": ..., "model": ...}` and passes the OpenAPI VectorInput schema.
+    #[test]
+    fn document_with_model_is_openapi_valid() {
+        let Some(openapi) = openapi_or_skip() else {
+            return;
+        };
+        let stmt = Parser::parse(
+            "QUERY TEXT 'hello world' MODEL 'jinaai/jina-embeddings-v2-base-en' FROM docs LIMIT 5;",
+        )
+        .unwrap();
+        let json = try_route(&stmt).unwrap().body_json().unwrap();
+        let nearest = &json["query"]["nearest"];
+        assert!(nearest.is_object(), "nearest must be an object: {nearest}");
+        assert_eq!(nearest["text"], "hello world");
+        assert_eq!(nearest["model"], "jinaai/jina-embeddings-v2-base-en");
+        validate_ref(&openapi, "Document", nearest);
+        validate_ref(&openapi, "Query", &json["query"]);
+    }
+
+    /// Image WITH model serializes as a valid OpenAPI Image object
+    /// `{"image": ..., "model": ...}` and passes the OpenAPI VectorInput schema.
+    #[test]
+    fn image_with_model_is_openapi_valid() {
+        let Some(openapi) = openapi_or_skip() else {
+            return;
+        };
+        let stmt = Parser::parse(
+            "QUERY IMAGE 'https://example.com/photo.jpg' MODEL 'Qdrant/clip-ViT-B-32-vision' FROM docs USING image_vec LIMIT 5;",
+        )
+        .unwrap();
+        let json = try_route(&stmt).unwrap().body_json().unwrap();
+        let nearest = &json["query"]["nearest"];
+        assert!(nearest.is_object(), "nearest must be an object: {nearest}");
+        assert_eq!(nearest["image"], "https://example.com/photo.jpg");
+        assert_eq!(nearest["model"], "Qdrant/clip-ViT-B-32-vision");
+        // Validate against both Image and VectorInput schemas.
+        validate_ref(&openapi, "Image", nearest);
+        validate_ref(&openapi, "Query", &json["query"]);
+    }
+
+    /// Document WITHOUT model must fail planning with a clear validation error.
+    #[test]
+    fn document_without_model_fails_planning() {
+        let err = plan(&Parser::parse("QUERY 'hello' FROM docs LIMIT 5;").unwrap()).unwrap_err();
+        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+        assert!(
+            err.message.contains("MODEL") || err.message.contains("model"),
+            "error must mention MODEL: {}",
+            err.message
+        );
+        assert_eq!(err.code, "QQL-PLAN-INFERENCE");
+    }
+
+    /// Image WITHOUT model must fail planning with a clear validation error.
+    #[test]
+    fn image_without_model_fails_planning() {
+        let err = plan(
+            &Parser::parse(
+                "QUERY IMAGE 'https://example.com/photo.jpg' FROM docs USING image_vec LIMIT 5;",
+            )
+            .unwrap(),
+        )
+        .unwrap_err();
+        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+        assert!(
+            err.message.contains("MODEL") || err.message.contains("model"),
+            "error must mention MODEL: {}",
+            err.message
+        );
+        assert_eq!(err.code, "QQL-PLAN-INFERENCE");
+    }
+
+    /// Document/Image with explicit MODEL '' (empty) also fails planning
+    /// because the OpenAPI schema requires `minLength: 1`.
+    #[test]
+    fn document_with_empty_model_fails_planning() {
+        let err = plan(&Parser::parse("QUERY TEXT 'hello' MODEL '' FROM docs LIMIT 5;").unwrap())
+            .unwrap_err();
+        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+        assert_eq!(err.code, "QQL-PLAN-INFERENCE");
+    }
+
+    /// HYBRID requires MODEL so both dense and sparse prefetches get a valid
+    /// Document object with the model field populated (no bare-string leakage).
+    #[test]
+    fn hybrid_with_model_propagates_to_both_prefetches() {
+        let Some(openapi) = openapi_or_skip() else {
+            return;
+        };
+        let stmt = Parser::parse(
+            "QUERY HYBRID TEXT 'search' MODEL 'bge' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10;",
+        )
+        .unwrap();
+        let json = try_route(&stmt).unwrap().body_json().unwrap();
+        let prefetch = json["prefetch"].as_array().unwrap();
+        assert_eq!(prefetch.len(), 2);
+        // Both prefetches must be Document objects (not bare strings).
+        for (i, pf) in prefetch.iter().enumerate() {
+            let nearest = &pf["query"]["nearest"];
+            assert!(
+                nearest.is_object(),
+                "prefetch[{i}] nearest must be Document object, got {nearest}"
+            );
+            assert_eq!(nearest["model"], "bge");
+            validate_ref(&openapi, "Document", nearest);
+        }
+        validate_ref(&openapi, "QueryRequest", &json);
     }
 }

@@ -2871,7 +2871,7 @@ mod tests {
     #[test]
     fn test_grpc_route_conversion_all_statements() {
         let statements = [
-            "QUERY 'search' FROM docs USING dense LIMIT 10;",
+            "QUERY TEXT 'search' MODEL 'test-model' FROM docs USING dense LIMIT 10;",
             "QUERY POINTS (1, 2, 'uuid-str') FROM docs WITH PAYLOAD INCLUDE ('title');",
             "SCROLL FROM docs WHERE status = 'active' LIMIT 50;",
             "UPSERT INTO docs VALUES {id: 1, text: 'hello', category: 'tech'} USING DENSE MODEL 'm';",
@@ -2970,7 +2970,7 @@ mod tests {
     #[test]
     fn query_points_field_level_basics() {
         let stmt = Parser::parse(
-            "QUERY 'search' FROM my_coll USING dense SCORE THRESHOLD 0.7 LIMIT 10 OFFSET 5;",
+            "QUERY TEXT 'search' MODEL 'test-model' FROM my_coll USING dense SCORE THRESHOLD 0.7 LIMIT 10 OFFSET 5;",
         )
         .unwrap();
         let op = qql_plan::plan(&stmt).unwrap();
@@ -3000,7 +3000,7 @@ mod tests {
     #[test]
     fn query_points_with_payload_and_vectors() {
         let stmt = Parser::parse(
-            "QUERY 'x' FROM docs WITH PAYLOAD INCLUDE ('title', 'url') WITH VECTOR (dense) LIMIT 5;",
+            "QUERY TEXT 'x' MODEL 'test-model' FROM docs WITH PAYLOAD INCLUDE ('title', 'url') WITH VECTOR (dense) LIMIT 5;",
         )
         .unwrap();
         let op = qql_plan::plan(&stmt).unwrap();
@@ -3035,8 +3035,10 @@ mod tests {
     /// Query with SHARD KEY → gRPC shard_key_selector
     #[test]
     fn query_points_shard_key() {
-        let stmt =
-            Parser::parse("QUERY 'x' FROM docs USING dense SHARD 'tenant-42' LIMIT 5;").unwrap();
+        let stmt = Parser::parse(
+            "QUERY TEXT 'x' MODEL 'test-model' FROM docs USING dense SHARD 'tenant-42' LIMIT 5;",
+        )
+        .unwrap();
         let op = qql_plan::plan(&stmt).unwrap();
         let (collection, req) = match &op {
             qql_plan::PlannedOperation::Query {
@@ -3060,7 +3062,10 @@ mod tests {
     /// Query with WHERE → gRPC filter present with must conditions
     #[test]
     fn query_points_filter_equality() {
-        let stmt = Parser::parse("QUERY 'x' FROM docs WHERE status = 'active' LIMIT 5;").unwrap();
+        let stmt = Parser::parse(
+            "QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE status = 'active' LIMIT 5;",
+        )
+        .unwrap();
         let op = qql_plan::plan(&stmt).unwrap();
         let (collection, req) = match &op {
             qql_plan::PlannedOperation::Query {
@@ -3094,8 +3099,10 @@ mod tests {
     /// Query with AND → gRPC filter with 2 must conditions
     #[test]
     fn query_points_filter_range_compound() {
-        let stmt =
-            Parser::parse("QUERY 'x' FROM docs WHERE age >= 18 AND age < 65 LIMIT 5;").unwrap();
+        let stmt = Parser::parse(
+            "QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE age >= 18 AND age < 65 LIMIT 5;",
+        )
+        .unwrap();
         let op = qql_plan::plan(&stmt).unwrap();
         let (collection, req) = match &op {
             qql_plan::PlannedOperation::Query {
@@ -3124,7 +3131,7 @@ mod tests {
     #[test]
     fn query_points_group_by_with_lookup() {
         let stmt = Parser::parse(
-            "QUERY 'x' FROM docs GROUP BY category SIZE 3 LOOKUP FROM categories LIMIT 10;",
+            "QUERY TEXT 'x' MODEL 'test-model' FROM docs GROUP BY category SIZE 3 LOOKUP FROM categories LIMIT 10;",
         )
         .unwrap();
         let op = qql_plan::plan(&stmt).unwrap();

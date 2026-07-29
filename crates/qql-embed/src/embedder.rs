@@ -23,9 +23,15 @@ impl<T> EmbedderBound for T {}
 pub trait Embedder: EmbedderBound {
     async fn embed_dense(&self, text: &str, model: &str) -> Result<Vec<f32>, QqlError>;
 
-    /// Sparse embedding (BM25 or Splade / BGE-M3 sparse model).
-    /// Default implementation uses local BM25 hashing.
-    async fn embed_sparse(&self, text: &str, _model: &str) -> Result<SparseVector, QqlError> {
+    /// Sparse embedding (BM25-like local hash or model-aware SPLADE / BGE-M3).
+    ///
+    /// Default implementation uses local BM25 hashing when `model` is empty or
+    /// `"default"`. Non-default sparse models are rejected — override this
+    /// method to provide model-aware sparse inference.
+    async fn embed_sparse(&self, text: &str, model: &str) -> Result<SparseVector, QqlError> {
+        if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
+            return Err(sparse_model_unsupported_error(model));
+        }
         Ok(sparse::build_query_default(text))
     }
 
@@ -43,15 +49,18 @@ pub trait Embedder: EmbedderBound {
     }
 
     /// Single-pass joint multi-modal / BGE-M3 embedding (dense + sparse + multi-vectors).
+    ///
     /// Default implementation delegates to separate dense, sparse, and multi calls.
+    /// Override this to make a single inference pass (e.g. `Bgem3Embedding::embed`).
+    /// The default propagates the first error and does **not** suppress failures.
     async fn embed_joint(&self, text: &str, model: &str) -> Result<JointEmbeddingOutput, QqlError> {
-        let dense = self.embed_dense(text, model).await.ok();
-        let sparse = self.embed_sparse(text, model).await.ok();
-        let multi = self.embed_multi(text, model).await.ok();
+        let dense = self.embed_dense(text, model).await?;
+        let sparse = self.embed_sparse(text, model).await?;
+        let multi = self.embed_multi(text, model).await?;
         Ok(JointEmbeddingOutput {
-            dense,
-            sparse,
-            multi,
+            dense: Some(dense),
+            sparse: Some(sparse),
+            multi: Some(multi),
         })
     }
 
@@ -210,6 +219,20 @@ pub fn cross_rerank_unsupported_error(model: &str) -> QqlError {
             "cross-encoder pair scoring is not available ({model_note}). \
              Configure a rerank host (rerank_endpoint / rerank_model, or edge \
              reranker_model for offline TextRerank / bge-reranker)."
+        ),
+        None,
+    )
+}
+
+/// Error when a sparse model is requested that this embedder cannot satisfy.
+pub fn sparse_model_unsupported_error(model: &str) -> QqlError {
+    QqlError::execution(
+        "QQL-EMBEDDING-SPARSE",
+        format!(
+            "sparse model '{model}' is not available on this embedder. \
+             Omit the MODEL clause (or use MODEL 'default') for local BM25-style \
+             hashing. To use model-aware sparse embedding (SPLADE / BGE-M3), \
+             configure a sparse embedding backend."
         ),
         None,
     )

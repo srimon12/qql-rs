@@ -134,23 +134,25 @@ impl Serialize for PlanQueryInput {
         match self {
             PlanQueryInput::Point(id) => id.serialize(serializer),
             PlanQueryInput::Vector(v) => v.serialize(serializer),
-            PlanQueryInput::Document { text, model: None } => serializer.serialize_str(text),
-            PlanQueryInput::Document {
-                text,
-                model: Some(model),
-            } => {
+            PlanQueryInput::Document { text, model } => {
+                // OpenAPI Document requires both "text" and "model" fields.
+                // Planning validation rejects model-less Documents before we
+                // reach serialization; keep a safe fallback to prevent a bare
+                // string from ever leaking to the REST wire.
                 let mut map = serializer.serialize_map(Some(2))?;
                 map.serialize_entry("text", text)?;
-                map.serialize_entry("model", model)?;
+                map.serialize_entry("model", &model.as_deref().unwrap_or(""))?;
                 map.end()
             }
             PlanQueryInput::Image { image, model } => {
-                let mut map =
-                    serializer.serialize_map(Some(if model.is_some() { 2 } else { 1 }))?;
+                // OpenAPI Image requires both "image" and "model" fields.
+                // gRPC proto Image uses a Value for the image field; REST
+                // always serializes as an object with two string members.
+                // Planning validation rejects model-less Images before we
+                // reach serialization; keep a safe fallback for the model key.
+                let mut map = serializer.serialize_map(Some(2))?;
                 map.serialize_entry("image", image)?;
-                if let Some(model) = model {
-                    map.serialize_entry("model", model)?;
-                }
+                map.serialize_entry("model", &model.as_deref().unwrap_or(""))?;
                 map.end()
             }
         }

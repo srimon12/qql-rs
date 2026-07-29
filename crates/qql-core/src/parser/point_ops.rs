@@ -69,7 +69,8 @@ impl<'a> AstLowerer<'a> {
                 TokenKind::With => {
                     self.advance()?;
                     let opts = self.parse_config_block()?;
-                    exact = opts.into_iter()
+                    exact = opts
+                        .into_iter()
                         .find(|(k, _)| k.eq_ignore_ascii_case("exact"))
                         .and_then(|(_, v)| match v {
                             crate::ast::Value::Bool(b) => Some(b),

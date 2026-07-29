@@ -284,6 +284,21 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
                 .or_else(|| emb.get("image_dimension"))
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0) as usize;
+            config.rerank_endpoint = emb
+                .get("rerankEndpoint")
+                .or_else(|| emb.get("rerank_endpoint"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            config.rerank_api_key = emb
+                .get("rerankApiKey")
+                .or_else(|| emb.get("rerank_api_key"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            config.rerank_model = emb
+                .get("rerankModel")
+                .or_else(|| emb.get("rerank_model"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
         }
     }
 

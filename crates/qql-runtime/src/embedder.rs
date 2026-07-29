@@ -666,7 +666,10 @@ impl Embedder for HttpEmbedder {
         self.embed_batch_with_model(texts, model).await
     }
 
-    async fn embed_sparse(&self, text: &str, _model: &str) -> Result<SparseVector, QqlError> {
+    async fn embed_sparse(&self, text: &str, model: &str) -> Result<SparseVector, QqlError> {
+        if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
+            return Err(qql_embed::sparse_model_unsupported_error(model));
+        }
         Ok(qql_embed::sparse::build_query_default(text))
     }
 

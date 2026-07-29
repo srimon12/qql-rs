@@ -9,6 +9,8 @@ pub struct EdgeConfig {
     pub on_disk_payload: bool,
     pub embedder: String,
     pub model: Option<String>,
+    /// Offline sparse model for fastembed (e.g. `"splade"`, `"bge-m3"`).
+    pub sparse_model: Option<String>,
     /// Offline multivector model for fastembed (e.g. `"bge-m3"`).
     pub multi_model: Option<String>,
     /// Offline CLIP vision model (e.g. `"clip-vision"`).
@@ -41,6 +43,7 @@ impl Default for EdgeConfig {
             on_disk_payload: true,
             embedder: "fastembed".to_string(),
             model: None,
+            sparse_model: None,
             multi_model: None,
             image_model: None,
             reranker_model: None,
@@ -133,6 +136,9 @@ impl EdgeConfig {
         if let Some(value) = env_string("QQL_EDGE_MODEL") {
             self.model = Some(value);
         }
+        if let Some(value) = env_string("QQL_EDGE_SPARSE_MODEL") {
+            self.sparse_model = Some(value);
+        }
         if let Some(value) = env_string("QQL_EDGE_MULTI_MODEL") {
             self.multi_model = Some(value);
         }
@@ -216,4 +222,34 @@ fn env_bool(name: &str) -> Option<bool> {
 #[cfg(feature = "edge")]
 fn env_usize(name: &str) -> Option<usize> {
     env_string(name)?.parse().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn edge_config_default_has_no_sparse_model() {
+        let cfg = EdgeConfig::default();
+        assert!(cfg.sparse_model.is_none());
+    }
+
+    #[test]
+    fn edge_config_with_sparse_model() {
+        let cfg = EdgeConfig {
+            sparse_model: Some("splade".into()),
+            ..Default::default()
+        };
+        assert_eq!(cfg.sparse_model.as_deref(), Some("splade"));
+    }
+
+    #[test]
+    fn edge_config_default_keeps_other_models_none() {
+        let cfg = EdgeConfig::default();
+        assert!(cfg.model.is_none());
+        assert!(cfg.sparse_model.is_none());
+        assert!(cfg.multi_model.is_none());
+        assert!(cfg.image_model.is_none());
+        assert!(cfg.reranker_model.is_none());
+    }
 }

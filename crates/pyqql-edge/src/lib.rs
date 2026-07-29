@@ -434,11 +434,12 @@ async fn run_async(
 #[cfg(feature = "fastembed-local")]
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
-#[pyo3(signature = (data_dir, on_disk_payload=true, *, model=None, multi_model=None, image_model=None, reranker_model=None, cache_dir=None, show_download_progress=false))]
+#[pyo3(signature = (data_dir, on_disk_payload=true, *, model=None, sparse_model=None, multi_model=None, image_model=None, reranker_model=None, cache_dir=None, show_download_progress=false))]
 fn local_executor(
     data_dir: &str,
     on_disk_payload: bool,
     model: Option<String>,
+    sparse_model: Option<String>,
     multi_model: Option<String>,
     image_model: Option<String>,
     reranker_model: Option<String>,
@@ -450,6 +451,7 @@ fn local_executor(
         qql_edge::LocalExecutorOptions {
             on_disk_payload,
             model,
+            sparse_model,
             multi_model,
             image_model,
             reranker_model,
@@ -493,13 +495,17 @@ fn list_embedding_models(py: Python<'_>) -> PyResult<Bound<'_, PyList>> {
 #[cfg(feature = "fastembed-local")]
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
-#[pyo3(signature = (query, *, data_dir="./qdrant_data", on_disk_payload=true, model=None, cache_dir=None, show_download_progress=false, on_error="stop"))]
+#[pyo3(signature = (query, *, data_dir="./qdrant_data", on_disk_payload=true, model=None, sparse_model=None, multi_model=None, image_model=None, reranker_model=None, cache_dir=None, show_download_progress=false, on_error="stop"))]
 fn execute<'py>(
     py: Python<'py>,
     query: &Bound<'_, PyAny>,
     data_dir: &str,
     on_disk_payload: bool,
     model: Option<String>,
+    sparse_model: Option<String>,
+    multi_model: Option<String>,
+    image_model: Option<String>,
+    reranker_model: Option<String>,
     cache_dir: Option<String>,
     show_download_progress: bool,
     on_error: &str,
@@ -508,9 +514,10 @@ fn execute<'py>(
         data_dir,
         on_disk_payload,
         model,
-        None,
-        None,
-        None,
+        sparse_model,
+        multi_model,
+        image_model,
+        reranker_model,
         cache_dir,
         show_download_progress,
     )?;
@@ -523,13 +530,17 @@ fn execute<'py>(
 #[cfg(feature = "fastembed-local")]
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
-#[pyo3(signature = (query, *, data_dir="./qdrant_data", on_disk_payload=true, model=None, cache_dir=None, show_download_progress=false, on_error="stop"))]
+#[pyo3(signature = (query, *, data_dir="./qdrant_data", on_disk_payload=true, model=None, sparse_model=None, multi_model=None, image_model=None, reranker_model=None, cache_dir=None, show_download_progress=false, on_error="stop"))]
 fn execute_async<'py>(
     py: Python<'py>,
     query: Bound<'py, PyAny>,
     data_dir: &str,
     on_disk_payload: bool,
     model: Option<String>,
+    sparse_model: Option<String>,
+    multi_model: Option<String>,
+    image_model: Option<String>,
+    reranker_model: Option<String>,
     cache_dir: Option<String>,
     show_download_progress: bool,
     on_error: &str,
@@ -540,9 +551,10 @@ fn execute_async<'py>(
         data_dir,
         on_disk_payload,
         model,
-        None,
-        None,
-        None,
+        sparse_model,
+        multi_model,
+        image_model,
+        reranker_model,
         cache_dir,
         show_download_progress,
     )?;

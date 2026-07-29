@@ -543,6 +543,7 @@ fn edge_executor() -> Result<qql::executor::Executor, Box<dyn std::error::Error>
             let options = qql_edge::LocalExecutorOptions {
                 on_disk_payload: config.on_disk_payload,
                 model: config.model,
+                sparse_model: config.sparse_model,
                 multi_model: config.multi_model.or(config.multi_embed_model.clone()),
                 image_model: config.image_model.or(config.image_embed_model.clone()),
                 reranker_model: config.reranker_model.clone(),

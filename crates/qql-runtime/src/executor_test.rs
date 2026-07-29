@@ -1,5 +1,6 @@
 #![allow(clippy::field_reassign_with_default)]
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -25,6 +26,9 @@ struct MockQdrantClient {
     pub execute_planned_call_count: Arc<Mutex<usize>>,
     pub create_collection_call_count: Arc<Mutex<usize>>,
     pub created_collections: Arc<Mutex<HashSet<String>>>,
+    /// Per-collection mock points returned by `execute_planned` when non-empty.
+    /// Key: collection name, Value: JSON object with a "points" array.
+    pub point_map: Arc<Mutex<HashMap<String, serde_json::Value>>>,
 }
 
 impl Default for MockQdrantClient {
@@ -41,6 +45,7 @@ impl Default for MockQdrantClient {
             execute_planned_call_count: Arc::new(Mutex::new(0)),
             create_collection_call_count: Arc::new(Mutex::new(0)),
             created_collections: Arc::new(Mutex::new(HashSet::new())),
+            point_map: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -133,6 +138,12 @@ impl QdrantOps for MockQdrantClient {
                         .collect::<Vec<_>>(),
                 }
             }));
+        }
+        // Return per-collection mock points when configured.
+        if let qql_plan::PlannedOperation::Query { collection, .. } = op {
+            if let Some(points) = self.point_map.lock().unwrap().get(collection) {
+                return Ok(points.clone());
+            }
         }
         Ok(serde_json::json!({"result": {"points": []}}))
     }
@@ -271,6 +282,15 @@ impl crate::embedder::Embedder for MockEmbedder {
     }
     async fn embed_multi(&self, _text: &str, _model: &str) -> Result<Vec<Vec<f32>>, QqlError> {
         Ok(self.multi.clone())
+    }
+    async fn rerank_pairs(
+        &self,
+        _query: &str,
+        documents: &[String],
+        _model: &str,
+    ) -> Result<Vec<f32>, QqlError> {
+        // Return descending scores: the first document gets the highest score.
+        Ok((0..documents.len()).map(|i| 1.0 - i as f32 * 0.1).collect())
     }
 }
 
@@ -466,7 +486,7 @@ async fn test_do_query_basic() {
     let last_planned = client.last_planned.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
-    let query = "QUERY 'admin docs' FROM docs WHERE metadata.group = 'admin' LIMIT 10 OFFSET 5";
+    let query = "QUERY TEXT 'admin docs' MODEL 'test-model' FROM docs WHERE metadata.group = 'admin' LIMIT 10 OFFSET 5";
     let resp = executor.execute(query, OnError::Stop).await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
@@ -484,7 +504,7 @@ async fn test_do_query_hybrid() {
     let last_planned = client.last_planned.clone();
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
-    let query = "QUERY HYBRID TEXT 'hello' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10";
+    let query = "QUERY HYBRID TEXT 'hello' MODEL 'test-model' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10";
     let resp = executor.execute(query, OnError::Stop).await;
     assert!(resp.is_ok(), "{:?}", resp.err());
 
@@ -511,7 +531,7 @@ async fn text_query_resolves_arbitrary_sparse_vector_by_schema() {
 
     executor
         .execute(
-            "QUERY TEXT 'hello' FROM docs USING lexical_v2 LIMIT 10",
+            "QUERY TEXT 'hello' MODEL 'test-model' FROM docs USING lexical_v2 LIMIT 10",
             OnError::Stop,
         )
         .await
@@ -548,8 +568,8 @@ async fn cte_prefetch_using_sparse_embeds_sparse_via_schema() {
 
     executor
         .execute(
-            "WITH d AS (QUERY TEXT 'x' USING dense LIMIT 100), \
-             s AS (QUERY TEXT 'x' USING sparse LIMIT 100) \
+            "WITH d AS (QUERY TEXT 'x' MODEL 'test-model' USING dense LIMIT 100), \
+             s AS (QUERY TEXT 'x' MODEL 'test-model' USING sparse LIMIT 100) \
              QUERY FUSION RRF FROM docs PREFETCH (d, s) LIMIT 10",
             OnError::Stop,
         )
@@ -604,7 +624,7 @@ async fn text_query_multivector_embeds_multi_via_schema() {
 
     executor
         .execute(
-            "QUERY TEXT 'late interaction' FROM docs USING colbert LIMIT 10",
+            "QUERY TEXT 'late interaction' MODEL 'test-model' FROM docs USING colbert LIMIT 10",
             OnError::Stop,
         )
         .await
@@ -643,7 +663,10 @@ async fn text_query_infers_only_arbitrary_dense_vector() {
         Executor::with_embedder(Box::new(client), Some(test_local_config()), Some(embedder));
 
     executor
-        .execute("QUERY TEXT 'hello' FROM docs LIMIT 10", OnError::Stop)
+        .execute(
+            "QUERY TEXT 'hello' MODEL 'test-model' FROM docs LIMIT 10",
+            OnError::Stop,
+        )
         .await
         .unwrap();
 
@@ -670,7 +693,10 @@ async fn text_query_rejects_ambiguous_vector_topology() {
         Executor::with_embedder(Box::new(client), Some(test_local_config()), Some(embedder));
 
     let error = executor
-        .execute("QUERY TEXT 'hello' FROM docs LIMIT 10", OnError::Stop)
+        .execute(
+            "QUERY TEXT 'hello' MODEL 'test-model' FROM docs LIMIT 10",
+            OnError::Stop,
+        )
         .await
         .unwrap_err();
     assert_eq!(error.code, "QQL-MISSING-USING");
@@ -867,7 +893,7 @@ async fn test_query_missing_collection_errors() {
         Some(mock_embedder),
     );
 
-    let query = "QUERY 'hello' FROM nonexistent LIMIT 10";
+    let query = "QUERY TEXT 'hello' MODEL 'test-model' FROM nonexistent LIMIT 10";
     let resp = executor.execute(query, OnError::Stop).await;
     assert!(resp.is_err());
     assert!(resp.unwrap_err().message.contains("does not exist"));
@@ -898,9 +924,9 @@ async fn test_batch_query_groups_same_collection() {
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
     let resp = qql_core::parser::Parser::parse_all(
-        "QUERY TEXT 'a' FROM docs USING dense AS DENSE LIMIT 1;\
-         QUERY TEXT 'b' FROM docs USING dense AS DENSE LIMIT 1;\
-         QUERY TEXT 'c' FROM docs USING dense AS DENSE LIMIT 1;",
+        "QUERY TEXT 'a' MODEL 'test-model' FROM docs USING dense AS DENSE LIMIT 1;\
+         QUERY TEXT 'b' MODEL 'test-model' FROM docs USING dense AS DENSE LIMIT 1;\
+         QUERY TEXT 'c' MODEL 'test-model' FROM docs USING dense AS DENSE LIMIT 1;",
     )
     .unwrap();
     let results = executor.execute_batch_nodes(resp, false).await.unwrap();
@@ -973,8 +999,8 @@ async fn test_batch_preserves_order_mixed_query_and_mutation() {
     let stmts = qql_core::parser::Parser::parse_all(
         "UPSERT INTO docs VALUES {id: 1};\
          DELETE FROM docs WHERE id = 2;\
-         QUERY TEXT 'a' FROM docs USING dense AS DENSE LIMIT 1;\
-         QUERY TEXT 'b' FROM docs USING dense AS DENSE LIMIT 1;",
+         QUERY TEXT 'a' MODEL 'test-model' FROM docs USING dense AS DENSE LIMIT 1;\
+         QUERY TEXT 'b' MODEL 'test-model' FROM docs USING dense AS DENSE LIMIT 1;",
     )
     .unwrap();
     let results = executor.execute_batch_nodes(stmts, false).await.unwrap();
@@ -1015,7 +1041,7 @@ async fn test_continue_preserves_failure_position_and_batch_boundary() {
     let executor = Executor::new(Box::new(client), Some(test_config()));
     let stmts = qql_core::parser::Parser::parse_all(
         "DELETE FROM docs WHERE id = 1;\
-         QUERY TEXT 'missing schema' FROM docs LIMIT 1;\
+         QUERY TEXT 'missing schema' MODEL 'test-model' FROM docs LIMIT 1;\
          DELETE FROM docs WHERE id = 2;",
     )
     .unwrap();
@@ -1040,7 +1066,7 @@ async fn test_stop_dispatches_prior_statement_before_later_prepare_failure() {
     let executor = Executor::new(Box::new(client), Some(test_config()));
     let stmts = qql_core::parser::Parser::parse_all(
         "DELETE FROM docs WHERE id = 1;\
-         QUERY TEXT 'missing schema' FROM docs LIMIT 1;",
+         QUERY TEXT 'missing schema' MODEL 'test-model' FROM docs LIMIT 1;",
     )
     .unwrap();
 
@@ -1142,7 +1168,7 @@ async fn test_execute_continue_returns_single_preparation_failure_report() {
 
     let report = executor
         .execute(
-            "QUERY TEXT 'missing schema' FROM docs LIMIT 1",
+            "QUERY TEXT 'missing schema' MODEL 'test-model' FROM docs LIMIT 1",
             OnError::Continue,
         )
         .await
@@ -1152,4 +1178,94 @@ async fn test_execute_continue_returns_single_preparation_failure_report() {
     assert_eq!(report.succeeded, 0);
     assert_eq!(report.failed, 1);
     assert_eq!(report.results[0].operation, "PREPARE");
+}
+
+/// RT-04: CROSS RERANK with same-ID candidates from different collections
+/// must preserve both hits using (collection, id) identity, not just point id.
+#[tokio::test]
+async fn cross_rerank_preserves_same_id_different_collections() {
+    let mut client = MockQdrantClient::default();
+    client.exists = true;
+    // Both collections use a simple dense-only topology.
+    client.info = Some(collection_with_vectors(&["dense"], &[]));
+    // Same point id "1" exists in both collections with different body text.
+    client.point_map.lock().unwrap().insert(
+        "coll_a".to_string(),
+        serde_json::json!({"result": {"points": [
+            {"id": "1", "score": 0.9, "payload": {"body": "alpha body text"}}
+        ]}}),
+    );
+    client.point_map.lock().unwrap().insert(
+        "coll_b".to_string(),
+        serde_json::json!({"result": {"points": [
+            {"id": "1", "score": 0.8, "payload": {"body": "beta body text"}}
+        ]}}),
+    );
+
+    let embedder = Arc::new(MockEmbedder {
+        dense: vec![0.1, 0.2, 0.3],
+        sparse_indices: vec![],
+        sparse_values: vec![],
+        multi: vec![vec![0.1, 0.2], vec![0.3, 0.4]],
+    });
+    let executor =
+        Executor::with_embedder(Box::new(client), Some(test_local_config()), Some(embedder));
+
+    let report = executor
+        .execute(
+            "WITH c1 AS (QUERY TEXT 'hello' MODEL 'test-model' FROM coll_a USING dense AS DENSE LIMIT 5), \
+             c2 AS (QUERY TEXT 'hello' MODEL 'test-model' FROM coll_b USING dense AS DENSE LIMIT 5) \
+             QUERY CROSS RERANK TEXT 'hello' MODEL 'mock' ON FIELD body \
+             FROM coll_a PREFETCH (c1, c2) LIMIT 10",
+            OnError::Stop,
+        )
+        .await
+        .expect("CROSS RERANK should succeed");
+
+    assert!(report.ok, "report should be ok: {report:?}");
+    assert_eq!(report.results.len(), 1);
+    assert_eq!(report.results[0].operation, "CROSS_RERANK");
+    let data = report.results[0].data.as_ref().expect("should have data");
+    let hits = data.as_array().expect("data should be an array of hits");
+
+    // Both same-ID candidates from different collections survive dedup.
+    assert_eq!(
+        hits.len(),
+        2,
+        "expected 2 hits (one per collection), got {}: {hits:?}",
+        hits.len()
+    );
+
+    // Verify each hit carries the correct source collection.
+    let collections: Vec<&str> = hits
+        .iter()
+        .map(|h| h["collection"].as_str().unwrap_or(""))
+        .collect();
+    assert!(
+        collections.contains(&"coll_a"),
+        "missing coll_a in results: {collections:?}"
+    );
+    assert!(
+        collections.contains(&"coll_b"),
+        "missing coll_b in results: {collections:?}"
+    );
+
+    // Verify the id is "1" for both.
+    let ids: Vec<&str> = hits
+        .iter()
+        .map(|h| h["id"].as_str().unwrap_or(""))
+        .collect();
+    assert_eq!(
+        ids.iter().filter(|id| **id == "1").count(),
+        2,
+        "both hits should have id '1'"
+    );
+
+    // Verify the reranker scored them (scores come from MockEmbedder::rerank_pairs).
+    for hit in hits {
+        let score = hit["score"]
+            .as_f64()
+            .expect("hit should have a numeric score");
+        assert!(score > 0.0, "score should be positive, got {score}");
+    }
 }

@@ -65,7 +65,7 @@ mod tests {
 
     #[test]
     fn query_routes_correctly() {
-        let s = Parser::parse("QUERY 'hello' FROM docs LIMIT 10;").unwrap();
+        let s = Parser::parse("QUERY TEXT 'hello' MODEL 'e5' FROM docs LIMIT 10;").unwrap();
         let r = try_route(&s).unwrap();
         assert_eq!(r.method, Method::Post);
         assert_eq!(r.path, "/collections/docs/points/query");
@@ -180,7 +180,7 @@ mod tests {
     fn all_endpoint_methods() {
         let cases = [
             (
-                "QUERY 'x' FROM docs;",
+                "QUERY TEXT 'x' MODEL 'e5' FROM docs;",
                 Method::Post,
                 "/collections/docs/points/query",
             ),
@@ -238,8 +238,10 @@ mod tests {
 
     #[test]
     fn grouped_query_routes_to_groups_endpoint() {
-        let s =
-            Parser::parse("QUERY 'hello' FROM docs GROUP BY category SIZE 3 LIMIT 10;").unwrap();
+        let s = Parser::parse(
+            "QUERY TEXT 'hello' MODEL 'e5' FROM docs GROUP BY category SIZE 3 LIMIT 10;",
+        )
+        .unwrap();
         let r = try_route(&s).unwrap();
         assert_eq!(r.method, Method::Post);
         assert_eq!(r.path, "/collections/docs/points/query/groups");
@@ -249,7 +251,7 @@ mod tests {
     #[test]
     fn grouped_query_with_lookup() {
         let s = Parser::parse(
-            "QUERY 'hello' FROM docs GROUP BY category SIZE 3 LOOKUP FROM categories LIMIT 10;",
+            "QUERY TEXT 'hello' MODEL 'e5' FROM docs GROUP BY category SIZE 3 LOOKUP FROM categories LIMIT 10;",
         )
         .unwrap();
         let r = try_route(&s).unwrap();
@@ -263,7 +265,7 @@ mod tests {
     #[test]
     fn hybrid_query_produces_prefetches() {
         let s = Parser::parse(
-            "QUERY HYBRID TEXT 'database' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10;",
+            "QUERY HYBRID TEXT 'database' MODEL 'bge' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10;",
         )
         .unwrap();
         let r = try_route(&s).unwrap();
@@ -274,15 +276,21 @@ mod tests {
         assert_eq!(prefetch[0]["using"], "dense");
         assert_eq!(prefetch[1]["using"], "sparse");
         assert!(
-            prefetch[0]["query"]["nearest"].is_object()
-                || prefetch[0]["query"]["nearest"].is_string()
+            prefetch[0]["query"]["nearest"].is_object(),
+            "HYBRID prefetch nearest must be Document object: {:?}",
+            prefetch[0]["query"]["nearest"]
+        );
+        assert!(
+            prefetch[1]["query"]["nearest"].is_object(),
+            "HYBRID sparse prefetch nearest must also be Document object: {:?}",
+            prefetch[1]["query"]["nearest"]
         );
     }
 
     #[test]
     fn rerank_query_staged() {
         let s = Parser::parse(
-            "QUERY RERANK TEXT 'travel' MODEL 'colbert' FROM docs USING colbert PREFETCH (QUERY 'travel' FROM docs USING dense LIMIT 100) LIMIT 10;",
+            "QUERY RERANK TEXT 'travel' MODEL 'colbert' FROM docs USING colbert PREFETCH (QUERY TEXT 'travel' MODEL 'colbert' FROM docs USING dense LIMIT 100) LIMIT 10;",
         )
         .unwrap();
         let r = try_route(&s).unwrap();
@@ -310,12 +318,15 @@ mod tests {
     #[test]
     fn query_with_all_options() {
         let s = Parser::parse(
-            "QUERY 'search' FROM docs USING dense WHERE status = 'active' PARAMS (hnsw_ef = 256, exact = true) SCORE THRESHOLD 0.5 WITH PAYLOAD INCLUDE ('title') WITH VECTOR ('dense') LIMIT 20 OFFSET 5;",
+            "QUERY TEXT 'search' MODEL 'e5' FROM docs USING dense WHERE status = 'active' PARAMS (hnsw_ef = 256, exact = true) SCORE THRESHOLD 0.5 WITH PAYLOAD INCLUDE ('title') WITH VECTOR ('dense') LIMIT 20 OFFSET 5;",
         )
         .unwrap();
         let r = try_route(&s).unwrap();
         let json = r.body_json().unwrap();
-        assert_eq!(json["query"]["nearest"], "search");
+        assert!(
+            json["query"]["nearest"]["text"].is_string()
+                || json["query"]["nearest"].as_str().is_some()
+        );
         assert_eq!(json["using"], "dense");
         assert_eq!(json["filter"]["must"][0]["key"], "status");
         assert_eq!(json["filter"]["must"][0]["match"]["value"], "active");
@@ -358,7 +369,7 @@ mod tests {
 
     #[test]
     fn query_body_has_no_group_fields_when_no_group() {
-        let s = Parser::parse("QUERY 'hello' FROM docs LIMIT 5;").unwrap();
+        let s = Parser::parse("QUERY TEXT 'hello' MODEL 'e5' FROM docs LIMIT 5;").unwrap();
         let r = try_route(&s).unwrap();
         let json = r.body_json().unwrap();
         assert!(json.get("group_by").is_none());
@@ -369,7 +380,7 @@ mod tests {
     #[test]
     fn query_body_serialization_roundtrip_all_variants() {
         let cases = [
-            "QUERY 'text search' FROM docs LIMIT 10;",
+            "QUERY TEXT 'text search' MODEL 'e5' FROM docs LIMIT 10;",
             "QUERY NEAREST VECTOR [0.1, 0.2, 0.3] FROM docs USING dense LIMIT 10;",
             "QUERY NEAREST POINT 42 FROM docs USING dense LIMIT 5;",
             "QUERY NEAREST POINT '550e8400-e29b-41d4-a716-446655440000' FROM docs USING dense;",

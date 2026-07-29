@@ -83,6 +83,25 @@ assert.throws(
   /dimension must be a positive integer/,
 );
 
+// RT-05: HttpEmbedder accepts rerank fields (camelCase convention)
+const embedderRerank = new nqql.HttpEmbedder({
+  endpoint: "http://localhost:11434/v1/embeddings",
+  model: "nomic-embed-text",
+  dimension: 768,
+  rerankEndpoint: "http://localhost:11434/rerank",
+  rerankModel: "test-reranker",
+  rerankApiKey: "rk-key",
+});
+assert.strictEqual(embedderRerank.rerankEndpoint, "http://localhost:11434/rerank");
+assert.strictEqual(embedderRerank.rerankModel, "test-reranker");
+assert.strictEqual(embedderRerank.rerankApiKey, "rk-key");
+const clientRerank = new nqql.Client({
+  url: "http://localhost:6333",
+  embedder: embedderRerank,
+});
+const rerankPlan = clientRerank.explain("QUERY 'hello' FROM docs LIMIT 10");
+assert(rerankPlan.includes("Collection: docs"));
+
 // Invalid filter operators must never silently become equality.
 assert.throws(
   () => nqql.injectFilter(query, "tenant_id", "contains", "acme"),

@@ -24,7 +24,8 @@ use conversions::{
     edge_err, from_edge_id, from_edge_record, from_edge_scored_point, to_edge_id, to_edge_ids,
 };
 use query_converter::{
-    convert_order_by_interface, convert_query_request, convert_with_payload, convert_with_vector, parse_json_path,
+    convert_order_by_interface, convert_query_request, convert_with_payload, convert_with_vector,
+    parse_json_path,
 };
 use unsupported::{reject_collection_sharding, reject_shard_key, EdgeUnsupported};
 use vector_parser::ToEdgeVector;

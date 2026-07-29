@@ -761,3 +761,38 @@ async fn test_duplicate_target_vector_error() {
     let err = resolve_embeddings(&mut stmt, &mock).await.unwrap_err();
     assert!(err.message.contains("duplicate target vector 'vec1'"));
 }
+
+// ── Embedder trait default-behaviour tests ───────────────────────────────
+
+/// Minimal embedder that only provides `embed_dense`; all other methods
+/// use their trait defaults (no override).
+struct DefaultEmbedder;
+
+#[async_trait]
+impl Embedder for DefaultEmbedder {
+    async fn embed_dense(&self, _text: &str, _model: &str) -> Result<Vec<f32>, QqlError> {
+        Ok(vec![0.0])
+    }
+}
+
+#[tokio::test]
+async fn default_embed_sparse_rejects_non_default_model() {
+    let e = DefaultEmbedder;
+    // Empty / default is accepted → returns local BM25.
+    let sv = e.embed_sparse("hello", "").await.unwrap();
+    assert!(!sv.indices.is_empty());
+    let sv = e.embed_sparse("hello", "default").await.unwrap();
+    assert!(!sv.indices.is_empty());
+    // Non-default model is rejected.
+    let err = e.embed_sparse("hello", "splade").await.unwrap_err();
+    assert_eq!(err.code, "QQL-EMBEDDING-SPARSE");
+    assert!(err.message.contains("splade"));
+}
+
+#[tokio::test]
+async fn default_embed_joint_propagates_errors_not_swallowed() {
+    let e = DefaultEmbedder;
+    let err = e.embed_joint("hello", "default").await.unwrap_err();
+    // embed_sparse passes for default model; embed_multi rejects by default.
+    assert_eq!(err.code, "QQL-EMBEDDING-MULTI");
+}

@@ -82,6 +82,7 @@ pub(crate) fn extract_search_hits(result: &serde_json::Value) -> Vec<SearchHit> 
                     p.as_object()
                         .map(|o| o.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
                 }),
+                collection: None,
             })
             .collect(),
         None => Vec::new(),

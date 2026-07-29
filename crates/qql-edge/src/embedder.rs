@@ -7,11 +7,11 @@ use async_trait::async_trait;
 use fastembed::{
     Bgem3Embedding, Bgem3InitOptions, Bgem3Model, EmbeddingModel, ImageEmbedding,
     ImageEmbeddingModel, ImageInitOptions, InitOptionsWithLength, RerankInitOptions, RerankerModel,
-    TextEmbedding, TextRerank,
+    SparseInitOptions, SparseModel, SparseTextEmbedding, TextEmbedding, TextRerank,
 };
 
 use qql_core::error::QqlError;
-use qql_embed::{Embedder, SparseVector};
+use qql_embed::{Embedder, JointEmbeddingOutput, SparseVector};
 
 fn err(msg: impl Into<std::borrow::Cow<'static, str>>) -> QqlError {
     QqlError::execution("QQL-EDGE-EMBED", msg, None)
@@ -42,6 +42,11 @@ pub struct FastEmbedderOptions {
     /// For CLIP text use `ClipVitB32` / `Qdrant/clip-ViT-B-32-text`.
     /// `None` → default `BGESmallENV15` (384-d).
     pub model: Option<String>,
+    /// Offline sparse model (SPLADE or BGE-M3 via `SparseTextEmbedding`).
+    /// Accepts `splade`, `SPLADEPPV1`, `Qdrant/Splade_PP_en_v1`, `bge-m3`,
+    /// `BGEM3`, `BAAI/bge-m3`. When set, `embed_sparse` uses real ONNX
+    /// inference. `None` → local BM25 hashing for sparse requests.
+    pub sparse_model: Option<String>,
     /// Offline multivector model. Accepts `bge-m3`, `BGEM3Q`,
     /// `gpahal/bge-m3-onnx-int8`. When set, `embed_multi` runs via BGE-M3 ColBERT.
     pub multi_model: Option<String>,
@@ -86,43 +91,69 @@ struct RerankSlot {
     model_code: String,
 }
 
+struct SparseSlot {
+    model: Arc<Mutex<SparseTextEmbedding>>,
+    model_name: String,
+    model_code: String,
+}
+
 pub struct FastEmbedder {
     dense: DenseSlot,
+    sparse: Option<SparseSlot>,
     multi: Option<MultiSlot>,
     image: Option<ImageSlot>,
     reranker: Option<RerankSlot>,
 }
 
-static DENSE_CACHE: OnceLock<Mutex<HashMap<String, Arc<Mutex<TextEmbedding>>>>> = OnceLock::new();
-static MULTI_CACHE: OnceLock<Mutex<HashMap<String, Arc<Mutex<Bgem3Embedding>>>>> = OnceLock::new();
-static IMAGE_CACHE: OnceLock<Mutex<HashMap<String, Arc<Mutex<ImageEmbedding>>>>> = OnceLock::new();
-static RERANK_CACHE: OnceLock<Mutex<HashMap<String, Arc<Mutex<TextRerank>>>>> = OnceLock::new();
+type CacheKey = (String, String);
+type CachedModel<T> = Arc<Mutex<T>>;
+type ModelCache<T> = Mutex<HashMap<CacheKey, CachedModel<T>>>;
 
-fn dense_cache() -> &'static Mutex<HashMap<String, Arc<Mutex<TextEmbedding>>>> {
+static DENSE_CACHE: OnceLock<ModelCache<TextEmbedding>> = OnceLock::new();
+static SPARSE_CACHE: OnceLock<ModelCache<SparseTextEmbedding>> = OnceLock::new();
+static MULTI_CACHE: OnceLock<ModelCache<Bgem3Embedding>> = OnceLock::new();
+static IMAGE_CACHE: OnceLock<ModelCache<ImageEmbedding>> = OnceLock::new();
+static RERANK_CACHE: OnceLock<ModelCache<TextRerank>> = OnceLock::new();
+
+fn cache_dir_key(dir: Option<&PathBuf>) -> String {
+    dir.map(|p| p.display().to_string()).unwrap_or_default()
+}
+
+fn dense_cache() -> &'static ModelCache<TextEmbedding> {
     DENSE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn multi_cache() -> &'static Mutex<HashMap<String, Arc<Mutex<Bgem3Embedding>>>> {
+fn sparse_cache() -> &'static ModelCache<SparseTextEmbedding> {
+    SPARSE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn multi_cache() -> &'static ModelCache<Bgem3Embedding> {
     MULTI_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn image_cache() -> &'static Mutex<HashMap<String, Arc<Mutex<ImageEmbedding>>>> {
+fn image_cache() -> &'static ModelCache<ImageEmbedding> {
     IMAGE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn rerank_cache() -> &'static Mutex<HashMap<String, Arc<Mutex<TextRerank>>>> {
+fn rerank_cache() -> &'static ModelCache<TextRerank> {
     RERANK_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 impl FastEmbedder {
     pub fn try_new(options: InitOptionsWithLength<EmbeddingModel>) -> Result<Self, QqlError> {
+        let cache_dir = if options.cache_dir != std::path::PathBuf::new() {
+            Some(options.cache_dir.clone())
+        } else {
+            None
+        };
         Self::try_with_options(FastEmbedderOptions {
             model: Some(format!("{:?}", options.model_name)),
+            sparse_model: None,
             multi_model: None,
             image_model: None,
             reranker_model: None,
-            cache_dir: None,
-            show_download_progress: false,
+            cache_dir,
+            show_download_progress: options.show_download_progress,
         })
     }
 
@@ -147,10 +178,11 @@ impl FastEmbedder {
         let dense_dim = dense_info.dim;
         let dense_code = dense_info.model_code.clone();
 
+        let cache_key = cache_dir_key(opts.cache_dir.as_ref());
         let dense_handle = dense_cache()
             .lock()
             .map_err(|e| err(format!("fastembed model cache poisoned: {e}")))?
-            .get(&dense_name)
+            .get(&(dense_name.clone(), cache_key.clone()))
             .cloned();
         let dense_model_arc = if let Some(model) = dense_handle {
             model
@@ -164,9 +196,53 @@ impl FastEmbedder {
                 .map_err(|e| err(format!("fastembed model cache poisoned: {e}")))?;
             Arc::clone(
                 cache
-                    .entry(dense_name.clone())
+                    .entry((dense_name.clone(), cache_key.clone()))
                     .or_insert_with(|| Arc::clone(&model)),
             )
+        };
+
+        let sparse = match opts.sparse_model.as_deref() {
+            None | Some("") => None,
+            Some(name) => {
+                let sp = resolve_sparse_model(name)?;
+                let info = SparseTextEmbedding::get_model_info(&sp);
+                let sparse_name = format!("{:?}", sp);
+                let sparse_code = info.model_code.clone();
+
+                let sparse_handle = sparse_cache()
+                    .lock()
+                    .map_err(|e| err(format!("fastembed sparse cache poisoned: {e}")))?
+                    .get(&(sparse_name.clone(), cache_key.clone()))
+                    .cloned();
+                let sparse_arc = if let Some(model) = sparse_handle {
+                    model
+                } else {
+                    let mut sparse_init = SparseInitOptions::new(sp);
+                    if let Some(ref dir) = opts.cache_dir {
+                        sparse_init = sparse_init.with_cache_dir(dir.clone());
+                    }
+                    sparse_init =
+                        sparse_init.with_show_download_progress(opts.show_download_progress);
+                    let model = Arc::new(Mutex::new(
+                        SparseTextEmbedding::try_new(sparse_init).map_err(|e| {
+                            err(format!("fastembed SparseTextEmbedding init failed: {e}"))
+                        })?,
+                    ));
+                    let mut cache = sparse_cache()
+                        .lock()
+                        .map_err(|e| err(format!("fastembed sparse cache poisoned: {e}")))?;
+                    Arc::clone(
+                        cache
+                            .entry((sparse_name.clone(), cache_key.clone()))
+                            .or_insert_with(|| Arc::clone(&model)),
+                    )
+                };
+                Some(SparseSlot {
+                    model: sparse_arc,
+                    model_name: sparse_name,
+                    model_code: sparse_code,
+                })
+            }
         };
 
         let multi = match opts.multi_model.as_deref() {
@@ -182,7 +258,7 @@ impl FastEmbedder {
                 let multi_handle = multi_cache()
                     .lock()
                     .map_err(|e| err(format!("fastembed multi cache poisoned: {e}")))?
-                    .get(&multi_name)
+                    .get(&(multi_name.clone(), cache_key.clone()))
                     .cloned();
                 let multi_arc = if let Some(model) = multi_handle {
                     model
@@ -202,7 +278,7 @@ impl FastEmbedder {
                         .map_err(|e| err(format!("fastembed multi cache poisoned: {e}")))?;
                     Arc::clone(
                         cache
-                            .entry(multi_name.clone())
+                            .entry((multi_name.clone(), cache_key.clone()))
                             .or_insert_with(|| Arc::clone(&model)),
                     )
                 };
@@ -227,7 +303,7 @@ impl FastEmbedder {
                 let image_handle = image_cache()
                     .lock()
                     .map_err(|e| err(format!("fastembed image cache poisoned: {e}")))?
-                    .get(&image_name)
+                    .get(&(image_name.clone(), cache_key.clone()))
                     .cloned();
                 let image_arc = if let Some(model) = image_handle {
                     model
@@ -246,7 +322,7 @@ impl FastEmbedder {
                         .map_err(|e| err(format!("fastembed image cache poisoned: {e}")))?;
                     Arc::clone(
                         cache
-                            .entry(image_name.clone())
+                            .entry((image_name.clone(), cache_key.clone()))
                             .or_insert_with(|| Arc::clone(&model)),
                     )
                 };
@@ -269,7 +345,7 @@ impl FastEmbedder {
                 let handle = rerank_cache()
                     .lock()
                     .map_err(|e| err(format!("fastembed rerank cache poisoned: {e}")))?
-                    .get(&rerank_name)
+                    .get(&(rerank_name.clone(), cache_key.clone()))
                     .cloned();
                 let arc = if let Some(model) = handle {
                     model
@@ -288,7 +364,7 @@ impl FastEmbedder {
                         .map_err(|e| err(format!("fastembed rerank cache poisoned: {e}")))?;
                     Arc::clone(
                         cache
-                            .entry(rerank_name.clone())
+                            .entry((rerank_name.clone(), cache_key.clone()))
                             .or_insert_with(|| Arc::clone(&model)),
                     )
                 };
@@ -307,6 +383,7 @@ impl FastEmbedder {
                 model_code: dense_code,
                 dim: dense_dim,
             },
+            sparse,
             multi,
             image,
             reranker,
@@ -373,6 +450,18 @@ impl FastEmbedder {
         self.reranker.is_some()
     }
 
+    pub fn sparse_model_name(&self) -> Option<&str> {
+        self.sparse.as_ref().map(|s| s.model_name.as_str())
+    }
+
+    pub fn sparse_model_code(&self) -> Option<&str> {
+        self.sparse.as_ref().map(|s| s.model_code.as_str())
+    }
+
+    pub fn has_sparse(&self) -> bool {
+        self.sparse.is_some()
+    }
+
     pub fn reranker_model_code(&self) -> Option<&str> {
         self.reranker.as_ref().map(|m| m.model_code.as_str())
     }
@@ -403,6 +492,15 @@ impl FastEmbedder {
             || short_alias_matches(r, &self.dense.model_code)
         {
             return true;
+        }
+        if let Some(ref sparse) = self.sparse {
+            if r.eq_ignore_ascii_case(&sparse.model_name)
+                || r.eq_ignore_ascii_case(&sparse.model_code)
+                || short_alias_matches(r, &sparse.model_code)
+                || is_sparse_alias(r)
+            {
+                return true;
+            }
         }
         if let Some(ref multi) = self.multi {
             if r.eq_ignore_ascii_case(&multi.model_name)
@@ -449,6 +547,20 @@ impl FastEmbedder {
             || short_alias_matches(r, &self.dense.model_code)
     }
 
+    fn accepts_sparse_model(&self, requested: &str) -> bool {
+        let Some(ref sparse) = self.sparse else {
+            return false;
+        };
+        let r = requested.trim();
+        if r.is_empty() || r.eq_ignore_ascii_case("default") {
+            return true;
+        }
+        r.eq_ignore_ascii_case(&sparse.model_name)
+            || r.eq_ignore_ascii_case(&sparse.model_code)
+            || short_alias_matches(r, &sparse.model_code)
+            || is_sparse_alias(r)
+    }
+
     fn accepts_multi_model(&self, requested: &str) -> bool {
         let Some(ref multi) = self.multi else {
             return false;
@@ -471,6 +583,10 @@ impl std::fmt::Debug for FastEmbedder {
             .field("model_code", &self.dense.model_code)
             .field("dim", &self.dense.dim)
             .field(
+                "sparse_model",
+                &self.sparse.as_ref().map(|m| m.model_code.as_str()),
+            )
+            .field(
                 "multi_model",
                 &self.multi.as_ref().map(|m| m.model_code.as_str()),
             )
@@ -484,8 +600,9 @@ impl std::fmt::Debug for FastEmbedder {
     }
 }
 
-/// List dense text models, offline multi (BGE-M3 / ColBERT), and image models
-/// (CLIP vision, …) that fastembed can load.
+/// List dense text models, offline sparse models (SPLADE / BGE-M3),
+/// multi (BGE-M3 / ColBERT), and image models (CLIP vision, …) that
+/// fastembed can load.
 pub fn list_embedding_models() -> Vec<EmbeddingModelInfo> {
     let mut models: Vec<EmbeddingModelInfo> = TextEmbedding::list_supported_models()
         .into_iter()
@@ -498,6 +615,16 @@ pub fn list_embedding_models() -> Vec<EmbeddingModelInfo> {
             image: false,
         })
         .collect();
+    for m in SparseTextEmbedding::list_supported_models() {
+        models.push(EmbeddingModelInfo {
+            name: format!("{:?}", m.model),
+            model_code: m.model_code,
+            dim: m.dim,
+            description: format!("{} (sparse / SPLADE)", m.description),
+            multi: false,
+            image: false,
+        });
+    }
     for m in Bgem3Embedding::list_supported_models() {
         models.push(EmbeddingModelInfo {
             name: format!("{:?}", m.model),
@@ -667,6 +794,44 @@ fn is_reranker_alias(name: &str) -> bool {
     )
 }
 
+/// Resolve offline sparse model (SPLADE, BGE-M3 sparse).
+pub fn resolve_sparse_model(name: &str) -> Result<SparseModel, QqlError> {
+    let name = name.trim();
+    if name.is_empty()
+        || matches!(
+            name.to_ascii_lowercase().as_str(),
+            "splade" | "spladeppv1" | "splade_pp_en_v1" | "sparse" | "bm25"
+        )
+    {
+        return Ok(SparseModel::default());
+    }
+    if matches!(name.to_ascii_lowercase().as_str(), "bge-m3" | "bgem3") {
+        return Ok(SparseModel::BGEM3);
+    }
+    if let Ok(m) = name.parse::<SparseModel>() {
+        return Ok(m);
+    }
+    for info in SparseTextEmbedding::list_supported_models() {
+        if info.model_code.eq_ignore_ascii_case(name)
+            || short_alias_matches(name, &info.model_code)
+            || format!("{:?}", info.model).eq_ignore_ascii_case(name)
+        {
+            return Ok(info.model);
+        }
+    }
+    Err(err(format!(
+        "unknown sparse embedding model '{name}'. Offline sparse supports \
+         'splade' (SPLADEPPV1) and 'bge-m3' (BGEM3)"
+    )))
+}
+
+fn is_sparse_alias(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "splade" | "spladeppv1" | "splade_pp_en_v1" | "sparse" | "bm25" | "bge-m3" | "bgem3"
+    )
+}
+
 fn short_alias_matches(requested: &str, model_code: &str) -> bool {
     let req = requested.trim().trim_matches('"');
     let code = model_code;
@@ -795,8 +960,104 @@ impl Embedder for FastEmbedder {
         Ok(embeddings)
     }
 
-    async fn embed_sparse(&self, text: &str, _model: &str) -> Result<SparseVector, QqlError> {
-        Ok(qql_embed::sparse::build_query_default(text))
+    async fn embed_sparse(&self, text: &str, model: &str) -> Result<SparseVector, QqlError> {
+        let Some(ref sparse) = self.sparse else {
+            // No sparse model configured: accept default/empty models for local
+            // BM25, but reject explicit non-default models.
+            if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
+                return Err(qql_embed::sparse_model_unsupported_error(model));
+            }
+            return Ok(qql_embed::sparse::build_query_default(text));
+        };
+
+        if !(self.accepts_sparse_model(model)
+            || model.is_empty()
+            || model.eq_ignore_ascii_case("default"))
+        {
+            return Err(err(format!(
+                "local sparse embedder is locked to '{}' ({}); cannot satisfy MODEL '{model}'",
+                sparse.model_name, sparse.model_code
+            )));
+        }
+
+        let model_arc = sparse.model.clone();
+        let texts = vec![text.to_string()];
+
+        let embeddings = tokio::task::spawn_blocking(move || {
+            let mut model = model_arc
+                .lock()
+                .map_err(|e| err(format!("fastembed sparse mutex poisoned: {e}")))?;
+            model
+                .embed(texts, None)
+                .map_err(|e| err(format!("fastembed SparseTextEmbedding failed: {e}")))
+        })
+        .await
+        .map_err(|e| err(format!("spawn_blocking failed: {e}")))??;
+
+        let emb = embeddings
+            .into_iter()
+            .next()
+            .map(|e| SparseVector {
+                indices: e.indices.iter().map(|&i| i as u32).collect(),
+                values: e.values.clone(),
+            })
+            .ok_or_else(|| err("fastembed SparseTextEmbedding returned no result"))?;
+
+        Ok(emb)
+    }
+
+    /// Single-pass BGE-M3 joint embedding: one `Bgem3Embedding::embed` call
+    /// yields dense, sparse, and ColBERT together. Falls back to the default
+    /// three-call implementation when no BGE-M3 multi model is configured.
+    async fn embed_joint(&self, text: &str, model: &str) -> Result<JointEmbeddingOutput, QqlError> {
+        let Some(ref multi) = self.multi else {
+            // No BGE-M3 model: delegate to default per-call impl (non-optimal
+            // but correct — no error suppression).
+            let dense = self.embed_dense(text, model).await?;
+            let sparse = self.embed_sparse(text, model).await?;
+            let multi_vec = self.embed_multi(text, model).await?;
+            return Ok(JointEmbeddingOutput {
+                dense: Some(dense),
+                sparse: Some(sparse),
+                multi: Some(multi_vec),
+            });
+        };
+
+        if !(self.accepts_multi_model(model)
+            || model.is_empty()
+            || model.eq_ignore_ascii_case("default"))
+        {
+            return Err(err(format!(
+                "local joint embedder uses BGE-M3 '{}' ({}); cannot satisfy MODEL '{model}'",
+                multi.model_name, multi.model_code
+            )));
+        }
+
+        let model_arc = multi.model.clone();
+        let texts = vec![text.to_string()];
+
+        let output = tokio::task::spawn_blocking(move || {
+            let mut m = model_arc
+                .lock()
+                .map_err(|e| err(format!("fastembed joint mutex poisoned: {e}")))?;
+            m.embed(texts, None)
+                .map_err(|e| err(format!("fastembed BGE-M3 joint failed: {e}")))
+        })
+        .await
+        .map_err(|e| err(format!("spawn_blocking failed: {e}")))??;
+
+        let dense = output.dense.into_iter().next();
+        let sparse = output.sparse.into_iter().next().map(|e| SparseVector {
+            indices: e.indices.iter().map(|&i| i as u32).collect(),
+            values: e.values.clone(),
+        });
+        let colbert = output.colbert.into_iter().next();
+
+        Ok(JointEmbeddingOutput {
+            dense,
+            sparse,
+            multi: colbert,
+        })
     }
 
     async fn embed_multi(&self, text: &str, model: &str) -> Result<Vec<Vec<f32>>, QqlError> {
@@ -992,5 +1253,86 @@ impl Embedder for FastEmbedder {
             }
         }
         Ok(scores)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cache_dir_key_empty_for_none() {
+        assert_eq!(cache_dir_key(None), "");
+    }
+
+    #[test]
+    fn cache_dir_key_preserves_path() {
+        let p = PathBuf::from("/tmp/my_cache");
+        assert_eq!(cache_dir_key(Some(&p)), "/tmp/my_cache");
+    }
+
+    #[test]
+    fn resolve_sparse_model_splade_default() {
+        let m = resolve_sparse_model("").unwrap();
+        assert_eq!(m, SparseModel::SPLADEPPV1);
+    }
+
+    #[test]
+    fn resolve_sparse_model_by_alias() {
+        let m = resolve_sparse_model("splade").unwrap();
+        assert_eq!(m, SparseModel::SPLADEPPV1);
+    }
+
+    #[test]
+    fn resolve_sparse_model_by_enum_name() {
+        let m = resolve_sparse_model("SPLADEPPV1").unwrap();
+        assert_eq!(m, SparseModel::SPLADEPPV1);
+    }
+
+    #[test]
+    fn resolve_sparse_model_by_model_code() {
+        let m = resolve_sparse_model("Qdrant/Splade_PP_en_v1").unwrap();
+        assert_eq!(m, SparseModel::SPLADEPPV1);
+    }
+
+    #[test]
+    fn resolve_sparse_model_bgem3() {
+        let m = resolve_sparse_model("bge-m3").unwrap();
+        assert_eq!(m, SparseModel::BGEM3);
+        let m = resolve_sparse_model("BGEM3").unwrap();
+        assert_eq!(m, SparseModel::BGEM3);
+        let m = resolve_sparse_model("BAAI/bge-m3").unwrap();
+        assert_eq!(m, SparseModel::BGEM3);
+    }
+
+    #[test]
+    fn resolve_sparse_model_unknown_errors() {
+        let e = resolve_sparse_model("nonexistent_model").unwrap_err();
+        assert!(e.message.contains("nonexistent_model"));
+    }
+
+    #[test]
+    fn is_sparse_alias_matches() {
+        assert!(is_sparse_alias("splade"));
+        assert!(is_sparse_alias("SPLADE"));
+        assert!(is_sparse_alias("bge-m3"));
+        assert!(is_sparse_alias("bgem3"));
+        assert!(!is_sparse_alias("unknown"));
+    }
+
+    #[test]
+    fn options_default_has_no_sparse_model() {
+        let opts = FastEmbedderOptions::default();
+        assert!(opts.sparse_model.is_none());
+        assert!(opts.model.is_none());
+    }
+
+    #[test]
+    fn options_with_sparse_model() {
+        let opts = FastEmbedderOptions {
+            sparse_model: Some("splade".into()),
+            ..Default::default()
+        };
+        assert_eq!(opts.sparse_model.as_deref(), Some("splade"));
     }
 }
