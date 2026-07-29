@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `inject_shard_key` and `inject_filter` fail closed on unsupported statement types (no silent no-op for DDL).
 
 ### 🚀 Added
+- **QQL 1.2 Specification**: Bumped language version to `1.2` in `language/v1/spec/versioning.md` covering all additive syntax additions.
+- **`DELETE PAYLOAD`**: Added syntax, AST, planner IR, REST route (`POST /collections/{c}/points/payload/delete`), gRPC (`DeletePayloadPoints`), and Edge support for deleting specific payload keys from targeted points (`DELETE PAYLOAD key1, key2 FROM collection WHERE ...`).
+- **`min_should` Filter Conjunction Threshold**: Added `min_should` field to `FilterCompound` in `qql-plan`.
+- **HNSW `inline_storage`**: Added `inline_storage` config field to `HnswConfig` in `qql-plan` and `qql-core`.
+- **Text Index `stemmer`**: Added `stemmer` validation to `CREATE INDEX ... WITH (stemmer = 'english')`.
 - **Full Qdrant Feature Coverage**:
   - **`FilterCompound.shard_key`**: Wired top-level and nested `shard_key` propagation into `FilterCompound` across query, count, scroll, and prefetch plans.
   - **`QueryRequest.lookup_from`**: Extracted lookup collection and vector specifications into `QueryRequest.lookup_from` (`LookupRequest`).

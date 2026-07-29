@@ -51,6 +51,7 @@ Translate user intent directly into QQL syntax:
 - Batch ingest -> `UPSERT INTO <collection> VALUES {id: 1, text: '...'}, {id: 2, text: '...'}`
 - Delete points -> `DELETE FROM <collection> WHERE <filter>`
 - Clear payload -> `CLEAR PAYLOAD FROM <collection> WHERE <filter>`
+- Delete payload keys -> `DELETE PAYLOAD <key1, key2> FROM <collection> WHERE <filter>`
 - Delete vectors -> `DELETE VECTOR <name> FROM <collection> WHERE id = N`
 - Count points -> `COUNT FROM <collection> WHERE <filter>`
 - Create shard key -> `CREATE SHARD KEY '<key>' ON COLLECTION <name> [WITH (shards_number = N, replication_factor = M)]`

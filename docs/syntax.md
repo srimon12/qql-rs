@@ -11,7 +11,7 @@ semantics. Keywords are case-insensitive.
 ```ebnf
 script       = [ statement, { ";", statement }, [ ";" ] ] ;
 statement    = query | scroll | upsert | update | delete | ddl | count
-             | clear-payload | delete-vectors
+             | clear-payload | delete-payload | delete-vectors
              | create-shard-key | drop-shard-key | show-shard-keys
              | drop-index | show ;
 ```
@@ -548,8 +548,11 @@ COUNT FROM sec10k WHERE tenant_id = 'honeywell' SHARD 'honeywell';
 ### Point Mutations
 
 ```sql
--- Clear payload fields from points
+-- Clear all payload fields from matching points
 CLEAR PAYLOAD FROM docs WHERE status = 'archived';
+
+-- Delete specific payload keys from matching points
+DELETE PAYLOAD draft, temp_token FROM docs WHERE status = 'archived';
 
 -- Delete specific named vectors from points
 DELETE VECTOR colbert FROM docs WHERE id = 42;
@@ -566,7 +569,7 @@ DELETE VECTOR dense, sparse FROM docs WHERE status = 'deprecated';
 | `integer` | `lookup`, `range`, `is_principal`, `on_disk`, `enable_hnsw` |
 | `float` | `on_disk`, `is_principal`, `enable_hnsw` |
 | `geo` | `on_disk`, `enable_hnsw` |
-| `text` | `tokenizer` (word/prefix/whitespace/multilingual), `lowercase`, `min_token_len`, `max_token_len`, `on_disk`, `stopwords`, `phrase_matching` |
+| `text` | `tokenizer` (word/prefix/whitespace/multilingual), `lowercase`, `min_token_len`, `max_token_len`, `on_disk`, `stopwords`, `phrase_matching`, `ascii_folding`, `stemmer` (e.g. `'english'`) |
 | `bool` | `on_disk`, `enable_hnsw` |
 | `datetime` | `on_disk`, `is_principal`, `enable_hnsw` |
 | `uuid` | `is_tenant`, `on_disk`, `enable_hnsw` |

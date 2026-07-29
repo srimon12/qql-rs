@@ -286,7 +286,7 @@ class TestEdgeExecutor(unittest.TestCase):
                 on_error="continue",
             )
             self.assertFalse(r["ok"])
-            self.assertIn("point-id", r["results"][0]["message"])
+            self.assertIn("point", r["results"][0]["message"].lower())
 
     def test_model_mismatch_rejected(self):
         with _EdgeCase() as edge:

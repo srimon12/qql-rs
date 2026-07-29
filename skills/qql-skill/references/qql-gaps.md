@@ -44,6 +44,10 @@ Edge unsupported codes are stable (see `crates/qql-edge/README.md`).
 | Request timeout | `PARAMS (timeout = 30)` → REST `?timeout=30` / gRPC `timeout` (seconds) |
 | Read consistency | `PARAMS (consistency = majority\|quorum\|all\|N)` → OpenAPI `ReadConsistency` |
 | ACORN params (remote) | `PARAMS (acorn = true, max_selectivity = 0.4)` — not on edge |
+| Exact count | `COUNT FROM coll WITH (exact = true)` |
+| Specific payload deletion | `DELETE PAYLOAD key1, key2 FROM coll WHERE ...` |
+| Multi-collection lookup | `GROUP BY ... LOOKUP FROM coll` → `QueryRequest.lookup_from` |
+| Filter shard & min_should | `FilterCompound.shard_key` and `min_should` threshold |
 | Dynamic shard (host) | `inject_shard_key(stmt, tenant)` / `stmt.inject_shard_key(tenant)` — or literal `SHARD '…'` |
 | Schema-first vectors | `USING name` / `AS DENSE\|SPARSE\|MULTI` |
 | Multivector / late interaction | `USING colbert` / `AS MULTI`; `RERANK … PREFETCH` |

@@ -21,6 +21,7 @@ statement = _{
     | count
     | upsert
     | update
+    | delete_payload
     | delete_vectors
     | delete
     | clear_payload
@@ -353,6 +354,13 @@ delete = {
 }
 clear_payload = {
     ^"CLEAR" ~ ^"PAYLOAD" ~ ^"FROM" ~ collection
+    ~ ^"WHERE" ~ filter
+    ~ (^"SHARD" ~ string)?
+}
+delete_payload = {
+    ^"DELETE" ~ ^"PAYLOAD"
+    ~ field_name ~ ("," ~ field_name)*
+    ~ ^"FROM" ~ collection
     ~ ^"WHERE" ~ filter
     ~ (^"SHARD" ~ string)?
 }

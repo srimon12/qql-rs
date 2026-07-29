@@ -1,0 +1,61 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "DeletePayload": {
+        "collection": "docs",
+        "keys": [
+          "draft"
+        ],
+        "selector": {
+          "Filter": {
+            "Compare": {
+              "field": "status",
+              "op": "Eq",
+              "value": {
+                "Str": "archived"
+              }
+            }
+          }
+        },
+        "shard_key": null
+      }
+    },
+    {
+      "DeletePayload": {
+        "collection": "docs",
+        "keys": [
+          "draft",
+          "temp_token"
+        ],
+        "selector": {
+          "Filter": {
+            "And": {
+              "operands": [
+                {
+                  "Compare": {
+                    "field": "status",
+                    "op": "Eq",
+                    "value": {
+                      "Str": "deleted"
+                    }
+                  }
+                },
+                {
+                  "Compare": {
+                    "field": "created_year",
+                    "op": "Lt",
+                    "value": {
+                      "Int": 2020
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "shard_key": "acme"
+      }
+    }
+  ]
+}
