@@ -298,7 +298,8 @@ fn turbo_quantization(value: &serde_json::Value) -> qdrant::TurboQuantization {
 pub(crate) fn quantization_config(value: &serde_json::Value) -> Option<qdrant::QuantizationConfig> {
     let value = value.get("quantization_config").unwrap_or(value);
     // Accept nested OpenAPI `{ "scalar": {…} }` and flat IR `{ "type": "scalar", … }`.
-    let (kind, payload) = if let Some(obj) = value.as_object() {
+    let (kind, payload) = {
+        let obj = value.as_object()?;
         if let Some(inner) = obj.get("scalar") {
             ("scalar", inner)
         } else if let Some(inner) = obj.get("product") {
@@ -311,8 +312,6 @@ pub(crate) fn quantization_config(value: &serde_json::Value) -> Option<qdrant::Q
             let kind = obj.get("type").and_then(|v| v.as_str()).unwrap_or("");
             (kind, value)
         }
-    } else {
-        return None;
     };
     let quantization = match kind.to_ascii_lowercase().as_str() {
         // Nested OpenAPI uses ScalarType `int8`; flat IR uses `scalar`.
