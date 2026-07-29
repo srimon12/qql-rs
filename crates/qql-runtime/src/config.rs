@@ -41,6 +41,18 @@ pub struct QqlConfig {
     /// Per-token dimension for multivector models (e.g. 96 ColBERT-small, 1024 BGE-M3).
     #[serde(default)]
     pub multi_embedding_dimension: usize,
+    /// Optional image / CLIP vision embedding endpoint (OpenAI-compatible dense).
+    /// When unset, image requests reuse [`embedding_endpoint`].
+    #[serde(default)]
+    pub image_embedding_endpoint: Option<String>,
+    #[serde(default)]
+    pub image_embedding_api_key: Option<String>,
+    /// Default vision model (e.g. `Qdrant/clip-ViT-B-32-vision`).
+    #[serde(default)]
+    pub image_embedding_model: Option<String>,
+    /// Dense dim for image embeds (CLIP ViT-B/32 = 512).
+    #[serde(default)]
+    pub image_embedding_dimension: usize,
     #[serde(default)]
     pub no_verify: bool,
     #[serde(default)]

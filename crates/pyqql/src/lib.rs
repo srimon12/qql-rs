@@ -286,6 +286,18 @@ fn create_executor(
             if let Ok(Some(v)) = dict.get_item("multi_dimension") {
                 config.multi_embedding_dimension = v.extract::<usize>()?;
             }
+            if let Ok(Some(v)) = dict.get_item("image_endpoint") {
+                config.image_embedding_endpoint = Some(v.extract::<String>()?);
+            }
+            if let Ok(Some(v)) = dict.get_item("image_api_key") {
+                config.image_embedding_api_key = Some(v.extract::<String>()?);
+            }
+            if let Ok(Some(v)) = dict.get_item("image_model") {
+                config.image_embedding_model = Some(v.extract::<String>()?);
+            }
+            if let Ok(Some(v)) = dict.get_item("image_dimension") {
+                config.image_embedding_dimension = v.extract::<usize>()?;
+            }
         }
     }
 
@@ -319,6 +331,10 @@ fn create_executor(
                     multi_api_key: config.multi_embedding_api_key.clone(),
                     multi_model: config.multi_embedding_model.clone(),
                     multi_dimension: config.multi_embedding_dimension,
+                    image_endpoint: config.image_embedding_endpoint.clone(),
+                    image_api_key: config.image_embedding_api_key.clone(),
+                    image_model: config.image_embedding_model.clone(),
+                    image_dimension: config.image_embedding_dimension,
                 },
             )
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;

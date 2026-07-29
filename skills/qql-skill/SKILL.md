@@ -40,7 +40,9 @@ Translate user intent directly into QQL syntax:
 - Random sampling -> `QUERY SAMPLE RANDOM FROM <collection> LIMIT <n>`
 - Browse by payload field -> `QUERY ORDER BY <field> [ASC|DESC] FROM <collection> LIMIT <n>`
 - Multi-stage retrieval -> `WITH c1 AS (QUERY 't' USING dense LIMIT 100), c2 AS (QUERY 't' USING sparse LIMIT 100) QUERY FUSION RRF FROM <collection> PREFETCH (c1, c2) LIMIT <n>`
-- CLIP / dual-encoder image-text -> plain dense named vectors (same dim space); **not** `AS MULTI`
+- CLIP text→image -> `QUERY TEXT '…' MODEL 'Qdrant/clip-ViT-B-32-text' FROM <coll> USING image LIMIT <n>`
+- CLIP image query -> `QUERY IMAGE '/path.jpg' MODEL 'Qdrant/clip-ViT-B-32-vision' FROM <coll> USING image LIMIT <n>`
+- CLIP image upsert -> `UPSERT … USING IMAGE MODEL 'clip-vision' ON FIELD image INTO image`
 - MMR diversification -> `QUERY MMR 'query_text' DIVERSITY 0.5 CANDIDATES 100 FROM <collection> USING dense LIMIT <n>`
 - Formula / Score shaping -> `QUERY FORMULA score + 0.3 * popularity DEFAULTS (popularity = 1.0) FROM <collection> USING dense LIMIT <n>`
 - Grouped results -> add `GROUP BY <field> SIZE <m> LOOKUP FROM <collection>`

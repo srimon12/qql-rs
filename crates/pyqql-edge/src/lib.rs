@@ -409,12 +409,13 @@ async fn run_async(
 ///     show_download_progress: show HuggingFace download progress (default False)
 #[cfg(feature = "fastembed-local")]
 #[pyfunction]
-#[pyo3(signature = (data_dir, on_disk_payload=true, *, model=None, multi_model=None, cache_dir=None, show_download_progress=false))]
+#[pyo3(signature = (data_dir, on_disk_payload=true, *, model=None, multi_model=None, image_model=None, cache_dir=None, show_download_progress=false))]
 fn local_executor(
     data_dir: &str,
     on_disk_payload: bool,
     model: Option<String>,
     multi_model: Option<String>,
+    image_model: Option<String>,
     cache_dir: Option<String>,
     show_download_progress: bool,
 ) -> PyResult<PyClient> {
@@ -424,6 +425,7 @@ fn local_executor(
             on_disk_payload,
             model,
             multi_model,
+            image_model,
             cache_dir: cache_dir.map(std::path::PathBuf::from),
             show_download_progress,
         },
@@ -450,6 +452,7 @@ fn list_embedding_models(py: Python<'_>) -> PyResult<Bound<'_, PyList>> {
         let d = PyDict::new(py);
         d.set_item("name", m.name)?;
         d.set_item("multi", m.multi)?;
+        d.set_item("image", m.image)?;
         d.set_item("model_code", m.model_code)?;
         d.set_item("dim", m.dim)?;
         d.set_item("description", m.description)?;

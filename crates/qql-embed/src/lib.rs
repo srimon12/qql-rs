@@ -17,7 +17,9 @@ mod resolve_test;
 #[cfg(test)]
 mod sparse_test;
 
-pub use embedder::{multi_unsupported_error, Embedder, EmbedderBound, SparseEmbedder};
+pub use embedder::{
+    image_unsupported_error, multi_unsupported_error, Embedder, EmbedderBound, SparseEmbedder,
+};
 pub use resolve::{resolve_embeddings, DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME};
 pub use sparse::SparseVector;
 pub use topology::{

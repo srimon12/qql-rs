@@ -94,6 +94,9 @@ nearest = { ^"NEAREST"? ~ query_input }
 
 query_input = _{
       ^"TEXT" ~ string ~ (^"MODEL" ~ string)?
+    // IMAGE: local path or URL → dense embed via host image/CLIP vision model.
+    // Same dense role as TEXT; modality is image, not multivector.
+    | ^"IMAGE" ~ string ~ (^"MODEL" ~ string)?
     | ^"VECTOR" ~ vector_value
     | ^"POINT" ~ point_id
     | string

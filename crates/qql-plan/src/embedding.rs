@@ -145,8 +145,10 @@ fn extract_upsert_jobs(upsert: &UpsertStmt, jobs: &mut Vec<EmbeddingJob>) {
             let (kind, model) = match &directive.kind {
                 EmbedKind::Dense { model } => (EmbeddingKind::Dense, model.clone()),
                 EmbedKind::Sparse { model } => (EmbeddingKind::Sparse, model.clone()),
-                // Plan-level jobs only track dense/sparse; multi is resolved in qql-embed.
-                EmbedKind::Multi { model } => (EmbeddingKind::Dense, model.clone()),
+                // Plan-level jobs only track dense/sparse; multi/image resolved in qql-embed.
+                EmbedKind::Multi { model } | EmbedKind::Image { model } => {
+                    (EmbeddingKind::Dense, model.clone())
+                }
             };
             jobs.push(EmbeddingJob {
                 texts,
@@ -195,6 +197,18 @@ fn process_plan_embedding_spec(
         }
         EmbeddingSpec::MultiVector { model, field, .. } => {
             let f = field.as_deref().unwrap_or("text");
+            let texts = extract_payload_texts(&upsert.points, f);
+            if !texts.is_empty() {
+                jobs.push(EmbeddingJob {
+                    texts,
+                    model: model.clone(),
+                    kind: EmbeddingKind::Dense,
+                    destinations: Vec::new(),
+                });
+            }
+        }
+        EmbeddingSpec::Image { model, field, .. } => {
+            let f = field.as_deref().unwrap_or("image");
             let texts = extract_payload_texts(&upsert.points, f);
             if !texts.is_empty() {
                 jobs.push(EmbeddingJob {

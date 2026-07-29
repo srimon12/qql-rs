@@ -29,6 +29,9 @@ pub enum PointVectors {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum QueryInput {
     Text { text: String, model: Option<String> },
+    /// Image path or URL for dense embedding (CLIP vision, etc.).
+    /// Resolved to [`VectorValue::Dense`] before plan/dispatch.
+    Image { source: String, model: Option<String> },
     Vector(VectorValue),
     Point(PointId),
 }
@@ -299,6 +302,8 @@ pub enum EmbedKind {
     Sparse { model: Option<String> },
     /// Multivector / ColBERT bag (`embed_multi` → MultiDense).
     Multi { model: Option<String> },
+    /// Image / CLIP vision path or URL → dense vector (`embed_image`).
+    Image { model: Option<String> },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -332,6 +337,12 @@ pub enum EmbeddingSpec {
     },
     /// Multivector / ColBERT: text → bag of token vectors for a named multi slot.
     MultiVector {
+        model: Option<String>,
+        vector: Option<String>,
+        field: Option<String>,
+    },
+    /// Image / CLIP vision: payload field holds a path or URL → dense vector.
+    Image {
         model: Option<String>,
         vector: Option<String>,
         field: Option<String>,

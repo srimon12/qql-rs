@@ -151,6 +151,7 @@ fn query_intent(expression: &QueryExpr) -> &'static str {
         QueryExpr::Nearest { mmr: Some(_), .. } => "maximal marginal relevance (MMR) search",
         QueryExpr::Nearest { input, .. } => match input {
             QueryInput::Text { .. } => "nearest neighbors from text",
+            QueryInput::Image { .. } => "nearest neighbors from an image",
             QueryInput::Vector(_) => "nearest neighbors from a vector",
             QueryInput::Point(_) => "nearest neighbors from a point",
         },

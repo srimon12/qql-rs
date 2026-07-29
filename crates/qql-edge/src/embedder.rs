@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use fastembed::{
-    Bgem3Embedding, Bgem3InitOptions, Bgem3Model, EmbeddingModel, InitOptionsWithLength,
-    TextEmbedding,
+    Bgem3Embedding, Bgem3InitOptions, Bgem3Model, EmbeddingModel, ImageEmbedding,
+    ImageEmbeddingModel, ImageInitOptions, InitOptionsWithLength, TextEmbedding,
 };
 
 use qql_core::error::QqlError;
@@ -29,6 +29,8 @@ pub struct EmbeddingModelInfo {
     pub description: String,
     /// True when this entry is a multivector / ColBERT-capable offline model.
     pub multi: bool,
+    /// True when this entry is an image / CLIP vision model.
+    pub image: bool,
 }
 
 /// Options for constructing a [`FastEmbedder`].
@@ -36,11 +38,15 @@ pub struct EmbeddingModelInfo {
 pub struct FastEmbedderOptions {
     /// Dense model name. Accepts enum names (`BGESmallENV15`), HF codes
     /// (`Xenova/bge-small-en-v1.5`), or short aliases (`bge-small-en-v1.5`).
+    /// For CLIP text use `ClipVitB32` / `Qdrant/clip-ViT-B-32-text`.
     /// `None` → default `BGESmallENV15` (384-d).
     pub model: Option<String>,
     /// Offline multivector model. Accepts `bge-m3`, `BGEM3Q`,
     /// `gpahal/bge-m3-onnx-int8`. When set, `embed_multi` runs via BGE-M3 ColBERT.
     pub multi_model: Option<String>,
+    /// Offline image / CLIP vision model. Accepts `ClipVitB32`,
+    /// `Qdrant/clip-ViT-B-32-vision`, `clip-vision`. Pairs with dense CLIP text.
+    pub image_model: Option<String>,
     /// Override model cache directory. `None` → fastembed default
     /// (`FASTEMBED_CACHE_DIR` / `HF_HOME` / `./.fastembed_cache`).
     pub cache_dir: Option<PathBuf>,
@@ -64,13 +70,22 @@ struct MultiSlot {
     dim: usize,
 }
 
+struct ImageSlot {
+    model: Arc<Mutex<ImageEmbedding>>,
+    model_name: String,
+    model_code: String,
+    dim: usize,
+}
+
 pub struct FastEmbedder {
     dense: DenseSlot,
     multi: Option<MultiSlot>,
+    image: Option<ImageSlot>,
 }
 
 static DENSE_CACHE: OnceLock<Mutex<HashMap<String, Arc<Mutex<TextEmbedding>>>>> = OnceLock::new();
 static MULTI_CACHE: OnceLock<Mutex<HashMap<String, Arc<Mutex<Bgem3Embedding>>>>> = OnceLock::new();
+static IMAGE_CACHE: OnceLock<Mutex<HashMap<String, Arc<Mutex<ImageEmbedding>>>>> = OnceLock::new();
 
 fn dense_cache() -> &'static Mutex<HashMap<String, Arc<Mutex<TextEmbedding>>>> {
     DENSE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
@@ -80,11 +95,16 @@ fn multi_cache() -> &'static Mutex<HashMap<String, Arc<Mutex<Bgem3Embedding>>>> 
     MULTI_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+fn image_cache() -> &'static Mutex<HashMap<String, Arc<Mutex<ImageEmbedding>>>> {
+    IMAGE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 impl FastEmbedder {
     pub fn try_new(options: InitOptionsWithLength<EmbeddingModel>) -> Result<Self, QqlError> {
         Self::try_with_options(FastEmbedderOptions {
             model: Some(format!("{:?}", options.model_name)),
             multi_model: None,
+            image_model: None,
             cache_dir: None,
             show_download_progress: false,
         })
@@ -179,6 +199,52 @@ impl FastEmbedder {
             }
         };
 
+        let image = match opts.image_model.as_deref() {
+            None | Some("") => None,
+            Some(name) => {
+                let img = resolve_image_model(name)?;
+                let info = ImageEmbedding::get_model_info(&img);
+                let image_name = format!("{:?}", img);
+                let image_code = info.model_code.clone();
+                let image_dim = info.dim;
+
+                let image_handle = image_cache()
+                    .lock()
+                    .map_err(|e| err(format!("fastembed image cache poisoned: {e}")))?
+                    .get(&image_name)
+                    .cloned();
+                let image_arc = if let Some(model) = image_handle {
+                    model
+                } else {
+                    let mut image_init = ImageInitOptions::new(img);
+                    if let Some(ref dir) = opts.cache_dir {
+                        image_init = image_init.with_cache_dir(dir.clone());
+                    }
+                    image_init =
+                        image_init.with_show_download_progress(opts.show_download_progress);
+                    let model = Arc::new(Mutex::new(
+                        ImageEmbedding::try_new(image_init).map_err(|e| {
+                            err(format!("fastembed image (CLIP vision) init failed: {e}"))
+                        })?,
+                    ));
+                    let mut cache = image_cache()
+                        .lock()
+                        .map_err(|e| err(format!("fastembed image cache poisoned: {e}")))?;
+                    Arc::clone(
+                        cache
+                            .entry(image_name.clone())
+                            .or_insert_with(|| Arc::clone(&model)),
+                    )
+                };
+                Some(ImageSlot {
+                    model: image_arc,
+                    model_name: image_name,
+                    model_code: image_code,
+                    dim: image_dim,
+                })
+            }
+        };
+
         Ok(Self {
             dense: DenseSlot {
                 model: dense_model_arc,
@@ -187,6 +253,7 @@ impl FastEmbedder {
                 dim: dense_dim,
             },
             multi,
+            image,
         })
     }
 
@@ -230,6 +297,22 @@ impl FastEmbedder {
         self.multi.is_some()
     }
 
+    pub fn image_model_name(&self) -> Option<&str> {
+        self.image.as_ref().map(|m| m.model_name.as_str())
+    }
+
+    pub fn image_model_code(&self) -> Option<&str> {
+        self.image.as_ref().map(|m| m.model_code.as_str())
+    }
+
+    pub fn image_dimension(&self) -> Option<usize> {
+        self.image.as_ref().map(|m| m.dim)
+    }
+
+    pub fn has_image(&self) -> bool {
+        self.image.is_some()
+    }
+
     /// Whether a QQL `USING MODEL '…'` / `MODEL '…'` string refers to this embedder.
     /// Empty / `"default"` always match (host did not pin a model).
     pub fn accepts_model(&self, requested: &str) -> bool {
@@ -252,7 +335,30 @@ impl FastEmbedder {
                 return true;
             }
         }
+        if let Some(ref image) = self.image {
+            if r.eq_ignore_ascii_case(&image.model_name)
+                || r.eq_ignore_ascii_case(&image.model_code)
+                || short_alias_matches(r, &image.model_code)
+                || is_image_alias(r)
+            {
+                return true;
+            }
+        }
         false
+    }
+
+    fn accepts_image_model(&self, requested: &str) -> bool {
+        let Some(ref image) = self.image else {
+            return false;
+        };
+        let r = requested.trim();
+        if r.is_empty() || r.eq_ignore_ascii_case("default") {
+            return true;
+        }
+        r.eq_ignore_ascii_case(&image.model_name)
+            || r.eq_ignore_ascii_case(&image.model_code)
+            || short_alias_matches(r, &image.model_code)
+            || is_image_alias(r)
     }
 
     fn accepts_dense_model(&self, requested: &str) -> bool {
@@ -291,6 +397,11 @@ impl std::fmt::Debug for FastEmbedder {
                 &self.multi.as_ref().map(|m| m.model_code.as_str()),
             )
             .field("multi_dim", &self.multi.as_ref().map(|m| m.dim))
+            .field(
+                "image_model",
+                &self.image.as_ref().map(|m| m.model_code.as_str()),
+            )
+            .field("image_dim", &self.image.as_ref().map(|m| m.dim))
             .finish()
     }
 }
@@ -305,6 +416,7 @@ pub fn list_embedding_models() -> Vec<EmbeddingModelInfo> {
             dim: m.dim,
             description: m.description,
             multi: false,
+            image: false,
         })
         .collect();
     for m in Bgem3Embedding::list_supported_models() {
@@ -314,6 +426,17 @@ pub fn list_embedding_models() -> Vec<EmbeddingModelInfo> {
             dim: m.dim,
             description: format!("{} (multivector / ColBERT via BGE-M3)", m.description),
             multi: true,
+            image: false,
+        });
+    }
+    for m in ImageEmbedding::list_supported_models() {
+        models.push(EmbeddingModelInfo {
+            name: format!("{:?}", m.model),
+            model_code: m.model_code,
+            dim: m.dim,
+            description: format!("{} (image / CLIP vision)", m.description),
+            multi: false,
+            image: true,
         });
     }
     models
@@ -400,6 +523,42 @@ fn is_multi_alias(name: &str) -> bool {
     )
 }
 
+/// Resolve offline image model (CLIP vision, etc.).
+pub fn resolve_image_model(name: &str) -> Result<ImageEmbeddingModel, QqlError> {
+    let name = name.trim();
+    if name.is_empty() || is_image_alias(name) {
+        return Ok(ImageEmbeddingModel::default());
+    }
+    if let Ok(m) = name.parse::<ImageEmbeddingModel>() {
+        return Ok(m);
+    }
+    for info in ImageEmbedding::list_supported_models() {
+        if info.model_code.eq_ignore_ascii_case(name)
+            || short_alias_matches(name, &info.model_code)
+            || format!("{:?}", info.model).eq_ignore_ascii_case(name)
+        {
+            return Ok(info.model);
+        }
+    }
+    Err(err(format!(
+        "unknown image embedding model '{name}'. Offline image uses CLIP vision \
+         (e.g. 'ClipVitB32', 'Qdrant/clip-ViT-B-32-vision', 'clip-vision')"
+    )))
+}
+
+fn is_image_alias(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "clip"
+            | "clip-vision"
+            | "clip_vision"
+            | "clip-vit-b-32"
+            | "clip-vit-b-32-vision"
+            | "image"
+            | "vision"
+    )
+}
+
 fn short_alias_matches(requested: &str, model_code: &str) -> bool {
     let req = requested.trim().trim_matches('"');
     let code = model_code;
@@ -439,6 +598,9 @@ impl Embedder for FastEmbedder {
     fn accepts_model(&self, model: &str) -> bool {
         self.accepts_model(model)
     }
+
+    // image_dimension is not on Embedder trait; use dimension() for dense CLIP text.
+    // Image dim available via FastEmbedder::image_dimension().
 
     async fn embed_dense(&self, text: &str, model: &str) -> Result<Vec<f32>, QqlError> {
         if !self.accepts_dense_model(model) {
@@ -596,5 +758,74 @@ impl Embedder for FastEmbedder {
             return Err(err("fastembed multi returned an empty ColBERT bag"));
         }
         Ok(output.colbert)
+    }
+
+    async fn embed_image(&self, source: &str, model: &str) -> Result<Vec<f32>, QqlError> {
+        let Some(ref image) = self.image else {
+            return Err(qql_embed::image_unsupported_error(model));
+        };
+        if !self.accepts_image_model(model)
+            && !(model.is_empty() || model.eq_ignore_ascii_case("default"))
+        {
+            return Err(err(format!(
+                "local image embedder is locked to '{}' ({}); cannot satisfy MODEL '{model}'",
+                image.model_name, image.model_code
+            )));
+        }
+
+        let model_arc = image.model.clone();
+        let path = source.to_string();
+
+        let mut embeddings = tokio::task::spawn_blocking(move || {
+            let mut model = model_arc
+                .lock()
+                .map_err(|e| err(format!("fastembed image mutex poisoned: {e}")))?;
+            model
+                .embed(vec![path], None)
+                .map_err(|e| err(format!("fastembed image embed failed: {e}")))
+        })
+        .await
+        .map_err(|e| err(format!("spawn_blocking failed: {e}")))??;
+
+        embeddings
+            .pop()
+            .ok_or_else(|| err("fastembed image returned empty result"))
+    }
+
+    async fn embed_image_batch(
+        &self,
+        sources: &[String],
+        model: &str,
+    ) -> Result<Vec<Vec<f32>>, QqlError> {
+        if sources.is_empty() {
+            return Ok(vec![]);
+        }
+        let Some(ref image) = self.image else {
+            return Err(qql_embed::image_unsupported_error(model));
+        };
+        if !self.accepts_image_model(model)
+            && !(model.is_empty() || model.eq_ignore_ascii_case("default"))
+        {
+            return Err(err(format!(
+                "local image embedder is locked to '{}' ({}); cannot satisfy MODEL '{model}'",
+                image.model_name, image.model_code
+            )));
+        }
+
+        let model_arc = image.model.clone();
+        let batch = sources.to_vec();
+
+        let embeddings = tokio::task::spawn_blocking(move || {
+            let mut model = model_arc
+                .lock()
+                .map_err(|e| err(format!("fastembed image mutex poisoned: {e}")))?;
+            model
+                .embed(batch, None)
+                .map_err(|e| err(format!("fastembed image batch failed: {e}")))
+        })
+        .await
+        .map_err(|e| err(format!("spawn_blocking failed: {e}")))??;
+
+        Ok(embeddings)
     }
 }

@@ -76,6 +76,28 @@ pub trait Embedder: EmbedderBound {
         }
         Ok(results)
     }
+
+    /// Image / CLIP vision embedding. `source` is a filesystem path or URL.
+    ///
+    /// Returns a single dense vector in the same space as the paired text
+    /// encoder (e.g. CLIP). Default rejects until the host opts in.
+    async fn embed_image(&self, source: &str, model: &str) -> Result<Vec<f32>, QqlError> {
+        let _ = source;
+        Err(image_unsupported_error(model))
+    }
+
+    /// Batch image embedding. Default loops [`embed_image`].
+    async fn embed_image_batch(
+        &self,
+        sources: &[String],
+        model: &str,
+    ) -> Result<Vec<Vec<f32>>, QqlError> {
+        let mut results = Vec::with_capacity(sources.len());
+        for source in sources {
+            results.push(self.embed_image(source, model).await?);
+        }
+        Ok(results)
+    }
 }
 
 /// Error when multi-vector embedding is requested but the host has no multi path.
@@ -92,6 +114,25 @@ pub fn multi_unsupported_error(model: &str) -> QqlError {
              Configure a multi embedder (multi_embedding_endpoint / multi_embedding_model, \
              or edge multi_model for offline BGE-M3), pass precomputed VECTOR [[...], ...], \
              or use UPSERT with explicit multivector bags."
+        ),
+        None,
+    )
+}
+
+/// Error when image embedding is requested but the host has no image path.
+pub fn image_unsupported_error(model: &str) -> QqlError {
+    let model_note = if model.is_empty() || model.eq_ignore_ascii_case("default") {
+        "no model specified".to_string()
+    } else {
+        format!("model='{model}'")
+    };
+    QqlError::execution(
+        "QQL-EMBEDDING-IMAGE",
+        format!(
+            "image embedding is not available ({model_note}). \
+             Configure an image/CLIP vision embedder (image_embedding_model / edge image_model, \
+             or image_embedding_endpoint), pass a precomputed VECTOR [...], \
+             or use UPSERT USING IMAGE ON FIELD <path_field>."
         ),
         None,
     )

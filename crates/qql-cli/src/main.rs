@@ -113,6 +113,9 @@ enum ConfigCommand {
         /// Offline multivector model for fastembed (e.g. bge-m3).
         #[arg(long)]
         multi_model: Option<String>,
+        /// Offline CLIP vision model for fastembed (e.g. clip-vision).
+        #[arg(long)]
+        image_model: Option<String>,
         /// Directory used for downloaded FastEmbed models.
         #[arg(long)]
         cache_dir: Option<PathBuf>,
@@ -143,6 +146,18 @@ enum ConfigCommand {
         /// Per-token dimension for multi embeds (0 = skip check).
         #[arg(long, default_value_t = 0)]
         multi_embed_dim: usize,
+        /// Optional image/CLIP vision HTTP embedding endpoint.
+        #[arg(long)]
+        image_embed_url: Option<String>,
+        /// API key for the image embedding endpoint.
+        #[arg(long)]
+        image_embed_key: Option<String>,
+        /// Image/CLIP vision model name for HTTP image embeds.
+        #[arg(long)]
+        image_embed_model: Option<String>,
+        /// Dense dimension for image embeds (CLIP = 512; 0 = use dense dim).
+        #[arg(long, default_value_t = 0)]
+        image_embed_dim: usize,
     },
 }
 
@@ -231,6 +246,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     embedder,
                     model,
                     multi_model,
+                    image_model,
                     cache_dir,
                     show_download_progress,
                     embed_url,
@@ -241,6 +257,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     multi_embed_key,
                     multi_embed_model,
                     multi_embed_dim,
+                    image_embed_url,
+                    image_embed_key,
+                    image_embed_model,
+                    image_embed_dim,
                 },
         } => commands::handle_configure_edge(config::EdgeConfig {
             data_dir: data_dir.unwrap_or_else(|| config::EdgeConfig::default().data_dir),
@@ -248,6 +268,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             embedder,
             model,
             multi_model,
+            image_model,
             cache_dir,
             show_download_progress,
             embed_url,
@@ -258,6 +279,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             multi_embed_key,
             multi_embed_model,
             multi_embed_dimension: multi_embed_dim,
+            image_embed_url,
+            image_embed_key,
+            image_embed_model,
+            image_embed_dimension: image_embed_dim,
         }),
         Command::Version => commands::handle_version(),
     }

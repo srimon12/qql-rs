@@ -182,6 +182,27 @@ async fn resolve_upsert_embeddings(
                         add_point_vector(point, target_vec_name, VectorValue::MultiDense(rows))?;
                     }
                 }
+                EmbedKind::Image { model } => {
+                    let m_name = model.as_deref().unwrap_or("default");
+                    let (indices, sources): (Vec<usize>, Vec<String>) =
+                        targets.into_iter().unzip();
+                    let vecs = embedder.embed_image_batch(&sources, m_name).await?;
+                    if vecs.len() != indices.len() {
+                        return Err(QqlError::execution(
+                            "QQL-EMBEDDING-IMAGE",
+                            format!(
+                                "embed_image_batch returned {} vectors for {} sources (model={m_name})",
+                                vecs.len(),
+                                indices.len()
+                            ),
+                            None,
+                        ));
+                    }
+                    for (idx, vec) in indices.into_iter().zip(vecs) {
+                        let point = &mut upsert.points[idx];
+                        add_point_vector(point, target_vec_name, VectorValue::Dense(vec))?;
+                    }
+                }
             }
         }
     }
@@ -598,39 +619,69 @@ async fn apply_input(
     embedder: &dyn Embedder,
     dense: DenseIter<'_>,
 ) -> Result<(), QqlError> {
-    let QueryInput::Text { text, model } = input else {
-        return Ok(());
-    };
-    let model_name = model.as_deref().unwrap_or(default_model);
-    if target.kind == VectorKind::Sparse {
-        let s_vec = embedder.embed_sparse(text).await?;
-        *input = QueryInput::Vector(VectorValue::Sparse {
-            indices: s_vec.indices,
-            values: s_vec.values,
-        });
-        return Ok(());
-    }
-    if target.multi {
-        let rows = embedder.embed_multi(text, model_name).await?;
-        if rows.is_empty() {
-            return Err(QqlError::execution(
-                "QQL-EMBEDDING-MULTI",
-                "embed_multi returned an empty multivector",
-                None,
-            ));
+    match input {
+        QueryInput::Image { source, model } => {
+            // Images always produce single-vector dense (CLIP vision, etc.).
+            if target.kind == VectorKind::Sparse {
+                return Err(QqlError::execution(
+                    "QQL-VECTOR-KIND",
+                    "IMAGE input requires a dense target, not sparse",
+                    None,
+                ));
+            }
+            if target.multi {
+                return Err(QqlError::execution(
+                    "QQL-VECTOR-KIND",
+                    "IMAGE input produces single-vector dense, not multivector; use TEXT with AS MULTI for ColBERT",
+                    None,
+                ));
+            }
+            let model_name = model.as_deref().unwrap_or(default_model);
+            let vec = embedder.embed_image(source, model_name).await?;
+            if vec.is_empty() {
+                return Err(QqlError::execution(
+                    "QQL-EMBEDDING-IMAGE",
+                    "embed_image returned an empty vector",
+                    None,
+                ));
+            }
+            *input = QueryInput::Vector(VectorValue::Dense(vec));
+            Ok(())
         }
-        *input = QueryInput::Vector(VectorValue::MultiDense(rows));
-        return Ok(());
+        QueryInput::Text { text, model } => {
+            let model_name = model.as_deref().unwrap_or(default_model);
+            if target.kind == VectorKind::Sparse {
+                let s_vec = embedder.embed_sparse(text).await?;
+                *input = QueryInput::Vector(VectorValue::Sparse {
+                    indices: s_vec.indices,
+                    values: s_vec.values,
+                });
+                return Ok(());
+            }
+            if target.multi {
+                let rows = embedder.embed_multi(text, model_name).await?;
+                if rows.is_empty() {
+                    return Err(QqlError::execution(
+                        "QQL-EMBEDDING-MULTI",
+                        "embed_multi returned an empty multivector",
+                        None,
+                    ));
+                }
+                *input = QueryInput::Vector(VectorValue::MultiDense(rows));
+                return Ok(());
+            }
+            let vec = dense.next().ok_or_else(|| {
+                QqlError::execution(
+                    "QQL-EMBEDDING",
+                    "internal error: ran out of dense embeddings",
+                    None,
+                )
+            })?;
+            *input = QueryInput::Vector(VectorValue::Dense(vec));
+            Ok(())
+        }
+        QueryInput::Vector(_) | QueryInput::Point(_) => Ok(()),
     }
-    let vec = dense.next().ok_or_else(|| {
-        QqlError::execution(
-            "QQL-EMBEDDING",
-            "internal error: ran out of dense embeddings",
-            None,
-        )
-    })?;
-    *input = QueryInput::Vector(VectorValue::Dense(vec));
-    Ok(())
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -830,6 +881,39 @@ async fn resolve_single_embedding_spec(
                 )?;
             }
         }
+        EmbeddingSpec::Image {
+            model,
+            vector,
+            field,
+        } => {
+            let model_name = model.as_deref().unwrap_or("default");
+            let vector_name = vector.as_deref().unwrap_or("image");
+            check_and_insert_vector_name(seen_vectors, vector_name)?;
+
+            let targets = collect_image_targets(&upsert.points, field.as_deref());
+            validate_non_empty_targets(upsert, &targets, "IMAGE", field.as_deref())?;
+
+            let (indices, sources): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
+            let vecs = embedder.embed_image_batch(&sources, model_name).await?;
+            if vecs.len() != indices.len() {
+                return Err(QqlError::execution(
+                    "QQL-EMBEDDING-IMAGE",
+                    format!(
+                        "embed_image_batch returned {} vectors for {} sources (model={model_name})",
+                        vecs.len(),
+                        indices.len()
+                    ),
+                    None,
+                ));
+            }
+            for (idx, vec) in indices.into_iter().zip(vecs) {
+                add_point_vector(
+                    &mut upsert.points[idx],
+                    vector_name,
+                    VectorValue::Dense(vec),
+                )?;
+            }
+        }
     }
     Ok(())
 }
@@ -893,6 +977,61 @@ const DEFAULT_TEXT_FIELDS_ORDERED: &[&str] = &[
     "summary",
     "document",
 ];
+
+const DEFAULT_IMAGE_FIELDS_ORDERED: &[&str] = &[
+    "image",
+    "image_path",
+    "image_url",
+    "photo",
+    "picture",
+    "img",
+    "path",
+    "url",
+];
+
+/// Collect image path/URL payload fields for IMAGE embedding specs.
+fn collect_image_targets(
+    points: &[UpsertPoint],
+    field_override: Option<&str>,
+) -> Vec<(usize, String)> {
+    if let Some(target_field) = field_override {
+        points
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, point)| {
+                point.payload.iter().find_map(|(key, value)| {
+                    if key.eq_ignore_ascii_case(target_field) {
+                        if let qql_core::ast::Value::Str(source) = value {
+                            if !source.is_empty() {
+                                return Some((idx, source.clone()));
+                            }
+                        }
+                    }
+                    None
+                })
+            })
+            .collect()
+    } else {
+        points
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, point)| {
+                for &candidate in DEFAULT_IMAGE_FIELDS_ORDERED {
+                    if let Some((_, qql_core::ast::Value::Str(source))) = point
+                        .payload
+                        .iter()
+                        .find(|(key, _)| key.eq_ignore_ascii_case(candidate))
+                    {
+                        if !source.is_empty() {
+                            return Some((idx, source.clone()));
+                        }
+                    }
+                }
+                None
+            })
+            .collect()
+    }
+}
 
 fn collect_text_targets(
     points: &[UpsertPoint],

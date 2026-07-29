@@ -232,6 +232,53 @@ fn using_can_declare_an_arbitrary_sparse_vector() {
 }
 
 #[test]
+fn image_query_input_parses() {
+    let stmt = Parser::parse(
+        "QUERY IMAGE '/data/photo.jpg' MODEL 'clip-vision' FROM products USING image AS DENSE LIMIT 5;",
+    )
+    .unwrap();
+    match stmt {
+        Stmt::Query(q) => match &q.expression {
+            QueryExpr::Nearest {
+                input: QueryInput::Image { source, model },
+                using: Some(u),
+                ..
+            } => {
+                assert_eq!(source, "/data/photo.jpg");
+                assert_eq!(model.as_deref(), Some("clip-vision"));
+                assert_eq!(u.name, "image");
+            }
+            other => panic!("expected IMAGE nearest, got {other:?}"),
+        },
+        other => panic!("expected query, got {other:?}"),
+    }
+}
+
+#[test]
+fn upsert_using_image_parses() {
+    let stmt = Parser::parse(
+        "UPSERT INTO products VALUES {id: 1, image: '/a.jpg'} \
+         USING IMAGE MODEL 'clip-vision' ON FIELD image INTO image;",
+    )
+    .unwrap();
+    match stmt {
+        Stmt::Upsert(u) => match &u.embedding {
+            Some(EmbeddingSpec::Image {
+                model,
+                vector,
+                field,
+            }) => {
+                assert_eq!(model.as_deref(), Some("clip-vision"));
+                assert_eq!(vector.as_deref(), Some("image"));
+                assert_eq!(field.as_deref(), Some("image"));
+            }
+            other => panic!("expected IMAGE embedding spec, got {other:?}"),
+        },
+        other => panic!("expected upsert, got {other:?}"),
+    }
+}
+
+#[test]
 fn using_as_multi_marks_dense_multivector() {
     let s =
         Parser::parse("QUERY TEXT 'search' FROM docs USING colbert AS MULTI LIMIT 10;").unwrap();

@@ -102,11 +102,12 @@ impl<'a> AstLowerer<'a> {
             });
         }
 
-        // MULTI / MULTIVECTOR as bare words (same as AS MULTI — not reserved keywords).
+        // MULTI / MULTIVECTOR / IMAGE as bare words (same as AS MULTI — not reserved).
         let is_multi = super::ascii_equal(self.peek()?.text, "MULTI")
             || super::ascii_equal(self.peek()?.text, "MULTIVECTOR");
+        let is_image = super::ascii_equal(self.peek()?.text, "IMAGE");
         let is_sparse = self.peek()?.kind == TokenKind::Sparse;
-        if self.peek()?.kind == TokenKind::Dense || is_sparse || is_multi {
+        if self.peek()?.kind == TokenKind::Dense || is_sparse || is_multi || is_image {
             self.advance()?;
         } else if self.peek()?.kind != TokenKind::Model
             && self.peek()?.kind != TokenKind::Vector
@@ -115,7 +116,7 @@ impl<'a> AstLowerer<'a> {
         {
             return Err(QqlError::parse(
                 "QQL-PARSE-EMBEDDING",
-                "USING requires DENSE, SPARSE, HYBRID, MULTI, MODEL, VECTOR, INTO, or ON FIELD",
+                "USING requires DENSE, SPARSE, HYBRID, MULTI, IMAGE, MODEL, VECTOR, INTO, or ON FIELD",
                 self.peek()?.span,
             ));
         }
@@ -124,6 +125,12 @@ impl<'a> AstLowerer<'a> {
 
         if is_multi {
             Ok(EmbeddingSpec::MultiVector {
+                model,
+                vector,
+                field,
+            })
+        } else if is_image {
+            Ok(EmbeddingSpec::Image {
                 model,
                 vector,
                 field,

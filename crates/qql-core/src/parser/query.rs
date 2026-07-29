@@ -354,6 +354,13 @@ impl<'a> AstLowerer<'a> {
             let model = self.parse_optional_model_string()?;
             return Ok(QueryInput::Text { text, model });
         }
+        // IMAGE is a bare word (not reserved) — local path or URL for CLIP vision.
+        if self.peek_word("IMAGE")? {
+            self.advance()?;
+            let source = self.parse_string()?;
+            let model = self.parse_optional_model_string()?;
+            return Ok(QueryInput::Image { source, model });
+        }
         if self.peek()?.kind == TokenKind::Vector {
             self.advance()?;
             return self.parse_vector_value().map(QueryInput::Vector);
@@ -369,7 +376,7 @@ impl<'a> AstLowerer<'a> {
         }
         Err(QqlError::parse(
             "QQL-PARSE-QUERY-INPUT",
-            "query input requires TEXT, VECTOR, or POINT",
+            "query input requires TEXT, IMAGE, VECTOR, or POINT",
             self.peek()?.span,
         ))
     }

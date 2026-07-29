@@ -114,6 +114,11 @@ impl From<&qql_core::ast::QueryInput> for PlanQueryInput {
                 text: text.clone(),
                 model: model.clone(),
             },
+            // Image must be resolved to dense Vector before plan.
+            qql_core::ast::QueryInput::Image { source, model } => PlanQueryInput::Document {
+                text: source.clone(),
+                model: model.clone(),
+            },
         }
     }
 }

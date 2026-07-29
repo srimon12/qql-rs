@@ -60,6 +60,12 @@ pub struct HttpEmbedderOptions {
     pub multi_model: Option<String>,
     /// Expected per-token dim for multi responses. `0` skips dim checks.
     pub multi_dimension: usize,
+    /// Optional image/CLIP vision endpoint. Falls back to `endpoint` when empty.
+    pub image_endpoint: Option<String>,
+    pub image_api_key: Option<String>,
+    pub image_model: Option<String>,
+    /// Expected dense dim for image responses (CLIP = 512). `0` uses dense dim.
+    pub image_dimension: usize,
 }
 
 /// OpenAI-compatible HTTP embedder (`POST {"model","input":[...]}`).
@@ -80,6 +86,10 @@ pub struct HttpEmbedder {
     multi_api_key: Option<String>,
     multi_model: Option<String>,
     multi_dimension: usize,
+    image_endpoint: Option<String>,
+    image_api_key: Option<String>,
+    image_model: Option<String>,
+    image_dimension: usize,
     client: Client,
 }
 
@@ -136,14 +146,14 @@ impl HttpEmbedder {
             api_key: opts.api_key,
             model: opts.model,
             dimension: opts.dimension,
-            multi_endpoint: opts
-                .multi_endpoint
-                .filter(|s| !s.trim().is_empty()),
+            multi_endpoint: opts.multi_endpoint.filter(|s| !s.trim().is_empty()),
             multi_api_key: opts.multi_api_key,
-            multi_model: opts
-                .multi_model
-                .filter(|s| !s.trim().is_empty()),
+            multi_model: opts.multi_model.filter(|s| !s.trim().is_empty()),
             multi_dimension: opts.multi_dimension,
+            image_endpoint: opts.image_endpoint.filter(|s| !s.trim().is_empty()),
+            image_api_key: opts.image_api_key,
+            image_model: opts.image_model.filter(|s| !s.trim().is_empty()),
+            image_dimension: opts.image_dimension,
             client,
         })
     }
@@ -163,10 +173,31 @@ impl HttpEmbedder {
         self
     }
 
+    /// Attach image/CLIP vision settings after construction.
+    pub fn with_image(
+        mut self,
+        endpoint: Option<String>,
+        api_key: Option<String>,
+        model: Option<String>,
+        dimension: usize,
+    ) -> Self {
+        self.image_endpoint = endpoint.filter(|s| !s.trim().is_empty());
+        self.image_api_key = api_key;
+        self.image_model = model.filter(|s| !s.trim().is_empty());
+        self.image_dimension = dimension;
+        self
+    }
+
     pub fn multi_enabled(&self) -> bool {
         self.multi_model.is_some()
             || self.multi_endpoint.is_some()
             || self.multi_dimension > 0
+    }
+
+    pub fn image_enabled(&self) -> bool {
+        self.image_model.is_some()
+            || self.image_endpoint.is_some()
+            || self.image_dimension > 0
     }
 
     pub async fn probe_dimension(&self, input: &str) -> Result<usize, QqlError> {
@@ -473,6 +504,126 @@ impl HttpEmbedder {
         }
         Ok(result)
     }
+
+    fn resolve_image_model(&self, model: &str) -> String {
+        if !model.is_empty() && model != "default" {
+            return model.to_string();
+        }
+        self.image_model
+            .clone()
+            .unwrap_or_else(|| self.model.clone())
+    }
+
+    fn image_url(&self) -> &str {
+        self.image_endpoint
+            .as_deref()
+            .unwrap_or(self.endpoint.as_str())
+    }
+
+    fn image_key(&self) -> &str {
+        self.image_api_key
+            .as_deref()
+            .unwrap_or(self.api_key.as_str())
+    }
+
+    fn image_dim(&self) -> usize {
+        if self.image_dimension > 0 {
+            self.image_dimension
+        } else {
+            self.dimension
+        }
+    }
+
+    /// Embed image paths/URLs via OpenAI-compatible dense endpoint.
+    ///
+    /// Contract: `POST { "model", "input": ["path-or-url", ...] }` → dense
+    /// `embedding: [f32,…]` per input (same shape as text). Servers that accept
+    /// filesystem paths or HTTP(S) image URLs can back CLIP vision this way.
+    async fn embed_image_batch_with_model(
+        &self,
+        sources: &[String],
+        model: &str,
+    ) -> Result<Vec<Vec<f32>>, QqlError> {
+        if sources.is_empty() {
+            return Ok(Vec::new());
+        }
+        if !self.image_enabled() {
+            return Err(qql_embed::embedder::image_unsupported_error(model));
+        }
+
+        let model_name = self.resolve_image_model(model);
+        let body = EmbedRequest {
+            model: model_name,
+            input: sources.to_vec(),
+        };
+        let decoded = self
+            .do_request(self.image_url(), self.image_key(), &body)
+            .await?;
+
+        if decoded.data.len() != sources.len() {
+            return Err(QqlError::execution(
+                "QQL-EMBEDDING-IMAGE",
+                format!(
+                    "image embedding response returned {} vector(s) for {} source(s)",
+                    decoded.data.len(),
+                    sources.len()
+                ),
+                None,
+            ));
+        }
+
+        let want_dim = self.image_dim();
+        let mut vectors: Vec<Option<Vec<f32>>> = vec![None; sources.len()];
+        for item in decoded.data {
+            if item.index >= sources.len() {
+                return Err(QqlError::execution(
+                    "QQL-EMBEDDING-IMAGE",
+                    format!("image embedding response index {} out of range", item.index),
+                    None,
+                ));
+            }
+            let dense = match item.embedding {
+                EmbeddingPayload::Dense(v) => v,
+                EmbeddingPayload::Multi(_) => {
+                    return Err(QqlError::execution(
+                        "QQL-EMBEDDING-IMAGE",
+                        format!(
+                            "image embedding index {} returned multivector; expected dense (CLIP vision is single-vector)",
+                            item.index
+                        ),
+                        None,
+                    ));
+                }
+            };
+            if dense.len() != want_dim {
+                return Err(QqlError::execution(
+                    "QQL-EMBEDDING-IMAGE",
+                    format!(
+                        "image embedding dimension mismatch for index {}: got {} want {}",
+                        item.index,
+                        dense.len(),
+                        want_dim
+                    ),
+                    None,
+                ));
+            }
+            vectors[item.index] = Some(dense);
+        }
+
+        let mut result = Vec::with_capacity(vectors.len());
+        for (i, v) in vectors.into_iter().enumerate() {
+            if let Some(vec) = v {
+                result.push(vec);
+            } else {
+                return Err(QqlError::execution(
+                    "QQL-EMBEDDING-IMAGE",
+                    format!("missing image embedding at index {}", i),
+                    None,
+                ));
+            }
+        }
+        Ok(result)
+    }
 }
 
 #[cfg(feature = "rest")]
@@ -529,5 +680,26 @@ impl Embedder for HttpEmbedder {
         model: &str,
     ) -> Result<Vec<Vec<Vec<f32>>>, QqlError> {
         self.embed_multi_batch_with_model(texts, model).await
+    }
+
+    async fn embed_image(&self, source: &str, model: &str) -> Result<Vec<f32>, QqlError> {
+        let results = self
+            .embed_image_batch_with_model(&[source.to_string()], model)
+            .await?;
+        results.into_iter().next().ok_or_else(|| {
+            QqlError::execution(
+                "QQL-EMBEDDING-IMAGE",
+                "image embedding response was empty",
+                None,
+            )
+        })
+    }
+
+    async fn embed_image_batch(
+        &self,
+        sources: &[String],
+        model: &str,
+    ) -> Result<Vec<Vec<f32>>, QqlError> {
+        self.embed_image_batch_with_model(sources, model).await
     }
 }

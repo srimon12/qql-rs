@@ -11,6 +11,8 @@ pub struct EdgeConfig {
     pub model: Option<String>,
     /// Offline multivector model for fastembed (e.g. `"bge-m3"`).
     pub multi_model: Option<String>,
+    /// Offline CLIP vision model (e.g. `"clip-vision"`).
+    pub image_model: Option<String>,
     pub cache_dir: Option<PathBuf>,
     pub show_download_progress: bool,
     pub embed_url: Option<String>,
@@ -21,6 +23,10 @@ pub struct EdgeConfig {
     pub multi_embed_key: Option<String>,
     pub multi_embed_model: Option<String>,
     pub multi_embed_dimension: usize,
+    pub image_embed_url: Option<String>,
+    pub image_embed_key: Option<String>,
+    pub image_embed_model: Option<String>,
+    pub image_embed_dimension: usize,
 }
 
 impl Default for EdgeConfig {
@@ -34,6 +40,7 @@ impl Default for EdgeConfig {
             embedder: "fastembed".to_string(),
             model: None,
             multi_model: None,
+            image_model: None,
             cache_dir: None,
             show_download_progress: false,
             embed_url: None,
@@ -44,6 +51,10 @@ impl Default for EdgeConfig {
             multi_embed_key: None,
             multi_embed_model: None,
             multi_embed_dimension: 0,
+            image_embed_url: None,
+            image_embed_key: None,
+            image_embed_model: None,
+            image_embed_dimension: 0,
         }
     }
 }
@@ -122,6 +133,9 @@ impl EdgeConfig {
         if let Some(value) = env_string("QQL_EDGE_MULTI_MODEL") {
             self.multi_model = Some(value);
         }
+        if let Some(value) = env_string("QQL_EDGE_IMAGE_MODEL") {
+            self.image_model = Some(value);
+        }
         if let Some(value) = env_string("QQL_EDGE_CACHE_DIR") {
             self.cache_dir = Some(PathBuf::from(value));
         }
@@ -154,6 +168,21 @@ impl EdgeConfig {
         }
         if let Some(value) = env_usize("MULTI_EMBED_DIM") {
             self.multi_embed_dimension = value;
+        }
+        if let Some(value) = env_string("IMAGE_EMBED_URL") {
+            self.image_embed_url = Some(value);
+        }
+        if let Some(value) = env_string("IMAGE_EMBED_KEY") {
+            self.image_embed_key = Some(value);
+        }
+        if let Some(value) = env_string("IMAGE_EMBED_MODEL") {
+            self.image_embed_model = Some(value.clone());
+            if self.image_model.is_none() {
+                self.image_model = Some(value);
+            }
+        }
+        if let Some(value) = env_usize("IMAGE_EMBED_DIM") {
+            self.image_embed_dimension = value;
         }
         self
     }

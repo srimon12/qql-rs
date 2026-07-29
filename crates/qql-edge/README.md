@@ -18,12 +18,28 @@ Three embedding strategies produce an [`Executor`] backed by [`EdgeQdrant`]:
 
 | FastEmbed | QQL |
 |---|---|
-| `TextEmbedding` (BGE, MiniLM, CLIP **text**, …) | Dense |
-| `ImageEmbedding` (CLIP vision, …) | Dense (custom host; not default) |
+| `TextEmbedding` (BGE, MiniLM, CLIP **text**, …) | Dense (`TEXT`) |
+| `ImageEmbedding` (CLIP vision, …) | Dense (`IMAGE` / `image_model`) |
 | `Bgem3Embedding.colbert` | **Multi** (`MultiDense`) — offline late interaction |
 | `TextRerank` (bge-reranker, …) | Cross-encoder — not QQL `RERANK` yet |
 
 CLIP is dual-encoder dense. Multivector is ColBERT bags only.
+
+```rust
+// Offline CLIP text + vision
+let mut clip = local_executor_with_options(
+    "/tmp/qql-clip",
+    LocalExecutorOptions {
+        model: Some("ClipVitB32".into()),           // Qdrant/clip-ViT-B-32-text
+        image_model: Some("clip-vision".into()),    // Qdrant/clip-ViT-B-32-vision
+        ..Default::default()
+    },
+)?;
+// CREATE COLLECTION products (image VECTOR(512, COSINE));
+// UPSERT … USING IMAGE MODEL 'clip-vision' ON FIELD image INTO image;
+// QUERY TEXT 'red shoe' FROM products USING image LIMIT 10;
+// QUERY IMAGE '/query.jpg' FROM products USING image LIMIT 10;
+```
 
 ## Quick start
 

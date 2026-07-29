@@ -513,7 +513,7 @@ fn validate_query_target_kinds(expression: &QueryExpr) -> Result<(), QqlError> {
                 Some(VectorKind::Dense)
             }
             QueryInput::Vector(VectorValue::Sparse { .. }) => Some(VectorKind::Sparse),
-            QueryInput::Text { .. } | QueryInput::Point(_) => None,
+            QueryInput::Text { .. } | QueryInput::Image { .. } | QueryInput::Point(_) => None,
         };
         if input_kind.is_some_and(|kind| kind != target_kind) {
             return Err(query_kind_error(

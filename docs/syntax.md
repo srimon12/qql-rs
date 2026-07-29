@@ -60,6 +60,17 @@ conventional defaults, **not reserved**. Kind never comes from name spelling
 | `USING name AS SPARSE` | Explicit sparse (BM25-style) embed |
 | `USING name AS MULTI` / `AS MULTIVECTOR` | Explicit dense **multivector bag** (ColBERT / BGE-M3 ColBERT) → `MultiDense` — **not** CLIP |
 
+### Query inputs (modality)
+
+| Form | Embed path | Result |
+|---|---|---|
+| `TEXT '…' [MODEL '…']` or bare `'…'` | dense / sparse / multi by `USING` | vector |
+| `IMAGE 'path-or-url' [MODEL '…']` | **image / CLIP vision** → always single dense | `Dense` |
+| `VECTOR …` / `POINT …` | none | as-is |
+
+CLIP dual-encoder: use dense CLIP **text** model for `TEXT` queries and CLIP **vision**
+for `IMAGE` / `USING IMAGE` upserts into the **same** dense named vector space (e.g. 512-d).
+
 Without `AS`, schema resolution runs **before** embedding and sets:
 
 - dense vs sparse role;
@@ -214,6 +225,18 @@ QUERY RERANK TEXT 'vector database' MODEL 'answerai-colbert-small-v1'
 FROM docs
 USING colbert
 PREFETCH (candidates)
+LIMIT 10;
+
+-- CLIP: text-to-image (dense CLIP text model → same space as stored image vectors)
+QUERY TEXT 'a red running shoe' MODEL 'Qdrant/clip-ViT-B-32-text'
+FROM products
+USING image
+LIMIT 10;
+
+-- CLIP: image-to-image / image query (vision encoder)
+QUERY IMAGE '/data/query.jpg' MODEL 'Qdrant/clip-ViT-B-32-vision'
+FROM products
+USING image
 LIMIT 10;
 
 -- Multivector nearest (schema has colbert WITH MULTIVECTOR, or use AS MULTI offline)

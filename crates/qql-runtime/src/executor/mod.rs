@@ -674,9 +674,9 @@ impl Executor {
                         ast::EmbeddingSpec::Sparse { model, vector, .. } => {
                             vec![(model.as_deref(), false, true, None, vector.as_deref())]
                         }
-                        // MultiVector alone does not auto-create a collection here;
-                        // collections with multivector DDL are created explicitly.
-                        ast::EmbeddingSpec::MultiVector { .. } => Vec::new(),
+                        // MultiVector / Image alone do not auto-create a collection here.
+                        ast::EmbeddingSpec::MultiVector { .. }
+                        | ast::EmbeddingSpec::Image { .. } => Vec::new(),
                         ast::EmbeddingSpec::Hybrid {
                             dense_model,
                             dense_vector,

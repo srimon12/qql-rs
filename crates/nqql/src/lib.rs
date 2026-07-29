@@ -259,6 +259,26 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
                 .or_else(|| emb.get("multi_dimension"))
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0) as usize;
+            config.image_embedding_endpoint = emb
+                .get("imageEndpoint")
+                .or_else(|| emb.get("image_endpoint"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            config.image_embedding_api_key = emb
+                .get("imageApiKey")
+                .or_else(|| emb.get("image_api_key"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            config.image_embedding_model = emb
+                .get("imageModel")
+                .or_else(|| emb.get("image_model"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            config.image_embedding_dimension = emb
+                .get("imageDimension")
+                .or_else(|| emb.get("image_dimension"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize;
         }
     }
 
@@ -289,6 +309,10 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
                     multi_api_key: config.multi_embedding_api_key.clone(),
                     multi_model: config.multi_embedding_model.clone(),
                     multi_dimension: config.multi_embedding_dimension,
+                    image_endpoint: config.image_embedding_endpoint.clone(),
+                    image_api_key: config.image_embedding_api_key.clone(),
+                    image_model: config.image_embedding_model.clone(),
+                    image_dimension: config.image_embedding_dimension,
                 },
             )
             .map_err(to_napi_err)?;

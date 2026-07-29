@@ -13,11 +13,22 @@ use crate::resolve::resolve_embeddings;
 use crate::sparse::SparseVector;
 use crate::topology::{resolve_query_vector_kinds, TopologyNames};
 
-#[derive(Default)]
 struct MockEmbedder {
     dense_calls: Arc<Mutex<Vec<(String, String)>>>, // (model, text)
     multi_calls: Arc<Mutex<Vec<(String, String)>>>,
+    image_calls: Arc<Mutex<Vec<(String, String)>>>, // (model, source)
     dense_batch_override: Option<Vec<Vec<f32>>>,
+}
+
+impl Default for MockEmbedder {
+    fn default() -> Self {
+        Self {
+            dense_calls: Arc::new(Mutex::new(Vec::new())),
+            multi_calls: Arc::new(Mutex::new(Vec::new())),
+            image_calls: Arc::new(Mutex::new(Vec::new())),
+            dense_batch_override: None,
+        }
+    }
 }
 
 #[async_trait]
@@ -60,6 +71,14 @@ impl Embedder for MockEmbedder {
             .unwrap()
             .push((model.to_string(), text.to_string()));
         Ok(vec![vec![0.1, 0.2], vec![0.3, 0.4], vec![0.5, 0.6]])
+    }
+
+    async fn embed_image(&self, source: &str, model: &str) -> Result<Vec<f32>, QqlError> {
+        self.image_calls
+            .lock()
+            .unwrap()
+            .push((model.to_string(), source.to_string()));
+        Ok(vec![0.5, 0.5, 0.5])
     }
 }
 
@@ -177,6 +196,54 @@ async fn upsert_multi_vector_spec_calls_embed_multi() {
             assert!(matches!(v, VectorValue::MultiDense(rows) if !rows.is_empty()));
         }
         other => panic!("expected named multi vector, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn image_query_calls_embed_image() {
+    let mut stmt = Parser::parse(
+        "QUERY IMAGE '/tmp/x.jpg' MODEL 'clip-vision' FROM products USING image AS DENSE LIMIT 5;",
+    )
+    .unwrap();
+    let mock = MockEmbedder::default();
+    resolve_embeddings(&mut stmt, &mock).await.unwrap();
+    let images = mock.image_calls.lock().unwrap();
+    assert_eq!(images.len(), 1);
+    assert_eq!(images[0].0, "clip-vision");
+    assert_eq!(images[0].1, "/tmp/x.jpg");
+    let Stmt::Query(q) = &stmt else {
+        panic!("expected query");
+    };
+    match &q.expression {
+        QueryExpr::Nearest {
+            input: QueryInput::Vector(VectorValue::Dense(v)),
+            ..
+        } => assert_eq!(v, &vec![0.5, 0.5, 0.5]),
+        other => panic!("expected dense from image, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn upsert_image_spec_calls_embed_image() {
+    let mut stmt = Parser::parse(
+        "UPSERT INTO products VALUES {id: 1, image: '/a.jpg'} \
+         USING IMAGE MODEL 'clip-vision' ON FIELD image INTO image;",
+    )
+    .unwrap();
+    let mock = MockEmbedder::default();
+    resolve_embeddings(&mut stmt, &mock).await.unwrap();
+    let images = mock.image_calls.lock().unwrap();
+    assert_eq!(images.len(), 1);
+    assert_eq!(images[0].1, "/a.jpg");
+    let Stmt::Upsert(u) = &stmt else {
+        panic!("expected upsert");
+    };
+    match &u.points[0].vectors {
+        Some(PointVectors::Named(list)) => {
+            let (_, v) = list.iter().find(|(n, _)| n == "image").expect("image vec");
+            assert!(matches!(v, VectorValue::Dense(_)));
+        }
+        other => panic!("expected named dense, got {other:?}"),
     }
 }
 

@@ -360,6 +360,19 @@ fn executor(
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(config.multi_embedding_dimension);
+            let image_endpoint = std::env::var("IMAGE_EMBED_URL")
+                .ok()
+                .or_else(|| config.image_embedding_endpoint.clone());
+            let image_api_key = std::env::var("IMAGE_EMBED_KEY")
+                .ok()
+                .or_else(|| config.image_embedding_api_key.clone());
+            let image_model = std::env::var("IMAGE_EMBED_MODEL")
+                .ok()
+                .or_else(|| config.image_embedding_model.clone());
+            let image_dimension = std::env::var("IMAGE_EMBED_DIM")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(config.image_embedding_dimension);
             let http_emb = qql::embedder::HttpEmbedder::try_with_options(
                 qql::embedder::HttpEmbedderOptions {
                     endpoint: endpoint.clone(),
@@ -370,6 +383,10 @@ fn executor(
                     multi_api_key,
                     multi_model,
                     multi_dimension,
+                    image_endpoint,
+                    image_api_key,
+                    image_model,
+                    image_dimension,
                 },
             )?;
             Some(std::sync::Arc::new(http_emb) as std::sync::Arc<dyn qql::embedder::Embedder>)
@@ -396,6 +413,7 @@ fn edge_executor() -> Result<qql::executor::Executor, Box<dyn std::error::Error>
                 on_disk_payload: config.on_disk_payload,
                 model: config.model,
                 multi_model: config.multi_model.or(config.multi_embed_model.clone()),
+                image_model: config.image_model.or(config.image_embed_model.clone()),
                 cache_dir: config.cache_dir,
                 show_download_progress: config.show_download_progress,
             };
@@ -406,17 +424,23 @@ fn edge_executor() -> Result<qql::executor::Executor, Box<dyn std::error::Error>
             let endpoint = config.embed_url.ok_or(
                 "the edge HTTP embedder requires embed_url; run `qql config edge --embedder http --embed-url <URL>`",
             )?;
-            qql_edge::http_executor_with_multi(
+            qql_edge::http_executor_with_options(
                 config.data_dir,
                 config.on_disk_payload,
-                endpoint,
-                config.embed_key,
-                config.embed_model,
-                config.embed_dimension,
-                config.multi_embed_url,
-                config.multi_embed_key,
-                config.multi_embed_model,
-                config.multi_embed_dimension,
+                qql::embedder::HttpEmbedderOptions {
+                    endpoint,
+                    api_key: config.embed_key,
+                    model: config.embed_model,
+                    dimension: config.embed_dimension,
+                    multi_endpoint: config.multi_embed_url,
+                    multi_api_key: config.multi_embed_key,
+                    multi_model: config.multi_embed_model,
+                    multi_dimension: config.multi_embed_dimension,
+                    image_endpoint: config.image_embed_url,
+                    image_api_key: config.image_embed_key,
+                    image_model: config.image_embed_model,
+                    image_dimension: config.image_embed_dimension,
+                },
             )
             .map_err(|error| format!("edge initialization failed: {error}").into())
         }

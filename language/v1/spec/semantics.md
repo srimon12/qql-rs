@@ -56,6 +56,13 @@ A query target is represented as:
 
 ```text
 USING <name> [AS DENSE | AS SPARSE | AS MULTI | AS MULTIVECTOR]
+
+Query inputs:
+
+- `TEXT '…' [MODEL '…']` — embed text (dense / sparse / multi by USING role)
+- `IMAGE 'path-or-url' [MODEL '…']` — embed image via host vision model → **dense**
+  (CLIP vision; not multivector)
+- `VECTOR …` / `POINT …` — no embedding
 ```
 
 The name answers “which vector?” and the optional role answers “what kind of

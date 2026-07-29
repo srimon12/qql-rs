@@ -363,6 +363,10 @@ fn resolve_explicit_embedding_targets(
                 EmbeddingSpec::MultiVector { vector, .. } => {
                     resolve_embedding_target(collection, vector, multi, "multivector")?;
                 }
+                EmbeddingSpec::Image { vector, .. } => {
+                    // Image embeds into a dense named vector (CLIP space).
+                    resolve_embedding_target(collection, vector, dense, "dense")?;
+                }
                 EmbeddingSpec::Multi(specs) => {
                     for s in specs {
                         resolve_spec(collection, s, dense, sparse, multi)?;
@@ -392,7 +396,9 @@ fn resolve_explicit_embedding_targets(
     };
     for directive in &upsert.embed {
         let (available, kind) = match directive.kind {
-            qql_core::ast::EmbedKind::Dense { .. } => (&dense, "dense"),
+            qql_core::ast::EmbedKind::Dense { .. } | qql_core::ast::EmbedKind::Image { .. } => {
+                (&dense, "dense")
+            }
             qql_core::ast::EmbedKind::Sparse { .. } => (&sparse, "sparse"),
             qql_core::ast::EmbedKind::Multi { .. } => (&multi_or_dense, "multivector"),
         };

@@ -397,6 +397,8 @@ pub struct LocalExecutorOptions {
     pub model: Option<String>,
     /// Offline multivector model (BGE-M3 ColBERT), e.g. `"bge-m3"`.
     pub multi_model: Option<String>,
+    /// Offline CLIP vision model, e.g. `"clip-vision"` / `"ClipVitB32"`.
+    pub image_model: Option<String>,
     /// Override model cache directory (default: fastembed / HF cache).
     pub cache_dir: Option<String>,
     /// Show HuggingFace download progress (default `false`).
@@ -432,6 +434,7 @@ pub fn local_executor(
             on_disk_payload: opts.on_disk_payload.unwrap_or(true),
             model: opts.model,
             multi_model: opts.multi_model,
+            image_model: opts.image_model,
             cache_dir: opts.cache_dir.map(std::path::PathBuf::from),
             show_download_progress: opts.show_download_progress.unwrap_or(false),
         },
@@ -454,6 +457,7 @@ pub fn list_embedding_models() -> Vec<EmbeddingModelInfoJs> {
             dim: m.dim as u32,
             description: m.description,
             multi: m.multi,
+            image: m.image,
         })
         .collect()
 }
@@ -466,6 +470,7 @@ pub struct EmbeddingModelInfoJs {
     pub dim: u32,
     pub description: String,
     pub multi: bool,
+    pub image: bool,
 }
 
 /// Create an edge executor that calls an external OpenAI-compatible embedding
@@ -518,6 +523,10 @@ fn standalone_local_opts(options: Option<&serde_json::Value>) -> LocalExecutorOp
             .map(|s| s.to_string()),
         multi_model: options
             .and_then(|o| o.get("multiModel").or_else(|| o.get("multi_model")))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        image_model: options
+            .and_then(|o| o.get("imageModel").or_else(|| o.get("image_model")))
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
         cache_dir: options

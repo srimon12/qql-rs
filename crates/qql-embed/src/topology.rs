@@ -296,7 +296,8 @@ fn configure_prefetches(
 
 fn input_kind(input: &QueryInput) -> Option<VectorKind> {
     match input {
-        QueryInput::Text { .. } | QueryInput::Point(_) => None,
+        // Text/image/point kinds are filled from USING / schema before embed.
+        QueryInput::Text { .. } | QueryInput::Image { .. } | QueryInput::Point(_) => None,
         QueryInput::Vector(VectorValue::Dense(_) | VectorValue::MultiDense(_)) => {
             Some(VectorKind::Dense)
         }

@@ -30,12 +30,17 @@ hosts may override `embed_multi_batch` (HTTP multi, BGE-M3 joint).
 | Host capability | QQL method | Shape |
 |---|---|---|
 | Sentence / CLIP **text** dense (`TextEmbedding`) | `embed_dense` | `[f32]` |
-| CLIP **vision** / image dense (`ImageEmbedding`) | dense (host-specific; not default) | `[f32]` |
+| CLIP **vision** / image dense (`ImageEmbedding`) | `embed_image` | `[f32]` |
 | Sparse (BM25 / SPLADE) | `embed_sparse` | indices + values |
 | ColBERT / BGE-M3 **ColBERT** bags (`Bgem3Embedding.colbert`) | `embed_multi` | `[[f32],…]` |
 | Cross-encoder pair scores (`TextRerank`) | **not** this trait | pair scores (future language) |
 
 CLIP is dual-encoder **dense**, never multivector. Multivector is late-interaction bags only.
+
+Language:
+
+- `QUERY IMAGE 'path-or-url' [MODEL '…']` → `embed_image` → `Dense`
+- `UPSERT … USING IMAGE MODEL '…' ON FIELD image INTO image`
 
 ## Schema topology before embed
 
