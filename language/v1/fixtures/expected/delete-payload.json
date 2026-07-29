@@ -2,8 +2,11 @@
   "schema": "qql.ast/v1",
   "statements": [
     {
-      "ClearPayload": {
+      "DeletePayload": {
         "collection": "docs",
+        "keys": [
+          "draft"
+        ],
         "selector": {
           "Filter": {
             "Compare": {
@@ -19,8 +22,12 @@
       }
     },
     {
-      "ClearPayload": {
+      "DeletePayload": {
         "collection": "docs",
+        "keys": [
+          "draft",
+          "temp_token"
+        ],
         "selector": {
           "Filter": {
             "And": {
@@ -47,7 +54,7 @@
             }
           }
         },
-        "shard_key": null
+        "shard_key": "acme"
       }
     }
   ]

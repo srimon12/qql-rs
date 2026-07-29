@@ -1,5 +1,4 @@
 use crate::backend::{CollectionInfo, VectorSpec};
-use crate::client::CreateCollectionReq;
 #[cfg(feature = "rest")]
 use crate::embedder::HttpEmbedder;
 use crate::executor::Executor;
@@ -73,45 +72,25 @@ impl Executor {
 
         let info = self.client.get_collection_info(&upsert.collection).await?;
         if needs_implicit {
-            let dense = dense_targets(&info);
+            let multi_names = multivector_targets(&info);
+            let dense_all = dense_targets(&info);
+            // Single-vector dense slots exclude multivector names for auto-embed.
+            let dense: Vec<String> = dense_all
+                .into_iter()
+                .filter(|name| !multi_names.iter().any(|m| m == name))
+                .collect();
             let sparse: Vec<String> = info
                 .schema
                 .sparse_vectors
                 .iter()
                 .map(|vector| vector.name.clone())
                 .collect();
-            upsert.embedding = Some(match (dense.as_slice(), sparse.as_slice()) {
-                ([dense], []) => EmbeddingSpec::Dense {
-                    model: None,
-                    vector: Some(dense.clone()),
-                    field: None,
-                },
-                ([], [sparse]) => EmbeddingSpec::Sparse {
-                    model: None,
-                    vector: Some(sparse.clone()),
-                    field: None,
-                },
-                ([dense], [sparse]) => EmbeddingSpec::Hybrid {
-                    dense_model: None,
-                    dense_vector: Some(dense.clone()),
-                    dense_field: None,
-                    sparse_model: None,
-                    sparse_vector: Some(sparse.clone()),
-                    sparse_field: None,
-                },
-                _ => {
-                    return Err(QqlError::execution(
-                        "QQL-EMBEDDING-TOPOLOGY",
-                        format!(
-                            "cannot infer text embedding targets for collection '{}': {} dense and {} sparse vectors. Add USING DENSE/SPARSE/HYBRID or explicit EMBED directives",
-                            upsert.collection,
-                            dense.len(),
-                            sparse.len()
-                        ),
-                        None,
-                    ));
-                }
-            });
+            upsert.embedding = Some(infer_embedding_spec(
+                &upsert.collection,
+                &dense,
+                &sparse,
+                &multi_names,
+            )?);
         }
         resolve_explicit_embedding_targets(upsert, &info)?;
         Ok(Some(info))
@@ -164,28 +143,49 @@ impl Executor {
             return Ok(false);
         }
 
-        let mut create_req = CreateCollectionReq::new(collection.to_string());
+        use qql_plan::{types::CreateCollectionRequest, PlannedOperation};
+        let mut req = CreateCollectionRequest {
+            vectors: None,
+            sparse_vectors: None,
+            hnsw_config: None,
+            optimizers_config: None,
+            params: None,
+            quantization_config: None,
+            vectors_config: None,
+            shard_number: None,
+            sharding_method: None,
+            shard_keys: None,
+        };
         if requested_dense {
             let dense_size = self.resolve_dense_vector_size(model).await?;
             let dense_name = explicit_dense.unwrap_or(crate::executor::DENSE_VECTOR_NAME);
-            create_req.vectors_config = Some(serde_json::json!({
-                dense_name: {
+            let mut vectors = serde_json::Map::new();
+            vectors.insert(
+                dense_name.to_string(),
+                serde_json::json!({
                     "size": dense_size,
                     "distance": "Cosine"
-                }
-            }));
+                }),
+            );
+            req.vectors = Some(vectors);
         }
-
         if requested_sparse {
             let sparse_name = explicit_sparse.unwrap_or(crate::executor::SPARSE_VECTOR_NAME);
-            create_req.sparse_vectors_config = Some(serde_json::json!({
-                sparse_name: {
+            let mut sparse = serde_json::Map::new();
+            sparse.insert(
+                sparse_name.to_string(),
+                serde_json::json!({
                     "modifier": "idf"
-                }
-            }));
+                }),
+            );
+            req.sparse_vectors = Some(sparse);
         }
 
-        self.client.create_collection(create_req).await?;
+        let op = PlannedOperation::CreateCollection {
+            collection: collection.to_string(),
+            request: req,
+        };
+        self.client.execute_planned(&op).await?;
         Ok(true)
     }
 
@@ -273,6 +273,78 @@ fn dense_targets(info: &CollectionInfo) -> Vec<String> {
     }
 }
 
+fn multivector_targets(info: &CollectionInfo) -> Vec<String> {
+    info.schema
+        .vectors
+        .iter()
+        .filter(|v| v.multivector.is_some())
+        .map(|v| v.name.clone().unwrap_or_default())
+        .collect()
+}
+
+/// Infer UPSERT embedding targets from collection topology, including multivector slots.
+fn infer_embedding_spec(
+    collection: &str,
+    dense: &[String],
+    sparse: &[String],
+    multi: &[String],
+) -> Result<EmbeddingSpec, QqlError> {
+    let mut parts: Vec<EmbeddingSpec> = Vec::new();
+    match (dense, sparse) {
+        ([d], []) => parts.push(EmbeddingSpec::Dense {
+            model: None,
+            vector: Some(d.clone()),
+            field: None,
+        }),
+        ([], [s]) => parts.push(EmbeddingSpec::Sparse {
+            model: None,
+            vector: Some(s.clone()),
+            field: None,
+        }),
+        ([d], [s]) => parts.push(EmbeddingSpec::Hybrid {
+            dense_model: None,
+            dense_vector: Some(d.clone()),
+            dense_field: None,
+            sparse_model: None,
+            sparse_vector: Some(s.clone()),
+            sparse_field: None,
+        }),
+        ([], []) if !multi.is_empty() => {}
+        _ => {
+            return Err(QqlError::execution(
+                "QQL-EMBEDDING-TOPOLOGY",
+                format!(
+                    "cannot infer text embedding targets for collection '{collection}': {} dense and {} sparse vectors. Add USING DENSE/SPARSE/HYBRID/MULTI or explicit EMBED directives",
+                    dense.len(),
+                    sparse.len()
+                ),
+                None,
+            ));
+        }
+    }
+    for m in multi {
+        parts.push(EmbeddingSpec::MultiVector {
+            model: None,
+            vector: Some(m.clone()),
+            field: None,
+        });
+    }
+    if parts.is_empty() {
+        return Err(QqlError::execution(
+            "QQL-EMBEDDING-TOPOLOGY",
+            format!(
+                "cannot infer text embedding targets for collection '{collection}': no dense, sparse, or multivector slots"
+            ),
+            None,
+        ));
+    }
+    if parts.len() == 1 {
+        Ok(parts.remove(0))
+    } else {
+        Ok(EmbeddingSpec::Multi(parts))
+    }
+}
+
 fn resolve_explicit_embedding_targets(
     upsert: &mut UpsertStmt,
     info: &CollectionInfo,
@@ -291,6 +363,7 @@ fn resolve_explicit_embedding_targets(
             spec: &mut EmbeddingSpec,
             dense: &[String],
             sparse: &[String],
+            multi: &[String],
         ) -> Result<(), QqlError> {
             match spec {
                 EmbeddingSpec::Dense { vector, .. } => {
@@ -307,21 +380,45 @@ fn resolve_explicit_embedding_targets(
                     resolve_embedding_target(collection, dense_vector, dense, "dense")?;
                     resolve_embedding_target(collection, sparse_vector, sparse, "sparse")?;
                 }
+                EmbeddingSpec::MultiVector { vector, .. } => {
+                    resolve_embedding_target(collection, vector, multi, "multivector")?;
+                }
+                EmbeddingSpec::Image { vector, .. } => {
+                    // Image embeds into a dense named vector (CLIP space).
+                    resolve_embedding_target(collection, vector, dense, "dense")?;
+                }
                 EmbeddingSpec::Multi(specs) => {
                     for s in specs {
-                        resolve_spec(collection, s, dense, sparse)?;
+                        resolve_spec(collection, s, dense, sparse, multi)?;
                     }
                 }
             }
             Ok(())
         }
-        resolve_spec(&upsert.collection, spec, &dense, &sparse)?;
+        let multi = multivector_targets(info);
+        // Multi targets are still dense names on the schema; allow MULTI VECTOR
+        // to resolve against dense when multivector list is empty (offline).
+        let multi_or_dense = if multi.is_empty() {
+            dense.clone()
+        } else {
+            multi
+        };
+        resolve_spec(&upsert.collection, spec, &dense, &sparse, &multi_or_dense)?;
     }
 
+    let multi = multivector_targets(info);
+    let multi_or_dense = if multi.is_empty() {
+        dense.clone()
+    } else {
+        multi
+    };
     for directive in &upsert.embed {
         let (available, kind) = match directive.kind {
-            qql_core::ast::EmbedKind::Dense { .. } => (&dense, "dense"),
+            qql_core::ast::EmbedKind::Dense { .. } | qql_core::ast::EmbedKind::Image { .. } => {
+                (&dense, "dense")
+            }
             qql_core::ast::EmbedKind::Sparse { .. } => (&sparse, "sparse"),
+            qql_core::ast::EmbedKind::Multi { .. } => (&multi_or_dense, "multivector"),
         };
         if !available
             .iter()

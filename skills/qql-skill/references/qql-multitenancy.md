@@ -158,6 +158,35 @@ if let Stmt::Query(ref mut q) = stmt {
 stmt.shardKey = "honeywell";  // Node.js / WASM
 ```
 
+**Host inject (preferred for SDKs):** use first-class `inject_shard_key` so you
+do not string-build `SHARD '…'`:
+
+```python
+from pyqql import parse, inject_filter, inject_shard_key
+
+stmt = parse("QUERY 'supply chain risks' FROM sec10k LIMIT 10")[0]
+inject_filter(stmt, "tenant_id", "=", "honeywell")
+inject_shard_key(stmt, "honeywell")  # also: stmt.inject_shard_key("honeywell")
+```
+
+```rust
+use qql_core::ast::{inject_filter, inject_shard_key, ComparisonOp, Value};
+// ...
+inject_shard_key(&mut stmt, tenant)?;
+```
+
+```js
+import { parse, injectFilter, injectShardKey } from '@veristamp/nqql';
+const [stmt] = parse("QUERY '…' FROM sec10k LIMIT 10");
+stmt.injectFilter("tenant_id", "=", "honeywell");
+stmt.injectShardKey("honeywell");
+// or free function: injectShardKey(qqlString, "honeywell")
+```
+
+There is no `$tenant` bind syntax in the language (Qdrant has no SQL bind
+params). Literals (`SHARD 'honeywell'`) and host inject both lower to the same
+`shard_key` / `ShardKeySelector` wire form.
+
 `inject_filter()` works across all point-accessing statement types -- injected filters are merged into the `WHERE` clause (or point selector) automatically:
 
 | Statement | How the filter is applied |

@@ -194,8 +194,6 @@ pub struct CollectionSchema {
     pub quantization: Option<serde_json::Value>,
 }
 
-impl CollectionSchema {}
-
 /// Transport-neutral collection metadata consumed by the executor.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CollectionInfo {

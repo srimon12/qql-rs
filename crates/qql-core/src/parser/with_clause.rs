@@ -1,5 +1,7 @@
 use super::AstLowerer;
-use crate::ast::{PayloadSelector, QuantizationSearchParams, SearchParams, Value, VectorSelector};
+use crate::ast::{
+    PayloadSelector, QuantizationSearchParams, ReadConsistency, SearchParams, Value, VectorSelector,
+};
 use crate::error::QqlError;
 use crate::token::TokenKind;
 use alloc::string::String;
@@ -14,12 +16,19 @@ impl<'a> AstLowerer<'a> {
                 "hnsw_ef" => params.hnsw_ef = Some(positive_integer(value, &key)?),
                 "exact" => params.exact = Some(boolean(value, &key)?),
                 "acorn" => params.acorn = Some(boolean(value, &key)?),
+                "max_selectivity" => {
+                    params.max_selectivity = Some(unit_interval(value, &key)?);
+                }
                 "indexed_only" => params.indexed_only = Some(boolean(value, &key)?),
                 "rrf_k" => params.rrf_k = Some(positive_integer(value, &key)?),
                 "rrf_weights" => params.rrf_weights = Some(float_list(value, &key)?),
                 "quantization" => {
                     params.quantization = Some(quantization(value)?);
                 }
+                // OpenAPI query param / proto field — seconds, minimum 1.
+                "timeout" => params.timeout = Some(positive_integer(value, &key)?),
+                // OpenAPI ReadConsistency: factor N or majority|quorum|all.
+                "consistency" => params.consistency = Some(read_consistency(value, &key)?),
                 _ => {
                     return Err(QqlError::validation(
                         "QQL-VALIDATION-SEARCH-PARAM",
@@ -28,6 +37,13 @@ impl<'a> AstLowerer<'a> {
                     ));
                 }
             }
+        }
+        if params.max_selectivity.is_some() && params.acorn != Some(true) {
+            return Err(QqlError::validation(
+                "QQL-VALIDATION-ACORN-SELECTIVITY",
+                "max_selectivity requires PARAMS (acorn = true, …)",
+                None,
+            ));
         }
         Ok(params)
     }
@@ -206,4 +222,49 @@ fn float_list(value: Value, key: &str) -> Result<Vec<f64>, QqlError> {
         }
     }
     Ok(res)
+}
+
+/// Number in (0, 1] for ACORN max_selectivity.
+fn unit_interval(value: Value, key: &str) -> Result<f64, QqlError> {
+    let value = match value {
+        Value::Int(v) => v as f64,
+        Value::Float(v) => v,
+        _ => {
+            return Err(QqlError::validation(
+                "QQL-VALIDATION-SEARCH-PARAM",
+                alloc::format!("{key} must be a number"),
+                None,
+            ));
+        }
+    };
+    if !value.is_finite() || value <= 0.0 || value > 1.0 {
+        return Err(QqlError::validation(
+            "QQL-VALIDATION-SEARCH-PARAM",
+            alloc::format!("{key} must be a finite number in (0, 1]"),
+            None,
+        ));
+    }
+    Ok(value)
+}
+
+/// OpenAPI `ReadConsistency`: integer factor or majority|quorum|all.
+fn read_consistency(value: Value, key: &str) -> Result<ReadConsistency, QqlError> {
+    match value {
+        Value::Int(v) if v >= 0 => Ok(ReadConsistency::Factor(v as u64)),
+        Value::Str(s) => match s.to_ascii_lowercase().as_str() {
+            "majority" => Ok(ReadConsistency::Majority),
+            "quorum" => Ok(ReadConsistency::Quorum),
+            "all" => Ok(ReadConsistency::All),
+            _ => Err(QqlError::validation(
+                "QQL-VALIDATION-CONSISTENCY",
+                "consistency must be a non-negative integer factor, or majority|quorum|all",
+                None,
+            )),
+        },
+        _ => Err(QqlError::validation(
+            "QQL-VALIDATION-CONSISTENCY",
+            alloc::format!("{key} must be a non-negative integer factor, or majority|quorum|all"),
+            None,
+        )),
+    }
 }

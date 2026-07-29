@@ -49,12 +49,12 @@ Benchmarks are split into two categories:
 * **Python DX Win**: `pyqql` wraps the native Rust `Stmt` directly inside PyO3 memory — parser throughput matches native Rust/Go speeds almost 1-to-1 (up to **1.48M ops/s**).
 * **Node.js parse()**: Returns a stable array of native `Stmt` objects. ~235K ops/s — V8 object allocation is the bottleneck.
 * **Node.js parseJson()**: Returns the raw JSON string directly from Rust. Bypasses V8 object heap allocation entirely for maximum forwarding throughput — **1.55–1.75× faster** than `parse()`. Ideal for HTTP/IPC forwarding.
-* **WASM compileValue()**: Compiles QQL queries directly into JS AST objects inside WebAssembly at up to **180K ops/s** without native binary dependencies.
+* **WASM parse()**: Parses QQL directly into JS AST objects inside WebAssembly without native binary dependencies.
 
 ---
 
-## 2. E2E Pipeline Benchmarks (ops/sec)
-*Measures entire compilation lifecycle + REST JSON payload construction. Higher is better.*
+## 2. Compile Pipeline Benchmarks (ops/sec)
+*Historical results. `explain` measures parsing plus explanation rendering; it does not perform schema resolution, embedding, transport I/O, or a Qdrant call.*
 
 | Query Type | Rust (Pure Sync E2E) | Node.js (`nqql` E2E) | Python (`pyqql` E2E) | Rust (Async E2E) | Go (`qql-go` E2E) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
@@ -88,22 +88,33 @@ $$\text{Rust Pure Sync} > \text{Node.js E2E} \ge \text{Python E2E} > \text{Rust 
 
 ## Running the Benchmarks
 
+Run benchmarks on an otherwise idle machine. Pin each process to one available
+CPU with `taskset -c <cpu>`, repeat at least three times, and report the
+median. Rust results are passed to `std::hint::black_box`; Node results are
+retained in a sink so the measured work is not discarded.
+
 ```bash
-# 1. Build release binaries & bindings
-cargo build --release -p pyqql -p nqql
+# 1. Rust parser / compile / mock-executor benchmarks
 cargo build --release --manifest-path bench/bench_rust/Cargo.toml --bins
+bench/bench_rust/target/release/parse
+bench/bench_rust/target/release/explain
+bench/bench_rust/target/release/e2e
+bench/bench_rust/target/release/bench_sparse
+bench/bench_rust/target/release/bench_upsert
+
+# 2. Python binding + parse/explain benchmark (requires maturin)
+(cd crates/pyqql && maturin develop --release)
+python3 bench/bench_python.py
+
+# 3. Node N-API binding + parse benchmark (requires npm dependencies)
 (cd crates/nqql && npx napi build --release --platform)
-
-# 2. Rust (Parser & E2E Sync/Async)
-cargo run --release --manifest-path bench/bench_rust/Cargo.toml --bin parse
-cargo run --release --manifest-path bench/bench_rust/Cargo.toml --bin explain
-cargo run --release --manifest-path bench/bench_rust/Cargo.toml --bin e2e
-cargo run --release --manifest-path bench/bench_rust/Cargo.toml --bin bench_sparse
-
-# 3. Python (Parser & E2E)
-PYTHONPATH=target/release python3 bench/bench_python.py
-
-# 4. Node.js (Parser & E2E)
 node bench/bench_node.js
-# For the raw JSON fast path, use parseJson() instead of parse() in the bench.
+
+# 4. Node-targeted WASM parse benchmark
+wasm-pack build crates/qql-wasm --release --target nodejs --out-dir pkg-node
+node bench/bench_node.js
 ```
+
+The Node suite reports N-API `parse`, N-API `parseJson`, and WASM `parse` when
+the corresponding artifacts are available. `bench_python.py` reports `parse`
+and `explain`; label the latter as explanation rendering rather than E2E.

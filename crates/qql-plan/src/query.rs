@@ -1,4 +1,5 @@
-use crate::filter::{lower_filter, top_level_filter};
+use crate::filter::{lower_filter, top_level_filter, top_level_filter_with_shard};
+use crate::semantic::PlanQueryInput;
 use crate::types::*;
 use qql_core::ast::{
     FusionMethod, OrderDirection, PrefetchSource, QueryExpr, QueryInput, QueryStmt, VectorValue,
@@ -278,11 +279,12 @@ pub fn lower_query_expr(expr: &QueryExpr) -> QueryVariant {
             nearest: lower_query_input(input),
             mmr: None,
         }),
-        QueryExpr::Points { .. } => QueryVariant::Nearest(NearestQuery {
-            // Placeholder only — Points lookups use GetPoints, not this variant.
-            nearest: PlanQueryInput::Vector(PlanVectorValue::Dense(Vec::new())),
-            mmr: None,
-        }),
+        // Handled only by plan() special-cases — never lower as a QueryVariant.
+        QueryExpr::CrossRerank { .. } | QueryExpr::Points { .. } => {
+            unreachable!(
+                "CrossRerank/Points must be planned via PlannedOperation special-cases, not lower_query_expr"
+            )
+        }
     }
 }
 
@@ -379,19 +381,25 @@ pub fn lower_query_request(query: &QueryStmt) -> Result<QueryRequest, QqlError> 
     let (with_payload, with_vector) = lower_output_selector(&query.output);
     let (query_variant, using, prefetch) = build_query_with_prefetch(query)?;
 
+    let (timeout, consistency) = lower_request_opts(query.params.as_ref());
     Ok(QueryRequest {
         query: query_variant,
         using,
         prefetch,
-        filter: query.filter.as_ref().map(|f| top_level_filter(f)),
+        filter: query
+            .filter
+            .as_ref()
+            .map(|f| top_level_filter_with_shard(f, query.shard_key.as_deref())),
         params: query.params.as_ref().and_then(lower_search_params),
         score_threshold: query.score_threshold,
         with_payload,
         with_vector,
         limit: query.page.limit,
         offset: query.page.offset,
-        lookup_from: None,
+        lookup_from: extract_lookup_from(query),
         shard_key: query.shard_key.clone(),
+        timeout,
+        consistency,
     })
 }
 
@@ -400,27 +408,39 @@ pub fn lower_query_groups_request(query: &QueryStmt) -> Result<QueryGroupsReques
         .group
         .as_ref()
         .expect("group required for groups query");
+    let offset = query.page.offset.unwrap_or(0);
+    let user_limit = query.page.limit.unwrap_or(10);
+    let effective_limit = user_limit + offset;
+    let group_offset = if offset > 0 { Some(offset) } else { None };
+
     let (with_payload, with_vector) = lower_output_selector(&query.output);
     let (query_variant, using, prefetch) = build_query_with_prefetch(query)?;
 
+    let (timeout, consistency) = lower_request_opts(query.params.as_ref());
     Ok(QueryGroupsRequest {
         query: query_variant,
         using,
         prefetch,
-        filter: query.filter.as_ref().map(|f| top_level_filter(f)),
+        filter: query
+            .filter
+            .as_ref()
+            .map(|f| top_level_filter_with_shard(f, query.shard_key.as_deref())),
         params: query.params.as_ref().and_then(lower_search_params),
         score_threshold: query.score_threshold,
         with_payload,
         with_vector,
         group_by: group.field.clone(),
         group_size: group.size.unwrap_or(3),
-        limit: query.page.limit.unwrap_or(10),
+        limit: effective_limit,
         with_lookup: group
             .lookup
             .as_ref()
             .map(|coll| WithLookupValue::Collection(coll.clone())),
-        lookup_from: None,
+        lookup_from: extract_lookup_from(query),
         shard_key: query.shard_key.clone(),
+        timeout,
+        consistency,
+        group_offset,
     })
 }
 
@@ -447,7 +467,10 @@ fn build_query_with_prefetch(
                     mmr: None,
                 })),
                 using: dense_vector.clone(),
-                filter: query.filter.as_ref().map(|f| top_level_filter(f)),
+                filter: query
+                    .filter
+                    .as_ref()
+                    .map(|f| top_level_filter_with_shard(f, query.shard_key.as_deref())),
                 params: query.params.as_ref().and_then(lower_search_params),
                 score_threshold: query.score_threshold,
                 limit: Some(candidates),
@@ -456,11 +479,14 @@ fn build_query_with_prefetch(
             };
             let sparse_prefetch = PrefetchRequest {
                 query: Some(QueryVariant::Nearest(NearestQuery {
-                    nearest: build_text_input(text, &None),
+                    nearest: build_text_input(text, model),
                     mmr: None,
                 })),
                 using: sparse_vector.clone(),
-                filter: query.filter.as_ref().map(|f| top_level_filter(f)),
+                filter: query
+                    .filter
+                    .as_ref()
+                    .map(|f| top_level_filter_with_shard(f, query.shard_key.as_deref())),
                 params: query.params.as_ref().and_then(lower_search_params),
                 score_threshold: query.score_threshold,
                 limit: Some(candidates),
@@ -565,14 +591,16 @@ fn build_text_input(text: &str, model: &Option<String>) -> PlanQueryInput {
     }
 }
 
+/// Validate that all [`PlanQueryInput::Document`] and [`PlanQueryInput::Image`]
 pub fn lower_search_params(params: &qql_core::ast::SearchParams) -> Option<SearchParamsRequest> {
+    // Body-only OpenAPI SearchParams — timeout/consistency are request-level.
     let mut has = false;
     let r = SearchParamsRequest {
         hnsw_ef: params.hnsw_ef,
         exact: params.exact,
         acorn: params.acorn.map(|enable| AcornSearchParams {
             enable,
-            max_selectivity: None,
+            max_selectivity: params.max_selectivity,
         }),
         indexed_only: params.indexed_only,
         quantization: params.quantization.as_ref().map(|q| {
@@ -593,6 +621,33 @@ pub fn lower_search_params(params: &qql_core::ast::SearchParams) -> Option<Searc
         Some(r)
     } else {
         None
+    }
+}
+
+/// Extract request-level opts (OpenAPI query params / proto fields).
+pub fn lower_request_opts(
+    params: Option<&qql_core::ast::SearchParams>,
+) -> (Option<u64>, Option<ReadConsistencyParam>) {
+    match params {
+        Some(p) => (
+            p.timeout,
+            p.consistency.as_ref().map(ReadConsistencyParam::from),
+        ),
+        None => (None, None),
+    }
+}
+
+/// Append OpenAPI query params for timeout + consistency.
+pub fn push_read_opts(
+    query: &mut Vec<(String, String)>,
+    timeout: Option<u64>,
+    consistency: Option<&ReadConsistencyParam>,
+) {
+    if let Some(secs) = timeout {
+        query.push(("timeout".into(), secs.to_string()));
+    }
+    if let Some(c) = consistency {
+        query.push(("consistency".into(), c.to_query_value()));
     }
 }
 
@@ -617,9 +672,22 @@ fn expression_prefetch(expr: &QueryExpr) -> &[qql_core::ast::Prefetch] {
         | QueryExpr::Fusion { prefetch, .. }
         | QueryExpr::Formula { prefetch, .. }
         | QueryExpr::RelevanceFeedback { prefetch, .. }
-        | QueryExpr::Rerank { prefetch, .. } => prefetch,
+        | QueryExpr::Rerank { prefetch, .. }
+        | QueryExpr::CrossRerank { prefetch, .. } => prefetch,
         _ => &[],
     }
+}
+
+fn extract_lookup_from(query: &QueryStmt) -> Option<LookupRequest> {
+    for pf in expression_prefetch(&query.expression) {
+        if let Some(l) = &pf.lookup {
+            return Some(LookupRequest {
+                collection: l.collection.clone(),
+                vector: l.vector.clone(),
+            });
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -628,26 +696,111 @@ mod tests {
 
     fn parse_route(source: &str) -> serde_json::Value {
         let s = Parser::parse(source).unwrap();
-        let r = crate::routing::route(&s);
+        let r = crate::routing::try_route(&s).unwrap();
         r.body_json().unwrap()
     }
 
     #[test]
     fn acorn_true_serializes_enable() {
-        let json = parse_route("QUERY 'hello' FROM docs PARAMS (acorn = true) LIMIT 5;");
+        let json =
+            parse_route("QUERY TEXT 'hello' MODEL 'e5' FROM docs PARAMS (acorn = true) LIMIT 5;");
         assert_eq!(json["params"]["acorn"]["enable"], true);
     }
 
     #[test]
     fn acorn_false_serializes_enable_false() {
-        let json = parse_route("QUERY 'hello' FROM docs PARAMS (acorn = false) LIMIT 5;");
+        let json =
+            parse_route("QUERY TEXT 'hello' MODEL 'e5' FROM docs PARAMS (acorn = false) LIMIT 5;");
         assert_eq!(json["params"]["acorn"]["enable"], false);
+    }
+
+    #[test]
+    fn acorn_max_selectivity_serializes() {
+        let json = parse_route(
+            "QUERY TEXT 'hello' MODEL 'e5' FROM docs PARAMS (acorn = true, max_selectivity = 0.4) LIMIT 5;",
+        );
+        assert_eq!(json["params"]["acorn"]["enable"], true);
+        assert_eq!(json["params"]["acorn"]["max_selectivity"], 0.4);
+    }
+
+    #[test]
+    fn timeout_and_consistency_are_rest_query_params_not_body() {
+        // OpenAPI: timeout + consistency are query params on POST …/points/query.
+        let route = crate::plan::try_route(
+            &Parser::parse(
+                "QUERY TEXT 'hello' MODEL 'e5' FROM docs PARAMS (timeout = 30, consistency = majority) LIMIT 5;",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            route.query.iter().any(|(k, v)| k == "timeout" && v == "30"),
+            "timeout query param missing: {:?}",
+            route.query
+        );
+        assert!(
+            route
+                .query
+                .iter()
+                .any(|(k, v)| k == "consistency" && v == "majority"),
+            "consistency query param missing: {:?}",
+            route.query
+        );
+        let body = route.body_json().expect("body");
+        assert!(body.get("timeout").is_none(), "timeout must not be body");
+        assert!(
+            body.get("consistency").is_none(),
+            "consistency must not be body"
+        );
+        // Body params only for HNSW etc. — absent when only request-level opts.
+        assert!(body.get("params").is_none() || body["params"].as_object().unwrap().is_empty());
+    }
+
+    #[test]
+    fn consistency_factor_serializes_as_integer_query_param() {
+        let route = crate::plan::try_route(
+            &Parser::parse(
+                "QUERY TEXT 'hello' MODEL 'e5' FROM docs PARAMS (consistency = 2) LIMIT 5;",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(route
+            .query
+            .iter()
+            .any(|(k, v)| k == "consistency" && v == "2"));
+    }
+
+    #[test]
+    fn group_by_with_offset_is_supported() {
+        let op = crate::plan::plan(
+            &Parser::parse("QUERY TEXT 'x' MODEL 'e5' FROM docs GROUP BY topic LIMIT 10 OFFSET 5;")
+                .unwrap(),
+        )
+        .unwrap();
+        if let crate::plan::PlannedOperation::QueryGroups { request, .. } = op {
+            assert_eq!(request.limit, 15);
+            assert_eq!(request.group_offset, Some(5));
+        } else {
+            panic!("expected QueryGroups operation");
+        }
+    }
+
+    #[test]
+    fn mmr_with_sparse_using_is_supported() {
+        let op = crate::plan::plan(
+            &Parser::parse(
+                "QUERY MMR TEXT 'q' MODEL 'e5' DIVERSITY 0.5 CANDIDATES 20 FROM docs USING sparse AS SPARSE LIMIT 5;",
+            )
+            .unwrap(),
+        );
+        assert!(op.is_ok());
     }
 
     #[test]
     fn prefetch_preserves_filter_limit_and_params() {
         let json = parse_route(
-            "WITH a AS (QUERY TEXT 'x' FROM docs USING dense WHERE status = 'active' PARAMS (hnsw_ef = 64) SCORE THRESHOLD 0.5 LIMIT 50) \
+            "WITH a AS (QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense WHERE status = 'active' PARAMS (hnsw_ef = 64) SCORE THRESHOLD 0.5 LIMIT 50) \
              QUERY FUSION RRF FROM docs PREFETCH (a) LIMIT 10;",
         );
         let pf = &json["prefetch"][0];
@@ -664,7 +817,7 @@ mod tests {
     #[test]
     fn prefetch_cte_name_is_case_insensitive() {
         let json = parse_route(
-            "WITH DenseHits AS (QUERY TEXT 'x' FROM docs USING dense LIMIT 20) \
+            "WITH DenseHits AS (QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense LIMIT 20) \
              QUERY FUSION RRF FROM docs PREFETCH (densehits) LIMIT 5;",
         );
         let pf = &json["prefetch"][0];
@@ -693,7 +846,7 @@ mod tests {
     #[test]
     fn hybrid_expands_to_prefetches() {
         let json = parse_route(
-            "QUERY HYBRID TEXT 'ai search' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10;",
+            "QUERY HYBRID TEXT 'ai search' MODEL 'bge' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10;",
         );
         assert_eq!(json["query"]["fusion"], "rrf");
         assert!(json["query"].get("nearest").is_none());
@@ -702,9 +855,46 @@ mod tests {
     }
 
     #[test]
-    fn nearest_text_is_string() {
-        let json = parse_route("QUERY 'hello world' FROM docs LIMIT 5;");
-        assert_eq!(json["query"]["nearest"], "hello world");
+    fn using_hybrid_expands_like_front_form() {
+        let front = parse_route(
+            "QUERY HYBRID TEXT 'ai search' MODEL 'bge' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10;",
+        );
+        let tail = parse_route(
+            "QUERY TEXT 'ai search' MODEL 'bge' FROM docs USING HYBRID DENSE dense SPARSE sparse FUSION RRF LIMIT 10;",
+        );
+        assert_eq!(front, tail);
+        assert_eq!(tail["query"]["fusion"], "rrf");
+        assert_eq!(tail["prefetch"].as_array().unwrap().len(), 2);
+        assert_eq!(tail["prefetch"][0]["using"], "dense");
+        assert_eq!(tail["prefetch"][1]["using"], "sparse");
+        // Candidate overfetch: LIMIT * 10
+        assert_eq!(tail["prefetch"][0]["limit"], 100);
+        assert_eq!(tail["prefetch"][1]["limit"], 100);
+    }
+
+    #[test]
+    fn using_hybrid_dbsf_and_defaults() {
+        let json = parse_route(
+            "QUERY TEXT 'q' MODEL 'bge' FROM docs USING HYBRID DENSE d SPARSE s FUSION DBSF LIMIT 5;",
+        );
+        assert_eq!(json["query"]["fusion"], "dbsf");
+        assert_eq!(json["prefetch"][0]["using"], "d");
+        assert_eq!(json["prefetch"][1]["using"], "s");
+        assert_eq!(json["prefetch"][0]["limit"], 50);
+    }
+
+    #[test]
+    fn nearest_text_without_model_plans_successfully() {
+        // Bare text without MODEL now succeeds at plan time — MODEL is
+        // filled by the executor/embedder, not the transport-agnostic plan layer.
+        let result = crate::plan::plan(
+            &Parser::parse("QUERY TEXT 'hello' FROM docs USING dense LIMIT 5;").unwrap(),
+        );
+        assert!(
+            result.is_ok(),
+            "plan should succeed without MODEL: {}",
+            result.unwrap_err()
+        );
     }
 
     #[test]
@@ -724,9 +914,10 @@ mod tests {
     #[test]
     fn nearest_with_mmr() {
         let json = parse_route(
-            "QUERY MMR TEXT 'query' DIVERSITY 0.4 CANDIDATES 100 FROM docs USING dense LIMIT 5;",
+            "QUERY MMR TEXT 'query' MODEL 'embedder' DIVERSITY 0.4 CANDIDATES 100 FROM docs USING dense LIMIT 5;",
         );
-        assert_eq!(json["query"]["nearest"], "query");
+        assert_eq!(json["query"]["nearest"]["text"], "query");
+        assert_eq!(json["query"]["nearest"]["model"], "embedder");
         assert_eq!(json["query"]["mmr"]["diversity"], 0.4);
         assert_eq!(json["query"]["mmr"]["candidates_limit"], 100);
     }
@@ -773,15 +964,16 @@ mod tests {
     #[test]
     fn prefetch_serializes_lookup_from() {
         let json = parse_route(
-            "QUERY NEAREST POINT 42 FROM docs USING dense PREFETCH (QUERY TEXT 'x' FROM docs USING dense LIMIT 50) LIMIT 10;",
+            "QUERY NEAREST POINT 42 FROM docs USING dense PREFETCH (QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense LIMIT 50) LIMIT 10;",
         );
         let pf = &json["prefetch"][0];
-        assert_eq!(pf["query"]["nearest"], "x");
+        assert_eq!(pf["query"]["nearest"]["text"], "x");
+        assert_eq!(pf["query"]["nearest"]["model"], "e5");
     }
 
     #[test]
     fn query_request_no_group_fields() {
-        let json = parse_route("QUERY 'hello' FROM docs LIMIT 5;");
+        let json = parse_route("QUERY TEXT 'hello' MODEL 'e5' FROM docs LIMIT 5;");
         assert!(json.get("group_by").is_none());
         assert!(json.get("group_size").is_none());
     }
@@ -789,7 +981,7 @@ mod tests {
     #[test]
     fn grouped_request_has_group_fields() {
         let json = parse_route(
-            "QUERY 'news' FROM docs GROUP BY topic SIZE 5 LOOKUP FROM topics LIMIT 20;",
+            "QUERY TEXT 'news' MODEL 'e5' FROM docs GROUP BY topic SIZE 5 LOOKUP FROM topics LIMIT 20;",
         );
         assert_eq!(json["group_by"], "topic");
         assert_eq!(json["group_size"], 5);
@@ -812,7 +1004,7 @@ mod tests {
     #[test]
     fn fusion_query() {
         let json = parse_route(
-            "WITH a AS (QUERY 'x' FROM docs USING dense LIMIT 100) QUERY FUSION RRF FROM docs PREFETCH (a) LIMIT 10;",
+            "WITH a AS (QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense LIMIT 100) QUERY FUSION RRF FROM docs PREFETCH (a) LIMIT 10;",
         );
         assert_eq!(json["query"]["fusion"], "rrf");
     }
@@ -843,12 +1035,65 @@ mod tests {
     #[test]
     fn rerank_has_prefetches_and_model() {
         let json = parse_route(
-            "QUERY RERANK TEXT 'travel tips' MODEL 'colbert-v2' FROM docs USING colbert PREFETCH (QUERY 'travel tips' FROM docs USING dense LIMIT 50) LIMIT 10;",
+            "QUERY RERANK TEXT 'travel tips' MODEL 'colbert-v2' FROM docs USING colbert PREFETCH (QUERY TEXT 'travel tips' MODEL 'e5' FROM docs USING dense LIMIT 50) LIMIT 10;",
         );
         assert_eq!(json["using"], "colbert");
         let nearest = &json["query"]["nearest"];
         assert_eq!(nearest["text"], "travel tips");
         assert_eq!(nearest["model"], "colbert-v2");
         assert_eq!(json["prefetch"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn document_without_model_plans_successfully() {
+        // Plan layer is transport-agnostic — MODEL is filled downstream.
+        let result = crate::plan::plan(
+            &Parser::parse("QUERY 'bare string' FROM docs USING dense LIMIT 5;").unwrap(),
+        );
+        assert!(
+            result.is_ok(),
+            "plan should succeed without MODEL: {}",
+            result.unwrap_err()
+        );
+    }
+
+    #[test]
+    fn hybrid_without_model_plans_successfully() {
+        let result = crate::plan::plan(
+            &Parser::parse(
+                "QUERY HYBRID TEXT 'search' DENSE d SPARSE s FUSION RRF FROM docs LIMIT 10;",
+            )
+            .unwrap(),
+        );
+        assert!(
+            result.is_ok(),
+            "plan should succeed without MODEL: {}",
+            result.unwrap_err()
+        );
+    }
+
+    #[test]
+    fn document_and_image_with_model_are_objects() {
+        // Verify that modelled Document is always an object, never a bare string.
+        let doc_json = parse_route("QUERY TEXT 'doc text' MODEL 'my-model' FROM docs LIMIT 5;");
+        let nearest = &doc_json["query"]["nearest"];
+        assert!(
+            nearest.is_object(),
+            "modelled Document must be object: {nearest}"
+        );
+        assert_eq!(nearest["text"], "doc text");
+        assert_eq!(nearest["model"], "my-model");
+
+        // Verify that modelled Image is always an object with both image and model.
+        let img_json = parse_route(
+            "QUERY IMAGE 'https://img.example.com/cat.jpg' MODEL 'clip-vision' FROM docs USING img LIMIT 5;",
+        );
+        let img_nearest = &img_json["query"]["nearest"];
+        assert!(
+            img_nearest.is_object(),
+            "modelled Image must be object: {img_nearest}"
+        );
+        assert_eq!(img_nearest["image"], "https://img.example.com/cat.jpg");
+        assert_eq!(img_nearest["model"], "clip-vision");
     }
 }

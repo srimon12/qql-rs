@@ -56,7 +56,8 @@ required prefetch topology in the AST.
 ```
 QUERY <expression>
 FROM <collection>
-[USING <vector> [AS DENSE | AS SPARSE]]
+[USING HYBRID [DENSE <vector>] [SPARSE <vector>] [FUSION RRF|DBSF]
+ | USING <vector> [AS DENSE | AS SPARSE | AS MULTI | AS MULTIVECTOR]]
 [PREFETCH (...)]
 [WHERE <filter>]
 [SHARD '<key>']
@@ -71,8 +72,20 @@ FROM <collection>
 
 Each clause occurs at most once and only in this order.
 
-Vector names are arbitrary. `AS DENSE` / `AS SPARSE` is an explicit role
-annotation; without it, execution resolves the role from collection schema.
+`USING HYBRID` is equivalent to front-form `QUERY HYBRID TEXT …`: parse expands
+to `QueryExpr::Hybrid` (dense + sparse prefetches fused with RRF/DBSF). It only
+applies to text nearest queries.
+
+Planner capabilities:
+
+- `GROUP BY` + `OFFSET` is supported (maps to Qdrant's `group_offset`)
+- `MMR` supports both dense and sparse vector targets
+
+Vector names are arbitrary (`dense` / `sparse` / `colbert` are conventions, not
+reserved). `AS DENSE` / `AS SPARSE` declare embed role; `AS MULTI` marks a dense
+**multivector** target (ColBERT-style). Without `AS`, the executor resolves kind
+and multivector flags from collection schema before embedding. Parse keeps
+untyped targets as `kind: null` (source fidelity).
 
 ## Search params (PARAMS)
 
@@ -80,18 +93,33 @@ annotation; without it, execution resolves the role from collection schema.
 search-param = "hnsw_ef", "=", integer
              | "exact", "=", boolean
              | "acorn", "=", boolean
+             | "max_selectivity", "=", number   -- requires acorn = true; range (0, 1]
              | "indexed_only", "=", boolean
              | "quantization", "=", object
              | "rrf_k", "=", integer
              | "rrf_weights", "=", array
+             | "timeout", "=", positive-integer  -- request-level seconds
+             | "consistency", "=", factor | majority | quorum | all
 ```
 
 `acorn` (Adaptive Cardinality Estimator for ONgRN) controls approximate search
 selectivity estimation. When `acorn = true`, Qdrant uses ACORN to estimate
-filter cardinality and adapt the search strategy.
+filter cardinality and adapt the search strategy. Optional `max_selectivity`
+(in `(0, 1]`) caps that estimate: `PARAMS (acorn = true, max_selectivity = 0.4)`.
+
+`timeout` and `consistency` are **request-level** (OpenAPI query params /
+gRPC fields), not body `SearchParams`. Plan projects them to REST `?timeout=`
+/ `?consistency=` and gRPC `timeout` / `read_consistency`.
 
 `quantization` accepts an object matching the Qdrant QuantizationSearchParams
 schema: `{ "ignore": bool, "rescore": bool, "oversampling": float }`.
+
+Host multi-tenant routing without string-building QQL:
+
+```rust
+use qql_core::ast::inject_shard_key;
+inject_shard_key(&mut stmt, "tenant-a")?;
+```
 
 ## Errors
 

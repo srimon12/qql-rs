@@ -36,8 +36,8 @@ mod embedder;
 pub use backend::EdgeQdrant;
 #[cfg(feature = "fastembed-local")]
 pub use embedder::{
-    list_embedding_models, resolve_embedding_model, EmbeddingModelInfo, FastEmbedder,
-    FastEmbedderOptions,
+    list_embedding_models, resolve_embedding_model, resolve_image_model, resolve_multi_model,
+    EmbeddingModelInfo, FastEmbedder, FastEmbedderOptions,
 };
 
 use qql::config::QqlConfig;
@@ -53,10 +53,26 @@ pub struct LocalExecutorOptions {
     /// this struct defaults to `false` for Rust ergonomics matching the
     /// historical `local_executor(path, false)` tests).
     pub on_disk_payload: bool,
-    /// Local ONNX model name. See [`resolve_embedding_model`] for accepted forms.
+    /// Local ONNX dense model name. See [`resolve_embedding_model`] for accepted forms.
     /// `None` → default `BGESmallENV15` (384-d).
     #[cfg(feature = "fastembed-local")]
     pub model: Option<String>,
+    /// Offline sparse model (SPLADE or BGE-M3 via `SparseTextEmbedding`).
+    /// e.g. `"splade"`, `"bge-m3"`. When set, `embed_sparse` uses real ONNX
+    /// inference. `None` → local BM25 hashing for sparse requests.
+    #[cfg(feature = "fastembed-local")]
+    pub sparse_model: Option<String>,
+    /// Offline multivector model (BGE-M3 ColBERT). e.g. `"bge-m3"`.
+    /// When set, `embed_multi` / multivector RERANK work with no network.
+    #[cfg(feature = "fastembed-local")]
+    pub multi_model: Option<String>,
+    /// Offline image / CLIP vision model. e.g. `"clip-vision"` / `ClipVitB32`.
+    /// Pair with dense CLIP text (`model: Some("ClipVitB32".into())`) for multimodal.
+    #[cfg(feature = "fastembed-local")]
+    pub image_model: Option<String>,
+    /// Offline cross-encoder (`bge-reranker-base`, `BGERerankerBase`, …).
+    #[cfg(feature = "fastembed-local")]
+    pub reranker_model: Option<String>,
     /// Override fastembed model cache directory.
     #[cfg(feature = "fastembed-local")]
     pub cache_dir: Option<PathBuf>,
@@ -95,6 +111,10 @@ pub fn local_executor_with_options(
     let client = Box::new(EdgeQdrant::new(data_dir, opts.on_disk_payload));
     let embedder = FastEmbedder::try_with_options(FastEmbedderOptions {
         model: opts.model,
+        sparse_model: opts.sparse_model,
+        multi_model: opts.multi_model,
+        image_model: opts.image_model,
+        reranker_model: opts.reranker_model,
         cache_dir: opts.cache_dir,
         show_download_progress: opts.show_download_progress,
     })?;
@@ -102,10 +122,18 @@ pub fn local_executor_with_options(
     // Pin collection vector size to the actual model dimension. Without this,
     // CREATE COLLECTION HYBRID always falls back to the hard-coded 384 and any
     // non-default model (768 / 1024-d) silently dimension-mismatches on upsert.
+    let multi_dim = embedder.multi_dimension().unwrap_or(0);
+    let image_dim = embedder.image_dimension().unwrap_or(0);
     let config = QqlConfig {
         inference_mode: "local".to_string(),
         embedding_dimension: embedder.dimension(),
         embedding_model: Some(embedder.model_name().to_string()),
+        sparse_inference_model: embedder.sparse_model_code().map(str::to_string),
+        multi_embedding_model: embedder.multi_model_code().map(str::to_string),
+        multi_embedding_dimension: multi_dim,
+        image_embedding_model: embedder.image_model_code().map(str::to_string),
+        image_embedding_dimension: image_dim,
+        rerank_model: embedder.reranker_model_code().map(str::to_string),
         ..Default::default()
     };
 
@@ -133,22 +161,83 @@ pub fn http_executor(
     model: impl Into<String>,
     dimension: usize,
 ) -> Result<Executor, qql_core::error::QqlError> {
+    http_executor_with_options(
+        data_dir,
+        on_disk_payload,
+        qql::embedder::HttpEmbedderOptions {
+            endpoint: endpoint.into(),
+            api_key: api_key.into(),
+            model: model.into(),
+            dimension,
+            ..Default::default()
+        },
+    )
+}
+
+/// Edge executor with OpenAI-compatible dense + optional multi/ColBERT endpoints.
+#[cfg(feature = "http-embedding")]
+#[allow(clippy::too_many_arguments)]
+pub fn http_executor_with_multi(
+    data_dir: impl Into<PathBuf>,
+    on_disk_payload: bool,
+    endpoint: impl Into<String>,
+    api_key: impl Into<String>,
+    model: impl Into<String>,
+    dimension: usize,
+    multi_endpoint: Option<String>,
+    multi_api_key: Option<String>,
+    multi_model: Option<String>,
+    multi_dimension: usize,
+) -> Result<Executor, qql_core::error::QqlError> {
+    http_executor_with_options(
+        data_dir,
+        on_disk_payload,
+        qql::embedder::HttpEmbedderOptions {
+            endpoint: endpoint.into(),
+            api_key: api_key.into(),
+            model: model.into(),
+            dimension,
+            multi_endpoint,
+            multi_api_key,
+            multi_model,
+            multi_dimension,
+            ..Default::default()
+        },
+    )
+}
+
+/// Edge executor from full [`HttpEmbedderOptions`] (dense + multi + image/CLIP).
+#[cfg(feature = "http-embedding")]
+pub fn http_executor_with_options(
+    data_dir: impl Into<PathBuf>,
+    on_disk_payload: bool,
+    opts: qql::embedder::HttpEmbedderOptions,
+) -> Result<Executor, qql_core::error::QqlError> {
     let client = Box::new(EdgeQdrant::new(data_dir, on_disk_payload));
-    let model = model.into();
-    let embedder = Some(Arc::new(qql::embedder::HttpEmbedder::new(
-        endpoint.into(),
-        api_key.into(),
-        model.clone(),
-        dimension,
-    )?) as Arc<dyn Embedder>);
     let config = QqlConfig {
         inference_mode: "local".to_string(),
-        embedding_dimension: dimension,
-        embedding_model: Some(model),
+        embedding_dimension: opts.dimension,
+        embedding_model: Some(opts.model.clone()),
         embedding_endpoint: None, // edge uses the Arc embedder, not config probing
+        multi_embedding_endpoint: opts.multi_endpoint.clone(),
+        multi_embedding_api_key: opts.multi_api_key.clone(),
+        multi_embedding_model: opts.multi_model.clone(),
+        multi_embedding_dimension: opts.multi_dimension,
+        image_embedding_endpoint: opts.image_endpoint.clone(),
+        image_embedding_api_key: opts.image_api_key.clone(),
+        image_embedding_model: opts.image_model.clone(),
+        image_embedding_dimension: opts.image_dimension,
+        rerank_endpoint: opts.rerank_endpoint.clone(),
+        rerank_api_key: opts.rerank_api_key.clone(),
+        rerank_model: opts.rerank_model.clone(),
         ..Default::default()
     };
-    Ok(Executor::with_embedder(client, Some(config), embedder))
+    let embedder = qql::embedder::HttpEmbedder::try_with_options(opts)?;
+    Ok(Executor::with_embedder(
+        client,
+        Some(config),
+        Some(Arc::new(embedder) as Arc<dyn Embedder>),
+    ))
 }
 
 /// Build an edge [`Executor`] with a fully custom [`Embedder`].
@@ -209,12 +298,29 @@ mod tests {
             Ok(vec![1.0, 0.0, 0.0])
         }
 
-        async fn embed_sparse(&self, _text: &str) -> Result<SparseVector, QqlError> {
+        async fn embed_sparse(&self, _text: &str, _model: &str) -> Result<SparseVector, QqlError> {
             Ok(SparseVector {
                 indices: vec![1],
                 values: vec![1.0],
             })
         }
+    }
+
+    #[test]
+    #[cfg(feature = "fastembed-local")]
+    fn local_executor_options_default_has_no_sparse_model() {
+        let opts = LocalExecutorOptions::default();
+        assert!(opts.sparse_model.is_none());
+    }
+
+    #[test]
+    #[cfg(feature = "fastembed-local")]
+    fn local_executor_options_with_sparse_model() {
+        let opts = LocalExecutorOptions {
+            sparse_model: Some("splade".into()),
+            ..Default::default()
+        };
+        assert_eq!(opts.sparse_model.as_deref(), Some("splade"));
     }
 
     #[test]

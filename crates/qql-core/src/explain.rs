@@ -129,6 +129,10 @@ pub fn explain_node(statement: &Stmt) -> String {
             "Statement: CLEAR PAYLOAD\nCollection: {}\nSelector: typed point selector\n",
             statement.collection
         )),
+        Stmt::DeletePayload(statement) => output.push_str(&format!(
+            "Statement: DELETE PAYLOAD\nCollection: {}\nKeys: {:?}\nSelector: typed point selector\n",
+            statement.collection, statement.keys
+        )),
         Stmt::DeleteVector(statement) => output.push_str(&format!(
             "Statement: DELETE VECTOR\nCollection: {}\nVectors: {:?}\nSelector: typed point selector\n",
             statement.collection, statement.vector_names
@@ -151,6 +155,7 @@ fn query_intent(expression: &QueryExpr) -> &'static str {
         QueryExpr::Nearest { mmr: Some(_), .. } => "maximal marginal relevance (MMR) search",
         QueryExpr::Nearest { input, .. } => match input {
             QueryInput::Text { .. } => "nearest neighbors from text",
+            QueryInput::Image { .. } => "nearest neighbors from an image",
             QueryInput::Vector(_) => "nearest neighbors from a vector",
             QueryInput::Point(_) => "nearest neighbors from a point",
         },
@@ -163,6 +168,7 @@ fn query_intent(expression: &QueryExpr) -> &'static str {
         QueryExpr::Formula { .. } => "formula-based scoring",
         QueryExpr::RelevanceFeedback { .. } => "relevance feedback",
         QueryExpr::Hybrid { .. } => "hybrid shorthand",
-        QueryExpr::Rerank { .. } => "explicit prefetched rerank",
+        QueryExpr::Rerank { .. } => "late-interaction prefetched rerank",
+        QueryExpr::CrossRerank { .. } => "cross-encoder pair rerank of prefetched candidates",
     }
 }

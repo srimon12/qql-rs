@@ -22,6 +22,7 @@
             "prefetch": [],
             "using": {
               "kind": null,
+              "multi": false,
               "name": "dense"
             }
           }
@@ -185,6 +186,7 @@
                   "prefetch": [],
                   "using": {
                     "kind": null,
+                    "multi": false,
                     "name": "dense"
                   }
                 }

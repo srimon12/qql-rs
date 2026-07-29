@@ -23,3 +23,16 @@ QUERY HYBRID TEXT 'vector database' DENSE dense SPARSE bm25 FUSION RRF
 FROM docs
 SCORE THRESHOLD 0.5
 LIMIT 10;
+
+-- Tail-form USING HYBRID (same AST expand as front-form QUERY HYBRID)
+QUERY TEXT 'vector database' FROM docs
+USING HYBRID DENSE dense SPARSE bm25 FUSION RRF
+LIMIT 10;
+
+-- Tail-form with bare string + defaults (omit names → schema resolve; FUSION defaults RRF)
+QUERY 'search query' FROM docs USING HYBRID LIMIT 10;
+
+-- Tail-form with MODEL + DBSF
+QUERY TEXT 'machine learning' MODEL 'nomic-embed-text' FROM docs
+USING HYBRID DENSE dense SPARSE bm25 FUSION DBSF
+LIMIT 10;

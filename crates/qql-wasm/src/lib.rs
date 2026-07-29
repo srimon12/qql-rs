@@ -66,6 +66,11 @@ export interface AnalysisResult {
   explain: string | null;
   error: AnalysisError | null;
 }
+
+/** Compile a QQL statement to a compiled route as a byte buffer. */
+export function compileBytes(query: string): Uint8Array;
+/** Explain a QQL statement as a byte buffer. */
+export function explainBytes(query: string): Uint8Array;
 "#;
 
 // ── Core: parsing ────────────────────────────────────────────────
@@ -145,56 +150,6 @@ enum WasmOnError {
 }
 
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
-#[derive(Clone, PartialEq, Eq)]
-enum WasmBatchKey {
-    Query(String),
-    Mutation(String),
-}
-
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
-fn wasm_statement_batch_key(stmt: &qql_core::ast::Stmt) -> Option<WasmBatchKey> {
-    use qql_core::ast::{QueryCollection, QueryExpr, Stmt};
-
-    match stmt {
-        Stmt::Query(query)
-            if query.group.is_none() && !matches!(query.expression, QueryExpr::Points { .. }) =>
-        {
-            match &query.collection {
-                QueryCollection::Explicit(collection) => {
-                    Some(WasmBatchKey::Query(collection.clone()))
-                }
-                QueryCollection::Inherited => None,
-            }
-        }
-        Stmt::Upsert(stmt) => Some(WasmBatchKey::Mutation(stmt.collection.clone())),
-        Stmt::Delete(stmt) => Some(WasmBatchKey::Mutation(stmt.collection.clone())),
-        Stmt::UpdatePayload(stmt) => Some(WasmBatchKey::Mutation(stmt.collection.clone())),
-        Stmt::ClearPayload(stmt) => Some(WasmBatchKey::Mutation(stmt.collection.clone())),
-        Stmt::UpdateVector(stmt) => Some(WasmBatchKey::Mutation(stmt.collection.clone())),
-        Stmt::DeleteVector(stmt) => Some(WasmBatchKey::Mutation(stmt.collection.clone())),
-        _ => None,
-    }
-}
-
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
-fn wasm_planned_batch_key(operation: &qql_plan::PlannedOperation) -> Option<WasmBatchKey> {
-    use qql_plan::{BatchFamily, PlannedOperation};
-
-    match operation.batch_family() {
-        BatchFamily::Query => match operation {
-            PlannedOperation::Query { collection, .. } => {
-                Some(WasmBatchKey::Query(collection.clone()))
-            }
-            _ => None,
-        },
-        BatchFamily::Mutation => operation
-            .collection()
-            .map(|collection| WasmBatchKey::Mutation(collection.to_owned())),
-        BatchFamily::Single => None,
-    }
-}
-
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
 fn parse_on_error(options: Option<JsValue>) -> Result<WasmOnError, JsValue> {
     let Some(options) = options else {
         return Ok(WasmOnError::Stop);
@@ -257,6 +212,14 @@ pub fn inject_filter(
     to_js_value(&stmt)
 }
 
+/// Inject a shard key for multi-tenant routing (QUERY/SCROLL/COUNT/UPSERT/DELETE + CTEs).
+#[wasm_bindgen(js_name = injectShardKey)]
+pub fn inject_shard_key(query: &str, shard_key: &str) -> Result<JsValue, JsValue> {
+    let mut stmt = Parser::parse(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    ast::inject_shard_key(&mut stmt, shard_key).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    to_js_value(&stmt)
+}
+
 fn parse_comparison_op(op: &str) -> Result<ComparisonOp, JsValue> {
     match op {
         "=" | "==" | "eq" => Ok(ComparisonOp::Eq),
@@ -301,7 +264,14 @@ impl Stmt {
         Ok(())
     }
 
-    /// Get or set the shard key (QUERY, COUNT, SCROLL, UPSERT, DELETE only).
+    /// Multi-tenant shard routing: set shard key on this statement (+ nested CTEs).
+    #[wasm_bindgen(js_name = injectShardKey)]
+    pub fn inject_shard_key(&mut self, shard_key: &str) -> Result<(), JsValue> {
+        ast::inject_shard_key(&mut self.inner, shard_key)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Get or set the shard key on statements that support custom sharding.
     #[wasm_bindgen(getter, js_name = shardKey)]
     pub fn shard_key(&self) -> Option<String> {
         match &self.inner {
@@ -310,6 +280,10 @@ impl Stmt {
             ast::Stmt::Scroll(s) => s.shard_key.clone(),
             ast::Stmt::Upsert(u) => u.shard_key.clone(),
             ast::Stmt::Delete(d) => d.shard_key.clone(),
+            ast::Stmt::ClearPayload(c) => c.shard_key.clone(),
+            ast::Stmt::DeleteVector(d) => d.shard_key.clone(),
+            ast::Stmt::UpdateVector(u) => u.shard_key.clone(),
+            ast::Stmt::UpdatePayload(u) => u.shard_key.clone(),
             _ => None,
         }
     }
@@ -323,6 +297,10 @@ impl Stmt {
             ast::Stmt::Scroll(s) => s.shard_key = key,
             ast::Stmt::Upsert(u) => u.shard_key = key,
             ast::Stmt::Delete(d) => d.shard_key = key,
+            ast::Stmt::ClearPayload(c) => c.shard_key = key,
+            ast::Stmt::DeleteVector(d) => d.shard_key = key,
+            ast::Stmt::UpdateVector(u) => u.shard_key = key,
+            ast::Stmt::UpdatePayload(u) => u.shard_key = key,
             _ => {}
         }
     }
@@ -342,28 +320,18 @@ impl Stmt {
     /// Compile this Stmt AST directly into a Qdrant REST route object.
     #[wasm_bindgen(js_name = compileRoute, unchecked_return_type = "CompiledRoute")]
     pub fn compile_route(&self) -> Result<JsValue, JsValue> {
-        let route = routing::route(&self.inner);
-        let json_body = route.body_json();
-        let output = serde_json::json!({
-            "stmt_type": route_statement_type(&route),
-            "method": route.method.as_str(),
-            "path": route.path,
-            "payload": json_body.unwrap_or(serde_json::Value::Null),
-        });
+        let compiled = routing::compile_statement(&self.inner)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let output = compiled_route_json(&compiled);
         to_js_value(&output)
     }
 
     /// Compile this Stmt AST into a JS-owned Uint8Array byte buffer.
     #[wasm_bindgen(js_name = compileRouteBytes)]
     pub fn compile_route_bytes(&self) -> Result<js_sys::Uint8Array, JsValue> {
-        let route = routing::route(&self.inner);
-        let json_body = route.body_json();
-        let output = serde_json::json!({
-            "stmt_type": route_statement_type(&route),
-            "method": route.method.as_str(),
-            "path": route.path,
-            "payload": json_body.unwrap_or(serde_json::Value::Null),
-        });
+        let compiled = routing::compile_statement(&self.inner)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let output = compiled_route_json(&compiled);
         SCRATCH_BUF.with(|cell| {
             let mut buf = cell.borrow_mut();
             buf.clear();
@@ -439,14 +407,9 @@ fn build_analyze_value(input: &str) -> serde_json::Value {
             let ast_val = serde_json::to_value(&stmts).unwrap_or(serde_json::Value::Null);
             let routes_val: Vec<_> = stmts
                 .iter()
-                .map(|s| {
-                    let r = routing::route(s);
-                    serde_json::json!({
-                        "stmt_type": route_statement_type(&r),
-                        "method": r.method.as_str(),
-                        "path": r.path,
-                        "payload": r.body_json().unwrap_or(serde_json::Value::Null),
-                    })
+                .filter_map(|s| {
+                    let compiled = routing::compile_statement(s).ok()?;
+                    Some(compiled_route_json(&compiled))
                 })
                 .collect();
             let route_val = routes_val
@@ -506,43 +469,28 @@ pub fn analyze(input: &str) -> Result<JsValue, JsValue> {
 
 // ── Core: compile & explain ───────────────────────────────────────
 
-fn route_statement_type(route: &qql_plan::routing::Route) -> &'static str {
-    match &route.body {
-        Some(qql_plan::routing::RequestBody::Query(_)) => "query",
-        Some(qql_plan::routing::RequestBody::QueryGroups(_)) => "query_groups",
-        Some(qql_plan::routing::RequestBody::Points(_)) => "points",
-        Some(qql_plan::routing::RequestBody::Scroll(_)) => "scroll",
-        Some(qql_plan::routing::RequestBody::Upsert(_)) => "upsert",
-        Some(qql_plan::routing::RequestBody::Delete(_)) => "delete",
-        Some(qql_plan::routing::RequestBody::UpdateVector(_)) => "update_vector",
-        Some(qql_plan::routing::RequestBody::UpdatePayload(_)) => "update_payload",
-        Some(qql_plan::routing::RequestBody::ClearPayload(_)) => "clear_payload",
-        Some(qql_plan::routing::RequestBody::DeleteVector(_)) => "delete_vector",
-        Some(qql_plan::routing::RequestBody::Count(_)) => "count",
-        Some(qql_plan::routing::RequestBody::CreateShardKey(_)) => "create_shard_key",
-        Some(qql_plan::routing::RequestBody::DropShardKey(_)) => "drop_shard_key",
-        Some(qql_plan::routing::RequestBody::CreateCollection(_)) => "create_collection",
-        Some(qql_plan::routing::RequestBody::UpdateCollection(_)) => "update_collection",
-        Some(qql_plan::routing::RequestBody::CreateIndex(_)) => "create_index",
-        None => match route.method {
-            qql_plan::types::Method::Get if route.path == "/collections" => "show_collections",
-            qql_plan::types::Method::Get => "show_collection",
-            qql_plan::types::Method::Delete => "drop_collection",
-            _ => "unknown",
-        },
+fn compiled_route_json(compiled: &qql_plan::CompiledStatement) -> serde_json::Value {
+    match &compiled.route {
+        Some(route) => serde_json::json!({
+            "stmt_type": compiled.stmt_type,
+            "method": route.method.as_str(),
+            "path": route.path,
+            "payload": route.body_json().unwrap_or(serde_json::Value::Null),
+        }),
+        None => serde_json::json!({
+            "stmt_type": compiled.stmt_type,
+            "method": serde_json::Value::Null,
+            "path": serde_json::Value::Null,
+            "payload": serde_json::Value::Null,
+        }),
     }
 }
 
 fn build_compile_output(query: &str) -> Result<serde_json::Value, JsValue> {
     let stmt = Parser::parse(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    let route = routing::route(&stmt);
-    let json_body = route.body_json();
-    Ok(serde_json::json!({
-        "stmt_type": route_statement_type(&route),
-        "method": route.method.as_str(),
-        "path": route.path,
-        "payload": json_body.unwrap_or(serde_json::Value::Null),
-    }))
+    let compiled =
+        routing::compile_statement(&stmt).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    Ok(compiled_route_json(&compiled))
 }
 
 /// Compile one QQL statement into a JavaScript route object.
@@ -942,6 +890,8 @@ impl Client {
         query: &str,
         on_error: WasmOnError,
     ) -> Result<WasmReport, JsValue> {
+        use qql_plan::{statement_batch_key, BatchKey};
+
         let stmts = match Parser::parse_all(query) {
             Ok(stmts) => stmts,
             Err(error) if on_error == WasmOnError::Stop => {
@@ -962,10 +912,10 @@ impl Client {
 
         let mut results: Vec<serde_json::Value> = Vec::with_capacity(stmts.len());
         let mut pending = Vec::new();
-        let mut pending_key: Option<WasmBatchKey> = None;
+        let mut pending_key: Option<BatchKey> = None;
 
         for stmt in stmts {
-            let statement_key = wasm_statement_batch_key(&stmt);
+            let statement_key = statement_batch_key(&stmt);
             if !pending.is_empty() && statement_key != pending_key {
                 self.flush_planned_group(&mut pending, on_error, &mut results)
                     .await?;
@@ -991,7 +941,7 @@ impl Client {
                 }
             };
 
-            let key = wasm_planned_batch_key(&planned);
+            let key = planned.batch_key();
             if key.is_none() {
                 self.flush_planned_group(&mut pending, on_error, &mut results)
                     .await?;
@@ -1019,15 +969,65 @@ impl Client {
         stmt: &qql_core::ast::Stmt,
     ) -> Result<qql_plan::PlannedOperation, JsValue> {
         let mut stmt = stmt.clone();
+        // Schema-first: fill USING kinds from collection topology before
+        // embedding so `USING sparse` embeds sparse, not dense-by-default.
+        self.resolve_stmt_vector_kinds(&mut stmt).await?;
         self.resolve_stmt_embeddings(&mut stmt).await?;
         qql_plan::plan(&stmt).map_err(|error| JsValue::from_str(&error.to_string()))
+    }
+
+    /// Fetch collection topology and resolve `USING` vector kinds.
+    #[cfg(target_arch = "wasm32")]
+    async fn resolve_stmt_vector_kinds(
+        &self,
+        stmt: &mut qql_core::ast::Stmt,
+    ) -> Result<(), JsValue> {
+        let qql_core::ast::Stmt::Query(query) = stmt else {
+            return Ok(());
+        };
+        let qql_core::ast::QueryCollection::Explicit(collection) = &query.collection else {
+            return Ok(());
+        };
+        if !qql_embed::query_needs_kind_resolution(query) {
+            return Ok(());
+        }
+        let collection = collection.clone();
+        let topology = self.fetch_vector_topology(&collection).await?;
+        qql_embed::resolve_query_vector_kinds(&collection, query, &topology)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn resolve_stmt_vector_kinds(
+        &self,
+        _stmt: &mut qql_core::ast::Stmt,
+    ) -> Result<(), JsValue> {
+        Ok(())
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn fetch_vector_topology(
+        &self,
+        collection: &str,
+    ) -> Result<qql_embed::TopologyNames, JsValue> {
+        let path = format!("/collections/{collection}");
+        let body = self.send_json("GET", &path, None).await?;
+        let result = body
+            .get("result")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        Ok(vector_names_from_collection_result(&result))
     }
 
     async fn execute_planned_inner(
         &self,
         operation: &qql_plan::PlannedOperation,
     ) -> Result<serde_json::Value, JsValue> {
-        let route = qql_plan::to_rest_route(operation);
+        let route = qql_plan::to_rest_route(operation).map_err(|err| match err {
+            qql_plan::RestProjectionError::ClientSideOnly { stmt_type } => {
+                JsValue::from_str(&format!("{stmt_type} has no single Qdrant REST route"))
+            }
+        })?;
         let result = self
             .send_json(route.method.as_str(), &route.path, route.body_json())
             .await?;
@@ -1271,6 +1271,56 @@ impl Client {
     }
 }
 
+/// Extract named dense/sparse/multivector names from a Qdrant collection `result` object.
+#[cfg(all(feature = "client", target_arch = "wasm32"))]
+fn vector_names_from_collection_result(result: &serde_json::Value) -> qql_embed::TopologyNames {
+    let params = result.get("config").and_then(|c| c.get("params"));
+    let mut dense = Vec::new();
+    let mut multivector = Vec::new();
+    if let Some(vectors) = params
+        .and_then(|p| p.get("vectors"))
+        .and_then(|v| v.as_object())
+    {
+        if vectors.contains_key("size") && vectors.contains_key("distance") {
+            // Unnamed default dense vector.
+            dense.clear();
+        } else {
+            for (name, cfg) in vectors {
+                if matches!(
+                    name.as_str(),
+                    "size"
+                        | "distance"
+                        | "hnsw_config"
+                        | "quantization_config"
+                        | "on_disk"
+                        | "multivector_config"
+                ) {
+                    continue;
+                }
+                dense.push(name.clone());
+                if cfg.get("multivector_config").is_some() {
+                    multivector.push(name.clone());
+                }
+            }
+            dense.sort();
+            multivector.sort();
+        }
+    }
+    let mut sparse = Vec::new();
+    if let Some(map) = params
+        .and_then(|p| p.get("sparse_vectors"))
+        .and_then(|v| v.as_object())
+    {
+        sparse.extend(map.keys().cloned());
+        sparse.sort();
+    }
+    qql_embed::TopologyNames {
+        dense,
+        sparse,
+        multivector,
+    }
+}
+
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
 fn wasm_search_hits(result: &serde_json::Value) -> serde_json::Value {
     let points = result
@@ -1392,7 +1442,10 @@ impl Embedder for Client {
         })
     }
 
-    async fn embed_sparse(&self, text: &str) -> Result<SparseVector, QqlError> {
+    async fn embed_sparse(&self, text: &str, model: &str) -> Result<SparseVector, QqlError> {
+        if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
+            return Err(qql_embed::sparse_model_unsupported_error(model));
+        }
         Ok(qql_embed::sparse::build_query_default(text))
     }
 }

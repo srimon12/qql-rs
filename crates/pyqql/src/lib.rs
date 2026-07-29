@@ -26,8 +26,14 @@ impl PyStmt {
         Ok(())
     }
 
-    /// Get or set the shard key on QUERY, COUNT, SCROLL, UPSERT, and DELETE
-    /// statements.  Returns `None` (setter is no-op) for other statement types.
+    /// Set shard key for multi-tenant routing (QUERY/SCROLL/COUNT/UPSERT/DELETE + CTEs).
+    fn inject_shard_key(&mut self, shard_key: &str) -> PyResult<()> {
+        ast::inject_shard_key(&mut self.inner, shard_key)
+            .map_err(|e| PySyntaxError::new_err(e.to_string()))
+    }
+
+    /// Get or set the shard key on statements that support custom sharding.
+    /// Returns `None` (setter is no-op) for other statement types.
     #[getter]
     fn shard_key(&self) -> Option<String> {
         match &self.inner {
@@ -36,6 +42,10 @@ impl PyStmt {
             ast::Stmt::Scroll(s) => s.shard_key.clone(),
             ast::Stmt::Upsert(u) => u.shard_key.clone(),
             ast::Stmt::Delete(d) => d.shard_key.clone(),
+            ast::Stmt::ClearPayload(c) => c.shard_key.clone(),
+            ast::Stmt::DeleteVector(d) => d.shard_key.clone(),
+            ast::Stmt::UpdateVector(u) => u.shard_key.clone(),
+            ast::Stmt::UpdatePayload(u) => u.shard_key.clone(),
             _ => None,
         }
     }
@@ -49,6 +59,10 @@ impl PyStmt {
             ast::Stmt::Scroll(s) => s.shard_key = key,
             ast::Stmt::Upsert(u) => u.shard_key = key,
             ast::Stmt::Delete(d) => d.shard_key = key,
+            ast::Stmt::ClearPayload(c) => c.shard_key = key,
+            ast::Stmt::DeleteVector(d) => d.shard_key = key,
+            ast::Stmt::UpdateVector(u) => u.shard_key = key,
+            ast::Stmt::UpdatePayload(u) => u.shard_key = key,
             _ => {}
         }
     }
@@ -58,7 +72,9 @@ impl PyStmt {
     }
 
     fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        pythonize::pythonize(py, &self.inner).map_err(|e| PySyntaxError::new_err(e.to_string()))
+        let val =
+            serde_json::to_value(&self.inner).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+        pythonize::pythonize(py, &val).map_err(|e| PySyntaxError::new_err(e.to_string()))
     }
 }
 
@@ -106,6 +122,26 @@ fn inject_filter(
     }
 }
 
+/// Inject a shard key into a QQL string or Stmt (host multi-tenant routing).
+#[pyfunction]
+fn inject_shard_key(query: &Bound<'_, PyAny>, shard_key: &str) -> PyResult<PyStmt> {
+    if let Ok(mut py_stmt) = query.extract::<PyRefMut<'_, PyStmt>>() {
+        ast::inject_shard_key(&mut py_stmt.inner, shard_key)
+            .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+        Ok(py_stmt.clone())
+    } else if let Ok(query_str) = query.extract::<String>() {
+        let mut stmt =
+            Parser::parse(&query_str).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+        ast::inject_shard_key(&mut stmt, shard_key)
+            .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+        Ok(PyStmt { inner: stmt })
+    } else {
+        Err(pyo3::exceptions::PyTypeError::new_err(
+            "query must be a string or a Stmt object",
+        ))
+    }
+}
+
 #[pyfunction]
 fn tokenize<'py>(input: &str, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict>>> {
     let lexer = Lexer::new(input);
@@ -124,11 +160,28 @@ fn tokenize<'py>(input: &str, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict
 #[pyfunction]
 fn compile_query<'py>(py: Python<'py>, input: &str) -> PyResult<Bound<'py, PyAny>> {
     let stmt = Parser::parse(input).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
-    let route = qql_plan::routing::route(&stmt);
+    let compiled = qql_plan::routing::compile_statement(&stmt)
+        .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+    let (method, path, payload) = match compiled.route {
+        Some(route) => {
+            let payload = route.body_json().unwrap_or(serde_json::Value::Null);
+            (
+                serde_json::Value::String(route.method.as_str().into()),
+                serde_json::Value::String(route.path),
+                payload,
+            )
+        }
+        None => (
+            serde_json::Value::Null,
+            serde_json::Value::Null,
+            serde_json::Value::Null,
+        ),
+    };
     let result = serde_json::json!({
-        "method": route.method.as_str(),
-        "path": route.path,
-        "payload": route.body_json().unwrap_or(serde_json::Value::Null),
+        "stmt_type": compiled.stmt_type,
+        "method": method,
+        "path": path,
+        "payload": payload,
     });
     pythonize::pythonize(py, &result).map_err(|e| PySyntaxError::new_err(e.to_string()))
 }
@@ -222,6 +275,8 @@ fn extract_embedder_config(
                 .get_item("api_key")?
                 .map(|value| value.extract::<String>())
                 .transpose()?;
+            // multi_* keys are applied later on config; parse into side channel via attributes
+            // is handled in create_executor when building HttpEmbedderOptions from full dict.
             if ep.as_ref().is_some_and(|value| value.trim().is_empty()) {
                 return Err(pyo3::exceptions::PyValueError::new_err(
                     "embedder.endpoint must not be empty",
@@ -269,6 +324,44 @@ fn create_executor(
         config.embedding_model = model;
         config.embedding_dimension = dim.unwrap_or(0);
     }
+    // Optional multi/ColBERT fields from embedder dict.
+    if let Some(emb) = embedder {
+        if let Ok(dict) = emb.downcast::<PyDict>() {
+            if let Ok(Some(v)) = dict.get_item("multi_endpoint") {
+                config.multi_embedding_endpoint = Some(v.extract::<String>()?);
+            }
+            if let Ok(Some(v)) = dict.get_item("multi_api_key") {
+                config.multi_embedding_api_key = Some(v.extract::<String>()?);
+            }
+            if let Ok(Some(v)) = dict.get_item("multi_model") {
+                config.multi_embedding_model = Some(v.extract::<String>()?);
+            }
+            if let Ok(Some(v)) = dict.get_item("multi_dimension") {
+                config.multi_embedding_dimension = v.extract::<usize>()?;
+            }
+            if let Ok(Some(v)) = dict.get_item("image_endpoint") {
+                config.image_embedding_endpoint = Some(v.extract::<String>()?);
+            }
+            if let Ok(Some(v)) = dict.get_item("image_api_key") {
+                config.image_embedding_api_key = Some(v.extract::<String>()?);
+            }
+            if let Ok(Some(v)) = dict.get_item("image_model") {
+                config.image_embedding_model = Some(v.extract::<String>()?);
+            }
+            if let Ok(Some(v)) = dict.get_item("image_dimension") {
+                config.image_embedding_dimension = v.extract::<usize>()?;
+            }
+            if let Ok(Some(v)) = dict.get_item("rerank_endpoint") {
+                config.rerank_endpoint = Some(v.extract::<String>()?);
+            }
+            if let Ok(Some(v)) = dict.get_item("rerank_api_key") {
+                config.rerank_api_key = Some(v.extract::<String>()?);
+            }
+            if let Ok(Some(v)) = dict.get_item("rerank_model") {
+                config.rerank_model = Some(v.extract::<String>()?);
+            }
+        }
+    }
 
     let client: Box<dyn qql::client::QdrantOps> = if use_grpc {
         #[cfg(feature = "grpc")]
@@ -290,10 +383,24 @@ fn create_executor(
 
     let embedder_impl = if let Some(endpoint) = &config.embedding_endpoint {
         if !endpoint.trim().is_empty() {
-            let api_key = config.embedding_api_key.clone().unwrap_or_default();
-            let model = config.embedding_model.clone().unwrap_or_default();
-            let dim = config.embedding_dimension;
-            let http_emb = qql::embedder::HttpEmbedder::new(endpoint.clone(), api_key, model, dim)
+            let http_emb =
+                qql::embedder::HttpEmbedder::try_with_options(qql::embedder::HttpEmbedderOptions {
+                    endpoint: endpoint.clone(),
+                    api_key: config.embedding_api_key.clone().unwrap_or_default(),
+                    model: config.embedding_model.clone().unwrap_or_default(),
+                    dimension: config.embedding_dimension,
+                    multi_endpoint: config.multi_embedding_endpoint.clone(),
+                    multi_api_key: config.multi_embedding_api_key.clone(),
+                    multi_model: config.multi_embedding_model.clone(),
+                    multi_dimension: config.multi_embedding_dimension,
+                    image_endpoint: config.image_embedding_endpoint.clone(),
+                    image_api_key: config.image_embedding_api_key.clone(),
+                    image_model: config.image_embedding_model.clone(),
+                    image_dimension: config.image_embedding_dimension,
+                    rerank_endpoint: config.rerank_endpoint.clone(),
+                    rerank_api_key: config.rerank_api_key.clone(),
+                    rerank_model: config.rerank_model.clone(),
+                })
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
             Some(std::sync::Arc::new(http_emb) as std::sync::Arc<dyn qql::embedder::Embedder>)
         } else {
@@ -372,6 +479,11 @@ impl PyClient {
     fn explain(&self, query: &Bound<'_, PyAny>) -> PyResult<PyObject> {
         let py = query.py();
         do_explain(py, query)
+    }
+
+    /// Compile a QQL query to its transport route without executing (parity with nqql).
+    fn compile<'py>(&self, py: Python<'py>, query: &str) -> PyResult<Bound<'py, PyAny>> {
+        compile_query(py, query)
     }
 }
 // ── internal dispatch (plain impl) ────────────────────────────────
@@ -579,6 +691,7 @@ fn pyqql(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse, m)?)?;
     m.add_function(wrap_pyfunction!(is_valid, m)?)?;
     m.add_function(wrap_pyfunction!(inject_filter, m)?)?;
+    m.add_function(wrap_pyfunction!(inject_shard_key, m)?)?;
     m.add_function(wrap_pyfunction!(tokenize, m)?)?;
     m.add_function(wrap_pyfunction!(compile_query, m)?)?;
     Ok(())

@@ -142,6 +142,13 @@ jobs:
               const request = input instanceof Request
                 ? input
                 : new Request(input, init);
+              // Schema-first topology resolution: GET /collections/{name}
+              if (request.method === 'GET') {
+                return new Response(
+                  JSON.stringify({ result: { config: { params: { vectors: { dense: { size: 2, distance: "Cosine" } } } } } }),
+                  { status: 200, headers: { 'content-type': 'application/json' } },
+                );
+              }
               batchBody = await request.clone().json();
               return new Response(
                 JSON.stringify({ result: [{ points: [] }, { points: [] }] }),

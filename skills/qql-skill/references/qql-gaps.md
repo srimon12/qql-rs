@@ -1,58 +1,75 @@
-# QQL Gaps
+# QQL Gaps (agent-facing)
 
-Use this file when a request sounds reasonable in Qdrant terms but is still outside the current QQL surface.
+Use this file so you **do not invent syntax** for open items and **do not claim
+missing** features that already ship.
 
-## Not Supported Yet
+---
 
-- Offset-style pagination for grouped search
-- MMR for `USING SPARSE` or `RECOMMEND`
-- ReadConsistency / Timeout controls via QQL syntax (timeout is in the Executor config layer, not the language)
-- `USING HYBRID` shorthand (use `QUERY HYBRID TEXT '...' DENSE ... SPARSE ...`)
-- Dynamic shard routing key resolution (shard key must be explicitly provided)
-- `max_selectivity` on `PARAMS (acorn = true)` -- the plan type has the field but it is not settable from QQL syntax yet
+## Edge (important)
 
-## What To Say
+| Capability | Status |
+|---|---|
+| Dense / sparse / hybrid FUSION | **Yes** (default) |
+| Multivector / ColBERT (`AS MULTI`, MaxSim `RERANK`) | **Opt-in** `multi_model` / multi HTTP |
+| CLIP `IMAGE` + CLIP text dense | **Opt-in** `image_model` (local **paths** only) |
+| Cross-encoder `CROSS RERANK` | **Opt-in** `reranker_model` / `rerank_endpoint` |
+| `GROUP BY` / query groups | **No** — `QQL-EDGE-UNSUPPORTED-GROUP-BY`; use remote Qdrant |
+| `SHARD`, `ALTER COLLECTION`, ACORN | **No** — `QQL-EDGE-UNSUPPORTED-*` catalog; use remote Qdrant |
+| Batch query/update | Fan-out only (not one native batch RPC) |
+| `PARAMS (timeout / consistency)` | No-op / N/A on single-node edge |
 
-Prefer plain language:
+Edge unsupported codes are stable (see `crates/qql-edge/README.md`).
 
-- `QQL does not support this yet.`
-- `This needs raw Qdrant SDK usage or a QQL extension.`
-- `The closest supported QQL form is ...`
+`qql doctor` prints which hosts are loaded: dense / multi / image / cross_rerank.
 
-## Practical Fallbacks
+---
 
-- Need exact baseline: use `PARAMS (exact = true)`
-- Need single point by exact ID: use `QUERY POINTS (42, 'uuid') FROM <collection> WITH PAYLOAD true`
-- Need to browse or export points page by page: use `SCROLL FROM <collection> ... LIMIT <n>`
-- Need pagination without similarity score: use `QUERY ORDER BY <field> [ASC|DESC] FROM <collection> LIMIT <n>`
-- Need to filter returned fields: use `WITH PAYLOAD INCLUDE ('f1', 'f2') WITH VECTOR ('name')`
-- Need recall tuning: use `PARAMS (hnsw_ef = ...)`
-- Need flat search pagination: use `QUERY ... LIMIT <n> OFFSET <n>`
-- Need low-score filtering: use `QUERY ... SCORE THRESHOLD <float>`
-- Need cross-collection lookup: use `QUERY ... LOOKUP FROM <collection>`
-- Need keyword plus semantic retrieval: use `QUERY HYBRID TEXT 'text' DENSE dense SPARSE sparse FUSION RRF FROM <collection> LIMIT <n>`
-- Need parameterized RRF tuning: use `PARAMS (rrf_k = <n>, rrf_weights = [...])`
-- Need multi-stage retrieval with per-prefetch filters: use `WITH <name> AS (...) ... PREFETCH (name WHERE <filter> SCORE THRESHOLD <n>) FUSION RRF`
-- Need hybrid DBSF fusion: use `QUERY HYBRID TEXT 'text' DENSE dense SPARSE sparse FUSION DBSF FROM <collection> LIMIT <n>`
-- Need better ordering: use `QUERY RERANK TEXT 'query' MODEL 'reranker' FROM <collection> USING colbert PREFETCH (...) LIMIT <n>`
-- Need filtering: create an index first (`CREATE INDEX ON COLLECTION <name> FOR <field> TYPE <type>`), then use `WHERE`
-- Need grouped top results by field: use `QUERY ... GROUP BY <field> SIZE <n>`
-- Need cross-collection group lookup: use `QUERY ... GROUP BY <field> SIZE <n> LOOKUP FROM <collection>`
-- Need to patch metadata in place: use `UPDATE <collection> SET PAYLOAD = {...} WHERE ...`
-- Need to replace a stored vector: use `UPDATE <collection> SET VECTOR <name> = [...] WHERE id = ...`
-- Need a runnable prototype: stay inside `CREATE`, `CREATE INDEX`, `UPSERT`, `QUERY`, `DELETE`
-- Need batch upsert: use comma-separated `UPSERT INTO <name> VALUES {...}, {...}`
-- Need script round-trip: use `qql execute <file.qql>` and `qql dump <collection> <output.qql>`
-- Need local inference without cloud: configure an embedder and set `USING DENSE MODEL` / `USING HYBRID`
-- Need score shaping: use `QUERY FORMULA score * 2 DEFAULTS (score = 0.0) FROM <collection> USING dense LIMIT <n>`
-- Need random sampling: use `QUERY SAMPLE RANDOM FROM <collection> LIMIT <n>`
-- Need geo-distance decay: use `QUERY FORMULA ...` with decay functions
-- Need conditional scoring: use `QUERY FORMULA ...` with CASE expressions
-- Need mathematical score shaping: use `QUERY FORMULA sqrt(score) * log(citations + 1) FROM ...`
-- Need multi-tenant isolation: use `SHARD '<key>'` on QUERY, UPSERT, SCROLL, DELETE
-- Need quantization-aware search: use `PARAMS (quantization = {ignore: false, rescore: true, oversampling: 2.0})`
-- Need API key authentication: pass `api_key` to SDK Client or set `QDRANT_API_KEY` env var
+## Open / incomplete (do not invent syntax)
+
+| Area | Reality | Agent rule |
+|---|---|---|
+| Edge `GROUP BY` | Rejected offline (`QQL-EDGE-UNSUPPORTED-GROUP-BY`). | Same QQL works on remote Qdrant; offline: filter + `LIMIT`. |
+
+---
+
+## Closed / supported (do not list as gaps)
+
+| Area | Use this |
+|---|---|
+| Hybrid shorthand | `USING HYBRID` or `QUERY HYBRID TEXT …` (same expand) |
+| Request timeout | `PARAMS (timeout = 30)` → REST `?timeout=30` / gRPC `timeout` (seconds) |
+| Read consistency | `PARAMS (consistency = majority\|quorum\|all\|N)` → OpenAPI `ReadConsistency` |
+| ACORN params (remote) | `PARAMS (acorn = true, max_selectivity = 0.4)` — not on edge |
+| Exact count | `COUNT FROM coll WITH (exact = true)` |
+| Specific payload deletion | `DELETE PAYLOAD key1, key2 FROM coll WHERE ...` |
+| Multi-collection lookup | `GROUP BY ... LOOKUP FROM coll` → `QueryRequest.lookup_from` |
+| Grouped pagination (OFFSET with GROUP BY) | `GROUP BY … OFFSET N` → maps to `group_offset` |
+| MMR with sparse vectors | `USING … AS SPARSE` with MMR is supported |
+| Filter shard & min_should | `FilterCompound.shard_key` and `min_should` threshold |
+| Dynamic shard (host) | `inject_shard_key(stmt, tenant)` / `stmt.inject_shard_key(tenant)` — or literal `SHARD '…'` |
+| Schema-first vectors | `USING name` / `AS DENSE\|SPARSE\|MULTI` |
+| Multivector / late interaction | `USING colbert` / `AS MULTI`; `RERANK … PREFETCH` |
+| CLIP | `QUERY IMAGE '…'` / `TEXT` into same dense space |
+| Cross-encoder | `CROSS RERANK TEXT '…' MODEL '…' ON FIELD text PREFETCH (…)` |
+| Doctor hosts | `qql doctor` → dense/multi/image/cross_rerank |
+
+---
+
+## Practical fallbacks
+
+| Need | Pattern |
+|---|---|
+| Hybrid | `QUERY 'q' FROM docs USING HYBRID LIMIT 10` |
+| Cluster timeout | `PARAMS (timeout = 30)` on QUERY |
+| Replica reads | `PARAMS (consistency = majority)` |
+| Multi-tenant shard | `inject_shard_key(stmt, tenant)` + `inject_filter(…, tenant_id, …)` |
+| Faceted page 2 (groups) | `GROUP BY … OFFSET N` — maps to Qdrant `group_offset` |
+| Edge without groups | `WHERE` + `LIMIT`, or remote Qdrant for `GROUP BY` |
+
+---
 
 ## Reminder
 
-Do not hide missing features behind made-up syntax. If the current CLI cannot parse and execute it, it is outside this skill.
+- Open gaps: do **not** invent syntax for items still listed as Open.
+- Closed items: prefer the supported forms above.
+- Wire shapes: always check `crates/qql-runtime/openapi.json` and `proto/`.

@@ -4,6 +4,7 @@ pub async fn handle_doctor(
     json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let executor = executor(url, use_edge)?;
+    let hosts = doctor_host_summary(executor.config(), use_edge);
     let result = executor
         .execute("SHOW COLLECTIONS", qql::executor::OnError::Stop)
         .await;
@@ -21,11 +22,13 @@ pub async fn handle_doctor(
                     serde_json::json!({
                         "ok": true,
                         "healthy": true,
-                        "message": format!("Connected to {target}")
+                        "message": format!("Connected to {target}"),
+                        "hosts": hosts,
                     })
                 );
             } else {
                 println!("Connected to {target} (healthy)");
+                print_doctor_hosts(&hosts);
             }
             Ok(())
         }
@@ -41,13 +44,129 @@ pub async fn handle_doctor(
                     serde_json::json!({
                         "ok": false,
                         "healthy": false,
-                        "error": format!("Failed to connect to {target}: {e}")
+                        "error": format!("Failed to connect to {target}: {e}"),
+                        "hosts": hosts,
                     })
                 );
             } else {
                 println!("Failed to connect to {target}: {e}");
+                print_doctor_hosts(&hosts);
             }
             Err(e.into())
+        }
+    }
+}
+
+/// Snapshot of embedding / rerank hosts for doctor UX (no model download).
+fn doctor_host_summary(
+    config: Option<&qql::config::QqlConfig>,
+    use_edge: bool,
+) -> serde_json::Value {
+    let Some(cfg) = config else {
+        return serde_json::json!({
+            "backend": if use_edge { "edge" } else { "remote" },
+            "dense": false,
+            "multi": false,
+            "image": false,
+            "cross_rerank": false,
+            "hints": ["no QqlConfig on executor — embedding hosts unknown"],
+        });
+    };
+    let dense = cfg.embedding_model.as_ref().is_some_and(|m| !m.is_empty())
+        || cfg
+            .embedding_endpoint
+            .as_ref()
+            .is_some_and(|e| !e.trim().is_empty())
+        || use_edge;
+    let multi = cfg
+        .multi_embedding_model
+        .as_ref()
+        .is_some_and(|m| !m.is_empty())
+        || cfg
+            .multi_embedding_endpoint
+            .as_ref()
+            .is_some_and(|e| !e.trim().is_empty());
+    let image = cfg
+        .image_embedding_model
+        .as_ref()
+        .is_some_and(|m| !m.is_empty())
+        || cfg
+            .image_embedding_endpoint
+            .as_ref()
+            .is_some_and(|e| !e.trim().is_empty());
+    let cross = cfg.rerank_model.as_ref().is_some_and(|m| !m.is_empty())
+        || cfg
+            .rerank_endpoint
+            .as_ref()
+            .is_some_and(|e| !e.trim().is_empty());
+
+    let mut hints = Vec::new();
+    if !multi {
+        hints.push(
+            "ColBERT / AS MULTI / multivector RERANK needs multi_model or multi_embedding_* config",
+        );
+    }
+    if !image {
+        hints.push("IMAGE / CLIP vision needs image_model or image_embedding_* config");
+    }
+    if !cross {
+        hints.push("CROSS RERANK needs reranker_model or rerank_endpoint / rerank_model");
+    }
+    if use_edge {
+        hints.push("edge has no GROUP BY, SHARD keys, ALTER COLLECTION, or ACORN");
+    }
+
+    serde_json::json!({
+        "backend": if use_edge { "edge" } else { "remote" },
+        "dense": dense,
+        "dense_model": cfg.embedding_model,
+        "multi": multi,
+        "multi_model": cfg.multi_embedding_model,
+        "image": image,
+        "image_model": cfg.image_embedding_model,
+        "cross_rerank": cross,
+        "rerank_model": cfg.rerank_model,
+        "hints": hints,
+    })
+}
+
+fn print_doctor_hosts(hosts: &serde_json::Value) {
+    println!(
+        "Hosts: dense={} multi={} image={} cross_rerank={}",
+        hosts
+            .get("dense")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        hosts
+            .get("multi")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        hosts
+            .get("image")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        hosts
+            .get("cross_rerank")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+    );
+    if let Some(m) = hosts.get("dense_model").and_then(|v| v.as_str()) {
+        println!("  dense_model: {m}");
+    }
+    if let Some(m) = hosts.get("multi_model").and_then(|v| v.as_str()) {
+        println!("  multi_model: {m}");
+    }
+    if let Some(m) = hosts.get("image_model").and_then(|v| v.as_str()) {
+        println!("  image_model: {m}");
+    }
+    if let Some(m) = hosts.get("rerank_model").and_then(|v| v.as_str()) {
+        println!("  rerank_model: {m}");
+    }
+    if let Some(hints) = hosts.get("hints").and_then(|v| v.as_array()) {
+        for h in hints {
+            if let Some(s) = h.as_str() {
+                println!("  hint: {s}");
+            }
         }
     }
 }
@@ -347,8 +466,60 @@ fn executor(
                 } else {
                     384
                 });
-            let http_emb =
-                qql::embedder::HttpEmbedder::new(endpoint.clone(), api_key, model, dimension)?;
+            let multi_endpoint = std::env::var("MULTI_EMBED_URL")
+                .ok()
+                .or_else(|| config.multi_embedding_endpoint.clone());
+            let multi_api_key = std::env::var("MULTI_EMBED_KEY")
+                .ok()
+                .or_else(|| config.multi_embedding_api_key.clone());
+            let multi_model = std::env::var("MULTI_EMBED_MODEL")
+                .ok()
+                .or_else(|| config.multi_embedding_model.clone());
+            let multi_dimension = std::env::var("MULTI_EMBED_DIM")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(config.multi_embedding_dimension);
+            let image_endpoint = std::env::var("IMAGE_EMBED_URL")
+                .ok()
+                .or_else(|| config.image_embedding_endpoint.clone());
+            let image_api_key = std::env::var("IMAGE_EMBED_KEY")
+                .ok()
+                .or_else(|| config.image_embedding_api_key.clone());
+            let image_model = std::env::var("IMAGE_EMBED_MODEL")
+                .ok()
+                .or_else(|| config.image_embedding_model.clone());
+            let image_dimension = std::env::var("IMAGE_EMBED_DIM")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(config.image_embedding_dimension);
+            let rerank_endpoint = std::env::var("RERANK_URL")
+                .ok()
+                .or_else(|| config.rerank_endpoint.clone());
+            let rerank_api_key = std::env::var("RERANK_KEY")
+                .ok()
+                .or_else(|| config.rerank_api_key.clone());
+            let rerank_model = std::env::var("RERANK_MODEL")
+                .ok()
+                .or_else(|| config.rerank_model.clone());
+            let http_emb = qql::embedder::HttpEmbedder::try_with_options(
+                qql::embedder::HttpEmbedderOptions {
+                    endpoint: endpoint.clone(),
+                    api_key,
+                    model,
+                    dimension,
+                    multi_endpoint,
+                    multi_api_key,
+                    multi_model,
+                    multi_dimension,
+                    image_endpoint,
+                    image_api_key,
+                    image_model,
+                    image_dimension,
+                    rerank_endpoint,
+                    rerank_api_key,
+                    rerank_model,
+                },
+            )?;
             Some(std::sync::Arc::new(http_emb) as std::sync::Arc<dyn qql::embedder::Embedder>)
         } else {
             None
@@ -372,6 +543,10 @@ fn edge_executor() -> Result<qql::executor::Executor, Box<dyn std::error::Error>
             let options = qql_edge::LocalExecutorOptions {
                 on_disk_payload: config.on_disk_payload,
                 model: config.model,
+                sparse_model: config.sparse_model,
+                multi_model: config.multi_model.or(config.multi_embed_model.clone()),
+                image_model: config.image_model.or(config.image_embed_model.clone()),
+                reranker_model: config.reranker_model.clone(),
                 cache_dir: config.cache_dir,
                 show_download_progress: config.show_download_progress,
             };
@@ -382,13 +557,26 @@ fn edge_executor() -> Result<qql::executor::Executor, Box<dyn std::error::Error>
             let endpoint = config.embed_url.ok_or(
                 "the edge HTTP embedder requires embed_url; run `qql config edge --embedder http --embed-url <URL>`",
             )?;
-            qql_edge::http_executor(
+            qql_edge::http_executor_with_options(
                 config.data_dir,
                 config.on_disk_payload,
-                endpoint,
-                config.embed_key,
-                config.embed_model,
-                config.embed_dimension,
+                qql::embedder::HttpEmbedderOptions {
+                    endpoint,
+                    api_key: config.embed_key,
+                    model: config.embed_model,
+                    dimension: config.embed_dimension,
+                    multi_endpoint: config.multi_embed_url,
+                    multi_api_key: config.multi_embed_key,
+                    multi_model: config.multi_embed_model,
+                    multi_dimension: config.multi_embed_dimension,
+                    image_endpoint: config.image_embed_url,
+                    image_api_key: config.image_embed_key,
+                    image_model: config.image_embed_model,
+                    image_dimension: config.image_embed_dimension,
+                    rerank_endpoint: None,
+                    rerank_api_key: None,
+                    rerank_model: config.reranker_model,
+                },
             )
             .map_err(|error| format!("edge initialization failed: {error}").into())
         }

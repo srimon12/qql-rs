@@ -7,18 +7,21 @@ pub fn lower_filter(filter: &FilterExpr) -> FilterExpression {
             must: operands.iter().map(lower_clause).collect(),
             must_not: Vec::new(),
             should: Vec::new(),
+            min_should: None,
             shard_key: None,
         }),
         FilterExpr::Or { operands } => FilterExpression::Compound(FilterCompound {
             must: Vec::new(),
             must_not: Vec::new(),
             should: operands.iter().map(lower_clause).collect(),
+            min_should: None,
             shard_key: None,
         }),
         FilterExpr::Not { operand } => FilterExpression::Compound(FilterCompound {
             must: Vec::new(),
             must_not: vec![lower_clause(operand)],
             should: Vec::new(),
+            min_should: None,
             shard_key: None,
         }),
         other => FilterExpression::Single(Box::new(lower_clause(other))),
@@ -26,15 +29,28 @@ pub fn lower_filter(filter: &FilterExpr) -> FilterExpression {
 }
 
 pub fn top_level_filter(filter: &FilterExpr) -> FilterExpression {
+    top_level_filter_with_shard(filter, None)
+}
+
+pub fn top_level_filter_with_shard(
+    filter: &FilterExpr,
+    shard_key: Option<&str>,
+) -> FilterExpression {
     let f = lower_filter(filter);
     match f {
         FilterExpression::Single(clause) => FilterExpression::Compound(FilterCompound {
             must: vec![*clause],
             must_not: Vec::new(),
             should: Vec::new(),
-            shard_key: None,
+            min_should: None,
+            shard_key: shard_key.map(|s| s.to_string()),
         }),
-        other => other,
+        FilterExpression::Compound(mut compound) => {
+            if compound.shard_key.is_none() {
+                compound.shard_key = shard_key.map(|s| s.to_string());
+            }
+            FilterExpression::Compound(compound)
+        }
     }
 }
 
@@ -117,18 +133,21 @@ fn lower_clause(filter: &FilterExpr) -> FilterClause {
             must: operands.iter().map(lower_clause).collect(),
             must_not: Vec::new(),
             should: Vec::new(),
+            min_should: None,
             shard_key: None,
         })),
         FilterExpr::Or { operands } => FilterClause::Filter(Box::new(FilterCompound {
             must: Vec::new(),
             must_not: Vec::new(),
             should: operands.iter().map(lower_clause).collect(),
+            min_should: None,
             shard_key: None,
         })),
         FilterExpr::Not { operand } => FilterClause::Filter(Box::new(FilterCompound {
             must: Vec::new(),
             must_not: vec![lower_clause(operand)],
             should: Vec::new(),
+            min_should: None,
             shard_key: None,
         })),
     }
@@ -156,8 +175,8 @@ fn field_condition(field: &str, f: impl FnOnce(&mut FieldCondition)) -> FilterCl
 
 fn lower_point_id(predicate: &PointIdPredicate) -> FilterClause {
     let ids = match predicate {
-        PointIdPredicate::Eq(id) => vec![point_id_req(id)],
-        PointIdPredicate::In(ids) => ids.iter().map(point_id_req).collect(),
+        PointIdPredicate::Eq(id) => vec![point_id_req_typed(id)],
+        PointIdPredicate::In(ids) => ids.iter().map(point_id_req_typed).collect(),
     };
     FilterClause::HasId(HasIdCondition { has_id: ids })
 }
@@ -271,13 +290,6 @@ pub fn value_to_json(value: &Value) -> serde_json::Value {
             }
             serde_json::Value::Object(map)
         }
-    }
-}
-
-pub fn point_id_req(id: &qql_core::ast::PointId) -> serde_json::Value {
-    match id {
-        qql_core::ast::PointId::Number(n) => serde_json::Value::Number((*n).into()),
-        qql_core::ast::PointId::String(s) => serde_json::Value::String(s.clone()),
     }
 }
 

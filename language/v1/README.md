@@ -19,9 +19,19 @@ across repositories.
 `grammar.pest` is the only handwritten core syntax grammar. The generated copy
 under `crates/qql-core/grammar` must never be edited directly.
 
-The grammar owns syntax only. Collection-schema inference and other
-schema-dependent validation remain in `qql-plan` and are specified in
-`spec/semantics.md`.
+The grammar owns syntax only. Collection-schema inference (dense vs sparse vs
+multivector flags), embedding, and other schema-dependent validation live in
+`qql-embed` / `qql-runtime` and are specified in `spec/semantics.md`.
+
+`USING name AS MULTI` / `AS MULTIVECTOR` is part of the grammar (dense multivector
+role). Parse still stores untyped `USING name` with `kind: null` until execution
+prep fills roles from the collection schema.
+
+`USING HYBRID [DENSE n] [SPARSE n] [FUSION …]` is accepted on query tails and
+lowers to the same `QueryExpr::Hybrid` AST as front-form `QUERY HYBRID TEXT …`.
+
+Product / implementation gaps (edge limits, remaining UX) are tracked in
+  [`skills/qql-skill/references/qql-gaps.md`](../../skills/qql-skill/references/qql-gaps.md).
 
 ## Generation
 
@@ -38,9 +48,9 @@ AST structure. Verify that no generated artifact is stale:
 cargo run -p qql-grammar-gen -- check
 ```
 
-Pest compiles the generated PEG into the qql-core syntax parser. Public
-`Parser::parse` and `Parser::parse_all` accept a program only when it matches
-that generated parser and lowers successfully into the typed QQL AST.
+`language/v1/grammar.pest` is the **language contract** (docs + CI sync via
+`qql-grammar-gen`). Production acceptance in `qql-core` is the hand-written
+`AstLowerer` only — pest is **not** linked into the runtime parser.
 
 ## Conformance
 
@@ -51,7 +61,7 @@ cargo run -p qql-conformance -- check language/v1
 Expected result:
 
 ```text
-conformant: 29 valid files (217 statements), 34 invalid cases, 29 AST snapshots
+conformant: 32 valid files, 34 invalid cases, 32 AST snapshots
 ```
 
 Regenerate AST snapshots only for an intentional contract change:

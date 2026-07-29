@@ -51,7 +51,11 @@ fn tenant_route(user_query: &str, tenant: &str) -> Result<(), Box<dyn std::error
 
 ## 2. Execute with REST or gRPC Client
 
-Full runtime: parse, optionally resolve embeddings, execute against Qdrant.
+Full runtime: parse → **schema vector kind resolution** → embeddings → plan →
+dispatch. `USING dense` / `USING sparse` / multivector names work without `AS`
+when the collection exists; kinds and multivector flags come from schema.
+`USING name` alone without schema fails closed (`QQL-VECTOR-KIND`). Multivector
+TEXT needs a host `Embedder::embed_multi` (or precomputed `VECTOR [[...]]`).
 
 ```rust
 use qql::executor::{Executor, OnError};
@@ -65,6 +69,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "QUERY 'supply chain risks' FROM sec10k SHARD 'honeywell' LIMIT 10",
         OnError::Stop,
     ).await?;
+
+    // Schema-driven sparse + multivector (no AS required when collection exists)
+    // exec.execute("QUERY TEXT 'q' FROM docs USING sparse LIMIT 10", OnError::Stop).await?;
+    // exec.execute("QUERY TEXT 'q' FROM docs USING colbert LIMIT 10", OnError::Stop).await?;
 
     Ok(())
 }
@@ -88,6 +96,9 @@ let exec = Executor::new(Box::new(client), None);
 
 `RestQdrant::with_timeout(url, api_key, timeout)` constructs with an explicit duration.
 
+**Note:** Statement-level timeout / read consistency is **not** QQL syntax yet
+(no `PARAMS (timeout = …)`). Use client/executor timeouts as above.
+
 ---
 
 ## 3. Batch Execution
@@ -95,7 +106,7 @@ let exec = Executor::new(Box::new(client), None);
 `execute_batch` and `execute_batch_nodes` execute multiple queries. Same-collection QUERY and mutation statements are automatically grouped into a single network call.
 
 ```rust
-use qql::executor::Executor;
+use qql::executor::{Executor, OnError};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -106,45 +117,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "QUERY 'a' FROM docs USING dense LIMIT 10",
         "QUERY 'b' FROM docs USING dense LIMIT 10",
         "QUERY 'c' FROM docs USING dense LIMIT 10",
-    ], true).await?;
+    ], OnError::Stop).await?;
     // -> 3 queries, 1 network call (auto-grouped by collection)
 
     // Batch from pre-parsed Stmts
     let stmts = Parser::parse_all("COUNT FROM docs; COUNT FROM sec10k")?;
-    let results = exec.execute_batch_nodes(stmts, true).await?;
+    let results = exec.execute_batch_nodes(stmts, OnError::Stop).await?;
 
     Ok(())
 }
 ```
 
-`stop_on_error: true` halts on the first failure. `false` collects per-statement errors.
+`OnError::Stop` halts on the first failure. `OnError::Continue` collects per-statement errors.
 
 ---
 
-## 4. Batch Route Compilation (no I/O)
+## 4. Offline Statement Compilation (no I/O)
 
-`route_query_batch` groups query statements by collection and produces batch request payloads -- useful for offline compilation or proxy layers.
+`compile_statement` lowers a parsed statement to a typed IR with optional REST route --
+useful for offline validation or proxy layers. `try_route` gives a fallible
+`Result<Route, _>` suitable for library code.
 
 ```rust
 use qql_core::parser::Parser;
-use qql_plan::routing::route_query_batch;
+use qql_plan::{compile_statement, try_route};
 
-let stmts = Parser::parse_all(
-    "QUERY 'a' FROM docs USING dense LIMIT 1;\
-     QUERY 'b' FROM docs USING dense LIMIT 1;\
-     QUERY 'c' FROM docs USING dense LIMIT 1;"
-)?;
+let stmt = Parser::parse("QUERY 'a' FROM docs USING dense LIMIT 1;")?;
 
-let stmt_refs: Vec<_> = stmts.iter().filter_map(|s| match s {
-    qql_core::ast::Stmt::Query(q) => Some(&**q),
-    _ => None,
-}).collect();
+// Full compilation (stmt_type + optional route)
+let compiled = compile_statement(&stmt)?;
+println!("type={} method={:?}", compiled.stmt_type, compiled.route.as_ref().map(|r| &r.method));
 
-let batches = route_query_batch(&stmt_refs);
-for (collection, batch) in batches {
-    println!("{} -> {} searches batched", collection, batch.searches.len());
-    // -> "docs -> 3 searches batched"
-}
+// Or get just the REST route directly (falls back for client-side ops)
+let route = try_route(&stmt)?;
+println!("{} {}", route.method.as_str(), route.path);
 ```
 
 ---
@@ -186,5 +192,5 @@ let stmts = Parser::parse_all(r#"
 "#)?;
 
 // Inspect, inject filters, set shard keys...
-// exec.execute_batch_nodes(stmts, true).await?;
+// exec.execute_batch_nodes(stmts, OnError::Stop).await?;
 ```

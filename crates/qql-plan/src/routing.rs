@@ -1,117 +1,62 @@
 use crate::plan::{plan, to_rest_route};
-use crate::query::lower_query_request;
 use crate::types::*;
-use qql_core::ast::{QueryCollection, QueryExpr, QueryStmt, Stmt};
+use qql_core::ast::Stmt;
 
-#[derive(serde::Serialize)]
-#[serde(untagged)]
-pub enum RequestBody {
-    Query(Box<QueryRequest>),
-    QueryGroups(Box<QueryGroupsRequest>),
-    Points(PointsRequest),
-    Scroll(Box<ScrollRequest>),
-    Upsert(UpsertRequest),
-    Delete(Box<DeleteRequest>),
-    ClearPayload(Box<ClearPayloadRequest>),
-    DeleteVector(Box<DeleteVectorRequest>),
-    UpdateVector(UpdateVectorRequest),
-    UpdatePayload(UpdatePayloadRequest),
-    CreateCollection(Box<CreateCollectionRequest>),
-    /// PATCH alter collection — distinct from create (PUT).
-    UpdateCollection(Box<UpdateCollectionRequest>),
-    CreateIndex(CreateIndexRequest),
-    Count(Box<CountRequest>),
-    CreateShardKey(Box<CreateShardKeyRequest>),
-    DropShardKey(Box<DropShardKeyRequest>),
-}
-
-impl RequestBody {
-    pub fn to_json(&self) -> Result<serde_json::Value, qql_core::error::QqlError> {
-        serde_json::to_value(self).map_err(|err| {
-            qql_core::error::QqlError::validation(
-                "QQL-PLAN-SERIALIZE",
-                alloc::format!("failed to serialize request body: {err}"),
-                None,
-            )
-        })
-    }
-}
-
+#[derive(Debug)]
 pub struct Route {
     pub method: Method,
     pub path: String,
     pub query: Vec<(String, String)>,
-    pub body: Option<RequestBody>,
+    pub body: Option<serde_json::Value>,
 }
 
 impl Route {
-    pub fn try_body_json(&self) -> Result<Option<serde_json::Value>, qql_core::error::QqlError> {
-        self.body.as_ref().map(RequestBody::to_json).transpose()
-    }
-
-    /// Compatibility helper for callers that only need an optional body.
-    /// Request bodies contain JSON-safe values, so serialization failure is an
-    /// internal invariant violation rather than an absent body.
+    /// Serialized JSON body, or None for bodyless routes.
     pub fn body_json(&self) -> Option<serde_json::Value> {
-        self.try_body_json()
-            .expect("request body serialization must be infallible")
+        self.body.clone()
     }
 }
 
-/// Compatibility REST projection. Prefer [`crate::plan::plan`] +
-/// [`crate::plan::to_rest_route`] (or [`crate::plan::try_route`]) for new code.
+/// Fallible REST projection of a statement. Prefer for new code.
 ///
-/// Parser-validated statements always succeed. Programmatic malformed AST
-/// returns a planning error via `try_route`; this infallible wrapper falls
-/// back to an empty GET only for unexpected validation failures (should not
-/// occur for parser-produced statements).
-pub fn route(statement: &Stmt) -> Route {
-    match plan(statement) {
-        Ok(op) => to_rest_route(&op),
-        Err(_) => Route {
-            method: Method::Get,
-            path: String::new(),
-            query: Vec::new(),
-            body: None,
-        },
-    }
-}
-
-/// Fallible route construction (planner + REST projection).
+/// Client-side ops (CROSS RERANK) and plan failures return `Err` — never a
+/// silent empty GET.
 pub fn try_route(statement: &Stmt) -> Result<Route, qql_core::error::QqlError> {
     crate::plan::try_route(statement)
 }
 
-/// Groups QUERY statements by collection and produces one `QueryBatchRequest`
-/// per unique collection.  Only standard queries (non-`Points`, non-grouped)
-/// are batched.  Returns an empty vec when fewer than 2 queries share a
-/// collection — single queries use the normal `route()` path.
-pub fn route_query_batch(stmts: &[QueryStmt]) -> Vec<(String, QueryBatchRequest)> {
-    let mut groups: std::collections::HashMap<String, Vec<QueryRequest>> =
-        std::collections::HashMap::new();
-
-    for stmt in stmts {
-        // Skip non-batchable variants — Points lookups and grouped queries
-        // use different Qdrant endpoints.
-        if matches!(stmt.expression, QueryExpr::Points { .. }) || stmt.group.is_some() {
-            continue;
-        }
-        let collection = match &stmt.collection {
-            QueryCollection::Explicit(name) => name.clone(),
-            QueryCollection::Inherited => continue,
-        };
-        if let Ok(req) = lower_query_request(stmt) {
-            groups.entry(collection).or_default().push(req);
-        }
-    }
-
-    groups
-        .into_iter()
-        .filter(|(_, reqs)| reqs.len() > 1) // single queries use the normal route
-        .map(|(collection, searches)| (collection, QueryBatchRequest { searches }))
-        .collect()
+/// Compatibility wrapper around [`try_route`].
+///
+/// # Panics
+/// Panics if planning fails or the op is client-side only. Prefer
+/// [`try_route`] or [`compile_statement`] in library code.
+#[deprecated(note = "use try_route or compile_statement; this panics on plan/client-side errors")]
+pub fn route(statement: &Stmt) -> Route {
+    try_route(statement).expect("route(): plan/REST projection failed")
 }
 
+/// Offline compile result for host SDKs.
+///
+/// `route` is `None` for client-side operations (e.g. CROSS RERANK) that have
+/// a stable `stmt_type` but no single Qdrant HTTP endpoint.
+#[derive(Debug)]
+pub struct CompiledStatement {
+    pub stmt_type: &'static str,
+    pub route: Option<Route>,
+}
+
+/// Compile a statement from the planner IR.
+///
+/// Always sets `stmt_type` from [`crate::plan::PlannedOperation::compile_stmt_type`].
+/// REST path/method/payload are present only when a real Qdrant route exists.
+pub fn compile_statement(statement: &Stmt) -> Result<CompiledStatement, qql_core::error::QqlError> {
+    let op = plan(statement)?;
+    let stmt_type = op.compile_stmt_type();
+    let route = to_rest_route(&op).ok();
+    Ok(CompiledStatement { stmt_type, route })
+}
+
+/// Groups QUERY statements by collection and produces one `QueryBatchRequest`
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,8 +65,8 @@ mod tests {
 
     #[test]
     fn query_routes_correctly() {
-        let s = Parser::parse("QUERY 'hello' FROM docs LIMIT 10;").unwrap();
-        let r = route(&s);
+        let s = Parser::parse("QUERY TEXT 'hello' MODEL 'e5' FROM docs LIMIT 10;").unwrap();
+        let r = try_route(&s).unwrap();
         assert_eq!(r.method, Method::Post);
         assert_eq!(r.path, "/collections/docs/points/query");
         assert!(r.body.is_some());
@@ -130,7 +75,7 @@ mod tests {
     #[test]
     fn points_lookup() {
         let s = Parser::parse("QUERY POINTS (42) FROM docs WITH PAYLOAD true;").unwrap();
-        let r = route(&s);
+        let r = try_route(&s).unwrap();
         assert_eq!(r.method, Method::Post);
         assert_eq!(r.path, "/collections/docs/points");
     }
@@ -143,7 +88,8 @@ mod tests {
             panic!("expected point lookup");
         };
         assert_eq!(request.shard_key.as_deref(), Some("tenant-a"));
-        assert!(route(&statement)
+        assert!(try_route(&statement)
+            .unwrap()
             .body_json()
             .unwrap()
             .to_string()
@@ -151,24 +97,81 @@ mod tests {
     }
 
     #[test]
+    fn compile_stmt_type_disambiguates_bodyless_routes() {
+        let cases = [
+            ("DROP INDEX ON COLLECTION docs FOR title;", "drop_index"),
+            ("SHOW SHARD KEYS ON COLLECTION docs;", "show_shard_keys"),
+            ("DROP COLLECTION docs;", "drop_collection"),
+            ("SHOW COLLECTION docs;", "show_collection"),
+            ("SHOW COLLECTIONS;", "show_collections"),
+        ];
+        for (qql, expected) in cases {
+            let stmt = Parser::parse(qql).unwrap();
+            let compiled = compile_statement(&stmt).unwrap();
+            assert_eq!(compiled.stmt_type, expected, "qql={qql}");
+        }
+    }
+
+    #[test]
+    fn mutation_shard_keys_lower_and_project() {
+        let cases = [
+            ("CLEAR PAYLOAD FROM docs WHERE id = 1 SHARD 't1';", "t1"),
+            (
+                "DELETE VECTOR dense FROM docs WHERE id = 1 SHARD 't2';",
+                "t2",
+            ),
+            (
+                "UPDATE docs SET VECTOR dense = [0.1, 0.2] WHERE id = 1 SHARD 't3';",
+                "t3",
+            ),
+            (
+                "UPDATE docs SET PAYLOAD = {\"k\": 1} WHERE id = 1 SHARD 't4';",
+                "t4",
+            ),
+        ];
+        for (qql, expected) in cases {
+            let statement = Parser::parse(qql).unwrap();
+            let operation = plan::plan(&statement).unwrap();
+            assert_eq!(
+                operation.shard_key(),
+                Some(expected),
+                "plan.shard_key for {qql}"
+            );
+            let r = to_rest_route(&operation).expect("rest route");
+            assert!(
+                r.query
+                    .iter()
+                    .any(|(k, v)| k == "shard_key" && v == expected),
+                "REST query param for {qql}: {:?}",
+                r.query
+            );
+            let body = r.body_json().unwrap().to_string();
+            assert!(
+                body.contains(expected),
+                "REST body should include shard_key for {qql}: {body}"
+            );
+        }
+    }
+
+    #[test]
     fn upsert_with_embedding_waits() {
         let s = Parser::parse("UPSERT INTO docs VALUES {id: 1, text: 'x'} USING DENSE MODEL 'm';")
             .unwrap();
-        let r = route(&s);
+        let r = try_route(&s).unwrap();
         assert!(r.query.iter().any(|(k, v)| k == "wait" && v == "true"));
     }
 
     #[test]
     fn delete_has_wait() {
         let s = Parser::parse("DELETE FROM docs WHERE id = 1;").unwrap();
-        let r = route(&s);
+        let r = try_route(&s).unwrap();
         assert!(r.query.iter().any(|(k, v)| k == "wait" && v == "true"));
     }
 
     #[test]
     fn show_collections_no_body() {
         let s = Parser::parse("SHOW COLLECTIONS;").unwrap();
-        let r = route(&s);
+        let r = try_route(&s).unwrap();
         assert_eq!(r.method, Method::Get);
         assert!(r.body.is_none());
     }
@@ -177,7 +180,7 @@ mod tests {
     fn all_endpoint_methods() {
         let cases = [
             (
-                "QUERY 'x' FROM docs;",
+                "QUERY TEXT 'x' MODEL 'e5' FROM docs;",
                 Method::Post,
                 "/collections/docs/points/query",
             ),
@@ -227,7 +230,7 @@ mod tests {
         ];
         for (source, method, path) in cases {
             let s = Parser::parse(source).unwrap();
-            let r = route(&s);
+            let r = try_route(&s).unwrap();
             assert_eq!(r.method, method, "method mismatch for: {}", source);
             assert_eq!(r.path, path, "path mismatch for: {}", source);
         }
@@ -235,9 +238,11 @@ mod tests {
 
     #[test]
     fn grouped_query_routes_to_groups_endpoint() {
-        let s =
-            Parser::parse("QUERY 'hello' FROM docs GROUP BY category SIZE 3 LIMIT 10;").unwrap();
-        let r = route(&s);
+        let s = Parser::parse(
+            "QUERY TEXT 'hello' MODEL 'e5' FROM docs GROUP BY category SIZE 3 LIMIT 10;",
+        )
+        .unwrap();
+        let r = try_route(&s).unwrap();
         assert_eq!(r.method, Method::Post);
         assert_eq!(r.path, "/collections/docs/points/query/groups");
         assert!(r.body.is_some());
@@ -246,10 +251,10 @@ mod tests {
     #[test]
     fn grouped_query_with_lookup() {
         let s = Parser::parse(
-            "QUERY 'hello' FROM docs GROUP BY category SIZE 3 LOOKUP FROM categories LIMIT 10;",
+            "QUERY TEXT 'hello' MODEL 'e5' FROM docs GROUP BY category SIZE 3 LOOKUP FROM categories LIMIT 10;",
         )
         .unwrap();
-        let r = route(&s);
+        let r = try_route(&s).unwrap();
         assert_eq!(r.path, "/collections/docs/points/query/groups");
         let json = r.body_json().unwrap();
         assert_eq!(json["group_by"], "category");
@@ -260,10 +265,10 @@ mod tests {
     #[test]
     fn hybrid_query_produces_prefetches() {
         let s = Parser::parse(
-            "QUERY HYBRID TEXT 'database' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10;",
+            "QUERY HYBRID TEXT 'database' MODEL 'bge' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10;",
         )
         .unwrap();
-        let r = route(&s);
+        let r = try_route(&s).unwrap();
         let json = r.body_json().unwrap();
         assert_eq!(json["query"]["fusion"], "rrf");
         let prefetch = json["prefetch"].as_array().unwrap();
@@ -271,18 +276,24 @@ mod tests {
         assert_eq!(prefetch[0]["using"], "dense");
         assert_eq!(prefetch[1]["using"], "sparse");
         assert!(
-            prefetch[0]["query"]["nearest"].is_object()
-                || prefetch[0]["query"]["nearest"].is_string()
+            prefetch[0]["query"]["nearest"].is_object(),
+            "HYBRID prefetch nearest must be Document object: {:?}",
+            prefetch[0]["query"]["nearest"]
+        );
+        assert!(
+            prefetch[1]["query"]["nearest"].is_object(),
+            "HYBRID sparse prefetch nearest must also be Document object: {:?}",
+            prefetch[1]["query"]["nearest"]
         );
     }
 
     #[test]
     fn rerank_query_staged() {
         let s = Parser::parse(
-            "QUERY RERANK TEXT 'travel' MODEL 'colbert' FROM docs USING colbert PREFETCH (QUERY 'travel' FROM docs USING dense LIMIT 100) LIMIT 10;",
+            "QUERY RERANK TEXT 'travel' MODEL 'colbert' FROM docs USING colbert PREFETCH (QUERY TEXT 'travel' MODEL 'colbert' FROM docs USING dense LIMIT 100) LIMIT 10;",
         )
         .unwrap();
-        let r = route(&s);
+        let r = try_route(&s).unwrap();
         let json = r.body_json().unwrap();
         assert_eq!(json["using"], "colbert");
         assert!(json["query"]["nearest"].is_object());
@@ -295,7 +306,7 @@ mod tests {
             "QUERY POINTS (42, 'uuid-v4') FROM docs WITH PAYLOAD INCLUDE ('title', 'url') WITH VECTOR ('dense');",
         )
         .unwrap();
-        let r = route(&s);
+        let r = try_route(&s).unwrap();
         assert_eq!(r.method, Method::Post);
         assert_eq!(r.path, "/collections/docs/points");
         let json = r.body_json().unwrap();
@@ -307,12 +318,15 @@ mod tests {
     #[test]
     fn query_with_all_options() {
         let s = Parser::parse(
-            "QUERY 'search' FROM docs USING dense WHERE status = 'active' PARAMS (hnsw_ef = 256, exact = true) SCORE THRESHOLD 0.5 WITH PAYLOAD INCLUDE ('title') WITH VECTOR ('dense') LIMIT 20 OFFSET 5;",
+            "QUERY TEXT 'search' MODEL 'e5' FROM docs USING dense WHERE status = 'active' PARAMS (hnsw_ef = 256, exact = true) SCORE THRESHOLD 0.5 WITH PAYLOAD INCLUDE ('title') WITH VECTOR ('dense') LIMIT 20 OFFSET 5;",
         )
         .unwrap();
-        let r = route(&s);
+        let r = try_route(&s).unwrap();
         let json = r.body_json().unwrap();
-        assert_eq!(json["query"]["nearest"], "search");
+        assert!(
+            json["query"]["nearest"]["text"].is_string()
+                || json["query"]["nearest"].as_str().is_some()
+        );
         assert_eq!(json["using"], "dense");
         assert_eq!(json["filter"]["must"][0]["key"], "status");
         assert_eq!(json["filter"]["must"][0]["match"]["value"], "active");
@@ -326,7 +340,7 @@ mod tests {
     #[test]
     fn scroll_with_order_by() {
         let s = Parser::parse("SCROLL FROM docs WHERE status = 'active' LIMIT 50;").unwrap();
-        let r = route(&s);
+        let r = try_route(&s).unwrap();
         let json = r.body_json().unwrap();
         assert_eq!(json["with_payload"], true);
         assert_eq!(json["with_vector"], false);
@@ -336,7 +350,7 @@ mod tests {
     #[test]
     fn scroll_with_vector_all() {
         let s = Parser::parse("SCROLL FROM docs WITH VECTOR LIMIT 25;").unwrap();
-        let r = route(&s);
+        let r = try_route(&s).unwrap();
         let json = r.body_json().unwrap();
         assert_eq!(json["with_payload"], true);
         assert_eq!(json["with_vector"], true);
@@ -347,7 +361,7 @@ mod tests {
     fn scroll_with_vector_after_string_id() {
         let s = Parser::parse("SCROLL FROM docs AFTER 'id-with-quote' WITH VECTOR true LIMIT 10;")
             .unwrap();
-        let r = route(&s);
+        let r = try_route(&s).unwrap();
         let json = r.body_json().unwrap();
         assert_eq!(json["offset"], "id-with-quote");
         assert_eq!(json["with_vector"], true);
@@ -355,8 +369,8 @@ mod tests {
 
     #[test]
     fn query_body_has_no_group_fields_when_no_group() {
-        let s = Parser::parse("QUERY 'hello' FROM docs LIMIT 5;").unwrap();
-        let r = route(&s);
+        let s = Parser::parse("QUERY TEXT 'hello' MODEL 'e5' FROM docs LIMIT 5;").unwrap();
+        let r = try_route(&s).unwrap();
         let json = r.body_json().unwrap();
         assert!(json.get("group_by").is_none());
         assert!(json.get("group_size").is_none());
@@ -366,7 +380,7 @@ mod tests {
     #[test]
     fn query_body_serialization_roundtrip_all_variants() {
         let cases = [
-            "QUERY 'text search' FROM docs LIMIT 10;",
+            "QUERY TEXT 'text search' MODEL 'e5' FROM docs LIMIT 10;",
             "QUERY NEAREST VECTOR [0.1, 0.2, 0.3] FROM docs USING dense LIMIT 10;",
             "QUERY NEAREST POINT 42 FROM docs USING dense LIMIT 5;",
             "QUERY NEAREST POINT '550e8400-e29b-41d4-a716-446655440000' FROM docs USING dense;",
@@ -391,7 +405,7 @@ mod tests {
         ];
         for source in cases {
             let s = Parser::parse(source).unwrap_or_else(|_| panic!("parse failed: {}", source));
-            let r = route(&s);
+            let r = try_route(&s).unwrap();
             let json = r.body_json();
             match r.body {
                 Some(_) => assert!(json.is_some(), "expected body for: {}", source),

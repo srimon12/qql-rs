@@ -62,6 +62,22 @@ QUERY FUSION RRF FROM clinical_docs
 
 **Why this works:** Instead of a single hybrid query, you split into multiple CTEs with different filters and score thresholds. RRF merges candidate streams into a single ranked list.
 
+For the simple dense+sparse case without per-leg filters, prefer the hybrid
+shorthand (same plan expand as `QUERY HYBRID`):
+
+```sql
+QUERY TEXT 'kubernetes deployment' FROM incidents
+  USING HYBRID DENSE dense SPARSE sparse FUSION RRF
+  LIMIT 10;
+
+-- Defaults: schema must resolve unique dense + sparse; FUSION defaults to RRF
+QUERY 'kubernetes deployment' FROM incidents USING HYBRID LIMIT 10;
+
+-- Equivalent front-form
+QUERY HYBRID TEXT 'kubernetes deployment' DENSE dense SPARSE sparse FUSION RRF
+  FROM incidents LIMIT 10;
+```
+
 ```sql
 WITH
   high_priority AS (
@@ -88,7 +104,7 @@ QUERY FUSION RRF FROM incidents
 
 **Problem:** You search in collection `research_papers`, but the group IDs (e.g. author names) live in a separate `author_metadata` collection. You want top-5 results per author without duplicate author dominance in the result feed.
 
-**Why this works:** `GROUP BY` partitions hits by payload field, while `LOOKUP FROM` resolves grouping metadata cross-collection.
+**Why this works:** `GROUP BY` partitions hits by payload field, while `LOOKUP FROM` resolves grouping metadata cross-collection. `OFFSET` is supported with `GROUP BY` (maps to `group_offset`). Edge rejects `GROUP BY` entirely — use remote Qdrant for grouped search.
 
 ```sql
 QUERY TEXT 'machine learning optimization' FROM research_papers
@@ -131,8 +147,96 @@ QUERY TEXT 'acute bronchitis treatment protocols' FROM medical_records
   USING dense
   WHERE specialty = 'pulmonology' AND evidence_level IN ('A', 'B')
   WITH PAYLOAD INCLUDE (title, summary, evidence_level, url)
-  WITH VECTOR (colbert_rerank)
+  WITH VECTOR (colbert)
   LIMIT 15;
+```
+
+---
+
+## 6b. ColBERT Multivector Nearest and Rerank
+
+**Problem:** Late-interaction retrieval: store token-level multivectors and either search with them directly or rerank dense candidates.
+
+**Why this works:** Multivector is a **dense role with multi shape**, not a third sparse/dense kind. Schema marks `colbert` via `WITH MULTIVECTOR`; runtime sets `multi` before embedding so TEXT becomes `MultiDense` (`[[f32,…],…]`). Offline without schema, use `AS MULTI`.
+
+**Dimension note:** The vector dimension of a multivector column must match the
+selected model's token dimension. BGE-M3 outputs 1024-dimensional tokens; the
+`edge` `multi_model: "bge-m3"` path produces 1024-d bags. Smaller
+late-interaction models such as `answerai-colbert-small-v1` output 128-d tokens.
+Set `VECTOR(dim, COSINE)` accordingly.
+
+```sql
+-- BGE-M3 (1024-d tokens, compatible with edge multi_model: "bge-m3"):
+CREATE COLLECTION docs_bge (
+  dense VECTOR(384, COSINE),
+  sparse SPARSE,
+  colbert VECTOR(1024, COSINE) WITH MULTIVECTOR (comparator = 'max_sim')
+);
+
+-- Smaller ColBERT model (128-d tokens):
+CREATE COLLECTION docs (
+  dense VECTOR(384, COSINE),
+  sparse SPARSE,
+  colbert VECTOR(128, COSINE) WITH MULTIVECTOR (comparator = 'max_sim')
+);
+
+-- Schema-driven: USING colbert alone is enough at execute time
+QUERY TEXT 'vector database latency'
+FROM docs
+USING colbert
+LIMIT 10;
+
+-- Explicit offline / no schema
+QUERY TEXT 'vector database latency'
+FROM docs
+USING colbert AS MULTI
+LIMIT 10;
+
+-- Precomputed multi-dense query vector
+QUERY NEAREST VECTOR [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]
+FROM docs
+USING colbert
+LIMIT 10;
+
+-- Dense first stage + ColBERT late-interaction rerank
+WITH candidates AS (
+  QUERY TEXT 'vector database latency' FROM docs USING dense LIMIT 100
+)
+QUERY RERANK TEXT 'vector database latency' MODEL 'answerai-colbert-small-v1'
+FROM docs
+USING colbert
+PREFETCH (candidates)
+LIMIT 10;
+
+-- Precomputed multivector on upsert
+UPSERT INTO docs VALUES {
+  id: 1,
+  text: 'chunk text',
+  vector: { dense: [0.1, 0.2, 0.3], colbert: [[0.1, 0.2], [0.3, 0.4]] }
+};
+```
+
+**Key decisions:**
+- Kind is dense; shape is multi (`MultiDense`).
+- Token dimension depends on model: BGE-M3 → 1024-d, smaller ColBERT models → 128-d. Match `VECTOR(dim, ...)` to the actual model.
+- Host embedder must implement `embed_multi` for TEXT → multivector; otherwise pass `VECTOR [[...]]` or precomputed upsert vectors.
+- `USING sparse` in a CTE never silently dense-embeds when schema marks sparse.
+
+### 6c. Cross-encoder pair rerank (`CROSS RERANK`)
+
+**Problem:** Reorder dense candidates with a pair scorer `(query, doc_text)` — not MaxSim multivector.
+
+**Why this works:** `CROSS RERANK` runs PREFETCH, reads document text from `ON FIELD` (default `text`), scores pairs client-side. Distinct from late-interaction `RERANK … USING colbert`. Host needs `rerank_pairs` (edge `reranker_model` or HTTP `rerank_endpoint`).
+
+```sql
+WITH candidates AS (
+  QUERY TEXT 'vector database latency' FROM docs USING dense LIMIT 50
+)
+QUERY CROSS RERANK TEXT 'vector database latency' MODEL 'bge-reranker-base'
+  ON FIELD text
+  FROM docs
+  PREFETCH (candidates)
+  LIMIT 10;
 ```
 
 ---
@@ -316,7 +420,10 @@ QUERY TEXT 'neurological assessment' FROM docs USING dense LIMIT 5;
 **Problem:** Create collection, payload indexes, upsert documents with auto-embedding, count points, clear payload, delete vectors, and drop everything in a single QQL script.
 
 ```sql
-CREATE COLLECTION medical (dense VECTOR(384, COSINE), colbert VECTOR(128, COSINE));
+CREATE COLLECTION medical (
+  dense VECTOR(384, COSINE),
+  colbert VECTOR(128, COSINE) WITH MULTIVECTOR (comparator = 'max_sim')
+);
 CREATE INDEX ON COLLECTION medical FOR specialty TYPE keyword;
 UPSERT INTO medical VALUES {id: 1, text: 'stroke protocol', specialty: 'neurology'}, {id: 2, text: 'cardiac arrest', specialty: 'cardiology'} USING DENSE MODEL 'all-minilm:l6-v2';
 COUNT FROM medical WHERE specialty = 'neurology';
@@ -384,7 +491,7 @@ QUERY FORMULA score * GAUSS_DECAY(GEO_DISTANCE(48.8566, 2.3522, location), 0.0, 
 
 ## 21. Maximal Marginal Relevance (MMR) Diversification
 
-**Problem:** Balance similarity relevance against result diversity for dense queries.
+**Problem:** Balance similarity relevance against result diversity. MMR supports both dense and sparse targets.
 
 ```sql
 QUERY MMR 'emergency triage' DIVERSITY 0.5 CANDIDATES 100
@@ -418,3 +525,47 @@ QUERY TEXT 'quantum computing' FROM papers
   PARAMS (quantization = {ignore: false, rescore: true, oversampling: 2.0})
   LIMIT 20;
 ```
+
+---
+
+## 24. ACORN Search Params (remote Qdrant)
+
+**Problem:** Filtered HNSW search should adapt to filter selectivity via ACORN.
+
+**Limit:** Supported on remote Qdrant REST/gRPC. **Not** supported on edge.
+`max_selectivity` requires `acorn = true` and is in `(0, 1]`.
+
+```sql
+QUERY TEXT 'filtered product search' FROM products
+  USING dense
+  WHERE category = 'electronics' AND in_stock = true
+  PARAMS (hnsw_ef = 128, acorn = true, max_selectivity = 0.4)
+  LIMIT 20;
+```
+
+---
+
+## 25. Request timeout and read consistency
+
+**Problem:** Cap how long a query may run and control replica read consistency
+on a clustered Qdrant deployment.
+
+**Why this works:** OpenAPI puts `timeout` and `consistency` on the **request**
+(query string for REST; fields on `QueryPoints` for gRPC), not inside body
+`SearchParams`. QQL accepts them in `PARAMS` and lowers accordingly.
+
+```sql
+QUERY TEXT 'incident response' FROM runbooks
+  USING dense
+  PARAMS (timeout = 30, consistency = majority, hnsw_ef = 64)
+  LIMIT 10;
+
+-- Factor form: require agreement from N replicas
+QUERY TEXT 'incident response' FROM runbooks
+  USING dense
+  PARAMS (consistency = 2)
+  LIMIT 10;
+```
+
+**Limit:** Single-node edge does not use cluster consistency; timeout is a
+server-side override on remote Qdrant (client HTTP timeout is separate).

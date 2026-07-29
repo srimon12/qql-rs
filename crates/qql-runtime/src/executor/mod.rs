@@ -86,49 +86,7 @@ pub enum OnError {
     Continue,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum BatchKey {
-    Query(String),
-    Mutation(String),
-}
-
-fn statement_batch_key(stmt: &Stmt) -> Option<BatchKey> {
-    match stmt {
-        Stmt::Query(query)
-            if query.group.is_none()
-                && !matches!(query.expression, ast::QueryExpr::Points { .. }) =>
-        {
-            match &query.collection {
-                ast::QueryCollection::Explicit(collection) => {
-                    Some(BatchKey::Query(collection.clone()))
-                }
-                ast::QueryCollection::Inherited => None,
-            }
-        }
-        Stmt::Upsert(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
-        Stmt::Delete(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
-        Stmt::UpdatePayload(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
-        Stmt::ClearPayload(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
-        Stmt::UpdateVector(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
-        Stmt::DeleteVector(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
-        _ => None,
-    }
-}
-
-fn planned_batch_key(operation: &qql_plan::PlannedOperation) -> Option<BatchKey> {
-    use qql_plan::{BatchFamily, PlannedOperation};
-
-    match operation.batch_family() {
-        BatchFamily::Query => match operation {
-            PlannedOperation::Query { collection, .. } => Some(BatchKey::Query(collection.clone())),
-            _ => None,
-        },
-        BatchFamily::Mutation => operation
-            .collection()
-            .map(|collection| BatchKey::Mutation(collection.to_owned())),
-        BatchFamily::Single => None,
-    }
-}
+use qql_plan::{statement_batch_key, BatchKey};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchHit {
@@ -136,6 +94,11 @@ pub struct SearchHit {
     pub score: f32,
     pub text: Option<String>,
     pub payload: Option<HashMap<String, serde_json::Value>>,
+    /// Source collection. Populated by cross-collection operations (e.g.
+    /// CROSS RERANK) so results are unambiguous when multiple collections
+    /// share the same point id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collection: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -434,7 +397,7 @@ impl Executor {
                 }
             };
 
-            let key = planned_batch_key(&planned);
+            let key = planned.batch_key();
             if key.is_none() {
                 self.flush_planned_group(&mut pending, stop_on_error, &mut results)
                     .await?;
@@ -674,6 +637,9 @@ impl Executor {
                         ast::EmbeddingSpec::Sparse { model, vector, .. } => {
                             vec![(model.as_deref(), false, true, None, vector.as_deref())]
                         }
+                        // MultiVector / Image alone do not auto-create a collection here.
+                        ast::EmbeddingSpec::MultiVector { .. }
+                        | ast::EmbeddingSpec::Image { .. } => Vec::new(),
                         ast::EmbeddingSpec::Hybrid {
                             dense_model,
                             dense_vector,
@@ -776,8 +742,10 @@ impl Executor {
             return Ok(());
         }
 
-        let (model, dense_name, sparse_name) = match &create.mode {
-            ast::CollectionMode::Dense { model } => (model.as_deref(), DENSE_VECTOR_NAME, None),
+        let (model, dense_name, sparse_name, with_colbert) = match &create.mode {
+            ast::CollectionMode::Dense { model } => {
+                (model.as_deref(), DENSE_VECTOR_NAME, None, false)
+            }
             ast::CollectionMode::Hybrid {
                 dense_vector,
                 sparse_vector,
@@ -785,8 +753,12 @@ impl Executor {
                 None,
                 dense_vector.as_deref().unwrap_or(DENSE_VECTOR_NAME),
                 Some(sparse_vector.as_deref().unwrap_or(SPARSE_VECTOR_NAME)),
+                false,
             ),
-            ast::CollectionMode::Rerank => (None, DENSE_VECTOR_NAME, Some(SPARSE_VECTOR_NAME)),
+            // Conventional dense + sparse + ColBERT multivector topology.
+            ast::CollectionMode::Rerank => {
+                (None, DENSE_VECTOR_NAME, Some(SPARSE_VECTOR_NAME), true)
+            }
         };
         let dense_size = self.resolve_dense_vector_size(model).await? as u64;
         create.vectors.push(ast::VectorDef {
@@ -805,6 +777,29 @@ impl Executor {
                 modifier: None,
             });
         }
+        if with_colbert {
+            let multi_size = self
+                .embedder
+                .as_deref()
+                .and_then(crate::embedder::Embedder::multi_dimension)
+                .or_else(|| {
+                    self.config.as_ref().and_then(|c| {
+                        (c.multi_embedding_dimension > 0).then_some(c.multi_embedding_dimension)
+                    })
+                })
+                .unwrap_or(RERANK_VECTOR_SIZE as usize) as u64;
+            create.vectors.push(ast::VectorDef {
+                name: RERANK_VECTOR_NAME.to_string(),
+                size: multi_size,
+                distance: ast::VectorDistance::Cosine,
+                hnsw: None,
+                quantization: None,
+                multivector: Some(ast::MultivectorConfig {
+                    comparator: ast::MultivectorComparator::MaxSim,
+                }),
+                vectors: None,
+            });
+        }
 
         Ok(())
     }
@@ -816,8 +811,24 @@ impl Executor {
     ) -> Result<ExecResponse, QqlError> {
         use qql_plan::PlannedOperation;
 
+        // Client-side pair scorer: never a single Qdrant route.
+        if let PlannedOperation::CrossRerank {
+            collection: _,
+            query,
+            model,
+            field,
+            limit,
+            offset,
+            candidates,
+        } = op
+        {
+            return self
+                .execute_cross_rerank(query, model, field, *limit, *offset, candidates)
+                .await;
+        }
+
         let label = op.operation_label();
-        let result = self.client.execute_planned(op).await?;
+        let mut result = self.client.execute_planned(op).await?;
         let (message, data) = match op {
             PlannedOperation::Query { .. }
             | PlannedOperation::Scroll { .. }
@@ -828,7 +839,22 @@ impl Executor {
                     Some(serde_json::to_value(hits).unwrap_or_default()),
                 )
             }
-            PlannedOperation::QueryGroups { .. } => {
+            PlannedOperation::QueryGroups { request, .. } => {
+                if let Some(offset) = request.group_offset {
+                    let offset = offset as usize;
+                    let groups_opt = if result.get("result").is_some() {
+                        result.get_mut("result").and_then(|r| r.get_mut("groups"))
+                    } else {
+                        result.get_mut("groups")
+                    };
+                    if let Some(groups) = groups_opt.and_then(|g| g.as_array_mut()) {
+                        if offset < groups.len() {
+                            groups.drain(0..offset);
+                        } else {
+                            groups.clear();
+                        }
+                    }
+                }
                 let groups_count = result
                     .get("result")
                     .and_then(|r| r.get("groups"))
@@ -865,6 +891,14 @@ impl Executor {
                 )
             }
             PlannedOperation::ListShardKeys { .. } => ("Shard keys listed".into(), Some(result)),
+            PlannedOperation::CrossRerank { .. } => {
+                // Defensive: early return above must handle this variant.
+                return Err(QqlError::execution(
+                    "QQL-CROSS-RERANK",
+                    "CROSS RERANK must be executed client-side, not via a Qdrant route",
+                    None,
+                ));
+            }
             _ => (format!("{label} ok"), None),
         };
         Ok(ExecResponse {
@@ -874,8 +908,135 @@ impl Executor {
             data,
         })
     }
+
+    /// Run candidate ANN stages, score (query, doc_text) with a cross-encoder, reorder.
+    async fn execute_cross_rerank(
+        &self,
+        query: &str,
+        model: &str,
+        field: &str,
+        limit: u64,
+        offset: u64,
+        candidates: &[(String, qql_plan::QueryRequest)],
+    ) -> Result<ExecResponse, QqlError> {
+        use std::collections::HashMap;
+
+        let embedder = self.embedder.as_ref().ok_or_else(|| {
+            QqlError::execution(
+                "QQL-RERANK-CROSS",
+                "CROSS RERANK requires a configured embedder with pair scoring \
+                 (rerank_endpoint / edge reranker_model)",
+                None,
+            )
+        })?;
+
+        let mut by_key: HashMap<(String, String), SearchHit> = HashMap::new();
+        for (collection, request) in candidates {
+            let op = qql_plan::PlannedOperation::Query {
+                collection: collection.clone(),
+                request: request.clone(),
+            };
+            let raw = self.client.execute_planned(&op).await?;
+            for mut hit in extract_search_hits(&raw) {
+                hit.collection = Some(collection.clone());
+                by_key
+                    .entry((collection.clone(), hit.id.clone()))
+                    .or_insert(hit);
+            }
+        }
+
+        if by_key.is_empty() {
+            return Ok(ExecResponse {
+                ok: true,
+                operation: "CROSS_RERANK".into(),
+                message: "Found 0 hits".into(),
+                data: Some(serde_json::json!([])),
+            });
+        }
+
+        // Stable order for scoring (then re-sort by pair score).
+        let mut hits: Vec<SearchHit> = by_key.into_values().collect();
+        hits.sort_by(|a, b| {
+            a.collection
+                .as_deref()
+                .unwrap_or("")
+                .cmp(b.collection.as_deref().unwrap_or(""))
+                .then_with(|| a.id.cmp(&b.id))
+        });
+
+        let mut docs = Vec::with_capacity(hits.len());
+        let mut keep_idx = Vec::with_capacity(hits.len());
+        for (i, hit) in hits.iter().enumerate() {
+            // Only use `hit.text` when the requested field is the conventional
+            // "text" payload key. Falling back for other fields (e.g. `body`)
+            // silently reranks against the wrong content.
+            let from_payload = hit
+                .payload
+                .as_ref()
+                .and_then(|p| p.get(field))
+                .and_then(|v| v.as_str());
+            let text = match from_payload {
+                Some(s) if !s.is_empty() => s,
+                _ if field.eq_ignore_ascii_case("text") => hit.text.as_deref().unwrap_or(""),
+                _ => "",
+            };
+            if text.is_empty() {
+                continue;
+            }
+            docs.push(text.to_string());
+            keep_idx.push(i);
+        }
+        if docs.is_empty() {
+            return Err(QqlError::execution(
+                "QQL-RERANK-CROSS-FIELD",
+                format!(
+                    "CROSS RERANK found candidates but none had non-empty payload field '{field}'. \
+                     Ensure UPSERT stores text on that field and PREFETCH returns WITH PAYLOAD."
+                ),
+                None,
+            ));
+        }
+
+        let scores = embedder.rerank_pairs(query, &docs, model).await?;
+        if scores.len() != docs.len() {
+            return Err(QqlError::execution(
+                "QQL-RERANK-CROSS",
+                format!(
+                    "rerank_pairs returned {} scores for {} documents",
+                    scores.len(),
+                    docs.len()
+                ),
+                None,
+            ));
+        }
+
+        let mut ranked: Vec<(f32, SearchHit)> = keep_idx
+            .into_iter()
+            .zip(scores)
+            .map(|(i, score)| {
+                let mut h = hits[i].clone();
+                h.score = score;
+                (score, h)
+            })
+            .collect();
+        ranked.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+        let skip = offset as usize;
+        let take = limit as usize;
+        let out: Vec<SearchHit> = ranked
+            .into_iter()
+            .skip(skip)
+            .take(take)
+            .map(|(_, h)| h)
+            .collect();
+        let n = out.len();
+        Ok(ExecResponse {
+            ok: true,
+            operation: "CROSS_RERANK".into(),
+            message: format!("Found {n} hits (cross-encoder)"),
+            data: Some(serde_json::to_value(out).unwrap_or_default()),
+        })
+    }
 }
 
 pub(crate) mod dml;
-#[cfg(feature = "rest")]
-pub(crate) mod helpers;

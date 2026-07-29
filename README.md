@@ -83,6 +83,7 @@ QUERY 'chest pain' FROM medical
 
 - 📖 **Syntax Reference**: [`docs/syntax.md`](docs/syntax.md)
 - ⚙️ **Language Specification**: [`language/v1/spec/semantics.md`](language/v1/spec/semantics.md)
+- 🗺️ **Implementation Gaps**: [`skills/qql-skill/references/qql-gaps.md`](skills/qql-skill/references/qql-gaps.md)
 - 🔒 **Multi-Tenancy Guide**: [`skills/qql-skill/references/qql-multitenancy.md`](skills/qql-skill/references/qql-multitenancy.md)
 - 🛠️ **Release Manual**: [`RELEASING.md`](RELEASING.md)
 

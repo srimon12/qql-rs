@@ -28,7 +28,16 @@ pub enum PointVectors {
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum QueryInput {
-    Text { text: String, model: Option<String> },
+    Text {
+        text: String,
+        model: Option<String>,
+    },
+    /// Image path or URL for dense embedding (CLIP vision, etc.).
+    /// Resolved to [`VectorValue::Dense`] before plan/dispatch.
+    Image {
+        source: String,
+        model: Option<String>,
+    },
     Vector(VectorValue),
     Point(PointId),
 }
@@ -45,6 +54,11 @@ pub enum VectorKind {
 pub struct VectorTarget {
     pub name: String,
     pub kind: Option<VectorKind>,
+    /// Multivector (ColBERT-style) dense target. Filled at parse only via
+    /// `AS MULTI`, or at execution prep from collection schema
+    /// (`multivector_config`). Not a third `VectorKind` — still dense.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub multi: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -192,6 +206,17 @@ pub enum QueryExpr {
         using: Option<VectorTarget>,
         prefetch: Vec<Prefetch>,
     },
+    /// Cross-encoder pair rerank: score query against PREFETCH document texts.
+    /// Not sent to Qdrant as MaxSim — executor scores client-side then reorders.
+    CrossRerank {
+        /// Query string scored against each document.
+        query: String,
+        /// Cross-encoder model id (e.g. bge-reranker-base).
+        model: String,
+        /// Payload field holding document text (default `"text"` at resolve time).
+        field: Option<String>,
+        prefetch: Vec<Prefetch>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -202,16 +227,41 @@ pub struct QuantizationSearchParams {
     pub oversampling: Option<f64>,
 }
 
+/// Read consistency for Qdrant point reads.
+///
+/// OpenAPI `ReadConsistency` / proto `ReadConsistency`: either a replica
+/// **factor** `N`, or a named mode (`majority` / `quorum` / `all`).
+/// REST: query param on `/points/query` etc. gRPC: `read_consistency` field.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum ReadConsistency {
+    /// Send requests to N nodes; keep points present on all of them.
+    Factor(u64),
+    /// N/2+1 random requests; points present on all of them.
+    Majority,
+    /// All nodes; points present on a majority.
+    Quorum,
+    /// All nodes; points present on all of them.
+    All,
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SearchParams {
     pub hnsw_ef: Option<u64>,
     pub exact: Option<bool>,
     pub acorn: Option<bool>,
+    /// ACORN selectivity ceiling in (0, 1]. Only valid with `acorn = true`.
+    pub max_selectivity: Option<f64>,
     pub indexed_only: Option<bool>,
     pub quantization: Option<QuantizationSearchParams>,
     pub rrf_k: Option<u64>,
     pub rrf_weights: Option<Vec<f64>>,
+    /// Request-level timeout in **seconds** (OpenAPI query param / proto field).
+    /// Not part of body `SearchParams`.
+    pub timeout: Option<u64>,
+    /// Request-level read consistency (OpenAPI query param / proto field).
+    pub consistency: Option<ReadConsistency>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -290,8 +340,20 @@ pub struct ScrollStmt {
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum EmbedKind {
-    Dense { model: Option<String> },
-    Sparse { model: Option<String> },
+    Dense {
+        model: Option<String>,
+    },
+    Sparse {
+        model: Option<String>,
+    },
+    /// Multivector / ColBERT bag (`embed_multi` → MultiDense).
+    Multi {
+        model: Option<String>,
+    },
+    /// Image / CLIP vision path or URL → dense vector (`embed_image`).
+    Image {
+        model: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -323,6 +385,19 @@ pub enum EmbeddingSpec {
         sparse_vector: Option<String>,
         sparse_field: Option<String>,
     },
+    /// Multivector / ColBERT: text → bag of token vectors for a named multi slot.
+    MultiVector {
+        model: Option<String>,
+        vector: Option<String>,
+        field: Option<String>,
+    },
+    /// Image / CLIP vision: payload field holds a path or URL → dense vector.
+    Image {
+        model: Option<String>,
+        vector: Option<String>,
+        field: Option<String>,
+    },
+    /// Combined specs (e.g. DENSE + SPARSE + MULTI VECTOR colbert).
     Multi(Vec<EmbeddingSpec>),
 }
 
@@ -502,6 +577,7 @@ pub enum CollectionMode {
 pub struct ClearPayloadStmt {
     pub collection: String,
     pub selector: PointSelector,
+    pub shard_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -510,6 +586,7 @@ pub struct DeleteVectorStmt {
     pub collection: String,
     pub selector: PointSelector,
     pub vector_names: Vec<String>,
+    pub shard_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -557,6 +634,7 @@ pub struct CountStmt {
     pub collection: QueryCollection,
     pub filter: Option<Box<FilterExpr>>,
     pub shard_key: Option<String>,
+    pub exact: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -598,6 +676,16 @@ pub struct UpdateVectorStmt {
     pub point_id: PointId,
     pub vector: VectorValue,
     pub vector_name: Option<String>,
+    pub shard_key: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct DeletePayloadStmt {
+    pub collection: String,
+    pub keys: Vec<String>,
+    pub selector: PointSelector,
+    pub shard_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -606,6 +694,7 @@ pub struct UpdatePayloadStmt {
     pub collection: String,
     pub selector: PointSelector,
     pub payload: Vec<(String, Value)>,
+    pub shard_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -626,6 +715,7 @@ pub enum Stmt {
     ShowShardKeys(String),
     Delete(Box<DeleteStmt>),
     ClearPayload(Box<ClearPayloadStmt>),
+    DeletePayload(Box<DeletePayloadStmt>),
     DeleteVector(Box<DeleteVectorStmt>),
     UpdateVector(Box<UpdateVectorStmt>),
     UpdatePayload(Box<UpdatePayloadStmt>),
@@ -678,16 +768,19 @@ impl serde::Serialize for Stmt {
             Stmt::ClearPayload(s) => {
                 serializer.serialize_newtype_variant("Stmt", 14, "ClearPayload", s)
             }
+            Stmt::DeletePayload(s) => {
+                serializer.serialize_newtype_variant("Stmt", 15, "DeletePayload", s)
+            }
             Stmt::DeleteVector(s) => {
-                serializer.serialize_newtype_variant("Stmt", 15, "DeleteVector", s)
+                serializer.serialize_newtype_variant("Stmt", 16, "DeleteVector", s)
             }
             Stmt::UpdateVector(s) => {
-                serializer.serialize_newtype_variant("Stmt", 16, "UpdateVector", s)
+                serializer.serialize_newtype_variant("Stmt", 17, "UpdateVector", s)
             }
             Stmt::UpdatePayload(s) => {
-                serializer.serialize_newtype_variant("Stmt", 17, "UpdatePayload", s)
+                serializer.serialize_newtype_variant("Stmt", 18, "UpdatePayload", s)
             }
-            Stmt::Count(s) => serializer.serialize_newtype_variant("Stmt", 18, "Count", s),
+            Stmt::Count(s) => serializer.serialize_newtype_variant("Stmt", 19, "Count", s),
         }
     }
 }

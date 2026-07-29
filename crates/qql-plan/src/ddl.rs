@@ -145,10 +145,10 @@ fn fill_collection_config(
         }
     }
     if let Some(ref h) = config.hnsw {
-        req.hnsw_config = Some(lower_hnsw_config_val(h));
+        req.hnsw_config = Some(lower_hnsw_config(h));
     }
     if let Some(ref o) = config.optimizers {
-        req.optimizers_config = Some(lower_optimizers_config_val(o));
+        req.optimizers_config = Some(lower_optimizers_config(o));
     }
     if let Some(ref p) = config.params {
         let mut pc = serde_json::Map::new();
@@ -180,18 +180,7 @@ fn fill_collection_config(
         req.shard_keys = p.shard_keys.clone();
     }
     if let Some(ref q) = config.quantization {
-        req.quantization_config = Some(lower_quantization_config_val(q));
-    }
-    if let Some(ref qu) = config.quantization_update {
-        let mut qup = serde_json::Map::new();
-        qup.insert("disabled".into(), serde_json::Value::Bool(qu.disabled));
-        if let Some(ref qc) = qu.config {
-            qup.insert(
-                "quantization_config".into(),
-                lower_quantization_config_val(qc),
-            );
-        }
-        req.quantization_config = Some(serde_json::Value::Object(qup));
+        req.quantization_config = Some(lower_quantization_config(q));
     }
 }
 
@@ -200,10 +189,10 @@ fn fill_update_collection_config(
     config: &qql_core::ast::CollectionConfig,
 ) {
     if let Some(ref h) = config.hnsw {
-        req.hnsw_config = Some(lower_hnsw_config_val(h));
+        req.hnsw_config = Some(lower_hnsw_config(h));
     }
     if let Some(ref o) = config.optimizers {
-        req.optimizers_config = Some(lower_optimizers_config_val(o));
+        req.optimizers_config = Some(lower_optimizers_config(o));
     }
     if let Some(ref p) = config.params {
         let mut pc = serde_json::Map::new();
@@ -241,7 +230,20 @@ fn fill_update_collection_config(
                 lower_quantization_config_val(qc),
             );
         }
+        // quantization_update w/ disabled is a REST PATCH shape.
         req.quantization_config = Some(serde_json::Value::Object(qup));
+    }
+}
+
+pub fn lower_hnsw_config(config: &qql_core::ast::HnswRuntimeConfig) -> HnswConfig {
+    HnswConfig {
+        m: config.m,
+        ef_construct: config.ef_construct,
+        full_scan_threshold: config.full_scan_threshold,
+        max_indexing_threads: config.max_indexing_threads,
+        on_disk: config.on_disk,
+        payload_m: config.payload_m,
+        inline_storage: None,
     }
 }
 
@@ -269,6 +271,29 @@ pub fn lower_hnsw_config_val(config: &qql_core::ast::HnswRuntimeConfig) -> serde
         obj.insert("inline_storage".into(), serde_json::Value::Bool(inline));
     }
     serde_json::Value::Object(obj)
+}
+
+pub fn lower_optimizers_config(
+    config: &qql_core::ast::OptimizersRuntimeConfig,
+) -> OptimizersConfig {
+    let max_threads = config.max_optimization_threads.as_ref().map(|mot| {
+        if mot.auto_ {
+            serde_json::Value::String("auto".into())
+        } else {
+            serde_json::Value::from(mot.value)
+        }
+    });
+    OptimizersConfig {
+        deleted_threshold: config.deleted_threshold,
+        vacuum_min_vector_number: config.vacuum_min_vector_number,
+        default_segment_number: config.default_segment_number,
+        max_segment_size: config.max_segment_size,
+        memmap_threshold: config.memmap_threshold,
+        indexing_threshold: config.indexing_threshold,
+        flush_interval_sec: config.flush_interval_sec,
+        max_optimization_threads: max_threads,
+        prevent_unoptimized: config.prevent_unoptimized,
+    }
 }
 
 pub fn lower_optimizers_config_val(
@@ -319,6 +344,38 @@ pub fn lower_optimizers_config_val(
         obj.insert("prevent_unoptimized".into(), serde_json::Value::Bool(pu));
     }
     serde_json::Value::Object(obj)
+}
+
+pub fn lower_quantization_config(config: &qql_core::ast::QuantizationConfig) -> QuantizationConfig {
+    match config.qtype {
+        qql_core::ast::QuantizationType::Scalar => QuantizationConfig::Scalar {
+            scalar: ScalarQuantization {
+                qtype: "int8".into(),
+                quantile: config.quantile,
+                always_ram: Some(config.always_ram),
+            },
+        },
+        qql_core::ast::QuantizationType::Product => QuantizationConfig::Product {
+            product: ProductQuantization {
+                compression: config.compression.clone().unwrap_or_default(),
+                always_ram: Some(config.always_ram),
+            },
+        },
+        qql_core::ast::QuantizationType::Binary => QuantizationConfig::Binary {
+            binary: BinaryQuantization {
+                always_ram: Some(config.always_ram),
+                encoding: config.encoding.clone(),
+                query_encoding: config.query_encoding.clone(),
+            },
+        },
+        _ => QuantizationConfig::Scalar {
+            scalar: ScalarQuantization {
+                qtype: "int8".into(),
+                quantile: config.quantile,
+                always_ram: Some(config.always_ram),
+            },
+        },
+    }
 }
 
 pub fn lower_quantization_config_val(
@@ -374,6 +431,289 @@ fn distance_str(d: VectorDistance) -> String {
     }
 }
 
+// ── REST OpenAPI wire projection (distinct from internal plan IR) ─────────
+//
+// CreateCollection OpenAPI fields are top-level (replication_factor, …), not a
+// nested `params` object. QuantizationConfig is nested (`{ "scalar": {…} }`).
+// Plan IR may carry `shard_keys`; the REST projection creates them via the
+// /shards endpoint after collection create (not as a CreateCollection field).
+// Internal plan IR keeps flat `type: "scalar"|…` for gRPC converters.
+
+/// OpenAPI PUT `/collections/{c}` body from plan IR.
+pub fn create_collection_rest_body(req: &CreateCollectionRequest) -> serde_json::Value {
+    let mut body = serde_json::Map::new();
+
+    if let Some(vectors) = &req.vectors {
+        let mut out = serde_json::Map::new();
+        for (name, cfg) in vectors {
+            out.insert(name.clone(), nest_vector_params_for_rest(cfg));
+        }
+        body.insert("vectors".into(), serde_json::Value::Object(out));
+    }
+    if let Some(sparse) = &req.sparse_vectors {
+        body.insert(
+            "sparse_vectors".into(),
+            serde_json::Value::Object(sparse.clone()),
+        );
+    }
+    if let Some(hnsw) = &req.hnsw_config {
+        body.insert(
+            "hnsw_config".into(),
+            serde_json::to_value(hnsw).unwrap_or_default(),
+        );
+    }
+    if let Some(opt) = &req.optimizers_config {
+        body.insert(
+            "optimizers_config".into(),
+            serde_json::to_value(opt).unwrap_or_default(),
+        );
+    }
+    if let Some(q) = &req.quantization_config {
+        body.insert(
+            "quantization_config".into(),
+            serde_json::to_value(q).unwrap_or_default(),
+        );
+    }
+    if let Some(n) = req.shard_number {
+        body.insert("shard_number".into(), serde_json::Value::from(n));
+    }
+    if let Some(method) = &req.sharding_method {
+        body.insert(
+            "sharding_method".into(),
+            serde_json::Value::String(method.clone()),
+        );
+    }
+    // OpenAPI CreateCollection: replication_factor / write_consistency_factor /
+    // on_disk_payload are top-level, not nested under `params`.
+    if let Some(params) = &req.params {
+        if let Some(rf) = params.get("replication_factor") {
+            body.insert("replication_factor".into(), rf.clone());
+        }
+        if let Some(wc) = params.get("write_consistency_factor") {
+            body.insert("write_consistency_factor".into(), wc.clone());
+        }
+        if let Some(od) = params.get("on_disk_payload") {
+            body.insert("on_disk_payload".into(), od.clone());
+        }
+        // read_fan_out_* only exist on UpdateCollection params (CollectionParamsDiff);
+        // callers apply them with a follow-up PATCH (REST) or update (gRPC).
+    }
+    // Do not emit: params, vectors_config, shard_keys
+    serde_json::Value::Object(body)
+}
+
+/// OpenAPI PUT `/collections/{c}/index` body.
+///
+/// When index options are present, `field_schema` becomes a typed object
+/// (`{ "type": "text", "tokenizer": … }`) per OpenAPI `PayloadSchemaParams`.
+/// Without options it remains a plain type string.
+pub fn create_index_rest_body(req: &CreateIndexRequest) -> serde_json::Value {
+    let mut body = serde_json::Map::new();
+    body.insert(
+        "field_name".into(),
+        serde_json::Value::String(req.field_name.clone()),
+    );
+    if req.extra.is_empty() {
+        body.insert(
+            "field_schema".into(),
+            serde_json::Value::String(req.field_schema.clone()),
+        );
+    } else {
+        let mut schema = serde_json::Map::new();
+        schema.insert(
+            "type".into(),
+            serde_json::Value::String(req.field_schema.clone()),
+        );
+        for (k, v) in &req.extra {
+            // Map QQL aliases to OpenAPI enum strings where needed.
+            if k == "encoding" {
+                continue;
+            }
+            let v = if k == "tokenizer" {
+                if let Some(s) = v.as_str() {
+                    serde_json::Value::String(s.to_ascii_lowercase())
+                } else {
+                    v.clone()
+                }
+            } else {
+                v.clone()
+            };
+            schema.insert(k.clone(), v);
+        }
+        body.insert("field_schema".into(), serde_json::Value::Object(schema));
+    }
+    serde_json::Value::Object(body)
+}
+
+/// OpenAPI PATCH `/collections/{c}` body from plan IR.
+pub fn update_collection_rest_body(req: &UpdateCollectionRequest) -> serde_json::Value {
+    let mut body = serde_json::Map::new();
+    if let Some(hnsw) = &req.hnsw_config {
+        body.insert(
+            "hnsw_config".into(),
+            serde_json::to_value(hnsw).unwrap_or_default(),
+        );
+    }
+    if let Some(opt) = &req.optimizers_config {
+        body.insert(
+            "optimizers_config".into(),
+            serde_json::to_value(opt).unwrap_or_default(),
+        );
+    }
+    if let Some(params) = &req.params {
+        body.insert("params".into(), params.clone());
+    }
+    if let Some(q) = &req.quantization_config {
+        body.insert("quantization_config".into(), nest_quantization_for_rest(q));
+    }
+    serde_json::Value::Object(body)
+}
+
+/// Follow-up PATCH body for create-time params that only exist on update
+/// (`read_fan_out_factor`, `read_fan_out_delay_ms`).
+pub fn create_collection_deferred_params_rest(
+    req: &CreateCollectionRequest,
+) -> Option<serde_json::Value> {
+    let params = req.params.as_ref()?;
+    let mut out = serde_json::Map::new();
+    if let Some(v) = params.get("read_fan_out_factor") {
+        out.insert("read_fan_out_factor".into(), v.clone());
+    }
+    if let Some(v) = params.get("read_fan_out_delay_ms") {
+        out.insert("read_fan_out_delay_ms".into(), v.clone());
+    }
+    if out.is_empty() {
+        None
+    } else {
+        Some(serde_json::json!({ "params": out }))
+    }
+}
+
+fn nest_vector_params_for_rest(cfg: &serde_json::Value) -> serde_json::Value {
+    let Some(obj) = cfg.as_object() else {
+        return cfg.clone();
+    };
+    let mut out = obj.clone();
+    if let Some(q) = obj.get("quantization_config") {
+        out.insert("quantization_config".into(), nest_quantization_for_rest(q));
+    }
+    serde_json::Value::Object(out)
+}
+
+/// Convert internal flat IR `{ "type": "scalar", … }` to OpenAPI
+/// `{ "scalar": { "type": "int8", … } }` (and product/binary/turbo).
+/// Passes through already-nested configs and update `disabled` forms.
+pub fn nest_quantization_for_rest(value: &serde_json::Value) -> serde_json::Value {
+    if value.as_str() == Some("Disabled") {
+        return serde_json::Value::String("Disabled".into());
+    }
+    let Some(obj) = value.as_object() else {
+        return value.clone();
+    };
+    // Already nested OpenAPI shape
+    if obj.contains_key("scalar")
+        || obj.contains_key("product")
+        || obj.contains_key("binary")
+        || obj.contains_key("turbo")
+        || obj.contains_key("turboquant")
+    {
+        return value.clone();
+    }
+    // Update IR: { disabled: true, quantization_config?: … }
+    if obj.get("disabled").and_then(|v| v.as_bool()) == Some(true) {
+        return serde_json::Value::String("Disabled".into());
+    }
+    if let Some(inner) = obj.get("quantization_config") {
+        return nest_quantization_for_rest(inner);
+    }
+
+    let kind = obj
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match kind.as_str() {
+        "scalar" => {
+            let mut inner = serde_json::Map::new();
+            // OpenAPI ScalarType is only `int8`.
+            inner.insert("type".into(), serde_json::Value::String("int8".into()));
+            if let Some(q) = obj.get("quantile") {
+                inner.insert("quantile".into(), q.clone());
+            }
+            if let Some(ar) = obj.get("always_ram") {
+                inner.insert("always_ram".into(), ar.clone());
+            }
+            serde_json::json!({ "scalar": inner })
+        }
+        "product" => {
+            let mut inner = serde_json::Map::new();
+            let compression = obj
+                .get("compression")
+                .and_then(|v| v.as_str())
+                .unwrap_or("x4");
+            inner.insert(
+                "compression".into(),
+                serde_json::Value::String(compression.into()),
+            );
+            if let Some(ar) = obj.get("always_ram") {
+                inner.insert("always_ram".into(), ar.clone());
+            }
+            serde_json::json!({ "product": inner })
+        }
+        "binary" => {
+            let mut inner = serde_json::Map::new();
+            if let Some(ar) = obj.get("always_ram") {
+                inner.insert("always_ram".into(), ar.clone());
+            }
+            if let Some(enc) = obj.get("encoding").and_then(|v| v.as_str()) {
+                let enc = match enc.to_ascii_lowercase().as_str() {
+                    "twobits" | "two_bits" | "2" => "two_bits",
+                    "oneandhalfbits" | "one_and_half_bits" | "1.5" => "one_and_half_bits",
+                    _ => "one_bit",
+                };
+                inner.insert("encoding".into(), serde_json::Value::String(enc.into()));
+            }
+            if let Some(qe) = obj.get("query_encoding").and_then(|v| v.as_str()) {
+                let qe = match qe.to_ascii_lowercase().as_str() {
+                    "binary" => "binary",
+                    "scalar4bits" | "scalar4" => "scalar4bits",
+                    "scalar8bits" | "scalar8" => "scalar8bits",
+                    _ => "default",
+                };
+                inner.insert(
+                    "query_encoding".into(),
+                    serde_json::Value::String(qe.into()),
+                );
+            }
+            serde_json::json!({ "binary": inner })
+        }
+        "turbo" | "turboquant" => {
+            let mut inner = serde_json::Map::new();
+            if let Some(ar) = obj.get("always_ram") {
+                inner.insert("always_ram".into(), ar.clone());
+            }
+            let bits = obj
+                .get("bits")
+                .or_else(|| obj.get("turbo_bits"))
+                .and_then(|v| v.as_f64());
+            if let Some(bits) = bits {
+                let label = if (bits - 1.5).abs() < f64::EPSILON {
+                    "bits1_5"
+                } else if (bits - 2.0).abs() < f64::EPSILON {
+                    "bits2"
+                } else if (bits - 4.0).abs() < f64::EPSILON {
+                    "bits4"
+                } else {
+                    "bits1"
+                };
+                inner.insert("bits".into(), serde_json::Value::String(label.into()));
+            }
+            serde_json::json!({ "turbo": inner })
+        }
+        _ => value.clone(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -417,10 +757,17 @@ mod tests {
             panic!()
         };
         let req = lower_create_index(ci);
-        let json = serde_json::to_value(&req).unwrap();
-        assert_eq!(json["field_name"], "title");
-        assert_eq!(json["field_schema"], "text");
-        assert_eq!(json["lowercase"], true);
+        // IR flattens options for gRPC payload_index_params
+        let ir = serde_json::to_value(&req).unwrap();
+        assert_eq!(ir["field_name"], "title");
+        assert_eq!(ir["field_schema"], "text");
+        assert_eq!(ir["lowercase"], true);
+        // REST OpenAPI nests options under field_schema object
+        let rest = create_index_rest_body(&req);
+        assert_eq!(rest["field_name"], "title");
+        assert_eq!(rest["field_schema"]["type"], "text");
+        assert_eq!(rest["field_schema"]["lowercase"], true);
+        assert!(rest.get("lowercase").is_none());
     }
 
     #[test]
@@ -503,6 +850,76 @@ mod tests {
             "auto"
         );
         assert_eq!(json["optimizers_config"]["indexing_threshold"], 1000);
+    }
+
+    #[test]
+    fn rest_body_flattens_params_and_nests_quantization() {
+        let stmt = parse_stmt(
+            "CREATE COLLECTION docs (v VECTOR(128, COSINE) WITH QUANTIZATION (type = 'scalar', quantile = 0.99, always_ram = true)) \
+             WITH HNSW (m = 16) \
+             WITH PARAMS (replication_factor = 2, write_consistency_factor = 1, on_disk_payload = true, shard_number = 4, sharding_method = 'custom', shard_keys = ['a', 'b']);",
+        );
+        let Stmt::CreateCollection(ref cc) = stmt else {
+            panic!()
+        };
+        let req = lower_create_collection(cc);
+        let rest = create_collection_rest_body(&req);
+        // OpenAPI top-level params
+        assert_eq!(rest["replication_factor"], 2);
+        assert_eq!(rest["write_consistency_factor"], 1);
+        assert_eq!(rest["on_disk_payload"], true);
+        assert_eq!(rest["shard_number"], 4);
+        assert_eq!(rest["sharding_method"], "custom");
+        assert!(
+            rest.get("params").is_none(),
+            "params must not be nested on create"
+        );
+        assert!(
+            rest.get("shard_keys").is_none(),
+            "shard_keys not on CreateCollection"
+        );
+        // Nested quantization
+        assert_eq!(
+            rest["vectors"]["v"]["quantization_config"]["scalar"]["type"],
+            "int8"
+        );
+        assert_eq!(
+            rest["vectors"]["v"]["quantization_config"]["scalar"]["quantile"],
+            0.99
+        );
+        assert_eq!(rest["hnsw_config"]["m"], 16);
+        // Deferred fan-out only when IR carries those keys (ALTER-only in grammar;
+        // still projected for gRPC/REST multi-step if present).
+        let mut with_fanout = req.clone();
+        if let Some(serde_json::Value::Object(ref mut p)) = with_fanout.params {
+            p.insert("read_fan_out_factor".into(), serde_json::json!(3));
+        }
+        let deferred = create_collection_deferred_params_rest(&with_fanout).unwrap();
+        assert_eq!(deferred["params"]["read_fan_out_factor"], 3);
+        // IR still flat for gRPC
+        let ir = serde_json::to_value(&req).unwrap();
+        assert_eq!(ir["vectors"]["v"]["quantization_config"]["type"], "scalar");
+        assert_eq!(ir["params"]["replication_factor"], 2);
+        assert_eq!(ir["shard_keys"], serde_json::json!(["a", "b"]));
+    }
+
+    #[test]
+    fn rest_body_product_binary_turbo_quantization() {
+        let product = nest_quantization_for_rest(&serde_json::json!({
+            "type": "product", "compression": "x16", "always_ram": true
+        }));
+        assert_eq!(product["product"]["compression"], "x16");
+        let binary = nest_quantization_for_rest(&serde_json::json!({
+            "type": "binary", "encoding": "two_bits", "query_encoding": "scalar4bits"
+        }));
+        assert_eq!(binary["binary"]["encoding"], "two_bits");
+        assert_eq!(binary["binary"]["query_encoding"], "scalar4bits");
+        let turbo = nest_quantization_for_rest(&serde_json::json!({
+            "type": "turbo", "bits": 1.5, "always_ram": false
+        }));
+        assert_eq!(turbo["turbo"]["bits"], "bits1_5");
+        let disabled = nest_quantization_for_rest(&serde_json::json!({ "disabled": true }));
+        assert_eq!(disabled, "Disabled");
     }
 
     #[test]

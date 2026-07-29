@@ -53,6 +53,12 @@ impl Stmt {
         Ok(())
     }
 
+    /// Multi-tenant shard routing: set shard key on QUERY/SCROLL/COUNT/UPSERT/DELETE + CTEs.
+    #[napi]
+    pub fn inject_shard_key(&mut self, shard_key: String) -> napi::Result<()> {
+        ast::inject_shard_key(&mut self.inner, &shard_key).map_err(to_napi_err)
+    }
+
     #[napi]
     pub fn to_object(&self) -> napi::Result<serde_json::Value> {
         serde_json::to_value(&self.inner).map_err(serde_napi_err)
@@ -141,6 +147,14 @@ pub fn inject_filter(
     serde_json::to_value(&stmt).map_err(serde_napi_err)
 }
 
+/// Inject a shard key into a QQL string (host multi-tenant routing).
+#[napi]
+pub fn inject_shard_key(query: String, shard_key: String) -> napi::Result<serde_json::Value> {
+    let mut stmt = Parser::parse(&query).map_err(to_napi_err)?;
+    ast::inject_shard_key(&mut stmt, &shard_key).map_err(to_napi_err)?;
+    serde_json::to_value(&stmt).map_err(serde_napi_err)
+}
+
 #[napi]
 pub fn tokenize(input: String) -> napi::Result<serde_json::Value> {
     #[derive(serde::Serialize)]
@@ -172,37 +186,28 @@ pub fn tokenize(input: String) -> napi::Result<serde_json::Value> {
 #[napi]
 pub fn compile_query(input: String) -> napi::Result<serde_json::Value> {
     let stmt = Parser::parse(&input).map_err(to_napi_err)?;
-    let route = routing::route(&stmt);
-    let output = serde_json::json!({
-        "stmt_type": match &route.body {
-            Some(qql_plan::routing::RequestBody::Query(_)) => "query",
-            Some(qql_plan::routing::RequestBody::QueryGroups(_)) => "query_groups",
-            Some(qql_plan::routing::RequestBody::Points(_)) => "points",
-            Some(qql_plan::routing::RequestBody::Scroll(_)) => "scroll",
-            Some(qql_plan::routing::RequestBody::Upsert(_)) => "upsert",
-            Some(qql_plan::routing::RequestBody::Delete(_)) => "delete",
-            Some(qql_plan::routing::RequestBody::UpdateVector(_)) => "update_vector",
-            Some(qql_plan::routing::RequestBody::UpdatePayload(_)) => "update_payload",
-            Some(qql_plan::routing::RequestBody::ClearPayload(_)) => "clear_payload",
-            Some(qql_plan::routing::RequestBody::DeleteVector(_)) => "delete_vector",
-            Some(qql_plan::routing::RequestBody::Count(_)) => "count",
-            Some(qql_plan::routing::RequestBody::CreateShardKey(_)) => "create_shard_key",
-            Some(qql_plan::routing::RequestBody::DropShardKey(_)) => "drop_shard_key",
-            Some(qql_plan::routing::RequestBody::CreateCollection(_)) => "create_collection",
-            Some(qql_plan::routing::RequestBody::UpdateCollection(_)) => "update_collection",
-            Some(qql_plan::routing::RequestBody::CreateIndex(_)) => "create_index",
-            None => match route.method {
-                qql_plan::types::Method::Get if route.path == "/collections" => "show_collections",
-                qql_plan::types::Method::Get => "show_collection",
-                qql_plan::types::Method::Delete => "drop_collection",
-                _ => "unknown",
-            },
-        },
-        "method": route.method.as_str(),
-        "path": route.path,
-        "payload": route.body_json().unwrap_or(serde_json::Value::Null),
-    });
-    Ok(output)
+    let compiled = routing::compile_statement(&stmt).map_err(to_napi_err)?;
+    let (method, path, payload) = match compiled.route {
+        Some(route) => {
+            let payload = route.body_json().unwrap_or(serde_json::Value::Null);
+            (
+                serde_json::Value::String(route.method.as_str().into()),
+                serde_json::Value::String(route.path),
+                payload,
+            )
+        }
+        None => (
+            serde_json::Value::Null,
+            serde_json::Value::Null,
+            serde_json::Value::Null,
+        ),
+    };
+    Ok(serde_json::json!({
+        "stmt_type": compiled.stmt_type,
+        "method": method,
+        "path": path,
+        "payload": payload,
+    }))
 }
 
 fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::executor::Executor> {
@@ -239,6 +244,61 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
             config.embedding_model = emb.get("model").and_then(|v| v.as_str()).map(String::from);
             config.embedding_dimension =
                 emb.get("dimension").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            config.multi_embedding_endpoint = emb
+                .get("multiEndpoint")
+                .or_else(|| emb.get("multi_endpoint"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            config.multi_embedding_api_key = emb
+                .get("multiApiKey")
+                .or_else(|| emb.get("multi_api_key"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            config.multi_embedding_model = emb
+                .get("multiModel")
+                .or_else(|| emb.get("multi_model"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            config.multi_embedding_dimension = emb
+                .get("multiDimension")
+                .or_else(|| emb.get("multi_dimension"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize;
+            config.image_embedding_endpoint = emb
+                .get("imageEndpoint")
+                .or_else(|| emb.get("image_endpoint"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            config.image_embedding_api_key = emb
+                .get("imageApiKey")
+                .or_else(|| emb.get("image_api_key"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            config.image_embedding_model = emb
+                .get("imageModel")
+                .or_else(|| emb.get("image_model"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            config.image_embedding_dimension = emb
+                .get("imageDimension")
+                .or_else(|| emb.get("image_dimension"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize;
+            config.rerank_endpoint = emb
+                .get("rerankEndpoint")
+                .or_else(|| emb.get("rerank_endpoint"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            config.rerank_api_key = emb
+                .get("rerankApiKey")
+                .or_else(|| emb.get("rerank_api_key"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            config.rerank_model = emb
+                .get("rerankModel")
+                .or_else(|| emb.get("rerank_model"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
         }
     }
 
@@ -259,10 +319,24 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
 
     let embedder = if let Some(endpoint) = &config.embedding_endpoint {
         if !endpoint.trim().is_empty() {
-            let api_key = config.embedding_api_key.clone().unwrap_or_default();
-            let model = config.embedding_model.clone().unwrap_or_default();
-            let dim = config.embedding_dimension;
-            let http_emb = qql::embedder::HttpEmbedder::new(endpoint.clone(), api_key, model, dim)
+            let http_emb =
+                qql::embedder::HttpEmbedder::try_with_options(qql::embedder::HttpEmbedderOptions {
+                    endpoint: endpoint.clone(),
+                    api_key: config.embedding_api_key.clone().unwrap_or_default(),
+                    model: config.embedding_model.clone().unwrap_or_default(),
+                    dimension: config.embedding_dimension,
+                    multi_endpoint: config.multi_embedding_endpoint.clone(),
+                    multi_api_key: config.multi_embedding_api_key.clone(),
+                    multi_model: config.multi_embedding_model.clone(),
+                    multi_dimension: config.multi_embedding_dimension,
+                    image_endpoint: config.image_embedding_endpoint.clone(),
+                    image_api_key: config.image_embedding_api_key.clone(),
+                    image_model: config.image_embedding_model.clone(),
+                    image_dimension: config.image_embedding_dimension,
+                    rerank_endpoint: config.rerank_endpoint.clone(),
+                    rerank_api_key: config.rerank_api_key.clone(),
+                    rerank_model: config.rerank_model.clone(),
+                })
                 .map_err(to_napi_err)?;
             Some(std::sync::Arc::new(http_emb) as std::sync::Arc<dyn qql::embedder::Embedder>)
         } else {

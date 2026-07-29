@@ -29,28 +29,6 @@ impl Method {
     }
 }
 
-// ── Embedding ──────────────────────────────────────────────────
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct EmbeddingJob {
-    pub texts: Vec<String>,
-    pub model: Option<String>,
-    pub kind: EmbeddingKind,
-    pub destinations: Vec<EmbeddingDestination>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EmbeddingKind {
-    Dense,
-    Sparse,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct EmbeddingDestination {
-    pub carrier_name: String,
-    pub vector_name: String,
-}
-
 // ── Filter types ───────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize)]
@@ -68,6 +46,8 @@ pub struct FilterCompound {
     pub must_not: Vec<FilterClause>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub should: Vec<FilterClause>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_should: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shard_key: Option<String>,
 }
@@ -233,7 +213,7 @@ pub struct KeyOnly {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct HasIdCondition {
-    pub has_id: Vec<serde_json::Value>,
+    pub has_id: Vec<crate::semantic::PlanPointId>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -279,6 +259,12 @@ pub struct QueryRequest {
     pub lookup_from: Option<LookupRequest>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shard_key: Option<String>,
+    /// OpenAPI query param / proto field — not body JSON.
+    #[serde(skip)]
+    pub timeout: Option<u64>,
+    /// OpenAPI query param / proto field — not body JSON.
+    #[serde(skip)]
+    pub consistency: Option<ReadConsistencyParam>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -307,6 +293,44 @@ pub struct QueryGroupsRequest {
     pub lookup_from: Option<LookupRequest>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shard_key: Option<String>,
+    #[serde(skip)]
+    pub timeout: Option<u64>,
+    #[serde(skip)]
+    pub consistency: Option<ReadConsistencyParam>,
+    #[serde(skip)]
+    pub group_offset: Option<u64>,
+}
+
+/// Wire form of OpenAPI `ReadConsistency` for REST query strings / gRPC.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReadConsistencyParam {
+    Factor(u64),
+    Majority,
+    Quorum,
+    All,
+}
+
+impl ReadConsistencyParam {
+    /// REST query value: integer factor or majority|quorum|all.
+    pub fn to_query_value(&self) -> String {
+        match self {
+            Self::Factor(n) => n.to_string(),
+            Self::Majority => "majority".into(),
+            Self::Quorum => "quorum".into(),
+            Self::All => "all".into(),
+        }
+    }
+}
+
+impl From<&qql_core::ast::ReadConsistency> for ReadConsistencyParam {
+    fn from(value: &qql_core::ast::ReadConsistency) -> Self {
+        match value {
+            qql_core::ast::ReadConsistency::Factor(n) => Self::Factor(*n),
+            qql_core::ast::ReadConsistency::Majority => Self::Majority,
+            qql_core::ast::ReadConsistency::Quorum => Self::Quorum,
+            qql_core::ast::ReadConsistency::All => Self::All,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -575,6 +599,8 @@ pub struct DeleteRequest {
 #[derive(Debug, Clone, Serialize)]
 pub struct UpdateVectorRequest {
     pub points: Vec<UpdateVectorPoint>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shard_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -590,6 +616,8 @@ pub struct UpdatePayloadRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<FilterExpression>,
     pub payload: serde_json::Map<String, serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shard_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -598,6 +626,19 @@ pub struct ClearPayloadRequest {
     pub points: Option<Vec<PlanPointId>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<FilterExpression>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shard_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DeletePayloadRequest {
+    pub keys: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub points: Option<Vec<PlanPointId>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter: Option<FilterExpression>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shard_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -607,6 +648,8 @@ pub struct DeleteVectorRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<FilterExpression>,
     pub vector: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shard_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -619,6 +662,86 @@ pub struct CountRequest {
     pub exact: Option<bool>,
 }
 
+/// HNSW index configuration for collection creation/update.
+#[derive(Debug, Clone, Serialize)]
+pub struct HnswConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub m: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ef_construct: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub full_scan_threshold: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_indexing_threads: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on_disk: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payload_m: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inline_storage: Option<bool>,
+}
+
+/// Segment optimizer configuration for collection creation/update.
+#[derive(Debug, Clone, Serialize)]
+pub struct OptimizersConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_threshold: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vacuum_min_vector_number: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_segment_number: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_segment_size: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memmap_threshold: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub indexing_threshold: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flush_interval_sec: Option<u64>,
+    /// Either a `u64` number or the string `"auto"` (REST-only; gRPC ignores "auto").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_optimization_threads: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prevent_unoptimized: Option<bool>,
+}
+
+/// Vector quantization config (scalar/product/binary).
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum QuantizationConfig {
+    Scalar { scalar: ScalarQuantization },
+    Product { product: ProductQuantization },
+    Binary { binary: BinaryQuantization },
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ScalarQuantization {
+    /// Qdrant REST/OpenAPI expects `"int8"` for scalar quantization type.
+    #[serde(rename = "type")]
+    pub qtype: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quantile: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub always_ram: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProductQuantization {
+    pub compression: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub always_ram: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BinaryQuantization {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub always_ram: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encoding: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query_encoding: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct CreateCollectionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -626,13 +749,13 @@ pub struct CreateCollectionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sparse_vectors: Option<serde_json::Map<String, serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub hnsw_config: Option<serde_json::Value>,
+    pub hnsw_config: Option<HnswConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub optimizers_config: Option<serde_json::Value>,
+    pub optimizers_config: Option<OptimizersConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub quantization_config: Option<serde_json::Value>,
+    pub quantization_config: Option<QuantizationConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vectors_config: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -646,11 +769,12 @@ pub struct CreateCollectionRequest {
 #[derive(Debug, Clone, Serialize)]
 pub struct UpdateCollectionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub optimizers_config: Option<serde_json::Value>,
+    pub optimizers_config: Option<OptimizersConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub hnsw_config: Option<serde_json::Value>,
+    pub hnsw_config: Option<HnswConfig>,
+    /// PATCH envelope for update (`{disabled, quantization_config}`) — JSON.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quantization_config: Option<serde_json::Value>,
 }

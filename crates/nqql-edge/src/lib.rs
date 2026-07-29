@@ -195,37 +195,28 @@ pub fn tokenize(input: String) -> napi::Result<serde_json::Value> {
 #[napi]
 pub fn compile_query(input: String) -> napi::Result<serde_json::Value> {
     let stmt = Parser::parse(&input).map_err(to_napi_err)?;
-    let route = routing::route(&stmt);
-    let output = serde_json::json!({
-        "stmt_type": match &route.body {
-            Some(routing::RequestBody::Query(_)) => "query",
-            Some(routing::RequestBody::QueryGroups(_)) => "query_groups",
-            Some(routing::RequestBody::Points(_)) => "points",
-            Some(routing::RequestBody::Scroll(_)) => "scroll",
-            Some(routing::RequestBody::Upsert(_)) => "upsert",
-            Some(routing::RequestBody::Delete(_)) => "delete",
-            Some(routing::RequestBody::UpdateVector(_)) => "update_vector",
-            Some(routing::RequestBody::UpdatePayload(_)) => "update_payload",
-            Some(routing::RequestBody::ClearPayload(_)) => "clear_payload",
-            Some(routing::RequestBody::DeleteVector(_)) => "delete_vector",
-            Some(routing::RequestBody::Count(_)) => "count",
-            Some(routing::RequestBody::CreateShardKey(_)) => "create_shard_key",
-            Some(routing::RequestBody::DropShardKey(_)) => "drop_shard_key",
-            Some(routing::RequestBody::CreateCollection(_)) => "create_collection",
-            Some(routing::RequestBody::UpdateCollection(_)) => "update_collection",
-            Some(routing::RequestBody::CreateIndex(_)) => "create_index",
-            None => match route.method {
-                qql_plan::types::Method::Get if route.path == "/collections" => "show_collections",
-                qql_plan::types::Method::Get => "show_collection",
-                qql_plan::types::Method::Delete => "drop_collection",
-                _ => "unknown",
-            },
-        },
-        "method": route.method.as_str(),
-        "path": route.path,
-        "payload": route.body_json().unwrap_or(serde_json::Value::Null),
-    });
-    Ok(output)
+    let compiled = routing::compile_statement(&stmt).map_err(to_napi_err)?;
+    let (method, path, payload) = match compiled.route {
+        Some(route) => {
+            let payload = route.body_json().unwrap_or(serde_json::Value::Null);
+            (
+                serde_json::Value::String(route.method.as_str().into()),
+                serde_json::Value::String(route.path),
+                payload,
+            )
+        }
+        None => (
+            serde_json::Value::Null,
+            serde_json::Value::Null,
+            serde_json::Value::Null,
+        ),
+    };
+    Ok(serde_json::json!({
+        "stmt_type": compiled.stmt_type,
+        "method": method,
+        "path": path,
+        "payload": payload,
+    }))
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -391,10 +382,19 @@ impl JsClient {
 pub struct LocalExecutorOptions {
     /// Store payloads on disk (default `true`).
     pub on_disk_payload: Option<bool>,
-    /// Local ONNX model. Accepts enum names (`BGESmallENV15`), HF codes
+    /// Local ONNX dense model. Accepts enum names (`BGESmallENV15`), HF codes
     /// (`Xenova/bge-small-en-v1.5`), or short aliases (`bge-small-en-v1.5`).
     /// Default: `BGESmallENV15` (384-d).
     pub model: Option<String>,
+    /// Offline sparse model (SPLADE or BGE-M3 via SparseTextEmbedding), e.g. `"splade"`.
+    /// `None` → local BM25 hashing for sparse requests.
+    pub sparse_model: Option<String>,
+    /// Offline multivector model (BGE-M3 ColBERT), e.g. `"bge-m3"`.
+    pub multi_model: Option<String>,
+    /// Offline CLIP vision model, e.g. `"clip-vision"` / `"ClipVitB32"`.
+    pub image_model: Option<String>,
+    /// Offline cross-encoder, e.g. `"bge-reranker-base"`.
+    pub reranker_model: Option<String>,
     /// Override model cache directory (default: fastembed / HF cache).
     pub cache_dir: Option<String>,
     /// Show HuggingFace download progress (default `false`).
@@ -429,6 +429,10 @@ pub fn local_executor(
         qql_edge::LocalExecutorOptions {
             on_disk_payload: opts.on_disk_payload.unwrap_or(true),
             model: opts.model,
+            sparse_model: opts.sparse_model,
+            multi_model: opts.multi_model,
+            image_model: opts.image_model,
+            reranker_model: opts.reranker_model,
             cache_dir: opts.cache_dir.map(std::path::PathBuf::from),
             show_download_progress: opts.show_download_progress.unwrap_or(false),
         },
@@ -450,6 +454,8 @@ pub fn list_embedding_models() -> Vec<EmbeddingModelInfoJs> {
             model_code: m.model_code,
             dim: m.dim as u32,
             description: m.description,
+            multi: m.multi,
+            image: m.image,
         })
         .collect()
 }
@@ -461,6 +467,8 @@ pub struct EmbeddingModelInfoJs {
     pub model_code: String,
     pub dim: u32,
     pub description: String,
+    pub multi: bool,
+    pub image: bool,
 }
 
 /// Create an edge executor that calls an external OpenAI-compatible embedding
@@ -509,6 +517,22 @@ fn standalone_local_opts(options: Option<&serde_json::Value>) -> LocalExecutorOp
             .and_then(|v| v.as_bool()),
         model: options
             .and_then(|o| o.get("model"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        sparse_model: options
+            .and_then(|o| o.get("sparseModel").or_else(|| o.get("sparse_model")))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        multi_model: options
+            .and_then(|o| o.get("multiModel").or_else(|| o.get("multi_model")))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        image_model: options
+            .and_then(|o| o.get("imageModel").or_else(|| o.get("image_model")))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        reranker_model: options
+            .and_then(|o| o.get("rerankerModel").or_else(|| o.get("reranker_model")))
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
         cache_dir: options
@@ -627,4 +651,46 @@ pub async fn execute(
         )?
     };
     client.execute(query, options).await
+}
+
+#[cfg(test)]
+#[cfg(feature = "fastembed-local")]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_executor_options_default_has_no_sparse_model() {
+        let opts = LocalExecutorOptions::default();
+        assert!(opts.sparse_model.is_none());
+    }
+
+    #[test]
+    fn local_executor_options_with_sparse_model() {
+        let opts = LocalExecutorOptions {
+            sparse_model: Some("splade".into()),
+            ..Default::default()
+        };
+        assert_eq!(opts.sparse_model.as_deref(), Some("splade"));
+    }
+
+    #[test]
+    fn standalone_local_opts_camel_case_sparse_model() {
+        let opts = serde_json::json!({ "sparseModel": "bge-m3" });
+        let lo = standalone_local_opts(Some(&opts));
+        assert_eq!(lo.sparse_model.as_deref(), Some("bge-m3"));
+    }
+
+    #[test]
+    fn standalone_local_opts_snake_case_sparse_model() {
+        let opts = serde_json::json!({ "sparse_model": "splade" });
+        let lo = standalone_local_opts(Some(&opts));
+        assert_eq!(lo.sparse_model.as_deref(), Some("splade"));
+    }
+
+    #[test]
+    fn standalone_local_opts_no_sparse_model_is_none() {
+        let opts = serde_json::json!({});
+        let lo = standalone_local_opts(Some(&opts));
+        assert!(lo.sparse_model.is_none());
+    }
 }

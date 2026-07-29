@@ -353,7 +353,7 @@ pub fn validate_index_options(options: &[(String, Value)], pos: usize) -> Result
                     ));
                 }
             }
-            "tokenizer" => {
+            "tokenizer" | "stemmer" => {
                 if !matches!(v, Value::Str(_)) {
                     return Err(QqlError::syntax(
                         alloc::format!("{} must be a string", k),

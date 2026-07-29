@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::{hint::black_box, time::Instant};
 
 const QUERIES: &[(&str, &str)] = &[
     ("Simple", "QUERY 'search' FROM docs LIMIT 10"),
@@ -15,19 +15,22 @@ const QUERIES: &[(&str, &str)] = &[
 fn main() {
     let iterations = 100_000;
 
-    println!("Rust qql-rs parse only  |  {} iterations each\n", iterations);
+    println!(
+        "Rust qql-rs parse only  |  {} iterations each\n",
+        iterations
+    );
     println!("{:<20} {:>10} {:>12}", "Query", "ns/op", "ops/s");
     println!("{}", "-".repeat(46));
 
     for (name, query) in QUERIES {
         // Warmup
         for _ in 0..1000 {
-            qql_core::parser::Parser::parse(query).unwrap();
+            black_box(qql_core::parser::Parser::parse(query).unwrap());
         }
 
         let start = Instant::now();
         for _ in 0..iterations {
-            qql_core::parser::Parser::parse(query).unwrap();
+            black_box(qql_core::parser::Parser::parse(query).unwrap());
         }
         let elapsed = start.elapsed();
 

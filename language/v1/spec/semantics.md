@@ -55,11 +55,32 @@ materialized; they are not reserved and receive no selection priority.
 A query target is represented as:
 
 ```text
-USING <name> [AS DENSE | AS SPARSE]
+USING <name> [AS DENSE | AS SPARSE | AS MULTI | AS MULTIVECTOR]
+
+Query inputs:
+
+- `TEXT '…' [MODEL '…']` — embed text (dense / sparse / multi by USING role)
+- `IMAGE 'path-or-url' [MODEL '…']` — embed image via host vision model → **dense**
+  (CLIP vision; not multivector)
+- `VECTOR …` / `POINT …` — no embedding
+
+Rerank forms:
+
+- `RERANK … MODEL '…' USING <dense|multi> PREFETCH (…)` — late-interaction MaxSim
+  (query embed against candidates in Qdrant).
+- `CROSS RERANK TEXT '…' MODEL '…' [ON FIELD f] PREFETCH (…)` — cross-encoder
+  pair scores on payload field `f` (default `text`), reordered client-side.
+  Requires host `rerank_pairs`. No `USING` vector.
 ```
 
 The name answers “which vector?” and the optional role answers “what kind of
 embedding/query input?”. They are independent.
+
+`AS MULTI` / `AS MULTIVECTOR` mark a **dense multivector** target (ColBERT-style
+late interaction). Multivector is not a third kind beside dense/sparse: the
+role remains dense and the query input shape is multi-dense
+(`[[f32, …], …]`). Collection schema may also mark named dense vectors as
+multivector when they carry `multivector_config` (e.g. `max_sim`).
 
 ### 3.1 Query target resolution
 
@@ -76,10 +97,11 @@ Resolution occurs before text embedding:
    contain exactly one vector in total.
 5. Otherwise inference is ambiguous and fails with `QQL-MISSING-USING`.
 
-`RERANK` always requires a dense target. `HYBRID` resolves its dense and sparse
-names independently; each omitted name requires exactly one named candidate of
-the corresponding role. Mixed dense and sparse structural inputs in one query
-expression are invalid.
+`RERANK` always requires a dense target (single-vector or multivector). When
+the target is multivector, text is embedded via multi-vector embedding into
+`MultiDense`. `HYBRID` resolves its dense and sparse names independently; each
+omitted name requires exactly one named candidate of the corresponding role.
+Mixed dense and sparse structural inputs in one query expression are invalid.
 
 The parse-time canonical AST records only source information. Therefore an
 explicit `AS` appears as `kind: "Dense"` or `"Sparse"`, an untyped explicit
@@ -124,12 +146,14 @@ its `USING` and `PREFETCH` pipeline in the canonical AST.
 | fusion | Requires at least one `PREFETCH`. |
 | formula | May score a prefetch or payload-derived expression. |
 | relevance feedback | Requires non-empty feedback and `NAIVE(a,b,c)`. |
-| MMR | `DIVERSITY` is finite and in `[0,1]`; `CANDIDATES` is positive. |
-| hybrid | Expands to dense and sparse prefetches fused by RRF (default) or DBSF. |
+| MMR | `DIVERSITY` is finite and in `[0,1]`; `CANDIDATES` is positive. MMR supports both dense and sparse vector targets. |
+| hybrid | Expands to dense and sparse prefetches fused by RRF (default) or DBSF. Surface forms: front-form `QUERY HYBRID TEXT …` and tail-form `QUERY TEXT … USING HYBRID …` lower to the same `Hybrid` AST. `USING HYBRID` requires a text nearest expression (no MMR, no non-text inputs). Omitted dense/sparse names resolve from schema (exactly one of each role). |
 | rerank | Requires `USING`, a model, and non-empty `PREFETCH`. |
 
 `LIMIT`, group size, `hnsw_ef`, and `rrf_k` are positive integers. `OFFSET`
 and `VALUES_COUNT` are non-negative. Score thresholds are finite.
+
+`GROUP BY` supports `OFFSET` (maps to Qdrant's `group_offset` field on query/groups requests).
 
 A group lookup names a collection only. A prefetch lookup may additionally
 name a vector because it changes the lookup input for that prefetch.
@@ -141,6 +165,15 @@ name a vector because it changes the lookup input for that prefetch.
 means all vectors; it also accepts `true`, `false`, or a non-empty name list.
 
 ### 4.2 Search parameters
+
+Request-level options (not body `SearchParams` on the wire):
+
+| Key | Rule | Wire (OpenAPI / proto) |
+|---|---|---|
+| `timeout` | Positive integer seconds | REST query `timeout`; gRPC `timeout` |
+| `consistency` | Factor ≥ 0, or `majority` / `quorum` / `all` | REST query `consistency`; gRPC `read_consistency` |
+
+Body search parameters (OpenAPI `SearchParams`):
 
 `PARAMS` accepts:
 
@@ -278,6 +311,7 @@ invalid fixtures are normative for those cases.
 | `QQL-VALIDATION-POINTS-CLAUSE` | Unsupported clause on POINTS |
 | `QQL-VALIDATION-UPSERT-ID` | UPSERT row lacks valid ID |
 | `QQL-VALIDATION-MMR` | MMR diversity is invalid |
+| `QQL-VALIDATION-HYBRID` | Invalid `USING HYBRID` / `QUERY HYBRID` combination |
 | `QQL-PLAN-VECTOR-KIND` | Structural input and declared role disagree |
 | `QQL-MISSING-USING` | Schema inference is ambiguous |
 | `QQL-UNKNOWN-VECTOR` | Explicit name does not exist |

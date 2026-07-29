@@ -7,7 +7,6 @@ pub(crate) mod formula;
 pub(crate) mod helpers;
 pub(crate) mod point_ops;
 pub(crate) mod query;
-mod syntax;
 pub(crate) mod r#update;
 pub(crate) mod upsert;
 pub(crate) mod with_clause;
@@ -27,8 +26,10 @@ pub use config_validation::{
 
 /// Canonical QQL parser facade.
 ///
-/// Syntax acceptance is generated from `language/v1/grammar.pest`. The
-/// private [`AstLowerer`] converts accepted source into the typed QQL AST.
+/// Production parsing is **only** the hand-written [`AstLowerer`]
+/// (lexer → tokens → typed AST). There is no parallel PEG/pest frontend in
+/// this crate: `language/v1/grammar.pest` is the language contract for docs
+/// and CI (`qql-grammar-gen`), not a runtime dependency of `qql-core`.
 pub struct Parser;
 
 pub(crate) struct AstLowerer<'a> {

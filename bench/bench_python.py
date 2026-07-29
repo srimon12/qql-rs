@@ -1,8 +1,9 @@
 """Benchmark pyqql parse and E2E explain across query types."""
-import time
 import sys
+import time
+from pathlib import Path
 
-sys.path.insert(0, "../target/release")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "target" / "release"))
 import pyqql
 
 QUERIES = [
@@ -28,7 +29,7 @@ def bench_parse(q, iterations):
     return iterations / elapsed
 
 def bench_e2e(q, iterations):
-    # Explain constructs the full execution payload offline (E2E pipeline)
+    # Explain parses and renders a textual explanation. It is not executor E2E.
     for _ in range(100):
         pyqql.explain(q)
     start = time.perf_counter()
@@ -40,7 +41,7 @@ def bench_e2e(q, iterations):
 if __name__ == "__main__":
     iterations = 10_000
     print(f"Python pyqql  |  {iterations} iterations each\n")
-    print(f"{'Query':<20} | {'Parse (ops/s)':>15} | {'E2E (ops/s)':>15}")
+    print(f"{'Query':<20} | {'Parse (ops/s)':>15} | {'Explain (ops/s)':>15}")
     print("-" * 58)
 
     for name, q in QUERIES:
