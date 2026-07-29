@@ -155,6 +155,33 @@ async fn resolve_upsert_embeddings(
                         )?;
                     }
                 }
+                EmbedKind::Multi { model } => {
+                    let m_name = model.as_deref().unwrap_or("default");
+                    let (indices, texts): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
+                    let bags = embedder.embed_multi_batch(&texts, m_name).await?;
+                    if bags.len() != indices.len() {
+                        return Err(QqlError::execution(
+                            "QQL-EMBEDDING-MULTI",
+                            format!(
+                                "embed_multi_batch returned {} bags for {} texts (model={m_name})",
+                                bags.len(),
+                                indices.len()
+                            ),
+                            None,
+                        ));
+                    }
+                    for (idx, rows) in indices.into_iter().zip(bags) {
+                        if rows.is_empty() {
+                            return Err(QqlError::execution(
+                                "QQL-EMBEDDING-MULTI",
+                                "embed_multi returned an empty multivector",
+                                None,
+                            ));
+                        }
+                        let point = &mut upsert.points[idx];
+                        add_point_vector(point, target_vec_name, VectorValue::MultiDense(rows))?;
+                    }
+                }
             }
         }
     }
@@ -760,6 +787,46 @@ async fn resolve_single_embedding_spec(
                         indices: sparse_vec.indices,
                         values: sparse_vec.values,
                     },
+                )?;
+            }
+        }
+        EmbeddingSpec::MultiVector {
+            model,
+            vector,
+            field,
+        } => {
+            let model_name = model.as_deref().unwrap_or("default");
+            let vector_name = vector.as_deref().unwrap_or("colbert");
+            check_and_insert_vector_name(seen_vectors, vector_name)?;
+
+            let targets = collect_text_targets(&upsert.points, field.as_deref());
+            validate_non_empty_targets(upsert, &targets, "MULTI", field.as_deref())?;
+
+            let (indices, texts): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
+            let bags = embedder.embed_multi_batch(&texts, model_name).await?;
+            if bags.len() != indices.len() {
+                return Err(QqlError::execution(
+                    "QQL-EMBEDDING-MULTI",
+                    format!(
+                        "embed_multi_batch returned {} bags for {} texts (model={model_name})",
+                        bags.len(),
+                        indices.len()
+                    ),
+                    None,
+                ));
+            }
+            for (idx, rows) in indices.into_iter().zip(bags) {
+                if rows.is_empty() {
+                    return Err(QqlError::execution(
+                        "QQL-EMBEDDING-MULTI",
+                        "embed_multi returned an empty multivector",
+                        None,
+                    ));
+                }
+                add_point_vector(
+                    &mut upsert.points[idx],
+                    vector_name,
+                    VectorValue::MultiDense(rows),
                 )?;
             }
         }

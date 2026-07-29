@@ -297,6 +297,8 @@ pub struct ScrollStmt {
 pub enum EmbedKind {
     Dense { model: Option<String> },
     Sparse { model: Option<String> },
+    /// Multivector / ColBERT bag (`embed_multi` → MultiDense).
+    Multi { model: Option<String> },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -328,6 +330,13 @@ pub enum EmbeddingSpec {
         sparse_vector: Option<String>,
         sparse_field: Option<String>,
     },
+    /// Multivector / ColBERT: text → bag of token vectors for a named multi slot.
+    MultiVector {
+        model: Option<String>,
+        vector: Option<String>,
+        field: Option<String>,
+    },
+    /// Combined specs (e.g. DENSE + SPARSE + MULTI VECTOR colbert).
     Multi(Vec<EmbeddingSpec>),
 }
 

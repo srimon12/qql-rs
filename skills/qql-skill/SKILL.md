@@ -31,7 +31,7 @@ Translate user intent directly into QQL syntax:
 - Hybrid retrieval (dense + sparse) -> `QUERY HYBRID TEXT 'text' DENSE dense SPARSE sparse FUSION RRF FROM <collection> LIMIT <n>`
 - Hybrid retrieval with DBSF fusion -> `QUERY HYBRID TEXT 'text' DENSE dense SPARSE sparse FUSION DBSF FROM <collection> LIMIT <n>`
 - Multivector / ColBERT nearest -> `QUERY TEXT 't' FROM <collection> USING colbert LIMIT <n>` when collection has multivector config; offline use `USING colbert AS MULTI`
-- Late-interaction rerank -> `WITH c AS (QUERY 't' USING dense LIMIT 50) QUERY RERANK TEXT 't' MODEL 'answerai-colbert-small-v1' FROM <collection> USING colbert PREFETCH (c) LIMIT <n>`
+- Late-interaction rerank (ColBERT MaxSim, **not** cross-encoder) -> `WITH c AS (QUERY 't' USING dense LIMIT 50) QUERY RERANK TEXT 't' MODEL 'answerai-colbert-small-v1' FROM <collection> USING colbert PREFETCH (c) LIMIT <n>`
 - Direct point retrieval by ID -> `QUERY POINTS (id1, id2, 'id3') FROM <collection>`
 - Recommendation by example -> `QUERY RECOMMEND POSITIVE (id1, id2) NEGATIVE (id3) STRATEGY average_vector FROM <collection> USING dense LIMIT <n>`
 - Context search -> `QUERY CONTEXT (POSITIVE POINT id1 NEGATIVE POINT id2) FROM <collection> USING dense LIMIT <n>`
@@ -40,7 +40,7 @@ Translate user intent directly into QQL syntax:
 - Random sampling -> `QUERY SAMPLE RANDOM FROM <collection> LIMIT <n>`
 - Browse by payload field -> `QUERY ORDER BY <field> [ASC|DESC] FROM <collection> LIMIT <n>`
 - Multi-stage retrieval -> `WITH c1 AS (QUERY 't' USING dense LIMIT 100), c2 AS (QUERY 't' USING sparse LIMIT 100) QUERY FUSION RRF FROM <collection> PREFETCH (c1, c2) LIMIT <n>`
-- Rerank search -> `WITH c AS (QUERY 't' USING dense LIMIT 50) QUERY RERANK TEXT 't' MODEL 'bge-reranker' FROM <collection> USING colbert PREFETCH (c) LIMIT <n>`
+- CLIP / dual-encoder image-text -> plain dense named vectors (same dim space); **not** `AS MULTI`
 - MMR diversification -> `QUERY MMR 'query_text' DIVERSITY 0.5 CANDIDATES 100 FROM <collection> USING dense LIMIT <n>`
 - Formula / Score shaping -> `QUERY FORMULA score + 0.3 * popularity DEFAULTS (popularity = 1.0) FROM <collection> USING dense LIMIT <n>`
 - Grouped results -> add `GROUP BY <field> SIZE <m> LOOKUP FROM <collection>`
@@ -151,9 +151,9 @@ FROM <collection>
 | Form | Behavior |
 |---|---|
 | `USING name` | Runtime looks up `name` on collection schema (dense / sparse / multivector). Names are **not** special-cased by spelling. |
-| `USING name AS DENSE` | Single dense embed (MiniLM, CLIP, …) |
+| `USING name AS DENSE` | Single dense embed (MiniLM, CLIP text, …) — one `Vec<f32>` |
 | `USING name AS SPARSE` | Sparse BM25-style embed |
-| `USING name AS MULTI` | Multivector embed → `[[f32,…],…]` (ColBERT-style); role is still dense |
+| `USING name AS MULTI` | Multivector / ColBERT bag → `[[f32,…],…]` via `embed_multi` (BGE-M3 ColBERT, not CLIP) |
 | No `USING` | Schema must have exactly one compatible vector |
 
 Offline/embed-only paths without schema require an explicit `AS …`. Leaving kind unknown fails with `QQL-VECTOR-KIND` (never silent dense default for named targets).

@@ -41,11 +41,12 @@ fn plan_vector_value_internal(v: PlanVectorValue) -> Result<VectorInternal, QqlE
             }))
         }
         PlanVectorValue::MultiDense(rows) => {
-            // Prefer MultiDense when available; fall back to first dense row.
             if rows.is_empty() {
                 return Err(err("empty multivector"));
             }
-            Ok(VectorInternal::Dense(rows.into_iter().next().unwrap()))
+            let vec = qdrant_edge::Vector::new_multi(rows)
+                .map_err(|e| err(format!("invalid multivector: {e}")))?;
+            Ok(vec.0)
         }
     }
 }

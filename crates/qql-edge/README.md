@@ -8,22 +8,46 @@ Three embedding strategies produce an [`Executor`] backed by [`EdgeQdrant`]:
 
 | Constructor | Embedder | Use case |
 |------------|----------|----------|
-| `local_executor()` | `FastEmbedder` (ONNX, default BGE small 384-d) | Fully offline |
-| `local_executor_with_options()` | `FastEmbedder` + model/cache selection | Pick ONNX model |
-| `http_executor()` | `HttpEmbedder` (OpenAI-compatible) | Local model, remote API |
+| `local_executor()` | `FastEmbedder` (ONNX, default BGE small 384-d) | Fully offline dense |
+| `local_executor_with_options()` | Dense ONNX + optional **multi** (`multi_model: "bge-m3"`) | Offline dense + ColBERT |
+| `http_executor()` / `http_executor_with_multi()` | `HttpEmbedder` (OpenAI-compatible) | Remote dense / multi APIs |
 | `custom_executor()` | Any `Arc<dyn Embedder>` | GPU, ensemble, caching |
-| `list_embedding_models()` | — | Discover ONNX models + dims |
+| `list_embedding_models()` | — | Dense ONNX + multi (BGE-M3) catalog |
+
+### FastEmbed roles (do not conflate)
+
+| FastEmbed | QQL |
+|---|---|
+| `TextEmbedding` (BGE, MiniLM, CLIP **text**, …) | Dense |
+| `ImageEmbedding` (CLIP vision, …) | Dense (custom host; not default) |
+| `Bgem3Embedding.colbert` | **Multi** (`MultiDense`) — offline late interaction |
+| `TextRerank` (bge-reranker, …) | Cross-encoder — not QQL `RERANK` yet |
+
+CLIP is dual-encoder dense. Multivector is ColBERT bags only.
 
 ## Quick start
 
 ```rust
-use qql_edge::local_executor;
+use qql_edge::{local_executor, local_executor_with_options, LocalExecutorOptions};
 use qql::executor::OnError;
 
+// Dense-only offline
 let mut executor = local_executor("/tmp/qql-edge-data", false)?;
 let resp = executor.execute("CREATE COLLECTION docs HYBRID", OnError::Stop).await?;
 let resp = executor.execute("UPSERT INTO docs VALUES {id: 1, text: 'hello world'}", OnError::Stop).await?;
 let resp = executor.execute("QUERY 'hello' FROM docs LIMIT 5;", OnError::Stop).await?;
+
+// Dense + offline ColBERT multi (downloads BGE-M3 on first multi embed)
+let mut multi_exec = local_executor_with_options(
+    "/tmp/qql-edge-multi",
+    LocalExecutorOptions {
+        multi_model: Some("bge-m3".into()),
+        ..Default::default()
+    },
+)?;
+// CREATE … colbert VECTOR(1024, COSINE) WITH MULTIVECTOR (comparator = 'max_sim')
+// then QUERY … USING colbert / QUERY RERANK … USING colbert
+
 executor.close().await?; // flush before deleting the data directory
 ```
 

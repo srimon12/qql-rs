@@ -30,23 +30,56 @@ struct EmbedResponse {
     data: Vec<EmbedData>,
 }
 
+/// OpenAI-compatible embedding payload: dense `[f32]` or multi `[[f32],…]`.
+#[cfg(feature = "rest")]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum EmbeddingPayload {
+    Dense(Vec<f32>),
+    Multi(Vec<Vec<f32>>),
+}
+
 #[cfg(feature = "rest")]
 #[derive(Debug, Clone, Deserialize)]
 struct EmbedData {
     index: usize,
-    embedding: Vec<f32>,
+    embedding: EmbeddingPayload,
+}
+
+/// Options for constructing an [`HttpEmbedder`].
+#[cfg(feature = "rest")]
+#[derive(Debug, Clone, Default)]
+pub struct HttpEmbedderOptions {
+    pub endpoint: String,
+    pub api_key: String,
+    pub model: String,
+    pub dimension: usize,
+    /// Optional multi/ColBERT endpoint. Falls back to `endpoint` when empty.
+    pub multi_endpoint: Option<String>,
+    pub multi_api_key: Option<String>,
+    pub multi_model: Option<String>,
+    /// Expected per-token dim for multi responses. `0` skips dim checks.
+    pub multi_dimension: usize,
 }
 
 /// OpenAI-compatible HTTP embedder (`POST {"model","input":[...]}`).
 ///
 /// Endpoint is **required** — no default URL. Works with OpenAI, Ollama
 /// `/v1/embeddings`, Cohere compatibility API, etc. Always batches in one request.
+///
+/// Multivector: set `multi_*` options (or share the dense endpoint with a model that
+/// returns nested `embedding: [[…],…]` arrays). Flat dense arrays on multi requests
+/// are rejected.
 #[cfg(feature = "rest")]
 pub struct HttpEmbedder {
     endpoint: String,
     api_key: String,
     model: String,
     dimension: usize,
+    multi_endpoint: Option<String>,
+    multi_api_key: Option<String>,
+    multi_model: Option<String>,
+    multi_dimension: usize,
     client: Client,
 }
 
@@ -58,21 +91,31 @@ impl HttpEmbedder {
         model: String,
         dimension: usize,
     ) -> Result<Self, QqlError> {
-        if endpoint.trim().is_empty() {
+        Self::try_with_options(HttpEmbedderOptions {
+            endpoint,
+            api_key,
+            model,
+            dimension,
+            ..Default::default()
+        })
+    }
+
+    pub fn try_with_options(opts: HttpEmbedderOptions) -> Result<Self, QqlError> {
+        if opts.endpoint.trim().is_empty() {
             return Err(QqlError::execution(
                 "QQL-EMBEDDING",
                 "embedding endpoint is required",
                 None,
             ));
         }
-        if model.trim().is_empty() {
+        if opts.model.trim().is_empty() {
             return Err(QqlError::execution(
                 "QQL-EMBEDDING",
                 "embedding model is required",
                 None,
             ));
         }
-        if dimension == 0 {
+        if opts.dimension == 0 {
             return Err(QqlError::execution(
                 "QQL-EMBEDDING",
                 "embedding dimension must be positive",
@@ -89,12 +132,41 @@ impl HttpEmbedder {
         })?;
 
         Ok(HttpEmbedder {
-            endpoint,
-            api_key,
-            model,
-            dimension,
+            endpoint: opts.endpoint,
+            api_key: opts.api_key,
+            model: opts.model,
+            dimension: opts.dimension,
+            multi_endpoint: opts
+                .multi_endpoint
+                .filter(|s| !s.trim().is_empty()),
+            multi_api_key: opts.multi_api_key,
+            multi_model: opts
+                .multi_model
+                .filter(|s| !s.trim().is_empty()),
+            multi_dimension: opts.multi_dimension,
             client,
         })
+    }
+
+    /// Attach multi/ColBERT settings after construction.
+    pub fn with_multi(
+        mut self,
+        endpoint: Option<String>,
+        api_key: Option<String>,
+        model: Option<String>,
+        dimension: usize,
+    ) -> Self {
+        self.multi_endpoint = endpoint.filter(|s| !s.trim().is_empty());
+        self.multi_api_key = api_key;
+        self.multi_model = model.filter(|s| !s.trim().is_empty());
+        self.multi_dimension = dimension;
+        self
+    }
+
+    pub fn multi_enabled(&self) -> bool {
+        self.multi_model.is_some()
+            || self.multi_endpoint.is_some()
+            || self.multi_dimension > 0
     }
 
     pub async fn probe_dimension(&self, input: &str) -> Result<usize, QqlError> {
@@ -103,7 +175,7 @@ impl HttpEmbedder {
             input: vec![input.to_string()],
         };
 
-        let resp = self.do_request(&body).await?;
+        let resp = self.do_request(&self.endpoint, &self.api_key, &body).await?;
 
         if resp.data.is_empty() {
             return Err(QqlError::execution(
@@ -113,14 +185,31 @@ impl HttpEmbedder {
             ));
         }
 
-        Ok(resp.data[0].embedding.len())
+        match &resp.data[0].embedding {
+            EmbeddingPayload::Dense(v) => Ok(v.len()),
+            EmbeddingPayload::Multi(rows) => rows
+                .first()
+                .map(Vec::len)
+                .ok_or_else(|| {
+                    QqlError::execution(
+                        "QQL-EMBEDDING",
+                        "embedding response multivector was empty",
+                        None,
+                    )
+                }),
+        }
     }
 
-    async fn do_request(&self, body: &EmbedRequest) -> Result<EmbedResponse, QqlError> {
-        let mut req = self.client.post(&self.endpoint).json(body);
+    async fn do_request(
+        &self,
+        endpoint: &str,
+        api_key: &str,
+        body: &EmbedRequest,
+    ) -> Result<EmbedResponse, QqlError> {
+        let mut req = self.client.post(endpoint).json(body);
 
-        if !self.api_key.is_empty() {
-            req = req.header("Authorization", format!("Bearer {}", self.api_key));
+        if !api_key.is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", api_key));
         }
 
         let resp = req.send().await.map_err(|e| {
@@ -152,6 +241,35 @@ impl HttpEmbedder {
         Ok(decoded)
     }
 
+    fn resolve_dense_model(&self, model: &str) -> String {
+        if !model.is_empty() && model != "default" {
+            model.to_string()
+        } else {
+            self.model.clone()
+        }
+    }
+
+    fn resolve_multi_model(&self, model: &str) -> String {
+        if !model.is_empty() && model != "default" {
+            return model.to_string();
+        }
+        self.multi_model
+            .clone()
+            .unwrap_or_else(|| self.model.clone())
+    }
+
+    fn multi_url(&self) -> &str {
+        self.multi_endpoint
+            .as_deref()
+            .unwrap_or(self.endpoint.as_str())
+    }
+
+    fn multi_key(&self) -> &str {
+        self.multi_api_key
+            .as_deref()
+            .unwrap_or(self.api_key.as_str())
+    }
+
     pub async fn embed_batch_with_model(
         &self,
         inputs: &[String],
@@ -162,18 +280,15 @@ impl HttpEmbedder {
             return Ok(Vec::new());
         }
 
-        let model_name = if !model.is_empty() && model != "default" {
-            model.to_string()
-        } else {
-            self.model.clone()
-        };
-
+        let model_name = self.resolve_dense_model(model);
         let body = EmbedRequest {
             model: model_name,
             input: inputs.to_vec(),
         };
 
-        let decoded = self.do_request(&body).await?;
+        let decoded = self
+            .do_request(&self.endpoint, &self.api_key, &body)
+            .await?;
 
         if decoded.data.len() != inputs.len() {
             return Err(QqlError::execution(
@@ -203,19 +318,32 @@ impl HttpEmbedder {
                     None,
                 ));
             }
-            if item.embedding.len() != self.dimension {
+            let dense = match item.embedding {
+                EmbeddingPayload::Dense(v) => v,
+                EmbeddingPayload::Multi(_) => {
+                    return Err(QqlError::execution(
+                        "QQL-EMBEDDING",
+                        format!(
+                            "embedding response index {} returned multivector; expected dense",
+                            item.index
+                        ),
+                        None,
+                    ));
+                }
+            };
+            if dense.len() != self.dimension {
                 return Err(QqlError::execution(
                     "QQL-EMBEDDING",
                     format!(
                         "embedding dimension mismatch for index {}: got {} want {}",
                         item.index,
-                        item.embedding.len(),
+                        dense.len(),
                         self.dimension
                     ),
                     None,
                 ));
             }
-            vectors[item.index] = Some(item.embedding);
+            vectors[item.index] = Some(dense);
         }
 
         let mut result = Vec::with_capacity(vectors.len());
@@ -237,6 +365,114 @@ impl HttpEmbedder {
     pub async fn embed_batch(&self, inputs: &[String]) -> Result<Vec<Vec<f32>>, QqlError> {
         self.embed_batch_with_model(inputs, &self.model).await
     }
+
+    async fn embed_multi_batch_with_model(
+        &self,
+        inputs: &[String],
+        model: &str,
+    ) -> Result<Vec<Vec<Vec<f32>>>, QqlError> {
+        if inputs.is_empty() {
+            return Ok(Vec::new());
+        }
+        if !self.multi_enabled() {
+            return Err(qql_embed::embedder::multi_unsupported_error(model));
+        }
+
+        let model_name = self.resolve_multi_model(model);
+        let body = EmbedRequest {
+            model: model_name.clone(),
+            input: inputs.to_vec(),
+        };
+
+        let decoded = self
+            .do_request(self.multi_url(), self.multi_key(), &body)
+            .await?;
+
+        if decoded.data.len() != inputs.len() {
+            return Err(QqlError::execution(
+                "QQL-EMBEDDING-MULTI",
+                format!(
+                    "multi embedding response returned {} result(s) for {} input(s) (model={model_name})",
+                    decoded.data.len(),
+                    inputs.len()
+                ),
+                None,
+            ));
+        }
+
+        let mut vectors: Vec<Option<Vec<Vec<f32>>>> = vec![None; inputs.len()];
+        for item in decoded.data {
+            if item.index >= inputs.len() {
+                return Err(QqlError::execution(
+                    "QQL-EMBEDDING-MULTI",
+                    format!("multi embedding response index {} out of range", item.index),
+                    None,
+                ));
+            }
+            if vectors[item.index].is_some() {
+                return Err(QqlError::execution(
+                    "QQL-EMBEDDING-MULTI",
+                    format!("multi embedding response duplicated index {}", item.index),
+                    None,
+                ));
+            }
+            let multi = match item.embedding {
+                EmbeddingPayload::Multi(rows) => rows,
+                EmbeddingPayload::Dense(flat) => {
+                    return Err(QqlError::execution(
+                        "QQL-EMBEDDING-MULTI",
+                        format!(
+                            "multi embedding endpoint returned a flat dense vector (len={}) for index {}; \
+                             expected nested array [[f32,…],…] (token-level multivector). \
+                             Point MODEL at a ColBERT multi service or set multi_embedding_endpoint.",
+                            flat.len(),
+                            item.index
+                        ),
+                        None,
+                    ));
+                }
+            };
+            if multi.is_empty() {
+                return Err(QqlError::execution(
+                    "QQL-EMBEDDING-MULTI",
+                    format!("multi embedding returned empty bag at index {}", item.index),
+                    None,
+                ));
+            }
+            if self.multi_dimension > 0 {
+                for (row_i, row) in multi.iter().enumerate() {
+                    if row.len() != self.multi_dimension {
+                        return Err(QqlError::execution(
+                            "QQL-EMBEDDING-MULTI",
+                            format!(
+                                "multi embedding dimension mismatch at index {} row {}: got {} want {}",
+                                item.index,
+                                row_i,
+                                row.len(),
+                                self.multi_dimension
+                            ),
+                            None,
+                        ));
+                    }
+                }
+            }
+            vectors[item.index] = Some(multi);
+        }
+
+        let mut result = Vec::with_capacity(vectors.len());
+        for (i, v) in vectors.into_iter().enumerate() {
+            if let Some(vec) = v {
+                result.push(vec);
+            } else {
+                return Err(QqlError::execution(
+                    "QQL-EMBEDDING-MULTI",
+                    format!("missing multi embedding at index {}", i),
+                    None,
+                ));
+            }
+        }
+        Ok(result)
+    }
 }
 
 #[cfg(feature = "rest")]
@@ -245,6 +481,14 @@ impl HttpEmbedder {
 impl Embedder for HttpEmbedder {
     fn dimension(&self) -> Option<usize> {
         Some(self.dimension)
+    }
+
+    fn multi_dimension(&self) -> Option<usize> {
+        if self.multi_dimension > 0 {
+            Some(self.multi_dimension)
+        } else {
+            None
+        }
     }
 
     async fn embed_dense(&self, text: &str, model: &str) -> Result<Vec<f32>, QqlError> {
@@ -264,5 +508,26 @@ impl Embedder for HttpEmbedder {
 
     async fn embed_sparse(&self, text: &str) -> Result<SparseVector, QqlError> {
         Ok(qql_embed::sparse::build_query_default(text))
+    }
+
+    async fn embed_multi(&self, text: &str, model: &str) -> Result<Vec<Vec<f32>>, QqlError> {
+        let results = self
+            .embed_multi_batch_with_model(&[text.to_string()], model)
+            .await?;
+        results.into_iter().next().ok_or_else(|| {
+            QqlError::execution(
+                "QQL-EMBEDDING-MULTI",
+                "multi embedding response was empty",
+                None,
+            )
+        })
+    }
+
+    async fn embed_multi_batch(
+        &self,
+        texts: &[String],
+        model: &str,
+    ) -> Result<Vec<Vec<Vec<f32>>>, QqlError> {
+        self.embed_multi_batch_with_model(texts, model).await
     }
 }

@@ -29,6 +29,18 @@ pub struct QqlConfig {
     pub embedding_model: Option<String>,
     #[serde(default)]
     pub embedding_dimension: usize,
+    /// Optional multi-vector / ColBERT embedding endpoint (OpenAI-compatible).
+    /// When unset, multi requests reuse [`embedding_endpoint`].
+    #[serde(default)]
+    pub multi_embedding_endpoint: Option<String>,
+    #[serde(default)]
+    pub multi_embedding_api_key: Option<String>,
+    /// Default model for multivector / late-interaction embeds (RERANK, AS MULTI).
+    #[serde(default)]
+    pub multi_embedding_model: Option<String>,
+    /// Per-token dimension for multivector models (e.g. 96 ColBERT-small, 1024 BGE-M3).
+    #[serde(default)]
+    pub multi_embedding_dimension: usize,
     #[serde(default)]
     pub no_verify: bool,
     #[serde(default)]

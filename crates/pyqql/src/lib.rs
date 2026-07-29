@@ -222,6 +222,8 @@ fn extract_embedder_config(
                 .get_item("api_key")?
                 .map(|value| value.extract::<String>())
                 .transpose()?;
+            // multi_* keys are applied later on config; parse into side channel via attributes
+            // is handled in create_executor when building HttpEmbedderOptions from full dict.
             if ep.as_ref().is_some_and(|value| value.trim().is_empty()) {
                 return Err(pyo3::exceptions::PyValueError::new_err(
                     "embedder.endpoint must not be empty",
@@ -269,6 +271,23 @@ fn create_executor(
         config.embedding_model = model;
         config.embedding_dimension = dim.unwrap_or(0);
     }
+    // Optional multi/ColBERT fields from embedder dict.
+    if let Some(emb) = embedder {
+        if let Ok(dict) = emb.downcast::<PyDict>() {
+            if let Ok(Some(v)) = dict.get_item("multi_endpoint") {
+                config.multi_embedding_endpoint = Some(v.extract::<String>()?);
+            }
+            if let Ok(Some(v)) = dict.get_item("multi_api_key") {
+                config.multi_embedding_api_key = Some(v.extract::<String>()?);
+            }
+            if let Ok(Some(v)) = dict.get_item("multi_model") {
+                config.multi_embedding_model = Some(v.extract::<String>()?);
+            }
+            if let Ok(Some(v)) = dict.get_item("multi_dimension") {
+                config.multi_embedding_dimension = v.extract::<usize>()?;
+            }
+        }
+    }
 
     let client: Box<dyn qql::client::QdrantOps> = if use_grpc {
         #[cfg(feature = "grpc")]
@@ -290,11 +309,19 @@ fn create_executor(
 
     let embedder_impl = if let Some(endpoint) = &config.embedding_endpoint {
         if !endpoint.trim().is_empty() {
-            let api_key = config.embedding_api_key.clone().unwrap_or_default();
-            let model = config.embedding_model.clone().unwrap_or_default();
-            let dim = config.embedding_dimension;
-            let http_emb = qql::embedder::HttpEmbedder::new(endpoint.clone(), api_key, model, dim)
-                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            let http_emb = qql::embedder::HttpEmbedder::try_with_options(
+                qql::embedder::HttpEmbedderOptions {
+                    endpoint: endpoint.clone(),
+                    api_key: config.embedding_api_key.clone().unwrap_or_default(),
+                    model: config.embedding_model.clone().unwrap_or_default(),
+                    dimension: config.embedding_dimension,
+                    multi_endpoint: config.multi_embedding_endpoint.clone(),
+                    multi_api_key: config.multi_embedding_api_key.clone(),
+                    multi_model: config.multi_embedding_model.clone(),
+                    multi_dimension: config.multi_embedding_dimension,
+                },
+            )
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
             Some(std::sync::Arc::new(http_emb) as std::sync::Arc<dyn qql::embedder::Embedder>)
         } else {
             None

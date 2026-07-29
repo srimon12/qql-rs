@@ -93,6 +93,13 @@ impl<'a> AstLowerer<'a> {
                     EmbedKind::Dense {
                         model: self.parse_optional_model_string()?,
                     }
+                } else if ascii_equal(self.peek()?.text, "MULTI")
+                    || ascii_equal(self.peek()?.text, "MULTIVECTOR")
+                {
+                    self.advance()?;
+                    EmbedKind::Multi {
+                        model: self.parse_optional_model_string()?,
+                    }
                 } else if self.peek()?.kind == TokenKind::Model {
                     EmbedKind::Dense {
                         model: Some(self.parse_required_model_string()?),
@@ -100,7 +107,7 @@ impl<'a> AstLowerer<'a> {
                 } else {
                     return Err(QqlError::parse(
                         "QQL-PARSE-EMBED",
-                        "EMBED USING requires DENSE, SPARSE, or MODEL",
+                        "EMBED USING requires DENSE, SPARSE, MULTI, or MODEL",
                         self.peek()?.span,
                     ));
                 }

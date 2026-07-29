@@ -36,8 +36,8 @@ mod embedder;
 pub use backend::EdgeQdrant;
 #[cfg(feature = "fastembed-local")]
 pub use embedder::{
-    list_embedding_models, resolve_embedding_model, EmbeddingModelInfo, FastEmbedder,
-    FastEmbedderOptions,
+    list_embedding_models, resolve_embedding_model, resolve_multi_model, EmbeddingModelInfo,
+    FastEmbedder, FastEmbedderOptions,
 };
 
 use qql::config::QqlConfig;
@@ -53,10 +53,14 @@ pub struct LocalExecutorOptions {
     /// this struct defaults to `false` for Rust ergonomics matching the
     /// historical `local_executor(path, false)` tests).
     pub on_disk_payload: bool,
-    /// Local ONNX model name. See [`resolve_embedding_model`] for accepted forms.
+    /// Local ONNX dense model name. See [`resolve_embedding_model`] for accepted forms.
     /// `None` → default `BGESmallENV15` (384-d).
     #[cfg(feature = "fastembed-local")]
     pub model: Option<String>,
+    /// Offline multivector model (BGE-M3 ColBERT). e.g. `"bge-m3"`.
+    /// When set, `embed_multi` / multivector RERANK work with no network.
+    #[cfg(feature = "fastembed-local")]
+    pub multi_model: Option<String>,
     /// Override fastembed model cache directory.
     #[cfg(feature = "fastembed-local")]
     pub cache_dir: Option<PathBuf>,
@@ -95,6 +99,7 @@ pub fn local_executor_with_options(
     let client = Box::new(EdgeQdrant::new(data_dir, opts.on_disk_payload));
     let embedder = FastEmbedder::try_with_options(FastEmbedderOptions {
         model: opts.model,
+        multi_model: opts.multi_model,
         cache_dir: opts.cache_dir,
         show_download_progress: opts.show_download_progress,
     })?;
@@ -102,10 +107,13 @@ pub fn local_executor_with_options(
     // Pin collection vector size to the actual model dimension. Without this,
     // CREATE COLLECTION HYBRID always falls back to the hard-coded 384 and any
     // non-default model (768 / 1024-d) silently dimension-mismatches on upsert.
+    let multi_dim = embedder.multi_dimension().unwrap_or(0);
     let config = QqlConfig {
         inference_mode: "local".to_string(),
         embedding_dimension: embedder.dimension(),
         embedding_model: Some(embedder.model_name().to_string()),
+        multi_embedding_model: embedder.multi_model_code().map(str::to_string),
+        multi_embedding_dimension: multi_dim,
         ..Default::default()
     };
 
@@ -133,22 +141,65 @@ pub fn http_executor(
     model: impl Into<String>,
     dimension: usize,
 ) -> Result<Executor, qql_core::error::QqlError> {
+    http_executor_with_multi(
+        data_dir,
+        on_disk_payload,
+        endpoint,
+        api_key,
+        model,
+        dimension,
+        None,
+        None,
+        None,
+        0,
+    )
+}
+
+/// Edge executor with OpenAI-compatible dense + optional multi/ColBERT endpoints.
+#[cfg(feature = "http-embedding")]
+#[allow(clippy::too_many_arguments)]
+pub fn http_executor_with_multi(
+    data_dir: impl Into<PathBuf>,
+    on_disk_payload: bool,
+    endpoint: impl Into<String>,
+    api_key: impl Into<String>,
+    model: impl Into<String>,
+    dimension: usize,
+    multi_endpoint: Option<String>,
+    multi_api_key: Option<String>,
+    multi_model: Option<String>,
+    multi_dimension: usize,
+) -> Result<Executor, qql_core::error::QqlError> {
     let client = Box::new(EdgeQdrant::new(data_dir, on_disk_payload));
     let model = model.into();
-    let embedder = Some(Arc::new(qql::embedder::HttpEmbedder::new(
-        endpoint.into(),
-        api_key.into(),
-        model.clone(),
+    let endpoint = endpoint.into();
+    let api_key = api_key.into();
+    let embedder = qql::embedder::HttpEmbedder::try_with_options(qql::embedder::HttpEmbedderOptions {
+        endpoint: endpoint.clone(),
+        api_key: api_key.clone(),
+        model: model.clone(),
         dimension,
-    )?) as Arc<dyn Embedder>);
+        multi_endpoint: multi_endpoint.clone(),
+        multi_api_key: multi_api_key.clone(),
+        multi_model: multi_model.clone(),
+        multi_dimension,
+    })?;
     let config = QqlConfig {
         inference_mode: "local".to_string(),
         embedding_dimension: dimension,
         embedding_model: Some(model),
         embedding_endpoint: None, // edge uses the Arc embedder, not config probing
+        multi_embedding_endpoint: multi_endpoint,
+        multi_embedding_api_key: multi_api_key,
+        multi_embedding_model: multi_model,
+        multi_embedding_dimension: multi_dimension,
         ..Default::default()
     };
-    Ok(Executor::with_embedder(client, Some(config), embedder))
+    Ok(Executor::with_embedder(
+        client,
+        Some(config),
+        Some(Arc::new(embedder) as Arc<dyn Embedder>),
+    ))
 }
 
 /// Build an edge [`Executor`] with a fully custom [`Embedder`].

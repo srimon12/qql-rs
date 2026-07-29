@@ -347,8 +347,31 @@ fn executor(
                 } else {
                     384
                 });
-            let http_emb =
-                qql::embedder::HttpEmbedder::new(endpoint.clone(), api_key, model, dimension)?;
+            let multi_endpoint = std::env::var("MULTI_EMBED_URL")
+                .ok()
+                .or_else(|| config.multi_embedding_endpoint.clone());
+            let multi_api_key = std::env::var("MULTI_EMBED_KEY")
+                .ok()
+                .or_else(|| config.multi_embedding_api_key.clone());
+            let multi_model = std::env::var("MULTI_EMBED_MODEL")
+                .ok()
+                .or_else(|| config.multi_embedding_model.clone());
+            let multi_dimension = std::env::var("MULTI_EMBED_DIM")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(config.multi_embedding_dimension);
+            let http_emb = qql::embedder::HttpEmbedder::try_with_options(
+                qql::embedder::HttpEmbedderOptions {
+                    endpoint: endpoint.clone(),
+                    api_key,
+                    model,
+                    dimension,
+                    multi_endpoint,
+                    multi_api_key,
+                    multi_model,
+                    multi_dimension,
+                },
+            )?;
             Some(std::sync::Arc::new(http_emb) as std::sync::Arc<dyn qql::embedder::Embedder>)
         } else {
             None
@@ -372,6 +395,7 @@ fn edge_executor() -> Result<qql::executor::Executor, Box<dyn std::error::Error>
             let options = qql_edge::LocalExecutorOptions {
                 on_disk_payload: config.on_disk_payload,
                 model: config.model,
+                multi_model: config.multi_model.or(config.multi_embed_model.clone()),
                 cache_dir: config.cache_dir,
                 show_download_progress: config.show_download_progress,
             };
@@ -382,13 +406,17 @@ fn edge_executor() -> Result<qql::executor::Executor, Box<dyn std::error::Error>
             let endpoint = config.embed_url.ok_or(
                 "the edge HTTP embedder requires embed_url; run `qql config edge --embedder http --embed-url <URL>`",
             )?;
-            qql_edge::http_executor(
+            qql_edge::http_executor_with_multi(
                 config.data_dir,
                 config.on_disk_payload,
                 endpoint,
                 config.embed_key,
                 config.embed_model,
                 config.embed_dimension,
+                config.multi_embed_url,
+                config.multi_embed_key,
+                config.multi_embed_model,
+                config.multi_embed_dimension,
             )
             .map_err(|error| format!("edge initialization failed: {error}").into())
         }

@@ -161,7 +161,8 @@ pub fn embedding_has_wait(spec: &EmbeddingSpec) -> bool {
     match spec {
         EmbeddingSpec::Dense { .. }
         | EmbeddingSpec::Sparse { .. }
-        | EmbeddingSpec::Hybrid { .. } => true,
+        | EmbeddingSpec::Hybrid { .. }
+        | EmbeddingSpec::MultiVector { .. } => true,
         EmbeddingSpec::Multi(specs) => specs.iter().any(embedding_has_wait),
     }
 }

@@ -107,9 +107,12 @@ enum ConfigCommand {
         /// Embedding backend: fastembed or an OpenAI-compatible HTTP endpoint.
         #[arg(long, default_value = "fastembed")]
         embedder: String,
-        /// Local FastEmbed model name or alias.
+        /// Local FastEmbed dense model name or alias.
         #[arg(long)]
         model: Option<String>,
+        /// Offline multivector model for fastembed (e.g. bge-m3).
+        #[arg(long)]
+        multi_model: Option<String>,
         /// Directory used for downloaded FastEmbed models.
         #[arg(long)]
         cache_dir: Option<PathBuf>,
@@ -128,6 +131,18 @@ enum ConfigCommand {
         /// Expected HTTP embedding dimension.
         #[arg(long, default_value_t = 768)]
         embed_dim: usize,
+        /// Optional multi/ColBERT HTTP embedding endpoint.
+        #[arg(long)]
+        multi_embed_url: Option<String>,
+        /// API key for the multi embedding endpoint.
+        #[arg(long)]
+        multi_embed_key: Option<String>,
+        /// Multi/ColBERT model name for HTTP multi embeds.
+        #[arg(long)]
+        multi_embed_model: Option<String>,
+        /// Per-token dimension for multi embeds (0 = skip check).
+        #[arg(long, default_value_t = 0)]
+        multi_embed_dim: usize,
     },
 }
 
@@ -215,24 +230,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     in_memory,
                     embedder,
                     model,
+                    multi_model,
                     cache_dir,
                     show_download_progress,
                     embed_url,
                     embed_key,
                     embed_model,
                     embed_dim,
+                    multi_embed_url,
+                    multi_embed_key,
+                    multi_embed_model,
+                    multi_embed_dim,
                 },
         } => commands::handle_configure_edge(config::EdgeConfig {
             data_dir: data_dir.unwrap_or_else(|| config::EdgeConfig::default().data_dir),
             on_disk_payload: !in_memory,
             embedder,
             model,
+            multi_model,
             cache_dir,
             show_download_progress,
             embed_url,
             embed_key,
             embed_model,
             embed_dimension: embed_dim,
+            multi_embed_url,
+            multi_embed_key,
+            multi_embed_model,
+            multi_embed_dimension: multi_embed_dim,
         }),
         Command::Version => commands::handle_version(),
     }

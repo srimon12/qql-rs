@@ -674,6 +674,9 @@ impl Executor {
                         ast::EmbeddingSpec::Sparse { model, vector, .. } => {
                             vec![(model.as_deref(), false, true, None, vector.as_deref())]
                         }
+                        // MultiVector alone does not auto-create a collection here;
+                        // collections with multivector DDL are created explicitly.
+                        ast::EmbeddingSpec::MultiVector { .. } => Vec::new(),
                         ast::EmbeddingSpec::Hybrid {
                             dense_model,
                             dense_vector,
@@ -812,9 +815,20 @@ impl Executor {
             });
         }
         if with_colbert {
+            let multi_size = self
+                .embedder
+                .as_deref()
+                .and_then(crate::embedder::Embedder::multi_dimension)
+                .or_else(|| {
+                    self.config.as_ref().and_then(|c| {
+                        (c.multi_embedding_dimension > 0)
+                            .then_some(c.multi_embedding_dimension)
+                    })
+                })
+                .unwrap_or(RERANK_VECTOR_SIZE as usize) as u64;
             create.vectors.push(ast::VectorDef {
                 name: RERANK_VECTOR_NAME.to_string(),
-                size: RERANK_VECTOR_SIZE,
+                size: multi_size,
                 distance: ast::VectorDistance::Cosine,
                 hnsw: None,
                 quantization: None,

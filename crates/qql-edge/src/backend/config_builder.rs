@@ -53,10 +53,24 @@ pub(crate) fn build_edge_config(
                         )))
                     }
                 };
+                let multivector_config = params.get("multivector_config").and_then(|mv| {
+                    let comparator = mv
+                        .get("comparator")
+                        .and_then(|c| c.as_str())
+                        .unwrap_or("max_sim");
+                    // Edge only supports max_sim today.
+                    if comparator.eq_ignore_ascii_case("max_sim") {
+                        Some(qdrant_edge::MultiVectorConfig {
+                            comparator: qdrant_edge::MultiVectorComparator::MaxSim,
+                        })
+                    } else {
+                        None
+                    }
+                });
                 let edge_params = qdrant_edge::EdgeVectorParams {
                     size,
                     distance,
-                    multivector_config: None,
+                    multivector_config,
                     datatype: None,
                     hnsw_config: None,
                     quantization_config: None,

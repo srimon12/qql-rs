@@ -22,7 +22,20 @@ pub trait Embedder: Send + Sync {
 ```
 
 Dense embedding is **batched by model** when the target is single-vector dense.
-Sparse and multivector embeddings are applied one text at a time (like sparse BM25).
+Sparse and multivector embeddings are applied one text at a time (like sparse BM25);
+hosts may override `embed_multi_batch` (HTTP multi, BGE-M3 joint).
+
+### FastEmbed-style host mapping
+
+| Host capability | QQL method | Shape |
+|---|---|---|
+| Sentence / CLIP **text** dense (`TextEmbedding`) | `embed_dense` | `[f32]` |
+| CLIP **vision** / image dense (`ImageEmbedding`) | dense (host-specific; not default) | `[f32]` |
+| Sparse (BM25 / SPLADE) | `embed_sparse` | indices + values |
+| ColBERT / BGE-M3 **ColBERT** bags (`Bgem3Embedding.colbert`) | `embed_multi` | `[[f32],…]` |
+| Cross-encoder pair scores (`TextRerank`) | **not** this trait | pair scores (future language) |
+
+CLIP is dual-encoder **dense**, never multivector. Multivector is late-interaction bags only.
 
 ## Schema topology before embed
 

@@ -749,7 +749,20 @@ impl QdrantOps for EdgeQdrant {
                         .to_string(),
                         hnsw: None,
                         quantization: None,
-                        multivector: None,
+                        multivector: params.multivector_config.as_ref().map(|mv| {
+                            let mut map = serde_json::Map::new();
+                            map.insert(
+                                "comparator".into(),
+                                serde_json::Value::String(
+                                    match mv.comparator {
+                                        qdrant_edge::MultiVectorComparator::MaxSim => {
+                                            "max_sim".into()
+                                        }
+                                    },
+                                ),
+                            );
+                            map
+                        }),
                         on_disk: params.on_disk,
                     })
                     .collect();

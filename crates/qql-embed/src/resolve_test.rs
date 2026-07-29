@@ -153,6 +153,49 @@ async fn unnamed_vector_topology_conflict_rejected() {
 }
 
 #[tokio::test]
+async fn upsert_multi_vector_spec_calls_embed_multi() {
+    let mut stmt = Parser::parse(
+        "UPSERT INTO docs VALUES {id: 1, text: 'late interaction'} \
+         USING MULTI MODEL 'bge-m3' VECTOR colbert;",
+    )
+    .unwrap();
+    let mock = MockEmbedder::default();
+    resolve_embeddings(&mut stmt, &mock).await.unwrap();
+    let multi = mock.multi_calls.lock().unwrap();
+    assert_eq!(multi.len(), 1);
+    assert_eq!(multi[0].0, "bge-m3");
+    assert_eq!(multi[0].1, "late interaction");
+    let Stmt::Upsert(u) = &stmt else {
+        panic!("expected upsert");
+    };
+    match &u.points[0].vectors {
+        Some(PointVectors::Named(list)) => {
+            let (_, v) = list
+                .iter()
+                .find(|(n, _)| n == "colbert")
+                .expect("colbert vector");
+            assert!(matches!(v, VectorValue::MultiDense(rows) if !rows.is_empty()));
+        }
+        other => panic!("expected named multi vector, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn as_multi_query_calls_embed_multi() {
+    let mut stmt = Parser::parse(
+        "QUERY TEXT 'q' FROM docs USING colbert AS MULTI LIMIT 5;",
+    )
+    .unwrap();
+    let mock = MockEmbedder::default();
+    resolve_embeddings(&mut stmt, &mock).await.unwrap();
+    let multi = mock.multi_calls.lock().unwrap();
+    assert_eq!(multi.len(), 1);
+    assert_eq!(multi[0].1, "q");
+    let dense = mock.dense_calls.lock().unwrap();
+    assert!(dense.is_empty(), "multi path must not use dense embed");
+}
+
+#[tokio::test]
 async fn sparse_model_is_rejected() {
     let mut stmt = Stmt::Upsert(Box::new(UpsertStmt {
         collection: "docs".into(),

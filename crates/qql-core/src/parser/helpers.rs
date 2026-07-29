@@ -102,8 +102,11 @@ impl<'a> AstLowerer<'a> {
             });
         }
 
+        // MULTI / MULTIVECTOR as bare words (same as AS MULTI — not reserved keywords).
+        let is_multi = super::ascii_equal(self.peek()?.text, "MULTI")
+            || super::ascii_equal(self.peek()?.text, "MULTIVECTOR");
         let is_sparse = self.peek()?.kind == TokenKind::Sparse;
-        if self.peek()?.kind == TokenKind::Dense || is_sparse {
+        if self.peek()?.kind == TokenKind::Dense || is_sparse || is_multi {
             self.advance()?;
         } else if self.peek()?.kind != TokenKind::Model
             && self.peek()?.kind != TokenKind::Vector
@@ -112,14 +115,20 @@ impl<'a> AstLowerer<'a> {
         {
             return Err(QqlError::parse(
                 "QQL-PARSE-EMBEDDING",
-                "USING requires DENSE, SPARSE, HYBRID, MODEL, VECTOR, INTO, or ON FIELD",
+                "USING requires DENSE, SPARSE, HYBRID, MULTI, MODEL, VECTOR, INTO, or ON FIELD",
                 self.peek()?.span,
             ));
         }
 
         let (model, vector, field) = self.parse_embedding_spec_modifiers()?;
 
-        if is_sparse {
+        if is_multi {
+            Ok(EmbeddingSpec::MultiVector {
+                model,
+                vector,
+                field,
+            })
+        } else if is_sparse {
             Ok(EmbeddingSpec::Sparse {
                 model,
                 vector,

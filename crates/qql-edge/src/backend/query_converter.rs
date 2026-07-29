@@ -268,9 +268,14 @@ fn plan_input_to_vector_internal(input: &PlanQueryInput) -> Result<VectorInterna
                 values: values.clone(),
             }))
         }
-        PlanQueryInput::Vector(PlanVectorValue::MultiDense(_)) => Err(edge_error(
-            "multidense queries are not supported in edge mode",
-        )),
+        PlanQueryInput::Vector(PlanVectorValue::MultiDense(rows)) => {
+            if rows.is_empty() {
+                return Err(edge_error("multidense query vector cannot be empty"));
+            }
+            let vec = qdrant_edge::Vector::new_multi(rows.clone())
+                .map_err(|e| edge_error(format!("invalid multidense query vector: {e}")))?;
+            Ok(vec.0)
+        }
         PlanQueryInput::Vector(PlanVectorValue::Dense(_)) => {
             Err(edge_error("dense query vector cannot be empty"))
         }

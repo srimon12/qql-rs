@@ -391,10 +391,12 @@ impl JsClient {
 pub struct LocalExecutorOptions {
     /// Store payloads on disk (default `true`).
     pub on_disk_payload: Option<bool>,
-    /// Local ONNX model. Accepts enum names (`BGESmallENV15`), HF codes
+    /// Local ONNX dense model. Accepts enum names (`BGESmallENV15`), HF codes
     /// (`Xenova/bge-small-en-v1.5`), or short aliases (`bge-small-en-v1.5`).
     /// Default: `BGESmallENV15` (384-d).
     pub model: Option<String>,
+    /// Offline multivector model (BGE-M3 ColBERT), e.g. `"bge-m3"`.
+    pub multi_model: Option<String>,
     /// Override model cache directory (default: fastembed / HF cache).
     pub cache_dir: Option<String>,
     /// Show HuggingFace download progress (default `false`).
@@ -429,6 +431,7 @@ pub fn local_executor(
         qql_edge::LocalExecutorOptions {
             on_disk_payload: opts.on_disk_payload.unwrap_or(true),
             model: opts.model,
+            multi_model: opts.multi_model,
             cache_dir: opts.cache_dir.map(std::path::PathBuf::from),
             show_download_progress: opts.show_download_progress.unwrap_or(false),
         },
@@ -450,6 +453,7 @@ pub fn list_embedding_models() -> Vec<EmbeddingModelInfoJs> {
             model_code: m.model_code,
             dim: m.dim as u32,
             description: m.description,
+            multi: m.multi,
         })
         .collect()
 }
@@ -461,6 +465,7 @@ pub struct EmbeddingModelInfoJs {
     pub model_code: String,
     pub dim: u32,
     pub description: String,
+    pub multi: bool,
 }
 
 /// Create an edge executor that calls an external OpenAI-compatible embedding
@@ -509,6 +514,10 @@ fn standalone_local_opts(options: Option<&serde_json::Value>) -> LocalExecutorOp
             .and_then(|v| v.as_bool()),
         model: options
             .and_then(|o| o.get("model"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        multi_model: options
+            .and_then(|o| o.get("multiModel").or_else(|| o.get("multi_model")))
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
         cache_dir: options

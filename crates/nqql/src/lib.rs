@@ -239,6 +239,26 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
             config.embedding_model = emb.get("model").and_then(|v| v.as_str()).map(String::from);
             config.embedding_dimension =
                 emb.get("dimension").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            config.multi_embedding_endpoint = emb
+                .get("multiEndpoint")
+                .or_else(|| emb.get("multi_endpoint"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            config.multi_embedding_api_key = emb
+                .get("multiApiKey")
+                .or_else(|| emb.get("multi_api_key"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            config.multi_embedding_model = emb
+                .get("multiModel")
+                .or_else(|| emb.get("multi_model"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            config.multi_embedding_dimension = emb
+                .get("multiDimension")
+                .or_else(|| emb.get("multi_dimension"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize;
         }
     }
 
@@ -259,11 +279,19 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
 
     let embedder = if let Some(endpoint) = &config.embedding_endpoint {
         if !endpoint.trim().is_empty() {
-            let api_key = config.embedding_api_key.clone().unwrap_or_default();
-            let model = config.embedding_model.clone().unwrap_or_default();
-            let dim = config.embedding_dimension;
-            let http_emb = qql::embedder::HttpEmbedder::new(endpoint.clone(), api_key, model, dim)
-                .map_err(to_napi_err)?;
+            let http_emb = qql::embedder::HttpEmbedder::try_with_options(
+                qql::embedder::HttpEmbedderOptions {
+                    endpoint: endpoint.clone(),
+                    api_key: config.embedding_api_key.clone().unwrap_or_default(),
+                    model: config.embedding_model.clone().unwrap_or_default(),
+                    dimension: config.embedding_dimension,
+                    multi_endpoint: config.multi_embedding_endpoint.clone(),
+                    multi_api_key: config.multi_embedding_api_key.clone(),
+                    multi_model: config.multi_embedding_model.clone(),
+                    multi_dimension: config.multi_embedding_dimension,
+                },
+            )
+            .map_err(to_napi_err)?;
             Some(std::sync::Arc::new(http_emb) as std::sync::Arc<dyn qql::embedder::Embedder>)
         } else {
             None
