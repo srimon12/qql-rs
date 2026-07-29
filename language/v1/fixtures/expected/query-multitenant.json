@@ -48,6 +48,7 @@
         "collection": {
           "Explicit": "sec10k"
         },
+        "exact": null,
         "filter": {
           "Compare": {
             "field": "tenant_id",

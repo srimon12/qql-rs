@@ -6,6 +6,7 @@
         "collection": {
           "Explicit": "docs"
         },
+        "exact": null,
         "filter": null,
         "shard_key": null
       }
@@ -15,6 +16,7 @@
         "collection": {
           "Explicit": "docs"
         },
+        "exact": null,
         "filter": {
           "Compare": {
             "field": "status",
@@ -32,6 +34,7 @@
         "collection": {
           "Explicit": "sec10k"
         },
+        "exact": null,
         "filter": {
           "Compare": {
             "field": "tenant_id",
@@ -49,6 +52,7 @@
         "collection": {
           "Explicit": "docs"
         },
+        "exact": null,
         "filter": {
           "And": {
             "operands": [

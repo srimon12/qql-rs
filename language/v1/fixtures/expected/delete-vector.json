@@ -9,6 +9,7 @@
             "Number": 42
           }
         },
+        "shard_key": null,
         "vector_names": [
           "colbert"
         ]
@@ -28,6 +29,7 @@
             }
           }
         },
+        "shard_key": null,
         "vector_names": [
           "dense",
           "sparse"
@@ -48,6 +50,7 @@
             }
           }
         },
+        "shard_key": null,
         "vector_names": [
           "colbert"
         ]

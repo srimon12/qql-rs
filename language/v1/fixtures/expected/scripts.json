@@ -74,6 +74,7 @@
         "collection": {
           "Explicit": "docs"
         },
+        "exact": null,
         "filter": {
           "Compare": {
             "field": "status",
@@ -149,6 +150,7 @@
         "collection": {
           "Explicit": "docs"
         },
+        "exact": null,
         "filter": {
           "Compare": {
             "field": "status",
