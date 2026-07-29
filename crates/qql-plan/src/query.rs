@@ -395,7 +395,7 @@ pub fn lower_query_request(query: &QueryStmt) -> Result<QueryRequest, QqlError> 
         with_vector,
         limit: query.page.limit,
         offset: query.page.offset,
-        lookup_from: None,
+        lookup_from: extract_lookup_from(query),
         shard_key: query.shard_key.clone(),
         timeout,
         consistency,
@@ -439,7 +439,7 @@ pub fn lower_query_groups_request(query: &QueryStmt) -> Result<QueryGroupsReques
             .lookup
             .as_ref()
             .map(|coll| WithLookupValue::Collection(coll.clone())),
-        lookup_from: None,
+        lookup_from: extract_lookup_from(query),
         shard_key: query.shard_key.clone(),
         timeout,
         consistency,
@@ -677,6 +677,18 @@ fn expression_prefetch(expr: &QueryExpr) -> &[qql_core::ast::Prefetch] {
         | QueryExpr::CrossRerank { prefetch, .. } => prefetch,
         _ => &[],
     }
+}
+
+fn extract_lookup_from(query: &QueryStmt) -> Option<LookupRequest> {
+    for pf in expression_prefetch(&query.expression) {
+        if let Some(l) = &pf.lookup {
+            return Some(LookupRequest {
+                collection: l.collection.clone(),
+                vector: l.vector.clone(),
+            });
+        }
+    }
+    None
 }
 
 #[cfg(test)]
