@@ -104,11 +104,7 @@ QUERY FUSION RRF FROM incidents
 
 **Problem:** You search in collection `research_papers`, but the group IDs (e.g. author names) live in a separate `author_metadata` collection. You want top-5 results per author without duplicate author dominance in the result feed.
 
-**Why this works:** `GROUP BY` partitions hits by payload field, while `LOOKUP FROM` resolves grouping metadata cross-collection.
-
-**Limit:** `OFFSET` is **not** allowed with `GROUP BY` (`QQL-PLAN-GROUP-OFFSET`).
-Page groups with `LIMIT` only, or filter group keys. Edge rejects `GROUP BY`
-entirely — use remote Qdrant for grouped search.
+**Why this works:** `GROUP BY` partitions hits by payload field, while `LOOKUP FROM` resolves grouping metadata cross-collection. `OFFSET` is supported with `GROUP BY` (maps to `group_offset`). Edge rejects `GROUP BY` entirely — use remote Qdrant for grouped search.
 
 ```sql
 QUERY TEXT 'machine learning optimization' FROM research_papers
@@ -495,10 +491,7 @@ QUERY FORMULA score * GAUSS_DECAY(GEO_DISTANCE(48.8566, 2.3522, location), 0.0, 
 
 ## 21. Maximal Marginal Relevance (MMR) Diversification
 
-**Problem:** Balance similarity relevance against result diversity for dense queries.
-
-**Limit:** MMR is **dense nearest only**. `USING … AS SPARSE` fails with
-`QQL-PLAN-MMR-SPARSE`. Do not use MMR on sparse or recommend queries.
+**Problem:** Balance similarity relevance against result diversity. MMR supports both dense and sparse targets.
 
 ```sql
 QUERY MMR 'emergency triage' DIVERSITY 0.5 CANDIDATES 100

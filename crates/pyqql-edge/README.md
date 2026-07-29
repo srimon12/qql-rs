@@ -113,6 +113,7 @@ All execution methods return an `ExecutionReport` dictionary:
 | `http_executor(data_dir, url, ...)` | Create an edge Client with local vector storage and remote HTTP embedder |
 | `Stmt` | Parsed statement object with `inject_filter()`, `to_json()`, `to_dict()`, `shard_key` property |
 | `parse(input)` | Parse one statement or a semicolon-delimited script into a list of `Stmt` objects |
+| `parse_json(input)` | Parse to raw JSON string (bypasses Python object allocation) |
 | `is_valid(input)` | Validate QQL syntax |
 | `inject_filter(query, field, op, value)` | Inject tenant filter into statement AST (accepts str or Stmt) |
 | `tokenize(input)` | Tokenize QQL string for syntax highlighting or inspection |

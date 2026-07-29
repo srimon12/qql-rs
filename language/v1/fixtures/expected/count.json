@@ -79,6 +79,24 @@
         },
         "shard_key": null
       }
+    },
+    {
+      "Count": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "exact": true,
+        "filter": {
+          "Compare": {
+            "field": "active",
+            "op": "Eq",
+            "value": {
+              "Bool": true
+            }
+          }
+        },
+        "shard_key": null
+      }
     }
   ]
 }

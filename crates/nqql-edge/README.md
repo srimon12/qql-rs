@@ -114,6 +114,7 @@ All execution methods return an `ExecutionReport` object:
 | `injectFilter(query, field, op, value)` | Inject tenant filter into statement AST |
 | `compileQuery(input)` | Lower QQL statement into `{ stmt_type, method, path, payload }` route object |
 | `explain(query)` | Inspect the execution plan without executing network calls |
+| `explainStmt(stmt)` | Explain a pre-parsed Stmt object |
 | `execute(query, options?)` | One-shot execute with temporary edge client; `options.onError` is `"stop"` or `"continue"` |
 | `executeStmt(stmt, options?)` | Free-function execute a pre-parsed Stmt |
 | `version` | Package runtime version string |

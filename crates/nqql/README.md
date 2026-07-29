@@ -33,7 +33,7 @@ npm install @veristamp/nqql
 const {
   Client, HttpEmbedder, Stmt,
   parse, parseJson,
-  isValid, injectFilter, tokenize,
+  isValid, injectFilter, injectShardKey, tokenize,
   compileQuery, explain, explainStmt,
   execute, executeStmt, version
 } = require('@veristamp/nqql');
@@ -71,6 +71,10 @@ const valid = isValid("QUERY 'test' FROM docs");
 // Inject tenant filter into query string (returns AST) or Stmt object
 const securedAst = injectFilter("QUERY 'search' FROM docs LIMIT 10", "org_id", "=", "acme-corp");
 stmts[0].injectFilter("tenant_id", "=", "acme-corp");
+
+// Inject shard key into query for multi-tenant routing
+const shardedAst = injectShardKey("QUERY 'test' FROM docs LIMIT 10", "honeywell");
+stmts[0].injectShardKey("honeywell");
 
 // 3. Lower to route without executing
 const route = compileQuery("QUERY 'search' FROM docs LIMIT 10");
@@ -142,6 +146,7 @@ try {
 | `isValid(input)` | Validate QQL syntax |
 | `tokenize(input)` | Tokenize QQL input string |
 | `injectFilter(query, field, op, value)` | Inject tenant filter into statement AST |
+| `injectShardKey(query, key)` | Inject a shard key into a QQL string (host multi-tenant routing) |
 | `compileQuery(input)` | Lower QQL statement into `{ stmt_type, method, path, payload }` route object |
 | `explain(query)` | Inspect the execution plan without executing network calls |
 | `explainStmt(stmt)` | Explain a pre-parsed Stmt object |

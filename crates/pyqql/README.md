@@ -132,6 +132,7 @@ All execution methods return an `ExecutionReport` dictionary:
 | `parse(input)` | Parse one statement or a semicolon-delimited script into a list of `Stmt` objects |
 | `is_valid(input)` | Validate QQL syntax |
 | `inject_filter(query, field, op, value)` | Inject tenant filter into statement AST (accepts str or Stmt) |
+| `inject_shard_key(query, key)` | Inject a shard key into a QQL string or Stmt (host multi-tenant routing) |
 | `tokenize(input)` | Tokenize QQL string for syntax highlighting or inspection |
 | `compile_query(input)` | Lower QQL statement into typed `{ method, path, payload }` route dict |
 | `explain(query)` | Inspect the execution plan without executing network calls (accepts str or Stmt) |

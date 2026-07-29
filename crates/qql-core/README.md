@@ -76,10 +76,10 @@ Each clause occurs at most once and only in this order.
 to `QueryExpr::Hybrid` (dense + sparse prefetches fused with RRF/DBSF). It only
 applies to text nearest queries.
 
-Planner fail-closed limits (not silent drops):
+Planner capabilities:
 
-- `GROUP BY` + non-zero `OFFSET` → `QQL-PLAN-GROUP-OFFSET`
-- `MMR` with `USING … AS SPARSE` → `QQL-PLAN-MMR-SPARSE` (dense nearest only)
+- `GROUP BY` + `OFFSET` is supported (maps to Qdrant's `group_offset`)
+- `MMR` supports both dense and sparse vector targets
 
 Vector names are arbitrary (`dense` / `sparse` / `colbert` are conventions, not
 reserved). `AS DENSE` / `AS SPARSE` declare embed role; `AS MULTI` marks a dense

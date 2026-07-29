@@ -66,6 +66,11 @@ export interface AnalysisResult {
   explain: string | null;
   error: AnalysisError | null;
 }
+
+/** Compile a QQL statement to a compiled route as a byte buffer. */
+export function compileBytes(query: string): Uint8Array;
+/** Explain a QQL statement as a byte buffer. */
+export function explainBytes(query: string): Uint8Array;
 "#;
 
 // ── Core: parsing ────────────────────────────────────────────────

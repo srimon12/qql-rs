@@ -300,6 +300,7 @@ count = {
     ^"COUNT" ~ ^"FROM" ~ collection
     ~ (^"WHERE" ~ filter)?
     ~ (^"SHARD" ~ string)?
+    ~ (^"WITH" ~ config_block)?
 }
 
 upsert = {

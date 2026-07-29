@@ -30,9 +30,8 @@ prep fills roles from the collection schema.
 `USING HYBRID [DENSE n] [SPARSE n] [FUSION …]` is accepted on query tails and
 lowers to the same `QueryExpr::Hybrid` AST as front-form `QUERY HYBRID TEXT …`.
 
-Product / implementation gaps (edge limits, remaining UX) live in the workspace
-[`gaps.md`](../../gaps.md) and agent summary
-[`skills/qql-skill/references/qql-gaps.md`](../../skills/qql-skill/references/qql-gaps.md).
+Product / implementation gaps (edge limits, remaining UX) are tracked in
+  [`skills/qql-skill/references/qql-gaps.md`](../../skills/qql-skill/references/qql-gaps.md).
 
 ## Generation
 
@@ -62,7 +61,7 @@ cargo run -p qql-conformance -- check language/v1
 Expected result:
 
 ```text
-conformant: 29 valid files (217 statements), 34 invalid cases, 29 AST snapshots
+conformant: 32 valid files, 34 invalid cases, 32 AST snapshots
 ```
 
 Regenerate AST snapshots only for an intentional contract change:

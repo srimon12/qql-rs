@@ -166,16 +166,14 @@ LIMIT 10;
 
 `CROSS RERANK` runs the PREFETCH stage(s), extracts document text from `ON FIELD` (default `text`), scores `(query, doc)` pairs client-side, and reorders hits. It does **not** use Qdrant MaxSim. Host needs `rerank_pairs` (edge `reranker_model` or HTTP `rerank_endpoint`).
 
-MMR requires both `DIVERSITY` in `[0, 1]` and positive `CANDIDATES`. MMR is **dense
-nearest only**: `USING … AS SPARSE` fails closed with `QQL-PLAN-MMR-SPARSE`.
-Recommend / sparse MMR is not supported.
+MMR requires both `DIVERSITY` in `[0, 1]` and positive `CANDIDATES`. MMR now supports both dense and sparse vector targets.
 
 Hybrid expands to two prefetches (dense + sparse) with `LIMIT * 10` candidate
 count, fused with RRF or DBSF.
 
-`GROUP BY` uses Qdrant’s query/groups API. **`OFFSET` is not valid with
-`GROUP BY`** (fail-closed: `QQL-PLAN-GROUP-OFFSET`). Page groups with `LIMIT`
-only, or constrain group keys with `WHERE`.
+`GROUP BY` uses Qdrant’s query/groups API. **`OFFSET` is now valid with
+`GROUP BY`** (maps to Qdrant's `group_offset`). Page groups with `LIMIT`
+and `OFFSET`, or constrain group keys with `WHERE`.
 
 **Hybrid shorthand** has two equivalent surface forms that lower to the same
 `QueryExpr::Hybrid` AST (and the same dense+sparse fusion plan):

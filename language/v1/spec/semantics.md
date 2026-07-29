@@ -146,15 +146,14 @@ its `USING` and `PREFETCH` pipeline in the canonical AST.
 | fusion | Requires at least one `PREFETCH`. |
 | formula | May score a prefetch or payload-derived expression. |
 | relevance feedback | Requires non-empty feedback and `NAIVE(a,b,c)`. |
-| MMR | `DIVERSITY` is finite and in `[0,1]`; `CANDIDATES` is positive. MMR applies to dense nearest only; sparse `USING` fails with `QQL-PLAN-MMR-SPARSE`. |
+| MMR | `DIVERSITY` is finite and in `[0,1]`; `CANDIDATES` is positive. MMR supports both dense and sparse vector targets. |
 | hybrid | Expands to dense and sparse prefetches fused by RRF (default) or DBSF. Surface forms: front-form `QUERY HYBRID TEXT …` and tail-form `QUERY TEXT … USING HYBRID …` lower to the same `Hybrid` AST. `USING HYBRID` requires a text nearest expression (no MMR, no non-text inputs). Omitted dense/sparse names resolve from schema (exactly one of each role). |
 | rerank | Requires `USING`, a model, and non-empty `PREFETCH`. |
 
 `LIMIT`, group size, `hnsw_ef`, and `rrf_k` are positive integers. `OFFSET`
 and `VALUES_COUNT` are non-negative. Score thresholds are finite.
 
-`GROUP BY` is incompatible with non-zero `OFFSET` (`QQL-PLAN-GROUP-OFFSET`):
-Qdrant’s query/groups request has no group offset.
+`GROUP BY` supports `OFFSET` (maps to Qdrant's `group_offset` field on query/groups requests).
 
 A group lookup names a collection only. A prefetch lookup may additionally
 name a vector because it changes the lookup input for that prefetch.
@@ -313,8 +312,6 @@ invalid fixtures are normative for those cases.
 | `QQL-VALIDATION-UPSERT-ID` | UPSERT row lacks valid ID |
 | `QQL-VALIDATION-MMR` | MMR diversity is invalid |
 | `QQL-VALIDATION-HYBRID` | Invalid `USING HYBRID` / `QUERY HYBRID` combination |
-| `QQL-PLAN-GROUP-OFFSET` | Non-zero `OFFSET` with `GROUP BY` |
-| `QQL-PLAN-MMR-SPARSE` | MMR with sparse vector target |
 | `QQL-PLAN-VECTOR-KIND` | Structural input and declared role disagree |
 | `QQL-MISSING-USING` | Schema inference is ambiguous |
 | `QQL-UNKNOWN-VECTOR` | Explicit name does not exist |

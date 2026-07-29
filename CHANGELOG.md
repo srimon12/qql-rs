@@ -22,6 +22,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove dead `client::CollectionSchema` duplicate.
 - `inject_shard_key` and `inject_filter` fail closed on unsupported statement types (no silent no-op for DDL).
 
+### 🔴 Breaking Changes
+- **String point IDs rejected at edge**: String-form point IDs in edge queries now fail with `QQL-EDGE-INVALID-POINT-ID` instead of being silently dropped.
+- **`USING name` without vector kind is fail-closed**: `USING name` without explicit `AS DENSE|SPARSE|MULTI` annotation now fails with `QQL-VECTOR-KIND` when the kind cannot be resolved from schema.
+- **`route()` deprecated**: The silent `routing::route()` empty-GET fallback is deprecated. Use `try_route()` or `compile_statement()` instead.
+- **`embed_sparse` rejects non-default models**: Sparse embedding now requires explicit model routing; passing a non-default model without specification is rejected.
+- **Auto-embed without topology produces dense-only**: Auto-embedding without explicit topology information now generates dense vectors only (no orphan sparse vectors). Hybrid remains schema-driven.
+- **Deleted internal modules**: `syntax.rs` (qql-core) and `embedding.rs` (qql-plan) have been removed as part of internal refactors.
+- **Empty dense query vectors rejected at edge**: Dense query vectors with zero dimensions are now rejected at the edge layer.
+- **Point reference query rejected at edge**: Using `QUERY ... FROM collection` with point references is now rejected at edge with `QQL-EDGE-UNSUPPORTED-POINT-REF`.
+- **`RECOMMEND STRATEGY average_vector` rejected at edge**: The `average_vector` recommendation strategy is no longer supported at the edge and is rejected.
+- **`CROSS RERANK` routes return `ClientSideOnly`**: Cross-encoder reranking routes are flagged as `ClientSideOnly` — they must go through an executor and cannot be dispatched directly.
+
 ### 🚀 Added
 - **QQL 1.2 Specification**: Bumped language version to `1.2` in `language/v1/spec/versioning.md` covering all additive syntax additions.
 - **`DELETE PAYLOAD`**: Added syntax, AST, planner IR, REST route (`POST /collections/{c}/points/payload/delete`), gRPC (`DeletePayloadPoints`), and Edge support for deleting specific payload keys from targeted points (`DELETE PAYLOAD key1, key2 FROM collection WHERE ...`).

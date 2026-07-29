@@ -362,7 +362,7 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
             }
 
             if query.group.is_some() {
-                // Surface GROUP BY + OFFSET before lowering so callers always get a plan error.
+                // GROUP BY is routed to QueryGroups which supports both LIMIT and OFFSET (via group_offset).
                 return Ok(PlannedOperation::QueryGroups {
                     collection,
                     request: lower_query_groups_request(query)?,

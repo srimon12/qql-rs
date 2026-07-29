@@ -1,7 +1,5 @@
 # QQL Gaps (agent-facing)
 
-Engineering source of truth: repo root [`gaps.md`](../../../gaps.md).
-
 Use this file so you **do not invent syntax** for open items and **do not claim
 missing** features that already ship.
 
@@ -30,8 +28,6 @@ Edge unsupported codes are stable (see `crates/qql-edge/README.md`).
 
 | Area | Reality | Agent rule |
 |---|---|---|
-| Grouped pagination | **No OFFSET with `GROUP BY`**. Qdrant OpenAPI `QueryGroupsRequest` has no `offset`. Fail-closed: `QQL-PLAN-GROUP-OFFSET`. | Use `LIMIT` only on groups. Do not invent group cursor syntax until Qdrant supports it. |
-| MMR | **Dense nearest only**. Sparse → `QQL-PLAN-MMR-SPARSE`. | Do not use MMR on sparse/recommend. |
 | Edge `GROUP BY` | Rejected offline (`QQL-EDGE-UNSUPPORTED-GROUP-BY`). | Same QQL works on remote Qdrant; offline: filter + `LIMIT`. |
 
 ---
@@ -47,6 +43,8 @@ Edge unsupported codes are stable (see `crates/qql-edge/README.md`).
 | Exact count | `COUNT FROM coll WITH (exact = true)` |
 | Specific payload deletion | `DELETE PAYLOAD key1, key2 FROM coll WHERE ...` |
 | Multi-collection lookup | `GROUP BY ... LOOKUP FROM coll` → `QueryRequest.lookup_from` |
+| Grouped pagination (OFFSET with GROUP BY) | `GROUP BY … OFFSET N` → maps to `group_offset` |
+| MMR with sparse vectors | `USING … AS SPARSE` with MMR is supported |
 | Filter shard & min_should | `FilterCompound.shard_key` and `min_should` threshold |
 | Dynamic shard (host) | `inject_shard_key(stmt, tenant)` / `stmt.inject_shard_key(tenant)` — or literal `SHARD '…'` |
 | Schema-first vectors | `USING name` / `AS DENSE\|SPARSE\|MULTI` |
@@ -65,13 +63,13 @@ Edge unsupported codes are stable (see `crates/qql-edge/README.md`).
 | Cluster timeout | `PARAMS (timeout = 30)` on QUERY |
 | Replica reads | `PARAMS (consistency = majority)` |
 | Multi-tenant shard | `inject_shard_key(stmt, tenant)` + `inject_filter(…, tenant_id, …)` |
-| Faceted page 2 (groups) | **Not in Qdrant** — do not invent OFFSET for groups |
+| Faceted page 2 (groups) | `GROUP BY … OFFSET N` — maps to Qdrant `group_offset` |
 | Edge without groups | `WHERE` + `LIMIT`, or remote Qdrant for `GROUP BY` |
 
 ---
 
 ## Reminder
 
-- Open gaps: do **not** invent syntax (especially group OFFSET — blocked on Qdrant).
+- Open gaps: do **not** invent syntax for items still listed as Open.
 - Closed items: prefer the supported forms above.
 - Wire shapes: always check `crates/qql-runtime/openapi.json` and `proto/`.

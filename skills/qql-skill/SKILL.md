@@ -53,7 +53,7 @@ Translate user intent directly into QQL syntax:
 - Clear payload -> `CLEAR PAYLOAD FROM <collection> WHERE <filter>`
 - Delete payload keys -> `DELETE PAYLOAD <key1, key2> FROM <collection> WHERE <filter>`
 - Delete vectors -> `DELETE VECTOR <name> FROM <collection> WHERE id = N`
-- Count points -> `COUNT FROM <collection> WHERE <filter>`
+- Count points -> `COUNT FROM <collection> WHERE <filter>` (or `COUNT FROM <collection> WITH (exact = true)` for exact count)
 - Create shard key -> `CREATE SHARD KEY '<key>' ON COLLECTION <name> [WITH (shards_number = N, replication_factor = M)]`
 - Drop shard key -> `DROP SHARD KEY '<key>' ON COLLECTION <name>`
 - Show shard keys -> `SHOW SHARD KEYS ON COLLECTION <name>`
@@ -154,8 +154,8 @@ FROM <collection>
 
 **Limits (see [qql-gaps.md](references/qql-gaps.md)):**
 
-- `OFFSET` is **not** allowed with `GROUP BY` (`QQL-PLAN-GROUP-OFFSET`) — Qdrant groups API has no offset.
-- `MMR` is **dense nearest only** (sparse → `QQL-PLAN-MMR-SPARSE`).
+- `OFFSET` **is** now supported with `GROUP BY` (maps to Qdrant's `group_offset`).
+- `MMR` now supports sparse vectors (`USING … AS SPARSE` with MMR is supported).
 - `max_selectivity` requires `acorn = true` (remote Qdrant; not edge).
 - `timeout` / `consistency` are request-level (OpenAPI query params / gRPC fields); not on edge.
 - Edge has **no** `GROUP BY` — use remote Qdrant or filter + `LIMIT`.
