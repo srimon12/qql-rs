@@ -49,9 +49,9 @@ AST structure. Verify that no generated artifact is stale:
 cargo run -p qql-grammar-gen -- check
 ```
 
-Pest compiles the generated PEG into the qql-core syntax parser. Public
-`Parser::parse` and `Parser::parse_all` accept a program only when it matches
-that generated parser and lowers successfully into the typed QQL AST.
+`language/v1/grammar.pest` is the **language contract** (docs + CI sync via
+`qql-grammar-gen`). Production acceptance in `qql-core` is the hand-written
+`AstLowerer` only — pest is **not** linked into the runtime parser.
 
 ## Conformance
 

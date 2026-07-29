@@ -903,15 +903,14 @@ impl QdrantOps for EdgeQdrant {
     }
 
     async fn execute_planned(&self, op: &qql_plan::PlannedOperation) -> Result<Value, QqlError> {
-        if matches!(op, qql_plan::PlannedOperation::CrossRerank { .. }) {
-            return Err(QqlError::execution(
-                "QQL-CROSS-RERANK",
-                "CROSS RERANK is client-side and cannot be executed as a single edge route",
-                None,
-            ));
-        }
         reject_shard(op.shard_key())?;
-        let route = qql_plan::plan::to_rest_route(op);
+        let route = qql_plan::plan::to_rest_route(op).map_err(|err| match err {
+            qql_plan::RestProjectionError::ClientSideOnly { stmt_type } => QqlError::execution(
+                "QQL-EDGE-CLIENT-SIDE",
+                format!("{stmt_type} cannot be executed as a single edge route"),
+                None,
+            ),
+        })?;
         self.execute_edge(route).await
     }
     async fn execute_query_batch(

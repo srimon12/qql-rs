@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 🏗️ Architecture
+- **Single production parser**: remove pest/`syntax.rs` from `qql-core`; `AstLowerer` is the only runtime frontend. `language/v1/grammar.pest` remains the language contract for docs/CI (`qql-grammar-gen`).
+- **Single embedding owner**: remove dead `qql-plan` embedding job extractor; embeddings live only in `qql-embed`.
+- **Plan is the IR**: `to_rest_route` is fallible; CROSS RERANK no longer invents a fake Qdrant path. SDK `compile_statement` returns `CompiledStatement { stmt_type, route: Option<Route> }`.
+- Deprecate silent `routing::route()` empty-GET fallback; prefer `try_route` / `compile_statement`.
+- Remove dead `client::CollectionSchema` duplicate.
+- `inject_shard_key` fails closed on unsupported statement types (no silent no-op for DDL).
+
 ### 🚀 Added
 - Multivector / ColBERT path: `USING name AS MULTI`, schema `multivector_config` → `MultiDense`, `Embedder::embed_multi`, `RERANK` multivector targets, `HYBRID RERANK` materializes `colbert` MaxSim vector.
 - Schema-first `USING` resolution before embedding; fail-closed `QQL-VECTOR-KIND` when kind is unknown offline.
@@ -29,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### 📚 Documentation
 - Update `docs/syntax.md`, skills (`SKILL.md`, examples, gaps, Python/Node/Rust/WASM SDKs), crate READMEs (`qql-core`, `qql-embed`, `qql-runtime`, `qql-plan`, `qql-cli`), `AGENT.md`, and `language/v1` notes for vector roles + multivector.
 - qql-plan README: 22 PlannedOperation variants including CrossRerank.
-- Clarify parser uses AstLowerer; pest grammar is acceptance/docs, not the production lowerer.
+- Clarify parser uses AstLowerer; pest grammar is language contract only, not the production lowerer.
 
 ---
 

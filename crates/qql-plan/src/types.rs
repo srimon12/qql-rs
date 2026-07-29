@@ -29,28 +29,6 @@ impl Method {
     }
 }
 
-// ── Embedding ──────────────────────────────────────────────────
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct EmbeddingJob {
-    pub texts: Vec<String>,
-    pub model: Option<String>,
-    pub kind: EmbeddingKind,
-    pub destinations: Vec<EmbeddingDestination>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EmbeddingKind {
-    Dense,
-    Sparse,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct EmbeddingDestination {
-    pub carrier_name: String,
-    pub vector_name: String,
-}
-
 // ── Filter types ───────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize)]

@@ -365,28 +365,18 @@ impl Stmt {
     /// Compile this Stmt AST directly into a Qdrant REST route object.
     #[wasm_bindgen(js_name = compileRoute, unchecked_return_type = "CompiledRoute")]
     pub fn compile_route(&self) -> Result<JsValue, JsValue> {
-        let (stmt_type, route) = routing::compile_statement(&self.inner)
+        let compiled = routing::compile_statement(&self.inner)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        let output = serde_json::json!({
-            "stmt_type": stmt_type,
-            "method": route.method.as_str(),
-            "path": route.path,
-            "payload": route.body_json().unwrap_or(serde_json::Value::Null),
-        });
+        let output = compiled_route_json(&compiled);
         to_js_value(&output)
     }
 
     /// Compile this Stmt AST into a JS-owned Uint8Array byte buffer.
     #[wasm_bindgen(js_name = compileRouteBytes)]
     pub fn compile_route_bytes(&self) -> Result<js_sys::Uint8Array, JsValue> {
-        let (stmt_type, route) = routing::compile_statement(&self.inner)
+        let compiled = routing::compile_statement(&self.inner)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        let output = serde_json::json!({
-            "stmt_type": stmt_type,
-            "method": route.method.as_str(),
-            "path": route.path,
-            "payload": route.body_json().unwrap_or(serde_json::Value::Null),
-        });
+        let output = compiled_route_json(&compiled);
         SCRATCH_BUF.with(|cell| {
             let mut buf = cell.borrow_mut();
             buf.clear();
@@ -463,13 +453,8 @@ fn build_analyze_value(input: &str) -> serde_json::Value {
             let routes_val: Vec<_> = stmts
                 .iter()
                 .filter_map(|s| {
-                    let (stmt_type, r) = routing::compile_statement(s).ok()?;
-                    Some(serde_json::json!({
-                        "stmt_type": stmt_type,
-                        "method": r.method.as_str(),
-                        "path": r.path,
-                        "payload": r.body_json().unwrap_or(serde_json::Value::Null),
-                    }))
+                    let compiled = routing::compile_statement(s).ok()?;
+                    Some(compiled_route_json(&compiled))
                 })
                 .collect();
             let route_val = routes_val
@@ -529,16 +514,29 @@ pub fn analyze(input: &str) -> Result<JsValue, JsValue> {
 
 // ── Core: compile & explain ───────────────────────────────────────
 
+
+fn compiled_route_json(compiled: &qql_plan::CompiledStatement) -> serde_json::Value {
+    match &compiled.route {
+        Some(route) => serde_json::json!({
+            "stmt_type": compiled.stmt_type,
+            "method": route.method.as_str(),
+            "path": route.path,
+            "payload": route.body_json().unwrap_or(serde_json::Value::Null),
+        }),
+        None => serde_json::json!({
+            "stmt_type": compiled.stmt_type,
+            "method": serde_json::Value::Null,
+            "path": serde_json::Value::Null,
+            "payload": serde_json::Value::Null,
+        }),
+    }
+}
+
 fn build_compile_output(query: &str) -> Result<serde_json::Value, JsValue> {
     let stmt = Parser::parse(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    let (stmt_type, route) =
+    let compiled =
         routing::compile_statement(&stmt).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    Ok(serde_json::json!({
-        "stmt_type": stmt_type,
-        "method": route.method.as_str(),
-        "path": route.path,
-        "payload": route.body_json().unwrap_or(serde_json::Value::Null),
-    }))
+    Ok(compiled_route_json(&compiled))
 }
 
 /// Compile one QQL statement into a JavaScript route object.
@@ -1069,7 +1067,11 @@ impl Client {
         &self,
         operation: &qql_plan::PlannedOperation,
     ) -> Result<serde_json::Value, JsValue> {
-        let route = qql_plan::to_rest_route(operation);
+        let route = qql_plan::to_rest_route(operation).map_err(|err| match err {
+            qql_plan::RestProjectionError::ClientSideOnly { stmt_type } => {
+                JsValue::from_str(&format!("{stmt_type} has no single Qdrant REST route"))
+            }
+        })?;
         let result = self
             .send_json(route.method.as_str(), &route.path, route.body_json())
             .await?;

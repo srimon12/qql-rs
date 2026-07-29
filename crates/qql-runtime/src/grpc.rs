@@ -451,7 +451,7 @@ impl QdrantOps for GrpcQdrant {
     async fn update_collection(&self, _req: serde_json::Value) -> Result<(), QqlError> {
         Err(QqlError::execution(
             "QQL-EXECUTION",
-            "update_collection: use execute_route for gRPC",
+            "update_collection: use execute_planned for gRPC DDL/DML",
             None,
         ))
     }
@@ -468,7 +468,7 @@ impl QdrantOps for GrpcQdrant {
     async fn create_field_index(&self, _req: CreateFieldIndexReq) -> Result<(), QqlError> {
         Err(QqlError::execution(
             "QQL-EXECUTION",
-            "create_field_index: use execute_route for gRPC",
+            "create_field_index: use execute_planned for gRPC DDL/DML",
             None,
         ))
     }
@@ -480,7 +480,7 @@ impl QdrantOps for GrpcQdrant {
     ) -> Result<(), QqlError> {
         Err(QqlError::execution(
             "QQL-EXECUTION",
-            "delete_field_index: use execute_route for gRPC",
+            "delete_field_index: use execute_planned for gRPC DDL/DML",
             None,
         ))
     }

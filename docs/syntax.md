@@ -1,9 +1,10 @@
 # QQL Syntax Guide
 
-This guide is illustrative. The executable
-[`language/v1/grammar.pest`](../language/v1/grammar.pest) is the canonical
-syntax and is compiled into `qql-core`. QQL follows Qdrant retrieval concepts
-rather than relational `SELECT` semantics. Keywords are case-insensitive.
+This guide is illustrative. The language contract lives in
+[`language/v1/grammar.pest`](../language/v1/grammar.pest); production parsing
+is the hand-written `AstLowerer` in `qql-core` (not a pest runtime frontend).
+QQL follows Qdrant retrieval concepts rather than relational `SELECT`
+semantics. Keywords are case-insensitive.
 
 ## Scripts
 

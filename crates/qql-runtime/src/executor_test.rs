@@ -96,7 +96,7 @@ impl QdrantOps for MockQdrantClient {
         op: &qql_plan::PlannedOperation,
     ) -> Result<serde_json::Value, QqlError> {
         *self.execute_planned_call_count.lock().unwrap() += 1;
-        let route = qql_plan::plan::to_rest_route(op);
+        let route = qql_plan::plan::to_rest_route(op).expect("rest route");
         if route.path.contains("nonexistent") {
             return Err(QqlError::execution(
                 "QQL-EXECUTION",
@@ -283,7 +283,7 @@ async fn test_create_collection_with_hnsw_and_quantization() {
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     assert_eq!(route.path, "/collections/mycol");
     let req = route.body_json().unwrap();
     assert_eq!(req["vectors"]["dense"]["size"], 384);
@@ -312,7 +312,7 @@ async fn test_create_hybrid_materializes_default_schema() {
         .unwrap();
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     let req = route.body_json().unwrap();
     assert_eq!(req["vectors"]["dense"]["size"], 384);
     assert_eq!(req["sparse_vectors"]["sparse"]["modifier"], "idf");
@@ -329,7 +329,7 @@ async fn test_create_collection_with_optimizers_and_params() {
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     let req = route.body_json().unwrap();
 
     // Check Optimizers config serialization
@@ -355,7 +355,7 @@ async fn test_create_collection_with_named_vectors_hnsw_quant() {
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     let req = route.body_json().unwrap();
 
     let vectors = &req["vectors"];
@@ -385,7 +385,7 @@ async fn test_alter_collection_quantization_and_hnsw() {
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     assert_eq!(route.path, "/collections/mycol");
     let req = route.body_json().unwrap();
 
@@ -407,7 +407,7 @@ async fn test_alter_collection_disable_quantization() {
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     let req = route.body_json().unwrap();
 
     // OpenAPI QuantizationConfigDiff disabled variant is the string "Disabled"
@@ -449,7 +449,7 @@ async fn test_do_query_basic() {
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     assert_eq!(route.method, qql_plan::types::Method::Post);
     assert!(route.path.contains("docs"));
     assert!(route.body.is_some());
@@ -467,7 +467,7 @@ async fn test_do_query_hybrid() {
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     assert_eq!(route.method, qql_plan::types::Method::Post);
     assert!(route.body.is_some());
 }
@@ -496,7 +496,7 @@ async fn text_query_resolves_arbitrary_sparse_vector_by_schema() {
         .unwrap();
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     let body = route.body_json().unwrap();
     assert_eq!(body["using"], "lexical_v2");
     assert_eq!(
@@ -535,7 +535,7 @@ async fn cte_prefetch_using_sparse_embeds_sparse_via_schema() {
         .unwrap();
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     let body = route.body_json().unwrap();
     let prefetch = body["prefetch"].as_array().expect("fusion prefetch");
     assert_eq!(prefetch.len(), 2);
@@ -589,7 +589,7 @@ async fn text_query_multivector_embeds_multi_via_schema() {
         .unwrap();
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     let body = route.body_json().unwrap();
     assert_eq!(body["using"], "colbert");
     // MultiDense serializes as array-of-arrays under nearest.
@@ -626,7 +626,7 @@ async fn text_query_infers_only_arbitrary_dense_vector() {
         .unwrap();
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     assert_eq!(route.body_json().unwrap()["using"], "semantic_v2");
 }
 
@@ -678,7 +678,7 @@ async fn hybrid_upsert_infers_arbitrary_named_targets() {
         .unwrap();
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     let vector = &route.body_json().unwrap()["points"][0]["vector"];
     assert!(vector.get("semantic_v2").is_some());
     assert!(vector.get("lexical_v2").is_some());
@@ -724,7 +724,7 @@ async fn test_do_select_returns_record_or_nil() {
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     assert_eq!(route.method, qql_plan::types::Method::Post);
     assert!(route.path.contains("docs/points"));
 }
@@ -742,7 +742,7 @@ async fn test_delete_by_id_and_filter() {
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     assert_eq!(route.method, qql_plan::types::Method::Post);
     assert!(route.path.contains("delete"));
 }
@@ -763,7 +763,7 @@ async fn test_set_payload_by_id_and_filter() {
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     assert_eq!(route.method, qql_plan::types::Method::Post);
     assert!(route.path.contains("payload"));
 }
@@ -784,7 +784,7 @@ async fn test_update_by_id() {
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     assert_eq!(route.method, qql_plan::types::Method::Put);
     assert!(route.path.contains("vectors"));
 }
@@ -804,7 +804,7 @@ async fn test_upsert_into_collection_creates_missing() {
     assert!(resp.is_ok(), "{:?}", resp.err());
 
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     assert_eq!(route.method, qql_plan::types::Method::Put);
     assert!(route.path.contains("docs"));
 }
@@ -822,7 +822,7 @@ async fn test_do_scroll_returns_upstream_style_payload() {
 
     assert!(resp.is_ok(), "{:?}", resp.err());
     let op = last_planned.lock().unwrap().take().unwrap();
-    let route = qql_plan::plan::to_rest_route(&op);
+    let route = qql_plan::plan::to_rest_route(&op).expect("rest route");
     assert_eq!(route.method, qql_plan::types::Method::Post);
     assert!(route.path.contains("scroll"));
 }

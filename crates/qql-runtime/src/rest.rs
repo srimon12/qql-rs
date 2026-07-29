@@ -291,14 +291,13 @@ impl QdrantOps for RestQdrant {
     }
 
     async fn execute_planned(&self, op: &qql_plan::PlannedOperation) -> Result<Value, QqlError> {
-        if matches!(op, qql_plan::PlannedOperation::CrossRerank { .. }) {
-            return Err(QqlError::execution(
-                "QQL-CROSS-RERANK",
-                "CROSS RERANK is client-side and cannot be executed as a single Qdrant REST route",
+        let route = qql_plan::plan::to_rest_route(op).map_err(|err| match err {
+            qql_plan::RestProjectionError::ClientSideOnly { stmt_type } => QqlError::execution(
+                "QQL-REST-CLIENT-SIDE",
+                format!("{stmt_type} cannot be executed as a single REST route"),
                 None,
-            ));
-        }
-        let route = qql_plan::plan::to_rest_route(op);
+            ),
+        })?;
         self.execute_http(route).await
     }
 

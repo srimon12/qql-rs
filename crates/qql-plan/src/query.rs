@@ -278,16 +278,12 @@ pub fn lower_query_expr(expr: &QueryExpr) -> QueryVariant {
             nearest: lower_query_input(input),
             mmr: None,
         }),
-        // CrossRerank is planned as PlannedOperation::CrossRerank, not a QueryVariant.
-        QueryExpr::CrossRerank { .. } => QueryVariant::Nearest(NearestQuery {
-            nearest: PlanQueryInput::Vector(PlanVectorValue::Dense(Vec::new())),
-            mmr: None,
-        }),
-        QueryExpr::Points { .. } => QueryVariant::Nearest(NearestQuery {
-            // Placeholder only — Points lookups use GetPoints, not this variant.
-            nearest: PlanQueryInput::Vector(PlanVectorValue::Dense(Vec::new())),
-            mmr: None,
-        }),
+        // Handled only by plan() special-cases — never lower as a QueryVariant.
+        QueryExpr::CrossRerank { .. } | QueryExpr::Points { .. } => {
+            unreachable!(
+                "CrossRerank/Points must be planned via PlannedOperation special-cases, not lower_query_expr"
+            )
+        }
     }
 }
 
@@ -677,7 +673,7 @@ mod tests {
 
     fn parse_route(source: &str) -> serde_json::Value {
         let s = Parser::parse(source).unwrap();
-        let r = crate::routing::route(&s);
+        let r = crate::routing::try_route(&s).unwrap();
         r.body_json().unwrap()
     }
 

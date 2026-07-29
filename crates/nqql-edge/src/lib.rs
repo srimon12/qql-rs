@@ -195,12 +195,23 @@ pub fn tokenize(input: String) -> napi::Result<serde_json::Value> {
 #[napi]
 pub fn compile_query(input: String) -> napi::Result<serde_json::Value> {
     let stmt = Parser::parse(&input).map_err(to_napi_err)?;
-    let (stmt_type, route) = routing::compile_statement(&stmt).map_err(to_napi_err)?;
+    let compiled = routing::compile_statement(&stmt).map_err(to_napi_err)?;
+    let (method, path, payload) = match compiled.route {
+        Some(route) => {
+            let payload = route.body_json().unwrap_or(serde_json::Value::Null);
+            (
+                serde_json::Value::String(route.method.as_str().into()),
+                serde_json::Value::String(route.path),
+                payload,
+            )
+        }
+        None => (serde_json::Value::Null, serde_json::Value::Null, serde_json::Value::Null),
+    };
     Ok(serde_json::json!({
-        "stmt_type": stmt_type,
-        "method": route.method.as_str(),
-        "path": route.path,
-        "payload": route.body_json().unwrap_or(serde_json::Value::Null),
+        "stmt_type": compiled.stmt_type,
+        "method": method,
+        "path": path,
+        "payload": payload,
     }))
 }
 

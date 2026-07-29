@@ -50,7 +50,7 @@ pub fn inject_filter(
 /// Applies to statements that carry `shard_key` in the AST: `QUERY`, `SCROLL`,
 /// `COUNT`, `UPSERT`, `DELETE`, `CLEAR PAYLOAD`, `DELETE VECTOR`,
 /// `UPDATE … VECTOR`, and `UPDATE … PAYLOAD`. Recurses into CTEs and nested
-/// prefetch queries. No-op for DDL.
+/// prefetch queries. Returns a validation error for DDL / SHOW (fail closed).
 pub fn inject_shard_key(statement: &mut Stmt, shard_key: &str) -> Result<(), QqlError> {
     if shard_key.is_empty() {
         return Err(QqlError::validation(
@@ -70,9 +70,42 @@ pub fn inject_shard_key(statement: &mut Stmt, shard_key: &str) -> Result<(), Qql
         Stmt::DeleteVector(delete) => delete.shard_key = Some(key),
         Stmt::UpdateVector(update) => update.shard_key = Some(key),
         Stmt::UpdatePayload(update) => update.shard_key = Some(key),
-        _ => {}
+        other => {
+            return Err(QqlError::validation(
+                "QQL-VALIDATION-SHARD-KEY",
+                format!(
+                    "inject_shard_key does not apply to this statement type ({})",
+                    stmt_kind(other)
+                ),
+                None,
+            ));
+        }
     }
     Ok(())
+}
+
+fn stmt_kind(statement: &Stmt) -> &'static str {
+    match statement {
+        Stmt::Query(_) => "QUERY",
+        Stmt::Scroll(_) => "SCROLL",
+        Stmt::Count(_) => "COUNT",
+        Stmt::Upsert(_) => "UPSERT",
+        Stmt::Delete(_) => "DELETE",
+        Stmt::ClearPayload(_) => "CLEAR PAYLOAD",
+        Stmt::DeleteVector(_) => "DELETE VECTOR",
+        Stmt::UpdateVector(_) => "UPDATE VECTOR",
+        Stmt::UpdatePayload(_) => "UPDATE PAYLOAD",
+        Stmt::CreateCollection(_) => "CREATE COLLECTION",
+        Stmt::AlterCollection(_) => "ALTER COLLECTION",
+        Stmt::DropCollection(_) => "DROP COLLECTION",
+        Stmt::CreateIndex(_) => "CREATE INDEX",
+        Stmt::DropIndex(_) => "DROP INDEX",
+        Stmt::CreateShardKey(_) => "CREATE SHARD KEY",
+        Stmt::DropShardKey(_) => "DROP SHARD KEY",
+        Stmt::ShowCollections => "SHOW COLLECTIONS",
+        Stmt::ShowCollection(_) => "SHOW COLLECTION",
+        Stmt::ShowShardKeys(_) => "SHOW SHARD KEYS",
+    }
 }
 
 fn inject_query_shard(query: &mut QueryStmt, key: &str) {

@@ -732,9 +732,21 @@ fn ensure_payload_field(query: &mut qql_core::ast::QueryStmt, field: &str) {
     }
 }
 
+/// Why a planned operation cannot become a single Qdrant REST route.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RestProjectionError {
+    /// Client-side only (e.g. CROSS RERANK). Compile still exposes `stmt_type`.
+    ClientSideOnly {
+        stmt_type: &'static str,
+    },
+}
+
 /// REST projection of a planned operation (HTTP method/path/query/body).
-pub fn to_rest_route(op: &PlannedOperation) -> Route {
-    match op {
+///
+/// Client-side operations such as [`PlannedOperation::CrossRerank`] return
+/// [`RestProjectionError::ClientSideOnly`] — they must not invent a Qdrant path.
+pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError> {
+    Ok(match op {
         PlannedOperation::Query {
             collection,
             request,
@@ -958,20 +970,27 @@ pub fn to_rest_route(op: &PlannedOperation) -> Route {
             query: Vec::new(),
             body: None,
         },
-        // CrossRerank is client-side; never projected as a single Qdrant route.
-        PlannedOperation::CrossRerank { collection, .. } => Route {
-            method: Method::Post,
-            path: format!("/collections/{collection}/points/query"),
-            query: Vec::new(),
-            body: None,
-        },
-    }
+        PlannedOperation::CrossRerank { .. } => {
+            return Err(RestProjectionError::ClientSideOnly {
+                stmt_type: "cross_rerank",
+            });
+        }
+    })
 }
 
-/// Compatibility: plan + REST projection. Returns a planning error as a
-/// validation failure rather than panicking on malformed programmatic AST.
+/// Plan + REST projection. Fails on plan errors or client-side-only ops.
 pub fn try_route(statement: &Stmt) -> Result<Route, QqlError> {
-    plan(statement).map(|op| to_rest_route(&op))
+    let op = plan(statement)?;
+    to_rest_route(&op).map_err(|err| match err {
+        RestProjectionError::ClientSideOnly { stmt_type } => QqlError::validation(
+            "QQL-REST-CLIENT-SIDE",
+            format!(
+                "{stmt_type} is client-side and has no single Qdrant REST route; \
+                 execute via the runtime CROSS RERANK path"
+            ),
+            None,
+        ),
+    })
 }
 
 #[cfg(test)]
@@ -1006,7 +1025,7 @@ mod tests {
     fn plan_and_route_agree_on_query() {
         let stmt = Parser::parse("QUERY 'hello' FROM docs LIMIT 5;").unwrap();
         let op = plan(&stmt).unwrap();
-        let route = to_rest_route(&op);
+        let route = to_rest_route(&op).expect("rest route");
         assert_eq!(route.path, "/collections/docs/points/query");
         assert!(matches!(route.body, Some(RequestBody::Query(_))));
     }

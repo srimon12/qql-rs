@@ -7,11 +7,6 @@ use std::collections::HashMap;
 pub use crate::backend::{CollectionInfo, Filter as QdrantFilter, PointId, ScoredPoint};
 
 #[derive(Debug, Clone)]
-pub struct CollectionSchema {
-    pub vector_configs: HashMap<String, serde_json::Value>,
-}
-
-#[derive(Debug, Clone)]
 pub struct CreateCollectionReq {
     pub collection_name: String,
     pub vectors_config: Option<serde_json::Value>,

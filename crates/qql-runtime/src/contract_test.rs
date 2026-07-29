@@ -9,7 +9,7 @@ mod tests {
 
     use qql_core::parser::Parser;
     use qql_plan::plan::{plan, to_rest_route};
-    use qql_plan::routing::route;
+    use qql_plan::routing::try_route;
     use qql_plan::types::{PlanQueryInput, PlanVectorValue};
     use qql_plan::PlannedOperation;
 
@@ -116,7 +116,7 @@ mod tests {
         for (name, qql) in query_cases {
             let stmt =
                 Parser::parse(qql).unwrap_or_else(|e| panic!("parse failed for {name}: {e}"));
-            let r = route(&stmt);
+            let r = try_route(&stmt).unwrap();
             let json = r
                 .body_json()
                 .unwrap_or_else(|| panic!("no body for {name}"));
@@ -137,7 +137,7 @@ mod tests {
                 "QUERY NEAREST VECTOR [[0.1, 0.2], [0.3, 0.4]] FROM docs USING colbert LIMIT 5;",
             )
             .unwrap();
-            let json = route(&stmt).body_json().unwrap();
+            let json = try_route(&stmt).unwrap().body_json().unwrap();
             let nearest = &json["query"]["nearest"];
             assert!(
                 nearest.as_array().is_some_and(|rows| {
@@ -154,7 +154,7 @@ mod tests {
                 "QUERY TEXT 'x' FROM docs USING HYBRID DENSE dense SPARSE sparse LIMIT 10;",
             )
             .unwrap();
-            let json = route(&stmt).body_json().unwrap();
+            let json = try_route(&stmt).unwrap().body_json().unwrap();
             assert_eq!(json["query"]["fusion"], "rrf");
             assert_eq!(json["prefetch"].as_array().unwrap().len(), 2);
             validate_ref(&openapi, "QueryRequest", &json);
@@ -166,7 +166,7 @@ mod tests {
                 "QUERY TEXT 'x' FROM docs USING dense GROUP BY topic SIZE 3 LIMIT 10;",
             )
             .unwrap();
-            let json = route(&stmt).body_json().unwrap();
+            let json = try_route(&stmt).unwrap().body_json().unwrap();
             assert!(json.get("offset").is_none());
             assert_eq!(json["group_by"], "topic");
             validate_ref(&openapi, "QueryGroupsRequest", &json);
@@ -179,7 +179,7 @@ mod tests {
             )
             .unwrap();
             let op = plan(&stmt).unwrap();
-            let r = to_rest_route(&op);
+            let r = to_rest_route(&op).expect("rest route");
             assert!(r.query.iter().any(|(k, v)| k == "timeout" && v == "30"));
             assert!(r
                 .query
@@ -204,10 +204,9 @@ mod tests {
                 matches!(op, PlannedOperation::CrossRerank { .. }),
                 "CROSS RERANK must plan as CrossRerank, got {op:?}"
             );
-            let r = to_rest_route(&op);
             assert!(
-                r.body.is_none(),
-                "CROSS RERANK must not invent a Qdrant body"
+                to_rest_route(&op).is_err(),
+                "CROSS RERANK must not invent a Qdrant REST route"
             );
         }
 
@@ -219,7 +218,7 @@ mod tests {
                 "QUERY NEAREST VECTOR [0.1, 0.2, 0.3] FROM docs USING image LIMIT 5;",
             )
             .unwrap();
-            let json = route(&stmt).body_json().unwrap();
+            let json = try_route(&stmt).unwrap().body_json().unwrap();
             validate_ref(&openapi, "Query", &json["query"]);
         }
 
@@ -281,7 +280,7 @@ mod tests {
         for (name, qql) in filter_cases {
             let stmt =
                 Parser::parse(qql).unwrap_or_else(|e| panic!("parse failed for {name}: {e}"));
-            let r = route(&stmt);
+            let r = try_route(&stmt).unwrap();
             let json = r
                 .body_json()
                 .unwrap_or_else(|| panic!("no body for {name}"));
@@ -307,13 +306,13 @@ mod tests {
 
         let scroll_stmt =
             Parser::parse("SCROLL FROM docs WHERE status = 'active' LIMIT 50;").unwrap();
-        let scroll_json = route(&scroll_stmt).body_json().unwrap();
+        let scroll_json = try_route(&scroll_stmt).unwrap().body_json().unwrap();
         validate_ref(&openapi, "ScrollRequest", &scroll_json);
 
         let points_stmt =
             Parser::parse("QUERY POINTS (42, 'uuid-v4') FROM docs WITH PAYLOAD INCLUDE ('title');")
                 .unwrap();
-        let points_json = route(&points_stmt).body_json().unwrap();
+        let points_json = try_route(&points_stmt).unwrap().body_json().unwrap();
         validate_ref(&openapi, "PointRequest", &points_json);
     }
 
@@ -338,7 +337,7 @@ mod tests {
         assert_eq!(collection, "docs");
 
         // REST projection
-        let route = to_rest_route(&op);
+        let route = to_rest_route(&op).expect("rest route");
         assert_eq!(route.path, "/collections/docs/points/query");
         assert!(route.query.iter().any(|(k, v)| k == "timeout" && v == "15"));
         assert!(route
@@ -408,7 +407,7 @@ mod tests {
             panic!("expected Query");
         };
 
-        let body = to_rest_route(&op).body_json().unwrap();
+        let body = to_rest_route(&op).expect("rest route").body_json().unwrap();
         assert_eq!(body["query"]["fusion"], "rrf");
         assert_eq!(body["prefetch"].as_array().unwrap().len(), 2);
         assert_eq!(body["prefetch"][0]["using"], "dense");
@@ -440,7 +439,7 @@ mod tests {
         else {
             panic!("expected Query");
         };
-        let body = to_rest_route(&op).body_json().unwrap();
+        let body = to_rest_route(&op).expect("rest route").body_json().unwrap();
         assert!(
             body["query"].get("formula").is_some(),
             "REST formula missing: {}",
@@ -508,7 +507,7 @@ mod tests {
         )
         .unwrap();
         let op = plan(&create).unwrap();
-        let body = to_rest_route(&op).body_json().unwrap();
+        let body = to_rest_route(&op).expect("rest route").body_json().unwrap();
         assert!(body.get("params").is_none());
         assert!(body.get("shard_keys").is_none());
         assert_eq!(body["replication_factor"], 2);
@@ -527,7 +526,7 @@ mod tests {
             "CREATE COLLECTION docs (v VECTOR(64, COSINE) WITH QUANTIZATION (type = 'product', compression = 'x16', always_ram = true) WITH MULTIVECTOR (comparator = 'max_sim'));",
         )
         .unwrap();
-        let body2 = to_rest_route(&plan(&create2).unwrap()).body_json().unwrap();
+        let body2 = to_rest_route(&plan(&create2).unwrap()).expect("rest").body_json().unwrap();
         assert_eq!(
             body2["vectors"]["v"]["quantization_config"]["product"]["compression"],
             "x16"
@@ -542,7 +541,7 @@ mod tests {
             "ALTER COLLECTION docs WITH HNSW (ef_construct = 200) WITH PARAMS (replication_factor = 3) WITH QUANTIZATION (type = 'binary', encoding = 'two_bits');",
         )
         .unwrap();
-        let alter_body = to_rest_route(&plan(&alter).unwrap()).body_json().unwrap();
+        let alter_body = to_rest_route(&plan(&alter).unwrap()).expect("rest").body_json().unwrap();
         assert_eq!(alter_body["params"]["replication_factor"], 3);
         assert_eq!(
             alter_body["quantization_config"]["binary"]["encoding"],
@@ -552,7 +551,7 @@ mod tests {
 
         let disable =
             Parser::parse("ALTER COLLECTION docs WITH QUANTIZATION (disabled = true);").unwrap();
-        let disable_body = to_rest_route(&plan(&disable).unwrap()).body_json().unwrap();
+        let disable_body = to_rest_route(&plan(&disable).unwrap()).expect("rest").body_json().unwrap();
         assert_eq!(disable_body["quantization_config"], "Disabled");
         validate_ref(&openapi, "UpdateCollection", &disable_body);
     }
@@ -566,7 +565,7 @@ mod tests {
             "CREATE INDEX ON COLLECTION docs FOR title TYPE text WITH (lowercase = true, tokenizer = 'word', min_token_len = 2);",
         )
         .unwrap();
-        let body = to_rest_route(&plan(&stmt).unwrap()).body_json().unwrap();
+        let body = to_rest_route(&plan(&stmt).unwrap()).expect("rest").body_json().unwrap();
         assert_eq!(body["field_name"], "title");
         assert_eq!(body["field_schema"]["type"], "text");
         assert_eq!(body["field_schema"]["lowercase"], true);

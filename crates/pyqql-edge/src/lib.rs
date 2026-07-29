@@ -160,13 +160,24 @@ fn tokenize<'py>(input: &str, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict
 #[pyfunction]
 fn compile_query<'py>(py: Python<'py>, input: &str) -> PyResult<Bound<'py, PyAny>> {
     let stmt = Parser::parse(input).map_err(qql_py_syntax_error)?;
-    let (stmt_type, route) = qql_plan::routing::compile_statement(&stmt)
+    let compiled = qql_plan::routing::compile_statement(&stmt)
         .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+    let (method, path, payload) = match compiled.route {
+        Some(route) => {
+            let payload = route.body_json().unwrap_or(serde_json::Value::Null);
+            (
+                serde_json::Value::String(route.method.as_str().into()),
+                serde_json::Value::String(route.path),
+                payload,
+            )
+        }
+        None => (serde_json::Value::Null, serde_json::Value::Null, serde_json::Value::Null),
+    };
     let result = serde_json::json!({
-        "stmt_type": stmt_type,
-        "method": route.method.as_str(),
-        "path": route.path,
-        "payload": route.body_json().unwrap_or(serde_json::Value::Null),
+        "stmt_type": compiled.stmt_type,
+        "method": method,
+        "path": path,
+        "payload": payload,
     });
     pythonize::pythonize(py, &result).map_err(|e| PySyntaxError::new_err(e.to_string()))
 }

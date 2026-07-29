@@ -2715,7 +2715,7 @@ pub(crate) mod test_api_ddl {
 mod tests {
     use super::*;
     use qql_core::parser::Parser;
-    use qql_plan::routing::{route, RequestBody};
+    use qql_plan::routing::{try_route, RequestBody};
 
     #[test]
     fn dense_vector_params_propagates_datatype() {
@@ -2761,7 +2761,7 @@ mod tests {
         for stmt_str in statements {
             let stmt = Parser::parse(stmt_str)
                 .unwrap_or_else(|e| panic!("parse failed for {stmt_str}: {e}"));
-            let r = route(&stmt);
+            let r = try_route(&stmt).unwrap();
             match &r.body {
                 Some(RequestBody::Query(req)) => {
                     let grpc_req = to_query_points(req, "docs");
@@ -2870,7 +2870,7 @@ mod tests {
             "QUERY 'search' FROM my_coll USING dense SCORE THRESHOLD 0.7 LIMIT 10 OFFSET 5;",
         )
         .unwrap();
-        let r = route(&stmt);
+        let r = try_route(&stmt).unwrap();
         let req = match r.body.as_ref().unwrap() {
             RequestBody::Query(q) => q,
             other => panic!("expected Query, got {:?}", std::mem::discriminant(other)),
@@ -2897,7 +2897,7 @@ mod tests {
             "QUERY 'x' FROM docs WITH PAYLOAD INCLUDE ('title', 'url') WITH VECTOR (dense) LIMIT 5;",
         )
         .unwrap();
-        let r = route(&stmt);
+        let r = try_route(&stmt).unwrap();
         let req = match r.body.as_ref().unwrap() {
             RequestBody::Query(q) => q,
             other => panic!("expected Query, got {:?}", std::mem::discriminant(other)),
@@ -2928,7 +2928,7 @@ mod tests {
     fn query_points_shard_key() {
         let stmt =
             Parser::parse("QUERY 'x' FROM docs USING dense SHARD 'tenant-42' LIMIT 5;").unwrap();
-        let r = route(&stmt);
+        let r = try_route(&stmt).unwrap();
         let req = match r.body.as_ref().unwrap() {
             RequestBody::Query(q) => q,
             other => panic!("expected Query, got {:?}", std::mem::discriminant(other)),
@@ -2949,7 +2949,7 @@ mod tests {
     #[test]
     fn query_points_filter_equality() {
         let stmt = Parser::parse("QUERY 'x' FROM docs WHERE status = 'active' LIMIT 5;").unwrap();
-        let r = route(&stmt);
+        let r = try_route(&stmt).unwrap();
         let req = match r.body.as_ref().unwrap() {
             RequestBody::Query(q) => q,
             other => panic!("expected Query, got {:?}", std::mem::discriminant(other)),
@@ -2981,7 +2981,7 @@ mod tests {
     fn query_points_filter_range_compound() {
         let stmt =
             Parser::parse("QUERY 'x' FROM docs WHERE age >= 18 AND age < 65 LIMIT 5;").unwrap();
-        let r = route(&stmt);
+        let r = try_route(&stmt).unwrap();
         let req = match r.body.as_ref().unwrap() {
             RequestBody::Query(q) => q,
             other => panic!("expected Query, got {:?}", std::mem::discriminant(other)),
@@ -3009,7 +3009,7 @@ mod tests {
             "QUERY 'x' FROM docs GROUP BY category SIZE 3 LOOKUP FROM categories LIMIT 10;",
         )
         .unwrap();
-        let r = route(&stmt);
+        let r = try_route(&stmt).unwrap();
         let req = match r.body.as_ref().unwrap() {
             RequestBody::QueryGroups(g) => g,
             other => panic!(
@@ -3033,7 +3033,7 @@ mod tests {
             "CREATE COLLECTION docs (dense VECTOR(384, COSINE)) WITH HNSW (m = 32, ef_construct = 100);",
         )
         .unwrap();
-        let r = route(&stmt);
+        let r = try_route(&stmt).unwrap();
         let req = match r.body.as_ref().unwrap() {
             RequestBody::CreateCollection(c) => c,
             other => {
@@ -3064,7 +3064,7 @@ mod tests {
             "UPSERT INTO docs VALUES {id: 1, text: 'hello'}, {id: 2, text: 'world'};",
         )
         .unwrap();
-        let r = route(&stmt);
+        let r = try_route(&stmt).unwrap();
         let req = match r.body.as_ref().unwrap() {
             RequestBody::Upsert(u) => u,
             other => panic!("expected Upsert, got {:?}", std::mem::discriminant(other)),
@@ -3079,7 +3079,7 @@ mod tests {
     fn delete_with_compound_filter() {
         let stmt = Parser::parse("DELETE FROM docs WHERE category = 'archived' AND priority < 3;")
             .unwrap();
-        let r = route(&stmt);
+        let r = try_route(&stmt).unwrap();
         let req = match r.body.as_ref().unwrap() {
             RequestBody::Delete(d) => d,
             other => panic!("expected Delete, got {:?}", std::mem::discriminant(other)),
@@ -3108,7 +3108,7 @@ mod tests {
             "QUERY ORDER BY created_at DESC FROM docs WHERE status = 'active' LIMIT 20;",
         )
         .unwrap();
-        let r = route(&stmt);
+        let r = try_route(&stmt).unwrap();
         let req = match r.body.as_ref().unwrap() {
             RequestBody::Query(q) => q,
             other => panic!("expected Query, got {:?}", std::mem::discriminant(other)),
