@@ -538,8 +538,7 @@ fn executor(
             {
                 let _ = endpoint;
                 return Err(
-                    "HTTP embedding requires the rest feature; rebuild with --features rest"
-                        .into(),
+                    "HTTP embedding requires the rest feature; rebuild with --features rest".into(),
                 );
             }
         } else {
