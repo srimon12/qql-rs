@@ -48,10 +48,7 @@ impl PyStmt {
         Ok(())
     }
 
-    fn inject_shard_key(&mut self, shard_key: &str) -> PyResult<()> {
-        ast::inject_shard_key(&mut self.inner, shard_key).map_err(qql_py_syntax_error)
-    }
-
+    /// QQL `SHARD '…'` routing key (request-level). Prefer the clause in QQL.
     #[getter]
     fn shard_key(&self) -> Option<String> {
         self.inner.shard_key().map(str::to_owned)
@@ -59,9 +56,7 @@ impl PyStmt {
 
     #[setter]
     fn set_shard_key(&mut self, key: Option<String>) {
-        let _ = self
-            .inner
-            .set_shard_key(key.filter(|value| !value.is_empty()));
+        let _ = self.inner.set_shard_key(key);
     }
 
     fn to_json(&self) -> PyResult<String> {
@@ -117,22 +112,6 @@ fn inject_filter(
     } else if let Ok(query_str) = query.extract::<String>() {
         let mut stmt = Parser::parse(&query_str).map_err(qql_py_syntax_error)?;
         ast::inject_filter(&mut stmt, field, cmp, val).map_err(qql_py_syntax_error)?;
-        Ok(PyStmt { inner: stmt })
-    } else {
-        Err(pyo3::exceptions::PyTypeError::new_err(
-            "query must be a string or a Stmt object",
-        ))
-    }
-}
-
-#[pyfunction]
-fn inject_shard_key(query: &Bound<'_, PyAny>, shard_key: &str) -> PyResult<PyStmt> {
-    if let Ok(mut py_stmt) = query.extract::<PyRefMut<'_, PyStmt>>() {
-        ast::inject_shard_key(&mut py_stmt.inner, shard_key).map_err(qql_py_syntax_error)?;
-        Ok(py_stmt.clone())
-    } else if let Ok(query_str) = query.extract::<String>() {
-        let mut stmt = Parser::parse(&query_str).map_err(qql_py_syntax_error)?;
-        ast::inject_shard_key(&mut stmt, shard_key).map_err(qql_py_syntax_error)?;
         Ok(PyStmt { inner: stmt })
     } else {
         Err(pyo3::exceptions::PyTypeError::new_err(
@@ -623,8 +602,7 @@ fn pyqql_edge(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_json, m)?)?;
     m.add_function(wrap_pyfunction!(is_valid, m)?)?;
     m.add_function(wrap_pyfunction!(inject_filter, m)?)?;
-    m.add_function(wrap_pyfunction!(inject_shard_key, m)?)?;
-    m.add_function(wrap_pyfunction!(tokenize, m)?)?;
+        m.add_function(wrap_pyfunction!(tokenize, m)?)?;
     m.add_function(wrap_pyfunction!(compile_query, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())

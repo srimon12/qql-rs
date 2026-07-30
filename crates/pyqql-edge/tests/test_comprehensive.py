@@ -28,8 +28,7 @@ class TestPackageInspection(unittest.TestCase):
             "execute_async",
             "explain",
             "inject_filter",
-            "inject_shard_key",
-            "is_valid",
+                        "is_valid",
             "local_executor",
             "parse",
             "parse_json",
@@ -42,7 +41,7 @@ class TestPackageInspection(unittest.TestCase):
 
     def test_a2_stmt_is_class_with_methods(self):
         self.assertTrue(isinstance(pyqql_edge.Stmt, type))
-        for attr in ("to_dict", "to_json", "inject_filter", "inject_shard_key", "shard_key"):
+        for attr in ("to_dict", "to_json", "inject_filter", "shard_key"):
             self.assertTrue(hasattr(pyqql_edge.Stmt, attr), f"Stmt missing {attr}")
 
 
@@ -146,17 +145,13 @@ class TestErrorHandling(unittest.TestCase):
             "tenant-a",
         )
 
-    def test_c5_module_inject_shard_key(self):
-        stmt = pyqql_edge.inject_shard_key(
-            "DELETE PAYLOAD draft FROM docs WHERE status = 'archived'",
-            "tenant-b",
-        )
-        self.assertEqual(stmt.shard_key, "tenant-b")
+    def test_c5_stmt_shard_key_property(self):
+        stmts = pyqql_edge.parse("QUERY TEXT 'x' FROM docs SHARD 't' LIMIT 5")
+        assert stmts[0].shard_key == "t"
+        s = pyqql_edge.parse("QUERY TEXT 'x' FROM docs LIMIT 5")[0]
+        s.shard_key = "acme"
+        assert s.shard_key == "acme"
 
-
-# ============================================================================
-# Category D: Local Edge Executor
-# ============================================================================
 
 class TestLocalExecutor(unittest.TestCase):
     def setUp(self):
