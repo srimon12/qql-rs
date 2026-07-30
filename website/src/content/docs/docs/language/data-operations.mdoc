@@ -1,26 +1,37 @@
 ---
 title: "Data operations"
-description: "Upsert, update, scroll, count, and delete Qdrant points with QQL."
+description: "Create, update, browse, count, and delete Qdrant points with readable QQL statements."
 sidebar:
   order: 4
 ---
 
-## Upsert
+Data statements make point writes and maintenance operations inspectable before
+they reach Qdrant. Use a `WHERE` selector for mutations and a `SHARD` clause
+only when you are targeting a known shard key.
 
-Every point requires exactly one case-insensitive `id` key.
+## Upsert a complete point
 
-{% qqlExample title="Payload and named vectors" %}
+Every value object requires exactly one case-insensitive `id` key. A point can
+carry payload values, named dense vectors, sparse vectors, or multivectors.
+
+{% qqlExample title="Payload with a named dense vector" %}
+```sql
 UPSERT INTO docs VALUES {
   id: 1,
   title: 'QQL',
   text: 'Declarative vector retrieval',
-  vector: {dense: [0.1, 0.2, 0.3]}
+  vector: {
+    dense: [0.1, 0.2, 0.3]
+  }
 };
+```
 {% /qqlExample %}
 
-To embed payload fields during execution, use an embedding modifier:
+When execution owns the embedding step, use `USING` or `EMBED` directives. The
+configured embedder resolves text before the operation is planned.
 
-{% qqlExample title="Multiple embedding destinations" %}
+{% qqlExample title="Embed multiple payload fields into named vectors" %}
+```sql
 UPSERT INTO articles VALUES {
   id: 'article-1',
   title: 'Planning hybrid retrieval',
@@ -28,27 +39,60 @@ UPSERT INTO articles VALUES {
 }
 EMBED body INTO dense_body USING DENSE,
       title INTO sparse_title USING SPARSE;
+```
 {% /qqlExample %}
 
-## Update and delete
+## Update only what changed
 
-{% qqlExample title="Mutations" %}
-UPDATE docs SET PAYLOAD = {status: 'reviewed'} WHERE id = 42;
-UPDATE docs SET VECTOR dense = [0.2, 0.3, 0.4] WHERE id = 42;
-DELETE PAYLOAD draft_notes FROM docs WHERE status = 'published';
-DELETE VECTOR dense FROM docs WHERE id = 42;
-DELETE FROM docs WHERE status = 'expired';
+Use a payload update, vector update, payload-key delete, vector delete, or
+point delete rather than overwriting a full point unnecessarily.
+
+{% qqlExample title="Targeted point mutations" %}
+```sql
+UPDATE docs
+SET PAYLOAD = {status: 'reviewed'}
+WHERE id = 42;
+
+UPDATE docs
+SET VECTOR dense = [0.2, 0.3, 0.4]
+WHERE id = 42;
+
+DELETE PAYLOAD draft_notes
+FROM docs
+WHERE status = 'published';
+
+DELETE VECTOR dense
+FROM docs
+WHERE id = 42;
+
+DELETE FROM docs
+WHERE status = 'expired';
+```
 {% /qqlExample %}
 
-Destructive point operations require an explicit selector.
+{% aside type="caution" title="Make destructive selectors explicit" %}
+`DELETE`, `CLEAR PAYLOAD`, `DELETE PAYLOAD`, and `DELETE VECTOR` are designed
+around explicit point selectors. Inspect the compiled route in the playground
+before pointing a mutation at a production endpoint.
+{% /aside %}
 
 ## Browse and count
 
-{% qqlExample title="Operational reads" %}
+`SCROLL` is for deterministic browsing, exports, and backfills. `COUNT` is for
+cardinality and accepts the same filter vocabulary.
+
+{% qqlExample title="Browse published documents and count them" %}
+```sql
 SCROLL FROM docs
 WHERE status = 'published'
 WITH VECTOR false
 LIMIT 100;
 
-COUNT FROM docs WHERE status = 'published';
+COUNT FROM docs
+WHERE status = 'published'
+WITH (exact = true);
+```
 {% /qqlExample %}
+
+Use `SCROLL ... AFTER point_id` to continue from a cursor. Use `COUNT` without
+`exact = true` when an approximate answer is sufficient for a large collection.

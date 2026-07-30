@@ -7,12 +7,22 @@ import starlightCopyButton from "starlight-copy-button";
 import starlightLlmsTxt from "starlight-llms-txt";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "astro/config";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const SITE_URL = "https://qql.veristamp.in";
 
 // Tailwind v4 plugin returns Plugin[] which Vite's PluginOption type rejects under Astro 7.
 const tailwind = /** @type {any} */ (tailwindcss());
+const qqlGrammar = {
+  ...JSON.parse(
+    readFileSync(
+      new URL("../editors/vscode/syntaxes/qql.tmLanguage.json", import.meta.url),
+      "utf8",
+    ),
+  ),
+  name: "qql",
+};
 
 export default defineConfig(
   /** @type {import("astro").AstroUserConfig} */ ({
@@ -24,6 +34,13 @@ export default defineConfig(
         filter: (page) => !page.includes("/docs/landing/"),
       }),
       starlight({
+        expressiveCode: {
+          shiki: {
+            // Reuse the VS Code TextMate grammar so documentation and editor
+            // highlighting recognize the same QQL vocabulary.
+            langs: [qqlGrammar],
+          },
+        },
         plugins: [
           starlightCopyButton(),
           starlightLlmsTxt({ projectName: "QQL" }),

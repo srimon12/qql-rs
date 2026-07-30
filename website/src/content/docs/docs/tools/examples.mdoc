@@ -21,6 +21,7 @@ inside the documentation site.
 Browse the [examples directory on GitHub](https://github.com/srimon12/qql-rs/tree/main/examples).
 
 {% qqlExample title="Representative geo query" %}
+```sql
 QUERY TEXT 'quiet apartment near transit' FROM listings
 USING dense
 WHERE location GEO_RADIUS {
@@ -29,6 +30,7 @@ WHERE location GEO_RADIUS {
 }
 WITH PAYLOAD INCLUDE (name, neighbourhood, price)
 LIMIT 10;
+```
 {% /qqlExample %}
 
 When adding an example, keep its QQL compatible with `language/v1`, document

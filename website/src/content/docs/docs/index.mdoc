@@ -44,15 +44,19 @@ execute the rewritten statement.
 ## A first query
 
 {% qqlExample title="Semantic nearest-neighbor search" %}
-QUERY TEXT 'vector database' FROM docs
+```sql
+QUERY TEXT 'vector database'
+FROM docs
 USING dense
 WHERE status = 'published'
 WITH PAYLOAD INCLUDE (title, url)
 LIMIT 10;
+```
 {% /qqlExample %}
 
-This is parsed by `qql-core`, prepared against collection schema, lowered by
-`qql-plan`, and dispatched by the selected backend.
+This source remains readable in a pull request, a support ticket, or a browser
+session. Open it in the playground to see the AST and the Qdrant request before
+choosing a backend.
 
 ## Choose a path
 
@@ -63,6 +67,7 @@ This is parsed by `qql-core`, prepared against collection schema, lowered by
 - [Choose an SDK](/docs/sdks/)
 
 {% aside type="note" title="Executable documentation" %}
-Every `QQL` example with the “WASM verified” label is extracted from this site
-and parsed by a freshly built `qql-wasm` package during documentation checks.
+Every QQL example is extracted from this site and parsed by a freshly built
+`qql-wasm` package during documentation checks. Open any example in the
+playground to inspect its AST and compiled route.
 {% /aside %}

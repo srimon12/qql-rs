@@ -40,10 +40,12 @@ execution. The edge packages construct an in-process backend and expose it
 through Python, Node.js, or the CLI.
 
 {% qqlExample title="Transport-neutral query" %}
+```sql
 QUERY TEXT 'local first retrieval' FROM notes
 USING dense
 WHERE workspace = 'personal'
 LIMIT 10;
+```
 {% /qqlExample %}
 
 The statement does not encode a transport. Backend-specific limits are

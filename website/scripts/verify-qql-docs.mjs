@@ -37,6 +37,12 @@ function sourceLocation(source, offset) {
   return before.split("\n").length;
 }
 
+function qqlExampleSource(body) {
+  const fence = body.match(/^\s*```(?:qql|sql)?\s*\n([\s\S]*?)\n\s*```\s*$/i);
+  const source = fence?.[1] ?? body;
+  return source.replace(/^ {1,3}/gm, "").trim();
+}
+
 try {
   const build = spawnSync(
     "wasm-pack",
@@ -79,18 +85,17 @@ try {
       path.endsWith(".mdoc"),
     )) {
       const source = readFileSync(file, "utf8");
-      const unwrapped = [...source.matchAll(/```(?:qql|sql)\b/gi)];
-      for (const match of unwrapped) {
-        failures.push({
-          file,
-          line: sourceLocation(source, match.index),
-          message: "QQL fences must use the qqlExample component",
-        });
-      }
-
       for (const match of source.matchAll(tagPattern)) {
         examples += 1;
-        const query = match[1].trim();
+        if (!match[1].trimStart().startsWith("```")) {
+          failures.push({
+            file,
+            line: sourceLocation(source, match.index),
+            message: "qqlExample content must use a fenced SQL block to preserve formatting",
+          });
+          continue;
+        }
+        const query = qqlExampleSource(match[1]);
         const line = sourceLocation(source, match.index);
         if (!query) {
           failures.push({ file, line, message: "empty qqlExample" });

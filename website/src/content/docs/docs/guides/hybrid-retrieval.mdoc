@@ -11,23 +11,28 @@ matching. QQL exposes a shorthand and an explicit multi-stage form.
 ## Shorthand
 
 {% qqlExample title="Schema-resolved hybrid search" %}
+```sql
 QUERY TEXT 'zero downtime deployment' FROM runbooks
 USING HYBRID DENSE dense SPARSE bm25 FUSION RRF
 WHERE service = 'gateway'
 LIMIT 10;
+```
 {% /qqlExample %}
 
 If the collection has exactly one dense and one sparse vector, omit the names:
 
 {% qqlExample title="Hybrid defaults" %}
+```sql
 QUERY 'zero downtime deployment' FROM runbooks
 USING HYBRID
 LIMIT 10;
+```
 {% /qqlExample %}
 
 ## Explicit candidate stages
 
 {% qqlExample title="Weighted RRF pipeline" %}
+```sql
 WITH
   semantic AS (
     QUERY TEXT 'zero downtime deployment'
@@ -46,6 +51,7 @@ FROM runbooks
 PREFETCH (semantic, lexical)
 PARAMS (rrf_k = 40, rrf_weights = [0.7, 0.3])
 LIMIT 10;
+```
 {% /qqlExample %}
 
 Use the explicit form when candidate limits, filters, or weights differ by

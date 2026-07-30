@@ -16,14 +16,17 @@ embedding path?” QQL keeps those decisions separate.
 | `USING colbert AS MULTI` | Explicit dense multivector |
 
 {% qqlExample title="Offline-explicit vector role" %}
+```sql
 QUERY TEXT 'late interaction' FROM papers
 USING colbert AS MULTI
 LIMIT 10;
+```
 {% /qqlExample %}
 
 ## Late-interaction reranking
 
 {% qqlExample title="ColBERT-style rerank" %}
+```sql
 WITH candidates AS (
   QUERY TEXT 'vector compression' USING dense LIMIT 100
 )
@@ -32,6 +35,7 @@ FROM papers
 USING colbert AS MULTI
 PREFETCH (candidates)
 LIMIT 10;
+```
 {% /qqlExample %}
 
 This embeds the query as a dense multivector and uses Qdrant MaxSim against the
@@ -40,6 +44,7 @@ stored multivector target.
 ## Cross-encoder reranking
 
 {% qqlExample title="Host pair scoring" %}
+```sql
 WITH candidates AS (
   QUERY TEXT 'vector compression' USING dense LIMIT 50
 )
@@ -49,6 +54,7 @@ ON FIELD abstract
 FROM papers
 PREFETCH (candidates)
 LIMIT 10;
+```
 {% /qqlExample %}
 
 Cross reranking reads candidate text from the payload, calls the host's

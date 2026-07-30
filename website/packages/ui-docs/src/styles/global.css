@@ -280,7 +280,7 @@ site-header, header.header {
 	font-family: var(--sl-font-mono);
 	font-size: 0.72rem;
 	gap: 0.75rem;
-	grid-template-columns: auto 1fr auto auto;
+	grid-template-columns: auto 1fr auto;
 	padding: 0.65rem 1rem;
 }
 
@@ -289,8 +289,6 @@ site-header, header.header {
 	font-weight: 600;
 	letter-spacing: 0.08em;
 }
-
-.qql-example__verified { color: var(--sl-color-gray-3); }
 
 .qql-example__try {
 	align-items: center;
@@ -323,7 +321,6 @@ site-header, header.header {
 
 @media (max-width: 38rem) {
 	.qql-example__caption { grid-template-columns: auto 1fr; }
-	.qql-example__verified { display: none; }
 	.qql-example__try {
 		border-left: 0;
 		grid-column: 1 / -1;

@@ -16,6 +16,7 @@ concerns.
 | Partition lifecycle | `CREATE/DROP SHARD KEY` | custom shard administration |
 
 {% qqlExample title="Tenant-aware schema" %}
+```sql
 CREATE COLLECTION documents (
   dense VECTOR(384, COSINE)
 ) WITH PARAMS (
@@ -26,14 +27,17 @@ CREATE COLLECTION documents (
 
 CREATE INDEX ON COLLECTION documents FOR tenant_id
 TYPE keyword WITH (is_tenant = true);
+```
 {% /qqlExample %}
 
 {% qqlExample title="Isolation and routing together" %}
+```sql
 QUERY TEXT 'risk factors' FROM documents
 USING dense
 WHERE tenant_id = 'acme'
 SHARD 'acme'
 LIMIT 10;
+```
 {% /qqlExample %}
 
 ## Host-side enforcement

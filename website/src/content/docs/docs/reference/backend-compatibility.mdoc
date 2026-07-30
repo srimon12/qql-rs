@@ -27,6 +27,7 @@ capability error as authoritative.
 ## Request-level parameters
 
 {% qqlExample title="Remote search controls" %}
+```sql
 QUERY TEXT 'search' FROM docs
 USING dense
 PARAMS (
@@ -37,6 +38,7 @@ PARAMS (
   max_selectivity = 0.4
 )
 LIMIT 10;
+```
 {% /qqlExample %}
 
 `timeout` and `consistency` map to request-level REST/gRPC fields. HNSW and

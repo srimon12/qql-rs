@@ -1,48 +1,108 @@
 ---
 title: "WebAssembly SDK"
-description: "Parse, analyze, compile, and optionally execute QQL in browsers and JavaScript runtimes."
+description: "Parse, analyze, compile, and optionally execute QQL in a browser or JavaScript runtime."
 sidebar:
   order: 5
 ---
+
+`qql-wasm` makes the parser and planner available without a server round-trip.
+Use `analyze` for editor feedback and offline route inspection; construct a
+`Client` only when your application is ready to call a Qdrant REST endpoint.
 
 {% terminal title="Install" %}
 npm install qql-wasm
 {% /terminal %}
 
-{% qqlExample title="Input used below" %}
-QUERY TEXT 'browser retrieval' FROM docs
+{% qqlExample title="A browser-safe query source" %}
+```sql
+QUERY TEXT 'browser retrieval'
+FROM docs
 USING dense
 LIMIT 5;
+```
 {% /qqlExample %}
 
+## Analyze source locally
+
+Initialize once per JavaScript realm. `analyze` returns strict validity, tokens,
+AST, compiled routes, an explanation, and a structured error with byte offsets.
+
 ```javascript
-import init, { analyze, parse, isValid } from "qql-wasm";
+import init, { analyze, isValid, parse } from "qql-wasm";
 
 await init();
-console.log(isValid(query));
-const statements = parse(query);
+
 const info = analyze(query);
-console.log(statements, info.route, info.explain);
+if (!info.valid) {
+  console.error(info.error.code, info.error.message);
+} else {
+  console.log(info.routes, info.explain);
+}
+
+console.log(isValid(query));
+console.log(parse(query));
 ```
 
-## Live REST execution
+## Execute with an explicit lifecycle
+
+The WASM client is REST/fetch only. Call `free()` when a `Client` or `Stmt` is
+no longer needed, especially in long-lived applications or when replacing
+connection settings.
 
 ```javascript
 import { Client } from "qql-wasm";
 
 const client = new Client("http://localhost:6333", null);
-const report = await client.execute(query);
-console.log(report);
-client.free();
+
+try {
+  const report = await client.execute(query);
+  console.log(report.ok, report.results);
+} finally {
+  client.free();
+}
 ```
 
-Use `setHttpEmbedder` for an OpenAI-compatible embedding endpoint or
-`setEmbedder` for a JavaScript host callback.
+## Provide text embeddings from the host
 
-{% aside type="caution" title="Free owned handles" %}
-`Client` and `Stmt` wrap WebAssembly allocations. Call `free()` when the object
-is no longer needed, especially in long-lived browser applications.
+Use an OpenAI-compatible HTTP endpoint or supply a JavaScript callback. The
+callback receives a batch of strings and returns one dense vector per string.
+
+```javascript
+import { Client } from "qql-wasm";
+
+const client = new Client("http://localhost:6333", null);
+client.setEmbedder(async (texts) => {
+  const response = await fetch("/api/embed", {
+    method: "POST",
+    body: JSON.stringify({ texts }),
+  });
+  return response.json();
+});
+
+// Or configure a hosted OpenAI-compatible endpoint.
+client.setHttpEmbedder(
+  "https://embeddings.example.com/v1/embeddings",
+  "text-embedding-3-small",
+  1536,
+  null,
+);
+```
+
+| API | Returns | Use it for |
+|---|---|---|
+| `init` / `initSync` | initialized WASM module | One-time module initialization |
+| `parse`, `isValid`, `tokenize` | AST values, boolean, token list | Strict local parser primitives |
+| `analyze(source)` | validity, tokens, AST, routes, explain, error | Editors and offline diagnostics |
+| `compile`, `explain`, `inject_filter` | route, text, rewritten AST | One-shot offline planning helpers |
+| `compileBytes`, `explainBytes` | `Uint8Array` | Transferable worker or IPC payloads |
+| `new Stmt(source)` | owned statement handle | `injectFilter`, route compile, and shard assignment |
+| `Stmt.toObject`, `toJSON`, `compileRoute` | AST or route | Inspect a single owned statement |
+| `new Client`, `execute`, `executeStmt` | execution report promise | Direct browser-to-Qdrant REST calls |
+| `setEmbedder`, `setHttpEmbedder`, `hasEmbedder` | configured client | Resolve text input from JavaScript or HTTP |
+| `free()` | released WASM allocation | Dispose `Client` and `Stmt` handles |
+
+{% aside type="caution" title="Browser capability boundary" %}
+WASM has no gRPC or edge backend. `setHttpEmbedder` configures one HTTP text
+embedder; multi-vector, image, and reranker endpoint configuration belongs in
+the Rust, Python, or Node SDKs.
 {% /aside %}
-
-The executable-doc test builds this crate from the current workspace with
-`wasm-pack --target nodejs` and parses every `qqlExample`.

@@ -1,42 +1,89 @@
 ---
 title: "Python SDK"
-description: "Use pyqql for native QQL parsing, policy injection, planning, and Qdrant execution."
+description: "Use pyqql for native parsing, policy injection, planning, and Qdrant execution from Python."
 sidebar:
   order: 3
 ---
 
-{% terminal title="Install" %}
+`pyqql` exposes native QQL statement handles while keeping the Python API small:
+parse source, inspect or mutate a statement, then execute it with a client.
+
+{% terminal title="Install the remote client" %}
 pip install pyqql
 {% /terminal %}
 
-{% qqlExample title="Input used below" %}
-QUERY TEXT 'cardiology' FROM medical_records
+{% qqlExample title="Scoped medical-record search" %}
+```sql
+QUERY TEXT 'cardiology'
+FROM medical_records
 USING dense
 LIMIT 5;
+```
 {% /qqlExample %}
 
-```python
-import pyqql
+## Execute and inspect the report
 
-client = pyqql.Client("http://localhost:6333")
+`Client.execute` returns an execution-report dictionary with `ok`, `results`,
+`succeeded`, and `failed` keys. A script may contain multiple semicolon-delimited
+statements.
+
+```python
+from pyqql import Client
+
+client = Client("http://localhost:6333")
 report = client.execute(query)
-print(report.ok, report.succeeded, report.failed)
+
+if not report["ok"]:
+    raise RuntimeError(report)
+
+print(report["succeeded"], report["failed"])
 ```
 
-## Parse and isolate
+## Parse, isolate, and route
+
+Use an AST predicate for isolation. Assign a shard key only when the host also
+knows the Qdrant routing partition.
 
 ```python
-stmt = pyqql.parse(query)[0]
-pyqql.inject_filter(stmt, "tenant_id", "=", "hospital-7")
+from pyqql import Client, parse
+
+client = Client("http://localhost:6333")
+stmt = parse(query)[0]
+stmt.inject_filter("tenant_id", "=", "hospital-7")
 stmt.shard_key = "hospital-7"
+
 report = client.execute(stmt)
 ```
 
-The native binding returns statement handles. Free-standing and client
-execution support strings, statement objects, and host arrays. Async variants
-are available for event-loop applications.
+Only `=`, `>`, `>=`, `<`, and `<=` are supported by policy injection. Do not
+substitute `!=` for an exclusion rule; model that rule in the source query.
 
-{% aside type="note" title="Edge package" %}
-Install `pyqql-edge` only when you need the in-process edge backend and bundled
-embedding support. The regular package has the smaller remote-client surface.
+## Plan before you send traffic
+
+```python
+from pyqql import compile_query, explain, tokenize
+
+route = compile_query(query)
+print(route["method"], route["path"])
+print(explain(query))
+print(tokenize(query))
+```
+
+| API | Returns | Use it when |
+|---|---|---|
+| `Client(url, api_key, use_grpc, embedder)` | client | Configure remote execution once |
+| `Client.execute` / `execute_async` | report dictionary | Execute source, statements, or an array; choose sync or async host flow |
+| `Client.explain` / `Client.compile` | plan or route dictionary | Inspect work before executing it |
+| `parse(source)` | `list[Stmt]` | You need to inspect or mutate a statement |
+| `Stmt.inject_filter`, `Stmt.shard_key` | mutated statement | Enforce a predicate and optionally choose routing |
+| `Stmt.to_dict` / `Stmt.to_json` | AST representation | Log or inspect the rewritten statement |
+| `is_valid`, `tokenize`, `explain` | boolean, tokens, plan | Lightweight strict parser tools |
+| `compile_query` | route dictionary | Obtain the Qdrant method, path, and payload |
+| `inject_filter` / `execute` | host-friendly convenience result | One-shot transform or execution |
+| `HttpEmbedder` | embedder object | Supply a remote embedding model |
+
+{% aside type="note" title="Remote and edge packages" %}
+Use `pyqql` for Qdrant execution. `pyqql-edge` is a separate in-process backend
+package; choose it only when you intentionally need local edge execution and its
+feature limits fit your workload.
 {% /aside %}

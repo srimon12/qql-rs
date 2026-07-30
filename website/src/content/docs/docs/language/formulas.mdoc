@@ -1,44 +1,69 @@
 ---
 title: "Formula scoring"
-description: "Shape QQL scores with arithmetic, payload fields, functions, decay, geo distance, and conditions."
+description: "Rescore QQL candidates with arithmetic, payload fields, decay functions, geo distance, and conditions."
 sidebar:
   order: 6
 ---
 
-Formula queries apply Qdrant score-builder expressions to prefetch scores or
-payload fields.
+Formula queries reshape a candidate score with Qdrant score-builder expressions.
+Use them after a retrieval stage when business signals such as freshness,
+popularity, distance, or a payload tier should influence ranking.
 
-{% qqlExample title="Prefetch then rescore" %}
+## Rescore an explicit candidate set
+
+`$score` represents the upstream score. `DEFAULTS` makes missing payload values
+predictable instead of leaving their behavior implicit.
+
+{% qqlExample title="Blend relevance and citation count" %}
+```sql
 WITH candidates AS (
-  QUERY TEXT 'distributed systems' USING dense LIMIT 100
+  QUERY TEXT 'distributed systems'
+  USING dense
+  LIMIT 100
 )
 QUERY FORMULA
   $score * 0.8 + LOG(citation_count + 1) * 0.2
-DEFAULTS (score = 0.0, citation_count = 0)
+DEFAULTS (
+  score = 0.0,
+  citation_count = 0
+)
 FROM papers
 PREFETCH (candidates)
 LIMIT 10;
+```
 {% /qqlExample %}
 
-## Decay
+## Pick a decay curve for the signal
 
-{% qqlExample title="Freshness and popularity" %}
+| Function | Choose it when |
+|---|---|
+| `EXP_DECAY` | The effect should drop quickly near the target and then taper |
+| `GAUSS_DECAY` | Values near the target should receive the smoothest peak |
+| `LIN_DECAY` | A simple, linear reduction is easiest to reason about |
+
+{% qqlExample title="Freshness and popularity signals" %}
+```sql
 QUERY FORMULA
   $score
   + EXP_DECAY(age_days, TARGET = 0, SCALE = 30, MIDPOINT = 0.5)
   + GAUSS_DECAY(popularity, TARGET = 100, SCALE = 25)
-DEFAULTS (score = 0.0, age_days = 365, popularity = 0)
+DEFAULTS (
+  score = 0.0,
+  age_days = 365,
+  popularity = 0
+)
 FROM articles
 LIMIT 10;
+```
 {% /qqlExample %}
 
-Supported functions include `ABS`, `SQRT`, `LOG`, `LN`, `EXP`, `POW`,
-`GEO_DISTANCE`, `EXP_DECAY`, `GAUSS_DECAY`, `LIN_DECAY`, `datetime`, and
-`datetime_key`.
+## Encode a transparent business rule
 
-## Conditions
+Use `CASE WHEN` for a discrete condition. Keep the fallback explicit so a
+missing or non-matching value remains easy to audit.
 
-{% qqlExample title="Conditional score" %}
+{% qqlExample title="Boost a premium tier" %}
+```sql
 QUERY FORMULA
   CASE WHEN tier MATCH ANY ('premium')
     THEN $score * 1.5
@@ -47,4 +72,10 @@ QUERY FORMULA
 DEFAULTS (score = 0.0)
 FROM docs
 LIMIT 10;
+```
 {% /qqlExample %}
+
+Supported functions include `ABS`, `SQRT`, `LOG`, `LN`, `EXP`, `POW`,
+`GEO_DISTANCE`, `EXP_DECAY`, `GAUSS_DECAY`, `LIN_DECAY`, `datetime`, and
+`datetime_key`. Keep formula inputs indexed and measurable before adding them to
+a production ranking path.

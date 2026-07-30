@@ -1,52 +1,92 @@
 ---
 title: "Collections and indexes"
-description: "Create and alter dense, sparse, hybrid, multivector, and custom-sharded Qdrant collections."
+description: "Define Qdrant collection topology, payload indexes, and custom shard keys from QQL."
 sidebar:
   order: 5
 ---
 
-## Collection topology
+Collection declarations make vector topology reviewable alongside the queries
+that use it. Define vectors first, add payload indexes for fields you filter or
+order by, and add shard keys only when Qdrant routing is part of the design.
 
-{% qqlExample title="Dense, sparse, and multivector schema" %}
+## Model the vector topology
+
+Vector names are application-defined. `dense`, `bm25`, and `colbert` are useful
+conventions, but vector configuration determines the actual role.
+
+{% qqlExample title="Dense, sparse, and multivector topology" %}
+```sql
 CREATE COLLECTION research (
   dense VECTOR(384, COSINE),
   bm25 SPARSE,
   colbert VECTOR(128, COSINE)
     WITH MULTIVECTOR (comparator = 'max_sim')
     WITH HNSW (m = 0)
-) WITH HNSW (m = 16, ef_construct = 100);
+)
+WITH HNSW (
+  m = 16,
+  ef_construct = 100
+);
+```
 {% /qqlExample %}
 
-Vector names are application-defined. Names such as `dense`, `bm25`, and
-`colbert` are conventions, not reserved words. The schema—not the name—defines
-the vector role.
+| Requirement | Schema choice |
+|---|---|
+| Semantic retrieval | A dense `VECTOR(size, distance)` |
+| Lexical or sparse retrieval | A named `SPARSE` vector |
+| Late interaction | A multivector with a comparator |
+| Hybrid retrieval | Both a dense and sparse vector |
 
-## Payload indexes
+## Index the filter paths you use
 
-{% qqlExample title="Filter indexes" %}
-CREATE INDEX ON COLLECTION research FOR tenant_id
-TYPE keyword WITH (is_tenant = true, on_disk = true);
+Create payload indexes for fields used frequently in filters, tenant predicates,
+or ordering. Index design is a Qdrant performance decision, not a requirement
+for every payload field.
 
-CREATE INDEX ON COLLECTION research FOR content
-TYPE text WITH (
+{% qqlExample title="Tenant and text payload indexes" %}
+```sql
+CREATE INDEX ON COLLECTION research
+FOR tenant_id
+TYPE keyword
+WITH (
+  is_tenant = true,
+  on_disk = true
+);
+
+CREATE INDEX ON COLLECTION research
+FOR content
+TYPE text
+WITH (
   tokenizer = 'multilingual',
   lowercase = true,
   phrase_matching = true
 );
+```
 {% /qqlExample %}
 
-Create indexes for fields used frequently in filters or ordering.
+## Route a collection with custom shard keys
 
-## Custom shard keys
+Shard-key DDL creates and manages routing partitions. It is separate from the
+tenant predicate your service must enforce.
 
-{% qqlExample title="Partition management" %}
-CREATE SHARD KEY 'acme' ON COLLECTION research
+{% qqlExample title="Manage a custom shard key" %}
+```sql
+CREATE SHARD KEY 'acme'
+ON COLLECTION research
 WITH (shards_number = 2);
 
-SHOW SHARD KEYS ON COLLECTION research;
+SHOW SHARD KEYS
+ON COLLECTION research;
 
-DROP SHARD KEY 'acme' ON COLLECTION research;
+DROP SHARD KEY 'acme'
+ON COLLECTION research;
+```
 {% /qqlExample %}
 
-Shard-key DDL is a remote Qdrant capability and is not supported by the edge
-backend.
+{% aside type="note" title="Remote-backend capability" %}
+Shard-key DDL is a Qdrant remote-backend capability. The in-process edge backend
+does not support shard keys, `ALTER COLLECTION`, or grouped queries.
+{% /aside %}
+
+Next: [Data operations](/docs/language/data-operations/) and
+[Multitenancy](/docs/guides/multitenancy/).

@@ -1,33 +1,50 @@
 ---
 title: "SDK overview"
-description: "Choose the qql-rs Rust, Python, Node.js, or WebAssembly integration."
+description: "Choose the Rust, Python, Node.js, or WebAssembly SDK for the environment that owns your QQL workflow."
 sidebar:
   order: 1
 ---
 
-All SDKs use the same language and plan model, but host capabilities differ.
+Every SDK implements the same QQL lifecycle: parse input, inspect or rewrite an
+AST, compile or explain offline, then execute against Qdrant. Choose the host
+that is already closest to your application; do not translate a query into a
+different syntax per service.
 
-| Host | Package | Parser | Live execution | Edge |
-|---|---|---:|---:|---:|
-| Rust | `qql-core`, `qql` | yes | REST + gRPC | separate crate |
-| Python | `pyqql` | yes | REST + gRPC | `pyqql-edge` |
-| Node.js | `@veristamp/nqql` | yes | REST + gRPC | `@veristamp/nqql-edge` |
-| Browser/WASM | `qql-wasm` | yes | REST/fetch | no |
+| Host | Install | Live execution | Distinct capability |
+|---|---|---:|---|
+| Rust | `qql-core` + `qql` | REST and optional gRPC | Direct AST, planning, and executor APIs |
+| Python | `pyqql` | REST and optional gRPC | Native statement handles and async execution |
+| Node.js | `@veristamp/nqql` | REST and optional gRPC | Native N-API bindings and `parseJson` |
+| Browser/WASM | `qql-wasm` | REST/fetch | Offline `analyze`, JavaScript embedder, transferable bytes |
 
-## Shared concepts
-
-- `parse` returns typed or host-owned statement objects.
-- `is_valid` / `isValid` performs strict full-input parsing.
-- `inject_filter` / `injectFilter` rewrites the AST.
-- `compile` and `explain` are offline planning tools.
-- `execute` accepts a statement or semicolon-delimited script.
-- Host arrays represent independent inputs.
-
-{% qqlExample title="Shared SDK input" %}
-QUERY TEXT 'portable query' FROM docs
+{% qqlExample title="One query, every SDK" %}
+```sql
+QUERY TEXT 'portable query'
+FROM docs
 USING dense
 LIMIT 5;
+```
 {% /qqlExample %}
 
-The SDK pages use `query` to refer to the verified statement above, keeping the
-language example separate from host syntax.
+## Shared workflow
+
+1. Parse or analyze the source before sending traffic.
+2. Inject a trusted filter when the caller must be constrained.
+3. Use `compile` or `explain` to inspect the Qdrant operation.
+4. Execute a statement, script, or independent host array.
+
+| Capability | Rust | Python | Node.js | WASM |
+|---|---|---|---|---|
+| Parse | `Parser::parse_all` | `parse` | `parse` | `parse` |
+| Validate | parse result | `is_valid` | `isValid` | `isValid` |
+| Inject policy | `inject_filter` | `inject_filter` | `injectFilter` | `inject_filter` / `Stmt.injectFilter` |
+| Explain and compile | planner/runtime | `explain`, `compile_query` | `explain`, `compileQuery` | `analyze`, `compile` |
+| Execute | `Executor::execute` | `Client.execute` | `Client.execute` | `Client.execute` |
+
+{% aside type="caution" title="A shard key is not a security boundary" %}
+`SHARD` chooses routing. Enforce tenant isolation with `inject_filter` or the
+equivalent statement method, and use a shard key only as an additional routing
+choice. The supported injected operators are `=`, `>`, `>=`, `<`, and `<=`.
+{% /aside %}
+
+Choose a host page for complete API and lifecycle guidance.

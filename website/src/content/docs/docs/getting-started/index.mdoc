@@ -1,38 +1,56 @@
 ---
 title: "What is QQL?"
-description: "Understand the qql-rs language, runtime, backends, and SDK family."
+description: "Use one readable query language for Qdrant retrieval, data operations, schema work, and policy-safe execution."
 sidebar:
   order: 1
 ---
 
-QQL is a query language and execution stack for Qdrant. It is implemented in
-Rust and exposed consistently through native and WebAssembly bindings.
+QQL gives a product team one query surface for search, retrieval pipelines,
+point mutations, and collection management. The same source works in a Rust
+service, Python worker, Node.js API, browser tool, or the `qql` CLI.
 
-## The workspace
+{% grid style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:1rem;" %}
 
-| Layer | Package | Responsibility |
-|---|---|---|
-| Language | `qql-core` | Lexer, strict parser, typed AST, validation, `inject_filter` |
-| Planning | `qql-plan` | Transport-neutral `PlannedOperation` |
-| Embedding | `qql-embed` | HTTP and host embedding interfaces |
-| Runtime | `qql` | Preparation, batching, REST/gRPC execution |
-| Edge | `qql-edge` | In-process vector storage and search |
-| Hosts | `pyqql`, `@veristamp/nqql`, `qql-wasm` | Python, Node.js, and browser APIs |
-| Tooling | `qql` CLI | Execute, explain, convert, dump, doctor, REPL |
+{% glassCard title="Readable operations" %}
+Keep the intent, filter, vector choice, and result shape together instead of
+assembling transport-specific request bodies across application layers.
+{% /glassCard %}
+
+{% glassCard title="Inspectable before execution" %}
+Parse, explain, and compile a statement locally. The playground exposes the
+same AST and Qdrant route your application will use.
+{% /glassCard %}
+
+{% glassCard title="Portable integration" %}
+Adopt QQL in the host language that already owns your product workflow rather
+than running a separate query service just to translate syntax.
+{% /glassCard %}
+
+{% glassCard title="Policy at the source" %}
+Inject a trusted predicate into the parsed AST before planning. Tenant filtering
+is part of the operation, not a post-processing step.
+{% /glassCard %}
+
+{% /grid %}
 
 ## Where QQL fits
 
-Use QQL when a system benefits from a reviewable query string, the same
-retrieval behavior across languages, or AST-level policy enforcement.
+Choose QQL when the product benefits from reviewable query source, consistent
+retrieval behavior across services, or policy enforcement before Qdrant sees a
+request. Use a native Qdrant SDK directly when your application already owns a
+stable typed request builder and portability is not useful.
 
-Use the native Qdrant SDK directly when your application already owns a stable
-typed request builder and does not need a portable query surface.
-
-{% qqlExample title="Hybrid retrieval with a payload filter" %}
-QUERY TEXT 'incident response' FROM runbooks
-USING HYBRID DENSE dense SPARSE bm25 FUSION RRF
+{% qqlExample title="Hybrid retrieval scoped to one service" %}
+```sql
+QUERY TEXT 'incident response'
+FROM runbooks
+USING HYBRID
+  DENSE dense
+  SPARSE bm25
+  FUSION RRF
 WHERE service = 'payments'
 LIMIT 8;
+```
 {% /qqlExample %}
 
 ## Two boundaries to remember
@@ -44,7 +62,9 @@ Production multi-tenant systems commonly use both.
 {% /aside %}
 
 {% aside type="note" title="Parsing is not execution" %}
-Parsing proves that the complete input is valid QQL. Planning can still require
-collection schema, and execution can still require an embedder or a live
-Qdrant backend.
+Parsing proves complete QQL syntax. Planning can still require collection
+topology, and execution can still require an embedder or a live Qdrant backend.
 {% /aside %}
+
+Continue with [installation](/docs/getting-started/installation/) or run the
+[quickstart](/docs/getting-started/quickstart/).

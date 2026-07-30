@@ -7,14 +7,20 @@ sidebar:
 
 Runnable QQL belongs in the `qqlExample` component:
 
-```text
+````text
 {% qqlExample title="Describe the behavior" %}
-QUERY TEXT 'example' FROM docs USING dense LIMIT 5;
-{% /qqlExample %}
+```sql
+QUERY TEXT 'example'
+FROM docs
+USING dense
+LIMIT 5;
 ```
+{% /qqlExample %}
+````
 
-The component provides consistent presentation and an honest verification
-label. Do not use raw `qql` or `sql` fences for runnable statements.
+The component provides consistent presentation and preserves the fenced source
+exactly. Do not use raw `qql` or `sql` fences outside `qqlExample` for runnable
+statements.
 
 ## Run the verifier
 

@@ -5,19 +5,26 @@ sidebar:
   order: 2
 ---
 
-Use `qql-core` for the transport-free frontend and `qql` for execution.
+Use `qql-core` when your service needs a transport-free parser and AST. Add
+`qql` when the same process should execute plans against Qdrant.
 
-{% terminal title="Install" %}
+{% terminal title="Install parser and runtime" %}
 cargo add qql-core qql
 {% /terminal %}
 
-## Parse and enforce policy
-
-{% qqlExample title="Input used below" %}
-QUERY TEXT 'laptops' FROM products
+{% qqlExample title="Tenant-scoped product search" %}
+```sql
+QUERY TEXT 'laptops'
+FROM products
 USING dense
 LIMIT 10;
+```
 {% /qqlExample %}
+
+## Parse once, then enforce policy
+
+The parser requires complete input. Retain the typed `Stmt` and rewrite that
+object before planning or execution.
 
 ```rust
 use qql_core::ast::{inject_filter, ComparisonOp, Value};
@@ -30,28 +37,56 @@ inject_filter(
     ComparisonOp::Eq,
     Value::Str("org_99".into()),
 )?;
+
+// Optional request routing. This is not tenant isolation.
 stmt.set_shard_key(Some("org_99".into()));
 ```
 
-## Execute
+## Execute a statement or script
+
+`Executor::execute` accepts one QQL source string. Use `OnError::Stop` to halt
+at the first failure or `OnError::Continue` to collect a report for every
+statement in a script.
 
 ```rust
 use qql::executor::{Executor, OnError};
 
-let executor = Executor::rest("http://localhost:6333", None);
+let executor = Executor::rest("http://localhost:6333", None)?;
 let report = executor.execute(query, OnError::Stop).await?;
+
 assert!(report.ok);
+println!("{} operations succeeded", report.succeeded);
 ```
 
-For text input, configure an embedder or use precomputed vector input. The
-runtime also provides `Executor::grpc`.
+For text input, configure an embedder or provide a `QUERY VECTOR` / explicit
+vector value. The runtime also exposes `Executor::grpc` behind its gRPC feature.
 
-## Parser contracts
+## Core API
 
 {% apiField name="Parser::parse" type="fn(&str) -> Result<Stmt, QqlError>" required=true %}
-Parse one statement and require complete input consumption.
+Parse exactly one complete statement.
 {% /apiField %}
 
 {% apiField name="Parser::parse_all" type="fn(&str) -> Result<Vec<Stmt>, QqlError>" required=true %}
 Parse one semicolon-delimited script.
 {% /apiField %}
+
+{% apiField name="inject_filter" type="fn(&mut Stmt, &str, ComparisonOp, Value) -> Result<(), QqlError>" required=true %}
+Add a trusted predicate to a parsed statement.
+{% /apiField %}
+
+{% apiField name="Executor::execute" type="async fn(&self, &str, OnError) -> Result<ExecutionReport>" required=true %}
+Plan and execute one statement or a script against the configured backend.
+{% /apiField %}
+
+| Surface | Function or type | Purpose |
+|---|---|---|
+| Parse | `Parser::parse`, `Parser::parse_all` | Strict single-statement or script parsing |
+| Inspect | `lexer::Lexer`, `explain`, `explain_all` | Tokens and human-readable AST explanation |
+| Rewrite | `inject_filter`, `Stmt::set_shard_key` | Trusted AST mutation before planning |
+| Plan | `qql_plan::plan::plan`, `to_rest_route` | Offline IR and Qdrant REST projection |
+| Execute | `Executor::execute`, `execute_batch`, `execute_node` | Source, batch, or owned-statement execution |
+| Embed | `Embedder`, `resolve_embeddings` | Resolve text, sparse, multi, image, or rerank inputs |
+
+For offline route inspection, use `qql_plan::plan::plan` followed by
+`qql_plan::plan::to_rest_route` before configuring any transport.

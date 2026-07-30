@@ -1,43 +1,98 @@
 ---
 title: "Node.js SDK"
-description: "Use @veristamp/nqql for native QQL parsing, policy injection, planning, and Qdrant execution."
+description: "Use @veristamp/nqql for native QQL parsing, policy injection, route inspection, and Qdrant execution."
 sidebar:
   order: 4
 ---
+
+`@veristamp/nqql` is a native N-API binding for Node.js 18 or newer. It accepts
+source strings, parsed statements, and arrays of independent inputs.
 
 {% terminal title="Install" %}
 npm install @veristamp/nqql
 {% /terminal %}
 
-{% qqlExample title="Input used below" %}
-QUERY TEXT 'incident response' FROM runbooks
+{% qqlExample title="Scoped runbook search" %}
+```sql
+QUERY TEXT 'incident response'
+FROM runbooks
 USING dense
 LIMIT 5;
+```
 {% /qqlExample %}
 
-```javascript
-const { Client, parse, isValid } = require("@veristamp/nqql");
+## Execute a query
 
-if (!isValid(query)) throw new Error("invalid QQL");
+```javascript
+const { Client, isValid } = require("@veristamp/nqql");
+
+if (!isValid(query)) {
+  throw new Error("QQL source is invalid");
+}
 
 const client = new Client({ url: "http://localhost:6333" });
 const report = await client.execute(query);
-console.log(report.ok, report.results);
+
+console.log(report.ok, report.succeeded, report.results);
 ```
 
-## Parse and isolate
+## Retain the parsed statement for policy
 
 ```javascript
+const { Client, parse } = require("@veristamp/nqql");
+
+const client = new Client({ url: "http://localhost:6333" });
 const [stmt] = parse(query);
+
 stmt.injectFilter("tenant_id", "=", "acme");
 stmt.shardKey = "acme";
-await client.execute(stmt);
+
+const report = await client.execute(stmt);
 ```
 
-`parse` wraps the native full-script parser and always returns an array of
-statement handles. `parseJson` is the raw JSON forwarding form.
+`injectFilter` permits `=`, `>`, `>=`, `<`, and `<=`. `shardKey` is routing,
+not authorization; keep the injected tenant predicate for isolation.
 
-{% aside type="note" title="Platform packages" %}
-The package loads the matching N-API binary for supported Linux, macOS, and
-Windows targets. Node.js 18 or newer is required.
+## Inspect or batch work
+
+```javascript
+const {
+  Client,
+  compileQuery,
+  explain,
+  parseJson,
+} = require("@veristamp/nqql");
+
+const route = compileQuery(query);
+console.log(route.method, route.path, route.payload);
+console.log(explain(query));
+
+// Fast JSON-string output when forwarding the AST instead of creating JS objects.
+const astJson = parseJson(query);
+
+const client = new Client({ url: "http://localhost:6333" });
+const report = await client.execute([
+  "COUNT FROM runbooks;",
+  "COUNT FROM incidents;",
+], { onError: "continue" });
+```
+
+| API | Use it for |
+|---|---|
+| `new Client({ url, apiKey, useGrpc, embedder })` | Configure a reusable native client |
+| `Client.execute`, `executeStmt` | Source, statement, script, or array execution |
+| `Client.explain`, `explainStmt`, `compile` | Plan and route inspection |
+| `parse(source)` | Native `Stmt` handles for AST mutation |
+| `Stmt.injectFilter`, `Stmt.shardKey` | Trusted filtering and optional routing |
+| `Stmt.toObject`, `toJson`, `toJSON` | AST inspection and serialization |
+| `isValid`, `tokenize`, `explain` | Lightweight parser and diagnostic tools |
+| `compileQuery` | Qdrant route inspection without network I/O |
+| `parseJson` | High-throughput JSON forwarding |
+| `injectFilter`, `execute` | One-shot host convenience functions |
+| `HttpEmbedder` | A reusable HTTP embedder configuration |
+
+{% aside type="note" title="Transport and package variants" %}
+Use `useGrpc: true` only when the installed package exposes gRPC support. The
+separate `@veristamp/nqql-edge` package is for intentionally local edge
+execution, not a browser build.
 {% /aside %}

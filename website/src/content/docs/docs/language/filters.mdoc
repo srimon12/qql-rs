@@ -1,50 +1,89 @@
 ---
 title: "Filters"
-description: "Compose QQL comparisons, logical predicates, text, nested, ID, vector, count, and geo filters."
+description: "Narrow QQL retrieval and mutations with comparisons, text, nested payload, vector, and geo predicates."
 sidebar:
   order: 3
 ---
 
-`WHERE` lowers to a Qdrant filter on REST, gRPC, and edge backends.
+`WHERE` describes *which points qualify*. It lowers to a Qdrant filter for REST,
+gRPC, and edge execution. It is independent from `SHARD`, which is request
+routing rather than access control.
 
-## Scalar and logical filters
+## Compose scalar predicates
 
-{% qqlExample title="Comparisons and boolean logic" %}
-QUERY TEXT 'search' FROM docs
+Predicates combine with `NOT`, `AND`, and `OR`; precedence is predicate → `NOT`
+→ `AND` → `OR`. Add parentheses when a mixed condition should be obvious to the
+reader.
+
+{% qqlExample title="Comparisons, membership, and boolean logic" %}
+```sql
+QUERY TEXT 'search'
+FROM docs
 WHERE status = 'published'
   AND year BETWEEN 2024 AND 2026
   AND tags NOT IN ('archived', 'private')
   AND (score >= 0.7 OR featured = true)
 LIMIT 10;
+```
 {% /qqlExample %}
 
-Supported forms include comparison operators, `BETWEEN`, `IN`, null/empty
-checks, `MATCH`, `NESTED`, `HAS_VECTOR`, `VALUES_COUNT`, and geo predicates.
-Precedence is predicate → `NOT` → `AND` → `OR`.
+| Predicate | Use it for |
+|---|---|
+| `=`, `>`, `>=`, `<`, `<=` | Scalar equality and range comparison |
+| `BETWEEN`, `IN`, `NOT IN` | Inclusive ranges and membership sets |
+| `IS NULL`, `IS EMPTY` | Missing or empty payload values |
+| `MATCH`, `MATCH ANY`, `MATCH PHRASE` | Text payload matching |
+| `HAS_VECTOR`, `VALUES_COUNT` | Vector presence and array cardinality |
 
-## Text and nested filters
+## Match nested document data
 
-{% qqlExample title="Text and nested payloads" %}
-QUERY TEXT 'quality' FROM products
+Use `NESTED` when predicates must apply within the same object of a nested
+payload array. This avoids accidentally matching `rating` from one review and
+`verified` from another.
+
+{% qqlExample title="Phrase and nested-payload matching" %}
+```sql
+QUERY TEXT 'quality'
+FROM products
 WHERE description MATCH PHRASE 'machine washable'
   AND NESTED('reviews', rating >= 4 AND verified = true)
 LIMIT 20;
+```
 {% /qqlExample %}
 
-## Geo filters
+## Filter geographic data
 
-{% qqlExample title="Radius filter" %}
-QUERY TEXT 'coffee' FROM places
+Geo predicates accept structured point and shape objects. Latitude, longitude,
+radius, and polygon structure are validated before planning.
+
+{% qqlExample title="Points within a radius" %}
+```sql
+QUERY TEXT 'coffee'
+FROM places
 WHERE location GEO_RADIUS {
   center: {lat: 52.52, lon: 13.405},
   radius: 1500.0
 }
 LIMIT 10;
+```
 {% /qqlExample %}
 
-Latitude, longitude, radius, and polygon shapes are validated before planning.
+{% qqlExample title="A geographic bounding box" %}
+```sql
+QUERY TEXT 'museum'
+FROM places
+WHERE location GEO_BBOX {
+  top_left: {lat: 52.54, lon: 13.36},
+  bottom_right: {lat: 52.49, lon: 13.45}
+}
+LIMIT 10;
+```
+{% /qqlExample %}
 
-{% aside type="caution" title="Routing is not a filter" %}
-`SHARD 'acme'` is a request-level `ShardKeySelector`. It never appears inside
-the Qdrant filter. Use a tenant predicate or `inject_filter` for isolation.
+{% aside type="caution" title="Routing is not isolation" %}
+`SHARD 'acme'` selects a Qdrant shard key and never becomes a Qdrant filter.
+For a tenant boundary, inject a trusted predicate with the host SDK. Use both
+when you need a security boundary and targeted routing.
 {% /aside %}
+
+See [Multitenancy](/docs/guides/multitenancy/) for the host-side policy pattern.

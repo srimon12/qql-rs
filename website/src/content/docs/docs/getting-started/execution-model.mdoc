@@ -16,10 +16,12 @@ QQL deliberately separates language correctness from backend execution.
 | Dispatch | plan → REST, gRPC, or edge | backend capability, transport, Qdrant response |
 
 {% qqlExample title="A schema-resolved text query" %}
+```sql
 QUERY TEXT 'release safety' FROM engineering_docs
 USING semantic_v2
 PARAMS (hnsw_ef = 96, exact = false)
 LIMIT 12;
+```
 {% /qqlExample %}
 
 `USING semantic_v2` names the vector. During preparation, the runtime reads the
