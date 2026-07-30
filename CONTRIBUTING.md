@@ -18,16 +18,36 @@ CI runs for:
 
 - every push to `dev`;
 - pull requests targeting `dev`;
-- pull requests targeting `main`.
+- pull requests targeting `main`;
+- manual `workflow_dispatch`.
 
 Standalone pushes to topic branches do not start CI. Opening or updating their
 pull request into `dev` does.
+
+### Required checks
+
+Branch protection can require the single aggregate job **CI success**, which
+waits on every gate below:
+
+| Job | What it enforces |
+|-----|------------------|
+| Branch policy | PRs into `main` must come from `dev` |
+| Release metadata | `scripts/check_release.py` + `VERSION` sync |
+| Format | `cargo fmt --all -- --check` |
+| Clippy & test | Published Rust crates, `--all-features`, clippy `-D warnings` |
+| Feature matrix | `qql` / `qql-cli` transport features; `qql-core` feature combos |
+| MSRV | `cargo check` on workspace `rust-version` |
+| Docs | `cargo doc --no-deps` with `RUSTDOCFLAGS=-D warnings` for all published crates |
+| Package dry-run | `cargo package` for publishable crates |
+| Conformance | Grammar generation sync + `language/v1` suite |
+| Python / Node / WASM bindings | Build + package smoke tests |
 
 ## Local checks
 
 Run the same core checks used by CI:
 
 ```bash
+python3 scripts/check_release.py
 cargo run --locked -p qql-grammar-gen -- check
 cargo run --locked -p qql-conformance -- check language/v1
 cargo fmt --all -- --check
@@ -37,7 +57,31 @@ PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 \
   --all-targets -- -D warnings
 PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 \
   cargo test --locked --all-features \
-  -p qql-core -p qql-plan -p qql-embed -p qql -p qql-cli
+  -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli
+```
+
+Optional gates that CI also runs (slower):
+
+```bash
+# Feature matrix
+cargo check --locked -p qql --no-default-features --features rest
+cargo check --locked -p qql --no-default-features --features grpc
+cargo check --locked -p qql --no-default-features
+cargo check --locked -p qql-cli --no-default-features --features rest
+cargo check --locked -p qql-cli --no-default-features --features grpc
+cargo check --locked -p qql-core --no-default-features
+cargo check --locked -p qql-core --all-features
+
+# Docs (deny rustdoc warnings on all published crates)
+RUSTDOCFLAGS='-D warnings' \
+  cargo doc --locked --no-deps --all-features \
+  -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge
+# Separate target-dir: CLI binary is also named `qql`
+RUSTDOCFLAGS='-D warnings' \
+  cargo doc --locked --no-deps --all-features -p qql-cli --target-dir target/doc-cli
+
+# Packaging
+cargo package --locked -p qql-core
 ```
 
 The edge bindings additionally exercise local qdrant-edge and FastEmbed. Their

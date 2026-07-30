@@ -223,7 +223,7 @@ fn center(value: &str, width: usize) -> String {
     )
 }
 
-/// Render an [`ExecutionReport`] to stdout.
+/// Render a [`qql::executor::ExecutionReport`] to stdout.
 ///
 /// For QUERY/SCROLL responses: prints a table of id, score, and payload fields.
 /// For SHOW COLLECTIONS: prints a simple list.
