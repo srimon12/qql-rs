@@ -1,0 +1,30 @@
+---
+interface Props {
+	keyName: string;
+}
+
+const { keyName } = Astro.props;
+---
+
+<kbd class="kbd-shortcut">{keyName}</kbd>
+
+<style>
+  .kbd-shortcut {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--sl-color-gray-6);
+    border: 1px solid var(--sl-color-gray-4);
+    border-bottom: 2px solid var(--sl-color-gray-3);
+    border-radius: 0.25rem;
+    padding: 0.15rem 0.4rem;
+    font-family: var(--sl-font-mono) !important;
+    font-size: 0.75rem !important;
+    font-weight: 600;
+    color: var(--sl-color-gray-1);
+    line-height: 1;
+    white-space: nowrap;
+    box-shadow: 0 1px 1px rgba(0, 0, 0, 0.1);
+    user-select: none;
+  }
+</style>

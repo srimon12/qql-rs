@@ -1,0 +1,128 @@
+---
+title: "Grouped Search"
+description: "Group search results by a payload field with QQL GROUP BY — diversity, GROUP_SIZE, cross-collection lookup, and RAG pipelines."
+sidebar:
+  order: 7
+---
+
+`GROUP BY` returns the top N results per unique value of a payload field. It prevents the same source (author, document, category) from dominating the result set.
+
+## Basic Grouped Search
+
+```sql
+QUERY 'machine learning' FROM docs LIMIT 20
+  GROUP BY 'author_id'
+```
+
+Returns up to `GROUP_SIZE` results (default: 3) per unique `author_id`.
+
+## GROUP_SIZE
+
+```sql
+QUERY 'machine learning' FROM docs LIMIT 20
+  GROUP BY 'source_id'
+  GROUP_SIZE 5
+```
+
+Returns up to 5 results per group.
+
+{% aside type="note" title="Pagination Limitation" %}
+`OFFSET` cannot be combined with `GROUP BY`. Only flat pagination is supported for grouped search.
+{% /aside %}
+
+## With Hybrid Search
+
+```sql
+QUERY 'machine learning optimization' FROM research_papers LIMIT 20
+  USING HYBRID
+  WHERE year >= 2023
+  WITH (rrf_k = 30, rrf_weights = [0.7, 0.3])
+  GROUP BY 'author_id'
+  GROUP_SIZE 5
+```
+
+## Cross-Collection Group Lookup
+
+When the group IDs (e.g., author names, category details) live in a separate collection:
+
+```sql
+QUERY 'machine learning optimization' FROM research_papers LIMIT 20
+  GROUP BY 'author_id'
+  GROUP_SIZE 5
+  WITH LOOKUP FROM author_metadata
+  USING HYBRID
+  WHERE year >= 2023
+```
+
+`WITH LOOKUP FROM author_metadata` tells Qdrant to resolve group IDs from the `author_metadata` collection. This is useful when your search corpus and grouping taxonomy are stored separately.
+
+### RAG Pipeline
+
+Production RAG retrieval that prevents multiple chunks from the same document from dominating the context window:
+
+```sql
+WITH
+  semantic AS (
+    QUERY 'how does transformer attention mechanism work' USING dense LIMIT 300
+    WHERE doc_type IN ('paper', 'textbook', 'blog')
+  ),
+  keyword AS (
+    QUERY 'transformer attention mechanism' USING sparse LIMIT 200
+  )
+QUERY 'how does transformer attention mechanism work' FROM knowledge_base LIMIT 20
+  PREFETCH (
+    semantic SCORE THRESHOLD 0.5,
+    keyword SCORE THRESHOLD 0.3
+  )
+  FUSION RRF
+  WITH (rrf_k = 20, rrf_weights = [0.65, 0.35])
+  GROUP BY 'source_id'
+  GROUP_SIZE 3
+```
+
+**Effect:** Max 3 chunks per source document. Dense leg filters to papers/textbooks/blogs to exclude noise; sparse leg catches exact terminology matches. `rrf_weights = [0.65, 0.35]` favors semantic understanding over keyword.
+
+Required indexes:
+
+```sql
+CREATE INDEX ON knowledge_base FOR doc_type TYPE keyword
+CREATE INDEX ON knowledge_base FOR source_id TYPE keyword
+```
+
+Full setup:
+
+```sql
+CREATE COLLECTION knowledge_base HYBRID WITH HNSW (m = 32)
+
+CREATE INDEX ON knowledge_base FOR source_id TYPE keyword
+CREATE INDEX ON knowledge_base FOR doc_type TYPE keyword
+
+INSERT INTO knowledge_base VALUES {
+  'id': 1,
+  'text': 'chunk text',
+  'source_id': 'paper-abc123',
+  'doc_type': 'paper',
+  'chunk_index': 0
+} USING HYBRID
+```
+
+## Limitations
+
+| Constraint | Notes |
+|---|---|
+| `GROUP BY` + `RERANK` | Not supported — reranking requires a flat result list |
+| `GROUP BY` + `OFFSET` | Not supported — use cursor-based pagination instead |
+| `GROUP_SIZE` default | `3` if not specified |
+
+## Index Requirement
+
+Create an index on the grouped field for efficient queries:
+
+```sql
+CREATE INDEX ON docs FOR source_id TYPE keyword
+CREATE INDEX ON docs FOR author_id TYPE keyword
+```
+
+{% aside type="tip" title="Performance Tip" %}
+Always create a keyword index on your `GROUP BY` field. Without it, Qdrant must scan the entire collection to group results.
+{% /aside %}

@@ -1,0 +1,91 @@
+---
+title: "Installation"
+description: "Install qql-go on macOS, Linux, or Windows using the install script, PowerShell, go install, or from source."
+sidebar:
+  order: 2
+---
+
+## macOS / Linux
+
+{% terminal title="Install script" %}
+curl -fsSL https://raw.githubusercontent.com/srimon12/qql-go/main/install.sh | sh
+{% /terminal %}
+
+## Windows (PowerShell)
+
+{% terminal title="PowerShell" %}
+irm https://raw.githubusercontent.com/srimon12/qql-go/main/install.ps1 | iex
+{% /terminal %}
+
+## Go Install
+
+{% terminal title="go install" %}
+go install github.com/srimon12/qql-go/cmd/qql-go@latest
+{% /terminal %}
+
+## From Source
+
+{% terminal title="Build from source" %}
+git clone https://github.com/srimon12/qql-go.git
+cd qql-go
+go build -o qql-go ./cmd/qql-go
+{% /terminal %}
+
+## Verify Installation
+
+{% terminal title="Verify" %}
+qql-go version
+qql-go doctor
+{% /terminal %}
+
+---
+
+## Binary Name
+
+| Platform | Binary name |
+|---|---|
+| macOS / Linux | `qql-go` |
+| Windows | `qql-go.exe` |
+
+---
+
+## PATH Setup
+
+The install script puts the binary on your PATH automatically. If you installed somewhere custom, set the `QQL_BIN` environment variable to the absolute path. The CLI checks: `QQL_BIN` env var → `qql-go` on `$PATH` → repo-local fallback.
+
+{% terminal title="macOS / Linux" %}
+export QQL_BIN=/absolute/path/to/qql-go
+{% /terminal %}
+
+{% terminal title="Windows (PowerShell)" %}
+$env:QQL_BIN = "C:\path\to\qql-go.exe"
+{% /terminal %}
+
+---
+
+## Prerequisites
+
+| Requirement | Notes |
+|---|---|
+| **Go 1.24+** | Only needed if building from source or using `go install` |
+| **Qdrant instance** | Docker, native, or Qdrant Cloud |
+| **Embedding server** | Only needed for `--inference-mode local` or `external` |
+
+### Start Qdrant with Docker
+
+{% terminal title="Docker" %}
+docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant
+{% /terminal %}
+
+{% aside type="note" title="Port 6334" %}
+
+QQL connects to Qdrant on port **6334** (gRPC). Port 6333 (REST) is used by the HTTP API but not by QQL directly. Passing port 6333 will be rejected with an error.
+
+{% /aside %}
+
+---
+
+## Next Steps
+
+→ [Quickstart](/docs/getting-started/quickstart) — connect, create, insert, and query in 60 seconds  
+→ [Configuration](/docs/getting-started/configuration) — set up inference modes and config file

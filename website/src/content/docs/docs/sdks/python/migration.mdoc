@@ -1,0 +1,87 @@
+---
+title: "Python SDK Migration"
+description: "Migrate from qdrant-client Python SDK to QQL using the qql_intercept.py HTTP interceptor."
+sidebar:
+  order: 2
+---
+
+`qql_intercept.py` wraps the `qdrant-client` Python SDK at the HTTP layer, captures all REST API calls, and converts them to QQL using `qql-go convert`. Use it to migrate existing Python code to QQL.
+
+## Setup
+
+{% terminal title="Install dependencies" %}
+uv venv .venv && source .venv/bin/activate
+uv pip install qdrant-client
+{% /terminal %}
+
+## Usage
+
+{% terminal title="Print converted QQL to stdout" %}
+python3 sdks/python/qql_intercept.py your_script.py
+{% /terminal %}
+
+{% terminal title="Save to .qql file" %}
+python3 sdks/python/qql_intercept.py your_script.py -o output.qql
+{% /terminal %}
+
+## Example
+
+Given `ingest.py`:
+
+```python
+from qdrant_client import QdrantClient
+from qdrant_client.models import PointStruct
+
+client = QdrantClient("localhost", port=6333)
+client.upsert(
+    collection_name="docs",
+    points=[
+        PointStruct(id=1, payload={"text": "hello"}, vector=[0.1, 0.2, 0.3]),
+        PointStruct(id=2, payload={"text": "world"}, vector=[0.4, 0.5, 0.6]),
+    ]
+)
+client.search("docs", query_vector=[0.1, 0.2, 0.3], limit=5)
+```
+
+Running the interceptor:
+
+{% terminal title="Run interceptor" %}
+python3 sdks/python/qql_intercept.py ingest.py -o output.qql
+{% /terminal %}
+
+Produces `output.qql`:
+
+```sql
+INSERT INTO docs VALUES {'id': 1, 'text': 'hello', 'vector': {'': [0.1, 0.2, 0.3]}}
+INSERT INTO docs VALUES {'id': 2, 'text': 'world', 'vector': {'': [0.4, 0.5, 0.6]}}
+QUERY [0.1, 0.2, 0.3] FROM docs LIMIT 5
+```
+
+## Supported Operations
+
+The interceptor captures any operation that `QdrantClient` makes via HTTP:
+
+- `upsert` → `INSERT INTO ... VALUES`
+- `search` / `query_points` → `QUERY ... FROM`
+- `recommend` → `QUERY RECOMMEND WITH (...)`
+- `scroll` → `SCROLL FROM`
+- `retrieve` → `SELECT * FROM ... WHERE id = ...`
+- `delete` → `DELETE FROM ... WHERE`
+- `create_collection` → `CREATE COLLECTION`
+- `create_payload_index` → `CREATE INDEX ON`
+- `set_payload` → `UPDATE ... SET PAYLOAD`
+
+## Workflow
+
+{% terminal title="Migration workflow" %}
+# Step 1: Intercept and convert
+python3 sdks/python/qql_intercept.py ingest.py -o output.qql
+
+# Step 2: Validate the output
+qql-go convert --validate output.qql
+
+# Step 3: Review and adjust as needed
+
+# Step 4: Execute with qql-go
+qql-go execute output.qql
+{% /terminal %}

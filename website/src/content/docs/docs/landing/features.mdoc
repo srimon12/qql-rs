@@ -1,0 +1,69 @@
+---
+title: "Features"
+description: "QQL feature overview — retrieval modes, collection management, data operations, score boosting, multivector support, the gateway, and SDKs."
+
+pagefind: false
+sidebar:
+  hidden: true
+head:
+  - tag: meta
+    attrs:
+      name: robots
+      content: noindex, follow
+---
+
+## Core Features
+
+### 1 — Unified QUERY Statement
+
+One statement covers every Qdrant retrieval mode — dense, hybrid, recommendation, context, discover, sort, and random sample. No separate APIs per mode.
+
+```sql
+QUERY 'emergency care' FROM docs LIMIT 5 USING HYBRID
+```
+
+### 2 — Multi-Stage Retrieval with CTEs
+
+Build prefetch DAGs declaratively with `WITH` clauses. Each stage can have its own filter, limit, score threshold, and named vector — composed into a single fused result.
+
+```sql
+WITH dense AS (QUERY 'care' USING dense LIMIT 200),
+     sparse AS (QUERY 'care' USING sparse LIMIT 300)
+QUERY 'care' FROM docs LIMIT 10 PREFETCH (dense, sparse) FUSION RRF
+```
+
+### 3 — Score Boosting (BOOST)
+
+Full expression algebra executed directly inside Qdrant — arithmetic, math functions, geo-distance, decay functions, datetime expressions, and `CASE WHEN` conditionals. No client-side post-processing.
+
+### 4 — Multivector (ColBERT / ColPali)
+
+Store and search with token-level vector representations for late interaction models. Define multiple named vectors with `multivector` comparators in a single `CREATE COLLECTION` statement.
+
+### 5 — Gateway with Auth, Policy & Audit
+
+Start a Connect RPC server (gRPC + gRPC-Web + HTTP/1.1) with JWT authentication, YAML policy rules, AST-level tenant filter injection, rate limiting, query templates, and structured audit logging.
+
+### 6 — Go SDK (`pkg/qql`)
+
+Embed QQL execution directly in Go applications without the CLI.
+
+```go
+result, _ := qql.Exec(ctx, client, "QUERY 'search' FROM docs LIMIT 5")
+```
+
+### 7 — Python & TypeScript SDKs
+
+Connect RPC clients for every language. Call the gateway from Python, TypeScript, Go, or curl.
+
+### 8 — Convert REST JSON → QQL
+
+Migrate from Qdrant REST API or Python SDK to QQL in seconds with the built-in converter and request interceptor.
+
+### 9 — Collection Management
+
+Full DDL surface: `CREATE`, `ALTER`, `DROP`, `SHOW`, and index management with HNSW and quantization configuration.
+
+### 10 — Agent & CI Integration
+
+Structured JSON output mode for pipelines and agents. Script execution, collection dumps, and explain plans for deterministic, repeatable operations.

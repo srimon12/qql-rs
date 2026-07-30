@@ -1,0 +1,56 @@
+---
+title: "0.1.4 Release Notes"
+description: "qql-go 0.1.4 release notes."
+sidebar:
+  order: 99
+---
+
+Release date: 2026-05-14
+
+## Summary
+
+This release brings `qql-go` in line with the upstream QQL 2.2.0 feature set for point retrieval, pagination, turbo quantization, configurable hybrid fusion, and sparse rerank, while tightening release docs and validation behavior.
+
+## Highlights
+
+- **`SELECT` support** — `SELECT * FROM <collection> WHERE id = <point_id>` retrieves a single point by ID.
+- **`SCROLL` support** — `SCROLL FROM <collection> [WHERE ...] [AFTER <id>] LIMIT <n>` pages through points with optional filters and cursor offsets.
+- **Hybrid DBSF fusion** — `SEARCH ... USING HYBRID FUSION 'dbsf'` is now supported alongside the default `RRF` fusion mode.
+- **Turbo quantization** — `CREATE COLLECTION ... QUANTIZE TURBO [BITS <1|1.5|2|4>] [ALWAYS RAM]` is supported through the upgraded Qdrant Go SDK.
+- **Sparse-only rerank** — `SEARCH ... USING SPARSE RERANK` works on the cloud inference path.
+- **Configurable dump batch size** — `qql-go dump --batch-size <n>` controls how many points are emitted per `INSERT BULK` statement in dump output.
+
+## Supported syntax added in this release
+
+{% terminal title="New Syntax in 0.1.4" %}
+SELECT * FROM <name> WHERE id = '<uuid>'
+SELECT * FROM <name> WHERE id = <integer>
+
+SCROLL FROM <name> LIMIT <n>
+SCROLL FROM <name> WHERE <filter> LIMIT <n>
+SCROLL FROM <name> AFTER '<point_id>' LIMIT <n>
+SCROLL FROM <name> WHERE <filter> AFTER <point_id> LIMIT <n>
+
+SEARCH <name> SIMILAR TO '<query>' LIMIT <n> USING HYBRID FUSION 'dbsf'
+SEARCH <name> SIMILAR TO '<query>' LIMIT <n> USING SPARSE RERANK
+
+CREATE COLLECTION <name> QUANTIZE TURBO
+CREATE COLLECTION <name> QUANTIZE TURBO BITS <1|1.5|2|4>
+CREATE COLLECTION <name> QUANTIZE TURBO BITS <1|1.5|2|4> ALWAYS RAM
+{% /terminal %}
+
+## Notes
+
+{% aside type="note" title="Notes" %}
+- `USING HYBRID` still defaults to `RRF` when no `FUSION` clause is supplied.
+- `RERANK` remains cloud-only in this release. Local and external modes reject rerank queries with a clear error.
+- Hosted embedding providers can be configured with `--embedding-key` in local/external inference modes.
+{% /aside %}
+
+## Full changelog
+
+See [CHANGELOG.md](../../CHANGELOG.md).
+
+---
+
+> For full commit list and details see the [original release notes](https://github.com/srimon12/qql-go/blob/main/docs/releases/0.1.4.md).

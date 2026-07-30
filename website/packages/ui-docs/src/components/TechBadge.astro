@@ -1,0 +1,77 @@
+---
+interface Props {
+	name: string;
+	variant?: "purple" | "cyan" | "orange" | "green" | "gray" | "default";
+	color?: string; // Optional custom color override (hex, rgb, or CSS variable)
+}
+
+const { name, variant = "gray", color } = Astro.props;
+
+// Determine key styling variable
+let baseColor = "var(--sl-color-gray-3)";
+
+if (color) {
+	baseColor = color;
+} else if (variant === "purple") {
+	baseColor = "#c084fc";
+} else if (variant === "cyan") {
+	baseColor = "#22d3ee";
+} else if (variant === "orange") {
+	baseColor = "#fb923c";
+} else if (variant === "green") {
+	baseColor = "#a3e635";
+}
+---
+
+<span class="tech-badge" style={`--badge-color: ${baseColor}; --badge-bg: color-mix(in srgb, ${baseColor} 8%, transparent); --badge-border: color-mix(in srgb, ${baseColor} 20%, transparent)`}>
+  <span class="badge-dot"></span>
+  <code class="badge-text">{name}</code>
+</span>
+
+<style>
+  .tech-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.15rem 0.6rem;
+    border-radius: 9999px;
+    background: var(--badge-bg);
+    border: 1px solid var(--badge-border);
+    color: var(--badge-color);
+    font-size: var(--sl-text-xs);
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    cursor: default;
+    user-select: none;
+  }
+
+  .tech-badge:hover {
+    transform: translateY(-1px) scale(1.02);
+    border-color: color-mix(in srgb, var(--badge-color) 40%, transparent);
+    background: color-mix(in srgb, var(--badge-color) 12%, transparent);
+    box-shadow: 0 0 12px color-mix(in srgb, var(--badge-color) 15%, transparent);
+  }
+
+  .badge-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: var(--badge-color);
+    transition: transform 0.2s;
+  }
+
+  .tech-badge:hover .badge-dot {
+    transform: scale(1.2);
+  }
+
+  .badge-text {
+    font-family: var(--sl-font-mono) !important;
+    font-size: inherit;
+    color: inherit;
+    background: none !important;
+    padding: 0 !important;
+    border: none !important;
+  }
+</style>

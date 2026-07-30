@@ -1,0 +1,84 @@
+---
+title: "0.1.6 Release Notes"
+description: "qql-go 0.1.6 release notes."
+sidebar:
+  order: 99
+---
+
+Release date: 2026-05-16
+
+## Summary
+
+This release expands `qql-go`'s retrieval and indexing surface with native dense MMR, richer payload index configuration, payload-aware HNSW tuning, and smaller query-surface fixes that bring the CLI closer to practical day-to-day Qdrant usage.
+
+## Highlights
+
+- **Dense MMR support** adds `WITH { mmr_diversity, mmr_candidates }` for semantic diversity in dense search results.
+- **Advanced payload indexing** adds richer `CREATE INDEX` support for `keyword`, `uuid`, and `text` fields, including tenant-aware indexing and text tokenizer controls.
+- **Payload-aware HNSW tuning** adds `CREATE COLLECTION ... HNSW { payload_m: <n> }`.
+- **Search param parity and cursor fixes** add `indexed_only`, quantization search params, boolean filter literals, and native numeric `SCROLL` offsets.
+- **Docs and demos refresh** updates the bundled skill references and runnable examples to showcase the new features end to end.
+
+## Supported syntax added in this release
+
+{% terminal title="New Syntax in 0.1.6" %}
+CREATE COLLECTION docs HYBRID HNSW { payload_m: 16 }
+
+CREATE INDEX ON COLLECTION docs FOR tenant_id TYPE keyword
+WITH { is_tenant: true, on_disk: true }
+
+CREATE INDEX ON COLLECTION docs FOR external_id TYPE uuid
+WITH { on_disk: true, enable_hnsw: false }
+
+CREATE INDEX ON COLLECTION docs FOR title TYPE text
+WITH {
+  tokenizer: 'word',
+  min_token_len: 2,
+  max_token_len: 20,
+  lowercase: true,
+  phrase_matching: true
+}
+
+SEARCH docs SIMILAR TO 'vector database tuning' LIMIT 10
+WITH { indexed_only: true }
+
+SEARCH docs SIMILAR TO 'vector database tuning' LIMIT 10
+WITH { quantization: { ignore: true, rescore: false, oversampling: 2 } }
+
+SEARCH docs SIMILAR TO 'vector database tuning' LIMIT 10
+WITH { mmr_diversity: 0.5, mmr_candidates: 25 }
+{% /terminal %}
+
+## Packaging
+
+Release bundles include:
+
+- `qql-go` (Linux amd64, Linux arm64, Windows amd64, macOS arm64)
+
+Tagged releases also publish:
+
+- `qql-go_0.1.6_checksums.txt`
+
+## Known limits
+
+{% aside type="note" title="Known Limits" %}
+- MMR currently supports dense `SEARCH` and dense grouped `SEARCH` only. `USING HYBRID`, `USING SPARSE`, and `RECOMMEND` reject MMR settings.
+- `RERANK` is cloud-only. Local and external modes reject rerank queries.
+- `CREATE COLLECTION` still does not expose custom vector sizes or distance metrics through QQL syntax.
+{% /aside %}
+
+## Validation
+
+Release prep was validated with:
+
+- `go run docs/dev_tasks.go prepare-release --version 0.1.6`
+- `go run docs/dev_tasks.go release-validate --version 0.1.6`
+- live local smoke runs against the runnable demo scripts and a dedicated local-mode script covering `payload_m`, tenant-aware indexing, text indexing, and dense MMR
+
+## Full changelog
+
+See [CHANGELOG.md](https://github.com/srimon12/qql-go/blob/main/CHANGELOG.md).
+
+---
+
+> For full commit list and details see the [original release notes](https://github.com/srimon12/qql-go/blob/main/docs/releases/0.1.6.md).

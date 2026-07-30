@@ -1,0 +1,230 @@
+---
+title: "Go SDK"
+description: "QQL Go SDK (pkg/qql) — embed QQL execution in Go applications with Parse, Exec, ExecBatch, BatchQuery, Explain, and the QdrantClient interface."
+sidebar:
+  order: 1
+---
+
+{% glassCard title="Go SDK" %}
+
+{% techBadge name="Go" variant="cyan" /%} {% techBadge name="pkg/qql" variant="purple" /%}
+
+A public Go library for embedding QQL execution in your own services. No CLI required.
+
+{% /glassCard %}
+
+## Install
+
+{% terminal title="Install" %}
+go get github.com/srimon12/qql-go/pkg/qql
+{% /terminal %}
+
+## Quick Start
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "github.com/srimon12/qql-go/pkg/qql"
+)
+
+func main() {
+    client, _ := qql.NewQdrantClient(qql.ClientConfig{
+        URL: "http://localhost:6334",
+    })
+    ctx := context.Background()
+
+    // Simple hybrid search
+    res, _ := qql.Exec(ctx, client, "QUERY 'emergency triage' FROM docs LIMIT 5 USING HYBRID")
+    fmt.Println(res.Data)
+
+    // Explain without executing
+    plan, _ := qql.Explain("QUERY 'test' FROM docs LIMIT 5 BOOST ($score * 2.0)")
+    fmt.Println(plan)
+}
+```
+
+---
+
+## API Reference
+
+### `Parse`
+
+Parse QQL into an AST node without executing. No Qdrant client needed.
+
+```go
+func Parse(input string) (ast.ASTNode, error)
+```
+
+```go
+node, err := qql.Parse("QUERY 'search' FROM docs LIMIT 10 USING HYBRID")
+// node is *ast.QueryStmt
+```
+
+### `Exec`
+
+Execute a single QQL statement.
+
+```go
+func Exec(ctx context.Context, client QdrantClient, query string) (*Result, error)
+```
+
+```go
+res, err := qql.Exec(ctx, client, "QUERY 'stroke' FROM medical LIMIT 5")
+// res.OK        bool
+// res.Operation string  e.g. "QUERY"
+// res.Message   string  e.g. "Found 5 results"
+// res.Data      []byte  JSON-encoded result
+```
+
+### `ExecWithConfig`
+
+Execute with an explicit config (overrides stored config):
+
+```go
+func ExecWithConfig(ctx context.Context, client QdrantClient, query string, cfg *config.Config) (*Result, error)
+```
+
+### `ExecBatch`
+
+Execute multiple statements sequentially. Supports mixed statement types (INSERT, CREATE, QUERY, etc.).
+
+```go
+func ExecBatch(ctx context.Context, client QdrantClient, queries []string, stopOnError bool) ([]*Result, error)
+```
+
+```go
+results, err := qql.ExecBatch(ctx, client, []string{
+    "CREATE COLLECTION docs HYBRID WITH HNSW (m = 32)",
+    "CREATE INDEX ON COLLECTION docs FOR category TYPE keyword",
+    "INSERT INTO docs VALUES {'text': 'hello', 'category': 'tech'} USING HYBRID",
+    "QUERY 'hello' FROM docs LIMIT 5",
+}, true) // stopOnError = true
+```
+
+### `BatchQuery`
+
+Execute multiple `QUERY` statements in a single round-trip via Qdrant's native `QueryBatch` API.
+
+```go
+func BatchQuery(ctx context.Context, client QdrantClient, queries []string) ([]*Result, error)
+```
+
+```go
+results, err := qql.BatchQuery(ctx, client, []string{
+    "QUERY 'stroke' FROM medical LIMIT 5",
+    "QUERY 'cardiac' FROM medical LIMIT 5",
+    "QUERY 'pulmonary' FROM medical LIMIT 5",
+})
+// All 3 queries in one round-trip — 3-5x faster than sequential
+```
+
+### `Explain`
+
+Return the execution plan without running the query.
+
+```go
+func Explain(query string) (string, error)
+```
+
+```go
+plan, err := qql.Explain(`QUERY 'test' FROM docs LIMIT 5
+  BOOST (CASE WHEN priority = 'high' THEN 2.0 ELSE 1.0 END)`)
+```
+
+### `ConvertJSONBytesToQQL`
+
+Convert Qdrant REST API JSON bytes to QQL (zero-allocation):
+
+```go
+func ConvertJSONBytesToQQL(data []byte) ([]string, error)
+```
+
+---
+
+## When to Use Which
+
+| Function | Use When |
+|---|---|
+| `Exec` | Single statement |
+| `ExecBatch` | Mixed statements (CREATE + INSERT + QUERY), sequential |
+| `BatchQuery` | Pure QUERY batches, single round-trip to Qdrant |
+| `Parse` | Validate syntax without executing |
+| `Explain` | Debug query structure without Qdrant |
+
+---
+
+## Result Type
+
+```go
+type Result struct {
+    OK        bool
+    Operation string
+    Message   string
+    Data      any  // parsed JSON or nil
+}
+
+// Access as JSON bytes
+data, err := res.DataJSON()
+```
+
+---
+
+## Production Examples
+
+### Hybrid Search with BOOST
+
+```go
+query := `
+WITH
+  dense AS (QUERY 'kubernetes deployment' USING dense LIMIT 200 WHERE priority = 'high'),
+  sparse AS (QUERY 'kubernetes deployment' USING sparse LIMIT 300)
+QUERY 'kubernetes deployment' FROM incidents LIMIT 10
+  PREFETCH (dense SCORE THRESHOLD 0.6, sparse SCORE THRESHOLD 0.3)
+  FUSION RRF
+  WITH (rrf_k = 20, rrf_weights = [0.6, 0.4])
+  BOOST (CASE WHEN priority = 'critical' THEN $score * 2.0 ELSE $score END)
+`
+res, _ := qql.Exec(ctx, client, query)
+```
+
+### Random Sampling for Dashboards
+
+```go
+res, _ := qql.Exec(ctx, client, "QUERY SAMPLE FROM docs LIMIT 20 WHERE status = 'active'")
+```
+
+### Paginated Browse
+
+```go
+res, _ := qql.Exec(ctx, client, "QUERY ORDER BY created_at DESC FROM docs LIMIT 20 OFFSET 40")
+```
+
+### Full Setup Pipeline
+
+```go
+queries := []string{
+    "CREATE COLLECTION docs HYBRID WITH HNSW (m = 32) WITH QUANTIZATION (type = 'turbo', bits = 2)",
+    "CREATE INDEX ON COLLECTION docs FOR category TYPE keyword",
+    "INSERT INTO docs VALUES {'text': 'first doc', 'category': 'tech'} USING HYBRID",
+    "QUERY 'first doc' FROM docs LIMIT 5",
+}
+results, _ := qql.ExecBatch(ctx, client, queries, true)
+```
+
+---
+
+## Client Configuration
+
+```go
+client, err := qql.NewQdrantClient(qql.ClientConfig{
+    URL:    "http://localhost:6334",  // gRPC endpoint (port 6334)
+    Secret: "optional-api-key",      // Qdrant API key for Cloud
+})
+```
+
+{% aside type="note" title="Port 6334 (gRPC)" %}
+Use port **6334** (gRPC), not 6333 (REST). Passing 6333 will be rejected with an error.
+{% /aside %}

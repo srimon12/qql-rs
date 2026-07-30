@@ -1,0 +1,101 @@
+---
+interface Props {
+	name: string;
+	type: string;
+	required?: boolean;
+}
+
+const { name, type, required = false } = Astro.props;
+---
+
+<div class="api-field premium-card">
+  <div class="field-header">
+    <div class="field-meta-left">
+      <code class="field-name">{name}</code>
+      <span class="field-type">{type}</span>
+    </div>
+    <div class="field-meta-right">
+      <span class={required ? 'badge-req' : 'badge-opt'}>
+        {required ? 'required' : 'optional'}
+      </span>
+    </div>
+  </div>
+  <div class="field-description">
+    <slot />
+  </div>
+</div>
+
+<style>
+  .api-field {
+    padding: 1.25rem;
+    margin: 1.5rem 0;
+  }
+
+  .field-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px dashed var(--sl-color-gray-4);
+    padding-bottom: 0.625rem;
+    margin-bottom: 0.875rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .field-meta-left {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  .field-name {
+    font-family: var(--sl-font-mono) !important;
+    font-size: 0.85rem !important;
+    font-weight: 500 !important;
+    color: var(--sl-color-accent) !important;
+    background: color-mix(in srgb, var(--sl-color-accent) 8%, var(--sl-color-gray-6)) !important;
+    padding: 0.15rem 0.45rem !important;
+    border-radius: 0.25rem !important;
+    border: 1px solid color-mix(in srgb, var(--sl-color-accent) 20%, var(--sl-color-gray-5)) !important;
+  }
+
+  .field-type {
+    font-family: var(--sl-font-mono) !important;
+    font-size: 0.75rem !important;
+    color: var(--sl-color-gray-2) !important;
+    font-weight: 400;
+  }
+
+  .badge-req, .badge-opt {
+    font-family: var(--sl-font-mono) !important;
+    font-size: 0.7rem !important;
+    font-weight: 500 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.15rem 0.5rem;
+    border-radius: 0.25rem;
+  }
+
+  .badge-req {
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+  }
+
+  .badge-opt {
+    color: var(--sl-color-gray-3);
+    background: var(--sl-color-gray-6);
+    border: 1px solid var(--sl-color-gray-4);
+  }
+
+  .field-description {
+    font-size: var(--sl-text-sm);
+    color: var(--sl-color-gray-2);
+    line-height: 1.6;
+  }
+
+  .field-description :global(p) {
+    margin: 0;
+  }
+</style>

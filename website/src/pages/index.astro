@@ -1,0 +1,345 @@
+---
+import { APPS, ANALYTICS, SITE } from "../config/site";
+import "../styles/global.css";
+import TechBadge from "@qql/ui-docs/TechBadge.astro";
+import Terminal from "@qql/ui-docs/Terminal.astro";
+import GlassCard from "@qql/ui-docs/GlassCard.astro";
+
+const SITE_URL = APPS.home.url;
+const PAGE_TITLE = "QQL: SQL-Like Vector Search & Secure Gateway for Qdrant";
+const PAGE_DESCRIPTION =
+	"QQL is a single-binary CLI, SDK, and secure gateway for operating Qdrant vector databases using a SQL-like query language. Express hybrid search logic with ease.";
+
+const terminalCode = `# Install QQL
+curl -fsSL https://raw.githubusercontent.com/srimon12/qql-go/main/install.sh | sh
+
+# Connect to Qdrant
+qql-go connect --url http://localhost:6334
+
+# Create collection and load data
+qql-go exec "CREATE COLLECTION docs HYBRID"
+qql-go exec "INSERT INTO docs VALUES {'id': 1, 'text': 'Qdrant stores vectors'} USING HYBRID"
+
+# Hybrid query search
+qql-go exec "QUERY 'vector database' FROM docs LIMIT 5 USING HYBRID"`;
+---
+
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>{PAGE_TITLE}</title>
+	<meta name="description" content={PAGE_DESCRIPTION} />
+	<link rel="shortcut icon" href="/favicon.ico" type="image/x-icon" />
+	<link rel="canonical" href={`${SITE_URL}/`} />
+
+	<!-- Open Graph / Facebook -->
+	<meta property="og:title" content={PAGE_TITLE} />
+	<meta property="og:type" content="website" />
+	<meta property="og:url" content={`${SITE_URL}/`} />
+	<meta property="og:description" content={PAGE_DESCRIPTION} />
+	<meta property="og:site_name" content="QQL Documentation" />
+	<meta property="og:image" content={`${SITE_URL}/og-image.png`} />
+
+	<!-- Twitter -->
+	<meta name="twitter:card" content="summary_large_image" />
+	<meta name="twitter:title" content={PAGE_TITLE} />
+	<meta name="twitter:description" content={PAGE_DESCRIPTION} />
+	<meta name="twitter:image" content={`${SITE_URL}/og-image.png`} />
+
+	{ANALYTICS.id && (
+		<script
+			is:inline
+			defer
+			src={`${ANALYTICS.url}/script.js`}
+			data-website-id={ANALYTICS.id}
+		></script>
+	)}
+
+	<!-- JSON-LD Structured Data for SEO/GEO/AEO -->
+	<script is:inline type="application/ld+json" set:html={JSON.stringify({
+		"@context": "https://schema.org",
+		"@type": "SoftwareApplication",
+		"name": "QQL",
+		"operatingSystem": "Linux, macOS, Windows",
+		"applicationCategory": "DeveloperApplication",
+		"description": "A single-binary CLI, SDK, and gateway for operating Qdrant vector databases with a SQL-like query language.",
+		"offers": {
+			"@type": "Offer",
+			"price": "0.00",
+			"priceCurrency": "USD"
+		},
+		"publisher": {
+			"@type": "Organization",
+			"name": SITE.name,
+			"url": SITE.url
+		}
+	})} />
+
+	<script is:inline type="application/ld+json" set:html={JSON.stringify({
+		"@context": "https://schema.org",
+		"@type": "FAQPage",
+		"mainEntity": [
+			{
+				"@type": "Question",
+				"name": "What is QQL?",
+				"acceptedAnswer": {
+					"@type": "Answer",
+					"text": "QQL (Qdrant Query Language) is a SQL-like interface, single-binary CLI, and security gateway designed for operating Qdrant vector databases. It allows developers to express dense, sparse, and hybrid retrieval logic using a declarative SQL dialect."
+				}
+			},
+			{
+				"@type": "Question",
+				"name": "Does the QQL Gateway support multi-tenancy?",
+				"acceptedAnswer": {
+					"@type": "Answer",
+					"text": "Yes. The QQL Gateway intercepts queries, validates JWT claims, and structurally injects tenant isolation filters at the AST (Abstract Syntax Tree) compiler level. This prevents cross-tenant data leaks and prompt injection attacks in AI agent workstreams."
+				}
+			},
+			{
+				"@type": "Question",
+				"name": "Is QQL open source?",
+				"acceptedAnswer": {
+					"@type": "Answer",
+					"text": "Yes, QQL is fully open source under the MIT license. The gateway, SDKs, and CLI are free to run, self-host, and modify."
+				}
+			},
+			{
+				"@type": "Question",
+				"name": "Does QQL require re-indexing Qdrant?",
+				"acceptedAnswer": {
+					"@type": "Answer",
+					"text": "No. QQL compiles SQL-like queries dynamically to Qdrant's native API calls (gRPC/REST). Your existing collections, points, and payload indexes in Qdrant remain untouched."
+				}
+			}
+		]
+	})} />
+</head>
+<body class="bg-[#141413] text-[#e6e4e0] font-sans antialiased selection:bg-[var(--sl-color-accent)]/20 selection:text-[var(--sl-color-accent)]">
+
+	<!-- Custom Header from scratch -->
+	<header class="w-full border-b border-[var(--sl-color-gray-5)] bg-[#141413]/70 backdrop-blur-md sticky top-0 z-50">
+		<div class="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
+			<a href="/" class="flex items-center gap-3 no-underline group">
+				<!-- Veristamp V monogram -->
+				<span class="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--sl-color-gray-5)] bg-[#1c1c1a] text-[var(--sl-color-accent)] transition-colors group-hover:border-[var(--sl-color-accent)]/40">
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						viewBox="0 0 32 32"
+						class="w-5 h-5 fill-current"
+						aria-hidden="true"
+					>
+						<path d="M7.25 7.5h4.05L16 21.15 20.7 7.5h4.05L17.35 25.25h-2.7L7.25 7.5Z" />
+					</svg>
+				</span>
+				<span class="font-bold tracking-tight text-xl text-white bg-linear-to-r from-white via-white to-[var(--sl-color-accent)] bg-clip-text text-transparent">
+					QQL
+				</span>
+			</a>
+			
+			<nav class="flex items-center gap-6">
+				<a href="/docs/getting-started/" class="text-sm font-medium text-[var(--sl-color-gray-2)] hover:text-white transition-colors">
+					Docs
+				</a>
+				<a href="https://github.com/srimon12/qql-go" class="text-sm font-medium text-[var(--sl-color-gray-2)] hover:text-white transition-colors" target="_blank" rel="noopener noreferrer">
+					GitHub
+				</a>
+			</nav>
+		</div>
+	</header>
+
+	<main class="max-w-5xl mx-auto px-6">
+		<div class="relative py-16 md:py-24 flex flex-col items-center text-center max-w-4xl mx-auto">
+			<!-- Subtle radial gradient highlight -->
+			<div class="absolute -top-12 left-1/2 -translate-x-1/2 w-[350px] h-[350px] bg-[var(--sl-color-accent)]/10 rounded-full blur-[120px] pointer-events-none"></div>
+
+			<div class="mb-4">
+				<TechBadge name="SQL-LIKE VECTOR SEARCH" variant="orange" />
+			</div>
+
+			<h1 class="text-4xl sm:text-5xl md:text-6xl font-serif font-light tracking-tight text-white mb-6">
+				QQL — SQL for Qdrant
+			</h1>
+
+			<p class="text-lg md:text-xl text-[var(--sl-color-gray-2)] max-w-2xl mx-auto mb-10 leading-relaxed font-light">
+				A single-binary CLI, SDK, and gateway for operating <a href="https://qdrant.tech" target="_blank" rel="noopener noreferrer" class="underline hover:text-white transition-colors">Qdrant</a> vector databases with a SQL-like query language. 
+				Write search logic like SQL. Ship it like a binary. Run it anywhere.
+			</p>
+
+			<div class="flex flex-wrap items-center justify-center gap-4 mb-14">
+				<a 
+					href="/docs/getting-started/" 
+					class="inline-flex items-center justify-center px-6 py-3 rounded-lg text-sm font-semibold transition-all duration-200 bg-[var(--sl-color-accent)] hover:bg-[color-mix(in_srgb,var(--sl-color-accent)_85%,white)] text-white shadow-lg hover:shadow-[0_0_20px_rgba(186,84,66,0.25)] hover:-translate-y-0.5"
+				>
+					Get Started
+					<svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+					</svg>
+				</a>
+				<a 
+					href="https://github.com/srimon12/qql-go" 
+					class="inline-flex items-center justify-center px-6 py-3 rounded-lg text-sm font-semibold transition-all duration-200 border border-[var(--sl-color-gray-5)] hover:border-[var(--sl-color-gray-4)] bg-[var(--sl-color-gray-6)] text-[var(--sl-color-gray-1)] hover:-translate-y-0.5" 
+					target="_blank" 
+					rel="noopener noreferrer"
+				>
+					View on GitHub
+				</a>
+			</div>
+
+			<div class="w-full max-w-3xl text-left animate-fade-in">
+				<Terminal title="qql-go interactive shell">{terminalCode}</Terminal>
+			</div>
+		</div>
+
+		<div class="py-16 md:py-24 border-t border-[var(--sl-color-gray-5)]">
+			<div class="text-center mb-12">
+				<h2 class="text-3xl md:text-4xl font-serif font-light text-white mb-4 !border-none">
+					Why QQL?
+				</h2>
+				<p class="text-sm md:text-base text-[var(--sl-color-gray-3)] max-w-lg mx-auto">
+					A query language and tooling layer built specifically to make vector database operations simple, governed, and highly performant.
+				</p>
+			</div>
+
+			<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+				<GlassCard title="Unified Querying">
+					<p>Dense, sparse, hybrid, and multivector retrieval modes are all unified under a single SQL-like <code>QUERY</code> syntax. No need to write complex nested JSON or gRPC structures.</p>
+				</GlassCard>
+
+				<GlassCard title="Single Binary Portability">
+					<p>Compiled in Go with zero runtime dependencies. A single executable that runs natively on Linux, macOS, and Windows. No SDK updates or environment versioning drift.</p>
+				</GlassCard>
+
+				<GlassCard title="In-Database Algebra">
+					<p>Perform expression algebra, boosting, and filtering directly within the Qdrant query pipeline. Eliminates the need for expensive client-side post-processing and sorting.</p>
+				</GlassCard>
+
+				<GlassCard title="Security & Governance Gateway">
+					<p>Secure production databases with built-in JWT authentication, rate limiting, audit logging, and dynamic tenant filter injection enforced at the AST parser level.</p>
+				</GlassCard>
+			</div>
+		</div>
+
+		<div class="py-16 md:py-24 border-t border-[var(--sl-color-gray-5)] mb-12">
+			<div class="text-center mb-12">
+				<h2 class="text-3xl md:text-4xl font-serif font-light text-white mb-4 !border-none">
+					Integrate in Any Stack
+				</h2>
+				<p class="text-sm md:text-base text-[var(--sl-color-gray-3)] max-w-lg mx-auto">
+					Official client SDKs are currently in development. Integrate QQL into your workflow today using our CLI and gateway APIs.
+				</p>
+			</div>
+
+			<div class="max-w-3xl mx-auto">
+				<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+					<GlassCard title="Client SDKs">
+						<p class="mb-4">Type-safe client SDKs are available in the source repository but not yet published to package registries:</p>
+						<div class="flex flex-wrap gap-2">
+							<TechBadge name="TypeScript (In Source)" variant="purple" />
+							<TechBadge name="Go SDK (In Source)" variant="cyan" />
+							<TechBadge name="Python Client (In Source)" variant="orange" />
+						</div>
+					</GlassCard>
+
+					<GlassCard title="Active Integrations">
+						<p class="mb-4">Deploy the QQL Gateway and interact with Qdrant today using our stable communication protocols:</p>
+						<div class="flex flex-wrap gap-2">
+							<TechBadge name="REST API" variant="green" />
+							<TechBadge name="gRPC / Connect RPC" variant="green" />
+							<TechBadge name="Single-Binary CLI" variant="green" />
+						</div>
+					</GlassCard>
+				</div>
+
+				<div class="text-center mt-12">
+					<a 
+						href="/docs/getting-started/" 
+						class="inline-flex items-center text-sm text-[var(--sl-color-accent)] hover:text-[color-mix(in_srgb,var(--sl-color-accent)_85%,white)] transition-colors duration-200 font-semibold group"
+					>
+						Read the getting started guide
+						<svg class="w-4 h-4 ml-1.5 transition-transform group-hover:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+						</svg>
+					</a>
+				</div>
+			</div>
+		</div>
+
+		<!-- Frequently Asked Questions Section for AEO -->
+		<div class="py-16 md:py-24 border-t border-[var(--sl-color-gray-5)] mb-12">
+			<div class="text-center mb-12">
+				<h2 class="text-3xl md:text-4xl font-serif font-light text-white mb-4 !border-none">
+					Frequently Asked Questions
+				</h2>
+				<p class="text-sm md:text-base text-[var(--sl-color-gray-3)] max-w-lg mx-auto">
+					Answers to common operational, architectural, and security questions about QQL.
+				</p>
+			</div>
+
+			<div class="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mx-auto text-left">
+				<GlassCard title="What is QQL?">
+					<p>QQL (Qdrant Query Language) is a SQL-like interface, single-binary CLI, and security gateway designed for operating Qdrant vector databases. It allows developers to express dense, sparse, and hybrid retrieval logic using a declarative SQL dialect.</p>
+				</GlassCard>
+
+				<GlassCard title="Does the QQL Gateway support multi-tenancy?">
+					<p>Yes. The QQL Gateway intercepts queries, validates JWT claims, and structurally injects tenant isolation filters at the AST (Abstract Syntax Tree) compiler level. This prevents cross-tenant data leaks and prompt injection attacks in AI agent workstreams.</p>
+				</GlassCard>
+
+				<GlassCard title="Is QQL open source?">
+					<p>Yes, QQL is fully open source under the MIT license. The gateway, SDKs, and CLI are free to run, self-host, and modify.</p>
+				</GlassCard>
+
+				<GlassCard title="Does QQL require re-indexing Qdrant?">
+					<p>No. QQL compiles SQL-like queries dynamically to Qdrant's native API calls (gRPC/REST). Your existing collections, points, and payload indexes in Qdrant remain untouched.</p>
+				</GlassCard>
+			</div>
+		</div>
+	</main>
+
+	<!-- Custom Footer from scratch -->
+	<footer class="w-full border-t border-[var(--sl-color-gray-5)] bg-[#141413] py-12">
+		<div class="max-w-5xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-6 text-sm text-[var(--sl-color-gray-3)]">
+			<div class="flex items-center gap-2.5">
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					viewBox="0 0 100 100"
+					class="w-5 h-5 text-[var(--sl-color-accent)] fill-current"
+				>
+					<path
+						d="M50 10L10 30V70L50 90L90 70V30L50 10Z"
+						fill="currentColor"
+						fill-opacity="0.1"
+					/>
+					<path
+						d="M50 10L10 30V70L50 50V10Z"
+						fill="var(--sl-color-accent)"
+					/>
+					<path
+						d="M50 10L90 30V70L50 50V10Z"
+						fill="currentColor"
+						fill-opacity="0.85"
+					/>
+					<path
+						d="M50 50L10 70L50 90L90 70L50 50Z"
+						fill="currentColor"
+						fill-opacity="0.4"
+					/>
+					<path
+						d="M30 40L50 60L70 40"
+						stroke="var(--sl-color-bg, #141413)"
+						stroke-width="6"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+					/>
+				</svg>
+				<span>© {new Date().getFullYear()} <a href="https://veristamp.in" target="_blank" rel="noopener noreferrer" class="hover:text-white transition-colors underline decoration-dotted">Veristamp</a>. All rights reserved.</span>
+			</div>
+			<div class="flex items-center gap-6">
+				<a href="/docs/getting-started/" class="hover:text-white transition-colors">Docs</a>
+				<a href="https://github.com/srimon12/qql-go" class="hover:text-white transition-colors" target="_blank" rel="noopener noreferrer">GitHub</a>
+			</div>
+		</div>
+	</footer>
+</body>
+</html>

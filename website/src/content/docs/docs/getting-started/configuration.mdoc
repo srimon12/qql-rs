@@ -1,0 +1,134 @@
+---
+title: "Configuration"
+description: "QQL configuration — inference modes (cloud, local, external), embedding setup, config file location, and all connect flags."
+sidebar:
+  order: 4
+---
+
+QQL stores connection config in `~/.qql/config.json`. It is written at `connect` time and read on every subsequent command.
+
+## Inference Modes
+
+| Mode | Dense vectors | Sparse vectors | Use when |
+|------|--------------|----------------|----------|
+| `cloud` | Qdrant Cloud server-side inference | Qdrant Cloud | Running on Qdrant Cloud |
+| `local` | Local OpenAI-compatible API | Repo BM25 + Qdrant sparse IDF | Self-hosted Qdrant + local embeddings (LM Studio, Ollama, llamafile) |
+| `external` | Remote OpenAI-compatible API | Same as local | Remote Qdrant + remote embedding service |
+
+## Connect Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--url` | — | Qdrant gRPC URL. **Must use port 6334**, not 6333. |
+| `--secret` | — | Qdrant API key (Qdrant Cloud) |
+| `--inference-mode` | `cloud` | `cloud`, `local`, or `external` |
+| `--embedding-endpoint` | — | OpenAI-compatible `/v1/embeddings` URL (local/external mode) |
+| `--embedding-key` | — | Bearer token for hosted embedding providers (optional) |
+| `--embedding-model` | — | Model name sent in the embeddings request |
+| `--embedding-dimension` | auto | Vector dimension. Auto-probed if reachable. |
+
+## Cloud Mode
+
+{% terminal title="Cloud connect" %}
+qql-go connect --url https://<cluster>.qdrant.io --secret <api-key>
+{% /terminal %}
+
+Qdrant Cloud handles all vectorization server-side. No embedding endpoint needed.
+
+## Local Mode
+
+{% terminal title="Local connect (macOS / Linux)" %}
+qql-go connect \
+  --url http://localhost:6334 \
+  --inference-mode local \
+  --embedding-endpoint http://127.0.0.1:1234/v1/embeddings \
+  --embedding-key <optional-api-key> \
+  --embedding-model text-embedding-all-minilm-l6-v2-embedding \
+  --embedding-dimension 384
+{% /terminal %}
+
+{% terminal title="Local connect (Windows)" %}
+qql-go connect `
+  --url http://localhost:6334 `
+  --inference-mode local `
+  --embedding-endpoint http://127.0.0.1:1234/v1/embeddings `
+  --embedding-model text-embedding-all-minilm-l6-v2-embedding
+{% /terminal %}
+
+{% aside type="note" title="Auto-detect dimension" %}
+
+`--embedding-dimension` is optional if the embedding endpoint is reachable. QQL will probe it automatically and save the detected dimension.
+
+{% /aside %}
+
+Compatible embedding servers: **LM Studio**, **Ollama**, **llamafile**, **Cohere**, **OpenAI**, or any server that implements the `/v1/embeddings` API.
+
+## External Mode
+
+{% terminal title="External connect" %}
+qql-go connect \
+  --url https://your-qdrant.example.com:6334 \
+  --secret <qdrant-api-key> \
+  --inference-mode external \
+  --embedding-endpoint https://api.openai.com/v1/embeddings \
+  --embedding-key sk-... \
+  --embedding-model text-embedding-3-small
+{% /terminal %}
+
+## Config File
+
+The config file lives at `~/.qql/config.json`. File permissions are `0o600` (contains secrets).
+
+{% aside type="tip" title="Example config" %}
+
+```json
+{
+  "url": "http://localhost:6334",
+  "inference_mode": "local",
+  "embedding_endpoint": "http://127.0.0.1:1234/v1/embeddings",
+  "embedding_model": "text-embedding-all-minilm-l6-v2-embedding",
+  "embedding_dimension": 384,
+  "bm25": {
+    "k1": 1.5,
+    "b": 0.75,
+    "avgdl": 100
+  }
+}
+```
+
+{% /aside %}
+
+### BM25 Parameters
+
+For local/external mode, BM25 parameters can be tuned in the config:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `k1` | `1.5` | Term frequency saturation |
+| `b` | `0.75` | Length normalization |
+| `avgdl` | `100` | Average document length |
+
+## Disconnect
+
+{% terminal title="Disconnect" %}
+qql-go disconnect
+{% /terminal %}
+
+Removes the stored config. Subsequent commands will require reconnection.
+
+## Doctor
+
+{% terminal title="Health check" %}
+qql-go doctor
+qql-go doctor --quiet --json
+{% /terminal %}
+
+## Feature Support by Mode
+
+| Feature | Cloud | Local | External |
+|---------|-------|-------|----------|
+| Dense insert/search | ✅ | ✅ | ✅ |
+| Hybrid insert/search | ✅ | ✅ | ✅ |
+| Sparse-only search | ✅ | ✅ | ✅ |
+| RERANK | ✅ | ❌ | ❌ |
+| Recommend | ✅ | ✅ | ✅ |

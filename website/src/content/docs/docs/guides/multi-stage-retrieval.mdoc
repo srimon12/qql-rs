@@ -1,0 +1,169 @@
+---
+title: "Multi-Stage Retrieval"
+description: "Build prefetch DAGs with CTEs in QQL — multi-stage retrieval, per-prefetch filters, nested CTEs, and pure fusion."
+sidebar:
+  order: 2
+---
+
+QQL supports multi-stage retrieval pipelines using Common Table Expressions (CTEs) and `PREFETCH` DAGs. Each stage can have its own vector, filter, limit, and score threshold.
+
+## Basic CTE Prefetch
+
+```sql
+WITH
+  dense AS (QUERY 'emergency care' USING dense LIMIT 200),
+  sparse AS (QUERY 'emergency care' USING sparse LIMIT 300)
+QUERY 'emergency care' FROM docs LIMIT 10
+  PREFETCH (dense, sparse)
+  FUSION RRF
+```
+
+Each CTE is a named retrieval stage. The top-level `QUERY` merges the prefetch results via `FUSION RRF` or `FUSION DBSF`.
+
+## Per-Prefetch Filters and Score Thresholds
+
+Apply independent filters and score thresholds to each CTE reference at the prefetch level:
+
+```sql
+WITH
+  dense AS (QUERY 'search' USING dense LIMIT 200 WHERE category = 'tech'),
+  sparse AS (QUERY 'search' USING sparse LIMIT 300)
+QUERY 'search' FROM docs LIMIT 10
+  PREFETCH (
+    dense WHERE priority = 'high' SCORE THRESHOLD 0.6,
+    sparse SCORE THRESHOLD 0.3
+  )
+  FUSION RRF WITH (rrf_k = 20, rrf_weights = [0.6, 0.4])
+```
+
+{% aside type="note" title="Pre-Filter vs Post-Filter" %}
+The `WHERE` inside a CTE definition is pushed down to Qdrant as a pre-filter (not a post-filter). The `WHERE` on a prefetch reference is an additional override applied at fusion time.
+{% /aside %}
+
+## Named Vector Targeting
+
+Each CTE can target a different named vector:
+
+```sql
+WITH
+  _pf0 AS (QUERY [0.1, 0.2, 0.3] USING 'mean_pooling_columns' LIMIT 100),
+  _pf1 AS (QUERY [0.1, 0.2, 0.3] USING 'mean_pooling_rows' LIMIT 100)
+QUERY [0.1, 0.2, 0.3] FROM pdf_retrieval USING 'original' LIMIT 10
+  PREFETCH (_pf0, _pf1)
+```
+
+## Nested CTEs (Coarse-to-Fine)
+
+CTEs can reference other CTEs to build hierarchical pipelines:
+
+```sql
+WITH
+  broad AS (
+    QUERY 'emergency neurological assessment' USING dense LIMIT 500
+    WHERE department = 'emergency'
+  ),
+  narrow AS (
+    QUERY 'emergency neurological assessment' USING sparse LIMIT 100
+    PREFETCH (broad)
+  )
+QUERY 'emergency neurological assessment' FROM clinical_docs LIMIT 5
+  PREFETCH (narrow)
+  FUSION RRF
+```
+
+{% aside type="tip" title="Pipeline Pattern" %}
+**Pipeline:** dense broad → sparse narrow → RRF. This coarse-to-fine pattern narrows candidates at each stage for better precision.
+{% /aside %}
+
+## Pure Fusion (No Search Target)
+
+Fuse CTE results without a new search:
+
+```sql
+WITH
+  dense AS (QUERY 'search' USING 'dense' LIMIT 100),
+  sparse AS (QUERY 'search' USING 'sparse' LIMIT 100)
+FUSION RRF LIMIT 10 PREFETCH (dense, sparse)
+```
+
+Or without explicit CTEs (inline):
+
+```sql
+FUSION RRF LIMIT 10 PREFETCH (dense, sparse)
+```
+
+## Three-Leg Priority Retrieval
+
+```sql
+WITH
+  high_priority AS (QUERY 'kubernetes deployment' USING dense LIMIT 50
+    WHERE priority = 'critical' AND status = 'open'),
+  general AS (QUERY 'kubernetes deployment' USING dense LIMIT 200),
+  keyword AS (QUERY 'kubernetes deployment' USING sparse LIMIT 200)
+QUERY 'kubernetes deployment' FROM incidents LIMIT 10
+  PREFETCH (
+    high_priority SCORE THRESHOLD 0.7,
+    general SCORE THRESHOLD 0.4,
+    keyword SCORE THRESHOLD 0.3
+  )
+  FUSION RRF
+  WITH (rrf_k = 30, rrf_weights = [0.5, 0.3, 0.2])
+```
+
+**Effect:** Critical incidents get 50% of the RRF weight, general dense 30%, keyword 20%.
+
+### Tiered Retrieval (Coarse → Fine)
+
+Nested CTE prefetch for coarse-to-fine retrieval — broad dense first pass, narrow sparse second pass:
+
+```sql
+WITH
+  broad AS (
+    QUERY 'emergency neurological assessment' USING dense LIMIT 500
+    WHERE department = 'emergency'
+  ),
+  narrow AS (
+    QUERY 'emergency neurological assessment' USING sparse LIMIT 100
+    PREFETCH (broad)
+  )
+QUERY 'emergency neurological assessment' FROM clinical_docs LIMIT 5
+  PREFETCH (narrow)
+  FUSION RRF
+```
+
+{% glassCard title="Pipeline" %}
+```
+broad (dense, 500 candidates, emergency dept)
+  ↓
+narrow (sparse, 100 results scoped to broad)
+  ↓
+FUSION RRF (final 5)
+```
+{% /glassCard %}
+
+| Decision | Why |
+|---|---|
+| `broad` retrieves 500 dense candidates | Wide semantic coverage |
+| `narrow` sparse search inside `broad` | Keyword precision within semantic neighborhood |
+| Top-level fuses only `narrow` | 2-stage: dense broad → sparse narrow → RRF |
+
+## Syntax Reference
+
+```sql
+WITH
+  <name> AS (QUERY <target> [USING <vector>] [LIMIT <n>] [WHERE <filter>] [PREFETCH (<name>)]),
+  <name> AS (...)
+QUERY '<text>' FROM <collection> [USING '<vector>'] LIMIT <n>
+  PREFETCH (
+    <name> [WHERE <filter>] [SCORE THRESHOLD <float>],
+    <name> [SCORE THRESHOLD <float>]
+  )
+  FUSION <RRF | DBSF>
+  [WITH (rrf_k = <n>, rrf_weights = [<f>, <f>])]
+```
+
+{% aside type="note" title="CTE Rules" %}
+- CTEs can reference previously defined CTEs (forward references are not allowed).
+- `PREFETCH` lists CTE names; inline queries generate CTEs automatically.
+- Multiple `WITH` blocks merge: `WITH (rrf_k = 20) WITH PAYLOAD (include = ['title'])`.
+{% /aside %}

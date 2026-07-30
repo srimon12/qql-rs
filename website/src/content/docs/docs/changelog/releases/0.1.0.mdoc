@@ -1,0 +1,32 @@
+---
+title: "0.1.0 Release Notes"
+description: "qql-go 0.1.0 release notes."
+sidebar:
+  order: 99
+---
+
+Release date: 2026-04-14
+
+## Summary
+
+This release seeds the open-source baseline for qql-go: a standalone Go CLI for Qdrant, a documented query surface, a public installable skill, and a basic CI workflow for pull requests and pushes.
+
+## Highlights
+
+- CLI commands for connect, exec, explain, doctor, repl, disconnect, and version flows.
+- Dense, hybrid, exact, filtered, and reranked query forms documented in the README.
+- Human-readable and structured JSON output modes for terminal and agent use.
+- Public `skills/qql-skill` package for installation through `npx skills add`.
+- GitHub Actions workflows for CI and tag-driven release publishing with downloadable binaries for Windows, Linux, and macOS.
+
+## Known limits
+
+{% aside type="note" title="Known Limits" %}
+- Text inference paths currently depend on Qdrant Cloud in this Go build.
+- Local or self-hosted Qdrant is currently best for non-inference operations.
+- Future tagged releases can publish prebuilt archives directly to GitHub Releases.
+{% /aside %}
+
+---
+
+> For full commit list and details see the [original release notes](https://github.com/srimon12/qql-go/blob/main/docs/releases/0.1.0.md).

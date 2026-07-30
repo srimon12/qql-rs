@@ -1,0 +1,184 @@
+---
+title: "Examples"
+description: "Runnable QQL example workflows — PDF retrieval, medical showcase, CI regression, debugging, benchmarks, and gateway."
+sidebar:
+  order: 1
+---
+
+Runnable retrieval workflows showcasing `qql-go` capabilities. All examples live under [`examples/`](https://github.com/srimon12/qql-go/tree/main/examples) in the repo.
+
+## Before You Run
+
+Install `qql-go`, then connect:
+
+{% terminal title="Connect to Qdrant" %}
+# Cloud
+qql-go connect --url https://<cluster>.qdrant.io --secret <api-key>
+
+# Local (needs embedding endpoint for text operations)
+qql-go connect --url http://localhost:6334 --inference-mode local \
+  --embedding-endpoint http://127.0.0.1:1234/v1/embeddings \
+  --embedding-model text-embedding-all-minilm-l6-v2-embedding
+{% /terminal %}
+
+---
+
+## Medical Showcase
+
+**Script:** [`examples/medical-showcase/main.py`](https://github.com/srimon12/qql-go/tree/main/examples/medical-showcase/main.py)
+
+Demonstrates every major QQL feature in a single run against 12 medical records: hybrid search, filters, grouped retrieval, recommend, context, discover, prefetch DAGs, mutations, EXPLAIN, and more.
+
+{% terminal title="Run" %}
+uv run examples/medical-showcase/main.py --execute
+{% /terminal %}
+
+Covers: `CREATE COLLECTION`, `CREATE INDEX`, `INSERT`, `QUERY` (dense/hybrid/sparse), `WHERE`, `GROUP BY`, `QUERY RECOMMEND`, `QUERY CONTEXT`, `QUERY DISCOVER`, CTE prefetch with `FUSION RRF`, `BOOST`, `ORDER BY`, `SAMPLE`, `SCROLL`, `SELECT`, `UPDATE`, `DELETE`, `EXPLAIN`.
+
+---
+
+## PDF Retrieval
+
+**Script:** [`examples/pdf-retrieval/run-demo.sh`](https://github.com/srimon12/qql-go/tree/main/examples/pdf-retrieval/run-demo.sh)
+
+Two-stage retrieval with ColPali/ColQwen-style multivectors: mean-pooled vectors for fast first-stage ANN, original multivectors for accurate late-interaction reranking.
+
+{% terminal title="Run" %}
+bash examples/pdf-retrieval/run-demo.sh
+{% /terminal %}
+
+**Architecture:** Stage 1 uses `mean_pooling_columns` / `mean_pooling_rows` (HNSW-indexed) for fast ANN. Stage 2 reranks candidates with the `original` multivector using `max_sim` (no HNSW, accurate). The QQL pattern uses CTEs for prefetch DAGs:
+
+{% terminal title="Two-Stage Search" %}
+WITH
+  _pf0 AS (QUERY [0.1, 0.2, 0.3] USING 'mean_pooling_columns' LIMIT 100),
+  _pf1 AS (QUERY [0.1, 0.2, 0.3] USING 'mean_pooling_rows' LIMIT 100)
+QUERY [0.1, 0.2, 0.3] FROM pdf_retrieval USING 'original' LIMIT 10
+  PREFETCH (_pf0, _pf1)
+{% /terminal %}
+
+Best for ColBERT/ColPali workloads where each page has multiple column/row representations.
+
+---
+
+## Release Validation
+
+**Script:** [`examples/release-validation/run-demo.sh`](https://github.com/srimon12/qql-go/tree/main/examples/release-validation/run-demo.sh)
+
+CI-friendly retrieval regression checks — runs `SHOW`, `EXPLAIN`, and `QUERY` against an existing collection, validates JSON results, exits non-zero on failure.
+
+{% terminal title="Run" %}
+bash examples/release-validation/run-demo.sh
+{% /terminal %}
+
+Steps: connect, check collection exists, explain a complex hybrid query, run hybrid search, verify grouped results. See [CI Integration](#ci-integration) for GitHub Actions setup. Artifacts written to `examples/release-validation/artifacts/`.
+
+---
+
+## Retrieval Debugging
+
+**Script:** [`examples/retrieval-debug-runbook/run-demo.sh`](https://github.com/srimon12/qql-go/tree/main/examples/retrieval-debug-runbook/run-demo.sh)
+
+On-call runbook for diagnosing retrieval quality issues — provisions a small corpus, compares hybrid/exact/sparse modes, inspects expected documents, and saves artifacts for support reports.
+
+{% terminal title="Run" %}
+bash examples/retrieval-debug-runbook/run-demo.sh
+{% /terminal %}
+
+Runbook steps:
+1. **Provision** a debug corpus with `CREATE COLLECTION debug HYBRID` and insert sample docs
+2. **Compare modes** — dense, hybrid, sparse, exact side by side
+3. **Inspect** expected documents with `SELECT` and `SCROLL`
+4. **Explain** the query plan with `qql-go explain`
+5. **Score investigation** using `SCORE THRESHOLD 0.0`
+
+Artifacts written to `examples/retrieval-debug-runbook/artifacts/`.
+
+---
+
+## Medical Benchmark
+
+**Script:** [`examples/medical-retrieval-ops/run-demo.sh`](https://github.com/srimon12/qql-go/tree/main/examples/medical-retrieval-ops/run-demo.sh)
+
+Downloads the `RAGCare-QA` dataset from HuggingFace, builds a QQL corpus, compares retrieval modes, and records `hit@1` / `hit@5` benchmark results.
+
+{% terminal title="Run" %}
+bash examples/medical-retrieval-ops/run-demo.sh
+{% /terminal %}
+
+Pipeline:
+
+1. **Download** `RAGCare-QA` from HuggingFace
+2. **Build corpus** — inserts records with `INSERT INTO medical VALUES {...} USING HYBRID`
+3. **Compare modes** — runs the same question set against dense, sparse, hybrid, and exact retrieval
+4. **Record** — writes metrics to `artifacts/results.json`
+
+Benchmark queries:
+{% terminal title="Query Set" %}
+-- Dense
+QUERY 'What are the symptoms of acute bronchitis?' FROM medical LIMIT 5
+-- Hybrid
+QUERY 'What are the symptoms of acute bronchitis?' FROM medical LIMIT 5 USING HYBRID
+-- Sparse
+QUERY 'acute bronchitis symptoms' FROM medical LIMIT 5 USING SPARSE
+-- Exact
+QUERY 'What are the symptoms of acute bronchitis?' FROM medical LIMIT 5 EXACT
+{% /terminal %}
+
+---
+
+## Server Gateway
+
+**Script:** [`examples/server-gateway/run-demo.sh`](https://github.com/srimon12/qql-go/tree/main/examples/server-gateway/run-demo.sh)
+
+End-to-end gateway demonstration with JWT authentication, YAML policy rules, AST-level filter injection, and tenant isolation.
+
+{% terminal title="Run" %}
+bash examples/server-gateway/run-demo.sh
+{% /terminal %}
+
+**What it demonstrates:**
+
+- Start the gateway with `qql-go serve` — JWKS auth, policy file, audit logging
+- **Reader role** (Alice): tenant-scoped — query rewritten to `WHERE org_id = 'acme-corp'`, max `LIMIT 50`, DROP rejected (403)
+- **Admin role** (Bob): full access — all collections, no limit cap, allowed all operations
+- Audit trail written to `examples/server-gateway/artifacts/audit.jsonl`
+
+Policy file (`examples/server-gateway/policies.yaml`):
+{% terminal title="policies.yaml" %}
+rules:
+  - match:
+      claims:
+        role: admin
+    allow: [QUERY, INSERT, CREATE, ALTER, DROP, SCROLL, SELECT, SHOW, EXPLAIN, DELETE, UPDATE]
+    collections: ["*"]
+
+  - match:
+      claims:
+        role: reader
+    allow: [QUERY, SCROLL, SELECT, SHOW, EXPLAIN]
+    inject:
+      where:
+        field: org_id
+        from_claim: org_id
+        op: "="
+    limits:
+      max_limit: 50
+{% /terminal %}
+
+---
+
+## Artifacts
+
+Each workflow writes JSON artifacts to its `artifacts/` directory. Use them to:
+- Diff retrieval quality between runs
+- Attach to CI failure reports
+- Inspect explain plans
+- Feed into agent reports
+
+---
+
+## Boundaries
+
+Use `qql-go` for deterministic, reviewable retrieval operations.  
+Use the Qdrant SDK for application code.

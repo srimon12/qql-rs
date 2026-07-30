@@ -1,0 +1,212 @@
+---
+title: "0.3.0 Release Notes"
+description: "qql-go 0.3.0 release notes."
+sidebar:
+  order: 99
+---
+
+Release date: 2026-06-17
+
+## Summary
+
+This is a major feature release that unifies the query grammar, adds multi-stage retrieval primitives, and brings the Go implementation to ~99% Python QQL parity. The `SEARCH` and `RECOMMEND` statements are replaced by a single `QUERY` statement with 4 modes. The parser and executor have been refactored into focused submodules. 30+ bugs from a red-team audit have been fixed.
+
+89 files changed. 12,870 insertions, 20,598 deletions across 6 pull requests.
+
+## Highlights
+
+### Unified QUERY API
+
+`SEARCH <collection> SIMILAR TO '<text>'` and `RECOMMEND FROM <collection> POSITIVE IDS (...)` are replaced by a single `QUERY` statement:
+
+{% terminal title="Unified QUERY Examples" %}
+-- Dense search
+QUERY 'emergency care' FROM medical LIMIT 5
+
+-- Hybrid search
+QUERY 'emergency care' FROM medical LIMIT 5 USING HYBRID
+
+-- Recommendation
+QUERY RECOMMEND WITH (positive = ('id-1', 'id-2'), negative = ('id-3')) FROM medical LIMIT 5
+
+-- Context-aware search
+QUERY CONTEXT PAIRS (('id-1', 'id-2'), ('id-3', 'id-4')) FROM medical LIMIT 10
+
+-- Exploration search
+QUERY DISCOVER TARGET 'id-1' CONTEXT PAIRS (('id-2', 'id-3')) FROM medical LIMIT 10
+{% /terminal %}
+
+All modes share the same clause surface: `LIMIT`, `OFFSET`, `SCORE THRESHOLD`, `LOOKUP FROM`, `USING`, `WITH`, `WHERE`, `RERANK`, `GROUP BY`, `GROUP_SIZE`, `STRATEGY`, `EXACT`.
+
+### SQL-native grammar
+
+The grammar has been cleaned up to follow SQL conventions:
+
+- CTEs: `WITH <name> AS (QUERY ...), ...`
+- DML: `INSERT INTO`, `UPDATE`, `DELETE FROM`
+- WITH params: `(key = value, ...)` instead of `{ key: value }`
+- Boolean expressions: `AND`, `OR`, `NOT`, `IS NULL`, `IS EMPTY`
+
+### Manual prefetch DAGs via CTEs
+
+Multi-stage retrieval with named sub-queries:
+
+{% terminal title="CTE Prefetch DAG" %}
+WITH
+  dense AS (QUERY 'emergency neurological' USING dense LIMIT 200 WHERE department = 'emergency'),
+  sparse AS (QUERY 'emergency neurological' USING sparse LIMIT 300)
+QUERY 'emergency neurological' FROM clinical_docs LIMIT 10
+  PREFETCH (dense, sparse)
+  FUSION RRF
+{% /terminal %}
+
+### Parameterized RRF
+
+Tune Reciprocal Rank Fusion with K and per-source weights:
+
+{% terminal title="Parameterized RRF" %}
+QUERY 'search' FROM docs LIMIT 10
+  USING HYBRID WITH (rrf_k = 30, rrf_weights = [0.7, 0.3])
+{% /terminal %}
+
+### Per-prefetch filtering and score thresholds
+
+Apply independent filters and score thresholds to each CTE prefetch stage. Filters are pushed down to Qdrant — not post-filters:
+
+{% terminal title="Per-prefetch Filters" %}
+WITH
+  a AS (QUERY 'search' USING dense LIMIT 200),
+  b AS (QUERY 'search' USING sparse LIMIT 300)
+QUERY 'search' FROM docs LIMIT 10
+  PREFETCH (a WHERE category = 'tech' SCORE THRESHOLD 0.6, b SCORE THRESHOLD 0.3)
+  FUSION RRF WITH (rrf_k = 20, rrf_weights = [0.6, 0.4])
+{% /terminal %}
+
+### Cross-collection group lookup
+
+Search in one collection, but resolve group IDs from a separate collection:
+
+{% terminal title="Cross-collection Lookup" %}
+QUERY 'machine learning' FROM research_papers LIMIT 20
+  GROUP BY 'author_id' GROUP_SIZE 5
+  WITH LOOKUP FROM author_metadata
+{% /terminal %}
+
+### ORDER BY
+
+Paginate by payload field instead of similarity score:
+
+{% terminal title="ORDER BY" %}
+QUERY ORDER BY created_at DESC FROM articles
+  WHERE status = 'published' AND category = 'engineering'
+  LIMIT 20
+{% /terminal %}
+
+### Payload and Vector Selectors
+
+Control which fields and vectors are returned:
+
+{% terminal title="Payload/Vector Selectors" %}
+QUERY 'acute bronchitis' FROM medical_records LIMIT 10
+  WITH PAYLOAD (include = ['title', 'summary'], exclude = ['raw_text', 'embedding'])
+  WITH VECTORS ('dense_v2')
+{% /terminal %}
+
+### Multi-vector DDL
+
+Create collections with explicit named-vector schemas:
+
+{% terminal title="Multi-vector DDL" %}
+CREATE COLLECTION docs (dense VECTOR(384, COSINE), sparse VECTOR(768, DOT))
+{% /terminal %}
+
+### ALTER COLLECTION
+
+Modify collection configuration after creation:
+
+{% terminal title="ALTER COLLECTION" %}
+ALTER COLLECTION docs WITH VECTORS { on_disk: true }
+ALTER COLLECTION docs WITH HNSW { m: 32 }
+ALTER COLLECTION docs WITH OPTIMIZERS { max_segment_size: 500000 }
+ALTER COLLECTION docs QUANTIZE SCALAR QUANTILE 0.95
+ALTER COLLECTION docs QUANTIZE DISABLED
+{% /terminal %}
+
+### Parser and executor refactoring
+
+The monolithic `commands.go` and `parser.go` have been broken into focused submodules:
+
+- **Executor:** `exec_query.go`, `exec_insert.go`, `exec_manage.go`, `exec_select.go`, `exec_update.go`, `cli_cmds.go`, `client.go`, `utils.go`
+- **Parser:** `parse_query.go`, `parse_create.go`, `parse_insert.go`, `parse_update.go`, `parse_manage.go`, `parse_search.go`
+
+The execution pipeline uses a proper DAG with typed nodes (`DenseEmbedNode`, `SparseEmbedNode`, `FusionNode`, `RerankNode`, `RecommendNode`, `ContextNode`, `DiscoverNode`, `PrefetchNode`) and request assembly delegated to `BuildFlatRequest` / `BuildGroupedRequest`.
+
+### BM25 improvements
+
+- Term frequency and stopword filtering in local tokenization
+- Parallelized sparse vector construction
+- Updated qdrant-go-client to v1.18.2
+- Dynamic vector resolution and SSL controls for Python parity
+
+### Security and correctness fixes
+
+30+ issues remediated from a red-team audit:
+
+- Config file permissions restricted from `0o644` to `0o600`
+- Config global state protected by `sync.RWMutex`
+- `newPointID` now validates negative integers and string coercion
+- `parseUint64` has overflow protection
+- Timer leak in `waitForCollectionReady` fixed
+- Race conditions in test fixtures fixed
+- Non-deterministic map iteration fixed
+- Dump `escapeString` now escapes control characters
+- `cloneConfig` deep-copies `CloudModelOptions` map
+- 8 false-positive parser tests corrected
+
+## Breaking changes
+
+{% aside type="caution" title="Breaking Changes" %}
+- `SEARCH <collection> SIMILAR TO '<text>'` is removed. Use `QUERY '<text>' FROM <collection>`.
+- `RECOMMEND FROM <collection> POSITIVE IDS (...)` is removed. Use `QUERY RECOMMEND WITH (positive = (...)) FROM <collection>`.
+- `internal/utils` package deleted. All callers migrated to `strings.ToUpper` / `strings.ToLower`.
+{% /aside %}
+
+## Packaging
+
+Release bundles include:
+
+- `qql-go` (Linux amd64, Linux arm64, Windows amd64, macOS arm64)
+
+Tagged releases also publish:
+
+- `qql-go_0.3.0_checksums.txt`
+
+## Known limits
+
+{% aside type="note" title="Known Limits" %}
+- `RERANK` is cloud-only. Local and external modes reject rerank queries.
+- MMR applies to dense search and the dense leg of hybrid search. `USING SPARSE` and `RECOMMEND` do not accept MMR settings.
+- `OFFSET` is not supported with `GROUP BY`.
+- Local sparse weighting still differs from Python's FastEmbed BM25 path.
+- Formula / score boosting, relevance feedback, and SAMPLE RANDOM are not yet supported.
+{% /aside %}
+
+## Validation
+
+Release prep was validated with:
+
+- `go test ./...` — all packages pass
+- `go vet ./...` — clean
+- `gofmt` — all files formatted
+- `go run docs/dev_tasks.go release-validate --version 0.3.0` — all 4 checks passed
+- `uv run skills/qql-skill/scripts/demo_medical_records.py --execute` — all steps pass
+- `uv run skills/qql-skill/scripts/demo_kitchen_sink.py --execute` — all steps pass
+- `uv run examples/medical-showcase/main.py --execute` — all steps pass
+
+## Full changelog
+
+See [CHANGELOG.md](https://github.com/srimon12/qql-go/blob/main/CHANGELOG.md).
+
+---
+
+> For full commit list and details see the [original release notes](https://github.com/srimon12/qql-go/blob/main/docs/releases/0.3.0.md).

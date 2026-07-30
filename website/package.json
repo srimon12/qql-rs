@@ -1,0 +1,33 @@
+{
+  "name": "@qql/website",
+  "type": "module",
+  "version": "0.1.5",
+  "private": true,
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "@astrojs/markdoc": "^2.0.3",
+    "@astrojs/sitemap": "^3.7.3",
+    "@astrojs/starlight": "^0.41.3",
+    "@astrojs/starlight-markdoc": "^0.7.0",
+    "@fontsource/ibm-plex-sans": "^5.2.8",
+    "@fontsource/instrument-serif": "^5.2.8",
+    "@fontsource/jetbrains-mono": "^5.2.8",
+    "@qql/ui-docs": "workspace:*",
+    "astro": "^7.0.6",
+    "sharp": "^0.35.3",
+    "starlight-copy-button": "github:dionysuzx/starlight-copy-button",
+    "starlight-llms-txt": "^0.11.0"
+  },
+  "devDependencies": {
+    "@astrojs/starlight-tailwind": "^5.0.0",
+    "@tailwindcss/vite": "^4.3.2",
+    "tailwindcss": "^4.3.2",
+    "typescript": "^5.9.0"
+  }
+}

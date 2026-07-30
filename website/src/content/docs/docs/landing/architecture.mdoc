@@ -1,0 +1,142 @@
+---
+title: "Architecture"
+description: "QQL pipeline architecture — Lexer, Parser, AST, Executor, Pipeline DAG, and the Connect RPC Gateway."
+
+pagefind: false
+sidebar:
+  hidden: true
+head:
+  - tag: meta
+    attrs:
+      name: robots
+      content: noindex, follow
+---
+
+## Pipeline
+
+Every QQL statement goes through three stages before reaching Qdrant:
+
+```
+User input
+    │
+    ▼
+[ Lexer ]      — O(1) stack-buffer keyword lookup, tokenizes input into keywords / identifiers / literals
+    │
+    ▼
+[ Parser ]     — Pratt parser, zero-allocation byte-level comparison, builds a typed AST node
+    │
+    ▼
+[ AST Node ]   — Typed node: QueryStmt, InsertStmt, CreateStmt, etc.
+    │
+    ▼
+[ Executor ]   — Maps AST node to Qdrant client calls via a Pipeline DAG
+    │
+    ▼
+[ Qdrant gRPC ]
+```
+
+## Execution Pipeline DAG
+
+```
+┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────────┐
+│  Lexer   │───▶│  Parser  │───▶│   AST    │───▶│   Executor   │
+│          │    │ (Pratt)  │    │          │    │              │
+│ O(1)     │    │ Zero-alloc│   │ Typed    │    │ Pipeline DAG │
+│ keywords │    │ compare  │    │ nodes    │    │              │
+└──────────┘    └──────────┘    └──────────┘    └──────┬──────┘
+                                                        │
+                               ┌─────────────────────────┼───────┐
+                               │                         │       │
+                      ┌────────▼───┐   ┌─────────┐  ┌───▼────┐  │
+                      │  Pipeline  │   │ Filters │  │ Sparse │  │
+                      │            │   │         │  │  BM25  │  │
+                      │ EmbedNode  │   │ Type-   │  │ Atomic │  │
+                      │ FusionNode │   │ switch  │  │ cache  │  │
+                      │ RerankNode │   │ (no     │  └────────┘  │
+                      │ FormulaNode│   │reflect) │              │
+                      └─────┬──────┘   └─────────┘              │
+                            │                                    │
+                     ┌──────▼────────────────────────────────────┘
+                     │
+               ┌─────▼─────┐    ┌───────────┐
+               │   Qdrant   │    │  Gateway  │
+               │  gRPC API  │    │ (Connect  │
+               │            │    │   RPC)    │
+               └───────────┘    └───────────┘
+```
+
+## Gateway Architecture
+
+```
+Request
+  │
+  ▼
+┌─────────────────────────────────────────────────┐
+│  Interceptor Chain                              │
+│                                                 │
+│  1. JWT Validation                              │
+│     Fetch & cache JWKS keys                     │
+│     Validate signature, expiry, issuer          │
+│     Extract claims into context                 │
+│                                                 │
+│  2. Policy Evaluation                           │
+│     Match claims against YAML rules             │
+│     Determine: allowed ops, collections,        │
+│     filter injection, limit caps                │
+│                                                 │
+│  3. Audit Meta Injection                        │
+│     Create empty AuditMeta in context           │
+│     Handler fills it with AST details           │
+│     Interceptor logs it after execution         │
+│                                                 │
+│  4. Handler Execution                           │
+│     Parse QQL → AST                             │
+│     Enforce operation + collection rules        │
+│     Inject tenant filter into AST               │
+│     Enforce LIMIT cap                           │
+│     Execute against Qdrant                      │
+│                                                 │
+│  5. Audit Logging                               │
+│     Build structured JSON entry                 │
+│     Write to file or stderr                     │
+└─────────────────────────────────────────────────┘
+```
+
+## Internal Package Layout
+
+```
+cmd/qql-go/                    CLI entrypoint
+internal/
+  ast/                         AST node definitions
+  lexer/                       Tokenizer and token kinds
+  parser/                      Recursive descent Pratt parser
+  filters/                     WHERE clause → Qdrant Filter conversion
+  cli/commands/                Command handlers (connect, exec, explain, etc.)
+  repl/                        Interactive shell
+  embedding/                   OpenAI-compatible embedding client
+  sparse/                      BM25 sparse vector generation
+  script/                      .qql script execution
+  dump/                        Collection dump to .qql files
+  config/                      Connection config persistence
+  output/                      Terminal output formatting
+  pipeline/                    DAG node types (EmbedNode, FusionNode, etc.)
+pkg/qql/                       Public Go SDK
+server/                        Connect RPC gateway
+proto/                         Protobuf service definition
+sdks/python/                   Python Connect RPC client
+sdks/typescript/               TypeScript Connect RPC client
+skills/qql-skill/              Agent skill package
+examples/                      Runnable retrieval workflows
+docs/releases/                 Release notes
+.github/workflows/             CI and release automation
+```
+
+## Inference Modes
+
+QQL supports three inference modes, set at `connect` time:
+
+| Mode | Dense Vectors | Sparse Vectors | When to Use |
+|------|--------------|----------------|-------------|
+| `cloud` | Qdrant Cloud server-side inference (`qdrant.Document`) | Qdrant Cloud | Qdrant Cloud clusters |
+| `local` | Local OpenAI-compatible embeddings API | Repo BM25 + Qdrant sparse IDF | Self-hosted Qdrant + LM Studio / Ollama |
+| `external` | Remote OpenAI-compatible embeddings API | Same as local | Remote Qdrant + remote embedding service |

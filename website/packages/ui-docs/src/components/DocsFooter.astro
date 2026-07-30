@@ -1,0 +1,213 @@
+---
+import EditLink from "virtual:starlight/components/EditLink";
+import LastUpdated from "virtual:starlight/components/LastUpdated";
+import Pagination from "virtual:starlight/components/Pagination";
+import config from "virtual:starlight/user-config";
+import type { DocsFooterConfig } from "../types";
+
+interface Props {
+	docsConfig: DocsFooterConfig;
+}
+
+const { docsConfig } = Astro.props;
+const year = new Date().getFullYear();
+---
+
+<footer class="sl-flex docs-footer" style="position: relative; z-index: 40; background: var(--sl-color-bg);">
+  <div class="meta sl-flex">
+    <EditLink />
+    <LastUpdated />
+  </div>
+  <Pagination />
+
+  {
+    config.credits && (
+      <a class="kudos sl-flex" href="https://starlight.astro.build">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+        </svg>
+        {Astro.locals.t('builtWithStarlight.label')}
+      </a>
+    )
+  }
+
+  <div class="brand-footer">
+    <div class="brand-footer-grid">
+      <div class="brand-col">
+        <a href={docsConfig.brand.href} class="brand-name">{docsConfig.brand.name}</a>
+        <p class="brand-tagline">
+          {docsConfig.brand.tagline}
+        </p>
+      </div>
+
+      {docsConfig.columns.map((col) => (
+        <div class="link-col">
+          <span class="col-title">{col.title}</span>
+          {col.items.map((item) =>
+            item.disabled ? (
+              <span class="text-disabled">{item.label}</span>
+            ) : (
+              <a
+                href={item.href}
+                {...(item.external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+              >
+                {item.label}
+              </a>
+            )
+          )}
+        </div>
+      ))}
+    </div>
+
+    <div class="brand-footer-bottom">
+      <span>{docsConfig.bottom?.copyright}</span>
+      {docsConfig.bottom?.note && (
+        <span class="brand-security-note">{docsConfig.bottom.note}</span>
+      )}
+    </div>
+  </div>
+</footer>
+
+<style>
+  @layer starlight.core {
+    .docs-footer {
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+    .meta {
+      gap: 0.75rem 3rem;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      margin-top: 3rem;
+      font-size: var(--sl-text-sm);
+      color: var(--sl-color-gray-3);
+    }
+    .meta > :global(p:only-child) {
+      margin-inline-start: auto;
+    }
+    .kudos {
+      align-items: center;
+      gap: 0.5em;
+      margin: 1.5rem auto;
+      font-size: var(--sl-text-xs);
+      text-decoration: none;
+      color: var(--sl-color-gray-3);
+      transition: color 0.2s;
+    }
+    .kudos:hover {
+      color: var(--sl-color-white);
+    }
+  }
+
+  @layer starlight.components {
+    .kudos svg {
+      color: var(--sl-color-orange);
+    }
+  }
+
+  .brand-footer {
+    margin-top: 3rem;
+    padding-top: 3rem;
+    position: relative;
+  }
+
+  /* Glowing central gradient line */
+  .brand-footer::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: radial-gradient(circle at center, color-mix(in srgb, var(--sl-color-accent) 40%, transparent) 0%, color-mix(in srgb, var(--sl-color-white) 5%, transparent) 50%, transparent 100%);
+  }
+
+  .brand-footer-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 2.5rem 1.5rem;
+  }
+
+  @media (min-width: 40rem) {
+    .brand-footer-grid {
+      grid-template-columns: 1.5fr 1fr 1fr 1fr;
+    }
+  }
+
+  .brand-name {
+    font-size: var(--sl-text-lg);
+    font-weight: 800;
+    color: var(--sl-color-white);
+    text-decoration: none;
+    letter-spacing: -0.03em;
+    background: linear-gradient(135deg, var(--sl-color-white) 50%, var(--sl-color-accent-high) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    transition: opacity 0.2s;
+  }
+  .brand-name:hover {
+    opacity: 0.85;
+  }
+
+  .brand-tagline {
+    margin-top: 0.75rem;
+    font-size: var(--sl-text-xs);
+    color: var(--sl-color-gray-3);
+    line-height: 1.6;
+    max-width: 26ch;
+  }
+
+  .link-col {
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+  }
+
+  .col-title {
+    font-size: var(--sl-text-xs);
+    font-weight: 700;
+    color: var(--sl-color-white);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-bottom: 0.5rem;
+    opacity: 0.9;
+  }
+
+  .link-col a {
+    font-size: var(--sl-text-sm);
+    color: var(--sl-color-gray-3);
+    text-decoration: none;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+  }
+
+  .link-col a:hover {
+    color: var(--sl-color-text-accent);
+    transform: translateX(4px);
+  }
+
+  .brand-footer-bottom {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-top: 3rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    font-size: var(--sl-text-xs);
+    color: var(--sl-color-gray-4);
+  }
+
+  .text-disabled {
+    font-size: var(--sl-text-sm);
+    color: var(--sl-color-gray-4);
+    cursor: default;
+  }
+
+  .brand-security-note {
+    font-family: var(--sl-font-mono);
+    color: var(--sl-color-gray-4);
+  }
+</style>

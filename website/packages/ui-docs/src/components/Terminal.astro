@@ -1,0 +1,101 @@
+---
+import { Code } from "@astrojs/starlight/components";
+
+interface Props {
+	title?: string;
+}
+
+const { title = "Terminal" } = Astro.props;
+
+const html = await Astro.slots.render("default");
+const rawText = html
+	.replace(/<br\s*\/?>/gi, "\n")
+	.replace(/<\/p>/gi, "\n")
+	.replace(/<\/div>/gi, "\n")
+	.replace(/<[^>]*>/g, "")
+	.replace(/&lt;/g, "<")
+	.replace(/&gt;/g, ">")
+	.replace(/&amp;/g, "&")
+	.replace(/&quot;/g, '"')
+	.replace(/&#39;/g, "'")
+	.trim();
+---
+
+<div class="terminal-container premium-card sl-my-6">
+  <div class="terminal-header">
+    <div class="terminal-dots">
+      <span></span><span></span><span></span>
+    </div>
+    <span class="terminal-title">{title}</span>
+    <div class="terminal-placeholder"></div>
+  </div>
+  <div class="terminal-body sl-p-4">
+    <Code code={rawText} lang="bash" frame="none" />
+  </div>
+</div>
+
+<style>
+  .terminal-container {
+    /* Inherits .premium-card styles */
+    overflow: hidden;
+  }
+
+  .terminal-header {
+    background: color-mix(in srgb, var(--sl-color-gray-6) 50%, transparent);
+    height: 2.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 1rem;
+    border-bottom: 1px solid var(--sl-color-gray-5);
+  }
+
+  .terminal-dots {
+    display: flex;
+    gap: 0.5rem;
+    width: 46px;
+  }
+
+  .terminal-dots span {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+
+  .terminal-dots span:nth-child(1) { background: #ff5f56; }
+  .terminal-dots span:nth-child(2) { background: #ffbd2e; }
+  .terminal-dots span:nth-child(3) { background: #27c93f; }
+
+  .terminal-title {
+    font-family: var(--sl-font-mono);
+    font-size: 0.75rem;
+    color: var(--sl-color-gray-3);
+  }
+
+  .terminal-placeholder {
+    width: 46px;
+  }
+
+  .terminal-body {
+    padding: 0 !important;
+  }
+
+  /* Style inner expressive-code element to be seamless */
+  .terminal-body :global(.expressive-code) {
+    margin: 0 !important;
+  }
+
+  .terminal-body :global(.expressive-code .frame) {
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    margin: 0 !important;
+  }
+
+  .terminal-body :global(.expressive-code pre) {
+    background: transparent !important;
+    border: none !important;
+    margin: 0 !important;
+  }
+</style>
+

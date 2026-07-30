@@ -1,0 +1,214 @@
+---
+title: "RPC Reference"
+description: "QQL gateway RPC reference — Exec, ExecBatch, Explain, Health, and Convert endpoints with request/response shapes."
+sidebar:
+  order: 3
+---
+
+The QQL gateway exposes five RPCs defined in `proto/qql.proto`. All RPCs accept JSON over HTTP POST (Connect RPC protocol).
+
+---
+
+## Exec
+
+Parse and execute a single QQL statement.
+
+{% terminal title="Endpoint" %}
+POST /qql.QQL/Exec
+{% /terminal %}
+
+**Request:**
+
+```json
+{
+  "query": "QUERY \"search\" FROM docs LIMIT 5 USING HYBRID"
+}
+```
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "operation": "QUERY",
+  "message": "Found 5 results",
+  "data": "<base64-encoded JSON bytes>"
+}
+```
+
+**curl:**
+
+{% terminal title="Exec curl" %}
+curl -X POST http://localhost:50051/qql.QQL/Exec \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <jwt>" \
+  -d '{"query": "QUERY \"search\" FROM docs LIMIT 5 USING HYBRID"}'
+{% /terminal %}
+
+---
+
+## ExecBatch
+
+Execute multiple statements in one request. Supports mixed statement types.
+
+{% terminal title="Endpoint" %}
+POST /qql.QQL/ExecBatch
+{% /terminal %}
+
+**Request:**
+
+```json
+{
+  "queries": [
+    {"query": "QUERY \"a\" FROM docs LIMIT 5"},
+    {"query": "QUERY \"b\" FROM docs LIMIT 5"}
+  ],
+  "stop_on_error": true
+}
+```
+
+**Response:**
+
+```json
+{
+  "results": [
+    {"ok": true, "operation": "QUERY", "message": "Found 3 results", "data": "..."},
+    {"ok": true, "operation": "QUERY", "message": "Found 1 result", "data": "..."}
+  ]
+}
+```
+
+{% aside type="tip" title="Auto-batch Detection" %}
+When all queries are pure `QUERY` statements, the gateway routes them through Qdrant's native `QueryBatch` API automatically (single round-trip).
+{% /aside %}
+
+**curl:**
+
+{% terminal title="ExecBatch curl" %}
+curl -X POST http://localhost:50051/qql.QQL/ExecBatch \
+  -H "Content-Type: application/json" \
+  -d '{
+    "queries": [
+      {"query": "QUERY \"a\" FROM docs LIMIT 5"},
+      {"query": "QUERY \"b\" FROM docs LIMIT 5"}
+    ],
+    "stop_on_error": true
+  }'
+{% /terminal %}
+
+---
+
+## Explain
+
+Return the execution plan without running the query.
+
+{% terminal title="Endpoint" %}
+POST /qql.QQL/Explain
+{% /terminal %}
+
+**Request:**
+
+```json
+{
+  "query": "QUERY \"search\" FROM docs LIMIT 5 USING HYBRID RERANK",
+  "json": false
+}
+```
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "query": "QUERY \"search\" FROM docs LIMIT 5 USING HYBRID RERANK",
+  "plan": "Statement: QUERY\nCollection: docs\nUSING: HYBRID\nRERANK: true\nLIMIT: 5\n..."
+}
+```
+
+Set `"json": true` for a structured JSON plan.
+
+{% aside type="note" title="No Auth Required" %}
+The `Explain` endpoint skips JWT authentication — it does not execute against Qdrant and poses no data risk.
+{% /aside %}
+
+**curl:**
+
+{% terminal title="Explain curl" %}
+curl -X POST http://localhost:50051/qql.QQL/Explain \
+  -H "Content-Type: application/json" \
+  -d '{"query": "QUERY \"search\" FROM docs LIMIT 5 USING HYBRID RERANK"}'
+{% /terminal %}
+
+---
+
+## Health
+
+Check gateway and Qdrant connectivity.
+
+{% terminal title="Endpoint" %}
+GET /health or POST /qql.QQL/Health
+{% /terminal %}
+
+**Response:**
+
+```json
+{
+  "version": "X.Y.Z",
+  "qdrant_connected": true,
+  "qdrant_status": "ok — 3 collections"
+}
+```
+
+**curl:**
+
+{% terminal title="Health check" %}
+curl http://localhost:50051/health
+{% /terminal %}
+
+---
+
+## Convert
+
+Translate Qdrant REST API JSON to QQL statements.
+
+{% terminal title="Endpoint" %}
+POST /qql.QQL/Convert
+{% /terminal %}
+
+**Request:**
+
+```json
+{
+  "json_payload": "{\"points\":[{\"id\":1,\"payload\":{\"text\":\"hello\"}}]}"
+}
+```
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "statements": [
+    "INSERT INTO <collection> VALUES {'id': 1, 'text': 'hello'}"
+  ],
+  "error": ""
+}
+```
+
+{% aside type="note" title="No Auth Required" %}
+The `Convert` endpoint also skips JWT authentication.
+{% /aside %}
+
+**curl:**
+
+{% terminal title="Convert curl" %}
+curl -X POST http://localhost:50051/qql.QQL/Convert \
+  -H "Content-Type: application/json" \
+  -d '{"json_payload": "{\"points\":[{\"id\":1,\"payload\":{\"text\":\"hello\"}}]}"}'
+{% /terminal %}
+
+---
+
+## Proto Definition
+
+See the [full protobuf reference](/docs/gateway/proto-reference) for the complete service and message definitions.

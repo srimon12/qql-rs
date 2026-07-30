@@ -1,0 +1,60 @@
+---
+title: "What is QQL?"
+description: "QQL (Qdrant Query Language) is a SQL-like interface for operating Qdrant vector databases — a CLI, Go SDK, and Connect RPC gateway in a single binary."
+sidebar:
+  order: 1
+---
+
+QQL (Qdrant Query Language) is a compact operational interface for Qdrant built in Go.
+
+It gives developers, CI pipelines, and AI agents **one deterministic command surface** for:
+
+- **Collection management** — CREATE, ALTER, DROP, SHOW, payload indexes
+- **Vector search** — dense, sparse, hybrid, multivector (ColBERT/ColPali)
+- **Multi-stage retrieval** — CTE prefetch DAGs with per-stage filters and thresholds
+- **Score boosting** — mathematical expression algebra executed inside Qdrant
+- **Data operations** — INSERT, SELECT, SCROLL, UPDATE, DELETE
+- **Automation** — structured JSON output, script execution, collection dumps
+- **REST migration** — convert Qdrant REST API JSON to QQL
+
+## When to use QQL
+
+| Situation | Tool |
+|---|---|
+| Building application logic | Qdrant SDK (Go, Python, TypeScript) |
+| Repeatable CLI commands | `qql-go` CLI |
+| CI pipelines, smoke tests | `qql-go exec --quiet --json` |
+| AI agent retrieval operations | `qql-go` skill or gateway |
+| Embedding QQL in a Go service | `pkg/qql` Go library |
+| Multi-language / polyglot setup | QQL Gateway (Connect RPC) |
+| Migrating from Qdrant REST API | `qql-go convert` |
+
+## Components
+
+{% grid style="display:grid; grid-template-columns:repeat(3, 1fr); gap:1rem;" %}
+
+{% glassCard title="CLI" %}
+{% techBadge name="qql-go" variant="cyan" /%}
+
+A single statically-compiled binary that handles all operations. Stores connection config in `~/.qql/config.json`. Supports cloud, local, and external inference modes.
+{% /glassCard %}
+
+{% glassCard title="Go SDK" %}
+{% techBadge name="pkg/qql" variant="purple" /%}
+
+A public Go library for embedding QQL execution in your own services. Accepts the `QdrantClient` interface so you can mock it for tests.
+{% /glassCard %}
+
+{% glassCard title="Gateway" %}
+{% techBadge name="qql-go serve" variant="orange" /%}
+
+A Connect RPC gateway (gRPC + gRPC-Web + HTTP/1.1) that sits in front of Qdrant. Adds JWT authentication, YAML policy enforcement, AST-level tenant filter injection, rate limiting, query templates, and structured audit logging.
+{% /glassCard %}
+
+{% /grid %}
+
+## Next Steps
+
+- [Installation](/docs/getting-started/installation) — install the binary
+- [Quickstart](/docs/getting-started/quickstart) — connect, create, insert, query in 60 seconds
+- [Syntax Reference](/docs/reference/syntax) — complete QQL statement reference

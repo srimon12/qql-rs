@@ -1,0 +1,59 @@
+---
+title: "0.1.3 Release Notes"
+description: "qql-go 0.1.3 release notes."
+sidebar:
+  order: 99
+---
+
+Release date: 2026-04-29
+
+Release tag target: `9b3b48bc7f6044bd230380fc943439981707933b`
+
+## Summary
+
+This release adds collection quantization for `CREATE COLLECTION`, validates scalar quantile boundaries in the parser, and aligns the public docs and skill references with the current Go behavior.
+
+## Highlights
+
+- **Create-time quantization** — `CREATE COLLECTION` now supports `QUANTIZE SCALAR`, `QUANTIZE BINARY`, and `QUANTIZE PRODUCT`.
+- **Scalar quantile endpoints** — `QUANTILE 0` and `QUANTILE 1` are accepted for scalar quantization.
+- **Scalar quantile validation** — out-of-range values such as `QUANTILE 1.5` now fail in the parser before reaching Qdrant.
+- **`ALWAYS RAM` support** — available for scalar, binary, and product quantization clauses.
+- **Docs and skill alignment** — README, compatibility notes, and QQL skill references now describe quantization and insert-time auto-create behavior accurately.
+
+## Supported syntax added in this release
+
+{% terminal title="New Syntax in 0.1.3" %}
+CREATE COLLECTION <name> QUANTIZE SCALAR
+CREATE COLLECTION <name> QUANTIZE SCALAR QUANTILE <0.0-1.0>
+CREATE COLLECTION <name> QUANTIZE SCALAR QUANTILE <0.0-1.0> ALWAYS RAM
+CREATE COLLECTION <name> QUANTIZE BINARY
+CREATE COLLECTION <name> QUANTIZE BINARY ALWAYS RAM
+CREATE COLLECTION <name> QUANTIZE PRODUCT
+CREATE COLLECTION <name> QUANTIZE PRODUCT ALWAYS RAM
+{% /terminal %}
+
+## Commits
+
+| Hash | Message |
+|---|---|
+| `9b3b48bc7f6044bd230380fc943439981707933b` | feat: add quantization support for collection creation |
+| `390e7d6fc57f2036057e7e8280b10563c1d01961` | readme update |
+| `43bcdc5f68fe7eb311f22c069eb98245ffc7d7e6` | docs: enhance README with clearer descriptions and updated installation instructions |
+| `aa2df109859862d441eb8bf509294ffa52aaf73e` | docs: update QQL skill documentation with new commands and script file format |
+
+## Notes
+
+{% aside type="note" title="Notes" %}
+- Product quantization is exposed as a fixed `x4` compression option in this release.
+- Collection-level HNSW configuration is still not exposed through `CREATE COLLECTION`.
+- Query-time tuning remains separate: use `EXACT` or `WITH { hnsw_ef: <n>, exact: true|false, acorn: true|false }`.
+{% /aside %}
+
+## Full changelog
+
+See [CHANGELOG.md](../../CHANGELOG.md).
+
+---
+
+> For full commit list and details see the [original release notes](https://github.com/srimon12/qql-go/blob/main/docs/releases/0.1.3.md).

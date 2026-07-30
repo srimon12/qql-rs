@@ -1,0 +1,67 @@
+---
+title: "Filtering"
+description: "QQL WHERE clause — practical patterns, per-prefetch filters, and payload indexes."
+sidebar:
+  order: 5
+---
+
+The `WHERE` clause filters results in `QUERY`, `SCROLL`, `UPDATE`, and `DELETE` statements. For the complete operator reference (comparison, range, set membership, null checks, text matching, logical operators), see the [Filter Reference](/docs/reference/filters).
+
+## Complex Filter Example
+
+```sql
+QUERY 'incident response' FROM runbooks LIMIT 10
+  WHERE (
+    (severity >= 3 AND status = 'open')
+    OR (severity >= 5 AND status = 'acknowledged')
+  )
+  AND assigned_team IS NOT NULL
+  AND tags MATCH ANY 'kubernetes' 'docker' 'container'
+  AND created_at BETWEEN '2024-01-01' AND '2025-12-31'
+  AND NOT (category = 'deprecated')
+```
+
+## Per-Prefetch Filters
+
+Apply filters to individual CTE prefetch references at the DAG level:
+
+```sql
+WITH
+  dense AS (QUERY 'search' USING dense LIMIT 200),
+  sparse AS (QUERY 'search' USING sparse LIMIT 300)
+QUERY 'search' FROM docs LIMIT 10
+  PREFETCH (
+    dense WHERE category = 'tech' SCORE THRESHOLD 0.6,
+    sparse WHERE priority = 'high' SCORE THRESHOLD 0.3
+  )
+  FUSION RRF
+```
+
+## Payload Indexes
+
+Always create indexes before filtering. Without an index, Qdrant performs a full collection scan.
+
+```sql
+CREATE INDEX ON docs FOR status TYPE keyword
+CREATE INDEX ON docs FOR year TYPE integer
+CREATE INDEX ON docs FOR score TYPE float
+CREATE INDEX ON docs FOR published TYPE bool
+CREATE INDEX ON docs FOR doc_id TYPE uuid
+CREATE INDEX ON docs FOR created_at TYPE datetime
+CREATE INDEX ON docs FOR location TYPE geo
+CREATE INDEX ON docs FOR content TYPE text WITH (
+  tokenizer = 'word',
+  min_token_len = 2,
+  max_token_len = 20,
+  lowercase = true,
+  phrase_matching = true,
+  stopwords = ['en']
+)
+
+-- Tenant isolation
+CREATE INDEX ON docs FOR org_id TYPE keyword WITH (is_tenant = true)
+```
+
+{% aside type="tip" title="Multi-Tenant Performance" %}
+Using `is_tenant = true` enables Qdrant's tenant-aware HNSW partitioning, which improves filtered search performance significantly for multi-tenant collections.
+{% /aside %}

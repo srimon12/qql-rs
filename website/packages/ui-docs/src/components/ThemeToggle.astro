@@ -1,0 +1,107 @@
+---
+---
+<custom-theme-toggle>
+  <button id="theme-toggle-btn" aria-label="Toggle theme" class="theme-toggle">
+    <!-- Sun Icon (Lucide) -->
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="sun-icon">
+      <circle cx="12" cy="12" r="4"></circle>
+      <path d="M12 2v2"></path>
+      <path d="M12 20v2"></path>
+      <path d="m4.93 4.93 1.41 1.41"></path>
+      <path d="m17.66 17.66 1.41 1.41"></path>
+      <path d="M2 12h2"></path>
+      <path d="M20 12h2"></path>
+      <path d="m6.34 17.66-1.41 1.41"></path>
+      <path d="m19.07 4.93-1.41 1.41"></path>
+    </svg>
+    
+    <!-- Moon Icon (Lucide) -->
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="moon-icon">
+      <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path>
+    </svg>
+  </button>
+</custom-theme-toggle>
+
+<style>
+  .theme-toggle {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: 0.5rem;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--sl-color-gray-3);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+  }
+
+  .theme-toggle:hover {
+    color: var(--sl-color-white);
+    background: color-mix(in srgb, var(--sl-color-gray-5) 30%, transparent);
+    border-color: color-mix(in srgb, var(--sl-color-gray-4) 40%, transparent);
+  }
+
+  .sun-icon, .moon-icon {
+    position: absolute;
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
+  }
+
+  /* Light Theme State */
+  :global(:root[data-theme="light"]) .sun-icon {
+    transform: rotate(0) scale(1);
+    opacity: 1;
+  }
+  :global(:root[data-theme="light"]) .moon-icon {
+    transform: rotate(90deg) scale(0);
+    opacity: 0;
+  }
+
+  /* Dark Theme State */
+  :global(:root[data-theme="dark"]) .sun-icon {
+    transform: rotate(-90deg) scale(0);
+    opacity: 0;
+  }
+  :global(:root[data-theme="dark"]) .moon-icon {
+    transform: rotate(0) scale(1);
+    opacity: 1;
+  }
+</style>
+
+<script>
+  class CustomThemeToggle extends HTMLElement {
+    constructor() {
+      super();
+      const btn = this.querySelector('button');
+      
+      // Update logic directly interfacing with Starlight's local storage and dataset
+      const toggleTheme = () => {
+        const isDark = document.documentElement.dataset.theme === 'dark';
+        const newTheme = isDark ? 'light' : 'dark';
+        
+        // Update document
+        document.documentElement.dataset.theme = newTheme;
+        
+        // Update Starlight localStorage
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem('starlight-theme', newTheme);
+          // Also set the veristamp theme to keep web app in sync
+          localStorage.setItem('theme', newTheme);
+          localStorage.setItem('veristamp-theme', newTheme);
+        }
+        
+        // Sync Starlight native pickers (if any exist)
+        if (window.StarlightThemeProvider) {
+          window.StarlightThemeProvider.updatePickers(newTheme);
+        }
+      };
+
+      btn?.addEventListener('click', toggleTheme);
+    }
+  }
+
+  customElements.define('custom-theme-toggle', CustomThemeToggle);
+</script>

@@ -1,0 +1,137 @@
+---
+title: "AST Injection"
+description: "How the QQL gateway rewrites queries at the AST level for tenant isolation, LIMIT capping, and collection scoping."
+sidebar:
+  order: 6
+---
+
+{% glassCard title="AST-Level Query Rewriting" %}
+
+{% techBadge name="Tenant Isolation" variant="cyan" /%} {% techBadge name="LIMIT Capping" variant="purple" /%}
+
+This is the key differentiator between the QQL gateway and a generic HTTP reverse proxy.
+
+Instead of filtering results after execution, the gateway **parses the QQL into an AST and rewrites it before execution**. The rewritten query is what reaches Qdrant — not the original.
+
+{% /glassCard %}
+
+## How It Works
+
+**User sends:**
+
+```sql
+QUERY 'company' FROM docs LIMIT 500
+```
+
+**Policy rule:**
+
+```yaml
+- match:
+    claims:
+      role: reader
+  allow: [QUERY]
+  inject:
+    where:
+      field: tenant_id
+      from_claim: org_id
+      op: "="
+  limits:
+    max_limit: 50
+```
+
+**Alice's JWT claim:** `org_id = "acme-corp"`
+
+**Gateway rewrites to:**
+
+```sql
+QUERY 'company' FROM docs LIMIT 50 WHERE tenant_id = 'acme-corp'
+```
+
+- The tenant filter is injected at the **AST level** — Alice never writes it, can't bypass it
+- Qdrant **only scores documents matching the filter** — not a post-filter
+- The LIMIT is capped at 50 by policy
+
+## Filter Merging
+
+If the user already has a `WHERE` clause, the injected filter is **AND'd** with it:
+
+**User sends:**
+
+```sql
+QUERY 'urgent' FROM docs LIMIT 20 WHERE priority = 'high'
+```
+
+**Gateway rewrites to:**
+
+```sql
+QUERY 'urgent' FROM docs LIMIT 20 WHERE priority = 'high' AND tenant_id = 'acme-corp'
+```
+
+## CTE Recursion
+
+For multi-stage queries with CTEs, injection is **recursive** — the filter is applied to every CTE stage:
+
+**User sends:**
+
+```sql
+WITH
+  dense AS (QUERY 'search' USING dense LIMIT 200),
+  sparse AS (QUERY 'search' USING sparse LIMIT 300)
+QUERY 'search' FROM docs LIMIT 20
+  PREFETCH (dense, sparse)
+  FUSION RRF
+```
+
+**Gateway rewrites to:**
+
+```sql
+WITH
+  dense AS (QUERY 'search' USING dense LIMIT 200 WHERE tenant_id = 'acme-corp'),
+  sparse AS (QUERY 'search' USING sparse LIMIT 300 WHERE tenant_id = 'acme-corp')
+QUERY 'search' FROM docs LIMIT 20 WHERE tenant_id = 'acme-corp'
+  PREFETCH (dense, sparse)
+  FUSION RRF
+```
+
+{% aside type="tip" title="CTE Safety" %}
+This prevents cross-tenant data leaking through prefetch subqueries.
+{% /aside %}
+
+## Multi-Filter Injection
+
+When policy uses `inject.filters`, all filters are AND'd together and injected:
+
+```yaml
+inject:
+  filters:
+    - field: org_id
+      from_claim: org_id
+      op: "="
+    - field: access
+      value: "confidential"
+      op: "!="
+```
+
+**Injection result:**
+
+```sql
+WHERE ... AND org_id = 'acme-corp' AND access != 'confidential'
+```
+
+## Collection Scoping
+
+If the user tries to access a collection not in the policy allowlist:
+
+```yaml
+collections: ["tenant_*"]
+```
+
+A query against `shared_docs` (not matching `tenant_*`) is rejected with `permission denied` before reaching Qdrant.
+
+## Injector File Map
+
+| File | Purpose |
+|---|---|
+| `server/inject.go` | `ASTInjector` — tenant filter injection, limit cap, collection scoping, CTE recursion |
+| `server/policy.go` | Rule matching, `EvaluatedPolicy` |
+| `server/handler.go` | Calls `ASTInjector` after policy evaluation, before execution |

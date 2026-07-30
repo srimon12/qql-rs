@@ -1,0 +1,129 @@
+---
+title: "Agent & CI Mode"
+description: "Use QQL in AI agents, CI pipelines, and automation scripts with structured JSON output, EXPLAIN plans, and the --quiet flag."
+sidebar:
+  order: 12
+---
+
+QQL is designed for scripted and agent-driven use. Every command supports structured JSON output for reliable parsing.
+
+## Structured JSON Output
+
+Add `--quiet --json` to any command to suppress human-readable formatting and output raw JSON:
+
+{% terminal title="JSON output for any command" %}
+# Execute a query
+qql-go exec --quiet --json "QUERY 'search' FROM docs LIMIT 5 USING HYBRID"
+
+# Show collections
+qql-go exec --quiet --json "SHOW COLLECTIONS"
+
+# Collection info
+qql-go exec --quiet --json "SHOW COLLECTION docs"
+
+# Explain plan (structured JSON)
+qql-go explain --quiet --json "QUERY 'search' FROM docs LIMIT 5 USING HYBRID RERANK"
+
+# Run a script
+qql-go execute --quiet --json workflow.qql
+
+# Dump a collection
+qql-go dump --quiet --json docs backup.qql
+
+# Doctor (connection/config status)
+qql-go doctor --quiet --json
+
+# Connect (with status check)
+qql-go connect --quiet --json --url http://localhost:6334
+{% /terminal %}
+
+## Response Shape
+
+All `exec` and `execute` responses return:
+
+```json
+{
+  "ok": true,
+  "operation": "QUERY",
+  "message": "Found 5 results",
+  "data": [...]
+}
+```
+
+For `ExecBatch`, each result in the array has the same shape.
+
+## EXPLAIN — Dry Run
+
+Use `explain` to validate a query without executing it against Qdrant:
+
+{% terminal title="EXPLAIN a query" %}
+qql-go explain "QUERY 'emergency care' FROM docs LIMIT 10 USING HYBRID RERANK"
+{% /terminal %}
+
+The explain output shows all parsed fields: `USING`, `MODEL`, `WITH` params, `PAYLOAD`, `VECTORS`, `WHERE`, `OFFSET`, `SCORE THRESHOLD`, `LOOKUP FROM`, `GROUP BY/SIZE`, `WITH LOOKUP`, `RERANK`, `STRATEGY`, `RECOMMEND IDs`, `CONTEXT pairs`, `DISCOVER target`, `CTEs`, `PREFETCH refs`, `FUSION`, and `BOOST formula`.
+
+{% terminal title="EXPLAIN with JSON output" %}
+qql-go explain --json "QUERY 'emergency' FROM docs LIMIT 5 USING HYBRID"
+{% /terminal %}
+
+## Agent Output Contract
+
+For LLM agents and AI coding assistants:
+
+| Command | Output format |
+|---|---|
+| `exec --quiet --json` | JSON with `ok`, `operation`, `message`, `data` |
+| `explain --quiet --json` | JSON with `ok`, `query`, `plan` |
+| `execute --quiet --json` | JSON array of per-statement results |
+| `doctor --quiet --json` | JSON with connection and config status |
+| `dump --quiet --json` | JSON with dump status |
+| `convert --quiet` | Raw QQL text (no decoration) |
+
+## CI Example
+
+```yaml
+# GitHub Actions
+- name: Validate retrieval quality
+  run: |
+    qql-go connect \
+      --url ${{ secrets.QDRANT_URL }} \
+      --secret ${{ secrets.QDRANT_SECRET }}
+    qql-go execute --stop-on-error --quiet --json examples/release-validation/validate.qql
+```
+
+## Gateway API for Agents
+
+Agents can hit the gateway's HTTP JSON endpoint directly without the CLI:
+
+{% terminal title="Gateway Exec endpoint" %}
+curl -X POST http://localhost:50051/qql.QQL/Exec \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <jwt>" \
+  -d '{"query": "QUERY \"search\" FROM docs LIMIT 5 USING HYBRID"}'
+{% /terminal %}
+
+Or use the **query template** feature to let agents call named operations without writing raw QQL:
+
+```yaml
+# policies.yaml
+templates:
+  search_docs:
+    description: "Search documents"
+    query: "QUERY '{query}' FROM docs LIMIT {limit} USING HYBRID"
+```
+
+{% terminal title="Gateway template endpoint" %}
+curl -X POST http://localhost:50051/qql.QQL/Exec \
+  -H "Content-Type: application/json" \
+  -d '{"query": "TEMPLATE search_docs query=\"vector database\" limit=10"}'
+{% /terminal %}
+
+## Skills Package
+
+QQL ships a skill package for AI coding assistants (`skills/qql-skill`). It provides a structured intent-to-QQL mapping that agents can use to generate correct QQL from natural language retrieval intent.
+
+Install with:
+
+{% terminal title="Install QQL skill package" %}
+npx skills add . --skill qql-skill --copy
+{% /terminal %}

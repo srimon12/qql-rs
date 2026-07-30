@@ -1,0 +1,45 @@
+---
+title: "Rate Limiting"
+description: "Per-user token bucket rate limiting in the QQL gateway."
+sidebar:
+  order: 8
+---
+
+The gateway uses a per-user token bucket rate limiter. Each authenticated user (JWT `sub` claim) gets its own bucket.
+
+## Enable
+
+{% terminal title="Enable rate limiting" %}
+qql-go serve \
+  --rate-limit 100 \          # max requests per second per user
+  --rate-limit-capacity 20    # max burst size per user
+{% /terminal %}
+
+| Flag | Default | Description |
+|---|---|---|
+| `--rate-limit` | `0` | Requests per second per user. `0` = unlimited. |
+| `--rate-limit-capacity` | `20` | Max burst size — tokens that can accumulate |
+
+## Behavior
+
+When a user's bucket is empty:
+- Request gets `429 Resource Exhausted`
+- Response includes `Retry-After` header (seconds until next token available)
+
+When a user's bucket has tokens:
+- Request proceeds normally
+- One token is consumed
+
+Tokens refill at the configured rate (e.g., `--rate-limit 100` = 100 tokens/second).
+
+## Burst
+
+`--rate-limit-capacity` controls burst tolerance. A user with `--rate-limit 10 --rate-limit-capacity 50` can send up to 50 requests instantly before rate limiting kicks in, then sustains 10/second.
+
+## Cleanup
+
+Stale buckets (no activity for 5 minutes) are automatically cleaned up to prevent memory leaks in long-running gateways.
+
+## Unauthenticated Requests
+
+If `--jwks-url` is not set, the rate limiter uses the client IP address as the bucket key.
