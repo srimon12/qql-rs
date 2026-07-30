@@ -4,12 +4,15 @@ node_modules/**
 src/**
 scripts/**
 test/**
+dist/**
 .gitignore
 tsconfig.json
 *.vsix
 out/*.d.ts
 out/*.d.ts.map
 out/*.js.map
+out/*.wasm
+wasm/.gitignore
 wasm/LICENSE
 wasm/README.md
 wasm/package.json

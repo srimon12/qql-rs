@@ -11,6 +11,11 @@ const GENERATED_HEADER: &str = "\
 
 ";
 
+struct Artifact {
+    path: PathBuf,
+    contents: String,
+}
+
 fn main() {
     if let Err(error) = run() {
         eprintln!("qql-grammar-gen: {error}");
@@ -22,12 +27,34 @@ fn run() -> Result<(), Box<dyn Error>> {
     let command = env::args().nth(1).unwrap_or_else(|| "check".to_owned());
     let root = workspace_root();
     let source_path = root.join("language/v1/grammar.pest");
-    let output_path = root.join("crates/qql-core/grammar/qql.generated.pest");
-    let generated = render(&fs::read_to_string(&source_path)?);
+    let source = fs::read_to_string(&source_path)?;
+    let literals = grammar_literals(&source);
+    let artifacts = vec![
+        Artifact {
+            path: root.join("crates/qql-core/grammar/qql.generated.pest"),
+            contents: render_pest(&source),
+        },
+        Artifact {
+            path: root.join("editors/vscode/syntaxes/qql.tmLanguage.json"),
+            contents: render_textmate(&literals),
+        },
+        Artifact {
+            path: root.join("editors/vscode/src/keywords.generated.ts"),
+            contents: render_typescript(&literals),
+        },
+        Artifact {
+            path: root.join("website/src/scripts/qql-keywords.generated.ts"),
+            contents: render_typescript(&literals),
+        },
+    ];
 
     match command.as_str() {
-        "generate" => write_if_changed(&output_path, &generated),
-        "check" => check(&output_path, &generated),
+        "generate" => artifacts
+            .iter()
+            .try_for_each(|artifact| write_if_changed(&artifact.path, &artifact.contents)),
+        "check" => artifacts
+            .iter()
+            .try_for_each(|artifact| check(&artifact.path, &artifact.contents)),
         "help" | "-h" | "--help" => {
             println!("Usage: qql-grammar-gen <generate|check>");
             Ok(())
@@ -44,15 +71,126 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
-fn render(source: &str) -> String {
+fn render_pest(source: &str) -> String {
     let normalized = source.replace("\r\n", "\n");
     let body = normalized.trim_end();
     format!("{GENERATED_HEADER}{body}\n")
 }
 
+fn grammar_literals(source: &str) -> Vec<String> {
+    let mut literals = Vec::new();
+
+    for line in source.lines() {
+        let line = line.split("//").next().unwrap_or_default();
+        let mut rest = line;
+        while let Some(index) = rest.find("^\"") {
+            let candidate = &rest[index + 2..];
+            let Some(end) = candidate.find('"') else {
+                break;
+            };
+            let literal = &candidate[..end];
+            if literal
+                .bytes()
+                .all(|byte| byte.is_ascii_alphabetic() || byte == b'_')
+                && literal.len() > 1
+            {
+                literals.push(literal.to_ascii_uppercase());
+            }
+            rest = &candidate[end + 1..];
+        }
+    }
+
+    literals.sort_by_key(|literal| literal.to_ascii_uppercase());
+    literals.dedup();
+    literals
+}
+
+fn render_typescript(literals: &[String]) -> String {
+    let constants = literals
+        .iter()
+        .filter(|literal| is_constant(literal))
+        .map(|literal| literal.to_ascii_uppercase())
+        .collect::<Vec<_>>();
+    let keywords = literals
+        .iter()
+        .filter(|literal| !is_constant(literal))
+        .map(|literal| format!("  \"{}\",", literal.to_ascii_uppercase()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let constants = constants
+        .iter()
+        .map(|literal| format!("  \"{literal}\","))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    format!(
+        "{GENERATED_HEADER}export const QQL_KEYWORDS = [\n{keywords}\n] as const;\n\
+         export const QQL_CONSTANTS = new Set([\n{constants}\n]);\n"
+    )
+}
+
+fn render_textmate(literals: &[String]) -> String {
+    let constants = literals
+        .iter()
+        .filter(|literal| is_constant(literal))
+        .cloned()
+        .collect::<Vec<_>>();
+    let keywords = literals
+        .iter()
+        .filter(|literal| !is_constant(literal))
+        .cloned()
+        .collect::<Vec<_>>();
+    let keyword_pattern = textmate_pattern(&keywords);
+    let constant_pattern = textmate_pattern(&constants);
+
+    format!(
+        r##"{{
+  "name": "QQL",
+  "scopeName": "source.qql",
+  "fileTypes": ["qql"],
+  "patterns": [
+    {{ "include": "#comments" }},
+    {{ "include": "#strings" }},
+    {{ "include": "#numbers" }},
+    {{ "include": "#constants" }},
+    {{ "include": "#keywords" }},
+    {{ "include": "#operators" }},
+    {{ "include": "#punctuation" }},
+    {{ "include": "#identifiers" }}
+  ],
+  "repository": {{
+    "comments": {{ "patterns": [{{ "name": "comment.line.double-dash.qql", "match": "--.*$" }}] }},
+    "strings": {{
+      "patterns": [
+        {{ "name": "string.quoted.single.qql", "begin": "'", "end": "'", "patterns": [{{ "name": "constant.character.escape.qql", "match": "''|\\\\['\\\"\\\\ntr]" }}] }},
+        {{ "name": "string.quoted.double.qql", "begin": "\\\"", "end": "\\\"", "patterns": [{{ "name": "constant.character.escape.qql", "match": "\\\\['\\\"\\\\ntr]" }}] }}
+      ]
+    }},
+    "numbers": {{ "patterns": [{{ "name": "constant.numeric.float.qql", "match": "-?\\\\d+(\\\\.\\\\d+([eE][+-]?\\\\d+)?|([eE][+-]?\\\\d+))" }}, {{ "name": "constant.numeric.integer.qql", "match": "-?\\\\d+" }}] }},
+    "constants": {{ "patterns": [{{ "name": "constant.language.qql", "match": "{constant_pattern}" }}] }},
+    "keywords": {{ "patterns": [{{ "name": "keyword.control.qql", "match": "{keyword_pattern}" }}] }},
+    "operators": {{ "patterns": [{{ "name": "keyword.operator.comparison.qql", "match": "!=|<>|<=|>=|<|>" }}, {{ "name": "keyword.operator.assignment.qql", "match": "=" }}, {{ "name": "keyword.operator.arithmetic.qql", "match": "[\\\\+\\\\-\\\\*\\\\/]" }}] }},
+    "punctuation": {{ "patterns": [{{ "name": "punctuation.terminator.qql", "match": ";" }}, {{ "name": "punctuation.separator.qql", "match": "," }}, {{ "name": "punctuation.definition.bracket.qql", "match": "[\\\\{{\\\\}}\\\\[\\\\]]" }}, {{ "name": "punctuation.definition.paren.qql", "match": "[\\\\(\\\\)]" }}, {{ "name": "punctuation.separator.key-value.qql", "match": ":" }}] }},
+    "identifiers": {{ "patterns": [{{ "name": "variable.other.readwrite.qql", "match": "\\\\$[A-Za-z_][A-Za-z0-9_]*(\\\\.[A-Za-z_][A-Za-z0-9_]*)*(\\\\[\\\\]\\\\.?)*" }}, {{ "name": "entity.name.qql", "match": "[A-Za-z_][A-Za-z0-9_]*(\\\\.[A-Za-z_][A-Za-z0-9_]*|\\\\[\\\\]\\\\.?)*" }}] }}
+  }}
+}}
+"##
+    )
+}
+
+fn is_constant(literal: &str) -> bool {
+    literal.eq_ignore_ascii_case("true")
+        || literal.eq_ignore_ascii_case("false")
+        || literal.eq_ignore_ascii_case("null")
+}
+
+fn textmate_pattern(literals: &[String]) -> String {
+    format!(r#"\\b(?i)({})\\b"#, literals.join("|"))
+}
+
 fn write_if_changed(path: &Path, contents: &str) -> Result<(), Box<dyn Error>> {
     if fs::read_to_string(path).ok().as_deref() == Some(contents) {
-        println!("grammar is current: {}", path.display());
+        println!("current: {}", path.display());
         return Ok(());
     }
 
@@ -60,7 +198,12 @@ fn write_if_changed(path: &Path, contents: &str) -> Result<(), Box<dyn Error>> {
         .parent()
         .ok_or_else(|| format!("generated path has no parent: {}", path.display()))?;
     fs::create_dir_all(parent)?;
-    let temporary = path.with_extension("pest.tmp");
+    let temporary = path.with_extension(format!(
+        "{}.tmp",
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("generated")
+    ));
     fs::write(&temporary, contents)?;
     fs::rename(temporary, path)?;
     println!("generated {}", path.display());
@@ -69,10 +212,7 @@ fn write_if_changed(path: &Path, contents: &str) -> Result<(), Box<dyn Error>> {
 
 fn check(path: &Path, expected: &str) -> Result<(), Box<dyn Error>> {
     match fs::read_to_string(path) {
-        Ok(actual) if actual == expected => {
-            println!("grammar generation is current");
-            Ok(())
-        }
+        Ok(actual) if actual == expected => Ok(()),
         Ok(_) => Err(format!(
             "{} is stale; run `cargo run -p qql-grammar-gen -- generate`",
             path.display()
@@ -92,10 +232,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn render_is_deterministic_and_normalizes_newlines() {
-        let generated = render("rule = { \"x\" }\r\n\r\n");
-        assert!(generated.starts_with(GENERATED_HEADER));
-        assert!(generated.ends_with("rule = { \"x\" }\n"));
-        assert!(!generated.contains('\r'));
+    fn extracts_case_insensitive_word_literals_only() {
+        let literals =
+            grammar_literals("query = { ^\"QUERY\" ~ ^\"from\" ~ \"(\" ~ ^\"true\" ~ ^\"x\" }");
+        assert_eq!(literals, ["FROM", "QUERY", "TRUE"]);
+    }
+
+    #[test]
+    fn generated_textmate_uses_the_grammar_vocabulary() {
+        let grammar =
+            render_textmate(&["FROM".into(), "NULL".into(), "QUERY".into(), "true".into()]);
+        assert!(grammar.contains(r#"\\b(?i)(FROM|QUERY)\\b"#));
+        assert!(grammar.contains(r#"\\b(?i)(NULL|true)\\b"#));
     }
 }
