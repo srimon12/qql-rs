@@ -438,89 +438,110 @@ fn executor(
             return Err("gRPC support is disabled in this build".into());
         }
     } else {
-        Box::new(qql::rest::RestQdrant::new(
-            url.to_owned(),
-            std::env::var("QDRANT_API_KEY")
-                .ok()
-                .or_else(|| config.secret.clone()),
-        ))
+        #[cfg(feature = "rest")]
+        {
+            Box::new(qql::rest::RestQdrant::new(
+                url.to_owned(),
+                std::env::var("QDRANT_API_KEY")
+                    .ok()
+                    .or_else(|| config.secret.clone()),
+            ))
+        }
+        #[cfg(not(feature = "rest"))]
+        {
+            return Err(
+                "REST support is disabled in this build; use a gRPC URL (:6334) or rebuild with --features rest"
+                    .into(),
+            );
+        }
     };
 
     let env_url = std::env::var("EMBED_URL").ok();
     let embedder = if let Some(endpoint) = env_url.as_ref().or(config.embedding_endpoint.as_ref()) {
         if !endpoint.trim().is_empty() {
-            let api_key = std::env::var("EMBED_KEY")
-                .ok()
-                .unwrap_or_else(|| config.embedding_api_key.clone().unwrap_or_default());
-            let model = std::env::var("EMBED_MODEL").ok().unwrap_or_else(|| {
-                config
-                    .embedding_model
-                    .clone()
-                    .unwrap_or_else(|| "all-minilm:l6-v2".to_string())
-            });
-            let dimension = std::env::var("EMBED_DIM")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(if config.embedding_dimension > 0 {
-                    config.embedding_dimension
-                } else {
-                    384
+            #[cfg(feature = "rest")]
+            {
+                let api_key = std::env::var("EMBED_KEY")
+                    .ok()
+                    .unwrap_or_else(|| config.embedding_api_key.clone().unwrap_or_default());
+                let model = std::env::var("EMBED_MODEL").ok().unwrap_or_else(|| {
+                    config
+                        .embedding_model
+                        .clone()
+                        .unwrap_or_else(|| "all-minilm:l6-v2".to_string())
                 });
-            let multi_endpoint = std::env::var("MULTI_EMBED_URL")
-                .ok()
-                .or_else(|| config.multi_embedding_endpoint.clone());
-            let multi_api_key = std::env::var("MULTI_EMBED_KEY")
-                .ok()
-                .or_else(|| config.multi_embedding_api_key.clone());
-            let multi_model = std::env::var("MULTI_EMBED_MODEL")
-                .ok()
-                .or_else(|| config.multi_embedding_model.clone());
-            let multi_dimension = std::env::var("MULTI_EMBED_DIM")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(config.multi_embedding_dimension);
-            let image_endpoint = std::env::var("IMAGE_EMBED_URL")
-                .ok()
-                .or_else(|| config.image_embedding_endpoint.clone());
-            let image_api_key = std::env::var("IMAGE_EMBED_KEY")
-                .ok()
-                .or_else(|| config.image_embedding_api_key.clone());
-            let image_model = std::env::var("IMAGE_EMBED_MODEL")
-                .ok()
-                .or_else(|| config.image_embedding_model.clone());
-            let image_dimension = std::env::var("IMAGE_EMBED_DIM")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(config.image_embedding_dimension);
-            let rerank_endpoint = std::env::var("RERANK_URL")
-                .ok()
-                .or_else(|| config.rerank_endpoint.clone());
-            let rerank_api_key = std::env::var("RERANK_KEY")
-                .ok()
-                .or_else(|| config.rerank_api_key.clone());
-            let rerank_model = std::env::var("RERANK_MODEL")
-                .ok()
-                .or_else(|| config.rerank_model.clone());
-            let http_emb = qql::embedder::HttpEmbedder::try_with_options(
-                qql::embedder::HttpEmbedderOptions {
-                    endpoint: endpoint.clone(),
-                    api_key,
-                    model,
-                    dimension,
-                    multi_endpoint,
-                    multi_api_key,
-                    multi_model,
-                    multi_dimension,
-                    image_endpoint,
-                    image_api_key,
-                    image_model,
-                    image_dimension,
-                    rerank_endpoint,
-                    rerank_api_key,
-                    rerank_model,
-                },
-            )?;
-            Some(std::sync::Arc::new(http_emb) as std::sync::Arc<dyn qql::embedder::Embedder>)
+                let dimension = std::env::var("EMBED_DIM")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(if config.embedding_dimension > 0 {
+                        config.embedding_dimension
+                    } else {
+                        384
+                    });
+                let multi_endpoint = std::env::var("MULTI_EMBED_URL")
+                    .ok()
+                    .or_else(|| config.multi_embedding_endpoint.clone());
+                let multi_api_key = std::env::var("MULTI_EMBED_KEY")
+                    .ok()
+                    .or_else(|| config.multi_embedding_api_key.clone());
+                let multi_model = std::env::var("MULTI_EMBED_MODEL")
+                    .ok()
+                    .or_else(|| config.multi_embedding_model.clone());
+                let multi_dimension = std::env::var("MULTI_EMBED_DIM")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(config.multi_embedding_dimension);
+                let image_endpoint = std::env::var("IMAGE_EMBED_URL")
+                    .ok()
+                    .or_else(|| config.image_embedding_endpoint.clone());
+                let image_api_key = std::env::var("IMAGE_EMBED_KEY")
+                    .ok()
+                    .or_else(|| config.image_embedding_api_key.clone());
+                let image_model = std::env::var("IMAGE_EMBED_MODEL")
+                    .ok()
+                    .or_else(|| config.image_embedding_model.clone());
+                let image_dimension = std::env::var("IMAGE_EMBED_DIM")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(config.image_embedding_dimension);
+                let rerank_endpoint = std::env::var("RERANK_URL")
+                    .ok()
+                    .or_else(|| config.rerank_endpoint.clone());
+                let rerank_api_key = std::env::var("RERANK_KEY")
+                    .ok()
+                    .or_else(|| config.rerank_api_key.clone());
+                let rerank_model = std::env::var("RERANK_MODEL")
+                    .ok()
+                    .or_else(|| config.rerank_model.clone());
+                let http_emb = qql::embedder::HttpEmbedder::try_with_options(
+                    qql::embedder::HttpEmbedderOptions {
+                        endpoint: endpoint.clone(),
+                        api_key,
+                        model,
+                        dimension,
+                        multi_endpoint,
+                        multi_api_key,
+                        multi_model,
+                        multi_dimension,
+                        image_endpoint,
+                        image_api_key,
+                        image_model,
+                        image_dimension,
+                        rerank_endpoint,
+                        rerank_api_key,
+                        rerank_model,
+                    },
+                )?;
+                Some(std::sync::Arc::new(http_emb) as std::sync::Arc<dyn qql::embedder::Embedder>)
+            }
+            #[cfg(not(feature = "rest"))]
+            {
+                let _ = endpoint;
+                return Err(
+                    "HTTP embedding requires the rest feature; rebuild with --features rest"
+                        .into(),
+                );
+            }
         } else {
             None
         }
