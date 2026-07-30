@@ -7,7 +7,10 @@ use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 
 impl Stmt {
-    /// Return the custom shard key carried by statements that support sharded routing.
+    /// Custom shard routing key for this statement, if any.
+    ///
+    /// Corresponds to QQL `SHARD '…'` on DML, lowered to request-level
+    /// `shard_key` (REST) / `ShardKeySelector` (gRPC) — never inside `Filter`.
     pub fn shard_key(&self) -> Option<&str> {
         match self {
             Self::Query(query) => query.shard_key.as_deref(),
@@ -24,25 +27,75 @@ impl Stmt {
         }
     }
 
-    /// Set the custom shard key on statements that support sharded routing.
+    /// Set custom shard routing (same field as QQL `SHARD '…'`).
     ///
-    /// Returns `false` when the statement cannot carry a shard key.
+    /// Prefer writing `SHARD 'tenant'` in the query when the tenant is known at
+    /// authoring time. Use this setter only when the host resolves the key after
+    /// parse (e.g. from auth context) without re-stringifying QQL.
+    ///
+    /// On `QUERY`, recurses into CTEs and nested prefetch queries so routing
+    /// matches a top-level `SHARD` clause. Empty / `None` clears the key.
+    /// Returns `false` for statement types that cannot carry routing (DDL, SHOW).
     pub fn set_shard_key(&mut self, shard_key: Option<String>) -> bool {
-        let slot = match self {
-            Self::Query(query) => &mut query.shard_key,
-            Self::Scroll(scroll) => &mut scroll.shard_key,
-            Self::Count(count) => &mut count.shard_key,
-            Self::Upsert(upsert) => &mut upsert.shard_key,
-            Self::Delete(delete) => &mut delete.shard_key,
-            Self::ClearPayload(clear) => &mut clear.shard_key,
-            Self::DeletePayload(delete) => &mut delete.shard_key,
-            Self::DeleteVector(delete) => &mut delete.shard_key,
-            Self::UpdateVector(update) => &mut update.shard_key,
-            Self::UpdatePayload(update) => &mut update.shard_key,
-            _ => return false,
-        };
-        *slot = shard_key;
-        true
+        let key = shard_key.filter(|k| !k.is_empty());
+        match self {
+            Self::Query(query) => {
+                apply_query_shard(query, key.as_deref());
+                true
+            }
+            Self::Scroll(scroll) => {
+                scroll.shard_key = key;
+                true
+            }
+            Self::Count(count) => {
+                count.shard_key = key;
+                true
+            }
+            Self::Upsert(upsert) => {
+                upsert.shard_key = key;
+                true
+            }
+            Self::Delete(delete) => {
+                delete.shard_key = key;
+                true
+            }
+            Self::ClearPayload(clear) => {
+                clear.shard_key = key;
+                true
+            }
+            Self::DeletePayload(delete) => {
+                delete.shard_key = key;
+                true
+            }
+            Self::DeleteVector(delete) => {
+                delete.shard_key = key;
+                true
+            }
+            Self::UpdateVector(update) => {
+                update.shard_key = key;
+                true
+            }
+            Self::UpdatePayload(update) => {
+                update.shard_key = key;
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+/// Apply shard routing to a query and nested CTE / prefetch queries.
+fn apply_query_shard(query: &mut QueryStmt, key: Option<&str>) {
+    query.shard_key = key.map(str::to_string);
+    for cte in &mut query.ctes {
+        apply_query_shard(&mut cte.query, key);
+    }
+    if let Some(prefetches) = expression_prefetch(&mut query.expression) {
+        for prefetch in prefetches {
+            if let PrefetchSource::Query(nested) = &mut prefetch.source {
+                apply_query_shard(nested, key);
+            }
+        }
     }
 }
 
@@ -91,41 +144,6 @@ pub fn inject_filter(
     Ok(())
 }
 
-/// Inject a custom shard key for multi-tenant routing (host-side, no language bind params).
-///
-/// Qdrant accepts `shard_key` on query/mutation bodies (OpenAPI / proto
-/// `ShardKeySelector`). QQL has no `$param` shard syntax — multi-tenant hosts
-/// call this after resolving the tenant id (or set `shard_key` on the AST).
-///
-/// Applies to statements that carry `shard_key` in the AST: `QUERY`, `SCROLL`,
-/// `COUNT`, `UPSERT`, `DELETE`, `CLEAR PAYLOAD`, `DELETE PAYLOAD`,
-/// `DELETE VECTOR`, `UPDATE … VECTOR`, and `UPDATE … PAYLOAD`. Recurses into
-/// CTEs and nested prefetch queries. Returns a validation error for DDL / SHOW
-/// (fail closed).
-pub fn inject_shard_key(statement: &mut Stmt, shard_key: &str) -> Result<(), QqlError> {
-    if shard_key.is_empty() {
-        return Err(QqlError::validation(
-            "QQL-VALIDATION-SHARD-KEY",
-            "shard key must be a non-empty string",
-            None,
-        ));
-    }
-    let key = shard_key.to_string();
-    if let Stmt::Query(query) = statement {
-        inject_query_shard(query, &key);
-    } else if !statement.set_shard_key(Some(key)) {
-        return Err(QqlError::validation(
-            "QQL-VALIDATION-SHARD-KEY",
-            format!(
-                "inject_shard_key does not apply to this statement type ({})",
-                stmt_kind(statement)
-            ),
-            None,
-        ));
-    }
-    Ok(())
-}
-
 fn stmt_kind(statement: &Stmt) -> &'static str {
     match statement {
         Stmt::Query(_) => "QUERY",
@@ -148,20 +166,6 @@ fn stmt_kind(statement: &Stmt) -> &'static str {
         Stmt::ShowCollections => "SHOW COLLECTIONS",
         Stmt::ShowCollection(_) => "SHOW COLLECTION",
         Stmt::ShowShardKeys(_) => "SHOW SHARD KEYS",
-    }
-}
-
-fn inject_query_shard(query: &mut QueryStmt, key: &str) {
-    query.shard_key = Some(key.to_string());
-    for cte in &mut query.ctes {
-        inject_query_shard(&mut cte.query, key);
-    }
-    if let Some(prefetches) = expression_prefetch(&mut query.expression) {
-        for prefetch in prefetches {
-            if let PrefetchSource::Query(nested) = &mut prefetch.source {
-                inject_query_shard(nested, key);
-            }
-        }
     }
 }
 

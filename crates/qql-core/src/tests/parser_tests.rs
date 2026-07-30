@@ -326,24 +326,33 @@ fn params_timeout_and_consistency() {
 }
 
 #[test]
-fn inject_shard_key_sets_query_and_ctes() {
-    use crate::ast::inject_shard_key;
+fn shard_clause_parses_on_query_and_ctes_via_set_shard_key() {
+    // Preferred path: SHARD in QQL
+    let with_clause = Parser::parse(
+        "WITH c AS (QUERY TEXT 'x' USING dense LIMIT 10) \
+         QUERY FUSION RRF FROM docs PREFETCH (c) SHARD 'acme' LIMIT 5;",
+    )
+    .unwrap();
+    let Stmt::Query(q) = &with_clause else { panic!() };
+    assert_eq!(q.shard_key.as_deref(), Some("acme"));
+
+    // Host path after parse: property setter (recurses into CTEs)
     let mut stmt = Parser::parse(
         "WITH c AS (QUERY TEXT 'x' USING dense LIMIT 10) \
          QUERY FUSION RRF FROM docs PREFETCH (c) LIMIT 5;",
     )
     .unwrap();
-    inject_shard_key(&mut stmt, "acme").unwrap();
+    assert!(stmt.set_shard_key(Some("acme".into())));
     let Stmt::Query(q) = &stmt else { panic!() };
     assert_eq!(q.shard_key.as_deref(), Some("acme"));
     assert_eq!(q.ctes[0].query.shard_key.as_deref(), Some("acme"));
-    assert!(inject_shard_key(&mut stmt, "").is_err());
+    assert!(stmt.set_shard_key(Some(String::new()))); // empty clears
+    assert_eq!(stmt.shard_key(), None);
+    assert!(!Parser::parse("SHOW COLLECTIONS").unwrap().set_shard_key(Some("x".into())));
 }
 
 #[test]
-fn mutation_shard_key_parses_and_injects() {
-    use crate::ast::inject_shard_key;
-
+fn mutation_shard_key_parses_from_qql() {
     let clear = Parser::parse("CLEAR PAYLOAD FROM docs WHERE id = 1 SHARD 'tenant-a';").unwrap();
     let Stmt::ClearPayload(c) = clear else {
         panic!("expected ClearPayload");
@@ -373,12 +382,9 @@ fn mutation_shard_key_parses_and_injects() {
     };
     assert_eq!(p.shard_key.as_deref(), Some("tenant-d"));
 
-    let mut inject_target = Parser::parse("CLEAR PAYLOAD FROM docs WHERE id = 2;").unwrap();
-    inject_shard_key(&mut inject_target, "injected").unwrap();
-    let Stmt::ClearPayload(c) = inject_target else {
-        panic!("expected ClearPayload after inject");
-    };
-    assert_eq!(c.shard_key.as_deref(), Some("injected"));
+    let mut host = Parser::parse("CLEAR PAYLOAD FROM docs WHERE id = 2;").unwrap();
+    assert!(host.set_shard_key(Some("injected".into())));
+    assert_eq!(host.shard_key(), Some("injected"));
 }
 
 #[test]
