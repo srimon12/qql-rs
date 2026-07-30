@@ -8,7 +8,7 @@ Three tools, each a different QQL strategy:
 
 Isolation is never left to the model:
   inject_filter(stmt, "tenant_id", "=", tenant)
-  inject_shard_key(stmt, tenant)
+  stmt.shard_key = tenant  # same as SHARD in QQL
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ import pyqql  # noqa: E402
 import config  # noqa: E402
 
 C = config.COLLECTION
-LM = config.LM_STUDIO.rstrip("/")
+LM = config.LLM_BASE.rstrip("/")
 
 
 def run_qql(qql: str, tenant: str, year: int | None = None):
@@ -32,12 +32,11 @@ def run_qql(qql: str, tenant: str, year: int | None = None):
     tenant = tenant.lower().strip()
     stmt = pyqql.parse(qql)[0]
     pyqql.inject_filter(stmt, "tenant_id", "=", tenant)
-    pyqql.inject_shard_key(stmt, tenant)
+    stmt.shard_key = tenant
     if year is not None:
         pyqql.inject_filter(stmt, "fiscal_year", "=", year)
 
-    embed_url = LM if LM.endswith("/embeddings") else f"{LM}/v1/embeddings"
-    e = pyqql.HttpEmbedder(embed_url, config.EMBED_MODEL, config.EMBED_DIM)
+    e = pyqql.HttpEmbedder(config.EMBED_URL, config.EMBED_MODEL, config.EMBED_DIM)
     client = pyqql.Client(config.QDRANT_URL, embedder=e)
     resp = client.execute(stmt)
     return resp["results"][0].get("data", [])
@@ -66,6 +65,7 @@ def strategy_hybrid(tenant, query, year=None, limit=5):
         QUERY TEXT '{q}'
         FROM {C}
         USING HYBRID DENSE dense SPARSE sparse FUSION RRF
+        PARAMS (hnsw_ef = 128, quantization = {{ignore: false, rescore: true, oversampling: 2.0}})
         WITH PAYLOAD true LIMIT {limit}
     """
     return format_hits(run_qql(qql, tenant, year))
@@ -256,7 +256,7 @@ def run_agent(user_input: str) -> None:
             continue
 
         print(f"\n🔧 {name}({tenant}, '{query[:60]}', year={year})")
-        print(f"   isolation: inject_filter(tenant_id) + inject_shard_key('{tenant}')")
+        print(f"   isolation: inject_filter(tenant_id) + shard_key='{tenant}'")
         hits = fn(tenant, query, year)
         all_hits.extend(hits)
         print(f"   → {len(hits)} hits")

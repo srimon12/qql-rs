@@ -1,6 +1,15 @@
 # QQL Filter Reference
 
-Metadata filter expressions in `WHERE` clauses for `QUERY`, `COUNT`, `SCROLL`, `DELETE`, `CLEAR PAYLOAD`, `DELETE VECTOR`, and `UPDATE ... SET PAYLOAD` statements. (The `UPDATE ... SET VECTOR` form uses point-ID equality only — general filters do not apply.)
+Metadata predicates in `WHERE` for `QUERY`, `COUNT`, `SCROLL`, `DELETE`,
+`CLEAR PAYLOAD`, `DELETE PAYLOAD`, `DELETE VECTOR`, and `UPDATE … SET PAYLOAD`.
+(`UPDATE … SET VECTOR` is point-ID scoped only.)
+
+**Proposition:** filters are the **isolation** surface. They lower to the same
+logical structure on REST (`filter`) and gRPC (`qdrant.Filter`).  
+**Not a filter:** `SHARD '…'` — that is request routing (see [syntax.md](syntax.md)).
+
+Host gateways should use [`inject_filter`](inject_filter.md) so policy cannot be
+omitted from untrusted QQL.
 
 ---
 
@@ -156,8 +165,9 @@ WHERE location GEO_POLYGON {
 
 ## 9. Round-trip example
 
-These filters all lower from QQL syntax to the plan layer and serialize to
-Qdrant's OpenAPI filter format. For instance:
+These filters lower from QQL to the plan IR `FilterExpression`, then to the
+same logical shape on **both** transports: REST body `filter` and gRPC
+`qdrant.Filter`. For instance:
 
 ```sql
 WHERE status = 'active' AND (score >= 0.5 OR tags IS NOT EMPTY)
@@ -180,3 +190,6 @@ Produces the JSON condition:
 ```
 
 All filter variants are supported across REST, gRPC, and edge backends.
+
+**Not a filter:** `SHARD '…'` is request-level routing (`shard_key` /
+`ShardKeySelector`). It never appears inside this object — see [syntax.md](syntax.md).

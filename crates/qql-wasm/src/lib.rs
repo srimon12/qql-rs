@@ -212,14 +212,6 @@ pub fn inject_filter(
     to_js_value(&stmt)
 }
 
-/// Inject a shard key for multi-tenant routing (QUERY/SCROLL/COUNT/UPSERT/DELETE + CTEs).
-#[wasm_bindgen(js_name = injectShardKey)]
-pub fn inject_shard_key(query: &str, shard_key: &str) -> Result<JsValue, JsValue> {
-    let mut stmt = Parser::parse(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    ast::inject_shard_key(&mut stmt, shard_key).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    to_js_value(&stmt)
-}
-
 fn parse_comparison_op(op: &str) -> Result<ComparisonOp, JsValue> {
     match op {
         "=" | "==" | "eq" => Ok(ComparisonOp::Eq),
@@ -264,14 +256,7 @@ impl Stmt {
         Ok(())
     }
 
-    /// Multi-tenant shard routing: set shard key on this statement (+ nested CTEs).
-    #[wasm_bindgen(js_name = injectShardKey)]
-    pub fn inject_shard_key(&mut self, shard_key: &str) -> Result<(), JsValue> {
-        ast::inject_shard_key(&mut self.inner, shard_key)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
-    }
-
-    /// Get or set the shard key on statements that support custom sharding.
+    /// QQL `SHARD '…'` routing key (request-level). Prefer the clause in QQL.
     #[wasm_bindgen(getter, js_name = shardKey)]
     pub fn shard_key(&self) -> Option<String> {
         self.inner.shard_key().map(str::to_owned)
@@ -279,9 +264,7 @@ impl Stmt {
 
     #[wasm_bindgen(setter, js_name = shardKey)]
     pub fn set_shard_key(&mut self, key: Option<String>) {
-        let _ = self
-            .inner
-            .set_shard_key(key.filter(|value| !value.is_empty()));
+        let _ = self.inner.set_shard_key(key);
     }
 
     /// Serialise the AST to a JSON string.

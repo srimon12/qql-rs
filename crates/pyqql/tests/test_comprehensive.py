@@ -52,8 +52,7 @@ class TestPackageInspection(unittest.TestCase):
             "parse",
             "is_valid",
             "inject_filter",
-            "inject_shard_key",
-            "tokenize",
+                        "tokenize",
             "compile_query",
             "explain",
             "execute",
@@ -65,7 +64,7 @@ class TestPackageInspection(unittest.TestCase):
 
     def test_a2_stmt_is_class_with_methods(self):
         self.assertTrue(isinstance(pyqql.Stmt, type))
-        for attr in ("to_dict", "to_json", "inject_filter", "inject_shard_key", "shard_key"):
+        for attr in ("to_dict", "to_json", "inject_filter", "shard_key"):
             self.assertTrue(hasattr(pyqql.Stmt, attr), f"Stmt missing {attr}")
 
     def test_a3_httpembedder_signature(self):
@@ -809,12 +808,17 @@ class TestEdgeCases(unittest.TestCase):
             "tenant-a",
         )
 
-    def test_j11_module_inject_shard_key(self):
-        stmt = pyqql.inject_shard_key(
-            "DELETE PAYLOAD draft FROM docs WHERE status = 'archived'",
-            "tenant-b",
-        )
-        self.assertEqual(stmt.shard_key, "tenant-b")
+    def test_j11_stmt_shard_key_property(self):
+        """SHARD in QQL + Stmt.shard_key property (no inject_shard_key)."""
+        stmts = pyqql.parse("QUERY TEXT 'x' FROM docs SHARD 'honeywell' LIMIT 5")
+        assert stmts[0].shard_key == "honeywell"
+        stmts2 = pyqql.parse("QUERY TEXT 'x' FROM docs LIMIT 5")
+        stmts2[0].shard_key = "acme"
+        assert stmts2[0].shard_key == "acme"
+        # empty clears
+        stmts2[0].shard_key = ""
+        assert stmts2[0].shard_key is None
+
 
     def test_j12_show_collections_to_json(self):
         stmt = pyqql.parse("SHOW COLLECTIONS")[0]

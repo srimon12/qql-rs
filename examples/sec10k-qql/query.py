@@ -3,7 +3,7 @@ QQL Feature Showcase — major capabilities against real SEC 10-K data.
 
 Tenant isolation is applied at the host layer (never string-built into the query):
   inject_filter(stmt, "tenant_id", "=", tenant)   # logical
-  inject_shard_key(stmt, tenant)                  # physical
+  SHARD in QQL or stmt.shard_key = tenant         # physical
 
 Demonstrates QQL 1.2:
   USING HYBRID shorthand, COUNT WITH (exact), SCROLL WITH VECTOR,
@@ -25,11 +25,12 @@ C = config.COLLECTION
 
 
 def client():
-    embed_url = config.LM_STUDIO.rstrip("/")
-    if not embed_url.endswith("/embeddings"):
-        embed_url = f"{embed_url}/v1/embeddings"
-    e = pyqql.HttpEmbedder(embed_url, config.EMBED_MODEL, config.EMBED_DIM)
+    e = pyqql.HttpEmbedder(config.EMBED_URL, config.EMBED_MODEL, config.EMBED_DIM)
     return pyqql.Client(config.QDRANT_URL, embedder=e)
+
+
+# Turbo quant rescore defaults for quality under quantization
+QRESCORE = "PARAMS (hnsw_ef = 128, quantization = {ignore: false, rescore: true, oversampling: 2.0})"
 
 
 def secure(qql_stmt: str, tenant: str | None = None):
@@ -37,7 +38,7 @@ def secure(qql_stmt: str, tenant: str | None = None):
     stmt = pyqql.parse(qql_stmt)[0]
     if tenant:
         pyqql.inject_filter(stmt, "tenant_id", "=", tenant)
-        pyqql.inject_shard_key(stmt, tenant)
+        stmt.shard_key = tenant
     return stmt
 
 
@@ -73,16 +74,31 @@ def llm(question: str, hits) -> str:
         f"Context:\n{ctx}\n\nQuestion: {question}\n"
         f"Answer concisely with specific facts:"
     )
-    base = config.LM_STUDIO.rstrip("/")
+    base = config.LLM_BASE.rstrip("/")
+    # Prefer OpenAI-compatible chat; fall back to Ollama /api/chat
+    try:
+        r = requests.post(
+            f"{base}/v1/chat/completions",
+            json={
+                "model": config.LLM_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=120,
+        )
+        if r.ok:
+            return r.json()["choices"][0]["message"]["content"].strip()
+    except Exception:
+        pass
     r = requests.post(
-        f"{base}/v1/chat/completions",
+        "http://localhost:11434/api/chat",
         json={
             "model": config.LLM_MODEL,
             "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
         },
         timeout=120,
     )
-    return r.json()["choices"][0]["message"]["content"].strip()
+    return r.json().get("message", {}).get("content", "").strip()
 
 
 def ok(qql_stmt: str) -> bool:
@@ -100,30 +116,32 @@ def ok(qql_stmt: str) -> bool:
 
 queries = [
     (
-        "1. HYBRID RRF (front-form)",
+        "1. HYBRID RRF (front-form) + quant rescore",
         f"""
         QUERY HYBRID TEXT 'cybersecurity risk factors' DENSE dense SPARSE sparse FUSION RRF
         FROM {C}
-        PARAMS (hnsw_ef = 128)
+        {QRESCORE}
         WITH PAYLOAD true LIMIT 5
         """,
         "honeywell",
     ),
     (
-        "2. HYBRID shorthand (USING HYBRID)",
+        "2. HYBRID shorthand (USING HYBRID) + rescore",
         f"""
         QUERY TEXT 'supply chain disruption'
         FROM {C}
         USING HYBRID DENSE dense SPARSE sparse FUSION RRF
+        {QRESCORE}
         WITH PAYLOAD true LIMIT 5
         """,
         "honeywell",
     ),
     (
-        "3. HYBRID DBSF",
+        "3. HYBRID DBSF + rescore",
         f"""
         QUERY HYBRID TEXT 'supply chain disruption' DENSE dense SPARSE sparse FUSION DBSF
         FROM {C}
+        {QRESCORE}
         WITH PAYLOAD true LIMIT 5
         """,
         "honeywell",
@@ -135,6 +153,7 @@ queries = [
              b AS (QUERY TEXT 'supply chain risk' FROM {C} USING sparse LIMIT 100)
         QUERY FUSION RRF FROM {C}
         PREFETCH (a, b)
+        {QRESCORE}
         WITH PAYLOAD true LIMIT 5
         """,
         "honeywell",
@@ -145,6 +164,7 @@ queries = [
         QUERY NEAREST TEXT 'missile defense contract' FROM {C} USING dense
         PREFETCH (QUERY TEXT 'missile defense' FROM {C} USING sparse LIMIT 50)
         SCORE THRESHOLD 0.3
+        {QRESCORE}
         WITH PAYLOAD true LIMIT 5
         """,
         "rtx",
@@ -154,7 +174,7 @@ queries = [
         f"""
         QUERY MMR TEXT 'manufacturing operations' DIVERSITY 0.5 CANDIDATES 100
         FROM {C} USING dense
-        PARAMS (hnsw_ef = 256)
+        PARAMS (hnsw_ef = 256, quantization = {{ignore: false, rescore: true, oversampling: 2.0}})
         WITH PAYLOAD true LIMIT 5
         """,
         "3m",
@@ -171,13 +191,14 @@ queries = [
         "rtx",
     ),
     (
-        "8. ACORN filtered search",
+        "8. ACORN filtered search + rescore",
         f"""
         QUERY TEXT 'risk factors'
         FROM {C}
         USING dense
         WHERE fiscal_year >= 2024
-        PARAMS (acorn = true, max_selectivity = 0.5, hnsw_ef = 128)
+        PARAMS (acorn = true, max_selectivity = 0.5, hnsw_ef = 128,
+                quantization = {{ignore: false, rescore: true, oversampling: 2.0}})
         WITH PAYLOAD true LIMIT 5
         """,
         "ge",
@@ -188,7 +209,8 @@ queries = [
         QUERY TEXT 'aerospace defense contracts'
         FROM {C}
         USING dense
-        PARAMS (timeout = 30, consistency = majority)
+        PARAMS (timeout = 30, consistency = majority,
+                quantization = {{rescore: true, oversampling: 2.0}})
         WITH PAYLOAD true LIMIT 5
         """,
         "rtx",
@@ -253,7 +275,7 @@ for t in config.TENANTS:
         print(f"  {t}: ERROR {e}")
 
 # ── Isolation proof (filter + shard, no SHARD literal in source) ──
-print("\n═══ 14. ISOLATION PROOF (inject_filter + inject_shard_key) ═══")
+print("\n═══ 14. ISOLATION PROOF (inject_filter + SHARD / shard_key) ═══")
 for tenant in ["honeywell", "rtx"]:
     try:
         hits = run(

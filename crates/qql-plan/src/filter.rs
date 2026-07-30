@@ -8,50 +8,46 @@ pub fn lower_filter(filter: &FilterExpr) -> FilterExpression {
             must_not: Vec::new(),
             should: Vec::new(),
             min_should: None,
-            shard_key: None,
         }),
         FilterExpr::Or { operands } => FilterExpression::Compound(FilterCompound {
             must: Vec::new(),
             must_not: Vec::new(),
             should: operands.iter().map(lower_clause).collect(),
             min_should: None,
-            shard_key: None,
         }),
         FilterExpr::Not { operand } => FilterExpression::Compound(FilterCompound {
             must: Vec::new(),
             must_not: vec![lower_clause(operand)],
             should: Vec::new(),
             min_should: None,
-            shard_key: None,
         }),
         other => FilterExpression::Single(Box::new(lower_clause(other))),
     }
 }
 
+/// Normalize a single top-level clause into a compound envelope.
+///
+/// Shard routing is **not** attached to filters. Both REST and gRPC carry
+/// routing on the operation request (`shard_key` / `ShardKeySelector`).
 pub fn top_level_filter(filter: &FilterExpr) -> FilterExpression {
-    top_level_filter_with_shard(filter, None)
-}
-
-pub fn top_level_filter_with_shard(
-    filter: &FilterExpr,
-    shard_key: Option<&str>,
-) -> FilterExpression {
-    let f = lower_filter(filter);
-    match f {
+    match lower_filter(filter) {
         FilterExpression::Single(clause) => FilterExpression::Compound(FilterCompound {
             must: vec![*clause],
             must_not: Vec::new(),
             should: Vec::new(),
             min_should: None,
-            shard_key: shard_key.map(|s| s.to_string()),
         }),
-        FilterExpression::Compound(mut compound) => {
-            if compound.shard_key.is_none() {
-                compound.shard_key = shard_key.map(|s| s.to_string());
-            }
-            FilterExpression::Compound(compound)
-        }
+        compound => compound,
     }
+}
+
+/// Deprecated alias: `shard_key` argument is ignored. Prefer `top_level_filter`.
+/// Routing belongs on the request (`CountRequest.shard_key`, `QueryRequest.shard_key`, …).
+pub fn top_level_filter_with_shard(
+    filter: &FilterExpr,
+    _shard_key: Option<&str>,
+) -> FilterExpression {
+    top_level_filter(filter)
 }
 
 fn lower_clause(filter: &FilterExpr) -> FilterClause {
@@ -134,21 +130,18 @@ fn lower_clause(filter: &FilterExpr) -> FilterClause {
             must_not: Vec::new(),
             should: Vec::new(),
             min_should: None,
-            shard_key: None,
         })),
         FilterExpr::Or { operands } => FilterClause::Filter(Box::new(FilterCompound {
             must: Vec::new(),
             must_not: Vec::new(),
             should: operands.iter().map(lower_clause).collect(),
             min_should: None,
-            shard_key: None,
         })),
         FilterExpr::Not { operand } => FilterClause::Filter(Box::new(FilterCompound {
             must: Vec::new(),
             must_not: vec![lower_clause(operand)],
             should: Vec::new(),
             min_should: None,
-            shard_key: None,
         })),
     }
 }

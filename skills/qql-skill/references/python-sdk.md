@@ -10,23 +10,30 @@ pip install pyqql
 
 ---
 
-## 1. Multi-Tenant Filter Injection
+## 1. Multi-tenant isolation + optional routing
 
-Parse a user query, inject tenant isolation, execute -- single call site, guaranteed safe.
+**Isolation** = `inject_filter` (always on untrusted QQL).  
+**Routing** = `SHARD '…'` in QQL (preferred) or `stmt.shard_key` after parse.  
+There is **no** `inject_shard_key`.
 
 ```python
 from pyqql import parse, inject_filter, Client
 
 client = Client("http://localhost:6333")
 
-# User query from UI / API
-stmt = parse("QUERY 'supply chain risks' FROM sec10k SHARD 'honeywell' LIMIT 10")[0]
+# Preferred when tenant is known: SHARD in the language
+stmt = parse("""
+  QUERY TEXT 'supply chain risks' FROM sec10k USING dense
+  SHARD 'honeywell' LIMIT 10
+""")[0]
 
-# Platform injects tenant filter -- recurses into CTEs and prefetches
+# Always force isolation (recursive into CTEs / prefetches)
 inject_filter(stmt, "tenant_id", "=", "honeywell")
 
-# Unified execute accepts Stmt objects directly
 result = client.execute(stmt)
+
+# Host-resolved routing after parse (same AST field as SHARD):
+# stmt.shard_key = "honeywell"
 ```
 
 ---

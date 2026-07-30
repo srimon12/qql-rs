@@ -1,8 +1,6 @@
 /**
- * Medium → Expert (Node.js / @veristamp/nqql)
- *
- * Multi-tenant security gateway with hybrid retrieval strategies.
- * Offline by default; pass --live to hit Qdrant (needs collection).
+ * Medium → Expert (Node.js) — multi-tenant gateway.
+ * injectFilter always; SHARD via QQL or stmt.shardKey.
  */
 import nqql from '../../crates/nqql/index.js';
 
@@ -29,72 +27,57 @@ const STRATEGIES = {
     PREFETCH (dense, sparse)
     LIMIT 5
   `,
-  formula: (q) => `
-    WITH candidates AS (
-      QUERY TEXT '${q}' FROM research_papers USING dense LIMIT 40
-    )
-    QUERY FORMULA (score * 2.0) DEFAULTS (score = 0.0)
-    FROM research_papers
-    PREFETCH (candidates)
-    LIMIT 5
-  `,
 };
 
 function secure(query, user) {
   const ctx = USERS[user];
   const [stmt] = parse(query);
   stmt.injectFilter('tenant_id', '=', ctx.tenant);
-  stmt.injectShardKey(ctx.tenant);
-  if (ctx.role === 'viewer') {
-    stmt.injectFilter('status', '=', 'published');
-  }
+  stmt.shardKey = ctx.tenant;
+  if (ctx.role === 'viewer') stmt.injectFilter('status', '=', 'published');
   return stmt;
 }
 
 const live = process.argv.includes('--live');
 const user = 'bob';
-const strategy = 'hybrid';
-const question = 'transformers attention mechanism';
+const raw = STRATEGIES.hybrid('transformers attention mechanism');
 
-console.log(`nqql ${version ?? nqql.__version__ ?? '?'}`);
-console.log(`user=${user} tenant=${USERS[user].tenant} role=${USERS[user].role}\n`);
-
-const raw = STRATEGIES[strategy](question);
-console.log('── raw QQL ──');
-console.log(raw.trim());
-console.log();
+console.log(`nqql ${version ?? '?'}`);
+console.log(`user=${user} tenant=${USERS[user].tenant}\n`);
+console.log('── raw ──\n' + raw.trim() + '\n');
 
 const secured = secure(raw, user);
 console.log('── secured ──');
 console.log('  shardKey =', secured.shardKey);
-console.log('  toJSON   =', secured.toJSON().slice(0, 200) + '…');
-console.log();
+console.log('  toJSON   =', secured.toJSON().slice(0, 180) + '…\n');
 
-console.log('── strategy inventory ──');
-for (const [name, fn] of Object.entries(STRATEGIES)) {
-  const q = fn('demo');
-  const s = secure(q, user);
-  console.log(`  ${name.padEnd(12)} valid=${isValid(q)}  shard=${s.shardKey}`);
-}
-
-console.log('\n── explain (hybrid base plan) ──');
-console.log(explain(raw));
+// Template with SHARD in the language (preferred when tenant known at write time)
+const literal = `
+  QUERY TEXT 'transformers'
+  FROM research_papers
+  USING HYBRID DENSE dense SPARSE sparse FUSION RRF
+  SHARD '${USERS[user].tenant}'
+  LIMIT 5
+`;
+const [lit] = parse(literal);
+console.log('── SHARD in QQL ── shardKey =', lit.shardKey, 'valid=', isValid(literal));
+console.log('\n── explain ──\n' + explain(raw));
 
 if (!live) {
-  console.log('\nOffline complete. Re-run with --live to hit Qdrant.');
+  console.log('\nOffline complete.');
   process.exit(0);
 }
 
-const embedder = new HttpEmbedder({
-  endpoint: 'http://localhost:11434/v1/embeddings',
-  model: 'nomic-embed-text',
-  dimension: 768,
+const client = new Client({
+  url: 'http://localhost:6333',
+  embedder: new HttpEmbedder({
+    endpoint: 'http://localhost:11434/v1/embeddings',
+    model: 'all-minilm:l6-v2',
+    dimension: 384,
+  }),
 });
-const client = new Client({ url: 'http://localhost:6333', embedder });
-console.log('\n── live execute ──');
 try {
-  const report = await client.execute(secured);
-  console.log(JSON.stringify(report, null, 2).slice(0, 500));
+  console.log(JSON.stringify(await client.execute(secured), null, 2).slice(0, 500));
 } catch (e) {
-  console.log('  execute failed (expected if collection missing):', e.message ?? e);
+  console.log('live failed:', e.message ?? e);
 }

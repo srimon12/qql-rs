@@ -5,47 +5,22 @@ Configuration for Berlin Airbnb QQL Geo Showcase.
 from __future__ import annotations
 
 import os
-import re
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
-# Optional real embeddings; if unset, ingest uses deterministic hash vectors
-EMBED_URL = os.getenv("EMBED_URL", "")
-EMBED_MODEL = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
+
+# Ollama OpenAI-compatible embeddings (all-minilm:l6-v2 → 384-d)
+EMBED_URL = os.getenv("EMBED_URL", "http://localhost:11434/v1/embeddings")
+EMBED_MODEL = os.getenv("EMBED_MODEL", "all-minilm:l6-v2")
 EMBED_DIM = int(os.getenv("EMBED_DIM", "384"))
 
 COLLECTION = "berlin_airbnb"
 
-# Cap for demo speed (full Berlin set is ~12.7k). Set 0 for all.
-MAX_LISTINGS = int(os.getenv("MAX_LISTINGS", "2500"))
+# Cap for demo speed. Set 0 for all ~12.7k rows.
+MAX_LISTINGS = int(os.getenv("MAX_LISTINGS", "1500"))
 
-# Map neighbourhood_group → short shard key (custom sharding)
-# Keys must be lowercase alphanumeric / underscore for clean QQL literals.
-DISTRICT_SHARDS = {
-    "mitte": "mitte",
-    "pankow": "pankow",
-    "friedrichshain-kreuzberg": "kreuzberg",
-    "neukolln": "neukolln",
-    "neukölln": "neukolln",
-    "charlottenburg-wilmersdorf": "charlottenburg",
-    "tempelhof-schoneberg": "tempelhof",
-    "tempelhof-schöneberg": "tempelhof",
-    "treptow-kopenick": "treptow",
-    "treptow-köpenick": "treptow",
-    "steglitz-zehlendorf": "steglitz",
-    "lichtenberg": "lichtenberg",
-    "reinickendorf": "reinickendorf",
-    "spandau": "spandau",
-    "marzahn-hellersdorf": "marzahn",
-}
-
-
-def shard_for_district(district: str) -> str:
-    key = re.sub(r"\s+", "-", district.strip().lower())
-    key = key.replace("ö", "o").replace("ü", "u").replace("ä", "a")
-    return DISTRICT_SHARDS.get(key, "other")
-
-
-SHARD_KEYS = sorted(set(DISTRICT_SHARDS.values()) | {"other"})
+# Turbo binary quantization (2-bit is aggressive + fast; 4-bit is safer)
+# Queries should set PARAMS (quantization = {rescore: true, …})
+QUANT_BITS = int(os.getenv("QUANT_BITS", "2"))
 
 # Berlin landmarks for geo demos
 BRANDENBURG_GATE = {"lat": 52.5163, "lon": 13.3777}

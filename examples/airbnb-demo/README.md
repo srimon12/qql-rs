@@ -1,101 +1,53 @@
 # Berlin Airbnb — QQL Geo Showcase
 
-Real [Inside Airbnb](http://insideairbnb.com/) Berlin listings demonstrating
-**geo filters**, **hybrid search**, and **district custom sharding**.
+Real [Inside Airbnb](http://insideairbnb.com/) Berlin listings with **geo filters**,
+**hybrid search**, and **turbo quantization + rescore**.
 
-Berlin is home to Qdrant — this demo keeps the geo story front and center.
+No custom district shards — filter with `WHERE district = 'Mitte'` instead.
 
-## Features
+## Stack
 
-| Capability | Example |
-|------------|---------|
-| `GEO_RADIUS` | Listings within 1.5 km of Brandenburg Gate |
-| `GEO_BBOX` | Mitte city-center bounding box |
-| `GEO_POLYGON` | Kreuzberg nightlife polygon |
-| Hybrid | `USING HYBRID DENSE dense SPARSE sparse FUSION RRF` |
-| Custom shards | `SHARD 'mitte'`, `SHARD 'kreuzberg'`, … via `inject_shard_key` |
-| Formula | `GAUSS_DECAY(GEO_DISTANCE(…))` for distance-aware ranking |
-| Indexes | `location` geo, `district` `is_tenant`, price/rating/room_type |
-
-## Dataset
-
-- Source: Inside Airbnb Berlin (`listings.csv.gz` bundled)
-- ~12.7k listings with lat/lon, price, ratings, room types
-- Demo default: first **2500** rows (`MAX_LISTINGS=0` for all)
+| Piece | Choice |
+|-------|--------|
+| Dense | Ollama `all-minilm:l6-v2` (384-d) |
+| Sparse | Local hashed BM25-style vectors |
+| Quant | `turbo` bits=2 (or 4 via `QUANT_BITS`) `always_ram` |
+| Query | `PARAMS (quantization = {rescore: true, oversampling: 2.0})` |
 
 ## Quickstart
 
 ```bash
-# Qdrant on localhost:6333
+# Qdrant :6333 + Ollama with all-minilm:l6-v2
 cd examples/airbnb-demo
-pip install -e ../../crates/pyqql   # pyqql 0.1.4+
+pip install -e ../../crates/pyqql
 
-# Offline hash vectors (no embed server)
-python ingest.py
+python ingest.py                 # default: 1500 listings, turbo/2
+QUANT_BITS=4 MAX_LISTINGS=3000 python ingest.py
 
-# Or real dense embeddings
-EMBED_URL=http://localhost:11434 MAX_LISTINGS=1000 python ingest.py
-
-# Parse-check all showcase queries (no Qdrant)
-python query.py
-
-# Live search
-python query.py --execute
+python query.py                  # parse-check
+python query.py --execute        # live geo + hybrid + rescore
 ```
 
 ## Sample QQL
 
-### GEO_RADIUS (Brandenburg Gate)
-
 ```sql
+-- Geo radius + quant rescore
 QUERY TEXT 'cozy studio near historic landmarks'
 FROM berlin_airbnb
 USING dense
 WHERE location GEO_RADIUS {
-    center: {lat: 52.5163, lon: 13.3777},
-    radius: 1500.0
+    center: {lat: 52.5163, lon: 13.3777}, radius: 1500.0
   }
   AND price <= 100.0
+PARAMS (hnsw_ef = 128, quantization = {ignore: false, rescore: true, oversampling: 2.0})
 LIMIT 5;
-```
 
-### GEO_BBOX + hybrid
-
-```sql
-QUERY TEXT 'spacious loft with balcony'
+-- District filter (not a shard key)
+QUERY TEXT 'quiet courtyard'
 FROM berlin_airbnb
-USING HYBRID DENSE dense SPARSE sparse FUSION RRF
-WHERE location GEO_BBOX {
-    top_left: {lat: 52.535, lon: 13.360},
-    bottom_right: {lat: 52.505, lon: 13.420}
-  }
-  AND room_type = 'Entire home/apt'
-LIMIT 5;
-```
-
-### District shard isolation (host inject)
-
-```python
-stmt = pyqql.parse("""
-  QUERY TEXT 'quiet courtyard apartment'
-  FROM berlin_airbnb USING dense
-  WHERE rating >= 4.5 LIMIT 5
-""")[0]
-pyqql.inject_shard_key(stmt, "mitte")
-client.execute(stmt)
-```
-
-### Formula geo-decay
-
-```sql
-WITH candidates AS (
-  QUERY TEXT 'apartment near museums' FROM berlin_airbnb USING dense LIMIT 50
-)
-QUERY FORMULA (
-  score * GAUSS_DECAY(GEO_DISTANCE(52.5163, 13.3777, location), 0.0, 3000.0, 0.5)
-) DEFAULTS (location = {lat: 52.5163, lon: 13.3777})
-FROM berlin_airbnb
-PREFETCH (candidates)
+USING dense
+WHERE district = 'Mitte' AND rating >= 4.5
+PARAMS (quantization = {rescore: true, oversampling: 2.0})
 LIMIT 5;
 ```
 
@@ -103,8 +55,7 @@ LIMIT 5;
 
 | File | Role |
 |------|------|
-| `config.py` | URLs, shard map, landmark coordinates |
-| `ingest.py` | Schema + indexes + sharded UPSERT |
-| `query.py` | 10 geo/hybrid/formula demos |
+| `config.py` | Ollama URL, turbo bits, landmarks |
+| `ingest.py` | Schema + turbo quant + hybrid UPSERT |
+| `query.py` | 12 geo/hybrid/formula demos with rescore |
 | `listings.csv.gz` | Inside Airbnb Berlin dump |
-| `neighbourhoods.geojson` | Optional neighbourhood polygons |

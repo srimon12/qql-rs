@@ -1,78 +1,41 @@
-# QQL AST Filter Injection Reference (`inject_filter`)
+# `inject_filter` (skill reference)
 
-`inject_filter` is a zero-trust AST modification utility in QQL. It programmatically mutates a parsed QQL statement (`Stmt`) by injecting a mandatory filter predicate across all statement types and sub-graphs **before** planning or execution.
+Host-side **logical isolation**. Recursively ANDs a comparison into the AST before plan/execute.
 
----
+## Do / don’t
 
-## When to Use `inject_filter`
+| Do | Don’t |
+|----|--------|
+| Always inject tenant / org / project on untrusted QQL | Trust the client to send `WHERE tenant_id = …` |
+| Use equality (`=`) for policy stamps | Expect `inject_filter` to support `!=` / `IN` / full text |
+| Pair with `is_tenant` indexes when useful | Confuse this with `SHARD` routing |
+| Fail closed on DDL (validation error is correct) | Use inject for `CREATE COLLECTION` / `SHOW` |
 
-Use `inject_filter` whenever platform code or AI agents receive untrusted QQL queries, or when system-wide context policies must be strictly enforced:
+## Isolation vs routing
 
-* **Security & Multi-Tenancy:** Enforcing `tenant_id = '...'` or `org_id = '...'`
-* **Agent Sandboxing:** Locking LLM-generated QQL to an active `project_id` or `user_id`
-* **Soft-Deletes:** Forcing `deleted = false` or `status = 'active'`
-* **Safety Rails:** Forcing `moderation_status = 'approved'` or `nsfw = false`
-* **Environment Boundaries:** Forcing `env = 'prod'` or `region = 'eu-west-1'`
-* **Scoped Mutations:** Preventing unscoped `DELETE`, `UPDATE PAYLOAD`, or `CLEAR PAYLOAD` execution
-
----
-
-## How `inject_filter` Operates on the AST
-
-When `inject_filter(stmt, field, op, value)` is called:
-
-1. **Queries (`Stmt::Query`):**
-   * Merges the filter predicate into the top-level `WHERE` clause (`AND` conjunction).
-   * Recursively traverses all Common Table Expression (CTE) definitions in `WITH cte_name AS (...)` blocks.
-   * Recursively traverses prefetch and fusion trees (`HYBRID`, `RERANK`, `FUSION`).
-
-2. **Scroll & Count (`Stmt::Scroll`, `Stmt::Count`):**
-   * Merges the injected predicate into the statement's filter expression.
-
-3. **Mutations (`Stmt::Delete`, `Stmt::UpdatePayload`, `Stmt::ClearPayload`):**
-   * Converts point selectors to filter conditions so deletions and payload updates cannot touch unauthorized points.
-
-4. **Upserts (`Stmt::Upsert`):**
-   * When injecting an equality filter (`ComparisonOp::Eq`), it stamps the payload field onto every point payload in the batch for data provenance.
-
----
-
-## Code Signatures
-
-### Rust (`qql-core`)
-```rust
-use qql_core::ast::{inject_filter, ComparisonOp, Value};
-use qql_core::parser::Parser;
-
-let mut stmt = Parser::parse("QUERY 'laptops' FROM products LIMIT 10")?;
-inject_filter(&mut stmt, "group_id", ComparisonOp::Eq, Value::Str("grp_123".into()))?;
+```text
+inject_filter(tenant_id = 'acme')  →  Filter
+SHARD 'acme' / stmt.shard_key      →  request shard_key / ShardKeySelector
 ```
 
-### Python (`pyqql`)
-```python
-import pyqql
+No `inject_shard_key`. Author `SHARD '…'` in QQL when the tenant is known; use
+`stmt.shard_key` only when auth resolves the key after parse.
 
-stmt = pyqql.parse("QUERY 'laptops' FROM products LIMIT 10")[0]
-pyqql.inject_filter(stmt, "group_id", "=", "grp_123")
-```
+## Signatures
 
-### Node.js (`nqql`)
-```javascript
-const nqql = require('@veristamp/nqql');
+**Rust:** `inject_filter(&mut Stmt, field, ComparisonOp, Value) -> Result<()>`  
+**Python:** `inject_filter(stmt|str, field, op, value)` or `stmt.inject_filter(...)`  
+**Node:** `injectFilter(str, …)` or `stmt.injectFilter(...)`  
+**WASM:** `stmt.injectFilter(...)` (and string free function where exported)
 
-const [stmt] = nqql.parse("QUERY 'laptops' FROM products LIMIT 10");
-stmt.injectFilter("group_id", "=", "grp_123");
-```
+## Propagation
 
-### WASM (`qql-wasm`)
-```javascript
-import init, { parse, inject_filter } from 'qql-wasm';
+- `QUERY`: top-level + every CTE + nested prefetch queries  
+- `SCROLL` / `COUNT`: statement filter  
+- Mutations: selector / filter merge  
+- `UPSERT` + `Eq`: stamp payload keys  
 
-await init();
-const stmt = inject_filter(
-  "QUERY 'laptops' FROM products LIMIT 10",
-  "group_id",
-  "=",
-  "grp_123",
-);
-```
+## Full guide
+
+See [docs/inject_filter.md](../../../docs/inject_filter.md) and
+[qql-multitenancy.md](qql-multitenancy.md).

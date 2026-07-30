@@ -1,8 +1,12 @@
 # qql-edge
 
-Zero-network QQL executor. Combines `qdrant-edge` (in-process HNSW) with the
-QQL runtime for fully local vector search — no external Qdrant, no network
-hops, no API keys.
+Zero-network QQL executor: **qdrant-edge** (in-process HNSW) + QQL runtime.
+
+## Proposition
+
+Same language and plan path as remote Qdrant, without a server. Opt-in
+FastEmbed slots for dense / sparse / multi / image / cross-encoder. Cluster
+features fail with stable `QQL-EDGE-UNSUPPORTED-*` codes (not silent no-ops).
 
 Three embedding strategies produce an [`Executor`] backed by [`EdgeQdrant`]:
 

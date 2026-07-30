@@ -1,11 +1,15 @@
 # qql-embed
 
-Shared embedding resolution layer. Contains the host-agnostic [`Embedder`] trait,
-a hash-based BM25 [`SparseEmbedder`], [`resolve_embeddings`] (AST rewriter), and
-[`resolve_query_vector_kinds`] (schema topology → `USING` kinds / multivector flags).
+Shared embedding resolution: host-agnostic [`Embedder`] trait, local BM25
+[`SparseEmbedder`], [`resolve_embeddings`], and schema
+[`resolve_query_vector_kinds`].
 
-No Qdrant I/O, no HTTP client, no transport code. Used by `qql-runtime`
-(`HttpEmbedder`), `qql-edge` (`FastEmbedder`), and `qql-wasm` (JS/fetch adapters).
+## Proposition
+
+**One embed owner** for every backend. No Qdrant I/O, no HTTP client. Runtime
+(`HttpEmbedder`), edge (`FastEmbedder`), and WASM adapters implement the trait.
+Schema fills `USING` kinds **before** embed; unknown kinds fail closed
+(`QQL-VECTOR-KIND`) — never silent dense defaults for named vectors.
 
 ## Embedder trait
 

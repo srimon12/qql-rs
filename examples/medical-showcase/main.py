@@ -22,20 +22,27 @@ COL = "medical_showcase"
 
 
 def qql_exec(stmt: str) -> dict:
-    r = subprocess.run([QQL, "exec", "--quiet", "--json", stmt], capture_output=True, text=True)
-    if not r.stdout.strip():
+    # Prefer JSON without --quiet so successful DDL always emits a report body.
+    r = subprocess.run([QQL, "exec", "--json", stmt], capture_output=True, text=True)
+    out = (r.stdout or "").strip()
+    if not out:
         raise RuntimeError(r.stderr or f"exit {r.returncode}")
-    d = json.loads(r.stdout)
+    d = json.loads(out)
     if not d.get("ok"):
-        raise RuntimeError(d.get("error") or r.stderr)
+        # Multi-result report: ok=false when any statement failed
+        err = d.get("error") or r.stderr
+        if not err and d.get("results"):
+            err = next((x.get("message") for x in d["results"] if not x.get("ok")), None)
+        raise RuntimeError(err or "execution failed")
     return d
 
 
 def qql_explain(stmt: str) -> dict:
-    r = subprocess.run([QQL, "explain", "--quiet", "--json", stmt], capture_output=True, text=True)
-    if not r.stdout.strip():
+    r = subprocess.run([QQL, "explain", "--json", stmt], capture_output=True, text=True)
+    out = (r.stdout or "").strip()
+    if not out:
         raise RuntimeError(r.stderr or f"exit {r.returncode}")
-    d = json.loads(r.stdout)
+    d = json.loads(out)
     if not d.get("ok"):
         raise RuntimeError(d.get("error") or r.stderr)
     return d
@@ -49,17 +56,34 @@ def run(label: str, stmt: str, *, execute: bool, explain: bool = False):
         if explain:
             d = qql_explain(stmt)
             plan = d.get("plan", "")
-            for line in plan.split("\n")[:5]:
+            for line in str(plan).split("\n")[:5]:
                 print(f"    {line}")
+            return
+        d = qql_exec(stmt)
+        # Normalize ExecutionReport → first result
+        if "results" in d:
+            res = d["results"][0] if d["results"] else {}
         else:
-            d = qql_exec(stmt)
-            msg = d.get("message", "")
-            data = d.get("data", {})
-            if isinstance(data, list) and data and "score" in data[0]:
+            res = d
+        msg = res.get("message", d.get("message", "ok"))
+        data = res.get("data")
+        if isinstance(data, dict):
+            data = data.get("result", data)
+            if isinstance(data, dict):
+                if "count" in data:
+                    print(f"    count={data['count']}")
+                    return
+                data = data.get("points") or data.get("hits") or data.get("groups") or data
+        if isinstance(data, list) and data:
+            if isinstance(data[0], dict) and "score" in data[0]:
                 for h in data[:3]:
-                    print(f"    score={h['score']:.3f}  id={h.get('id','')}")
-            else:
-                print(f"    {msg}")
+                    print(f"    score={h['score']:.3f}  id={h.get('id', '')}")
+                return
+            if isinstance(data[0], dict) and "hits" in data[0]:
+                for g in data[:3]:
+                    print(f"    group={g.get('id', '?')} hits={len(g.get('hits', []))}")
+                return
+        print(f"    {msg or 'ok'}")
     except Exception as e:
         print(f"    ERROR: {e}")
 
@@ -90,9 +114,18 @@ def main():
     print("Medical Retrieval Showcase")
     print("=" * 50)
 
+    # Quant rescore defaults for turbo collections
+    QRESCORE = "PARAMS (hnsw_ef = 128, quantization = {ignore: false, rescore: true, oversampling: 2.0})"
+
     # -- Schema --
     print("\n[1] Schema")
-    run("Create HYBRID collection",
+    if args.execute:
+        try:
+            qql_exec(f"DROP COLLECTION {COL}")
+            print("  Drop existing collection")
+        except Exception:
+            print("  Drop (none)")
+    run("Create HYBRID + turbo/2",
         f"CREATE COLLECTION {COL} HYBRID WITH HNSW (payload_m = 16) WITH QUANTIZATION (type = 'turbo', bits = 2, always_ram = true)",
         execute=args.execute)
     for name, ftype in [
@@ -105,17 +138,6 @@ def main():
 
     # -- Upsert --
     print("\n[2] Upsert (12 records)")
-    if args.execute:
-        try:
-            qql_exec(f"DROP COLLECTION {COL}")
-        except:
-            pass
-        qql_exec(f"CREATE COLLECTION {COL} HYBRID WITH HNSW (payload_m = 16) WITH QUANTIZATION (type = 'turbo', bits = 2, always_ram = true)")
-        for name, ftype in [
-            ("specialty", "keyword"), ("priority", "keyword"), ("status", "keyword"),
-            ("year", "integer"), ("patient_id", "keyword"),
-        ]:
-            qql_exec(f"CREATE INDEX ON COLLECTION {COL} FOR {name} TYPE {ftype}")
     for pid, text, spec, pri, stat, year in RECORDS:
         run(f"  Upsert #{pid} ({spec})",
             f"UPSERT INTO {COL} VALUES {{'id': {pid}, 'text': '{text}', 'patient_id': 'PT-{pid:04d}', 'specialty': '{spec}', 'priority': '{pri}', 'status': '{stat}', 'year': {year}}}",
@@ -123,68 +145,68 @@ def main():
 
     # -- Search Modes --
     print("\n[3] Search Modes")
-    run("Dense (semantic)",
-        f"QUERY 'acute stroke weakness' FROM {COL} LIMIT 3",
+    run("Dense (semantic) + rescore",
+        f"QUERY TEXT 'acute stroke weakness' FROM {COL} USING dense {QRESCORE} LIMIT 3",
         execute=args.execute)
     run("Dense exact (PARAMS exact=true)",
-        f"QUERY 'chest pain troponin' FROM {COL} PARAMS (exact = true) LIMIT 3",
+        f"QUERY TEXT 'chest pain troponin' FROM {COL} USING dense PARAMS (exact = true) LIMIT 3",
         execute=args.execute)
-    run("Hybrid RRF",
-        f"QUERY HYBRID TEXT 'emergency neurological' DENSE dense SPARSE sparse FUSION RRF FROM {COL} LIMIT 3",
+    run("Hybrid RRF + rescore",
+        f"QUERY HYBRID TEXT 'emergency neurological' DENSE dense SPARSE sparse FUSION RRF FROM {COL} {QRESCORE} LIMIT 3",
         execute=args.execute)
     run("Hybrid DBSF",
-        f"QUERY HYBRID TEXT 'emergency neurological' DENSE dense SPARSE sparse FUSION DBSF FROM {COL} LIMIT 3",
+        f"QUERY HYBRID TEXT 'emergency neurological' DENSE dense SPARSE sparse FUSION DBSF FROM {COL} {QRESCORE} LIMIT 3",
         execute=args.execute)
     run("Sparse (keyword)",
-        f"QUERY 'fever cough antibiotics' FROM {COL} USING sparse LIMIT 3",
+        f"QUERY TEXT 'fever cough antibiotics' FROM {COL} USING sparse LIMIT 3",
         execute=args.execute)
     run("MMR diversity",
-        f"QUERY MMR 'neurological emergency' DIVERSITY 0.5 CANDIDATES 20 FROM {COL} USING dense LIMIT 5",
+        f"QUERY MMR TEXT 'neurological emergency' DIVERSITY 0.5 CANDIDATES 20 FROM {COL} USING dense {QRESCORE} LIMIT 5",
         execute=args.execute)
 
     # -- Filters --
     print("\n[4] Filters")
     run("WHERE specialty = 'neurology'",
-        f"QUERY 'headache' FROM {COL} USING dense WHERE specialty = 'neurology' LIMIT 3",
+        f"QUERY TEXT 'headache' FROM {COL} USING dense WHERE specialty = 'neurology' {QRESCORE} LIMIT 3",
         execute=args.execute)
     run("WHERE priority IN ('high','medium')",
-        f"QUERY 'chest pain' FROM {COL} USING dense WHERE priority IN ('high', 'medium') LIMIT 3",
+        f"QUERY TEXT 'chest pain' FROM {COL} USING dense WHERE priority IN ('high', 'medium') {QRESCORE} LIMIT 3",
         execute=args.execute)
     run("Compound AND + IN",
-        f"QUERY 'emergency' FROM {COL} USING dense WHERE priority = 'high' AND status = 'admitted' LIMIT 3",
+        f"QUERY TEXT 'emergency' FROM {COL} USING dense WHERE priority = 'high' AND status = 'admitted' {QRESCORE} LIMIT 3",
         execute=args.execute)
     run("MATCH PHRASE",
-        f"QUERY 'chest pain' FROM {COL} WHERE diagnosis MATCH PHRASE 'chest pain' LIMIT 3",
+        f"QUERY TEXT 'chest pain' FROM {COL} USING dense WHERE text MATCH PHRASE 'chest pain' {QRESCORE} LIMIT 3",
         execute=args.execute)
 
     # -- Query-Time Params --
     print("\n[5] Query-Time Params")
-    run("HNSW ef=256",
-        f"QUERY 'stroke' FROM {COL} PARAMS (hnsw_ef = 256) LIMIT 3",
+    run("HNSW ef=256 + rescore",
+        f"QUERY TEXT 'stroke' FROM {COL} USING dense PARAMS (hnsw_ef = 256, quantization = {{rescore: true, oversampling: 2.0}}) LIMIT 3",
         execute=args.execute)
     run("ACORN (filtered recall)",
-        f"QUERY 'emergency' FROM {COL} WHERE specialty = 'neurology' PARAMS (acorn = true, max_selectivity = 0.5) LIMIT 3",
+        f"QUERY TEXT 'emergency' FROM {COL} USING dense WHERE specialty = 'neurology' PARAMS (acorn = true, max_selectivity = 0.5, quantization = {{rescore: true}}) LIMIT 3",
         execute=args.execute)
     run("Hybrid shorthand (USING HYBRID)",
-        f"QUERY TEXT 'emergency neurological' FROM {COL} USING HYBRID DENSE dense SPARSE sparse FUSION RRF LIMIT 3",
+        f"QUERY TEXT 'emergency neurological' FROM {COL} USING HYBRID DENSE dense SPARSE sparse FUSION RRF {QRESCORE} LIMIT 3",
         execute=args.execute)
     run("Request timeout + consistency",
-        f"QUERY TEXT 'stroke' FROM {COL} USING dense PARAMS (timeout = 15, consistency = majority) LIMIT 3",
+        f"QUERY TEXT 'stroke' FROM {COL} USING dense PARAMS (timeout = 15, consistency = majority, quantization = {{rescore: true}}) LIMIT 3",
         execute=args.execute)
     run("Score threshold",
-        f"QUERY 'patient treatment' FROM {COL} SCORE THRESHOLD 0.3 LIMIT 10",
+        f"QUERY TEXT 'patient treatment' FROM {COL} USING dense {QRESCORE} SCORE THRESHOLD 0.3 LIMIT 10",
         execute=args.execute)
     run("Offset pagination",
-        f"QUERY 'patient diagnosis' FROM {COL} LIMIT 3 OFFSET 3",
+        f"QUERY TEXT 'patient diagnosis' FROM {COL} USING dense {QRESCORE} LIMIT 3 OFFSET 3",
         execute=args.execute)
 
     # -- Grouped Retrieval --
     print("\n[6] Grouped Retrieval")
     run("GROUP BY specialty",
-        f"QUERY 'emergency acute' FROM {COL} GROUP BY specialty SIZE 2 LIMIT 4",
+        f"QUERY TEXT 'emergency acute' FROM {COL} USING dense {QRESCORE} GROUP BY specialty SIZE 2 LIMIT 4",
         execute=args.execute)
     run("GROUP BY priority",
-        f"QUERY 'patient' FROM {COL} USING dense GROUP BY priority SIZE 2 LIMIT 4",
+        f"QUERY TEXT 'patient' FROM {COL} USING dense {QRESCORE} GROUP BY priority SIZE 2 LIMIT 4",
         execute=args.execute)
 
     # -- Recommend --
@@ -202,10 +224,10 @@ def main():
     # -- Context & Discover --
     print("\n[8] Context & Discover")
     run("Context pairs",
-        f"QUERY CONTEXT (POSITIVE POINT 1 NEGATIVE POINT 4, POSITIVE POINT 10 NEGATIVE POINT 3) FROM {COL} LIMIT 3",
+        f"QUERY CONTEXT (POSITIVE POINT 1 NEGATIVE POINT 4, POSITIVE POINT 10 NEGATIVE POINT 3) FROM {COL} USING dense LIMIT 3",
         execute=args.execute)
     run("Discover",
-        f"QUERY DISCOVER TARGET POINT 1 CONTEXT (POSITIVE POINT 12 NEGATIVE POINT 4) FROM {COL} LIMIT 3",
+        f"QUERY DISCOVER TARGET POINT 1 CONTEXT (POSITIVE POINT 12 NEGATIVE POINT 4) FROM {COL} USING dense LIMIT 3",
         execute=args.execute)
 
     # -- CTE Prefetch DAG --
@@ -238,10 +260,10 @@ def main():
         f"QUERY ORDER BY year DESC FROM {COL} LIMIT 5",
         execute=args.execute)
     run("WITH PAYLOAD false",
-        f"QUERY 'stroke' FROM {COL} USING dense WITH PAYLOAD false LIMIT 3",
+        f"QUERY TEXT 'stroke' FROM {COL} USING dense {QRESCORE} WITH PAYLOAD false LIMIT 3",
         execute=args.execute)
     run("WITH PAYLOAD INCLUDE",
-        f"QUERY 'emergency' FROM {COL} USING dense WITH PAYLOAD INCLUDE ('specialty', 'priority') LIMIT 3",
+        f"QUERY TEXT 'emergency' FROM {COL} USING dense {QRESCORE} WITH PAYLOAD INCLUDE ('specialty', 'priority') LIMIT 3",
         execute=args.execute)
 
     # -- Point Access --

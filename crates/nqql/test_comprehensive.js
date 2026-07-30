@@ -92,7 +92,6 @@ test('exports: parse', () => assert.strictEqual(typeof nqql.parse, 'function'));
 test('exports: parseJson', () => assert.strictEqual(typeof nqql.parseJson, 'function'));
 test('exports: isValid', () => assert.strictEqual(typeof nqql.isValid, 'function'));
 test('exports: injectFilter', () => assert.strictEqual(typeof nqql.injectFilter, 'function'));
-test('exports: injectShardKey', () => assert.strictEqual(typeof nqql.injectShardKey, 'function'));
 test('exports: tokenize', () => assert.strictEqual(typeof nqql.tokenize, 'function'));
 test('exports: compileQuery', () => assert.strictEqual(typeof nqql.compileQuery, 'function'));
 test('exports: explain', () => assert.strictEqual(typeof nqql.explain, 'function'));
@@ -102,7 +101,7 @@ test('exports: executeStmt', () => assert.strictEqual(typeof nqql.executeStmt, '
 
 // Unknown exports check
 const knownKeys = ['Client','HttpEmbedder','Stmt','compileQuery','execute','executeStmt',
-  'explain','explainStmt','injectFilter','injectShardKey','isValid','parse','parseJson','tokenize', 'version', '__version__'];
+  'explain','explainStmt','injectFilter','isValid','parse','parseJson','tokenize', 'version', '__version__'];
 const actualKeys = Object.keys(nqql).sort();
 test('no extra exports', () => {
   const extras = actualKeys.filter(k => !knownKeys.includes(k));
@@ -112,7 +111,6 @@ test('no extra exports', () => {
 const stmt = nqql.parse('SHOW COLLECTIONS')[0];
 test('Stmt instance methods: toObject', () => assert.strictEqual(typeof stmt.toObject, 'function'));
 test('Stmt instance methods: injectFilter', () => assert.strictEqual(typeof stmt.injectFilter, 'function'));
-test('Stmt instance methods: injectShardKey', () => assert.strictEqual(typeof stmt.injectShardKey, 'function'));
 test('Stmt.toJson and Stmt.toJSON both exist', () => {
   assert.strictEqual(typeof stmt.toJson, 'function');
   assert.strictEqual(typeof stmt.toJSON, 'function');
@@ -753,12 +751,12 @@ async function runE2E() {
     assert.strictEqual(stmt.toObject().DeletePayload.shard_key, 'tenant-a');
   });
 
-  test('injectShardKey supports DELETE PAYLOAD', () => {
-    const result = nqql.injectShardKey(
-      "DELETE PAYLOAD draft FROM docs WHERE status = 'archived'",
-      'tenant-b',
+  test('SHARD clause on DELETE PAYLOAD', () => {
+    const [stmt] = nqql.parse(
+      "DELETE PAYLOAD draft FROM docs WHERE status = 'archived' SHARD 'tenant-b'",
     );
-    assert.strictEqual(result.DeletePayload.shard_key, 'tenant-b');
+    assert.strictEqual(stmt.shardKey, 'tenant-b');
+    assert.strictEqual(stmt.toObject().DeletePayload.shard_key, 'tenant-b');
   });
 
   test('Stmt.shardKey on SHOW COLLECTIONS returns null', () => {
