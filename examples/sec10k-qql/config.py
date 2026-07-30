@@ -8,17 +8,24 @@ import os
 import re
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
-# OpenAI-compatible embeddings endpoint (LM Studio, Ollama, vLLM, …)
-LM_STUDIO = os.getenv("EMBED_URL", "http://127.0.0.1:1234")
-EMBED_MODEL = os.getenv("EMBED_MODEL", "text-embedding-all-minilm-l6-v2-embedding")
+
+# Ollama OpenAI-compatible embeddings — small & fast
+EMBED_URL = os.getenv("EMBED_URL", "http://localhost:11434/v1/embeddings")
+EMBED_MODEL = os.getenv("EMBED_MODEL", "all-minilm:l6-v2")
 EMBED_DIM = int(os.getenv("EMBED_DIM", "384"))
-LLM_MODEL = os.getenv("LLM_MODEL", "minicpm5-1b-claude-opus-fable5-v2-thinking")
+
+# Optional chat model for agent / answer generation (LM Studio or Ollama)
+LLM_BASE = os.getenv("LLM_BASE", os.getenv("LM_STUDIO", "http://127.0.0.1:1234"))
+LLM_MODEL = os.getenv("LLM_MODEL", "lfm2.5-thinking:1.2b")
+
+# Back-compat aliases used by older scripts
+LM_STUDIO = os.getenv("LM_STUDIO", EMBED_URL.rsplit("/v1", 1)[0] if "/v1" in EMBED_URL else "http://localhost:11434")
 
 COLLECTION = "sec10k"
 TENANTS = ["honeywell", "ge", "3m", "rtx"]
 
-CHUNK_SIZE = 384
-CHUNK_OVERLAP = 50
+CHUNK_SIZE = 256
+CHUNK_OVERLAP = 40
 
 SEC_USER_AGENT = os.getenv("SEC_USER_AGENT", "QQL-demo contact@example.com")
 
@@ -46,7 +53,9 @@ FILINGS = {
     },
 }
 
-# Metadata extraction — stored as payload for WHERE / GROUP BY / ORDER BY
+# Optional: limit years for a faster demo (default all years)
+DEMO_YEARS = os.getenv("DEMO_YEARS", "")  # e.g. "2024" or "2024,2025"
+
 SECTION_RE = re.compile(r"(Item\s+[0-9]+[A-Z]?\.?)", re.IGNORECASE)
 RISK_RE = re.compile(
     r"(cyber\s*security|supply\s*chain|regulatory|litigation|"

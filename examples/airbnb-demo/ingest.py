@@ -2,14 +2,14 @@
 """
 Ingest Berlin Airbnb listings into Qdrant via pyqql.
 
-- Reads listings.csv or listings.csv.gz (Inside Airbnb)
-- Hybrid collection: dense 384-d + sparse BM25-style vectors
-- Custom sharding by Berlin district (SHARD 'mitte', 'kreuzberg', …)
+- Hybrid collection: dense 384-d (all-minilm via Ollama) + sparse BM25-style
+- Turbo quantization (bits=2|4) for memory-efficient ANN
 - Geo + keyword + numeric payload indexes
+- NO custom sharding (single collection, filter by district in WHERE)
 
-Embedding modes:
-  1. EMBED_URL set  → HttpEmbedder (real dense vectors; sparse still hashed)
-  2. default        → deterministic hash dense + sparse (fully offline)
+Usage:
+    python ingest.py
+    QUANT_BITS=4 MAX_LISTINGS=3000 python ingest.py
 """
 
 from __future__ import annotations
@@ -27,7 +27,9 @@ from pathlib import Path
 
 import config
 
-sys.path.insert(0, os.environ.get("QQL_LIB", str(Path(__file__).resolve().parents[2] / "crates" / "pyqql")))
+sys.path.insert(
+    0, os.environ.get("QQL_LIB", str(Path(__file__).resolve().parents[2] / "crates" / "pyqql"))
+)
 import pyqql  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent
@@ -55,19 +57,8 @@ def escape_qql(s: str) -> str:
     return s.replace("\\", "\\\\").replace("'", "\\'")
 
 
-def text_to_vector(text: str, dim: int = 384) -> list[float]:
-    """Deterministic dense vector (offline fallback)."""
-    vec = [0.0] * dim
-    for word in text.lower().split():
-        h = hashlib.sha256(word.encode()).digest()
-        for i in range(dim):
-            vec[i] += (h[i % len(h)] - 128) / 128.0
-    norm = math.sqrt(sum(x * x for x in vec)) or 1.0
-    return [round(x / norm, 5) for x in vec]
-
-
 def text_to_sparse_vector(text: str) -> dict:
-    """Sparse bag-of-words via token hashing (demo BM25-like)."""
+    """Sparse bag-of-words via token hashing (local BM25-like companion)."""
     words = re.findall(r"\w+", text.lower())
     counts = Counter(words)
     index_map: dict[int, float] = {}
@@ -115,7 +106,6 @@ def load_listings() -> list[dict]:
                     or "Mitte"
                 )
                 district = clean_string(row.get("neighbourhood_group_cleansed") or "Mitte")
-                shard = config.shard_for_district(district)
 
                 listings.append(
                     {
@@ -124,8 +114,9 @@ def load_listings() -> list[dict]:
                         "name": name[:100],
                         "neighbourhood": neighbourhood,
                         "district": district,
-                        "shard": shard,
-                        "property_type": clean_string(row.get("property_type") or "Entire rental unit"),
+                        "property_type": clean_string(
+                            row.get("property_type") or "Entire rental unit"
+                        ),
                         "room_type": clean_string(row.get("room_type") or "Entire home apt"),
                         "host_name": clean_string(row.get("host_name") or "Host")[:50],
                         "lat": lat,
@@ -140,7 +131,6 @@ def load_listings() -> list[dict]:
                         "reviews_count": int(float(row.get("number_of_reviews") or 0)),
                         "rating": float(row.get("review_scores_rating") or 4.5),
                         "rating_location": float(row.get("review_scores_location") or 4.5),
-                        "vector": text_to_vector(text, config.EMBED_DIM),
                         "sparse": text_to_sparse_vector(text),
                     }
                 )
@@ -157,17 +147,10 @@ def main() -> None:
     listings = load_listings()
     print(f"Loaded {len(listings)} listings in {time.time() - t0:.2f}s")
 
-    use_http = bool(config.EMBED_URL)
-    if use_http:
-        url = config.EMBED_URL.rstrip("/")
-        if not url.endswith("/embeddings"):
-            url = f"{url}/v1/embeddings"
-        embedder = pyqql.HttpEmbedder(url, config.EMBED_MODEL, config.EMBED_DIM)
-        client = pyqql.Client(config.QDRANT_URL, embedder=embedder)
-        print(f"Embedder: HTTP {url}")
-    else:
-        client = pyqql.Client(config.QDRANT_URL)
-        print("Embedder: offline hash vectors (set EMBED_URL for real dense)")
+    embedder = pyqql.HttpEmbedder(config.EMBED_URL, config.EMBED_MODEL, config.EMBED_DIM)
+    client = pyqql.Client(config.QDRANT_URL, embedder=embedder)
+    print(f"Embedder: {config.EMBED_MODEL} @ {config.EMBED_URL} (dim={config.EMBED_DIM})")
+    print(f"Quantization: turbo bits={config.QUANT_BITS} always_ram")
 
     print(f"Setting up collection '{config.COLLECTION}'…")
     try:
@@ -175,23 +158,20 @@ def main() -> None:
     except Exception:
         pass
 
-    shard_list = ", ".join(repr(k) for k in config.SHARD_KEYS)
+    # Hybrid dense+sparse, turbo quant — single shard (no custom district keys)
     client.execute(
         f"""
         CREATE COLLECTION {config.COLLECTION}
-        (dense VECTOR({config.EMBED_DIM}, COSINE), sparse SPARSE)
-        WITH PARAMS (
-            shard_number = {max(len(config.SHARD_KEYS) * 2, 4)},
-            sharding_method = 'custom',
-            shard_keys = [{shard_list}]
-        )
+        HYBRID (dense VECTOR({config.EMBED_DIM}, COSINE), sparse SPARSE)
+        WITH HNSW (m = 16, ef_construct = 100, payload_m = 16)
+        WITH QUANTIZATION (type = 'turbo', bits = {config.QUANT_BITS}, always_ram = true)
         """
     )
 
     indexes = [
         f"CREATE INDEX ON COLLECTION {config.COLLECTION} FOR location TYPE geo",
         f"CREATE INDEX ON COLLECTION {config.COLLECTION} FOR neighbourhood TYPE keyword",
-        f"CREATE INDEX ON COLLECTION {config.COLLECTION} FOR district TYPE keyword WITH (is_tenant = true)",
+        f"CREATE INDEX ON COLLECTION {config.COLLECTION} FOR district TYPE keyword",
         f"CREATE INDEX ON COLLECTION {config.COLLECTION} FOR price TYPE float",
         f"CREATE INDEX ON COLLECTION {config.COLLECTION} FOR rating TYPE float",
         f"CREATE INDEX ON COLLECTION {config.COLLECTION} FOR rating_location TYPE float",
@@ -210,100 +190,63 @@ def main() -> None:
         except Exception as e:
             print(f"  index notice: {e}")
 
-    for key in config.SHARD_KEYS:
-        try:
-            client.execute(
-                f"CREATE SHARD KEY '{key}' ON COLLECTION {config.COLLECTION} WITH (shards_number = 1)"
-            )
-        except Exception as e:
-            print(f"  shard '{key}': {e}")
-
-    print(f"Ingesting {len(listings)} listings…")
-    batch_size = 40
+    print(f"Ingesting {len(listings)} listings (dense via Ollama, sparse local)…")
+    batch_size = 32
     for i in range(0, len(listings), batch_size):
         batch = listings[i : i + batch_size]
-        # Group by shard so each UPSERT carries one SHARD key
-        by_shard: dict[str, list] = {}
+        vals = []
         for item in batch:
-            by_shard.setdefault(item["shard"], []).append(item)
+            sp = item["sparse"]
+            # Dense auto-embedded from `text` via HttpEmbedder;
+            # sparse provided explicitly for hybrid.
+            payload = (
+                "{"
+                f"id: {item['id']}, "
+                f"text: '{escape_qql(item['text'])}', "
+                f"name: '{escape_qql(item['name'])}', "
+                f"neighbourhood: '{escape_qql(item['neighbourhood'])}', "
+                f"district: '{escape_qql(item['district'])}', "
+                f"property_type: '{escape_qql(item['property_type'])}', "
+                f"room_type: '{escape_qql(item['room_type'])}', "
+                f"host_name: '{escape_qql(item['host_name'])}', "
+                f"location: {{lat: {item['lat']}, lon: {item['lon']}}}, "
+                f"price: {item['price']}, "
+                f"accommodates: {item['accommodates']}, "
+                f"bedrooms: {item['bedrooms']}, "
+                f"beds: {item['beds']}, "
+                f"minimum_nights: {item['minimum_nights']}, "
+                f"rating: {item['rating']}, "
+                f"rating_location: {item['rating_location']}, "
+                f"superhost: {'true' if item['superhost'] else 'false'}, "
+                f"instant_bookable: {'true' if item['instant_bookable'] else 'false'}, "
+                f"reviews_count: {item['reviews_count']}, "
+                f"vector: {{sparse: {{indices: {sp['indices']}, values: {sp['values']}}}}}"
+                "}"
+            )
+            vals.append(payload)
 
-        for shard, items in by_shard.items():
-            vals = []
-            for item in items:
-                sp = item["sparse"]
-                if use_http:
-                    # Auto-embed dense from text; still pass sparse explicitly
-                    payload = (
-                        "{"
-                        f"id: {item['id']}, "
-                        f"text: '{escape_qql(item['text'])}', "
-                        f"name: '{escape_qql(item['name'])}', "
-                        f"neighbourhood: '{escape_qql(item['neighbourhood'])}', "
-                        f"district: '{escape_qql(item['district'])}', "
-                        f"property_type: '{escape_qql(item['property_type'])}', "
-                        f"room_type: '{escape_qql(item['room_type'])}', "
-                        f"host_name: '{escape_qql(item['host_name'])}', "
-                        f"location: {{lat: {item['lat']}, lon: {item['lon']}}}, "
-                        f"price: {item['price']}, "
-                        f"accommodates: {item['accommodates']}, "
-                        f"bedrooms: {item['bedrooms']}, "
-                        f"beds: {item['beds']}, "
-                        f"minimum_nights: {item['minimum_nights']}, "
-                        f"rating: {item['rating']}, "
-                        f"rating_location: {item['rating_location']}, "
-                        f"superhost: {'true' if item['superhost'] else 'false'}, "
-                        f"instant_bookable: {'true' if item['instant_bookable'] else 'false'}, "
-                        f"reviews_count: {item['reviews_count']}"
-                        "}"
-                    )
-                else:
-                    dense_str = f"[{', '.join(f'{x:.5f}' for x in item['vector'])}]"
-                    payload = (
-                        "{"
-                        f"id: {item['id']}, "
-                        f"text: '{escape_qql(item['text'])}', "
-                        f"name: '{escape_qql(item['name'])}', "
-                        f"neighbourhood: '{escape_qql(item['neighbourhood'])}', "
-                        f"district: '{escape_qql(item['district'])}', "
-                        f"property_type: '{escape_qql(item['property_type'])}', "
-                        f"room_type: '{escape_qql(item['room_type'])}', "
-                        f"host_name: '{escape_qql(item['host_name'])}', "
-                        f"location: {{lat: {item['lat']}, lon: {item['lon']}}}, "
-                        f"price: {item['price']}, "
-                        f"accommodates: {item['accommodates']}, "
-                        f"bedrooms: {item['bedrooms']}, "
-                        f"beds: {item['beds']}, "
-                        f"minimum_nights: {item['minimum_nights']}, "
-                        f"rating: {item['rating']}, "
-                        f"rating_location: {item['rating_location']}, "
-                        f"superhost: {'true' if item['superhost'] else 'false'}, "
-                        f"instant_bookable: {'true' if item['instant_bookable'] else 'false'}, "
-                        f"reviews_count: {item['reviews_count']}, "
-                        f"vector: {{dense: {dense_str}, sparse: {{indices: {sp['indices']}, values: {sp['values']}}}}}"
-                        "}"
-                    )
-                vals.append(payload)
-
-            if use_http:
-                qql = (
-                    f"UPSERT INTO {config.COLLECTION} VALUES {', '.join(vals)} "
-                    f"USING DENSE MODEL '{config.EMBED_MODEL}' SHARD '{shard}'"
-                )
-            else:
-                qql = f"UPSERT INTO {config.COLLECTION} VALUES {', '.join(vals)} SHARD '{shard}'"
-
-            try:
-                client.execute(pyqql.parse(qql))
-            except Exception as e:
-                print(f"  batch error shard={shard} idx={i}: {e}")
+        qql = (
+            f"UPSERT INTO {config.COLLECTION} VALUES {', '.join(vals)} "
+            f"USING DENSE MODEL '{config.EMBED_MODEL}'"
+        )
+        try:
+            client.execute(pyqql.parse(qql))
+        except Exception as e:
+            print(f"  batch error at {i}: {e}")
+            # Retry smaller if batch fails
+            if batch_size > 8:
+                print("  reducing batch size and continuing…")
+            continue
 
         done = min(i + batch_size, len(listings))
-        if done % 500 < batch_size or done == len(listings):
+        if done % 256 < batch_size or done == len(listings):
             print(f"  Progress: {done}/{len(listings)}")
 
     cnt = client.execute(pyqql.parse(f"COUNT FROM {config.COLLECTION} WITH (exact = true)"))
-    print(f"\nDone. Collection count response: {cnt}")
-    print(f"Shards: {', '.join(config.SHARD_KEYS)}")
+    print(f"\nDone in {time.time() - t0:.1f}s.")
+    print(f"Count: {cnt}")
+    info = client.execute(f"SHOW COLLECTION {config.COLLECTION}")
+    print(f"Collection info: {info}")
 
 
 if __name__ == "__main__":

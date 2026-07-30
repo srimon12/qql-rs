@@ -6,7 +6,7 @@ hybrid dense+sparse retrieval, and **host-enforced tenant isolation**.
 ```
 Layer 1  SHARD 'honeywell'          physical routing
 Layer 2  WHERE tenant_id = …        logical filter
-Layer 3  inject_filter / inject_shard_key   cannot forget
+Layer 3  inject_filter + SHARD / stmt.shard_key
 ```
 
 ## What it shows
@@ -39,8 +39,17 @@ python agent.py "What are Honeywell's cybersecurity risks?"
 ```python
 stmt = pyqql.parse("QUERY TEXT 'risks' FROM sec10k USING HYBRID LIMIT 5")[0]
 pyqql.inject_filter(stmt, "tenant_id", "=", "honeywell")
-pyqql.inject_shard_key(stmt, "honeywell")
+stmt.shard_key = "honeywell"  # or write SHARD 'honeywell' in the QQL
 client.execute(stmt)
+```
+
+Preferred when authoring templates:
+
+```sql
+QUERY TEXT 'risks' FROM sec10k USING HYBRID
+  WHERE tenant_id = 'honeywell'
+  SHARD 'honeywell'
+  LIMIT 5;
 ```
 
 No `$tenant` bind params — Qdrant has none. Literals (`SHARD 'honeywell'`) and

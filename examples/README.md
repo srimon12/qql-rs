@@ -6,7 +6,7 @@ Two flagship stories:
 
 | Demo | Story |
 |------|--------|
-| **[sec10k-qql/](sec10k-qql/)** | Multi-tenant RAG over real SEC 10-K filings — `inject_filter` + `inject_shard_key` |
+| **[sec10k-qql/](sec10k-qql/)** | Multi-tenant RAG over real SEC 10-K filings — `inject_filter` + `SHARD` / `stmt.shard_key` |
 | **[airbnb-demo/](airbnb-demo/)** | Berlin geo search — `GEO_RADIUS` / `BBOX` / `POLYGON` + district shards |
 
 ## Catalog
@@ -49,23 +49,25 @@ node ../../examples/nodejs/medium_to_expert.mjs
 ### Multi-tenant pattern (all SDKs)
 
 ```python
+# Prefer SHARD in QQL when the tenant is known:
+#   QUERY TEXT 'risks' FROM docs USING HYBRID SHARD 'acme' LIMIT 5
 stmt = pyqql.parse("QUERY TEXT 'risks' FROM docs USING HYBRID LIMIT 5")[0]
-pyqql.inject_filter(stmt, "tenant_id", "=", "acme")
-pyqql.inject_shard_key(stmt, "acme")
+pyqql.inject_filter(stmt, "tenant_id", "=", "acme")  # isolation (always)
+stmt.shard_key = "acme"  # optional host routing; same field as SHARD
 client.execute(stmt)
 ```
 
 ```rust
-use qql_core::ast::{inject_filter, inject_shard_key, ComparisonOp, Value};
+use qql_core::ast::{inject_filter, ComparisonOp, Value};
 // ...
 inject_filter(&mut stmt, "tenant_id", ComparisonOp::Eq, Value::Str("acme".into()))?;
-inject_shard_key(&mut stmt, "acme")?;
+stmt.set_shard_key(Some("acme".into())); // optional; prefer SHARD in QQL
 ```
 
 ```js
 const [stmt] = parse("QUERY TEXT 'risks' FROM docs USING HYBRID LIMIT 5");
 stmt.injectFilter("tenant_id", "=", "acme");
-stmt.injectShardKey("acme");
+stmt.shardKey = "acme"; // optional; prefer SHARD 'acme' in QQL
 ```
 
 ## Flagship demos
@@ -111,7 +113,7 @@ QQL_BIN=./target/release/qql python examples/edge-demo/main.py --dry-run
 Examples across this folder exercise:
 
 - `USING HYBRID` / `QUERY HYBRID` … `FUSION RRF|DBSF`
-- `inject_filter` + `inject_shard_key` (fail-closed on DDL)
+- `inject_filter` + `SHARD` / `stmt.shard_key` (fail-closed on DDL)
 - `CREATE SHARD KEY` / custom `sharding_method`
 - `GEO_RADIUS` / `GEO_BBOX` / `GEO_POLYGON` + formula `GEO_DISTANCE`
 - `PARAMS (acorn, max_selectivity, timeout, consistency, hnsw_ef)`

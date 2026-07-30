@@ -1,9 +1,5 @@
-//! Medium → Expert (Rust / qql-core)
-//!
-//! Multi-tenant query gateway: inject_filter + inject_shard_key at one call site.
-//! Viewers get an extra status filter; admins do not.
-//!
-//! Offline only — no Qdrant required.
+//! Medium → Expert (Rust) — multi-tenant gateway.
+//! inject_filter always; SHARD in QQL or set_shard_key after parse.
 
 use qql_core::ast::{self, ComparisonOp, Value};
 use qql_core::parser::Parser;
@@ -22,8 +18,6 @@ fn enforce(user: &str, query: &str) -> String {
     let ctx = users.get(user).expect("known user");
 
     let mut stmt = Parser::parse(query).expect("valid QQL");
-
-    // Logical isolation — always
     ast::inject_filter(
         &mut stmt,
         "tenant_id",
@@ -31,12 +25,9 @@ fn enforce(user: &str, query: &str) -> String {
         Value::Str(ctx.tenant.into()),
     )
     .unwrap();
+    // Physical routing — same field as QQL `SHARD '…'`
+    assert!(stmt.set_shard_key(Some(ctx.tenant.into())));
 
-    // Physical shard routing — always
-    ast::inject_shard_key(&mut stmt, ctx.tenant).unwrap();
-
-    // Role gate — viewers only see published docs
-    // Note: inject_filter does not support != ; use positive equality.
     if ctx.role == "viewer" {
         ast::inject_filter(
             &mut stmt,
@@ -47,11 +38,7 @@ fn enforce(user: &str, query: &str) -> String {
         .unwrap();
     }
 
-    format!(
-        "shard={:?}  stmt={:#?}",
-        stmt.shard_key(),
-        stmt
-    )
+    format!("shard={:?}  stmt={:#?}", stmt.shard_key(), stmt)
 }
 
 fn main() {
@@ -66,12 +53,10 @@ fn main() {
         ),
         (
             "charlie",
-            r#"
-                QUERY TEXT 'engineering docs'
-                FROM docs
-                USING HYBRID DENSE dense SPARSE sparse FUSION RRF
-                LIMIT 5
-            "#,
+            // SHARD written in the language when tenant is known up front
+            "QUERY TEXT 'engineering docs' FROM docs \
+             USING HYBRID DENSE dense SPARSE sparse FUSION RRF \
+             SHARD 'globex' LIMIT 5",
         ),
     ];
 
@@ -80,15 +65,12 @@ fn main() {
         let safe = enforce(user, raw);
         println!("user: {user}");
         println!("  raw:  {}", raw.trim());
-        // Truncate debug dump for readability
         let preview: String = safe.chars().take(180).collect();
         println!("  safe: {preview}…\n");
     }
 
-    // Fail-closed demo: DDL rejects inject_shard_key
+    // DDL has no request-level shard routing
     let mut ddl = Parser::parse("SHOW COLLECTIONS").unwrap();
-    match ast::inject_shard_key(&mut ddl, "acme") {
-        Ok(()) => println!("unexpected: DDL accepted shard key"),
-        Err(e) => println!("fail-closed on DDL: {e}"),
-    }
+    assert!(!ddl.set_shard_key(Some("acme".into())));
+    println!("DDL set_shard_key → false (expected)");
 }

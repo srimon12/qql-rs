@@ -99,19 +99,16 @@ def ingest(client, tenant: str, year: int, url: str) -> int:
 
 
 def main() -> None:
-    embed_url = config.LM_STUDIO.rstrip("/")
-    if not embed_url.endswith("/embeddings"):
-        embed_url = f"{embed_url}/v1/embeddings"
-
+    embed_url = config.EMBED_URL
     embedder = pyqql.HttpEmbedder(embed_url, config.EMBED_MODEL, config.EMBED_DIM)
     client = pyqql.Client(config.QDRANT_URL, embedder=embedder)
+    print(f"Embedder: {config.EMBED_MODEL} @ {embed_url} (dim={config.EMBED_DIM})")
 
-    # ── Schema: hybrid + custom sharding ──
+    # ── Schema: hybrid + custom tenant sharding + turbo quant ──
     try:
         client.execute(f"DROP COLLECTION {config.COLLECTION}")
     except Exception:
         pass
-    # Legacy name cleanup from earlier demos
     try:
         client.execute("DROP COLLECTION sec10k_qql_demo")
     except Exception:
@@ -121,6 +118,8 @@ def main() -> None:
     client.execute(f"""
         CREATE COLLECTION {config.COLLECTION}
         HYBRID (dense VECTOR({config.EMBED_DIM}, COSINE), sparse SPARSE)
+        WITH HNSW (m = 16, ef_construct = 100, payload_m = 16)
+        WITH QUANTIZATION (type = 'turbo', bits = 2, always_ram = true)
         WITH PARAMS (
             replication_factor = 1,
             shard_number = {n_shards},
@@ -151,18 +150,25 @@ def main() -> None:
             print(f"  shard key '{t}': {e}")
 
     # ── Ingest ──
-    total = sum(
-        ingest(client, t, y, u)
-        for t, years in config.FILINGS.items()
-        for y, u in years.items()
-    )
+    year_filter = None
+    if config.DEMO_YEARS.strip():
+        year_filter = {int(y.strip()) for y in config.DEMO_YEARS.split(",") if y.strip()}
+        print(f"DEMO_YEARS filter: {sorted(year_filter)}")
+
+    total = 0
+    for t, years in config.FILINGS.items():
+        for y, u in years.items():
+            if year_filter is not None and y not in year_filter:
+                continue
+            total += ingest(client, t, y, u)
     print(f"\nIngested {total} chunks across {len(config.TENANTS)} tenants.")
 
     for t in config.TENANTS:
-        s = pyqql.parse(f"COUNT FROM {config.COLLECTION} WITH (exact = true)")[0]
-        pyqql.inject_filter(s, "tenant_id", "=", t)
-        pyqql.inject_shard_key(s, t)
-        r = client.execute(s)
+        # Prefer literal SHARD + WHERE so count body is always OpenAPI-clean
+        r = client.execute(
+            f"COUNT FROM {config.COLLECTION} WHERE tenant_id = '{t}' "
+            f"SHARD '{t}' WITH (exact = true)"
+        )
         count = r["results"][0]["data"]["result"]["count"]
         print(f"  {t}: {count} points")
 
