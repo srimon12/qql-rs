@@ -35,11 +35,14 @@ irm https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.ps1 |
 #### 📦 Language SDKs
 
 ```bash
+# Edge verions are heavier but comes with qdrant_edge and fastembed-rs in a single package
+# for minimal footprint prefer vanilla sdk without the -edge.
+
 # Python
-pip install pyqql pyqql-edge
+pip install pyqql OR pyqql-edge
 
 # Node.js
-npm install @veristamp/nqql @veristamp/nqql-edge
+npm install @veristamp/nqql OR @veristamp/nqql-edge  
 
 # WebAssembly
 npm install qql-wasm
@@ -51,11 +54,11 @@ cargo add qql qql-core
 #### 🧩 VS Code / Cursor Extension
 
 ```bash
-# Marketplace (when published)
+# Marketplace (
 code --install-extension srimon12.qql-lang
 
 # Or install the local VSIX from this repo
-code --install-extension editors/vscode/qql-lang-0.1.0.vsix
+code --install-extension editors/vscode/qql-lang-0.1.4.vsix
 ```
 
 Syntax highlighting, live WASM diagnostics, and keyword/snippet completions for `.qql` files. See [`editors/vscode`](editors/vscode).

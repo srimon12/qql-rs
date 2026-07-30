@@ -1,8 +1,8 @@
 {
   "name": "qql-lang",
   "displayName": "QQL — Qdrant Query Language",
-  "description": "Syntax highlighting, linting, and autocompletion for QQL (Qdrant Query Language)",
-  "version": "0.1.0",
+  "description": "Syntax highlighting, linting, and autocompletion for QQL 1.2 — Qdrant Query Language",
+  "version": "0.1.4",
   "publisher": "srimon12",
   "license": "MIT",
   "icon": "icon.png",

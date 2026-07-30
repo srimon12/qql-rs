@@ -12,11 +12,12 @@ const KEYWORDS: string[] = [
   "RECOMMEND", "CONTEXT", "DISCOVER", "ORDER", "ASC", "DESC",
   "SAMPLE", "RANDOM", "FUSION", "RRF", "DBSF", "FORMULA",
   "MMR", "DIVERSITY", "CANDIDATES", "RERANK",
-  "RELEVANCE", "FEEDBACK", "POINTS", "TEXT",
+  "RELEVANCE", "FEEDBACK", "POINTS", "TEXT", "IMAGE",
   "PREFETCH", "TARGET", "PAIRS", "POSITIVE", "NEGATIVE",
-  "STRATEGY", "GROUP", "SIZE", "LOOKUP",
+  "STRATEGY", "AVERAGE_VECTOR", "GROUP", "SIZE", "LOOKUP",
   "SCORE", "THRESHOLD", "SHARD", "KEY", "KEYS",
   "BOOST", "DEFAULTS", "STAR", "FIELD",
+  "CROSS", "MULTI",
   // Clauses
   "INTO", "FROM", "WHERE", "LIMIT", "OFFSET",
   "USING", "WITH", "AS", "ON", "FOR", "BY", "AFTER",
@@ -32,7 +33,8 @@ const KEYWORDS: string[] = [
   "SCALAR", "BINARY", "PRODUCT", "TURBO", "BITS", "QUANTILE",
   "ALWAYS", "RAM", "DISABLED", "MULTIVECTOR",
   "COSINE", "DOT", "EUCLID", "MANHATTAN",
-  "EXACT", "ACORN", "INDEXED_ONLY",
+  "EXACT", "ACORN", "MAX_SELECTIVITY", "TIMEOUT", "CONSISTENCY",
+  "MAJORITY", "QUORUM", "FACTOR", "INDEXED_ONLY", "TENANT",
   // Formula
   "CASE", "WHEN", "THEN", "ELSE", "END",
   "ABS", "SQRT", "LOG", "LN", "EXP", "POW",
@@ -146,6 +148,51 @@ const SNIPPETS: QqlCompletion[] = [
     label: "DELETE",
     insertText: "DELETE FROM ${1:collection} WHERE ${2:status} = '${3:archived}';",
     detail: "Delete points by filter",
+  },
+  {
+    label: "DELETE PAYLOAD",
+    insertText: "DELETE PAYLOAD ${1:key1}, ${2:key2} FROM ${3:collection} WHERE ${4:status} = '${5:archived}';",
+    detail: "Delete specific payload keys from matching points",
+  },
+  {
+    label: "COUNT EXACT",
+    insertText: "COUNT FROM ${1:collection} WHERE ${2:active} = true WITH (exact = true);",
+    detail: "Exact point count (not approximate)",
+  },
+  {
+    label: "CROSS RERANK",
+    insertText: "WITH ${1:candidates} AS (QUERY TEXT '${2:search}' USING ${3:dense} LIMIT 100)\nQUERY CROSS RERANK TEXT '${2:search}' MODEL '${4:cross-encoder}' ON FIELD ${5:body}\n  FROM ${6:collection}\n  PREFETCH (${1:candidates})\n  LIMIT ${7:10};",
+    detail: "Cross-encoder pair scoring over prefetch candidates",
+  },
+  {
+    label: "QUERY IMAGE",
+    insertText: "QUERY IMAGE '${1:/path/to/image.jpg}' MODEL '${2:clip-vit}'\n  FROM ${3:collection} USING ${4:image}\\n  LIMIT ${5:10};",
+    detail: "CLIP vision embedding search",
+  },
+  {
+    label: "USING HYBRID (tail-form)",
+    insertText: "QUERY TEXT '${1:search}' FROM ${2:collection}\n  USING HYBRID DENSE ${3:dense} SPARSE ${4:sparse} FUSION RRF\n  LIMIT ${5:10};",
+    detail: "Hybrid search using tail-form USING HYBRID",
+  },
+  {
+    label: "QUERY AS MULTI",
+    insertText: "QUERY TEXT '${1:search}' FROM ${2:collection}\n  USING ${3:colbert} AS MULTI\n  LIMIT ${4:10};",
+    detail: "ColBERT multivector nearest search",
+  },
+  {
+    label: "QUERY ACORN",
+    insertText: "QUERY TEXT '${1:search}' FROM ${2:collection} USING ${3:dense}\n  PARAMS (acorn = true, max_selectivity = ${4:0.5})\n  LIMIT ${5:10};",
+    detail: "ACORN search with max_selectivity",
+  },
+  {
+    label: "CREATE SHARD KEY",
+    insertText: "CREATE SHARD KEY '${1:tenant-a}';",
+    detail: "Create a new shard key for multi-tenancy",
+  },
+  {
+    label: "SHARD KEY lifecycle",
+    insertText: "CREATE SHARD KEY '${1:tenant}'; SHOW SHARD KEYS; DROP SHARD KEY '${1:tenant}';",
+    detail: "Full shard key lifecycle: create, show, drop",
   },
 ];
 
