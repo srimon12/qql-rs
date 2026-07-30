@@ -1,0 +1,65 @@
+---
+interface Preset {
+  id: string;
+  label: string;
+  description: string;
+  category: string;
+  query: string;
+  statements: number;
+}
+
+interface Props {
+  presets: Preset[];
+  categories: string[];
+}
+
+const { presets, categories } = Astro.props;
+---
+
+<dialog class="app-dialog preset-dialog" id="preset-dialog" aria-labelledby="preset-dialog-title">
+  <div class="dialog-shell">
+    <header>
+      <div>
+        <span class="eyebrow">Executable corpus</span>
+        <h2 id="preset-dialog-title">Choose a valid fixture</h2>
+        <p>Every example is loaded directly from <code>language/v1/fixtures/valid</code>.</p>
+      </div>
+      <button class="icon-button" type="button" data-close-dialog aria-label="Close examples">×</button>
+    </header>
+
+    <div class="preset-controls">
+      <label>
+        <span class="sr-only">Search examples</span>
+        <input type="search" placeholder="Search 32 fixture groups…" data-preset-search />
+      </label>
+      <div class="filter-row" role="group" aria-label="Filter examples">
+        <button type="button" class="is-active" data-preset-category="all">All</button>
+        {categories.map((category) => (
+          <button type="button" data-preset-category={category}>{category}</button>
+        ))}
+      </div>
+    </div>
+
+    <div class="preset-list">
+      {presets.map((preset) => (
+        <button
+          class="preset-card"
+          type="button"
+          data-preset
+          data-preset-id={preset.id}
+          data-preset-label={preset.label}
+          data-preset-description={preset.description}
+          data-preset-category-value={preset.category}
+          data-preset-query={preset.query}
+        >
+          <span class="preset-card__meta">
+            <span>{preset.category}</span>
+            <span>{preset.statements} {preset.statements === 1 ? "statement" : "statements"}</span>
+          </span>
+          <strong>{preset.label}</strong>
+          <span>{preset.description}</span>
+        </button>
+      ))}
+    </div>
+  </div>
+</dialog>

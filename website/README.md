@@ -6,7 +6,7 @@ Astro + Starlight site for QQL:
 |------|---------|
 | `/` | Landing |
 | `/docs/` | qql-rs language, guides, SDKs, tools, and reference |
-| `/playground/` | Nested Vite SPA (merged at deploy) |
+| `/playground/` | Astro-native QQL editor, planner, fixture browser, and Qdrant runner |
 
 ## Packages
 
@@ -18,22 +18,24 @@ Astro + Starlight site for QQL:
 ```bash
 cd website
 pnpm install
-pnpm dev          # http://localhost:4321
-pnpm build        # → website/dist
-pnpm validate:qql # build qql-wasm and parse every documented QQL example
-pnpm check        # executable examples + production site build
+pnpm dev          # build current web WASM, then serve http://localhost:4321
+pnpm build        # build current web WASM → Astro site in website/dist
+pnpm validate:qql # parse docs and every valid fixture with current Node WASM
+pnpm check        # all executable QQL + web WASM + production Astro build
 ```
 
 No root `package.json` / pnpm workspace — only `website/`.
 
-## Merge with playground
+## Playground
 
-From **repo root** (after building playground with `VITE_BASE=/playground/` into `.playground-dist`):
+The playground is part of this Astro application. Its UI is split into reusable
+Astro components under `src/components/playground`; one browser controller owns
+CodeMirror, WASM lifetimes, policy rewrites, and Qdrant execution.
 
-```bash
-node scripts/merge-qql-dist.mjs
-# → dist-site/
-```
+The preset browser is generated from every file in
+`../language/v1/fixtures/valid`. `scripts/build-playground-wasm.mjs` builds
+`../crates/qql-wasm` from the current checkout, so development and deployment
+cannot silently drift to a published package.
 
 ## Deploy
 
@@ -47,5 +49,4 @@ The information architecture and source-of-truth rules live in
 `qqlExample` Markdoc component so it is checked against a fresh Node-target
 build of the current `qql-wasm` crate.
 
-The playground build and merge remain a separate concern from documentation
-content and validation.
+Every `qqlExample` also links its verified source into `/playground/?q=…`.

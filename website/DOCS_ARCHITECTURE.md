@@ -36,11 +36,21 @@ inventing a documentation-only dialect.
   difference is the point of the page.
 - Keep isolation (`WHERE` / `inject_filter`) separate from physical routing
   (`SHARD` / `shard_key`).
+- Generate playground presets directly from every valid v1 fixture. Do not
+  duplicate fixture source inside the website.
+- Link runnable `qqlExample` blocks into `/playground/?q=…` so documentation
+  and interactive exploration share the exact same query.
 - Link release history to GitHub Releases. Do not duplicate invented changelog
   entries inside the documentation tree.
 
-## Out of scope
+## Integrated playground
 
-The playground application and its merge/deployment lifecycle are separate.
-Documentation may link to it, but this refactor does not move or integrate its
-source.
+The playground is an Astro route in the same application. Astro components own
+the accessible shell, shared site chrome, and fixture rendering. A single
+browser controller owns CodeMirror, qql-wasm initialization, explicit
+`Client`/`Stmt` cleanup, analysis, policy injection, and execution.
+
+The website build generates the browser package from the current
+`crates/qql-wasm` source. TypeScript resolves its declaration file separately
+from Vite's runtime JavaScript alias so generated `.d.ts` and `.js` identities
+do not drift.

@@ -9,6 +9,13 @@ const websiteRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const workspaceRoot = resolve(websiteRoot, "..");
 const docsRoot = join(websiteRoot, "src", "content", "docs", "docs");
 const pagesRoot = join(websiteRoot, "src", "pages");
+const validFixturesRoot = join(
+  workspaceRoot,
+  "language",
+  "v1",
+  "fixtures",
+  "valid",
+);
 const wasmOut = mkdtempSync(join(tmpdir(), "qql-docs-wasm-"));
 const wasmPackCache = join(
   websiteRoot,
@@ -63,6 +70,8 @@ try {
     const failures = [];
     let examples = 0;
     let statements = 0;
+    let fixtureGroups = 0;
+    let fixtureStatements = 0;
     const tagPattern =
       /{%\s*qqlExample(?:\s+[^%]*?)?%}([\s\S]*?){%\s*\/qqlExample\s*%}/g;
 
@@ -124,6 +133,23 @@ try {
       }
     }
 
+    for (const file of filesUnder(validFixturesRoot)
+      .filter((path) => path.endsWith(".qql"))
+      .sort()) {
+      fixtureGroups += 1;
+      const query = readFileSync(file, "utf8").trim();
+      try {
+        const ast = wasm.parse(query);
+        fixtureStatements += Array.isArray(ast) ? ast.length : 1;
+      } catch (error) {
+        failures.push({
+          file,
+          line: 1,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
     if (failures.length > 0) {
       for (const failure of failures) {
         const relative = failure.file.slice(websiteRoot.length + 1);
@@ -132,7 +158,7 @@ try {
       process.exitCode = 1;
     } else {
       console.log(
-        `Verified ${examples} QQL examples (${statements} statements) with freshly built qql-wasm.`,
+        `Verified ${examples} documentation examples (${statements} statements) and ${fixtureGroups} playground fixture groups (${fixtureStatements} statements) with freshly built qql-wasm.`,
       );
     }
   }

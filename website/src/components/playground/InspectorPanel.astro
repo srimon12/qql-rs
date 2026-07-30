@@ -1,0 +1,71 @@
+<section class="work-panel inspector-panel" aria-labelledby="inspector-title">
+  <div class="panel-heading panel-heading--tabs">
+    <div>
+      <span class="eyebrow">Compiler</span>
+      <h2 id="inspector-title">Inspector</h2>
+    </div>
+    <label class="statement-select">
+      <span class="sr-only">Statement</span>
+      <select data-statement-select aria-label="Inspect statement" disabled>
+        <option value="0">Statement 1</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="inspector-tabs" role="tablist" aria-label="Compiler output">
+    {[
+      ["plan", "Plan"],
+      ["wire", "Wire"],
+      ["ast", "AST"],
+      ["tokens", "Tokens"],
+      ["explain", "Explain"],
+      ["response", "Response"],
+      ["metrics", "Metrics"],
+    ].map(([id, label], index) => (
+      <button
+        type="button"
+        role="tab"
+        id={`tab-${id}`}
+        aria-controls={`panel-${id}`}
+        aria-selected={index === 0 ? "true" : "false"}
+        tabindex={index === 0 ? 0 : -1}
+        data-inspector-tab={id}
+      >
+        {label}
+      </button>
+    ))}
+  </div>
+
+  <div class="inspector-content">
+    <section role="tabpanel" id="panel-plan" aria-labelledby="tab-plan" data-inspector-panel="plan">
+      <div class="empty-state" data-empty-plan>
+        <span class="empty-state__mark">Q</span>
+        <h3>Plan appears here</h3>
+        <p>Edit a valid statement to inspect its compiled Qdrant route.</p>
+      </div>
+      <div class="plan-card" data-plan-card hidden>
+        <div>
+          <span class="method-badge" data-route-method>POST</span>
+          <code data-route-path>/collections/…</code>
+        </div>
+        <dl>
+          <div><dt>Statement</dt><dd data-route-type>—</dd></div>
+          <div><dt>Transport</dt><dd>Qdrant REST</dd></div>
+          <div><dt>Policy</dt><dd data-route-policy>Source only</dd></div>
+        </dl>
+      </div>
+    </section>
+
+    {["wire", "ast", "tokens", "explain", "response", "metrics"].map((id) => (
+      <section
+        role="tabpanel"
+        id={`panel-${id}`}
+        aria-labelledby={`tab-${id}`}
+        data-inspector-panel={id}
+        hidden
+      >
+        <pre data-output={id}>No {id} output yet.</pre>
+      </section>
+    ))}
+  </div>
+</section>

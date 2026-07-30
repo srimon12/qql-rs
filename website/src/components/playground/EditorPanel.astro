@@ -1,0 +1,47 @@
+<section class="work-panel editor-panel" aria-labelledby="editor-title">
+  <div class="panel-heading">
+    <div>
+      <span class="eyebrow">Source</span>
+      <h2 id="editor-title">QQL editor</h2>
+    </div>
+    <div class="panel-actions">
+      <button class="button button--quiet" type="button" data-open-presets>
+        Examples
+        <kbd>⌘K</kbd>
+      </button>
+      <button class="button button--quiet" type="button" data-open-policy>
+        Policy
+        <span class="status-dot" data-policy-dot></span>
+      </button>
+      <button class="button button--quiet" type="button" data-open-settings>
+        Connection
+      </button>
+      <button class="button button--primary" type="button" data-run disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m8 5 11 7-11 7V5Z"></path>
+        </svg>
+        Run
+        <kbd>⌘↵</kbd>
+      </button>
+    </div>
+  </div>
+
+  <div class="editor-frame">
+    <div id="qql-editor" aria-label="QQL source editor"></div>
+    <noscript>
+      <p class="noscript">The playground requires JavaScript and WebAssembly.</p>
+    </noscript>
+  </div>
+
+  <div class="editor-status" aria-live="polite">
+    <span class="validation-badge is-loading" data-validation-badge>
+      <span class="status-dot"></span>
+      Loading qql-wasm
+    </span>
+    <span data-analysis-summary>Preparing the current workspace parser…</span>
+    <span class="editor-status__spacer"></span>
+    <button class="text-button" type="button" data-open-export disabled>
+      Export SDK code
+    </button>
+  </div>
+</section>

@@ -1,0 +1,28 @@
+<dialog class="app-dialog export-dialog" id="export-dialog" aria-labelledby="export-title">
+  <div class="dialog-shell">
+    <header>
+      <div>
+        <span class="eyebrow">Host integration</span>
+        <h2 id="export-title">Export SDK code</h2>
+        <p>Use the same validated QQL source from Rust, Python, Node.js, or cURL.</p>
+      </div>
+      <button class="icon-button" type="button" data-close-dialog aria-label="Close exporter">×</button>
+    </header>
+    <div class="export-toolbar">
+      <div role="tablist" aria-label="SDK language">
+        {["python", "node", "rust", "curl"].map((language, index) => (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={index === 0 ? "true" : "false"}
+            data-export-tab={language}
+          >
+            {language === "node" ? "Node.js" : language}
+          </button>
+        ))}
+      </div>
+      <button class="button button--quiet" type="button" data-copy-export>Copy code</button>
+    </div>
+    <pre data-export-output>Generate a valid plan before exporting.</pre>
+  </div>
+</dialog>

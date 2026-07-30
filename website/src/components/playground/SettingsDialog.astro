@@ -1,0 +1,57 @@
+<dialog class="app-dialog side-dialog" id="settings-dialog" aria-labelledby="settings-title">
+  <form class="dialog-shell" data-settings-form>
+    <header>
+      <div>
+        <span class="eyebrow">Runtime</span>
+        <h2 id="settings-title">Connection and embeddings</h2>
+        <p>Stored only in this browser. QQL is sent directly to your configured Qdrant endpoint.</p>
+      </div>
+      <button class="icon-button" type="button" data-close-dialog aria-label="Close settings">×</button>
+    </header>
+
+    <div class="form-stack">
+      <label>
+        <span>Qdrant REST URL</span>
+        <input name="qdrantUrl" type="url" required placeholder="http://localhost:6333" />
+      </label>
+      <label>
+        <span>Qdrant API key <small>optional</small></span>
+        <input name="qdrantKey" type="password" autocomplete="off" />
+      </label>
+      <label>
+        <span>Embedding provider</span>
+        <select name="embedProvider">
+          <option value="browser">In-browser MiniLM</option>
+          <option value="http">OpenAI-compatible HTTP</option>
+          <option value="none">None — raw vectors only</option>
+        </select>
+      </label>
+      <fieldset data-http-embed-fields>
+        <legend>HTTP embedder</legend>
+        <label>
+          <span>Endpoint</span>
+          <input name="embedUrl" type="url" placeholder="http://localhost:11434/v1/embeddings" />
+        </label>
+        <label>
+          <span>Model</span>
+          <input name="embedModel" type="text" />
+        </label>
+        <div class="form-grid">
+          <label>
+            <span>Dimension</span>
+            <input name="embedDim" type="number" min="1" step="1" />
+          </label>
+          <label>
+            <span>API key <small>optional</small></span>
+            <input name="embedKey" type="password" autocomplete="off" />
+          </label>
+        </div>
+      </fieldset>
+    </div>
+
+    <footer>
+      <span class="dialog-note" data-embed-status>Browser model loads only when execution needs text embeddings.</span>
+      <button class="button button--primary" type="submit">Save connection</button>
+    </footer>
+  </form>
+</dialog>

@@ -1,0 +1,212 @@
+---
+import { APPS } from "../config/site";
+
+interface Props {
+  active?: "home" | "docs" | "playground";
+}
+
+const { active } = Astro.props;
+const nav = [
+  { key: "docs", label: "Docs", href: "/docs/" },
+  { key: "playground", label: "Playground", href: "/playground/" },
+  { key: "github", label: "GitHub", href: APPS.github.url, external: true },
+] as const;
+---
+
+<header class="site-header">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <div class="site-header__inner">
+    <a class="brand" href="/" aria-label="QQL home">
+      <span class="brand__mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32">
+          <path d="M7.25 7.5h4.05L16 21.15 20.7 7.5h4.05L17.35 25.25h-2.7L7.25 7.5Z"></path>
+        </svg>
+      </span>
+      <span>QQL</span>
+    </a>
+
+    <nav aria-label="Primary navigation">
+      {nav.map((item) => (
+        <a
+          href={item.href}
+          class:list={["site-nav__link", active === item.key && "is-active"]}
+          aria-current={active === item.key ? "page" : undefined}
+          target={item.external ? "_blank" : undefined}
+          rel={item.external ? "noopener noreferrer" : undefined}
+        >
+          {item.label}
+        </a>
+      ))}
+    </nav>
+
+    <button class="theme-button" type="button" data-theme-toggle aria-label="Toggle color theme">
+      <svg class="theme-button__sun" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"></circle>
+        <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
+      </svg>
+      <svg class="theme-button__moon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<style>
+  .site-header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    border-bottom: 1px solid var(--sl-color-gray-5);
+    background: color-mix(in srgb, var(--sl-color-bg) 78%, transparent);
+    backdrop-filter: blur(16px);
+  }
+
+  .site-header__inner {
+    width: min(100% - 2rem, 90rem);
+    height: 4rem;
+    margin-inline: auto;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .brand {
+    width: fit-content;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.65rem;
+    color: var(--sl-color-white);
+    font-size: 1.1rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    text-decoration: none;
+  }
+
+  .brand__mark {
+    width: 2rem;
+    height: 2rem;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.55rem;
+    color: var(--sl-color-accent);
+    background: var(--sl-color-gray-6);
+  }
+
+  .brand__mark svg {
+    width: 1.2rem;
+    fill: currentColor;
+  }
+
+  nav {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  .site-nav__link {
+    padding: 0.42rem 0.75rem;
+    border-radius: 999px;
+    color: var(--sl-color-gray-2);
+    font-size: 0.82rem;
+    font-weight: 500;
+    text-decoration: none;
+    transition: 160ms ease;
+  }
+
+  .site-nav__link:hover,
+  .site-nav__link.is-active {
+    color: var(--sl-color-white);
+    background: color-mix(in srgb, var(--sl-color-gray-5) 76%, transparent);
+  }
+
+  .theme-button {
+    justify-self: end;
+    position: relative;
+    width: 2.35rem;
+    height: 2.35rem;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.6rem;
+    color: var(--sl-color-gray-2);
+    background: var(--sl-color-gray-6);
+    cursor: pointer;
+  }
+
+  .theme-button:hover {
+    color: var(--sl-color-white);
+    border-color: var(--sl-color-gray-4);
+  }
+
+  .theme-button svg {
+    position: absolute;
+    width: 1rem;
+    height: 1rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    transition: 180ms ease;
+  }
+
+  :global(:root[data-theme="dark"]) .theme-button__sun {
+    opacity: 0;
+    transform: rotate(-45deg) scale(0.6);
+  }
+
+  :global(:root[data-theme="light"]) .theme-button__moon {
+    opacity: 0;
+    transform: rotate(45deg) scale(0.6);
+  }
+
+  .skip-link {
+    position: absolute;
+    left: 1rem;
+    top: -4rem;
+    z-index: 100;
+    padding: 0.65rem 0.9rem;
+    border-radius: 0.5rem;
+    background: var(--sl-color-accent);
+    color: white;
+  }
+
+  .skip-link:focus {
+    top: 0.65rem;
+  }
+
+  @media (max-width: 42rem) {
+    .site-header__inner {
+      grid-template-columns: auto 1fr auto;
+    }
+
+    nav {
+      justify-self: end;
+    }
+
+    .site-nav__link {
+      display: none;
+    }
+
+    .site-nav__link.is-active {
+      display: inline-flex;
+    }
+  }
+</style>
+
+<script>
+  document.querySelectorAll<HTMLElement>("[data-theme-toggle]").forEach((button) => {
+    if (button.dataset.bound === "true") return;
+    button.dataset.bound = "true";
+    button.addEventListener("click", () => {
+      const next =
+        document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+      document.documentElement.dataset.theme = next;
+      localStorage.setItem("theme", next);
+      localStorage.setItem("starlight-theme", next);
+      localStorage.setItem("veristamp-theme", next);
+    });
+  });
+</script>

@@ -8,18 +8,19 @@ on:
     branches: [main]
     paths:
       - "website/**"
-      - "scripts/merge-qql-dist.mjs"
+      - "language/v1/fixtures/**"
+      - "crates/qql-core/**"
+      - "crates/qql-plan/**"
+      - "crates/qql-embed/**"
+      - "crates/qql-wasm/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
       - ".github/workflows/deploy-site.yml"
   workflow_dispatch:
-    inputs:
-      playground_ref:
-        description: "qql-wasm-demo ref"
-        default: "main"
 
 env:
   NODE_VERSION: "24"
   CF_PAGES_PROJECT: qql
-  PLAYGROUND_REPO: srimon12/qql-wasm-demo
 
 jobs:
   deploy:
@@ -54,33 +55,9 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm check
 
-      - name: Checkout playground
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.PLAYGROUND_REPO }}
-          ref: ${{ inputs.playground_ref || 'main' }}
-          path: .playground-src
-
-      - name: Build playground
-        working-directory: .playground-src
-        run: |
-          corepack enable
-          pnpm install --frozen-lockfile
-          VITE_BASE=/playground/ pnpm build
-          mkdir -p ../.playground-dist
-          cp -a dist/. ../.playground-dist/
-          test -f ../.playground-dist/index.html
-
-      - name: Merge
-        run: node scripts/merge-qql-dist.mjs
-        env:
-          WEBSITE_DIST: website/dist
-          PLAYGROUND_DIST: .playground-dist
-          OUT_DIST: dist-site
-
       - name: Deploy
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy dist-site --project-name=${{ env.CF_PAGES_PROJECT }} --branch=main
+          command: pages deploy website/dist --project-name=${{ env.CF_PAGES_PROJECT }} --branch=main

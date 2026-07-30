@@ -1,0 +1,87 @@
+<dialog class="app-dialog side-dialog" id="policy-dialog" aria-labelledby="policy-title">
+  <form class="dialog-shell" data-policy-form>
+    <header>
+      <div>
+        <span class="eyebrow">AST guardrail</span>
+        <h2 id="policy-title">Mandatory runtime policy</h2>
+        <p>Inject a trusted predicate after parsing and before planning or execution.</p>
+      </div>
+      <button class="icon-button" type="button" data-close-dialog aria-label="Close policy">×</button>
+    </header>
+
+    <div class="form-stack">
+      <label class="switch-row">
+        <span>
+          <strong>Enable policy injection</strong>
+          <small>Single-statement inputs only; multi-statement scripts fail closed.</small>
+        </span>
+        <input name="enabled" type="checkbox" role="switch" />
+      </label>
+
+      <fieldset>
+        <legend>Recipes</legend>
+        <div class="recipe-grid">
+          {[
+            ["workspace_id", "ws_101", "Workspace boundary", "ws_101"],
+            ["deleted", "false", "Soft-delete safety", ""],
+            ["region", "eu-west-1", "Data residency", ""],
+            ["visibility", "public", "Visibility ACL", ""],
+          ].map(([field, value, label, shard]) => (
+            <button
+              type="button"
+              class="recipe-card"
+              data-policy-recipe
+              data-field={field}
+              data-value={value}
+              data-value-type={value === "false" ? "boolean" : "string"}
+              data-shard={shard}
+            >
+              <strong>{label}</strong>
+              <code>{field} = {value}</code>
+            </button>
+          ))}
+        </div>
+      </fieldset>
+
+      <div class="form-grid form-grid--policy">
+        <label>
+          <span>Payload field</span>
+          <input name="field" type="text" required />
+        </label>
+        <label>
+          <span>Operator</span>
+          <select name="op">
+            <option value="=">=</option>
+            <option value=">">&gt;</option>
+            <option value=">=">&gt;=</option>
+            <option value="<">&lt;</option>
+            <option value="<=">&lt;=</option>
+          </select>
+        </label>
+      </div>
+      <div class="form-grid">
+        <label>
+          <span>Required value</span>
+          <input name="value" type="text" required />
+        </label>
+        <label>
+          <span>Value type</span>
+          <select name="valueType">
+            <option value="string">String</option>
+            <option value="number">Number</option>
+            <option value="boolean">Boolean</option>
+          </select>
+        </label>
+      </div>
+      <label>
+        <span>Shard key <small>optional routing, not isolation</small></span>
+        <input name="shardKey" type="text" />
+      </label>
+    </div>
+
+    <footer>
+      <span class="dialog-note">The editor source remains unchanged; inspector output shows the rewritten AST and route.</span>
+      <button class="button button--primary" type="submit">Apply guardrail</button>
+    </footer>
+  </form>
+</dialog>

@@ -1,0 +1,186 @@
+---
+import { readFileSync, readdirSync } from "node:fs";
+import { basename, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import ExportDialog from "../../components/playground/ExportDialog.astro";
+import EditorPanel from "../../components/playground/EditorPanel.astro";
+import InspectorPanel from "../../components/playground/InspectorPanel.astro";
+import PolicyDialog from "../../components/playground/PolicyDialog.astro";
+import PresetDialog from "../../components/playground/PresetDialog.astro";
+import SettingsDialog from "../../components/playground/SettingsDialog.astro";
+import SiteFooter from "../../components/SiteFooter.astro";
+import SiteHeader from "../../components/SiteHeader.astro";
+import { ANALYTICS, APPS } from "../../config/site";
+import "../../styles/global.css";
+import "../../styles/playground.css";
+
+const workspaceRoot = fileURLToPath(
+  new URL("../../../../", import.meta.url),
+);
+const fixtureRoot = join(workspaceRoot, "language", "v1", "fixtures");
+const validRoot = join(fixtureRoot, "valid");
+const expectedRoot = join(fixtureRoot, "expected");
+
+const categoryFor = (id: string) => {
+  if (id.startsWith("query-")) return "Query";
+  if (id.includes("collection") || id.includes("index") || id.includes("shard")) return "Schema";
+  if (
+    id.startsWith("upsert") ||
+    id.startsWith("update") ||
+    id.startsWith("delete") ||
+    id.startsWith("clear")
+  ) return "Data";
+  if (id === "filters") return "Filters";
+  if (id === "scripts" || id === "string-delimiters") return "Language";
+  return "Operations";
+};
+
+const presets = readdirSync(validRoot)
+  .filter((name) => name.endsWith(".qql"))
+  .sort()
+  .map((name) => {
+    const id = basename(name, ".qql");
+    const query = readFileSync(join(validRoot, name), "utf8").trim();
+    const comments = query
+      .split("\n")
+      .filter((line) => line.startsWith("--"))
+      .map((line) => line.replace(/^--\s*/, "").trim())
+      .filter(Boolean);
+    const expected = JSON.parse(
+      readFileSync(join(expectedRoot, `${id}.json`), "utf8"),
+    ) as { statements?: unknown[] };
+    const label = (comments[0]?.split("—")[1] ?? id)
+      .trim()
+      .replace(/\bqql$/i, "");
+    const description =
+      comments.find((line) => line.startsWith("Tests:"))?.replace("Tests:", "").trim() ??
+      comments[1] ??
+      "Valid QQL v1 conformance fixture.";
+
+    return {
+      id,
+      label,
+      description,
+      category: categoryFor(id),
+      query,
+      statements: expected.statements?.length ?? 1,
+    };
+  });
+
+const categories = [...new Set(presets.map((preset) => preset.category))].sort();
+const defaultPreset =
+  presets.find((preset) => preset.id === "query-hybrid") ?? presets[0];
+const pageTitle = "QQL Playground — Parse, plan, and run Qdrant queries";
+const pageDescription =
+  "Explore the current qql-rs parser and planner in your browser using the complete QQL v1 valid fixture corpus.";
+---
+
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>{pageTitle}</title>
+    <meta name="description" content={pageDescription} />
+    <link rel="canonical" href={`${APPS.playground.url}/`} />
+    <link rel="icon" href="/favicon.ico" />
+    <meta property="og:title" content={pageTitle} />
+    <meta property="og:description" content={pageDescription} />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={`${APPS.playground.url}/`} />
+    <meta property="og:image" content={`${APPS.home.url}/og-image.png`} />
+    <script is:inline>
+      (() => {
+        const saved =
+          localStorage.getItem("theme") ??
+          localStorage.getItem("starlight-theme") ??
+          localStorage.getItem("veristamp-theme");
+        const dark =
+          saved === "dark" ||
+          (!saved && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+      })();
+    </script>
+    {
+      ANALYTICS.id && (
+        <script
+          is:inline
+          defer
+          src={`${ANALYTICS.url}/script.js`}
+          data-website-id={ANALYTICS.id}
+        />
+      )
+    }
+  </head>
+  <body class="playground-page">
+    <SiteHeader active="playground" />
+    <main id="main-content" class="playground-main">
+      <section class="playground-intro" aria-labelledby="playground-title">
+        <div>
+          <div class="live-badge">
+            <span></span>
+            Current qql-rs WASM · {presets.length} fixture groups
+          </div>
+          <h1 id="playground-title">Write QQL. See the entire pipeline.</h1>
+          <p>
+            Parse, rewrite, plan, export, and execute against Qdrant without
+            leaving the documentation site. Every bundled example comes from
+            the versioned language conformance corpus.
+          </p>
+        </div>
+        <dl class="intro-stats" aria-label="Playground capabilities">
+          <div><dt>Parser</dt><dd>qql-core</dd></div>
+          <div><dt>Planner</dt><dd>qql-plan</dd></div>
+          <div><dt>Runtime</dt><dd>qql-wasm</dd></div>
+        </dl>
+      </section>
+
+      <div class="runtime-strip" role="status" aria-live="polite">
+        <span class="runtime-strip__status"><span class="status-dot"></span><span data-runtime-status>Loading current WASM…</span></span>
+        <span data-active-fixture>{defaultPreset.label}</span>
+        <span class="runtime-strip__spacer"></span>
+        <span data-connection-summary>http://localhost:6333 · browser MiniLM</span>
+      </div>
+
+      <div class="playground-workspace" data-default-query={defaultPreset.query}>
+        <EditorPanel />
+        <InspectorPanel />
+      </div>
+
+      <section class="playground-notes" aria-label="Playground boundaries">
+        <article>
+          <span>01</span>
+          <div>
+            <h2>Offline analysis first</h2>
+            <p>Parsing, AST inspection, planning, policy injection, and SDK export happen locally in WebAssembly.</p>
+          </div>
+        </article>
+        <article>
+          <span>02</span>
+          <div>
+            <h2>Direct execution</h2>
+            <p>When you run a query, the browser connects directly to the Qdrant URL saved in your settings.</p>
+          </div>
+        </article>
+        <article>
+          <span>03</span>
+          <div>
+            <h2>Fixture-backed examples</h2>
+            <p>The example browser is generated from all valid QQL v1 fixtures at every Astro build.</p>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <PresetDialog presets={presets} categories={categories} />
+    <SettingsDialog />
+    <PolicyDialog />
+    <ExportDialog />
+    <div class="toast-region" aria-live="polite" aria-atomic="true" data-toast-region></div>
+    <SiteFooter />
+
+    <script>
+      import "../../scripts/playground";
+    </script>
+  </body>
+</html>

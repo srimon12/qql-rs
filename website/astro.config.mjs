@@ -7,6 +7,7 @@ import starlightCopyButton from "starlight-copy-button";
 import starlightLlmsTxt from "starlight-llms-txt";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "astro/config";
+import { fileURLToPath } from "node:url";
 
 const SITE_URL = "https://qql.veristamp.in";
 
@@ -101,6 +102,13 @@ export default defineConfig(
     ],
     vite: {
       plugins: [tailwind],
+      resolve: {
+        alias: {
+          "qql-wasm-current": fileURLToPath(
+            new URL("./.wasm/qql-wasm/qql_wasm.js", import.meta.url),
+          ),
+        },
+      },
     },
   }),
 );
