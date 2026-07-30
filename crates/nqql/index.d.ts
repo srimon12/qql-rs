@@ -1,5 +1,6 @@
 export class Stmt {
   injectFilter(field: string, op: string, value: unknown): void;
+  injectShardKey(shardKey: string): void;
   toObject(): unknown;
   toJson(): string;
   toJSON(): string;
@@ -74,6 +75,7 @@ export function injectFilter(
   op: string,
   value: unknown,
 ): unknown;
+export function injectShardKey(query: string, shardKey: string): unknown;
 export function tokenize(
   query: string,
 ): Array<{ kind: string; text: string; pos: number }>;

@@ -116,6 +116,7 @@ def main():
     step("Dense (semantic)",  f"QUERY '{Q}' FROM {COL} USING dense LIMIT 3")
     step("Sparse BM25",       f"QUERY '{Q}' FROM {COL} USING sparse LIMIT 3")
     step("Hybrid RRF",        f"QUERY HYBRID TEXT '{Q}' DENSE dense SPARSE sparse FUSION RRF FROM {COL} LIMIT 3")
+    step("Hybrid shorthand",  f"QUERY TEXT '{Q}' FROM {COL} USING HYBRID DENSE dense SPARSE sparse FUSION RRF LIMIT 3")
     step("Hybrid DBSF",       f"QUERY HYBRID TEXT '{Q}' DENSE dense SPARSE sparse FUSION DBSF FROM {COL} LIMIT 3")
     step("Exact brute-force", f"QUERY '{Q}' FROM {COL} USING dense PARAMS (exact = true) LIMIT 3")
 
@@ -145,12 +146,15 @@ def main():
     section("7. Point Access")
     step("QUERY POINTS by id",  f"QUERY POINTS (1, 3) FROM {COL} WITH PAYLOAD true")
     step("SCROLL all",          f"SCROLL FROM {COL} LIMIT 5")
+    step("SCROLL no vectors",   f"SCROLL FROM {COL} WITH VECTOR false LIMIT 5")
     step("SCROLL filtered",     f"SCROLL FROM {COL} WHERE tag = 'database' LIMIT 5")
     step("ORDER BY year DESC",  f"QUERY ORDER BY year DESC FROM {COL} LIMIT 5", allow_fail=True)
+    step("COUNT exact",         f"COUNT FROM {COL} WHERE year = 2024 WITH (exact = true)", allow_fail=True)
 
     # ── 8. Mutations ──
     section("8. Mutations")
     step("UPDATE payload by id",     f"UPDATE {COL} SET PAYLOAD = {{year: 2025}} WHERE id = 2")
+    step("DELETE PAYLOAD key",       f"DELETE PAYLOAD year FROM {COL} WHERE id = 7", allow_fail=True)
     step("DELETE by filter",         f"DELETE FROM {COL} WHERE tag = 'systems'")
 
     # ── 9. Operations ──

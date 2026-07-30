@@ -75,6 +75,11 @@ impl Stmt {
     }
 
     #[napi]
+    pub fn inject_shard_key(&mut self, shard_key: String) -> napi::Result<()> {
+        ast::inject_shard_key(&mut self.inner, &shard_key).map_err(to_napi_err)
+    }
+
+    #[napi]
     pub fn to_object(&self) -> napi::Result<serde_json::Value> {
         serde_json::to_value(&self.inner).map_err(serde_napi_err)
     }
@@ -86,27 +91,14 @@ impl Stmt {
 
     #[napi(getter)]
     pub fn shard_key(&self) -> Option<String> {
-        match &self.inner {
-            ast::Stmt::Query(q) => q.shard_key.clone(),
-            ast::Stmt::Count(c) => c.shard_key.clone(),
-            ast::Stmt::Scroll(s) => s.shard_key.clone(),
-            ast::Stmt::Upsert(u) => u.shard_key.clone(),
-            ast::Stmt::Delete(d) => d.shard_key.clone(),
-            _ => None,
-        }
+        self.inner.shard_key().map(str::to_owned)
     }
 
     #[napi(setter)]
     pub fn set_shard_key(&mut self, key: Option<String>) {
-        let key = key.filter(|k| !k.is_empty());
-        match &mut self.inner {
-            ast::Stmt::Query(q) => q.shard_key = key,
-            ast::Stmt::Count(c) => c.shard_key = key,
-            ast::Stmt::Scroll(s) => s.shard_key = key,
-            ast::Stmt::Upsert(u) => u.shard_key = key,
-            ast::Stmt::Delete(d) => d.shard_key = key,
-            _ => {}
-        }
+        let _ = self
+            .inner
+            .set_shard_key(key.filter(|value| !value.is_empty()));
     }
 }
 
@@ -161,6 +153,13 @@ pub fn inject_filter(
     let val = Value::from_json(value).map_err(to_napi_err)?;
     let mut stmt = Parser::parse(&query).map_err(to_napi_err)?;
     ast::inject_filter(&mut stmt, &field, cmp, val).map_err(to_napi_err)?;
+    serde_json::to_value(&stmt).map_err(serde_napi_err)
+}
+
+#[napi]
+pub fn inject_shard_key(query: String, shard_key: String) -> napi::Result<serde_json::Value> {
+    let mut stmt = Parser::parse(&query).map_err(to_napi_err)?;
+    ast::inject_shard_key(&mut stmt, &shard_key).map_err(to_napi_err)?;
     serde_json::to_value(&stmt).map_err(serde_napi_err)
 }
 

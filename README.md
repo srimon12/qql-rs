@@ -74,10 +74,11 @@ npx skills add srimon12/qql-rs --skill qql-skill
 ### 💡 Example
 
 ```sql
-QUERY 'chest pain' FROM medical 
-  USING DENSE MODEL 'nomic' ON FIELD title INTO title_vec 
-  LIMIT 5 
-  WHERE department = 'cardio';
+QUERY TEXT 'chest pain' MODEL 'nomic'
+FROM medical
+USING title_vec AS DENSE
+WHERE department = 'cardio'
+LIMIT 5;
 ```
 
 ---

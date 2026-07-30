@@ -126,6 +126,10 @@ function injectFilter(query, field, op, value) {
   return callNative(() => nativeBinding.injectFilter(query, field, op, value));
 }
 
+function injectShardKey(query, shardKey) {
+  return callNative(() => nativeBinding.injectShardKey(query, shardKey));
+}
+
 function tokenize(query) {
   return callNative(() => nativeBinding.tokenize(query));
 }
@@ -346,6 +350,7 @@ module.exports = {
   parseJson,
   isValid,
   injectFilter,
+  injectShardKey,
   tokenize,
   compileQuery,
   explain,

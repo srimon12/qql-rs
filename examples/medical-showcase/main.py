@@ -3,18 +3,21 @@
 Medical Retrieval Showcase — E2E demo of QQL capabilities.
 
 Demonstrates: collection creation, indexing, hybrid upsert, dense/sparse/hybrid
-search, filters, grouped retrieval, recommend, context, discover, CTE prefetch DAGs,
-parameterized RRF, mutations, scroll, explain.
+(USING HYBRID), filters, ACORN, request timeout/consistency, grouped retrieval,
+recommend, context, discover, CTE prefetch DAGs, parameterized RRF, mutations,
+DELETE PAYLOAD, SCROLL WITH VECTOR, COUNT exact, explain.
 
 Usage:
-    QQL_BIN=./target/release/qql uv run examples/medical-showcase/main.py --execute
-    QQL_BIN=./target/release/qql uv run examples/medical-showcase/main.py --execute --keep
-    uv run examples/medical-showcase/main.py              # print only
+    QQL_BIN=./target/release/qql python examples/medical-showcase/main.py --execute
+    QQL_BIN=./target/release/qql python examples/medical-showcase/main.py --execute --keep
+    python examples/medical-showcase/main.py              # print only
 """
 from __future__ import annotations
 import argparse, json, os, subprocess, sys
+from pathlib import Path
 
-QQL = os.environ.get("QQL_BIN", "/data/codebases/qql-rs/target/debug/qql")
+_ROOT = Path(__file__).resolve().parents[2]
+QQL = os.environ.get("QQL_BIN", str(_ROOT / "target" / "release" / "qql"))
 COL = "medical_showcase"
 
 
@@ -160,7 +163,13 @@ def main():
         f"QUERY 'stroke' FROM {COL} PARAMS (hnsw_ef = 256) LIMIT 3",
         execute=args.execute)
     run("ACORN (filtered recall)",
-        f"QUERY 'emergency' FROM {COL} WHERE specialty = 'neurology' PARAMS (acorn = true) LIMIT 3",
+        f"QUERY 'emergency' FROM {COL} WHERE specialty = 'neurology' PARAMS (acorn = true, max_selectivity = 0.5) LIMIT 3",
+        execute=args.execute)
+    run("Hybrid shorthand (USING HYBRID)",
+        f"QUERY TEXT 'emergency neurological' FROM {COL} USING HYBRID DENSE dense SPARSE sparse FUSION RRF LIMIT 3",
+        execute=args.execute)
+    run("Request timeout + consistency",
+        f"QUERY TEXT 'stroke' FROM {COL} USING dense PARAMS (timeout = 15, consistency = majority) LIMIT 3",
         execute=args.execute)
     run("Score threshold",
         f"QUERY 'patient treatment' FROM {COL} SCORE THRESHOLD 0.3 LIMIT 10",
@@ -246,13 +255,22 @@ def main():
     run("Scroll filtered",
         f"SCROLL FROM {COL} WHERE priority = 'high' LIMIT 3",
         execute=args.execute)
+    run("Scroll WITHOUT vectors",
+        f"SCROLL FROM {COL} WITH VECTOR false LIMIT 3",
+        execute=args.execute)
+    run("COUNT exact",
+        f"COUNT FROM {COL} WHERE priority = 'high' WITH (exact = true)",
+        execute=args.execute)
+    run("DELETE PAYLOAD keys",
+        f"DELETE PAYLOAD care_path FROM {COL} WHERE id = 1",
+        execute=args.execute)
 
     # -- Operations --
     print("\n[13] Operations")
     run("SHOW COLLECTIONS", "SHOW COLLECTIONS", execute=args.execute)
     run("SHOW COLLECTION", f"SHOW COLLECTION {COL}", execute=args.execute)
     run("EXPLAIN",
-        f"QUERY HYBRID TEXT 'stroke' DENSE dense SPARSE sparse FUSION RRF FROM {COL} LIMIT 3",
+        f"QUERY TEXT 'stroke' FROM {COL} USING HYBRID DENSE dense SPARSE sparse FUSION RRF LIMIT 3",
         execute=args.execute, explain=True)
 
     # -- Cleanup --
