@@ -153,7 +153,7 @@ code --install-extension srimon12.qql-lang
 
 ```bash
 # Download the .vsix from GitHub Releases
-code --install-extension qql-lang-0.1.0.vsix
+code --install-extension qql-lang-0.1.5.vsix
 ```
 
 ### Build from source
@@ -175,7 +175,7 @@ npm run vscode:prepublish
 npx vsce package
 
 # Install locally
-code --install-extension qql-lang-0.1.0.vsix
+code --install-extension qql-lang-0.1.5.vsix
 ```
 
 ---

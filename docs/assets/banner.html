@@ -349,7 +349,7 @@
 
         <div class="meta">
           <span class="chip red">QUERY · UPSERT · FILTER</span>
-          <span class="chip blue">Rust · Python · Node · WASM</span>
+          <span class="chip blue">Rust · Python · Node · WASM · Edge</span>
           <span class="chip">REST + gRPC + Edge</span>
         </div>
       </div>
@@ -359,13 +359,12 @@
           <span></span><span></span><span></span>
           <div class="label">search.qql</div>
         </div>
-        <pre><span class="kw">QUERY</span> <span class="str">'chest pain'</span>
+        <pre><span class="kw">QUERY TEXT</span> <span class="str">'chest pain'</span>
   <span class="kw">FROM</span> <span class="id">medical</span>
-  <span class="kw">USING DENSE MODEL</span> <span class="str">'nomic'</span>
-  <span class="kw">ON FIELD</span> <span class="id">title</span>
-  <span class="kw">INTO</span> <span class="id">title_vec</span>
-  <span class="kw">LIMIT</span> <span class="num">5</span>
-  <span class="kw">WHERE</span> <span class="id">department</span> <span class="op">=</span> <span class="str">'cardio'</span><span class="op">;</span></pre>
+  <span class="kw">USING</span> <span class="id">dense</span>
+  <span class="kw">WHERE</span> <span class="id">department</span> <span class="op">=</span> <span class="str">'cardio'</span>
+  <span class="kw">SHARD</span> <span class="str">'hospital-east'</span>
+  <span class="kw">LIMIT</span> <span class="num">5</span><span class="op">;</span></pre>
       </div>
     </div>
 
