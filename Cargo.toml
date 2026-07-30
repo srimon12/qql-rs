@@ -17,9 +17,9 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
-rust-version = "1.90"
+rust-version = "1.95"
 authors = ["Srimon Danguria <srimon12mckv@gmail.com>"]
 license = "MIT"
 repository = "https://github.com/srimon12/qql-rs"

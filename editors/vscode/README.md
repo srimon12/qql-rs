@@ -2,7 +2,7 @@
 
   <img src="https://raw.githubusercontent.com/srimon12/qql-rs/main/docs/assets/qql-banner.png" alt="QQL Banner" width="600" />
 
-  # QQL — Qdrant Query Language for VS Code
+  # QQL 1.2 — Qdrant Query Language for VS Code
 
   Syntax highlighting, live linting, and autocompletion for [QQL](https://github.com/srimon12/qql-rs) — a SQL-like query language for the [Qdrant](https://qdrant.tech) vector database.
 
@@ -16,7 +16,7 @@
 
 ### Syntax Highlighting
 
-All 127 QQL keywords tokenized into distinct scopes — statements, query expressions, filters, DDL, formula expressions, and boolean/null constants. Strings, numbers, comments, operators, and dotted paths (`field.nested`, `items[].name`) are all highlighted correctly.
+All 130+ QQL 1.2 keywords tokenized into distinct scopes — statements, query expressions (IMAGE, CROSS, MULTI), filters, DDL, formula expressions, and boolean/null constants. Strings, numbers, comments, operators, and dotted paths (`field.nested`, `items[].name`) are all highlighted correctly.
 
 | Token type | Scope |
 |-----------|-------|
@@ -46,9 +46,9 @@ QUERY missing FROM docs;   ← QQL-PARSE-UNEXPECTED: Expected FROM
 
 ### Autocompletion
 
-**127 keyword completions** — every QQL keyword is available at your cursor.
+**130+ keyword completions** — every QQL keyword is available at your cursor.
 
-**19 snippet templates** — common query patterns insert with placeholders:
+**28 snippet templates** — common query patterns insert with placeholders:
 
 | Snippet | What it generates |
 |---------|------------------|

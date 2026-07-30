@@ -52,6 +52,11 @@ export interface AnalysisResult {
     error: AnalysisError | null;
 }
 
+/** Compile a QQL statement to a compiled route as a byte buffer. */
+export function compileBytes(query: string): Uint8Array;
+/** Explain a QQL statement as a byte buffer. */
+export function explainBytes(query: string): Uint8Array;
+
 
 
 export class Client {
@@ -122,6 +127,10 @@ export class Stmt {
      */
     injectFilter(field: string, op: string, value: any): void;
     /**
+     * Multi-tenant shard routing: set shard key on this statement (+ nested CTEs).
+     */
+    injectShardKey(shard_key: string): void;
+    /**
      * Parse a QQL string into a Stmt object for programmatic manipulation.
      */
     constructor(input: string);
@@ -134,7 +143,7 @@ export class Stmt {
      */
     toObject(): any;
     /**
-     * Get or set the shard key (QUERY, COUNT, SCROLL, UPSERT, DELETE only).
+     * Get or set the shard key on statements that support custom sharding.
      */
     get shardKey(): string | undefined;
     set shardKey(value: string | null | undefined);
@@ -155,6 +164,11 @@ export function compileBytes(query: string): Uint8Array;
 export function explain(query: string): string;
 
 export function explainBytes(query: string): Uint8Array;
+
+/**
+ * Inject a shard key for multi-tenant routing (QUERY/SCROLL/COUNT/UPSERT/DELETE + CTEs).
+ */
+export function injectShardKey(query: string, shard_key: string): any;
 
 export function inject_filter(query: string, field: string, op: string, value: any): any;
 

@@ -5,22 +5,34 @@ description: "Use QQL (Qdrant Query Language) to manage collections, upsert docu
 
 # QQL Skill
 
-Use this skill to turn vector retrieval and database intent into valid, canonical QQL statements.
-Treat QQL as a typed query language and execution surface for vector databases.
+Turn retrieval intent into **valid, current QQL** and correct SDK usage.
+
+## Proposition (read this first)
+
+QQL is the **typed language + plan IR** for Qdrant:
+
+1. **One grammar** for search, hybrid, multivector, mutations, DDL, multitenancy.
+2. **One plan** (`PlannedOperation`) — gRPC and REST are equal projections, not REST-first.
+3. **Host isolation** via `inject_filter` (AST); **routing** via `SHARD '…'` or `stmt.shard_key`.
+4. **Never invent** syntax listed as open in [qql-gaps.md](references/qql-gaps.md).
+
+Human docs (product-facing): [`docs/`](../../docs/). This skill is for agents writing QQL/SDK code.
 
 ## Reference Wiki
 
-Read these reference documents when you need details on specific topics:
-- [references/qql-examples.md](references/qql-examples.md) — Canonical QQL query examples (CTEs, RRF/DBSF, MMR, Discover, Rerank, Formulas, Filters).
-- [references/python-sdk.md](references/python-sdk.md) — Python SDK (`pyqql`) client, AST parsing, and filter injection.
-- [references/node-sdk.md](references/node-sdk.md) — Node.js SDK (`nqql`) client and N-API methods.
-- [references/wasm-sdk.md](references/wasm-sdk.md) — WebAssembly SDK (`qql-wasm`) browser & edge client.
-- [references/rust-sdk.md](references/rust-sdk.md) — Rust SDK (`qql`, `qql-core`, `qql-plan`) runtime & executor.
-- [references/qql-gaps.md](references/qql-gaps.md) — **Open vs closed** features; do not invent open syntax; do not claim closed items are missing.
-- [references/qql-install.md](references/qql-install.md) — Read for installation and setup instructions across Python, Rust, Node.js, and CLI.
-- [references/qql-multitenancy.md](references/qql-multitenancy.md) — Complete multi-tenant guide: shard routing, filter injection, and tenant isolation.
+| Doc | When to open it |
+|-----|-----------------|
+| [qql-examples.md](references/qql-examples.md) | Golden QQL patterns (CTE, hybrid, rerank, formula, geo) |
+| [qql-multitenancy.md](references/qql-multitenancy.md) | `SHARD KEY` DDL vs `SHARD` routing vs `inject_filter` |
+| [inject-filter.md](references/inject-filter.md) | Fail-closed tenant / policy injection |
+| [qql-gaps.md](references/qql-gaps.md) | Open vs closed — **do not invent open syntax** |
+| [qql-install.md](references/qql-install.md) | Install pyqql / nqql / CLI / edge |
+| [python-sdk.md](references/python-sdk.md) | `pyqql` |
+| [node-sdk.md](references/node-sdk.md) | `@veristamp/nqql` |
+| [wasm-sdk.md](references/wasm-sdk.md) | `qql-wasm` |
+| [rust-sdk.md](references/rust-sdk.md) | `qql-core` / `qql-plan` / `qql` |
 
-For runnable demo scripts, see `scripts/demo_retrieval_modes.py`, `scripts/demo_medical_records.py`, `scripts/demo_kitchen_sink.py`, and `scripts/demo_multivector.py`.
+Runnable demos: `scripts/demo_*.py`. Repo examples: `examples/` (Berlin, SEC 10-K, medical, edge).
 
 ## Intent Mapping
 
@@ -159,7 +171,7 @@ FROM <collection>
 - `max_selectivity` requires `acorn = true` (remote Qdrant; not edge).
 - `timeout` / `consistency` are request-level (OpenAPI query params / gRPC fields); not on edge.
 - Edge has **no** `GROUP BY` — use remote Qdrant or filter + `LIMIT`.
-- Dynamic shard: host `inject_shard_key(stmt, tenant)` (no `$bind` syntax).
+- Dynamic shard: write `SHARD 'tenant'` in QQL, or set `stmt.shard_key = tenant` after parse (no `$bind` syntax).
 
 **Vector roles (critical for embedding):**
 
@@ -174,38 +186,34 @@ FROM <collection>
 
 Offline/embed-only paths without schema require an explicit `AS …`. Leaving kind unknown fails with `QQL-VECTOR-KIND` (never silent dense default for named targets).
 
-### Shard Routing & Multi-Tenancy
+### Shard routing & multi-tenancy (two keywords)
 
-For collections using custom sharding, append `SHARD '<key>'` to route queries and mutations to a specific tenant's shard group:
+| Keyword | Kind | Meaning |
+|---------|------|---------|
+| `CREATE/DROP/SHOW SHARD KEY` | DDL | Define / list custom partition names |
+| `SHARD 'key'` on a statement | DML routing | Route **this** request (`shard_key` / `ShardKeySelector`) |
 
 ```sql
--- Create a multi-tenant collection with custom sharding
-CREATE COLLECTION sec10k HYBRID (dense VECTOR(768, COSINE), sparse SPARSE)
+CREATE COLLECTION sec10k HYBRID (dense VECTOR(384, COSINE), sparse SPARSE)
 WITH PARAMS (
-  replication_factor = 2,
   shard_number = 8,
   sharding_method = 'custom',
   shard_keys = ['honeywell', 'ge', '3m', 'rtx']
 );
+CREATE INDEX ON COLLECTION sec10k FOR tenant_id TYPE keyword WITH (is_tenant = true);
 
--- Query isolated to one tenant
-QUERY 'supply chain risks' FROM sec10k
+-- Isolation (filter) + routing (SHARD) together
+QUERY TEXT 'supply chain risks' FROM sec10k USING dense
 WHERE tenant_id = 'honeywell'
 SHARD 'honeywell'
 LIMIT 10;
 
--- Upsert with shard routing
-UPSERT INTO sec10k VALUES {id: 1, text: '...', tenant_id: 'honeywell'}
-SHARD 'honeywell';
-
--- Scroll with shard routing
-SCROLL FROM sec10k WHERE tenant_id = 'honeywell' SHARD 'honeywell' LIMIT 100;
-
--- Delete with shard routing
-DELETE FROM sec10k WHERE tenant_id = 'honeywell' SHARD 'honeywell';
+UPSERT INTO sec10k VALUES {id: 1, text: '…', tenant_id: 'honeywell'} SHARD 'honeywell';
 ```
 
-Shard routing is optional — omit `SHARD` for auto-sharded collections. Shard key is supported on `QUERY`, `COUNT`, `SCROLL`, `UPSERT`, and `DELETE`.
+- **Security:** host `inject_filter(…, "tenant_id", "=", tenant)` on untrusted QQL.  
+- **Routing:** prefer `SHARD '…'` in the query; or `stmt.shard_key = tenant` after parse.  
+- **No** `inject_shard_key` API. Full guide: [qql-multitenancy.md](references/qql-multitenancy.md).
 
 ### Filters (`WHERE` Clause)
 Supports standard comparison operators and predicates:
@@ -220,43 +228,38 @@ Supports standard comparison operators and predicates:
 - Nested: `NESTED('reviews', rating > 4)`
 - Logical: `AND`, `OR`, `NOT`
 
-## Query Planning & Execution Architecture
-
-QQL uses a prepare → plan → dispatch pipeline shared by all SDKs and the CLI:
+## Query planning & execution
 
 ```
-Phase 1: Parse (qql-core)
-  QQL string -> AST (Stmt enum)
-  USING name without AS keeps kind: null (source fidelity)
-
-Phase 2: Prepare (qql-runtime / WASM Client)
-  1. Schema topology: resolve USING kinds + multivector flags
-     (dense / sparse names + multivector_config → multi)
-  2. Embeddings (qql-embed): text → Dense | Sparse | MultiDense
-     - kind unknown without schema → QQL-VECTOR-KIND (fail closed)
-     - multi targets call Embedder::embed_multi
-
-Phase 3: Plan (qql-plan)
-  AST -> PlannedOperation (canonical, transport-neutral)
-  MultiDense serializes as array-of-arrays on REST / multi_dense on gRPC
-  to_rest_route() -> Route { method, path, body }
-
-Phase 4: Dispatch
-  Smart batching: same-collection QUERYs -> /points/query/batch,
-                   same-collection mutations -> /points/batch
-  REST / gRPC / Edge backends
+source / host AST
+    │
+    ▼
+qql-core: parse + validation  →  Stmt
+    │
+    ▼
+prepare (runtime / WASM Client)
+  · schema topology → USING dense/sparse/multi
+  · embeddings (qql-embed) → Dense | Sparse | MultiDense
+    │
+    ▼
+qql-plan: plan() → PlannedOperation   ← single source of truth
+    │
+    ├── to_rest_route()     → REST JSON
+    ├── execute_grpc_route  → typed protobuf (no JSON for query vectors / IDs)
+    └── EdgeQdrant          → in-process
 ```
 
-DDL (`CREATE COLLECTION`, `ALTER`, `CREATE INDEX`, etc.) and DML (`QUERY`, `UPSERT`, `DELETE`, etc.) all flow through the same plan-then-dispatch path.
+`filter` and `shard_key` are **siblings** on the request. gRPC uses `Filter` +
+`ShardKeySelector`; REST uses body `filter` + body `shard_key`. Neither puts
+routing inside the filter object.
 
+### Backend limits
 
-### Backend Limitations
-
-| Backend | Limitations |
-|---------|-------------|
-| REST | None |
-| gRPC | Requires `--features grpc` at build time |
-| Edge (`qdrant-edge`) | No shard key management (CreateShardKey returns error); in-process HNSW; no persistence unless `--on-disk` |
+| Backend | Notes |
+|---------|--------|
+| REST | Full matrix |
+| gRPC | Default with runtime `grpc` feature; typed plan → proto |
+| Edge | No custom shard-key admin; no `GROUP BY` / ACORN; optional multi/image/rerank hosts |
 
 ## CLI Reference
 

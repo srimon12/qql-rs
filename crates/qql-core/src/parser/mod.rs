@@ -26,7 +26,7 @@ pub use config_validation::{
 
 /// Canonical QQL parser facade.
 ///
-/// Production parsing is **only** the hand-written [`AstLowerer`]
+/// Production parsing is **only** the hand-written AST lowerer
 /// (lexer → tokens → typed AST). There is no parallel PEG/pest frontend in
 /// this crate: `language/v1/grammar.pest` is the language contract for docs
 /// and CI (`qql-grammar-gen`), not a runtime dependency of `qql-core`.

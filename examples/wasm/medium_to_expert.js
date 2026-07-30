@@ -1,20 +1,58 @@
-import init, { Client, parse, compile, isValid } from 'qql-wasm';
+/**
+ * Medium → Expert (WASM) — multi-tenant gateway.
+ */
+import init, { isValid, explain, analyze, Stmt, Client } from '../../demo/pkg/qql_wasm.js';
+
+const USERS = {
+  alice: { tenant: 'edge-a', role: 'admin' },
+  bob: { tenant: 'edge-a', role: 'viewer' },
+};
+
+function secure(query, user) {
+  const ctx = USERS[user];
+  const stmt = new Stmt(query);
+  stmt.injectFilter('tenant_id', '=', ctx.tenant);
+  stmt.shardKey = ctx.tenant;
+  if (ctx.role === 'viewer') stmt.injectFilter('status', '=', 'published');
+  return stmt;
+}
 
 await init();
 
-// 1. Parse & validate (browser-side, no server)
-const stmt = parse("QUERY 'wasm performance' FROM edge_docs USING dense LIMIT 10");
-isValid("QUERY 'v8 engine' FROM edge_docs");
+const raw = `
+  QUERY TEXT 'wasm edge retrieval'
+  FROM edge_docs
+  USING HYBRID DENSE dense SPARSE sparse FUSION RRF
+  LIMIT 10
+`;
 
-// 2. Compile to REST route (offline)
-const route = compile("QUERY 'search' FROM docs USING dense LIMIT 10");
-// route = "{ method: \"POST\", path: \"/collections/docs/points/query\", ... }"
+console.log('isValid:', isValid(raw));
+console.log('explain:\n' + explain(raw));
 
-// 3. Execute via browser fetch
-const client = new Client("http://localhost:6333", null);
-// endpoint required — no default URL
-client.setHttpEmbedder("https://api.openai.com/v1/embeddings", "text-embedding-3-small", 1536, "sk-...");
+const secured = secure(raw, 'bob');
+console.log('secured shardKey:', secured.shardKey);
 
-const result = await client.execute(
-    "QUERY 'vector databases' FROM docs USING dense LIMIT 10"
-);
+const literal = new Stmt(`
+  QUERY TEXT 'wasm edge retrieval'
+  FROM edge_docs
+  USING HYBRID DENSE dense SPARSE sparse FUSION RRF
+  SHARD 'edge-a'
+  LIMIT 10
+`);
+console.log('SHARD in QQL →', literal.shardKey);
+
+console.log('analyze routes:', analyze(raw).routes?.length ?? 0);
+
+const live =
+  typeof location !== 'undefined' && new URLSearchParams(location.search).has('live');
+if (live) {
+  const client = new Client('http://localhost:6333', null);
+  client.setHttpEmbedder('http://localhost:11434/v1/embeddings', 'all-minilm:l6-v2', 384, null);
+  try {
+    console.log(await client.executeStmt(secured));
+  } catch (e) {
+    console.warn(e);
+  }
+} else {
+  console.log('Offline complete. Append ?live for execute.');
+}

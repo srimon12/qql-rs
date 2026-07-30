@@ -1,8 +1,8 @@
 //! Transport-neutral planning: AST → [`PlannedOperation`].
 //!
 //! Architecture:
-//! - [`plan`] is the sole statement → IR entry point.
-//! - [`to_rest_route`] is an **optional** REST projection (proxies / offline compile).
+//! - [`plan::plan`] is the sole statement → IR entry point.
+//! - [`plan::to_rest_route`] is an **optional** REST projection (proxies / offline compile).
 //! - Embeddings are owned by `qql-embed`, not this crate.
 
 extern crate alloc;

@@ -171,6 +171,7 @@ function injectFilter(query, field, op, value) {
   return callNative(() => nativeBinding.injectFilter(query, field, op, value));
 }
 
+
 function tokenize(query) {
   return callNative(() => nativeBinding.tokenize(query));
 }
@@ -246,7 +247,7 @@ module.exports = {
   parseJson,
   isValid,
   injectFilter,
-  tokenize,
+    tokenize,
   compileQuery,
   explain,
   explainStmt,

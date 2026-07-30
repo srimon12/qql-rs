@@ -77,6 +77,19 @@ test('Stmt.toJson and Stmt.toJSON both exist', () => {
   assert.strictEqual(stmt.toJson(), stmt.toJSON());
 });
 test('Stmt.shardKey property (get)', () => assert.strictEqual(stmt.shardKey, null));
+test('Stmt.shardKey setter supports DELETE PAYLOAD', () => {
+  const [stmt] = nqql.parse("DELETE PAYLOAD draft FROM docs WHERE status = 'archived'");
+  stmt.shardKey = 'tenant-a';
+  assert.strictEqual(stmt.shardKey, 'tenant-a');
+  assert.strictEqual(stmt.toObject().DeletePayload.shard_key, 'tenant-a');
+});
+test('Stmt.shardKey from SHARD clause and property', () => {
+  const [s] = nqql.parse("DELETE PAYLOAD draft FROM docs WHERE status = 'x' SHARD 'tenant'");
+  assert.strictEqual(s.shardKey, 'tenant');
+  const [s2] = nqql.parse("QUERY TEXT 'x' FROM docs LIMIT 1");
+  s2.shardKey = 'acme';
+  assert.strictEqual(s2.shardKey, 'acme');
+});
 
 // ============================================================================
 console.log('\n========== B. Parse API ==========');

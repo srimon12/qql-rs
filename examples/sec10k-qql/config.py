@@ -1,23 +1,35 @@
 """
-SEC 10-K Multitenant RAG — QQL Edition.  One source of truth.
+SEC 10-K Multitenant RAG — QQL Edition. One source of truth.
 """
 
-import os, re
+from __future__ import annotations
+
+import os
+import re
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
-LM_STUDIO = "http://127.0.0.1:1234"
-EMBED_MODEL = "text-embedding-all-minilm-l6-v2-embedding"
-EMBED_DIM = 384
-LLM_MODEL = "minicpm5-1b-claude-opus-fable5-v2-thinking"
+
+# Ollama OpenAI-compatible embeddings — small & fast
+EMBED_URL = os.getenv("EMBED_URL", "http://localhost:11434/v1/embeddings")
+EMBED_MODEL = os.getenv("EMBED_MODEL", "all-minilm:l6-v2")
+EMBED_DIM = int(os.getenv("EMBED_DIM", "384"))
+
+# Optional chat model for agent / answer generation (LM Studio or Ollama)
+LLM_BASE = os.getenv("LLM_BASE", os.getenv("LM_STUDIO", "http://127.0.0.1:1234"))
+LLM_MODEL = os.getenv("LLM_MODEL", "lfm2.5-thinking:1.2b")
+
+# Back-compat aliases used by older scripts
+LM_STUDIO = os.getenv("LM_STUDIO", EMBED_URL.rsplit("/v1", 1)[0] if "/v1" in EMBED_URL else "http://localhost:11434")
 
 COLLECTION = "sec10k"
 TENANTS = ["honeywell", "ge", "3m", "rtx"]
 
-CHUNK_SIZE = 384       # match EMBED_DIM for 1:1 token/dim ratio
-CHUNK_OVERLAP = 50
+CHUNK_SIZE = 256
+CHUNK_OVERLAP = 40
 
-SEC_USER_AGENT = "QQL demo contact@example.com"
+SEC_USER_AGENT = os.getenv("SEC_USER_AGENT", "QQL-demo contact@example.com")
 
+# Real SEC EDGAR 10-K filings (company → fiscal year → filing URL)
 FILINGS = {
     "honeywell": {
         2023: "https://www.sec.gov/Archives/edgar/data/773840/000077384024000014/hon-20231231.htm",
@@ -41,17 +53,15 @@ FILINGS = {
     },
 }
 
-# ── Metadata extraction patterns ─────────────────────────────────
-# These regexes extract structured metadata from 10-K text chunks.
-# Stored as payload → enables rich QQL WHERE/ORDER BY/GROUP BY later.
-SECTION_RE = re.compile(
-    r'(Item\s+[0-9]+[A-Z]?\.?)', re.IGNORECASE
-)
+# Optional: limit years for a faster demo (default all years)
+DEMO_YEARS = os.getenv("DEMO_YEARS", "")  # e.g. "2024" or "2024,2025"
+
+SECTION_RE = re.compile(r"(Item\s+[0-9]+[A-Z]?\.?)", re.IGNORECASE)
 RISK_RE = re.compile(
-    r'(cyber\s*security|supply\s*chain|regulatory|litigation|'
-    r'economic\s*condition|competition|intellectual\s*property|'
-    r'environmental|geopolitical|inflation|foreign\s*exchange|'
-    r'pandemic|data\s*privacy|trade\s+restriction)',
+    r"(cyber\s*security|supply\s*chain|regulatory|litigation|"
+    r"economic\s*condition|competition|intellectual\s*property|"
+    r"environmental|geopolitical|inflation|foreign\s*exchange|"
+    r"pandemic|data\s*privacy|trade\s+restriction)",
     re.IGNORECASE,
 )
-REVENUE_RE = re.compile(r'\$[\d,]+\.?\d*\s*(million|billion|trillion)', re.IGNORECASE)
+REVENUE_RE = re.compile(r"\$[\d,]+\.?\d*\s*(million|billion|trillion)", re.IGNORECASE)

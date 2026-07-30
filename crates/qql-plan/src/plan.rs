@@ -437,10 +437,12 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
                 qql_core::ast::QueryCollection::Explicit(name) => name.clone(),
                 qql_core::ast::QueryCollection::Inherited => String::new(),
             };
+            // Filter and shard routing are independent: filter → qdrant.Filter,
+            // shard_key → request ShardKeySelector (gRPC) / shard_key (REST).
             let filter = count
                 .filter
                 .as_ref()
-                .map(|f| crate::filter::top_level_filter_with_shard(f, count.shard_key.as_deref()));
+                .map(|f| crate::filter::top_level_filter(f));
             Ok(PlannedOperation::Count {
                 collection,
                 request: CountRequest {

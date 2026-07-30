@@ -744,6 +744,21 @@ async function runE2E() {
     assert.strictEqual(stmt.shardKey, null);
   });
 
+  test('Stmt.shardKey setter supports DELETE PAYLOAD', () => {
+    const [stmt] = nqql.parse("DELETE PAYLOAD draft FROM docs WHERE status = 'archived'");
+    stmt.shardKey = 'tenant-a';
+    assert.strictEqual(stmt.shardKey, 'tenant-a');
+    assert.strictEqual(stmt.toObject().DeletePayload.shard_key, 'tenant-a');
+  });
+
+  test('SHARD clause on DELETE PAYLOAD', () => {
+    const [stmt] = nqql.parse(
+      "DELETE PAYLOAD draft FROM docs WHERE status = 'archived' SHARD 'tenant-b'",
+    );
+    assert.strictEqual(stmt.shardKey, 'tenant-b');
+    assert.strictEqual(stmt.toObject().DeletePayload.shard_key, 'tenant-b');
+  });
+
   test('Stmt.shardKey on SHOW COLLECTIONS returns null', () => {
     const [stmt] = nqql.parse('SHOW COLLECTIONS');
     assert.strictEqual(stmt.shardKey, null);

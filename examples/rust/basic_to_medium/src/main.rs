@@ -1,22 +1,35 @@
-use std::borrow::Cow;
-use qql_core::ast::{self, Value};
+//! Basic → Medium (Rust / qql-core)
+//! Offline: parse, inject_filter, SHARD clause, set_shard_key.
+
+use qql_core::ast::{self, ComparisonOp, Value};
 use qql_core::parser::Parser;
 
 fn main() {
-    let q = "QUERY 'machine learning transformer' FROM papers LIMIT 20";
+    let q = "QUERY TEXT 'machine learning transformer' FROM papers USING dense LIMIT 20";
 
-    let mut s = Parser::parse(q).unwrap();
-    ast::inject_filter(&mut s, "tenant_id", "=", &Value::Str(Cow::Borrowed("acme-corp")));
-    println!("=== String filter ===");
-    println!("{:#?}", s);
+    let mut stmt = Parser::parse(q).expect("valid QQL");
+    println!("=== parse OK ===\n{stmt:#?}\n");
 
-    let mut s = Parser::parse(q).unwrap();
-    ast::inject_filter(&mut s, "impact_factor", ">=", &Value::Float(5.0));
-    println!("\n=== Numeric filter ===");
-    println!("{:#?}", s);
+    ast::inject_filter(
+        &mut stmt,
+        "tenant_id",
+        ComparisonOp::Eq,
+        Value::Str("acme-corp".into()),
+    )
+    .unwrap();
+    println!("=== after inject_filter(tenant_id) ===\n{stmt:#?}\n");
 
-    let mut s = Parser::parse(q).unwrap();
-    ast::inject_filter(&mut s, "is_published", "=", &Value::Bool(true));
-    println!("\n=== Boolean filter ===");
-    println!("{:#?}", s);
+    // Preferred: SHARD in the language
+    let with_shard = Parser::parse(
+        "QUERY TEXT 'vector database latency' FROM papers \
+         USING HYBRID DENSE dense SPARSE sparse FUSION RRF \
+         SHARD 'acme-corp' LIMIT 10",
+    )
+    .unwrap();
+    println!("=== SHARD in QQL → shard_key = {:?} ===\n", with_shard.shard_key());
+
+    // Host path after parse
+    let mut host = Parser::parse(q).unwrap();
+    assert!(host.set_shard_key(Some("acme-corp".into())));
+    println!("=== set_shard_key → {:?} ===", host.shard_key());
 }

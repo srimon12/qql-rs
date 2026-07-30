@@ -7,7 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.1.4] - 2026-07-30
+
+## [0.1.5] - 2026-07-30
+
+### 🔴 Breaking Changes
+- **Removed `inject_shard_key` / `injectShardKey`** from `qql-core` and all SDKs (`pyqql`, `pyqql-edge`, `nqql`, `nqql-edge`, `qql-wasm`).
+  Routing is now strictly expressed via QQL `SHARD 'key'` syntax or host property setters (`stmt.shard_key` / `set_shard_key`). `inject_filter` is reserved exclusively for logical security isolation.
+
+### 🏗️ Architecture & Wire Protocol
+- **Clean Transport Routing**: Removed `shard_key` from `FilterCompound`. REST and gRPC lower routing parameters into request-level `shard_key` params or `ShardKeySelector` payloads, avoiding filter payload overhead.
+- **Turbo Quantization IR**: Added `QuantizationConfig::Turbo` to `qql-plan` with bit-width parameters (`bits = 1|2|4|8`), OpenAPI payload serialization, and gRPC converter lowering.
+
+### 🚀 Added & Improved
+- **Refreshed Showcase Examples**: Updated SEC 10-K, Berlin Airbnb, Medical showcase, and language binding demos (`examples/`) to use `SHARD` syntax, Turbo quantization, and `fastembed-rs` ONNX inference.
+- **SDK & Crate Documentation**: Harmonized API tables across all 13 crate READMEs and updated agent skills (`skills/qql-skill/`).
+
+---
 
 ### 🏗️ Architecture
 - **Transport-agnostic Plan IR**: `qql-plan` is now free of REST/gRPC client types. `PlannedOperation` is the single source of truth, lowered directly by every backend (`RestQdrant`, `GrpcQdrant`, `EdgeQdrant`). `to_rest_route()` is fallible and `compile_statement()` returns `CompiledStatement { stmt_type, route }` for reliable SDK metadata.

@@ -28,7 +28,7 @@ class TestPackageInspection(unittest.TestCase):
             "execute_async",
             "explain",
             "inject_filter",
-            "is_valid",
+                        "is_valid",
             "local_executor",
             "parse",
             "parse_json",
@@ -134,10 +134,24 @@ class TestErrorHandling(unittest.TestCase):
         d = r.to_dict()
         self.assertIsNotNone(d["Query"]["filter"])
 
+    def test_c4_delete_payload_shard_key(self):
+        stmt = pyqql_edge.parse(
+            "DELETE PAYLOAD draft FROM docs WHERE status = 'archived'"
+        )[0]
+        stmt.shard_key = "tenant-a"
+        self.assertEqual(stmt.shard_key, "tenant-a")
+        self.assertEqual(
+            stmt.to_dict()["DeletePayload"]["shard_key"],
+            "tenant-a",
+        )
 
-# ============================================================================
-# Category D: Local Edge Executor
-# ============================================================================
+    def test_c5_stmt_shard_key_property(self):
+        stmts = pyqql_edge.parse("QUERY TEXT 'x' FROM docs SHARD 't' LIMIT 5")
+        assert stmts[0].shard_key == "t"
+        s = pyqql_edge.parse("QUERY TEXT 'x' FROM docs LIMIT 5")[0]
+        s.shard_key = "acme"
+        assert s.shard_key == "acme"
+
 
 class TestLocalExecutor(unittest.TestCase):
     def setUp(self):

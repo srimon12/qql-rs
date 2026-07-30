@@ -212,14 +212,6 @@ pub fn inject_filter(
     to_js_value(&stmt)
 }
 
-/// Inject a shard key for multi-tenant routing (QUERY/SCROLL/COUNT/UPSERT/DELETE + CTEs).
-#[wasm_bindgen(js_name = injectShardKey)]
-pub fn inject_shard_key(query: &str, shard_key: &str) -> Result<JsValue, JsValue> {
-    let mut stmt = Parser::parse(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    ast::inject_shard_key(&mut stmt, shard_key).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    to_js_value(&stmt)
-}
-
 fn parse_comparison_op(op: &str) -> Result<ComparisonOp, JsValue> {
     match op {
         "=" | "==" | "eq" => Ok(ComparisonOp::Eq),
@@ -264,45 +256,15 @@ impl Stmt {
         Ok(())
     }
 
-    /// Multi-tenant shard routing: set shard key on this statement (+ nested CTEs).
-    #[wasm_bindgen(js_name = injectShardKey)]
-    pub fn inject_shard_key(&mut self, shard_key: &str) -> Result<(), JsValue> {
-        ast::inject_shard_key(&mut self.inner, shard_key)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
-    }
-
-    /// Get or set the shard key on statements that support custom sharding.
+    /// QQL `SHARD '…'` routing key (request-level). Prefer the clause in QQL.
     #[wasm_bindgen(getter, js_name = shardKey)]
     pub fn shard_key(&self) -> Option<String> {
-        match &self.inner {
-            ast::Stmt::Query(q) => q.shard_key.clone(),
-            ast::Stmt::Count(c) => c.shard_key.clone(),
-            ast::Stmt::Scroll(s) => s.shard_key.clone(),
-            ast::Stmt::Upsert(u) => u.shard_key.clone(),
-            ast::Stmt::Delete(d) => d.shard_key.clone(),
-            ast::Stmt::ClearPayload(c) => c.shard_key.clone(),
-            ast::Stmt::DeleteVector(d) => d.shard_key.clone(),
-            ast::Stmt::UpdateVector(u) => u.shard_key.clone(),
-            ast::Stmt::UpdatePayload(u) => u.shard_key.clone(),
-            _ => None,
-        }
+        self.inner.shard_key().map(str::to_owned)
     }
 
     #[wasm_bindgen(setter, js_name = shardKey)]
     pub fn set_shard_key(&mut self, key: Option<String>) {
-        let key = key.filter(|k| !k.is_empty());
-        match &mut self.inner {
-            ast::Stmt::Query(q) => q.shard_key = key,
-            ast::Stmt::Count(c) => c.shard_key = key,
-            ast::Stmt::Scroll(s) => s.shard_key = key,
-            ast::Stmt::Upsert(u) => u.shard_key = key,
-            ast::Stmt::Delete(d) => d.shard_key = key,
-            ast::Stmt::ClearPayload(c) => c.shard_key = key,
-            ast::Stmt::DeleteVector(d) => d.shard_key = key,
-            ast::Stmt::UpdateVector(u) => u.shard_key = key,
-            ast::Stmt::UpdatePayload(u) => u.shard_key = key,
-            _ => {}
-        }
+        let _ = self.inner.set_shard_key(key);
     }
 
     /// Serialise the AST to a JSON string.

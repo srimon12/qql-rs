@@ -40,28 +40,28 @@ const client = new Client({
 
 ---
 
-## 2. Multi-Tenant Filter Injection
+## 2. Multi-tenant isolation + optional routing
 
-Parse user query, inject tenant isolation, execute.
+**Isolation** = `injectFilter` (always). **Routing** = `SHARD '…'` in QQL or `stmt.shardKey`.  
+No `injectShardKey` free function.
 
 ```js
-const { parse, injectFilter, Client } = require('@veristamp/nqql');
-
+const { parse, Client } = require('@veristamp/nqql');
 const client = new Client({ url: "http://localhost:6333" });
 
-// User query from UI / API
-const [stmt] = parse("QUERY 'supply chain risks' FROM sec10k SHARD 'honeywell' LIMIT 10");
-
-// Platform injects tenant filter -- single call, recursive into CTEs and prefetches
+// Preferred: SHARD in QQL
+const [stmt] = parse(`
+  QUERY TEXT 'supply chain risks' FROM sec10k USING dense
+  SHARD 'honeywell' LIMIT 10
+`);
 stmt.injectFilter("tenant_id", "=", "honeywell");
-
-// Set the shard key on the statement
-stmt.shardKey = "honeywell";
-
 const result = await client.execute(stmt);
+
+// Host-resolved after parse:
+// stmt.shardKey = "honeywell";
 ```
 
-Note: `injectFilter` does not support `!=`. Use equality and wrap with `NOT`, or rewrite the query.
+`injectFilter` does not support `!=` — use equality or rewrite the query.
 
 ---
 

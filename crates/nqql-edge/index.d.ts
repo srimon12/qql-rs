@@ -3,6 +3,7 @@ export class Stmt {
   toObject(): unknown;
   toJson(): string;
   toJSON(): string;
+  /** QQL `SHARD '…'` routing key (request-level). Prefer the clause in QQL. */
   shardKey?: string | null;
 }
 

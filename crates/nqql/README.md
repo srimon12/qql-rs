@@ -1,162 +1,84 @@
 # nqql
 
-Node.js native bindings for the QQL parser, plan compiler, and execution engine, compiled using N-API (`napi-rs`).
+Node.js N-API bindings for QQL (parser, plan, execute).
 
-## Features
+## Proposition
 
-- **Live Qdrant Execution**: Connect to live Qdrant instances over REST (default) or gRPC
-- **First-Class Embedding Inference**: Integrate custom HTTP embedder models (Ollama, OpenAI, vLLM, TEI)
-- **Native Route Lowering**: Lower QQL queries to typed route objects via `compileQuery`
-- **Native parsing**: Rust-speed QQL parsing in Node.js returning `Stmt` objects
-- **Filter injection**: Programmatically add tenant isolation filters
-- **Validation**: Check if a query string is valid QQL
-- **Smart batching**: Auto-batches contiguous same-collection query/mutation statements
+Same QQL surface as Python/Rust/CLI — live Qdrant over **REST or gRPC**,
+optional HTTP embedders, AST `injectFilter`, and first-class `SHARD` routing.
 
-## Requirements & Supported Platforms
-
-- **Node.js**: `>=18`
-- **Supported Platforms**:
-  - Linux x64 (`glibc`) — `@veristamp/nqql-linux-x64-gnu`
-  - macOS x64 (`x86_64`) & arm64 (`Apple Silicon`) — `@veristamp/nqql-darwin-x64`, `@veristamp/nqql-darwin-arm64`
-  - Windows x64 (`msvc`) — `@veristamp/nqql-win32-x64-msvc`
-- *Note: Linux musl (Alpine) is not currently supported.*
-
-## Installation
+## Install
 
 ```bash
 npm install @veristamp/nqql
 ```
 
-## Quick Start
+Node **≥ 18**. Platforms: Linux x64 glibc, macOS x64/arm64, Windows x64.
+
+## Quick start
 
 ```javascript
 const {
-  Client, HttpEmbedder, Stmt,
-  parse, parseJson,
-  isValid, injectFilter, injectShardKey, tokenize,
-  compileQuery, explain, explainStmt,
-  execute, executeStmt, version
-} = require('@veristamp/nqql');
+  Client, HttpEmbedder, parse, isValid, injectFilter,
+  compileQuery, explain, execute, version,
+} = require("@veristamp/nqql");
 
-// 1. Connect to live Qdrant with optional embedding provider
-const embedder = new HttpEmbedder({
+const client = new Client({
+  url: "http://localhost:6333",
+  embedder: new HttpEmbedder({
     endpoint: "http://localhost:11434/v1/embeddings",
     model: "all-minilm:l6-v2",
     dimension: 384,
-    apiKey: ""                          // or api_key (snake_case also accepted)
+  }),
 });
 
-const client = new Client({
-    url: "http://localhost:6333",
-    apiKey: "optional-qdrant-secret",   // or api_key
-    useGrpc: false,                     // or use_grpc
-    embedder: embedder
-});
+const report = await client.execute(
+  "QUERY TEXT 'cardiology' FROM medical_records USING dense LIMIT 5"
+);
 
-// Execute QQL query (auto-embeds text to vector)
-const result = await client.execute("QUERY 'cardiology' FROM medical_records USING dense LIMIT 5");
-console.log(result);
+// Isolation
+const [stmt] = parse("QUERY TEXT 'risks' FROM sec10k USING dense LIMIT 10");
+stmt.injectFilter("tenant_id", "=", "honeywell");
 
-// Explain query execution plan
-const plan = client.explain("QUERY 'cardiology' FROM medical_records USING dense LIMIT 5");
-console.log(plan);
+// Routing: prefer SHARD in QQL — or property after parse
+// QUERY ... SHARD 'honeywell' LIMIT 10
+stmt.shardKey = "honeywell";
+await client.execute(stmt);
 
-// 2. Pure AST Parsing & Filter Injection
-// parse() always returns an array of Stmt objects
-const stmts = parse("QUERY 'full text match' FROM articles LIMIT 10");
-// parseJson() returns raw JSON string (bypasses V8 object allocation)
-const rawJson = parseJson("QUERY 'full text match' FROM articles LIMIT 10");
-const valid = isValid("QUERY 'test' FROM docs");
-
-// Inject tenant filter into query string (returns AST) or Stmt object
-const securedAst = injectFilter("QUERY 'search' FROM docs LIMIT 10", "org_id", "=", "acme-corp");
-stmts[0].injectFilter("tenant_id", "=", "acme-corp");
-
-// Inject shard key into query for multi-tenant routing
-const shardedAst = injectShardKey("QUERY 'test' FROM docs LIMIT 10", "honeywell");
-stmts[0].injectShardKey("honeywell");
-
-// 3. Lower to route without executing
-const route = compileQuery("QUERY 'search' FROM docs LIMIT 10");
-console.log("Compiled route:", route);  // { stmt_type, method, path, payload }
-
-// 4. Free-function convenience execute
-const result2 = await execute("SHOW COLLECTIONS", { url: "http://localhost:6333" });
+console.log(version, isValid("SHOW COLLECTIONS"), compileQuery("SHOW COLLECTIONS"));
 ```
 
-## Execution Results & Errors
+## API summary
 
-### ExecutionReport Format
+| Export | Role |
+|--------|------|
+| `Client({ url, apiKey?, useGrpc?, embedder? })` | Live execute |
+| `HttpEmbedder({ endpoint, model, dimension, apiKey? })` | Embeddings |
+| `parse` / `parseJson` / `isValid` / `tokenize` | Frontend |
+| `injectFilter` / `stmt.injectFilter` | Isolation |
+| `stmt.shardKey` | Same as QQL `SHARD '…'` (no `injectShardKey`) |
+| `compileQuery` / `explain` / `explainStmt` | Offline |
+| `execute` / `executeStmt` | Free-function execute |
 
-All execution methods (`client.execute`, `execute`, `executeStmt`) return an `ExecutionReport` object:
+### Isolation vs routing
+
+| Concern | API | Wire |
+|---------|-----|------|
+| Isolation | `injectFilter` | **Filter** |
+| Routing | `SHARD '…'` or `stmt.shardKey` | `shard_key` / `ShardKeySelector` |
+| Partition DDL | `CREATE SHARD KEY` | Admin API |
+
+`injectFilter` ops: `= > >= < <=` only (no `!=`).
+
+## Execution report
 
 ```json
-{
-  "ok": true,
-  "results": [
-    {
-      "ok": true,
-      "operation": "QUERY",
-      "message": "Found 5 hits",
-      "data": [ ... ]
-    }
-  ],
-  "succeeded": 1,
-  "failed": 0
-}
+{ "ok": true, "results": [{ "ok": true, "operation": "QUERY", "message": "…", "data": null }], "succeeded": 1, "failed": 0 }
 ```
 
-### Failure Policy (`onError`)
+`onError`: `"stop"` | `"continue"`.
 
-| Policy | Behavior |
-|---|---|
-| `"stop"` (default) | Halts batch execution on the first error and throws an exception. |
-| `"continue"` | Continues executing remaining statements, collecting failures into `results` with `ok: false`. |
+## Docs
 
-### Structured Errors
-
-Native errors thrown by `nqql` include structured diagnostic fields:
-
-```javascript
-try {
-  parse("INVALID SYNTAX");
-} catch (err) {
-  console.log(err.code); // "QQL-PARSE-STATEMENT"
-  console.log(err.kind); // "Parse"
-  console.log(err.span); // { start: 0, end: 7 }
-}
-```
-
-## Filter Injection Operators
-
-`injectFilter` accepts comparison operators:
-
-- **Accepted**: `=`, `==`, `eq`, `>`, `gt`, `>=`, `gte`, `<`, `lt`, `<=`, `lte`
-- **Rejected**: `!=`, `neq`, `<>`, `in`, `is_null`, `contains` (throws error — wrap with `NOT` or write in QQL query)
-
-## API Summary
-
-| Export | Description |
-|---|---|
-| `Client(options)` | Class for executing QQL against a live Qdrant database |
-| `HttpEmbedder(options)` | First-class HTTP embedding provider configuration |
-| `Stmt` | Parsed statement object (`injectFilter`, `toObject`, `toJson` / `toJSON`, `shardKey`) |
-| `parse(input)` | Parse into array of `Stmt` objects |
-| `parseJson(input)` | Parse to raw JSON string (bypasses V8 object allocation) |
-| `isValid(input)` | Validate QQL syntax |
-| `tokenize(input)` | Tokenize QQL input string |
-| `injectFilter(query, field, op, value)` | Inject tenant filter into statement AST |
-| `injectShardKey(query, key)` | Inject a shard key into a QQL string (host multi-tenant routing) |
-| `compileQuery(input)` | Lower QQL statement into `{ stmt_type, method, path, payload }` route object |
-| `explain(query)` | Inspect the execution plan without executing network calls |
-| `explainStmt(stmt)` | Explain a pre-parsed Stmt object |
-| `execute(query, options?)` | Execute string or Stmt list; `options.onError` is `"stop"` or `"continue"` |
-| `executeStmt(stmt, options?)` | Free-function execute a pre-parsed Stmt |
-| `version` | Package runtime version string |
-
-## Documentation Links
-
-- [QQL Syntax Guide](https://github.com/srimon12/qql-rs/blob/main/docs/syntax.md)
-- [Filter Documentation](https://github.com/srimon12/qql-rs/blob/main/docs/filters.md)
-- [Filter Injection Guide](https://github.com/srimon12/qql-rs/blob/main/docs/inject_filter.md)
-- [Changelog](https://github.com/srimon12/qql-rs/blob/main/CHANGELOG.md)
+- [Syntax](../../docs/syntax.md) · [Filters](../../docs/filters.md) · [inject_filter](../../docs/inject_filter.md)
+- [Multitenancy](../../skills/qql-skill/references/qql-multitenancy.md) · [Node skill](../../skills/qql-skill/references/node-sdk.md)

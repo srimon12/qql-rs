@@ -26,45 +26,17 @@ impl PyStmt {
         Ok(())
     }
 
-    /// Set shard key for multi-tenant routing (QUERY/SCROLL/COUNT/UPSERT/DELETE + CTEs).
-    fn inject_shard_key(&mut self, shard_key: &str) -> PyResult<()> {
-        ast::inject_shard_key(&mut self.inner, shard_key)
-            .map_err(|e| PySyntaxError::new_err(e.to_string()))
-    }
-
-    /// Get or set the shard key on statements that support custom sharding.
-    /// Returns `None` (setter is no-op) for other statement types.
+    /// QQL `SHARD '…'` routing key on this statement (request-level; not a filter).
+    /// Prefer writing `SHARD 'tenant'` in QQL; use the setter only when the host
+    /// resolves the key after parse. Empty / None clears. Recurses into CTEs.
     #[getter]
     fn shard_key(&self) -> Option<String> {
-        match &self.inner {
-            ast::Stmt::Query(q) => q.shard_key.clone(),
-            ast::Stmt::Count(c) => c.shard_key.clone(),
-            ast::Stmt::Scroll(s) => s.shard_key.clone(),
-            ast::Stmt::Upsert(u) => u.shard_key.clone(),
-            ast::Stmt::Delete(d) => d.shard_key.clone(),
-            ast::Stmt::ClearPayload(c) => c.shard_key.clone(),
-            ast::Stmt::DeleteVector(d) => d.shard_key.clone(),
-            ast::Stmt::UpdateVector(u) => u.shard_key.clone(),
-            ast::Stmt::UpdatePayload(u) => u.shard_key.clone(),
-            _ => None,
-        }
+        self.inner.shard_key().map(str::to_owned)
     }
 
     #[setter]
     fn set_shard_key(&mut self, key: Option<String>) {
-        let key = key.filter(|k| !k.is_empty());
-        match &mut self.inner {
-            ast::Stmt::Query(q) => q.shard_key = key,
-            ast::Stmt::Count(c) => c.shard_key = key,
-            ast::Stmt::Scroll(s) => s.shard_key = key,
-            ast::Stmt::Upsert(u) => u.shard_key = key,
-            ast::Stmt::Delete(d) => d.shard_key = key,
-            ast::Stmt::ClearPayload(c) => c.shard_key = key,
-            ast::Stmt::DeleteVector(d) => d.shard_key = key,
-            ast::Stmt::UpdateVector(u) => u.shard_key = key,
-            ast::Stmt::UpdatePayload(u) => u.shard_key = key,
-            _ => {}
-        }
+        let _ = self.inner.set_shard_key(key);
     }
 
     fn to_json(&self) -> PyResult<String> {
@@ -113,26 +85,6 @@ fn inject_filter(
         let mut stmt =
             Parser::parse(&query_str).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
         ast::inject_filter(&mut stmt, field, cmp, val)
-            .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
-        Ok(PyStmt { inner: stmt })
-    } else {
-        Err(pyo3::exceptions::PyTypeError::new_err(
-            "query must be a string or a Stmt object",
-        ))
-    }
-}
-
-/// Inject a shard key into a QQL string or Stmt (host multi-tenant routing).
-#[pyfunction]
-fn inject_shard_key(query: &Bound<'_, PyAny>, shard_key: &str) -> PyResult<PyStmt> {
-    if let Ok(mut py_stmt) = query.extract::<PyRefMut<'_, PyStmt>>() {
-        ast::inject_shard_key(&mut py_stmt.inner, shard_key)
-            .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
-        Ok(py_stmt.clone())
-    } else if let Ok(query_str) = query.extract::<String>() {
-        let mut stmt =
-            Parser::parse(&query_str).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
-        ast::inject_shard_key(&mut stmt, shard_key)
             .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
         Ok(PyStmt { inner: stmt })
     } else {
@@ -691,7 +643,6 @@ fn pyqql(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse, m)?)?;
     m.add_function(wrap_pyfunction!(is_valid, m)?)?;
     m.add_function(wrap_pyfunction!(inject_filter, m)?)?;
-    m.add_function(wrap_pyfunction!(inject_shard_key, m)?)?;
     m.add_function(wrap_pyfunction!(tokenize, m)?)?;
     m.add_function(wrap_pyfunction!(compile_query, m)?)?;
     Ok(())

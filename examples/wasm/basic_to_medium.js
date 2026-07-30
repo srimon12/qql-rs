@@ -1,20 +1,47 @@
-import init, { compile, isValid, parse } from 'qql-wasm';
+/**
+ * Basic → Medium (WASM) — parse, compile, injectFilter, SHARD / shardKey.
+ */
+import init, {
+  parse,
+  isValid,
+  compile,
+  explain,
+  analyze,
+  Stmt,
+} from '../../demo/pkg/qql_wasm.js';
 
 async function run() {
-    await init();
+  await init();
 
-    const query = "QUERY 'browser search' FROM docs LIMIT 5";
-    
-    // 1. Validate syntax
-    console.log("Is valid QQL:", isValid(query));
+  const query = "QUERY TEXT 'browser search' FROM docs USING dense LIMIT 5";
+  console.log('1. isValid:', isValid(query));
+  console.log('2. parse:', parse(query));
+  console.log('3. explain:\n' + explain(query));
+  console.log('4. compile:', compile(query));
 
-    // 2. Parse AST
-    const ast = parse(query);
-    console.log("Parsed AST:", ast);
+  // SHARD in QQL
+  const sharded = new Stmt(
+    "QUERY TEXT 'browser search' FROM docs USING dense SHARD 'browser-tenant' LIMIT 5",
+  );
+  console.log('5a. SHARD in QQL → shardKey =', sharded.shardKey);
 
-    // 3. Client-side compile to Qdrant REST payload
-    const payload = compile(query);
-    console.log("Qdrant REST Payload:", payload);
+  // Host property after parse
+  const stmt = new Stmt(query);
+  stmt.injectFilter('tenant_id', '=', 'browser-tenant');
+  stmt.shardKey = 'browser-tenant';
+  console.log('5b. stmt.shardKey =', stmt.shardKey);
+
+  const hybrid = `
+    QUERY TEXT 'wasm performance'
+    FROM edge_docs
+    USING HYBRID DENSE dense SPARSE sparse FUSION RRF
+    SHARD 'browser-tenant'
+    LIMIT 10
+  `;
+  console.log('6. analyze(hybrid):', analyze(hybrid));
 }
 
-run();
+run().catch((e) => {
+  console.error(e);
+  throw e;
+});

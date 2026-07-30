@@ -52,7 +52,7 @@ class TestPackageInspection(unittest.TestCase):
             "parse",
             "is_valid",
             "inject_filter",
-            "tokenize",
+                        "tokenize",
             "compile_query",
             "explain",
             "execute",
@@ -797,22 +797,45 @@ class TestEdgeCases(unittest.TestCase):
         stmt.shard_key = "asia"
         self.assertEqual(stmt.shard_key, "asia")
 
-    def test_j10_show_collections_to_json(self):
+    def test_j10_delete_payload_shard_key(self):
+        stmt = pyqql.parse(
+            "DELETE PAYLOAD draft FROM docs WHERE status = 'archived'"
+        )[0]
+        stmt.shard_key = "tenant-a"
+        self.assertEqual(stmt.shard_key, "tenant-a")
+        self.assertEqual(
+            stmt.to_dict()["DeletePayload"]["shard_key"],
+            "tenant-a",
+        )
+
+    def test_j11_stmt_shard_key_property(self):
+        """SHARD in QQL + Stmt.shard_key property (no inject_shard_key)."""
+        stmts = pyqql.parse("QUERY TEXT 'x' FROM docs SHARD 'honeywell' LIMIT 5")
+        assert stmts[0].shard_key == "honeywell"
+        stmts2 = pyqql.parse("QUERY TEXT 'x' FROM docs LIMIT 5")
+        stmts2[0].shard_key = "acme"
+        assert stmts2[0].shard_key == "acme"
+        # empty clears
+        stmts2[0].shard_key = ""
+        assert stmts2[0].shard_key is None
+
+
+    def test_j12_show_collections_to_json(self):
         stmt = pyqql.parse("SHOW COLLECTIONS")[0]
         j = stmt.to_json()
         self.assertIsInstance(j, str)
         self.assertEqual(j, '{"ShowCollections":{}}')
 
-    def test_j11_module_level_explain(self):
+    def test_j13_module_level_explain(self):
         result = pyqql.explain('QUERY "test" FROM docs LIMIT 5')
         self.assertIsInstance(result, dict)
         self.assertTrue(result["ok"])
 
-    def test_j12_parse_duplicate_statements(self):
+    def test_j14_parse_duplicate_statements(self):
         stmts = pyqql.parse("COUNT FROM docs; COUNT FROM docs")
         self.assertEqual(len(stmts), 2)
 
-    def test_j13_to_dict_stable(self):
+    def test_j15_to_dict_stable(self):
         stmt = pyqql.parse('QUERY "hello" FROM docs LIMIT 5')[0]
         d1 = stmt.to_dict()
         d2 = stmt.to_dict()

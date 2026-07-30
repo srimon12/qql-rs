@@ -20,9 +20,9 @@ grpc = ["qql/grpc"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
-qql-core = { version = "0.1.4", path = "../qql-core", features = ["serde", "json"] }
-qql-plan = { version = "0.1.4", path = "../qql-plan" }
-qql = { version = "0.1.4", path = "../qql-runtime", default-features = false, features = ["rest", "grpc"] }
+qql-core = { version = "0.1.5", path = "../qql-core", features = ["serde", "json"] }
+qql-plan = { version = "0.1.5", path = "../qql-plan" }
+qql = { version = "0.1.5", path = "../qql-runtime", default-features = false, features = ["rest", "grpc"] }
 napi = { version = "2", features = ["napi8", "serde-json", "async"] }
 napi-derive = "2"
 serde_json = "1"

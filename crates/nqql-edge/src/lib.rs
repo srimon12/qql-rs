@@ -84,29 +84,15 @@ impl Stmt {
         serde_json::to_string(&self.inner).map_err(serde_napi_err)
     }
 
+    /// QQL `SHARD '…'` routing key (request-level). Prefer the clause in QQL.
     #[napi(getter)]
     pub fn shard_key(&self) -> Option<String> {
-        match &self.inner {
-            ast::Stmt::Query(q) => q.shard_key.clone(),
-            ast::Stmt::Count(c) => c.shard_key.clone(),
-            ast::Stmt::Scroll(s) => s.shard_key.clone(),
-            ast::Stmt::Upsert(u) => u.shard_key.clone(),
-            ast::Stmt::Delete(d) => d.shard_key.clone(),
-            _ => None,
-        }
+        self.inner.shard_key().map(str::to_owned)
     }
 
     #[napi(setter)]
     pub fn set_shard_key(&mut self, key: Option<String>) {
-        let key = key.filter(|k| !k.is_empty());
-        match &mut self.inner {
-            ast::Stmt::Query(q) => q.shard_key = key,
-            ast::Stmt::Count(c) => c.shard_key = key,
-            ast::Stmt::Scroll(s) => s.shard_key = key,
-            ast::Stmt::Upsert(u) => u.shard_key = key,
-            ast::Stmt::Delete(d) => d.shard_key = key,
-            _ => {}
-        }
+        let _ = self.inner.set_shard_key(key);
     }
 }
 

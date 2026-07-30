@@ -14,7 +14,7 @@
   [![npm](https://img.shields.io/npm/v/@veristamp/nqql.svg)](https://www.npmjs.com/package/@veristamp/nqql)
   [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-  [Documentation](docs/syntax.md) • [Specification](language/v1/spec/semantics.md) • [Releases](https://github.com/srimon12/qql-rs/releases)
+  [Docs](docs/README.md) • [Syntax](docs/syntax.md) • [Spec](language/v1/spec/semantics.md) • [Skill](skills/qql-skill/README.md) • [Releases](https://github.com/srimon12/qql-rs/releases)
 
 </div>
 
@@ -35,11 +35,14 @@ irm https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.ps1 |
 #### 📦 Language SDKs
 
 ```bash
+# Edge verions are heavier but comes with qdrant_edge and fastembed-rs in a single package
+# for minimal footprint prefer vanilla sdk without the -edge.
+
 # Python
-pip install pyqql pyqql-edge
+pip install pyqql OR pyqql-edge
 
 # Node.js
-npm install @veristamp/nqql @veristamp/nqql-edge
+npm install @veristamp/nqql OR @veristamp/nqql-edge  
 
 # WebAssembly
 npm install qql-wasm
@@ -51,11 +54,11 @@ cargo add qql qql-core
 #### 🧩 VS Code / Cursor Extension
 
 ```bash
-# Marketplace (when published)
+# Marketplace (
 code --install-extension srimon12.qql-lang
 
 # Or install the local VSIX from this repo
-code --install-extension editors/vscode/qql-lang-0.1.0.vsix
+code --install-extension editors/vscode/qql-lang-0.1.4.vsix
 ```
 
 Syntax highlighting, live WASM diagnostics, and keyword/snippet completions for `.qql` files. See [`editors/vscode`](editors/vscode).
@@ -71,21 +74,29 @@ npx skills add srimon12/qql-rs --skill qql-skill
 ### 💡 Example
 
 ```sql
-QUERY 'chest pain' FROM medical 
-  USING DENSE MODEL 'nomic' ON FIELD title INTO title_vec 
-  LIMIT 5 
-  WHERE department = 'cardio';
+QUERY TEXT 'chest pain' MODEL 'all-minilm:l6-v2'
+FROM medical
+USING dense
+WHERE department = 'cardio'
+SHARD 'hospital-east'   -- optional custom-shard routing
+LIMIT 5;
 ```
+
+Isolation on untrusted QQL: `inject_filter(stmt, "tenant_id", "=", tenant)`.  
+Routing: `SHARD '…'` in QQL (or `stmt.shard_key` after parse).  
+Partition DDL: `CREATE SHARD KEY '…' ON COLLECTION …`.
 
 ---
 
 ### 📚 Documentation
 
-- 📖 **Syntax Reference**: [`docs/syntax.md`](docs/syntax.md)
-- ⚙️ **Language Specification**: [`language/v1/spec/semantics.md`](language/v1/spec/semantics.md)
-- 🗺️ **Implementation Gaps**: [`skills/qql-skill/references/qql-gaps.md`](skills/qql-skill/references/qql-gaps.md)
-- 🔒 **Multi-Tenancy Guide**: [`skills/qql-skill/references/qql-multitenancy.md`](skills/qql-skill/references/qql-multitenancy.md)
-- 🛠️ **Release Manual**: [`RELEASING.md`](RELEASING.md)
+- 📖 **Docs index**: [`docs/README.md`](docs/README.md)
+- 📐 **Syntax**: [`docs/syntax.md`](docs/syntax.md)
+- 🔒 **inject_filter / multitenancy**: [`docs/inject_filter.md`](docs/inject_filter.md) · [`skills/qql-skill/references/qql-multitenancy.md`](skills/qql-skill/references/qql-multitenancy.md)
+- 🤖 **Agent skill**: [`skills/qql-skill/README.md`](skills/qql-skill/README.md)
+- 🗺️ **Gaps**: [`skills/qql-skill/references/qql-gaps.md`](skills/qql-skill/references/qql-gaps.md)
+- ⚙️ **Spec**: [`language/v1/spec/semantics.md`](language/v1/spec/semantics.md)
+- 🛠️ **Releasing**: [`RELEASING.md`](RELEASING.md)
 
 ---
 

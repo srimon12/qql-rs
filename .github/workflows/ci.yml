@@ -14,35 +14,218 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  PYO3_USE_ABI3_FORWARD_COMPATIBILITY: 1
+  CARGO_INCREMENTAL: "0"
+  PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"
+  # Deny rustdoc warnings for workspace crates only (`cargo doc --no-deps`).
+  # Do not set RUSTFLAGS=-Dwarnings globally — it applies to dependencies too.
+  RUSTDOCFLAGS: "-D warnings"
 
 jobs:
+  # ── Policy & metadata (fast, no compile) ─────────────────────
+
+  branch-policy:
+    name: Branch policy
+    runs-on: ubuntu-latest
+    steps:
+      - name: PRs into main must come from dev
+        if: github.event_name == 'pull_request' && github.base_ref == 'main'
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.head_ref }}" != "dev" ]]; then
+            echo "::error::Pull requests into main must come from the dev branch (got '${{ github.head_ref }}')."
+            exit 1
+          fi
+          echo "Source branch is dev — ok."
+
+      - name: No policy restriction for this event
+        if: ${{ !(github.event_name == 'pull_request' && github.base_ref == 'main') }}
+        run: echo "Branch policy not applicable."
+
+  metadata:
+    name: Release metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Validate synchronized package metadata
+        run: python3 scripts/check_release.py
+
+      - name: VERSION file matches workspace
+        run: |
+          set -euo pipefail
+          workspace="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
+          file="$(tr -d '[:space:]' < VERSION)"
+          if [[ "$workspace" != "$file" ]]; then
+            echo "::error::VERSION ($file) != workspace.package.version ($workspace)"
+            exit 1
+          fi
+
+  # ── Rust quality ─────────────────────────────────────────────
+
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
   rust:
-    name: Rust
+    name: Clippy & test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: clippy
 
-      - name: Format check
-        run: cargo fmt --all -- --check
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust-stable
+          cache-on-failure: true
 
       - name: Clippy (published Rust crates)
-        run: cargo clippy --locked --all-features -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli --all-targets -- -D warnings
+        run: >
+          cargo clippy --locked --all-features
+          -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli
+          --all-targets -- -D warnings
 
       - name: Test (published Rust crates)
-        run: cargo test --locked --all-features -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli
+        run: >
+          cargo test --locked --all-features
+          -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli
+
+  features:
+    name: Feature matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: features-stable
+          cache-on-failure: true
+
+      # Ensure optional transport features compile independently and together.
+      - name: qql (rest only)
+        run: cargo check --locked -p qql --no-default-features --features rest
+
+      - name: qql (grpc only)
+        run: cargo check --locked -p qql --no-default-features --features grpc
+
+      - name: qql (no transports)
+        run: cargo check --locked -p qql --no-default-features
+
+      - name: qql (default = rest + grpc)
+        run: cargo check --locked -p qql --all-features
+
+      - name: qql-cli (rest only)
+        run: cargo check --locked -p qql-cli --no-default-features --features rest
+
+      - name: qql-cli (grpc only)
+        run: cargo check --locked -p qql-cli --no-default-features --features grpc
+
+      - name: qql-core feature combinations
+        run: |
+          set -euo pipefail
+          cargo check --locked -p qql-core --no-default-features
+          cargo check --locked -p qql-core --features serde
+          cargo check --locked -p qql-core --features json
+          cargo check --locked -p qql-core --all-features
+
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve workspace MSRV
+        id: msrv
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
+          [[ -n "$version" ]] || { echo "workspace rust-version missing"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: msrv
+          cache-on-failure: true
+
+      - name: cargo check on MSRV (${{ steps.msrv.outputs.version }})
+        run: >
+          cargo check --locked --all-features
+          -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli
+
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: docs-stable
+          cache-on-failure: true
+          cache-targets: false
+
+      # Strict rustdoc for every publishable library. The CLI binary target is
+      # also named `qql`, so it must use a separate target-dir to avoid the
+      # known cargo doc path collision with the `qql` library crate.
+      - name: cargo doc (libraries, deny warnings)
+        run: >
+          cargo doc --locked --no-deps --all-features
+          -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge
+
+      - name: cargo doc (CLI, deny warnings)
+        run: >
+          cargo doc --locked --no-deps --all-features -p qql-cli
+          --target-dir target/doc-cli
+
+  package:
+    name: Package dry-run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: package-stable
+          cache-on-failure: true
+
+      # Full verify for the leaf crate (no unpublished path deps at publish time
+      # for qql-core). Dependents skip verify so CI does not require crates.io
+      # to already host the workspace versions under test.
+      - name: Package qql-core (verified)
+        run: cargo package --locked -p qql-core
+
+      - name: Package dependents (list + archive only)
+        run: |
+          set -euo pipefail
+          for crate in qql-plan qql-embed qql qql-edge qql-cli; do
+            cargo package --locked --no-verify --exclude-lockfile -p "$crate"
+          done
+
+  # ── Language contract ────────────────────────────────────────
 
   conformance:
     name: Conformance
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: conformance-stable
+          cache-on-failure: true
 
       - name: Check generated grammar
         run: cargo run --locked -p qql-grammar-gen -- check
@@ -50,7 +233,7 @@ jobs:
       - name: Check QQL language conformance
         run: cargo run --locked -p qql-conformance -- check language/v1
 
-  # ── Platform binding build checks ─────────────────────────────
+  # ── Platform binding build checks ────────────────────────────
   # Build and import the language artifacts so generated bindings and
   # wrapper code cannot drift independently from the Rust crates.
 
@@ -60,11 +243,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: pyqql-stable
+          cache-on-failure: true
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.12'
+          python-version: "3.12"
       - name: Build and test Python SDKs
         run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
           python -m pip install ./crates/pyqql ./crates/pyqql-edge
           python -m unittest discover -s crates/pyqql/tests -v
           python -m unittest discover -s crates/pyqql-edge/tests -v
@@ -79,12 +268,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: nqql-${{ matrix.package }}-stable
+          cache-on-failure: true
       - uses: actions/setup-node@v7
         with:
-          node-version: '22.13.1'
+          node-version: "22.13.1"
       - name: Build and test ${{ matrix.package }}
         working-directory: crates/${{ matrix.package }}
         run: |
+          set -euo pipefail
           npm install --no-package-lock --omit=optional --no-audit --no-fund
           npm test
           npm pack --dry-run --ignore-scripts
@@ -97,15 +291,21 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: wasm-stable
+          cache-on-failure: true
       - uses: actions/setup-node@v7
         with:
-          node-version: '22.13.1'
-      - name: Install wasm-pack
-        run: cargo install wasm-pack --locked --version 0.15.0
+          node-version: "22.13.1"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack@0.15.0
       - name: Build qql-wasm package
         run: wasm-pack build crates/qql-wasm --dev --target nodejs --out-dir /tmp/qql-wasm-pkg
       - name: Smoke-test generated WASM API
         run: |
+          set -euo pipefail
           grep -q 'Promise<ExecutionReport>' /tmp/qql-wasm-pkg/qql_wasm.d.ts
           node <<'NODE'
           const assert = require('node:assert/strict');
@@ -169,3 +369,46 @@ jobs:
             process.exitCode = 1;
           });
           NODE
+
+  # Single required status check for branch protection.
+  ci-success:
+    name: CI success
+    if: always()
+    needs:
+      [
+        branch-policy,
+        metadata,
+        fmt,
+        rust,
+        features,
+        msrv,
+        docs,
+        package,
+        conformance,
+        pyqql-check,
+        nqql-check,
+        wasm-check,
+      ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: All required jobs passed
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, sys
+
+          needs = json.loads(os.environ["NEEDS_JSON"])
+          failed = [
+              name
+              for name, data in needs.items()
+              if data.get("result") != "success"
+          ]
+          if failed:
+              print("Failing/skipped/cancelled jobs:", ", ".join(sorted(failed)))
+              for name in sorted(failed):
+                  print(f"  - {name}: {needs[name].get('result')}")
+              sys.exit(1)
+          print("All CI jobs succeeded.")
+          PY

@@ -51,7 +51,37 @@ vector-kind  = "DENSE" | "SPARSE" | "MULTI" | "MULTIVECTOR" ;
 
 Top-level queries require `FROM`. A CTE may omit it and inherit the outer collection. Clauses occur at most once and only in the order above.
 
-`SHARD '<key>'` routes the query to a specific shard group. It is optional and only needed when using custom sharding in a multi-tenant collection.
+### `SHARD KEY` (DDL) vs `SHARD` (routing)
+
+These are **two different features**. Confusing them is the most common multi-tenant mistake.
+
+| Form | Kind | Purpose | Wire |
+|------|------|---------|------|
+| `CREATE SHARD KEY 'acme' ON COLLECTION c …` | **DDL** | Register a custom partition name | Create shard-key API |
+| `DROP SHARD KEY` / `SHOW SHARD KEYS` | **DDL** | Manage / list keys | Admin RPCs |
+| `… SHARD 'acme'` on QUERY / UPSERT / COUNT / … | **DML routing** | Send **this** request to that key | REST `shard_key` / gRPC `ShardKeySelector` |
+
+```sql
+-- 1) Define partitions (once)
+CREATE COLLECTION tenants HYBRID (dense VECTOR(384, COSINE), sparse SPARSE)
+WITH PARAMS (shard_number = 8, sharding_method = 'custom',
+             shard_keys = ['acme', 'globex']);
+
+CREATE SHARD KEY 'acme' ON COLLECTION tenants WITH (shards_number = 2);
+
+-- 2) Route every DML op (and still filter for isolation)
+UPSERT INTO tenants VALUES {id: 1, text: '…', tenant_id: 'acme'} SHARD 'acme';
+QUERY TEXT 'risks' FROM tenants USING dense
+  WHERE tenant_id = 'acme' SHARD 'acme' LIMIT 10;
+```
+
+- Omit `SHARD` on auto-sharded collections (default).
+- **Isolation** is still `WHERE` / `inject_filter` — routing alone is not a security boundary.
+- Host code may set the same field after parse: `stmt.shard_key = 'acme'` (Python),
+  `stmt.shardKey = 'acme'` (Node/WASM), `stmt.set_shard_key(Some(...))` (Rust).
+  There is **no** `inject_shard_key` API.
+- Supported on: `QUERY`, `SCROLL`, `COUNT`, `UPSERT`, `DELETE`, `CLEAR PAYLOAD`,
+  `DELETE PAYLOAD`, `DELETE VECTOR`, `UPDATE … VECTOR`, `UPDATE … PAYLOAD`.
 
 ### Vector targets and embedding roles
 
@@ -275,7 +305,7 @@ Edge ignores request-level timeout/consistency (single-node, no cluster reads).
 ### Examples
 
 ```sql
-QUERY TEXT 'vector database' MODEL 'nomic-embed-text'
+QUERY TEXT 'vector database' MODEL 'all-minilm:l6-v2'
 FROM docs
 USING dense
 WHERE category = 'database'
