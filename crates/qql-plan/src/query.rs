@@ -1,4 +1,4 @@
-use crate::filter::{lower_filter, top_level_filter, top_level_filter_with_shard};
+use crate::filter::{lower_filter, top_level_filter};
 use crate::semantic::PlanQueryInput;
 use crate::types::*;
 use qql_core::ast::{
@@ -389,7 +389,7 @@ pub fn lower_query_request(query: &QueryStmt) -> Result<QueryRequest, QqlError> 
         filter: query
             .filter
             .as_ref()
-            .map(|f| top_level_filter_with_shard(f, query.shard_key.as_deref())),
+            .map(|f| top_level_filter(f)),
         params: query.params.as_ref().and_then(lower_search_params),
         score_threshold: query.score_threshold,
         with_payload,
@@ -397,6 +397,7 @@ pub fn lower_query_request(query: &QueryStmt) -> Result<QueryRequest, QqlError> 
         limit: query.page.limit,
         offset: query.page.offset,
         lookup_from: extract_lookup_from(query),
+        // Routing is request-level (REST shard_key / gRPC ShardKeySelector) — not in filter.
         shard_key: query.shard_key.clone(),
         timeout,
         consistency,
@@ -424,7 +425,7 @@ pub fn lower_query_groups_request(query: &QueryStmt) -> Result<QueryGroupsReques
         filter: query
             .filter
             .as_ref()
-            .map(|f| top_level_filter_with_shard(f, query.shard_key.as_deref())),
+            .map(|f| top_level_filter(f)),
         params: query.params.as_ref().and_then(lower_search_params),
         score_threshold: query.score_threshold,
         with_payload,
@@ -470,7 +471,7 @@ fn build_query_with_prefetch(
                 filter: query
                     .filter
                     .as_ref()
-                    .map(|f| top_level_filter_with_shard(f, query.shard_key.as_deref())),
+                    .map(|f| top_level_filter(f)),
                 params: query.params.as_ref().and_then(lower_search_params),
                 score_threshold: query.score_threshold,
                 limit: Some(candidates),
@@ -486,7 +487,7 @@ fn build_query_with_prefetch(
                 filter: query
                     .filter
                     .as_ref()
-                    .map(|f| top_level_filter_with_shard(f, query.shard_key.as_deref())),
+                    .map(|f| top_level_filter(f)),
                 params: query.params.as_ref().and_then(lower_search_params),
                 score_threshold: query.score_threshold,
                 limit: Some(candidates),

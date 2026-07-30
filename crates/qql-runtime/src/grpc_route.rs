@@ -133,6 +133,24 @@ pub(crate) fn quantization_config_from_plan(
                 )),
             })
         }
+        qql_plan::QuantizationConfig::Turbo { turbo } => {
+            let bits = turbo.bits.as_deref().map(|label| {
+                match label.to_ascii_lowercase().as_str() {
+                    "bits1_5" | "1.5" => qdrant::TurboQuantBitSize::Bits15 as i32,
+                    "bits2" | "2" => qdrant::TurboQuantBitSize::Bits2 as i32,
+                    "bits4" | "4" => qdrant::TurboQuantBitSize::Bits4 as i32,
+                    _ => qdrant::TurboQuantBitSize::Bits1 as i32,
+                }
+            });
+            Some(qdrant::QuantizationConfig {
+                quantization: Some(qdrant::quantization_config::Quantization::Turboquant(
+                    qdrant::TurboQuantization {
+                        always_ram: turbo.always_ram,
+                        bits,
+                    },
+                )),
+            })
+        }
     }
 }
 
@@ -277,17 +295,25 @@ fn turbo_quantization(value: &serde_json::Value) -> qdrant::TurboQuantization {
     let bits = value
         .get("turbo_bits")
         .or_else(|| value.get("bits"))
-        .and_then(serde_json::Value::as_f64)
-        .map(|bits| {
-            if (bits - 1.5).abs() < f64::EPSILON {
-                qdrant::TurboQuantBitSize::Bits15 as i32
-            } else if (bits - 2.0).abs() < f64::EPSILON {
-                qdrant::TurboQuantBitSize::Bits2 as i32
-            } else if (bits - 4.0).abs() < f64::EPSILON {
-                qdrant::TurboQuantBitSize::Bits4 as i32
-            } else {
-                qdrant::TurboQuantBitSize::Bits1 as i32
+        .and_then(|v| {
+            if let Some(bits) = v.as_f64() {
+                return Some(if (bits - 1.5).abs() < f64::EPSILON {
+                    qdrant::TurboQuantBitSize::Bits15 as i32
+                } else if (bits - 2.0).abs() < f64::EPSILON {
+                    qdrant::TurboQuantBitSize::Bits2 as i32
+                } else if (bits - 4.0).abs() < f64::EPSILON {
+                    qdrant::TurboQuantBitSize::Bits4 as i32
+                } else {
+                    qdrant::TurboQuantBitSize::Bits1 as i32
+                });
             }
+            // OpenAPI string enum: bits1 | bits1_5 | bits2 | bits4
+            v.as_str().map(|label| match label.to_ascii_lowercase().as_str() {
+                "bits1_5" | "1.5" => qdrant::TurboQuantBitSize::Bits15 as i32,
+                "bits2" | "2" => qdrant::TurboQuantBitSize::Bits2 as i32,
+                "bits4" | "4" => qdrant::TurboQuantBitSize::Bits4 as i32,
+                _ => qdrant::TurboQuantBitSize::Bits1 as i32,
+            })
         });
     qdrant::TurboQuantization {
         always_ram: json_bool(value, "always_ram"),

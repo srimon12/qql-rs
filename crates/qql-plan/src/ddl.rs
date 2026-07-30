@@ -346,6 +346,24 @@ pub fn lower_optimizers_config_val(
     serde_json::Value::Object(obj)
 }
 
+/// Map a numeric QQL `bits` value onto the OpenAPI `TurboQuantBitSize` string.
+fn turbo_bits_label(bits: Option<f64>) -> Option<String> {
+    let bits = bits?;
+    let label = if (bits - 1.5).abs() < f64::EPSILON {
+        "bits1_5"
+    } else if (bits - 2.0).abs() < f64::EPSILON {
+        "bits2"
+    } else if (bits - 4.0).abs() < f64::EPSILON {
+        "bits4"
+    } else if (bits - 1.0).abs() < f64::EPSILON {
+        "bits1"
+    } else {
+        // Unknown — still emit a best-effort label so Qdrant can reject clearly.
+        return Some(format!("bits{bits}"));
+    };
+    Some(label.into())
+}
+
 pub fn lower_quantization_config(config: &qql_core::ast::QuantizationConfig) -> QuantizationConfig {
     match config.qtype {
         qql_core::ast::QuantizationType::Scalar => QuantizationConfig::Scalar {
@@ -368,10 +386,9 @@ pub fn lower_quantization_config(config: &qql_core::ast::QuantizationConfig) -> 
                 query_encoding: config.query_encoding.clone(),
             },
         },
-        _ => QuantizationConfig::Scalar {
-            scalar: ScalarQuantization {
-                qtype: "int8".into(),
-                quantile: config.quantile,
+        qql_core::ast::QuantizationType::Turbo => QuantizationConfig::Turbo {
+            turbo: TurboQuantization {
+                bits: turbo_bits_label(config.bits),
                 always_ram: Some(config.always_ram),
             },
         },

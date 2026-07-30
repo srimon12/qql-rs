@@ -38,6 +38,12 @@ pub enum FilterExpression {
     Compound(FilterCompound),
 }
 
+/// Transport-neutral filter compound.
+///
+/// Matches Qdrant `Filter` on **both** protocols:
+/// REST `Filter` object and gRPC `qdrant.Filter` — only must/should/must_not
+/// (and min_should). Shard routing is **not** a filter field; it lives on the
+/// operation request as `shard_key` / gRPC `ShardKeySelector`.
 #[derive(Debug, Clone, Serialize)]
 pub struct FilterCompound {
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -48,8 +54,6 @@ pub struct FilterCompound {
     pub should: Vec<FilterClause>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min_should: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub shard_key: Option<String>,
 }
 
 /// Wraps multiple `QueryRequest`s for Qdrant's `/points/query/batch` endpoint.
@@ -705,13 +709,15 @@ pub struct OptimizersConfig {
     pub prevent_unoptimized: Option<bool>,
 }
 
-/// Vector quantization config (scalar/product/binary).
+/// Vector quantization config (scalar/product/binary/turbo).
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 pub enum QuantizationConfig {
     Scalar { scalar: ScalarQuantization },
     Product { product: ProductQuantization },
     Binary { binary: BinaryQuantization },
+    /// OpenAPI `TurboQuantization`: `{ "turbo": { "bits": "bits2", … } }`.
+    Turbo { turbo: TurboQuantization },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -740,6 +746,16 @@ pub struct BinaryQuantization {
     pub encoding: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub query_encoding: Option<String>,
+}
+
+/// OpenAPI `TurboQuantQuantizationConfig`.
+#[derive(Debug, Clone, Serialize)]
+pub struct TurboQuantization {
+    /// OpenAPI enum: `bits1` | `bits1_5` | `bits2` | `bits4`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bits: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub always_ram: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
