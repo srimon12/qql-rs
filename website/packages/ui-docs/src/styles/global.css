@@ -100,8 +100,12 @@ code:not(pre code) {
 
 /* --- Theming Starlight Native Components (Cards, Tabs, Steps, Asides) --- */
 
-/* MintMCP Premium Card Glassmorphism for Starlight Cards */
-.card, a.sl-link-card, .premium-card {
+/* MintMCP Premium Card Glassmorphism for Starlight Cards and standard code blocks.
+   Terminal/QQL blocks already get premium-card from their own container — excluded here. */
+.card,
+a.sl-link-card,
+.premium-card,
+.sl-markdown-content .expressive-code:not(.terminal-body .expressive-code):not(.qql-example__code .expressive-code) {
 	border: 1.5px solid color-mix(in srgb, var(--sl-color-gray-5) 70%, var(--sl-color-gray-4)) !important;
 	background: linear-gradient(145deg, color-mix(in srgb, var(--sl-color-gray-6) 60%, transparent) 0%, color-mix(in srgb, var(--sl-color-bg) 70%, transparent) 100%) !important;
 	border-radius: 0.75rem !important;
@@ -113,13 +117,21 @@ code:not(pre code) {
 	box-shadow: 0 4px 24px -4px color-mix(in srgb, var(--sl-color-text) 5%, transparent), inset 0 1px 0 color-mix(in srgb, var(--sl-color-text) 3%, transparent) !important;
 }
 
-.card:hover, a.sl-link-card:hover, .premium-card:hover {
+.card:hover,
+a.sl-link-card:hover,
+.premium-card:hover,
+.sl-markdown-content .expressive-code:not(.terminal-body .expressive-code):not(.qql-example__code .expressive-code):hover {
 	border-color: color-mix(in srgb, var(--sl-color-accent) 40%, var(--sl-color-gray-5)) !important;
 	background: linear-gradient(145deg, color-mix(in srgb, var(--sl-color-gray-5) 50%, transparent) 0%, color-mix(in srgb, var(--sl-color-gray-6) 60%, transparent) 100%) !important;
 	transform: translateY(-2px);
 	box-shadow: 0 12px 28px color-mix(in srgb, var(--sl-color-text) 8%, transparent), 
 	            0 0 20px color-mix(in srgb, var(--sl-color-accent) 15%, transparent),
 				inset 0 1px 0 color-mix(in srgb, var(--sl-color-text) 5%, transparent) !important;
+}
+
+/* Standard code blocks: let the glass effect show through */
+.sl-markdown-content .expressive-code:not(.terminal-body .expressive-code):not(.qql-example__code .expressive-code) pre {
+	background-color: transparent !important;
 }
 
 /* Starlight Card Titles */
@@ -205,12 +217,7 @@ aside p.starlight-aside__title {
 	letter-spacing: 0 !important;
 }
 
-/* Starlight Code blocks */
-.sl-markdown-content pre {
-	border: 1px solid var(--sl-color-gray-5) !important;
-	border-radius: 0.75rem !important;
-	background-color: var(--sl-color-gray-6) !important;
-}
+/* Starlight Code blocks — glass effect handled by .expressive-code via premium-card above */
 
 /* --- ZenNotes-style Minimalist Global Sidebar --- */
 .sidebar-content a {
