@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+
+### 🔴 Breaking (post-0.1.4 cleanup)
+- **Removed `inject_shard_key` / `injectShardKey`** from all SDKs and `qql-core`.
+  Routing is expressed as QQL `SHARD '…'` (preferred) or `stmt.shard_key` / `set_shard_key`.
+  DDL remains `CREATE/DROP/SHOW SHARD KEY`. Isolation remains `inject_filter` only.
+  Wire form is request-level REST `shard_key` / gRPC `ShardKeySelector` — never inside Filter.
+
 ## [0.1.4] - 2026-07-30
 
 ### 🏗️ Architecture

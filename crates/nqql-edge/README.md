@@ -1,127 +1,58 @@
 # nqql-edge
 
-Native Node.js bindings for local QQL execution. `nqql-edge` combines the QQL
-runtime with `qdrant-edge` for in-process vector storage and FastEmbed for
-optional local ONNX inference.
+Node N-API bindings for **local** QQL: qdrant-edge + FastEmbed, no remote Qdrant.
 
-## Features
+## Proposition
 
-- **In-Process Vector Storage**: Run Qdrant search engine locally inside Node.js process with zero server daemon requirement
-- **Embedded ONNX Inference**: Automatically fetch and run FastEmbed ONNX models on-device
-- **Native Route Lowering**: Lower QQL queries to typed route objects via `compileQuery`
-- **Native Parsing**: Rust-speed QQL parsing in Node.js returning `Stmt` objects
-- **Filter Injection**: Programmatically add tenant isolation filters
-- **Validation**: Check if a query string is valid QQL
-- **Smart Batching**: Auto-batches contiguous same-collection query/mutation statements
+Same language as `@veristamp/nqql`, executed in-process. Cluster features
+(`GROUP BY`, `SHARD`, ACORN, …) return explicit `QQL-EDGE-UNSUPPORTED-*` errors.
 
-## Requirements & Supported Platforms
-
-- **Node.js**: `>=18`
-- **Supported Platforms**:
-  - Linux x64 (`glibc`) — `@veristamp/nqql-edge-linux-x64-gnu`
-  - macOS arm64 (`Apple Silicon`) — `@veristamp/nqql-edge-darwin-arm64`
-  - Windows x64 (`msvc`) — `@veristamp/nqql-edge-win32-x64-msvc`
-- *Note: Prebuilt native packages are not published for macOS Intel (Darwin x64) because ONNX Runtime lacks Darwin x64 N-API prebuilds.*
-
-## Installation
+## Install
 
 ```bash
 npm install @veristamp/nqql-edge
 ```
 
-Embedding models download on first use from HuggingFace and cache locally.
+Node ≥ 18. Platforms: Linux x64, macOS arm64, Windows x64 (not macOS Intel).
 
-## Quick Start
+## Quick start
 
 ```javascript
 const {
-  localExecutor, listEmbeddingModels, httpExecutor,
-  parse, parseJson, isValid, injectFilter, tokenize,
-  compileQuery, explain, explainStmt, execute, executeStmt, version
-} = require('@veristamp/nqql-edge');
+  localExecutor, listEmbeddingModels, parse, injectFilter, version,
+} = require("@veristamp/nqql-edge");
 
-// 1. Create a local edge executor (embedded ONNX + local storage)
-const client = localExecutor('./qql-data', {
-  model: 'bge-small-en-v1.5',
+const client = localExecutor("./qql-data", {
+  model: "bge-small-en-v1.5",
   onDiskPayload: true,
 });
 
-await client.execute('CREATE COLLECTION docs HYBRID');
+await client.execute("CREATE COLLECTION docs HYBRID");
 await client.execute('UPSERT INTO docs VALUES {id: 1, text: "hello from edge"}');
+const report = await client.execute(
+  "QUERY TEXT 'hello' FROM docs USING dense LIMIT 5"
+);
 
-const report = await client.execute("QUERY 'hello' FROM docs USING dense LIMIT 5");
-console.log(report);
+const [stmt] = parse("QUERY TEXT 'hello' FROM docs USING dense LIMIT 10");
+stmt.injectFilter("tenant_id", "=", "acme");
+// No custom SHARD on edge — use remote Qdrant for SHARD / CREATE SHARD KEY
 
 await client.close();
-
-// 2. Pure AST Parsing & Filter Injection
-const stmts = parse("QUERY 'full text match' FROM articles LIMIT 10");
-const rawJson = parseJson("QUERY 'full text match' FROM articles LIMIT 10");
-const valid = isValid("QUERY 'test' FROM docs");
-
-stmts[0].injectFilter("tenant_id", "=", "acme-corp");
-const securedAst = injectFilter("QUERY 'search' FROM docs LIMIT 10", "org_id", "=", "acme-corp");
+console.log(version, listEmbeddingModels().length);
 ```
 
-## Execution Results & Errors
+## API
 
-### ExecutionReport Format
+| Export | Role |
+|--------|------|
+| `localExecutor(dataDir, options)` | FastEmbed + edge |
+| `httpExecutor(dataDir, url, key, model, dim)` | Edge + HTTP embedder |
+| `listEmbeddingModels()` | Dense ONNX catalog |
+| `parse` / `parseJson` / `isValid` / `tokenize` | Frontend |
+| `injectFilter` | Isolation |
+| `stmt.shardKey` | AST property; edge **rejects** SHARD at execute |
+| `compileQuery` / `explain` / `execute` | Plan / run |
 
-All execution methods return an `ExecutionReport` object:
+## Docs
 
-```json
-{
-  "ok": true,
-  "results": [
-    {
-      "ok": true,
-      "operation": "QUERY",
-      "message": "Found 5 hits",
-      "data": [ ... ]
-    }
-  ],
-  "succeeded": 1,
-  "failed": 0
-}
-```
-
-### Failure Policy (`onError`)
-
-| Policy | Behavior |
-|---|---|
-| `"stop"` (default) | Halts batch execution on the first error and throws an exception. |
-| `"continue"` | Continues executing remaining statements, collecting failures into `results` with `ok: false`. |
-
-## Filter Injection Operators
-
-`injectFilter` accepts comparison operators:
-
-- **Accepted**: `=`, `==`, `eq`, `>`, `gt`, `>=`, `gte`, `<`, `lt`, `<=`, `lte`
-- **Rejected**: `!=`, `neq`, `<>`, `in`, `is_null`, `contains` (throws error — wrap with `NOT` or write in QQL query)
-
-## API Summary
-
-| Export | Description |
-|---|---|
-| `localExecutor(dataDir, options)` | Create a fully local edge Client backed by fastembed-rs & qdrant-edge |
-| `listEmbeddingModels()` | List dense ONNX models available for `localExecutor({ model })` |
-| `httpExecutor(dataDir, url, key, model, dim)` | Create an edge Client with local vector storage and remote HTTP embedder |
-| `Stmt` | Parsed statement object (`injectFilter`, `toObject`, `toJson` / `toJSON`, `shardKey`) |
-| `parse(input)` | Parse into array of `Stmt` objects |
-| `parseJson(input)` | Parse to raw JSON string (bypasses V8 object allocation) |
-| `isValid(input)` | Validate QQL syntax |
-| `tokenize(input)` | Tokenize QQL input string |
-| `injectFilter(query, field, op, value)` | Inject tenant filter into statement AST |
-| `compileQuery(input)` | Lower QQL statement into `{ stmt_type, method, path, payload }` route object |
-| `explain(query)` | Inspect the execution plan without executing network calls |
-| `explainStmt(stmt)` | Explain a pre-parsed Stmt object |
-| `execute(query, options?)` | One-shot execute with temporary edge client; `options.onError` is `"stop"` or `"continue"` |
-| `executeStmt(stmt, options?)` | Free-function execute a pre-parsed Stmt |
-| `version` | Package runtime version string |
-
-## Documentation Links
-
-- [QQL Syntax Guide](https://github.com/srimon12/qql-rs/blob/main/docs/syntax.md)
-- [Filter Documentation](https://github.com/srimon12/qql-rs/blob/main/docs/filters.md)
-- [Filter Injection Guide](https://github.com/srimon12/qql-rs/blob/main/docs/inject_filter.md)
-- [Changelog](https://github.com/srimon12/qql-rs/blob/main/CHANGELOG.md)
+- [qql-edge](../qql-edge/README.md) · [Gaps](../../skills/qql-skill/references/qql-gaps.md) · [Syntax](../../docs/syntax.md)

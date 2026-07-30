@@ -1,181 +1,85 @@
 # qql-core
 
-Transport-free QQL frontend: lexer, strict parser, typed AST, validation,
-AST transforms (`inject_filter`), and intent-only explain output.
-Performs no I/O and does not generate Qdrant JSON.
+Transport-free QQL frontend: lexer, parser, typed AST, validation,
+`inject_filter`, and explain. **No I/O, no Qdrant JSON.**
 
-The accepted syntax is generated from the workspace canonical grammar at
-[`language/v1/grammar.pest`](../../language/v1/grammar.pest). Change that file,
-run `cargo run -p qql-grammar-gen -- generate`, and then update AST lowering.
-The generated file under `grammar/` is checked in for standalone crate
-packaging and must not be edited manually.
+Canonical grammar: [`language/v1/grammar.pest`](../../language/v1/grammar.pest)
+→ `qql-grammar-gen` → checked-in `grammar/` (do not edit by hand).
 
-## Parser
+## Proposition
 
-The parser produces one of these [`Statement`] variants:
+Own the **language surface** for every SDK. Hosts and agents parse here, inject
+policy here, then hand `Stmt` to `qql-plan` / runtime.
 
-| Variant | SQL example |
-|---------|-------------|
-| `Query` | `QUERY 'search' FROM docs USING dense LIMIT 10` |
-| `Upsert` | `UPSERT INTO docs VALUES {id: 1, text: 'hello'}` |
-| `Scroll` | `SCROLL FROM docs WHERE status = 'active' LIMIT 50` |
-| `Delete` | `DELETE FROM docs WHERE id = 1` |
-| `ClearPayload` | `CLEAR PAYLOAD FROM docs WHERE id = 1` |
-| `DeleteVector` | `DELETE VECTOR colbert FROM docs WHERE id = 42` |
-| `UpdateVector` | `UPDATE docs SET VECTOR = [0.1, 0.2, 0.3] WHERE id = 1` |
-| `UpdatePayload` | `UPDATE docs SET PAYLOAD = {status: 'active'} WHERE id = 1` |
-| `Count` | `COUNT FROM docs WHERE status = 'active'` |
-| `CreateCollection` | `CREATE COLLECTION docs (dense VECTOR(384, COSINE))` |
-| `AlterCollection` | `ALTER COLLECTION docs WITH PARAMS (replication_factor = 2)` |
-| `DropCollection` | `DROP COLLECTION docs` |
-| `CreateIndex` | `CREATE INDEX ON COLLECTION docs FOR title TYPE text` |
-| `DropIndex` | `DROP INDEX ON COLLECTION docs FOR title` |
-| `CreateShardKey` | `CREATE SHARD KEY 'acme' ON COLLECTION docs` |
-| `DropShardKey` | `DROP SHARD KEY 'acme' ON COLLECTION docs` |
-| `ShowCollections` | `SHOW COLLECTIONS` |
-| `ShowCollection` | `SHOW COLLECTION docs` |
-| `ShowShardKeys` | `SHOW SHARD KEYS ON COLLECTION docs` |
+## Statement surface
 
-## Query contract
+| Kind | Examples |
+|------|----------|
+| Query | `QUERY`, CTEs, hybrid, formula, rerank, recommend, … |
+| DML | `UPSERT`, `DELETE`, `SCROLL`, `COUNT`, payload/vector updates |
+| DDL | `CREATE/ALTER/DROP COLLECTION`, indexes, **`CREATE/DROP/SHOW SHARD KEY`** |
+| Meta | `SHOW COLLECTIONS` / `SHOW COLLECTION` |
 
-`QUERY` is the sole retrieval entry point. Direct point retrieval and
-similarity-by-point are distinct:
-
-```sql
-QUERY POINTS (42, 'point-a') FROM docs WITH PAYLOAD true;
-QUERY NEAREST POINT 42 FROM docs USING dense LIMIT 10;
-```
-
-The typed `QueryExpr` enum covers nearest text/vector/point, recommend, context,
-discover, order-by, random sample, RRF/DBSF fusion, formula scoring, relevance
-feedback, MMR, hybrid shorthand, and explicit rerank. Fusion and rerank own their
-required prefetch topology in the AST.
-
-### Clause order
+### Clause order (QUERY)
 
 ```
-QUERY <expression>
-FROM <collection>
-[USING HYBRID [DENSE <vector>] [SPARSE <vector>] [FUSION RRF|DBSF]
- | USING <vector> [AS DENSE | AS SPARSE | AS MULTI | AS MULTIVECTOR]]
-[PREFETCH (...)]
-[WHERE <filter>]
-[SHARD '<key>']
-[PARAMS (...)]
-[SCORE THRESHOLD <number>]
-[GROUP BY <field> [SIZE <n>] [LOOKUP FROM <collection>]]
-[WITH PAYLOAD <selector>]
-[WITH VECTOR <selector>]
-[LIMIT <positive integer>]
-[OFFSET <non-negative integer>]
+QUERY <expr> FROM <coll>
+  [USING HYBRID … | USING <vec> [AS DENSE|SPARSE|MULTI]]
+  [PREFETCH (…)] [WHERE …] [SHARD '…'] [PARAMS (…)]
+  [SCORE THRESHOLD n] [GROUP BY …] [WITH PAYLOAD|VECTOR …]
+  [LIMIT n] [OFFSET n]
 ```
 
-Each clause occurs at most once and only in this order.
+### `SHARD KEY` vs `SHARD`
 
-`USING HYBRID` is equivalent to front-form `QUERY HYBRID TEXT …`: parse expands
-to `QueryExpr::Hybrid` (dense + sparse prefetches fused with RRF/DBSF). It only
-applies to text nearest queries.
+| Form | Role |
+|------|------|
+| `CREATE SHARD KEY 'acme' ON COLLECTION c` | DDL — define custom partition |
+| `… SHARD 'acme'` | DML — route this request |
 
-Planner capabilities:
+Routing field after parse: `stmt.set_shard_key(Some("acme".into()))`  
+(same AST field; **no** `inject_shard_key`).
 
-- `GROUP BY` + `OFFSET` is supported (maps to Qdrant's `group_offset`)
-- `MMR` supports both dense and sparse vector targets
+### PARAMS (selected)
 
-Vector names are arbitrary (`dense` / `sparse` / `colbert` are conventions, not
-reserved). `AS DENSE` / `AS SPARSE` declare embed role; `AS MULTI` marks a dense
-**multivector** target (ColBERT-style). Without `AS`, the executor resolves kind
-and multivector flags from collection schema before embedding. Parse keeps
-untyped targets as `kind: null` (source fidelity).
-
-## Search params (PARAMS)
-
-```ebnf
-search-param = "hnsw_ef", "=", integer
-             | "exact", "=", boolean
-             | "acorn", "=", boolean
-             | "max_selectivity", "=", number   -- requires acorn = true; range (0, 1]
-             | "indexed_only", "=", boolean
-             | "quantization", "=", object
-             | "rrf_k", "=", integer
-             | "rrf_weights", "=", array
-             | "timeout", "=", positive-integer  -- request-level seconds
-             | "consistency", "=", factor | majority | quorum | all
-```
-
-`acorn` (Adaptive Cardinality Estimator for ONgRN) controls approximate search
-selectivity estimation. When `acorn = true`, Qdrant uses ACORN to estimate
-filter cardinality and adapt the search strategy. Optional `max_selectivity`
-(in `(0, 1]`) caps that estimate: `PARAMS (acorn = true, max_selectivity = 0.4)`.
-
-`timeout` and `consistency` are **request-level** (OpenAPI query params /
-gRPC fields), not body `SearchParams`. Plan projects them to REST `?timeout=`
-/ `?consistency=` and gRPC `timeout` / `read_consistency`.
-
-`quantization` accepts an object matching the Qdrant QuantizationSearchParams
-schema: `{ "ignore": bool, "rescore": bool, "oversampling": float }`.
-
-Host multi-tenant routing without string-building QQL:
-
-```rust
-use qql_core::ast::inject_shard_key;
-inject_shard_key(&mut stmt, "tenant-a")?;
-```
-
-## Errors
-
-Every error has an explicit `ErrorKind` (`Lex`, `Parse`, or `Validation`),
-a stable machine-readable code, human message, and optional byte
-`Span { start, end }`.
-
-## Features
-
-- `serde`: AST/token/error serialization
-- `json`: enables `serde` + fallible host JSON conversion for `Value`
-- `std`: implements `std::error::Error` for `QqlError`
+Body search params: `hnsw_ef`, `exact`, `acorn`, `max_selectivity`, `quantization`, …  
+**Request-level** (REST query string / gRPC fields): `timeout`, `consistency`.
 
 ## API
 
 ```rust
-use qql_core::ast::{QueryExpr, Stmt};
+use qql_core::ast::{inject_filter, ComparisonOp, Stmt, Value};
 use qql_core::parser::Parser;
 
-let statement = Parser::parse("QUERY TEXT 'hello' FROM docs LIMIT 5;")?;
-if let Stmt::Query(query) = statement {
-    assert!(matches!(query.expression, QueryExpr::Nearest { .. }));
-}
-
-let script = Parser::parse_all(
-    "SHOW COLLECTIONS; QUERY POINTS (1, 2) FROM docs;",
+let mut stmt = Parser::parse(
+    "QUERY TEXT 'hello' FROM docs USING dense LIMIT 5"
 )?;
-# Ok::<(), qql_core::error::QqlError>(())
+
+// Isolation (recurses CTEs / prefetches)
+inject_filter(
+    &mut stmt,
+    "tenant_id",
+    ComparisonOp::Eq,
+    Value::Str("org_99".into()),
+)?;
+
+// Optional routing (custom sharding)
+stmt.set_shard_key(Some("org_99".into()));
+// Prefer authoring: ... SHARD 'org_99' LIMIT 5
 ```
 
-Multiple statements require `;`. A single trailing semicolon is optional;
-leading and repeated empty statements are rejected.
+| Feature | Role |
+|---------|------|
+| `serde` | AST serialize |
+| `json` | `Value` from/to JSON |
+| `std` | `std::error::Error` |
 
-## AST Filter Injection & Sandboxing (`inject_filter`)
+## Docs
 
-`inject_filter` is `qql-core`'s zero-trust AST modification engine. It allows gateways, API layers, and LLM runtimes to inject mandatory security, tenant, lifecycle (soft delete), safety, or environment filters across any QQL statement graph before planning:
+- [Syntax](../../docs/syntax.md) · [inject_filter](../../docs/inject_filter.md) · [Multitenancy](../../skills/qql-skill/references/qql-multitenancy.md)
 
-```rust
-use qql_core::ast::{inject_filter, ComparisonOp, Value};
-use qql_core::parser::Parser;
-
-let mut stmt = Parser::parse("QUERY 'laptops' FROM products LIMIT 10")?;
-
-// Programmatically enforce group isolation across query, CTEs, prefetches, & mutations
-inject_filter(&mut stmt, "group_id", ComparisonOp::Eq, Value::Str("org_99".into()))?;
-```
-
-For the complete guide on real-world policy patterns, see [docs/inject_filter.md](../../docs/inject_filter.md).
-
-## Verification
+## Test
 
 ```bash
-cargo test -p qql-core -- --test-threads=4
+cargo test -p qql-core
 ```
-
-Tests cover: positive parsing for all statement types, negative parsing
-(rejected syntax), lexer roundtrip, filter lowering, transform roundtrip
-(inject_filter across CTEs/prefetches), DDL config block parsing, and
-formula expression parsing.
