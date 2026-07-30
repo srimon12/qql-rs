@@ -1,83 +1,110 @@
-# 🏠 Berlin Airbnb QQL Geo Showcase Demo
+# Berlin Airbnb — QQL Geo Showcase
 
-This example demonstrates **QQL's Geo Search Capabilities** (`GEO_RADIUS`, `GEO_BBOX`, `GEO_POLYGON`) combined with multi-tenant custom neighborhood sharding (`SHARD 'mitte'`, `SHARD 'kreuzberg'`) and hybrid text + metadata filtering over real Berlin Airbnb listings data.
+Real [Inside Airbnb](http://insideairbnb.com/) Berlin listings demonstrating
+**geo filters**, **hybrid search**, and **district custom sharding**.
 
----
+Berlin is home to Qdrant — this demo keeps the geo story front and center.
 
-## 📊 Dataset Highlights
+## Features
 
-- **Source**: Inside Airbnb Berlin Dataset (`listings.csv.gz`)
-- **Location**: Berlin, Germany (Home of Qdrant!)
-- **Listings**: ~12,700 real apartments with coordinates (`lat`, `lon`), prices, ratings, and room types.
-- **Geo Payload Index**: `location` TYPE `geo`
+| Capability | Example |
+|------------|---------|
+| `GEO_RADIUS` | Listings within 1.5 km of Brandenburg Gate |
+| `GEO_BBOX` | Mitte city-center bounding box |
+| `GEO_POLYGON` | Kreuzberg nightlife polygon |
+| Hybrid | `USING HYBRID DENSE dense SPARSE sparse FUSION RRF` |
+| Custom shards | `SHARD 'mitte'`, `SHARD 'kreuzberg'`, … via `inject_shard_key` |
+| Formula | `GAUSS_DECAY(GEO_DISTANCE(…))` for distance-aware ranking |
+| Indexes | `location` geo, `district` `is_tenant`, price/rating/room_type |
 
----
+## Dataset
 
-## 🚀 Quickstart Ingestion
+- Source: Inside Airbnb Berlin (`listings.csv.gz` bundled)
+- ~12.7k listings with lat/lon, price, ratings, room types
+- Demo default: first **2500** rows (`MAX_LISTINGS=0` for all)
 
-1. Ensure your local Qdrant instance is running on `http://localhost:6333`.
-2. Run the ingestion pipeline:
+## Quickstart
 
 ```bash
-python3 ingest.py
+# Qdrant on localhost:6333
+cd examples/airbnb-demo
+pip install -e ../../crates/pyqql   # pyqql 0.1.4+
+
+# Offline hash vectors (no embed server)
+python ingest.py
+
+# Or real dense embeddings
+EMBED_URL=http://localhost:11434 MAX_LISTINGS=1000 python ingest.py
+
+# Parse-check all showcase queries (no Qdrant)
+python query.py
+
+# Live search
+python query.py --execute
 ```
 
-This script will automatically:
-1. Create the `berlin_airbnb` collection with custom neighborhood sharding.
-2. Build payload indexes for `location` (`geo`), `neighbourhood` (`keyword`), `price` (`float`), `room_type` (`keyword`), and `rating` (`float`).
-3. Embed listing titles and descriptions using `all-MiniLM-L6-v2`.
-4. Ingest listing points into their respective neighborhood shards (`mitte`, `pankow`, `kreuzberg`, etc.).
+## Sample QQL
 
----
-
-## 🔍 Sample QQL Geo Queries
-
-### 1. GEO_RADIUS (Brandenburg Gate / Central Berlin)
-Search for cozy apartments within 1,500 meters of Brandenburg Gate (`lat=52.5163`, `lon=13.3777`) under €100/night:
+### GEO_RADIUS (Brandenburg Gate)
 
 ```sql
 QUERY TEXT 'cozy studio near historic landmarks'
 FROM berlin_airbnb
-WHERE location GEO_RADIUS {center: {lat: 52.5163, lon: 13.3777}, radius: 1500.0}
+USING dense
+WHERE location GEO_RADIUS {
+    center: {lat: 52.5163, lon: 13.3777},
+    radius: 1500.0
+  }
   AND price <= 100.0
 LIMIT 5;
 ```
 
----
-
-### 2. GEO_BBOX (Manhattan / Mitte City Center)
-Search for spacious lofts inside the Mitte bounding box (`top_left={lat: 52.535, lon: 13.360}`, `bottom_right={lat: 52.505, lon: 13.420}`):
+### GEO_BBOX + hybrid
 
 ```sql
-QUERY HYBRID TEXT 'spacious loft with balcony and fast wifi'
+QUERY TEXT 'spacious loft with balcony'
 FROM berlin_airbnb
-WHERE location GEO_BBOX {top_left: {lat: 52.535, lon: 13.360}, bottom_right: {lat: 52.505, lon: 13.420}}
+USING HYBRID DENSE dense SPARSE sparse FUSION RRF
+WHERE location GEO_BBOX {
+    top_left: {lat: 52.535, lon: 13.360},
+    bottom_right: {lat: 52.505, lon: 13.420}
+  }
   AND room_type = 'Entire home/apt'
 LIMIT 5;
 ```
 
----
+### District shard isolation (host inject)
 
-### 3. GEO_POLYGON (Kreuzberg Nightlife District Boundary)
-Search for top-rated artistic flats inside a custom neighborhood polygon boundary:
+```python
+stmt = pyqql.parse("""
+  QUERY TEXT 'quiet courtyard apartment'
+  FROM berlin_airbnb USING dense
+  WHERE rating >= 4.5 LIMIT 5
+""")[0]
+pyqql.inject_shard_key(stmt, "mitte")
+client.execute(stmt)
+```
+
+### Formula geo-decay
 
 ```sql
-QUERY TEXT 'artistic flat nightlife and coffee shops'
+WITH candidates AS (
+  QUERY TEXT 'apartment near museums' FROM berlin_airbnb USING dense LIMIT 50
+)
+QUERY FORMULA (
+  score * GAUSS_DECAY(GEO_DISTANCE(52.5163, 13.3777, location), 0.0, 3000.0, 0.5)
+) DEFAULTS (location = {lat: 52.5163, lon: 13.3777})
 FROM berlin_airbnb
-WHERE location GEO_POLYGON {exterior: [{lat: 52.500, lon: 13.370}, {lat: 52.515, lon: 13.430}, {lat: 52.485, lon: 13.450}, {lat: 52.470, lon: 13.390}, {lat: 52.500, lon: 13.370}]}
-  AND rating >= 4.7
+PREFETCH (candidates)
 LIMIT 5;
 ```
 
----
+## Layout
 
-### 4. Custom Neighborhood Shard Isolation
-Search specifically within the `mitte` custom physical shard:
-
-```sql
-QUERY TEXT 'quiet apartment courtyard'
-FROM berlin_airbnb
-SHARD 'mitte'
-WHERE rating >= 4.5
-LIMIT 5;
-```
+| File | Role |
+|------|------|
+| `config.py` | URLs, shard map, landmark coordinates |
+| `ingest.py` | Schema + indexes + sharded UPSERT |
+| `query.py` | 10 geo/hybrid/formula demos |
+| `listings.csv.gz` | Inside Airbnb Berlin dump |
+| `neighbourhoods.geojson` | Optional neighbourhood polygons |
