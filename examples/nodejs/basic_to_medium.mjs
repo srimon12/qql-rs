@@ -10,7 +10,7 @@ console.log(plan);
 
 // 3. Inject tenant filter into AST
 const rawQuery = "QUERY 'neural networks' FROM papers LIMIT 10";
-const ast = injectFilter(rawQuery, "org_id", "=", '"acme-corp"');
+const ast = injectFilter(rawQuery, "org_id", "=", "acme-corp");
 
 console.log("\n=== Secured AST Object ===");
-console.log(ast.Query.query_filter);
+console.log(ast.Query.filter);

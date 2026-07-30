@@ -28,6 +28,7 @@ class TestPackageInspection(unittest.TestCase):
             "execute_async",
             "explain",
             "inject_filter",
+            "inject_shard_key",
             "is_valid",
             "local_executor",
             "parse",
@@ -41,7 +42,7 @@ class TestPackageInspection(unittest.TestCase):
 
     def test_a2_stmt_is_class_with_methods(self):
         self.assertTrue(isinstance(pyqql_edge.Stmt, type))
-        for attr in ("to_dict", "to_json", "inject_filter", "shard_key"):
+        for attr in ("to_dict", "to_json", "inject_filter", "inject_shard_key", "shard_key"):
             self.assertTrue(hasattr(pyqql_edge.Stmt, attr), f"Stmt missing {attr}")
 
 
@@ -133,6 +134,24 @@ class TestErrorHandling(unittest.TestCase):
         self.assertIsInstance(r, pyqql_edge.Stmt)
         d = r.to_dict()
         self.assertIsNotNone(d["Query"]["filter"])
+
+    def test_c4_delete_payload_shard_key(self):
+        stmt = pyqql_edge.parse(
+            "DELETE PAYLOAD draft FROM docs WHERE status = 'archived'"
+        )[0]
+        stmt.shard_key = "tenant-a"
+        self.assertEqual(stmt.shard_key, "tenant-a")
+        self.assertEqual(
+            stmt.to_dict()["DeletePayload"]["shard_key"],
+            "tenant-a",
+        )
+
+    def test_c5_module_inject_shard_key(self):
+        stmt = pyqql_edge.inject_shard_key(
+            "DELETE PAYLOAD draft FROM docs WHERE status = 'archived'",
+            "tenant-b",
+        )
+        self.assertEqual(stmt.shard_key, "tenant-b")
 
 
 # ============================================================================

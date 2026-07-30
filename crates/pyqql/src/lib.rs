@@ -36,35 +36,14 @@ impl PyStmt {
     /// Returns `None` (setter is no-op) for other statement types.
     #[getter]
     fn shard_key(&self) -> Option<String> {
-        match &self.inner {
-            ast::Stmt::Query(q) => q.shard_key.clone(),
-            ast::Stmt::Count(c) => c.shard_key.clone(),
-            ast::Stmt::Scroll(s) => s.shard_key.clone(),
-            ast::Stmt::Upsert(u) => u.shard_key.clone(),
-            ast::Stmt::Delete(d) => d.shard_key.clone(),
-            ast::Stmt::ClearPayload(c) => c.shard_key.clone(),
-            ast::Stmt::DeleteVector(d) => d.shard_key.clone(),
-            ast::Stmt::UpdateVector(u) => u.shard_key.clone(),
-            ast::Stmt::UpdatePayload(u) => u.shard_key.clone(),
-            _ => None,
-        }
+        self.inner.shard_key().map(str::to_owned)
     }
 
     #[setter]
     fn set_shard_key(&mut self, key: Option<String>) {
-        let key = key.filter(|k| !k.is_empty());
-        match &mut self.inner {
-            ast::Stmt::Query(q) => q.shard_key = key,
-            ast::Stmt::Count(c) => c.shard_key = key,
-            ast::Stmt::Scroll(s) => s.shard_key = key,
-            ast::Stmt::Upsert(u) => u.shard_key = key,
-            ast::Stmt::Delete(d) => d.shard_key = key,
-            ast::Stmt::ClearPayload(c) => c.shard_key = key,
-            ast::Stmt::DeleteVector(d) => d.shard_key = key,
-            ast::Stmt::UpdateVector(u) => u.shard_key = key,
-            ast::Stmt::UpdatePayload(u) => u.shard_key = key,
-            _ => {}
-        }
+        let _ = self
+            .inner
+            .set_shard_key(key.filter(|value| !value.is_empty()));
     }
 
     fn to_json(&self) -> PyResult<String> {

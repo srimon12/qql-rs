@@ -97,6 +97,19 @@ fn inject_id_requires_equality() {
     assert!(crate::ast::inject_filter(&mut s, "id", ComparisonOp::Gt, Value::Int(5)).is_err());
 }
 
+#[test]
+fn shard_key_access_supports_delete_payload() {
+    let mut statement =
+        Parser::parse("DELETE PAYLOAD draft FROM docs WHERE status = 'archived';").unwrap();
+
+    assert_eq!(statement.shard_key(), None);
+    assert!(statement.set_shard_key(Some("tenant-a".into())));
+    assert_eq!(statement.shard_key(), Some("tenant-a"));
+
+    assert!(statement.set_shard_key(None));
+    assert_eq!(statement.shard_key(), None);
+}
+
 // ── Security: injection resistance tests ────────────────────────
 
 #[test]

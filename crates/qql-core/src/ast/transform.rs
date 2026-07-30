@@ -4,7 +4,47 @@ use super::{
 };
 use crate::error::QqlError;
 use alloc::boxed::Box;
-use alloc::string::ToString;
+use alloc::string::{String, ToString};
+
+impl Stmt {
+    /// Return the custom shard key carried by statements that support sharded routing.
+    pub fn shard_key(&self) -> Option<&str> {
+        match self {
+            Self::Query(query) => query.shard_key.as_deref(),
+            Self::Scroll(scroll) => scroll.shard_key.as_deref(),
+            Self::Count(count) => count.shard_key.as_deref(),
+            Self::Upsert(upsert) => upsert.shard_key.as_deref(),
+            Self::Delete(delete) => delete.shard_key.as_deref(),
+            Self::ClearPayload(clear) => clear.shard_key.as_deref(),
+            Self::DeletePayload(delete) => delete.shard_key.as_deref(),
+            Self::DeleteVector(delete) => delete.shard_key.as_deref(),
+            Self::UpdateVector(update) => update.shard_key.as_deref(),
+            Self::UpdatePayload(update) => update.shard_key.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// Set the custom shard key on statements that support sharded routing.
+    ///
+    /// Returns `false` when the statement cannot carry a shard key.
+    pub fn set_shard_key(&mut self, shard_key: Option<String>) -> bool {
+        let slot = match self {
+            Self::Query(query) => &mut query.shard_key,
+            Self::Scroll(scroll) => &mut scroll.shard_key,
+            Self::Count(count) => &mut count.shard_key,
+            Self::Upsert(upsert) => &mut upsert.shard_key,
+            Self::Delete(delete) => &mut delete.shard_key,
+            Self::ClearPayload(clear) => &mut clear.shard_key,
+            Self::DeletePayload(delete) => &mut delete.shard_key,
+            Self::DeleteVector(delete) => &mut delete.shard_key,
+            Self::UpdateVector(update) => &mut update.shard_key,
+            Self::UpdatePayload(update) => &mut update.shard_key,
+            _ => return false,
+        };
+        *slot = shard_key;
+        true
+    }
+}
 
 pub fn inject_filter(
     statement: &mut Stmt,
@@ -58,9 +98,10 @@ pub fn inject_filter(
 /// call this after resolving the tenant id (or set `shard_key` on the AST).
 ///
 /// Applies to statements that carry `shard_key` in the AST: `QUERY`, `SCROLL`,
-/// `COUNT`, `UPSERT`, `DELETE`, `CLEAR PAYLOAD`, `DELETE VECTOR`,
-/// `UPDATE … VECTOR`, and `UPDATE … PAYLOAD`. Recurses into CTEs and nested
-/// prefetch queries. Returns a validation error for DDL / SHOW (fail closed).
+/// `COUNT`, `UPSERT`, `DELETE`, `CLEAR PAYLOAD`, `DELETE PAYLOAD`,
+/// `DELETE VECTOR`, `UPDATE … VECTOR`, and `UPDATE … PAYLOAD`. Recurses into
+/// CTEs and nested prefetch queries. Returns a validation error for DDL / SHOW
+/// (fail closed).
 pub fn inject_shard_key(statement: &mut Stmt, shard_key: &str) -> Result<(), QqlError> {
     if shard_key.is_empty() {
         return Err(QqlError::validation(
@@ -70,27 +111,17 @@ pub fn inject_shard_key(statement: &mut Stmt, shard_key: &str) -> Result<(), Qql
         ));
     }
     let key = shard_key.to_string();
-    match statement {
-        Stmt::Query(query) => inject_query_shard(query, &key),
-        Stmt::Scroll(scroll) => scroll.shard_key = Some(key),
-        Stmt::Count(count) => count.shard_key = Some(key),
-        Stmt::Upsert(upsert) => upsert.shard_key = Some(key),
-        Stmt::Delete(delete) => delete.shard_key = Some(key),
-        Stmt::ClearPayload(clear) => clear.shard_key = Some(key),
-        Stmt::DeletePayload(del) => del.shard_key = Some(key),
-        Stmt::DeleteVector(delete) => delete.shard_key = Some(key),
-        Stmt::UpdateVector(update) => update.shard_key = Some(key),
-        Stmt::UpdatePayload(update) => update.shard_key = Some(key),
-        other => {
-            return Err(QqlError::validation(
-                "QQL-VALIDATION-SHARD-KEY",
-                format!(
-                    "inject_shard_key does not apply to this statement type ({})",
-                    stmt_kind(other)
-                ),
-                None,
-            ));
-        }
+    if let Stmt::Query(query) = statement {
+        inject_query_shard(query, &key);
+    } else if !statement.set_shard_key(Some(key)) {
+        return Err(QqlError::validation(
+            "QQL-VALIDATION-SHARD-KEY",
+            format!(
+                "inject_shard_key does not apply to this statement type ({})",
+                stmt_kind(statement)
+            ),
+            None,
+        ));
     }
     Ok(())
 }

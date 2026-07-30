@@ -52,6 +52,7 @@ class TestPackageInspection(unittest.TestCase):
             "parse",
             "is_valid",
             "inject_filter",
+            "inject_shard_key",
             "tokenize",
             "compile_query",
             "explain",
@@ -64,7 +65,7 @@ class TestPackageInspection(unittest.TestCase):
 
     def test_a2_stmt_is_class_with_methods(self):
         self.assertTrue(isinstance(pyqql.Stmt, type))
-        for attr in ("to_dict", "to_json", "inject_filter", "shard_key"):
+        for attr in ("to_dict", "to_json", "inject_filter", "inject_shard_key", "shard_key"):
             self.assertTrue(hasattr(pyqql.Stmt, attr), f"Stmt missing {attr}")
 
     def test_a3_httpembedder_signature(self):
@@ -797,22 +798,40 @@ class TestEdgeCases(unittest.TestCase):
         stmt.shard_key = "asia"
         self.assertEqual(stmt.shard_key, "asia")
 
-    def test_j10_show_collections_to_json(self):
+    def test_j10_delete_payload_shard_key(self):
+        stmt = pyqql.parse(
+            "DELETE PAYLOAD draft FROM docs WHERE status = 'archived'"
+        )[0]
+        stmt.shard_key = "tenant-a"
+        self.assertEqual(stmt.shard_key, "tenant-a")
+        self.assertEqual(
+            stmt.to_dict()["DeletePayload"]["shard_key"],
+            "tenant-a",
+        )
+
+    def test_j11_module_inject_shard_key(self):
+        stmt = pyqql.inject_shard_key(
+            "DELETE PAYLOAD draft FROM docs WHERE status = 'archived'",
+            "tenant-b",
+        )
+        self.assertEqual(stmt.shard_key, "tenant-b")
+
+    def test_j12_show_collections_to_json(self):
         stmt = pyqql.parse("SHOW COLLECTIONS")[0]
         j = stmt.to_json()
         self.assertIsInstance(j, str)
         self.assertEqual(j, '{"ShowCollections":{}}')
 
-    def test_j11_module_level_explain(self):
+    def test_j13_module_level_explain(self):
         result = pyqql.explain('QUERY "test" FROM docs LIMIT 5')
         self.assertIsInstance(result, dict)
         self.assertTrue(result["ok"])
 
-    def test_j12_parse_duplicate_statements(self):
+    def test_j14_parse_duplicate_statements(self):
         stmts = pyqql.parse("COUNT FROM docs; COUNT FROM docs")
         self.assertEqual(len(stmts), 2)
 
-    def test_j13_to_dict_stable(self):
+    def test_j15_to_dict_stable(self):
         stmt = pyqql.parse('QUERY "hello" FROM docs LIMIT 5')[0]
         d1 = stmt.to_dict()
         d2 = stmt.to_dict()

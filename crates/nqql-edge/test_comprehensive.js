@@ -51,6 +51,7 @@ test('exports: parse', () => assert.strictEqual(typeof nqql.parse, 'function'));
 test('exports: parseJson', () => assert.strictEqual(typeof nqql.parseJson, 'function'));
 test('exports: isValid', () => assert.strictEqual(typeof nqql.isValid, 'function'));
 test('exports: injectFilter', () => assert.strictEqual(typeof nqql.injectFilter, 'function'));
+test('exports: injectShardKey', () => assert.strictEqual(typeof nqql.injectShardKey, 'function'));
 test('exports: tokenize', () => assert.strictEqual(typeof nqql.tokenize, 'function'));
 test('exports: compileQuery', () => assert.strictEqual(typeof nqql.compileQuery, 'function'));
 test('exports: explain', () => assert.strictEqual(typeof nqql.explain, 'function'));
@@ -60,7 +61,7 @@ test('exports: executeStmt', () => assert.strictEqual(typeof nqql.executeStmt, '
 test('exports: version', () => assert.strictEqual(typeof nqql.version, 'string'));
 
 const knownKeys = ['Client','Stmt','compileQuery','execute','executeStmt',
-  'explain','explainStmt','httpExecutor','injectFilter','isValid','listEmbeddingModels',
+  'explain','explainStmt','httpExecutor','injectFilter','injectShardKey','isValid','listEmbeddingModels',
   'localExecutor','parse','parseJson','tokenize', 'version', '__version__'];
 const actualKeys = Object.keys(nqql).sort();
 test('no extra exports', () => {
@@ -71,12 +72,26 @@ test('no extra exports', () => {
 const stmt = nqql.parse('SHOW COLLECTIONS')[0];
 test('Stmt instance methods: toObject', () => assert.strictEqual(typeof stmt.toObject, 'function'));
 test('Stmt instance methods: injectFilter', () => assert.strictEqual(typeof stmt.injectFilter, 'function'));
+test('Stmt instance methods: injectShardKey', () => assert.strictEqual(typeof stmt.injectShardKey, 'function'));
 test('Stmt.toJson and Stmt.toJSON both exist', () => {
   assert.strictEqual(typeof stmt.toJson, 'function');
   assert.strictEqual(typeof stmt.toJSON, 'function');
   assert.strictEqual(stmt.toJson(), stmt.toJSON());
 });
 test('Stmt.shardKey property (get)', () => assert.strictEqual(stmt.shardKey, null));
+test('Stmt.shardKey setter supports DELETE PAYLOAD', () => {
+  const [stmt] = nqql.parse("DELETE PAYLOAD draft FROM docs WHERE status = 'archived'");
+  stmt.shardKey = 'tenant-a';
+  assert.strictEqual(stmt.shardKey, 'tenant-a');
+  assert.strictEqual(stmt.toObject().DeletePayload.shard_key, 'tenant-a');
+});
+test('injectShardKey supports DELETE PAYLOAD', () => {
+  const result = nqql.injectShardKey(
+    "DELETE PAYLOAD draft FROM docs WHERE status = 'archived'",
+    'tenant-b',
+  );
+  assert.strictEqual(result.DeletePayload.shard_key, 'tenant-b');
+});
 
 // ============================================================================
 console.log('\n========== B. Parse API ==========');
