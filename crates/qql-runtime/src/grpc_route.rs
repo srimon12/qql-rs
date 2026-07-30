@@ -134,14 +134,16 @@ pub(crate) fn quantization_config_from_plan(
             })
         }
         qql_plan::QuantizationConfig::Turbo { turbo } => {
-            let bits = turbo.bits.as_deref().map(|label| {
-                match label.to_ascii_lowercase().as_str() {
-                    "bits1_5" | "1.5" => qdrant::TurboQuantBitSize::Bits15 as i32,
-                    "bits2" | "2" => qdrant::TurboQuantBitSize::Bits2 as i32,
-                    "bits4" | "4" => qdrant::TurboQuantBitSize::Bits4 as i32,
-                    _ => qdrant::TurboQuantBitSize::Bits1 as i32,
-                }
-            });
+            let bits =
+                turbo
+                    .bits
+                    .as_deref()
+                    .map(|label| match label.to_ascii_lowercase().as_str() {
+                        "bits1_5" | "1.5" => qdrant::TurboQuantBitSize::Bits15 as i32,
+                        "bits2" | "2" => qdrant::TurboQuantBitSize::Bits2 as i32,
+                        "bits4" | "4" => qdrant::TurboQuantBitSize::Bits4 as i32,
+                        _ => qdrant::TurboQuantBitSize::Bits1 as i32,
+                    });
             Some(qdrant::QuantizationConfig {
                 quantization: Some(qdrant::quantization_config::Quantization::Turboquant(
                     qdrant::TurboQuantization {
@@ -308,12 +310,13 @@ fn turbo_quantization(value: &serde_json::Value) -> qdrant::TurboQuantization {
                 });
             }
             // OpenAPI string enum: bits1 | bits1_5 | bits2 | bits4
-            v.as_str().map(|label| match label.to_ascii_lowercase().as_str() {
-                "bits1_5" | "1.5" => qdrant::TurboQuantBitSize::Bits15 as i32,
-                "bits2" | "2" => qdrant::TurboQuantBitSize::Bits2 as i32,
-                "bits4" | "4" => qdrant::TurboQuantBitSize::Bits4 as i32,
-                _ => qdrant::TurboQuantBitSize::Bits1 as i32,
-            })
+            v.as_str()
+                .map(|label| match label.to_ascii_lowercase().as_str() {
+                    "bits1_5" | "1.5" => qdrant::TurboQuantBitSize::Bits15 as i32,
+                    "bits2" | "2" => qdrant::TurboQuantBitSize::Bits2 as i32,
+                    "bits4" | "4" => qdrant::TurboQuantBitSize::Bits4 as i32,
+                    _ => qdrant::TurboQuantBitSize::Bits1 as i32,
+                })
         });
     qdrant::TurboQuantization {
         always_ram: json_bool(value, "always_ram"),

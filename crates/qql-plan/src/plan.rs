@@ -439,7 +439,10 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
             };
             // Filter and shard routing are independent: filter → qdrant.Filter,
             // shard_key → request ShardKeySelector (gRPC) / shard_key (REST).
-            let filter = count.filter.as_ref().map(|f| crate::filter::top_level_filter(f));
+            let filter = count
+                .filter
+                .as_ref()
+                .map(|f| crate::filter::top_level_filter(f));
             Ok(PlannedOperation::Count {
                 collection,
                 request: CountRequest {

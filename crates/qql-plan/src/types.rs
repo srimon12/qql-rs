@@ -713,11 +713,19 @@ pub struct OptimizersConfig {
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 pub enum QuantizationConfig {
-    Scalar { scalar: ScalarQuantization },
-    Product { product: ProductQuantization },
-    Binary { binary: BinaryQuantization },
+    Scalar {
+        scalar: ScalarQuantization,
+    },
+    Product {
+        product: ProductQuantization,
+    },
+    Binary {
+        binary: BinaryQuantization,
+    },
     /// OpenAPI `TurboQuantization`: `{ "turbo": { "bits": "bits2", … } }`.
-    Turbo { turbo: TurboQuantization },
+    Turbo {
+        turbo: TurboQuantization,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -333,7 +333,9 @@ fn shard_clause_parses_on_query_and_ctes_via_set_shard_key() {
          QUERY FUSION RRF FROM docs PREFETCH (c) SHARD 'acme' LIMIT 5;",
     )
     .unwrap();
-    let Stmt::Query(q) = &with_clause else { panic!() };
+    let Stmt::Query(q) = &with_clause else {
+        panic!()
+    };
     assert_eq!(q.shard_key.as_deref(), Some("acme"));
 
     // Host path after parse: property setter (recurses into CTEs)
@@ -348,7 +350,9 @@ fn shard_clause_parses_on_query_and_ctes_via_set_shard_key() {
     assert_eq!(q.ctes[0].query.shard_key.as_deref(), Some("acme"));
     assert!(stmt.set_shard_key(Some(String::new()))); // empty clears
     assert_eq!(stmt.shard_key(), None);
-    assert!(!Parser::parse("SHOW COLLECTIONS").unwrap().set_shard_key(Some("x".into())));
+    assert!(!Parser::parse("SHOW COLLECTIONS")
+        .unwrap()
+        .set_shard_key(Some("x".into())));
 }
 
 #[test]
