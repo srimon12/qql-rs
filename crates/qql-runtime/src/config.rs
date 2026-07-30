@@ -30,7 +30,7 @@ pub struct QqlConfig {
     #[serde(default)]
     pub embedding_dimension: usize,
     /// Optional multi-vector / ColBERT embedding endpoint (OpenAI-compatible).
-    /// When unset, multi requests reuse [`embedding_endpoint`].
+    /// When unset, multi requests reuse [`Self::embedding_endpoint`].
     #[serde(default)]
     pub multi_embedding_endpoint: Option<String>,
     #[serde(default)]
@@ -42,7 +42,7 @@ pub struct QqlConfig {
     #[serde(default)]
     pub multi_embedding_dimension: usize,
     /// Optional image / CLIP vision embedding endpoint (OpenAI-compatible dense).
-    /// When unset, image requests reuse [`embedding_endpoint`].
+    /// When unset, image requests reuse [`Self::embedding_endpoint`].
     #[serde(default)]
     pub image_embedding_endpoint: Option<String>,
     #[serde(default)]

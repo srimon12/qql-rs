@@ -17,7 +17,7 @@ impl<T> EmbedderBound for T {}
 ///
 /// Dense calls should batch when possible (`embed_dense_batch` → one HTTP
 /// request or one ONNX batch). Sparse defaults to local BM25-style hashing.
-/// Multivector (ColBERT-style) uses [`embed_multi`] → `Vec<Vec<f32>>`.
+/// Multivector (ColBERT-style) uses [`Self::embed_multi`] → `Vec<Vec<f32>>`.
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait Embedder: EmbedderBound {
@@ -35,7 +35,7 @@ pub trait Embedder: EmbedderBound {
         Ok(sparse::build_query_default(text))
     }
 
-    /// Batch sparse embedding. Default loops [`embed_sparse`].
+    /// Batch sparse embedding. Default loops [`Self::embed_sparse`].
     async fn embed_sparse_batch(
         &self,
         texts: &[String],
@@ -64,7 +64,7 @@ pub trait Embedder: EmbedderBound {
         })
     }
 
-    /// Batch joint embedding. Default loops [`embed_joint`].
+    /// Batch joint embedding. Default loops [`Self::embed_joint`].
     async fn embed_joint_batch(
         &self,
         texts: &[String],
@@ -117,7 +117,7 @@ pub trait Embedder: EmbedderBound {
         Err(multi_unsupported_error(model))
     }
 
-    /// Batch multivector embedding. Default loops [`embed_multi`].
+    /// Batch multivector embedding. Default loops [`Self::embed_multi`].
     async fn embed_multi_batch(
         &self,
         texts: &[String],
@@ -139,7 +139,7 @@ pub trait Embedder: EmbedderBound {
         Err(image_unsupported_error(model))
     }
 
-    /// Batch image embedding. Default loops [`embed_image`].
+    /// Batch image embedding. Default loops [`Self::embed_image`].
     async fn embed_image_batch(
         &self,
         sources: &[String],

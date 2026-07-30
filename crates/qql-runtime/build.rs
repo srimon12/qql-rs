@@ -3,6 +3,31 @@ use std::fs;
 use std::path::Path;
 use typify::{TypeSpace, TypeSpaceSettings};
 
+/// Convert rustdoc intra-doc links `[`name`]` into plain code spans `` `name` ``.
+///
+/// Keeps prose readable while preventing broken-link errors from upstream
+/// OpenAPI text that references symbols outside the generated type space.
+fn neutralize_intra_doc_links(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    let mut rest = src;
+    while let Some(start) = rest.find("[`") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        if let Some(end) = after.find("`]") {
+            let inner = &after[..end];
+            out.push('`');
+            out.push_str(inner);
+            out.push('`');
+            rest = &after[end + 2..];
+        } else {
+            out.push_str("[`");
+            rest = after;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 fn sanitize_schema(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(map) => {
@@ -117,6 +142,11 @@ fn main() {
     let token_stream = type_space.to_stream();
     let file = syn::parse2(token_stream).expect("Failed to parse generated Rust tokens");
     let formatted = prettyplease::unparse(&file);
+    // OpenAPI descriptions sometimes embed Markdown rustdoc links such as
+    // [`init_feature_flags`] that refer to Qdrant server-private symbols. Those
+    // names are not generated into this crate; neutralize them so `cargo doc
+    // -D warnings` stays clean for the public `qql` API surface.
+    let formatted = neutralize_intra_doc_links(&formatted);
 
     let out_dir = env::var_os("OUT_DIR").unwrap();
     let dest_path = Path::new(&out_dir).join("qdrant_types.rs");

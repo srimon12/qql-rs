@@ -206,7 +206,7 @@ pub fn http_executor_with_multi(
     )
 }
 
-/// Edge executor from full [`HttpEmbedderOptions`] (dense + multi + image/CLIP).
+/// Edge executor from full [`qql::embedder::HttpEmbedderOptions`] (dense + multi + image/CLIP).
 #[cfg(feature = "http-embedding")]
 pub fn http_executor_with_options(
     data_dir: impl Into<PathBuf>,
