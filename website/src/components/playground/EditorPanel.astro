@@ -1,46 +1,52 @@
-<section class="work-panel editor-panel" aria-labelledby="editor-title">
-  <div class="panel-heading">
+<section class="flex min-h-[38rem] min-w-0 flex-col border-b border-[var(--sl-color-gray-5)] lg:border-r lg:border-b-0" aria-labelledby="editor-title">
+  <div class="flex min-h-16 flex-wrap items-center justify-between gap-3 border-b border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-4 py-3">
     <div>
-      <span class="eyebrow">Source</span>
-      <h2 id="editor-title">QQL editor</h2>
+      <span class="block font-mono text-[0.6rem] font-semibold uppercase tracking-[0.12em] text-[var(--sl-color-accent)]">Source</span>
+      <h2 id="editor-title" class="!m-0 !mt-0.5 !font-[var(--sl-font)] !text-sm !font-semibold text-[var(--sl-color-white)]">QQL editor</h2>
     </div>
-    <div class="panel-actions">
-      <button class="button button--quiet" type="button" data-open-presets>
+    <div class="flex items-center gap-1 overflow-x-auto">
+      <button class="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-md border border-[var(--sl-color-gray-5)] bg-transparent px-2.5 font-mono text-[0.68rem] font-medium text-[var(--sl-color-gray-2)] transition hover:border-[var(--sl-color-gray-4)] hover:text-[var(--sl-color-white)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="button" data-open-presets>
         Examples
-        <kbd>⌘K</kbd>
+        <kbd class="hidden rounded border border-current/20 px-1 font-mono text-[0.55rem] opacity-70 sm:inline">⌘K</kbd>
       </button>
-      <button class="button button--quiet" type="button" data-open-policy>
+      <button class="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-md border border-[var(--sl-color-gray-5)] bg-transparent px-2.5 font-mono text-[0.68rem] font-medium text-[var(--sl-color-gray-2)] transition hover:border-[var(--sl-color-gray-4)] hover:text-[var(--sl-color-white)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="button" data-open-policy>
         Policy
-        <span class="status-dot" data-policy-dot></span>
+        <span class="size-1.5 rounded-full bg-[var(--sl-color-gray-3)]" data-policy-dot></span>
       </button>
-      <button class="button button--quiet" type="button" data-open-settings>
+      <button class="inline-flex min-h-8 items-center justify-center rounded-md border border-[var(--sl-color-gray-5)] bg-transparent px-2.5 font-mono text-[0.68rem] font-medium text-[var(--sl-color-gray-2)] transition hover:border-[var(--sl-color-gray-4)] hover:text-[var(--sl-color-white)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="button" data-open-settings>
         Connection
       </button>
-      <button class="button button--primary" type="button" data-run disabled>
-        <svg viewBox="0 0 24 24" aria-hidden="true">
+      <button class="hidden min-h-8 items-center justify-center rounded-md border border-[var(--sl-color-gray-5)] bg-transparent px-2.5 font-mono text-[0.68rem] font-medium text-[var(--sl-color-gray-2)] transition hover:border-[var(--sl-color-gray-4)] hover:text-[var(--sl-color-white)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)] sm:inline-flex" type="button" data-share>
+        Share
+      </button>
+      <button class="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-md bg-[var(--sl-color-accent)] px-3 font-mono text-[0.68rem] font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="button" data-run disabled>
+        <svg class="size-3 fill-current" viewBox="0 0 24 24" aria-hidden="true">
           <path d="m8 5 11 7-11 7V5Z"></path>
         </svg>
         Run
-        <kbd>⌘↵</kbd>
+        <kbd class="hidden rounded border border-white/25 px-1 font-mono text-[0.55rem] opacity-80 sm:inline">⌘↵</kbd>
       </button>
     </div>
   </div>
 
-  <div class="editor-frame">
+  <div class="relative min-h-0 flex-1 bg-[color-mix(in_srgb,var(--sl-color-bg)_55%,var(--sl-color-gray-6))]">
     <div id="qql-editor" aria-label="QQL source editor"></div>
+    <div class="absolute inset-0 z-10 grid place-content-center gap-3 bg-[color-mix(in_srgb,var(--sl-color-bg)_88%,transparent)] text-center font-mono text-xs text-[var(--sl-color-gray-2)]" data-editor-loading role="status" aria-live="polite">
+      <span class="size-6 justify-self-center animate-spin rounded-full border-2 border-[var(--sl-color-gray-4)] border-t-[var(--sl-color-accent)]" aria-hidden="true"></span>
+      Loading the current qql-rs WASM…
+    </div>
     <noscript>
-      <p class="noscript">The playground requires JavaScript and WebAssembly.</p>
+      <p class="p-4">The playground requires JavaScript and WebAssembly.</p>
     </noscript>
   </div>
 
-  <div class="editor-status" aria-live="polite">
-    <span class="validation-badge is-loading" data-validation-badge>
-      <span class="status-dot"></span>
+  <div class="flex min-h-10 items-center gap-3 border-t border-[var(--sl-color-gray-5)] px-4 py-2 font-mono text-[0.65rem] text-[var(--sl-color-gray-3)]" role="status" aria-live="polite">
+    <span class="inline-flex items-center gap-1.5 text-[var(--sl-color-gray-2)]" data-validation-badge>
+      <span class="size-1.5 rounded-full bg-[var(--sl-color-gray-3)]"></span>
       Loading qql-wasm
     </span>
-    <span data-analysis-summary>Preparing the current workspace parser…</span>
-    <span class="editor-status__spacer"></span>
-    <button class="text-button" type="button" data-open-export disabled>
+    <span class="min-w-0 flex-1 truncate" data-analysis-summary>Preparing the current workspace parser…</span>
+    <button class="border-0 bg-transparent font-mono text-[0.65rem] text-[var(--sl-color-accent-high)] hover:text-[var(--sl-color-white)] disabled:cursor-not-allowed disabled:text-[var(--sl-color-gray-4)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="button" data-open-export disabled>
       Export SDK code
     </button>
   </div>

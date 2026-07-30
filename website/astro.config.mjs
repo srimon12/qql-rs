@@ -102,6 +102,11 @@ export default defineConfig(
     ],
     vite: {
       plugins: [tailwind],
+      optimizeDeps: {
+        // The browser embedder imports this only on demand. Keep it out of the
+        // playground's eager optimization path.
+        exclude: ["@huggingface/transformers"],
+      },
       resolve: {
         alias: {
           "qql-wasm-current": fileURLToPath(

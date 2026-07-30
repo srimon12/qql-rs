@@ -12,7 +12,6 @@ import SiteFooter from "../../components/SiteFooter.astro";
 import SiteHeader from "../../components/SiteHeader.astro";
 import { ANALYTICS, APPS } from "../../config/site";
 import "../../styles/global.css";
-import "../../styles/playground.css";
 
 const workspaceRoot = fileURLToPath(
   new URL("../../../../", import.meta.url),
@@ -112,64 +111,22 @@ const pageDescription =
       )
     }
   </head>
-  <body class="playground-page">
+  <body class="min-h-dvh bg-[var(--sl-color-bg)] font-[var(--sl-font)] text-[var(--sl-color-gray-1)]">
     <SiteHeader active="playground" />
-    <main id="main-content" class="playground-main">
-      <section class="playground-intro" aria-labelledby="playground-title">
-        <div>
-          <div class="live-badge">
-            <span></span>
-            Current qql-rs WASM · {presets.length} fixture groups
-          </div>
-          <h1 id="playground-title">Write QQL. See the entire pipeline.</h1>
-          <p>
-            Parse, rewrite, plan, export, and execute against Qdrant without
-            leaving the documentation site. Every bundled example comes from
-            the versioned language conformance corpus.
-          </p>
-        </div>
-        <dl class="intro-stats" aria-label="Playground capabilities">
-          <div><dt>Parser</dt><dd>qql-core</dd></div>
-          <div><dt>Planner</dt><dd>qql-plan</dd></div>
-          <div><dt>Runtime</dt><dd>qql-wasm</dd></div>
-        </dl>
-      </section>
-
-      <div class="runtime-strip" role="status" aria-live="polite">
-        <span class="runtime-strip__status"><span class="status-dot"></span><span data-runtime-status>Loading current WASM…</span></span>
+    <main id="main-content" class="mx-auto flex w-full max-w-[96rem] flex-col gap-3 px-3 py-3 sm:px-5 sm:py-5">
+      <h1 class="sr-only">QQL Playground</h1>
+      <div class="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--sl-color-gray-5)] px-1 pb-3 font-mono text-[0.68rem] text-[var(--sl-color-gray-3)]" role="status" aria-live="polite">
+        <span class="inline-flex items-center gap-2 text-[var(--sl-color-gray-2)]"><span class="size-1.5 rounded-full bg-emerald-400 shadow-[0_0_0.5rem_#31b276]"></span><span data-runtime-status>Loading current WASM…</span></span>
+        <span class="hidden text-[var(--sl-color-gray-4)] sm:inline">/</span>
         <span data-active-fixture>{defaultPreset.label}</span>
-        <span class="runtime-strip__spacer"></span>
-        <span data-connection-summary>http://localhost:6333 · browser MiniLM</span>
+        <span class="ml-auto hidden truncate sm:inline" data-connection-summary>http://localhost:6333 · browser MiniLM</span>
+        <a class="font-medium text-[var(--sl-color-accent-high)] no-underline hover:text-[var(--sl-color-white)] focus-visible:rounded focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" href="/docs/" data-docs-backlink hidden>← Back to documentation</a>
       </div>
 
-      <div class="playground-workspace" data-default-query={defaultPreset.query}>
+      <div class="grid min-h-[calc(100dvh-8.75rem)] grid-cols-1 overflow-hidden rounded-xl border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] shadow-[0_1.5rem_5rem_color-mix(in_srgb,black_18%,transparent)] lg:grid-cols-[minmax(0,1.08fr)_minmax(26rem,0.92fr)]" data-default-query={defaultPreset.query}>
         <EditorPanel />
         <InspectorPanel />
       </div>
-
-      <section class="playground-notes" aria-label="Playground boundaries">
-        <article>
-          <span>01</span>
-          <div>
-            <h2>Offline analysis first</h2>
-            <p>Parsing, AST inspection, planning, policy injection, and SDK export happen locally in WebAssembly.</p>
-          </div>
-        </article>
-        <article>
-          <span>02</span>
-          <div>
-            <h2>Direct execution</h2>
-            <p>When you run a query, the browser connects directly to the Qdrant URL saved in your settings.</p>
-          </div>
-        </article>
-        <article>
-          <span>03</span>
-          <div>
-            <h2>Fixture-backed examples</h2>
-            <p>The example browser is generated from all valid QQL v1 fixtures at every Astro build.</p>
-          </div>
-        </article>
-      </section>
     </main>
 
     <PresetDialog presets={presets} categories={categories} />

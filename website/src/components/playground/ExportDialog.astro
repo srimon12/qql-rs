@@ -9,12 +9,11 @@
       <button class="icon-button" type="button" data-close-dialog aria-label="Close exporter">×</button>
     </header>
     <div class="export-toolbar">
-      <div role="tablist" aria-label="SDK language">
+      <div class="button-group" aria-label="SDK language">
         {["python", "node", "rust", "curl"].map((language, index) => (
           <button
             type="button"
-            role="tab"
-            aria-selected={index === 0 ? "true" : "false"}
+            aria-pressed={index === 0 ? "true" : "false"}
             data-export-tab={language}
           >
             {language === "node" ? "Node.js" : language}

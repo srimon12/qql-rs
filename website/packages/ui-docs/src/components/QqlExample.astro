@@ -18,97 +18,24 @@ const code = html
   .replace(/&quot;/g, '"')
   .replace(/&#39;/g, "'")
   .trim();
-const playgroundUrl = `/playground/?q=${encodeURIComponent(code)}`;
+const params = new URLSearchParams({
+  q: code,
+  ref: Astro.url.pathname,
+});
+const playgroundUrl = `/playground/?${params}`;
 ---
 
 <div class="qql-example premium-card">
-  <div class="caption">
-    <span class="language">QQL</span>
+  <div class="qql-example__caption">
+    <span class="qql-example__language">QQL</span>
     <span>{title}</span>
-    <span class="verified">WASM verified</span>
-    <a href={playgroundUrl} class="try-link">
+    <span class="qql-example__verified">WASM verified</span>
+    <a href={playgroundUrl} class="qql-example__try">
       Try in playground
       <span aria-hidden="true">↗</span>
     </a>
   </div>
-  <div class="code">
+  <div class="qql-example__code">
     <Code code={code} lang="sql" frame="none" />
   </div>
 </div>
-
-<style>
-  .qql-example {
-    margin: 1.5rem 0;
-    overflow: hidden;
-  }
-
-  .caption {
-    align-items: center;
-    border-bottom: 1px solid var(--sl-color-gray-5);
-    color: var(--sl-color-gray-2);
-    display: grid;
-    font-family: var(--sl-font-mono);
-    font-size: 0.72rem;
-    gap: 0.75rem;
-    grid-template-columns: auto 1fr auto auto;
-    padding: 0.65rem 1rem;
-  }
-
-  .language {
-    color: var(--sl-color-accent);
-    font-weight: 600;
-    letter-spacing: 0.08em;
-  }
-
-  .verified {
-    color: var(--sl-color-gray-3);
-  }
-
-  .try-link {
-    align-items: center;
-    border-left: 1px solid var(--sl-color-gray-5);
-    color: var(--sl-color-accent-high);
-    display: inline-flex;
-    gap: 0.35rem;
-    margin-left: 0.2rem;
-    padding-left: 0.9rem;
-    text-decoration: none;
-    white-space: nowrap;
-  }
-
-  .try-link:hover {
-    color: var(--sl-color-white);
-  }
-
-  .try-link:focus-visible {
-    border-radius: 0.2rem;
-    outline: 2px solid var(--sl-color-accent);
-    outline-offset: 3px;
-  }
-
-  .code :global(.expressive-code),
-  .code :global(.frame),
-  .code :global(pre) {
-    background: transparent !important;
-    border: 0 !important;
-    box-shadow: none !important;
-    margin: 0 !important;
-  }
-
-  @media (max-width: 38rem) {
-    .caption {
-      grid-template-columns: auto 1fr;
-    }
-
-    .verified {
-      display: none;
-    }
-
-    .try-link {
-      border-left: 0;
-      grid-column: 1 / -1;
-      margin-left: 0;
-      padding-left: 0;
-    }
-  }
-</style>

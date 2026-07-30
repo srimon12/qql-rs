@@ -35,6 +35,8 @@ import {
 
 const SETTINGS_KEY = "qql-playground.settings.v1";
 const POLICY_KEY = "qql-playground.policy.v1";
+const WORKSPACE_KEY = "qql-playground.workspace.v1";
+const INSPECTOR_TAB_KEY = "qql-playground.inspector-tab.v1";
 const ANALYSIS_DELAY_MS = 90;
 
 function required<T extends Element>(selector: string): T {
@@ -71,6 +73,22 @@ function loadStored<T>(key: string, fallback: T): T {
   }
 }
 
+function loadSession(key: string): string | null {
+  try {
+    return sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function saveSession(key: string, value: string): void {
+  try {
+    sessionStorage.setItem(key, value);
+  } catch {
+    // Private browsing may deny storage; the playground remains usable.
+  }
+}
+
 function policyValue(policy: RuntimePolicy): string | number | boolean {
   if (policy.valueType === "number") {
     const number = Number(policy.value);
@@ -93,7 +111,7 @@ function byteOffsetToPosition(source: string, offset: number): number {
 }
 
 function quotePython(source: string): string {
-  return `qql = ${JSON.stringify(source)}`;
+  return `qql = """${source.replace(/"""/g, '\\\"\\\"\\\"')}"""`;
 }
 
 function quoteRust(source: string): string {
@@ -105,15 +123,19 @@ function exportCode(
   language: ExportLanguage,
   source: string,
   settings: PlaygroundSettings,
+  route: CompiledRoute | null,
+  statementCount: number,
 ): string {
   const url = JSON.stringify(settings.qdrantUrl);
-  const key = settings.qdrantKey ? JSON.stringify(settings.qdrantKey) : "None";
+  const pythonKey = settings.qdrantKey ? JSON.stringify(settings.qdrantKey) : "None";
 
   if (language === "python") {
-    return `import pyqql
+    return `# pip install pyqql
+from pyqql import Client
 
 ${quotePython(source)}
-client = pyqql.Client(${url}, api_key=${key})
+# execute() accepts a complete QQL script, including multiple statements.
+client = Client(url=${url}, api_key=${pythonKey})
 report = client.execute(qql)
 print(report)`;
   }
@@ -122,7 +144,8 @@ print(report)`;
     const apiKey = settings.qdrantKey
       ? `,\n  apiKey: ${JSON.stringify(settings.qdrantKey)}`
       : "";
-    return `import { Client } from "@veristamp/nqql";
+    return `// npm install @veristamp/nqql
+import { Client } from "@veristamp/nqql";
 
 const qql = ${JSON.stringify(source)};
 const client = new Client({
@@ -136,22 +159,29 @@ console.log(report);`;
     const rustKey = settings.qdrantKey
       ? `Some(${JSON.stringify(settings.qdrantKey)}.to_owned())`
       : "None";
-    return `use qql::executor::{Executor, OnError};
+    return `// Cargo.toml: qql = "0.1", tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+use qql::executor::{Executor, OnError};
 
-let executor = Executor::rest(${url}, ${rustKey})?;
-let report = executor
-    .execute(${quoteRust(source)}, OnError::Stop)
-    .await?;
-println!("{report:#?}");`;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let executor = Executor::rest(${url}, ${rustKey})?;
+    let report = executor
+        .execute(${quoteRust(source)}, OnError::Stop)
+        .await?;
+    println!("{report:#?}");
+    Ok(())
+}`;
   }
 
+  if (!route) return "A compiled route is required before exporting cURL.";
+  const payload = pretty(route.payload).replace(/'/g, "'\\''");
   const header = settings.qdrantKey
     ? ` \\\n  -H ${JSON.stringify(`api-key: ${settings.qdrantKey}`)}`
     : "";
-  return `# cURL executes the compiled Qdrant route shown in the Wire tab.
-curl -X POST ${JSON.stringify(`${settings.qdrantUrl}/<compiled-route>`)} \\
+  return `# Statement ${state.selectedStatement + 1} of ${statementCount} · compiled from the editor
+curl -X ${route.method} ${JSON.stringify(`${settings.qdrantUrl}${route.path}`)} \\
   -H "content-type: application/json"${header} \\
-  --data @payload.json`;
+  --data '${payload}'`;
 }
 
 const workspace = required<HTMLElement>("[data-default-query]");
@@ -173,6 +203,9 @@ const routePolicy = required<HTMLElement>("[data-route-policy]");
 const policyDot = required<HTMLElement>("[data-policy-dot]");
 const toastRegion = required<HTMLElement>("[data-toast-region]");
 const embedStatus = required<HTMLElement>("[data-embed-status]");
+const editorLoading = required<HTMLElement>("[data-editor-loading]");
+const shareButton = required<HTMLButtonElement>("[data-share]");
+const docsBacklink = required<HTMLAnchorElement>("[data-docs-backlink]");
 
 const state: PlaygroundState = {
   analysis: null,
@@ -201,6 +234,12 @@ function toast(message: string, tone: "success" | "error" = "success"): void {
 
 function setRuntime(message: string): void {
   runtimeStatus.textContent = message;
+}
+
+function setEditorLoading(message: string | null): void {
+  editorLoading.hidden = message == null;
+  if (message != null) editorLoading.textContent = message;
+  editorHost.setAttribute("aria-busy", String(message != null));
 }
 
 function updateConnectionSummary(): void {
@@ -489,6 +528,7 @@ function queueAnalysis(source: string): void {
 
 function switchInspectorTab(tab: InspectorTab, focus = false): void {
   state.inspectorTab = tab;
+  saveSession(INSPECTOR_TAB_KEY, tab);
   for (const button of all<HTMLButtonElement>("[data-inspector-tab]")) {
     const active = button.dataset.inspectorTab === tab;
     button.setAttribute("aria-selected", String(active));
@@ -520,7 +560,11 @@ function setupTabs(): void {
 }
 
 function openDialog(id: string): void {
-  required<HTMLDialogElement>(id).showModal();
+  const dialog = required<HTMLDialogElement>(id);
+  dialog.showModal();
+  if (id === "#preset-dialog") {
+    window.setTimeout(() => required<HTMLInputElement>("[data-preset-search]").focus(), 0);
+  }
 }
 
 function setupDialogs(): void {
@@ -551,6 +595,7 @@ function setupDialogs(): void {
 
 function setupPresets(): void {
   const search = required<HTMLInputElement>("[data-preset-search]");
+  const results = required<HTMLElement>("[data-preset-results]");
   const cards = all<HTMLButtonElement>("[data-preset]");
   const categories = all<HTMLButtonElement>("[data-preset-category]");
   let category = "all";
@@ -569,15 +614,15 @@ function setupPresets(): void {
         .toLowerCase();
       card.hidden = !categoryMatches || !text.includes(query);
     }
+    const shown = cards.filter((card) => !card.hidden).length;
+    results.textContent = `${shown} of ${cards.length} fixture examples shown`;
   };
 
   search.addEventListener("input", filter);
   for (const button of categories) {
     button.addEventListener("click", () => {
       category = button.dataset.presetCategory ?? "all";
-      categories.forEach((item) =>
-        item.classList.toggle("is-active", item === button),
-      );
+      categories.forEach((item) => item.setAttribute("aria-pressed", String(item === button)));
       filter();
     });
   }
@@ -591,7 +636,42 @@ function setupPresets(): void {
       required<HTMLDialogElement>("#preset-dialog").close();
       editor.focus();
     });
+    card.addEventListener("keydown", (event) => {
+      const visible = cards.filter((item) => !item.hidden);
+      const index = visible.indexOf(card);
+      if (index === -1) return;
+      let next: number | null = null;
+      if (event.key === "Home") next = 0;
+      if (event.key === "End") next = visible.length - 1;
+      if (event.key === "ArrowRight" || event.key === "ArrowDown") next = index + 1;
+      if (event.key === "ArrowLeft" || event.key === "ArrowUp") next = index - 1;
+      if (next == null) return;
+      event.preventDefault();
+      visible[(next + visible.length) % visible.length]?.focus();
+    });
   }
+}
+
+function setupShare(): void {
+  shareButton.addEventListener("click", async () => {
+    const url = new URL(window.location.href);
+    url.search = "";
+    url.searchParams.set("q", editor.state.doc.toString());
+    const ref = docsBacklink.hidden ? null : docsBacklink.getAttribute("href");
+    if (ref?.startsWith("/docs/")) url.searchParams.set("ref", ref);
+    try {
+      await navigator.clipboard.writeText(url.toString());
+      toast("Share link copied.");
+    } catch {
+      toast("Clipboard access was denied. Copy the page URL instead.", "error");
+    }
+  });
+}
+
+function setupDocsBacklink(ref: string | null): void {
+  if (!ref || !/^\/docs(?:\/|$)/.test(ref)) return;
+  docsBacklink.href = ref;
+  docsBacklink.hidden = false;
 }
 
 function writeSettingsForm(): void {
@@ -652,6 +732,24 @@ function writePolicyForm(): void {
   field<HTMLInputElement>("shardKey").value = policy.shardKey;
   policyDot.classList.toggle("is-active", policy.enabled);
 
+  const preview = required<HTMLOutputElement>("[data-policy-preview]");
+  const updatePreview = () => {
+    const enabled = field<HTMLInputElement>("enabled").checked;
+    const fieldName = field<HTMLInputElement>("field").value.trim() || "field";
+    const operator = field<HTMLSelectElement>("op").value;
+    const value = field<HTMLInputElement>("value").value || "value";
+    const shard = field<HTMLInputElement>("shardKey").value.trim();
+    preview.textContent = enabled
+      ? `Trusted filter: ${fieldName} ${operator} ${value}${shard ? ` · route with shard ${shard}` : ""}`
+      : "The source stays unchanged. Enable the guardrail to inject a trusted predicate.";
+  };
+  updatePreview();
+
+  for (const name of ["enabled", "field", "op", "value", "shardKey"] as const) {
+    field<HTMLInputElement | HTMLSelectElement>(name).addEventListener("input", updatePreview);
+    field<HTMLInputElement | HTMLSelectElement>(name).addEventListener("change", updatePreview);
+  }
+
   for (const recipe of all<HTMLButtonElement>("[data-policy-recipe]")) {
     recipe.addEventListener("click", () => {
       field<HTMLInputElement>("enabled").checked = true;
@@ -660,6 +758,7 @@ function writePolicyForm(): void {
       field<HTMLSelectElement>("valueType").value =
         recipe.dataset.valueType ?? "string";
       field<HTMLInputElement>("shardKey").value = recipe.dataset.shard ?? "";
+      updatePreview();
     });
   }
 
@@ -688,6 +787,8 @@ function renderExport(): void {
     state.exportLanguage,
     source,
     settings,
+    selectedRoute(),
+    state.analysis?.result.statements_count ?? 1,
   );
 }
 
@@ -697,7 +798,7 @@ function setupExporter(): void {
     tab.addEventListener("click", () => {
       state.exportLanguage = tab.dataset.exportTab as ExportLanguage;
       tabs.forEach((item) =>
-        item.setAttribute("aria-selected", String(item === tab)),
+        item.setAttribute("aria-pressed", String(item === tab)),
       );
       renderExport();
     });
@@ -768,13 +869,15 @@ async function executeQuery(): Promise<void> {
     runButton.classList.remove("is-running");
     runButton.innerHTML =
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7V5Z"></path></svg>Run<kbd>⌘↵</kbd>';
-    runButton.disabled = false;
+    renderValidation();
     renderOutputs();
   }
 }
 
-const urlQuery = new URLSearchParams(window.location.search).get("q");
-const initialQuery = urlQuery || workspace.dataset.defaultQuery || "";
+const pageParams = new URLSearchParams(window.location.search);
+const urlQuery = pageParams.get("q");
+const initialQuery =
+  urlQuery || loadSession(WORKSPACE_KEY) || workspace.dataset.defaultQuery || "";
 
 const editor = new EditorView({
   parent: editorHost,
@@ -808,6 +911,7 @@ const editor = new EditorView({
       EditorView.updateListener.of((update) => {
         if (!update.docChanged) return;
         activeFixture.textContent = "Custom query";
+        saveSession(WORKSPACE_KEY, update.state.doc.toString());
         queueAnalysis(update.state.doc.toString());
       }),
     ],
@@ -818,9 +922,15 @@ async function start(): Promise<void> {
   setupTabs();
   setupDialogs();
   setupPresets();
+  setupShare();
+  setupDocsBacklink(pageParams.get("ref"));
   writeSettingsForm();
   writePolicyForm();
   setupExporter();
+  const savedTab = loadSession(INSPECTOR_TAB_KEY);
+  if (["plan", "wire", "ast", "tokens", "explain", "response", "metrics"].includes(savedTab ?? "")) {
+    switchInspectorTab(savedTab as InspectorTab);
+  }
   statementSelect.addEventListener("change", () => {
     state.selectedStatement = Number(statementSelect.value);
     renderPlan();
@@ -833,6 +943,7 @@ async function start(): Promise<void> {
     configureClient();
     setRuntime("Current qql-rs WASM ready");
     runAnalysis(editor.state.doc.toString());
+    setEditorLoading(null);
   } catch (error) {
     const message = formatError(error);
     setRuntime(`WASM failed: ${message}`);
@@ -840,6 +951,7 @@ async function start(): Promise<void> {
     validationBadge.classList.add("is-invalid");
     validationBadge.textContent = "WASM unavailable";
     analysisSummary.textContent = message;
+    setEditorLoading("QQL WebAssembly could not load. Reload the page to try again.");
     toast(message, "error");
   }
 }
