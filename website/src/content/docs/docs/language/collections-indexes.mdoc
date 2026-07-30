@@ -1,0 +1,52 @@
+---
+title: "Collections and indexes"
+description: "Create and alter dense, sparse, hybrid, multivector, and custom-sharded Qdrant collections."
+sidebar:
+  order: 5
+---
+
+## Collection topology
+
+{% qqlExample title="Dense, sparse, and multivector schema" %}
+CREATE COLLECTION research (
+  dense VECTOR(384, COSINE),
+  bm25 SPARSE,
+  colbert VECTOR(128, COSINE)
+    WITH MULTIVECTOR (comparator = 'max_sim')
+    WITH HNSW (m = 0)
+) WITH HNSW (m = 16, ef_construct = 100);
+{% /qqlExample %}
+
+Vector names are application-defined. Names such as `dense`, `bm25`, and
+`colbert` are conventions, not reserved words. The schema—not the name—defines
+the vector role.
+
+## Payload indexes
+
+{% qqlExample title="Filter indexes" %}
+CREATE INDEX ON COLLECTION research FOR tenant_id
+TYPE keyword WITH (is_tenant = true, on_disk = true);
+
+CREATE INDEX ON COLLECTION research FOR content
+TYPE text WITH (
+  tokenizer = 'multilingual',
+  lowercase = true,
+  phrase_matching = true
+);
+{% /qqlExample %}
+
+Create indexes for fields used frequently in filters or ordering.
+
+## Custom shard keys
+
+{% qqlExample title="Partition management" %}
+CREATE SHARD KEY 'acme' ON COLLECTION research
+WITH (shards_number = 2);
+
+SHOW SHARD KEYS ON COLLECTION research;
+
+DROP SHARD KEY 'acme' ON COLLECTION research;
+{% /qqlExample %}
+
+Shard-key DDL is a remote Qdrant capability and is not supported by the edge
+backend.

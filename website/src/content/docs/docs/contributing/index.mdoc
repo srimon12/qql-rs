@@ -1,99 +1,32 @@
 ---
 title: "Contributing"
-description: "How to contribute to qql-go — project structure, issue guidelines, PR workflow, and code style."
+description: "Change qql-rs implementation and documentation without drifting the language or SDK contracts."
 sidebar:
   order: 1
 ---
 
-Contributions to QQL are welcome. This guide covers how to set up your environment, the project structure, and the PR workflow.
+Start with the source of truth for the layer you are changing.
 
-## Project Structure
+| Change | Begin with |
+|---|---|
+| Grammar or validation | `language/v1`, `qql-core`, conformance fixtures |
+| Plan semantics | `qql-plan` and runtime plan tests |
+| REST/gRPC behavior | shared plan plus both transport projections |
+| SDK API | Rust implementation and every affected binding |
+| Documentation | current fixtures, crate APIs, and generated declarations |
 
-```
-cmd/qql-go/          CLI entrypoint
-internal/
-  ast/               AST node definitions
-  lexer/             Tokenizer
-  parser/            Pratt parser
-  filters/           WHERE clause → Qdrant Filter conversion
-  cli/commands/      Command handlers
-  repl/              Interactive REPL
-  embedding/         OpenAI-compatible embedding client
-  sparse/            BM25 sparse vector generation
-  script/            .qql script execution
-  dump/              Collection dump
-  config/            Connection config persistence
-  pipeline/          DAG node types
-  convert/           REST JSON → QQL converter
-pkg/qql/             Public Go SDK
-server/              Connect RPC gateway
-proto/               Protobuf service definition
-gen/                 Generated protobuf Go code
-sdks/python/         Python SDK
-sdks/typescript/     TypeScript SDK
-skills/qql-skill/    Agent skill package
-examples/            Runnable example workflows
-docs/                Reference documentation
-docs-ui/             Documentation site source (you are here)
-```
-
-## Development Setup
-
-See [Development Guide](/docs/contributing/development) for the full setup.
-
-{% terminal title="Quick Start" %}
-git clone https://github.com/srimon12/qql-go.git
-cd qql-go
-go test ./...
-go build ./cmd/qql-go
+{% terminal title="Core checks" %}
+RUSTC_WRAPPER= cargo test --workspace --all-targets
+RUSTC_WRAPPER= cargo clippy --workspace --all-targets -- -D warnings
 {% /terminal %}
 
-## Issue Guidelines
+For native Python checks in environments using a newer unsupported CPython,
+the workspace may require `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1`.
 
-Before submitting a new issue:
+## Pull request expectations
 
-1. Check existing issues and the [CHANGELOG](/docs/changelog) for your concern
-2. Search the codebase if it looks like a missing feature
-
-**Bug reports** should include:
-- QQL version (`qql-go version`)
-- Qdrant version
-- The QQL statement that caused the issue
-- Expected vs actual behavior
-- Any error output
-
-**Feature requests** should describe the use case, not just the solution.
-
-## PR Workflow
-
-1. Fork the repository
-2. Create a branch: `feat/<your-feature>` or `fix/<issue-number>-description`
-3. Write tests
-4. Run `gofmt`, `go vet`, and `go test ./...`
-5. Open a pull request against `main`
-
-## PR Requirements
-
-- All tests pass (`go test ./...`)
-- No `gofmt` differences
-- `go vet` clean
-- New features include parser/executor/pipeline tests
-- New syntax additions update `docs/syntax.md` and `skills/qql-skill/SKILL.md`
-
-## Parser Contribution Guide
-
-The parser is a recursive descent Pratt parser in `internal/parser/`. When adding a new statement:
-
-1. Add the token kind(s) to `internal/lexer/`
-2. Add the AST node to `internal/ast/`
-3. Add the parse function in `internal/parser/`
-4. Add the executor case in `internal/cli/commands/executor.go`
-5. Add tests in `internal/parser/parse_*_test.go`
-
-## Code Style
-
-- `gofmt` — always
-- No `reflect` in hot paths (parser, filters, pipeline)
-- No allocations in keyword lookup (use `asciiEqual` / `asciiEqualLower`)
-- Add `_test.go` files alongside every new internal package
-- Comments in exported functions and types
+- Add valid and invalid fixtures for language changes.
+- Regenerate canonical AST snapshots from qql-core output.
+- Keep Python, Node.js, and WASM contracts aligned.
+- Verify both REST and gRPC projections for transport changes.
+- Add or update executable documentation examples.

@@ -1,0 +1,50 @@
+---
+title: "Filters"
+description: "Compose QQL comparisons, logical predicates, text, nested, ID, vector, count, and geo filters."
+sidebar:
+  order: 3
+---
+
+`WHERE` lowers to a Qdrant filter on REST, gRPC, and edge backends.
+
+## Scalar and logical filters
+
+{% qqlExample title="Comparisons and boolean logic" %}
+QUERY TEXT 'search' FROM docs
+WHERE status = 'published'
+  AND year BETWEEN 2024 AND 2026
+  AND tags NOT IN ('archived', 'private')
+  AND (score >= 0.7 OR featured = true)
+LIMIT 10;
+{% /qqlExample %}
+
+Supported forms include comparison operators, `BETWEEN`, `IN`, null/empty
+checks, `MATCH`, `NESTED`, `HAS_VECTOR`, `VALUES_COUNT`, and geo predicates.
+Precedence is predicate → `NOT` → `AND` → `OR`.
+
+## Text and nested filters
+
+{% qqlExample title="Text and nested payloads" %}
+QUERY TEXT 'quality' FROM products
+WHERE description MATCH PHRASE 'machine washable'
+  AND NESTED('reviews', rating >= 4 AND verified = true)
+LIMIT 20;
+{% /qqlExample %}
+
+## Geo filters
+
+{% qqlExample title="Radius filter" %}
+QUERY TEXT 'coffee' FROM places
+WHERE location GEO_RADIUS {
+  center: {lat: 52.52, lon: 13.405},
+  radius: 1500.0
+}
+LIMIT 10;
+{% /qqlExample %}
+
+Latitude, longitude, radius, and polygon shapes are validated before planning.
+
+{% aside type="caution" title="Routing is not a filter" %}
+`SHARD 'acme'` is a request-level `ShardKeySelector`. It never appears inside
+the Qdrant filter. Use a tenant predicate or `inject_filter` for isolation.
+{% /aside %}

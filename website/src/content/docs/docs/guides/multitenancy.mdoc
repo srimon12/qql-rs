@@ -1,0 +1,55 @@
+---
+title: "Multitenancy"
+description: "Combine QQL AST filter injection, custom shard routing, tenant indexes, and shard-key DDL safely."
+sidebar:
+  order: 3
+---
+
+Production multitenancy has distinct security, routing, layout, and lifecycle
+concerns.
+
+| Concern | QQL or host API | Effect |
+|---|---|---|
+| Isolation | `WHERE` / `inject_filter` | Qdrant `Filter` |
+| Routing | `SHARD` / `stmt.shard_key` | `ShardKeySelector` |
+| Layout | index option `is_tenant = true` | tenant-aware index organization |
+| Partition lifecycle | `CREATE/DROP SHARD KEY` | custom shard administration |
+
+{% qqlExample title="Tenant-aware schema" %}
+CREATE COLLECTION documents (
+  dense VECTOR(384, COSINE)
+) WITH PARAMS (
+  shard_number = 8,
+  sharding_method = 'custom',
+  shard_keys = ['acme', 'globex']
+);
+
+CREATE INDEX ON COLLECTION documents FOR tenant_id
+TYPE keyword WITH (is_tenant = true);
+{% /qqlExample %}
+
+{% qqlExample title="Isolation and routing together" %}
+QUERY TEXT 'risk factors' FROM documents
+USING dense
+WHERE tenant_id = 'acme'
+SHARD 'acme'
+LIMIT 10;
+{% /qqlExample %}
+
+## Host-side enforcement
+
+For untrusted user or agent input:
+
+1. Parse the complete statement or script.
+2. Call `inject_filter` with the trusted tenant value.
+3. Optionally assign the trusted shard key.
+4. Inspect or explain the rewritten AST.
+5. Execute the rewritten statement, never the original source.
+
+`inject_filter` recurses into CTE and prefetch branches. It fails closed for
+statements where the predicate cannot be applied.
+
+{% aside type="danger" title="Do not filter results after retrieval" %}
+Post-filtering leaks work across the tenant boundary and produces incorrect
+limits, groups, and scores. Enforce the predicate before planning.
+{% /aside %}

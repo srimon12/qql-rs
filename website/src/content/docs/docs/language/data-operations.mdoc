@@ -1,0 +1,54 @@
+---
+title: "Data operations"
+description: "Upsert, update, scroll, count, and delete Qdrant points with QQL."
+sidebar:
+  order: 4
+---
+
+## Upsert
+
+Every point requires exactly one case-insensitive `id` key.
+
+{% qqlExample title="Payload and named vectors" %}
+UPSERT INTO docs VALUES {
+  id: 1,
+  title: 'QQL',
+  text: 'Declarative vector retrieval',
+  vector: {dense: [0.1, 0.2, 0.3]}
+};
+{% /qqlExample %}
+
+To embed payload fields during execution, use an embedding modifier:
+
+{% qqlExample title="Multiple embedding destinations" %}
+UPSERT INTO articles VALUES {
+  id: 'article-1',
+  title: 'Planning hybrid retrieval',
+  body: 'Dense and sparse candidate generation'
+}
+EMBED body INTO dense_body USING DENSE,
+      title INTO sparse_title USING SPARSE;
+{% /qqlExample %}
+
+## Update and delete
+
+{% qqlExample title="Mutations" %}
+UPDATE docs SET PAYLOAD = {status: 'reviewed'} WHERE id = 42;
+UPDATE docs SET VECTOR dense = [0.2, 0.3, 0.4] WHERE id = 42;
+DELETE PAYLOAD draft_notes FROM docs WHERE status = 'published';
+DELETE VECTOR dense FROM docs WHERE id = 42;
+DELETE FROM docs WHERE status = 'expired';
+{% /qqlExample %}
+
+Destructive point operations require an explicit selector.
+
+## Browse and count
+
+{% qqlExample title="Operational reads" %}
+SCROLL FROM docs
+WHERE status = 'published'
+WITH VECTOR false
+LIMIT 100;
+
+COUNT FROM docs WHERE status = 'published';
+{% /qqlExample %}

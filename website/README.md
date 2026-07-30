@@ -5,7 +5,7 @@ Astro + Starlight site for QQL:
 | Path | Content |
 |------|---------|
 | `/` | Landing |
-| `/docs/` | Starlight documentation (copied content) |
+| `/docs/` | qql-rs language, guides, SDKs, tools, and reference |
 | `/playground/` | Nested Vite SPA (merged at deploy) |
 
 ## Packages
@@ -20,6 +20,8 @@ cd website
 pnpm install
 pnpm dev          # http://localhost:4321
 pnpm build        # → website/dist
+pnpm validate:qql # build qql-wasm and parse every documented QQL example
+pnpm check        # executable examples + production site build
 ```
 
 No root `package.json` / pnpm workspace — only `website/`.
@@ -38,7 +40,12 @@ node scripts/merge-qql-dist.mjs
 GitHub Actions: `.github/workflows/deploy-site.yml`  
 Pages project: `qql` · domain: `qql.veristamp.in`
 
-## Note on docs content
+## Documentation contract
 
-Markdown under `src/content/` is a **copy** of the previous qql-docs tree.  
-Refactor content later; theme/components/deploy land first.
+The information architecture and source-of-truth rules live in
+[`DOCS_ARCHITECTURE.md`](DOCS_ARCHITECTURE.md). Runnable QQL belongs in the
+`qqlExample` Markdoc component so it is checked against a fresh Node-target
+build of the current `qql-wasm` crate.
+
+The playground build and merge remain a separate concern from documentation
+content and validation.

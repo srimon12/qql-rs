@@ -40,11 +40,19 @@ jobs:
           cache: pnpm
           cache-dependency-path: website/pnpm-lock.yaml
 
-      - name: Build website
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack@0.15.0
+
+      - name: Validate documentation and build website
         working-directory: website
         run: |
           pnpm install --frozen-lockfile
-          pnpm build
+          pnpm check
 
       - name: Checkout playground
         uses: actions/checkout@v4

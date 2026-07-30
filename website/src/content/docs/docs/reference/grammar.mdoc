@@ -1,0 +1,48 @@
+---
+title: "Grammar contract"
+description: "Understand the normative QQL v1 grammar, semantics, fixtures, AST snapshots, and parser contract."
+sidebar:
+  order: 1
+---
+
+The website is explanatory. The versioned language contract lives in
+`language/v1`.
+
+| Artifact | Authority |
+|---|---|
+| `grammar.pest` | Canonical syntax grammar |
+| `spec/semantics.md` | Meaning and validation rules |
+| `fixtures/valid/*.qql` | Programs that must parse and validate |
+| `fixtures/invalid/*.qql` | Annotated failures and stable error codes |
+| `fixtures/expected/*.json` | Canonical `qql.ast/v1` output |
+| `qql-core::Parser::parse_all` | Production full-script parser |
+
+The checked-in grammar modules are generated. Do not edit generated grammar
+files directly.
+
+## Script grammar
+
+```text
+script = [ statement, { ";", statement }, [ ";" ] ] ;
+statement = query | scroll | count | upsert | update | delete
+          | clear-payload | delete-payload | delete-vector
+          | create | alter | drop | show ;
+```
+
+## Lexical rules
+
+- Keywords are ASCII case-insensitive.
+- Identifiers are case-sensitive and preserve spelling.
+- Dotted and array payload paths are accepted.
+- Strings support single, double, raw, triple, and backtick delimiters.
+- `--` starts a line comment; block comments do not exist.
+- Error spans are zero-based UTF-8 byte ranges `[start, end)`.
+
+## Conformance
+
+{% terminal title="Check the language fixtures" %}
+RUSTC_WRAPPER= cargo run -p qql-conformance -- check language/v1
+{% /terminal %}
+
+The conformance runner parses every valid and invalid case through
+`Parser::parse_all` and compares valid programs with generated AST snapshots.

@@ -7,6 +7,8 @@
     "dev": "astro dev",
     "start": "astro dev",
     "build": "astro build",
+    "validate:qql": "node scripts/verify-qql-docs.mjs",
+    "check": "pnpm validate:qql && astro build",
     "preview": "astro preview",
     "astro": "astro"
   },

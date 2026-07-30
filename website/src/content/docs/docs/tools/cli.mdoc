@@ -1,0 +1,42 @@
+---
+title: "CLI"
+description: "Execute, explain, convert, dump, diagnose, and explore QQL with the qql command."
+sidebar:
+  order: 1
+---
+
+The `qql` binary is the operational interface to the same runtime used by the
+SDKs.
+
+| Command | Purpose |
+|---|---|
+| `qql exec "…"` | Execute one statement or inline script |
+| `qql execute file.qql` | Execute a script file |
+| `qql explain "…"` | Show a plan without backend execution |
+| `qql connect` | Start the interactive REPL |
+| `qql convert [file.json]` | Convert Qdrant REST JSON to QQL |
+| `qql dump collection out.qql` | Export a collection |
+| `qql doctor` | Inspect backend and embedder configuration |
+| `qql version` | Print version information |
+
+{% qqlExample title="Input for CLI examples" %}
+SHOW COLLECTIONS;
+{% /qqlExample %}
+
+{% terminal title="Execute and explain" %}
+qql exec --json "SHOW COLLECTIONS"
+qql explain "SHOW COLLECTIONS"
+{% /terminal %}
+
+## Configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `QDRANT_URL` | `http://localhost:6333` | REST or gRPC endpoint |
+| `QDRANT_API_KEY` | unset | Qdrant API key |
+| `EMBED_URL` | unset | OpenAI-compatible embedding endpoint |
+| `EMBED_MODEL` | `all-minilm:l6-v2` | model ID |
+| `EMBED_DIM` | `384` | output dimension |
+
+Use `qql --url http://host:6333 ...` to override the configured backend for one
+invocation.

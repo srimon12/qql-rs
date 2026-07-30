@@ -1,0 +1,33 @@
+---
+title: "SDK overview"
+description: "Choose the qql-rs Rust, Python, Node.js, or WebAssembly integration."
+sidebar:
+  order: 1
+---
+
+All SDKs use the same language and plan model, but host capabilities differ.
+
+| Host | Package | Parser | Live execution | Edge |
+|---|---|---:|---:|---:|
+| Rust | `qql-core`, `qql` | yes | REST + gRPC | separate crate |
+| Python | `pyqql` | yes | REST + gRPC | `pyqql-edge` |
+| Node.js | `@veristamp/nqql` | yes | REST + gRPC | `@veristamp/nqql-edge` |
+| Browser/WASM | `qql-wasm` | yes | REST/fetch | no |
+
+## Shared concepts
+
+- `parse` returns typed or host-owned statement objects.
+- `is_valid` / `isValid` performs strict full-input parsing.
+- `inject_filter` / `injectFilter` rewrites the AST.
+- `compile` and `explain` are offline planning tools.
+- `execute` accepts a statement or semicolon-delimited script.
+- Host arrays represent independent inputs.
+
+{% qqlExample title="Shared SDK input" %}
+QUERY TEXT 'portable query' FROM docs
+USING dense
+LIMIT 5;
+{% /qqlExample %}
+
+The SDK pages use `query` to refer to the verified statement above, keeping the
+language example separate from host syntax.

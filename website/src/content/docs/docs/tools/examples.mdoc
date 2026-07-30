@@ -1,0 +1,35 @@
+---
+title: "Examples"
+description: "Find maintained qql-rs examples for Python, Node.js, WebAssembly, edge, geo search, medical retrieval, and SEC filings."
+sidebar:
+  order: 2
+---
+
+The repository examples are executable applications, not duplicated snippets
+inside the documentation site.
+
+| Example | What it demonstrates |
+|---|---|
+| `examples/python` | Python basics through advanced retrieval |
+| `examples/nodejs` | Node.js parser and runtime APIs |
+| `examples/wasm` | WASM parsing, planning, and browser-oriented APIs |
+| `examples/edge-demo` | In-process edge execution |
+| `examples/airbnb-demo` | Geo payloads and filtered search |
+| `examples/medical-retrieval-ops` | Provisioning and retrieval operations |
+| `examples/sec10k-qql` | Tenant-aware document retrieval |
+
+Browse the [examples directory on GitHub](https://github.com/srimon12/qql-rs/tree/main/examples).
+
+{% qqlExample title="Representative geo query" %}
+QUERY TEXT 'quiet apartment near transit' FROM listings
+USING dense
+WHERE location GEO_RADIUS {
+  center: {lat: 52.52, lon: 13.405},
+  radius: 5000.0
+}
+WITH PAYLOAD INCLUDE (name, neighbourhood, price)
+LIMIT 10;
+{% /qqlExample %}
+
+When adding an example, keep its QQL compatible with `language/v1`, document
+the required backend and models, and provide a deterministic setup path.

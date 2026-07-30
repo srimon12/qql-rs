@@ -1,129 +1,64 @@
 ---
 title: "Quickstart"
-description: "Get QQL running in under 60 seconds — connect to Qdrant, create a collection, insert documents, and run your first search."
+description: "Create a Qdrant collection, upsert documents, and query them with the qql-rs CLI."
 sidebar:
   order: 3
 ---
 
-Get from zero to your first search result in under 60 seconds.
+This path uses Qdrant REST on port `6333` and an OpenAI-compatible embedding
+endpoint. If you already store vectors, omit the embedder and use vector input.
 
-## 1. Start Qdrant
+{% steps %}
 
-{% terminal title="Start Qdrant" %}
-docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant
+1. Start Qdrant
+
+   {% terminal title="Qdrant" %}
+   docker run --rm -p 6333:6333 -p 6334:6334 qdrant/qdrant
+   {% /terminal %}
+
+2. Configure execution
+
+   {% terminal title="Environment" %}
+   export QDRANT_URL=http://localhost:6333
+   export EMBED_URL=http://localhost:11434/v1/embeddings
+   export EMBED_MODEL=all-minilm:l6-v2
+   export EMBED_DIM=384
+   {% /terminal %}
+
+3. Create a collection
+
+   {% qqlExample title="Dense collection and filter index" %}
+   CREATE COLLECTION docs (
+     dense VECTOR(384, COSINE)
+   ) WITH HNSW (m = 16, ef_construct = 100);
+
+   CREATE INDEX ON COLLECTION docs FOR category TYPE keyword;
+   {% /qqlExample %}
+
+4. Upsert content
+
+   {% qqlExample title="Embed text into the dense vector" %}
+   UPSERT INTO docs VALUES
+     {id: 1, text: 'QQL provides typed vector retrieval', category: 'qql'},
+     {id: 2, text: 'Qdrant stores dense and sparse vectors', category: 'qdrant'}
+   USING DENSE MODEL 'all-minilm:l6-v2';
+   {% /qqlExample %}
+
+5. Search
+
+   {% qqlExample title="Filtered search" %}
+   QUERY TEXT 'typed query language' FROM docs
+   USING dense
+   WHERE category = 'qql'
+   LIMIT 5;
+   {% /qqlExample %}
+
+{% /steps %}
+
+Save the statements as `quickstart.qql`, then execute the whole script:
+
+{% terminal title="Execute the script" %}
+qql execute quickstart.qql
 {% /terminal %}
 
-Or use a [Qdrant Cloud](https://cloud.qdrant.io/) cluster.
-
-## 2. Connect
-
-**Local Qdrant (no inference):**
-
-{% terminal title="Local" %}
-qql-go connect --url http://localhost:6334
-{% /terminal %}
-
-**Qdrant Cloud:**
-
-{% terminal title="Cloud" %}
-qql-go connect --url https://<cluster>.qdrant.io --secret <api-key>
-{% /terminal %}
-
-**Local with embeddings (local inference mode):**
-
-{% terminal title="Local inference" %}
-qql-go connect \
-  --url http://localhost:6334 \
-  --inference-mode local \
-  --embedding-endpoint http://127.0.0.1:1234/v1/embeddings \
-  --embedding-model text-embedding-all-minilm-l6-v2-embedding
-{% /terminal %}
-
-Verify the connection:
-
-{% terminal title="Verify" %}
-qql-go doctor
-{% /terminal %}
-
-## 3. Create a Collection
-
-{% terminal title="Create collection" %}
-qql-go exec "CREATE COLLECTION docs HYBRID"
-{% /terminal %}
-
-{% aside type="tip" title="Collection types" %}
-The `HYBRID` keyword creates a collection with both dense and sparse vector support.
-{% /aside %}
-
-With HNSW tuning and quantization:
-
-{% terminal title="Advanced collection" %}
-qql-go exec "CREATE COLLECTION docs HYBRID WITH HNSW (m = 32, ef_construct = 100) WITH QUANTIZATION (type = 'scalar')"
-{% /terminal %}
-
-## 4. Create Payload Indexes
-
-Always create indexes on fields you'll filter on:
-
-{% terminal title="Indexes" %}
-qql-go exec "CREATE INDEX ON docs FOR category TYPE keyword"
-qql-go exec "CREATE INDEX ON docs FOR year TYPE integer"
-{% /terminal %}
-
-## 5. Insert Documents
-
-{% terminal title="Insert" %}
-qql-go exec "INSERT INTO docs VALUES {'id': 1, 'text': 'Qdrant stores dense and sparse vectors', 'category': 'search'} USING HYBRID"
-qql-go exec "INSERT INTO docs VALUES {'id': 2, 'text': 'QQL makes vector search feel like SQL', 'category': 'tooling'} USING HYBRID"
-qql-go exec "INSERT INTO docs VALUES {'id': 3, 'text': 'Hybrid search combines dense and BM25 sparse signals', 'category': 'search'} USING HYBRID"
-{% /terminal %}
-
-{% aside type="note" title="Batch inserts" %}
-You can also batch multiple documents in a single statement for better performance.
-{% /aside %}
-
-Batch insert multiple documents in one statement:
-
-{% terminal title="Batch insert" %}
-qql-go exec "INSERT INTO docs VALUES {'id': 4, 'text': 'Qdrant supports HNSW indexing'}, {'id': 5, 'text': 'Score boosting with BOOST expressions'} USING HYBRID"
-{% /terminal %}
-
-## 6. Search
-
-{% terminal title="Search examples" %}
-qql-go exec "QUERY 'vector database' FROM docs LIMIT 5"
-qql-go exec "QUERY 'vector database' FROM docs LIMIT 5 USING HYBRID"
-qql-go exec "QUERY 'search' FROM docs LIMIT 5 WHERE category = 'search'"
-{% /terminal %}
-
-## 7. Explain a Query (without executing)
-
-{% terminal title="Explain" %}
-qql-go explain "QUERY 'vector database' FROM docs LIMIT 5 USING HYBRID RERANK"
-{% /terminal %}
-
-## 8. Explore with the REPL
-
-{% terminal title="REPL" %}
-qql-go repl
-{% /terminal %}
-
-{% aside type="tip" title="REPL tips" %}
-The REPL supports tab completion and multi-line statements.
-{% /aside %}
-
----
-
-## Common Next Steps
-
-| Goal | Command |
-|---|---|
-| Show all collections | `qql-go exec "SHOW COLLECTIONS"` |
-| Collection details | `qql-go exec "SHOW COLLECTION docs"` |
-| Structured JSON output | `qql-go exec --quiet --json "SHOW COLLECTIONS"` |
-| Browse all points | `qql-go exec "SCROLL FROM docs LIMIT 20"` |
-| Delete a collection | `qql-go exec "DROP COLLECTION docs"` |
-
-→ [Hybrid Search guide](/docs/guides/hybrid-search)  
-→ [Syntax Reference](/docs/reference/syntax)  
-→ [Configuration](/docs/getting-started/configuration)
+Use `qql explain "QUERY ..."` to inspect a plan without sending it to Qdrant.

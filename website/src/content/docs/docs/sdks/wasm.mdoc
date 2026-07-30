@@ -1,0 +1,48 @@
+---
+title: "WebAssembly SDK"
+description: "Parse, analyze, compile, and optionally execute QQL in browsers and JavaScript runtimes."
+sidebar:
+  order: 5
+---
+
+{% terminal title="Install" %}
+npm install qql-wasm
+{% /terminal %}
+
+{% qqlExample title="Input used below" %}
+QUERY TEXT 'browser retrieval' FROM docs
+USING dense
+LIMIT 5;
+{% /qqlExample %}
+
+```javascript
+import init, { analyze, parse, isValid } from "qql-wasm";
+
+await init();
+console.log(isValid(query));
+const statements = parse(query);
+const info = analyze(query);
+console.log(statements, info.route, info.explain);
+```
+
+## Live REST execution
+
+```javascript
+import { Client } from "qql-wasm";
+
+const client = new Client("http://localhost:6333", null);
+const report = await client.execute(query);
+console.log(report);
+client.free();
+```
+
+Use `setHttpEmbedder` for an OpenAI-compatible embedding endpoint or
+`setEmbedder` for a JavaScript host callback.
+
+{% aside type="caution" title="Free owned handles" %}
+`Client` and `Stmt` wrap WebAssembly allocations. Call `free()` when the object
+is no longer needed, especially in long-lived browser applications.
+{% /aside %}
+
+The executable-doc test builds this crate from the current workspace with
+`wasm-pack --target nodejs` and parses every `qqlExample`.

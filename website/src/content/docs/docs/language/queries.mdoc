@@ -1,0 +1,65 @@
+---
+title: "Queries"
+description: "Use QQL nearest, point, hybrid, recommendation, grouped, fusion, MMR, and rerank queries."
+sidebar:
+  order: 2
+---
+
+`QUERY` is the universal retrieval statement. A top-level query always names a
+collection with `FROM`.
+
+## Nearest and point retrieval
+
+{% qqlExample title="Text, vector, and point input" %}
+QUERY TEXT 'vector database' FROM docs USING dense LIMIT 10;
+QUERY VECTOR [0.1, 0.2, 0.3] FROM docs USING dense LIMIT 10;
+QUERY POINT 42 FROM docs USING dense LIMIT 10;
+QUERY POINTS (1, 2, 'point-a') FROM docs WITH PAYLOAD true;
+{% /qqlExample %}
+
+`QUERY POINT id` searches by a stored point vector. `QUERY POINTS (...)`
+retrieves the listed records directly.
+
+## Recommendation and discovery
+
+{% qqlExample title="Recommendation" %}
+QUERY RECOMMEND
+POSITIVE (1, 2)
+NEGATIVE (3)
+STRATEGY best_score
+FROM docs
+USING dense
+LIMIT 10;
+{% /qqlExample %}
+
+## Multi-stage retrieval
+
+{% qqlExample title="CTE prefetch and fusion" %}
+WITH
+  dense_candidates AS (
+    QUERY TEXT 'database internals' USING dense LIMIT 100
+  ),
+  sparse_candidates AS (
+    QUERY TEXT 'database internals' USING bm25 LIMIT 100
+  )
+QUERY FUSION RRF
+FROM docs
+PREFETCH (dense_candidates, sparse_candidates)
+LIMIT 10;
+{% /qqlExample %}
+
+A CTE may omit `FROM` and inherit the outer collection. Every prefetch name
+must resolve to a CTE.
+
+## Grouping and pagination
+
+{% qqlExample title="Grouped results" %}
+QUERY TEXT 'incident' FROM runbooks
+USING dense
+GROUP BY service SIZE 3
+WITH PAYLOAD INCLUDE (title, service)
+LIMIT 10
+OFFSET 10;
+{% /qqlExample %}
+
+`OFFSET` with grouping maps to Qdrant group pagination.

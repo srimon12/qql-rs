@@ -1,0 +1,56 @@
+---
+title: "Choose a backend"
+description: "Select qql-rs REST, gRPC, or in-process edge execution."
+sidebar:
+  order: 4
+---
+
+The runtime prepares and plans QQL once, then dispatches through a `QdrantOps`
+implementation.
+
+{% grid style="display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:1rem;" %}
+
+{% glassCard title="REST" %}
+{% techBadge name="Port 6333" variant="cyan" /%}
+
+Broad compatibility, inspectable OpenAPI JSON, and the default choice for
+browser-like transports.
+{% /glassCard %}
+
+{% glassCard title="gRPC" %}
+{% techBadge name="Port 6334" variant="purple" /%}
+
+Typed protobuf transport with query and mutation batching. Enable the runtime
+`grpc` feature.
+{% /glassCard %}
+
+{% glassCard title="Edge" %}
+{% techBadge name="In process" variant="orange" /%}
+
+Local HNSW storage and optional embedded models. No remote cluster
+administration and a deliberately smaller query subset.
+{% /glassCard %}
+
+{% /grid %}
+
+## Runtime construction
+
+Use `Executor::rest(url, api_key)` or `Executor::grpc(url, api_key)` for remote
+execution. The edge packages construct an in-process backend and expose it
+through Python, Node.js, or the CLI.
+
+{% qqlExample title="Transport-neutral query" %}
+QUERY TEXT 'local first retrieval' FROM notes
+USING dense
+WHERE workspace = 'personal'
+LIMIT 10;
+{% /qqlExample %}
+
+The statement does not encode a transport. Backend-specific limits are
+reported during planning or execution.
+
+## Feature selection
+
+The `qql` runtime enables REST and gRPC by default. Disable unused features for
+smaller native builds. Edge and embedded FastEmbed support are opt-in because
+they carry more code and model dependencies.

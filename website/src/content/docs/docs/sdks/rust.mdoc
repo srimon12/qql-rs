@@ -1,0 +1,57 @@
+---
+title: "Rust SDK"
+description: "Parse, rewrite, plan, and execute QQL from Rust with qql-core and qql."
+sidebar:
+  order: 2
+---
+
+Use `qql-core` for the transport-free frontend and `qql` for execution.
+
+{% terminal title="Install" %}
+cargo add qql-core qql
+{% /terminal %}
+
+## Parse and enforce policy
+
+{% qqlExample title="Input used below" %}
+QUERY TEXT 'laptops' FROM products
+USING dense
+LIMIT 10;
+{% /qqlExample %}
+
+```rust
+use qql_core::ast::{inject_filter, ComparisonOp, Value};
+use qql_core::parser::Parser;
+
+let mut stmt = Parser::parse(query)?;
+inject_filter(
+    &mut stmt,
+    "tenant_id",
+    ComparisonOp::Eq,
+    Value::Str("org_99".into()),
+)?;
+stmt.set_shard_key(Some("org_99".into()));
+```
+
+## Execute
+
+```rust
+use qql::executor::{Executor, OnError};
+
+let executor = Executor::rest("http://localhost:6333", None);
+let report = executor.execute(query, OnError::Stop).await?;
+assert!(report.ok);
+```
+
+For text input, configure an embedder or use precomputed vector input. The
+runtime also provides `Executor::grpc`.
+
+## Parser contracts
+
+{% apiField name="Parser::parse" type="fn(&str) -> Result<Stmt, QqlError>" required=true %}
+Parse one statement and require complete input consumption.
+{% /apiField %}
+
+{% apiField name="Parser::parse_all" type="fn(&str) -> Result<Vec<Stmt>, QqlError>" required=true %}
+Parse one semicolon-delimited script.
+{% /apiField %}

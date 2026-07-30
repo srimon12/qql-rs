@@ -1,0 +1,40 @@
+---
+title: "API surface"
+description: "Compare the stable qql-rs parser, statement, compiler, execution, embedder, and policy APIs across hosts."
+sidebar:
+  order: 2
+---
+
+The host bindings follow the same conceptual surface while respecting host
+naming and object ownership.
+
+| Capability | Rust | Python | Node.js | WASM |
+|---|---|---|---|---|
+| Parse script | `Parser::parse_all` | `parse` | `parse` | `parse` |
+| Validate | `Parser::parse(_).is_ok()` | `is_valid` | `isValid` | `isValid` |
+| Tokenize | lexer API | `tokenize` | `tokenize` | `tokenize` |
+| Inject policy | `inject_filter` | `inject_filter` | `injectFilter` | `inject_filter` / `Stmt.injectFilter` |
+| Explain | planner/runtime | `explain` | `explain` | `explain` / `analyze` |
+| Compile | planner/runtime | `compile_query` | `compileQuery` | `compile` |
+| Execute | `Executor::execute` | `Client.execute` | `Client.execute` | `Client.execute` |
+
+## Three input axes
+
+1. One statement: the strict single-statement parser.
+2. One script: semicolon-delimited source parsed as one ordered unit.
+3. Host batch: an array of independent statements or scripts.
+
+These are not interchangeable APIs. In particular, an array boundary is
+owned by the host, while semicolon ordering is part of QQL source.
+
+## Statement ownership
+
+Python, Node.js, and WASM expose statement handles so a host can parse once,
+inject policy, set optional shard routing, inspect the AST, and execute the
+same object. WASM owners must call `free()` explicitly when they are finished.
+
+## Execution reports
+
+Execution returns a stable report with aggregate `ok`, ordered per-operation
+results, and succeeded/failed counts. `on_error` / `onError` selects stop or
+continue behavior for multi-operation inputs.

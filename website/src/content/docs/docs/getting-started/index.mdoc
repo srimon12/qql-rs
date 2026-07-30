@@ -1,60 +1,50 @@
 ---
 title: "What is QQL?"
-description: "QQL (Qdrant Query Language) is a SQL-like interface for operating Qdrant vector databases — a CLI, Go SDK, and Connect RPC gateway in a single binary."
+description: "Understand the qql-rs language, runtime, backends, and SDK family."
 sidebar:
   order: 1
 ---
 
-QQL (Qdrant Query Language) is a compact operational interface for Qdrant built in Go.
+QQL is a query language and execution stack for Qdrant. It is implemented in
+Rust and exposed consistently through native and WebAssembly bindings.
 
-It gives developers, CI pipelines, and AI agents **one deterministic command surface** for:
+## The workspace
 
-- **Collection management** — CREATE, ALTER, DROP, SHOW, payload indexes
-- **Vector search** — dense, sparse, hybrid, multivector (ColBERT/ColPali)
-- **Multi-stage retrieval** — CTE prefetch DAGs with per-stage filters and thresholds
-- **Score boosting** — mathematical expression algebra executed inside Qdrant
-- **Data operations** — INSERT, SELECT, SCROLL, UPDATE, DELETE
-- **Automation** — structured JSON output, script execution, collection dumps
-- **REST migration** — convert Qdrant REST API JSON to QQL
+| Layer | Package | Responsibility |
+|---|---|---|
+| Language | `qql-core` | Lexer, strict parser, typed AST, validation, `inject_filter` |
+| Planning | `qql-plan` | Transport-neutral `PlannedOperation` |
+| Embedding | `qql-embed` | HTTP and host embedding interfaces |
+| Runtime | `qql` | Preparation, batching, REST/gRPC execution |
+| Edge | `qql-edge` | In-process vector storage and search |
+| Hosts | `pyqql`, `@veristamp/nqql`, `qql-wasm` | Python, Node.js, and browser APIs |
+| Tooling | `qql` CLI | Execute, explain, convert, dump, doctor, REPL |
 
-## When to use QQL
+## Where QQL fits
 
-| Situation | Tool |
-|---|---|
-| Building application logic | Qdrant SDK (Go, Python, TypeScript) |
-| Repeatable CLI commands | `qql-go` CLI |
-| CI pipelines, smoke tests | `qql-go exec --quiet --json` |
-| AI agent retrieval operations | `qql-go` skill or gateway |
-| Embedding QQL in a Go service | `pkg/qql` Go library |
-| Multi-language / polyglot setup | QQL Gateway (Connect RPC) |
-| Migrating from Qdrant REST API | `qql-go convert` |
+Use QQL when a system benefits from a reviewable query string, the same
+retrieval behavior across languages, or AST-level policy enforcement.
 
-## Components
+Use the native Qdrant SDK directly when your application already owns a stable
+typed request builder and does not need a portable query surface.
 
-{% grid style="display:grid; grid-template-columns:repeat(3, 1fr); gap:1rem;" %}
+{% qqlExample title="Hybrid retrieval with a payload filter" %}
+QUERY TEXT 'incident response' FROM runbooks
+USING HYBRID DENSE dense SPARSE bm25 FUSION RRF
+WHERE service = 'payments'
+LIMIT 8;
+{% /qqlExample %}
 
-{% glassCard title="CLI" %}
-{% techBadge name="qql-go" variant="cyan" /%}
+## Two boundaries to remember
 
-A single statically-compiled binary that handles all operations. Stores connection config in `~/.qql/config.json`. Supports cloud, local, and external inference modes.
-{% /glassCard %}
+{% aside type="caution" title="Isolation is not routing" %}
+`WHERE tenant_id = 'acme'` or host-side `inject_filter` is the security
+boundary. `SHARD 'acme'` only routes the request to a custom shard key.
+Production multi-tenant systems commonly use both.
+{% /aside %}
 
-{% glassCard title="Go SDK" %}
-{% techBadge name="pkg/qql" variant="purple" /%}
-
-A public Go library for embedding QQL execution in your own services. Accepts the `QdrantClient` interface so you can mock it for tests.
-{% /glassCard %}
-
-{% glassCard title="Gateway" %}
-{% techBadge name="qql-go serve" variant="orange" /%}
-
-A Connect RPC gateway (gRPC + gRPC-Web + HTTP/1.1) that sits in front of Qdrant. Adds JWT authentication, YAML policy enforcement, AST-level tenant filter injection, rate limiting, query templates, and structured audit logging.
-{% /glassCard %}
-
-{% /grid %}
-
-## Next Steps
-
-- [Installation](/docs/getting-started/installation) — install the binary
-- [Quickstart](/docs/getting-started/quickstart) — connect, create, insert, query in 60 seconds
-- [Syntax Reference](/docs/reference/syntax) — complete QQL statement reference
+{% aside type="note" title="Parsing is not execution" %}
+Parsing proves that the complete input is valid QQL. Planning can still require
+collection schema, and execution can still require an embedder or a live
+Qdrant backend.
+{% /aside %}

@@ -1,0 +1,37 @@
+---
+title: "Production guides"
+description: "Apply QQL to hybrid retrieval, reranking, multitenancy, and backend selection."
+sidebar:
+  order: 0
+---
+
+The language pages explain individual constructs. These guides combine them
+into production retrieval patterns.
+
+{% grid style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:1rem;" %}
+
+{% glassCard title="Hybrid retrieval" %}
+Build dense and sparse candidate stages, then fuse them with RRF or DBSF.
+
+[Open the guide](/docs/guides/hybrid-retrieval/)
+{% /glassCard %}
+
+{% glassCard title="Embeddings and reranking" %}
+Resolve vector roles and choose late-interaction or cross-encoder reranking.
+
+[Open the guide](/docs/guides/embeddings-reranking/)
+{% /glassCard %}
+
+{% glassCard title="Multitenancy" %}
+Keep isolation, shard routing, index layout, and partition lifecycle distinct.
+
+[Open the guide](/docs/guides/multitenancy/)
+{% /glassCard %}
+
+{% glassCard title="Backends" %}
+Choose between Qdrant REST, gRPC, and in-process edge execution.
+
+[Open the guide](/docs/guides/backends/)
+{% /glassCard %}
+
+{% /grid %}

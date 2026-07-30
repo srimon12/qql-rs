@@ -1,0 +1,43 @@
+---
+title: "Node.js SDK"
+description: "Use @veristamp/nqql for native QQL parsing, policy injection, planning, and Qdrant execution."
+sidebar:
+  order: 4
+---
+
+{% terminal title="Install" %}
+npm install @veristamp/nqql
+{% /terminal %}
+
+{% qqlExample title="Input used below" %}
+QUERY TEXT 'incident response' FROM runbooks
+USING dense
+LIMIT 5;
+{% /qqlExample %}
+
+```javascript
+const { Client, parse, isValid } = require("@veristamp/nqql");
+
+if (!isValid(query)) throw new Error("invalid QQL");
+
+const client = new Client({ url: "http://localhost:6333" });
+const report = await client.execute(query);
+console.log(report.ok, report.results);
+```
+
+## Parse and isolate
+
+```javascript
+const [stmt] = parse(query);
+stmt.injectFilter("tenant_id", "=", "acme");
+stmt.shardKey = "acme";
+await client.execute(stmt);
+```
+
+`parse` wraps the native full-script parser and always returns an array of
+statement handles. `parseJson` is the raw JSON forwarding form.
+
+{% aside type="note" title="Platform packages" %}
+The package loads the matching N-API binary for supported Linux, macOS, and
+Windows targets. Node.js 18 or newer is required.
+{% /aside %}

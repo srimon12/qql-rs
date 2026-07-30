@@ -38,6 +38,12 @@ export default defineMarkdocConfig({
         keyName: { type: String, required: true },
       },
     },
+    qqlExample: {
+      render: component("@qql/ui-docs/QqlExample.astro"),
+      attributes: {
+        title: { type: String },
+      },
+    },
     terminal: {
       render: component("@qql/ui-docs/Terminal.astro"),
       attributes: {

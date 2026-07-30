@@ -1,0 +1,42 @@
+---
+title: "Scripts and errors"
+description: "Write strict QQL scripts and handle structured parse, validation, plan, and execution errors."
+sidebar:
+  order: 7
+---
+
+## Script rules
+
+Statements are separated by one semicolon. A final semicolon is optional.
+Leading separators, repeated separators, adjacent unseparated statements, and
+more than 256 statements are rejected.
+
+{% qqlExample title="Provision and query" %}
+CREATE COLLECTION catalog (
+  dense VECTOR(384, COSINE)
+);
+CREATE INDEX ON COLLECTION catalog FOR category TYPE keyword;
+UPSERT INTO catalog VALUES {id: 1, text: 'red chair', category: 'furniture'};
+QUERY TEXT 'chair' FROM catalog USING dense LIMIT 5;
+{% /qqlExample %}
+
+## Parse APIs
+
+| API | Contract |
+|---|---|
+| `Parser::parse` | Exactly one complete statement |
+| `Parser::parse_all` | One complete semicolon-delimited script |
+| SDK `parse` | Host-friendly wrapper returning statement objects |
+| Executor `execute` | One statement or script; chooses the shared path |
+| Host array input | Independent inputs, each parsed separately |
+
+## Structured failures
+
+QQL errors carry a stable code, error kind, message, and optional zero-based
+UTF-8 byte span. The main families are parse, validation, planning, embedding,
+transport, backend, and batch-cardinality errors.
+
+{% aside type="tip" title="Validate the real operation" %}
+Do not add a second parse pass just to “validate” before parsing again. Parse
+once, keep the typed statement, apply policy, then plan or execute it.
+{% /aside %}

@@ -51,39 +51,49 @@ export default defineConfig(
           Footer: "./src/components/DocsFooter.astro",
           Header: "./src/components/DocsHeader.astro",
         },
-        // Sidebar mirrors the copied content tree (docs content untouched).
         sidebar: [
           {
-            label: "Getting Started",
-            items: [{ autogenerate: { directory: "docs/getting-started" } }],
+            label: "Start",
+            items: [
+              { label: "Overview", link: "/docs/" },
+              { label: "What is QQL?", link: "/docs/getting-started/" },
+              {
+                label: "Installation",
+                link: "/docs/getting-started/installation/",
+              },
+              {
+                label: "Quickstart",
+                link: "/docs/getting-started/quickstart/",
+              },
+              {
+                label: "Execution model",
+                link: "/docs/getting-started/execution-model/",
+              },
+            ],
+          },
+          {
+            label: "Language",
+            items: [{ autogenerate: { directory: "docs/language" } }],
           },
           {
             label: "Guides",
             items: [{ autogenerate: { directory: "docs/guides" } }],
           },
           {
-            label: "Reference",
-            items: [{ autogenerate: { directory: "docs/reference" } }],
-          },
-          {
             label: "SDKs",
             items: [{ autogenerate: { directory: "docs/sdks" } }],
           },
           {
-            label: "Gateway",
-            items: [{ autogenerate: { directory: "docs/gateway" } }],
+            label: "Tools",
+            items: [{ autogenerate: { directory: "docs/tools" } }],
           },
           {
-            label: "Examples",
-            items: [{ autogenerate: { directory: "docs/examples" } }],
+            label: "Reference",
+            items: [{ autogenerate: { directory: "docs/reference" } }],
           },
           {
             label: "Contributing",
             items: [{ autogenerate: { directory: "docs/contributing" } }],
-          },
-          {
-            label: "Changelog",
-            items: [{ autogenerate: { directory: "docs/changelog" } }],
           },
         ],
       }),

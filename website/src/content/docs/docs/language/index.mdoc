@@ -1,0 +1,50 @@
+---
+title: "Language overview"
+description: "Learn QQL scripts, statements, values, vector roles, and clause ordering."
+sidebar:
+  order: 1
+---
+
+QQL keywords are ASCII case-insensitive. Identifiers preserve source spelling.
+Statements in a script are separated by semicolons; a trailing semicolon is
+allowed.
+
+## Statement families
+
+| Family | Statements |
+|---|---|
+| Retrieval | `QUERY`, `SCROLL`, `COUNT` |
+| Data | `UPSERT`, `UPDATE`, `DELETE`, `CLEAR PAYLOAD`, `DELETE PAYLOAD`, `DELETE VECTOR` |
+| Schema | `CREATE`, `ALTER`, `DROP`, `SHOW` |
+
+{% qqlExample title="A mixed script" %}
+CREATE COLLECTION notes (
+  dense VECTOR(384, COSINE)
+);
+
+UPSERT INTO notes VALUES {id: 1, text: 'first note'};
+
+QUERY TEXT 'note' FROM notes USING dense LIMIT 5;
+{% /qqlExample %}
+
+## Values
+
+QQL supports strings, signed integers, floats, booleans, `null`, ordered
+objects, and lists. Point IDs are unsigned integers or strings. Dense, sparse,
+and multidense vectors have distinct shapes:
+
+| Kind | Shape |
+|---|---|
+| Dense | `[0.1, 0.2, 0.3]` |
+| Sparse | `{indices: [1, 9], values: [0.4, 0.7]}` |
+| Multidense | `[[0.1, 0.2], [0.3, 0.4]]` |
+
+## Clause order
+
+Query clauses are unique and ordered:
+
+`USING` → `PREFETCH` → `WHERE` → `SHARD` → `PARAMS` → `SCORE THRESHOLD`
+→ `GROUP BY` → payload/vector selectors → `LIMIT` → `OFFSET`.
+
+The parser rejects repeated and out-of-order clauses rather than silently
+accepting a prefix.

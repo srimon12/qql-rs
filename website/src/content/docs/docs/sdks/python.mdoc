@@ -1,0 +1,42 @@
+---
+title: "Python SDK"
+description: "Use pyqql for native QQL parsing, policy injection, planning, and Qdrant execution."
+sidebar:
+  order: 3
+---
+
+{% terminal title="Install" %}
+pip install pyqql
+{% /terminal %}
+
+{% qqlExample title="Input used below" %}
+QUERY TEXT 'cardiology' FROM medical_records
+USING dense
+LIMIT 5;
+{% /qqlExample %}
+
+```python
+import pyqql
+
+client = pyqql.Client("http://localhost:6333")
+report = client.execute(query)
+print(report.ok, report.succeeded, report.failed)
+```
+
+## Parse and isolate
+
+```python
+stmt = pyqql.parse(query)[0]
+pyqql.inject_filter(stmt, "tenant_id", "=", "hospital-7")
+stmt.shard_key = "hospital-7"
+report = client.execute(stmt)
+```
+
+The native binding returns statement handles. Free-standing and client
+execution support strings, statement objects, and host arrays. Async variants
+are available for event-loop applications.
+
+{% aside type="note" title="Edge package" %}
+Install `pyqql-edge` only when you need the in-process edge backend and bundled
+embedding support. The regular package has the smaller remote-client surface.
+{% /aside %}

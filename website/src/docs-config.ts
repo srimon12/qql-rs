@@ -37,9 +37,13 @@ export const footerConfig: DocsFooterConfig = {
     {
       title: "Resources",
       items: [
-        { label: "Gateway", href: `${APPS.docs.url}/gateway/` },
-        { label: "Examples", href: `${APPS.docs.url}/examples/` },
-        { label: "Changelog", href: `${APPS.docs.url}/changelog/` },
+        { label: "CLI", href: `${APPS.docs.url}/tools/cli/` },
+        { label: "Examples", href: `${APPS.docs.url}/tools/examples/` },
+        {
+          label: "Releases",
+          href: `${APPS.github.url}/releases`,
+          external: true,
+        },
         { label: "Blog", href: APPS.blog.url, external: true },
       ],
     },

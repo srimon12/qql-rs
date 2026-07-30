@@ -1,91 +1,67 @@
 ---
 title: "Installation"
-description: "Install qql-go on macOS, Linux, or Windows using the install script, PowerShell, go install, or from source."
+description: "Install the QQL CLI and the qql-rs SDKs for Rust, Python, Node.js, and WebAssembly."
 sidebar:
   order: 2
 ---
 
-## macOS / Linux
+## CLI
 
-{% terminal title="Install script" %}
-curl -fsSL https://raw.githubusercontent.com/srimon12/qql-go/main/install.sh | sh
+{% terminal title="Linux and macOS" %}
+curl -fsSL https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.sh | sh
 {% /terminal %}
 
-## Windows (PowerShell)
-
-{% terminal title="PowerShell" %}
-irm https://raw.githubusercontent.com/srimon12/qql-go/main/install.ps1 | iex
+{% terminal title="Windows PowerShell" %}
+irm https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.ps1 | iex
 {% /terminal %}
 
-## Go Install
+The installed binary is `qql`.
 
-{% terminal title="go install" %}
-go install github.com/srimon12/qql-go/cmd/qql-go@latest
+{% terminal title="Verify the CLI" %}
+qql version
+qql doctor --json
 {% /terminal %}
 
-## From Source
+## SDKs
 
-{% terminal title="Build from source" %}
-git clone https://github.com/srimon12/qql-go.git
-cd qql-go
-go build -o qql-go ./cmd/qql-go
+{% grid style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:1rem;" %}
+
+{% glassCard title="Rust" %}
+{% terminal title="Cargo" %}
+cargo add qql qql-core
+{% /terminal %}
+{% /glassCard %}
+
+{% glassCard title="Python" %}
+{% terminal title="pip" %}
+pip install pyqql
+{% /terminal %}
+Use `pyqql-edge` only when the in-process edge backend is required.
+{% /glassCard %}
+
+{% glassCard title="Node.js" %}
+{% terminal title="npm" %}
+npm install @veristamp/nqql
+{% /terminal %}
+Use `@veristamp/nqql-edge` for the heavier edge-enabled build.
+{% /glassCard %}
+
+{% glassCard title="WebAssembly" %}
+{% terminal title="npm" %}
+npm install qql-wasm
+{% /terminal %}
+Initialize the module before calling browser exports.
+{% /glassCard %}
+
+{% /grid %}
+
+## Build from source
+
+{% terminal title="Workspace build" %}
+git clone https://github.com/srimon12/qql-rs.git
+cd qql-rs
+cargo build --release --workspace
 {% /terminal %}
 
-## Verify Installation
-
-{% terminal title="Verify" %}
-qql-go version
-qql-go doctor
-{% /terminal %}
-
----
-
-## Binary Name
-
-| Platform | Binary name |
-|---|---|
-| macOS / Linux | `qql-go` |
-| Windows | `qql-go.exe` |
-
----
-
-## PATH Setup
-
-The install script puts the binary on your PATH automatically. If you installed somewhere custom, set the `QQL_BIN` environment variable to the absolute path. The CLI checks: `QQL_BIN` env var → `qql-go` on `$PATH` → repo-local fallback.
-
-{% terminal title="macOS / Linux" %}
-export QQL_BIN=/absolute/path/to/qql-go
-{% /terminal %}
-
-{% terminal title="Windows (PowerShell)" %}
-$env:QQL_BIN = "C:\path\to\qql-go.exe"
-{% /terminal %}
-
----
-
-## Prerequisites
-
-| Requirement | Notes |
-|---|---|
-| **Go 1.24+** | Only needed if building from source or using `go install` |
-| **Qdrant instance** | Docker, native, or Qdrant Cloud |
-| **Embedding server** | Only needed for `--inference-mode local` or `external` |
-
-### Start Qdrant with Docker
-
-{% terminal title="Docker" %}
-docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant
-{% /terminal %}
-
-{% aside type="note" title="Port 6334" %}
-
-QQL connects to Qdrant on port **6334** (gRPC). Port 6333 (REST) is used by the HTTP API but not by QQL directly. Passing port 6333 will be rejected with an error.
-
-{% /aside %}
-
----
-
-## Next Steps
-
-→ [Quickstart](/docs/getting-started/quickstart) — connect, create, insert, and query in 60 seconds  
-→ [Configuration](/docs/getting-started/configuration) — set up inference modes and config file
+The runtime defaults to REST and gRPC. Edge and embedded model support are
+opt-in because they add substantial binary and model weight.

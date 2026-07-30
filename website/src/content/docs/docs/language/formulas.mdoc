@@ -1,0 +1,50 @@
+---
+title: "Formula scoring"
+description: "Shape QQL scores with arithmetic, payload fields, functions, decay, geo distance, and conditions."
+sidebar:
+  order: 6
+---
+
+Formula queries apply Qdrant score-builder expressions to prefetch scores or
+payload fields.
+
+{% qqlExample title="Prefetch then rescore" %}
+WITH candidates AS (
+  QUERY TEXT 'distributed systems' USING dense LIMIT 100
+)
+QUERY FORMULA
+  $score * 0.8 + LOG(citation_count + 1) * 0.2
+DEFAULTS (score = 0.0, citation_count = 0)
+FROM papers
+PREFETCH (candidates)
+LIMIT 10;
+{% /qqlExample %}
+
+## Decay
+
+{% qqlExample title="Freshness and popularity" %}
+QUERY FORMULA
+  $score
+  + EXP_DECAY(age_days, TARGET = 0, SCALE = 30, MIDPOINT = 0.5)
+  + GAUSS_DECAY(popularity, TARGET = 100, SCALE = 25)
+DEFAULTS (score = 0.0, age_days = 365, popularity = 0)
+FROM articles
+LIMIT 10;
+{% /qqlExample %}
+
+Supported functions include `ABS`, `SQRT`, `LOG`, `LN`, `EXP`, `POW`,
+`GEO_DISTANCE`, `EXP_DECAY`, `GAUSS_DECAY`, `LIN_DECAY`, `datetime`, and
+`datetime_key`.
+
+## Conditions
+
+{% qqlExample title="Conditional score" %}
+QUERY FORMULA
+  CASE WHEN tier MATCH ANY ('premium')
+    THEN $score * 1.5
+    ELSE $score
+  END
+DEFAULTS (score = 0.0)
+FROM docs
+LIMIT 10;
+{% /qqlExample %}
