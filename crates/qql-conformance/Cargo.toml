@@ -11,6 +11,6 @@ description = "Repository-only QQL language conformance runner"
 publish = false
 
 [dependencies]
-qql-core = { version = "0.1.4", path = "../qql-core", features = ["serde", "std"] }
-qql-plan = { version = "0.1.4", path = "../qql-plan" }
+qql-core = { version = "0.1.5", path = "../qql-core", features = ["serde", "std"] }
+qql-plan = { version = "0.1.5", path = "../qql-plan" }
 serde_json = "1"
