@@ -138,12 +138,12 @@ await init();
 // Parse into a Stmt object
 const stmt = new Stmt("QUERY 'search' FROM docs USING dense LIMIT 10");
 
-// Read / write the shard key
-stmt.shardKey = "acme";
-console.log(stmt.shardKey);  // -> "acme"
-
-// Inject a tenant filter (mutates in place)
+// Isolation (always on untrusted QQL)
 stmt.injectFilter("tenant_id", "=", "acme");
+
+// Routing: prefer SHARD 'acme' in the QQL string; or set after parse:
+stmt.shardKey = "acme";  // same field as SHARD — no injectShardKey API
+console.log(stmt.shardKey);  // -> "acme"
 
 // Serialise to JSON
 const json = stmt.toJSON();

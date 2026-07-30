@@ -45,8 +45,8 @@ Edge unsupported codes are stable (see `crates/qql-edge/README.md`).
 | Multi-collection lookup | `GROUP BY ... LOOKUP FROM coll` → `QueryRequest.lookup_from` |
 | Grouped pagination (OFFSET with GROUP BY) | `GROUP BY … OFFSET N` → maps to `group_offset` |
 | MMR with sparse vectors | `USING … AS SPARSE` with MMR is supported |
-| Filter shard & min_should | `FilterCompound.shard_key` and `min_should` threshold |
-| Dynamic shard (host) | `inject_shard_key(stmt, tenant)` / `stmt.inject_shard_key(tenant)` — or literal `SHARD '…'` |
+| Filter `min_should` | Conjunction threshold on compound filters |
+| Request-level shard routing | QQL `SHARD '…'` or `stmt.shard_key` → REST `shard_key` / gRPC `ShardKeySelector` (never inside Filter) |
 | Schema-first vectors | `USING name` / `AS DENSE\|SPARSE\|MULTI` |
 | Multivector / late interaction | `USING colbert` / `AS MULTI`; `RERANK … PREFETCH` |
 | CLIP | `QUERY IMAGE '…'` / `TEXT` into same dense space |
@@ -62,7 +62,7 @@ Edge unsupported codes are stable (see `crates/qql-edge/README.md`).
 | Hybrid | `QUERY 'q' FROM docs USING HYBRID LIMIT 10` |
 | Cluster timeout | `PARAMS (timeout = 30)` on QUERY |
 | Replica reads | `PARAMS (consistency = majority)` |
-| Multi-tenant shard | `inject_shard_key(stmt, tenant)` + `inject_filter(…, tenant_id, …)` |
+| Multi-tenant shard | `SHARD 'tenant'` / `stmt.shard_key` + `inject_filter(…, tenant_id, …)` |
 | Faceted page 2 (groups) | `GROUP BY … OFFSET N` — maps to Qdrant `group_offset` |
 | Edge without groups | `WHERE` + `LIMIT`, or remote Qdrant for `GROUP BY` |
 

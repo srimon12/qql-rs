@@ -1,207 +1,146 @@
-# QQL AST Filter Injection & Sandboxing Guide
+# Host Isolation: `inject_filter`
 
-**Filter Injection (`inject_filter`)** is QQL's zero-trust AST transformation engine. It allows platform code, API gateways, and agent runtimes to inject mandatory security, lifecycle, and policy constraints into any parsed QQL statement **before** it is planned, compiled, or executed against Qdrant.
+**Purpose:** force a predicate onto untrusted or agent-written QQL **before** plan/execute — so tenants, soft-deletes, and policy flags cannot be omitted.
 
-Unlike manual payload filter construction in raw database clients, `inject_filter` operates directly on the QQL Abstract Syntax Tree (AST). It recursively propagates predicates across complex query graphs, Common Table Expressions (CTEs), prefetch/fusion trees, and mutation statements (`DELETE`, `UPDATE PAYLOAD`, `UPSERT`).
-
----
-
-## Key Differences: QQL `inject_filter` vs. Raw Qdrant Payload Filtering
-
-| Feature | Raw Qdrant Filter JSON | QQL `inject_filter` AST Engine |
-| :--- | :--- | :--- |
-| **Enforcement Point** | Client-side manual construction before API call | Server/Gateway AST transform before planning |
-| **CTE & Subquery Support** | Manual duplication into every `prefetch` JSON block | Automated recursive injection into all CTE branches & prefetches |
-| **Agent / LLM Sandboxing** | Requires parsing/rebuilding raw JSON query objects | Single AST call: `inject_filter(&mut stmt, field, op, value)` |
-| **Mutation Guardrails** | Manual filter building for `delete` & `update` | Automatically injects into `DELETE`, `UPDATE PAYLOAD`, & `UPSERT` |
-| **Bypass Resistance** | High risk of omitted `must` conditions | Resists `OR` logical bypasses, negations, and empty `WHERE` clauses |
+This is **logical isolation** only. For physical routing on custom-sharded collections, use QQL `SHARD '…'` or `stmt.shard_key` (see [syntax.md](syntax.md#shard-key-ddl-vs-shard-routing) and [qql-multitenancy](../skills/qql-skill/references/qql-multitenancy.md)). There is **no** `inject_shard_key`.
 
 ---
 
-## Physical Optimization vs. Logical Injection (`is_tenant = true`)
+## Why it exists
 
-In Qdrant, payload filtering and physical data layout are complementary:
-
-1. **Logical Isolation (`inject_filter`):**  
-   QQL guarantees that a condition like `group_id = 'grp-101'` or `workspace_id = 'ws-5'` is injected into every AST branch. The query author or LLM cannot bypass it.
-2. **Physical Layout Optimization (`is_tenant = true`):**  
-   You can point `is_tenant = true` to **any keyword field name** (`group_id`, `org_id`, `user_id`, `workspace_id`, etc.) during index creation:
-   ```sql
-   CREATE INDEX ON docs (group_id KEYWORD WITH (is_tenant = true));
-   ```
-   Qdrant uses this index to physically co-locate points belonging to the same group/tenant on disk for ultra-fast filtered HNSW graph traversal.
+| Approach | Risk |
+|----------|------|
+| Ask the client to “remember” `WHERE tenant_id = …` | One missing path → data leak |
+| Filter results after retrieval | Wasted work; still wrong if LIMIT/group cuts the set |
+| Rebuild nested Qdrant JSON by hand | CTEs / prefetches / hybrids easy to miss |
+| **`inject_filter` on the AST** | One call; recurses into CTEs and prefetches; fail-closed on unsupported stmts |
 
 ---
 
-## 12 Real-World Use Cases for AST Filter Injection
+## What it does
 
-### 1. Soft-Delete & Lifecycle Preservation
-Never return or mutate tombstoned or soft-deleted records.
-```rust
-inject_filter(&mut stmt, "deleted", ComparisonOp::Eq, Value::Bool(false))?;
-```
-* **Use case:** E-commerce, CMS, ticket systems where deletes are soft flags. Prevents accidental retrieval of deleted points.
+Given a parsed `Stmt`, merge `field op value` into every applicable branch:
 
-### 2. Environment / Stage Isolation (Shared Cluster)
-Run multi-stage data (production, staging, preview) inside a single collection.
-```rust
-inject_filter(&mut stmt, "env", ComparisonOp::Eq, Value::Str("prod".into()))?;
-```
-* **Use case:** Staging/Prod demo clusters and preview deployments without creating separate physical collections.
+| Statement | Effect |
+|-----------|--------|
+| `QUERY` | AND into top-level filter; recurse CTEs + nested prefetches |
+| `SCROLL`, `COUNT` | Merge into statement filter |
+| `DELETE`, `UPDATE … PAYLOAD`, `CLEAR PAYLOAD`, `DELETE PAYLOAD`, `DELETE VECTOR` | Wrap / merge into point selector |
+| `UPSERT` | Equality on non-`id` fields stamps payload on each point |
+| DDL / `SHOW` | **Error** (`QQL-VALIDATION-FILTER-INJECT`) — fail closed |
 
-### 3. Data Residency & Regional Governance
-Enforce geographic constraints based on user session or legal requirements.
-```rust
-inject_filter(&mut stmt, "region", ComparisonOp::Eq, Value::Str("eu-west-1".into()))?;
-```
-* **Use case:** GDPR and regional compliance for SaaS applications.
-
-### 4. Visibility & Authorization ACLs
-Restrict searches to public or user-permitted visibility tiers.
-```rust
-inject_filter(&mut stmt, "visibility", ComparisonOp::Eq, Value::Str("public".into()))?;
-```
-* **Use case:** Knowledge bases, Notion-style workspaces, and partner APIs.
-
-### 5. Feature Flags & Corpus Rollouts
-Scope searches to specific index versions or experiment buckets.
-```rust
-inject_filter(&mut stmt, "corpus_version", ComparisonOp::Eq, Value::Str("v3".into()))?;
-```
-* **Use case:** A/B testing retrieval pipelines and zero-downtime model migration.
-
-### 6. Language & Locale Scoping
-Enforce request-level language boundaries on LLM-generated queries.
-```rust
-inject_filter(&mut stmt, "lang", ComparisonOp::Eq, Value::Str("en".into()))?;
-```
-* **Use case:** Support bots and international product catalogs.
-
-### 7. Safety Rails & Content Moderation
-Ensure untrusted or model-generated queries never expose unapproved content.
-```rust
-inject_filter(&mut stmt, "moderation_status", ComparisonOp::Eq, Value::Str("approved".into()))?;
-```
-* **Use case:** User-generated content (UGC) search and media marketplaces.
-
-### 8. Effective Date / Business Rules
-Restrict results to currently active price books or legal clauses.
-```rust
-inject_filter(&mut stmt, "is_current", ComparisonOp::Eq, Value::Bool(true))?;
-```
-* **Use case:** Insurance policy search, price catalogs, and legal databases.
-
-### 9. Product Surface & Channel Scoping
-Vary available points by client surface (mobile app vs. partner API).
-```rust
-inject_filter(&mut stmt, "channel", ComparisonOp::Eq, Value::Str("mobile_app".into()))?;
-```
-* **Use case:** Omni-channel inventory and API tiers.
-
-### 10. Agent & LLM Sandbox Guardrails
-Safely execute free-form QQL generated by LLMs or external agents.
-```rust
-// Scope agent to the current session user and active project
-inject_filter(&mut stmt, "owner_id", ComparisonOp::Eq, Value::Str(user_id))?;
-inject_filter(&mut stmt, "project_id", ComparisonOp::Eq, Value::Str(project_id))?;
-```
-* **Use case:** RAG gateways, IDE copilots, and AI agents with database access.
-
-### 11. Scoped Mutations (`DELETE`, `UPDATE PAYLOAD`, `CLEAR PAYLOAD`)
-Prevent accidental broad deletions or payload wipes by forcing scope filters onto mutation statements.
-```rust
-inject_filter(&mut delete_stmt, "project_id", ComparisonOp::Eq, Value::Str(project_id))?;
-```
-* **Use case:** Admin UIs, agent tools, and multi-tenant cleanup jobs.
-
-### 12. Data Provenance & Ingestion Stamping on `UPSERT`
-When injecting equality filters on `UPSERT` statements, QQL automatically stamps payload fields on inserted/updated points.
-```rust
-inject_filter(&mut upsert_stmt, "ingested_by", ComparisonOp::Eq, Value::Str("sync-pipeline-v2".into()))?;
-```
-* **Use case:** Data pipeline auditing and ingestion tracking.
+**Operators (SDK string form):** `=`, `>`, `>=`, `<`, `<=` (and aliases `eq`/`gt`/…).  
+**Not supported:** `!=`, `IN`, `MATCH`, … — put those in authored QQL, or inject equality and compose with `NOT` in the source.
 
 ---
 
-## Supported QQL Filter Conditions & Qdrant Mapping
+## Isolation vs routing vs index layout
 
-QQL supports the full suite of Qdrant payload conditions, fully compatible with AST injection:
+```
+inject_filter(tenant_id = 'acme')     →  Filter (security)
+SHARD 'acme'  /  stmt.shard_key       →  ShardKeySelector (routing / perf)
+CREATE INDEX … is_tenant = true       →  Qdrant layout optimization
+CREATE SHARD KEY 'acme' …             →  define custom partition (DDL)
+```
 
-| QQL Condition | Description | Qdrant Engine Mapping |
-| :--- | :--- | :--- |
-| `field = val` | Exact match | `MatchValue` |
-| `field IN (a, b)` | Match any | `MatchAny` |
-| `field NOT IN (a, b)` | Match except | `MatchExcept` |
-| `field MATCH TEXT 'phrase'` | Substring / Token search | `MatchText` / `MatchTextAny` |
-| `field MATCH PHRASE 'exact'` | Exact phrase match | `MatchPhrase` |
-| `field BETWEEN a AND b` | Range comparison | `Range` (`gte`, `lte`) |
-| `field IS NULL` | Null value check | `IsNull` |
-| `field IS EMPTY` | Empty array/null check | `IsEmpty` |
-| `HAS VECTOR 'name'` | Named vector check | `HasVector` |
-| `id = 'uuid'` | Point ID predicate | `HasId` |
-| `GEO_BBOX(...)` | Geo bounding box | `GeoBoundingBox` |
-| `GEO_RADIUS(...)` | Geo radius circle | `GeoRadius` |
-| `GEO_POLYGON(...)` | Geo polygon area | `GeoPolygon` |
+All four can apply on a multi-tenant collection; only the first is mandatory for isolation.
 
 ---
 
-## Multi-Language Usage Examples
+## SDKs
 
-### Rust (`qql-core`)
+### Rust
+
 ```rust
 use qql_core::ast::{inject_filter, ComparisonOp, Value};
 use qql_core::parser::Parser;
 
-let mut stmt = Parser::parse("QUERY 'laptops' FROM products LIMIT 10")?;
+let mut stmt = Parser::parse("QUERY TEXT 'laptops' FROM products USING dense LIMIT 10")?;
 inject_filter(
     &mut stmt,
-    "group_id",
+    "tenant_id",
     ComparisonOp::Eq,
     Value::Str("org_99".into()),
 )?;
+// Optional routing (custom sharding only):
+// stmt.set_shard_key(Some("org_99".into()));
+// Or author: ... SHARD 'org_99' LIMIT 10
 ```
 
 ### Python (`pyqql`)
+
 ```python
 import pyqql
 
-# Option 1: Using free function with Stmt object or query string
-stmts = pyqql.parse("QUERY 'laptops' FROM products LIMIT 10")
-pyqql.inject_filter(stmts[0], "group_id", "=", "org_99")
+stmt = pyqql.parse("QUERY TEXT 'laptops' FROM products USING dense LIMIT 10")[0]
+pyqql.inject_filter(stmt, "tenant_id", "=", "org_99")
+# or: stmt.inject_filter("tenant_id", "=", "org_99")
 
-# Option 2: Using Stmt method
-stmts[0].inject_filter("group_id", "=", "org_99")
+# Prefer SHARD in QQL when the key is known up front:
+# QUERY ... SHARD 'org_99' LIMIT 10
+# Host-resolved after parse:
+stmt.shard_key = "org_99"
 ```
 
-### Node.js (`nqql`)
-```javascript
-const nqql = require('@veristamp/nqql');
+### Node (`@veristamp/nqql`)
 
-// Option 1: Free function with query string (returns AST object)
-const ast = nqql.injectFilter("QUERY 'laptops' FROM products LIMIT 10", "group_id", "=", "org_99");
+```js
+const { parse, injectFilter } = require("@veristamp/nqql");
 
-// Option 2: Stmt instance method (mutates Stmt in place)
-const stmts = nqql.parse("QUERY 'laptops' FROM products LIMIT 10");
-stmts[0].injectFilter("group_id", "=", "org_99");
+const [stmt] = parse("QUERY TEXT 'laptops' FROM products USING dense LIMIT 10");
+stmt.injectFilter("tenant_id", "=", "org_99");
+// or: injectFilter(qqlString, "tenant_id", "=", "org_99")
+
+stmt.shardKey = "org_99"; // optional routing; same as SHARD 'org_99'
 ```
 
-### WebAssembly (`qql-wasm`)
-```javascript
-import init, { parse, inject_filter } from 'qql-wasm';
+### WASM (`qql-wasm`)
 
+```js
+import init, { Stmt } from "qql-wasm";
 await init();
-let stmts = parse("QUERY 'laptops' FROM products LIMIT 10");
-let modified = inject_filter(stmts[0], "group_id", "=", "org_99");
+
+const stmt = new Stmt("QUERY TEXT 'laptops' FROM products USING dense LIMIT 10");
+stmt.injectFilter("tenant_id", "=", "org_99");
+stmt.shardKey = "org_99";
 ```
 
-## Operator Support Matrix
+---
 
-| Operator | Aliases | Status | Note |
-|---|---|---|---|
-| Equality | `=`, `==`, `eq` | ✅ Supported | Injects `key = value` |
-| Greater than | `>`, `gt` | ✅ Supported | Injects `key > value` |
-| Greater/equal | `>=`, `gte` | ✅ Supported | Injects `key >= value` |
-| Less than | `<`, `lt` | ✅ Supported | Injects `key < value` |
-| Less/equal | `<=`, `lte` | ✅ Supported | Injects `key <= value` |
-| Inequality | `!=`, `neq`, `<>` | ❌ Rejected | Wrap equality with `NOT (...)` in query string |
-| Inclusion / Null | `in`, `is_null`, etc. | ❌ Rejected | Write explicit QQL `WHERE` clause |
+## Typical policies (equality inject)
+
+| Policy | Inject |
+|--------|--------|
+| Multi-tenant SaaS | `tenant_id = '…'` |
+| Soft delete | `deleted = false` |
+| Environment | `env = 'prod'` |
+| Region / residency | `region = 'eu-west-1'` |
+| Content moderation | `moderation_status = 'approved'` |
+| Agent sandbox | `project_id = '…'` (and often tenant) |
+| UPSERT provenance | stamp `ingested_by = 'pipeline-v2'` |
+
+Pair with:
+
+```sql
+CREATE INDEX ON COLLECTION docs FOR tenant_id
+  TYPE keyword WITH (is_tenant = true);
+```
+
+---
+
+## Verify before execute
+
+```bash
+qql explain "QUERY TEXT 'x' FROM docs WHERE tenant_id = 'acme' LIMIT 5"
+# Filter: present
+```
+
+In code, re-`explain` / `to_dict` / `toObject` after inject and assert the filter is present before `execute`.
+
+---
+
+## Related
+
+- [filters.md](filters.md) — full `WHERE` surface  
+- [syntax.md](syntax.md) — `SHARD` / `CREATE SHARD KEY`  
+- Skill: [inject-filter.md](../skills/qql-skill/references/inject-filter.md), [qql-multitenancy.md](../skills/qql-skill/references/qql-multitenancy.md)

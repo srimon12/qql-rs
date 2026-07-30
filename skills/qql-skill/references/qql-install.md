@@ -1,31 +1,33 @@
 # QQL Installation
 
+Install the pieces you need. Runtime can talk **REST (6333)** and/or **gRPC (6334)** —
+both are first-class; pick at client construction time.
+
 ## Rust CLI (`qql`)
 
-### From Source
+### From source
 
 ```bash
 git clone https://github.com/srimon12/qql-rs.git
 cd qql-rs
+
+# REST-only CLI (fast build)
 cargo build --release -p qql-cli --no-default-features --features rest
 
-# Optional: install globally
-cargo install --path crates/qql-cli --no-default-features --features rest
+# REST + gRPC
+cargo build --release -p qql-cli --no-default-features --features rest,grpc
+
+# Full CLI including edge + fastembed (default features; slower compile)
+cargo build --release -p qql-cli
 ```
 
-The binary will be at `target/release/qql`.
-
-### Features
+Binary: `target/release/qql`.
 
 | Feature | Description |
 |---------|-------------|
-| `rest` | HTTP REST client (reqwest) -- enabled by default |
-| `grpc` | gRPC client (tonic) -- for Qdrant port 6334 |
-| `edge` | In-process execution via qdrant-edge (no server needed) |
-
-Build with gRPC: `cargo build --release -p qql-cli --no-default-features --features rest,grpc`
-
-Build with edge (local HNSW + fastembed): `cargo build --release -p qql-cli`
+| `rest` | HTTP client → Qdrant REST |
+| `grpc` | tonic client → Qdrant gRPC |
+| `edge` | In-process qdrant-edge (no server) |
 
 ### CLI Commands
 
@@ -49,10 +51,15 @@ qql dump my_collection output.qql
 qql doctor
 ```
 
-### Environment Variables
+### Environment
 
-- `QDRANT_URL` -- Qdrant REST endpoint (default: `http://localhost:6333`)
-- `QDRANT_API_KEY` -- API key for authenticated Qdrant
+| Variable | Role |
+|----------|------|
+| `QDRANT_URL` | REST base (default `http://localhost:6333`) |
+| `QDRANT_API_KEY` | Qdrant API key |
+| `EMBED_URL` | OpenAI-compatible embeddings endpoint (e.g. Ollama `…/v1/embeddings`) |
+| `EMBED_MODEL` | e.g. `all-minilm:l6-v2` |
+| `EMBED_DIM` | e.g. `384` |
 
 ### Verify Installation
 

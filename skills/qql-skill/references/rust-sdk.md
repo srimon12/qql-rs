@@ -96,8 +96,15 @@ let exec = Executor::new(Box::new(client), None);
 
 `RestQdrant::with_timeout(url, api_key, timeout)` constructs with an explicit duration.
 
-**Note:** Statement-level timeout / read consistency is **not** QQL syntax yet
-(no `PARAMS (timeout = …)`). Use client/executor timeouts as above.
+**Request-level params (QQL 1.2+):** `PARAMS (timeout = 30, consistency = majority)`
+lower to REST query string / gRPC fields on the request (not body `SearchParams`).
+Client builder timeouts remain a separate HTTP-layer budget.
+
+**Routing:** prefer `SHARD 'tenant'` in the query string. After parse, use
+`stmt.set_shard_key(Some(tenant.into()))` — there is no `inject_shard_key`.
+
+**Compilation:** prefer `compile_statement` / `try_route` over deprecated
+`route()` (which panics on client-side-only ops such as bare `CROSS RERANK`).
 
 ---
 
