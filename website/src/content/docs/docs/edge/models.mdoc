@@ -29,8 +29,8 @@ or sparse slots — and a BGE-M3 multi model used for dense embedding is a
 clear error, not a silent fallback.
 
 {% aside type="tip" title="Sparse defaults to local BM25" %}
-When no `sparse_model` is configured, sparse requests (`USING bm25`,
-`QUERY HYBRID … SPARSE bm25`) use a **local BM25 hash** built into the
+When no `sparse_model` is configured, sparse requests (`USING sparse`,
+`QUERY HYBRID … SPARSE sparse`) use a **local BM25 hash** built into the
 runtime — no download, no inference. It is fast (~1.5M documents/s and ~4.9M
 queries/s in local microbenchmarks) and needs no model. Set `sparse_model:
 "bge-m3"` or `"splade"` only when you want real ONNX sparse inference.
@@ -76,7 +76,7 @@ switching models mid-index would corrupt vector semantics.
 
 ## HTTP alternative
 
-If you do not want the ~1 GB local download (or are on an unsupported
+If you do not want the ~130 MB local download (or are on an unsupported
 platform), set the embedder to `http`. Storage and search stay local; only
 embeddings go to an OpenAI-compatible endpoint.
 
@@ -105,7 +105,7 @@ slots over HTTP.
 ## Downloads and caching
 
 - Models download from Hugging Face on **first use** and cache locally.
-- The default dense model is **roughly 1 GB**; sparse/multi/image/reranker
+- The default dense model is **roughly 130 MB**; sparse/multi/image/reranker
   models add more.
 - Cache location: fastembed's default, or `--cache-dir` /
   `QQL_EDGE_CACHE_DIR` / `cacheDir` / `cache_dir`. Fastembed also honors

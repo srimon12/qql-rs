@@ -8,6 +8,11 @@ sidebar:
 Most QQL statements are transport-neutral. Differences come from backend
 capability, not a separate language dialect.
 
+The REST and gRPC transports target **Qdrant 1.18.x** (the bundled OpenAPI
+schema and protobuf definitions are pinned to `v1.18.x`). Older servers may
+reject plan fields introduced in that generation; the edge backend is an
+in-process engine and does not depend on a server version.
+
 | Capability | REST | gRPC | Edge |
 |---|:---:|:---:|:---:|
 | Parse, validate, inject, explain | yes | yes | yes |

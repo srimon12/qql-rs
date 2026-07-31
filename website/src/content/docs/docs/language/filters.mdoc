@@ -38,8 +38,9 @@ LIMIT 10;
 The unicode operators `≠`, `≥`, and `≤` normalize to `!=`, `>=`, and `<=`.
 `!=`, `NOT IN`, `IS NOT NULL`, and `IS NOT EMPTY` all normalize to a `NOT`
 around the corresponding positive predicate. Comparison against the point
-`id` field permits only `=` and `IN`, and every value must be a valid point ID
-(an unsigned integer or a string).
+`id` field permits `=`, `IN`, and — via the same `NOT` normalization — `!=`
+and `NOT IN`; every value must be a valid point ID (an unsigned integer or a
+string).
 
 ## Text, cardinality, and presence predicates
 

@@ -13,7 +13,7 @@ matching. QQL exposes a shorthand and an explicit multi-stage form.
 {% qqlExample title="Schema-resolved hybrid search" %}
 ```sql
 QUERY TEXT 'zero downtime deployment' FROM runbooks
-USING HYBRID DENSE dense SPARSE bm25 FUSION RRF
+USING HYBRID DENSE dense SPARSE sparse FUSION RRF
 WHERE service = 'gateway'
 LIMIT 10;
 ```
@@ -42,7 +42,7 @@ WITH
   ),
   lexical AS (
     QUERY TEXT 'zero downtime deployment'
-    USING bm25
+    USING sparse
     WHERE service = 'gateway'
     LIMIT 180
   )

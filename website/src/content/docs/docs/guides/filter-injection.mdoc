@@ -83,9 +83,9 @@ stmt.inject_filter("tenant_id", "=", "acme")
 ```
 
 ```javascript
-const { Stmt } = require("@veristamp/nqql");
+const { parse } = require("@veristamp/nqql");
 
-const stmt = new Stmt(query);
+const [stmt] = parse(query);
 stmt.injectFilter("tenant_id", "=", "acme");
 ```
 

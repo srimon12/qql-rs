@@ -11,8 +11,8 @@ order by, and add shard keys only when Qdrant routing is part of the design.
 
 ## Model the vector topology
 
-Vector names are application-defined. `dense`, `bm25`, and `colbert` are useful
-conventions, but vector configuration determines the actual role. A dense
+Vector names are application-defined. `dense`, `sparse`, and `colbert` are
+useful conventions, but vector configuration determines the actual role. A dense
 definition is `name VECTOR(size, distance)` with distance `COSINE`, `DOT`,
 `EUCLID`, or `MANHATTAN`; a sparse definition is `name SPARSE` with optional
 `WITH SPARSE (...)` / `WITH INDEX (...)` config.
@@ -21,7 +21,7 @@ definition is `name VECTOR(size, distance)` with distance `COSINE`, `DOT`,
 ```sql
 CREATE COLLECTION research (
   dense VECTOR(384, COSINE),
-  bm25 SPARSE,
+  sparse SPARSE,
   colbert VECTOR(128, COSINE)
     WITH MULTIVECTOR (comparator = 'max_sim')
     WITH HNSW (m = 0)
@@ -130,6 +130,7 @@ WITH (
 | `lowercase`, `ascii_folding`, `phrase_matching`, `lookup`, `range`, `is_principal` | boolean |
 | `min_token_len`, `max_token_len` | non-negative integer |
 | `tokenizer` | string |
+| `stemmer` | string |
 | `stopwords` | string list |
 
 `DROP INDEX ON COLLECTION research FOR field` removes an index.
