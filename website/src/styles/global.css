@@ -5,3 +5,4 @@
 @import "tailwindcss/utilities.css" layer(utilities);
 
 @import "@qql/ui-docs/global.css";
+@import "./ec-theme.css";
