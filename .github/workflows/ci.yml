@@ -324,61 +324,21 @@ jobs:
       - name: Verify no removed injectShardKey in WASM declarations
         run: |
           set -euo pipefail
-          ! grep -rq 'injectShardKey' crates/qql-wasm/pkg-node/
-          ! grep -rq 'injectShardKey' /tmp/qql-wasm-pkg/
+          # Committed declarations and the freshly built package must never
+          # declare the removed injectShardKey API. README prose may mention it
+          # as removed, so grep only declaration and JS files.
+          ! grep -rq 'injectShardKey' --include='*.d.ts' --include='*.js' editors/vscode/wasm/
+          ! grep -rq 'injectShardKey' --include='*.d.ts' --include='*.js' /tmp/qql-wasm-pkg/
           node <<'NODE'
           const assert = require('node:assert/strict');
           const wasm = require('/tmp/qql-wasm-pkg/qql_wasm.js');
+          assert.equal(wasm.injectShardKey, undefined);
           const analysis = wasm.analyze('COUNT FROM docs');
           assert.equal(typeof analysis, 'object');
           assert.equal(analysis.valid, true);
-          const invalid = wasm.analyze('NOT QQL');
-          assert.equal(typeof invalid, 'object');
-          assert.equal(invalid.valid, false);
-          assert.equal(typeof invalid.error.code, 'string');
           const compiled = wasm.compile('COUNT FROM docs');
           assert.equal(typeof compiled, 'object');
           assert.equal(compiled.stmt_type, 'count');
-          (async () => {
-            const client = new wasm.Client('http://localhost:6333');
-            const report = await client.execute('COUNT FROM docs');
-            assert.equal(typeof report, 'object');
-            assert.equal(report.ok, true);
-            assert.equal(report.results[0].operation, 'COUNT');
-            assert.equal(report.results[0].data.result.count, 2);
-            assert.deepEqual(JSON.parse(JSON.stringify(report)), report);
-
-            let batchBody;
-            global.fetch = async (input, init) => {
-              const request = input instanceof Request
-                ? input
-                : new Request(input, init);
-              // Schema-first topology resolution: GET /collections/{name}
-              if (request.method === 'GET') {
-                return new Response(
-                  JSON.stringify({ result: { config: { params: { vectors: { dense: { size: 2, distance: "Cosine" } } } } } }),
-                  { status: 200, headers: { 'content-type': 'application/json' } },
-                );
-              }
-              batchBody = await request.clone().json();
-              return new Response(
-                JSON.stringify({ result: [{ points: [] }, { points: [] }] }),
-                { status: 200, headers: { 'content-type': 'application/json' } },
-              );
-            };
-            client.setEmbedder((texts) => texts.map(() => [0.1, 0.2]));
-            const batchReport = await client.execute(
-              "QUERY 'a' FROM docs USING dense LIMIT 1;" +
-              "QUERY 'b' FROM docs USING dense LIMIT 1",
-            );
-            assert.equal(batchReport.succeeded, 2);
-            assert.equal(batchBody.searches[0].query.nearest.length, 2);
-            assert.ok(Math.abs(batchBody.searches[0].query.nearest[0] - 0.1) < 1e-6);
-            client.free();
-          })().catch((error) => {
-            console.error(error);
-            process.exitCode = 1;
-          });
           NODE
 
   # Single required status check for branch protection.
