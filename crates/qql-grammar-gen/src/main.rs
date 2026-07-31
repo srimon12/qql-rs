@@ -250,9 +250,7 @@ fn rule_references(body: &str, defined: &std::collections::HashSet<String>) -> V
             }
             c if !in_string && (c.is_ascii_alphabetic() || c == '_') => {
                 let start = i;
-                while i < chars.len()
-                    && (chars[i].is_ascii_alphanumeric() || chars[i] == '_')
-                {
+                while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
                     i += 1;
                 }
                 let word: String = chars[start..i].iter().collect();

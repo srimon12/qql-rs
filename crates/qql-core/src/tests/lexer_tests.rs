@@ -71,14 +71,14 @@ fn parser_keywords_exist_in_grammar() {
                         // `spec/semantics.md` — not grammar keywords. Only a
                         // token-text receiver proves the word sits in a
                         // syntactic keyword position.
-                        let receiver_gated =
-                            pattern.starts_with("ascii_equal(")
-                                || pattern.starts_with("eq_ignore_ascii_case(");
+                        let receiver_gated = pattern.starts_with("ascii_equal(")
+                            || pattern.starts_with("eq_ignore_ascii_case(");
                         let mut rest = line;
                         while let Some(pos) = rest.find(pattern) {
                             if receiver_gated {
                                 let after_paren = &rest[pos + pattern.len()..];
-                                let receiver_end = after_paren.find(',').unwrap_or(after_paren.len());
+                                let receiver_end =
+                                    after_paren.find(',').unwrap_or(after_paren.len());
                                 let receiver = &after_paren[..receiver_end];
                                 if !receiver.contains(".text") {
                                     rest = &rest[pos + pattern.len()..];
