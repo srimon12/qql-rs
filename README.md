@@ -53,8 +53,6 @@ cargo add qql qql-core
 
 #### 🧩 VS Code / Cursor Extension
 
-Extension packaging version is in `editors/vscode/package.json` (Marketplace). Bundles the QQL **0.2.0** WASM parser — independent of the monorepo crate version. VSIX artifacts are built/published, not stored in git.
-
 ```bash
 # Marketplace
 code --install-extension srimon12.qql-lang
