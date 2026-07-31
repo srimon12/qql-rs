@@ -8,6 +8,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 
+## [Unreleased]
+
+### 🚀 Added
+- **QQL documentation website** — a new docs site at `qql.veristamp.in` (Astro + Starlight) replaces the legacy playground. 40+ pages across Start, Language, Guides, Edge, SDKs, Tools, Reference, and Contributing, including a dedicated **Edge runtime** section (9 pages), a **Filter injection** security guide, an **Error codes** reference, and **editors** documentation for the VS Code extension. All language, CLI, SDK, and reference pages were rewritten and deepened.
+- **Interactive playground** — integrated into the site and backed by a freshly built `qql-wasm` bundle. Every documented example is extracted and parsed at build time, so the docs cannot drift from the parser.
+- **Grammar as the single source of truth** — `qql-grammar-gen` now derives five artifacts from `language/v1/grammar.pest`: the generated pest grammar, the VS Code TextMate grammar, the VS Code and playground keyword tables, and the Rust `KEYWORDS` map (`keywords.generated.rs`) used by the `qql-core` lexer.
+- **Language & conformance** — new conformance fixtures for `CROSS RERANK` and formula division defaults, grammar support for `USING MULTI/MULTIVECTOR/IMAGE` embedding specs, and a documented contract map in `language/v1/README.md`. The conformance suite now stands at 35 valid / 35 invalid / 35 AST snapshots.
+- **Python typing** — `.pyi` stubs and `py.typed` markers for `pyqql` and `pyqql-edge`.
+
+### 🏗️ Architecture
+- **Lexer/grammar lockstep** — the `TokenKind` enum stays hand-written, but its keyword map is generated and guarded by bi-directional drift tests (grammar → keywords, and parser keyword vocabulary → grammar), and `qql-grammar-gen check` rejects grammar rules unreachable from the entry productions. A dead `sharding_method_val` rule and its unused `TokenKind` variants were removed.
+- **Parser-generation roadmap** — `docs/parser_generation_design.md` evaluates pest/LALRPOP/custom generators against the `no_std`, zero-dependency core and lays out a phased migration.
+
+### 🔒 Changed & Scoped
+- **Edge fail-loud hardening** — `PARAMS (timeout)` and `PARAMS (consistency)` are now rejected on the edge backend with `QQL-EDGE-UNSUPPORTED-TIMEOUT` / `QQL-EDGE-UNSUPPORTED-CONSISTENCY` instead of being silently ignored.
+- **Fail-closed `set_shard_key`** in the Python, Node, and WASM bindings — assigning a shard key to a statement type that does not support routing now raises an error.
+- **Installer & release tooling** — install scripts validate released platform targets (with a build-from-source hint otherwise) and `RELEASING.md` was aligned to `0.1.5` (edge verification notes the `--features edge` requirement).
+- **Versioning** — `language/v1/spec/versioning.md` documents the post-`0.1.5` contract corrections and hardening.
+
+### 📚 Documentation
+- Edge timeout/consistency behavior, error codes, backend compatibility, and API surfaces updated to match the hardened runtime.
+
+---
+
 ## [0.1.5] - 2026-07-30
 
 ### 🔴 Breaking Changes
@@ -23,6 +47,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SDK & Crate Documentation**: Harmonized API tables across all 13 crate READMEs and updated agent skills (`skills/qql-skill/`).
 
 ---
+
+## [0.1.4] - 2026-07-29
 
 ### 🏗️ Architecture
 - **Transport-agnostic Plan IR**: `qql-plan` is now free of REST/gRPC client types. `PlannedOperation` is the single source of truth, lowered directly by every backend (`RestQdrant`, `GrpcQdrant`, `EdgeQdrant`). `to_rest_route()` is fallible and `compile_statement()` returns `CompiledStatement { stmt_type, route }` for reliable SDK metadata.
