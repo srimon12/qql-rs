@@ -15,19 +15,25 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const root = path.join(__dirname, "..");
-const completions = fs.readFileSync(path.join(root, "src", "completions.ts"), "utf8");
-const keywords = fs.readFileSync(path.join(root, "src", "keywords.generated.ts"), "utf8");
+const completions = fs.readFileSync(
+  path.join(root, "src", "providers", "completions.ts"),
+  "utf8",
+);
+const keywords = fs.readFileSync(
+  path.join(root, "src", "keywords.generated.ts"),
+  "utf8",
+);
 
-test("snippet count matches the documented claim (README: 27)", () => {
+test("snippet count matches the documented claim (README: 29)", () => {
   const labels = [...completions.matchAll(/^\s*label: "([^"]+)",$/gm)].map((m) => m[1]);
-  assert.strictEqual(labels.length, 27, "expected exactly 27 snippets");
+  assert.strictEqual(labels.length, 29, "expected exactly 29 snippets");
   assert.strictEqual(new Set(labels).size, labels.length, "snippet labels must be unique");
 });
 
 test("snippet insertText values are well-formed", () => {
   // No literal backslash-n (double backslash + n) anywhere — that inserts a
   // visible "\n" into the user's document instead of a newline.
-  assert.doesNotMatch(completions, /\\\\n/, "found literal \\\\n in completions.ts");
+  assert.doesNotMatch(completions, /\\\\n/, "found literal \\\\n in providers/completions.ts");
 
   // The QUERY IMAGE snippet must use a real \n escape before "  FROM".
   assert.match(
@@ -41,10 +47,14 @@ test("snippet insertText values are well-formed", () => {
   for (const m of completions.matchAll(/insertText: "([^"]*)"(?:\s*\+|\s*,)/g)) {
     assert.doesNotMatch(m[1], /\\$/, "insertText fragment must not end in a backslash");
   }
-  const insertTextCount = (completions.match(/insertText: "/g) || []).length;
-  const detailCount = (completions.match(/detail: "/g) || []).length;
-  assert.strictEqual(insertTextCount, 27, "every snippet must have insertText");
-  assert.strictEqual(detailCount, 27, "every snippet must have a detail");
+  const snippetsEnd = completions.indexOf("// Contextual follow-ups");
+  const snippetBlock = completions.slice(0, snippetsEnd);
+  const insertTextCount = (snippetBlock.match(/\binsertText:/g) || []).length;
+  const detailCount = (snippetBlock.match(/\bdetail:/g) || []).length;
+  // One declaration belongs to the QqlSnippet interface; every concrete
+  // snippet contributes exactly one additional property.
+  assert.strictEqual(insertTextCount, 30, "every snippet must have insertText");
+  assert.strictEqual(detailCount, 30, "every snippet must have a detail");
 });
 
 test("keyword count supports the '130+' claim", () => {

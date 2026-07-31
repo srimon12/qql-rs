@@ -1,16 +1,22 @@
 import * as vscode from "vscode";
-import { initWasm, analyzeQql } from "./wasm";
-import { createDiagnosticCollection, updateDiagnostics } from "./diagnostics";
-import { QqlCompletionProvider } from "./completions";
+import { initWasm, isWasmReady } from "./core/wasm";
+import { AnalysisService } from "./core/analysis";
+import { createDiagnosticCollection, updateDiagnostics } from "./providers/diagnostics";
+import { QqlCompletionProvider } from "./providers/completions";
+import { QqlHoverProvider } from "./providers/hover";
+import { QqlDocumentSymbolProvider } from "./providers/symbols";
+import { QqlFoldingRangeProvider } from "./providers/folding";
+import { QqlDefinitionProvider } from "./providers/definition";
+import { QqlCodeLensProvider } from "./providers/codelens";
+import { QqlStatusBar } from "./ui/statusBar";
+import { registerCommands } from "./ui/commands";
 
-let diagnosticCollection: vscode.DiagnosticCollection;
-let wasmReady = false;
+const QQL_SELECTOR: vscode.DocumentSelector = { language: "qql" };
 
 export function activate(context: vscode.ExtensionContext) {
-  // ── Init WASM parser (synchronous, Node.js target) ─────────────
+  // ── Init WASM parser ──────────────────────────────────────────
   try {
     initWasm();
-    wasmReady = true;
   } catch (err) {
     console.error("[qql-lang] WASM init failed:", err);
     vscode.window.showErrorMessage(
@@ -18,80 +24,114 @@ export function activate(context: vscode.ExtensionContext) {
     );
   }
 
-  // ── Completions (keywords + snippets) ─────────────────────────
-  const completionProvider = vscode.languages.registerCompletionItemProvider(
-    { language: "qql" },
-    new QqlCompletionProvider()
+  const config = vscode.workspace.getConfiguration("qql");
+  const debounceMs = config.get<number>("diagnostics.debounceMs") ?? 300;
+
+  const analysis = new AnalysisService(debounceMs);
+  const diagnosticCollection = createDiagnosticCollection();
+  const codeLensProvider = new QqlCodeLensProvider(analysis);
+  const statusBar = new QqlStatusBar(analysis);
+
+  // Push diagnostics whenever analysis completes
+  analysis.onDidAnalyze((a) => {
+    if (!a) return;
+    const doc = vscode.workspace.textDocuments.find(
+      (d) => d.uri.toString() === a.uri
+    );
+    if (doc) {
+      updateDiagnostics(diagnosticCollection, doc, a.result);
+    }
+  });
+
+  // ── Language providers ────────────────────────────────────────
+  context.subscriptions.push(
+    analysis,
+    diagnosticCollection,
+    statusBar,
+
+    vscode.languages.registerCompletionItemProvider(
+      QQL_SELECTOR,
+      new QqlCompletionProvider(analysis),
+      " ",
+      ".",
+      "(",
+      ","
+    ),
+    vscode.languages.registerHoverProvider(
+      QQL_SELECTOR,
+      new QqlHoverProvider(analysis)
+    ),
+    vscode.languages.registerDocumentSymbolProvider(
+      QQL_SELECTOR,
+      new QqlDocumentSymbolProvider(analysis)
+    ),
+    vscode.languages.registerFoldingRangeProvider(
+      QQL_SELECTOR,
+      new QqlFoldingRangeProvider(analysis)
+    ),
+    vscode.languages.registerDefinitionProvider(
+      QQL_SELECTOR,
+      new QqlDefinitionProvider(analysis)
+    ),
+    vscode.languages.registerCodeLensProvider(
+      QQL_SELECTOR,
+      codeLensProvider
+    )
   );
 
-  // ── Diagnostics ───────────────────────────────────────────────
-  diagnosticCollection = createDiagnosticCollection();
+  // ── Commands ──────────────────────────────────────────────────
+  registerCommands(context, analysis);
 
-  // Per-document debounce timers, keyed by URI string
-  const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
-  function debouncedDiagnostics(document: vscode.TextDocument) {
-    const key = document.uri.toString();
-    const existing = debounceTimers.get(key);
-    if (existing) clearTimeout(existing);
-    debounceTimers.set(
-      key,
-      setTimeout(() => {
-        debounceTimers.delete(key);
-        triggerDiagnostics(document);
-      }, 300)
-    );
-  }
-
-  function triggerDiagnostics(document: vscode.TextDocument) {
-    if (document.languageId !== "qql") return;
-    if (!wasmReady) return;
-
-    try {
-      const result = analyzeQql(document.getText());
-      updateDiagnostics(diagnosticCollection, document, result);
-    } catch (err) {
-      console.error("[qql-lang] analyze error:", err);
-    }
-  }
-
+  // ── Document lifecycle ────────────────────────────────────────
   context.subscriptions.push(
-    completionProvider,
     vscode.workspace.onDidOpenTextDocument((doc) => {
-      if (doc.languageId === "qql") triggerDiagnostics(doc);
+      if (doc.languageId === "qql" && isWasmReady()) {
+        analysis.analyzeNow(doc);
+      }
     }),
     vscode.workspace.onDidSaveTextDocument((doc) => {
-      if (doc.languageId === "qql") triggerDiagnostics(doc);
+      if (doc.languageId === "qql" && isWasmReady()) {
+        analysis.analyzeNow(doc);
+      }
     }),
     vscode.workspace.onDidChangeTextDocument((e) => {
-      if (e.document.languageId === "qql") {
-        debouncedDiagnostics(e.document);
+      if (e.document.languageId === "qql" && isWasmReady()) {
+        analysis.schedule(e.document);
       }
     }),
     vscode.window.onDidChangeActiveTextEditor((editor) => {
-      if (editor && editor.document.languageId === "qql") {
-        triggerDiagnostics(editor.document);
+      if (editor && editor.document.languageId === "qql" && isWasmReady()) {
+        analysis.analyzeNow(editor.document);
       }
     }),
     vscode.workspace.onDidCloseTextDocument((doc) => {
-      const key = doc.uri.toString();
-      const timer = debounceTimers.get(key);
-      if (timer) clearTimeout(timer);
-      debounceTimers.delete(key);
+      analysis.invalidate(doc.uri);
       diagnosticCollection.delete(doc.uri);
     }),
-    diagnosticCollection
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("qql.diagnostics.debounceMs")) {
+        const ms =
+          vscode.workspace
+            .getConfiguration("qql")
+            .get<number>("diagnostics.debounceMs") ?? 300;
+        analysis.setDebounceMs(ms);
+      }
+      if (e.affectsConfiguration("qql.codeLens.enabled")) {
+        codeLensProvider.refresh();
+      }
+    })
   );
 
-  // Analyze all already-open QQL documents (foreground and background)
-  for (const doc of vscode.workspace.textDocuments) {
-    triggerDiagnostics(doc);
+  // Analyze already-open QQL documents
+  if (isWasmReady()) {
+    for (const doc of vscode.workspace.textDocuments) {
+      if (doc.languageId === "qql") {
+        analysis.analyzeNow(doc);
+      }
+    }
   }
 }
 
 export function deactivate() {
-  if (diagnosticCollection) {
-    diagnosticCollection.clear();
-    diagnosticCollection.dispose();
-  }
+  // Disposables are cleaned via context.subscriptions
 }
