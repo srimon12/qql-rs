@@ -46,7 +46,23 @@ fn run() -> Result<(), Box<dyn Error>> {
             path: root.join("website/src/scripts/qql-keywords.generated.ts"),
             contents: render_typescript(&literals),
         },
+        Artifact {
+            path: root.join("crates/qql-core/src/keywords.generated.rs"),
+            contents: render_rust_keywords(&literals),
+        },
     ];
+
+    let dead = dead_rules(&source);
+    if !dead.is_empty() {
+        let message = format!(
+            "dead grammar rules (defined but unreachable from `script`/`single_statement`): {}",
+            dead.join(", ")
+        );
+        if command == "check" {
+            return Err(message.into());
+        }
+        eprintln!("qql-grammar-gen: warning: {message}");
+    }
 
     match command.as_str() {
         "generate" => artifacts
@@ -103,6 +119,192 @@ fn grammar_literals(source: &str) -> Vec<String> {
     literals.sort_by_key(|literal| literal.to_ascii_uppercase());
     literals.dedup();
     literals
+}
+
+/// Extract `name = { body }` rule definitions. Bodies may span multiple lines.
+fn rule_definitions(source: &str) -> Vec<(String, String)> {
+    let lines: Vec<&str> = source.lines().collect();
+    let mut rules = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("//") {
+            i += 1;
+            continue;
+        }
+        if let Some(eq) = first_unquoted(trimmed, '=') {
+            let name = trimmed[..eq].trim();
+            if is_rule_name(name) {
+                let mut rest = trimmed[eq + 1..].trim_start();
+                // pest rule modifiers: `_`, `@`, `$`.
+                loop {
+                    let before = rest;
+                    for marker in ['_', '@', '$'] {
+                        rest = rest.strip_prefix(marker).unwrap_or(rest).trim_start();
+                    }
+                    if rest == before {
+                        break;
+                    }
+                }
+                if let Some(open) = rest.find('{') {
+                    let mut body = String::from(&rest[open..]);
+                    let mut depth = brace_delta(&body);
+                    let mut j = i + 1;
+                    while depth > 0 && j < lines.len() {
+                        body.push('\n');
+                        body.push_str(lines[j]);
+                        depth += brace_delta(lines[j]);
+                        j += 1;
+                    }
+                    rules.push((name.to_string(), body));
+                    i = j;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+    rules
+}
+
+/// Find the byte offset of `needle` in `text`, ignoring string literals.
+fn first_unquoted(text: &str, needle: char) -> Option<usize> {
+    let mut in_string = false;
+    let mut iter = text.char_indices();
+    while let Some((idx, ch)) = iter.next() {
+        match ch {
+            '"' => in_string = !in_string,
+            c if c == needle && !in_string => return Some(idx),
+            '^' => {
+                // `^"..."` — skip the whole literal.
+                if let Some((_, next)) = iter.next() {
+                    if next == '"' {
+                        for (_, c) in iter.by_ref() {
+                            if c == '"' {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn is_rule_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {
+            chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+        }
+        _ => false,
+    }
+}
+
+fn brace_delta(text: &str) -> isize {
+    let mut delta = 0isize;
+    let mut in_string = false;
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' => in_string = !in_string,
+            '{' if !in_string => delta += 1,
+            '}' if !in_string => delta -= 1,
+            '^' => {
+                if chars.peek() == Some(&'"') {
+                    chars.next();
+                    for c in chars.by_ref() {
+                        if c == '"' {
+                            break;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    delta
+}
+
+/// Rule names referenced from a rule body (excluding string literals).
+fn rule_references(body: &str, defined: &std::collections::HashSet<String>) -> Vec<String> {
+    let mut refs = Vec::new();
+    let mut in_string = false;
+    let chars: Vec<char> = body.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        match chars[i] {
+            '"' => {
+                in_string = !in_string;
+                i += 1;
+            }
+            '^' if i + 1 < chars.len() && chars[i + 1] == '"' => {
+                i += 2;
+                while i < chars.len() && chars[i] != '"' {
+                    i += 1;
+                }
+                i += 1;
+            }
+            c if !in_string && (c.is_ascii_alphabetic() || c == '_') => {
+                let start = i;
+                while i < chars.len()
+                    && (chars[i].is_ascii_alphanumeric() || chars[i] == '_')
+                {
+                    i += 1;
+                }
+                let word: String = chars[start..i].iter().collect();
+                if defined.contains(&word) {
+                    refs.push(word);
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    refs
+}
+
+/// Rules defined in the grammar that are unreachable from the entry
+/// productions. `WHITESPACE` and `COMMENT` are implicit pest hooks and are
+/// treated as roots.
+fn dead_rules(source: &str) -> Vec<String> {
+    use std::collections::{HashMap, HashSet};
+
+    let definitions = rule_definitions(source);
+    let names: HashSet<String> = definitions.iter().map(|(name, _)| name.clone()).collect();
+    let references: HashMap<String, Vec<String>> = definitions
+        .iter()
+        .map(|(name, body)| (name.clone(), rule_references(body, &names)))
+        .collect();
+
+    let mut reachable = HashSet::new();
+    let mut stack = vec![
+        "script".to_string(),
+        "single_statement".to_string(),
+        "WHITESPACE".to_string(),
+        "COMMENT".to_string(),
+    ];
+    while let Some(name) = stack.pop() {
+        if !reachable.insert(name.clone()) {
+            continue;
+        }
+        if let Some(deps) = references.get(&name) {
+            for dep in deps {
+                if !reachable.contains(dep) {
+                    stack.push(dep.clone());
+                }
+            }
+        }
+    }
+
+    let mut dead: Vec<String> = names
+        .into_iter()
+        .filter(|name| !reachable.contains(name))
+        .collect();
+    dead.sort();
+    dead
 }
 
 fn render_typescript(literals: &[String]) -> String {
@@ -188,6 +390,33 @@ fn textmate_pattern(literals: &[String]) -> String {
     format!(r#"\\b(?i)({})\\b"#, literals.join("|"))
 }
 
+fn to_camel_case(literal: &str) -> String {
+    literal
+        .split('_')
+        .map(|part| {
+            let mut c = part.chars();
+            match c.next() {
+                None => String::new(),
+                Some(f) => {
+                    f.to_uppercase().collect::<String>() + c.as_str().to_lowercase().as_str()
+                }
+            }
+        })
+        .collect()
+}
+
+fn render_rust_keywords(literals: &[String]) -> String {
+    let mut lines = Vec::new();
+    for lit in literals {
+        let variant = to_camel_case(lit);
+        lines.push(format!("    \"{lit}\" => TokenKind::{variant},"));
+    }
+    let body = lines.join("\n");
+    format!(
+        "{GENERATED_HEADER}pub static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {{\n{body}\n}};\n"
+    )
+}
+
 fn write_if_changed(path: &Path, contents: &str) -> Result<(), Box<dyn Error>> {
     if fs::read_to_string(path).ok().as_deref() == Some(contents) {
         println!("current: {}", path.display());
@@ -244,5 +473,31 @@ mod tests {
             render_textmate(&["FROM".into(), "NULL".into(), "QUERY".into(), "true".into()]);
         assert!(grammar.contains(r#"\\b(?i)(FROM|QUERY)\\b"#));
         assert!(grammar.contains(r#"\\b(?i)(NULL|true)\\b"#));
+    }
+
+    #[test]
+    fn flags_unreachable_rules_only() {
+        let grammar = r#"
+WHITESPACE = _{ " " }
+script = { SOI ~ (statement ~ ";"?)* ~ EOI }
+statement = _{ query | scroll }
+query = { ^"QUERY" ~ collection }
+scroll = { ^"SCROLL" ~ collection }
+collection = { identifier }
+identifier = { ASCII_ALPHA+ }
+orphan = { ^"NEVER" }
+"#;
+        let dead = dead_rules(grammar);
+        assert_eq!(dead, ["orphan"]);
+    }
+
+    #[test]
+    fn implicit_pest_hooks_are_not_dead() {
+        let grammar = r#"
+WHITESPACE = _{ " " }
+COMMENT = _{ "--" }
+script = { SOI ~ (^"QUERY" | ^"SCROLL") ~ EOI }
+"#;
+        assert!(dead_rules(grammar).is_empty());
     }
 }
