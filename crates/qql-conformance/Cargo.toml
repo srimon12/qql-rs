@@ -14,3 +14,10 @@ publish = false
 qql-core = { version = "0.1.5", path = "../qql-core", features = ["serde", "std"] }
 qql-plan = { version = "0.1.5", path = "../qql-plan" }
 serde_json = "1"
+
+[dev-dependencies]
+# Test-only executable grammar gate (F-4): compiles language/v1/grammar.pest
+# and asserts the fixture corpus. pest is never a runtime dependency of
+# qql-core; it lives only behind `cargo test` for this repository tool.
+pest = "2"
+pest_derive = "2"

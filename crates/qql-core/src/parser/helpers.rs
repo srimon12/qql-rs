@@ -398,13 +398,23 @@ impl<'a> AstLowerer<'a> {
             ));
         }
         self.advance()?;
-        token.text.parse::<f64>().map_err(|_| {
+        let value = token.text.parse::<f64>().map_err(|_| {
             QqlError::parse(
                 "QQL-PARSE-NUMBER",
                 alloc::format!("invalid number '{}'", token.text),
                 token.span,
             )
-        })
+        })?;
+        // grammar.pest numbers are finite; exponent overflow (`1e999`) must
+        // not leak inf/NaN into the AST.
+        if !value.is_finite() {
+            return Err(QqlError::parse(
+                "QQL-PARSE-NUMBER",
+                alloc::format!("number '{}' is not finite", token.text),
+                token.span,
+            ));
+        }
+        Ok(value)
     }
 
     pub fn parse_positive_u64(&mut self, label: &str) -> Result<u64, QqlError> {

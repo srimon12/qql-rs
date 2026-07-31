@@ -710,11 +710,13 @@ pub async fn execute_planned_grpc(
                 .get_points(grpc_req)
                 .await
                 .map_err(|e| QqlError::backend("QQL-GRPC", format!("get_points: {e}"), None))?;
-            Ok(serde_json::json!({
-                "result": resp.result.into_iter().map(retrieved_point_to_json).collect::<Vec<_>>(),
-                "status": "ok",
-                "time": resp.time,
-            }))
+            Ok(get_points_envelope(
+                resp.result
+                    .into_iter()
+                    .map(retrieved_point_to_json)
+                    .collect(),
+                resp.time,
+            ))
         }
         PlannedOperation::Scroll {
             collection,
@@ -722,7 +724,7 @@ pub async fn execute_planned_grpc(
         } => {
             let grpc_req = qdrant::ScrollPoints {
                 collection_name: collection.clone(),
-                filter: request.filter.as_ref().map(to_filter),
+                filter: to_filter_opt(request.filter.as_ref())?,
                 offset: request.offset.as_ref().map(to_point_id),
                 limit: request.limit.map(|l| l as u32),
                 with_payload: request.with_payload.as_ref().map(to_payload_selector),
@@ -754,7 +756,7 @@ pub async fn execute_planned_grpc(
         } => {
             let grpc_req = qdrant::CountPoints {
                 collection_name: collection.clone(),
-                filter: request.filter.as_ref().map(to_filter),
+                filter: to_filter_opt(request.filter.as_ref())?,
                 exact: Some(true),
                 shard_key_selector: shard_key_selector(&request.shard_key),
                 ..Default::default()
@@ -814,7 +816,7 @@ pub async fn execute_planned_grpc(
             request,
         } => {
             let selector =
-                points_and_filter_selector(request.points.as_ref(), request.filter.as_ref());
+                points_and_filter_selector(request.points.as_ref(), request.filter.as_ref())?;
             let grpc_req = qdrant::DeletePoints {
                 collection_name: collection.clone(),
                 wait: Some(true),
@@ -833,7 +835,7 @@ pub async fn execute_planned_grpc(
             request,
         } => {
             let selector =
-                points_and_filter_selector(request.points.as_ref(), request.filter.as_ref());
+                points_and_filter_selector(request.points.as_ref(), request.filter.as_ref())?;
             let grpc_req = qdrant::ClearPayloadPoints {
                 collection_name: collection.clone(),
                 wait: Some(true),
@@ -852,7 +854,7 @@ pub async fn execute_planned_grpc(
             request,
         } => {
             let selector =
-                points_and_filter_selector(request.points.as_ref(), request.filter.as_ref());
+                points_and_filter_selector(request.points.as_ref(), request.filter.as_ref())?;
             let grpc_req = qdrant::DeletePayloadPoints {
                 collection_name: collection.clone(),
                 wait: Some(true),
@@ -872,7 +874,7 @@ pub async fn execute_planned_grpc(
             request,
         } => {
             let selector =
-                points_and_filter_selector(request.points.as_ref(), request.filter.as_ref());
+                points_and_filter_selector(request.points.as_ref(), request.filter.as_ref())?;
             let grpc_req = qdrant::DeletePointVectors {
                 collection_name: collection.clone(),
                 wait: Some(true),
@@ -919,7 +921,7 @@ pub async fn execute_planned_grpc(
             request,
         } => {
             let selector =
-                points_and_filter_selector(request.points.as_ref(), request.filter.as_ref());
+                points_and_filter_selector(request.points.as_ref(), request.filter.as_ref())?;
             let payload_map: std::collections::HashMap<String, qdrant::Value> = request
                 .payload
                 .iter()
@@ -1262,7 +1264,7 @@ pub async fn execute_update_batch_grpc(
         .operations
         .iter()
         .map(to_points_update_operation)
-        .collect();
+        .collect::<Result<Vec<_>, QqlError>>()?;
 
     let grpc_req = qdrant::UpdateBatchPoints {
         collection_name: collection.to_string(),
@@ -1279,7 +1281,9 @@ pub async fn execute_update_batch_grpc(
     Ok(resp.result.into_iter().map(update_result_to_json).collect())
 }
 
-fn to_points_update_operation(op: &qql_plan::UpdateOperation) -> qdrant::PointsUpdateOperation {
+fn to_points_update_operation(
+    op: &qql_plan::UpdateOperation,
+) -> Result<qdrant::PointsUpdateOperation, QqlError> {
     use qdrant::points_update_operation::{self, Operation};
     use qql_plan::UpdateOperation;
 
@@ -1319,7 +1323,8 @@ fn to_points_update_operation(op: &qql_plan::UpdateOperation) -> qdrant::PointsU
             })
         }
         UpdateOperation::Delete { delete } => {
-            let points = points_and_filter_selector(delete.points.as_ref(), delete.filter.as_ref());
+            let points =
+                points_and_filter_selector(delete.points.as_ref(), delete.filter.as_ref())?;
             let shard_key_selector = delete.shard_key.as_ref().map(|k| qdrant::ShardKeySelector {
                 shard_keys: vec![qdrant::ShardKey {
                     key: Some(qdrant::shard_key::Key::Keyword(k.clone())),
@@ -1342,7 +1347,7 @@ fn to_points_update_operation(op: &qql_plan::UpdateOperation) -> qdrant::PointsU
                 points_selector: points_and_filter_selector(
                     set_payload.points.as_ref(),
                     set_payload.filter.as_ref(),
-                ),
+                )?,
                 shard_key_selector: shard_key_selector(&set_payload.shard_key),
                 key: None,
             })
@@ -1352,7 +1357,7 @@ fn to_points_update_operation(op: &qql_plan::UpdateOperation) -> qdrant::PointsU
                 points: points_and_filter_selector(
                     clear_payload.points.as_ref(),
                     clear_payload.filter.as_ref(),
-                ),
+                )?,
                 shard_key_selector: shard_key_selector(&clear_payload.shard_key),
             })
         }
@@ -1376,7 +1381,7 @@ fn to_points_update_operation(op: &qql_plan::UpdateOperation) -> qdrant::PointsU
                 points_selector: points_and_filter_selector(
                     delete_vectors.points.as_ref(),
                     delete_vectors.filter.as_ref(),
-                ),
+                )?,
                 vectors: Some(qdrant::VectorsSelector {
                     names: delete_vectors.vector.clone(),
                 }),
@@ -1385,29 +1390,31 @@ fn to_points_update_operation(op: &qql_plan::UpdateOperation) -> qdrant::PointsU
         }
     };
 
-    qdrant::PointsUpdateOperation {
+    Ok(qdrant::PointsUpdateOperation {
         operation: Some(operation),
-    }
+    })
 }
 
 fn points_and_filter_selector(
     points: Option<&Vec<PlanPointId>>,
     filter: Option<&FilterExpression>,
-) -> Option<qdrant::PointsSelector> {
+) -> Result<Option<qdrant::PointsSelector>, QqlError> {
     if let Some(points) = points {
-        Some(qdrant::PointsSelector {
+        Ok(Some(qdrant::PointsSelector {
             points_selector_one_of: Some(qdrant::points_selector::PointsSelectorOneOf::Points(
                 qdrant::PointsIdsList {
                     ids: points.iter().map(to_point_id).collect(),
                 },
             )),
-        })
-    } else {
-        filter.map(|f| qdrant::PointsSelector {
+        }))
+    } else if let Some(f) = filter {
+        Ok(Some(qdrant::PointsSelector {
             points_selector_one_of: Some(qdrant::points_selector::PointsSelectorOneOf::Filter(
-                to_filter(f),
+                to_filter(f)?,
             )),
-        })
+        }))
+    } else {
+        Ok(None)
     }
 }
 
@@ -1425,16 +1432,31 @@ fn update_result_to_json(r: qdrant::UpdateResult) -> serde_json::Value {
     })
 }
 
+/// REST-compatible envelope for `GetPoints`: hit extraction reads
+/// `result.points`, so a bare `result` array would silently drop every hit
+/// (B-3 regression).
+fn get_points_envelope(points: Vec<serde_json::Value>, time: f64) -> serde_json::Value {
+    serde_json::json!({
+        "result": { "points": points },
+        "status": "ok",
+        "time": time,
+    })
+}
+
 pub(crate) fn to_query_points(
     req: &qql_plan::types::QueryRequest,
     collection: &str,
 ) -> Result<qdrant::QueryPoints, QqlError> {
     Ok(qdrant::QueryPoints {
         collection_name: collection.into(),
-        prefetch: req.prefetch.iter().map(to_prefetch).collect(),
+        prefetch: req
+            .prefetch
+            .iter()
+            .map(to_prefetch)
+            .collect::<Result<Vec<_>, _>>()?,
         query: Some(to_query_variant(&req.query)?),
         using: req.using.clone(),
-        filter: req.filter.as_ref().map(to_filter),
+        filter: to_filter_opt(req.filter.as_ref())?,
         params: req.params.as_ref().map(to_search_params),
         score_threshold: req.score_threshold.map(|s| s as f32),
         limit: req.limit,
@@ -1455,10 +1477,14 @@ fn to_query_groups(
 ) -> Result<qdrant::QueryPointGroups, QqlError> {
     Ok(qdrant::QueryPointGroups {
         collection_name: collection.into(),
-        prefetch: req.prefetch.iter().map(to_prefetch).collect(),
+        prefetch: req
+            .prefetch
+            .iter()
+            .map(to_prefetch)
+            .collect::<Result<Vec<_>, _>>()?,
         query: Some(to_query_variant(&req.query)?),
         using: req.using.clone(),
-        filter: req.filter.as_ref().map(to_filter),
+        filter: to_filter_opt(req.filter.as_ref())?,
         params: req.params.as_ref().map(to_search_params),
         score_threshold: req.score_threshold.map(|s| s as f32),
         with_payload: req.with_payload.as_ref().map(to_payload_selector),
@@ -1498,16 +1524,18 @@ fn to_read_consistency(c: &qql_plan::types::ReadConsistencyParam) -> qdrant::Rea
     qdrant::ReadConsistency { value: Some(value) }
 }
 
-fn to_prefetch(pf: &qql_plan::types::PrefetchRequest) -> qdrant::PrefetchQuery {
-    qdrant::PrefetchQuery {
-        prefetch: pf
-            .prefetch
-            .as_ref()
-            .map(|pfs| pfs.iter().map(to_prefetch).collect())
-            .unwrap_or_default(),
-        query: pf.query.as_ref().and_then(|q| to_query_variant(q).ok()),
+fn to_prefetch(pf: &qql_plan::types::PrefetchRequest) -> Result<qdrant::PrefetchQuery, QqlError> {
+    Ok(qdrant::PrefetchQuery {
+        prefetch: match pf.prefetch.as_ref() {
+            Some(pfs) => pfs
+                .iter()
+                .map(to_prefetch)
+                .collect::<Result<Vec<_>, QqlError>>()?,
+            None => Vec::new(),
+        },
+        query: pf.query.as_ref().map(to_query_variant).transpose()?,
         using: pf.using.clone(),
-        filter: pf.filter.as_ref().map(to_filter),
+        filter: to_filter_opt(pf.filter.as_ref())?,
         params: pf.params.as_ref().map(to_search_params),
         score_threshold: pf.score_threshold.map(|s| s as f32),
         limit: pf.limit,
@@ -1516,7 +1544,53 @@ fn to_prefetch(pf: &qql_plan::types::PrefetchRequest) -> qdrant::PrefetchQuery {
             vector_name: l.vector.clone(),
             ..Default::default()
         }),
-    }
+    })
+}
+
+/// Convert plan RRF parameters to the gRPC `Rrf` message.
+///
+/// The pinned proto stores `k` as `uint32` and `weights` as `repeated float`.
+/// Values that cannot be represented exactly (`k > u32::MAX`, an `f64` weight
+/// that does not round-trip through `f32`) return a structured error instead
+/// of being silently dropped or silently losing precision.
+fn to_grpc_rrf(rrf: &qql_plan::types::RrfQuery) -> Result<qdrant::Rrf, QqlError> {
+    let k = match rrf.rrf.k {
+        Some(k) => {
+            let k32 = u32::try_from(k).map_err(|_| {
+                QqlError::validation(
+                    "QQL-GRPC-RRF-K",
+                    format!(
+                        "rrf_k = {k} cannot be represented on the gRPC path: the bundled Qdrant proto stores k as uint32 (max {})",
+                        u32::MAX
+                    ),
+                    None,
+                )
+            })?;
+            Some(k32)
+        }
+        None => None,
+    };
+    let weights = match rrf.rrf.weights.as_ref() {
+        Some(weights) => {
+            let mut out = Vec::with_capacity(weights.len());
+            for w in weights {
+                let w32 = *w as f32;
+                if (w32 as f64) != *w {
+                    return Err(QqlError::validation(
+                        "QQL-GRPC-RRF-WEIGHT",
+                        format!(
+                            "rrf_weights value {w} cannot be represented exactly on the gRPC path: the bundled Qdrant proto stores weights as f32"
+                        ),
+                        None,
+                    ));
+                }
+                out.push(w32);
+            }
+            out
+        }
+        None => Vec::new(),
+    };
+    Ok(qdrant::Rrf { k, weights })
 }
 
 fn to_query_variant(qv: &qql_plan::types::QueryVariant) -> Result<qdrant::Query, QqlError> {
@@ -1572,13 +1646,19 @@ fn to_query_variant(qv: &qql_plan::types::QueryVariant) -> Result<qdrant::Query,
         QueryVariant::Sample { .. } => Variant::Sample(0),
         QueryVariant::Fusion { fusion } => {
             let val = match fusion.as_str() {
-                "rrf" => 1,
-                "dbsf" => 2,
-                _ => 0,
+                "rrf" => qdrant::Fusion::Rrf as i32,
+                "dbsf" => qdrant::Fusion::Dbsf as i32,
+                other => {
+                    return Err(QqlError::validation(
+                        "QQL-GRPC-FUSION",
+                        format!("unsupported fusion method '{other}' on the gRPC path"),
+                        None,
+                    ));
+                }
             };
             Variant::Fusion(val)
         }
-        QueryVariant::Rrf(_rrf_q) => Variant::Fusion(1),
+        QueryVariant::Rrf(rrf) => Variant::Rrf(to_grpc_rrf(rrf)?),
         QueryVariant::Formula(fq) => Variant::Formula(qdrant::Formula {
             expression: ast_formula_to_grpc(&fq.formula.0),
             defaults: fq
@@ -1663,35 +1743,54 @@ pub(crate) fn to_vector_input(input: &PlanQueryInput) -> qdrant::VectorInput {
     }
 }
 
-fn to_filter(fe: &FilterExpression) -> qdrant::Filter {
+fn to_filter(fe: &FilterExpression) -> Result<qdrant::Filter, QqlError> {
     match fe {
         FilterExpression::Compound(fc) => compound_to_filter(fc),
-        FilterExpression::Single(fc) => qdrant::Filter {
-            must: vec![to_condition(fc)],
+        FilterExpression::Single(fc) => Ok(qdrant::Filter {
+            must: vec![to_condition(fc)?],
             ..Default::default()
-        },
+        }),
     }
 }
 
-fn compound_to_filter(fc: &FilterCompound) -> qdrant::Filter {
-    qdrant::Filter {
-        must: fc.must.iter().map(to_condition).collect(),
-        must_not: fc.must_not.iter().map(to_condition).collect(),
-        should: fc.should.iter().map(to_condition).collect(),
+fn to_filter_opt(fe: Option<&FilterExpression>) -> Result<Option<qdrant::Filter>, QqlError> {
+    fe.map(to_filter).transpose()
+}
+
+fn compound_to_filter(fc: &FilterCompound) -> Result<qdrant::Filter, QqlError> {
+    let must = fc
+        .must
+        .iter()
+        .map(to_condition)
+        .collect::<Result<Vec<_>, _>>()?;
+    let must_not = fc
+        .must_not
+        .iter()
+        .map(to_condition)
+        .collect::<Result<Vec<_>, _>>()?;
+    let should = fc
+        .should
+        .iter()
+        .map(to_condition)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(qdrant::Filter {
+        must,
+        must_not,
+        should,
         ..Default::default()
-    }
+    })
 }
 
-fn to_condition(clause: &FilterClause) -> qdrant::Condition {
+fn to_condition(clause: &FilterClause) -> Result<qdrant::Condition, QqlError> {
     use qdrant::condition::ConditionOneOf;
-    match clause {
+    let condition_one_of = match clause {
         FilterClause::Field(fc) => {
             let mut field = qdrant::FieldCondition {
                 key: fc.key.clone(),
                 ..Default::default()
             };
             if let Some(mv) = &fc.r#match {
-                field.r#match = Some(to_match(mv));
+                field.r#match = Some(to_match(mv)?);
             }
             if let Some(r) = &fc.range {
                 field.range = Some(qdrant::Range {
@@ -1730,120 +1829,198 @@ fn to_condition(clause: &FilterClause) -> qdrant::Condition {
                     lte: vc.lte,
                 });
             }
-            qdrant::Condition {
-                condition_one_of: Some(ConditionOneOf::Field(field)),
-            }
+            ConditionOneOf::Field(field)
         }
-        FilterClause::IsNull(n) => qdrant::Condition {
-            condition_one_of: Some(ConditionOneOf::IsNull(qdrant::IsNullCondition {
-                key: n.is_null.key.clone(),
-            })),
-        },
-        FilterClause::IsEmpty(e) => qdrant::Condition {
-            condition_one_of: Some(ConditionOneOf::IsEmpty(qdrant::IsEmptyCondition {
-                key: e.is_empty.key.clone(),
-            })),
-        },
-        FilterClause::HasId(h) => qdrant::Condition {
-            condition_one_of: Some(ConditionOneOf::HasId(qdrant::HasIdCondition {
-                has_id: h.has_id.iter().map(to_point_id).collect(),
-            })),
-        },
-        FilterClause::HasVector(v) => qdrant::Condition {
-            condition_one_of: Some(ConditionOneOf::HasVector(qdrant::HasVectorCondition {
-                has_vector: v.has_vector.clone(),
-            })),
-        },
-        FilterClause::Nested(n) => qdrant::Condition {
-            condition_one_of: Some(ConditionOneOf::Nested(qdrant::NestedCondition {
-                key: n.nested.key.clone(),
-                filter: Some(to_filter(&n.nested.filter)),
-            })),
-        },
-        FilterClause::Filter(f) => qdrant::Condition {
-            condition_one_of: Some(ConditionOneOf::Filter(compound_to_filter(f))),
-        },
-    }
+        FilterClause::IsNull(n) => ConditionOneOf::IsNull(qdrant::IsNullCondition {
+            key: n.is_null.key.clone(),
+        }),
+        FilterClause::IsEmpty(e) => ConditionOneOf::IsEmpty(qdrant::IsEmptyCondition {
+            key: e.is_empty.key.clone(),
+        }),
+        FilterClause::HasId(h) => ConditionOneOf::HasId(qdrant::HasIdCondition {
+            has_id: h.has_id.iter().map(to_point_id).collect(),
+        }),
+        FilterClause::HasVector(v) => ConditionOneOf::HasVector(qdrant::HasVectorCondition {
+            has_vector: v.has_vector.clone(),
+        }),
+        FilterClause::Nested(n) => ConditionOneOf::Nested(qdrant::NestedCondition {
+            key: n.nested.key.clone(),
+            filter: Some(to_filter(&n.nested.filter)?),
+        }),
+        FilterClause::Filter(f) => ConditionOneOf::Filter(compound_to_filter(f)?),
+    };
+    Ok(qdrant::Condition {
+        condition_one_of: Some(condition_one_of),
+    })
 }
 
-fn exact_list_match(values: &[serde_json::Value], any: bool) -> qdrant::Match {
+/// Convert an `IN`/`NOT IN` value list to the gRPC `Match`.
+///
+/// The pinned proto's `Match` carries either a repeated string list
+/// (`keywords` / `except_keywords`) or a repeated int64 list (`integers` /
+/// `except_integers`); there is no repeated bool or double list. Every entry
+/// must therefore be the same kind and representable as the target type.
+/// Mixed lists, non-integral floats, and `u64` values above `i64::MAX`
+/// produce a structured error instead of being silently dropped or wrapped
+/// into negative integers.
+fn exact_list_match(values: &[serde_json::Value], any: bool) -> Result<qdrant::Match, QqlError> {
     use qdrant::r#match::MatchValue as Mv;
+
+    let any_string = values.iter().any(|v| v.is_string());
     let all_strings = values.iter().all(|v| v.is_string());
-    let all_ints = values
-        .iter()
-        .all(|v| v.as_i64().is_some() || v.as_u64().is_some());
+    if any_string && !all_strings {
+        let offending = values
+            .iter()
+            .find(|v| !v.is_string())
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "non-string entry".to_string());
+        return Err(QqlError::validation(
+            "QQL-GRPC-LIST-TYPE",
+            format!(
+                "IN/NOT IN list mixes strings with non-string entry {offending}: the bundled Qdrant proto only supports homogeneous string or int64 lists"
+            ),
+            None,
+        ));
+    }
     if all_strings {
         let strings: Vec<String> = values
             .iter()
-            .filter_map(|v| v.as_str().map(String::from))
+            .map(|v| String::from(v.as_str().expect("guarded by all_strings")))
             .collect();
-        return qdrant::Match {
+        return Ok(qdrant::Match {
             match_value: Some(if any {
                 Mv::Keywords(qdrant::RepeatedStrings { strings })
             } else {
                 Mv::ExceptKeywords(qdrant::RepeatedStrings { strings })
             }),
-        };
+        });
     }
-    if all_ints {
-        let integers: Vec<i64> = values
-            .iter()
-            .filter_map(|v| v.as_i64().or_else(|| v.as_u64().map(|n| n as i64)))
-            .collect();
-        return qdrant::Match {
-            match_value: Some(if any {
-                Mv::Integers(qdrant::RepeatedIntegers { integers })
-            } else {
-                Mv::ExceptIntegers(qdrant::RepeatedIntegers { integers })
-            }),
-        };
-    }
-    // Mixed types: keep keywords for string-only entries (lossy but never invent ints).
-    // Prefer empty over wrong semantics when types mix — still map strings.
-    let strings: Vec<String> = values
+
+    // No strings: every entry must fit the proto's repeated int64 list.
+    // Integral floats map to integer matches (mirroring single-value
+    // `to_match`); anything else is a structured error.
+    let integers = values
         .iter()
-        .filter_map(|v| v.as_str().map(String::from))
-        .collect();
-    qdrant::Match {
+        .map(list_integer)
+        .collect::<Result<Vec<i64>, QqlError>>()?;
+    Ok(qdrant::Match {
         match_value: Some(if any {
-            Mv::Keywords(qdrant::RepeatedStrings { strings })
+            Mv::Integers(qdrant::RepeatedIntegers { integers })
         } else {
-            Mv::ExceptKeywords(qdrant::RepeatedStrings { strings })
+            Mv::ExceptIntegers(qdrant::RepeatedIntegers { integers })
         }),
-    }
+    })
 }
 
-fn to_match(mv: &MatchValue) -> qdrant::Match {
+/// Convert one `IN`/`NOT IN` entry to the int64 wire type, rejecting values
+/// the bundled proto cannot carry.
+fn list_integer(value: &serde_json::Value) -> Result<i64, QqlError> {
+    if let Some(n) = value.as_i64() {
+        return Ok(n);
+    }
+    if let Some(n) = value.as_u64() {
+        return i64::try_from(n).map_err(|_| {
+            QqlError::validation(
+                "QQL-GRPC-LIST-INT",
+                format!(
+                    "integer {n} in an IN/NOT IN list cannot be represented on the gRPC path: the bundled Qdrant proto stores match lists as int64 (max {})",
+                    i64::MAX
+                ),
+                None,
+            )
+        });
+    }
+    if let Some(f) = value.as_f64() {
+        // Mirror single-value `to_match`: an integral float is carried as an
+        // integer match (Qdrant compares payload numbers numerically).
+        let integral = f.is_finite()
+            && f.fract() == 0.0
+            && f >= i64::MIN as f64
+            && f <= i64::MAX as f64
+            && (f as i64) as f64 == f;
+        if integral {
+            return Ok(f as i64);
+        }
+        return Err(QqlError::validation(
+            "QQL-GRPC-LIST-TYPE",
+            format!(
+                "IN/NOT IN list entry {value} cannot be represented on the gRPC path: the bundled Qdrant proto only supports homogeneous string or int64 lists; use an exact integer value or a RANGE filter"
+            ),
+            None,
+        ));
+    }
+    Err(QqlError::validation(
+        "QQL-GRPC-LIST-TYPE",
+        format!(
+            "IN/NOT IN list entry {value} cannot be represented on the gRPC path: the bundled Qdrant proto only supports homogeneous string or int64 lists"
+        ),
+        None,
+    ))
+}
+
+fn to_match(mv: &MatchValue) -> Result<qdrant::Match, QqlError> {
     use qdrant::r#match::MatchValue as Mv;
     match mv {
         MatchValue::Value { value } => {
             if let Some(s) = value.as_str() {
-                qdrant::Match {
+                Ok(qdrant::Match {
                     match_value: Some(Mv::Keyword(s.into())),
-                }
+                })
             } else if let Some(b) = value.as_bool() {
-                qdrant::Match {
+                Ok(qdrant::Match {
                     match_value: Some(Mv::Boolean(b)),
-                }
+                })
             } else if let Some(n) = value.as_i64() {
-                qdrant::Match {
+                Ok(qdrant::Match {
                     match_value: Some(Mv::Integer(n)),
+                })
+            } else if let Some(f) = value.as_f64() {
+                // The pinned proto's `Match` has no `double_value` field, so a
+                // float equality filter (`WHERE x = 1.5`) has no exact wire
+                // representation. An integral value can be carried as an
+                // integer match (Qdrant compares payload numbers numerically);
+                // anything else returns a structured error instead of emitting
+                // an empty `Match` and silently matching nothing.
+                let integral = f.is_finite()
+                    && f.fract() == 0.0
+                    && f >= i64::MIN as f64
+                    && f <= i64::MAX as f64
+                    && (f as i64) as f64 == f;
+                if integral {
+                    Ok(qdrant::Match {
+                        match_value: Some(Mv::Integer(f as i64)),
+                    })
+                } else {
+                    Err(QqlError::validation(
+                        "QQL-GRPC-FLOAT-MATCH",
+                        format!(
+                            "float equality value {f} cannot be represented on the gRPC path: the bundled Qdrant proto's Match has no double field; use a RANGE filter or an exact integer value"
+                        ),
+                        None,
+                    ))
                 }
             } else {
-                qdrant::Match { match_value: None }
+                Err(QqlError::validation(
+                    "QQL-GRPC-MATCH-VALUE",
+                    format!(
+                        "match value {} cannot be represented on the gRPC path",
+                        value
+                    ),
+                    None,
+                ))
             }
         }
-        MatchValue::Text { text } => qdrant::Match {
+        MatchValue::Text { text } => Ok(qdrant::Match {
             match_value: Some(Mv::Text(text.clone())),
-        },
-        MatchValue::TextAny { text } => qdrant::Match {
+        }),
+        MatchValue::TextAny { text } => Ok(qdrant::Match {
             match_value: Some(Mv::TextAny(text.clone())),
-        },
+        }),
         MatchValue::Any { any } => exact_list_match(any, true),
         MatchValue::Except { except } => exact_list_match(except, false),
-        MatchValue::Phrase { phrase } => qdrant::Match {
+        MatchValue::Phrase { phrase } => Ok(qdrant::Match {
             match_value: Some(Mv::Phrase(phrase.clone())),
-        },
+        }),
     }
 }
 
@@ -3276,5 +3453,450 @@ mod tests {
         }
         // Filter should be present
         assert!(qp.filter.is_some(), "filter should be set for WHERE clause");
+    }
+
+    /// RRF `k` + `weights` survive the gRPC conversion (regression: they were
+    /// silently dropped into a bare `Fusion(1)`).
+    #[test]
+    fn grpc_rrf_params_are_transmitted() {
+        let stmt = Parser::parse(
+            "QUERY HYBRID TEXT 'search' MODEL 'bge' DENSE dense SPARSE sparse FUSION RRF \
+             FROM docs PARAMS (rrf_k = 5, rrf_weights = [1.0, 0.5]) LIMIT 10;",
+        )
+        .unwrap();
+        let op = qql_plan::plan(&stmt).unwrap();
+        let (collection, req) = match &op {
+            qql_plan::PlannedOperation::Query {
+                collection,
+                request,
+            } => (collection, request),
+            other => panic!("expected Query, got {:?}", other),
+        };
+        let qp = to_query_points(req, collection).unwrap();
+        use qdrant::query::Variant as Qv;
+        match qp.query.as_ref().and_then(|q| q.variant.as_ref()) {
+            Some(Qv::Rrf(rrf)) => {
+                assert_eq!(rrf.k, Some(5), "rrf k must be transmitted");
+                assert_eq!(rrf.weights, vec![1.0, 0.5]);
+            }
+            other => panic!("expected Rrf variant, got {other:?}"),
+        }
+    }
+
+    /// RRF values that the pinned proto cannot represent exactly must produce
+    /// structured errors, never silent loss.
+    #[test]
+    fn grpc_rrf_unrepresentable_values_error() {
+        // k beyond uint32 range.
+        let stmt = Parser::parse(
+            "QUERY HYBRID TEXT 'search' MODEL 'bge' DENSE dense SPARSE sparse FUSION RRF \
+             FROM docs PARAMS (rrf_k = 4294967296) LIMIT 10;",
+        )
+        .unwrap();
+        let op = qql_plan::plan(&stmt).unwrap();
+        let (collection, req) = match &op {
+            qql_plan::PlannedOperation::Query {
+                collection,
+                request,
+            } => (collection, request),
+            other => panic!("expected Query, got {:?}", other),
+        };
+        let err = to_query_points(req, collection).unwrap_err();
+        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+        assert_eq!(err.code, "QQL-GRPC-RRF-K");
+        assert!(err.message.contains("rrf_k"));
+
+        // Weight that does not round-trip f64 → f32 exactly (0.1 in f32 is
+        // 0.10000000149011612…).
+        let stmt = Parser::parse(
+            "QUERY HYBRID TEXT 'search' MODEL 'bge' DENSE dense SPARSE sparse FUSION RRF \
+             FROM docs PARAMS (rrf_weights = [1.0, 0.1]) LIMIT 10;",
+        )
+        .unwrap();
+        let op = qql_plan::plan(&stmt).unwrap();
+        let (collection, req) = match &op {
+            qql_plan::PlannedOperation::Query {
+                collection,
+                request,
+            } => (collection, request),
+            other => panic!("expected Query, got {:?}", other),
+        };
+        let err = to_query_points(req, collection).unwrap_err();
+        assert_eq!(err.code, "QQL-GRPC-RRF-WEIGHT");
+        assert!(err.message.contains("0.1"));
+    }
+
+    /// Fusion methods must map to the correct proto enum values (RRF=0,
+    /// DBSF=1); previously "rrf" was mapped to 1 (DBSF) and "dbsf" to an
+    /// undefined 2.
+    #[test]
+    fn grpc_fusion_method_maps_to_correct_enum() {
+        use qdrant::query::Variant as Qv;
+
+        let stmt = Parser::parse(
+            "QUERY HYBRID TEXT 'search' MODEL 'bge' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10;",
+        )
+        .unwrap();
+        let op = qql_plan::plan(&stmt).unwrap();
+        let (collection, req) = match &op {
+            qql_plan::PlannedOperation::Query {
+                collection,
+                request,
+            } => (collection, request),
+            other => panic!("expected Query, got {:?}", other),
+        };
+        let qp = to_query_points(req, collection).unwrap();
+        match qp.query.as_ref().and_then(|q| q.variant.as_ref()) {
+            Some(Qv::Fusion(f)) => assert_eq!(*f, qdrant::Fusion::Rrf as i32),
+            other => panic!("expected Fusion(Rrf), got {other:?}"),
+        }
+
+        let stmt = Parser::parse(
+            "QUERY HYBRID TEXT 'search' MODEL 'bge' DENSE dense SPARSE sparse FUSION DBSF FROM docs LIMIT 10;",
+        )
+        .unwrap();
+        let op = qql_plan::plan(&stmt).unwrap();
+        let (collection, req) = match &op {
+            qql_plan::PlannedOperation::Query {
+                collection,
+                request,
+            } => (collection, request),
+            other => panic!("expected Query, got {:?}", other),
+        };
+        let qp = to_query_points(req, collection).unwrap();
+        match qp.query.as_ref().and_then(|q| q.variant.as_ref()) {
+            Some(Qv::Fusion(f)) => assert_eq!(*f, qdrant::Fusion::Dbsf as i32),
+            other => panic!("expected Fusion(Dbsf), got {other:?}"),
+        }
+    }
+
+    /// Float equality filters must not silently lower to an empty `Match`:
+    /// integral floats map to an integer match, non-integral floats produce a
+    /// structured error (the pinned proto's Match has no double field).
+    #[test]
+    fn grpc_float_equality_filter_is_explicit() {
+        // Non-integral float → structured error.
+        let stmt = Parser::parse(
+            "QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE rating = 1.5 LIMIT 5;",
+        )
+        .unwrap();
+        let op = qql_plan::plan(&stmt).unwrap();
+        let (collection, req) = match &op {
+            qql_plan::PlannedOperation::Query {
+                collection,
+                request,
+            } => (collection, request),
+            other => panic!("expected Query, got {:?}", other),
+        };
+        let err = to_query_points(req, collection).unwrap_err();
+        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+        assert_eq!(err.code, "QQL-GRPC-FLOAT-MATCH");
+        assert!(err.message.contains("1.5"));
+
+        // Integral float → integer match (numerically equivalent in Qdrant).
+        let stmt = Parser::parse(
+            "QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE rating = 2.0 LIMIT 5;",
+        )
+        .unwrap();
+        let op = qql_plan::plan(&stmt).unwrap();
+        let (collection, req) = match &op {
+            qql_plan::PlannedOperation::Query {
+                collection,
+                request,
+            } => (collection, request),
+            other => panic!("expected Query, got {:?}", other),
+        };
+        let qp = to_query_points(req, collection).unwrap();
+        let filter = qp.filter.expect("filter should be set");
+        let mv = filter.must[0]
+            .condition_one_of
+            .as_ref()
+            .and_then(|c| match c {
+                qdrant::condition::ConditionOneOf::Field(f) => f.r#match.as_ref(),
+                _ => None,
+            })
+            .expect("field match");
+        match mv.match_value.as_ref().unwrap() {
+            qdrant::r#match::MatchValue::Integer(n) => assert_eq!(*n, 2),
+            other => panic!("expected Integer(2), got {other:?}"),
+        }
+    }
+
+    /// GetPoints must wrap hits in `result.points` so hit extraction sees
+    /// them (B-3 regression); a bare `result` array would report 0 hits.
+    #[test]
+    fn grpc_get_points_envelope_keeps_hits_extractable() {
+        use crate::executor::dml::query::extract_search_hits;
+
+        let envelope = get_points_envelope(
+            vec![
+                serde_json::json!({"id": 1, "payload": {"title": "a"}}),
+                serde_json::json!({"id": 2, "payload": {"title": "b"}}),
+            ],
+            0.0,
+        );
+        assert_eq!(envelope["result"]["points"].as_array().unwrap().len(), 2);
+        let hits = extract_search_hits(&envelope);
+        assert_eq!(hits.len(), 2, "GetPoints hits must survive hit extraction");
+        assert_eq!(hits[0].id, "1");
+        assert_eq!(hits[1].id, "2");
+
+        // The empty case still yields zero hits, not an error.
+        let envelope = get_points_envelope(Vec::new(), 0.0);
+        assert_eq!(extract_search_hits(&envelope).len(), 0);
+    }
+
+    /// IN/NOT IN lists must be homogeneous and int64-representable: valid
+    /// string/integer lists survive, while mixed lists, non-integral floats,
+    /// and `u64` values above `i64::MAX` produce structured errors instead of
+    /// being silently dropped or wrapped into negative integers.
+    #[test]
+    fn grpc_exact_list_match_is_homogeneous_and_fallible() {
+        // Homogeneous string list → keywords.
+        let mv = to_match(&MatchValue::Any {
+            any: vec![serde_json::json!("a"), serde_json::json!("b")],
+        })
+        .unwrap();
+        match mv.match_value.unwrap() {
+            qdrant::r#match::MatchValue::Keywords(k) => {
+                assert_eq!(k.strings, vec!["a", "b"]);
+            }
+            other => panic!("expected Keywords, got {other:?}"),
+        }
+
+        // Homogeneous string list via Except → except_keywords.
+        let mv = to_match(&MatchValue::Except {
+            except: vec![serde_json::json!("a"), serde_json::json!("b")],
+        })
+        .unwrap();
+        match mv.match_value.unwrap() {
+            qdrant::r#match::MatchValue::ExceptKeywords(k) => {
+                assert_eq!(k.strings, vec!["a", "b"]);
+            }
+            other => panic!("expected ExceptKeywords, got {other:?}"),
+        }
+
+        // Homogeneous integer list (positive and negative) → integers.
+        let mv = to_match(&MatchValue::Any {
+            any: vec![
+                serde_json::json!(1),
+                serde_json::json!(-2),
+                serde_json::json!(3),
+            ],
+        })
+        .unwrap();
+        match mv.match_value.unwrap() {
+            qdrant::r#match::MatchValue::Integers(k) => {
+                assert_eq!(k.integers, vec![1, -2, 3]);
+            }
+            other => panic!("expected Integers, got {other:?}"),
+        }
+
+        // Homogeneous integer list via Except → except_integers.
+        let mv = to_match(&MatchValue::Except {
+            except: vec![serde_json::json!(10), serde_json::json!(20)],
+        })
+        .unwrap();
+        match mv.match_value.unwrap() {
+            qdrant::r#match::MatchValue::ExceptIntegers(k) => {
+                assert_eq!(k.integers, vec![10, 20]);
+            }
+            other => panic!("expected ExceptIntegers, got {other:?}"),
+        }
+
+        // Integral floats map to integer matches, mirroring single-value
+        // `WHERE x = 2.0` → Integer(2).
+        let mv = to_match(&MatchValue::Any {
+            any: vec![serde_json::json!(2.0), serde_json::json!(3.0)],
+        })
+        .unwrap();
+        match mv.match_value.unwrap() {
+            qdrant::r#match::MatchValue::Integers(k) => {
+                assert_eq!(k.integers, vec![2, 3]);
+            }
+            other => panic!("expected Integers, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn grpc_exact_list_match_rejects_unrepresentable() {
+        // Mixed string + integer list → structured error, not a silent drop
+        // of the integer entry.
+        let err = to_match(&MatchValue::Any {
+            any: vec![serde_json::json!("a"), serde_json::json!(1)],
+        })
+        .unwrap_err();
+        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+        assert_eq!(err.code, "QQL-GRPC-LIST-TYPE");
+        assert!(err.message.contains("mixes strings"), "{err}");
+
+        // Non-integral floats have no list encoding → structured error.
+        let err = to_match(&MatchValue::Any {
+            any: vec![serde_json::json!(1.5), serde_json::json!(2.5)],
+        })
+        .unwrap_err();
+        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+        assert_eq!(err.code, "QQL-GRPC-LIST-TYPE");
+        assert!(err.message.contains("1.5"), "{err}");
+
+        // A float mixed into a string list is caught as heterogeneous.
+        let err = to_match(&MatchValue::Except {
+            except: vec![serde_json::json!("a"), serde_json::json!(1.5)],
+        })
+        .unwrap_err();
+        assert_eq!(err.code, "QQL-GRPC-LIST-TYPE");
+        assert!(err.message.contains("mixes strings"), "{err}");
+
+        // Booleans are unrepresentable in either list form.
+        let err = to_match(&MatchValue::Any {
+            any: vec![serde_json::json!(true), serde_json::json!(false)],
+        })
+        .unwrap_err();
+        assert_eq!(err.code, "QQL-GRPC-LIST-TYPE");
+        assert!(err.message.contains("true"), "{err}");
+
+        // u64 above i64::MAX must error, never wrap into a negative integer.
+        let oversized = i64::MAX as u64 + 1;
+        let err = to_match(&MatchValue::Any {
+            any: vec![serde_json::json!(oversized)],
+        })
+        .unwrap_err();
+        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+        assert_eq!(err.code, "QQL-GRPC-LIST-INT");
+        assert!(err.message.contains("9223372036854775808"), "{err}");
+    }
+
+    /// Errors from list conversion must propagate through the full filter
+    /// path (`to_filter` → `to_condition` → `to_match`).
+    #[test]
+    fn grpc_in_list_errors_propagate_through_filter() {
+        let stmt = Parser::parse(
+            "QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE status IN ('a', 1) LIMIT 5;",
+        )
+        .unwrap();
+        let op = qql_plan::plan(&stmt).unwrap();
+        let (collection, req) = match &op {
+            qql_plan::PlannedOperation::Query {
+                collection,
+                request,
+            } => (collection, request),
+            other => panic!("expected Query, got {other:?}"),
+        };
+        let err = to_query_points(req, collection).unwrap_err();
+        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+        assert_eq!(err.code, "QQL-GRPC-LIST-TYPE");
+
+        // Non-integral floats in IN also propagate.
+        let stmt = Parser::parse(
+            "QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE rating IN (1.5, 2.5) LIMIT 5;",
+        )
+        .unwrap();
+        let op = qql_plan::plan(&stmt).unwrap();
+        let (collection, req) = match &op {
+            qql_plan::PlannedOperation::Query {
+                collection,
+                request,
+            } => (collection, request),
+            other => panic!("expected Query, got {other:?}"),
+        };
+        let err = to_query_points(req, collection).unwrap_err();
+        assert_eq!(err.code, "QQL-GRPC-LIST-TYPE");
+        assert!(err.message.contains("1.5"), "{err}");
+    }
+
+    /// Valid homogeneous lists survive the full parser → plan → gRPC path.
+    #[test]
+    fn grpc_in_list_homogeneous_lists_survive_full_path() {
+        // String list → keywords.
+        let stmt = Parser::parse(
+            "QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE status IN ('a', 'b') LIMIT 5;",
+        )
+        .unwrap();
+        let op = qql_plan::plan(&stmt).unwrap();
+        let (collection, req) = match &op {
+            qql_plan::PlannedOperation::Query {
+                collection,
+                request,
+            } => (collection, request),
+            other => panic!("expected Query, got {other:?}"),
+        };
+        let qp = to_query_points(req, collection).unwrap();
+        let filter = qp.filter.expect("filter should be set");
+        let mv = filter.must[0]
+            .condition_one_of
+            .as_ref()
+            .and_then(|c| match c {
+                qdrant::condition::ConditionOneOf::Field(f) => f.r#match.as_ref(),
+                _ => None,
+            })
+            .expect("field match");
+        match mv.match_value.as_ref().unwrap() {
+            qdrant::r#match::MatchValue::Keywords(k) => {
+                assert_eq!(k.strings, vec!["a", "b"]);
+            }
+            other => panic!("expected Keywords, got {other:?}"),
+        }
+
+        // Integer list → integers.
+        let stmt = Parser::parse(
+            "QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE year IN (2024, 2025) LIMIT 5;",
+        )
+        .unwrap();
+        let op = qql_plan::plan(&stmt).unwrap();
+        let (collection, req) = match &op {
+            qql_plan::PlannedOperation::Query {
+                collection,
+                request,
+            } => (collection, request),
+            other => panic!("expected Query, got {other:?}"),
+        };
+        let qp = to_query_points(req, collection).unwrap();
+        let filter = qp.filter.expect("filter should be set");
+        let mv = filter.must[0]
+            .condition_one_of
+            .as_ref()
+            .and_then(|c| match c {
+                qdrant::condition::ConditionOneOf::Field(f) => f.r#match.as_ref(),
+                _ => None,
+            })
+            .expect("field match");
+        match mv.match_value.as_ref().unwrap() {
+            qdrant::r#match::MatchValue::Integers(k) => {
+                assert_eq!(k.integers, vec![2024, 2025]);
+            }
+            other => panic!("expected Integers, got {other:?}"),
+        }
+
+        // NOT IN lowers to a `must_not` condition that still carries the
+        // keyword list.
+        let stmt = Parser::parse(
+            "QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE status NOT IN ('deleted', 'archived') LIMIT 5;",
+        )
+        .unwrap();
+        let op = qql_plan::plan(&stmt).unwrap();
+        let (collection, req) = match &op {
+            qql_plan::PlannedOperation::Query {
+                collection,
+                request,
+            } => (collection, request),
+            other => panic!("expected Query, got {other:?}"),
+        };
+        let qp = to_query_points(req, collection).unwrap();
+        let filter = qp.filter.expect("filter should be set");
+        assert_eq!(filter.must_not.len(), 1, "NOT IN should lower to must_not");
+        let mv = filter.must_not[0]
+            .condition_one_of
+            .as_ref()
+            .and_then(|c| match c {
+                qdrant::condition::ConditionOneOf::Field(f) => f.r#match.as_ref(),
+                _ => None,
+            })
+            .expect("field match");
+        match mv.match_value.as_ref().unwrap() {
+            qdrant::r#match::MatchValue::Keywords(k) => {
+                assert_eq!(k.strings, vec!["deleted", "archived"]);
+            }
+            other => panic!("expected Keywords, got {other:?}"),
+        }
     }
 }

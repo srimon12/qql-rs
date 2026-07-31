@@ -50,7 +50,24 @@ fn usage() -> &'static str {
 }
 
 fn check(spec_dir: &Path, require_expected: bool) -> Result<(), Box<dyn Error>> {
-    let report = inspect(spec_dir, require_expected)?;
+    let mut report = inspect(spec_dir, require_expected)?;
+    if require_expected {
+        // Stale-snapshot safety: an expected snapshot without a matching
+        // fixture means the fixture was deleted/renamed; `check` must fail
+        // until the stale file is removed (or regenerated).
+        let valid_dir = spec_dir.join("fixtures/valid");
+        let expected_dir = spec_dir.join("fixtures/expected");
+        for stale in stale_snapshots(&valid_dir, &expected_dir)? {
+            report.failures.push(format!(
+                "{}: stale AST snapshot (no matching fixture); remove it or run `cargo run -p qql-conformance -- generate`",
+                stale.display()
+            ));
+        }
+    }
+    finish_check(&report)
+}
+
+fn finish_check(report: &Report) -> Result<(), Box<dyn Error>> {
     if report.failures.is_empty() {
         println!(
             "conformant: {} valid files ({} statements), {} invalid cases, {} AST snapshots",
@@ -91,16 +108,16 @@ fn generate(spec_dir: &Path) -> Result<(), Box<dyn Error>> {
         let statements =
             parse_and_validate(&source).map_err(|error| format_parse_failure(&fixture, &error))?;
         let json = serde_json::to_string_pretty(&canonical_ast(&statements)?)?;
-        let output = expected_dir.join(
-            fixture
-                .file_stem()
-                .expect("fixture path has a file stem")
-                .to_string_lossy()
-                .to_string()
-                + ".json",
-        );
+        let output = expected_path(&fixture, &valid_dir, &expected_dir);
         write_atomic(&output, &(json + "\n"))?;
         written += 1;
+    }
+
+    // Stale-snapshot safety: remove expected snapshots whose fixture has been
+    // deleted or renamed, so a dead snapshot cannot keep passing `check`.
+    for stale in stale_snapshots(&valid_dir, &expected_dir)? {
+        fs::remove_file(&stale)?;
+        println!("removed stale snapshot {}", stale.display());
     }
 
     println!(
@@ -135,7 +152,13 @@ fn inspect(spec_dir: &Path, require_expected: bool) -> Result<Report, Box<dyn Er
             Ok(statements) => {
                 report.valid_statements += statements.len();
                 if require_expected {
-                    compare_expected(&fixture, &expected_dir, &statements, &mut report)?;
+                    compare_expected(
+                        &fixture,
+                        &valid_dir,
+                        &expected_dir,
+                        &statements,
+                        &mut report,
+                    )?;
                 }
             }
             Err(error) => report.failures.push(format_parse_failure(&fixture, &error)),
@@ -190,18 +213,12 @@ fn parse_and_validate(source: &str) -> Result<Vec<qql_core::ast::Stmt>, QqlError
 
 fn compare_expected(
     fixture: &Path,
+    valid_dir: &Path,
     expected_dir: &Path,
     statements: &[qql_core::ast::Stmt],
     report: &mut Report,
 ) -> Result<(), Box<dyn Error>> {
-    let expected = expected_dir.join(
-        fixture
-            .file_stem()
-            .expect("fixture path has a file stem")
-            .to_string_lossy()
-            .to_string()
-            + ".json",
-    );
+    let expected = expected_path(fixture, valid_dir, expected_dir);
     if !expected.is_file() {
         report
             .failures
@@ -330,14 +347,68 @@ fn finish_case(cases: &mut Vec<InvalidCase>, case: Option<InvalidCase>) -> Resul
     Ok(())
 }
 
+/// Recursively collect `*.qql` files under `directory` (sorted).
 fn qql_files(directory: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>> {
-    let mut files = fs::read_dir(directory)?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.extension() == Some(OsStr::new("qql")))
-        .collect::<Vec<_>>();
+    let mut files = Vec::new();
+    collect_qql_files(directory, &mut files)?;
     files.sort();
     Ok(files)
+}
+
+fn collect_qql_files(directory: &Path, out: &mut Vec<PathBuf>) -> Result<(), Box<dyn Error>> {
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_qql_files(&path, out)?;
+        } else if path.extension() == Some(OsStr::new("qql")) {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
+/// Expected snapshot path for a fixture, preserving the fixture's relative
+/// location under `fixtures/valid` (so nested fixture directories work).
+fn expected_path(fixture: &Path, valid_dir: &Path, expected_dir: &Path) -> PathBuf {
+    let relative = fixture.strip_prefix(valid_dir).unwrap_or(fixture);
+    expected_dir.join(relative).with_extension("json")
+}
+
+/// Expected snapshots whose `*.qql` fixture no longer exists.
+fn stale_snapshots(valid_dir: &Path, expected_dir: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+    let mut stale = Vec::new();
+    for entry in qql_json_files(expected_dir)? {
+        let relative = entry
+            .strip_prefix(expected_dir)
+            .unwrap_or(&entry)
+            .with_extension("qql");
+        let fixture = valid_dir.join(relative);
+        if !fixture.is_file() {
+            stale.push(entry);
+        }
+    }
+    Ok(stale)
+}
+
+fn qql_json_files(directory: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+    let mut files = Vec::new();
+    collect_qql_json_files(directory, &mut files)?;
+    files.sort();
+    Ok(files)
+}
+
+fn collect_qql_json_files(directory: &Path, out: &mut Vec<PathBuf>) -> Result<(), Box<dyn Error>> {
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_qql_json_files(&path, out)?;
+        } else if path.extension() == Some(OsStr::new("json")) {
+            out.push(path);
+        }
+    }
+    Ok(())
 }
 
 fn ensure_directory(path: &Path) -> Result<(), Box<dyn Error>> {
@@ -367,6 +438,171 @@ fn write_atomic(path: &Path, contents: &str) -> Result<(), Box<dyn Error>> {
     fs::write(&temporary, contents)?;
     fs::rename(temporary, path)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod grammar_gate {
+    // Executable grammar coverage (F-4): compile the canonical
+    // language/v1/grammar.pest with pest (test-only dev-dependencies; pest is
+    // never a runtime dependency of qql-core) and assert the fixture corpus
+    // against it, so grammar↔runtime drift becomes a test failure.
+
+    use pest::Parser;
+    use pest_derive::Parser as PestParser;
+    use qql_core::parser::Parser as QqlParser;
+    use std::path::{Path, PathBuf};
+
+    #[derive(PestParser)]
+    #[grammar = "../../language/v1/grammar.pest"]
+    struct QqlGrammar;
+
+    fn spec_dir() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../language/v1")
+    }
+
+    fn qql_files(dir: &Path) -> Vec<PathBuf> {
+        let mut out = Vec::new();
+        collect(dir, &mut out);
+        out.sort();
+        out
+    }
+
+    fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                collect(&path, out);
+            } else if path.extension().is_some_and(|e| e == "qql") {
+                out.push(path);
+            }
+        }
+    }
+
+    #[test]
+    fn every_valid_fixture_parses_as_script() {
+        let valid = spec_dir().join("fixtures/valid");
+        let mut failures = Vec::new();
+        for fixture in qql_files(&valid) {
+            let source = std::fs::read_to_string(&fixture).unwrap();
+            if QqlGrammar::parse(Rule::script, &source).is_err() {
+                failures.push(fixture.display().to_string());
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "{} valid fixture(s) are rejected by grammar.pest:\n{}",
+            failures.len(),
+            failures.join("\n")
+        );
+    }
+
+    #[test]
+    fn grammar_rejected_cases_are_rejected_by_the_runtime() {
+        // The grammar is the canonical contract: anything it rejects must also
+        // be rejected by the reference parser. Cases the grammar accepts are
+        // validation-level rejections pinned by their @error codes.
+        let spec = spec_dir();
+        let mut checked = 0;
+        for fixture in qql_files(&spec.join("fixtures/invalid")) {
+            let source = std::fs::read_to_string(&fixture).unwrap();
+            let cases = super::invalid_cases(&source).unwrap();
+            for case in cases {
+                if QqlGrammar::parse(Rule::single_statement, &case.source).is_ok() {
+                    continue; // grammar-accepted: validation/plan-level rejection
+                }
+                checked += 1;
+                assert!(
+                    QqlParser::parse_all(&case.source).is_err(),
+                    "grammar rejects case '{}' ({}) but the runtime accepts it",
+                    case.name,
+                    fixture.display()
+                );
+            }
+        }
+        assert!(
+            checked > 0,
+            "expected at least one grammar-rejected invalid case"
+        );
+    }
+
+    #[test]
+    fn grammar_and_runtime_agree_on_aligned_divergences() {
+        // Cases from the grammar-alignment audit (F-2, F-5) fixed in this pass:
+        // grammar and runtime must now agree on every input.
+        let both_reject = [
+            // F-5a count clause order (grammar order: WHERE → SHARD → WITH).
+            "COUNT FROM docs WITH (exact = true) SHARD 'x';",
+            "COUNT FROM docs SHARD 'a' SHARD 'b';",
+            // F-5b closed field_type enum.
+            "CREATE INDEX ON COLLECTION docs FOR title TYPE banana;",
+            // F-5c feedback params must be exactly a, b, c in order.
+            "QUERY RELEVANCE FEEDBACK TARGET TEXT 'x' FEEDBACK ((TEXT 'y', 1.0)) STRATEGY NAIVE (a = 1, c = 2, b = 3) FROM docs LIMIT 5;",
+            "QUERY RELEVANCE FEEDBACK TARGET TEXT 'x' FEEDBACK ((TEXT 'y', 1.0)) STRATEGY NAIVE (a = 1, b = 2, c = 3, d = 4) FROM docs LIMIT 5;",
+            // F-5d rerank_input is TEXT | VECTOR | POINT only.
+            "QUERY RERANK 'x' MODEL 'm' FROM docs LIMIT 5;",
+            "QUERY RERANK IMAGE 'a.png' MODEL 'm' FROM docs LIMIT 5;",
+            // F-5h lowercase raw prefix only.
+            "QUERY R'a\\nb' FROM docs LIMIT 5;",
+            // F-5i dotted segments start with a letter or `_`.
+            "QUERY TEXT 'x' FROM docs WHERE a.$b = 1 LIMIT 5;",
+            // F-14 COUNT config is exactly `exact = true|false`.
+            "COUNT FROM docs WITH (exact = 5);",
+            "COUNT FROM docs WITH (exact = 'yes');",
+            "COUNT FROM docs WITH (exact = true, foo = 1);",
+            "COUNT FROM docs WITH (foo = 1);",
+            // F-15 CREATE SHARD KEY config is exactly positive-integer
+            // shards_number / replication_factor.
+            "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (shards_number = 0);",
+            "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (shards_number = -1);",
+            "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (shards_number = 2.0);",
+            "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (replication_factor = 'three');",
+            "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (shards_number = 2, foo = 1);",
+        ];
+        let both_accept = [
+            // F-2 `''''` is the SQL-escaped one-apostrophe string.
+            "UPSERT INTO docs VALUES {id: 1, text: ''''};",
+            // F-1 triple-quoted strings preserve contents verbatim.
+            "UPSERT INTO docs VALUES {id: 1, text: '''a\\nb'''};",
+            "UPSERT INTO docs VALUES {id: 1, text: '''it''s'''};",
+            // F-5a valid grammar order.
+            "COUNT FROM docs WHERE active = true SHARD 'x' WITH (exact = true);",
+            // F-5e embed directive kinds match single_embedding_spec.
+            "UPSERT INTO docs VALUES {id: 1, text: 'hello'} EMBED text INTO v USING MULTI MODEL 'm';",
+            "UPSERT INTO docs VALUES {id: 1, text: 'hello'} EMBED text INTO v USING IMAGE MODEL 'm';",
+            // F-5g consistency accepts non-negative factors and keywords.
+            "QUERY TEXT 'x' FROM docs PARAMS (consistency = 0) LIMIT 5;",
+            "QUERY TEXT 'x' FROM docs PARAMS (consistency = majority) LIMIT 5;",
+            // F-14/F-15 strict config shapes (case-insensitive keys; quoted
+            // keys stay aligned with the reference parser's config blocks).
+            "COUNT FROM docs WITH (exact = true);",
+            "COUNT FROM docs WITH (Exact = FALSE);",
+            "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (shards_number = 2);",
+            "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (replication_factor = 3);",
+            "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (SHARDS_NUMBER = 4, REPLICATION_FACTOR = 2);",
+            "CREATE SHARD KEY 'a' ON COLLECTION docs WITH ('shards_number' = 2);",
+        ];
+
+        for source in both_reject {
+            assert!(
+                QqlGrammar::parse(Rule::single_statement, source).is_err(),
+                "grammar should reject: {source}"
+            );
+            assert!(
+                QqlParser::parse_all(source).is_err(),
+                "runtime should reject: {source}"
+            );
+        }
+        for source in both_accept {
+            assert!(
+                QqlGrammar::parse(Rule::single_statement, source).is_ok(),
+                "grammar should accept: {source}"
+            );
+            assert!(
+                QqlParser::parse_all(source).is_ok(),
+                "runtime should accept: {source}"
+            );
+        }
+    }
 }
 
 #[cfg(test)]

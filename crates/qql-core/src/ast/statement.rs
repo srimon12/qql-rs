@@ -698,7 +698,6 @@ pub struct UpdatePayloadStmt {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize))]
 pub enum Stmt {
     Query(Box<QueryStmt>),
     Scroll(Box<ScrollStmt>),
@@ -752,6 +751,11 @@ impl serde::Serialize for Stmt {
             Stmt::DropCollection(s) => {
                 serializer.serialize_newtype_variant("Stmt", 9, "DropCollection", s)
             }
+            // Unit variant. The serialized form is the empty-object tag
+            // `{"ShowCollections": {}}` (kept for backward compatibility with
+            // consumers that already emit that shape). The manual
+            // `Deserialize` accepts both this form and the derived string
+            // form `"ShowCollections"`, so serde round-trips.
             Stmt::ShowCollections => {
                 let mut map = serializer.serialize_map(Some(1))?;
                 let empty = std::collections::BTreeMap::<String, String>::new();
@@ -782,5 +786,108 @@ impl serde::Serialize for Stmt {
             }
             Stmt::Count(s) => serializer.serialize_newtype_variant("Stmt", 19, "Count", s),
         }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for Stmt {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use core::fmt;
+        use serde::de::{Error as _, IgnoredAny, MapAccess, Visitor};
+
+        struct StmtVisitor;
+
+        impl<'de> Visitor<'de> for StmtVisitor {
+            type Value = Stmt;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("an externally tagged QQL statement")
+            }
+
+            /// Derived externally-tagged form of the unit variant.
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                if value == "ShowCollections" {
+                    Ok(Stmt::ShowCollections)
+                } else {
+                    Err(E::unknown_variant(value, &["ShowCollections"]))
+                }
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let key = map
+                    .next_key::<alloc::string::String>()?
+                    .ok_or_else(|| A::Error::custom("expected a statement tag"))?;
+                let stmt = match key.as_str() {
+                    "Query" => Stmt::Query(map.next_value()?),
+                    "Scroll" => Stmt::Scroll(map.next_value()?),
+                    "Upsert" => Stmt::Upsert(map.next_value()?),
+                    "CreateCollection" => Stmt::CreateCollection(map.next_value()?),
+                    "CreateIndex" => Stmt::CreateIndex(map.next_value()?),
+                    "DropIndex" => Stmt::DropIndex(map.next_value()?),
+                    "CreateShardKey" => Stmt::CreateShardKey(map.next_value()?),
+                    "DropShardKey" => Stmt::DropShardKey(map.next_value()?),
+                    "AlterCollection" => Stmt::AlterCollection(map.next_value()?),
+                    "DropCollection" => Stmt::DropCollection(map.next_value()?),
+                    // Canonical serialized form (`{"ShowCollections": {}}`);
+                    // the payload is ignored, mirroring the derived impl's
+                    // permissive unit-variant handling.
+                    "ShowCollections" => {
+                        map.next_value::<IgnoredAny>()?;
+                        Stmt::ShowCollections
+                    }
+                    "ShowCollection" => Stmt::ShowCollection(map.next_value()?),
+                    "ShowShardKeys" => Stmt::ShowShardKeys(map.next_value()?),
+                    "Delete" => Stmt::Delete(map.next_value()?),
+                    "ClearPayload" => Stmt::ClearPayload(map.next_value()?),
+                    "DeletePayload" => Stmt::DeletePayload(map.next_value()?),
+                    "DeleteVector" => Stmt::DeleteVector(map.next_value()?),
+                    "UpdateVector" => Stmt::UpdateVector(map.next_value()?),
+                    "UpdatePayload" => Stmt::UpdatePayload(map.next_value()?),
+                    "Count" => Stmt::Count(map.next_value()?),
+                    _ => {
+                        return Err(A::Error::unknown_variant(
+                            &key,
+                            &[
+                                "Query",
+                                "Scroll",
+                                "Upsert",
+                                "CreateCollection",
+                                "CreateIndex",
+                                "DropIndex",
+                                "CreateShardKey",
+                                "DropShardKey",
+                                "AlterCollection",
+                                "DropCollection",
+                                "ShowCollections",
+                                "ShowCollection",
+                                "ShowShardKeys",
+                                "Delete",
+                                "ClearPayload",
+                                "DeletePayload",
+                                "DeleteVector",
+                                "UpdateVector",
+                                "UpdatePayload",
+                                "Count",
+                            ],
+                        ));
+                    }
+                };
+                if map.next_key::<IgnoredAny>()?.is_some() {
+                    return Err(A::Error::custom("duplicate statement tag"));
+                }
+                Ok(stmt)
+            }
+        }
+
+        deserializer.deserialize_any(StmtVisitor)
     }
 }

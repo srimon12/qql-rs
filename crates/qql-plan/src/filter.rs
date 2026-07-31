@@ -41,15 +41,6 @@ pub fn top_level_filter(filter: &FilterExpr) -> FilterExpression {
     }
 }
 
-/// Deprecated alias: `shard_key` argument is ignored. Prefer `top_level_filter`.
-/// Routing belongs on the request (`CountRequest.shard_key`, `QueryRequest.shard_key`, …).
-pub fn top_level_filter_with_shard(
-    filter: &FilterExpr,
-    _shard_key: Option<&str>,
-) -> FilterExpression {
-    top_level_filter(filter)
-}
-
 fn lower_clause(filter: &FilterExpr) -> FilterClause {
     match filter {
         FilterExpr::PointId(predicate) => lower_point_id(predicate),
@@ -305,6 +296,22 @@ mod tests {
     fn assert_json(lowered: &FilterExpression, expected: serde_json::Value) {
         let json = serde_json::to_value(lowered).unwrap();
         assert_eq!(json, expected);
+    }
+
+    #[test]
+    fn top_level_filter_normalizes_single_clause() {
+        // Guards the replacement for the removed `top_level_filter_with_shard`:
+        // a single clause lowers to a compound envelope, and shard routing stays
+        // on the operation request (never on the filter).
+        let f = FilterExpr::Compare {
+            field: "status".into(),
+            op: ComparisonOp::Eq,
+            value: Value::Str("active".into()),
+        };
+        assert_json(
+            &top_level_filter(&f),
+            json!({"must": [{"key": "status", "match": {"value": "active"}}]}),
+        );
     }
 
     #[test]

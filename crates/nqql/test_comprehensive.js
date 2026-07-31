@@ -1,7 +1,8 @@
 'use strict';
 
 // ============================================================================
-// COMPREHENSIVE TEST SUITE FOR @veristamp/nqql v0.1.2
+// COMPREHENSIVE TEST SUITE FOR @veristamp/nqql
+// (package version lives in package.json — `nqql.version` at runtime)
 // ============================================================================
 // Requires: Qdrant running at http://localhost:6333
 // Run: node test_comprehensive.js

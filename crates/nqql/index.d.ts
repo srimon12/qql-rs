@@ -1,4 +1,6 @@
 export class Stmt {
+  /** Parse a QQL string into a statement handle (mirrors `qql-wasm`). */
+  constructor(input: string);
   injectFilter(field: string, op: string, value: unknown): void;
   toObject(): unknown;
   toJson(): string;
@@ -42,11 +44,37 @@ export interface ClientOptions {
 }
 
 export interface HttpEmbedderOptions {
+  /** OpenAI-compatible dense embedding endpoint */
   endpoint: string;
   apiKey?: string;
   api_key?: string;
   model: string;
   dimension: number;
+  /** Multi/ColBERT embedding endpoint (requires `endpoint`) */
+  multiEndpoint?: string;
+  multi_endpoint?: string;
+  multiApiKey?: string;
+  multi_api_key?: string;
+  multiModel?: string;
+  multi_model?: string;
+  multiDimension?: number;
+  multi_dimension?: number;
+  /** Image/CLIP embedding endpoint (requires `endpoint`) */
+  imageEndpoint?: string;
+  image_endpoint?: string;
+  imageApiKey?: string;
+  image_api_key?: string;
+  imageModel?: string;
+  image_model?: string;
+  imageDimension?: number;
+  image_dimension?: number;
+  /** Cross-encoder reranking endpoint (requires `endpoint`) */
+  rerankEndpoint?: string;
+  rerank_endpoint?: string;
+  rerankApiKey?: string;
+  rerank_api_key?: string;
+  rerankModel?: string;
+  rerank_model?: string;
 }
 
 export class HttpEmbedder {

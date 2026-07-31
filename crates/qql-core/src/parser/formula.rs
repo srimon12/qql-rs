@@ -104,6 +104,12 @@ fn parse_formula_constant(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, QqlErro
         .text
         .parse()
         .map_err(|_| QqlError::syntax("invalid number format in formula", tok.pos))?;
+    if !v.is_finite() {
+        return Err(QqlError::syntax(
+            alloc::format!("formula number '{}' is not finite", tok.text),
+            tok.pos,
+        ));
+    }
     Ok(FormulaExpr::Constant { value: v })
 }
 

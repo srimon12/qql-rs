@@ -103,10 +103,10 @@ pub fn lower_formula_expr(expr: &qql_core::ast::FormulaExpr) -> serde_json::Valu
         }
         qql_core::ast::FormulaExpr::Case { cond, then_, else_ } => {
             let cond_val = match lower_filter(cond) {
-                FilterExpression::Single(clause) => {
-                    serde_json::to_value(&*clause).unwrap_or_default()
-                }
-                FilterExpression::Compound(comp) => serde_json::to_value(comp).unwrap_or_default(),
+                FilterExpression::Single(clause) => crate::plan::serialize_body(&*clause)
+                    .expect("formula CASE condition clause serialization failed"),
+                FilterExpression::Compound(comp) => crate::plan::serialize_body(&comp)
+                    .expect("formula CASE condition compound serialization failed"),
             };
             // OpenAPI Expression accepts a Condition as a boolean 0/1 term.
             // Encode CASE as: condition * then + (1 - condition) * else.
@@ -147,8 +147,8 @@ pub fn lower_formula_expr(expr: &qql_core::ast::FormulaExpr) -> serde_json::Valu
     }
 }
 
-pub fn lower_query_expr(expr: &QueryExpr) -> QueryVariant {
-    match expr {
+pub fn lower_query_expr(expr: &QueryExpr) -> Result<QueryVariant, QqlError> {
+    Ok(match expr {
         QueryExpr::Nearest { input, mmr, .. } => QueryVariant::Nearest(NearestQuery {
             nearest: lower_query_input(input),
             mmr: mmr.as_ref().map(|m| MmrQueryParams {
@@ -279,53 +279,68 @@ pub fn lower_query_expr(expr: &QueryExpr) -> QueryVariant {
             nearest: lower_query_input(input),
             mmr: None,
         }),
-        // Handled only by plan() special-cases — never lower as a QueryVariant.
+        // Points / CrossRerank are planned by plan() special-cases and cannot
+        // be represented as a QueryVariant. Reaching this arm means one leaked
+        // into a prefetch source — a structured error, never a panic.
         QueryExpr::CrossRerank { .. } | QueryExpr::Points { .. } => {
-            unreachable!(
-                "CrossRerank/Points must be planned via PlannedOperation special-cases, not lower_query_expr"
-            )
+            return Err(QqlError::validation(
+                "QQL-PLAN-UNSUPPORTED-PREFETCH",
+                "POINTS / CROSS RERANK are not supported inside PREFETCH",
+                None,
+            ));
         }
-    }
+    })
 }
 
-pub fn lower_prefetch(prefetch: &qql_core::ast::Prefetch) -> PrefetchRequest {
+pub fn lower_prefetch(prefetch: &qql_core::ast::Prefetch) -> Result<PrefetchRequest, QqlError> {
     lower_prefetch_with_ctes(prefetch, &[])
 }
 
 pub fn lower_prefetch_with_ctes(
     prefetch: &qql_core::ast::Prefetch,
     ctes: &[qql_core::ast::Cte],
-) -> PrefetchRequest {
-    let source_query: Option<&QueryStmt> = match &prefetch.source {
+) -> Result<PrefetchRequest, QqlError> {
+    let source_query: &QueryStmt = match &prefetch.source {
         PrefetchSource::Cte(name) => ctes
             .iter()
             .find(|c| c.name.eq_ignore_ascii_case(name))
-            .map(|c| c.query.as_ref()),
-        PrefetchSource::Query(query) => Some(query.as_ref()),
+            .map(|c| c.query.as_ref())
+            .ok_or_else(|| {
+                QqlError::validation(
+                    "QQL-PLAN-PREFETCH-CTE",
+                    format!("PREFETCH references unknown CTE '{name}'"),
+                    None,
+                )
+            })?,
+        PrefetchSource::Query(query) => query.as_ref(),
     };
 
-    let (query, using, nested_prefetch, source_filter, source_params, source_limit, source_score) =
-        if let Some(q) = source_query {
-            if let Ok((variant, using, nested)) = build_query_with_prefetch(q) {
-                (
-                    Some(variant),
-                    using,
-                    if nested.is_empty() {
-                        None
-                    } else {
-                        Some(nested)
-                    },
-                    q.filter.as_ref().map(|f| top_level_filter(f)),
-                    q.params.as_ref().and_then(lower_search_params),
-                    q.page.limit,
-                    q.score_threshold,
-                )
+    // PrefetchRequest cannot represent grouping (no group_by / group_size
+    // fields). Reject explicitly instead of silently dropping the group.
+    if source_query.group.is_some() {
+        return Err(QqlError::validation(
+            "QQL-PLAN-PREFETCH-GROUP",
+            "GROUP BY is not supported inside PREFETCH",
+            None,
+        ));
+    }
+
+    let (query, using, nested_prefetch, source_filter, source_params, source_limit, source_score) = {
+        let (variant, using, nested) = build_query_with_prefetch(source_query)?;
+        (
+            Some(variant),
+            using,
+            if nested.is_empty() {
+                None
             } else {
-                (None, None, None, None, None, None, None)
-            }
-        } else {
-            (None, None, None, None, None, None, None)
-        };
+                Some(nested)
+            },
+            source_query.filter.as_ref().map(|f| top_level_filter(f)),
+            source_query.params.as_ref().and_then(lower_search_params),
+            source_query.page.limit,
+            source_query.score_threshold,
+        )
+    };
 
     // Outer PREFETCH WHERE / SCORE THRESHOLD override source-query values when set.
     let filter = prefetch
@@ -335,7 +350,7 @@ pub fn lower_prefetch_with_ctes(
         .or(source_filter);
     let score_threshold = prefetch.score_threshold.or(source_score);
 
-    PrefetchRequest {
+    Ok(PrefetchRequest {
         query,
         using,
         filter,
@@ -347,7 +362,7 @@ pub fn lower_prefetch_with_ctes(
             vector: l.vector.clone(),
         }),
         prefetch: nested_prefetch,
-    }
+    })
 }
 
 pub fn lower_output_selector_public(
@@ -408,7 +423,16 @@ pub fn lower_query_groups_request(query: &QueryStmt) -> Result<QueryGroupsReques
         .expect("group required for groups query");
     let offset = query.page.offset.unwrap_or(0);
     let user_limit = query.page.limit.unwrap_or(10);
-    let effective_limit = user_limit + offset;
+    let effective_limit = user_limit.checked_add(offset).ok_or_else(|| {
+        QqlError::validation(
+            "QQL-VALIDATION-LIMIT-OVERFLOW",
+            format!(
+                "grouped query LIMIT {user_limit} + OFFSET {offset} overflows u64; \
+                 reduce LIMIT or OFFSET"
+            ),
+            None,
+        )
+    })?;
     let group_offset = if offset > 0 { Some(offset) } else { None };
 
     let (with_payload, with_vector) = lower_output_selector(&query.output);
@@ -454,7 +478,19 @@ fn build_query_with_prefetch(
                 FusionMethod::Rrf => "rrf",
                 FusionMethod::Dbsf => "dbsf",
             };
-            let candidates = query.page.limit.map(|l| l * 10).unwrap_or(100);
+            let candidates = match query.page.limit {
+                Some(l) => l.checked_mul(10).ok_or_else(|| {
+                    QqlError::validation(
+                        "QQL-VALIDATION-LIMIT-OVERFLOW",
+                        format!(
+                            "hybrid query LIMIT {l} overflows the candidate limit \
+                             (LIMIT * 10); reduce LIMIT"
+                        ),
+                        None,
+                    )
+                })?,
+                None => 100,
+            };
 
             let dense_prefetch = PrefetchRequest {
                 query: Some(QueryVariant::Nearest(NearestQuery {
@@ -529,7 +565,10 @@ fn build_query_with_prefetch(
                     None,
                 ));
             }
-            let pf_requests: Vec<PrefetchRequest> = prefetch.iter().map(lower_prefetch).collect();
+            let pf_requests: Vec<PrefetchRequest> = prefetch
+                .iter()
+                .map(|p| lower_prefetch_with_ctes(p, &query.ctes))
+                .collect::<Result<_, _>>()?;
             let nearest_input = match input {
                 QueryInput::Text { text, .. } => PlanQueryInput::Document {
                     text: text.clone(),
@@ -547,7 +586,7 @@ fn build_query_with_prefetch(
             ))
         }
         _ => {
-            let mut variant = lower_query_expr(&query.expression);
+            let mut variant = lower_query_expr(&query.expression)?;
             if let Some(params) = &query.params {
                 if params.rrf_k.is_some() || params.rrf_weights.is_some() {
                     if let QueryVariant::Fusion { fusion } = &variant {
@@ -567,7 +606,7 @@ fn build_query_with_prefetch(
             let pf_requests: Vec<PrefetchRequest> = prefetches
                 .iter()
                 .map(|p| lower_prefetch_with_ctes(p, &query.ctes))
-                .collect();
+                .collect::<Result<_, _>>()?;
             Ok((variant, using, pf_requests))
         }
     }
@@ -928,6 +967,35 @@ mod tests {
     }
 
     #[test]
+    fn formula_case_condition_lowers_to_object_not_null() {
+        // Regression: the CASE condition used
+        // `serde_json::to_value(...).unwrap_or_default()`, which silently lowered
+        // to a JSON `null` term on any serialization failure. It must lower to a
+        // real filter object (single clause or compound) — never null.
+        let single = parse_route(
+            "QUERY FORMULA CASE WHEN status = 'active' THEN $score * 2 ELSE $score END FROM docs LIMIT 5;",
+        );
+        let formula = &single["query"]["formula"];
+        assert!(formula.is_object(), "formula must be an object: {formula}");
+        let cond = &formula["sum"][0]["mult"][0];
+        assert_ne!(cond, &serde_json::Value::Null);
+        assert_eq!(cond["key"], "status");
+        assert_eq!(cond["match"]["value"], "active");
+        // The `(1 - condition)` arm mirrors the same condition term.
+        assert_eq!(formula["sum"][1]["mult"][0]["sum"][1]["neg"], *cond);
+
+        let compound = parse_route(
+            "QUERY FORMULA CASE WHEN a = 1 AND b = 2 THEN $score ELSE 0 END FROM docs LIMIT 5;",
+        );
+        let formula = &compound["query"]["formula"];
+        let cond = &formula["sum"][0]["mult"][0];
+        assert_ne!(cond, &serde_json::Value::Null);
+        assert_eq!(cond["must"][0]["key"], "a");
+        assert_eq!(cond["must"][0]["match"]["value"], 1);
+        assert_eq!(cond["must"][1]["key"], "b");
+    }
+
+    #[test]
     fn formula_with_defaults() {
         let json = parse_route(
             "QUERY FORMULA score * 2 DEFAULTS (score = 0.0, boost = 1.0) FROM docs LIMIT 5;",
@@ -1084,5 +1152,140 @@ mod tests {
         );
         assert_eq!(img_nearest["image"], "https://img.example.com/cat.jpg");
         assert_eq!(img_nearest["model"], "clip-vision");
+    }
+
+    #[test]
+    fn points_prefetch_source_errors_instead_of_panicking() {
+        let result = crate::plan::plan(
+            &Parser::parse(
+                "QUERY TEXT 'x' FROM docs USING dense PREFETCH (QUERY POINTS (1) FROM docs) LIMIT 10;",
+            )
+            .unwrap(),
+        );
+        let err = result.unwrap_err();
+        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+        assert_eq!(err.code, "QQL-PLAN-UNSUPPORTED-PREFETCH");
+    }
+
+    #[test]
+    fn points_cte_prefetch_source_errors_instead_of_panicking() {
+        let result = crate::plan::plan(
+            &Parser::parse(
+                "WITH a AS (QUERY POINTS (1) FROM docs) \
+                 QUERY FUSION RRF FROM docs PREFETCH (a) LIMIT 10;",
+            )
+            .unwrap(),
+        );
+        let err = result.unwrap_err();
+        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+        assert_eq!(err.code, "QQL-PLAN-UNSUPPORTED-PREFETCH");
+    }
+
+    #[test]
+    fn cross_rerank_prefetch_source_errors_instead_of_panicking() {
+        let result = crate::plan::plan(
+            &Parser::parse(
+                "QUERY TEXT 'x' FROM docs USING dense \
+                 PREFETCH (QUERY CROSS RERANK TEXT 'q' MODEL 'm' FROM docs \
+                   PREFETCH (QUERY TEXT 'c' FROM docs LIMIT 5)) \
+                 LIMIT 10;",
+            )
+            .unwrap(),
+        );
+        let err = result.unwrap_err();
+        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+        assert_eq!(err.code, "QQL-PLAN-UNSUPPORTED-PREFETCH");
+    }
+
+    #[test]
+    fn rerank_cte_prefetch_preserves_candidate_query() {
+        let json = parse_route(
+            "WITH a AS (QUERY TEXT 'x' MODEL 'e5' FROM docs USING dense LIMIT 20) \
+             QUERY RERANK TEXT 'q' MODEL 'colbert' FROM docs USING colbert PREFETCH (a) LIMIT 10;",
+        );
+        let pf = &json["prefetch"][0];
+        assert!(
+            pf["query"].is_object(),
+            "CTE-referencing RERANK prefetch must keep its candidate query: {pf}"
+        );
+        assert_eq!(pf["query"]["nearest"]["text"], "x");
+        assert_eq!(pf["limit"], 20);
+        assert_ne!(pf, &serde_json::json!({}));
+    }
+
+    #[test]
+    fn group_by_prefetch_source_is_rejected() {
+        let result = crate::plan::plan(
+            &Parser::parse(
+                "QUERY FUSION RRF FROM docs PREFETCH \
+                   (QUERY TEXT 'y' FROM docs GROUP BY topic LIMIT 5) \
+                 LIMIT 10;",
+            )
+            .unwrap(),
+        );
+        let err = result.unwrap_err();
+        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+        assert_eq!(err.code, "QQL-PLAN-PREFETCH-GROUP");
+    }
+
+    #[test]
+    fn prefetch_lowering_errors_are_propagated_not_swallowed() {
+        use qql_core::ast::*;
+        // Programmatic AST: a PREFETCH referencing a CTE that is not declared
+        // must fail planning instead of silently lowering to an empty prefetch.
+        let stmt = Stmt::Query(Box::new(QueryStmt {
+            ctes: vec![],
+            collection: QueryCollection::Explicit("docs".into()),
+            expression: QueryExpr::Fusion {
+                method: FusionMethod::Rrf,
+                prefetch: vec![Prefetch {
+                    source: PrefetchSource::Cte("missing".into()),
+                    filter: None,
+                    score_threshold: None,
+                    lookup: None,
+                }],
+            },
+            filter: None,
+            params: None,
+            score_threshold: None,
+            group: None,
+            output: QueryOutput::default(),
+            page: PageSpec {
+                limit: Some(10),
+                offset: None,
+            },
+            shard_key: None,
+        }));
+        let err = crate::plan::plan(&stmt).unwrap_err();
+        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+        assert_eq!(err.code, "QQL-PLAN-PREFETCH-CTE");
+    }
+
+    #[test]
+    fn grouped_query_limit_offset_overflow_is_a_validation_error() {
+        let result = crate::plan::plan(
+            &Parser::parse(
+                "QUERY TEXT 'x' FROM docs GROUP BY topic \
+                 LIMIT 18446744073709551615 OFFSET 18446744073709551615;",
+            )
+            .unwrap(),
+        );
+        let err = result.unwrap_err();
+        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+        assert_eq!(err.code, "QQL-VALIDATION-LIMIT-OVERFLOW");
+    }
+
+    #[test]
+    fn hybrid_limit_times_ten_overflow_is_a_validation_error() {
+        let result = crate::plan::plan(
+            &Parser::parse(
+                "QUERY HYBRID TEXT 'q' DENSE d SPARSE s FROM docs \
+                 LIMIT 18446744073709551615;",
+            )
+            .unwrap(),
+        );
+        let err = result.unwrap_err();
+        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+        assert_eq!(err.code, "QQL-VALIDATION-LIMIT-OVERFLOW");
     }
 }

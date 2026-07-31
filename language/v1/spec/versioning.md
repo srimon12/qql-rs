@@ -1,6 +1,6 @@
 # QQL versioning policy
 
-QQL uses `MAJOR.MINOR`. The current language version is `1.2`; the canonical AST
+QQL uses `MAJOR.MINOR`. The current language version is `1.3`; the canonical AST
 schema identifier is independently fixed as `qql.ast/v1`.
 
 ## Compatibility rule
@@ -97,7 +97,7 @@ executable verifier, not a second private specification.
 | 1.0 | 2026-07-26 | Unified QUERY/UPSERT grammar, arbitrary named-vector roles, schema-safe inference, 29 valid files, 34 invalid cases, and generated `qql.ast/v1` snapshots |
 | 1.1 | 2026-07-28 | Additive minor features: ON FIELD and INTO spec modifiers, multi-spec embedding options, raw strings (r'...', r"..."), triple-quoted multiline strings ('''...''', """..."""), backtick strings (`...`), and \$ string escape sequences |
 | 1.2 | 2026-07-29 | Additive minor features: ColBERT multivectors (`AS MULTI` / `AS MULTIVECTOR`), CLIP vision (`QUERY IMAGE`), `CROSS RERANK`, `USING HYBRID`, `acorn` search params, exact point counting (`COUNT WITH (exact = true)`), and specific payload deletion (`DELETE PAYLOAD key1, key2 FROM coll`).
-| 1.2.1 | 2026-07-31 | Contract corrections & hardening: fixed `field_name` typo rule in `delete_payload` grammar, declared `MULTI`, `MULTIVECTOR`, `IMAGE` in `single_embedding_spec`, added `sharding_method` rules (`auto`, `custom`), generated `keywords.generated.rs` artifact from `grammar.pest`, added `embedding-multi-image.qql` fixtures, and enforced bi-directional reverse-drift CI checks. |
+| 1.3 | 2026-07-31 | Additive minor changes: declared `MULTI`, `MULTIVECTOR`, and `IMAGE` in `single_embedding_spec` and `embed_directive` (matching the already-supported `AS MULTI` / `QUERY IMAGE` query forms), fixed the `delete_payload` field rule to use the canonical `field` name, added `sharding_method` values (`auto`, `custom`), generated the `keywords.generated.rs` artifact from `grammar.pest`, added `embedding-multi-image.qql` fixtures, and enforced bi-directional reverse-drift CI checks. |
 
 `qql-rs` is the supported reference implementation. An implementation version
 number does not imply QQL conformance; conformance is claimed only against a

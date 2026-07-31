@@ -40,6 +40,10 @@ export interface EmbeddingModelInfo {
   /** Dense vector dimension */
   dim: number;
   description: string;
+  /** Model supports multivector (ColBERT-style) embeddings */
+  multi: boolean;
+  /** Model supports CLIP vision embeddings */
+  image: boolean;
 }
 
 export interface LocalExecutorOptions {
@@ -51,6 +55,14 @@ export interface LocalExecutorOptions {
    * Default: BGESmallENV15 (384-d).
    */
   model?: string;
+  /** Offline sparse model (SPLADE or BGE-M3 SparseTextEmbedding), e.g. "splade". None → local BM25 hashing. */
+  sparseModel?: string;
+  /** Offline multivector model (BGE-M3 ColBERT), e.g. "bge-m3". */
+  multiModel?: string;
+  /** Offline CLIP vision model, e.g. "clip-vision" / "ClipVitB32". */
+  imageModel?: string;
+  /** Offline cross-encoder, e.g. "bge-reranker-base". */
+  rerankerModel?: string;
   /** Override model cache directory */
   cacheDir?: string;
   /** Show HuggingFace download progress (default false) */
@@ -64,6 +76,14 @@ export interface StandaloneOptions {
   onDiskPayload?: boolean;
   /** Local ONNX model for standalone execute() / executeStmt() */
   model?: string;
+  /** Offline sparse model (SPLADE or BGE-M3 SparseTextEmbedding), e.g. "splade". None → local BM25 hashing. */
+  sparseModel?: string;
+  /** Offline multivector model (BGE-M3 ColBERT), e.g. "bge-m3". */
+  multiModel?: string;
+  /** Offline CLIP vision model, e.g. "clip-vision" / "ClipVitB32". */
+  imageModel?: string;
+  /** Offline cross-encoder, e.g. "bge-reranker-base". */
+  rerankerModel?: string;
   /** Override model cache directory */
   cacheDir?: string;
   /** Show HuggingFace download progress */

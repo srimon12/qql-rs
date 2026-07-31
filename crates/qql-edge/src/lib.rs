@@ -402,4 +402,132 @@ mod tests {
             let _ = std::fs::remove_dir_all(data_dir);
         });
     }
+
+    #[test]
+    fn edge_reads_do_not_create_missing_collections() {
+        // Regression (B-2): read operations against a missing collection must
+        // error with QQL-EDGE-COLLECTION-NOT-FOUND and must not materialise a
+        // ghost collection on disk — matching remote 404 semantics.
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        runtime.block_on(async {
+            let data_dir =
+                std::env::temp_dir().join(format!("qql-edge-readtest-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&data_dir);
+            let executor =
+                custom_executor(&data_dir, false, Arc::new(TestEmbedder)).expect("custom executor");
+
+            let cases = [
+                "QUERY 'hello' FROM never_queried USING dense AS DENSE LIMIT 5",
+                "SCROLL FROM never_scrolled LIMIT 5",
+                "QUERY POINTS (1, 2) FROM never_points WITH PAYLOAD true",
+                "COUNT FROM never_counted",
+                "DELETE FROM never_deleted WHERE id = 1",
+            ];
+            for query in cases {
+                let report = executor
+                    .execute(query, OnError::Continue)
+                    .await
+                    .expect("read against missing collection must return a report");
+                assert!(
+                    !report.ok,
+                    "expected failure for '{query}': {:?}",
+                    report.results
+                );
+                assert!(
+                    report.results[0]
+                        .message
+                        .contains("QQL-EDGE-COLLECTION-NOT-FOUND"),
+                    "expected QQL-EDGE-COLLECTION-NOT-FOUND for '{query}', got {:?}",
+                    report.results[0].message
+                );
+            }
+
+            // No ghost collections were created on disk.
+            let report = executor
+                .execute("SHOW COLLECTIONS", OnError::Stop)
+                .await
+                .expect("list collections");
+            assert!(report.ok);
+            let cols = report.results[0]
+                .data
+                .as_ref()
+                .and_then(|d| d["result"]["collections"].as_array())
+                .expect("collections array");
+            assert!(
+                cols.is_empty(),
+                "read operations must not create collections: {cols:?}"
+            );
+
+            executor.close().await.expect("close edge executor");
+            let _ = std::fs::remove_dir_all(data_dir);
+        });
+    }
+
+    #[test]
+    fn edge_upsert_autocreate_and_get_points_shape() {
+        // Regression (B-2 preserve + B-3): an embedding UPSERT to a missing
+        // collection still auto-creates it with the inferred schema, and
+        // QUERY POINTS on a populated collection returns non-empty hits.
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        runtime.block_on(async {
+            let data_dir =
+                std::env::temp_dir().join(format!("qql-edge-pointstest-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&data_dir);
+            let executor =
+                custom_executor(&data_dir, false, Arc::new(TestEmbedder)).expect("custom executor");
+
+            // Auto-create via embedding upsert (collection does not exist yet).
+            let report = executor
+                .execute(
+                    "UPSERT INTO auto_docs VALUES {id: 1, text: 'hello'}, {id: 2, text: 'world'}",
+                    OnError::Stop,
+                )
+                .await
+                .expect("auto-creating upsert");
+            assert!(report.ok, "auto-creating UPSERT failed: {:?}", report);
+
+            let report = executor
+                .execute("SHOW COLLECTIONS", OnError::Stop)
+                .await
+                .expect("list collections");
+            let cols = report.results[0]
+                .data
+                .as_ref()
+                .and_then(|d| d["result"]["collections"].as_array())
+                .map(|c| c.len())
+                .unwrap_or(0);
+            assert_eq!(
+                cols, 1,
+                "UPSERT auto-create should materialise one collection"
+            );
+
+            // QUERY POINTS must surface the retrieved points (response shape
+            // regression) and report the hit count.
+            let report = executor
+                .execute(
+                    "QUERY POINTS (1, 2) FROM auto_docs WITH PAYLOAD true",
+                    OnError::Stop,
+                )
+                .await
+                .expect("points lookup");
+            assert!(report.ok, "POINTS lookup failed: {:?}", report);
+            assert_eq!(
+                report.results[0].message, "Found 2 hits",
+                "POINTS lookup should report 2 hits, got {:?}",
+                report.results[0].message
+            );
+            let data = report.results[0].data.as_ref().expect("data");
+            let hits = data.as_array().expect("hits array");
+            assert_eq!(hits.len(), 2, "POINTS lookup should return 2 hits");
+
+            executor.close().await.expect("close edge executor");
+            let _ = std::fs::remove_dir_all(data_dir);
+        });
+    }
 }

@@ -657,3 +657,130 @@ fn parse_upsert_with_dollar_and_pattern_strings() {
         _ => panic!("expected string payload"),
     }
 }
+
+#[test]
+fn triple_quoted_strings_preserve_backslash_verbatim() {
+    let stmt = Parser::parse(r"UPSERT INTO docs VALUES {id: 1, text: '''a\nb'''};").unwrap();
+    let Stmt::Upsert(upsert) = stmt else {
+        panic!("expected upsert")
+    };
+    let (_, value) = &upsert.points[0].payload[0];
+    match value {
+        crate::ast::Value::Str(s) => {
+            // Backslash is content, not an escape: the value is `a\nb`
+            // (backslash + n), never a real newline.
+            assert_eq!(s, r"a\nb");
+        }
+        _ => panic!("expected string payload"),
+    }
+}
+
+#[test]
+fn triple_quoted_strings_preserve_doubled_quotes_verbatim() {
+    let stmt = Parser::parse("UPSERT INTO docs VALUES {id: 1, text: '''it''s'''};").unwrap();
+    let Stmt::Upsert(upsert) = stmt else {
+        panic!("expected upsert")
+    };
+    let (_, value) = &upsert.points[0].payload[0];
+    match value {
+        crate::ast::Value::Str(s) => assert_eq!(s, "it''s"),
+        _ => panic!("expected string payload"),
+    }
+}
+
+#[test]
+fn triple_quoted_double_delimited_strings_are_verbatim() {
+    let stmt = Parser::parse("UPSERT INTO docs VALUES {id: 1, text: \"\"\"a\\nb\"\"\"};").unwrap();
+    let Stmt::Upsert(upsert) = stmt else {
+        panic!("expected upsert")
+    };
+    let (_, value) = &upsert.points[0].payload[0];
+    match value {
+        crate::ast::Value::Str(s) => assert_eq!(s, r"a\nb"),
+        _ => panic!("expected string payload"),
+    }
+}
+
+#[test]
+fn four_quotes_decode_to_single_apostrophe() {
+    let stmt = Parser::parse("UPSERT INTO docs VALUES {id: 1, text: ''''};").unwrap();
+    let Stmt::Upsert(upsert) = stmt else {
+        panic!("expected upsert")
+    };
+    let (_, value) = &upsert.points[0].payload[0];
+    match value {
+        crate::ast::Value::Str(s) => assert_eq!(s, "'"),
+        _ => panic!("expected string payload"),
+    }
+}
+
+#[test]
+fn empty_triple_quoted_string_decodes_to_empty() {
+    let stmt = Parser::parse("UPSERT INTO docs VALUES {id: 1, text: ''''''};").unwrap();
+    let Stmt::Upsert(upsert) = stmt else {
+        panic!("expected upsert")
+    };
+    let (_, value) = &upsert.points[0].payload[0];
+    match value {
+        crate::ast::Value::Str(s) => assert_eq!(s, ""),
+        _ => panic!("expected string payload"),
+    }
+}
+
+/// F-3: `Stmt` serialization must round-trip through its `Deserialize`. The
+/// canonical serialized form of the unit variant is the empty-object tag
+/// `{"ShowCollections": {}}` (kept for consumers that emit that shape); the
+/// manual deserializer also accepts the derived string form `"ShowCollections"`,
+/// so both directions of the contract work.
+#[cfg(feature = "json")]
+#[test]
+fn stmt_serde_round_trips_through_json() {
+    use crate::ast::Stmt;
+    // One representative statement per `Stmt` variant.
+    let sources = [
+        "QUERY TEXT 'hello' FROM docs LIMIT 10;",
+        "SCROLL FROM docs LIMIT 10;",
+        "UPSERT INTO docs VALUES {id: 1, title: 'x'};",
+        "CREATE COLLECTION docs (dense VECTOR (4, COSINE));",
+        "CREATE INDEX ON COLLECTION docs FOR title TYPE text;",
+        "DROP INDEX ON COLLECTION docs FOR title;",
+        "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (shards_number = 2);",
+        "DROP SHARD KEY 'a' ON COLLECTION docs;",
+        "ALTER COLLECTION docs WITH VECTOR (on_disk = true);",
+        "DROP COLLECTION docs;",
+        "SHOW COLLECTIONS;",
+        "SHOW COLLECTION docs;",
+        "SHOW SHARD KEYS ON COLLECTION docs;",
+        "DELETE FROM docs WHERE id = 1;",
+        "CLEAR PAYLOAD FROM docs WHERE id = 1;",
+        "DELETE PAYLOAD title FROM docs WHERE id = 1;",
+        "DELETE VECTOR dense FROM docs WHERE id = 1;",
+        "UPDATE docs SET VECTOR dense = [0.1, 0.2] WHERE id = 1;",
+        "UPDATE docs SET PAYLOAD = {a: 1} WHERE id = 1;",
+        "COUNT FROM docs WHERE active = true WITH (exact = true);",
+    ];
+    for source in sources {
+        let stmt = Parser::parse(source).unwrap_or_else(|e| panic!("{source} should parse: {e}"));
+        let json = serde_json::to_string(&stmt)
+            .unwrap_or_else(|e| panic!("{source} should serialize: {e}"));
+        let back: Stmt = serde_json::from_str(&json)
+            .unwrap_or_else(|e| panic!("{source} should deserialize from {json}: {e}"));
+        assert_eq!(stmt, back, "round-trip mismatch for: {source}");
+    }
+
+    // The canonical serialized form is the empty-object tag (matches the
+    // conformance snapshot and the JS/Python bindings' output).
+    assert_eq!(
+        serde_json::to_string(&Stmt::ShowCollections).unwrap(),
+        "{\"ShowCollections\":{}}"
+    );
+    // Both the canonical tag and the derived string form deserialize.
+    assert_eq!(
+        serde_json::from_str::<Stmt>(r#"{"ShowCollections":{}}"#).unwrap(),
+        Stmt::ShowCollections
+    );
+    assert_eq!(
+        serde_json::from_str::<Stmt>("\"ShowCollections\"").unwrap(),
+        Stmt::ShowCollections
+    );
+}

@@ -9,6 +9,12 @@ use crate::token::TokenKind;
 
 use super::AstLowerer;
 
+/// The closed set of `CREATE INDEX … TYPE` values, mirroring
+/// `field_type` in language/v1/grammar.pest.
+const INDEX_FIELD_TYPES: &[&str] = &[
+    "keyword", "integer", "float", "geo", "text", "bool", "datetime", "uuid",
+];
+
 impl<'a> AstLowerer<'a> {
     // ── ALTER ───────────────────────────────────────────────────
 
@@ -109,6 +115,15 @@ impl<'a> AstLowerer<'a> {
                 ));
             }
             field_type = self.parse_identifier()?.to_ascii_lowercase();
+            // `field_type` is a closed enum in grammar.pest; reject unknown
+            // types at parse time instead of forwarding them to the backend.
+            if !INDEX_FIELD_TYPES.contains(&field_type.as_str()) {
+                return Err(QqlError::parse(
+                    "QQL-PARSE-INDEX-TYPE",
+                    alloc::format!("unknown index field type '{field_type}'"),
+                    field_type_token.span,
+                ));
+            }
         }
         let mut options = Vec::new();
         if self.peek()?.kind == TokenKind::With {

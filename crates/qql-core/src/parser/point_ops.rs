@@ -52,33 +52,56 @@ impl<'a> AstLowerer<'a> {
         self.expect(TokenKind::Count)?;
         self.expect(TokenKind::From)?;
         let collection = crate::ast::QueryCollection::Explicit(self.parse_identifier()?);
+        // Grammar order (grammar.pest `count`): WHERE → SHARD → WITH, each at
+        // most once. The runtime previously accepted any order/repeats.
         let filter = if self.peek()?.kind == TokenKind::Where {
             self.advance()?;
             Some(Box::new(self.parse_filter_expr()?))
         } else {
             None
         };
-        let mut shard_key = None;
-        let mut exact = None;
-        loop {
-            match self.peek()?.kind {
-                TokenKind::Shard => {
-                    self.advance()?;
-                    shard_key = Some(self.parse_string()?);
+        let shard_key = if self.peek()?.kind == TokenKind::Shard {
+            self.advance()?;
+            Some(self.parse_string()?)
+        } else {
+            None
+        };
+        let exact = if self.peek()?.kind == TokenKind::With {
+            self.advance()?;
+            let opts = self.parse_config_block()?;
+            let mut exact = None;
+            for (key, value) in &opts {
+                if !key.eq_ignore_ascii_case("exact") {
+                    return Err(QqlError::parse(
+                        "QQL-PARSE-COUNT-CONFIG",
+                        alloc::format!("unknown COUNT parameter '{}'. Expected: exact", key),
+                        self.peek()?.span,
+                    ));
                 }
-                TokenKind::With => {
-                    self.advance()?;
-                    let opts = self.parse_config_block()?;
-                    exact = opts
-                        .into_iter()
-                        .find(|(k, _)| k.eq_ignore_ascii_case("exact"))
-                        .and_then(|(_, v)| match v {
-                            crate::ast::Value::Bool(b) => Some(b),
-                            _ => None,
-                        });
+                match value {
+                    crate::ast::Value::Bool(b) => exact = Some(*b),
+                    _ => {
+                        return Err(QqlError::parse(
+                            "QQL-PARSE-COUNT-CONFIG",
+                            "COUNT 'exact' must be true or false",
+                            self.peek()?.span,
+                        ));
+                    }
                 }
-                _ => break,
             }
+            exact
+        } else {
+            None
+        };
+        if matches!(
+            self.peek()?.kind,
+            TokenKind::Where | TokenKind::Shard | TokenKind::With
+        ) {
+            return Err(QqlError::parse(
+                "QQL-PARSE-CLAUSE-ORDER",
+                "duplicate or out-of-order COUNT clause (grammar order: WHERE, SHARD, WITH)",
+                self.peek()?.span,
+            ));
         }
         Ok(Stmt::Count(Box::new(CountStmt {
             collection,

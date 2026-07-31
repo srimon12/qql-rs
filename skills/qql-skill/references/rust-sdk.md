@@ -30,7 +30,7 @@ Parse a user query, inject tenant isolation, lower to a typed REST route -- zero
 ```rust
 use qql_core::parser::Parser;
 use qql_core::ast::{self, ComparisonOp, Value};
-use qql_plan::routing::route;
+use qql_plan::routing::try_route;
 
 fn tenant_route(user_query: &str, tenant: &str) -> Result<(), Box<dyn std::error::Error>> {
     let mut stmt = Parser::parse(user_query)?;
@@ -40,7 +40,7 @@ fn tenant_route(user_query: &str, tenant: &str) -> Result<(), Box<dyn std::error
                        Value::Str(tenant.to_string()))?;
 
     // Lower to typed REST route (no Qdrant connection needed)
-    let r = route(&stmt);
+    let r = try_route(&stmt)?;
     assert_eq!(r.method.as_str(), "POST");
 
     Ok(())
@@ -103,8 +103,9 @@ Client builder timeouts remain a separate HTTP-layer budget.
 **Routing:** prefer `SHARD 'tenant'` in the query string. After parse, use
 `stmt.set_shard_key(Some(tenant.into()))` — there is no `inject_shard_key`.
 
-**Compilation:** prefer `compile_statement` / `try_route` over deprecated
-`route()` (which panics on client-side-only ops such as bare `CROSS RERANK`).
+**Compilation:** use `compile_statement` / `try_route`. The deprecated
+`route()` (which panicked on client-side-only ops such as bare `CROSS RERANK`)
+has been removed; `try_route` returns `Err` — never panics — for those cases.
 
 ---
 

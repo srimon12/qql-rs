@@ -34,9 +34,14 @@ Together these files are the normative `qql.ast/v1` schema.
 }
 ```
 
-Statement and expression enums use externally tagged JSON. Unit variants, such
-as `ShowCollections`, are strings. Optional fields are present as `null`.
-Ordered payload/config entries remain arrays of `[key, value]` pairs.
+Statement and expression enums use externally tagged JSON. Unit variants
+serialize as strings when the derived serializer applies (for example
+`QueryExpr::SampleRandom` → `"SampleRandom"`) or as an empty-object tag for
+the custom `Stmt` serializer (for example
+`Stmt::ShowCollections` → `{"ShowCollections": {}}`). The `Stmt`
+deserializer accepts both forms, so `Stmt::ShowCollections` round-trips from
+either representation. Optional fields are present as `null`. Ordered
+payload/config entries remain arrays of `[key, value]` pairs.
 
 Vector targets are value objects:
 

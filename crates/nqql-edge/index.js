@@ -1,3 +1,5 @@
+const pkg = require('./package.json');
+
 function isMusl() {
   if (process.platform !== 'linux') {
     return false;
@@ -10,7 +12,7 @@ function nativeTarget() {
   const { platform, arch } = process;
   if (platform === 'linux' && arch === 'x64') {
     if (isMusl()) {
-      throw new Error('nqql-edge 0.1.1 does not provide a Linux musl binary');
+      throw new Error(`nqql-edge ${pkg.version} does not provide a Linux musl binary`);
     }
     return 'linux-x64-gnu';
   }
@@ -19,7 +21,7 @@ function nativeTarget() {
   }
   if (platform === 'darwin' && arch === 'x64') {
     throw new Error(
-      'nqql-edge 0.1.1 does not provide a macOS Intel binary because ONNX Runtime no longer ships the required x86_64 artifact',
+      `nqql-edge ${pkg.version} does not provide a macOS Intel binary because ONNX Runtime no longer ships the required x86_64 artifact`,
     );
   }
   if (platform === 'win32' && arch === 'x64') {
@@ -143,34 +145,10 @@ function compileQuery(query) {
   return callNative(() => nativeBinding.compileQuery(query));
 }
 
-/**
- * Normalize the second arg of localExecutor:
- *   localExecutor(dir)                          → {}
- *   localExecutor(dir, false)                   → { onDiskPayload: false }  (legacy)
- *   localExecutor(dir, { model, onDiskPayload }) → as-is
- */
-function normalizeLocalOptions(options) {
-  if (options === undefined || options === null) {
-    return {};
-  }
-  if (typeof options === 'boolean') {
-    return { onDiskPayload: options };
-  }
-  if (typeof options !== 'object' || Array.isArray(options)) {
-    throw new TypeError(
-      'localExecutor options must be a boolean (legacy onDiskPayload) or an object',
-    );
-  }
-  return {
-    onDiskPayload: options.onDiskPayload,
-    model: typeof options.model === 'string' ? options.model : undefined,
-    cacheDir: typeof options.cacheDir === 'string' ? options.cacheDir : undefined,
-    showDownloadProgress:
-      typeof options.showDownloadProgress === 'boolean'
-        ? options.showDownloadProgress
-        : undefined,
-  };
-}
+const {
+  normalizeLocalOptions,
+  normalizeStandaloneOptions,
+} = require("./options.js");
 
 /**
  * Create a fully-local edge executor backed by fastembed-rs.
@@ -181,6 +159,10 @@ function normalizeLocalOptions(options) {
  * @param {boolean | {
  *   onDiskPayload?: boolean,
  *   model?: string,
+ *   sparseModel?: string,
+ *   multiModel?: string,
+ *   imageModel?: string,
+ *   rerankerModel?: string,
  *   cacheDir?: string,
  *   showDownloadProgress?: boolean,
  * }} [options] - boolean is legacy `onDiskPayload`; object is preferred.
@@ -190,6 +172,7 @@ function normalizeLocalOptions(options) {
  *   const exec = localExecutor('./data');
  *   const exec = localExecutor('./data', false);
  *   const exec = localExecutor('./data', { model: 'AllMiniLML6V2', onDiskPayload: false });
+ *   const exec = localExecutor('./data', { sparseModel: 'splade', rerankerModel: 'bge-reranker-base' });
  */
 function localExecutor(dataDir, options) {
   if (typeof dataDir !== 'string' || !dataDir) {
@@ -268,30 +251,6 @@ async function executeStmt(stmt, options) {
   }
 }
 
-function normalizeStandaloneOptions(options) {
-  if (options === undefined || options === null) {
-    return undefined;
-  }
-  if (typeof options !== 'object' || Array.isArray(options)) {
-    throw new TypeError('options must be an object');
-  }
-  return {
-    dataDir: typeof options.dataDir === 'string' ? options.dataDir : './qdrant_data',
-    onDiskPayload: options.onDiskPayload ?? true,
-    model: typeof options.model === 'string' ? options.model : undefined,
-    cacheDir: typeof options.cacheDir === 'string' ? options.cacheDir : undefined,
-    showDownloadProgress:
-      typeof options.showDownloadProgress === 'boolean'
-        ? options.showDownloadProgress
-        : undefined,
-    embedUrl: typeof options.embedUrl === 'string' ? options.embedUrl : undefined,
-    embedKey: typeof options.embedKey === 'string' ? options.embedKey : undefined,
-    embedModel: typeof options.embedModel === 'string' ? options.embedModel : undefined,
-    embedDim: Number.isSafeInteger(options.embedDim) ? options.embedDim : undefined,
-    onError: options.onError,
-  };
-}
-
 class Client {
   /**
    * Clients should be created via `localExecutor()` or `httpExecutor()`,
@@ -339,8 +298,6 @@ class Client {
     return callNative(() => this._inner.compile(query));
   }
 }
-
-const pkg = require('./package.json');
 
 module.exports = {
   parse,

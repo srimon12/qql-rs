@@ -350,6 +350,7 @@ impl JsClient {
     }
 }
 
+#[cfg(any(feature = "fastembed-local", feature = "http-embedding"))]
 impl JsClient {
     fn from_executor(exec: qql::executor::Executor) -> Self {
         Self {
@@ -501,6 +502,7 @@ pub fn http_executor(
 //  Standalone execute (one-shot with a temporary client)
 // ═══════════════════════════════════════════════════════════════════
 
+#[cfg(feature = "fastembed-local")]
 fn standalone_local_opts(options: Option<&serde_json::Value>) -> LocalExecutorOptions {
     LocalExecutorOptions {
         on_disk_payload: options
@@ -536,24 +538,94 @@ fn standalone_local_opts(options: Option<&serde_json::Value>) -> LocalExecutorOp
     }
 }
 
-/// Execute a pre-parsed Stmt directly via a new temporary edge client.
+/// Build the one-shot edge client for the standalone `execute` / `executeStmt`
+/// APIs.
 ///
-/// **Warning:** each call loads the ONNX model. Prefer a long-lived
-/// `localExecutor()` Client for anything beyond one-shots.
-#[cfg(feature = "fastembed-local")]
-#[napi(
-    ts_args_type = "stmt: Stmt, options?: { dataDir?: string; onDiskPayload?: boolean; model?: string; cacheDir?: string; showDownloadProgress?: boolean }"
-)]
-pub async fn execute_stmt(stmt: &Stmt, options: Option<serde_json::Value>) -> napi::Result<String> {
+/// HTTP embedding is selected whenever `options.embedUrl` is supplied — exactly
+/// matching the long-lived `httpExecutor()` constructor and the standalone
+/// `execute({ embedUrl })` path. When the `http-embedding` feature is not
+/// compiled in, a supplied `embedUrl` returns an explicit error instead of being
+/// silently ignored (falling back to the local ONNX model).
+#[cfg(any(feature = "fastembed-local", feature = "http-embedding"))]
+fn standalone_client(options: Option<&serde_json::Value>) -> napi::Result<JsClient> {
     let data_dir = options
-        .as_ref()
         .and_then(|o| o.get("dataDir"))
         .and_then(|v| v.as_str())
         .unwrap_or("./qdrant_data");
-    let client = local_executor(
-        data_dir.to_string(),
-        Some(standalone_local_opts(options.as_ref())),
-    )?;
+
+    // Prefer http embedding if embedUrl is provided
+    #[cfg(feature = "http-embedding")]
+    {
+        let on_disk = options
+            .and_then(|o| o.get("onDiskPayload"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        if let Some(embed_url) = options
+            .and_then(|o| o.get("embedUrl"))
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            let embed_key = options
+                .and_then(|o| o.get("embedKey"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let embed_model = options
+                .and_then(|o| o.get("embedModel"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let embed_dim = options
+                .and_then(|o| o.get("embedDim"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32;
+            return http_executor(
+                data_dir.to_string(),
+                embed_url.to_string(),
+                embed_key.to_string(),
+                embed_model.to_string(),
+                embed_dim,
+                Some(on_disk),
+            );
+        }
+    }
+
+    // Reject HTTP embedding options explicitly when the feature is absent,
+    // instead of silently falling back to the local ONNX model.
+    #[cfg(not(feature = "http-embedding"))]
+    if options
+        .and_then(|o| o.get("embedUrl"))
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| !s.is_empty())
+    {
+        return Err(napi::Error::from_reason(
+            "embedUrl requires the http-embedding feature (httpExecutor), which is not enabled in this build",
+        ));
+    }
+
+    #[cfg(feature = "fastembed-local")]
+    {
+        local_executor(data_dir.to_string(), Some(standalone_local_opts(options)))
+    }
+
+    #[cfg(not(feature = "fastembed-local"))]
+    Err(napi::Error::from_reason(
+        "no embedding backend is enabled: build nqql-edge with fastembed-local and/or http-embedding",
+    ))
+}
+
+/// Execute a pre-parsed Stmt directly via a new temporary edge client.
+///
+/// HTTP embedding is selected when `options.embedUrl` is supplied, matching the
+/// standalone `execute` API; otherwise a local fastembed executor is used.
+///
+/// **Warning:** each call initialises the embedding backend (ONNX model load for
+/// the local path, HTTP client for the `embedUrl` path). Prefer a long-lived
+/// `localExecutor()` / `httpExecutor()` Client for anything beyond one-shots.
+#[cfg(any(feature = "fastembed-local", feature = "http-embedding"))]
+#[napi(
+    ts_args_type = "stmt: Stmt, options?: { onError?: 'stop' | 'continue'; dataDir?: string; onDiskPayload?: boolean; model?: string; cacheDir?: string; showDownloadProgress?: boolean; embedUrl?: string; embedKey?: string; embedModel?: string; embedDim?: number }"
+)]
+pub async fn execute_stmt(stmt: &Stmt, options: Option<serde_json::Value>) -> napi::Result<String> {
+    let client = standalone_client(options.as_ref())?;
     let resp = client
         .inner
         .execute_node(stmt.inner.clone())
@@ -572,15 +644,7 @@ pub async fn execute(
     query: serde_json::Value,
     options: Option<serde_json::Value>,
 ) -> napi::Result<String> {
-    let data_dir = options
-        .as_ref()
-        .and_then(|o| o.get("dataDir"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("./qdrant_data");
-    let client = local_executor(
-        data_dir.to_string(),
-        Some(standalone_local_opts(options.as_ref())),
-    )?;
+    let client = standalone_client(options.as_ref())?;
     let report = client.execute(query, options).await?;
     client.inner.close().await.map_err(to_napi_err)?;
     Ok(report)
@@ -594,60 +658,25 @@ pub async fn execute(
     query: serde_json::Value,
     options: Option<serde_json::Value>,
 ) -> napi::Result<String> {
-    let data_dir = options
-        .as_ref()
-        .and_then(|o| o.get("dataDir"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("./qdrant_data");
-    let on_disk = options
-        .as_ref()
-        .and_then(|o| o.get("onDiskPayload"))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true);
-
-    // Prefer http embedding if embedUrl is provided
-    let client = if let Some(embed_url) = options
-        .as_ref()
-        .and_then(|o| o.get("embedUrl"))
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-    {
-        let embed_key = options
-            .as_ref()
-            .and_then(|o| o.get("embedKey"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let embed_model = options
-            .as_ref()
-            .and_then(|o| o.get("embedModel"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let embed_dim = options
-            .as_ref()
-            .and_then(|o| o.get("embedDim"))
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u32;
-        http_executor(
-            data_dir.to_string(),
-            embed_url.to_string(),
-            embed_key.to_string(),
-            embed_model.to_string(),
-            embed_dim,
-            Some(on_disk),
-        )?
-    } else {
-        local_executor(
-            data_dir.to_string(),
-            Some(standalone_local_opts(options.as_ref())),
-        )?
-    };
-    client.execute(query, options).await
+    let client = standalone_client(options.as_ref())?;
+    let report = client.execute(query, options).await?;
+    client.inner.close().await.map_err(to_napi_err)?;
+    Ok(report)
 }
 
 #[cfg(test)]
 #[cfg(feature = "fastembed-local")]
 mod tests {
     use super::*;
+    use qql_core::parser::Parser;
+    #[cfg(feature = "http-embedding")]
+    use std::io::{Read, Write};
+    #[cfg(feature = "http-embedding")]
+    use std::net::TcpListener;
+    #[cfg(feature = "http-embedding")]
+    use std::sync::mpsc;
+    #[cfg(feature = "http-embedding")]
+    use std::time::Duration;
 
     #[test]
     fn local_executor_options_default_has_no_sparse_model() {
@@ -683,5 +712,266 @@ mod tests {
         let opts = serde_json::json!({});
         let lo = standalone_local_opts(Some(&opts));
         assert!(lo.sparse_model.is_none());
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Default-feature HTTP embedding coverage (Finding 1 + Finding 3
+    //  of docs/audits/review-adapters-website.json): prove the native
+    //  `httpExecutor` binding exists and `executeStmt` selects HTTP
+    //  embedding whenever `embedUrl` is supplied — against a local mock
+    //  OpenAI-compatible endpoint, so no network is involved.
+    // ═══════════════════════════════════════════════════════════════
+
+    /// A request captured by the mock embedding server.
+    #[cfg(feature = "http-embedding")]
+    #[derive(Debug)]
+    struct MockEmbedRequest {
+        method: String,
+        path: String,
+        auth: Option<String>,
+        body: String,
+    }
+
+    #[cfg(feature = "http-embedding")]
+    impl MockEmbedRequest {
+        fn model(&self) -> Option<String> {
+            serde_json::from_str::<serde_json::Value>(&self.body)
+                .ok()?
+                .get("model")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        }
+
+        fn inputs(&self) -> Vec<String> {
+            serde_json::from_str::<serde_json::Value>(&self.body)
+                .ok()
+                .and_then(|v| v.get("input").cloned())
+                .and_then(|v| serde_json::from_value(v).ok())
+                .unwrap_or_default()
+        }
+    }
+
+    /// Minimal OpenAI-compatible `/v1/embeddings` mock. Accepts one connection,
+    /// parses the HTTP request, replies with a fixed dense vector, and sends the
+    /// captured request to `tx`. Returns the base URL to point `embedUrl` at.
+    #[cfg(feature = "http-embedding")]
+    fn spawn_mock_embedding_server(dim: usize, tx: mpsc::Sender<MockEmbedRequest>) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock embedding server");
+        let addr = listener.local_addr().expect("mock server address");
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("mock embedding server connection");
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 4096];
+            // Read headers (up to \r\n\r\n) plus the declared Content-Length body.
+            let (header_end, body_len) = loop {
+                let n = stream.read(&mut chunk).expect("read request headers");
+                if n == 0 {
+                    return;
+                }
+                buf.extend_from_slice(&chunk[..n]);
+                if let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let headers = String::from_utf8_lossy(&buf[..end]);
+                    let len = headers
+                        .lines()
+                        .find_map(|line| {
+                            let (key, value) = line.split_once(':')?;
+                            if key.eq_ignore_ascii_case("content-length") {
+                                value.trim().parse().ok()
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(0);
+                    break (end, len);
+                }
+            };
+            while buf.len() < header_end + 4 + body_len {
+                let n = stream.read(&mut chunk).expect("read request body");
+                if n == 0 {
+                    return;
+                }
+                buf.extend_from_slice(&chunk[..n]);
+            }
+
+            let header_text = String::from_utf8_lossy(&buf[..header_end]).into_owned();
+            let body = String::from_utf8_lossy(&buf[header_end + 4..header_end + 4 + body_len])
+                .into_owned();
+            let mut parts = header_text
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .split_whitespace();
+            let method = parts.next().unwrap_or_default().to_string();
+            let path = parts.next().unwrap_or_default().to_string();
+            let auth = header_text.lines().find_map(|line| {
+                let (key, value) = line.split_once(':')?;
+                if key.eq_ignore_ascii_case("authorization") {
+                    Some(value.trim().to_string())
+                } else {
+                    None
+                }
+            });
+            let _ = tx.send(MockEmbedRequest {
+                method,
+                path,
+                auth,
+                body,
+            });
+
+            let embedding: Vec<f32> = (0..dim).map(|i| (i + 1) as f32 / 10.0).collect();
+            let payload = serde_json::json!({
+                "data": [{ "index": 0, "embedding": embedding }]
+            })
+            .to_string();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                payload.len(),
+                payload
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write mock response");
+        });
+        format!("http://{addr}/v1/embeddings")
+    }
+
+    #[test]
+    #[cfg(feature = "http-embedding")]
+    fn http_executor_native_symbol_constructs_client() {
+        // Default-feature proof that the native `httpExecutor` binding exists
+        // (the JS wrapper exports it regardless of the compiled feature set, so
+        // a wrapper-level existence test cannot prove this).
+        let data_dir =
+            std::env::temp_dir().join(format!("nqql-edge-http-ctor-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data_dir);
+        let client = http_executor(
+            data_dir.to_string_lossy().into_owned(),
+            "http://127.0.0.1:1/v1/embeddings".to_string(),
+            "key".to_string(),
+            "mock".to_string(),
+            4,
+            Some(false),
+        )
+        .expect("http_executor must construct a client");
+        // Construction must not touch the network; executing a non-embedding
+        // statement proves the returned client is usable end-to-end.
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        runtime.block_on(async {
+            let report = client
+                .inner
+                .execute("SHOW COLLECTIONS", qql::executor::OnError::Stop)
+                .await
+                .expect("SHOW COLLECTIONS via httpExecutor");
+            assert!(report.ok, "SHOW COLLECTIONS failed: {report:?}");
+            client
+                .inner
+                .close()
+                .await
+                .expect("close httpExecutor client");
+        });
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[test]
+    #[cfg(feature = "http-embedding")]
+    fn execute_stmt_prefers_http_embedding_when_embed_url_supplied() {
+        // Default-feature proof that `executeStmt` routes to the native
+        // `httpExecutor` path whenever `embedUrl` is supplied (matching the
+        // standalone `execute`), verified against a local mock endpoint.
+        let (tx, rx) = mpsc::channel();
+        let url = spawn_mock_embedding_server(4, tx);
+        let data_dir =
+            std::env::temp_dir().join(format!("nqql-edge-http-stmt-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data_dir);
+
+        let stmt = Stmt {
+            inner: Parser::parse("UPSERT INTO http_docs VALUES {id: 1, text: 'hello'}")
+                .expect("parse upsert"),
+        };
+        let options = serde_json::json!({
+            "dataDir": data_dir,
+            "onDiskPayload": false,
+            "embedUrl": url,
+            "embedKey": "test-key",
+            "embedModel": "mock-embed",
+            "embedDim": 4,
+        });
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        let report = runtime.block_on(async {
+            let raw = execute_stmt(&stmt, Some(options))
+                .await
+                .expect("execute_stmt with embedUrl");
+            serde_json::from_str::<serde_json::Value>(&raw).expect("report is JSON")
+        });
+
+        // The statement ran through the HTTP embedder and succeeded.
+        assert!(
+            report["ok"].as_bool().unwrap_or(false),
+            "execute_stmt report: {report}"
+        );
+        // The mock received exactly one OpenAI-compatible dense request with the
+        // supplied options forwarded (sparse uses local BM25, no HTTP).
+        let req = rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("mock embedding server received a request");
+        assert_eq!(req.method, "POST", "request: {req:?}");
+        assert_eq!(req.path, "/v1/embeddings", "request: {req:?}");
+        assert_eq!(
+            req.model().as_deref(),
+            Some("mock-embed"),
+            "request: {req:?}"
+        );
+        assert_eq!(req.inputs(), vec!["hello".to_string()], "request: {req:?}");
+        assert_eq!(
+            req.auth.as_deref(),
+            Some("Bearer test-key"),
+            "request: {req:?}"
+        );
+        assert!(
+            rx.try_recv().is_err(),
+            "expected exactly one embedding request, got more"
+        );
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[test]
+    #[cfg(not(feature = "http-embedding"))]
+    fn execute_stmt_rejects_embed_url_when_http_embedding_disabled() {
+        // Consistency contract: when the `http-embedding` feature is not
+        // compiled in, `executeStmt` must reject `embedUrl` explicitly instead
+        // of silently falling back to the local ONNX model.
+        let stmt = Stmt {
+            inner: Parser::parse("COUNT FROM docs").expect("parse count"),
+        };
+        let options = serde_json::json!({
+            "dataDir": std::env::temp_dir().join(format!(
+                "nqql-edge-http-reject-{}",
+                std::process::id()
+            )),
+            "embedUrl": "http://127.0.0.1:1/v1/embeddings",
+            "embedKey": "test-key",
+            "embedModel": "mock-embed",
+            "embedDim": 4,
+        });
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        let err = runtime.block_on(async {
+            execute_stmt(&stmt, Some(options))
+                .await
+                .expect_err("embedUrl must be rejected without http-embedding")
+        });
+        assert!(
+            err.to_string().contains("http-embedding"),
+            "unexpected error: {err}"
+        );
     }
 }

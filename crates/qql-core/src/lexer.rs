@@ -48,7 +48,10 @@ impl<'a> Lexer<'a> {
             b'`' => self.read_backtick_string(),
             b'"' | b'\'' => self.read_string(ch),
             _ => {
-                if (ch == b'r' || ch == b'R')
+                // Raw strings use a lowercase `r` prefix only; the grammar
+                // (`raw_string`) has no uppercase form, so `R'…'` must lex as
+                // the identifier `R` followed by a string.
+                if ch == b'r'
                     && self.pos + 1 < self.input.len()
                     && (bytes[self.pos + 1] == b'\'' || bytes[self.pos + 1] == b'"')
                 {
@@ -158,6 +161,15 @@ impl<'a> Lexer<'a> {
         let bytes = self.input.as_bytes();
         if self.pos + 1 < self.input.len() && is_digit(bytes[self.pos + 1]) {
             self.read_number()
+        } else if self.pos + 1 < self.input.len() && bytes[self.pos + 1] == b'.' {
+            // `-.5`: grammar `float`/`integer` require digits after the sign,
+            // so a `-` followed by `.` is never a number. Error at lex time
+            // instead of emitting `-` and a confusing bare-dot error.
+            Err(QqlError::lex(
+                "QQL-LEX-NUMBER",
+                "malformed numeric literal: '-' must be followed by a digit",
+                Span::new(self.pos, self.pos + 2),
+            ))
         } else {
             self.single_char(TokenKind::Minus)
         }
@@ -165,8 +177,14 @@ impl<'a> Lexer<'a> {
 
     fn read_string(&mut self, quote: u8) -> Result<Token<'a>, QqlError> {
         let start = self.pos;
-        if (quote == b'\'' && self.input[self.pos..].starts_with("'''"))
-            || (quote == b'"' && self.input[self.pos..].starts_with("\"\"\""))
+        // A run of three quotes only starts a triple-quoted string when a
+        // matching closing delimiter exists later in the input. Otherwise the
+        // run is single-quoted content: `''''` (four quotes) is the
+        // SQL-escaped one-apostrophe string `'` + `''` + `'` per
+        // `single_quoted_string` in grammar.pest, and must fall back below.
+        let triple = if quote == b'\'' { "'''" } else { "\"\"\"" };
+        if self.input[start..].starts_with(triple)
+            && self.input[start + triple.len()..].find(triple).is_some()
         {
             return self.read_triple_quoted_string(quote);
         }
@@ -309,26 +327,42 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        // Handle scientific notation exponent (e/E, e-5, e+5)
+        // Handle scientific notation exponent (e/E, e-5, e+5). An exponent
+        // must have at least one digit (after an optional sign): `1e`, `5e-`,
+        // `1e+` are malformed (grammar `exponent` = (^"e" | ^"E") ~ ("+" |
+        // "-")? ~ ASCII_DIGIT+), so error at lex time with a structured code
+        // instead of emitting a token that fails downstream `f64` parsing.
         if self.pos < self.input.len()
             && (self.input.as_bytes()[self.pos] == b'e' || self.input.as_bytes()[self.pos] == b'E')
         {
-            let next_pos = self.pos + 1;
-            if next_pos < self.input.len() {
-                let next_ch = self.input.as_bytes()[next_pos];
-                if is_digit(next_ch) || next_ch == b'+' || next_ch == b'-' {
-                    is_float = true;
-                    self.pos += 1; // consume 'e'/'E'
-                    if self.input.as_bytes()[self.pos] == b'+'
-                        || self.input.as_bytes()[self.pos] == b'-'
-                    {
-                        self.pos += 1; // consume '+' or '-'
-                    }
-                    while self.pos < self.input.len() && is_digit(self.input.as_bytes()[self.pos]) {
-                        self.pos += 1;
-                    }
-                }
+            let mut cursor = self.pos + 1;
+            if cursor < self.input.len()
+                && (self.input.as_bytes()[cursor] == b'+' || self.input.as_bytes()[cursor] == b'-')
+            {
+                cursor += 1;
             }
+            if cursor >= self.input.len() || !is_digit(self.input.as_bytes()[cursor]) {
+                return Err(QqlError::lex(
+                    "QQL-LEX-NUMBER",
+                    "malformed numeric literal: exponent requires at least one digit",
+                    Span::new(start, cursor),
+                ));
+            }
+            is_float = true;
+            self.pos = cursor;
+            while self.pos < self.input.len() && is_digit(self.input.as_bytes()[self.pos]) {
+                self.pos += 1;
+            }
+        }
+
+        // A trailing `.` (e.g. `1.` or `1e5.3`) is never part of a valid
+        // number (grammar `float` requires digits after the decimal point).
+        if self.pos < self.input.len() && self.input.as_bytes()[self.pos] == b'.' {
+            return Err(QqlError::lex(
+                "QQL-LEX-NUMBER",
+                "malformed numeric literal: unexpected '.'",
+                Span::new(start, self.pos + 1),
+            ));
         }
 
         if is_float {
@@ -362,7 +396,9 @@ impl<'a> Lexer<'a> {
             if self.input[self.pos..].starts_with('.') {
                 let rest = &self.input[self.pos + 1..];
                 let first_byte = rest.as_bytes().first().copied().unwrap_or(0);
-                if is_alpha(first_byte) || first_byte == b'_' {
+                // `identifier_segment` starts with a letter or `_` only
+                // (grammar.pest); `$` cannot begin a dotted segment.
+                if first_byte.is_ascii_alphabetic() || first_byte == b'_' {
                     self.pos += 1;
                     while self.pos < self.input.len()
                         && (is_alnum(self.input.as_bytes()[self.pos])
@@ -376,7 +412,7 @@ impl<'a> Lexer<'a> {
             } else if self.input[self.pos..].starts_with("[].") {
                 let rest = &self.input[self.pos + 3..];
                 let first_byte = rest.as_bytes().first().copied().unwrap_or(0);
-                if is_alpha(first_byte) || first_byte == b'_' {
+                if first_byte.is_ascii_alphabetic() || first_byte == b'_' {
                     self.pos += 3;
                     while self.pos < self.input.len()
                         && (is_alnum(self.input.as_bytes()[self.pos])
