@@ -25,16 +25,6 @@ pub fn try_route(statement: &Stmt) -> Result<Route, qql_core::error::QqlError> {
     crate::plan::try_route(statement)
 }
 
-/// Compatibility wrapper around [`try_route`].
-///
-/// # Panics
-/// Panics if planning fails or the op is client-side only. Prefer
-/// [`try_route`] or [`compile_statement`] in library code.
-#[deprecated(note = "use try_route or compile_statement; this panics on plan/client-side errors")]
-pub fn route(statement: &Stmt) -> Route {
-    try_route(statement).expect("route(): plan/REST projection failed")
-}
-
 /// Offline compile result for host SDKs.
 ///
 /// `route` is `None` for client-side operations (e.g. CROSS RERANK) that have
@@ -56,12 +46,30 @@ pub fn compile_statement(statement: &Stmt) -> Result<CompiledStatement, qql_core
     Ok(CompiledStatement { stmt_type, route })
 }
 
-/// Groups QUERY statements by collection and produces one `QueryBatchRequest`
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{plan, PlannedOperation};
     use qql_core::parser::Parser;
+
+    #[test]
+    fn client_side_ops_error_via_try_route_and_compile_cleanly() {
+        // Regression: the deprecated `route()` (panicking wrapper around
+        // `try_route`) was removed. `try_route` must return `Err` — never panic —
+        // for client-side-only ops, and `compile_statement` must still expose the
+        // stable `stmt_type` with no route.
+        let s = Parser::parse(
+            "QUERY CROSS RERANK TEXT 'q' MODEL 'bge-reranker-base' ON FIELD body FROM docs PREFETCH (QUERY TEXT 'q' FROM docs USING dense LIMIT 50) LIMIT 10;",
+        )
+        .unwrap();
+        assert!(
+            try_route(&s).is_err(),
+            "client-side op must not produce a REST route"
+        );
+        let compiled = compile_statement(&s).unwrap();
+        assert_eq!(compiled.stmt_type, "cross_rerank");
+        assert!(compiled.route.is_none());
+    }
 
     #[test]
     fn query_routes_correctly() {

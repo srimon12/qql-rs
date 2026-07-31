@@ -434,8 +434,21 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
         }),
         Stmt::Count(count) => {
             let collection = match &count.collection {
-                qql_core::ast::QueryCollection::Explicit(name) => name.clone(),
-                qql_core::ast::QueryCollection::Inherited => String::new(),
+                qql_core::ast::QueryCollection::Explicit(name) if !name.is_empty() => name.clone(),
+                qql_core::ast::QueryCollection::Explicit(_) => {
+                    return Err(QqlError::validation(
+                        "QQL-PLAN-COLLECTION",
+                        "count collection name must not be empty",
+                        None,
+                    ));
+                }
+                qql_core::ast::QueryCollection::Inherited => {
+                    return Err(QqlError::validation(
+                        "QQL-PLAN-COLLECTION",
+                        "count requires an explicit collection (FROM ...)",
+                        None,
+                    ));
+                }
             };
             // Filter and shard routing are independent: filter → qdrant.Filter,
             // shard_key → request ShardKeySelector (gRPC) / shard_key (REST).
@@ -786,18 +799,31 @@ pub enum RestProjectionError {
     ClientSideOnly { stmt_type: &'static str },
 }
 
+/// Serialize a plan struct to JSON for the REST body.
+///
+/// Every plan IR request type is JSON-serializable by construction, so this is
+/// only reachable if a `Serialize` impl regresses. A failure must surface as a
+/// loud invariant violation — a JSON `null` body would be rejected by the
+/// backend with an opaque error. `pub(crate)` so the plan/query/ddl REST
+/// projections share the same no-swallow invariant; kept fallible so the
+/// property is unit-testable.
+pub(crate) fn serialize_body<T: serde::Serialize>(
+    req: &T,
+) -> Result<serde_json::Value, serde_json::Error> {
+    serde_json::to_value(req)
+}
+
 /// REST projection of a planned operation (HTTP method/path/query/body).
 ///
 /// Client-side operations such as [`PlannedOperation::CrossRerank`] return
 /// [`RestProjectionError::ClientSideOnly`] — they must not invent a Qdrant path.
-/// REST projection of a planned operation.
-///
 /// Returns `RestProjectionError::ClientSideOnly` for operations that have no
 /// single Qdrant REST endpoint (e.g. CROSS RERANK).
 pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError> {
-    /// Serialize a plan struct to JSON for the REST body.
+    /// Serialize a plan struct to JSON for the REST body, treating the
+    /// (provably unreachable) serialization failure as an invariant violation.
     fn body<T: serde::Serialize>(req: &T) -> Option<serde_json::Value> {
-        Some(serde_json::to_value(req).unwrap_or_default())
+        Some(serialize_body(req).expect("plan IR REST request body serialization failed"))
     }
 
     /// Read-op query params: timeout, consistency.
@@ -1209,8 +1235,9 @@ mod tests {
 
     #[test]
     fn count_exact_planning() {
+        // Grammar `count` order: WHERE → SHARD → WITH (grammar.pest).
         let stmt = qql_core::parser::Parser::parse(
-            "COUNT FROM docs WHERE active = true WITH (exact = true) SHARD 'tenant_2';",
+            "COUNT FROM docs WHERE active = true SHARD 'tenant_2' WITH (exact = true);",
         )
         .unwrap();
         let op = plan(&stmt).unwrap();
@@ -1226,5 +1253,40 @@ mod tests {
         } else {
             panic!("expected Count operation");
         }
+    }
+
+    #[test]
+    fn plan_rejects_inherited_collection_for_count() {
+        use qql_core::ast::*;
+        let stmt = Stmt::Count(Box::new(CountStmt {
+            collection: QueryCollection::Inherited,
+            filter: None,
+            shard_key: None,
+            exact: None,
+        }));
+        let err = plan(&stmt).unwrap_err();
+        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+        assert_eq!(err.code, "QQL-PLAN-COLLECTION");
+    }
+
+    #[test]
+    fn body_serialization_failure_is_an_error_not_null() {
+        struct FailingSerialize;
+        impl serde::Serialize for FailingSerialize {
+            fn serialize<S: serde::Serializer>(&self, _s: S) -> Result<S::Ok, S::Error> {
+                Err(serde::ser::Error::custom("injected serialization failure"))
+            }
+        }
+        assert!(
+            serialize_body(&FailingSerialize).is_err(),
+            "a serialization failure must surface as Err, never a JSON null body"
+        );
+
+        // Sanity: real plan bodies still serialize to non-null JSON.
+        let op =
+            plan(&Parser::parse("QUERY TEXT 'x' MODEL 'e5' FROM docs LIMIT 5;").unwrap()).unwrap();
+        let route = to_rest_route(&op).expect("rest route");
+        assert!(route.body.is_some());
+        assert_ne!(route.body, Some(serde_json::Value::Null));
     }
 }

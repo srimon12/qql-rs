@@ -140,7 +140,9 @@ impl QdrantOps for MockQdrantClient {
             }));
         }
         // Return per-collection mock points when configured.
-        if let qql_plan::PlannedOperation::Query { collection, .. } = op {
+        if let qql_plan::PlannedOperation::Query { collection, .. }
+        | qql_plan::PlannedOperation::QueryGroups { collection, .. } = op
+        {
             if let Some(points) = self.point_map.lock().unwrap().get(collection) {
                 return Ok(points.clone());
             }
@@ -982,6 +984,164 @@ async fn test_batch_mutations_same_collection() {
         route_count.lock().unwrap().is_none(),
         "mutations should go through update batch, not execute_route"
     );
+}
+
+#[tokio::test]
+async fn test_delete_payload_in_mutation_batch_is_deliberately_isolated() {
+    // Regression (B-1): `DELETE PAYLOAD` has no `UpdateOperation` batch form.
+    // Mixed same-collection mutation batches must not abort the whole script
+    // with QQL-BATCH-INVARIANT; DELETE PAYLOAD is dispatched through the
+    // single-op path in statement order and every statement succeeds.
+    let client = MockQdrantClient::default();
+    let update_count = client.update_batch_call_count.clone();
+    let individual_calls = client.execute_planned_call_count.clone();
+
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+
+    // Two DELETE PAYLOAD statements, no other mutations.
+    let stmts = qql_core::parser::Parser::parse_all(
+        "DELETE PAYLOAD draft FROM docs WHERE id = 1;\
+         DELETE PAYLOAD final FROM docs WHERE id = 2;",
+    )
+    .unwrap();
+    let results = executor.execute_batch_nodes(stmts, false).await.unwrap();
+    assert_eq!(
+        results.len(),
+        2,
+        "expected 2 results, got {}",
+        results.len()
+    );
+    for r in &results {
+        assert!(r.ok, "DELETE PAYLOAD should succeed: {:?}", r);
+        assert_eq!(r.operation, "DELETE_PAYLOAD");
+    }
+    assert_eq!(
+        *update_count.lock().unwrap(),
+        0,
+        "DELETE PAYLOAD must not use update batch"
+    );
+    assert_eq!(
+        *individual_calls.lock().unwrap(),
+        2,
+        "each DELETE PAYLOAD should dispatch singly"
+    );
+
+    // UPSERT + DELETE PAYLOAD in one same-collection group.
+    let client = MockQdrantClient::default();
+    let update_count = client.update_batch_call_count.clone();
+    let individual_calls = client.execute_planned_call_count.clone();
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+    let stmts = qql_core::parser::Parser::parse_all(
+        "UPSERT INTO docs VALUES {id: 1, title: 'a'};\
+         DELETE PAYLOAD draft FROM docs WHERE id = 1;",
+    )
+    .unwrap();
+    let results = executor.execute_batch_nodes(stmts, false).await.unwrap();
+    assert_eq!(results.len(), 2);
+    assert!(results[0].ok, "UPSERT should succeed: {:?}", results[0]);
+    assert_eq!(results[0].operation, "UPSERT");
+    assert!(
+        results[1].ok,
+        "DELETE PAYLOAD should succeed: {:?}",
+        results[1]
+    );
+    assert_eq!(results[1].operation, "DELETE_PAYLOAD");
+    assert_eq!(
+        *update_count.lock().unwrap(),
+        0,
+        "single batchable run is dispatched singly, not via update batch"
+    );
+    assert_eq!(
+        *individual_calls.lock().unwrap(),
+        2,
+        "UPSERT + DELETE PAYLOAD both dispatch through execute_planned"
+    );
+
+    // DELETE PAYLOAD sandwiched between batchable mutations: the surrounding
+    // run is still batched, the DELETE PAYLOAD is isolated, and statement
+    // order is preserved in the response.
+    let client = MockQdrantClient::default();
+    let update_count = client.update_batch_call_count.clone();
+    let ops_count = client.last_update_batch_ops_count.clone();
+    let individual_calls = client.execute_planned_call_count.clone();
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+    let stmts = qql_core::parser::Parser::parse_all(
+        "UPSERT INTO docs VALUES {id: 1, title: 'a'};\
+         DELETE PAYLOAD draft FROM docs WHERE id = 1;\
+         DELETE FROM docs WHERE id = 2;\
+         UPSERT INTO docs VALUES {id: 3, title: 'c'};",
+    )
+    .unwrap();
+    let results = executor.execute_batch_nodes(stmts, false).await.unwrap();
+    assert_eq!(results.len(), 4);
+    assert_eq!(results[0].operation, "UPSERT");
+    assert_eq!(results[1].operation, "DELETE_PAYLOAD");
+    assert_eq!(results[2].operation, "DELETE");
+    assert_eq!(results[3].operation, "UPSERT");
+    for r in &results {
+        assert!(r.ok, "all statements should succeed: {:?}", r);
+    }
+    // run = [UPSERT, DELETE] batched as one update batch; the leading UPSERT
+    // and the DELETE PAYLOAD dispatch singly.
+    assert_eq!(
+        *update_count.lock().unwrap(),
+        1,
+        "batchable run after DELETE PAYLOAD should batch"
+    );
+    assert_eq!(*ops_count.lock().unwrap(), 2);
+    assert_eq!(
+        *individual_calls.lock().unwrap(),
+        2,
+        "leading UPSERT and DELETE PAYLOAD dispatch singly"
+    );
+}
+
+#[tokio::test]
+async fn test_grouped_offset_applied_exactly_once() {
+    // Regression (task 5): GROUP BY with OFFSET must apply the offset exactly
+    // once. The planner sends `limit = user_limit + offset` and the executor
+    // trims the returned groups client-side; `group_offset` has no wire
+    // representation (serde-skipped, not in the gRPC QueryPointGroups proto),
+    // so the backend never applies it. Simulate a server returning `limit`
+    // groups and assert the result is exactly `user_limit` groups starting at
+    // the offset — a double application would drop or duplicate groups.
+    let client = MockQdrantClient {
+        info: Some(collection_with_vectors(&["dense"], &["sparse"])),
+        point_map: Arc::new(Mutex::new(HashMap::from([(
+            "docs".to_string(),
+            serde_json::json!({
+                "result": {
+                    "groups": [
+                        {"id": "a", "hits": [{"id": 1, "score": 1.0}]},
+                        {"id": "b", "hits": [{"id": 2, "score": 0.9}]},
+                        {"id": "c", "hits": [{"id": 3, "score": 0.8}]},
+                    ]
+                }
+            }),
+        )]))),
+        ..Default::default()
+    };
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+    let stmts = qql_core::parser::Parser::parse_all(
+        "QUERY TEXT 'x' MODEL 'test-model' FROM docs USING dense AS DENSE GROUP BY category LIMIT 2 OFFSET 1;",
+    )
+    .unwrap();
+    let results = executor.execute_batch_nodes(stmts, false).await.unwrap();
+    assert_eq!(results.len(), 1);
+    let r = &results[0];
+    assert!(r.ok, "grouped query should succeed: {:?}", r);
+    assert_eq!(r.operation, "QUERY_GROUPS");
+    assert_eq!(r.message, "Found 2 group(s)");
+    let data = r.data.as_ref().expect("data should be present");
+    let groups = data["result"]["groups"].as_array().expect("groups array");
+    assert_eq!(
+        groups.len(),
+        2,
+        "must return exactly user_limit groups, got {}",
+        groups.len()
+    );
+    assert_eq!(groups[0]["id"], "b", "groups must start at the offset");
+    assert_eq!(groups[1]["id"], "c");
 }
 
 #[tokio::test]

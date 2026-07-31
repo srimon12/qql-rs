@@ -135,7 +135,15 @@ async fn test_live_rest_and_grpc_with_ollama_embeddings() {
         )
         .await
         .unwrap();
-    assert!(points_res.ok, "POINTS lookup failed");
+    assert!(points_res.ok, "POINTS lookup failed: {:?}", points_res);
+    // B-3 regression: GetPoints must report the retrieved hits, not 0.
+    assert_eq!(points_res.results[0].message, "Found 2 hits");
+    let points_hits = points_res.results[0]
+        .data
+        .as_ref()
+        .and_then(|d| d.as_array())
+        .expect("POINTS data should be an array");
+    assert_eq!(points_hits.len(), 2, "POINTS lookup should return 2 hits");
 
     // Scroll
     let scroll_res = rest_exec
