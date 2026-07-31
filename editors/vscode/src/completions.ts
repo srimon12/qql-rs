@@ -123,7 +123,7 @@ const SNIPPETS: QqlCompletion[] = [
   },
   {
     label: "QUERY IMAGE",
-    insertText: "QUERY IMAGE '${1:/path/to/image.jpg}' MODEL '${2:clip-vit}'\n  FROM ${3:collection} USING ${4:image}\\n  LIMIT ${5:10};",
+    insertText: "QUERY IMAGE '${1:/path/to/image.jpg}' MODEL '${2:clip-vit}'\n  FROM ${3:collection} USING ${4:image}\n  LIMIT ${5:10};",
     detail: "CLIP vision embedding search",
   },
   {

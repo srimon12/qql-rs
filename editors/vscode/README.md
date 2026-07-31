@@ -42,13 +42,13 @@ QUERY missing FROM docs;   ← QQL-PARSE-UNEXPECTED: Expected FROM
 
 - Errors update within 300ms of typing
 - Error spans are precise (byte-level from the Rust parser, converted to VS Code positions)
-- Zero external dependencies — the 1.35 MB WASM binary is bundled directly
+- Zero external dependencies — the 1.18 MiB WASM binary is bundled directly
 
 ### Autocompletion
 
 **130+ keyword completions** — every QQL keyword is available at your cursor.
 
-**28 snippet templates** — common query patterns insert with placeholders:
+**27 snippet templates** — common query patterns insert with placeholders:
 
 | Snippet | What it generates |
 |---------|------------------|
@@ -96,12 +96,12 @@ QUERY missing FROM docs;   ← QQL-PARSE-UNEXPECTED: Expected FROM
 
 | Component | Size |
 |-----------|------|
-| WASM parser binary | 1.35 MB |
+| WASM parser binary | 1.18 MiB |
 | JS loader + providers | ~14 KB |
 | TextMate grammar | 4.2 KB |
-| **Total VSIX** | **846 KB** |
+| **Total VSIX** | **414 KB** |
 
-The WASM binary is compiled from `qql-core` (the Rust reference implementation) and contains the complete QQL v1 parser — lexer, recursive-descent parser, Pratt formula parser, and AST builder — all running in-process.
+The WASM binary is compiled from the `qql-wasm` crate (built on the Rust reference implementation) and contains the complete QQL v1 parser — lexer, recursive-descent parser, Pratt formula parser, and AST builder — all running in-process.
 
 ---
 
@@ -115,7 +115,7 @@ The WASM binary is compiled from `qql-core` (the Rust reference implementation) 
                 │
                 ▼
         ┌──────────────┐
-        │  Rust parser  │  (1.35 MB WASM binary)
+        │  Rust parser  │  (1.18 MiB WASM binary)
         │  • Lexer      │
         │  • Parser     │
         │  • AST build  │
