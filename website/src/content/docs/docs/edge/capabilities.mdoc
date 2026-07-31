@@ -53,7 +53,7 @@ Qdrant" hint.
 | Point-id query inputs | no | `QQL-EDGE-UNSUPPORTED-POINT-REF` |
 | String point IDs (non-UUID) | no | `QQL-EDGE-INVALID-POINT-ID` |
 | gRPC transport | no | edge has no protobuf dependency |
-| `PARAMS (timeout, consistency)` | n/a | request-level fields, not applicable |
+| `PARAMS (timeout, consistency)` | no | `QQL-EDGE-UNSUPPORTED-TIMEOUT` / `QQL-EDGE-UNSUPPORTED-CONSISTENCY` |
 | Remote image URLs | no | local file paths only |
 
 ## What works
@@ -203,6 +203,12 @@ keeps the whole feature surface of the language and rejects at execution —
 switch to REST or gRPC for those workloads.
 {% /aside %}
 
+## Code catalog
+
+See the complete list of fixed codes in the [error codes reference](/docs/reference/error-codes/#qql-edge-unsupported-codes).
+
+## Technical details
+
 Recommendations and point reference inputs: `QUERY POINT 42 FROM docs`,
 `QUERY RECOMMEND POSITIVE (1)`, and similar **point-id inputs** need the
 point's vector materialized. Text, vector, or image inputs that can be
@@ -212,8 +218,9 @@ embedded by the configured model work; point-id-only inputs fail with
 ## Request-level parameters
 
 `timeout` and `consistency` are request-level fields for remote REST/gRPC
-transports and do not apply to an in-process backend. `hnsw_ef`, `exact`,
-`quantization`, and `indexed_only` are honored.
+transports and are rejected offline with `QQL-EDGE-UNSUPPORTED-TIMEOUT` and
+`QQL-EDGE-UNSUPPORTED-CONSISTENCY`. `hnsw_ef`, `exact`, `quantization`, and
+`indexed_only` are honored.
 
 ## Transport
 

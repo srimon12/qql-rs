@@ -82,12 +82,18 @@ Formula precedence, highest to lowest, is unary `-`, multiplication/division,
 then addition/subtraction; operators are left-associative. A division may carry
 an explicit by-zero default with `[DEFAULT = number]`:
 
-```text
+{% qqlExample title="Division with a by-zero default" %}
+```sql
+WITH candidates AS (
+  QUERY TEXT 'distributed systems' USING dense LIMIT 10
+)
 QUERY FORMULA $score / (views + 1) [DEFAULT = 0]
-DEFAULTS (score = 0.0)
+DEFAULTS (score = 0.0, views = 0)
 FROM docs
+PREFETCH (candidates)
 LIMIT 10;
 ```
+{% /qqlExample %}
 
 ## Encode a transparent business rule
 

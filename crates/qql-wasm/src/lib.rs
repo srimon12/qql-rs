@@ -263,8 +263,13 @@ impl Stmt {
     }
 
     #[wasm_bindgen(setter, js_name = shardKey)]
-    pub fn set_shard_key(&mut self, key: Option<String>) {
-        let _ = self.inner.set_shard_key(key);
+    pub fn set_shard_key(&mut self, key: Option<String>) -> Result<(), JsValue> {
+        if !self.inner.set_shard_key(key) {
+            return Err(JsValue::from_str(
+                "cannot set shardKey on statement type that does not support sharding (e.g. DDL statements)",
+            ));
+        }
+        Ok(())
     }
 
     /// Serialise the AST to a JSON string.

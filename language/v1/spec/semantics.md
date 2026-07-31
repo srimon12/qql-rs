@@ -240,7 +240,8 @@ Collection config keys are case-insensitive and unique:
 
 `read_fan_out_factor` and `read_fan_out_delay_ms` are ALTER-only. Quantization
 type is `scalar`, `binary`, `product`, or `turbo`; `disabled = true` is an
-ALTER form.
+ALTER form. `sharding_method` accepts the string `'auto'` or `'custom'`;
+`shard_keys` is a list of strings.
 
 Index options are limited to boolean `is_tenant`, `on_disk`, `enable_hnsw`,
 `lowercase`, `ascii_folding`, `phrase_matching`, `lookup`, `range`, and

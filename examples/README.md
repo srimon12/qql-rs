@@ -102,8 +102,8 @@ cargo build --release -p qql-cli --no-default-features --features rest
 QQL_BIN=./target/release/qql python examples/medical-showcase/main.py
 QQL_BIN=./target/release/qql python examples/medical-showcase/main.py --execute --keep
 
-# Edge (default CLI features include edge + fastembed)
-cargo build --release -p qql-cli
+# Edge (requires edge feature)
+cargo build --release -p qql-cli --features edge
 QQL_BIN=./target/release/qql python examples/edge-demo/main.py
 QQL_BIN=./target/release/qql python examples/edge-demo/main.py --dry-run
 ```
@@ -120,12 +120,12 @@ Examples across this folder exercise:
 - `COUNT … WITH (exact = true)`
 - `SCROLL … WITH VECTOR false`
 - `DELETE PAYLOAD key FROM …`
-- CTE `PREFETCH` + `FORMULA` + `MMR` + `GROUP BY` + `ORDER BY`
+- `CTE` `PREFETCH` + `FORMULA` + `MMR` + `GROUP BY` + `ORDER BY`
 - Recommend / Context / Discover (medical showcase)
 
 ## Version note
 
-Target SDK / engine: **0.1.4+**. Older release binaries (e.g. 0.1.1 CLI) reject some 1.2 syntax — rebuild from this workspace:
+Target SDK / engine: **0.1.5+**. Older release binaries (e.g. 0.1.1 CLI) reject some 1.2 syntax — rebuild from this workspace:
 
 ```bash
 cargo build --release -p qql-cli

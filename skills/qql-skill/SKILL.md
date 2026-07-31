@@ -271,7 +271,8 @@ qql connect                                   Interactive REPL
 qql convert [file.json]                       Convert REST JSON to QQL
 qql dump <collection> <output.qql> [options]  Dump collection to QQL script
 qql doctor [--json] [--quiet]                 Check Qdrant connection health
-qql edge <query> [options]                    Execute against local qdrant-edge
+qql --edge exec <query> [options]           Execute against local qdrant-edge
+qql config edge [options]                    Configure local qdrant-edge backend
 qql version                                   Show version
 
 Global: --url <URL> (overrides QDRANT_URL env, default http://localhost:6333)

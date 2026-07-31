@@ -1,0 +1,121 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Formula": {
+            "defaults": [
+              [
+                "score",
+                {
+                  "Float": 0.0
+                }
+              ]
+            ],
+            "expression": {
+              "Mul": {
+                "left": {
+                  "Div": {
+                    "by_zero_default": 1.0,
+                    "left": {
+                      "Variable": {
+                        "name": "$score"
+                      }
+                    },
+                    "right": {
+                      "Variable": {
+                        "name": "views"
+                      }
+                    }
+                  }
+                },
+                "right": {
+                  "Constant": {
+                    "value": 10.0
+                  }
+                }
+              }
+            },
+            "prefetch": []
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Formula": {
+            "defaults": [
+              [
+                "score",
+                {
+                  "Float": 0.0
+                }
+              ]
+            ],
+            "expression": {
+              "Sum": {
+                "left": {
+                  "Div": {
+                    "by_zero_default": 0.0,
+                    "left": {
+                      "Variable": {
+                        "name": "score_a"
+                      }
+                    },
+                    "right": {
+                      "Variable": {
+                        "name": "score_b"
+                      }
+                    }
+                  }
+                },
+                "right": {
+                  "Constant": {
+                    "value": 1.0
+                  }
+                }
+              }
+            },
+            "prefetch": []
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    }
+  ]
+}

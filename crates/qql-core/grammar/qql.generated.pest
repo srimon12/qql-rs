@@ -319,7 +319,7 @@ single_embedding_spec = _{
     ^"HYBRID"
       ~ (^"DENSE" ~ spec_modifier*)?
       ~ (^"SPARSE" ~ spec_modifier*)?
-    | (^"DENSE" | ^"SPARSE") ~ spec_modifier*
+    | (^"DENSE" | ^"SPARSE" | ^"MULTI" | ^"MULTIVECTOR" | ^"IMAGE") ~ spec_modifier*
     | spec_modifier+
 }
 
@@ -360,7 +360,7 @@ clear_payload = {
 }
 delete_payload = {
     ^"DELETE" ~ ^"PAYLOAD"
-    ~ field_name ~ ("," ~ field_name)*
+    ~ field ~ ("," ~ field)*
     ~ ^"FROM" ~ collection
     ~ ^"WHERE" ~ filter
     ~ (^"SHARD" ~ string)?

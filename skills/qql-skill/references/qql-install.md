@@ -17,8 +17,8 @@ cargo build --release -p qql-cli --no-default-features --features rest
 # REST + gRPC
 cargo build --release -p qql-cli --no-default-features --features rest,grpc
 
-# Full CLI including edge + fastembed (default features; slower compile)
-cargo build --release -p qql-cli
+# Full CLI including edge + fastembed
+cargo build --release -p qql-cli --features edge
 ```
 
 Binary: `target/release/qql`.

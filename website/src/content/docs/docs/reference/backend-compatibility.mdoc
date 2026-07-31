@@ -27,7 +27,7 @@ capability, not a separate language dialect.
 | Collection `PARAMS` (replication, sharding) | yes | yes | no |
 | Point-ID query inputs | yes | yes | no |
 | ACORN search parameter | yes | yes | no |
-| Cluster consistency/timeout fields | yes | yes | not applicable |
+| Cluster consistency/timeout fields | yes | yes | no |
 
 Notes:
 
@@ -39,8 +39,8 @@ Notes:
   any backend.
 - **Point-ID query inputs** (`QUERY POINT`, `RECOMMEND POSITIVE (id)`) need
   materialized vectors; offline, use `TEXT` or `VECTOR` inputs instead.
-- **Timeouts and consistency** are request-level REST/gRPC fields and are not
-  applicable to the in-process edge backend.
+- **Timeouts and consistency** are request-level REST/gRPC fields and are rejected
+  offline with `QQL-EDGE-UNSUPPORTED-TIMEOUT` and `QQL-EDGE-UNSUPPORTED-CONSISTENCY`.
 
 The exact edge surface evolves with `qql-edge`; treat a plan or execution
 capability error as authoritative.

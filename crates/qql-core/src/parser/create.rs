@@ -126,13 +126,15 @@ impl<'a> AstLowerer<'a> {
                         if self.peek()?.kind == TokenKind::Hnsw {
                             self.advance()?;
                             hnsw = self.parse_hnsw_config_block()?.hnsw;
-                        } else if self.peek()?.kind == TokenKind::Identifier
-                            && ascii_equal(self.peek()?.text, "QUANTIZATION")
+                        } else if self.peek()?.kind == TokenKind::Quantization
+                            || (self.peek()?.is_keyword_or_identifier()
+                                && ascii_equal(self.peek()?.text, "QUANTIZATION"))
                         {
                             self.advance()?;
                             quant = self.parse_quantization_config_block()?.quantization;
-                        } else if self.peek()?.kind == TokenKind::Identifier
-                            && ascii_equal(self.peek()?.text, "MULTIVECTOR")
+                        } else if self.peek()?.kind == TokenKind::Multivector
+                            || (self.peek()?.is_keyword_or_identifier()
+                                && ascii_equal(self.peek()?.text, "MULTIVECTOR"))
                         {
                             self.advance()?;
                             multiv = Some(self.parse_multivector_config_block()?);
