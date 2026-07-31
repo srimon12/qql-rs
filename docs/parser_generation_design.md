@@ -37,7 +37,7 @@ Any solution for parser generation or parser alignment must satisfy the followin
 1. **`no_std` Compatibility**: Must compile with `#![no_std]` when default features are disabled.
 2. **Zero Dependencies**: Must not introduce runtime dependencies (such as heavy parser generator runtime crates) to `qql-core`.
 3. **AST Parity & Performance**: Zero-allocation token matching and deterministic error spans.
-4. **100% Conformance**: Must pass all 34 valid fixture groups and 35 invalid test cases in `language/v1/fixtures`.
+4. **100% Conformance**: Must pass all 35 valid fixture groups (249 statements) and 53 invalid test cases in `language/v1/fixtures`, compared against 35 canonical AST snapshots.
 
 ---
 
@@ -70,17 +70,19 @@ Any solution for parser generation or parser alignment must satisfy the followin
   - Special handling required for Pratt parsing of formula expressions (`FORMULA …`).
 - **Verdict**: Feasible long-term architecture, but requires phased implementation.
 
-### Option D: Hybrid Generated Lexer + Bi-Directional CI Validation (Current / Recommended)
+### Option D: Hand-Written Runtime + Test-Only Pest Harness (Current / Recommended)
 - **Mechanism**: 
-  1. Automatically generate the keyword map (`keywords.generated.rs`) from `grammar.pest`. Adding a keyword without updating `TokenKind` causes a compile error.
-   2. Enforce **Forward-Drift Test**: Asserts all 165 keywords in `grammar.pest` exist in `keywords.generated.rs`.
-  3. Enforce **Reverse-Drift Test**: Statically scans `crates/qql-core/src/parser/` for `ascii_equal`, `peek_word`, `expect_word`, `eq_ignore_ascii_case` calls and asserts every referenced keyword is declared in `grammar.pest`.
-  4. Enforce **Exhaustive Conformance Corpus**: CI validates all valid statements and invalid cases against canonical AST snapshots.
+  1. Keep the production parser hand-written (lexer + `AstLowerer` in `qql-core`); pest is never a `qql-core` runtime dependency.
+  2. Automatically generate the keyword map (`keywords.generated.rs`) from `grammar.pest`. Adding a keyword without updating `TokenKind` causes a compile error.
+  3. Enforce **Forward-Drift Test**: Asserts all 163 keywords in `grammar.pest` exist in `keywords.generated.rs`.
+  4. Enforce **Reverse-Drift Test**: Statically scans `crates/qql-core/src/parser/` for `ascii_equal`, `peek_word`, `expect_word`, `eq_ignore_ascii_case` calls and asserts every referenced keyword is declared in `grammar.pest`.
+  5. **Execute `grammar.pest` itself in a test-only pest harness**: `qql-conformance` compiles the canonical grammar via `pest_derive` (dev-dependencies only) and runs the valid fixture corpus through it, plus every grammar-rejected invalid case through the runtime — so structural grammar↔runtime drift fails CI, not just keyword vocabulary.
+  6. Enforce **Exhaustive Conformance Corpus**: CI validates all valid statements and invalid cases against canonical AST snapshots.
 - **Pros**:
-  - Zero runtime overhead, 100% `no_std` and zero dependencies preserved.
-  - Immediately closes 100% of forward and reverse drift bugs.
+  - Zero runtime overhead, 100% `no_std` and zero dependencies preserved in `qql-core`.
+  - Closes forward and reverse drift bugs at the keyword level and turns the canonical grammar into an executable gate without violating the no-pest-runtime constraint.
   - Zero extra complexity in build scripts.
-- **Verdict**: Recommended architecture for QQL 1.x.
+- **Verdict**: Recommended architecture for QQL 1.x (implemented; `qql-grammar-gen check` + `qql-conformance check language/v1` run in CI).
 
 ---
 
@@ -97,13 +99,16 @@ flowchart TD
     
     F -->|Forward Test| G["grammar_keywords_in_token_rs"]
     F -->|Reverse Test| H["parser_keywords_exist_in_grammar"]
-    F -->|Conformance| I["34 Valid / 35 Invalid Fixtures"]
+    F -->|Pest Gate| I["qql-conformance grammar_gate (test-only)"]
+    F -->|Conformance| J["35 Valid / 53 Invalid Fixtures / 35 Snapshots"]
 ```
 
-### Phase 1: Generated Lexer & Bi-Directional Gates (Completed)
+### Phase 1: Generated Lexer, Bi-Directional Gates & Executable Grammar Gate (Completed)
 - Render `keywords.generated.rs` via `qql-grammar-gen`.
 - Enforce `parser_keywords_exist_in_grammar` reverse-drift unit test in `crates/qql-core`.
 - Wire all 5 derived artifacts into `qql-grammar-gen check` in CI.
+- Add the test-only pest harness (`grammar_gate` in `qql-conformance`) that compiles
+  `grammar.pest` and checks the fixture corpus, wired into CI (`cargo test -p qql-conformance`).
 
 ### Phase 2: AST Node Annotation (Next Release)
 - Annotate grammar rules in `grammar.pest` with explicit AST node attributes (e.g. `@ast(QueryExpr::Nearest)`).
