@@ -42,7 +42,9 @@ print(report["succeeded"], report["failed"])
 ## Parse, isolate, and route
 
 Use an AST predicate for isolation. Assign a shard key only when the host also
-knows the Qdrant routing partition.
+knows the Qdrant routing partition. The full per-statement behavior of
+`inject_filter` is described in the
+[Filter injection guide](/docs/guides/filter-injection/).
 
 ```python
 from pyqql import Client, parse

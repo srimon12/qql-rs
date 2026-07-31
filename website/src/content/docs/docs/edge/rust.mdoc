@@ -1,0 +1,197 @@
+---
+title: "Rust"
+description: "Embed local QQL execution in a Rust service with the qql-edge crate."
+sidebar:
+  order: 3
+---
+
+The `qql-edge` crate combines the `qql` runtime executor with `qdrant-edge`
+(in-process HNSW) and, optionally, `fastembed-rs` (local ONNX embeddings).
+The result is a normal [`qql::executor::Executor`] whose backend is embedded
+in your process.
+
+{% techBadge name="qql-edge" variant="orange" /%}
+
+## Install
+
+{% terminal title="Cargo" %}
+cargo add qql-edge
+{% /terminal %}
+
+Features:
+
+| Feature | Default | Provides |
+|---|---|---|
+| `fastembed-local` | yes | Local ONNX embedding via fastembed-rs |
+| `http-embedding` | no | OpenAI-compatible HTTP embeddings (`http_executor`) |
+
+With neither feature, only `custom_executor` is available.
+
+## Quick start
+
+`local_executor` gives you a dense-only offline executor using the default
+model `BGESmallENV15` (384-dimensional), with payloads in memory when you pass
+`false`:
+
+```rust
+use qql_edge::local_executor;
+use qql::executor::OnError;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut executor = local_executor("./qdrant_data", false)?;
+
+    let report = executor
+        .execute("CREATE COLLECTION docs HYBRID", OnError::Stop)
+        .await?;
+    assert!(report.ok);
+
+    executor
+        .execute(
+            "UPSERT INTO docs VALUES {id: 1, text: 'hello from edge'}",
+            OnError::Stop,
+        )
+        .await?;
+
+    let report = executor
+        .execute("QUERY TEXT 'hello' FROM docs USING dense LIMIT 5", OnError::Stop)
+        .await?;
+    println!("found {} hits", report.results[0].data.map(|d| d.to_string()).unwrap_or_default());
+
+    executor.close().await?; // flush before deleting the data directory
+    Ok(())
+}
+```
+
+`OnError::Stop` halts at the first failing statement; `OnError::Continue`
+collects a report for every statement in a script.
+
+## Constructor reference
+
+| Function | Embedder | Use case |
+|---|---|---|
+| `local_executor(path, on_disk_payload)` | FastEmbed (default dense model) | Fully offline dense search |
+| `local_executor_with_options(path, options)` | FastEmbed + optional sparse/multi/image/reranker | Offline dense + sparse + ColBERT + CLIP + cross-encoder |
+| `http_executor(path, on_disk_payload, url, key, model, dim)` | OpenAI-compatible HTTP endpoint | Local storage, remote embeddings |
+| `http_executor_with_multi(path, on_disk_payload, url, key, model, dim, multi_url, multi_key, multi_model, multi_dim)` | HTTP + optional multi/ColBERT endpoint | Local storage, remote dense + multi |
+| `custom_executor(path, on_disk_payload, embedder)` | Any `Arc<dyn Embedder>` | GPU, ensemble, caching, your own inference |
+| `list_embedding_models()` | — | Catalog of loadable ONNX models |
+
+All constructors return `Result<Executor, qql_core::error::QqlError>`.
+
+### `local_executor_with_options`
+
+`LocalExecutorOptions` maps one-to-one onto the five fastembed slots plus
+storage behavior:
+
+```rust
+use qql_edge::{local_executor_with_options, LocalExecutorOptions};
+use qql::executor::OnError;
+
+let mut executor = local_executor_with_options(
+    "./qdrant_data",
+    LocalExecutorOptions {
+        on_disk_payload: true,
+        model: Some("bge-small-en-v1.5".into()),      // dense, 384-d
+        sparse_model: Some("splade".into()),          // real ONNX sparse
+        multi_model: Some("bge-m3".into()),           // ColBERT multivector
+        image_model: None,                            // no CLIP vision
+        reranker_model: Some("bge-reranker-base".into()), // CROSS RERANK
+        cache_dir: Some("/var/cache/qql-models".into()),
+        show_download_progress: true,
+    },
+)?;
+
+executor
+    .execute("CREATE COLLECTION docs HYBRID", OnError::Stop)
+    .await?;
+```
+
+Models are locked at construction: a `USING MODEL '…'` clause that names a
+model the embedder does not own fails at execution time instead of silently
+switching models. See [models](/docs/edge/models/).
+
+### `http_executor`
+
+Storage and search stay local; only embeddings are remote. Works with any
+OpenAI-compatible endpoint — Ollama (`/v1/embeddings`), OpenAI, Cohere,
+Together, Mistral:
+
+```rust
+use qql_edge::http_executor;
+use qql::executor::OnError;
+
+let mut executor = http_executor(
+    "./qdrant_data",
+    false,
+    "http://localhost:11434/v1/embeddings", // endpoint
+    "",                                      // api key (empty = none)
+    "nomic-embed-text",                      // model
+    768,                                     // dimension
+)?;
+```
+
+### `custom_executor`
+
+Plug in any `Arc<dyn Embedder>`. If your embedder reports a dimension, edge
+auto-sizes `CREATE COLLECTION HYBRID`; otherwise pass a `QqlConfig` with
+`embedding_dimension` set via `Executor::with_embedder`.
+
+## `FastEmbedder` and `FastEmbedderOptions`
+
+`FastEmbedder` wraps fastembed-rs behind the `qql_embed::Embedder` trait and
+is what every local constructor builds internally. You can construct it
+directly for full control:
+
+```rust
+use qql_edge::{FastEmbedder, FastEmbedderOptions};
+
+let embedder = FastEmbedder::try_with_options(FastEmbedderOptions {
+    model: Some("ClipVitB32".into()),          // CLIP text
+    image_model: Some("clip-vision".into()),   // CLIP vision
+    ..Default::default()
+})?;
+```
+
+Useful accessors: `model_name()`, `model_code()`, `dimension()`,
+`multi_dimension()`, `image_dimension()`, `has_sparse()`, `has_multi()`,
+`has_image()`, `has_reranker()`.
+
+## `EdgeQdrant` backend
+
+For lower-level control you can build the backend directly. `EdgeQdrant`
+implements the `QdrantOps` trait that REST and gRPC clients also implement:
+
+```rust
+use qql_edge::EdgeQdrant;
+
+let backend = EdgeQdrant::new("./qdrant_data", true); // base_path, on_disk_payload
+```
+
+`EdgeQdrant::new(base_path, on_disk_payload)` opens shards lazily per
+collection and persists them under `base_path`. Combined with an embedder and
+a `QqlConfig`, wrap it in a runtime `Executor` via `Executor::with_embedder`.
+The `close()` method (also on `Executor`) drains and flushes all open shards.
+
+## Response shapes
+
+Queries return hit arrays with `id`, `payload`, and `vector` keys inside
+`result.points`; mutations return the standard envelope:
+
+| Operation | `data` shape |
+|---|---|
+| Query / scroll / points | `{"result": {"points": [{"id", "score", "payload", "vector"}]}}` |
+| Mutation | `{"result": {"status": "completed"}, "status": "ok", "time": 0.0}` |
+| Count | `{"result": {"count": N}}` |
+| `SHOW COLLECTIONS` | `{"result": {"collections": [{"name"}]}}` |
+
+## Errors
+
+Offline-unsupported features fail with stable `QQL-EDGE-UNSUPPORTED-*` codes
+plus a remediation hint — never a silent no-op. String point IDs that are not
+UUIDs fail with `QQL-EDGE-INVALID-POINT-ID`. See
+[capabilities](/docs/edge/capabilities/) for the catalog.
+
+Call `executor.close().await?` before deleting the data directory so
+qdrant-edge can flush the WAL and segments while the files still exist. See
+[persistence](/docs/edge/persistence/).

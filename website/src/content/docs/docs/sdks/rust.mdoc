@@ -24,7 +24,9 @@ LIMIT 10;
 ## Parse once, then enforce policy
 
 The parser requires complete input. Retain the typed `Stmt` and rewrite that
-object before planning or execution.
+object before planning or execution. The
+[Filter injection guide](/docs/guides/filter-injection/) details how the
+injected predicate lands in each statement type.
 
 ```rust
 use qql_core::ast::{inject_filter, ComparisonOp, Value};

@@ -1,0 +1,197 @@
+---
+title: "Filter injection"
+description: "Enforce tenant and authorization predicates at the AST level with inject_filter."
+sidebar:
+  order: 5
+---
+
+`inject_filter` is the security boundary of QQL. Your host parses untrusted
+QQL, injects a trusted tenant or authorization predicate directly into the
+statement's AST, and then plans or executes the rewritten statement. The
+untrusted source never reaches Qdrant verbatim.
+
+The lifecycle is always the same:
+
+1. Parse the untrusted source once into a typed statement.
+2. Inject the trusted predicate with `inject_filter`.
+3. Optionally `explain` or compile the rewritten AST to inspect it.
+4. Execute the rewritten statement — never the original source.
+
+## Why AST-level injection
+
+Filtering after retrieval is not enforcement. A post-filter runs after Qdrant
+has already searched, grouped, and scored points from every tenant. The tenant
+boundary leaks work, and the filter corrupts limits, groups, and scores because
+the pre-filter statistics include data the caller must never see.
+
+Injecting the predicate into the AST places it inside the Qdrant `Filter`
+itself. Qdrant applies the predicate before vector search, grouping, or score
+computation, so no point outside the caller's scope can influence a result.
+
+{% qqlExample title="Tenant-scoped query" %}
+```sql
+QUERY TEXT 'compliance review'
+FROM docs
+USING dense
+WHERE tenant_id = 'acme'
+LIMIT 10;
+```
+{% /qqlExample %}
+
+## The core operation
+
+The Rust core exposes a free function that mutates a parsed statement in place:
+
+```rust
+pub fn inject_filter(
+    statement: &mut Stmt,
+    field: &str,
+    operator: ComparisonOp,
+    value: Value,
+) -> Result<(), QqlError>
+```
+
+Every host SDK exposes the same operation, either as a free function that
+accepts source or a parsed statement, or as a method on the owned statement
+handle:
+
+| Host | Free function | Statement method |
+|---|---|---|
+| Rust | `inject_filter(&mut stmt, field, op, value)` | — |
+| Python | `inject_filter(stmt_or_source, field, op, value)` | `Stmt.inject_filter(field, op, value)` |
+| Node.js | `injectFilter(source, field, op, value)` | `Stmt.injectFilter(field, op, value)` |
+| WebAssembly | `inject_filter(source, field, op, value)` | `Stmt.injectFilter(field, op, value)` |
+
+```rust
+use qql_core::ast::{inject_filter, ComparisonOp, Value};
+use qql_core::parser::Parser;
+
+let mut stmt = Parser::parse(query)?;
+inject_filter(
+    &mut stmt,
+    "tenant_id",
+    ComparisonOp::Eq,
+    Value::Str("acme".into()),
+)?;
+```
+
+```python
+from pyqql import parse
+
+stmt = parse(query)[0]
+stmt.inject_filter("tenant_id", "=", "acme")
+```
+
+```javascript
+const { Stmt } = require("@veristamp/nqql");
+
+const stmt = new Stmt(query);
+stmt.injectFilter("tenant_id", "=", "acme");
+```
+
+## Supported operators
+
+Only comparison operators that keep the predicate deniable are supported:
+`=`, `>`, `>=`, `<`, and `<=`. Inequality is deliberately rejected.
+
+`!=` (and the aliases `neq`, `<>`) raises:
+
+> inject_filter does not support '!='; inject equality and wrap with NOT, or rewrite the query
+
+There is no `NOT`-wrapped negation for injected predicates. If you need an
+exclusion rule, model it in the source query or rewrite the statement yourself.
+
+Every SDK accepts the same operator aliases:
+
+| Operator | Aliases |
+|---|---|
+| Equal | `=`, `==`, `eq` |
+| Greater than | `>`, `gt` |
+| Greater or equal | `>=`, `gte` |
+| Less than | `<`, `lt` |
+| Less or equal | `<=`, `lte` |
+
+An unknown operator fails fast with:
+
+> unsupported comparison operator '{op}' (use =, >, >=, <, <=)
+
+## How it behaves per statement
+
+Injection is statement-aware. The predicate lands where the statement type
+actually reads or writes points:
+
+| Statement | Injection behavior |
+|---|---|
+| `QUERY` | Merges into the top-level filter, then recurses into every CTE and nested `PREFETCH` sub-query |
+| `SCROLL`, `COUNT` | Merges into the statement filter |
+| `DELETE`, `CLEAR PAYLOAD`, `DELETE PAYLOAD`, `DELETE VECTOR`, `UPDATE` (payload) | Wraps the point selector (`id`/`ids` become a point-ID predicate) and ANDs it with the injected predicate — mutations can only touch the caller's tenant |
+| `UPSERT` | Only for `=` on a non-`id` field: stamps the value onto every point's payload, scoping writes to the tenant |
+| DDL, `SHOW`, `UPDATE` (vector) | Fails closed with `QQL-VALIDATION-FILTER-INJECT` rather than weakening the statement |
+
+For queries, the recursion matters. A rewritten statement is only safe if
+*every* branch that reads points carries the predicate:
+
+{% qqlExample title="Injection covers CTEs and prefetches" %}
+```sql
+WITH candidates AS (
+  QUERY TEXT 'candidate' USING dense LIMIT 100
+)
+QUERY FUSION RRF
+FROM docs
+PREFETCH (candidates)
+LIMIT 10;
+```
+{% /qqlExample %}
+
+`inject_filter` merges `tenant_id = 'acme'` into the outer filter, into the CTE
+`candidates`, and into every prefetch sub-query, so no stage can read outside
+the tenant.
+
+### The `id` field
+
+A field named `id` is treated as a point-ID predicate rather than a payload
+comparison. Only `=` is allowed; any other operator raises
+`QQL-VALIDATION-ID-PREDICATE`. The value must be an unsigned integer or a
+string, otherwise `QQL-VALIDATION-POINT-ID` is raised. This keeps `id`
+injection consistent with how Qdrant selects points.
+
+## The recommended workflow
+
+1. **Parse once** and retain the typed statement. Do not re-parse the original
+   source later — re-parsing reintroduces untrusted text.
+2. **Inject the trusted predicate** with `inject_filter`. Derive the value from
+   your authentication context, never from the caller's request body.
+3. **Optionally assign `shard_key`** for routing only. Routing is not a security
+   boundary.
+4. **Explain or compile** the rewritten AST to inspect exactly what will be
+   sent to Qdrant.
+5. **Execute the rewritten statement**, never the original source.
+
+## Failure modes and safety
+
+Injection fails closed. When the statement type cannot carry the predicate —
+DDL, `SHOW`, `UPDATE` (vector) — `inject_filter` returns an error and the
+statement is left untouched. The host must reject the request rather than
+execute it without the predicate.
+
+Do not substitute `!=` for an exclusion rule. The injected predicate is trusted
+and must stay expressible as a single comparison; an inequality would silently
+exclude nothing when combined with an empty filter. Model exclusions in the
+source query so the author controls them, and keep the injected predicate as a
+positive constraint.
+
+{% aside type="caution" title="SHARD and shard_key are routing, not authorization" %}
+A `SHARD` clause or `stmt.shard_key` selects Qdrant routing partitions. It is
+an optimization, not a security boundary. Always enforce tenant isolation with
+`inject_filter`; use shard routing only when the host also knows the Qdrant
+partition layout.
+{% /aside %}
+
+## Related documentation
+
+- [Multitenancy guide](/docs/guides/multitenancy/)
+- [Language filters](/docs/language/filters/)
+- [Rust SDK](/docs/sdks/rust/)
+- [Python SDK](/docs/sdks/python/)
+- [Node.js SDK](/docs/sdks/node/)
+- [WebAssembly SDK](/docs/sdks/wasm/)

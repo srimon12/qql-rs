@@ -11,8 +11,17 @@ only when you are targeting a known shard key.
 
 ## Upsert a complete point
 
-Every value object requires exactly one case-insensitive `id` key. A point can
-carry payload values, named dense vectors, sparse vectors, or multivectors.
+Every value object requires exactly one case-insensitive `id` key: a duplicate
+key is rejected at parse time with `QQL-PARSE-DUPLICATE-KEY`, and a missing or
+non-point-ID value fails with `QQL-VALIDATION-UPSERT-ID`. A point can carry
+payload values, named dense vectors, sparse vectors, or multivectors, either as
+one unnamed vector or as an object of arbitrary named vectors.
+
+| Vector shape | Value |
+|---|---|
+| Dense | `[0.1, 0.2, 0.3]` |
+| Sparse | `{indices: [1, 9], values: [0.4, 0.7]}` |
+| Multivector | `[[0.1, 0.2], [0.3, 0.4]]` |
 
 {% qqlExample title="Payload with a named dense vector" %}
 ```sql
@@ -21,14 +30,17 @@ UPSERT INTO docs VALUES {
   title: 'QQL',
   text: 'Declarative vector retrieval',
   vector: {
-    dense: [0.1, 0.2, 0.3]
+    dense: [0.1, 0.2, 0.3],
+    sparse: {indices: [1, 9], values: [0.4, 0.7]}
   }
 };
 ```
 {% /qqlExample %}
 
 When execution owns the embedding step, use `USING` or `EMBED` directives. The
-configured embedder resolves text before the operation is planned.
+configured embedder resolves text before the operation is planned. Embedding
+specs are comma-separated, and each may name a `MODEL`, an `ON FIELD` source,
+and a `VECTOR`/`INTO` destination.
 
 {% qqlExample title="Embed multiple payload fields into named vectors" %}
 ```sql
@@ -39,13 +51,40 @@ UPSERT INTO articles VALUES {
 }
 EMBED body INTO dense_body USING DENSE,
       title INTO sparse_title USING SPARSE;
+
+UPSERT INTO articles VALUES {
+  id: 'article-2',
+  title: 'Vector search',
+  body: 'Semantic ranking'
+}
+USING DENSE MODEL 'all-MiniLM-L6-v2' ON FIELD body INTO dense_body,
+      SPARSE MODEL 'qdrant/bm25' ON FIELD title INTO sparse_title;
 ```
 {% /qqlExample %}
 
+When `ON FIELD` is omitted, the default payload text field resolves in the
+deterministic priority order `text`, `body`, `content`, `title`,
+`description`, `name`, `summary`, `document`.
+
 ## Update only what changed
 
-Use a payload update, vector update, payload-key delete, vector delete, or
-point delete rather than overwriting a full point unnecessarily.
+There are two `UPDATE` forms. The payload form sets `PAYLOAD` under any
+`WHERE` filter:
+
+```text
+UPDATE docs SET PAYLOAD = {status: 'reviewed'} WHERE <filter>;
+```
+
+The vector form replaces a vector (optionally a named one) and targets exactly
+one point ID:
+
+```text
+UPDATE docs SET VECTOR [dense] = [0.2, 0.3, 0.4] WHERE id = <point_id>;
+```
+
+`DELETE PAYLOAD`, `DELETE VECTOR`, `DELETE`, and `CLEAR PAYLOAD` all require a
+`WHERE` selector so an empty script never mutates an entire collection by
+accident.
 
 {% qqlExample title="Targeted point mutations" %}
 ```sql

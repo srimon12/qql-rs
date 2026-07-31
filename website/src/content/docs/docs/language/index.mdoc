@@ -45,11 +45,44 @@ LIMIT 5;
 | Data | Creating and mutating points | `UPSERT`, `UPDATE`, `DELETE`, payload/vector operations |
 | Schema | Defining Qdrant resources | `CREATE`, `ALTER`, `DROP`, `SHOW` |
 
+## Lexical rules
+
+The script surface is strict: one statement per semicolon-separated element, at
+most 256 statements per script, and exactly one trailing semicolon allowed.
+Leading, repeated, or empty separators are rejected. Comments run from `--` to
+the end of the line only; block comments do not exist.
+
+| Rule | Behavior |
+|---|---|
+| Keywords | ASCII case-insensitive (`query`, `Query`, `QUERY` are the same keyword) |
+| Identifiers | Case-sensitive and preserve spelling |
+| Identifier characters | Begin with an ASCII letter, `_`, or `$`; later characters may also be digits |
+| Payload paths | A dotted path (`metadata.author`) or array path (`items[].price`) is one identifier |
+| Unicode operators | `≠`, `≥`, `≤` normalize to `!=`, `>=`, `<=` |
+
+Strings come in five families. The escape sequences `\\`, `\'`, `\"`, `\n`,
+`\r`, `\t`, and `\$` apply only to standard single- and double-quoted strings;
+`''` inside a single-quoted string decodes to one quote.
+
+| Family | Example | Behavior |
+|---|---|---|
+| Single-quoted | `'it''s ready'` | Escapes and `''` doubling |
+| Double-quoted | `"text"` | Escapes |
+| Raw | `r'...'`, `r"..."` | Preserves `$PARAM` and quotes verbatim |
+| Triple-quoted | `'''...'''`, `"""..."""` | Multiline; preserves contents verbatim |
+| Backtick | `` `...` `` | Preserves contents verbatim |
+
+Raw, triple-quoted, and backtick strings keep `$PARAM` references and any
+internal quotes exactly as written.
+
 ## Values and vector roles
 
 QQL supports strings, signed integers, floats, booleans, `null`, ordered
-objects, and lists. Point IDs are unsigned integers or strings. Vector shape,
-not its field name, determines its role.
+objects, and lists. Point IDs are unsigned integers or strings. Object and
+config keys must be unique under ASCII case-insensitive comparison — a
+duplicate key is rejected with `QQL-PARSE-DUPLICATE-KEY`. Vector shape, not its
+field name, determines its role. A point carries one unnamed vector or an
+object of arbitrary named vectors.
 
 | Role | Value shape | Typical use |
 |---|---|---|

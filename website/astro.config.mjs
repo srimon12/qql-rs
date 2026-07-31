@@ -98,6 +98,10 @@ export default defineConfig(
             items: [{ autogenerate: { directory: "docs/guides" } }],
           },
           {
+            label: "Edge",
+            items: [{ autogenerate: { directory: "docs/edge" } }],
+          },
+          {
             label: "SDKs",
             items: [{ autogenerate: { directory: "docs/sdks" } }],
           },

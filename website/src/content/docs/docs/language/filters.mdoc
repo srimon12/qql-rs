@@ -29,11 +29,38 @@ LIMIT 10;
 
 | Predicate | Use it for |
 |---|---|
-| `=`, `>`, `>=`, `<`, `<=` | Scalar equality and range comparison |
+| `=`, `!=`, `>`, `>=`, `<`, `<=` | Scalar equality and range comparison |
 | `BETWEEN`, `IN`, `NOT IN` | Inclusive ranges and membership sets |
 | `IS NULL`, `IS EMPTY` | Missing or empty payload values |
 | `MATCH`, `MATCH ANY`, `MATCH PHRASE` | Text payload matching |
 | `HAS_VECTOR`, `VALUES_COUNT` | Vector presence and array cardinality |
+
+The unicode operators `≠`, `≥`, and `≤` normalize to `!=`, `>=`, and `<=`.
+`!=`, `NOT IN`, `IS NOT NULL`, and `IS NOT EMPTY` all normalize to a `NOT`
+around the corresponding positive predicate. Comparison against the point
+`id` field permits only `=` and `IN`, and every value must be a valid point ID
+(an unsigned integer or a string).
+
+## Text, cardinality, and presence predicates
+
+`MATCH` covers three text forms: a plain string match, `MATCH ANY` over a
+non-empty list, and `MATCH PHRASE` for ordered multi-token phrases. Field and
+text-index compatibility is enforced by the backend at execution time.
+`VALUES_COUNT <op> <non_negative_integer>` tests array cardinality.
+
+{% qqlExample title="Text matching, cardinality, and presence" %}
+```sql
+QUERY TEXT 'search'
+FROM docs
+WHERE content MATCH 'hello world'
+  AND tags MATCH ANY ('hello', 'world')
+  AND description MATCH PHRASE 'vector database'
+  AND reviews VALUES_COUNT >= 2
+  AND HAS_VECTOR 'dense'
+  AND notes IS NOT NULL
+LIMIT 10;
+```
+{% /qqlExample %}
 
 ## Match nested document data
 
@@ -75,6 +102,35 @@ FROM places
 WHERE location GEO_BBOX {
   top_left: {lat: 52.54, lon: 13.36},
   bottom_right: {lat: 52.49, lon: 13.45}
+}
+LIMIT 10;
+```
+{% /qqlExample %}
+
+`GEO_POLYGON` matches points inside an `exterior` ring and optionally excludes
+holes in `interiors`. Every ring needs at least three points. Latitudes are
+validated to `[-90, 90]`, longitudes to `[-180, 180]`, and radii must be
+positive — all before planning.
+
+{% qqlExample title="A polygon with an interior hole" %}
+```sql
+QUERY TEXT 'territory'
+FROM places
+WHERE location GEO_POLYGON {
+  exterior: [
+    {lat: -70.0, lon: -70.0},
+    {lat: 60.0, lon: -70.0},
+    {lat: 60.0, lon: 60.0},
+    {lat: -70.0, lon: 60.0}
+  ],
+  interiors: [
+    [
+      {lat: -50.0, lon: -50.0},
+      {lat: 50.0, lon: -50.0},
+      {lat: 50.0, lon: 50.0},
+      {lat: -50.0, lon: 50.0}
+    ]
+  ]
 }
 LIMIT 10;
 ```

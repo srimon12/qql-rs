@@ -51,7 +51,9 @@ const report = await client.execute(stmt);
 ```
 
 `injectFilter` permits `=`, `>`, `>=`, `<`, and `<=`. `shardKey` is routing,
-not authorization; keep the injected tenant predicate for isolation.
+not authorization; keep the injected tenant predicate for isolation. See the
+[Filter injection guide](/docs/guides/filter-injection/) for the per-statement
+behavior.
 
 ## Inspect or batch work
 

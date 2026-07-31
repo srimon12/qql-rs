@@ -17,8 +17,10 @@ The website is explanatory. The versioned language contract lives in
 | `fixtures/expected/*.json` | Canonical `qql.ast/v1` output |
 | `qql-core::Parser::parse_all` | Production full-script parser |
 
-The checked-in grammar modules are generated. Do not edit generated grammar
-files directly.
+The checked-in grammar modules are generated. `language/v1/grammar.pest` is the
+only handwritten core syntax grammar; the generated copy under
+`crates/qql-core/grammar` must never be edited directly. After a grammar
+change, regenerate it with `qql-grammar-gen` and review the complete diff.
 
 ## Script grammar
 
@@ -28,6 +30,41 @@ statement = query | scroll | count | upsert | update | delete
           | clear-payload | delete-payload | delete-vector
           | create | alter | drop | show ;
 ```
+
+## Statement surface
+
+Every statement family, including the three `SHOW` forms:
+
+| Family | Grammar production |
+|---|---|
+| `QUERY ...` | `query` |
+| `SCROLL FROM ... LIMIT n` | `scroll` |
+| `COUNT FROM ...` | `count` |
+| `UPSERT INTO ... VALUES {...}` | `upsert` |
+| `UPDATE ... SET PAYLOAD` / `SET VECTOR` | `update` |
+| `DELETE FROM ... WHERE ...` | `delete` |
+| `DELETE PAYLOAD field, ... FROM ... WHERE ...` | `delete-payload` |
+| `DELETE VECTOR name, ... FROM ... WHERE ...` | `delete-vectors` |
+| `CLEAR PAYLOAD FROM ... WHERE ...` | `clear-payload` |
+| `CREATE COLLECTION ...` | `create-collection` |
+| `CREATE INDEX ON COLLECTION ... FOR field` | `create-index` |
+| `ALTER COLLECTION ... WITH <block> (...)` | `alter-collection` |
+| `DROP COLLECTION ...` | `drop-collection` |
+| `DROP INDEX ON COLLECTION ... FOR field` | `drop-index` |
+| `CREATE SHARD KEY 'name' ON COLLECTION ...` | `create-shard-key` |
+| `DROP SHARD KEY 'name' ON COLLECTION ...` | `drop-shard-key` |
+| `SHOW COLLECTIONS;` / `SHOW COLLECTION name;` / `SHOW SHARD KEYS ON COLLECTION name;` | `show-collections` / `show-collection` / `show-shard-keys` |
+
+## Query tail clause order
+
+A query tail accepts each clause at most once, in this order:
+
+`USING` (a named vector with optional `AS <kind>`, or `HYBRID`) → `PREFETCH` →
+`WHERE` → `SHARD` → `PARAMS` → `SCORE THRESHOLD` → `GROUP BY [SIZE n] [LOOKUP
+FROM collection]` → `WITH PAYLOAD` → `WITH VECTOR` → `LIMIT` → `OFFSET`.
+
+The parser rejects a duplicate or out-of-order clause with
+`QQL-PARSE-CLAUSE-ORDER` rather than silently reordering it.
 
 ## Lexical rules
 
@@ -46,3 +83,24 @@ RUSTC_WRAPPER= cargo run -p qql-conformance -- check language/v1
 
 The conformance runner parses every valid and invalid case through
 `Parser::parse_all` and compares valid programs with generated AST snapshots.
+
+{% terminal title="Check generated grammar freshness" %}
+cargo run -p qql-grammar-gen -- check
+{% /terminal %}
+
+## Versioning contract
+
+QQL follows `MAJOR.MINOR`; the current language version is `1.2` while the
+canonical AST schema is independently fixed as `qql.ast/v1`.
+
+- Within one major version, every program valid in an earlier minor release
+  must stay valid with the same meaning and canonical AST. A minor release may
+  only make previously invalid source valid by adding syntax.
+- Breaking changes (removing syntax, changing clause order, precedence, or an
+  existing fixture's normalization, renaming AST tags, or changing a stable
+  error code) require QQL 2.
+- QQL 1.0 has no compatibility parser: pre-v1 `SELECT`, `INSERT`, and `BOOST`
+  are invalid source, not deprecated aliases.
+- Deprecated v1 features may be announced but cannot be removed within v1.
+
+See `language/v1/spec/versioning.md` for the full policy.

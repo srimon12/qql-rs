@@ -28,7 +28,8 @@ Typed protobuf transport with query and mutation batching. Enable the runtime
 {% techBadge name="In process" variant="orange" /%}
 
 Local HNSW storage and optional embedded models. No remote cluster
-administration and a deliberately smaller query subset.
+administration and a deliberately smaller query subset. See the dedicated
+[Edge section](/docs/edge/) for capabilities and limits.
 {% /glassCard %}
 
 {% /grid %}
@@ -37,7 +38,9 @@ administration and a deliberately smaller query subset.
 
 Use `Executor::rest(url, api_key)` or `Executor::grpc(url, api_key)` for remote
 execution. The edge packages construct an in-process backend and expose it
-through Python, Node.js, or the CLI.
+through Python, Node.js, or the CLI. The [Edge overview](/docs/edge/) explains
+when in-process execution fits, and [Edge capabilities](/docs/edge/capabilities/)
+lists exactly which statements and features the edge backend supports.
 
 {% qqlExample title="Transport-neutral query" %}
 ```sql

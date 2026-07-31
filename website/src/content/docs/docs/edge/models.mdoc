@@ -1,0 +1,133 @@
+---
+title: "Embedding models"
+description: "The five fastembed slots (dense, sparse, multi, image, rerank), model resolution, HTTP alternatives, and downloads."
+sidebar:
+  order: 6
+---
+
+Edge embeds text through `fastembed-rs` (local ONNX inference) by default, or
+through any OpenAI-compatible HTTP endpoint. The local path has **five
+distinct model slots** backed by five different fastembed classes. Knowing
+which slot a model belongs to is the most common source of edge
+misconfiguration.
+
+## The five slots
+
+| Slot | fastembed class | QQL surface | Example model |
+|---|---|---|---|
+| Dense | `TextEmbedding` | `TEXT`, `QUERY VECTOR` fallback | `BGESmallENV15` (default) |
+| Sparse | `SparseTextEmbedding` | `USING SPARSE MODEL '…'` | SPLADE / BGE-M3 sparse |
+| Multi | `Bgem3Embedding` | `AS MULTI`, multivector `RERANK` | BGE-M3 (ColBERT) |
+| Image | `ImageEmbedding` | `IMAGE` / CLIP vision | CLIP ViT-B-32 vision |
+| Rerank | `TextRerank` | `CROSS RERANK` pair scoring | `bge-reranker-base` |
+
+Each slot is configured separately (CLI: `--model`, `--sparse-model`,
+`--multi-model`, `--image-model`, `--reranker-model`; Rust:
+`LocalExecutorOptions`; Python/Node: keyword options on `local_executor` /
+`localExecutor`). Configuring `multi_model` does **not** configure the dense
+or sparse slots — and a BGE-M3 multi model used for dense embedding is a
+clear error, not a silent fallback.
+
+{% aside type="tip" title="Sparse defaults to local BM25" %}
+When no `sparse_model` is configured, sparse requests (`USING bm25`,
+`QUERY HYBRID … SPARSE bm25`) use a **local BM25 hash** built into the
+runtime — no download, no inference. It is fast (~1.5M documents/s and ~4.9M
+queries/s in local microbenchmarks) and needs no model. Set `sparse_model:
+"bge-m3"` or `"splade"` only when you want real ONNX sparse inference.
+{% /aside %}
+
+## Default dense model
+
+With no `model` configured, the dense slot uses `BGESmallENV15`
+(`Xenova/bge-small-en-v1.5`), a 384-dimensional model. This dimension is what
+`CREATE COLLECTION HYBRID` assumes when the collection has no explicit vector
+definition, and what `local_executor` pins via its `QqlConfig`. Choosing a
+different dense model (e.g. 768-d or 1024-d) auto-sizes hybrid collections to
+the real dimension.
+
+## Model resolution
+
+`model` strings are resolved case-insensitively against three forms:
+
+1. **Enum-style names**: `BGESmallENV15`, `AllMiniLML6V2`, `SPLADEPPV1`, `ClipVitB32`
+2. **Hugging Face codes**: `Xenova/bge-small-en-v1.5`, `Qdrant/clip-ViT-B-32-vision`, `BAAI/bge-m3`
+3. **Short aliases**: `bge-small-en-v1.5`, `all-minilm-l6-v2`, plus slot aliases like `splade`, `bge-m3`, `clip-vision`, `bge-reranker-base`
+
+Common ONNX suffixes (`-onnx`, `-onnx-int8`, `-q8_0`, …) are ignored when
+matching, so `bge-m3` matches `BAAI/bge-m3` and the quantized variants.
+Unknown names fail at construction with a helpful error listing example
+models. Use `list_embedding_models()` (`qql_edge::list_embedding_models`,
+`pyqql_edge.list_embedding_models()`, or `listEmbeddingModels()` in Node) for
+the full catalog.
+
+## Models are locked at construction
+
+The executor snapshot is fixed when the client is built. A query that asks
+for a model outside the configured slots fails at execution with a message
+like:
+
+```text
+local embedder is locked to dense model 'BGESmallENV15' (Xenova/bge-small-en-v1.5);
+cannot satisfy USING MODEL 'all-MiniLM-L6-v2'. Create the executor with model='all-MiniLM-L6-v2'.
+```
+
+This is deliberate: edge has no per-request model loading, and silently
+switching models mid-index would corrupt vector semantics.
+
+## HTTP alternative
+
+If you do not want the ~1 GB local download (or are on an unsupported
+platform), set the embedder to `http`. Storage and search stay local; only
+embeddings go to an OpenAI-compatible endpoint.
+
+{% terminal title="CLI" %}
+qql config edge --embedder http --embed-url http://localhost:11434/v1/embeddings --embed-model nomic-embed-text --embed-dim 768
+{% /terminal %}
+
+```rust
+// Rust
+use qql_edge::http_executor;
+let exec = http_executor("./qdrant_data", false,
+    "http://localhost:11434/v1/embeddings", "", "nomic-embed-text", 768)?;
+```
+
+```python
+# Python
+import pyqql_edge
+client = pyqql_edge.http_executor("./qdrant_data", "http://localhost:11434/v1/embeddings", "", "nomic-embed-text", 768)
+```
+
+Works with any provider that follows the OpenAI embeddings spec: OpenAI,
+Ollama (`/v1/embeddings`), Cohere, Together AI, and Mistral. Optional
+`multi_embed_*` and `image_embed_*` settings enable remote ColBERT and CLIP
+slots over HTTP.
+
+## Downloads and caching
+
+- Models download from Hugging Face on **first use** and cache locally.
+- The default dense model is **roughly 1 GB**; sparse/multi/image/reranker
+  models add more.
+- Cache location: fastembed's default, or `--cache-dir` /
+  `QQL_EDGE_CACHE_DIR` / `cacheDir` / `cache_dir`. Fastembed also honors
+  `FASTEMBED_CACHE_DIR` / `HF_HOME`.
+- Use `--show-download-progress` (`showDownloadProgress` /
+  `show_download_progress`) to see progress bars.
+- After the first download, inference is fully offline.
+- The model cache is shared across executor instances in the same process
+  (per model and cache directory), so multiple clients pay the download cost
+  once.
+
+## Platform support
+
+| Platform | Local ONNX (fastembed) |
+|---|---|
+| Linux x86-64 | yes |
+| Windows x86-64 | yes |
+| macOS arm64 (Apple Silicon) | yes |
+| macOS Intel | **no** — ONNX Runtime publishes no artifact |
+
+On macOS Intel, disable default features and use `--embedder http`,
+`http_executor`, or `custom_executor` instead.
+
+Continue to [capabilities](/docs/edge/capabilities/) to see which query forms
+the local storage engine executes.

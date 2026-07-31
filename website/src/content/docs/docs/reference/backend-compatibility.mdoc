@@ -14,12 +14,33 @@ capability, not a separate language dialect.
 | Dense nearest search | yes | yes | yes |
 | Sparse and hybrid retrieval | yes | yes | yes |
 | Payload filters | yes | yes | yes |
-| Query/update batching | yes | yes | supported subset |
+| MMR, recommend, formula, order-by, sample, context/discover | yes | yes | yes |
+| Quantization rescore / oversampling (`PARAMS quantization = {...}`) | yes | yes | yes |
+| Cross-encoder reranking (`CROSS RERANK`) | yes | yes | yes (client-side) |
+| Exact count (`COUNT ... WITH (exact = true)`) | yes | yes | yes |
+| UPSERT with auto-embedding | yes | yes | yes (local embedder) |
+| Query/update batching | yes | yes | fan-out |
 | Grouped search | yes | yes | no |
 | Custom `SHARD` routing | yes | yes | no |
 | Shard-key administration | yes | yes | no |
+| `ALTER COLLECTION` | yes | yes | no |
+| Collection `PARAMS` (replication, sharding) | yes | yes | no |
+| Point-ID query inputs | yes | yes | no |
 | ACORN search parameter | yes | yes | no |
 | Cluster consistency/timeout fields | yes | yes | not applicable |
+
+Notes:
+
+- **Batching on edge** fans out into one operation per request; there is no
+  native batch endpoint.
+- **Cross-rerank** is always executed client-side: the runtime fetches the
+  prefetched candidates, scores `(query, document text)` pairs with a
+  pair-scoring embedder, and reorders. It is not a Qdrant search variant on
+  any backend.
+- **Point-ID query inputs** (`QUERY POINT`, `RECOMMEND POSITIVE (id)`) need
+  materialized vectors; offline, use `TEXT` or `VECTOR` inputs instead.
+- **Timeouts and consistency** are request-level REST/gRPC fields and are not
+  applicable to the in-process edge backend.
 
 The exact edge surface evolves with `qql-edge`; treat a plan or execution
 capability error as authoritative.

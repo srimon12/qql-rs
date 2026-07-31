@@ -25,7 +25,8 @@ LIMIT 5;
 ## Analyze source locally
 
 Initialize once per JavaScript realm. `analyze` returns strict validity, tokens,
-AST, compiled routes, an explanation, and a structured error with byte offsets.
+the AST, compiled routes, an explanation, and a structured error with byte
+offsets.
 
 ```javascript
 import init, { analyze, isValid, parse } from "qql-wasm";
@@ -43,11 +44,118 @@ console.log(isValid(query));
 console.log(parse(query));
 ```
 
+The `analyze` result is one object with every diagnostic and compiled route in a
+single pass:
+
+```typescript
+interface AnalysisResult {
+  valid: boolean;
+  statements_count: number;
+  tokens: Token[];          // [{ kind, text, pos, end, len }]
+  ast: unknown[] | null;    // parsed statements, null when invalid
+  route: CompiledRoute | null;   // first statement's route
+  routes: CompiledRoute[];  // every statement's route
+  explain: string | null;   // human-readable plan, null when invalid
+  error: AnalysisError | null;   // null when valid
+}
+
+interface Token {
+  kind: string;
+  text: string;
+  pos: number;   // start byte offset
+  end: number;   // end byte offset
+  len: number;
+}
+
+interface CompiledRoute {
+  stmt_type: string;
+  method: string;
+  path: string;
+  payload: unknown | null;
+}
+
+interface AnalysisError {
+  code: string;
+  message: string;
+  start: number | null;
+  end: number | null;
+}
+```
+
+`route` is the compiled route of the first statement; `routes` lists every
+statement in a script. `error` carries the validation code plus byte offsets
+into the source for editor underlining.
+
+## Compile and explain bytes
+
+When a route or explanation must cross a worker or process boundary, use the
+byte variants instead of building JavaScript objects. Both are safe, JS-owned
+`Uint8Array` buffers that transfer to a `Worker` or over IPC with zero
+JS-object overhead.
+
+```javascript
+import init, { compileBytes, explainBytes } from "qql-wasm";
+
+await init();
+
+// JSON-encoded CompiledRoute.
+const routeBytes = compileBytes(query);
+worker.postMessage(routeBytes, [routeBytes.buffer]);
+
+// UTF-8 explain text.
+const explainBytesUtf8 = explainBytes(query);
+const explainText = new TextDecoder().decode(explainBytesUtf8);
+```
+
+## The Stmt class
+
+`new Stmt(source)` parses exactly one statement and returns an owned handle.
+Mutate the handle locally — inject a trusted filter, assign routing — then
+compile or execute it. The class is a JavaScript realm object; the parsed AST
+stays in WASM memory.
+
+```javascript
+import init, { Stmt } from "qql-wasm";
+
+await init();
+
+const stmt = new Stmt(query);
+
+// Trusted predicate injection (void; throws on invalid operator or value).
+stmt.injectFilter("tenant_id", "=", "acme");
+
+// Routing only — never a security boundary.
+stmt.shardKey = "acme";
+console.log(stmt.shardKey);
+
+const route = stmt.compileRoute();          // { stmt_type, method, path, payload }
+const astJson = stmt.toJSON();              // string
+const astObject = stmt.toObject();          // plain JS object
+
+// Transferable byte compile.
+const routeBytes = stmt.compileRouteBytes();
+
+stmt.free(); // or use `using stmt = new Stmt(query)` with [Symbol.dispose]
+```
+
+Methods:
+
+| Member | Returns | Use it for |
+|---|---|---|
+| `new Stmt(source)` | owned handle | Parse exactly one statement |
+| `injectFilter(field, op, value)` | void | Inject a trusted predicate (mutates in place) |
+| `shardKey` getter / setter | string or null | Assign or read QQL `SHARD` routing |
+| `toJSON()` | string | Serialize the AST to JSON |
+| `toObject()` | object | Serialize the AST to a JS object |
+| `compileRoute()` | `{stmt_type, method, path, payload}` | Compile this statement to a Qdrant REST route |
+| `compileRouteBytes()` | `Uint8Array` | Transferable route compile |
+| `free()` / `[Symbol.dispose]()` | — | Release WASM memory (`using` works in TypeScript) |
+
 ## Execute with an explicit lifecycle
 
-The WASM client is REST/fetch only. Call `free()` when a `Client` or `Stmt` is
-no longer needed, especially in long-lived applications or when replacing
-connection settings.
+The WASM client is REST/fetch only. `new Client(url?, apiKey?)` takes the
+Qdrant REST URL and an optional API key; both default to `null`, and the URL
+defaults to `http://localhost:6333`.
 
 ```javascript
 import { Client } from "qql-wasm";
@@ -61,6 +169,16 @@ try {
   client.free();
 }
 ```
+
+`execute(query | string[], options)` accepts a single statement, a
+semicolon-delimited script, or an array of independent sources. `options.onError`
+is `"stop"` (default) or `"continue"`. `executeStmt(stmt)` runs a pre-parsed
+`Stmt` handle. `compile(query)` and `explain(query)` inspect a route or plan
+without touching the network.
+
+Before executing, the client fetches the collection topology to resolve `USING`
+vector roles, then embeds text through the configured embedder. Execution is
+REST-only — there is no gRPC or edge backend in WASM.
 
 ## Provide text embeddings from the host
 
@@ -86,7 +204,24 @@ client.setHttpEmbedder(
   1536,
   null,
 );
+
+client.hasEmbedder(); // true
 ```
+
+`setEmbedder(fn)` takes a JS callback `(texts: string[]) => Promise<number[][]>`
+— compatible with Transformers.js pipelines and `@huggingface/transformers`.
+The callback is called once with the full batch, so prefer a model that embeds
+batches. `setHttpEmbedder(endpoint, model, dimension, apiKey?)` configures any
+OpenAI-compatible `{"model", "input": [...]}` endpoint and sends the whole batch
+in one request. `setRemoteEmbedder` is an alias with the same signature.
+`hasEmbedder()` reports whether either is configured.
+
+## Memory
+
+Every `Client` and `Stmt` owns WASM allocations. Call `free()` when a handle is
+no longer needed, especially in long-lived pages or when replacing connection
+settings. `Stmt` also implements `[Symbol.dispose]`, so `using` in TypeScript
+releases it automatically.
 
 | API | Returns | Use it for |
 |---|---|---|
@@ -96,10 +231,14 @@ client.setHttpEmbedder(
 | `compile`, `explain`, `inject_filter` | route, text, rewritten AST | One-shot offline planning helpers |
 | `compileBytes`, `explainBytes` | `Uint8Array` | Transferable worker or IPC payloads |
 | `new Stmt(source)` | owned statement handle | `injectFilter`, route compile, and shard assignment |
+| `Stmt.injectFilter`, `Stmt.shardKey` | mutated statement handle | Trusted filtering and optional routing |
 | `Stmt.toObject`, `toJSON`, `compileRoute` | AST or route | Inspect a single owned statement |
+| `Stmt.compileRouteBytes` | `Uint8Array` | Transferable single-statement route |
 | `new Client`, `execute`, `executeStmt` | execution report promise | Direct browser-to-Qdrant REST calls |
+| `Client.compile`, `Client.explain` | route, plan text | Inspect work before sending traffic |
 | `setEmbedder`, `setHttpEmbedder`, `hasEmbedder` | configured client | Resolve text input from JavaScript or HTTP |
-| `free()` | released WASM allocation | Dispose `Client` and `Stmt` handles |
+| `Client.setRemoteEmbedder` | configured client | Alias for `setHttpEmbedder` |
+| `free()` / `[Symbol.dispose]` | released WASM allocation | Dispose `Client` and `Stmt` handles |
 
 {% aside type="caution" title="Browser capability boundary" %}
 WASM has no gRPC or edge backend. `setHttpEmbedder` configures one HTTP text

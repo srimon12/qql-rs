@@ -22,6 +22,11 @@ qql version
 qql doctor --json
 {% /terminal %}
 
+{% aside type="note" title="Editors" %}
+Syntax highlighting, live diagnostics, and autocompletion are available from
+the `qql-lang` VS Code extension — see [Editors](/docs/tools/editors/).
+{% /aside %}
+
 ## SDKs
 
 {% grid style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:1rem;" %}
@@ -62,6 +67,17 @@ git clone https://github.com/srimon12/qql-rs.git
 cd qql-rs
 cargo build --release --workspace
 {% /terminal %}
+
+### Edge runtime
+
+The in-process edge backend is an opt-in build. Compile the CLI with the `edge`
+feature to enable `--edge` and `qql config edge`:
+
+{% terminal title="Edge-enabled CLI build" %}
+cargo build --release -p qql-cli --features edge
+{% /terminal %}
+
+See [the edge backend overview](/docs/edge/) for capabilities and limits.
 
 The runtime defaults to REST and gRPC. Edge and embedded model support are
 opt-in because they add substantial binary and model weight.

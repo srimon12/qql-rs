@@ -50,8 +50,23 @@ For untrusted user or agent input:
 4. Inspect or explain the rewritten AST.
 5. Execute the rewritten statement, never the original source.
 
-`inject_filter` recurses into CTE and prefetch branches. It fails closed for
-statements where the predicate cannot be applied.
+`inject_filter` is statement-aware. It recurses into CTE and prefetch branches
+for queries, wraps the point selector for mutations so they can only touch the
+caller's tenant, stamps the tenant value onto payloads for `UPSERT`, and fails
+closed for DDL, `SHOW`, and vector updates. See the
+[Filter injection guide](/docs/guides/filter-injection/) for the full
+behavior.
+
+```python
+from pyqql import Client, parse
+
+client = Client("http://localhost:6333")
+stmt = parse(query)[0]
+stmt.inject_filter("tenant_id", "=", "acme")
+stmt.shard_key = "acme"
+
+report = client.execute(stmt)
+```
 
 {% aside type="danger" title="Do not filter results after retrieval" %}
 Post-filtering leaks work across the tenant boundary and produces incorrect

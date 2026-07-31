@@ -32,9 +32,18 @@ owned by the host, while semicolon ordering is part of QQL source.
 Python, Node.js, and WASM expose statement handles so a host can parse once,
 inject policy, set optional shard routing, inspect the AST, and execute the
 same object. WASM owners must call `free()` explicitly when they are finished.
+In addition to `toObject`/`toJSON`, the WASM `Stmt` exposes `compileRoute` and
+`compileRouteBytes` to inspect the compiled REST route of a single owned
+statement.
+
+Token objects are nearly identical across hosts but differ slightly in shape:
+the Rust lexer emits `{ kind, text, span }`, the Python and Node bindings emit
+`{ kind, text, pos }`, and WASM additionally includes `end` and `len`.
 
 ## Execution reports
 
 Execution returns a stable report with aggregate `ok`, ordered per-operation
 results, and succeeded/failed counts. `on_error` / `onError` selects stop or
-continue behavior for multi-operation inputs.
+continue behavior for multi-operation inputs. The WASM `Client` is REST-only:
+it compiles to and executes Qdrant REST routes and does not open gRPC
+connections.

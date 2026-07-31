@@ -47,4 +47,9 @@ equivalent statement method, and use a shard key only as an additional routing
 choice. The supported injected operators are `=`, `>`, `>=`, `<`, and `<=`.
 {% /aside %}
 
+For local in-process execution, the edge packages (`pyqql-edge`,
+`@veristamp/nqql-edge`, and the `qql-edge` crate) build a self-contained backend
+with embedded models. They are a separate feature surface from the remote
+SDKs; see the [Edge overview](/docs/edge/) before adopting them.
+
 Choose a host page for complete API and lifecycle guidance.

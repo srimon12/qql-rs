@@ -1,6 +1,6 @@
 @import "./playground.css";
 
-/* --- MintMCP Aesthetic Theming --- */
+/* ---Aesthetic Theming --- */
 
 :root {
 	--sl-font: "Inter", "IBM Plex Sans", var(--sl-font-system);
@@ -19,7 +19,7 @@
 	--sl-color-accent-high: #5c1906;
 }
 
-/* --- Dark Mode (MintMCP Main Vibe) --- */
+/* --- Dark Mode ( Main Vibe) --- */
 :root[data-theme="dark"] {
 	--sl-color-bg: #141413;
 	--sl-color-bg-nav: rgba(20, 20, 19, 0.7);
@@ -100,7 +100,7 @@ code:not(pre code) {
 
 /* --- Theming Starlight Native Components (Cards, Tabs, Steps, Asides) --- */
 
-/* MintMCP Premium Card Glassmorphism for Starlight Cards and standard code blocks.
+/*  Premium Card Glassmorphism for Starlight Cards and standard code blocks.
    Terminal/QQL blocks already get premium-card from their own container — excluded here. */
 .card,
 a.sl-link-card,

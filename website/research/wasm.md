@@ -239,7 +239,7 @@ A) Demo's Own System (src/index.css + Tailwind 4 + shadcn/tailwind.css)
 - Custom classes: .noise-overlay, .glass-header, .brand-wordmark.
 - Imports: Tailwind 4, tw-animate-css, shadcn, Inter Variable, JetBrains Mono, Instrument Serif.
 B) Target Astro Site's System
-- @qql/ui-docs/global.css — 252 lines of MintMCP-themed Starlight overrides.
+- @qql/ui-docs/global.css — 252 lines of -themed Starlight overrides.
 - website/src/styles/global.css — imports Starlight Tailwind + @qql/ui-docs/global.css.
 - website/src/styles/playground.css — 1028 lines of custom bare CSS for the Astro playground integration.
 - Uses completely different variable names: --sl-color-accent, --sl-color-gray-1 through --sl-color-gray-6, --sl-color-bg, etc.
@@ -366,7 +366,7 @@ Demo (source of truth for porting)
 Astro target (files to align with)
 - /data/codebases/qql-rs/website/src/styles/playground.css — Existing playground CSS (1028 lines, needs dedup)
 - /data/codebases/qql-rs/website/src/styles/global.css — Site CSS entry point
-- /data/codebases/qql-rs/website/packages/ui-docs/src/styles/global.css — MintMCP theme tokens
+- /data/codebases/qql-rs/website/packages/ui-docs/src/styles/global.css —  theme tokens
 - /data/codebases/qql-rs/website/src/components/playground/ — 6 Astro scaffold components
 - /data/codebases/qql-rs/website/astro.config.mjs — Astro config with WASM alias
 10. Concise Migration Recommendation

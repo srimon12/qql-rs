@@ -77,6 +77,24 @@ LIMIT 10;
 you want distribution-based score normalization. See [Hybrid
 retrieval](/docs/guides/hybrid-retrieval/) for multi-stage tuning.
 
+## Vector roles in a query target
+
+`USING <name>` answers *which vector*; the optional `AS <kind>` answers *what
+kind of input*. The name and the role are independent:
+
+```text
+USING <name> [AS DENSE | AS SPARSE | AS MULTI | AS MULTIVECTOR]
+```
+
+`AS DENSE` and `AS SPARSE` declare the role of the query target: text is then
+embedded into that role, and a structural vector input must agree with the
+declaration. `AS MULTI` and `AS MULTIVECTOR` are synonyms that mark a **dense
+multivector** target (ColBERT-style late interaction) — multivector is not a
+third kind beside dense and sparse; the role stays dense and text is embedded
+into `[[f32, ...], ...]` multi-dense shape. When `AS` is omitted, the role is
+resolved from the collection schema at plan time. An explicit structural vector
+input that contradicts a declared role fails with `QQL-PLAN-VECTOR-KIND`.
+
 ## Build an explicit multi-stage pipeline
 
 CTEs make candidate generation visible. A CTE can omit `FROM` and inherit the
@@ -140,6 +158,117 @@ GROUP BY service
 SIZE 3
 LOOKUP FROM services
 WITH PAYLOAD INCLUDE (title, service)
+LIMIT 10;
+```
+{% /qqlExample %}
+
+## Context, discover, and relevance feedback
+
+`QUERY CONTEXT` pairs positive and negative inputs that define a region;
+`QUERY DISCOVER` adds a `TARGET` and shifts results toward it. Each
+positive/negative/target item is a full query input — use `POINT` for a point
+ID, `TEXT` or `VECTOR` otherwise.
+
+{% qqlExample title="Context pairs and a discover target" %}
+```sql
+QUERY CONTEXT (
+  POSITIVE POINT 1 NEGATIVE POINT 2,
+  POSITIVE POINT 3 NEGATIVE POINT 4
+)
+FROM docs
+LIMIT 10;
+
+QUERY DISCOVER
+TARGET TEXT 'search'
+CONTEXT (POSITIVE POINT 1 NEGATIVE POINT 2)
+FROM docs
+LIMIT 10;
+```
+{% /qqlExample %}
+
+`QUERY RELEVANCE FEEDBACK` refines a `TARGET` with scored feedback pairs and
+the `NAIVE` strategy, whose `a`, `b`, and `c` coefficients shape the adjusted
+query vector. Feedback items pair a query input with a relevance weight.
+
+{% qqlExample title="Naive relevance feedback" %}
+```sql
+QUERY RELEVANCE FEEDBACK
+TARGET TEXT 'search'
+FEEDBACK (
+  (VECTOR [0.1, 0.2], 1.0),
+  (VECTOR [0.3, 0.4], -1.0)
+)
+STRATEGY NAIVE (a = 1.0, b = 0.5, c = 0.2)
+FROM docs
+LIMIT 10;
+```
+{% /qqlExample %}
+
+## Order, sample, and fetch exact points
+
+`QUERY ORDER BY` sorts by a payload field (`ASC` or `DESC`), and
+`QUERY SAMPLE RANDOM` draws a random page. Neither expression accepts `USING`
+or `PREFETCH` — there is no similarity input to resolve.
+
+{% qqlExample title="Ordered and random access" %}
+```sql
+QUERY ORDER BY price ASC
+FROM products
+WHERE category = 'electronics'
+LIMIT 10;
+
+QUERY SAMPLE RANDOM
+FROM docs
+WITH VECTOR false
+LIMIT 10;
+```
+{% /qqlExample %}
+
+`QUERY POINTS` retrieves exact records by ID and is deliberately minimal: only
+`SHARD`, `WITH PAYLOAD`, and `WITH VECTOR` clauses are allowed. Filtering,
+scoring, and paging clauses are invalid — add a `WHERE` on a `QUERY TEXT`
+instead when you need a filtered search.
+
+## Rerank candidate lists
+
+`QUERY RERANK` is late-interaction MaxSim reranking. It always requires
+`USING` (a dense or multivector target), a `MODEL`, and a non-empty
+`PREFETCH`.
+
+{% qqlExample title="Late-interaction rerank of dense candidates" %}
+```sql
+WITH candidates AS (
+  QUERY TEXT 'vector database'
+  USING dense
+  LIMIT 100
+)
+QUERY RERANK TEXT 'vector database'
+MODEL 'reranker-v1'
+FROM docs
+USING colbert AS DENSE
+PREFETCH (candidates)
+LIMIT 10;
+```
+{% /qqlExample %}
+
+`QUERY CROSS RERANK` (v1.2) instead scores `(query, document text)` pairs with
+a cross-encoder. `ON FIELD` names the payload key holding document text
+(default `text`). It takes no `USING` vector and requires a host embedder with
+pair scoring; the scoring runs client-side and reorders the prefetched
+candidates.
+
+{% qqlExample title="Cross-encoder reranking on a payload field" %}
+```sql
+WITH candidates AS (
+  QUERY TEXT 'vector database'
+  USING dense
+  LIMIT 100
+)
+QUERY CROSS RERANK TEXT 'vector database'
+MODEL 'bge-reranker-base'
+ON FIELD abstract
+FROM docs
+PREFETCH (candidates)
 LIMIT 10;
 ```
 {% /qqlExample %}

@@ -35,6 +35,10 @@ LIMIT 10;
 
 ## Pick a decay curve for the signal
 
+Decay functions take a payload field followed by named (`TARGET =`, `SCALE =`,
+`MIDPOINT =`, `DECAY =`) or positional arguments. `scale` and
+`midpoint`/`decay` are numeric constants.
+
 | Function | Choose it when |
 |---|---|
 | `EXP_DECAY` | The effect should drop quickly near the target and then taper |
@@ -57,6 +61,34 @@ LIMIT 10;
 ```
 {% /qqlExample %}
 
+## Complete function reference
+
+Function names are case-insensitive. `$score` (or `score`) holds the upstream
+candidate score when no `DEFAULTS` entry overrides it.
+
+| Function | Signature |
+|---|---|
+| `ABS`, `SQRT`, `LOG`, `LN`, `EXP` | `NAME(expr)` |
+| `POW` | `POW(base, exponent)` |
+| `GEO_DISTANCE` | `GEO_DISTANCE(lat, lon, field)` or `GEO_DISTANCE({lat: ..., lon: ...}, field)` |
+| `MATCH` / `MATCH_ANY` | `MATCH(field, value)` or `MATCH_ANY(field, list)` |
+| `EXP_DECAY`, `GAUSS_DECAY`, `LIN_DECAY` | `NAME(field, TARGET = n, SCALE = n, ...)` or positional |
+| `datetime` | `datetime('2026-01-01')` — literal timestamp |
+| `datetime_key` | `datetime_key('published_at')` — payload timestamp field |
+
+## Precedence and division defaults
+
+Formula precedence, highest to lowest, is unary `-`, multiplication/division,
+then addition/subtraction; operators are left-associative. A division may carry
+an explicit by-zero default with `[DEFAULT = number]`:
+
+```text
+QUERY FORMULA $score / (views + 1) [DEFAULT = 0]
+DEFAULTS (score = 0.0)
+FROM docs
+LIMIT 10;
+```
+
 ## Encode a transparent business rule
 
 Use `CASE WHEN` for a discrete condition. Keep the fallback explicit so a
@@ -75,7 +107,5 @@ LIMIT 10;
 ```
 {% /qqlExample %}
 
-Supported functions include `ABS`, `SQRT`, `LOG`, `LN`, `EXP`, `POW`,
-`GEO_DISTANCE`, `EXP_DECAY`, `GAUSS_DECAY`, `LIN_DECAY`, `datetime`, and
-`datetime_key`. Keep formula inputs indexed and measurable before adding them to
-a production ranking path.
+Keep formula inputs indexed and measurable before adding them to a production
+ranking path.
