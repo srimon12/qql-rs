@@ -42,8 +42,9 @@ cd crates/nqql && npm install && npm run build
 node ../../examples/nodejs/basic_to_medium.mjs
 node ../../examples/nodejs/medium_to_expert.mjs
 
-# WASM (needs demo/pkg or wasm-pack build)
-# Serve examples/ + demo/ and open the JS modules in a browser, or run under node with wasm
+# WASM (checked-in Node build of qql-wasm)
+node examples/wasm/basic_to_medium.js
+node examples/wasm/medium_to_expert.js
 ```
 
 ### Multi-tenant pattern (all SDKs)

@@ -8,8 +8,8 @@ Showcases qdrant-edge: zero-network, in-process HNSW vector database.
 No Qdrant server required. Embeddings via fastembed (local ONNX) or Ollama.
 
 Requirements:
-    cargo build --release -p qql-cli
-    # (default features include edge + fastembed)
+    cargo build --release -p qql-cli --features edge
+    # (edge is opt-in — the CLI default features are rest + grpc only)
 
 Usage:
     python main.py                          # fastembed (local ONNX, no network)
