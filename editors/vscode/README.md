@@ -152,15 +152,15 @@ Commands (`explain`, `compile`, `curl`, `AST`) call the same WASM surface (`expl
 code --install-extension srimon12.qql-lang
 ```
 
-### From `.vsix`
+### From `.vsix` (local / GitHub Release)
+
+VSIX binaries are **not** committed to the repo. Build one locally or download from [GitHub Releases](https://github.com/srimon12/qql-rs/releases).
 
 ```bash
-code --install-extension qql-lang-0.2.1.vsix
-# Overwrite a previous install:
-code --install-extension qql-lang-0.2.1.vsix --force
+code --install-extension qql-lang-*.vsix --force
 ```
 
-Extension packaging version is **0.2.1**. It ships the QQL **0.2.0** WASM parser from this monorepo (crate version need not match the VSIX version).
+Extension packaging version is in `package.json` (**0.2.1**). It ships the QQL **0.2.0** WASM parser from this monorepo (crate version need not match the VSIX version).
 
 ### Build from source
 
@@ -174,8 +174,8 @@ wasm-pack build ../../crates/qql-wasm --release --target nodejs --out-dir wasm
 npm install
 npm run check
 npm run compile
-npx vsce package
-code --install-extension qql-lang-0.2.1.vsix --force
+npm run package          # npx @vscode/vsce package → qql-lang-<version>.vsix
+code --install-extension qql-lang-*.vsix --force
 ```
 
 ---

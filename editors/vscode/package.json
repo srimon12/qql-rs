@@ -285,8 +285,8 @@
     "check": "npm run typecheck && npm run lint",
     "fix": "npm run lint:fix && npm run typecheck",
     "test": "node --test",
-    "package": "vsce package",
-    "publish": "vsce publish"
+    "package": "npx @vscode/vsce package",
+    "publish": "npx @vscode/vsce publish"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.6",

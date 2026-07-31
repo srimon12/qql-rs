@@ -47,19 +47,17 @@ export class AnalysisService implements vscode.Disposable {
   }
 
   /**
-   * Return cached analysis for this document version, or compute once.
-   * If the cache is already current, returns it **without** notifying listeners
-   * (critical — providers must not trigger refresh loops).
+   * Side-effect-free cache read for the current document version.
+   * Returns `undefined` when missing or stale — never parses.
+   * Providers should `schedule()` on a miss and refresh via `onDidAnalyze`.
    */
   ensure(document: vscode.TextDocument): DocumentAnalysis | undefined {
-    if (document.languageId !== "qql" || !isWasmReady()) return undefined;
-
-    const key = document.uri.toString();
-    const cached = this.cache.get(key);
+    if (document.languageId !== "qql") return undefined;
+    const cached = this.cache.get(document.uri.toString());
     if (cached && cached.version === document.version) {
       return cached;
     }
-    return this.analyzeNow(document);
+    return undefined;
   }
 
   /**

@@ -75,7 +75,8 @@ export function registerCommands(
       const source = selectionOrDocument(editor);
       try {
         if (editor.selection.isEmpty) {
-          const a = analysis.ensure(editor.document);
+          // User-invoked: analyzeNow is OK (not a provider path)
+          const a = analysis.analyzeNow(editor.document);
           if (a?.result.explain) {
             showInOutput("QQL Explain", a.result.explain);
             return;
@@ -118,7 +119,7 @@ export function registerCommands(
       if (!editor) return;
       try {
         if (editor.selection.isEmpty) {
-          const a = analysis.ensure(editor.document);
+          const a = analysis.analyzeNow(editor.document);
           if (a?.result.routes?.length) {
             const body = JSON.stringify(
               a.result.routes.length === 1 ? a.result.routes[0] : a.result.routes,
@@ -175,7 +176,7 @@ export function registerCommands(
         const source = selectionOrDocument(editor);
         let route: CompiledRoute;
         if (editor.selection.isEmpty) {
-          const a = analysis.ensure(editor.document);
+          const a = analysis.analyzeNow(editor.document);
           if (a?.result.routes?.length === 1) {
             route = a.result.routes[0];
           } else if (a?.result.routes && a.result.routes.length > 1) {
@@ -238,7 +239,7 @@ export function registerCommands(
         const source = selectionOrDocument(editor);
         let ast: unknown;
         if (editor.selection.isEmpty) {
-          const a = analysis.ensure(editor.document);
+          const a = analysis.analyzeNow(editor.document);
           ast = a?.result.ast ?? parseQql(source);
         } else {
           ast = parseQql(source);

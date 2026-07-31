@@ -48,9 +48,12 @@ export class QqlDocumentSymbolProvider implements vscode.DocumentSymbolProvider 
     document: vscode.TextDocument,
     _token: vscode.CancellationToken
   ): vscode.ProviderResult<vscode.DocumentSymbol[]> {
-    // ensure() returns cache without notify when current — no refresh storm
+    // Cache-only; schedule miss and let lifecycle/onDidAnalyze refresh outline
     const analysis = this.analysis.ensure(document);
-    if (!analysis) return [];
+    if (!analysis) {
+      this.analysis.schedule(document);
+      return [];
+    }
 
     const symbols: vscode.DocumentSymbol[] = [];
 

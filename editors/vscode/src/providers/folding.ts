@@ -4,7 +4,7 @@ import { byteOffsetToPosition } from "../core/positions";
 
 /**
  * Folding for multi-line statements, paren regions, and comment blocks.
- * Uses ensure() so a cache hit never notifies listeners.
+ * Cache-only — schedules analysis on miss; lifecycle/onDidAnalyze refresh.
  */
 export class QqlFoldingRangeProvider implements vscode.FoldingRangeProvider {
   constructor(private readonly analysis: AnalysisService) {}
@@ -26,6 +26,9 @@ export class QqlFoldingRangeProvider implements vscode.FoldingRangeProvider {
     };
 
     const analysis = this.analysis.ensure(document);
+    if (!analysis) {
+      this.analysis.schedule(document);
+    }
 
     if (analysis) {
       for (const stmt of analysis.statements) {

@@ -19,7 +19,10 @@ export class QqlDefinitionProvider implements vscode.DefinitionProvider {
     const name = document.getText(wordRange);
 
     const analysis = this.analysis.ensure(document);
-    if (!analysis) return undefined;
+    if (!analysis) {
+      this.analysis.schedule(document);
+      return undefined;
+    }
 
     const ctes = extractCteDefinitions(analysis.source, analysis.result.tokens);
     const match = ctes.find((c) => c.name === name || c.name.toLowerCase() === name.toLowerCase());
