@@ -3,9 +3,8 @@ import type { AnalysisService } from "../core/analysis";
 import { byteOffsetToPosition } from "../core/positions";
 
 /**
- * Folding:
- *  1. Each multi-line top-level statement
- *  2. Parenthesized regions (CTE bodies, PREFETCH lists, VALUES objects)
+ * Folding for multi-line statements, paren regions, and comment blocks.
+ * Uses ensure() so a cache hit never notifies listeners.
  */
 export class QqlFoldingRangeProvider implements vscode.FoldingRangeProvider {
   constructor(private readonly analysis: AnalysisService) {}
@@ -26,11 +25,7 @@ export class QqlFoldingRangeProvider implements vscode.FoldingRangeProvider {
       ranges.push(new vscode.FoldingRange(startLine, endLine, kind));
     };
 
-    // Statement-level folds
-    let analysis = this.analysis.get(document.uri);
-    if (!analysis || analysis.version !== document.version) {
-      analysis = this.analysis.analyzeNow(document);
-    }
+    const analysis = this.analysis.ensure(document);
 
     if (analysis) {
       for (const stmt of analysis.statements) {
@@ -39,13 +34,11 @@ export class QqlFoldingRangeProvider implements vscode.FoldingRangeProvider {
         add(start.line, end.line);
       }
 
-      // Paren / brace regions from tokens
-      const stack: Array<{ line: number; kind: string }> = [];
+      const stack: Array<{ line: number }> = [];
       for (const tok of analysis.result.tokens) {
         const k = tok.kind.toUpperCase();
         if (k === "LPAREN" || k === "LBRACE" || k === "LBRACKET") {
-          const pos = byteOffsetToPosition(document, tok.pos);
-          stack.push({ line: pos.line, kind: k });
+          stack.push({ line: byteOffsetToPosition(document, tok.pos).line });
         } else if (k === "RPAREN" || k === "RBRACE" || k === "RBRACKET") {
           const open = stack.pop();
           if (open) {
@@ -56,7 +49,7 @@ export class QqlFoldingRangeProvider implements vscode.FoldingRangeProvider {
       }
     }
 
-    // Comment block folds (consecutive -- lines)
+    // Consecutive -- comment lines
     let commentStart: number | null = null;
     for (let line = 0; line < document.lineCount; line++) {
       const text = document.lineAt(line).text.trimStart();

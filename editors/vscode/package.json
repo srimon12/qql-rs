@@ -2,7 +2,7 @@
   "name": "qql-lang",
   "displayName": "QQL — Qdrant Query Language",
   "description": "Syntax highlighting, linting, and autocompletion for QQL 1.3 — Qdrant Query Language",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "srimon12",
   "license": "MIT",
   "icon": "icon.png",
@@ -275,15 +275,21 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "tsc -p tsconfig.json",
+    "vscode:prepublish": "npm run check && npm run compile",
     "compile": "tsc -p tsconfig.json",
     "watch": "tsc --watch",
-    "lint": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "biome check src package.json tsconfig.json biome.json",
+    "lint:fix": "biome check --write src package.json tsconfig.json biome.json",
+    "format": "biome format --write src package.json tsconfig.json biome.json",
+    "check": "npm run typecheck && npm run lint",
+    "fix": "npm run lint:fix && npm run typecheck",
     "test": "node --test",
     "package": "vsce package",
     "publish": "vsce publish"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.6",
     "@types/node": "^26.1.2",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.0.0",

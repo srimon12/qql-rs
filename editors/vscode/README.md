@@ -155,8 +155,12 @@ code --install-extension srimon12.qql-lang
 ### From `.vsix`
 
 ```bash
-code --install-extension qql-lang-0.2.0.vsix
+code --install-extension qql-lang-0.2.1.vsix
+# Overwrite a previous install:
+code --install-extension qql-lang-0.2.1.vsix --force
 ```
+
+Extension packaging version is **0.2.1**. It ships the QQL **0.2.0** WASM parser from this monorepo (crate version need not match the VSIX version).
 
 ### Build from source
 
@@ -168,9 +172,10 @@ cd qql-rs/editors/vscode
 wasm-pack build ../../crates/qql-wasm --release --target nodejs --out-dir wasm
 
 npm install
+npm run check
 npm run compile
 npx vsce package
-code --install-extension qql-lang-0.2.0.vsix
+code --install-extension qql-lang-0.2.1.vsix --force
 ```
 
 ---

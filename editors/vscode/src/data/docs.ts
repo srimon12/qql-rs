@@ -75,8 +75,7 @@ export const KEYWORD_DOCS: Record<string, KeywordDoc> = {
     category: "Query mode",
     summary:
       "Dense + sparse retrieval fused with RRF or DBSF. Front-form `QUERY HYBRID …` or tail-form `USING HYBRID`.",
-    example:
-      "QUERY TEXT 'q' FROM docs USING HYBRID DENSE dense SPARSE sparse FUSION RRF LIMIT 10;",
+    example: "QUERY TEXT 'q' FROM docs USING HYBRID DENSE dense SPARSE sparse FUSION RRF LIMIT 10;",
   },
   FUSION: {
     title: "FUSION",
@@ -88,8 +87,7 @@ export const KEYWORD_DOCS: Record<string, KeywordDoc> = {
   RRF: {
     title: "RRF",
     category: "Fusion",
-    summary:
-      "Reciprocal Rank Fusion. Optional `RRF_K` and `RRF_WEIGHTS` tune the merge.",
+    summary: "Reciprocal Rank Fusion. Optional `RRF_K` and `RRF_WEIGHTS` tune the merge.",
   },
   DBSF: {
     title: "DBSF",
@@ -122,15 +120,15 @@ export const KEYWORD_DOCS: Record<string, KeywordDoc> = {
     category: "Query mode",
     summary:
       "Score shaping with arithmetic, `CASE WHEN`, payload fields, and decay helpers (`EXP_DECAY`, `GAUSS_DECAY`, `GEO_DISTANCE`, …).",
-    example: "QUERY FORMULA ($score * 0.7 + popularity * 0.3) DEFAULTS (popularity = 0) FROM docs LIMIT 10;",
+    example:
+      "QUERY FORMULA ($score * 0.7 + popularity * 0.3) DEFAULTS (popularity = 0) FROM docs LIMIT 10;",
   },
   RERANK: {
     title: "RERANK",
     category: "Query mode",
     summary:
       "Late-interaction multivector rerank (e.g. ColBERT MaxSim) over prefetch candidates. For pair scorers use `CROSS RERANK`.",
-    example:
-      "QUERY RERANK TEXT 'q' MODEL 'colbert' FROM docs USING colbert PREFETCH (c) LIMIT 10;",
+    example: "QUERY RERANK TEXT 'q' MODEL 'colbert' FROM docs USING colbert PREFETCH (c) LIMIT 10;",
   },
   CROSS: {
     title: "CROSS RERANK",
@@ -180,8 +178,7 @@ export const KEYWORD_DOCS: Record<string, KeywordDoc> = {
   UPSERT: {
     title: "UPSERT INTO",
     category: "Statement",
-    summary:
-      "Insert or update points. `USING DENSE MODEL '…'` embeds text fields at execute time.",
+    summary: "Insert or update points. `USING DENSE MODEL '…'` embeds text fields at execute time.",
     example: "UPSERT INTO docs VALUES {id: 1, text: 'hello'} USING DENSE MODEL 'all-MiniLM-L6-v2';",
   },
   DELETE: {
@@ -204,8 +201,7 @@ export const KEYWORD_DOCS: Record<string, KeywordDoc> = {
   CREATE: {
     title: "CREATE",
     category: "DDL",
-    summary:
-      "DDL: `CREATE COLLECTION`, `CREATE INDEX`, `CREATE SHARD KEY`.",
+    summary: "DDL: `CREATE COLLECTION`, `CREATE INDEX`, `CREATE SHARD KEY`.",
     example: "CREATE COLLECTION docs (dense VECTOR(384, COSINE));",
   },
   DROP: {
@@ -295,7 +291,8 @@ export const KEYWORD_DOCS: Record<string, KeywordDoc> = {
   MATCH: {
     title: "MATCH",
     category: "Filter",
-    summary: "Full-text / keyword match on a payload field. Prefer `MATCH ANY` for multi-value sets.",
+    summary:
+      "Full-text / keyword match on a payload field. Prefer `MATCH ANY` for multi-value sets.",
   },
   MATCH_ANY: {
     title: "MATCH ANY",
@@ -429,8 +426,7 @@ export const KEYWORD_DOCS: Record<string, KeywordDoc> = {
   CONSISTENCY: {
     title: "CONSISTENCY",
     category: "Param",
-    summary:
-      "Read consistency on clustered Qdrant: `majority`, `quorum`, `all`, or a factor `N`.",
+    summary: "Read consistency on clustered Qdrant: `majority`, `quorum`, `all`, or a factor `N`.",
   },
   TRUE: {
     title: "true",
@@ -454,11 +450,7 @@ export function lookupKeywordDoc(word: string): KeywordDoc | undefined {
 }
 
 export function formatKeywordHover(doc: KeywordDoc): string {
-  const parts = [
-    `**${doc.title}** · _${doc.category}_`,
-    "",
-    doc.summary,
-  ];
+  const parts = [`**${doc.title}** · _${doc.category}_`, "", doc.summary];
   if (doc.example) {
     parts.push("", "```qql", doc.example, "```");
   }

@@ -1,8 +1,8 @@
 import * as vscode from "vscode";
 import type { AnalysisService } from "../core/analysis";
-import { formatKeywordHover, lookupKeywordDoc } from "../data/docs";
 import { positionToByteOffset } from "../core/positions";
 import { statementAtOffset } from "../core/statements";
+import { formatKeywordHover, lookupKeywordDoc } from "../data/docs";
 
 export class QqlHoverProvider implements vscode.HoverProvider {
   constructor(private readonly analysis: AnalysisService) {}

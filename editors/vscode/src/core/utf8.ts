@@ -55,11 +55,7 @@ export function utf8ByteLength(text: string): number {
 }
 
 /** Slice `text` using UTF-8 byte offsets (inclusive start, exclusive end). */
-export function sliceByByteOffsets(
-  text: string,
-  startByte: number,
-  endByte: number
-): string {
+export function sliceByByteOffsets(text: string, startByte: number, endByte: number): string {
   const start = byteOffsetToJsIndex(text, startByte);
   const end = byteOffsetToJsIndex(text, endByte);
   return text.slice(start, end);

@@ -4,8 +4,7 @@ import { byteOffsetToPosition, positionToByteOffset } from "../core/positions";
 import { extractCteDefinitions } from "../core/statements";
 
 /**
- * Go-to-definition for CTE names: jump from PREFETCH (name) / references
- * back to `name AS (` in a WITH header.
+ * Go-to-definition for CTE names.
  */
 export class QqlDefinitionProvider implements vscode.DefinitionProvider {
   constructor(private readonly analysis: AnalysisService) {}
@@ -19,17 +18,13 @@ export class QqlDefinitionProvider implements vscode.DefinitionProvider {
     if (!wordRange) return undefined;
     const name = document.getText(wordRange);
 
-    let analysis = this.analysis.get(document.uri);
-    if (!analysis || analysis.version !== document.version) {
-      analysis = this.analysis.analyzeNow(document);
-    }
+    const analysis = this.analysis.ensure(document);
     if (!analysis) return undefined;
 
     const ctes = extractCteDefinitions(analysis.source, analysis.result.tokens);
     const match = ctes.find((c) => c.name === name || c.name.toLowerCase() === name.toLowerCase());
     if (!match) return undefined;
 
-    // Don't jump to self when already on the definition
     const offset = positionToByteOffset(document, position);
     if (offset >= match.start && offset <= match.end) return undefined;
 

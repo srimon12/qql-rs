@@ -7,11 +7,13 @@ test/**
 dist/**
 .gitignore
 tsconfig.json
+biome.json
+package-lock.json
 *.vsix
-out/*.d.ts
-out/*.d.ts.map
-out/*.js.map
-out/*.wasm
+**/*.d.ts
+**/*.d.ts.map
+**/*.js.map
+out/**/*.wasm
 wasm/.gitignore
 wasm/LICENSE
 wasm/README.md

@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
-import { QQL_KEYWORDS } from "../keywords.generated";
 import type { AnalysisService } from "../core/analysis";
+import { QQL_KEYWORDS } from "../keywords.generated";
 
 const UNIQUE_KEYWORDS = [...QQL_KEYWORDS];
 
@@ -139,8 +139,7 @@ const SNIPPETS: QqlSnippet[] = [
   },
   {
     label: "COUNT EXACT",
-    insertText:
-      "COUNT FROM ${1:collection} WHERE ${2:active} = true WITH (exact = true);",
+    insertText: "COUNT FROM ${1:collection} WHERE ${2:active} = true WITH (exact = true);",
     detail: "Exact point count (not approximate)",
   },
   {
@@ -200,7 +199,10 @@ const SNIPPETS: QqlSnippet[] = [
 ];
 
 // Contextual follow-ups after a keyword
-const AFTER: Record<string, Array<{ label: string; kind?: vscode.CompletionItemKind; detail?: string }>> = {
+const AFTER: Record<
+  string,
+  Array<{ label: string; kind?: vscode.CompletionItemKind; detail?: string }>
+> = {
   QUERY: [
     { label: "TEXT", detail: "Nearest from text" },
     { label: "HYBRID", detail: "Dense + sparse fusion" },
@@ -223,11 +225,7 @@ const AFTER: Record<string, Array<{ label: string; kind?: vscode.CompletionItemK
     { label: "RRF", detail: "Reciprocal Rank Fusion" },
     { label: "DBSF", detail: "Distribution-Based Score Fusion" },
   ],
-  STRATEGY: [
-    { label: "average_vector" },
-    { label: "best_score" },
-    { label: "sum_scores" },
-  ],
+  STRATEGY: [{ label: "average_vector" }, { label: "best_score" }, { label: "sum_scores" }],
   TYPE: [
     { label: "keyword" },
     { label: "integer" },
@@ -247,27 +245,11 @@ const AFTER: Record<string, Array<{ label: string; kind?: vscode.CompletionItemK
   ORDER: [{ label: "BY" }],
   SAMPLE: [{ label: "RANDOM" }],
   CROSS: [{ label: "RERANK" }],
-  CREATE: [
-    { label: "COLLECTION" },
-    { label: "INDEX" },
-    { label: "SHARD" },
-  ],
-  DROP: [
-    { label: "COLLECTION" },
-    { label: "INDEX" },
-    { label: "SHARD" },
-  ],
-  SHOW: [
-    { label: "COLLECTIONS" },
-    { label: "COLLECTION" },
-    { label: "SHARD" },
-  ],
+  CREATE: [{ label: "COLLECTION" }, { label: "INDEX" }, { label: "SHARD" }],
+  DROP: [{ label: "COLLECTION" }, { label: "INDEX" }, { label: "SHARD" }],
+  SHOW: [{ label: "COLLECTIONS" }, { label: "COLLECTION" }, { label: "SHARD" }],
   ALTER: [{ label: "COLLECTION" }],
-  DELETE: [
-    { label: "FROM" },
-    { label: "PAYLOAD" },
-    { label: "VECTOR" },
-  ],
+  DELETE: [{ label: "FROM" }, { label: "PAYLOAD" }, { label: "VECTOR" }],
   CLEAR: [{ label: "PAYLOAD" }],
   UPDATE: [{ label: "VECTOR" }, { label: "PAYLOAD" }],
   WITH: [
@@ -280,17 +262,8 @@ const AFTER: Record<string, Array<{ label: string; kind?: vscode.CompletionItemK
   SCORE: [{ label: "THRESHOLD" }],
   GROUP: [{ label: "BY" }],
   SHARD: [{ label: "KEY" }, { label: "KEYS" }],
-  VECTOR: [
-    { label: "COSINE" },
-    { label: "DOT" },
-    { label: "EUCLID" },
-    { label: "MANHATTAN" },
-  ],
-  CONSISTENCY: [
-    { label: "majority" },
-    { label: "quorum" },
-    { label: "all" },
-  ],
+  VECTOR: [{ label: "COSINE" }, { label: "DOT" }, { label: "EUCLID" }, { label: "MANHATTAN" }],
+  CONSISTENCY: [{ label: "majority" }, { label: "quorum" }, { label: "all" }],
   IS: [{ label: "NULL" }, { label: "NOT" }, { label: "EMPTY" }],
   MATCH: [{ label: "ANY" }],
   ASC: [],
@@ -392,10 +365,7 @@ export class QqlCompletionProvider implements vscode.CompletionItemProvider {
     // After FROM / INTO / COLLECTION — suggest collection names seen in the file
     if (["FROM", "INTO", "COLLECTION"].includes(ctx.prevWord.toUpperCase())) {
       for (const name of collectIdentifiers(document, this.analysis)) {
-        const item = new vscode.CompletionItem(
-          name,
-          vscode.CompletionItemKind.Variable
-        );
+        const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.Variable);
         item.detail = "collection (from file)";
         add(item, 850);
       }
@@ -407,10 +377,7 @@ export class QqlCompletionProvider implements vscode.CompletionItemProvider {
       (ctx.prevWord === "(" && ctx.prevPrevWord.toUpperCase() === "PREFETCH")
     ) {
       for (const name of collectCteNames(document, this.analysis)) {
-        const item = new vscode.CompletionItem(
-          name,
-          vscode.CompletionItemKind.Reference
-        );
+        const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.Reference);
         item.detail = "CTE";
         add(item, 880);
       }
@@ -419,10 +386,7 @@ export class QqlCompletionProvider implements vscode.CompletionItemProvider {
     // 2) Statement starters at beginning of statement
     if (ctx.isStart) {
       for (const kw of STATEMENT_STARTERS) {
-        const item = new vscode.CompletionItem(
-          kw,
-          vscode.CompletionItemKind.Keyword
-        );
+        const item = new vscode.CompletionItem(kw, vscode.CompletionItemKind.Keyword);
         item.detail = "statement";
         add(item, 700);
       }
@@ -431,10 +395,7 @@ export class QqlCompletionProvider implements vscode.CompletionItemProvider {
     // 3) Common clauses mid-statement
     if (!ctx.isStart) {
       for (const kw of CLAUSE_KEYWORDS) {
-        const item = new vscode.CompletionItem(
-          kw,
-          vscode.CompletionItemKind.Keyword
-        );
+        const item = new vscode.CompletionItem(kw, vscode.CompletionItemKind.Keyword);
         item.detail = "clause";
         add(item, 400);
       }
@@ -443,10 +404,7 @@ export class QqlCompletionProvider implements vscode.CompletionItemProvider {
     // 4) Snippets (boost at statement start)
     for (const snip of SNIPPETS) {
       if (snip.when && !snip.when(ctx)) continue;
-      const item = new vscode.CompletionItem(
-        snip.label,
-        vscode.CompletionItemKind.Snippet
-      );
+      const item = new vscode.CompletionItem(snip.label, vscode.CompletionItemKind.Snippet);
       item.detail = snip.detail;
       item.insertText = new vscode.SnippetString(snip.insertText);
       item.documentation = new vscode.MarkdownString(
@@ -457,10 +415,7 @@ export class QqlCompletionProvider implements vscode.CompletionItemProvider {
 
     // 5) Full keyword list (lowest priority — still available for filtering)
     for (const kw of UNIQUE_KEYWORDS) {
-      const item = new vscode.CompletionItem(
-        kw,
-        vscode.CompletionItemKind.Keyword
-      );
+      const item = new vscode.CompletionItem(kw, vscode.CompletionItemKind.Keyword);
       item.detail = "QQL keyword";
       add(item, 100);
     }
@@ -474,9 +429,7 @@ function buildContext(
   position: vscode.Position,
   linePrefix: string
 ): CompletionContext {
-  const fullPrefix = document.getText(
-    new vscode.Range(new vscode.Position(0, 0), position)
-  );
+  const fullPrefix = document.getText(new vscode.Range(new vscode.Position(0, 0), position));
 
   // Words on current line (ignore trailing partial word)
   const trimmed = linePrefix.replace(/[A-Za-z0-9_]*$/, "").trimEnd();
@@ -491,14 +444,11 @@ function buildContext(
   return { linePrefix, prevWord, prevPrevWord, isStart, fullPrefix };
 }
 
-function collectIdentifiers(
-  document: vscode.TextDocument,
-  analysis?: AnalysisService
-): string[] {
+function collectIdentifiers(document: vscode.TextDocument, analysis?: AnalysisService): string[] {
   const names = new Set<string>();
   const cached = analysis?.get(document.uri);
   if (cached) {
-    for (const stmt of cached.statements) {
+    for (const _stmt of cached.statements) {
       // FROM / INTO identifiers via tokens
     }
     for (const tok of cached.result.tokens) {
@@ -508,25 +458,18 @@ function collectIdentifiers(
     }
   } else {
     const text = document.getText();
-    for (const m of text.matchAll(
-      /\b(?:FROM|INTO|COLLECTION)\s+([A-Za-z_][A-Za-z0-9_]*)/gi
-    )) {
+    for (const m of text.matchAll(/\b(?:FROM|INTO|COLLECTION)\s+([A-Za-z_][A-Za-z0-9_]*)/gi)) {
       names.add(m[1]);
     }
   }
   return [...names].sort();
 }
 
-function collectCteNames(
-  document: vscode.TextDocument,
-  analysis?: AnalysisService
-): string[] {
+function collectCteNames(document: vscode.TextDocument, analysis?: AnalysisService): string[] {
   const names = new Set<string>();
   const cached = analysis?.get(document.uri);
   const text = cached?.source ?? document.getText();
-  for (const m of text.matchAll(
-    /\b(?:WITH|,)\s*([A-Za-z_][A-Za-z0-9_]*)\s+AS\s*\(/gi
-  )) {
+  for (const m of text.matchAll(/\b(?:WITH|,)\s*([A-Za-z_][A-Za-z0-9_]*)\s+AS\s*\(/gi)) {
     names.add(m[1]);
   }
   return [...names].sort();

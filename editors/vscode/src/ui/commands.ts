@@ -1,12 +1,31 @@
 import * as vscode from "vscode";
 import type { AnalysisService } from "../core/analysis";
-import { compileQql, explainQql, parseQql } from "../core/wasm";
 import { routeToCurl } from "../core/statements";
 import type { CompiledRoute } from "../core/types";
+import { compileQql, explainQql, parseQql } from "../core/wasm";
+
+/** Single reusable output channel — avoids opening dozens of untitled docs. */
+let output: vscode.OutputChannel | undefined;
+
+function getOutput(): vscode.OutputChannel {
+  if (!output) {
+    output = vscode.window.createOutputChannel("QQL");
+  }
+  return output;
+}
+
+function showInOutput(title: string, body: string): void {
+  const ch = getOutput();
+  ch.clear();
+  ch.appendLine(`── ${title} ──`);
+  ch.appendLine("");
+  ch.appendLine(body);
+  ch.show(true);
+}
 
 function getActiveQqlEditor(): vscode.TextEditor | undefined {
   const editor = vscode.window.activeTextEditor;
-  if (!editor || editor.document.languageId !== "qql") {
+  if (editor?.document.languageId !== "qql") {
     vscode.window.showWarningMessage("QQL: open a .qql file first");
     return undefined;
   }
@@ -19,24 +38,6 @@ function selectionOrDocument(editor: vscode.TextEditor): string {
     return editor.document.getText(sel);
   }
   return editor.document.getText();
-}
-
-async function showTextPanel(
-  title: string,
-  body: string,
-  language: string
-): Promise<void> {
-  const doc = await vscode.workspace.openTextDocument({
-    content: body,
-    language,
-  });
-  await vscode.window.showTextDocument(doc, {
-    preview: true,
-    viewColumn: vscode.ViewColumn.Beside,
-    preserveFocus: true,
-  });
-  // Title is not settable on untitled docs easily; first line acts as header when needed
-  void title;
 }
 
 function resolveStatementSource(
@@ -55,25 +56,33 @@ export function registerCommands(
   analysis: AnalysisService
 ): void {
   const baseUrl = () =>
-    vscode.workspace.getConfiguration("qql").get<string>("baseUrl") ??
-    "http://localhost:6333";
+    vscode.workspace.getConfiguration("qql").get<string>("baseUrl") ?? "http://localhost:6333";
 
   context.subscriptions.push(
+    {
+      dispose: () => {
+        output?.dispose();
+        output = undefined;
+      },
+    },
+
+    // No-op used by label-only CodeLens entries
+    vscode.commands.registerCommand("qql.noop", () => undefined),
+
     vscode.commands.registerCommand("qql.explain", async () => {
       const editor = getActiveQqlEditor();
       if (!editor) return;
       const source = selectionOrDocument(editor);
       try {
-        // Prefer multi-statement explain from analyze cache when full doc
         if (editor.selection.isEmpty) {
-          const a = analysis.analyzeNow(editor.document);
+          const a = analysis.ensure(editor.document);
           if (a?.result.explain) {
-            await showTextPanel("QQL Explain", a.result.explain, "plaintext");
+            showInOutput("QQL Explain", a.result.explain);
             return;
           }
         }
         const out = explainQql(source);
-        await showTextPanel("QQL Explain", out, "plaintext");
+        showInOutput("QQL Explain", out);
       } catch (err) {
         vscode.window.showErrorMessage(
           `QQL Explain failed: ${err instanceof Error ? err.message : String(err)}`
@@ -95,7 +104,7 @@ export function registerCommands(
             source = selectionOrDocument(editor);
           }
           const out = explainQql(source);
-          await showTextPanel("QQL Explain", out, "plaintext");
+          showInOutput("QQL Explain", out);
         } catch (err) {
           vscode.window.showErrorMessage(
             `QQL Explain failed: ${err instanceof Error ? err.message : String(err)}`
@@ -109,24 +118,20 @@ export function registerCommands(
       if (!editor) return;
       try {
         if (editor.selection.isEmpty) {
-          const a = analysis.analyzeNow(editor.document);
+          const a = analysis.ensure(editor.document);
           if (a?.result.routes?.length) {
             const body = JSON.stringify(
               a.result.routes.length === 1 ? a.result.routes[0] : a.result.routes,
               null,
               2
             );
-            await showTextPanel("QQL REST Route", body, "json");
+            showInOutput("QQL REST Route", body);
             return;
           }
         }
         const source = selectionOrDocument(editor);
         const route = compileQql(source);
-        await showTextPanel(
-          "QQL REST Route",
-          JSON.stringify(route, null, 2),
-          "json"
-        );
+        showInOutput("QQL REST Route", JSON.stringify(route, null, 2));
       } catch (err) {
         vscode.window.showErrorMessage(
           `QQL Compile failed: ${err instanceof Error ? err.message : String(err)}`
@@ -154,11 +159,7 @@ export function registerCommands(
             if (!editor) return;
             route = compileQql(selectionOrDocument(editor));
           }
-          await showTextPanel(
-            "QQL REST Route",
-            JSON.stringify(route, null, 2),
-            "json"
-          );
+          showInOutput("QQL REST Route", JSON.stringify(route, null, 2));
         } catch (err) {
           vscode.window.showErrorMessage(
             `QQL Compile failed: ${err instanceof Error ? err.message : String(err)}`
@@ -174,11 +175,10 @@ export function registerCommands(
         const source = selectionOrDocument(editor);
         let route: CompiledRoute;
         if (editor.selection.isEmpty) {
-          const a = analysis.analyzeNow(editor.document);
+          const a = analysis.ensure(editor.document);
           if (a?.result.routes?.length === 1) {
             route = a.result.routes[0];
           } else if (a?.result.routes && a.result.routes.length > 1) {
-            // Multiple: copy all as a shell script
             const script = a.result.routes
               .map((r, i) => `# Statement ${i + 1}\n${routeToCurl(r, baseUrl())}`)
               .join("\n\n");
@@ -238,12 +238,12 @@ export function registerCommands(
         const source = selectionOrDocument(editor);
         let ast: unknown;
         if (editor.selection.isEmpty) {
-          const a = analysis.analyzeNow(editor.document);
+          const a = analysis.ensure(editor.document);
           ast = a?.result.ast ?? parseQql(source);
         } else {
           ast = parseQql(source);
         }
-        await showTextPanel("QQL AST", JSON.stringify(ast, null, 2), "json");
+        showInOutput("QQL AST", JSON.stringify(ast, null, 2));
       } catch (err) {
         vscode.window.showErrorMessage(
           `QQL AST failed: ${err instanceof Error ? err.message : String(err)}`
@@ -254,15 +254,13 @@ export function registerCommands(
     vscode.commands.registerCommand("qql.analyze", async () => {
       const editor = getActiveQqlEditor();
       if (!editor) return;
-      const a = analysis.analyzeNow(editor.document);
+      const a = analysis.analyzeNow(editor.document, { force: true });
       if (!a) {
         vscode.window.showWarningMessage("QQL: analysis unavailable");
         return;
       }
       if (a.result.valid) {
-        vscode.window.showInformationMessage(
-          `QQL: valid · ${a.statements.length} statement(s)`
-        );
+        vscode.window.showInformationMessage(`QQL: valid · ${a.statements.length} statement(s)`);
       } else {
         const err = a.result.error;
         vscode.window.showErrorMessage(

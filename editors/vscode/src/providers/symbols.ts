@@ -48,10 +48,8 @@ export class QqlDocumentSymbolProvider implements vscode.DocumentSymbolProvider 
     document: vscode.TextDocument,
     _token: vscode.CancellationToken
   ): vscode.ProviderResult<vscode.DocumentSymbol[]> {
-    let analysis = this.analysis.get(document.uri);
-    if (!analysis || analysis.version !== document.version) {
-      analysis = this.analysis.analyzeNow(document);
-    }
+    // ensure() returns cache without notify when current — no refresh storm
+    const analysis = this.analysis.ensure(document);
     if (!analysis) return [];
 
     const symbols: vscode.DocumentSymbol[] = [];
@@ -61,30 +59,23 @@ export class QqlDocumentSymbolProvider implements vscode.DocumentSymbolProvider 
         byteOffsetToPosition(document, stmt.start),
         byteOffsetToPosition(document, stmt.end)
       );
-      const selectionRange = range; // fine for outline
       const kind = KIND_MAP[stmt.kind] ?? vscode.SymbolKind.String;
       const detail = stmt.route
         ? `${stmt.route.method ?? "?"} ${stmt.route.path ?? ""}`.trim()
         : stmt.kind;
 
-      const symbol = new vscode.DocumentSymbol(
-        stmt.label,
-        detail,
-        kind,
-        range,
-        selectionRange
-      );
+      const symbol = new vscode.DocumentSymbol(stmt.label, detail, kind, range, range);
 
-      // Nested CTE children for WITH queries
-      if (stmt.kind === "WITH" || stmt.kind.startsWith("QUERY") || stmt.source.match(/^\s*WITH\b/i)) {
-        // Re-tokenize just this statement's tokens from full analysis by filtering offsets
+      if (
+        stmt.kind === "WITH" ||
+        stmt.kind.startsWith("QUERY") ||
+        /^\s*WITH\b/i.test(stmt.source)
+      ) {
         const stmtTokens = analysis.result.tokens.filter(
           (t) => t.pos >= stmt.start && t.end <= stmt.end
         );
-        // Adjust token positions to absolute (already absolute)
         const ctes = extractCteDefinitions(analysis.source, stmtTokens, 0);
         for (const cte of ctes) {
-          // Only CTEs that fall inside this statement
           if (cte.start < stmt.start || cte.end > stmt.end) continue;
           const cteRange = new vscode.Range(
             byteOffsetToPosition(document, cte.start),

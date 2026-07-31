@@ -1,24 +1,22 @@
 import * as vscode from "vscode";
-import { initWasm, isWasmReady } from "./core/wasm";
 import { AnalysisService } from "./core/analysis";
-import { createDiagnosticCollection, updateDiagnostics } from "./providers/diagnostics";
+import { initWasm, isWasmReady } from "./core/wasm";
+import { QqlCodeLensProvider } from "./providers/codelens";
 import { QqlCompletionProvider } from "./providers/completions";
+import { QqlDefinitionProvider } from "./providers/definition";
+import { createDiagnosticCollection, updateDiagnostics } from "./providers/diagnostics";
+import { QqlFoldingRangeProvider } from "./providers/folding";
 import { QqlHoverProvider } from "./providers/hover";
 import { QqlDocumentSymbolProvider } from "./providers/symbols";
-import { QqlFoldingRangeProvider } from "./providers/folding";
-import { QqlDefinitionProvider } from "./providers/definition";
-import { QqlCodeLensProvider } from "./providers/codelens";
-import { QqlStatusBar } from "./ui/statusBar";
 import { registerCommands } from "./ui/commands";
+import { QqlStatusBar } from "./ui/statusBar";
 
 const QQL_SELECTOR: vscode.DocumentSelector = { language: "qql" };
 
 export function activate(context: vscode.ExtensionContext) {
-  // ── Init WASM parser ──────────────────────────────────────────
   try {
     initWasm();
   } catch (err) {
-    console.error("[qql-lang] WASM init failed:", err);
     vscode.window.showErrorMessage(
       `QQL: WASM parser failed to load — diagnostics disabled. ${err}`
     );
@@ -32,22 +30,20 @@ export function activate(context: vscode.ExtensionContext) {
   const codeLensProvider = new QqlCodeLensProvider(analysis);
   const statusBar = new QqlStatusBar(analysis);
 
-  // Push diagnostics whenever analysis completes
-  analysis.onDidAnalyze((a) => {
-    if (!a) return;
-    const doc = vscode.workspace.textDocuments.find(
-      (d) => d.uri.toString() === a.uri
-    );
-    if (doc) {
+  // Diagnostics only — keep this listener cheap (no re-analyze).
+  const diagnosticsSub = analysis.onDidAnalyze((a) => {
+    const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === a.uri);
+    if (doc && !doc.isClosed) {
       updateDiagnostics(diagnosticCollection, doc, a.result);
     }
   });
 
-  // ── Language providers ────────────────────────────────────────
   context.subscriptions.push(
     analysis,
     diagnosticCollection,
+    codeLensProvider,
     statusBar,
+    diagnosticsSub,
 
     vscode.languages.registerCompletionItemProvider(
       QQL_SELECTOR,
@@ -57,10 +53,7 @@ export function activate(context: vscode.ExtensionContext) {
       "(",
       ","
     ),
-    vscode.languages.registerHoverProvider(
-      QQL_SELECTOR,
-      new QqlHoverProvider(analysis)
-    ),
+    vscode.languages.registerHoverProvider(QQL_SELECTOR, new QqlHoverProvider(analysis)),
     vscode.languages.registerDocumentSymbolProvider(
       QQL_SELECTOR,
       new QqlDocumentSymbolProvider(analysis)
@@ -69,20 +62,14 @@ export function activate(context: vscode.ExtensionContext) {
       QQL_SELECTOR,
       new QqlFoldingRangeProvider(analysis)
     ),
-    vscode.languages.registerDefinitionProvider(
-      QQL_SELECTOR,
-      new QqlDefinitionProvider(analysis)
-    ),
-    vscode.languages.registerCodeLensProvider(
-      QQL_SELECTOR,
-      codeLensProvider
-    )
+    vscode.languages.registerDefinitionProvider(QQL_SELECTOR, new QqlDefinitionProvider(analysis)),
+    vscode.languages.registerCodeLensProvider(QQL_SELECTOR, codeLensProvider)
   );
 
-  // ── Commands ──────────────────────────────────────────────────
   registerCommands(context, analysis);
 
-  // ── Document lifecycle ────────────────────────────────────────
+  // ── Document lifecycle (single owner of analyze/schedule) ─────
+  // Providers must not drive analysis. Only these events do.
   context.subscriptions.push(
     vscode.workspace.onDidOpenTextDocument((doc) => {
       if (doc.languageId === "qql" && isWasmReady()) {
@@ -95,25 +82,27 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }),
     vscode.workspace.onDidChangeTextDocument((e) => {
+      // Ignore non-content events (e.g. some VS Code internal updates)
+      if (e.contentChanges.length === 0) return;
       if (e.document.languageId === "qql" && isWasmReady()) {
         analysis.schedule(e.document);
       }
     }),
     vscode.window.onDidChangeActiveTextEditor((editor) => {
       if (editor && editor.document.languageId === "qql" && isWasmReady()) {
+        // analyzeNow is a no-op (no notify) when version is already cached
         analysis.analyzeNow(editor.document);
       }
     }),
     vscode.workspace.onDidCloseTextDocument((doc) => {
+      if (doc.languageId !== "qql") return;
       analysis.invalidate(doc.uri);
       diagnosticCollection.delete(doc.uri);
     }),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("qql.diagnostics.debounceMs")) {
         const ms =
-          vscode.workspace
-            .getConfiguration("qql")
-            .get<number>("diagnostics.debounceMs") ?? 300;
+          vscode.workspace.getConfiguration("qql").get<number>("diagnostics.debounceMs") ?? 300;
         analysis.setDebounceMs(ms);
       }
       if (e.affectsConfiguration("qql.codeLens.enabled")) {
@@ -122,7 +111,7 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // Analyze already-open QQL documents
+  // Analyze currently open QQL docs once at activation
   if (isWasmReady()) {
     for (const doc of vscode.workspace.textDocuments) {
       if (doc.languageId === "qql") {
@@ -133,5 +122,5 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {
-  // Disposables are cleaned via context.subscriptions
+  // Disposables cleaned via context.subscriptions
 }
