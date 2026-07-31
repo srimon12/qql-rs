@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { byteOffsetToJsIndex } from "./utf8";
 
-export { byteOffsetToJsIndex, utf8ByteLength, sliceByByteOffsets } from "./utf8";
+export { byteOffsetToJsIndex, sliceByByteOffsets, utf8ByteLength } from "./utf8";
 
 /**
  * Convert a UTF-8 byte offset (from the Rust WASM parser) into a VS Code Position.

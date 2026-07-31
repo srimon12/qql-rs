@@ -21,10 +21,7 @@ const STATEMENT_STARTERS = new Set([
  * Split a document into top-level statement spans using lexer tokens.
  * Handles nested parentheses (CTEs) and multi-statement scripts.
  */
-export function extractStatementSpans(
-  source: string,
-  result: WasmAnalyzeResult
-): StatementSpan[] {
+export function extractStatementSpans(source: string, result: WasmAnalyzeResult): StatementSpan[] {
   const tokens = result.tokens ?? [];
   if (tokens.length === 0) {
     // Fallback: split on top-level semicolons by a simple scan
@@ -213,7 +210,7 @@ export function extractCollection(source: string): string | undefined {
  * when `baseOffset` is provided (default 0).
  */
 export function extractCteDefinitions(
-  source: string,
+  _source: string,
   tokens: QqlToken[],
   baseOffset = 0
 ): Array<{ name: string; start: number; end: number }> {
@@ -223,10 +220,7 @@ export function extractCteDefinitions(
   while (i < tokens.length) {
     const tok = tokens[i];
     const kind = tok.kind.toUpperCase();
-    if (
-      (kind === "WITH" || kind === "COMMA") &&
-      i + 2 < tokens.length
-    ) {
+    if ((kind === "WITH" || kind === "COMMA") && i + 2 < tokens.length) {
       const nameTok = tokens[i + 1];
       const asTok = tokens[i + 2];
       if (
@@ -351,15 +345,11 @@ export function statementAtOffset(
 }
 
 /** Build a curl snippet from a compiled route. */
-export function routeToCurl(
-  route: CompiledRoute,
-  baseUrl = "http://localhost:6333"
-): string {
+export function routeToCurl(route: CompiledRoute, baseUrl = "http://localhost:6333"): string {
   const method = (route.method ?? "POST").toUpperCase();
   const path = route.path ?? "/";
   const url = `${baseUrl.replace(/\/$/, "")}${path.startsWith("/") ? path : `/${path}`}`;
-  const body =
-    route.payload != null ? JSON.stringify(route.payload, null, 2) : undefined;
+  const body = route.payload != null ? JSON.stringify(route.payload, null, 2) : undefined;
 
   if (method === "GET" || method === "DELETE") {
     return `curl -X ${method} '${url}' \\\n  -H 'Content-Type: application/json'`;

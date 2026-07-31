@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0] - Unreleased
 
+### 📦 Packaging (VS Code only)
+- **VS Code extension 0.2.1** — Marketplace packaging bump (immutable `0.2.0` slot). Ships the same QQL **0.2.0** WASM parser; crate / SDK versions stay at **0.2.0**. Fixes analysis feedback loops (CodeLens / host thrash), UTF-8 statement slicing for explain, shared analysis cache, Output channel for plans/routes, and Biome + typecheck scripts. VSIX binaries are no longer committed; build via `npm run package` (`@vscode/vsce`).
+
 ### 🚀 Added
 - **QQL documentation website** — a new docs site at `qql.veristamp.in` (Astro + Starlight) replaces the legacy playground. 40+ pages across Start, Language, Guides, Edge, SDKs, Tools, Reference, and Contributing, including a dedicated **Edge runtime** section (9 pages), a **Filter injection** security guide, an **Error codes** reference, and **editors** documentation for the VS Code extension. All language, CLI, SDK, and reference pages were rewritten and deepened.
 - **Interactive playground** — integrated into the site and backed by a freshly built `qql-wasm` bundle. Every documented example is extracted and parsed at build time, so the docs cannot drift from the parser.

@@ -1,8 +1,8 @@
 import * as vscode from "vscode";
-import type { WasmAnalyzeResult } from "../core/types";
 import { byteOffsetToPosition } from "../core/positions";
+import type { WasmAnalyzeResult } from "../core/types";
 
-export type { WasmAnalyzeResult, AnalysisError } from "../core/types";
+export type { AnalysisError, WasmAnalyzeResult } from "../core/types";
 
 /**
  * Create the shared diagnostic collection for QQL.

@@ -7,7 +7,7 @@
 
 import type { CompiledRoute, WasmAnalyzeResult } from "./types";
 
-export type { WasmAnalyzeResult, CompiledRoute };
+export type { CompiledRoute, WasmAnalyzeResult };
 
 let _analyze: ((input: string) => WasmAnalyzeResult) | null = null;
 let _explain: ((input: string) => string) | null = null;
@@ -22,7 +22,7 @@ export function initWasm(): void {
   try {
     // Compiled output lives at out/core/wasm.js → ../../wasm/qql_wasm.js
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const path = require("path") as typeof import("path");
+    const path = require("node:path") as typeof import("path");
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const qqlWasm = require(path.join(__dirname, "..", "..", "wasm", "qql_wasm.js"));
     if (typeof qqlWasm.analyze !== "function") {

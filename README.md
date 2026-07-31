@@ -53,15 +53,17 @@ cargo add qql qql-core
 
 #### 🧩 VS Code / Cursor Extension
 
+Extension packaging version is in `editors/vscode/package.json` (Marketplace). Bundles the QQL **0.2.0** WASM parser — independent of the monorepo crate version. VSIX artifacts are built/published, not stored in git.
+
 ```bash
 # Marketplace
 code --install-extension srimon12.qql-lang
 
-# Or install the local VSIX from this repo (0.2.0)
-code --install-extension editors/vscode/qql-lang-0.2.0.vsix
+# Local build (from editors/vscode)
+# npm run package && code --install-extension qql-lang-*.vsix --force
 ```
 
-Syntax highlighting, live WASM diagnostics, and keyword/snippet completions for `.qql` files. See [`editors/vscode`](editors/vscode).
+Syntax highlighting, live WASM diagnostics, hover plans, CodeLens, outline, and smart completions for `.qql` files. See [`editors/vscode`](editors/vscode).
 
 #### 🤖 AI Agent Skill (Cursor, Claude Code, codex etc)
 
