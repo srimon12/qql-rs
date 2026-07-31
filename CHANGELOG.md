@@ -8,27 +8,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 
-## [Unreleased]
+## [0.2.0] - Unreleased
 
 ### 🚀 Added
 - **QQL documentation website** — a new docs site at `qql.veristamp.in` (Astro + Starlight) replaces the legacy playground. 40+ pages across Start, Language, Guides, Edge, SDKs, Tools, Reference, and Contributing, including a dedicated **Edge runtime** section (9 pages), a **Filter injection** security guide, an **Error codes** reference, and **editors** documentation for the VS Code extension. All language, CLI, SDK, and reference pages were rewritten and deepened.
 - **Interactive playground** — integrated into the site and backed by a freshly built `qql-wasm` bundle. Every documented example is extracted and parsed at build time, so the docs cannot drift from the parser.
 - **Grammar as the single source of truth** — `qql-grammar-gen` now derives five artifacts from `language/v1/grammar.pest`: the generated pest grammar, the VS Code TextMate grammar, the VS Code and playground keyword tables, and the Rust `KEYWORDS` map (`keywords.generated.rs`) used by the `qql-core` lexer.
-- **Language & conformance** — new conformance fixtures for `CROSS RERANK` and formula division defaults, grammar support for `USING MULTI/MULTIVECTOR/IMAGE` embedding specs, and a documented contract map in `language/v1/README.md`. The conformance suite now stands at 35 valid / 35 invalid / 35 AST snapshots.
+- **Language & conformance** — new conformance fixtures for `CROSS RERANK` and formula division defaults, grammar support for `USING MULTI/MULTIVECTOR/IMAGE` embedding specs, and a documented contract map in `language/v1/README.md`. The conformance suite now stands at 35 valid files (249 statements) / 53 invalid cases / 35 AST snapshots.
 - **Python typing** — `.pyi` stubs and `py.typed` markers for `pyqql` and `pyqql-edge`.
+- **Executable grammar contract** — `qql-conformance` now compiles `language/v1/grammar.pest` in test-only code and checks the canonical grammar against the fixture corpus without adding Pest to the `qql-core` runtime parser.
+- **VS Code 0.2.0** — live diagnostics, hover plans, CTE go-to-definition, document symbols, folding, CodeLens, commands, status bar state, contextual completions, QQL snippets, and Markdown fenced-block support.
+- **Updated examples** — WASM examples now use the checked-in generated package, and the edge example documents the required opt-in CLI feature.
 
 ### 🏗️ Architecture
 - **Lexer/grammar lockstep** — the `TokenKind` enum stays hand-written, but its keyword map is generated and guarded by bi-directional drift tests (grammar → keywords, and parser keyword vocabulary → grammar), and `qql-grammar-gen check` rejects grammar rules unreachable from the entry productions. A dead `sharding_method_val` rule and its unused `TokenKind` variants were removed.
 - **Parser-generation roadmap** — `docs/parser_generation_design.md` evaluates pest/LALRPOP/custom generators against the `no_std`, zero-dependency core and lays out a phased migration.
+- **Shared editor analysis** — the extension now performs one debounced WASM analysis per document and shares the result across diagnostics, hover, symbols, CodeLens, and completion providers.
 
 ### 🔒 Changed & Scoped
 - **Edge fail-loud hardening** — `PARAMS (timeout)` and `PARAMS (consistency)` are now rejected on the edge backend with `QQL-EDGE-UNSUPPORTED-TIMEOUT` / `QQL-EDGE-UNSUPPORTED-CONSISTENCY` instead of being silently ignored.
 - **Fail-closed `set_shard_key`** in the Python, Node, and WASM bindings — assigning a shard key to a statement type that does not support routing now raises an error.
 - **Installer & release tooling** — install scripts validate released platform targets (with a build-from-source hint otherwise) and `RELEASING.md` was aligned to `0.1.5` (edge verification notes the `--features edge` requirement).
 - **Versioning** — `language/v1/spec/versioning.md` documents the post-`0.1.5` contract corrections and hardening.
+- **Language version 1.3** — the specification now documents multivector and image embedding directives, strict COUNT and shard-key configuration, and the current 35 valid / 249 statement / 53 invalid / 35 snapshot conformance corpus.
+- **Fallible planning surface** — removed the panicking `qql_plan::routing::route()` helper and the shard-key-dropping `top_level_filter_with_shard()` helper; use `try_route()` or `compile_statement()`.
+
+### 🐛 Fixed
+- **Parser/grammar alignment** — fixed triple-quoted string preservation, four-quote SQL strings, malformed numeric literals, non-finite floats, COUNT clause ordering, index-type validation, rerank inputs, feedback strategy validation, raw-string prefix handling, and identifier segment validation.
+- **Planner and execution safety** — replaced unsupported PREFETCH panics, integer overflow, and silent prefetch degradation with structured errors; preserved CTE-backed RERANK prefetches.
+- **Backend correctness** — fixed `DELETE PAYLOAD` batching, edge reads that created missing collections, gRPC/edge point-lookup envelopes, gRPC RRF parameters, and lossy gRPC filter conversion.
+- **SDK and CLI correctness** — aligned Python and Node declarations with native APIs, fixed Node edge HTTP embedding and model forwarding, corrected CLI REPL ANSI output, and rebuilt the bundled editor WASM as a release artifact.
 
 ### 📚 Documentation
 - Edge timeout/consistency behavior, error codes, backend compatibility, and API surfaces updated to match the hardened runtime.
+- Documentation validation now rejects unwrapped QQL/SQL fences, parse-and-plan checks examples and fixtures, and verifies same-site documentation anchors.
+
+### 🔗 Major release work
+- **Core language and execution hardening — [PR #25](https://github.com/srimon12/qql-rs/pull/25)** — grammar/runtime conformance, parser and AST fixes, planner safety, backend correctness, binding alignment, and structured error handling.
+- **VS Code packaging cleanup — [PR #26](https://github.com/srimon12/qql-rs/pull/26)** — removed the obsolete packaging path, corrected completion output, and added editor source checks.
+- **Website validation and documentation — [PR #27](https://github.com/srimon12/qql-rs/pull/27)** — executable documentation checks, raw-fence validation, anchor checking, and updated reference content.
+- **VS Code language intelligence — [PR #28](https://github.com/srimon12/qql-rs/pull/28)** — full editor-host analysis, providers, commands, snippets, release WASM, and the `0.2.0` VSIX.
 
 ---
 

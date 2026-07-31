@@ -126,7 +126,7 @@ Examples across this folder exercise:
 
 ## Version note
 
-Target SDK / engine: **0.1.5+**. Older release binaries (e.g. 0.1.1 CLI) reject some 1.2 syntax — rebuild from this workspace:
+Target SDK / engine: **0.2.0+**. Older release binaries reject some 1.3 syntax — rebuild from this workspace:
 
 ```bash
 cargo build --release -p qql-cli

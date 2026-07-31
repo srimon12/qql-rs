@@ -31,7 +31,7 @@ if ([string]::IsNullOrEmpty($Version)) {
         $Release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest"
         $Version = $Release.tag_name
     } catch {
-        $Version = "v0.1.5"
+        $Version = "v0.2.0"
     }
 }
 

@@ -17,7 +17,7 @@ Three classes emerge from the grammar:
 2b. Intermediate Manifest Output
 New generated file: language/v1/keywords.json
 {
-  "version": "1.2",
+  "version": "1.3",
   "generated_by": "qql-grammar-gen",
   "source": "language/v1/grammar.pest",
   "generated_at": "ISO-8601",

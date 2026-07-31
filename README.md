@@ -57,8 +57,8 @@ cargo add qql qql-core
 # Marketplace
 code --install-extension srimon12.qql-lang
 
-# Or install the local VSIX from this repo (0.1.5)
-code --install-extension editors/vscode/qql-lang-0.1.5.vsix
+# Or install the local VSIX from this repo (0.2.0)
+code --install-extension editors/vscode/qql-lang-0.2.0.vsix
 ```
 
 Syntax highlighting, live WASM diagnostics, and keyword/snippet completions for `.qql` files. See [`editors/vscode`](editors/vscode).
