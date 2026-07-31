@@ -1,0 +1,72 @@
+from typing import Any, Dict, List, Optional, Union
+
+__version__: str
+
+class Stmt:
+    # NOTE: Stmt has no constructor — instances come from `parse()`.
+    @property
+    def shard_key(self) -> Optional[str]: ...
+    @shard_key.setter
+    def shard_key(self, value: Optional[str]) -> None: ...
+    def inject_filter(self, field: str, op: str, value: Any) -> None: ...
+    def to_dict(self) -> Dict[str, Any]: ...
+    def to_json(self) -> str: ...
+
+class HttpEmbedder:
+    def __init__(
+        self,
+        endpoint: str,
+        model: str,
+        dimension: int,
+        api_key: Optional[str] = None,
+    ) -> None: ...
+
+class Client:
+    def __init__(
+        self,
+        url: str = "http://localhost:6333",
+        api_key: Optional[str] = None,
+        use_grpc: bool = False,
+        embedder: Optional[HttpEmbedder] = None,
+    ) -> None: ...
+    def execute(
+        self,
+        query: Union[str, Stmt, List[Union[str, Stmt]]],
+        *,
+        on_error: str = "stop",
+    ) -> Dict[str, Any]: ...
+    def execute_async(
+        self,
+        query: Union[str, Stmt, List[Union[str, Stmt]]],
+        *,
+        on_error: str = "stop",
+    ) -> Dict[str, Any]: ...
+    def explain(self, query: Union[str, Stmt]) -> Dict[str, Any]: ...
+    def compile(self, query: str) -> Dict[str, Any]: ...
+
+Query = Union[str, Stmt, List[Union[str, Stmt]]]
+
+def parse(input: str) -> List[Stmt]: ...
+def is_valid(input: str) -> bool: ...
+def explain(query: Union[str, Stmt]) -> Dict[str, Any]: ...
+def compile_query(query: str) -> Dict[str, Any]: ...
+def tokenize(input: str) -> List[Dict[str, Any]]: ...
+def inject_filter(query: Union[str, Stmt], field: str, op: str, value: Any) -> Stmt: ...
+def execute(
+    query: Query,
+    *,
+    url: str = "http://localhost:6333",
+    api_key: Optional[str] = None,
+    use_grpc: bool = False,
+    embedder: Optional[HttpEmbedder] = None,
+    on_error: str = "stop",
+) -> Dict[str, Any]: ...
+def execute_async(
+    query: Query,
+    *,
+    url: str = "http://localhost:6333",
+    api_key: Optional[str] = None,
+    use_grpc: bool = False,
+    embedder: Optional[HttpEmbedder] = None,
+    on_error: str = "stop",
+) -> Dict[str, Any]: ...

@@ -1,0 +1,83 @@
+---
+title: "Installation"
+description: "Install the QQL CLI and the qql-rs SDKs for Rust, Python, Node.js, and WebAssembly."
+sidebar:
+  order: 2
+---
+
+## CLI
+
+{% terminal title="Linux and macOS" %}
+curl -fsSL https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.sh | sh
+{% /terminal %}
+
+{% terminal title="Windows PowerShell" %}
+irm https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.ps1 | iex
+{% /terminal %}
+
+The installed binary is `qql`.
+
+{% terminal title="Verify the CLI" %}
+qql version
+qql doctor --json
+{% /terminal %}
+
+{% aside type="note" title="Editors" %}
+Syntax highlighting, live diagnostics, and autocompletion are available from
+the `qql-lang` VS Code extension — see [Editors](/docs/tools/editors/).
+{% /aside %}
+
+## SDKs
+
+{% grid style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:1rem;" %}
+
+{% glassCard title="Rust" %}
+{% terminal title="Cargo" %}
+cargo add qql qql-core
+{% /terminal %}
+{% /glassCard %}
+
+{% glassCard title="Python" %}
+{% terminal title="pip" %}
+pip install pyqql
+{% /terminal %}
+Use `pyqql-edge` only when the in-process edge backend is required.
+{% /glassCard %}
+
+{% glassCard title="Node.js" %}
+{% terminal title="npm" %}
+npm install @veristamp/nqql
+{% /terminal %}
+Use `@veristamp/nqql-edge` for the heavier edge-enabled build.
+{% /glassCard %}
+
+{% glassCard title="WebAssembly" %}
+{% terminal title="npm" %}
+npm install qql-wasm
+{% /terminal %}
+Initialize the module before calling browser exports.
+{% /glassCard %}
+
+{% /grid %}
+
+## Build from source
+
+{% terminal title="Workspace build" %}
+git clone https://github.com/srimon12/qql-rs.git
+cd qql-rs
+cargo build --release --workspace
+{% /terminal %}
+
+### Edge runtime
+
+The in-process edge backend is an opt-in build. Compile the CLI with the `edge`
+feature to enable `--edge` and `qql config edge`:
+
+{% terminal title="Edge-enabled CLI build" %}
+cargo build --release -p qql-cli --features edge
+{% /terminal %}
+
+See [the edge backend overview](/docs/edge/) for capabilities and limits.
+
+The runtime defaults to REST and gRPC. Edge and embedded model support are
+opt-in because they add substantial binary and model weight.

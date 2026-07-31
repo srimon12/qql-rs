@@ -63,40 +63,7 @@ pub fn ascii_equal_lower(s: &str, lower: &str) -> bool {
 }
 
 pub fn is_contextual_field_name(kind: TokenKind) -> bool {
-    matches!(
-        kind,
-        TokenKind::Offset
-            | TokenKind::Score
-            | TokenKind::Threshold
-            | TokenKind::Lookup
-            | TokenKind::Id
-            | TokenKind::Dense
-            | TokenKind::Sparse
-            | TokenKind::Vector
-            | TokenKind::By
-            | TokenKind::Count
-            | TokenKind::Clear
-            | TokenKind::Field
-            | TokenKind::Into
-    )
-}
-
-fn is_contextual_identifier(kind: TokenKind) -> bool {
-    matches!(
-        kind,
-        TokenKind::Offset
-            | TokenKind::Score
-            | TokenKind::Threshold
-            | TokenKind::Lookup
-            | TokenKind::Id
-            | TokenKind::Dense
-            | TokenKind::Sparse
-            | TokenKind::Vector
-            | TokenKind::Count
-            | TokenKind::Clear
-            | TokenKind::Field
-            | TokenKind::Into
-    )
+    kind.is_keyword_or_identifier()
 }
 
 impl Parser {
@@ -262,10 +229,7 @@ impl<'a> AstLowerer<'a> {
 
     pub fn parse_identifier_str(&mut self) -> Result<&'a str, QqlError> {
         let tok = self.peek()?;
-        if tok.kind == TokenKind::Identifier
-            || tok.kind == TokenKind::String
-            || is_contextual_identifier(tok.kind)
-        {
+        if tok.is_keyword_or_identifier() || tok.kind == TokenKind::String {
             self.advance()?;
             Ok(tok.text)
         } else {
@@ -299,6 +263,15 @@ impl<'a> AstLowerer<'a> {
                         tok.span,
                     )
                 })?;
+                // grammar.pest `float` can only denote finite values; an
+                // exponent overflow like `1e999` must not become inf/NaN.
+                if !v.is_finite() {
+                    return Err(QqlError::parse(
+                        "QQL-PARSE-FLOAT",
+                        alloc::format!("float literal '{}' is not finite", tok.text),
+                        tok.span,
+                    ));
+                }
                 Ok(crate::ast::Value::Float(v))
             }
             TokenKind::Integer => {
@@ -316,7 +289,15 @@ impl<'a> AstLowerer<'a> {
                 self.advance()?;
                 Ok(crate::ast::Value::Null)
             }
-            TokenKind::Identifier => {
+            TokenKind::True => {
+                self.advance()?;
+                Ok(crate::ast::Value::Bool(true))
+            }
+            TokenKind::False => {
+                self.advance()?;
+                Ok(crate::ast::Value::Bool(false))
+            }
+            kind if kind.is_keyword_or_identifier() => {
                 self.advance()?;
                 if ascii_equal(tok.text, "TRUE") {
                     Ok(crate::ast::Value::Bool(true))
@@ -341,14 +322,21 @@ impl<'a> AstLowerer<'a> {
     }
 
     fn decode_string(&self, token: Token<'a>) -> Result<String, QqlError> {
-        let first_byte = self
-            .input
-            .as_bytes()
-            .get(token.span.start)
-            .copied()
-            .unwrap_or(0);
+        let input = self.input.as_bytes();
+        let start = token.span.start;
+        let end = token.span.end;
+        let first_byte = input.get(start).copied().unwrap_or(0);
         let is_raw_or_backtick = first_byte == b'r' || first_byte == b'`';
+        // Triple-quoted strings preserve their contents verbatim: no escape
+        // decoding and no SQL-style `''` folding. Detect them from the full
+        // source span — a token is triple-quoted only when it starts and ends
+        // with the same `'''` / `"""` delimiter and spans at least both
+        // delimiters (the SQL-escaped `''''` four-quote form is only 4 bytes).
+        let triple_quoted = end >= start + 6
+            && (input[start..start + 3] == b"'''"[..] || input[start..start + 3] == b"\"\"\""[..])
+            && input[start..start + 3] == input[end - 3..end];
         if is_raw_or_backtick
+            || triple_quoted
             || !(token.text.contains('\\') || first_byte == b'\'' && token.text.contains("''"))
         {
             return Ok(token.text.to_string());

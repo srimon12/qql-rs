@@ -1,7 +1,11 @@
 /**
  * Medium → Expert (WASM) — multi-tenant gateway.
+ *
+ * Uses the checked-in Node build of the qql-wasm crate
+ * (`crates/qql-wasm/pkg-node`, auto-instantiated — no `init()` needed).
+ * Run: node examples/wasm/medium_to_expert.js
  */
-import init, { isValid, explain, analyze, Stmt, Client } from '../../demo/pkg/qql_wasm.js';
+const { isValid, explain, analyze, Stmt, Client } = require('../../crates/qql-wasm/pkg-node/qql_wasm.js');
 
 const USERS = {
   alice: { tenant: 'edge-a', role: 'admin' },
@@ -17,42 +21,47 @@ function secure(query, user) {
   return stmt;
 }
 
-await init();
+async function run() {
+  const raw = `
+    QUERY TEXT 'wasm edge retrieval'
+    FROM edge_docs
+    USING HYBRID DENSE dense SPARSE sparse FUSION RRF
+    LIMIT 10
+  `;
 
-const raw = `
-  QUERY TEXT 'wasm edge retrieval'
-  FROM edge_docs
-  USING HYBRID DENSE dense SPARSE sparse FUSION RRF
-  LIMIT 10
-`;
+  console.log('isValid:', isValid(raw));
+  console.log('explain:\n' + explain(raw));
 
-console.log('isValid:', isValid(raw));
-console.log('explain:\n' + explain(raw));
+  const secured = secure(raw, 'bob');
+  console.log('secured shardKey:', secured.shardKey);
 
-const secured = secure(raw, 'bob');
-console.log('secured shardKey:', secured.shardKey);
+  const literal = new Stmt(`
+    QUERY TEXT 'wasm edge retrieval'
+    FROM edge_docs
+    USING HYBRID DENSE dense SPARSE sparse FUSION RRF
+    SHARD 'edge-a'
+    LIMIT 10
+  `);
+  console.log('SHARD in QQL →', literal.shardKey);
 
-const literal = new Stmt(`
-  QUERY TEXT 'wasm edge retrieval'
-  FROM edge_docs
-  USING HYBRID DENSE dense SPARSE sparse FUSION RRF
-  SHARD 'edge-a'
-  LIMIT 10
-`);
-console.log('SHARD in QQL →', literal.shardKey);
+  const routes = analyze(raw).routes ?? [];
+  console.log('analyze routes:', routes.length);
 
-console.log('analyze routes:', analyze(raw).routes?.length ?? 0);
-
-const live =
-  typeof location !== 'undefined' && new URLSearchParams(location.search).has('live');
-if (live) {
-  const client = new Client('http://localhost:6333', null);
-  client.setHttpEmbedder('http://localhost:11434/v1/embeddings', 'all-minilm:l6-v2', 384, null);
-  try {
-    console.log(await client.executeStmt(secured));
-  } catch (e) {
-    console.warn(e);
+  // Live execution is opt-in: QDRANT_URL must point at a running Qdrant.
+  if (process.env.QDRANT_URL) {
+    const client = new Client(process.env.QDRANT_URL, null);
+    client.setHttpEmbedder('http://localhost:11434/v1/embeddings', 'all-minilm:l6-v2', 384, null);
+    try {
+      console.log(await client.executeStmt(secured));
+    } catch (e) {
+      console.warn(e);
+    }
+  } else {
+    console.log('Offline complete. Set QDRANT_URL for live execute.');
   }
-} else {
-  console.log('Offline complete. Append ?live for execute.');
 }
+
+run().catch((e) => {
+  console.error(e);
+  process.exitCode = 1;
+});

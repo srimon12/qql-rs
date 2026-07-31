@@ -102,15 +102,27 @@ impl EdgeQdrant {
         self.base_path.join(name)
     }
 
-    /// Open (or create) the shard for `collection`.
+    /// Open an existing shard for `collection`. Never creates the collection:
+    /// reads and mutations against a missing collection return
+    /// `QQL-EDGE-COLLECTION-NOT-FOUND` instead of materialising a ghost
+    /// collection, matching the remote backends' 404 semantics.
     async fn open_shard(&self, name: &str) -> Result<Arc<EdgeShard>, QqlError> {
-        self.open_shard_with_req(name, None).await
+        self.open_shard_inner(name, None, false).await
     }
 
     async fn open_shard_with_req(
         &self,
         name: &str,
         req: Option<&CreateCollectionRequest>,
+    ) -> Result<Arc<EdgeShard>, QqlError> {
+        self.open_shard_inner(name, req, true).await
+    }
+
+    async fn open_shard_inner(
+        &self,
+        name: &str,
+        req: Option<&CreateCollectionRequest>,
+        create: bool,
     ) -> Result<Arc<EdgeShard>, QqlError> {
         {
             let shards = self.shards.read().await;
@@ -137,11 +149,12 @@ impl EdgeQdrant {
 
         let path = self.collection_path(name);
         let on_disk = self.on_disk_payload;
+        let collection = name.to_string();
         let config_res = req.map(|r| build_edge_config(r, on_disk));
         let shard = tokio::task::spawn_blocking(move || -> Result<EdgeShard, QqlError> {
             if path.join("segments").exists() {
                 EdgeShard::load(&path, None).map_err(edge_err)
-            } else {
+            } else if create {
                 std::fs::create_dir_all(&path).map_err(|e| {
                     QqlError::execution(
                         "QQL-EDGE-CREATE-DIR",
@@ -156,6 +169,15 @@ impl EdgeQdrant {
                 };
 
                 EdgeShard::new(&path, config).map_err(edge_err)
+            } else {
+                Err(QqlError::execution(
+                    "QQL-EDGE-COLLECTION-NOT-FOUND",
+                    format!(
+                        "collection '{collection}' does not exist; create it first with CREATE COLLECTION (or an embedding UPSERT auto-creates it)"
+                    ),
+                    None,
+                )
+                .with_collection(collection))
             }
         })
         .await
@@ -199,7 +221,7 @@ impl EdgeQdrant {
         collection: &str,
         req: &qql_plan::types::PointsRequest,
     ) -> Result<Value, QqlError> {
-        reject_shard(req.shard_key.as_deref())?;
+        reject_shard_key(req.shard_key.as_deref())?;
         let shard = self.open_shard(collection).await?;
         let ids = to_edge_ids(req.ids.iter())?;
         let with_payload = req
@@ -223,7 +245,9 @@ impl EdgeQdrant {
         .map_err(|e| spawn_error("get_points", e))??;
 
         Ok(serde_json::json!({
-            "result": records.into_iter().map(from_edge_record).collect::<Vec<_>>(),
+            "result": {
+                "points": records.into_iter().map(from_edge_record).collect::<Vec<_>>()
+            },
             "status": "ok",
             "time": 0.0,
         }))
@@ -234,7 +258,7 @@ impl EdgeQdrant {
         collection: &str,
         req: &qql_plan::types::ScrollRequest,
     ) -> Result<Value, QqlError> {
-        reject_shard(req.shard_key.as_deref())?;
+        reject_shard_key(req.shard_key.as_deref())?;
         let shard = self.open_shard(collection).await?;
 
         let offset = match req.offset.as_ref() {
@@ -292,7 +316,7 @@ impl EdgeQdrant {
         collection: &str,
         req: &qql_plan::types::UpsertRequest,
     ) -> Result<Value, QqlError> {
-        reject_shard(req.shard_key.as_deref())?;
+        reject_shard_key(req.shard_key.as_deref())?;
         let shard = self.open_shard(collection).await?;
         let collection_name = collection.to_string();
 
@@ -334,7 +358,7 @@ impl EdgeQdrant {
         collection: &str,
         req: &qql_plan::types::DeleteRequest,
     ) -> Result<Value, QqlError> {
-        reject_shard(req.shard_key.as_deref())?;
+        reject_shard_key(req.shard_key.as_deref())?;
         let shard = self.open_shard(collection).await?;
 
         let operation = if let Some(points) = &req.points {
@@ -371,7 +395,7 @@ impl EdgeQdrant {
         collection: &str,
         req: &qql_plan::types::ClearPayloadRequest,
     ) -> Result<Value, QqlError> {
-        reject_shard(req.shard_key.as_deref())?;
+        reject_shard_key(req.shard_key.as_deref())?;
         let shard = self.open_shard(collection).await?;
 
         let operation = if let Some(points) = &req.points {
@@ -409,7 +433,7 @@ impl EdgeQdrant {
         collection: &str,
         req: &qql_plan::types::DeletePayloadRequest,
     ) -> Result<Value, QqlError> {
-        reject_shard(req.shard_key.as_deref())?;
+        reject_shard_key(req.shard_key.as_deref())?;
         let shard = self.open_shard(collection).await?;
 
         let points = req
@@ -453,7 +477,7 @@ impl EdgeQdrant {
         collection: &str,
         req: &qql_plan::types::DeleteVectorRequest,
     ) -> Result<Value, QqlError> {
-        reject_shard(req.shard_key.as_deref())?;
+        reject_shard_key(req.shard_key.as_deref())?;
         let shard = self.open_shard(collection).await?;
         let vector_names: Vec<String> = req.vector.clone();
 
@@ -496,7 +520,7 @@ impl EdgeQdrant {
         collection: &str,
         req: &qql_plan::types::UpdateVectorRequest,
     ) -> Result<Value, QqlError> {
-        reject_shard(req.shard_key.as_deref())?;
+        reject_shard_key(req.shard_key.as_deref())?;
         let shard = self.open_shard(collection).await?;
 
         let mut pvps = Vec::with_capacity(req.points.len());
@@ -528,7 +552,7 @@ impl EdgeQdrant {
         collection: &str,
         req: &qql_plan::types::UpdatePayloadRequest,
     ) -> Result<Value, QqlError> {
-        reject_shard(req.shard_key.as_deref())?;
+        reject_shard_key(req.shard_key.as_deref())?;
         let shard = self.open_shard(collection).await?;
         let payload = qdrant_edge::Payload(req.payload.clone().into_iter().collect());
 
@@ -579,7 +603,7 @@ impl EdgeQdrant {
         collection: &str,
         req: &qql_plan::types::CountRequest,
     ) -> Result<Value, QqlError> {
-        reject_shard(req.shard_key.as_deref())?;
+        reject_shard_key(req.shard_key.as_deref())?;
         let shard = self.open_shard(collection).await?;
         let filter = convert_edge_filter(req.filter.as_ref())?;
         let count_req = qdrant_edge::CountRequest {
@@ -855,7 +879,7 @@ impl QdrantOps for EdgeQdrant {
     }
 
     async fn execute_planned(&self, op: &qql_plan::PlannedOperation) -> Result<Value, QqlError> {
-        reject_shard(op.shard_key())?;
+        reject_shard_key(op.shard_key())?;
         use qql_plan::PlannedOperation::*;
         match op {
             Query {
@@ -980,7 +1004,7 @@ impl QdrantOps for EdgeQdrant {
         batch: &QueryBatchRequest,
     ) -> Result<Vec<serde_json::Value>, QqlError> {
         for request in &batch.searches {
-            reject_shard(request.shard_key.as_deref())?;
+            reject_shard_key(request.shard_key.as_deref())?;
         }
         let mut results = Vec::with_capacity(batch.searches.len());
         for req in &batch.searches {
@@ -1031,10 +1055,6 @@ impl QdrantOps for EdgeQdrant {
         }
         Ok(results)
     }
-}
-
-fn reject_shard(shard_key: Option<&str>) -> Result<(), QqlError> {
-    reject_shard_key(shard_key)
 }
 
 fn edge_vectors_json(vectors: &[qql::backend::VectorSpec]) -> Result<Value, QqlError> {
@@ -1096,7 +1116,9 @@ fn edge_sparse_vectors_json(vectors: &[qql::backend::SparseVectorSpec]) -> Value
 /// Bare condition objects (`{"key": ...}`) are wrapped as `{"must": [...]}`
 /// so they match the Filter schema. Conversion failures return an error —
 /// previously COUNT/DELETE silently dropped malformed filters via `.ok()`.
-fn convert_edge_filter(
+/// This is the single JSON→`qdrant_edge::Filter` converter: query, scroll,
+/// count, and mutation paths all go through it.
+pub(crate) fn convert_edge_filter(
     filter: Option<&impl serde::Serialize>,
 ) -> Result<Option<qdrant_edge::Filter>, QqlError> {
     let Some(filter) = filter else {

@@ -20,6 +20,10 @@ if ($Arch -eq "AMD64" -or $Arch -eq "x64") {
 $Target = "$TargetArch-pc-windows-msvc"
 Write-Host "✨ Target platform: $Target" -ForegroundColor Cyan
 
+if ($Target -ne "x86_64-pc-windows-msvc") {
+    Write-Error "❌ Pre-built Windows binaries are currently published for x86_64-pc-windows-msvc only. For $Target, build from source using: cargo install qql-cli --locked"
+}
+
 $Version = $env:QQL_VERSION
 if ([string]::IsNullOrEmpty($Version)) {
     Write-Host "📡 Fetching latest release version..." -ForegroundColor Cyan
@@ -27,7 +31,7 @@ if ([string]::IsNullOrEmpty($Version)) {
         $Release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest"
         $Version = $Release.tag_name
     } catch {
-        $Version = "v0.1.2"
+        $Version = "v0.2.0"
     }
 }
 

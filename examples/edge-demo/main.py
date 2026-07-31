@@ -8,8 +8,8 @@ Showcases qdrant-edge: zero-network, in-process HNSW vector database.
 No Qdrant server required. Embeddings via fastembed (local ONNX) or Ollama.
 
 Requirements:
-    cargo build --release -p qql-cli
-    # (default features include edge + fastembed)
+    cargo build --release -p qql-cli --features edge
+    # (edge is opt-in — the CLI default features are rest + grpc only)
 
 Usage:
     python main.py                          # fastembed (local ONNX, no network)
@@ -31,11 +31,23 @@ COL = "edge_docs"
 DRY_RUN = "--dry-run" in sys.argv
 
 
-def edge(stmt: str) -> dict:
-    cmd = [QQL, "edge", stmt, "--json", "--data-dir", DATA_DIR, "--embedder", EMBEDDER]
+def setup_edge():
+    if DRY_RUN:
+        return
+    cfg_cmd = [QQL, "config", "edge", "--data-dir", DATA_DIR, "--embedder", EMBEDDER]
     if EMBEDDER == "http":
-        cmd += ["--embed-url", EMBED_URL, "--embed-key", EMBED_KEY,
-                "--embed-model", EMBED_MODEL, "--embed-dim", str(EMBED_DIM)]
+        cfg_cmd += ["--embed-url", EMBED_URL, "--embed-key", EMBED_KEY,
+                    "--embed-model", EMBED_MODEL, "--embed-dim", str(EMBED_DIM)]
+    r = subprocess.run(cfg_cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        msg = r.stderr.strip()
+        if "unrecognized" in msg.lower() or "subcommand" in msg.lower():
+            raise RuntimeError("qql config edge not supported. Rebuild with --features edge: cargo build --release -p qql-cli --features edge")
+        raise RuntimeError(f"Failed to configure edge: {msg}")
+
+
+def edge(stmt: str) -> dict:
+    cmd = [QQL, "--edge", "exec", stmt, "--json"]
     if DRY_RUN:
         print(f"    {stmt[:100]}{'...' if len(stmt)>100 else ''}")
         return {"ok": True}
@@ -43,8 +55,8 @@ def edge(stmt: str) -> dict:
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     if not r.stdout.strip():
         msg = r.stderr.strip()
-        if "subcommand" in (msg or "").lower() or "unrecognized" in (msg or "").lower():
-            raise RuntimeError("Edge not in this binary. Rebuild: cargo build --release -p qql-cli")
+        if "features edge" in (msg or "").lower() or "disabled" in (msg or "").lower() or "unrecognized" in (msg or "").lower():
+            raise RuntimeError("Edge feature not enabled in qql binary. Build with: cargo build --release -p qql-cli --features edge")
         raise RuntimeError(msg or f"exit {r.returncode}")
     d = json.loads(r.stdout)
     if not d.get("ok"):
@@ -86,6 +98,8 @@ def main():
     if DRY_RUN:
         print(f"  Mode: dry-run (parsing only)")
     print(f"{'='*50}")
+
+    setup_edge()
 
     # ── 1. Schema ──
     section("1. Schema")
@@ -138,9 +152,9 @@ def main():
     # ── 6. Recommend ──
     section("6. Recommend")
     step("Single positive (id=1)",
-         f"QUERY RECOMMEND POSITIVE (1) STRATEGY average_vector FROM {COL} USING dense LIMIT 3")
+         f"QUERY RECOMMEND POSITIVE (1) STRATEGY best_score FROM {COL} USING dense LIMIT 3")
     step("Positive + negative",
-         f"QUERY RECOMMEND POSITIVE (3) NEGATIVE (2) STRATEGY average_vector FROM {COL} USING dense LIMIT 3")
+         f"QUERY RECOMMEND POSITIVE (3) NEGATIVE (2) STRATEGY best_score FROM {COL} USING dense LIMIT 3")
 
     # ── 7. Point Access ──
     section("7. Point Access")

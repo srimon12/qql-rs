@@ -505,12 +505,10 @@ impl<'a> AstLowerer<'a> {
         self.expect(TokenKind::Rparen)?;
         self.expect(TokenKind::Strategy)?;
         self.expect_word("NAIVE")?;
-        let values = self.parse_config_block()?;
-        let strategy = FeedbackStrategy {
-            a: required_number(&values, "a")?,
-            b: required_number(&values, "b")?,
-            c: required_number(&values, "c")?,
-        };
+        // Grammar `feedback`: STRATEGY NAIVE (a = number, b = number, c = number)
+        // in fixed order with exactly three parameters. The runtime previously
+        // parsed a generic config block and accepted any order/extra keys.
+        let strategy = self.parse_feedback_strategy()?;
         Ok(QueryExpr::RelevanceFeedback {
             target,
             feedback,
@@ -518,6 +516,52 @@ impl<'a> AstLowerer<'a> {
             using: None,
             prefetch: Vec::new(),
         })
+    }
+
+    fn parse_feedback_strategy(&mut self) -> Result<FeedbackStrategy, QqlError> {
+        self.expect(TokenKind::Lparen)?;
+        let a = self.parse_feedback_param("A")?;
+        self.feedback_separator()?;
+        let b = self.parse_feedback_param("B")?;
+        self.feedback_separator()?;
+        let c = self.parse_feedback_param("C")?;
+        if self.peek()?.kind == TokenKind::Comma {
+            return Err(QqlError::parse(
+                "QQL-PARSE-FEEDBACK-STRATEGY",
+                "feedback strategy accepts exactly three parameters (a, b, c) in order",
+                self.peek()?.span,
+            ));
+        }
+        self.expect(TokenKind::Rparen)?;
+        Ok(FeedbackStrategy { a, b, c })
+    }
+
+    fn feedback_separator(&mut self) -> Result<(), QqlError> {
+        let tok = self.peek()?;
+        if tok.kind == TokenKind::Comma {
+            self.advance()?;
+            Ok(())
+        } else {
+            Err(QqlError::parse(
+                "QQL-PARSE-FEEDBACK-STRATEGY",
+                "feedback strategy expects exactly three parameters (a, b, c) in order",
+                tok.span,
+            ))
+        }
+    }
+
+    fn parse_feedback_param(&mut self, name: &str) -> Result<f64, QqlError> {
+        let key = self.peek()?;
+        if !(key.is_keyword_or_identifier() && ascii_equal(key.text, name)) {
+            return Err(QqlError::parse(
+                "QQL-PARSE-FEEDBACK-STRATEGY",
+                alloc::format!("feedback strategy expects '{name}' here (order: a, b, c)"),
+                key.span,
+            ));
+        }
+        self.advance()?;
+        self.expect(TokenKind::Equals)?;
+        self.parse_numeric_literal()
     }
 
     fn parse_mmr(&mut self) -> Result<QueryExpr, QqlError> {
@@ -638,14 +682,26 @@ impl<'a> AstLowerer<'a> {
 
     fn parse_rerank(&mut self) -> Result<QueryExpr, QqlError> {
         self.expect(TokenKind::Rerank)?;
+        // `rerank_input` in grammar.pest is strictly TEXT | VECTOR | POINT;
+        // a bare string (and IMAGE) are query inputs, not rerank inputs.
         let input = if self.peek_word("TEXT")? {
             self.advance()?;
             QueryInput::Text {
                 text: self.parse_string()?,
                 model: None,
             }
+        } else if self.peek()?.kind == TokenKind::Vector {
+            self.advance()?;
+            self.parse_vector_value().map(QueryInput::Vector)?
+        } else if self.peek_word("POINT")? {
+            self.advance()?;
+            self.parse_point_id("POINT").map(QueryInput::Point)?
         } else {
-            self.parse_query_input()?
+            return Err(QqlError::parse(
+                "QQL-PARSE-RERANK",
+                "RERANK input requires TEXT '…', VECTOR […], or POINT <id>",
+                self.peek()?.span,
+            ));
         };
         let model = self.parse_required_model_string()?;
         Ok(QueryExpr::Rerank {
@@ -732,10 +788,7 @@ impl<'a> AstLowerer<'a> {
 
     fn peek_word(&mut self, word: &str) -> Result<bool, QqlError> {
         let token = self.peek()?;
-        Ok(
-            (token.kind == TokenKind::Identifier || token.kind == TokenKind::String)
-                && ascii_equal(token.text, word),
-        )
+        Ok(token.kind.is_keyword_or_identifier() && ascii_equal(token.text, word))
     }
 
     fn expect_word(&mut self, word: &str) -> Result<(), QqlError> {
@@ -1004,22 +1057,4 @@ fn validate_common_clauses(
         ));
     }
     Ok(())
-}
-
-fn required_number(values: &[(String, crate::ast::Value)], key: &str) -> Result<f64, QqlError> {
-    values
-        .iter()
-        .find(|(candidate, _)| candidate.eq_ignore_ascii_case(key))
-        .and_then(|(_, value)| match value {
-            crate::ast::Value::Int(value) => Some(*value as f64),
-            crate::ast::Value::Float(value) => Some(*value),
-            _ => None,
-        })
-        .ok_or_else(|| {
-            QqlError::validation(
-                "QQL-VALIDATION-FEEDBACK-STRATEGY",
-                alloc::format!("feedback strategy requires numeric '{}'", key),
-                None,
-            )
-        })
 }

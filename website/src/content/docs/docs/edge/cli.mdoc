@@ -1,0 +1,142 @@
+---
+title: "CLI reference"
+description: "The global qql --edge flag, the qql config edge subcommand, environment variables, and edge doctor output."
+sidebar:
+  order: 2
+---
+
+The CLI exposes the edge backend through a global `--edge` flag plus a
+dedicated `qql config edge` configuration subcommand. Edge must be compiled in
+first — see [getting started](/docs/edge/getting-started/).
+
+## Global `--edge` flag
+
+`--edge` is a global flag, not a subcommand. Add it to any execution-facing
+command to route it to the in-process backend instead of `QDRANT_URL`:
+
+| Command | Remote form | Edge form |
+|---|---|---|
+| Run one statement or script | `qql exec "…"` | `qql --edge exec "…"` |
+| Run a `.qql` file | `qql execute file.qql` | `qql --edge execute file.qql` |
+| Interactive REPL | `qql connect` | `qql --edge connect` |
+| Export a collection | `qql dump docs out.qql` | `qql --edge dump docs out.qql` |
+| Health check | `qql doctor` | `qql --edge doctor` |
+
+{% terminal title="Edge examples" %}
+qql --edge exec "SHOW COLLECTIONS"
+qql --edge exec "QUERY TEXT 'hello' FROM docs USING dense LIMIT 5"
+qql --edge execute first-local.qql
+qql --edge dump docs backup.qql
+qql --edge connect
+{% /terminal %}
+
+`qql explain` needs no backend and therefore no `--edge` flag — planning is
+identical for remote and edge backends.
+
+## `qql config edge`
+
+`qql config edge` writes `<config-dir>/edge.json` (default config directory is
+`~/.qql`, file written with `0600` permissions). After saving it prints:
+
+```text
+Saved edge configuration to /home/you/.qql/edge.json
+Use it with: qql --edge exec "SHOW COLLECTIONS"
+```
+
+### Storage flags
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--data-dir <dir>` | `~/.qql/edge-data` | Directory for persistent qdrant-edge data |
+| `--in-memory` | off | Keep payloads in memory instead of persisting them to disk (sets `on_disk_payload=false`) |
+
+### Embedding model flags (fastembed)
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--embedder fastembed\|http` | `fastembed` | Local ONNX inference or an OpenAI-compatible endpoint |
+| `--model <name>` | `BGESmallENV15` (384-d) | Dense model name or alias |
+| `--sparse-model <name>` | local BM25 hash | Offline sparse model (`splade`, `bge-m3`) |
+| `--multi-model <name>` | none | Offline multivector / ColBERT model (`bge-m3`) |
+| `--image-model <name>` | none | Offline CLIP vision model (`clip-vision`) |
+| `--reranker-model <name>` | none | Offline cross-encoder (`bge-reranker-base`) |
+| `--cache-dir <dir>` | fastembed default | Directory for downloaded models |
+| `--show-download-progress` | off | Show Hugging Face download progress bars |
+
+### HTTP embedder flags
+
+These apply when `--embedder http` is selected. Storage and search stay
+local; only embeddings go over the network.
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--embed-url <url>` | none (required for `http`) | OpenAI-compatible embedding endpoint |
+| `--embed-key <key>` | empty | Bearer token (`EMBED_KEY`) |
+| `--embed-model <name>` | `nomic-embed-text` | Model name sent in the request body |
+| `--embed-dim <n>` | `768` | Expected output dimension |
+| `--multi-embed-url / --multi-embed-key / --multi-embed-model / --multi-embed-dim` | none | Optional multi/ColBERT endpoint (dim 0 skips the dimension check) |
+| `--image-embed-url / --image-embed-key / --image-embed-model / --image-embed-dim` | none | Optional image/CLIP endpoint (dim 0 uses the dense dimension) |
+
+Validation rules: `--embedder` must be `fastembed` or `http`; `http` requires
+`--embed-url`; and `--embed-dim` must be greater than zero.
+
+## Environment variables
+
+Every `qql config edge` setting can be overridden per invocation via
+environment. Edge-specific variables start with `QQL_EDGE_`; the HTTP
+embedder reuses the same variables as remote execution.
+
+| Variable | Overrides | Notes |
+|---|---|---|
+| `QQL_EDGE_DATA_DIR` | `--data-dir` | Data directory for qdrant-edge storage |
+| `QQL_EDGE_EMBEDDER` | `--embedder` | `fastembed` or `http` |
+| `QQL_EDGE_MODEL` | `--model` | Dense model name or alias |
+| `QQL_EDGE_SPARSE_MODEL` | `--sparse-model` | Offline sparse model |
+| `QQL_EDGE_MULTI_MODEL` | `--multi-model` | Offline multi/ColBERT model |
+| `QQL_EDGE_IMAGE_MODEL` | `--image-model` | Offline CLIP vision model |
+| `QQL_EDGE_RERANKER_MODEL` | `--reranker-model` | Also falls back to `RERANK_MODEL` |
+| `QQL_EDGE_CACHE_DIR` | `--cache-dir` | Model download cache directory |
+| `QQL_EDGE_ON_DISK` | `--in-memory` | `true`/`false`/`1`/`0` — payloads on disk |
+| `EMBED_URL` | `--embed-url` | HTTP embedding endpoint |
+| `EMBED_KEY` | `--embed-key` | Bearer token |
+| `EMBED_MODEL` | `--embed-model` | Model name |
+| `EMBED_DIM` | `--embed-dim` | Output dimension (integer) |
+| `MULTI_EMBED_URL` / `MULTI_EMBED_KEY` / `MULTI_EMBED_MODEL` / `MULTI_EMBED_DIM` | `--multi-embed-*` | Multi/ColBERT endpoint |
+| `IMAGE_EMBED_URL` / `IMAGE_EMBED_KEY` / `IMAGE_EMBED_MODEL` / `IMAGE_EMBED_DIM` | `--image-embed-*` | Image/CLIP endpoint |
+
+{% terminal title="One-shot edge override" %}
+QQL_EDGE_DATA_DIR=/tmp/ephemeral QQL_EDGE_MODEL=all-minilm-l6-v2 \
+  qql --edge exec "QUERY TEXT 'hi' FROM docs USING dense LIMIT 3"
+{% /terminal %}
+
+## Edge doctor output
+
+`qql --edge doctor` performs a real edge init (config load, model resolution,
+shard open) and then runs `SHOW COLLECTIONS` against it. It prints a summary
+of which embedding slots are configured and actionable hints:
+
+```text
+Connected to the local edge backend (healthy)
+Hosts: dense=true multi=false image=false cross_rerank=false
+  dense_model: BGESmallENV15
+  hint: ColBERT / AS MULTI / multivector RERANK needs multi_model or multi_embedding_* config
+  hint: IMAGE / CLIP vision needs image_model or image_embedding_* config
+  hint: CROSS RERANK needs reranker_model or rerank_endpoint / rerank_model
+  hint: edge has no GROUP BY, SHARD keys, ALTER COLLECTION, or ACORN
+```
+
+The hints are guidance, not failures — the backend is healthy. If a configured
+model cannot be loaded (for example an unknown name), doctor reports the init
+error instead. The JSON form is available via `qql --edge doctor --json`, which
+emits `backend`, `dense`/`multi`/`image`/`cross_rerank` booleans, the resolved
+model names, and the `hints` array.
+
+## Config file location and permissions
+
+- File: `<config-dir>/edge.json` where the config dir is `~/.qql`
+- Permissions: `0600` on Unix (contains embedding API keys when using the HTTP
+  embedder)
+- Default data dir: `<config-dir>/edge-data`
+
+For what happens inside the data directory, see
+[persistence](/docs/edge/persistence/).

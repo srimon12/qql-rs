@@ -5,8 +5,10 @@
 
 // QQL 1.0 canonical syntax grammar.
 //
-// This file is the source of truth for lexical and syntactic acceptance.
-// qql-core compiles a generated copy of this PEG with pest. Semantic and
+// This file is the source of truth for lexical and syntactic acceptance. The
+// reference parser is a hand-written lexer + recursive-descent AST lowerer in
+// qql-core, kept aligned by qql-grammar-gen and the conformance suite. pest is
+// not a runtime dependency; qql-core never compiles this grammar. Semantic and
 // schema-dependent rules remain in qql-plan and language/v1/spec/semantics.md.
 
 WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
@@ -77,7 +79,7 @@ hybrid_using = {
 vector_target = { vector_name ~ (^"AS" ~ vector_kind)? }
 // MULTI / MULTIVECTOR mark a dense multivector target (ColBERT-style).
 // Role is still dense; multi is a shape flag, not a third sparse/dense kind.
-vector_kind = { ^"DENSE" | ^"SPARSE" | ^"MULTI" | ^"MULTIVECTOR" }
+vector_kind = { ^"DENSE" | ^"SPARSE" | ^"MULTIVECTOR" | ^"MULTI" }
 
 group_clause = {
     ^"GROUP" ~ ^"BY" ~ field
@@ -300,8 +302,18 @@ count = {
     ^"COUNT" ~ ^"FROM" ~ collection
     ~ (^"WHERE" ~ filter)?
     ~ (^"SHARD" ~ string)?
-    ~ (^"WITH" ~ config_block)?
+    ~ (^"WITH" ~ count_config)?
 }
+
+// COUNT config is exactly `exact = true|false` (strict reference-parser
+// contract F-14: unknown keys and non-boolean values are rejected with
+// QQL-PARSE-COUNT-CONFIG). `^"exact"` reuses the keyword literal already
+// declared by `search_param`, so no new keyword tables are generated. Quoted
+// keys are accepted so grammar and reference parser agree on string config
+// keys; unknown quoted keys are still rejected at runtime.
+count_config = { "(" ~ count_config_entry ~ ("," ~ count_config_entry)* ~ ")" }
+count_config_entry = { count_config_key ~ "=" ~ boolean }
+count_config_key = { ^"exact" | string }
 
 upsert = {
     ^"UPSERT" ~ ^"INTO" ~ collection ~ ^"VALUES"
@@ -319,7 +331,9 @@ single_embedding_spec = _{
     ^"HYBRID"
       ~ (^"DENSE" ~ spec_modifier*)?
       ~ (^"SPARSE" ~ spec_modifier*)?
-    | (^"DENSE" | ^"SPARSE") ~ spec_modifier*
+    // `^"MULTIVECTOR"` must precede `^"MULTI"`: pest literals match prefixes,
+    // so `MULTIVECTOR` would otherwise be read as `MULTI` + `VECTOR` modifier.
+    | (^"DENSE" | ^"SPARSE" | ^"MULTIVECTOR" | ^"MULTI" | ^"IMAGE") ~ spec_modifier*
     | spec_modifier+
 }
 
@@ -330,12 +344,17 @@ spec_modifier = _{
 }
 
 embed_clause = { ^"EMBED" ~ embed_directive ~ ("," ~ embed_directive)* }
+// Per-field embedding at UPSERT time. `single_embedding_spec` already accepts
+// MULTI / MULTIVECTOR / IMAGE beside DENSE / SPARSE; the directive's USING form
+// mirrors that set so spec and reference parser agree on all five kinds.
 embed_directive = {
     field ~ ^"INTO" ~ vector_name
     ~ (
         ^"USING"
         ~ (
-            (^"DENSE" | ^"SPARSE") ~ (^"MODEL" ~ string)?
+            // `^"MULTIVECTOR"` before `^"MULTI"` (pest literals match prefixes).
+            (^"DENSE" | ^"SPARSE" | ^"MULTIVECTOR" | ^"MULTI" | ^"IMAGE")
+                ~ (^"MODEL" ~ string)?
             | ^"MODEL" ~ string
         )
     )?
@@ -360,7 +379,7 @@ clear_payload = {
 }
 delete_payload = {
     ^"DELETE" ~ ^"PAYLOAD"
-    ~ field_name ~ ("," ~ field_name)*
+    ~ field ~ ("," ~ field)*
     ~ ^"FROM" ~ collection
     ~ ^"WHERE" ~ filter
     ~ (^"SHARD" ~ string)?
@@ -448,7 +467,35 @@ drop_index = {
 create_shard_key = {
     ^"CREATE" ~ ^"SHARD" ~ ^"KEY" ~ string
     ~ ^"ON" ~ ^"COLLECTION" ~ collection
-    ~ (^"WITH" ~ config_block)?
+    ~ (^"WITH" ~ shard_key_config)?
+}
+
+// CREATE SHARD KEY config is exactly `shards_number` / `replication_factor`
+// as positive integers (strict reference-parser contract F-15: unknown keys,
+// zero, negative, and non-integer values are rejected with
+// QQL-PARSE-SHARD-KEY-CONFIG). Keys are matched case-insensitively via
+// per-character alternation instead of `^"…"` literals so no new keyword
+// tables are generated; quoted keys are accepted for reference-parser
+// alignment.
+shard_key_config = { "(" ~ shard_key_config_entry ~ ("," ~ shard_key_config_entry)* ~ ")" }
+shard_key_config_entry = { shard_key_name ~ "=" ~ shard_key_config_value }
+shard_key_name = { shards_number_key | replication_factor_key | string }
+// Positive integer *value*: the literal `0` (and any literal whose numeric
+// value is 0, e.g. `00`) is rejected, while leading zeros on nonzero values
+// (`05`) remain accepted, mirroring the reference parser's value-level `> 0`
+// check.
+shard_key_config_value = @{
+    ("1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9") ~ ASCII_DIGIT*
+    | "0" ~ ASCII_DIGIT+
+}
+shards_number_key = {
+    ("s" | "S") ~ ("h" | "H") ~ ("a" | "A") ~ ("r" | "R") ~ ("d" | "D") ~ ("s" | "S")
+    ~ "_" ~ ("n" | "N") ~ ("u" | "U") ~ ("m" | "M") ~ ("b" | "B") ~ ("e" | "E") ~ ("r" | "R")
+}
+replication_factor_key = {
+    ("r" | "R") ~ ("e" | "E") ~ ("p" | "P") ~ ("l" | "L") ~ ("i" | "I") ~ ("c" | "C")
+    ~ ("a" | "A") ~ ("t" | "T") ~ ("i" | "I") ~ ("o" | "O") ~ ("n" | "N")
+    ~ "_" ~ ("f" | "F") ~ ("a" | "A") ~ ("c" | "C") ~ ("t" | "T") ~ ("o" | "O") ~ ("r" | "R")
 }
 drop_shard_key = {
     ^"DROP" ~ ^"SHARD" ~ ^"KEY" ~ string
@@ -487,8 +534,8 @@ search_param = _{
     | ^"quantization" ~ "=" ~ quantization_search
     // Request-level (REST query string / gRPC fields) — seconds, min 1
     | ^"timeout" ~ "=" ~ positive_integer
-    // ReadConsistency: integer factor N, or majority | quorum | all
-    | ^"consistency" ~ "=" ~ (positive_integer | string | ^"majority" | ^"quorum" | ^"all")
+    // ReadConsistency: non-negative integer factor N, or majority | quorum | all
+    | ^"consistency" ~ "=" ~ (non_negative_integer | ^"majority" | ^"quorum" | ^"all")
 }
 quantization_search = {
     "{"

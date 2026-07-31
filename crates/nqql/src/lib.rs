@@ -24,6 +24,14 @@ pub struct Stmt {
 
 #[napi]
 impl Stmt {
+    /// Parse a QQL string into a Stmt handle (mirrors `qql-wasm`'s
+    /// `new Stmt(query)` — see the filter-injection guide).
+    #[napi(constructor)]
+    pub fn new(input: String) -> napi::Result<Self> {
+        let inner = Parser::parse(&input).map_err(to_napi_err)?;
+        Ok(Stmt { inner })
+    }
+
     #[napi]
     pub fn inject_filter(
         &mut self,
@@ -71,8 +79,13 @@ impl Stmt {
     }
 
     #[napi(setter)]
-    pub fn set_shard_key(&mut self, key: Option<String>) {
-        let _ = self.inner.set_shard_key(key);
+    pub fn set_shard_key(&mut self, key: Option<String>) -> napi::Result<()> {
+        if !self.inner.set_shard_key(key) {
+            return Err(napi::Error::from_reason(
+                "cannot set shardKey on statement type that does not support sharding (e.g. DDL statements)",
+            ));
+        }
+        Ok(())
     }
 }
 

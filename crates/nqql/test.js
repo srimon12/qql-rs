@@ -102,6 +102,92 @@ const clientRerank = new nqql.Client({
 const rerankPlan = clientRerank.explain("QUERY 'hello' FROM docs LIMIT 10");
 assert(rerankPlan.includes("Collection: docs"));
 
+// RT-07: HttpEmbedder forwards multi/image embedder fields (camelCase + snake_case)
+const embedderMultiImage = new nqql.HttpEmbedder({
+  endpoint: "http://localhost:11434/v1/embeddings",
+  model: "nomic-embed-text",
+  dimension: 768,
+  multiEndpoint: "http://localhost:11434/multi",
+  multiApiKey: "mk",
+  multiModel: "colbert",
+  multiDimension: 256,
+  imageEndpoint: "http://localhost:11434/image",
+  imageApiKey: "ik",
+  imageModel: "clip-vit-b32",
+  imageDimension: 512,
+});
+assert.strictEqual(embedderMultiImage.multiEndpoint, "http://localhost:11434/multi");
+assert.strictEqual(embedderMultiImage.multiApiKey, "mk");
+assert.strictEqual(embedderMultiImage.multiModel, "colbert");
+assert.strictEqual(embedderMultiImage.multiDimension, 256);
+assert.strictEqual(embedderMultiImage.imageEndpoint, "http://localhost:11434/image");
+assert.strictEqual(embedderMultiImage.imageApiKey, "ik");
+assert.strictEqual(embedderMultiImage.imageModel, "clip-vit-b32");
+assert.strictEqual(embedderMultiImage.imageDimension, 512);
+assert.strictEqual(embedderMultiImage.rerankEndpoint, ""); // default empty
+
+const embedderMultiImageSnake = new nqql.HttpEmbedder({
+  endpoint: "http://localhost:11434/v1/embeddings",
+  model: "nomic-embed-text",
+  dimension: 768,
+  multi_endpoint: "http://localhost:11434/multi",
+  multi_api_key: "mk",
+  multi_model: "colbert",
+  multi_dimension: 256,
+  image_endpoint: "http://localhost:11434/image",
+  image_api_key: "ik",
+  image_model: "clip-vit-b32",
+  image_dimension: 512,
+});
+assert.strictEqual(embedderMultiImageSnake.multiEndpoint, "http://localhost:11434/multi");
+assert.strictEqual(embedderMultiImageSnake.multiApiKey, "mk");
+assert.strictEqual(embedderMultiImageSnake.multiModel, "colbert");
+assert.strictEqual(embedderMultiImageSnake.multiDimension, 256);
+assert.strictEqual(embedderMultiImageSnake.imageEndpoint, "http://localhost:11434/image");
+assert.strictEqual(embedderMultiImageSnake.imageApiKey, "ik");
+assert.strictEqual(embedderMultiImageSnake.imageModel, "clip-vit-b32");
+assert.strictEqual(embedderMultiImageSnake.imageDimension, 512);
+
+// Multi/image dimensions must be positive integers when supplied.
+assert.throws(
+  () =>
+    new nqql.HttpEmbedder({
+      endpoint: "http://x",
+      model: "m",
+      dimension: 4,
+      multiDimension: "256",
+    }),
+  /multiDimension must be a positive integer/,
+);
+assert.throws(
+  () =>
+    new nqql.HttpEmbedder({
+      endpoint: "http://x",
+      model: "m",
+      dimension: 4,
+      imageDimension: 0,
+    }),
+  /imageDimension must be a positive integer/,
+);
+assert.throws(
+  () =>
+    new nqql.HttpEmbedder({
+      endpoint: "http://x",
+      model: "m",
+      dimension: 4,
+      multiApiKey: 123,
+    }),
+  /multiApiKey must be a string/,
+);
+
+// Client construction accepts the full multi/image embedder surface.
+const clientMultiImage = new nqql.Client({
+  url: "http://localhost:6333",
+  embedder: embedderMultiImage,
+});
+const multiImagePlan = clientMultiImage.explain("QUERY 'hello' FROM docs LIMIT 10");
+assert(multiImagePlan.includes("Collection: docs"));
+
 // Invalid filter operators must never silently become equality.
 assert.throws(
   () => nqql.injectFilter(query, "tenant_id", "contains", "acme"),

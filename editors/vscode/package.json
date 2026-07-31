@@ -1,8 +1,8 @@
 {
   "name": "qql-lang",
   "displayName": "QQL — Qdrant Query Language",
-  "description": "Syntax highlighting, linting, and autocompletion for QQL 1.2 — Qdrant Query Language",
-  "version": "0.1.5",
+  "description": "Syntax highlighting, linting, and autocompletion for QQL 1.3 — Qdrant Query Language",
+  "version": "0.2.0",
   "publisher": "srimon12",
   "license": "MIT",
   "icon": "icon.png",
@@ -16,10 +16,14 @@
     "directory": "editors/vscode"
   },
   "homepage": "https://github.com/srimon12/qql-rs",
+  "bugs": {
+    "url": "https://github.com/srimon12/qql-rs/issues"
+  },
   "categories": [
     "Programming Languages",
     "Linters",
-    "Snippets"
+    "Snippets",
+    "Other"
   ],
   "keywords": [
     "qql",
@@ -27,7 +31,9 @@
     "vector-database",
     "vector-search",
     "query-language",
-    "semantic-search"
+    "semantic-search",
+    "hybrid-search",
+    "rag"
   ],
   "engines": {
     "vscode": "^1.85.0"
@@ -47,7 +53,11 @@
         "extensions": [
           ".qql"
         ],
-        "configuration": "./language-configuration.json"
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icon.png",
+          "dark": "./icon.png"
+        }
       }
     ],
     "grammars": [
@@ -55,14 +65,221 @@
         "language": "qql",
         "scopeName": "source.qql",
         "path": "./syntaxes/qql.tmLanguage.json"
+      },
+      {
+        "scopeName": "markdown.qql.codeblock",
+        "path": "./syntaxes/qql.markdown.json",
+        "injectTo": [
+          "text.html.markdown"
+        ],
+        "embeddedLanguages": {
+          "meta.embedded.block.qql": "qql"
+        }
       }
-    ]
+    ],
+    "snippets": [
+      {
+        "language": "qql",
+        "path": "./snippets/qql.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "qql.explain",
+        "title": "Explain Document / Selection",
+        "category": "QQL",
+        "icon": "$(info)"
+      },
+      {
+        "command": "qql.explainStatement",
+        "title": "Explain Statement",
+        "category": "QQL"
+      },
+      {
+        "command": "qql.compile",
+        "title": "Compile to REST Route",
+        "category": "QQL",
+        "icon": "$(json)"
+      },
+      {
+        "command": "qql.compileStatement",
+        "title": "Compile Statement to REST",
+        "category": "QQL"
+      },
+      {
+        "command": "qql.copyCurl",
+        "title": "Copy as curl",
+        "category": "QQL",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "qql.copyCurlStatement",
+        "title": "Copy Statement as curl",
+        "category": "QQL"
+      },
+      {
+        "command": "qql.showAst",
+        "title": "Show AST",
+        "category": "QQL",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "qql.analyze",
+        "title": "Re-analyze Document",
+        "category": "QQL",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "submenu": "qql.submenu",
+          "when": "resourceLangId == qql",
+          "group": "qql@1"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "qql.explain",
+          "when": "resourceLangId == qql",
+          "group": "navigation@1"
+        },
+        {
+          "command": "qql.compile",
+          "when": "resourceLangId == qql",
+          "group": "navigation@2"
+        },
+        {
+          "command": "qql.copyCurl",
+          "when": "resourceLangId == qql",
+          "group": "navigation@3"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "qql.explain",
+          "when": "resourceLangId == qql"
+        },
+        {
+          "command": "qql.compile",
+          "when": "resourceLangId == qql"
+        },
+        {
+          "command": "qql.copyCurl",
+          "when": "resourceLangId == qql"
+        },
+        {
+          "command": "qql.showAst",
+          "when": "resourceLangId == qql"
+        },
+        {
+          "command": "qql.analyze",
+          "when": "resourceLangId == qql"
+        },
+        {
+          "command": "qql.explainStatement",
+          "when": "false"
+        },
+        {
+          "command": "qql.compileStatement",
+          "when": "false"
+        },
+        {
+          "command": "qql.copyCurlStatement",
+          "when": "false"
+        }
+      ],
+      "qql.submenu": [
+        {
+          "command": "qql.explain",
+          "group": "qql@1"
+        },
+        {
+          "command": "qql.compile",
+          "group": "qql@2"
+        },
+        {
+          "command": "qql.copyCurl",
+          "group": "qql@3"
+        },
+        {
+          "command": "qql.showAst",
+          "group": "qql@4"
+        },
+        {
+          "command": "qql.analyze",
+          "group": "qql@5"
+        }
+      ]
+    },
+    "submenus": [
+      {
+        "id": "qql.submenu",
+        "label": "QQL"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "qql.explain",
+        "key": "ctrl+k ctrl+e",
+        "mac": "cmd+k cmd+e",
+        "when": "editorTextFocus && resourceLangId == qql"
+      },
+      {
+        "command": "qql.compile",
+        "key": "ctrl+k ctrl+r",
+        "mac": "cmd+k cmd+r",
+        "when": "editorTextFocus && resourceLangId == qql"
+      },
+      {
+        "command": "qql.copyCurl",
+        "key": "ctrl+k ctrl+c",
+        "mac": "cmd+k cmd+c",
+        "when": "editorTextFocus && resourceLangId == qql"
+      }
+    ],
+    "configuration": {
+      "title": "QQL",
+      "properties": {
+        "qql.diagnostics.debounceMs": {
+          "type": "number",
+          "default": 300,
+          "minimum": 50,
+          "maximum": 2000,
+          "description": "Debounce delay (ms) before re-analyzing a QQL document after edits."
+        },
+        "qql.codeLens.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Explain / REST / curl CodeLens above each top-level statement."
+        },
+        "qql.baseUrl": {
+          "type": "string",
+          "default": "http://localhost:6333",
+          "description": "Base URL used when generating curl commands for compiled REST routes."
+        }
+      }
+    },
+    "configurationDefaults": {
+      "[qql]": {
+        "editor.semanticHighlighting.enabled": false,
+        "editor.quickSuggestions": {
+          "other": true,
+          "comments": false,
+          "strings": false
+        },
+        "editor.suggest.snippetsPreventQuickSuggestions": false,
+        "editor.wordBasedSuggestions": "off",
+        "editor.tabSize": 2
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "tsc -p tsconfig.json",
-    "build": "node scripts/build.mjs",
+    "compile": "tsc -p tsconfig.json",
     "watch": "tsc --watch",
-    "lint": "eslint src --ext ts",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test",
     "package": "vsce package",
     "publish": "vsce publish"
   },
@@ -70,7 +287,6 @@
     "@types/node": "^26.1.2",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.0.0",
-    "esbuild": "^0.24.0",
     "typescript": "^5.5.0"
   }
 }

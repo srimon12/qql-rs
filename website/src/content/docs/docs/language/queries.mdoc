@@ -1,0 +1,277 @@
+---
+title: "Queries"
+description: "Choose QQL retrieval expressions for nearest, hybrid, recommendation, grouped, diverse, and staged search."
+sidebar:
+  order: 2
+---
+
+`QUERY` is the universal retrieval statement. Pick the expression that matches
+the input and result shape you need, then apply the same tail clauses for
+filters, routing, payload selection, and pagination. A top-level query always
+names its collection with `FROM`.
+
+## Start with a nearest query
+
+Use text when an embedder resolves user language at execution time. Use a
+vector when your application already generated an embedding. `QUERY POINT` uses
+a stored point as the similarity input; `QUERY POINTS` retrieves exact records
+and does not accept search clauses such as `WHERE` or `LIMIT`.
+
+{% qqlExample title="Text, vector, and stored-point input" %}
+```sql
+QUERY TEXT 'vector database'
+FROM docs
+USING dense
+LIMIT 10;
+
+QUERY VECTOR [0.1, 0.2, 0.3]
+FROM docs
+USING dense
+LIMIT 10;
+
+QUERY POINT 42
+FROM docs
+USING dense
+LIMIT 10;
+
+QUERY POINTS (1, 2, 'point-a')
+FROM docs
+WITH PAYLOAD true;
+```
+{% /qqlExample %}
+
+## Choose a retrieval strategy
+
+| Need | Expression | Why |
+|---|---|---|
+| Similar documents from one input | `QUERY TEXT`, `VECTOR`, or `POINT` | Standard nearest-neighbor search |
+| Combine semantic and lexical candidates | `QUERY HYBRID` or `USING HYBRID` | Dense and sparse result sets are fused |
+| Bias results toward examples | `QUERY RECOMMEND` | Positive and negative point IDs define the intent |
+| Diversify similar results | `QUERY MMR` | Re-ranks a candidate set by relevance and diversity |
+| Join multiple retrieval stages | CTEs + `QUERY FUSION` | Explicit prefetch and fusion pipeline |
+| Group results by a payload key | `GROUP BY` | Returns bounded groups rather than a flat list |
+
+## Hybrid retrieval
+
+Use the front form when you want the dense and sparse vector names explicit.
+Use the tail form when schema defaults resolve the names. Both forms are part of
+the v1 conformance corpus.
+
+{% qqlExample title="Hybrid dense and sparse fusion" %}
+```sql
+QUERY HYBRID TEXT 'vector database'
+DENSE dense
+SPARSE sparse
+FUSION RRF
+FROM docs
+LIMIT 10;
+
+QUERY TEXT 'search query'
+FROM docs
+USING HYBRID
+LIMIT 10;
+```
+{% /qqlExample %}
+
+`RRF` is a safe default when candidate score scales differ. Choose `DBSF` when
+you want distribution-based score normalization. See [Hybrid
+retrieval](/docs/guides/hybrid-retrieval/) for multi-stage tuning.
+
+## Vector roles in a query target
+
+`USING <name>` answers *which vector*; the optional `AS <kind>` answers *what
+kind of input*. The name and the role are independent:
+
+```text
+USING <name> [AS DENSE | AS SPARSE | AS MULTI | AS MULTIVECTOR]
+```
+
+`AS DENSE` and `AS SPARSE` declare the role of the query target: text is then
+embedded into that role, and a structural vector input must agree with the
+declaration. `AS MULTI` and `AS MULTIVECTOR` are synonyms that mark a **dense
+multivector** target (ColBERT-style late interaction) — multivector is not a
+third kind beside dense and sparse; the role stays dense and text is embedded
+into `[[f32, ...], ...]` multi-dense shape. When `AS` is omitted, the role is
+resolved from the collection schema at plan time. An explicit structural vector
+input that contradicts a declared role fails with `QQL-PLAN-VECTOR-KIND`.
+
+## Build an explicit multi-stage pipeline
+
+CTEs make candidate generation visible. A CTE can omit `FROM` and inherit the
+outer collection. `PREFETCH` names must resolve to CTEs.
+
+{% qqlExample title="Dense and sparse candidates fused with RRF" %}
+```sql
+WITH
+  dense_candidates AS (
+    QUERY TEXT 'database internals'
+    USING dense
+    LIMIT 100
+  ),
+  sparse_candidates AS (
+    QUERY TEXT 'database internals'
+    USING sparse
+    LIMIT 100
+  )
+QUERY FUSION RRF
+FROM docs
+PREFETCH (dense_candidates, sparse_candidates)
+LIMIT 10;
+```
+{% /qqlExample %}
+
+{% aside type="caution" title="Fusion and rerank require candidates" %}
+`QUERY FUSION` and `QUERY RERANK` are invalid without `PREFETCH`. Keep the
+candidate-generating stage explicit so the planner can validate the pipeline.
+{% /aside %}
+
+## Recommendation, diversity, and groups
+
+{% qqlExample title="Recommendation and diversified search" %}
+```sql
+QUERY RECOMMEND
+POSITIVE (1, 2)
+NEGATIVE (3)
+STRATEGY best_score
+FROM products
+USING dense
+LIMIT 10;
+
+QUERY MMR TEXT 'vector database'
+DIVERSITY 0.7
+CANDIDATES 100
+FROM docs
+USING dense
+LIMIT 10;
+```
+{% /qqlExample %}
+
+`DIVERSITY` must be between `0` and `1`; `CANDIDATES` must be positive. Use
+grouping when the UI needs several results per payload category.
+
+{% qqlExample title="Grouped results with lookup" %}
+```sql
+QUERY TEXT 'incident'
+FROM runbooks
+USING dense
+GROUP BY service
+SIZE 3
+LOOKUP FROM services
+WITH PAYLOAD INCLUDE (title, service)
+LIMIT 10;
+```
+{% /qqlExample %}
+
+## Context, discover, and relevance feedback
+
+`QUERY CONTEXT` pairs positive and negative inputs that define a region;
+`QUERY DISCOVER` adds a `TARGET` and shifts results toward it. Each
+positive/negative/target item is a full query input — use `POINT` for a point
+ID, `TEXT` or `VECTOR` otherwise.
+
+{% qqlExample title="Context pairs and a discover target" %}
+```sql
+QUERY CONTEXT (
+  POSITIVE POINT 1 NEGATIVE POINT 2,
+  POSITIVE POINT 3 NEGATIVE POINT 4
+)
+FROM docs
+LIMIT 10;
+
+QUERY DISCOVER
+TARGET TEXT 'search'
+CONTEXT (POSITIVE POINT 1 NEGATIVE POINT 2)
+FROM docs
+LIMIT 10;
+```
+{% /qqlExample %}
+
+`QUERY RELEVANCE FEEDBACK` refines a `TARGET` with scored feedback pairs and
+the `NAIVE` strategy, whose `a`, `b`, and `c` coefficients shape the adjusted
+query vector. Feedback items pair a query input with a relevance weight.
+
+{% qqlExample title="Naive relevance feedback" %}
+```sql
+QUERY RELEVANCE FEEDBACK
+TARGET TEXT 'search'
+FEEDBACK (
+  (VECTOR [0.1, 0.2], 1.0),
+  (VECTOR [0.3, 0.4], -1.0)
+)
+STRATEGY NAIVE (a = 1.0, b = 0.5, c = 0.2)
+FROM docs
+LIMIT 10;
+```
+{% /qqlExample %}
+
+## Order, sample, and fetch exact points
+
+`QUERY ORDER BY` sorts by a payload field (`ASC` or `DESC`), and
+`QUERY SAMPLE RANDOM` draws a random page. Neither expression accepts `USING`
+or `PREFETCH` — there is no similarity input to resolve.
+
+{% qqlExample title="Ordered and random access" %}
+```sql
+QUERY ORDER BY price ASC
+FROM products
+WHERE category = 'electronics'
+LIMIT 10;
+
+QUERY SAMPLE RANDOM
+FROM docs
+WITH VECTOR false
+LIMIT 10;
+```
+{% /qqlExample %}
+
+`QUERY POINTS` retrieves exact records by ID and is deliberately minimal: only
+`SHARD`, `WITH PAYLOAD`, and `WITH VECTOR` clauses are allowed. Filtering,
+scoring, and paging clauses are invalid — add a `WHERE` on a `QUERY TEXT`
+instead when you need a filtered search.
+
+## Rerank candidate lists
+
+`QUERY RERANK` is late-interaction MaxSim reranking. It always requires
+`USING` (a dense or multivector target), a `MODEL`, and a non-empty
+`PREFETCH`.
+
+{% qqlExample title="Late-interaction rerank of dense candidates" %}
+```sql
+WITH candidates AS (
+  QUERY TEXT 'vector database'
+  USING dense
+  LIMIT 100
+)
+QUERY RERANK TEXT 'vector database'
+MODEL 'reranker-v1'
+FROM docs
+USING colbert AS DENSE
+PREFETCH (candidates)
+LIMIT 10;
+```
+{% /qqlExample %}
+
+`QUERY CROSS RERANK` (v1.2) instead scores `(query, document text)` pairs with
+a cross-encoder. `ON FIELD` names the payload key holding document text
+(default `text`). It takes no `USING` vector and requires a host embedder with
+pair scoring; the scoring runs client-side and reorders the prefetched
+candidates.
+
+{% qqlExample title="Cross-encoder reranking on a payload field" %}
+```sql
+WITH candidates AS (
+  QUERY TEXT 'vector database'
+  USING dense
+  LIMIT 100
+)
+QUERY CROSS RERANK TEXT 'vector database'
+MODEL 'bge-reranker-base'
+ON FIELD abstract
+FROM docs
+PREFETCH (candidates)
+LIMIT 10;
+```
+{% /qqlExample %}
+
+For formula scoring and decay functions, continue with [Formula
+scoring](/docs/language/formulas/).

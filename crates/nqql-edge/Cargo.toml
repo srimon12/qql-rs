@@ -14,7 +14,10 @@ publish = false
 crate-type = ["cdylib"]
 
 [features]
-default = ["fastembed-local"]
+# http-embedding is default to match pyqql-edge: both `httpExecutor` and the
+# standalone `execute({ embedUrl })` path are documented in the README and the
+# website, so they must be present in default-feature builds.
+default = ["fastembed-local", "http-embedding"]
 # Local ONNX embedding via fastembed-rs (downloads models on first use — never shipped in npm package)
 fastembed-local = ["qql-edge/fastembed-local"]
 # HTTP-based embedding provider (OpenAI-compatible API)
@@ -22,10 +25,10 @@ http-embedding = ["qql-edge/http-embedding"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
-qql-core = { version = "0.1.5", path = "../qql-core", features = ["serde", "json"] }
-qql-plan = { version = "0.1.5", path = "../qql-plan" }
-qql = { version = "0.1.5", path = "../qql-runtime", default-features = false }
-qql-edge = { version = "0.1.5", path = "../qql-edge" }
+qql-core = { version = "0.2.0", path = "../qql-core", features = ["serde", "json"] }
+qql-plan = { version = "0.2.0", path = "../qql-plan" }
+qql = { version = "0.2.0", path = "../qql-runtime", default-features = false }
+qql-edge = { version = "0.2.0", path = "../qql-edge" }
 napi = { version = "2", features = ["napi8", "serde-json", "async"] }
 napi-derive = "2"
 serde_json = "1"

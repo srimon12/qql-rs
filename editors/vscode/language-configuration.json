@@ -11,8 +11,8 @@
     { "open": "{", "close": "}" },
     { "open": "[", "close": "]" },
     { "open": "(", "close": ")" },
-    { "open": "'", "close": "'" },
-    { "open": "\"", "close": "\"" }
+    { "open": "'", "close": "'", "notIn": ["string", "comment"] },
+    { "open": "\"", "close": "\"", "notIn": ["string", "comment"] }
   ],
   "surroundingPairs": [
     { "open": "{", "close": "}" },
@@ -20,5 +20,45 @@
     { "open": "(", "close": ")" },
     { "open": "'", "close": "'" },
     { "open": "\"", "close": "\"" }
+  ],
+  "colorizedBracketPairs": [
+    ["{", "}"],
+    ["[", "]"],
+    ["(", ")"]
+  ],
+  "autoCloseBefore": ";:.,=}])> \n\t",
+  "folding": {
+    "markers": {
+      "start": "^\\s*--\\s*#region\\b",
+      "end": "^\\s*--\\s*#endregion\\b"
+    }
+  },
+  "wordPattern": "(\\$)?[A-Za-z_][A-Za-z0-9_]*",
+  "indentationRules": {
+    "increaseIndentPattern": "^.*(\\(|\\{|\\[)\\s*$",
+    "decreaseIndentPattern": "^\\s*(\\)|\\}|\\])"
+  },
+  "onEnterRules": [
+    {
+      "beforeText": "^\\s*--.*$",
+      "action": {
+        "indent": "none",
+        "appendText": "-- "
+      }
+    },
+    {
+      "beforeText": "^.*\\(\\s*$",
+      "afterText": "^\\s*\\)",
+      "action": {
+        "indent": "indentOutdent"
+      }
+    },
+    {
+      "beforeText": "^.*\\{\\s*$",
+      "afterText": "^\\s*\\}",
+      "action": {
+        "indent": "indentOutdent"
+      }
+    }
   ]
 }

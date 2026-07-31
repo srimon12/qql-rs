@@ -1,0 +1,62 @@
+---
+title: "Embeddings and reranking"
+description: "Resolve QQL vector roles, embed text and images, and choose late-interaction or cross-encoder reranking."
+sidebar:
+  order: 2
+---
+
+Vector names answer “which vector?” Vector roles answer “what input shape and
+embedding path?” QQL keeps those decisions separate.
+
+| Form | Role |
+|---|---|
+| `USING semantic` | Resolve role from collection schema |
+| `USING semantic AS DENSE` | Explicit dense vector |
+| `USING lexical AS SPARSE` | Explicit sparse vector |
+| `USING colbert AS MULTI` | Explicit dense multivector |
+
+{% qqlExample title="Offline-explicit vector role" %}
+```sql
+QUERY TEXT 'late interaction' FROM papers
+USING colbert AS MULTI
+LIMIT 10;
+```
+{% /qqlExample %}
+
+## Late-interaction reranking
+
+{% qqlExample title="ColBERT-style rerank" %}
+```sql
+WITH candidates AS (
+  QUERY TEXT 'vector compression' USING dense LIMIT 100
+)
+QUERY RERANK TEXT 'vector compression' MODEL 'colbert-v2'
+FROM papers
+USING colbert AS MULTI
+PREFETCH (candidates)
+LIMIT 10;
+```
+{% /qqlExample %}
+
+This embeds the query as a dense multivector and uses Qdrant MaxSim against the
+stored multivector target.
+
+## Cross-encoder reranking
+
+{% qqlExample title="Host pair scoring" %}
+```sql
+WITH candidates AS (
+  QUERY TEXT 'vector compression' USING dense LIMIT 50
+)
+QUERY CROSS RERANK TEXT 'vector compression'
+MODEL 'bge-reranker-base'
+ON FIELD abstract
+FROM papers
+PREFETCH (candidates)
+LIMIT 10;
+```
+{% /qqlExample %}
+
+Cross reranking reads candidate text from the payload, calls the host's
+pair-scoring capability, and reorders hits client-side. It does not use a Qdrant
+multivector target.

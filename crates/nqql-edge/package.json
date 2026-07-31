@@ -1,11 +1,12 @@
 {
   "name": "@veristamp/nqql-edge",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "description": "Local QQL execution for Node.js with qdrant-edge and FastEmbed.",
   "main": "index.js",
   "types": "index.d.ts",
   "files": [
     "index.js",
+    "options.js",
     "index.d.ts",
     "index.*.node",
     "README.md"
@@ -13,7 +14,8 @@
   "scripts": {
     "build": "napi build --platform --no-js --release --dts native.d.ts",
     "build:debug": "napi build --platform --no-js --dts native.d.ts",
-    "test": "npm run build:debug && node test.js && node test_comprehensive.js",
+    "test": "node --test test_options.js && npm run build:debug && node test.js && node test_comprehensive.js",
+    "test:options": "node --test test_options.js",
     "prepublishOnly": "napi prepublish -t npm"
   },
   "keywords": [
@@ -55,9 +57,9 @@
     ]
   },
   "optionalDependencies": {
-    "@veristamp/nqql-edge-linux-x64-gnu": "0.1.5",
-    "@veristamp/nqql-edge-darwin-arm64": "0.1.5",
-    "@veristamp/nqql-edge-win32-x64-msvc": "0.1.5"
+    "@veristamp/nqql-edge-linux-x64-gnu": "0.2.0",
+    "@veristamp/nqql-edge-darwin-arm64": "0.2.0",
+    "@veristamp/nqql-edge-win32-x64-msvc": "0.2.0"
   },
   "devDependencies": {
     "@napi-rs/cli": "3.7.4"

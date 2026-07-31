@@ -1,0 +1,209 @@
+---
+title: "CLI"
+description: "Execute, explain, convert, dump, diagnose, and explore QQL with the qql command."
+sidebar:
+  order: 1
+---
+
+The `qql` binary is the operational interface to the same runtime used by the
+SDKs. It parses, plans, and executes QQL against a Qdrant instance — or against
+the in-process edge backend — from a terminal or a script.
+
+## Global flags
+
+The two flags below apply to every subcommand.
+
+| Flag | Purpose |
+|---|---|
+| `--url <URL>` | Qdrant endpoint. Overrides `QDRANT_URL` when supplied; defaults to `http://localhost:6333`. |
+| `--edge` | Execute supported commands against the configured in-process edge backend. Requires an edge-enabled build. |
+
+{% aside type="note" title="gRPC endpoint selection" %}
+A URL containing `:6334` selects the gRPC transport when the CLI was built with
+the `grpc` feature. Otherwise the REST transport is used.
+{% /aside %}
+
+## Command reference
+
+| Command | Purpose |
+|---|---|
+| `qql exec "<query>"` | Execute one statement or an inline semicolon-delimited script (`--json` for JSON output, `-q`/`--quiet`) |
+| `qql execute file.qql` | Execute a script file (`--stop-on-error`; prints a JSON summary `{ok, command, path, succeeded, failed, message}`) |
+| `qql explain "<query>"` | Show the execution plan without a backend (plan text; JSON with `--json`) |
+| `qql connect` | Interactive REPL |
+| `qql convert [file.json]` | Convert Qdrant REST JSON to QQL (stdin if no file) |
+| `qql dump <collection> <output.qql>` | Export a collection to a `.qql` script (`--batch-size N`, default 100; typed `CREATE COLLECTION` + `CREATE INDEX` + batched `UPSERT`) |
+| `qql doctor` | Check backend and embedder health (`--json`) |
+| `qql config edge` | Configure persistent edge settings (see below) |
+| `qql version` | Print version as JSON |
+
+{% qqlExample title="Executable input" %}
+```sql
+SHOW COLLECTIONS;
+```
+{% /qqlExample %}
+
+{% terminal title="Execute, explain, and diagnose" %}
+qql exec "SHOW COLLECTIONS"
+qql exec --json "SHOW COLLECTIONS"
+qql explain "SHOW COLLECTIONS"
+qql doctor --json
+qql version
+{% /terminal %}
+
+## Configuring the edge backend
+
+`qql config edge` writes persistent settings for the in-process edge backend to
+`<config_dir>/edge.json` (mode `0600`). The edge executor reads this file every
+time you run a command with `--edge`.
+
+| Flag | Purpose |
+|---|---|
+| `--data-dir` | Directory for persistent qdrant-edge data |
+| `--in-memory` | Keep payloads in RAM instead of persisting them to disk |
+| `--embedder fastembed\|http` | Embedding backend (default `fastembed`) |
+| `--model` | Local FastEmbed dense model name or alias |
+| `--sparse-model` | Offline sparse model for fastembed (e.g. `splade`, `bge-m3`) |
+| `--multi-model` | Offline multivector model for fastembed (e.g. `bge-m3`) |
+| `--image-model` | Offline CLIP vision model for fastembed (e.g. `clip-vision`) |
+| `--reranker-model` | Offline cross-encoder model (e.g. `bge-reranker-base`) |
+| `--cache-dir` | Directory for downloaded FastEmbed models |
+| `--show-download-progress` | Show model download progress |
+| `--embed-url` | OpenAI-compatible embedding endpoint for the HTTP backend |
+| `--embed-key` | API key for the HTTP embedding backend |
+| `--embed-model` | Model name sent to the HTTP backend (default `nomic-embed-text`) |
+| `--embed-dim` | Expected HTTP embedding dimension (default `768`) |
+| `--multi-embed-url` / `--multi-embed-key` / `--multi-embed-model` / `--multi-embed-dim` | Optional multi/ColBERT HTTP embedding endpoint |
+| `--image-embed-url` / `--image-embed-key` / `--image-embed-model` / `--image-embed-dim` | Optional image/CLIP vision HTTP embedding endpoint |
+
+Validation: `--embedder http` requires `--embed-url`, and `--embed-dim` must be
+greater than zero. After saving, the command prints
+`Use it with: qql --edge exec "SHOW COLLECTIONS"`.
+
+{% terminal title="Configure the edge backend with an HTTP embedder" %}
+qql config edge --embedder http \
+  --embed-url http://localhost:11434/v1/embeddings \
+  --embed-model all-minilm:l6-v2 \
+  --embed-dim 384
+{% /terminal %}
+
+## Using the edge backend
+
+The edge backend is an OPT-IN build: it is compiled into the CLI only when the
+`edge` feature is enabled.
+
+{% terminal title="Build the edge-enabled CLI" %}
+cargo build --release -p qql-cli --features edge
+{% /terminal %}
+
+Once configured, every operational command accepts `--edge`:
+
+{% terminal title="Edge commands" %}
+qql --edge exec "QUERY TEXT 'local search' FROM docs USING dense LIMIT 10"
+qql --edge doctor
+qql --edge connect
+qql --edge execute script.qql
+qql --edge dump listings out.qql
+{% /terminal %}
+
+{% qqlExample title="Query the edge backend" %}
+```sql
+QUERY TEXT 'quiet apartment near transit' FROM listings
+USING dense
+WHERE location GEO_RADIUS {
+  center: {lat: 52.52, lon: 13.405},
+  radius: 5000.0
+}
+WITH PAYLOAD INCLUDE (name, neighbourhood, price)
+LIMIT 10;
+```
+{% /qqlExample %}
+
+{% aside type="note" title="Edge capability surface" %}
+The edge backend deliberately implements a smaller query subset than a Qdrant
+cluster: no `GROUP BY`, `SHARD` keys, `ALTER COLLECTION`, or ACORN. See [the
+edge backend overview](/docs/edge/) and [the edge CLI reference](/docs/edge/cli/).
+{% /aside %}
+
+## Interactive REPL
+
+`qql connect` starts the interactive shell. Results render as psql-style
+aligned tables with a row-count footer.
+
+| Built-in | Purpose |
+|---|---|
+| `help`, `\h`, `?` | Show available statements and built-in commands |
+| `explain <query>` | Show the execution plan without executing |
+| `execute <file>`, `\e <file>` | Run a `.qql` script file |
+| `dump <collection> <output.qql>` | Dump a collection (schema + vectors + payload) to `.qql` |
+| `exit`, `quit`, `\q`, `:q` | Leave the shell |
+
+`Ctrl-D` exits the shell; `Ctrl-C` cancels the current input line.
+
+{% terminal title="Start the REPL" %}
+qql connect
+qql> help
+qql> SHOW COLLECTIONS;
+qql> \q
+{% /terminal %}
+
+## Environment variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `QDRANT_URL` | `http://localhost:6333` | REST or gRPC endpoint |
+| `QDRANT_API_KEY` | unset | Qdrant API key |
+| `EMBED_URL` | unset | OpenAI-compatible embedding endpoint |
+| `EMBED_KEY` | unset | API key for the embedding endpoint |
+| `EMBED_MODEL` | `all-minilm:l6-v2` | dense model ID |
+| `EMBED_DIM` | `384` | dense output dimension |
+| `MULTI_EMBED_URL` | unset | multi/ColBERT embedding endpoint |
+| `MULTI_EMBED_KEY` | unset | API key for multi embeds |
+| `MULTI_EMBED_MODEL` | unset | multi/ColBERT model ID |
+| `MULTI_EMBED_DIM` | unset | per-token dimension for multi embeds |
+| `IMAGE_EMBED_URL` | unset | image/CLIP vision embedding endpoint |
+| `IMAGE_EMBED_KEY` | unset | API key for image embeds |
+| `IMAGE_EMBED_MODEL` | unset | image/CLIP vision model ID |
+| `IMAGE_EMBED_DIM` | unset | image output dimension |
+| `RERANK_URL` | unset | cross-encoder rerank endpoint |
+| `RERANK_KEY` | unset | API key for reranking |
+| `RERANK_MODEL` | unset | reranker model ID |
+| `QQL_EDGE_DATA_DIR` | `<config_dir>/edge-data` | edge data directory |
+| `QQL_EDGE_EMBEDDER` | `fastembed` | edge embedding backend |
+| `QQL_EDGE_MODEL` | unset | edge FastEmbed dense model |
+| `QQL_EDGE_SPARSE_MODEL` | unset | edge sparse model |
+| `QQL_EDGE_MULTI_MODEL` | unset | edge multivector model |
+| `QQL_EDGE_IMAGE_MODEL` | unset | edge image/CLIP model |
+| `QQL_EDGE_RERANKER_MODEL` | unset | edge reranker model |
+| `QQL_EDGE_CACHE_DIR` | unset | edge FastEmbed model cache |
+| `QQL_EDGE_ON_DISK` | `true` | persist payloads to disk (`true`/`false`) |
+
+## Converting REST JSON to QQL
+
+`qql convert` reads a Qdrant REST JSON payload from a file, or from stdin when
+no file is given, and prints the equivalent QQL statements.
+
+It accepts a wrapped request `{method, path, body}`:
+
+| Request | QQL |
+|---|---|
+| `PUT /collections/{name}` | `CREATE COLLECTION` |
+| `PUT /collections/{name}/points` | `UPSERT` |
+| `POST /collections/{name}/points/query` | `QUERY FORMULA` or CTE query |
+| `POST /collections/{name}/points/search` | `QUERY` |
+| `POST /collections/{name}/points/recommend` | `QUERY RECOMMEND` |
+| `POST /collections/{name}/points/discover` | discover query |
+| `POST /collections/{name}/points/scroll` | `SCROLL` |
+| `POST /collections/{name}/points/delete` | `DELETE` |
+| `POST /collections/{name}/points/payload` | payload mutation |
+| `PUT /collections/{name}/index` | `CREATE INDEX` |
+
+A bare REST body is auto-detected from its structure (`prefetch` + `query`,
+`searches`, `points`, `vector`, `positive`, `target`, `ids`, `vectors_config`,
+`field_name`, `filter`). Qdrant filters translate `must` → `AND`,
+`should` → `OR`, and `must_not` → `NOT`.
+
+{% terminal title="Convert a search request" %}
+qql convert search.json
+cat search.json | qql convert
+{% /terminal %}

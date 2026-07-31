@@ -211,3 +211,168 @@ fn trailing_tokens_rejected() {
     assert!(Parser::parse("SHOW COLLECTIONS extra;").is_err());
     assert!(Parser::parse("SHOW COLLECTIONS FROM").is_err());
 }
+
+#[test]
+fn non_finite_float_literals_rejected() {
+    // grammar.pest numbers are finite; exponent overflow must not yield inf.
+    let cases = [
+        "UPSERT INTO docs VALUES {id: 1, v: 1e999};",
+        "QUERY TEXT 'x' FROM docs SCORE THRESHOLD 1e999 LIMIT 5;",
+        "QUERY FORMULA 1e999 FROM docs LIMIT 5;",
+        "QUERY TEXT 'x' FROM docs WHERE score >= -1e999 LIMIT 5;",
+    ];
+    for source in cases {
+        let err = Parser::parse(source).expect_err(&format!(
+            "expected non-finite float rejection for: {source}"
+        ));
+        assert_eq!(
+            err.kind,
+            ErrorKind::Parse,
+            "unexpected error kind for: {source} (code {})",
+            err.code
+        );
+    }
+}
+
+#[test]
+fn count_clause_order_enforced() {
+    // grammar `count` order is WHERE → SHARD → WITH, each at most once.
+    let cases = [
+        "COUNT FROM docs WITH (exact = true) SHARD 'x';",
+        "COUNT FROM docs SHARD 'a' SHARD 'b';",
+        "COUNT FROM docs WITH (exact = true) WITH (exact = false);",
+        "COUNT FROM docs WHERE active = true SHARD 'x' WITH (exact = true) SHARD 'y';",
+    ];
+    for source in cases {
+        let err = Parser::parse(source)
+            .expect_err(&format!("expected count clause order error for: {source}"));
+        assert_eq!(err.code, "QQL-PARSE-CLAUSE-ORDER");
+    }
+}
+
+#[test]
+fn count_valid_grammar_order_accepted() {
+    for source in [
+        "COUNT FROM docs;",
+        "COUNT FROM docs WHERE active = true;",
+        "COUNT FROM docs SHARD 'x';",
+        "COUNT FROM docs WHERE active = true SHARD 'x' WITH (exact = true);",
+        "COUNT FROM docs WITH (exact = false);",
+    ] {
+        Parser::parse(source).unwrap_or_else(|e| panic!("{source} should parse: {e}"));
+    }
+}
+
+#[test]
+fn count_config_rejects_unknown_keys_and_non_boolean_exact() {
+    // F-14: `COUNT ... WITH (...)` previously swallowed bad values silently.
+    // Only `exact = <boolean>` is valid; unknown keys and non-boolean values
+    // are rejected with a structured code.
+    let cases = [
+        "COUNT FROM docs WITH (exact = 5);",
+        "COUNT FROM docs WITH (exact = 'yes');",
+        "COUNT FROM docs WITH (exact = true, foo = 1);",
+        "COUNT FROM docs WITH (foo = 1);",
+        "COUNT FROM docs WHERE active = true WITH (exact = 1.0);",
+    ];
+    for source in cases {
+        let err =
+            Parser::parse(source).expect_err(&format!("expected count config error for: {source}"));
+        assert_eq!(err.code, "QQL-PARSE-COUNT-CONFIG");
+    }
+}
+
+#[test]
+fn create_shard_key_config_rejects_unknown_keys_and_invalid_values() {
+    // F-15: `CREATE SHARD KEY ... WITH (...)` previously skipped invalid
+    // values and ignored unknown keys. Only positive-integer
+    // `shards_number` / `replication_factor` are valid.
+    let cases = [
+        "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (shards_number = 0);",
+        "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (shards_number = -1);",
+        "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (shards_number = 2.0);",
+        "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (shards_number = 2.5);",
+        "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (shards_number = 'two');",
+        "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (shards_number = true);",
+        "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (replication_factor = 0);",
+        "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (replication_factor = 1.5);",
+        "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (foo = 1);",
+        "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (shards_number = 2, foo = 1);",
+    ];
+    for source in cases {
+        let err = Parser::parse(source)
+            .expect_err(&format!("expected shard key config error for: {source}"));
+        assert_eq!(err.code, "QQL-PARSE-SHARD-KEY-CONFIG");
+    }
+}
+
+#[test]
+fn create_shard_key_config_accepts_positive_integers() {
+    for source in [
+        "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (shards_number = 2);",
+        "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (replication_factor = 3);",
+        "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (shards_number = 2, replication_factor = 3);",
+        "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (SHARDS_NUMBER = 4);",
+        "CREATE SHARD KEY 'a' ON COLLECTION docs;",
+    ] {
+        Parser::parse(source).unwrap_or_else(|e| panic!("{source} should parse: {e}"));
+    }
+}
+
+#[test]
+fn create_index_unknown_field_type_rejected() {
+    let err = Parser::parse("CREATE INDEX ON COLLECTION docs FOR title TYPE banana;")
+        .expect_err("unknown index field type must be rejected");
+    assert_eq!(err.code, "QQL-PARSE-INDEX-TYPE");
+    // Case-insensitive canonical names are still accepted.
+    Parser::parse("CREATE INDEX ON COLLECTION docs FOR title TYPE TEXT;")
+        .unwrap_or_else(|e| panic!("canonical type should parse: {e}"));
+}
+
+#[test]
+fn feedback_strategy_requires_exact_a_b_c_in_order() {
+    let base =
+        "QUERY RELEVANCE FEEDBACK TARGET TEXT 'x' FEEDBACK ((TEXT 'y', 1.0)) STRATEGY NAIVE ";
+    let cases = [
+        // reordered
+        "(a = 1, c = 2, b = 3)",
+        // extra parameter
+        "(a = 1, b = 2, c = 3, d = 4)",
+        // missing parameter
+        "(a = 1, b = 2)",
+        // unknown key
+        "(a = 1, b = 2, x = 3)",
+    ];
+    for params in cases {
+        let source = format!("{base}{params} FROM docs LIMIT 5;");
+        let err = Parser::parse(&source)
+            .expect_err(&format!("expected feedback strategy error for: {params}"));
+        assert_eq!(err.code, "QQL-PARSE-FEEDBACK-STRATEGY");
+    }
+}
+
+#[test]
+fn rerank_bare_string_input_rejected() {
+    // `rerank_input` in grammar.pest is TEXT | VECTOR | POINT only.
+    let err = Parser::parse("QUERY RERANK 'x' MODEL 'm' FROM docs LIMIT 5;")
+        .expect_err("bare string rerank input must be rejected");
+    assert_eq!(err.code, "QQL-PARSE-RERANK");
+    // IMAGE is a query input, not a rerank input.
+    assert!(Parser::parse("QUERY RERANK IMAGE 'a.png' MODEL 'm' FROM docs LIMIT 5;").is_err());
+}
+
+#[test]
+fn uppercase_raw_prefix_rejected_as_raw_string() {
+    // grammar.pest has no uppercase `R'…'` raw form.
+    let err = Parser::parse(r"QUERY R'a\nb' FROM docs LIMIT 5;")
+        .expect_err("uppercase raw prefix must not lex as a raw string");
+    assert_eq!(err.code, "QQL-PARSE-QUERY-INPUT");
+}
+
+#[test]
+fn dollar_leading_dotted_segment_rejected() {
+    // identifier_segment starts with a letter or `_` only.
+    let err = Parser::parse("QUERY TEXT 'x' FROM docs WHERE a.$b = 1 LIMIT 5;")
+        .expect_err("dollar-leading dotted segment must be rejected");
+    assert_eq!(err.code, "QQL-LEX-CHAR");
+}

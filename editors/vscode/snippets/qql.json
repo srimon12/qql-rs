@@ -1,0 +1,81 @@
+{
+  "Nearest search": {
+    "prefix": ["qnearest", "qsearch"],
+    "body": [
+      "QUERY TEXT '${1:search term}'",
+      "  FROM ${2:collection} USING ${3:dense}",
+      "  LIMIT ${4:10};"
+    ],
+    "description": "Nearest-neighbor semantic search"
+  },
+  "Hybrid RRF": {
+    "prefix": ["qhybrid", "qrrf"],
+    "body": [
+      "QUERY HYBRID TEXT '${1:search term}'",
+      "  DENSE ${2:dense} SPARSE ${3:sparse}",
+      "  FUSION RRF",
+      "  FROM ${4:collection}",
+      "  LIMIT ${5:10};"
+    ],
+    "description": "Hybrid dense+sparse RRF search"
+  },
+  "CTE + Fusion": {
+    "prefix": ["qcte", "qfusion"],
+    "body": [
+      "WITH",
+      "  ${1:dense} AS (QUERY TEXT '${2:search}' USING ${3:dense} LIMIT 100),",
+      "  ${4:sparse} AS (QUERY TEXT '${2:search}' USING ${5:sparse} LIMIT 100)",
+      "QUERY FUSION RRF",
+      "  FROM ${6:collection}",
+      "  PREFETCH (${1:dense}, ${4:sparse})",
+      "  LIMIT ${7:10};"
+    ],
+    "description": "Multi-stage CTE + RRF fusion"
+  },
+  "Create collection": {
+    "prefix": ["qcreate", "qcollection"],
+    "body": [
+      "CREATE COLLECTION ${1:collection} (",
+      "  ${2:dense} VECTOR(${3:384}, ${4|COSINE,DOT,EUCLID,MANHATTAN|})",
+      ") WITH HNSW (m = ${5:16}, ef_construct = ${6:100});"
+    ],
+    "description": "Create a dense collection"
+  },
+  "Upsert with embed": {
+    "prefix": ["qupsert"],
+    "body": [
+      "UPSERT INTO ${1:collection} VALUES",
+      "  {id: ${2:1}, text: '${3:document}'}",
+      "  USING DENSE MODEL '${4:all-MiniLM-L6-v2}';"
+    ],
+    "description": "Upsert points with auto-embedding"
+  },
+  "Cross rerank": {
+    "prefix": ["qcross", "qrerank"],
+    "body": [
+      "WITH ${1:candidates} AS (QUERY TEXT '${2:search}' USING ${3:dense} LIMIT 100)",
+      "QUERY CROSS RERANK TEXT '${2:search}' MODEL '${4:cross-encoder}' ON FIELD ${5:body}",
+      "  FROM ${6:collection}",
+      "  PREFETCH (${1:candidates})",
+      "  LIMIT ${7:10};"
+    ],
+    "description": "Cross-encoder pair rerank"
+  },
+  "Count exact": {
+    "prefix": ["qcount"],
+    "body": [
+      "COUNT FROM ${1:collection} WHERE ${2:active} = true WITH (exact = true);"
+    ],
+    "description": "Exact point count"
+  },
+  "Recommend": {
+    "prefix": ["qrecommend"],
+    "body": [
+      "QUERY RECOMMEND POSITIVE (${1:1}, ${2:2}) NEGATIVE (${3:3})",
+      "  STRATEGY ${4|average_vector,best_score,sum_scores|}",
+      "  FROM ${5:collection}",
+      "  LIMIT ${6:10};"
+    ],
+    "description": "Recommendation search"
+  }
+}

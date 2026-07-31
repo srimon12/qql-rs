@@ -24,6 +24,10 @@ QUERY FUSION RRF FROM docs LIMIT 10;
 QUERY RERANK TEXT 'test' MODEL 'reranker' FROM docs
 USING colbert AS DENSE LIMIT 10;
 
+-- @case cross-rerank-without-prefetch
+-- @error QQL-VALIDATION-CROSS-RERANK-PREFETCH
+QUERY CROSS RERANK TEXT 'test' MODEL 'cross-encoder' FROM docs LIMIT 10;
+
 -- @case points-with-limit
 -- @error QQL-VALIDATION-POINTS-CLAUSE
 QUERY POINTS (1, 2) FROM docs LIMIT 10;

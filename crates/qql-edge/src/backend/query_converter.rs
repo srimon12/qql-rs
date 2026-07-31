@@ -3,10 +3,9 @@ use std::collections::HashMap;
 use qdrant_edge::external::ordered_float::OrderedFloat;
 use qdrant_edge::{
     Condition, ContextPair as EdgeContextPair, ContextQuery, DecayKind, Direction, DiscoverQuery,
-    Filter, Fusion, GeoPoint, JsonPath, Mmr, NamedQuery, OrderBy, OrderByInterface,
-    PayloadSelectorExclude, PayloadSelectorInclude, Prefetch, QueryEnum, QueryRequest,
-    RecommendQuery, Sample, ScoringQuery, SearchParams, VectorInternal, WithPayloadInterface,
-    WithVector,
+    Fusion, GeoPoint, JsonPath, Mmr, NamedQuery, OrderBy, OrderByInterface, PayloadSelectorExclude,
+    PayloadSelectorInclude, Prefetch, QueryEnum, QueryRequest, RecommendQuery, Sample,
+    ScoringQuery, SearchParams, VectorInternal, WithPayloadInterface, WithVector,
 };
 
 use qql_core::error::QqlError;
@@ -20,6 +19,12 @@ pub(crate) fn convert_query_request(request: &PlanQueryRequest) -> Result<QueryR
     if request.shard_key.is_some() {
         return Err(unsupported_shard());
     }
+    if request.timeout.is_some() {
+        return Err(crate::backend::unsupported::EdgeUnsupported::Timeout.error());
+    }
+    if request.consistency.is_some() {
+        return Err(crate::backend::unsupported::EdgeUnsupported::Consistency.error());
+    }
     Ok(QueryRequest {
         prefetches: request
             .prefetch
@@ -27,7 +32,7 @@ pub(crate) fn convert_query_request(request: &PlanQueryRequest) -> Result<QueryR
             .map(convert_prefetch)
             .collect::<Result<_, _>>()?,
         query: Some(convert_query(&request.query, request.using.as_deref())?),
-        filter: convert_filter(request.filter.as_ref())?,
+        filter: super::convert_edge_filter(request.filter.as_ref())?,
         score_threshold: request
             .score_threshold
             .map(|score| OrderedFloat(score as f32)),
@@ -72,7 +77,7 @@ fn convert_prefetch(request: &PrefetchRequest) -> Result<Prefetch, QqlError> {
             .as_ref()
             .map(convert_search_params)
             .transpose()?,
-        filter: convert_filter(request.filter.as_ref())?,
+        filter: super::convert_edge_filter(request.filter.as_ref())?,
         score_threshold: request
             .score_threshold
             .map(|score| OrderedFloat(score as f32)),
@@ -539,20 +544,6 @@ pub(crate) fn convert_order_by_interface(
     }))
 }
 
-fn convert_filter(filter: Option<&impl serde::Serialize>) -> Result<Option<Filter>, QqlError> {
-    let Some(filter) = filter else {
-        return Ok(None);
-    };
-    let mut value = serde_json::to_value(filter)
-        .map_err(|error| edge_error(format!("invalid filter: {error}")))?;
-    if value.get("key").is_some() {
-        value = serde_json::json!({ "must": [value] });
-    }
-    serde_json::from_value(value)
-        .map(Some)
-        .map_err(|error| edge_error(format!("invalid filter format: {error}")))
-}
-
 pub(crate) fn parse_json_path(path: &str) -> Result<JsonPath, QqlError> {
     serde_json::from_value(serde_json::Value::String(path.to_string()))
         .map_err(|error| edge_error(format!("invalid payload path '{path}': {error}")))
@@ -893,5 +884,88 @@ mod tests {
             }
             _ => panic!("expected Struct variant"),
         }
+    }
+
+    /// Build a `PlanQueryRequest` with the given filter over a simple dense
+    /// nearest query.
+    fn request_with_filter(filter: qql_plan::types::FilterExpression) -> PlanQueryRequest {
+        PlanQueryRequest {
+            query: QueryVariant::Nearest(NearestQuery {
+                nearest: PlanQueryInput::Vector(PlanVectorValue::Dense(vec![1.0, 2.0, 3.0])),
+                mmr: None,
+            }),
+            using: Some("dense".to_string()),
+            prefetch: Vec::new(),
+            filter: Some(filter),
+            params: None,
+            score_threshold: None,
+            with_payload: None,
+            with_vector: None,
+            limit: Some(10),
+            offset: None,
+            lookup_from: None,
+            shard_key: None,
+            timeout: None,
+            consistency: None,
+        }
+    }
+
+    fn city_match() -> qql_plan::types::FilterClause {
+        qql_plan::types::FilterClause::Field(Box::new(qql_plan::types::FieldCondition {
+            key: "city".to_string(),
+            r#match: Some(qql_plan::types::MatchValue::Value {
+                value: serde_json::json!("NYC"),
+            }),
+            range: None,
+            geo_bounding_box: None,
+            geo_radius: None,
+            geo_polygon: None,
+            values_count: None,
+            is_empty: None,
+            is_null: None,
+        }))
+    }
+
+    #[test]
+    fn test_single_condition_filter_is_wrapped_in_must() {
+        // A bare condition filter (`{"key": ...}`) must be wrapped as
+        // `{"must": [...]}` to match the qdrant-edge Filter schema. This pins
+        // the behaviour of the single canonical JSON→Filter converter now
+        // shared by the query, scroll, count, and mutation paths.
+        let request = request_with_filter(qql_plan::types::FilterExpression::Single(Box::new(
+            city_match(),
+        )));
+        let converted = convert_query_request(&request).expect("conversion succeeds");
+        let filter_value = serde_json::to_value(converted.filter.as_ref().expect("filter present"))
+            .expect("filter serializes");
+        assert_eq!(
+            filter_value,
+            serde_json::json!({
+                "must": [{ "key": "city", "match": { "value": "NYC" } }]
+            })
+        );
+    }
+
+    #[test]
+    fn test_compound_filter_passes_through_unchanged() {
+        // A full filter object (`{"must": [...]}`) is already in Filter
+        // schema and must not be double-wrapped.
+        let request = request_with_filter(qql_plan::types::FilterExpression::Compound(
+            qql_plan::types::FilterCompound {
+                must: vec![city_match()],
+                must_not: vec![],
+                should: vec![],
+                min_should: None,
+            },
+        ));
+        let converted = convert_query_request(&request).expect("conversion succeeds");
+        let filter_value = serde_json::to_value(converted.filter.as_ref().expect("filter present"))
+            .expect("filter serializes");
+        assert_eq!(
+            filter_value,
+            serde_json::json!({
+                "must": [{ "key": "city", "match": { "value": "NYC" } }]
+            })
+        );
     }
 }

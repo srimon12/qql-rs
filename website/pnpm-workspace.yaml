@@ -1,0 +1,14 @@
+packages:
+  - "."
+  - "packages/*"
+
+# pnpm 11: allow native postinstalls for the toolchain
+onlyBuiltDependencies:
+  - esbuild
+  - sharp
+
+allowBuilds:
+  esbuild: true
+  onnxruntime-node: false
+  protobufjs: false
+  sharp: true

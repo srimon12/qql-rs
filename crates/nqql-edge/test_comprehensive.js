@@ -5,6 +5,7 @@
 // ============================================================================
 
 const assert = require('assert');
+const http = require('http');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -262,6 +263,65 @@ testAsync('localExecutor create collection, upsert, count, show collections', as
   assert.strictEqual(r3.ok, true);
 
   await client.close();
+});
+
+// ============================================================================
+console.log('\n========== G. HTTP embedding (executeStmt via local mock) ==========');
+
+// The JS wrapper exports `executeStmt` and `httpExecutor` unconditionally, so
+// symbol-existence checks cannot prove the compiled native binding honors HTTP
+// embedding. This end-to-end test runs `executeStmt({ embedUrl })` against a
+// local Node mock and asserts the embedding request actually went to it —
+// requiring the native default-feature build (http-embedding) to be loaded.
+
+testAsync('executeStmt() honors embedUrl via local mock HTTP endpoint', async () => {
+  const embedding = [0.1, 0.2, 0.3, 0.4];
+  let received = null;
+  const server = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+    });
+    req.on('end', () => {
+      received = {
+        method: req.method,
+        url: req.url,
+        auth: req.headers.authorization,
+        body,
+      };
+      const payload = JSON.stringify({
+        data: [{ index: 0, embedding }],
+      });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(payload);
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const dataDir = path.join(os.tmpdir(), 'nqql_edge_http_' + Date.now());
+  fs.mkdirSync(dataDir, { recursive: true });
+
+  try {
+    const [stmt] = nqql.parse("UPSERT INTO http_docs VALUES {id: 1, text: 'hello'}");
+    const report = await nqql.executeStmt(stmt, {
+      dataDir,
+      onDiskPayload: false,
+      embedUrl: `http://127.0.0.1:${server.address().port}/v1/embeddings`,
+      embedKey: 'test-key',
+      embedModel: 'mock-embed',
+      embedDim: 4,
+    });
+    assert.strictEqual(report.ok, true, JSON.stringify(report));
+    assert.ok(received, 'mock embedding endpoint must receive a request');
+    assert.strictEqual(received.method, 'POST');
+    assert.strictEqual(received.url, '/v1/embeddings');
+    assert.strictEqual(received.auth, 'Bearer test-key');
+    const body = JSON.parse(received.body);
+    assert.strictEqual(body.model, 'mock-embed');
+    assert.deepStrictEqual(body.input, ['hello']);
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
 
 // ============================================================================

@@ -1,0 +1,123 @@
+---
+title: "Language overview"
+description: "Learn the QQL building blocks: scripts, statements, values, vector roles, and strict clause order."
+sidebar:
+  order: 1
+---
+
+QQL is the product boundary between an application intent and a Qdrant
+operation. Write a readable statement, inspect its route before execution, and
+keep the same source across the CLI, Rust, Python, Node.js, and WebAssembly.
+
+{% glassCard title="The mental model" %}
+QQL is not a stringly typed wrapper around REST. A statement is parsed into an
+AST, optionally rewritten by the host, planned into a Qdrant operation, and
+then executed. The language rejects incomplete or ambiguous input early.
+{% /glassCard %}
+
+## Scripts are composed from statements
+
+Keywords are ASCII case-insensitive while identifiers retain their spelling.
+Separate statements with semicolons; a final semicolon is allowed. The parser
+accepts at most 256 statements in one script.
+
+{% qqlExample title="Provision, write, and retrieve" %}
+```sql
+CREATE COLLECTION notes (
+  dense VECTOR(384, COSINE)
+);
+
+UPSERT INTO notes VALUES {
+  id: 1,
+  text: 'first note'
+};
+
+QUERY TEXT 'note'
+FROM notes
+USING dense
+LIMIT 5;
+```
+{% /qqlExample %}
+
+| Family | Use it for | Statements |
+|---|---|---|
+| Retrieval | Finding or browsing points | `QUERY`, `SCROLL`, `COUNT` |
+| Data | Creating and mutating points | `UPSERT`, `UPDATE`, `DELETE`, payload/vector operations |
+| Schema | Defining Qdrant resources | `CREATE`, `ALTER`, `DROP`, `SHOW` |
+
+## Lexical rules
+
+The script surface is strict: one statement per semicolon-separated element, at
+most 256 statements per script, and exactly one trailing semicolon allowed.
+Leading, repeated, or empty separators are rejected. Comments run from `--` to
+the end of the line only; block comments do not exist.
+
+| Rule | Behavior |
+|---|---|
+| Keywords | ASCII case-insensitive (`query`, `Query`, `QUERY` are the same keyword) |
+| Identifiers | Case-sensitive and preserve spelling |
+| Identifier characters | Begin with an ASCII letter, `_`, or `$`; later characters may also be digits |
+| Payload paths | A dotted path (`metadata.author`) or array path (`items[].price`) is one identifier |
+| Unicode operators | `≠`, `≥`, `≤` normalize to `!=`, `>=`, `<=` |
+
+Strings come in five families. The escape sequences `\\`, `\'`, `\"`, `\n`,
+`\r`, `\t`, and `\$` apply only to standard single- and double-quoted strings;
+`''` inside a single-quoted string decodes to one quote.
+
+| Family | Example | Behavior |
+|---|---|---|
+| Single-quoted | `'it''s ready'` | Escapes and `''` doubling |
+| Double-quoted | `"text"` | Escapes |
+| Raw | `r'...'`, `r"..."` | Preserves `$PARAM` and quotes verbatim |
+| Triple-quoted | `'''...'''`, `"""..."""` | Multiline; preserves contents verbatim |
+| Backtick | `` `...` `` | Preserves contents verbatim |
+
+Raw, triple-quoted, and backtick strings keep `$PARAM` references and any
+internal quotes exactly as written.
+
+## Values and vector roles
+
+QQL supports strings, signed integers, floats, booleans, `null`, ordered
+objects, and lists. Point IDs are unsigned integers or strings. Object and
+config keys must be unique under ASCII case-insensitive comparison — a
+duplicate key is rejected with `QQL-PARSE-DUPLICATE-KEY`. Vector shape, not its
+field name, determines its role. A point carries one unnamed vector or an
+object of arbitrary named vectors.
+
+| Role | Value shape | Typical use |
+|---|---|---|
+| Dense | `[0.1, 0.2, 0.3]` | Semantic nearest-neighbor retrieval |
+| Sparse | `{indices: [1, 9], values: [0.4, 0.7]}` | Lexical or sparse retrieval |
+| Multivector | `[[0.1, 0.2], [0.3, 0.4]]` | Late interaction such as ColBERT |
+
+{% aside type="tip" title="Start with text, add vectors deliberately" %}
+`QUERY TEXT` and `UPSERT ... USING` need an embedder at execution time. Use
+explicit `VECTOR` values when your application owns embedding generation or
+when you want a fully offline planning workflow.
+{% /aside %}
+
+## Query clauses have one order
+
+Each clause appears at most once. The parser does not silently reorder a query:
+
+`USING` → `PREFETCH` → `WHERE` → `SHARD` → `PARAMS` → `SCORE THRESHOLD` →
+`GROUP BY` → payload/vector selectors → `LIMIT` → `OFFSET`.
+
+{% qqlExample title="A complete nearest-neighbor query" %}
+```sql
+QUERY TEXT 'search'
+FROM docs
+USING semantic_v2 AS DENSE
+WHERE status = 'published'
+SHARD 'acme'
+PARAMS (hnsw_ef = 128, exact = false, acorn = true)
+SCORE THRESHOLD 0.5
+WITH PAYLOAD INCLUDE (title, url)
+WITH VECTOR false
+LIMIT 20
+OFFSET 10;
+```
+{% /qqlExample %}
+
+The [Queries](/docs/language/queries/) page selects a retrieval expression. The
+[Filters](/docs/language/filters/) page covers the `WHERE` predicate language.

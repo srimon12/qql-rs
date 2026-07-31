@@ -569,7 +569,7 @@
               "Decay": {
                 "kind": "exp_decay",
                 "midpoint": null,
-                "scale": null,
+                "scale": 30.0,
                 "target": null,
                 "x": {
                   "Variable": {
@@ -615,9 +615,13 @@
             "expression": {
               "Decay": {
                 "kind": "gauss_decay",
-                "midpoint": null,
-                "scale": null,
-                "target": null,
+                "midpoint": 0.5,
+                "scale": 10.0,
+                "target": {
+                  "Constant": {
+                    "value": 100.0
+                  }
+                },
                 "x": {
                   "Variable": {
                     "name": "popularity"
@@ -663,8 +667,12 @@
               "Decay": {
                 "kind": "lin_decay",
                 "midpoint": null,
-                "scale": null,
-                "target": null,
+                "scale": 365.0,
+                "target": {
+                  "Constant": {
+                    "value": 0.0
+                  }
+                },
                 "x": {
                   "Variable": {
                     "name": "age_days"

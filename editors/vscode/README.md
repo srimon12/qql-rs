@@ -2,9 +2,9 @@
 
   <img src="https://raw.githubusercontent.com/srimon12/qql-rs/main/docs/assets/qql-banner.png" alt="QQL Banner" width="600" />
 
-  # QQL 1.2 — Qdrant Query Language for VS Code
+  # QQL — Qdrant Query Language for VS Code
 
-  Syntax highlighting, live linting, and autocompletion for [QQL](https://github.com/srimon12/qql-rs) — a SQL-like query language for the [Qdrant](https://qdrant.tech) vector database.
+  A full IDE experience for [QQL](https://github.com/srimon12/qql-rs) — syntax highlighting, live linting, hover plans, outline, CodeLens, REST compile, curl export, and smart completions.
 
   **QQL is to Qdrant what SQL is to Postgres.**
 
@@ -16,144 +16,146 @@
 
 ### Syntax Highlighting
 
-All 130+ QQL 1.2 keywords tokenized into distinct scopes — statements, query expressions (IMAGE, CROSS, MULTI), filters, DDL, formula expressions, and boolean/null constants. Strings, numbers, comments, operators, and dotted paths (`field.nested`, `items[].name`) are all highlighted correctly.
+The generated TextMate grammar highlights QQL keywords, constants, strings, numbers, comments, comparison operators, formula variables (`$score`), and dotted paths (`field.nested`, `items[].name`).
 
-| Token type | Scope |
-|-----------|-------|
-| Statements (`QUERY`, `UPSERT`, `CREATE`, …) | `keyword.control` |
-| Clauses (`FROM`, `WHERE`, `LIMIT`, …) | `keyword.other` |
-| Query modes (`HYBRID`, `MMR`, `FUSION`, …) | `keyword.query` |
-| DDL (`COLLECTION`, `HNSW`, `QUANTIZATION`, …) | `keyword.ddl` |
-| Filters (`MATCH`, `NESTED`, `GEO_BBOX`, …) | `keyword.filter` |
-| Formula (`CASE WHEN`, `ABS`, `GEO_DISTANCE`, …) | `keyword.formula` |
-| Booleans (`true`, `false`) | `constant.language.boolean` |
-| Null | `constant.language.null` |
-| Strings | `string.quoted.single` / `.double` |
-| Numbers (int, float, sci notation) | `constant.numeric` |
-| Comments (`-- …`) | `comment.line` |
+Also injects into Markdown fenced blocks:
+
+````markdown
+```qql
+QUERY TEXT 'hello' FROM docs USING dense LIMIT 10;
+```
+````
 
 ### Live Diagnostics
 
-Every `.qql` file is parsed in real-time by the same WASM parser that powers `qql-core`. Parse errors appear as red squiggly underlines with the exact error code, message, and position from the Rust compiler pipeline.
+Every `.qql` file is parsed in real time by the same WASM build of `qql-core`. Parse errors appear as red squiggles with the exact error code, message, and span from the Rust pipeline.
 
-```
-QUERY missing FROM docs;   ← QQL-PARSE-UNEXPECTED: Expected FROM
-```
+- Updates within ~300ms of typing (configurable)
+- Byte-accurate spans (UTF-8 → UTF-16 conversion)
+- Zero network — the WASM binary is bundled
 
-- Errors update within 300ms of typing
-- Error spans are precise (byte-level from the Rust parser, converted to VS Code positions)
-- Zero external dependencies — the 1.35 MB WASM binary is bundled directly
+### Hover Intelligence
 
-### Autocompletion
+- **Keyword docs** for statements, modes, clauses, filters, formula helpers
+- **Live plan** for the enclosing statement (intent, collection, CTEs, limit)
+- **REST route** summary when the statement compiles (`POST /collections/…/points/query`)
 
-**130+ keyword completions** — every QQL keyword is available at your cursor.
+### Outline & Folding
 
-**28 snippet templates** — common query patterns insert with placeholders:
+- **Outline / breadcrumbs** list every top-level statement with kind + collection
+- **CTE children** nest under `WITH` queries
+- **Folding** for multi-line statements, parenthesized regions, and comment blocks
+- Region markers: `-- #region` / `-- #endregion`
 
-| Snippet | What it generates |
-|---------|------------------|
-| `QUERY NEAREST` | Basic semantic search with `TEXT`/`USING`/`LIMIT` |
-| `QUERY HYBRID` | Hybrid dense+sparse RRF search |
-| `QUERY HYBRID DBSF` | Hybrid with DBSF fusion |
-| `CTE + FUSION` | Multi-stage retrieval with `WITH`/`PREFETCH`/`FUSION RRF` |
-| `CTE + RERANK` | Two-stage retrieval with cross-encoder reranking |
-| `QUERY RECOMMEND` | Recommendation from positive/negative examples |
-| `QUERY MMR` | Maximal Marginal Relevance diversity search |
-| `QUERY FORMULA` | Score shaping with arithmetic and payload fields |
-| `QUERY POINTS` | Direct point ID retrieval |
-| `QUERY ORDER BY` | Ordered payload scan |
-| `QUERY SAMPLE` | Random sampling |
-| `UPSERT INTO` | Point upsert with auto-embedding |
-| `CREATE COLLECTION` | Collection DDL |
-| `CREATE COLLECTION HYBRID` | Hybrid dense+sparse collection DDL |
-| `CREATE INDEX` | Payload index creation |
-| `SCROLL` | Cursor-based pagination |
-| `COUNT` | Point counting with filter |
-| `DELETE` | Point deletion by filter |
+### CodeLens
 
-### Language Configuration
+Above each statement:
 
-- **Comment toggle:** `Ctrl+/` inserts `-- `
-- **Bracket matching:** `{}`, `[]`, `()` highlight pairs and auto-close
-- **String auto-close:** `'` and `"` auto-close with the matching quote
+| Lens | Action |
+|------|--------|
+| **Explain** | Open the execution plan |
+| **REST** | Open the compiled Qdrant REST route (JSON) |
+| **curl** | Copy a ready-to-run curl command |
+
+Disable with `qql.codeLens.enabled`.
+
+### Commands
+
+| Command | Default keybinding | Description |
+|---------|-------------------|-------------|
+| **QQL: Explain Document / Selection** | `Ctrl+K Ctrl+E` | Plan for doc or selection |
+| **QQL: Compile to REST Route** | `Ctrl+K Ctrl+R` | Compiled route JSON |
+| **QQL: Copy as curl** | `Ctrl+K Ctrl+C` | Clipboard curl (uses `qql.baseUrl`) |
+| **QQL: Show AST** | — | Parsed AST as JSON |
+| **QQL: Re-analyze Document** | click status bar | Force re-parse |
+
+Also available from the editor title bar and right-click **QQL** submenu.
+
+### Status Bar
+
+Shows `✓ QQL N` when valid, or `✗ QQL` with the error code on failure. Click to re-analyze.
+
+### Go to Definition
+
+Jump from a CTE reference in `PREFETCH (…)` back to its `name AS (` definition.
+
+### Smart Completions
+
+- **Contextual follow-ups** — after `QUERY` suggest modes; after `FUSION` suggest `RRF`/`DBSF`; after `TYPE` suggest index types; …
+- **Collection names** harvested from the current file
+- **CTE names** suggested inside `PREFETCH`
+- **29 snippets** for hybrid, CTE fusion, rerank, recommend, DDL, shards, geo decay, …
+- Full keyword list still available for filter-as-you-type
+
+Snippet prefixes (Insert Snippet): `qnearest`, `qhybrid`, `qcte`, `qcreate`, `qupsert`, `qcross`, `qcount`, `qrecommend`.
+
+### Language Ergonomics
+
+- Comment toggle (`Ctrl+/` → `-- `)
+- Bracket colorization + auto-close for `{}` `[]` `()`
+- Smart indent on open parens/braces
+- Continue `-- ` comments on Enter
 
 ---
 
-## Requirements
+## Settings
 
-- VS Code 1.85 or newer
-- No additional dependencies — the extension bundles everything
-
----
-
-## Supported File Types
-
-- `.qql` files — full highlighting, linting, and completions
-
----
-
-## Extension Size
-
-| Component | Size |
-|-----------|------|
-| WASM parser binary | 1.35 MB |
-| JS loader + providers | ~14 KB |
-| TextMate grammar | 4.2 KB |
-| **Total VSIX** | **846 KB** |
-
-The WASM binary is compiled from `qql-core` (the Rust reference implementation) and contains the complete QQL v1 parser — lexer, recursive-descent parser, Pratt formula parser, and AST builder — all running in-process.
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `qql.diagnostics.debounceMs` | `300` | Debounce before re-analyze |
+| `qql.codeLens.enabled` | `true` | Statement CodeLens |
+| `qql.baseUrl` | `http://localhost:6333` | Base URL for curl export |
 
 ---
 
 ## How It Works
 
 ```
-.qql file → VS Code onDidChangeTextDocument
-                │
-                ▼ (300ms debounce)
-          qql-wasm analyze()
-                │
-                ▼
-        ┌──────────────┐
-        │  Rust parser  │  (1.35 MB WASM binary)
-        │  • Lexer      │
-        │  • Parser     │
-        │  • AST build  │
-        └──────┬───────┘
-               │
-               ▼
-    { valid, error: { code, message, start, end }, tokens, … }
-               │
-               ▼
-      VS Code DiagnosticCollection (red squiggly)
+.qql file
+    │
+    ▼ (debounced)
+ AnalysisService  ── qql-wasm analyze()
+    │                     │
+    │              ┌──────┴──────┐
+    │              │ Rust WASM   │
+    │              │ lexer/parse │
+    │              │ plan/route  │
+    │              └──────┬──────┘
+    │                     │
+    ├── Diagnostics (errors)
+    ├── Status bar (valid / N stmts)
+    ├── CodeLens (Explain · REST · curl)
+    ├── Outline symbols + CTE children
+    ├── Hover (keyword docs + plan)
+    └── Completions (context + collections)
 ```
 
-- **Parsing** happens synchronously in the extension host (Node.js)
-- **No network calls** — the parser is fully self-contained
-- **No file writes** — everything is in-memory
+Commands (`explain`, `compile`, `curl`, `AST`) call the same WASM surface (`explain`, `compile`, `parse`, `analyze`).
+
+- **No network** for editing features
+- **No language server process** — everything runs in the extension host
+
+---
+
+## Requirements
+
+- VS Code 1.85+
+- No extra runtime deps — WASM is bundled
 
 ---
 
 ## Installation
 
-### From VS Code Marketplace (recommended)
-
-1. Open VS Code
-2. Go to Extensions (`Ctrl+Shift+X`)
-3. Search for **QQL**
-4. Click Install
-
-Or from the command line:
+### Marketplace
 
 ```bash
 code --install-extension srimon12.qql-lang
 ```
 
-### From `.vsix` (offline / local build)
+### From `.vsix`
 
 ```bash
-# Download the .vsix from GitHub Releases
-code --install-extension qql-lang-0.1.5.vsix
+code --install-extension qql-lang-0.2.0.vsix
 ```
 
 ### Build from source
@@ -162,20 +164,13 @@ code --install-extension qql-lang-0.1.5.vsix
 git clone https://github.com/srimon12/qql-rs
 cd qql-rs/editors/vscode
 
-# Build the WASM parser
+# Build the WASM parser (Node target)
 wasm-pack build ../../crates/qql-wasm --release --target nodejs --out-dir wasm
 
-# Install dependencies
 npm install
-
-# Compile TypeScript
-npm run vscode:prepublish
-
-# Package
+npm run compile
 npx vsce package
-
-# Install locally
-code --install-extension qql-lang-0.1.5.vsix
+code --install-extension qql-lang-0.2.0.vsix
 ```
 
 ---
@@ -184,8 +179,9 @@ code --install-extension qql-lang-0.1.5.vsix
 
 | Project | Description |
 |---------|-------------|
-| [`qql-rs`](https://github.com/srimon12/qql-rs) | Rust reference implementation — parser, planner, runtime, CLI, edge, bindings |
-| [`qql-go`](https://github.com/srimon12/qql-go) | Go implementation — gateway, RPC, policy engine, MCP server |
+| [`qql-rs`](https://github.com/srimon12/qql-rs) | Rust reference — parser, planner, runtime, CLI, edge, bindings |
+| [`qql-go`](https://github.com/srimon12/qql-go) | Go — gateway, RPC, policy engine, MCP server |
+
 ---
 
 ## License

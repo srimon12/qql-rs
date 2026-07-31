@@ -1,0 +1,194 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "CreateCollection": {
+        "collection": "products",
+        "config": null,
+        "mode": {
+          "Dense": {
+            "model": null
+          }
+        },
+        "sparse_vectors": [],
+        "vectors": [
+          {
+            "distance": "Cosine",
+            "hnsw": null,
+            "multivector": null,
+            "name": "dense",
+            "quantization": null,
+            "size": 512,
+            "vectors": null
+          }
+        ]
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "products",
+        "embed": [],
+        "embedding": {
+          "MultiVector": {
+            "field": null,
+            "model": "bge-m3",
+            "vector": null
+          }
+        },
+        "points": [
+          {
+            "id": {
+              "Number": 1
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "red shoe"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": null
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "products",
+        "embed": [],
+        "embedding": {
+          "Image": {
+            "field": null,
+            "model": "clip-vit",
+            "vector": null
+          }
+        },
+        "points": [
+          {
+            "id": {
+              "Number": 2
+            },
+            "payload": [
+              [
+                "image",
+                {
+                  "Str": "/path/to/img.png"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": null
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "products",
+        "embed": [],
+        "embedding": {
+          "MultiVector": {
+            "field": null,
+            "model": "colbert-v2",
+            "vector": null
+          }
+        },
+        "points": [
+          {
+            "id": {
+              "Number": 3
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "colbert document"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "products"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Image": {
+                "model": null,
+                "source": "/path/to/img.png"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": {
+              "kind": null,
+              "multi": false,
+              "name": "clip-v2"
+            }
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 5,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "products"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "colbert query"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": {
+              "kind": "Dense",
+              "multi": true,
+              "name": "colbert"
+            }
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 5,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    }
+  ]
+}

@@ -1,0 +1,154 @@
+---
+title: "Edge runtime"
+description: "Run QQL with zero network: in-process HNSW storage and optional local ONNX embeddings, no Qdrant server."
+sidebar:
+  order: 0
+---
+
+QQL Edge runs the full QQL pipeline — parse, plan, execute — inside your own
+process, with **no Qdrant server and no network**. Storage is an in-process HNSW
+index (`qdrant-edge`), and embeddings can run on-device via ONNX
+(`fastembed-rs`) or against an OpenAI-compatible HTTP endpoint.
+
+{% techBadge name="qql-edge" variant="orange" /%}
+
+The same QQL language you use against remote Qdrant works unchanged. Edge
+reuses the same parser, planner, and runtime executor; only the backend
+transport is swapped for an embedded one.
+
+## Why edge
+
+{% grid style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:1rem;" %}
+
+{% glassCard title="Zero infrastructure" %}
+No Docker, no server process, no ports, no API keys. A Python script, a Node
+service, or a Rust binary can own a local vector index.
+{% /glassCard %}
+
+{% glassCard title="Fully offline" %}
+With the local ONNX embedder, inference happens on your CPU. Great for demos,
+CI, air-gapped tools, and single-node products.
+{% /glassCard %}
+
+{% glassCard title="Same language, same plans" %}
+Statements compile to the same IR and use the same response envelope as the
+REST and gRPC backends. What you write in the playground is what edge executes.
+{% /glassCard %}
+
+{% glassCard title="Honest capability errors" %}
+Cluster-only features fail loudly with stable `QQL-EDGE-UNSUPPORTED-*` codes
+and a "use remote Qdrant" hint. Edge never silently drops a clause.
+{% /glassCard %}
+
+{% /grid %}
+
+## Architecture
+
+```
+┌─────────────────────────── your process ───────────────────────────┐
+│                                                                     │
+│  QQL source ──► parser (qql-core) ──► planner (qql-plan)            │
+│                                            │                        │
+│                                            ▼                        │
+│                                      Executor (qql-runtime)         │
+│                          ┌───────────────┴────────────────┐         │
+│                          ▼                                ▼         │
+│                 EdgeQdrant (qdrant-edge)           Embedder          │
+│                 in-process HNSW shards            ┌──────────┐      │
+│                 on-disk at <base_path>            │ FastEmbed│      │
+│                          │                       │  (ONNX)  │      │
+│                          │                       └──────────┘      │
+│                          │                        or HttpEmbedder   │
+│                          │                        (OpenAI-compatible)│
+│                          ▼                                         │
+│              ┌─────────────────────┐                                │
+│              │ <base_path>/        │  collection dirs, WAL,         │
+│              │   <collection>/     │  segments, edge_config.json    │
+│              │     segments/       │                                │
+│              │     wal/            │                                │
+│              │     edge_config.json│                                │
+│              └─────────────────────┘                                │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+Compare that with a remote backend, where the executor translates the same
+plan into REST or gRPC calls and sends them to a Qdrant server:
+
+```
+QQL source ──► parser ──► planner ──► Executor ──► REST/gRPC ──► Qdrant server
+```
+
+Everything above the executor is shared. Only the backend and the embedding
+path differ.
+
+## When to use it
+
+**Use edge** when you want vector search and QQL execution embedded in a single
+process: local desktop tools, mobile-adjacent prototypes, CI test suites,
+air-gapped demos, or a product that does not want to operate a Qdrant cluster.
+
+**Use remote Qdrant** when you need a shared, multi-node service with
+replication, shard keys, `GROUP BY`, ACORN, or the full query surface. Edge
+rejects exactly those cluster features with stable error codes — see
+[capabilities](/docs/edge/capabilities/).
+
+## Relationship to REST and gRPC backends
+
+| Aspect | REST / gRPC | Edge |
+|---|---|---|
+| Parser, planner, executor | shared | shared |
+| Transport | HTTP / protobuf | none (in-process) |
+| Storage | Qdrant server | `qdrant-edge` on-disk HNSW |
+| Embeddings | remote endpoint or explicit vectors | ONNX local, HTTP endpoint, or explicit vectors |
+| Cluster features (`GROUP BY`, shards, ACORN) | yes | rejected with stable codes |
+| Response envelope | `{result, status, time}` | identical |
+
+Both backends implement the same `QdrantOps` trait, so a Rust application can
+switch between them without changing query code. See
+[backend compatibility](/docs/reference/backend-compatibility/) for the
+full matrix.
+
+## Quick start summary
+
+{% steps %}
+
+1. **Build the edge-enabled CLI** (edge is an opt-in feature)
+
+   {% terminal title="Build the CLI with edge support" %}
+   cargo build --release -p qql-cli --features edge
+   {% /terminal %}
+
+2. **Configure a local data directory and model**
+
+   {% terminal title="Configure edge" %}
+   qql config edge --data-dir ./qdrant_data --model bge-small-en-v1.5
+   {% /terminal %}
+
+3. **Run a query with no Qdrant server anywhere**
+
+   {% qqlExample title="Create, upsert, and search locally" %}
+   ```sql
+   CREATE COLLECTION docs HYBRID;
+
+   UPSERT INTO docs VALUES {id: 1, text: 'hello from edge'};
+
+   QUERY TEXT 'hello' FROM docs USING dense LIMIT 5;
+   ```
+   {% /qqlExample %}
+
+   Execute it with `qql --edge exec "QUERY TEXT 'hello' FROM docs USING dense LIMIT 5"`.
+
+{% /steps %}
+
+The first run downloads the embedding model from Hugging Face (roughly
+130 MB for the default dense model) and caches it locally; afterwards
+inference is fully offline.
+
+## Where to go next
+
+- [Getting started](/docs/edge/getting-started/) — the full local walkthrough.
+- [CLI reference](/docs/edge/cli/) — `qql --edge` and `qql config edge`.
+- [Models](/docs/edge/models/) — the five embedding slots and how to pick them.
+- [Capabilities](/docs/edge/capabilities/) — what works and what fails.
+- [Persistence](/docs/edge/persistence/) — data layout, restart, and `close()`.
+- SDK pages: [Rust](/docs/edge/rust/), [Python](/docs/edge/python/), [Node.js](/docs/edge/node/).

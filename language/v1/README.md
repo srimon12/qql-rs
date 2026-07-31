@@ -33,6 +33,21 @@ lowers to the same `QueryExpr::Hybrid` AST as front-form `QUERY HYBRID TEXT …`
 Product / implementation gaps (edge limits, remaining UX) are tracked in
   [`skills/qql-skill/references/qql-gaps.md`](../../skills/qql-skill/references/qql-gaps.md).
 
+## Contract Map & Protection Matrix
+
+The relationship between the single source of truth (`language/v1/grammar.pest`) and generated or hand-written surfaces is enforced in CI:
+
+| Surface | Nature | Target Location | Protection & CI Gate |
+|---|---|---|---|
+| Generated Pest Grammar | Derived | `crates/qql-core/grammar/qql.generated.pest` | `qql-grammar-gen check` (CI) |
+| VS Code TextMate Syntax | Derived | `editors/vscode/syntaxes/qql.tmLanguage.json` | `qql-grammar-gen check` (CI) |
+| VS Code TS Keywords | Derived | `editors/vscode/src/keywords.generated.ts` | `qql-grammar-gen check` (CI) |
+| Website TS Keywords | Derived | `website/src/scripts/qql-keywords.generated.ts` | `qql-grammar-gen check` (CI) |
+| Rust Keyword PHF Map | Derived | `crates/qql-core/src/keywords.generated.rs` | `qql-grammar-gen check` + `cargo check` (CI) |
+| Lexer & Token Table | Hand-written | `crates/qql-core/src/token.rs` | `grammar_keywords_in_token_rs` test (CI) |
+| Recursive Descent Parser | Hand-written | `crates/qql-core/src/parser/*` | `parser_keywords_exist_in_grammar` test (CI) |
+| Fixture Corpus | Hand-written | `language/v1/fixtures/` | `qql-conformance check` (CI) |
+
 ## Generation
 
 After changing `grammar.pest`, regenerate the parser input:
@@ -61,8 +76,11 @@ cargo run -p qql-conformance -- check language/v1
 Expected result:
 
 ```text
-conformant: 32 valid files, 34 invalid cases, 32 AST snapshots
+conformant: 35 valid files (249 statements), 53 invalid cases, 35 AST snapshots
 ```
+
+(Counts track the fixture corpus and change as fixtures are added; the live
+command above is authoritative.)
 
 Regenerate AST snapshots only for an intentional contract change:
 

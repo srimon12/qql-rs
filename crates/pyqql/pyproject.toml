@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "pyqql"
-version = "0.1.5"
+version = "0.2.0"
 requires-python = ">=3.8"
 description = "Native Python bindings for the Qdrant Query Language parser and runtime"
 readme = "README.md"

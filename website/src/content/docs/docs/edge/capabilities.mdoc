@@ -1,0 +1,234 @@
+---
+title: "Capabilities"
+description: "Exactly what the edge backend executes, what it rejects, and the stable QQL-EDGE error codes."
+sidebar:
+  order: 7
+---
+
+Edge implements the same plan path as remote Qdrant and shares its response
+envelope, but it is a single-process engine. This page is the definitive
+boundary: what runs offline, what fails, and with which stable error code.
+
+The rule is simple: **unsupported is a loud, stable error, never a silent
+no-op.** Every rejection carries a reason and, when applicable, a "use remote
+Qdrant" hint.
+
+## Capability matrix
+
+| Capability | Edge | Notes |
+|---|:---:|---|
+| Parser, planner, explain | yes | identical to remote |
+| Dense nearest search | yes | HNSW, single-threaded per shard |
+| Sparse search (BM25 hash) | yes | default; real ONNX with `sparse_model` |
+| Hybrid dense + sparse | yes | front-form or tail-form `USING HYBRID` |
+| Fusion RRF / DBSF | yes | plain `FUSION RRF` uses `k = 2`; parameterized form honors `PARAMS (rrf_k, rrf_weights)` |
+| MMR | yes | dense only |
+| Recommend | partial | `best_score` and `sum_scores` only |
+| Context / Discover | yes | requires embeddable inputs |
+| Formula scoring | yes | full operator set including geo and decay |
+| Relevance feedback | yes | naive strategy |
+| `QUERY POINTS` | yes | integers or UUIDs |
+| Scroll | yes | cursor via `AFTER` / `next_page_offset` |
+| Count | yes | exact by default |
+| Order-by queries | yes | `QUERY ORDER BY field ASC/DESC` |
+| Random sample | yes | `QUERY SAMPLE RANDOM` |
+| CTEs / prefetch | yes | `WITH … PREFETCH` |
+| Cross rerank | yes | client-side, host cross-encoder model |
+| Score threshold, offset/limit | yes | |
+| `PARAMS (hnsw_ef, exact, quantization, indexed_only)` | yes | |
+| Payload filters | yes | comparisons, `IN`, `BETWEEN`, `MATCH`, geo, `NESTED`, … |
+| `UPSERT` with auto-embedding | yes | dense, sparse, multi, image |
+| `DELETE` / payload / vector operations | yes | by id or filter |
+| `CREATE/DROP COLLECTION` | yes | |
+| `CREATE/DROP INDEX` | yes | keyword, integer, float, bool, geo, text, datetime, uuid |
+| `SHOW COLLECTIONS` / `SHOW COLLECTION` | yes | |
+| Query/update batching | partial | fan-out, not a native batch RPC |
+| `GROUP BY` | no | `QQL-EDGE-UNSUPPORTED-GROUP-BY` |
+| `SHARD` routing / custom sharding | no | `QQL-EDGE-UNSUPPORTED-SHARD` |
+| `CREATE/DROP SHARD KEY` | no | `QQL-EDGE-UNSUPPORTED-SHARD-KEY` |
+| `ALTER COLLECTION` | no | `QQL-EDGE-UNSUPPORTED-ALTER` |
+| Collection `WITH PARAMS` | no | `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` |
+| `PARAMS (acorn = …)` | no | `QQL-EDGE-UNSUPPORTED-ACORN` |
+| `RECOMMEND STRATEGY average_vector` | no | `QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY` |
+| Point-id query inputs | no | `QQL-EDGE-UNSUPPORTED-POINT-REF` |
+| String point IDs (non-UUID) | no | `QQL-EDGE-INVALID-POINT-ID` |
+| gRPC transport | no | edge has no protobuf dependency |
+| `PARAMS (timeout, consistency)` | no | `QQL-EDGE-UNSUPPORTED-TIMEOUT` / `QQL-EDGE-UNSUPPORTED-CONSISTENCY` |
+| Remote image URLs | partial | local ONNX embedder: local file paths only; the HTTP embedder forwards the source string verbatim, so endpoints that accept HTTP(S) image URLs can back CLIP vision |
+
+## What works
+
+### Schema and mutations
+
+{% qqlExample title="Collections and indexes" %}
+```sql
+CREATE COLLECTION docs HYBRID;
+
+CREATE INDEX ON COLLECTION docs FOR category TYPE keyword;
+
+SHOW COLLECTIONS;
+
+DROP COLLECTION docs;
+```
+{% /qqlExample %}
+
+{% qqlExample title="Upsert with auto-embedding" %}
+```sql
+UPSERT INTO docs VALUES
+  {id: 1, text: 'runs locally', category: 'edge'},
+  {id: 2, text: 'shipped to production', category: 'qql'}
+USING HYBRID;
+```
+{% /qqlExample %}
+
+Upserts embed text on-device (or via the configured HTTP endpoint) into the
+schema's dense and sparse vectors. Explicit vectors work too:
+
+{% qqlExample title="Explicit dense vector" %}
+```sql
+UPSERT INTO docs VALUES {id: 1, text: 'precomputed', vector: {dense: [0.1, 0.2, 0.3]}};
+```
+{% /qqlExample %}
+
+### Point and payload operations
+
+{% qqlExample title="Delete and payload updates" %}
+```sql
+DELETE FROM docs WHERE status = 'expired';
+
+UPDATE docs SET PAYLOAD = {status: 'reviewed'} WHERE id = 42;
+
+UPDATE docs SET VECTOR = [0.1, 0.2, 0.3] WHERE id = 42;
+
+CLEAR PAYLOAD FROM docs WHERE status = 'archived';
+
+DELETE PAYLOAD draft FROM docs WHERE id = 42;
+
+DELETE VECTOR colbert FROM docs WHERE id = 42;
+```
+{% /qqlExample %}
+
+### Search
+
+{% qqlExample title="Dense, sparse, and hybrid search" %}
+```sql
+QUERY TEXT 'edge vector search' FROM docs USING dense LIMIT 10;
+
+QUERY TEXT 'keyword style' FROM docs USING sparse LIMIT 10;
+
+QUERY 'hybrid' FROM docs USING HYBRID LIMIT 10;
+
+QUERY HYBRID TEXT 'hybrid' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10;
+```
+{% /qqlExample %}
+
+{% qqlExample title="Fusion, MMR, and recommendation" %}
+```sql
+WITH candidates AS (QUERY TEXT 'x' USING dense LIMIT 100)
+QUERY FUSION RRF FROM docs PREFETCH (candidates) LIMIT 10;
+
+QUERY MMR TEXT 'x' DIVERSITY 0.7 CANDIDATES 100 FROM docs USING dense LIMIT 10;
+
+QUERY RECOMMEND POSITIVE (1, 2) NEGATIVE (3) STRATEGY best_score FROM docs USING dense LIMIT 10;
+```
+{% /qqlExample %}
+
+{% qqlExample title="Advanced query forms" %}
+```sql
+QUERY FORMULA $score * 0.8 DEFAULTS (score = 0.0) FROM docs LIMIT 10;
+
+QUERY CONTEXT (POSITIVE TEXT 'good' NEGATIVE TEXT 'bad') FROM docs LIMIT 10;
+
+QUERY SAMPLE RANDOM FROM docs LIMIT 10;
+
+QUERY ORDER BY year DESC FROM docs LIMIT 10;
+```
+{% /qqlExample %}
+
+Cross-encoder reranking runs client-side: candidate stages execute against
+local storage and the host cross-encoder model scores the pairs.
+
+### Params and pagination
+
+{% qqlExample title="Search params, threshold, and offset" %}
+```sql
+QUERY TEXT 'x' FROM docs USING dense
+PARAMS (hnsw_ef = 64, exact = true)
+SCORE THRESHOLD 0.5
+LIMIT 10 OFFSET 20;
+```
+{% /qqlExample %}
+
+### Batching is fan-out
+
+`execute` with a list of statements or a semicolon-delimited string is
+executed statement-by-statement against the edge backend. There is no native
+batch RPC — results are returned per operation with cardinality matching the
+input.
+
+## What fails — and how
+
+Every unsupported feature returns a stable error code. The message includes
+the feature, the reason, and a remediation hint.
+
+| Code | Feature |
+|---|---|
+| `QQL-EDGE-UNSUPPORTED-GROUP-BY` | `GROUP BY` / query groups |
+| `QQL-EDGE-UNSUPPORTED-SHARD` | `SHARD` routing or collection sharding options |
+| `QQL-EDGE-UNSUPPORTED-SHARD-KEY` | `CREATE` / `DROP SHARD KEY` |
+| `QQL-EDGE-UNSUPPORTED-ALTER` | `ALTER COLLECTION` |
+| `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | collection `WITH PARAMS` (replication, shard count, …) |
+| `QQL-EDGE-UNSUPPORTED-ACORN` | `PARAMS (acorn = …)` |
+| `QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY` | `RECOMMEND STRATEGY average_vector` |
+| `QQL-EDGE-UNSUPPORTED-POINT-REF` | point-id-only inputs (need materialized vectors) |
+| `QQL-EDGE-UNSUPPORTED-ROUTE` | any other unmapped projection |
+| `QQL-EDGE-INVALID-POINT-ID` | non-integer, non-UUID string point IDs |
+
+Example rejection:
+
+```text
+GROUP BY / query groups is not supported offline: qdrant-edge has no /points/query/groups
+endpoint. Use remote Qdrant (REST or gRPC) for this feature.
+```
+
+{% aside type="caution" title="Point IDs: integers or UUIDs only" %}
+Edge storage represents IDs as unsigned integers or UUIDs. A string like
+`'doc-1'` is rejected with `QQL-EDGE-INVALID-POINT-ID` rather than silently
+mapped — deleting "half a batch" because some IDs could not be represented is
+exactly what edge refuses to do.
+{% /aside %}
+
+{% aside type="note" title="Group by, shards, and clusters need remote Qdrant" %}
+`GROUP BY`, custom `SHARD` routing, shard-key administration, `ALTER
+COLLECTION`, ACORN, and collection `WITH PARAMS` are cluster features. Edge
+keeps the whole feature surface of the language and rejects at execution —
+switch to REST or gRPC for those workloads.
+{% /aside %}
+
+## Code catalog
+
+See the complete list of fixed codes in the [error codes reference](/docs/reference/error-codes/#edge-backend).
+
+## Technical details
+
+Recommendations and point reference inputs: `QUERY POINT 42 FROM docs`,
+`QUERY RECOMMEND POSITIVE (1)`, and similar **point-id inputs** need the
+point's vector materialized. Text, vector, or image inputs that can be
+embedded by the configured model work; point-id-only inputs fail with
+`QQL-EDGE-UNSUPPORTED-POINT-REF` (or resolve to vectors first).
+
+## Request-level parameters
+
+`timeout` and `consistency` are request-level fields for remote REST/gRPC
+transports and are rejected offline with `QQL-EDGE-UNSUPPORTED-TIMEOUT` and
+`QQL-EDGE-UNSUPPORTED-CONSISTENCY`. `hnsw_ef`, `exact`, `quantization`, and
+`indexed_only` are honored.
+
+## Transport
+
+Edge has **no gRPC** and no protobuf dependency. The runtime executor always
+dispatches through the embedded `QdrantOps` backend. If your tooling needs
+gRPC, use the remote path.
+
+For storage behavior across restarts and the data directory layout, continue
+to [persistence](/docs/edge/persistence/).

@@ -476,19 +476,19 @@ pub fn create_collection_rest_body(req: &CreateCollectionRequest) -> serde_json:
     if let Some(hnsw) = &req.hnsw_config {
         body.insert(
             "hnsw_config".into(),
-            serde_json::to_value(hnsw).unwrap_or_default(),
+            crate::plan::serialize_body(hnsw).expect("hnsw_config REST serialization failed"),
         );
     }
     if let Some(opt) = &req.optimizers_config {
         body.insert(
             "optimizers_config".into(),
-            serde_json::to_value(opt).unwrap_or_default(),
+            crate::plan::serialize_body(opt).expect("optimizers_config REST serialization failed"),
         );
     }
     if let Some(q) = &req.quantization_config {
         body.insert(
             "quantization_config".into(),
-            serde_json::to_value(q).unwrap_or_default(),
+            crate::plan::serialize_body(q).expect("quantization_config REST serialization failed"),
         );
     }
     if let Some(n) = req.shard_number {
@@ -568,13 +568,13 @@ pub fn update_collection_rest_body(req: &UpdateCollectionRequest) -> serde_json:
     if let Some(hnsw) = &req.hnsw_config {
         body.insert(
             "hnsw_config".into(),
-            serde_json::to_value(hnsw).unwrap_or_default(),
+            crate::plan::serialize_body(hnsw).expect("hnsw_config REST serialization failed"),
         );
     }
     if let Some(opt) = &req.optimizers_config {
         body.insert(
             "optimizers_config".into(),
-            serde_json::to_value(opt).unwrap_or_default(),
+            crate::plan::serialize_body(opt).expect("optimizers_config REST serialization failed"),
         );
     }
     if let Some(params) = &req.params {
@@ -956,5 +956,45 @@ mod tests {
         assert_eq!(sparse["index"]["datatype"], "float32");
         assert_eq!(json["sharding_method"], "custom");
         assert_eq!(json["shard_number"], 2);
+    }
+
+    #[test]
+    fn rest_body_config_sections_are_objects_not_null() {
+        // Regression: these sections used `serde_json::to_value(...).unwrap_or_default()`,
+        // silently inserting JSON `null` on any serialization failure. Assert the
+        // create REST body carries real objects on the wire.
+        let stmt = parse_stmt(
+            "CREATE COLLECTION docs (v VECTOR(128, COSINE)) WITH HNSW (m = 16) WITH OPTIMIZERS (indexing_threshold = 1000) WITH QUANTIZATION (type = 'scalar', quantile = 0.5);",
+        );
+        let Stmt::CreateCollection(ref cc) = stmt else {
+            panic!()
+        };
+        let req = lower_create_collection(cc);
+        let rest = create_collection_rest_body(&req);
+        assert_ne!(rest["hnsw_config"], serde_json::Value::Null);
+        assert_eq!(rest["hnsw_config"]["m"], 16);
+        assert_ne!(rest["optimizers_config"], serde_json::Value::Null);
+        assert_eq!(rest["optimizers_config"]["indexing_threshold"], 1000);
+        assert_ne!(rest["quantization_config"], serde_json::Value::Null);
+        assert_eq!(rest["quantization_config"]["scalar"]["type"], "int8");
+        assert_eq!(rest["quantization_config"]["scalar"]["quantile"], 0.5);
+    }
+
+    #[test]
+    fn update_rest_body_config_sections_are_objects_not_null() {
+        // Regression for `update_collection_rest_body` (same swallowed-serialization
+        // footgun as create). PATCH body must carry real hnsw/optimizers objects.
+        let stmt = parse_stmt(
+            "ALTER COLLECTION docs WITH HNSW (m = 32) WITH OPTIMIZERS (indexing_threshold = 500);",
+        );
+        let Stmt::AlterCollection(ref ac) = stmt else {
+            panic!()
+        };
+        let req = lower_alter_collection(ac);
+        let rest = update_collection_rest_body(&req);
+        assert_ne!(rest["hnsw_config"], serde_json::Value::Null);
+        assert_eq!(rest["hnsw_config"]["m"], 32);
+        assert_ne!(rest["optimizers_config"], serde_json::Value::Null);
+        assert_eq!(rest["optimizers_config"]["indexing_threshold"], 500);
     }
 }

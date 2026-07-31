@@ -28,6 +28,18 @@ QUERY 'search' FROM docs WHERE (status = 'active' LIMIT 10;
 -- @error QQL-LEX-STRING
 QUERY 'unterminated FROM docs LIMIT 10;
 
+-- @case number-malformed-exponent
+-- @error QQL-LEX-NUMBER
+UPSERT INTO docs VALUES {id: 1, v: 1e};
+
+-- @case number-trailing-dot
+-- @error QQL-LEX-NUMBER
+COUNT FROM docs WHERE score >= 1.;
+
+-- @case number-minus-before-dot
+-- @error QQL-LEX-NUMBER
+COUNT FROM docs WHERE score >= -.5;
+
 -- @case legacy-select
 -- @error QQL-PARSE-STATEMENT
 SELECT * FROM docs WHERE id = 42;
@@ -68,3 +80,37 @@ QUERY TEXT 'x' FROM docs PARAMS (weights = [1.0]);
 -- @case legacy-quoted-index-type
 -- @error QQL-PARSE-INDEX-TYPE
 CREATE INDEX ON COLLECTION docs FOR title TYPE 'text';
+
+-- @case count-reversed-clauses
+-- @error QQL-PARSE-CLAUSE-ORDER
+COUNT FROM docs WITH (exact = true) SHARD 'x';
+
+-- @case count-repeated-shard
+-- @error QQL-PARSE-CLAUSE-ORDER
+COUNT FROM docs SHARD 'a' SHARD 'b';
+
+-- @case index-unknown-field-type
+-- @error QQL-PARSE-INDEX-TYPE
+CREATE INDEX ON COLLECTION docs FOR title TYPE banana;
+
+-- @case feedback-reordered-params
+-- @error QQL-PARSE-FEEDBACK-STRATEGY
+QUERY RELEVANCE FEEDBACK TARGET TEXT 'search'
+FEEDBACK ((TEXT 'relevant', 1.5))
+STRATEGY NAIVE (a = 1.0, c = 0.2, b = 0.5)
+FROM docs LIMIT 10;
+
+-- @case feedback-extra-params
+-- @error QQL-PARSE-FEEDBACK-STRATEGY
+QUERY RELEVANCE FEEDBACK TARGET TEXT 'search'
+FEEDBACK ((TEXT 'relevant', 1.5))
+STRATEGY NAIVE (a = 1.0, b = 0.5, c = 0.2, d = 0.1)
+FROM docs LIMIT 10;
+
+-- @case rerank-bare-string-input
+-- @error QQL-PARSE-RERANK
+QUERY RERANK 'vector database' MODEL 'reranker-v1'
+FROM docs
+USING colbert AS DENSE
+PREFETCH (candidates)
+LIMIT 10;

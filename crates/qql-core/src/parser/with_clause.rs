@@ -95,14 +95,16 @@ impl<'a> AstLowerer<'a> {
     }
 
     fn parse_selector_bool(&mut self) -> Result<Option<bool>, QqlError> {
-        if self.peek()?.kind != TokenKind::Identifier {
-            return Ok(None);
-        }
-        if self.peek()?.text.eq_ignore_ascii_case("true") {
+        let tok = self.peek()?;
+        if tok.kind == TokenKind::True
+            || (tok.is_keyword_or_identifier() && tok.text.eq_ignore_ascii_case("true"))
+        {
             self.advance()?;
             return Ok(Some(true));
         }
-        if self.peek()?.text.eq_ignore_ascii_case("false") {
+        if tok.kind == TokenKind::False
+            || (tok.is_keyword_or_identifier() && tok.text.eq_ignore_ascii_case("false"))
+        {
             self.advance()?;
             return Ok(Some(false));
         }

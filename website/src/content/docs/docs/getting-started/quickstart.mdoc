@@ -1,0 +1,70 @@
+---
+title: "Quickstart"
+description: "Create a Qdrant collection, upsert documents, and query them with the qql-rs CLI."
+sidebar:
+  order: 3
+---
+
+This path uses Qdrant REST on port `6333` and an OpenAI-compatible embedding
+endpoint. If you already store vectors, omit the embedder and use vector input.
+
+{% steps %}
+
+1. Start Qdrant
+
+   {% terminal title="Qdrant" %}
+   docker run --rm -p 6333:6333 -p 6334:6334 qdrant/qdrant
+   {% /terminal %}
+
+2. Configure execution
+
+   {% terminal title="Environment" %}
+   export QDRANT_URL=http://localhost:6333
+   export EMBED_URL=http://localhost:11434/v1/embeddings
+   export EMBED_MODEL=all-minilm:l6-v2
+   export EMBED_DIM=384
+   {% /terminal %}
+
+3. Create a collection
+
+   {% qqlExample title="Dense collection and filter index" %}
+   ```sql
+   CREATE COLLECTION docs (
+     dense VECTOR(384, COSINE)
+   ) WITH HNSW (m = 16, ef_construct = 100);
+
+   CREATE INDEX ON COLLECTION docs FOR category TYPE keyword;
+   ```
+   {% /qqlExample %}
+
+4. Upsert content
+
+   {% qqlExample title="Embed text into the dense vector" %}
+   ```sql
+   UPSERT INTO docs VALUES
+     {id: 1, text: 'QQL provides typed vector retrieval', category: 'qql'},
+     {id: 2, text: 'Qdrant stores dense and sparse vectors', category: 'qdrant'}
+    USING DENSE MODEL 'all-minilm:l6-v2';
+   ```
+   {% /qqlExample %}
+
+5. Search
+
+   {% qqlExample title="Filtered search" %}
+   ```sql
+   QUERY TEXT 'typed query language' FROM docs
+   USING dense
+    WHERE category = 'qql'
+    LIMIT 5;
+   ```
+   {% /qqlExample %}
+
+{% /steps %}
+
+Save the statements as `quickstart.qql`, then execute the whole script:
+
+{% terminal title="Execute the script" %}
+qql execute quickstart.qql
+{% /terminal %}
+
+Use `qql explain "QUERY ..."` to inspect a plan without sending it to Qdrant.

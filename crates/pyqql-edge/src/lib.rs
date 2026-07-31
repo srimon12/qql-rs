@@ -16,7 +16,7 @@
 //! models = pyqql_edge.list_embedding_models()
 //! ```
 
-use pyo3::exceptions::{PyRuntimeError, PySyntaxError};
+use pyo3::exceptions::{PyRuntimeError, PySyntaxError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList};
 use qql_core::ast::{self, ComparisonOp, Value};
@@ -55,8 +55,13 @@ impl PyStmt {
     }
 
     #[setter]
-    fn set_shard_key(&mut self, key: Option<String>) {
-        let _ = self.inner.set_shard_key(key);
+    fn set_shard_key(&mut self, key: Option<String>) -> PyResult<()> {
+        if !self.inner.set_shard_key(key) {
+            return Err(PyValueError::new_err(
+                "cannot set shard_key on statement type that does not support sharding (e.g. DDL statements)",
+            ));
+        }
+        Ok(())
     }
 
     fn to_json(&self) -> PyResult<String> {

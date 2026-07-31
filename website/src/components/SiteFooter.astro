@@ -1,0 +1,55 @@
+---
+import { APPS, SITE } from "../config/site";
+---
+
+<footer class="site-footer">
+  <div>
+    <span>© {new Date().getFullYear()} {SITE.org}. QQL is MIT licensed.</span>
+    <nav aria-label="Footer navigation">
+      <a href="/docs/">Docs</a>
+      <a href="/playground/">Playground</a>
+      <a href={`${APPS.github.url}/releases`}>Releases</a>
+      <a href={APPS.github.url}>GitHub</a>
+    </nav>
+  </div>
+</footer>
+
+<style>
+  .site-footer {
+    border-top: 1px solid var(--sl-color-gray-5);
+    color: var(--sl-color-gray-3);
+    font-size: 0.78rem;
+  }
+
+  .site-footer > div {
+    width: min(100% - 2rem, 90rem);
+    min-height: 4.5rem;
+    margin-inline: auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+
+  nav {
+    display: flex;
+    gap: 1.25rem;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  a:hover {
+    color: var(--sl-color-white);
+  }
+
+  @media (max-width: 35rem) {
+    .site-footer > div {
+      padding-block: 1rem;
+      align-items: flex-start;
+      flex-direction: column;
+    }
+  }
+</style>

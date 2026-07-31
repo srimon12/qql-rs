@@ -1,0 +1,129 @@
+---
+title: "Persistence"
+description: "Data directory layout, restart and reload behavior, close() flushing, and storage options."
+sidebar:
+  order: 8
+---
+
+Edge stores collection data on disk inside a single base directory you choose
+(`--data-dir`, `QQL_EDGE_DATA_DIR`, the first constructor argument, or
+`~/.qql/edge-data` by default). Everything is plain files owned by the
+`qdrant-edge` engine — no external database is involved.
+
+## Directory layout
+
+```
+<base_path>/
+└── <collection>/
+    ├── segments/           # HNSW segment data (one or more segment dirs)
+    ├── wal/                # write-ahead log of collection update operations
+    └── edge_config.json    # dense/sparse vector schema, HNSW, quantization
+```
+
+One directory per collection, created lazily on first access. `SHOW
+COLLECTIONS` lists exactly the subdirectories that contain a `segments/`
+directory (hidden dot-directories are skipped).
+
+## Restart and reload
+
+Opening an executor does **not** scan or load every collection eagerly.
+Shards open lazily on first statement that touches the collection:
+
+- If `<base_path>/<collection>/segments` does **not** exist, a fresh
+  collection is created from the statement's schema.
+- If it **does** exist, the shard is **loaded**: `edge_config.json` is read
+  (or inferred from the segments), the WAL is re-opened, and segments are
+  loaded into the in-process index.
+
+So a CLI invocation, script run, or SDK client that creates collections and
+data in one session finds them intact in the next:
+
+{% terminal title="Two sessions, same data" %}
+qql --edge exec "CREATE COLLECTION docs HYBRID"
+qql --edge exec "UPSERT INTO docs VALUES {id: 1, text: 'hello'}"
+qql --edge exec "QUERY TEXT 'hello' FROM docs USING dense LIMIT 5"   # still there
+{% /terminal %}
+
+The vector schema is fixed at creation (`edge_config.json`); edge has no
+`ALTER COLLECTION`.
+
+## `close()` — flushing the WAL and segments
+
+Updates are written to the WAL and segments incrementally, but a clean flush
+happens when the executor is closed. `close()` (on `Executor`, `EdgeQdrant`,
+`pyqql_edge.Client`, or the Node `Client`) drains all open shards, drops them
+on a blocking worker, and each shard's `Drop` implementation flushes its WAL
+and segments.
+
+{% aside type="caution" title="Close before deleting the data directory" %}
+Call `close()` before removing `<base_path>`. qdrant-edge flushes while the
+directory still exists; deleting open shard files can lose data. Both the
+Python and Node clients expose `close()` for exactly this reason.
+{% /aside %}
+
+`close()` is **idempotent**: calling it twice is a no-op. The Python client
+also implements the context manager so `with client:` closes automatically:
+
+```python
+with pyqql_edge.local_executor("./qdrant_data") as client:
+    client.execute("CREATE COLLECTION docs HYBRID")
+# closed, flushed, safe to remove ./qdrant_data
+```
+
+## One live executor per data directory
+
+There is **no cross-process locking**. Each executor owns an in-memory shard
+map, and two writers to the same files have no coordination:
+
+- Do not point two processes at the same data directory.
+- Do not create two clients on the same data directory in one process and
+  mutate through both.
+- A safe pattern is to build one long-lived client per data directory (which
+  also avoids reloading the ONNX model).
+
+If you need concurrent access, use remote Qdrant — edge is a single-instance
+embedding.
+
+## In-memory vs on-disk payloads
+
+Payloads can be kept in memory or persisted to disk. This is controlled at
+executor construction:
+
+| Layer | Flag |
+|---|---|
+| CLI | `qql config edge --in-memory` |
+| Environment | `QQL_EDGE_ON_DISK=false` |
+| Rust | `local_executor(path, false)` or `LocalExecutorOptions { on_disk_payload: false, .. }` |
+| Python | `local_executor(data_dir, on_disk_payload=False)` |
+| Node | `localExecutor(path, { onDiskPayload: false })` |
+
+With `on_disk_payload = false`, payload JSON lives in RAM only; vectors and
+the index structure remain on disk, and the WAL still applies. In-memory
+payloads trade durability and memory footprint for speed — choose on-disk for
+any data you cannot rebuild. Note the default differs by surface: the CLI and
+language bindings default to `true` (on-disk), while the Rust
+`local_executor(path, false)` signature requires you to choose explicitly.
+
+## WAL options
+
+The WAL captures every collection update operation before it is applied to
+segments, which is what makes a crash restart safe. qdrant-edge defaults to
+WAL segments of 32 MiB capacity and recycles them as they are flushed to
+segments. Smaller capacities are useful for embedded or memory-constrained
+deployments; the `wal_options` are configurable at the qdrant-edge
+`EdgeConfig` layer (they are not currently exposed through `qql-edge`
+`LocalExecutorOptions`).
+
+## Operational notes
+
+- `SHOW COLLECTION docs` reports `points_count` and `segments_count` from the
+  live shard.
+- Deleting a collection removes its directory, so a dropped collection does
+  not reappear after restart.
+- `dump` (`qql --edge dump <collection> out.qql`) reads the live shard and
+  emits QQL (schema, vectors, payloads) — a convenient backup format that does
+  not depend on the internal file layout.
+
+Continue to the [Rust](/docs/edge/rust/), [Python](/docs/edge/python/), and
+[Node.js](/docs/edge/node/) pages for the full API, or revisit
+[capabilities](/docs/edge/capabilities/) for the execution boundary.

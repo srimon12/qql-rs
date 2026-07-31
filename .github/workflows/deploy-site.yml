@@ -1,0 +1,63 @@
+name: Deploy QQL Site
+
+# qql.veristamp.in → Pages project `qql`
+# Secrets: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "website/**"
+      - "language/v1/fixtures/**"
+      - "crates/qql-core/**"
+      - "crates/qql-plan/**"
+      - "crates/qql-embed/**"
+      - "crates/qql-wasm/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/deploy-site.yml"
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: "24"
+  CF_PAGES_PROJECT: qql
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: website/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack@0.15.0
+
+      - name: Validate documentation and build website
+        working-directory: website
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm check
+
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy website/dist --project-name=${{ env.CF_PAGES_PROJECT }} --branch=main

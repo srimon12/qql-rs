@@ -135,6 +135,78 @@
               [
                 "text",
                 {
+                  "Str": "windows\\path\\to\\file"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": null
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "docs",
+        "embed": [],
+        "embedding": null,
+        "points": [
+          {
+            "id": {
+              "Number": 1
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "it''s not folded"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": null
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "docs",
+        "embed": [],
+        "embedding": null,
+        "points": [
+          {
+            "id": {
+              "Number": 1
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "'"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": null
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "docs",
+        "embed": [],
+        "embedding": null,
+        "points": [
+          {
+            "id": {
+              "Number": 1
+            },
+            "payload": [
+              [
+                "text",
+                {
                   "Str": "price is $100 for $QUERY_TEXT"
                 }
               ]

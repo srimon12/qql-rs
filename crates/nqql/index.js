@@ -1,3 +1,5 @@
+const pkg = require('./package.json');
+
 function isMusl() {
   if (process.platform !== 'linux') {
     return false;
@@ -10,7 +12,7 @@ function nativeTarget() {
   const { platform, arch } = process;
   if (platform === 'linux' && arch === 'x64') {
     if (isMusl()) {
-      throw new Error('nqql 0.1.1 does not provide a Linux musl binary');
+      throw new Error(`nqql ${pkg.version} does not provide a Linux musl binary`);
     }
     return 'linux-x64-gnu';
   }
@@ -72,6 +74,8 @@ function callNative(call) {
   }
 }
 
+const { normalizeClientOptions } = require('./options.js');
+
 function normalizeQuery(query) {
   if (query instanceof nativeBinding.Stmt) {
     return query.toObject();
@@ -97,31 +101,6 @@ function validateOptions(options) {
   return options;
 }
 
-function normalizeClientOptions(options) {
-  if (!options) {
-    return undefined;
-  }
-  if (typeof options !== 'object' || Array.isArray(options)) {
-    throw new TypeError('client options must be an object');
-  }
-  return {
-    ...options,
-    apiKey: options.apiKey ?? options.api_key,
-    useGrpc: options.useGrpc ?? options.use_grpc,
-    embedder: options.embedder
-      ? {
-          endpoint: options.embedder.endpoint,
-          apiKey: options.embedder.apiKey ?? options.embedder.api_key,
-          model: options.embedder.model,
-          dimension: options.embedder.dimension,
-          rerankEndpoint: options.embedder.rerankEndpoint ?? options.embedder.rerank_endpoint,
-          rerankApiKey: options.embedder.rerankApiKey ?? options.embedder.rerank_api_key,
-          rerankModel: options.embedder.rerankModel ?? options.embedder.rerank_model,
-        }
-      : undefined,
-  };
-}
-
 class HttpEmbedder {
   constructor(options) {
     if (!options || typeof options.endpoint !== 'string' || !options.endpoint) {
@@ -137,10 +116,30 @@ class HttpEmbedder {
     if (apiKey !== undefined && typeof apiKey !== 'string') {
       throw new TypeError('HttpEmbedder apiKey must be a string');
     }
+    for (const key of ['multiApiKey', 'imageApiKey']) {
+      const value = options[key] ?? options[key === 'multiApiKey' ? 'multi_api_key' : 'image_api_key'];
+      if (value !== undefined && typeof value !== 'string') {
+        throw new TypeError(`HttpEmbedder ${key} must be a string`);
+      }
+    }
+    for (const key of ['multiDimension', 'imageDimension']) {
+      const value = options[key] ?? options[key === 'multiDimension' ? 'multi_dimension' : 'image_dimension'];
+      if (value !== undefined && (!Number.isSafeInteger(value) || value <= 0)) {
+        throw new TypeError(`HttpEmbedder ${key} must be a positive integer`);
+      }
+    }
     this.endpoint = options.endpoint;
     this.apiKey = apiKey ?? '';
     this.model = options.model;
     this.dimension = options.dimension;
+    this.multiEndpoint = options.multiEndpoint ?? options.multi_endpoint ?? '';
+    this.multiApiKey = options.multiApiKey ?? options.multi_api_key ?? '';
+    this.multiModel = options.multiModel ?? options.multi_model ?? '';
+    this.multiDimension = options.multiDimension ?? options.multi_dimension ?? null;
+    this.imageEndpoint = options.imageEndpoint ?? options.image_endpoint ?? '';
+    this.imageApiKey = options.imageApiKey ?? options.image_api_key ?? '';
+    this.imageModel = options.imageModel ?? options.image_model ?? '';
+    this.imageDimension = options.imageDimension ?? options.image_dimension ?? null;
     this.rerankEndpoint = options.rerankEndpoint ?? options.rerank_endpoint ?? '';
     this.rerankApiKey = options.rerankApiKey ?? options.rerank_api_key ?? '';
     this.rerankModel = options.rerankModel ?? options.rerank_model ?? '';
@@ -239,8 +238,6 @@ class Client {
     return callNative(() => this._inner.compile(query));
   }
 }
-
-const pkg = require('./package.json');
 
 module.exports = {
   parse,

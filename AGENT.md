@@ -65,7 +65,7 @@ Canonical plan is `PlannedOperation` (transport-neutral). `Route { method, path,
 
 * **`qql-cli`**: CLI binary. Uses the executor via REST/adapter construction.
 
-* **Foreign Bindings**: PyO3 (`pyqql`), N-API (`nqql`), Wasm-bindgen (`qql-wasm`). Expose parser, tokenization, filter injection, explain, `compile_query` (via `routing::route()`), and `Client` classes. Keep public class names (`Client`, `HttpEmbedder`, `Stmt`), return shapes, and error mappings aligned.
+* **Foreign Bindings**: PyO3 (`pyqql`), N-API (`nqql`), Wasm-bindgen (`qql-wasm`). Expose parser, tokenization, filter injection, explain, `compile_query` (via `qql_plan::routing::compile_statement`), and `Client` classes. Keep public class names (`Client`, `HttpEmbedder`, `Stmt`), return shapes, and error mappings aligned.
 
 ### Permanently Removed Abstractions
 
@@ -83,8 +83,8 @@ The following old abstractions have been permanently removed — do NOT reintrod
 - `QqlError::runtime()` — replaced by `QqlError::execution(code, message, span)`
 - `QqlError::syntax()` — replaced by `QqlError::parse(code, message, span)`
 - `executor/ddl.rs` — DDL now flows through `qql_plan::plan` → REST projection / gRPC route
-- `CompiledQuery` / `offline.rs` — eliminated; `routing::route()` is a compatibility wrapper around `plan()` + `to_rest_route()`
-- `parser/syntax.rs` (pest grammar runtime) — removed from production runtime; pest lives only as a CI contract checker via `qql-grammar-gen`
+- `CompiledQuery` / `offline.rs` — eliminated; the deprecated panicking `routing::route()` wrapper is removed — `routing::try_route()` (fallible) and `compile_statement` supersede it around `plan()` + `to_rest_route()`
+- `parser/syntax.rs` (pest grammar runtime) — removed from production runtime; pest survives only as a test-only harness in `qql-conformance` (dev-dependency that compiles `language/v1/grammar.pest` and gates the fixture corpus), never in `qql-core`. `qql-grammar-gen` instead derives keyword tables, TextMate/TS artifacts, and the generated pest copy from `grammar.pest`
 - `qql-plan/src/embedding.rs` (embedding job extraction) — removed; embeddings are solely owned by `qql-embed`
 - `CollectionSchema` (client.rs) — removed duplicate; backend schema is the only source
 
@@ -192,7 +192,7 @@ REST/gRPC operation-matrix coverage is not yet complete — gRPC tests validate 
 1. **Size Constraints**: Target <400 lines per file where possible. Split large files into modules.
 2. **Error Propagation**: Dispatch directly; bubble up downstream errors. No pre-emptive checks.
 3. **No JSON-as-IR**: `RequestBody` is typed. JSON only at the REST boundary, except for DDL sub-configs and formula expressions which still use JSON within gRPC conversion.
-4. **No duplicate planners**: `qql_plan::plan::plan()` is the single fallible planner. `routing::route()` is a compatibility wrapper. DDL goes through the same planner.
+4. **No duplicate planners**: `qql_plan::plan::plan()` is the single fallible planner. `routing::try_route()` is the fallible REST projection; the deprecated `route()` wrapper is removed. DDL goes through the same planner.
 5. **No glue code**: Each layer has one responsibility. No wrappers around wrappers.
 
 ---

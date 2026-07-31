@@ -1,0 +1,155 @@
+---
+title: "Node.js"
+description: "Run QQL in-process from Node.js with the @veristamp/nqql-edge package."
+sidebar:
+  order: 5
+---
+
+`@veristamp/nqql-edge` is the edge-enabled Node.js package: N-API bindings for
+the QQL runtime plus in-process HNSW storage and optional local ONNX
+embeddings. No Qdrant server and no network at inference time.
+
+{% techBadge name="nqql-edge" variant="orange" /%}
+
+## Install
+
+Node.js >= 18. Prebuilt binaries are published for Linux x86-64, macOS arm64
+(Apple Silicon), and Windows x86-64 — not macOS Intel (ONNX Runtime publishes
+no artifact for it; see [models](/docs/edge/models/)).
+
+{% terminal title="npm" %}
+npm install @veristamp/nqql-edge
+{% /terminal %}
+
+## Quick start
+
+```javascript
+const {
+  localExecutor, listEmbeddingModels, parse, injectFilter, version,
+} = require("@veristamp/nqql-edge");
+
+const client = localExecutor("./qql-data", {
+  model: "bge-small-en-v1.5",
+  onDiskPayload: true,
+});
+
+await client.execute("CREATE COLLECTION docs HYBRID");
+await client.execute('UPSERT INTO docs VALUES {id: 1, text: "hello from edge"}');
+
+const report = await client.execute(
+  "QUERY TEXT 'hello' FROM docs USING dense LIMIT 5"
+);
+console.log(report.results[0].data);
+
+await client.close(); // flush before deleting ./qql-data
+console.log(version, listEmbeddingModels().length);
+```
+
+{% aside type="note" title="Call close() before deleting the data directory" %}
+`close()` flushes the WAL and segments. Deleting `./qql-data` while shards are
+still open can lose or corrupt data — see
+[persistence](/docs/edge/persistence/).
+{% /aside %}
+
+## Constructors
+
+### `localExecutor(dataDir, options)`
+
+Fully offline FastEmbed-backed executor. `dataDir` is the storage path.
+`options` is an object (a bare boolean is accepted for backward
+compatibility and maps to `onDiskPayload`):
+
+| Option | Default | Purpose |
+|---|---|---|
+| `onDiskPayload` | `true` | Store payloads on disk instead of memory |
+| `model` | `BGESmallENV15` | Dense ONNX model name, HF code, or alias (`bge-small-en-v1.5`) |
+| `sparseModel` | `null` | Offline sparse model (e.g. `"splade"`) |
+| `multiModel` | `null` | Offline multivector model (e.g. `"bge-m3"`) |
+| `imageModel` | `null` | Offline CLIP vision model (e.g. `"clip-vision"`) |
+| `rerankerModel` | `null` | Offline cross-encoder model (e.g. `"bge-reranker-base"`) |
+| `cacheDir` | fastembed default | Directory for downloaded models |
+| `showDownloadProgress` | `false` | Show Hugging Face progress bars |
+
+Models are locked at construction. A `USING MODEL '…'` clause naming a
+different model fails loudly instead of switching silently — see
+[models](/docs/edge/models/).
+
+### `httpExecutor(dataDir, url, embedKey, embedModel, embedDim, onDiskPayload?)`
+
+Local storage and search, remote OpenAI-compatible embeddings (Ollama,
+OpenAI, Cohere, Together, Mistral):
+
+```javascript
+const client = httpExecutor(
+  "./qql-data",
+  "http://localhost:11434/v1/embeddings",
+  "",
+  "nomic-embed-text",
+  768,
+  true,
+);
+```
+
+## Client and Stmt
+
+`localExecutor` and `httpExecutor` return a `Client`:
+
+| Method | Purpose |
+|---|---|
+| `client.execute(query, options?)` | Execute a query string, `Stmt`, or array of either; `options.onError` is `"stop"` or `"continue"` |
+| `client.explain(query)` | Human-readable plan for a string |
+| `client.explainStmt(stmt)` | Human-readable plan for a pre-parsed `Stmt` |
+| `client.compile(query)` | Non-executing `{stmt_type, method, path, payload}` route |
+| `client.close()` | Flush and release edge storage. Idempotent |
+
+`execute` returns an `ExecutionReport`:
+
+```javascript
+{
+  ok: true,
+  results: [
+    {
+      ok: true,
+      operation: "QUERY",
+      message: "Found 10 hits",
+      data: { result: { points: [{ id: 1, score: 0.75, payload: { text: "hello" } }] } },
+    },
+  ],
+  succeeded: 1,
+  failed: 0,
+}
+```
+
+`Stmt` objects come from `parse()` and support `stmt.injectFilter(field, op, value)` and
+`stmt.toJson()`. `injectFilter` is the supported tenant-scoping mechanism.
+Edge has no custom `SHARD` routing, so a `SHARD '…'` clause fails at
+execution with `QQL-EDGE-UNSUPPORTED-SHARD` — see
+[capabilities](/docs/edge/capabilities/).
+
+## Module-level helpers
+
+| Export | Purpose |
+|---|---|
+| `parse(query)` | Parse one statement or a script into `Stmt[]` |
+| `parseJson(query)` | Raw AST JSON string (avoids V8 object allocation) |
+| `isValid(query)` | Boolean parse check |
+| `injectFilter(query, field, op, value)` | Return a filtered statement |
+| `tokenize(query)` | Token list `{kind, text, pos}` |
+| `compileQuery(query)` | Non-executing route |
+| `explain(query)` / `explainStmt(stmt)` | Plan rendering |
+| `listEmbeddingModels()` | Catalog of loadable ONNX models |
+| `version` | Package version string |
+| `execute(query, options?)` | One-shot execution with a temporary client (loads the model every call — prefer a long-lived `Client`) |
+| `executeStmt(stmt, options?)` | One-shot execution of a pre-parsed `Stmt` |
+
+Supported injected operators: `=`, `>`, `>=`, `<`, `<=` (`!=` is rejected by
+design; wrap equality and negate instead).
+
+## Errors
+
+Unsupported features throw with a stable code embedded in the message, e.g.
+`QQL-EDGE-UNSUPPORTED-GROUP-BY`, always with a reason and a "use remote
+Qdrant" hint. Errors are never silent no-ops.
+
+See the [Rust](/docs/edge/rust/) page for the underlying engine and
+[models](/docs/edge/models/) for embedding configuration.

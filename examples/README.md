@@ -42,8 +42,9 @@ cd crates/nqql && npm install && npm run build
 node ../../examples/nodejs/basic_to_medium.mjs
 node ../../examples/nodejs/medium_to_expert.mjs
 
-# WASM (needs demo/pkg or wasm-pack build)
-# Serve examples/ + demo/ and open the JS modules in a browser, or run under node with wasm
+# WASM (checked-in Node build of qql-wasm)
+node examples/wasm/basic_to_medium.js
+node examples/wasm/medium_to_expert.js
 ```
 
 ### Multi-tenant pattern (all SDKs)
@@ -102,8 +103,8 @@ cargo build --release -p qql-cli --no-default-features --features rest
 QQL_BIN=./target/release/qql python examples/medical-showcase/main.py
 QQL_BIN=./target/release/qql python examples/medical-showcase/main.py --execute --keep
 
-# Edge (default CLI features include edge + fastembed)
-cargo build --release -p qql-cli
+# Edge (requires edge feature)
+cargo build --release -p qql-cli --features edge
 QQL_BIN=./target/release/qql python examples/edge-demo/main.py
 QQL_BIN=./target/release/qql python examples/edge-demo/main.py --dry-run
 ```
@@ -120,12 +121,12 @@ Examples across this folder exercise:
 - `COUNT … WITH (exact = true)`
 - `SCROLL … WITH VECTOR false`
 - `DELETE PAYLOAD key FROM …`
-- CTE `PREFETCH` + `FORMULA` + `MMR` + `GROUP BY` + `ORDER BY`
+- `CTE` `PREFETCH` + `FORMULA` + `MMR` + `GROUP BY` + `ORDER BY`
 - Recommend / Context / Discover (medical showcase)
 
 ## Version note
 
-Target SDK / engine: **0.1.4+**. Older release binaries (e.g. 0.1.1 CLI) reject some 1.2 syntax — rebuild from this workspace:
+Target SDK / engine: **0.2.0+**. Older release binaries reject some 1.3 syntax — rebuild from this workspace:
 
 ```bash
 cargo build --release -p qql-cli
