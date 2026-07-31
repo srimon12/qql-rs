@@ -318,6 +318,17 @@ jobs:
           assert.equal(wasm.parse_all, undefined);
           assert.equal(wasm.analyzeValue, undefined);
           assert.equal(wasm.compileValue, undefined);
+          assert.equal(wasm.injectShardKey, undefined);
+          NODE
+
+      - name: Verify no removed injectShardKey in WASM declarations
+        run: |
+          set -euo pipefail
+          ! grep -rq 'injectShardKey' crates/qql-wasm/pkg-node/
+          ! grep -rq 'injectShardKey' /tmp/qql-wasm-pkg/
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const wasm = require('/tmp/qql-wasm-pkg/qql_wasm.js');
           const analysis = wasm.analyze('COUNT FROM docs');
           assert.equal(typeof analysis, 'object');
           assert.equal(analysis.valid, true);

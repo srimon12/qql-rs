@@ -184,11 +184,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             file,
             stop_on_error,
         } => commands::handle_execute_file(&url, use_edge, &file, stop_on_error).await,
-        Command::Explain {
-            query,
-            json: _,
-            quiet: _,
-        } => commands::handle_explain(&query),
+        Command::Explain { query, json, quiet } => commands::handle_explain(&query, json, quiet),
         Command::Connect => commands::handle_connect(&url, use_edge).await,
         Command::Convert { file } => commands::handle_convert(file.as_deref()),
         Command::Dump {
@@ -243,7 +239,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             Ok(())
         }
-        Command::Doctor { json, quiet: _ } => commands::handle_doctor(&url, use_edge, json).await,
+        Command::Doctor { json, quiet } => {
+            commands::handle_doctor(&url, use_edge, json, quiet).await
+        }
         Command::Config { command } => match *command {
             ConfigCommand::Edge {
                 data_dir,

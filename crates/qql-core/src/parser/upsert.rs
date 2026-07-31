@@ -50,8 +50,8 @@ impl<'a> AstLowerer<'a> {
         }
 
         let embedding = self.parse_embedding_options()?;
-        let embed = if self.peek()?.kind == TokenKind::Identifier
-            && ascii_equal(self.peek()?.text, "EMBED")
+        let embed = if self.peek()?.kind == TokenKind::Embed
+            || (self.peek()?.is_keyword_or_identifier() && ascii_equal(self.peek()?.text, "EMBED"))
         {
             self.parse_embed_clause()?
         } else {

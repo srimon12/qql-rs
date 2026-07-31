@@ -25,34 +25,24 @@ fn token_precedence(kind: TokenKind) -> u8 {
 }
 
 fn is_formula_kwarg_key(kind: TokenKind) -> bool {
-    matches!(
-        kind,
-        TokenKind::Identifier
-            | TokenKind::String
-            | TokenKind::Target
-            | TokenKind::Score
-            | TokenKind::Offset
-            | TokenKind::Threshold
-            | TokenKind::Lookup
-    )
+    kind.is_keyword_or_identifier() || kind == TokenKind::String
 }
 
 type PrefixParseFn = fn(&mut AstLowerer<'_>) -> Result<FormulaExpr, QqlError>;
 type InfixParseFn = fn(&mut AstLowerer<'_>, FormulaExpr) -> Result<FormulaExpr, QqlError>;
 
-fn formula_prefix_parse_fn(kind: TokenKind) -> Option<PrefixParseFn> {
-    match kind {
-        TokenKind::Identifier
-        | TokenKind::Score
-        | TokenKind::Offset
-        | TokenKind::Threshold
-        | TokenKind::Lookup
-        | TokenKind::Match => Some(parse_formula_identifier_or_func),
-        TokenKind::Integer | TokenKind::Float => Some(parse_formula_constant),
-        TokenKind::Minus => Some(parse_formula_prefix_expression),
-        TokenKind::Lparen => Some(parse_formula_grouped_expression),
-        TokenKind::Case => Some(parse_formula_case_expression),
-        _ => None,
+fn formula_prefix_parse_fn(tok: &crate::token::Token<'_>) -> Option<PrefixParseFn> {
+    if tok.kind == TokenKind::Case {
+        Some(parse_formula_case_expression)
+    } else if tok.is_keyword_or_identifier() {
+        Some(parse_formula_identifier_or_func)
+    } else {
+        match tok.kind {
+            TokenKind::Integer | TokenKind::Float => Some(parse_formula_constant),
+            TokenKind::Minus => Some(parse_formula_prefix_expression),
+            TokenKind::Lparen => Some(parse_formula_grouped_expression),
+            _ => None,
+        }
     }
 }
 
@@ -68,7 +58,7 @@ fn formula_infix_parse_fn(kind: TokenKind) -> Option<InfixParseFn> {
 impl<'a> AstLowerer<'a> {
     pub fn parse_formula_expr(&mut self, precedence: u8) -> Result<FormulaExpr, QqlError> {
         let tok = self.peek()?;
-        let prefix = formula_prefix_parse_fn(tok.kind).ok_or_else(|| {
+        let prefix = formula_prefix_parse_fn(&tok).ok_or_else(|| {
             QqlError::syntax(
                 alloc::format!("unexpected token in formula: {}", tok.text),
                 tok.pos,
@@ -152,7 +142,10 @@ fn parse_formula_infix_expression(
             let mut by_zero_default = None;
             if p.peek()?.kind == TokenKind::Lbracket && p.index + 1 < p.tokens.len() {
                 let next_tok = &p.tokens[p.index + 1];
-                if next_tok.kind == TokenKind::Identifier && ascii_equal(next_tok.text, "DEFAULT") {
+                if next_tok.kind == TokenKind::Default
+                    || (next_tok.is_keyword_or_identifier()
+                        && ascii_equal(next_tok.text, "DEFAULT"))
+                {
                     p.advance()?;
                     p.advance()?;
                     p.expect(TokenKind::Equals)?;
@@ -351,19 +344,13 @@ fn parse_formula_function_call(
             Ok(FormulaExpr::GeoDistance { lat, lon, field })
         }
         "exp_decay" | "gauss_decay" | "lin_decay" => {
-            if args.is_empty() && kwargs.is_empty() {
-                return Err(QqlError::syntax(
-                    alloc::format!(
-                        "{}() expects at least 1 argument (x)",
-                        func_name.to_uppercase()
-                    ),
-                    pos,
-                ));
-            }
-
             let x = if !args.is_empty() {
                 args[0].clone()
-            } else if let Some(val) = kwargs.iter().find(|(k, _)| *k == "x").map(|(_, v)| v) {
+            } else if let Some(val) = kwargs
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("x"))
+                .map(|(_, v)| v)
+            {
                 val.clone()
             } else {
                 return Err(QqlError::syntax(
@@ -377,7 +364,7 @@ fn parse_formula_function_call(
             } else {
                 kwargs
                     .iter()
-                    .find(|(k, _)| *k == "target")
+                    .find(|(k, _)| k.eq_ignore_ascii_case("target"))
                     .map(|(_, v)| v)
                     .map(|val| Box::new(val.clone()))
             };
@@ -392,7 +379,11 @@ fn parse_formula_function_call(
                         ));
                     }
                 }
-            } else if let Some(val) = kwargs.iter().find(|(k, _)| *k == "scale").map(|(_, v)| v) {
+            } else if let Some(val) = kwargs
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("scale"))
+                .map(|(_, v)| v)
+            {
                 match val {
                     FormulaExpr::Constant { value } => Some(*value),
                     _ => {
@@ -418,7 +409,7 @@ fn parse_formula_function_call(
                 }
             } else if let Some(val) = kwargs
                 .iter()
-                .find(|(k, _)| *k == "midpoint")
+                .find(|(k, _)| k.eq_ignore_ascii_case("midpoint"))
                 .map(|(_, v)| v)
             {
                 match val {
@@ -430,7 +421,11 @@ fn parse_formula_function_call(
                         ));
                     }
                 }
-            } else if let Some(val) = kwargs.iter().find(|(k, _)| *k == "decay").map(|(_, v)| v) {
+            } else if let Some(val) = kwargs
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("decay"))
+                .map(|(_, v)| v)
+            {
                 match val {
                     FormulaExpr::Constant { value } => Some(*value),
                     _ => {

@@ -20,6 +20,12 @@ pub(crate) fn convert_query_request(request: &PlanQueryRequest) -> Result<QueryR
     if request.shard_key.is_some() {
         return Err(unsupported_shard());
     }
+    if request.timeout.is_some() {
+        return Err(crate::backend::unsupported::EdgeUnsupported::Timeout.error());
+    }
+    if request.consistency.is_some() {
+        return Err(crate::backend::unsupported::EdgeUnsupported::Consistency.error());
+    }
     Ok(QueryRequest {
         prefetches: request
             .prefetch

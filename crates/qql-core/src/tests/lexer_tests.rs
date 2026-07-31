@@ -19,6 +19,29 @@ fn basic_keywords() {
 }
 
 #[test]
+fn grammar_keywords_in_token_rs() {
+    let pest = include_str!("../../../../language/v1/grammar.pest");
+    for line in pest.lines() {
+        let line = line.split("//").next().unwrap_or_default();
+        let mut rest = line;
+        while let Some(idx) = rest.find("^\"") {
+            let cand = &rest[idx + 2..];
+            let end = cand.find('"').unwrap();
+            let word = &cand[..end];
+            if word.bytes().all(|b| b.is_ascii_alphabetic() || b == b'_') && word.len() > 1 {
+                let kw = word.to_ascii_uppercase();
+                assert!(
+                    crate::token::lookup_keyword(&kw).is_some(),
+                    "Keyword '{}' from grammar.pest is missing from token.rs KEYWORDS map",
+                    kw
+                );
+            }
+            rest = &cand[end + 1..];
+        }
+    }
+}
+
+#[test]
 fn unicode_comparison_operators() {
     let t = tokens("year ≥ 2024 AND year ≤ 2030 AND id ≠ 5");
     assert_eq!(t[1].0, TokenKind::Gte);

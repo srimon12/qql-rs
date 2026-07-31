@@ -126,6 +126,10 @@ Intel Mac users should disable default features and use `http-embedding` or
 - `IMAGE` expects local filesystem paths (no remote URL fetch)
 - Query/update “batch” is fan-out, not a single native batch RPC
 
+### Storage & Concurrency Contract
+
+Each `data_dir` storage directory requires **exclusive single-process access** for reading and writing segments and payload files. Attempting to initialize multiple `EdgeQdrant` instances pointing to the same `data_dir` from separate processes concurrently is not supported.
+
 ### Unsupported product surface (stable codes)
 
 Offline rejects use a fixed catalog (`backend/unsupported.rs`). Messages include
@@ -139,6 +143,8 @@ Offline rejects use a fixed catalog (`backend/unsupported.rs`). Messages include
 | `QQL-EDGE-UNSUPPORTED-ALTER` | `ALTER COLLECTION` |
 | `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | collection `WITH PARAMS` (replication, …) |
 | `QQL-EDGE-UNSUPPORTED-ACORN` | `PARAMS (acorn = …)` |
+| `QQL-EDGE-UNSUPPORTED-TIMEOUT` | `PARAMS (timeout = …)` |
+| `QQL-EDGE-UNSUPPORTED-CONSISTENCY` | `PARAMS (consistency = …)` |
 | `QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY` | `RECOMMEND STRATEGY average_vector` (use `best_score` / `sum_scores`) |
 | `QQL-EDGE-UNSUPPORTED-POINT-REF` | point-id query inputs without embedded vectors |
 | `QQL-EDGE-UNSUPPORTED-ROUTE` | unmapped REST projection |

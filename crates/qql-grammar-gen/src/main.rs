@@ -29,7 +29,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     let source_path = root.join("language/v1/grammar.pest");
     let source = fs::read_to_string(&source_path)?;
     let literals = grammar_literals(&source);
-    let artifacts = vec![
+    let artifacts = [
         Artifact {
             path: root.join("crates/qql-core/grammar/qql.generated.pest"),
             contents: render_pest(&source),

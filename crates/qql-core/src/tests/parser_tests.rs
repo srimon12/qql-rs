@@ -163,6 +163,12 @@ fn formula_query() {
 }
 
 #[test]
+fn formula_query_div_default() {
+    let res = Parser::parse("QUERY FORMULA ($score / views [DEFAULT = 1.0]) * 10 DEFAULTS (score = 0.0) FROM docs LIMIT 10;");
+    assert!(res.is_ok(), "failed: {:?}", res.err());
+}
+
+#[test]
 fn relevance_feedback() {
     let s = Parser::parse(
         "QUERY RELEVANCE FEEDBACK TARGET POINT 1 FEEDBACK ((POINT 2, 0.8)) STRATEGY naive (a = 1, b = 0.5, c = 0.25) FROM docs;",

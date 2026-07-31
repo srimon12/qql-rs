@@ -1,7 +1,10 @@
+use std::io::IsTerminal;
+
 pub async fn handle_doctor(
     url: &str,
     use_edge: bool,
     json: bool,
+    quiet: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let executor = executor(url, use_edge)?;
     let hosts = doctor_host_summary(executor.config(), use_edge);
@@ -11,6 +14,9 @@ pub async fn handle_doctor(
     executor.close().await?;
     match result {
         Ok(_) => {
+            if quiet {
+                return Ok(());
+            }
             let target = if use_edge {
                 "the local edge backend".to_string()
             } else {
@@ -38,6 +44,9 @@ pub async fn handle_doctor(
             } else {
                 format!("Qdrant at {url}")
             };
+            if quiet {
+                return Err(format!("Failed to connect to {target}: {e}").into());
+            }
             if json {
                 println!(
                     "{}",
@@ -260,16 +269,26 @@ pub async fn handle_execute_file(
     Ok(())
 }
 
-pub fn handle_explain(query: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub fn handle_explain(
+    query: &str,
+    json: bool,
+    quiet: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     let plan = explain_query(query)?;
-
-    let resp = output::ExplainResponse {
-        ok: true,
-        query: query.to_string(),
-        plan: plan.clone(),
-    };
-    let s = serde_json::to_string_pretty(&resp)?;
-    println!("{}", s);
+    if quiet {
+        return Ok(());
+    }
+    if json {
+        let resp = output::ExplainResponse {
+            ok: true,
+            query: query.to_string(),
+            plan,
+        };
+        let s = serde_json::to_string_pretty(&resp)?;
+        println!("{}", s);
+    } else {
+        println!("{}", plan);
+    }
     Ok(())
 }
 
@@ -560,6 +579,12 @@ fn edge_executor() -> Result<qql::executor::Executor, Box<dyn std::error::Error>
     let config = crate::config::EdgeConfig::load()?.apply_environment();
     match config.embedder.as_str() {
         "fastembed" => {
+            let is_tty = std::io::stdout().is_terminal();
+            let show_progress = config.show_download_progress || is_tty;
+            let model_name = config.model.as_deref().unwrap_or("BGESmallENV15");
+            if show_progress {
+                eprintln!("ℹ Initializing local edge embedder (model: '{model_name}'). Model weights are downloaded on first run if not cached.");
+            }
             let options = qql_edge::LocalExecutorOptions {
                 on_disk_payload: config.on_disk_payload,
                 model: config.model,
@@ -568,7 +593,7 @@ fn edge_executor() -> Result<qql::executor::Executor, Box<dyn std::error::Error>
                 image_model: config.image_model.or(config.image_embed_model.clone()),
                 reranker_model: config.reranker_model.clone(),
                 cache_dir: config.cache_dir,
-                show_download_progress: config.show_download_progress,
+                show_download_progress: show_progress,
             };
             qql_edge::local_executor_with_options(config.data_dir, options)
                 .map_err(|error| format!("edge initialization failed: {error}").into())

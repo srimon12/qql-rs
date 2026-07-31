@@ -27,6 +27,10 @@ pub enum EdgeUnsupported {
     CollectionParams,
     /// `PARAMS (acorn = …)`.
     Acorn,
+    /// `PARAMS (timeout = …)`.
+    Timeout,
+    /// `PARAMS (consistency = …)`.
+    Consistency,
     /// `RECOMMEND … STRATEGY average_vector`.
     RecommendAverageVector,
     /// Nearest/recommend inputs that are only point IDs (need materialised vectors offline).
@@ -44,6 +48,8 @@ impl EdgeUnsupported {
             Self::AlterCollection => "QQL-EDGE-UNSUPPORTED-ALTER",
             Self::CollectionParams => "QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS",
             Self::Acorn => "QQL-EDGE-UNSUPPORTED-ACORN",
+            Self::Timeout => "QQL-EDGE-UNSUPPORTED-TIMEOUT",
+            Self::Consistency => "QQL-EDGE-UNSUPPORTED-CONSISTENCY",
             Self::RecommendAverageVector => "QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY",
             Self::PointReferenceQuery => "QQL-EDGE-UNSUPPORTED-POINT-REF",
             Self::Route { .. } => "QQL-EDGE-UNSUPPORTED-ROUTE",
@@ -61,6 +67,8 @@ impl EdgeUnsupported {
             Self::AlterCollection => "ALTER COLLECTION",
             Self::CollectionParams => "collection WITH PARAMS (replication, etc.)",
             Self::Acorn => "PARAMS (acorn = …)",
+            Self::Timeout => "PARAMS (timeout = …)",
+            Self::Consistency => "PARAMS (consistency = …)",
             Self::RecommendAverageVector => "RECOMMEND STRATEGY average_vector",
             Self::PointReferenceQuery => "point-id query inputs without embedded vectors",
             Self::Route { path_hint } => path_hint,
@@ -78,6 +86,10 @@ impl EdgeUnsupported {
                 "edge storage is configured via LocalExecutorOptions, not collection PARAMS"
             }
             Self::Acorn => "ACORN is a clustered Qdrant HNSW search feature unavailable offline",
+            Self::Timeout => "qql-edge runs in-process without network RPC timeouts",
+            Self::Consistency => {
+                "qql-edge is a single-node in-process engine without replica consistency levels"
+            }
             Self::RecommendAverageVector => {
                 "qdrant-edge recommend supports best_score and sum_scores only"
             }
