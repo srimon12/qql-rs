@@ -251,19 +251,25 @@ impl<'a> AstLowerer<'a> {
         if self.peek()?.kind == TokenKind::With {
             self.advance()?;
             let opts = self.parse_config_block()?;
-            for (key, val) in &opts {
+            for (key, value) in &opts {
                 let key_lower = key.to_ascii_lowercase();
-                if key_lower == "shards_number" {
-                    if let crate::ast::Value::Int(n) = val {
-                        if *n > 0 {
-                            shards_number = Some(*n as u64);
-                        }
+                match key_lower.as_str() {
+                    "shards_number" => {
+                        shards_number = Some(self.positive_shard_key_u64("shards_number", value)?);
                     }
-                } else if key_lower == "replication_factor" {
-                    if let crate::ast::Value::Int(n) = val {
-                        if *n > 0 {
-                            replication_factor = Some(*n as u64);
-                        }
+                    "replication_factor" => {
+                        replication_factor =
+                            Some(self.positive_shard_key_u64("replication_factor", value)?);
+                    }
+                    _ => {
+                        return Err(QqlError::parse(
+                            "QQL-PARSE-SHARD-KEY-CONFIG",
+                            alloc::format!(
+                                "unknown CREATE SHARD KEY parameter '{}'. Expected: shards_number, replication_factor",
+                                key
+                            ),
+                            self.peek()?.span,
+                        ));
                     }
                 }
             }
@@ -274,5 +280,23 @@ impl<'a> AstLowerer<'a> {
             shards_number,
             replication_factor,
         })))
+    }
+
+    /// `CREATE SHARD KEY` options are positive integers (the Qdrant wire
+    /// fields are `u32`): reject floats (even integral ones), zero, negatives,
+    /// and any non-integer value instead of silently dropping the option.
+    fn positive_shard_key_u64(
+        &mut self,
+        name: &str,
+        value: &crate::ast::Value,
+    ) -> Result<u64, QqlError> {
+        match value {
+            crate::ast::Value::Int(n) if *n > 0 => Ok(*n as u64),
+            _ => Err(QqlError::parse(
+                "QQL-PARSE-SHARD-KEY-CONFIG",
+                alloc::format!("{} must be a positive integer", name),
+                self.peek()?.span,
+            )),
+        }
     }
 }

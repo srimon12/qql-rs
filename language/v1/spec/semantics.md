@@ -118,12 +118,37 @@ For an existing collection:
 - `ON FIELD field` explicitly names the target payload text field to embed.
 - Multiple comma-separated embedding specs may be specified (e.g. `USING DENSE MODEL 'm1' ON FIELD text INTO dense, DENSE MODEL 'm2' ON FIELD title INTO title_vec`).
 - When `ON FIELD` is omitted, default payload text field resolution follows a deterministic priority order: `text` > `body` > `content` > `title` > `description` > `name` > `summary` > `document`.
-- Each `EMBED field INTO name` directive targets exactly the named vector;
-  `USING SPARSE` selects sparse embedding, while the default is dense.
+- Each `EMBED field INTO name` directive targets exactly the named vector and
+  selects one embedding kind:
+  - `USING DENSE` (also the default when no `USING` kind is written, including
+    a bare `USING MODEL`) — text → dense vector;
+  - `USING SPARSE` — text → sparse vector;
+  - `USING MULTI` / `USING MULTIVECTOR` — synonyms; text → multi-dense bag
+    (`[[f32, …], …]`, ColBERT-style late interaction). The target must be a
+    multivector slot; when the collection declares no multivector slots, a
+    dense slot is accepted as the target (offline fallback). An empty or
+    mis-sized bag fails with `QQL-EMBEDDING-MULTI`;
+  - `USING IMAGE` — the payload field holds an image path or URL; image →
+    dense vector via the host vision model (CLIP; not multivector). The target
+    must be a dense slot. A mis-sized image batch fails with
+    `QQL-EMBEDDING-IMAGE`.
+  Each kind accepts an optional `MODEL '…'`; an omitted model defaults to the
+  embedder's `default` model.
+- The `USING` clause accepts the same kinds through `single_embedding_spec`:
+  `USING MULTI` / `USING MULTIVECTOR` (synonyms) embed text into a multivector
+  slot named `colbert` by default (or `VECTOR name` / `INTO name`); `USING
+  IMAGE` embeds the image source field into a dense slot named `image` by
+  default (or an explicit name). When `ON FIELD` is omitted, `USING MULTI` /
+  `USING MULTIVECTOR` resolve text fields with the text priority order above,
+  and `USING IMAGE` resolves image-source fields (`image` > `image_path` >
+  `image_url` > `photo` > `picture` > `img` > `path` > `url`).
 - An UPSERT with no explicit `ON FIELD` or `EMBED` directive infers text from the payload using the deterministic priority order. If no matching text payload field exists, resolution fails with an error (`QQL-EMBEDDING`).
 
 For a missing collection, implicit text ingestion creates the conventional
-`dense` + `sparse` topology. Explicit creation/embedding names are preserved.
+`dense` + `sparse` topology. `USING MULTI` / `USING MULTIVECTOR` / `USING
+IMAGE` alone do not auto-create a collection; the collection and its
+multivector/dense slots must already exist. Explicit creation/embedding names
+are preserved.
 
 Vector spelling never determines vector role.
 
@@ -171,7 +196,7 @@ Request-level options (not body `SearchParams` on the wire):
 | Key | Rule | Wire (OpenAPI / proto) |
 |---|---|---|
 | `timeout` | Positive integer seconds | REST query `timeout`; gRPC `timeout` |
-| `consistency` | Factor ≥ 0, or `majority` / `quorum` / `all` | REST query `consistency`; gRPC `read_consistency` |
+| `consistency` | Non-negative integer factor, or `majority` / `quorum` / `all` | REST query `consistency`; gRPC `read_consistency` |
 
 Body search parameters (OpenAPI `SearchParams`):
 
@@ -191,8 +216,9 @@ are invalid on non-RRF expressions.
 ## 5. Filters and formulas
 
 Filter precedence, highest to lowest, is primary/predicate, recursive `NOT`,
-`AND`, then `OR`. Comparison against `id` only permits `=` and `IN`, and every
-value must be a valid point ID. `IN` and `MATCH ANY` lists are non-empty.
+`AND`, then `OR`. Comparison against `id` permits `=`, `IN`, and — via `NOT`
+normalization — `!=` and `NOT IN`; every value must be a valid point ID. `IN`
+and `MATCH ANY` lists are non-empty.
 
 `!=`, `NOT IN`, `IS NOT NULL`, and `IS NOT EMPTY` normalize to a `Not` node
 around the corresponding positive node. Geo validation requires latitude in
@@ -246,7 +272,8 @@ ALTER form. `sharding_method` accepts the string `'auto'` or `'custom'`;
 Index options are limited to boolean `is_tenant`, `on_disk`, `enable_hnsw`,
 `lowercase`, `ascii_folding`, `phrase_matching`, `lookup`, `range`, and
 `is_principal`; non-negative `min_token_len`/`max_token_len`; string
-`tokenizer`; and string-list `stopwords`.
+`tokenizer` and `stemmer`; and string-list `stopwords`. The parser accepts
+these options and forwards them to the backend's `field_schema`.
 
 ## 7. Canonical AST (`qql.ast/v1`)
 
@@ -256,7 +283,9 @@ Every expected file has this envelope:
 {
   "schema": "qql.ast/v1",
   "statements": [
-    "ShowCollections"
+    {
+      "ShowCollections": {}
+    }
   ]
 }
 ```
@@ -265,8 +294,10 @@ The generated files, not a Rust type layout, are the normative schema. The
 reference adapter currently maps qql-core values as follows:
 
 - enums use externally tagged JSON (`{"Query": {...}}`);
-- unit variants serialize as strings or null-valued tags according to the
-  fixture;
+- unit variants serialize as strings when the derived serializer applies
+  (e.g. `"SampleRandom"`) or as an empty-object tag for the custom `Stmt`
+  serializer (e.g. `{"ShowCollections": {}}`); the `Stmt` deserializer
+  accepts both representations, so every statement round-trips;
 - optional fields are present as `null`;
 - ordered maps/payloads remain arrays of `[key, value]` pairs;
 - identifiers and decoded strings preserve spelling;
@@ -293,32 +324,117 @@ invalid fixtures are normative for those cases.
 
 | Code | Meaning |
 |---|---|
-| `QQL-LEX-STRING` | Unterminated string |
-| `QQL-PARSE-STATEMENT` | Unknown/legacy statement keyword |
-| `QQL-PARSE-EMPTY-STATEMENT` | Empty script element |
-| `QQL-PARSE-EXPECTED` | Required token missing |
-| `QQL-PARSE-QUERY-INPUT` | Invalid query input form |
+| `QQL-LEX-CHAR` | A character cannot start any token |
+| `QQL-LEX-NUMBER` | Malformed numeric literal (a trailing decimal point, or an exponent without digits) |
+| `QQL-LEX-STRING` | Unterminated string literal |
+| `QQL-PARSE-STATEMENT` | Unknown or legacy statement keyword (`SELECT`, `INSERT`, `BOOST`) |
+| `QQL-PARSE-EMPTY-STATEMENT` | Empty script element, such as a leading or repeated separator |
+| `QQL-PARSE-EXPECTED` | A required token is missing (for example an unmatched parenthesis) |
+| `QQL-PARSE-QUERY-INPUT` | Invalid query input form (a bare number is not a query input) |
 | `QQL-PARSE-CLAUSE-ORDER` | Duplicate or out-of-order query clause |
-| `QQL-PARSE-VECTOR-KIND` | `AS` is not DENSE or SPARSE |
-| `QQL-PARSE-DUPLICATE-CTE` | Duplicate CTE name |
-| `QQL-PARSE-DUPLICATE-KEY` | Duplicate object/config key |
-| `QQL-PARSE-POSITIVE-INTEGER` | Value must be positive |
-| `QQL-PARSE-NONNEGATIVE-INTEGER` | Value must be non-negative |
-| `QQL-PARSE-SYNTAX` | Production-specific syntax/range failure |
-| `QQL-VALIDATION-FROM` | Top-level query lacks FROM |
-| `QQL-VALIDATION-PREFETCH-CTE` | Unknown CTE reference |
-| `QQL-VALIDATION-FUSION-PREFETCH` | Fusion lacks prefetch |
-| `QQL-VALIDATION-RERANK-PREFETCH` | Rerank lacks prefetch |
-| `QQL-VALIDATION-POINTS-CLAUSE` | Unsupported clause on POINTS |
-| `QQL-VALIDATION-UPSERT-ID` | UPSERT row lacks valid ID |
-| `QQL-VALIDATION-MMR` | MMR diversity is invalid |
+| `QQL-PARSE-VECTOR-KIND` | `AS` is not `DENSE`, `SPARSE`, `MULTI`, or `MULTIVECTOR` |
+| `QQL-PARSE-DUPLICATE-CTE` | Duplicate CTE name in one script |
+| `QQL-PARSE-DUPLICATE-KEY` | Duplicate object or config key (ASCII case-insensitive) |
+| `QQL-PARSE-POSITIVE-INTEGER` | Value must be a positive integer (for example `LIMIT`, `CANDIDATES`, vector size) |
+| `QQL-PARSE-NONNEGATIVE-INTEGER` | Value must be non-negative (for example `OFFSET`, `VALUES_COUNT`) |
+| `QQL-PARSE-SYNTAX` | Production-specific syntax or range failure |
+| `QQL-PARSE-COMPARISON` | Expected a comparison operator |
+| `QQL-PARSE-CONTEXT` | `CONTEXT` requires at least one positive/negative pair |
+| `QQL-PARSE-COUNT-CONFIG` | `COUNT … WITH (…)` accepts only `exact = true` / `exact = false` |
+| `QQL-PARSE-CROSS-RERANK` | `CROSS RERANK` requires `TEXT '…'` or a string query input |
+| `QQL-PARSE-EMBED` | `EMBED USING` requires `DENSE`, `SPARSE`, `MULTI`, `IMAGE`, or `MODEL` |
+| `QQL-PARSE-EMBEDDING` | Duplicate clause in a HYBRID embedding spec |
+| `QQL-PARSE-ESCAPE` | Unterminated escape sequence |
+| `QQL-PARSE-FEEDBACK-STRATEGY` | `STRATEGY NAIVE` requires exactly `a`, `b`, `c` in order |
+| `QQL-PARSE-FIELD` | Expected a field name |
+| `QQL-PARSE-FILTER` | Expected a filter operator (for example `IS` requires `NULL`/`EMPTY`) |
+| `QQL-PARSE-FLOAT` | Invalid float literal |
+| `QQL-PARSE-IDENTIFIER` | Expected an identifier or quoted name |
+| `QQL-PARSE-IN` | `IN` / `NOT IN` requires a non-empty value list |
+| `QQL-PARSE-INDEX-TYPE` | Unsupported `CREATE INDEX` field type |
+| `QQL-PARSE-INTEGER` | Invalid integer literal |
+| `QQL-PARSE-LITERAL` | Expected a scalar literal |
+| `QQL-PARSE-MATCH-ANY` | `MATCH ANY` requires a non-empty exact-value list |
+| `QQL-PARSE-NUMBER` | Expected a number |
+| `QQL-PARSE-OBJECT-KEY` | Expected an object key |
+| `QQL-PARSE-PAYLOAD-SELECTOR` | `WITH PAYLOAD` requires `true`, `false`, `INCLUDE (...)`, or `EXCLUDE (...)` |
+| `QQL-PARSE-POINT-ID` | A point ID must be an unsigned integer or a string |
+| `QQL-PARSE-POINT-IDS` | A point ID list cannot be empty |
+| `QQL-PARSE-PREFETCH` | `PREFETCH` cannot be empty |
+| `QQL-PARSE-RERANK` | `RERANK` input requires `TEXT '…'`, `VECTOR […]`, or `POINT <id>` |
+| `QQL-PARSE-SAMPLE` | `SAMPLE` requires `RANDOM` |
+| `QQL-PARSE-SELECTOR` | A selector list cannot be empty |
+| `QQL-PARSE-SEPARATOR` | Multiple statements must be separated by a semicolon |
+| `QQL-PARSE-SHARD-KEY-CONFIG` | `CREATE SHARD KEY … WITH (…)` accepts only positive-integer `shards_number` / `replication_factor` |
+| `QQL-PARSE-STATEMENT-LIMIT` | A script may contain at most 256 statements |
+| `QQL-PARSE-TRAILING` | Unexpected trailing token |
+| `QQL-PARSE-UPDATE` | Expected `VECTOR` or `PAYLOAD` after `SET` |
+| `QQL-PARSE-VALUE` | Unexpected value token |
+| `QQL-VALIDATION-FROM` | A top-level query lacks `FROM` |
+| `QQL-VALIDATION-PREFETCH-CTE` | A `PREFETCH` name does not resolve to a CTE |
+| `QQL-VALIDATION-FUSION-PREFETCH` | `QUERY FUSION` has no `PREFETCH` |
+| `QQL-VALIDATION-RERANK-PREFETCH` | `QUERY RERANK` has no `PREFETCH` |
+| `QQL-VALIDATION-POINTS-CLAUSE` | `QUERY POINTS` uses a clause it cannot accept |
+| `QQL-VALIDATION-UPSERT-ID` | An UPSERT point lacks a valid `id` key |
+| `QQL-VALIDATION-MMR` | MMR `DIVERSITY` is outside `[0, 1]` or not finite |
 | `QQL-VALIDATION-HYBRID` | Invalid `USING HYBRID` / `QUERY HYBRID` combination |
-| `QQL-PLAN-VECTOR-KIND` | Structural input and declared role disagree |
-| `QQL-MISSING-USING` | Schema inference is ambiguous |
-| `QQL-UNKNOWN-VECTOR` | Explicit name does not exist |
-| `QQL-VECTOR-KIND` | Schema role conflicts with requested role |
-| `QQL-EMBEDDING-TOPOLOGY` | UPSERT embedding inference is ambiguous |
-| `QQL-EMBEDDING-TARGET` | UPSERT target is absent/wrong-role |
+| `QQL-VALIDATION-FILTER-INJECT` | `inject_filter` does not apply to this statement type |
+| `QQL-VALIDATION-ID-PREDICATE` | A point ID predicate uses an operator other than `=`, `!=`, `IN`, or `NOT IN` |
+| `QQL-VALIDATION-POINT-ID` | A value used as a point ID is neither an unsigned integer nor a string |
+| `QQL-VALIDATION-ACORN-SELECTIVITY` | `max_selectivity` requires `PARAMS (acorn = true, …)` |
+| `QQL-VALIDATION-CONFIG` | Invalid collection configuration block |
+| `QQL-VALIDATION-CONSISTENCY` | `consistency` must be a non-negative integer factor or `majority` / `quorum` / `all` |
+| `QQL-VALIDATION-CREATE-MODEL` | `CREATE COLLECTION … HYBRID` rejects a single dense `MODEL` |
+| `QQL-VALIDATION-CROSS-RERANK-PREFETCH` | `CROSS RERANK` requires `PREFETCH` |
+| `QQL-VALIDATION-FUSION` | The fusion method must be `RRF` or `DBSF` |
+| `QQL-VALIDATION-GEO` | Invalid geo coordinates, radius, or polygon ring |
+| `QQL-VALIDATION-LIMIT-OVERFLOW` | `LIMIT` + `OFFSET` (or hybrid candidate scaling) overflows `u64` |
+| `QQL-VALIDATION-PREFETCH` | This query expression does not accept `PREFETCH` |
+| `QQL-VALIDATION-RECOMMEND-STRATEGY` | Unknown `RECOMMEND STRATEGY` |
+| `QQL-VALIDATION-RERANK-USING` | `RERANK` requires `USING <vector>` |
+| `QQL-VALIDATION-SCORE` | A score threshold must be finite |
+| `QQL-VALIDATION-SEARCH-PARAM` | Unknown search parameter |
+| `QQL-VALIDATION-USING` | This query expression does not accept `USING` |
+| `QQL-VALIDATION-VECTOR` | Invalid vector value |
+| `QQL-PLAN-VECTOR-KIND` | Structural vector input and the declared `AS` role disagree |
+| `QQL-MISSING-USING` | Schema inference is ambiguous; add `USING <vector>` |
+| `QQL-UNKNOWN-VECTOR` | The explicit vector name does not exist in the collection |
+| `QQL-VECTOR-KIND` | The schema role conflicts with the requested role, or the kind is unresolved before embedding |
+| `QQL-PLAN-COLLECTION` | A query collection name must not be empty |
+| `QQL-PLAN-CROSS-RERANK-CANDIDATE` | A `CROSS RERANK` prefetch must plan as a search query |
+| `QQL-PLAN-CROSS-RERANK-CTE` | `PREFETCH` references an unknown CTE |
+| `QQL-PLAN-CROSS-RERANK-MODEL` | `CROSS RERANK MODEL` must not be empty |
+| `QQL-PLAN-CROSS-RERANK-PREFETCH` | `CROSS RERANK` requires at least one `PREFETCH` |
+| `QQL-PLAN-CROSS-RERANK-QUERY` | `CROSS RERANK` query text must not be empty |
+| `QQL-PLAN-FUSION-PREFETCH` | `FUSION` requires at least one prefetch |
+| `QQL-PLAN-PREFETCH-CTE` | `PREFETCH` references an unknown CTE |
+| `QQL-PLAN-PREFETCH-GROUP` | `GROUP BY` is not supported inside a `PREFETCH` source |
+| `QQL-PLAN-RERANK-PREFETCH` | `RERANK` requires at least one `PREFETCH` |
+| `QQL-PLAN-RERANK-USING` | `RERANK` requires a non-empty `USING` vector name |
+| `QQL-PLAN-RRF-PARAMS` | `rrf_k` and `rrf_weights` are valid only with `RRF` fusion |
+| `QQL-PLAN-RRF-WEIGHTS` | `rrf_weights` length must equal the prefetch count |
+| `QQL-PLAN-UNSUPPORTED-PREFETCH` | `POINTS` / `CROSS RERANK` are not supported inside `PREFETCH` |
+| `QQL-REST-CLIENT-SIDE` | The operation is executed client-side and has no single Qdrant REST route |
+| `QQL-BACKEND` | Generic backend or transport failure |
+| `QQL-JSON-NONFINITE` | A non-finite float cannot be serialized to JSON |
+| `QQL-JSON-NUMBER` | A value cannot be represented as a JSON number |
+| `QQL-EMBEDDING-TOPOLOGY` | UPSERT embedding inference is ambiguous across the collection topology |
+| `QQL-EMBEDDING-TARGET` | The UPSERT embedding target is absent or has the wrong role |
+| `QQL-EMBEDDING-MULTI` | Multi-vector embedding returned an empty or mis-sized bag for the requested text batch |
+| `QQL-EMBEDDING-IMAGE` | Image embedding returned an empty or mis-sized batch for the requested image sources |
+| `QQL-EDGE-UNSUPPORTED-GROUP-BY` | `GROUP BY` / query groups are not available offline |
+| `QQL-EDGE-UNSUPPORTED-SHARD` | `SHARD` routing or collection sharding options are not available offline |
+| `QQL-EDGE-UNSUPPORTED-SHARD-KEY` | `CREATE` / `DROP SHARD KEY` are not available offline |
+| `QQL-EDGE-UNSUPPORTED-ALTER` | `ALTER COLLECTION` is not available offline |
+| `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | Collection `WITH PARAMS` is not available offline |
+| `QQL-EDGE-UNSUPPORTED-ACORN` | `PARAMS (acorn = ...)` is not available offline |
+| `QQL-EDGE-UNSUPPORTED-TIMEOUT` | `PARAMS (timeout = ...)` is not available offline |
+| `QQL-EDGE-UNSUPPORTED-CONSISTENCY` | `PARAMS (consistency = ...)` is not available offline |
+| `QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY` | `RECOMMEND STRATEGY average_vector`; offline supports `best_score` and `sum_scores` only |
+| `QQL-EDGE-UNSUPPORTED-POINT-REF` | Point-ID query inputs need materialized vectors offline |
+| `QQL-EDGE-UNSUPPORTED-FIELD-TYPE` | The index field type is not available offline |
+| `QQL-EDGE-UNSUPPORTED-ROUTE` | The planned operation has no edge route implementation (defensive fallback) |
+| `QQL-EDGE-INVALID-POINT-ID` | Offline point IDs accept unsigned integers or UUIDs only |
 
 New error codes may refine cases in a v1 minor release. A code already asserted
 by a v1 fixture cannot change before v2.

@@ -19,5 +19,14 @@ LIMIT $LIMIT;"""};
 -- Backtick string literal
 UPSERT INTO docs VALUES {id: 1, text: `QUERY '$QUERY_TEXT' FROM docs`};
 
+-- Triple-quoted string preserves a backslash sequence verbatim (no decoding)
+UPSERT INTO docs VALUES {id: 1, text: '''windows\path\to\file'''};
+
+-- Triple-quoted string preserves doubled quotes verbatim (no SQL folding)
+UPSERT INTO docs VALUES {id: 1, text: '''it''s not folded'''};
+
+-- Four single quotes: SQL-escaped one-apostrophe string (single_quoted_string)
+UPSERT INTO docs VALUES {id: 1, text: ''''};
+
 -- Escaped dollar sign in single-quoted string
 UPSERT INTO docs VALUES {id: 1, text: 'price is \$100 for \$QUERY_TEXT'};

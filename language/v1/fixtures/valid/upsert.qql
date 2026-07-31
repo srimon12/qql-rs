@@ -48,6 +48,14 @@ UPSERT INTO docs VALUES {id: 1, text: 'hello', title: 'World'}
 EMBED text INTO dense_chunk USING DENSE MODEL 'all-MiniLM-L6-v2',
      title INTO sparse_title USING SPARSE MODEL 'qdrant/bm25';
 
+-- EMBED with multivector and image kinds (mirror single_embedding_spec)
+UPSERT INTO docs VALUES {id: 1, text: 'colbert doc'}
+EMBED text INTO colbert_vec USING MULTIVECTOR MODEL 'colbert-v2';
+UPSERT INTO docs VALUES {id: 1, image: '/path/to/img.png'}
+EMBED image INTO clip_vec USING IMAGE MODEL 'clip-vit';
+UPSERT INTO docs VALUES {id: 1, text: 'colbert doc'}
+EMBED text INTO colbert_vec USING MULTI MODEL 'colbert-v2';
+
 -- With shard routing
 UPSERT INTO sec10k VALUES {id: 1, text: 'test'} SHARD 'tenant-a';
 

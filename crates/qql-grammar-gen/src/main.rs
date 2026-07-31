@@ -94,25 +94,51 @@ fn render_pest(source: &str) -> String {
 }
 
 fn grammar_literals(source: &str) -> Vec<String> {
+    let bytes = source.as_bytes();
     let mut literals = Vec::new();
-
-    for line in source.lines() {
-        let line = line.split("//").next().unwrap_or_default();
-        let mut rest = line;
-        while let Some(index) = rest.find("^\"") {
-            let candidate = &rest[index + 2..];
-            let Some(end) = candidate.find('"') else {
-                break;
-            };
-            let literal = &candidate[..end];
-            if literal
-                .bytes()
-                .all(|byte| byte.is_ascii_alphabetic() || byte == b'_')
-                && literal.len() > 1
-            {
-                literals.push(literal.to_ascii_uppercase());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'/' if bytes.get(i + 1) == Some(&b'/') => {
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1;
+                }
             }
-            rest = &candidate[end + 1..];
+            b'"' => {
+                // Skip a double-quoted string literal; pest supports `\"`
+                // escapes inside literals, so consume backslash pairs.
+                i += 1;
+                while i < bytes.len() {
+                    if bytes[i] == b'\\' {
+                        i += 2;
+                    } else if bytes[i] == b'"' {
+                        i += 1;
+                        break;
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+            b'^' if bytes.get(i + 1) == Some(&b'"') => {
+                let mut end = i + 2;
+                while end < bytes.len() && bytes[end] != b'"' {
+                    end += 1;
+                }
+                let literal = &source[i + 2..end];
+                // Keyword literals are ASCII words of length > 1. Single-char
+                // literals (`^"a"`, `^"b"`, `^"c"`, `^"e"`, `^"E"`, `^"x"`)
+                // are contextual tokens (feedback params, decay args,
+                // exponents), deliberately not keyword variants.
+                if literal
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphabetic() || byte == b'_')
+                    && literal.len() > 1
+                {
+                    literals.push(literal.to_ascii_uppercase());
+                }
+                i = end + 1;
+            }
+            _ => i += 1,
         }
     }
 
@@ -213,13 +239,11 @@ fn brace_delta(text: &str) -> isize {
             '"' => in_string = !in_string,
             '{' if !in_string => delta += 1,
             '}' if !in_string => delta -= 1,
-            '^' => {
-                if chars.peek() == Some(&'"') {
-                    chars.next();
-                    for c in chars.by_ref() {
-                        if c == '"' {
-                            break;
-                        }
+            '^' if chars.peek() == Some(&'"') => {
+                chars.next();
+                for c in chars.by_ref() {
+                    if c == '"' {
+                        break;
                     }
                 }
             }
@@ -329,6 +353,12 @@ fn render_typescript(literals: &[String]) -> String {
     )
 }
 
+/// Operators accepted by `comparison_op` in grammar.pest, in longest-first
+/// alternation order. Derived here (not hard-coded in the template) so the
+/// TextMate highlight cannot drift from the grammar: `<>` is not a QQL
+/// operator, and the Unicode forms `≠`, `≥`, `≤` are.
+const COMPARISON_OPERATORS: &[&str] = &["!=", ">=", "<=", "≠", "≥", "≤", "=", ">", "<"];
+
 fn render_textmate(literals: &[String]) -> String {
     let constants = literals
         .iter()
@@ -342,6 +372,7 @@ fn render_textmate(literals: &[String]) -> String {
         .collect::<Vec<_>>();
     let keyword_pattern = textmate_pattern(&keywords);
     let constant_pattern = textmate_pattern(&constants);
+    let comparison_operator_pattern = COMPARISON_OPERATORS.join("|");
 
     format!(
         r##"{{
@@ -369,7 +400,7 @@ fn render_textmate(literals: &[String]) -> String {
     "numbers": {{ "patterns": [{{ "name": "constant.numeric.float.qql", "match": "-?\\\\d+(\\\\.\\\\d+([eE][+-]?\\\\d+)?|([eE][+-]?\\\\d+))" }}, {{ "name": "constant.numeric.integer.qql", "match": "-?\\\\d+" }}] }},
     "constants": {{ "patterns": [{{ "name": "constant.language.qql", "match": "{constant_pattern}" }}] }},
     "keywords": {{ "patterns": [{{ "name": "keyword.control.qql", "match": "{keyword_pattern}" }}] }},
-    "operators": {{ "patterns": [{{ "name": "keyword.operator.comparison.qql", "match": "!=|<>|<=|>=|<|>" }}, {{ "name": "keyword.operator.assignment.qql", "match": "=" }}, {{ "name": "keyword.operator.arithmetic.qql", "match": "[\\\\+\\\\-\\\\*\\\\/]" }}] }},
+    "operators": {{ "patterns": [{{ "name": "keyword.operator.comparison.qql", "match": "{comparison_operator_pattern}" }}, {{ "name": "keyword.operator.assignment.qql", "match": "=" }}, {{ "name": "keyword.operator.arithmetic.qql", "match": "[\\\\+\\\\-\\\\*\\\\/]" }}] }},
     "punctuation": {{ "patterns": [{{ "name": "punctuation.terminator.qql", "match": ";" }}, {{ "name": "punctuation.separator.qql", "match": "," }}, {{ "name": "punctuation.definition.bracket.qql", "match": "[\\\\{{\\\\}}\\\\[\\\\]]" }}, {{ "name": "punctuation.definition.paren.qql", "match": "[\\\\(\\\\)]" }}, {{ "name": "punctuation.separator.key-value.qql", "match": ":" }}] }},
     "identifiers": {{ "patterns": [{{ "name": "variable.other.readwrite.qql", "match": "\\\\$[A-Za-z_][A-Za-z0-9_]*(\\\\.[A-Za-z_][A-Za-z0-9_]*)*(\\\\[\\\\]\\\\.?)*" }}, {{ "name": "entity.name.qql", "match": "[A-Za-z_][A-Za-z0-9_]*(\\\\.[A-Za-z_][A-Za-z0-9_]*|\\\\[\\\\]\\\\.?)*" }}] }}
   }}
@@ -497,5 +528,59 @@ COMMENT = _{ "--" }
 script = { SOI ~ (^"QUERY" | ^"SCROLL") ~ EOI }
 "#;
         assert!(dead_rules(grammar).is_empty());
+    }
+
+    #[test]
+    fn scanner_ignores_comments_and_string_bodies() {
+        // `//` inside a string literal and `^"` inside a string must not be
+        // treated as comment / keyword starts.
+        let grammar = r#"
+// comment with ^"FAKE" inside
+WHITESPACE = _{ " " | "\t" }
+string = @{ "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
+rule = { ^"REAL" ~ "//not a comment" ~ ^"ALSO_REAL" }
+"#;
+        assert_eq!(grammar_literals(grammar), ["ALSO_REAL", "REAL"]);
+    }
+
+    #[test]
+    fn generated_textmate_operators_derive_from_comparison_op() {
+        let grammar = render_textmate(&["FROM".into()]);
+        // Unicode operators present, `<>` absent.
+        assert!(grammar.contains("!=|>=|<=|≠|≥|≤|=|>|<"));
+        assert!(!grammar.contains("<>"));
+    }
+
+    #[test]
+    fn grammar_literals_match_generated_keywords_exactly() {
+        // Exact bidirectional keyword check: the generated `KEYWORDS` map must
+        // be exactly the grammar's keyword literal set (and vice versa), so a
+        // hand-edit of either file cannot drift from the canonical grammar.
+        let root = workspace_root();
+        let grammar_source = fs::read_to_string(root.join("language/v1/grammar.pest")).unwrap();
+        let generated =
+            fs::read_to_string(root.join("crates/qql-core/src/keywords.generated.rs")).unwrap();
+        let from_grammar = grammar_literals(&grammar_source);
+
+        // Extract `"KEY" => TokenKind::Variant,` rows from the generated map.
+        let mut from_map: Vec<String> = generated
+            .lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                let key = line.split("=>").next()?.trim();
+                key.strip_prefix('"')?.strip_suffix('"').map(str::to_owned)
+            })
+            .collect();
+        from_map.sort();
+        from_map.dedup();
+
+        assert!(
+            !from_grammar.is_empty(),
+            "grammar must contain keyword literals"
+        );
+        assert_eq!(
+            from_grammar, from_map,
+            "grammar.pest keyword literals and keywords.generated.rs must match exactly"
+        );
     }
 }

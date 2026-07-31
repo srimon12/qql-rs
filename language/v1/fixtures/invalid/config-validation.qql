@@ -1,0 +1,45 @@
+-- config-validation.qql — strict config-block validation for COUNT and CREATE SHARD KEY
+--
+-- The canonical grammar now models `COUNT … WITH (…)` as `count_config`
+-- (exact = true|false) and `CREATE SHARD KEY … WITH (…)` as `shard_key_config`
+-- (positive-integer shards_number / replication_factor), so every case below is
+-- rejected by grammar.pest as well as by the reference parser. The grammar
+-- rejects the literal `0`, but it cannot express numeric-value checks (e.g.
+-- `00`), so the reference parser still owns the exact runtime codes; the
+-- cases below pin those codes.
+
+-- @case count-exact-non-boolean
+-- @error QQL-PARSE-COUNT-CONFIG
+COUNT FROM docs WITH (exact = 5);
+
+-- @case count-exact-string
+-- @error QQL-PARSE-COUNT-CONFIG
+COUNT FROM docs WHERE active = true WITH (exact = 'yes');
+
+-- @case count-unknown-config-key
+-- @error QQL-PARSE-COUNT-CONFIG
+COUNT FROM docs WITH (exact = true, foo = 1);
+
+-- @case count-only-unknown-config-key
+-- @error QQL-PARSE-COUNT-CONFIG
+COUNT FROM docs WITH (foo = 1);
+
+-- @case shard-key-shards-number-zero
+-- @error QQL-PARSE-SHARD-KEY-CONFIG
+CREATE SHARD KEY 'a' ON COLLECTION docs WITH (shards_number = 0);
+
+-- @case shard-key-shards-number-negative
+-- @error QQL-PARSE-SHARD-KEY-CONFIG
+CREATE SHARD KEY 'a' ON COLLECTION docs WITH (shards_number = -1);
+
+-- @case shard-key-shards-number-float
+-- @error QQL-PARSE-SHARD-KEY-CONFIG
+CREATE SHARD KEY 'a' ON COLLECTION docs WITH (shards_number = 2.0);
+
+-- @case shard-key-replication-factor-wrong-type
+-- @error QQL-PARSE-SHARD-KEY-CONFIG
+CREATE SHARD KEY 'a' ON COLLECTION docs WITH (replication_factor = 'three');
+
+-- @case shard-key-unknown-config-key
+-- @error QQL-PARSE-SHARD-KEY-CONFIG
+CREATE SHARD KEY 'a' ON COLLECTION docs WITH (shards_number = 2, foo = 1);

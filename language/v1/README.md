@@ -76,8 +76,11 @@ cargo run -p qql-conformance -- check language/v1
 Expected result:
 
 ```text
-conformant: 32 valid files, 34 invalid cases, 32 AST snapshots
+conformant: 35 valid files (249 statements), 53 invalid cases, 35 AST snapshots
 ```
+
+(Counts track the fixture corpus and change as fixtures are added; the live
+command above is authoritative.)
 
 Regenerate AST snapshots only for an intentional contract change:
 

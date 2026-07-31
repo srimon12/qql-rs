@@ -233,6 +233,9 @@ jobs:
       - name: Check QQL language conformance
         run: cargo run --locked -p qql-conformance -- check language/v1
 
+      - name: Test conformance tooling (incl. executable grammar gate)
+        run: cargo test --locked -p qql-grammar-gen -p qql-conformance
+
   # ── Platform binding build checks ────────────────────────────
   # Build and import the language artifacts so generated bindings and
   # wrapper code cannot drift independently from the Rust crates.
@@ -341,6 +344,91 @@ jobs:
           assert.equal(compiled.stmt_type, 'count');
           NODE
 
+  # ── Website documentation ────────────────────────────────────
+  # Validate the docs corpus (raw fences, parse + plan of every example and
+  # fixture) with the existing `pnpm validate:qql` command. The job always runs
+  # on pull requests so it can never be silently skipped; a cheap diff check
+  # decides whether the (wasm-pack-heavy) validation actually runs.
+
+  docs-validation:
+    name: Website docs validation
+    runs-on: ubuntu-latest
+    env:
+      # Match the website toolchain pinned by deploy-site.yml.
+      NODE_VERSION: "24"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history so the relevance check can diff against the PR base.
+          fetch-depth: 0
+
+      - name: Check for relevant changes
+        id: relevant
+        run: |
+          set -euo pipefail
+          # Manual dispatch always validates. On pull requests, gate on the
+          # paths that verify-qql-docs.mjs reads or depends on (website docs,
+          # language corpus, the qql-wasm crate and its Rust dependencies, and
+          # this workflow). Fail toward running validation, never toward
+          # skipping it.
+          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          base_sha="${{ github.event.pull_request.base.sha }}"
+          changed="$(git diff --name-only --no-renames "${base_sha}"...HEAD)" || {
+            echo "::warning::Could not diff against base ${base_sha}; running docs validation anyway."
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          if grep -Eq \
+            '(^website/|^language/v1/|^crates/qql-wasm/|^crates/qql-core/|^crates/qql-plan/|^crates/qql-embed/|^Cargo\.toml$|^Cargo\.lock$|^\.github/workflows/ci\.yml$)' \
+            <<<"$changed"; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            printf 'No relevant changes; skipping docs validation.\nChanged files:\n%s\n' "$changed"
+          fi
+
+      - uses: pnpm/action-setup@v4
+        if: steps.relevant.outputs.relevant == 'true'
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v7
+        if: steps.relevant.outputs.relevant == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: website/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.relevant.outputs.relevant == 'true'
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.relevant.outputs.relevant == 'true'
+        with:
+          shared-key: docs-wasm-stable
+          cache-on-failure: true
+
+      - uses: taiki-e/install-action@v2
+        if: steps.relevant.outputs.relevant == 'true'
+        with:
+          tool: wasm-pack@0.15.0
+
+      # Existing pnpm validation command: builds qql-wasm, then runs the
+      # raw-fence scan and the parse + plan checks over every documentation
+      # example, playground snippet, and language fixture.
+      - name: Validate website docs (raw-fence + plan checks)
+        if: steps.relevant.outputs.relevant == 'true'
+        working-directory: website
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm validate:qql
+
   # Single required status check for branch protection.
   ci-success:
     name: CI success
@@ -359,6 +447,7 @@ jobs:
         pyqql-check,
         nqql-check,
         wasm-check,
+        docs-validation,
       ]
     runs-on: ubuntu-latest
     steps:

@@ -464,6 +464,108 @@
     },
     {
       "Upsert": {
+        "collection": "docs",
+        "embed": [
+          {
+            "kind": {
+              "Multi": {
+                "model": "colbert-v2"
+              }
+            },
+            "source_field": "text",
+            "target_vector": "colbert_vec"
+          }
+        ],
+        "embedding": null,
+        "points": [
+          {
+            "id": {
+              "Number": 1
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "colbert doc"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": null
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "docs",
+        "embed": [
+          {
+            "kind": {
+              "Image": {
+                "model": "clip-vit"
+              }
+            },
+            "source_field": "image",
+            "target_vector": "clip_vec"
+          }
+        ],
+        "embedding": null,
+        "points": [
+          {
+            "id": {
+              "Number": 1
+            },
+            "payload": [
+              [
+                "image",
+                {
+                  "Str": "/path/to/img.png"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": null
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "docs",
+        "embed": [
+          {
+            "kind": {
+              "Multi": {
+                "model": "colbert-v2"
+              }
+            },
+            "source_field": "text",
+            "target_vector": "colbert_vec"
+          }
+        ],
+        "embedding": null,
+        "points": [
+          {
+            "id": {
+              "Number": 1
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "colbert doc"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": null
+      }
+    },
+    {
+      "Upsert": {
         "collection": "sec10k",
         "embed": [],
         "embedding": null,
