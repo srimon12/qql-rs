@@ -14,7 +14,10 @@ publish = false
 crate-type = ["cdylib"]
 
 [features]
-default = ["fastembed-local"]
+# http-embedding is default to match pyqql-edge: both `httpExecutor` and the
+# standalone `execute({ embedUrl })` path are documented in the README and the
+# website, so they must be present in default-feature builds.
+default = ["fastembed-local", "http-embedding"]
 # Local ONNX embedding via fastembed-rs (downloads models on first use — never shipped in npm package)
 fastembed-local = ["qql-edge/fastembed-local"]
 # HTTP-based embedding provider (OpenAI-compatible API)

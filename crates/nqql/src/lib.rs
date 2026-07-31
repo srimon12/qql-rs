@@ -24,6 +24,14 @@ pub struct Stmt {
 
 #[napi]
 impl Stmt {
+    /// Parse a QQL string into a Stmt handle (mirrors `qql-wasm`'s
+    /// `new Stmt(query)` — see the filter-injection guide).
+    #[napi(constructor)]
+    pub fn new(input: String) -> napi::Result<Self> {
+        let inner = Parser::parse(&input).map_err(to_napi_err)?;
+        Ok(Stmt { inner })
+    }
+
     #[napi]
     pub fn inject_filter(
         &mut self,

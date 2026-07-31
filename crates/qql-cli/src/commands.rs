@@ -1,3 +1,4 @@
+#[cfg(feature = "edge")]
 use std::io::IsTerminal;
 
 pub async fn handle_doctor(
@@ -731,40 +732,27 @@ fn cut_command_prefix(input: &str, prefix: &str) -> Option<String> {
 }
 
 fn print_repl_help() {
-    println!(
-        r#"
-\x1b[1mAvailable Statements:\x1b[0m
-
-  \x1b[33mUPSERT INTO\x1b[0m <name> \x1b[33mVALUES\x1b[0m {{id: 1, text: '...', ...}}
-
-  \x1b[33mCREATE COLLECTION\x1b[0m <name> [\x1b[33mHYBRID\x1b[0m [\x1b[33mRERANK\x1b[0m]]
-
-  \x1b[33mDROP COLLECTION\x1b[0m <name>
-
-  \x1b[33mSHOW COLLECTIONS\x1b[0m
-
-  \x1b[33mQUERY\x1b[0m ['<text>' | NEAREST POINT <id> | ...]
-      \x1b[33mFROM\x1b[0m <collection> [\x1b[33mUSING\x1b[0m <vector> [\x1b[33mAS DENSE|SPARSE\x1b[0m]] \x1b[33mLIMIT\x1b[0m <n>
-
-  \x1b[33mQUERY POINTS\x1b[0m (<id>, ...) \x1b[33mFROM\x1b[0m <name> [\x1b[33mWITH PAYLOAD true\x1b[0m]
-
-  \x1b[33mSCROLL FROM\x1b[0m <name> [\x1b[33mWHERE\x1b[0m <filter>] [\x1b[33mAFTER\x1b[0m '<id>'] [\x1b[33mWITH VECTOR\x1b[0m] \x1b[33mLIMIT\x1b[0m <n>
-
-  \x1b[33mDELETE FROM\x1b[0m <name> \x1b[33mWHERE\x1b[0m id = '<id>' | <field> = '<value>'
-
-\x1b[1mBuilt-in Commands:\x1b[0m
-
-  \x1b[36mhelp\x1b[0m, \x1b[36m?\x1b[0m           Show this help
-  \x1b[36mexplain <query>\x1b[0m  Show query plan without executing
-  \x1b[36mexecute <file>\x1b[0m  Run a .qql script file
-  \x1b[36m\e <file>\x1b[0m        Shortcut for execute
-  \x1b[36mdump <name> <file>\x1b[0m  Dump collection (schema + vectors + payload) to .qql
-  \x1b[36mexit\x1b[0m, \x1b[36mquit\x1b[0m      Exit the shell
-
-\x1b[1mKeyboard Shortcuts:\x1b[0m
-
-  Ctrl-C         Cancel current input
-  Ctrl-D         Exit shell
-"#
-    );
+    // NOTE: must be a normal (non-raw) string so the \x1b[..m escapes are
+    // processed — a raw string would print the literal escape text.
+    let help = "\x1b[1mAvailable Statements:\x1b[0m\n\
+\n  \x1b[33mUPSERT INTO\x1b[0m <name> \x1b[33mVALUES\x1b[0m {id: 1, text: '...', ...}\n\
+\n  \x1b[33mCREATE COLLECTION\x1b[0m <name> [\x1b[33mHYBRID\x1b[0m [\x1b[33mRERANK\x1b[0m]]\n\
+\n  \x1b[33mDROP COLLECTION\x1b[0m <name>\n\
+\n  \x1b[33mSHOW COLLECTIONS\x1b[0m\n\
+\n  \x1b[33mQUERY\x1b[0m ['<text>' | NEAREST POINT <id> | ...]\n\
+      \x1b[33mFROM\x1b[0m <collection> [\x1b[33mUSING\x1b[0m <vector> [\x1b[33mAS DENSE|SPARSE\x1b[0m]] \x1b[33mLIMIT\x1b[0m <n>\n\
+\n  \x1b[33mQUERY POINTS\x1b[0m (<id>, ...) \x1b[33mFROM\x1b[0m <name> [\x1b[33mWITH PAYLOAD true\x1b[0m]\n\
+\n  \x1b[33mSCROLL FROM\x1b[0m <name> [\x1b[33mWHERE\x1b[0m <filter>] [\x1b[33mAFTER\x1b[0m '<id>'] [\x1b[33mWITH VECTOR\x1b[0m] \x1b[33mLIMIT\x1b[0m <n>\n\
+\n  \x1b[33mDELETE FROM\x1b[0m <name> \x1b[33mWHERE\x1b[0m id = '<id>' | <field> = '<value>'\n\
+\n\x1b[1mBuilt-in Commands:\x1b[0m\n\
+\n  \x1b[36mhelp\x1b[0m, \x1b[36m?\x1b[0m           Show this help\n\
+  \x1b[36mexplain <query>\x1b[0m  Show query plan without executing\n\
+  \x1b[36mexecute <file>\x1b[0m  Run a .qql script file\n\
+  \x1b[36m\\e <file>\x1b[0m        Shortcut for execute\n\
+  \x1b[36mdump <name> <file>\x1b[0m  Dump collection (schema + vectors + payload) to .qql\n\
+  \x1b[36mexit\x1b[0m, \x1b[36mquit\x1b[0m      Exit the shell\n\
+\n\x1b[1mKeyboard Shortcuts:\x1b[0m\n\
+\n  Ctrl-C         Cancel current input\n\
+  Ctrl-D         Exit shell\n";
+    println!("{}", help);
 }

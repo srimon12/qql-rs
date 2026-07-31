@@ -53,7 +53,7 @@ console.log(version, isValid("SHOW COLLECTIONS"), compileQuery("SHOW COLLECTIONS
 | Export | Role |
 |--------|------|
 | `Client({ url, apiKey?, useGrpc?, embedder? })` | Live execute |
-| `HttpEmbedder({ endpoint, model, dimension, apiKey? })` | Embeddings |
+| `HttpEmbedder({ endpoint, model, dimension, apiKey?, multi*?, image*?, rerank*? })` | Embeddings (dense, multi/ColBERT, image/CLIP, rerank) |
 | `parse` / `parseJson` / `isValid` / `tokenize` | Frontend |
 | `injectFilter` / `stmt.injectFilter` | Isolation |
 | `stmt.shardKey` | Same as QQL `SHARD '…'` (no `injectShardKey`) |

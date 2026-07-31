@@ -47,17 +47,35 @@ qql doctor --json
 | `QDRANT_URL` | `http://localhost:6333` | REST/gRPC URL (`:6334` selects gRPC when enabled) |
 | `QDRANT_API_KEY` | — | Auth |
 | `EMBED_URL` | — | OpenAI-compatible embeddings endpoint |
+| `EMBED_KEY` | — | Bearer token for the embedding endpoint |
 | `EMBED_MODEL` | `all-minilm:l6-v2` | Remote embedding model ID |
 | `EMBED_DIM` | `384` | Remote embedding vector dimension |
+| `MULTI_EMBED_URL` / `MULTI_EMBED_KEY` / `MULTI_EMBED_MODEL` / `MULTI_EMBED_DIM` | — | Multi/ColBERT embedding endpoint |
+| `IMAGE_EMBED_URL` / `IMAGE_EMBED_KEY` / `IMAGE_EMBED_MODEL` / `IMAGE_EMBED_DIM` | — | Image/CLIP embedding endpoint |
+| `RERANK_URL` / `RERANK_KEY` / `RERANK_MODEL` | — | Cross-encoder reranking endpoint |
 
 ### Local Edge Backend (`qql config edge`)
 
-| Setting / Variable | Default (FastEmbed) | Default (HTTP) | Role |
-|--------------------|---------------------|----------------|------|
-| `EDGE_DATA_DIR` / `--data-dir` | `/tmp/qql-edge` | `/tmp/qql-edge` | Directory for persistent edge data |
-| `EMBEDDER` / `--embedder` | `fastembed` | — | Embedder engine (`fastembed` or `http`) |
-| `EMBED_MODEL` / `--model` | `BGESmallENV15` | `nomic-embed-text` | Dense model ID/alias |
-| `EMBED_DIM` / `--embed-dim` | `384` | `768` | Dense vector dimension |
+Edge-specific variables start with `QQL_EDGE_`; the `EMBED_*`, `MULTI_EMBED_*`, and
+`IMAGE_EMBED_*` variables above are shared with the HTTP embedder.
+
+| Variable | Flag | Default | Role |
+|----------|------|---------|------|
+| `QQL_EDGE_DATA_DIR` | `--data-dir` | `~/.qql/edge-data` | Directory for persistent edge data |
+| `QQL_EDGE_EMBEDDER` | `--embedder` | `fastembed` | Embedder engine (`fastembed` or `http`) |
+| `QQL_EDGE_MODEL` | `--model` | `BGESmallENV15` | Dense FastEmbed model ID/alias |
+| `QQL_EDGE_SPARSE_MODEL` | `--sparse-model` | — | Offline sparse model (e.g. `splade`) |
+| `QQL_EDGE_MULTI_MODEL` | `--multi-model` | — | Offline multi/ColBERT model (e.g. `bge-m3`) |
+| `QQL_EDGE_IMAGE_MODEL` | `--image-model` | — | Offline CLIP vision model (e.g. `clip-vision`) |
+| `QQL_EDGE_RERANKER_MODEL` | `--reranker-model` | — | Offline cross-encoder (also falls back to `RERANK_MODEL`) |
+| `QQL_EDGE_CACHE_DIR` | `--cache-dir` | — | Model download cache directory |
+| `QQL_EDGE_ON_DISK` | `--in-memory` | `true` | `true`/`false`/`1`/`0` — payloads on disk |
+| `EMBED_URL` | `--embed-url` | — | HTTP embedding endpoint |
+| `EMBED_KEY` | `--embed-key` | — | HTTP Bearer token |
+| `EMBED_MODEL` | `--embed-model` | `nomic-embed-text` | HTTP embedding model ID |
+| `EMBED_DIM` | `--embed-dim` | `768` | HTTP embedding vector dimension |
+| `MULTI_EMBED_URL` / `MULTI_EMBED_KEY` / `MULTI_EMBED_MODEL` / `MULTI_EMBED_DIM` | `--multi-embed-*` | — | Multi/ColBERT HTTP endpoint |
+| `IMAGE_EMBED_URL` / `IMAGE_EMBED_KEY` / `IMAGE_EMBED_MODEL` / `IMAGE_EMBED_DIM` | `--image-embed-*` | — | Image/CLIP HTTP endpoint |
 
 Global: `qql --url http://host:6333 exec "…"`.
 
