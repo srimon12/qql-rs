@@ -1,0 +1,73 @@
+---
+title: "QQL documentation"
+description: "Learn the Qdrant Query Language and use the same typed query surface from Rust, Python, Node.js, WebAssembly, and the QQL CLI."
+sidebar:
+  order: 1
+---
+
+QQL is a typed, declarative language for Qdrant. It turns search, hybrid
+retrieval, mutations, collection management, and tenant-safe policies into one
+portable syntax.
+
+{% grid style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:1rem;" %}
+
+{% glassCard title="One language" %}
+{% techBadge name="qql-core" variant="cyan" /%}
+
+The canonical grammar, typed AST, strict full-script parser, validation, and
+filter injection are shared by every SDK.
+{% /glassCard %}
+
+{% glassCard title="One plan" %}
+{% techBadge name="qql-plan" variant="purple" /%}
+
+Statements lower to a transport-neutral plan before REST, gRPC, or in-process
+edge dispatch.
+{% /glassCard %}
+
+{% glassCard title="Every host" %}
+{% techBadge name="Rust" variant="orange" /%} {% techBadge name="Python" variant="purple" /%}
+
+Use native Rust, Python, Node.js, WebAssembly, or the `qql` command-line tool
+without learning another query dialect.
+{% /glassCard %}
+
+{% glassCard title="Policy at the AST" %}
+{% techBadge name="Fail closed" variant="cyan" /%}
+
+Parse untrusted QQL, recursively inject mandatory filters, then plan and
+execute the rewritten statement.
+{% /glassCard %}
+
+{% /grid %}
+
+## A first query
+
+{% qqlExample title="Semantic nearest-neighbor search" %}
+```sql
+QUERY TEXT 'vector database'
+FROM docs
+USING dense
+WHERE status = 'published'
+WITH PAYLOAD INCLUDE (title, url)
+LIMIT 10;
+```
+{% /qqlExample %}
+
+This source remains readable in a pull request, a support ticket, or a browser
+session. Open it in the playground to see the AST and the Qdrant request before
+choosing a backend.
+
+## Choose a path
+
+- [Install the CLI or an SDK](/docs/getting-started/installation/)
+- [Run the five-minute quickstart](/docs/getting-started/quickstart/)
+- [Learn the execution model](/docs/getting-started/execution-model/)
+- [Read the language guide](/docs/language/)
+- [Choose an SDK](/docs/sdks/)
+
+{% aside type="note" title="Executable documentation" %}
+Every QQL example is extracted from this site and parsed by a freshly built
+`qql-wasm` package during documentation checks. Open any example in the
+playground to inspect its AST and compiled route.
+{% /aside %}

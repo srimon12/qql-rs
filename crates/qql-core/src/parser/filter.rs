@@ -50,7 +50,9 @@ impl<'a> AstLowerer<'a> {
             self.expect(TokenKind::Rparen)?;
             return Ok(expression);
         }
-        if self.peek()?.kind == TokenKind::Identifier && ascii_equal(self.peek()?.text, "NESTED") {
+        if self.peek()?.kind == TokenKind::Nested
+            || (self.peek()?.is_keyword_or_identifier() && ascii_equal(self.peek()?.text, "NESTED"))
+        {
             self.advance()?;
             self.expect(TokenKind::Lparen)?;
             let path = self.parse_string()?;

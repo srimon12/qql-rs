@@ -1,0 +1,51 @@
+---
+title: "Executable documentation"
+description: "Write QQL documentation examples that are automatically parsed by the current qql-wasm source."
+sidebar:
+  order: 2
+---
+
+Runnable QQL belongs in the `qqlExample` component:
+
+{% qqlExample title="Describe the behavior" %}
+```sql
+QUERY TEXT 'example'
+FROM docs
+USING dense
+LIMIT 5;
+```
+{% /qqlExample %}
+
+The component provides consistent presentation and preserves the fenced source
+exactly. Do not use raw `qql` or `sql` fences outside `qqlExample` for runnable
+statements.
+
+## Run the verifier
+
+{% terminal title="Documentation contract check" %}
+cd website
+pnpm validate:qql
+{% /terminal %}
+
+The command:
+
+1. creates an isolated temporary output directory;
+2. builds `crates/qql-wasm` from the current checkout for Node.js;
+3. extracts every `qqlExample` from the Markdoc tree;
+4. calls the WASM `parse` export on the complete example;
+5. reports the source file and line for every failure;
+6. removes the temporary generated package.
+
+This detects grammar drift without depending on a previously generated or
+published SDK package.
+
+## Full site check
+
+{% terminal title="Validate and build" %}
+cd website
+pnpm check
+{% /terminal %}
+
+Keep intentionally invalid syntax in prose or an `ebnf`/text block, clearly
+labelled as invalid. The verifier rejects raw QQL fences so examples cannot
+silently bypass the executable contract.

@@ -27,6 +27,13 @@ Thumbs.db
 *.so
 uv.lock
 documentation/
+dist-site/
+.playground-dist/
+.playground-src/
+website/dist/
+website/.astro/
+website/node_modules/
+
 crates/nqql/index.*.node
 crates/nqql/package-lock.json
 qdrant_storage

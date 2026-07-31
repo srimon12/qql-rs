@@ -1,0 +1,89 @@
+---
+title: "Scripts and errors"
+description: "Write strict, reviewable QQL scripts and handle structured parse, validation, plan, and execution failures."
+sidebar:
+  order: 7
+---
+
+QQL scripts are for repeatable provisioning, migrations, fixtures, and batched
+operations. Parse a script once, retain its statements, apply any trusted
+rewrite, and then plan or execute the result.
+
+## Write a readable script
+
+Statements are separated by one semicolon; a final semicolon is optional. Empty
+separators, adjacent unseparated statements, and scripts over 256 statements
+are rejected.
+
+{% qqlExample title="Provision a catalog and query it" %}
+```sql
+CREATE COLLECTION catalog (
+  dense VECTOR(384, COSINE)
+);
+
+CREATE INDEX ON COLLECTION catalog
+FOR category
+TYPE keyword;
+
+UPSERT INTO catalog VALUES {
+  id: 1,
+  text: 'red chair',
+  category: 'furniture'
+};
+
+QUERY TEXT 'chair'
+FROM catalog
+USING dense
+LIMIT 5;
+```
+{% /qqlExample %}
+
+## Use the right host API
+
+| API | Contract |
+|---|---|
+| `Parser::parse` | One complete statement only |
+| `Parser::parse_all` | One complete semicolon-delimited script |
+| SDK `parse` | Host-language statement handles or objects |
+| `compile` / `explain` | Offline plan inspection |
+| Executor or client `execute` | One statement, a script, or host array input |
+
+Host arrays are independent inputs. A semicolon-delimited script is one input
+that the runtime parses together, which matters when batching compatible
+operations.
+
+## Surface structured failures
+
+Errors carry a stable code, kind, message, and optional zero-based UTF-8 byte
+span. Message text is not normative — match on the code. The stable codes are
+grouped by their prefix; see [Error codes](/docs/reference/error-codes/) for
+the full list with meanings.
+
+| Code prefix | Family | Examples |
+|---|---|---|
+| `QQL-LEX-*` | Lexical failures | `QQL-LEX-STRING` |
+| `QQL-PARSE-*` | Syntax, clause order, and value-range failures | `QQL-PARSE-STATEMENT`, `QQL-PARSE-CLAUSE-ORDER`, `QQL-PARSE-DUPLICATE-KEY`, `QQL-PARSE-POSITIVE-INTEGER` |
+| `QQL-VALIDATION-*` | Semantic validation of a parsed program | `QQL-VALIDATION-FROM`, `QQL-VALIDATION-UPSERT-ID`, `QQL-VALIDATION-MMR` |
+| `QQL-PLAN-*`, `QQL-MISSING-*`, `QQL-UNKNOWN-*`, `QQL-VECTOR-KIND` | Planning and schema resolution | `QQL-PLAN-VECTOR-KIND`, `QQL-MISSING-USING`, `QQL-UNKNOWN-VECTOR` |
+| `QQL-EMBEDDING-*` | UPSERT embedding inference | `QQL-EMBEDDING-TOPOLOGY`, `QQL-EMBEDDING-TARGET` |
+| `QQL-EDGE-*` | In-process edge backend capability and runtime failures | `QQL-EDGE-UNSUPPORTED-GROUP-BY`, `QQL-EDGE-INVALID-POINT-ID` |
+| Transport / backend | Network and Qdrant response failures during execution | `QQL-*` from the transport layer |
+
+A code already asserted by a v1 invalid fixture cannot change before v2. New
+codes may only refine previously unspecified cases.
+
+| Situation | Example code family | What to do |
+|---|---|---|
+| Syntax or clause order | `QQL-PARSE-*` | Show the span and preserve the user source |
+| Missing required query structure | `QQL-VALIDATION-*` | Add the required `FROM`, `PREFETCH`, or valid parameter |
+| Vector-role conflict | `QQL-PLAN-VECTOR-KIND` | Align the query role with the collection topology |
+| Service policy cannot be applied | policy error | Reject the request rather than weakening the predicate |
+
+{% aside type="tip" title="Validate the real operation" %}
+Do not parse once merely to “validate” and then parse again. Keep the typed
+statement, inject policy into that AST, and pass the rewritten statement to the
+planner or executor.
+{% /aside %}
+
+The [Playground](/playground/) shows the same source, AST, compiled route, and
+explanation without connecting to Qdrant until you choose to run it.

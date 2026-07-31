@@ -1,0 +1,226 @@
+---
+import GlassCard from "@qql/ui-docs/GlassCard.astro";
+import TechBadge from "@qql/ui-docs/TechBadge.astro";
+import Terminal from "@qql/ui-docs/Terminal.astro";
+import { ANALYTICS, APPS, SITE } from "../config/site";
+import "../styles/global.css";
+
+const pageTitle = "QQL — Declarative vector search for Qdrant";
+const pageDescription =
+  "One typed Qdrant query language across Rust, Python, Node.js, WebAssembly, REST, gRPC, and edge.";
+
+// The documentation verifier parses every `verifiedQql` String.raw template.
+const verifiedQql = String.raw`CREATE COLLECTION docs (
+  dense VECTOR(384, COSINE),
+  bm25 SPARSE
+);
+
+UPSERT INTO docs VALUES {
+  id: 1,
+  text: 'QQL provides typed vector retrieval',
+  category: 'qql'
+} USING HYBRID;
+
+QUERY TEXT 'typed query language' FROM docs
+USING HYBRID DENSE dense SPARSE bm25 FUSION RRF
+WHERE category = 'qql'
+LIMIT 5;`;
+
+const terminalCode = `# Install the qql-rs CLI
+curl -fsSL https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.sh | sh
+
+# Save the QQL below as quickstart.qql, then run:
+qql execute quickstart.qql
+
+${verifiedQql}`;
+
+const faq = [
+  {
+    question: "What is QQL?",
+    answer:
+      "QQL is a typed, declarative query language and execution stack for Qdrant. It covers retrieval, filtering, mutations, schema operations, and policy-safe AST rewriting.",
+  },
+  {
+    question: "Which SDKs are available?",
+    answer:
+      "The qql-rs workspace ships Rust crates, native Python and Node.js bindings, a WebAssembly package, and the qql command-line tool.",
+  },
+  {
+    question: "How does multitenancy work?",
+    answer:
+      "Hosts parse untrusted QQL and inject a trusted tenant filter into the AST before planning. Custom SHARD routing is separate and can be used alongside the filter.",
+  },
+  {
+    question: "Does QQL replace Qdrant?",
+    answer:
+      "No. QQL plans operations for Qdrant and dispatches them over REST or gRPC, or evaluates the supported subset through the in-process edge backend.",
+  },
+];
+---
+
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>{pageTitle}</title>
+    <meta name="description" content={pageDescription} />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="canonical" href={`${APPS.home.url}/`} />
+    <meta property="og:title" content={pageTitle} />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={`${APPS.home.url}/`} />
+    <meta property="og:description" content={pageDescription} />
+    <meta property="og:site_name" content="QQL" />
+    <meta property="og:image" content={`${APPS.home.url}/og-image.png`} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={pageTitle} />
+    <meta name="twitter:description" content={pageDescription} />
+    <meta name="twitter:image" content={`${APPS.home.url}/og-image.png`} />
+    {
+      ANALYTICS.id && (
+        <script
+          is:inline
+          defer
+          src={`${ANALYTICS.url}/script.js`}
+          data-website-id={ANALYTICS.id}
+        />
+      )
+    }
+    <script
+      is:inline
+      type="application/ld+json"
+      set:html={JSON.stringify({
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        name: "QQL",
+        operatingSystem: "Linux, macOS, Windows, Web",
+        applicationCategory: "DeveloperApplication",
+        description: pageDescription,
+        codeRepository: APPS.github.url,
+        license: "https://opensource.org/license/mit",
+        offers: {
+          "@type": "Offer",
+          price: "0",
+          priceCurrency: "USD",
+        },
+        publisher: {
+          "@type": "Organization",
+          name: SITE.org,
+          url: "https://veristamp.in",
+        },
+      })}
+    />
+    <script
+      is:inline
+      type="application/ld+json"
+      set:html={JSON.stringify({
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        mainEntity: faq.map((item) => ({
+          "@type": "Question",
+          name: item.question,
+          acceptedAnswer: { "@type": "Answer", text: item.answer },
+        })),
+      })}
+    />
+  </head>
+  <body class="bg-[#141413] text-[#e6e4e0] antialiased">
+    <header class="sticky top-0 z-50 border-b border-[var(--sl-color-gray-5)] bg-[#141413]/80 backdrop-blur-md">
+      <div class="mx-auto flex h-16 max-w-5xl items-center justify-between px-6">
+        <a href="/" class="flex items-center gap-3 no-underline">
+          <span class="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--sl-color-gray-5)] bg-[#1c1c1a] text-[var(--sl-color-accent)]">
+            <svg viewBox="0 0 32 32" class="h-5 w-5 fill-current" aria-hidden="true">
+              <path d="M7.25 7.5h4.05L16 21.15 20.7 7.5h4.05L17.35 25.25h-2.7L7.25 7.5Z"></path>
+            </svg>
+          </span>
+          <span class="text-xl font-bold tracking-tight text-white">QQL</span>
+        </a>
+        <nav class="flex items-center gap-6" aria-label="Primary">
+          <a href="/docs/" class="text-sm text-[var(--sl-color-gray-2)] hover:text-white">Docs</a>
+          <a href="/playground/" class="text-sm text-[var(--sl-color-gray-2)] hover:text-white">Playground</a>
+          <a href={APPS.github.url} class="text-sm text-[var(--sl-color-gray-2)] hover:text-white">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="mx-auto max-w-5xl px-6">
+      <section class="relative mx-auto flex max-w-4xl flex-col items-center py-20 text-center md:py-28">
+        <div class="pointer-events-none absolute -top-12 left-1/2 h-[350px] w-[350px] -translate-x-1/2 rounded-full bg-[var(--sl-color-accent)]/10 blur-[120px]"></div>
+        <TechBadge name="ONE LANGUAGE · EVERY HOST" variant="orange" />
+        <h1 class="mt-6 text-5xl font-light tracking-tight text-white md:text-7xl">
+          Declarative vector search for Qdrant
+        </h1>
+        <p class="mx-auto mb-10 max-w-2xl text-lg leading-relaxed text-[var(--sl-color-gray-2)] md:text-xl">
+          Parse once, enforce policy on a typed AST, plan once, then execute over
+          REST, gRPC, or in-process edge—from Rust, Python, Node.js, WebAssembly,
+          or the CLI.
+        </p>
+        <div class="mb-14 flex flex-wrap justify-center gap-4">
+          <a href="/docs/getting-started/quickstart/" class="rounded-lg bg-[var(--sl-color-accent)] px-6 py-3 text-sm font-semibold text-white hover:-translate-y-0.5">
+            Start building
+          </a>
+          <a href="/docs/language/" class="rounded-lg border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-6 py-3 text-sm font-semibold text-white hover:-translate-y-0.5">
+            Explore the language
+          </a>
+        </div>
+        <div class="w-full max-w-3xl text-left">
+          <Terminal title="qql-rs quickstart">{terminalCode}</Terminal>
+        </div>
+      </section>
+
+      <section class="border-t border-[var(--sl-color-gray-5)] py-20">
+        <div class="mb-12 text-center">
+          <h2 class="!border-none text-4xl text-white">One coherent execution stack</h2>
+          <p class="mx-auto max-w-xl text-[var(--sl-color-gray-3)]">
+            The language, policy model, planner, and host bindings evolve
+            together in the qql-rs workspace.
+          </p>
+        </div>
+        <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
+          <GlassCard title="Strict language frontend">
+            <p>Full-input parsing, typed statements, stable structured errors, versioned conformance fixtures, and canonical AST snapshots.</p>
+          </GlassCard>
+          <GlassCard title="Transport-neutral planning">
+            <p>Collection schema and embedding preparation feed one plan IR before REST, gRPC, or edge projection.</p>
+          </GlassCard>
+          <GlassCard title="AST-level isolation">
+            <p>Recursively inject trusted tenant predicates before planning, while keeping custom shard routing a separate concern.</p>
+          </GlassCard>
+          <GlassCard title="Native and web SDKs">
+            <div class="flex flex-wrap gap-2">
+              <TechBadge name="Rust" variant="cyan" />
+              <TechBadge name="Python" variant="purple" />
+              <TechBadge name="Node.js" variant="orange" />
+              <TechBadge name="WASM" variant="cyan" />
+            </div>
+          </GlassCard>
+        </div>
+      </section>
+
+      <section class="border-t border-[var(--sl-color-gray-5)] py-20">
+        <div class="mb-12 text-center">
+          <h2 class="!border-none text-4xl text-white">Common questions</h2>
+        </div>
+        <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
+          {faq.map((item) => (
+            <GlassCard title={item.question}>
+              <p>{item.answer}</p>
+            </GlassCard>
+          ))}
+        </div>
+      </section>
+    </main>
+
+    <footer class="border-t border-[var(--sl-color-gray-5)] py-10">
+      <div class="mx-auto flex max-w-5xl flex-col items-center justify-between gap-4 px-6 text-sm text-[var(--sl-color-gray-3)] md:flex-row">
+        <span>© {new Date().getFullYear()} {SITE.org}. QQL is MIT licensed.</span>
+        <div class="flex gap-6">
+          <a href="/docs/" class="hover:text-white">Docs</a>
+          <a href={`${APPS.github.url}/releases`} class="hover:text-white">Releases</a>
+          <a href={APPS.github.url} class="hover:text-white">GitHub</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

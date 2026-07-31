@@ -1,0 +1,112 @@
+---
+title: "Error codes"
+description: "Match QQL failures by their stable error codes, grouped by lexical, parse, validation, planning, embedding, and edge families."
+sidebar:
+  order: 4
+---
+
+Every QQL error carries a stable `code`, a broad `kind`, a human-readable
+`message`, and an optional zero-based UTF-8 byte `span` `[start, end)`. The
+`message` text is not normative — match on the `code`, which is fixed by the
+conformance fixtures. A code already asserted by a v1 invalid fixture cannot
+change before QQL 2; new codes may only refine previously unspecified cases.
+
+The code prefix identifies the failure family:
+
+| Prefix | Family |
+|---|---|
+| `QQL-LEX-*` | Lexical failures |
+| `QQL-PARSE-*` | Syntax, clause order, and value-range failures |
+| `QQL-VALIDATION-*` | Semantic validation of a parsed program |
+| `QQL-PLAN-*`, `QQL-MISSING-*`, `QQL-UNKNOWN-*`, `QQL-VECTOR-KIND` | Planning and schema resolution |
+| `QQL-EMBEDDING-*` | UPSERT embedding inference |
+| `QQL-EDGE-*` | In-process edge backend capability and runtime failures |
+
+## Error shape per host
+
+The same structured fields are projected differently by each host binding.
+
+| Host | Shape |
+|---|---|
+| Rust | `QqlError { kind, code, message, span: Option<Span { start, end }>, fields, source }`; the `kind` is one of `Lex`, `Parse`, `Validation`, `Execution`, `Transport`, `Backend` |
+| Python | Error attributes `code`, `kind`, and `span` |
+| Node.js | `error.code`, `error.kind`, `error.span` on the thrown error |
+| WebAssembly | `AnalysisError { code, message, start, end }` (nulls when a span is absent) |
+
+## Lexical
+
+| Code | Meaning |
+|---|---|
+| `QQL-LEX-STRING` | Unterminated string literal |
+
+## Parse
+
+| Code | Meaning |
+|---|---|
+| `QQL-PARSE-STATEMENT` | Unknown or legacy statement keyword (`SELECT`, `INSERT`, `BOOST`) |
+| `QQL-PARSE-EMPTY-STATEMENT` | Empty script element, such as a leading or repeated separator |
+| `QQL-PARSE-EXPECTED` | A required token is missing (for example an unmatched parenthesis) |
+| `QQL-PARSE-QUERY-INPUT` | Invalid query input form (a bare number is not a query input) |
+| `QQL-PARSE-CLAUSE-ORDER` | Duplicate or out-of-order query clause |
+| `QQL-PARSE-VECTOR-KIND` | `AS` is not `DENSE`, `SPARSE`, `MULTI`, or `MULTIVECTOR` |
+| `QQL-PARSE-DUPLICATE-CTE` | Duplicate CTE name in one script |
+| `QQL-PARSE-DUPLICATE-KEY` | Duplicate object or config key (ASCII case-insensitive) |
+| `QQL-PARSE-POSITIVE-INTEGER` | Value must be a positive integer (for example `LIMIT`, `CANDIDATES`, vector size) |
+| `QQL-PARSE-NONNEGATIVE-INTEGER` | Value must be non-negative (for example `OFFSET`, `VALUES_COUNT`) |
+| `QQL-PARSE-SYNTAX` | Production-specific syntax or range failure |
+
+## Validation
+
+| Code | Meaning |
+|---|---|
+| `QQL-VALIDATION-FROM` | A top-level query lacks `FROM` |
+| `QQL-VALIDATION-PREFETCH-CTE` | A `PREFETCH` name does not resolve to a CTE |
+| `QQL-VALIDATION-FUSION-PREFETCH` | `QUERY FUSION` has no `PREFETCH` |
+| `QQL-VALIDATION-RERANK-PREFETCH` | `QUERY RERANK` has no `PREFETCH` |
+| `QQL-VALIDATION-POINTS-CLAUSE` | `QUERY POINTS` uses a clause it cannot accept |
+| `QQL-VALIDATION-UPSERT-ID` | An UPSERT point lacks a valid `id` key |
+| `QQL-VALIDATION-MMR` | MMR `DIVERSITY` is outside `[0, 1]` or not finite |
+| `QQL-VALIDATION-HYBRID` | Invalid `USING HYBRID` / `QUERY HYBRID` combination |
+| `QQL-VALIDATION-FILTER-INJECT` | `inject_filter` does not apply to this statement type |
+| `QQL-VALIDATION-ID-PREDICATE` | A point ID predicate uses an operator other than `=`, `!=`, `IN`, or `NOT IN` |
+| `QQL-VALIDATION-POINT-ID` | A value used as a point ID is neither an unsigned integer nor a string |
+
+## Planning
+
+| Code | Meaning |
+|---|---|
+| `QQL-PLAN-VECTOR-KIND` | Structural vector input and the declared `AS` role disagree |
+| `QQL-MISSING-USING` | Schema inference is ambiguous; add `USING <vector>` |
+| `QQL-UNKNOWN-VECTOR` | The explicit vector name does not exist in the collection |
+| `QQL-VECTOR-KIND` | The schema role conflicts with the requested role, or the kind is unresolved before embedding |
+
+## Embedding
+
+| Code | Meaning |
+|---|---|
+| `QQL-EMBEDDING-TOPOLOGY` | UPSERT embedding inference is ambiguous across the collection topology |
+| `QQL-EMBEDDING-TARGET` | The UPSERT embedding target is absent or has the wrong role |
+
+## Edge backend
+
+The in-process edge backend reports capability limits with a stable
+`QQL-EDGE-UNSUPPORTED-*` code instead of a generic failure. These errors
+usually carry a remediation hint pointing at remote Qdrant.
+
+| Code | Meaning |
+|---|---|
+| `QQL-EDGE-UNSUPPORTED-GROUP-BY` | `GROUP BY` / query groups are not available offline |
+| `QQL-EDGE-UNSUPPORTED-SHARD` | `SHARD` routing or collection sharding options are not available offline |
+| `QQL-EDGE-UNSUPPORTED-SHARD-KEY` | `CREATE` / `DROP SHARD KEY` are not available offline |
+| `QQL-EDGE-UNSUPPORTED-ALTER` | `ALTER COLLECTION` is not available offline |
+| `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | Collection `WITH PARAMS` is not available offline |
+| `QQL-EDGE-UNSUPPORTED-ACORN` | `PARAMS (acorn = ...)` is not available offline |
+| `QQL-EDGE-UNSUPPORTED-TIMEOUT` | `PARAMS (timeout = ...)` is not available offline |
+| `QQL-EDGE-UNSUPPORTED-CONSISTENCY` | `PARAMS (consistency = ...)` is not available offline |
+| `QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY` | `RECOMMEND STRATEGY average_vector`; offline supports `best_score` and `sum_scores` only |
+| `QQL-EDGE-UNSUPPORTED-POINT-REF` | Point-ID query inputs need materialized vectors offline |
+| `QQL-EDGE-UNSUPPORTED-ROUTE` | The planned operation has no edge route implementation |
+| `QQL-EDGE-INVALID-POINT-ID` | Offline point IDs accept unsigned integers or UUIDs only |
+
+The [Backend compatibility](/docs/reference/backend-compatibility/) matrix
+covers which features are available on each backend.

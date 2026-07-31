@@ -732,10 +732,7 @@ impl<'a> AstLowerer<'a> {
 
     fn peek_word(&mut self, word: &str) -> Result<bool, QqlError> {
         let token = self.peek()?;
-        Ok(
-            (token.kind == TokenKind::Identifier || token.kind == TokenKind::String)
-                && ascii_equal(token.text, word),
-        )
+        Ok(token.kind.is_keyword_or_identifier() && ascii_equal(token.text, word))
     }
 
     fn expect_word(&mut self, word: &str) -> Result<(), QqlError> {

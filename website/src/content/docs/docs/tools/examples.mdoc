@@ -1,0 +1,39 @@
+---
+title: "Examples"
+description: "Find maintained qql-rs examples for Python, Node.js, WebAssembly, edge, geo search, medical retrieval, and SEC filings."
+sidebar:
+  order: 2
+---
+
+The repository examples are executable applications, not duplicated snippets
+inside the documentation site.
+
+| Example | Language / backend | What it demonstrates |
+|---|---|---|
+| `examples/python` | Python (`pyqql`) | Python basics through advanced retrieval: `basic_to_medium.py` (parse → `is_valid` → `explain` → `compile_query` → `inject_filter` → shard key) and `medium_to_expert.py`. Offline — no Qdrant needed. |
+| `examples/nodejs` | Node.js (`@veristamp/nqql`) | Node.js parser and runtime APIs: `basic_to_medium.mjs` and `medium_to_expert.mjs`. |
+| `examples/rust` | Rust (`qql-core`) | `basic_to_medium` (`Parser::parse` + `inject_filter` + `set_shard_key`) and `medium_to_expert` (fail-closed multi-tenant gateway with a per-user `tenant_id` plus a `status` predicate). |
+| `examples/wasm` | WebAssembly (`qql-wasm`) | WASM `parse` / `analyze` / `compile` / `explain` and `Stmt.injectFilter`. |
+| `examples/edge-demo` | qql CLI `--edge` | In-process edge execution with the qql CLI. Requires an edge-enabled build (`--features edge`). |
+| `examples/airbnb-demo` | Python (`pyqql`) + Qdrant + Ollama | Berlin geo search: `GEO_RADIUS` / `GEO_BBOX` / `GEO_POLYGON`, hybrid search, turbo binary quantization with rescore. |
+| `examples/medical-retrieval-ops` | qql CLI + Qdrant | Provisions the ChatMED RAGCare-QA benchmark and runs retrieval checks. |
+| `examples/medical-showcase` | qql CLI + Qdrant | 12-record end-to-end: hybrid, filters, ACORN, timeout/consistency, grouped retrieval, recommend, context, discover, CTE prefetch DAGs, mutations, `DELETE PAYLOAD`, `SCROLL WITH VECTOR`, `COUNT` exact. |
+| `examples/sec10k-qql` | Python (`pyqql`) + Qdrant + Ollama/LM Studio | Flagship multi-tenant hybrid RAG over SEC 10-K filings: `CREATE SHARD KEY`, `is_tenant` index, `SHARD` + `WHERE tenant_id`, fail-closed `inject_filter`, agent tool-use. |
+
+Browse the [examples directory on GitHub](https://github.com/srimon12/qql-rs/tree/main/examples).
+
+{% qqlExample title="Representative geo query" %}
+```sql
+QUERY TEXT 'quiet apartment near transit' FROM listings
+USING dense
+WHERE location GEO_RADIUS {
+  center: {lat: 52.52, lon: 13.405},
+  radius: 5000.0
+}
+WITH PAYLOAD INCLUDE (name, neighbourhood, price)
+LIMIT 10;
+```
+{% /qqlExample %}
+
+When adding an example, keep its QQL compatible with `language/v1`, document
+the required backend and models, and provide a deterministic setup path.

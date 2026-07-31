@@ -1,0 +1,172 @@
+---
+title: "Collections and indexes"
+description: "Define Qdrant collection topology, payload indexes, and custom shard keys from QQL."
+sidebar:
+  order: 5
+---
+
+Collection declarations make vector topology reviewable alongside the queries
+that use it. Define vectors first, add payload indexes for fields you filter or
+order by, and add shard keys only when Qdrant routing is part of the design.
+
+## Model the vector topology
+
+Vector names are application-defined. `dense`, `bm25`, and `colbert` are useful
+conventions, but vector configuration determines the actual role. A dense
+definition is `name VECTOR(size, distance)` with distance `COSINE`, `DOT`,
+`EUCLID`, or `MANHATTAN`; a sparse definition is `name SPARSE` with optional
+`WITH SPARSE (...)` / `WITH INDEX (...)` config.
+
+{% qqlExample title="Dense, sparse, and multivector topology" %}
+```sql
+CREATE COLLECTION research (
+  dense VECTOR(384, COSINE),
+  bm25 SPARSE,
+  colbert VECTOR(128, COSINE)
+    WITH MULTIVECTOR (comparator = 'max_sim')
+    WITH HNSW (m = 0)
+)
+WITH HNSW (
+  m = 16,
+  ef_construct = 100
+);
+```
+{% /qqlExample %}
+
+| Requirement | Schema choice |
+|---|---|
+| Semantic retrieval | A dense `VECTOR(size, distance)` |
+| Lexical or sparse retrieval | A named `SPARSE` vector |
+| Late interaction | A multivector with a comparator |
+| Hybrid retrieval | Both a dense and sparse vector |
+
+### Collection modes
+
+A `CREATE COLLECTION` can name a mode instead of (or alongside) explicit
+vector definitions. Modes infer a conventional topology:
+
+| Mode | Resulting topology |
+|---|---|
+| (no mode) | Bare dense topology without a model hint |
+| `USING DENSE MODEL 'name'` | Dense topology with dimension inference from the model |
+| `USING HYBRID` | Conventional hybrid `dense` + `sparse` topology |
+| `HYBRID RERANK` | Conventional rerank topology |
+| `HYBRID DENSE VECTOR semantic_v2 SPARSE VECTOR lexical_v2` | Hybrid topology with arbitrary role names |
+
+Explicit dense and sparse vector definitions may coexist with the collection
+blocks below. Dense size must be positive.
+
+## Collection configuration blocks
+
+Config blocks attach to the collection with `WITH <BLOCK> (...)` and to
+individual dense vectors (`WITH HNSW`, `WITH VECTOR`, `WITH QUANTIZATION`,
+`WITH MULTIVECTOR`). Keys are ASCII case-insensitive and unique.
+
+| Block | Accepted keys |
+|---|---|
+| `HNSW` | `m`, `ef_construct`, `full_scan_threshold`, `max_indexing_threads`, `on_disk`, `payload_m`, `inline_storage` |
+| `VECTOR` | `on_disk` |
+| `OPTIMIZERS` | `deleted_threshold`, `vacuum_min_vector_number`, `default_segment_number`, `max_segment_size`, `memmap_threshold`, `indexing_threshold`, `flush_interval_sec`, `max_optimization_threads`, `prevent_unoptimized` |
+| `PARAMS` | `replication_factor`, `write_consistency_factor`, `on_disk_payload`, `shard_number`, `sharding_method`, `shard_keys` |
+| `QUANTIZATION` | `type` (`scalar`/`binary`/`product`/`turbo`), `disabled`, `always_ram`, `quantile`, `bits`, `compression`, `encoding`, `query_encoding` |
+| `MULTIVECTOR` | `comparator` (`max_sim`) |
+| sparse `INDEX`/`SPARSE` | `modifier`, `full_scan_threshold`, `on_disk`, `datatype` |
+
+`read_fan_out_factor` and `read_fan_out_delay_ms` are `ALTER`-only PARAMS
+keys, and `QUANTIZATION (disabled = true)` is an ALTER form. `ALTER COLLECTION`
+applies any of the `HNSW`, `VECTOR`, `OPTIMIZERS`, `PARAMS`, or `QUANTIZATION`
+blocks to an existing collection.
+
+{% qqlExample title="Replication, quantization, and alter" %}
+```sql
+CREATE COLLECTION sec10k (
+  dense VECTOR(768, COSINE),
+  sparse SPARSE
+) WITH HNSW (m = 16, ef_construct = 100)
+WITH PARAMS (
+  replication_factor = 2,
+  shard_number = 8,
+  sharding_method = 'custom',
+  shard_keys = ['honeywell', 'ge']
+);
+
+ALTER COLLECTION sec10k WITH QUANTIZATION (type = 'scalar');
+```
+{% /qqlExample %}
+
+## Index the filter paths you use
+
+Create payload indexes for fields used frequently in filters, tenant predicates,
+or ordering. Index design is a Qdrant performance decision, not a requirement
+for every payload field. The index `TYPE` is `keyword`, `integer`, `float`,
+`geo`, `text`, `bool`, `datetime`, or `uuid`.
+
+{% qqlExample title="Tenant and text payload indexes" %}
+```sql
+CREATE INDEX ON COLLECTION research
+FOR tenant_id
+TYPE keyword
+WITH (
+  is_tenant = true,
+  on_disk = true
+);
+
+CREATE INDEX ON COLLECTION research
+FOR content
+TYPE text
+WITH (
+  tokenizer = 'multilingual',
+  lowercase = true,
+  phrase_matching = true
+);
+```
+{% /qqlExample %}
+
+`CREATE INDEX ... WITH (...)` accepts the following options:
+
+| Option | Type |
+|---|---|
+| `is_tenant`, `on_disk`, `enable_hnsw` | boolean |
+| `lowercase`, `ascii_folding`, `phrase_matching`, `lookup`, `range`, `is_principal` | boolean |
+| `min_token_len`, `max_token_len` | non-negative integer |
+| `tokenizer` | string |
+| `stopwords` | string list |
+
+`DROP INDEX ON COLLECTION research FOR field` removes an index.
+
+## Inspect resources with SHOW
+
+`SHOW` has exactly three forms — there is no `SHOW INDEXES`.
+
+| Statement | Returns |
+|---|---|
+| `SHOW COLLECTIONS;` | All collection names |
+| `SHOW COLLECTION name;` | A single collection's configuration |
+| `SHOW SHARD KEYS ON COLLECTION name;` | The custom shard keys of a collection |
+
+## Route a collection with custom shard keys
+
+Shard-key DDL creates and manages routing partitions. It is separate from the
+tenant predicate your service must enforce.
+
+{% qqlExample title="Manage a custom shard key" %}
+```sql
+CREATE SHARD KEY 'acme'
+ON COLLECTION research
+WITH (shards_number = 2);
+
+SHOW SHARD KEYS
+ON COLLECTION research;
+
+DROP SHARD KEY 'acme'
+ON COLLECTION research;
+```
+{% /qqlExample %}
+
+{% aside type="note" title="Remote-backend capability" %}
+Shard-key DDL is a Qdrant remote-backend capability. The in-process edge backend
+does not support shard keys, `ALTER COLLECTION`, or grouped queries.
+{% /aside %}
+
+Next: [Data operations](/docs/language/data-operations/) and
+[Multitenancy](/docs/guides/multitenancy/).

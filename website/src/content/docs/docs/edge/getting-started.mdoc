@@ -1,0 +1,140 @@
+---
+title: "Getting started"
+description: "Install the edge-enabled CLI, configure it, and run a complete local query with no Qdrant server."
+sidebar:
+  order: 1
+---
+
+This page walks through a complete end-to-end local session: build the
+edge-enabled CLI, configure it, create a collection, upsert documents, and
+search — all in-process, with no Qdrant server running.
+
+## 1. Build the edge-enabled CLI
+
+Edge support is an **opt-in cargo feature**. The default `qql-cli` build ships
+with `grpc` and `rest` only; `--edge` refuses to run until you build with the
+`edge` feature (FastEmbed and ONNX materially increase compile time and binary
+size).
+
+{% terminal title="Build the edge-enabled CLI" %}
+git clone https://github.com/srimon12/qql-rs.git
+cd qql-rs
+cargo build --release -p qql-cli --features edge
+{% /terminal %}
+
+The binary is `target/release/qql`. A default build without the flag would
+answer `qql --edge exec "SHOW COLLECTIONS"` with:
+
+{% terminal title="Edge disabled" %}
+edge support is not installed; reinstall qql-cli with --features edge
+{% /terminal %}
+
+## 2. Configure the local backend
+
+`qql config edge` persists an `edge.json` to your QQL config directory
+(`~/.qql/edge.json`, written with `0600` permissions). The key settings are
+the data directory and the embedding model.
+
+{% terminal title="Configure edge" %}
+qql config edge --data-dir ./qdrant_data --model bge-small-en-v1.5
+{% /terminal %}
+
+The command confirms where it saved the file and how to use it:
+
+{% terminal title="Config confirmation" %}
+Saved edge configuration to /home/you/.qql/edge.json
+Use it with: qql --edge exec "SHOW COLLECTIONS"
+{% /terminal %}
+
+For a full list of flags and environment variables, see the
+[CLI reference](/docs/edge/cli/).
+
+## 3. Run your first local query
+
+Every subcommand accepts the global `--edge` flag, which swaps the backend
+from `QDRANT_URL` to the local embedded storage. Start with a health check:
+
+{% terminal title="Doctor" %}
+qql --edge doctor
+{% /terminal %}
+
+```text
+Connected to the local edge backend (healthy)
+Hosts: dense=true multi=false image=false cross_rerank=false
+  dense_model: BGESmallENV15
+```
+
+Now run the real thing. This script creates a hybrid collection (dense +
+sparse), upserts two documents, and searches them. No server is involved:
+
+{% qqlExample title="Local end-to-end script" %}
+```sql
+CREATE COLLECTION docs HYBRID;
+
+UPSERT INTO docs VALUES
+  {id: 1, text: 'QQL runs vector search locally'},
+  {id: 2, text: 'qdrant-edge keeps the HNSW index in-process'}
+USING HYBRID;
+
+QUERY TEXT 'local vector search' FROM docs USING dense LIMIT 5;
+```
+{% /qqlExample %}
+
+{% terminal title="Execute the script against edge" %}
+qql --edge execute first-local.qql
+{% /terminal %}
+
+You can also run the interactive REPL entirely offline:
+
+{% terminal title="Local REPL" %}
+qql --edge connect
+{% /terminal %}
+
+```text
+Connected to local edge
+qql> SHOW COLLECTIONS;
+```
+
+## Model download note
+
+The first statement that needs an embedding (the `UPSERT … USING HYBRID`
+above, or any `QUERY TEXT …`) downloads the model from Hugging Face —
+**roughly 1 GB for the default dense model** — and caches it locally. The
+download happens once per machine and cache directory.
+
+{% aside type="note" title="The first run needs network" %}
+The download is the only network access in the local path. After it completes,
+embedding inference and all storage operations are fully offline. Use
+`--cache-dir` or `QQL_EDGE_CACHE_DIR` to place the cache somewhere
+predictable, and `--show-download-progress` to see the progress bars.
+{% /aside %}
+
+If you prefer to skip the download entirely, configure the HTTP embedder
+instead (storage stays local, embeddings come from any OpenAI-compatible
+endpoint):
+
+{% terminal title="HTTP embedder" %}
+qql config edge --embedder http --embed-url http://localhost:11434/v1/embeddings
+{% /terminal %}
+
+See [models](/docs/edge/models/) for the full model story.
+
+## Try the SDKs instead
+
+The same local backend is available from each host language:
+
+- Rust: `local_executor("./qdrant_data", false)` — [Rust page](/docs/edge/rust/)
+- Python: `pyqql_edge.local_executor("./qdrant_data")` — [Python page](/docs/edge/python/)
+- Node.js: `localExecutor("./qql-data", { model: "bge-small-en-v1.5" })` — [Node.js page](/docs/edge/node/)
+
+Each package embeds the runtime directly, so no CLI build is needed.
+
+## What happens on repeat runs
+
+Collections persist under the data directory and are re-opened on the next
+invocation — including the WAL, segments, and `edge_config.json`. See
+[persistence](/docs/edge/persistence/) for the layout and the rules around
+`close()` and multi-process access.
+
+For the boundary of what edge can and cannot execute, see
+[capabilities](/docs/edge/capabilities/).

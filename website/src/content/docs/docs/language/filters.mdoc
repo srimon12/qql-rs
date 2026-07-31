@@ -1,0 +1,145 @@
+---
+title: "Filters"
+description: "Narrow QQL retrieval and mutations with comparisons, text, nested payload, vector, and geo predicates."
+sidebar:
+  order: 3
+---
+
+`WHERE` describes *which points qualify*. It lowers to a Qdrant filter for REST,
+gRPC, and edge execution. It is independent from `SHARD`, which is request
+routing rather than access control.
+
+## Compose scalar predicates
+
+Predicates combine with `NOT`, `AND`, and `OR`; precedence is predicate → `NOT`
+→ `AND` → `OR`. Add parentheses when a mixed condition should be obvious to the
+reader.
+
+{% qqlExample title="Comparisons, membership, and boolean logic" %}
+```sql
+QUERY TEXT 'search'
+FROM docs
+WHERE status = 'published'
+  AND year BETWEEN 2024 AND 2026
+  AND tags NOT IN ('archived', 'private')
+  AND (score >= 0.7 OR featured = true)
+LIMIT 10;
+```
+{% /qqlExample %}
+
+| Predicate | Use it for |
+|---|---|
+| `=`, `!=`, `>`, `>=`, `<`, `<=` | Scalar equality and range comparison |
+| `BETWEEN`, `IN`, `NOT IN` | Inclusive ranges and membership sets |
+| `IS NULL`, `IS EMPTY` | Missing or empty payload values |
+| `MATCH`, `MATCH ANY`, `MATCH PHRASE` | Text payload matching |
+| `HAS_VECTOR`, `VALUES_COUNT` | Vector presence and array cardinality |
+
+The unicode operators `≠`, `≥`, and `≤` normalize to `!=`, `>=`, and `<=`.
+`!=`, `NOT IN`, `IS NOT NULL`, and `IS NOT EMPTY` all normalize to a `NOT`
+around the corresponding positive predicate. Comparison against the point
+`id` field permits only `=` and `IN`, and every value must be a valid point ID
+(an unsigned integer or a string).
+
+## Text, cardinality, and presence predicates
+
+`MATCH` covers three text forms: a plain string match, `MATCH ANY` over a
+non-empty list, and `MATCH PHRASE` for ordered multi-token phrases. Field and
+text-index compatibility is enforced by the backend at execution time.
+`VALUES_COUNT <op> <non_negative_integer>` tests array cardinality.
+
+{% qqlExample title="Text matching, cardinality, and presence" %}
+```sql
+QUERY TEXT 'search'
+FROM docs
+WHERE content MATCH 'hello world'
+  AND tags MATCH ANY ('hello', 'world')
+  AND description MATCH PHRASE 'vector database'
+  AND reviews VALUES_COUNT >= 2
+  AND HAS_VECTOR 'dense'
+  AND notes IS NOT NULL
+LIMIT 10;
+```
+{% /qqlExample %}
+
+## Match nested document data
+
+Use `NESTED` when predicates must apply within the same object of a nested
+payload array. This avoids accidentally matching `rating` from one review and
+`verified` from another.
+
+{% qqlExample title="Phrase and nested-payload matching" %}
+```sql
+QUERY TEXT 'quality'
+FROM products
+WHERE description MATCH PHRASE 'machine washable'
+  AND NESTED('reviews', rating >= 4 AND verified = true)
+LIMIT 20;
+```
+{% /qqlExample %}
+
+## Filter geographic data
+
+Geo predicates accept structured point and shape objects. Latitude, longitude,
+radius, and polygon structure are validated before planning.
+
+{% qqlExample title="Points within a radius" %}
+```sql
+QUERY TEXT 'coffee'
+FROM places
+WHERE location GEO_RADIUS {
+  center: {lat: 52.52, lon: 13.405},
+  radius: 1500.0
+}
+LIMIT 10;
+```
+{% /qqlExample %}
+
+{% qqlExample title="A geographic bounding box" %}
+```sql
+QUERY TEXT 'museum'
+FROM places
+WHERE location GEO_BBOX {
+  top_left: {lat: 52.54, lon: 13.36},
+  bottom_right: {lat: 52.49, lon: 13.45}
+}
+LIMIT 10;
+```
+{% /qqlExample %}
+
+`GEO_POLYGON` matches points inside an `exterior` ring and optionally excludes
+holes in `interiors`. Every ring needs at least three points. Latitudes are
+validated to `[-90, 90]`, longitudes to `[-180, 180]`, and radii must be
+positive — all before planning.
+
+{% qqlExample title="A polygon with an interior hole" %}
+```sql
+QUERY TEXT 'territory'
+FROM places
+WHERE location GEO_POLYGON {
+  exterior: [
+    {lat: -70.0, lon: -70.0},
+    {lat: 60.0, lon: -70.0},
+    {lat: 60.0, lon: 60.0},
+    {lat: -70.0, lon: 60.0}
+  ],
+  interiors: [
+    [
+      {lat: -50.0, lon: -50.0},
+      {lat: 50.0, lon: -50.0},
+      {lat: 50.0, lon: 50.0},
+      {lat: -50.0, lon: 50.0}
+    ]
+  ]
+}
+LIMIT 10;
+```
+{% /qqlExample %}
+
+{% aside type="caution" title="Routing is not isolation" %}
+`SHARD 'acme'` selects a Qdrant shard key and never becomes a Qdrant filter.
+For a tenant boundary, inject a trusted predicate with the host SDK. Use both
+when you need a security boundary and targeted routing.
+{% /aside %}
+
+See [Multitenancy](/docs/guides/multitenancy/) for the host-side policy pattern.

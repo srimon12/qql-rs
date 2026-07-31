@@ -11,6 +11,11 @@ const GENERATED_HEADER: &str = "\
 
 ";
 
+struct Artifact {
+    path: PathBuf,
+    contents: String,
+}
+
 fn main() {
     if let Err(error) = run() {
         eprintln!("qql-grammar-gen: {error}");
@@ -22,12 +27,50 @@ fn run() -> Result<(), Box<dyn Error>> {
     let command = env::args().nth(1).unwrap_or_else(|| "check".to_owned());
     let root = workspace_root();
     let source_path = root.join("language/v1/grammar.pest");
-    let output_path = root.join("crates/qql-core/grammar/qql.generated.pest");
-    let generated = render(&fs::read_to_string(&source_path)?);
+    let source = fs::read_to_string(&source_path)?;
+    let literals = grammar_literals(&source);
+    let artifacts = [
+        Artifact {
+            path: root.join("crates/qql-core/grammar/qql.generated.pest"),
+            contents: render_pest(&source),
+        },
+        Artifact {
+            path: root.join("editors/vscode/syntaxes/qql.tmLanguage.json"),
+            contents: render_textmate(&literals),
+        },
+        Artifact {
+            path: root.join("editors/vscode/src/keywords.generated.ts"),
+            contents: render_typescript(&literals),
+        },
+        Artifact {
+            path: root.join("website/src/scripts/qql-keywords.generated.ts"),
+            contents: render_typescript(&literals),
+        },
+        Artifact {
+            path: root.join("crates/qql-core/src/keywords.generated.rs"),
+            contents: render_rust_keywords(&literals),
+        },
+    ];
+
+    let dead = dead_rules(&source);
+    if !dead.is_empty() {
+        let message = format!(
+            "dead grammar rules (defined but unreachable from `script`/`single_statement`): {}",
+            dead.join(", ")
+        );
+        if command == "check" {
+            return Err(message.into());
+        }
+        eprintln!("qql-grammar-gen: warning: {message}");
+    }
 
     match command.as_str() {
-        "generate" => write_if_changed(&output_path, &generated),
-        "check" => check(&output_path, &generated),
+        "generate" => artifacts
+            .iter()
+            .try_for_each(|artifact| write_if_changed(&artifact.path, &artifact.contents)),
+        "check" => artifacts
+            .iter()
+            .try_for_each(|artifact| check(&artifact.path, &artifact.contents)),
         "help" | "-h" | "--help" => {
             println!("Usage: qql-grammar-gen <generate|check>");
             Ok(())
@@ -44,15 +87,337 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
-fn render(source: &str) -> String {
+fn render_pest(source: &str) -> String {
     let normalized = source.replace("\r\n", "\n");
     let body = normalized.trim_end();
     format!("{GENERATED_HEADER}{body}\n")
 }
 
+fn grammar_literals(source: &str) -> Vec<String> {
+    let mut literals = Vec::new();
+
+    for line in source.lines() {
+        let line = line.split("//").next().unwrap_or_default();
+        let mut rest = line;
+        while let Some(index) = rest.find("^\"") {
+            let candidate = &rest[index + 2..];
+            let Some(end) = candidate.find('"') else {
+                break;
+            };
+            let literal = &candidate[..end];
+            if literal
+                .bytes()
+                .all(|byte| byte.is_ascii_alphabetic() || byte == b'_')
+                && literal.len() > 1
+            {
+                literals.push(literal.to_ascii_uppercase());
+            }
+            rest = &candidate[end + 1..];
+        }
+    }
+
+    literals.sort_by_key(|literal| literal.to_ascii_uppercase());
+    literals.dedup();
+    literals
+}
+
+/// Extract `name = { body }` rule definitions. Bodies may span multiple lines.
+fn rule_definitions(source: &str) -> Vec<(String, String)> {
+    let lines: Vec<&str> = source.lines().collect();
+    let mut rules = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("//") {
+            i += 1;
+            continue;
+        }
+        if let Some(eq) = first_unquoted(trimmed, '=') {
+            let name = trimmed[..eq].trim();
+            if is_rule_name(name) {
+                let mut rest = trimmed[eq + 1..].trim_start();
+                // pest rule modifiers: `_`, `@`, `$`.
+                loop {
+                    let before = rest;
+                    for marker in ['_', '@', '$'] {
+                        rest = rest.strip_prefix(marker).unwrap_or(rest).trim_start();
+                    }
+                    if rest == before {
+                        break;
+                    }
+                }
+                if let Some(open) = rest.find('{') {
+                    let mut body = String::from(&rest[open..]);
+                    let mut depth = brace_delta(&body);
+                    let mut j = i + 1;
+                    while depth > 0 && j < lines.len() {
+                        body.push('\n');
+                        body.push_str(lines[j]);
+                        depth += brace_delta(lines[j]);
+                        j += 1;
+                    }
+                    rules.push((name.to_string(), body));
+                    i = j;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+    rules
+}
+
+/// Find the byte offset of `needle` in `text`, ignoring string literals.
+fn first_unquoted(text: &str, needle: char) -> Option<usize> {
+    let mut in_string = false;
+    let mut iter = text.char_indices();
+    while let Some((idx, ch)) = iter.next() {
+        match ch {
+            '"' => in_string = !in_string,
+            c if c == needle && !in_string => return Some(idx),
+            '^' => {
+                // `^"..."` — skip the whole literal.
+                if let Some((_, next)) = iter.next() {
+                    if next == '"' {
+                        for (_, c) in iter.by_ref() {
+                            if c == '"' {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn is_rule_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {
+            chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+        }
+        _ => false,
+    }
+}
+
+fn brace_delta(text: &str) -> isize {
+    let mut delta = 0isize;
+    let mut in_string = false;
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' => in_string = !in_string,
+            '{' if !in_string => delta += 1,
+            '}' if !in_string => delta -= 1,
+            '^' => {
+                if chars.peek() == Some(&'"') {
+                    chars.next();
+                    for c in chars.by_ref() {
+                        if c == '"' {
+                            break;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    delta
+}
+
+/// Rule names referenced from a rule body (excluding string literals).
+fn rule_references(body: &str, defined: &std::collections::HashSet<String>) -> Vec<String> {
+    let mut refs = Vec::new();
+    let mut in_string = false;
+    let chars: Vec<char> = body.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        match chars[i] {
+            '"' => {
+                in_string = !in_string;
+                i += 1;
+            }
+            '^' if i + 1 < chars.len() && chars[i + 1] == '"' => {
+                i += 2;
+                while i < chars.len() && chars[i] != '"' {
+                    i += 1;
+                }
+                i += 1;
+            }
+            c if !in_string && (c.is_ascii_alphabetic() || c == '_') => {
+                let start = i;
+                while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                    i += 1;
+                }
+                let word: String = chars[start..i].iter().collect();
+                if defined.contains(&word) {
+                    refs.push(word);
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    refs
+}
+
+/// Rules defined in the grammar that are unreachable from the entry
+/// productions. `WHITESPACE` and `COMMENT` are implicit pest hooks and are
+/// treated as roots.
+fn dead_rules(source: &str) -> Vec<String> {
+    use std::collections::{HashMap, HashSet};
+
+    let definitions = rule_definitions(source);
+    let names: HashSet<String> = definitions.iter().map(|(name, _)| name.clone()).collect();
+    let references: HashMap<String, Vec<String>> = definitions
+        .iter()
+        .map(|(name, body)| (name.clone(), rule_references(body, &names)))
+        .collect();
+
+    let mut reachable = HashSet::new();
+    let mut stack = vec![
+        "script".to_string(),
+        "single_statement".to_string(),
+        "WHITESPACE".to_string(),
+        "COMMENT".to_string(),
+    ];
+    while let Some(name) = stack.pop() {
+        if !reachable.insert(name.clone()) {
+            continue;
+        }
+        if let Some(deps) = references.get(&name) {
+            for dep in deps {
+                if !reachable.contains(dep) {
+                    stack.push(dep.clone());
+                }
+            }
+        }
+    }
+
+    let mut dead: Vec<String> = names
+        .into_iter()
+        .filter(|name| !reachable.contains(name))
+        .collect();
+    dead.sort();
+    dead
+}
+
+fn render_typescript(literals: &[String]) -> String {
+    let constants = literals
+        .iter()
+        .filter(|literal| is_constant(literal))
+        .map(|literal| literal.to_ascii_uppercase())
+        .collect::<Vec<_>>();
+    let keywords = literals
+        .iter()
+        .filter(|literal| !is_constant(literal))
+        .map(|literal| format!("  \"{}\",", literal.to_ascii_uppercase()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let constants = constants
+        .iter()
+        .map(|literal| format!("  \"{literal}\","))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    format!(
+        "{GENERATED_HEADER}export const QQL_KEYWORDS = [\n{keywords}\n] as const;\n\
+         export const QQL_CONSTANTS = new Set([\n{constants}\n]);\n"
+    )
+}
+
+fn render_textmate(literals: &[String]) -> String {
+    let constants = literals
+        .iter()
+        .filter(|literal| is_constant(literal))
+        .cloned()
+        .collect::<Vec<_>>();
+    let keywords = literals
+        .iter()
+        .filter(|literal| !is_constant(literal))
+        .cloned()
+        .collect::<Vec<_>>();
+    let keyword_pattern = textmate_pattern(&keywords);
+    let constant_pattern = textmate_pattern(&constants);
+
+    format!(
+        r##"{{
+  "name": "QQL",
+  "scopeName": "source.qql",
+  "fileTypes": ["qql"],
+  "patterns": [
+    {{ "include": "#comments" }},
+    {{ "include": "#strings" }},
+    {{ "include": "#numbers" }},
+    {{ "include": "#constants" }},
+    {{ "include": "#keywords" }},
+    {{ "include": "#operators" }},
+    {{ "include": "#punctuation" }},
+    {{ "include": "#identifiers" }}
+  ],
+  "repository": {{
+    "comments": {{ "patterns": [{{ "name": "comment.line.double-dash.qql", "match": "--.*$" }}] }},
+    "strings": {{
+      "patterns": [
+        {{ "name": "string.quoted.single.qql", "begin": "'", "end": "'", "patterns": [{{ "name": "constant.character.escape.qql", "match": "''|\\\\['\\\"\\\\ntr]" }}] }},
+        {{ "name": "string.quoted.double.qql", "begin": "\\\"", "end": "\\\"", "patterns": [{{ "name": "constant.character.escape.qql", "match": "\\\\['\\\"\\\\ntr]" }}] }}
+      ]
+    }},
+    "numbers": {{ "patterns": [{{ "name": "constant.numeric.float.qql", "match": "-?\\\\d+(\\\\.\\\\d+([eE][+-]?\\\\d+)?|([eE][+-]?\\\\d+))" }}, {{ "name": "constant.numeric.integer.qql", "match": "-?\\\\d+" }}] }},
+    "constants": {{ "patterns": [{{ "name": "constant.language.qql", "match": "{constant_pattern}" }}] }},
+    "keywords": {{ "patterns": [{{ "name": "keyword.control.qql", "match": "{keyword_pattern}" }}] }},
+    "operators": {{ "patterns": [{{ "name": "keyword.operator.comparison.qql", "match": "!=|<>|<=|>=|<|>" }}, {{ "name": "keyword.operator.assignment.qql", "match": "=" }}, {{ "name": "keyword.operator.arithmetic.qql", "match": "[\\\\+\\\\-\\\\*\\\\/]" }}] }},
+    "punctuation": {{ "patterns": [{{ "name": "punctuation.terminator.qql", "match": ";" }}, {{ "name": "punctuation.separator.qql", "match": "," }}, {{ "name": "punctuation.definition.bracket.qql", "match": "[\\\\{{\\\\}}\\\\[\\\\]]" }}, {{ "name": "punctuation.definition.paren.qql", "match": "[\\\\(\\\\)]" }}, {{ "name": "punctuation.separator.key-value.qql", "match": ":" }}] }},
+    "identifiers": {{ "patterns": [{{ "name": "variable.other.readwrite.qql", "match": "\\\\$[A-Za-z_][A-Za-z0-9_]*(\\\\.[A-Za-z_][A-Za-z0-9_]*)*(\\\\[\\\\]\\\\.?)*" }}, {{ "name": "entity.name.qql", "match": "[A-Za-z_][A-Za-z0-9_]*(\\\\.[A-Za-z_][A-Za-z0-9_]*|\\\\[\\\\]\\\\.?)*" }}] }}
+  }}
+}}
+"##
+    )
+}
+
+fn is_constant(literal: &str) -> bool {
+    literal.eq_ignore_ascii_case("true")
+        || literal.eq_ignore_ascii_case("false")
+        || literal.eq_ignore_ascii_case("null")
+}
+
+fn textmate_pattern(literals: &[String]) -> String {
+    format!(r#"\\b(?i)({})\\b"#, literals.join("|"))
+}
+
+fn to_camel_case(literal: &str) -> String {
+    literal
+        .split('_')
+        .map(|part| {
+            let mut c = part.chars();
+            match c.next() {
+                None => String::new(),
+                Some(f) => {
+                    f.to_uppercase().collect::<String>() + c.as_str().to_lowercase().as_str()
+                }
+            }
+        })
+        .collect()
+}
+
+fn render_rust_keywords(literals: &[String]) -> String {
+    let mut lines = Vec::new();
+    for lit in literals {
+        let variant = to_camel_case(lit);
+        lines.push(format!("    \"{lit}\" => TokenKind::{variant},"));
+    }
+    let body = lines.join("\n");
+    format!(
+        "{GENERATED_HEADER}pub static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {{\n{body}\n}};\n"
+    )
+}
+
 fn write_if_changed(path: &Path, contents: &str) -> Result<(), Box<dyn Error>> {
     if fs::read_to_string(path).ok().as_deref() == Some(contents) {
-        println!("grammar is current: {}", path.display());
+        println!("current: {}", path.display());
         return Ok(());
     }
 
@@ -60,7 +425,12 @@ fn write_if_changed(path: &Path, contents: &str) -> Result<(), Box<dyn Error>> {
         .parent()
         .ok_or_else(|| format!("generated path has no parent: {}", path.display()))?;
     fs::create_dir_all(parent)?;
-    let temporary = path.with_extension("pest.tmp");
+    let temporary = path.with_extension(format!(
+        "{}.tmp",
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("generated")
+    ));
     fs::write(&temporary, contents)?;
     fs::rename(temporary, path)?;
     println!("generated {}", path.display());
@@ -69,10 +439,7 @@ fn write_if_changed(path: &Path, contents: &str) -> Result<(), Box<dyn Error>> {
 
 fn check(path: &Path, expected: &str) -> Result<(), Box<dyn Error>> {
     match fs::read_to_string(path) {
-        Ok(actual) if actual == expected => {
-            println!("grammar generation is current");
-            Ok(())
-        }
+        Ok(actual) if actual == expected => Ok(()),
         Ok(_) => Err(format!(
             "{} is stale; run `cargo run -p qql-grammar-gen -- generate`",
             path.display()
@@ -92,10 +459,43 @@ mod tests {
     use super::*;
 
     #[test]
-    fn render_is_deterministic_and_normalizes_newlines() {
-        let generated = render("rule = { \"x\" }\r\n\r\n");
-        assert!(generated.starts_with(GENERATED_HEADER));
-        assert!(generated.ends_with("rule = { \"x\" }\n"));
-        assert!(!generated.contains('\r'));
+    fn extracts_case_insensitive_word_literals_only() {
+        let literals =
+            grammar_literals("query = { ^\"QUERY\" ~ ^\"from\" ~ \"(\" ~ ^\"true\" ~ ^\"x\" }");
+        assert_eq!(literals, ["FROM", "QUERY", "TRUE"]);
+    }
+
+    #[test]
+    fn generated_textmate_uses_the_grammar_vocabulary() {
+        let grammar =
+            render_textmate(&["FROM".into(), "NULL".into(), "QUERY".into(), "true".into()]);
+        assert!(grammar.contains(r#"\\b(?i)(FROM|QUERY)\\b"#));
+        assert!(grammar.contains(r#"\\b(?i)(NULL|true)\\b"#));
+    }
+
+    #[test]
+    fn flags_unreachable_rules_only() {
+        let grammar = r#"
+WHITESPACE = _{ " " }
+script = { SOI ~ (statement ~ ";"?)* ~ EOI }
+statement = _{ query | scroll }
+query = { ^"QUERY" ~ collection }
+scroll = { ^"SCROLL" ~ collection }
+collection = { identifier }
+identifier = { ASCII_ALPHA+ }
+orphan = { ^"NEVER" }
+"#;
+        let dead = dead_rules(grammar);
+        assert_eq!(dead, ["orphan"]);
+    }
+
+    #[test]
+    fn implicit_pest_hooks_are_not_dead() {
+        let grammar = r#"
+WHITESPACE = _{ " " }
+COMMENT = _{ "--" }
+script = { SOI ~ (^"QUERY" | ^"SCROLL") ~ EOI }
+"#;
+        assert!(dead_rules(grammar).is_empty());
     }
 }

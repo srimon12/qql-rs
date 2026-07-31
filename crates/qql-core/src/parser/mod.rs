@@ -63,40 +63,7 @@ pub fn ascii_equal_lower(s: &str, lower: &str) -> bool {
 }
 
 pub fn is_contextual_field_name(kind: TokenKind) -> bool {
-    matches!(
-        kind,
-        TokenKind::Offset
-            | TokenKind::Score
-            | TokenKind::Threshold
-            | TokenKind::Lookup
-            | TokenKind::Id
-            | TokenKind::Dense
-            | TokenKind::Sparse
-            | TokenKind::Vector
-            | TokenKind::By
-            | TokenKind::Count
-            | TokenKind::Clear
-            | TokenKind::Field
-            | TokenKind::Into
-    )
-}
-
-fn is_contextual_identifier(kind: TokenKind) -> bool {
-    matches!(
-        kind,
-        TokenKind::Offset
-            | TokenKind::Score
-            | TokenKind::Threshold
-            | TokenKind::Lookup
-            | TokenKind::Id
-            | TokenKind::Dense
-            | TokenKind::Sparse
-            | TokenKind::Vector
-            | TokenKind::Count
-            | TokenKind::Clear
-            | TokenKind::Field
-            | TokenKind::Into
-    )
+    kind.is_keyword_or_identifier()
 }
 
 impl Parser {
@@ -262,10 +229,7 @@ impl<'a> AstLowerer<'a> {
 
     pub fn parse_identifier_str(&mut self) -> Result<&'a str, QqlError> {
         let tok = self.peek()?;
-        if tok.kind == TokenKind::Identifier
-            || tok.kind == TokenKind::String
-            || is_contextual_identifier(tok.kind)
-        {
+        if tok.is_keyword_or_identifier() || tok.kind == TokenKind::String {
             self.advance()?;
             Ok(tok.text)
         } else {
@@ -316,7 +280,15 @@ impl<'a> AstLowerer<'a> {
                 self.advance()?;
                 Ok(crate::ast::Value::Null)
             }
-            TokenKind::Identifier => {
+            TokenKind::True => {
+                self.advance()?;
+                Ok(crate::ast::Value::Bool(true))
+            }
+            TokenKind::False => {
+                self.advance()?;
+                Ok(crate::ast::Value::Bool(false))
+            }
+            kind if kind.is_keyword_or_identifier() => {
                 self.advance()?;
                 if ascii_equal(tok.text, "TRUE") {
                     Ok(crate::ast::Value::Bool(true))

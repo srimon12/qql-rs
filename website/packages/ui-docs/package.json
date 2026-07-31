@@ -1,0 +1,25 @@
+{
+  "name": "@qql/ui-docs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/types.ts",
+    "./types": "./src/types.ts",
+    "./global.css": "./src/styles/global.css",
+    "./DocsFooter.astro": "./src/components/DocsFooter.astro",
+    "./DocsHeader.astro": "./src/components/DocsHeader.astro",
+    "./TechBadge.astro": "./src/components/TechBadge.astro",
+    "./ApiField.astro": "./src/components/ApiField.astro",
+    "./GlassCard.astro": "./src/components/GlassCard.astro",
+    "./Kbd.astro": "./src/components/Kbd.astro",
+    "./QqlExample.astro": "./src/components/QqlExample.astro",
+    "./Terminal.astro": "./src/components/Terminal.astro",
+    "./PackageManager.astro": "./src/components/PackageManager.astro",
+    "./ThemeToggle.astro": "./src/components/ThemeToggle.astro"
+  },
+  "peerDependencies": {
+    "@astrojs/starlight": "*",
+    "astro": "*"
+  }
+}

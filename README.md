@@ -54,11 +54,11 @@ cargo add qql qql-core
 #### 🧩 VS Code / Cursor Extension
 
 ```bash
-# Marketplace (
+# Marketplace
 code --install-extension srimon12.qql-lang
 
-# Or install the local VSIX from this repo
-code --install-extension editors/vscode/qql-lang-0.1.4.vsix
+# Or install the local VSIX from this repo (0.1.5)
+code --install-extension editors/vscode/qql-lang-0.1.5.vsix
 ```
 
 Syntax highlighting, live WASM diagnostics, and keyword/snippet completions for `.qql` files. See [`editors/vscode`](editors/vscode).
@@ -74,7 +74,7 @@ npx skills add srimon12/qql-rs --skill qql-skill
 ### 💡 Example
 
 ```sql
-QUERY TEXT 'chest pain' MODEL 'all-minilm:l6-v2'
+QUERY TEXT 'chest pain'
 FROM medical
 USING dense
 WHERE department = 'cardio'

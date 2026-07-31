@@ -19,6 +19,104 @@ fn basic_keywords() {
 }
 
 #[test]
+fn grammar_keywords_in_token_rs() {
+    let pest = include_str!("../../../../language/v1/grammar.pest");
+    for line in pest.lines() {
+        let line = line.split("//").next().unwrap_or_default();
+        let mut rest = line;
+        while let Some(idx) = rest.find("^\"") {
+            let cand = &rest[idx + 2..];
+            let end = cand.find('"').unwrap();
+            let word = &cand[..end];
+            if word.bytes().all(|b| b.is_ascii_alphabetic() || b == b'_') && word.len() > 1 {
+                let kw = word.to_ascii_uppercase();
+                assert!(
+                    crate::token::lookup_keyword(&kw).is_some(),
+                    "Keyword '{}' from grammar.pest is missing from token.rs KEYWORDS map",
+                    kw
+                );
+            }
+            rest = &cand[end + 1..];
+        }
+    }
+}
+
+#[test]
+fn parser_keywords_exist_in_grammar() {
+    use std::fs;
+    use std::path::Path;
+
+    let parser_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/parser");
+    let mut words = std::collections::BTreeSet::new();
+
+    fn scan_dir(dir: &Path, words: &mut std::collections::BTreeSet<String>) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.is_dir() {
+                scan_dir(&path, words);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                let code = fs::read_to_string(&path).unwrap();
+                for line in code.lines() {
+                    for pattern in &[
+                        "ascii_equal(",
+                        "peek_word(",
+                        "expect_word(",
+                        "eq_ignore_ascii_case(",
+                    ] {
+                        // `peek_word`/`expect_word` compare token text by
+                        // construction. `ascii_equal`/`eq_ignore_ascii_case`
+                        // are also used on parsed *values* (config keys, string
+                        // payloads), which are semantic domains documented in
+                        // `spec/semantics.md` — not grammar keywords. Only a
+                        // token-text receiver proves the word sits in a
+                        // syntactic keyword position.
+                        let receiver_gated = pattern.starts_with("ascii_equal(")
+                            || pattern.starts_with("eq_ignore_ascii_case(");
+                        let mut rest = line;
+                        while let Some(pos) = rest.find(pattern) {
+                            if receiver_gated {
+                                let after_paren = &rest[pos + pattern.len()..];
+                                let receiver_end =
+                                    after_paren.find(',').unwrap_or(after_paren.len());
+                                let receiver = &after_paren[..receiver_end];
+                                if !receiver.contains(".text") {
+                                    rest = &rest[pos + pattern.len()..];
+                                    continue;
+                                }
+                            }
+                            let candidate = &rest[pos + pattern.len()..];
+                            if let Some(start_quote) = candidate.find('"') {
+                                let after_quote = &candidate[start_quote + 1..];
+                                if let Some(end_quote) = after_quote.find('"') {
+                                    let word = &after_quote[..end_quote];
+                                    if word.bytes().all(|b| b.is_ascii_alphabetic() || b == b'_')
+                                        && word.len() > 1
+                                    {
+                                        words.insert(word.to_ascii_uppercase());
+                                    }
+                                }
+                            }
+                            rest = &candidate[1..];
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    scan_dir(&parser_dir, &mut words);
+
+    assert!(!words.is_empty(), "expected parser string keyword calls");
+    for word in &words {
+        assert!(
+            crate::token::lookup_keyword(word).is_some(),
+            "Parser checks word '{word}' which is NOT in token.rs KEYWORDS map (or grammar.pest)"
+        );
+    }
+}
+
+#[test]
 fn unicode_comparison_operators() {
     let t = tokens("year ≥ 2024 AND year ≤ 2030 AND id ≠ 5");
     assert_eq!(t[1].0, TokenKind::Gte);

@@ -1,0 +1,196 @@
+---
+title: "Python"
+description: "Run QQL fully in-process from Python with the pyqql-edge package."
+sidebar:
+  order: 4
+---
+
+`pyqql-edge` is the edge-enabled Python package: the QQL parser, planner,
+runtime, in-process HNSW storage, and optional local ONNX embeddings all live
+in the wheel. No Qdrant server, no network at inference time.
+
+{% techBadge name="pyqql-edge" variant="orange" /%}
+
+## Install
+
+Python 3.8+. Wheels are published for Linux x86-64, macOS arm64 (Apple
+Silicon), and Windows x86-64 — not macOS Intel (ONNX Runtime publishes no
+artifact for it; see [models](/docs/edge/models/)).
+
+{% terminal title="pip" %}
+pip install pyqql-edge
+{% /terminal %}
+
+## Quick start
+
+```python
+import pyqql_edge
+
+client = pyqql_edge.local_executor(
+    "./qdrant_data",
+    model="bge-small-en-v1.5",
+)
+
+client.execute("CREATE COLLECTION docs HYBRID")
+client.execute('UPSERT INTO docs VALUES {id: 1, text: "hello from edge"}')
+
+report = client.execute("QUERY TEXT 'hello' FROM docs USING dense LIMIT 10")
+print(report["results"][0]["data"])
+
+client.close()  # flush before deleting ./qdrant_data
+```
+
+{% aside type="note" title="Call close() before deleting the data directory" %}
+`close()` flushes the WAL and segments. Deleting `./qdrant_data` while shards
+are still open can lose or corrupt data — see
+[persistence](/docs/edge/persistence/).
+{% /aside %}
+
+## Constructors
+
+### `local_executor()`
+
+Fully offline FastEmbed-backed executor signature:
+
+```python
+pyqql_edge.local_executor(
+    data_dir,
+    on_disk_payload=True,
+    *,
+    model=None,
+    sparse_model=None,
+    multi_model=None,
+    image_model=None,
+    reranker_model=None,
+    cache_dir=None,
+    show_download_progress=False,
+)
+```
+
+| Parameter | Default | Purpose |
+|---|---|---|
+| `data_dir` | *(required)* | Storage directory path |
+| `on_disk_payload` | `True` | Store payloads on disk instead of memory |
+| `model` | `None` *(BGESmallENV15)* | Dense ONNX model name, HF code, or alias (`"bge-small-en-v1.5"`) |
+| `sparse_model` | `None` | Offline sparse model (e.g. `"splade"`) |
+| `multi_model` | `None` | Offline multivector model (e.g. `"bge-m3"`) |
+| `image_model` | `None` | Offline CLIP vision model (e.g. `"clip-vision"`) |
+| `reranker_model` | `None` | Offline cross-encoder model (e.g. `"bge-reranker-base"`) |
+| `cache_dir` | `None` | Directory for downloaded models |
+| `show_download_progress` | `False` | Show Hugging Face progress bars |
+
+Usage example:
+
+```python
+# Dense + sparse + cross-encoder, payloads kept in memory
+client = pyqql_edge.local_executor(
+    "./qdrant_data",
+    on_disk_payload=False,
+    model="bge-small-en-v1.5",
+    sparse_model="splade",
+    reranker_model="bge-reranker-base",
+)
+```
+
+Models are locked at construction. Passing a `USING MODEL '…'` clause that
+names a different model fails loudly instead of switching silently — see
+[models](/docs/edge/models/).
+
+### `http_executor()`
+
+Local storage and search, remote OpenAI-compatible embeddings signature:
+
+```python
+pyqql_edge.http_executor(
+    data_dir,
+    url,
+    embed_key,
+    embed_model,
+    embed_dim,
+    on_disk_payload=True,
+)
+```
+
+Usage example:
+
+```python
+client = pyqql_edge.http_executor(
+    "./qdrant_data",
+    "http://localhost:11434/v1/embeddings",
+    "",
+    "nomic-embed-text",
+    768,
+)
+```
+
+## Client and Stmt
+
+`local_executor` and `http_executor` return a `Client`:
+
+| Method | Purpose |
+|---|---|
+| `client.execute(query, *, on_error="stop")` | Execute a query string, `Stmt`, or a list of either. `on_error` is `"stop"` or `"continue"` |
+| `client.execute_async(query, *, on_error="stop")` | Same, but returns an awaitable that runs on the Tokio runtime without blocking the GIL |
+| `client.explain(query)` | Human-readable plan |
+| `client.close()` | Flush and release edge storage. Idempotent |
+| `with client:` | Context manager; `close()` runs on `__exit__` |
+
+`execute` accepts a string, a pre-parsed `Stmt`, or a list of either. Arrays
+and semicolon-delimited strings are auto-batched.
+
+The module also exposes parser helpers with the same names as `pyqql`:
+`parse`, `parse_json`, `is_valid`, `tokenize`, `inject_filter`,
+`compile_query`, and `explain`. `inject_filter` works on a `Stmt` or a query
+string and is the supported way to scope a client to a tenant. Edge has no
+custom `SHARD` routing, so a `SHARD '…'` clause fails at execution with
+`QQL-EDGE-UNSUPPORTED-SHARD` — see [capabilities](/docs/edge/capabilities/).
+
+## One-shot execution
+
+Prefer a long-lived `Client` when you run more than one query — it keeps the
+ONNX model and edge shards open. For one-off calls, module-level `execute`
+and `execute_async` build a temporary client, run, and close:
+
+```python
+report = pyqql_edge.execute(
+    "QUERY TEXT 'hello' FROM docs USING dense LIMIT 5",
+    data_dir="./qdrant_data",
+    model="bge-small-en-v1.5",
+)
+```
+
+## Return shape and errors
+
+`execute` returns the canonical report:
+
+```json
+{
+  "ok": true,
+  "results": [
+    {
+      "ok": true,
+      "operation": "QUERY",
+      "message": "Found 10 hits",
+      "data": {"result": {"points": [{"id": 1, "score": 0.75, "payload": {"text": "hello"}}]}}
+    }
+  ],
+  "succeeded": 1,
+  "failed": 0
+}
+```
+
+Errors are raised as `RuntimeError` (execution) or `SyntaxError` (parsing)
+with structured attributes attached: `err.code` (e.g.
+`QQL-EDGE-UNSUPPORTED-GROUP-BY`), `err.kind`, and `err.span` (a
+`{"start", "end"}` dict when the parser has a span). Offline-unsupported
+features always raise — never a silent no-op.
+
+## Listing models
+
+```python
+models = pyqql_edge.list_embedding_models()
+for m in models:
+    print(m["name"], m["dim"], m["description"])
+```
+
+See [models](/docs/edge/models/) for the model slots and resolution rules.

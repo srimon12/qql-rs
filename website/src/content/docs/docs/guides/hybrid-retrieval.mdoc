@@ -1,0 +1,65 @@
+---
+title: "Hybrid retrieval"
+description: "Combine dense and sparse candidate generation with RRF or DBSF in QQL."
+sidebar:
+  order: 1
+---
+
+Hybrid retrieval combines semantic dense similarity with lexical sparse
+matching. QQL exposes a shorthand and an explicit multi-stage form.
+
+## Shorthand
+
+{% qqlExample title="Schema-resolved hybrid search" %}
+```sql
+QUERY TEXT 'zero downtime deployment' FROM runbooks
+USING HYBRID DENSE dense SPARSE bm25 FUSION RRF
+WHERE service = 'gateway'
+LIMIT 10;
+```
+{% /qqlExample %}
+
+If the collection has exactly one dense and one sparse vector, omit the names:
+
+{% qqlExample title="Hybrid defaults" %}
+```sql
+QUERY 'zero downtime deployment' FROM runbooks
+USING HYBRID
+LIMIT 10;
+```
+{% /qqlExample %}
+
+## Explicit candidate stages
+
+{% qqlExample title="Weighted RRF pipeline" %}
+```sql
+WITH
+  semantic AS (
+    QUERY TEXT 'zero downtime deployment'
+    USING dense
+    WHERE service = 'gateway'
+    LIMIT 120
+  ),
+  lexical AS (
+    QUERY TEXT 'zero downtime deployment'
+    USING bm25
+    WHERE service = 'gateway'
+    LIMIT 180
+  )
+QUERY FUSION RRF
+FROM runbooks
+PREFETCH (semantic, lexical)
+PARAMS (rrf_k = 40, rrf_weights = [0.7, 0.3])
+LIMIT 10;
+```
+{% /qqlExample %}
+
+Use the explicit form when candidate limits, filters, or weights differ by
+stage. `rrf_weights` length must equal the prefetch count.
+
+## RRF or DBSF?
+
+| Fusion | Prefer when |
+|---|---|
+| RRF | Ranking positions are reliable but score scales differ |
+| DBSF | Normalized score magnitude carries useful information |

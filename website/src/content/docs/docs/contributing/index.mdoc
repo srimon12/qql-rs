@@ -1,0 +1,32 @@
+---
+title: "Contributing"
+description: "Change qql-rs implementation and documentation without drifting the language or SDK contracts."
+sidebar:
+  order: 1
+---
+
+Start with the source of truth for the layer you are changing.
+
+| Change | Begin with |
+|---|---|
+| Grammar or validation | `language/v1`, `qql-core`, conformance fixtures |
+| Plan semantics | `qql-plan` and runtime plan tests |
+| REST/gRPC behavior | shared plan plus both transport projections |
+| SDK API | Rust implementation and every affected binding |
+| Documentation | current fixtures, crate APIs, and generated declarations |
+
+{% terminal title="Core checks" %}
+RUSTC_WRAPPER= cargo test --workspace --all-targets
+RUSTC_WRAPPER= cargo clippy --workspace --all-targets -- -D warnings
+{% /terminal %}
+
+For native Python checks in environments using a newer unsupported CPython,
+the workspace may require `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1`.
+
+## Pull request expectations
+
+- Add valid and invalid fixtures for language changes.
+- Regenerate canonical AST snapshots from qql-core output.
+- Keep Python, Node.js, and WASM contracts aligned.
+- Verify both REST and gRPC projections for transport changes.
+- Add or update executable documentation examples.

@@ -27,12 +27,25 @@ esac
 TARGET="${ARCH}-${OS}"
 echo "✨ Target platform: ${TARGET}"
 
+case "$TARGET" in
+  x86_64-unknown-linux-gnu|x86_64-apple-darwin|aarch64-apple-darwin) ;;
+  aarch64-unknown-linux-gnu)
+    echo "❌ Pre-built binaries are not yet published for ${TARGET}."
+    echo "   You can build from source using: cargo install qql-cli --locked"
+    exit 1
+    ;;
+  *)
+    echo "❌ Unsupported target platform: ${TARGET}"
+    exit 1
+    ;;
+esac
+
 VERSION="${QQL_VERSION}"
 if [ -z "$VERSION" ]; then
   echo "📡 Fetching latest release version..."
   VERSION=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
   if [ -z "$VERSION" ]; then
-    VERSION="v0.1.2"
+    VERSION="v0.1.5"
   fi
 fi
 

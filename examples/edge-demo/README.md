@@ -4,10 +4,10 @@ In-process vector search using qdrant-edge. No Qdrant server, no network.
 
 ## Build
 
-The `qql` CLI must be built with default features (includes edge + fastembed):
+The `qql` CLI must be built with the `edge` feature:
 
 ```bash
-cargo build --release -p qql-cli
+cargo build --release -p qql-cli --features edge
 ```
 
 ## Run

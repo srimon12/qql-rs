@@ -40,13 +40,24 @@ qql doctor --json
 
 ## Configuration
 
+### Remote HTTP Embedder (Environment Variables)
+
 | Variable | Default | Role |
 |----------|---------|------|
-| `QDRANT_URL` | `http://localhost:6333` | REST/gRPC URL (`:6334` tends to select gRPC when enabled) |
+| `QDRANT_URL` | `http://localhost:6333` | REST/gRPC URL (`:6334` selects gRPC when enabled) |
 | `QDRANT_API_KEY` | — | Auth |
-| `EMBED_URL` | — | OpenAI-compatible embeddings |
-| `EMBED_MODEL` | `all-minilm:l6-v2` | Model id |
-| `EMBED_DIM` | `384` | Dimension |
+| `EMBED_URL` | — | OpenAI-compatible embeddings endpoint |
+| `EMBED_MODEL` | `all-minilm:l6-v2` | Remote embedding model ID |
+| `EMBED_DIM` | `384` | Remote embedding vector dimension |
+
+### Local Edge Backend (`qql config edge`)
+
+| Setting / Variable | Default (FastEmbed) | Default (HTTP) | Role |
+|--------------------|---------------------|----------------|------|
+| `EDGE_DATA_DIR` / `--data-dir` | `/tmp/qql-edge` | `/tmp/qql-edge` | Directory for persistent edge data |
+| `EMBEDDER` / `--embedder` | `fastembed` | — | Embedder engine (`fastembed` or `http`) |
+| `EMBED_MODEL` / `--model` | `BGESmallENV15` | `nomic-embed-text` | Dense model ID/alias |
+| `EMBED_DIM` / `--embed-dim` | `384` | `768` | Dense vector dimension |
 
 Global: `qql --url http://host:6333 exec "…"`.
 

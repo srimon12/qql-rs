@@ -1,50 +1,7 @@
 import * as vscode from "vscode";
+import { QQL_KEYWORDS } from "./keywords.generated";
 
-// ── QQL v1 keywords (from qql-core TokenKind, case-insensitive) ──
-// Grouped for maintainability; all are added as completion items.
-const KEYWORDS: string[] = [
-  // Statement control
-  "QUERY", "UPSERT", "DELETE", "UPDATE", "SET",
-  "COUNT", "SCROLL", "CLEAR", "PAYLOAD", "VECTOR",
-  "CREATE", "ALTER", "DROP", "SHOW", "EMBED",
-  // Query modes & modifiers
-  "NEAREST", "HYBRID", "DENSE", "SPARSE",
-  "RECOMMEND", "CONTEXT", "DISCOVER", "ORDER", "ASC", "DESC",
-  "SAMPLE", "RANDOM", "FUSION", "RRF", "DBSF", "FORMULA",
-  "MMR", "DIVERSITY", "CANDIDATES", "RERANK",
-  "RELEVANCE", "FEEDBACK", "POINTS", "TEXT", "IMAGE",
-  "PREFETCH", "TARGET", "PAIRS", "POSITIVE", "NEGATIVE",
-  "STRATEGY", "AVERAGE_VECTOR", "GROUP", "SIZE", "LOOKUP",
-  "SCORE", "THRESHOLD", "SHARD", "KEY", "KEYS",
-  "BOOST", "DEFAULTS", "STAR", "FIELD",
-  "CROSS", "MULTI",
-  // Clauses
-  "INTO", "FROM", "WHERE", "LIMIT", "OFFSET",
-  "USING", "WITH", "AS", "ON", "FOR", "BY", "AFTER",
-  "MODEL", "TYPE",
-  // Filters
-  "IN", "BETWEEN", "IS", "NOT", "AND", "OR",
-  "EMPTY", "NULL", "MATCH", "ANY", "PHRASE",
-  "NESTED", "HAS_VECTOR", "VALUES_COUNT", "ID",
-  "GEO_BBOX", "GEO_RADIUS", "GEO_POLYGON",
-  // DDL
-  "COLLECTION", "COLLECTIONS", "INDEX", "HNSW",
-  "OPTIMIZERS", "PARAMS", "QUANTIZATION",
-  "SCALAR", "BINARY", "PRODUCT", "TURBO", "BITS", "QUANTILE",
-  "ALWAYS", "RAM", "DISABLED", "MULTIVECTOR",
-  "COSINE", "DOT", "EUCLID", "MANHATTAN",
-  "EXACT", "ACORN", "MAX_SELECTIVITY", "TIMEOUT", "CONSISTENCY",
-  "MAJORITY", "QUORUM", "FACTOR", "INDEXED_ONLY", "TENANT",
-  // Formula
-  "CASE", "WHEN", "THEN", "ELSE", "END",
-  "ABS", "SQRT", "LOG", "LN", "EXP", "POW",
-  "GEO_DISTANCE", "EXP_DECAY", "GAUSS_DECAY", "LIN_DECAY",
-  // Literals
-  "TRUE", "FALSE",
-];
-
-// De-duplicate (SHARD appeared twice in review)
-const UNIQUE_KEYWORDS = [...new Set(KEYWORDS)];
+const UNIQUE_KEYWORDS = [...QQL_KEYWORDS];
 
 // ── Snippets ─────────────────────────────────────────────────────
 interface QqlCompletion {

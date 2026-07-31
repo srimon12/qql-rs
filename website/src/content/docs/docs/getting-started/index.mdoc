@@ -1,0 +1,70 @@
+---
+title: "What is QQL?"
+description: "Use one readable query language for Qdrant retrieval, data operations, schema work, and policy-safe execution."
+sidebar:
+  order: 1
+---
+
+QQL gives a product team one query surface for search, retrieval pipelines,
+point mutations, and collection management. The same source works in a Rust
+service, Python worker, Node.js API, browser tool, or the `qql` CLI.
+
+{% grid style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:1rem;" %}
+
+{% glassCard title="Readable operations" %}
+Keep the intent, filter, vector choice, and result shape together instead of
+assembling transport-specific request bodies across application layers.
+{% /glassCard %}
+
+{% glassCard title="Inspectable before execution" %}
+Parse, explain, and compile a statement locally. The playground exposes the
+same AST and Qdrant route your application will use.
+{% /glassCard %}
+
+{% glassCard title="Portable integration" %}
+Adopt QQL in the host language that already owns your product workflow rather
+than running a separate query service just to translate syntax.
+{% /glassCard %}
+
+{% glassCard title="Policy at the source" %}
+Inject a trusted predicate into the parsed AST before planning. Tenant filtering
+is part of the operation, not a post-processing step.
+{% /glassCard %}
+
+{% /grid %}
+
+## Where QQL fits
+
+Choose QQL when the product benefits from reviewable query source, consistent
+retrieval behavior across services, or policy enforcement before Qdrant sees a
+request. Use a native Qdrant SDK directly when your application already owns a
+stable typed request builder and portability is not useful.
+
+{% qqlExample title="Hybrid retrieval scoped to one service" %}
+```sql
+QUERY TEXT 'incident response'
+FROM runbooks
+USING HYBRID
+  DENSE dense
+  SPARSE bm25
+  FUSION RRF
+WHERE service = 'payments'
+LIMIT 8;
+```
+{% /qqlExample %}
+
+## Two boundaries to remember
+
+{% aside type="caution" title="Isolation is not routing" %}
+`WHERE tenant_id = 'acme'` or host-side `inject_filter` is the security
+boundary. `SHARD 'acme'` only routes the request to a custom shard key.
+Production multi-tenant systems commonly use both.
+{% /aside %}
+
+{% aside type="note" title="Parsing is not execution" %}
+Parsing proves complete QQL syntax. Planning can still require collection
+topology, and execution can still require an embedder or a live Qdrant backend.
+{% /aside %}
+
+Continue with [installation](/docs/getting-started/installation/) or run the
+[quickstart](/docs/getting-started/quickstart/).

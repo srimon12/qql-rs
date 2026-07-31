@@ -1,0 +1,114 @@
+---
+interface Props {
+	cmd: string; // The command itself, e.g. "add starlight-llms-txt" or "install"
+	dev?: boolean; // Is it a dev dependency?
+}
+
+const { cmd, dev = false } = Astro.props;
+const devFlag = dev ? " -D" : "";
+---
+
+<div class="pkg-manager">
+  <div class="tabs-header">
+    <button class="tab-btn active" data-tab="pnpm">pnpm</button>
+    <button class="tab-btn" data-tab="npm">npm</button>
+    <button class="tab-btn" data-tab="yarn">yarn</button>
+    <button class="tab-btn" data-tab="bun">bun</button>
+  </div>
+  <div class="tabs-content">
+    <div class="tab-pane active" data-tab="pnpm">
+      <code class="cmd-text">pnpm add{devFlag} {cmd}</code>
+    </div>
+    <div class="tab-pane" data-tab="npm">
+      <code class="cmd-text">npm i{devFlag} {cmd}</code>
+    </div>
+    <div class="tab-pane" data-tab="yarn">
+      <code class="cmd-text">yarn add{devFlag} {cmd}</code>
+    </div>
+    <div class="tab-pane" data-tab="bun">
+      <code class="cmd-text">bun add{devFlag} {cmd}</code>
+    </div>
+  </div>
+</div>
+
+<style>
+  .pkg-manager {
+    border: 1px solid var(--sl-color-gray-5);
+    background: var(--sl-color-gray-6);
+    border-radius: 0.5rem;
+    margin: 1.5rem 0;
+    overflow: hidden;
+  }
+
+  .tabs-header {
+    display: flex;
+    background: color-mix(in srgb, var(--sl-color-gray-6) 90%, var(--sl-color-gray-5));
+    border-bottom: 1px solid var(--sl-color-gray-5);
+  }
+
+  .tab-btn {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 0.625rem 1rem;
+    font-family: var(--sl-font);
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--sl-color-gray-3);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .tab-btn:hover {
+    color: var(--sl-color-gray-1);
+  }
+
+  .tab-btn.active {
+    color: var(--sl-color-accent);
+    border-bottom-color: var(--sl-color-accent);
+    background: var(--sl-color-gray-6);
+  }
+
+  .tabs-content {
+    padding: 1rem 1.25rem;
+  }
+
+  .tab-pane {
+    display: none;
+  }
+
+  .tab-pane.active {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .cmd-text {
+    font-family: var(--sl-font-mono) !important;
+    font-size: 0.85rem !important;
+    color: var(--sl-color-gray-1) !important;
+    background: none !important;
+    padding: 0 !important;
+    border: none !important;
+  }
+</style>
+
+<script>
+  // Simple client script to switch tabs
+  document.querySelectorAll('.pkg-manager').forEach(container => {
+    const buttons = container.querySelectorAll('.tab-btn');
+    const panes = container.querySelectorAll('.tab-pane');
+
+    buttons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const tab = btn.getAttribute('data-tab');
+        
+        buttons.forEach(b => b.classList.remove('active'));
+        panes.forEach(p => p.classList.remove('active'));
+
+        btn.classList.add('active');
+        container.querySelector(`.tab-pane[data-tab="${tab}"]`)?.classList.add('active');
+      });
+    });
+  });
+</script>
