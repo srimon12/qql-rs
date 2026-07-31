@@ -46,7 +46,7 @@ QUERY TEXT 'incident response'
 FROM runbooks
 USING HYBRID
   DENSE dense
-  SPARSE bm25
+  SPARSE sparse
   FUSION RRF
 WHERE service = 'payments'
 LIMIT 8;

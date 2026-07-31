@@ -54,7 +54,7 @@ Qdrant" hint.
 | String point IDs (non-UUID) | no | `QQL-EDGE-INVALID-POINT-ID` |
 | gRPC transport | no | edge has no protobuf dependency |
 | `PARAMS (timeout, consistency)` | no | `QQL-EDGE-UNSUPPORTED-TIMEOUT` / `QQL-EDGE-UNSUPPORTED-CONSISTENCY` |
-| Remote image URLs | no | local file paths only |
+| Remote image URLs | partial | local ONNX embedder: local file paths only; the HTTP embedder forwards the source string verbatim, so endpoints that accept HTTP(S) image URLs can back CLIP vision |
 
 ## What works
 
@@ -84,9 +84,11 @@ USING HYBRID;
 Upserts embed text on-device (or via the configured HTTP endpoint) into the
 schema's dense and sparse vectors. Explicit vectors work too:
 
+{% qqlExample title="Explicit dense vector" %}
 ```sql
 UPSERT INTO docs VALUES {id: 1, text: 'precomputed', vector: {dense: [0.1, 0.2, 0.3]}};
 ```
+{% /qqlExample %}
 
 ### Point and payload operations
 
@@ -112,11 +114,11 @@ DELETE VECTOR colbert FROM docs WHERE id = 42;
 ```sql
 QUERY TEXT 'edge vector search' FROM docs USING dense LIMIT 10;
 
-QUERY TEXT 'keyword style' FROM docs USING bm25 LIMIT 10;
+QUERY TEXT 'keyword style' FROM docs USING sparse LIMIT 10;
 
 QUERY 'hybrid' FROM docs USING HYBRID LIMIT 10;
 
-QUERY HYBRID TEXT 'hybrid' DENSE dense SPARSE bm25 FUSION RRF FROM docs LIMIT 10;
+QUERY HYBRID TEXT 'hybrid' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10;
 ```
 {% /qqlExample %}
 
@@ -205,7 +207,7 @@ switch to REST or gRPC for those workloads.
 
 ## Code catalog
 
-See the complete list of fixed codes in the [error codes reference](/docs/reference/error-codes/#qql-edge-unsupported-codes).
+See the complete list of fixed codes in the [error codes reference](/docs/reference/error-codes/#edge-backend).
 
 ## Technical details
 

@@ -99,7 +99,7 @@ qql> SHOW COLLECTIONS;
 
 The first statement that needs an embedding (the `UPSERT … USING HYBRID`
 above, or any `QUERY TEXT …`) downloads the model from Hugging Face —
-**roughly 1 GB for the default dense model** — and caches it locally. The
+**roughly 130 MB for the default dense model** — and caches it locally. The
 download happens once per machine and cache directory.
 
 {% aside type="note" title="The first run needs network" %}

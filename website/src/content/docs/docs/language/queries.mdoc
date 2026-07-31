@@ -61,7 +61,7 @@ the v1 conformance corpus.
 ```sql
 QUERY HYBRID TEXT 'vector database'
 DENSE dense
-SPARSE bm25
+SPARSE sparse
 FUSION RRF
 FROM docs
 LIMIT 10;
@@ -110,7 +110,7 @@ WITH
   ),
   sparse_candidates AS (
     QUERY TEXT 'database internals'
-    USING bm25
+    USING sparse
     LIMIT 100
   )
 QUERY FUSION RRF
