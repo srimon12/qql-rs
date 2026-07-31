@@ -48,9 +48,38 @@ are still open can lose or corrupt data — see
 
 ## Constructors
 
-### `local_executor(data_dir, on_disk_payload=True, *, model=None, sparse_model=None, multi_model=None, image_model=None, reranker_model=None, cache_dir=None, show_download_progress=False)`
+### `local_executor()`
 
-Fully offline FastEmbed-backed executor.
+Fully offline FastEmbed-backed executor signature:
+
+```python
+pyqql_edge.local_executor(
+    data_dir,
+    on_disk_payload=True,
+    *,
+    model=None,
+    sparse_model=None,
+    multi_model=None,
+    image_model=None,
+    reranker_model=None,
+    cache_dir=None,
+    show_download_progress=False,
+)
+```
+
+| Parameter | Default | Purpose |
+|---|---|---|
+| `data_dir` | *(required)* | Storage directory path |
+| `on_disk_payload` | `True` | Store payloads on disk instead of memory |
+| `model` | `None` *(BGESmallENV15)* | Dense ONNX model name, HF code, or alias (`"bge-small-en-v1.5"`) |
+| `sparse_model` | `None` | Offline sparse model (e.g. `"splade"`) |
+| `multi_model` | `None` | Offline multivector model (e.g. `"bge-m3"`) |
+| `image_model` | `None` | Offline CLIP vision model (e.g. `"clip-vision"`) |
+| `reranker_model` | `None` | Offline cross-encoder model (e.g. `"bge-reranker-base"`) |
+| `cache_dir` | `None` | Directory for downloaded models |
+| `show_download_progress` | `False` | Show Hugging Face progress bars |
+
+Usage example:
 
 ```python
 # Dense + sparse + cross-encoder, payloads kept in memory
@@ -67,9 +96,22 @@ Models are locked at construction. Passing a `USING MODEL '…'` clause that
 names a different model fails loudly instead of switching silently — see
 [models](/docs/edge/models/).
 
-### `http_executor(data_dir, url, embed_key, embed_model, embed_dim, on_disk_payload=True)`
+### `http_executor()`
 
-Local storage and search, remote OpenAI-compatible embeddings:
+Local storage and search, remote OpenAI-compatible embeddings signature:
+
+```python
+pyqql_edge.http_executor(
+    data_dir,
+    url,
+    embed_key,
+    embed_model,
+    embed_dim,
+    on_disk_payload=True,
+)
+```
+
+Usage example:
 
 ```python
 client = pyqql_edge.http_executor(

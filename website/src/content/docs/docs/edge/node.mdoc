@@ -62,7 +62,11 @@ compatibility and maps to `onDiskPayload`):
 | Option | Default | Purpose |
 |---|---|---|
 | `onDiskPayload` | `true` | Store payloads on disk instead of memory |
-| `model` | `BGESmallENV15` | Dense ONNX model name, HF code, or alias |
+| `model` | `BGESmallENV15` | Dense ONNX model name, HF code, or alias (`bge-small-en-v1.5`) |
+| `sparseModel` | `null` | Offline sparse model (e.g. `"splade"`) |
+| `multiModel` | `null` | Offline multivector model (e.g. `"bge-m3"`) |
+| `imageModel` | `null` | Offline CLIP vision model (e.g. `"clip-vision"`) |
+| `rerankerModel` | `null` | Offline cross-encoder model (e.g. `"bge-reranker-base"`) |
 | `cacheDir` | fastembed default | Directory for downloaded models |
 | `showDownloadProgress` | `false` | Show Hugging Face progress bars |
 
