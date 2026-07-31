@@ -11,7 +11,7 @@
     "build": "astro build",
     "build:wasm": "node scripts/build-playground-wasm.mjs",
     "validate:qql": "node scripts/verify-qql-docs.mjs",
-    "check": "pnpm validate:qql && pnpm build:wasm && astro build",
+    "check": "pnpm validate:qql && pnpm build:wasm && astro build && node scripts/check-site-anchors.mjs",
     "preview": "astro preview",
     "astro": "astro"
   },
