@@ -60,9 +60,9 @@
   },
   "scripts": {
     "vscode:prepublish": "tsc -p tsconfig.json",
-    "build": "node scripts/build.mjs",
     "watch": "tsc --watch",
     "lint": "eslint src --ext ts",
+    "test": "node --test",
     "package": "vsce package",
     "publish": "vsce publish"
   },
@@ -70,7 +70,6 @@
     "@types/node": "^26.1.2",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.0.0",
-    "esbuild": "^0.24.0",
     "typescript": "^5.5.0"
   }
 }
