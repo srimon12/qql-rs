@@ -71,6 +71,8 @@ export interface AnalysisResult {
 export function compileBytes(query: string): Uint8Array;
 /** Explain a QQL statement as a byte buffer. */
 export function explainBytes(query: string): Uint8Array;
+/** Format a QQL string into canonical form. Throws on parse error. */
+export function formatQuery(query: string): string;
 "#;
 
 // ── Core: parsing ────────────────────────────────────────────────
@@ -489,6 +491,12 @@ pub fn explain_bytes(query: &str) -> Result<js_sys::Uint8Array, JsValue> {
     let exp_str =
         qql_core::explain::explain(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
     Ok(safe_owned_uint8_array(exp_str.as_bytes()))
+}
+
+/// Format a QQL string into canonical form.
+#[wasm_bindgen(js_name = formatQuery)]
+pub fn format_query(input: &str) -> Result<String, JsValue> {
+    qql_core::fmt::format(input).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 // ── Client: browser fetch-based execute with embedding ────────────

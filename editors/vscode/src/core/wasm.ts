@@ -15,6 +15,7 @@ let _compile: ((input: string) => CompiledRoute) | null = null;
 let _tokenize: ((input: string) => unknown[]) | null = null;
 let _isValid: ((input: string) => boolean) | null = null;
 let _parse: ((input: string) => unknown[]) | null = null;
+let _format: ((input: string) => string) | null = null;
 
 export function initWasm(): void {
   if (_analyze) return;
@@ -34,6 +35,7 @@ export function initWasm(): void {
     _tokenize = typeof qqlWasm.tokenize === "function" ? qqlWasm.tokenize : null;
     _isValid = typeof qqlWasm.isValid === "function" ? qqlWasm.isValid : null;
     _parse = typeof qqlWasm.parse === "function" ? qqlWasm.parse : null;
+    _format = typeof qqlWasm.formatQuery === "function" ? qqlWasm.formatQuery : null;
   } catch (err) {
     throw new Error(
       `Failed to load QQL WASM parser: ${err instanceof Error ? err.message : String(err)}`
@@ -125,4 +127,18 @@ export function isValidQql(source: string): boolean {
     return analyzeQql(source).valid;
   }
   return _isValid(source);
+}
+
+/**
+ * Format a QQL string into canonical form.
+ *
+ * Throws on parse errors; returns the canonical rendering (statements joined
+ * by newlines, each terminated by `;`). The output has no trailing newline,
+ * matching the CLI `qql fmt` contract.
+ */
+export function formatQql(source: string): string {
+  if (!_format) {
+    throw new Error("format() is not available from the WASM module");
+  }
+  return _format(source);
 }

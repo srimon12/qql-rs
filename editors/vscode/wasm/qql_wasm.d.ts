@@ -56,6 +56,8 @@ export interface AnalysisResult {
 export function compileBytes(query: string): Uint8Array;
 /** Explain a QQL statement as a byte buffer. */
 export function explainBytes(query: string): Uint8Array;
+/** Format a QQL string into canonical form. Throws on parse error. */
+export function formatQuery(query: string): string;
 
 
 
@@ -160,6 +162,11 @@ export function compileBytes(query: string): Uint8Array;
 export function explain(query: string): string;
 
 export function explainBytes(query: string): Uint8Array;
+
+/**
+ * Format a QQL string into canonical form.
+ */
+export function formatQuery(input: string): string;
 
 export function inject_filter(query: string, field: string, op: string, value: any): any;
 

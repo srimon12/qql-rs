@@ -8,7 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 
-## [0.2.0] - Unreleased
+## [Unreleased]
+
+### 🚀 Added
+- **Canonical QQL formatter (`qql fmt`)** — a new `qql-core::fmt` AST-based pretty-printer normalizes QQL source (clause order, keyword casing, string escaping, whitespace) and always re-parses to an identical AST. Exposed as `qql fmt [FILE] [--check] [--write]` in the CLI, `formatQuery()` in `qql-wasm`, and a **Format Document** provider in the VS Code extension. Round-trip + idempotence are guaranteed by property tests over the full conformance fixture corpus.
+
+## [0.2.0]
 
 ### 📦 Packaging (VS Code only)
 - **VS Code extension 0.2.1** — Marketplace packaging bump (immutable `0.2.0` slot). Ships the same QQL **0.2.0** WASM parser; crate / SDK versions stay at **0.2.0**. Fixes analysis feedback loops (CodeLens / host thrash), UTF-8 statement slicing for explain, shared analysis cache, Output channel for plans/routes, and Biome + typecheck scripts. VSIX binaries are no longer committed; build via `npm run package` (`@vscode/vsce`).

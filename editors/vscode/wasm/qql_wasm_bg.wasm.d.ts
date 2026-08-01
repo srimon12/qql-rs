@@ -17,6 +17,7 @@ export const compile: (a: number, b: number, c: number) => void;
 export const compileBytes: (a: number, b: number, c: number) => void;
 export const explain: (a: number, b: number, c: number) => void;
 export const explainBytes: (a: number, b: number, c: number) => void;
+export const formatQuery: (a: number, b: number, c: number) => void;
 export const inject_filter: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
 export const isValid: (a: number, b: number) => number;
 export const parse: (a: number, b: number, c: number) => void;
