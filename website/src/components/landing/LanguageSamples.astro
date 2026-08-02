@@ -1,0 +1,52 @@
+---
+import { Code } from "@astrojs/starlight/components";
+
+interface Sample {
+  kind: string;
+  code: string;
+  href: string;
+}
+
+interface Props {
+  label: string;
+  heading: string;
+  sub: string;
+  footHref: string;
+  footLabel: string;
+  samples: readonly Sample[];
+}
+
+const { label, heading, sub, footHref, footLabel, samples } = Astro.props;
+---
+
+<section class="landing-section landing-section--muted" aria-labelledby="language-heading">
+  <div class="landing-shell landing-fade-up">
+    <header class="landing-section__head">
+      <span class="landing-label">{label}</span>
+      <h2 id="language-heading">{heading}</h2>
+      <p class="landing-section__sub">{sub}</p>
+    </header>
+
+    <div class="landing-samples">
+      {
+        samples.map((sample) => (
+          <article class="landing-sample">
+            <header class="landing-sample__head">
+              <span class="landing-sample__kind">{sample.kind}</span>
+              <a class="landing-sample__try" href={sample.href}>
+                Try in playground
+              </a>
+            </header>
+            <div class="landing-sample__code">
+              <Code code={sample.code} lang="qql" frame="none" />
+            </div>
+          </article>
+        ))
+      }
+    </div>
+
+    <p class="landing-section__foot">
+      <a href={footHref}>{footLabel}</a>
+    </p>
+  </div>
+</section>

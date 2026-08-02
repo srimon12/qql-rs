@@ -1,0 +1,29 @@
+---
+interface Props {
+  label: string;
+  heading: string;
+  body: string;
+  primaryCta: { label: string; href: string };
+  secondaryCta: { label: string; href: string };
+}
+
+const { label, heading, body, primaryCta, secondaryCta } = Astro.props;
+---
+
+<section class="landing-cta" aria-labelledby="cta-heading">
+  <div class="landing-shell landing-cta__inner landing-fade-up">
+    <div>
+      <span class="landing-label">{label}</span>
+      <h2 id="cta-heading">{heading}</h2>
+      <p>{body}</p>
+    </div>
+    <div class="landing-cta__actions">
+      <a class="landing-btn landing-btn--primary" href={primaryCta.href}>
+        {primaryCta.label}
+      </a>
+      <a class="landing-btn landing-btn--ghost" href={secondaryCta.href}>
+        {secondaryCta.label}
+      </a>
+    </div>
+  </div>
+</section>

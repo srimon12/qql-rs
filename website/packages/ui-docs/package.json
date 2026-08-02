@@ -7,6 +7,7 @@
     ".": "./src/types.ts",
     "./types": "./src/types.ts",
     "./global.css": "./src/styles/global.css",
+    "./landing.css": "./src/styles/landing.css",
     "./DocsFooter.astro": "./src/components/DocsFooter.astro",
     "./DocsHeader.astro": "./src/components/DocsHeader.astro",
     "./TechBadge.astro": "./src/components/TechBadge.astro",

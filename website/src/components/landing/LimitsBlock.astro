@@ -1,0 +1,21 @@
+---
+interface Props {
+  label: string;
+  statement: string;
+  body: string;
+  foot: string;
+}
+
+const { label, statement, body, foot } = Astro.props;
+---
+
+<section class="landing-limits" aria-labelledby="limits-heading">
+  <div class="landing-shell landing-fade-up">
+    <div class="landing-limits__inner">
+      <span class="landing-label landing-label--accent">{label}</span>
+      <p id="limits-heading" class="landing-limits__statement">{statement}</p>
+      <p class="landing-limits__body">{body}</p>
+      <p class="landing-limits__foot">{foot}</p>
+    </div>
+  </div>
+</section>

@@ -1,0 +1,37 @@
+---
+interface Props {
+  label: string;
+  heading: string;
+  sub: string;
+  rows: readonly { without: string; with: string }[];
+}
+
+const { label, heading, sub, rows } = Astro.props;
+---
+
+<section class="landing-section" aria-labelledby="problem-heading">
+  <div class="landing-shell landing-fade-up">
+    <header class="landing-section__head">
+      <span class="landing-label">{label}</span>
+      <h2 id="problem-heading">{heading}</h2>
+      <p class="landing-section__sub">{sub}</p>
+    </header>
+
+    <div class="landing-compare" role="list">
+      {
+        rows.map((row) => (
+          <div class="landing-compare__row" role="listitem">
+            <div class="landing-compare__cell">
+              <span class="landing-compare__tag">Today</span>
+              <p>{row.without}</p>
+            </div>
+            <div class="landing-compare__cell landing-compare__cell--with">
+              <span class="landing-compare__tag">With QQL</span>
+              <p>{row.with}</p>
+            </div>
+          </div>
+        ))
+      }
+    </div>
+  </div>
+</section>
