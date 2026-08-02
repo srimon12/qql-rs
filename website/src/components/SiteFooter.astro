@@ -1,55 +1,80 @@
 ---
-import { APPS, SITE } from "../config/site";
+import { APPS, SITE, SOCIAL } from "../config/site";
+
+const columns = [
+  {
+    title: "Product",
+    links: [
+      { label: "Documentation", href: "/docs/" },
+      { label: "Playground", href: "/playground/" },
+      { label: "Language reference", href: "/docs/language/" },
+      { label: "Edge runtime", href: "/docs/edge/getting-started/" },
+    ],
+  },
+  {
+    title: "Resources",
+    links: [
+      { label: "Quickstart", href: "/docs/getting-started/quickstart/" },
+      { label: "Installation", href: "/docs/getting-started/installation/" },
+      { label: "VS Code extension", href: "/docs/tools/editors/" },
+      { label: "Releases", href: `${APPS.github.url}/releases`, external: true },
+    ],
+  },
+  {
+    title: "Connect",
+    links: [
+      { label: "GitHub", href: APPS.github.url, external: true },
+      { label: "X / Twitter", href: SOCIAL.twitter, external: true },
+      { label: "Email", href: `mailto:${SITE.email}` },
+      { label: "Veristamp", href: "https://veristamp.in", external: true },
+    ],
+  },
+] as const;
 ---
 
 <footer class="site-footer">
-  <div>
+  <div class="site-footer__grid">
+    <div class="site-footer__brand">
+      <a class="brand" href="/" aria-label="QQL home">
+        <span class="brand__mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32">
+            <path d="M7.25 7.5h4.05L16 21.15 20.7 7.5h4.05L17.35 25.25h-2.7L7.25 7.5Z"></path>
+          </svg>
+        </span>
+        <span class="brand__name">QQL</span>
+      </a>
+      <p class="site-footer__blurb">
+        A typed, declarative query language for Qdrant — one surface for
+        search, hybrid retrieval, mutations, and schema across every runtime.
+      </p>
+      <span class="site-footer__pill">
+        <span class="site-footer__pill-dot" aria-hidden="true"></span>
+        v0.2.0 · MIT
+      </span>
+    </div>
+
+    {columns.map((col) => (
+      <nav class="site-footer__col" aria-label={`${col.title} links`}>
+        <p class="site-footer__col-title">{col.title}</p>
+        <ul>
+          {col.links.map((link) => (
+            <li>
+              <a
+                href={link.href}
+                target={"external" in link && link.external ? "_blank" : undefined}
+                rel={"external" in link && link.external ? "noopener noreferrer" : undefined}
+              >
+                {link.label}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </nav>
+    ))}
+  </div>
+
+  <div class="site-footer__bottom">
     <span>© {new Date().getFullYear()} {SITE.org}. QQL is MIT licensed.</span>
-    <nav aria-label="Footer navigation">
-      <a href="/docs/">Docs</a>
-      <a href="/playground/">Playground</a>
-      <a href={`${APPS.github.url}/releases`}>Releases</a>
-      <a href={APPS.github.url}>GitHub</a>
-    </nav>
+    <span class="site-footer__tag">Same parser, every runtime.</span>
   </div>
 </footer>
-
-<style>
-  .site-footer {
-    border-top: 1px solid var(--sl-color-gray-5);
-    color: var(--sl-color-gray-3);
-    font-size: 0.78rem;
-  }
-
-  .site-footer > div {
-    width: min(100% - 2rem, 90rem);
-    min-height: 4.5rem;
-    margin-inline: auto;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-  }
-
-  nav {
-    display: flex;
-    gap: 1.25rem;
-  }
-
-  a {
-    color: inherit;
-    text-decoration: none;
-  }
-
-  a:hover {
-    color: var(--sl-color-white);
-  }
-
-  @media (max-width: 35rem) {
-    .site-footer > div {
-      padding-block: 1rem;
-      align-items: flex-start;
-      flex-direction: column;
-    }
-  }
-</style>
