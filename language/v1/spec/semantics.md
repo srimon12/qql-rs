@@ -430,10 +430,16 @@ invalid fixtures are normative for those cases.
 | `QQL-EDGE-UNSUPPORTED-ACORN` | `PARAMS (acorn = ...)` is not available offline |
 | `QQL-EDGE-UNSUPPORTED-TIMEOUT` | `PARAMS (timeout = ...)` is not available offline |
 | `QQL-EDGE-UNSUPPORTED-CONSISTENCY` | `PARAMS (consistency = ...)` is not available offline |
+| `QQL-EDGE-UNSUPPORTED-QUOTA` | `SHOW QUOTAS` / `SET QUOTA` require cluster REST `/quotas` |
 | `QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY` | `RECOMMEND STRATEGY average_vector`; offline supports `best_score` and `sum_scores` only |
 | `QQL-EDGE-UNSUPPORTED-POINT-REF` | Point-ID query inputs need materialized vectors offline |
 | `QQL-EDGE-UNSUPPORTED-FIELD-TYPE` | The index field type is not available offline |
 | `QQL-EDGE-UNSUPPORTED-ROUTE` | The planned operation has no edge route implementation (defensive fallback) |
+| `QQL-PLAN-QUOTA` | Invalid `SET QUOTA` key or out-of-range percent |
+| `QQL-PLAN-IDF` | `PARAMS (idf = …)` corpus is not a valid Qdrant filter object |
+| `QQL-GRPC-QUOTA` | Quotas have no public gRPC service; use REST |
+| `QQL-VALIDATION-SLICE` | `SLICE (total, index)` with `total < 1` or `index >= total` |
+| `QQL-VALIDATION-IDF` | Malformed `idf` search param at parse time |
 | `QQL-EDGE-INVALID-POINT-ID` | Offline point IDs accept unsigned integers or UUIDs only |
 
 New error codes may refine cases in a v1 minor release. A code already asserted

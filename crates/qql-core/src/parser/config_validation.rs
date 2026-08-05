@@ -136,19 +136,65 @@ pub fn validate_hnsw_value(key: &str, value: &Value, pos: usize) -> Result<(), Q
                 pos,
             ));
         }
+        "memory" => validate_memory_value(key, value, pos, true)?,
         _ => {}
     }
     Ok(())
 }
 
 pub fn validate_vectors_value(key: &str, value: &Value, pos: usize) -> Result<(), QqlError> {
-    if ascii_equal_lower(key, "on_disk") && !matches!(value, Value::Bool(_)) {
-        return Err(validation_err(
-            alloc::format!("{} must be true or false", key),
-            pos,
-        ));
+    let lower = key.to_ascii_lowercase();
+    match lower.as_str() {
+        "on_disk" if !matches!(value, Value::Bool(_)) => {
+            return Err(validation_err(
+                alloc::format!("{} must be true or false", key),
+                pos,
+            ));
+        }
+        "memory" => validate_memory_value(key, value, pos, true)?,
+        "datatype" => match value {
+            Value::Str(s) if crate::ast::VectorDatatype::parse(s).is_some() => {}
+            Value::Str(_) => {
+                return Err(validation_err(
+                    alloc::format!("{key} must be float32, float16, uint8, or turbo4"),
+                    pos,
+                ));
+            }
+            _ => {
+                return Err(validation_err(
+                    alloc::format!("{key} must be a string (float32, float16, uint8, or turbo4)"),
+                    pos,
+                ));
+            }
+        },
+        _ => {}
     }
     Ok(())
+}
+
+fn validate_memory_value(
+    key: &str,
+    value: &Value,
+    pos: usize,
+    allow_pinned: bool,
+) -> Result<(), QqlError> {
+    match value {
+        Value::Str(s) => match crate::ast::MemoryPlacement::parse(s) {
+            Some(crate::ast::MemoryPlacement::Pinned) if !allow_pinned => Err(validation_err(
+                alloc::format!("{key} does not support 'pinned'"),
+                pos,
+            )),
+            Some(_) => Ok(()),
+            None => Err(validation_err(
+                alloc::format!("{key} must be 'cold', 'cached', or 'pinned'"),
+                pos,
+            )),
+        },
+        _ => Err(validation_err(
+            alloc::format!("{key} must be a string ('cold', 'cached', or 'pinned')"),
+            pos,
+        )),
+    }
 }
 
 pub fn validate_optimizers_value(key: &str, value: &Value, pos: usize) -> Result<(), QqlError> {
@@ -215,6 +261,7 @@ pub fn validate_params_value(key: &str, value: &Value, pos: usize) -> Result<(),
                 pos,
             ));
         }
+        "payload_memory" => validate_memory_value(key, value, pos, false)?,
         "sharding_method" => match value {
             Value::Str(s) if s.eq_ignore_ascii_case("auto") || s.eq_ignore_ascii_case("custom") => {
             }
@@ -337,7 +384,7 @@ pub fn validate_index_options(options: &[(String, Value)], pos: usize) -> Result
         let lower = k.to_ascii_lowercase();
         match lower.as_str() {
             "is_tenant" | "on_disk" | "enable_hnsw" | "lowercase" | "ascii_folding"
-            | "phrase_matching" | "lookup" | "range" | "is_principal" => {
+            | "phrase_matching" | "lookup" | "range" | "is_principal" | "prefix" => {
                 if !matches!(v, Value::Bool(_)) {
                     return Err(QqlError::syntax(
                         alloc::format!("{} must be true or false", k),
@@ -361,6 +408,7 @@ pub fn validate_index_options(options: &[(String, Value)], pos: usize) -> Result
                     ));
                 }
             }
+            "memory" => validate_memory_value(k, v, pos, true)?,
             "stopwords" => match v {
                 Value::List(items) => {
                     for item in items {

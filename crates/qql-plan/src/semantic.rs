@@ -35,6 +35,24 @@ impl Serialize for PlanPointId {
     }
 }
 
+impl<'de> serde::Deserialize<'de> for PlanPointId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(untagged)]
+        enum Wire {
+            Number(u64),
+            String(String),
+        }
+        Ok(match Wire::deserialize(deserializer)? {
+            Wire::Number(n) => PlanPointId::Number(n),
+            Wire::String(s) => PlanPointId::String(s),
+        })
+    }
+}
+
 // ── Vector value ────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq)]

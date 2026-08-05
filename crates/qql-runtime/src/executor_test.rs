@@ -223,6 +223,8 @@ fn collection_with_vectors_multi(
                     m
                 }),
                 on_disk: None,
+                datatype: None,
+                memory: None,
             }
         })
         .collect();

@@ -336,7 +336,10 @@ pub fn lower_prefetch_with_ctes(
                 Some(nested)
             },
             source_query.filter.as_ref().map(|f| top_level_filter(f)),
-            source_query.params.as_ref().and_then(lower_search_params),
+            match source_query.params.as_ref() {
+                Some(p) => lower_search_params(p)?,
+                None => None,
+            },
             source_query.page.limit,
             source_query.score_threshold,
         )
@@ -402,7 +405,10 @@ pub fn lower_query_request(query: &QueryStmt) -> Result<QueryRequest, QqlError> 
         using,
         prefetch,
         filter: query.filter.as_ref().map(|f| top_level_filter(f)),
-        params: query.params.as_ref().and_then(lower_search_params),
+        params: match query.params.as_ref() {
+            Some(p) => lower_search_params(p)?,
+            None => None,
+        },
         score_threshold: query.score_threshold,
         with_payload,
         with_vector,
@@ -444,7 +450,10 @@ pub fn lower_query_groups_request(query: &QueryStmt) -> Result<QueryGroupsReques
         using,
         prefetch,
         filter: query.filter.as_ref().map(|f| top_level_filter(f)),
-        params: query.params.as_ref().and_then(lower_search_params),
+        params: match query.params.as_ref() {
+            Some(p) => lower_search_params(p)?,
+            None => None,
+        },
         score_threshold: query.score_threshold,
         with_payload,
         with_vector,
@@ -492,6 +501,10 @@ fn build_query_with_prefetch(
                 None => 100,
             };
 
+            let hybrid_params = match query.params.as_ref() {
+                Some(p) => lower_search_params(p)?,
+                None => None,
+            };
             let dense_prefetch = PrefetchRequest {
                 query: Some(QueryVariant::Nearest(NearestQuery {
                     nearest: build_text_input(text, model),
@@ -499,7 +512,7 @@ fn build_query_with_prefetch(
                 })),
                 using: dense_vector.clone(),
                 filter: query.filter.as_ref().map(|f| top_level_filter(f)),
-                params: query.params.as_ref().and_then(lower_search_params),
+                params: hybrid_params.clone(),
                 score_threshold: query.score_threshold,
                 limit: Some(candidates),
                 lookup_from: None,
@@ -512,7 +525,7 @@ fn build_query_with_prefetch(
                 })),
                 using: sparse_vector.clone(),
                 filter: query.filter.as_ref().map(|f| top_level_filter(f)),
-                params: query.params.as_ref().and_then(lower_search_params),
+                params: hybrid_params,
                 score_threshold: query.score_threshold,
                 limit: Some(candidates),
                 lookup_from: None,
@@ -619,10 +632,66 @@ fn build_text_input(text: &str, model: &Option<String>) -> PlanQueryInput {
     }
 }
 
-/// Validate that all [`PlanQueryInput::Document`] and [`PlanQueryInput::Image`]
-pub fn lower_search_params(params: &qql_core::ast::SearchParams) -> Option<SearchParamsRequest> {
-    // Body-only OpenAPI SearchParams — timeout/consistency are request-level.
+/// True when a plan filter has no clauses (serde can produce this for objects
+/// with only unknown keys). Empty IDF corpora are rejected as plan errors.
+fn filter_expression_is_empty(filter: &FilterExpression) -> bool {
+    match filter {
+        FilterExpression::Compound(c) => {
+            c.must.is_empty()
+                && c.must_not.is_empty()
+                && c.should.is_empty()
+                && c.min_should.is_none()
+        }
+        FilterExpression::Single(clause) => match clause.as_ref() {
+            FilterClause::Filter(c) => {
+                c.must.is_empty()
+                    && c.must_not.is_empty()
+                    && c.should.is_empty()
+                    && c.min_should.is_none()
+            }
+            _ => false,
+        },
+    }
+}
+
+/// Lower body-only OpenAPI `SearchParams` (timeout/consistency are request-level).
+///
+/// Returns `Err` when an IDF corpus object cannot be interpreted as a Qdrant
+/// filter. Parse only checks that `corpus` is an object; shape validation is
+/// intentionally deferred here so the planner stays the single fail-closed
+/// gate.
+pub fn lower_search_params(
+    params: &qql_core::ast::SearchParams,
+) -> Result<Option<SearchParamsRequest>, QqlError> {
     let mut has = false;
+    let idf = match params.idf.as_ref() {
+        None => None,
+        Some(idf) => Some(match &idf.corpus {
+            None => IdfSearchParams::Global,
+            Some(corpus) => {
+                let json = crate::filter::value_to_json(corpus);
+                let filter: FilterExpression = serde_json::from_value(json).map_err(|err| {
+                    QqlError::validation(
+                        "QQL-PLAN-IDF",
+                        format!(
+                            "idf corpus must be a Qdrant filter object \
+                             (must/should/must_not/min_should or a field condition): {err}"
+                        ),
+                        None,
+                    )
+                })?;
+                if filter_expression_is_empty(&filter) {
+                    return Err(QqlError::validation(
+                        "QQL-PLAN-IDF",
+                        "idf corpus filter is empty or has no recognised conditions \
+                         (expected must/should/must_not/min_should or a field condition)",
+                        None,
+                    ));
+                }
+                IdfSearchParams::Corpus { corpus: filter }
+            }
+        }),
+    };
     let r = SearchParamsRequest {
         hnsw_ef: params.hnsw_ef,
         exact: params.exact,
@@ -639,16 +708,18 @@ pub fn lower_search_params(params: &qql_core::ast::SearchParams) -> Option<Searc
                 oversampling: q.oversampling,
             }
         }),
+        idf,
     };
     if has
         || r.hnsw_ef.is_some()
         || r.exact.is_some()
         || r.acorn.is_some()
         || r.indexed_only.is_some()
+        || r.idf.is_some()
     {
-        Some(r)
+        Ok(Some(r))
     } else {
-        None
+        Ok(None)
     }
 }
 
@@ -749,6 +820,31 @@ mod tests {
         );
         assert_eq!(json["params"]["acorn"]["enable"], true);
         assert_eq!(json["params"]["acorn"]["max_selectivity"], 0.4);
+    }
+
+    #[test]
+    fn idf_serializes_global_and_corpus() {
+        let global =
+            parse_route("QUERY TEXT 'hello' MODEL 'e5' FROM docs PARAMS (idf = 'global') LIMIT 5;");
+        assert_eq!(global["params"]["idf"], "global");
+
+        let corpus = parse_route(
+            "QUERY TEXT 'hello' MODEL 'e5' FROM docs PARAMS (idf = {corpus: {must: [{key: 'status', match: {value: 'active'}}]}}) LIMIT 5;",
+        );
+        let idf = &corpus["params"]["idf"];
+        assert_eq!(idf["corpus"]["must"][0]["key"], "status");
+        assert_eq!(idf["corpus"]["must"][0]["match"]["value"], "active");
+    }
+
+    #[test]
+    fn idf_corpus_that_is_not_a_filter_is_a_plan_error() {
+        // Parse accepts any object under corpus; plan must fail closed.
+        let stmt = Parser::parse(
+            "QUERY TEXT 'hello' MODEL 'e5' FROM docs PARAMS (idf = {corpus: {not_a_filter: true}}) LIMIT 5;",
+        )
+        .unwrap();
+        let err = crate::plan::plan(&stmt).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-IDF");
     }
 
     #[test]

@@ -105,6 +105,49 @@ mod tests {
     }
 
     #[test]
+    fn quota_routes() {
+        let show = Parser::parse("SHOW QUOTAS;").unwrap();
+        let r = try_route(&show).unwrap();
+        assert_eq!(r.method, Method::Get);
+        assert_eq!(r.path, "/quotas");
+        assert!(r.body.is_none());
+
+        let set = Parser::parse(
+            "SET QUOTA (enabled = true, max_resident_memory_percent = 80) WAIT true;",
+        )
+        .unwrap();
+        let r = try_route(&set).unwrap();
+        assert_eq!(r.method, Method::Put);
+        assert_eq!(r.path, "/quotas");
+        assert!(r.query.iter().any(|(k, v)| k == "wait" && v == "true"));
+        let body = r.body_json().unwrap();
+        assert_eq!(body["enabled"], true);
+        assert_eq!(body["max_resident_memory_percent"], 80);
+        assert!(body.get("wait").is_none(), "wait must be a query param");
+    }
+
+    #[test]
+    fn quota_plan_validates_config() {
+        use crate::plan::{plan, PlannedOperation};
+        let bad = Parser::parse("SET QUOTA (bogus = 1);").unwrap();
+        let err = plan(&bad).unwrap_err();
+        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+        assert_eq!(err.code, "QQL-PLAN-QUOTA");
+
+        let bad_range = Parser::parse("SET QUOTA (max_resident_memory_percent = 500);").unwrap();
+        assert!(plan(&bad_range).is_err());
+
+        let clear = Parser::parse("SET QUOTA (max_disk_usage_percent = null);").unwrap();
+        let op = plan(&clear).unwrap();
+        match op {
+            PlannedOperation::SetQuotas { request } => {
+                assert_eq!(request.max_disk_usage_percent, None);
+            }
+            other => panic!("expected SetQuotas, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn compile_stmt_type_disambiguates_bodyless_routes() {
         let cases = [
             ("DROP INDEX ON COLLECTION docs FOR title;", "drop_index"),

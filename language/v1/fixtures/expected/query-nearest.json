@@ -300,6 +300,7 @@
           "consistency": null,
           "exact": false,
           "hnsw_ef": 128,
+          "idf": null,
           "indexed_only": null,
           "max_selectivity": null,
           "quantization": null,

@@ -70,6 +70,30 @@ impl<'a> AstLowerer<'a> {
                 name: self.parse_identifier()?,
             });
         }
+        if self.peek()?.kind == TokenKind::Slice {
+            let start = self.peek()?.span;
+            self.advance()?;
+            self.expect(TokenKind::Lparen)?;
+            let total = self.parse_non_negative_u64("SLICE")?;
+            self.expect(TokenKind::Comma)?;
+            let index = self.parse_non_negative_u64("SLICE")?;
+            self.expect(TokenKind::Rparen)?;
+            if total == 0 {
+                return Err(QqlError::validation(
+                    "QQL-VALIDATION-SLICE",
+                    "SLICE total must be >= 1",
+                    Some(start),
+                ));
+            }
+            if index >= total {
+                return Err(QqlError::validation(
+                    "QQL-VALIDATION-SLICE",
+                    alloc::format!("SLICE index ({index}) must be less than total ({total})"),
+                    Some(start),
+                ));
+            }
+            return Ok(FilterExpr::Slice { total, index });
+        }
         self.parse_predicate()
     }
 
@@ -284,6 +308,13 @@ impl<'a> AstLowerer<'a> {
                 return Ok(FilterExpr::MatchPhrase {
                     field,
                     text: self.parse_string()?,
+                });
+            }
+            if self.peek()?.kind == TokenKind::Prefix {
+                self.advance()?;
+                return Ok(FilterExpr::MatchPrefix {
+                    field,
+                    prefix: self.parse_string()?,
                 });
             }
             return Ok(FilterExpr::MatchText {

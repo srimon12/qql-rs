@@ -145,6 +145,7 @@ Offline rejects use a fixed catalog (`backend/unsupported.rs`). Messages include
 | `QQL-EDGE-UNSUPPORTED-ACORN` | `PARAMS (acorn = …)` |
 | `QQL-EDGE-UNSUPPORTED-TIMEOUT` | `PARAMS (timeout = …)` |
 | `QQL-EDGE-UNSUPPORTED-CONSISTENCY` | `PARAMS (consistency = …)` |
+| `QQL-EDGE-UNSUPPORTED-QUOTA` | `SHOW QUOTAS` / `SET QUOTA` (cluster REST `/quotas` only) |
 | `QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY` | `RECOMMEND STRATEGY average_vector` (use `best_score` / `sum_scores`) |
 | `QQL-EDGE-UNSUPPORTED-POINT-REF` | point-id query inputs without embedded vectors |
 | `QQL-EDGE-UNSUPPORTED-ROUTE` | unmapped REST projection |

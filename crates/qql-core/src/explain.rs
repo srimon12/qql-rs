@@ -1,4 +1,4 @@
-use crate::ast::{CollectionMode, QueryCollection, QueryExpr, QueryInput, Stmt};
+use crate::ast::{CollectionMode, QueryCollection, QueryExpr, QueryInput, Stmt, Value};
 use crate::error::QqlError;
 use crate::parser::Parser;
 use alloc::format;
@@ -90,6 +90,13 @@ pub fn explain_node(statement: &Stmt) -> String {
             "Statement: SHOW SHARD KEYS\nCollection: {}\n",
             collection
         )),
+        Stmt::ShowQuotas => output.push_str("Statement: SHOW QUOTAS\n"),
+        Stmt::SetQuota(statement) => {
+            output.push_str("Statement: SET QUOTA\n");
+            for (key, value) in &statement.config {
+                output.push_str(&format!("  {} = {}\n", key, render_quota_value(value)));
+            }
+        }
         Stmt::DropIndex(statement) => output.push_str(&format!(
             "Statement: DROP INDEX\nCollection: {}\nField: {}\n",
             statement.collection, statement.field
@@ -170,5 +177,17 @@ fn query_intent(expression: &QueryExpr) -> &'static str {
         QueryExpr::Hybrid { .. } => "hybrid shorthand",
         QueryExpr::Rerank { .. } => "late-interaction prefetched rerank",
         QueryExpr::CrossRerank { .. } => "cross-encoder pair rerank of prefetched candidates",
+    }
+}
+
+fn render_quota_value(value: &Value) -> String {
+    match value {
+        Value::Str(s) => format!("'{}'", s),
+        Value::Int(n) => n.to_string(),
+        Value::Float(f) => f.to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Null => "null".into(),
+        Value::Dict(_) => "<object>".into(),
+        Value::List(_) => "<list>".into(),
     }
 }

@@ -11,10 +11,16 @@ use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 
 use crate::client::{CollectionInfo, QdrantOps};
 
+/// HTTP header for Qdrant 1.19 read affinity (`X-Qdrant-Route-Affinity`).
+pub const ROUTE_AFFINITY_HEADER: &str = "X-Qdrant-Route-Affinity";
+
 #[derive(Clone)]
 pub struct RestQdrant {
     base_url: String,
     api_key: Option<String>,
+    /// Stable value hashed by Qdrant to pin reads to one replica (session /
+    /// user id). Sent as [`ROUTE_AFFINITY_HEADER`] on every request.
+    route_affinity: Option<String>,
     client: Client,
 }
 
@@ -53,6 +59,7 @@ impl RestQdrant {
         Ok(Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             api_key,
+            route_affinity: None,
             client,
         })
     }
@@ -61,8 +68,33 @@ impl RestQdrant {
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             api_key,
+            route_affinity: None,
             client,
         }
+    }
+
+    /// Pin subsequent reads to a stable replica via `X-Qdrant-Route-Affinity`.
+    ///
+    /// See Qdrant docs: read affinity / consistency guarantees (v1.19+).
+    /// Empty strings are treated as unset.
+    pub fn with_route_affinity(mut self, affinity: impl Into<String>) -> Self {
+        let value = affinity.into();
+        self.route_affinity = if value.is_empty() { None } else { Some(value) };
+        self
+    }
+
+    pub fn route_affinity(&self) -> Option<&str> {
+        self.route_affinity.as_deref()
+    }
+
+    fn apply_headers(&self, mut req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        if let Some(ref key) = self.api_key {
+            req = req.header("api-key", key);
+        }
+        if let Some(ref affinity) = self.route_affinity {
+            req = req.header(ROUTE_AFFINITY_HEADER, affinity);
+        }
+        req
     }
 
     async fn call_body<B: serde::Serialize + ?Sized, T: DeserializeOwned>(
@@ -75,9 +107,7 @@ impl RestQdrant {
         url_buf.push_str(&self.base_url);
         url_buf.push_str(path);
         let mut req = self.client.request(method, &url_buf);
-        if let Some(ref key) = self.api_key {
-            req = req.header("api-key", key);
-        }
+        req = self.apply_headers(req);
         if let Some(b) = body {
             req = req.json(b);
         }
@@ -361,9 +391,7 @@ impl RestQdrant {
         if !route.query.is_empty() {
             builder = builder.query(&route.query);
         }
-        if let Some(ref key) = self.api_key {
-            builder = builder.header("api-key", key);
-        }
+        builder = self.apply_headers(builder);
         if let Some(ref body) = route.body {
             builder = builder.json(body);
         }

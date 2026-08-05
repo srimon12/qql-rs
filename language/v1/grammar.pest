@@ -32,6 +32,8 @@ statement = _{
     | show_collections
     | show_collection
     | show_shard_keys
+    | show_quotas
+    | set_quota
 }
 
 // Query
@@ -259,8 +261,11 @@ filter_primary = _{
       "(" ~ filter ~ ")"
     | nested_filter
     | has_vector_filter
+    | slice_filter
     | predicate
 }
+
+slice_filter = { ^"SLICE" ~ "(" ~ non_negative_integer ~ "," ~ non_negative_integer ~ ")" }
 
 nested_filter = { ^"NESTED" ~ "(" ~ string ~ "," ~ filter ~ ")" }
 has_vector_filter = { ^"HAS_VECTOR" ~ vector_name }
@@ -273,6 +278,7 @@ predicate_tail = _{
     | ^"IS" ~ ^"NOT"? ~ (^"NULL" | ^"EMPTY")
     | ^"MATCH" ~ ^"ANY" ~ non_empty_literal_list
     | ^"MATCH" ~ ^"PHRASE" ~ string
+    | ^"MATCH" ~ ^"PREFIX" ~ string
     | ^"MATCH" ~ string
     | ^"VALUES_COUNT" ~ comparison_op ~ non_negative_integer
     | ^"GEO_BBOX" ~ geo_bbox
@@ -503,6 +509,11 @@ show_shard_keys = {
     ^"SHOW" ~ ^"SHARD" ~ ^"KEYS"
     ~ ^"ON" ~ ^"COLLECTION" ~ collection
 }
+show_quotas = { ^"SHOW" ~ ^"QUOTAS" }
+set_quota = {
+    ^"SET" ~ ^"QUOTA" ~ config_block
+    ~ (^"WAIT" ~ boolean)?
+}
 
 // Selectors and search parameters
 
@@ -527,10 +538,17 @@ search_param = _{
     | ^"rrf_k" ~ "=" ~ positive_integer
     | ^"rrf_weights" ~ "=" ~ number_list
     | ^"quantization" ~ "=" ~ quantization_search
+    // Per-query IDF corpus for sparse vectors: global scope or a corpus filter.
+    | ^"idf" ~ "=" ~ idf_param
     // Request-level (REST query string / gRPC fields) — seconds, min 1
     | ^"timeout" ~ "=" ~ positive_integer
     // ReadConsistency: non-negative integer factor N, or majority | quorum | all
     | ^"consistency" ~ "=" ~ (non_negative_integer | ^"majority" | ^"quorum" | ^"all")
+}
+idf_param = _{
+      string
+    | ^"global"
+    | "{" ~ ^"corpus" ~ ":" ~ object ~ "}"
 }
 quantization_search = {
     "{"

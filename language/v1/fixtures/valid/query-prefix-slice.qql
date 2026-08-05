@@ -1,0 +1,27 @@
+-- query-prefix-slice.qql — v1.19 filters and search params
+-- Tests: MATCH PREFIX, SLICE condition, per-query IDF corpus
+
+-- MATCH PREFIX filter (keyword prefix matching)
+QUERY TEXT 'search' MODEL 'e5' FROM docs
+WHERE title MATCH PREFIX 'Comp'
+LIMIT 10;
+
+-- SLICE deterministic sampling filter
+QUERY TEXT 'search' MODEL 'e5' FROM docs
+WHERE SLICE (4, 1)
+LIMIT 10;
+
+-- SLICE combined with an equality predicate
+QUERY TEXT 'search' MODEL 'e5' FROM docs
+WHERE SLICE (4, 1) AND status = 'active'
+LIMIT 10;
+
+-- Per-query IDF corpus: global scope
+QUERY TEXT 'search' MODEL 'e5' FROM docs
+PARAMS (idf = 'global')
+LIMIT 10;
+
+-- Per-query IDF corpus: explicit corpus filter
+QUERY TEXT 'search' MODEL 'e5' FROM docs
+PARAMS (idf = {corpus: {must: [{key: 'status', match: {value: 'active'}}]}})
+LIMIT 10;

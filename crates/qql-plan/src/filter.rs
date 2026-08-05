@@ -65,6 +65,11 @@ fn lower_clause(filter: &FilterExpr) -> FilterClause {
                 phrase: text.clone(),
             })
         }),
+        FilterExpr::MatchPrefix { field, prefix } => field_condition(field, |fc| {
+            fc.r#match = Some(MatchValue::Prefix {
+                prefix: prefix.clone(),
+            })
+        }),
         FilterExpr::Nested { path, filter } => FilterClause::Nested(NestedCondition {
             nested: NestedParams {
                 key: path.clone(),
@@ -73,6 +78,12 @@ fn lower_clause(filter: &FilterExpr) -> FilterClause {
         }),
         FilterExpr::HasVector { name } => FilterClause::HasVector(HasVectorCondition {
             has_vector: name.clone(),
+        }),
+        FilterExpr::Slice { total, index } => FilterClause::Slice(SliceCondition {
+            slice: SliceParams {
+                total: *total,
+                index: *index,
+            },
         }),
         FilterExpr::ValuesCount { field, op, count } => {
             let mut fc = empty_field_condition(field);
@@ -380,6 +391,18 @@ mod tests {
     }
 
     #[test]
+    fn match_prefix() {
+        let f = FilterExpr::MatchPrefix {
+            field: "title".into(),
+            prefix: "Comp".into(),
+        };
+        assert_json(
+            &lower_filter(&f),
+            json!({"key": "title", "match": {"prefix": "Comp"}}),
+        );
+    }
+
+    #[test]
     fn match_any() {
         let f = FilterExpr::MatchAny {
             field: "tags".into(),
@@ -469,6 +492,15 @@ mod tests {
             name: "dense".into(),
         };
         assert_json(&lower_filter(&f), json!({"has_vector": "dense"}));
+    }
+
+    #[test]
+    fn slice_condition() {
+        let f = FilterExpr::Slice { total: 4, index: 1 };
+        assert_json(
+            &lower_filter(&f),
+            json!({"slice": {"total": 4, "index": 1}}),
+        );
     }
 
     #[test]

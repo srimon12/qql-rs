@@ -176,6 +176,19 @@ pub fn format_stmt(statement: &Stmt) -> String {
         Stmt::ShowShardKeys(collection) => {
             format!("SHOW SHARD KEYS ON COLLECTION {}", render_name(collection))
         }
+        Stmt::ShowQuotas => "SHOW QUOTAS".into(),
+        Stmt::SetQuota(stmt) => {
+            let config: Vec<String> = stmt
+                .config
+                .iter()
+                .map(|(key, value)| format!("{} = {}", render_name(key), render_value(value)))
+                .collect();
+            let mut out = format!("SET QUOTA ({})", config.join(", "));
+            if let Some(wait) = stmt.wait {
+                out.push_str(&format!(" WAIT {}", wait));
+            }
+            out
+        }
         Stmt::Delete(statement) => {
             let mut out = format!(
                 "DELETE FROM {} WHERE {}",
@@ -700,6 +713,12 @@ fn render_search_params(params: &SearchParams) -> String {
         }
         parts.push(format!("quantization = {{{}}}", entries.join(", ")));
     }
+    if let Some(idf) = &params.idf {
+        match &idf.corpus {
+            None => parts.push("idf = 'global'".into()),
+            Some(corpus) => parts.push(format!("idf = {{corpus: {}}}", render_value(corpus))),
+        }
+    }
     if let Some(value) = params.timeout {
         parts.push(format!("timeout = {}", value));
     }
@@ -852,12 +871,18 @@ fn render_filter_predicate(filter: &FilterExpr) -> String {
             render_name(field),
             escape_string(text)
         ),
+        FilterExpr::MatchPrefix { field, prefix } => format!(
+            "{} MATCH PREFIX '{}'",
+            render_name(field),
+            escape_string(prefix)
+        ),
         FilterExpr::Nested { path, filter } => format!(
             "NESTED('{}', {})",
             escape_string(path),
             render_filter(filter)
         ),
         FilterExpr::HasVector { name } => format!("HAS_VECTOR {}", render_name(name)),
+        FilterExpr::Slice { total, index } => format!("SLICE ({}, {})", total, index),
         FilterExpr::ValuesCount { field, op, count } => format!(
             "{} VALUES_COUNT {} {}",
             render_name(field),
@@ -1071,8 +1096,8 @@ fn render_collection_config(config: &CollectionConfig) -> String {
         }
     }
     if let Some(vectors) = &config.vectors {
-        if let Some(on_disk) = vectors.on_disk {
-            out.push_str(&format!(" WITH VECTOR (on_disk = {})", on_disk));
+        if let Some(body) = render_vectors_options(vectors) {
+            out.push_str(&format!(" WITH VECTOR ({})", body));
         }
     }
     if let Some(optimizers) = &config.optimizers {
@@ -1157,11 +1182,29 @@ fn render_vector_def(vector: &VectorDef) -> String {
         ));
     }
     if let Some(vectors) = &vector.vectors {
-        if let Some(on_disk) = vectors.on_disk {
-            out.push_str(&format!(" WITH VECTOR (on_disk = {})", on_disk));
+        if let Some(body) = render_vectors_options(vectors) {
+            out.push_str(&format!(" WITH VECTOR ({})", body));
         }
     }
     out
+}
+
+fn render_vectors_options(vectors: &VectorsConfig) -> Option<String> {
+    let mut options = Vec::new();
+    if let Some(value) = vectors.on_disk {
+        options.push(format!("on_disk = {}", value));
+    }
+    if let Some(value) = vectors.memory {
+        options.push(format!("memory = '{}'", value.as_str()));
+    }
+    if let Some(value) = vectors.datatype {
+        options.push(format!("datatype = '{}'", value.as_str()));
+    }
+    if options.is_empty() {
+        None
+    } else {
+        Some(options.join(", "))
+    }
 }
 
 fn render_sparse_vector_def(vector: &SparseVectorDef) -> String {
@@ -1180,11 +1223,11 @@ fn render_sparse_vector_def(vector: &SparseVectorDef) -> String {
         if let Some(value) = index.on_disk {
             options.push(format!("on_disk = {}", value));
         }
-        if let Some(value) = &index.datatype {
-            options.push(format!(
-                "datatype = '{}'",
-                escape_string(&value.to_ascii_lowercase())
-            ));
+        if let Some(value) = index.datatype {
+            options.push(format!("datatype = '{}'", value.as_str()));
+        }
+        if let Some(value) = index.memory {
+            options.push(format!("memory = '{}'", value.as_str()));
         }
     }
     if !options.is_empty() {
@@ -1215,6 +1258,9 @@ fn render_hnsw_block(hnsw: &HnswRuntimeConfig) -> Option<String> {
     }
     if let Some(value) = hnsw.inline_storage {
         options.push(format!("inline_storage = {}", value));
+    }
+    if let Some(value) = hnsw.memory {
+        options.push(format!("memory = '{}'", value.as_str()));
     }
     if options.is_empty() {
         None
@@ -1280,6 +1326,9 @@ fn render_params_block(params: &CollectionParamsConfig) -> Option<String> {
     if let Some(value) = params.on_disk_payload {
         options.push(format!("on_disk_payload = {}", value));
     }
+    if let Some(value) = params.payload_memory {
+        options.push(format!("payload_memory = '{}'", value.as_str()));
+    }
     if let Some(value) = params.shard_number {
         options.push(format!("shard_number = {}", value));
     }
@@ -1328,6 +1377,9 @@ fn render_quantization_block(quantization: &QuantizationConfig) -> Option<String
     }
     if let Some(value) = &quantization.query_encoding {
         options.push(format!("query_encoding = '{}'", escape_string(value)));
+    }
+    if let Some(value) = quantization.memory {
+        options.push(format!("memory = '{}'", value.as_str()));
     }
     Some(options.join(", "))
 }

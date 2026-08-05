@@ -93,6 +93,28 @@ fn match_phrase() {
 }
 
 #[test]
+fn match_prefix() {
+    let f = filter_of("QUERY TEXT 'x' FROM docs WHERE title MATCH PREFIX 'Comp';").unwrap();
+    match *f {
+        FilterExpr::MatchPrefix {
+            ref field,
+            ref prefix,
+        } => {
+            assert_eq!(field, "title");
+            assert_eq!(prefix, "Comp");
+        }
+        other => panic!("expected MatchPrefix, got {other:?}"),
+    }
+}
+
+#[test]
+fn match_prefix_roundtrip_fmt() {
+    let stmt = Parser::parse("QUERY TEXT 'x' FROM docs WHERE title MATCH PREFIX 'Comp';").unwrap();
+    let formatted = crate::fmt::format_stmt(&stmt);
+    assert!(formatted.contains("MATCH PREFIX 'Comp'"));
+}
+
+#[test]
 fn logical_and_or_not() {
     let f = filter_of("QUERY TEXT 'x' FROM docs WHERE a = 1 AND b = 2 OR c = 3;").unwrap();
     assert!(matches!(*f, FilterExpr::Or { .. }));
@@ -115,6 +137,46 @@ fn nested_filter() {
 fn has_vector() {
     let f = filter_of("QUERY TEXT 'x' FROM docs WHERE HAS_VECTOR dense;").unwrap();
     assert!(matches!(*f, FilterExpr::HasVector { .. }));
+}
+
+#[test]
+fn slice_condition() {
+    let f = filter_of("QUERY TEXT 'x' FROM docs WHERE SLICE (4, 1);").unwrap();
+    match *f {
+        FilterExpr::Slice { total, index } => {
+            assert_eq!(total, 4);
+            assert_eq!(index, 1);
+        }
+        other => panic!("expected Slice, got {other:?}"),
+    }
+}
+
+#[test]
+fn slice_condition_in_compound() {
+    let f =
+        filter_of("QUERY TEXT 'x' FROM docs WHERE SLICE (4, 1) AND status = 'active';").unwrap();
+    match *f {
+        FilterExpr::And { operands } => {
+            assert!(matches!(
+                operands[0],
+                FilterExpr::Slice { total: 4, index: 1 }
+            ));
+            assert!(matches!(operands[1], FilterExpr::Compare { .. }));
+        }
+        other => panic!("expected And, got {other:?}"),
+    }
+}
+
+#[test]
+fn slice_condition_rejects_index_gte_total() {
+    let err = Parser::parse("QUERY TEXT 'x' FROM docs WHERE SLICE (2, 2);").unwrap_err();
+    assert_eq!(err.code, "QQL-VALIDATION-SLICE");
+}
+
+#[test]
+fn slice_condition_rejects_zero_total() {
+    let err = Parser::parse("QUERY TEXT 'x' FROM docs WHERE SLICE (0, 0);").unwrap_err();
+    assert_eq!(err.code, "QQL-VALIDATION-SLICE");
 }
 
 #[test]
