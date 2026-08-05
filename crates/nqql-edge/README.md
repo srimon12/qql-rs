@@ -4,8 +4,10 @@ Node N-API bindings for **local** QQL: qdrant-edge + FastEmbed, no remote Qdrant
 
 ## Proposition
 
-Same language as `@veristamp/nqql`, executed in-process. Cluster features
-(`GROUP BY`, `SHARD`, ACORN, …) return explicit `QQL-EDGE-UNSUPPORTED-*` errors.
+Same language as `@veristamp/nqql`, executed in-process (qdrant-edge **0.8**).
+Cluster features (`GROUP BY`, `SHARD`, ACORN, **`SHOW QUOTAS` / `SET QUOTA`**, …)
+return explicit `QQL-EDGE-UNSUPPORTED-*` errors. Sparse `PARAMS (idf = …)` is
+supported offline.
 
 ## Install
 
@@ -52,6 +54,9 @@ console.log(version, listEmbeddingModels().length);
 | `injectFilter` | Isolation |
 | `stmt.shardKey` | AST property; edge **rejects** SHARD at execute |
 | `compileQuery` / `explain` / `execute` | Plan / run |
+
+Quotas, custom sharding, and `GROUP BY` require remote Qdrant. Offline sparse
+IDF works: `PARAMS (idf = 'global')`.
 
 ## Docs
 

@@ -14,6 +14,20 @@
 
 ## Features
 
+### Language support (QQL 1.4 / Qdrant 1.19)
+
+Highlights and completions cover the full QQL 1.4 surface, including:
+
+| Feature | Example |
+|---------|---------|
+| Quotas | `SHOW QUOTAS;` / `SET QUOTA (enabled = true, max_resident_memory_percent = 80) WAIT true;` |
+| Memory placement | `WITH VECTOR (memory = 'cached')`, `WITH HNSW (memory = 'cold')`, `payload_memory = 'cold'` |
+| MATCH PREFIX | `WHERE title MATCH PREFIX 'Comp'` |
+| SLICE sampling | `WHERE SLICE (4, 1)` |
+| Per-query IDF | `PARAMS (idf = 'global')` or `PARAMS (idf = {corpus: {…}})` |
+| TurboQuant datatype | `datatype = 'turbo4'` (aliases `t4`, `f32`, `f16`, `u8`) |
+| Keyword prefix index | `CREATE INDEX … TYPE keyword WITH (prefix = true)` |
+
 ### Syntax Highlighting
 
 The generated TextMate grammar highlights QQL keywords, constants, strings, numbers, comments, comparison operators, formula variables (`$score`), and dotted paths (`field.nested`, `items[].name`).
@@ -84,10 +98,10 @@ Jump from a CTE reference in `PREFETCH (…)` back to its `name AS (` definition
 - **Contextual follow-ups** — after `QUERY` suggest modes; after `FUSION` suggest `RRF`/`DBSF`; after `TYPE` suggest index types; …
 - **Collection names** harvested from the current file
 - **CTE names** suggested inside `PREFETCH`
-- **29 snippets** for hybrid, CTE fusion, rerank, recommend, DDL, shards, geo decay, …
+- **Snippets** for hybrid, CTE fusion, rerank, recommend, DDL, shards, quotas, MATCH PREFIX, SLICE, memory placement, …
 - Full keyword list still available for filter-as-you-type
 
-Snippet prefixes (Insert Snippet): `qnearest`, `qhybrid`, `qcte`, `qcreate`, `qupsert`, `qcross`, `qcount`, `qrecommend`.
+Snippet prefixes (Insert Snippet): `qnearest`, `qhybrid`, `qcte`, `qcreate`, `qcreatemem`, `qupsert`, `qcross`, `qcount`, `qrecommend`, `qquota`, `qsetquota`, `qprefix`, `qslice`.
 
 ### Language Ergonomics
 
@@ -160,7 +174,7 @@ VSIX binaries are **not** committed to the repo. Build one locally or download f
 code --install-extension qql-lang-*.vsix --force
 ```
 
-Extension packaging version is in `package.json` (**0.2.1**). It ships the QQL **0.2.0** WASM parser from this monorepo (crate version need not match the VSIX version).
+Extension packaging version is in `package.json` (**0.2.2**). It ships the QQL **0.2.0** WASM parser from this monorepo (crate version need not match the VSIX version). Note: the checked-in WASM binary may still reflect a pre-1.4 parse surface until rebuilt with `wasm-pack`; TextMate / keyword artifacts stay in sync with QQL **1.4** via `qql-grammar-gen generate` without a WASM rebuild.
 
 ### Build from source
 

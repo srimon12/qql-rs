@@ -52,7 +52,10 @@ LIMIT 10;
 {% /qqlExample %}
 
 The statement does not encode a transport. Backend-specific limits are
-reported during planning or execution.
+reported during planning or execution. See
+[Backend compatibility](/docs/reference/backend-compatibility/) for the
+REST / gRPC / edge matrix — notably, `SHOW QUOTAS` / `SET QUOTA` are REST-only
+(gRPC and edge fail with `QQL-GRPC-QUOTA` / `QQL-EDGE-UNSUPPORTED-QUOTA`).
 
 ## Feature selection
 

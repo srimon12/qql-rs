@@ -2,6 +2,16 @@
 
 Native Node.js bindings via N-API (napi-rs).
 
+Language surface includes **Qdrant 1.19 / QQL 1.4** features expressible in QQL
+(`SHOW QUOTAS`, memory/`turbo4`, `MATCH PREFIX`, `SLICE`, `PARAMS (idf = …)`).
+Pass those strings to `client.execute` when the backend supports them (quotas:
+**REST only**).
+
+**Not exposed in nqql yet:** client-side **route affinity**
+(`X-Qdrant-Route-Affinity`). Use Rust `RestQdrant` / `GrpcQdrant`
+`.with_route_affinity(…)` if you need sticky replica reads — do not invent a
+Node `Client` option for it.
+
 ## Install
 
 ```bash

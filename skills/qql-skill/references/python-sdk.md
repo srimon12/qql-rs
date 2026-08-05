@@ -2,6 +2,16 @@
 
 Native Python bindings via PyO3.
 
+Language surface includes **Qdrant 1.19 / QQL 1.4** features expressible in QQL
+(`SHOW QUOTAS`, memory/`turbo4`, `MATCH PREFIX`, `SLICE`, `PARAMS (idf = …)`).
+Those statements execute through the same `Client.execute` path as older syntax
+when the connected backend supports them (quotas: **REST only**).
+
+**Not exposed in pyqql yet:** client-side **route affinity**
+(`X-Qdrant-Route-Affinity`). That is Rust-only via
+`RestQdrant::with_route_affinity` / `GrpcQdrant::with_route_affinity` — do not
+invent a Python constructor flag for it.
+
 ## Install
 
 ```bash

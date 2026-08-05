@@ -1,6 +1,6 @@
 # QQL Examples
 
-Working demos of **QQL 1.2** across language bindings and end-to-end apps.
+Working demos of **QQL 1.4** (Qdrant ≥ 1.19.0) across language bindings and end-to-end apps.
 
 Two flagship stories:
 
@@ -8,6 +8,39 @@ Two flagship stories:
 |------|--------|
 | **[sec10k-qql/](sec10k-qql/)** | Multi-tenant RAG over real SEC 10-K filings — `inject_filter` + `SHARD` / `stmt.shard_key` |
 | **[airbnb-demo/](airbnb-demo/)** | Berlin geo search — `GEO_RADIUS` / `BBOX` / `POLYGON` + district shards |
+
+## QQL 1.4 / Qdrant 1.19 snippets
+
+These parse offline; execute against Qdrant 1.19+ (quotas are REST-only):
+
+```sql
+-- Memory tiers + turbo4 dense storage
+CREATE COLLECTION docs (
+  dense VECTOR(384, COSINE)
+    WITH VECTOR (memory = 'cached', datatype = 'turbo4')
+    WITH HNSW (memory = 'cold')
+) WITH PARAMS (payload_memory = 'cold');
+
+CREATE INDEX ON COLLECTION docs FOR title TYPE keyword WITH (prefix = true);
+
+-- Prefix match + deterministic slice sampling
+QUERY TEXT 'compliance' FROM docs
+  WHERE title MATCH PREFIX 'Comp' AND SLICE (4, 0)
+  LIMIT 20;
+
+-- Per-query sparse IDF corpus (tenant stats)
+QUERY TEXT 'risks' FROM docs USING sparse
+  PARAMS (idf = {corpus: {must: [{key: 'tenant', match: {value: 'acme'}}]}})
+  LIMIT 10;
+
+-- Cluster resource quotas (REST only; not edge/gRPC)
+SHOW QUOTAS;
+SET QUOTA (enabled = true, max_resident_memory_percent = 80) WAIT true;
+```
+
+Route affinity (`X-Qdrant-Route-Affinity`) is a **Rust client** option
+(`RestQdrant` / `GrpcQdrant::with_route_affinity`), not QQL syntax — see the
+Rust SDK docs.
 
 ## Catalog
 

@@ -32,7 +32,8 @@ LIMIT 10;
 | `=`, `!=`, `>`, `>=`, `<`, `<=` | Scalar equality and range comparison |
 | `BETWEEN`, `IN`, `NOT IN` | Inclusive ranges and membership sets |
 | `IS NULL`, `IS EMPTY` | Missing or empty payload values |
-| `MATCH`, `MATCH ANY`, `MATCH PHRASE` | Text payload matching |
+| `MATCH`, `MATCH ANY`, `MATCH PHRASE`, `MATCH PREFIX` | Text and keyword-prefix payload matching |
+| `SLICE (total, index)` | Deterministic point-ID slice (parallelism / sampling) |
 | `HAS_VECTOR`, `VALUES_COUNT` | Vector presence and array cardinality |
 
 The unicode operators `≠`, `≥`, and `≤` normalize to `!=`, `>=`, and `<=`.
@@ -44,9 +45,12 @@ string).
 
 ## Text, cardinality, and presence predicates
 
-`MATCH` covers three text forms: a plain string match, `MATCH ANY` over a
-non-empty list, and `MATCH PHRASE` for ordered multi-token phrases. Field and
-text-index compatibility is enforced by the backend at execution time.
+`MATCH` covers four text forms: a plain string match, `MATCH ANY` over a
+non-empty list, `MATCH PHRASE` for ordered multi-token phrases, and
+`MATCH PREFIX` for keyword-prefix matching (Qdrant 1.19+). Field and
+text-index compatibility is enforced by the backend at execution time —
+`MATCH PREFIX` is most useful on a keyword field indexed with
+`prefix = true` (see [Collections and indexes](/docs/language/collections-indexes/)).
 `VALUES_COUNT <op> <non_negative_integer>` tests array cardinality.
 
 {% qqlExample title="Text matching, cardinality, and presence" %}
@@ -56,9 +60,33 @@ FROM docs
 WHERE content MATCH 'hello world'
   AND tags MATCH ANY ('hello', 'world')
   AND description MATCH PHRASE 'vector database'
+  AND title MATCH PREFIX 'Comp'
   AND reviews VALUES_COUNT >= 2
   AND HAS_VECTOR 'dense'
   AND notes IS NOT NULL
+LIMIT 10;
+```
+{% /qqlExample %}
+
+## Slice a point set deterministically
+
+`SLICE (total, index)` keeps points whose ID falls in partition `index` of
+`total` equal partitions. Use it to fan work across workers without random
+sampling. Validation requires `total >= 1` and `index < total`; violations
+return `QQL-VALIDATION-SLICE`.
+
+{% qqlExample title="Prefix match and deterministic slice" %}
+```sql
+QUERY TEXT 'search'
+FROM docs
+WHERE title MATCH PREFIX 'Comp'
+  AND SLICE (4, 1)
+LIMIT 10;
+
+QUERY TEXT 'search'
+FROM docs
+WHERE SLICE (4, 1)
+  AND status = 'active'
 LIMIT 10;
 ```
 {% /qqlExample %}

@@ -8,9 +8,9 @@ sidebar:
 Most QQL statements are transport-neutral. Differences come from backend
 capability, not a separate language dialect.
 
-The REST and gRPC transports target **Qdrant 1.18.x** (the bundled OpenAPI
-schema and protobuf definitions are pinned to `v1.18.x`). Older servers may
-reject plan fields introduced in that generation; the edge backend is an
+The REST and gRPC transports target **Qdrant 1.19.x** (the bundled OpenAPI
+schema and public protobuf definitions are pinned to `v1.19.0`). Older servers
+may reject plan fields introduced in that generation; the edge backend is an
 in-process engine and does not depend on a server version.
 
 | Capability | REST | gRPC | Edge |
@@ -18,13 +18,18 @@ in-process engine and does not depend on a server version.
 | Parse, validate, inject, explain | yes | yes | yes |
 | Dense nearest search | yes | yes | yes |
 | Sparse and hybrid retrieval | yes | yes | yes |
-| Payload filters | yes | yes | yes |
+| Payload filters (including `MATCH PREFIX`, `SLICE`) | yes | yes | yes |
+| Per-query sparse IDF (`PARAMS idf = …`) | yes | yes | yes |
+| Memory placement / `payload_memory` / dense `datatype` | yes | yes | partial |
+| Keyword index `prefix = true` | yes | yes | yes |
 | MMR, recommend, formula, order-by, sample, context/discover | yes | yes | yes |
 | Quantization rescore / oversampling (`PARAMS quantization = {...}`) | yes | yes | yes |
 | Cross-encoder reranking (`CROSS RERANK`) | yes | yes | yes (client-side) |
 | Exact count (`COUNT ... WITH (exact = true)`) | yes | yes | yes |
 | UPSERT with auto-embedding | yes | yes | yes (local embedder) |
 | Query/update batching | yes | yes | fan-out |
+| `SHOW QUOTAS` / `SET QUOTA` | yes | no | no |
+| Route affinity (`X-Qdrant-Route-Affinity`) | yes | yes | n/a |
 | Grouped search | yes | yes | no |
 | Custom `SHARD` routing | yes | yes | no |
 | Shard-key administration | yes | yes | no |
@@ -46,6 +51,13 @@ Notes:
   materialized vectors; offline, use `TEXT` or `VECTOR` inputs instead.
 - **Timeouts and consistency** are request-level REST/gRPC fields and are rejected
   offline with `QQL-EDGE-UNSUPPORTED-TIMEOUT` and `QQL-EDGE-UNSUPPORTED-CONSISTENCY`.
+- **Quotas** are cluster REST only (`GET|PUT /quotas`). gRPC fails with
+  `QQL-GRPC-QUOTA`; edge fails with `QQL-EDGE-UNSUPPORTED-QUOTA`.
+- **Route affinity** is transport metadata on `RestQdrant` /
+  `GrpcQdrant` (`with_route_affinity`), not a QQL statement or request body.
+- **Memory placement on edge** may not honor every `memory` /
+  `payload_memory` value on the underlying engine; prefer remote Qdrant when
+  placement must match cluster semantics.
 
 The exact edge surface evolves with `qql-edge`; treat a plan or execution
 capability error as authoritative.
@@ -67,5 +79,14 @@ LIMIT 10;
 ```
 {% /qqlExample %}
 
-`timeout` and `consistency` map to request-level REST/gRPC fields. HNSW and
-ACORN options are search-body parameters.
+{% qqlExample title="Sparse IDF corpus (search-body param)" %}
+```sql
+QUERY TEXT 'search' FROM docs
+USING sparse
+PARAMS (idf = 'global')
+LIMIT 10;
+```
+{% /qqlExample %}
+
+`timeout` and `consistency` map to request-level REST/gRPC fields. HNSW,
+ACORN, and sparse `idf` options are search-body parameters.

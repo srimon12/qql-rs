@@ -6,6 +6,8 @@ Node.js N-API bindings for QQL (parser, plan, execute).
 
 Same QQL surface as Python/Rust/CLI — live Qdrant over **REST or gRPC**,
 optional HTTP embedders, AST `injectFilter`, and first-class `SHARD` routing.
+Language surface tracks **Qdrant ≥ 1.19** (quotas, `memory` placement,
+`MATCH PREFIX` / `SLICE`, sparse `idf`, `turbo4`).
 
 ## Install
 
@@ -69,6 +71,30 @@ console.log(version, isValid("SHOW COLLECTIONS"), compileQuery("SHOW COLLECTIONS
 | Partition DDL | `CREATE SHARD KEY` | Admin API |
 
 `injectFilter` ops: `= > >= < <=` only (no `!=`).
+
+### Qdrant 1.19 notes
+
+```javascript
+// Quotas: REST only (default :6333). useGrpc: true → QQL-GRPC-QUOTA
+await client.execute("SHOW QUOTAS");
+await client.execute(
+  "SET QUOTA (enabled = true, max_resident_memory_percent = 80, " +
+    "max_disk_usage_percent = 90, release_margin_percent = 5) WAIT true"
+);
+
+// Keyword prefix filter (index needs prefix = true)
+await client.execute(
+  "QUERY TEXT 'q' FROM docs USING dense WHERE title MATCH PREFIX 'Comp' LIMIT 5"
+);
+
+// Sparse IDF corpus
+await client.execute(
+  "QUERY TEXT 'q' FROM docs USING sparse PARAMS (idf = 'global') LIMIT 5"
+);
+```
+
+`SET QUOTA` fully replaces the cluster config. Route affinity is a Rust client
+API only (`RestQdrant` / `GrpcQdrant::with_route_affinity`) — not on `Client`.
 
 ## Execution report
 

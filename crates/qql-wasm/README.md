@@ -5,8 +5,10 @@ WebAssembly bindings for QQL: parse, plan, optional browser execute (`fetch`).
 ## Proposition
 
 Run the same QQL frontend offline in the browser (or Workers/Deno/Bun with the
-right wasm-bindgen target). Optional `Client` posts REST to Qdrant and can
-attach HTTP/JS embedders. Plan IR is shared with native crates.
+right wasm-bindgen target). Optional `Client` posts **REST** to Qdrant and can
+attach HTTP/JS embedders. Plan IR is shared with native crates. Language
+surface tracks **Qdrant ≥ 1.19** (parse/plan/compile always; live quotas and
+1.19 body fields need a ≥ 1.19 server when executing).
 
 ## Install
 
@@ -95,6 +97,22 @@ cargo build -p qql-wasm --target wasm32-unknown-unknown --no-default-features
 - JS host ABI (`wasm-bindgen`), not generic WASI
 - Single-threaded async on `wasm32-unknown-unknown`
 - Multivector embed needs a multi-capable host embedder (default HTTP is dense)
+- Live `Client` is REST-only (no gRPC) — so `SHOW QUOTAS` / `SET QUOTA` work
+  against Qdrant ≥ 1.19 when executed; offline `compile`/`analyze` project
+  them to `GET|PUT /quotas`
+- Route affinity is not exposed on the WASM client
+
+```javascript
+// Offline plan of 1.19 surfaces
+const info = analyze("SHOW QUOTAS");
+// Live REST (server ≥ 1.19)
+await client.execute(
+  "SET QUOTA (enabled = true, max_resident_memory_percent = 80) WAIT true"
+);
+await client.execute(
+  "QUERY TEXT 'q' FROM docs USING dense WHERE title MATCH PREFIX 'Comp' LIMIT 5"
+);
+```
 
 ## Docs
 

@@ -115,6 +115,7 @@ Intel Mac users should disable default features and use `http-embedding` or
 
 ## Boundaries
 
+- Built on **qdrant-edge 0.8** (retrieve API, optional `score_threshold`, **IDF** on search params)
 - No `UPDATE ... SET VECTOR` via batch — uses individual route dispatch
 - gRPC is not available in edge mode (no protobuf dependency)
 - Edge uses qdrant-edge's native query engine for nearest, sparse, hybrid,
@@ -125,6 +126,28 @@ Intel Mac users should disable default features and use `http-embedding` or
 - Sparse (`sparse_model`) defaults to local BM25 hash; opt in with `sparse_model: Some("splade".into())` for real ONNX sparse inference
 - `IMAGE` expects local filesystem paths (no remote URL fetch)
 - Query/update “batch” is fan-out, not a single native batch RPC
+- Route affinity is a remote-client transport feature (`RestQdrant` /
+  `GrpcQdrant`); it does not apply to in-process edge
+
+### Qdrant 1.19 language surface on edge
+
+| Feature | Edge |
+|---------|------|
+| `PARAMS (idf = 'global' \| {corpus: …})` | **Supported** (qdrant-edge 0.8) |
+| `WHERE field MATCH PREFIX '…'` / `WHERE SLICE (total, index)` | Supported when the offline filter converter accepts them |
+| `memory` / `datatype` / keyword `prefix` on DDL | Parsed and planned; storage support follows qdrant-edge capabilities |
+| `SHOW QUOTAS` / `SET QUOTA` | **Unsupported** — cluster REST `/quotas` only → `QQL-EDGE-UNSUPPORTED-QUOTA` |
+| `SHARD` / `GROUP BY` / ACORN / timeout / consistency | Still unsupported (table below) |
+
+```sql
+-- Sparse IDF corpus works offline (edge 0.8+)
+QUERY TEXT 'search' FROM docs USING sparse
+  PARAMS (idf = 'global')
+  LIMIT 10;
+
+-- Quotas always fail-loud offline
+SHOW QUOTAS;  -- QQL-EDGE-UNSUPPORTED-QUOTA
+```
 
 ### Storage & Concurrency Contract
 

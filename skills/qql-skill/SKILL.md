@@ -70,8 +70,18 @@ Translate user intent directly into QQL syntax:
 - Drop shard key -> `DROP SHARD KEY '<key>' ON COLLECTION <name>`
 - Show shard keys -> `SHOW SHARD KEYS ON COLLECTION <name>`
 - Multi-tenant isolation -> `QUERY 'text' FROM <collection> WHERE tenant_id = 'honeywell' SHARD 'honeywell' LIMIT 10`
+- Keyword prefix filter -> `WHERE title MATCH PREFIX 'Comp'` (keyword index with `prefix = true`)
+- Deterministic ID-space sampling -> `WHERE SLICE (total, index)` e.g. `SLICE (4, 1)`
+- Sparse IDF corpus (global / tenant) -> `PARAMS (idf = 'global')` or `PARAMS (idf = {corpus: {must: […]}})`
+- Cluster quotas (REST) -> `SHOW QUOTAS;` / `SET QUOTA (enabled = true, max_resident_memory_percent = 80) WAIT true;`
+- Memory placement + TurboQuant -> `WITH VECTOR (memory = 'cached', datatype = 'turbo4')`, `WITH HNSW (memory = 'cold')`, `payload_memory = 'cold'`
+- Read affinity (Rust client only) -> `RestQdrant` / `GrpcQdrant` `.with_route_affinity(…)` → `X-Qdrant-Route-Affinity` (not QQL syntax)
 
 ## Canonical Grammar & Capabilities
+
+Language surface targets **Qdrant 1.19** / **QQL 1.4** features (quotas, memory placement,
+`MATCH PREFIX`, `SLICE`, IDF corpus, `turbo4`). Prefer forms below over legacy dual-write
+keys (`on_disk` / `always_ram`) for new scripts.
 
 ### Collection Management (DDL)
 ```sql
@@ -81,6 +91,13 @@ CREATE COLLECTION docs (
   colbert VECTOR(128, COSINE) WITH MULTIVECTOR (comparator = 'max_sim')
 ) WITH HNSW (m = 16, ef_construct = 100);
 
+-- Memory tiers + TurboQuant 4-bit dense (Qdrant 1.19 / QQL 1.4)
+CREATE COLLECTION docs_tiered (
+  dense VECTOR(384, COSINE) WITH VECTOR (memory = 'cached', datatype = 'turbo4')
+    WITH HNSW (memory = 'cold')
+) WITH PARAMS (payload_memory = 'cold')
+  WITH QUANTIZATION (type = 'scalar', memory = 'cached');
+
 ALTER COLLECTION docs WITH VECTOR (on_disk = true);
 ALTER COLLECTION docs WITH PARAMS (replication_factor = 3);
 ALTER COLLECTION docs WITH QUANTIZATION (type = 'scalar', always_ram = true);
@@ -88,10 +105,16 @@ ALTER COLLECTION docs WITH QUANTIZATION (type = 'scalar', always_ram = true);
 CREATE INDEX ON COLLECTION docs FOR title TYPE text WITH (lowercase = true);
 CREATE INDEX ON COLLECTION docs FOR tenant_id TYPE keyword WITH (is_tenant = true);
 CREATE INDEX ON COLLECTION docs FOR rating TYPE integer WITH (range = true);
+-- Keyword prefix index for MATCH PREFIX filters
+CREATE INDEX ON COLLECTION docs FOR title TYPE keyword WITH (prefix = true, memory = 'cached');
 
 DROP INDEX ON COLLECTION docs FOR title;
 SHOW COLLECTIONS;
 SHOW COLLECTION docs;
+
+-- Cluster-wide resource quotas (REST /quotas only — not gRPC, not edge)
+SHOW QUOTAS;
+SET QUOTA (enabled = true, max_resident_memory_percent = 80) WAIT true;
 
 -- Shard key lifecycle for multi-tenant custom sharding
 CREATE SHARD KEY 'acme' ON COLLECTION docs WITH (shards_number = 2);
@@ -153,7 +176,8 @@ FROM <collection>
 [WHERE <filter_expression>]
 [SHARD '<tenant_key>']
 [PARAMS (hnsw_ef = <n>, exact = <bool>, acorn = <bool>, max_selectivity = <0–1>,
-         indexed_only = <bool>, timeout = <seconds>, consistency = majority|quorum|all|<n>)]
+         indexed_only = <bool>, timeout = <seconds>, consistency = majority|quorum|all|<n>,
+         idf = 'global' | {corpus: <FilterJSON>})]
 [SCORE THRESHOLD <number>]
 [GROUP BY <field> [SIZE <n>] [LOOKUP FROM <collection>]]
 [WITH PAYLOAD [true | false | INCLUDE (...) | EXCLUDE (...)]]
@@ -170,8 +194,11 @@ FROM <collection>
 - `MMR` now supports sparse vectors (`USING … AS SPARSE` with MMR is supported).
 - `max_selectivity` requires `acorn = true` (remote Qdrant; not edge).
 - `timeout` / `consistency` are request-level (OpenAPI query params / gRPC fields); not on edge.
+- `idf` is a search param for sparse IDF corpus scoping (remote + edge 0.8+).
 - Edge has **no** `GROUP BY` — use remote Qdrant or filter + `LIMIT`.
+- Edge / gRPC have **no** quotas (`SHOW QUOTAS` / `SET QUOTA` are REST-only).
 - Dynamic shard: write `SHARD 'tenant'` in QQL, or set `stmt.shard_key = tenant` after parse (no `$bind` syntax).
+- Route affinity is **not** QQL syntax — Rust `with_route_affinity` only (see [rust-sdk.md](references/rust-sdk.md)).
 
 **Vector roles (critical for embedding):**
 
@@ -222,6 +249,8 @@ Supports standard comparison operators and predicates:
 - Sets: `IN ('a', 'b')`, `NOT IN ('c', 'd')`
 - Null/Empty: `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`
 - Text Match: `MATCH 'term'`, `MATCH ANY ('term1', 'term2')`, `MATCH PHRASE 'exact phrase'`
+- Keyword prefix: `title MATCH PREFIX 'Comp'` (pair with keyword index `prefix = true`)
+- Deterministic slice: `SLICE (total, index)` e.g. `WHERE SLICE (4, 1)` — hash buckets over point IDs
 - Array / Vector: `HAS_VECTOR 'dense'`, `tags VALUES_COUNT >= 2`
 - Geo: `location GEO_BBOX { top_left: {lat: 52.5, lon: 13.4}, bottom_right: {lat: 52.4, lon: 13.5} }`
 - Geo radius: `location GEO_RADIUS { center: {lat: 48.85, lon: 2.35}, radius: 5000 }`
@@ -257,9 +286,10 @@ routing inside the filter object.
 
 | Backend | Notes |
 |---------|--------|
-| REST | Full matrix |
-| gRPC | Default with runtime `grpc` feature; typed plan → proto |
-| Edge | No custom shard-key admin; no `GROUP BY` / ACORN; optional multi/image/rerank hosts |
+| REST | Full matrix including `SHOW QUOTAS` / `SET QUOTA` |
+| gRPC | Typed plan → proto; **no** public quota service (`QQL-GRPC-QUOTA`) |
+| Edge | No quotas; no custom shard-key admin; no `GROUP BY` / ACORN; **IDF** on search params (edge 0.8+); optional multi/image/rerank hosts |
+| Route affinity | Client transport only (`RestQdrant` / `GrpcQdrant`); not in pyqql / nqql / wasm yet |
 
 ## CLI Reference
 

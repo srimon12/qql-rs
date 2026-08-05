@@ -35,5 +35,49 @@ LIMIT 10;
 ```
 {% /qqlExample %}
 
+## Qdrant 1.19 / QQL 1.4 surface
+
+These statements require a Qdrant **1.19+** server for full semantics. Prefix
+and slice filters, IDF params, and memory placement parse on every backend;
+quotas are REST-only.
+
+{% qqlExample title="Prefix filter, slice, and sparse IDF" %}
+```sql
+CREATE INDEX ON COLLECTION docs
+FOR title
+TYPE keyword
+WITH (prefix = true);
+
+QUERY TEXT 'search'
+FROM docs
+WHERE title MATCH PREFIX 'Comp'
+  AND SLICE (4, 1)
+LIMIT 10;
+
+QUERY TEXT 'search'
+FROM docs
+USING sparse
+PARAMS (idf = 'global')
+LIMIT 10;
+```
+{% /qqlExample %}
+
+{% qqlExample title="Memory placement and cluster quotas (REST)" %}
+```sql
+CREATE COLLECTION docs (
+  dense VECTOR(384, COSINE)
+    WITH VECTOR (memory = 'cached', datatype = 'turbo4')
+) WITH HNSW (memory = 'cold')
+WITH PARAMS (payload_memory = 'cold');
+
+SHOW QUOTAS;
+
+SET QUOTA (
+  enabled = true,
+  max_resident_memory_percent = 80
+) WAIT true;
+```
+{% /qqlExample %}
+
 When adding an example, keep its QQL compatible with `language/v1`, document
 the required backend and models, and provide a deterministic setup path.

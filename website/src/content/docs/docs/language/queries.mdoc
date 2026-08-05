@@ -273,5 +273,37 @@ LIMIT 10;
 ```
 {% /qqlExample %}
 
+## Search parameters: sparse IDF corpus
+
+Query-level `PARAMS` accept search controls such as `hnsw_ef`, `exact`,
+`acorn`, `quantization`, `timeout`, and `consistency`. For sparse retrieval
+on Qdrant 1.19+, set a per-query IDF corpus:
+
+| Form | Meaning |
+|---|---|
+| `idf = 'global'` | Use the collection-wide IDF statistics |
+| `idf = {corpus: {…}}` | Restrict IDF to points matching a Qdrant filter object |
+
+A malformed `idf` value fails validation with `QQL-VALIDATION-IDF`; a corpus
+object that is not a valid Qdrant filter fails planning with `QQL-PLAN-IDF`.
+
+{% qqlExample title="Per-query sparse IDF corpus" %}
+```sql
+QUERY TEXT 'search'
+FROM docs
+USING sparse
+PARAMS (idf = 'global')
+LIMIT 10;
+
+QUERY TEXT 'search'
+FROM docs
+USING sparse
+PARAMS (
+  idf = {corpus: {must: [{key: 'status', match: {value: 'active'}}]}}
+)
+LIMIT 10;
+```
+{% /qqlExample %}
+
 For formula scoring and decay functions, continue with [Formula
 scoring](/docs/language/formulas/).

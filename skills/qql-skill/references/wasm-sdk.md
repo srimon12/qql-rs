@@ -2,6 +2,16 @@
 
 WASM bindings for browser and edge (Cloudflare Workers, Vercel Edge, Deno, Bun).
 
+Language surface includes **Qdrant 1.19 / QQL 1.4** features expressible in QQL
+(`SHOW QUOTAS`, memory/`turbo4`, `MATCH PREFIX`, `SLICE`, `PARAMS (idf = …)`).
+Parse/compile/execute those strings against a backend that supports them
+(quotas: **REST only**).
+
+**Not exposed in qql-wasm yet:** client-side **route affinity**
+(`X-Qdrant-Route-Affinity`). That is Rust transport-only
+(`RestQdrant` / `GrpcQdrant` `.with_route_affinity`) — do not invent a WASM
+`Client` constructor parameter for it.
+
 ## Install
 
 ```bash

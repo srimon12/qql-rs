@@ -1,9 +1,10 @@
-# QQL 1.0 semantics
+# QQL 1.x semantics
 
 This document defines the meaning and validation rules of programs accepted by
-the canonical [`grammar.pest`](../grammar.pest). The fixture suite is normative: valid fixtures
-must parse and plan, invalid cases must fail with their declared code, and
-canonical AST output must match `fixtures/expected`.
+the canonical [`grammar.pest`](../grammar.pest) for the current language version
+**1.4** (see [`versioning.md`](versioning.md)). The fixture suite is normative:
+valid fixtures must parse and plan, invalid cases must fail with their declared
+code, and canonical AST output must match `fixtures/expected`.
 
 ## 1. Lexical model
 
@@ -209,6 +210,23 @@ Body search parameters (OpenAPI `SearchParams`):
 | `rrf_k` | positive integer |
 | `rrf_weights` | list of numbers |
 | `quantization` | object containing `ignore`/`rescore` booleans and positive `oversampling` |
+| `idf` | per-query sparse IDF corpus: `'global'`, the bare keyword `global`, or `{corpus: <filter-object>}` |
+
+`idf` selects the inverse-document-frequency corpus used for sparse scoring on
+this request. The string / keyword form means the whole collection; the object
+form must carry a non-empty Qdrant filter object under `corpus` (must/should/
+must_not conditions). Malformed values fail at parse with `QQL-VALIDATION-IDF`
+or at plan with `QQL-PLAN-IDF`.
+
+```sql
+QUERY TEXT 'search' MODEL 'e5' FROM docs
+PARAMS (idf = 'global')
+LIMIT 10;
+
+QUERY TEXT 'search' MODEL 'e5' FROM docs
+PARAMS (idf = {corpus: {must: [{key: 'status', match: {value: 'active'}}]}})
+LIMIT 10;
+```
 
 For RRF, `rrf_weights` length must equal prefetch count. RRF-only parameters
 are invalid on non-RRF expressions.
@@ -224,6 +242,30 @@ and `MATCH ANY` lists are non-empty.
 around the corresponding positive node. Geo validation requires latitude in
 `[-90,90]`, longitude in `[-180,180]`, positive radius, and at least three
 points per polygon ring.
+
+### 5.1 MATCH PREFIX
+
+`field MATCH PREFIX 'prefix'` is keyword/text prefix matching (OpenAPI
+`Match.prefix`). The prefix string is required.
+
+```sql
+QUERY TEXT 'search' MODEL 'e5' FROM docs
+WHERE title MATCH PREFIX 'Comp'
+LIMIT 10;
+```
+
+### 5.2 SLICE
+
+`SLICE (total, index)` is a deterministic sampling filter with no field. Both
+arguments are non-negative integers; validation requires `total >= 1` and
+`index < total` (`QQL-VALIDATION-SLICE` otherwise). It may combine with other
+predicates via `AND` / `OR` / `NOT`.
+
+```sql
+QUERY TEXT 'search' MODEL 'e5' FROM docs
+WHERE SLICE (4, 1) AND status = 'active'
+LIMIT 10;
+```
 
 Field-schema compatibility (for example, MATCH on a text index) is checked by
 the backend at execution time.
@@ -256,12 +298,12 @@ Collection config keys are case-insensitive and unique:
 
 | Block | Accepted keys |
 |---|---|
-| `HNSW` | `m`, `ef_construct`, `full_scan_threshold`, `max_indexing_threads`, `on_disk`, `payload_m`, `inline_storage` |
-| `VECTOR` | `on_disk` |
+| `HNSW` | `m`, `ef_construct`, `full_scan_threshold`, `max_indexing_threads`, `on_disk`, `payload_m`, `inline_storage`, `memory` |
+| `VECTOR` | `on_disk`, `memory`, `datatype` |
 | `OPTIMIZERS` | `deleted_threshold`, `vacuum_min_vector_number`, `default_segment_number`, `max_segment_size`, `memmap_threshold`, `indexing_threshold`, `flush_interval_sec`, `max_optimization_threads`, `prevent_unoptimized` |
-| `PARAMS` | `replication_factor`, `write_consistency_factor`, `read_fan_out_factor`, `read_fan_out_delay_ms`, `on_disk_payload`, `shard_number`, `sharding_method`, `shard_keys` |
-| `QUANTIZATION` | `type`, `disabled`, `always_ram`, `quantile`, `bits`, `compression`, `encoding`, `query_encoding` |
-| sparse `INDEX`/`SPARSE` | `modifier`, `full_scan_threshold`, `on_disk`, `datatype` |
+| `PARAMS` | `replication_factor`, `write_consistency_factor`, `read_fan_out_factor`, `read_fan_out_delay_ms`, `on_disk_payload`, `payload_memory`, `shard_number`, `sharding_method`, `shard_keys` |
+| `QUANTIZATION` | `type`, `disabled`, `always_ram`, `quantile`, `bits`, `compression`, `encoding`, `query_encoding`, `memory` |
+| sparse `INDEX`/`SPARSE` | `modifier`, `full_scan_threshold`, `on_disk`, `datatype`, `memory` |
 | `MULTIVECTOR` | `comparator` (`max_sim`) |
 
 `read_fan_out_factor` and `read_fan_out_delay_ms` are ALTER-only. Quantization
@@ -269,11 +311,84 @@ type is `scalar`, `binary`, `product`, or `turbo`; `disabled = true` is an
 ALTER form. `sharding_method` accepts the string `'auto'` or `'custom'`;
 `shard_keys` is a list of strings.
 
+### 6.1 Memory placement
+
+`memory` controls how a component is held in RAM while data remains on disk
+(Qdrant 1.19 `Memory`). Accepted string values (case-insensitive):
+
+| Value | Meaning |
+|---|---|
+| `'cold'` | Load on demand |
+| `'cached'` | Keep hot in cache |
+| `'pinned'` | Pin in RAM (not valid for payload) |
+
+Applies on `WITH HNSW (…)`, `WITH VECTOR (…)`, `WITH SPARSE` / sparse `INDEX`,
+`WITH QUANTIZATION (…)`, and payload field indexes. Collection
+`WITH PARAMS (payload_memory = 'cold' | 'cached')` sets payload storage
+placement; `pinned` is rejected for payload (`payload_memory`).
+
+Legacy dual-write: `on_disk` / `on_disk_payload` / `always_ram` remain accepted
+and may be emitted alongside `memory` / `payload_memory` for Qdrant 1.19
+compatibility. Prefer `memory` / `payload_memory` in new scripts.
+
+```sql
+CREATE COLLECTION docs (
+  dense VECTOR(384, COSINE) WITH VECTOR (memory = 'cached', datatype = 'turbo4')
+) WITH HNSW (memory = 'cold') WITH PARAMS (payload_memory = 'cold');
+```
+
+### 6.2 Vector datatype
+
+Dense `WITH VECTOR (datatype = …)` accepts `float32`, `float16`, `uint8`,
+`turbo4` (TurboQuant 4-bit), and short aliases `f32`, `f16`, `u8`, `t4`.
+Sparse index `datatype` accepts float32 / float16 / uint8 only (not `turbo4`).
+
+### 6.3 Payload indexes
+
 Index options are limited to boolean `is_tenant`, `on_disk`, `enable_hnsw`,
-`lowercase`, `ascii_folding`, `phrase_matching`, `lookup`, `range`, and
-`is_principal`; non-negative `min_token_len`/`max_token_len`; string
-`tokenizer` and `stemmer`; and string-list `stopwords`. The parser accepts
-these options and forwards them to the backend's `field_schema`.
+`lowercase`, `ascii_folding`, `phrase_matching`, `lookup`, `range`,
+`is_principal`, and `prefix` (keyword prefix index); non-negative
+`min_token_len`/`max_token_len`; string `tokenizer`, `stemmer`, and `memory`;
+and string-list `stopwords`. The parser accepts these options and forwards them
+to the backend's `field_schema`.
+
+```sql
+CREATE INDEX ON COLLECTION docs FOR tenant TYPE keyword
+  WITH (prefix = true, memory = 'cached', is_tenant = true);
+```
+
+### 6.4 Quotas
+
+Cluster-wide resource quotas (REST `GET|PUT /quotas` only; no public gRPC
+service; edge rejects with `QQL-EDGE-UNSUPPORTED-QUOTA`):
+
+```sql
+SHOW QUOTAS;
+
+SET QUOTA (
+  enabled = true,
+  max_resident_memory_percent = 80,
+  max_disk_usage_percent = 90,
+  release_margin_percent = 5
+) WAIT true;
+
+SET QUOTA (enabled = false);
+SET QUOTA (max_disk_usage_percent = null);
+```
+
+`SET QUOTA` is a **full replace** of the cluster config (`PUT /quotas`).
+Omitted keys (including `key = null`) are unset in the replacement body, not
+merged with the previous limits. Accepted keys:
+
+| Key | Rule |
+|---|---|
+| `enabled` | boolean |
+| `max_resident_memory_percent` | integer in `[1, 100]`, or `null` to clear |
+| `max_disk_usage_percent` | integer in `[1, 100]`, or `null` to clear |
+| `release_margin_percent` | integer in `[0, 100]`, or `null` to clear |
+
+Optional `WAIT true|false` waits for consensus after the update. Unknown keys
+or out-of-range percents fail with `QQL-PLAN-QUOTA`.
 
 ## 7. Canonical AST (`qql.ast/v1`)
 

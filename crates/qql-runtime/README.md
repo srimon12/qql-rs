@@ -49,11 +49,50 @@ batches). Implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant` (other crate
 
 | Backend | Port (typical) | Notes |
 |---------|----------------|--------|
-| REST | 6333 | OpenAPI JSON body |
-| gRPC | 6334 | tonic + protos in `proto/` |
-| Edge | n/a | No cluster SHARD admin / GROUP BY / ACORN |
+| REST | 6333 | OpenAPI **1.19.0** JSON body (`openapi.json`) |
+| gRPC | 6334 | tonic + public protos in `proto/` (1.19.0 pin) |
+| Edge | n/a | qdrant-edge **0.8** (IDF yes; quotas / SHARD / GROUP BY / ACORN no) |
 
 API key: REST header `api-key`; gRPC `ApiKeyInterceptor`.
+
+### Route affinity (client API, Qdrant ≥ 1.19)
+
+Not part of QQL grammar — transport metadata only. Pins reads to a stable replica:
+
+```rust
+use qql::rest::RestQdrant;
+// use qql::grpc::GrpcQdrant;
+
+let ops = Box::new(
+    RestQdrant::new("http://localhost:6333", None)
+        .with_route_affinity("session-42"), // X-Qdrant-Route-Affinity
+);
+// GrpcQdrant::with_route_affinity sends gRPC metadata x-qdrant-route-affinity
+```
+
+Empty strings are treated as unset. Bindings (Python/Node/WASM) do not currently
+expose this setter; use the Rust client or set the header upstream.
+
+### Quotas (REST only)
+
+```sql
+SHOW QUOTAS;
+SET QUOTA (enabled = true, max_resident_memory_percent = 80,
+           max_disk_usage_percent = 90, release_margin_percent = 5) WAIT true;
+```
+
+| Backend | Result |
+|---------|--------|
+| REST | `GET|PUT /quotas` |
+| gRPC | `QQL-GRPC-QUOTA` — no public gRPC quota service |
+| Edge | `QQL-EDGE-UNSUPPORTED-QUOTA` |
+
+`SET QUOTA` is a **full replace** of the cluster config (omitted/`null` keys clear
+limits in the replacement body).
+
+Other 1.19 body features (`memory`, `MATCH PREFIX`, `SLICE`, `idf`, `turbo4`,
+keyword `prefix`) flow through the shared plan IR on all backends that support
+the corresponding Qdrant capability.
 
 ## Prepare order
 

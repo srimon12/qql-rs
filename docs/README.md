@@ -1,6 +1,6 @@
 # QQL Documentation
 
-**QQL** is a typed query language for [Qdrant](https://qdrant.tech): one grammar, one plan IR, three backends (REST, gRPC, edge).
+**QQL** is a typed query language for [Qdrant](https://qdrant.tech): one grammar, one plan IR, three backends (REST, gRPC, edge). The language surface tracks **Qdrant ≥ 1.19.0** (OpenAPI / public protos pinned in `qql-runtime`).
 
 ## Proposition
 
@@ -13,12 +13,26 @@
 
 **Pipeline:** parse (`qql-core`) → prepare/embed (`qql-runtime` + `qql-embed`) → plan (`qql-plan` → `PlannedOperation`) → dispatch (REST / gRPC / edge).
 
+### Qdrant 1.19 language highlights
+
+| Feature | Notes |
+|---------|--------|
+| `SHOW QUOTAS` / `SET QUOTA (…)` | Cluster REST `GET|PUT /quotas` only; gRPC → `QQL-GRPC-QUOTA`; edge → `QQL-EDGE-UNSUPPORTED-QUOTA` |
+| `memory = 'cold'\|'cached'\|'pinned'` | HNSW / VECTOR / SPARSE / QUANTIZATION / indexes; `payload_memory` is cold\|cached only |
+| `WHERE field MATCH PREFIX '…'` | Keyword prefix match (`prefix=true` index) |
+| `WHERE SLICE (total, index)` | Deterministic id-space slice (`total ≥ 1`, `index < total`) |
+| `PARAMS (idf = …)` | Sparse IDF corpus: `'global'` or `{corpus: {…filter…}}` |
+| `datatype = 'turbo4'` | Dense TurboQuant 4-bit storage |
+| Route affinity | **Client API only** (`RestQdrant` / `GrpcQdrant::with_route_affinity`) — not QQL grammar |
+
+See [syntax.md](syntax.md) and [filters.md](filters.md) for examples.
+
 ## Guides in this folder
 
 | Doc | What it covers |
 |-----|----------------|
-| [syntax.md](syntax.md) | Full language: QUERY, DML, DDL, `SHARD` vs `SHARD KEY`, params, embeddings |
-| [filters.md](filters.md) | `WHERE` predicates and how they lower to Qdrant `Filter` |
+| [syntax.md](syntax.md) | Full language: QUERY, DML, DDL, quotas, memory/datatype, `SHARD` vs `SHARD KEY`, params, embeddings |
+| [filters.md](filters.md) | `WHERE` predicates (including `MATCH PREFIX` / `SLICE`) and how they lower to Qdrant `Filter` |
 | [inject_filter.md](inject_filter.md) | Host isolation: AST injection (not routing) |
 | [STORY.md](STORY.md) | Product history (Python → Go → Rust) |
 

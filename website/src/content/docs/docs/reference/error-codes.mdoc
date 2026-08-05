@@ -115,6 +115,8 @@ The same structured fields are projected differently by each host binding.
 | `QQL-VALIDATION-RERANK-USING` | `RERANK` requires `USING <vector>` |
 | `QQL-VALIDATION-SCORE` | A score threshold must be finite |
 | `QQL-VALIDATION-SEARCH-PARAM` | Unknown search parameter |
+| `QQL-VALIDATION-SLICE` | `SLICE (total, index)` with `total < 1` or `index >= total` |
+| `QQL-VALIDATION-IDF` | Malformed `PARAMS (idf = …)` value at parse time |
 | `QQL-VALIDATION-USING` | This query expression does not accept `USING` |
 | `QQL-VALIDATION-VECTOR` | Invalid vector value |
 
@@ -133,14 +135,17 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PLAN-CROSS-RERANK-PREFETCH` | `CROSS RERANK` requires at least one `PREFETCH` |
 | `QQL-PLAN-CROSS-RERANK-QUERY` | `CROSS RERANK` query text must not be empty |
 | `QQL-PLAN-FUSION-PREFETCH` | `FUSION` requires at least one prefetch |
+| `QQL-PLAN-IDF` | `PARAMS (idf = …)` corpus is not a valid Qdrant filter object |
 | `QQL-PLAN-PREFETCH-CTE` | `PREFETCH` references an unknown CTE |
 | `QQL-PLAN-PREFETCH-GROUP` | `GROUP BY` is not supported inside a `PREFETCH` source |
+| `QQL-PLAN-QUOTA` | Invalid `SET QUOTA` key or out-of-range percent |
 | `QQL-PLAN-RERANK-PREFETCH` | `RERANK` requires at least one `PREFETCH` |
 | `QQL-PLAN-RERANK-USING` | `RERANK` requires a non-empty `USING` vector name |
 | `QQL-PLAN-RRF-PARAMS` | `rrf_k` and `rrf_weights` are valid only with `RRF` fusion |
 | `QQL-PLAN-RRF-WEIGHTS` | `rrf_weights` length must equal the prefetch count |
 | `QQL-PLAN-UNSUPPORTED-PREFETCH` | `POINTS` / `CROSS RERANK` are not supported inside `PREFETCH` |
 | `QQL-REST-CLIENT-SIDE` | The operation is executed client-side and has no single Qdrant REST route |
+| `QQL-GRPC-QUOTA` | Quotas have no public gRPC service; use REST (`SHOW QUOTAS` / `SET QUOTA`) |
 | `QQL-BACKEND` | Generic backend or transport failure |
 
 ## Value conversion
@@ -173,6 +178,7 @@ usually carry a remediation hint pointing at remote Qdrant.
 | `QQL-EDGE-UNSUPPORTED-ACORN` | `PARAMS (acorn = ...)` is not available offline |
 | `QQL-EDGE-UNSUPPORTED-TIMEOUT` | `PARAMS (timeout = ...)` is not available offline |
 | `QQL-EDGE-UNSUPPORTED-CONSISTENCY` | `PARAMS (consistency = ...)` is not available offline |
+| `QQL-EDGE-UNSUPPORTED-QUOTA` | `SHOW QUOTAS` / `SET QUOTA` require cluster REST `/quotas` |
 | `QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY` | `RECOMMEND STRATEGY average_vector`; offline supports `best_score` and `sum_scores` only |
 | `QQL-EDGE-UNSUPPORTED-POINT-REF` | Point-ID query inputs need materialized vectors offline |
 | `QQL-EDGE-UNSUPPORTED-FIELD-TYPE` | The index field type is not available offline |
@@ -235,6 +241,7 @@ QQL-EDGE-UNSUPPORTED-CONSISTENCY
 QQL-EDGE-UNSUPPORTED-FIELD-TYPE
 QQL-EDGE-UNSUPPORTED-GROUP-BY
 QQL-EDGE-UNSUPPORTED-POINT-REF
+QQL-EDGE-UNSUPPORTED-QUOTA
 QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY
 QQL-EDGE-UNSUPPORTED-ROUTE
 QQL-EDGE-UNSUPPORTED-SHARD
@@ -242,6 +249,7 @@ QQL-EDGE-UNSUPPORTED-SHARD-KEY
 QQL-EDGE-UNSUPPORTED-TIMEOUT
 QQL-EDGE-VECTOR
 QQL-EDGE-VECTOR-NAME-MISSING
+QQL-GRPC-QUOTA
 QQL-JSON-NONFINITE
 QQL-JSON-NUMBER
 QQL-LEX-CHAR
@@ -292,8 +300,10 @@ QQL-PLAN-CROSS-RERANK-MODEL
 QQL-PLAN-CROSS-RERANK-PREFETCH
 QQL-PLAN-CROSS-RERANK-QUERY
 QQL-PLAN-FUSION-PREFETCH
+QQL-PLAN-IDF
 QQL-PLAN-PREFETCH-CTE
 QQL-PLAN-PREFETCH-GROUP
+QQL-PLAN-QUOTA
 QQL-PLAN-RERANK-PREFETCH
 QQL-PLAN-RERANK-USING
 QQL-PLAN-RRF-PARAMS
@@ -314,6 +324,7 @@ QQL-VALIDATION-FUSION-PREFETCH
 QQL-VALIDATION-GEO
 QQL-VALIDATION-HYBRID
 QQL-VALIDATION-ID-PREDICATE
+QQL-VALIDATION-IDF
 QQL-VALIDATION-LIMIT-OVERFLOW
 QQL-VALIDATION-MMR
 QQL-VALIDATION-POINT-ID
@@ -325,6 +336,7 @@ QQL-VALIDATION-RERANK-PREFETCH
 QQL-VALIDATION-RERANK-USING
 QQL-VALIDATION-SCORE
 QQL-VALIDATION-SEARCH-PARAM
+QQL-VALIDATION-SLICE
 QQL-VALIDATION-UPSERT-ID
 QQL-VALIDATION-USING
 QQL-VALIDATION-VECTOR
