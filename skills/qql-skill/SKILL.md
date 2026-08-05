@@ -75,7 +75,7 @@ Translate user intent directly into QQL syntax:
 - Sparse IDF corpus (global / tenant) -> `PARAMS (idf = 'global')` or `PARAMS (idf = {corpus: {must: […]}})`
 - Cluster quotas (REST) -> `SHOW QUOTAS;` / `SET QUOTA (enabled = true, max_resident_memory_percent = 80) WAIT true;`
 - Memory placement + TurboQuant -> `WITH VECTOR (memory = 'cached', datatype = 'turbo4')`, `WITH HNSW (memory = 'cold')`, `payload_memory = 'cold'`
-- Read affinity (Rust client only) -> `RestQdrant` / `GrpcQdrant` `.with_route_affinity(…)` → `X-Qdrant-Route-Affinity` (not QQL syntax)
+- Read affinity (host SDKs) -> `RestQdrant` / `GrpcQdrant` `.with_route_affinity(…)`, `pyqql.Client(route_affinity=…)`, `nqql` `{ routeAffinity }`, wasm `client.setRouteAffinity(key)` → `X-Qdrant-Route-Affinity` (not QQL syntax)
 
 ## Canonical Grammar & Capabilities
 
@@ -198,7 +198,7 @@ FROM <collection>
 - Edge has **no** `GROUP BY` — use remote Qdrant or filter + `LIMIT`.
 - Edge / gRPC have **no** quotas (`SHOW QUOTAS` / `SET QUOTA` are REST-only).
 - Dynamic shard: write `SHARD 'tenant'` in QQL, or set `stmt.shard_key = tenant` after parse (no `$bind` syntax).
-- Route affinity is **not** QQL syntax — Rust `with_route_affinity` only (see [rust-sdk.md](references/rust-sdk.md)).
+- Route affinity is **not** QQL syntax — a client transport option: Rust `with_route_affinity`, `pyqql.Client(route_affinity=…)`, `nqql` `{ routeAffinity }`, wasm `setRouteAffinity` (see [rust-sdk.md](references/rust-sdk.md)).
 
 **Vector roles (critical for embedding):**
 
@@ -289,7 +289,7 @@ routing inside the filter object.
 | REST | Full matrix including `SHOW QUOTAS` / `SET QUOTA` |
 | gRPC | Typed plan → proto; **no** public quota service (`QQL-GRPC-QUOTA`) |
 | Edge | No quotas; no custom shard-key admin; no `GROUP BY` / ACORN; **IDF** on search params (edge 0.8+); optional multi/image/rerank hosts |
-| Route affinity | Client transport only (`RestQdrant` / `GrpcQdrant`); not in pyqql / nqql / wasm yet |
+| Route affinity | Client transport option on remote SDKs (`RestQdrant` / `GrpcQdrant`, `pyqql.Client(route_affinity=…)`, `nqql` `{ routeAffinity }`, wasm `setRouteAffinity`); not on edge |
 
 ## CLI Reference
 

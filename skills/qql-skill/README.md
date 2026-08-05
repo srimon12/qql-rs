@@ -8,7 +8,7 @@ Packaged guidance for coding agents that author QQL and call SDKs.
 - **Plan IR:** transport-neutral `PlannedOperation` — gRPC and REST are first-class projections (quotas REST-only).
 - **Isolation:** `inject_filter` on the AST (fail-closed).
 - **Routing:** `SHARD '…'` in QQL or `stmt.shard_key` — never inside `Filter`; no `inject_shard_key`.
-- **Read affinity:** Rust client transport only (`with_route_affinity`) — not QQL syntax.
+- **Read affinity:** client transport option on all remote SDKs (Rust `with_route_affinity`, `pyqql.Client(route_affinity=…)`, `nqql` `{ routeAffinity }`, WASM `setRouteAffinity`) — not QQL syntax.
 - **Honesty:** [references/qql-gaps.md](references/qql-gaps.md) lists open vs closed capabilities.
 
 ## Layout

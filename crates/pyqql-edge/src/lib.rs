@@ -263,6 +263,12 @@ impl PyClient {
         do_explain(py, query)
     }
 
+    /// Compile a QQL query to its transport route without executing (parity
+    /// with `pyqql.Client.compile` / `nqql-edge` `Client.compile`).
+    fn compile<'py>(&self, py: Python<'py>, query: &str) -> PyResult<Bound<'py, PyAny>> {
+        compile_query(py, query)
+    }
+
     /// Flush and release edge storage. Idempotent.
     fn close(&self) -> PyResult<()> {
         if self.closed.swap(true, Ordering::AcqRel) {

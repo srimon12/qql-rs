@@ -26,6 +26,7 @@ function normalizeClientOptions(options) {
     ...options,
     apiKey: options.apiKey ?? options.api_key,
     useGrpc: options.useGrpc ?? options.use_grpc,
+    routeAffinity: options.routeAffinity ?? options.route_affinity,
     embedder: options.embedder
       ? {
           endpoint: options.embedder.endpoint,

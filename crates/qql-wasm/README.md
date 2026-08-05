@@ -78,6 +78,7 @@ client.free();
 | Method | Role |
 |--------|------|
 | `setHttpEmbedder` / `setEmbedder` | Dense embed hosts |
+| `setRouteAffinity(key)` / `routeAffinity` | Qdrant 1.19 read affinity (get/set) |
 | `execute` / `executeStmt` | REST execute → `ExecutionReport` |
 | `compile` / `explain` | Offline helpers |
 
@@ -100,7 +101,13 @@ cargo build -p qql-wasm --target wasm32-unknown-unknown --no-default-features
 - Live `Client` is REST-only (no gRPC) — so `SHOW QUOTAS` / `SET QUOTA` work
   against Qdrant ≥ 1.19 when executed; offline `compile`/`analyze` project
   them to `GET|PUT /quotas`
-- Route affinity is not exposed on the WASM client
+
+```javascript
+// Qdrant 1.19 read affinity (REST header `X-Qdrant-Route-Affinity`)
+client.setRouteAffinity("session-acme-42");
+console.log(client.routeAffinity); // "session-acme-42"
+client.setRouteAffinity(null); // clear
+```
 
 ```javascript
 // Offline plan of 1.19 surfaces

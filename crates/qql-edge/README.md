@@ -127,7 +127,8 @@ Intel Mac users should disable default features and use `http-embedding` or
 - `IMAGE` expects local filesystem paths (no remote URL fetch)
 - Query/update “batch” is fan-out, not a single native batch RPC
 - Route affinity is a remote-client transport feature (`RestQdrant` /
-  `GrpcQdrant`); it does not apply to in-process edge
+  `GrpcQdrant` and the `pyqql` / `nqql` / wasm client options); it does not
+  apply to in-process edge
 
 ### Qdrant 1.19 language surface on edge
 

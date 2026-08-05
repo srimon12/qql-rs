@@ -70,8 +70,9 @@ let ops = Box::new(
 // GrpcQdrant::with_route_affinity sends gRPC metadata x-qdrant-route-affinity
 ```
 
-Empty strings are treated as unset. Bindings (Python/Node/WASM) do not currently
-expose this setter; use the Rust client or set the header upstream.
+Empty strings are treated as unset. Host bindings expose the same option:
+`pyqql.Client(..., route_affinity=...)`, `nqql` `new Client({ routeAffinity })`,
+and the WASM `client.setRouteAffinity(key)`.
 
 ### Quotas (REST only)
 

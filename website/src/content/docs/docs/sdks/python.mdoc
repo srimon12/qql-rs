@@ -73,7 +73,7 @@ print(tokenize(query))
 
 | API | Returns | Use it when |
 |---|---|---|
-| `Client(url, api_key, use_grpc, embedder)` | client | Configure remote execution once |
+| `Client(url, api_key, use_grpc, embedder, route_affinity)` | client | Configure remote execution once |
 | `Client.execute` / `execute_async` | report dictionary | Execute source, statements, or an array; choose sync or async host flow |
 | `Client.explain` / `Client.compile` | plan or route dictionary | Inspect work before executing it |
 | `parse(source)` | `list[Stmt]` | You need to inspect or mutate a statement |
@@ -83,6 +83,24 @@ print(tokenize(query))
 | `compile_query` | route dictionary | Obtain the Qdrant method, path, and payload |
 | `inject_filter` / `execute` | host-friendly convenience result | One-shot transform or execution |
 | `HttpEmbedder` | embedder object | Supply a remote embedding model |
+
+## Pin reads with route affinity
+
+Qdrant 1.19 read affinity pins reads to a stable replica so a user or session
+sees a consistent view. `pyqql` passes the key at construction as the
+`X-Qdrant-Route-Affinity` header (REST) or gRPC metadata `x-qdrant-route-affinity`.
+Empty strings are unset.
+
+```python
+from pyqql import Client
+
+client = Client("http://localhost:6333", route_affinity="session-acme-42")
+print(client.route_affinity)  # "session-acme-42"
+
+# One-shot convenience accepts the same keyword.
+from pyqql import execute
+report = execute(query, url="http://localhost:6333", route_affinity="session-acme-42")
+```
 
 {% aside type="note" title="Remote and edge packages" %}
 Use `pyqql` for Qdrant execution. `pyqql-edge` is a separate in-process backend

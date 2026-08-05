@@ -42,7 +42,7 @@ Edge unsupported codes are stable (see `crates/qql-edge/README.md`).
 | Area | Reality | Agent rule |
 |---|---|---|
 | Edge `GROUP BY` | Rejected offline (`QQL-EDGE-UNSUPPORTED-GROUP-BY`). | Same QQL works on remote Qdrant; offline: filter + `LIMIT`. |
-| Host SDK route affinity | Only Rust `RestQdrant` / `GrpcQdrant`. | Do **not** invent `Client(route_affinity=…)` in pyqql / nqql / wasm until bindings expose it. |
+| Host SDK route affinity | Exposed: `pyqql.Client(route_affinity=…)`, `nqql` `{ routeAffinity }`, WASM `client.setRouteAffinity(…)`. | Route affinity is **N/A on edge** (single node). Do not add it to `localExecutor`/`httpExecutor`. |
 | Edge quotas | Always unsupported. | Use remote Qdrant REST for quota admin. |
 
 ---
@@ -61,7 +61,7 @@ Edge unsupported codes are stable (see `crates/qql-edge/README.md`).
 | Keyword prefix | Index `WITH (prefix = true)`; filter `field MATCH PREFIX '…'` |
 | Slice sampling | `WHERE SLICE (total, index)` |
 | Sparse IDF corpus | `PARAMS (idf = 'global' \| {corpus: {must: […]}})` — remote + edge 0.8+ |
-| Route affinity (Rust) | `RestQdrant::with_route_affinity` / `GrpcQdrant::with_route_affinity` → `X-Qdrant-Route-Affinity` |
+| Route affinity (host SDKs) | `pyqql.Client(route_affinity=…)` · `nqql` `{ routeAffinity }` · wasm `client.setRouteAffinity(key)` · Rust `RestQdrant`/`GrpcQdrant::with_route_affinity` → `X-Qdrant-Route-Affinity` |
 | Exact count | `COUNT FROM coll WITH (exact = true)` |
 | Specific payload deletion | `DELETE PAYLOAD key1, key2 FROM coll WHERE ...` |
 | Multi-collection lookup | `GROUP BY ... LOOKUP FROM coll` → `QueryRequest.lookup_from` |
@@ -84,7 +84,7 @@ Edge unsupported codes are stable (see `crates/qql-edge/README.md`).
 | Hybrid | `QUERY 'q' FROM docs USING HYBRID LIMIT 10` |
 | Cluster timeout | `PARAMS (timeout = 30)` on QUERY |
 | Replica reads | `PARAMS (consistency = majority)` |
-| Pin reads to a replica (Rust) | `RestQdrant::…with_route_affinity("session-key")` / gRPC equivalent — not QQL |
+| Pin reads to a replica | `pyqql.Client(route_affinity=…)` / `nqql` `{ routeAffinity }` / wasm `setRouteAffinity(key)` / Rust `RestQdrant::…with_route_affinity("session-key")` — not QQL |
 | Multi-tenant shard | `SHARD 'tenant'` / `stmt.shard_key` + `inject_filter(…, tenant_id, …)` |
 | Tenant-local sparse IDF | `PARAMS (idf = {corpus: {must: [{key: 'tenant_id', match: {value: 'acme'}}]}})` + `WHERE tenant_id = 'acme'` |
 | Faceted page 2 (groups) | `GROUP BY … OFFSET N` — maps to Qdrant `group_offset` |

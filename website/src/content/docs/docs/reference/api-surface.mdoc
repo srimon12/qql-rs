@@ -42,9 +42,11 @@ administration include:
 
 `SHOW QUOTAS` / `SET QUOTA` plan to REST `/quotas` only. gRPC and edge
 reject them with stable codes (`QQL-GRPC-QUOTA`, `QQL-EDGE-UNSUPPORTED-QUOTA`).
-Transport metadata such as route affinity is configured on the client (Rust:
-`RestQdrant::with_route_affinity` / `GrpcQdrant::with_route_affinity`), not as
-QQL syntax.
+Transport metadata such as route affinity is configured on the client — Rust
+`RestQdrant::with_route_affinity` / `GrpcQdrant::with_route_affinity`,
+`pyqql.Client(route_affinity=…)`, `nqql` `new Client({ routeAffinity })`, and
+WASM `client.setRouteAffinity(key)` — not as QQL syntax. Edge has no route
+affinity (single node).
 
 ## Statement ownership
 

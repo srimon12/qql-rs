@@ -211,7 +211,14 @@ async function executeStmt(stmt, options) {
 
 class Client {
   constructor(options) {
-    this._inner = new nativeBinding.Client(normalizeClientOptions(options));
+    const normalized = normalizeClientOptions(options);
+    this._inner = new nativeBinding.Client(normalized);
+    this._routeAffinity = normalized?.routeAffinity || null;
+  }
+
+  /** Qdrant 1.19+ read affinity key set at construction; `null` when unset. */
+  get routeAffinity() {
+    return this._routeAffinity;
   }
 
   async execute(query, options) {

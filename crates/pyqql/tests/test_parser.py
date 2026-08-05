@@ -1,3 +1,4 @@
+import json
 import unittest
 import pyqql
 
@@ -89,6 +90,31 @@ class TestPyQql(unittest.TestCase):
                     "model": "nomic-embed-text",
                 },
             )
+
+    def test_client_route_affinity(self):
+        """Route affinity (Qdrant 1.19) is accepted at construction and readable."""
+        client = pyqql.Client(
+            "http://localhost:6333",
+            use_grpc=False,
+            route_affinity="session-acme-42",
+        )
+        self.assertEqual(client.route_affinity, "session-acme-42")
+        res = client.explain("QUERY 'hello' FROM docs LIMIT 10")
+        self.assertTrue(res["ok"])
+
+        # Empty string is treated as unset (matches the Rust client contract).
+        unset = pyqql.Client(
+            "http://localhost:6333", use_grpc=False, route_affinity=""
+        )
+        self.assertIsNone(unset.route_affinity)
+        self.assertIsNone(pyqql.Client("http://localhost:6333").route_affinity)
+
+    def test_parse_json(self):
+        raw = pyqql.parse_json("QUERY 'hello' FROM docs LIMIT 10")
+        self.assertIsInstance(raw, str)
+        stmts = json.loads(raw)
+        self.assertEqual(len(stmts), 1)
+        self.assertEqual(stmts[0]["Query"]["collection"]["Explicit"], "docs")
 
     def test_parse_script(self):
         results = pyqql.parse(

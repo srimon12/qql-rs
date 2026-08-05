@@ -7,10 +7,9 @@ Language surface includes **Qdrant 1.19 / QQL 1.4** features expressible in QQL
 Those statements execute through the same `Client.execute` path as older syntax
 when the connected backend supports them (quotas: **REST only**).
 
-**Not exposed in pyqql yet:** client-side **route affinity**
-(`X-Qdrant-Route-Affinity`). That is Rust-only via
-`RestQdrant::with_route_affinity` / `GrpcQdrant::with_route_affinity` — do not
-invent a Python constructor flag for it.
+**Route affinity** (`X-Qdrant-Route-Affinity`) is exposed on `Client` via the
+`route_affinity` constructor keyword (readable with `client.route_affinity`).
+See §2b below.
 
 ## Install
 
@@ -56,6 +55,7 @@ Client(
     api_key=None,
     use_grpc=False,
     embedder=None,
+    route_affinity=None,
 )
 ```
 
@@ -63,6 +63,10 @@ Client(
 - `api_key`: Optional API key for authenticated Qdrant instances (sent as `api-key` header)
 - `use_grpc`: Set `True` to use gRPC transport (requires `--features grpc` build)
 - `embedder`: A `pyqql.HttpEmbedder` instance or a dict with `endpoint`, `api_key`, `model`, `dimension` keys
+- `route_affinity`: Optional Qdrant 1.19 read-affinity key, pinning reads to a
+  stable replica. Sent as `X-Qdrant-Route-Affinity` (REST) / gRPC metadata
+  `x-qdrant-route-affinity`. Empty string is treated as unset. Readable via
+  `client.route_affinity`.
 
 ```python
 # With API key
@@ -78,6 +82,10 @@ client = Client("http://localhost:6333", embedder={
     "model": "all-minilm:l6-v2",
     "dimension": 384,
 })
+
+# With read affinity (Qdrant 1.19+)
+client = Client("http://localhost:6333", route_affinity="session-acme-42")
+print(client.route_affinity)  # "session-acme-42"
 ```
 
 ---

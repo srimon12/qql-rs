@@ -80,8 +80,8 @@ const report = await client.execute([
 ```
 
 | API | Use it for |
-|---|---|
-| `new Client({ url, apiKey, useGrpc, embedder })` | Configure a reusable native client |
+|---|---|---|
+| `new Client({ url, apiKey, useGrpc, routeAffinity, embedder })` | Configure a reusable native client |
 | `Client.execute`, `executeStmt` | Source, statement, script, or array execution |
 | `Client.explain`, `explainStmt`, `compile` | Plan and route inspection |
 | `parse(source)` | Native `Stmt` handles for AST mutation |
@@ -92,6 +92,29 @@ const report = await client.execute([
 | `parseJson` | High-throughput JSON forwarding |
 | `injectFilter`, `execute` | One-shot host convenience functions |
 | `HttpEmbedder` | A reusable HTTP embedder configuration |
+
+## Pin reads with route affinity
+
+Qdrant 1.19 read affinity pins reads to a stable replica so a user or session
+sees a consistent view. `nqql` passes the key at construction as the
+`X-Qdrant-Route-Affinity` header (REST) or gRPC metadata `x-qdrant-route-affinity`.
+Empty strings are unset.
+
+```javascript
+const { Client, execute } = require("@veristamp/nqql");
+
+const client = new Client({
+  url: "http://localhost:6333",
+  routeAffinity: "session-acme-42",
+});
+console.log(client.routeAffinity); // "session-acme-42"
+
+// One-shot convenience accepts the same option.
+const report = await execute(query, {
+  url: "http://localhost:6333",
+  routeAffinity: "session-acme-42",
+});
+```
 
 {% aside type="note" title="Transport and package variants" %}
 Use `useGrpc: true` only when the installed package exposes gRPC support. The

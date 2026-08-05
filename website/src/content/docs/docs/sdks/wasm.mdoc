@@ -180,6 +180,22 @@ Before executing, the client fetches the collection topology to resolve `USING`
 vector roles, then embeds text through the configured embedder. Execution is
 REST-only — there is no gRPC or edge backend in WASM.
 
+## Pin reads with route affinity
+
+Qdrant 1.19 supports read affinity: pin reads to a stable replica so a user or
+session sees a consistent view. The WASM client applies the
+`X-Qdrant-Route-Affinity` header on every request. Pass `null` or `""` to clear.
+
+```javascript
+import { Client } from "qql-wasm";
+
+const client = new Client("http://localhost:6333", null);
+client.setRouteAffinity("session-acme-42");
+console.log(client.routeAffinity); // "session-acme-42"
+
+client.setRouteAffinity(null); // clear
+```
+
 ## Provide text embeddings from the host
 
 Use an OpenAI-compatible HTTP endpoint or supply a JavaScript callback. The
@@ -238,6 +254,7 @@ releases it automatically.
 | `Client.compile`, `Client.explain` | route, plan text | Inspect work before sending traffic |
 | `setEmbedder`, `setHttpEmbedder`, `hasEmbedder` | configured client | Resolve text input from JavaScript or HTTP |
 | `Client.setRemoteEmbedder` | configured client | Alias for `setHttpEmbedder` |
+| `setRouteAffinity`, `routeAffinity` | configured client, key | Pin reads via `X-Qdrant-Route-Affinity` (Qdrant 1.19+) |
 | `free()` / `[Symbol.dispose]` | released WASM allocation | Dispose `Client` and `Stmt` handles |
 
 {% aside type="caution" title="Browser capability boundary" %}

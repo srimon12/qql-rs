@@ -23,7 +23,7 @@
 | `WHERE SLICE (total, index)` | Deterministic id-space slice (`total ≥ 1`, `index < total`) |
 | `PARAMS (idf = …)` | Sparse IDF corpus: `'global'` or `{corpus: {…filter…}}` |
 | `datatype = 'turbo4'` | Dense TurboQuant 4-bit storage |
-| Route affinity | **Client API only** (`RestQdrant` / `GrpcQdrant::with_route_affinity`) — not QQL grammar |
+| Route affinity | **Client API only** (`RestQdrant` / `GrpcQdrant::with_route_affinity`, `pyqql.Client(route_affinity=…)`, `nqql` `{ routeAffinity }`, WASM `setRouteAffinity`) — not QQL grammar |
 
 See [syntax.md](syntax.md) and [filters.md](filters.md) for examples.
 

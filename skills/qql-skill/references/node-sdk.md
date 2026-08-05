@@ -7,10 +7,9 @@ Language surface includes **Qdrant 1.19 / QQL 1.4** features expressible in QQL
 Pass those strings to `client.execute` when the backend supports them (quotas:
 **REST only**).
 
-**Not exposed in nqql yet:** client-side **route affinity**
-(`X-Qdrant-Route-Affinity`). Use Rust `RestQdrant` / `GrpcQdrant`
-`.with_route_affinity(…)` if you need sticky replica reads — do not invent a
-Node `Client` option for it.
+**Route affinity** (`X-Qdrant-Route-Affinity`) is exposed on `Client` via the
+`routeAffinity` constructor option (readable with `client.routeAffinity`). See
+§1 below.
 
 ## Install
 
@@ -46,6 +45,13 @@ const client = new Client({
         dimension: 384,
     },
 });
+
+// With Qdrant 1.19 read affinity (sticky replica reads)
+const client = new Client({
+    url: "http://localhost:6333",
+    routeAffinity: "session-acme-42",
+});
+console.log(client.routeAffinity); // "session-acme-42"
 ```
 
 ---

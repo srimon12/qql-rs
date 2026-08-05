@@ -54,7 +54,7 @@ console.log(version, isValid("SHOW COLLECTIONS"), compileQuery("SHOW COLLECTIONS
 
 | Export | Role |
 |--------|------|
-| `Client({ url, apiKey?, useGrpc?, embedder? })` | Live execute |
+| `Client({ url, apiKey?, useGrpc?, routeAffinity?, embedder? })` | Live execute |
 | `HttpEmbedder({ endpoint, model, dimension, apiKey?, multi*?, image*?, rerank*? })` | Embeddings (dense, multi/ColBERT, image/CLIP, rerank) |
 | `parse` / `parseJson` / `isValid` / `tokenize` | Frontend |
 | `injectFilter` / `stmt.injectFilter` | Isolation |
@@ -93,8 +93,22 @@ await client.execute(
 );
 ```
 
-`SET QUOTA` fully replaces the cluster config. Route affinity is a Rust client
-API only (`RestQdrant` / `GrpcQdrant::with_route_affinity`) — not on `Client`.
+`SET QUOTA` fully replaces the cluster config.
+
+### Route affinity (Qdrant 1.19+)
+
+Pin reads to a stable replica with `routeAffinity` at construction — sent as
+the `X-Qdrant-Route-Affinity` header (REST) / `x-qdrant-route-affinity` metadata
+(gRPC). Empty string is treated as unset. Readable via `client.routeAffinity`.
+
+```javascript
+const client = new Client({
+  url: "http://localhost:6333",
+  routeAffinity: "session-acme-42",
+});
+console.log(client.routeAffinity); // "session-acme-42"
+// One-shot convenience: execute(qql, { url, routeAffinity })
+```
 
 ## Execution report
 

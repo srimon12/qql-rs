@@ -114,8 +114,9 @@ has been removed; `try_route` returns `Err` — never panics — for those cases
 Pin subsequent **reads** to a stable replica via the transport header
 `X-Qdrant-Route-Affinity` (HTTP) / `x-qdrant-route-affinity` (gRPC metadata).
 This is **not** QQL syntax, not a plan body field, and not expressible via
-OpenAPI/proto schemas — only Rust `RestQdrant` / `GrpcQdrant` builders expose it
-today. Host SDKs (pyqql / nqql / qql-wasm) do **not** wire this yet.
+OpenAPI/proto schemas. Host SDKs expose the same option: `pyqql.Client(
+route_affinity=…)`, `nqql` `new Client({ routeAffinity })`, and WASM
+`client.setRouteAffinity(key)`. Edge (single node) has no affinity.
 
 ```rust
 use qql::executor::{Executor, OnError};

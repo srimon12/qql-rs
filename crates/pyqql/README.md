@@ -48,9 +48,9 @@ client.execute(stmt)
 
 | Export | Role |
 |--------|------|
-| `Client(url, api_key=None, use_grpc=False, embedder=None)` | Execute against Qdrant |
+| `Client(url, api_key=None, use_grpc=False, embedder=None, route_affinity=None)` | Execute against Qdrant |
 | `HttpEmbedder(endpoint, model, dimension, api_key="")` | OpenAI-compatible embeddings |
-| `parse` / `is_valid` / `tokenize` | Frontend |
+| `parse` / `parse_json` / `is_valid` / `tokenize` | Frontend |
 | `inject_filter(query\|Stmt, field, op, value)` | Host isolation (AST) |
 | `Stmt.shard_key` | Same field as QQL `SHARD '…'` (get/set; no `inject_shard_key`) |
 | `compile_query` / `explain` | Offline plan / REST projection |
@@ -92,9 +92,20 @@ client.execute(
 )
 ```
 
-`SET QUOTA` is a **full replace** of the cluster config. Route affinity
-(`X-Qdrant-Route-Affinity`) is a Rust client setter only — not exposed on
-`pyqql.Client`.
+`SET QUOTA` is a **full replace** of the cluster config.
+
+### Route affinity (Qdrant 1.19+)
+
+Pin reads to a stable replica with `route_affinity` at construction — sent as
+the `X-Qdrant-Route-Affinity` header (REST) / `x-qdrant-route-affinity` metadata
+(gRPC). Empty string is treated as unset. Readable via `client.route_affinity`.
+
+```python
+client = pyqql.Client("http://localhost:6333", route_affinity="session-acme-42")
+print(client.route_affinity)  # "session-acme-42"
+# One-shot convenience:
+pyqql.execute("SHOW COLLECTIONS", url="http://localhost:6333", route_affinity="session-acme-42")
+```
 
 ## Execution report
 

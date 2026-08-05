@@ -82,7 +82,9 @@ let client = RestQdrant::new("http://localhost:6333", None)
 
 Pass a stable session or user identifier so Qdrant can hash affinity
 consistently. Empty strings are treated as unset. The same helper exists on
-`GrpcQdrant`.
+`GrpcQdrant`, and the Python (`pyqql.Client(route_affinity=…)`), Node
+(`new Client({ routeAffinity })`), and WASM (`client.setRouteAffinity(key)`)
+clients expose the equivalent option.
 
 ## Core API
 

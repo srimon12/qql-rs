@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Keyword index `prefix = true` and dense `datatype = 'turbo4'` (TurboQuant 4-bit)
 - **Typed placement / datatype enums** — `MemoryPlacement` and `VectorDatatype` in `qql-core` (parse once, serialize as OpenAPI lowercase strings).
 - **Read affinity transport support** — `RestQdrant::with_route_affinity` / `GrpcQdrant::with_route_affinity` send `X-Qdrant-Route-Affinity` (HTTP header / gRPC metadata). This is transport metadata, not a request-body field, so it is not expressible via openapi/proto schemas.
+- **Route affinity on host SDKs** — `pyqql.Client(route_affinity=…)` (readable via `client.route_affinity`), `nqql` `new Client({ routeAffinity })` (readable via `client.routeAffinity`), and the WASM `client.setRouteAffinity(key)` / `client.routeAffinity` getter. Applies `X-Qdrant-Route-Affinity` on REST and `x-qdrant-route-affinity` metadata on gRPC; edge remains single-node (no affinity). Includes `pyqql.parse_json` for parity with `nqql.parseJson` / `pyqql-edge.parse_json`.
 - **qdrant-edge 0.8.0** — retrieve API, optional `score_threshold`, IDF on search params, fail-loud quotas.
 
 ### 🔄 Changed

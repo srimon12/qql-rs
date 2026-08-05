@@ -53,8 +53,11 @@ Notes:
   offline with `QQL-EDGE-UNSUPPORTED-TIMEOUT` and `QQL-EDGE-UNSUPPORTED-CONSISTENCY`.
 - **Quotas** are cluster REST only (`GET|PUT /quotas`). gRPC fails with
   `QQL-GRPC-QUOTA`; edge fails with `QQL-EDGE-UNSUPPORTED-QUOTA`.
-- **Route affinity** is transport metadata on `RestQdrant` /
-  `GrpcQdrant` (`with_route_affinity`), not a QQL statement or request body.
+- **Route affinity** is transport metadata configured on the client — Rust
+  `RestQdrant` / `GrpcQdrant` (`with_route_affinity`), `pyqql.Client(
+  route_affinity=…)`, `nqql` `new Client({ routeAffinity })`, or WASM
+  `client.setRouteAffinity(key)` — not a QQL statement or request body. Edge is
+  single-node so it has no route affinity.
 - **Memory placement on edge** may not honor every `memory` /
   `payload_memory` value on the underlying engine; prefer remote Qdrant when
   placement must match cluster semantics.
