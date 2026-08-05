@@ -51,6 +51,10 @@ async function run() {
   if (process.env.QDRANT_URL) {
     const client = new Client(process.env.QDRANT_URL, null);
     client.setHttpEmbedder('http://localhost:11434/v1/embeddings', 'all-minilm:l6-v2', 384, null);
+    // Qdrant 1.19 read affinity: pins reads to a stable replica via the
+    // X-Qdrant-Route-Affinity header. null/"" clears it.
+    client.setRouteAffinity('session-bob');
+    console.log('routeAffinity:', client.routeAffinity);
     try {
       console.log(await client.executeStmt(secured));
     } catch (e) {

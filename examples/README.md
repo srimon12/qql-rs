@@ -38,9 +38,11 @@ SHOW QUOTAS;
 SET QUOTA (enabled = true, max_resident_memory_percent = 80) WAIT true;
 ```
 
-Route affinity (`X-Qdrant-Route-Affinity`) is a **Rust client** option
-(`RestQdrant` / `GrpcQdrant::with_route_affinity`), not QQL syntax — see the
-Rust SDK docs.
+Route affinity (`X-Qdrant-Route-Affinity`) is a **client transport** option on
+every remote SDK — `pyqql.Client(route_affinity=…)`, `nqql`
+`new Client({ routeAffinity })`, WASM `client.setRouteAffinity(key)`, and Rust
+`RestQdrant` / `GrpcQdrant::with_route_affinity` — not QQL syntax. The `--live`
+examples below construct their client with it.
 
 ## Catalog
 
@@ -142,7 +144,7 @@ QQL_BIN=./target/release/qql python examples/edge-demo/main.py
 QQL_BIN=./target/release/qql python examples/edge-demo/main.py --dry-run
 ```
 
-## QQL 1.2 features covered
+## QQL 1.4 / Qdrant 1.19 features covered
 
 Examples across this folder exercise:
 
@@ -150,12 +152,17 @@ Examples across this folder exercise:
 - `inject_filter` + `SHARD` / `stmt.shard_key` (fail-closed on DDL)
 - `CREATE SHARD KEY` / custom `sharding_method`
 - `GEO_RADIUS` / `GEO_BBOX` / `GEO_POLYGON` + formula `GEO_DISTANCE`
-- `PARAMS (acorn, max_selectivity, timeout, consistency, hnsw_ef)`
+- `PARAMS (acorn, max_selectivity, timeout, consistency, hnsw_ef, idf)`
+- `WHERE title MATCH PREFIX '…'` + keyword index `prefix = true` (Qdrant 1.19+)
+- `WHERE SLICE (total, index)` deterministic sampling (Qdrant 1.19+)
+- Memory placement (`memory` / `payload_memory`) + dense `datatype = 'turbo4'`
+- `SHOW QUOTAS` / `SET QUOTA (…)` (REST only)
 - `COUNT … WITH (exact = true)`
 - `SCROLL … WITH VECTOR false`
 - `DELETE PAYLOAD key FROM …`
 - `CTE` `PREFETCH` + `FORMULA` + `MMR` + `GROUP BY` + `ORDER BY`
 - Recommend / Context / Discover (medical showcase)
+- Route affinity (`pyqql` / `nqql` / wasm / Rust client options) in the `--live` paths
 
 ## Version note
 
