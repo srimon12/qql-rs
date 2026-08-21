@@ -51,8 +51,12 @@ Notes:
   materialized vectors; offline, use `TEXT` or `VECTOR` inputs instead.
 - **Timeouts and consistency** are request-level REST/gRPC fields and are rejected
   offline with `QQL-EDGE-UNSUPPORTED-TIMEOUT` and `QQL-EDGE-UNSUPPORTED-CONSISTENCY`.
-- **Quotas** are cluster REST only (`GET|PUT /quotas`). gRPC fails with
-  `QQL-GRPC-QUOTA`; edge fails with `QQL-EDGE-UNSUPPORTED-QUOTA`.
+- **Quotas** are cluster REST only (`GET|PUT /quotas`). Upstream Qdrant exposes
+  no public gRPC quota service: the only quota RPC (`GetQuotaUsage`) lives in
+  the internal cluster service on the peer-to-peer port and reports
+  *utilization*, not the configured limits, and there is no RPC to set limits.
+  gRPC therefore fails with `QQL-GRPC-QUOTA`; edge fails with
+  `QQL-EDGE-UNSUPPORTED-QUOTA`.
 - **Route affinity** is transport metadata configured on the client — Rust
   `RestQdrant` / `GrpcQdrant` (`with_route_affinity`), `pyqql.Client(
   route_affinity=…)`, `nqql` `new Client({ routeAffinity })`, or WASM

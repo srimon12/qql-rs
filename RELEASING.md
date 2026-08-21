@@ -146,7 +146,17 @@ server-side branch rules are therefore mandatory.
    formatting reject syntax that the grammar, snippets, and completions
    advertise. Verify the exports (e.g. `formatQuery`) exist in
    `editors/vscode/wasm/qql_wasm.d.ts` before continuing.
-5. If the extension changed, bump `editors/vscode/package.json`
+5. If the Qdrant protocol pin moves, re-sync the vendored API surfaces:
+
+   ```bash
+   python3 scripts/sync_qdrant_api.py --update --ref v1.19.0
+   ```
+
+   This refreshes `crates/qql-runtime/openapi.json` and the vendored protos
+   from upstream Qdrant at an immutable commit, records the pin in
+   `scripts/qdrant-api-manifest.json`, and is enforced by the CI
+   `Qdrant API sync` job (`--check`).
+6. If the extension changed, bump `editors/vscode/package.json`
    (its version is independent of the workspace version), run
    `npm run check` and `npm test` inside `editors/vscode/`, and publish with
    `npx vsce publish` — VSIX binaries are never committed.

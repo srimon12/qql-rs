@@ -344,6 +344,19 @@ jobs:
           assert.equal(compiled.stmt_type, 'count');
           NODE
 
+  # ── Upstream Qdrant API sync ─────────────────────────────────
+  # The vendored openapi.json and protos under crates/qql-runtime must stay
+  # byte-identical to the pinned upstream Qdrant commit (the umbrella
+  # qdrant.proto is checked as its derived, internal-import-free variant).
+
+  upstream-sync:
+    name: Qdrant API sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check vendored OpenAPI + protos against pinned upstream
+        run: python3 scripts/sync_qdrant_api.py --check
+
   # ── VS Code extension ────────────────────────────────────────
   # The extension ships a committed qql-wasm bundle under editors/vscode/wasm/.
   # A stale bundle silently rejects syntax that the grammar, snippets, and
@@ -496,6 +509,7 @@ jobs:
         pyqql-check,
         nqql-check,
         wasm-check,
+        upstream-sync,
         editor-check,
         docs-validation,
       ]

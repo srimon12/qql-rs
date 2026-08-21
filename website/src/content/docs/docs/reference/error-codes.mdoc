@@ -150,7 +150,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PLAN-RRF-WEIGHTS` | `rrf_weights` length must equal the prefetch count |
 | `QQL-PLAN-UNSUPPORTED-PREFETCH` | `POINTS` / `CROSS RERANK` are not supported inside `PREFETCH` |
 | `QQL-REST-CLIENT-SIDE` | The operation is executed client-side and has no single Qdrant REST route |
-| `QQL-GRPC-QUOTA` | Quotas have no public gRPC service; use REST (`SHOW QUOTAS` / `SET QUOTA`) |
+| `QQL-GRPC-QUOTA` | Quotas have no public gRPC service (upstream serves quota usage on the internal cluster port only, with no setter RPC); use REST (`SHOW QUOTAS` / `SET QUOTA`) |
 | `QQL-BACKEND` | Generic backend or transport failure |
 
 ## Value conversion
