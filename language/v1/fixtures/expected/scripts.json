@@ -173,6 +173,7 @@
             "inline_storage": null,
             "m": 16,
             "max_indexing_threads": null,
+            "memory": null,
             "on_disk": null,
             "payload_m": null
           },

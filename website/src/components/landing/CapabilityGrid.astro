@@ -1,0 +1,32 @@
+---
+interface Props {
+  label: string;
+  heading: string;
+  sub: string;
+  capabilities: readonly { eyebrow: string; title: string; body: string }[];
+}
+
+const { label, heading, sub, capabilities } = Astro.props;
+---
+
+<section class="landing-section landing-section--muted" aria-labelledby="caps-heading">
+  <div class="landing-shell landing-fade-up">
+    <header class="landing-section__head">
+      <span class="landing-label">{label}</span>
+      <h2 id="caps-heading">{heading}</h2>
+      <p class="landing-section__sub">{sub}</p>
+    </header>
+
+    <div class="landing-caps">
+      {
+        capabilities.map((cap) => (
+          <article class="landing-cap">
+            <span class="landing-cap__eyebrow">{cap.eyebrow}</span>
+            <h3 class="landing-cap__title">{cap.title}</h3>
+            <p class="landing-cap__body">{cap.body}</p>
+          </article>
+        ))
+      }
+    </div>
+  </div>
+</section>

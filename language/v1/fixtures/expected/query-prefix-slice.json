@@ -1,0 +1,266 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": "e5",
+                "text": "search"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "MatchPrefix": {
+            "field": "title",
+            "prefix": "Comp"
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": "e5",
+                "text": "search"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "Slice": {
+            "index": 1,
+            "total": 4
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": "e5",
+                "text": "search"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "And": {
+            "operands": [
+              {
+                "Slice": {
+                  "index": 1,
+                  "total": 4
+                }
+              },
+              {
+                "Compare": {
+                  "field": "status",
+                  "op": "Eq",
+                  "value": {
+                    "Str": "active"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": "e5",
+                "text": "search"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": {
+          "acorn": null,
+          "consistency": null,
+          "exact": null,
+          "hnsw_ef": null,
+          "idf": {
+            "corpus": null
+          },
+          "indexed_only": null,
+          "max_selectivity": null,
+          "quantization": null,
+          "rrf_k": null,
+          "rrf_weights": null,
+          "timeout": null
+        },
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": "e5",
+                "text": "search"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": {
+          "acorn": null,
+          "consistency": null,
+          "exact": null,
+          "hnsw_ef": null,
+          "idf": {
+            "corpus": {
+              "Dict": [
+                [
+                  "must",
+                  {
+                    "List": [
+                      {
+                        "Dict": [
+                          [
+                            "key",
+                            {
+                              "Str": "status"
+                            }
+                          ],
+                          [
+                            "match",
+                            {
+                              "Dict": [
+                                [
+                                  "value",
+                                  {
+                                    "Str": "active"
+                                  }
+                                ]
+                              ]
+                            }
+                          ]
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              ]
+            }
+          },
+          "indexed_only": null,
+          "max_selectivity": null,
+          "quantization": null,
+          "rrf_k": null,
+          "rrf_weights": null,
+          "timeout": null
+        },
+        "score_threshold": null,
+        "shard_key": null
+      }
+    }
+  ]
+}

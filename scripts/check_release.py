@@ -139,6 +139,32 @@ def validate_node(expected: str) -> None:
             fail(f"{package}/LICENSE must match the root LICENSE")
 
 
+def validate_editor() -> None:
+    """The VS Code extension version is intentionally independent from the
+    workspace version (packaging slot), but it must exist and its bundled WASM
+    copy must declare the same version."""
+    ext = json.loads((ROOT / "editors" / "vscode" / "package.json").read_text())
+    if not isinstance(ext.get("version"), str) or not ext["version"]:
+        fail("editors/vscode/package.json is missing a version")
+    bundled = ROOT / "editors" / "vscode" / "wasm" / "package.json"
+    if not bundled.is_file():
+        fail("editors/vscode/wasm/package.json is missing (bundled editor WASM)")
+    wasm_pkg = json.loads(bundled.read_text())
+    if wasm_pkg.get("name") != "qql-wasm":
+        fail("editors/vscode/wasm/package.json must be the qql-wasm bundle")
+    if not wasm_pkg.get("version"):
+        fail("editors/vscode/wasm/package.json is missing a version")
+    for export in ("formatQuery",):
+        d_ts = ROOT / "editors" / "vscode" / "wasm" / "qql_wasm.d.ts"
+        if not d_ts.is_file():
+            fail("editors/vscode/wasm/qql_wasm.d.ts is missing (stale bundle?)")
+        if export not in d_ts.read_text():
+            fail(
+                f"bundled editor WASM does not export {export}; "
+                "rebuild with wasm-pack from crates/qql-wasm"
+            )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -173,6 +199,7 @@ def main() -> None:
     validate_cargo(expected)
     validate_python(expected)
     validate_node(expected)
+    validate_editor()
     print(f"release metadata is consistent for {expected}")
 
 

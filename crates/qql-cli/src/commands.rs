@@ -657,6 +657,48 @@ pub fn handle_convert(path: Option<&str>) -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 
+/// Format QQL source into canonical form.
+///
+/// Reads from `path` (or stdin when `None`). In `check` mode the formatted
+/// output is compared against the input and a non-zero exit indicates the
+/// source is not formatted. With `write` the formatted output is written back
+/// to the file; otherwise it is printed to stdout.
+pub fn handle_fmt(
+    path: Option<&str>,
+    check: bool,
+    write: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let input = if let Some(p) = path {
+        std::fs::read_to_string(p).map_err(|e| format!("cannot read file '{}': {}", p, e))?
+    } else {
+        let mut buf = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)
+            .map_err(|e| format!("cannot read stdin: {}", e))?;
+        buf
+    };
+
+    let formatted = qql_core::fmt::format(&input)?;
+
+    if check {
+        if input.trim_end() != formatted {
+            let target = path.unwrap_or("<stdin>");
+            return Err(format!("{} is not formatted (run `qql fmt` to fix)", target).into());
+        }
+        return Ok(());
+    }
+
+    if write {
+        if let Some(p) = path {
+            std::fs::write(p, format!("{}\n", formatted))
+                .map_err(|e| format!("cannot write '{}': {}", p, e))?;
+            return Ok(());
+        }
+    }
+
+    println!("{}", formatted);
+    Ok(())
+}
+
 pub async fn handle_dump(
     url: &str,
     use_edge: bool,

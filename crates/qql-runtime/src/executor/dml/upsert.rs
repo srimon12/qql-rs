@@ -155,6 +155,7 @@ impl Executor {
             shard_number: None,
             sharding_method: None,
             shard_keys: None,
+            payload: None,
         };
         if requested_dense {
             let dense_size = self.resolve_dense_vector_size(model).await?;

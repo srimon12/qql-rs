@@ -235,6 +235,9 @@ pub fn generate_create_statement(collection: &str, info: &CollectionInfo) -> Str
     if let Some(b) = p.on_disk_payload {
         with_parts.push(format!("on_disk_payload = {}", b));
     }
+    if let Some(ref mem) = p.payload_memory {
+        with_parts.push(format!("payload_memory = '{}'", escape_string(mem)));
+    }
     if let Some(r) = p.replication_factor {
         with_parts.push(format!("replication_factor = {}", r));
     }
@@ -271,6 +274,7 @@ const HNSW_KEYS: &[&str] = &[
     "on_disk",
     "payload_m",
     "inline_storage",
+    "memory",
 ];
 
 const OPTIMIZER_KEYS: &[&str] = &[
@@ -305,7 +309,7 @@ fn format_config_block(
     }
 }
 
-const SPARSE_INDEX_KEYS: &[&str] = &["full_scan_threshold", "on_disk", "datatype"];
+const SPARSE_INDEX_KEYS: &[&str] = &["full_scan_threshold", "on_disk", "datatype", "memory"];
 
 fn format_sparse_vector_part(sv: &qql::backend::SparseVectorSpec) -> String {
     let mut part = format!("{} SPARSE", format_ident(&sv.name));
@@ -381,8 +385,18 @@ fn format_vector_part(v: &VectorSpec) -> String {
         part.push_str(&format!(" WITH MULTIVECTOR (comparator = '{}')", comp));
     }
 
+    let mut vector_opts = Vec::new();
     if let Some(on_disk) = v.on_disk {
-        part.push_str(&format!(" WITH VECTOR (on_disk = {})", on_disk));
+        vector_opts.push(format!("on_disk = {}", on_disk));
+    }
+    if let Some(ref mem) = v.memory {
+        vector_opts.push(format!("memory = '{}'", escape_string(mem)));
+    }
+    if let Some(ref dt) = v.datatype {
+        vector_opts.push(format!("datatype = '{}'", escape_string(dt)));
+    }
+    if !vector_opts.is_empty() {
+        part.push_str(&format!(" WITH VECTOR ({})", vector_opts.join(", ")));
     }
 
     part
@@ -832,6 +846,8 @@ mod tests {
                 quantization: None,
                 multivector: None,
                 on_disk: None,
+                datatype: None,
+                memory: None,
             }],
             vec![],
         );
@@ -853,6 +869,8 @@ mod tests {
                     quantization: None,
                     multivector: None,
                     on_disk: None,
+                    datatype: None,
+                    memory: None,
                 },
                 VectorSpec {
                     name: Some("image".into()),
@@ -862,6 +880,8 @@ mod tests {
                     quantization: None,
                     multivector: None,
                     on_disk: None,
+                    datatype: None,
+                    memory: None,
                 },
             ],
             vec!["sparse".into()],
@@ -870,6 +890,7 @@ mod tests {
             shard_number: Some(2),
             sharding_method: None,
             on_disk_payload: Some(true),
+            payload_memory: None,
             replication_factor: None,
         };
         let stmt = generate_create_statement("hybrid_docs", &info);
@@ -1099,6 +1120,8 @@ mod tests {
                 })),
                 multivector: None,
                 on_disk: Some(true),
+                datatype: None,
+                memory: None,
             }],
             vec![],
         );
@@ -1165,6 +1188,8 @@ mod tests {
                 })),
                 multivector: None,
                 on_disk: None,
+                datatype: None,
+                memory: None,
             }],
             vec![],
         );
@@ -1272,6 +1297,8 @@ mod tests {
                 })),
                 multivector: Some(multivector),
                 on_disk: Some(true),
+                datatype: None,
+                memory: None,
             }],
             vec![],
         );
@@ -1321,7 +1348,7 @@ mod tests {
         let idx = c.sparse_vectors[0].index.as_ref().unwrap();
         assert_eq!(idx.full_scan_threshold, Some(10000));
         assert_eq!(idx.on_disk, Some(true));
-        assert_eq!(idx.datatype.as_deref(), Some("float32"));
+        assert_eq!(idx.datatype, Some(qql_core::ast::VectorDatatype::Float32));
     }
 
     #[test]

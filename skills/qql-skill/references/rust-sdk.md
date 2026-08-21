@@ -109,6 +109,53 @@ has been removed; `try_route` returns `Err` — never panics — for those cases
 
 ---
 
+## 2b. Read route affinity (Qdrant 1.19+, client-side only)
+
+Pin subsequent **reads** to a stable replica via the transport header
+`X-Qdrant-Route-Affinity` (HTTP) / `x-qdrant-route-affinity` (gRPC metadata).
+This is **not** QQL syntax, not a plan body field, and not expressible via
+OpenAPI/proto schemas. Host SDKs expose the same option: `pyqql.Client(
+route_affinity=…)`, `nqql` `new Client({ routeAffinity })`, and WASM
+`client.setRouteAffinity(key)`. Edge (single node) has no affinity.
+
+```rust
+use qql::executor::{Executor, OnError};
+use qql::rest::RestQdrant;
+// use qql::grpc::GrpcQdrant; // with `grpc` feature
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // REST: sticky affinity key (e.g. session / tenant / request correlation id)
+    let rest = RestQdrant::new("http://localhost:6333".into(), None)
+        .with_route_affinity("session-acme-42");
+    let exec = Executor::new(Box::new(rest), None);
+
+    exec.execute(
+        "QUERY TEXT 'supply chain' FROM sec10k USING dense LIMIT 10",
+        OnError::Stop,
+    )
+    .await?;
+
+    // gRPC equivalent (feature = "grpc"):
+    // let grpc = GrpcQdrant::from_url("http://localhost:6334", None)?
+    //     .with_route_affinity("session-acme-42");
+    // let exec = Executor::new(Box::new(grpc), None);
+
+    // Empty string unsets affinity:
+    // let rest = rest.with_route_affinity("");
+    // assert!(rest.route_affinity().is_none());
+
+    Ok(())
+}
+```
+
+**Key decisions:**
+- Affinity is a **client transport** concern (same idea as API keys) — keep it out of QQL strings and `inject_filter`.
+- Combine freely with `PARAMS (consistency = …)` when you need both sticky routing and replica agreement semantics.
+- Edge has no replicas → affinity is N/A offline.
+
+---
+
 ## 3. Batch Execution
 
 `execute_batch` and `execute_batch_nodes` execute multiple queries. Same-collection QUERY and mutation statements are automatically grouped into a single network call.

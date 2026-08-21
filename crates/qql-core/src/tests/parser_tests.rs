@@ -332,6 +332,38 @@ fn params_timeout_and_consistency() {
 }
 
 #[test]
+fn params_idf_global_and_corpus() {
+    let s = Parser::parse("QUERY 'x' FROM docs PARAMS (idf = 'global') LIMIT 5;").unwrap();
+    let Stmt::Query(q) = s else { panic!() };
+    let idf = q.params.as_ref().unwrap().idf.as_ref().unwrap();
+    assert!(idf.corpus.is_none(), "global scope must carry no corpus");
+
+    let s = Parser::parse(
+        "QUERY 'x' FROM docs PARAMS (idf = {corpus: {key: 'status', match: {value: 'active'}}}) LIMIT 5;",
+    )
+    .unwrap();
+    let Stmt::Query(q) = s else { panic!() };
+    let idf = q.params.as_ref().unwrap().idf.as_ref().unwrap();
+    let corpus = idf.corpus.as_ref().expect("corpus filter");
+    match corpus {
+        crate::ast::Value::Dict(entries) => {
+            assert!(entries.iter().any(|(k, _)| k.eq_ignore_ascii_case("key")));
+        }
+        other => panic!("expected dict corpus, got {other:?}"),
+    }
+
+    // Round-trip through the formatter.
+    let formatted = crate::fmt::format_stmt(
+        &Parser::parse("QUERY 'x' FROM docs PARAMS (idf = 'global') LIMIT 5;").unwrap(),
+    );
+    assert!(formatted.contains("idf = 'global'"), "{formatted}");
+
+    // Invalid forms are rejected.
+    assert!(Parser::parse("QUERY 'x' FROM docs PARAMS (idf = 5) LIMIT 5;").is_err());
+    assert!(Parser::parse("QUERY 'x' FROM docs PARAMS (idf = {foo: 1}) LIMIT 5;").is_err());
+}
+
+#[test]
 fn shard_clause_parses_on_query_and_ctes_via_set_shard_key() {
     // Preferred path: SHARD in QQL
     let with_clause = Parser::parse(

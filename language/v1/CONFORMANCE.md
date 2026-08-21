@@ -10,7 +10,7 @@ fixture passes unchanged.
 | Syntax | Parse all valid fixtures and reject all invalid fixtures |
 | Semantic | Syntax plus language/planner validation and exact invalid-case codes |
 | Canonical AST | Semantic plus structural equality with all `qql.ast/v1` snapshots |
-| Execution | Optional backend-specific profile; outside base QQL 1.0 conformance |
+| Execution | Optional backend-specific profile; outside base QQL 1.x conformance |
 
 The qql-rs runner checks Syntax, Semantic, and Canonical AST:
 

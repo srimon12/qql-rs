@@ -52,11 +52,6 @@ export interface AnalysisResult {
     error: AnalysisError | null;
 }
 
-/** Compile a QQL statement to a compiled route as a byte buffer. */
-export function compileBytes(query: string): Uint8Array;
-/** Explain a QQL statement as a byte buffer. */
-export function explainBytes(query: string): Uint8Array;
-
 
 
 export class Client {
@@ -109,6 +104,15 @@ export class Client {
      * Alias for [`set_http_embedder`] — same OpenAI-compatible protocol.
      */
     setRemoteEmbedder(endpoint: string, model: string, dimension: number, api_key?: string | null): void;
+    /**
+     * Set Qdrant 1.19 read affinity. Pins reads to a stable replica via the
+     * `X-Qdrant-Route-Affinity` header. Pass `null`/`""` to clear.
+     */
+    setRouteAffinity(affinity?: string | null): void;
+    /**
+     * Current read-affinity key, or `null` when unset.
+     */
+    readonly routeAffinity: string | undefined;
 }
 
 export class Stmt {
@@ -160,6 +164,11 @@ export function compileBytes(query: string): Uint8Array;
 export function explain(query: string): string;
 
 export function explainBytes(query: string): Uint8Array;
+
+/**
+ * Format a QQL string into canonical form.
+ */
+export function formatQuery(input: string): string;
 
 export function inject_filter(query: string, field: string, op: string, value: any): any;
 

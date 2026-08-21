@@ -1,0 +1,43 @@
+---
+interface Props {
+  label: string;
+  heading: string;
+  sub: string;
+  installs: readonly { name: string; cmd: string; href: string }[];
+  primaryCta: { label: string; href: string };
+  secondaryCta: { label: string; href: string };
+}
+
+const { label, heading, sub, installs, primaryCta, secondaryCta } = Astro.props;
+---
+
+<section class="landing-section" aria-labelledby="install-heading">
+  <div class="landing-shell landing-fade-up">
+    <header class="landing-section__head">
+      <span class="landing-label">{label}</span>
+      <h2 id="install-heading">{heading}</h2>
+      <p class="landing-section__sub">{sub}</p>
+    </header>
+
+    <div class="landing-installs">
+      {
+        installs.map((item) => (
+          <a class="landing-install" href={item.href}>
+            <span class="landing-install__name">{item.name}</span>
+            <code class="landing-install__cmd">{item.cmd}</code>
+            <span class="landing-install__arrow" aria-hidden="true">→</span>
+          </a>
+        ))
+      }
+    </div>
+
+    <div class="landing-install-cta">
+      <a class="landing-btn landing-btn--primary" href={primaryCta.href}>
+        {primaryCta.label}
+      </a>
+      <a class="landing-btn landing-btn--ghost" href={secondaryCta.href}>
+        {secondaryCta.label}
+      </a>
+    </div>
+  </div>
+</section>

@@ -63,6 +63,17 @@ enum Command {
         /// Path to JSON file (or stdin if omitted)
         file: Option<String>,
     },
+    /// Format QQL source into canonical form
+    Fmt {
+        /// Path to .qql file (or stdin if omitted)
+        file: Option<String>,
+        /// Check formatting without writing; exit non-zero if changes are needed
+        #[arg(long)]
+        check: bool,
+        /// Write the formatted output back to the file
+        #[arg(long)]
+        write: bool,
+    },
     /// Dump collection to .qql file
     Dump {
         collection: String,
@@ -187,6 +198,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::Explain { query, json, quiet } => commands::handle_explain(&query, json, quiet),
         Command::Connect => commands::handle_connect(&url, use_edge).await,
         Command::Convert { file } => commands::handle_convert(file.as_deref()),
+        Command::Fmt { file, check, write } => commands::handle_fmt(file.as_deref(), check, write),
         Command::Dump {
             collection,
             output,

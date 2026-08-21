@@ -1,9 +1,9 @@
 use alloc::boxed::Box;
 
 use crate::ast::{
-    CollectionConfig, CollectionParamsConfig, HnswRuntimeConfig, MultivectorComparator,
-    MultivectorConfig, OptimizersRuntimeConfig, QuantizationConfig, QuantizationType,
-    QuantizationUpdate, SparseIndexConfig, Value, VectorsConfig,
+    CollectionConfig, CollectionParamsConfig, HnswRuntimeConfig, MemoryPlacement,
+    MultivectorComparator, MultivectorConfig, OptimizersRuntimeConfig, QuantizationConfig,
+    QuantizationType, QuantizationUpdate, SparseIndexConfig, Value, VectorDatatype, VectorsConfig,
 };
 use crate::error::{QqlError, Span};
 use crate::token::TokenKind;
@@ -24,6 +24,58 @@ fn validation_err(
         message,
         Some(Span::point(position)),
     )
+}
+
+/// Parse a `memory = 'cold' | 'cached' | 'pinned'` placement value.
+///
+/// Returns `Ok(None)` when the key is absent. Any non-string or unknown value
+/// is a validation error (the enum is closed; a typo must not silently hit the
+/// backend default). When `allow_pinned` is false (payload storage), `pinned`
+/// is rejected here so callers cannot bypass the closed set.
+fn config_memory(
+    config: &[(alloc::string::String, Value)],
+    key: &str,
+    pos: usize,
+    allow_pinned: bool,
+) -> Result<Option<MemoryPlacement>, QqlError> {
+    match config_value(config, key) {
+        None => Ok(None),
+        Some(Value::Str(s)) => match MemoryPlacement::parse(s) {
+            Some(MemoryPlacement::Pinned) if !allow_pinned => Err(validation_err(
+                alloc::format!("{key} does not support 'pinned'"),
+                pos,
+            )),
+            Some(m) => Ok(Some(m)),
+            None => Err(validation_err(
+                alloc::format!("{key} must be 'cold', 'cached', or 'pinned', got '{s}'"),
+                pos,
+            )),
+        },
+        Some(_) => Err(validation_err(
+            alloc::format!("{key} must be a string ('cold', 'cached', or 'pinned')"),
+            pos,
+        )),
+    }
+}
+
+fn config_dense_datatype(
+    config: &[(alloc::string::String, Value)],
+    pos: usize,
+) -> Result<Option<VectorDatatype>, QqlError> {
+    match config_value(config, "datatype") {
+        None => Ok(None),
+        Some(Value::Str(s)) => match VectorDatatype::parse(s) {
+            Some(dt) => Ok(Some(dt)),
+            None => Err(QqlError::syntax(
+                "datatype must be float32, float16, uint8, or turbo4 for VECTOR",
+                pos,
+            )),
+        },
+        Some(_) => Err(QqlError::syntax(
+            "datatype must be a string for VECTOR",
+            pos,
+        )),
+    }
 }
 
 impl<'a> AstLowerer<'a> {
@@ -96,11 +148,12 @@ impl<'a> AstLowerer<'a> {
                 | "max_indexing_threads"
                 | "on_disk"
                 | "payload_m"
-                | "inline_storage" => {}
+                | "inline_storage"
+                | "memory" => {}
                 _ => {
                     return Err(validation_err(
                         alloc::format!(
-                            "unknown HNSW parameter '{}'. Expected: m, ef_construct, full_scan_threshold, max_indexing_threads, on_disk, payload_m, inline_storage",
+                            "unknown HNSW parameter '{}'. Expected: m, ef_construct, full_scan_threshold, max_indexing_threads, on_disk, payload_m, inline_storage, memory",
                             key
                         ),
                         self.peek()?.pos,
@@ -134,6 +187,7 @@ impl<'a> AstLowerer<'a> {
                 on_disk: config_bool(&config, "on_disk"),
                 payload_m,
                 inline_storage: config_bool(&config, "inline_storage"),
+                memory: config_memory(&config, "memory", self.peek()?.pos, true)?,
             })),
             optimizers: None,
             params: None,
@@ -145,9 +199,15 @@ impl<'a> AstLowerer<'a> {
     pub fn parse_vectors_config_block(&mut self) -> Result<CollectionConfig, QqlError> {
         let config = self.parse_config_block()?;
         for (key, value) in &config {
-            if !ascii_equal_lower(key, "on_disk") {
+            if !matches!(
+                key.to_ascii_lowercase().as_str(),
+                "on_disk" | "memory" | "datatype"
+            ) {
                 return Err(QqlError::syntax(
-                    alloc::format!("unknown VECTOR parameter '{}'. Expected: on_disk", key),
+                    alloc::format!(
+                        "unknown VECTOR parameter '{}'. Expected: on_disk, memory, datatype",
+                        key
+                    ),
                     self.peek()?.pos,
                 ));
             }
@@ -156,6 +216,8 @@ impl<'a> AstLowerer<'a> {
         Ok(CollectionConfig {
             vectors: Some(Box::new(VectorsConfig {
                 on_disk: config_bool(&config, "on_disk"),
+                memory: config_memory(&config, "memory", self.peek()?.pos, true)?,
+                datatype: config_dense_datatype(&config, self.peek()?.pos)?,
             })),
             hnsw: None,
             optimizers: None,
@@ -273,13 +335,14 @@ impl<'a> AstLowerer<'a> {
                 | "read_fan_out_factor"
                 | "read_fan_out_delay_ms"
                 | "on_disk_payload"
+                | "payload_memory"
                 | "shard_number"
                 | "sharding_method"
                 | "shard_keys" => {}
                 _ => {
                     return Err(validation_err(
                         alloc::format!(
-                            "unknown PARAMS parameter '{}'. Expected: replication_factor, write_consistency_factor, read_fan_out_factor, read_fan_out_delay_ms, on_disk_payload, shard_number, sharding_method, shard_keys",
+                            "unknown PARAMS parameter '{}'. Expected: replication_factor, write_consistency_factor, read_fan_out_factor, read_fan_out_delay_ms, on_disk_payload, payload_memory, shard_number, sharding_method, shard_keys",
                             key
                         ),
                         self.peek()?.pos,
@@ -325,6 +388,7 @@ impl<'a> AstLowerer<'a> {
                     self.peek()?.pos,
                 )?,
                 on_disk_payload: config_bool(&config, "on_disk_payload"),
+                payload_memory: config_memory(&config, "payload_memory", self.peek()?.pos, false)?,
                 shard_number: config_positive_u64(&config, "shard_number", self.peek()?.pos)?,
                 sharding_method: match config_value(&config, "sharding_method") {
                     Some(Value::Str(s)) => Some(s.clone()),
@@ -534,6 +598,7 @@ impl<'a> AstLowerer<'a> {
             compression,
             encoding,
             query_encoding,
+            memory: config_memory(&config, "memory", self.peek()?.pos, true)?,
         };
 
         Ok(CollectionConfig {
@@ -585,11 +650,11 @@ impl<'a> AstLowerer<'a> {
             let lower = key.to_ascii_lowercase();
             if !matches!(
                 lower.as_str(),
-                "modifier" | "full_scan_threshold" | "on_disk" | "datatype"
+                "modifier" | "full_scan_threshold" | "on_disk" | "datatype" | "memory"
             ) {
                 return Err(QqlError::syntax(
                     alloc::format!(
-                        "unknown SPARSE/INDEX parameter '{}'. Expected: modifier, full_scan_threshold, on_disk, datatype",
+                        "unknown SPARSE/INDEX parameter '{}'. Expected: modifier, full_scan_threshold, on_disk, datatype, memory",
                         key
                     ),
                     self.peek()?.pos,
@@ -612,22 +677,18 @@ impl<'a> AstLowerer<'a> {
         let full_scan_threshold =
             config_non_negative_u64(&config, "full_scan_threshold", self.peek()?.pos)?;
         let on_disk = config_bool(&config, "on_disk");
+        // `default` (and omitting the key) both mean "backend default" → None.
         let datatype = match config_value(&config, "datatype") {
-            Some(Value::Str(s)) => {
-                let s_lower = s.to_ascii_lowercase();
-                match s_lower.as_str() {
-                    "float32" | "f32" => Some("float32".into()),
-                    "uint8" | "u8" => Some("uint8".into()),
-                    "float16" | "f16" => Some("float16".into()),
-                    "default" => Some("default".into()),
-                    _ => {
-                        return Err(QqlError::syntax(
-                            "datatype must be float32, uint8, float16, or default for SPARSE index",
-                            self.peek()?.pos,
-                        ));
-                    }
+            Some(Value::Str(s)) if s.eq_ignore_ascii_case("default") => None,
+            Some(Value::Str(s)) => match VectorDatatype::parse_sparse(s) {
+                Some(dt) => Some(dt),
+                None => {
+                    return Err(QqlError::syntax(
+                        "datatype must be float32, uint8, float16, or default for SPARSE index",
+                        self.peek()?.pos,
+                    ));
                 }
-            }
+            },
             Some(_) => {
                 return Err(QqlError::syntax(
                     "datatype must be a string for SPARSE index",
@@ -637,11 +698,16 @@ impl<'a> AstLowerer<'a> {
             None => None,
         };
 
-        let index = if full_scan_threshold.is_some() || on_disk.is_some() || datatype.is_some() {
+        let index = if full_scan_threshold.is_some()
+            || on_disk.is_some()
+            || datatype.is_some()
+            || config_has_key(&config, "memory")
+        {
             Some(Box::new(SparseIndexConfig {
                 full_scan_threshold,
                 on_disk,
                 datatype,
+                memory: config_memory(&config, "memory", self.peek()?.pos, true)?,
             }))
         } else {
             None

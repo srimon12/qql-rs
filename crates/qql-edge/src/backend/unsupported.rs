@@ -31,6 +31,8 @@ pub enum EdgeUnsupported {
     Timeout,
     /// `PARAMS (consistency = …)`.
     Consistency,
+    /// `SHOW QUOTAS` / `SET QUOTA`.
+    Quota,
     /// `RECOMMEND … STRATEGY average_vector`.
     RecommendAverageVector,
     /// Nearest/recommend inputs that are only point IDs (need materialised vectors offline).
@@ -50,6 +52,7 @@ impl EdgeUnsupported {
             Self::Acorn => "QQL-EDGE-UNSUPPORTED-ACORN",
             Self::Timeout => "QQL-EDGE-UNSUPPORTED-TIMEOUT",
             Self::Consistency => "QQL-EDGE-UNSUPPORTED-CONSISTENCY",
+            Self::Quota => "QQL-EDGE-UNSUPPORTED-QUOTA",
             Self::RecommendAverageVector => "QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY",
             Self::PointReferenceQuery => "QQL-EDGE-UNSUPPORTED-POINT-REF",
             Self::Route { .. } => "QQL-EDGE-UNSUPPORTED-ROUTE",
@@ -69,6 +72,7 @@ impl EdgeUnsupported {
             Self::Acorn => "PARAMS (acorn = …)",
             Self::Timeout => "PARAMS (timeout = …)",
             Self::Consistency => "PARAMS (consistency = …)",
+            Self::Quota => "SHOW QUOTAS / SET QUOTA",
             Self::RecommendAverageVector => "RECOMMEND STRATEGY average_vector",
             Self::PointReferenceQuery => "point-id query inputs without embedded vectors",
             Self::Route { path_hint } => path_hint,
@@ -89,6 +93,9 @@ impl EdgeUnsupported {
             Self::Timeout => "qql-edge runs in-process without network RPC timeouts",
             Self::Consistency => {
                 "qql-edge is a single-node in-process engine without replica consistency levels"
+            }
+            Self::Quota => {
+                "global resource quotas are cluster-wide and require Qdrant's REST /quotas API"
             }
             Self::RecommendAverageVector => {
                 "qdrant-edge recommend supports best_score and sum_scores only"
@@ -166,6 +173,7 @@ mod tests {
             EdgeUnsupported::CollectionParams,
             EdgeUnsupported::Acorn,
             EdgeUnsupported::RecommendAverageVector,
+            EdgeUnsupported::Quota,
             EdgeUnsupported::PointReferenceQuery,
         ];
         let mut codes = std::collections::BTreeSet::new();

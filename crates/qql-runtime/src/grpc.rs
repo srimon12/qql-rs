@@ -1,3 +1,7 @@
+// Dual-read of Qdrant 1.19-deprecated on-disk / always-ram fields while
+// schema extraction also reports the new `memory` placement. See grpc_route.
+#![allow(deprecated)]
+
 use async_trait::async_trait;
 use tonic::transport::Channel;
 
@@ -20,18 +24,24 @@ fn grpc_error(operation: &str, status: tonic::Status) -> QqlError {
         .with_field("operation", operation.to_string())
 }
 
+/// gRPC metadata key for Qdrant 1.19 read affinity (same string as the HTTP header).
+pub const ROUTE_AFFINITY_METADATA: &str = "x-qdrant-route-affinity";
+
 pub struct GrpcQdrant {
     channel: Channel,
     api_key: Option<String>,
+    /// Stable value hashed by Qdrant to pin reads to one replica.
+    route_affinity: Option<String>,
 }
 
-/// Interceptor that attaches the Qdrant API key metadata header (RUN-009).
+/// Interceptor that attaches API-key and optional route-affinity metadata.
 #[derive(Clone)]
-struct ApiKeyInterceptor {
+struct MetadataInterceptor {
     api_key: Option<String>,
+    route_affinity: Option<String>,
 }
 
-impl tonic::service::Interceptor for ApiKeyInterceptor {
+impl tonic::service::Interceptor for MetadataInterceptor {
     fn call(
         &mut self,
         mut request: tonic::Request<()>,
@@ -40,6 +50,15 @@ impl tonic::service::Interceptor for ApiKeyInterceptor {
             let value = tonic::metadata::MetadataValue::try_from(key.as_str())
                 .map_err(|e| tonic::Status::invalid_argument(format!("invalid api key: {e}")))?;
             request.metadata_mut().insert("api-key", value);
+        }
+        if let Some(ref affinity) = self.route_affinity {
+            let value =
+                tonic::metadata::MetadataValue::try_from(affinity.as_str()).map_err(|e| {
+                    tonic::Status::invalid_argument(format!("invalid route affinity: {e}"))
+                })?;
+            request
+                .metadata_mut()
+                .insert(ROUTE_AFFINITY_METADATA, value);
         }
         Ok(request)
     }
@@ -50,6 +69,7 @@ impl GrpcQdrant {
         Self {
             channel,
             api_key: None,
+            route_affinity: None,
         }
     }
 
@@ -81,36 +101,55 @@ impl GrpcQdrant {
         }
         let channel = ep.connect_lazy();
 
-        Ok(Self { channel, api_key })
+        Ok(Self {
+            channel,
+            api_key,
+            route_affinity: None,
+        })
+    }
+
+    /// Pin subsequent reads to a stable replica via gRPC metadata
+    /// `x-qdrant-route-affinity` (Qdrant 1.19+). Empty → unset.
+    pub fn with_route_affinity(mut self, affinity: impl Into<String>) -> Self {
+        let value = affinity.into();
+        self.route_affinity = if value.is_empty() { None } else { Some(value) };
+        self
+    }
+
+    pub fn route_affinity(&self) -> Option<&str> {
+        self.route_affinity.as_deref()
     }
 
     pub fn channel(&self) -> Channel {
         self.channel.clone()
     }
 
+    fn interceptor(&self) -> MetadataInterceptor {
+        MetadataInterceptor {
+            api_key: self.api_key.clone(),
+            route_affinity: self.route_affinity.clone(),
+        }
+    }
+
     fn points_client(
         &self,
     ) -> qdrant::points_client::PointsClient<
-        tonic::service::interceptor::InterceptedService<Channel, ApiKeyInterceptor>,
+        tonic::service::interceptor::InterceptedService<Channel, MetadataInterceptor>,
     > {
         qdrant::points_client::PointsClient::with_interceptor(
             self.channel.clone(),
-            ApiKeyInterceptor {
-                api_key: self.api_key.clone(),
-            },
+            self.interceptor(),
         )
     }
 
     fn collections_client(
         &self,
     ) -> qdrant::collections_client::CollectionsClient<
-        tonic::service::interceptor::InterceptedService<Channel, ApiKeyInterceptor>,
+        tonic::service::interceptor::InterceptedService<Channel, MetadataInterceptor>,
     > {
         qdrant::collections_client::CollectionsClient::with_interceptor(
             self.channel.clone(),
-            ApiKeyInterceptor {
-                api_key: self.api_key.clone(),
-            },
+            self.interceptor(),
         )
     }
 
@@ -548,6 +587,7 @@ fn schema_from_grpc_collection(info: &qdrant::CollectionInfo) -> CollectionSchem
                                     qdrant::Datatype::Float32 => "float32",
                                     qdrant::Datatype::Uint8 => "uint8",
                                     qdrant::Datatype::Float16 => "float16",
+                                    qdrant::Datatype::Turbo4 => "turbo4",
                                     qdrant::Datatype::Default => "default",
                                 };
                                 map.insert(
@@ -555,6 +595,9 @@ fn schema_from_grpc_collection(info: &qdrant::CollectionInfo) -> CollectionSchem
                                     serde_json::Value::String(name.into()),
                                 );
                             }
+                        }
+                        if let Some(name) = i.memory.and_then(memory_to_str) {
+                            map.insert("memory".into(), serde_json::Value::String(name.into()));
                         }
                         map
                     });
@@ -577,6 +620,12 @@ fn schema_from_grpc_collection(info: &qdrant::CollectionInfo) -> CollectionSchem
                 shard_number: Some(params.shard_number as u64),
                 sharding_method,
                 on_disk_payload: Some(params.on_disk_payload),
+                payload_memory: params
+                    .payload
+                    .as_ref()
+                    .and_then(|p| p.memory)
+                    .and_then(memory_to_str)
+                    .map(str::to_string),
                 replication_factor: params.replication_factor.map(|n| n as u64),
             };
         }
@@ -634,6 +683,20 @@ fn vector_params_to_spec(name: Option<String>, p: &qdrant::VectorParams) -> Vect
         }
         map
     });
+    let datatype = p
+        .datatype
+        .and_then(|v| qdrant::Datatype::try_from(v).ok())
+        .map(|dt| {
+            match dt {
+                qdrant::Datatype::Float32 => "float32",
+                qdrant::Datatype::Uint8 => "uint8",
+                qdrant::Datatype::Float16 => "float16",
+                qdrant::Datatype::Turbo4 => "turbo4",
+                qdrant::Datatype::Default => "default",
+            }
+            .to_string()
+        });
+    let memory = p.memory.and_then(memory_to_str).map(str::to_string);
     VectorSpec {
         name,
         size: p.size,
@@ -642,6 +705,8 @@ fn vector_params_to_spec(name: Option<String>, p: &qdrant::VectorParams) -> Vect
         quantization,
         multivector,
         on_disk: p.on_disk,
+        datatype,
+        memory,
     }
 }
 
@@ -664,6 +729,9 @@ fn hnsw_diff_to_map(diff: &qdrant::HnswConfigDiff) -> serde_json::Map<String, se
     }
     if let Some(v) = diff.payload_m {
         map.insert("payload_m".into(), serde_json::Value::from(v));
+    }
+    if let Some(name) = diff.memory.and_then(memory_to_str) {
+        map.insert("memory".into(), serde_json::Value::String(name.into()));
     }
     map
 }
@@ -804,6 +872,17 @@ fn quantization_config_to_json(q: &qdrant::QuantizationConfig) -> Option<serde_j
     }
 }
 
+/// Convert a proto `Memory` enum value to its QQL/OpenAPI lowercase form.
+/// `Unknown` is omitted rather than inventing a placement.
+fn memory_to_str(value: i32) -> Option<&'static str> {
+    match qdrant::Memory::try_from(value).ok()? {
+        qdrant::Memory::Cold => Some("cold"),
+        qdrant::Memory::Cached => Some("cached"),
+        qdrant::Memory::Pinned => Some("pinned"),
+        qdrant::Memory::Unknown => None,
+    }
+}
+
 /// Extract dump-relevant index options from protobuf params (best-effort).
 fn payload_index_params_from_proto(
     params: Option<&qdrant::PayloadIndexParams>,
@@ -819,6 +898,12 @@ fn payload_index_params_from_proto(
             is_tenant = p.is_tenant;
             if let Some(v) = p.on_disk {
                 map.insert("on_disk".into(), serde_json::Value::Bool(v));
+            }
+            if p.prefix.is_some() {
+                map.insert("prefix".into(), serde_json::Value::Bool(true));
+            }
+            if let Some(v) = p.memory.and_then(memory_to_str) {
+                map.insert("memory".into(), serde_json::Value::String(v.into()));
             }
         }
         Some(IndexParams::UuidIndexParams(p)) => {
@@ -854,25 +939,40 @@ fn payload_index_params_from_proto(
             if let Some(v) = p.is_principal {
                 map.insert("is_principal".into(), serde_json::Value::Bool(v));
             }
+            if let Some(v) = p.memory.and_then(memory_to_str) {
+                map.insert("memory".into(), serde_json::Value::String(v.into()));
+            }
         }
         Some(IndexParams::FloatIndexParams(p)) => {
             if let Some(v) = p.on_disk {
                 map.insert("on_disk".into(), serde_json::Value::Bool(v));
+            }
+            if let Some(v) = p.memory.and_then(memory_to_str) {
+                map.insert("memory".into(), serde_json::Value::String(v.into()));
             }
         }
         Some(IndexParams::DatetimeIndexParams(p)) => {
             if let Some(v) = p.on_disk {
                 map.insert("on_disk".into(), serde_json::Value::Bool(v));
             }
+            if let Some(v) = p.memory.and_then(memory_to_str) {
+                map.insert("memory".into(), serde_json::Value::String(v.into()));
+            }
         }
         Some(IndexParams::GeoIndexParams(p)) => {
             if let Some(v) = p.on_disk {
                 map.insert("on_disk".into(), serde_json::Value::Bool(v));
             }
+            if let Some(v) = p.memory.and_then(memory_to_str) {
+                map.insert("memory".into(), serde_json::Value::String(v.into()));
+            }
         }
         Some(IndexParams::BoolIndexParams(p)) => {
             if let Some(v) = p.on_disk {
                 map.insert("on_disk".into(), serde_json::Value::Bool(v));
+            }
+            if let Some(v) = p.memory.and_then(memory_to_str) {
+                map.insert("memory".into(), serde_json::Value::String(v.into()));
             }
         }
         None => {}

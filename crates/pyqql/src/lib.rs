@@ -63,6 +63,14 @@ fn parse(input: &str) -> PyResult<Vec<PyStmt>> {
     Ok(stmts.into_iter().map(|s| PyStmt { inner: s }).collect())
 }
 
+/// Parse a QQL source and return the canonical AST as a JSON string without
+/// creating Python objects for every node (parity with `nqql.parseJson`).
+#[pyfunction]
+fn parse_json(input: &str) -> PyResult<String> {
+    let statements = Parser::parse_all(input).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+    serde_json::to_string(&statements).map_err(|e| PySyntaxError::new_err(e.to_string()))
+}
+
 #[pyfunction]
 fn is_valid(input: &str) -> bool {
     Parser::parse_all(input).is_ok()
@@ -258,11 +266,13 @@ fn extract_embedder_config(
     Ok((ep, ep_key, model, dim))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn create_executor(
     url: &str,
     api_key: Option<String>,
     use_grpc: bool,
     embedder: Option<&Bound<'_, PyAny>>,
+    route_affinity: Option<String>,
 ) -> PyResult<(qql::executor::Executor, tokio::runtime::Runtime)> {
     let rt = tokio::runtime::Runtime::new()
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
@@ -323,10 +333,12 @@ fn create_executor(
     let client: Box<dyn qql::client::QdrantOps> = if use_grpc {
         #[cfg(feature = "grpc")]
         {
-            Box::new(
-                qql::grpc::GrpcQdrant::from_url(url, api_key)
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?,
-            )
+            let mut grpc = qql::grpc::GrpcQdrant::from_url(url, api_key)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            if let Some(affinity) = route_affinity.as_deref() {
+                grpc = grpc.with_route_affinity(affinity);
+            }
+            Box::new(grpc)
         }
         #[cfg(not(feature = "grpc"))]
         {
@@ -335,7 +347,11 @@ fn create_executor(
             ));
         }
     } else {
-        Box::new(qql::rest::RestQdrant::new(url.to_string(), api_key))
+        let mut rest = qql::rest::RestQdrant::new(url.to_string(), api_key);
+        if let Some(affinity) = route_affinity.as_deref() {
+            rest = rest.with_route_affinity(affinity);
+        }
+        Box::new(rest)
     };
 
     let embedder_impl = if let Some(endpoint) = &config.embedding_endpoint {
@@ -375,23 +391,36 @@ fn create_executor(
 struct PyClient {
     inner: std::sync::Arc<qql::executor::Executor>,
     runtime: tokio::runtime::Runtime,
+    /// Normalized `X-Qdrant-Route-Affinity` / gRPC metadata value; `None` = unset.
+    route_affinity: Option<String>,
 }
 
 #[pymethods]
 impl PyClient {
     #[new]
-    #[pyo3(signature = (url="http://localhost:6333", api_key=None, use_grpc=false, embedder=None))]
+    #[pyo3(signature = (url="http://localhost:6333", api_key=None, use_grpc=false, embedder=None, route_affinity=None))]
     fn new(
         url: &str,
         api_key: Option<String>,
         use_grpc: bool,
         embedder: Option<&Bound<'_, PyAny>>,
+        route_affinity: Option<String>,
     ) -> PyResult<Self> {
-        let (exec, rt) = create_executor(url, api_key, use_grpc, embedder)?;
+        let route_affinity = route_affinity.filter(|s| !s.is_empty());
+        let (exec, rt) = create_executor(url, api_key, use_grpc, embedder, route_affinity.clone())?;
         Ok(PyClient {
             inner: std::sync::Arc::new(exec),
             runtime: rt,
+            route_affinity,
         })
+    }
+
+    /// Read affinity key pinning reads to a stable replica
+    /// (`X-Qdrant-Route-Affinity` header / gRPC metadata, Qdrant 1.19+).
+    /// Set at construction via `Client(..., route_affinity=...)`.
+    #[getter]
+    fn route_affinity(&self) -> Option<String> {
+        self.route_affinity.clone()
     }
 
     /// Execute a QQL query string, a pre-parsed Stmt, or a list of either.
@@ -562,7 +591,8 @@ impl PyClient {
 // ── free functions ────────────────────────────────────────────────
 
 #[pyfunction]
-#[pyo3(signature = (query, *, url="http://localhost:6333", api_key=None, use_grpc=false, embedder=None, on_error="stop"))]
+#[pyo3(signature = (query, *, url="http://localhost:6333", api_key=None, use_grpc=false, embedder=None, on_error="stop", route_affinity=None))]
+#[allow(clippy::too_many_arguments)]
 fn execute<'py>(
     py: Python<'py>,
     query: &Bound<'_, PyAny>,
@@ -571,13 +601,15 @@ fn execute<'py>(
     use_grpc: bool,
     embedder: Option<&Bound<'_, PyAny>>,
     on_error: &str,
+    route_affinity: Option<String>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let client = PyClient::new(url, api_key, use_grpc, embedder)?;
+    let client = PyClient::new(url, api_key, use_grpc, embedder, route_affinity)?;
     client.execute(py, query, on_error)
 }
 
 #[pyfunction]
-#[pyo3(signature = (query, *, url="http://localhost:6333", api_key=None, use_grpc=false, embedder=None, on_error="stop"))]
+#[pyo3(signature = (query, *, url="http://localhost:6333", api_key=None, use_grpc=false, embedder=None, on_error="stop", route_affinity=None))]
+#[allow(clippy::too_many_arguments)]
 fn execute_async<'py>(
     py: Python<'py>,
     query: Bound<'py, PyAny>,
@@ -586,8 +618,9 @@ fn execute_async<'py>(
     use_grpc: bool,
     embedder: Option<&Bound<'_, PyAny>>,
     on_error: &str,
+    route_affinity: Option<String>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let client = PyClient::new(url, api_key, use_grpc, embedder)?;
+    let client = PyClient::new(url, api_key, use_grpc, embedder, route_affinity)?;
     client.execute_async(py, query, on_error)
 }
 
@@ -646,6 +679,7 @@ fn pyqql(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(execute_async, m)?)?;
     m.add_function(wrap_pyfunction!(explain, m)?)?;
     m.add_function(wrap_pyfunction!(parse, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_json, m)?)?;
     m.add_function(wrap_pyfunction!(is_valid, m)?)?;
     m.add_function(wrap_pyfunction!(inject_filter, m)?)?;
     m.add_function(wrap_pyfunction!(tokenize, m)?)?;

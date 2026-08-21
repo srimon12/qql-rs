@@ -166,6 +166,8 @@ fn stmt_kind(statement: &Stmt) -> &'static str {
         Stmt::ShowCollections => "SHOW COLLECTIONS",
         Stmt::ShowCollection(_) => "SHOW COLLECTION",
         Stmt::ShowShardKeys(_) => "SHOW SHARD KEYS",
+        Stmt::ShowQuotas => "SHOW QUOTAS",
+        Stmt::SetQuota(_) => "SET QUOTA",
     }
 }
 

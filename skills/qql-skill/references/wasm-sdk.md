@@ -2,6 +2,14 @@
 
 WASM bindings for browser and edge (Cloudflare Workers, Vercel Edge, Deno, Bun).
 
+Language surface includes **Qdrant 1.19 / QQL 1.4** features expressible in QQL
+(`SHOW QUOTAS`, memory/`turbo4`, `MATCH PREFIX`, `SLICE`, `PARAMS (idf = …)`).
+Parse/compile/execute those strings against a backend that supports them
+(quotas: **REST only**).
+
+**Route affinity** (`X-Qdrant-Route-Affinity`) is exposed on the WASM `Client`
+via `setRouteAffinity(key)` / the `routeAffinity` getter. See §2b below.
+
 ## Install
 
 ```bash
@@ -35,6 +43,18 @@ const client = new Client("http://localhost:6333");
 
 // With URL and API key
 const client = new Client("https://qdrant.example.com:6333", "sk-...");
+```
+
+### 1b. Route affinity (Qdrant 1.19+)
+
+Set after construction; applies the `X-Qdrant-Route-Affinity` header to every
+REST request. Pass `null`/`""` to clear.
+
+```js
+client.setRouteAffinity("session-acme-42");
+console.log(client.routeAffinity); // "session-acme-42"
+client.setRouteAffinity(null);
+console.log(client.routeAffinity); // null
 ```
 
 ---

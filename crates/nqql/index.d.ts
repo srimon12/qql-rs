@@ -40,6 +40,11 @@ export interface ClientOptions {
   api_key?: string;
   useGrpc?: boolean;
   use_grpc?: boolean;
+  /** Qdrant 1.19+ read affinity: pins reads to a stable replica via
+   * `X-Qdrant-Route-Affinity` (REST header) / `x-qdrant-route-affinity`
+   * (gRPC metadata). Empty string is treated as unset. */
+  routeAffinity?: string;
+  route_affinity?: string;
   embedder?: HttpEmbedder | HttpEmbedderOptions;
 }
 
@@ -90,6 +95,8 @@ export class Client {
   explain(query: string): string;
   explainStmt(stmt: Stmt): string;
   compile(query: string): CompiledRoute;
+  /** Qdrant 1.19+ read affinity key set at construction; `null` when unset. */
+  readonly routeAffinity: string | null;
 }
 
 /** Parse one statement or a semicolon-delimited script into a stable list. */

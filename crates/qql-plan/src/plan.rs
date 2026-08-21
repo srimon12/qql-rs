@@ -116,6 +116,12 @@ pub enum PlannedOperation {
         /// Candidate ANN stages already planned as normal queries.
         candidates: Vec<(String, QueryRequest)>,
     },
+    /// Show the cluster-wide resource quota config and current utilization.
+    GetQuotas,
+    /// Replace the cluster-wide resource quota configuration.
+    SetQuotas {
+        request: SetQuotaRequest,
+    },
 }
 
 impl PlannedOperation {
@@ -145,6 +151,8 @@ impl PlannedOperation {
             PlannedOperation::ListCollections => "SHOW_COLLECTIONS",
             PlannedOperation::GetCollection { .. } => "SHOW_COLLECTION",
             PlannedOperation::CrossRerank { .. } => "CROSS_RERANK",
+            PlannedOperation::GetQuotas => "SHOW_QUOTAS",
+            PlannedOperation::SetQuotas { .. } => "SET_QUOTA",
         }
     }
 
@@ -177,6 +185,8 @@ impl PlannedOperation {
             PlannedOperation::ListCollections => "show_collections",
             PlannedOperation::GetCollection { .. } => "show_collection",
             PlannedOperation::CrossRerank { .. } => "cross_rerank",
+            PlannedOperation::GetQuotas => "show_quotas",
+            PlannedOperation::SetQuotas { .. } => "set_quota",
         }
     }
 
@@ -205,7 +215,9 @@ impl PlannedOperation {
             | PlannedOperation::ListShardKeys { collection }
             | PlannedOperation::GetCollection { collection }
             | PlannedOperation::CrossRerank { collection, .. } => Some(collection.as_str()),
-            PlannedOperation::ListCollections => None,
+            PlannedOperation::ListCollections
+            | PlannedOperation::GetQuotas
+            | PlannedOperation::SetQuotas { .. } => None,
         }
     }
 
@@ -486,7 +498,90 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
         Stmt::ShowShardKeys(collection) => Ok(PlannedOperation::ListShardKeys {
             collection: collection.clone(),
         }),
+        Stmt::ShowQuotas => Ok(PlannedOperation::GetQuotas),
+        Stmt::SetQuota(stmt) => Ok(PlannedOperation::SetQuotas {
+            request: lower_set_quota(stmt)?,
+        }),
     }
+}
+
+/// Lower a `SET QUOTA (…)` statement to a typed quota request.
+///
+/// `PUT /quotas` **replaces** the entire cluster-wide config. Omitted keys
+/// (including `key = null`) are not set on the replacement body, so they
+/// become "uncapped / default" in the new config — not a patch of the old
+/// one. Callers that want to keep existing limits must restate them.
+fn lower_set_quota(stmt: &qql_core::ast::SetQuotaStmt) -> Result<SetQuotaRequest, QqlError> {
+    use qql_core::ast::Value;
+
+    let mut request = SetQuotaRequest {
+        enabled: None,
+        max_resident_memory_percent: None,
+        max_disk_usage_percent: None,
+        release_margin_percent: None,
+        wait: stmt.wait,
+    };
+    for (key, value) in &stmt.config {
+        let lower = key.to_ascii_lowercase();
+        match lower.as_str() {
+            "enabled" => match value {
+                Value::Bool(b) => request.enabled = Some(*b),
+                _ => {
+                    return Err(QqlError::validation(
+                        "QQL-PLAN-QUOTA",
+                        "enabled must be true or false",
+                        None,
+                    ));
+                }
+            },
+            "max_resident_memory_percent" | "max_disk_usage_percent" => {
+                request = apply_quota_percent(request, &lower, value, 1, 100)?;
+            }
+            "release_margin_percent" => {
+                request = apply_quota_percent(request, &lower, value, 0, 100)?;
+            }
+            _ => {
+                return Err(QqlError::validation(
+                    "QQL-PLAN-QUOTA",
+                    format!(
+                        "unknown quota parameter '{key}'. Expected: enabled, max_resident_memory_percent, max_disk_usage_percent, release_margin_percent"
+                    ),
+                    None,
+                ));
+            }
+        }
+    }
+    Ok(request)
+}
+
+fn apply_quota_percent(
+    mut request: SetQuotaRequest,
+    key: &str,
+    value: &qql_core::ast::Value,
+    min: u64,
+    max: u64,
+) -> Result<SetQuotaRequest, QqlError> {
+    match value {
+        // Explicit null → leave field unset so the replacement config has no
+        // cap for this resource (full PUT replace semantics).
+        qql_core::ast::Value::Null => {}
+        qql_core::ast::Value::Int(n) if *n >= min as i64 && (*n as u64) <= max => {
+            let n = *n as u64;
+            match key {
+                "max_resident_memory_percent" => request.max_resident_memory_percent = Some(n),
+                "max_disk_usage_percent" => request.max_disk_usage_percent = Some(n),
+                _ => request.release_margin_percent = Some(n),
+            }
+        }
+        _ => {
+            return Err(QqlError::validation(
+                "QQL-PLAN-QUOTA",
+                format!("{key} must be an integer in [{min}, {max}] or null"),
+                None,
+            ));
+        }
+    }
+    Ok(request)
 }
 
 fn validate_query_stmt(query: &qql_core::ast::QueryStmt) -> Result<(), QqlError> {
@@ -1041,6 +1136,24 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             query: Vec::new(),
             body: None,
         },
+        PlannedOperation::GetQuotas => Route {
+            method: Method::Get,
+            path: "/quotas".into(),
+            query: Vec::new(),
+            body: None,
+        },
+        PlannedOperation::SetQuotas { request } => {
+            let mut query = Vec::new();
+            if let Some(wait) = request.wait {
+                query.push(("wait".into(), wait.to_string()));
+            }
+            Route {
+                method: Method::Put,
+                path: "/quotas".into(),
+                query,
+                body: body(request),
+            }
+        }
         PlannedOperation::CrossRerank { .. } => {
             return Err(RestProjectionError::ClientSideOnly {
                 stmt_type: "cross_rerank",

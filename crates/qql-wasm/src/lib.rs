@@ -66,11 +66,6 @@ export interface AnalysisResult {
   explain: string | null;
   error: AnalysisError | null;
 }
-
-/** Compile a QQL statement to a compiled route as a byte buffer. */
-export function compileBytes(query: string): Uint8Array;
-/** Explain a QQL statement as a byte buffer. */
-export function explainBytes(query: string): Uint8Array;
 "#;
 
 // ── Core: parsing ────────────────────────────────────────────────
@@ -491,6 +486,12 @@ pub fn explain_bytes(query: &str) -> Result<js_sys::Uint8Array, JsValue> {
     Ok(safe_owned_uint8_array(exp_str.as_bytes()))
 }
 
+/// Format a QQL string into canonical form.
+#[wasm_bindgen(js_name = formatQuery)]
+pub fn format_query(input: &str) -> Result<String, JsValue> {
+    qql_core::fmt::format(input).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
 // ── Client: browser fetch-based execute with embedding ────────────
 
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
@@ -508,6 +509,9 @@ enum EmbedMode {
 pub struct Client {
     url: String,
     api_key: Option<String>,
+    /// Qdrant 1.19 read affinity (`X-Qdrant-Route-Affinity` header). Pins
+    /// reads to a stable replica; `None` = unset.
+    route_affinity: Option<String>,
 
     embed_mode: EmbedMode,
     embed_endpoint: String,
@@ -524,12 +528,26 @@ impl Client {
         Client {
             url: url.unwrap_or_else(|| "http://localhost:6333".to_string()),
             api_key,
+            route_affinity: None,
             embed_mode: EmbedMode::None,
             embed_endpoint: String::new(),
             embed_api_key: None,
             embed_model: String::new(),
             embed_dim: 0,
         }
+    }
+
+    /// Set Qdrant 1.19 read affinity. Pins reads to a stable replica via the
+    /// `X-Qdrant-Route-Affinity` header. Pass `null`/`""` to clear.
+    #[wasm_bindgen(js_name = setRouteAffinity)]
+    pub fn set_route_affinity(&mut self, affinity: Option<String>) {
+        self.route_affinity = affinity.filter(|s| !s.is_empty());
+    }
+
+    /// Current read-affinity key, or `null` when unset.
+    #[wasm_bindgen(getter, js_name = routeAffinity)]
+    pub fn route_affinity(&self) -> Option<String> {
+        self.route_affinity.clone()
     }
 
     // ── Embedder configuration ──────────────────────────────────
@@ -614,6 +632,9 @@ impl Client {
         };
         if let Some(ref key) = self.api_key {
             rb = rb.header("api-key", key);
+        }
+        if let Some(ref affinity) = self.route_affinity {
+            rb = rb.header("X-Qdrant-Route-Affinity", affinity);
         }
         rb = rb.header("Content-Type", "application/json");
         rb

@@ -1,10 +1,11 @@
 use alloc::string::String;
 use alloc::vec::Vec;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub use crate::semantic::{
     PlanFormula, PlanPointId, PlanPointVectors, PlanQueryInput, PlanVectorValue,
 };
+pub use qql_core::ast::{MemoryPlacement, VectorDatatype};
 
 // ── Method ──────────────────────────────────────────────────────
 
@@ -31,7 +32,7 @@ impl Method {
 
 // ── Filter types ───────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum FilterExpression {
     Single(Box<FilterClause>),
@@ -44,15 +45,15 @@ pub enum FilterExpression {
 /// REST `Filter` object and gRPC `qdrant.Filter` — only must/should/must_not
 /// (and min_should). Shard routing is **not** a filter field; it lives on the
 /// operation request as `shard_key` / gRPC `ShardKeySelector`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FilterCompound {
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub must: Vec<FilterClause>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub must_not: Vec<FilterClause>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub should: Vec<FilterClause>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_should: Option<usize>,
 }
 
@@ -103,7 +104,7 @@ pub struct MinShould {
     pub min_count: u64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum FilterClause {
     Field(Box<FieldCondition>),
@@ -113,9 +114,22 @@ pub enum FilterClause {
     HasVector(HasVectorCondition),
     Nested(NestedCondition),
     Filter(Box<FilterCompound>),
+    Slice(SliceCondition),
 }
 
-#[derive(Debug, Clone, Serialize)]
+/// Deterministic slice of the id space (`hash(id) % total == index`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SliceCondition {
+    pub slice: SliceParams,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SliceParams {
+    pub total: u64,
+    pub index: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FieldCondition {
     pub key: String,
     #[serde(rename = "match", skip_serializing_if = "Option::is_none")]
@@ -136,7 +150,7 @@ pub struct FieldCondition {
     pub is_null: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValuesCountParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lt: Option<u64>,
@@ -148,7 +162,7 @@ pub struct ValuesCountParams {
     pub lte: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum MatchValue {
     Value { value: serde_json::Value },
@@ -157,9 +171,10 @@ pub enum MatchValue {
     Any { any: Vec<serde_json::Value> },
     Except { except: Vec<serde_json::Value> },
     Phrase { phrase: String },
+    Prefix { prefix: String },
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RangeParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gt: Option<serde_json::Value>,
@@ -171,66 +186,66 @@ pub struct RangeParams {
     pub lte: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeoBoundingBox {
     pub top_left: GeoPoint,
     pub bottom_right: GeoPoint,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeoRadius {
     pub center: GeoPoint,
     pub radius: f64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeoPolygon {
     pub exterior: GeoLineString,
     pub interiors: Vec<GeoLineString>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeoLineString {
     pub points: Vec<GeoPoint>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeoPoint {
     pub lat: f64,
     pub lon: f64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IsNullCondition {
     pub is_null: KeyOnly,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IsEmptyCondition {
     pub is_empty: KeyOnly,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyOnly {
     pub key: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HasIdCondition {
     pub has_id: Vec<crate::semantic::PlanPointId>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HasVectorCondition {
     pub has_vector: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NestedCondition {
     pub nested: NestedParams,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NestedParams {
     pub key: String,
     pub filter: Box<FilterExpression>,
@@ -373,6 +388,9 @@ pub struct SearchParamsRequest {
     pub indexed_only: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quantization: Option<QuantizationSearchRequest>,
+    /// Per-query IDF corpus for sparse vectors (OpenAPI `IdfParams`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idf: Option<IdfSearchParams>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -383,6 +401,29 @@ pub struct QuantizationSearchRequest {
     pub rescore: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oversampling: Option<f64>,
+}
+
+/// OpenAPI `IdfParams`: `"global"` scope or a corpus filter over which sparse
+/// vector IDF statistics are computed.
+#[derive(Debug, Clone)]
+pub enum IdfSearchParams {
+    Global,
+    Corpus { corpus: FilterExpression },
+}
+
+impl Serialize for IdfSearchParams {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        match self {
+            // OpenAPI `IdfScope`: the bare string `"global"`.
+            IdfSearchParams::Global => serializer.serialize_str("global"),
+            IdfSearchParams::Corpus { corpus } => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry("corpus", corpus)?;
+                map.end()
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -683,6 +724,9 @@ pub struct HnswConfig {
     pub payload_m: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub inline_storage: Option<bool>,
+    /// Memory placement of the HNSW graph.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory: Option<MemoryPlacement>,
 }
 
 /// Segment optimizer configuration for collection creation/update.
@@ -737,6 +781,9 @@ pub struct ScalarQuantization {
     pub quantile: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub always_ram: Option<bool>,
+    /// Memory placement of quantized vectors.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory: Option<MemoryPlacement>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -744,6 +791,9 @@ pub struct ProductQuantization {
     pub compression: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub always_ram: Option<bool>,
+    /// Memory placement of quantized vectors.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory: Option<MemoryPlacement>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -754,6 +804,9 @@ pub struct BinaryQuantization {
     pub encoding: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub query_encoding: Option<String>,
+    /// Memory placement of quantized vectors.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory: Option<MemoryPlacement>,
 }
 
 /// OpenAPI `TurboQuantQuantizationConfig`.
@@ -764,6 +817,9 @@ pub struct TurboQuantization {
     pub bits: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub always_ram: Option<bool>,
+    /// Memory placement of quantized vectors.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory: Option<MemoryPlacement>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -788,6 +844,9 @@ pub struct CreateCollectionRequest {
     pub sharding_method: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shard_keys: Option<Vec<String>>,
+    /// OpenAPI `PayloadStorageParams`: `{"memory": "cold"|"cached"}`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payload: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -823,4 +882,20 @@ pub struct CreateShardKeyRequest {
 #[derive(Debug, Clone, Serialize)]
 pub struct DropShardKeyRequest {
     pub shard_key: String,
+}
+
+/// Cluster-wide resource quota configuration (`PUT /quotas`).
+#[derive(Debug, Clone, Serialize)]
+pub struct SetQuotaRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_resident_memory_percent: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_disk_usage_percent: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub release_margin_percent: Option<u64>,
+    /// REST query param (`?wait=`), not body.
+    #[serde(skip)]
+    pub wait: Option<bool>,
 }

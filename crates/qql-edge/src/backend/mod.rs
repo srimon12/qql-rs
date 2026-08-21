@@ -238,7 +238,11 @@ impl EdgeQdrant {
 
         let records = tokio::task::spawn_blocking(move || {
             shard
-                .retrieve(&ids, Some(with_payload), Some(with_vector))
+                .retrieve(qdrant_edge::RetrieveRequest {
+                    point_ids: ids,
+                    with_payload: Some(with_payload),
+                    with_vector: Some(with_vector),
+                })
                 .map_err(edge_err)
         })
         .await
@@ -674,8 +678,8 @@ impl QdrantOps for EdgeQdrant {
     async fn get_collection_info(&self, name: &str) -> Result<CollectionInfo, QqlError> {
         let shard = self.open_shard(name).await?;
         let (info, dense_vectors, sparse_vectors, vectors) =
-            tokio::task::spawn_blocking(move || {
-                let info = shard.info();
+            tokio::task::spawn_blocking(move || -> Result<_, qql_core::error::QqlError> {
+                let info = shard.info().map_err(edge_err)?;
                 let cfg = shard.config();
                 let dense = cfg
                     .vectors
@@ -709,6 +713,18 @@ impl QdrantOps for EdgeQdrant {
                             map
                         }),
                         on_disk: params.on_disk,
+                        datatype: params.datatype.map(|dt| {
+                            match dt {
+                                qdrant_edge::VectorStorageDatatype::Float32 => "float32",
+                                qdrant_edge::VectorStorageDatatype::Float16 => "float16",
+                                qdrant_edge::VectorStorageDatatype::Uint8 => "uint8",
+                                qdrant_edge::VectorStorageDatatype::Turbo4 => "turbo4",
+                            }
+                            .to_string()
+                        }),
+                        // qdrant-edge 0.8 still surfaces `on_disk` rather than
+                        // the full memory placement enum on its public config.
+                        memory: None,
                     })
                     .collect();
                 let sparse = cfg
@@ -720,10 +736,10 @@ impl QdrantOps for EdgeQdrant {
                         modifier: None,
                     })
                     .collect();
-                (info, dense, sparse, vectors)
+                Ok((info, dense, sparse, vectors))
             })
             .await
-            .map_err(|e| spawn_error("get_collection_info", e))?;
+            .map_err(|e| spawn_error("get_collection_info", e))??;
 
         Ok(CollectionInfo {
             status: "green".to_string(),
@@ -995,6 +1011,7 @@ impl QdrantOps for EdgeQdrant {
                 path_hint: "CROSS RERANK",
             }
             .error()),
+            GetQuotas | SetQuotas { .. } => Err(EdgeUnsupported::Quota.error()),
         }
     }
 

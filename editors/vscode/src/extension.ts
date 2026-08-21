@@ -6,6 +6,7 @@ import { QqlCompletionProvider } from "./providers/completions";
 import { QqlDefinitionProvider } from "./providers/definition";
 import { createDiagnosticCollection, updateDiagnostics } from "./providers/diagnostics";
 import { QqlFoldingRangeProvider } from "./providers/folding";
+import { QqlFormattingProvider } from "./providers/formatting";
 import { QqlHoverProvider } from "./providers/hover";
 import { QqlDocumentSymbolProvider } from "./providers/symbols";
 import { registerCommands } from "./ui/commands";
@@ -63,7 +64,11 @@ export function activate(context: vscode.ExtensionContext) {
       new QqlFoldingRangeProvider(analysis)
     ),
     vscode.languages.registerDefinitionProvider(QQL_SELECTOR, new QqlDefinitionProvider(analysis)),
-    vscode.languages.registerCodeLensProvider(QQL_SELECTOR, codeLensProvider)
+    vscode.languages.registerCodeLensProvider(QQL_SELECTOR, codeLensProvider),
+    vscode.languages.registerDocumentFormattingEditProvider(
+      QQL_SELECTOR,
+      new QqlFormattingProvider()
+    )
   );
 
   registerCommands(context, analysis);

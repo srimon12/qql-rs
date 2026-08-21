@@ -1,0 +1,63 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "ShowQuotas": {}
+    },
+    {
+      "SetQuota": {
+        "config": [
+          [
+            "enabled",
+            {
+              "Bool": true
+            }
+          ],
+          [
+            "max_resident_memory_percent",
+            {
+              "Int": 80
+            }
+          ],
+          [
+            "max_disk_usage_percent",
+            {
+              "Int": 90
+            }
+          ],
+          [
+            "release_margin_percent",
+            {
+              "Int": 5
+            }
+          ]
+        ],
+        "wait": true
+      }
+    },
+    {
+      "SetQuota": {
+        "config": [
+          [
+            "enabled",
+            {
+              "Bool": false
+            }
+          ]
+        ],
+        "wait": null
+      }
+    },
+    {
+      "SetQuota": {
+        "config": [
+          [
+            "max_disk_usage_percent",
+            "Null"
+          ]
+        ],
+        "wait": null
+      }
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+---
+interface Props {
+  stats: readonly { value: string; label: string }[];
+}
+
+const { stats } = Astro.props;
+---
+
+<section class="landing-stats landing-fade-up" aria-label="QQL at a glance">
+  <div class="landing-shell landing-stats__grid">
+    {
+      stats.map((item) => (
+        <div class="landing-stat">
+          <span class="landing-stat__value">{item.value}</span>
+          <span class="landing-stat__label">{item.label}</span>
+        </div>
+      ))
+    }
+  </div>
+</section>

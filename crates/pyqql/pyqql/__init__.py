@@ -11,6 +11,7 @@ from .pyqql import (
     inject_filter,
     is_valid,
     parse,
+    parse_json,
     tokenize,
 )
 
@@ -25,6 +26,7 @@ __all__ = [
     "inject_filter",
     "is_valid",
     "parse",
+    "parse_json",
     "tokenize",
     "__version__",
 ]

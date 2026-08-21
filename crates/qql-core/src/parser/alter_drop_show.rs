@@ -2,7 +2,8 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use crate::ast::{
-    AlterCollectionStmt, CreateIndexStmt, DropCollectionStmt, DropIndexStmt, DropShardKeyStmt, Stmt,
+    AlterCollectionStmt, CreateIndexStmt, DropCollectionStmt, DropIndexStmt, DropShardKeyStmt,
+    SetQuotaStmt, Stmt,
 };
 use crate::error::QqlError;
 use crate::token::TokenKind;
@@ -77,6 +78,10 @@ impl<'a> AstLowerer<'a> {
             let collection = self.parse_identifier()?;
             return Ok(Stmt::ShowCollection(collection));
         }
+        if self.peek()?.kind == TokenKind::Quotas {
+            self.advance()?;
+            return Ok(Stmt::ShowQuotas);
+        }
         if self.peek()?.kind == TokenKind::Shard {
             self.advance()?; // consume SHARD
             self.expect(TokenKind::Keys)?;
@@ -87,11 +92,42 @@ impl<'a> AstLowerer<'a> {
         }
         Err(QqlError::syntax(
             alloc::format!(
-                "expected COLLECTION, COLLECTIONS, or SHARD KEYS after SHOW, got '{}'",
+                "expected COLLECTION, COLLECTIONS, QUOTAS, or SHARD KEYS after SHOW, got '{}'",
                 self.peek()?.text
             ),
             self.peek()?.pos,
         ))
+    }
+
+    // ── SET QUOTA ────────────────────────────────────────────────
+
+    pub fn parse_set_quota(&mut self) -> Result<Stmt, QqlError> {
+        self.advance()?; // consume SET
+        self.expect(TokenKind::Quota)?;
+        let config = self.parse_config_block()?;
+        let wait = if self.peek()?.kind == TokenKind::Wait {
+            self.advance()?;
+            match self.peek()?.kind {
+                TokenKind::True => {
+                    self.advance()?;
+                    Some(true)
+                }
+                TokenKind::False => {
+                    self.advance()?;
+                    Some(false)
+                }
+                _ => {
+                    return Err(QqlError::parse(
+                        "QQL-PARSE-QUOTA",
+                        "WAIT requires true or false",
+                        self.peek()?.span,
+                    ));
+                }
+            }
+        } else {
+            None
+        };
+        Ok(Stmt::SetQuota(Box::new(SetQuotaStmt { config, wait })))
     }
 
     // ── CREATE INDEX ────────────────────────────────────────────

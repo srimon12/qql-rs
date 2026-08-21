@@ -210,6 +210,14 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
         .or_else(|| opts.get("use_grpc"))
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    // Qdrant 1.19 read affinity: `X-Qdrant-Route-Affinity` header (REST) /
+    // `x-qdrant-route-affinity` metadata (gRPC). Empty strings are unset.
+    let route_affinity = opts
+        .get("routeAffinity")
+        .or_else(|| opts.get("route_affinity"))
+        .and_then(|v| v.as_str())
+        .map(str::to_owned)
+        .filter(|s| !s.is_empty());
 
     let mut config = qql::config::QqlConfig {
         url: url_str.to_string(),
@@ -289,7 +297,12 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
     let client: Box<dyn qql::client::QdrantOps> = if grpc {
         #[cfg(feature = "grpc")]
         {
-            Box::new(qql::grpc::GrpcQdrant::from_url(url_str, api_key).map_err(to_napi_err)?)
+            let mut grpc =
+                qql::grpc::GrpcQdrant::from_url(url_str, api_key).map_err(to_napi_err)?;
+            if let Some(affinity) = route_affinity.as_deref() {
+                grpc = grpc.with_route_affinity(affinity);
+            }
+            Box::new(grpc)
         }
         #[cfg(not(feature = "grpc"))]
         {
@@ -298,7 +311,11 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
             ));
         }
     } else {
-        Box::new(qql::rest::RestQdrant::new(url_str.to_string(), api_key))
+        let mut rest = qql::rest::RestQdrant::new(url_str.to_string(), api_key);
+        if let Some(affinity) = route_affinity.as_deref() {
+            rest = rest.with_route_affinity(affinity);
+        }
+        Box::new(rest)
     };
 
     let embedder = if let Some(endpoint) = &config.embedding_endpoint {
@@ -338,14 +355,36 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
 #[napi(js_name = "Client")]
 pub struct JsClient {
     inner: qql::executor::Executor,
+    /// Normalized `X-Qdrant-Route-Affinity` value (REST header / gRPC metadata).
+    route_affinity: Option<String>,
 }
 
 #[napi]
 impl JsClient {
+    /// Constructor required by napi-rs class registry.  Always throws —
+    /// use `new Client(options)`.
     #[napi(constructor)]
     pub fn new(options: Option<serde_json::Value>) -> napi::Result<Self> {
+        let route_affinity = options
+            .as_ref()
+            .and_then(|o| o.get("routeAffinity"))
+            .or_else(|| options.as_ref().and_then(|o| o.get("route_affinity")))
+            .and_then(|v| v.as_str())
+            .map(str::to_owned)
+            .filter(|s| !s.is_empty());
         let exec = create_js_executor(options)?;
-        Ok(JsClient { inner: exec })
+        Ok(JsClient {
+            inner: exec,
+            route_affinity,
+        })
+    }
+
+    /// Read affinity key pinning reads to a stable replica
+    /// (`X-Qdrant-Route-Affinity`, Qdrant 1.19+). Set via
+    /// `new Client({ routeAffinity })`.
+    #[napi(getter)]
+    pub fn route_affinity(&self) -> Option<String> {
+        self.route_affinity.clone()
     }
 
     /// Execute a QQL query string, a Stmt, or an array of either.

@@ -16,6 +16,20 @@ test("client options forward apiKey/useGrpc aliases", () => {
   assert.strictEqual(opts.url, "http://x");
 });
 
+test("client options forward routeAffinity (camelCase wins over snake_case)", () => {
+  const camel = normalizeClientOptions({ routeAffinity: "session-42" });
+  assert.strictEqual(camel.routeAffinity, "session-42");
+  const snake = normalizeClientOptions({ route_affinity: "session-42" });
+  assert.strictEqual(snake.routeAffinity, "session-42");
+  const both = normalizeClientOptions({
+    routeAffinity: "camel",
+    route_affinity: "snake",
+  });
+  assert.strictEqual(both.routeAffinity, "camel");
+  const none = normalizeClientOptions({ url: "http://x" });
+  assert.strictEqual(none.routeAffinity, undefined);
+});
+
 test("client options embedder forwards dense fields", () => {
   const opts = normalizeClientOptions({
     embedder: {

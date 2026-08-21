@@ -202,7 +202,10 @@ async function execute(query, options) {
 async function executeStmt(stmt, options) {
   try {
     return JSON.parse(
-      await nativeBinding.executeStmt(stmt, normalizeClientOptions(options)),
+      await nativeBinding.executeStmt(
+        stmt,
+        normalizeClientOptions(validateOptions(options)),
+      ),
     );
   } catch (error) {
     throw buildError(error);
@@ -211,7 +214,14 @@ async function executeStmt(stmt, options) {
 
 class Client {
   constructor(options) {
-    this._inner = new nativeBinding.Client(normalizeClientOptions(options));
+    const normalized = normalizeClientOptions(options);
+    this._inner = new nativeBinding.Client(normalized);
+    this._routeAffinity = normalized?.routeAffinity || null;
+  }
+
+  /** Qdrant 1.19+ read affinity key set at construction; `null` when unset. */
+  get routeAffinity() {
+    return this._routeAffinity;
   }
 
   async execute(query, options) {
@@ -244,7 +254,7 @@ module.exports = {
   parseJson,
   isValid,
   injectFilter,
-    tokenize,
+  tokenize,
   compileQuery,
   explain,
   explainStmt,

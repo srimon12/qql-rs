@@ -69,9 +69,40 @@ WHERE content MATCH ANY ('hello', 'world')   -- match any terms in list
 WHERE content MATCH PHRASE 'hello world'    -- exact phrase matching
 ```
 
+### Keyword prefix match (Qdrant ≥ 1.19)
+
+```sql
+-- Requires a keyword index created with prefix = true
+WHERE title MATCH PREFIX 'Comp'
+```
+
+Lowers to `{"key": "title", "match": {"prefix": "Comp"}}`. Full-text `MATCH` /
+`MATCH PHRASE` use the text index; `MATCH PREFIX` is for **keyword** fields with
+`CREATE INDEX … TYPE keyword WITH (prefix = true)`.
+
 ---
 
-## 6. Logical Operators
+## 6. Deterministic id-space slice (Qdrant ≥ 1.19)
+
+```sql
+-- Points whose id hash satisfies hash(id) % total == index
+WHERE SLICE (4, 1)
+
+-- Combined with other predicates
+WHERE SLICE (4, 1) AND status = 'active'
+```
+
+Constraints (fail at parse with `QQL-VALIDATION-SLICE`):
+
+- `total ≥ 1`
+- `index < total`
+
+Useful for stable partition sampling / multi-worker splits without random
+`SAMPLE`.
+
+---
+
+## 7. Logical Operators
 
 ```sql
 WHERE a = 1 AND b = 2
@@ -80,11 +111,11 @@ WHERE NOT a = 1
 WHERE (a = 1 OR b = 2) AND c = 3
 ```
 
-Operator precedence (highest to lowest): comparisons/BETWEEN/IN/IS/MATCH > NOT > AND > OR.
+Operator precedence (highest to lowest): comparisons/BETWEEN/IN/IS/MATCH/SLICE > NOT > AND > OR.
 
 ---
 
-## 7. Nested Object Filtering
+## 8. Nested Object Filtering
 
 Filter elements inside nested arrays using `NESTED('path', filter)`:
 
@@ -101,7 +132,7 @@ WHERE status = 'published' AND NOT NESTED('history', action = 'reject')
 
 ---
 
-## 8. Advanced Filters
+## 9. Advanced Filters
 
 ### Point ID filter
 
@@ -163,7 +194,7 @@ WHERE location GEO_POLYGON {
 
 ---
 
-## 9. Round-trip example
+## 10. Round-trip example
 
 These filters lower from QQL to the plan IR `FilterExpression`, then to the
 same logical shape on **both** transports: REST body `filter` and gRPC

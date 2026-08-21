@@ -1,8 +1,13 @@
+// Dual-read/write of Qdrant 1.19-deprecated `on_disk` / `always_ram` /
+// `on_disk_payload` fields alongside the new `memory` placement enum, until
+// upstream removes them in 1.21. Prefer `memory` for new code paths.
+#![allow(deprecated)]
+
 use crate::qdrant_grpc::qdrant;
 use qql_core::error::QqlError;
 use qql_plan::types::{
-    FilterClause, FilterCompound, FilterExpression, MatchValue, PayloadSelectorReq,
-    VectorSelectorReq, WithLookupValue,
+    FilterClause, FilterCompound, FilterExpression, MatchValue, MemoryPlacement,
+    PayloadSelectorReq, VectorSelectorReq, WithLookupValue,
 };
 use qql_plan::{PlanPointId, PlanPointVectors, PlanQueryInput, PlanVectorValue};
 
@@ -23,6 +28,28 @@ fn json_bool(value: &serde_json::Value, key: &str) -> Option<bool> {
     value.get(key).and_then(serde_json::Value::as_bool)
 }
 
+/// Convert typed `MemoryPlacement` to the proto `Memory` enum discriminant.
+fn memory_to_proto(value: MemoryPlacement) -> i32 {
+    match value {
+        MemoryPlacement::Cold => qdrant::Memory::Cold as i32,
+        MemoryPlacement::Cached => qdrant::Memory::Cached as i32,
+        MemoryPlacement::Pinned => qdrant::Memory::Pinned as i32,
+    }
+}
+
+/// Convert a placement string (JSON configs, index options) to proto `Memory`.
+fn memory_from_str(value: &str) -> Option<i32> {
+    MemoryPlacement::parse(value).map(memory_to_proto)
+}
+
+/// Read a `memory` key from a JSON config object into the proto `Memory` enum value.
+fn json_memory(value: &serde_json::Value, key: &str) -> Option<i32> {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .and_then(memory_from_str)
+}
+
 // ── Typed plan-to-gRPC converters (no JSON intermediate) ─────────────
 
 pub(crate) fn hnsw_config_from_plan(cfg: &qql_plan::HnswConfig) -> qdrant::HnswConfigDiff {
@@ -33,6 +60,7 @@ pub(crate) fn hnsw_config_from_plan(cfg: &qql_plan::HnswConfig) -> qdrant::HnswC
         max_indexing_threads: cfg.max_indexing_threads,
         on_disk: cfg.on_disk,
         payload_m: cfg.payload_m,
+        memory: cfg.memory.map(memory_to_proto),
         ..Default::default()
     }
 }
@@ -83,6 +111,7 @@ pub(crate) fn quantization_config_from_plan(
                     r#type: qdrant::QuantizationType::Int8 as i32,
                     quantile: scalar.quantile.map(|v| v as f32),
                     always_ram: scalar.always_ram,
+                    memory: scalar.memory.map(memory_to_proto),
                 },
             )),
         }),
@@ -99,6 +128,7 @@ pub(crate) fn quantization_config_from_plan(
                     qdrant::ProductQuantization {
                         compression: compression as i32,
                         always_ram: product.always_ram,
+                        memory: product.memory.map(memory_to_proto),
                     },
                 )),
             })
@@ -129,6 +159,7 @@ pub(crate) fn quantization_config_from_plan(
                         always_ram: binary.always_ram,
                         encoding,
                         query_encoding,
+                        memory: binary.memory.map(memory_to_proto),
                     },
                 )),
             })
@@ -149,6 +180,7 @@ pub(crate) fn quantization_config_from_plan(
                     qdrant::TurboQuantization {
                         always_ram: turbo.always_ram,
                         bits,
+                        memory: turbo.memory.map(memory_to_proto),
                     },
                 )),
             })
@@ -168,6 +200,7 @@ pub(crate) fn hnsw_config(value: &serde_json::Value) -> qdrant::HnswConfigDiff {
         on_disk: json_bool(value, "on_disk"),
         payload_m: json_u64(value, "payload_m"),
         inline_storage: json_bool(value, "inline_storage"),
+        memory: json_memory(value, "memory"),
     }
 }
 
@@ -218,6 +251,7 @@ fn scalar_quantization(value: &serde_json::Value) -> qdrant::ScalarQuantization 
             .and_then(serde_json::Value::as_f64)
             .map(|value| value as f32),
         always_ram: json_bool(value, "always_ram"),
+        memory: json_memory(value, "memory"),
     }
 }
 
@@ -238,6 +272,7 @@ fn product_quantization(value: &serde_json::Value) -> qdrant::ProductQuantizatio
     qdrant::ProductQuantization {
         compression: compression as i32,
         always_ram: json_bool(value, "always_ram"),
+        memory: json_memory(value, "memory"),
     }
 }
 
@@ -290,6 +325,7 @@ fn binary_quantization(value: &serde_json::Value) -> qdrant::BinaryQuantization 
         always_ram: json_bool(value, "always_ram"),
         encoding,
         query_encoding,
+        memory: json_memory(value, "memory"),
     }
 }
 
@@ -321,6 +357,7 @@ fn turbo_quantization(value: &serde_json::Value) -> qdrant::TurboQuantization {
     qdrant::TurboQuantization {
         always_ram: json_bool(value, "always_ram"),
         bits,
+        memory: json_memory(value, "memory"),
     }
 }
 
@@ -415,6 +452,7 @@ fn datatype_from_json(value: &serde_json::Value) -> Option<i32> {
             "float32" | "f32" => qdrant::Datatype::Float32 as i32,
             "uint8" | "u8" => qdrant::Datatype::Uint8 as i32,
             "float16" | "f16" => qdrant::Datatype::Float16 as i32,
+            "turbo4" | "t4" => qdrant::Datatype::Turbo4 as i32,
             _ => qdrant::Datatype::Default as i32,
         })
 }
@@ -429,6 +467,7 @@ pub(crate) fn vector_params(value: &serde_json::Value) -> qdrant::VectorParams {
             .and_then(quantization_config),
         on_disk: json_bool(value, "on_disk"),
         datatype: datatype_from_json(value),
+        memory: json_memory(value, "memory"),
         multivector_config: value
             .get("multivector_config")
             .map(|_| qdrant::MultiVectorConfig {
@@ -445,6 +484,7 @@ fn vector_params_diff(value: &serde_json::Value) -> qdrant::VectorParamsDiff {
             .get("quantization_config")
             .and_then(quantization_config_diff),
         on_disk: json_bool(value, "on_disk"),
+        memory: json_memory(value, "memory"),
     }
 }
 
@@ -473,6 +513,7 @@ pub(crate) fn sparse_vector_params(value: &serde_json::Value) -> qdrant::SparseV
         full_scan_threshold: json_u64(idx, "full_scan_threshold"),
         on_disk: json_bool(idx, "on_disk"),
         datatype: datatype_from_json(idx),
+        memory: json_memory(idx, "memory"),
     });
     qdrant::SparseVectorParams {
         index,
@@ -493,11 +534,26 @@ pub(crate) fn collection_params_diff(value: &serde_json::Value) -> qdrant::Colle
         on_disk_payload: json_bool(value, "on_disk_payload"),
         read_fan_out_factor: json_u64(value, "read_fan_out_factor").map(|n| n as u32),
         read_fan_out_delay_ms: json_u64(value, "read_fan_out_delay_ms"),
+        payload: value
+            .get("payload")
+            .and_then(|p| p.get("memory"))
+            .and_then(serde_json::Value::as_str)
+            .and_then(memory_from_str)
+            .map(|memory| qdrant::PayloadStorageParams {
+                memory: Some(memory),
+            }),
     }
 }
 
 fn option_bool(options: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<bool> {
     options.get(key).and_then(serde_json::Value::as_bool)
+}
+
+fn option_memory(options: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<i32> {
+    options
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .and_then(memory_from_str)
 }
 
 fn option_u64(options: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<u64> {
@@ -526,6 +582,8 @@ fn payload_index_params(
             is_tenant: option_bool(options, "is_tenant"),
             on_disk: option_bool(options, "on_disk"),
             enable_hnsw: option_bool(options, "enable_hnsw"),
+            prefix: option_bool(options, "prefix").map(|_| qdrant::KeywordPrefixParams {}),
+            memory: option_memory(options, "memory"),
         }),
         "integer" => IndexParams::IntegerIndexParams(qdrant::IntegerIndexParams {
             lookup: option_bool(options, "lookup"),
@@ -533,29 +591,35 @@ fn payload_index_params(
             is_principal: option_bool(options, "is_principal"),
             on_disk: option_bool(options, "on_disk"),
             enable_hnsw: option_bool(options, "enable_hnsw"),
+            memory: option_memory(options, "memory"),
         }),
         "float" => IndexParams::FloatIndexParams(qdrant::FloatIndexParams {
             on_disk: option_bool(options, "on_disk"),
             is_principal: option_bool(options, "is_principal"),
             enable_hnsw: option_bool(options, "enable_hnsw"),
+            memory: option_memory(options, "memory"),
         }),
         "geo" => IndexParams::GeoIndexParams(qdrant::GeoIndexParams {
             on_disk: option_bool(options, "on_disk"),
             enable_hnsw: option_bool(options, "enable_hnsw"),
+            memory: option_memory(options, "memory"),
         }),
         "bool" => IndexParams::BoolIndexParams(qdrant::BoolIndexParams {
             on_disk: option_bool(options, "on_disk"),
             enable_hnsw: option_bool(options, "enable_hnsw"),
+            memory: option_memory(options, "memory"),
         }),
         "datetime" => IndexParams::DatetimeIndexParams(qdrant::DatetimeIndexParams {
             on_disk: option_bool(options, "on_disk"),
             is_principal: option_bool(options, "is_principal"),
             enable_hnsw: option_bool(options, "enable_hnsw"),
+            memory: option_memory(options, "memory"),
         }),
         "uuid" => IndexParams::UuidIndexParams(qdrant::UuidIndexParams {
             is_tenant: option_bool(options, "is_tenant"),
             on_disk: option_bool(options, "on_disk"),
             enable_hnsw: option_bool(options, "enable_hnsw"),
+            memory: option_memory(options, "memory"),
         }),
         "text" => IndexParams::TextIndexParams(text_index_params(options)?),
         other => {
@@ -614,6 +678,7 @@ fn text_index_params(
         stemmer: None,
         ascii_folding: option_bool(options, "ascii_folding"),
         enable_hnsw: option_bool(options, "enable_hnsw"),
+        memory: option_memory(options, "memory"),
     })
 }
 
@@ -1000,6 +1065,14 @@ pub async fn execute_planned_grpc(
                     .as_ref()
                     .and_then(|p| p.get("on_disk_payload"))
                     .and_then(|v| v.as_bool()),
+                payload: request.payload.as_ref().and_then(|p| {
+                    p.get("memory")
+                        .and_then(serde_json::Value::as_str)
+                        .and_then(memory_from_str)
+                        .map(|memory| qdrant::PayloadStorageParams {
+                            memory: Some(memory),
+                        })
+                }),
                 write_consistency_factor: request
                     .params
                     .as_ref()
@@ -1224,6 +1297,14 @@ pub async fn execute_planned_grpc(
             "CROSS RERANK is executed client-side by the Executor, not as a single gRPC route",
             None,
         )),
+        PlannedOperation::GetQuotas | PlannedOperation::SetQuotas { .. } => {
+            Err(QqlError::execution(
+                "QQL-GRPC-QUOTA",
+                "global quotas are only exposed through Qdrant's REST API (/quotas); \
+                 the public gRPC surface has no quota service. Use the REST backend",
+                None,
+            ))
+        }
     }
 }
 
@@ -1848,6 +1929,10 @@ fn to_condition(clause: &FilterClause) -> Result<qdrant::Condition, QqlError> {
             filter: Some(to_filter(&n.nested.filter)?),
         }),
         FilterClause::Filter(f) => ConditionOneOf::Filter(compound_to_filter(f)?),
+        FilterClause::Slice(s) => ConditionOneOf::Slice(qdrant::SliceCondition {
+            total: s.slice.total as u32,
+            index: s.slice.index as u32,
+        }),
     };
     Ok(qdrant::Condition {
         condition_one_of: Some(condition_one_of),
@@ -2021,6 +2106,9 @@ fn to_match(mv: &MatchValue) -> Result<qdrant::Match, QqlError> {
         MatchValue::Phrase { phrase } => Ok(qdrant::Match {
             match_value: Some(Mv::Phrase(phrase.clone())),
         }),
+        MatchValue::Prefix { prefix } => Ok(qdrant::Match {
+            match_value: Some(Mv::Prefix(prefix.clone())),
+        }),
     }
 }
 
@@ -2073,6 +2161,7 @@ fn to_vectors_selector(vs: &VectorSelectorReq) -> qdrant::WithVectorsSelector {
 }
 
 fn to_search_params(params: &qql_plan::types::SearchParamsRequest) -> qdrant::SearchParams {
+    use qql_plan::types::IdfSearchParams;
     qdrant::SearchParams {
         hnsw_ef: params.hnsw_ef,
         exact: params.exact,
@@ -2088,6 +2177,12 @@ fn to_search_params(params: &qql_plan::types::SearchParamsRequest) -> qdrant::Se
         acorn: params.acorn.as_ref().map(|a| qdrant::AcornSearchParams {
             enable: Some(a.enable),
             max_selectivity: a.max_selectivity,
+        }),
+        idf: params.idf.as_ref().map(|idf| match idf {
+            IdfSearchParams::Global => qdrant::IdfParams { corpus: None },
+            IdfSearchParams::Corpus { corpus } => qdrant::IdfParams {
+                corpus: to_filter(corpus).ok(),
+            },
         }),
     }
 }
@@ -2929,36 +3024,46 @@ fn quantization_config_to_json(qc: &qdrant::QuantizationConfig) -> serde_json::V
     let mut obj = serde_json::Map::new();
     match &qc.quantization {
         Some(Quantization::Scalar(s)) => {
-            obj.insert(
-                "scalar".into(),
-                serde_json::json!({
-                    "r#type": s.r#type,
-                    "quantile": s.quantile,
-                    "always_ram": s.always_ram,
-                }),
-            );
+            let mut scalar = serde_json::Map::new();
+            scalar.insert("r#type".into(), serde_json::json!(s.r#type));
+            scalar.insert("quantile".into(), serde_json::json!(s.quantile));
+            scalar.insert("always_ram".into(), serde_json::json!(s.always_ram));
+            if let Some(m) = s.memory.and_then(memory_enum_to_str) {
+                scalar.insert("memory".into(), serde_json::json!(m));
+            }
+            obj.insert("scalar".into(), serde_json::Value::Object(scalar));
         }
         Some(Quantization::Product(p)) => {
-            obj.insert(
-                "product".into(),
-                serde_json::json!({
-                    "compression": p.compression,
-                    "always_ram": p.always_ram,
-                }),
-            );
+            let mut product = serde_json::Map::new();
+            product.insert("compression".into(), serde_json::json!(p.compression));
+            product.insert("always_ram".into(), serde_json::json!(p.always_ram));
+            if let Some(m) = p.memory.and_then(memory_enum_to_str) {
+                product.insert("memory".into(), serde_json::json!(m));
+            }
+            obj.insert("product".into(), serde_json::Value::Object(product));
         }
         Some(Quantization::Binary(b)) => {
-            obj.insert(
-                "binary".into(),
-                serde_json::json!({
-                    "always_ram": b.always_ram,
-                }),
-            );
+            let mut binary = serde_json::Map::new();
+            binary.insert("always_ram".into(), serde_json::json!(b.always_ram));
+            if let Some(m) = b.memory.and_then(memory_enum_to_str) {
+                binary.insert("memory".into(), serde_json::json!(m));
+            }
+            obj.insert("binary".into(), serde_json::Value::Object(binary));
         }
         Some(Quantization::Turboquant(_)) => {}
         None => {}
     }
     serde_json::Value::Object(obj)
+}
+
+fn memory_enum_to_str(value: i32) -> Option<&'static str> {
+    match qdrant::Memory::try_from(value).ok()? {
+        qdrant::Memory::Cold => Some("cold"),
+        qdrant::Memory::Cached => Some("cached"),
+        qdrant::Memory::Pinned => Some("pinned"),
+        // Unset/unknown: omit rather than invent a placement.
+        qdrant::Memory::Unknown => None,
+    }
 }
 
 fn vectors_config_to_json(vc: &qdrant::VectorsConfig) -> serde_json::Value {
@@ -2987,18 +3092,37 @@ fn vector_params_to_json(vp: &qdrant::VectorParams) -> serde_json::Value {
     if let Some(od) = vp.on_disk {
         obj.insert("on_disk".into(), serde_json::json!(od));
     }
+    if let Some(dt) = vp.datatype.and_then(|v| qdrant::Datatype::try_from(v).ok()) {
+        let name = match dt {
+            qdrant::Datatype::Float32 => "float32",
+            qdrant::Datatype::Uint8 => "uint8",
+            qdrant::Datatype::Float16 => "float16",
+            qdrant::Datatype::Turbo4 => "turbo4",
+            qdrant::Datatype::Default => "float32",
+        };
+        obj.insert("datatype".into(), serde_json::json!(name));
+    }
+    if let Some(m) = vp.memory.and_then(memory_enum_to_str) {
+        obj.insert("memory".into(), serde_json::json!(m));
+    }
     if let Some(hnsw) = &vp.hnsw_config {
-        obj.insert(
-            "hnsw_config".into(),
-            serde_json::json!({
-                "m": hnsw.m,
-                "ef_construct": hnsw.ef_construct,
-                "full_scan_threshold": hnsw.full_scan_threshold,
-                "max_indexing_threads": hnsw.max_indexing_threads,
-                "on_disk": hnsw.on_disk,
-                "payload_m": hnsw.payload_m,
-            }),
+        let mut hnsw_map = serde_json::Map::new();
+        hnsw_map.insert("m".into(), serde_json::json!(hnsw.m));
+        hnsw_map.insert("ef_construct".into(), serde_json::json!(hnsw.ef_construct));
+        hnsw_map.insert(
+            "full_scan_threshold".into(),
+            serde_json::json!(hnsw.full_scan_threshold),
         );
+        hnsw_map.insert(
+            "max_indexing_threads".into(),
+            serde_json::json!(hnsw.max_indexing_threads),
+        );
+        hnsw_map.insert("on_disk".into(), serde_json::json!(hnsw.on_disk));
+        hnsw_map.insert("payload_m".into(), serde_json::json!(hnsw.payload_m));
+        if let Some(m) = hnsw.memory.and_then(memory_enum_to_str) {
+            hnsw_map.insert("memory".into(), serde_json::json!(m));
+        }
+        obj.insert("hnsw_config".into(), serde_json::Value::Object(hnsw_map));
     }
     if let Some(qc) = &vp.quantization_config {
         obj.insert(
@@ -3156,6 +3280,7 @@ mod tests {
                 qtype: "int8".into(),
                 quantile: Some(0.95),
                 always_ram: Some(true),
+                memory: None,
             },
         };
         let q_proto = quantization_config_from_plan(&scalar);

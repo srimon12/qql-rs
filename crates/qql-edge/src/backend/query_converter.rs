@@ -33,9 +33,7 @@ pub(crate) fn convert_query_request(request: &PlanQueryRequest) -> Result<QueryR
             .collect::<Result<_, _>>()?,
         query: Some(convert_query(&request.query, request.using.as_deref())?),
         filter: super::convert_edge_filter(request.filter.as_ref())?,
-        score_threshold: request
-            .score_threshold
-            .map(|score| OrderedFloat(score as f32)),
+        score_threshold: request.score_threshold.map(|score| score as f32),
         limit: usize::try_from(request.limit.unwrap_or(10)).map_err(limit_error)?,
         offset: usize::try_from(request.offset.unwrap_or(0)).map_err(limit_error)?,
         params: request
@@ -78,9 +76,7 @@ fn convert_prefetch(request: &PrefetchRequest) -> Result<Prefetch, QqlError> {
             .map(convert_search_params)
             .transpose()?,
         filter: super::convert_edge_filter(request.filter.as_ref())?,
-        score_threshold: request
-            .score_threshold
-            .map(|score| OrderedFloat(score as f32)),
+        score_threshold: request.score_threshold.map(|score| score as f32),
     })
 }
 
@@ -475,6 +471,20 @@ pub(crate) fn convert_search_params(
     if params.acorn.is_some() {
         return Err(crate::backend::unsupported::EdgeUnsupported::Acorn.error());
     }
+    let idf = params
+        .idf
+        .as_ref()
+        .map(|idf| match idf {
+            qql_plan::types::IdfSearchParams::Global => {
+                Ok(qdrant_edge::IdfParams::Scope(qdrant_edge::IdfScope::Global))
+            }
+            qql_plan::types::IdfSearchParams::Corpus { corpus } => Ok(
+                qdrant_edge::IdfParams::Corpus(qdrant_edge::IdfCorpusParams {
+                    corpus: super::convert_edge_filter(Some(corpus))?.unwrap(),
+                }),
+            ),
+        })
+        .transpose()?;
     Ok(SearchParams {
         hnsw_ef: params
             .hnsw_ef
@@ -491,6 +501,7 @@ pub(crate) fn convert_search_params(
         }),
         indexed_only: params.indexed_only.unwrap_or(false),
         acorn: None,
+        idf,
     })
 }
 

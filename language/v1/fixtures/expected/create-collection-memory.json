@@ -1,0 +1,114 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "CreateCollection": {
+        "collection": "docs",
+        "config": {
+          "hnsw": {
+            "ef_construct": null,
+            "full_scan_threshold": null,
+            "inline_storage": null,
+            "m": null,
+            "max_indexing_threads": null,
+            "memory": "cold",
+            "on_disk": null,
+            "payload_m": null
+          },
+          "optimizers": null,
+          "params": {
+            "on_disk_payload": null,
+            "payload_memory": "cold",
+            "read_fan_out_delay_ms": null,
+            "read_fan_out_factor": null,
+            "replication_factor": null,
+            "shard_keys": null,
+            "shard_number": null,
+            "sharding_method": null,
+            "write_consistency_factor": null
+          },
+          "quantization": null,
+          "quantization_update": null,
+          "vectors": null
+        },
+        "mode": {
+          "Dense": {
+            "model": null
+          }
+        },
+        "sparse_vectors": [],
+        "vectors": [
+          {
+            "distance": "Cosine",
+            "hnsw": null,
+            "multivector": null,
+            "name": "dense",
+            "quantization": null,
+            "size": 384,
+            "vectors": {
+              "datatype": "turbo4",
+              "memory": "cached",
+              "on_disk": null
+            }
+          }
+        ]
+      }
+    },
+    {
+      "CreateCollection": {
+        "collection": "docs2",
+        "config": null,
+        "mode": {
+          "Dense": {
+            "model": null
+          }
+        },
+        "sparse_vectors": [
+          {
+            "index": {
+              "datatype": null,
+              "full_scan_threshold": null,
+              "memory": "cached",
+              "on_disk": null
+            },
+            "modifier": "idf",
+            "name": "sparse"
+          }
+        ],
+        "vectors": []
+      }
+    },
+    {
+      "CreateCollection": {
+        "collection": "docs3",
+        "config": null,
+        "mode": {
+          "Dense": {
+            "model": null
+          }
+        },
+        "sparse_vectors": [],
+        "vectors": [
+          {
+            "distance": "Dot",
+            "hnsw": null,
+            "multivector": null,
+            "name": "dense",
+            "quantization": {
+              "always_ram": false,
+              "bits": null,
+              "compression": null,
+              "encoding": null,
+              "memory": "pinned",
+              "qtype": "Scalar",
+              "quantile": null,
+              "query_encoding": null
+            },
+            "size": 128,
+            "vectors": null
+          }
+        ]
+      }
+    }
+  ]
+}

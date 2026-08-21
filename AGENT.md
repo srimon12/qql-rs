@@ -130,7 +130,7 @@ pub trait QdrantOps: Send + Sync {
 
 Three implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant`. The gRPC adapter bypasses `execute_route` for DML — it uses `execute_grpc_route()` which converts typed `RequestBody` variants directly to protobuf. For REST, `execute_route` serializes `RequestBody` as JSON.
 
-### Statement → Endpoint Matrix (18 routes)
+### Statement → Endpoint Matrix (20 routes)
 
 | QQL Statement | Endpoint | Method |
 |---|---|---|
@@ -152,6 +152,8 @@ Three implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant`. The gRPC adapte
 | `DROP INDEX` | `/collections/{c}/index/{field}` | DELETE |
 | `SHOW COLLECTIONS` | `/collections` | GET |
 | `SHOW COLLECTION` | `/collections/{c}` | GET |
+| `SHOW QUOTAS` | `/quotas` | GET |
+| `SET QUOTA` | `/quotas` | PUT |
 
 ### gRPC Stack
 

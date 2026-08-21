@@ -13,7 +13,7 @@ script       = [ statement, { ";", statement }, [ ";" ] ] ;
 statement    = query | scroll | upsert | update | delete | ddl | count
              | clear-payload | delete-payload | delete-vectors
              | create-shard-key | drop-shard-key | show-shard-keys
-             | drop-index | show ;
+             | drop-index | show | show-quotas | set-quota ;
 ```
 
 Multiple statements require `;`. Leading semicolons, repeated semicolons, and adjacent unseparated statements are invalid.
@@ -274,6 +274,7 @@ search-param    = "hnsw_ef", "=", positive-integer
                 | "quantization", "=", object
                 | "rrf_k", "=", positive-integer
                 | "rrf_weights", "=", array
+                | "idf", "=", ( "global" | object )
                 | "timeout", "=", positive-integer
                 | "consistency", "=", ( positive-integer | "majority" | "quorum" | "all" | string ) ;
 ```
@@ -282,7 +283,7 @@ search-param    = "hnsw_ef", "=", positive-integer
 
 | Param | Wire | Notes |
 |---|---|---|
-| `hnsw_ef`, `exact`, `acorn`, `max_selectivity`, `indexed_only`, `quantization` | JSON body `params` | OpenAPI `SearchParams` |
+| `hnsw_ef`, `exact`, `acorn`, `max_selectivity`, `indexed_only`, `quantization`, `idf` | JSON body `params` | OpenAPI `SearchParams` (Qdrant ≥ 1.19 for `idf`) |
 | `rrf_k`, `rrf_weights` | Fusion body when RRF | |
 | `timeout` | REST **query string** `?timeout=N` / gRPC `timeout` field | Seconds, min 1; overrides global server timeout for this request |
 | `consistency` | REST **query string** `?consistency=` / gRPC `read_consistency` | Factor `N`, or `majority` \| `quorum` \| `all` (OpenAPI `ReadConsistency`) |
@@ -293,6 +294,25 @@ search-param    = "hnsw_ef", "=", positive-integer
 
 `rrf_k` and `rrf_weights` control the Reciprocal Rank Fusion formula when `FUSION RRF` is used.
 
+#### Sparse IDF corpus (Qdrant ≥ 1.19)
+
+Per-query Inverse Document Frequency for sparse vectors:
+
+```sql
+-- Collection-wide / global IDF
+QUERY TEXT 'vector database' FROM docs USING sparse
+  PARAMS (idf = 'global')
+  LIMIT 10;
+
+-- Restrict the IDF corpus to an explicit filter object
+QUERY TEXT 'vector database' FROM docs USING sparse
+  PARAMS (idf = {corpus: {must: [{key: 'status', match: {value: 'active'}}]}})
+  LIMIT 10;
+```
+
+`idf.corpus` must be a valid Qdrant filter object; malformed corpora fail with
+`QQL-PLAN-IDF`. Supported on remote Qdrant and on **qdrant-edge ≥ 0.8**.
+
 ```sql
 -- Request timeout 30s + majority read consistency (remote Qdrant)
 QUERY TEXT 'search' FROM docs USING dense
@@ -300,7 +320,8 @@ QUERY TEXT 'search' FROM docs USING dense
   LIMIT 10;
 ```
 
-Edge ignores request-level timeout/consistency (single-node, no cluster reads).
+Edge rejects request-level `timeout` / `consistency` with
+`QQL-EDGE-UNSUPPORTED-TIMEOUT` / `QQL-EDGE-UNSUPPORTED-CONSISTENCY` (fail-loud).
 
 ### Examples
 
@@ -499,13 +520,94 @@ drop-collection = "DROP", "COLLECTION", name ;
 show            = "SHOW", "COLLECTIONS"
                 | "SHOW", "COLLECTION", name ;
 
+show-quotas     = "SHOW", "QUOTAS" ;
+set-quota       = "SET", "QUOTA", config-block, [ "WAIT", boolean ] ;
+
 vector-def    = name, "VECTOR", "(", size, ",", distance, ")"
-                [ "WITH", "MULTIVECTOR", "(", config-block, ")" ] ;
-sparse-def    = name, "SPARSE" ;
+                [ "WITH", "MULTIVECTOR", "(", config-block, ")" ]
+                [ "WITH", "VECTOR", config-block ]
+                [ "WITH", "QUANTIZATION", config-block ] ;
+sparse-def    = name, "SPARSE", [ "WITH", "SPARSE", config-block ] ;
 collection-vector-def = vector-def | sparse-def ;
 config-blocks = "WITH", ( "HNSW" | "PARAMS" | "OPTIMIZERS" | "QUANTIZATION"
                          | "VECTOR" ), config-block ;
 ```
+
+### Cluster quotas (Qdrant ≥ 1.19, REST only)
+
+```sql
+SHOW QUOTAS;
+
+SET QUOTA (
+  enabled = true,
+  max_resident_memory_percent = 80,
+  max_disk_usage_percent = 90,
+  release_margin_percent = 5
+) WAIT true;
+
+-- Full replace of the cluster config — omitted keys are unset in the new body
+SET QUOTA (enabled = false);
+
+-- Clear a limit in the replacement body
+SET QUOTA (max_disk_usage_percent = null);
+```
+
+| Key | Range | Notes |
+|-----|-------|--------|
+| `enabled` | bool | Master switch |
+| `max_resident_memory_percent` | 1–100 or `null` | Resident memory cap |
+| `max_disk_usage_percent` | 1–100 or `null` | Disk usage cap |
+| `release_margin_percent` | 0–100 or `null` | Hysteresis margin |
+| `WAIT` | bool (optional clause) | REST query `?wait=` |
+
+`SET QUOTA` is a **full replace** (`PUT /quotas`), not a merge. Restate any
+limits you want to keep. Invalid keys/ranges → `QQL-PLAN-QUOTA`.
+
+| Backend | Behavior |
+|---------|----------|
+| REST | `GET /quotas`, `PUT /quotas` |
+| gRPC | Fail-loud `QQL-GRPC-QUOTA` (no public quota service) |
+| edge | Fail-loud `QQL-EDGE-UNSUPPORTED-QUOTA` |
+
+### Memory placement & vector datatype (Qdrant ≥ 1.19)
+
+Data remains on disk; `memory` only controls how a component is held in RAM:
+
+| Placement | Meaning |
+|-----------|---------|
+| `cold` | Prefer disk; load on demand |
+| `cached` | Cache in RAM when hot |
+| `pinned` | Keep in RAM (not valid for payload) |
+
+```sql
+CREATE COLLECTION docs (
+  dense VECTOR(384, COSINE)
+    WITH VECTOR (memory = 'cached', datatype = 'turbo4')
+) WITH HNSW (memory = 'cold')
+  WITH PARAMS (payload_memory = 'cold');
+
+CREATE COLLECTION sparse_docs (
+  sparse SPARSE WITH SPARSE (modifier = 'idf', memory = 'cached')
+);
+
+CREATE COLLECTION qdocs (
+  dense VECTOR(128, DOT)
+    WITH QUANTIZATION (type = 'scalar', memory = 'pinned')
+);
+```
+
+| Config block | `memory` | Other 1.19 keys |
+|--------------|----------|-----------------|
+| `WITH HNSW` | cold \| cached \| pinned | legacy `on_disk` still accepted |
+| `WITH VECTOR` | cold \| cached \| pinned | `datatype = 'float32'\|'float16'\|'uint8'\|'turbo4'` (aliases `f32`/`f16`/`u8`/`t4`) |
+| `WITH SPARSE` | cold \| cached \| pinned | `modifier`, `datatype` (no `turbo4` for sparse) |
+| `WITH QUANTIZATION` | cold \| cached \| pinned | legacy `always_ram` still accepted |
+| `WITH PARAMS` | use **`payload_memory`** | cold \| cached only (`pinned` rejected) |
+| `CREATE INDEX … WITH` | cold \| cached \| pinned | keyword `prefix = true` |
+
+Legacy `on_disk` / `on_disk_payload` / `always_ram` still parse and dual-write
+with `memory` through Qdrant 1.19; prefer `memory` / `payload_memory` for new
+scripts (upstream plans removal around 1.21).
 
 `USING [DENSE] MODEL '<model>'` creates a collection with a single dense vector whose dimension is inferred from the embedding model. `USING HYBRID` creates the default dense+sparse topology. `HYBRID DENSE VECTOR semantic_v2 SPARSE VECTOR lexical_v2` assigns arbitrary names to those roles; `HYBRID RERANK` materializes conventional dense + sparse + `colbert` multivector (MaxSim) topology. All forms begin with `CREATE COLLECTION <name>` followed by at most one mode keyword group; `DENSE MODEL` without a preceding `USING` is rejected.
 
@@ -531,7 +633,8 @@ WITH PARAMS (
   replication_factor = 2,
   shard_number = 8,
   sharding_method = 'custom',
-  shard_keys = ['honeywell', 'ge', '3m', 'rtx']
+  shard_keys = ['honeywell', 'ge', '3m', 'rtx'],
+  payload_memory = 'cached'
 );
 ```
 
@@ -539,7 +642,8 @@ WITH PARAMS (
 |-------|------|-------------|
 | `replication_factor` | integer | Replica count per shard |
 | `write_consistency_factor` | integer | Min replicas for write ack |
-| `on_disk_payload` | boolean | Store payload on disk |
+| `on_disk_payload` | boolean | Store payload on disk (legacy; prefer `payload_memory`) |
+| `payload_memory` | string | `'cold'` or `'cached'` (Qdrant ≥ 1.19; `pinned` rejected) |
 | `shard_number` | integer | Total shard count |
 | `sharding_method` | string | `'auto'` or `'custom'` |
 | `shard_keys` | string list | Tenant identifiers for custom sharding |
@@ -550,18 +654,23 @@ WITH PARAMS (
 
 ```sql
 CREATE COLLECTION docs (
-  dense VECTOR(384, COSINE),
+  dense VECTOR(384, COSINE)
+    WITH VECTOR (memory = 'cached', datatype = 'float16'),
   sparse SPARSE,
   colbert VECTOR(128, COSINE) WITH MULTIVECTOR (comparator = 'max_sim')
-) WITH HNSW (m = 16, ef_construct = 100);
+) WITH HNSW (m = 16, ef_construct = 100, memory = 'cold')
+  WITH PARAMS (payload_memory = 'cached');
 
-ALTER COLLECTION docs WITH VECTOR (on_disk = true);
+ALTER COLLECTION docs WITH VECTOR (memory = 'pinned');
 CREATE INDEX ON COLLECTION docs FOR title TYPE text WITH (lowercase = true);
+CREATE INDEX ON COLLECTION docs FOR tenant TYPE keyword
+  WITH (prefix = true, memory = 'cached', is_tenant = true);
 CREATE SHARD KEY 'acme' ON COLLECTION docs WITH (shards_number = 2);
 DROP INDEX ON COLLECTION docs FOR title;
 DROP COLLECTION docs;
 SHOW COLLECTIONS;
 SHOW COLLECTION docs;
+SHOW QUOTAS;
 ```
 
 ### Point Counting
@@ -595,9 +704,12 @@ DELETE VECTOR dense, sparse FROM docs WHERE status = 'deprecated';
 
 ### Supported field index types
 
+All types accept optional `memory = 'cold'|'cached'|'pinned'` (Qdrant ≥ 1.19)
+alongside the legacy `on_disk` boolean where applicable.
+
 | TYPE | Index variants |
 |------|----------------|
-| `keyword` | `is_tenant`, `on_disk`, `enable_hnsw` |
+| `keyword` | `is_tenant`, `on_disk`, `enable_hnsw`, **`prefix`** (bool — enables `MATCH PREFIX`) |
 | `integer` | `lookup`, `range`, `is_principal`, `on_disk`, `enable_hnsw` |
 | `float` | `on_disk`, `is_principal`, `enable_hnsw` |
 | `geo` | `on_disk`, `enable_hnsw` |
@@ -605,3 +717,13 @@ DELETE VECTOR dense, sparse FROM docs WHERE status = 'deprecated';
 | `bool` | `on_disk`, `enable_hnsw` |
 | `datetime` | `on_disk`, `is_principal`, `enable_hnsw` |
 | `uuid` | `is_tenant`, `on_disk`, `enable_hnsw` |
+
+```sql
+-- Keyword prefix index for MATCH PREFIX filters
+CREATE INDEX ON COLLECTION docs FOR title TYPE keyword
+  WITH (prefix = true, memory = 'cached');
+
+QUERY TEXT 'search' FROM docs USING dense
+WHERE title MATCH PREFIX 'Comp'
+LIMIT 10;
+```

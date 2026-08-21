@@ -1,6 +1,7 @@
 use super::AstLowerer;
 use crate::ast::{
-    PayloadSelector, QuantizationSearchParams, ReadConsistency, SearchParams, Value, VectorSelector,
+    IdfParams, PayloadSelector, QuantizationSearchParams, ReadConsistency, SearchParams, Value,
+    VectorSelector,
 };
 use crate::error::QqlError;
 use crate::token::TokenKind;
@@ -25,6 +26,7 @@ impl<'a> AstLowerer<'a> {
                 "quantization" => {
                     params.quantization = Some(quantization(value)?);
                 }
+                "idf" => params.idf = Some(idf_params(value)?),
                 // OpenAPI query param / proto field — seconds, minimum 1.
                 "timeout" => params.timeout = Some(positive_integer(value, &key)?),
                 // OpenAPI ReadConsistency: factor N or majority|quorum|all.
@@ -199,6 +201,43 @@ fn quantization(value: Value) -> Result<QuantizationSearchParams, QqlError> {
         }
     }
     Ok(params)
+}
+
+/// OpenAPI `IdfParams`: `"global"` (collection-wide) or `{"corpus": <filter>}`.
+///
+/// The corpus is kept as a raw QQL `Value` in Qdrant filter JSON shape and is
+/// lowered to a typed plan filter by the plan layer.
+fn idf_params(value: Value) -> Result<IdfParams, QqlError> {
+    match value {
+        Value::Str(s) if s.eq_ignore_ascii_case("global") => Ok(IdfParams { corpus: None }),
+        Value::Dict(entries) => {
+            let Some((_, corpus)) = entries
+                .into_iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case("corpus"))
+            else {
+                return Err(QqlError::validation(
+                    "QQL-VALIDATION-IDF",
+                    "idf object must contain a 'corpus' filter",
+                    None,
+                ));
+            };
+            if !matches!(corpus, Value::Dict(_)) {
+                return Err(QqlError::validation(
+                    "QQL-VALIDATION-IDF",
+                    "idf corpus must be a filter object",
+                    None,
+                ));
+            }
+            Ok(IdfParams {
+                corpus: Some(corpus),
+            })
+        }
+        _ => Err(QqlError::validation(
+            "QQL-VALIDATION-IDF",
+            "idf must be 'global' or an object with a 'corpus' filter",
+            None,
+        )),
+    }
 }
 
 fn float_list(value: Value, key: &str) -> Result<Vec<f64>, QqlError> {

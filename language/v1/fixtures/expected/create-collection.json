@@ -103,6 +103,7 @@
             "inline_storage": null,
             "m": 16,
             "max_indexing_threads": null,
+            "memory": null,
             "on_disk": null,
             "payload_m": null
           },
@@ -143,6 +144,7 @@
             "bits": null,
             "compression": null,
             "encoding": null,
+            "memory": null,
             "qtype": "Scalar",
             "quantile": 0.95,
             "query_encoding": null
@@ -153,6 +155,7 @@
               "bits": null,
               "compression": null,
               "encoding": null,
+              "memory": null,
               "qtype": "Scalar",
               "quantile": 0.95,
               "query_encoding": null
@@ -192,6 +195,7 @@
             "bits": 2.0,
             "compression": null,
             "encoding": null,
+            "memory": null,
             "qtype": "Turbo",
             "quantile": null,
             "query_encoding": null
@@ -202,6 +206,7 @@
               "bits": 2.0,
               "compression": null,
               "encoding": null,
+              "memory": null,
               "qtype": "Turbo",
               "quantile": null,
               "query_encoding": null
@@ -241,6 +246,7 @@
             "bits": null,
             "compression": null,
             "encoding": null,
+            "memory": null,
             "qtype": "Binary",
             "quantile": null,
             "query_encoding": null
@@ -251,6 +257,7 @@
               "bits": null,
               "compression": null,
               "encoding": null,
+              "memory": null,
               "qtype": "Binary",
               "quantile": null,
               "query_encoding": null
@@ -290,6 +297,7 @@
             "bits": null,
             "compression": null,
             "encoding": null,
+            "memory": null,
             "qtype": "Product",
             "quantile": null,
             "query_encoding": null
@@ -300,6 +308,7 @@
               "bits": null,
               "compression": null,
               "encoding": null,
+              "memory": null,
               "qtype": "Product",
               "quantile": null,
               "query_encoding": null
@@ -354,6 +363,7 @@
               "bits": null,
               "compression": null,
               "encoding": null,
+              "memory": null,
               "qtype": "Scalar",
               "quantile": null,
               "query_encoding": null
@@ -392,6 +402,7 @@
               "inline_storage": null,
               "m": 0,
               "max_indexing_threads": null,
+              "memory": null,
               "on_disk": null,
               "payload_m": null
             },
@@ -416,12 +427,14 @@
             "inline_storage": null,
             "m": 16,
             "max_indexing_threads": null,
+            "memory": null,
             "on_disk": null,
             "payload_m": null
           },
           "optimizers": null,
           "params": {
             "on_disk_payload": null,
+            "payload_memory": null,
             "read_fan_out_delay_ms": null,
             "read_fan_out_factor": null,
             "replication_factor": 2,

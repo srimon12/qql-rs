@@ -35,12 +35,12 @@ Qdrant" hint.
 | CTEs / prefetch | yes | `WITH … PREFETCH` |
 | Cross rerank | yes | client-side, host cross-encoder model |
 | Score threshold, offset/limit | yes | |
-| `PARAMS (hnsw_ef, exact, quantization, indexed_only)` | yes | |
-| Payload filters | yes | comparisons, `IN`, `BETWEEN`, `MATCH`, geo, `NESTED`, … |
+| `PARAMS (hnsw_ef, exact, quantization, indexed_only, idf)` | yes | including per-query sparse IDF corpora |
+| Payload filters | yes | comparisons, `IN`, `BETWEEN`, `MATCH` / `MATCH PREFIX`, `SLICE`, geo, `NESTED`, … |
 | `UPSERT` with auto-embedding | yes | dense, sparse, multi, image |
 | `DELETE` / payload / vector operations | yes | by id or filter |
 | `CREATE/DROP COLLECTION` | yes | |
-| `CREATE/DROP INDEX` | yes | keyword, integer, float, bool, geo, text, datetime, uuid |
+| `CREATE/DROP INDEX` | yes | keyword (incl. `prefix`), integer, float, bool, geo, text, datetime, uuid |
 | `SHOW COLLECTIONS` / `SHOW COLLECTION` | yes | |
 | Query/update batching | partial | fan-out, not a native batch RPC |
 | `GROUP BY` | no | `QQL-EDGE-UNSUPPORTED-GROUP-BY` |
@@ -48,6 +48,7 @@ Qdrant" hint.
 | `CREATE/DROP SHARD KEY` | no | `QQL-EDGE-UNSUPPORTED-SHARD-KEY` |
 | `ALTER COLLECTION` | no | `QQL-EDGE-UNSUPPORTED-ALTER` |
 | Collection `WITH PARAMS` | no | `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` |
+| `SHOW QUOTAS` / `SET QUOTA` | no | `QQL-EDGE-UNSUPPORTED-QUOTA` (cluster REST only) |
 | `PARAMS (acorn = …)` | no | `QQL-EDGE-UNSUPPORTED-ACORN` |
 | `RECOMMEND STRATEGY average_vector` | no | `QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY` |
 | Point-id query inputs | no | `QQL-EDGE-UNSUPPORTED-POINT-REF` |
@@ -178,6 +179,7 @@ the feature, the reason, and a remediation hint.
 | `QQL-EDGE-UNSUPPORTED-SHARD-KEY` | `CREATE` / `DROP SHARD KEY` |
 | `QQL-EDGE-UNSUPPORTED-ALTER` | `ALTER COLLECTION` |
 | `QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS` | collection `WITH PARAMS` (replication, shard count, …) |
+| `QQL-EDGE-UNSUPPORTED-QUOTA` | `SHOW QUOTAS` / `SET QUOTA` (cluster REST `/quotas` only) |
 | `QQL-EDGE-UNSUPPORTED-ACORN` | `PARAMS (acorn = …)` |
 | `QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY` | `RECOMMEND STRATEGY average_vector` |
 | `QQL-EDGE-UNSUPPORTED-POINT-REF` | point-id-only inputs (need materialized vectors) |
@@ -198,11 +200,12 @@ mapped — deleting "half a batch" because some IDs could not be represented is
 exactly what edge refuses to do.
 {% /aside %}
 
-{% aside type="note" title="Group by, shards, and clusters need remote Qdrant" %}
+{% aside type="note" title="Group by, shards, quotas, and clusters need remote Qdrant" %}
 `GROUP BY`, custom `SHARD` routing, shard-key administration, `ALTER
-COLLECTION`, ACORN, and collection `WITH PARAMS` are cluster features. Edge
-keeps the whole feature surface of the language and rejects at execution —
-switch to REST or gRPC for those workloads.
+COLLECTION`, ACORN, collection `WITH PARAMS`, and `SHOW QUOTAS` /
+`SET QUOTA` are cluster or REST-only features. Edge keeps the whole language
+surface and rejects at execution — switch to REST (or gRPC where supported)
+for those workloads. Per-query sparse `idf` params **are** supported offline.
 {% /aside %}
 
 ## Code catalog

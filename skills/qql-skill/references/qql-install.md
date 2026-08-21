@@ -3,6 +3,19 @@
 Install the pieces you need. Runtime can talk **REST (6333)** and/or **gRPC (6334)** —
 both are first-class; pick at client construction time.
 
+## Backend version notes
+
+| Feature set | Minimum backend |
+|-------------|-----------------|
+| Core QQL search / hybrid / multivector | Qdrant **1.x** (protocol pin tracks openapi/proto in tree) |
+| Quotas, memory placement, `turbo4`, `MATCH PREFIX`, `SLICE`, query `idf` | Qdrant **1.19.0+** |
+| Edge quotas | **Unsupported** (`QQL-EDGE-UNSUPPORTED-QUOTA`) |
+| Edge IDF search params | qdrant-edge **0.8+** |
+| gRPC quotas | **Unsupported** (`QQL-GRPC-QUOTA`) — use REST for `SHOW QUOTAS` / `SET QUOTA` |
+
+For local development against 1.19 features, run a Qdrant **1.19** (or newer) server
+on `6333`/`6334`. Older servers will reject new config keys / filter conditions.
+
 ## Rust CLI (`qql`)
 
 ### From source
