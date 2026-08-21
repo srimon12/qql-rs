@@ -116,6 +116,17 @@ class TestPyQql(unittest.TestCase):
         self.assertEqual(len(stmts), 1)
         self.assertEqual(stmts[0]["Query"]["collection"]["Explicit"], "docs")
 
+    def test_client_compile(self):
+        """Client.compile mirrors module-level compile_query (parity with nqql)."""
+        client = pyqql.Client("http://localhost:6333", use_grpc=False)
+        route = client.compile("QUERY 'hello' FROM docs LIMIT 10")
+        expected = pyqql.compile_query("QUERY 'hello' FROM docs LIMIT 10")
+        self.assertEqual(route["stmt_type"], "query")
+        self.assertEqual(route, expected)
+
+        with self.assertRaises(Exception):
+            client.compile("NOT A QUERY")
+
     def test_parse_script(self):
         results = pyqql.parse(
             "QUERY 'test' FROM users LIMIT 5; CREATE COLLECTION items"

@@ -2,7 +2,7 @@
 
 All public packages use one repository version. The current release is `0.2.0`;
 the corresponding Git tag is `v0.2.0`. The QQL language specification version
-(`1.3`) is independent from the package release version.
+(`1.4`) is independent from the package release version.
 
 ## Published artifacts
 
@@ -11,6 +11,7 @@ the corresponding Git tag is `v0.2.0`. The QQL language specification version
 | crates.io | `qql-core`, `qql-plan`, `qql-embed`, `qql`, `qql-edge`, `qql-cli` |
 | PyPI | `pyqql`, `pyqql-edge` |
 | npm | `@veristamp/nqql`, `@veristamp/nqql-edge`, `qql-wasm` |
+| VS Code Marketplace | `srimon12.qql-lang` (extension version is independent; currently `0.2.2`) |
 | GitHub Releases | Default REST/gRPC `qql` CLI archives and checksums |
 
 `qql-conformance`, `qql-grammar-gen`, and the Rust implementation crates for
@@ -135,15 +136,29 @@ server-side branch rules are therefore mandatory.
    - `crates/nqql/package.json`;
    - `crates/nqql-edge/package.json`;
    - Node optional platform dependencies.
-4. Update release notes and user-facing installation documentation.
-5. Validate synchronized metadata:
+4. Refresh the bundled editor WASM so it matches `crates/qql-wasm`:
+
+   ```bash
+   wasm-pack build crates/qql-wasm --target bundler --out-dir ../../editors/vscode/wasm
+   ```
+
+   The extension ships this copy; a stale bundle means diagnostics and
+   formatting reject syntax that the grammar, snippets, and completions
+   advertise. Verify the exports (e.g. `formatQuery`) exist in
+   `editors/vscode/wasm/qql_wasm.d.ts` before continuing.
+5. If the extension changed, bump `editors/vscode/package.json`
+   (its version is independent of the workspace version), run
+   `npm run check` and `npm test` inside `editors/vscode/`, and publish with
+   `npx vsce publish` — VSIX binaries are never committed.
+6. Update release notes and user-facing installation documentation.
+7. Validate synchronized metadata:
 
    ```bash
    python3 scripts/check_release.py --version 0.2.0
    ```
 
-6. Open a pull request into `dev` and let CI pass.
-7. Run the `Release` workflow manually from `dev`.
+8. Open a pull request into `dev` and let CI pass.
+9. Run the `Release` workflow manually from `dev`.
 
 A manual Release run builds and packages every artifact but has no publishing
 jobs. Download and inspect:

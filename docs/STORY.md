@@ -136,11 +136,11 @@ Interactive browser-based QQL editor with CodeMirror 6, 163-keyword syntax highl
 
 **4. VS Code extension** — `editors/vscode/`
 
-Syntax highlighting (TextMate grammar with 163 keywords), live diagnostics (same WASM parser), and 19 snippet templates. 850 KB VSIX, zero external dependencies.
+Syntax highlighting (TextMate grammar with 171 keywords), live diagnostics (same WASM parser), and 19 snippet templates. 850 KB VSIX, zero external dependencies.
 
 **5. Language specification** — `language/v1/grammar.pest`
 
-A canonical PEG spec — 632 lines, 19 statement types, 14 query expressions. The reference parser in `qql-core` is hand-written (lexer + `AstLowerer`); pest is **not** compiled into the runtime, it exists only as a test-only harness in `qql-conformance` that executes `grammar.pest` against the fixture corpus. The spec is the authority — implementations derive from it, not the other way around. Conformance fixtures: 35 valid `.qql` files (249 statements), 53 invalid cases, and 35 canonical AST snapshots, over 163 grammar keywords.
+A canonical PEG spec — 688 lines, 19 statement types, 14 query expressions. The reference parser in `qql-core` is hand-written (lexer + `AstLowerer`); pest is **not** compiled into the runtime, it exists only as a test-only harness in `qql-conformance` that executes `grammar.pest` against the fixture corpus. The spec is the authority — implementations derive from it, not the other way around. Conformance fixtures: 38 valid `.qql` files (261 statements), 53 invalid cases, and 38 canonical AST snapshots, over 171 grammar keywords.
 
 ### Published artifacts (v0.1.2)
 

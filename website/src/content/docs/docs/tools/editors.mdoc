@@ -8,19 +8,20 @@ sidebar:
 ## VS Code extension
 
 The official extension is `qql-lang` (publisher `srimon12`), displayed as
-"QQL — Qdrant Query Language". It is published on the Visual Studio Code
-marketplace and is also bundled as a local VSIX in the repository at
-`editors/vscode/qql-lang-*.vsix` (currently **0.2.2**).
+"QQL — Qdrant Query Language" (extension version **0.2.2**, bundling the QQL
+**1.4** parser). It is published on the Visual Studio Code marketplace; VSIX
+binaries are not committed to the repository — build one locally with
+`npm run package` inside `editors/vscode/` (requires `@vscode/vsce`).
 
 {% terminal title="Install from the marketplace" %}
 code --install-extension srimon12.qql-lang
 {% /terminal %}
 
-Or install the local VSIX manually:
+Or install a locally built VSIX manually:
 
 1. Open the Extensions panel (`Ctrl+Shift+X`).
 2. Open the `⋯` (More Actions) menu.
-3. Choose **Install from VSIX...** and select `editors/vscode/qql-lang-*.vsix`.
+3. Choose **Install from VSIX...** and select your built `qql-lang-*.vsix`.
 
 {% aside type="note" title="Requirements" %}
 Requires VS Code 1.85 or newer. The extension is fully offline: live
@@ -50,6 +51,15 @@ Completions cover 130+ keywords and 28 statement snippet templates, including:
 - `QUERY POINTS`, `QUERY ORDER BY`, `QUERY SAMPLE`
 - `UPSERT INTO`, `CREATE COLLECTION`, `CREATE INDEX`
 - `SCROLL`, `COUNT`, `COUNT EXACT`, `DELETE`, `DELETE PAYLOAD`
+
+### Format Document
+
+The extension registers a document formatter (Shift+Alt+F, or **Format
+Document** from the command palette). It runs the source through the bundled
+canonical formatter — the same AST-based formatter as `qql fmt` and the WASM
+`formatQuery()` — so clause order, keyword casing, whitespace, and escaping are
+normalized. Unparseable documents are left untouched; diagnostics report the
+syntax error instead.
 
 ### Language configuration
 

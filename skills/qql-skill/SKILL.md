@@ -299,6 +299,7 @@ qql execute <file.qql> [--stop-on-error]     Execute statements from file
 qql explain <query> [--json] [--quiet]       Show execution plan (no Qdrant needed)
 qql connect                                   Interactive REPL
 qql convert [file.json]                       Convert REST JSON to QQL
+qql fmt [file.qql] [--check] [--write]        Format QQL source into canonical form
 qql dump <collection> <output.qql> [options]  Dump collection to QQL script
 qql doctor [--json] [--quiet]                 Check Qdrant connection health
 qql --edge exec <query> [options]           Execute against local qdrant-edge

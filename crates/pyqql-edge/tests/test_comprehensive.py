@@ -114,6 +114,20 @@ class TestParseAPI(unittest.TestCase):
         self.assertIsInstance(cq, dict)
         self.assertEqual(cq["method"], "POST")
 
+    def test_b13_client_compile_parity(self):
+        """Client.compile mirrors module-level compile_query (parity with pyqql)."""
+        executor = pyqql_edge.local_executor(
+            tempfile.mkdtemp(prefix="pyqql-edge-compile-"), False
+        )
+        try:
+            route = executor.compile('QUERY "hello" FROM docs LIMIT 5')
+            expected = pyqql_edge.compile_query('QUERY "hello" FROM docs LIMIT 5')
+            self.assertIsInstance(route, dict)
+            self.assertEqual(route, expected)
+            self.assertEqual(route["stmt_type"], "query")
+        finally:
+            executor.close()
+
 
 # ============================================================================
 # Category C: Error handling & inject_filter

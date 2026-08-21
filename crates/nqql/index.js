@@ -202,7 +202,10 @@ async function execute(query, options) {
 async function executeStmt(stmt, options) {
   try {
     return JSON.parse(
-      await nativeBinding.executeStmt(stmt, normalizeClientOptions(options)),
+      await nativeBinding.executeStmt(
+        stmt,
+        normalizeClientOptions(validateOptions(options)),
+      ),
     );
   } catch (error) {
     throw buildError(error);
@@ -251,7 +254,7 @@ module.exports = {
   parseJson,
   isValid,
   injectFilter,
-    tokenize,
+  tokenize,
   compileQuery,
   explain,
   explainStmt,

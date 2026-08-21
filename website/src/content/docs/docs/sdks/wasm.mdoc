@@ -107,6 +107,22 @@ const explainBytesUtf8 = explainBytes(query);
 const explainText = new TextDecoder().decode(explainBytesUtf8);
 ```
 
+## Format source
+
+`formatQuery(source)` returns the canonical form of a QQL string — normalized
+clause order, keyword casing, whitespace, and escaping. It throws on a parse
+error. This is the same formatter the `qql fmt` CLI command and the VS Code
+**Format Document** command use.
+
+```javascript
+import { formatQuery } from "qql-wasm";
+
+await init();
+
+console.log(formatQuery("query text 'x' from docs using dense limit 5"));
+// QUERY 'x' FROM docs USING dense LIMIT 5;
+```
+
 ## The Stmt class
 
 `new Stmt(source)` parses exactly one statement and returns an owned handle.
@@ -246,6 +262,7 @@ releases it automatically.
 | `analyze(source)` | validity, tokens, AST, routes, explain, error | Editors and offline diagnostics |
 | `compile`, `explain`, `inject_filter` | route, text, rewritten AST | One-shot offline planning helpers |
 | `compileBytes`, `explainBytes` | `Uint8Array` | Transferable worker or IPC payloads |
+| `formatQuery` | canonical source string | Normalize clause order, casing, and whitespace |
 | `new Stmt(source)` | owned statement handle | `injectFilter`, route compile, and shard assignment |
 | `Stmt.injectFilter`, `Stmt.shardKey` | mutated statement handle | Trusted filtering and optional routing |
 | `Stmt.toObject`, `toJSON`, `compileRoute` | AST or route | Inspect a single owned statement |

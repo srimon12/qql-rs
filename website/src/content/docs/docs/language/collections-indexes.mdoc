@@ -66,7 +66,7 @@ individual dense vectors (`WITH HNSW`, `WITH VECTOR`, `WITH QUANTIZATION`,
 
 | Block | Accepted keys |
 |---|---|
-| `HNSW` | `m`, `ef_construct`, `full_scan_threshold`, `max_indexing_threads`, `on_disk`, `payload_m`, `inline_storage`, `memory` (`cold`/`cached`; not `pinned`) |
+| `HNSW` | `m`, `ef_construct`, `full_scan_threshold`, `max_indexing_threads`, `on_disk`, `payload_m`, `inline_storage`, `memory` (`cold`/`cached`/`pinned`) |
 | `VECTOR` | `on_disk`, `memory` (`cold`/`cached`/`pinned`), `datatype` (`float32`/`float16`/`uint8`/`turbo4`) |
 | `OPTIMIZERS` | `deleted_threshold`, `vacuum_min_vector_number`, `default_segment_number`, `max_segment_size`, `memmap_threshold`, `indexing_threshold`, `flush_interval_sec`, `max_optimization_threads`, `prevent_unoptimized` |
 | `PARAMS` | `replication_factor`, `write_consistency_factor`, `on_disk_payload`, `payload_memory` (`cold`/`cached` only), `shard_number`, `sharding_method`, `shard_keys` |

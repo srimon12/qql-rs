@@ -131,6 +131,15 @@ for stmt in stmts:
 results = client.execute(stmts)
 ```
 
+For raw AST JSON without Python object allocation (parity with Node's
+`parseJson`), use `parse_json()`:
+
+```python
+from pyqql import parse_json
+
+ast_json = parse_json("QUERY 'a' FROM docs LIMIT 5")  # JSON string of the AST array
+```
+
 ---
 
 ## 4. Batch Execution

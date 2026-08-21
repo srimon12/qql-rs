@@ -32,6 +32,7 @@ the `grpc` feature. Otherwise the REST transport is used.
 | `qql explain "<query>"` | Show the execution plan without a backend (plan text; JSON with `--json`) |
 | `qql connect` | Interactive REPL |
 | `qql convert [file.json]` | Convert Qdrant REST JSON to QQL (stdin if no file) |
+| `qql fmt [file.qql]` | Format QQL source into canonical form (stdin if no file; prints to stdout). `--check` exits non-zero when the source is not formatted, `--write` rewrites the file in place |
 | `qql dump <collection> <output.qql>` | Export a collection to a `.qql` script (`--batch-size N`, default 100; typed `CREATE COLLECTION` + `CREATE INDEX` + batched `UPSERT`) |
 | `qql doctor` | Check backend and embedder health (`--json`) |
 | `qql config edge` | Configure persistent edge settings (see below) |

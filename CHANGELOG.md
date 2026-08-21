@@ -25,12 +25,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🔄 Changed
 - **Language version 1.4** — additive contract for quotas, memory placement, `MATCH PREFIX`, `SLICE`, per-query `idf`, keyword `prefix`, and dense `turbo4`. Spec, conformance counts (38 / 261 / 53 / 38), website, crate READMEs, skills, and VS Code **0.2.2** (snippets + description) updated together.
+- **Bundled editor WASM rebuilt** — `editors/vscode/wasm/` now matches the current `qql-wasm` crate: the QQL 1.4 parse surface (`QUOTA`/`PREFIX`/`SLICE`/`turbo4`/`payload_memory`) and the route-affinity API are live in extension diagnostics, completions, and formatting. CI gains an `editor-check` job that fails when the committed bundle's export surface lags a fresh wasm-pack build.
+- **Release tooling covers the extension** — `RELEASING.md` documents the language **1.4** spec version, the editor WASM refresh step, and VSIX packaging; `scripts/check_release.py` validates `editors/vscode/package.json` and requires the bundled WASM to expose current exports.
 - **Qdrant 1.19.0 protocol pin** — `openapi.json` and public gRPC protos under `crates/qql-runtime/proto/` updated to 1.19.0. Only public services are compiled (internal raft/telemetry/quota protos are not vendored). Legacy `/points/search`, `/recommend`, and `/discover` REST endpoints were removed upstream; the runtime already used unified `/points/query`.
 - **`SET QUOTA` is a full replace** — `PUT /quotas` replaces the whole config; omitted keys (including `key = null`) are unset in the replacement body, not a merge of the previous limits.
 - **Fallible IDF corpus lowering** — malformed `idf.corpus` objects return `QQL-PLAN-IDF` instead of panicking in the planner.
 
+### 🐛 Fixed
+- **SDK declaration drift** — `pyqql_edge.Client.compile()` added to the `.pyi` stubs; the duplicated `compileBytes` / `explainBytes` / `formatQuery` declarations removed from the qql-wasm custom TS section (wasm-bindgen already emits them); `nqql-edge`'s non-constructible `Client` documented in `index.d.ts`.
+- **Wrapper option validation** — `nqql.executeStmt` and the nqql-edge standalone `execute`/`executeStmt` paths now reject invalid `onError` values instead of silently ignoring them.
+- **`pyqql_edge.Stmt.to_dict` shape** — now round-trips through serde before pythonizing, matching `to_json()` and `pyqql.Stmt.to_dict`.
+- **Error-code reference** — renamed the phantom `QQL-VALIDATION-FEEDBACK-STRATEGY` to the emitted `QQL-PARSE-FEEDBACK-STRATEGY`, added the missing lexical/parse codes (`QQL-LEX-NUMBER`, `QQL-PARSE-COUNT-CONFIG`, `QQL-PARSE-QUOTA`, `QQL-PARSE-RERANK`, `QQL-PARSE-SHARD-KEY-CONFIG`), regenerated the complete code set over all five emitting crates, and corrected the HNSW `memory` row (`pinned` is accepted).
+- **Formatter documentation** — `qql fmt`, WASM `formatQuery()`, and the VS Code Format Document provider are now documented on the website (CLI, WASM SDK, editors pages), in the agent skill, and the Python/Node SDK pages list `parse_json`.
+
 ### 📚 Documentation
 - Full docs pass for 1.19/1.4: crate READMEs, `docs/syntax.md` / `docs/filters.md`, website language/reference/edge/SDK pages, skills (`qql-examples` §26–§30, gaps, multitenancy, install), and examples catalog.
+- Stale conformance counts (35 valid / 249 statements) refreshed to 38 / 261 in `docs/STORY.md` and `docs/parser_generation_design.md`.
 
 ### ⚠️ Deprecations (upstream dual-write)
 - QQL still accepts `on_disk` / `on_disk_payload` / `always_ram` and dual-writes them with the new `memory` placement through Qdrant 1.19; prefer `memory` / `payload_memory` for new scripts. Upstream plans removal around 1.21.

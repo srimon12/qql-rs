@@ -112,6 +112,26 @@ class Client {
         return this;
     }
     /**
+     * Current read-affinity key, or `null` when unset.
+     * @returns {string | undefined}
+     */
+    get routeAffinity() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.client_routeAffinity(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            let v1;
+            if (r0 !== 0) {
+                v1 = getStringFromWasm0(r0, r1).slice();
+                wasm.__wbindgen_export5(r0, r1 * 1, 1);
+            }
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
      * Set a JS embedder: `async (texts: string[]) => number[][]`.
      * Called with the full batch — do not loop one-by-one inside the callback
      * if your model supports batching (Transformers.js pipeline, etc.).
@@ -178,6 +198,16 @@ class Client {
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
         }
+    }
+    /**
+     * Set Qdrant 1.19 read affinity. Pins reads to a stable replica via the
+     * `X-Qdrant-Route-Affinity` header. Pass `null`/`""` to clear.
+     * @param {string | null} [affinity]
+     */
+    setRouteAffinity(affinity) {
+        var ptr0 = isLikeNone(affinity) ? 0 : passStringToWasm0(affinity, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        var len0 = WASM_VECTOR_LEN;
+        wasm.client_setRouteAffinity(this.__wbg_ptr, ptr0, len0);
     }
 }
 if (Symbol.dispose) Client.prototype[Symbol.dispose] = Client.prototype.free;

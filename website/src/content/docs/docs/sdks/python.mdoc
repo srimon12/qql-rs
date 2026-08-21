@@ -77,6 +77,7 @@ print(tokenize(query))
 | `Client.execute` / `execute_async` | report dictionary | Execute source, statements, or an array; choose sync or async host flow |
 | `Client.explain` / `Client.compile` | plan or route dictionary | Inspect work before executing it |
 | `parse(source)` | `list[Stmt]` | You need to inspect or mutate a statement |
+| `parse_json(source)` | JSON string of the AST array | Forward a parse over HTTP/IPC without Python object overhead |
 | `Stmt.inject_filter`, `Stmt.shard_key` | mutated statement | Enforce a predicate and optionally choose routing |
 | `Stmt.to_dict` / `Stmt.to_json` | AST representation | Log or inspect the rewritten statement |
 | `is_valid`, `tokenize`, `explain` | boolean, tokens, plan | Lightweight strict parser tools |
