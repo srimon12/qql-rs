@@ -1,6 +1,6 @@
 {
   "name": "@veristamp/nqql-edge",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Local QQL execution for Node.js with qdrant-edge and FastEmbed.",
   "main": "index.js",
   "types": "index.d.ts",
@@ -57,9 +57,9 @@
     ]
   },
   "optionalDependencies": {
-    "@veristamp/nqql-edge-linux-x64-gnu": "0.2.0",
-    "@veristamp/nqql-edge-darwin-arm64": "0.2.0",
-    "@veristamp/nqql-edge-win32-x64-msvc": "0.2.0"
+    "@veristamp/nqql-edge-linux-x64-gnu": "0.2.1",
+    "@veristamp/nqql-edge-darwin-arm64": "0.2.1",
+    "@veristamp/nqql-edge-win32-x64-msvc": "0.2.1"
   },
   "devDependencies": {
     "@napi-rs/cli": "3.7.4"

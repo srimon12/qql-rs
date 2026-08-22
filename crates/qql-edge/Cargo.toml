@@ -22,10 +22,10 @@ fastembed-local = ["fastembed"]
 http-embedding = ["qql/rest"]
 
 [dependencies]
-qql-core = { version = "0.2.0", path = "../qql-core", features = ["serde", "json", "std"] }
-qql-plan = { version = "0.2.0", path = "../qql-plan" }
-qql-embed = { version = "0.2.0", path = "../qql-embed" }
-qql = { version = "0.2.0", path = "../qql-runtime", default-features = false }
+qql-core = { version = "0.2.1", path = "../qql-core", features = ["serde", "json", "std"] }
+qql-plan = { version = "0.2.1", path = "../qql-plan" }
+qql-embed = { version = "0.2.1", path = "../qql-embed" }
+qql = { version = "0.2.1", path = "../qql-runtime", default-features = false }
 
 fastembed = { version = "5", optional = true, default-features = false, features = [
     "ort-download-binaries-rustls-tls",

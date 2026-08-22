@@ -174,7 +174,7 @@ VSIX binaries are **not** committed to the repo. Build one locally or download f
 code --install-extension qql-lang-*.vsix --force
 ```
 
-Extension packaging version is in `package.json` (**0.2.2**). It ships the QQL **0.2.0** WASM parser from this monorepo (crate version need not match the VSIX version). Note: the checked-in WASM binary may still reflect a pre-1.4 parse surface until rebuilt with `wasm-pack`; TextMate / keyword artifacts stay in sync with QQL **1.4** via `qql-grammar-gen generate` without a WASM rebuild.
+Extension packaging version is in `package.json` (**0.2.3**). It ships the QQL **0.2.1** WASM parser from this monorepo (crate version need not match the VSIX version). Note: the checked-in WASM binary may still reflect a pre-1.4 parse surface until rebuilt with `wasm-pack`; TextMate / keyword artifacts stay in sync with QQL **1.4** via `qql-grammar-gen generate` without a WASM rebuild.
 
 ### Build from source
 

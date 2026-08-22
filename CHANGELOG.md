@@ -8,7 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 
-## [Unreleased]
+## [0.2.1] - 2026-08-22
+
+### 📦 Packaging
+- **Workspace 0.2.1** — all crates, `pyqql` / `pyqql-edge` (PyPI), `@veristamp/nqql` / `@veristamp/nqql-edge` + platform packages (npm), and `qql-wasm` move to **0.2.1** together.
+- **VS Code extension 0.2.3** — Marketplace packaging bump (immutable `0.2.2` slot); its version stays independent of the workspace version.
 
 ### 🚀 Added
 - **Canonical QQL formatter (`qql fmt`)** — a new `qql-core::fmt` AST-based pretty-printer normalizes QQL source (clause order, keyword casing, string escaping, whitespace) and always re-parses to an identical AST. Exposed as `qql fmt [FILE] [--check] [--write]` in the CLI, `formatQuery()` in `qql-wasm`, and a **Format Document** provider in the VS Code extension. Round-trip + idempotence are guaranteed by property tests over the full conformance fixture corpus.

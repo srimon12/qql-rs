@@ -1,7 +1,7 @@
 /** QQL landing page copy — mirrors Veristamp's apps/landing/src/data/landing.ts. */
 
 export const hero = {
-  badge: "v0.2.0 · MIT · by Veristamp",
+  badge: "v0.2.1 · MIT · by Veristamp",
   headline: "A query language for Qdrant.",
   tagline: "QQL is to Qdrant what SQL is to Postgres.",
   lede: "Search, hybrid retrieval, filtering, reranking, mutations, and schema — written as statements instead of hand-built JSON. One typed core parses, plans, and executes across Rust, Python, Node.js, WASM, REST, gRPC, and an in-process edge runtime.",
@@ -115,7 +115,7 @@ export const design = {
 export const limits = {
   label: "Current limits",
   statement: "Young, Qdrant-specific, and honest about it.",
-  body: "v0.2.0 is weeks old and the API surface is stabilizing, not frozen. Edge is intentionally single-node — group-by, custom shard routing, and replication are rejected with stable error codes. Benchmarks are single-run samples, not a CI suite. The gaps document is public.",
+  body: "v0.2.1 is weeks old and the API surface is stabilizing, not frozen. Edge is intentionally single-node — group-by, custom shard routing, and replication are rejected with stable error codes. Benchmarks are single-run samples, not a CI suite. The gaps document is public.",
   foot: "Fail-closed by default · Stable error codes · Public gaps doc",
 } as const;
 
@@ -162,7 +162,7 @@ export const faq = {
     {
       question: "Is it production-ready?",
       answer:
-        "It is young — v0.2.0. Fail-closed defaults, OpenAPI contract tests, a conformance corpus, and a public gaps document. The API surface is stabilizing, not frozen.",
+        "It is young — v0.2.1. Fail-closed defaults, OpenAPI contract tests, a conformance corpus, and a public gaps document. The API surface is stabilizing, not frozen.",
     },
     {
       question: "Can I try it without a cluster?",

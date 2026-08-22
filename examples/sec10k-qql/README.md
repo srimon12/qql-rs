@@ -21,7 +21,7 @@ Layer 3  inject_filter + SHARD / stmt.shard_key
 
 - Qdrant at `QDRANT_URL` (default `http://localhost:6333`)
 - OpenAI-compatible embeddings at `EMBED_URL` (default LM Studio `http://127.0.0.1:1234`)
-- `pyqql` 0.2.0+ (`pip install -e crates/pyqql` or the workspace wheel)
+- `pyqql` 0.2.1+ (`pip install -e crates/pyqql` or the workspace wheel)
 - Network access to `sec.gov` for filing download
 
 ```bash

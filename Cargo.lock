@@ -3163,7 +3163,7 @@ checksum = "0676bb32a98c1a483ce53e500a81ad9c3d5b3f7c920c28c24e9cb0980d0b5bc8"
 
 [[package]]
 name = "nqql"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "napi",
  "napi-derive",
@@ -3177,7 +3177,7 @@ dependencies = [
 
 [[package]]
 name = "nqql-edge"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "napi",
  "napi-derive",
@@ -4108,7 +4108,7 @@ dependencies = [
 
 [[package]]
 name = "pyqql"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "pyo3",
  "pyo3-async-runtimes",
@@ -4123,7 +4123,7 @@ dependencies = [
 
 [[package]]
 name = "pyqql-edge"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "pyo3",
  "pyo3-async-runtimes",
@@ -4262,7 +4262,7 @@ dependencies = [
 
 [[package]]
 name = "qql"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4289,7 +4289,7 @@ dependencies = [
 
 [[package]]
 name = "qql-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "clap",
  "mimalloc",
@@ -4306,7 +4306,7 @@ dependencies = [
 
 [[package]]
 name = "qql-conformance"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "pest",
  "pest_derive",
@@ -4317,7 +4317,7 @@ dependencies = [
 
 [[package]]
 name = "qql-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "phf 0.11.3",
  "serde",
@@ -4326,7 +4326,7 @@ dependencies = [
 
 [[package]]
 name = "qql-edge"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "fastembed",
@@ -4343,7 +4343,7 @@ dependencies = [
 
 [[package]]
 name = "qql-embed"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "qql-core",
@@ -4352,11 +4352,11 @@ dependencies = [
 
 [[package]]
 name = "qql-grammar-gen"
-version = "0.2.0"
+version = "0.2.1"
 
 [[package]]
 name = "qql-plan"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "qql-core",
  "serde",
@@ -4365,7 +4365,7 @@ dependencies = [
 
 [[package]]
 name = "qql-wasm"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "gloo-net",
