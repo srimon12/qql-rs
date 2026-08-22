@@ -1,6 +1,5 @@
 {
   "name": "qql-wasm",
-  "type": "module",
   "collaborators": [
     "Srimon Danguria <srimon12mckv@gmail.com>"
   ],
@@ -14,16 +13,11 @@
   "files": [
     "qql_wasm_bg.wasm",
     "qql_wasm.js",
-    "qql_wasm_bg.js",
     "qql_wasm.d.ts"
   ],
   "main": "qql_wasm.js",
   "homepage": "https://github.com/srimon12/qql-rs",
   "types": "qql_wasm.d.ts",
-  "sideEffects": [
-    "./qql_wasm.js",
-    "./snippets/*"
-  ],
   "keywords": [
     "qql",
     "qdrant",

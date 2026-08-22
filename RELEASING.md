@@ -139,8 +139,14 @@ server-side branch rules are therefore mandatory.
 4. Refresh the bundled editor WASM so it matches `crates/qql-wasm`:
 
    ```bash
-   wasm-pack build crates/qql-wasm --target bundler --out-dir ../../editors/vscode/wasm
+   wasm-pack build crates/qql-wasm --target nodejs --out-dir ../../editors/vscode/wasm
    ```
+
+   The extension loads the bundle with plain `require()` in a CommonJS
+   context, so the **`nodejs` target is required**. A `--target bundler`
+   rebuild produces an ESM entry that imports `./qql_wasm_bg.wasm`, which
+   Node 22 (CI) and the VS Code extension host cannot load
+   (`ERR_UNKNOWN_FILE_EXTENSION`).
 
    The extension ships this copy; a stale bundle means diagnostics and
    formatting reject syntax that the grammar, snippets, and completions
