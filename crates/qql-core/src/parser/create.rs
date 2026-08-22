@@ -179,7 +179,10 @@ impl<'a> AstLowerer<'a> {
                                         existing.on_disk = new_idx.on_disk;
                                     }
                                     if new_idx.datatype.is_some() {
-                                        existing.datatype = new_idx.datatype.clone();
+                                        existing.datatype = new_idx.datatype;
+                                    }
+                                    if new_idx.memory.is_some() {
+                                        existing.memory = new_idx.memory;
                                     }
                                 } else {
                                     index = Some(new_idx);

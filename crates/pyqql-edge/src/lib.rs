@@ -69,7 +69,11 @@ impl PyStmt {
     }
 
     fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        pythonize::pythonize(py, &self.inner).map_err(|e| PySyntaxError::new_err(e.to_string()))
+        // Round-trip through serde_json first so the dict shape matches
+        // `to_json()` exactly (parity with `pyqql.Stmt.to_dict`).
+        let val =
+            serde_json::to_value(&self.inner).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+        pythonize::pythonize(py, &val).map_err(|e| PySyntaxError::new_err(e.to_string()))
     }
 }
 
@@ -261,6 +265,12 @@ impl PyClient {
     fn explain(&self, query: &Bound<'_, PyAny>) -> PyResult<PyObject> {
         let py = query.py();
         do_explain(py, query)
+    }
+
+    /// Compile a QQL query to its transport route without executing (parity
+    /// with `pyqql.Client.compile` / `nqql-edge` `Client.compile`).
+    fn compile<'py>(&self, py: Python<'py>, query: &str) -> PyResult<Bound<'py, PyAny>> {
+        compile_query(py, query)
     }
 
     /// Flush and release edge storage. Idempotent.

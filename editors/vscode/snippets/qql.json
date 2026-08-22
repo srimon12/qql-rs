@@ -77,5 +77,70 @@
       "  LIMIT ${6:10};"
     ],
     "description": "Recommendation search"
+  },
+  "Show quotas": {
+    "prefix": ["qquota", "qshowquota"],
+    "body": [
+      "SHOW QUOTAS;"
+    ],
+    "description": "Show cluster resource quotas"
+  },
+  "Set quota": {
+    "prefix": ["qsetquota"],
+    "body": [
+      "SET QUOTA (",
+      "  enabled = ${1|true,false|},",
+      "  max_resident_memory_percent = ${2:80},",
+      "  max_disk_usage_percent = ${3:90},",
+      "  release_margin_percent = ${4:5}",
+      ") WAIT ${5|true,false|};"
+    ],
+    "description": "Replace cluster quota config (full PUT)"
+  },
+  "Match PREFIX filter": {
+    "prefix": ["qprefix", "qmatchprefix"],
+    "body": [
+      "QUERY TEXT '${1:search}' FROM ${2:collection}",
+      "  WHERE ${3:title} MATCH PREFIX '${4:prefix}'",
+      "  LIMIT ${5:10};"
+    ],
+    "description": "Keyword/text MATCH PREFIX filter"
+  },
+  "SLICE filter": {
+    "prefix": ["qslice"],
+    "body": [
+      "QUERY TEXT '${1:search}' FROM ${2:collection}",
+      "  WHERE SLICE (${3:4}, ${4:0})",
+      "  LIMIT ${5:10};"
+    ],
+    "description": "Deterministic SLICE sampling filter"
+  },
+  "Create collection with memory": {
+    "prefix": ["qcreatemem", "qmemory"],
+    "body": [
+      "CREATE COLLECTION ${1:collection} (",
+      "  ${2:dense} VECTOR(${3:384}, ${4|COSINE,DOT,EUCLID,MANHATTAN|})",
+      "    WITH VECTOR (memory = '${5|cached,cold,pinned|}', datatype = '${6|float32,float16,uint8,turbo4|}')",
+      ") WITH HNSW (memory = '${7|cold,cached,pinned|}')",
+      "  WITH PARAMS (payload_memory = '${8|cold,cached|}');"
+    ],
+    "description": "Create collection with memory placement + datatype"
+  },
+  "Keyword index with prefix": {
+    "prefix": ["qindexprefix"],
+    "body": [
+      "CREATE INDEX ON COLLECTION ${1:collection} FOR ${2:field} TYPE keyword",
+      "  WITH (prefix = true, is_tenant = ${3|true,false|});"
+    ],
+    "description": "Keyword index with prefix matching enabled"
+  },
+  "IDF search param": {
+    "prefix": ["qidf"],
+    "body": [
+      "QUERY TEXT '${1:search}' FROM ${2:collection}",
+      "  PARAMS (idf = '${3|global|}')",
+      "  LIMIT ${4:10};"
+    ],
+    "description": "Per-query sparse IDF corpus (global)"
   }
 }

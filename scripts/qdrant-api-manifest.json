@@ -1,0 +1,47 @@
+{
+  "repo": "qdrant/qdrant",
+  "ref": "v1.19.0",
+  "commit": "74f3e85b9473c62560006c043e13737ce6b48412",
+  "sources": {
+    "collections.proto": {
+      "path": "lib/api/src/grpc/proto/collections.proto",
+      "sha256": "3c2c3391d899a7f7162d859cedebfbde0f4efd5dbc907fa64d3e18c68a616251"
+    },
+    "collections_service.proto": {
+      "path": "lib/api/src/grpc/proto/collections_service.proto",
+      "sha256": "d7b31cdddced1a8f9c5331b63ae2ba42102a0c98d8b12ece5c458a0cb6a62765"
+    },
+    "json_with_int.proto": {
+      "path": "lib/api/src/grpc/proto/json_with_int.proto",
+      "sha256": "909c7b4fa47c7502abe86f00084d206bbdc7b690fcea41a6d1d1fbd39f53dc2f"
+    },
+    "points.proto": {
+      "path": "lib/api/src/grpc/proto/points.proto",
+      "sha256": "191dc8a704d5c2449776a118e9ade87cc48612bd6b612bfe9a203dfec10ee32a"
+    },
+    "points_service.proto": {
+      "path": "lib/api/src/grpc/proto/points_service.proto",
+      "sha256": "31ff9b39d9a2fdd0f8d1001c2f55a507de40d8dd24ebaff73d41e1423bb7c150"
+    },
+    "qdrant_common.proto": {
+      "path": "lib/api/src/grpc/proto/qdrant_common.proto",
+      "sha256": "a77f0c15d232b36f40e5682211db923e4ba8b8f4f300757811255d86024061fc"
+    },
+    "snapshots_service.proto": {
+      "path": "lib/api/src/grpc/proto/snapshots_service.proto",
+      "sha256": "978695ac42470a204da1a4f425edb07a85db43adb22efdd4e5a6fdc7b23abf78"
+    },
+    "quota_internal.proto": {
+      "path": "lib/api/src/grpc/proto/quota_internal.proto",
+      "sha256": "de1b3096d7bae943ab237df8398e3053a4128085d8b662723ef93992c498b2f5"
+    },
+    "qdrant.proto": {
+      "path": "lib/api/src/grpc/proto/qdrant.proto",
+      "sha256": "d87e55dc13f32bf089c75abad24a8a398534c95e4d6742dadf6d2cb0a93abfc6"
+    },
+    "openapi.json": {
+      "path": "docs/redoc/master/openapi.json",
+      "sha256": "ae5cf980e40fc12ce7ce48f500a7c9cc19a7d8fcf0cfa1e2c7c7b27faecd8ffa"
+    }
+  }
+}

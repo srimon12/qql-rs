@@ -63,11 +63,11 @@ the full list with meanings.
 |---|---|---|
 | `QQL-LEX-*` | Lexical failures | `QQL-LEX-STRING` |
 | `QQL-PARSE-*` | Syntax, clause order, and value-range failures | `QQL-PARSE-STATEMENT`, `QQL-PARSE-CLAUSE-ORDER`, `QQL-PARSE-DUPLICATE-KEY`, `QQL-PARSE-POSITIVE-INTEGER` |
-| `QQL-VALIDATION-*` | Semantic validation of a parsed program | `QQL-VALIDATION-FROM`, `QQL-VALIDATION-UPSERT-ID`, `QQL-VALIDATION-MMR` |
-| `QQL-PLAN-*`, `QQL-MISSING-*`, `QQL-UNKNOWN-*`, `QQL-VECTOR-KIND` | Planning and schema resolution | `QQL-PLAN-VECTOR-KIND`, `QQL-MISSING-USING`, `QQL-UNKNOWN-VECTOR` |
+| `QQL-VALIDATION-*` | Semantic validation of a parsed program | `QQL-VALIDATION-FROM`, `QQL-VALIDATION-UPSERT-ID`, `QQL-VALIDATION-SLICE`, `QQL-VALIDATION-IDF` |
+| `QQL-PLAN-*`, `QQL-MISSING-*`, `QQL-UNKNOWN-*`, `QQL-VECTOR-KIND` | Planning and schema resolution | `QQL-PLAN-VECTOR-KIND`, `QQL-PLAN-QUOTA`, `QQL-PLAN-IDF`, `QQL-MISSING-USING` |
 | `QQL-EMBEDDING-*` | UPSERT embedding inference | `QQL-EMBEDDING-TOPOLOGY`, `QQL-EMBEDDING-TARGET` |
-| `QQL-EDGE-*` | In-process edge backend capability and runtime failures | `QQL-EDGE-UNSUPPORTED-GROUP-BY`, `QQL-EDGE-INVALID-POINT-ID` |
-| Transport / backend | Network and Qdrant response failures during execution | `QQL-*` from the transport layer |
+| `QQL-EDGE-*` | In-process edge backend capability and runtime failures | `QQL-EDGE-UNSUPPORTED-GROUP-BY`, `QQL-EDGE-UNSUPPORTED-QUOTA`, `QQL-EDGE-INVALID-POINT-ID` |
+| Transport / backend | Network and Qdrant response failures during execution | `QQL-GRPC-QUOTA`, other transport-layer `QQL-*` |
 
 A code already asserted by a v1 invalid fixture cannot change before v2. New
 codes may only refine previously unspecified cases.

@@ -4,7 +4,7 @@
  */
 import nqql from '../../crates/nqql/index.js';
 
-const { parse, isValid, explain, compileQuery, injectFilter, version } = nqql;
+const { parse, parseJson, isValid, explain, compileQuery, injectFilter, version } = nqql;
 
 console.log(`nqql ${version ?? nqql.__version__ ?? '?'}\n`);
 
@@ -19,6 +19,9 @@ console.log('2. explain()\n' + explain(q) + '\n');
 
 const route = compileQuery(q);
 console.log('3. compileQuery()', route.stmt_type, route.method, route.path, '\n');
+
+// Fast JSON-string parse — no V8 Stmt objects (1.85–2.15× faster than parse()).
+console.log('3b. parseJson()', parseJson(q).slice(0, 120), '\n');
 
 const securedAst = injectFilter(q, 'org_id', '=', 'acme-corp');
 console.log('4. injectFilter keys:', Object.keys(securedAst), '\n');

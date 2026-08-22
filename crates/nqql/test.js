@@ -83,6 +83,18 @@ assert.throws(
   /dimension must be a positive integer/,
 );
 
+// Qdrant 1.19 route affinity is accepted at construction and readable.
+const affinityClient = new nqql.Client({
+  url: "http://localhost:6333",
+  routeAffinity: "session-acme-42",
+});
+assert.strictEqual(affinityClient.routeAffinity, "session-acme-42");
+const affinityPlan = affinityClient.explain("QUERY 'hello' FROM docs LIMIT 10");
+assert(affinityPlan.includes("Collection: docs"));
+const unsetClient = new nqql.Client({ url: "http://localhost:6333", routeAffinity: "" });
+assert.strictEqual(unsetClient.routeAffinity, null);
+assert.strictEqual(new nqql.Client({ url: "http://localhost:6333" }).routeAffinity, null);
+
 // RT-05: HttpEmbedder accepts rerank fields (camelCase convention)
 const embedderRerank = new nqql.HttpEmbedder({
   endpoint: "http://localhost:11434/v1/embeddings",

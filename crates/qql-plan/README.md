@@ -43,27 +43,45 @@ let route = to_rest_route(&op)?;   // fallible REST projection
 | Search | `Query`, `QueryGroups`, `GetPoints`, `Scroll`, `Count` |
 | Mutations | `Upsert`, `Delete`, `ClearPayload`, `UpdateVectors`, `DeleteVectors`, `UpdatePayload`, … |
 | DDL | `CreateCollection`, `UpdateCollection`, indexes, **`CreateShardKey` / `DropShardKey` / `ListShardKeys`** |
+| Quotas | **`GetQuotas`** / **`SetQuotas`** → REST `GET|PUT /quotas` (Qdrant ≥ 1.19) |
 | Client-side | `CrossRerank` (no single Qdrant route) |
 
 ### Batch families
 
 - **Query** — contiguous same-collection queries → `/points/query/batch`
 - **Mutation** — contiguous mutations → `/points/batch`
-- **Single** — DDL, scroll, count, …
+- **Single** — DDL, scroll, count, quotas, …
 
 ### Semantic primitives
 
 `PlanPointId`, `PlanVectorValue` (Dense / Sparse / MultiDense), `PlanQueryInput`,
 typed formula trees — stay typed until a transport boundary.
+`MemoryPlacement` / `VectorDatatype` re-exported from `qql-core`.
+
+### Qdrant 1.19 lowering notes
+
+| Surface | Plan behavior |
+|---------|----------------|
+| `SET QUOTA (…)` | **Full replace** body (`SetQuotaRequest`). Omitted keys / `key = null` are unset in the PUT body — not a merge of the previous config. Invalid keys/ranges → `QQL-PLAN-QUOTA`. Optional `WAIT` → query `?wait=`. |
+| `PARAMS (idf = …)` | `'global'` or `{corpus: <filter>}`; bad corpus filter → `QQL-PLAN-IDF`. |
+| `MATCH PREFIX` / `SLICE` | `MatchValue::Prefix` / `SliceCondition` on the filter IR. |
+| `memory` / `payload_memory` / `datatype` / keyword `prefix` | Forwarded on collection, vector, HNSW, quantization, and index REST bodies. |
+
+```rust
+let op = plan(&Parser::parse(
+    "SET QUOTA (enabled = true, max_resident_memory_percent = 80) WAIT true;"
+)?)?;
+let route = to_rest_route(&op)?; // PUT /quotas?wait=true
+```
 
 ## Modules
 
 | Module | Role |
 |--------|------|
 | `plan` | `plan`, `to_rest_route`, `try_route`, `compile_statement` |
-| `query` / `mutation` / `ddl` | Lowering |
+| `query` / `mutation` / `ddl` | Lowering (including quotas / IDF / memory) |
 | `filter` | `FilterExpression` only (no routing fields) |
-| `types` | Request IR |
+| `types` | Request IR (`SetQuotaRequest`, `IdfSearchParams`, …) |
 
 ## Docs
 

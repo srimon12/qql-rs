@@ -569,3 +569,159 @@ QUERY TEXT 'incident response' FROM runbooks
 
 **Limit:** Single-node edge does not use cluster consistency; timeout is a
 server-side override on remote Qdrant (client HTTP timeout is separate).
+
+---
+
+## 26. Cluster resource quotas (`SHOW QUOTAS` / `SET QUOTA`)
+
+**Problem:** You operate a shared Qdrant cluster and need to inspect global
+resource limits, then cap resident memory (and optionally disk) so a noisy
+workload cannot starve the node.
+
+**Why this works:** Qdrant 1.19 exposes a cluster-wide quota API at
+`GET|PUT /quotas`. QQL maps `SHOW QUOTAS` / `SET QUOTA (…)` directly. `WAIT true`
+is a query param (consensus wait), not a body field.
+
+```sql
+-- Inspect current config + utilization
+SHOW QUOTAS;
+
+-- Full replace of quota config (PUT replaces the whole object)
+SET QUOTA (
+  enabled = true,
+  max_resident_memory_percent = 80,
+  max_disk_usage_percent = 90,
+  release_margin_percent = 5
+) WAIT true;
+
+-- Disable quotas (still a full replace — omitted keys are unset)
+SET QUOTA (enabled = false);
+
+-- Clear a single limit with null in a replace body
+SET QUOTA (max_disk_usage_percent = null);
+```
+
+**Key decisions:**
+- `SET QUOTA` is a **full replace**, not a merge of previous limits.
+- Percent fields must be valid ranges (`QQL-PLAN-QUOTA` on out-of-range / unknown keys).
+- **REST only** — gRPC returns `QQL-GRPC-QUOTA`; edge returns `QQL-EDGE-UNSUPPORTED-QUOTA`.
+- Prefer REST client for quota admin; DML can stay on gRPC.
+
+---
+
+## 27. Memory placement tiers + TurboQuant (`turbo4`)
+
+**Problem:** You want cold/cached/pinned placement for vectors, HNSW, payload, and
+quantization, plus 4-bit TurboQuant dense storage for a large document corpus.
+
+**Why this works:** Qdrant 1.19 adds `memory = 'cold'|'cached'|'pinned'` on vector,
+HNSW, sparse, quantization, and indexes, plus `payload_memory` in collection
+`PARAMS` (payload rejects `pinned`). Dense `datatype = 'turbo4'` enables TurboQuant.
+
+```sql
+CREATE COLLECTION docs (
+  dense VECTOR(384, COSINE) WITH VECTOR (memory = 'cached', datatype = 'turbo4')
+    WITH HNSW (memory = 'cold')
+) WITH PARAMS (payload_memory = 'cold')
+  WITH QUANTIZATION (type = 'scalar', memory = 'cached');
+
+-- Sparse index can also take memory placement
+CREATE COLLECTION docs_sparse (
+  sparse SPARSE WITH SPARSE (modifier = 'idf', memory = 'cached')
+);
+
+-- Quantization-only placement (pinned allowed on quantization / vectors / HNSW)
+CREATE COLLECTION docs_q (
+  dense VECTOR(128, DOT) WITH QUANTIZATION (type = 'scalar', memory = 'pinned')
+);
+```
+
+**Key decisions:**
+- Prefer `memory` / `payload_memory` for new scripts. Legacy `on_disk` /
+  `on_disk_payload` / `always_ram` still dual-write through Qdrant 1.19; upstream
+  plans removal around 1.21.
+- `payload_memory` cannot be `'pinned'`.
+- `datatype = 'turbo4'` is a dense storage datatype (TurboQuant 4-bit), not a distance metric.
+
+---
+
+## 28. Keyword prefix index + `MATCH PREFIX`
+
+**Problem:** Autocomplete / prefix filters on company names (`Comp…`) must hit an
+indexed keyword field without full-text tokenization.
+
+**Why this works:** Keyword indexes support `prefix = true` (and optional
+`memory`). Filters use `field MATCH PREFIX '…'` (Qdrant match-prefix condition).
+
+```sql
+CREATE INDEX ON COLLECTION docs FOR title
+  TYPE keyword WITH (prefix = true, memory = 'cached');
+
+QUERY TEXT 'x' FROM docs
+  WHERE title MATCH PREFIX 'Comp'
+  LIMIT 10;
+```
+
+**Key decisions:**
+- `MATCH PREFIX` is for **keyword** (or similar exact) fields with a prefix-capable index — not a substitute for `MATCH PHRASE` on text indexes.
+- Combine with tenant filters as usual: `WHERE title MATCH PREFIX 'Comp' AND tenant_id = 'acme'`.
+
+---
+
+## 29. Deterministic `SLICE` sampling filter
+
+**Problem:** You need a stable, hash-based subset of points (e.g. 1 of 4 shards of
+the ID space) for canary ranking, A/B sampling, or tenant-agnostic load tests —
+without random `SAMPLE` each time.
+
+**Why this works:** `WHERE SLICE (total, index)` is a Qdrant filter condition:
+points are partitioned into `total` buckets (`total >= 1`); only bucket `index`
+(`0 <= index < total`) matches. Validation fails closed (`QQL-VALIDATION-SLICE`).
+
+```sql
+-- 25% of the collection (bucket 1 of 4)
+QUERY TEXT 'x' FROM docs
+  WHERE SLICE (4, 1)
+  LIMIT 100;
+
+-- Combine with payload predicates
+QUERY TEXT 'x' FROM docs
+  WHERE SLICE (4, 1) AND status = 'active'
+  LIMIT 100;
+```
+
+**Key decisions:**
+- Deterministic across queries for the same point set (unlike `QUERY SAMPLE RANDOM`).
+- Multi-tenant: combine with `tenant_id` / `inject_filter` when sampling inside one tenant, or use alone for cluster-wide bucket experiments.
+- `total` / `index` are integers; invalid pairs are rejected at validation.
+
+---
+
+## 30. Per-query sparse IDF corpus
+
+**Problem:** Sparse / BM25-style retrieval should use either global IDF stats or a
+tenant-scoped corpus so term rarity reflects only that tenant’s documents.
+
+**Why this works:** Search `PARAMS (idf = …)` lowers to Qdrant’s per-query IDF
+options: `'global'` or `{corpus: <Filter>}`. Malformed corpus objects fail with
+`QQL-PLAN-IDF` (not a panic). Supported on remote Qdrant and **qdrant-edge 0.8+**.
+
+```sql
+-- Cluster / collection-global IDF
+QUERY TEXT 'hello' FROM docs USING sparse
+  PARAMS (idf = 'global')
+  LIMIT 5;
+
+-- Tenant-scoped IDF corpus (OpenAPI-style filter object)
+QUERY TEXT 'hello' FROM docs USING sparse
+  PARAMS (idf = {corpus: {must: [{key: 'tenant', match: {value: 'acme'}}]}})
+  LIMIT 5;
+```
+
+**Key decisions:**
+- Collection sparse vectors often use `modifier = 'idf'` at create time; query
+  `PARAMS (idf = …)` overrides / scopes the corpus for **this** request.
+- Corpus filter shape matches Qdrant Filter JSON (`must` / `should` / …), not QQL
+  `WHERE` syntax inside the object.
+- Pair with `WHERE tenant = 'acme'` (and `SHARD 'acme'` when custom-sharded) so
+  both **retrieval isolation** and **IDF stats** stay tenant-local.

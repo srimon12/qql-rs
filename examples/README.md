@@ -1,6 +1,6 @@
 # QQL Examples
 
-Working demos of **QQL 1.2** across language bindings and end-to-end apps.
+Working demos of **QQL 1.4** (Qdrant ≥ 1.19.0) across language bindings and end-to-end apps.
 
 Two flagship stories:
 
@@ -8,6 +8,41 @@ Two flagship stories:
 |------|--------|
 | **[sec10k-qql/](sec10k-qql/)** | Multi-tenant RAG over real SEC 10-K filings — `inject_filter` + `SHARD` / `stmt.shard_key` |
 | **[airbnb-demo/](airbnb-demo/)** | Berlin geo search — `GEO_RADIUS` / `BBOX` / `POLYGON` + district shards |
+
+## QQL 1.4 / Qdrant 1.19 snippets
+
+These parse offline; execute against Qdrant 1.19+ (quotas are REST-only):
+
+```sql
+-- Memory tiers + turbo4 dense storage
+CREATE COLLECTION docs (
+  dense VECTOR(384, COSINE)
+    WITH VECTOR (memory = 'cached', datatype = 'turbo4')
+    WITH HNSW (memory = 'cold')
+) WITH PARAMS (payload_memory = 'cold');
+
+CREATE INDEX ON COLLECTION docs FOR title TYPE keyword WITH (prefix = true);
+
+-- Prefix match + deterministic slice sampling
+QUERY TEXT 'compliance' FROM docs
+  WHERE title MATCH PREFIX 'Comp' AND SLICE (4, 0)
+  LIMIT 20;
+
+-- Per-query sparse IDF corpus (tenant stats)
+QUERY TEXT 'risks' FROM docs USING sparse
+  PARAMS (idf = {corpus: {must: [{key: 'tenant', match: {value: 'acme'}}]}})
+  LIMIT 10;
+
+-- Cluster resource quotas (REST only; not edge/gRPC)
+SHOW QUOTAS;
+SET QUOTA (enabled = true, max_resident_memory_percent = 80) WAIT true;
+```
+
+Route affinity (`X-Qdrant-Route-Affinity`) is a **client transport** option on
+every remote SDK — `pyqql.Client(route_affinity=…)`, `nqql`
+`new Client({ routeAffinity })`, WASM `client.setRouteAffinity(key)`, and Rust
+`RestQdrant` / `GrpcQdrant::with_route_affinity` — not QQL syntax. The `--live`
+examples below construct their client with it.
 
 ## Catalog
 
@@ -109,7 +144,7 @@ QQL_BIN=./target/release/qql python examples/edge-demo/main.py
 QQL_BIN=./target/release/qql python examples/edge-demo/main.py --dry-run
 ```
 
-## QQL 1.2 features covered
+## QQL 1.4 / Qdrant 1.19 features covered
 
 Examples across this folder exercise:
 
@@ -117,16 +152,21 @@ Examples across this folder exercise:
 - `inject_filter` + `SHARD` / `stmt.shard_key` (fail-closed on DDL)
 - `CREATE SHARD KEY` / custom `sharding_method`
 - `GEO_RADIUS` / `GEO_BBOX` / `GEO_POLYGON` + formula `GEO_DISTANCE`
-- `PARAMS (acorn, max_selectivity, timeout, consistency, hnsw_ef)`
+- `PARAMS (acorn, max_selectivity, timeout, consistency, hnsw_ef, idf)`
+- `WHERE title MATCH PREFIX '…'` + keyword index `prefix = true` (Qdrant 1.19+)
+- `WHERE SLICE (total, index)` deterministic sampling (Qdrant 1.19+)
+- Memory placement (`memory` / `payload_memory`) + dense `datatype = 'turbo4'`
+- `SHOW QUOTAS` / `SET QUOTA (…)` (REST only)
 - `COUNT … WITH (exact = true)`
 - `SCROLL … WITH VECTOR false`
 - `DELETE PAYLOAD key FROM …`
 - `CTE` `PREFETCH` + `FORMULA` + `MMR` + `GROUP BY` + `ORDER BY`
 - Recommend / Context / Discover (medical showcase)
+- Route affinity (`pyqql` / `nqql` / wasm / Rust client options) in the `--live` paths
 
 ## Version note
 
-Target SDK / engine: **0.2.0+**. Older release binaries reject some 1.3 syntax — rebuild from this workspace:
+Target SDK / engine: **0.2.1+**. Older release binaries reject some 1.3 syntax — rebuild from this workspace:
 
 ```bash
 cargo build --release -p qql-cli

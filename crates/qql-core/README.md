@@ -19,6 +19,7 @@ policy here, then hand `Stmt` to `qql-plan` / runtime.
 | DML | `UPSERT`, `DELETE`, `SCROLL`, `COUNT`, payload/vector updates |
 | DDL | `CREATE/ALTER/DROP COLLECTION`, indexes, **`CREATE/DROP/SHOW SHARD KEY`** |
 | Meta | `SHOW COLLECTIONS` / `SHOW COLLECTION` |
+| Quotas | **`SHOW QUOTAS`** / **`SET QUOTA (…)`** (Qdrant ≥ 1.19; REST at execute time) |
 
 ### Clause order (QUERY)
 
@@ -42,8 +43,37 @@ Routing field after parse: `stmt.set_shard_key(Some("acme".into()))`
 
 ### PARAMS (selected)
 
-Body search params: `hnsw_ef`, `exact`, `acorn`, `max_selectivity`, `quantization`, …  
+Body search params: `hnsw_ef`, `exact`, `acorn`, `max_selectivity`, `quantization`,
+`idf` (`'global'` or `{corpus: {…}}` for sparse IDF, Qdrant ≥ 1.19), …  
 **Request-level** (REST query string / gRPC fields): `timeout`, `consistency`.
+
+### Filters (selected, Qdrant ≥ 1.19)
+
+```sql
+WHERE title MATCH PREFIX 'Comp'   -- keyword prefix (needs prefix=true index)
+WHERE SLICE (4, 1)                -- hash(id) % total == index; total≥1, index<total
+```
+
+### Typed config enums
+
+| Type | Values | Use |
+|------|--------|-----|
+| `MemoryPlacement` | `cold` / `cached` / `pinned` | `WITH HNSW|VECTOR|SPARSE|QUANTIZATION`, index options; `payload_memory` rejects `pinned` |
+| `VectorDatatype` | `float32` / `float16` / `uint8` / `turbo4` | dense `WITH VECTOR (datatype = …)`; sparse rejects `turbo4` |
+
+```sql
+CREATE COLLECTION docs (
+  dense VECTOR(384, COSINE)
+    WITH VECTOR (memory = 'cached', datatype = 'turbo4')
+) WITH HNSW (memory = 'cold')
+  WITH PARAMS (payload_memory = 'cold');
+
+CREATE INDEX ON COLLECTION docs FOR title TYPE keyword
+  WITH (prefix = true, memory = 'cached');
+
+SHOW QUOTAS;
+SET QUOTA (enabled = true, max_resident_memory_percent = 80) WAIT true;
+```
 
 ## API
 

@@ -3,6 +3,7 @@ extern crate alloc;
 pub mod ast;
 pub mod error;
 pub mod explain;
+pub mod fmt;
 pub mod lexer;
 pub mod parser;
 pub mod token;

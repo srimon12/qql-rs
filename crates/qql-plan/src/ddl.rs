@@ -14,6 +14,7 @@ pub fn lower_create_collection(stmt: &CreateCollectionStmt) -> CreateCollectionR
         shard_number: None,
         sharding_method: None,
         shard_keys: None,
+        payload: None,
     };
 
     let mut vectors = serde_json::Map::new();
@@ -46,6 +47,18 @@ pub fn lower_create_collection(stmt: &CreateCollectionStmt) -> CreateCollectionR
             if let Some(on_disk) = vec_cfg.on_disk {
                 v.insert("on_disk".into(), serde_json::Value::Bool(on_disk));
             }
+            if let Some(ref memory) = vec_cfg.memory {
+                v.insert(
+                    "memory".into(),
+                    serde_json::Value::String(memory.as_str().into()),
+                );
+            }
+            if let Some(ref datatype) = vec_cfg.datatype {
+                v.insert(
+                    "datatype".into(),
+                    serde_json::Value::String(datatype.as_str().into()),
+                );
+            }
         }
         vectors.insert(vd.name.clone(), serde_json::Value::Object(v));
     }
@@ -73,7 +86,16 @@ pub fn lower_create_collection(stmt: &CreateCollectionStmt) -> CreateCollectionR
                 idx_map.insert("on_disk".into(), serde_json::Value::Bool(od));
             }
             if let Some(ref dt) = idx.datatype {
-                idx_map.insert("datatype".into(), serde_json::Value::String(dt.clone()));
+                idx_map.insert(
+                    "datatype".into(),
+                    serde_json::Value::String(dt.as_str().into()),
+                );
+            }
+            if let Some(ref memory) = idx.memory {
+                idx_map.insert(
+                    "memory".into(),
+                    serde_json::Value::String(memory.as_str().into()),
+                );
             }
             if !idx_map.is_empty() {
                 opts.insert("index".into(), serde_json::Value::Object(idx_map));
@@ -140,6 +162,18 @@ fn fill_collection_config(
         if let Some(on_disk) = v.on_disk {
             vc.insert("on_disk".into(), serde_json::Value::Bool(on_disk));
         }
+        if let Some(ref memory) = v.memory {
+            vc.insert(
+                "memory".into(),
+                serde_json::Value::String(memory.as_str().into()),
+            );
+        }
+        if let Some(ref datatype) = v.datatype {
+            vc.insert(
+                "datatype".into(),
+                serde_json::Value::String(datatype.as_str().into()),
+            );
+        }
         if !vc.is_empty() {
             req.vectors_config = Some(serde_json::Value::Object(vc));
         }
@@ -169,6 +203,14 @@ fn fill_collection_config(
         }
         if let Some(od) = p.on_disk_payload {
             pc.insert("on_disk_payload".into(), serde_json::Value::Bool(od));
+        }
+        if let Some(ref payload_memory) = p.payload_memory {
+            let mut ps = serde_json::Map::new();
+            ps.insert(
+                "memory".into(),
+                serde_json::Value::String(payload_memory.as_str().into()),
+            );
+            req.payload = Some(serde_json::Value::Object(ps));
         }
         if !pc.is_empty() {
             req.params = Some(serde_json::Value::Object(pc));
@@ -214,6 +256,14 @@ fn fill_update_collection_config(
         if let Some(od) = p.on_disk_payload {
             pc.insert("on_disk_payload".into(), serde_json::Value::Bool(od));
         }
+        if let Some(ref payload_memory) = p.payload_memory {
+            let mut ps = serde_json::Map::new();
+            ps.insert(
+                "memory".into(),
+                serde_json::Value::String(payload_memory.as_str().into()),
+            );
+            pc.insert("payload".into(), serde_json::Value::Object(ps));
+        }
         if !pc.is_empty() {
             req.params = Some(serde_json::Value::Object(pc));
         }
@@ -243,7 +293,8 @@ pub fn lower_hnsw_config(config: &qql_core::ast::HnswRuntimeConfig) -> HnswConfi
         max_indexing_threads: config.max_indexing_threads,
         on_disk: config.on_disk,
         payload_m: config.payload_m,
-        inline_storage: None,
+        inline_storage: config.inline_storage,
+        memory: config.memory,
     }
 }
 
@@ -269,6 +320,12 @@ pub fn lower_hnsw_config_val(config: &qql_core::ast::HnswRuntimeConfig) -> serde
     }
     if let Some(inline) = config.inline_storage {
         obj.insert("inline_storage".into(), serde_json::Value::Bool(inline));
+    }
+    if let Some(ref memory) = config.memory {
+        obj.insert(
+            "memory".into(),
+            serde_json::Value::String(memory.as_str().into()),
+        );
     }
     serde_json::Value::Object(obj)
 }
@@ -371,12 +428,14 @@ pub fn lower_quantization_config(config: &qql_core::ast::QuantizationConfig) -> 
                 qtype: "int8".into(),
                 quantile: config.quantile,
                 always_ram: Some(config.always_ram),
+                memory: config.memory,
             },
         },
         qql_core::ast::QuantizationType::Product => QuantizationConfig::Product {
             product: ProductQuantization {
                 compression: config.compression.clone().unwrap_or_default(),
                 always_ram: Some(config.always_ram),
+                memory: config.memory,
             },
         },
         qql_core::ast::QuantizationType::Binary => QuantizationConfig::Binary {
@@ -384,12 +443,14 @@ pub fn lower_quantization_config(config: &qql_core::ast::QuantizationConfig) -> 
                 always_ram: Some(config.always_ram),
                 encoding: config.encoding.clone(),
                 query_encoding: config.query_encoding.clone(),
+                memory: config.memory,
             },
         },
         qql_core::ast::QuantizationType::Turbo => QuantizationConfig::Turbo {
             turbo: TurboQuantization {
                 bits: turbo_bits_label(config.bits),
                 always_ram: Some(config.always_ram),
+                memory: config.memory,
             },
         },
     }
@@ -434,6 +495,12 @@ pub fn lower_quantization_config_val(
         obj.insert(
             "query_encoding".into(),
             serde_json::Value::String(query_encoding.clone()),
+        );
+    }
+    if let Some(ref memory) = config.memory {
+        obj.insert(
+            "memory".into(),
+            serde_json::Value::String(memory.as_str().into()),
         );
     }
     serde_json::Value::Object(obj)
@@ -514,6 +581,9 @@ pub fn create_collection_rest_body(req: &CreateCollectionRequest) -> serde_json:
         }
         // read_fan_out_* only exist on UpdateCollection params (CollectionParamsDiff);
         // callers apply them with a follow-up PATCH (REST) or update (gRPC).
+    }
+    if let Some(payload) = &req.payload {
+        body.insert("payload".into(), payload.clone());
     }
     // Do not emit: params, vectors_config, shard_keys
     serde_json::Value::Object(body)
@@ -785,6 +855,26 @@ mod tests {
         assert_eq!(rest["field_schema"]["type"], "text");
         assert_eq!(rest["field_schema"]["lowercase"], true);
         assert!(rest.get("lowercase").is_none());
+    }
+
+    #[test]
+    fn create_keyword_index_with_prefix_and_memory() {
+        let stmt = parse_stmt(
+            "CREATE INDEX ON COLLECTION docs FOR tenant TYPE keyword WITH (prefix = true, memory = 'cached', is_tenant = true);",
+        );
+        let Stmt::CreateIndex(ref ci) = stmt else {
+            panic!()
+        };
+        let req = lower_create_index(ci);
+        let rest = create_index_rest_body(&req);
+        assert_eq!(rest["field_schema"]["type"], "keyword");
+        assert_eq!(rest["field_schema"]["prefix"], true);
+        assert_eq!(rest["field_schema"]["memory"], "cached");
+        assert_eq!(rest["field_schema"]["is_tenant"], true);
+        // The extra options survive for the gRPC payload_index_params path.
+        let ir = serde_json::to_value(&req).unwrap();
+        assert_eq!(ir["prefix"], true);
+        assert_eq!(ir["memory"], "cached");
     }
 
     #[test]

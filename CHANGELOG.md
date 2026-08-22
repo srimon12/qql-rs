@@ -8,7 +8,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 
-## [0.2.0] - Unreleased
+## [0.2.1] - 2026-08-22
+
+### 📦 Packaging
+- **Workspace 0.2.1** — all crates, `pyqql` / `pyqql-edge` (PyPI), `@veristamp/nqql` / `@veristamp/nqql-edge` + platform packages (npm), and `qql-wasm` move to **0.2.1** together.
+- **VS Code extension 0.2.4** — Marketplace packaging fix. The `0.2.3` upload was built from a `--target bundler` WASM bundle whose ESM entry imports the `.wasm` binary directly, which fails to load in the extension host (`ERR_UNKNOWN_FILE_EXTENSION`, Node ≤ 22) and breaks diagnostics, completions, and formatting. `0.2.4` ships the correct CommonJS bundle (`--target nodejs`, synchronous init); anyone who installed `0.2.3` should update. The extension version stays independent of the workspace version.
+
+### 🚀 Added
+- **Canonical QQL formatter (`qql fmt`)** — a new `qql-core::fmt` AST-based pretty-printer normalizes QQL source (clause order, keyword casing, string escaping, whitespace) and always re-parses to an identical AST. Exposed as `qql fmt [FILE] [--check] [--write]` in the CLI, `formatQuery()` in `qql-wasm`, and a **Format Document** provider in the VS Code extension. Round-trip + idempotence are guaranteed by property tests over the full conformance fixture corpus.
+- **Qdrant 1.19.0 language surface** — end-to-end wiring for the six body/API features in the 1.19 release:
+  - `SHOW QUOTAS` / `SET QUOTA (…) [WAIT bool]` → `GET|PUT /quotas` (REST only; gRPC and edge fail-loud)
+  - `memory = 'cold'|'cached'|'pinned'` on HNSW / VECTOR / SPARSE / QUANTIZATION / indexes, plus `payload_memory` in `PARAMS` (payload rejects `pinned`)
+  - `WHERE field MATCH PREFIX '…'` and `WHERE SLICE (total, index)`
+  - `PARAMS (idf = 'global' | {corpus: …})` for per-query sparse IDF corpora
+  - Keyword index `prefix = true` and dense `datatype = 'turbo4'` (TurboQuant 4-bit)
+- **Typed placement / datatype enums** — `MemoryPlacement` and `VectorDatatype` in `qql-core` (parse once, serialize as OpenAPI lowercase strings).
+- **Read affinity transport support** — `RestQdrant::with_route_affinity` / `GrpcQdrant::with_route_affinity` send `X-Qdrant-Route-Affinity` (HTTP header / gRPC metadata). This is transport metadata, not a request-body field, so it is not expressible via openapi/proto schemas.
+- **Route affinity on host SDKs** — `pyqql.Client(route_affinity=…)` (readable via `client.route_affinity`), `nqql` `new Client({ routeAffinity })` (readable via `client.routeAffinity`), and the WASM `client.setRouteAffinity(key)` / `client.routeAffinity` getter. Applies `X-Qdrant-Route-Affinity` on REST and `x-qdrant-route-affinity` metadata on gRPC; edge remains single-node (no affinity). Includes `pyqql.parse_json` for parity with `nqql.parseJson` / `pyqql-edge.parse_json`.
+- **qdrant-edge 0.8.0** — retrieve API, optional `score_threshold`, IDF on search params, fail-loud quotas.
+- **Upstream Qdrant API sync** — new `scripts/sync_qdrant_api.py` cross-checks the vendored `openapi.json` and protos against upstream Qdrant at an immutable pinned commit (`scripts/qdrant-api-manifest.json`, currently `v1.19.0`). The umbrella `qdrant.proto` is verified as its derived internal-import-free variant; `quota_internal.proto` is now vendored for reference (messages only — upstream serves quota usage via the internal cluster service on the peer port, with no setter RPC, so REST remains the only quota transport). Enforced by a CI `Qdrant API sync` job.
+
+### 🔄 Changed
+- **Language version 1.4** — additive contract for quotas, memory placement, `MATCH PREFIX`, `SLICE`, per-query `idf`, keyword `prefix`, and dense `turbo4`. Spec, conformance counts (38 / 261 / 53 / 38), website, crate READMEs, skills, and VS Code **0.2.2** (snippets + description) updated together.
+- **Bundled editor WASM rebuilt** — `editors/vscode/wasm/` now matches the current `qql-wasm` crate: the QQL 1.4 parse surface (`QUOTA`/`PREFIX`/`SLICE`/`turbo4`/`payload_memory`) and the route-affinity API are live in extension diagnostics, completions, and formatting. The bundle is now built with wasm-pack's **`nodejs`** target (CommonJS entry, synchronous init) so it loads under the extension host's plain `require()` on all supported Node versions — a `bundler`-target rebuild is no longer loadable there. The bundle directory tracks an explicit file whitelist; CI gains an `editor-check` job that fails when the committed bundle's export surface lags a fresh wasm-pack build.
+- **Release tooling covers the extension** — `RELEASING.md` documents the language **1.4** spec version, the editor WASM refresh step, and VSIX packaging; `scripts/check_release.py` validates `editors/vscode/package.json` and requires the bundled WASM to expose current exports.
+- **Qdrant 1.19.0 protocol pin** — `openapi.json` and public gRPC protos under `crates/qql-runtime/proto/` updated to 1.19.0. Only public services are compiled (internal raft/telemetry/quota protos are not vendored). Legacy `/points/search`, `/recommend`, and `/discover` REST endpoints were removed upstream; the runtime already used unified `/points/query`.
+- **`SET QUOTA` is a full replace** — `PUT /quotas` replaces the whole config; omitted keys (including `key = null`) are unset in the replacement body, not a merge of the previous limits.
+- **Fallible IDF corpus lowering** — malformed `idf.corpus` objects return `QQL-PLAN-IDF` instead of panicking in the planner.
+
+### 🐛 Fixed
+- **SDK declaration drift** — `pyqql_edge.Client.compile()` added to the `.pyi` stubs; the duplicated `compileBytes` / `explainBytes` / `formatQuery` declarations removed from the qql-wasm custom TS section (wasm-bindgen already emits them); `nqql-edge`'s non-constructible `Client` documented in `index.d.ts`.
+- **Wrapper option validation** — `nqql.executeStmt` and the nqql-edge standalone `execute`/`executeStmt` paths now reject invalid `onError` values instead of silently ignoring them.
+- **`pyqql_edge.Stmt.to_dict` shape** — now round-trips through serde before pythonizing, matching `to_json()` and `pyqql.Stmt.to_dict`.
+- **Error-code reference** — renamed the phantom `QQL-VALIDATION-FEEDBACK-STRATEGY` to the emitted `QQL-PARSE-FEEDBACK-STRATEGY`, added the missing lexical/parse codes (`QQL-LEX-NUMBER`, `QQL-PARSE-COUNT-CONFIG`, `QQL-PARSE-QUOTA`, `QQL-PARSE-RERANK`, `QQL-PARSE-SHARD-KEY-CONFIG`), regenerated the complete code set over all five emitting crates, and corrected the HNSW `memory` row (`pinned` is accepted).
+- **Formatter documentation** — `qql fmt`, WASM `formatQuery()`, and the VS Code Format Document provider are now documented on the website (CLI, WASM SDK, editors pages), in the agent skill, and the Python/Node SDK pages list `parse_json`.
+
+### 📚 Documentation
+- Full docs pass for 1.19/1.4: crate READMEs, `docs/syntax.md` / `docs/filters.md`, website language/reference/edge/SDK pages, skills (`qql-examples` §26–§30, gaps, multitenancy, install), and examples catalog.
+- Stale conformance counts (35 valid / 249 statements) refreshed to 38 / 261 in `docs/STORY.md` and `docs/parser_generation_design.md`.
+
+### ⚠️ Deprecations (upstream dual-write)
+- QQL still accepts `on_disk` / `on_disk_payload` / `always_ram` and dual-writes them with the new `memory` placement through Qdrant 1.19; prefer `memory` / `payload_memory` for new scripts. Upstream plans removal around 1.21.
+
+## [0.2.0]
 
 ### 📦 Packaging (VS Code only)
 - **VS Code extension 0.2.1** — Marketplace packaging bump (immutable `0.2.0` slot). Ships the same QQL **0.2.0** WASM parser; crate / SDK versions stay at **0.2.0**. Fixes analysis feedback loops (CodeLens / host thrash), UTF-8 statement slicing for explain, shared analysis cache, Output channel for plans/routes, and Biome + typecheck scripts. VSIX binaries are no longer committed; build via `npm run package` (`@vscode/vsce`).

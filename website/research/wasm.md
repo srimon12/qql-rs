@@ -13,7 +13,7 @@ UI primitives	shadcn/ui (Base UI style base-maia)	shadcn ^4.14.0
 Base UI (Radix replacement)	@base-ui/react	^1.6.0
 Animation	tw-animate-css	^1.4.0
 Editor	CodeMirror 6 via @uiw/react-codemirror	^4.25.11
-WASM engine	qql-wasm (npm)	^0.2.0
+WASM engine	qql-wasm (npm)	^0.2.1
 Browser embeddings	@huggingface/transformers	^4.2.0
 Icons	lucide-react	^1.25.0
 Resizable panels	react-resizable-panels	^4.12.2
@@ -112,7 +112,7 @@ Key Architectural Decisions
 - Client retirement — old Client instances are queued in retiredClientsRef and freed with .free() once no active executions remain (reference counting via activeExecutionsRef).
 - analyze() is synchronous (WASM function), quick enough for 80ms debounce.
 - execute() is async (calls client.execute() which goes over the network + WASM).
-Critical APIs (qql-wasm v0.2.0)
+Critical APIs (qql-wasm v0.2.1)
 API	Signature	Cost
 init()	() => Promise<void>	One-time
 analyze(qql)	(source: string) => AnalysisResult	Sync, cheap

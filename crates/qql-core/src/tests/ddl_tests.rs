@@ -57,6 +57,115 @@ fn create_collection_with_params() {
 }
 
 #[test]
+fn create_collection_with_memory_and_datatype() {
+    let stmt = Parser::parse(
+        "CREATE COLLECTION docs \
+         (dense VECTOR(4, COSINE) WITH VECTOR (memory = 'cached', datatype = 'turbo4') WITH HNSW (memory = 'cold')) \
+         WITH PARAMS (payload_memory = 'cold') \
+         WITH QUANTIZATION (type = 'scalar', memory = 'cached');",
+    )
+    .unwrap();
+    let Stmt::CreateCollection(create) = stmt else {
+        panic!("expected CREATE COLLECTION");
+    };
+    let dense = create
+        .vectors
+        .iter()
+        .find(|v| v.name == "dense")
+        .expect("dense vector");
+    let vectors = dense.vectors.as_ref().expect("WITH VECTOR block");
+    assert_eq!(vectors.memory, Some(crate::ast::MemoryPlacement::Cached));
+    assert_eq!(vectors.datatype, Some(crate::ast::VectorDatatype::Turbo4));
+    let hnsw = dense.hnsw.as_ref().expect("WITH HNSW block");
+    assert_eq!(hnsw.memory, Some(crate::ast::MemoryPlacement::Cold));
+    let params = create.config.as_ref().and_then(|c| c.params.as_ref());
+    assert_eq!(
+        params.unwrap().payload_memory,
+        Some(crate::ast::MemoryPlacement::Cold)
+    );
+    let quant = create.config.as_ref().and_then(|c| c.quantization.as_ref());
+    assert_eq!(
+        quant.unwrap().memory,
+        Some(crate::ast::MemoryPlacement::Cached)
+    );
+}
+
+#[test]
+fn create_collection_rejects_bad_memory_and_datatype() {
+    assert!(Parser::parse(
+        "CREATE COLLECTION docs (d VECTOR(4, COSINE)) WITH VECTOR (memory = 'hot');",
+    )
+    .is_err());
+    assert!(Parser::parse(
+        "CREATE COLLECTION docs (d VECTOR(4, COSINE)) WITH VECTOR (datatype = 'float64');",
+    )
+    .is_err());
+    assert!(Parser::parse(
+        "CREATE COLLECTION docs (d VECTOR(4, COSINE)) WITH HNSW (memory = 'pinned');",
+    )
+    .is_ok());
+    assert!(Parser::parse(
+        "CREATE COLLECTION docs (d VECTOR(4, COSINE)) WITH PARAMS (payload_memory = 'pinned');",
+    )
+    .is_err());
+}
+
+#[test]
+fn create_sparse_with_memory_roundtrips_fmt() {
+    let stmt = Parser::parse(
+        "CREATE COLLECTION docs (sparse SPARSE WITH SPARSE (modifier = 'idf', memory = 'cached'));",
+    )
+    .unwrap();
+    let formatted = crate::fmt::format_stmt(&stmt);
+    assert!(formatted.contains("memory = 'cached'"), "{formatted}");
+    let reparsed = Parser::parse(&formatted).unwrap();
+    assert_eq!(format_stmt_ast(&stmt), format_stmt_ast(&reparsed));
+}
+
+#[test]
+fn show_quotas() {
+    let s = Parser::parse("SHOW QUOTAS;").unwrap();
+    assert!(matches!(s, Stmt::ShowQuotas));
+}
+
+#[test]
+fn set_quota_parses_and_roundtrips_fmt() {
+    let stmt = Parser::parse(
+        "SET QUOTA (enabled = true, max_resident_memory_percent = 80, max_disk_usage_percent = 90, release_margin_percent = 5) WAIT true;",
+    )
+    .unwrap();
+    match &stmt {
+        Stmt::SetQuota(q) => {
+            assert_eq!(q.wait, Some(true));
+            assert_eq!(q.config.len(), 4);
+        }
+        other => panic!("expected SET QUOTA, got {other:?}"),
+    }
+    let formatted = crate::fmt::format_stmt(&stmt);
+    assert!(formatted.contains("SET QUOTA ("), "{formatted}");
+    assert!(formatted.contains("WAIT true"), "{formatted}");
+    let reparsed = Parser::parse(&formatted).unwrap();
+    assert_eq!(&stmt, &reparsed);
+
+    // WAIT defaults to absent.
+    let s = Parser::parse("SET QUOTA (enabled = true);").unwrap();
+    match s {
+        Stmt::SetQuota(q) => assert_eq!(q.wait, None),
+        other => panic!("expected SET QUOTA, got {other:?}"),
+    }
+}
+
+#[test]
+fn set_quota_rejects_unknown_keys_and_bad_wait() {
+    assert!(Parser::parse("SET QUOTA (bogus = 1);").is_ok()); // planner validates
+    assert!(Parser::parse("SET QUOTA (enabled = true) WAIT maybe;").is_err());
+}
+
+fn format_stmt_ast(stmt: &Stmt) -> String {
+    crate::fmt::format_stmt(stmt)
+}
+
+#[test]
 fn alter_collection() {
     let s = Parser::parse("ALTER COLLECTION docs WITH VECTOR (on_disk = true) WITH HNSW (m = 32);")
         .unwrap();

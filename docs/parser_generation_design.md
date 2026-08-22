@@ -37,7 +37,7 @@ Any solution for parser generation or parser alignment must satisfy the followin
 1. **`no_std` Compatibility**: Must compile with `#![no_std]` when default features are disabled.
 2. **Zero Dependencies**: Must not introduce runtime dependencies (such as heavy parser generator runtime crates) to `qql-core`.
 3. **AST Parity & Performance**: Zero-allocation token matching and deterministic error spans.
-4. **100% Conformance**: Must pass all 35 valid fixture groups (249 statements) and 53 invalid test cases in `language/v1/fixtures`, compared against 35 canonical AST snapshots.
+4. **100% Conformance**: Must pass all 38 valid fixture groups (261 statements) and 53 invalid test cases in `language/v1/fixtures`, compared against 38 canonical AST snapshots.
 
 ---
 

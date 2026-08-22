@@ -178,6 +178,7 @@ impl<'a> AstLowerer<'a> {
             TokenKind::Clear => self.parse_clear(),
             TokenKind::Update => self.parse_update(),
             TokenKind::Count => self.parse_count(),
+            TokenKind::Set => self.parse_set_quota(),
             _ => Err(QqlError::parse(
                 "QQL-PARSE-STATEMENT",
                 alloc::format!("expected a QQL statement keyword, got '{}'", tok.text),

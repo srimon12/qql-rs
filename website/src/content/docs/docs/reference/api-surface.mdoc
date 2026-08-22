@@ -27,6 +27,27 @@ naming and object ownership.
 These are not interchangeable APIs. In particular, an array boundary is
 owned by the host, while semicolon ordering is part of QQL source.
 
+## Statement families (language surface)
+
+Hosts expose the same statement set the planner accepts. Schema and cluster
+administration include:
+
+| Family | Statements |
+|---|---|
+| Retrieval | `QUERY …`, `SCROLL`, `COUNT` |
+| Data | `UPSERT`, `UPDATE … SET VECTOR/PAYLOAD`, `DELETE`, `CLEAR PAYLOAD`, `DELETE PAYLOAD`, `DELETE VECTOR` |
+| Schema | `CREATE/ALTER/DROP COLLECTION`, `CREATE/DROP INDEX`, `CREATE/DROP SHARD KEY` |
+| Inspect | `SHOW COLLECTIONS`, `SHOW COLLECTION`, `SHOW SHARD KEYS`, `SHOW QUOTAS` |
+| Cluster (REST) | `SET QUOTA (…) [WAIT bool]` |
+
+`SHOW QUOTAS` / `SET QUOTA` plan to REST `/quotas` only. gRPC and edge
+reject them with stable codes (`QQL-GRPC-QUOTA`, `QQL-EDGE-UNSUPPORTED-QUOTA`).
+Transport metadata such as route affinity is configured on the client — Rust
+`RestQdrant::with_route_affinity` / `GrpcQdrant::with_route_affinity`,
+`pyqql.Client(route_affinity=…)`, `nqql` `new Client({ routeAffinity })`, and
+WASM `client.setRouteAffinity(key)` — not as QQL syntax. Edge has no route
+affinity (single node).
+
 ## Statement ownership
 
 Python, Node.js, and WASM expose statement handles so a host can parse once,

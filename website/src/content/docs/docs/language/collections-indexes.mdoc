@@ -15,7 +15,9 @@ Vector names are application-defined. `dense`, `sparse`, and `colbert` are
 useful conventions, but vector configuration determines the actual role. A dense
 definition is `name VECTOR(size, distance)` with distance `COSINE`, `DOT`,
 `EUCLID`, or `MANHATTAN`; a sparse definition is `name SPARSE` with optional
-`WITH SPARSE (...)` / `WITH INDEX (...)` config.
+`WITH SPARSE (...)` / `WITH INDEX (...)` config. Dense vectors may also set a
+storage `datatype` (`float32`, `float16`, `uint8`, or `turbo4` for TurboQuant
+4-bit) and a `memory` placement.
 
 {% qqlExample title="Dense, sparse, and multivector topology" %}
 ```sql
@@ -64,18 +66,46 @@ individual dense vectors (`WITH HNSW`, `WITH VECTOR`, `WITH QUANTIZATION`,
 
 | Block | Accepted keys |
 |---|---|
-| `HNSW` | `m`, `ef_construct`, `full_scan_threshold`, `max_indexing_threads`, `on_disk`, `payload_m`, `inline_storage` |
-| `VECTOR` | `on_disk` |
+| `HNSW` | `m`, `ef_construct`, `full_scan_threshold`, `max_indexing_threads`, `on_disk`, `payload_m`, `inline_storage`, `memory` (`cold`/`cached`/`pinned`) |
+| `VECTOR` | `on_disk`, `memory` (`cold`/`cached`/`pinned`), `datatype` (`float32`/`float16`/`uint8`/`turbo4`) |
 | `OPTIMIZERS` | `deleted_threshold`, `vacuum_min_vector_number`, `default_segment_number`, `max_segment_size`, `memmap_threshold`, `indexing_threshold`, `flush_interval_sec`, `max_optimization_threads`, `prevent_unoptimized` |
-| `PARAMS` | `replication_factor`, `write_consistency_factor`, `on_disk_payload`, `shard_number`, `sharding_method`, `shard_keys` |
-| `QUANTIZATION` | `type` (`scalar`/`binary`/`product`/`turbo`), `disabled`, `always_ram`, `quantile`, `bits`, `compression`, `encoding`, `query_encoding` |
+| `PARAMS` | `replication_factor`, `write_consistency_factor`, `on_disk_payload`, `payload_memory` (`cold`/`cached` only), `shard_number`, `sharding_method`, `shard_keys` |
+| `QUANTIZATION` | `type` (`scalar`/`binary`/`product`/`turbo`), `disabled`, `always_ram`, `quantile`, `bits`, `compression`, `encoding`, `query_encoding`, `memory` |
 | `MULTIVECTOR` | `comparator` (`max_sim`) |
-| sparse `INDEX`/`SPARSE` | `modifier`, `full_scan_threshold`, `on_disk`, `datatype` |
+| sparse `INDEX`/`SPARSE` | `modifier`, `full_scan_threshold`, `on_disk`, `datatype` (`float32`/`float16`/`uint8`; not `turbo4`), `memory` |
 
 `read_fan_out_factor` and `read_fan_out_delay_ms` are `ALTER`-only PARAMS
 keys, and `QUANTIZATION (disabled = true)` is an ALTER form. `ALTER COLLECTION`
 applies any of the `HNSW`, `VECTOR`, `OPTIMIZERS`, `PARAMS`, or `QUANTIZATION`
 blocks to an existing collection.
+
+### Memory placement (Qdrant 1.19+)
+
+`memory` controls how a component is held in RAM while data remains on disk:
+`cold` (load on demand), `cached` (OS page cache), or `pinned` (keep resident).
+`payload_memory` is the payload counterpart under `WITH PARAMS` and accepts only
+`cold` or `cached` — `pinned` is rejected for payload. Prefer `memory` /
+`payload_memory` for new scripts; legacy `on_disk` / `on_disk_payload` /
+`always_ram` still parse and dual-write through 1.19.
+
+{% qqlExample title="Memory placement and turbo4 datatype" %}
+```sql
+CREATE COLLECTION docs (
+  dense VECTOR(384, COSINE)
+    WITH VECTOR (memory = 'cached', datatype = 'turbo4')
+) WITH HNSW (memory = 'cold')
+WITH PARAMS (payload_memory = 'cold');
+
+CREATE COLLECTION docs2 (
+  sparse SPARSE WITH SPARSE (modifier = 'idf', memory = 'cached')
+);
+
+CREATE COLLECTION docs3 (
+  dense VECTOR(128, DOT)
+    WITH QUANTIZATION (type = 'scalar', memory = 'pinned')
+);
+```
+{% /qqlExample %}
 
 {% qqlExample title="Replication, quantization, and alter" %}
 ```sql
@@ -101,7 +131,7 @@ or ordering. Index design is a Qdrant performance decision, not a requirement
 for every payload field. The index `TYPE` is `keyword`, `integer`, `float`,
 `geo`, `text`, `bool`, `datetime`, or `uuid`.
 
-{% qqlExample title="Tenant and text payload indexes" %}
+{% qqlExample title="Tenant, prefix, and text payload indexes" %}
 ```sql
 CREATE INDEX ON COLLECTION research
 FOR tenant_id
@@ -109,6 +139,14 @@ TYPE keyword
 WITH (
   is_tenant = true,
   on_disk = true
+);
+
+CREATE INDEX ON COLLECTION research
+FOR title
+TYPE keyword
+WITH (
+  prefix = true,
+  memory = 'cached'
 );
 
 CREATE INDEX ON COLLECTION research
@@ -127,23 +165,57 @@ WITH (
 | Option | Type |
 |---|---|
 | `is_tenant`, `on_disk`, `enable_hnsw` | boolean |
-| `lowercase`, `ascii_folding`, `phrase_matching`, `lookup`, `range`, `is_principal` | boolean |
+| `lowercase`, `ascii_folding`, `phrase_matching`, `lookup`, `range`, `is_principal`, `prefix` | boolean |
 | `min_token_len`, `max_token_len` | non-negative integer |
 | `tokenizer` | string |
 | `stemmer` | string |
 | `stopwords` | string list |
+| `memory` | `'cold'`, `'cached'`, or `'pinned'` |
 
-`DROP INDEX ON COLLECTION research FOR field` removes an index.
+`prefix = true` enables keyword prefix matching for `WHERE field MATCH PREFIX`
+(Qdrant 1.19+). `DROP INDEX ON COLLECTION research FOR field` removes an index.
 
 ## Inspect resources with SHOW
 
-`SHOW` has exactly three forms — there is no `SHOW INDEXES`.
+There is no `SHOW INDEXES`. The supported forms are:
 
 | Statement | Returns |
 |---|---|
 | `SHOW COLLECTIONS;` | All collection names |
 | `SHOW COLLECTION name;` | A single collection's configuration |
 | `SHOW SHARD KEYS ON COLLECTION name;` | The custom shard keys of a collection |
+| `SHOW QUOTAS;` | Cluster-wide resource quota config and utilization (REST only) |
+
+## Manage cluster quotas (REST only)
+
+`SHOW QUOTAS` and `SET QUOTA (...)` map to Qdrant's `GET|PUT /quotas` REST
+API. They are **not** available over gRPC (`QQL-GRPC-QUOTA`) or the edge
+backend (`QQL-EDGE-UNSUPPORTED-QUOTA`).
+
+`SET QUOTA` is a **full replace**: `PUT /quotas` replaces the whole
+configuration. Omitted keys (including an explicit `key = null`) are unset in
+the replacement body — they do not merge with previous limits. Optional
+`WAIT true|false` waits for consensus after the update.
+
+{% qqlExample title="Inspect and replace cluster quotas" %}
+```sql
+SHOW QUOTAS;
+
+SET QUOTA (
+  enabled = true,
+  max_resident_memory_percent = 80,
+  max_disk_usage_percent = 90,
+  release_margin_percent = 5
+) WAIT true;
+
+SET QUOTA (enabled = false);
+
+SET QUOTA (max_disk_usage_percent = null);
+```
+{% /qqlExample %}
+
+Invalid quota keys or out-of-range percentages fail planning with
+`QQL-PLAN-QUOTA`.
 
 ## Route a collection with custom shard keys
 
@@ -165,8 +237,9 @@ ON COLLECTION research;
 {% /qqlExample %}
 
 {% aside type="note" title="Remote-backend capability" %}
-Shard-key DDL is a Qdrant remote-backend capability. The in-process edge backend
-does not support shard keys, `ALTER COLLECTION`, or grouped queries.
+Shard-key DDL and cluster quotas are Qdrant remote capabilities. The in-process
+edge backend does not support shard keys, `ALTER COLLECTION`, grouped queries,
+or `SHOW QUOTAS` / `SET QUOTA`. Quotas are also unavailable over gRPC.
 {% /aside %}
 
 Next: [Data operations](/docs/language/data-operations/) and

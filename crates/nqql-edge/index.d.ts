@@ -100,6 +100,10 @@ export interface StandaloneOptions {
   onError?: "stop" | "continue";
 }
 
+/**
+ * Edge executor client. Not directly constructible — the constructor always
+ * throws. Create instances via {@link localExecutor} or {@link httpExecutor}.
+ */
 export class Client {
   /**
    * Execute a QQL query string, Stmt, or array of either.

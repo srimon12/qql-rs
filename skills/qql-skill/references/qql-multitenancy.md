@@ -83,6 +83,54 @@ CREATE INDEX ON COLLECTION sec10k FOR tenant_id
 
 ---
 
+## Per-tenant sparse IDF corpus (Qdrant 1.19 / QQL 1.4)
+
+Sparse scores that use IDF should not mix term statistics across tenants when
+each tenant’s vocabulary is private. Scope the **IDF corpus** with a filter object
+in `PARAMS`, and keep **isolation** via `WHERE` / `inject_filter` (and `SHARD` when
+custom-sharded).
+
+```sql
+-- Global IDF (shared stats across the collection)
+QUERY TEXT 'supply chain risks' FROM sec10k USING sparse
+  WHERE tenant_id = 'honeywell'
+  SHARD 'honeywell'
+  PARAMS (idf = 'global')
+  LIMIT 10;
+
+-- Tenant-scoped IDF: rarity computed only on points matching the corpus filter
+QUERY TEXT 'supply chain risks' FROM sec10k USING sparse
+  WHERE tenant_id = 'honeywell'
+  SHARD 'honeywell'
+  PARAMS (idf = {corpus: {must: [{key: 'tenant_id', match: {value: 'honeywell'}}]}})
+  LIMIT 10;
+```
+
+**Notes:**
+- Corpus filter uses Qdrant Filter **JSON** shape (`must` / `should` / …), not nested QQL `WHERE`.
+- Malformed corpus → `QQL-PLAN-IDF`. Supported on remote Qdrant and **edge 0.8+**.
+- `idf` scopes statistics; it does **not** replace `inject_filter` for security.
+
+---
+
+## Deterministic sampling with `SLICE`
+
+`WHERE SLICE (total, index)` partitions the point-ID space into `total` stable
+buckets and keeps bucket `index`. Useful for canary ranking or load tests
+**inside** a tenant (or cluster-wide when unfiltered).
+
+```sql
+-- 1/4 of honeywell’s points (stable bucket), not random SAMPLE
+QUERY TEXT 'risks' FROM sec10k USING dense
+  WHERE tenant_id = 'honeywell' AND SLICE (4, 1)
+  SHARD 'honeywell'
+  LIMIT 100;
+```
+
+Validation: `total >= 1` and `0 <= index < total` (`QQL-VALIDATION-SLICE`).
+
+---
+
 ## Host SDKs
 
 ### Preferred: put `SHARD` in the QQL string
@@ -148,3 +196,5 @@ Plan IR mirrors that: `filter` and `shard_key` are siblings on the request, neve
 3. Queries: `WHERE tenant_id = …` **and** (if custom-sharded) `SHARD 'tenant'`
 4. Host gate: always `inject_filter`; never trust client-only filters
 5. Do not invent a second inject API for shards — use QQL `SHARD` or `stmt.shard_key`
+6. Sparse multi-tenant: consider `PARAMS (idf = {corpus: …})` so IDF stats match the tenant
+7. Canary / sample inside a tenant: `WHERE tenant_id = … AND SLICE (n, k)` (not a substitute for isolation)

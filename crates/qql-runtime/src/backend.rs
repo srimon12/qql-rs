@@ -136,6 +136,10 @@ pub struct VectorSpec {
     pub multivector: Option<serde_json::Map<String, serde_json::Value>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_disk: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub datatype: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory: Option<String>,
 }
 
 /// A payload field index declared on the collection.
@@ -158,6 +162,8 @@ pub struct CollectionParamsSpec {
     pub sharding_method: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_disk_payload: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload_memory: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replication_factor: Option<u64>,
 }
@@ -270,6 +276,13 @@ pub fn schema_from_rest_result(result: &serde_json::Value) -> CollectionSchema {
             .map(String::from);
         schema.params.on_disk_payload = p.get("on_disk_payload").and_then(|v| v.as_bool());
         schema.params.replication_factor = p.get("replication_factor").and_then(|v| v.as_u64());
+        schema.params.payload_memory = result
+            .get("config")
+            .and_then(|c| c.get("params"))
+            .and_then(|p| p.get("payload"))
+            .and_then(|payload| payload.get("memory"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
     }
 
     if let Some(payload_schema) = result.get("payload_schema").and_then(|s| s.as_object()) {
@@ -333,6 +346,7 @@ fn filter_hnsw_map(
         "on_disk",
         "payload_m",
         "inline_storage",
+        "memory",
     ];
     filter_known_keys(map, KEYS)
 }
@@ -397,6 +411,11 @@ fn extract_vector_spec(name: Option<String>, cfg: &serde_json::Value) -> Option<
         .and_then(|m| m.as_object())
         .cloned();
     let on_disk = cfg.get("on_disk").and_then(|b| b.as_bool());
+    let datatype = cfg
+        .get("datatype")
+        .and_then(|d| d.as_str())
+        .map(String::from);
+    let memory = cfg.get("memory").and_then(|m| m.as_str()).map(String::from);
 
     Some(VectorSpec {
         name,
@@ -406,5 +425,7 @@ fn extract_vector_spec(name: Option<String>, cfg: &serde_json::Value) -> Option<
         quantization,
         multivector,
         on_disk,
+        datatype,
+        memory,
     })
 }

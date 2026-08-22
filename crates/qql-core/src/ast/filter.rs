@@ -63,6 +63,10 @@ pub enum FilterExpr {
         field: String,
         text: String,
     },
+    MatchPrefix {
+        field: String,
+        prefix: String,
+    },
     And {
         operands: Vec<FilterExpr>,
     },
@@ -78,6 +82,12 @@ pub enum FilterExpr {
     },
     HasVector {
         name: String,
+    },
+    /// Deterministic sampling: a point belongs to slice `index` iff
+    /// `hash(id) % total == index`. `total >= 1`, `index < total`.
+    Slice {
+        total: u64,
+        index: u64,
     },
     ValuesCount {
         field: String,

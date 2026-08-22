@@ -28,7 +28,10 @@ class Client:
         api_key: Optional[str] = None,
         use_grpc: bool = False,
         embedder: Optional[HttpEmbedder] = None,
+        route_affinity: Optional[str] = None,
     ) -> None: ...
+    @property
+    def route_affinity(self) -> Optional[str]: ...
     def execute(
         self,
         query: Union[str, Stmt, List[Union[str, Stmt]]],
@@ -47,6 +50,7 @@ class Client:
 Query = Union[str, Stmt, List[Union[str, Stmt]]]
 
 def parse(input: str) -> List[Stmt]: ...
+def parse_json(input: str) -> str: ...
 def is_valid(input: str) -> bool: ...
 def explain(query: Union[str, Stmt]) -> Dict[str, Any]: ...
 def compile_query(query: str) -> Dict[str, Any]: ...
@@ -60,6 +64,7 @@ def execute(
     use_grpc: bool = False,
     embedder: Optional[HttpEmbedder] = None,
     on_error: str = "stop",
+    route_affinity: Optional[str] = None,
 ) -> Dict[str, Any]: ...
 def execute_async(
     query: Query,
@@ -69,4 +74,5 @@ def execute_async(
     use_grpc: bool = False,
     embedder: Optional[HttpEmbedder] = None,
     on_error: str = "stop",
+    route_affinity: Optional[str] = None,
 ) -> Dict[str, Any]: ...

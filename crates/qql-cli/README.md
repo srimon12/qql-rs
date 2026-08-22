@@ -36,6 +36,10 @@ qql exec "SHOW COLLECTIONS"
 qql exec --json "QUERY TEXT 'ml' FROM docs USING dense LIMIT 5"
 qql explain "QUERY TEXT 'ml' FROM docs USING HYBRID LIMIT 5"
 qql doctor --json
+
+# Cluster quotas (Qdrant ≥ 1.19, REST only — use :6333, not gRPC :6334)
+qql exec "SHOW QUOTAS"
+qql exec "SET QUOTA (enabled = true, max_resident_memory_percent = 80, max_disk_usage_percent = 90, release_margin_percent = 5) WAIT true"
 ```
 
 ## Configuration
@@ -93,8 +97,9 @@ qql --edge exec "QUERY TEXT 'search' FROM docs USING dense LIMIT 5"
 qql --edge doctor
 ```
 
-Config: `~/.qql/edge.json`. Edge does **not** support custom `SHARD` / `CREATE SHARD KEY`
-or `GROUP BY` — use remote Qdrant for those.
+Config: `~/.qql/edge.json`. Edge does **not** support custom `SHARD` / `CREATE SHARD KEY`,
+`GROUP BY`, or **`SHOW QUOTAS` / `SET QUOTA`** — use remote Qdrant (REST) for those.
+Sparse `PARAMS (idf = …)` is available offline (qdrant-edge 0.8+).
 
 ## Multitenancy examples
 
@@ -112,10 +117,21 @@ LIMIT 10;
 Semicolon-separated statements. `--` comments OK.
 
 ```qql
-CREATE COLLECTION docs (dense VECTOR(384, COSINE));
+CREATE COLLECTION docs (
+  dense VECTOR(384, COSINE)
+    WITH VECTOR (memory = 'cached', datatype = 'float16')
+) WITH HNSW (memory = 'cold')
+  WITH PARAMS (payload_memory = 'cached');
+
+CREATE INDEX ON COLLECTION docs FOR title TYPE keyword
+  WITH (prefix = true, memory = 'cached');
+
 UPSERT INTO docs VALUES {id: 1, text: 'first document'}
   USING DENSE MODEL 'all-minilm:l6-v2';
-QUERY TEXT 'search' FROM docs USING dense LIMIT 10;
+
+QUERY TEXT 'search' FROM docs USING dense
+WHERE title MATCH PREFIX 'fir'
+LIMIT 10;
 ```
 
 ## Features

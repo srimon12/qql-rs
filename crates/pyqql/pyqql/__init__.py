@@ -1,4 +1,4 @@
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 from .pyqql import (
     Client,
@@ -11,6 +11,7 @@ from .pyqql import (
     inject_filter,
     is_valid,
     parse,
+    parse_json,
     tokenize,
 )
 
@@ -25,6 +26,7 @@ __all__ = [
     "inject_filter",
     "is_valid",
     "parse",
+    "parse_json",
     "tokenize",
     "__version__",
 ]

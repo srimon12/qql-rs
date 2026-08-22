@@ -3,6 +3,96 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+/// Memory placement of a storage component (`cold` / `cached` / `pinned`).
+///
+/// Mirrors Qdrant 1.19 `Memory`. Data is always persisted on disk; this only
+/// controls how the component is held in RAM. `Pinned` is not valid for
+/// payload storage — parsers reject it for `payload_memory`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "lowercase"))]
+pub enum MemoryPlacement {
+    Cold,
+    Cached,
+    Pinned,
+}
+
+impl MemoryPlacement {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Cold => "cold",
+            Self::Cached => "cached",
+            Self::Pinned => "pinned",
+        }
+    }
+
+    /// Parse a placement string (case-insensitive). Unknown values → `None`.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "cold" => Some(Self::Cold),
+            "cached" => Some(Self::Cached),
+            "pinned" => Some(Self::Pinned),
+            _ => None,
+        }
+    }
+}
+
+impl core::fmt::Display for MemoryPlacement {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Dense / sparse vector storage datatype (OpenAPI `Datatype`).
+///
+/// Aliases accepted at parse: `f32`→`Float32`, `f16`→`Float16`, `u8`→`Uint8`,
+/// `t4`→`Turbo4`. Sparse indexes reject `Turbo4` (unsupported upstream).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "lowercase"))]
+pub enum VectorDatatype {
+    Float32,
+    Float16,
+    Uint8,
+    Turbo4,
+}
+
+impl VectorDatatype {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Float32 => "float32",
+            Self::Float16 => "float16",
+            Self::Uint8 => "uint8",
+            Self::Turbo4 => "turbo4",
+        }
+    }
+
+    /// Parse a datatype string including short aliases. Unknown → `None`.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "float32" | "f32" => Some(Self::Float32),
+            "float16" | "f16" => Some(Self::Float16),
+            "uint8" | "u8" => Some(Self::Uint8),
+            "turbo4" | "t4" => Some(Self::Turbo4),
+            _ => None,
+        }
+    }
+
+    /// Sparse indexes support float32 / float16 / uint8 only (not turbo4).
+    pub fn parse_sparse(s: &str) -> Option<Self> {
+        match Self::parse(s) {
+            Some(Self::Turbo4) => None,
+            other => other,
+        }
+    }
+}
+
+impl core::fmt::Display for VectorDatatype {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum PointId {
@@ -257,11 +347,24 @@ pub struct SearchParams {
     pub quantization: Option<QuantizationSearchParams>,
     pub rrf_k: Option<u64>,
     pub rrf_weights: Option<Vec<f64>>,
+    /// Per-query IDF corpus for sparse vectors. `None` = collection-wide (global).
+    pub idf: Option<IdfParams>,
     /// Request-level timeout in **seconds** (OpenAPI query param / proto field).
     /// Not part of body `SearchParams`.
     pub timeout: Option<u64>,
     /// Request-level read consistency (OpenAPI query param / proto field).
     pub consistency: Option<ReadConsistency>,
+}
+
+/// Sparse-vector IDF scope: global statistics (no corpus) or statistics over
+/// the points matching a corpus filter. The corpus is stored as a raw QQL
+/// `Value` in Qdrant filter JSON shape (`{"must": [{"key": ..., ...}]}`) and
+/// is lowered to a typed plan filter by the plan layer.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct IdfParams {
+    /// Corpus filter as Qdrant filter JSON (via QQL `Value`). `None` = global.
+    pub corpus: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -457,7 +560,10 @@ pub struct VectorDef {
 pub struct SparseIndexConfig {
     pub full_scan_threshold: Option<u64>,
     pub on_disk: Option<bool>,
-    pub datatype: Option<String>,
+    /// Storage datatype (`float32` / `float16` / `uint8`). Turbo4 is rejected.
+    pub datatype: Option<VectorDatatype>,
+    /// Memory placement of the index.
+    pub memory: Option<MemoryPlacement>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -487,6 +593,8 @@ pub struct QuantizationConfig {
     pub compression: Option<String>,
     pub encoding: Option<String>,
     pub query_encoding: Option<String>,
+    /// Memory placement of quantized vectors.
+    pub memory: Option<MemoryPlacement>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -506,12 +614,18 @@ pub struct HnswRuntimeConfig {
     pub on_disk: Option<bool>,
     pub payload_m: Option<u64>,
     pub inline_storage: Option<bool>,
+    /// Memory placement of the HNSW graph.
+    pub memory: Option<MemoryPlacement>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct VectorsConfig {
     pub on_disk: Option<bool>,
+    /// Memory placement of the original vector storage.
+    pub memory: Option<MemoryPlacement>,
+    /// Storage datatype for dense vectors.
+    pub datatype: Option<VectorDatatype>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -543,6 +657,8 @@ pub struct CollectionParamsConfig {
     pub read_fan_out_factor: Option<u64>,
     pub read_fan_out_delay_ms: Option<u64>,
     pub on_disk_payload: Option<bool>,
+    /// Memory placement of the payload storage (`Cold` / `Cached` only; never `Pinned`).
+    pub payload_memory: Option<MemoryPlacement>,
     pub shard_number: Option<u64>,
     pub sharding_method: Option<String>,
     pub shard_keys: Option<Vec<String>>,
@@ -653,6 +769,18 @@ pub struct DropShardKeyStmt {
     pub shard_key: String,
 }
 
+/// Global quota configuration statement (`SET QUOTA (…) [WAIT bool]`).
+///
+/// `config` keeps the raw `key = value` pairs (enabled,
+/// max_resident_memory_percent, max_disk_usage_percent,
+/// release_margin_percent); the plan layer validates and serializes them.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SetQuotaStmt {
+    pub config: Vec<(String, Value)>,
+    pub wait: Option<bool>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum PointSelector {
@@ -719,6 +847,8 @@ pub enum Stmt {
     UpdateVector(Box<UpdateVectorStmt>),
     UpdatePayload(Box<UpdatePayloadStmt>),
     Count(Box<CountStmt>),
+    ShowQuotas,
+    SetQuota(Box<SetQuotaStmt>),
 }
 
 #[cfg(feature = "serde")]
@@ -785,6 +915,13 @@ impl serde::Serialize for Stmt {
                 serializer.serialize_newtype_variant("Stmt", 18, "UpdatePayload", s)
             }
             Stmt::Count(s) => serializer.serialize_newtype_variant("Stmt", 19, "Count", s),
+            Stmt::ShowQuotas => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                let empty = std::collections::BTreeMap::<String, String>::new();
+                map.serialize_entry("ShowQuotas", &empty)?;
+                map.end()
+            }
+            Stmt::SetQuota(s) => serializer.serialize_newtype_variant("Stmt", 21, "SetQuota", s),
         }
     }
 }
@@ -844,6 +981,10 @@ impl<'de> serde::Deserialize<'de> for Stmt {
                         map.next_value::<IgnoredAny>()?;
                         Stmt::ShowCollections
                     }
+                    "ShowQuotas" => {
+                        map.next_value::<IgnoredAny>()?;
+                        Stmt::ShowQuotas
+                    }
                     "ShowCollection" => Stmt::ShowCollection(map.next_value()?),
                     "ShowShardKeys" => Stmt::ShowShardKeys(map.next_value()?),
                     "Delete" => Stmt::Delete(map.next_value()?),
@@ -853,6 +994,7 @@ impl<'de> serde::Deserialize<'de> for Stmt {
                     "UpdateVector" => Stmt::UpdateVector(map.next_value()?),
                     "UpdatePayload" => Stmt::UpdatePayload(map.next_value()?),
                     "Count" => Stmt::Count(map.next_value()?),
+                    "SetQuota" => Stmt::SetQuota(map.next_value()?),
                     _ => {
                         return Err(A::Error::unknown_variant(
                             &key,
@@ -877,6 +1019,8 @@ impl<'de> serde::Deserialize<'de> for Stmt {
                                 "UpdateVector",
                                 "UpdatePayload",
                                 "Count",
+                                "ShowQuotas",
+                                "SetQuota",
                             ],
                         ));
                     }

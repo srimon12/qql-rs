@@ -304,7 +304,7 @@ module.exports = {
   parseJson,
   isValid,
   injectFilter,
-    tokenize,
+  tokenize,
   compileQuery,
   explain,
   explainStmt,

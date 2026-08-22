@@ -1,0 +1,29 @@
+---
+interface Props {
+  label: string;
+  heading: string;
+  items: readonly { question: string; answer: string }[];
+}
+
+const { label, heading, items } = Astro.props;
+---
+
+<section class="landing-section landing-section--muted" aria-labelledby="faq-heading">
+  <div class="landing-shell landing-fade-up">
+    <header class="landing-section__head">
+      <span class="landing-label">{label}</span>
+      <h2 id="faq-heading">{heading}</h2>
+    </header>
+
+    <div class="landing-faq">
+      {
+        items.map((item) => (
+          <details class="landing-faq__item">
+            <summary class="landing-faq__q">{item.question}</summary>
+            <p class="landing-faq__a">{item.answer}</p>
+          </details>
+        ))
+      }
+    </div>
+  </div>
+</section>

@@ -48,6 +48,13 @@ function normalizeStandaloneOptions(options) {
   if (typeof options !== "object" || Array.isArray(options)) {
     throw new TypeError("options must be an object");
   }
+  if (
+    options.onError !== undefined &&
+    options.onError !== "stop" &&
+    options.onError !== "continue"
+  ) {
+    throw new TypeError("options.onError must be 'stop' or 'continue'");
+  }
   return {
     dataDir: typeof options.dataDir === "string" ? options.dataDir : "./qdrant_data",
     onDiskPayload: options.onDiskPayload ?? true,

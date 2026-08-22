@@ -40,6 +40,7 @@ The same structured fields are projected differently by each host binding.
 | Code | Meaning |
 |---|---|
 | `QQL-LEX-CHAR` | A character cannot start any token |
+| `QQL-LEX-NUMBER` | Malformed numeric literal (a `-` not followed by a digit, or an exponent with no digits) |
 | `QQL-LEX-STRING` | Unterminated string literal |
 
 ## Parse
@@ -58,6 +59,11 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PARSE-NONNEGATIVE-INTEGER` | Value must be non-negative (for example `OFFSET`, `VALUES_COUNT`) |
 | `QQL-PARSE-SYNTAX` | Production-specific syntax or range failure |
 | `QQL-PARSE-COMPARISON` | Expected a comparison operator |
+| `QQL-PARSE-COUNT-CONFIG` | Unknown `COUNT WITH (…)` parameter, or `exact` is not true/false |
+| `QQL-PARSE-FEEDBACK-STRATEGY` | Feedback strategy must be exactly `(a = …, b = …, c = …)` numeric parameters in order |
+| `QQL-PARSE-QUOTA` | `SET QUOTA (…) WAIT` requires true or false |
+| `QQL-PARSE-RERANK` | RERANK input requires `TEXT '…'`, `VECTOR […]`, or `POINT <id>` |
+| `QQL-PARSE-SHARD-KEY-CONFIG` | Unknown `CREATE SHARD KEY (…)` parameter, or a value that must be a positive integer is not one |
 | `QQL-PARSE-CONTEXT` | `CONTEXT` requires at least one positive/negative pair |
 | `QQL-PARSE-CROSS-RERANK` | `CROSS RERANK` requires `TEXT '…'` or a string query input |
 | `QQL-PARSE-EMBED` | `EMBED USING` requires `DENSE`, `SPARSE`, `MULTI`, `IMAGE`, or `MODEL` |
@@ -106,7 +112,6 @@ The same structured fields are projected differently by each host binding.
 | `QQL-VALIDATION-CONSISTENCY` | `consistency` must be a non-negative integer factor or `majority` / `quorum` / `all` |
 | `QQL-VALIDATION-CREATE-MODEL` | `CREATE COLLECTION … HYBRID` rejects a single dense `MODEL` |
 | `QQL-VALIDATION-CROSS-RERANK-PREFETCH` | `CROSS RERANK` requires `PREFETCH` |
-| `QQL-VALIDATION-FEEDBACK-STRATEGY` | A feedback strategy parameter is not numeric |
 | `QQL-VALIDATION-FUSION` | The fusion method must be `RRF` or `DBSF` |
 | `QQL-VALIDATION-GEO` | Invalid geo coordinates, radius, or polygon ring |
 | `QQL-VALIDATION-LIMIT-OVERFLOW` | `LIMIT` + `OFFSET` (or hybrid candidate scaling) overflows `u64` |
@@ -115,6 +120,8 @@ The same structured fields are projected differently by each host binding.
 | `QQL-VALIDATION-RERANK-USING` | `RERANK` requires `USING <vector>` |
 | `QQL-VALIDATION-SCORE` | A score threshold must be finite |
 | `QQL-VALIDATION-SEARCH-PARAM` | Unknown search parameter |
+| `QQL-VALIDATION-SLICE` | `SLICE (total, index)` with `total < 1` or `index >= total` |
+| `QQL-VALIDATION-IDF` | Malformed `PARAMS (idf = …)` value at parse time |
 | `QQL-VALIDATION-USING` | This query expression does not accept `USING` |
 | `QQL-VALIDATION-VECTOR` | Invalid vector value |
 
@@ -133,14 +140,17 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PLAN-CROSS-RERANK-PREFETCH` | `CROSS RERANK` requires at least one `PREFETCH` |
 | `QQL-PLAN-CROSS-RERANK-QUERY` | `CROSS RERANK` query text must not be empty |
 | `QQL-PLAN-FUSION-PREFETCH` | `FUSION` requires at least one prefetch |
+| `QQL-PLAN-IDF` | `PARAMS (idf = …)` corpus is not a valid Qdrant filter object |
 | `QQL-PLAN-PREFETCH-CTE` | `PREFETCH` references an unknown CTE |
 | `QQL-PLAN-PREFETCH-GROUP` | `GROUP BY` is not supported inside a `PREFETCH` source |
+| `QQL-PLAN-QUOTA` | Invalid `SET QUOTA` key or out-of-range percent |
 | `QQL-PLAN-RERANK-PREFETCH` | `RERANK` requires at least one `PREFETCH` |
 | `QQL-PLAN-RERANK-USING` | `RERANK` requires a non-empty `USING` vector name |
 | `QQL-PLAN-RRF-PARAMS` | `rrf_k` and `rrf_weights` are valid only with `RRF` fusion |
 | `QQL-PLAN-RRF-WEIGHTS` | `rrf_weights` length must equal the prefetch count |
 | `QQL-PLAN-UNSUPPORTED-PREFETCH` | `POINTS` / `CROSS RERANK` are not supported inside `PREFETCH` |
 | `QQL-REST-CLIENT-SIDE` | The operation is executed client-side and has no single Qdrant REST route |
+| `QQL-GRPC-QUOTA` | Quotas have no public gRPC service (upstream serves quota usage on the internal cluster port only, with no setter RPC); use REST (`SHOW QUOTAS` / `SET QUOTA`) |
 | `QQL-BACKEND` | Generic backend or transport failure |
 
 ## Value conversion
@@ -173,6 +183,7 @@ usually carry a remediation hint pointing at remote Qdrant.
 | `QQL-EDGE-UNSUPPORTED-ACORN` | `PARAMS (acorn = ...)` is not available offline |
 | `QQL-EDGE-UNSUPPORTED-TIMEOUT` | `PARAMS (timeout = ...)` is not available offline |
 | `QQL-EDGE-UNSUPPORTED-CONSISTENCY` | `PARAMS (consistency = ...)` is not available offline |
+| `QQL-EDGE-UNSUPPORTED-QUOTA` | `SHOW QUOTAS` / `SET QUOTA` require cluster REST `/quotas` |
 | `QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY` | `RECOMMEND STRATEGY average_vector`; offline supports `best_score` and `sum_scores` only |
 | `QQL-EDGE-UNSUPPORTED-POINT-REF` | Point-ID query inputs need materialized vectors offline |
 | `QQL-EDGE-UNSUPPORTED-FIELD-TYPE` | The index field type is not available offline |
@@ -199,10 +210,17 @@ covers which features are available on each backend.
 ## Complete code set
 
 The full set of codes emitted by the reference implementation, generated from
-`rg -o 'QQL-[A-Z0-9-]+' crates/qql-core/src crates/qql-plan/src crates/qql-edge/src`:
+`rg -o 'QQL-[A-Z0-9-]+' crates/qql-core/src crates/qql-plan/src crates/qql-edge/src crates/qql-embed/src crates/qql-runtime/src`:
 
 ```text
 QQL-BACKEND
+QQL-BACKEND-ENVELOPE
+QQL-BACKEND-HTTP
+QQL-BACKEND-JSON
+QQL-BATCH-CARDINALITY
+QQL-BATCH-INVARIANT
+QQL-CONFIG
+QQL-CROSS-RERANK
 QQL-EDGE-CLEAR-PAYLOAD-REQUIRES-TARGET
 QQL-EDGE-CLOSE
 QQL-EDGE-COLLECTION-EXISTS
@@ -235,6 +253,7 @@ QQL-EDGE-UNSUPPORTED-CONSISTENCY
 QQL-EDGE-UNSUPPORTED-FIELD-TYPE
 QQL-EDGE-UNSUPPORTED-GROUP-BY
 QQL-EDGE-UNSUPPORTED-POINT-REF
+QQL-EDGE-UNSUPPORTED-QUOTA
 QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY
 QQL-EDGE-UNSUPPORTED-ROUTE
 QQL-EDGE-UNSUPPORTED-SHARD
@@ -242,13 +261,36 @@ QQL-EDGE-UNSUPPORTED-SHARD-KEY
 QQL-EDGE-UNSUPPORTED-TIMEOUT
 QQL-EDGE-VECTOR
 QQL-EDGE-VECTOR-NAME-MISSING
+QQL-EMBEDDING
+QQL-EMBEDDING-DIM
+QQL-EMBEDDING-IMAGE
+QQL-EMBEDDING-MODEL
+QQL-EMBEDDING-MULTI
+QQL-EMBEDDING-SPARSE
+QQL-EMBEDDING-TARGET
+QQL-EMBEDDING-TOPOLOGY
+QQL-EXECUTION
+QQL-GRPC
+QQL-GRPC-FLOAT-MATCH
+QQL-GRPC-FUSION
+QQL-GRPC-INDEX
+QQL-GRPC-LIST-INT
+QQL-GRPC-LIST-TYPE
+QQL-GRPC-MATCH-VALUE
+QQL-GRPC-NO-RESULT
+QQL-GRPC-QUOTA
+QQL-GRPC-RRF-K
+QQL-GRPC-RRF-WEIGHT
 QQL-JSON-NONFINITE
 QQL-JSON-NUMBER
 QQL-LEX-CHAR
+QQL-LEX-NUMBER
 QQL-LEX-STRING
+QQL-MISSING-USING
 QQL-PARSE-CLAUSE-ORDER
 QQL-PARSE-COMPARISON
 QQL-PARSE-CONTEXT
+QQL-PARSE-COUNT-CONFIG
 QQL-PARSE-CROSS-RERANK
 QQL-PARSE-DUPLICATE-CTE
 QQL-PARSE-DUPLICATE-KEY
@@ -257,6 +299,7 @@ QQL-PARSE-EMBEDDING
 QQL-PARSE-EMPTY-STATEMENT
 QQL-PARSE-ESCAPE
 QQL-PARSE-EXPECTED
+QQL-PARSE-FEEDBACK-STRATEGY
 QQL-PARSE-FIELD
 QQL-PARSE-FILTER
 QQL-PARSE-FLOAT
@@ -275,9 +318,12 @@ QQL-PARSE-POINT-IDS
 QQL-PARSE-POSITIVE-INTEGER
 QQL-PARSE-PREFETCH
 QQL-PARSE-QUERY-INPUT
+QQL-PARSE-QUOTA
+QQL-PARSE-RERANK
 QQL-PARSE-SAMPLE
 QQL-PARSE-SELECTOR
 QQL-PARSE-SEPARATOR
+QQL-PARSE-SHARD-KEY-CONFIG
 QQL-PARSE-STATEMENT
 QQL-PARSE-STATEMENT-LIMIT
 QQL-PARSE-SYNTAX
@@ -292,27 +338,35 @@ QQL-PLAN-CROSS-RERANK-MODEL
 QQL-PLAN-CROSS-RERANK-PREFETCH
 QQL-PLAN-CROSS-RERANK-QUERY
 QQL-PLAN-FUSION-PREFETCH
+QQL-PLAN-IDF
 QQL-PLAN-PREFETCH-CTE
 QQL-PLAN-PREFETCH-GROUP
+QQL-PLAN-QUOTA
 QQL-PLAN-RERANK-PREFETCH
 QQL-PLAN-RERANK-USING
 QQL-PLAN-RRF-PARAMS
 QQL-PLAN-RRF-WEIGHTS
 QQL-PLAN-UNSUPPORTED-PREFETCH
 QQL-PLAN-VECTOR-KIND
+QQL-RERANK-CROSS
+QQL-RERANK-CROSS-FIELD
+QQL-RESPONSE-SERIALIZE
 QQL-REST-CLIENT-SIDE
+QQL-TIMEOUT
+QQL-TRANSPORT
+QQL-UNKNOWN-VECTOR
 QQL-VALIDATION-ACORN-SELECTIVITY
 QQL-VALIDATION-CONFIG
 QQL-VALIDATION-CONSISTENCY
 QQL-VALIDATION-CREATE-MODEL
 QQL-VALIDATION-CROSS-RERANK-PREFETCH
-QQL-VALIDATION-FEEDBACK-STRATEGY
 QQL-VALIDATION-FILTER-INJECT
 QQL-VALIDATION-FROM
 QQL-VALIDATION-FUSION
 QQL-VALIDATION-FUSION-PREFETCH
 QQL-VALIDATION-GEO
 QQL-VALIDATION-HYBRID
+QQL-VALIDATION-IDF
 QQL-VALIDATION-ID-PREDICATE
 QQL-VALIDATION-LIMIT-OVERFLOW
 QQL-VALIDATION-MMR
@@ -325,9 +379,12 @@ QQL-VALIDATION-RERANK-PREFETCH
 QQL-VALIDATION-RERANK-USING
 QQL-VALIDATION-SCORE
 QQL-VALIDATION-SEARCH-PARAM
+QQL-VALIDATION-SLICE
 QQL-VALIDATION-UPSERT-ID
 QQL-VALIDATION-USING
 QQL-VALIDATION-VECTOR
+QQL-VALIDATION-VECTOR-KIND
+QQL-VECTOR-KIND
 ```
 
 The `QQL-EDGE-UNSUPPORTED-` prefix is the family marker used by the edge

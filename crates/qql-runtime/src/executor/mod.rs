@@ -946,6 +946,10 @@ impl Executor {
                 )
             }
             PlannedOperation::ListShardKeys { .. } => ("Shard keys listed".into(), Some(result)),
+            PlannedOperation::GetQuotas => ("Quota configuration shown".into(), Some(result)),
+            PlannedOperation::SetQuotas { .. } => {
+                ("Quota configuration updated".into(), Some(result))
+            }
             PlannedOperation::CrossRerank { .. } => {
                 // Defensive: early return above must handle this variant.
                 return Err(QqlError::execution(

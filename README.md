@@ -90,8 +90,10 @@ Partition DDL: `CREATE SHARD KEY '…' ON COLLECTION …`.
 
 ### 📚 Documentation
 
+Targets **Qdrant ≥ 1.19.0** (quotas, `memory` placement, `MATCH PREFIX` / `SLICE`, sparse `idf`, `turbo4`).
+
 - 📖 **Docs index**: [`docs/README.md`](docs/README.md)
-- 📐 **Syntax**: [`docs/syntax.md`](docs/syntax.md)
+- 📐 **Syntax**: [`docs/syntax.md`](docs/syntax.md) · **Filters**: [`docs/filters.md`](docs/filters.md)
 - 🔒 **inject_filter / multitenancy**: [`docs/inject_filter.md`](docs/inject_filter.md) · [`skills/qql-skill/references/qql-multitenancy.md`](skills/qql-skill/references/qql-multitenancy.md)
 - 🤖 **Agent skill**: [`skills/qql-skill/README.md`](skills/qql-skill/README.md)
 - 🗺️ **Gaps**: [`skills/qql-skill/references/qql-gaps.md`](skills/qql-skill/references/qql-gaps.md)

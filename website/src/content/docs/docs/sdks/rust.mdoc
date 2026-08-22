@@ -63,6 +63,29 @@ println!("{} operations succeeded", report.succeeded);
 For text input, configure an embedder or provide a `QUERY VECTOR` / explicit
 vector value. The runtime also exposes `Executor::grpc` behind its gRPC feature.
 
+## Pin reads with route affinity
+
+Qdrant 1.19+ can pin subsequent reads to a stable replica using the
+`X-Qdrant-Route-Affinity` header (HTTP) or equivalent gRPC metadata. This is
+**transport configuration**, not a QQL clause — set it on the client when you
+construct REST or gRPC access:
+
+```rust
+use qql::rest::RestQdrant;
+// use qql::grpc::GrpcQdrant; // with the `grpc` feature
+
+let client = RestQdrant::new("http://localhost:6333", None)
+    .with_route_affinity("session-or-user-id");
+
+// GrpcQdrant::new(...).with_route_affinity("session-or-user-id")
+```
+
+Pass a stable session or user identifier so Qdrant can hash affinity
+consistently. Empty strings are treated as unset. The same helper exists on
+`GrpcQdrant`, and the Python (`pyqql.Client(route_affinity=…)`), Node
+(`new Client({ routeAffinity })`), and WASM (`client.setRouteAffinity(key)`)
+clients expose the equivalent option.
+
 ## Core API
 
 {% apiField name="Parser::parse" type="fn(&str) -> Result<Stmt, QqlError>" required=true %}
@@ -88,6 +111,7 @@ Plan and execute one statement or a script against the configured backend.
 | Rewrite | `inject_filter`, `Stmt::set_shard_key` | Trusted AST mutation before planning |
 | Plan | `qql_plan::plan::plan`, `to_rest_route` | Offline IR and Qdrant REST projection |
 | Execute | `Executor::execute`, `execute_batch`, `execute_node` | Source, batch, or owned-statement execution |
+| Transport | `RestQdrant::with_route_affinity`, `GrpcQdrant::with_route_affinity` | Pin reads via `X-Qdrant-Route-Affinity` |
 | Embed | `Embedder`, `resolve_embeddings` | Resolve text, sparse, multi, image, or rerank inputs |
 
 For offline route inspection, use `qql_plan::plan::plan` followed by

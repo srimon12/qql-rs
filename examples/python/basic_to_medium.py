@@ -37,6 +37,10 @@ route = pyqql.compile_query(q)
 print("3. compile_query()")
 print(f"   stmt_type={route.get('stmt_type')}  {route.get('method')} {route.get('path')}\n")
 
+# Fast JSON-only parse — same AST as parse(), no Python Stmt objects.
+print("3b. parse_json()")
+print(f"   {pyqql.parse_json(q)[:120]}…\n")
+
 secured = pyqql.inject_filter(q, "tenant_id", "=", "hospital-east")
 print("4. inject_filter(tenant_id = hospital-east)")
 print("   filter:", json.dumps(secured.to_dict().get("Query", {}).get("filter"), indent=2)[:300])

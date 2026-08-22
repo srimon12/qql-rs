@@ -2,6 +2,15 @@
 
 Native Node.js bindings via N-API (napi-rs).
 
+Language surface includes **Qdrant 1.19 / QQL 1.4** features expressible in QQL
+(`SHOW QUOTAS`, memory/`turbo4`, `MATCH PREFIX`, `SLICE`, `PARAMS (idf = …)`).
+Pass those strings to `client.execute` when the backend supports them (quotas:
+**REST only**).
+
+**Route affinity** (`X-Qdrant-Route-Affinity`) is exposed on `Client` via the
+`routeAffinity` constructor option (readable with `client.routeAffinity`). See
+§1 below.
+
 ## Install
 
 ```bash
@@ -36,6 +45,13 @@ const client = new Client({
         dimension: 384,
     },
 });
+
+// With Qdrant 1.19 read affinity (sticky replica reads)
+const client = new Client({
+    url: "http://localhost:6333",
+    routeAffinity: "session-acme-42",
+});
+console.log(client.routeAffinity); // "session-acme-42"
 ```
 
 ---

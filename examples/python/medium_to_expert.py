@@ -108,16 +108,41 @@ def main() -> int:
         s = secure(q, args.user)
         print(f"  {name:12s} valid={pyqql.is_valid(q)} shard={s.shard_key!r}")
 
+    # ── Qdrant 1.19 / QQL 1.4 surface (offline parse/plan checks) ──
+    q19 = [
+        "CREATE COLLECTION docs (dense VECTOR(384, COSINE) "
+        "WITH VECTOR (memory = 'cached', datatype = 'turbo4')) "
+        "WITH HNSW (memory = 'cold') WITH PARAMS (payload_memory = 'cold')",
+        "CREATE INDEX ON COLLECTION docs FOR title TYPE keyword "
+        "WITH (prefix = true)",
+        "QUERY TEXT 'compliance' FROM docs USING dense "
+        "WHERE title MATCH PREFIX 'Comp' AND SLICE (4, 0) LIMIT 20",
+        "QUERY TEXT 'risks' FROM docs USING sparse "
+        "PARAMS (idf = 'global') LIMIT 10",
+        "SHOW QUOTAS",
+        "SET QUOTA (enabled = true, max_resident_memory_percent = 80) WAIT true",
+    ]
+    print("── Qdrant 1.19 surface (offline) ──")
+    for s in q19:
+        route = pyqql.compile_query(s)
+        print(f"  valid={pyqql.is_valid(s)}  {route.get('method')} {route.get('path')}")
+    print()
+
     if not args.live:
         print("\nOffline complete.")
         return 0
 
+    # Qdrant 1.19 read affinity: pins reads to a stable replica via
+    # X-Qdrant-Route-Affinity (REST header) / gRPC metadata. Transport only —
+    # empty strings are treated as unset. Not available on edge (single node).
     client = pyqql.Client(
         "http://localhost:6333",
+        route_affinity=f"session-{args.user}",
         embedder=pyqql.HttpEmbedder(
             "http://localhost:11434/v1/embeddings", "all-minilm:l6-v2", 384
         ),
     )
+    print(f"── live route_affinity={client.route_affinity!r} ──")
     try:
         print(json.dumps(client.execute(secured), indent=2)[:500])
     except Exception as e:
