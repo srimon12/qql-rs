@@ -11,7 +11,7 @@ the corresponding Git tag is `v0.2.1`. The QQL language specification version
 | crates.io | `qql-core`, `qql-plan`, `qql-embed`, `qql`, `qql-edge`, `qql-cli` |
 | PyPI | `pyqql`, `pyqql-edge` |
 | npm | `@veristamp/nqql`, `@veristamp/nqql-edge`, `qql-wasm` |
-| VS Code Marketplace | `srimon12.qql-lang` (extension version is independent; currently `0.2.3`) |
+| VS Code Marketplace | `srimon12.qql-lang` (extension version is independent; currently `0.2.4`) |
 | GitHub Releases | Default REST/gRPC `qql` CLI archives and checksums |
 
 `qql-conformance`, `qql-grammar-gen`, and the Rust implementation crates for
