@@ -46,6 +46,6 @@ crates/nqql-edge/package-lock.json
 qdrant-lib-edge
 .fastembed_cache
 examples/medical-retrieval-ops/generated/eval.json
-examples/medical-retrieval-ops/generated/eval.json
-examples/medical-retrieval-ops/generated/eval.json
 docs/audits
+.wrangler/
+launch/

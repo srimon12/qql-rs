@@ -382,6 +382,7 @@ fn render_textmate(literals: &[String]) -> String {
   "patterns": [
     {{ "include": "#comments" }},
     {{ "include": "#strings" }},
+    {{ "include": "#parameters" }},
     {{ "include": "#numbers" }},
     {{ "include": "#constants" }},
     {{ "include": "#keywords" }},
@@ -397,6 +398,10 @@ fn render_textmate(literals: &[String]) -> String {
         {{ "name": "string.quoted.double.qql", "begin": "\\\"", "end": "\\\"", "patterns": [{{ "name": "constant.character.escape.qql", "match": "\\\\['\\\"\\\\ntr]" }}] }}
       ]
     }},
+    "parameters": {{ "patterns": [
+      {{ "name": "variable.parameter.named.qql", "match": "(?<![A-Za-z0-9_$'\"`\\]\\}}]):[A-Za-z_][A-Za-z0-9_]*" }},
+      {{ "name": "variable.parameter.positional.qql", "match": "\\?" }}
+    ] }},
     "numbers": {{ "patterns": [{{ "name": "constant.numeric.float.qql", "match": "-?\\\\d+(\\\\.\\\\d+([eE][+-]?\\\\d+)?|([eE][+-]?\\\\d+))" }}, {{ "name": "constant.numeric.integer.qql", "match": "-?\\\\d+" }}] }},
     "constants": {{ "patterns": [{{ "name": "constant.language.qql", "match": "{constant_pattern}" }}] }},
     "keywords": {{ "patterns": [{{ "name": "keyword.control.qql", "match": "{keyword_pattern}" }}] }},

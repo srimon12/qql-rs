@@ -670,7 +670,7 @@ fn render_fusion_method(method: FusionMethod) -> &'static str {
 
 // ── Search params / selectors ────────────────────────────────────
 
-fn render_search_params(params: &SearchParams) -> String {
+pub(crate) fn render_search_params(params: &SearchParams) -> String {
     let mut parts = Vec::new();
     if let Some(value) = params.hnsw_ef {
         parts.push(format!("hnsw_ef = {}", value));
@@ -780,7 +780,7 @@ fn render_vector_selector(selector: &VectorSelector) -> String {
 
 // ── Filters ──────────────────────────────────────────────────────
 
-fn render_filter(filter: &FilterExpr) -> String {
+pub(crate) fn render_filter(filter: &FilterExpr) -> String {
     match filter {
         FilterExpr::And { operands } => operands
             .iter()

@@ -179,30 +179,6 @@ pub fn read_script(path: &str) -> Result<Vec<String>, QqlError> {
     split_statements(&data)
 }
 
-pub fn execute_script<F>(lines: Vec<String>, stop: bool, mut exec: F) -> Result<(u32, u32), String>
-where
-    F: FnMut(&str) -> Result<String, String>,
-{
-    let mut ok_count = 0u32;
-    let mut fail_count = 0u32;
-    for stmt in &lines {
-        match exec(stmt) {
-            Ok(_) => ok_count += 1,
-            Err(e) => {
-                fail_count += 1;
-                if stop {
-                    return Err(format!(
-                        "error at statement {}: {}",
-                        ok_count + fail_count,
-                        e
-                    ));
-                }
-            }
-        }
-    }
-    Ok((ok_count, fail_count))
-}
-
 #[cfg(test)]
 mod tests {
     use super::split_statements;

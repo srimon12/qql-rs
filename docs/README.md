@@ -34,6 +34,7 @@ See [syntax.md](syntax.md) and [filters.md](filters.md) for examples.
 | [syntax.md](syntax.md) | Full language: QUERY, DML, DDL, quotas, memory/datatype, `SHARD` vs `SHARD KEY`, params, embeddings |
 | [filters.md](filters.md) | `WHERE` predicates (including `MATCH PREFIX` / `SLICE`) and how they lower to Qdrant `Filter` |
 | [inject_filter.md](inject_filter.md) | Host isolation: AST injection (not routing) |
+| [parameters.md](parameters.md) | Prepared statements and parameter binding (`:name`, `?`) |
 | [STORY.md](STORY.md) | Product history (Python → Go → Rust) |
 
 ## Companion material

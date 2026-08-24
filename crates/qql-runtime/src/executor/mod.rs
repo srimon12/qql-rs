@@ -251,6 +251,28 @@ impl Executor {
         Ok(ExecutionReport::from_results(results))
     }
 
+    /// Execute a parameterized query with named parameters (`:name`).
+    pub async fn execute_with_params(
+        &self,
+        query: &str,
+        params: &HashMap<String, qql_core::ast::Value>,
+        on_error: OnError,
+    ) -> Result<ExecutionReport, QqlError> {
+        let bound = qql_core::params::bind_named(query, |k| params.get(k).cloned())?;
+        self.execute(&bound, on_error).await
+    }
+
+    /// Execute a parameterized query with positional parameters (`?`).
+    pub async fn execute_with_positional_params(
+        &self,
+        query: &str,
+        params: &[qql_core::ast::Value],
+        on_error: OnError,
+    ) -> Result<ExecutionReport, QqlError> {
+        let bound = qql_core::params::bind_positional(query, params)?;
+        self.execute(&bound, on_error).await
+    }
+
     pub async fn execute_node(&self, stmt: Stmt) -> Result<ExecResponse, QqlError> {
         if let Some(secs) = self.request_timeout() {
             match tokio::time::timeout(

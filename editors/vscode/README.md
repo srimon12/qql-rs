@@ -30,7 +30,7 @@ Highlights and completions cover the full QQL 1.4 surface, including:
 
 ### Syntax Highlighting
 
-The generated TextMate grammar highlights QQL keywords, constants, strings, numbers, comments, comparison operators, formula variables (`$score`), and dotted paths (`field.nested`, `items[].name`).
+The generated TextMate grammar highlights QQL keywords, constants, strings, numbers, comments, parameter placeholders (`:name`, `?`), comparison operators, formula variables (`$score`), and dotted paths (`field.nested`, `items[].name`).
 
 Also injects into Markdown fenced blocks:
 
