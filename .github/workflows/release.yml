@@ -24,8 +24,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.98"
           components: rustfmt
 
       - name: Resolve and validate release version
