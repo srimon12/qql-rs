@@ -6,6 +6,147 @@ interface Props {
 }
 
 const { heading, sub, rows } = Astro.props;
+
+const verifiedQqlCompareHybrid = String.raw`QUERY TEXT 'distributed consensus' FROM docs
+USING HYBRID DENSE dense_vec SPARSE bm25_vec FUSION RRF
+WHERE status = 'active'
+LIMIT 10;`;
+
+const verifiedQqlCompareTenant = String.raw`QUERY TEXT 'annual financial risks' FROM filings
+WHERE department = 'finance'
+SHARD 'tenant-corp-99'
+LIMIT 5;`;
+
+const verifiedQqlCompareFilters = String.raw`QUERY TEXT 'industrial robotics' FROM products
+WHERE (category = 'hardware' OR category = 'tools')
+  AND price <= 1200.0 AND in_stock = true
+LIMIT 20;`;
+
+const comparePresets = [
+  {
+    id: "hybrid",
+    title: "Hybrid search (RRF)",
+    qql: verifiedQqlCompareHybrid,
+    playgroundHref: `/playground/?q=${encodeURIComponent(verifiedQqlCompareHybrid)}`,
+    restJson: `{
+  "prefetch": [
+    {
+      "query": { "nearest": "dense_vec" },
+      "using": "dense_vec",
+      "filter": {
+        "must": [{ "key": "status", "match": { "value": "active" } }]
+      },
+      "limit": 100
+    },
+    {
+      "query": { "nearest": "bm25_vec" },
+      "using": "bm25_vec",
+      "filter": {
+        "must": [{ "key": "status", "match": { "value": "active" } }]
+      },
+      "limit": 100
+    }
+  ],
+  "query": { "fusion": "rrf" },
+  "limit": 10
+}`,
+    python: `client.query_points(
+    collection_name="docs",
+    prefetch=[
+        models.Prefetch(
+            query=models.NearestQuery(nearest="dense_vec"),
+            using="dense_vec",
+            filter=models.Filter(must=[models.FieldCondition(key="status", match=models.MatchValue(value="active"))]),
+            limit=100,
+        ),
+        models.Prefetch(
+            query=models.NearestQuery(nearest="bm25_vec"),
+            using="bm25_vec",
+            filter=models.Filter(must=[models.FieldCondition(key="status", match=models.MatchValue(value="active"))]),
+            limit=100,
+        ),
+    ],
+    query=models.FusionQuery(fusion=models.Fusion.RRF),
+    limit=10,
+)`
+  },
+  {
+    id: "multitenant",
+    title: "Zero-Trust multitenancy",
+    qql: verifiedQqlCompareTenant,
+    playgroundHref: `/playground/?q=${encodeURIComponent(verifiedQqlCompareTenant)}`,
+    restJson: `POST /collections/filings/points/query?shard_key=tenant-corp-99
+{
+  "query": [0.038, -0.192, 0.441, 0.812, ...],
+  "filter": {
+    "must": [
+      { "key": "tenant_id", "match": { "value": "tenant-corp-99" } },
+      { "key": "department", "match": { "value": "finance" } }
+    ]
+  },
+  "limit": 5,
+  "with_payload": true
+}`,
+    python: `client.query_points(
+    collection_name="filings",
+    shard_key_selector="tenant-corp-99",
+    query=dense_embedding_vector,
+    query_filter=models.Filter(
+        must=[
+            models.FieldCondition(key="tenant_id", match=models.MatchValue(value="tenant-corp-99")),
+            models.FieldCondition(key="department", match=models.MatchValue(value="finance")),
+        ]
+    ),
+    limit=5,
+    with_payload=True,
+)`
+  },
+  {
+    id: "filters",
+    title: "Complex boolean filters",
+    qql: verifiedQqlCompareFilters,
+    playgroundHref: `/playground/?q=${encodeURIComponent(verifiedQqlCompareFilters)}`,
+    restJson: `POST /collections/products/points/query
+{
+  "query": [0.12, -0.04, 0.81, -0.33, ...],
+  "filter": {
+    "must": [
+      {
+        "should": [
+          { "key": "category", "match": { "value": "hardware" } },
+          { "key": "category", "match": { "value": "tools" } }
+        ]
+      },
+      { "key": "price", "range": { "lte": 1200.0 } },
+      { "key": "in_stock", "match": { "value": true } }
+    ]
+  },
+  "limit": 20
+}`,
+    python: `client.query_points(
+    collection_name="products",
+    query=product_query_vector,
+    query_filter=models.Filter(
+        must=[
+            models.Filter(should=[
+                models.FieldCondition(key="category", match=models.MatchValue(value="hardware")),
+                models.FieldCondition(key="category", match=models.MatchValue(value="tools")),
+            ]),
+            models.FieldCondition(key="price", range=models.Range(lte=1200.0)),
+            models.FieldCondition(key="in_stock", match=models.MatchValue(value=True)),
+        ]
+    ),
+    limit=20,
+)`
+  }
+];
+
+const lineCount = (source: string) => source.split("\n").length;
+const presetStats = comparePresets.map((preset) => ({
+  qql: lineCount(preset.qql),
+  rest: lineCount(preset.restJson),
+  python: lineCount(preset.python),
+}));
 ---
 
 <section class="landing-section" aria-labelledby="problem-heading">
@@ -15,6 +156,71 @@ const { heading, sub, rows } = Astro.props;
       <p class="landing-section__sub">{sub}</p>
     </header>
 
+    <!-- Side-by-Side Comparison Box -->
+    <div class="landing-compare-widget" data-compare-widget>
+      <!-- Preset Tabs Bar -->
+      <div class="landing-compare-tabs" role="tablist" aria-label="Comparison scenarios">
+        {comparePresets.map((preset, idx) => (
+          <button
+            type="button"
+            role="tab"
+            class:list={["landing-compare-tab", { "landing-compare-tab--active": idx === 0 }]}
+            id={`tab-${preset.id}`}
+            aria-selected={idx === 0 ? "true" : "false"}
+            aria-controls={`panel-${preset.id}`}
+            data-preset-id={preset.id}
+          >
+            {preset.title}
+          </button>
+        ))}
+      </div>
+
+      <!-- Comparison Content Frame -->
+      <div class="landing-compare-frame">
+        <!-- Top Toolbar -->
+        <div class="landing-compare-toolbar">
+          <div class="landing-compare-modes" role="radiogroup" aria-label="Comparison format">
+            <button type="button" class="landing-mode-btn landing-mode-btn--active" data-format="rest">
+              QQL vs REST JSON
+            </button>
+            <button type="button" class="landing-mode-btn" data-format="python">
+              QQL vs Python SDK
+            </button>
+          </div>
+
+          <div class="landing-compare-chip" data-stat-chip>
+            <span data-stat-text>{presetStats[0].qql} lines vs {presetStats[0].rest} lines</span>
+          </div>
+
+          <a href={comparePresets[0].playgroundHref} class="landing-compare-try" data-playground-link>
+            Open in Playground →
+          </a>
+        </div>
+
+        <!-- Side-by-Side Split Grid -->
+        <div class="landing-compare-grid">
+          <!-- Left side: QQL -->
+          <div class="landing-compare-col landing-compare-col--qql">
+            <div class="landing-col-head">
+              <span class="landing-tag-pill landing-tag-pill--qql">QQL</span>
+              <span class="landing-col-meta">Declarative query</span>
+            </div>
+            <pre class="landing-code-pre"><code data-code-qql>{comparePresets[0].qql}</code></pre>
+          </div>
+
+          <!-- Right side: raw Qdrant API -->
+          <div class="landing-compare-col landing-compare-col--raw">
+            <div class="landing-col-head">
+              <span class="landing-tag-pill landing-tag-pill--raw" data-raw-label>Raw Qdrant REST JSON</span>
+              <span class="landing-col-meta" data-raw-lang>Payload</span>
+            </div>
+            <pre class="landing-code-pre"><code data-code-raw>{comparePresets[0].restJson}</code></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Architectural Overview Cards -->
     <div class="landing-compare" role="list">
       {
         rows.map((row) => (
@@ -33,3 +239,62 @@ const { heading, sub, rows } = Astro.props;
     </div>
   </div>
 </section>
+
+<script is:inline define:vars={{ comparePresets, presetStats }}>
+  (() => {
+    const widget = document.querySelector('[data-compare-widget]');
+    if (!widget) return;
+
+    let activePresetIndex = 0;
+    let activeFormat = 'rest'; // 'rest' | 'python'
+    const qqlCodeEl = widget.querySelector('[data-code-qql]');
+    const rawCodeEl = widget.querySelector('[data-code-raw]');
+    const rawLabelEl = widget.querySelector('[data-raw-label]');
+    const rawLangEl = widget.querySelector('[data-raw-lang]');
+    const statTextEl = widget.querySelector('[data-stat-text]');
+    const playgroundLink = widget.querySelector('[data-playground-link]');
+    const tabButtons = widget.querySelectorAll('[data-preset-id]');
+    const formatButtons = widget.querySelectorAll('[data-format]');
+
+    function updateContent() {
+      const preset = comparePresets[activePresetIndex];
+      const stats = presetStats[activePresetIndex];
+      const otherLines = activeFormat === 'rest' ? stats.rest : stats.python;
+      if (qqlCodeEl) qqlCodeEl.textContent = preset.qql;
+      if (rawCodeEl) rawCodeEl.textContent = activeFormat === 'rest' ? preset.restJson : preset.python;
+      if (rawLabelEl) {
+        rawLabelEl.textContent = activeFormat === 'rest' ? 'Raw Qdrant REST JSON' : 'Qdrant Python Client';
+      }
+      if (rawLangEl) rawLangEl.textContent = activeFormat === 'rest' ? 'Payload' : 'Python';
+      if (statTextEl) statTextEl.textContent = `${stats.qql} lines vs ${otherLines} lines`;
+      if (playgroundLink) playgroundLink.setAttribute('href', preset.playgroundHref);
+    }
+
+    // Tabs
+    tabButtons.forEach((btn, index) => {
+      btn.addEventListener('click', () => {
+        activePresetIndex = index;
+        tabButtons.forEach((b) => {
+          b.classList.remove('landing-compare-tab--active');
+          b.setAttribute('aria-selected', 'false');
+        });
+        btn.classList.add('landing-compare-tab--active');
+        btn.setAttribute('aria-selected', 'true');
+        updateContent();
+      });
+    });
+
+    // Format buttons
+    formatButtons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const fmt = btn.getAttribute('data-format');
+        if (fmt) {
+          activeFormat = fmt;
+          formatButtons.forEach((b) => b.classList.remove('landing-mode-btn--active'));
+          btn.classList.add('landing-mode-btn--active');
+          updateContent();
+        }
+      });
+    });
+  })();
+</script>

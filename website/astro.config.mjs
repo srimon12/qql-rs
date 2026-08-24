@@ -66,6 +66,7 @@ export default defineConfig(
           "./src/styles/global.css",
         ],
         components: {
+          Head: "./src/components/DocsHead.astro",
           Footer: "./src/components/DocsFooter.astro",
           Header: "./src/components/DocsHeader.astro",
         },

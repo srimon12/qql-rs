@@ -2,8 +2,8 @@
   <div class="flex max-h-[90vh] flex-col">
     <header class="flex items-start justify-between gap-4 border-b border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] p-5">
       <div>
-        <span class="block font-mono text-[0.6rem] font-semibold uppercase tracking-[0.12em] text-[var(--sl-color-accent)]">Host integration</span>
-        <h2 id="export-title" class="!m-0 !mt-1 !font-[var(--sl-font)] !text-xl !font-semibold text-[var(--sl-color-white)]">Export SDK code</h2>
+        <span class="block font-mono text-[0.62rem] font-semibold uppercase tracking-[0.12em] text-[var(--sl-color-accent)]">Host integration</span>
+        <h2 id="export-title" class="!m-0 !mt-1 font-(family-name:--sl-font) !text-xl !font-semibold text-[var(--sl-color-white)]">Export SDK code</h2>
         <p class="mt-1 text-xs leading-5 text-[var(--sl-color-gray-3)]">Use the same validated QQL source from Rust, Python, Node.js, or cURL.</p>
       </div>
       <button class="grid size-8 place-items-center rounded-md border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] text-lg text-[var(--sl-color-gray-2)] hover:text-[var(--sl-color-white)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="button" data-close-dialog aria-label="Close exporter">×</button>
@@ -16,13 +16,13 @@
             type="button"
             aria-pressed={index === 0 ? "true" : "false"}
             data-export-tab={language}
-            class="rounded-full border border-[var(--sl-color-gray-5)] bg-transparent px-2.5 py-1 font-mono text-[0.65rem] text-[var(--sl-color-gray-3)] transition hover:border-[var(--sl-color-gray-4)] hover:text-[var(--sl-color-gray-1)] aria-pressed:border-[var(--sl-color-accent)] aria-pressed:bg-[var(--sl-color-accent)] aria-pressed:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]"
+            class="shrink-0 rounded-full border border-[var(--sl-color-gray-5)] bg-transparent px-3 py-1.5 font-mono text-[0.72rem] text-[var(--sl-color-gray-3)] transition hover:border-[var(--sl-color-gray-4)] hover:text-[var(--sl-color-gray-1)] aria-pressed:border-[var(--sl-color-accent)] aria-pressed:bg-[var(--sl-color-accent)] aria-pressed:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]"
           >
             {language === "node" ? "Node.js" : language}
           </button>
         ))}
       </div>
-      <button class="min-h-8 rounded-md border border-[var(--sl-color-gray-5)] bg-transparent px-2.5 font-mono text-[0.68rem] font-medium text-[var(--sl-color-gray-2)] transition hover:border-[var(--sl-color-gray-4)] hover:text-[var(--sl-color-white)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="button" data-copy-export>Copy code</button>
+      <button class="min-h-9 shrink-0 rounded-md border border-[var(--sl-color-gray-5)] bg-transparent px-3 font-mono text-[0.75rem] font-medium text-[var(--sl-color-gray-2)] transition hover:border-[var(--sl-color-gray-4)] hover:text-[var(--sl-color-white)] active:translate-y-px focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="button" data-copy-export>Copy code</button>
     </div>
 
     <pre class="m-0 min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-5 font-mono text-xs leading-5 text-[var(--sl-color-gray-2)]" data-export-output>Generate a valid plan before exporting.</pre>

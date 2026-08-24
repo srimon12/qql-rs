@@ -1,0 +1,200 @@
+---
+title: "QQL vs Raw Qdrant JSON API"
+description: "A comprehensive side-by-side comparison of QQL declarative query syntax vs verbose Qdrant REST JSON and Python SDK calls."
+sidebar:
+  order: 4
+---
+
+Qdrant provides a high-performance vector search engine, but its native REST and gRPC interfaces require assembling deeply nested JSON payloads. **QQL** provides a typed, declarative SQL dialect that lowers directly to Qdrant execution plans.
+
+Below is an architectural and ergonomic comparison between writing raw JSON payloads and declarative QQL statements.
+
+---
+
+## 1. Hybrid Search with Reciprocal Rank Fusion (RRF)
+
+Hybrid search requires querying both a dense semantic index and a sparse lexical index (like BM25 or SPLADE), then fusing candidates using Reciprocal Rank Fusion (RRF).
+
+### In QQL (4 lines)
+
+{% qqlExample title="Declarative hybrid search with RRF" %}
+```sql
+QUERY TEXT 'distributed consensus raft' FROM docs
+USING HYBRID DENSE dense_vec SPARSE bm25_vec FUSION RRF
+WHERE status = 'active'
+LIMIT 10;
+```
+{% /qqlExample %}
+
+### In Raw Qdrant REST JSON (38 lines)
+
+```json
+POST /collections/docs/points/query
+{
+  "prefetch": [
+    {
+      "query": { "nearest": "dense_vec" },
+      "using": "dense_vec",
+      "filter": {
+        "must": [
+          { "key": "status", "match": { "value": "active" } }
+        ]
+      },
+      "limit": 100
+    },
+    {
+      "query": { "nearest": "bm25_vec" },
+      "using": "bm25_vec",
+      "filter": {
+        "must": [
+          { "key": "status", "match": { "value": "active" } }
+        ]
+      },
+      "limit": 100
+    }
+  ],
+  "query": { "fusion": "rrf" },
+  "limit": 10
+}
+```
+
+---
+
+## 2. Multi-Tenant Search with Custom Shard Routing
+
+In production multitenancy, queries require both **logical tenant isolation** (`WHERE tenant_id = ...`) and **physical shard locality** (`SHARD '...'`).
+
+### In QQL (3 lines)
+
+{% qqlExample title="Multitenant search with shard key" %}
+```sql
+QUERY TEXT 'supply chain risk analysis' FROM filings
+WHERE department = 'finance'
+SHARD 'tenant-corp-99'
+LIMIT 5;
+```
+{% /qqlExample %}
+
+### In Raw Qdrant REST JSON (24 lines)
+
+```json
+POST /collections/filings/points/query?shard_key=tenant-corp-99
+{
+  "query": [0.038, -0.192, 0.441, ...],
+  "filter": {
+    "must": [
+      { "key": "tenant_id", "match": { "value": "tenant-corp-99" } },
+      { "key": "department", "match": { "value": "finance" } }
+    ]
+  },
+  "limit": 5,
+  "with_payload": true
+}
+```
+
+---
+
+## 3. Deeply Nested Boolean Filters
+
+Filter clauses in vector applications frequently combine equality, range constraints, array inclusions, and negation.
+
+### In QQL (4 lines)
+
+{% qqlExample title="Complex nested predicate filter" %}
+```sql
+QUERY TEXT 'industrial robotics' FROM products
+WHERE (category = 'hardware' OR category = 'tools')
+  AND price <= 1200.0 AND in_stock = true AND rating >= 4.5
+LIMIT 20;
+```
+{% /qqlExample %}
+
+### In Raw Qdrant REST JSON (36 lines)
+
+```json
+POST /collections/products/points/query
+{
+  "query": [0.12, -0.04, 0.81, ...],
+  "filter": {
+    "must": [
+      {
+        "should": [
+          { "key": "category", "match": { "value": "hardware" } },
+          { "key": "category", "match": { "value": "tools" } }
+        ]
+      },
+      { "key": "price", "range": { "lte": 1200.0 } },
+      { "key": "in_stock", "match": { "value": true } },
+      { "key": "rating", "range": { "gte": 4.5 } }
+    ]
+  },
+  "limit": 20
+}
+```
+
+---
+
+## 4. Collection Schema & Index Creation (DDL)
+
+Defining collections with multiple named vector spaces and payload schema indexes.
+
+### In QQL (6 lines)
+
+{% qqlExample title="Declarative schema and index DDL" %}
+```sql
+CREATE COLLECTION articles (
+  dense VECTOR(384, COSINE),
+  bm25 SPARSE
+);
+
+CREATE INDEX ON COLLECTION articles FOR tenant_id TYPE keyword;
+```
+{% /qqlExample %}
+
+### In Raw Qdrant REST JSON (32 lines)
+
+```json
+PUT /collections/articles
+{
+  "vectors": {
+    "dense": {
+      "size": 384,
+      "distance": "Cosine"
+    }
+  },
+  "sparse_vectors": {
+    "bm25": {}
+  }
+}
+
+PUT /collections/articles/index
+{
+  "field_name": "tenant_id",
+  "field_schema": "keyword"
+}
+```
+
+---
+
+## Comparison Matrix
+
+| Dimension | Raw Qdrant JSON API | QQL Dialect |
+|---|---|---|
+| **Syntax Style** | Deeply nested JSON tree | Typed declarative SQL |
+| **Average Lines of Code** | 35–60 lines per query | 3–6 lines per query |
+| **LLM Context Token Cost** | High (~250–400 tokens/query) | Low (~30–60 tokens/query, **78% reduction**) |
+| **Injection Safety** | Manual string building / sanitization | AST-level `inject_filter` rewrite before planning |
+| **Backend Portability** | Tied to REST or gRPC wire formats | Logical IR lowers to REST, gRPC, or in-process edge |
+| **Compile-Time Validation** | Runtime HTTP 400 errors | Hand-written lexer/parser with byte-exact spans |
+| **Hybrid RRF & DBSF** | Multi-block `prefetch` tree | Single `USING HYBRID ... FUSION RRF` clause |
+
+---
+
+## Why QQL is Critical for AI Agents (GEO & Tool Use)
+
+When AI coding agents (Claude, Cursor, OpenAI Agents, Gemini) interact with vector databases, generating 50-line JSON objects is error-prone: bracket mismatches, wrong key types, and leaking tenant filters are common failure modes.
+
+QQL enables AI agents to generate standard SQL-like syntax that is:
+1. **Token-efficient**: Uses a fraction of the prompt context window.
+2. **Deterministic**: Parsed into a typed AST before network transmission.
+3. **Safe**: Applications can intercept agent-generated queries and apply `inject_filter` before execution.

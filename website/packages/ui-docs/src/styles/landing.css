@@ -294,6 +294,18 @@ html.js .landing-fade-up.landing-visible {
   margin: 0 !important;
 }
 
+/* Install commands wrap instead of scrolling: a hero terminal with a
+   horizontal scrollbar reads as broken. */
+.landing-hero__terminal .expressive-code pre {
+  white-space: pre-wrap;
+  overflow-x: hidden;
+}
+
+.landing-hero__terminal .expressive-code pre > code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* ── Stats (divide-x banner, ported from StatsBanner) ───────────────────── */
 .landing-stats {
   border-block: 1px solid color-mix(in srgb, var(--sl-color-gray-5) 70%, transparent);
@@ -392,7 +404,208 @@ html.js .landing-fade-up.landing-visible {
   color: var(--sl-color-white);
 }
 
-/* ── Comparison ─────────────────────────────────────────────────────────── */
+/* ── Comparison Widget & Interactive Slider ─────────────────────────────── */
+.landing-compare-widget {
+  margin-bottom: 2.25rem;
+  border-radius: 0.85rem;
+  border: 1px solid var(--sl-color-gray-5);
+  background: color-mix(in srgb, var(--sl-color-gray-6) 45%, transparent);
+  overflow: hidden;
+}
+
+.landing-compare-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.5rem;
+  background: color-mix(in srgb, var(--sl-color-gray-6) 75%, transparent);
+  border-bottom: 1px solid var(--sl-color-gray-5);
+}
+
+.landing-compare-tab {
+  padding: 0.45rem 0.9rem;
+  border-radius: 0.5rem;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--sl-color-gray-3);
+  font-family: var(--sl-font-mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.landing-compare-tab:hover {
+  color: var(--sl-color-white);
+  background: color-mix(in srgb, var(--sl-color-gray-5) 40%, transparent);
+}
+
+.landing-compare-tab--active {
+  color: var(--sl-color-white);
+  background: var(--sl-color-gray-6);
+  border-color: var(--sl-color-gray-5);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.landing-compare-frame {
+  display: flex;
+  flex-direction: column;
+}
+
+.landing-compare-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.65rem 1rem;
+  background: color-mix(in srgb, var(--sl-color-gray-6) 30%, transparent);
+  border-bottom: 1px solid var(--sl-color-gray-5);
+  font-size: 0.78rem;
+}
+
+.landing-compare-modes {
+  display: inline-flex;
+  gap: 0.25rem;
+  background: color-mix(in srgb, var(--sl-color-gray-6) 90%, transparent);
+  padding: 0.2rem;
+  border-radius: 0.4rem;
+  border: 1px solid var(--sl-color-gray-5);
+}
+
+.landing-mode-btn {
+  padding: 0.25rem 0.6rem;
+  border-radius: 0.3rem;
+  border: none;
+  background: transparent;
+  color: var(--sl-color-gray-3);
+  font-size: 0.72rem;
+  font-family: var(--sl-font-mono);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.landing-mode-btn:hover {
+  color: var(--sl-color-white);
+}
+
+.landing-mode-btn--active {
+  background: var(--sl-color-gray-5);
+  color: var(--sl-color-white);
+  font-weight: 600;
+}
+
+.landing-compare-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-family: var(--sl-font-mono);
+  font-size: 0.7rem;
+  color: var(--sl-color-accent);
+  background: color-mix(in srgb, var(--sl-color-accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sl-color-accent) 25%, transparent);
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+}
+
+.landing-compare-try {
+  color: var(--sl-color-accent-high);
+  text-decoration: none;
+  font-family: var(--sl-font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  transition: color 0.15s ease;
+}
+
+.landing-compare-try:hover {
+  color: var(--sl-color-white);
+  text-decoration: underline;
+}
+
+.landing-compare-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 52rem) {
+  .landing-compare-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.landing-compare-col {
+  padding: 1.25rem;
+  overflow-x: auto;
+  font-family: var(--sl-font-mono);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.landing-compare-col--qql {
+  background: color-mix(in srgb, var(--sl-color-accent) 2.5%, var(--sl-color-gray-6));
+  border-bottom: 1px solid var(--sl-color-gray-5);
+}
+
+@media (min-width: 52rem) {
+  .landing-compare-col--qql {
+    border-bottom: 0;
+    border-right: 1px solid var(--sl-color-gray-5);
+  }
+}
+
+.landing-compare-col--raw {
+  background: var(--sl-color-gray-6);
+}
+
+.landing-col-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.85rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px dashed color-mix(in srgb, var(--sl-color-gray-5) 60%, transparent);
+}
+
+.landing-tag-pill {
+  font-family: var(--sl-font-mono);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.15rem 0.5rem;
+  border-radius: 0.35rem;
+}
+
+.landing-tag-pill--qql {
+  background: color-mix(in srgb, var(--sl-color-accent) 18%, transparent);
+  color: var(--sl-color-accent);
+  border: 1px solid color-mix(in srgb, var(--sl-color-accent) 35%, transparent);
+}
+
+.landing-tag-pill--raw {
+  background: color-mix(in srgb, var(--sl-color-gray-4) 20%, transparent);
+  color: var(--sl-color-gray-2);
+  border: 1px solid var(--sl-color-gray-5);
+}
+
+.landing-col-meta {
+  font-family: var(--sl-font-mono);
+  font-size: 0.65rem;
+  color: var(--sl-color-gray-3);
+  text-transform: uppercase;
+}
+
+.landing-code-pre {
+  margin: 0;
+  padding: 0;
+  background: transparent !important;
+  color: var(--sl-color-gray-1);
+  white-space: pre;
+  tab-size: 2;
+  font-family: var(--sl-font-mono);
+}
+
+/* ── Architectural Comparison Rows ──────────────────────────────────────── */
 .landing-compare {
   display: flex;
   flex-direction: column;

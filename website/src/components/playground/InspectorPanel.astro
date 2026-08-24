@@ -1,12 +1,12 @@
-<section class="flex min-h-[28rem] min-w-0 flex-col lg:min-h-0" aria-labelledby="inspector-title">
+<section class="flex min-h-0 min-w-0 flex-col" aria-labelledby="inspector-title">
   <div class="flex min-h-16 items-center justify-between gap-3 border-b border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-4 py-3">
     <div>
-      <span class="block font-mono text-[0.6rem] font-semibold uppercase tracking-[0.12em] text-[var(--sl-color-accent)]">Compiler</span>
-      <h2 id="inspector-title" class="!m-0 !mt-0.5 !font-[var(--sl-font)] !text-sm !font-semibold text-[var(--sl-color-white)]">Inspector</h2>
+      <span class="block font-mono text-[0.62rem] font-semibold uppercase tracking-[0.12em] text-[var(--sl-color-accent)]">Compiler</span>
+      <h2 id="inspector-title" class="!m-0 !mt-0.5 font-(family-name:--sl-font) !text-[0.95rem] !font-semibold text-[var(--sl-color-white)]">Inspector</h2>
     </div>
     <label>
       <span class="sr-only">Statement</span>
-      <select class="min-h-8 min-w-28 rounded-md border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] px-2 font-mono text-[0.68rem] text-[var(--sl-color-gray-1)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" data-statement-select name="statement-select" aria-label="Inspect statement" disabled>
+      <select class="min-h-9 min-w-28 rounded-md border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] px-2 font-mono text-[0.75rem] text-[var(--sl-color-gray-1)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" data-statement-select name="statement-select" aria-label="Inspect statement" disabled>
         <option value="0">Statement 1</option>
       </select>
     </label>
@@ -30,7 +30,7 @@
         aria-selected={index === 0 ? "true" : "false"}
         tabindex={index === 0 ? 0 : -1}
         data-inspector-tab={id}
-        class="shrink-0 border-x-0 border-t-0 border-b-2 border-transparent bg-transparent px-2.5 py-2 font-mono text-[0.67rem] text-[var(--sl-color-gray-3)] hover:text-[var(--sl-color-gray-1)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--sl-color-accent)] aria-selected:border-[var(--sl-color-accent)] aria-selected:text-[var(--sl-color-white)]"
+        class="shrink-0 border-x-0 border-t-0 border-b-2 border-transparent bg-transparent px-3 py-2.5 font-mono text-[0.75rem] text-[var(--sl-color-gray-3)] hover:text-[var(--sl-color-gray-1)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--sl-color-accent)] aria-selected:border-[var(--sl-color-accent)] aria-selected:text-[var(--sl-color-white)]"
         >
         {label}
       </button>
@@ -40,8 +40,8 @@
   <div class="relative min-h-0 flex-1">
     <section class="absolute inset-0 overflow-auto" role="tabpanel" id="panel-plan" aria-labelledby="tab-plan" data-inspector-panel="plan">
       <div class="grid h-full place-content-center justify-items-center p-8 text-center" data-empty-plan>
-        <span class="mb-4 grid size-12 place-items-center rounded-xl border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] font-serif text-2xl text-[var(--sl-color-accent)]">Q</span>
-        <h3 class="!m-0 !text-sm !font-[var(--sl-font)] !font-semibold text-[var(--sl-color-gray-1)]">Plan appears here</h3>
+        <span class="mb-4 grid size-12 place-items-center rounded-xl border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] font-mono text-xl text-[var(--sl-color-accent)]">Q</span>
+        <h3 class="!m-0 font-(family-name:--sl-font) !text-sm !font-semibold text-[var(--sl-color-gray-1)]">Plan appears here</h3>
         <p class="mt-2 max-w-72 text-xs leading-5 text-[var(--sl-color-gray-3)]">Edit a valid statement to inspect its compiled Qdrant route.</p>
       </div>
 
@@ -60,8 +60,8 @@
 
         <div class="flex min-h-0 flex-1 flex-col border-t border-[var(--sl-color-gray-5)]" data-routes-section>
           <header class="flex shrink-0 items-baseline justify-between gap-3 px-4 pt-3 pb-2">
-            <span class="font-mono text-[0.6rem] font-semibold uppercase tracking-[0.14em] text-[var(--sl-color-gray-3)]">Compiled statements</span>
-            <span class="font-mono text-[0.62rem] text-[var(--sl-color-gray-4)]" data-routes-count>0</span>
+            <span class="font-mono text-[0.62rem] font-semibold uppercase tracking-[0.14em] text-[var(--sl-color-gray-3)]">Compiled statements</span>
+            <span class="font-mono text-[0.68rem] text-[var(--sl-color-gray-4)]" data-routes-count>0</span>
           </header>
           <div class="min-h-0 flex-1 overflow-y-auto px-2 pb-3" data-routes-list role="listbox" aria-label="Compiled Qdrant routes"></div>
         </div>

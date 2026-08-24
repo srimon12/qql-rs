@@ -61,22 +61,29 @@
 	--sl-color-white: #1d1c19;
 }
 
-/* --- Editorial Serif Typography --- */
-h1, h2, h3, h4, h5, h6 {
+/* --- Editorial Serif Typography ---
+   Marketing and docs pages only. The playground opts out with `app-shell`
+   on <body>: a tool UI reads better entirely in sans + mono. */
+body:not(.app-shell) h1,
+body:not(.app-shell) h2,
+body:not(.app-shell) h3,
+body:not(.app-shell) h4,
+body:not(.app-shell) h5,
+body:not(.app-shell) h6 {
 	font-family: "Instrument Serif", Georgia, serif !important;
 	font-weight: 400 !important;
 	letter-spacing: -0.01em !important;
 	color: var(--sl-color-white) !important;
 }
 
-h1 {
+body:not(.app-shell) h1 {
 	font-size: 3.5rem !important;
 	line-height: 1.1 !important;
 	margin-top: 1rem !important;
 	margin-bottom: 2rem !important;
 }
 
-h2 {
+body:not(.app-shell) h2 {
 	font-size: 2.25rem !important;
 	margin-top: 3.5rem !important;
 	margin-bottom: 1.5rem !important;
@@ -84,7 +91,7 @@ h2 {
 	padding-bottom: 0.75rem;
 }
 
-h3 {
+body:not(.app-shell) h3 {
 	font-size: 1.75rem !important;
 	margin-top: 2.5rem !important;
 	margin-bottom: 1rem !important;

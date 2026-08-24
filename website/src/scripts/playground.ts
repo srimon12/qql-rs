@@ -191,6 +191,7 @@ const exportButton = required<HTMLButtonElement>("[data-open-export]");
 const validationBadge = required<HTMLElement>("[data-validation-badge]");
 const analysisSummary = required<HTMLElement>("[data-analysis-summary]");
 const runtimeStatus = required<HTMLElement>("[data-runtime-status]");
+const runtimeDot = required<HTMLElement>("[data-runtime-dot]");
 const connectionSummary = required<HTMLElement>("[data-connection-summary]");
 const activeFixture = required<HTMLElement>("[data-active-fixture]");
 const statementSelect = required<HTMLSelectElement>("[data-statement-select]");
@@ -235,8 +236,20 @@ function toast(message: string, tone: "success" | "error" = "success"): void {
   window.setTimeout(() => item.remove(), 3600);
 }
 
-function setRuntime(message: string): void {
+function setRuntime(message: string, tone: "idle" | "ready" | "failed" = "idle"): void {
   runtimeStatus.textContent = message;
+  runtimeDot.classList.remove("is-ready", "is-failed");
+  if (tone === "ready") runtimeDot.classList.add("is-ready");
+  if (tone === "failed") runtimeDot.classList.add("is-failed");
+}
+
+/** Show "Ctrl" instead of "⌘" in kbd hints when the host is not Apple hardware. */
+function applyPlatformKeyHints(): void {
+  const isApple = /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent);
+  if (isApple) return;
+  for (const kbd of all<HTMLElement>("[data-kbd]")) {
+    kbd.textContent = (kbd.textContent ?? "").replace("⌘", "Ctrl ");
+  }
 }
 
 function setEditorLoading(message: string | null): void {
@@ -516,7 +529,7 @@ function renderValidation(): void {
     validationBadge.innerHTML = '<span class="status-dot"></span>Valid QQL';
     analysisSummary.textContent = `${analysis.result.statements_count} ${
       analysis.result.statements_count === 1 ? "statement" : "statements"
-    } · ${analysis.result.tokens.length} tokens · ${state.metrics?.parseMs.toFixed(2)} ms`;
+    }, ${analysis.result.tokens.length} tokens, ${state.metrics?.parseMs.toFixed(2)} ms`;
   } else {
     validationBadge.innerHTML = '<span class="status-dot"></span>Invalid QQL';
     analysisSummary.textContent =
@@ -897,8 +910,9 @@ async function executeQuery(): Promise<void> {
     if (state.metrics) state.metrics.executeMs = performance.now() - started;
     setRuntime(
       state.response.ok
-        ? `Execution complete · ${state.response.succeeded} succeeded`
-        : `Execution complete · ${state.response.failed} failed`,
+        ? `Execution complete, ${state.response.succeeded} succeeded`
+        : `Execution complete, ${state.response.failed} failed`,
+      state.response.ok ? "ready" : "failed",
     );
     switchInspectorTab("response");
     toast(
@@ -908,7 +922,7 @@ async function executeQuery(): Promise<void> {
   } catch (error) {
     state.executionError = formatError(error);
     if (state.metrics) state.metrics.executeMs = performance.now() - started;
-    setRuntime("Execution failed.");
+    setRuntime("Execution failed.", "failed");
     switchInspectorTab("response");
     toast(state.executionError, "error");
   } finally {
@@ -916,11 +930,18 @@ async function executeQuery(): Promise<void> {
     activeExecutions -= 1;
     releaseRetiredClients();
     runButton.classList.remove("is-running");
-    runButton.innerHTML =
-      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7V5Z"></path></svg>Run<kbd class="hidden rounded border border-white/25 px-1 font-mono text-[0.55rem] opacity-80 sm:inline">⌘↵</kbd>';
+    runButton.innerHTML = runButtonLabel();
     renderValidation();
     renderOutputs();
   }
+}
+
+/** Canonical Run button content, shared by the loading restore path. */
+function runButtonLabel(): string {
+  const kbd = /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent)
+    ? "⌘↵"
+    : "Ctrl ↵";
+  return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7V5Z"></path></svg>Run<kbd data-kbd class="hidden rounded border border-white/25 px-1 font-mono text-[0.62rem] opacity-80 sm:inline">${kbd}</kbd>`;
 }
 
 const pageParams = new URLSearchParams(window.location.search);
@@ -967,7 +988,78 @@ const editor = new EditorView({
   }),
 });
 
+/** Draggable divider between the editor and inspector panels (lg and up). */
+function setupSplit(): void {
+  const handle = document.querySelector<HTMLElement>("[data-split-handle]");
+  if (!handle) return;
+  const SPLIT_KEY = "qql-playground.split.v1";
+  const MIN = 0.6;
+  const MAX = 1.4;
+  const DEFAULT_A = 1.08;
+
+  const apply = (a: number): number => {
+    const clamped = Math.min(MAX, Math.max(MIN, a));
+    workspace.style.setProperty("--split-a", `${clamped.toFixed(3)}fr`);
+    workspace.style.setProperty("--split-b", `${(2 - clamped).toFixed(3)}fr`);
+    return clamped;
+  };
+
+  const saved = Number(localStorage.getItem(SPLIT_KEY));
+  if (Number.isFinite(saved) && saved >= MIN && saved <= MAX) apply(saved);
+
+  const fractionFromEvent = (clientX: number): number => {
+    const bounds = workspace.getBoundingClientRect();
+    const handleWidth = handle.offsetWidth || 8;
+    const usable = bounds.width - handleWidth;
+    if (usable <= 0) return DEFAULT_A;
+    // Columns are [a, handle, b] with a + b = 2, so solve for a in fr units.
+    return ((clientX - bounds.left - handleWidth / 2) / usable) * 2;
+  };
+
+  handle.addEventListener("pointerdown", (event) => {
+    if (!window.matchMedia("(min-width: 64rem)").matches) return;
+    event.preventDefault();
+    handle.setPointerCapture(event.pointerId);
+    handle.dataset.dragging = "true";
+    const move = (moveEvent: PointerEvent) => {
+      apply(fractionFromEvent(moveEvent.clientX));
+    };
+    const up = (upEvent: PointerEvent) => {
+      const finalSplit = apply(fractionFromEvent(upEvent.clientX));
+      handle.dataset.dragging = "false";
+      delete handle.dataset.dragging;
+      localStorage.setItem(SPLIT_KEY, String(finalSplit));
+      editor.requestMeasure();
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+      handle.removeEventListener("pointercancel", up);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+    handle.addEventListener("pointercancel", up);
+  });
+
+  handle.addEventListener("dblclick", () => {
+    apply(DEFAULT_A);
+    localStorage.setItem(SPLIT_KEY, String(DEFAULT_A));
+    editor.requestMeasure();
+  });
+
+  handle.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const current = Number.parseFloat(
+      workspace.style.getPropertyValue("--split-a") || String(DEFAULT_A),
+    );
+    const next = apply(current + (event.key === "ArrowRight" ? 0.08 : -0.08));
+    localStorage.setItem(SPLIT_KEY, String(next));
+    editor.requestMeasure();
+  });
+}
+
 async function start(): Promise<void> {
+  applyPlatformKeyHints();
+  setupSplit();
   setupTabs();
   setupDialogs();
   setupPresets();
@@ -991,12 +1083,12 @@ async function start(): Promise<void> {
   try {
     await initQql();
     configureClient();
-    setRuntime("Current qql-rs WASM ready");
+    setRuntime("Current qql-rs WASM ready", "ready");
     runAnalysis(editor.state.doc.toString());
     setEditorLoading(null);
   } catch (error) {
     const message = formatError(error);
-    setRuntime(`WASM failed: ${message}`);
+    setRuntime(`WASM failed: ${message}`, "failed");
     validationBadge.classList.remove("is-loading");
     validationBadge.classList.add("is-invalid");
     validationBadge.textContent = "WASM unavailable";
