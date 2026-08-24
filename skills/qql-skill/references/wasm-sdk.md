@@ -2,7 +2,7 @@
 
 WASM bindings for browser and edge (Cloudflare Workers, Vercel Edge, Deno, Bun).
 
-Language surface includes **Qdrant 1.19 / QQL 1.4** features expressible in QQL
+Language surface includes **Qdrant 1.19 / QQL 1.5** features expressible in QQL
 (`SHOW QUOTAS`, memory/`turbo4`, `MATCH PREFIX`, `SLICE`, `PARAMS (idf = …)`).
 Parse/compile/execute those strings against a backend that supports them
 (quotas: **REST only**).
@@ -168,6 +168,26 @@ console.log(stmt.shardKey);  // -> "acme"
 // Serialise to JSON
 const json = stmt.toJSON();
 const obj = stmt.toObject();
+```
+
+Sparse IDF is QQL (`PARAMS (idf = 'global' | WHERE <filter>)`). There is no
+`injectIdfCorpus` and no host JSON corpus. `compile` / `analyze` emit Qdrant’s
+`params.idf` object from the filter AST.
+
+```js
+import init, { bind, compile } from 'qql-wasm';
+await init();
+
+const bound = bind(`
+  QUERY TEXT :q FROM sec10k USING sparse
+  WHERE tenant_id = :tenant
+  SHARD :tenant
+  PARAMS (idf = WHERE tenant_id = :tenant)
+  LIMIT 10
+`, JSON.stringify({ q: "supply chain", tenant: "acme" }));
+
+const route = compile(bound);
+// route.payload.params.idf.corpus.must[0].key === "tenant_id"
 ```
 
 ---

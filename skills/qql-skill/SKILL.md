@@ -72,14 +72,14 @@ Translate user intent directly into QQL syntax:
 - Multi-tenant isolation -> `QUERY 'text' FROM <collection> WHERE tenant_id = 'honeywell' SHARD 'honeywell' LIMIT 10`
 - Keyword prefix filter -> `WHERE title MATCH PREFIX 'Comp'` (keyword index with `prefix = true`)
 - Deterministic ID-space sampling -> `WHERE SLICE (total, index)` e.g. `SLICE (4, 1)`
-- Sparse IDF corpus (global / tenant) -> `PARAMS (idf = 'global')` or `PARAMS (idf = {corpus: {must: […]}})`
+- Sparse IDF corpus (global / tenant) -> `PARAMS (idf = 'global')` or `PARAMS (idf = WHERE tenant_id = 'acme')`
 - Cluster quotas (REST) -> `SHOW QUOTAS;` / `SET QUOTA (enabled = true, max_resident_memory_percent = 80) WAIT true;`
 - Memory placement + TurboQuant -> `WITH VECTOR (memory = 'cached', datatype = 'turbo4')`, `WITH HNSW (memory = 'cold')`, `payload_memory = 'cold'`
 - Read affinity (host SDKs) -> `RestQdrant` / `GrpcQdrant` `.with_route_affinity(…)`, `pyqql.Client(route_affinity=…)`, `nqql` `{ routeAffinity }`, wasm `client.setRouteAffinity(key)` → `X-Qdrant-Route-Affinity` (not QQL syntax)
 
 ## Canonical Grammar & Capabilities
 
-Language surface targets **Qdrant 1.19** / **QQL 1.4** features (quotas, memory placement,
+Language surface targets **Qdrant 1.19** / **QQL 1.5** features (quotas, memory placement,
 `MATCH PREFIX`, `SLICE`, IDF corpus, `turbo4`). Prefer forms below over legacy dual-write
 keys (`on_disk` / `always_ram`) for new scripts.
 
@@ -91,7 +91,7 @@ CREATE COLLECTION docs (
   colbert VECTOR(128, COSINE) WITH MULTIVECTOR (comparator = 'max_sim')
 ) WITH HNSW (m = 16, ef_construct = 100);
 
--- Memory tiers + TurboQuant 4-bit dense (Qdrant 1.19 / QQL 1.4)
+-- Memory tiers + TurboQuant 4-bit dense (Qdrant 1.19 / QQL 1.5)
 CREATE COLLECTION docs_tiered (
   dense VECTOR(384, COSINE) WITH VECTOR (memory = 'cached', datatype = 'turbo4')
     WITH HNSW (memory = 'cold')
@@ -177,7 +177,7 @@ FROM <collection>
 [SHARD '<tenant_key>']
 [PARAMS (hnsw_ef = <n>, exact = <bool>, acorn = <bool>, max_selectivity = <0–1>,
          indexed_only = <bool>, timeout = <seconds>, consistency = majority|quorum|all|<n>,
-         idf = 'global' | {corpus: <FilterJSON>})]
+         idf = 'global' | WHERE <filter>)]
 [SCORE THRESHOLD <number>]
 [GROUP BY <field> [SIZE <n>] [LOOKUP FROM <collection>]]
 [WITH PAYLOAD [true | false | INCLUDE (...) | EXCLUDE (...)]]

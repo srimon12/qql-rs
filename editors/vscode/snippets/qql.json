@@ -138,9 +138,22 @@
     "prefix": ["qidf"],
     "body": [
       "QUERY TEXT '${1:search}' FROM ${2:collection}",
-      "  PARAMS (idf = '${3|global|}')",
+      "  USING sparse",
+      "  PARAMS (idf = 'global')",
+      "  LIMIT ${3:10};"
+    ],
+    "description": "Collection-wide sparse IDF corpus"
+  },
+  "Per-tenant IDF corpus": {
+    "prefix": ["qidftenant"],
+    "body": [
+      "QUERY TEXT '${1:search}' FROM ${2:collection}",
+      "  USING sparse",
+      "  WHERE tenant_id = '${3:acme}'",
+      "  SHARD '${3:acme}'",
+      "  PARAMS (idf = WHERE tenant_id = '${3:acme}')",
       "  LIMIT ${4:10};"
     ],
-    "description": "Per-query sparse IDF corpus (global)"
+    "description": "Tenant-scoped sparse IDF: WHERE + SHARD + PARAMS idf"
   }
 }

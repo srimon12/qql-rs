@@ -703,8 +703,9 @@ QUERY TEXT 'x' FROM docs
 tenant-scoped corpus so term rarity reflects only that tenant’s documents.
 
 **Why this works:** Search `PARAMS (idf = …)` lowers to Qdrant’s per-query IDF
-options: `'global'` or `{corpus: <Filter>}`. Malformed corpus objects fail with
-`QQL-PLAN-IDF` (not a panic). Supported on remote Qdrant and **qdrant-edge 0.8+**.
+options: `'global'` or a QQL `WHERE` filter. Isolation is still statement
+`WHERE` / `inject_filter`. IDF only scopes term statistics. Supported on remote
+Qdrant and **qdrant-edge 0.8+**.
 
 ```sql
 -- Cluster / collection-global IDF
@@ -712,16 +713,17 @@ QUERY TEXT 'hello' FROM docs USING sparse
   PARAMS (idf = 'global')
   LIMIT 5;
 
--- Tenant-scoped IDF corpus (OpenAPI-style filter object)
+-- Tenant-scoped IDF corpus (same filter grammar as WHERE)
 QUERY TEXT 'hello' FROM docs USING sparse
-  PARAMS (idf = {corpus: {must: [{key: 'tenant', match: {value: 'acme'}}]}})
+  WHERE tenant_id = 'acme'
+  SHARD 'acme'
+  PARAMS (idf = WHERE tenant_id = 'acme')
   LIMIT 5;
 ```
 
 **Key decisions:**
 - Collection sparse vectors often use `modifier = 'idf'` at create time; query
   `PARAMS (idf = …)` overrides / scopes the corpus for **this** request.
-- Corpus filter shape matches Qdrant Filter JSON (`must` / `should` / …), not QQL
-  `WHERE` syntax inside the object.
-- Pair with `WHERE tenant = 'acme'` (and `SHARD 'acme'` when custom-sharded) so
+- Write `idf = WHERE <filter>` — not a Qdrant JSON `{must: […]}` object.
+- Pair with `WHERE tenant_id = 'acme'` (and `SHARD 'acme'` when custom-sharded) so
   both **retrieval isolation** and **IDF stats** stay tenant-local.

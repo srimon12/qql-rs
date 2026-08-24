@@ -4,7 +4,7 @@ Packaged guidance for coding agents that author QQL and call SDKs.
 
 ## Proposition
 
-- **Language:** one SQL-like grammar for Qdrant retrieval, hybrid, multivector, mutations, DDL (Qdrant **1.19** / QQL **1.4** surface: quotas, memory/`turbo4`, `MATCH PREFIX`, `SLICE`, IDF corpus).
+- **Language:** one SQL-like grammar for Qdrant retrieval, hybrid, multivector, mutations, DDL (Qdrant **1.19** / QQL **1.5** surface: quotas, memory/`turbo4`, `MATCH PREFIX`, `SLICE`, `PARAMS (idf = 'global' | WHERE <filter>)`).
 - **Plan IR:** transport-neutral `PlannedOperation` — gRPC and REST are first-class projections (quotas REST-only).
 - **Isolation:** `inject_filter` on the AST (fail-closed).
 - **Routing:** `SHARD '…'` in QQL or `stmt.shard_key` — never inside `Filter`; no `inject_shard_key`.
@@ -32,6 +32,13 @@ CREATE SHARD KEY 'acme' ON COLLECTION docs WITH (shards_number = 2);
 -- DML: isolate + route
 QUERY TEXT 'q' FROM docs USING dense
 WHERE tenant_id = 'acme' SHARD 'acme' LIMIT 10;
+
+-- Sparse IDF is QQL, not inject_filter
+QUERY TEXT 'q' FROM docs USING sparse
+WHERE tenant_id = 'acme' SHARD 'acme'
+PARAMS (idf = WHERE tenant_id = 'acme')
+LIMIT 10;
 ```
 
 Host: always `inject_filter(..., "tenant_id", "=", tenant)` on untrusted QQL.
+IDF stays in `PARAMS`; do not invent a host inject or JSON corpus object.

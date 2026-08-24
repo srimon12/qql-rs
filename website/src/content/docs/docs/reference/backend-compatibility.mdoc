@@ -92,6 +92,12 @@ QUERY TEXT 'search' FROM docs
 USING sparse
 PARAMS (idf = 'global')
 LIMIT 10;
+
+QUERY TEXT 'search' FROM docs
+USING sparse
+WHERE tenant_id = 'acme'
+PARAMS (idf = WHERE tenant_id = 'acme')
+LIMIT 10;
 ```
 {% /qqlExample %}
 

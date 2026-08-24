@@ -1,4 +1,7 @@
-use crate::ast::{EmbeddingSpec, FusionMethod, QueryCollection, QueryExpr, QueryInput, Stmt};
+use crate::ast::{
+    ComparisonOp, EmbeddingSpec, FilterExpr, FusionMethod, QueryCollection, QueryExpr, QueryInput,
+    Stmt, Value,
+};
 use crate::parser::Parser;
 
 #[test]
@@ -338,29 +341,74 @@ fn params_idf_global_and_corpus() {
     let idf = q.params.as_ref().unwrap().idf.as_ref().unwrap();
     assert!(idf.corpus.is_none(), "global scope must carry no corpus");
 
-    let s = Parser::parse(
-        "QUERY 'x' FROM docs PARAMS (idf = {corpus: {key: 'status', match: {value: 'active'}}}) LIMIT 5;",
-    )
-    .unwrap();
+    let s = Parser::parse("QUERY 'x' FROM docs PARAMS (idf = WHERE status = 'active') LIMIT 5;")
+        .unwrap();
     let Stmt::Query(q) = s else { panic!() };
     let idf = q.params.as_ref().unwrap().idf.as_ref().unwrap();
-    let corpus = idf.corpus.as_ref().expect("corpus filter");
-    match corpus {
-        crate::ast::Value::Dict(entries) => {
-            assert!(entries.iter().any(|(k, _)| k.eq_ignore_ascii_case("key")));
+    match idf.corpus.as_ref().expect("corpus filter") {
+        FilterExpr::Compare {
+            field,
+            op,
+            value: Value::Str(value),
+        } => {
+            assert_eq!(field, "status");
+            assert_eq!(*op, ComparisonOp::Eq);
+            assert_eq!(value, "active");
         }
-        other => panic!("expected dict corpus, got {other:?}"),
+        other => panic!("expected compare corpus, got {other:?}"),
     }
 
-    // Round-trip through the formatter.
+    let tenant = Parser::parse(
+        "QUERY 'x' FROM docs PARAMS (idf = WHERE tenant_id = 'acme' AND status = 'active') LIMIT 5;",
+    )
+    .unwrap();
+    let Stmt::Query(q) = tenant else { panic!() };
+    assert!(matches!(
+        q.params
+            .as_ref()
+            .unwrap()
+            .idf
+            .as_ref()
+            .unwrap()
+            .corpus
+            .as_ref()
+            .unwrap(),
+        FilterExpr::And { operands } if operands.len() == 2
+    ));
+
+    // Bare keyword global, and formatter round-trip of WHERE corpora.
+    let s = Parser::parse("QUERY 'x' FROM docs PARAMS (idf = global) LIMIT 5;").unwrap();
+    let Stmt::Query(q) = s else { panic!() };
+    assert!(q
+        .params
+        .as_ref()
+        .unwrap()
+        .idf
+        .as_ref()
+        .unwrap()
+        .corpus
+        .is_none());
+
     let formatted = crate::fmt::format_stmt(
         &Parser::parse("QUERY 'x' FROM docs PARAMS (idf = 'global') LIMIT 5;").unwrap(),
     );
     assert!(formatted.contains("idf = 'global'"), "{formatted}");
+    let formatted = crate::fmt::format_stmt(
+        &Parser::parse("QUERY 'x' FROM docs PARAMS (idf = WHERE tenant_id = 'acme') LIMIT 5;")
+            .unwrap(),
+    );
+    assert!(
+        formatted.contains("idf = WHERE tenant_id = 'acme'"),
+        "{formatted}"
+    );
 
-    // Invalid forms are rejected.
+    // JSON corpus objects and other non-filter values are rejected at parse.
     assert!(Parser::parse("QUERY 'x' FROM docs PARAMS (idf = 5) LIMIT 5;").is_err());
     assert!(Parser::parse("QUERY 'x' FROM docs PARAMS (idf = {foo: 1}) LIMIT 5;").is_err());
+    assert!(Parser::parse(
+        "QUERY 'x' FROM docs PARAMS (idf = {corpus: {must: [{key: 'status', match: {value: 'active'}}]}}) LIMIT 5;"
+    )
+    .is_err());
 }
 
 #[test]

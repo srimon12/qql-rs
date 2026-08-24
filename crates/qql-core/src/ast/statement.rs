@@ -356,15 +356,17 @@ pub struct SearchParams {
     pub consistency: Option<ReadConsistency>,
 }
 
-/// Sparse-vector IDF scope: global statistics (no corpus) or statistics over
-/// the points matching a corpus filter. The corpus is stored as a raw QQL
-/// `Value` in Qdrant filter JSON shape (`{"must": [{"key": ..., ...}]}`) and
-/// is lowered to a typed plan filter by the plan layer.
+/// Sparse-vector IDF scope.
+///
+/// `corpus = None` is collection-wide (`PARAMS (idf = 'global')`). Otherwise
+/// IDF statistics are computed over points matching the QQL filter
+/// (`PARAMS (idf = WHERE tenant_id = 'acme')`). The planner lowers the filter
+/// to a Qdrant `Filter`; the language never takes a JSON corpus object.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct IdfParams {
-    /// Corpus filter as Qdrant filter JSON (via QQL `Value`). `None` = global.
-    pub corpus: Option<Value>,
+    /// Corpus as a QQL filter. `None` = global collection statistics.
+    pub corpus: Option<FilterExpr>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

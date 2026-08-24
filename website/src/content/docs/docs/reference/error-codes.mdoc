@@ -121,7 +121,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-VALIDATION-SCORE` | A score threshold must be finite |
 | `QQL-VALIDATION-SEARCH-PARAM` | Unknown search parameter |
 | `QQL-VALIDATION-SLICE` | `SLICE (total, index)` with `total < 1` or `index >= total` |
-| `QQL-VALIDATION-IDF` | Malformed `PARAMS (idf = …)` value at parse time |
+| `QQL-VALIDATION-IDF` | `PARAMS (idf = …)` is not `'global'` or `WHERE <filter>` |
 | `QQL-VALIDATION-USING` | This query expression does not accept `USING` |
 | `QQL-VALIDATION-VECTOR` | Invalid vector value |
 
@@ -140,7 +140,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PLAN-CROSS-RERANK-PREFETCH` | `CROSS RERANK` requires at least one `PREFETCH` |
 | `QQL-PLAN-CROSS-RERANK-QUERY` | `CROSS RERANK` query text must not be empty |
 | `QQL-PLAN-FUSION-PREFETCH` | `FUSION` requires at least one prefetch |
-| `QQL-PLAN-IDF` | `PARAMS (idf = …)` corpus is not a valid Qdrant filter object |
+| `QQL-PLAN-IDF` | `PARAMS (idf = WHERE …)` lowered to an empty Qdrant filter |
 | `QQL-PLAN-PREFETCH-CTE` | `PREFETCH` references an unknown CTE |
 | `QQL-PLAN-PREFETCH-GROUP` | `GROUP BY` is not supported inside a `PREFETCH` source |
 | `QQL-PLAN-QUOTA` | Invalid `SET QUOTA` key or out-of-range percent |

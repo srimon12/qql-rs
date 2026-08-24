@@ -1,6 +1,6 @@
 # QQL versioning policy
 
-QQL uses `MAJOR.MINOR`. The current language version is `1.4`; the canonical AST
+QQL uses `MAJOR.MINOR`. The current language version is `1.5`; the canonical AST
 schema identifier is independently fixed as `qql.ast/v1`.
 
 ## Compatibility rule
@@ -99,6 +99,7 @@ executable verifier, not a second private specification.
 | 1.2 | 2026-07-29 | Additive minor features: ColBERT multivectors (`AS MULTI` / `AS MULTIVECTOR`), CLIP vision (`QUERY IMAGE`), `CROSS RERANK`, `USING HYBRID`, `acorn` search params, exact point counting (`COUNT WITH (exact = true)`), and specific payload deletion (`DELETE PAYLOAD key1, key2 FROM coll`).
 | 1.3 | 2026-07-31 | Additive minor changes: declared `MULTI`, `MULTIVECTOR`, and `IMAGE` in `single_embedding_spec` and `embed_directive` (matching the already-supported `AS MULTI` / `QUERY IMAGE` query forms), fixed the `delete_payload` field rule to use the canonical `field` name, added `sharding_method` values (`auto`, `custom`), generated the `keywords.generated.rs` artifact from `grammar.pest`, added `embedding-multi-image.qql` fixtures, and enforced bi-directional reverse-drift CI checks. |
 | 1.4 | 2026-08-05 | Additive minor features aligned with Qdrant 1.19: `SHOW QUOTAS` / `SET QUOTA (…) [WAIT bool]`; `memory` placement (`cold`/`cached`/`pinned`) on HNSW, VECTOR, SPARSE, QUANTIZATION, and indexes plus `payload_memory` in collection `PARAMS`; `WHERE field MATCH PREFIX '…'` and `WHERE SLICE (total, index)`; `PARAMS (idf = 'global' \| {corpus: …})` for per-query sparse IDF corpora; keyword index `prefix = true`; dense `datatype = 'turbo4'` (aliases `t4`, plus `f32`/`f16`/`u8`); conformance corpus 38 valid files (261 statements), 53 invalid cases, 38 AST snapshots. |
+| 1.5 | 2026-08-24 | `PARAMS (idf = …)` corpus is a QQL `WHERE` filter (`idf = WHERE tenant_id = 'acme'`), stored as `FilterExpr`. The Qdrant JSON `{corpus: {must: […]}}` form is removed. Isolation remains `WHERE` / `inject_filter`; routing remains `SHARD`; IDF is scoring only. Conformance corpus 39 valid files (265 statements), 56 invalid cases, 39 AST snapshots. |
 
 `qql-rs` is the supported reference implementation. An implementation version
 number does not imply QQL conformance; conformance is claimed only against a

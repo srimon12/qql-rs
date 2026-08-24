@@ -716,7 +716,7 @@ pub(crate) fn render_search_params(params: &SearchParams) -> String {
     if let Some(idf) = &params.idf {
         match &idf.corpus {
             None => parts.push("idf = 'global'".into()),
-            Some(corpus) => parts.push(format!("idf = {{corpus: {}}}", render_value(corpus))),
+            Some(filter) => parts.push(format!("idf = WHERE {}", render_filter(filter))),
         }
     }
     if let Some(value) = params.timeout {

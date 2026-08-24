@@ -1,7 +1,7 @@
 # QQL 1.0 language contract
 
 This directory is the source of truth for the QQL 1.x language contract
-(canonical AST schema `qql.ast/v1`). The **current language version is 1.4**.
+(canonical AST schema `qql.ast/v1`). The **current language version is 1.5**.
 The grammar, semantic rules, fixtures, and canonical AST snapshots are
 versioned with the supported Rust implementation so a language change and its
 implementation cannot drift across repositories.
@@ -74,10 +74,10 @@ cargo run -p qql-grammar-gen -- check
 cargo run -p qql-conformance -- check language/v1
 ```
 
-Expected result (language 1.4):
+Expected result (language 1.5):
 
 ```text
-conformant: 38 valid files (261 statements), 53 invalid cases, 38 AST snapshots
+conformant: 39 valid files (265 statements), 56 invalid cases, 39 AST snapshots
 ```
 
 (Counts track the fixture corpus and change as fixtures are added; the live

@@ -60,7 +60,7 @@ Edge unsupported codes are stable (see `crates/qql-edge/README.md`).
 | TurboQuant dense | `WITH VECTOR (…, datatype = 'turbo4')` |
 | Keyword prefix | Index `WITH (prefix = true)`; filter `field MATCH PREFIX '…'` |
 | Slice sampling | `WHERE SLICE (total, index)` |
-| Sparse IDF corpus | `PARAMS (idf = 'global' \| {corpus: {must: […]}})` — remote + edge 0.8+ |
+| Sparse IDF corpus | `PARAMS (idf = 'global' \| WHERE <filter>)` — remote + edge 0.8+ |
 | Route affinity (host SDKs) | `pyqql.Client(route_affinity=…)` · `nqql` `{ routeAffinity }` · wasm `client.setRouteAffinity(key)` · Rust `RestQdrant`/`GrpcQdrant::with_route_affinity` → `X-Qdrant-Route-Affinity` |
 | Exact count | `COUNT FROM coll WITH (exact = true)` |
 | Specific payload deletion | `DELETE PAYLOAD key1, key2 FROM coll WHERE ...` |
@@ -86,7 +86,7 @@ Edge unsupported codes are stable (see `crates/qql-edge/README.md`).
 | Replica reads | `PARAMS (consistency = majority)` |
 | Pin reads to a replica | `pyqql.Client(route_affinity=…)` / `nqql` `{ routeAffinity }` / wasm `setRouteAffinity(key)` / Rust `RestQdrant::…with_route_affinity("session-key")` — not QQL |
 | Multi-tenant shard | `SHARD 'tenant'` / `stmt.shard_key` + `inject_filter(…, tenant_id, …)` |
-| Tenant-local sparse IDF | `PARAMS (idf = {corpus: {must: [{key: 'tenant_id', match: {value: 'acme'}}]}})` + `WHERE tenant_id = 'acme'` |
+| Tenant-local sparse IDF | `PARAMS (idf = WHERE tenant_id = 'acme')` + `WHERE tenant_id = 'acme'` |
 | Faceted page 2 (groups) | `GROUP BY … OFFSET N` — maps to Qdrant `group_offset` |
 | Edge without groups | `WHERE` + `LIMIT`, or remote Qdrant for `GROUP BY` |
 | Quota admin offline | Use remote Qdrant REST; never invent edge quota ops |

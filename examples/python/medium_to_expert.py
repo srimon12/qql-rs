@@ -108,7 +108,7 @@ def main() -> int:
         s = secure(q, args.user)
         print(f"  {name:12s} valid={pyqql.is_valid(q)} shard={s.shard_key!r}")
 
-    # ── Qdrant 1.19 / QQL 1.4 surface (offline parse/plan checks) ──
+    # ── Qdrant 1.19 / QQL 1.5 surface (offline parse/plan checks) ──
     q19 = [
         "CREATE COLLECTION docs (dense VECTOR(384, COSINE) "
         "WITH VECTOR (memory = 'cached', datatype = 'turbo4')) "
@@ -119,6 +119,9 @@ def main() -> int:
         "WHERE title MATCH PREFIX 'Comp' AND SLICE (4, 0) LIMIT 20",
         "QUERY TEXT 'risks' FROM docs USING sparse "
         "PARAMS (idf = 'global') LIMIT 10",
+        "QUERY TEXT 'risks' FROM docs USING sparse "
+        "WHERE tenant_id = 'acme' SHARD 'acme' "
+        "PARAMS (idf = WHERE tenant_id = 'acme') LIMIT 10",
         "SHOW QUOTAS",
         "SET QUOTA (enabled = true, max_resident_memory_percent = 80) WAIT true",
     ]

@@ -27,7 +27,6 @@ pub static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {
     "COLLECTIONS" => TokenKind::Collections,
     "CONSISTENCY" => TokenKind::Consistency,
     "CONTEXT" => TokenKind::Context,
-    "CORPUS" => TokenKind::Corpus,
     "COSINE" => TokenKind::Cosine,
     "COUNT" => TokenKind::Count,
     "CREATE" => TokenKind::Create,

@@ -63,7 +63,7 @@ typed formula trees — stay typed until a transport boundary.
 | Surface | Plan behavior |
 |---------|----------------|
 | `SET QUOTA (…)` | **Full replace** body (`SetQuotaRequest`). Omitted keys / `key = null` are unset in the PUT body — not a merge of the previous config. Invalid keys/ranges → `QQL-PLAN-QUOTA`. Optional `WAIT` → query `?wait=`. |
-| `PARAMS (idf = …)` | `'global'` or `{corpus: <filter>}`; bad corpus filter → `QQL-PLAN-IDF`. |
+| `PARAMS (idf = …)` | `'global'` or `WHERE <filter>`; empty lowered corpus → `QQL-PLAN-IDF`. |
 | `MATCH PREFIX` / `SLICE` | `MatchValue::Prefix` / `SliceCondition` on the filter IR. |
 | `memory` / `payload_memory` / `datatype` / keyword `prefix` | Forwarded on collection, vector, HNSW, quantization, and index REST bodies. |
 

@@ -27,7 +27,6 @@ export const QQL_KEYWORDS = [
   "COLLECTIONS",
   "CONSISTENCY",
   "CONTEXT",
-  "CORPUS",
   "COSINE",
   "COUNT",
   "CREATE",
