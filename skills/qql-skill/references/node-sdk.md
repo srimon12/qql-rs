@@ -175,10 +175,35 @@ console.log(stmt.toObject());
 
 ---
 
-## 6. Free Functions
+## 6. Parameter Binding & Prepared Queries
 
 ```js
-const { parse, parseJson, isValid, injectFilter, tokenize, compileQuery } = require('@veristamp/nqql');
+const { Client, bind, bindNamed, bindPositional } = require('@veristamp/nqql');
+const client = new Client({ url: "http://localhost:6333" });
+
+// Execute with named parameters (:name)
+const res1 = await client.execute(
+  "QUERY TEXT :query FROM docs WHERE category = :cat AND rating >= :min_rating LIMIT :limit",
+  { params: { query: "machine learning", cat: "tech", min_rating: 4.5, limit: 10 } }
+);
+
+// Execute with positional parameters (?)
+const res2 = await client.execute(
+  "QUERY TEXT ? FROM docs WHERE category = ? LIMIT ?",
+  { params: ["machine learning", "tech", 10] }
+);
+
+// Standalone string binding
+const bound = bind("QUERY TEXT :q FROM docs LIMIT :lim", { q: "test", lim: 10 });
+console.log(bound); // QUERY TEXT 'test' FROM docs LIMIT 10
+```
+
+---
+
+## 7. Free Functions & Explain
+
+```js
+const { parse, parseJson, isValid, injectFilter, tokenize, compileQuery, explain, bind } = require('@veristamp/nqql');
 
 parse("QUERY 'x' FROM docs LIMIT 5");                    // Always Stmt[]
 parse("QUERY 'x' FROM docs LIMIT 5; COUNT FROM docs");   // Script -> Stmt[]
@@ -187,15 +212,19 @@ isValid("QUERY 'x' FROM docs LIMIT 5");                  // Validate
 injectFilter("QUERY 'x' FROM docs", "tenant_id", "=", "acme");
 tokenize("QUERY 'x'");
 compileQuery("QUERY 'x' FROM docs LIMIT 5");
-```
 
-`parseJson()` returns the raw JSON string directly from Rust, bypassing V8 object
-allocation entirely. It is **1.85–2.15× faster** than `parse()`. Prefer it for
-HTTP/IPC forwarding or any path that serialises to JSON anyway.
+// Hierarchical ASCII tree plan
+const planTree = explain("QUERY TEXT 'hello' FROM docs USING dense LIMIT 10");
+console.log(planTree);
+// Query Plan
+// └── Target: docs
+//     ├── Query: text('hello') via dense
+//     └── Limit: 10
+```
 
 ---
 
-## 7. Free-Standing Execute
+## 8. Free-Standing Execute
 
 A top-level `execute()` function creates a temporary client per call:
 
@@ -205,9 +234,10 @@ const { execute } = require('@veristamp/nqql');
 // Single query
 const result = await execute("QUERY 'search' FROM docs USING dense LIMIT 10");
 
-// With options
-const result = await execute("QUERY 'search' FROM docs USING dense LIMIT 10", {
+// With options & parameters
+const result = await execute("QUERY TEXT :q FROM docs USING dense LIMIT :lim", {
     url: "http://localhost:6333",
     apiKey: "sk-...",
+    params: { q: "search", lim: 10 },
 });
 ```

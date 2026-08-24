@@ -36,6 +36,31 @@ const report = await client.execute(query);
 console.log(report.ok, report.succeeded, report.results);
 ```
 
+## Parameter binding & prepared queries
+
+Pass `params` in the execution options as an object for named placeholders (`:name`) or an array for positional placeholders (`?`):
+
+```javascript
+const { Client, bind } = require("@veristamp/nqql");
+
+const client = new Client({ url: "http://localhost:6333" });
+
+// Named parameter substitution (:name)
+const report = await client.execute(
+  "QUERY TEXT :query FROM runbooks WHERE category = :cat LIMIT :limit",
+  { params: { query: "incident response", cat: "ops", limit: 5 } }
+);
+
+// Positional parameter substitution (?)
+const reportPos = await client.execute(
+  "QUERY TEXT ? FROM runbooks WHERE category = ? LIMIT ?",
+  { params: ["incident response", "ops", 5] }
+);
+
+// Standalone query string binding
+const boundQql = bind("QUERY TEXT :q FROM docs LIMIT :lim", { q: "search", lim: 10 });
+```
+
 ## Retain the parsed statement for policy
 
 ```javascript

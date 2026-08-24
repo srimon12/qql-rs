@@ -229,11 +229,42 @@ const result = analyze("QUERY 'search' FROM docs USING dense LIMIT 10");
 
 ---
 
-## 8. Free Functions
+## 8. Parameter Binding & Formatting
+
+```js
+import init, { bind, formatQuery, explain } from 'qql-wasm';
+await init();
+
+// Substitute named parameters (:name)
+const boundNamed = bind(
+    "QUERY TEXT :q FROM docs WHERE category = :cat LIMIT :lim",
+    JSON.stringify({ q: "chest pain", cat: "medical", lim: 10 })
+);
+console.log(boundNamed);
+
+// Substitute positional parameters (?)
+const boundPos = bind(
+    "QUERY TEXT ? FROM docs WHERE category = ? LIMIT ?",
+    JSON.stringify(["chest pain", "medical", 10])
+);
+console.log(boundPos);
+
+// Canonical query formatting
+const formatted = formatQuery("query text 'hello' from docs limit 5");
+console.log(formatted); // "QUERY TEXT 'hello' FROM docs LIMIT 5;"
+
+// Hierarchical ASCII plan tree
+const planTree = explain(boundNamed);
+console.log(planTree);
+```
+
+---
+
+## 9. Free Functions
 
 ```js
 import init, { parse, isValid, inject_filter,
-              tokenize, compile, explain } from 'qql-wasm';
+              tokenize, compile, explain, bind, formatQuery } from 'qql-wasm';
 await init();
 
 parse("QUERY 'x' FROM docs LIMIT 5");                  // Always returns an array
@@ -242,5 +273,7 @@ isValid("QUERY 'x' FROM docs LIMIT 5");                  // Validate
 inject_filter("QUERY 'x'", "tenant_id", "=", "acme");   // Inject filter (string -> object)
 tokenize("QUERY 'x'");                                   // Lex to tokens array
 compile("QUERY 'x' FROM docs LIMIT 5");                  // Compile to a route object
-explain("QUERY 'x' FROM docs LIMIT 5");                  // Explain plan string
+explain("QUERY 'x' FROM docs LIMIT 5");                  // Hierarchical ASCII plan tree
+bind("QUERY :q FROM docs", JSON.stringify({ q: "test" })); // Parameter substitution
+formatQuery("query 'x' from docs");                      // Canonical formatter
 ```

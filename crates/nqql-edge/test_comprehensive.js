@@ -58,9 +58,12 @@ test('exports: explain', () => assert.strictEqual(typeof nqql.explain, 'function
 test('exports: explainStmt', () => assert.strictEqual(typeof nqql.explainStmt, 'function'));
 test('exports: execute', () => assert.strictEqual(typeof nqql.execute, 'function'));
 test('exports: executeStmt', () => assert.strictEqual(typeof nqql.executeStmt, 'function'));
+test('exports: bind', () => assert.strictEqual(typeof nqql.bind, 'function'));
+test('exports: bindNamed', () => assert.strictEqual(typeof nqql.bindNamed, 'function'));
+test('exports: bindPositional', () => assert.strictEqual(typeof nqql.bindPositional, 'function'));
 test('exports: version', () => assert.strictEqual(typeof nqql.version, 'string'));
 
-const knownKeys = ['Client','Stmt','compileQuery','execute','executeStmt',
+const knownKeys = ['Client','Stmt','bind','bindNamed','bindPositional','compileQuery','execute','executeStmt',
   'explain','explainStmt','httpExecutor','injectFilter','isValid','listEmbeddingModels',
   'localExecutor','parse','parseJson','tokenize', 'version', '__version__'];
 const actualKeys = Object.keys(nqql).sort();
@@ -325,6 +328,47 @@ testAsync('executeStmt() honors embedUrl via local mock HTTP endpoint', async ()
 });
 
 // ============================================================================
+// Parameter Binding Tests
+// ============================================================================
+console.log('\n========== Parameter Binding ==========');
+
+test('bind named parameters', () => {
+  const q = "QUERY 'shoes' FROM products WHERE category = :cat AND price < :max_p";
+  const res = nqql.bind(q, { cat: "sneakers", max_p: 100 });
+  assert.strictEqual(res, "QUERY 'shoes' FROM products WHERE category = 'sneakers' AND price < 100");
+});
+
+test('bind positional parameters', () => {
+  const q = "QUERY 'shoes' FROM products WHERE category = ? AND in_stock = ?";
+  const res = nqql.bind(q, ["sneakers", true]);
+  assert.strictEqual(res, "QUERY 'shoes' FROM products WHERE category = 'sneakers' AND in_stock = true");
+});
+
+test('bindNamed helper', () => {
+  const q = "QUERY 'shoes' FROM products WHERE category = :cat";
+  const res = nqql.bindNamed(q, { cat: "boots" });
+  assert.strictEqual(res, "QUERY 'shoes' FROM products WHERE category = 'boots'");
+});
+
+test('bindPositional helper', () => {
+  const q = "QUERY 'shoes' FROM products WHERE category = ?";
+  const res = nqql.bindPositional(q, ["boots"]);
+  assert.strictEqual(res, "QUERY 'shoes' FROM products WHERE category = 'boots'");
+});
+
+test('bind preserves dollar identifiers', () => {
+  const q = "QUERY 'shoes' FROM products WHERE $category = :cat AND $1 = 42";
+  const res = nqql.bind(q, { cat: "boots" });
+  assert.strictEqual(res, "QUERY 'shoes' FROM products WHERE $category = 'boots' AND $1 = 42");
+});
+
+test('bindNamed rejects arrays', () => {
+  assert.throws(() => nqql.bindNamed("WHERE x = :x", [1]), /bind_named expects a JSON object/);
+});
+
+test('bindPositional rejects objects', () => {
+  assert.throws(() => nqql.bindPositional("WHERE x = ?", { x: 1 }), /bind_positional expects a JSON array/);
+});
 console.log(`\n========================================`);
 console.log(`  TEST RESULTS: ${passed} passed, ${failed} failed.`);
 console.log(`========================================\n`);

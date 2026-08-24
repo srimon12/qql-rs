@@ -25,6 +25,7 @@ export interface ExecutionReport {
 
 export interface ExecuteOptions {
   onError?: "stop" | "continue";
+  params?: Record<string, unknown> | unknown[];
 }
 
 export interface CompiledRoute {
@@ -116,6 +117,21 @@ export function tokenize(
 export function compileQuery(query: string): CompiledRoute;
 export function explain(query: string): string;
 export function explainStmt(stmt: Stmt): string;
+/** Substitute named (:name) or positional (?) parameters into a query string. */
+export function bind(
+  query: string,
+  params: Record<string, unknown> | unknown[],
+): string;
+/** Substitute named parameters (:name) using an object. */
+export function bindNamed(
+  query: string,
+  params: Record<string, unknown>,
+): string;
+/** Substitute positional parameters (?) using an array. */
+export function bindPositional(
+  query: string,
+  params: unknown[],
+): string;
 export function execute(
   query: string | Stmt | string[] | Stmt[],
   options?: ExecuteOptions & ClientOptions,

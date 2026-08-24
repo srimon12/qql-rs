@@ -151,241 +151,8 @@ fn compile_query<'py>(py: Python<'py>, input: &str) -> PyResult<Bound<'py, PyAny
     pythonize::pythonize(py, &result).map_err(|e| PySyntaxError::new_err(e.to_string()))
 }
 
-#[pyclass(name = "HttpEmbedder")]
-#[derive(Clone)]
-struct PyHttpEmbedder {
-    endpoint: String,
-    api_key: String,
-    model: String,
-    dimension: usize,
-}
-
-#[pymethods]
-impl PyHttpEmbedder {
-    #[new]
-    #[pyo3(signature = (endpoint, model, dimension, api_key=None))]
-    fn new(
-        endpoint: &str,
-        model: &str,
-        dimension: usize,
-        api_key: Option<String>,
-    ) -> PyResult<Self> {
-        if endpoint.trim().is_empty() {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "embedding endpoint is required",
-            ));
-        }
-        if model.trim().is_empty() {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "embedding model is required",
-            ));
-        }
-        if dimension == 0 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "embedding dimension must be positive",
-            ));
-        }
-        Ok(PyHttpEmbedder {
-            endpoint: endpoint.to_string(),
-            api_key: api_key.unwrap_or_default(),
-            model: model.to_string(),
-            dimension,
-        })
-    }
-}
-
-#[allow(clippy::type_complexity)]
-fn extract_embedder_config(
-    embedder: Option<&Bound<'_, PyAny>>,
-) -> PyResult<(
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<usize>,
-)> {
-    let mut ep = None;
-    let mut ep_key = None;
-    let mut model = None;
-    let mut dim = None;
-
-    if let Some(emb) = embedder {
-        if let Ok(py_emb) = emb.extract::<PyRef<PyHttpEmbedder>>() {
-            ep = Some(py_emb.endpoint.clone());
-            ep_key = Some(py_emb.api_key.clone());
-            model = Some(py_emb.model.clone());
-            dim = Some(py_emb.dimension);
-        } else if let Ok(dict) = emb.downcast::<PyDict>() {
-            ep = Some(
-                dict.get_item("endpoint")?
-                    .ok_or_else(|| {
-                        pyo3::exceptions::PyValueError::new_err("embedder.endpoint is required")
-                    })?
-                    .extract::<String>()?,
-            );
-            model = Some(
-                dict.get_item("model")?
-                    .ok_or_else(|| {
-                        pyo3::exceptions::PyValueError::new_err("embedder.model is required")
-                    })?
-                    .extract::<String>()?,
-            );
-            dim = Some(
-                dict.get_item("dimension")?
-                    .ok_or_else(|| {
-                        pyo3::exceptions::PyValueError::new_err("embedder.dimension is required")
-                    })?
-                    .extract::<usize>()?,
-            );
-            ep_key = dict
-                .get_item("api_key")?
-                .map(|value| value.extract::<String>())
-                .transpose()?;
-            // multi_* keys are applied later on config; parse into side channel via attributes
-            // is handled in create_executor when building HttpEmbedderOptions from full dict.
-            if ep.as_ref().is_some_and(|value| value.trim().is_empty()) {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "embedder.endpoint must not be empty",
-                ));
-            }
-            if model.as_ref().is_some_and(|value| value.trim().is_empty()) {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "embedder.model must not be empty",
-                ));
-            }
-            if dim == Some(0) {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "embedder.dimension must be positive",
-                ));
-            }
-        } else {
-            return Err(pyo3::exceptions::PyTypeError::new_err(
-                "embedder must be an HttpEmbedder or dict",
-            ));
-        }
-    }
-    Ok((ep, ep_key, model, dim))
-}
-
-#[allow(clippy::too_many_arguments)]
-fn create_executor(
-    url: &str,
-    api_key: Option<String>,
-    use_grpc: bool,
-    embedder: Option<&Bound<'_, PyAny>>,
-    route_affinity: Option<String>,
-) -> PyResult<(qql::executor::Executor, tokio::runtime::Runtime)> {
-    let rt = tokio::runtime::Runtime::new()
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-
-    let (ep, ep_key, model, dim) = extract_embedder_config(embedder)?;
-
-    let mut config = qql::config::QqlConfig {
-        url: url.to_string(),
-        secret: api_key.clone(),
-        ..Default::default()
-    };
-
-    if let Some(endpoint) = ep {
-        config.embedding_endpoint = Some(endpoint);
-        config.embedding_api_key = ep_key;
-        config.embedding_model = model;
-        config.embedding_dimension = dim.unwrap_or(0);
-    }
-    // Optional multi/ColBERT fields from embedder dict.
-    if let Some(emb) = embedder {
-        if let Ok(dict) = emb.downcast::<PyDict>() {
-            if let Ok(Some(v)) = dict.get_item("multi_endpoint") {
-                config.multi_embedding_endpoint = Some(v.extract::<String>()?);
-            }
-            if let Ok(Some(v)) = dict.get_item("multi_api_key") {
-                config.multi_embedding_api_key = Some(v.extract::<String>()?);
-            }
-            if let Ok(Some(v)) = dict.get_item("multi_model") {
-                config.multi_embedding_model = Some(v.extract::<String>()?);
-            }
-            if let Ok(Some(v)) = dict.get_item("multi_dimension") {
-                config.multi_embedding_dimension = v.extract::<usize>()?;
-            }
-            if let Ok(Some(v)) = dict.get_item("image_endpoint") {
-                config.image_embedding_endpoint = Some(v.extract::<String>()?);
-            }
-            if let Ok(Some(v)) = dict.get_item("image_api_key") {
-                config.image_embedding_api_key = Some(v.extract::<String>()?);
-            }
-            if let Ok(Some(v)) = dict.get_item("image_model") {
-                config.image_embedding_model = Some(v.extract::<String>()?);
-            }
-            if let Ok(Some(v)) = dict.get_item("image_dimension") {
-                config.image_embedding_dimension = v.extract::<usize>()?;
-            }
-            if let Ok(Some(v)) = dict.get_item("rerank_endpoint") {
-                config.rerank_endpoint = Some(v.extract::<String>()?);
-            }
-            if let Ok(Some(v)) = dict.get_item("rerank_api_key") {
-                config.rerank_api_key = Some(v.extract::<String>()?);
-            }
-            if let Ok(Some(v)) = dict.get_item("rerank_model") {
-                config.rerank_model = Some(v.extract::<String>()?);
-            }
-        }
-    }
-
-    let client: Box<dyn qql::client::QdrantOps> = if use_grpc {
-        #[cfg(feature = "grpc")]
-        {
-            let mut grpc = qql::grpc::GrpcQdrant::from_url(url, api_key)
-                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-            if let Some(affinity) = route_affinity.as_deref() {
-                grpc = grpc.with_route_affinity(affinity);
-            }
-            Box::new(grpc)
-        }
-        #[cfg(not(feature = "grpc"))]
-        {
-            return Err(pyo3::exceptions::PyRuntimeError::new_err(
-                "gRPC feature not enabled in this build",
-            ));
-        }
-    } else {
-        let mut rest = qql::rest::RestQdrant::new(url.to_string(), api_key);
-        if let Some(affinity) = route_affinity.as_deref() {
-            rest = rest.with_route_affinity(affinity);
-        }
-        Box::new(rest)
-    };
-
-    let embedder_impl = if let Some(endpoint) = &config.embedding_endpoint {
-        if !endpoint.trim().is_empty() {
-            let http_emb =
-                qql::embedder::HttpEmbedder::try_with_options(qql::embedder::HttpEmbedderOptions {
-                    endpoint: endpoint.clone(),
-                    api_key: config.embedding_api_key.clone().unwrap_or_default(),
-                    model: config.embedding_model.clone().unwrap_or_default(),
-                    dimension: config.embedding_dimension,
-                    multi_endpoint: config.multi_embedding_endpoint.clone(),
-                    multi_api_key: config.multi_embedding_api_key.clone(),
-                    multi_model: config.multi_embedding_model.clone(),
-                    multi_dimension: config.multi_embedding_dimension,
-                    image_endpoint: config.image_embedding_endpoint.clone(),
-                    image_api_key: config.image_embedding_api_key.clone(),
-                    image_model: config.image_embedding_model.clone(),
-                    image_dimension: config.image_embedding_dimension,
-                    rerank_endpoint: config.rerank_endpoint.clone(),
-                    rerank_api_key: config.rerank_api_key.clone(),
-                    rerank_model: config.rerank_model.clone(),
-                })
-                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-            Some(std::sync::Arc::new(http_emb) as std::sync::Arc<dyn qql::embedder::Embedder>)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    let exec = qql::executor::Executor::with_embedder(client, Some(config), embedder_impl);
-    Ok((exec, rt))
-}
+mod embedder;
+pub use embedder::*;
 
 #[pyclass(name = "Client")]
 struct PyClient {
@@ -426,32 +193,57 @@ impl PyClient {
     /// Execute a QQL query string, a pre-parsed Stmt, or a list of either.
     /// Lists of same-collection QUERY statements are automatically batched
     /// into a single network call.
-    #[pyo3(signature = (query, *, on_error="stop"))]
+    #[pyo3(signature = (query, *, params=None, on_error="stop"))]
     fn execute<'py>(
         &self,
         py: Python<'py>,
         query: &Bound<'_, PyAny>,
+        params: Option<&Bound<'_, PyAny>>,
         on_error: &str,
     ) -> PyResult<Bound<'py, PyAny>> {
         let oe = parse_on_error(on_error)?;
-        let out = self.classify_and_run(query, oe)?;
+        let input = if let Some(p) = params {
+            if let Ok(q_str) = query.extract::<String>() {
+                let bound = bind_py_params(&q_str, p)?;
+                Input::String(bound)
+            } else {
+                return Err(PyValueError::new_err(
+                    "parameter binding requires a query string",
+                ));
+            }
+        } else {
+            self.classify(query)?
+        };
+        let out = self.run_input(input, oe)?;
         pythonize::pythonize(py, &out)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
     }
 
     /// Async variant — accepts the same input types as `execute`.
-    #[pyo3(signature = (query, *, on_error="stop"))]
+    #[pyo3(signature = (query, *, params=None, on_error="stop"))]
     fn execute_async<'py>(
         &self,
         py: Python<'py>,
         query: Bound<'py, PyAny>,
+        params: Option<&Bound<'_, PyAny>>,
         on_error: &str,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
         let oe = parse_on_error(on_error)?;
-        let classified = self.classify(&query)?;
+        let input = if let Some(p) = params {
+            if let Ok(q_str) = query.extract::<String>() {
+                let bound = bind_py_params(&q_str, p)?;
+                Input::String(bound)
+            } else {
+                return Err(PyValueError::new_err(
+                    "parameter binding requires a query string",
+                ));
+            }
+        } else {
+            self.classify(&query)?
+        };
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let val = Self::run_async(&inner, classified, oe)
+            let val = Self::run_async(&inner, input, oe)
                 .await
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
             Python::with_gil(|py| {
@@ -517,13 +309,13 @@ impl PyClient {
         Ok(Input::String(s))
     }
 
-    fn classify_and_run(
+    fn run_input(
         &self,
-        query: &Bound<'_, PyAny>,
+        input: Input,
         on_error: qql::executor::OnError,
     ) -> PyResult<serde_json::Value> {
         let stop = matches!(on_error, qql::executor::OnError::Stop);
-        match self.classify(query)? {
+        match input {
             Input::String(s) => {
                 let report = self
                     .runtime
@@ -591,11 +383,12 @@ impl PyClient {
 // ── free functions ────────────────────────────────────────────────
 
 #[pyfunction]
-#[pyo3(signature = (query, *, url="http://localhost:6333", api_key=None, use_grpc=false, embedder=None, on_error="stop", route_affinity=None))]
+#[pyo3(signature = (query, *, params=None, url="http://localhost:6333", api_key=None, use_grpc=false, embedder=None, on_error="stop", route_affinity=None))]
 #[allow(clippy::too_many_arguments)]
 fn execute<'py>(
     py: Python<'py>,
     query: &Bound<'_, PyAny>,
+    params: Option<&Bound<'_, PyAny>>,
     url: &str,
     api_key: Option<String>,
     use_grpc: bool,
@@ -604,15 +397,16 @@ fn execute<'py>(
     route_affinity: Option<String>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let client = PyClient::new(url, api_key, use_grpc, embedder, route_affinity)?;
-    client.execute(py, query, on_error)
+    client.execute(py, query, params, on_error)
 }
 
 #[pyfunction]
-#[pyo3(signature = (query, *, url="http://localhost:6333", api_key=None, use_grpc=false, embedder=None, on_error="stop", route_affinity=None))]
+#[pyo3(signature = (query, *, params=None, url="http://localhost:6333", api_key=None, use_grpc=false, embedder=None, on_error="stop", route_affinity=None))]
 #[allow(clippy::too_many_arguments)]
 fn execute_async<'py>(
     py: Python<'py>,
     query: Bound<'py, PyAny>,
+    params: Option<&Bound<'_, PyAny>>,
     url: &str,
     api_key: Option<String>,
     use_grpc: bool,
@@ -621,7 +415,58 @@ fn execute_async<'py>(
     route_affinity: Option<String>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let client = PyClient::new(url, api_key, use_grpc, embedder, route_affinity)?;
-    client.execute_async(py, query, on_error)
+    client.execute_async(py, query, params, on_error)
+}
+
+/// Substitute named (:name) or positional (?) parameters into a query string.
+#[pyfunction]
+#[pyo3(signature = (query, params=None))]
+fn bind(query: &str, params: Option<&Bound<'_, PyAny>>) -> PyResult<String> {
+    match params {
+        Some(p) => bind_py_params(query, p),
+        None => Ok(query.to_string()),
+    }
+}
+
+/// Substitute named parameters (:name) using a dictionary.
+#[pyfunction]
+fn bind_named(query: &str, params: &Bound<'_, PyDict>) -> PyResult<String> {
+    bind_py_params(query, params.as_any())
+}
+
+/// Substitute positional parameters (?) using a list.
+#[pyfunction]
+fn bind_positional(query: &str, params: &Bound<'_, PyList>) -> PyResult<String> {
+    bind_py_params(query, params.as_any())
+}
+
+fn bind_py_params(query: &str, params: &Bound<'_, PyAny>) -> PyResult<String> {
+    if params.is_none() {
+        return Ok(query.to_string());
+    }
+    if let Ok(dict) = params.downcast::<PyDict>() {
+        let mut map = std::collections::HashMap::new();
+        for (k, v) in dict.iter() {
+            let key = k
+                .extract::<String>()
+                .map_err(|_| PySyntaxError::new_err("parameter dict keys must be strings"))?;
+            let val = py_to_value(&v)?;
+            map.insert(key, val);
+        }
+        qql_core::params::bind_named(query, |k| map.get(k).cloned())
+            .map_err(|e| PyValueError::new_err(e.to_string()))
+    } else if let Ok(list) = params.downcast::<PyList>() {
+        let mut items = Vec::with_capacity(list.len());
+        for item in list.iter() {
+            items.push(py_to_value(&item)?);
+        }
+        qql_core::params::bind_positional(query, &items)
+            .map_err(|e| PyValueError::new_err(e.to_string()))
+    } else {
+        Err(PyValueError::new_err(
+            "params must be a dict for named parameters (:name) or a list for positional parameters (?)",
+        ))
+    }
 }
 
 fn parse_on_error(s: &str) -> PyResult<qql::executor::OnError> {
@@ -677,6 +522,9 @@ fn pyqql(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyClient>()?;
     m.add_function(wrap_pyfunction!(execute, m)?)?;
     m.add_function(wrap_pyfunction!(execute_async, m)?)?;
+    m.add_function(wrap_pyfunction!(bind, m)?)?;
+    m.add_function(wrap_pyfunction!(bind_named, m)?)?;
+    m.add_function(wrap_pyfunction!(bind_positional, m)?)?;
     m.add_function(wrap_pyfunction!(explain, m)?)?;
     m.add_function(wrap_pyfunction!(parse, m)?)?;
     m.add_function(wrap_pyfunction!(parse_json, m)?)?;

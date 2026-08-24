@@ -221,6 +221,45 @@ try {
   assert.deepStrictEqual(e.span, { start: 0, end: 7 });
 }
 
+// Parameter binding tests
+const qNamed = "QUERY 'shoes' FROM products WHERE category = :cat AND price < :max_p";
+const boundNamed = nqql.bind(qNamed, { cat: "sneakers", max_p: 100 });
+assert.strictEqual(
+  boundNamed,
+  "QUERY 'shoes' FROM products WHERE category = 'sneakers' AND price < 100",
+);
+const boundNamedFn = nqql.bindNamed(qNamed, { cat: "boots", max_p: 50 });
+assert.strictEqual(
+  boundNamedFn,
+  "QUERY 'shoes' FROM products WHERE category = 'boots' AND price < 50",
+);
+
+const qPos = "QUERY 'shoes' FROM products WHERE category = ? AND in_stock = ?";
+const boundPos = nqql.bind(qPos, ["sneakers", true]);
+assert.strictEqual(
+  boundPos,
+  "QUERY 'shoes' FROM products WHERE category = 'sneakers' AND in_stock = true",
+);
+const boundPosFn = nqql.bindPositional(qPos, ["boots", false]);
+assert.strictEqual(
+  boundPosFn,
+  "QUERY 'shoes' FROM products WHERE category = 'boots' AND in_stock = false",
+);
+
+// Boolean ordering & dollar identifier tests
+assert.strictEqual(
+  nqql.bind("WHERE flag = ? AND count = ?", [true, 1]),
+  "WHERE flag = true AND count = 1",
+);
+assert.strictEqual(
+  nqql.bind("WHERE $category = :cat AND $1 = 42", { cat: "boots" }),
+  "WHERE $category = 'boots' AND $1 = 42",
+);
+
+// Shape validation tests
+assert.throws(() => nqql.bindNamed("WHERE x = :x", [1]), /bind_named expects a JSON object/);
+assert.throws(() => nqql.bindPositional("WHERE x = ?", { x: 1 }), /bind_positional expects a JSON array/);
+
 async function testAsyncErrors() {
   await assert.rejects(
     client.execute("invalid syntax"),
