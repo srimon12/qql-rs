@@ -27,14 +27,14 @@ the `grpc` feature. Otherwise the REST transport is used.
 
 | Command | Purpose |
 |---|---|
+| `qql [repl\|connect]` | Interactive REPL shell with multiline continuation and live diagnostics (default when run without arguments in a TTY) |
 | `qql exec "<query>"` | Execute one statement or an inline semicolon-delimited script (`--json` for JSON output, `-q`/`--quiet`) |
 | `qql execute file.qql` | Execute a script file (`--stop-on-error`; prints a JSON summary `{ok, command, path, succeeded, failed, message}`) |
-| `qql explain "<query>"` | Show the execution plan without a backend (plan text; JSON with `--json`) |
-| `qql connect` | Interactive REPL |
+| `qql explain "<query>"` | Show the hierarchical execution plan tree without a backend (ASCII tree; JSON with `--json`) |
 | `qql convert [file.json]` | Convert Qdrant REST JSON to QQL (stdin if no file) |
 | `qql fmt [file.qql]` | Format QQL source into canonical form (stdin if no file; prints to stdout). `--check` exits non-zero when the source is not formatted, `--write` rewrites the file in place |
 | `qql dump <collection> <output.qql>` | Export a collection to a `.qql` script (`--batch-size N`, default 100; typed `CREATE COLLECTION` + `CREATE INDEX` + batched `UPSERT`) |
-| `qql doctor` | Check backend and embedder health (`--json`) |
+| `qql doctor` | Check backend, model hosts, and embedder health (`--json`) |
 | `qql config edge` | Configure persistent edge settings (see below) |
 | `qql version` | Print version as JSON |
 
@@ -47,7 +47,7 @@ SHOW COLLECTIONS;
 {% terminal title="Execute, explain, and diagnose" %}
 qql exec "SHOW COLLECTIONS"
 qql exec --json "SHOW COLLECTIONS"
-qql explain "SHOW COLLECTIONS"
+qql explain "QUERY TEXT 'quantum' FROM papers USING dense LIMIT 5"
 qql doctor --json
 qql version
 {% /terminal %}
@@ -128,23 +128,28 @@ edge backend overview](/docs/edge/) and [the edge CLI reference](/docs/edge/cli/
 
 ## Interactive REPL
 
-`qql connect` starts the interactive shell. Results render as psql-style
-aligned tables with a row-count footer.
+`qql repl` (or `qql connect`, or simply `qql` when invoked in a terminal) starts the interactive shell. The REPL supports multiline statement buffers with continuation prompts (`qql...> `), live syntax completeness detection, and psql-style aligned tables.
 
 | Built-in | Purpose |
 |---|---|
 | `help`, `\h`, `?` | Show available statements and built-in commands |
-| `explain <query>` | Show the execution plan without executing |
-| `execute <file>`, `\e <file>` | Run a `.qql` script file |
+| `fmt <qql>`, `\f <qql>` | Format QQL into canonical syntax |
+| `doctor`, `\d` | Run backend and embedder health diagnostics |
+| `explain <query>` | Show the hierarchical ASCII execution plan tree |
+| `execute <file>`, `\e <file>` | Run a `.qql` script file statement-by-statement with timing |
 | `dump <collection> <output.qql>` | Dump a collection (schema + vectors + payload) to `.qql` |
 | `exit`, `quit`, `\q`, `:q` | Leave the shell |
 
-`Ctrl-D` exits the shell; `Ctrl-C` cancels the current input line.
+`Ctrl-D` exits the shell; `Ctrl-C` cancels the current multiline buffer.
 
 {% terminal title="Start the REPL" %}
-qql connect
-qql> help
-qql> SHOW COLLECTIONS;
+qql repl
+qql> QUERY TEXT 'vector databases'
+qql...>   FROM docs
+qql...>   USING dense
+qql...>   LIMIT 5;
+qql> \f query text 'quantum' from papers limit 10
+QUERY TEXT 'quantum' FROM papers LIMIT 10;
 qql> \q
 {% /terminal %}
 

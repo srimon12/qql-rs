@@ -167,6 +167,57 @@ class TestPyQql(unittest.TestCase):
                 "acme",
             )
 
+    def test_bind_named(self):
+        q = "QUERY 'shoes' FROM products WHERE category = :cat AND price < :max_p"
+        bound = pyqql.bind(q, {"cat": "sneakers", "max_p": 100})
+        self.assertEqual(
+            bound,
+            "QUERY 'shoes' FROM products WHERE category = 'sneakers' AND price < 100",
+        )
+        bound_named = pyqql.bind_named(q, {"cat": "boots", "max_p": 50})
+        self.assertEqual(
+            bound_named,
+            "QUERY 'shoes' FROM products WHERE category = 'boots' AND price < 50",
+        )
+
+    def test_bind_positional(self):
+        q = "QUERY 'shoes' FROM products WHERE category = ? AND in_stock = ?"
+        bound = pyqql.bind(q, ["sneakers", True])
+        self.assertEqual(
+            bound,
+            "QUERY 'shoes' FROM products WHERE category = 'sneakers' AND in_stock = true",
+        )
+        bound_pos = pyqql.bind_positional(q, ["boots", False])
+        self.assertEqual(
+            bound_pos,
+            "QUERY 'shoes' FROM products WHERE category = 'boots' AND in_stock = false",
+        )
+
+    def test_bind_bool_ordering(self):
+        q = "WHERE flag = ? AND count = ?"
+        bound = pyqql.bind(q, [True, 1])
+        self.assertEqual(bound, "WHERE flag = true AND count = 1")
+
+    def test_bind_dict_keys_and_floats(self):
+        q = "UPSERT INTO t VALUES :doc"
+        bound = pyqql.bind(q, {"doc": {"a: 1, b": 5, "rate": 1.25e-5}})
+        self.assertIn("'a: 1, b': 5", bound)
+        self.assertIn("1.25e-5", bound)
+
+    def test_bind_invalid_float(self):
+        q = "WHERE score > ?"
+        with self.assertRaises(ValueError):
+            pyqql.bind(q, [float("nan")])
+        with self.assertRaises(ValueError):
+            pyqql.bind(q, [float("inf")])
+
+    def test_bind_mixed_style_error(self):
+        with self.assertRaises(ValueError):
+            pyqql.bind_named("WHERE x = ?", {"x": 1})
+        with self.assertRaises(ValueError):
+            pyqql.bind_positional("WHERE x = :name", [1])
+
 
 if __name__ == "__main__":
     unittest.main()
+

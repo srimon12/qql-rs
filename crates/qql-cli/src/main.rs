@@ -9,6 +9,7 @@ mod config;
 mod convert;
 mod dump;
 mod output;
+mod repl;
 mod script;
 mod table;
 
@@ -22,7 +23,7 @@ struct Cli {
     #[arg(long, global = true)]
     edge: bool,
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(clap::Subcommand)]
@@ -57,6 +58,7 @@ enum Command {
         quiet: bool,
     },
     /// Start interactive REPL connected to Qdrant
+    #[command(alias = "repl")]
     Connect,
     /// Convert REST JSON payload to QQL
     Convert {
@@ -187,7 +189,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .or_else(|| std::env::var("QDRANT_URL").ok())
         .unwrap_or_else(|| "http://localhost:6333".to_string());
 
-    match cli.command {
+    match cli.command.unwrap_or(Command::Connect) {
         Command::Exec { query, json, quiet } => {
             commands::handle_exec(&url, use_edge, &query, json, quiet).await
         }

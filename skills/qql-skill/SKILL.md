@@ -291,17 +291,25 @@ routing inside the filter object.
 | Edge | No quotas; no custom shard-key admin; no `GROUP BY` / ACORN; **IDF** on search params (edge 0.8+); optional multi/image/rerank hosts |
 | Route affinity | Client transport option on remote SDKs (`RestQdrant` / `GrpcQdrant`, `pyqql.Client(route_affinity=…)`, `nqql` `{ routeAffinity }`, wasm `setRouteAffinity`); not on edge |
 
+## Parameter Binding & Prepared Queries
+
+QQL provides type-safe parameter binding across all SDKs:
+- **Named Placeholders**: `:name` (e.g. `:category`, `:lim`)
+- **Positional Placeholders**: `?` (sequential 1-to-1 mapping)
+- **Grammar Rule**: `$` is an identifier character in QQL (`$category`, `$score`). **Never** use `$name` or `$1` as placeholders — only `:name` and `?`.
+- **Token Boundaries**: Colons in compact dicts (`{a:b}`, `{'a':b}`) are preserved as key-value separators. Write `{key: :val}` to bind dict values.
+
 ## CLI Reference
 
 ```text
+qql [repl | connect]                         Interactive REPL (multiline, \f fmt, \d doctor, \e script)
 qql exec <query> [--json] [--quiet]          Execute a single QQL query
 qql execute <file.qql> [--stop-on-error]     Execute statements from file
-qql explain <query> [--json] [--quiet]       Show execution plan (no Qdrant needed)
-qql connect                                   Interactive REPL
+qql explain <query> [--json] [--quiet]       Show hierarchical ASCII tree execution plan
 qql convert [file.json]                       Convert REST JSON to QQL
 qql fmt [file.qql] [--check] [--write]        Format QQL source into canonical form
 qql dump <collection> <output.qql> [options]  Dump collection to QQL script
-qql doctor [--json] [--quiet]                 Check Qdrant connection health
+qql doctor [--json] [--quiet]                 Check Qdrant connection health & model hosts
 qql --edge exec <query> [options]           Execute against local qdrant-edge
 qql config edge [options]                    Configure local qdrant-edge backend
 qql version                                   Show version
@@ -318,31 +326,55 @@ import pyqql
 embedder = pyqql.HttpEmbedder("http://localhost:11434/v1/embeddings", "all-minilm:l6-v2", 384)
 client = pyqql.Client("http://localhost:6333", embedder=embedder)
 
+# Standard execution
 result = client.execute("QUERY 'semantic search' FROM docs USING dense LIMIT 5")
+
+# Parameterized execution (named or positional)
+result = client.execute(
+    "QUERY TEXT :q FROM docs WHERE category = :cat LIMIT :lim",
+    params={"q": "chest pain", "cat": "medical", "lim": 10},
+)
 ```
 
 ### Rust (`qql`)
 ```rust
+use std::collections::HashMap;
 use qql::executor::{Executor, OnError};
+use qql_core::ast::Value;
 
 let exec = Executor::rest("http://localhost:6333", None).unwrap();
-let res = exec.execute(
-    "QUERY 'search' FROM docs USING dense LIMIT 5",
+
+// Parameterized execution with named parameters
+let mut params = HashMap::new();
+params.insert("q".into(), Value::Str("chest pain".into()));
+params.insert("lim".into(), Value::Int(10));
+let res = exec.execute_with_params(
+    "QUERY TEXT :q FROM docs LIMIT :lim",
+    &params,
     OnError::Stop,
 ).await.unwrap();
 ```
 
 ### Node.js (`nqql`)
 ```js
-const { Client } = require('@veristamp/nqql');
+const { Client, bind } = require('@veristamp/nqql');
 const client = new Client({ url: "http://localhost:6333" });
-const result = await client.execute("QUERY 'search' FROM docs USING dense LIMIT 5");
+
+// Parameterized execution
+const result = await client.execute(
+  "QUERY TEXT :q FROM docs WHERE category = :cat LIMIT :lim",
+  { params: { q: "chest pain", cat: "medical", lim: 10 } }
+);
 ```
 
 ### WebAssembly (`qql-wasm`)
 ```js
-import init, { Client } from 'qql-wasm';
+import init, { Client, bind, explain } from 'qql-wasm';
 await init();
 const client = new Client("http://localhost:6333", null);
-const result = await client.execute("QUERY 'search' FROM docs USING dense LIMIT 5");
+
+// Offline binding & tree explanation
+const bound = bind("QUERY TEXT :q FROM docs LIMIT :lim", JSON.stringify({ q: "chest pain", lim: 10 }));
+const plan = explain(bound);
+const result = await client.execute(bound);
 ```

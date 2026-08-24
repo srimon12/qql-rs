@@ -392,7 +392,7 @@ impl JsClient {
     /// Returns a stable ExecutionReport JSON string for the JavaScript wrapper
     /// to deserialize into an object.
     #[napi(
-        ts_args_type = "query: string | Stmt | string[] | Stmt[], options?: { onError?: 'stop' | 'continue' }"
+        ts_args_type = "query: string | Stmt | string[] | Stmt[], options?: { onError?: 'stop' | 'continue', params?: Record<string, any> | any[] }"
     )]
     pub async fn execute(
         &self,
@@ -409,24 +409,40 @@ impl JsClient {
             })
             .unwrap_or(qql::executor::OnError::Stop);
 
+        let params = options.as_ref().and_then(|o| o.get("params"));
+
         let report = match &query {
             serde_json::Value::String(s) => {
-                self.inner.execute(s, on_error).await.map_err(to_napi_err)?
+                let effective_query = if let Some(p) = params {
+                    bind_json_params(s, p)?
+                } else {
+                    s.clone()
+                };
+                self.inner
+                    .execute(&effective_query, on_error)
+                    .await
+                    .map_err(to_napi_err)?
             }
             serde_json::Value::Array(arr) => {
                 if arr.is_empty() {
                     qql::executor::ExecutionReport::empty()
                 } else if arr[0].is_string() {
-                    let strs: Vec<&str> = arr
+                    let strs: Vec<String> = arr
                         .iter()
                         .map(|v| {
-                            v.as_str().ok_or_else(|| {
+                            let s = v.as_str().ok_or_else(|| {
                                 napi::Error::from_reason("batch items must be strings")
-                            })
+                            })?;
+                            if let Some(p) = params {
+                                bind_json_params(s, p)
+                            } else {
+                                Ok(s.to_string())
+                            }
                         })
                         .collect::<napi::Result<_>>()?;
+                    let str_refs: Vec<&str> = strs.iter().map(|s| s.as_str()).collect();
                     self.inner
-                        .execute_batch(&strs, on_error)
+                        .execute_batch(&str_refs, on_error)
                         .await
                         .map_err(to_napi_err)?
                 } else {
@@ -479,6 +495,58 @@ impl JsClient {
     }
 }
 
+fn bind_json_params(query: &str, params: &serde_json::Value) -> napi::Result<String> {
+    match params {
+        serde_json::Value::Object(obj) => {
+            let mut map = std::collections::HashMap::new();
+            for (k, v) in obj {
+                let val = ast::Value::from_json(v.clone()).map_err(to_napi_err)?;
+                map.insert(k.clone(), val);
+            }
+            qql_core::params::bind_named(query, |k| map.get(k).cloned()).map_err(to_napi_err)
+        }
+        serde_json::Value::Array(arr) => {
+            let items: Vec<ast::Value> = arr
+                .iter()
+                .map(|v| ast::Value::from_json(v.clone()))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(to_napi_err)?;
+            qql_core::params::bind_positional(query, &items).map_err(to_napi_err)
+        }
+        _ => Err(napi::Error::from_reason(
+            "params must be an object for named parameters (:name) or an array for positional parameters (?)",
+        )),
+    }
+}
+
+/// Substitute named (:name) or positional (?) parameters into a query string.
+#[napi(ts_args_type = "query: string, params: Record<string, any> | any[]")]
+pub fn bind(query: String, params: serde_json::Value) -> napi::Result<String> {
+    bind_json_params(&query, &params)
+}
+
+/// Substitute named parameters (:name) using an object.
+#[napi(ts_args_type = "query: string, params: Record<string, any>")]
+pub fn bind_named(query: String, params: serde_json::Value) -> napi::Result<String> {
+    if !params.is_object() {
+        return Err(napi::Error::from_reason(
+            "bind_named expects a JSON object of named parameters",
+        ));
+    }
+    bind_json_params(&query, &params)
+}
+
+/// Substitute positional parameters (?) using an array.
+#[napi(ts_args_type = "query: string, params: any[]")]
+pub fn bind_positional(query: String, params: serde_json::Value) -> napi::Result<String> {
+    if !params.is_array() {
+        return Err(napi::Error::from_reason(
+            "bind_positional expects a JSON array of positional parameters",
+        ));
+    }
+    bind_json_params(&query, &params)
+}
+
 #[napi]
 pub fn explain(query: String) -> napi::Result<String> {
     qql_core::explain::explain(&query).map_err(to_napi_err)
@@ -503,7 +571,7 @@ pub async fn execute_stmt(stmt: &Stmt, options: Option<serde_json::Value>) -> na
 }
 
 #[napi(
-    ts_args_type = "query: string | Stmt | string[] | Stmt[], options?: { onError?: 'stop' | 'continue' }"
+    ts_args_type = "query: string | Stmt | string[] | Stmt[], options?: { onError?: 'stop' | 'continue', params?: Record<string, any> | any[] }"
 )]
 pub async fn execute(
     query: serde_json::Value,

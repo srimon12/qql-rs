@@ -24,8 +24,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.98"
           components: rustfmt
 
       - name: Resolve and validate release version
@@ -161,6 +162,9 @@ jobs:
         with:
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux }}
+          # Host builds (macOS/Windows) keep the runner rustc unless set.
+          # GitHub images currently ship 1.97.1; workspace MSRV is 1.98.
+          rust-toolchain: stable
           command: build
           args: --release --locked --out dist --manifest-path crates/pyqql/Cargo.toml
 
@@ -195,6 +199,9 @@ jobs:
         with:
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux }}
+          # Host builds (macOS/Windows) keep the runner rustc unless set.
+          # GitHub images currently ship 1.97.1; workspace MSRV is 1.98.
+          rust-toolchain: stable
           command: build
           args: --release --locked --out dist --manifest-path crates/pyqql-edge/Cargo.toml
 

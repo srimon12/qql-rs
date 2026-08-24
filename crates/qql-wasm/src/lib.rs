@@ -492,6 +492,37 @@ pub fn format_query(input: &str) -> Result<String, JsValue> {
     qql_core::fmt::format(input).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
+/// Substitute named (:name) or positional (?) parameters into a query string via JSON.
+#[wasm_bindgen]
+pub fn bind(query: &str, params_json: &str) -> Result<String, JsValue> {
+    let parsed: serde_json::Value =
+        serde_json::from_str(params_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    match parsed {
+        serde_json::Value::Object(obj) => {
+            let mut map = std::collections::HashMap::new();
+            for (k, v) in obj {
+                let val =
+                    ast::Value::from_json(v).map_err(|e| JsValue::from_str(&e.to_string()))?;
+                map.insert(k, val);
+            }
+            qql_core::params::bind_named(query, |k| map.get(k).cloned())
+                .map_err(|e| JsValue::from_str(&e.to_string()))
+        }
+        serde_json::Value::Array(arr) => {
+            let items: Vec<ast::Value> = arr
+                .into_iter()
+                .map(ast::Value::from_json)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            qql_core::params::bind_positional(query, &items)
+                .map_err(|e| JsValue::from_str(&e.to_string()))
+        }
+        _ => Err(JsValue::from_str(
+            "params JSON must be an object for :name or an array for ?",
+        )),
+    }
+}
+
 // ── Client: browser fetch-based execute with embedding ────────────
 
 #[cfg(all(feature = "client", target_arch = "wasm32"))]

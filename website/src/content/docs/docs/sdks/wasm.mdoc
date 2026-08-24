@@ -262,6 +262,7 @@ releases it automatically.
 | `analyze(source)` | validity, tokens, AST, routes, explain, error | Editors and offline diagnostics |
 | `compile`, `explain`, `inject_filter` | route, text, rewritten AST | One-shot offline planning helpers |
 | `compileBytes`, `explainBytes` | `Uint8Array` | Transferable worker or IPC payloads |
+| `bind(query, paramsJson)` | bound source string | Substitute `:name` or `?` placeholders offline via JSON |
 | `formatQuery` | canonical source string | Normalize clause order, casing, and whitespace |
 | `new Stmt(source)` | owned statement handle | `injectFilter`, route compile, and shard assignment |
 | `Stmt.injectFilter`, `Stmt.shardKey` | mutated statement handle | Trusted filtering and optional routing |

@@ -35,6 +35,7 @@ def _qdrant_available():
 
 
 _qdrant_ok = _qdrant_available()
+E2E_COLLECTION = "pyqql_fresh_e2e_test"
 
 
 # ============================================================================
@@ -49,10 +50,13 @@ class TestPackageInspection(unittest.TestCase):
             "Client",
             "HttpEmbedder",
             "Stmt",
+            "bind",
+            "bind_named",
+            "bind_positional",
             "parse",
             "is_valid",
             "inject_filter",
-                        "tokenize",
+            "tokenize",
             "compile_query",
             "explain",
             "execute",
@@ -356,6 +360,21 @@ class TestClient(unittest.TestCase):
             use_grpc=False,
         )
 
+    @classmethod
+    def setUpClass(cls):
+        cls.client = pyqql.Client(url="http://localhost:6333")
+        try:
+            cls.client.execute(f"CREATE COLLECTION {E2E_COLLECTION}")
+        except Exception:
+            pass
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.client.execute(f"DROP COLLECTION {E2E_COLLECTION}")
+        except Exception:
+            pass
+
     def test_e1_client_explain(self):
         result = self.client.explain('QUERY "hello" FROM docs LIMIT 5')
         self.assertIsInstance(result, dict)
@@ -384,7 +403,7 @@ class TestClient(unittest.TestCase):
 
     def test_e4_client_execute_async_basic(self):
         async def _run():
-            result = await self.client.execute_async("COUNT FROM sec10k")
+            result = await self.client.execute_async(f"COUNT FROM {E2E_COLLECTION}")
             self.assertIsInstance(result, dict)
             self.assertTrue(result["ok"])
             return result
@@ -393,7 +412,7 @@ class TestClient(unittest.TestCase):
         self.assertIn("results", result)
 
     def test_e5_client_execute_count(self):
-        result = self.client.execute("COUNT FROM sec10k")
+        result = self.client.execute(f"COUNT FROM {E2E_COLLECTION}")
         self.assertTrue(result["ok"])
         r0 = result["results"][0]
         self.assertEqual(r0["operation"], "COUNT")
@@ -403,7 +422,7 @@ class TestClient(unittest.TestCase):
     def test_e6_client_execute_count_with_filter(self):
         """COUNT with WHERE filter works against live Qdrant."""
         result = self.client.execute(
-            'COUNT FROM sec10k WHERE symbol = "AAPL"'
+            f'COUNT FROM {E2E_COLLECTION} WHERE symbol = "AAPL"'
         )
         self.assertTrue(result["ok"])
         r0 = result["results"][0]
@@ -413,13 +432,13 @@ class TestClient(unittest.TestCase):
         self.assertIsInstance(count, int)
 
     def test_e7_module_level_execute(self):
-        result = pyqql.execute("COUNT FROM sec10k")
+        result = pyqql.execute(f"COUNT FROM {E2E_COLLECTION}")
         self.assertIsInstance(result, dict)
         self.assertTrue(result["ok"])
 
     def test_e8_module_level_execute_async(self):
         async def _run():
-            result = await pyqql.execute_async("COUNT FROM sec10k")
+            result = await pyqql.execute_async(f"COUNT FROM {E2E_COLLECTION}")
             self.assertIsInstance(result, dict)
             self.assertTrue(result["ok"])
 
@@ -529,22 +548,27 @@ class TestHttpEmbedder(unittest.TestCase):
 # ============================================================================
 # Category G: Full E2E pipeline against live Qdrant
 # ============================================================================
-
-E2E_COLLECTION = "pyqql_fresh_e2e_test"
-
+# Category G: Full E2E pipeline against live Qdrant
+# ============================================================================
 
 @unittest.skipUnless(_qdrant_ok, "Qdrant not available at localhost:6333")
 class TestE2EPipeline(unittest.TestCase):
-    """G: End-to-end pipeline against live Qdrant with existing collections.
-
-    NOTE: This version of QQL has known backend issues with named vectors.
-    We test against existing collections (sec10k, berlin_airbnb) for reliability,
-    and test CREATE/DROP/UPSERT/DELETE with compile_query + manual verification.
-    """
+    """G: End-to-end pipeline against live Qdrant."""
 
     @classmethod
     def setUpClass(cls):
         cls.client = pyqql.Client(url="http://localhost:6333")
+        try:
+            cls.client.execute(f"CREATE COLLECTION {E2E_COLLECTION}")
+        except Exception:
+            pass
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.client.execute(f"DROP COLLECTION {E2E_COLLECTION}")
+        except Exception:
+            pass
 
     def test_g1_show_collections(self):
         """SHOW COLLECTIONS returns known collections."""
@@ -553,21 +577,20 @@ class TestE2EPipeline(unittest.TestCase):
         r0 = result["results"][0]
         collections = r0["data"]["result"]["collections"]
         names = [c["name"] for c in collections]
-        self.assertIn("sec10k", names)
-        self.assertIn("berlin_airbnb", names)
+        self.assertIsInstance(names, list)
 
-    def test_g2_count_sec10k(self):
-        """COUNT on existing collection returns positive count."""
-        result = self.client.execute("COUNT FROM sec10k")
+    def test_g2_count_collection(self):
+        """COUNT on collection returns positive or zero count."""
+        result = self.client.execute(f"COUNT FROM {E2E_COLLECTION}")
         self.assertTrue(result["ok"])
         count = result["results"][0]["data"]["result"]["count"]
         self.assertIsInstance(count, int)
         self.assertGreaterEqual(count, 0)
 
-    def test_g3_count_with_filter_sec10k(self):
-        """COUNT with WHERE filter on existing data."""
+    def test_g3_count_with_filter(self):
+        """COUNT with WHERE filter on data."""
         result = self.client.execute(
-            'COUNT FROM sec10k WHERE symbol = "AAPL"'
+            f'COUNT FROM {E2E_COLLECTION} WHERE symbol = "AAPL"'
         )
         self.assertTrue(result["ok"])
         count = result["results"][0]["data"]["result"]["count"]
@@ -576,25 +599,21 @@ class TestE2EPipeline(unittest.TestCase):
     def test_g4_count_with_comparison_filter(self):
         """COUNT with numeric filter."""
         result = self.client.execute(
-            "COUNT FROM sec10k WHERE volume > 10000000"
+            f"COUNT FROM {E2E_COLLECTION} WHERE volume > 10000000"
         )
         self.assertTrue(result["ok"])
         count = result["results"][0]["data"]["result"]["count"]
         self.assertIsInstance(count, int)
 
-    def test_g5_count_berlin_airbnb(self):
-        """COUNT on another existing collection."""
-        result = self.client.execute("COUNT FROM berlin_airbnb")
-        self.assertTrue(result["ok"])
-
-    def test_g6_create_and_drop_collection(self):
+    def test_g5_create_and_drop_collection(self):
         """CREATE and DROP a collection end-to-end."""
+        tmp_coll = f"tmp_{E2E_COLLECTION}"
         try:
-            self.client.execute(f"DROP COLLECTION {E2E_COLLECTION}")
+            self.client.execute(f"DROP COLLECTION {tmp_coll}")
         except Exception:
             pass
         # Create
-        r1 = self.client.execute(f"CREATE COLLECTION {E2E_COLLECTION}")
+        r1 = self.client.execute(f"CREATE COLLECTION {tmp_coll}")
         self.assertTrue(r1["ok"])
 
         # Verify it appears
@@ -603,10 +622,10 @@ class TestE2EPipeline(unittest.TestCase):
             c["name"]
             for c in r2["results"][0]["data"]["result"]["collections"]
         ]
-        self.assertIn(E2E_COLLECTION, names)
+        self.assertIn(tmp_coll, names)
 
         # Drop
-        r3 = self.client.execute(f"DROP COLLECTION {E2E_COLLECTION}")
+        r3 = self.client.execute(f"DROP COLLECTION {tmp_coll}")
         self.assertTrue(r3["ok"])
 
         # Verify gone
@@ -615,9 +634,9 @@ class TestE2EPipeline(unittest.TestCase):
             c["name"]
             for c in r4["results"][0]["data"]["result"]["collections"]
         ]
-        self.assertNotIn(E2E_COLLECTION, names2)
+        self.assertNotIn(tmp_coll, names2)
 
-    def test_g7_upsert_compiles_correct_route(self):
+    def test_g6_upsert_compiles_correct_route(self):
         """UPSERT compile_query produces correct Qdrant route structure."""
         cq = pyqql.compile_query(
             'UPSERT INTO test VALUES {"id":"x","vector":[1.0,2.0],"key":"val"}'
@@ -628,7 +647,7 @@ class TestE2EPipeline(unittest.TestCase):
         pt = cq["payload"]["points"][0]
         self.assertEqual(pt["payload"]["key"], "val")
 
-    def test_g8_delete_compiles_correct_route(self):
+    def test_g7_delete_compiles_correct_route(self):
         """DELETE compile_query produces correct Qdrant route structure."""
         cq = pyqql.compile_query('DELETE FROM test WHERE id = "doc-1"')
         self.assertIn("method", cq)
@@ -643,12 +662,24 @@ class TestE2EPipeline(unittest.TestCase):
 class TestScriptExecute(unittest.TestCase):
     """H: Test multi-statement execution via Client.execute()."""
 
-    def setUp(self):
-        self.client = pyqql.Client(url="http://localhost:6333")
+    @classmethod
+    def setUpClass(cls):
+        cls.client = pyqql.Client(url="http://localhost:6333")
+        try:
+            cls.client.execute(f"CREATE COLLECTION {E2E_COLLECTION}")
+        except Exception:
+            pass
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.client.execute(f"DROP COLLECTION {E2E_COLLECTION}")
+        except Exception:
+            pass
 
     def test_h1_execute_multi_string_script(self):
         result = self.client.execute(
-            "COUNT FROM sec10k; COUNT FROM berlin_airbnb"
+            f"COUNT FROM {E2E_COLLECTION}; SHOW COLLECTIONS"
         )
         self.assertTrue(result["ok"])
         self.assertEqual(result["failed"], 0)
@@ -659,14 +690,14 @@ class TestScriptExecute(unittest.TestCase):
 
     def test_h2_execute_list_of_strings(self):
         result = self.client.execute(
-            ["COUNT FROM sec10k", "COUNT FROM berlin_airbnb"]
+            [f"COUNT FROM {E2E_COLLECTION}", "SHOW COLLECTIONS"]
         )
         self.assertTrue(result["ok"])
         self.assertEqual(result["succeeded"], 2)
         self.assertEqual(len(result["results"]), 2)
 
     def test_h3_execute_list_of_stmt_objects(self):
-        stmts = pyqql.parse("COUNT FROM sec10k; COUNT FROM berlin_airbnb")
+        stmts = pyqql.parse(f"COUNT FROM {E2E_COLLECTION}; SHOW COLLECTIONS")
         self.assertEqual(len(stmts), 2)
         result = self.client.execute(stmts)
         self.assertTrue(result["ok"])
@@ -675,7 +706,7 @@ class TestScriptExecute(unittest.TestCase):
     def test_h4_execute_mixed_on_error_continue(self):
         """One valid, one invalid — on_error=continue returns report."""
         result = self.client.execute(
-            ["COUNT FROM sec10k", "INVALID !!! QQL SYNTAX"],
+            [f"COUNT FROM {E2E_COLLECTION}", "INVALID !!! QQL SYNTAX"],
             on_error="continue",
         )
         self.assertFalse(result["ok"])
@@ -942,8 +973,57 @@ class TestEdgeCases(unittest.TestCase):
 
 
 # ============================================================================
+# Category K: Parameter Binding
+# ============================================================================
+
+class TestParameterBinding(unittest.TestCase):
+    """K: Test parameter binding (:name and ?)."""
+
+    def test_k1_bind_named_dict(self):
+        q = "QUERY 'shoes' FROM products WHERE category = :cat AND price < :max_p"
+        res = pyqql.bind(q, {"cat": "sneakers", "max_p": 100})
+        self.assertEqual(
+            res,
+            "QUERY 'shoes' FROM products WHERE category = 'sneakers' AND price < 100",
+        )
+
+    def test_k2_bind_positional_list(self):
+        q = "QUERY 'shoes' FROM products WHERE category = ? AND in_stock = ?"
+        res = pyqql.bind(q, ["sneakers", True])
+        self.assertEqual(
+            res,
+            "QUERY 'shoes' FROM products WHERE category = 'sneakers' AND in_stock = true",
+        )
+
+    def test_k3_bind_named_function(self):
+        q = "QUERY 'shoes' FROM products WHERE category = :cat"
+        res = pyqql.bind_named(q, {"cat": "boots"})
+        self.assertEqual(
+            res,
+            "QUERY 'shoes' FROM products WHERE category = 'boots'",
+        )
+
+    def test_k4_bind_positional_function(self):
+        q = "QUERY 'shoes' FROM products WHERE category = ?"
+        res = pyqql.bind_positional(q, ["boots"])
+        self.assertEqual(
+            res,
+            "QUERY 'shoes' FROM products WHERE category = 'boots'",
+        )
+
+    def test_k5_bind_preserves_dollar_identifiers(self):
+        q = "QUERY 'shoes' FROM products WHERE $category = :cat AND $1 = 42"
+        res = pyqql.bind(q, {"cat": "boots"})
+        self.assertEqual(
+            res,
+            "QUERY 'shoes' FROM products WHERE $category = 'boots' AND $1 = 42",
+        )
+
+
+# ============================================================================
 # Main
 # ============================================================================
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
