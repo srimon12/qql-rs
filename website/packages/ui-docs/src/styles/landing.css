@@ -143,22 +143,6 @@ html.js .landing-fade-up.landing-visible {
   line-height: 1.3 !important;
 }
 
-/* ── Section labels ─────────────────────────────────────────────────────── */
-.landing-label {
-  display: block;
-  margin: 0 0 1rem;
-  font-family: var(--sl-font-mono);
-  font-size: 0.65rem;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: color-mix(in srgb, var(--sl-color-gray-1) 68%, transparent);
-}
-
-.landing-label--accent {
-  color: var(--sl-color-accent);
-}
-
 /* ── Buttons ────────────────────────────────────────────────────────────── */
 .landing-btn {
   display: inline-flex;
@@ -177,6 +161,10 @@ html.js .landing-fade-up.landing-visible {
     border-color 180ms ease,
     color 180ms ease,
     transform 180ms ease;
+}
+
+.landing-btn:active {
+  transform: translateY(1px) scale(0.99);
 }
 
 .landing-btn:focus-visible {
@@ -253,24 +241,6 @@ html.js .landing-fade-up.landing-visible {
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--sl-color-accent);
-}
-
-.landing-hero__badge-dot {
-  width: 0.4rem;
-  height: 0.4rem;
-  border-radius: 999px;
-  background: var(--sl-color-accent);
-  animation: landingPulse 2.4s ease-in-out infinite;
-}
-
-@keyframes landingPulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.45;
-  }
 }
 
 .landing-hero__tagline {
@@ -478,6 +448,7 @@ html.js .landing-fade-up.landing-visible {
 .landing-samples {
   display: grid;
   gap: 1rem;
+  align-items: start;
 }
 
 @media (min-width: 54rem) {
@@ -491,7 +462,6 @@ html.js .landing-fade-up.landing-visible {
   border: 1px solid var(--sl-color-gray-5);
   border-radius: 0.75rem;
   background: color-mix(in srgb, var(--sl-color-gray-6) 45%, transparent);
-  backdrop-filter: blur(6px);
   transition:
     border-color 300ms ease,
     box-shadow 300ms ease,
@@ -592,21 +562,39 @@ html.js .landing-fade-up.landing-visible {
   color: var(--sl-color-gray-2);
 }
 
-/* ── Capability cards ───────────────────────────────────────────────────── */
+/* ── Capability cards (bento: two featured + four compact) ──────────────── */
 .landing-caps {
   display: grid;
   gap: 0.9rem;
 }
 
-@media (min-width: 40rem) {
-  .landing-caps {
-    grid-template-columns: repeat(2, 1fr);
+.landing-caps--bento {
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+}
+
+.landing-caps--bento .landing-cap--wide {
+  grid-column: span 7;
+}
+
+.landing-caps--bento .landing-cap--side {
+  grid-column: span 5;
+}
+
+.landing-caps--bento .landing-cap--small {
+  grid-column: span 3;
+}
+
+@media (max-width: 63.99rem) {
+  .landing-caps--bento .landing-cap--wide,
+  .landing-caps--bento .landing-cap--side,
+  .landing-caps--bento .landing-cap--small {
+    grid-column: span 12;
   }
 }
 
-@media (min-width: 64rem) {
-  .landing-caps {
-    grid-template-columns: repeat(3, 1fr);
+@media (min-width: 40rem) and (max-width: 63.99rem) {
+  .landing-caps--bento .landing-cap--small {
+    grid-column: span 6;
   }
 }
 
@@ -650,26 +638,88 @@ html.js .landing-fade-up.landing-visible {
   color: var(--sl-color-gray-2);
 }
 
-/* ── Statement block (ported from PhilosophyBlock) ──────────────────────── */
+.landing-cap__code {
+  margin: 1rem 0 0;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 0.5rem;
+  background: var(--sl-color-bg);
+  overflow-x: auto;
+}
+
+.landing-cap__code code {
+  font-family: var(--sl-font-mono);
+  font-size: 0.72rem;
+  line-height: 1.7;
+  color: var(--sl-color-gray-2);
+  white-space: pre;
+}
+
+.landing-cap__shield {
+  margin-top: auto;
+  padding: 0.85rem 1rem;
+  border: 1px dashed color-mix(in srgb, var(--sl-color-accent) 40%, var(--sl-color-gray-5));
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--sl-color-accent) 5%, var(--sl-color-bg));
+}
+
+.landing-cap__shield code {
+  font-family: var(--sl-font-mono);
+  font-size: 0.72rem;
+  line-height: 1.7;
+  color: var(--sl-color-accent-high);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.landing-cap:not(.landing-cap--wide):not(.landing-cap--side) .landing-cap__title {
+  font-size: 1.1rem !important;
+}
+
+/* ── Statement block (editorial two-column: statement left, body right) ─── */
 .landing-limits {
   padding: clamp(3.5rem, 8vw, 5rem) 0;
   border-bottom: 1px solid color-mix(in srgb, var(--sl-color-gray-5) 55%, transparent);
 }
 
 .landing-limits__inner {
-  max-width: 42rem;
+  display: grid;
+  gap: 2rem 3.5rem;
   padding: 2.5rem 0;
   border-block: 1px solid color-mix(in srgb, var(--sl-color-gray-5) 60%, transparent);
 }
 
+@media (min-width: 54rem) {
+  .landing-limits__inner {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
 .landing-limits__statement {
-  margin: 0 0 1.5rem;
+  margin: 0;
   font-family: "Instrument Serif", Georgia, serif;
-  font-weight: 300;
-  font-size: clamp(1.65rem, 3.2vw, 2.4rem);
-  line-height: 1.15;
+  font-weight: 400;
+  font-size: clamp(1.9rem, 3.6vw, 2.8rem);
+  line-height: 1.12;
   letter-spacing: -0.02em;
   color: var(--sl-color-white);
+  text-wrap: balance;
+}
+
+.landing-limits__aside {
+  display: flex;
+  flex-direction: column;
+  gap: 1.4rem;
+  border-left: 1px solid color-mix(in srgb, var(--sl-color-gray-5) 60%, transparent);
+  padding-left: 2rem;
+}
+
+@media (max-width: 53.99rem) {
+  .landing-limits__aside {
+    border-left: 0;
+    padding-left: 0;
+  }
 }
 
 .landing-limits__body {
@@ -681,7 +731,7 @@ html.js .landing-fade-up.landing-visible {
 }
 
 .landing-limits__foot {
-  margin: 1.75rem 0 0;
+  margin: 0;
   font-family: var(--sl-font-mono);
   font-size: 0.65rem;
   font-weight: 700;
@@ -845,29 +895,51 @@ html.js .landing-fade-up.landing-visible {
   background:
     radial-gradient(
       ellipse 55% 75% at 78% 50%,
-      color-mix(in srgb, var(--sl-color-accent) 10%, transparent),
+      color-mix(in srgb, var(--sl-color-accent) 8%, transparent),
       transparent
     ),
     var(--sl-color-bg);
 }
 
 .landing-cta__inner {
-  display: flex;
-  flex-direction: column;
-  gap: 1.75rem;
+  display: grid;
+  gap: 1.75rem 3rem;
+  align-items: center;
 }
 
 @media (min-width: 54rem) {
   .landing-cta__inner {
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-    gap: 3rem;
+    grid-template-columns: minmax(0, 1.35fr) auto;
+  }
+}
+
+@media (max-width: 53.99rem) {
+  .landing-cta__actions {
+    justify-content: flex-start;
+  }
+}
+
+.landing-cta__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  flex-shrink: 0;
+  padding-left: 2rem;
+  border-left: 1px solid color-mix(in srgb, var(--sl-color-gray-5) 60%, transparent);
+}
+
+@media (max-width: 53.99rem) {
+  .landing-cta__actions {
+    padding-left: 0;
+    border-left: 0;
   }
 }
 
 .landing-cta h2 {
   max-width: 26ch;
+  margin: 0 !important;
+  border: 0 !important;
+  padding: 0 !important;
 }
 
 .landing-cta p {
@@ -877,13 +949,6 @@ html.js .landing-fade-up.landing-visible {
   line-height: 1.6;
 }
 
-.landing-cta__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.65rem;
-  flex-shrink: 0;
-}
-
 /* ── Reduced motion ─────────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   .landing-hero-animate,
@@ -891,10 +956,6 @@ html.js .landing-fade-up.landing-visible {
   .landing-fade-up {
     opacity: 1 !important;
     animation: none !important;
-  }
-
-  .landing-hero__badge-dot {
-    animation: none;
   }
 
   .landing-btn,

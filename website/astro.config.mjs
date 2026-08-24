@@ -48,7 +48,7 @@ export default defineConfig(
         title: "QQL Documentation",
         favicon: "/favicon.ico",
         description:
-          "Declarative vector search for Qdrant — QQL language, SDKs, CLI, and security patterns.",
+          "Declarative vector search for Qdrant: QQL language, SDKs, CLI, and security patterns.",
         social: [
           {
             icon: "github",

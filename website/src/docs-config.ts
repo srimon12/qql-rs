@@ -18,7 +18,7 @@ export const footerConfig: DocsFooterConfig = {
     name: SITE.name,
     href: SITE.url,
     tagline:
-      "Declarative vector search for Qdrant — SQL-like QQL across Rust, Python, Node, WASM, and edge.",
+      "Declarative vector search for Qdrant. SQL-like QQL across Rust, Python, Node, WASM, and edge.",
   },
   columns: [
     {

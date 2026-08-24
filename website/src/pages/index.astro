@@ -34,9 +34,9 @@ import {
 } from "../data/landing";
 import "../styles/global.css";
 
-const pageTitle = "QQL — SQL for Qdrant vector search";
+const pageTitle = "QQL: SQL for Qdrant vector search";
 const pageDescription =
-  "QQL is to Qdrant what SQL is to Postgres. One declarative language for hybrid search, filtering, mutations, multitenancy, and DDL — across Rust, Python, Node.js, WASM, REST, gRPC, and edge.";
+  "QQL is to Qdrant what SQL is to Postgres. One declarative language for hybrid search, filtering, mutations, multitenancy, and DDL across Rust, Python, Node.js, WASM, REST, gRPC, and edge.";
 
 // The documentation verifier parses every `verifiedQql` String.raw template.
 const verifiedQql = String.raw`CREATE COLLECTION docs (
@@ -68,9 +68,7 @@ LIMIT 10;`;
 const terminalCode = `# Install the QQL CLI
 curl -fsSL https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.sh | sh
 
-# Save as quickstart.qql, then:
-qql exec quickstart.qql
-
+# quickstart.qql
 ${verifiedQql}`;
 
 const samples = [
@@ -212,14 +210,12 @@ const samples = [
       <StatsBanner stats={stats} />
 
       <ProblemCompare
-        label={problem.label}
         heading={problem.heading}
         sub={problem.sub}
         rows={problem.rows}
       />
 
       <LanguageSamples
-        label={language.label}
         heading={language.heading}
         sub={language.sub}
         footHref={language.footHref}
@@ -228,28 +224,24 @@ const samples = [
       />
 
       <PipelineSteps
-        label={architecture.label}
         heading={architecture.heading}
         sub={architecture.sub}
         steps={architecture.steps}
       />
 
       <CapabilityGrid
-        label={design.label}
         heading={design.heading}
         sub={design.sub}
         capabilities={design.capabilities}
       />
 
       <LimitsBlock
-        label={limits.label}
         statement={limits.statement}
         body={limits.body}
         foot={limits.foot}
       />
 
       <InstallGrid
-        label={getStarted.label}
         heading={getStarted.heading}
         sub={getStarted.sub}
         installs={getStarted.installs}
@@ -257,10 +249,9 @@ const samples = [
         secondaryCta={getStarted.secondaryCta}
       />
 
-      <FaqList label={faq.label} heading={faq.heading} items={faq.items} />
+      <FaqList heading={faq.heading} items={faq.items} />
 
       <CtaBand
-        label={cta.label}
         heading={cta.heading}
         body={cta.body}
         primaryCta={cta.primaryCta}

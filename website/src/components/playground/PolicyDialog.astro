@@ -1,26 +1,26 @@
-<dialog class="app-dialog side-dialog" id="policy-dialog" aria-labelledby="policy-title">
-  <form class="dialog-shell" data-policy-form>
-    <header>
+<dialog class="m-auto w-[min(calc(100%-2rem),38rem)] max-h-[90vh] overflow-hidden rounded-xl border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] p-0 text-[var(--sl-color-gray-1)] shadow-2xl backdrop:bg-black/70 backdrop:backdrop-blur-sm" id="policy-dialog" aria-labelledby="policy-title" data-app-dialog>
+  <form class="flex max-h-[90vh] flex-col" data-policy-form>
+    <header class="flex items-start justify-between gap-4 border-b border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] p-5">
       <div>
-        <span class="eyebrow">AST guardrail</span>
-        <h2 id="policy-title">Mandatory runtime policy</h2>
-        <p>Inject a trusted predicate after parsing and before planning or execution.</p>
+        <span class="block font-mono text-[0.6rem] font-semibold uppercase tracking-[0.12em] text-[var(--sl-color-accent)]">AST guardrail</span>
+        <h2 id="policy-title" class="!m-0 !mt-1 !font-[var(--sl-font)] !text-xl !font-semibold text-[var(--sl-color-white)]">Mandatory runtime policy</h2>
+        <p class="mt-1 text-xs leading-5 text-[var(--sl-color-gray-3)]">Inject a trusted predicate after parsing and before planning or execution.</p>
       </div>
-      <button class="icon-button" type="button" data-close-dialog aria-label="Close policy">×</button>
+      <button class="grid size-8 place-items-center rounded-md border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] text-lg text-[var(--sl-color-gray-2)] hover:text-[var(--sl-color-white)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="button" data-close-dialog aria-label="Close policy">×</button>
     </header>
 
-    <div class="form-stack">
-      <label class="switch-row">
-        <span>
-          <strong>Enable policy injection</strong>
-          <small>Single-statement inputs only; multi-statement scripts fail closed.</small>
+    <div class="grid gap-4 overflow-y-auto p-5">
+      <label class="grid grid-cols-[1fr_auto] items-center gap-3 rounded-lg border border-[var(--sl-color-gray-5)] p-3">
+        <span class="text-xs font-medium text-[var(--sl-color-gray-2)]">
+          <strong class="block text-[var(--sl-color-gray-1)]">Enable policy injection</strong>
+          <small class="mt-0.5 block font-normal text-[var(--sl-color-gray-3)]">Single-statement inputs only; multi-statement scripts fail closed.</small>
         </span>
-        <input name="enabled" type="checkbox" role="switch" />
+        <input name="enabled" type="checkbox" role="switch" class="switch" />
       </label>
 
-      <fieldset>
-        <legend>Recipes</legend>
-        <div class="recipe-grid">
+      <fieldset class="grid gap-2 rounded-lg border border-[var(--sl-color-gray-5)] p-3">
+        <legend class="px-1 text-xs font-medium text-[var(--sl-color-gray-2)]">Recipes</legend>
+        <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {[
             ["workspace_id", "ws_101", "Workspace boundary", "ws_101"],
             ["deleted", "false", "Soft-delete safety", ""],
@@ -29,28 +29,28 @@
           ].map(([field, value, label, shard]) => (
             <button
               type="button"
-              class="recipe-card"
+              class="grid gap-1 rounded-md border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] p-3 text-left text-[var(--sl-color-gray-2)] transition hover:border-[var(--sl-color-accent)] hover:text-[var(--sl-color-white)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]"
               data-policy-recipe
               data-field={field}
               data-value={value}
               data-value-type={value === "false" ? "boolean" : "string"}
               data-shard={shard}
             >
-              <strong>{label}</strong>
-              <code>{field} = {value}</code>
+              <strong class="text-xs font-semibold">{label}</strong>
+              <code class="font-mono text-[0.68rem] text-[var(--sl-color-accent-high)]">{field} = {value}</code>
             </button>
           ))}
         </div>
       </fieldset>
 
-      <div class="form-grid form-grid--policy">
-        <label>
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_7rem]">
+        <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
           <span>Payload field</span>
-          <input name="field" type="text" required />
+          <input class="min-h-10 rounded-md border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] px-3 text-sm text-[var(--sl-color-gray-1)]" name="field" type="text" required />
         </label>
-        <label>
+        <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
           <span>Operator</span>
-          <select name="op">
+          <select class="min-h-10 rounded-md border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] px-3 text-sm text-[var(--sl-color-gray-1)]" name="op">
             <option value="=">=</option>
             <option value=">">&gt;</option>
             <option value=">=">&gt;=</option>
@@ -59,32 +59,32 @@
           </select>
         </label>
       </div>
-      <div class="form-grid">
-        <label>
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
           <span>Required value</span>
-          <input name="value" type="text" required />
+          <input class="min-h-10 rounded-md border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] px-3 text-sm text-[var(--sl-color-gray-1)]" name="value" type="text" required />
         </label>
-        <label>
+        <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
           <span>Value type</span>
-          <select name="valueType">
+          <select class="min-h-10 rounded-md border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] px-3 text-sm text-[var(--sl-color-gray-1)]" name="valueType">
             <option value="string">String</option>
             <option value="number">Number</option>
             <option value="boolean">Boolean</option>
           </select>
         </label>
       </div>
-      <label>
-        <span>Shard key <small>optional routing, not isolation</small></span>
-        <input name="shardKey" type="text" />
+      <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
+        <span>Shard key <small class="font-normal text-[var(--sl-color-gray-3)]">optional routing, not isolation</small></span>
+        <input class="min-h-10 rounded-md border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] px-3 text-sm text-[var(--sl-color-gray-1)]" name="shardKey" type="text" />
       </label>
       <output class="block rounded-md border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] p-3 font-mono text-xs leading-5 text-[var(--sl-color-gray-2)]" data-policy-preview>
         The source stays unchanged. A trusted predicate is applied after parsing.
       </output>
     </div>
 
-    <footer>
-      <span class="dialog-note">The editor source remains unchanged; inspector output shows the rewritten AST and route.</span>
-      <button class="button button--primary" type="submit">Apply guardrail</button>
+    <footer class="flex flex-col items-stretch justify-between gap-3 border-t border-[var(--sl-color-gray-5)] p-4 sm:flex-row sm:items-center">
+      <span class="max-w-md text-xs leading-5 text-[var(--sl-color-gray-3)]">The editor source remains unchanged; inspector output shows the rewritten AST and route.</span>
+      <button class="min-h-9 rounded-md bg-[var(--sl-color-accent)] px-3 font-mono text-xs font-semibold text-white hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="submit">Apply guardrail</button>
     </footer>
   </form>
 </dialog>

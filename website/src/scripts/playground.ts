@@ -200,6 +200,9 @@ const routeMethod = required<HTMLElement>("[data-route-method]");
 const routePath = required<HTMLElement>("[data-route-path]");
 const routeType = required<HTMLElement>("[data-route-type]");
 const routePolicy = required<HTMLElement>("[data-route-policy]");
+const routesSection = required<HTMLElement>("[data-routes-section]");
+const routesList = required<HTMLElement>("[data-routes-list]");
+const routesCount = required<HTMLElement>("[data-routes-count]");
 const policyDot = required<HTMLElement>("[data-policy-dot]");
 const toastRegion = required<HTMLElement>("[data-toast-region]");
 const embedStatus = required<HTMLElement>("[data-embed-status]");
@@ -411,6 +414,51 @@ function renderPlan(): void {
   routePolicy.textContent = policy.enabled ? "Trusted predicate injected" : "Source only";
 }
 
+function selectStatement(index: number): void {
+  state.selectedStatement = index;
+  statementSelect.value = String(index);
+  renderPlan();
+  renderOutputs();
+  renderRoutes();
+}
+
+function renderRoutes(): void {
+  const routes = state.analysis?.effectiveRoutes ?? [];
+  routesSection.hidden = routes.length === 0;
+  routesCount.textContent = `${routes.length} ${routes.length === 1 ? "statement" : "statements"}`;
+  routesList.replaceChildren();
+
+  routes.forEach((route, index) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "route-row";
+    item.setAttribute("role", "option");
+    item.setAttribute(
+      "aria-selected",
+      String(index === state.selectedStatement),
+    );
+    item.setAttribute("aria-current", String(index === state.selectedStatement));
+    item.dataset.routeIndex = String(index);
+
+    const indexLabel = document.createElement("span");
+    indexLabel.className = "route-row__index";
+    indexLabel.textContent = String(index + 1);
+    const typeLabel = document.createElement("span");
+    typeLabel.className = "route-row__type";
+    typeLabel.textContent = route.stmt_type;
+    const methodLabel = document.createElement("span");
+    methodLabel.className = "route-row__method";
+    methodLabel.textContent = route.method;
+    const pathLabel = document.createElement("span");
+    pathLabel.className = "route-row__path";
+    pathLabel.textContent = route.path;
+
+    item.append(indexLabel, typeLabel, methodLabel, pathLabel);
+    item.addEventListener("click", () => selectStatement(index));
+    routesList.append(item);
+  });
+}
+
 function renderOutputs(): void {
   const analysis = state.analysis;
   const route = selectedRoute();
@@ -483,6 +531,7 @@ function renderInspector(): void {
   renderStatementSelect();
   renderPlan();
   renderOutputs();
+  renderRoutes();
   renderValidation();
 }
 
@@ -568,7 +617,7 @@ function openDialog(id: string): void {
 }
 
 function setupDialogs(): void {
-  for (const dialog of all<HTMLDialogElement>("dialog.app-dialog")) {
+  for (const dialog of all<HTMLDialogElement>("dialog[data-app-dialog]")) {
     dialog.addEventListener("click", (event) => {
       if (event.target === dialog) dialog.close();
     });
@@ -868,7 +917,7 @@ async function executeQuery(): Promise<void> {
     releaseRetiredClients();
     runButton.classList.remove("is-running");
     runButton.innerHTML =
-      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7V5Z"></path></svg>Run<kbd>⌘↵</kbd>';
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7V5Z"></path></svg>Run<kbd class="hidden rounded border border-white/25 px-1 font-mono text-[0.55rem] opacity-80 sm:inline">⌘↵</kbd>';
     renderValidation();
     renderOutputs();
   }
@@ -935,6 +984,7 @@ async function start(): Promise<void> {
     state.selectedStatement = Number(statementSelect.value);
     renderPlan();
     renderOutputs();
+    renderRoutes();
   });
   runButton.addEventListener("click", () => void executeQuery());
 

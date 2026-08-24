@@ -1,12 +1,12 @@
 /** QQL landing page copy — mirrors Veristamp's apps/landing/src/data/landing.ts. */
 
 export const hero = {
-  badge: "v0.2.1 · MIT · by Veristamp",
+  badge: "MIT licensed by Veristamp",
   headline: "A query language for Qdrant.",
   tagline: "QQL is to Qdrant what SQL is to Postgres.",
-  lede: "Search, hybrid retrieval, filtering, reranking, mutations, and schema — written as statements instead of hand-built JSON. One typed core parses, plans, and executes across Rust, Python, Node.js, WASM, REST, gRPC, and an in-process edge runtime.",
+  lede: "One typed language for search, hybrid retrieval, filtering, mutations, and schema. It parses, plans, and executes across Rust, Python, Node.js, WASM, REST, gRPC, and edge.",
   primaryCta: { label: "Read the quickstart", href: "/docs/getting-started/quickstart/" },
-  secondaryCta: { label: "Open the playground", href: "/playground/" },
+  secondaryCta: { label: "Try the playground", href: "/playground/" },
   hosts: ["Rust", "Python", "Node.js", "WASM", "CLI", "VS Code"],
   terminalTitle: "quickstart.qql",
 } as const;
@@ -28,8 +28,8 @@ export const problem = {
       with: "One SQL-like surface for search, hybrid, mutations, and DDL",
     },
     {
-      without: "Tenant filters pasted into every code path — miss one and data leaks",
-      with: "inject_filter rewrites the AST before planning — recursive, fail-closed",
+      without: "Tenant filters pasted into every code path: miss one and data leaks",
+      with: "inject_filter rewrites the AST before planning. Recursive, fail closed",
     },
     {
       without: "Application code tied to REST, or gRPC, or an edge store",
@@ -41,14 +41,14 @@ export const problem = {
 export const language = {
   label: "The language",
   heading: "Reads like SQL. Plans like Qdrant.",
-  sub: "Hybrid fusion, multi-stage CTEs, shard routing, and formula scoring are part of the grammar — not string templates.",
+  sub: "Hybrid fusion, multi-stage CTEs, shard routing, and formula scoring are part of the grammar, not string templates.",
   footHref: "/docs/language/",
   footLabel: "Full language reference →",
 } as const;
 
 export const architecture = {
   label: "Architecture",
-  heading: "Parse, plan, execute — in separate crates.",
+  heading: "Parse, plan, execute: separate crates.",
   sub: "Parsing never knows about endpoints. Planning never does I/O. Execution never re-interprets the language.",
   steps: [
     {
@@ -69,7 +69,7 @@ export const architecture = {
     {
       step: "04",
       title: "Execute",
-      detail: "REST, gRPC, or edge — same language, same response envelope.",
+      detail: "REST, gRPC, or edge: same language, same response envelope.",
     },
   ],
 } as const;
@@ -77,12 +77,12 @@ export const architecture = {
 export const design = {
   label: "Design",
   heading: "Built to be inspected.",
-  sub: "The same parser, planner, and error codes in every runtime — fix a bug once and every binding gets it.",
+  sub: "The same parser, planner, and error codes in every runtime. Fix a bug once and every binding gets it.",
   capabilities: [
     {
       eyebrow: "Language",
       title: "The full Qdrant surface, one grammar",
-      body: "Nearest, recommend, discover, hybrid RRF, formula scoring, MMR, cross-encoder rerank, mutations, indexes, and shard keys — a 670-line canonical grammar with 163 keywords.",
+      body: "Nearest, recommend, discover, hybrid RRF, formula scoring, MMR, cross-encoder rerank, mutations, indexes, and shard keys: a 670-line canonical grammar with 163 keywords.",
     },
     {
       eyebrow: "Security",
@@ -107,7 +107,7 @@ export const design = {
     {
       eyebrow: "Quality",
       title: "The grammar is the contract",
-      body: "Conformance fixtures, OpenAPI contract tests against Qdrant’s schema, and every documented example parsed at build time — the docs cannot drift from the parser.",
+      body: "Conformance fixtures, OpenAPI contract tests against Qdrant's schema, and every documented example parsed at build time. The docs cannot drift from the parser.",
     },
   ],
 } as const;
@@ -115,14 +115,14 @@ export const design = {
 export const limits = {
   label: "Current limits",
   statement: "Young, Qdrant-specific, and honest about it.",
-  body: "v0.2.1 is weeks old and the API surface is stabilizing, not frozen. Edge is intentionally single-node — group-by, custom shard routing, and replication are rejected with stable error codes. Benchmarks are single-run samples, not a CI suite. The gaps document is public.",
-  foot: "Fail-closed by default · Stable error codes · Public gaps doc",
+  body: "v0.2.1 is weeks old and the API surface is stabilizing, not frozen. Edge is intentionally single-node: group-by, custom shard routing, and replication are rejected with stable error codes. Benchmarks are single-run samples, not a CI suite. The gaps document is public.",
+  foot: "Fail-closed by default, stable error codes, public gaps doc",
 } as const;
 
 export const getStarted = {
   label: "Get started",
   heading: "Install it where you already work.",
-  sub: "crates.io · PyPI · npm · VS Code Marketplace · GitHub Releases.",
+  sub: "crates.io, PyPI, npm, VS Code Marketplace, and GitHub Releases.",
   installs: [
     { name: "CLI", cmd: "curl -fsSL …/install.sh | sh", href: "/docs/getting-started/installation/" },
     { name: "Python", cmd: "pip install pyqql", href: "/docs/sdks/python/" },
@@ -162,12 +162,12 @@ export const faq = {
     {
       question: "Is it production-ready?",
       answer:
-        "It is young — v0.2.1. Fail-closed defaults, OpenAPI contract tests, a conformance corpus, and a public gaps document. The API surface is stabilizing, not frozen.",
+        "It is young: v0.2.1. Fail-closed defaults, OpenAPI contract tests, a conformance corpus, and a public gaps document. The API surface is stabilizing, not frozen.",
     },
     {
       question: "Can I try it without a cluster?",
       answer:
-        "Yes. The playground runs the real WASM parser in-browser, and qql-edge runs the full pipeline with local HNSW storage and ONNX embeddings — offline after models cache.",
+        "Yes. The playground runs the real WASM parser in-browser, and qql-edge runs the full pipeline with local HNSW storage and ONNX embeddings (offline after models cache).",
     },
   ],
 } as const;
@@ -175,7 +175,7 @@ export const faq = {
 export const cta = {
   label: "Start here",
   heading: "Read the quickstart. Run a query in five minutes.",
-  body: "Parse, enforce policy, plan, and execute — from a laptop edge process to a remote Qdrant cluster.",
+  body: "Parse, enforce policy, plan, and execute: from a laptop edge process to a remote Qdrant cluster.",
   primaryCta: { label: "Read the quickstart", href: "/docs/getting-started/quickstart/" },
   secondaryCta: { label: "Try the playground", href: "/playground/" },
 } as const;

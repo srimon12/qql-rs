@@ -3,8 +3,8 @@
 /* ---Aesthetic Theming --- */
 
 :root {
-	--sl-font: "Inter", "IBM Plex Sans", var(--sl-font-system);
-	--sl-font-mono: "JetBrains Mono", var(--sl-font-system-mono);
+	--sl-font: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+	--sl-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
 	--sl-content-width: 52rem;
 	--syntax-keyword: #9f3f2d;
 	--syntax-string: #16724e;
@@ -22,9 +22,9 @@
 /* --- Dark Mode ( Main Vibe) --- */
 :root[data-theme="dark"] {
 	--sl-color-bg: #141413;
-	--sl-color-bg-nav: rgba(20, 20, 19, 0.7);
+	--sl-color-bg-nav: rgba(20, 20, 19, 0.72);
 	--sl-color-text: #e6e4e0;
-	
+
 	--sl-color-accent-low: #2e130a;
 	--sl-color-accent: #ba5442;
 	--sl-color-accent-high: #ffcfbf;
@@ -35,7 +35,8 @@
 	--sl-color-gray-4: #5a5850;
 	--sl-color-gray-5: #222120;
 	--sl-color-gray-6: #1c1c1a;
-	--sl-color-white: #ffffff;
+	--sl-color-gray-7: #262523;
+	--sl-color-white: #f6f4ee;
 	--syntax-keyword: #ffad9a;
 	--syntax-string: #9ee6bd;
 	--syntax-number: #f4cb86;
@@ -47,21 +48,23 @@
 /* --- Light Mode --- */
 :root[data-theme="light"] {
 	--sl-color-bg: #f5f4ed;
+	--sl-color-bg-nav: rgba(245, 244, 237, 0.78);
 	--sl-color-text: #141413;
 
-	--sl-color-gray-1: #141413;
-	--sl-color-gray-2: #5e5d59;
-	--sl-color-gray-3: #838579;
-	--sl-color-gray-4: #b6b8ac;
-	--sl-color-gray-5: #e8e6dc;
-	--sl-color-gray-6: #faf9f5;
-	--sl-color-white: #000000;
+	--sl-color-gray-1: #1d1c19;
+	--sl-color-gray-2: #4e4d46;
+	--sl-color-gray-3: #6f6e64;
+	--sl-color-gray-4: #a8a698;
+	--sl-color-gray-5: #e4e2d6;
+	--sl-color-gray-6: #fbfaf5;
+	--sl-color-gray-7: #efede2;
+	--sl-color-white: #1d1c19;
 }
 
 /* --- Editorial Serif Typography --- */
 h1, h2, h3, h4, h5, h6 {
 	font-family: "Instrument Serif", Georgia, serif !important;
-	font-weight: 300 !important;
+	font-weight: 400 !important;
 	letter-spacing: -0.01em !important;
 	color: var(--sl-color-white) !important;
 }
@@ -100,36 +103,37 @@ code:not(pre code) {
 
 /* --- Theming Starlight Native Components (Cards, Tabs, Steps, Asides) --- */
 
-/*  Premium Card Glassmorphism for Starlight Cards and standard code blocks.
-   Terminal/QQL blocks already get premium-card from their own container — excluded here. */
+/*  Cards: hairline border + tinted surface, no blur, no glow. The
+   backdrop-filter glass look hurt scroll performance and read generic;
+   a color-tinted surface keeps the same depth with a fraction of the cost. */
 .card,
 a.sl-link-card,
 .premium-card,
 .sl-markdown-content .expressive-code:not(.terminal-body .expressive-code):not(.qql-example__code .expressive-code) {
-	border: 1.5px solid color-mix(in srgb, var(--sl-color-gray-5) 70%, var(--sl-color-gray-4)) !important;
-	background: linear-gradient(145deg, color-mix(in srgb, var(--sl-color-gray-6) 60%, transparent) 0%, color-mix(in srgb, var(--sl-color-bg) 70%, transparent) 100%) !important;
+	border: 1px solid color-mix(in srgb, var(--sl-color-gray-5) 78%, var(--sl-color-gray-4)) !important;
+	background: var(--sl-color-gray-6) !important;
 	border-radius: 0.75rem !important;
-	transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
-	backdrop-filter: blur(12px) !important;
-	-webkit-backdrop-filter: blur(12px) !important;
+	transition:
+		border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important,
+		background-color 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important,
+		transform 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important,
+		box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
 	position: relative;
 	overflow: hidden;
-	box-shadow: 0 4px 24px -4px color-mix(in srgb, var(--sl-color-text) 5%, transparent), inset 0 1px 0 color-mix(in srgb, var(--sl-color-text) 3%, transparent) !important;
+	box-shadow: 0 1px 2px color-mix(in srgb, var(--sl-color-text) 4%, transparent) !important;
 }
 
 .card:hover,
 a.sl-link-card:hover,
 .premium-card:hover,
 .sl-markdown-content .expressive-code:not(.terminal-body .expressive-code):not(.qql-example__code .expressive-code):hover {
-	border-color: color-mix(in srgb, var(--sl-color-accent) 40%, var(--sl-color-gray-5)) !important;
-	background: linear-gradient(145deg, color-mix(in srgb, var(--sl-color-gray-5) 50%, transparent) 0%, color-mix(in srgb, var(--sl-color-gray-6) 60%, transparent) 100%) !important;
+	border-color: color-mix(in srgb, var(--sl-color-accent) 38%, var(--sl-color-gray-5)) !important;
+	background: var(--sl-color-gray-7) !important;
 	transform: translateY(-2px);
-	box-shadow: 0 12px 28px color-mix(in srgb, var(--sl-color-text) 8%, transparent), 
-	            0 0 20px color-mix(in srgb, var(--sl-color-accent) 15%, transparent),
-				inset 0 1px 0 color-mix(in srgb, var(--sl-color-text) 5%, transparent) !important;
+	box-shadow: 0 10px 24px color-mix(in srgb, var(--sl-color-text) 7%, transparent) !important;
 }
 
-/* Standard code blocks: let the glass effect show through */
+/* Standard code blocks: let the surface show through */
 .sl-markdown-content .expressive-code:not(.terminal-body .expressive-code):not(.qql-example__code .expressive-code) pre {
 	background-color: transparent !important;
 }
@@ -181,7 +185,7 @@ starlight-tabs [role="tab"][aria-selected="true"] {
 	background-color: var(--sl-color-bg) !important;
 	border: 1px solid var(--sl-color-gray-4) !important;
 	color: var(--sl-color-white) !important;
-	box-shadow: 0 0 10px color-mix(in srgb, var(--sl-color-accent) 10%, transparent) !important;
+	box-shadow: none !important;
 }
 
 /* Starlight Asides (Callouts) */
@@ -193,7 +197,6 @@ starlight-tabs [role="tab"][aria-selected="true"] {
 	line-height: 1.6 !important;
 	background-color: var(--sl-color-gray-6) !important;
 	border: 1px solid var(--sl-color-gray-5) !important;
-	backdrop-filter: blur(8px) !important;
 }
 
 aside.starlight-aside--note {
@@ -213,11 +216,11 @@ aside.starlight-aside--danger, aside.starlight-aside--caution {
 aside p.starlight-aside__title {
 	font-family: "Instrument Serif", Georgia, serif !important;
 	font-size: 1.35rem !important;
-	font-weight: 300 !important;
+	font-weight: 400 !important;
 	letter-spacing: 0 !important;
 }
 
-/* Starlight Code blocks — glass effect handled by .expressive-code via premium-card above */
+/* Starlight Code blocks — surface handled by .expressive-code via card rule above */
 
 /* --- ZenNotes-style Minimalist Global Sidebar --- */
 .sidebar-content a {
@@ -266,7 +269,7 @@ aside p.starlight-aside__title {
 
 /* Glass Header Override */
 site-header, header.header {
-	background-color: var(--sl-color-bg-nav) !important;
+	background-color: var(--sl-color-bg-nav, var(--sl-color-bg)) !important;
 	backdrop-filter: blur(12px) !important;
 	-webkit-backdrop-filter: blur(12px) !important;
 	border-bottom: 1px solid var(--sl-color-gray-5) !important;

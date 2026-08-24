@@ -1,7 +1,6 @@
 ---
 import LanguageSelect from "virtual:starlight/components/LanguageSelect";
 import Search from "virtual:starlight/components/Search";
-import SiteTitle from "virtual:starlight/components/SiteTitle";
 import SocialIcons from "virtual:starlight/components/SocialIcons";
 import config from "virtual:starlight/user-config";
 import type { DocsHeaderConfig } from "../types";
@@ -22,7 +21,15 @@ const currentPath = Astro.url.pathname;
 
 <div class="header">
   <div class="title-wrapper sl-flex">
-    <SiteTitle />
+    <a class="docs-brand" href="/" aria-label="QQL home">
+      <span class="docs-brand__mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" width="20" height="20">
+          <path d="M7.25 7.5h4.05L16 21.15 20.7 7.5h4.05L17.35 25.25h-2.7L7.25 7.5Z"></path>
+        </svg>
+      </span>
+      <span class="docs-brand__name">QQL</span>
+      <span class="docs-brand__chip">Docs</span>
+    </a>
   </div>
   
   <nav class="sl-hidden lg:sl-flex center-nav">
@@ -101,6 +108,66 @@ const currentPath = Astro.url.pathname;
     }
   }
 
+  /* Brand block: matches the landing/playground site header. */
+  .docs-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    text-decoration: none;
+    color: inherit;
+  }
+
+  .docs-brand__mark {
+    width: 2rem;
+    height: 2rem;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.55rem;
+    color: var(--sl-color-accent);
+    background: var(--sl-color-gray-6);
+    transition:
+      border-color 180ms ease,
+      background-color 180ms ease;
+  }
+
+  .docs-brand:hover .docs-brand__mark {
+    border-color: color-mix(in srgb, var(--sl-color-accent) 35%, var(--sl-color-gray-5));
+    background: color-mix(in srgb, var(--sl-color-accent) 6%, var(--sl-color-gray-6));
+  }
+
+  .docs-brand__mark svg {
+    fill: currentColor;
+  }
+
+  .docs-brand__name {
+    font-family: "Instrument Serif", Georgia, serif;
+    font-size: 1.3rem;
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    color: var(--sl-color-white);
+  }
+
+  .docs-brand__chip {
+    padding: 0.22rem 0.6rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--sl-color-gray-6) 60%, transparent);
+    font-family: var(--sl-font-mono);
+    font-size: 0.56rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--sl-color-gray-3);
+    white-space: nowrap;
+  }
+
+  @media (max-width: 26rem) {
+    .docs-brand__chip {
+      display: none;
+    }
+  }
+
   .center-nav {
     display: flex;
     align-items: center;
@@ -148,21 +215,9 @@ const currentPath = Astro.url.pathname;
     transition: all 0.2s;
   }
 
-  .search-container :global(.search-input:focus) {
-    box-shadow: 0 0 12px rgba(195, 88, 56, 0.2) !important;
-  }
-
-  /* Site title gradient styling */
-  :global(.site-title) {
-    font-weight: 800 !important;
-    letter-spacing: -0.02em !important;
-    background: linear-gradient(135deg, var(--sl-color-white) 40%, var(--sl-color-accent-high) 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    transition: opacity 0.2s;
-  }
-
-  :global(.site-title:hover) {
-    opacity: 0.9;
+  .search-container :global(.search-input:focus-visible) {
+    outline: 2px solid var(--sl-color-accent);
+    outline-offset: 1px;
+    box-shadow: none !important;
   }
 </style>

@@ -1,4 +1,4 @@
-<section class="flex min-h-[38rem] min-w-0 flex-col border-b border-[var(--sl-color-gray-5)] lg:border-r lg:border-b-0" aria-labelledby="editor-title">
+<section class="flex min-h-[34rem] min-w-0 flex-col border-b border-[var(--sl-color-gray-5)] lg:min-h-0 lg:border-r lg:border-b-0" aria-labelledby="editor-title">
   <div class="flex min-h-16 flex-wrap items-center justify-between gap-3 border-b border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-4 py-3">
     <div>
       <span class="block font-mono text-[0.6rem] font-semibold uppercase tracking-[0.12em] text-[var(--sl-color-accent)]">Source</span>
@@ -31,9 +31,15 @@
 
   <div class="relative min-h-0 flex-1 bg-[color-mix(in_srgb,var(--sl-color-bg)_55%,var(--sl-color-gray-6))]">
     <div id="qql-editor" aria-label="QQL source editor"></div>
-    <div class="absolute inset-0 z-10 grid place-content-center gap-3 bg-[color-mix(in_srgb,var(--sl-color-bg)_88%,transparent)] text-center font-mono text-xs text-[var(--sl-color-gray-2)]" data-editor-loading role="status" aria-live="polite">
-      <span class="size-6 justify-self-center animate-spin rounded-full border-2 border-[var(--sl-color-gray-4)] border-t-[var(--sl-color-accent)]" aria-hidden="true"></span>
-      Loading the current qql-rs WASM…
+    <div class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-[color-mix(in_srgb,var(--sl-color-bg)_90%,transparent)] text-center font-mono text-xs text-[var(--sl-color-gray-2)]" data-editor-loading role="status" aria-live="polite">
+      <div class="w-72 max-w-[80%] space-y-2.5 px-6" aria-hidden="true">
+        <span class="block h-3 animate-pulse rounded-sm bg-[var(--sl-color-gray-6)]"></span>
+        <span class="block h-3 w-11/12 animate-pulse rounded-sm bg-[var(--sl-color-gray-6)] [animation-delay:120ms]"></span>
+        <span class="block h-3 w-4/5 animate-pulse rounded-sm bg-[var(--sl-color-gray-6)] [animation-delay:240ms]"></span>
+        <span class="block h-3 w-9/12 animate-pulse rounded-sm bg-[var(--sl-color-gray-6)] [animation-delay:360ms]"></span>
+        <span class="block h-3 w-1/2 animate-pulse rounded-sm bg-[var(--sl-color-gray-6)] [animation-delay:480ms]"></span>
+      </div>
+      <span>Loading the current qql-rs WASM…</span>
     </div>
     <noscript>
       <p class="p-4">The playground requires JavaScript and WebAssembly.</p>

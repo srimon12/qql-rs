@@ -294,8 +294,6 @@ body:has(.site-header) {
   z-index: 1;
   border-top: 1px solid color-mix(in srgb, var(--sl-color-gray-5) 60%, transparent);
   background: color-mix(in srgb, var(--sl-color-gray-6) 40%, transparent);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
 }
 
 .site-footer__grid {

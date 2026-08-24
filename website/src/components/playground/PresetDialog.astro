@@ -16,7 +16,7 @@ interface Props {
 const { presets, categories } = Astro.props;
 ---
 
-<dialog class="m-auto w-[min(calc(100%-2rem),68rem)] max-h-[90vh] overflow-hidden rounded-xl border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] p-0 text-[var(--sl-color-gray-1)] shadow-2xl backdrop:bg-black/70" id="preset-dialog" aria-labelledby="preset-dialog-title">
+<dialog class="m-auto w-[min(calc(100%-2rem),68rem)] max-h-[90vh] overflow-hidden rounded-xl border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] p-0 text-[var(--sl-color-gray-1)] shadow-2xl backdrop:bg-black/70 backdrop:backdrop-blur-sm" id="preset-dialog" aria-labelledby="preset-dialog-title" data-app-dialog>
   <div class="flex max-h-[90vh] flex-col">
     <header class="flex items-start justify-between gap-4 border-b border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] p-5">
       <div>
@@ -30,7 +30,7 @@ const { presets, categories } = Astro.props;
     <div class="grid gap-3 border-b border-[var(--sl-color-gray-5)] p-5 pb-3">
       <label>
         <span class="sr-only">Search examples</span>
-        <input class="min-h-10 w-full rounded-md border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] px-3 text-sm text-[var(--sl-color-gray-1)] placeholder:text-[var(--sl-color-gray-4)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="search" placeholder="Search 32 fixture groups…" data-preset-search />
+        <input class="min-h-10 w-full rounded-md border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] px-3 text-sm text-[var(--sl-color-gray-1)] placeholder:text-[var(--sl-color-gray-4)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="search" placeholder="Search fixture groups…" name="preset-search" data-preset-search />
       </label>
       <div class="flex gap-1.5 overflow-x-auto" role="group" aria-label="Filter examples">
         <button type="button" class="rounded-full border border-[var(--sl-color-gray-5)] bg-transparent px-2.5 py-1 font-mono text-[0.65rem] text-[var(--sl-color-gray-3)] hover:border-[var(--sl-color-gray-4)] hover:text-[var(--sl-color-gray-1)] aria-pressed:border-[var(--sl-color-accent)] aria-pressed:bg-[var(--sl-color-accent)] aria-pressed:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" aria-pressed="true" data-preset-category="all">All</button>

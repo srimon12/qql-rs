@@ -70,7 +70,7 @@ const presets = readdirSync(validRoot)
 const categories = [...new Set(presets.map((preset) => preset.category))].sort();
 const defaultPreset =
   presets.find((preset) => preset.id === "query-hybrid") ?? presets[0];
-const pageTitle = "QQL Playground — Parse, plan, and run Qdrant queries";
+const pageTitle = "QQL Playground: parse, plan, and run Qdrant queries";
 const pageDescription =
   "Explore the current qql-rs parser and planner in your browser using the complete QQL v1 valid fixture corpus.";
 ---
@@ -114,9 +114,16 @@ const pageDescription =
   </head>
   <body class="min-h-dvh bg-[var(--sl-color-bg)] font-[var(--sl-font)] text-[var(--sl-color-gray-1)]">
     <SiteHeader active="playground" />
-    <main id="main-content" class="mx-auto flex w-full max-w-[96rem] flex-col gap-3 px-3 py-3 sm:px-5 sm:py-5">
+    <main
+      id="main-content"
+      class="mx-auto flex w-full max-w-[96rem] flex-col gap-3 px-3 py-3 sm:px-5 sm:py-5 lg:h-[calc(100dvh-4rem)] lg:pb-2"
+    >
       <h1 class="sr-only">QQL Playground</h1>
-      <div class="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--sl-color-gray-5)] px-1 pb-3 font-mono text-[0.68rem] text-[var(--sl-color-gray-3)]" role="status" aria-live="polite">
+      <div
+        class="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--sl-color-gray-5)] px-1 pb-3 font-mono text-[0.68rem] text-[var(--sl-color-gray-3)]"
+        role="status"
+        aria-live="polite"
+      >
         <span class="inline-flex items-center gap-2 text-[var(--sl-color-gray-2)]"><span class="size-1.5 rounded-full bg-emerald-400 shadow-[0_0_0.5rem_#31b276]"></span><span data-runtime-status>Loading current WASM…</span></span>
         <span class="hidden text-[var(--sl-color-gray-4)] sm:inline">/</span>
         <span data-active-fixture>{defaultPreset.label}</span>
@@ -124,7 +131,10 @@ const pageDescription =
         <a class="font-medium text-[var(--sl-color-accent-high)] no-underline hover:text-[var(--sl-color-white)] focus-visible:rounded focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" href="/docs/" data-docs-backlink hidden>← Back to documentation</a>
       </div>
 
-      <div class="grid min-h-[calc(100dvh-8.75rem)] grid-cols-1 overflow-hidden rounded-xl border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] shadow-[0_1.5rem_5rem_color-mix(in_srgb,black_18%,transparent)] lg:grid-cols-[minmax(0,1.08fr)_minmax(26rem,0.92fr)]" data-default-query={defaultPreset.query}>
+      <div
+        class="grid min-h-[calc(100dvh-8.75rem)] grid-cols-1 overflow-hidden rounded-xl border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] shadow-[0_1.5rem_5rem_color-mix(in_srgb,black_18%,transparent)] lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1.08fr)_minmax(26rem,0.92fr)]"
+        data-default-query={defaultPreset.query}
+      >
         <EditorPanel />
         <InspectorPanel />
       </div>

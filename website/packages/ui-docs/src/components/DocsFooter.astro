@@ -101,7 +101,7 @@ const year = new Date().getFullYear();
 
   @layer starlight.components {
     .kudos svg {
-      color: var(--sl-color-orange);
+      color: var(--sl-color-gray-4);
     }
   }
 
@@ -111,7 +111,7 @@ const year = new Date().getFullYear();
     position: relative;
   }
 
-  /* Glowing central gradient line */
+  /* Hairline separator with a faint accent at center */
   .brand-footer::before {
     content: '';
     position: absolute;
@@ -119,7 +119,12 @@ const year = new Date().getFullYear();
     left: 0;
     right: 0;
     height: 1px;
-    background: radial-gradient(circle at center, color-mix(in srgb, var(--sl-color-accent) 40%, transparent) 0%, color-mix(in srgb, var(--sl-color-white) 5%, transparent) 50%, transparent 100%);
+    background: linear-gradient(
+      to right,
+      transparent 0%,
+      color-mix(in srgb, var(--sl-color-accent) 30%, transparent) 50%,
+      transparent 100%
+    );
   }
 
   .brand-footer-grid {
@@ -136,13 +141,11 @@ const year = new Date().getFullYear();
 
   .brand-name {
     font-size: var(--sl-text-lg);
-    font-weight: 800;
+    font-weight: 600;
+    font-family: "Instrument Serif", Georgia, serif;
     color: var(--sl-color-white);
     text-decoration: none;
-    letter-spacing: -0.03em;
-    background: linear-gradient(135deg, var(--sl-color-white) 50%, var(--sl-color-accent-high) 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+    letter-spacing: -0.02em;
     transition: opacity 0.2s;
   }
   .brand-name:hover {
