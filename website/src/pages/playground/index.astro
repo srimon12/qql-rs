@@ -11,8 +11,14 @@ import SettingsDialog from "../../components/playground/SettingsDialog.astro";
 import SiteFooter from "../../components/SiteFooter.astro";
 import SiteHeader from "../../components/SiteHeader.astro";
 import { ANALYTICS, APPS } from "../../config/site";
-import "@qql/ui-docs/chrome.css";
+import "@fontsource/newsreader/latin-400.css";
+import "@fontsource/ibm-plex-sans/400.css";
+import "@fontsource/ibm-plex-sans/500.css";
+import "@fontsource/ibm-plex-sans/600.css";
+import "@fontsource/jetbrains-mono/400.css";
+import "@fontsource/jetbrains-mono/500.css";
 import "../../styles/global.css";
+import "@qql/ui-docs/chrome.css";
 
 const workspaceRoot = fileURLToPath(
   new URL("../../../../", import.meta.url),
@@ -70,7 +76,7 @@ const presets = readdirSync(validRoot)
 const categories = [...new Set(presets.map((preset) => preset.category))].sort();
 const defaultPreset =
   presets.find((preset) => preset.id === "query-hybrid") ?? presets[0];
-const pageTitle = "QQL Playground — Parse, plan, and run Qdrant queries";
+const pageTitle = "QQL Playground: parse, plan, and run Qdrant queries";
 const pageDescription =
   "Explore the current qql-rs parser and planner in your browser using the complete QQL v1 valid fixture corpus.";
 ---
@@ -82,13 +88,25 @@ const pageDescription =
     <meta name="viewport" content="width=device-width" />
     <title>{pageTitle}</title>
     <meta name="description" content={pageDescription} />
+    <meta
+      name="keywords"
+      content="QQL playground, Qdrant query builder, interactive vector search, AST visualizer, WASM planner, QQL online"
+    />
     <link rel="canonical" href={`${APPS.playground.url}/`} />
     <link rel="icon" href="/favicon.ico" />
     <meta property="og:title" content={pageTitle} />
     <meta property="og:description" content={pageDescription} />
     <meta property="og:type" content="website" />
     <meta property="og:url" content={`${APPS.playground.url}/`} />
-    <meta property="og:image" content={`${APPS.home.url}/og-image.png`} />
+    <meta property="og:image" content={`${APPS.home.url}/open-graph/playground.png`} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@srimon_12" />
+    <meta name="twitter:creator" content="@srimon_12" />
+    <meta name="twitter:title" content={pageTitle} />
+    <meta name="twitter:description" content={pageDescription} />
+    <meta name="twitter:image" content={`${APPS.home.url}/open-graph/playground.png`} />
     <script is:inline>
       (() => {
         const saved =
@@ -111,21 +129,74 @@ const pageDescription =
         />
       )
     }
+    <script
+      is:inline
+      type="application/ld+json"
+      set:html={JSON.stringify({
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        name: "QQL Playground",
+        url: APPS.playground.url,
+        description: pageDescription,
+        applicationCategory: "DeveloperApplication",
+        operatingSystem: "Web Browser / WebAssembly",
+        browserRequirements: "Requires WebAssembly support",
+        offers: {
+          "@type": "Offer",
+          price: "0",
+          priceCurrency: "USD",
+        },
+      })}
+    />
   </head>
-  <body class="min-h-dvh bg-[var(--sl-color-bg)] font-[var(--sl-font)] text-[var(--sl-color-gray-1)]">
+  <body class="app-shell min-h-dvh bg-[var(--sl-color-bg)] font-(family-name:--sl-font) text-[var(--sl-color-gray-1)]">
     <SiteHeader active="playground" />
-    <main id="main-content" class="mx-auto flex w-full max-w-[96rem] flex-col gap-3 px-3 py-3 sm:px-5 sm:py-5">
+    <main
+      id="main-content"
+      class="mx-auto flex w-full max-w-[96rem] flex-col gap-3 px-3 py-3 sm:px-5 sm:py-5 lg:h-[calc(100dvh-4rem)] lg:pb-2"
+    >
       <h1 class="sr-only">QQL Playground</h1>
-      <div class="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--sl-color-gray-5)] px-1 pb-3 font-mono text-[0.68rem] text-[var(--sl-color-gray-3)]" role="status" aria-live="polite">
-        <span class="inline-flex items-center gap-2 text-[var(--sl-color-gray-2)]"><span class="size-1.5 rounded-full bg-emerald-400 shadow-[0_0_0.5rem_#31b276]"></span><span data-runtime-status>Loading current WASM…</span></span>
-        <span class="hidden text-[var(--sl-color-gray-4)] sm:inline">/</span>
-        <span data-active-fixture>{defaultPreset.label}</span>
-        <span class="ml-auto hidden truncate sm:inline" data-connection-summary>http://localhost:6333 · browser MiniLM</span>
-        <a class="font-medium text-[var(--sl-color-accent-high)] no-underline hover:text-[var(--sl-color-white)] focus-visible:rounded focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" href="/docs/" data-docs-backlink hidden>← Back to documentation</a>
+      <div
+        class="flex min-h-10 flex-wrap items-center gap-2 border-b border-[var(--sl-color-gray-5)] px-1 pb-3"
+        aria-label="Playground status"
+      >
+        <span class="inline-flex min-h-8 shrink-0 items-center gap-2 px-1 font-mono text-[0.75rem] text-[var(--sl-color-gray-2)]" role="status" aria-live="polite">
+          <span class="size-2 rounded-full bg-[var(--sl-color-gray-4)] transition-colors" data-runtime-dot></span>
+          <span data-runtime-status>Loading current WASM…</span>
+        </span>
+        <button class="app-chip min-w-0 max-w-[min(24rem,100%)]" type="button" data-open-presets title="Load a fixture">
+          <span class="app-chip__label">Example</span>
+          <span class="app-chip__value" data-active-fixture>{defaultPreset.label}</span>
+          <span class="app-chip__caret" aria-hidden="true">▾</span>
+        </button>
+        <button class="app-chip ml-auto min-w-0 max-w-[min(28rem,100%)]" type="button" data-open-settings title="Edit Qdrant URL and embeddings">
+          <span class="app-chip__label">Connection</span>
+          <span class="app-chip__value" data-connection-value>localhost:6333 · MiniLM</span>
+          <span class="app-chip__caret" aria-hidden="true">▾</span>
+        </button>
+        <a class="app-chip" href="/docs/" data-docs-backlink hidden>
+          <span class="app-chip__label">Docs</span>
+          <span class="app-chip__caret" aria-hidden="true">→</span>
+        </a>
       </div>
 
-      <div class="grid min-h-[calc(100dvh-8.75rem)] grid-cols-1 overflow-hidden rounded-xl border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] shadow-[0_1.5rem_5rem_color-mix(in_srgb,black_18%,transparent)] lg:grid-cols-[minmax(0,1.08fr)_minmax(26rem,0.92fr)]" data-default-query={defaultPreset.query}>
+      <div
+        class="grid h-[calc(100dvh-9rem)] min-h-[36rem] grid-cols-1 grid-rows-[minmax(0,3fr)_minmax(0,2fr)] overflow-hidden rounded-xl border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] shadow-[0_1.5rem_5rem_color-mix(in_srgb,black_18%,transparent)] lg:h-auto lg:min-h-0 lg:flex-1 lg:grid-cols-[var(--split-a,1.08fr)_0.5rem_var(--split-b,0.92fr)] lg:grid-rows-[minmax(0,1fr)]"
+        data-default-query={defaultPreset.query}
+        data-workspace
+      >
         <EditorPanel />
+        <div
+          aria-label="Resize editor and inspector panels"
+          aria-orientation="vertical"
+          class="relative hidden min-w-0 cursor-col-resize select-none lg:block"
+          role="separator"
+          tabindex="0"
+          title="Drag to resize (double-click to reset)"
+          data-split-handle
+        >
+          <span class="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-[var(--sl-color-gray-5)] transition-colors" aria-hidden="true"></span>
+        </div>
         <InspectorPanel />
       </div>
     </main>

@@ -1,18 +1,16 @@
 ---
 interface Props {
-  label: string;
   heading: string;
   sub: string;
   steps: readonly { step: string; title: string; detail: string }[];
 }
 
-const { label, heading, sub, steps } = Astro.props;
+const { heading, sub, steps } = Astro.props;
 ---
 
 <section class="landing-section" aria-labelledby="pipeline-heading">
   <div class="landing-shell landing-fade-up">
     <header class="landing-section__head">
-      <span class="landing-label">{label}</span>
       <h2 id="pipeline-heading">{heading}</h2>
       <p class="landing-section__sub">{sub}</p>
     </header>

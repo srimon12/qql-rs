@@ -9,9 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Work after **0.2.1** (`v0.2.1`). Workspace version is still 0.2.1 until the next tag.
+
+### 🚀 Added
+- **Parameter binding (`:name` / `?`)** — `qql-core::params` substitutes named and positional placeholders in QQL source before parse. `$` stays an identifier character (`$score`, `$1`), so placeholders are only `:name` and `?`. Colons inside compact dicts (`{a:b}`) are not placeholders. Strings and `--` comments are never rewritten. Exposed as `bind` / `bind_named` / `bind_positional` on Python, Node, WASM, and edge SDKs, `Executor::execute_with_params` / `execute_with_positional_params`, and `Client.execute(..., params=…)`.
+- **Standalone value parse** — `Parser::parse_value` for binding literals.
+- **CLI REPL module** — interactive session extracted to `qql-cli` `repl.rs` (multiline statements, `\f` format, `\d` doctor, `\e` script).
+- **QQL 1.5 tenant IDF examples** — `query-idf-tenant.qql` plus keyword `prefix = true` on `create-index`. VS Code snippet `qidftenant`.
+- **Website guides** — embedded in-process Qdrant + FastEmbed (Python / Node), and a QQL vs raw Qdrant JSON comparison. Open Graph image route for docs/landing.
+
 ### 🔄 Changed
 - **Host bind DX** — Python (`pyqql` / `pyqql-edge`), Node (`nqql` / `nqql-edge`), and WASM expose one `bind(query, params)`: dict/object for `:name`, list/array for `?`. `Client.execute` takes the same `params`. Removed `bind_named` / `bind_positional` / `bindNamed` / `bindPositional` from host SDKs. WASM `bind` takes a JS object or array, not a JSON string. Rust keeps typed `bind_named` / `bind_positional` and `execute_with_params` / `execute_with_positional_params`.
 - **QQL 1.5 IDF corpus** — `PARAMS (idf = …)` takes `'global'` or a QQL `WHERE` filter (`idf = WHERE tenant_id = 'acme'`). The AST stores `Option<FilterExpr>`. The Qdrant JSON `{corpus: {must: […]}}` form is removed (`QQL-VALIDATION-IDF`). Isolation remains `WHERE` / `inject_filter`; routing remains `SHARD`; IDF only scopes sparse term statistics.
+- **Language version 1.5** — `PARAMS (idf = …)` is `'global'` / bare `global`, or `WHERE <filter>` (`idf = WHERE tenant_id = 'acme'`). AST `IdfParams.corpus` is `Option<FilterExpr>`. The planner lowers that filter with `top_level_filter` (the old `value_to_json` JSON-corpus path is gone). Isolation stays `WHERE` / `inject_filter`; routing stays `SHARD`; IDF only scopes sparse term statistics. The Qdrant JSON `{corpus: {must: […]}}` form is **removed** (`QQL-VALIDATION-IDF` at parse). Unused `CORPUS` token dropped. Conformance: 39 valid files (265 statements), 56 invalid cases, 39 AST snapshots.
+- **SDK crate splits** — `pyqql` embedder, `pyqql-edge` models, and `nqql-edge` tests moved out of the giant `lib.rs` files. JSON → AST values go through `Value::from_json` in one place. Node bindings reject invalid `params` shapes (object for named, array for positional).
+- **Bundled editor WASM** — rebuilt (`nodejs` target) so diagnostics, format, and `bind` match current `qql-wasm` (parameter placeholders and `idf = WHERE …`).
+- **Website chrome and landing** — Veristamp tokens (warm paper, terracotta, Newsreader + IBM Plex Sans + JetBrains Mono). Landing cut to hero, QQL vs JSON/Python compare, why, install, FAQ. Shared `chrome.css` for docs header/footer and playground dialogs.
+- **Playground** — full-viewport editor/inspector shell; Connection and Example as clickable chips; policy dialog is an example list plus a two-row inject form (`Field`/`Op`, `Value`/`Type`). Policy is `inject_filter` + optional `SHARD` only.
+
+### 🐛 Fixed
+- **IDF JSON corpora** — `{corpus: {must: […]}}` no longer parses; write `idf = WHERE …`.
+- **Docs keyword / 1.5 references** — skill and SDK pages, `docs/STORY.md` counts, and website language/examples/error-code pages match 1.5.
+- **Playground policy layout** — native `<select>` no longer overlaps the field/value inputs (`box-sizing` + two-row grid).
+
+### 📚 Documentation
+- `docs/parameters.md` and executable `{% qqlExample %}` blocks for bound queries.
+- Skills and SDK references: bind usage, and IDF as QQL `WHERE` (no host inject, no JSON corpus).
+- Website language, tools/examples, backend-compatibility, and error-code pages updated for `idf = WHERE <filter>`.
 
 ## [0.2.1] - 2026-08-22
 

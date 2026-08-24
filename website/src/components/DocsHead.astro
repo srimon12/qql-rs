@@ -1,0 +1,101 @@
+---
+import StarlightHead from "@astrojs/starlight/components/Head.astro";
+import type { StarlightRouteData } from "@astrojs/starlight/route-data";
+import { APPS, SITE } from "../config/site";
+
+const starlightRoute = (Astro.locals as any)?.starlightRoute as StarlightRouteData | undefined;
+const entry = starlightRoute?.entry ?? (Astro.props as any)?.entry;
+const title = entry?.data?.title ?? "Documentation";
+const description = entry?.data?.description || "Declarative vector search for Qdrant: QQL language, SDKs, CLI, and security patterns.";
+const rawId = entry?.id ? String(entry.id).replace(/\.(mdoc|md)$/, "").replace(/^\//, "") : "docs";
+const canonicalUrl = new URL(Astro.url.pathname, APPS.home.url).href;
+const ogImageUrl = `${APPS.home.url}/open-graph/${rawId}.png`;
+
+// Compute breadcrumbs hierarchy cleanly without duplicate "docs" segment
+const cleanDocPath = rawId.replace(/^docs\/?/, "");
+const pathSegments = cleanDocPath.split("/").filter(Boolean);
+const breadcrumbs = [
+  { name: "Home", url: `${APPS.home.url}/` },
+  { name: "Docs", url: `${APPS.docs.url}/` },
+];
+
+let currentPath = `${APPS.docs.url}`;
+for (let i = 0; i < pathSegments.length; i++) {
+  const seg = pathSegments[i];
+  if (seg === "index") continue;
+  currentPath += `/${seg}`;
+  const label = seg
+    .split("-")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+  breadcrumbs.push({
+    name: i === pathSegments.length - 1 ? title : label,
+    url: `${currentPath}/`,
+  });
+}
+---
+
+<StarlightHead {...Astro.props}>
+  <slot />
+</StarlightHead>
+
+<link rel="canonical" href={canonicalUrl} />
+<meta property="og:image" content={ogImageUrl} />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+
+<meta name="twitter:site" content="@srimon_12" />
+<meta name="twitter:creator" content="@srimon_12" />
+<meta name="twitter:title" content={`${title} · QQL Docs`} />
+<meta name="twitter:description" content={description} />
+<meta name="twitter:image" content={ogImageUrl} />
+
+<script
+  is:inline
+  type="application/ld+json"
+  set:html={JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    headline: title,
+    description: description,
+    inLanguage: "en",
+    mainEntityOfPage: canonicalUrl,
+    image: ogImageUrl,
+    author: {
+      "@type": "Organization",
+      name: SITE.org,
+      url: "https://veristamp.in",
+    },
+    publisher: {
+      "@type": "Organization",
+      name: SITE.org,
+      url: "https://veristamp.in",
+      logo: {
+        "@type": "ImageObject",
+        url: `${APPS.home.url}/favicon.ico`,
+      },
+    },
+    keywords: [
+      "QQL",
+      "Qdrant",
+      "Vector Search",
+      "Hybrid Retrieval",
+      "Database Query Language",
+    ],
+  })}
+/>
+
+<script
+  is:inline
+  type="application/ld+json"
+  set:html={JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: breadcrumbs.map((item, index) => ({
+      "@type": "ListItem",
+      position: index + 1,
+      name: item.name,
+      item: item.url,
+    })),
+  })}
+/>
