@@ -3,11 +3,11 @@ interface Props {
   heading: string;
   sub: string;
   installs: readonly { name: string; cmd: string; href: string }[];
-  primaryCta: { label: string; href: string };
-  secondaryCta: { label: string; href: string };
+  footHref?: string;
+  footLabel?: string;
 }
 
-const { heading, sub, installs, primaryCta, secondaryCta } = Astro.props;
+const { heading, sub, installs, footHref, footLabel } = Astro.props;
 ---
 
 <section class="landing-section" aria-labelledby="install-heading">
@@ -29,13 +29,12 @@ const { heading, sub, installs, primaryCta, secondaryCta } = Astro.props;
       }
     </div>
 
-    <div class="landing-install-cta">
-      <a class="landing-btn landing-btn--primary" href={primaryCta.href}>
-        {primaryCta.label}
-      </a>
-      <a class="landing-btn landing-btn--ghost" href={secondaryCta.href}>
-        {secondaryCta.label}
-      </a>
-    </div>
+    {
+      footHref && footLabel && (
+        <p class="landing-section__foot">
+          <a href={footHref}>{footLabel} →</a>
+        </p>
+      )
+    }
   </div>
 </section>

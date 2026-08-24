@@ -99,8 +99,8 @@ function generateSvg({
       <stop offset="100%" stop-color="#d96b43" stop-opacity="0"/>
     </radialGradient>
     <radialGradient id="glowGrad2" cx="0.15" cy="0.85" r="0.5">
-      <stop offset="0%" stop-color="#31b276" stop-opacity="0.12"/>
-      <stop offset="100%" stop-color="#31b276" stop-opacity="0"/>
+      <stop offset="0%" stop-color="#ba5442" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#ba5442" stop-opacity="0"/>
     </radialGradient>
     <pattern id="grid" width="36" height="36" patternUnits="userSpaceOnUse">
       <path d="M 36 0 L 0 0 0 36" fill="none" stroke="#262623" stroke-width="1" stroke-opacity="0.6"/>

@@ -1,34 +1,20 @@
 ---
+import { Code } from "@astrojs/starlight/components";
+
 interface Props {
   heading: string;
   sub: string;
-  rows: readonly { without: string; with: string }[];
+  guideHref: string;
+  guideLabel: string;
+  hybridQql: string;
+  tenantQql: string;
+  filtersQql: string;
 }
 
-const { heading, sub, rows } = Astro.props;
+const { heading, sub, guideHref, guideLabel, hybridQql, tenantQql, filtersQql } =
+  Astro.props;
 
-const verifiedQqlCompareHybrid = String.raw`QUERY TEXT 'distributed consensus' FROM docs
-USING HYBRID DENSE dense_vec SPARSE bm25_vec FUSION RRF
-WHERE status = 'active'
-LIMIT 10;`;
-
-const verifiedQqlCompareTenant = String.raw`QUERY TEXT 'annual financial risks' FROM filings
-WHERE department = 'finance'
-SHARD 'tenant-corp-99'
-LIMIT 5;`;
-
-const verifiedQqlCompareFilters = String.raw`QUERY TEXT 'industrial robotics' FROM products
-WHERE (category = 'hardware' OR category = 'tools')
-  AND price <= 1200.0 AND in_stock = true
-LIMIT 20;`;
-
-const comparePresets = [
-  {
-    id: "hybrid",
-    title: "Hybrid search (RRF)",
-    qql: verifiedQqlCompareHybrid,
-    playgroundHref: `/playground/?q=${encodeURIComponent(verifiedQqlCompareHybrid)}`,
-    restJson: `{
+const restHybrid = `{
   "prefetch": [
     {
       "query": { "nearest": "dense_vec" },
@@ -49,66 +35,69 @@ const comparePresets = [
   ],
   "query": { "fusion": "rrf" },
   "limit": 10
-}`,
-    python: `client.query_points(
+}`;
+
+const pythonHybrid = `client.query_points(
     collection_name="docs",
     prefetch=[
         models.Prefetch(
             query=models.NearestQuery(nearest="dense_vec"),
             using="dense_vec",
-            filter=models.Filter(must=[models.FieldCondition(key="status", match=models.MatchValue(value="active"))]),
+            filter=models.Filter(must=[
+                models.FieldCondition(
+                    key="status",
+                    match=models.MatchValue(value="active"),
+                )
+            ]),
             limit=100,
         ),
         models.Prefetch(
             query=models.NearestQuery(nearest="bm25_vec"),
             using="bm25_vec",
-            filter=models.Filter(must=[models.FieldCondition(key="status", match=models.MatchValue(value="active"))]),
+            filter=models.Filter(must=[
+                models.FieldCondition(
+                    key="status",
+                    match=models.MatchValue(value="active"),
+                )
+            ]),
             limit=100,
         ),
     ],
     query=models.FusionQuery(fusion=models.Fusion.RRF),
     limit=10,
-)`
-  },
-  {
-    id: "multitenant",
-    title: "Zero-Trust multitenancy",
-    qql: verifiedQqlCompareTenant,
-    playgroundHref: `/playground/?q=${encodeURIComponent(verifiedQqlCompareTenant)}`,
-    restJson: `POST /collections/filings/points/query?shard_key=tenant-corp-99
-{
-  "query": [0.038, -0.192, 0.441, 0.812, ...],
+)`;
+
+const restTenant = `{
+  "query": "<dense vector>",
   "filter": {
     "must": [
-      { "key": "tenant_id", "match": { "value": "tenant-corp-99" } },
       { "key": "department", "match": { "value": "finance" } }
     ]
   },
   "limit": 5,
   "with_payload": true
-}`,
-    python: `client.query_points(
+}
+
+POST .../points/query?shard_key=tenant-corp-99`;
+
+const pythonTenant = `client.query_points(
     collection_name="filings",
     shard_key_selector="tenant-corp-99",
     query=dense_embedding_vector,
     query_filter=models.Filter(
         must=[
-            models.FieldCondition(key="tenant_id", match=models.MatchValue(value="tenant-corp-99")),
-            models.FieldCondition(key="department", match=models.MatchValue(value="finance")),
+            models.FieldCondition(
+                key="department",
+                match=models.MatchValue(value="finance"),
+            ),
         ]
     ),
     limit=5,
     with_payload=True,
-)`
-  },
-  {
-    id: "filters",
-    title: "Complex boolean filters",
-    qql: verifiedQqlCompareFilters,
-    playgroundHref: `/playground/?q=${encodeURIComponent(verifiedQqlCompareFilters)}`,
-    restJson: `POST /collections/products/points/query
-{
-  "query": [0.12, -0.04, 0.81, -0.33, ...],
+)`;
+
+const restFilters = `{
+  "query": "<dense vector>",
   "filter": {
     "must": [
       {
@@ -122,31 +111,64 @@ const comparePresets = [
     ]
   },
   "limit": 20
-}`,
-    python: `client.query_points(
+}`;
+
+const pythonFilters = `client.query_points(
     collection_name="products",
     query=product_query_vector,
     query_filter=models.Filter(
         must=[
             models.Filter(should=[
-                models.FieldCondition(key="category", match=models.MatchValue(value="hardware")),
-                models.FieldCondition(key="category", match=models.MatchValue(value="tools")),
+                models.FieldCondition(
+                    key="category",
+                    match=models.MatchValue(value="hardware"),
+                ),
+                models.FieldCondition(
+                    key="category",
+                    match=models.MatchValue(value="tools"),
+                ),
             ]),
-            models.FieldCondition(key="price", range=models.Range(lte=1200.0)),
-            models.FieldCondition(key="in_stock", match=models.MatchValue(value=True)),
+            models.FieldCondition(
+                key="price",
+                range=models.Range(lte=1200.0),
+            ),
+            models.FieldCondition(
+                key="in_stock",
+                match=models.MatchValue(value=True),
+            ),
         ]
     ),
     limit=20,
-)`
-  }
-];
+)`;
 
-const lineCount = (source: string) => source.split("\n").length;
-const presetStats = comparePresets.map((preset) => ({
-  qql: lineCount(preset.qql),
-  rest: lineCount(preset.restJson),
-  python: lineCount(preset.python),
-}));
+const presets = [
+  {
+    id: "hybrid",
+    title: "Hybrid RRF",
+    qql: hybridQql,
+    playgroundHref: `/playground/?q=${encodeURIComponent(hybridQql)}`,
+    rest: restHybrid,
+    python: pythonHybrid,
+  },
+  {
+    id: "tenant",
+    title: "Shard + filter",
+    qql: tenantQql,
+    playgroundHref: `/playground/?q=${encodeURIComponent(tenantQql)}`,
+    rest: restTenant,
+    python: pythonTenant,
+  },
+  {
+    id: "filters",
+    title: "Boolean filters",
+    qql: filtersQql,
+    playgroundHref: `/playground/?q=${encodeURIComponent(filtersQql)}`,
+    rest: restFilters,
+    python: pythonFilters,
+  },
+] as const;
+
+const lines = (source: string) => source.trim().split("\n").length;
 ---
 
 <section class="landing-section" aria-labelledby="problem-heading">
@@ -156,145 +178,172 @@ const presetStats = comparePresets.map((preset) => ({
       <p class="landing-section__sub">{sub}</p>
     </header>
 
-    <!-- Side-by-Side Comparison Box -->
-    <div class="landing-compare-widget" data-compare-widget>
-      <!-- Preset Tabs Bar -->
-      <div class="landing-compare-tabs" role="tablist" aria-label="Comparison scenarios">
-        {comparePresets.map((preset, idx) => (
-          <button
-            type="button"
-            role="tab"
-            class:list={["landing-compare-tab", { "landing-compare-tab--active": idx === 0 }]}
-            id={`tab-${preset.id}`}
-            aria-selected={idx === 0 ? "true" : "false"}
-            aria-controls={`panel-${preset.id}`}
-            data-preset-id={preset.id}
-          >
-            {preset.title}
+    <div class="landing-compare" data-compare>
+      <div class="landing-compare__tabs" role="tablist" aria-label="Query examples">
+        {
+          presets.map((preset, idx) => (
+            <button
+              type="button"
+              role="tab"
+              id={`compare-tab-${preset.id}`}
+              class:list={["landing-compare__tab", { "is-active": idx === 0 }]}
+              aria-selected={idx === 0 ? "true" : "false"}
+              aria-controls={`compare-panel-${preset.id}`}
+              data-preset={preset.id}
+            >
+              {preset.title}
+            </button>
+          ))
+        }
+      </div>
+
+      <div class="landing-compare__toolbar">
+        <div class="landing-compare__modes" role="radiogroup" aria-label="Compare against">
+          <button type="button" class="is-active" data-format="rest" aria-pressed="true">
+            JSON
           </button>
-        ))}
+          <button type="button" data-format="python" aria-pressed="false">
+            Python
+          </button>
+        </div>
+        <p class="landing-compare__stat" data-stat>
+          {lines(presets[0].qql)} lines vs {lines(presets[0].rest)}
+        </p>
+        <a class="landing-compare__try" data-play href={presets[0].playgroundHref}>
+          Open in playground
+        </a>
       </div>
 
-      <!-- Comparison Content Frame -->
-      <div class="landing-compare-frame">
-        <!-- Top Toolbar -->
-        <div class="landing-compare-toolbar">
-          <div class="landing-compare-modes" role="radiogroup" aria-label="Comparison format">
-            <button type="button" class="landing-mode-btn landing-mode-btn--active" data-format="rest">
-              QQL vs REST JSON
-            </button>
-            <button type="button" class="landing-mode-btn" data-format="python">
-              QQL vs Python SDK
-            </button>
-          </div>
-
-          <div class="landing-compare-chip" data-stat-chip>
-            <span data-stat-text>{presetStats[0].qql} lines vs {presetStats[0].rest} lines</span>
-          </div>
-
-          <a href={comparePresets[0].playgroundHref} class="landing-compare-try" data-playground-link>
-            Open in Playground →
-          </a>
-        </div>
-
-        <!-- Side-by-Side Split Grid -->
-        <div class="landing-compare-grid">
-          <!-- Left side: QQL -->
-          <div class="landing-compare-col landing-compare-col--qql">
-            <div class="landing-col-head">
-              <span class="landing-tag-pill landing-tag-pill--qql">QQL</span>
-              <span class="landing-col-meta">Declarative query</span>
-            </div>
-            <pre class="landing-code-pre"><code data-code-qql>{comparePresets[0].qql}</code></pre>
-          </div>
-
-          <!-- Right side: raw Qdrant API -->
-          <div class="landing-compare-col landing-compare-col--raw">
-            <div class="landing-col-head">
-              <span class="landing-tag-pill landing-tag-pill--raw" data-raw-label>Raw Qdrant REST JSON</span>
-              <span class="landing-col-meta" data-raw-lang>Payload</span>
-            </div>
-            <pre class="landing-code-pre"><code data-code-raw>{comparePresets[0].restJson}</code></pre>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Architectural Overview Cards -->
-    <div class="landing-compare" role="list">
       {
-        rows.map((row) => (
-          <div class="landing-compare__row" role="listitem">
-            <div class="landing-compare__cell">
-              <span class="landing-compare__tag">Today</span>
-              <p>{row.without}</p>
-            </div>
-            <div class="landing-compare__cell landing-compare__cell--with">
-              <span class="landing-compare__tag">With QQL</span>
-              <p>{row.with}</p>
+        presets.map((preset, idx) => (
+          <div
+            class="landing-compare__panel"
+            id={`compare-panel-${preset.id}`}
+            role="tabpanel"
+            aria-labelledby={`compare-tab-${preset.id}`}
+            data-panel={preset.id}
+            data-play={preset.playgroundHref}
+            data-qql-lines={lines(preset.qql)}
+            data-rest-lines={lines(preset.rest)}
+            data-python-lines={lines(preset.python)}
+            hidden={idx !== 0}
+          >
+            <div class="landing-compare__split" data-split>
+              <div class="landing-compare__pane">
+                <header>
+                  <span>QQL</span>
+                  <span>{lines(preset.qql)} lines</span>
+                </header>
+                <Code code={preset.qql} lang="qql" frame="none" />
+              </div>
+
+              <button
+                type="button"
+                class="landing-compare__handle"
+                data-split-handle
+                aria-label="Resize comparison"
+              ></button>
+
+              <div class="landing-compare__stack">
+                <div class="landing-compare__pane" data-raw="rest">
+                  <header>
+                    <span>REST JSON</span>
+                    <span>{lines(preset.rest)} lines</span>
+                  </header>
+                  <Code code={preset.rest} lang="json" frame="none" />
+                </div>
+                <div class="landing-compare__pane" data-raw="python" hidden>
+                  <header>
+                    <span>Python SDK</span>
+                    <span>{lines(preset.python)} lines</span>
+                  </header>
+                  <Code code={preset.python} lang="python" frame="none" />
+                </div>
+              </div>
             </div>
           </div>
         ))
       }
     </div>
+
+    <p class="landing-section__foot">
+      <a href={guideHref}>{guideLabel} →</a>
+    </p>
   </div>
 </section>
 
-<script is:inline define:vars={{ comparePresets, presetStats }}>
-  (() => {
-    const widget = document.querySelector('[data-compare-widget]');
-    if (!widget) return;
+<script>
+  const root = document.querySelector<HTMLElement>("[data-compare]");
+  if (root) {
+    const tabs = [...root.querySelectorAll<HTMLButtonElement>("[data-preset]")];
+    const panels = [...root.querySelectorAll<HTMLElement>("[data-panel]")];
+    const formatBtns = [...root.querySelectorAll<HTMLButtonElement>("[data-format]")];
+    const stat = root.querySelector("[data-stat]");
+    const play = root.querySelector<HTMLAnchorElement>("[data-play]");
+    let format: "rest" | "python" = "rest";
 
-    let activePresetIndex = 0;
-    let activeFormat = 'rest'; // 'rest' | 'python'
-    const qqlCodeEl = widget.querySelector('[data-code-qql]');
-    const rawCodeEl = widget.querySelector('[data-code-raw]');
-    const rawLabelEl = widget.querySelector('[data-raw-label]');
-    const rawLangEl = widget.querySelector('[data-raw-lang]');
-    const statTextEl = widget.querySelector('[data-stat-text]');
-    const playgroundLink = widget.querySelector('[data-playground-link]');
-    const tabButtons = widget.querySelectorAll('[data-preset-id]');
-    const formatButtons = widget.querySelectorAll('[data-format]');
+    const activePanel = () => panels.find((panel) => !panel.hidden) ?? panels[0];
 
-    function updateContent() {
-      const preset = comparePresets[activePresetIndex];
-      const stats = presetStats[activePresetIndex];
-      const otherLines = activeFormat === 'rest' ? stats.rest : stats.python;
-      if (qqlCodeEl) qqlCodeEl.textContent = preset.qql;
-      if (rawCodeEl) rawCodeEl.textContent = activeFormat === 'rest' ? preset.restJson : preset.python;
-      if (rawLabelEl) {
-        rawLabelEl.textContent = activeFormat === 'rest' ? 'Raw Qdrant REST JSON' : 'Qdrant Python Client';
-      }
-      if (rawLangEl) rawLangEl.textContent = activeFormat === 'rest' ? 'Payload' : 'Python';
-      if (statTextEl) statTextEl.textContent = `${stats.qql} lines vs ${otherLines} lines`;
-      if (playgroundLink) playgroundLink.setAttribute('href', preset.playgroundHref);
-    }
+    const sync = () => {
+      const panel = activePanel();
+      const qql = panel.dataset.qqlLines ?? "0";
+      const other = format === "rest" ? panel.dataset.restLines : panel.dataset.pythonLines;
+      if (stat) stat.textContent = `${qql} lines vs ${other}`;
+      if (play && panel.dataset.play) play.href = panel.dataset.play;
+      root.querySelectorAll<HTMLElement>("[data-raw]").forEach((pane) => {
+        pane.hidden = pane.dataset.raw !== format;
+      });
+    };
 
-    // Tabs
-    tabButtons.forEach((btn, index) => {
-      btn.addEventListener('click', () => {
-        activePresetIndex = index;
-        tabButtons.forEach((b) => {
-          b.classList.remove('landing-compare-tab--active');
-          b.setAttribute('aria-selected', 'false');
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const id = tab.dataset.preset;
+        tabs.forEach((item) => {
+          const on = item === tab;
+          item.classList.toggle("is-active", on);
+          item.setAttribute("aria-selected", String(on));
         });
-        btn.classList.add('landing-compare-tab--active');
-        btn.setAttribute('aria-selected', 'true');
-        updateContent();
+        panels.forEach((panel) => {
+          panel.hidden = panel.dataset.panel !== id;
+        });
+        sync();
       });
     });
 
-    // Format buttons
-    formatButtons.forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const fmt = btn.getAttribute('data-format');
-        if (fmt) {
-          activeFormat = fmt;
-          formatButtons.forEach((b) => b.classList.remove('landing-mode-btn--active'));
-          btn.classList.add('landing-mode-btn--active');
-          updateContent();
-        }
+    formatBtns.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const next = btn.dataset.format;
+        if (next !== "rest" && next !== "python") return;
+        format = next;
+        formatBtns.forEach((item) => {
+          const on = item === btn;
+          item.classList.toggle("is-active", on);
+          item.setAttribute("aria-pressed", String(on));
+        });
+        sync();
       });
     });
-  })();
+
+    root.querySelectorAll<HTMLElement>("[data-split-handle]").forEach((handle) => {
+      handle.addEventListener("pointerdown", (event) => {
+        const split = handle.closest<HTMLElement>("[data-split]");
+        if (!split || window.matchMedia("(max-width: 51.99rem)").matches) return;
+        event.preventDefault();
+        handle.setPointerCapture(event.pointerId);
+        const rect = split.getBoundingClientRect();
+        const move = (ev: PointerEvent) => {
+          const ratio = (ev.clientX - rect.left) / rect.width;
+          const clamped = Math.min(0.68, Math.max(0.28, ratio));
+          split.style.setProperty("--split", `${(clamped * 100).toFixed(1)}%`);
+        };
+        const up = () => {
+          handle.releasePointerCapture(event.pointerId);
+          handle.removeEventListener("pointermove", move);
+          handle.removeEventListener("pointerup", up);
+        };
+        handle.addEventListener("pointermove", move);
+        handle.addEventListener("pointerup", up);
+      });
+    });
+  }
 </script>

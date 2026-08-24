@@ -4,8 +4,10 @@
 
 :root {
 	--sl-font: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+	--sl-font-serif: "Newsreader", Georgia, "Times New Roman", serif;
 	--sl-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
 	--sl-content-width: 52rem;
+	--qql-radius: 0.75rem;
 	--syntax-keyword: #9f3f2d;
 	--syntax-string: #16724e;
 	--syntax-number: #8a5a00;
@@ -61,40 +63,41 @@
 	--sl-color-white: #1d1c19;
 }
 
-/* --- Editorial Serif Typography ---
-   Marketing and docs pages only. The playground opts out with `app-shell`
-   on <body>: a tool UI reads better entirely in sans + mono. */
+/* Editorial serif for titles. Playground (`app-shell`) stays sans + mono. */
 body:not(.app-shell) h1,
 body:not(.app-shell) h2,
-body:not(.app-shell) h3,
-body:not(.app-shell) h4,
-body:not(.app-shell) h5,
-body:not(.app-shell) h6 {
-	font-family: "Instrument Serif", Georgia, serif !important;
-	font-weight: 400 !important;
-	letter-spacing: -0.01em !important;
-	color: var(--sl-color-white) !important;
-}
-
-body:not(.app-shell) h1 {
-	font-size: 3.5rem !important;
-	line-height: 1.1 !important;
-	margin-top: 1rem !important;
-	margin-bottom: 2rem !important;
-}
-
-body:not(.app-shell) h2 {
-	font-size: 2.25rem !important;
-	margin-top: 3.5rem !important;
-	margin-bottom: 1.5rem !important;
-	border-bottom: 1px solid var(--sl-color-gray-5);
-	padding-bottom: 0.75rem;
-}
-
 body:not(.app-shell) h3 {
-	font-size: 1.75rem !important;
-	margin-top: 2.5rem !important;
-	margin-bottom: 1rem !important;
+	font-family: var(--sl-font-serif);
+	font-weight: 400;
+	letter-spacing: -0.02em;
+	color: var(--sl-color-white);
+}
+
+.content-panel h1#_top,
+.sl-markdown-content h1 {
+	font-size: clamp(1.85rem, 3vw, 2.35rem);
+	line-height: 1.15;
+	margin-top: 0.25rem;
+	margin-bottom: 1.25rem;
+	font-family: var(--sl-font-serif);
+	font-weight: 400;
+	letter-spacing: -0.02em;
+}
+
+.sl-markdown-content h2 {
+	font-size: clamp(1.35rem, 2.2vw, 1.6rem);
+	line-height: 1.25;
+	margin-top: 2.25rem;
+	margin-bottom: 0.85rem;
+}
+
+.sl-markdown-content h3 {
+	font-family: var(--sl-font);
+	font-size: 1.1rem;
+	font-weight: 600;
+	letter-spacing: -0.01em;
+	margin-top: 1.75rem;
+	margin-bottom: 0.6rem;
 }
 
 /* Make inline code pristine */
@@ -221,10 +224,10 @@ aside.starlight-aside--danger, aside.starlight-aside--caution {
 }
 
 aside p.starlight-aside__title {
-	font-family: "Instrument Serif", Georgia, serif !important;
-	font-size: 1.35rem !important;
-	font-weight: 400 !important;
-	letter-spacing: 0 !important;
+	font-family: var(--sl-font-serif);
+	font-size: 1.2rem;
+	font-weight: 400;
+	letter-spacing: -0.01em;
 }
 
 /* Starlight Code blocks — surface handled by .expressive-code via card rule above */
@@ -338,6 +341,10 @@ site-header, header.header {
 	border: 0 !important;
 	box-shadow: none !important;
 	margin: 0 !important;
+}
+
+.qql-example__code pre {
+	padding-right: 2.85rem !important;
 }
 
 @media (max-width: 38rem) {

@@ -84,7 +84,7 @@ body:has(.site-header) {
 }
 
 .brand__name {
-  font-family: "Instrument Serif", Georgia, serif;
+  font-family: var(--sl-font-serif);
   font-size: 1.3rem;
   font-weight: 400;
   letter-spacing: -0.02em;
@@ -120,14 +120,14 @@ body:has(.site-header) {
 
 .site-nav__link {
   padding: 0.42rem 0.8rem;
-  border-radius: 999px;
+  border-radius: 0.5rem;
   color: var(--sl-color-gray-2);
   font-size: 0.82rem;
   font-weight: 500;
   text-decoration: none;
   transition:
-    color 160ms ease,
-    background-color 160ms ease;
+    color 160ms cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 160ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .site-nav__link:hover {

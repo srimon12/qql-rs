@@ -57,7 +57,8 @@ export default defineConfig(
           },
         ],
         customCss: [
-          "@fontsource/instrument-serif/index.css",
+          "@fontsource/newsreader/latin-300.css",
+          "@fontsource/newsreader/latin-400.css",
           "@fontsource/ibm-plex-sans/400.css",
           "@fontsource/ibm-plex-sans/500.css",
           "@fontsource/ibm-plex-sans/600.css",
