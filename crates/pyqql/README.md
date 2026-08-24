@@ -90,6 +90,11 @@ client.execute(
 client.execute(
     "QUERY TEXT 'q' FROM docs USING sparse PARAMS (idf = 'global') LIMIT 5"
 )
+client.execute(
+    "QUERY TEXT 'q' FROM docs USING sparse "
+    "WHERE tenant_id = 'acme' SHARD 'acme' "
+    "PARAMS (idf = WHERE tenant_id = 'acme') LIMIT 5"
+)
 ```
 
 `SET QUOTA` is a **full replace** of the cluster config.

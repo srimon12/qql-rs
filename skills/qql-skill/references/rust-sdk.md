@@ -103,6 +103,24 @@ Client builder timeouts remain a separate HTTP-layer budget.
 **Routing:** prefer `SHARD 'tenant'` in the query string. After parse, use
 `stmt.set_shard_key(Some(tenant.into()))` — there is no `inject_shard_key`.
 
+**Sparse IDF:** write `PARAMS (idf = 'global')` or `PARAMS (idf = WHERE tenant_id = 'acme')`.
+There is no host inject and no `Value` / JSON corpus helper. `try_route` /
+`compile_statement` lower the QQL filter to OpenAPI `params.idf` (the old
+`value_to_json` corpus path is gone). Isolation stays `inject_filter`.
+
+```rust
+use qql_core::parser::Parser;
+use qql_plan::routing::try_route;
+
+let stmt = Parser::parse(
+    "QUERY TEXT 'risks' FROM docs USING sparse \
+     WHERE tenant_id = 'acme' SHARD 'acme' \
+     PARAMS (idf = WHERE tenant_id = 'acme') LIMIT 10;",
+)?;
+let route = try_route(&stmt)?;
+// REST body: params.idf = { "corpus": { "must": [{ "key": "tenant_id", "match": { "value": "acme" } }] } }
+```
+
 **Compilation:** use `compile_statement` / `try_route`. The deprecated
 `route()` (which panicked on client-side-only ops such as bare `CROSS RERANK`)
 has been removed; `try_route` returns `Err` — never panics — for those cases.

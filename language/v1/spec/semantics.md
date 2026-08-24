@@ -210,13 +210,15 @@ Body search parameters (OpenAPI `SearchParams`):
 | `rrf_k` | positive integer |
 | `rrf_weights` | list of numbers |
 | `quantization` | object containing `ignore`/`rescore` booleans and positive `oversampling` |
-| `idf` | per-query sparse IDF corpus: `'global'`, the bare keyword `global`, or `{corpus: <filter-object>}` |
+| `idf` | `'global'` / bare `global` (collection-wide), or `WHERE <filter>` (corpus is that QQL filter) |
 
 `idf` selects the inverse-document-frequency corpus used for sparse scoring on
-this request. The string / keyword form means the whole collection; the object
-form must carry a non-empty Qdrant filter object under `corpus` (must/should/
-must_not conditions). Malformed values fail at parse with `QQL-VALIDATION-IDF`
-or at plan with `QQL-PLAN-IDF`.
+this request. `'global'` means the whole collection. A `WHERE` form uses the
+same filter grammar as query `WHERE` — isolation stays on the statement
+`WHERE` / `inject_filter`; IDF only scopes term statistics. JSON corpus
+objects are not accepted. Malformed values fail at parse with
+`QQL-VALIDATION-IDF`. An empty lowered corpus fails at plan with
+`QQL-PLAN-IDF`.
 
 ```sql
 QUERY TEXT 'search' MODEL 'e5' FROM docs
@@ -224,7 +226,13 @@ PARAMS (idf = 'global')
 LIMIT 10;
 
 QUERY TEXT 'search' MODEL 'e5' FROM docs
-PARAMS (idf = {corpus: {must: [{key: 'status', match: {value: 'active'}}]}})
+PARAMS (idf = WHERE status = 'active')
+LIMIT 10;
+
+QUERY TEXT 'search' MODEL 'e5' FROM docs
+WHERE tenant_id = 'acme'
+SHARD 'acme'
+PARAMS (idf = WHERE tenant_id = 'acme')
 LIMIT 10;
 ```
 
@@ -551,7 +559,7 @@ invalid fixtures are normative for those cases.
 | `QQL-EDGE-UNSUPPORTED-FIELD-TYPE` | The index field type is not available offline |
 | `QQL-EDGE-UNSUPPORTED-ROUTE` | The planned operation has no edge route implementation (defensive fallback) |
 | `QQL-PLAN-QUOTA` | Invalid `SET QUOTA` key or out-of-range percent |
-| `QQL-PLAN-IDF` | `PARAMS (idf = …)` corpus is not a valid Qdrant filter object |
+| `QQL-PLAN-IDF` | `PARAMS (idf = WHERE …)` lowered to an empty Qdrant filter |
 | `QQL-GRPC-QUOTA` | Quotas have no public gRPC service; use REST |
 | `QQL-VALIDATION-SLICE` | `SLICE (total, index)` with `total < 1` or `index >= total` |
 | `QQL-VALIDATION-IDF` | Malformed `idf` search param at parse time |

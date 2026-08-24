@@ -342,7 +342,7 @@ impl<'a> AstLowerer<'a> {
         Ok(values)
     }
 
-    fn parse_object_key(&mut self) -> Result<Token<'a>, QqlError> {
+    pub(crate) fn parse_object_key(&mut self) -> Result<Token<'a>, QqlError> {
         let token = self.peek()?;
         if matches!(
             token.kind,

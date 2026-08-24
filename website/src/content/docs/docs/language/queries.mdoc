@@ -282,10 +282,10 @@ on Qdrant 1.19+, set a per-query IDF corpus:
 | Form | Meaning |
 |---|---|
 | `idf = 'global'` | Use the collection-wide IDF statistics |
-| `idf = {corpus: {…}}` | Restrict IDF to points matching a Qdrant filter object |
+| `idf = WHERE <filter>` | Restrict IDF to points matching that QQL filter |
 
-A malformed `idf` value fails validation with `QQL-VALIDATION-IDF`; a corpus
-object that is not a valid Qdrant filter fails planning with `QQL-PLAN-IDF`.
+A malformed `idf` value fails validation with `QQL-VALIDATION-IDF`. Isolation
+stays on statement `WHERE` / host `inject_filter`. IDF only scopes BM25 rarity.
 
 {% qqlExample title="Per-query sparse IDF corpus" %}
 ```sql
@@ -298,9 +298,15 @@ LIMIT 10;
 QUERY TEXT 'search'
 FROM docs
 USING sparse
-PARAMS (
-  idf = {corpus: {must: [{key: 'status', match: {value: 'active'}}]}}
-)
+PARAMS (idf = WHERE status = 'active')
+LIMIT 10;
+
+QUERY TEXT 'search'
+FROM docs
+USING sparse
+WHERE tenant_id = 'acme'
+SHARD 'acme'
+PARAMS (idf = WHERE tenant_id = 'acme')
 LIMIT 10;
 ```
 {% /qqlExample %}

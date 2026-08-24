@@ -134,7 +134,7 @@ Intel Mac users should disable default features and use `http-embedding` or
 
 | Feature | Edge |
 |---------|------|
-| `PARAMS (idf = 'global' \| {corpus: …})` | **Supported** (qdrant-edge 0.8) |
+| `PARAMS (idf = 'global' \| WHERE <filter>)` | **Supported** (qdrant-edge 0.8) |
 | `WHERE field MATCH PREFIX '…'` / `WHERE SLICE (total, index)` | Supported when the offline filter converter accepts them |
 | `memory` / `datatype` / keyword `prefix` on DDL | Parsed and planned; storage support follows qdrant-edge capabilities |
 | `SHOW QUOTAS` / `SET QUOTA` | **Unsupported** — cluster REST `/quotas` only → `QQL-EDGE-UNSUPPORTED-QUOTA` |
@@ -144,6 +144,11 @@ Intel Mac users should disable default features and use `http-embedding` or
 -- Sparse IDF corpus works offline (edge 0.8+)
 QUERY TEXT 'search' FROM docs USING sparse
   PARAMS (idf = 'global')
+  LIMIT 10;
+
+QUERY TEXT 'search' FROM docs USING sparse
+  WHERE tenant_id = 'acme'
+  PARAMS (idf = WHERE tenant_id = 'acme')
   LIMIT 10;
 
 -- Quotas always fail-loud offline

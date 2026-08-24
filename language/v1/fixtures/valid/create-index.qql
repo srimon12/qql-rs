@@ -6,6 +6,9 @@ CREATE INDEX ON COLLECTION docs FOR status TYPE keyword;
 -- Keyword with options
 CREATE INDEX ON COLLECTION docs FOR tags TYPE keyword WITH (is_tenant = true, on_disk = true, enable_hnsw = false);
 
+-- Keyword prefix index (Qdrant 1.19 MATCH PREFIX)
+CREATE INDEX ON COLLECTION docs FOR title TYPE keyword WITH (prefix = true);
+
 -- Integer index
 CREATE INDEX ON COLLECTION docs FOR year TYPE integer;
 

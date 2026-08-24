@@ -56,7 +56,7 @@ console.log(version, listEmbeddingModels().length);
 | `compileQuery` / `explain` / `execute` | Plan / run |
 
 Quotas, custom sharding, and `GROUP BY` require remote Qdrant. Offline sparse
-IDF works: `PARAMS (idf = 'global')`.
+IDF works: `PARAMS (idf = 'global')` or `PARAMS (idf = WHERE tenant_id = 'acme')`.
 
 ## Docs
 

@@ -2,7 +2,7 @@
 
 Native Node.js bindings via N-API (napi-rs).
 
-Language surface includes **Qdrant 1.19 / QQL 1.4** features expressible in QQL
+Language surface includes **Qdrant 1.19 / QQL 1.5** features expressible in QQL
 (`SHOW QUOTAS`, memory/`turbo4`, `MATCH PREFIX`, `SLICE`, `PARAMS (idf = …)`).
 Pass those strings to `client.execute` when the backend supports them (quotas:
 **REST only**).
@@ -78,6 +78,27 @@ const result = await client.execute(stmt);
 ```
 
 `injectFilter` does not support `!=` — use equality or rewrite the query.
+
+Sparse IDF is QQL, not an inject and not a JSON corpus. `compileQuery` lowers
+`idf = WHERE tenant_id = '…'` to Qdrant `params.idf.corpus` — do not build that
+object in JS.
+
+```js
+const { parse, bind, compileQuery, injectFilter } = require('@veristamp/nqql');
+
+const bound = bind(`
+  QUERY TEXT :q FROM sec10k USING sparse
+  WHERE tenant_id = :tenant
+  SHARD :tenant
+  PARAMS (idf = WHERE tenant_id = :tenant)
+  LIMIT 10
+`, { q: "supply chain", tenant: "honeywell" });
+
+const [stmt] = parse(bound);
+stmt.injectFilter("tenant_id", "=", "honeywell");
+const route = compileQuery(bound);
+// route.payload.params.idf.corpus.must[0].key === "tenant_id"
+```
 
 ---
 

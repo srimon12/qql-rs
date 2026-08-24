@@ -44,7 +44,7 @@ Routing field after parse: `stmt.set_shard_key(Some("acme".into()))`
 ### PARAMS (selected)
 
 Body search params: `hnsw_ef`, `exact`, `acorn`, `max_selectivity`, `quantization`,
-`idf` (`'global'` or `{corpus: {…}}` for sparse IDF, Qdrant ≥ 1.19), …  
+`idf` (`'global'` or `WHERE <filter>` for sparse IDF, Qdrant ≥ 1.19), …  
 **Request-level** (REST query string / gRPC fields): `timeout`, `consistency`.
 
 ### Filters (selected, Qdrant ≥ 1.19)

@@ -217,38 +217,13 @@
           "hnsw_ef": null,
           "idf": {
             "corpus": {
-              "Dict": [
-                [
-                  "must",
-                  {
-                    "List": [
-                      {
-                        "Dict": [
-                          [
-                            "key",
-                            {
-                              "Str": "status"
-                            }
-                          ],
-                          [
-                            "match",
-                            {
-                              "Dict": [
-                                [
-                                  "value",
-                                  {
-                                    "Str": "active"
-                                  }
-                                ]
-                              ]
-                            }
-                          ]
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              ]
+              "Compare": {
+                "field": "status",
+                "op": "Eq",
+                "value": {
+                  "Str": "active"
+                }
+              }
             }
           },
           "indexed_only": null,

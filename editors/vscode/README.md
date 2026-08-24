@@ -14,9 +14,9 @@
 
 ## Features
 
-### Language support (QQL 1.4 / Qdrant 1.19)
+### Language support (QQL 1.5 / Qdrant 1.19)
 
-Highlights and completions cover the full QQL 1.4 surface, including:
+Highlights and completions cover the full QQL 1.5 surface, including:
 
 | Feature | Example |
 |---------|---------|
@@ -24,7 +24,7 @@ Highlights and completions cover the full QQL 1.4 surface, including:
 | Memory placement | `WITH VECTOR (memory = 'cached')`, `WITH HNSW (memory = 'cold')`, `payload_memory = 'cold'` |
 | MATCH PREFIX | `WHERE title MATCH PREFIX 'Comp'` |
 | SLICE sampling | `WHERE SLICE (4, 1)` |
-| Per-query IDF | `PARAMS (idf = 'global')` or `PARAMS (idf = {corpus: {…}})` |
+| Per-query IDF | `PARAMS (idf = 'global')` or `PARAMS (idf = WHERE tenant_id = 'acme')` |
 | TurboQuant datatype | `datatype = 'turbo4'` (aliases `t4`, `f32`, `f16`, `u8`) |
 | Keyword prefix index | `CREATE INDEX … TYPE keyword WITH (prefix = true)` |
 

@@ -140,7 +140,7 @@ Syntax highlighting (TextMate grammar with 171 keywords), live diagnostics (same
 
 **5. Language specification** — `language/v1/grammar.pest`
 
-A canonical PEG spec — 688 lines, 19 statement types, 14 query expressions. The reference parser in `qql-core` is hand-written (lexer + `AstLowerer`); pest is **not** compiled into the runtime, it exists only as a test-only harness in `qql-conformance` that executes `grammar.pest` against the fixture corpus. The spec is the authority — implementations derive from it, not the other way around. Conformance fixtures: 38 valid `.qql` files (261 statements), 53 invalid cases, and 38 canonical AST snapshots, over 171 grammar keywords.
+A canonical PEG spec — 688 lines, 19 statement types, 14 query expressions. The reference parser in `qql-core` is hand-written (lexer + `AstLowerer`); pest is **not** compiled into the runtime, it exists only as a test-only harness in `qql-conformance` that executes `grammar.pest` against the fixture corpus. The spec is the authority — implementations derive from it, not the other way around. Conformance fixtures: 39 valid `.qql` files (265 statements), 56 invalid cases, and 39 canonical AST snapshots, over 171 grammar keywords.
 
 ### Published artifacts (v0.1.2)
 

@@ -2,7 +2,7 @@
 
 Native Python bindings via PyO3.
 
-Language surface includes **Qdrant 1.19 / QQL 1.4** features expressible in QQL
+Language surface includes **Qdrant 1.19 / QQL 1.5** features expressible in QQL
 (`SHOW QUOTAS`, memory/`turbo4`, `MATCH PREFIX`, `SLICE`, `PARAMS (idf = …)`).
 Those statements execute through the same `Client.execute` path as older syntax
 when the connected backend supports them (quotas: **REST only**).
@@ -43,6 +43,29 @@ result = client.execute(stmt)
 
 # Host-resolved routing after parse (same AST field as SHARD):
 # stmt.shard_key = "honeywell"
+```
+
+Sparse IDF is **not** `inject_filter` and not a JSON corpus object. Write it in
+QQL. `compile_query` / execute lower `WHERE tenant_id = '…'` to Qdrant’s
+`params.idf.corpus` filter JSON — hosts do not build that dict.
+
+```python
+from pyqql import parse, inject_filter, compile_query, bind, Client
+
+# Isolation + routing + tenant-local BM25 stats (three different layers)
+qql = """
+QUERY TEXT :q FROM sec10k USING sparse
+WHERE tenant_id = :tenant
+SHARD :tenant
+PARAMS (idf = WHERE tenant_id = :tenant)
+LIMIT 10
+"""
+bound = bind(qql, {"q": "supply chain", "tenant": "honeywell"})
+stmt = parse(bound)[0]
+inject_filter(stmt, "tenant_id", "=", "honeywell")  # still required on untrusted QQL
+route = compile_query(bound)
+# route["payload"]["params"]["idf"] ==
+#   {"corpus": {"must": [{"key": "tenant_id", "match": {"value": "honeywell"}}]}}
 ```
 
 ---

@@ -21,7 +21,7 @@
 | `memory = 'cold'\|'cached'\|'pinned'` | HNSW / VECTOR / SPARSE / QUANTIZATION / indexes; `payload_memory` is cold\|cached only |
 | `WHERE field MATCH PREFIX '…'` | Keyword prefix match (`prefix=true` index) |
 | `WHERE SLICE (total, index)` | Deterministic id-space slice (`total ≥ 1`, `index < total`) |
-| `PARAMS (idf = …)` | Sparse IDF corpus: `'global'` or `{corpus: {…filter…}}` |
+| `PARAMS (idf = …)` | Sparse IDF corpus: `'global'` or `WHERE <filter>` |
 | `datatype = 'turbo4'` | Dense TurboQuant 4-bit storage |
 | Route affinity | **Client API only** (`RestQdrant` / `GrpcQdrant::with_route_affinity`, `pyqql.Client(route_affinity=…)`, `nqql` `{ routeAffinity }`, WASM `setRouteAffinity`) — not QQL grammar |
 
