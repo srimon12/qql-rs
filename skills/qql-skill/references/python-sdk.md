@@ -285,7 +285,7 @@ result = client.execute(query)
 Substitute named (`:name`) or positional (`?`) parameters safely into queries:
 
 ```python
-from pyqql import Client, bind, bind_named, bind_positional
+from pyqql import Client, bind
 
 client = Client("http://localhost:6333")
 

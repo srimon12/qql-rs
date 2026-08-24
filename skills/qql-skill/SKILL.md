@@ -296,6 +296,7 @@ routing inside the filter object.
 QQL provides type-safe parameter binding across all SDKs:
 - **Named Placeholders**: `:name` (e.g. `:category`, `:lim`)
 - **Positional Placeholders**: `?` (sequential 1-to-1 mapping)
+- **Host DX**: one `bind(query, params)` plus `Client.execute(..., params=...)`. Dict/object → named; list/array → positional. WASM takes a JS object/array, not a JSON string. Rust keeps typed `bind_named` / `bind_positional`.
 - **Grammar Rule**: `$` is an identifier character in QQL (`$category`, `$score`). **Never** use `$name` or `$1` as placeholders — only `:name` and `?`.
 - **Token Boundaries**: Colons in compact dicts (`{a:b}`, `{'a':b}`) are preserved as key-value separators. Write `{key: :val}` to bind dict values.
 
@@ -374,7 +375,9 @@ await init();
 const client = new Client("http://localhost:6333", null);
 
 // Offline binding & tree explanation
-const bound = bind("QUERY TEXT :q FROM docs LIMIT :lim", JSON.stringify({ q: "chest pain", lim: 10 }));
+const bound = bind("QUERY TEXT :q FROM docs LIMIT :lim", { q: "chest pain", lim: 10 });
 const plan = explain(bound);
-const result = await client.execute(bound);
+const result = await client.execute("QUERY TEXT :q FROM docs LIMIT :lim", {
+  params: { q: "chest pain", lim: 10 },
+});
 ```

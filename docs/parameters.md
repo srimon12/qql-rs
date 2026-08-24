@@ -80,3 +80,29 @@ let report = executor.execute_with_positional_params(
     qql::executor::OnError::Stop,
 ).await?;
 ```
+
+### Host SDKs (Python / Node / WASM)
+
+One `bind` plus `execute(..., params=)`. Dict/object → named (`:name`); list/array → positional (`?`). Mixed styles fail with `QQL-BIND-MIXED-STYLE`. Rust keeps the typed twins above.
+
+```python
+from pyqql import Client, bind
+
+client = Client("http://localhost:6333")
+client.execute(
+    "QUERY TEXT :q FROM docs LIMIT :lim",
+    params={"q": "chest pain", "lim": 5},
+)
+bound = bind("QUERY TEXT :q FROM docs LIMIT :lim", {"q": "chest pain", "lim": 5})
+```
+
+```javascript
+const { Client, bind } = require("@veristamp/nqql");
+const client = new Client({ url: "http://localhost:6333" });
+await client.execute("QUERY TEXT :q FROM docs LIMIT :lim", {
+  params: { q: "chest pain", lim: 5 },
+});
+bind("QUERY TEXT :q FROM docs LIMIT :lim", { q: "chest pain", lim: 5 });
+```
+
+WASM `bind` takes a JS object or array (not a JSON string). The same object/array goes on `client.execute(query, { params })`.

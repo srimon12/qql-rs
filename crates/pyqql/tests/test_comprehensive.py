@@ -51,8 +51,6 @@ class TestPackageInspection(unittest.TestCase):
             "HttpEmbedder",
             "Stmt",
             "bind",
-            "bind_named",
-            "bind_positional",
             "parse",
             "is_valid",
             "inject_filter",
@@ -995,17 +993,17 @@ class TestParameterBinding(unittest.TestCase):
             "QUERY 'shoes' FROM products WHERE category = 'sneakers' AND in_stock = true",
         )
 
-    def test_k3_bind_named_function(self):
+    def test_k3_bind_named_again(self):
         q = "QUERY 'shoes' FROM products WHERE category = :cat"
-        res = pyqql.bind_named(q, {"cat": "boots"})
+        res = pyqql.bind(q, {"cat": "boots"})
         self.assertEqual(
             res,
             "QUERY 'shoes' FROM products WHERE category = 'boots'",
         )
 
-    def test_k4_bind_positional_function(self):
+    def test_k4_bind_positional_again(self):
         q = "QUERY 'shoes' FROM products WHERE category = ?"
-        res = pyqql.bind_positional(q, ["boots"])
+        res = pyqql.bind(q, ["boots"])
         self.assertEqual(
             res,
             "QUERY 'shoes' FROM products WHERE category = 'boots'",

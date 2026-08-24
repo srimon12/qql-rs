@@ -272,6 +272,10 @@ let stmts = Parser::parse_all(r#"
 
 ## 6. Parameter Binding & Prepared Statements
 
+Rust keeps typed twins (`bind_named` / `bind_positional`, `execute_with_params` /
+`execute_with_positional_params`). Python, Node, and WASM collapse those into
+one `bind(query, params)` plus `execute(..., params=...)`.
+
 ```rust
 use std::collections::HashMap;
 use qql::executor::{Executor, OnError};

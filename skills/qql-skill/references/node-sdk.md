@@ -197,7 +197,7 @@ console.log(stmt.toObject());
 ## 6. Parameter Binding & Prepared Queries
 
 ```js
-const { Client, bind, bindNamed, bindPositional } = require('@veristamp/nqql');
+const { Client, bind } = require('@veristamp/nqql');
 const client = new Client({ url: "http://localhost:6333" });
 
 // Execute with named parameters (:name)

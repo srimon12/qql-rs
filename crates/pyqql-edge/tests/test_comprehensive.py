@@ -24,8 +24,6 @@ class TestPackageInspection(unittest.TestCase):
             "Client",
             "Stmt",
             "bind",
-            "bind_named",
-            "bind_positional",
             "compile_query",
             "execute",
             "execute_async",
@@ -220,7 +218,7 @@ class TestParameterBinding(unittest.TestCase):
 
     def test_e3_bind_named_fn(self):
         q = "QUERY 'shoes' FROM products WHERE category = :cat"
-        res = pyqql_edge.bind_named(q, {"cat": "boots"})
+        res = pyqql_edge.bind(q, {"cat": "boots"})
         self.assertEqual(
             res,
             "QUERY 'shoes' FROM products WHERE category = 'boots'",
@@ -228,7 +226,7 @@ class TestParameterBinding(unittest.TestCase):
 
     def test_e4_bind_positional_fn(self):
         q = "QUERY 'shoes' FROM products WHERE category = ?"
-        res = pyqql_edge.bind_positional(q, ["boots"])
+        res = pyqql_edge.bind(q, ["boots"])
         self.assertEqual(
             res,
             "QUERY 'shoes' FROM products WHERE category = 'boots'",

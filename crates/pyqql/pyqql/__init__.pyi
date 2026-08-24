@@ -36,12 +36,14 @@ class Client:
         self,
         query: Union[str, Stmt, List[Union[str, Stmt]]],
         *,
+        params: Optional[Union[Dict[str, Any], List[Any]]] = None,
         on_error: str = "stop",
     ) -> Dict[str, Any]: ...
     def execute_async(
         self,
         query: Union[str, Stmt, List[Union[str, Stmt]]],
         *,
+        params: Optional[Union[Dict[str, Any], List[Any]]] = None,
         on_error: str = "stop",
     ) -> Dict[str, Any]: ...
     def explain(self, query: Union[str, Stmt]) -> Dict[str, Any]: ...
@@ -56,9 +58,13 @@ def explain(query: Union[str, Stmt]) -> Dict[str, Any]: ...
 def compile_query(query: str) -> Dict[str, Any]: ...
 def tokenize(input: str) -> List[Dict[str, Any]]: ...
 def inject_filter(query: Union[str, Stmt], field: str, op: str, value: Any) -> Stmt: ...
+def bind(
+    query: str, params: Optional[Union[Dict[str, Any], List[Any]]] = None
+) -> str: ...
 def execute(
     query: Query,
     *,
+    params: Optional[Union[Dict[str, Any], List[Any]]] = None,
     url: str = "http://localhost:6333",
     api_key: Optional[str] = None,
     use_grpc: bool = False,
@@ -69,6 +75,7 @@ def execute(
 def execute_async(
     query: Query,
     *,
+    params: Optional[Union[Dict[str, Any], List[Any]]] = None,
     url: str = "http://localhost:6333",
     api_key: Optional[str] = None,
     use_grpc: bool = False,

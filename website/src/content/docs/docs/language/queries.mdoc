@@ -321,7 +321,7 @@ QQL queries support parameterized templates with type-safe client-side binding:
 In QQL, `$` is a first-class identifier character (e.g. `$score`, `$category`, `$1`). To guarantee that `$`-prefixed identifiers and formula variables are never accidentally overwritten, parameter placeholders exclusively use `:name` and `?`.
 {% /aside %}
 
-When parameters are bound at runtime via the SDKs (`bind`, `bind_named`, or `Client.execute(query, params=...)`), the template evaluates to a fully-formed, executable QQL statement:
+When parameters are bound at runtime via the SDKs (`bind` or `Client.execute(..., params=...)`), the template evaluates to a fully-formed, executable QQL statement:
 
 {% qqlExample title="Bound query execution" %}
 ```sql

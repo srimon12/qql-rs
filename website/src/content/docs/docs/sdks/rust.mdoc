@@ -62,7 +62,7 @@ println!("{} operations succeeded", report.succeeded);
 
 ## Parameter binding & prepared queries
 
-Use `execute_with_params` or `execute_with_positional_params` on `Executor`, or `qql_core::params` for standalone binding:
+Rust keeps typed twins: `execute_with_params` / `execute_with_positional_params` on `Executor`, and `qql_core::params::{bind_named, bind_positional}` for standalone binding. Python, Node, and WASM collapse those into one `bind(query, params)` plus `execute(..., params=...)`.
 
 ```rust
 use std::collections::HashMap;

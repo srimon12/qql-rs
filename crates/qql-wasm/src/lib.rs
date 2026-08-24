@@ -18,6 +18,7 @@ use wasm_bindgen::prelude::*;
 const EXECUTION_TYPES: &str = r#"
 export interface ExecuteOptions {
   onError?: "stop" | "continue";
+  params?: Record<string, unknown> | unknown[];
 }
 
 export interface ExecResponse {
@@ -145,7 +146,7 @@ enum WasmOnError {
 }
 
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
-fn parse_on_error(options: Option<JsValue>) -> Result<WasmOnError, JsValue> {
+fn parse_on_error(options: Option<&JsValue>) -> Result<WasmOnError, JsValue> {
     let Some(options) = options else {
         return Ok(WasmOnError::Stop);
     };
@@ -155,7 +156,7 @@ fn parse_on_error(options: Option<JsValue>) -> Result<WasmOnError, JsValue> {
     if !options.is_object() {
         return Err(JsValue::from_str("options must be an object"));
     }
-    let value = js_sys::Reflect::get(&options, &JsValue::from_str("onError"))?;
+    let value = js_sys::Reflect::get(options, &JsValue::from_str("onError"))?;
     if value.is_undefined() {
         return Ok(WasmOnError::Stop);
     }
@@ -165,6 +166,59 @@ fn parse_on_error(options: Option<JsValue>) -> Result<WasmOnError, JsValue> {
         _ => Err(JsValue::from_str(
             "options.onError must be 'stop' or 'continue'",
         )),
+    }
+}
+
+#[cfg(all(feature = "client", target_arch = "wasm32"))]
+fn options_params(options: Option<&JsValue>) -> Result<Option<serde_json::Value>, JsValue> {
+    let Some(options) = options else {
+        return Ok(None);
+    };
+    if options.is_null() || options.is_undefined() || !options.is_object() {
+        return Ok(None);
+    }
+    let value = js_sys::Reflect::get(options, &JsValue::from_str("params"))?;
+    if value.is_undefined() || value.is_null() {
+        return Ok(None);
+    }
+    let parsed: serde_json::Value = serde_wasm_bindgen::from_value(value)
+        .map_err(|e| JsValue::from_str(&format!("invalid options.params: {e}")))?;
+    Ok(Some(parsed))
+}
+
+fn bind_json_params(query: &str, params: &serde_json::Value) -> Result<String, JsValue> {
+    match params {
+        serde_json::Value::Object(obj) => {
+            let mut map = std::collections::HashMap::new();
+            for (k, v) in obj {
+                let val = ast::Value::from_json(v.clone())
+                    .map_err(|e| JsValue::from_str(&e.to_string()))?;
+                map.insert(k.clone(), val);
+            }
+            qql_core::params::bind_named(query, |k| map.get(k).cloned())
+                .map_err(|e| JsValue::from_str(&e.to_string()))
+        }
+        serde_json::Value::Array(arr) => {
+            let items: Vec<ast::Value> = arr
+                .iter()
+                .cloned()
+                .map(ast::Value::from_json)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            qql_core::params::bind_positional(query, &items)
+                .map_err(|e| JsValue::from_str(&e.to_string()))
+        }
+        _ => Err(JsValue::from_str(
+            "params must be an object for :name or an array for ?",
+        )),
+    }
+}
+
+#[cfg(all(feature = "client", target_arch = "wasm32"))]
+fn maybe_bind(query: &str, params: Option<&serde_json::Value>) -> Result<String, JsValue> {
+    match params {
+        Some(params) => bind_json_params(query, params),
+        None => Ok(query.to_string()),
     }
 }
 
@@ -492,35 +546,15 @@ pub fn format_query(input: &str) -> Result<String, JsValue> {
     qql_core::fmt::format(input).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
-/// Substitute named (:name) or positional (?) parameters into a query string via JSON.
+/// Substitute `:name` (object) or `?` (array) placeholders into a query string.
 #[wasm_bindgen]
-pub fn bind(query: &str, params_json: &str) -> Result<String, JsValue> {
-    let parsed: serde_json::Value =
-        serde_json::from_str(params_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    match parsed {
-        serde_json::Value::Object(obj) => {
-            let mut map = std::collections::HashMap::new();
-            for (k, v) in obj {
-                let val =
-                    ast::Value::from_json(v).map_err(|e| JsValue::from_str(&e.to_string()))?;
-                map.insert(k, val);
-            }
-            qql_core::params::bind_named(query, |k| map.get(k).cloned())
-                .map_err(|e| JsValue::from_str(&e.to_string()))
-        }
-        serde_json::Value::Array(arr) => {
-            let items: Vec<ast::Value> = arr
-                .into_iter()
-                .map(ast::Value::from_json)
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| JsValue::from_str(&e.to_string()))?;
-            qql_core::params::bind_positional(query, &items)
-                .map_err(|e| JsValue::from_str(&e.to_string()))
-        }
-        _ => Err(JsValue::from_str(
-            "params JSON must be an object for :name or an array for ?",
-        )),
-    }
+pub fn bind(
+    query: &str,
+    #[wasm_bindgen(unchecked_param_type = "Record<string, unknown> | unknown[]")] params: JsValue,
+) -> Result<String, JsValue> {
+    let parsed: serde_json::Value = serde_wasm_bindgen::from_value(params)
+        .map_err(|e| JsValue::from_str(&format!("invalid bind params: {e}")))?;
+    bind_json_params(query, &parsed)
 }
 
 // ── Client: browser fetch-based execute with embedding ────────────
@@ -840,7 +874,8 @@ impl Client {
         #[wasm_bindgen(unchecked_param_type = "string | string[]")] query: JsValue,
         #[wasm_bindgen(unchecked_optional_param_type = "ExecuteOptions")] options: Option<JsValue>,
     ) -> Result<JsValue, JsValue> {
-        let on_error = parse_on_error(options)?;
+        let on_error = parse_on_error(options.as_ref())?;
+        let params = options_params(options.as_ref())?;
         if js_sys::Array::is_array(&query) {
             let arr = js_sys::Array::from(&query);
             let len = arr.length() as usize;
@@ -856,6 +891,7 @@ impl Client {
                         item.js_typeof()
                     ))
                 })?;
+                let s = maybe_bind(&s, params.as_ref())?;
                 match self.execute_script(&s, on_error).await {
                     Ok(report) => {
                         succeeded += report.succeeded;
@@ -886,6 +922,7 @@ impl Client {
         }
 
         if let Some(s) = query.as_string() {
+            let s = maybe_bind(&s, params.as_ref())?;
             let report = self.execute_script(&s, on_error).await?;
             return to_js_value(&report);
         }

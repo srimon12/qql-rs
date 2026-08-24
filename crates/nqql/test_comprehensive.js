@@ -100,11 +100,9 @@ test('exports: explainStmt', () => assert.strictEqual(typeof nqql.explainStmt, '
 test('exports: execute', () => assert.strictEqual(typeof nqql.execute, 'function'));
 test('exports: executeStmt', () => assert.strictEqual(typeof nqql.executeStmt, 'function'));
 test('exports: bind', () => assert.strictEqual(typeof nqql.bind, 'function'));
-test('exports: bindNamed', () => assert.strictEqual(typeof nqql.bindNamed, 'function'));
-test('exports: bindPositional', () => assert.strictEqual(typeof nqql.bindPositional, 'function'));
 
 // Unknown exports check
-const knownKeys = ['Client','HttpEmbedder','Stmt','bind','bindNamed','bindPositional','compileQuery','execute','executeStmt',
+const knownKeys = ['Client','HttpEmbedder','Stmt','bind','compileQuery','execute','executeStmt',
   'explain','explainStmt','injectFilter','isValid','parse','parseJson','tokenize', 'version', '__version__'];
 const actualKeys = Object.keys(nqql).sort();
 test('no extra exports', () => {
@@ -867,15 +865,15 @@ async function runE2E() {
     assert.strictEqual(res, "QUERY 'shoes' FROM products WHERE category = 'sneakers' AND in_stock = true");
   });
 
-  test('bindNamed helper', () => {
+  test('bind named again', () => {
     const q = "QUERY 'shoes' FROM products WHERE category = :cat";
-    const res = nqql.bindNamed(q, { cat: "boots" });
+    const res = nqql.bind(q, { cat: "boots" });
     assert.strictEqual(res, "QUERY 'shoes' FROM products WHERE category = 'boots'");
   });
 
-  test('bindPositional helper', () => {
+  test('bind positional again', () => {
     const q = "QUERY 'shoes' FROM products WHERE category = ?";
-    const res = nqql.bindPositional(q, ["boots"]);
+    const res = nqql.bind(q, ["boots"]);
     assert.strictEqual(res, "QUERY 'shoes' FROM products WHERE category = 'boots'");
   });
 
@@ -885,12 +883,13 @@ async function runE2E() {
     assert.strictEqual(res, "QUERY 'shoes' FROM products WHERE $category = 'boots' AND $1 = 42");
   });
 
-  test('bindNamed rejects arrays', () => {
-    assert.throws(() => nqql.bindNamed("WHERE x = :x", [1]), /bind_named expects a JSON object/);
+  test('bind rejects mixed styles', () => {
+    assert.throws(() => nqql.bind("WHERE x = :x", [1]), /named placeholder|MIXED-STYLE/);
+    assert.throws(() => nqql.bind("WHERE x = ?", { x: 1 }), /positional placeholder|MIXED-STYLE/);
   });
 
-  test('bindPositional rejects objects', () => {
-    assert.throws(() => nqql.bindPositional("WHERE x = ?", { x: 1 }), /bind_positional expects a JSON array/);
+  test('bind rejects scalar params', () => {
+    assert.throws(() => nqql.bind("WHERE x = :x", "oops"), /params must be an object/);
   });
 
   // ============================================================================

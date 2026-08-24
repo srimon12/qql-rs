@@ -115,7 +115,9 @@ embedder when available.
 
 `execute()` accepts a string, a semicolon-delimited script, or an array of
 strings. Pass `{ onError: "continue" }` to collect per-statement failures; the
-default is `"stop"`. Adjacent compatible operations use Qdrant batch endpoints.
+default is `"stop"`. Pass `{ params }` as an object for `:name` or an array for
+`?` — same shape as `bind(query, params)`, no `JSON.stringify`. Adjacent
+compatible operations use Qdrant batch endpoints.
 Every execution path returns an `ExecutionReport` object with `ok`, `results`,
 `succeeded`, and `failed` fields.
 
@@ -124,6 +126,11 @@ Every execution path returns an `ExecutionReport` object with `ok`, `results`,
 const result = await client.execute(
     "QUERY 'vector databases' FROM docs USING dense LIMIT 10"
 );
+
+// Named / positional params (object or array — not a JSON string)
+await client.execute("QUERY TEXT :q FROM docs LIMIT :lim", {
+    params: { q: "vector databases", lim: 10 },
+});
 
 // Multi-statement (semicolons auto-detected)
 const schemaResult = await client.execute(`
@@ -184,7 +191,7 @@ const bound = bind(`
   SHARD :tenant
   PARAMS (idf = WHERE tenant_id = :tenant)
   LIMIT 10
-`, JSON.stringify({ q: "supply chain", tenant: "acme" }));
+`, { q: "supply chain", tenant: "acme" });
 
 const route = compile(bound);
 // route.payload.params.idf.corpus.must[0].key === "tenant_id"
@@ -258,14 +265,14 @@ await init();
 // Substitute named parameters (:name)
 const boundNamed = bind(
     "QUERY TEXT :q FROM docs WHERE category = :cat LIMIT :lim",
-    JSON.stringify({ q: "chest pain", cat: "medical", lim: 10 })
+    { q: "chest pain", cat: "medical", lim: 10 }
 );
 console.log(boundNamed);
 
 // Substitute positional parameters (?)
 const boundPos = bind(
     "QUERY TEXT ? FROM docs WHERE category = ? LIMIT ?",
-    JSON.stringify(["chest pain", "medical", 10])
+    ["chest pain", "medical", 10]
 );
 console.log(boundPos);
 
@@ -294,6 +301,6 @@ inject_filter("QUERY 'x'", "tenant_id", "=", "acme");   // Inject filter (string
 tokenize("QUERY 'x'");                                   // Lex to tokens array
 compile("QUERY 'x' FROM docs LIMIT 5");                  // Compile to a route object
 explain("QUERY 'x' FROM docs LIMIT 5");                  // Hierarchical ASCII plan tree
-bind("QUERY :q FROM docs", JSON.stringify({ q: "test" })); // Parameter substitution
+bind("QUERY :q FROM docs", { q: "test" }); // Parameter substitution
 formatQuery("query 'x' from docs");                      // Canonical formatter
 ```

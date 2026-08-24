@@ -60,7 +60,8 @@ console.log(version, isValid("SHOW COLLECTIONS"), compileQuery("SHOW COLLECTIONS
 | `injectFilter` / `stmt.injectFilter` | Isolation |
 | `stmt.shardKey` | Same as QQL `SHARD '…'` (no `injectShardKey`) |
 | `compileQuery` / `explain` / `explainStmt` | Offline |
-| `execute` / `executeStmt` | Free-function execute |
+| `bind(query, params)` | Substitute `:name` (object) or `?` (array) |
+| `execute` / `executeStmt` | Free-function execute (`options.params` same as `bind`) |
 
 ### Isolation vs routing
 

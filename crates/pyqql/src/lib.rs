@@ -418,7 +418,7 @@ fn execute_async<'py>(
     client.execute_async(py, query, params, on_error)
 }
 
-/// Substitute named (:name) or positional (?) parameters into a query string.
+/// Substitute `:name` (dict) or `?` (list) placeholders into a query string.
 #[pyfunction]
 #[pyo3(signature = (query, params=None))]
 fn bind(query: &str, params: Option<&Bound<'_, PyAny>>) -> PyResult<String> {
@@ -426,18 +426,6 @@ fn bind(query: &str, params: Option<&Bound<'_, PyAny>>) -> PyResult<String> {
         Some(p) => bind_py_params(query, p),
         None => Ok(query.to_string()),
     }
-}
-
-/// Substitute named parameters (:name) using a dictionary.
-#[pyfunction]
-fn bind_named(query: &str, params: &Bound<'_, PyDict>) -> PyResult<String> {
-    bind_py_params(query, params.as_any())
-}
-
-/// Substitute positional parameters (?) using a list.
-#[pyfunction]
-fn bind_positional(query: &str, params: &Bound<'_, PyList>) -> PyResult<String> {
-    bind_py_params(query, params.as_any())
 }
 
 fn bind_py_params(query: &str, params: &Bound<'_, PyAny>) -> PyResult<String> {
@@ -523,8 +511,6 @@ fn pyqql(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(execute, m)?)?;
     m.add_function(wrap_pyfunction!(execute_async, m)?)?;
     m.add_function(wrap_pyfunction!(bind, m)?)?;
-    m.add_function(wrap_pyfunction!(bind_named, m)?)?;
-    m.add_function(wrap_pyfunction!(bind_positional, m)?)?;
     m.add_function(wrap_pyfunction!(explain, m)?)?;
     m.add_function(wrap_pyfunction!(parse, m)?)?;
     m.add_function(wrap_pyfunction!(parse_json, m)?)?;
