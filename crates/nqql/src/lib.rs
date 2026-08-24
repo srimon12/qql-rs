@@ -519,31 +519,9 @@ fn bind_json_params(query: &str, params: &serde_json::Value) -> napi::Result<Str
     }
 }
 
-/// Substitute named (:name) or positional (?) parameters into a query string.
+/// Substitute `:name` (object) or `?` (array) placeholders into a query string.
 #[napi(ts_args_type = "query: string, params: Record<string, any> | any[]")]
 pub fn bind(query: String, params: serde_json::Value) -> napi::Result<String> {
-    bind_json_params(&query, &params)
-}
-
-/// Substitute named parameters (:name) using an object.
-#[napi(ts_args_type = "query: string, params: Record<string, any>")]
-pub fn bind_named(query: String, params: serde_json::Value) -> napi::Result<String> {
-    if !params.is_object() {
-        return Err(napi::Error::from_reason(
-            "bind_named expects a JSON object of named parameters",
-        ));
-    }
-    bind_json_params(&query, &params)
-}
-
-/// Substitute positional parameters (?) using an array.
-#[napi(ts_args_type = "query: string, params: any[]")]
-pub fn bind_positional(query: String, params: serde_json::Value) -> napi::Result<String> {
-    if !params.is_array() {
-        return Err(napi::Error::from_reason(
-            "bind_positional expects a JSON array of positional parameters",
-        ));
-    }
     bind_json_params(&query, &params)
 }
 

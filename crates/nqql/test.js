@@ -228,7 +228,7 @@ assert.strictEqual(
   boundNamed,
   "QUERY 'shoes' FROM products WHERE category = 'sneakers' AND price < 100",
 );
-const boundNamedFn = nqql.bindNamed(qNamed, { cat: "boots", max_p: 50 });
+const boundNamedFn = nqql.bind(qNamed, { cat: "boots", max_p: 50 });
 assert.strictEqual(
   boundNamedFn,
   "QUERY 'shoes' FROM products WHERE category = 'boots' AND price < 50",
@@ -240,7 +240,7 @@ assert.strictEqual(
   boundPos,
   "QUERY 'shoes' FROM products WHERE category = 'sneakers' AND in_stock = true",
 );
-const boundPosFn = nqql.bindPositional(qPos, ["boots", false]);
+const boundPosFn = nqql.bind(qPos, ["boots", false]);
 assert.strictEqual(
   boundPosFn,
   "QUERY 'shoes' FROM products WHERE category = 'boots' AND in_stock = false",
@@ -257,8 +257,8 @@ assert.strictEqual(
 );
 
 // Shape validation tests
-assert.throws(() => nqql.bindNamed("WHERE x = :x", [1]), /bind_named expects a JSON object/);
-assert.throws(() => nqql.bindPositional("WHERE x = ?", { x: 1 }), /bind_positional expects a JSON array/);
+assert.throws(() => nqql.bind("WHERE x = :x", [1]), /named placeholder|MIXED-STYLE/);
+assert.throws(() => nqql.bind("WHERE x = ?", { x: 1 }), /positional placeholder|MIXED-STYLE/);
 
 async function testAsyncErrors() {
   await assert.rejects(

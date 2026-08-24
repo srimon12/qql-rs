@@ -319,7 +319,7 @@ class TestEdgeExecutor(unittest.TestCase):
             bound,
             "QUERY 'shoes' FROM products WHERE category = 'sneakers' AND price < 100",
         )
-        bound_named = pyqql_edge.bind_named(q, {"cat": "boots", "max_p": 50})
+        bound_named = pyqql_edge.bind(q, {"cat": "boots", "max_p": 50})
         self.assertEqual(
             bound_named,
             "QUERY 'shoes' FROM products WHERE category = 'boots' AND price < 50",
@@ -332,7 +332,7 @@ class TestEdgeExecutor(unittest.TestCase):
             bound,
             "QUERY 'shoes' FROM products WHERE category = 'sneakers' AND in_stock = true",
         )
-        bound_pos = pyqql_edge.bind_positional(q, ["boots", False])
+        bound_pos = pyqql_edge.bind(q, ["boots", False])
         self.assertEqual(
             bound_pos,
             "QUERY 'shoes' FROM products WHERE category = 'boots' AND in_stock = false",
@@ -358,9 +358,9 @@ class TestEdgeExecutor(unittest.TestCase):
 
     def test_bind_mixed_style_error(self):
         with self.assertRaises(ValueError):
-            pyqql_edge.bind_named("WHERE x = ?", {"x": 1})
+            pyqql_edge.bind("WHERE x = ?", {"x": 1})
         with self.assertRaises(ValueError):
-            pyqql_edge.bind_positional("WHERE x = :name", [1])
+            pyqql_edge.bind("WHERE x = :name", [1])
 
 
 if __name__ == "__main__":

@@ -155,22 +155,10 @@ export function explain(query: string): string;
 
 export function explainStmt(stmt: Stmt): string;
 
-/** Substitute named (:name) or positional (?) parameters into a query string. */
+/** Substitute `:name` (object) or `?` (array) placeholders into a query string. */
 export function bind(
   query: string,
   params: Record<string, unknown> | unknown[],
-): string;
-
-/** Substitute named parameters (:name) using an object. */
-export function bindNamed(
-  query: string,
-  params: Record<string, unknown>,
-): string;
-
-/** Substitute positional parameters (?) using an array. */
-export function bindPositional(
-  query: string,
-  params: unknown[],
 ): string;
 
 /**

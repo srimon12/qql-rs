@@ -446,18 +446,6 @@ fn bind(query: &str, params: Option<&Bound<'_, PyAny>>) -> PyResult<String> {
     }
 }
 
-/// Substitute named parameters (:name) using a dictionary.
-#[pyfunction]
-fn bind_named(query: &str, params: &Bound<'_, PyDict>) -> PyResult<String> {
-    bind_py_params(query, params.as_any())
-}
-
-/// Substitute positional parameters (?) using a list.
-#[pyfunction]
-fn bind_positional(query: &str, params: &Bound<'_, PyList>) -> PyResult<String> {
-    bind_py_params(query, params.as_any())
-}
-
 pub(crate) fn bind_py_params(query: &str, params: &Bound<'_, PyAny>) -> PyResult<String> {
     if params.is_none() {
         return Ok(query.to_string());
@@ -509,8 +497,6 @@ fn pyqql_edge(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     #[cfg(feature = "http-embedding")]
     m.add_function(wrap_pyfunction!(http_executor, m)?)?;
     m.add_function(wrap_pyfunction!(bind, m)?)?;
-    m.add_function(wrap_pyfunction!(bind_named, m)?)?;
-    m.add_function(wrap_pyfunction!(bind_positional, m)?)?;
     m.add_function(wrap_pyfunction!(explain, m)?)?;
     m.add_function(wrap_pyfunction!(parse, m)?)?;
     m.add_function(wrap_pyfunction!(parse_json, m)?)?;

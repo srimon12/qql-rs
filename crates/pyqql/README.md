@@ -54,7 +54,8 @@ client.execute(stmt)
 | `inject_filter(query\|Stmt, field, op, value)` | Host isolation (AST) |
 | `Stmt.shard_key` | Same field as QQL `SHARD '…'` (get/set; no `inject_shard_key`) |
 | `compile_query` / `explain` | Offline plan / REST projection |
-| `execute` / `execute_async` | One-shot free functions |
+| `bind(query, params)` | Substitute `:name` (dict) or `?` (list) |
+| `execute` / `execute_async` | One-shot free functions (`params=` same as `bind`) |
 
 ### `inject_filter` operators
 

@@ -303,14 +303,6 @@ function bind(query, params) {
   return callNative(() => nativeBinding.bind(query, params));
 }
 
-function bindNamed(query, params) {
-  return callNative(() => nativeBinding.bindNamed(query, params));
-}
-
-function bindPositional(query, params) {
-  return callNative(() => nativeBinding.bindPositional(query, params));
-}
-
 module.exports = {
   parse,
   parseJson,
@@ -321,8 +313,6 @@ module.exports = {
   explain,
   explainStmt,
   bind,
-  bindNamed,
-  bindPositional,
   execute,
   executeStmt,
   localExecutor,
