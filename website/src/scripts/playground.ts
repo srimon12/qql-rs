@@ -34,7 +34,7 @@ import {
 } from "./playground-types";
 
 const SETTINGS_KEY = "qql-playground.settings.v1";
-const POLICY_KEY = "qql-playground.policy.v1";
+const POLICY_KEY = "qql-playground.policy.v2";
 const WORKSPACE_KEY = "qql-playground.workspace.v1";
 const INSPECTOR_TAB_KEY = "qql-playground.inspector-tab.v1";
 const ANALYSIS_DELAY_MS = 90;
@@ -87,6 +87,11 @@ function saveSession(key: string, value: string): void {
   } catch {
     // Private browsing may deny storage; the playground remains usable.
   }
+}
+
+function applyRuntimePolicy(statement: Stmt): void {
+  statement.injectFilter(policy.field, policy.op, policyValue(policy));
+  if (policy.shardKey.trim()) statement.shardKey = policy.shardKey.trim();
 }
 
 function policyValue(policy: RuntimePolicy): string | number | boolean {
@@ -191,7 +196,8 @@ const exportButton = required<HTMLButtonElement>("[data-open-export]");
 const validationBadge = required<HTMLElement>("[data-validation-badge]");
 const analysisSummary = required<HTMLElement>("[data-analysis-summary]");
 const runtimeStatus = required<HTMLElement>("[data-runtime-status]");
-const connectionSummary = required<HTMLElement>("[data-connection-summary]");
+const runtimeDot = required<HTMLElement>("[data-runtime-dot]");
+const connectionValue = required<HTMLElement>("[data-connection-value]");
 const activeFixture = required<HTMLElement>("[data-active-fixture]");
 const statementSelect = required<HTMLSelectElement>("[data-statement-select]");
 const planEmpty = required<HTMLElement>("[data-empty-plan]");
@@ -200,7 +206,12 @@ const routeMethod = required<HTMLElement>("[data-route-method]");
 const routePath = required<HTMLElement>("[data-route-path]");
 const routeType = required<HTMLElement>("[data-route-type]");
 const routePolicy = required<HTMLElement>("[data-route-policy]");
+const routesSection = required<HTMLElement>("[data-routes-section]");
+const routesList = required<HTMLElement>("[data-routes-list]");
+const routesCount = required<HTMLElement>("[data-routes-count]");
 const policyDot = required<HTMLElement>("[data-policy-dot]");
+const policyChip = required<HTMLButtonElement>("[data-policy-chip]");
+const runLabel = required<HTMLElement>("[data-run-label]");
 const toastRegion = required<HTMLElement>("[data-toast-region]");
 const embedStatus = required<HTMLElement>("[data-embed-status]");
 const editorLoading = required<HTMLElement>("[data-editor-loading]");
@@ -232,8 +243,20 @@ function toast(message: string, tone: "success" | "error" = "success"): void {
   window.setTimeout(() => item.remove(), 3600);
 }
 
-function setRuntime(message: string): void {
+function setRuntime(message: string, tone: "idle" | "ready" | "failed" = "idle"): void {
   runtimeStatus.textContent = message;
+  runtimeDot.classList.remove("is-ready", "is-failed");
+  if (tone === "ready") runtimeDot.classList.add("is-ready");
+  if (tone === "failed") runtimeDot.classList.add("is-failed");
+}
+
+/** Show "Ctrl" instead of "⌘" in kbd hints when the host is not Apple hardware. */
+function applyPlatformKeyHints(): void {
+  const isApple = /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent);
+  if (isApple) return;
+  for (const kbd of all<HTMLElement>("[data-kbd]")) {
+    kbd.textContent = (kbd.textContent ?? "").replace("⌘", "Ctrl ");
+  }
 }
 
 function setEditorLoading(message: string | null): void {
@@ -242,14 +265,37 @@ function setEditorLoading(message: string | null): void {
   editorHost.setAttribute("aria-busy", String(message != null));
 }
 
+function connectionHost(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return parsed.host || url;
+  } catch {
+    return url.replace(/^https?:\/\//, "");
+  }
+}
+
 function updateConnectionSummary(): void {
   const embedding =
     settings.embedProvider === "browser"
-      ? "browser MiniLM"
+      ? "MiniLM"
       : settings.embedProvider === "http"
         ? settings.embedModel || "HTTP embeddings"
         : "no embedder";
-  connectionSummary.textContent = `${settings.qdrantUrl} · ${embedding}`;
+  const summary = `${connectionHost(settings.qdrantUrl)} · ${embedding}`;
+  connectionValue.textContent = summary;
+  connectionValue.parentElement?.setAttribute(
+    "title",
+    `Edit connection (${settings.qdrantUrl}, ${embedding})`,
+  );
+}
+
+function syncPolicyChip(): void {
+  policyDot.classList.toggle("is-active", policy.enabled);
+  policyChip.hidden = !policy.enabled;
+  const value = required<HTMLElement>("[data-policy-chip-value]");
+  value.textContent = policy.enabled
+    ? `${policy.field} ${policy.op} ${policy.value}`
+    : "";
 }
 
 function releaseRetiredClients(): void {
@@ -310,12 +356,7 @@ function analyzeWithPolicy(source: string): PlaygroundAnalysis {
       let statement: Stmt | null = null;
       try {
         statement = new Stmt(source);
-        statement.injectFilter(
-          policy.field,
-          policy.op,
-          policyValue(policy),
-        );
-        if (policy.shardKey.trim()) statement.shardKey = policy.shardKey.trim();
+        applyRuntimePolicy(statement);
         effectiveAst = [statement.toObject()];
         effectiveRoutes = [statement.compileRoute()];
       } catch (error) {
@@ -343,10 +384,11 @@ function currentDiagnostic(): Diagnostic[] {
   if (!analysis) return [];
   const { source, result, policyError } = analysis;
   if (policyError) {
+    const firstLine = source.indexOf("\n");
     return [
       {
         from: 0,
-        to: Math.max(0, source.length),
+        to: Math.max(1, firstLine === -1 ? Math.min(source.length, 1) : firstLine),
         severity: "error",
         message: policyError,
       },
@@ -408,7 +450,54 @@ function renderPlan(): void {
   routeMethod.textContent = route.method;
   routePath.textContent = route.path;
   routeType.textContent = route.stmt_type;
-  routePolicy.textContent = policy.enabled ? "Trusted predicate injected" : "Source only";
+  routePolicy.textContent = policy.enabled
+    ? "Trusted predicate injected"
+    : "Source only";
+}
+
+function selectStatement(index: number): void {
+  state.selectedStatement = index;
+  statementSelect.value = String(index);
+  renderPlan();
+  renderOutputs();
+  renderRoutes();
+}
+
+function renderRoutes(): void {
+  const routes = state.analysis?.effectiveRoutes ?? [];
+  routesSection.hidden = routes.length === 0;
+  routesCount.textContent = `${routes.length} ${routes.length === 1 ? "statement" : "statements"}`;
+  routesList.replaceChildren();
+
+  routes.forEach((route, index) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "route-row";
+    item.setAttribute("role", "option");
+    item.setAttribute(
+      "aria-selected",
+      String(index === state.selectedStatement),
+    );
+    item.setAttribute("aria-current", String(index === state.selectedStatement));
+    item.dataset.routeIndex = String(index);
+
+    const indexLabel = document.createElement("span");
+    indexLabel.className = "route-row__index";
+    indexLabel.textContent = String(index + 1);
+    const typeLabel = document.createElement("span");
+    typeLabel.className = "route-row__type";
+    typeLabel.textContent = route.stmt_type;
+    const methodLabel = document.createElement("span");
+    methodLabel.className = "route-row__method";
+    methodLabel.textContent = route.method;
+    const pathLabel = document.createElement("span");
+    pathLabel.className = "route-row__path";
+    pathLabel.textContent = route.path;
+
+    item.append(indexLabel, typeLabel, methodLabel, pathLabel);
+    item.addEventListener("click", () => selectStatement(index));
+    routesList.append(item);
+  });
 }
 
 function renderOutputs(): void {
@@ -468,7 +557,7 @@ function renderValidation(): void {
     validationBadge.innerHTML = '<span class="status-dot"></span>Valid QQL';
     analysisSummary.textContent = `${analysis.result.statements_count} ${
       analysis.result.statements_count === 1 ? "statement" : "statements"
-    } · ${analysis.result.tokens.length} tokens · ${state.metrics?.parseMs.toFixed(2)} ms`;
+    }, ${analysis.result.tokens.length} tokens, ${state.metrics?.parseMs.toFixed(2)} ms`;
   } else {
     validationBadge.innerHTML = '<span class="status-dot"></span>Invalid QQL';
     analysisSummary.textContent =
@@ -483,6 +572,7 @@ function renderInspector(): void {
   renderStatementSelect();
   renderPlan();
   renderOutputs();
+  renderRoutes();
   renderValidation();
 }
 
@@ -568,7 +658,7 @@ function openDialog(id: string): void {
 }
 
 function setupDialogs(): void {
-  for (const dialog of all<HTMLDialogElement>("dialog.app-dialog")) {
+  for (const dialog of all<HTMLDialogElement>("dialog[data-app-dialog]")) {
     dialog.addEventListener("click", (event) => {
       if (event.target === dialog) dialog.close();
     });
@@ -578,15 +668,16 @@ function setupDialogs(): void {
       close.addEventListener("click", () => dialog.close());
     }
   }
-  required("[data-open-presets]").addEventListener("click", () =>
-    openDialog("#preset-dialog"),
-  );
-  required("[data-open-settings]").addEventListener("click", () =>
-    openDialog("#settings-dialog"),
-  );
+  for (const button of all<HTMLElement>("[data-open-presets]")) {
+    button.addEventListener("click", () => openDialog("#preset-dialog"));
+  }
+  for (const button of all<HTMLElement>("[data-open-settings]")) {
+    button.addEventListener("click", () => openDialog("#settings-dialog"));
+  }
   required("[data-open-policy]").addEventListener("click", () =>
     openDialog("#policy-dialog"),
   );
+  policyChip.addEventListener("click", () => openDialog("#policy-dialog"));
   exportButton.addEventListener("click", () => {
     renderExport();
     openDialog("#export-dialog");
@@ -724,36 +815,84 @@ function writePolicyForm(): void {
   const form = required<HTMLFormElement>("[data-policy-form]");
   const field = <T extends HTMLInputElement | HTMLSelectElement>(name: string) =>
     required<T>(`[data-policy-form] [name="${name}"]`);
+  const recipes = all<HTMLButtonElement>("[data-policy-recipe]");
   field<HTMLInputElement>("enabled").checked = policy.enabled;
   field<HTMLInputElement>("field").value = policy.field;
   field<HTMLSelectElement>("op").value = policy.op;
   field<HTMLInputElement>("value").value = policy.value;
   field<HTMLSelectElement>("valueType").value = policy.valueType;
   field<HTMLInputElement>("shardKey").value = policy.shardKey;
-  policyDot.classList.toggle("is-active", policy.enabled);
+  syncPolicyChip();
 
   const preview = required<HTMLOutputElement>("[data-policy-preview]");
+  const quotePreviewValue = (raw: string, valueType: string) => {
+    if (valueType === "string") return `'${raw || "value"}'`;
+    return raw || "value";
+  };
+  const syncRecipeSelection = () => {
+    const current = {
+      field: field<HTMLInputElement>("field").value.trim(),
+      op: field<HTMLSelectElement>("op").value,
+      value: field<HTMLInputElement>("value").value,
+      valueType: field<HTMLSelectElement>("valueType").value,
+      shard: field<HTMLInputElement>("shardKey").value.trim(),
+    };
+    for (const recipe of recipes) {
+      const matches =
+        recipe.dataset.field === current.field &&
+        (recipe.dataset.op ?? "=") === current.op &&
+        recipe.dataset.value === current.value &&
+        (recipe.dataset.valueType ?? "string") === current.valueType &&
+        (recipe.dataset.shard ?? "") === current.shard;
+      recipe.setAttribute("aria-pressed", String(matches));
+    }
+  };
   const updatePreview = () => {
     const enabled = field<HTMLInputElement>("enabled").checked;
     const fieldName = field<HTMLInputElement>("field").value.trim() || "field";
     const operator = field<HTMLSelectElement>("op").value;
-    const value = field<HTMLInputElement>("value").value || "value";
+    const valueType = field<HTMLSelectElement>("valueType").value;
+    const value = quotePreviewValue(
+      field<HTMLInputElement>("value").value,
+      valueType,
+    );
     const shard = field<HTMLInputElement>("shardKey").value.trim();
-    preview.textContent = enabled
-      ? `Trusted filter: ${fieldName} ${operator} ${value}${shard ? ` · route with shard ${shard}` : ""}`
-      : "The source stays unchanged. Enable the guardrail to inject a trusted predicate.";
+    if (!enabled) {
+      preview.textContent =
+        "The source stays unchanged. Enable injection to rewrite the AST after parse.";
+      syncRecipeSelection();
+      return;
+    }
+    const parts = [`WHERE ${fieldName} ${operator} ${value}`];
+    if (shard) parts.push(`SHARD '${shard}'`);
+    preview.textContent = parts.join("\n");
+    syncRecipeSelection();
   };
   updatePreview();
 
-  for (const name of ["enabled", "field", "op", "value", "shardKey"] as const) {
-    field<HTMLInputElement | HTMLSelectElement>(name).addEventListener("input", updatePreview);
-    field<HTMLInputElement | HTMLSelectElement>(name).addEventListener("change", updatePreview);
+  for (const name of [
+    "enabled",
+    "field",
+    "op",
+    "value",
+    "valueType",
+    "shardKey",
+  ] as const) {
+    field<HTMLInputElement | HTMLSelectElement>(name).addEventListener(
+      "input",
+      updatePreview,
+    );
+    field<HTMLInputElement | HTMLSelectElement>(name).addEventListener(
+      "change",
+      updatePreview,
+    );
   }
 
-  for (const recipe of all<HTMLButtonElement>("[data-policy-recipe]")) {
+  for (const recipe of recipes) {
     recipe.addEventListener("click", () => {
       field<HTMLInputElement>("enabled").checked = true;
       field<HTMLInputElement>("field").value = recipe.dataset.field ?? "";
+      field<HTMLSelectElement>("op").value = recipe.dataset.op ?? "=";
       field<HTMLInputElement>("value").value = recipe.dataset.value ?? "";
       field<HTMLSelectElement>("valueType").value =
         recipe.dataset.valueType ?? "string";
@@ -774,7 +913,7 @@ function writePolicyForm(): void {
       shardKey: field<HTMLInputElement>("shardKey").value,
     };
     localStorage.setItem(POLICY_KEY, JSON.stringify(policy));
-    policyDot.classList.toggle("is-active", policy.enabled);
+    syncPolicyChip();
     required<HTMLDialogElement>("#policy-dialog").close();
     runAnalysis(editor.state.doc.toString());
     toast(policy.enabled ? "Runtime policy applied." : "Runtime policy disabled.");
@@ -820,7 +959,7 @@ async function executeQuery(): Promise<void> {
   }
   runButton.disabled = true;
   runButton.classList.add("is-running");
-  runButton.textContent = "Running…";
+  runLabel.textContent = "Running…";
   state.executionError = null;
   state.response = null;
   renderOutputs();
@@ -835,12 +974,7 @@ async function executeQuery(): Promise<void> {
   try {
     if (policy.enabled) {
       statement = new Stmt(source);
-      statement.injectFilter(
-        policy.field,
-        policy.op,
-        policyValue(policy),
-      );
-      if (policy.shardKey.trim()) statement.shardKey = policy.shardKey.trim();
+      applyRuntimePolicy(statement);
       state.response = await executionClient.executeStmt(statement);
     } else {
       state.response = await executionClient.execute(source);
@@ -848,8 +982,9 @@ async function executeQuery(): Promise<void> {
     if (state.metrics) state.metrics.executeMs = performance.now() - started;
     setRuntime(
       state.response.ok
-        ? `Execution complete · ${state.response.succeeded} succeeded`
-        : `Execution complete · ${state.response.failed} failed`,
+        ? `Execution complete, ${state.response.succeeded} succeeded`
+        : `Execution complete, ${state.response.failed} failed`,
+      state.response.ok ? "ready" : "failed",
     );
     switchInspectorTab("response");
     toast(
@@ -859,7 +994,7 @@ async function executeQuery(): Promise<void> {
   } catch (error) {
     state.executionError = formatError(error);
     if (state.metrics) state.metrics.executeMs = performance.now() - started;
-    setRuntime("Execution failed.");
+    setRuntime("Execution failed.", "failed");
     switchInspectorTab("response");
     toast(state.executionError, "error");
   } finally {
@@ -867,8 +1002,7 @@ async function executeQuery(): Promise<void> {
     activeExecutions -= 1;
     releaseRetiredClients();
     runButton.classList.remove("is-running");
-    runButton.innerHTML =
-      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7V5Z"></path></svg>Run<kbd>⌘↵</kbd>';
+    runLabel.textContent = "Run";
     renderValidation();
     renderOutputs();
   }
@@ -890,6 +1024,12 @@ const editor = new EditorView({
       qqlCompletion,
       lintGutter(),
       linter(currentDiagnostic),
+      EditorView.contentAttributes.of({
+        spellcheck: "false",
+        autocorrect: "off",
+        autocapitalize: "off",
+        translate: "no",
+      }),
       keymap.of([
         indentWithTab,
         {
@@ -918,7 +1058,78 @@ const editor = new EditorView({
   }),
 });
 
+/** Draggable divider between the editor and inspector panels (lg and up). */
+function setupSplit(): void {
+  const handle = document.querySelector<HTMLElement>("[data-split-handle]");
+  if (!handle) return;
+  const SPLIT_KEY = "qql-playground.split.v1";
+  const MIN = 0.6;
+  const MAX = 1.4;
+  const DEFAULT_A = 1.08;
+
+  const apply = (a: number): number => {
+    const clamped = Math.min(MAX, Math.max(MIN, a));
+    workspace.style.setProperty("--split-a", `${clamped.toFixed(3)}fr`);
+    workspace.style.setProperty("--split-b", `${(2 - clamped).toFixed(3)}fr`);
+    return clamped;
+  };
+
+  const saved = Number(localStorage.getItem(SPLIT_KEY));
+  if (Number.isFinite(saved) && saved >= MIN && saved <= MAX) apply(saved);
+
+  const fractionFromEvent = (clientX: number): number => {
+    const bounds = workspace.getBoundingClientRect();
+    const handleWidth = handle.offsetWidth || 8;
+    const usable = bounds.width - handleWidth;
+    if (usable <= 0) return DEFAULT_A;
+    // Columns are [a, handle, b] with a + b = 2, so solve for a in fr units.
+    return ((clientX - bounds.left - handleWidth / 2) / usable) * 2;
+  };
+
+  handle.addEventListener("pointerdown", (event) => {
+    if (!window.matchMedia("(min-width: 64rem)").matches) return;
+    event.preventDefault();
+    handle.setPointerCapture(event.pointerId);
+    handle.dataset.dragging = "true";
+    const move = (moveEvent: PointerEvent) => {
+      apply(fractionFromEvent(moveEvent.clientX));
+    };
+    const up = (upEvent: PointerEvent) => {
+      const finalSplit = apply(fractionFromEvent(upEvent.clientX));
+      handle.dataset.dragging = "false";
+      delete handle.dataset.dragging;
+      localStorage.setItem(SPLIT_KEY, String(finalSplit));
+      editor.requestMeasure();
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+      handle.removeEventListener("pointercancel", up);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+    handle.addEventListener("pointercancel", up);
+  });
+
+  handle.addEventListener("dblclick", () => {
+    apply(DEFAULT_A);
+    localStorage.setItem(SPLIT_KEY, String(DEFAULT_A));
+    editor.requestMeasure();
+  });
+
+  handle.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const current = Number.parseFloat(
+      workspace.style.getPropertyValue("--split-a") || String(DEFAULT_A),
+    );
+    const next = apply(current + (event.key === "ArrowRight" ? 0.08 : -0.08));
+    localStorage.setItem(SPLIT_KEY, String(next));
+    editor.requestMeasure();
+  });
+}
+
 async function start(): Promise<void> {
+  applyPlatformKeyHints();
+  setupSplit();
   setupTabs();
   setupDialogs();
   setupPresets();
@@ -935,18 +1146,19 @@ async function start(): Promise<void> {
     state.selectedStatement = Number(statementSelect.value);
     renderPlan();
     renderOutputs();
+    renderRoutes();
   });
   runButton.addEventListener("click", () => void executeQuery());
 
   try {
     await initQql();
     configureClient();
-    setRuntime("Current qql-rs WASM ready");
+    setRuntime("Current qql-rs WASM ready", "ready");
     runAnalysis(editor.state.doc.toString());
     setEditorLoading(null);
   } catch (error) {
     const message = formatError(error);
-    setRuntime(`WASM failed: ${message}`);
+    setRuntime(`WASM failed: ${message}`, "failed");
     validationBadge.classList.remove("is-loading");
     validationBadge.classList.add("is-invalid");
     validationBadge.textContent = "WASM unavailable";

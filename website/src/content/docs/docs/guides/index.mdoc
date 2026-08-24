@@ -1,14 +1,20 @@
 ---
 title: "Production guides"
-description: "Apply QQL to hybrid retrieval, reranking, multitenancy, and backend selection."
+description: "Production cookbooks and architectural patterns for hybrid retrieval, reranking, multitenancy, edge execution, and JSON comparisons."
 sidebar:
   order: 0
 ---
 
 The language pages explain individual constructs. These guides combine them
-into production retrieval patterns.
+into production retrieval patterns and architectural solutions.
 
-{% grid style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:1rem;" %}
+{% grid style="display:grid; grid-template-columns:repeat(auto-fit, minmax(15rem, 1fr)); gap:1rem;" %}
+
+{% glassCard title="QQL vs Qdrant JSON API" %}
+Side-by-side comparison of declarative QQL queries vs verbose nested REST JSON and Python payloads.
+
+[Open the comparison](/docs/guides/qql-vs-qdrant-json/)
+{% /glassCard %}
 
 {% glassCard title="Hybrid retrieval" %}
 Build dense and sparse candidate stages, then fuse them with RRF or DBSF.
@@ -16,28 +22,40 @@ Build dense and sparse candidate stages, then fuse them with RRF or DBSF.
 [Open the guide](/docs/guides/hybrid-retrieval/)
 {% /glassCard %}
 
-{% glassCard title="Embeddings and reranking" %}
-Resolve vector roles and choose late-interaction or cross-encoder reranking.
-
-[Open the guide](/docs/guides/embeddings-reranking/)
-{% /glassCard %}
-
-{% glassCard title="Multitenancy" %}
+{% glassCard title="Multitenancy & routing" %}
 Keep isolation, shard routing, index layout, and partition lifecycle distinct.
 
 [Open the guide](/docs/guides/multitenancy/)
-{% /glassCard %}
-
-{% glassCard title="Backends" %}
-Choose between Qdrant REST, gRPC, and in-process edge execution.
-
-[Open the guide](/docs/guides/backends/)
 {% /glassCard %}
 
 {% glassCard title="Filter injection" %}
 Enforce tenant and authorization predicates at the AST level with `inject_filter`.
 
 [Open the guide](/docs/guides/filter-injection/)
+{% /glassCard %}
+
+{% glassCard title="ColBERT & re-ranking" %}
+Multi-vector token late interaction (MaxSim) and two-stage re-ranking pipelines.
+
+[Open the guide](/docs/guides/colbert-reranking/)
+{% /glassCard %}
+
+{% glassCard title="Embedded in-process edge" %}
+Run local vector search and ONNX FastEmbed models in Python and Node.js.
+
+[Open the guide](/docs/guides/embedded-qdrant-fastembed/)
+{% /glassCard %}
+
+{% glassCard title="Embeddings & reranking" %}
+Resolve vector roles and choose late-interaction or cross-encoder reranking.
+
+[Open the guide](/docs/guides/embeddings-reranking/)
+{% /glassCard %}
+
+{% glassCard title="Backends" %}
+Choose between Qdrant REST, gRPC, and in-process edge execution.
+
+[Open the guide](/docs/guides/backends/)
 {% /glassCard %}
 
 {% /grid %}

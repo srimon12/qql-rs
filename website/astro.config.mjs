@@ -48,7 +48,7 @@ export default defineConfig(
         title: "QQL Documentation",
         favicon: "/favicon.ico",
         description:
-          "Declarative vector search for Qdrant — QQL language, SDKs, CLI, and security patterns.",
+          "Declarative vector search for Qdrant: QQL language, SDKs, CLI, and security patterns.",
         social: [
           {
             icon: "github",
@@ -57,7 +57,8 @@ export default defineConfig(
           },
         ],
         customCss: [
-          "@fontsource/instrument-serif/index.css",
+          "@fontsource/newsreader/latin-300.css",
+          "@fontsource/newsreader/latin-400.css",
           "@fontsource/ibm-plex-sans/400.css",
           "@fontsource/ibm-plex-sans/500.css",
           "@fontsource/ibm-plex-sans/600.css",
@@ -66,6 +67,7 @@ export default defineConfig(
           "./src/styles/global.css",
         ],
         components: {
+          Head: "./src/components/DocsHead.astro",
           Footer: "./src/components/DocsFooter.astro",
           Header: "./src/components/DocsHeader.astro",
         },

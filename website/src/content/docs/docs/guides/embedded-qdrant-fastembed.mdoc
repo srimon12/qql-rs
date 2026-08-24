@@ -1,0 +1,135 @@
+---
+title: "Running Embedded In-Process Qdrant with FastEmbed"
+description: "How to run local, zero-infrastructure vector search with embedded Qdrant and FastEmbed ONNX models in Python and Node.js."
+sidebar:
+  order: 6
+---
+
+Traditional vector databases require deploying and maintaining a standalone cluster, configuring network ports, and orchestrating API keys for third-party embedding providers.
+
+**QQL Edge** (`pyqql-edge` in Python, `@veristamp/nqql-edge` in Node.js, and `qql-edge` in Rust) bundles the entire pipeline inside your application process:
+- **Embedded vector storage**: Native in-process `qdrant-edge` (HNSW indexing, WAL persistence, vector segments).
+- **Embedded text embeddings**: FastEmbed ONNX inference with zero Python dependencies (written in pure Rust).
+- **Unified QQL parser & planner**: The same declarative SQL dialect used for cloud Qdrant clusters.
+
+---
+
+## 1. Python Quickstart (`pyqql-edge`)
+
+Install the standalone binary wheel:
+
+```bash
+pip install pyqql-edge
+```
+
+Create a local embedded client, create a hybrid collection, upsert data, and run semantic queries:
+
+```python
+from pyqql_edge import local_executor
+
+# Initialize local in-process vector store in ./local_vectors
+# (use in_memory=True for ephemeral / test workloads)
+client = local_executor("./local_vectors")
+
+# 1. Create collection with dense and sparse vector spaces
+client.execute("""
+    CREATE COLLECTION knowledge_base (
+        dense VECTOR(384, COSINE),
+        bm25 SPARSE
+    );
+""")
+
+# 2. Upsert points with automatic local embedding generation
+client.execute("""
+    UPSERT INTO knowledge_base VALUES {
+        id: 1,
+        text: 'Zero-infrastructure vector search runs locally on edge devices.',
+        topic: 'architecture'
+    } USING HYBRID;
+""")
+
+# 3. Query with declarative QQL
+results = client.execute("""
+    QUERY TEXT 'edge vector database'
+    FROM knowledge_base
+    USING HYBRID
+    WHERE topic = 'architecture'
+    LIMIT 5;
+""")
+
+print(results)
+```
+
+---
+
+## 2. Node.js Quickstart (`@veristamp/nqql-edge`)
+
+Install the native Node addon:
+
+```bash
+npm install @veristamp/nqql-edge
+```
+
+Execute in-process queries in JavaScript or TypeScript:
+
+```javascript
+import { localExecutor } from "@veristamp/nqql-edge";
+
+// Initialize edge executor
+const client = localExecutor("./local_vectors", {
+  model: "bge-small-en-v1.5",
+});
+
+// Run declarative DDL and data operations
+await client.execute(`
+  CREATE COLLECTION articles (
+    dense VECTOR(384, COSINE)
+  );
+`);
+
+await client.execute(`
+  UPSERT INTO articles VALUES {
+    id: 101,
+    title: 'Fast local embeddings with ONNX Runtime',
+    category: 'performance'
+  } USING dense;
+`);
+
+const response = await client.execute(`
+  QUERY TEXT 'machine learning on device'
+  FROM articles
+  USING dense
+  LIMIT 5;
+`);
+
+console.log(response);
+```
+
+---
+
+## 3. Supported Local Embedding Models
+
+FastEmbed models are downloaded automatically on the first execution requiring embeddings and cached locally in `~/.cache/fastembed/` or `$QQL_EDGE_CACHE_DIR`. After the initial download, all embedding generation and search operations are **100% offline**:
+
+| Model Identifier | Dimensions | Primary Use Case | Default For |
+|---|---|---|---|
+| `bge-small-en-v1.5` | 384 | English dense similarity | Default dense model |
+| `all-minilm-l6-v2` | 384 | Compact semantic search | Fast local inference |
+| `bge-base-en-v1.5` | 768 | High-accuracy dense retrieval | Production retrieval |
+| `splade-pp-edinburgh` | Sparse | Lexical matching | Default sparse index |
+
+---
+
+## Architectural Comparison: Cloud vs Edge
+
+```
+[ Cloud Architecture ]
+App -> HTTP/gRPC -> OpenAI Embeddings API -> HTTP/gRPC -> Qdrant Cluster (Port 6333)
+
+[ QQL Edge Architecture ]
+App Process [ QQL Parser -> ONNX FastEmbed -> qdrant-edge HNSW Engine -> Local Disk / RAM ]
+```
+
+- **Zero Network Latency**: Zero round-trips over the internet.
+- **Zero API Ingestion Costs**: Run unlimited embedding transformations locally on CPU or GPU.
+- **Strict Privacy**: Sensitive customer data never leaves the local machine or edge container.
