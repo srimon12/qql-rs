@@ -407,3 +407,128 @@ body:has(.site-header) {
   letter-spacing: 0.06em;
   color: var(--sl-color-gray-3);
 }
+
+/* Playground is a full-viewport tool; the marketing footer is noise there. */
+body.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+}
+
+body.app-shell .site-footer {
+  display: none;
+}
+
+body.app-shell main {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.app-dialog {
+  margin: auto;
+  width: min(calc(100% - 2rem), 40rem);
+  max-height: 90vh;
+  overflow: hidden;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 0.75rem;
+  background: var(--sl-color-bg);
+  padding: 0;
+  color: var(--sl-color-gray-1);
+  box-shadow: 0 24px 64px color-mix(in srgb, var(--sl-color-text) 16%, transparent);
+}
+
+.app-dialog::backdrop {
+  background: rgb(20 20 19 / 0.72);
+}
+
+.app-dialog--wide {
+  width: min(calc(100% - 2rem), 68rem);
+}
+
+.app-input,
+.app-select {
+  box-sizing: border-box;
+  min-height: 2.5rem;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 0.5rem;
+  background: var(--sl-color-bg);
+  padding: 0 0.75rem;
+  color: var(--sl-color-gray-1);
+  font: inherit;
+}
+
+.app-input:focus-visible,
+.app-select:focus-visible {
+  outline: 2px solid var(--sl-color-accent);
+  outline-offset: 2px;
+}
+
+.app-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2rem;
+  max-width: 100%;
+  padding: 0 0.55rem 0 0.65rem;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 0.5rem;
+  background: var(--sl-color-gray-6);
+  color: var(--sl-color-gray-1);
+  font-family: var(--sl-font-mono);
+  font-size: 0.72rem;
+  line-height: 1;
+  cursor: pointer;
+  text-align: left;
+  text-decoration: none;
+  transition:
+    border-color 160ms cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 160ms cubic-bezier(0.16, 1, 0.3, 1),
+    color 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.app-chip:hover {
+  border-color: var(--sl-color-gray-4);
+  background: var(--sl-color-bg);
+  color: var(--sl-color-white);
+}
+
+.app-chip:focus-visible {
+  outline: 2px solid var(--sl-color-accent);
+  outline-offset: 2px;
+}
+
+.app-chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.app-chip__label {
+  flex-shrink: 0;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--sl-color-accent);
+}
+
+.app-chip__value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--sl-color-gray-2);
+}
+
+.app-chip:hover .app-chip__value {
+  color: var(--sl-color-gray-1);
+}
+
+.app-chip__caret {
+  flex-shrink: 0;
+  color: var(--sl-color-gray-3);
+  font-size: 0.85rem;
+  line-height: 1;
+}

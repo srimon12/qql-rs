@@ -157,14 +157,27 @@ const pageDescription =
     >
       <h1 class="sr-only">QQL Playground</h1>
       <div
-        class="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--sl-color-gray-5)] px-1 pb-3 font-mono text-[0.75rem] text-[var(--sl-color-gray-3)]"
-        role="status"
-        aria-live="polite"
+        class="flex min-h-10 flex-wrap items-center gap-2 border-b border-[var(--sl-color-gray-5)] px-1 pb-3"
+        aria-label="Playground status"
       >
-        <span class="inline-flex shrink-0 items-center gap-2 text-[var(--sl-color-gray-2)]"><span class="size-2 rounded-full bg-[var(--sl-color-gray-4)] transition-colors" data-runtime-dot></span><span data-runtime-status>Loading current WASM…</span></span>
-        <span class="hidden min-w-0 text-[var(--sl-color-gray-4)] sm:inline" data-active-fixture>{defaultPreset.label}</span>
-        <span class="ml-auto hidden min-w-0 truncate text-[var(--sl-color-gray-3)] lg:inline" data-connection-summary title="http://localhost:6333 · browser MiniLM">http://localhost:6333 · browser MiniLM</span>
-        <a class="font-medium text-[var(--sl-color-accent-high)] no-underline hover:text-[var(--sl-color-white)] focus-visible:rounded focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" href="/docs/" data-docs-backlink hidden>← Back to documentation</a>
+        <span class="inline-flex min-h-8 shrink-0 items-center gap-2 px-1 font-mono text-[0.75rem] text-[var(--sl-color-gray-2)]" role="status" aria-live="polite">
+          <span class="size-2 rounded-full bg-[var(--sl-color-gray-4)] transition-colors" data-runtime-dot></span>
+          <span data-runtime-status>Loading current WASM…</span>
+        </span>
+        <button class="app-chip min-w-0 max-w-[min(24rem,100%)]" type="button" data-open-presets title="Load a fixture">
+          <span class="app-chip__label">Example</span>
+          <span class="app-chip__value" data-active-fixture>{defaultPreset.label}</span>
+          <span class="app-chip__caret" aria-hidden="true">▾</span>
+        </button>
+        <button class="app-chip ml-auto min-w-0 max-w-[min(28rem,100%)]" type="button" data-open-settings title="Edit Qdrant URL and embeddings">
+          <span class="app-chip__label">Connection</span>
+          <span class="app-chip__value" data-connection-value>localhost:6333 · MiniLM</span>
+          <span class="app-chip__caret" aria-hidden="true">▾</span>
+        </button>
+        <a class="app-chip" href="/docs/" data-docs-backlink hidden>
+          <span class="app-chip__label">Docs</span>
+          <span class="app-chip__caret" aria-hidden="true">→</span>
+        </a>
       </div>
 
       <div

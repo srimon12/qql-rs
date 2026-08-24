@@ -13,8 +13,9 @@
         Policy
         <span class="size-1.5 rounded-full bg-[var(--sl-color-gray-3)]" data-policy-dot></span>
       </button>
-      <button class="inline-flex min-h-9 shrink-0 items-center justify-center rounded-md border border-[var(--sl-color-gray-5)] bg-transparent px-3 font-mono text-[0.78rem] font-medium text-[var(--sl-color-gray-2)] transition hover:border-[var(--sl-color-gray-4)] hover:text-[var(--sl-color-white)] active:translate-y-px focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="button" data-open-settings>
-        Connection
+      <button class="app-chip hidden max-w-56 sm:inline-flex" type="button" data-policy-chip hidden title="Edit tenant policy">
+        <span class="app-chip__label">Policy</span>
+        <span class="app-chip__value" data-policy-chip-value></span>
       </button>
       <button class="hidden min-h-9 shrink-0 items-center justify-center rounded-md border border-[var(--sl-color-gray-5)] bg-transparent px-3 font-mono text-[0.78rem] font-medium text-[var(--sl-color-gray-2)] transition hover:border-[var(--sl-color-gray-4)] hover:text-[var(--sl-color-white)] active:translate-y-px focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)] sm:inline-flex" type="button" data-share>
         Share
@@ -23,14 +24,14 @@
         <svg class="size-3 fill-current" viewBox="0 0 24 24" aria-hidden="true">
           <path d="m8 5 11 7-11 7V5Z"></path>
         </svg>
-        Run
+        <span data-run-label>Run</span>
         <kbd class="hidden rounded border border-white/25 px-1 font-mono text-[0.62rem] opacity-80 sm:inline" data-kbd>⌘↵</kbd>
       </button>
     </div>
   </div>
 
   <div class="relative min-h-0 flex-1 bg-[color-mix(in_srgb,var(--sl-color-bg)_55%,var(--sl-color-gray-6))]">
-    <div id="qql-editor" aria-label="QQL source editor"></div>
+    <div id="qql-editor" aria-label="QQL source editor" spellcheck="false"></div>
     <div class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-[color-mix(in_srgb,var(--sl-color-bg)_90%,transparent)] text-center font-mono text-xs text-[var(--sl-color-gray-2)]" data-editor-loading role="status" aria-live="polite">
       <div class="w-72 max-w-[80%] space-y-2.5 px-6" aria-hidden="true">
         <span class="block h-3 animate-pulse rounded-sm bg-[var(--sl-color-gray-6)]"></span>
@@ -52,8 +53,9 @@
       Loading qql-wasm
     </span>
     <span class="min-w-0 flex-1 truncate" data-analysis-summary>Preparing the current workspace parser…</span>
-    <button class="shrink-0 border-0 bg-transparent font-mono text-[0.75rem] font-medium text-[var(--sl-color-accent-high)] hover:text-[var(--sl-color-white)] active:translate-y-px disabled:cursor-not-allowed disabled:text-[var(--sl-color-gray-4)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="button" data-open-export disabled>
-      Export SDK code
+    <button class="app-chip shrink-0" type="button" data-open-export disabled>
+      <span class="app-chip__label">Export</span>
+      <span class="app-chip__value">SDK</span>
     </button>
   </div>
 </section>

@@ -1,90 +1,138 @@
-<dialog class="m-auto w-[min(calc(100%-2rem),38rem)] max-h-[90vh] overflow-hidden rounded-xl border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] p-0 text-[var(--sl-color-gray-1)] shadow-2xl backdrop:bg-black/70 backdrop:backdrop-blur-sm" id="policy-dialog" aria-labelledby="policy-title" data-app-dialog>
+---
+const recipes = [
+  {
+    field: "tenant_id",
+    value: "acme",
+    valueType: "string",
+    op: "=",
+    shard: "acme",
+    label: "Tenant",
+    hint: "Filter plus shard routing",
+  },
+  {
+    field: "workspace_id",
+    value: "ws_101",
+    valueType: "string",
+    op: "=",
+    shard: "ws_101",
+    label: "Workspace",
+    hint: "Trusted workspace predicate",
+  },
+  {
+    field: "deleted",
+    value: "false",
+    valueType: "boolean",
+    op: "=",
+    shard: "",
+    label: "Soft-delete",
+    hint: "Keep deleted rows out",
+  },
+  {
+    field: "region",
+    value: "eu-west-1",
+    valueType: "string",
+    op: "=",
+    shard: "",
+    label: "Residency",
+    hint: "Region payload only",
+  },
+];
+---
+
+<dialog class="app-dialog" id="policy-dialog" aria-labelledby="policy-title" data-app-dialog>
   <form class="flex max-h-[90vh] flex-col" data-policy-form>
     <header class="flex items-start justify-between gap-4 border-b border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] p-5">
       <div>
-        <span class="block font-mono text-[0.62rem] font-semibold uppercase tracking-[0.12em] text-[var(--sl-color-accent)]">AST guardrail</span>
-        <h2 id="policy-title" class="!m-0 !mt-1 font-(family-name:--sl-font) !text-xl !font-semibold text-[var(--sl-color-white)]">Mandatory runtime policy</h2>
-        <p class="mt-1 text-xs leading-5 text-[var(--sl-color-gray-3)]">Inject a trusted predicate after parsing and before planning or execution.</p>
+        <span class="block font-mono text-[0.62rem] font-semibold uppercase tracking-[0.12em] text-[var(--sl-color-accent)]">Host inject</span>
+        <h2 id="policy-title" class="!m-0 !mt-1 font-(family-name:--sl-font) !text-xl !font-semibold text-[var(--sl-color-white)]">Tenant policy</h2>
+        <p class="mt-1 text-xs leading-5 text-[var(--sl-color-gray-3)]">
+          Applied after parse, before plan. The editor source stays as the caller wrote it.
+        </p>
       </div>
       <button class="grid size-8 place-items-center rounded-md border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] text-lg text-[var(--sl-color-gray-2)] hover:text-[var(--sl-color-white)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="button" data-close-dialog aria-label="Close policy">×</button>
     </header>
 
-    <div class="grid gap-4 overflow-y-auto p-5">
-      <label class="grid grid-cols-[1fr_auto] items-center gap-3 rounded-lg border border-[var(--sl-color-gray-5)] p-3">
+    <div class="grid gap-5 overflow-y-auto p-5">
+      <label class="grid grid-cols-[1fr_auto] items-center gap-3">
         <span class="text-xs font-medium text-[var(--sl-color-gray-2)]">
-          <strong class="block text-[var(--sl-color-gray-1)]">Enable policy injection</strong>
-          <small class="mt-0.5 block font-normal text-[var(--sl-color-gray-3)]">Single-statement inputs only; multi-statement scripts fail closed.</small>
+          <strong class="block text-[var(--sl-color-gray-1)]">Enable injection</strong>
+          <small class="mt-0.5 block font-normal text-[var(--sl-color-gray-3)]">One statement only. Scripts with two or more fail closed.</small>
         </span>
         <input name="enabled" type="checkbox" role="switch" class="switch" />
       </label>
 
-      <fieldset class="grid gap-2 rounded-lg border border-[var(--sl-color-gray-5)] p-3">
-        <legend class="px-1 text-xs font-medium text-[var(--sl-color-gray-2)]">Recipes</legend>
-        <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {[
-            ["workspace_id", "ws_101", "Workspace boundary", "ws_101"],
-            ["deleted", "false", "Soft-delete safety", ""],
-            ["region", "eu-west-1", "Data residency", ""],
-            ["visibility", "public", "Visibility ACL", ""],
-          ].map(([field, value, label, shard]) => (
+      <div class="grid gap-2">
+        <p class="m-0 text-xs font-medium text-[var(--sl-color-gray-2)]">Start from an example</p>
+        <div class="grid gap-2" data-policy-recipes aria-label="Policy examples">
+          {recipes.map((recipe) => (
             <button
               type="button"
-              class="grid gap-1 rounded-md border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] p-3 text-left text-[var(--sl-color-gray-2)] transition hover:border-[var(--sl-color-accent)] hover:text-[var(--sl-color-white)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]"
+              class="flex items-center justify-between gap-3 rounded-lg border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-3 py-2.5 text-left text-[var(--sl-color-gray-2)] transition hover:border-[var(--sl-color-accent)]/60 hover:bg-[var(--sl-color-bg)] hover:text-[var(--sl-color-white)] aria-pressed:border-[var(--sl-color-accent)] aria-pressed:bg-[var(--sl-color-bg)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]"
               data-policy-recipe
-              data-field={field}
-              data-value={value}
-              data-value-type={value === "false" ? "boolean" : "string"}
-              data-shard={shard}
+              data-field={recipe.field}
+              data-value={recipe.value}
+              data-value-type={recipe.valueType}
+              data-op={recipe.op}
+              data-shard={recipe.shard}
+              aria-pressed="false"
             >
-              <strong class="text-xs font-semibold">{label}</strong>
-              <code class="font-mono text-[0.68rem] text-[var(--sl-color-accent-high)]">{field} = {value}</code>
+              <span class="grid min-w-0 gap-0.5">
+                <strong class="text-sm font-semibold text-[var(--sl-color-gray-1)]">{recipe.label}</strong>
+                <span class="text-[0.68rem] leading-4 text-[var(--sl-color-gray-3)]">{recipe.hint}</span>
+              </span>
+              <code class="shrink-0 font-mono text-[0.68rem] text-[var(--sl-color-accent-high)]">{recipe.field} {recipe.op} {recipe.value}</code>
             </button>
           ))}
         </div>
+      </div>
+
+      <fieldset class="grid gap-3">
+        <legend class="mb-1 px-0 text-xs font-medium text-[var(--sl-color-gray-2)]">Injected clause</legend>
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_8.5rem]">
+          <label class="grid min-w-0 gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
+            <span>Field</span>
+            <input class="app-input" name="field" type="text" required autocomplete="off" />
+          </label>
+          <label class="grid min-w-0 gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
+            <span>Op</span>
+            <select class="app-select" name="op">
+              <option value="=">=</option>
+              <option value=">">&gt;</option>
+              <option value=">=">&gt;=</option>
+              <option value="<">&lt;</option>
+              <option value="<=">&lt;=</option>
+            </select>
+          </label>
+          <label class="grid min-w-0 gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
+            <span>Value</span>
+            <input class="app-input" name="value" type="text" required autocomplete="off" />
+          </label>
+          <label class="grid min-w-0 gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
+            <span>Type</span>
+            <select class="app-select" name="valueType">
+              <option value="string">String</option>
+              <option value="number">Number</option>
+              <option value="boolean">Boolean</option>
+            </select>
+          </label>
+        </div>
+        <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
+          <span>Shard key <small class="font-normal text-[var(--sl-color-gray-3)]">optional routing, not isolation</small></span>
+          <input class="app-input" name="shardKey" type="text" placeholder="leave empty to skip SHARD" autocomplete="off" />
+        </label>
       </fieldset>
 
-      <div class="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_7rem]">
-        <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
-          <span>Payload field</span>
-          <input class="min-h-10 rounded-md border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] px-3 text-sm text-[var(--sl-color-gray-1)]" name="field" type="text" required />
-        </label>
-        <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
-          <span>Operator</span>
-          <select class="min-h-10 rounded-md border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] px-3 text-sm text-[var(--sl-color-gray-1)]" name="op">
-            <option value="=">=</option>
-            <option value=">">&gt;</option>
-            <option value=">=">&gt;=</option>
-            <option value="<">&lt;</option>
-            <option value="<=">&lt;=</option>
-          </select>
-        </label>
-      </div>
-      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
-          <span>Required value</span>
-          <input class="min-h-10 rounded-md border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] px-3 text-sm text-[var(--sl-color-gray-1)]" name="value" type="text" required />
-        </label>
-        <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
-          <span>Value type</span>
-          <select class="min-h-10 rounded-md border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] px-3 text-sm text-[var(--sl-color-gray-1)]" name="valueType">
-            <option value="string">String</option>
-            <option value="number">Number</option>
-            <option value="boolean">Boolean</option>
-          </select>
-        </label>
-      </div>
-      <label class="grid gap-1.5 text-xs font-medium text-[var(--sl-color-gray-2)]">
-        <span>Shard key <small class="font-normal text-[var(--sl-color-gray-3)]">optional routing, not isolation</small></span>
-        <input class="min-h-10 rounded-md border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] px-3 text-sm text-[var(--sl-color-gray-1)]" name="shardKey" type="text" />
-      </label>
-      <output class="block rounded-md border border-[var(--sl-color-gray-5)] bg-[var(--sl-color-bg)] p-3 font-mono text-xs leading-5 text-[var(--sl-color-gray-2)]" data-policy-preview>
-        The source stays unchanged. A trusted predicate is applied after parsing.
+      <output
+        class="m-0 block whitespace-pre-line font-mono text-xs leading-5 text-[var(--sl-color-gray-3)]"
+        data-policy-preview
+      >
+        Enable injection to rewrite the AST after parse.
       </output>
     </div>
 
     <footer class="flex flex-col items-stretch justify-between gap-3 border-t border-[var(--sl-color-gray-5)] p-4 sm:flex-row sm:items-center">
-      <span class="max-w-md text-xs leading-5 text-[var(--sl-color-gray-3)]">The editor source remains unchanged; inspector output shows the rewritten AST and route.</span>
-      <button class="min-h-9 rounded-md bg-[var(--sl-color-accent)] px-3 font-mono text-xs font-semibold text-white hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="submit">Apply guardrail</button>
+      <span class="max-w-md text-xs leading-5 text-[var(--sl-color-gray-3)]">Inspector Plan and Wire show the rewritten request. The editor does not change.</span>
+      <button class="min-h-9 rounded-md bg-[var(--sl-color-accent)] px-3 font-mono text-xs font-semibold text-white hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="submit">Apply policy</button>
     </footer>
   </form>
 </dialog>

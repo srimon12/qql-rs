@@ -34,7 +34,7 @@ import {
 } from "./playground-types";
 
 const SETTINGS_KEY = "qql-playground.settings.v1";
-const POLICY_KEY = "qql-playground.policy.v1";
+const POLICY_KEY = "qql-playground.policy.v2";
 const WORKSPACE_KEY = "qql-playground.workspace.v1";
 const INSPECTOR_TAB_KEY = "qql-playground.inspector-tab.v1";
 const ANALYSIS_DELAY_MS = 90;
@@ -87,6 +87,11 @@ function saveSession(key: string, value: string): void {
   } catch {
     // Private browsing may deny storage; the playground remains usable.
   }
+}
+
+function applyRuntimePolicy(statement: Stmt): void {
+  statement.injectFilter(policy.field, policy.op, policyValue(policy));
+  if (policy.shardKey.trim()) statement.shardKey = policy.shardKey.trim();
 }
 
 function policyValue(policy: RuntimePolicy): string | number | boolean {
@@ -192,7 +197,7 @@ const validationBadge = required<HTMLElement>("[data-validation-badge]");
 const analysisSummary = required<HTMLElement>("[data-analysis-summary]");
 const runtimeStatus = required<HTMLElement>("[data-runtime-status]");
 const runtimeDot = required<HTMLElement>("[data-runtime-dot]");
-const connectionSummary = required<HTMLElement>("[data-connection-summary]");
+const connectionValue = required<HTMLElement>("[data-connection-value]");
 const activeFixture = required<HTMLElement>("[data-active-fixture]");
 const statementSelect = required<HTMLSelectElement>("[data-statement-select]");
 const planEmpty = required<HTMLElement>("[data-empty-plan]");
@@ -205,6 +210,8 @@ const routesSection = required<HTMLElement>("[data-routes-section]");
 const routesList = required<HTMLElement>("[data-routes-list]");
 const routesCount = required<HTMLElement>("[data-routes-count]");
 const policyDot = required<HTMLElement>("[data-policy-dot]");
+const policyChip = required<HTMLButtonElement>("[data-policy-chip]");
+const runLabel = required<HTMLElement>("[data-run-label]");
 const toastRegion = required<HTMLElement>("[data-toast-region]");
 const embedStatus = required<HTMLElement>("[data-embed-status]");
 const editorLoading = required<HTMLElement>("[data-editor-loading]");
@@ -258,14 +265,37 @@ function setEditorLoading(message: string | null): void {
   editorHost.setAttribute("aria-busy", String(message != null));
 }
 
+function connectionHost(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return parsed.host || url;
+  } catch {
+    return url.replace(/^https?:\/\//, "");
+  }
+}
+
 function updateConnectionSummary(): void {
   const embedding =
     settings.embedProvider === "browser"
-      ? "browser MiniLM"
+      ? "MiniLM"
       : settings.embedProvider === "http"
         ? settings.embedModel || "HTTP embeddings"
         : "no embedder";
-  connectionSummary.textContent = `${settings.qdrantUrl} · ${embedding}`;
+  const summary = `${connectionHost(settings.qdrantUrl)} · ${embedding}`;
+  connectionValue.textContent = summary;
+  connectionValue.parentElement?.setAttribute(
+    "title",
+    `Edit connection (${settings.qdrantUrl}, ${embedding})`,
+  );
+}
+
+function syncPolicyChip(): void {
+  policyDot.classList.toggle("is-active", policy.enabled);
+  policyChip.hidden = !policy.enabled;
+  const value = required<HTMLElement>("[data-policy-chip-value]");
+  value.textContent = policy.enabled
+    ? `${policy.field} ${policy.op} ${policy.value}`
+    : "";
 }
 
 function releaseRetiredClients(): void {
@@ -326,12 +356,7 @@ function analyzeWithPolicy(source: string): PlaygroundAnalysis {
       let statement: Stmt | null = null;
       try {
         statement = new Stmt(source);
-        statement.injectFilter(
-          policy.field,
-          policy.op,
-          policyValue(policy),
-        );
-        if (policy.shardKey.trim()) statement.shardKey = policy.shardKey.trim();
+        applyRuntimePolicy(statement);
         effectiveAst = [statement.toObject()];
         effectiveRoutes = [statement.compileRoute()];
       } catch (error) {
@@ -359,10 +384,11 @@ function currentDiagnostic(): Diagnostic[] {
   if (!analysis) return [];
   const { source, result, policyError } = analysis;
   if (policyError) {
+    const firstLine = source.indexOf("\n");
     return [
       {
         from: 0,
-        to: Math.max(0, source.length),
+        to: Math.max(1, firstLine === -1 ? Math.min(source.length, 1) : firstLine),
         severity: "error",
         message: policyError,
       },
@@ -424,7 +450,9 @@ function renderPlan(): void {
   routeMethod.textContent = route.method;
   routePath.textContent = route.path;
   routeType.textContent = route.stmt_type;
-  routePolicy.textContent = policy.enabled ? "Trusted predicate injected" : "Source only";
+  routePolicy.textContent = policy.enabled
+    ? "Trusted predicate injected"
+    : "Source only";
 }
 
 function selectStatement(index: number): void {
@@ -640,15 +668,16 @@ function setupDialogs(): void {
       close.addEventListener("click", () => dialog.close());
     }
   }
-  required("[data-open-presets]").addEventListener("click", () =>
-    openDialog("#preset-dialog"),
-  );
-  required("[data-open-settings]").addEventListener("click", () =>
-    openDialog("#settings-dialog"),
-  );
+  for (const button of all<HTMLElement>("[data-open-presets]")) {
+    button.addEventListener("click", () => openDialog("#preset-dialog"));
+  }
+  for (const button of all<HTMLElement>("[data-open-settings]")) {
+    button.addEventListener("click", () => openDialog("#settings-dialog"));
+  }
   required("[data-open-policy]").addEventListener("click", () =>
     openDialog("#policy-dialog"),
   );
+  policyChip.addEventListener("click", () => openDialog("#policy-dialog"));
   exportButton.addEventListener("click", () => {
     renderExport();
     openDialog("#export-dialog");
@@ -786,36 +815,84 @@ function writePolicyForm(): void {
   const form = required<HTMLFormElement>("[data-policy-form]");
   const field = <T extends HTMLInputElement | HTMLSelectElement>(name: string) =>
     required<T>(`[data-policy-form] [name="${name}"]`);
+  const recipes = all<HTMLButtonElement>("[data-policy-recipe]");
   field<HTMLInputElement>("enabled").checked = policy.enabled;
   field<HTMLInputElement>("field").value = policy.field;
   field<HTMLSelectElement>("op").value = policy.op;
   field<HTMLInputElement>("value").value = policy.value;
   field<HTMLSelectElement>("valueType").value = policy.valueType;
   field<HTMLInputElement>("shardKey").value = policy.shardKey;
-  policyDot.classList.toggle("is-active", policy.enabled);
+  syncPolicyChip();
 
   const preview = required<HTMLOutputElement>("[data-policy-preview]");
+  const quotePreviewValue = (raw: string, valueType: string) => {
+    if (valueType === "string") return `'${raw || "value"}'`;
+    return raw || "value";
+  };
+  const syncRecipeSelection = () => {
+    const current = {
+      field: field<HTMLInputElement>("field").value.trim(),
+      op: field<HTMLSelectElement>("op").value,
+      value: field<HTMLInputElement>("value").value,
+      valueType: field<HTMLSelectElement>("valueType").value,
+      shard: field<HTMLInputElement>("shardKey").value.trim(),
+    };
+    for (const recipe of recipes) {
+      const matches =
+        recipe.dataset.field === current.field &&
+        (recipe.dataset.op ?? "=") === current.op &&
+        recipe.dataset.value === current.value &&
+        (recipe.dataset.valueType ?? "string") === current.valueType &&
+        (recipe.dataset.shard ?? "") === current.shard;
+      recipe.setAttribute("aria-pressed", String(matches));
+    }
+  };
   const updatePreview = () => {
     const enabled = field<HTMLInputElement>("enabled").checked;
     const fieldName = field<HTMLInputElement>("field").value.trim() || "field";
     const operator = field<HTMLSelectElement>("op").value;
-    const value = field<HTMLInputElement>("value").value || "value";
+    const valueType = field<HTMLSelectElement>("valueType").value;
+    const value = quotePreviewValue(
+      field<HTMLInputElement>("value").value,
+      valueType,
+    );
     const shard = field<HTMLInputElement>("shardKey").value.trim();
-    preview.textContent = enabled
-      ? `Trusted filter: ${fieldName} ${operator} ${value}${shard ? ` · route with shard ${shard}` : ""}`
-      : "The source stays unchanged. Enable the guardrail to inject a trusted predicate.";
+    if (!enabled) {
+      preview.textContent =
+        "The source stays unchanged. Enable injection to rewrite the AST after parse.";
+      syncRecipeSelection();
+      return;
+    }
+    const parts = [`WHERE ${fieldName} ${operator} ${value}`];
+    if (shard) parts.push(`SHARD '${shard}'`);
+    preview.textContent = parts.join("\n");
+    syncRecipeSelection();
   };
   updatePreview();
 
-  for (const name of ["enabled", "field", "op", "value", "shardKey"] as const) {
-    field<HTMLInputElement | HTMLSelectElement>(name).addEventListener("input", updatePreview);
-    field<HTMLInputElement | HTMLSelectElement>(name).addEventListener("change", updatePreview);
+  for (const name of [
+    "enabled",
+    "field",
+    "op",
+    "value",
+    "valueType",
+    "shardKey",
+  ] as const) {
+    field<HTMLInputElement | HTMLSelectElement>(name).addEventListener(
+      "input",
+      updatePreview,
+    );
+    field<HTMLInputElement | HTMLSelectElement>(name).addEventListener(
+      "change",
+      updatePreview,
+    );
   }
 
-  for (const recipe of all<HTMLButtonElement>("[data-policy-recipe]")) {
+  for (const recipe of recipes) {
     recipe.addEventListener("click", () => {
       field<HTMLInputElement>("enabled").checked = true;
       field<HTMLInputElement>("field").value = recipe.dataset.field ?? "";
+      field<HTMLSelectElement>("op").value = recipe.dataset.op ?? "=";
       field<HTMLInputElement>("value").value = recipe.dataset.value ?? "";
       field<HTMLSelectElement>("valueType").value =
         recipe.dataset.valueType ?? "string";
@@ -836,7 +913,7 @@ function writePolicyForm(): void {
       shardKey: field<HTMLInputElement>("shardKey").value,
     };
     localStorage.setItem(POLICY_KEY, JSON.stringify(policy));
-    policyDot.classList.toggle("is-active", policy.enabled);
+    syncPolicyChip();
     required<HTMLDialogElement>("#policy-dialog").close();
     runAnalysis(editor.state.doc.toString());
     toast(policy.enabled ? "Runtime policy applied." : "Runtime policy disabled.");
@@ -882,7 +959,7 @@ async function executeQuery(): Promise<void> {
   }
   runButton.disabled = true;
   runButton.classList.add("is-running");
-  runButton.textContent = "Running…";
+  runLabel.textContent = "Running…";
   state.executionError = null;
   state.response = null;
   renderOutputs();
@@ -897,12 +974,7 @@ async function executeQuery(): Promise<void> {
   try {
     if (policy.enabled) {
       statement = new Stmt(source);
-      statement.injectFilter(
-        policy.field,
-        policy.op,
-        policyValue(policy),
-      );
-      if (policy.shardKey.trim()) statement.shardKey = policy.shardKey.trim();
+      applyRuntimePolicy(statement);
       state.response = await executionClient.executeStmt(statement);
     } else {
       state.response = await executionClient.execute(source);
@@ -930,18 +1002,10 @@ async function executeQuery(): Promise<void> {
     activeExecutions -= 1;
     releaseRetiredClients();
     runButton.classList.remove("is-running");
-    runButton.innerHTML = runButtonLabel();
+    runLabel.textContent = "Run";
     renderValidation();
     renderOutputs();
   }
-}
-
-/** Canonical Run button content, shared by the loading restore path. */
-function runButtonLabel(): string {
-  const kbd = /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent)
-    ? "⌘↵"
-    : "Ctrl ↵";
-  return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7V5Z"></path></svg>Run<kbd data-kbd class="hidden rounded border border-white/25 px-1 font-mono text-[0.62rem] opacity-80 sm:inline">${kbd}</kbd>`;
 }
 
 const pageParams = new URLSearchParams(window.location.search);
@@ -960,6 +1024,12 @@ const editor = new EditorView({
       qqlCompletion,
       lintGutter(),
       linter(currentDiagnostic),
+      EditorView.contentAttributes.of({
+        spellcheck: "false",
+        autocorrect: "off",
+        autocapitalize: "off",
+        translate: "no",
+      }),
       keymap.of([
         indentWithTab,
         {

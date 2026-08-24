@@ -74,10 +74,10 @@ export const DEFAULT_SETTINGS: PlaygroundSettings = {
 
 export const DEFAULT_POLICY: RuntimePolicy = {
   enabled: false,
-  field: "workspace_id",
+  field: "tenant_id",
   op: "=",
-  value: "ws_101",
+  value: "acme",
   valueType: "string",
-  shardKey: "ws_101",
+  shardKey: "acme",
 };
 
