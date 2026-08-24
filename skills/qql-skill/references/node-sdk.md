@@ -84,7 +84,7 @@ Sparse IDF is QQL, not an inject and not a JSON corpus. `compileQuery` lowers
 object in JS.
 
 ```js
-const { parse, bind, compileQuery, injectFilter } = require('@veristamp/nqql');
+const { bind, compileQuery } = require('@veristamp/nqql');
 
 const bound = bind(`
   QUERY TEXT :q FROM sec10k USING sparse
@@ -94,8 +94,6 @@ const bound = bind(`
   LIMIT 10
 `, { q: "supply chain", tenant: "honeywell" });
 
-const [stmt] = parse(bound);
-stmt.injectFilter("tenant_id", "=", "honeywell");
 const route = compileQuery(bound);
 // route.payload.params.idf.corpus.must[0].key === "tenant_id"
 ```

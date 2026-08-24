@@ -175,7 +175,7 @@ Sparse IDF is QQL (`PARAMS (idf = 'global' | WHERE <filter>)`). There is no
 `params.idf` object from the filter AST.
 
 ```js
-import init, { Stmt, bind, compile } from 'qql-wasm';
+import init, { bind, compile } from 'qql-wasm';
 await init();
 
 const bound = bind(`
@@ -186,8 +186,6 @@ const bound = bind(`
   LIMIT 10
 `, JSON.stringify({ q: "supply chain", tenant: "acme" }));
 
-const stmt = new Stmt(bound);
-stmt.injectFilter("tenant_id", "=", "acme");
 const route = compile(bound);
 // route.payload.params.idf.corpus.must[0].key === "tenant_id"
 ```

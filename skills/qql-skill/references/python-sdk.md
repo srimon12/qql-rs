@@ -50,7 +50,7 @@ QQL. `compile_query` / execute lower `WHERE tenant_id = '…'` to Qdrant’s
 `params.idf.corpus` filter JSON — hosts do not build that dict.
 
 ```python
-from pyqql import parse, inject_filter, compile_query, bind, Client
+from pyqql import bind, compile_query
 
 # Isolation + routing + tenant-local BM25 stats (three different layers)
 qql = """
@@ -61,8 +61,6 @@ PARAMS (idf = WHERE tenant_id = :tenant)
 LIMIT 10
 """
 bound = bind(qql, {"q": "supply chain", "tenant": "honeywell"})
-stmt = parse(bound)[0]
-inject_filter(stmt, "tenant_id", "=", "honeywell")  # still required on untrusted QQL
 route = compile_query(bound)
 # route["payload"]["params"]["idf"] ==
 #   {"corpus": {"must": [{"key": "tenant_id", "match": {"value": "honeywell"}}]}}

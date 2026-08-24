@@ -91,7 +91,7 @@ CREATE COLLECTION docs (
   colbert VECTOR(128, COSINE) WITH MULTIVECTOR (comparator = 'max_sim')
 ) WITH HNSW (m = 16, ef_construct = 100);
 
--- Memory tiers + TurboQuant 4-bit dense (Qdrant 1.19 / QQL 1.4)
+-- Memory tiers + TurboQuant 4-bit dense (Qdrant 1.19 / QQL 1.5)
 CREATE COLLECTION docs_tiered (
   dense VECTOR(384, COSINE) WITH VECTOR (memory = 'cached', datatype = 'turbo4')
     WITH HNSW (memory = 'cold')
