@@ -45,7 +45,7 @@ pub struct Stmt {
 
 #[napi]
 impl Stmt {
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn inject_filter(
         &mut self,
         field: String,
@@ -74,23 +74,23 @@ impl Stmt {
         Ok(())
     }
 
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn to_object(&self) -> napi::Result<serde_json::Value> {
         serde_json::to_value(&self.inner).map_err(serde_napi_err)
     }
 
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn to_json(&self) -> napi::Result<String> {
         serde_json::to_string(&self.inner).map_err(serde_napi_err)
     }
 
     /// QQL `SHARD '…'` routing key (request-level). Prefer the clause in QQL.
-    #[napi(getter)]
+    #[napi(getter, catch_unwind)]
     pub fn shard_key(&self) -> Option<String> {
         self.inner.shard_key().map(str::to_owned)
     }
 
-    #[napi(setter)]
+    #[napi(setter, catch_unwind)]
     pub fn set_shard_key(&mut self, key: Option<String>) -> napi::Result<()> {
         if !self.inner.set_shard_key(key) {
             return Err(napi::Error::from_reason(
@@ -105,7 +105,7 @@ impl Stmt {
 //  Parser functions (identical to nqql)
 // ═══════════════════════════════════════════════════════════════════
 
-#[napi]
+#[napi(catch_unwind)]
 pub fn parse_all(input: String) -> napi::Result<Vec<Stmt>> {
     let stmts = Parser::parse_all(&input).map_err(to_napi_err)?;
     Ok(stmts.into_iter().map(|s| Stmt { inner: s }).collect())
@@ -114,18 +114,18 @@ pub fn parse_all(input: String) -> napi::Result<Vec<Stmt>> {
 /// Fast JSON-only parse — returns a JSON string of the AST array.
 /// Bypasses V8 Stmt object allocation entirely (~2× throughput).
 /// Ideal for HTTP/IPC forwarding.
-#[napi(js_name = parseAllJson)]
+#[napi(js_name = parseAllJson, catch_unwind)]
 pub fn parse_all_json(input: String) -> napi::Result<String> {
     let stmts = Parser::parse_all(&input).map_err(to_napi_err)?;
     serde_json::to_string(&stmts).map_err(serde_napi_err)
 }
 
-#[napi]
+#[napi(catch_unwind)]
 pub fn is_valid(input: String) -> bool {
     Parser::parse_all(&input).is_ok()
 }
 
-#[napi]
+#[napi(catch_unwind)]
 pub fn inject_filter(
     query: String,
     field: String,
@@ -155,7 +155,7 @@ pub fn inject_filter(
     serde_json::to_value(&stmt).map_err(serde_napi_err)
 }
 
-#[napi]
+#[napi(catch_unwind)]
 pub fn tokenize(input: String) -> napi::Result<serde_json::Value> {
     #[derive(serde::Serialize)]
     struct TokenView<'a> {
@@ -165,7 +165,7 @@ pub fn tokenize(input: String) -> napi::Result<serde_json::Value> {
     }
 
     let lexer = Lexer::new(&input);
-    let mut tokens = Vec::new();
+    let mut tokens = Vec::with_capacity(input.len() / 4 + 1);
     for token_result in lexer {
         let token =
             token_result.map_err(|e| napi::Error::new(napi::Status::InvalidArg, e.to_string()))?;
@@ -183,7 +183,7 @@ pub fn tokenize(input: String) -> napi::Result<serde_json::Value> {
     })
 }
 
-#[napi]
+#[napi(catch_unwind)]
 pub fn compile_query(input: String) -> napi::Result<serde_json::Value> {
     let stmt = Parser::parse(&input).map_err(to_napi_err)?;
     let compiled = routing::compile_statement(&stmt).map_err(to_napi_err)?;
@@ -214,12 +214,12 @@ pub fn compile_query(input: String) -> napi::Result<serde_json::Value> {
 //  Explain (standalone, no client needed)
 // ═══════════════════════════════════════════════════════════════════
 
-#[napi]
+#[napi(catch_unwind)]
 pub fn explain(query: String) -> napi::Result<String> {
     qql_core::explain::explain(&query).map_err(to_napi_err)
 }
 
-#[napi]
+#[napi(catch_unwind)]
 pub fn explain_stmt(stmt: &Stmt) -> napi::Result<String> {
     Ok(qql_core::explain::explain_node(&stmt.inner))
 }
@@ -238,7 +238,7 @@ pub struct JsClient {
 impl JsClient {
     /// Constructor required by napi-rs class registry.  Always throws —
     /// use `localExecutor()` or `httpExecutor()` to obtain a Client.
-    #[napi(constructor)]
+    #[napi(constructor, catch_unwind)]
     pub fn new() -> napi::Result<Self> {
         Err(napi::Error::from_reason(
             "Client must be created via localExecutor() or httpExecutor()",
@@ -250,6 +250,7 @@ impl JsClient {
     /// Returns a stable ExecutionReport JSON string for the JavaScript wrapper
     /// to deserialize into an object.
     #[napi(
+        catch_unwind,
         ts_args_type = "query: string | Stmt | string[] | Stmt[], options?: { onError?: 'stop' | 'continue', params?: Record<string, any> | any[] }"
     )]
     pub async fn execute(
@@ -337,25 +338,25 @@ impl JsClient {
         serde_json::to_string(&report).map_err(serde_napi_err)
     }
 
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn explain(&self, query: String) -> napi::Result<String> {
         qql::executor::Executor::explain(&query).map_err(to_napi_err)
     }
 
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn explain_stmt(&self, stmt: &Stmt) -> napi::Result<String> {
         qql::executor::Executor::explain_node(&stmt.inner).map_err(to_napi_err)
     }
 
     /// Compile a QQL query to its transport route (non-executing).
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn compile(&self, query: String) -> napi::Result<serde_json::Value> {
         crate::compile_query(query)
     }
 
     /// Flush and release edge storage. Idempotent; execution after close is
     /// rejected instead of silently reopening shards.
-    #[napi]
+    #[napi(catch_unwind)]
     pub async fn close(&self) -> napi::Result<()> {
         if self.closed.swap(true, std::sync::atomic::Ordering::AcqRel) {
             return Ok(());
@@ -425,7 +426,7 @@ pub struct LocalExecutorOptions {
 /// });
 /// ```
 #[cfg(feature = "fastembed-local")]
-#[napi(js_name = localExecutor)]
+#[napi(js_name = localExecutor, catch_unwind)]
 pub fn local_executor(
     data_dir: String,
     options: Option<LocalExecutorOptions>,
@@ -452,7 +453,7 @@ pub fn local_executor(
 ///
 /// Returns `[{ name, modelCode, dim, description }, ...]`.
 #[cfg(feature = "fastembed-local")]
-#[napi(js_name = listEmbeddingModels)]
+#[napi(js_name = listEmbeddingModels, catch_unwind)]
 pub fn list_embedding_models() -> Vec<EmbeddingModelInfoJs> {
     qql_edge::list_embedding_models()
         .into_iter()
@@ -491,7 +492,7 @@ pub struct EmbeddingModelInfoJs {
 ///
 /// `onDiskPayload` defaults to `true`.
 #[cfg(feature = "http-embedding")]
-#[napi(js_name = httpExecutor)]
+#[napi(js_name = httpExecutor, catch_unwind)]
 pub fn http_executor(
     data_dir: String,
     url: String,
@@ -637,6 +638,7 @@ fn standalone_client(options: Option<&serde_json::Value>) -> napi::Result<JsClie
 /// `localExecutor()` / `httpExecutor()` Client for anything beyond one-shots.
 #[cfg(any(feature = "fastembed-local", feature = "http-embedding"))]
 #[napi(
+    catch_unwind,
     ts_args_type = "stmt: Stmt, options?: { onError?: 'stop' | 'continue'; dataDir?: string; onDiskPayload?: boolean; model?: string; cacheDir?: string; showDownloadProgress?: boolean; embedUrl?: string; embedKey?: string; embedModel?: string; embedDim?: number }"
 )]
 pub async fn execute_stmt(stmt: &Stmt, options: Option<serde_json::Value>) -> napi::Result<String> {
@@ -653,6 +655,7 @@ pub async fn execute_stmt(stmt: &Stmt, options: Option<serde_json::Value>) -> na
 
 #[cfg(all(feature = "fastembed-local", not(feature = "http-embedding")))]
 #[napi(
+    catch_unwind,
     ts_args_type = "query: string | Stmt | string[] | Stmt[], options?: { onError?: 'stop' | 'continue'; params?: Record<string, any> | any[]; dataDir?: string; onDiskPayload?: boolean; model?: string; cacheDir?: string; showDownloadProgress?: boolean }"
 )]
 pub async fn execute(
@@ -667,6 +670,7 @@ pub async fn execute(
 
 #[cfg(feature = "http-embedding")]
 #[napi(
+    catch_unwind,
     ts_args_type = "query: string | Stmt | string[] | Stmt[], options?: { onError?: 'stop' | 'continue'; params?: Record<string, any> | any[]; dataDir?: string; onDiskPayload?: boolean; model?: string; cacheDir?: string; showDownloadProgress?: boolean; embedUrl?: string; embedKey?: string; embedModel?: string; embedDim?: number }"
 )]
 pub async fn execute(
@@ -704,7 +708,10 @@ fn bind_json_params(query: &str, params: &serde_json::Value) -> napi::Result<Str
 }
 
 /// Substitute `:name` (object) or `?` (array) placeholders into a query string.
-#[napi(ts_args_type = "query: string, params: Record<string, any> | any[]")]
+#[napi(
+    catch_unwind,
+    ts_args_type = "query: string, params: Record<string, any> | any[]"
+)]
 pub fn bind(query: String, params: serde_json::Value) -> napi::Result<String> {
     bind_json_params(&query, &params)
 }

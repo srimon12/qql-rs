@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict};
 
-#[pyclass(name = "HttpEmbedder")]
+#[pyclass(name = "HttpEmbedder", frozen, from_py_object)]
 #[derive(Clone)]
 pub struct PyHttpEmbedder {
     pub endpoint: String,
@@ -64,7 +64,7 @@ pub fn extract_embedder_config(
             ep_key = Some(py_emb.api_key.clone());
             model = Some(py_emb.model.clone());
             dim = Some(py_emb.dimension);
-        } else if let Ok(dict) = emb.downcast::<PyDict>() {
+        } else if let Ok(dict) = emb.cast::<PyDict>() {
             ep = Some(
                 dict.get_item("endpoint")?
                     .ok_or_else(|| {
@@ -142,7 +142,7 @@ pub fn create_executor(
     }
 
     if let Some(emb) = embedder {
-        if let Ok(dict) = emb.downcast::<PyDict>() {
+        if let Ok(dict) = emb.cast::<PyDict>() {
             if let Ok(Some(v)) = dict.get_item("multi_endpoint") {
                 config.multi_embedding_endpoint = Some(v.extract::<String>()?);
             }

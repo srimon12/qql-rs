@@ -1,11 +1,12 @@
-use pyo3::exceptions::{PySyntaxError, PyValueError};
+use pyo3::exceptions::{PyRuntimeError, PySyntaxError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList};
 use qql_core::ast::{self, ComparisonOp, Value};
+use qql_core::error::QqlError;
 use qql_core::lexer::Lexer;
 use qql_core::parser::Parser;
 
-#[pyclass(name = "Stmt")]
+#[pyclass(name = "Stmt", from_py_object)]
 #[derive(Clone)]
 pub struct PyStmt {
     pub inner: qql_core::ast::Stmt,
@@ -21,8 +22,7 @@ impl PyStmt {
         }
         let val = py_to_value(value)?;
         let cmp = str_to_comparison_op(op)?;
-        ast::inject_filter(&mut self.inner, field, cmp, val)
-            .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+        ast::inject_filter(&mut self.inner, field, cmp, val).map_err(qql_py_syntax_error)?;
         Ok(())
     }
 
@@ -49,6 +49,9 @@ impl PyStmt {
     }
 
     fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        // Must go through serde_json::Value: pythonize maps Rust tuples to
+        // Python tuples, while JSON arrays become lists. AST dicts are
+        // `Vec<(String, Value)>` and host tests walk those as lists.
         let val =
             serde_json::to_value(&self.inner).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
         pythonize::pythonize(py, &val).map_err(|e| PySyntaxError::new_err(e.to_string()))
@@ -59,7 +62,7 @@ impl PyStmt {
 /// Accepts single statements and semicolon-delimited scripts.
 #[pyfunction]
 fn parse(input: &str) -> PyResult<Vec<PyStmt>> {
-    let stmts = Parser::parse_all(input).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+    let stmts = Parser::parse_all(input).map_err(qql_py_syntax_error)?;
     Ok(stmts.into_iter().map(|s| PyStmt { inner: s }).collect())
 }
 
@@ -67,7 +70,7 @@ fn parse(input: &str) -> PyResult<Vec<PyStmt>> {
 /// creating Python objects for every node (parity with `nqql.parseJson`).
 #[pyfunction]
 fn parse_json(input: &str) -> PyResult<String> {
-    let statements = Parser::parse_all(input).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+    let statements = Parser::parse_all(input).map_err(qql_py_syntax_error)?;
     serde_json::to_string(&statements).map_err(|e| PySyntaxError::new_err(e.to_string()))
 }
 
@@ -91,14 +94,11 @@ fn inject_filter(
     let val = py_to_value(value)?;
     let cmp = str_to_comparison_op(op)?;
     if let Ok(mut py_stmt) = query.extract::<PyRefMut<'_, PyStmt>>() {
-        ast::inject_filter(&mut py_stmt.inner, field, cmp, val)
-            .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+        ast::inject_filter(&mut py_stmt.inner, field, cmp, val).map_err(qql_py_syntax_error)?;
         Ok(py_stmt.clone())
     } else if let Ok(query_str) = query.extract::<String>() {
-        let mut stmt =
-            Parser::parse(&query_str).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
-        ast::inject_filter(&mut stmt, field, cmp, val)
-            .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+        let mut stmt = Parser::parse(&query_str).map_err(qql_py_syntax_error)?;
+        ast::inject_filter(&mut stmt, field, cmp, val).map_err(qql_py_syntax_error)?;
         Ok(PyStmt { inner: stmt })
     } else {
         Err(pyo3::exceptions::PyTypeError::new_err(
@@ -110,13 +110,16 @@ fn inject_filter(
 #[pyfunction]
 fn tokenize<'py>(input: &str, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict>>> {
     let lexer = Lexer::new(input);
-    let mut result = Vec::new();
+    let mut result = Vec::with_capacity(input.len() / 4 + 1);
+    let kind_key = pyo3::intern!(py, "kind");
+    let text_key = pyo3::intern!(py, "text");
+    let pos_key = pyo3::intern!(py, "pos");
     for token_result in lexer {
-        let token = token_result.map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+        let token = token_result.map_err(qql_py_syntax_error)?;
         let d = PyDict::new(py);
-        d.set_item("kind", token.kind.as_str())?;
-        d.set_item("text", token.text)?;
-        d.set_item("pos", token.span.start as i64)?;
+        d.set_item(kind_key, token.kind.as_str())?;
+        d.set_item(text_key, token.text)?;
+        d.set_item(pos_key, token.span.start as i64)?;
         result.push(d);
     }
     Ok(result)
@@ -124,9 +127,8 @@ fn tokenize<'py>(input: &str, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict
 
 #[pyfunction]
 fn compile_query<'py>(py: Python<'py>, input: &str) -> PyResult<Bound<'py, PyAny>> {
-    let stmt = Parser::parse(input).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
-    let compiled = qql_plan::routing::compile_statement(&stmt)
-        .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+    let stmt = Parser::parse(input).map_err(qql_py_syntax_error)?;
+    let compiled = qql_plan::routing::compile_statement(&stmt).map_err(qql_py_syntax_error)?;
     let (method, path, payload) = match compiled.route {
         Some(route) => {
             let payload = route.body_json().unwrap_or(serde_json::Value::Null);
@@ -154,7 +156,7 @@ fn compile_query<'py>(py: Python<'py>, input: &str) -> PyResult<Bound<'py, PyAny
 mod embedder;
 pub use embedder::*;
 
-#[pyclass(name = "Client")]
+#[pyclass(name = "Client", frozen)]
 struct PyClient {
     inner: std::sync::Arc<qql::executor::Executor>,
     runtime: tokio::runtime::Runtime,
@@ -214,7 +216,7 @@ impl PyClient {
         } else {
             self.classify(query)?
         };
-        let out = self.run_input(input, oe)?;
+        let out = py.detach(|| self.run_input(input, oe))?;
         pythonize::pythonize(py, &out)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
     }
@@ -245,16 +247,16 @@ impl PyClient {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let val = Self::run_async(&inner, input, oe)
                 .await
-                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-            Python::with_gil(|py| {
+                .map_err(qql_py_error)?;
+            Python::attach(|py| {
                 pythonize::pythonize(py, &val)
                     .map(|b| b.unbind())
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+                    .map_err(|e| PyRuntimeError::new_err(e.to_string()))
             })
         })
     }
 
-    fn explain(&self, query: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    fn explain(&self, query: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
         let py = query.py();
         do_explain(py, query)
     }
@@ -275,7 +277,7 @@ enum Input {
 
 impl PyClient {
     fn classify(&self, query: &Bound<'_, PyAny>) -> PyResult<Input> {
-        if let Ok(list) = query.downcast::<pyo3::types::PyList>() {
+        if let Ok(list) = query.cast::<pyo3::types::PyList>() {
             if list.is_empty() {
                 return Ok(Input::StrList(Vec::new()));
             }
@@ -320,14 +322,14 @@ impl PyClient {
                 let report = self
                     .runtime
                     .block_on(self.inner.execute(&s, on_error))
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+                    .map_err(qql_py_error)?;
                 Ok(serde_json::to_value(&report).unwrap_or_default())
             }
             Input::Stmt(s) => {
                 let results = self
                     .runtime
                     .block_on(self.inner.execute_batch_nodes(vec![s], stop))
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+                    .map_err(qql_py_error)?;
                 let report = qql::executor::ExecutionReport::from_results(results);
                 Ok(serde_json::to_value(&report).unwrap_or_default())
             }
@@ -336,14 +338,14 @@ impl PyClient {
                 let report = self
                     .runtime
                     .block_on(self.inner.execute_batch(&refs, on_error))
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+                    .map_err(qql_py_error)?;
                 Ok(serde_json::to_value(&report).unwrap_or_default())
             }
             Input::StmtList(stmts) => {
                 let results = self
                     .runtime
                     .block_on(self.inner.execute_batch_nodes(stmts, stop))
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+                    .map_err(qql_py_error)?;
                 let report = qql::executor::ExecutionReport::from_results(results);
                 Ok(serde_json::to_value(&report).unwrap_or_default())
             }
@@ -432,7 +434,7 @@ fn bind_py_params(query: &str, params: &Bound<'_, PyAny>) -> PyResult<String> {
     if params.is_none() {
         return Ok(query.to_string());
     }
-    if let Ok(dict) = params.downcast::<PyDict>() {
+    if let Ok(dict) = params.cast::<PyDict>() {
         let mut map = std::collections::HashMap::new();
         for (k, v) in dict.iter() {
             let key = k
@@ -441,15 +443,13 @@ fn bind_py_params(query: &str, params: &Bound<'_, PyAny>) -> PyResult<String> {
             let val = py_to_value(&v)?;
             map.insert(key, val);
         }
-        qql_core::params::bind_named(query, |k| map.get(k).cloned())
-            .map_err(|e| PyValueError::new_err(e.to_string()))
-    } else if let Ok(list) = params.downcast::<PyList>() {
+        qql_core::params::bind_named(query, |k| map.get(k).cloned()).map_err(qql_py_value_error)
+    } else if let Ok(list) = params.cast::<PyList>() {
         let mut items = Vec::with_capacity(list.len());
         for item in list.iter() {
             items.push(py_to_value(&item)?);
         }
-        qql_core::params::bind_positional(query, &items)
-            .map_err(|e| PyValueError::new_err(e.to_string()))
+        qql_core::params::bind_positional(query, &items).map_err(qql_py_value_error)
     } else {
         Err(PyValueError::new_err(
             "params must be a dict for named parameters (:name) or a list for positional parameters (?)",
@@ -467,7 +467,7 @@ fn parse_on_error(s: &str) -> PyResult<qql::executor::OnError> {
     }
 }
 
-fn do_explain(py: Python<'_>, query: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+fn do_explain(py: Python<'_>, query: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let query_str: String;
     let plan_result = if let Ok(py_stmt) = query.extract::<PyRef<PyStmt>>() {
         query_str = String::from("<Stmt>");
@@ -484,21 +484,21 @@ fn do_explain(py: Python<'_>, query: &Bound<'_, PyAny>) -> PyResult<PyObject> {
     let dict = PyDict::new(py);
     match plan_result {
         Ok(plan) => {
-            dict.set_item("ok", true)?;
-            dict.set_item("query", query_str)?;
-            dict.set_item("plan", plan)?;
+            dict.set_item(pyo3::intern!(py, "ok"), true)?;
+            dict.set_item(pyo3::intern!(py, "query"), query_str)?;
+            dict.set_item(pyo3::intern!(py, "plan"), plan)?;
         }
         Err(e) => {
-            dict.set_item("ok", false)?;
-            dict.set_item("query", query_str)?;
-            dict.set_item("error", e.to_string())?;
+            dict.set_item(pyo3::intern!(py, "ok"), false)?;
+            dict.set_item(pyo3::intern!(py, "query"), query_str)?;
+            dict.set_item(pyo3::intern!(py, "error"), e.to_string())?;
         }
     }
-    Ok(dict.into())
+    Ok(dict.into_any().unbind())
 }
 
 #[pyfunction]
-fn explain(query: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+fn explain(query: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let py = query.py();
     do_explain(py, query)
 }
@@ -521,6 +521,36 @@ fn pyqql(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     Ok(())
 }
 
+fn qql_py_error(error: QqlError) -> PyErr {
+    attach_qql_error(PyRuntimeError::new_err(error.to_string()), error)
+}
+
+fn qql_py_syntax_error(error: QqlError) -> PyErr {
+    attach_qql_error(PySyntaxError::new_err(error.to_string()), error)
+}
+
+fn qql_py_value_error(error: QqlError) -> PyErr {
+    attach_qql_error(PyValueError::new_err(error.to_string()), error)
+}
+
+fn attach_qql_error(py_error: PyErr, error: QqlError) -> PyErr {
+    Python::attach(|py| {
+        let value = py_error.value(py);
+        let _ = value.setattr("code", error.code.as_ref());
+        let _ = value.setattr("kind", format!("{:?}", error.kind));
+        let span = if let Some(span) = error.span {
+            let span_dict = PyDict::new(py);
+            let _ = span_dict.set_item("start", span.start);
+            let _ = span_dict.set_item("end", span.end);
+            span_dict.into_any()
+        } else {
+            py.None().into_bound(py)
+        };
+        let _ = value.setattr("span", span);
+    });
+    py_error
+}
+
 fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
     if value.is_none() {
         return Ok(Value::Null);
@@ -537,14 +567,14 @@ fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
     if let Ok(s) = value.extract::<String>() {
         return Ok(Value::Str(s));
     }
-    if let Ok(list) = value.downcast::<PyList>() {
+    if let Ok(list) = value.cast::<PyList>() {
         let mut items = Vec::with_capacity(list.len());
         for item in list.iter() {
             items.push(py_to_value(&item)?);
         }
         return Ok(Value::List(items));
     }
-    if let Ok(dict) = value.downcast::<PyDict>() {
+    if let Ok(dict) = value.cast::<PyDict>() {
         let mut items = Vec::with_capacity(dict.len());
         for (key, item) in dict.iter() {
             let key = key
