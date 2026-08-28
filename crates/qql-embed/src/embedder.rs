@@ -253,9 +253,9 @@ pub fn sparse_model_unsupported_error(model: &str) -> QqlError {
         "QQL-EMBEDDING-SPARSE",
         format!(
             "sparse model '{model}' is not available on this embedder. \
-             Omit the MODEL clause (or use MODEL 'default') for local BM25-style \
-             hashing. To use model-aware sparse embedding (SPLADE / BGE-M3), \
-             configure a sparse embedding backend."
+             Omit the MODEL clause (or use MODEL 'default') for local \
+             wire-compatible BM25. To use model-aware sparse embedding \
+             (SPLADE / BGE-M3), configure a sparse embedding backend."
         ),
         None,
     )

@@ -81,8 +81,14 @@ $$\text{Rust Pure Sync} > \text{Node.js E2E} \ge \text{Python E2E} > \text{Rust 
 
 | Operation | Total Time | Throughput (ops/sec) |
 |---|:---:|:---:|
-| **Build Document Vector** | 64.13 ms | **1,559,443** |
-| **Build Query Vector** | 20.39 ms | **4,903,462** |
+| **Build Document Vector** | 511.32 ms | **195,571** |
+| **Build Query Vector** | 132.88 ms | **752,578** |
+
+The pipeline now matches Qdrant's `qdrant/bm25` exactly (murmur3-32 token
+IDs, word tokenizer, English stopwords, snowball stemming, BM25 tf
+saturation). Stemming and stopword filtering do real work per token, so
+throughput is lower than the old bare hasher — still ~5 µs per document,
+negligible next to dense ONNX inference.
 
 ---
 

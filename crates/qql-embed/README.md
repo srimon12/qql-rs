@@ -1,7 +1,7 @@
 # qql-embed
 
-Shared embedding resolution: host-agnostic [`Embedder`] trait, local BM25
-[`SparseEmbedder`], [`resolve_embeddings`], and schema
+Shared embedding resolution: host-agnostic [`Embedder`] trait, local
+wire-compatible BM25 [`SparseEmbedder`], [`resolve_embeddings`], and schema
 [`resolve_query_vector_kinds`].
 
 ## Proposition
@@ -149,6 +149,11 @@ let d = SparseEmbedder::embed_document("quantum computing"); // tf saturation
 Vectors produced here can be mixed with server-side `qdrant/bm25` inference on
 the same collection (a golden test pins the exact server output from the
 Qdrant docs).
+
+Like the server defaults, the pipeline is **English-only** (snowball English
+stemmer + English stopwords). Non-English corpora should use server-side
+`qdrant/bm25` inference with explicit `language` / `stemmer` / `stopwords`
+options instead.
 
 ## Known WASM limitation
 

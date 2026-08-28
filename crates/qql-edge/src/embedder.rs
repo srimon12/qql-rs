@@ -106,8 +106,9 @@ pub struct FastEmbedderOptions {
     pub model: Option<String>,
     /// Offline sparse model (SPLADE or BGE-M3 via `SparseTextEmbedding`).
     /// Accepts `splade`, `SPLADEPPV1`, `Qdrant/Splade_PP_en_v1`, `bge-m3`,
-    /// `BGEM3`, `BAAI/bge-m3`. When set, `embed_sparse` uses real ONNX
-    /// inference. `None` → local BM25 hashing for sparse requests.
+    /// `BGEM3`, `BAAI/bge-m3`. When set, sparse embedding uses real ONNX
+    /// inference. `None` → local wire-compatible BM25 (Qdrant
+    /// `qdrant/bm25`-identical token IDs) for sparse requests.
     pub sparse_model: Option<String>,
     /// Offline multivector model. Accepts `bge-m3`, `BGEM3Q`,
     /// `gpahal/bge-m3-onnx-int8`. When set, `embed_multi` runs via BGE-M3 ColBERT.

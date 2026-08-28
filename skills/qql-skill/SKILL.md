@@ -206,7 +206,7 @@ FROM <collection>
 |---|---|
 | `USING name` | Runtime looks up `name` on collection schema (dense / sparse / multivector). Names are **not** special-cased by spelling. |
 | `USING name AS DENSE` | Single dense embed (MiniLM, CLIP text, …) — one `Vec<f32>` |
-| `USING name AS SPARSE` | Sparse BM25-style embed |
+| `USING name AS SPARSE` | Sparse embed — wire-compatible BM25 (Qdrant `qdrant/bm25` token IDs; unit-weight queries, tf-saturated documents) |
 | `USING name AS MULTI` | Multivector / ColBERT bag → `[[f32,…],…]` via `embed_multi` (BGE-M3 ColBERT, not CLIP) |
 | `USING HYBRID …` | Expand text nearest → dense+sparse fusion (same AST as `QUERY HYBRID`) |
 | No `USING` | Schema must have exactly one compatible vector |

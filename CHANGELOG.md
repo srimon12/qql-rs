@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Work after **0.2.2** (`v0.2.2`). Workspace version is still 0.2.2 until the next tag.
 
+### 🚀 Added
+- **Wire-compatible client-side BM25** — `qql-embed` sparse embeddings are now byte-for-byte compatible with Qdrant's server-side `qdrant/bm25` model: murmur3-32 token IDs (same `murmur3_32` crate the server uses), word tokenizer (split on non-alphanumeric), Unicode lowercasing, English stopword removal (exact server list), and English snowball stemming (`qdrant-rust-stemmers`). Queries embed with unit term weights; documents with BM25 tf saturation (k1=1.2, b=0.75, avg_len=256). A golden test pins real server output from the Qdrant docs. Vectors can be mixed with server-side `qdrant/bm25` inference on the same collection (requires sparse vector `modifier = 'idf'`).
+- **Batched sparse ingestion** — `Embedder::embed_sparse_document_batch` with default loop implementation; the edge embedder batches fastembed sparse inference at ingestion.
+
+### 🔄 Changed
+- **BREAKING: sparse token IDs changed** — the previous FNV-1a + length-prefix hashing is replaced by murmur3-32. **Existing sparse collections must be re-embedded**; old and new vectors cannot be mixed within one collection. New vectors are interchangeable with server-side `qdrant/bm25`.
+- **BREAKING: `Embedder` trait split** — `embed_sparse` / `embed_sparse_batch` are replaced by `embed_sparse_query` (unit weights, search text) and `embed_sparse_document` / `embed_sparse_document_batch` (BM25 tf saturation, ingestion text). Previously both sides used the query-style log-tf function and `build_document` was dead code. Custom embedders overriding `embed_sparse` must move to the role methods; embedders using the defaults need no changes.
+- **Edge BM25 fidelity** — `qql-edge` `FastEmbedder` delegates its local BM25 fallback to `qdrant_edge::bm25_embed::EdgeBm25` (segment's exact tokenizer pipeline), replacing the hand-rolled hasher.
+- **Sparse tokenizer follows the server** — underscores and hyphens are word boundaries (e.g. `test_fn` → `test` + `fn`), stopwords are dropped, and inflections stem (`running` → `run`), matching Qdrant's `qdrant/bm25` defaults. The pipeline is English-only, like the server defaults; non-English corpora should use server-side inference with explicit language options.
+
 ## [0.2.2] - 2026-08-28
 
 ### 📦 Packaging

@@ -29,7 +29,9 @@ type DenseIter<'a> = &'a mut dyn Iterator<Item = Vec<f32>>;
 /// Resolve text → vectors on a statement before routing/execution.
 ///
 /// Dense jobs are collected and sent through `embed_dense_batch` (grouped by
-/// model). Sparse stays local BM25 via the embedder.
+/// model). Sparse is role-split via the embedder: queries embed with unit
+/// weights, documents with BM25 tf saturation (both wire-compatible with
+/// Qdrant's `qdrant/bm25`).
 pub async fn resolve_embeddings(stmt: &mut Stmt, embedder: &dyn Embedder) -> Result<(), QqlError> {
     match stmt {
         Stmt::Query(query) => resolve_query_embeddings(query, embedder).await?,

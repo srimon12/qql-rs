@@ -12,7 +12,7 @@
 //! Because token IDs and formulas match the server, vectors produced here can
 //! be mixed with server-side `qdrant/bm25` inference on the same collection.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
 use murmur3_32::Murmur3;
@@ -262,9 +262,11 @@ pub fn embed_document(text: &str) -> SparseVector {
 /// Embed document text with explicit BM25 parameters.
 ///
 /// `avgdl <= 0` or non-finite falls back to [`DEFAULT_AVGDL`] (it is a
-/// divisor). Term frequencies are counted per token string and only then
-/// mapped to token IDs, so a rare murmur3 collision merges exactly like the
-/// Qdrant server's implementation (last write wins).
+/// divisor). Frequencies are counted per token ID: on the rare murmur3
+/// collision two terms merge into one dimension with summed counts, which
+/// keeps output deterministic across runs (the server's own per-string
+/// counting is randomized there, so collided IDs carry no cross-implementation
+/// contract).
 pub fn embed_document_with(text: &str, k1: f64, b: f64, avgdl: f64) -> SparseVector {
     let tokens = tokenize(text);
     if tokens.is_empty() {
@@ -280,19 +282,21 @@ pub fn embed_document_with(text: &str, k1: f64, b: f64, avgdl: f64) -> SparseVec
     let denom_scale = k1 * (1.0 - b + b * doc_len / safe_avgdl);
     let k1p1 = k1 + 1.0;
 
-    let mut counts: HashMap<&str, u32> = HashMap::with_capacity(tokens.len());
+    let mut counts: HashMap<u32, u32> = HashMap::with_capacity(tokens.len());
     for token in &tokens {
-        *counts.entry(token).or_insert(0) += 1;
+        *counts.entry(token_id(token)).or_insert(0) += 1;
     }
 
-    // BTreeMap keeps indices sorted (post-insert invariant, like the server).
-    let mut tf_map: BTreeMap<u32, f64> = BTreeMap::new();
-    for (token, n) in &counts {
-        let tf = (*n as f64) * k1p1 / (denom_scale + *n as f64);
-        tf_map.insert(token_id(token), tf);
-    }
+    let mut indices: Vec<u32> = counts.keys().copied().collect();
+    indices.sort_unstable();
 
-    let indices: Vec<u32> = tf_map.keys().copied().collect();
-    let values: Vec<f32> = tf_map.values().map(|&tf| tf as f32).collect();
+    let values: Vec<f32> = indices
+        .iter()
+        .map(|id| {
+            let n = counts[id] as f64;
+            (n * k1p1 / (denom_scale + n)) as f32
+        })
+        .collect();
+
     SparseVector { indices, values }
 }

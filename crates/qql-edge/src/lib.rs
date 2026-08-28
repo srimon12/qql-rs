@@ -58,8 +58,9 @@ pub struct LocalExecutorOptions {
     #[cfg(feature = "fastembed-local")]
     pub model: Option<String>,
     /// Offline sparse model (SPLADE or BGE-M3 via `SparseTextEmbedding`).
-    /// e.g. `"splade"`, `"bge-m3"`. When set, `embed_sparse` uses real ONNX
-    /// inference. `None` → local BM25 hashing for sparse requests.
+    /// e.g. `"splade"`, `"bge-m3"`. When set, sparse embedding uses real ONNX
+    /// inference. `None` → local wire-compatible BM25 (Qdrant
+    /// `qdrant/bm25`-identical token IDs) for sparse requests.
     #[cfg(feature = "fastembed-local")]
     pub sparse_model: Option<String>,
     /// Offline multivector model (BGE-M3 ColBERT). e.g. `"bge-m3"`.

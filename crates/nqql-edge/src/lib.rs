@@ -393,7 +393,8 @@ pub struct LocalExecutorOptions {
     /// Default: `BGESmallENV15` (384-d).
     pub model: Option<String>,
     /// Offline sparse model (SPLADE or BGE-M3 via SparseTextEmbedding), e.g. `"splade"`.
-    /// `None` → local BM25 hashing for sparse requests.
+    /// `None` → local wire-compatible BM25 (Qdrant `qdrant/bm25`-identical
+    /// token IDs) for sparse requests.
     pub sparse_model: Option<String>,
     /// Offline multivector model (BGE-M3 ColBERT), e.g. `"bge-m3"`.
     pub multi_model: Option<String>,

@@ -122,6 +122,52 @@ fn test_embed_document_invalid_avgdl_falls_back_to_default() {
 }
 
 #[test]
+fn test_embed_document_merges_murmur3_collisions_deterministically() {
+    // Find two distinct 4-letter words colliding under murmur3-32 (the 26^4
+    // space holds ~24 such pairs, so this search always succeeds).
+    let mut seen: std::collections::HashMap<u32, [u8; 4]> = std::collections::HashMap::new();
+    let mut collision = None;
+    'outer: for n in 0..26u32.pow(4) {
+        let mut buf = [0u8; 4];
+        let mut x = n;
+        for slot in buf.iter_mut() {
+            *slot = b'a' + (x % 26) as u8;
+            x /= 26;
+        }
+        let id = sparse::token_id(std::str::from_utf8(&buf).unwrap());
+        match seen.get(&id) {
+            Some(prev) if *prev != buf => {
+                collision = Some((*prev, buf));
+                break 'outer;
+            }
+            _ => {
+                seen.insert(id, buf);
+            }
+        }
+    }
+    let (w1, w2) = collision.expect("expected a murmur3 collision in the 26^4 space");
+    let w1 = std::str::from_utf8(&w1).unwrap();
+    let w2 = std::str::from_utf8(&w2).unwrap();
+    assert_ne!(w1, w2);
+    assert_eq!(sparse::token_id(w1), sparse::token_id(w2));
+
+    // Both terms twice: merged into ONE dimension with summed count n=4.
+    // dl=4, avgdl=4 → denom_scale=1.2 → tf = 4*2.2/(4+1.2) ≈ 1.6923.
+    let text = format!("{w1} {w2} {w1} {w2}");
+    let v = sparse::embed_document_with(&text, 1.2, 0.75, 4.0);
+    assert_eq!(v.indices, vec![sparse::token_id(w1)]);
+    assert!(
+        (v.values[0] - 1.692_307_7f32).abs() < 1e-5,
+        "got {}",
+        v.values[0]
+    );
+
+    // Deterministic across repeated runs.
+    let again = sparse::embed_document_with(&text, 1.2, 0.75, 4.0);
+    assert_eq!(v, again);
+}
+
+#[test]
 fn test_embed_returns_empty_for_empty_text() {
     let doc = sparse::embed_document("");
     assert!(doc.indices.is_empty());
