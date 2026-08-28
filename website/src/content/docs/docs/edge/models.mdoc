@@ -35,8 +35,8 @@ runtime — no download, no inference. It produces the same token IDs and
 weights as Qdrant's server-side `qdrant/bm25` model (murmur3-32 token IDs,
 word tokenizer, English stopwords + snowball stemming; unit-weight query
 vectors, BM25 tf-saturated document vectors), so vectors can be mixed with
-server-side BM25 inference on the same collection. It runs at ~195k
-documents/s and ~750k queries/s in local microbenchmarks and needs no model.
+server-side BM25 inference on the same collection. It runs at ~260k
+documents/s and ~860k queries/s in local microbenchmarks and needs no model.
 Set `sparse_model: "bge-m3"` or `"splade"` only when you want real ONNX
 sparse inference.
 {% /aside %}

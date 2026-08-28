@@ -12,10 +12,10 @@
 //! Because token IDs and formulas match the server, vectors produced here can
 //! be mixed with server-side `qdrant/bm25` inference on the same collection.
 
-use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
 use murmur3_32::Murmur3;
+use phf::phf_set;
 use rust_stemmers::{Algorithm, Stemmer};
 
 /// Sparse embedding (indices + values). Transport-neutral — not a protobuf type.
@@ -41,7 +41,7 @@ pub fn token_id(token: &str) -> u32 {
 
 /// English stopwords, identical to the Qdrant server set
 /// (`lib/segment/src/index/field_index/full_text_index/stop_words/english.rs`).
-const ENGLISH_STOPWORDS: &[&str] = &[
+static STOPWORDS: phf::Set<&'static str> = phf_set! {
     "i",
     "me",
     "my",
@@ -221,12 +221,89 @@ const ENGLISH_STOPWORDS: &[&str] = &[
     "won't",
     "wouldn",
     "wouldn't",
-];
-
-static STOPWORDS: LazyLock<HashSet<&'static str>> =
-    LazyLock::new(|| ENGLISH_STOPWORDS.iter().copied().collect());
+};
 
 static STEMMER: LazyLock<Stemmer> = LazyLock::new(|| Stemmer::create(Algorithm::English));
+
+#[inline]
+fn process_token<F>(raw: &str, buf: &mut [u8; 64], f: &mut F)
+where
+    F: FnMut(&str),
+{
+    let bytes = raw.as_bytes();
+    let len = bytes.len();
+    if len <= buf.len() && raw.is_ascii() {
+        for (j, &b) in bytes.iter().enumerate() {
+            buf[j] = b.to_ascii_lowercase();
+        }
+        // SAFETY: We verified `raw.is_ascii()`, and `to_ascii_lowercase()`
+        // preserves valid ASCII (and thus valid UTF-8).
+        let lower = unsafe { std::str::from_utf8_unchecked(&buf[..len]) };
+        if !STOPWORDS.contains(lower) {
+            let stemmed = STEMMER.stem(lower);
+            f(&stemmed);
+        }
+    } else {
+        let lower = raw.to_lowercase();
+        if !STOPWORDS.contains(lower.as_str()) {
+            let stemmed = STEMMER.stem(&lower);
+            f(&stemmed);
+        }
+    }
+}
+
+/// Tokenize and iterate over stemmed tokens without intermediate heap allocations.
+#[inline]
+pub fn for_each_token<F>(text: &str, mut f: F)
+where
+    F: FnMut(&str),
+{
+    let mut buf = [0u8; 64];
+
+    if text.is_ascii() {
+        let bytes = text.as_bytes();
+        let mut start = None;
+        for (i, &b) in bytes.iter().enumerate() {
+            if b.is_ascii_alphanumeric() {
+                if start.is_none() {
+                    start = Some(i);
+                }
+            } else if let Some(s) = start {
+                process_token(&text[s..i], &mut buf, &mut f);
+                start = None;
+            }
+        }
+        if let Some(s) = start {
+            process_token(&text[s..], &mut buf, &mut f);
+        }
+    } else {
+        let mut start = None;
+        for (i, c) in text.char_indices() {
+            if c.is_alphanumeric() {
+                if start.is_none() {
+                    start = Some(i);
+                }
+            } else if let Some(s) = start {
+                process_token(&text[s..i], &mut buf, &mut f);
+                start = None;
+            }
+        }
+        if let Some(s) = start {
+            process_token(&text[s..], &mut buf, &mut f);
+        }
+    }
+}
+
+/// Tokenize and iterate directly over `u32` token IDs without intermediate allocations.
+#[inline]
+pub fn for_each_token_id<F>(text: &str, mut f: F)
+where
+    F: FnMut(u32),
+{
+    for_each_token(text, |token| {
+        f(token_id(token));
+    });
+}
 
 /// Server-default text pipeline: word tokenizer (split on non-alphanumeric),
 /// Unicode lowercase, English stopword removal, English snowball stemming.
@@ -234,18 +311,25 @@ static STEMMER: LazyLock<Stemmer> = LazyLock::new(|| Stemmer::create(Algorithm::
 /// Matches `WordTokenizer` + default `TokensProcessor` on the Qdrant server —
 /// the same pipeline Qdrant Edge's `EdgeBm25` runs.
 pub fn tokenize(text: &str) -> Vec<String> {
-    text.split(|c: char| !c.is_alphanumeric())
-        .filter(|token| !token.is_empty())
-        .map(|token| token.to_lowercase())
-        .filter(|token| !STOPWORDS.contains(token.as_str()))
-        .map(|token| STEMMER.stem(&token).into_owned())
-        .collect()
+    let mut tokens = Vec::new();
+    for_each_token(text, |token| {
+        tokens.push(token.to_string());
+    });
+    tokens
 }
 
 /// Embed query text: unique token IDs (sorted) with unit weights — identical
 /// to Qdrant's `qdrant/bm25` query embedding.
 pub fn embed_query(text: &str) -> SparseVector {
-    let mut indices: Vec<u32> = tokenize(text).iter().map(|token| token_id(token)).collect();
+    let mut indices: Vec<u32> = Vec::with_capacity(text.len() / 6 + 1);
+    for_each_token_id(text, |id| {
+        indices.push(id);
+    });
+
+    if indices.is_empty() {
+        return SparseVector::default();
+    }
+
     indices.sort_unstable();
     indices.dedup();
 
@@ -268,12 +352,16 @@ pub fn embed_document(text: &str) -> SparseVector {
 /// counting is randomized there, so collided IDs carry no cross-implementation
 /// contract).
 pub fn embed_document_with(text: &str, k1: f64, b: f64, avgdl: f64) -> SparseVector {
-    let tokens = tokenize(text);
-    if tokens.is_empty() {
+    let mut token_ids: Vec<u32> = Vec::with_capacity(text.len() / 6 + 1);
+    for_each_token_id(text, |id| {
+        token_ids.push(id);
+    });
+
+    if token_ids.is_empty() {
         return SparseVector::default();
     }
 
-    let doc_len = tokens.len() as f64;
+    let doc_len = token_ids.len() as f64;
     let safe_avgdl = if avgdl.is_finite() && avgdl > 0.0 {
         avgdl
     } else {
@@ -282,21 +370,24 @@ pub fn embed_document_with(text: &str, k1: f64, b: f64, avgdl: f64) -> SparseVec
     let denom_scale = k1 * (1.0 - b + b * doc_len / safe_avgdl);
     let k1p1 = k1 + 1.0;
 
-    let mut counts: HashMap<u32, u32> = HashMap::with_capacity(tokens.len());
-    for token in &tokens {
-        *counts.entry(token_id(token)).or_insert(0) += 1;
+    token_ids.sort_unstable();
+
+    let mut indices = Vec::with_capacity(token_ids.len());
+    let mut values = Vec::with_capacity(token_ids.len());
+
+    let mut i = 0;
+    while i < token_ids.len() {
+        let id = token_ids[i];
+        let mut count = 1u32;
+        while i + 1 < token_ids.len() && token_ids[i + 1] == id {
+            count += 1;
+            i += 1;
+        }
+        indices.push(id);
+        let n = count as f64;
+        values.push((n * k1p1 / (denom_scale + n)) as f32);
+        i += 1;
     }
-
-    let mut indices: Vec<u32> = counts.keys().copied().collect();
-    indices.sort_unstable();
-
-    let values: Vec<f32> = indices
-        .iter()
-        .map(|id| {
-            let n = counts[id] as f64;
-            (n * k1p1 / (denom_scale + n)) as f32
-        })
-        .collect();
 
     SparseVector { indices, values }
 }
