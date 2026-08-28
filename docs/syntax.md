@@ -274,7 +274,7 @@ search-param    = "hnsw_ef", "=", positive-integer
                 | "quantization", "=", object
                 | "rrf_k", "=", positive-integer
                 | "rrf_weights", "=", array
-                | "idf", "=", ( "global" | object )
+                | "idf", "=", ( string | "global" | "WHERE", filter )
                 | "timeout", "=", positive-integer
                 | "consistency", "=", ( positive-integer | "majority" | "quorum" | "all" | string ) ;
 ```

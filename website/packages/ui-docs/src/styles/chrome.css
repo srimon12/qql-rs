@@ -445,6 +445,131 @@ body.app-shell main {
   width: min(calc(100% - 2rem), 68rem);
 }
 
+.app-share-pop {
+  display: none;
+  inset: unset;
+  margin: 0;
+  width: min(22.5rem, calc(100vw - 1.5rem));
+  padding: 0.9rem;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 0.75rem;
+  background: var(--sl-color-bg);
+  color: var(--sl-color-gray-1);
+  box-shadow: 0 18px 48px color-mix(in srgb, var(--sl-color-text) 16%, transparent);
+}
+
+.app-share-pop:popover-open {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.app-share-pop__kicker {
+  margin: 0;
+  font-family: var(--sl-font-mono);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--sl-color-accent);
+}
+
+.app-share-pop__hint {
+  margin: -0.25rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--sl-color-gray-3);
+}
+
+.app-share-pop__field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.4rem;
+}
+
+.app-share-pop__url {
+  min-height: 2.25rem;
+  padding-inline: 0.65rem;
+  font-family: var(--sl-font-mono);
+  font-size: 0.72rem;
+}
+
+.app-share-pop__copy,
+.app-share-pop__social {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-height: 2.25rem;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 0.5rem;
+  background: var(--sl-color-gray-6);
+  color: var(--sl-color-gray-2);
+  font-family: var(--sl-font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    color 160ms ease,
+    background-color 160ms ease;
+}
+
+.app-share-pop__copy {
+  padding: 0 0.75rem;
+}
+
+.app-share-pop__copy:hover,
+.app-share-pop__social:hover {
+  border-color: var(--sl-color-gray-4);
+  background: var(--sl-color-bg);
+  color: var(--sl-color-white);
+}
+
+.app-share-pop__copy:focus-visible,
+.app-share-pop__social:focus-visible {
+  outline: 2px solid var(--sl-color-accent);
+  outline-offset: 2px;
+}
+
+.app-share-pop__copy[data-copied] {
+  border-color: color-mix(in srgb, #31b276 50%, var(--sl-color-gray-5));
+  color: #31b276;
+}
+
+.app-share-pop__copy[data-copied] [data-share-copy-icon],
+.app-share-pop__copy:not([data-copied]) [data-share-check-icon] {
+  display: none;
+}
+
+.app-share-pop__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.app-share-pop__social {
+  flex: 1 1 0;
+  min-width: 5.5rem;
+  padding: 0 0.65rem;
+}
+
+.app-share-pop__icon {
+  width: 0.95rem;
+  height: 0.95rem;
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.app-share-pop__icon--fill {
+  fill: currentColor;
+  stroke: none;
+}
+
 .app-input,
 .app-select {
   box-sizing: border-box;

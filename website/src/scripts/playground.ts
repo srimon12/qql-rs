@@ -743,20 +743,119 @@ function setupPresets(): void {
   }
 }
 
+function currentShareUrl(): URL {
+  const url = new URL(window.location.href);
+  url.search = "";
+  url.hash = "";
+  url.searchParams.set("q", editor.state.doc.toString());
+  const ref = docsBacklink.hidden ? null : docsBacklink.getAttribute("href");
+  if (ref?.startsWith("/docs/")) url.searchParams.set("ref", ref);
+  return url;
+}
+
+function shareHeadline(source: string): string {
+  const line =
+    source
+      .split("\n")
+      .map((row) => row.trim())
+      .find((row) => row && !row.startsWith("--")) ?? "a QQL query";
+  const clipped = line.length > 72 ? `${line.slice(0, 69)}…` : line;
+  return `Try this in the QQL playground:\n${clipped}`;
+}
+
+function positionShareMenu(menu: HTMLElement): void {
+  const rect = shareButton.getBoundingClientRect();
+  const width = menu.offsetWidth;
+  const left = Math.min(
+    Math.max(8, rect.right - width),
+    window.innerWidth - width - 8,
+  );
+  menu.style.top = `${rect.bottom + 8}px`;
+  menu.style.left = `${left}px`;
+}
+
 function setupShare(): void {
-  shareButton.addEventListener("click", async () => {
-    const url = new URL(window.location.href);
-    url.search = "";
-    url.searchParams.set("q", editor.state.doc.toString());
-    const ref = docsBacklink.hidden ? null : docsBacklink.getAttribute("href");
-    if (ref?.startsWith("/docs/")) url.searchParams.set("ref", ref);
+  const menu = required<HTMLElement>("[data-share-menu]");
+  const urlInput = required<HTMLInputElement>("[data-share-url]");
+  const copyButton = required<HTMLButtonElement>("[data-share-copy]");
+  const copyLabel = required<HTMLElement>("[data-share-copy-label]");
+  const xLink = required<HTMLAnchorElement>("[data-share-x]");
+  const linkedinLink = required<HTMLAnchorElement>("[data-share-linkedin]");
+  const nativeButton = document.querySelector<HTMLButtonElement>("[data-share-native]");
+  const canPopover = "showPopover" in HTMLElement.prototype;
+  let copiedTimer = 0;
+
+  const fill = (): string => {
+    const url = currentShareUrl().toString();
+    const text = shareHeadline(editor.state.doc.toString());
+    urlInput.value = url;
+    xLink.href = `https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`;
+    linkedinLink.href = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(url)}`;
+    return url;
+  };
+
+  const markCopied = (copied: boolean): void => {
+    if (copied) copyButton.dataset.copied = "true";
+    else delete copyButton.dataset.copied;
+    copyLabel.textContent = copied ? "Copied" : "Copy";
+    copyButton.setAttribute("aria-label", copied ? "Link copied" : "Copy link");
+  };
+
+  const copyShareUrl = async (): Promise<void> => {
+    const url = fill();
     try {
-      await navigator.clipboard.writeText(url.toString());
+      await navigator.clipboard.writeText(url);
+      markCopied(true);
       toast("Share link copied.");
+      window.clearTimeout(copiedTimer);
+      copiedTimer = window.setTimeout(() => markCopied(false), 2000);
     } catch {
-      toast("Clipboard access was denied. Copy the page URL instead.", "error");
+      urlInput.select();
+      toast("Clipboard access was denied. Copy the URL from the field.", "error");
     }
+  };
+
+  if (nativeButton && "share" in navigator) {
+    nativeButton.hidden = false;
+    nativeButton.addEventListener("click", async () => {
+      const url = fill();
+      try {
+        await navigator.share({
+          title: "QQL Playground",
+          text: shareHeadline(editor.state.doc.toString()),
+          url,
+        });
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") return;
+        toast("Share failed.", "error");
+      }
+    });
+  }
+
+  if (!canPopover) {
+    shareButton.addEventListener("click", () => void copyShareUrl());
+    return;
+  }
+
+  menu.addEventListener("toggle", () => {
+    const open = menu.matches(":popover-open");
+    shareButton.setAttribute("aria-expanded", String(open));
+    if (!open) {
+      markCopied(false);
+      return;
+    }
+    fill();
+    positionShareMenu(menu);
+    urlInput.focus();
+    urlInput.select();
   });
+
+  window.addEventListener("resize", () => {
+    if (menu.matches(":popover-open")) positionShareMenu(menu);
+  });
+
+  copyButton.addEventListener("click", () => void copyShareUrl());
+  urlInput.addEventListener("focus", () => urlInput.select());
 }
 
 function setupDocsBacklink(ref: string | null): void {

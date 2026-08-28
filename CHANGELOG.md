@@ -9,7 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Work after **0.2.1** (`v0.2.1`). Workspace version is still 0.2.1 until the next tag.
+Work after **0.2.2** (`v0.2.2`). Workspace version is still 0.2.2 until the next tag.
+
+## [0.2.2] - 2026-08-28
+
+### 📦 Packaging
+- **Workspace 0.2.2** — all crates, `pyqql` / `pyqql-edge` (PyPI), `@veristamp/nqql` / `@veristamp/nqql-edge` + platform packages (npm), and `qql-wasm` move to **0.2.2** together.
+- **VS Code extension 0.2.5** — ships the rebuilt `nodejs`-target WASM bundle (parameter binding + QQL 1.5 parse surface) and the `qidftenant` snippet. The extension version stays independent of the workspace version.
 
 ### 🚀 Added
 - **Parameter binding (`:name` / `?`)** — `qql-core::params` substitutes named and positional placeholders in QQL source before parse. `$` stays an identifier character (`$score`, `$1`), so placeholders are only `:name` and `?`. Colons inside compact dicts (`{a:b}`) are not placeholders. Strings and `--` comments are never rewritten. Exposed as `bind` / `bind_named` / `bind_positional` on Python, Node, WASM, and edge SDKs, `Executor::execute_with_params` / `execute_with_positional_params`, and `Client.execute(..., params=…)`.

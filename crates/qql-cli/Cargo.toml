@@ -27,10 +27,10 @@ rest = ["qql/rest"]
 edge = ["qql-edge", "qql-edge/http-embedding"]
 
 [dependencies]
-qql-core = { version = "0.2.1", path = "../qql-core" }
-qql-plan = { version = "0.2.1", path = "../qql-plan" }
-qql = { version = "0.2.1", path = "../qql-runtime", default-features = false }
-qql-edge = { version = "0.2.1", path = "../qql-edge", optional = true }
+qql-core = { version = "0.2.2", path = "../qql-core" }
+qql-plan = { version = "0.2.2", path = "../qql-plan" }
+qql = { version = "0.2.2", path = "../qql-runtime", default-features = false }
+qql-edge = { version = "0.2.2", path = "../qql-edge", optional = true }
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 serde = { version = "1", features = ["derive"] }
