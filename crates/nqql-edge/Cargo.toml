@@ -25,10 +25,10 @@ http-embedding = ["qql-edge/http-embedding"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
-qql-core = { version = "0.2.1", path = "../qql-core", features = ["serde", "json"] }
-qql-plan = { version = "0.2.1", path = "../qql-plan" }
-qql = { version = "0.2.1", path = "../qql-runtime", default-features = false }
-qql-edge = { version = "0.2.1", path = "../qql-edge" }
+qql-core = { version = "0.2.2", path = "../qql-core", features = ["serde", "json"] }
+qql-plan = { version = "0.2.2", path = "../qql-plan" }
+qql = { version = "0.2.2", path = "../qql-runtime", default-features = false }
+qql-edge = { version = "0.2.2", path = "../qql-edge" }
 napi = { version = "2", features = ["napi8", "serde-json", "async"] }
 napi-derive = "2"
 serde_json = "1"
