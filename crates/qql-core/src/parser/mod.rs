@@ -321,9 +321,7 @@ impl<'a> AstLowerer<'a> {
                     Ok(crate::ast::Value::Str(tok.text.to_string()))
                 }
             }
-            TokenKind::Lbrace => self
-                .parse_payload_dict()
-                .map(|items| crate::ast::Value::Dict(items.into_iter().collect())),
+            TokenKind::Lbrace => self.parse_payload_dict().map(crate::ast::Value::Dict),
             TokenKind::Lbracket => self.parse_list().map(crate::ast::Value::List),
             _ => Err(QqlError::parse(
                 "QQL-PARSE-VALUE",

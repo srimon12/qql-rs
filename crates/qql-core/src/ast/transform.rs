@@ -235,12 +235,11 @@ fn expression_prefetch(expression: &mut QueryExpr) -> Option<&mut Vec<Prefetch>>
 }
 
 fn merge_selector(selector: &mut PointSelector, filter: FilterExpr) {
-    let current =
-        match core::mem::replace(selector, PointSelector::Filter(Box::new(filter.clone()))) {
-            PointSelector::Id(id) => FilterExpr::PointId(PointIdPredicate::Eq(id)),
-            PointSelector::Ids(ids) => FilterExpr::PointId(PointIdPredicate::In(ids)),
-            PointSelector::Filter(filter) => *filter,
-        };
+    let current = match core::mem::replace(selector, PointSelector::Ids(Vec::new())) {
+        PointSelector::Id(id) => FilterExpr::PointId(PointIdPredicate::Eq(id)),
+        PointSelector::Ids(ids) => FilterExpr::PointId(PointIdPredicate::In(ids)),
+        PointSelector::Filter(existing) => *existing,
+    };
     *selector = PointSelector::Filter(Box::new(and(current, filter)));
 }
 

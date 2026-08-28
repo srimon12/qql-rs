@@ -27,7 +27,6 @@ use crate::ast::Value;
 use crate::error::QqlError;
 use alloc::format;
 use alloc::string::{String, ToString};
-use alloc::vec::Vec;
 
 /// Check if a string is a simple identifier (starts with ascii alphabetic or `_`,
 /// followed by ascii alphanumeric or `_`).
@@ -40,24 +39,110 @@ fn is_simple_ident(name: &str) -> bool {
     chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-/// Returns true if the `:` at position `i` is at a valid token boundary to begin a parameter placeholder.
+/// Returns true if the `:` at byte offset `i` is at a valid token boundary to begin a parameter placeholder.
 ///
 /// If preceded immediately by an identifier character (`[a-zA-Z0-9_$]`), quote (`'`, `"`, `` ` ``),
 /// or closing delimiter (`}`, `]`), the colon is part of dictionary syntax (e.g. `{a:b}`, `{'a':b}`)
-/// rather than a placeholder.
-fn is_placeholder_start(chars: &[char], i: usize) -> bool {
+/// rather than a placeholder. Delimiters are ASCII, so a byte scan matches the former char scan.
+fn is_placeholder_start(bytes: &[u8], i: usize) -> bool {
     if i == 0 {
         return true;
     }
-    let prev = chars[i - 1];
-    !(prev.is_ascii_alphanumeric()
-        || prev == '_'
-        || prev == '$'
-        || prev == '\''
-        || prev == '"'
-        || prev == '`'
-        || prev == '}'
-        || prev == ']')
+    !matches!(
+        bytes[i - 1],
+        b'0'..=b'9'
+            | b'A'..=b'Z'
+            | b'a'..=b'z'
+            | b'_'
+            | b'$'
+            | b'\''
+            | b'"'
+            | b'`'
+            | b'}'
+            | b']'
+    )
+}
+
+#[inline]
+fn is_ident_start(b: u8) -> bool {
+    b.is_ascii_alphabetic() || b == b'_'
+}
+
+#[inline]
+fn is_ident_continue(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+/// Advance past a `--` line comment. `i` is the first `-`. Stops before `\n`.
+fn scan_line_comment(bytes: &[u8], mut i: usize) -> usize {
+    while i < bytes.len() && bytes[i] != b'\n' {
+        i += 1;
+    }
+    i
+}
+
+/// Advance past a backtick-quoted span including the closing `` ` `` if present.
+fn scan_backtick(bytes: &[u8], mut i: usize) -> usize {
+    i += 1;
+    while i < bytes.len() {
+        if bytes[i] == b'`' {
+            return i + 1;
+        }
+        i += 1;
+    }
+    i
+}
+
+/// Advance past a single-quoted literal, honoring `''` and `\` escapes.
+fn scan_single_quoted(bytes: &[u8], mut i: usize) -> usize {
+    i += 1;
+    while i < bytes.len() {
+        let sc = bytes[i];
+        i += 1;
+        if sc == b'\\' && i < bytes.len() {
+            i += 1;
+        } else if sc == b'\'' {
+            if i < bytes.len() && bytes[i] == b'\'' {
+                i += 1;
+            } else {
+                break;
+            }
+        }
+    }
+    i
+}
+
+/// Advance past a double-quoted span, honoring `\` escapes.
+fn scan_double_quoted(bytes: &[u8], mut i: usize) -> usize {
+    i += 1;
+    while i < bytes.len() {
+        let sc = bytes[i];
+        i += 1;
+        if sc == b'\\' && i < bytes.len() {
+            i += 1;
+        } else if sc == b'"' {
+            break;
+        }
+    }
+    i
+}
+
+/// Skip a comment or quoted span so placeholders inside it are not substituted.
+/// Returns the new index when `bytes[i]` opens such a span.
+fn skip_protected(bytes: &[u8], i: usize) -> Option<usize> {
+    match bytes.get(i).copied() {
+        Some(b'-') if bytes.get(i + 1) == Some(&b'-') => Some(scan_line_comment(bytes, i)),
+        Some(b'`') => Some(scan_backtick(bytes, i)),
+        Some(b'\'') => Some(scan_single_quoted(bytes, i)),
+        Some(b'"') => Some(scan_double_quoted(bytes, i)),
+        _ => None,
+    }
+}
+
+/// ASCII identifier slice at `[start, end)`. Infallible because the scanner
+/// only advances over `is_ident_start` / `is_ident_continue` bytes.
+fn ident_at(source: &str, start: usize, end: usize) -> &str {
+    source.get(start..end).unwrap_or("")
 }
 
 /// Escape a string literal for QQL single-quoted representation.
@@ -146,81 +231,20 @@ pub fn bind_named<F>(source: &str, lookup: F) -> Result<String, QqlError>
 where
     F: Fn(&str) -> Option<Value>,
 {
+    let bytes = source.as_bytes();
+    let len = bytes.len();
     let mut out = String::with_capacity(source.len());
-    let chars: Vec<char> = source.chars().collect();
-    let len = chars.len();
     let mut i = 0;
+    let mut run = 0;
 
     while i < len {
-        let ch = chars[i];
-
-        // 1. Line comment: skip until newline
-        if ch == '-' && i + 1 < len && chars[i + 1] == '-' {
-            while i < len && chars[i] != '\n' {
-                out.push(chars[i]);
-                i += 1;
-            }
+        if let Some(next) = skip_protected(bytes, i) {
+            i = next;
             continue;
         }
 
-        // 2. Backtick string: preserve verbatim
-        if ch == '`' {
-            out.push('`');
-            i += 1;
-            while i < len {
-                let sc = chars[i];
-                out.push(sc);
-                i += 1;
-                if sc == '`' {
-                    break;
-                }
-            }
-            continue;
-        }
-
-        // 3. Single-quoted string literal: preserve
-        if ch == '\'' {
-            out.push('\'');
-            i += 1;
-            while i < len {
-                let sc = chars[i];
-                out.push(sc);
-                i += 1;
-                if sc == '\\' && i < len {
-                    out.push(chars[i]);
-                    i += 1;
-                } else if sc == '\'' {
-                    if i < len && chars[i] == '\'' {
-                        out.push('\'');
-                        i += 1;
-                    } else {
-                        break;
-                    }
-                }
-            }
-            continue;
-        }
-
-        // 4. Double-quoted string / identifier: preserve
-        if ch == '"' {
-            out.push('"');
-            i += 1;
-            while i < len {
-                let sc = chars[i];
-                out.push(sc);
-                i += 1;
-                if sc == '\\' && i < len {
-                    out.push(chars[i]);
-                    i += 1;
-                } else if sc == '"' {
-                    break;
-                }
-            }
-            continue;
-        }
-
-        // 5. Positional placeholder in named binder -> detect mixed style
-        if ch == '?' {
+        let ch = bytes[i];
+        if ch == b'?' {
             return Err(QqlError::validation(
                 "QQL-BIND-MIXED-STYLE",
                 "query contains positional placeholder '?' — use bind_positional / execute_with_positional_params instead of named parameter binding",
@@ -228,20 +252,18 @@ where
             ));
         }
 
-        // 6. Named placeholder `:name`
-        if ch == ':' && i + 1 < len && is_placeholder_start(&chars, i) {
-            let next = chars[i + 1];
-            // Disallow :: (type cast or namespace) and require valid identifier start
-            if next != ':' && (next.is_ascii_alphabetic() || next == '_') {
-                i += 1; // skip ':'
-                let mut name = String::new();
-                while i < len && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
-                    name.push(chars[i]);
+        if ch == b':' && i + 1 < len && is_placeholder_start(bytes, i) {
+            let next = bytes[i + 1];
+            if next != b':' && is_ident_start(next) {
+                out.push_str(&source[run..i]);
+                i += 1;
+                let name_start = i;
+                while i < len && is_ident_continue(bytes[i]) {
                     i += 1;
                 }
-                if let Some(val) = lookup(&name) {
-                    let lit = value_to_literal(&val)?;
-                    out.push_str(&lit);
+                let name = ident_at(source, name_start, i);
+                if let Some(val) = lookup(name) {
+                    out.push_str(&value_to_literal(&val)?);
                 } else {
                     return Err(QqlError::validation(
                         "QQL-BIND-MISSING-PARAM",
@@ -249,97 +271,37 @@ where
                         None,
                     ));
                 }
+                run = i;
                 continue;
             }
         }
 
-        out.push(ch);
         i += 1;
     }
 
+    out.push_str(&source[run..len]);
     Ok(out)
 }
 
 /// Substitute positional parameters (`?`) sequentially into `source`.
 pub fn bind_positional(source: &str, params: &[Value]) -> Result<String, QqlError> {
+    let bytes = source.as_bytes();
+    let len = bytes.len();
     let mut out = String::with_capacity(source.len());
-    let chars: Vec<char> = source.chars().collect();
-    let len = chars.len();
     let mut i = 0;
+    let mut run = 0;
     let mut param_index = 0;
 
     while i < len {
-        let ch = chars[i];
-
-        // 1. Line comment
-        if ch == '-' && i + 1 < len && chars[i + 1] == '-' {
-            while i < len && chars[i] != '\n' {
-                out.push(chars[i]);
-                i += 1;
-            }
+        if let Some(next) = skip_protected(bytes, i) {
+            i = next;
             continue;
         }
 
-        // 2. Backtick string
-        if ch == '`' {
-            out.push('`');
-            i += 1;
-            while i < len {
-                let sc = chars[i];
-                out.push(sc);
-                i += 1;
-                if sc == '`' {
-                    break;
-                }
-            }
-            continue;
-        }
-
-        // 3. Single-quoted string literal
-        if ch == '\'' {
-            out.push('\'');
-            i += 1;
-            while i < len {
-                let sc = chars[i];
-                out.push(sc);
-                i += 1;
-                if sc == '\\' && i < len {
-                    out.push(chars[i]);
-                    i += 1;
-                } else if sc == '\'' {
-                    if i < len && chars[i] == '\'' {
-                        out.push('\'');
-                        i += 1;
-                    } else {
-                        break;
-                    }
-                }
-            }
-            continue;
-        }
-
-        // 4. Double-quoted string
-        if ch == '"' {
-            out.push('"');
-            i += 1;
-            while i < len {
-                let sc = chars[i];
-                out.push(sc);
-                i += 1;
-                if sc == '\\' && i < len {
-                    out.push(chars[i]);
-                    i += 1;
-                } else if sc == '"' {
-                    break;
-                }
-            }
-            continue;
-        }
-
-        // 5. Named placeholder in positional binder -> detect mixed style
-        if ch == ':' && i + 1 < len && is_placeholder_start(&chars, i) {
-            let next = chars[i + 1];
-            if next != ':' && (next.is_ascii_alphabetic() || next == '_') {
+        let ch = bytes[i];
+        if ch == b':' && i + 1 < len && is_placeholder_start(bytes, i) {
+            let next = bytes[i + 1];
+            if next != b':' && is_ident_start(next) {
                 return Err(QqlError::validation(
                     "QQL-BIND-MIXED-STYLE",
                     "query contains named placeholder ':name' — use bind_named / execute_with_params instead of positional parameter binding",
@@ -348,30 +310,30 @@ pub fn bind_positional(source: &str, params: &[Value]) -> Result<String, QqlErro
             }
         }
 
-        // 6. Sequential positional placeholder `?`
-        if ch == '?' {
+        if ch == b'?' {
             if param_index < params.len() {
-                let lit = value_to_literal(&params[param_index])?;
-                out.push_str(&lit);
+                out.push_str(&source[run..i]);
+                out.push_str(&value_to_literal(&params[param_index])?);
                 param_index += 1;
                 i += 1;
+                run = i;
                 continue;
-            } else {
-                return Err(QqlError::validation(
-                    "QQL-BIND-MISSING-PARAM",
-                    format!(
-                        "positional parameter ? index {} out of range (total provided: {})",
-                        param_index + 1,
-                        params.len()
-                    ),
-                    None,
-                ));
             }
+            return Err(QqlError::validation(
+                "QQL-BIND-MISSING-PARAM",
+                format!(
+                    "positional parameter ? index {} out of range (total provided: {})",
+                    param_index + 1,
+                    params.len()
+                ),
+                None,
+            ));
         }
 
-        out.push(ch);
         i += 1;
     }
+
+    out.push_str(&source[run..len]);
 
     if param_index < params.len() {
         let msg = if param_index == 0 {

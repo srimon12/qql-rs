@@ -13,14 +13,20 @@ use crate::{bind_py_params, classify, parse_on_error, qql_py_error, run_async, I
 pub fn list_embedding_models(py: Python<'_>) -> PyResult<Bound<'_, PyList>> {
     let models = qql_edge::list_embedding_models();
     let out = PyList::empty(py);
+    let name_key = pyo3::intern!(py, "name");
+    let multi_key = pyo3::intern!(py, "multi");
+    let image_key = pyo3::intern!(py, "image");
+    let model_code_key = pyo3::intern!(py, "model_code");
+    let dim_key = pyo3::intern!(py, "dim");
+    let description_key = pyo3::intern!(py, "description");
     for m in models {
         let d = PyDict::new(py);
-        d.set_item("name", m.name)?;
-        d.set_item("multi", m.multi)?;
-        d.set_item("image", m.image)?;
-        d.set_item("model_code", m.model_code)?;
-        d.set_item("dim", m.dim)?;
-        d.set_item("description", m.description)?;
+        d.set_item(name_key, m.name)?;
+        d.set_item(multi_key, m.multi)?;
+        d.set_item(image_key, m.image)?;
+        d.set_item(model_code_key, m.model_code)?;
+        d.set_item(dim_key, m.dim)?;
+        d.set_item(description_key, m.description)?;
         out.append(d)?;
     }
     Ok(out)
@@ -151,7 +157,7 @@ pub fn execute_async<'py>(
         let close_result = inner.close().await;
         let value = result.map_err(qql_py_error)?;
         close_result.map_err(qql_py_error)?;
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             pythonize::pythonize(py, &value)
                 .map(|bound| bound.unbind())
                 .map_err(|error| PyRuntimeError::new_err(error.to_string()))

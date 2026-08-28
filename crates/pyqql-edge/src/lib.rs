@@ -28,7 +28,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 //  Stmt class — mirrors pyqql.PyStmt
 // ═══════════════════════════════════════════════════════════════════
 
-#[pyclass(name = "Stmt")]
+#[pyclass(name = "Stmt", from_py_object)]
 #[derive(Clone)]
 pub struct PyStmt {
     pub inner: qql_core::ast::Stmt,
@@ -69,8 +69,9 @@ impl PyStmt {
     }
 
     fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        // Round-trip through serde_json first so the dict shape matches
-        // `to_json()` exactly (parity with `pyqql.Stmt.to_dict`).
+        // Must go through serde_json::Value: pythonize maps Rust tuples to
+        // Python tuples, while JSON arrays become lists. AST dicts are
+        // `Vec<(String, Value)>` and host tests walk those as lists.
         let val =
             serde_json::to_value(&self.inner).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
         pythonize::pythonize(py, &val).map_err(|e| PySyntaxError::new_err(e.to_string()))
@@ -132,13 +133,16 @@ fn inject_filter(
 #[pyfunction]
 fn tokenize<'py>(input: &str, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict>>> {
     let lexer = Lexer::new(input);
-    let mut result = Vec::new();
+    let mut result = Vec::with_capacity(input.len() / 4 + 1);
+    let kind_key = pyo3::intern!(py, "kind");
+    let text_key = pyo3::intern!(py, "text");
+    let pos_key = pyo3::intern!(py, "pos");
     for token_result in lexer {
         let token = token_result.map_err(qql_py_syntax_error)?;
         let d = PyDict::new(py);
-        d.set_item("kind", token.kind.as_str())?;
-        d.set_item("text", token.text)?;
-        d.set_item("pos", token.span.start as i64)?;
+        d.set_item(kind_key, token.kind.as_str())?;
+        d.set_item(text_key, token.text)?;
+        d.set_item(pos_key, token.span.start as i64)?;
         result.push(d);
     }
     Ok(result)
@@ -173,7 +177,7 @@ fn compile_query<'py>(py: Python<'py>, input: &str) -> PyResult<Bound<'py, PyAny
     pythonize::pythonize(py, &result).map_err(|e| PySyntaxError::new_err(e.to_string()))
 }
 
-fn do_explain(py: Python<'_>, query: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+fn do_explain(py: Python<'_>, query: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let query_str: String;
     let plan_result = if let Ok(py_stmt) = query.extract::<PyRef<PyStmt>>() {
         query_str = String::from("<Stmt>");
@@ -190,21 +194,21 @@ fn do_explain(py: Python<'_>, query: &Bound<'_, PyAny>) -> PyResult<PyObject> {
     let dict = PyDict::new(py);
     match plan_result {
         Ok(plan) => {
-            dict.set_item("ok", true)?;
-            dict.set_item("query", query_str)?;
-            dict.set_item("plan", plan)?;
+            dict.set_item(pyo3::intern!(py, "ok"), true)?;
+            dict.set_item(pyo3::intern!(py, "query"), query_str)?;
+            dict.set_item(pyo3::intern!(py, "plan"), plan)?;
         }
         Err(e) => {
-            dict.set_item("ok", false)?;
-            dict.set_item("query", query_str)?;
-            dict.set_item("error", e.to_string())?;
+            dict.set_item(pyo3::intern!(py, "ok"), false)?;
+            dict.set_item(pyo3::intern!(py, "query"), query_str)?;
+            dict.set_item(pyo3::intern!(py, "error"), e.to_string())?;
         }
     }
-    Ok(dict.into())
+    Ok(dict.into_any().unbind())
 }
 
 #[pyfunction]
-fn explain(query: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+fn explain(query: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let py = query.py();
     do_explain(py, query)
 }
@@ -213,7 +217,7 @@ fn explain(query: &Bound<'_, PyAny>) -> PyResult<PyObject> {
 //  Edge Client — wraps qql-edge Executor
 // ═══════════════════════════════════════════════════════════════════
 
-#[pyclass(name = "Client")]
+#[pyclass(name = "Client", frozen)]
 pub struct PyClient {
     pub(crate) inner: std::sync::Arc<qql::executor::Executor>,
     pub(crate) runtime: tokio::runtime::Runtime,
@@ -246,7 +250,7 @@ impl PyClient {
         } else {
             classify(query)?
         };
-        let out = self.run_input(input, oe)?;
+        let out = py.detach(|| self.run_input(input, oe))?;
         pythonize::pythonize(py, &out)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
     }
@@ -280,7 +284,7 @@ impl PyClient {
             let val = run_async(&inner, input, on_error)
                 .await
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-            Python::with_gil(|py| {
+            Python::attach(|py| {
                 pythonize::pythonize(py, &val)
                     .map(|b| b.unbind())
                     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
@@ -288,7 +292,7 @@ impl PyClient {
         })
     }
 
-    fn explain(&self, query: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    fn explain(&self, query: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
         let py = query.py();
         do_explain(py, query)
     }
@@ -304,8 +308,7 @@ impl PyClient {
         if self.closed.swap(true, Ordering::AcqRel) {
             return Ok(());
         }
-        self.runtime
-            .block_on(self.inner.close())
+        Python::attach(|py| py.detach(|| self.runtime.block_on(self.inner.close())))
             .map_err(qql_py_error)
     }
 
@@ -332,7 +335,7 @@ pub(crate) enum Input {
 }
 
 pub(crate) fn classify(query: &Bound<'_, PyAny>) -> PyResult<Input> {
-    if let Ok(list) = query.downcast::<pyo3::types::PyList>() {
+    if let Ok(list) = query.cast::<pyo3::types::PyList>() {
         if list.is_empty() {
             return Ok(Input::StrList(Vec::new()));
         }
@@ -450,7 +453,7 @@ pub(crate) fn bind_py_params(query: &str, params: &Bound<'_, PyAny>) -> PyResult
     if params.is_none() {
         return Ok(query.to_string());
     }
-    if let Ok(dict) = params.downcast::<PyDict>() {
+    if let Ok(dict) = params.cast::<PyDict>() {
         let mut map = std::collections::HashMap::new();
         for (k, v) in dict.iter() {
             let key = k
@@ -461,7 +464,7 @@ pub(crate) fn bind_py_params(query: &str, params: &Bound<'_, PyAny>) -> PyResult
         }
         qql_core::params::bind_named(query, |k| map.get(k).cloned())
             .map_err(|e| PyValueError::new_err(e.to_string()))
-    } else if let Ok(list) = params.downcast::<PyList>() {
+    } else if let Ok(list) = params.cast::<PyList>() {
         let mut items = Vec::with_capacity(list.len());
         for item in list.iter() {
             items.push(py_to_value(&item)?);
@@ -517,7 +520,7 @@ fn qql_py_syntax_error(error: qql_core::error::QqlError) -> pyo3::PyErr {
 }
 
 fn attach_qql_error(py_error: pyo3::PyErr, error: qql_core::error::QqlError) -> pyo3::PyErr {
-    Python::with_gil(|py| {
+    Python::attach(|py| {
         let value = py_error.value(py);
         let _ = value.setattr("code", error.code.as_ref());
         let _ = value.setattr("kind", format!("{:?}", error.kind));
@@ -564,14 +567,14 @@ fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
     if let Ok(s) = value.extract::<String>() {
         return Ok(Value::Str(s));
     }
-    if let Ok(list) = value.downcast::<PyList>() {
+    if let Ok(list) = value.cast::<PyList>() {
         let mut items = Vec::with_capacity(list.len());
         for item in list.iter() {
             items.push(py_to_value(&item)?);
         }
         return Ok(Value::List(items));
     }
-    if let Ok(dict) = value.downcast::<PyDict>() {
+    if let Ok(dict) = value.cast::<PyDict>() {
         let mut items = Vec::with_capacity(dict.len());
         for (key, item) in dict.iter() {
             let key = key
