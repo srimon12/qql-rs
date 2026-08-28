@@ -2,7 +2,7 @@
 //!
 //! - [`Embedder`] — host-agnostic dense/sparse API (batch dense by default when overridden)
 //! - [`resolve_embeddings`] — rewrite `QUERY` / `UPSERT` text into vectors on the AST
-//! - [`sparse`] — local BM25-style sparse vectors (no network)
+//! - [`sparse`] — local wire-compatible BM25 sparse vectors (no network)
 //!
 //! Used by `qql` (runtime HttpEmbedder), `qql-edge` (FastEmbedder), and `qql-wasm`
 //! (fetch / JS adapters). No Qdrant I/O and no HTTP client live here.

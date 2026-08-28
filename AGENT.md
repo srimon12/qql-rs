@@ -13,7 +13,7 @@ qql/ (workspace root)
 ├── crates/
 │   ├── qql-core/         # Lexer, parser, typed AST, explain, filter injection
 │   ├── qql-plan/         # Fallible planner: AST → PlannedOperation; REST projection
-│   ├── qql-embed/        # Shared Embedder trait, sparse BM25, resolve_embeddings (batch dense)
+│   ├── qql-embed/        # Shared Embedder trait, wire-compatible BM25, resolve_embeddings (batch dense)
 │   ├── qql-runtime/      # Executor (package name `qql`), REST & gRPC adapters, HttpEmbedder
 │   ├── qql-edge/         # Local in-process executor: fastembed-rs + qdrant-edge
 │   ├── qql-cli/          # CLI binary and interactive REPL
@@ -57,7 +57,7 @@ Canonical plan is `PlannedOperation` (transport-neutral). `Route { method, path,
 
 * **`qql-plan`**: Transport-neutral lowering layer. Contains the fallible planner `plan()` returning `PlannedOperation`, typed filter/query/mutation/DDL types (`PlanPointId`, `PlanVectorValue`, `PlanQueryInput`), and `to_rest_route()` for the **optional** REST projection. Also provides `BatchKey` + `statement_batch_key()` + `PlannedOperation::batch_key()` for executor sharing (Rust + WASM). `Route` and `RequestBody` are REST-specific. Depends ONLY on `qql-core`. No networking, no tokio, no reqwest.
 
-* **`qql-embed`**: Shared embedding layer. `Embedder` trait (`embed_dense` / `embed_sparse` / `embed_multi`), local sparse BM25, `resolve_query_vector_kinds` (schema topology → dense/sparse/multi flags), and `resolve_embeddings` (TEXT → Dense | Sparse | MultiDense). Unknown `USING` kinds fail closed (`QQL-VECTOR-KIND`). No Qdrant I/O. Used by runtime (`HttpEmbedder`), edge (`FastEmbedder`), and wasm (fetch/JS adapters).
+* **`qql-embed`**: Shared embedding layer. `Embedder` trait (`embed_dense` / `embed_sparse_query` / `embed_sparse_document` / `embed_multi`), local wire-compatible BM25 (murmur3-32 token IDs, word tokenizer, English stopwords + snowball stemming — byte-identical to Qdrant's `qdrant/bm25`; queries embed unit weights, documents tf saturation), `resolve_query_vector_kinds` (schema topology → dense/sparse/multi flags), and `resolve_embeddings` (TEXT → Dense | Sparse | MultiDense). Unknown `USING` kinds fail closed (`QQL-VECTOR-KIND`). No Qdrant I/O. Used by runtime (`HttpEmbedder`), edge (`FastEmbedder`), and wasm (fetch/JS adapters).
 
 * **`qql-runtime`**: The executor and transport adapters. Package name is `qql`. The `Executor` holds a `Box<dyn QdrantOps>` (single unified trait with 11 methods) and optional `Embedder`. Calls `prepare_statement` (**schema vector resolution first**, then embeddings, then upsert schema prep) → `plan()` → batch classification / dispatch. DDL flows through `plan()` → REST projection → `execute_route()` or `execute_grpc_route()`. Features: `default = ["grpc", "rest"]`, `grpc`, `rest`. Re-exports embed API via `qql::embedder` / `qql::sparse`.
 

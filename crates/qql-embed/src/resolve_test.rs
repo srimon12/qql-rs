@@ -41,7 +41,22 @@ impl Embedder for MockEmbedder {
         Ok(vec![1.0, 2.0, 3.0])
     }
 
-    async fn embed_sparse(&self, _text: &str, _model: &str) -> Result<SparseVector, QqlError> {
+    async fn embed_sparse_query(
+        &self,
+        _text: &str,
+        _model: &str,
+    ) -> Result<SparseVector, QqlError> {
+        Ok(SparseVector {
+            indices: vec![1],
+            values: vec![1.0],
+        })
+    }
+
+    async fn embed_sparse_document(
+        &self,
+        _text: &str,
+        _model: &str,
+    ) -> Result<SparseVector, QqlError> {
         Ok(SparseVector {
             indices: vec![1],
             values: vec![1.0],
@@ -778,13 +793,13 @@ impl Embedder for DefaultEmbedder {
 #[tokio::test]
 async fn default_embed_sparse_rejects_non_default_model() {
     let e = DefaultEmbedder;
-    // Empty / default is accepted → returns local BM25.
-    let sv = e.embed_sparse("hello", "").await.unwrap();
+    // Empty / default is accepted → returns local wire-compatible BM25.
+    let sv = e.embed_sparse_query("hello", "").await.unwrap();
     assert!(!sv.indices.is_empty());
-    let sv = e.embed_sparse("hello", "default").await.unwrap();
+    let sv = e.embed_sparse_document("hello", "default").await.unwrap();
     assert!(!sv.indices.is_empty());
     // Non-default model is rejected.
-    let err = e.embed_sparse("hello", "splade").await.unwrap_err();
+    let err = e.embed_sparse_query("hello", "splade").await.unwrap_err();
     assert_eq!(err.code, "QQL-EMBEDDING-SPARSE");
     assert!(err.message.contains("splade"));
 }

@@ -58,8 +58,9 @@ pub struct LocalExecutorOptions {
     #[cfg(feature = "fastembed-local")]
     pub model: Option<String>,
     /// Offline sparse model (SPLADE or BGE-M3 via `SparseTextEmbedding`).
-    /// e.g. `"splade"`, `"bge-m3"`. When set, `embed_sparse` uses real ONNX
-    /// inference. `None` → local BM25 hashing for sparse requests.
+    /// e.g. `"splade"`, `"bge-m3"`. When set, sparse embedding uses real ONNX
+    /// inference. `None` → local wire-compatible BM25 (Qdrant
+    /// `qdrant/bm25`-identical token IDs) for sparse requests.
     #[cfg(feature = "fastembed-local")]
     pub sparse_model: Option<String>,
     /// Offline multivector model (BGE-M3 ColBERT). e.g. `"bge-m3"`.
@@ -298,7 +299,22 @@ mod tests {
             Ok(vec![1.0, 0.0, 0.0])
         }
 
-        async fn embed_sparse(&self, _text: &str, _model: &str) -> Result<SparseVector, QqlError> {
+        async fn embed_sparse_query(
+            &self,
+            _text: &str,
+            _model: &str,
+        ) -> Result<SparseVector, QqlError> {
+            Ok(SparseVector {
+                indices: vec![1],
+                values: vec![1.0],
+            })
+        }
+
+        async fn embed_sparse_document(
+            &self,
+            _text: &str,
+            _model: &str,
+        ) -> Result<SparseVector, QqlError> {
             Ok(SparseVector {
                 indices: vec![1],
                 values: vec![1.0],

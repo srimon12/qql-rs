@@ -1,7 +1,7 @@
 # qql-embed
 
-Shared embedding resolution: host-agnostic [`Embedder`] trait, local BM25
-[`SparseEmbedder`], [`resolve_embeddings`], and schema
+Shared embedding resolution: host-agnostic [`Embedder`] trait, local
+wire-compatible BM25 [`SparseEmbedder`], [`resolve_embeddings`], and schema
 [`resolve_query_vector_kinds`].
 
 ## Proposition
@@ -16,8 +16,16 @@ Schema fills `USING` kinds **before** embed; unknown kinds fail closed
 ```rust
 pub trait Embedder: Send + Sync {
     async fn embed_dense(&self, text: &str, model: &str) -> Result<Vec<f32>>;
-    /// Sparse embedding (default: local BM25 hash).
-    async fn embed_sparse(&self, text: &str, model: &str) -> Result<SparseVector>;
+    /// Sparse embedding for query text (default: local wire-compatible BM25, unit weights).
+    async fn embed_sparse_query(&self, text: &str, model: &str) -> Result<SparseVector>;
+    /// Sparse embedding for document text (default: local wire-compatible BM25, tf saturation).
+    async fn embed_sparse_document(&self, text: &str, model: &str) -> Result<SparseVector>;
+    /// Batch document-side sparse embedding. Default loops `embed_sparse_document`.
+    async fn embed_sparse_document_batch(
+        &self,
+        texts: &[String],
+        model: &str,
+    ) -> Result<Vec<SparseVector>>;
     /// Dense embedding — batch API, grouped by model.
     async fn embed_dense_batch(&self, texts: &[String], model: &str) -> Result<Vec<Vec<f32>>>;
     /// Multivector (ColBERT-style). Default rejects with QQL-EMBEDDING-MULTI.
@@ -34,8 +42,11 @@ pub trait Embedder: Send + Sync {
 ```
 
 Dense embedding is **batched by model** when the target is single-vector dense.
-Sparse defaults to local BM25-style token hashing. Multivector defaults reject
-until the host opts in (`embed_multi`), as does image embedding (`embed_image`).
+Sparse is role-split: queries embed with unit term weights
+(`embed_sparse_query`), documents with BM25 term-frequency saturation
+(`embed_sparse_document`) — both matching Qdrant's `qdrant/bm25` defaults.
+Multivector defaults reject until the host opts in (`embed_multi`), as does
+image embedding (`embed_image`).
 
 ### FastEmbed-style host mapping
 
@@ -43,7 +54,8 @@ until the host opts in (`embed_multi`), as does image embedding (`embed_image`).
 |---|---|---|
 | Sentence / CLIP **text** dense (`TextEmbedding`) | `embed_dense` | `[f32]` |
 | CLIP **vision** / image dense (`ImageEmbedding`) | `embed_image` | `[f32]` |
-| Sparse (BM25 / SPLADE) | `embed_sparse` | indices + values |
+| Sparse query (BM25 / SPLADE) | `embed_sparse_query` | indices + values |
+| Sparse document (BM25 / SPLADE) | `embed_sparse_document` / `_batch` | indices + values |
 | ColBERT / BGE-M3 **ColBERT** bags (`Bgem3Embedding.colbert`) | `embed_multi` | `[[f32],…]` |
 | Cross-encoder pair scores (`TextRerank`) | `rerank_pairs` | per-document `[f32]` |
 
@@ -115,18 +127,33 @@ behavior never depends on a target literally being named `dense` or `sparse`.
 
 These constants are used only when materializing a new default topology.
 
-## SparseEmbedder — local BM25
+## SparseEmbedder — local wire-compatible BM25
 
-Hash-based term-frequency tokenizer with IDF-like weighting. No network, no model
-downloads, no external dependencies. A synchronous helper; used by the default
-`Embedder::embed_sparse` implementation.
+Client-side BM25 that is **wire-compatible with Qdrant's `qdrant/bm25` model**:
+murmur3-32 token IDs (same hash the server uses), word tokenizer (split on
+non-alphanumeric), Unicode lowercasing, English stopword removal, and English
+snowball stemming — the server's documented defaults. Queries embed with unit
+term weights; documents with BM25 tf saturation (k1=1.2, b=0.75, avg_len=256).
+IDF is applied server-side via the sparse vector `modifier: idf`. No network,
+no model downloads. A synchronous helper backing the default
+`Embedder::embed_sparse_query` / `embed_sparse_document` implementations.
 
 ```rust
 use qql_embed::SparseEmbedder;
 
-let sv = SparseEmbedder::embed_sparse("quantum computing");
-// sv.indices: [u32; N], sv.values: [f32; N]
+let q = SparseEmbedder::embed_query("quantum computing");   // unit weights
+let d = SparseEmbedder::embed_document("quantum computing"); // tf saturation
+// q/d.indices: [u32; N], q/d.values: [f32; N]
 ```
+
+Vectors produced here can be mixed with server-side `qdrant/bm25` inference on
+the same collection (a golden test pins the exact server output from the
+Qdrant docs).
+
+Like the server defaults, the pipeline is **English-only** (snowball English
+stemmer + English stopwords). Non-English corpora should use server-side
+`qdrant/bm25` inference with explicit `language` / `stemmer` / `stopwords`
+options instead.
 
 ## Known WASM limitation
 

@@ -56,7 +56,7 @@ export interface LocalExecutorOptions {
    * Default: BGESmallENV15 (384-d).
    */
   model?: string;
-  /** Offline sparse model (SPLADE or BGE-M3 SparseTextEmbedding), e.g. "splade". None → local BM25 hashing. */
+  /** Offline sparse model (SPLADE or BGE-M3 SparseTextEmbedding), e.g. "splade". None → local wire-compatible BM25 (Qdrant qdrant/bm25-identical token IDs). */
   sparseModel?: string;
   /** Offline multivector model (BGE-M3 ColBERT), e.g. "bge-m3". */
   multiModel?: string;
@@ -77,7 +77,7 @@ export interface StandaloneOptions {
   onDiskPayload?: boolean;
   /** Local ONNX model for standalone execute() / executeStmt() */
   model?: string;
-  /** Offline sparse model (SPLADE or BGE-M3 SparseTextEmbedding), e.g. "splade". None → local BM25 hashing. */
+  /** Offline sparse model (SPLADE or BGE-M3 SparseTextEmbedding), e.g. "splade". None → local wire-compatible BM25 (Qdrant qdrant/bm25-identical token IDs). */
   sparseModel?: string;
   /** Offline multivector model (BGE-M3 ColBERT), e.g. "bge-m3". */
   multiModel?: string;

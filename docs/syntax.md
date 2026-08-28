@@ -93,7 +93,7 @@ conventional defaults, **not reserved**. Kind never comes from name spelling
 |---|---|
 | `USING name` | Executor looks up `name` on the collection schema: dense, sparse, or dense+multivector |
 | `USING name AS DENSE` | Explicit single-vector dense embed (MiniLM, CLIP text, …) |
-| `USING name AS SPARSE` | Explicit sparse (BM25-style) embed |
+| `USING name AS SPARSE` | Explicit sparse (wire-compatible BM25) embed |
 | `USING name AS MULTI` / `AS MULTIVECTOR` | Explicit dense **multivector bag** (ColBERT / BGE-M3 ColBERT) → `MultiDense` — **not** CLIP |
 | `USING HYBRID [DENSE n] [SPARSE n] [FUSION RRF\|DBSF]` | Expand text nearest → dense+sparse fusion (`QueryExpr::Hybrid`, same as `QUERY HYBRID`) |
 

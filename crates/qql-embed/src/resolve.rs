@@ -29,7 +29,9 @@ type DenseIter<'a> = &'a mut dyn Iterator<Item = Vec<f32>>;
 /// Resolve text → vectors on a statement before routing/execution.
 ///
 /// Dense jobs are collected and sent through `embed_dense_batch` (grouped by
-/// model). Sparse stays local BM25 via the embedder.
+/// model). Sparse is role-split via the embedder: queries embed with unit
+/// weights, documents with BM25 tf saturation (both wire-compatible with
+/// Qdrant's `qdrant/bm25`).
 pub async fn resolve_embeddings(stmt: &mut Stmt, embedder: &dyn Embedder) -> Result<(), QqlError> {
     match stmt {
         Stmt::Query(query) => resolve_query_embeddings(query, embedder).await?,
@@ -131,8 +133,10 @@ async fn resolve_upsert_embeddings(
                 }
                 EmbedKind::Sparse { model } => {
                     let m = model.as_deref().unwrap_or("default");
-                    for (idx, text) in targets {
-                        let s_vec = embedder.embed_sparse(&text, m).await?;
+                    let (indices, texts): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
+                    let vecs = embedder.embed_sparse_document_batch(&texts, m).await?;
+                    ensure_batch_len(vecs.len(), indices.len(), m)?;
+                    for (idx, s_vec) in indices.into_iter().zip(vecs) {
                         let point = &mut upsert.points[idx];
                         add_point_vector(
                             point,
@@ -518,7 +522,7 @@ fn apply_expr_embeddings<'a>(
                         None,
                     )
                 })?;
-                let s_vec = embedder.embed_sparse(text, "default").await?;
+                let s_vec = embedder.embed_sparse_query(text, "default").await?;
                 let d_vec_name = dense_vector.as_deref().unwrap_or(DENSE_VECTOR_NAME);
                 let s_vec_name = sparse_vector.as_deref().unwrap_or(SPARSE_VECTOR_NAME);
 
@@ -646,7 +650,7 @@ async fn apply_input(
         QueryInput::Text { text, model } => {
             let model_name = model.as_deref().unwrap_or(default_model);
             if target.kind == VectorKind::Sparse {
-                let s_vec = embedder.embed_sparse(text, model_name).await?;
+                let s_vec = embedder.embed_sparse_query(text, model_name).await?;
                 *input = QueryInput::Vector(VectorValue::Sparse {
                     indices: s_vec.indices,
                     values: s_vec.values,
@@ -769,8 +773,12 @@ async fn resolve_single_embedding_spec(
             let targets = collect_text_targets(&upsert.points, field.as_deref());
             validate_non_empty_targets(upsert, &targets, "SPARSE", field.as_deref())?;
 
-            for (idx, text) in targets {
-                let sparse_vec = embedder.embed_sparse(&text, model_name).await?;
+            let (indices, texts): (Vec<usize>, Vec<String>) = targets.into_iter().unzip();
+            let vecs = embedder
+                .embed_sparse_document_batch(&texts, model_name)
+                .await?;
+            ensure_batch_len(vecs.len(), indices.len(), model_name)?;
+            for (idx, sparse_vec) in indices.into_iter().zip(vecs) {
                 add_point_vector(
                     &mut upsert.points[idx],
                     vector_name,
@@ -811,8 +819,13 @@ async fn resolve_single_embedding_spec(
                 add_point_vector(point, d_vec_name, VectorValue::Dense(d_vec))?;
             }
 
-            for (idx, text) in sparse_targets {
-                let sparse_vec = embedder.embed_sparse(&text, s_model).await?;
+            let (sparse_indices, sparse_texts): (Vec<usize>, Vec<String>) =
+                sparse_targets.into_iter().unzip();
+            let sparse_vecs = embedder
+                .embed_sparse_document_batch(&sparse_texts, s_model)
+                .await?;
+            ensure_batch_len(sparse_vecs.len(), sparse_indices.len(), s_model)?;
+            for (idx, sparse_vec) in sparse_indices.into_iter().zip(sparse_vecs) {
                 let point = &mut upsert.points[idx];
                 add_point_vector(
                     point,

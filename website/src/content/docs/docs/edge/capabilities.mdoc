@@ -19,7 +19,7 @@ Qdrant" hint.
 |---|:---:|---|
 | Parser, planner, explain | yes | identical to remote |
 | Dense nearest search | yes | HNSW, single-threaded per shard |
-| Sparse search (BM25 hash) | yes | default; real ONNX with `sparse_model` |
+| Sparse search (BM25) | yes | default, Qdrant `qdrant/bm25`-compatible; real ONNX with `sparse_model` |
 | Hybrid dense + sparse | yes | front-form or tail-form `USING HYBRID` |
 | Fusion RRF / DBSF | yes | plain `FUSION RRF` uses `k = 2`; parameterized form honors `PARAMS (rrf_k, rrf_weights)` |
 | MMR | yes | dense only |

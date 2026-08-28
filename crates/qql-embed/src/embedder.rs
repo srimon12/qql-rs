@@ -16,34 +16,57 @@ impl<T> EmbedderBound for T {}
 /// Host-agnostic embedding backend.
 ///
 /// Dense calls should batch when possible (`embed_dense_batch` → one HTTP
-/// request or one ONNX batch). Sparse defaults to local BM25-style hashing.
-/// Multivector (ColBERT-style) uses [`Self::embed_multi`] → `Vec<Vec<f32>>`.
+/// request or one ONNX batch). Sparse is role-split: [`Self::embed_sparse_query`]
+/// (unit weights) for search text and [`Self::embed_sparse_document`]
+/// (BM25 tf saturation) for ingestion text, both defaulting to local
+/// wire-compatible BM25. Multivector (ColBERT-style) uses
+/// [`Self::embed_multi`] → `Vec<Vec<f32>>`.
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait Embedder: EmbedderBound {
     async fn embed_dense(&self, text: &str, model: &str) -> Result<Vec<f32>, QqlError>;
 
-    /// Sparse embedding (BM25-like local hash or model-aware SPLADE / BGE-M3).
+    /// Sparse embedding for **query** text: unique terms with unit weights,
+    /// matching Qdrant's `qdrant/bm25` query embedding.
     ///
-    /// Default implementation uses local BM25 hashing when `model` is empty or
-    /// `"default"`. Non-default sparse models are rejected — override this
-    /// method to provide model-aware sparse inference.
-    async fn embed_sparse(&self, text: &str, model: &str) -> Result<SparseVector, QqlError> {
+    /// Default implementation uses local wire-compatible BM25 when `model` is
+    /// empty or `"default"`. Non-default sparse models are rejected — override
+    /// this method to provide model-aware sparse inference.
+    async fn embed_sparse_query(&self, text: &str, model: &str) -> Result<SparseVector, QqlError> {
         if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
             return Err(sparse_model_unsupported_error(model));
         }
-        Ok(sparse::build_query_default(text))
+        Ok(sparse::embed_query(text))
     }
 
-    /// Batch sparse embedding. Default loops [`Self::embed_sparse`].
-    async fn embed_sparse_batch(
+    /// Sparse embedding for **document** text at ingestion: BM25
+    /// term-frequency saturation, matching Qdrant's `qdrant/bm25` document
+    /// embedding.
+    ///
+    /// Default implementation uses local wire-compatible BM25 when `model` is
+    /// empty or `"default"`. Non-default sparse models are rejected — override
+    /// this method to provide model-aware sparse inference.
+    async fn embed_sparse_document(
+        &self,
+        text: &str,
+        model: &str,
+    ) -> Result<SparseVector, QqlError> {
+        if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
+            return Err(sparse_model_unsupported_error(model));
+        }
+        Ok(sparse::embed_document(text))
+    }
+
+    /// Batch document-side sparse embedding. Default loops
+    /// [`Self::embed_sparse_document`]; override for real batching.
+    async fn embed_sparse_document_batch(
         &self,
         texts: &[String],
         model: &str,
     ) -> Result<Vec<SparseVector>, QqlError> {
         let mut results = Vec::with_capacity(texts.len());
         for text in texts {
-            results.push(self.embed_sparse(text, model).await?);
+            results.push(self.embed_sparse_document(text, model).await?);
         }
         Ok(results)
     }
@@ -55,7 +78,7 @@ pub trait Embedder: EmbedderBound {
     /// The default propagates the first error and does **not** suppress failures.
     async fn embed_joint(&self, text: &str, model: &str) -> Result<JointEmbeddingOutput, QqlError> {
         let dense = self.embed_dense(text, model).await?;
-        let sparse = self.embed_sparse(text, model).await?;
+        let sparse = self.embed_sparse_document(text, model).await?;
         let multi = self.embed_multi(text, model).await?;
         Ok(JointEmbeddingOutput {
             dense: Some(dense),
@@ -230,9 +253,9 @@ pub fn sparse_model_unsupported_error(model: &str) -> QqlError {
         "QQL-EMBEDDING-SPARSE",
         format!(
             "sparse model '{model}' is not available on this embedder. \
-             Omit the MODEL clause (or use MODEL 'default') for local BM25-style \
-             hashing. To use model-aware sparse embedding (SPLADE / BGE-M3), \
-             configure a sparse embedding backend."
+             Omit the MODEL clause (or use MODEL 'default') for local \
+             wire-compatible BM25. To use model-aware sparse embedding \
+             (SPLADE / BGE-M3), configure a sparse embedding backend."
         ),
         None,
     )
@@ -250,8 +273,13 @@ pub struct JointEmbeddingOutput {
 pub struct SparseEmbedder;
 
 impl SparseEmbedder {
-    /// Generate a local BM25-style sparse vector representation for `text`.
-    pub fn embed_sparse(text: &str) -> SparseVector {
-        sparse::build_query_default(text)
+    /// Embed query text with local wire-compatible BM25 (unit term weights).
+    pub fn embed_query(text: &str) -> SparseVector {
+        sparse::embed_query(text)
+    }
+
+    /// Embed document text with local wire-compatible BM25 (tf saturation).
+    pub fn embed_document(text: &str) -> SparseVector {
+        sparse::embed_document(text)
     }
 }

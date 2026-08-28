@@ -1498,10 +1498,21 @@ impl Embedder for Client {
         })
     }
 
-    async fn embed_sparse(&self, text: &str, model: &str) -> Result<SparseVector, QqlError> {
+    async fn embed_sparse_query(&self, text: &str, model: &str) -> Result<SparseVector, QqlError> {
         if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
             return Err(qql_embed::sparse_model_unsupported_error(model));
         }
-        Ok(qql_embed::sparse::build_query_default(text))
+        Ok(qql_embed::sparse::embed_query(text))
+    }
+
+    async fn embed_sparse_document(
+        &self,
+        text: &str,
+        model: &str,
+    ) -> Result<SparseVector, QqlError> {
+        if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
+            return Err(qql_embed::sparse_model_unsupported_error(model));
+        }
+        Ok(qql_embed::sparse::embed_document(text))
     }
 }

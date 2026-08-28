@@ -8,19 +8,19 @@ fn main() {
 
     // Warmup
     for _ in 0..1_000 {
-        black_box(qql::sparse::build_document_default(doc_text));
-        black_box(qql::sparse::build_query(query_text));
+        black_box(qql::sparse::embed_document(doc_text));
+        black_box(qql::sparse::embed_query(query_text));
     }
 
     let start = Instant::now();
     for _ in 0..iterations {
-        black_box(qql::sparse::build_document_default(doc_text));
+        black_box(qql::sparse::embed_document(doc_text));
     }
     let elapsed_doc = start.elapsed();
 
     let start = Instant::now();
     for _ in 0..iterations {
-        black_box(qql::sparse::build_query(query_text));
+        black_box(qql::sparse::embed_query(query_text));
     }
     let elapsed_query = start.elapsed();
 
