@@ -357,15 +357,15 @@ async fn batch_dense_by_model(
         return Ok(Vec::new());
     }
 
-    let mut by_model: HashMap<String, Vec<usize>> = HashMap::new();
+    let mut by_model: HashMap<&str, Vec<usize>> = HashMap::new();
     for (i, (model, _)) in jobs.iter().enumerate() {
-        by_model.entry(model.clone()).or_default().push(i);
+        by_model.entry(model.as_str()).or_default().push(i);
     }
 
     let mut out: Vec<Option<Vec<f32>>> = vec![None; jobs.len()];
     for (model, indices) in by_model {
         let texts: Vec<String> = indices.iter().map(|&i| jobs[i].1.clone()).collect();
-        let vecs = embedder.embed_dense_batch(&texts, &model).await?;
+        let vecs = embedder.embed_dense_batch(&texts, model).await?;
         if vecs.len() != indices.len() {
             return Err(QqlError::execution(
                 "QQL-EMBEDDING",

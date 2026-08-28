@@ -23,7 +23,7 @@ fn lower_upsert_point(point: &UpsertPoint) -> UpsertPointRequest {
         req.vector = Some(PlanPointVectors::from(vectors));
     }
     if !point.payload.is_empty() {
-        let mut payload = serde_json::Map::new();
+        let mut payload = serde_json::Map::with_capacity(point.payload.len());
         for (key, value) in &point.payload {
             payload.insert(key.clone(), value_to_json(value));
         }
@@ -68,7 +68,7 @@ pub fn lower_update_vector_request(stmt: &UpdateVectorStmt) -> UpdateVectorReque
 }
 
 pub fn lower_update_payload_request(stmt: &UpdatePayloadStmt) -> UpdatePayloadRequest {
-    let mut payload = serde_json::Map::new();
+    let mut payload = serde_json::Map::with_capacity(stmt.payload.len());
     for (key, value) in &stmt.payload {
         payload.insert(key.clone(), value_to_json(value));
     }
