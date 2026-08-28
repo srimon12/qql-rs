@@ -19,27 +19,33 @@ QUERIES = [
     ("WithPayload", "QUERY 'search' FROM docs WITH PAYLOAD INCLUDE (title, body) WITH VECTOR (dense) LIMIT 10"),
 ]
 
+import gc
+
 def bench_parse(q, iterations):
-    for _ in range(100):
+    for _ in range(1000):
         pyqql.parse(q)
+    gc.disable()
     start = time.perf_counter()
     for _ in range(iterations):
         pyqql.parse(q)
     elapsed = time.perf_counter() - start
+    gc.enable()
     return iterations / elapsed
 
 def bench_e2e(q, iterations):
     # Explain parses and renders a textual explanation. It is not executor E2E.
-    for _ in range(100):
+    for _ in range(1000):
         pyqql.explain(q)
+    gc.disable()
     start = time.perf_counter()
     for _ in range(iterations):
         pyqql.explain(q)
     elapsed = time.perf_counter() - start
+    gc.enable()
     return iterations / elapsed
 
 if __name__ == "__main__":
-    iterations = 10_000
+    iterations = 50_000
     print(f"Python pyqql  |  {iterations} iterations each\n")
     print(f"{'Query':<20} | {'Parse (ops/s)':>15} | {'Explain (ops/s)':>15}")
     print("-" * 58)
