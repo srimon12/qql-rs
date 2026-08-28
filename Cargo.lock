@@ -4346,6 +4346,8 @@ name = "qql-embed"
 version = "0.2.2"
 dependencies = [
  "async-trait",
+ "murmur3_32",
+ "qdrant-rust-stemmers",
  "qql-core",
  "tokio",
 ]

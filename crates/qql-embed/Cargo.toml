@@ -16,6 +16,9 @@ categories = ["database", "algorithms"]
 [dependencies]
 qql-core = { version = "0.2.2", path = "../qql-core", features = ["std"] }
 async-trait = "0.1"
+# Wire-compatible BM25: same murmur3 + snowball crates the Qdrant server uses.
+murmur3_32 = "0.1"
+rust-stemmers = { package = "qdrant-rust-stemmers", version = "1.2" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }
