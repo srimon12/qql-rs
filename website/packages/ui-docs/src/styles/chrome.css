@@ -62,31 +62,25 @@ body:has(.site-header) {
 .brand__mark {
   width: 2rem;
   height: 2rem;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--sl-color-gray-5);
-  border-radius: 0.55rem;
-  color: var(--sl-color-accent);
-  background: var(--sl-color-gray-6);
-  transition:
-    border-color 180ms ease,
-    background-color 180ms ease;
+  display: block;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 0.44rem;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
-.brand:hover .brand__mark {
-  border-color: color-mix(in srgb, var(--sl-color-accent) 35%, var(--sl-color-gray-5));
-  background: color-mix(in srgb, var(--sl-color-accent) 6%, var(--sl-color-gray-6));
-}
-
+.brand__mark img,
 .brand__mark svg {
-  width: 1.15rem;
-  fill: currentColor;
+  display: block;
+  width: 2rem;
+  height: 2rem;
 }
 
 .brand__name {
   font-family: var(--sl-font-serif);
   font-size: 1.3rem;
   font-weight: 400;
+  line-height: 1;
   letter-spacing: -0.02em;
   color: var(--sl-color-white);
 }

@@ -118,9 +118,9 @@ function generateSvg({
 
   <!-- Top bar -->
   <g transform="translate(80, 80)">
-    <!-- Brand mark -->
-    <rect x="0" y="0" width="36" height="36" rx="8" fill="#d96b43" fill-opacity="0.15" stroke="#d96b43" stroke-width="1.5"/>
-    <text x="18" y="24" font-family="DejaVu Serif, Georgia, serif" font-size="20" font-weight="bold" fill="#d96b43" text-anchor="middle">Q</text>
+    <!-- Veristamp attestation ring -->
+    <circle cx="18" cy="18" r="14.22" fill="none" stroke="#b04930" stroke-width="2.88"/>
+    <path fill="#f4efe6" d="M7.535 11.248 L18 30.084 L28.465 11.248 L24.5 9.045 L18 20.744 L11.5 9.045 Z"/>
     <text x="48" y="25" font-family="DejaVu Serif, Georgia, serif" font-size="24" font-weight="700" fill="#f5f4ed" letter-spacing="-0.5">QQL</text>
     <text x="108" y="24" font-family="DejaVu Sans, Arial, sans-serif" font-size="13" font-weight="500" fill="#78716c" letter-spacing="0.5">/ ${escapeXml(SITE.org)}</text>
     
