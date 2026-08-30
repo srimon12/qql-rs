@@ -83,12 +83,12 @@ CREATE INDEX ON COLLECTION sec10k FOR tenant_id
 
 ---
 
-## Per-tenant sparse IDF corpus (Qdrant 1.19 / QQL 1.4)
+## Per-tenant sparse IDF corpus (Qdrant 1.19 / QQL 1.5)
 
 Sparse scores that use IDF should not mix term statistics across tenants when
-each tenant’s vocabulary is private. Scope the **IDF corpus** with a filter object
+each tenant’s vocabulary is private. Scope the **IDF corpus** with a QQL filter
 in `PARAMS`, and keep **isolation** via `WHERE` / `inject_filter` (and `SHARD` when
-custom-sharded).
+custom-sharded). These are three different layers — IDF is not a policy inject.
 
 ```sql
 -- Global IDF (shared stats across the collection)
@@ -102,14 +102,14 @@ QUERY TEXT 'supply chain risks' FROM sec10k USING sparse
 QUERY TEXT 'supply chain risks' FROM sec10k USING sparse
   WHERE tenant_id = 'honeywell'
   SHARD 'honeywell'
-  PARAMS (idf = {corpus: {must: [{key: 'tenant_id', match: {value: 'honeywell'}}]}})
+  PARAMS (idf = WHERE tenant_id = 'honeywell')
   LIMIT 10;
 ```
 
 **Notes:**
-- Corpus filter uses Qdrant Filter **JSON** shape (`must` / `should` / …), not nested QQL `WHERE`.
-- Malformed corpus → `QQL-PLAN-IDF`. Supported on remote Qdrant and **edge 0.8+**.
+- `idf = 'global'` or `idf = WHERE <filter>`. JSON `{corpus: {must: […]}}` is rejected.
 - `idf` scopes statistics; it does **not** replace `inject_filter` for security.
+- Supported on remote Qdrant and **edge 0.8+**.
 
 ---
 
@@ -196,5 +196,5 @@ Plan IR mirrors that: `filter` and `shard_key` are siblings on the request, neve
 3. Queries: `WHERE tenant_id = …` **and** (if custom-sharded) `SHARD 'tenant'`
 4. Host gate: always `inject_filter`; never trust client-only filters
 5. Do not invent a second inject API for shards — use QQL `SHARD` or `stmt.shard_key`
-6. Sparse multi-tenant: consider `PARAMS (idf = {corpus: …})` so IDF stats match the tenant
+6. Sparse multi-tenant: `PARAMS (idf = WHERE tenant_id = '…')` so IDF stats match the tenant
 7. Canary / sample inside a tenant: `WHERE tenant_id = … AND SLICE (n, k)` (not a substitute for isolation)

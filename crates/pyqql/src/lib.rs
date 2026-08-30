@@ -1,11 +1,12 @@
-use pyo3::exceptions::{PySyntaxError, PyValueError};
+use pyo3::exceptions::{PyRuntimeError, PySyntaxError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList};
 use qql_core::ast::{self, ComparisonOp, Value};
+use qql_core::error::QqlError;
 use qql_core::lexer::Lexer;
 use qql_core::parser::Parser;
 
-#[pyclass(name = "Stmt")]
+#[pyclass(name = "Stmt", from_py_object)]
 #[derive(Clone)]
 pub struct PyStmt {
     pub inner: qql_core::ast::Stmt,
@@ -21,8 +22,7 @@ impl PyStmt {
         }
         let val = py_to_value(value)?;
         let cmp = str_to_comparison_op(op)?;
-        ast::inject_filter(&mut self.inner, field, cmp, val)
-            .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+        ast::inject_filter(&mut self.inner, field, cmp, val).map_err(qql_py_syntax_error)?;
         Ok(())
     }
 
@@ -49,6 +49,9 @@ impl PyStmt {
     }
 
     fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        // Must go through serde_json::Value: pythonize maps Rust tuples to
+        // Python tuples, while JSON arrays become lists. AST dicts are
+        // `Vec<(String, Value)>` and host tests walk those as lists.
         let val =
             serde_json::to_value(&self.inner).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
         pythonize::pythonize(py, &val).map_err(|e| PySyntaxError::new_err(e.to_string()))
@@ -59,7 +62,7 @@ impl PyStmt {
 /// Accepts single statements and semicolon-delimited scripts.
 #[pyfunction]
 fn parse(input: &str) -> PyResult<Vec<PyStmt>> {
-    let stmts = Parser::parse_all(input).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+    let stmts = Parser::parse_all(input).map_err(qql_py_syntax_error)?;
     Ok(stmts.into_iter().map(|s| PyStmt { inner: s }).collect())
 }
 
@@ -67,7 +70,7 @@ fn parse(input: &str) -> PyResult<Vec<PyStmt>> {
 /// creating Python objects for every node (parity with `nqql.parseJson`).
 #[pyfunction]
 fn parse_json(input: &str) -> PyResult<String> {
-    let statements = Parser::parse_all(input).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+    let statements = Parser::parse_all(input).map_err(qql_py_syntax_error)?;
     serde_json::to_string(&statements).map_err(|e| PySyntaxError::new_err(e.to_string()))
 }
 
@@ -91,14 +94,11 @@ fn inject_filter(
     let val = py_to_value(value)?;
     let cmp = str_to_comparison_op(op)?;
     if let Ok(mut py_stmt) = query.extract::<PyRefMut<'_, PyStmt>>() {
-        ast::inject_filter(&mut py_stmt.inner, field, cmp, val)
-            .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+        ast::inject_filter(&mut py_stmt.inner, field, cmp, val).map_err(qql_py_syntax_error)?;
         Ok(py_stmt.clone())
     } else if let Ok(query_str) = query.extract::<String>() {
-        let mut stmt =
-            Parser::parse(&query_str).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
-        ast::inject_filter(&mut stmt, field, cmp, val)
-            .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+        let mut stmt = Parser::parse(&query_str).map_err(qql_py_syntax_error)?;
+        ast::inject_filter(&mut stmt, field, cmp, val).map_err(qql_py_syntax_error)?;
         Ok(PyStmt { inner: stmt })
     } else {
         Err(pyo3::exceptions::PyTypeError::new_err(
@@ -110,13 +110,16 @@ fn inject_filter(
 #[pyfunction]
 fn tokenize<'py>(input: &str, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict>>> {
     let lexer = Lexer::new(input);
-    let mut result = Vec::new();
+    let mut result = Vec::with_capacity(input.len() / 4 + 1);
+    let kind_key = pyo3::intern!(py, "kind");
+    let text_key = pyo3::intern!(py, "text");
+    let pos_key = pyo3::intern!(py, "pos");
     for token_result in lexer {
-        let token = token_result.map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+        let token = token_result.map_err(qql_py_syntax_error)?;
         let d = PyDict::new(py);
-        d.set_item("kind", token.kind.as_str())?;
-        d.set_item("text", token.text)?;
-        d.set_item("pos", token.span.start as i64)?;
+        d.set_item(kind_key, token.kind.as_str())?;
+        d.set_item(text_key, token.text)?;
+        d.set_item(pos_key, token.span.start as i64)?;
         result.push(d);
     }
     Ok(result)
@@ -124,9 +127,8 @@ fn tokenize<'py>(input: &str, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict
 
 #[pyfunction]
 fn compile_query<'py>(py: Python<'py>, input: &str) -> PyResult<Bound<'py, PyAny>> {
-    let stmt = Parser::parse(input).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
-    let compiled = qql_plan::routing::compile_statement(&stmt)
-        .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+    let stmt = Parser::parse(input).map_err(qql_py_syntax_error)?;
+    let compiled = qql_plan::routing::compile_statement(&stmt).map_err(qql_py_syntax_error)?;
     let (method, path, payload) = match compiled.route {
         Some(route) => {
             let payload = route.body_json().unwrap_or(serde_json::Value::Null);
@@ -151,243 +153,10 @@ fn compile_query<'py>(py: Python<'py>, input: &str) -> PyResult<Bound<'py, PyAny
     pythonize::pythonize(py, &result).map_err(|e| PySyntaxError::new_err(e.to_string()))
 }
 
-#[pyclass(name = "HttpEmbedder")]
-#[derive(Clone)]
-struct PyHttpEmbedder {
-    endpoint: String,
-    api_key: String,
-    model: String,
-    dimension: usize,
-}
+mod embedder;
+pub use embedder::*;
 
-#[pymethods]
-impl PyHttpEmbedder {
-    #[new]
-    #[pyo3(signature = (endpoint, model, dimension, api_key=None))]
-    fn new(
-        endpoint: &str,
-        model: &str,
-        dimension: usize,
-        api_key: Option<String>,
-    ) -> PyResult<Self> {
-        if endpoint.trim().is_empty() {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "embedding endpoint is required",
-            ));
-        }
-        if model.trim().is_empty() {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "embedding model is required",
-            ));
-        }
-        if dimension == 0 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "embedding dimension must be positive",
-            ));
-        }
-        Ok(PyHttpEmbedder {
-            endpoint: endpoint.to_string(),
-            api_key: api_key.unwrap_or_default(),
-            model: model.to_string(),
-            dimension,
-        })
-    }
-}
-
-#[allow(clippy::type_complexity)]
-fn extract_embedder_config(
-    embedder: Option<&Bound<'_, PyAny>>,
-) -> PyResult<(
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<usize>,
-)> {
-    let mut ep = None;
-    let mut ep_key = None;
-    let mut model = None;
-    let mut dim = None;
-
-    if let Some(emb) = embedder {
-        if let Ok(py_emb) = emb.extract::<PyRef<PyHttpEmbedder>>() {
-            ep = Some(py_emb.endpoint.clone());
-            ep_key = Some(py_emb.api_key.clone());
-            model = Some(py_emb.model.clone());
-            dim = Some(py_emb.dimension);
-        } else if let Ok(dict) = emb.downcast::<PyDict>() {
-            ep = Some(
-                dict.get_item("endpoint")?
-                    .ok_or_else(|| {
-                        pyo3::exceptions::PyValueError::new_err("embedder.endpoint is required")
-                    })?
-                    .extract::<String>()?,
-            );
-            model = Some(
-                dict.get_item("model")?
-                    .ok_or_else(|| {
-                        pyo3::exceptions::PyValueError::new_err("embedder.model is required")
-                    })?
-                    .extract::<String>()?,
-            );
-            dim = Some(
-                dict.get_item("dimension")?
-                    .ok_or_else(|| {
-                        pyo3::exceptions::PyValueError::new_err("embedder.dimension is required")
-                    })?
-                    .extract::<usize>()?,
-            );
-            ep_key = dict
-                .get_item("api_key")?
-                .map(|value| value.extract::<String>())
-                .transpose()?;
-            // multi_* keys are applied later on config; parse into side channel via attributes
-            // is handled in create_executor when building HttpEmbedderOptions from full dict.
-            if ep.as_ref().is_some_and(|value| value.trim().is_empty()) {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "embedder.endpoint must not be empty",
-                ));
-            }
-            if model.as_ref().is_some_and(|value| value.trim().is_empty()) {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "embedder.model must not be empty",
-                ));
-            }
-            if dim == Some(0) {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "embedder.dimension must be positive",
-                ));
-            }
-        } else {
-            return Err(pyo3::exceptions::PyTypeError::new_err(
-                "embedder must be an HttpEmbedder or dict",
-            ));
-        }
-    }
-    Ok((ep, ep_key, model, dim))
-}
-
-#[allow(clippy::too_many_arguments)]
-fn create_executor(
-    url: &str,
-    api_key: Option<String>,
-    use_grpc: bool,
-    embedder: Option<&Bound<'_, PyAny>>,
-    route_affinity: Option<String>,
-) -> PyResult<(qql::executor::Executor, tokio::runtime::Runtime)> {
-    let rt = tokio::runtime::Runtime::new()
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-
-    let (ep, ep_key, model, dim) = extract_embedder_config(embedder)?;
-
-    let mut config = qql::config::QqlConfig {
-        url: url.to_string(),
-        secret: api_key.clone(),
-        ..Default::default()
-    };
-
-    if let Some(endpoint) = ep {
-        config.embedding_endpoint = Some(endpoint);
-        config.embedding_api_key = ep_key;
-        config.embedding_model = model;
-        config.embedding_dimension = dim.unwrap_or(0);
-    }
-    // Optional multi/ColBERT fields from embedder dict.
-    if let Some(emb) = embedder {
-        if let Ok(dict) = emb.downcast::<PyDict>() {
-            if let Ok(Some(v)) = dict.get_item("multi_endpoint") {
-                config.multi_embedding_endpoint = Some(v.extract::<String>()?);
-            }
-            if let Ok(Some(v)) = dict.get_item("multi_api_key") {
-                config.multi_embedding_api_key = Some(v.extract::<String>()?);
-            }
-            if let Ok(Some(v)) = dict.get_item("multi_model") {
-                config.multi_embedding_model = Some(v.extract::<String>()?);
-            }
-            if let Ok(Some(v)) = dict.get_item("multi_dimension") {
-                config.multi_embedding_dimension = v.extract::<usize>()?;
-            }
-            if let Ok(Some(v)) = dict.get_item("image_endpoint") {
-                config.image_embedding_endpoint = Some(v.extract::<String>()?);
-            }
-            if let Ok(Some(v)) = dict.get_item("image_api_key") {
-                config.image_embedding_api_key = Some(v.extract::<String>()?);
-            }
-            if let Ok(Some(v)) = dict.get_item("image_model") {
-                config.image_embedding_model = Some(v.extract::<String>()?);
-            }
-            if let Ok(Some(v)) = dict.get_item("image_dimension") {
-                config.image_embedding_dimension = v.extract::<usize>()?;
-            }
-            if let Ok(Some(v)) = dict.get_item("rerank_endpoint") {
-                config.rerank_endpoint = Some(v.extract::<String>()?);
-            }
-            if let Ok(Some(v)) = dict.get_item("rerank_api_key") {
-                config.rerank_api_key = Some(v.extract::<String>()?);
-            }
-            if let Ok(Some(v)) = dict.get_item("rerank_model") {
-                config.rerank_model = Some(v.extract::<String>()?);
-            }
-        }
-    }
-
-    let client: Box<dyn qql::client::QdrantOps> = if use_grpc {
-        #[cfg(feature = "grpc")]
-        {
-            let mut grpc = qql::grpc::GrpcQdrant::from_url(url, api_key)
-                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-            if let Some(affinity) = route_affinity.as_deref() {
-                grpc = grpc.with_route_affinity(affinity);
-            }
-            Box::new(grpc)
-        }
-        #[cfg(not(feature = "grpc"))]
-        {
-            return Err(pyo3::exceptions::PyRuntimeError::new_err(
-                "gRPC feature not enabled in this build",
-            ));
-        }
-    } else {
-        let mut rest = qql::rest::RestQdrant::new(url.to_string(), api_key);
-        if let Some(affinity) = route_affinity.as_deref() {
-            rest = rest.with_route_affinity(affinity);
-        }
-        Box::new(rest)
-    };
-
-    let embedder_impl = if let Some(endpoint) = &config.embedding_endpoint {
-        if !endpoint.trim().is_empty() {
-            let http_emb =
-                qql::embedder::HttpEmbedder::try_with_options(qql::embedder::HttpEmbedderOptions {
-                    endpoint: endpoint.clone(),
-                    api_key: config.embedding_api_key.clone().unwrap_or_default(),
-                    model: config.embedding_model.clone().unwrap_or_default(),
-                    dimension: config.embedding_dimension,
-                    multi_endpoint: config.multi_embedding_endpoint.clone(),
-                    multi_api_key: config.multi_embedding_api_key.clone(),
-                    multi_model: config.multi_embedding_model.clone(),
-                    multi_dimension: config.multi_embedding_dimension,
-                    image_endpoint: config.image_embedding_endpoint.clone(),
-                    image_api_key: config.image_embedding_api_key.clone(),
-                    image_model: config.image_embedding_model.clone(),
-                    image_dimension: config.image_embedding_dimension,
-                    rerank_endpoint: config.rerank_endpoint.clone(),
-                    rerank_api_key: config.rerank_api_key.clone(),
-                    rerank_model: config.rerank_model.clone(),
-                })
-                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-            Some(std::sync::Arc::new(http_emb) as std::sync::Arc<dyn qql::embedder::Embedder>)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    let exec = qql::executor::Executor::with_embedder(client, Some(config), embedder_impl);
-    Ok((exec, rt))
-}
-
-#[pyclass(name = "Client")]
+#[pyclass(name = "Client", frozen)]
 struct PyClient {
     inner: std::sync::Arc<qql::executor::Executor>,
     runtime: tokio::runtime::Runtime,
@@ -426,43 +195,68 @@ impl PyClient {
     /// Execute a QQL query string, a pre-parsed Stmt, or a list of either.
     /// Lists of same-collection QUERY statements are automatically batched
     /// into a single network call.
-    #[pyo3(signature = (query, *, on_error="stop"))]
+    #[pyo3(signature = (query, *, params=None, on_error="stop"))]
     fn execute<'py>(
         &self,
         py: Python<'py>,
         query: &Bound<'_, PyAny>,
+        params: Option<&Bound<'_, PyAny>>,
         on_error: &str,
     ) -> PyResult<Bound<'py, PyAny>> {
         let oe = parse_on_error(on_error)?;
-        let out = self.classify_and_run(query, oe)?;
+        let input = if let Some(p) = params {
+            if let Ok(q_str) = query.extract::<String>() {
+                let bound = bind_py_params(&q_str, p)?;
+                Input::String(bound)
+            } else {
+                return Err(PyValueError::new_err(
+                    "parameter binding requires a query string",
+                ));
+            }
+        } else {
+            self.classify(query)?
+        };
+        let out = py.detach(|| self.run_input(input, oe))?;
         pythonize::pythonize(py, &out)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
     }
 
     /// Async variant — accepts the same input types as `execute`.
-    #[pyo3(signature = (query, *, on_error="stop"))]
+    #[pyo3(signature = (query, *, params=None, on_error="stop"))]
     fn execute_async<'py>(
         &self,
         py: Python<'py>,
         query: Bound<'py, PyAny>,
+        params: Option<&Bound<'_, PyAny>>,
         on_error: &str,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
         let oe = parse_on_error(on_error)?;
-        let classified = self.classify(&query)?;
+        let input = if let Some(p) = params {
+            if let Ok(q_str) = query.extract::<String>() {
+                let bound = bind_py_params(&q_str, p)?;
+                Input::String(bound)
+            } else {
+                return Err(PyValueError::new_err(
+                    "parameter binding requires a query string",
+                ));
+            }
+        } else {
+            self.classify(&query)?
+        };
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let val = Self::run_async(&inner, classified, oe)
+            let val = Self::run_async(&inner, input, oe)
                 .await
-                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-            Python::with_gil(|py| {
+                .map_err(qql_py_error)?;
+            Python::attach(|py| {
                 pythonize::pythonize(py, &val)
                     .map(|b| b.unbind())
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+                    .map_err(|e| PyRuntimeError::new_err(e.to_string()))
             })
         })
     }
 
-    fn explain(&self, query: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    fn explain(&self, query: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
         let py = query.py();
         do_explain(py, query)
     }
@@ -483,7 +277,7 @@ enum Input {
 
 impl PyClient {
     fn classify(&self, query: &Bound<'_, PyAny>) -> PyResult<Input> {
-        if let Ok(list) = query.downcast::<pyo3::types::PyList>() {
+        if let Ok(list) = query.cast::<pyo3::types::PyList>() {
             if list.is_empty() {
                 return Ok(Input::StrList(Vec::new()));
             }
@@ -517,25 +311,25 @@ impl PyClient {
         Ok(Input::String(s))
     }
 
-    fn classify_and_run(
+    fn run_input(
         &self,
-        query: &Bound<'_, PyAny>,
+        input: Input,
         on_error: qql::executor::OnError,
     ) -> PyResult<serde_json::Value> {
         let stop = matches!(on_error, qql::executor::OnError::Stop);
-        match self.classify(query)? {
+        match input {
             Input::String(s) => {
                 let report = self
                     .runtime
                     .block_on(self.inner.execute(&s, on_error))
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+                    .map_err(qql_py_error)?;
                 Ok(serde_json::to_value(&report).unwrap_or_default())
             }
             Input::Stmt(s) => {
                 let results = self
                     .runtime
                     .block_on(self.inner.execute_batch_nodes(vec![s], stop))
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+                    .map_err(qql_py_error)?;
                 let report = qql::executor::ExecutionReport::from_results(results);
                 Ok(serde_json::to_value(&report).unwrap_or_default())
             }
@@ -544,14 +338,14 @@ impl PyClient {
                 let report = self
                     .runtime
                     .block_on(self.inner.execute_batch(&refs, on_error))
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+                    .map_err(qql_py_error)?;
                 Ok(serde_json::to_value(&report).unwrap_or_default())
             }
             Input::StmtList(stmts) => {
                 let results = self
                     .runtime
                     .block_on(self.inner.execute_batch_nodes(stmts, stop))
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+                    .map_err(qql_py_error)?;
                 let report = qql::executor::ExecutionReport::from_results(results);
                 Ok(serde_json::to_value(&report).unwrap_or_default())
             }
@@ -591,11 +385,12 @@ impl PyClient {
 // ── free functions ────────────────────────────────────────────────
 
 #[pyfunction]
-#[pyo3(signature = (query, *, url="http://localhost:6333", api_key=None, use_grpc=false, embedder=None, on_error="stop", route_affinity=None))]
+#[pyo3(signature = (query, *, params=None, url="http://localhost:6333", api_key=None, use_grpc=false, embedder=None, on_error="stop", route_affinity=None))]
 #[allow(clippy::too_many_arguments)]
 fn execute<'py>(
     py: Python<'py>,
     query: &Bound<'_, PyAny>,
+    params: Option<&Bound<'_, PyAny>>,
     url: &str,
     api_key: Option<String>,
     use_grpc: bool,
@@ -604,15 +399,16 @@ fn execute<'py>(
     route_affinity: Option<String>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let client = PyClient::new(url, api_key, use_grpc, embedder, route_affinity)?;
-    client.execute(py, query, on_error)
+    client.execute(py, query, params, on_error)
 }
 
 #[pyfunction]
-#[pyo3(signature = (query, *, url="http://localhost:6333", api_key=None, use_grpc=false, embedder=None, on_error="stop", route_affinity=None))]
+#[pyo3(signature = (query, *, params=None, url="http://localhost:6333", api_key=None, use_grpc=false, embedder=None, on_error="stop", route_affinity=None))]
 #[allow(clippy::too_many_arguments)]
 fn execute_async<'py>(
     py: Python<'py>,
     query: Bound<'py, PyAny>,
+    params: Option<&Bound<'_, PyAny>>,
     url: &str,
     api_key: Option<String>,
     use_grpc: bool,
@@ -621,7 +417,44 @@ fn execute_async<'py>(
     route_affinity: Option<String>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let client = PyClient::new(url, api_key, use_grpc, embedder, route_affinity)?;
-    client.execute_async(py, query, on_error)
+    client.execute_async(py, query, params, on_error)
+}
+
+/// Substitute `:name` (dict) or `?` (list) placeholders into a query string.
+#[pyfunction]
+#[pyo3(signature = (query, params=None))]
+fn bind(query: &str, params: Option<&Bound<'_, PyAny>>) -> PyResult<String> {
+    match params {
+        Some(p) => bind_py_params(query, p),
+        None => Ok(query.to_string()),
+    }
+}
+
+fn bind_py_params(query: &str, params: &Bound<'_, PyAny>) -> PyResult<String> {
+    if params.is_none() {
+        return Ok(query.to_string());
+    }
+    if let Ok(dict) = params.cast::<PyDict>() {
+        let mut map = std::collections::HashMap::new();
+        for (k, v) in dict.iter() {
+            let key = k
+                .extract::<String>()
+                .map_err(|_| PySyntaxError::new_err("parameter dict keys must be strings"))?;
+            let val = py_to_value(&v)?;
+            map.insert(key, val);
+        }
+        qql_core::params::bind_named(query, |k| map.get(k).cloned()).map_err(qql_py_value_error)
+    } else if let Ok(list) = params.cast::<PyList>() {
+        let mut items = Vec::with_capacity(list.len());
+        for item in list.iter() {
+            items.push(py_to_value(&item)?);
+        }
+        qql_core::params::bind_positional(query, &items).map_err(qql_py_value_error)
+    } else {
+        Err(PyValueError::new_err(
+            "params must be a dict for named parameters (:name) or a list for positional parameters (?)",
+        ))
+    }
 }
 
 fn parse_on_error(s: &str) -> PyResult<qql::executor::OnError> {
@@ -634,7 +467,7 @@ fn parse_on_error(s: &str) -> PyResult<qql::executor::OnError> {
     }
 }
 
-fn do_explain(py: Python<'_>, query: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+fn do_explain(py: Python<'_>, query: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let query_str: String;
     let plan_result = if let Ok(py_stmt) = query.extract::<PyRef<PyStmt>>() {
         query_str = String::from("<Stmt>");
@@ -651,21 +484,21 @@ fn do_explain(py: Python<'_>, query: &Bound<'_, PyAny>) -> PyResult<PyObject> {
     let dict = PyDict::new(py);
     match plan_result {
         Ok(plan) => {
-            dict.set_item("ok", true)?;
-            dict.set_item("query", query_str)?;
-            dict.set_item("plan", plan)?;
+            dict.set_item(pyo3::intern!(py, "ok"), true)?;
+            dict.set_item(pyo3::intern!(py, "query"), query_str)?;
+            dict.set_item(pyo3::intern!(py, "plan"), plan)?;
         }
         Err(e) => {
-            dict.set_item("ok", false)?;
-            dict.set_item("query", query_str)?;
-            dict.set_item("error", e.to_string())?;
+            dict.set_item(pyo3::intern!(py, "ok"), false)?;
+            dict.set_item(pyo3::intern!(py, "query"), query_str)?;
+            dict.set_item(pyo3::intern!(py, "error"), e.to_string())?;
         }
     }
-    Ok(dict.into())
+    Ok(dict.into_any().unbind())
 }
 
 #[pyfunction]
-fn explain(query: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+fn explain(query: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let py = query.py();
     do_explain(py, query)
 }
@@ -677,6 +510,7 @@ fn pyqql(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyClient>()?;
     m.add_function(wrap_pyfunction!(execute, m)?)?;
     m.add_function(wrap_pyfunction!(execute_async, m)?)?;
+    m.add_function(wrap_pyfunction!(bind, m)?)?;
     m.add_function(wrap_pyfunction!(explain, m)?)?;
     m.add_function(wrap_pyfunction!(parse, m)?)?;
     m.add_function(wrap_pyfunction!(parse_json, m)?)?;
@@ -685,6 +519,36 @@ fn pyqql(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(tokenize, m)?)?;
     m.add_function(wrap_pyfunction!(compile_query, m)?)?;
     Ok(())
+}
+
+fn qql_py_error(error: QqlError) -> PyErr {
+    attach_qql_error(PyRuntimeError::new_err(error.to_string()), error)
+}
+
+fn qql_py_syntax_error(error: QqlError) -> PyErr {
+    attach_qql_error(PySyntaxError::new_err(error.to_string()), error)
+}
+
+fn qql_py_value_error(error: QqlError) -> PyErr {
+    attach_qql_error(PyValueError::new_err(error.to_string()), error)
+}
+
+fn attach_qql_error(py_error: PyErr, error: QqlError) -> PyErr {
+    Python::attach(|py| {
+        let value = py_error.value(py);
+        let _ = value.setattr("code", error.code.as_ref());
+        let _ = value.setattr("kind", format!("{:?}", error.kind));
+        let span = if let Some(span) = error.span {
+            let span_dict = PyDict::new(py);
+            let _ = span_dict.set_item("start", span.start);
+            let _ = span_dict.set_item("end", span.end);
+            span_dict.into_any()
+        } else {
+            py.None().into_bound(py)
+        };
+        let _ = value.setattr("span", span);
+    });
+    py_error
 }
 
 fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
@@ -703,14 +567,14 @@ fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
     if let Ok(s) = value.extract::<String>() {
         return Ok(Value::Str(s));
     }
-    if let Ok(list) = value.downcast::<PyList>() {
+    if let Ok(list) = value.cast::<PyList>() {
         let mut items = Vec::with_capacity(list.len());
         for item in list.iter() {
             items.push(py_to_value(&item)?);
         }
         return Ok(Value::List(items));
     }
-    if let Ok(dict) = value.downcast::<PyDict>() {
+    if let Ok(dict) = value.cast::<PyDict>() {
         let mut items = Vec::with_capacity(dict.len());
         for (key, item) in dict.iter() {
             let key = key

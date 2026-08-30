@@ -53,7 +53,8 @@ client.close()
 | `parse` / `parse_json` / `is_valid` / `tokenize` | Frontend |
 | `inject_filter` | Isolation |
 | `Stmt.shard_key` | Property exists for AST parity; **edge rejects SHARD at execute** |
-| `compile_query` / `explain` / `execute` | Plan / run |
+| `bind(query, params)` | Substitute `:name` (dict) or `?` (list) |
+| `compile_query` / `explain` / `execute` | Plan / run (`params=` same as `bind`) |
 
 ## Edge gotchas
 

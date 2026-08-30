@@ -1,0 +1,223 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "sec10k"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "supply chain"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": {
+              "kind": "Sparse",
+              "multi": false,
+              "name": "lexical_v2"
+            }
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": {
+          "acorn": null,
+          "consistency": null,
+          "exact": null,
+          "hnsw_ef": null,
+          "idf": {
+            "corpus": null
+          },
+          "indexed_only": null,
+          "max_selectivity": null,
+          "quantization": null,
+          "rrf_k": null,
+          "rrf_weights": null,
+          "timeout": null
+        },
+        "score_threshold": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "sec10k"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "supply chain"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": {
+              "kind": "Sparse",
+              "multi": false,
+              "name": "lexical_v2"
+            }
+          }
+        },
+        "filter": {
+          "Compare": {
+            "field": "tenant_id",
+            "op": "Eq",
+            "value": {
+              "Str": "acme"
+            }
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": {
+          "acorn": null,
+          "consistency": null,
+          "exact": null,
+          "hnsw_ef": null,
+          "idf": {
+            "corpus": {
+              "Compare": {
+                "field": "tenant_id",
+                "op": "Eq",
+                "value": {
+                  "Str": "acme"
+                }
+              }
+            }
+          },
+          "indexed_only": null,
+          "max_selectivity": null,
+          "quantization": null,
+          "rrf_k": null,
+          "rrf_weights": null,
+          "timeout": null
+        },
+        "score_threshold": null,
+        "shard_key": "acme"
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "sec10k"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "supply chain"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": {
+              "kind": "Sparse",
+              "multi": false,
+              "name": "lexical_v2"
+            }
+          }
+        },
+        "filter": {
+          "And": {
+            "operands": [
+              {
+                "Compare": {
+                  "field": "tenant_id",
+                  "op": "Eq",
+                  "value": {
+                    "Str": "acme"
+                  }
+                }
+              },
+              {
+                "Compare": {
+                  "field": "status",
+                  "op": "Eq",
+                  "value": {
+                    "Str": "active"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": {
+          "acorn": null,
+          "consistency": null,
+          "exact": null,
+          "hnsw_ef": null,
+          "idf": {
+            "corpus": {
+              "And": {
+                "operands": [
+                  {
+                    "Compare": {
+                      "field": "tenant_id",
+                      "op": "Eq",
+                      "value": {
+                        "Str": "acme"
+                      }
+                    }
+                  },
+                  {
+                    "Compare": {
+                      "field": "status",
+                      "op": "Eq",
+                      "value": {
+                        "Str": "active"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "indexed_only": null,
+          "max_selectivity": null,
+          "quantization": null,
+          "rrf_k": null,
+          "rrf_weights": null,
+          "timeout": null
+        },
+        "score_threshold": null,
+        "shard_key": "acme"
+      }
+    }
+  ]
+}

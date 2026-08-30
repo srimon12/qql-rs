@@ -45,9 +45,10 @@ LIMIT 5;
 | Data | Creating and mutating points | `UPSERT`, `UPDATE`, `DELETE`, payload/vector operations |
 | Schema | Defining Qdrant resources | `CREATE`, `ALTER`, `DROP`, `SHOW`, `SET QUOTA` |
 
-Notable QQL 1.4 / Qdrant 1.19 additions: `MATCH PREFIX` and `SLICE` filters,
-`PARAMS (idf = …)`, dense `datatype` / `memory` placement, keyword
-`prefix = true` indexes, and REST-only `SHOW QUOTAS` / `SET QUOTA`.
+Notable QQL 1.5 / Qdrant 1.19 additions: `MATCH PREFIX` and `SLICE` filters,
+`PARAMS (idf = 'global' | WHERE <filter>)`, dense `datatype` / `memory`
+placement, keyword `prefix = true` indexes, and REST-only `SHOW QUOTAS` /
+`SET QUOTA`.
 
 ## Lexical rules
 

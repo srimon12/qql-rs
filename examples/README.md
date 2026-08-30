@@ -1,6 +1,6 @@
 # QQL Examples
 
-Working demos of **QQL 1.4** (Qdrant ≥ 1.19.0) across language bindings and end-to-end apps.
+Working demos of **QQL 1.5** (Qdrant ≥ 1.19.0) across language bindings and end-to-end apps.
 
 Two flagship stories:
 
@@ -9,7 +9,7 @@ Two flagship stories:
 | **[sec10k-qql/](sec10k-qql/)** | Multi-tenant RAG over real SEC 10-K filings — `inject_filter` + `SHARD` / `stmt.shard_key` |
 | **[airbnb-demo/](airbnb-demo/)** | Berlin geo search — `GEO_RADIUS` / `BBOX` / `POLYGON` + district shards |
 
-## QQL 1.4 / Qdrant 1.19 snippets
+## QQL 1.5 / Qdrant 1.19 snippets
 
 These parse offline; execute against Qdrant 1.19+ (quotas are REST-only):
 
@@ -30,7 +30,9 @@ QUERY TEXT 'compliance' FROM docs
 
 -- Per-query sparse IDF corpus (tenant stats)
 QUERY TEXT 'risks' FROM docs USING sparse
-  PARAMS (idf = {corpus: {must: [{key: 'tenant', match: {value: 'acme'}}]}})
+  WHERE tenant_id = 'acme'
+  SHARD 'acme'
+  PARAMS (idf = WHERE tenant_id = 'acme')
   LIMIT 10;
 
 -- Cluster resource quotas (REST only; not edge/gRPC)
@@ -144,7 +146,7 @@ QQL_BIN=./target/release/qql python examples/edge-demo/main.py
 QQL_BIN=./target/release/qql python examples/edge-demo/main.py --dry-run
 ```
 
-## QQL 1.4 / Qdrant 1.19 features covered
+## QQL 1.5 / Qdrant 1.19 features covered
 
 Examples across this folder exercise:
 
@@ -166,7 +168,7 @@ Examples across this folder exercise:
 
 ## Version note
 
-Target SDK / engine: **0.2.1+**. Older release binaries reject some 1.3 syntax — rebuild from this workspace:
+Target SDK / engine: **0.3.0+**. Older release binaries reject some 1.3 syntax — rebuild from this workspace:
 
 ```bash
 cargo build --release -p qql-cli

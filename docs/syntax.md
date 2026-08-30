@@ -93,7 +93,7 @@ conventional defaults, **not reserved**. Kind never comes from name spelling
 |---|---|
 | `USING name` | Executor looks up `name` on the collection schema: dense, sparse, or dense+multivector |
 | `USING name AS DENSE` | Explicit single-vector dense embed (MiniLM, CLIP text, …) |
-| `USING name AS SPARSE` | Explicit sparse (BM25-style) embed |
+| `USING name AS SPARSE` | Explicit sparse (wire-compatible BM25) embed |
 | `USING name AS MULTI` / `AS MULTIVECTOR` | Explicit dense **multivector bag** (ColBERT / BGE-M3 ColBERT) → `MultiDense` — **not** CLIP |
 | `USING HYBRID [DENSE n] [SPARSE n] [FUSION RRF\|DBSF]` | Expand text nearest → dense+sparse fusion (`QueryExpr::Hybrid`, same as `QUERY HYBRID`) |
 
@@ -274,7 +274,7 @@ search-param    = "hnsw_ef", "=", positive-integer
                 | "quantization", "=", object
                 | "rrf_k", "=", positive-integer
                 | "rrf_weights", "=", array
-                | "idf", "=", ( "global" | object )
+                | "idf", "=", ( string | "global" | "WHERE", filter )
                 | "timeout", "=", positive-integer
                 | "consistency", "=", ( positive-integer | "majority" | "quorum" | "all" | string ) ;
 ```
@@ -304,14 +304,21 @@ QUERY TEXT 'vector database' FROM docs USING sparse
   PARAMS (idf = 'global')
   LIMIT 10;
 
--- Restrict the IDF corpus to an explicit filter object
+-- Restrict the IDF corpus with a QQL filter
 QUERY TEXT 'vector database' FROM docs USING sparse
-  PARAMS (idf = {corpus: {must: [{key: 'status', match: {value: 'active'}}]}})
+  PARAMS (idf = WHERE status = 'active')
+  LIMIT 10;
+
+-- Tenant-scoped IDF: scoring corpus, not isolation
+QUERY TEXT 'vector database' FROM docs USING sparse
+  WHERE tenant_id = 'acme'
+  SHARD 'acme'
+  PARAMS (idf = WHERE tenant_id = 'acme')
   LIMIT 10;
 ```
 
-`idf.corpus` must be a valid Qdrant filter object; malformed corpora fail with
-`QQL-PLAN-IDF`. Supported on remote Qdrant and on **qdrant-edge ≥ 0.8**.
+`idf` is `'global'` or `WHERE <filter>`. JSON corpus objects are rejected at
+parse (`QQL-VALIDATION-IDF`). Supported on remote Qdrant and on **qdrant-edge ≥ 0.8**.
 
 ```sql
 -- Request timeout 30s + majority read consistency (remote Qdrant)

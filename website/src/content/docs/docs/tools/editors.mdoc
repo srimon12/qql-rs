@@ -8,8 +8,8 @@ sidebar:
 ## VS Code extension
 
 The official extension is `qql-lang` (publisher `srimon12`), displayed as
-"QQL — Qdrant Query Language" (extension version **0.2.2**, bundling the QQL
-**1.4** parser). It is published on the Visual Studio Code marketplace; VSIX
+"QQL — Qdrant Query Language" (extension version **0.3.0**, bundling the QQL
+**1.5** parser). It is published on the Visual Studio Code marketplace; VSIX
 binaries are not committed to the repository — build one locally with
 `npm run package` inside `editors/vscode/` (requires `@vscode/vsce`).
 
@@ -31,9 +31,10 @@ external language runtime is needed.
 
 ### Syntax highlighting
 
-The TextMate grammar highlights `.qql` files with 130+ keywords across 8
-scopes, covering statements, operators, punctuation, strings, and comments.
-The same grammar powers the syntax highlighting on this website.
+The TextMate grammar highlights `.qql` files with 130+ keywords across 9
+scopes, covering statements, operators, parameter placeholders (`:name`, `?`),
+punctuation, strings, and comments. The same grammar powers the syntax
+highlighting on this website.
 
 ### Live diagnostics
 

@@ -60,7 +60,8 @@ console.log(version, isValid("SHOW COLLECTIONS"), compileQuery("SHOW COLLECTIONS
 | `injectFilter` / `stmt.injectFilter` | Isolation |
 | `stmt.shardKey` | Same as QQL `SHARD '…'` (no `injectShardKey`) |
 | `compileQuery` / `explain` / `explainStmt` | Offline |
-| `execute` / `executeStmt` | Free-function execute |
+| `bind(query, params)` | Substitute `:name` (object) or `?` (array) |
+| `execute` / `executeStmt` | Free-function execute (`options.params` same as `bind`) |
 
 ### Isolation vs routing
 
@@ -68,6 +69,7 @@ console.log(version, isValid("SHOW COLLECTIONS"), compileQuery("SHOW COLLECTIONS
 |---------|-----|------|
 | Isolation | `injectFilter` | **Filter** |
 | Routing | `SHARD '…'` or `stmt.shardKey` | `shard_key` / `ShardKeySelector` |
+| Sparse IDF | QQL `PARAMS (idf = 'global' \| WHERE …)` | `params.idf` (planner, not an inject) |
 | Partition DDL | `CREATE SHARD KEY` | Admin API |
 
 `injectFilter` ops: `= > >= < <=` only (no `!=`).
@@ -87,9 +89,14 @@ await client.execute(
   "QUERY TEXT 'q' FROM docs USING dense WHERE title MATCH PREFIX 'Comp' LIMIT 5"
 );
 
-// Sparse IDF corpus
+// Sparse IDF corpus — QQL WHERE filter, not a JSON object / inject API
 await client.execute(
   "QUERY TEXT 'q' FROM docs USING sparse PARAMS (idf = 'global') LIMIT 5"
+);
+await client.execute(
+  "QUERY TEXT 'q' FROM docs USING sparse " +
+    "WHERE tenant_id = 'acme' SHARD 'acme' " +
+    "PARAMS (idf = WHERE tenant_id = 'acme') LIMIT 5"
 );
 ```
 

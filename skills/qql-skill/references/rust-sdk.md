@@ -103,6 +103,24 @@ Client builder timeouts remain a separate HTTP-layer budget.
 **Routing:** prefer `SHARD 'tenant'` in the query string. After parse, use
 `stmt.set_shard_key(Some(tenant.into()))` — there is no `inject_shard_key`.
 
+**Sparse IDF:** write `PARAMS (idf = 'global')` or `PARAMS (idf = WHERE tenant_id = 'acme')`.
+There is no host inject and no `Value` / JSON corpus helper. `try_route` /
+`compile_statement` lower the QQL filter to OpenAPI `params.idf` (the old
+`value_to_json` corpus path is gone). Isolation stays `inject_filter`.
+
+```rust
+use qql_core::parser::Parser;
+use qql_plan::routing::try_route;
+
+let stmt = Parser::parse(
+    "QUERY TEXT 'risks' FROM docs USING sparse \
+     WHERE tenant_id = 'acme' SHARD 'acme' \
+     PARAMS (idf = WHERE tenant_id = 'acme') LIMIT 10;",
+)?;
+let route = try_route(&stmt)?;
+// REST body: params.idf = { "corpus": { "must": [{ "key": "tenant_id", "match": { "value": "acme" } }] } }
+```
+
 **Compilation:** use `compile_statement` / `try_route`. The deprecated
 `route()` (which panicked on client-side-only ops such as bare `CROSS RERANK`)
 has been removed; `try_route` returns `Err` — never panics — for those cases.
@@ -248,4 +266,62 @@ let stmts = Parser::parse_all(r#"
 
 // Inspect, inject filters, set shard keys...
 // exec.execute_batch_nodes(stmts, OnError::Stop).await?;
+```
+
+---
+
+## 6. Parameter Binding & Prepared Statements
+
+Rust keeps typed twins (`bind_named` / `bind_positional`, `execute_with_params` /
+`execute_with_positional_params`). Python, Node, and WASM collapse those into
+one `bind(query, params)` plus `execute(..., params=...)`.
+
+```rust
+use std::collections::HashMap;
+use qql::executor::{Executor, OnError};
+use qql_core::ast::Value;
+use qql_core::params::{bind_named, bind_positional};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let exec = Executor::rest("http://localhost:6333", None)?;
+
+    // 1. Direct execution with named parameters (:name)
+    let mut params = HashMap::new();
+    params.insert("cat".into(), Value::Str("medical".into()));
+    params.insert("lim".into(), Value::Int(10));
+    let res = exec.execute_with_params(
+        "QUERY TEXT 'chest pain' FROM docs WHERE category = :cat LIMIT :lim",
+        &params,
+        OnError::Stop,
+    ).await?;
+
+    // 2. Direct execution with positional parameters (?)
+    let pos_params = vec![
+        Value::Str("medical".into()),
+        Value::Int(10),
+    ];
+    let res2 = exec.execute_with_positional_params(
+        "QUERY TEXT 'chest pain' FROM docs WHERE category = ? LIMIT ?",
+        &pos_params,
+        OnError::Stop,
+    ).await?;
+
+    // 3. Standalone query binding (qql_core::params)
+    let bound = bind_named(
+        "QUERY TEXT :q FROM docs LIMIT :lim",
+        |k| match k {
+            "q" => Some(Value::Str("cardiology".into())),
+            "lim" => Some(Value::Int(5)),
+            _ => None,
+        },
+    )?;
+    println!("{bound}");
+
+    // 4. Hierarchical ASCII Tree Explain (qql_core::explain)
+    let plan = qql_core::explain::explain(&bound)?;
+    println!("{plan}");
+
+    Ok(())
+}
 ```

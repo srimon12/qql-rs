@@ -77,16 +77,23 @@ impl From<&qql_core::ast::VectorValue> for PlanVectorValue {
     }
 }
 
+/// Streams `f32` as JSON `f64` without allocating an intermediate `Vec<f64>`.
+struct F64Elems<'a>(&'a [f32]);
+
+impl Serialize for F64Elems<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
+        for v in self.0 {
+            seq.serialize_element(&(*v as f64))?;
+        }
+        seq.end()
+    }
+}
+
 impl Serialize for PlanVectorValue {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
-            PlanVectorValue::Dense(values) => {
-                let mut seq = serializer.serialize_seq(Some(values.len()))?;
-                for v in values {
-                    seq.serialize_element(&(*v as f64))?;
-                }
-                seq.end()
-            }
+            PlanVectorValue::Dense(values) => F64Elems(values).serialize(serializer),
             PlanVectorValue::Sparse { indices, values } => {
                 let mut map = serializer.serialize_map(Some(2))?;
                 map.serialize_entry("indices", indices)?;
@@ -96,8 +103,7 @@ impl Serialize for PlanVectorValue {
             PlanVectorValue::MultiDense(rows) => {
                 let mut seq = serializer.serialize_seq(Some(rows.len()))?;
                 for row in rows {
-                    let floats: Vec<f64> = row.iter().map(|v| *v as f64).collect();
-                    seq.serialize_element(&floats)?;
+                    seq.serialize_element(&F64Elems(row))?;
                 }
                 seq.end()
             }

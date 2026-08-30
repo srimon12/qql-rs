@@ -5,6 +5,7 @@ __version__ = "0.2.1"
 from .pyqql_edge import (  # type: ignore[attr-defined]
     Client,
     Stmt,
+    bind,
     compile_query,
     execute,
     execute_async,
@@ -30,6 +31,7 @@ except ImportError:  # pragma: no cover - feature-disabled builds
 __all__ = [
     "Client",
     "Stmt",
+    "bind",
     "compile_query",
     "execute",
     "execute_async",

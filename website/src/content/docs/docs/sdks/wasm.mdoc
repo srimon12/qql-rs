@@ -188,9 +188,16 @@ try {
 
 `execute(query | string[], options)` accepts a single statement, a
 semicolon-delimited script, or an array of independent sources. `options.onError`
-is `"stop"` (default) or `"continue"`. `executeStmt(stmt)` runs a pre-parsed
-`Stmt` handle. `compile(query)` and `explain(query)` inspect a route or plan
-without touching the network.
+is `"stop"` (default) or `"continue"`. `options.params` is an object for `:name`
+or an array for `?` — the same shape as `bind(query, params)`. `executeStmt(stmt)`
+runs a pre-parsed `Stmt` handle. `compile(query)` and `explain(query)` inspect a
+route or plan without touching the network.
+
+```javascript
+await client.execute("QUERY TEXT :q FROM docs LIMIT :lim", {
+  params: { q: "search", lim: 5 },
+});
+```
 
 Before executing, the client fetches the collection topology to resolve `USING`
 vector roles, then embeds text through the configured embedder. Execution is
@@ -262,6 +269,7 @@ releases it automatically.
 | `analyze(source)` | validity, tokens, AST, routes, explain, error | Editors and offline diagnostics |
 | `compile`, `explain`, `inject_filter` | route, text, rewritten AST | One-shot offline planning helpers |
 | `compileBytes`, `explainBytes` | `Uint8Array` | Transferable worker or IPC payloads |
+| `bind(query, params)` | bound source string | Substitute `:name` (object) or `?` (array) placeholders offline |
 | `formatQuery` | canonical source string | Normalize clause order, casing, and whitespace |
 | `new Stmt(source)` | owned statement handle | `injectFilter`, route compile, and shard assignment |
 | `Stmt.injectFilter`, `Stmt.shardKey` | mutated statement handle | Trusted filtering and optional routing |

@@ -61,6 +61,10 @@ export const ROBOTS_AI_AGENTS = [
   "Bytespider",
   "CCBot",
   "meta-externalagent",
+  "Cohere-ai",
+  "OAI-SearchBot",
+  "Diffbot",
+  "DuckAssistBot",
 ] as const;
 
 export function generateRobotsTxt({
@@ -81,6 +85,8 @@ export function generateRobotsTxt({
       "",
     ]),
     `Sitemap: ${sitemapUrl}`,
+    `# LLM documentation index: https://${DOMAIN}/llms.txt`,
+    `# Full LLM documentation corpus: https://${DOMAIN}/llms-full.txt`,
   ];
   return rules.join("\n");
 }

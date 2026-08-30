@@ -43,11 +43,9 @@ impl Executor {
                     if dense.len() == 1 && !dense[0].is_empty() {
                         let dense_name = &dense[0];
                         for point in &mut upsert.points {
-                            if let Some(PointVectors::Unnamed(vv)) = &point.vectors {
-                                point.vectors = Some(PointVectors::Named(vec![(
-                                    dense_name.clone(),
-                                    vv.clone(),
-                                )]));
+                            if let Some(PointVectors::Unnamed(vv)) = point.vectors.take() {
+                                point.vectors =
+                                    Some(PointVectors::Named(vec![(dense_name.clone(), vv)]));
                             }
                         }
                     }

@@ -382,6 +382,7 @@ fn render_textmate(literals: &[String]) -> String {
   "patterns": [
     {{ "include": "#comments" }},
     {{ "include": "#strings" }},
+    {{ "include": "#parameters" }},
     {{ "include": "#numbers" }},
     {{ "include": "#constants" }},
     {{ "include": "#keywords" }},
@@ -394,15 +395,20 @@ fn render_textmate(literals: &[String]) -> String {
     "strings": {{
       "patterns": [
         {{ "name": "string.quoted.single.qql", "begin": "'", "end": "'", "patterns": [{{ "name": "constant.character.escape.qql", "match": "''|\\\\['\\\"\\\\ntr]" }}] }},
-        {{ "name": "string.quoted.double.qql", "begin": "\\\"", "end": "\\\"", "patterns": [{{ "name": "constant.character.escape.qql", "match": "\\\\['\\\"\\\\ntr]" }}] }}
+        {{ "name": "string.quoted.double.qql", "begin": "\\\"", "end": "\\\"", "patterns": [{{ "name": "constant.character.escape.qql", "match": "\\\\['\\\"\\\\ntr]" }}] }},
+        {{ "name": "string.quoted.backtick.qql", "begin": "`", "end": "`", "patterns": [{{ "name": "constant.character.escape.qql", "match": "\\\\." }}] }}
       ]
     }},
+    "parameters": {{ "patterns": [
+      {{ "name": "variable.parameter.named.qql", "match": "(?<![A-Za-z0-9_$'\"`\\]\\}}]):[A-Za-z_][A-Za-z0-9_]*" }},
+      {{ "name": "variable.parameter.positional.qql", "match": "\\?" }}
+    ] }},
     "numbers": {{ "patterns": [{{ "name": "constant.numeric.float.qql", "match": "-?\\\\d+(\\\\.\\\\d+([eE][+-]?\\\\d+)?|([eE][+-]?\\\\d+))" }}, {{ "name": "constant.numeric.integer.qql", "match": "-?\\\\d+" }}] }},
     "constants": {{ "patterns": [{{ "name": "constant.language.qql", "match": "{constant_pattern}" }}] }},
     "keywords": {{ "patterns": [{{ "name": "keyword.control.qql", "match": "{keyword_pattern}" }}] }},
     "operators": {{ "patterns": [{{ "name": "keyword.operator.comparison.qql", "match": "{comparison_operator_pattern}" }}, {{ "name": "keyword.operator.assignment.qql", "match": "=" }}, {{ "name": "keyword.operator.arithmetic.qql", "match": "[\\\\+\\\\-\\\\*\\\\/]" }}] }},
     "punctuation": {{ "patterns": [{{ "name": "punctuation.terminator.qql", "match": ";" }}, {{ "name": "punctuation.separator.qql", "match": "," }}, {{ "name": "punctuation.definition.bracket.qql", "match": "[\\\\{{\\\\}}\\\\[\\\\]]" }}, {{ "name": "punctuation.definition.paren.qql", "match": "[\\\\(\\\\)]" }}, {{ "name": "punctuation.separator.key-value.qql", "match": ":" }}] }},
-    "identifiers": {{ "patterns": [{{ "name": "variable.other.readwrite.qql", "match": "\\\\$[A-Za-z_][A-Za-z0-9_]*(\\\\.[A-Za-z_][A-Za-z0-9_]*)*(\\\\[\\\\]\\\\.?)*" }}, {{ "name": "entity.name.qql", "match": "[A-Za-z_][A-Za-z0-9_]*(\\\\.[A-Za-z_][A-Za-z0-9_]*|\\\\[\\\\]\\\\.?)*" }}] }}
+    "identifiers": {{ "patterns": [{{ "name": "variable.other.readwrite.qql", "match": "\\\\$[A-Za-z0-9_]+(\\\\.[A-Za-z_][A-Za-z0-9_]*)*(\\\\[\\\\]\\\\.?)*" }}, {{ "name": "entity.name.qql", "match": "[A-Za-z_][A-Za-z0-9_]*(\\\\.[A-Za-z_][A-Za-z0-9_]*|\\\\[\\\\]\\\\.?)*" }}] }}
   }}
 }}
 "##

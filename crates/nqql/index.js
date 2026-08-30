@@ -249,6 +249,10 @@ class Client {
   }
 }
 
+function bind(query, params) {
+  return callNative(() => nativeBinding.bind(query, params));
+}
+
 module.exports = {
   parse,
   parseJson,
@@ -258,6 +262,7 @@ module.exports = {
   compileQuery,
   explain,
   explainStmt,
+  bind,
   execute,
   executeStmt,
   Client,

@@ -8,7 +8,6 @@ interface Sample {
 }
 
 interface Props {
-  label: string;
   heading: string;
   sub: string;
   footHref: string;
@@ -16,13 +15,12 @@ interface Props {
   samples: readonly Sample[];
 }
 
-const { label, heading, sub, footHref, footLabel, samples } = Astro.props;
+const { heading, sub, footHref, footLabel, samples } = Astro.props;
 ---
 
 <section class="landing-section landing-section--muted" aria-labelledby="language-heading">
   <div class="landing-shell landing-fade-up">
     <header class="landing-section__head">
-      <span class="landing-label">{label}</span>
       <h2 id="language-heading">{heading}</h2>
       <p class="landing-section__sub">{sub}</p>
     </header>

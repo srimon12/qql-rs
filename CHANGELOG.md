@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.0] - 2026-08-30
+
+### 📦 Packaging
+- **Workspace 0.3.0** — all crates, `pyqql` / `pyqql-edge` (PyPI), `@veristamp/nqql` / `@veristamp/nqql-edge` + platform packages (npm), and `qql-wasm` move to **0.3.0** together. This release merges the post-0.2.2 work with the previously unreleased 0.2.2 changes into a single version.
+- **VS Code extension 0.3.0** — the extension version aligns with the workspace release again after several independent packaging slots (0.2.1 / 0.2.4 / 0.2.5). Ships the rebuilt `nodejs`-target WASM bundle (parameter binding + QQL 1.5 parse surface) and the `qidftenant` snippet.
+
+### 🚀 Added
+- **Wire-compatible client-side BM25** — `qql-embed` sparse embeddings are now byte-for-byte compatible with Qdrant's server-side `qdrant/bm25` model: murmur3-32 token IDs (same `murmur3_32` crate the server uses), word tokenizer (split on non-alphanumeric), Unicode lowercasing, English stopword removal (exact server list), and English snowball stemming (`qdrant-rust-stemmers`). Queries embed with unit term weights; documents with BM25 tf saturation (k1=1.2, b=0.75, avg_len=256). A golden test pins real server output from the Qdrant docs. Vectors can be mixed with server-side `qdrant/bm25` inference on the same collection (requires sparse vector `modifier = 'idf'`).
+- **Batched sparse ingestion** — `Embedder::embed_sparse_document_batch` with default loop implementation; the edge embedder batches fastembed sparse inference at ingestion.
+- **Parameter binding (`:name` / `?`)** — `qql-core::params` substitutes named and positional placeholders in QQL source before parse. `$` stays an identifier character (`$score`, `$1`), so placeholders are only `:name` and `?`. Colons inside compact dicts (`{a:b}`) are not placeholders. Strings and `--` comments are never rewritten. Exposed as `bind` / `bind_named` / `bind_positional` on Python, Node, WASM, and edge SDKs, `Executor::execute_with_params` / `execute_with_positional_params`, and `Client.execute(..., params=…)`.
+- **Standalone value parse** — `Parser::parse_value` for binding literals.
+- **CLI REPL module** — interactive session extracted to `qql-cli` `repl.rs` (multiline statements, `\f` format, `\d` doctor, `\e` script).
+- **QQL 1.5 tenant IDF examples** — `query-idf-tenant.qql` plus keyword `prefix = true` on `create-index`. VS Code snippet `qidftenant`.
+- **Website guides** — embedded in-process Qdrant + FastEmbed (Python / Node), and a QQL vs raw Qdrant JSON comparison. Open Graph image route for docs/landing.
+
+### 🔄 Changed
+- **BREAKING: sparse token IDs changed** — the previous FNV-1a + length-prefix hashing is replaced by murmur3-32. **Existing sparse collections must be re-embedded**; old and new vectors cannot be mixed within one collection. New vectors are interchangeable with server-side `qdrant/bm25`.
+- **BREAKING: `Embedder` trait split** — `embed_sparse` / `embed_sparse_batch` are replaced by `embed_sparse_query` (unit weights, search text) and `embed_sparse_document` / `embed_sparse_document_batch` (BM25 tf saturation, ingestion text). Previously both sides used the query-style log-tf function and `build_document` was dead code. Custom embedders overriding `embed_sparse` must move to the role methods; embedders using the defaults need no changes.
+- **Edge BM25 fidelity** — `qql-edge` `FastEmbedder` delegates its local BM25 fallback to `qdrant_edge::bm25_embed::EdgeBm25` (segment's exact tokenizer pipeline), replacing the hand-rolled hasher.
+- **Sparse tokenizer follows the server** — underscores and hyphens are word boundaries (e.g. `test_fn` → `test` + `fn`), stopwords are dropped, and inflections stem (`running` → `run`), matching Qdrant's `qdrant/bm25` defaults. The pipeline is English-only, like the server defaults; non-English corpora should use server-side inference with explicit language options.
+- **Host bind DX** — Python (`pyqql` / `pyqql-edge`), Node (`nqql` / `nqql-edge`), and WASM expose one `bind(query, params)`: dict/object for `:name`, list/array for `?`. `Client.execute` takes the same `params`. Removed `bind_named` / `bind_positional` / `bindNamed` / `bindPositional` from host SDKs. WASM `bind` takes a JS object or array, not a JSON string. Rust keeps typed `bind_named` / `bind_positional` and `execute_with_params` / `execute_with_positional_params`.
+- **QQL 1.5 IDF corpus** — `PARAMS (idf = …)` takes `'global'` or a QQL `WHERE` filter (`idf = WHERE tenant_id = 'acme'`). The AST stores `Option<FilterExpr>`. The Qdrant JSON `{corpus: {must: […]}}` form is removed (`QQL-VALIDATION-IDF`). Isolation remains `WHERE` / `inject_filter`; routing remains `SHARD`; IDF only scopes sparse term statistics.
+- **Language version 1.5** — `PARAMS (idf = …)` is `'global'` / bare `global`, or `WHERE <filter>` (`idf = WHERE tenant_id = 'acme'`). AST `IdfParams.corpus` is `Option<FilterExpr>`. The planner lowers that filter with `top_level_filter` (the old `value_to_json` JSON-corpus path is gone). Isolation stays `WHERE` / `inject_filter`; routing stays `SHARD`; IDF only scopes sparse term statistics. The Qdrant JSON `{corpus: {must: […]}}` form is **removed** (`QQL-VALIDATION-IDF` at parse). Unused `CORPUS` token dropped. Conformance: 39 valid files (265 statements), 56 invalid cases, 39 AST snapshots.
+- **SDK crate splits** — `pyqql` embedder, `pyqql-edge` models, and `nqql-edge` tests moved out of the giant `lib.rs` files. JSON → AST values go through `Value::from_json` in one place. Node bindings reject invalid `params` shapes (object for named, array for positional).
+- **Bundled editor WASM** — rebuilt (`nodejs` target) so diagnostics, format, and `bind` match current `qql-wasm` (parameter placeholders and `idf = WHERE …`).
+- **Website chrome and landing** — Veristamp tokens (warm paper, terracotta, Newsreader + IBM Plex Sans + JetBrains Mono). Landing cut to hero, QQL vs JSON/Python compare, why, install, FAQ. Shared `chrome.css` for docs header/footer and playground dialogs.
+- **Playground** — full-viewport editor/inspector shell; Connection and Example as clickable chips; policy dialog is an example list plus a two-row inject form (`Field`/`Op`, `Value`/`Type`). Policy is `inject_filter` + optional `SHARD` only.
+
+### 🐛 Fixed
+- **IDF JSON corpora** — `{corpus: {must: […]}}` no longer parses; write `idf = WHERE …`.
+- **Docs keyword / 1.5 references** — skill and SDK pages, `docs/STORY.md` counts, and website language/examples/error-code pages match 1.5.
+- **Playground policy layout** — native `<select>` no longer overlaps the field/value inputs (`box-sizing` + two-row grid).
+
+### 📚 Documentation
+- `docs/parameters.md` and executable `{% qqlExample %}` blocks for bound queries.
+- Skills and SDK references: bind usage, and IDF as QQL `WHERE` (no host inject, no JSON corpus).
+- Website language, tools/examples, backend-compatibility, and error-code pages updated for `idf = WHERE <filter>`.
 
 ## [0.2.1] - 2026-08-22
 

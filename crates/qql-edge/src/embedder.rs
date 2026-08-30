@@ -10,11 +10,73 @@ use fastembed::{
     SparseInitOptions, SparseModel, SparseTextEmbedding, TextEmbedding, TextRerank,
 };
 
+use qdrant_edge::bm25_embed::{EdgeBm25, EdgeBm25Config};
 use qql_core::error::QqlError;
 use qql_embed::{Embedder, JointEmbeddingOutput, SparseVector};
 
 fn err(msg: impl Into<std::borrow::Cow<'static, str>>) -> QqlError {
     QqlError::execution("QQL-EDGE-EMBED", msg, None)
+}
+
+/// Convert an edge BM25 sparse vector into the transport-neutral type.
+fn to_qql_sparse(sv: qdrant_edge::SparseVector) -> SparseVector {
+    SparseVector {
+        indices: sv.indices,
+        values: sv.values,
+    }
+}
+
+/// Validate `model` against the embedder's sparse configuration: with a
+/// fastembed sparse model locked in, only that model (or default/empty) is
+/// allowed; without one, only default/empty is allowed (local wire-compatible
+/// BM25 handles it).
+fn ensure_sparse_model_allowed(embedder: &FastEmbedder, model: &str) -> Result<(), QqlError> {
+    let Some(ref sparse) = embedder.sparse else {
+        if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
+            return Err(qql_embed::sparse_model_unsupported_error(model));
+        }
+        return Ok(());
+    };
+    if !(embedder.accepts_sparse_model(model)
+        || model.is_empty()
+        || model.eq_ignore_ascii_case("default"))
+    {
+        return Err(err(format!(
+            "local sparse embedder is locked to '{}' ({}); cannot satisfy MODEL '{model}'",
+            sparse.model_name, sparse.model_code
+        )));
+    }
+    Ok(())
+}
+
+/// Run the configured fastembed sparse model over a batch of texts.
+async fn embed_sparse_fastembed_batch(
+    embedder: &FastEmbedder,
+    texts: Vec<String>,
+) -> Result<Vec<SparseVector>, QqlError> {
+    let Some(ref sparse) = embedder.sparse else {
+        return Err(err("no fastembed sparse model configured"));
+    };
+    let model_arc = sparse.model.clone();
+
+    let embeddings = tokio::task::spawn_blocking(move || {
+        let mut model = model_arc
+            .lock()
+            .map_err(|e| err(format!("fastembed sparse mutex poisoned: {e}")))?;
+        model
+            .embed(texts, None)
+            .map_err(|e| err(format!("fastembed SparseTextEmbedding failed: {e}")))
+    })
+    .await
+    .map_err(|e| err(format!("spawn_blocking failed: {e}")))??;
+
+    Ok(embeddings
+        .into_iter()
+        .map(|e| SparseVector {
+            indices: e.indices.iter().map(|&i| i as u32).collect(),
+            values: e.values.clone(),
+        })
+        .collect())
 }
 
 /// Public description of a local ONNX embedding model.
@@ -44,8 +106,9 @@ pub struct FastEmbedderOptions {
     pub model: Option<String>,
     /// Offline sparse model (SPLADE or BGE-M3 via `SparseTextEmbedding`).
     /// Accepts `splade`, `SPLADEPPV1`, `Qdrant/Splade_PP_en_v1`, `bge-m3`,
-    /// `BGEM3`, `BAAI/bge-m3`. When set, `embed_sparse` uses real ONNX
-    /// inference. `None` → local BM25 hashing for sparse requests.
+    /// `BGEM3`, `BAAI/bge-m3`. When set, sparse embedding uses real ONNX
+    /// inference. `None` → local wire-compatible BM25 (Qdrant
+    /// `qdrant/bm25`-identical token IDs) for sparse requests.
     pub sparse_model: Option<String>,
     /// Offline multivector model. Accepts `bge-m3`, `BGEM3Q`,
     /// `gpahal/bge-m3-onnx-int8`. When set, `embed_multi` runs via BGE-M3 ColBERT.
@@ -103,6 +166,10 @@ pub struct FastEmbedder {
     multi: Option<MultiSlot>,
     image: Option<ImageSlot>,
     reranker: Option<RerankSlot>,
+    /// Wire-compatible BM25 (Qdrant Edge pipeline) used when no fastembed
+    /// sparse model is configured. Query/document roles produce the same
+    /// token IDs and weights as the Qdrant server's `qdrant/bm25`.
+    bm25: EdgeBm25,
 }
 
 type CacheKey = (String, String);
@@ -387,6 +454,10 @@ impl FastEmbedder {
             multi,
             image,
             reranker,
+            // Default config (k=1.2, b=0.75, avg_len=256, English stemming +
+            // stopwords) is always valid, so init cannot fail here.
+            bm25: EdgeBm25::new(EdgeBm25Config::default())
+                .map_err(|e| err(format!("edge BM25 init failed: {e}")))?,
         })
     }
 
@@ -960,50 +1031,45 @@ impl Embedder for FastEmbedder {
         Ok(embeddings)
     }
 
-    async fn embed_sparse(&self, text: &str, model: &str) -> Result<SparseVector, QqlError> {
-        let Some(ref sparse) = self.sparse else {
-            // No sparse model configured: accept default/empty models for local
-            // BM25, but reject explicit non-default models.
-            if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
-                return Err(qql_embed::sparse_model_unsupported_error(model));
-            }
-            return Ok(qql_embed::sparse::build_query_default(text));
-        };
-
-        if !(self.accepts_sparse_model(model)
-            || model.is_empty()
-            || model.eq_ignore_ascii_case("default"))
-        {
-            return Err(err(format!(
-                "local sparse embedder is locked to '{}' ({}); cannot satisfy MODEL '{model}'",
-                sparse.model_name, sparse.model_code
-            )));
+    async fn embed_sparse_query(&self, text: &str, model: &str) -> Result<SparseVector, QqlError> {
+        ensure_sparse_model_allowed(self, model)?;
+        if self.sparse.is_some() {
+            let mut out = embed_sparse_fastembed_batch(self, vec![text.to_string()]).await?;
+            return out
+                .pop()
+                .ok_or_else(|| err("fastembed SparseTextEmbedding returned no result"));
         }
+        Ok(to_qql_sparse(self.bm25.embed_query(text)))
+    }
 
-        let model_arc = sparse.model.clone();
-        let texts = vec![text.to_string()];
+    async fn embed_sparse_document(
+        &self,
+        text: &str,
+        model: &str,
+    ) -> Result<SparseVector, QqlError> {
+        ensure_sparse_model_allowed(self, model)?;
+        if self.sparse.is_some() {
+            let mut out = embed_sparse_fastembed_batch(self, vec![text.to_string()]).await?;
+            return out
+                .pop()
+                .ok_or_else(|| err("fastembed SparseTextEmbedding returned no result"));
+        }
+        Ok(to_qql_sparse(self.bm25.embed_document(text)))
+    }
 
-        let embeddings = tokio::task::spawn_blocking(move || {
-            let mut model = model_arc
-                .lock()
-                .map_err(|e| err(format!("fastembed sparse mutex poisoned: {e}")))?;
-            model
-                .embed(texts, None)
-                .map_err(|e| err(format!("fastembed SparseTextEmbedding failed: {e}")))
-        })
-        .await
-        .map_err(|e| err(format!("spawn_blocking failed: {e}")))??;
-
-        let emb = embeddings
-            .into_iter()
-            .next()
-            .map(|e| SparseVector {
-                indices: e.indices.iter().map(|&i| i as u32).collect(),
-                values: e.values.clone(),
-            })
-            .ok_or_else(|| err("fastembed SparseTextEmbedding returned no result"))?;
-
-        Ok(emb)
+    async fn embed_sparse_document_batch(
+        &self,
+        texts: &[String],
+        model: &str,
+    ) -> Result<Vec<SparseVector>, QqlError> {
+        ensure_sparse_model_allowed(self, model)?;
+        if self.sparse.is_some() {
+            return embed_sparse_fastembed_batch(self, texts.to_vec()).await;
+        }
+        Ok(texts
+            .iter()
+            .map(|text| to_qql_sparse(self.bm25.embed_document(text)))
+            .collect())
     }
 
     /// Single-pass BGE-M3 joint embedding: one `Bgem3Embedding::embed` call
@@ -1014,7 +1080,7 @@ impl Embedder for FastEmbedder {
             // No BGE-M3 model: delegate to default per-call impl (non-optimal
             // but correct — no error suppression).
             let dense = self.embed_dense(text, model).await?;
-            let sparse = self.embed_sparse(text, model).await?;
+            let sparse = self.embed_sparse_document(text, model).await?;
             let multi_vec = self.embed_multi(text, model).await?;
             return Ok(JointEmbeddingOutput {
                 dense: Some(dense),

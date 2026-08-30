@@ -53,10 +53,11 @@ console.log(version, listEmbeddingModels().length);
 | `parse` / `parseJson` / `isValid` / `tokenize` | Frontend |
 | `injectFilter` | Isolation |
 | `stmt.shardKey` | AST property; edge **rejects** SHARD at execute |
-| `compileQuery` / `explain` / `execute` | Plan / run |
+| `bind(query, params)` | Substitute `:name` (object) or `?` (array) |
+| `compileQuery` / `explain` / `execute` | Plan / run (`options.params` same as `bind`) |
 
 Quotas, custom sharding, and `GROUP BY` require remote Qdrant. Offline sparse
-IDF works: `PARAMS (idf = 'global')`.
+IDF works: `PARAMS (idf = 'global')` or `PARAMS (idf = WHERE tenant_id = 'acme')`.
 
 ## Docs
 

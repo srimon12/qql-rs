@@ -35,12 +35,155 @@
 [data-policy-dot].is-active { background: #31b276; box-shadow: 0 0 0.5rem color-mix(in srgb, #31b276 65%, transparent); }
 [data-validation-badge].is-invalid > span { background: #dd675a; }
 
+/* Custom switch (avoids the unstyled native checkbox square). */
+input[role="switch"].switch {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 2.35rem;
+  height: 1.3rem;
+  flex: 0 0 auto;
+  align-self: center;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 999px;
+  background: var(--sl-color-gray-7);
+  position: relative;
+  cursor: pointer;
+  margin: 0;
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease;
+}
+
+input[role="switch"].switch::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0.15rem;
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 999px;
+  background: var(--sl-color-gray-3);
+  transform: translateY(-50%);
+  transition:
+    transform 200ms cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 180ms ease;
+}
+
+input[role="switch"].switch:checked {
+  background: color-mix(in srgb, var(--sl-color-accent) 18%, var(--sl-color-bg));
+  border-color: color-mix(in srgb, var(--sl-color-accent) 55%, var(--sl-color-gray-5));
+}
+
+input[role="switch"].switch:checked::after {
+  transform: translate(1rem, -50%);
+  background: var(--sl-color-accent);
+}
+
+input[role="switch"].switch:focus-visible {
+  outline: 2px solid var(--sl-color-accent);
+  outline-offset: 2px;
+}
+
+/* Route list rows in the Plan tab (built dynamically by playground.ts). */
+.route-row {
+	display: grid;
+	grid-template-columns: 1.5rem minmax(0, 1fr) auto;
+	gap: 0.4rem 0.6rem;
+	align-items: center;
+	width: 100%;
+	padding: 0.55rem 0.7rem;
+	border: 1px solid var(--sl-color-gray-5);
+	border-radius: 0.5rem;
+	background: var(--sl-color-bg);
+	color: var(--sl-color-gray-2);
+	font-family: var(--sl-font-mono);
+	font-size: 0.73rem;
+	text-align: left;
+	cursor: pointer;
+	transition:
+		border-color 160ms ease,
+		background-color 160ms ease,
+		color 160ms ease;
+}
+
+.route-row:hover {
+	border-color: var(--sl-color-gray-4);
+	color: var(--sl-color-white);
+}
+
+.route-row[aria-current="true"] {
+	border-color: color-mix(in srgb, var(--sl-color-accent) 55%, var(--sl-color-gray-5));
+	background: color-mix(in srgb, var(--sl-color-accent) 8%, var(--sl-color-bg));
+}
+
+.route-row:focus-visible {
+	outline: 2px solid var(--sl-color-accent);
+	outline-offset: 2px;
+}
+
+.route-row__index {
+	color: var(--sl-color-gray-4);
+	font-variant-numeric: tabular-nums;
+}
+
+.route-row__type {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--sl-color-gray-1);
+}
+
+.route-row[aria-current="true"] .route-row__type { color: var(--sl-color-white); }
+
+.route-row__method {
+	padding: 0.12rem 0.5rem;
+	border: 1px solid var(--sl-color-gray-5);
+	border-radius: 999px;
+	background: var(--sl-color-gray-7);
+	font-size: 0.64rem;
+	font-weight: 700;
+	color: var(--sl-color-gray-3);
+}
+
+.route-row[aria-current="true"] .route-row__method {
+	border-color: color-mix(in srgb, var(--sl-color-accent) 45%, var(--sl-color-gray-5));
+	color: var(--sl-color-accent-high);
+}
+
+.route-row__path {
+	grid-column: 2 / -1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--sl-color-gray-3);
+	font-size: 0.7rem;
+}
+
+/* Runtime status dot in the playground top strip. Colors are set from
+   playground.ts so the dot reflects real WASM state, not a constant. */
+[data-runtime-dot].is-ready { background: #31b276; }
+[data-runtime-dot].is-failed { background: #dd675a; }
+
+/* Draggable split between editor and inspector (desktop only). */
+[data-split-handle] { min-height: 2rem; }
+[data-split-handle]:hover > span,
+[data-split-handle][data-dragging] > span {
+	width: 3px;
+	background: color-mix(in srgb, var(--sl-color-accent) 65%, var(--sl-color-gray-5));
+}
+[data-split-handle][data-dragging] { cursor: col-resize; user-select: none; }
+[data-split-handle]:focus-visible {
+	outline: 2px solid var(--sl-color-accent);
+	outline-offset: -2px;
+	border-radius: 0.25rem;
+}
+
 .toast-region { bottom: 1rem; display: grid; gap: 0.5rem; position: fixed; right: 1rem; z-index: 100; }
 .toast {
 	background: var(--sl-color-gray-6);
 	border: 1px solid var(--sl-color-gray-5);
 	border-radius: 0.6rem;
-	box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.3);
+	box-shadow: 0 1rem 3rem color-mix(in srgb, var(--sl-color-text) 22%, transparent);
 	color: var(--sl-color-gray-1);
 	font-size: 0.75rem;
 	max-width: 22rem;
@@ -48,80 +191,16 @@
 }
 .toast--error { border-color: color-mix(in srgb, #dd675a 60%, var(--sl-color-gray-5)); }
 
-/* The policy and exporter retain semantic native dialog/form markup. */
-.app-dialog {
-	background: var(--sl-color-bg);
-	border: 1px solid var(--sl-color-gray-5);
-	border-radius: 0.75rem;
-	color: var(--sl-color-gray-1);
-	margin: auto;
-	max-height: 90vh;
-	overflow: hidden;
-	padding: 0;
-	width: min(calc(100% - 2rem), 48rem);
-}
-.app-dialog::backdrop { background: rgb(0 0 0 / 70%); backdrop-filter: blur(4px); }
-.side-dialog { width: min(calc(100% - 2rem), 38rem); }
-.dialog-shell { display: flex; flex-direction: column; margin: 0; max-height: 90vh; }
-.dialog-shell > header {
-	align-items: flex-start;
-	background: var(--sl-color-gray-6);
-	border-bottom: 1px solid var(--sl-color-gray-5);
-	display: flex;
-	gap: 1rem;
-	justify-content: space-between;
-	padding: 1.25rem;
-}
-.dialog-shell > header h2 { border: 0; font-family: var(--sl-font) !important; font-size: 1.1rem !important; font-weight: 600 !important; margin: 0.3rem 0 !important; padding: 0; }
-.dialog-shell > header p,
-.dialog-note { color: var(--sl-color-gray-3); font-size: 0.75rem; line-height: 1.5; margin: 0; }
-.icon-button {
-	background: var(--sl-color-bg); border: 1px solid var(--sl-color-gray-5); border-radius: 0.5rem;
-	color: var(--sl-color-gray-2); cursor: pointer; flex: 0 0 auto; font-size: 1.2rem; height: 2rem; width: 2rem;
-}
-.form-stack { display: grid; gap: 1rem; overflow-y: auto; padding: 1.25rem; }
-.form-stack label,
-.form-stack fieldset { display: grid; gap: 0.4rem; }
-.form-stack label > span,
-.form-stack legend { color: var(--sl-color-gray-2); font-size: 0.75rem; font-weight: 600; }
-.form-stack input,
-.form-stack select {
-	background: var(--sl-color-bg); border: 1px solid var(--sl-color-gray-5); border-radius: 0.5rem;
-	box-sizing: border-box; color: var(--sl-color-gray-1); min-height: 2.5rem; padding-inline: 0.7rem;
-}
-.form-stack input:focus,
-.form-stack select:focus { outline: 2px solid var(--sl-color-accent); outline-offset: 1px; }
-.form-stack fieldset { border: 1px solid var(--sl-color-gray-5); border-radius: 0.65rem; margin: 0; padding: 0.8rem; }
-.form-grid { display: grid; gap: 0.8rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.form-grid--policy { grid-template-columns: 1fr 7rem; }
-.switch-row { align-items: center; grid-template-columns: 1fr auto; padding: 0.8rem; }
-.switch-row input { accent-color: var(--sl-color-accent); width: 2.5rem; }
-.recipe-grid { display: grid; gap: 0.55rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.recipe-card {
-	background: var(--sl-color-bg); border: 1px solid var(--sl-color-gray-5); border-radius: 0.55rem;
-	color: var(--sl-color-gray-2); cursor: pointer; display: grid; gap: 0.35rem; padding: 0.75rem; text-align: left;
-}
-.recipe-card:hover { border-color: var(--sl-color-accent); }
-.recipe-card code { background: transparent !important; border: 0 !important; padding: 0 !important; }
-.dialog-shell > footer { align-items: center; border-top: 1px solid var(--sl-color-gray-5); display: flex; gap: 1rem; justify-content: space-between; padding: 1rem 1.25rem; }
-.button {
-	background: transparent; border: 1px solid var(--sl-color-gray-5); border-radius: 0.5rem; color: var(--sl-color-gray-2);
-	cursor: pointer; font: inherit; min-height: 2.25rem; padding: 0.45rem 0.75rem;
-}
-.button--primary { background: var(--sl-color-accent); border-color: var(--sl-color-accent); color: white; }
-.button:focus-visible,
-.icon-button:focus-visible,
-.recipe-card:focus-visible { outline: 2px solid var(--sl-color-accent); outline-offset: 2px; }
-.export-toolbar { align-items: center; border-bottom: 1px solid var(--sl-color-gray-5); display: flex; gap: 1rem; justify-content: space-between; padding: 0.75rem 1.25rem; }
-.button-group { display: flex; }
-.button-group button { background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--sl-color-gray-3); cursor: pointer; font: 0.72rem var(--sl-font-mono); padding: 0.5rem 0.65rem; }
-.button-group button[aria-pressed="true"] { border-bottom-color: var(--sl-color-accent); color: var(--sl-color-white); }
-.export-dialog pre { margin: 0; max-height: 58vh; min-height: 22rem; overflow: auto; padding: 1.25rem; white-space: pre-wrap; word-break: break-word; }
 [hidden] { display: none !important; }
 
-@media (max-width: 42rem) {
-	.form-grid,
-	.form-grid--policy,
-	.recipe-grid { grid-template-columns: 1fr; }
-	.dialog-shell > footer { align-items: stretch; flex-direction: column; }
+@media (prefers-reduced-motion: reduce) {
+	.route-row,
+	.toast,
+	input[role="switch"].switch {
+		transition: none;
+	}
+
+	[data-editor-loading] .animate-pulse {
+		animation: none !important;
+	}
 }

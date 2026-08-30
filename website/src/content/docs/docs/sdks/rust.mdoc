@@ -60,6 +60,44 @@ assert!(report.ok);
 println!("{} operations succeeded", report.succeeded);
 ```
 
+## Parameter binding & prepared queries
+
+Rust keeps typed twins: `execute_with_params` / `execute_with_positional_params` on `Executor`, and `qql_core::params::{bind_named, bind_positional}` for standalone binding. Python, Node, and WASM collapse those into one `bind(query, params)` plus `execute(..., params=...)`.
+
+```rust
+use std::collections::HashMap;
+use qql::executor::{Executor, OnError};
+use qql_core::ast::Value;
+use qql_core::params::{bind_named, bind_positional};
+
+let executor = Executor::rest("http://localhost:6333", None)?;
+
+// Named parameters (:name)
+let mut params = HashMap::new();
+params.insert("cat".into(), Value::Str("laptops".into()));
+params.insert("lim".into(), Value::Int(10));
+let report = executor.execute_with_params(
+    "QUERY TEXT 'ultrabook' FROM products WHERE category = :cat LIMIT :lim",
+    &params,
+    OnError::Stop,
+).await?;
+
+// Positional parameters (?)
+let pos_params = vec![Value::Str("laptops".into()), Value::Int(10)];
+let report2 = executor.execute_with_positional_params(
+    "QUERY TEXT 'ultrabook' FROM products WHERE category = ? LIMIT ?",
+    &pos_params,
+    OnError::Stop,
+).await?;
+
+// Standalone binding (qql_core::params)
+let bound = bind_named("QUERY TEXT :q FROM products LIMIT :lim", |k| match k {
+    "q" => Some(Value::Str("thinkpad".into())),
+    "lim" => Some(Value::Int(5)),
+    _ => None,
+})?;
+```
+
 For text input, configure an embedder or provide a `QUERY VECTOR` / explicit
 vector value. The runtime also exposes `Executor::grpc` behind its gRPC feature.
 

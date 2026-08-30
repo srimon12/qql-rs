@@ -656,10 +656,8 @@ fn filter_expression_is_empty(filter: &FilterExpression) -> bool {
 
 /// Lower body-only OpenAPI `SearchParams` (timeout/consistency are request-level).
 ///
-/// Returns `Err` when an IDF corpus object cannot be interpreted as a Qdrant
-/// filter. Parse only checks that `corpus` is an object; shape validation is
-/// intentionally deferred here so the planner stays the single fail-closed
-/// gate.
+/// IDF corpora are QQL filters (`idf = WHERE …`). An empty lowered filter is
+/// rejected with `QQL-PLAN-IDF`.
 pub fn lower_search_params(
     params: &qql_core::ast::SearchParams,
 ) -> Result<Option<SearchParamsRequest>, QqlError> {
@@ -668,27 +666,16 @@ pub fn lower_search_params(
         None => None,
         Some(idf) => Some(match &idf.corpus {
             None => IdfSearchParams::Global,
-            Some(corpus) => {
-                let json = crate::filter::value_to_json(corpus);
-                let filter: FilterExpression = serde_json::from_value(json).map_err(|err| {
-                    QqlError::validation(
-                        "QQL-PLAN-IDF",
-                        format!(
-                            "idf corpus must be a Qdrant filter object \
-                             (must/should/must_not/min_should or a field condition): {err}"
-                        ),
-                        None,
-                    )
-                })?;
-                if filter_expression_is_empty(&filter) {
+            Some(filter) => {
+                let corpus = top_level_filter(filter);
+                if filter_expression_is_empty(&corpus) {
                     return Err(QqlError::validation(
                         "QQL-PLAN-IDF",
-                        "idf corpus filter is empty or has no recognised conditions \
-                         (expected must/should/must_not/min_should or a field condition)",
+                        "idf corpus filter is empty or has no recognised conditions",
                         None,
                     ));
                 }
-                IdfSearchParams::Corpus { corpus: filter }
+                IdfSearchParams::Corpus { corpus }
             }
         }),
     };
@@ -829,22 +816,32 @@ mod tests {
         assert_eq!(global["params"]["idf"], "global");
 
         let corpus = parse_route(
-            "QUERY TEXT 'hello' MODEL 'e5' FROM docs PARAMS (idf = {corpus: {must: [{key: 'status', match: {value: 'active'}}]}}) LIMIT 5;",
+            "QUERY TEXT 'hello' MODEL 'e5' FROM docs PARAMS (idf = WHERE status = 'active') LIMIT 5;",
         );
         let idf = &corpus["params"]["idf"];
         assert_eq!(idf["corpus"]["must"][0]["key"], "status");
         assert_eq!(idf["corpus"]["must"][0]["match"]["value"], "active");
+
+        let tenant = parse_route(
+            "QUERY TEXT 'hello' MODEL 'e5' FROM docs WHERE tenant_id = 'acme' SHARD 'acme' PARAMS (idf = WHERE tenant_id = 'acme') LIMIT 5;",
+        );
+        assert_eq!(
+            tenant["params"]["idf"]["corpus"]["must"][0]["key"],
+            "tenant_id"
+        );
+        assert_eq!(
+            tenant["params"]["idf"]["corpus"]["must"][0]["match"]["value"],
+            "acme"
+        );
     }
 
     #[test]
-    fn idf_corpus_that_is_not_a_filter_is_a_plan_error() {
-        // Parse accepts any object under corpus; plan must fail closed.
-        let stmt = Parser::parse(
+    fn idf_json_corpus_is_rejected_at_parse() {
+        let err = Parser::parse(
             "QUERY TEXT 'hello' MODEL 'e5' FROM docs PARAMS (idf = {corpus: {not_a_filter: true}}) LIMIT 5;",
         )
-        .unwrap();
-        let err = crate::plan::plan(&stmt).unwrap_err();
-        assert_eq!(err.code, "QQL-PLAN-IDF");
+        .unwrap_err();
+        assert_eq!(err.code, "QQL-VALIDATION-IDF");
     }
 
     #[test]

@@ -538,7 +538,7 @@ search_param = _{
     | ^"rrf_k" ~ "=" ~ positive_integer
     | ^"rrf_weights" ~ "=" ~ number_list
     | ^"quantization" ~ "=" ~ quantization_search
-    // Per-query IDF corpus for sparse vectors: global scope or a corpus filter.
+    // Per-query IDF corpus for sparse vectors: global scope or a QQL filter.
     | ^"idf" ~ "=" ~ idf_param
     // Request-level (REST query string / gRPC fields) — seconds, min 1
     | ^"timeout" ~ "=" ~ positive_integer
@@ -548,7 +548,7 @@ search_param = _{
 idf_param = _{
       string
     | ^"global"
-    | "{" ~ ^"corpus" ~ ":" ~ object ~ "}"
+    | ^"WHERE" ~ filter
 }
 quantization_search = {
     "{"

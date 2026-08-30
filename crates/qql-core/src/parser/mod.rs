@@ -74,6 +74,17 @@ impl Parser {
     pub fn parse_all(input: &str) -> Result<Vec<Stmt>, QqlError> {
         AstLowerer::lower_script(input)
     }
+
+    /// Parse a standalone literal value (string, number, boolean, null, list, or dict).
+    ///
+    /// Errors if parsing fails or if unexpected trailing tokens exist after the value.
+    pub fn parse_value(input: &str) -> Result<crate::ast::Value, QqlError> {
+        let tokens = AstLowerer::lex(input)?;
+        let mut parser = AstLowerer::new(input, tokens);
+        let val = parser.parse_value()?;
+        parser.expect_end()?;
+        Ok(val)
+    }
 }
 
 impl<'a> AstLowerer<'a> {
@@ -310,9 +321,7 @@ impl<'a> AstLowerer<'a> {
                     Ok(crate::ast::Value::Str(tok.text.to_string()))
                 }
             }
-            TokenKind::Lbrace => self
-                .parse_payload_dict()
-                .map(|items| crate::ast::Value::Dict(items.into_iter().collect())),
+            TokenKind::Lbrace => self.parse_payload_dict().map(crate::ast::Value::Dict),
             TokenKind::Lbracket => self.parse_list().map(crate::ast::Value::List),
             _ => Err(QqlError::parse(
                 "QQL-PARSE-VALUE",

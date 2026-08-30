@@ -23,6 +23,7 @@ export interface ExecutionReport {
 
 export interface ExecuteOptions {
   onError?: "stop" | "continue";
+  params?: Record<string, unknown> | unknown[];
 }
 
 export interface CompiledRoute {
@@ -55,7 +56,7 @@ export interface LocalExecutorOptions {
    * Default: BGESmallENV15 (384-d).
    */
   model?: string;
-  /** Offline sparse model (SPLADE or BGE-M3 SparseTextEmbedding), e.g. "splade". None → local BM25 hashing. */
+  /** Offline sparse model (SPLADE or BGE-M3 SparseTextEmbedding), e.g. "splade". None → local wire-compatible BM25 (Qdrant qdrant/bm25-identical token IDs). */
   sparseModel?: string;
   /** Offline multivector model (BGE-M3 ColBERT), e.g. "bge-m3". */
   multiModel?: string;
@@ -76,7 +77,7 @@ export interface StandaloneOptions {
   onDiskPayload?: boolean;
   /** Local ONNX model for standalone execute() / executeStmt() */
   model?: string;
-  /** Offline sparse model (SPLADE or BGE-M3 SparseTextEmbedding), e.g. "splade". None → local BM25 hashing. */
+  /** Offline sparse model (SPLADE or BGE-M3 SparseTextEmbedding), e.g. "splade". None → local wire-compatible BM25 (Qdrant qdrant/bm25-identical token IDs). */
   sparseModel?: string;
   /** Offline multivector model (BGE-M3 ColBERT), e.g. "bge-m3". */
   multiModel?: string;
@@ -98,6 +99,8 @@ export interface StandaloneOptions {
   embedDim?: number;
   /** onError behaviour */
   onError?: "stop" | "continue";
+  /** Parameter bindings */
+  params?: Record<string, unknown> | unknown[];
 }
 
 /**
@@ -151,6 +154,12 @@ export function compileQuery(query: string): CompiledRoute;
 export function explain(query: string): string;
 
 export function explainStmt(stmt: Stmt): string;
+
+/** Substitute `:name` (object) or `?` (array) placeholders into a query string. */
+export function bind(
+  query: string,
+  params: Record<string, unknown> | unknown[],
+): string;
 
 /**
  * Create a fully-local edge executor backed by fastembed-rs.

@@ -342,7 +342,7 @@ impl<'a> AstLowerer<'a> {
         Ok(values)
     }
 
-    fn parse_object_key(&mut self) -> Result<Token<'a>, QqlError> {
+    pub(crate) fn parse_object_key(&mut self) -> Result<Token<'a>, QqlError> {
         let token = self.peek()?;
         if matches!(
             token.kind,
@@ -490,24 +490,26 @@ pub(super) fn vector_from_value(value: Value, span: Span) -> Result<VectorValue,
             }
         }),
         Value::Dict(items) => {
-            let indices = items
-                .iter()
-                .find(|(key, _)| key.eq_ignore_ascii_case("indices"))
-                .map(|(_, value)| value);
-            let values = items
-                .iter()
-                .find(|(key, _)| key.eq_ignore_ascii_case("values"))
-                .map(|(_, value)| value);
-            let (Some(Value::List(indices)), Some(Value::List(values))) = (indices, values) else {
+            let mut indices_v = None;
+            let mut values_v = None;
+            for (key, value) in items {
+                if key.eq_ignore_ascii_case("indices") {
+                    indices_v = Some(value);
+                } else if key.eq_ignore_ascii_case("values") {
+                    values_v = Some(value);
+                }
+            }
+            let (Some(Value::List(indices)), Some(Value::List(values))) = (indices_v, values_v)
+            else {
                 return Err(vector_error(
                     "sparse vectors require indices and values lists",
                     span,
                 ));
             };
             let indices = indices
-                .iter()
+                .into_iter()
                 .map(|value| match value {
-                    Value::Int(value) if *value >= 0 => u32::try_from(*value)
+                    Value::Int(value) if value >= 0 => u32::try_from(value)
                         .map_err(|_| vector_error("sparse vector index is out of range", span)),
                     _ => Err(vector_error(
                         "sparse vector indices must be non-negative integers",
@@ -515,7 +517,7 @@ pub(super) fn vector_from_value(value: Value, span: Span) -> Result<VectorValue,
                     )),
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            let values = numeric_vector(values.clone(), span)?;
+            let values = numeric_vector(values, span)?;
             if indices.is_empty() || indices.len() != values.len() {
                 return Err(vector_error(
                     "sparse vector indices and values must be non-empty and have equal length",

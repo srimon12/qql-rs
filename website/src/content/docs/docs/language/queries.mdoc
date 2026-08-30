@@ -282,10 +282,10 @@ on Qdrant 1.19+, set a per-query IDF corpus:
 | Form | Meaning |
 |---|---|
 | `idf = 'global'` | Use the collection-wide IDF statistics |
-| `idf = {corpus: {…}}` | Restrict IDF to points matching a Qdrant filter object |
+| `idf = WHERE <filter>` | Restrict IDF to points matching that QQL filter |
 
-A malformed `idf` value fails validation with `QQL-VALIDATION-IDF`; a corpus
-object that is not a valid Qdrant filter fails planning with `QQL-PLAN-IDF`.
+A malformed `idf` value fails validation with `QQL-VALIDATION-IDF`. Isolation
+stays on statement `WHERE` / host `inject_filter`. IDF only scopes BM25 rarity.
 
 {% qqlExample title="Per-query sparse IDF corpus" %}
 ```sql
@@ -298,12 +298,41 @@ LIMIT 10;
 QUERY TEXT 'search'
 FROM docs
 USING sparse
-PARAMS (
-  idf = {corpus: {must: [{key: 'status', match: {value: 'active'}}]}}
-)
+PARAMS (idf = WHERE status = 'active')
+LIMIT 10;
+
+QUERY TEXT 'search'
+FROM docs
+USING sparse
+WHERE tenant_id = 'acme'
+SHARD 'acme'
+PARAMS (idf = WHERE tenant_id = 'acme')
 LIMIT 10;
 ```
 {% /qqlExample %}
+
+## Parameter binding & prepared queries
+
+QQL queries support parameterized templates with type-safe client-side binding:
+- **Named Placeholders**: `:name` (e.g. `:category`, `:lim`)
+- **Positional Placeholders**: `?` (mapped sequentially to argument lists)
+
+{% aside type="note" title="Why :name and ? (not $name)?" %}
+In QQL, `$` is a first-class identifier character (e.g. `$score`, `$category`, `$1`). To guarantee that `$`-prefixed identifiers and formula variables are never accidentally overwritten, parameter placeholders exclusively use `:name` and `?`.
+{% /aside %}
+
+When parameters are bound at runtime via the SDKs (`bind` or `Client.execute(..., params=...)`), the template evaluates to a fully-formed, executable QQL statement:
+
+{% qqlExample title="Bound query execution" %}
+```sql
+QUERY TEXT 'chest pain'
+FROM docs
+WHERE category = 'cardiology' AND rating >= 4.5
+LIMIT 10;
+```
+{% /qqlExample %}
+
+Colons in compact dictionary syntax (e.g. `{a:b}`, `{'a':b}`) are preserved as key-value separators and not treated as placeholders.
 
 For formula scoring and decay functions, continue with [Formula
 scoring](/docs/language/formulas/).

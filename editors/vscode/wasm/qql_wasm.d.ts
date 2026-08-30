@@ -152,6 +152,11 @@ export class Stmt {
 export function analyze(input: string): AnalysisResult;
 
 /**
+ * Substitute named (:name) or positional (?) parameters into a query string via JSON.
+ */
+export function bind(query: string, params_json: string): string;
+
+/**
  * Compile one QQL statement into a JavaScript route object.
  */
 export function compile(query: string): CompiledRoute;

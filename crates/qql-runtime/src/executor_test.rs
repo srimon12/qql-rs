@@ -274,7 +274,17 @@ impl crate::embedder::Embedder for MockEmbedder {
     async fn embed_dense(&self, _text: &str, _model: &str) -> Result<Vec<f32>, QqlError> {
         Ok(self.dense.clone())
     }
-    async fn embed_sparse(
+    async fn embed_sparse_query(
+        &self,
+        _text: &str,
+        _model: &str,
+    ) -> Result<crate::sparse::SparseVector, QqlError> {
+        Ok(crate::sparse::SparseVector {
+            indices: self.sparse_indices.clone(),
+            values: self.sparse_values.clone(),
+        })
+    }
+    async fn embed_sparse_document(
         &self,
         _text: &str,
         _model: &str,

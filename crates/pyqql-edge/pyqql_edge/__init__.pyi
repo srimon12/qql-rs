@@ -19,12 +19,14 @@ class Client:
         self,
         query: Union[str, Stmt, List[Union[str, Stmt]]],
         *,
+        params: Optional[Union[Dict[str, Any], List[Any]]] = None,
         on_error: str = "stop",
     ) -> Dict[str, Any]: ...
     def execute_async(
         self,
         query: Union[str, Stmt, List[Union[str, Stmt]]],
         *,
+        params: Optional[Union[Dict[str, Any], List[Any]]] = None,
         on_error: str = "stop",
     ) -> Dict[str, Any]: ...
     def explain(self, query: Union[str, Stmt]) -> Dict[str, Any]: ...
@@ -41,6 +43,9 @@ def explain(query: Union[str, Stmt]) -> Dict[str, Any]: ...
 def compile_query(query: str) -> Dict[str, Any]: ...
 def tokenize(input: str) -> List[Dict[str, Any]]: ...
 def inject_filter(query: Union[str, Stmt], field: str, op: str, value: Any) -> Stmt: ...
+def bind(
+    query: str, params: Optional[Union[Dict[str, Any], List[Any]]] = None
+) -> str: ...
 def parse_json(input: str) -> str: ...
 def local_executor(
     data_dir: str,
@@ -66,6 +71,7 @@ def list_embedding_models() -> List[Dict[str, Any]]: ...
 def execute(
     query: Query,
     *,
+    params: Optional[Union[Dict[str, Any], List[Any]]] = None,
     data_dir: str = "./qdrant_data",
     on_disk_payload: bool = True,
     model: Optional[str] = None,
@@ -80,6 +86,7 @@ def execute(
 def execute_async(
     query: Query,
     *,
+    params: Optional[Union[Dict[str, Any], List[Any]]] = None,
     data_dir: str = "./qdrant_data",
     on_disk_payload: bool = True,
     model: Optional[str] = None,

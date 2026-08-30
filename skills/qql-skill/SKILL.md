@@ -72,14 +72,14 @@ Translate user intent directly into QQL syntax:
 - Multi-tenant isolation -> `QUERY 'text' FROM <collection> WHERE tenant_id = 'honeywell' SHARD 'honeywell' LIMIT 10`
 - Keyword prefix filter -> `WHERE title MATCH PREFIX 'Comp'` (keyword index with `prefix = true`)
 - Deterministic ID-space sampling -> `WHERE SLICE (total, index)` e.g. `SLICE (4, 1)`
-- Sparse IDF corpus (global / tenant) -> `PARAMS (idf = 'global')` or `PARAMS (idf = {corpus: {must: […]}})`
+- Sparse IDF corpus (global / tenant) -> `PARAMS (idf = 'global')` or `PARAMS (idf = WHERE tenant_id = 'acme')`
 - Cluster quotas (REST) -> `SHOW QUOTAS;` / `SET QUOTA (enabled = true, max_resident_memory_percent = 80) WAIT true;`
 - Memory placement + TurboQuant -> `WITH VECTOR (memory = 'cached', datatype = 'turbo4')`, `WITH HNSW (memory = 'cold')`, `payload_memory = 'cold'`
 - Read affinity (host SDKs) -> `RestQdrant` / `GrpcQdrant` `.with_route_affinity(…)`, `pyqql.Client(route_affinity=…)`, `nqql` `{ routeAffinity }`, wasm `client.setRouteAffinity(key)` → `X-Qdrant-Route-Affinity` (not QQL syntax)
 
 ## Canonical Grammar & Capabilities
 
-Language surface targets **Qdrant 1.19** / **QQL 1.4** features (quotas, memory placement,
+Language surface targets **Qdrant 1.19** / **QQL 1.5** features (quotas, memory placement,
 `MATCH PREFIX`, `SLICE`, IDF corpus, `turbo4`). Prefer forms below over legacy dual-write
 keys (`on_disk` / `always_ram`) for new scripts.
 
@@ -91,7 +91,7 @@ CREATE COLLECTION docs (
   colbert VECTOR(128, COSINE) WITH MULTIVECTOR (comparator = 'max_sim')
 ) WITH HNSW (m = 16, ef_construct = 100);
 
--- Memory tiers + TurboQuant 4-bit dense (Qdrant 1.19 / QQL 1.4)
+-- Memory tiers + TurboQuant 4-bit dense (Qdrant 1.19 / QQL 1.5)
 CREATE COLLECTION docs_tiered (
   dense VECTOR(384, COSINE) WITH VECTOR (memory = 'cached', datatype = 'turbo4')
     WITH HNSW (memory = 'cold')
@@ -177,7 +177,7 @@ FROM <collection>
 [SHARD '<tenant_key>']
 [PARAMS (hnsw_ef = <n>, exact = <bool>, acorn = <bool>, max_selectivity = <0–1>,
          indexed_only = <bool>, timeout = <seconds>, consistency = majority|quorum|all|<n>,
-         idf = 'global' | {corpus: <FilterJSON>})]
+         idf = 'global' | WHERE <filter>)]
 [SCORE THRESHOLD <number>]
 [GROUP BY <field> [SIZE <n>] [LOOKUP FROM <collection>]]
 [WITH PAYLOAD [true | false | INCLUDE (...) | EXCLUDE (...)]]
@@ -206,7 +206,7 @@ FROM <collection>
 |---|---|
 | `USING name` | Runtime looks up `name` on collection schema (dense / sparse / multivector). Names are **not** special-cased by spelling. |
 | `USING name AS DENSE` | Single dense embed (MiniLM, CLIP text, …) — one `Vec<f32>` |
-| `USING name AS SPARSE` | Sparse BM25-style embed |
+| `USING name AS SPARSE` | Sparse embed — wire-compatible BM25 (Qdrant `qdrant/bm25` token IDs; unit-weight queries, tf-saturated documents) |
 | `USING name AS MULTI` | Multivector / ColBERT bag → `[[f32,…],…]` via `embed_multi` (BGE-M3 ColBERT, not CLIP) |
 | `USING HYBRID …` | Expand text nearest → dense+sparse fusion (same AST as `QUERY HYBRID`) |
 | No `USING` | Schema must have exactly one compatible vector |
@@ -291,17 +291,26 @@ routing inside the filter object.
 | Edge | No quotas; no custom shard-key admin; no `GROUP BY` / ACORN; **IDF** on search params (edge 0.8+); optional multi/image/rerank hosts |
 | Route affinity | Client transport option on remote SDKs (`RestQdrant` / `GrpcQdrant`, `pyqql.Client(route_affinity=…)`, `nqql` `{ routeAffinity }`, wasm `setRouteAffinity`); not on edge |
 
+## Parameter Binding & Prepared Queries
+
+QQL provides type-safe parameter binding across all SDKs:
+- **Named Placeholders**: `:name` (e.g. `:category`, `:lim`)
+- **Positional Placeholders**: `?` (sequential 1-to-1 mapping)
+- **Host DX**: one `bind(query, params)` plus `Client.execute(..., params=...)`. Dict/object → named; list/array → positional. WASM takes a JS object/array, not a JSON string. Rust keeps typed `bind_named` / `bind_positional`.
+- **Grammar Rule**: `$` is an identifier character in QQL (`$category`, `$score`). **Never** use `$name` or `$1` as placeholders — only `:name` and `?`.
+- **Token Boundaries**: Colons in compact dicts (`{a:b}`, `{'a':b}`) are preserved as key-value separators. Write `{key: :val}` to bind dict values.
+
 ## CLI Reference
 
 ```text
+qql [repl | connect]                         Interactive REPL (multiline, \f fmt, \d doctor, \e script)
 qql exec <query> [--json] [--quiet]          Execute a single QQL query
 qql execute <file.qql> [--stop-on-error]     Execute statements from file
-qql explain <query> [--json] [--quiet]       Show execution plan (no Qdrant needed)
-qql connect                                   Interactive REPL
+qql explain <query> [--json] [--quiet]       Show hierarchical ASCII tree execution plan
 qql convert [file.json]                       Convert REST JSON to QQL
 qql fmt [file.qql] [--check] [--write]        Format QQL source into canonical form
 qql dump <collection> <output.qql> [options]  Dump collection to QQL script
-qql doctor [--json] [--quiet]                 Check Qdrant connection health
+qql doctor [--json] [--quiet]                 Check Qdrant connection health & model hosts
 qql --edge exec <query> [options]           Execute against local qdrant-edge
 qql config edge [options]                    Configure local qdrant-edge backend
 qql version                                   Show version
@@ -318,31 +327,57 @@ import pyqql
 embedder = pyqql.HttpEmbedder("http://localhost:11434/v1/embeddings", "all-minilm:l6-v2", 384)
 client = pyqql.Client("http://localhost:6333", embedder=embedder)
 
+# Standard execution
 result = client.execute("QUERY 'semantic search' FROM docs USING dense LIMIT 5")
+
+# Parameterized execution (named or positional)
+result = client.execute(
+    "QUERY TEXT :q FROM docs WHERE category = :cat LIMIT :lim",
+    params={"q": "chest pain", "cat": "medical", "lim": 10},
+)
 ```
 
 ### Rust (`qql`)
 ```rust
+use std::collections::HashMap;
 use qql::executor::{Executor, OnError};
+use qql_core::ast::Value;
 
 let exec = Executor::rest("http://localhost:6333", None).unwrap();
-let res = exec.execute(
-    "QUERY 'search' FROM docs USING dense LIMIT 5",
+
+// Parameterized execution with named parameters
+let mut params = HashMap::new();
+params.insert("q".into(), Value::Str("chest pain".into()));
+params.insert("lim".into(), Value::Int(10));
+let res = exec.execute_with_params(
+    "QUERY TEXT :q FROM docs LIMIT :lim",
+    &params,
     OnError::Stop,
 ).await.unwrap();
 ```
 
 ### Node.js (`nqql`)
 ```js
-const { Client } = require('@veristamp/nqql');
+const { Client, bind } = require('@veristamp/nqql');
 const client = new Client({ url: "http://localhost:6333" });
-const result = await client.execute("QUERY 'search' FROM docs USING dense LIMIT 5");
+
+// Parameterized execution
+const result = await client.execute(
+  "QUERY TEXT :q FROM docs WHERE category = :cat LIMIT :lim",
+  { params: { q: "chest pain", cat: "medical", lim: 10 } }
+);
 ```
 
 ### WebAssembly (`qql-wasm`)
 ```js
-import init, { Client } from 'qql-wasm';
+import init, { Client, bind, explain } from 'qql-wasm';
 await init();
 const client = new Client("http://localhost:6333", null);
-const result = await client.execute("QUERY 'search' FROM docs USING dense LIMIT 5");
+
+// Offline binding & tree explanation
+const bound = bind("QUERY TEXT :q FROM docs LIMIT :lim", { q: "chest pain", lim: 10 });
+const plan = explain(bound);
+const result = await client.execute("QUERY TEXT :q FROM docs LIMIT :lim", {
+  params: { q: "chest pain", lim: 10 },
+});
 ```

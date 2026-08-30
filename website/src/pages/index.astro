@@ -1,90 +1,49 @@
 ---
-import "@fontsource/instrument-serif/index.css";
+import "@fontsource/newsreader/latin-300.css";
+import "@fontsource/newsreader/latin-400.css";
 import "@fontsource/ibm-plex-sans/400.css";
 import "@fontsource/ibm-plex-sans/500.css";
 import "@fontsource/ibm-plex-sans/600.css";
 import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/500.css";
+import "../styles/global.css";
 import "@qql/ui-docs/chrome.css";
 import "@qql/ui-docs/landing.css";
-import CapabilityGrid from "../components/landing/CapabilityGrid.astro";
-import CtaBand from "../components/landing/CtaBand.astro";
 import FaqList from "../components/landing/FaqList.astro";
 import InstallGrid from "../components/landing/InstallGrid.astro";
 import LandingHero from "../components/landing/LandingHero.astro";
-import LanguageSamples from "../components/landing/LanguageSamples.astro";
-import LimitsBlock from "../components/landing/LimitsBlock.astro";
-import PipelineSteps from "../components/landing/PipelineSteps.astro";
 import ProblemCompare from "../components/landing/ProblemCompare.astro";
-import StatsBanner from "../components/landing/StatsBanner.astro";
+import WhyList from "../components/landing/WhyList.astro";
 import SiteFooter from "../components/SiteFooter.astro";
 import SiteHeader from "../components/SiteHeader.astro";
 import { ANALYTICS, APPS, SITE } from "../config/site";
-import {
-  architecture,
-  cta,
-  design,
-  faq,
-  getStarted,
-  hero,
-  language,
-  limits,
-  problem,
-  stats,
-} from "../data/landing";
-import "../styles/global.css";
+import { faq, getStarted, hero, problem, why } from "../data/landing";
 
-const pageTitle = "QQL — SQL for Qdrant vector search";
+const pageTitle = "QQL: SQL for Qdrant vector search";
 const pageDescription =
-  "QQL is to Qdrant what SQL is to Postgres. One declarative language for hybrid search, filtering, mutations, multitenancy, and DDL — across Rust, Python, Node.js, WASM, REST, gRPC, and edge.";
+  "QQL is to Qdrant what SQL is to Postgres. One declarative language for hybrid search, filtering, mutations, and DDL across Rust, Python, Node.js, WASM, REST, gRPC, and edge.";
 
 // The documentation verifier parses every `verifiedQql` String.raw template.
-const verifiedQql = String.raw`CREATE COLLECTION docs (
-  dense VECTOR(384, COSINE),
-  bm25 SPARSE
-);
-
-UPSERT INTO docs VALUES {
-  id: 1,
-  text: 'QQL provides typed vector retrieval',
-  category: 'qql'
-} USING HYBRID;
-
-QUERY TEXT 'typed query language' FROM docs
-USING HYBRID DENSE dense SPARSE bm25 FUSION RRF
-WHERE category = 'qql'
+const verifiedQqlHero = String.raw`QUERY TEXT 'chest pain' FROM medical
+USING dense
+WHERE department = 'cardio'
+SHARD 'hospital-east'
 LIMIT 5;`;
 
-const verifiedQqlHybrid = String.raw`WITH
-  dense  AS (QUERY TEXT 'ml' USING dense  LIMIT 100),
-  sparse AS (QUERY TEXT 'ml' USING bm25   LIMIT 100)
-QUERY FUSION RRF FROM docs PREFETCH (dense, sparse) LIMIT 10;`;
-
-const verifiedQqlTenant = String.raw`QUERY TEXT 'supply chain risks' FROM sec10k
-WHERE department = 'risk'
-SHARD 'honeywell'
+const verifiedQqlCompareHybrid = String.raw`QUERY TEXT 'distributed consensus' FROM docs
+USING HYBRID DENSE dense_vec SPARSE bm25_vec FUSION RRF
+WHERE status = 'active'
 LIMIT 10;`;
 
-const terminalCode = `# Install the QQL CLI
-curl -fsSL https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.sh | sh
+const verifiedQqlCompareTenant = String.raw`QUERY TEXT 'annual financial risks' FROM filings
+WHERE department = 'finance'
+SHARD 'tenant-corp-99'
+LIMIT 5;`;
 
-# Save as quickstart.qql, then:
-qql exec quickstart.qql
-
-${verifiedQql}`;
-
-const samples = [
-  {
-    kind: "Hybrid · RRF",
-    code: verifiedQqlHybrid,
-    href: `/playground/?q=${encodeURIComponent(verifiedQqlHybrid)}`,
-  },
-  {
-    kind: "Multitenant · SHARD",
-    code: verifiedQqlTenant,
-    href: `/playground/?q=${encodeURIComponent(verifiedQqlTenant)}`,
-  },
-];
+const verifiedQqlCompareFilters = String.raw`QUERY TEXT 'industrial robotics' FROM products
+WHERE (category = 'hardware' OR category = 'tools')
+  AND price <= 1200.0 AND in_stock = true
+LIMIT 20;`;
 ---
 
 <!doctype html>
@@ -96,7 +55,7 @@ const samples = [
     <meta name="description" content={pageDescription} />
     <meta
       name="keywords"
-      content="QQL, Qdrant, vector search, hybrid search, SQL, query language, multitenancy, WASM, pyqql, nqql, edge runtime, Veristamp"
+      content="QQL, Qdrant, vector search, hybrid search, SQL for vector database, Qdrant SQL, Reciprocal Rank Fusion, RRF, multitenancy, filter injection, pyqql, nqql, qql-edge, WASM, Veristamp"
     />
     <link rel="shortcut icon" href="/favicon.ico" />
     <link rel="canonical" href={`${APPS.home.url}/`} />
@@ -105,11 +64,15 @@ const samples = [
     <meta property="og:url" content={`${APPS.home.url}/`} />
     <meta property="og:description" content={pageDescription} />
     <meta property="og:site_name" content="QQL" />
-    <meta property="og:image" content={`${APPS.home.url}/og-image.png`} />
+    <meta property="og:image" content={`${APPS.home.url}/open-graph/home.png`} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@srimon_12" />
+    <meta name="twitter:creator" content="@srimon_12" />
     <meta name="twitter:title" content={pageTitle} />
     <meta name="twitter:description" content={pageDescription} />
-    <meta name="twitter:image" content={`${APPS.home.url}/og-image.png`} />
+    <meta name="twitter:image" content={`${APPS.home.url}/open-graph/home.png`} />
     <script is:inline>
       (() => {
         document.documentElement.classList.add("js");
@@ -145,11 +108,7 @@ const samples = [
         description: pageDescription,
         codeRepository: APPS.github.url,
         license: "https://opensource.org/license/mit",
-        offers: {
-          "@type": "Offer",
-          price: "0",
-          priceCurrency: "USD",
-        },
+        offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
         publisher: {
           "@type": "Organization",
           name: SITE.org,
@@ -189,89 +148,57 @@ const samples = [
   </head>
 
   <body class="landing-body">
-    <div class="landing-noise" aria-hidden="true"></div>
-    <div class="landing-tech-grid" aria-hidden="true"></div>
-    <div class="landing-glow" aria-hidden="true"></div>
-
     <SiteHeader active="home" />
 
     <main id="main-content">
       <LandingHero
-        badge={hero.badge}
         headline={hero.headline}
-        tagline={hero.tagline}
         lede={hero.lede}
         primaryCta={hero.primaryCta}
         secondaryCta={hero.secondaryCta}
-        githubUrl={APPS.github.url}
-        hosts={hero.hosts}
-        terminalTitle={hero.terminalTitle}
-        terminalCode={terminalCode}
-      />
-
-      <StatsBanner stats={stats} />
+        specimenTitle="search.qql"
+        specimenQql={verifiedQqlHero}
+      >
+        <span class="kw">QUERY TEXT</span> <span class="str">'chest pain'</span>
+        {"\n"}
+        <span class="kw">FROM</span> <span class="id">medical</span>
+        {"\n"}
+        <span class="kw">USING</span> <span class="id">dense</span>
+        {"\n"}
+        <span class="kw">WHERE</span> <span class="id">department</span>{" "}
+        <span class="op">=</span> <span class="str">'cardio'</span>
+        {"\n"}
+        <span class="kw">SHARD</span> <span class="str">'hospital-east'</span>
+        {"\n"}
+        <span class="kw">LIMIT</span> <span class="num">5</span><span class="op">;</span>
+      </LandingHero>
 
       <ProblemCompare
-        label={problem.label}
         heading={problem.heading}
         sub={problem.sub}
-        rows={problem.rows}
+        guideHref={problem.guideHref}
+        guideLabel={problem.guideLabel}
+        hybridQql={verifiedQqlCompareHybrid}
+        tenantQql={verifiedQqlCompareTenant}
+        filtersQql={verifiedQqlCompareFilters}
       />
 
-      <LanguageSamples
-        label={language.label}
-        heading={language.heading}
-        sub={language.sub}
-        footHref={language.footHref}
-        footLabel={language.footLabel}
-        samples={samples}
-      />
-
-      <PipelineSteps
-        label={architecture.label}
-        heading={architecture.heading}
-        sub={architecture.sub}
-        steps={architecture.steps}
-      />
-
-      <CapabilityGrid
-        label={design.label}
-        heading={design.heading}
-        sub={design.sub}
-        capabilities={design.capabilities}
-      />
-
-      <LimitsBlock
-        label={limits.label}
-        statement={limits.statement}
-        body={limits.body}
-        foot={limits.foot}
-      />
+      <WhyList heading={why.heading} rows={why.rows} />
 
       <InstallGrid
-        label={getStarted.label}
         heading={getStarted.heading}
         sub={getStarted.sub}
         installs={getStarted.installs}
-        primaryCta={getStarted.primaryCta}
-        secondaryCta={getStarted.secondaryCta}
+        footHref={getStarted.footHref}
+        footLabel={getStarted.footLabel}
       />
 
-      <FaqList label={faq.label} heading={faq.heading} items={faq.items} />
-
-      <CtaBand
-        label={cta.label}
-        heading={cta.heading}
-        body={cta.body}
-        primaryCta={cta.primaryCta}
-        secondaryCta={cta.secondaryCta}
-      />
+      <FaqList heading={faq.heading} items={faq.items} />
     </main>
 
     <SiteFooter />
 
     <script>
-      // Scroll reveals — adds .landing-visible when sections enter view.
       document.addEventListener("DOMContentLoaded", () => {
         const observer = new IntersectionObserver(
           (entries) => {

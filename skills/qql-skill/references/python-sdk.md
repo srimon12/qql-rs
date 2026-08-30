@@ -2,7 +2,7 @@
 
 Native Python bindings via PyO3.
 
-Language surface includes **Qdrant 1.19 / QQL 1.4** features expressible in QQL
+Language surface includes **Qdrant 1.19 / QQL 1.5** features expressible in QQL
 (`SHOW QUOTAS`, memory/`turbo4`, `MATCH PREFIX`, `SLICE`, `PARAMS (idf = …)`).
 Those statements execute through the same `Client.execute` path as older syntax
 when the connected backend supports them (quotas: **REST only**).
@@ -43,6 +43,27 @@ result = client.execute(stmt)
 
 # Host-resolved routing after parse (same AST field as SHARD):
 # stmt.shard_key = "honeywell"
+```
+
+Sparse IDF is **not** `inject_filter` and not a JSON corpus object. Write it in
+QQL. `compile_query` / execute lower `WHERE tenant_id = '…'` to Qdrant’s
+`params.idf.corpus` filter JSON — hosts do not build that dict.
+
+```python
+from pyqql import bind, compile_query
+
+# Isolation + routing + tenant-local BM25 stats (three different layers)
+qql = """
+QUERY TEXT :q FROM sec10k USING sparse
+WHERE tenant_id = :tenant
+SHARD :tenant
+PARAMS (idf = WHERE tenant_id = :tenant)
+LIMIT 10
+"""
+bound = bind(qql, {"q": "supply chain", "tenant": "honeywell"})
+route = compile_query(bound)
+# route["payload"]["params"]["idf"] ==
+#   {"corpus": {"must": [{"key": "tenant_id", "match": {"value": "honeywell"}}]}}
 ```
 
 ---
@@ -259,9 +280,35 @@ result = client.execute(query)
 #   FROM docs PREFETCH (c) LIMIT 10
 ```
 
+## 7. Parameter Binding & Prepared Queries
+
+Substitute named (`:name`) or positional (`?`) parameters safely into queries:
+
+```python
+from pyqql import Client, bind
+
+client = Client("http://localhost:6333")
+
+# Direct execution with named parameters
+result = client.execute(
+    "QUERY TEXT :query FROM docs WHERE category = :cat AND rating >= :min_rating LIMIT :limit",
+    params={"query": "machine learning", "cat": "tech", "min_rating": 4.5, "limit": 10},
+)
+
+# Direct execution with positional parameters
+result = client.execute(
+    "QUERY TEXT ? FROM docs WHERE category = ? LIMIT ?",
+    params=["machine learning", "tech", 10],
+)
+
+# Standalone string binding
+bound = bind("QUERY TEXT :q FROM docs LIMIT :lim", {"q": "search term", "lim": 5})
+print(bound)  # QUERY TEXT 'search term' FROM docs LIMIT 5
+```
+
 ---
 
-## 7. Async Execution
+## 8. Async Execution
 
 ```python
 import asyncio
@@ -269,20 +316,36 @@ from pyqql import Client
 
 async def main():
     client = Client("http://localhost:6333")
-    result = await client.execute_async("QUERY 'search' FROM docs USING dense LIMIT 5")
+    result = await client.execute_async(
+        "QUERY TEXT :q FROM docs USING dense LIMIT :lim",
+        params={"q": "search", "lim": 5},
+    )
 
 asyncio.run(main())
 ```
 
 ---
 
-## 8. Free Functions
+## 9. Free Functions & Explain
 
 ```python
-stmt = parse("QUERY 'x' FROM docs LIMIT 5")[0]        # Parse one statement
-stmts = parse("QUERY 'a' FROM docs; COUNT FROM docs")        # Parse a script
-ok = is_valid("QUERY 'x' FROM docs LIMIT 5")           # Validate without returning the AST
-tokenized = tokenize("QUERY 'x' FROM docs LIMIT 5")    # Lex into tokens
-result = inject_filter(stmt, "tenant_id", "=", "acme") # Inject filter (mutates or returns new)
-route = compile_query("QUERY 'x' FROM docs LIMIT 5")   # Lower to REST route (no execute)
+import pyqql
+
+stmt = pyqql.parse("QUERY 'x' FROM docs LIMIT 5")[0]        # Parse one statement
+stmts = pyqql.parse("QUERY 'a' FROM docs; COUNT FROM docs") # Parse a script
+ok = pyqql.is_valid("QUERY 'x' FROM docs LIMIT 5")          # Validate without returning the AST
+tokenized = pyqql.tokenize("QUERY 'x' FROM docs LIMIT 5")   # Lex into tokens
+result = pyqql.inject_filter(stmt, "tenant_id", "=", "acme") # Inject filter
+route = pyqql.compile_query("QUERY 'x' FROM docs LIMIT 5")  # Lower to REST route (no execute)
+
+# Hierarchical ASCII tree plan
+plan_dict = pyqql.explain("QUERY TEXT 'hello' FROM docs USING dense LIMIT 10")
+print(plan_dict["plan"])
+# Query Plan
+# └── Target: docs
+#     ├── Query: text('hello') via dense
+#     └── Limit: 10
+
+# Standalone parameter binding
+bound = pyqql.bind("QUERY TEXT :q FROM docs LIMIT :lim", {"q": "test", "lim": 10})
 ```

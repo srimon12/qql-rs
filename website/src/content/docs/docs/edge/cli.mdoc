@@ -56,7 +56,7 @@ Use it with: qql --edge exec "SHOW COLLECTIONS"
 |---|---|---|
 | `--embedder fastembed\|http` | `fastembed` | Local ONNX inference or an OpenAI-compatible endpoint |
 | `--model <name>` | `BGESmallENV15` (384-d) | Dense model name or alias |
-| `--sparse-model <name>` | local BM25 hash | Offline sparse model (`splade`, `bge-m3`) |
+| `--sparse-model <name>` | local Qdrant-compatible BM25 | Offline sparse model (`splade`, `bge-m3`) |
 | `--multi-model <name>` | none | Offline multivector / ColBERT model (`bge-m3`) |
 | `--image-model <name>` | none | Offline CLIP vision model (`clip-vision`) |
 | `--reranker-model <name>` | none | Offline cross-encoder (`bge-reranker-base`) |

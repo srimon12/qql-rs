@@ -1,19 +1,17 @@
 ---
 interface Props {
-  label: string;
   heading: string;
   body: string;
   primaryCta: { label: string; href: string };
   secondaryCta: { label: string; href: string };
 }
 
-const { label, heading, body, primaryCta, secondaryCta } = Astro.props;
+const { heading, body, primaryCta, secondaryCta } = Astro.props;
 ---
 
 <section class="landing-cta" aria-labelledby="cta-heading">
   <div class="landing-shell landing-cta__inner landing-fade-up">
-    <div>
-      <span class="landing-label">{label}</span>
+    <div class="landing-cta__copy">
       <h2 id="cta-heading">{heading}</h2>
       <p>{body}</p>
     </div>

@@ -39,6 +39,31 @@ if not report["ok"]:
 print(report["succeeded"], report["failed"])
 ```
 
+## Parameter binding & prepared queries
+
+Pass `params` as a dictionary for named placeholders (`:name`) or a list for positional placeholders (`?`):
+
+```python
+from pyqql import Client, bind
+
+client = Client("http://localhost:6333")
+
+# Named parameter substitution
+report = client.execute(
+    "QUERY TEXT :query FROM docs WHERE category = :cat LIMIT :limit",
+    params={"query": "cardiology", "cat": "medical", "limit": 10},
+)
+
+# Positional parameter substitution
+report = client.execute(
+    "QUERY TEXT ? FROM docs WHERE category = ? LIMIT ?",
+    params=["cardiology", "medical", 10],
+)
+
+# Standalone query string binding
+bound_qql = bind("QUERY TEXT :q FROM docs LIMIT :lim", {"q": "search", "lim": 5})
+```
+
 ## Parse, isolate, and route
 
 Use an AST predicate for isolation. Assign a shard key only when the host also

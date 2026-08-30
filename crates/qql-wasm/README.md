@@ -64,6 +64,7 @@ client.free();
 | `inject_filter` | Isolation |
 | `analyze` | tokens + AST + route(s) + explain |
 | `compile` / `explain` | Offline REST projection / plan text |
+| `bind(query, params)` | Substitute `:name` (object) or `?` (array) |
 
 ### `Stmt`
 
@@ -79,7 +80,7 @@ client.free();
 |--------|------|
 | `setHttpEmbedder` / `setEmbedder` | Dense embed hosts |
 | `setRouteAffinity(key)` / `routeAffinity` | Qdrant 1.19 read affinity (get/set) |
-| `execute` / `executeStmt` | REST execute → `ExecutionReport` |
+| `execute` / `executeStmt` | REST execute → `ExecutionReport` (`options.params` same as `bind`) |
 | `compile` / `explain` | Offline helpers |
 
 ## Features

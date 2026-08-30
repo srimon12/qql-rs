@@ -2,7 +2,7 @@
 
 WASM bindings for browser and edge (Cloudflare Workers, Vercel Edge, Deno, Bun).
 
-Language surface includes **Qdrant 1.19 / QQL 1.4** features expressible in QQL
+Language surface includes **Qdrant 1.19 / QQL 1.5** features expressible in QQL
 (`SHOW QUOTAS`, memory/`turbo4`, `MATCH PREFIX`, `SLICE`, `PARAMS (idf = …)`).
 Parse/compile/execute those strings against a backend that supports them
 (quotas: **REST only**).
@@ -115,7 +115,9 @@ embedder when available.
 
 `execute()` accepts a string, a semicolon-delimited script, or an array of
 strings. Pass `{ onError: "continue" }` to collect per-statement failures; the
-default is `"stop"`. Adjacent compatible operations use Qdrant batch endpoints.
+default is `"stop"`. Pass `{ params }` as an object for `:name` or an array for
+`?` — same shape as `bind(query, params)`, no `JSON.stringify`. Adjacent
+compatible operations use Qdrant batch endpoints.
 Every execution path returns an `ExecutionReport` object with `ok`, `results`,
 `succeeded`, and `failed` fields.
 
@@ -124,6 +126,11 @@ Every execution path returns an `ExecutionReport` object with `ok`, `results`,
 const result = await client.execute(
     "QUERY 'vector databases' FROM docs USING dense LIMIT 10"
 );
+
+// Named / positional params (object or array — not a JSON string)
+await client.execute("QUERY TEXT :q FROM docs LIMIT :lim", {
+    params: { q: "vector databases", lim: 10 },
+});
 
 // Multi-statement (semicolons auto-detected)
 const schemaResult = await client.execute(`
@@ -168,6 +175,26 @@ console.log(stmt.shardKey);  // -> "acme"
 // Serialise to JSON
 const json = stmt.toJSON();
 const obj = stmt.toObject();
+```
+
+Sparse IDF is QQL (`PARAMS (idf = 'global' | WHERE <filter>)`). There is no
+`injectIdfCorpus` and no host JSON corpus. `compile` / `analyze` emit Qdrant’s
+`params.idf` object from the filter AST.
+
+```js
+import init, { bind, compile } from 'qql-wasm';
+await init();
+
+const bound = bind(`
+  QUERY TEXT :q FROM sec10k USING sparse
+  WHERE tenant_id = :tenant
+  SHARD :tenant
+  PARAMS (idf = WHERE tenant_id = :tenant)
+  LIMIT 10
+`, { q: "supply chain", tenant: "acme" });
+
+const route = compile(bound);
+// route.payload.params.idf.corpus.must[0].key === "tenant_id"
 ```
 
 ---
@@ -229,11 +256,42 @@ const result = analyze("QUERY 'search' FROM docs USING dense LIMIT 10");
 
 ---
 
-## 8. Free Functions
+## 8. Parameter Binding & Formatting
+
+```js
+import init, { bind, formatQuery, explain } from 'qql-wasm';
+await init();
+
+// Substitute named parameters (:name)
+const boundNamed = bind(
+    "QUERY TEXT :q FROM docs WHERE category = :cat LIMIT :lim",
+    { q: "chest pain", cat: "medical", lim: 10 }
+);
+console.log(boundNamed);
+
+// Substitute positional parameters (?)
+const boundPos = bind(
+    "QUERY TEXT ? FROM docs WHERE category = ? LIMIT ?",
+    ["chest pain", "medical", 10]
+);
+console.log(boundPos);
+
+// Canonical query formatting
+const formatted = formatQuery("query text 'hello' from docs limit 5");
+console.log(formatted); // "QUERY TEXT 'hello' FROM docs LIMIT 5;"
+
+// Hierarchical ASCII plan tree
+const planTree = explain(boundNamed);
+console.log(planTree);
+```
+
+---
+
+## 9. Free Functions
 
 ```js
 import init, { parse, isValid, inject_filter,
-              tokenize, compile, explain } from 'qql-wasm';
+              tokenize, compile, explain, bind, formatQuery } from 'qql-wasm';
 await init();
 
 parse("QUERY 'x' FROM docs LIMIT 5");                  // Always returns an array
@@ -242,5 +300,7 @@ isValid("QUERY 'x' FROM docs LIMIT 5");                  // Validate
 inject_filter("QUERY 'x'", "tenant_id", "=", "acme");   // Inject filter (string -> object)
 tokenize("QUERY 'x'");                                   // Lex to tokens array
 compile("QUERY 'x' FROM docs LIMIT 5");                  // Compile to a route object
-explain("QUERY 'x' FROM docs LIMIT 5");                  // Explain plan string
+explain("QUERY 'x' FROM docs LIMIT 5");                  // Hierarchical ASCII plan tree
+bind("QUERY :q FROM docs", { q: "test" }); // Parameter substitution
+formatQuery("query 'x' from docs");                      // Canonical formatter
 ```

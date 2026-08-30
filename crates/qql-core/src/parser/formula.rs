@@ -265,63 +265,47 @@ fn parse_formula_function_call(
 
     match func_name {
         "abs" => {
-            if args.len() != 1 {
-                return Err(QqlError::syntax("ABS() expects 1 argument", pos));
-            }
-            Ok(FormulaExpr::Abs {
-                x: Box::new(args[0].clone()),
-            })
+            let [x] = <[FormulaExpr; 1]>::try_from(args)
+                .map_err(|_| QqlError::syntax("ABS() expects 1 argument", pos))?;
+            Ok(FormulaExpr::Abs { x: Box::new(x) })
         }
         "sqrt" => {
-            if args.len() != 1 {
-                return Err(QqlError::syntax("SQRT() expects 1 argument", pos));
-            }
-            Ok(FormulaExpr::Sqrt {
-                x: Box::new(args[0].clone()),
-            })
+            let [x] = <[FormulaExpr; 1]>::try_from(args)
+                .map_err(|_| QqlError::syntax("SQRT() expects 1 argument", pos))?;
+            Ok(FormulaExpr::Sqrt { x: Box::new(x) })
         }
         "log" => {
-            if args.len() != 1 {
-                return Err(QqlError::syntax("LOG() expects 1 argument", pos));
-            }
-            Ok(FormulaExpr::Log {
-                x: Box::new(args[0].clone()),
-            })
+            let [x] = <[FormulaExpr; 1]>::try_from(args)
+                .map_err(|_| QqlError::syntax("LOG() expects 1 argument", pos))?;
+            Ok(FormulaExpr::Log { x: Box::new(x) })
         }
         "ln" => {
-            if args.len() != 1 {
-                return Err(QqlError::syntax("LN() expects 1 argument", pos));
-            }
-            Ok(FormulaExpr::Ln {
-                x: Box::new(args[0].clone()),
-            })
+            let [x] = <[FormulaExpr; 1]>::try_from(args)
+                .map_err(|_| QqlError::syntax("LN() expects 1 argument", pos))?;
+            Ok(FormulaExpr::Ln { x: Box::new(x) })
         }
         "exp" => {
-            if args.len() != 1 {
-                return Err(QqlError::syntax("EXP() expects 1 argument", pos));
-            }
-            Ok(FormulaExpr::Exp {
-                x: Box::new(args[0].clone()),
-            })
+            let [x] = <[FormulaExpr; 1]>::try_from(args)
+                .map_err(|_| QqlError::syntax("EXP() expects 1 argument", pos))?;
+            Ok(FormulaExpr::Exp { x: Box::new(x) })
         }
         "pow" => {
-            if args.len() != 2 {
-                return Err(QqlError::syntax("POW() expects 2 arguments", pos));
-            }
+            let [base, exponent] = <[FormulaExpr; 2]>::try_from(args)
+                .map_err(|_| QqlError::syntax("POW() expects 2 arguments", pos))?;
             Ok(FormulaExpr::Pow {
-                base: Box::new(args[0].clone()),
-                exponent: Box::new(args[1].clone()),
+                base: Box::new(base),
+                exponent: Box::new(exponent),
             })
         }
         "geo_distance" => {
-            if args.len() != 3 {
-                return Err(QqlError::syntax(
+            let [lat_e, lon_e, field_e] = <[FormulaExpr; 3]>::try_from(args).map_err(|_| {
+                QqlError::syntax(
                     "GEO_DISTANCE() expects 3 arguments (lat, lon, field_name)",
                     pos,
-                ));
-            }
-            let lat = match &args[0] {
-                FormulaExpr::Constant { value } => *value,
+                )
+            })?;
+            let lat = match lat_e {
+                FormulaExpr::Constant { value } => value,
                 _ => {
                     return Err(QqlError::syntax(
                         "GEO_DISTANCE() first argument must be a float constant",
@@ -329,8 +313,8 @@ fn parse_formula_function_call(
                     ));
                 }
             };
-            let lon = match &args[1] {
-                FormulaExpr::Constant { value } => *value,
+            let lon = match lon_e {
+                FormulaExpr::Constant { value } => value,
                 _ => {
                     return Err(QqlError::syntax(
                         "GEO_DISTANCE() second argument must be a float constant",
@@ -338,8 +322,8 @@ fn parse_formula_function_call(
                     ));
                 }
             };
-            let field = match &args[2] {
-                FormulaExpr::Variable { name } => name.clone(),
+            let field = match field_e {
+                FormulaExpr::Variable { name } => name,
                 _ => {
                     return Err(QqlError::syntax(
                         "GEO_DISTANCE() third argument must be a field name",

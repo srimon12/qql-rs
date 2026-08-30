@@ -23,12 +23,13 @@ class TestPackageInspection(unittest.TestCase):
         expected = [
             "Client",
             "Stmt",
+            "bind",
             "compile_query",
             "execute",
             "execute_async",
             "explain",
             "inject_filter",
-                        "is_valid",
+            "is_valid",
             "local_executor",
             "parse",
             "parse_json",
@@ -192,5 +193,46 @@ class TestLocalExecutor(unittest.TestCase):
         self.assertTrue(r3["ok"])
 
 
+# ============================================================================
+# Category E: Parameter Binding
+# ============================================================================
+
+class TestParameterBinding(unittest.TestCase):
+    """E: Test parameter binding (:name and ?)."""
+
+    def test_e1_bind_named(self):
+        q = "QUERY 'shoes' FROM products WHERE category = :cat AND price < :max_p"
+        res = pyqql_edge.bind(q, {"cat": "sneakers", "max_p": 100})
+        self.assertEqual(
+            res,
+            "QUERY 'shoes' FROM products WHERE category = 'sneakers' AND price < 100",
+        )
+
+    def test_e2_bind_positional(self):
+        q = "QUERY 'shoes' FROM products WHERE category = ? AND in_stock = ?"
+        res = pyqql_edge.bind(q, ["sneakers", True])
+        self.assertEqual(
+            res,
+            "QUERY 'shoes' FROM products WHERE category = 'sneakers' AND in_stock = true",
+        )
+
+    def test_e3_bind_named_fn(self):
+        q = "QUERY 'shoes' FROM products WHERE category = :cat"
+        res = pyqql_edge.bind(q, {"cat": "boots"})
+        self.assertEqual(
+            res,
+            "QUERY 'shoes' FROM products WHERE category = 'boots'",
+        )
+
+    def test_e4_bind_positional_fn(self):
+        q = "QUERY 'shoes' FROM products WHERE category = ?"
+        res = pyqql_edge.bind(q, ["boots"])
+        self.assertEqual(
+            res,
+            "QUERY 'shoes' FROM products WHERE category = 'boots'",
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+

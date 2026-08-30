@@ -1,0 +1,90 @@
+---
+title: "ColBERT Late Interaction & Re-ranking"
+description: "How to use multi-vector representations, ColBERT MaxSim late interaction, and multi-stage re-ranking pipelines in QQL."
+sidebar:
+  order: 5
+---
+
+Single-vector embeddings compress an entire document or chunk into a single fixed-size vector. While fast, this bottleneck can miss nuanced token-level relationships.
+
+**ColBERT (Contextualized Late Interaction over BERT)** keeps token-level vector representations and computes similarity using **MaxSim** (maximum inner product per query token summed across the query). Qdrant supports multi-vectors natively, and QQL exposes first-class syntax for schema definition, multi-vector indexing, and multi-stage reranking.
+
+---
+
+## 1. Schema Definition with MULTIVECTOR
+
+To store token-level multi-vectors in Qdrant, specify `MULTIVECTOR` with dimensions and distance metric during collection creation:
+
+{% qqlExample title="Create multi-vector collection for ColBERT" %}
+```sql
+CREATE COLLECTION kb_articles (
+  dense VECTOR(384, COSINE),
+  colbert VECTOR(128, COSINE) WITH MULTIVECTOR (comparator = 'max_sim') WITH HNSW (m = 0)
+);
+```
+{% /qqlExample %}
+
+---
+
+## 2. Ingesting Multi-Vector Documents
+
+When inserting documents, pass token matrices directly or invoke a supported multi-vector model:
+
+{% qqlExample title="Upserting with multi-vector model" %}
+```sql
+UPSERT INTO kb_articles VALUES {
+  id: 101,
+  text: 'QQL supports native multi-vector late interaction ranking',
+  category: 'search'
+} USING MULTIVECTOR MODEL 'colbert-v2';
+```
+{% /qqlExample %}
+
+---
+
+## 3. Direct Multi-Vector Search
+
+You can search multi-vector spaces directly using `USING ... AS MULTI`:
+
+{% qqlExample title="Direct ColBERT token-level search" %}
+```sql
+QUERY TEXT 'late interaction vector retrieval'
+FROM kb_articles
+USING colbert AS MULTI
+WHERE category = 'search'
+LIMIT 10;
+```
+{% /qqlExample %}
+
+---
+
+## 4. Multi-Stage Pipeline: Dense Candidate Retrieval + ColBERT Re-ranking
+
+In high-scale retrieval systems, running late-interaction over millions of points can be resource-intensive. The industry standard is a **two-stage pipeline**:
+1. **Candidate stage (Prefetch)**: Rapidly retrieve top 100 candidates using standard dense or sparse search.
+2. **Re-ranking stage (ColBERT / Cross-Encoder)**: Re-score and order the candidates using token-level late interaction.
+
+{% qqlExample title="Two-stage prefetch and ColBERT re-ranking" %}
+```sql
+WITH candidates AS (
+  QUERY TEXT 'late interaction vector retrieval'
+  USING dense
+  LIMIT 100
+)
+QUERY RERANK TEXT 'late interaction vector retrieval' MODEL 'colbert-v2'
+FROM kb_articles
+USING colbert AS DENSE
+PREFETCH (candidates)
+LIMIT 10;
+```
+{% /qqlExample %}
+
+---
+
+## Single-Vector vs ColBERT vs Cross-Encoder
+
+| Architecture | Retrieval Latency | Storage Footprint | Token Interaction Depth | Best Used For |
+|---|---|---|---|---|
+| **Single Dense Vector** | ~1–5 ms | Low (1 vector / doc) | Coarse chunk-level | First-stage candidate generation |
+| **ColBERT (Late Interaction)** | ~10–25 ms | Medium (N vectors / doc) | Fine-grained token MaxSim | High-precision candidate re-ranking |
+| **Cross-Encoder Model** | ~50–200 ms | None (re-evaluates text) | Full cross-attention | Final top-10 scoring & reranking |

@@ -19,9 +19,9 @@ pub use qql_embed::SparseVector;
 
 #[cfg(feature = "rest")]
 #[derive(Debug, Clone, Serialize)]
-struct EmbedRequest {
-    model: String,
-    input: Vec<String>,
+struct EmbedRequest<'a> {
+    model: &'a str,
+    input: &'a [String],
 }
 
 #[cfg(feature = "rest")]
@@ -211,9 +211,10 @@ impl HttpEmbedder {
     }
 
     pub async fn probe_dimension(&self, input: &str) -> Result<usize, QqlError> {
+        let input = [input.to_string()];
         let body = EmbedRequest {
-            model: self.model.clone(),
-            input: vec![input.to_string()],
+            model: &self.model,
+            input: &input,
         };
 
         let resp = self
@@ -244,12 +245,12 @@ impl HttpEmbedder {
         &self,
         endpoint: &str,
         api_key: &str,
-        body: &EmbedRequest,
+        body: &EmbedRequest<'_>,
     ) -> Result<EmbedResponse, QqlError> {
         let mut req = self.client.post(endpoint).json(body);
 
         if !api_key.is_empty() {
-            req = req.header("Authorization", format!("Bearer {}", api_key));
+            req = req.bearer_auth(api_key);
         }
 
         let resp = req.send().await.map_err(|e| {
@@ -281,21 +282,20 @@ impl HttpEmbedder {
         Ok(decoded)
     }
 
-    fn resolve_dense_model(&self, model: &str) -> String {
+    fn resolve_dense_model<'a>(&'a self, model: &'a str) -> &'a str {
         if !model.is_empty() && model != "default" {
-            model.to_string()
+            model
         } else {
-            self.model.clone()
+            self.model.as_str()
         }
     }
 
-    fn resolve_multi_model(&self, model: &str) -> String {
+    fn resolve_multi_model<'a>(&'a self, model: &'a str) -> &'a str {
         if !model.is_empty() && model != "default" {
-            return model.to_string();
+            model
+        } else {
+            self.multi_model.as_deref().unwrap_or(self.model.as_str())
         }
-        self.multi_model
-            .clone()
-            .unwrap_or_else(|| self.model.clone())
     }
 
     fn multi_url(&self) -> &str {
@@ -323,7 +323,7 @@ impl HttpEmbedder {
         let model_name = self.resolve_dense_model(model);
         let body = EmbedRequest {
             model: model_name,
-            input: inputs.to_vec(),
+            input: inputs,
         };
 
         let decoded = self
@@ -420,8 +420,8 @@ impl HttpEmbedder {
 
         let model_name = self.resolve_multi_model(model);
         let body = EmbedRequest {
-            model: model_name.clone(),
-            input: inputs.to_vec(),
+            model: model_name,
+            input: inputs,
         };
 
         let decoded = self
@@ -514,13 +514,12 @@ impl HttpEmbedder {
         Ok(result)
     }
 
-    fn resolve_image_model(&self, model: &str) -> String {
+    fn resolve_image_model<'a>(&'a self, model: &'a str) -> &'a str {
         if !model.is_empty() && model != "default" {
-            return model.to_string();
+            model
+        } else {
+            self.image_model.as_deref().unwrap_or(self.model.as_str())
         }
-        self.image_model
-            .clone()
-            .unwrap_or_else(|| self.model.clone())
     }
 
     fn image_url(&self) -> &str {
@@ -563,7 +562,7 @@ impl HttpEmbedder {
         let model_name = self.resolve_image_model(model);
         let body = EmbedRequest {
             model: model_name,
-            input: sources.to_vec(),
+            input: sources,
         };
         let decoded = self
             .do_request(self.image_url(), self.image_key(), &body)
@@ -666,11 +665,22 @@ impl Embedder for HttpEmbedder {
         self.embed_batch_with_model(texts, model).await
     }
 
-    async fn embed_sparse(&self, text: &str, model: &str) -> Result<SparseVector, QqlError> {
+    async fn embed_sparse_query(&self, text: &str, model: &str) -> Result<SparseVector, QqlError> {
         if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
             return Err(qql_embed::sparse_model_unsupported_error(model));
         }
-        Ok(qql_embed::sparse::build_query_default(text))
+        Ok(qql_embed::sparse::embed_query(text))
+    }
+
+    async fn embed_sparse_document(
+        &self,
+        text: &str,
+        model: &str,
+    ) -> Result<SparseVector, QqlError> {
+        if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
+            return Err(qql_embed::sparse_model_unsupported_error(model));
+        }
+        Ok(qql_embed::sparse::embed_document(text))
     }
 
     async fn embed_multi(&self, text: &str, model: &str) -> Result<Vec<Vec<f32>>, QqlError> {

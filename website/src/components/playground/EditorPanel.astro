@@ -1,53 +1,134 @@
-<section class="flex min-h-[38rem] min-w-0 flex-col border-b border-[var(--sl-color-gray-5)] lg:border-r lg:border-b-0" aria-labelledby="editor-title">
+<section class="flex min-h-0 min-w-0 flex-col border-b border-[var(--sl-color-gray-5)] lg:border-b-0" aria-labelledby="editor-title">
   <div class="flex min-h-16 flex-wrap items-center justify-between gap-3 border-b border-[var(--sl-color-gray-5)] bg-[var(--sl-color-gray-6)] px-4 py-3">
     <div>
-      <span class="block font-mono text-[0.6rem] font-semibold uppercase tracking-[0.12em] text-[var(--sl-color-accent)]">Source</span>
-      <h2 id="editor-title" class="!m-0 !mt-0.5 !font-[var(--sl-font)] !text-sm !font-semibold text-[var(--sl-color-white)]">QQL editor</h2>
+      <span class="block font-mono text-[0.62rem] font-semibold uppercase tracking-[0.12em] text-[var(--sl-color-accent)]">Source</span>
+      <h2 id="editor-title" class="!m-0 !mt-0.5 font-(family-name:--sl-font) !text-[0.95rem] !font-semibold text-[var(--sl-color-white)]">QQL editor</h2>
     </div>
-    <div class="flex items-center gap-1 overflow-x-auto">
-      <button class="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-md border border-[var(--sl-color-gray-5)] bg-transparent px-2.5 font-mono text-[0.68rem] font-medium text-[var(--sl-color-gray-2)] transition hover:border-[var(--sl-color-gray-4)] hover:text-[var(--sl-color-white)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="button" data-open-presets>
+    <div class="flex items-center gap-1.5 overflow-x-auto">
+      <button class="inline-flex min-h-9 shrink-0 items-center justify-center gap-1.5 rounded-md border border-[var(--sl-color-gray-5)] bg-transparent px-3 font-mono text-[0.78rem] font-medium text-[var(--sl-color-gray-2)] transition hover:border-[var(--sl-color-gray-4)] hover:text-[var(--sl-color-white)] active:translate-y-px focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="button" data-open-presets>
         Examples
-        <kbd class="hidden rounded border border-current/20 px-1 font-mono text-[0.55rem] opacity-70 sm:inline">⌘K</kbd>
+        <kbd class="hidden rounded border border-current/20 px-1 font-mono text-[0.62rem] opacity-70 sm:inline" data-kbd>⌘K</kbd>
       </button>
-      <button class="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-md border border-[var(--sl-color-gray-5)] bg-transparent px-2.5 font-mono text-[0.68rem] font-medium text-[var(--sl-color-gray-2)] transition hover:border-[var(--sl-color-gray-4)] hover:text-[var(--sl-color-white)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="button" data-open-policy>
+      <button class="inline-flex min-h-9 shrink-0 items-center justify-center gap-1.5 rounded-md border border-[var(--sl-color-gray-5)] bg-transparent px-3 font-mono text-[0.78rem] font-medium text-[var(--sl-color-gray-2)] transition hover:border-[var(--sl-color-gray-4)] hover:text-[var(--sl-color-white)] active:translate-y-px focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="button" data-open-policy>
         Policy
         <span class="size-1.5 rounded-full bg-[var(--sl-color-gray-3)]" data-policy-dot></span>
       </button>
-      <button class="inline-flex min-h-8 items-center justify-center rounded-md border border-[var(--sl-color-gray-5)] bg-transparent px-2.5 font-mono text-[0.68rem] font-medium text-[var(--sl-color-gray-2)] transition hover:border-[var(--sl-color-gray-4)] hover:text-[var(--sl-color-white)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="button" data-open-settings>
-        Connection
+      <button class="app-chip hidden max-w-56 sm:inline-flex" type="button" data-policy-chip hidden title="Edit tenant policy">
+        <span class="app-chip__label">Policy</span>
+        <span class="app-chip__value" data-policy-chip-value></span>
       </button>
-      <button class="hidden min-h-8 items-center justify-center rounded-md border border-[var(--sl-color-gray-5)] bg-transparent px-2.5 font-mono text-[0.68rem] font-medium text-[var(--sl-color-gray-2)] transition hover:border-[var(--sl-color-gray-4)] hover:text-[var(--sl-color-white)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)] sm:inline-flex" type="button" data-share>
+      <button
+        class="inline-flex min-h-9 shrink-0 items-center justify-center gap-1.5 rounded-md border border-[var(--sl-color-gray-5)] bg-transparent px-3 font-mono text-[0.78rem] font-medium text-[var(--sl-color-gray-2)] transition hover:border-[var(--sl-color-gray-4)] hover:text-[var(--sl-color-white)] active:translate-y-px focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]"
+        type="button"
+        data-share
+        popovertarget="share-menu"
+        title="Share playground link"
+        aria-haspopup="dialog"
+        aria-expanded="false"
+        aria-controls="share-menu"
+      >
         Share
       </button>
-      <button class="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-md bg-[var(--sl-color-accent)] px-3 font-mono text-[0.68rem] font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="button" data-run disabled>
+      <button class="ml-1 inline-flex min-h-9 shrink-0 items-center justify-center gap-1.5 rounded-md bg-[var(--sl-color-accent)] px-3.5 font-mono text-[0.78rem] font-semibold text-white transition hover:brightness-110 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="button" data-run disabled>
         <svg class="size-3 fill-current" viewBox="0 0 24 24" aria-hidden="true">
           <path d="m8 5 11 7-11 7V5Z"></path>
         </svg>
-        Run
-        <kbd class="hidden rounded border border-white/25 px-1 font-mono text-[0.55rem] opacity-80 sm:inline">⌘↵</kbd>
+        <span data-run-label>Run</span>
+        <kbd class="hidden rounded border border-white/25 px-1 font-mono text-[0.62rem] opacity-80 sm:inline" data-kbd>⌘↵</kbd>
       </button>
     </div>
   </div>
 
   <div class="relative min-h-0 flex-1 bg-[color-mix(in_srgb,var(--sl-color-bg)_55%,var(--sl-color-gray-6))]">
-    <div id="qql-editor" aria-label="QQL source editor"></div>
-    <div class="absolute inset-0 z-10 grid place-content-center gap-3 bg-[color-mix(in_srgb,var(--sl-color-bg)_88%,transparent)] text-center font-mono text-xs text-[var(--sl-color-gray-2)]" data-editor-loading role="status" aria-live="polite">
-      <span class="size-6 justify-self-center animate-spin rounded-full border-2 border-[var(--sl-color-gray-4)] border-t-[var(--sl-color-accent)]" aria-hidden="true"></span>
-      Loading the current qql-rs WASM…
+    <div id="qql-editor" aria-label="QQL source editor" spellcheck="false"></div>
+    <div class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-[color-mix(in_srgb,var(--sl-color-bg)_90%,transparent)] text-center font-mono text-xs text-[var(--sl-color-gray-2)]" data-editor-loading role="status" aria-live="polite">
+      <div class="w-72 max-w-[80%] space-y-2.5 px-6" aria-hidden="true">
+        <span class="block h-3 animate-pulse rounded-sm bg-[var(--sl-color-gray-6)]"></span>
+        <span class="block h-3 w-11/12 animate-pulse rounded-sm bg-[var(--sl-color-gray-6)] [animation-delay:120ms]"></span>
+        <span class="block h-3 w-4/5 animate-pulse rounded-sm bg-[var(--sl-color-gray-6)] [animation-delay:240ms]"></span>
+        <span class="block h-3 w-9/12 animate-pulse rounded-sm bg-[var(--sl-color-gray-6)] [animation-delay:360ms]"></span>
+        <span class="block h-3 w-1/2 animate-pulse rounded-sm bg-[var(--sl-color-gray-6)] [animation-delay:480ms]"></span>
+      </div>
+      <span>Loading the current qql-rs WASM…</span>
     </div>
     <noscript>
       <p class="p-4">The playground requires JavaScript and WebAssembly.</p>
     </noscript>
   </div>
 
-  <div class="flex min-h-10 items-center gap-3 border-t border-[var(--sl-color-gray-5)] px-4 py-2 font-mono text-[0.65rem] text-[var(--sl-color-gray-3)]" role="status" aria-live="polite">
-    <span class="inline-flex items-center gap-1.5 text-[var(--sl-color-gray-2)]" data-validation-badge>
+  <div
+    id="share-menu"
+    class="app-share-pop"
+    popover="auto"
+    data-share-menu
+    role="dialog"
+    aria-labelledby="share-title"
+  >
+    <p id="share-title" class="app-share-pop__kicker">Share this query</p>
+    <p class="app-share-pop__hint">Anyone with the link opens this QQL in the playground.</p>
+    <label class="app-share-pop__field">
+      <span class="sr-only">Playground link</span>
+      <input class="app-input app-share-pop__url" type="text" readonly data-share-url spellcheck="false" />
+      <button class="app-share-pop__copy" type="button" data-share-copy aria-label="Copy link">
+        <svg class="app-share-pop__icon" data-share-copy-icon viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+          <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+        </svg>
+        <svg class="app-share-pop__icon app-share-pop__icon--check" data-share-check-icon viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M20 6 9 17l-5-5"></path>
+        </svg>
+        <span data-share-copy-label>Copy</span>
+      </button>
+    </label>
+    <div class="app-share-pop__row">
+      <a
+        class="app-share-pop__social"
+        data-share-x
+        href="https://x.com/intent/tweet"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="Share on X"
+      >
+        <svg class="app-share-pop__icon app-share-pop__icon--fill" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.727-8.831L1.254 2.25H8.08l4.253 5.622L18.244 2.25Zm-1.161 17.52h1.833L7.084 4.126H5.117Z"></path>
+        </svg>
+        <span>X</span>
+      </a>
+      <a
+        class="app-share-pop__social"
+        data-share-linkedin
+        href="https://www.linkedin.com/sharing/share-offsite/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="Share on LinkedIn"
+      >
+        <svg class="app-share-pop__icon" viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="3.25" y="3.25" width="17.5" height="17.5" rx="3.5"></rect>
+          <path d="M8 10.5v6M8 7.7v.1M12 16.5v-3.2c0-1.7 2.3-1.9 2.3 0v3.2M12 10.5v6"></path>
+        </svg>
+        <span>LinkedIn</span>
+      </a>
+      <button class="app-share-pop__social" type="button" data-share-native hidden aria-label="Share with another app">
+        <svg class="app-share-pop__icon" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="18" cy="5" r="3"></circle>
+          <circle cx="6" cy="12" r="3"></circle>
+          <circle cx="18" cy="19" r="3"></circle>
+          <path d="m8.59 13.51 6.83 3.98M15.41 6.51l-6.82 3.98"></path>
+        </svg>
+        <span>More</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="flex min-h-11 items-center gap-3 border-t border-[var(--sl-color-gray-5)] px-4 py-2 font-mono text-[0.75rem] text-[var(--sl-color-gray-3)]" role="status" aria-live="polite">
+    <span class="inline-flex shrink-0 items-center gap-1.5 text-[var(--sl-color-gray-2)]" data-validation-badge>
       <span class="size-1.5 rounded-full bg-[var(--sl-color-gray-3)]"></span>
       Loading qql-wasm
     </span>
     <span class="min-w-0 flex-1 truncate" data-analysis-summary>Preparing the current workspace parser…</span>
-    <button class="border-0 bg-transparent font-mono text-[0.65rem] text-[var(--sl-color-accent-high)] hover:text-[var(--sl-color-white)] disabled:cursor-not-allowed disabled:text-[var(--sl-color-gray-4)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sl-color-accent)]" type="button" data-open-export disabled>
-      Export SDK code
+    <button class="app-chip shrink-0" type="button" data-open-export disabled>
+      <span class="app-chip__label">Export</span>
+      <span class="app-chip__value">SDK</span>
     </button>
   </div>
 </section>

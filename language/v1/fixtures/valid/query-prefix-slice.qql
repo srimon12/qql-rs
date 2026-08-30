@@ -1,5 +1,5 @@
 -- query-prefix-slice.qql — v1.19 filters and search params
--- Tests: MATCH PREFIX, SLICE condition, per-query IDF corpus
+-- Tests: MATCH PREFIX, SLICE condition, per-query IDF as a QQL WHERE filter
 
 -- MATCH PREFIX filter (keyword prefix matching)
 QUERY TEXT 'search' MODEL 'e5' FROM docs
@@ -16,12 +16,12 @@ QUERY TEXT 'search' MODEL 'e5' FROM docs
 WHERE SLICE (4, 1) AND status = 'active'
 LIMIT 10;
 
--- Per-query IDF corpus: global scope
+-- Per-query IDF corpus: collection-wide statistics
 QUERY TEXT 'search' MODEL 'e5' FROM docs
 PARAMS (idf = 'global')
 LIMIT 10;
 
--- Per-query IDF corpus: explicit corpus filter
+-- Per-query IDF corpus: QQL filter, not a JSON object
 QUERY TEXT 'search' MODEL 'e5' FROM docs
-PARAMS (idf = {corpus: {must: [{key: 'status', match: {value: 'active'}}]}})
+PARAMS (idf = WHERE status = 'active')
 LIMIT 10;

@@ -39,6 +39,21 @@
     {
       "CreateIndex": {
         "collection": "docs",
+        "field": "title",
+        "field_type": "keyword",
+        "options": [
+          [
+            "prefix",
+            {
+              "Bool": true
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "CreateIndex": {
+        "collection": "docs",
         "field": "year",
         "field_type": "integer",
         "options": []

@@ -30,7 +30,8 @@ Three embedding strategies produce an [`Executor`] backed by [`EdgeQdrant`]:
 
 CLIP is dual-encoder dense. Multivector is ColBERT bags only. Late-interaction
 `RERANK` uses multi; cross-encoder uses `CROSS RERANK` + `reranker_model`.
-Sparse defaults to local BM25 hash; set `sparse_model` for real SPLADE/BGE-M3
+Sparse defaults to local wire-compatible BM25 (Qdrant `qdrant/bm25`-identical
+token IDs via qdrant-edge); set `sparse_model` for real SPLADE/BGE-M3
 sparse inference.
 
 ```rust
@@ -123,7 +124,7 @@ Intel Mac users should disable default features and use `http-embedding` or
   sample, formula, relevance-feedback, and order-by queries; point-reference
   and text inputs that cannot be embedded locally are rejected
 - Model-based sparse inference, multivector, and `CROSS RERANK` require the matching models to be opted in
-- Sparse (`sparse_model`) defaults to local BM25 hash; opt in with `sparse_model: Some("splade".into())` for real ONNX sparse inference
+- Sparse (`sparse_model`) defaults to local wire-compatible BM25 (Qdrant `qdrant/bm25`-identical token IDs via qdrant-edge); opt in with `sparse_model: Some("splade".into())` for real ONNX sparse inference
 - `IMAGE` expects local filesystem paths (no remote URL fetch)
 - Query/update “batch” is fan-out, not a single native batch RPC
 - Route affinity is a remote-client transport feature (`RestQdrant` /
@@ -134,7 +135,7 @@ Intel Mac users should disable default features and use `http-embedding` or
 
 | Feature | Edge |
 |---------|------|
-| `PARAMS (idf = 'global' \| {corpus: …})` | **Supported** (qdrant-edge 0.8) |
+| `PARAMS (idf = 'global' \| WHERE <filter>)` | **Supported** (qdrant-edge 0.8) |
 | `WHERE field MATCH PREFIX '…'` / `WHERE SLICE (total, index)` | Supported when the offline filter converter accepts them |
 | `memory` / `datatype` / keyword `prefix` on DDL | Parsed and planned; storage support follows qdrant-edge capabilities |
 | `SHOW QUOTAS` / `SET QUOTA` | **Unsupported** — cluster REST `/quotas` only → `QQL-EDGE-UNSUPPORTED-QUOTA` |
@@ -144,6 +145,11 @@ Intel Mac users should disable default features and use `http-embedding` or
 -- Sparse IDF corpus works offline (edge 0.8+)
 QUERY TEXT 'search' FROM docs USING sparse
   PARAMS (idf = 'global')
+  LIMIT 10;
+
+QUERY TEXT 'search' FROM docs USING sparse
+  WHERE tenant_id = 'acme'
+  PARAMS (idf = WHERE tenant_id = 'acme')
   LIMIT 10;
 
 -- Quotas always fail-loud offline

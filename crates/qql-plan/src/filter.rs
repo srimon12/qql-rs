@@ -279,7 +279,7 @@ pub fn value_to_json(value: &Value) -> serde_json::Value {
         Value::Null => serde_json::Value::Null,
         Value::List(items) => serde_json::Value::Array(items.iter().map(value_to_json).collect()),
         Value::Dict(entries) => {
-            let mut map = serde_json::Map::new();
+            let mut map = serde_json::Map::with_capacity(entries.len());
             for (k, v) in entries {
                 map.insert(k.clone(), value_to_json(v));
             }

@@ -45,7 +45,7 @@ pub struct Stmt {
 
 #[napi]
 impl Stmt {
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn inject_filter(
         &mut self,
         field: String,
@@ -74,23 +74,23 @@ impl Stmt {
         Ok(())
     }
 
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn to_object(&self) -> napi::Result<serde_json::Value> {
         serde_json::to_value(&self.inner).map_err(serde_napi_err)
     }
 
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn to_json(&self) -> napi::Result<String> {
         serde_json::to_string(&self.inner).map_err(serde_napi_err)
     }
 
     /// QQL `SHARD '…'` routing key (request-level). Prefer the clause in QQL.
-    #[napi(getter)]
+    #[napi(getter, catch_unwind)]
     pub fn shard_key(&self) -> Option<String> {
         self.inner.shard_key().map(str::to_owned)
     }
 
-    #[napi(setter)]
+    #[napi(setter, catch_unwind)]
     pub fn set_shard_key(&mut self, key: Option<String>) -> napi::Result<()> {
         if !self.inner.set_shard_key(key) {
             return Err(napi::Error::from_reason(
@@ -105,7 +105,7 @@ impl Stmt {
 //  Parser functions (identical to nqql)
 // ═══════════════════════════════════════════════════════════════════
 
-#[napi]
+#[napi(catch_unwind)]
 pub fn parse_all(input: String) -> napi::Result<Vec<Stmt>> {
     let stmts = Parser::parse_all(&input).map_err(to_napi_err)?;
     Ok(stmts.into_iter().map(|s| Stmt { inner: s }).collect())
@@ -114,18 +114,18 @@ pub fn parse_all(input: String) -> napi::Result<Vec<Stmt>> {
 /// Fast JSON-only parse — returns a JSON string of the AST array.
 /// Bypasses V8 Stmt object allocation entirely (~2× throughput).
 /// Ideal for HTTP/IPC forwarding.
-#[napi(js_name = parseAllJson)]
+#[napi(js_name = parseAllJson, catch_unwind)]
 pub fn parse_all_json(input: String) -> napi::Result<String> {
     let stmts = Parser::parse_all(&input).map_err(to_napi_err)?;
     serde_json::to_string(&stmts).map_err(serde_napi_err)
 }
 
-#[napi]
+#[napi(catch_unwind)]
 pub fn is_valid(input: String) -> bool {
     Parser::parse_all(&input).is_ok()
 }
 
-#[napi]
+#[napi(catch_unwind)]
 pub fn inject_filter(
     query: String,
     field: String,
@@ -155,7 +155,7 @@ pub fn inject_filter(
     serde_json::to_value(&stmt).map_err(serde_napi_err)
 }
 
-#[napi]
+#[napi(catch_unwind)]
 pub fn tokenize(input: String) -> napi::Result<serde_json::Value> {
     #[derive(serde::Serialize)]
     struct TokenView<'a> {
@@ -165,7 +165,7 @@ pub fn tokenize(input: String) -> napi::Result<serde_json::Value> {
     }
 
     let lexer = Lexer::new(&input);
-    let mut tokens = Vec::new();
+    let mut tokens = Vec::with_capacity(input.len() / 4 + 1);
     for token_result in lexer {
         let token =
             token_result.map_err(|e| napi::Error::new(napi::Status::InvalidArg, e.to_string()))?;
@@ -183,7 +183,7 @@ pub fn tokenize(input: String) -> napi::Result<serde_json::Value> {
     })
 }
 
-#[napi]
+#[napi(catch_unwind)]
 pub fn compile_query(input: String) -> napi::Result<serde_json::Value> {
     let stmt = Parser::parse(&input).map_err(to_napi_err)?;
     let compiled = routing::compile_statement(&stmt).map_err(to_napi_err)?;
@@ -214,12 +214,12 @@ pub fn compile_query(input: String) -> napi::Result<serde_json::Value> {
 //  Explain (standalone, no client needed)
 // ═══════════════════════════════════════════════════════════════════
 
-#[napi]
+#[napi(catch_unwind)]
 pub fn explain(query: String) -> napi::Result<String> {
     qql_core::explain::explain(&query).map_err(to_napi_err)
 }
 
-#[napi]
+#[napi(catch_unwind)]
 pub fn explain_stmt(stmt: &Stmt) -> napi::Result<String> {
     Ok(qql_core::explain::explain_node(&stmt.inner))
 }
@@ -238,7 +238,7 @@ pub struct JsClient {
 impl JsClient {
     /// Constructor required by napi-rs class registry.  Always throws —
     /// use `localExecutor()` or `httpExecutor()` to obtain a Client.
-    #[napi(constructor)]
+    #[napi(constructor, catch_unwind)]
     pub fn new() -> napi::Result<Self> {
         Err(napi::Error::from_reason(
             "Client must be created via localExecutor() or httpExecutor()",
@@ -250,7 +250,8 @@ impl JsClient {
     /// Returns a stable ExecutionReport JSON string for the JavaScript wrapper
     /// to deserialize into an object.
     #[napi(
-        ts_args_type = "query: string | Stmt | string[] | Stmt[], options?: { onError?: 'stop' | 'continue' }"
+        catch_unwind,
+        ts_args_type = "query: string | Stmt | string[] | Stmt[], options?: { onError?: 'stop' | 'continue', params?: Record<string, any> | any[] }"
     )]
     pub async fn execute(
         &self,
@@ -269,25 +270,39 @@ impl JsClient {
                 _ => qql::executor::OnError::Stop,
             })
             .unwrap_or(qql::executor::OnError::Stop);
+        let params = options.as_ref().and_then(|o| o.get("params"));
 
         let report = match &query {
             serde_json::Value::String(s) => {
-                self.inner.execute(s, on_error).await.map_err(to_napi_err)?
+                let bound_query = if let Some(p) = params {
+                    bind_json_params(s, p)?
+                } else {
+                    s.clone()
+                };
+                self.inner
+                    .execute(&bound_query, on_error)
+                    .await
+                    .map_err(to_napi_err)?
             }
             serde_json::Value::Array(arr) => {
                 if arr.is_empty() {
                     qql::executor::ExecutionReport::empty()
                 } else if arr[0].is_string() {
-                    let strs: Vec<&str> = arr
-                        .iter()
-                        .map(|v| {
-                            v.as_str().ok_or_else(|| {
-                                napi::Error::from_reason("batch items must be strings")
-                            })
-                        })
-                        .collect::<napi::Result<_>>()?;
+                    let mut bound_strs = Vec::with_capacity(arr.len());
+                    for v in arr {
+                        let s = v.as_str().ok_or_else(|| {
+                            napi::Error::from_reason("batch items must be strings")
+                        })?;
+                        let bound = if let Some(p) = params {
+                            bind_json_params(s, p)?
+                        } else {
+                            s.to_string()
+                        };
+                        bound_strs.push(bound);
+                    }
+                    let refs: Vec<&str> = bound_strs.iter().map(|s| s.as_str()).collect();
                     self.inner
-                        .execute_batch(&strs, on_error)
+                        .execute_batch(&refs, on_error)
                         .await
                         .map_err(to_napi_err)?
                 } else {
@@ -323,25 +338,25 @@ impl JsClient {
         serde_json::to_string(&report).map_err(serde_napi_err)
     }
 
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn explain(&self, query: String) -> napi::Result<String> {
         qql::executor::Executor::explain(&query).map_err(to_napi_err)
     }
 
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn explain_stmt(&self, stmt: &Stmt) -> napi::Result<String> {
         qql::executor::Executor::explain_node(&stmt.inner).map_err(to_napi_err)
     }
 
     /// Compile a QQL query to its transport route (non-executing).
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn compile(&self, query: String) -> napi::Result<serde_json::Value> {
         crate::compile_query(query)
     }
 
     /// Flush and release edge storage. Idempotent; execution after close is
     /// rejected instead of silently reopening shards.
-    #[napi]
+    #[napi(catch_unwind)]
     pub async fn close(&self) -> napi::Result<()> {
         if self.closed.swap(true, std::sync::atomic::Ordering::AcqRel) {
             return Ok(());
@@ -379,7 +394,8 @@ pub struct LocalExecutorOptions {
     /// Default: `BGESmallENV15` (384-d).
     pub model: Option<String>,
     /// Offline sparse model (SPLADE or BGE-M3 via SparseTextEmbedding), e.g. `"splade"`.
-    /// `None` → local BM25 hashing for sparse requests.
+    /// `None` → local wire-compatible BM25 (Qdrant `qdrant/bm25`-identical
+    /// token IDs) for sparse requests.
     pub sparse_model: Option<String>,
     /// Offline multivector model (BGE-M3 ColBERT), e.g. `"bge-m3"`.
     pub multi_model: Option<String>,
@@ -410,7 +426,7 @@ pub struct LocalExecutorOptions {
 /// });
 /// ```
 #[cfg(feature = "fastembed-local")]
-#[napi(js_name = localExecutor)]
+#[napi(js_name = localExecutor, catch_unwind)]
 pub fn local_executor(
     data_dir: String,
     options: Option<LocalExecutorOptions>,
@@ -437,7 +453,7 @@ pub fn local_executor(
 ///
 /// Returns `[{ name, modelCode, dim, description }, ...]`.
 #[cfg(feature = "fastembed-local")]
-#[napi(js_name = listEmbeddingModels)]
+#[napi(js_name = listEmbeddingModels, catch_unwind)]
 pub fn list_embedding_models() -> Vec<EmbeddingModelInfoJs> {
     qql_edge::list_embedding_models()
         .into_iter()
@@ -476,7 +492,7 @@ pub struct EmbeddingModelInfoJs {
 ///
 /// `onDiskPayload` defaults to `true`.
 #[cfg(feature = "http-embedding")]
-#[napi(js_name = httpExecutor)]
+#[napi(js_name = httpExecutor, catch_unwind)]
 pub fn http_executor(
     data_dir: String,
     url: String,
@@ -622,6 +638,7 @@ fn standalone_client(options: Option<&serde_json::Value>) -> napi::Result<JsClie
 /// `localExecutor()` / `httpExecutor()` Client for anything beyond one-shots.
 #[cfg(any(feature = "fastembed-local", feature = "http-embedding"))]
 #[napi(
+    catch_unwind,
     ts_args_type = "stmt: Stmt, options?: { onError?: 'stop' | 'continue'; dataDir?: string; onDiskPayload?: boolean; model?: string; cacheDir?: string; showDownloadProgress?: boolean; embedUrl?: string; embedKey?: string; embedModel?: string; embedDim?: number }"
 )]
 pub async fn execute_stmt(stmt: &Stmt, options: Option<serde_json::Value>) -> napi::Result<String> {
@@ -638,7 +655,8 @@ pub async fn execute_stmt(stmt: &Stmt, options: Option<serde_json::Value>) -> na
 
 #[cfg(all(feature = "fastembed-local", not(feature = "http-embedding")))]
 #[napi(
-    ts_args_type = "query: string | Stmt | string[] | Stmt[], options?: { onError?: 'stop' | 'continue'; dataDir?: string; onDiskPayload?: boolean; model?: string; cacheDir?: string; showDownloadProgress?: boolean }"
+    catch_unwind,
+    ts_args_type = "query: string | Stmt | string[] | Stmt[], options?: { onError?: 'stop' | 'continue'; params?: Record<string, any> | any[]; dataDir?: string; onDiskPayload?: boolean; model?: string; cacheDir?: string; showDownloadProgress?: boolean }"
 )]
 pub async fn execute(
     query: serde_json::Value,
@@ -652,7 +670,8 @@ pub async fn execute(
 
 #[cfg(feature = "http-embedding")]
 #[napi(
-    ts_args_type = "query: string | Stmt | string[] | Stmt[], options?: { onError?: 'stop' | 'continue'; dataDir?: string; onDiskPayload?: boolean; model?: string; cacheDir?: string; showDownloadProgress?: boolean; embedUrl?: string; embedKey?: string; embedModel?: string; embedDim?: number }"
+    catch_unwind,
+    ts_args_type = "query: string | Stmt | string[] | Stmt[], options?: { onError?: 'stop' | 'continue'; params?: Record<string, any> | any[]; dataDir?: string; onDiskPayload?: boolean; model?: string; cacheDir?: string; showDownloadProgress?: boolean; embedUrl?: string; embedKey?: string; embedModel?: string; embedDim?: number }"
 )]
 pub async fn execute(
     query: serde_json::Value,
@@ -664,314 +683,39 @@ pub async fn execute(
     Ok(report)
 }
 
-#[cfg(test)]
-#[cfg(feature = "fastembed-local")]
-mod tests {
-    use super::*;
-    use qql_core::parser::Parser;
-    #[cfg(feature = "http-embedding")]
-    use std::io::{Read, Write};
-    #[cfg(feature = "http-embedding")]
-    use std::net::TcpListener;
-    #[cfg(feature = "http-embedding")]
-    use std::sync::mpsc;
-    #[cfg(feature = "http-embedding")]
-    use std::time::Duration;
-
-    #[test]
-    fn local_executor_options_default_has_no_sparse_model() {
-        let opts = LocalExecutorOptions::default();
-        assert!(opts.sparse_model.is_none());
-    }
-
-    #[test]
-    fn local_executor_options_with_sparse_model() {
-        let opts = LocalExecutorOptions {
-            sparse_model: Some("splade".into()),
-            ..Default::default()
-        };
-        assert_eq!(opts.sparse_model.as_deref(), Some("splade"));
-    }
-
-    #[test]
-    fn standalone_local_opts_camel_case_sparse_model() {
-        let opts = serde_json::json!({ "sparseModel": "bge-m3" });
-        let lo = standalone_local_opts(Some(&opts));
-        assert_eq!(lo.sparse_model.as_deref(), Some("bge-m3"));
-    }
-
-    #[test]
-    fn standalone_local_opts_snake_case_sparse_model() {
-        let opts = serde_json::json!({ "sparse_model": "splade" });
-        let lo = standalone_local_opts(Some(&opts));
-        assert_eq!(lo.sparse_model.as_deref(), Some("splade"));
-    }
-
-    #[test]
-    fn standalone_local_opts_no_sparse_model_is_none() {
-        let opts = serde_json::json!({});
-        let lo = standalone_local_opts(Some(&opts));
-        assert!(lo.sparse_model.is_none());
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    //  Default-feature HTTP embedding coverage (Finding 1 + Finding 3
-    //  of docs/audits/review-adapters-website.json): prove the native
-    //  `httpExecutor` binding exists and `executeStmt` selects HTTP
-    //  embedding whenever `embedUrl` is supplied — against a local mock
-    //  OpenAI-compatible endpoint, so no network is involved.
-    // ═══════════════════════════════════════════════════════════════
-
-    /// A request captured by the mock embedding server.
-    #[cfg(feature = "http-embedding")]
-    #[derive(Debug)]
-    struct MockEmbedRequest {
-        method: String,
-        path: String,
-        auth: Option<String>,
-        body: String,
-    }
-
-    #[cfg(feature = "http-embedding")]
-    impl MockEmbedRequest {
-        fn model(&self) -> Option<String> {
-            serde_json::from_str::<serde_json::Value>(&self.body)
-                .ok()?
-                .get("model")
-                .and_then(|v| v.as_str())
-                .map(str::to_string)
-        }
-
-        fn inputs(&self) -> Vec<String> {
-            serde_json::from_str::<serde_json::Value>(&self.body)
-                .ok()
-                .and_then(|v| v.get("input").cloned())
-                .and_then(|v| serde_json::from_value(v).ok())
-                .unwrap_or_default()
-        }
-    }
-
-    /// Minimal OpenAI-compatible `/v1/embeddings` mock. Accepts one connection,
-    /// parses the HTTP request, replies with a fixed dense vector, and sends the
-    /// captured request to `tx`. Returns the base URL to point `embedUrl` at.
-    #[cfg(feature = "http-embedding")]
-    fn spawn_mock_embedding_server(dim: usize, tx: mpsc::Sender<MockEmbedRequest>) -> String {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock embedding server");
-        let addr = listener.local_addr().expect("mock server address");
-        std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("mock embedding server connection");
-            let mut buf = Vec::new();
-            let mut chunk = [0u8; 4096];
-            // Read headers (up to \r\n\r\n) plus the declared Content-Length body.
-            let (header_end, body_len) = loop {
-                let n = stream.read(&mut chunk).expect("read request headers");
-                if n == 0 {
-                    return;
-                }
-                buf.extend_from_slice(&chunk[..n]);
-                if let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
-                    let headers = String::from_utf8_lossy(&buf[..end]);
-                    let len = headers
-                        .lines()
-                        .find_map(|line| {
-                            let (key, value) = line.split_once(':')?;
-                            if key.eq_ignore_ascii_case("content-length") {
-                                value.trim().parse().ok()
-                            } else {
-                                None
-                            }
-                        })
-                        .unwrap_or(0);
-                    break (end, len);
-                }
-            };
-            while buf.len() < header_end + 4 + body_len {
-                let n = stream.read(&mut chunk).expect("read request body");
-                if n == 0 {
-                    return;
-                }
-                buf.extend_from_slice(&chunk[..n]);
+fn bind_json_params(query: &str, params: &serde_json::Value) -> napi::Result<String> {
+    match params {
+        serde_json::Value::Object(obj) => {
+            let mut map = std::collections::HashMap::new();
+            for (k, v) in obj {
+                let val = ast::Value::from_json(v.clone()).map_err(to_napi_err)?;
+                map.insert(k.clone(), val);
             }
-
-            let header_text = String::from_utf8_lossy(&buf[..header_end]).into_owned();
-            let body = String::from_utf8_lossy(&buf[header_end + 4..header_end + 4 + body_len])
-                .into_owned();
-            let mut parts = header_text
-                .lines()
-                .next()
-                .unwrap_or_default()
-                .split_whitespace();
-            let method = parts.next().unwrap_or_default().to_string();
-            let path = parts.next().unwrap_or_default().to_string();
-            let auth = header_text.lines().find_map(|line| {
-                let (key, value) = line.split_once(':')?;
-                if key.eq_ignore_ascii_case("authorization") {
-                    Some(value.trim().to_string())
-                } else {
-                    None
-                }
-            });
-            let _ = tx.send(MockEmbedRequest {
-                method,
-                path,
-                auth,
-                body,
-            });
-
-            let embedding: Vec<f32> = (0..dim).map(|i| (i + 1) as f32 / 10.0).collect();
-            let payload = serde_json::json!({
-                "data": [{ "index": 0, "embedding": embedding }]
-            })
-            .to_string();
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                payload.len(),
-                payload
-            );
-            stream
-                .write_all(response.as_bytes())
-                .expect("write mock response");
-        });
-        format!("http://{addr}/v1/embeddings")
-    }
-
-    #[test]
-    #[cfg(feature = "http-embedding")]
-    fn http_executor_native_symbol_constructs_client() {
-        // Default-feature proof that the native `httpExecutor` binding exists
-        // (the JS wrapper exports it regardless of the compiled feature set, so
-        // a wrapper-level existence test cannot prove this).
-        let data_dir =
-            std::env::temp_dir().join(format!("nqql-edge-http-ctor-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&data_dir);
-        let client = http_executor(
-            data_dir.to_string_lossy().into_owned(),
-            "http://127.0.0.1:1/v1/embeddings".to_string(),
-            "key".to_string(),
-            "mock".to_string(),
-            4,
-            Some(false),
-        )
-        .expect("http_executor must construct a client");
-        // Construction must not touch the network; executing a non-embedding
-        // statement proves the returned client is usable end-to-end.
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("test runtime");
-        runtime.block_on(async {
-            let report = client
-                .inner
-                .execute("SHOW COLLECTIONS", qql::executor::OnError::Stop)
-                .await
-                .expect("SHOW COLLECTIONS via httpExecutor");
-            assert!(report.ok, "SHOW COLLECTIONS failed: {report:?}");
-            client
-                .inner
-                .close()
-                .await
-                .expect("close httpExecutor client");
-        });
-        let _ = std::fs::remove_dir_all(data_dir);
-    }
-
-    #[test]
-    #[cfg(feature = "http-embedding")]
-    fn execute_stmt_prefers_http_embedding_when_embed_url_supplied() {
-        // Default-feature proof that `executeStmt` routes to the native
-        // `httpExecutor` path whenever `embedUrl` is supplied (matching the
-        // standalone `execute`), verified against a local mock endpoint.
-        let (tx, rx) = mpsc::channel();
-        let url = spawn_mock_embedding_server(4, tx);
-        let data_dir =
-            std::env::temp_dir().join(format!("nqql-edge-http-stmt-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&data_dir);
-
-        let stmt = Stmt {
-            inner: Parser::parse("UPSERT INTO http_docs VALUES {id: 1, text: 'hello'}")
-                .expect("parse upsert"),
-        };
-        let options = serde_json::json!({
-            "dataDir": data_dir,
-            "onDiskPayload": false,
-            "embedUrl": url,
-            "embedKey": "test-key",
-            "embedModel": "mock-embed",
-            "embedDim": 4,
-        });
-
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("test runtime");
-        let report = runtime.block_on(async {
-            let raw = execute_stmt(&stmt, Some(options))
-                .await
-                .expect("execute_stmt with embedUrl");
-            serde_json::from_str::<serde_json::Value>(&raw).expect("report is JSON")
-        });
-
-        // The statement ran through the HTTP embedder and succeeded.
-        assert!(
-            report["ok"].as_bool().unwrap_or(false),
-            "execute_stmt report: {report}"
-        );
-        // The mock received exactly one OpenAI-compatible dense request with the
-        // supplied options forwarded (sparse uses local BM25, no HTTP).
-        let req = rx
-            .recv_timeout(Duration::from_secs(10))
-            .expect("mock embedding server received a request");
-        assert_eq!(req.method, "POST", "request: {req:?}");
-        assert_eq!(req.path, "/v1/embeddings", "request: {req:?}");
-        assert_eq!(
-            req.model().as_deref(),
-            Some("mock-embed"),
-            "request: {req:?}"
-        );
-        assert_eq!(req.inputs(), vec!["hello".to_string()], "request: {req:?}");
-        assert_eq!(
-            req.auth.as_deref(),
-            Some("Bearer test-key"),
-            "request: {req:?}"
-        );
-        assert!(
-            rx.try_recv().is_err(),
-            "expected exactly one embedding request, got more"
-        );
-        let _ = std::fs::remove_dir_all(data_dir);
-    }
-
-    #[test]
-    #[cfg(not(feature = "http-embedding"))]
-    fn execute_stmt_rejects_embed_url_when_http_embedding_disabled() {
-        // Consistency contract: when the `http-embedding` feature is not
-        // compiled in, `executeStmt` must reject `embedUrl` explicitly instead
-        // of silently falling back to the local ONNX model.
-        let stmt = Stmt {
-            inner: Parser::parse("COUNT FROM docs").expect("parse count"),
-        };
-        let options = serde_json::json!({
-            "dataDir": std::env::temp_dir().join(format!(
-                "nqql-edge-http-reject-{}",
-                std::process::id()
-            )),
-            "embedUrl": "http://127.0.0.1:1/v1/embeddings",
-            "embedKey": "test-key",
-            "embedModel": "mock-embed",
-            "embedDim": 4,
-        });
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("test runtime");
-        let err = runtime.block_on(async {
-            execute_stmt(&stmt, Some(options))
-                .await
-                .expect_err("embedUrl must be rejected without http-embedding")
-        });
-        assert!(
-            err.to_string().contains("http-embedding"),
-            "unexpected error: {err}"
-        );
+            qql_core::params::bind_named(query, |k| map.get(k).cloned()).map_err(to_napi_err)
+        }
+        serde_json::Value::Array(arr) => {
+            let items: Vec<ast::Value> = arr
+                .iter()
+                .map(|v| ast::Value::from_json(v.clone()))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(to_napi_err)?;
+            qql_core::params::bind_positional(query, &items).map_err(to_napi_err)
+        }
+        _ => Err(napi::Error::from_reason(
+            "params must be an object for named parameters (:name) or an array for positional parameters (?)",
+        )),
     }
 }
+
+/// Substitute `:name` (object) or `?` (array) placeholders into a query string.
+#[napi(
+    catch_unwind,
+    ts_args_type = "query: string, params: Record<string, any> | any[]"
+)]
+pub fn bind(query: String, params: serde_json::Value) -> napi::Result<String> {
+    bind_json_params(&query, &params)
+}
+
+#[cfg(test)]
+#[cfg(feature = "fastembed-local")]
+mod tests;

@@ -99,9 +99,10 @@ test('exports: explain', () => assert.strictEqual(typeof nqql.explain, 'function
 test('exports: explainStmt', () => assert.strictEqual(typeof nqql.explainStmt, 'function'));
 test('exports: execute', () => assert.strictEqual(typeof nqql.execute, 'function'));
 test('exports: executeStmt', () => assert.strictEqual(typeof nqql.executeStmt, 'function'));
+test('exports: bind', () => assert.strictEqual(typeof nqql.bind, 'function'));
 
 // Unknown exports check
-const knownKeys = ['Client','HttpEmbedder','Stmt','compileQuery','execute','executeStmt',
+const knownKeys = ['Client','HttpEmbedder','Stmt','bind','compileQuery','execute','executeStmt',
   'explain','explainStmt','injectFilter','isValid','parse','parseJson','tokenize', 'version', '__version__'];
 const actualKeys = Object.keys(nqql).sort();
 test('no extra exports', () => {
@@ -845,6 +846,50 @@ async function runE2E() {
     const route = nqql.compileQuery('SCROLL FROM docs LIMIT 10');
     assert.strictEqual(typeof route, 'object');
     assert.ok('stmt_type' in route);
+  });
+
+  // ============================================================================
+  // Parameter Binding Tests
+  // ============================================================================
+  console.log('\n========== Parameter Binding ==========');
+
+  test('bind named parameters', () => {
+    const q = "QUERY 'shoes' FROM products WHERE category = :cat AND price < :max_p";
+    const res = nqql.bind(q, { cat: "sneakers", max_p: 100 });
+    assert.strictEqual(res, "QUERY 'shoes' FROM products WHERE category = 'sneakers' AND price < 100");
+  });
+
+  test('bind positional parameters', () => {
+    const q = "QUERY 'shoes' FROM products WHERE category = ? AND in_stock = ?";
+    const res = nqql.bind(q, ["sneakers", true]);
+    assert.strictEqual(res, "QUERY 'shoes' FROM products WHERE category = 'sneakers' AND in_stock = true");
+  });
+
+  test('bind named again', () => {
+    const q = "QUERY 'shoes' FROM products WHERE category = :cat";
+    const res = nqql.bind(q, { cat: "boots" });
+    assert.strictEqual(res, "QUERY 'shoes' FROM products WHERE category = 'boots'");
+  });
+
+  test('bind positional again', () => {
+    const q = "QUERY 'shoes' FROM products WHERE category = ?";
+    const res = nqql.bind(q, ["boots"]);
+    assert.strictEqual(res, "QUERY 'shoes' FROM products WHERE category = 'boots'");
+  });
+
+  test('bind preserves dollar identifiers', () => {
+    const q = "QUERY 'shoes' FROM products WHERE $category = :cat AND $1 = 42";
+    const res = nqql.bind(q, { cat: "boots" });
+    assert.strictEqual(res, "QUERY 'shoes' FROM products WHERE $category = 'boots' AND $1 = 42");
+  });
+
+  test('bind rejects mixed styles', () => {
+    assert.throws(() => nqql.bind("WHERE x = :x", [1]), /named placeholder|MIXED-STYLE/);
+    assert.throws(() => nqql.bind("WHERE x = ?", { x: 1 }), /positional placeholder|MIXED-STYLE/);
+  });
+
+  test('bind rejects scalar params', () => {
+    assert.throws(() => nqql.bind("WHERE x = :x", "oops"), /params must be an object/);
   });
 
   // ============================================================================

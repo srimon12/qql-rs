@@ -99,7 +99,45 @@ assert.throws(
   () => nqql.injectFilter(query, "tenant_id", "contains", "acme"),
   /unsupported comparison operator/,
 );
-console.log("  ✓ injectFilter");
+console.log("  ✓ injectFilter validation");
+
+// Parameter binding tests
+const qNamed = "QUERY 'shoes' FROM products WHERE category = :cat AND price < :max_p";
+const boundNamed = nqql.bind(qNamed, { cat: "sneakers", max_p: 100 });
+assert.strictEqual(
+  boundNamed,
+  "QUERY 'shoes' FROM products WHERE category = 'sneakers' AND price < 100",
+);
+const boundNamedFn = nqql.bind(qNamed, { cat: "boots", max_p: 50 });
+assert.strictEqual(
+  boundNamedFn,
+  "QUERY 'shoes' FROM products WHERE category = 'boots' AND price < 50",
+);
+
+const qPos = "QUERY 'shoes' FROM products WHERE category = ? AND in_stock = ?";
+const boundPos = nqql.bind(qPos, ["sneakers", true]);
+assert.strictEqual(
+  boundPos,
+  "QUERY 'shoes' FROM products WHERE category = 'sneakers' AND in_stock = true",
+);
+const boundPosFn = nqql.bind(qPos, ["boots", false]);
+assert.strictEqual(
+  boundPosFn,
+  "QUERY 'shoes' FROM products WHERE category = 'boots' AND in_stock = false",
+);
+
+assert.strictEqual(
+  nqql.bind("WHERE flag = ? AND count = ?", [true, 1]),
+  "WHERE flag = true AND count = 1",
+);
+assert.strictEqual(
+  nqql.bind("WHERE $category = :cat AND $1 = 42", { cat: "boots" }),
+  "WHERE $category = 'boots' AND $1 = 42",
+);
+
+assert.throws(() => nqql.bind("WHERE x = :x", [1]), /named placeholder|MIXED-STYLE/);
+assert.throws(() => nqql.bind("WHERE x = ?", { x: 1 }), /positional placeholder|MIXED-STYLE/);
+console.log("  ✓ parameter binding");
 
 const stmt = nqql.parse("QUERY 'hello' FROM docs LIMIT 10")[0];
 stmt.injectFilter("x", ">", 42);

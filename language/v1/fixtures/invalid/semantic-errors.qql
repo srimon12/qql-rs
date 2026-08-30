@@ -35,3 +35,15 @@ QUERY POINTS (1, 2) FROM docs LIMIT 10;
 -- @case upsert-without-id
 -- @error QQL-VALIDATION-UPSERT-ID
 UPSERT INTO docs VALUES {text: 'hello'};
+
+-- @case idf-numeric
+-- @error QQL-VALIDATION-IDF
+QUERY 'x' FROM docs PARAMS (idf = 5) LIMIT 5;
+
+-- @case idf-unknown-string
+-- @error QQL-VALIDATION-IDF
+QUERY 'x' FROM docs PARAMS (idf = 'collection') LIMIT 5;
+
+-- @case idf-json-corpus
+-- @error QQL-VALIDATION-IDF
+QUERY 'x' FROM docs PARAMS (idf = {corpus: {must: [{key: 'status', match: {value: 'active'}}]}}) LIMIT 5;

@@ -5,6 +5,7 @@
   "patterns": [
     { "include": "#comments" },
     { "include": "#strings" },
+    { "include": "#parameters" },
     { "include": "#numbers" },
     { "include": "#constants" },
     { "include": "#keywords" },
@@ -17,14 +18,19 @@
     "strings": {
       "patterns": [
         { "name": "string.quoted.single.qql", "begin": "'", "end": "'", "patterns": [{ "name": "constant.character.escape.qql", "match": "''|\\\\['\\\"\\\\ntr]" }] },
-        { "name": "string.quoted.double.qql", "begin": "\\\"", "end": "\\\"", "patterns": [{ "name": "constant.character.escape.qql", "match": "\\\\['\\\"\\\\ntr]" }] }
+        { "name": "string.quoted.double.qql", "begin": "\\\"", "end": "\\\"", "patterns": [{ "name": "constant.character.escape.qql", "match": "\\\\['\\\"\\\\ntr]" }] },
+        { "name": "string.quoted.backtick.qql", "begin": "`", "end": "`", "patterns": [{ "name": "constant.character.escape.qql", "match": "\\\\." }] }
       ]
     },
+    "parameters": { "patterns": [
+      { "name": "variable.parameter.named.qql", "match": "(?<![A-Za-z0-9_$'\"`\\]\\}]):[A-Za-z_][A-Za-z0-9_]*" },
+      { "name": "variable.parameter.positional.qql", "match": "\\?" }
+    ] },
     "numbers": { "patterns": [{ "name": "constant.numeric.float.qql", "match": "-?\\\\d+(\\\\.\\\\d+([eE][+-]?\\\\d+)?|([eE][+-]?\\\\d+))" }, { "name": "constant.numeric.integer.qql", "match": "-?\\\\d+" }] },
     "constants": { "patterns": [{ "name": "constant.language.qql", "match": "\\b(?i)(FALSE|NULL|TRUE)\\b" }] },
-    "keywords": { "patterns": [{ "name": "keyword.control.qql", "match": "\\b(?i)(ABS|ACORN|AFTER|ALL|ALTER|AND|ANY|AS|ASC|AVERAGE_VECTOR|BEST_SCORE|BETWEEN|BOOL|BOTTOM_RIGHT|BY|CANDIDATES|CASE|CENTER|CLEAR|COLLECTION|COLLECTIONS|CONSISTENCY|CONTEXT|CORPUS|COSINE|COUNT|CREATE|CROSS|DATETIME|DATETIME_KEY|DBSF|DECAY|DEFAULT|DEFAULTS|DELETE|DENSE|DESC|DISCOVER|DIVERSITY|DOT|DROP|ELSE|EMBED|EMPTY|END|EUCLID|EXACT|EXCLUDE|EXP|EXP_DECAY|EXTERIOR|FEEDBACK|FIELD|FLOAT|FOR|FORMULA|FROM|FUSION|GAUSS_DECAY|GEO|GEO_BBOX|GEO_DISTANCE|GEO_POLYGON|GEO_RADIUS|GLOBAL|GROUP|HAS_VECTOR|HNSW|HNSW_EF|HYBRID|ID|IDF|IGNORE|IMAGE|IN|INCLUDE|INDEX|INDEXED_ONLY|INDICES|INTEGER|INTERIORS|INTO|IS|KEY|KEYS|KEYWORD|LAT|LIMIT|LIN_DECAY|LN|LOG|LON|LOOKUP|MAJORITY|MANHATTAN|MATCH|MATCH_ANY|MAX_SELECTIVITY|MIDPOINT|MMR|MODEL|MULTI|MULTIVECTOR|NAIVE|NEAREST|NEGATIVE|NESTED|NOT|OFFSET|ON|OPTIMIZERS|OR|ORDER|OVERSAMPLING|PARAMS|PAYLOAD|PHRASE|POINT|POINTS|POSITIVE|POW|PREFETCH|PREFIX|QUANTIZATION|QUERY|QUORUM|QUOTA|QUOTAS|RADIUS|RANDOM|RECOMMEND|RELEVANCE|RERANK|RESCORE|RRF|RRF_K|RRF_WEIGHTS|SAMPLE|SCALE|SCORE|SCROLL|SET|SHARD|SHOW|SIZE|SLICE|SPARSE|SQRT|STRATEGY|SUM_SCORES|TARGET|TEXT|THEN|THRESHOLD|TIMEOUT|TOP_LEFT|TYPE|UPDATE|UPSERT|USING|UUID|VALUES|VALUES_COUNT|VECTOR|WAIT|WHEN|WHERE|WITH)\\b" }] },
+    "keywords": { "patterns": [{ "name": "keyword.control.qql", "match": "\\b(?i)(ABS|ACORN|AFTER|ALL|ALTER|AND|ANY|AS|ASC|AVERAGE_VECTOR|BEST_SCORE|BETWEEN|BOOL|BOTTOM_RIGHT|BY|CANDIDATES|CASE|CENTER|CLEAR|COLLECTION|COLLECTIONS|CONSISTENCY|CONTEXT|COSINE|COUNT|CREATE|CROSS|DATETIME|DATETIME_KEY|DBSF|DECAY|DEFAULT|DEFAULTS|DELETE|DENSE|DESC|DISCOVER|DIVERSITY|DOT|DROP|ELSE|EMBED|EMPTY|END|EUCLID|EXACT|EXCLUDE|EXP|EXP_DECAY|EXTERIOR|FEEDBACK|FIELD|FLOAT|FOR|FORMULA|FROM|FUSION|GAUSS_DECAY|GEO|GEO_BBOX|GEO_DISTANCE|GEO_POLYGON|GEO_RADIUS|GLOBAL|GROUP|HAS_VECTOR|HNSW|HNSW_EF|HYBRID|ID|IDF|IGNORE|IMAGE|IN|INCLUDE|INDEX|INDEXED_ONLY|INDICES|INTEGER|INTERIORS|INTO|IS|KEY|KEYS|KEYWORD|LAT|LIMIT|LIN_DECAY|LN|LOG|LON|LOOKUP|MAJORITY|MANHATTAN|MATCH|MATCH_ANY|MAX_SELECTIVITY|MIDPOINT|MMR|MODEL|MULTI|MULTIVECTOR|NAIVE|NEAREST|NEGATIVE|NESTED|NOT|OFFSET|ON|OPTIMIZERS|OR|ORDER|OVERSAMPLING|PARAMS|PAYLOAD|PHRASE|POINT|POINTS|POSITIVE|POW|PREFETCH|PREFIX|QUANTIZATION|QUERY|QUORUM|QUOTA|QUOTAS|RADIUS|RANDOM|RECOMMEND|RELEVANCE|RERANK|RESCORE|RRF|RRF_K|RRF_WEIGHTS|SAMPLE|SCALE|SCORE|SCROLL|SET|SHARD|SHOW|SIZE|SLICE|SPARSE|SQRT|STRATEGY|SUM_SCORES|TARGET|TEXT|THEN|THRESHOLD|TIMEOUT|TOP_LEFT|TYPE|UPDATE|UPSERT|USING|UUID|VALUES|VALUES_COUNT|VECTOR|WAIT|WHEN|WHERE|WITH)\\b" }] },
     "operators": { "patterns": [{ "name": "keyword.operator.comparison.qql", "match": "!=|>=|<=|≠|≥|≤|=|>|<" }, { "name": "keyword.operator.assignment.qql", "match": "=" }, { "name": "keyword.operator.arithmetic.qql", "match": "[\\\\+\\\\-\\\\*\\\\/]" }] },
     "punctuation": { "patterns": [{ "name": "punctuation.terminator.qql", "match": ";" }, { "name": "punctuation.separator.qql", "match": "," }, { "name": "punctuation.definition.bracket.qql", "match": "[\\\\{\\\\}\\\\[\\\\]]" }, { "name": "punctuation.definition.paren.qql", "match": "[\\\\(\\\\)]" }, { "name": "punctuation.separator.key-value.qql", "match": ":" }] },
-    "identifiers": { "patterns": [{ "name": "variable.other.readwrite.qql", "match": "\\\\$[A-Za-z_][A-Za-z0-9_]*(\\\\.[A-Za-z_][A-Za-z0-9_]*)*(\\\\[\\\\]\\\\.?)*" }, { "name": "entity.name.qql", "match": "[A-Za-z_][A-Za-z0-9_]*(\\\\.[A-Za-z_][A-Za-z0-9_]*|\\\\[\\\\]\\\\.?)*" }] }
+    "identifiers": { "patterns": [{ "name": "variable.other.readwrite.qql", "match": "\\\\$[A-Za-z0-9_]+(\\\\.[A-Za-z_][A-Za-z0-9_]*)*(\\\\[\\\\]\\\\.?)*" }, { "name": "entity.name.qql", "match": "[A-Za-z_][A-Za-z0-9_]*(\\\\.[A-Za-z_][A-Za-z0-9_]*|\\\\[\\\\]\\\\.?)*" }] }
   }
 }
