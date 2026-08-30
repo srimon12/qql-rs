@@ -4,9 +4,6 @@
 /favicon.ico
   Cache-Control: public, max-age=86400
 
-/og-image.png
-  Cache-Control: public, max-age=86400
-
 # Pagefind (Starlight search) — WASM + worker need CSP allowances
 /pagefind/*
   Cache-Control: public, max-age=3600, s-maxage=3600
