@@ -29,6 +29,12 @@ export default defineConfig(
     site: SITE_URL,
     trailingSlash: "always",
 
+    // Cloudflare Speed Brain refuses every `sec-purpose: prefetch` on this
+    // zone's Pages projects ("disabled for worker requests" → 503), so
+    // Astro's link prefetch only spams the console and never succeeds.
+    // Read by Starlight's astro:config:setup hook (config.prefetch).
+    prefetch: false,
+
     integrations: [
       sitemap({
         filter: (page) => !page.includes("/docs/landing/"),
