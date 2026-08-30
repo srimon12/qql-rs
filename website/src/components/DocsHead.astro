@@ -39,6 +39,8 @@ for (let i = 0; i < pathSegments.length; i++) {
   <slot />
 </StarlightHead>
 
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 <link rel="canonical" href={canonicalUrl} />
 <meta property="og:image" content={ogImageUrl} />
 <meta property="og:image:width" content="1200" />
@@ -72,7 +74,7 @@ for (let i = 0; i < pathSegments.length; i++) {
       url: "https://veristamp.in",
       logo: {
         "@type": "ImageObject",
-        url: `${APPS.home.url}/favicon.ico`,
+        url: `${APPS.home.url}/icon-512.png`,
       },
     },
     keywords: [

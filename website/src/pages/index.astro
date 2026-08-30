@@ -57,7 +57,9 @@ LIMIT 20;`;
       name="keywords"
       content="QQL, Qdrant, vector search, hybrid search, SQL for vector database, Qdrant SQL, Reciprocal Rank Fusion, RRF, multitenancy, filter injection, pyqql, nqql, qql-edge, WASM, Veristamp"
     />
-    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="canonical" href={`${APPS.home.url}/`} />
     <meta property="og:title" content={pageTitle} />
     <meta property="og:type" content="website" />
@@ -159,17 +161,12 @@ LIMIT 20;`;
         specimenTitle="search.qql"
         specimenQql={verifiedQqlHero}
       >
-        <span class="kw">QUERY TEXT</span> <span class="str">'chest pain'</span>
-        {"\n"}
-        <span class="kw">FROM</span> <span class="id">medical</span>
-        {"\n"}
-        <span class="kw">USING</span> <span class="id">dense</span>
-        {"\n"}
+        <span class="kw">QUERY TEXT</span> <span class="str">'chest pain'</span><br />
+        <span class="kw">FROM</span> <span class="id">medical</span><br />
+        <span class="kw">USING</span> <span class="id">dense</span><br />
         <span class="kw">WHERE</span> <span class="id">department</span>{" "}
-        <span class="op">=</span> <span class="str">'cardio'</span>
-        {"\n"}
-        <span class="kw">SHARD</span> <span class="str">'hospital-east'</span>
-        {"\n"}
+        <span class="op">=</span> <span class="str">'cardio'</span><br />
+        <span class="kw">SHARD</span> <span class="str">'hospital-east'</span><br />
         <span class="kw">LIMIT</span> <span class="num">5</span><span class="op">;</span>
       </LandingHero>
 

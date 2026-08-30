@@ -37,9 +37,7 @@ const columns = [
     <div class="site-footer__brand">
       <a class="brand" href="/" aria-label="QQL home">
         <span class="brand__mark" aria-hidden="true">
-          <svg viewBox="0 0 32 32">
-            <path d="M7.25 7.5h4.05L16 21.15 20.7 7.5h4.05L17.35 25.25h-2.7L7.25 7.5Z"></path>
-          </svg>
+          <img src={`${import.meta.env.BASE_URL}logo.svg`.replace(/([^:]\/)\/+/g, "$1")} alt="" width="32" height="32" />
         </span>
         <span class="brand__name">QQL</span>
       </a>
