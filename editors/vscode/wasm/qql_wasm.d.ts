@@ -3,6 +3,7 @@
 
 export interface ExecuteOptions {
     onError?: "stop" | "continue";
+    params?: Record<string, unknown> | unknown[];
 }
 
 export interface ExecResponse {
@@ -152,9 +153,9 @@ export class Stmt {
 export function analyze(input: string): AnalysisResult;
 
 /**
- * Substitute named (:name) or positional (?) parameters into a query string via JSON.
+ * Substitute `:name` (object) or `?` (array) placeholders into a query string.
  */
-export function bind(query: string, params_json: string): string;
+export function bind(query: string, params: Record<string, unknown> | unknown[]): string;
 
 /**
  * Compile one QQL statement into a JavaScript route object.
