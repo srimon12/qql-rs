@@ -1,7 +1,7 @@
 # QQL release procedure
 
-All public packages use one repository version. The current release is `0.2.2`;
-the corresponding Git tag is `v0.2.2`. The QQL language specification version
+All public packages use one repository version. The current release is `0.3.0`;
+the corresponding Git tag is `v0.3.0`. The QQL language specification version
 (`1.5`) is independent from the package release version.
 
 ## Published artifacts
@@ -11,7 +11,7 @@ the corresponding Git tag is `v0.2.2`. The QQL language specification version
 | crates.io | `qql-core`, `qql-plan`, `qql-embed`, `qql`, `qql-edge`, `qql-cli` |
 | PyPI | `pyqql`, `pyqql-edge` |
 | npm | `@veristamp/nqql`, `@veristamp/nqql-edge`, `qql-wasm` |
-| VS Code Marketplace | `srimon12.qql-lang` (extension version is independent; currently `0.2.5`) |
+| VS Code Marketplace | `srimon12.qql-lang` (extension version matches the workspace release; currently `0.3.0`) |
 | GitHub Releases | Default REST/gRPC `qql` CLI archives and checksums |
 
 `qql-conformance`, `qql-grammar-gen`, and the Rust implementation crates for
@@ -170,7 +170,7 @@ server-side branch rules are therefore mandatory.
 7. Validate synchronized metadata:
 
    ```bash
-   python3 scripts/check_release.py --version 0.2.2
+   python3 scripts/check_release.py --version 0.3.0
    ```
 
 8. Open a pull request into `dev` and let CI pass.
@@ -196,14 +196,14 @@ Install the artifacts in clean temporary projects before approving the release.
    ```bash
    git switch main
    git pull --ff-only origin main
-   python3 scripts/check_release.py --version 0.2.2
+   python3 scripts/check_release.py --version 0.3.0
    ```
 
 4. Create an annotated tag on that exact commit:
 
    ```bash
-   git tag -a v0.2.2 -m "QQL 0.2.2"
-   git push origin v0.2.2
+   git tag -a v0.3.0 -m "QQL 0.3.0"
+   git push origin v0.3.0
    ```
 
 Only the tag push can publish. The release gate verifies that:
@@ -234,17 +234,17 @@ are published before their root dispatcher packages.
 After the workflow succeeds:
 
 ```bash
-cargo info --registry crates-io qql-core@0.2.2
-cargo info --registry crates-io qql@0.2.2
-cargo info --registry crates-io qql-edge@0.2.2
-cargo install qql-cli@0.2.2 --locked --features edge
+cargo info --registry crates-io qql-core@0.3.0
+cargo info --registry crates-io qql@0.3.0
+cargo info --registry crates-io qql-edge@0.3.0
+cargo install qql-cli@0.3.0 --locked --features edge
 
-python -m pip install pyqql==0.2.2
-python -m pip install pyqql-edge==0.2.2
+python -m pip install pyqql==0.3.0
+python -m pip install pyqql-edge==0.3.0
 
-npm view @veristamp/nqql@0.2.2
-npm view @veristamp/nqql-edge@0.2.2
-npm view qql-wasm@0.2.2
+npm view @veristamp/nqql@0.3.0
+npm view @veristamp/nqql-edge@0.3.0
+npm view qql-wasm@0.3.0
 ```
 
 Install the CLI archive on at least one platform and verify

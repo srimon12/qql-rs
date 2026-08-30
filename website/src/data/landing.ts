@@ -73,7 +73,7 @@ export const faq = {
     {
       question: "Is it production-ready?",
       answer:
-        "It is young: v0.2.1. Fail-closed defaults, OpenAPI contract tests, a conformance corpus, and a public gaps document. The API surface is stabilizing, not frozen.",
+        "It is young: v0.3.0. Fail-closed defaults, OpenAPI contract tests, a conformance corpus, and a public gaps document. The API surface is stabilizing, not frozen.",
     },
     {
       question: "Can I try it without a cluster?",

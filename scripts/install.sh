@@ -45,7 +45,7 @@ if [ -z "$VERSION" ]; then
   echo "📡 Fetching latest release version..."
   VERSION=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
   if [ -z "$VERSION" ]; then
-    VERSION="v0.2.1"
+    VERSION="v0.3.0"
   fi
 fi
 

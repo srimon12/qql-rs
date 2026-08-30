@@ -21,10 +21,10 @@ fastembed-local = ["qql-edge/fastembed-local"]
 http-embedding = ["qql-edge/http-embedding"]
 
 [dependencies]
-qql-core = { version = "0.2.2", path = "../qql-core", features = ["serde"] }
-qql-plan = { version = "0.2.2", path = "../qql-plan" }
-qql = { version = "0.2.2", path = "../qql-runtime", default-features = false }
-qql-edge = { version = "0.2.2", path = "../qql-edge", default-features = false }
+qql-core = { version = "0.3.0", path = "../qql-core", features = ["serde"] }
+qql-plan = { version = "0.3.0", path = "../qql-plan" }
+qql = { version = "0.3.0", path = "../qql-runtime", default-features = false }
+qql-edge = { version = "0.3.0", path = "../qql-edge", default-features = false }
 pyo3 = { version = "0.29", features = ["extension-module", "abi3-py310", "parking_lot"] }
 pyo3-async-runtimes = { version = "0.29", features = ["tokio-runtime"] }
 pythonize = "0.29"

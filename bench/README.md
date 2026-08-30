@@ -7,12 +7,12 @@ Benchmarks are split into two categories:
 2. **Full E2E Pipeline Benchmarks**: The complete query compilation lifecycle right up to the millisecond before sending the network request (parsing, filter injection, schema validation, and Qdrant REST JSON payload construction).
 
 - **CPU:** Intel Core i5-10400F @ 2.90 GHz (6 cores / 12 threads)
-- **Rust:** `qql-rs` (v0.2.2)
+- **Rust:** `qql-rs` (v0.3.0)
 - **Go:** `qql-go` (v0.1.2)
-- **Python:** `pyqql` (v0.2.2 PyO3 0.29.2, `abi3-py310`)
-- **Node.js:** `nqql` (v0.2.2 N-API 3.12.2)
-- **WASM:** `qql-wasm` (v0.2.2 `wasm32-unknown-unknown`)
-- **Date:** August 2026 (v0.2.2 Release Verification)
+- **Python:** `pyqql` (v0.3.0 PyO3 0.29.2, `abi3-py310`)
+- **Node.js:** `nqql` (v0.3.0 N-API 3.12.2)
+- **WASM:** `qql-wasm` (v0.3.0 `wasm32-unknown-unknown`)
+- **Date:** August 2026 (v0.3.0 Release Verification)
 
 ---
 

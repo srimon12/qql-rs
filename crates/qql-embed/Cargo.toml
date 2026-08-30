@@ -14,7 +14,7 @@ keywords = ["qql", "qdrant", "embeddings", "vector-search", "bm25"]
 categories = ["database", "algorithms"]
 
 [dependencies]
-qql-core = { version = "0.2.2", path = "../qql-core", features = ["std"] }
+qql-core = { version = "0.3.0", path = "../qql-core", features = ["std"] }
 async-trait = "0.1"
 phf = { version = "0.14", features = ["macros"] }
 # Wire-compatible BM25: same murmur3 + snowball crates the Qdrant server uses.

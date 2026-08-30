@@ -1,6 +1,6 @@
 {
   "name": "@veristamp/nqql",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Native Node.js bindings for the Qdrant Query Language parser and runtime.",
   "main": "index.js",
   "types": "index.d.ts",
@@ -56,10 +56,10 @@
     ]
   },
   "optionalDependencies": {
-    "@veristamp/nqql-linux-x64-gnu": "0.2.2",
-    "@veristamp/nqql-darwin-x64": "0.2.2",
-    "@veristamp/nqql-darwin-arm64": "0.2.2",
-    "@veristamp/nqql-win32-x64-msvc": "0.2.2"
+    "@veristamp/nqql-linux-x64-gnu": "0.3.0",
+    "@veristamp/nqql-darwin-x64": "0.3.0",
+    "@veristamp/nqql-darwin-arm64": "0.3.0",
+    "@veristamp/nqql-win32-x64-msvc": "0.3.0"
   },
   "devDependencies": {
     "@napi-rs/cli": "3.7.4"
