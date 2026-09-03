@@ -226,10 +226,11 @@ thread_local! {
     static SCRATCH_BUF: std::cell::RefCell<Vec<u8>> = std::cell::RefCell::new(Vec::with_capacity(8192));
 }
 
-/// Safely copies slice into a JS-owned Uint8Array, avoiding WASM memory reentrancy/relocation issues.
+/// Safely copies slice into a JS-owned Uint8Array without borrowing WASM
+/// memory. `Uint8Array::from` copies via the JS API, so there is no
+/// `Uint8Array::view` lifetime to invalidate on memory growth.
 fn safe_owned_uint8_array(bytes: &[u8]) -> js_sys::Uint8Array {
-    let view = unsafe { js_sys::Uint8Array::view(bytes) };
-    js_sys::Uint8Array::new(&view)
+    js_sys::Uint8Array::from(bytes)
 }
 
 #[wasm_bindgen(unchecked_return_type = "unknown[]")]
