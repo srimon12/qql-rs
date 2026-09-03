@@ -118,9 +118,12 @@ function generateSvg({
 
   <!-- Top bar -->
   <g transform="translate(80, 80)">
-    <!-- Brand mark -->
-    <rect x="0" y="0" width="36" height="36" rx="8" fill="#d96b43" fill-opacity="0.15" stroke="#d96b43" stroke-width="1.5"/>
-    <text x="18" y="24" font-family="DejaVu Serif, Georgia, serif" font-size="20" font-weight="bold" fill="#d96b43" text-anchor="middle">Q</text>
+    <!-- Veristamp mark: ring, double-slit V -->
+    <mask id="vslit"><rect width="32" height="32" fill="#fff"/><line x1="23.54" y1="9.02" x2="16" y2="22.59" stroke="#000" stroke-width="1.6"/></mask>
+    <g transform="scale(1.125)">
+    <circle cx="16" cy="16" r="12.64" fill="none" stroke="#b04930" stroke-width="2.56"/>
+    <path fill="#f4efe6" mask="url(#vslit)" d="M6.698 9.998 L16 26.741 L25.302 9.998 L21.777 8.04 L16 18.439 L10.223 8.04 Z"/>
+    </g>
     <text x="48" y="25" font-family="DejaVu Serif, Georgia, serif" font-size="24" font-weight="700" fill="#f5f4ed" letter-spacing="-0.5">QQL</text>
     <text x="108" y="24" font-family="DejaVu Sans, Arial, sans-serif" font-size="13" font-weight="500" fill="#78716c" letter-spacing="0.5">/ ${escapeXml(SITE.org)}</text>
     
