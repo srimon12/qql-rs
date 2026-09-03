@@ -260,11 +260,23 @@ impl fmt::Display for QqlError {
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for QqlError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl core::error::Error for QqlError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         self.source
             .as_ref()
-            .map(|s| s.as_ref() as &(dyn std::error::Error + 'static))
+            .map(|s| s.as_ref() as &(dyn core::error::Error + 'static))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_core_error_impl() {
+        let err = QqlError::syntax("unexpected token", 0);
+        let dyn_err: &dyn core::error::Error = &err;
+        assert!(dyn_err.source().is_none());
+        assert!(!dyn_err.to_string().is_empty());
     }
 }

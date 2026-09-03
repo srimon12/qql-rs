@@ -125,21 +125,20 @@ impl Table {
     }
 
     fn compute_alignments(&self) -> Vec<Alignment> {
-        self.columns
-            .iter()
-            .enumerate()
-            .map(|(column_index, _)| {
-                let has_value = self
-                    .rows
-                    .iter()
-                    .map(|row| &row[column_index])
-                    .any(|cell| !cell.value.is_empty());
-                let all_numbers = self
-                    .rows
-                    .iter()
-                    .map(|row| &row[column_index])
-                    .filter(|cell| !cell.value.is_empty())
-                    .all(|cell| cell.alignment == Alignment::Right);
+        (0..self.columns.len())
+            .map(|col_idx| {
+                let mut has_value = false;
+                let mut all_numbers = true;
+                for row in &self.rows {
+                    let cell = &row[col_idx];
+                    if !cell.value.is_empty() {
+                        has_value = true;
+                        if cell.alignment != Alignment::Right {
+                            all_numbers = false;
+                            break;
+                        }
+                    }
+                }
                 if has_value && all_numbers {
                     Alignment::Right
                 } else {
@@ -680,5 +679,20 @@ mod tests {
         assert!(columns.iter().any(|column| column.label == "payload.score"));
         assert_eq!(query_cell(hit, column("payload.id")).value, "external-id");
         assert_eq!(query_cell(hit, column("payload.score")).value, "10");
+    }
+
+    #[test]
+    fn compute_alignments_distinguishes_numeric_and_text_columns() {
+        let mut table = Table::new(vec!["name".to_string(), "count".to_string()]);
+        table.add_cells(vec![
+            Cell::from_json(Some(&serde_json::json!("alice"))),
+            Cell::from_json(Some(&serde_json::json!(42))),
+        ]);
+        table.add_cells(vec![
+            Cell::from_json(Some(&serde_json::json!("bob"))),
+            Cell::from_json(Some(&serde_json::json!(100))),
+        ]);
+        let alignments = table.compute_alignments();
+        assert_eq!(alignments, vec![Alignment::Left, Alignment::Right]);
     }
 }

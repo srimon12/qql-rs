@@ -129,11 +129,8 @@ impl RestQdrant {
             .with_url(url_buf.clone())
         })?;
         if !status.is_success() {
-            let detail = if text.len() > 4096 {
-                &text[..4096]
-            } else {
-                &text
-            };
+            let limit = text.floor_char_boundary(4096);
+            let detail = &text[..limit];
             return Err(QqlError::backend(
                 "QQL-BACKEND-HTTP",
                 format!("Qdrant returned {status}: {detail}"),

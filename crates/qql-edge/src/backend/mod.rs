@@ -188,6 +188,10 @@ impl EdgeQdrant {
             .write()
             .await
             .insert(name.to_string(), Arc::clone(&shard));
+        {
+            let mut opening = self.opening.lock().await;
+            opening.remove(name);
+        }
         Ok(shard)
     }
 
@@ -785,6 +789,10 @@ impl QdrantOps for EdgeQdrant {
             let mut shards = self.shards.write().await;
             shards.remove(name)
         };
+        {
+            let mut opening = self.opening.lock().await;
+            opening.remove(name);
+        }
         if let Some(shard) = shard {
             tokio::task::spawn_blocking(move || drop(shard))
                 .await
