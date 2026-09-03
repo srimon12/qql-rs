@@ -20,6 +20,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::fmt::Write;
 
 /// Parse `source` and render it in canonical QQL form.
 pub fn format(source: &str) -> Result<String, QqlError> {
@@ -48,21 +49,18 @@ pub fn format_stmt(statement: &Stmt) -> String {
         Stmt::Scroll(statement) => {
             let mut out = format!("SCROLL FROM {}", render_name(&statement.collection));
             if let Some(filter) = &statement.filter {
-                out.push_str(&format!(" WHERE {}", render_filter(filter)));
+                let _ = write!(out, " WHERE {}", render_filter(filter));
             }
             if let Some(after) = &statement.after {
-                out.push_str(&format!(" AFTER {}", render_point_id(after)));
+                let _ = write!(out, " AFTER {}", render_point_id(after));
             }
             if let Some(key) = &statement.shard_key {
-                out.push_str(&format!(" SHARD '{}'", escape_string(key)));
+                let _ = write!(out, " SHARD '{}'", escape_string(key));
             }
             if let Some(selector) = &statement.with_vector {
-                out.push_str(&format!(
-                    " WITH VECTOR {}",
-                    render_vector_selector(selector)
-                ));
+                let _ = write!(out, " WITH VECTOR {}", render_vector_selector(selector));
             }
-            out.push_str(&format!(" LIMIT {}", statement.limit));
+            let _ = write!(out, " LIMIT {}", statement.limit);
             out
         }
         Stmt::Upsert(statement) => {
@@ -76,7 +74,7 @@ pub fn format_stmt(statement: &Stmt) -> String {
                 out.push_str(&render_point(point));
             }
             if let Some(embedding) = &statement.embedding {
-                out.push_str(&format!(" USING {}", render_embedding_spec(embedding)));
+                let _ = write!(out, " USING {}", render_embedding_spec(embedding));
             }
             if !statement.embed.is_empty() {
                 out.push_str(" EMBED ");
@@ -88,7 +86,7 @@ pub fn format_stmt(statement: &Stmt) -> String {
                 }
             }
             if let Some(key) = &statement.shard_key {
-                out.push_str(&format!(" SHARD '{}'", escape_string(key)));
+                let _ = write!(out, " SHARD '{}'", escape_string(key));
             }
             out
         }
@@ -97,7 +95,7 @@ pub fn format_stmt(statement: &Stmt) -> String {
             let mode = render_collection_mode(&statement.mode);
             let mut out = format!("CREATE COLLECTION {}", render_name(&statement.collection));
             if !mode.is_empty() && (!has_vectors || statement.vectors.is_empty()) {
-                out.push_str(&format!(" {}", mode));
+                let _ = write!(out, " {}", mode);
             }
             if has_vectors {
                 out.push_str(" (");
@@ -129,7 +127,7 @@ pub fn format_stmt(statement: &Stmt) -> String {
                     .iter()
                     .map(|(key, value)| format!("{} = {}", render_name(key), render_value(value)))
                     .collect();
-                out.push_str(&format!(" WITH ({})", options.join(", ")));
+                let _ = write!(out, " WITH ({})", options.join(", "));
             }
             out
         }
@@ -152,7 +150,7 @@ pub fn format_stmt(statement: &Stmt) -> String {
                 options.push(format!("replication_factor = {}", value));
             }
             if !options.is_empty() {
-                out.push_str(&format!(" WITH ({})", options.join(", ")));
+                let _ = write!(out, " WITH ({})", options.join(", "));
             }
             out
         }
@@ -185,7 +183,7 @@ pub fn format_stmt(statement: &Stmt) -> String {
                 .collect();
             let mut out = format!("SET QUOTA ({})", config.join(", "));
             if let Some(wait) = stmt.wait {
-                out.push_str(&format!(" WAIT {}", wait));
+                let _ = write!(out, " WAIT {}", wait);
             }
             out
         }
@@ -196,7 +194,7 @@ pub fn format_stmt(statement: &Stmt) -> String {
                 render_point_selector(&statement.selector)
             );
             if let Some(key) = &statement.shard_key {
-                out.push_str(&format!(" SHARD '{}'", escape_string(key)));
+                let _ = write!(out, " SHARD '{}'", escape_string(key));
             }
             out
         }
@@ -207,7 +205,7 @@ pub fn format_stmt(statement: &Stmt) -> String {
                 render_point_selector(&statement.selector)
             );
             if let Some(key) = &statement.shard_key {
-                out.push_str(&format!(" SHARD '{}'", escape_string(key)));
+                let _ = write!(out, " SHARD '{}'", escape_string(key));
             }
             out
         }
@@ -220,7 +218,7 @@ pub fn format_stmt(statement: &Stmt) -> String {
                 render_point_selector(&statement.selector)
             );
             if let Some(key) = &statement.shard_key {
-                out.push_str(&format!(" SHARD '{}'", escape_string(key)));
+                let _ = write!(out, " SHARD '{}'", escape_string(key));
             }
             out
         }
@@ -237,22 +235,23 @@ pub fn format_stmt(statement: &Stmt) -> String {
                 render_point_selector(&statement.selector)
             );
             if let Some(key) = &statement.shard_key {
-                out.push_str(&format!(" SHARD '{}'", escape_string(key)));
+                let _ = write!(out, " SHARD '{}'", escape_string(key));
             }
             out
         }
         Stmt::UpdateVector(statement) => {
             let mut out = format!("UPDATE {} SET VECTOR", render_name(&statement.collection));
             if let Some(name) = &statement.vector_name {
-                out.push_str(&format!(" {}", render_name(name)));
+                let _ = write!(out, " {}", render_name(name));
             }
-            out.push_str(&format!(
+            let _ = write!(
+                out,
                 " = {} WHERE id = {}",
                 render_vector_value(&statement.vector),
                 render_point_id(&statement.point_id)
-            ));
+            );
             if let Some(key) = &statement.shard_key {
-                out.push_str(&format!(" SHARD '{}'", escape_string(key)));
+                let _ = write!(out, " SHARD '{}'", escape_string(key));
             }
             out
         }
@@ -269,7 +268,7 @@ pub fn format_stmt(statement: &Stmt) -> String {
                 render_point_selector(&statement.selector)
             );
             if let Some(key) = &statement.shard_key {
-                out.push_str(&format!(" SHARD '{}'", escape_string(key)));
+                let _ = write!(out, " SHARD '{}'", escape_string(key));
             }
             out
         }
@@ -281,13 +280,13 @@ pub fn format_stmt(statement: &Stmt) -> String {
                 QueryCollection::Inherited => "COUNT FROM".into(),
             };
             if let Some(filter) = &statement.filter {
-                out.push_str(&format!(" WHERE {}", render_filter(filter)));
+                let _ = write!(out, " WHERE {}", render_filter(filter));
             }
             if let Some(key) = &statement.shard_key {
-                out.push_str(&format!(" SHARD '{}'", escape_string(key)));
+                let _ = write!(out, " SHARD '{}'", escape_string(key));
             }
             if let Some(exact) = statement.exact {
-                out.push_str(&format!(" WITH (exact = {})", exact));
+                let _ = write!(out, " WITH (exact = {})", exact);
             }
             out
         }
@@ -304,7 +303,7 @@ fn render_query_body(query: &QueryStmt) -> String {
             if i > 0 {
                 out.push_str(", ");
             }
-            out.push_str(&format!("{} AS (", render_name(&cte.name)));
+            let _ = write!(out, "{} AS (", render_name(&cte.name));
             // CTE bodies inherit the enclosing `ctes` list in the AST; a CTE
             // cannot declare its own WITH clause, so render it without one.
             out.push_str(&render_query_body_inner(&cte.query));
@@ -322,7 +321,7 @@ fn render_query_body_inner(query: &QueryStmt) -> String {
     let mut out = String::from("QUERY ");
     out.push_str(&render_query_expr(&query.expression));
     if let QueryCollection::Explicit(collection) = &query.collection {
-        out.push_str(&format!(" FROM {}", render_name(collection)));
+        let _ = write!(out, " FROM {}", render_name(collection));
     }
     let tail = render_query_tail(query);
     if !tail.is_empty() {
@@ -363,10 +362,10 @@ fn render_query_tail(query: &QueryStmt) -> String {
     if let Some(group) = &query.group {
         let mut clause = format!("GROUP BY {}", render_name(&group.field));
         if let Some(size) = group.size {
-            clause.push_str(&format!(" SIZE {}", size));
+            let _ = write!(clause, " SIZE {}", size);
         }
         if let Some(lookup) = &group.lookup {
-            clause.push_str(&format!(" LOOKUP FROM {}", render_name(lookup)));
+            let _ = write!(clause, " LOOKUP FROM {}", render_name(lookup));
         }
         parts.push(clause);
     }
@@ -423,20 +422,18 @@ fn render_query_expr(expression: &QueryExpr) -> String {
                     .join(", ")
             );
             if !negative.is_empty() {
-                out.push_str(&format!(
+                let _ = write!(
+                    out,
                     " NEGATIVE ({})",
                     negative
                         .iter()
                         .map(render_recommend_input)
                         .collect::<Vec<_>>()
                         .join(", ")
-                ));
+                );
             }
             if let Some(strategy) = strategy {
-                out.push_str(&format!(
-                    " STRATEGY {}",
-                    render_recommend_strategy(*strategy)
-                ));
+                let _ = write!(out, " STRATEGY {}", render_recommend_strategy(*strategy));
             }
             out
         }
@@ -480,7 +477,7 @@ fn render_query_expr(expression: &QueryExpr) -> String {
                     .iter()
                     .map(|(key, value)| format!("{} = {}", render_name(key), render_value(value)))
                     .collect();
-                out.push_str(&format!(" DEFAULTS ({})", entries.join(", ")));
+                let _ = write!(out, " DEFAULTS ({})", entries.join(", "));
             }
             out
         }
@@ -518,15 +515,15 @@ fn render_query_expr(expression: &QueryExpr) -> String {
         } => {
             let mut out = format!("HYBRID TEXT '{}'", escape_string(text));
             if let Some(model) = model {
-                out.push_str(&format!(" MODEL '{}'", escape_string(model)));
+                let _ = write!(out, " MODEL '{}'", escape_string(model));
             }
             if let Some(vector) = dense_vector {
-                out.push_str(&format!(" DENSE {}", render_name(vector)));
+                let _ = write!(out, " DENSE {}", render_name(vector));
             }
             if let Some(vector) = sparse_vector {
-                out.push_str(&format!(" SPARSE {}", render_name(vector)));
+                let _ = write!(out, " SPARSE {}", render_name(vector));
             }
-            out.push_str(&format!(" FUSION {}", render_fusion_method(*fusion)));
+            let _ = write!(out, " FUSION {}", render_fusion_method(*fusion));
             out
         }
         QueryExpr::Rerank { input, model, .. } => format!(
@@ -546,7 +543,7 @@ fn render_query_expr(expression: &QueryExpr) -> String {
                 escape_string(model)
             );
             if let Some(field) = field {
-                out.push_str(&format!(" ON FIELD {}", render_name(field)));
+                let _ = write!(out, " ON FIELD {}", render_name(field));
             }
             out
         }
@@ -586,15 +583,15 @@ fn render_prefetch(prefetch: &Prefetch) -> String {
         PrefetchSource::Query(query) => render_query_body_inner(query),
     };
     if let Some(filter) = &prefetch.filter {
-        out.push_str(&format!(" WHERE {}", render_filter(filter)));
+        let _ = write!(out, " WHERE {}", render_filter(filter));
     }
     if let Some(score) = prefetch.score_threshold {
-        out.push_str(&format!(" SCORE THRESHOLD {}", render_f64(score)));
+        let _ = write!(out, " SCORE THRESHOLD {}", render_f64(score));
     }
     if let Some(lookup) = &prefetch.lookup {
-        out.push_str(&format!(" LOOKUP FROM {}", render_name(&lookup.collection)));
+        let _ = write!(out, " LOOKUP FROM {}", render_name(&lookup.collection));
         if let Some(vector) = &lookup.vector {
-            out.push_str(&format!(" VECTOR {}", render_name(vector)));
+            let _ = write!(out, " VECTOR {}", render_name(vector));
         }
     }
     out
@@ -608,14 +605,14 @@ fn render_query_input(input: &QueryInput, allow_bare: bool) -> String {
         QueryInput::Text { text, model } => {
             let mut out = format!("TEXT '{}'", escape_string(text));
             if let Some(model) = model {
-                out.push_str(&format!(" MODEL '{}'", escape_string(model)));
+                let _ = write!(out, " MODEL '{}'", escape_string(model));
             }
             out
         }
         QueryInput::Image { source, model } => {
             let mut out = format!("IMAGE '{}'", escape_string(source));
             if let Some(model) = model {
-                out.push_str(&format!(" MODEL '{}'", escape_string(model)));
+                let _ = write!(out, " MODEL '{}'", escape_string(model));
             }
             out
         }
@@ -923,14 +920,15 @@ fn render_filter_predicate(filter: &FilterExpr) -> String {
                 render_geo_ring(exterior)
             );
             if !interiors.is_empty() {
-                out.push_str(&format!(
+                let _ = write!(
+                    out,
                     ", interiors: [{}]",
                     interiors
                         .iter()
                         .map(|ring| format!("[{}]", render_geo_ring(ring)))
                         .collect::<Vec<_>>()
                         .join(", ")
-                ));
+                );
             }
             out.push('}');
             out
@@ -1009,7 +1007,7 @@ fn render_formula_min(formula: &FormulaExpr, min_precedence: u8) -> String {
                 render_formula_min(right, 3)
             );
             if let Some(default) = by_zero_default {
-                out.push_str(&format!(" [DEFAULT = {}]", render_f64(*default)));
+                let _ = write!(out, " [DEFAULT = {}]", render_f64(*default));
             }
             out
         }
@@ -1040,13 +1038,13 @@ fn render_formula_min(formula: &FormulaExpr, min_precedence: u8) -> String {
             let mut out = format!("{}(", kind.to_ascii_uppercase());
             out.push_str(&render_formula_min(x, 0));
             if let Some(target) = target {
-                out.push_str(&format!(", TARGET = {}", render_formula_min(target, 0)));
+                let _ = write!(out, ", TARGET = {}", render_formula_min(target, 0));
             }
             if let Some(scale) = scale {
-                out.push_str(&format!(", SCALE = {}", render_f64(*scale)));
+                let _ = write!(out, ", SCALE = {}", render_f64(*scale));
             }
             if let Some(midpoint) = midpoint {
-                out.push_str(&format!(", MIDPOINT = {}", render_f64(*midpoint)));
+                let _ = write!(out, ", MIDPOINT = {}", render_f64(*midpoint));
             }
             out.push(')');
             out
@@ -1092,27 +1090,27 @@ fn render_collection_config(config: &CollectionConfig) -> String {
     let mut out = String::new();
     if let Some(hnsw) = &config.hnsw {
         if let Some(body) = render_hnsw_block(hnsw) {
-            out.push_str(&format!(" WITH HNSW ({})", body));
+            let _ = write!(out, " WITH HNSW ({})", body);
         }
     }
     if let Some(vectors) = &config.vectors {
         if let Some(body) = render_vectors_options(vectors) {
-            out.push_str(&format!(" WITH VECTOR ({})", body));
+            let _ = write!(out, " WITH VECTOR ({})", body);
         }
     }
     if let Some(optimizers) = &config.optimizers {
         if let Some(body) = render_optimizers_block(optimizers) {
-            out.push_str(&format!(" WITH OPTIMIZERS ({})", body));
+            let _ = write!(out, " WITH OPTIMIZERS ({})", body);
         }
     }
     if let Some(params) = &config.params {
         if let Some(body) = render_params_block(params) {
-            out.push_str(&format!(" WITH PARAMS ({})", body));
+            let _ = write!(out, " WITH PARAMS ({})", body);
         }
     }
     if let Some(quantization) = &config.quantization {
         if let Some(body) = render_quantization_block(quantization) {
-            out.push_str(&format!(" WITH QUANTIZATION ({})", body));
+            let _ = write!(out, " WITH QUANTIZATION ({})", body);
         }
     }
     if let Some(update) = &config.quantization_update {
@@ -1125,7 +1123,7 @@ fn render_collection_config(config: &CollectionConfig) -> String {
         } else if config.quantization.is_none() {
             if let Some(config) = &update.config {
                 if let Some(body) = render_quantization_block(config) {
-                    out.push_str(&format!(" WITH QUANTIZATION ({})", body));
+                    let _ = write!(out, " WITH QUANTIZATION ({})", body);
                 }
             }
         }
@@ -1145,10 +1143,10 @@ fn render_collection_mode(mode: &CollectionMode) -> String {
         } => {
             let mut out = String::from("HYBRID");
             if let Some(vector) = dense_vector {
-                out.push_str(&format!(" DENSE VECTOR {}", render_name(vector)));
+                let _ = write!(out, " DENSE VECTOR {}", render_name(vector));
             }
             if let Some(vector) = sparse_vector {
-                out.push_str(&format!(" SPARSE VECTOR {}", render_name(vector)));
+                let _ = write!(out, " SPARSE VECTOR {}", render_name(vector));
             }
             out
         }
@@ -1165,25 +1163,26 @@ fn render_vector_def(vector: &VectorDef) -> String {
     );
     if let Some(hnsw) = &vector.hnsw {
         if let Some(body) = render_hnsw_block(hnsw) {
-            out.push_str(&format!(" WITH HNSW ({})", body));
+            let _ = write!(out, " WITH HNSW ({})", body);
         }
     }
     if let Some(quantization) = &vector.quantization {
         if let Some(body) = render_quantization_block(quantization) {
-            out.push_str(&format!(" WITH QUANTIZATION ({})", body));
+            let _ = write!(out, " WITH QUANTIZATION ({})", body);
         }
     }
     if let Some(multivector) = &vector.multivector {
-        out.push_str(&format!(
+        let _ = write!(
+            out,
             " WITH MULTIVECTOR (comparator = '{}')",
             match multivector.comparator {
                 MultivectorComparator::MaxSim => "max_sim",
             }
-        ));
+        );
     }
     if let Some(vectors) = &vector.vectors {
         if let Some(body) = render_vectors_options(vectors) {
-            out.push_str(&format!(" WITH VECTOR ({})", body));
+            let _ = write!(out, " WITH VECTOR ({})", body);
         }
     }
     out
@@ -1231,7 +1230,7 @@ fn render_sparse_vector_def(vector: &SparseVectorDef) -> String {
         }
     }
     if !options.is_empty() {
-        out.push_str(&format!(" WITH SPARSE ({})", options.join(", ")));
+        let _ = write!(out, " WITH SPARSE ({})", options.join(", "));
     }
     out
 }
@@ -1622,25 +1621,25 @@ fn render_embed_directive(directive: &EmbedDirective) -> String {
         EmbedKind::Dense { model } => {
             out.push_str("DENSE");
             if let Some(model) = model {
-                out.push_str(&format!(" MODEL '{}'", escape_string(model)));
+                let _ = write!(out, " MODEL '{}'", escape_string(model));
             }
         }
         EmbedKind::Sparse { model } => {
             out.push_str("SPARSE");
             if let Some(model) = model {
-                out.push_str(&format!(" MODEL '{}'", escape_string(model)));
+                let _ = write!(out, " MODEL '{}'", escape_string(model));
             }
         }
         EmbedKind::Multi { model } => {
             out.push_str("MULTI");
             if let Some(model) = model {
-                out.push_str(&format!(" MODEL '{}'", escape_string(model)));
+                let _ = write!(out, " MODEL '{}'", escape_string(model));
             }
         }
         EmbedKind::Image { model } => {
             out.push_str("IMAGE");
             if let Some(model) = model {
-                out.push_str(&format!(" MODEL '{}'", escape_string(model)));
+                let _ = write!(out, " MODEL '{}'", escape_string(model));
             }
         }
     }

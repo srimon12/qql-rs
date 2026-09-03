@@ -43,23 +43,11 @@ pub(crate) struct AstLowerer<'a> {
 pub const MAX_STATEMENTS: usize = 256;
 
 pub fn ascii_equal(s: &str, upper: &str) -> bool {
-    if s.len() != upper.len() {
-        return false;
-    }
-    s.as_bytes()
-        .iter()
-        .zip(upper.as_bytes().iter())
-        .all(|(a, b)| a.to_ascii_uppercase() == *b)
+    s.eq_ignore_ascii_case(upper)
 }
 
 pub fn ascii_equal_lower(s: &str, lower: &str) -> bool {
-    if s.len() != lower.len() {
-        return false;
-    }
-    s.as_bytes()
-        .iter()
-        .zip(lower.as_bytes().iter())
-        .all(|(a, b)| a.to_ascii_lowercase() == *b)
+    s.eq_ignore_ascii_case(lower)
 }
 
 pub fn is_contextual_field_name(kind: TokenKind) -> bool {
