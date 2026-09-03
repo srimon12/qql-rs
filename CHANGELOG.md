@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 🚀 Added
+- **SDK parity: `Stmt::new()` constructor in `nqql-edge`** — Node edge binding now exports a constructible `Stmt(query)` handle mirroring `nqql` and `qql-wasm`.
+- **SDK parity: `Stmt.compile_route()`** — exposed AST route compilation (`compile_route` / `compileRoute`) directly on `Stmt` across `pyqql`, `pyqql-edge`, `nqql`, and `nqql-edge` to avoid re-parsing queries.
+- **SDK parity: `Client.close()`** — added explicit connection release `close()` on remote clients in `pyqql` (with `__enter__`/`__exit__` context manager support) and `nqql`.
+- **SDK parity: full token spans** — `tokenize()` outputs across `pyqql`, `pyqql-edge`, `nqql`, and `nqql-edge` now provide `{ kind, text, pos, end, len }` matching `qql-wasm` and the lexer `Span` contract.
+- **SDK parity: version export** — `pyqql` exports `__version__` matching the cargo package version.
+- **CLI gRPC scheme detection** — `qql-cli` recognizes `grpc://` protocol URIs in addition to `:6334` port matching.
+
+### 🔄 Changed
+- **Decomposed runtime gRPC monoliths** — split `crates/qql-runtime/src/grpc.rs` (1,000 lines) and `crates/qql-runtime/src/grpc_route.rs` (4,000 lines) into focused domain submodules (`query`, `execute_write`, `execute_read`, `execute_ddl`, `ddl`, `filter`, `formula`, `responses`, `schema`, `points`, `ops`).
+- **Centralized workspace dependencies** — configured `[workspace.dependencies]` in root `Cargo.toml` (`serde`, `serde_json`, `tokio`, `phf`, `uuid`, `async-trait`, and internal crates) and converted member manifests to `.workspace = true`.
+- **Standard error trait** — implemented `core::error::Error` unconditionally on `QqlError` in `qql-core`, enabling standard error interoperability in `#![no_std]` contexts.
+
+### ⚡ Performance
+- **Zero-allocation query and plan explain formatting** — converted 110+ `output.push_str(&format!(...))` heap allocations across `qql-core::fmt` and `qql-core::explain` to in-place `write!` and `writeln!` via `core::fmt::Write`.
+- **Single-pass table alignment** — rewrote `qql-cli::table` column alignment to a single short-circuiting pass over rows.
+- **SIMD string case matching** — replaced manual byte-by-byte iterator loops in `qql-core` parser with standard `eq_ignore_ascii_case`.
+
+### 🐛 Fixed
+- **REST error UTF-8 boundary panic** — protected 4096-byte response truncation in `qql-runtime` using `floor_char_boundary(4096)`.
+- **Range filter bound inversion in CLI converter** — `convert_condition` in `qql-cli` now only emits `BETWEEN` for `(gte, lte)` pairs; strict inequalities emit explicit `> <` comparisons.
+- **Incomplete string escaping in CLI converter** — replaced naive quote replacement with `escape_qql_string`.
+- **Monotonic mutex growth in edge backend** — evicted collection keys from `self.opening` once cached or upon collection deletion in `qql-edge`.
+- **Python error type consistency** — aligned `pyqql-edge` `parse_json` to raise `SyntaxError` on malformed queries.
+
 ### 🔒 Security
 - **Website transitive deps (pnpm)** — `nanoid 3.3.16 → 3.3.18` (GHSA-2v37-7h3g-55p8, custom-generator infinite loop on size 0), `adm-zip 0.5.18 → 0.6.0` (GHSA-xcpc-8h2w-3j85, crafted-ZIP 4GB `Buffer.alloc`), `js-yaml 4.3.0 → 4.3.1` (GHSA-5p4m-2wfm-xmqj, quadratic `!!omap` CPU), `sharp 0.35.3/0.34.5 → 0.35.4` (libvips ≥8.18.6 for CVE-2026-33327/33328/35590/35591). Enforced via `website/pnpm-workspace.yaml` `overrides`; `pnpm audit` is clean.
 - **VS Code extension transitive deps (npm)** — `js-yaml 4.3.0 → 4.3.1`, `brace-expansion 5.0.8 → 5.0.9` (GHSA-rgw5-rvv9-x895), `qs 6.15.3 → 6.16.0` (GHSA-x5fp-wj9c-mxmx / GHSA-4mjr-xmp4-gh2g) via `package.json` `overrides`; `npm audit` is clean.
