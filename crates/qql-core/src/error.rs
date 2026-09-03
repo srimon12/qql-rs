@@ -274,7 +274,7 @@ mod tests {
 
     #[test]
     fn test_core_error_impl() {
-        let err = QqlError::syntax("unexpected token", "QQL-SYNTAX-001");
+        let err = QqlError::syntax("unexpected token", 0);
         let dyn_err: &dyn core::error::Error = &err;
         assert!(dyn_err.source().is_none());
         assert!(!dyn_err.to_string().is_empty());

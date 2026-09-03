@@ -684,8 +684,14 @@ mod tests {
     #[test]
     fn compute_alignments_distinguishes_numeric_and_text_columns() {
         let mut table = Table::new(vec!["name".to_string(), "count".to_string()]);
-        table.add_row(vec![Cell::left("alice"), Cell::right("42")]);
-        table.add_row(vec![Cell::left("bob"), Cell::right("100")]);
+        table.add_cells(vec![
+            Cell::from_json(Some(&serde_json::json!("alice"))),
+            Cell::from_json(Some(&serde_json::json!(42))),
+        ]);
+        table.add_cells(vec![
+            Cell::from_json(Some(&serde_json::json!("bob"))),
+            Cell::from_json(Some(&serde_json::json!(100))),
+        ]);
         let alignments = table.compute_alignments();
         assert_eq!(alignments, vec![Alignment::Left, Alignment::Right]);
     }
