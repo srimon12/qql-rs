@@ -1,2 +1,4 @@
 artifacts
 .dataset_cache/
+# Local demo output contains benchmark Q&A text (0600). Keep out of git.
+generated/

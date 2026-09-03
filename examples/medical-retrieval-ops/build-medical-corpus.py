@@ -3,9 +3,22 @@
 # dependencies = ["datasets>=4.4.0"]
 # ///
 
+"""Build the medical-retrieval-ops demo corpus from the public RAGCare-QA benchmark.
+
+The source dataset is a public synthetic benchmark (not real PHI), but rows
+still contain medical Q&A text. Generated files stay local under
+``generated/`` / ``.dataset_cache/`` with owner-only (0600) permissions, and
+stdout/stderr logs carry only file names and row counts — never question,
+answer, or context text.
+"""
+
 from __future__ import annotations
 
-import json, os, re, hashlib
+import hashlib
+import json
+import os
+import re
+import sys
 from pathlib import Path
 
 from datasets import load_dataset
@@ -27,6 +40,15 @@ SPECIALTY_TENANTS = {
     "neurology": "hospital-neuro", "psychiatry": "hospital-neuro",
     "emergency medicine": "hospital-emergency", "critical care": "hospital-emergency",
 }
+
+
+def write_restricted(path: Path, text: str) -> None:
+    """Write demo output with owner-only permissions (no PHI in git)."""
+    path.write_text(text, encoding="utf-8")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
 
 
 def canonical_whitespace(value: str | None) -> str:
@@ -88,7 +110,7 @@ def write_seed(rows: list[dict[str, str | int]]) -> None:
         docs = ",\n".join(render_doc(row) for row in chunk)
         statements.append(f"UPSERT INTO {COLLECTION} VALUES\n  {docs}")
     statements.append(f"SHOW COLLECTION {COLLECTION}")
-    SEED_PATH.write_text("\n\n".join(statements) + "\n", encoding="utf-8")
+    write_restricted(SEED_PATH, "\n\n".join(statements) + "\n")
 
 
 def write_benchmark(rows: list[dict[str, str | int]]) -> None:
@@ -96,7 +118,7 @@ def write_benchmark(rows: list[dict[str, str | int]]) -> None:
         {"id": row["id"], "question": row["question"], "specialty": row["specialty"], "limit": 5}
         for row in rows
     ]
-    BENCHMARK_PATH.write_text(json.dumps(items, indent=2) + "\n", encoding="utf-8")
+    write_restricted(BENCHMARK_PATH, json.dumps(items, indent=2) + "\n")
 
 
 def main() -> None:
@@ -108,8 +130,9 @@ def main() -> None:
     cache_file = CACHE_DIR / f"{cache_key}.json"
 
     if cache_file.exists():
+        # Log only the cache path, never row contents.
         print(f"Loading cached dataset from {cache_file}", file=sys.stderr)
-        rows_data = json.loads(cache_file.read_text())
+        rows_data = json.loads(cache_file.read_text(encoding="utf-8"))
         rows = [{k: v if k == "id" else str(v) for k, v in r.items()} for r in rows_data]
     else:
         print(f"Downloading dataset {DATASET_ID}...", file=sys.stderr)
@@ -125,8 +148,8 @@ def main() -> None:
         if not rows:
             raise SystemExit("No usable dataset rows were found")
 
-        # Save to cache
-        cache_file.write_text(json.dumps(rows, indent=2))
+        # Local cache only (0600); never log row contents.
+        write_restricted(cache_file, json.dumps(rows, indent=2) + "\n")
 
     write_seed(rows)
     write_benchmark(rows)
@@ -134,6 +157,9 @@ def main() -> None:
     main_row = next((r for r in rows if r["case_status"] == "active" and r["case_priority"] == "high"), rows[0])
     related_row = next((r for r in rows if r["id"] != main_row["id"] and r["specialty"] == main_row["specialty"]), rows[1] if len(rows) > 1 else rows[0])
 
+    # Eval manifest keeps only the fields the demo/benchmark actually need
+    # (ids, questions, routing labels). Full answers/context stay in the
+    # restricted seed file; they are never printed to stdout/stderr.
     manifest = {
         "dataset": DATASET_ID, "collection": COLLECTION, "row_count": len(rows),
         "chunk_size": CHUNK_SIZE, "benchmark_path": BENCHMARK_PATH.name,
@@ -142,20 +168,18 @@ def main() -> None:
                 "id": main_row["id"], "question": main_row["question"],
                 "specialty": main_row["specialty"], "tenant_id": main_row["tenant_id"],
                 "case_priority": main_row["case_priority"], "case_status": main_row["case_status"],
-                "answer": main_row["text_answer"],
             },
             "related": {
                 "id": related_row["id"], "question": related_row["question"],
                 "specialty": related_row["specialty"], "tenant_id": related_row["tenant_id"],
-                "answer": related_row["text_answer"],
             },
         },
     }
-    EVAL_PATH.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    write_restricted(EVAL_PATH, json.dumps(manifest, indent=2) + "\n")
+    # Machine-readable summary: file names + counts only, no Q&A text.
     print(json.dumps({"seed_path": SEED_PATH.name, "eval_path": EVAL_PATH.name,
                        "benchmark_path": BENCHMARK_PATH.name, "rows": len(rows)}))
 
 
 if __name__ == "__main__":
-    import sys
     main()

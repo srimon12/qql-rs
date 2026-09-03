@@ -94,8 +94,9 @@ def main():
     main = eval_data["main"]
     related = eval_data["related"]
     print(f"  Rows: {json.loads((GENERATED / 'eval.json').read_text())['row_count']}")
-    print(f"  Main Q: {main['question'][:80]}...")
-    print(f"  Related Q: {related['question'][:80]}...")
+    # Log opaque IDs + routing labels only; question text stays out of logs.
+    print(f"  Main id: {main['id']} specialty={main['specialty']}")
+    print(f"  Related id: {related['id']} specialty={related['specialty']}")
 
     # ── schema ──
     step("Schema")

@@ -236,9 +236,12 @@ where
         for (j, &b) in bytes.iter().enumerate() {
             buf[j] = b.to_ascii_lowercase();
         }
-        // SAFETY: We verified `raw.is_ascii()`, and `to_ascii_lowercase()`
-        // preserves valid ASCII (and thus valid UTF-8).
-        let lower = unsafe { std::str::from_utf8_unchecked(&buf[..len]) };
+        // Safe: `raw.is_ascii()` guarantees `bytes` is ASCII, and
+        // `to_ascii_lowercase()` maps ASCII to ASCII, so `buf[..len]`
+        // is valid UTF-8. Use the checked conversion so a logic error
+        // fails loudly instead of invoking undefined behavior.
+        let lower =
+            std::str::from_utf8(&buf[..len]).expect("ascii lowercasing preserves valid UTF-8");
         if !STOPWORDS.contains(lower) {
             let stemmed = STEMMER.stem(lower);
             f(&stemmed);
