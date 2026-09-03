@@ -76,6 +76,34 @@ impl PyStmt {
             serde_json::to_value(&self.inner).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
         pythonize::pythonize(py, &val).map_err(|e| PySyntaxError::new_err(e.to_string()))
     }
+
+    /// Compile this Stmt directly to its transport route without re-parsing.
+    fn compile_route<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let compiled = qql_plan::routing::compile_statement(&self.inner)
+            .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+        let (method, path, payload) = match compiled.route {
+            Some(route) => {
+                let payload = route.body_json().unwrap_or(serde_json::Value::Null);
+                (
+                    serde_json::Value::String(route.method.as_str().into()),
+                    serde_json::Value::String(route.path),
+                    payload,
+                )
+            }
+            None => (
+                serde_json::Value::Null,
+                serde_json::Value::Null,
+                serde_json::Value::Null,
+            ),
+        };
+        let result = serde_json::json!({
+            "stmt_type": compiled.stmt_type,
+            "method": method,
+            "path": path,
+            "payload": payload,
+        });
+        pythonize::pythonize(py, &result).map_err(|e| PySyntaxError::new_err(e.to_string()))
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -92,7 +120,7 @@ fn parse(input: &str) -> PyResult<Vec<PyStmt>> {
 /// objects for every node.
 #[pyfunction]
 fn parse_json(input: &str) -> PyResult<String> {
-    let statements = Parser::parse_all(input).map_err(qql_py_error)?;
+    let statements = Parser::parse_all(input).map_err(qql_py_syntax_error)?;
     serde_json::to_string(&statements)
         .map_err(|error| PyRuntimeError::new_err(format!("serialize AST: {error}")))
 }
@@ -137,12 +165,19 @@ fn tokenize<'py>(input: &str, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict
     let kind_key = pyo3::intern!(py, "kind");
     let text_key = pyo3::intern!(py, "text");
     let pos_key = pyo3::intern!(py, "pos");
+    let end_key = pyo3::intern!(py, "end");
+    let len_key = pyo3::intern!(py, "len");
     for token_result in lexer {
         let token = token_result.map_err(qql_py_syntax_error)?;
         let d = PyDict::new(py);
         d.set_item(kind_key, token.kind.as_str())?;
         d.set_item(text_key, token.text)?;
         d.set_item(pos_key, token.span.start as i64)?;
+        d.set_item(end_key, token.span.end as i64)?;
+        d.set_item(
+            len_key,
+            token.span.end.saturating_sub(token.span.start) as i64,
+        )?;
         result.push(d);
     }
     Ok(result)

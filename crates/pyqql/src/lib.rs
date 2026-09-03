@@ -56,6 +56,34 @@ impl PyStmt {
             serde_json::to_value(&self.inner).map_err(|e| PySyntaxError::new_err(e.to_string()))?;
         pythonize::pythonize(py, &val).map_err(|e| PySyntaxError::new_err(e.to_string()))
     }
+
+    /// Compile this Stmt directly to its transport route without re-parsing.
+    fn compile_route<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let compiled =
+            qql_plan::routing::compile_statement(&self.inner).map_err(qql_py_syntax_error)?;
+        let (method, path, payload) = match compiled.route {
+            Some(route) => {
+                let payload = route.body_json().unwrap_or(serde_json::Value::Null);
+                (
+                    serde_json::Value::String(route.method.as_str().into()),
+                    serde_json::Value::String(route.path),
+                    payload,
+                )
+            }
+            None => (
+                serde_json::Value::Null,
+                serde_json::Value::Null,
+                serde_json::Value::Null,
+            ),
+        };
+        let result = serde_json::json!({
+            "stmt_type": compiled.stmt_type,
+            "method": method,
+            "path": path,
+            "payload": payload,
+        });
+        pythonize::pythonize(py, &result).map_err(|e| PySyntaxError::new_err(e.to_string()))
+    }
 }
 
 /// Parse a QQL source into a list of Stmt objects.
@@ -114,12 +142,19 @@ fn tokenize<'py>(input: &str, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict
     let kind_key = pyo3::intern!(py, "kind");
     let text_key = pyo3::intern!(py, "text");
     let pos_key = pyo3::intern!(py, "pos");
+    let end_key = pyo3::intern!(py, "end");
+    let len_key = pyo3::intern!(py, "len");
     for token_result in lexer {
         let token = token_result.map_err(qql_py_syntax_error)?;
         let d = PyDict::new(py);
         d.set_item(kind_key, token.kind.as_str())?;
         d.set_item(text_key, token.text)?;
         d.set_item(pos_key, token.span.start as i64)?;
+        d.set_item(end_key, token.span.end as i64)?;
+        d.set_item(
+            len_key,
+            token.span.end.saturating_sub(token.span.start) as i64,
+        )?;
         result.push(d);
     }
     Ok(result)
@@ -190,6 +225,26 @@ impl PyClient {
     #[getter]
     fn route_affinity(&self) -> Option<String> {
         self.route_affinity.clone()
+    }
+
+    /// Close the client and release underlying connections.
+    fn close(&self) -> PyResult<()> {
+        Python::attach(|py| py.detach(|| self.runtime.block_on(self.inner.close())))
+            .map_err(qql_py_error)
+    }
+
+    fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __exit__(
+        &self,
+        _ty: &Bound<'_, PyAny>,
+        _value: &Bound<'_, PyAny>,
+        _traceback: &Bound<'_, PyAny>,
+    ) -> PyResult<bool> {
+        self.close()?;
+        Ok(false)
     }
 
     /// Execute a QQL query string, a pre-parsed Stmt, or a list of either.
@@ -518,6 +573,7 @@ fn pyqql(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(inject_filter, m)?)?;
     m.add_function(wrap_pyfunction!(tokenize, m)?)?;
     m.add_function(wrap_pyfunction!(compile_query, m)?)?;
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }
 
