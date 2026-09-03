@@ -134,7 +134,7 @@ execution with `QQL-EDGE-UNSUPPORTED-SHARD` — see
 | `parseJson(query)` | Raw AST JSON string (avoids V8 object allocation) |
 | `isValid(query)` | Boolean parse check |
 | `injectFilter(query, field, op, value)` | Return a filtered statement |
-| `tokenize(query)` | Token list `{kind, text, pos}` |
+| `tokenize(query)` | Token list `{kind, text, pos, end, len}` |
 | `compileQuery(query)` | Non-executing route |
 | `explain(query)` / `explainStmt(stmt)` | Plan rendering |
 | `listEmbeddingModels()` | Catalog of loadable ONNX models |

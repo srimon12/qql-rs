@@ -5,6 +5,7 @@ export class Stmt {
   toObject(): unknown;
   toJson(): string;
   toJSON(): string;
+  compileRoute(): CompiledRoute;
   /** QQL `SHARD '…'` routing key (request-level). Prefer the clause in QQL. */
   shardKey?: string | null;
 }
@@ -98,6 +99,7 @@ export class Client {
   compile(query: string): CompiledRoute;
   /** Qdrant 1.19+ read affinity key set at construction; `null` when unset. */
   readonly routeAffinity: string | null;
+  close(): Promise<void>;
 }
 
 /** Parse one statement or a semicolon-delimited script into a stable list. */
@@ -113,7 +115,7 @@ export function injectFilter(
 ): unknown;
 export function tokenize(
   query: string,
-): Array<{ kind: string; text: string; pos: number }>;
+): Array<{ kind: string; text: string; pos: number; end: number; len: number }>;
 export function compileQuery(query: string): CompiledRoute;
 export function explain(query: string): string;
 export function explainStmt(stmt: Stmt): string;
