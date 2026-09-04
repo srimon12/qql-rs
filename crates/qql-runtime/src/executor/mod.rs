@@ -14,19 +14,31 @@ use crate::embedder::Embedder;
 use crate::executor::dml::query::extract_search_hits;
 
 pub use qql_embed::resolve::{DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME};
+/// Collection vector name reserved for multivector (ColBERT) rerank vectors.
 pub const RERANK_VECTOR_NAME: &str = "colbert";
+/// Dense model used when a default embedder is required and none is configured.
 pub const DENSE_MODEL_DEFAULT: &str = "sentence-transformers/all-minilm-l6-v2";
+/// Sparse model id used when a default sparse embedder is required.
 pub const SPARSE_MODEL_DEFAULT: &str = "qdrant/bm25";
+/// Cross-encoder model used when `CROSS RERANK` runs without an explicit model.
 pub const RERANK_MODEL_DEFAULT: &str = "answerdotai/answerai-colbert-small-v1";
+/// Fallback dense vector dimension when no embedder is configured (all-minilm-l6-v2).
 pub const DENSE_VECTOR_SIZE: u64 = 384;
+/// Fallback per-token multivector dimension (ColBERT-small) when none is configured.
 pub const RERANK_VECTOR_SIZE: u64 = 96;
+/// Default inference mode (`local` fastembed; `remote` uses HTTP endpoints).
 pub const INFERENCE_MODE_DEFAULT: &str = "local";
 
+/// Single-statement execution outcome: status, operation label, message, and data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecResponse {
+    /// Whether the statement succeeded.
     pub ok: bool,
+    /// Operation label (e.g. `QUERY`, `UPSERT`, `PARSE`) for this result.
     pub operation: String,
+    /// Human-readable summary or error text.
     pub message: String,
+    /// JSON payload (search hits, raw result, or counts), when the operation returns data.
     pub data: Option<serde_json::Value>,
 }
 
@@ -34,9 +46,13 @@ pub struct ExecResponse {
 /// returns this shape regardless of input type (string / Stmt / array).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionReport {
+    /// Whether every statement succeeded (`failed == 0`).
     pub ok: bool,
+    /// One `ExecResponse` per statement, in execution order.
     pub results: Vec<ExecResponse>,
+    /// Number of successful statements.
     pub succeeded: usize,
+    /// Number of failed statements.
     pub failed: usize,
 }
 
@@ -64,6 +80,7 @@ impl ExecutionReport {
         }
     }
 
+    /// A successful report with no results (empty script).
     pub fn empty() -> Self {
         Self {
             ok: true,
@@ -88,11 +105,16 @@ pub enum OnError {
 
 use qql_plan::{statement_batch_key, BatchKey};
 
+/// Normalized search hit returned inside `ExecResponse` data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchHit {
+    /// Point ID rendered as a string (`num` or `uuid`).
     pub id: String,
+    /// Similarity or rerank score.
     pub score: f32,
+    /// Payload text extracted for text-centric results, when present.
     pub text: Option<String>,
+    /// Point payload when requested via `WITH PAYLOAD`.
     pub payload: Option<HashMap<String, serde_json::Value>>,
     /// Source collection. Populated by cross-collection operations (e.g.
     /// CROSS RERANK) so results are unambiguous when multiple collections
@@ -101,9 +123,12 @@ pub struct SearchHit {
     pub collection: Option<String>,
 }
 
+/// Grouped query result: one group key with its ordered hits.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GroupedSearchResult {
+    /// Group key value as returned by Qdrant (JSON-typed).
     pub group_id: serde_json::Value,
+    /// Search hits in this group, in backend order.
     pub hits: Vec<SearchHit>,
 }
 
@@ -124,6 +149,8 @@ fn serialize_hits(hits: &[SearchHit]) -> Result<serde_json::Value, QqlError> {
     })
 }
 
+/// The QQL executor: prepare (schema `USING` resolution + embeddings) → `plan()`
+/// → batch classification → dispatch over a `QdrantOps` backend.
 pub struct Executor {
     pub(crate) client: Box<dyn QdrantOps>,
     pub(crate) config: Option<QqlConfig>,
@@ -144,6 +171,7 @@ impl Executor {
         ))
     }
 
+    /// Creates an executor backed by Qdrant's gRPC API.
     #[cfg(feature = "grpc")]
     pub fn grpc(url: &str, api_key: Option<String>) -> Result<Self, QqlError> {
         Ok(Self::new(
@@ -152,6 +180,7 @@ impl Executor {
         ))
     }
 
+    /// Creates an executor around a custom `QdrantOps` backend with optional config.
     pub fn new(client: Box<dyn QdrantOps>, config: Option<QqlConfig>) -> Self {
         Executor {
             client,
@@ -160,6 +189,7 @@ impl Executor {
         }
     }
 
+    /// Like `new`, but with a pre-built embedder (e.g. `FastEmbedder` or `HttpEmbedder`).
     pub fn with_embedder(
         client: Box<dyn QdrantOps>,
         config: Option<QqlConfig>,
@@ -172,10 +202,12 @@ impl Executor {
         }
     }
 
+    /// Borrow the underlying backend ops (alias of `client`).
     pub fn ops(&self) -> &dyn QdrantOps {
         self.client.as_ref()
     }
 
+    /// Explain a single QQL query string without executing it.
     pub fn explain(query: &str) -> Result<String, QqlError> {
         qql_core::explain::explain(query)
     }
@@ -185,12 +217,14 @@ impl Executor {
         qql_core::explain::explain_all(query)
     }
 
+    /// Explain an already-parsed statement.
     pub fn explain_node(stmt: &Stmt) -> Result<String, QqlError> {
         Ok(qql_core::explain::explain_node(stmt))
     }
 
     // --- explain_stmt removed --- moved to qql_core::explain
 
+    /// Borrow the underlying backend `QdrantOps` implementation.
     pub fn client(&self) -> &dyn QdrantOps {
         self.client.as_ref()
     }
@@ -201,14 +235,17 @@ impl Executor {
         self.client.close().await
     }
 
+    /// Borrow the configured embedder, if any.
     pub fn embedder(&self) -> Option<&Arc<dyn Embedder>> {
         self.embedder.as_ref()
     }
 
+    /// Borrow the executor config, if any.
     pub fn config(&self) -> Option<&QqlConfig> {
         self.config.as_ref()
     }
 
+    /// Configured request timeout in seconds, or `None` when disabled (`0`).
     pub fn request_timeout(&self) -> Option<u64> {
         self.config.as_ref().and_then(|c| {
             if c.request_timeout > 0 {
@@ -273,6 +310,8 @@ impl Executor {
         self.execute(&bound, on_error).await
     }
 
+    /// Execute one parsed statement under the configured timeout, returning a
+    /// single response.
     pub async fn execute_node(&self, stmt: Stmt) -> Result<ExecResponse, QqlError> {
         if let Some(secs) = self.request_timeout() {
             match tokio::time::timeout(
@@ -338,6 +377,8 @@ impl Executor {
         Ok(ExecutionReport::from_results(results))
     }
 
+    /// Execute already-parsed statements through the unified batch path,
+    /// honoring the configured request timeout.
     pub async fn execute_batch_nodes(
         &self,
         stmts: Vec<Stmt>,

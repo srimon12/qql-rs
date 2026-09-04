@@ -46,3 +46,6 @@ protoc-bin-vendored = "3"
 
 [dev-dependencies]
 jsonschema = "0.26"
+
+[lints]
+workspace = true

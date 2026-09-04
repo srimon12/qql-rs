@@ -3,15 +3,23 @@ use crate::error::QqlError;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+/// QQL literal value: string, number, bool, `null`, object, or list.
 #[derive(Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Value {
+    /// String literal (`'…'`).
     Str(String),
+    /// Integer literal.
     Int(i64),
+    /// Floating-point literal.
     Float(f64),
+    /// Boolean literal (`true` / `false`).
     Bool(bool),
+    /// `null` literal.
     Null,
+    /// `{key: value, …}` object; entries keep their written order.
     Dict(Vec<(String, Value)>),
+    /// `[v1, v2, …]` list literal (also dense vector input).
     List(Vec<Value>),
 }
 
@@ -30,6 +38,7 @@ impl core::fmt::Debug for Value {
 }
 
 impl Value {
+    /// Case-insensitive lookup of a `Dict` entry; `None` for non-dict values.
     pub fn dict_get(&self, key: &str) -> Option<&Value> {
         match self {
             Self::Dict(items) => items
@@ -40,6 +49,8 @@ impl Value {
         }
     }
 
+    /// Set a key in a `Dict` (case-insensitive replace) or append it; no-op on
+    /// other variants.
     pub fn dict_set(&mut self, key: String, value: Value) {
         if let Self::Dict(items) = self {
             if let Some((_, current)) = items
@@ -53,6 +64,7 @@ impl Value {
         }
     }
 
+    /// Borrow the string contents, if this value is a `Str`.
     pub fn as_str(&self) -> Option<&str> {
         match self {
             Self::Str(value) => Some(value),
@@ -60,6 +72,9 @@ impl Value {
         }
     }
 
+    /// Convert a JSON value into a QQL `Value`.
+    ///
+    /// Integer numbers stay `Int`; any other number becomes `Float`.
     #[cfg(feature = "json")]
     pub fn from_json(value: serde_json::Value) -> Result<Self, QqlError> {
         match value {
@@ -90,6 +105,7 @@ impl Value {
         }
     }
 
+    /// Convert the value into JSON, failing on non-finite floats.
     #[cfg(feature = "json")]
     pub fn to_json(&self) -> Result<serde_json::Value, QqlError> {
         match self {

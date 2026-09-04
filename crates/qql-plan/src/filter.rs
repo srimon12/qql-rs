@@ -1,6 +1,7 @@
 use crate::types::*;
 use qql_core::ast::{ComparisonOp, FilterExpr, GeoPoint, PointIdPredicate, Value};
 
+/// Lower a typed AST filter into the transport-neutral `FilterExpression` IR.
 pub fn lower_filter(filter: &FilterExpr) -> FilterExpression {
     match filter {
         FilterExpr::And { operands } => FilterExpression::Compound(FilterCompound {
@@ -269,6 +270,7 @@ fn values_count_params(op: ComparisonOp, count: u64) -> ValuesCountParams {
     }
 }
 
+/// Convert a dynamic AST `Value` into its JSON wire representation.
 pub fn value_to_json(value: &Value) -> serde_json::Value {
     match value {
         Value::Str(s) => serde_json::Value::String(s.clone()),
@@ -288,6 +290,7 @@ pub fn value_to_json(value: &Value) -> serde_json::Value {
     }
 }
 
+/// Map an AST point ID to its typed plan representation.
 pub fn point_id_req_typed(id: &qql_core::ast::PointId) -> crate::semantic::PlanPointId {
     crate::semantic::PlanPointId::from(id)
 }

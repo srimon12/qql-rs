@@ -8,6 +8,7 @@ use super::client::GrpcQdrant;
 use super::error::grpc_error;
 
 impl GrpcQdrant {
+    /// `CreateShardKey` RPC: add a custom shard key to a collection.
     pub async fn create_shard_key(
         &self,
         req: qdrant::CreateShardKeyRequest,
@@ -19,6 +20,7 @@ impl GrpcQdrant {
             .map_err(|e| grpc_error("create_shard_key", e))
     }
 
+    /// `DeleteShardKey` RPC: remove a custom shard key from a collection.
     pub async fn delete_shard_key(
         &self,
         req: qdrant::DeleteShardKeyRequest,
@@ -30,6 +32,7 @@ impl GrpcQdrant {
             .map_err(|e| grpc_error("delete_shard_key", e))
     }
 
+    /// `ListShardKeys` RPC: enumerate a collection's custom shard keys.
     pub async fn list_shard_keys(
         &self,
         req: qdrant::ListShardKeysRequest,
@@ -41,6 +44,7 @@ impl GrpcQdrant {
             .map_err(|e| grpc_error("list_shard_keys", e))
     }
 
+    /// `List` RPC returning the raw collections response.
     pub async fn list_collections_raw(&self) -> Result<qdrant::ListCollectionsResponse, QqlError> {
         let mut cl = self.collections_client();
         cl.list(tonic::Request::new(qdrant::ListCollectionsRequest {}))
@@ -49,6 +53,7 @@ impl GrpcQdrant {
             .map_err(|e| grpc_error("list_collections", e))
     }
 
+    /// `Get` RPC returning the raw collection-info response.
     pub async fn collection_info_raw(
         &self,
         collection: String,

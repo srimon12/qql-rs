@@ -3,6 +3,7 @@
 //
 // Run `cargo run -p qql-grammar-gen -- generate` after changing the source.
 
+/// Keyword lookup table: uppercase keyword text to token kind.
 pub static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {
     "ABS" => TokenKind::Abs,
     "ACORN" => TokenKind::Acorn,

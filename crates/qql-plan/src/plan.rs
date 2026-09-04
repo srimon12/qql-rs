@@ -36,102 +36,171 @@ pub fn parse_and_plan(source: &str) -> Result<Vec<Stmt>, QqlError> {
 /// type, not from raw AST.
 #[derive(Debug, Clone)]
 pub enum PlannedOperation {
+    /// Vector or text search: `POST /collections/{c}/points/query`.
     Query {
+        /// Target collection name.
         collection: String,
+        /// Lowered `/points/query` request body.
         request: QueryRequest,
     },
+    /// Grouped search: `POST /collections/{c}/points/query/groups`.
     QueryGroups {
+        /// Target collection name.
         collection: String,
+        /// Lowered `/points/query/groups` request body.
         request: QueryGroupsRequest,
     },
+    /// Point-ID retrieval: `POST /collections/{c}/points`.
     GetPoints {
+        /// Target collection name.
         collection: String,
+        /// Lowered `/points` request body.
         request: PointsRequest,
     },
+    /// Keyset pagination: `POST /collections/{c}/points/scroll`.
     Scroll {
+        /// Target collection name.
         collection: String,
+        /// Lowered `/points/scroll` request body.
         request: ScrollRequest,
     },
+    /// Count matching points: `POST /collections/{c}/points/count`.
     Count {
+        /// Target collection name.
         collection: String,
+        /// Lowered `/points/count` request body.
         request: CountRequest,
     },
     /// In-database facet aggregation (`POST /collections/{collection}/facet`).
     Facet {
+        /// Target collection name.
         collection: String,
+        /// Lowered `/points/facet` request body.
         request: FacetRequest,
     },
+    /// Point upsert: `PUT /collections/{c}/points`.
     Upsert {
+        /// Target collection name.
         collection: String,
+        /// Lowered `/points` upsert request body.
         request: UpsertRequest,
+        /// Force `wait=true` on the route when embedding resolution runs.
         wait: bool,
     },
+    /// Point deletion by ID or filter: `POST /collections/{c}/points/delete`.
     Delete {
+        /// Target collection name.
         collection: String,
+        /// Lowered `/points/delete` request body.
         request: DeleteRequest,
     },
+    /// Merge payload keys: `POST /collections/{c}/points/payload`.
     UpdatePayload {
+        /// Target collection name.
         collection: String,
+        /// Lowered `/points/payload` request body.
         request: UpdatePayloadRequest,
     },
+    /// Drop all payload: `POST /collections/{c}/points/payload/clear`.
     ClearPayload {
+        /// Target collection name.
         collection: String,
+        /// Lowered `/points/payload/clear` request body.
         request: ClearPayloadRequest,
     },
+    /// Remove payload keys: `POST /collections/{c}/points/payload/delete`.
     DeletePayload {
+        /// Target collection name.
         collection: String,
+        /// Lowered `/points/payload/delete` request body.
         request: DeletePayloadRequest,
     },
+    /// Replace point vectors: `PUT /collections/{c}/points/vectors`.
     UpdateVectors {
+        /// Target collection name.
         collection: String,
+        /// Lowered `/points/vectors` request body.
         request: UpdateVectorRequest,
     },
+    /// Remove named vectors: `POST /collections/{c}/points/vectors/delete`.
     DeleteVectors {
+        /// Target collection name.
         collection: String,
+        /// Lowered `/points/vectors/delete` request body.
         request: DeleteVectorRequest,
     },
+    /// Create a collection: `PUT /collections/{c}`.
     CreateCollection {
+        /// Target collection name.
         collection: String,
+        /// Lowered create-collection request body.
         request: CreateCollectionRequest,
     },
+    /// Alter a collection: `PATCH /collections/{c}`.
     UpdateCollection {
+        /// Target collection name.
         collection: String,
+        /// Lowered alter-collection request body.
         request: UpdateCollectionRequest,
     },
+    /// Drop a collection: `DELETE /collections/{c}`.
     DropCollection {
+        /// Target collection name.
         collection: String,
     },
+    /// Create a payload index: `PUT /collections/{c}/index`.
     CreateIndex {
+        /// Target collection name.
         collection: String,
+        /// Lowered create-index request body.
         request: CreateIndexRequest,
     },
+    /// Drop a payload index: `DELETE /collections/{c}/index/{field}`.
     DropIndex {
+        /// Target collection name.
         collection: String,
+        /// Payload field whose index is dropped.
         field: String,
     },
+    /// Create a custom shard key: `PUT /collections/{c}/shards`.
     CreateShardKey {
+        /// Target collection name.
         collection: String,
+        /// Lowered create-shard-key request body.
         request: CreateShardKeyRequest,
     },
+    /// Drop a custom shard key: `POST /collections/{c}/shards/delete`.
     DropShardKey {
+        /// Target collection name.
         collection: String,
+        /// Lowered drop-shard-key request body.
         request: DropShardKeyRequest,
     },
+    /// List custom shard keys: `GET /collections/{c}/shards`.
     ListShardKeys {
+        /// Target collection name.
         collection: String,
     },
+    /// List collections: `GET /collections`.
     ListCollections,
+    /// Inspect a collection: `GET /collections/{c}`.
     GetCollection {
+        /// Target collection name.
         collection: String,
     },
     /// Client-side cross-encoder: run candidate queries, score pairs, reorder.
     CrossRerank {
+        /// Target collection name.
         collection: String,
+        /// Natural-language query text for the cross-encoder.
         query: String,
+        /// Cross-encoder model identifier.
         model: String,
         /// Payload field holding document text for pair scoring.
         field: String,
+        /// Final result limit after reranking.
         limit: u64,
+        /// Result offset after reranking.
         offset: u64,
         /// Candidate ANN stages already planned as normal queries.
         candidates: Vec<(String, QueryRequest)>,
@@ -140,6 +209,7 @@ pub enum PlannedOperation {
     GetQuotas,
     /// Replace the cluster-wide resource quota configuration.
     SetQuotas {
+        /// Replacement quota config; omitted keys become uncapped defaults.
         request: SetQuotaRequest,
     },
 }
@@ -303,9 +373,14 @@ impl PlannedOperation {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Classification family for executor batch sharing: which statements may run
+/// together as one contiguous same-collection batch.
 pub enum BatchFamily {
+    /// Joins a query batch (`/points/query/batch`).
     Query,
+    /// Joins a mutation batch (`UpdateOperations` / `UpdateBatchPoints`).
     Mutation,
+    /// Always executed alone.
     Single,
 }
 
@@ -315,7 +390,9 @@ pub enum BatchFamily {
 /// batches before flushing to the backend.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BatchKey {
+    /// Query batch for the named collection.
     Query(String),
+    /// Mutation batch for the named collection.
     Mutation(String),
 }
 
@@ -1028,7 +1105,10 @@ fn ensure_payload_field(query: &mut qql_core::ast::QueryStmt, field: &str) {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RestProjectionError {
     /// Client-side only (e.g. CROSS RERANK). Compile still exposes `stmt_type`.
-    ClientSideOnly { stmt_type: &'static str },
+    ClientSideOnly {
+        /// Statement type name used in error messages.
+        stmt_type: &'static str,
+    },
 }
 
 /// Serialize a plan struct to JSON for the REST body.
@@ -1307,6 +1387,10 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
         }
     })
 }
+/// Plan a statement and project it to a REST route in one call.
+///
+/// Returns `QQL-REST-CLIENT-SIDE` for client-side operations (e.g. CROSS
+/// RERANK) that have no single Qdrant REST endpoint.
 pub fn try_route(statement: &Stmt) -> Result<Route, QqlError> {
     let op = plan(statement)?;
     to_rest_route(&op).map_err(|err| match err {

@@ -38,3 +38,6 @@ serde_json = { workspace = true }
 rustyline = "14"
 mimalloc = "0.1"
 unicode-width = "0.2"
+
+[lints]
+workspace = true

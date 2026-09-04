@@ -23,3 +23,6 @@ rust-stemmers = { package = "qdrant-rust-stemmers", version = "1.2" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true

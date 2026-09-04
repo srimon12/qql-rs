@@ -104,6 +104,7 @@ fn apply_query_shard(query: &mut QueryStmt, key: Option<&str>) {
     }
 }
 
+/// Injects a typed field comparison into a statement (CTEs and prefetches included), fail-closed.
 pub fn inject_filter(
     statement: &mut Stmt,
     field: &str,

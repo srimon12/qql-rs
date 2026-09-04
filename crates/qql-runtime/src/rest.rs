@@ -14,6 +14,8 @@ use crate::client::{CollectionInfo, QdrantOps};
 /// HTTP header for Qdrant 1.19 read affinity (`X-Qdrant-Route-Affinity`).
 pub const ROUTE_AFFINITY_HEADER: &str = "X-Qdrant-Route-Affinity";
 
+/// REST transport adapter implementing the `QdrantOps` backend contract over
+/// the Qdrant HTTP API.
 #[derive(Clone)]
 pub struct RestQdrant {
     base_url: String,
@@ -64,6 +66,8 @@ impl RestQdrant {
         })
     }
 
+    /// Construct from a pre-built [`Client`] (the panic-free fallback used by
+    /// [`Self::new`]).
     pub fn with_client(base_url: String, api_key: Option<String>, client: Client) -> Self {
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
@@ -83,6 +87,7 @@ impl RestQdrant {
         self
     }
 
+    /// Current read-affinity value, if one is set.
     pub fn route_affinity(&self) -> Option<&str> {
         self.route_affinity.as_deref()
     }

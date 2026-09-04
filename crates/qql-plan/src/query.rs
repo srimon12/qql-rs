@@ -6,14 +6,17 @@ use qql_core::ast::{
 };
 use qql_core::error::QqlError;
 
+/// Convert an AST vector value into its transport-neutral plan representation.
 pub fn lower_vector_value(value: &VectorValue) -> PlanVectorValue {
     PlanVectorValue::from(value)
 }
 
+/// Convert an AST query input (point, vector, text, image) into its plan form.
 pub fn lower_query_input(input: &QueryInput) -> PlanQueryInput {
     PlanQueryInput::from(input)
 }
 
+/// Lower a formula expression tree to the OpenAPI `Expression` JSON shape.
 pub fn lower_formula_expr(expr: &qql_core::ast::FormulaExpr) -> serde_json::Value {
     match expr {
         qql_core::ast::FormulaExpr::Constant { value } => serde_json::json!(value),
@@ -175,6 +178,7 @@ pub fn lower_formula_expr(expr: &qql_core::ast::FormulaExpr) -> serde_json::Valu
     }
 }
 
+/// Lower a `QueryExpr` to its wire `QueryVariant` representation.
 pub fn lower_query_expr(expr: &QueryExpr) -> Result<QueryVariant, QqlError> {
     Ok(match expr {
         QueryExpr::Nearest { input, mmr, .. } => QueryVariant::Nearest(NearestQuery {
@@ -320,10 +324,12 @@ pub fn lower_query_expr(expr: &QueryExpr) -> Result<QueryVariant, QqlError> {
     })
 }
 
+/// Lower a `PREFETCH` clause with no CTE context (inline query sources only).
 pub fn lower_prefetch(prefetch: &qql_core::ast::Prefetch) -> Result<PrefetchRequest, QqlError> {
     lower_prefetch_with_ctes(prefetch, &[])
 }
 
+/// Lower a `PREFETCH` clause, resolving `CTE` sources against `ctes`.
 pub fn lower_prefetch_with_ctes(
     prefetch: &qql_core::ast::Prefetch,
     ctes: &[qql_core::ast::Cte],
@@ -396,6 +402,7 @@ pub fn lower_prefetch_with_ctes(
     })
 }
 
+/// Lower a `QueryOutput` into payload/vector selection for wire bodies.
 pub fn lower_output_selector_public(
     output: &qql_core::ast::QueryOutput,
 ) -> (Option<PayloadSelectorReq>, Option<VectorSelectorReq>) {
@@ -428,6 +435,7 @@ fn lower_output_selector(
     (with_payload, with_vector)
 }
 
+/// Lower a full `QUERY` statement into the `/points/query` request body.
 pub fn lower_query_request(query: &QueryStmt) -> Result<QueryRequest, QqlError> {
     let (with_payload, with_vector) = lower_output_selector(&query.output);
     let (query_variant, using, prefetch) = build_query_with_prefetch(query)?;
@@ -455,6 +463,9 @@ pub fn lower_query_request(query: &QueryStmt) -> Result<QueryRequest, QqlError> 
     })
 }
 
+/// Lower a grouped `QUERY` statement into the `/points/query/groups` body.
+///
+/// User LIMIT and OFFSET fold into the wire `limit` + `group_offset` pair.
 pub fn lower_query_groups_request(query: &QueryStmt) -> Result<QueryGroupsRequest, QqlError> {
     let group = query
         .group

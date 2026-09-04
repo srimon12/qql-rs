@@ -20,3 +20,6 @@ default = []
 qql-core = { workspace = true, features = ["serde"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+[lints]
+workspace = true

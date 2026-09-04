@@ -39,6 +39,8 @@ use qql_plan::{
     UpdateCollectionRequest,
 };
 
+/// In-process backend: one `qdrant_edge` shard per collection under `base_path`,
+/// zero network. Batch methods fan out to individual routes (no native batch RPC).
 pub struct EdgeQdrant {
     base_path: PathBuf,
     on_disk_payload: bool,
@@ -70,6 +72,8 @@ impl std::fmt::Debug for EdgeQdrant {
 }
 
 impl EdgeQdrant {
+    /// Create an edge backend rooted at `base_path`; payloads persist on disk
+    /// unless `on_disk_payload` is false.
     pub fn new(base_path: impl Into<PathBuf>, on_disk_payload: bool) -> Self {
         Self {
             base_path: base_path.into(),

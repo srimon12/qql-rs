@@ -1,3 +1,6 @@
+//! Live end-to-end integration test for the REST and gRPC transports with an
+//! Ollama embedding endpoint. Requires a Qdrant on localhost:6333/6334 and
+//! Ollama on localhost:11434.
 use std::sync::Arc;
 
 use qql::embedder::HttpEmbedder;

@@ -448,7 +448,7 @@ fn render_rust_keywords(literals: &[String]) -> String {
     }
     let body = lines.join("\n");
     format!(
-        "{GENERATED_HEADER}pub static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {{\n{body}\n}};\n"
+        "{GENERATED_HEADER}/// Keyword lookup table: uppercase keyword text to token kind.\npub static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {{\n{body}\n}};\n"
     )
 }
 

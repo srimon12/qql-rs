@@ -1,3 +1,5 @@
+//! `qql` — Qdrant Query Language CLI: query exec, scripts, explain, REPL,
+//! REST→QQL conversion, collection dump, formatting, and edge configuration.
 use clap::Parser;
 use std::path::PathBuf;
 
