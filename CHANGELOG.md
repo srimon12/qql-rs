@@ -9,7 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-04
+
+### 📦 Packaging
+- **Workspace 0.3.1** — synchronized across all crates, PyPI (`pyqql` / `pyqql-edge`), npm (`@veristamp/nqql` / `@veristamp/nqql-edge` + platform packages), and the bundled editor WASM; `Cargo.lock` refreshed. `scripts/check_release.py` now drives this: `set <version>` / `bump major|minor|patch` rewrite every version site in one step, refresh the lockfile, and re-validate; check mode additionally validates root `[workspace.dependencies]` pins and `VERSION` ↔ workspace consistency.
+
 ### 🚀 Added
+- **Formula functions `MAX` / `MIN` / `ACOSH`** (QQL 1.6, Qdrant upstream API sync) — `MAX`/`MIN` fold n ≥ 1 operands and `ACOSH(x)` is unary; wired grammar → parser → typed AST → canonical formatter → plan lowering → gRPC protobuf. The edge backend fails closed (`QQL-EDGE-UNSUPPORTED-FORMULA-FUNCTION`).
+- **Vector-dimension cap** — `CREATE COLLECTION` rejects dimensions above 65536 at parse time with `QQL-PARSE-VECTOR-SIZE` (mirrors the Qdrant `VectorParams.size` maximum).
+- **Canonical-format conformance goldens** — `language/v1/fixtures/formatted/*.txt` join the conformance contract (40 files), verified natively and against the bundled editor WASM via corpus-driven extension tests.
+- **`qql` single-dependency re-exports** — `QqlError` / `ErrorKind` / `Span`, `Stmt` / `Parser` / `inject_filter` / `ComparisonOp` / `Value`, and the plan contract types (`PlannedOperation`, batch + DDL request types) are re-exported from `qql` (Rust API guidelines C-REEXPORT), with a compile-time test enforcing that a full `QdrantOps` impl and the parse → inject policy flow build from `qql::` paths alone.
 - **Native `FACET` statement** — first-class grammar, AST (`Stmt::Facet(Box<FacetStmt>)`), and planning (`PlannedOperation::Facet`) mapping to Qdrant's `POST /collections/{collection}/facet` aggregation endpoint. Supports `WHERE` filtering, `LIMIT`, `EXACT true` distributed counting, and `SHARD` partition routing. Validated across `qql-runtime`, `qql-edge`, `qql-wasm`, and `language/v1` conformance fixtures.
 - **Implicit vector array literals** — queries accept float array literals directly as `QUERY [0.1, 0.2, ...] FROM ...` without requiring the explicit `VECTOR` keyword prefix.
 - **Formula decay ISO datetime string parsing & variable auto-inference** — decay functions (`EXP_DECAY`, `GAUSS_DECAY`, `LIN_DECAY`) now accept standard ISO 8601 string literals `TARGET = "2024-01-01T00:00:00Z"` lowering to `FormulaExpr::Datetime`, and bare payload field names automatically infer `{"datetime_key": name}`.
@@ -22,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CLI gRPC scheme detection** — `qql-cli` recognizes `grpc://` protocol URIs in addition to `:6334` port matching.
 
 ### 🔄 Changed
+- **QQL language version 1.6** — additive minor per `language/v1/spec/versioning.md`; the conformance corpus grows to 40 valid files (276 statements), 59 invalid cases, 40 AST snapshots, and 40 canonical formats.
+- **`is_valid` is a full parse + plan gate** — `is_valid` / `analyze` in `pyqql`, `nqql`, and `qql-wasm` validate plan-level semantics through the shared `qql_plan::parse_and_plan` instead of syntax alone; binding READMEs document the tightened contract.
 - **Default `WITH PAYLOAD true`** — `lower_output_selector` now defaults to returning all payload attributes (`Some(PayloadSelectorReq::All(true))`) when `WITH PAYLOAD` is omitted, matching intuitive SQL retrieval semantics. Explicit `WITH PAYLOAD false` continues to omit payload fields.
 - **Decomposed runtime gRPC monoliths** — split `crates/qql-runtime/src/grpc.rs` (1,000 lines) and `crates/qql-runtime/src/grpc_route.rs` (4,000 lines) into focused domain submodules (`query`, `execute_write`, `execute_read`, `execute_ddl`, `ddl`, `filter`, `formula`, `responses`, `schema`, `points`, `ops`).
 - **Centralized workspace dependencies** — configured `[workspace.dependencies]` in root `Cargo.toml` (`serde`, `serde_json`, `tokio`, `phf`, `uuid`, `async-trait`, and internal crates) and converted member manifests to `.workspace = true`.
@@ -34,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SIMD string case matching** — replaced manual byte-by-byte iterator loops in `qql-core` parser with standard `eq_ignore_ascii_case`.
 
 ### 🐛 Fixed
+- **Lexer error-stream termination** — the `Lexer` iterator re-yielded non-advancing lex errors forever (inputs like `1.` or `1e+` hung `flatten()` consumers); the token stream now halts after the first error, and `qql-wasm` `analyze` handles errors explicitly instead of flattening.
 - **Formula boolean `MatchCondition` lowering** — single-value match conditions (e.g. `MATCH(is_superhost, true)`) now lower to `{"match": {"value": val}}` instead of `{"match": {"any": [...]}}`, avoiding HTTP 400 schema validation rejection from Qdrant.
 - **REST error UTF-8 boundary panic** — protected 4096-byte response truncation in `qql-runtime` using `floor_char_boundary(4096)`.
 - **Range filter bound inversion in CLI converter** — `convert_condition` in `qql-cli` now only emits `BETWEEN` for `(gte, lte)` pairs; strict inequalities emit explicit `> <` comparisons.
@@ -48,6 +60,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Invalid-pointer CodeQL (Rust)** — removed the repo's only two `unsafe` blocks: `qql-wasm` no longer uses `Uint8Array::view` (uses `Uint8Array::from` copy), `qql-embed` BM25 lowercasing uses checked `from_utf8().expect()` instead of `from_utf8_unchecked`.
 - **Playground XSS + open-redirect (CodeQL)** — `website/src/scripts/playground.ts` now validates `?ref=` with strict same-origin `isSafeDocsRef()` (`/docs` + reject `[\\<>"'`\s]` + `URL` origin/pathname check), sets the backlink via `setAttribute("href")`, and builds share URLs only from validated refs. Replaced `innerHTML` badge updates with `createElement`/`createTextNode`.
 - **Medical demo clear-text logging/storage (CodeQL)** — `build-medical-corpus.py` / `run-benchmark.py` / `run_demo.py` log only file names, counts, opaque IDs and hit flags (no question/answer/context text); all generated/cache writes go through owner-only `0600` helper; eval manifest drops unused `answer` fields. `generated/` is now git-ignored and untracked (`git rm --cached`); files stay local only.
+
+### 📚 Documentation
+- **Full public-API Rust docs** — ~1,500 doc comments across the six published crates (`qql`, `qql-core`, `qql-plan`, `qql-embed`, `qql-edge`, `qql-cli`): AST variants, plan IR, the `QdrantOps` extension contract, executor/config/transports, tokens, and errors; docs.rs landing pages for `qql` and `qql-core`. A `missing_docs` workspace lint scoped to exactly CI's `cargo doc -D warnings` gate makes the standard self-enforcing. Generated code (`qdrant.rs`, `qdrant_grpc.rs`, `keywords.generated.rs`) keeps its local allowances.
+- **Website and reference alignment to QQL 1.6** — formula reference (`MAX` / `MIN` / `ACOSH` + a clamping example validated by the docs pipeline), error-code tables (`QQL-PARSE-VECTOR-SIZE`, `QQL-PLAN-RECOMMEND-AVERAGE`, `QQL-EDGE-UNSUPPORTED-FORMULA-FUNCTION`), grammar/editors/language pages bumped to QQL 1.6.
 
 ## [0.3.0] - 2026-08-30
 
