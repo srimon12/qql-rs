@@ -12,8 +12,11 @@ const { heading, rows } = Astro.props;
     <h2 id="why-heading">{heading}</h2>
     <ul class="landing-why">
       {
-        rows.map((row) => (
+        rows.map((row, index) => (
           <li class="landing-why__row">
+            <span class="landing-why__num" aria-hidden="true">
+              {String(index + 1).padStart(2, "0")}
+            </span>
             <p class="landing-why__label">{row.label}</p>
             <p class="landing-why__body">{row.body}</p>
           </li>

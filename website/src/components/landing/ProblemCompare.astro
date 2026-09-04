@@ -14,13 +14,18 @@ interface Props {
 const { heading, sub, guideHref, guideLabel, hybridQql, tenantQql, filtersQql } =
   Astro.props;
 
+// ── Scenario 1: Hybrid Search (Dense + Sparse RRF) ─────────────────────────
+
 const restHybrid = `{
   "prefetch": [
     {
       "query": { "nearest": "dense_vec" },
       "using": "dense_vec",
       "filter": {
-        "must": [{ "key": "status", "match": { "value": "active" } }]
+        "must": [{
+          "key": "status",
+          "match": { "value": "active" }
+        }]
       },
       "limit": 100
     },
@@ -28,7 +33,10 @@ const restHybrid = `{
       "query": { "nearest": "bm25_vec" },
       "using": "bm25_vec",
       "filter": {
-        "must": [{ "key": "status", "match": { "value": "active" } }]
+        "must": [{
+          "key": "status",
+          "match": { "value": "active" }
+        }]
       },
       "limit": 100
     }
@@ -37,27 +45,35 @@ const restHybrid = `{
   "limit": 10
 }`;
 
-const pythonHybrid = `client.query_points(
+const pythonHybrid = `results = client.query_points(
     collection_name="docs",
     prefetch=[
         models.Prefetch(
-            query=models.NearestQuery(nearest="dense_vec"),
+            query=models.NearestQuery(
+                nearest="dense_vec"
+            ),
             using="dense_vec",
             filter=models.Filter(must=[
                 models.FieldCondition(
                     key="status",
-                    match=models.MatchValue(value="active"),
+                    match=models.MatchValue(
+                        value="active"
+                    ),
                 )
             ]),
             limit=100,
         ),
         models.Prefetch(
-            query=models.NearestQuery(nearest="bm25_vec"),
+            query=models.NearestQuery(
+                nearest="bm25_vec"
+            ),
             using="bm25_vec",
             filter=models.Filter(must=[
                 models.FieldCondition(
                     key="status",
-                    match=models.MatchValue(value="active"),
+                    match=models.MatchValue(
+                        value="active"
+                    ),
                 )
             ]),
             limit=100,
@@ -67,23 +83,102 @@ const pythonHybrid = `client.query_points(
     limit=10,
 )`;
 
+const tsHybrid = `const results = await client.query("docs", {
+  prefetch: [
+    {
+      query: { nearest: "dense_vec" },
+      using: "dense_vec",
+      filter: {
+        must: [
+          { key: "status", match: { value: "active" } },
+        ],
+      },
+      limit: 100,
+    },
+    {
+      query: { nearest: "bm25_vec" },
+      using: "bm25_vec",
+      filter: {
+        must: [
+          { key: "status", match: { value: "active" } },
+        ],
+      },
+      limit: 100,
+    },
+  ],
+  query: { fusion: "rrf" },
+  limit: 10,
+});`;
+
+const rustHybrid = `let response = client.query(
+    QueryPointsBuilder::new("docs")
+        .add_prefetch(
+            PrefetchQueryBuilder::default()
+                .query(Query::new_nearest("dense_vec"))
+                .using("dense_vec")
+                .filter(active_filter.clone())
+                .limit(100u64),
+        )
+        .add_prefetch(
+            PrefetchQueryBuilder::default()
+                .query(Query::new_nearest("bm25_vec"))
+                .using("bm25_vec")
+                .filter(active_filter)
+                .limit(100u64),
+        )
+        .query(Query::new_fusion(Fusion::Rrf))
+        .limit(10u64),
+).await?;`;
+
+const goHybrid = `res, err := client.Query(ctx, &qdrant.QueryPoints{
+    CollectionName: "docs",
+    Prefetch: []*qdrant.PrefetchQuery{
+        {
+            Query: qdrant.NewQueryNearest("dense_vec"),
+            Using: qdrant.Ptr("dense_vec"),
+            Filter: &qdrant.Filter{
+                Must: []*qdrant.Condition{
+                    qdrant.NewMatch("status", "active"),
+                },
+            },
+            Limit: qdrant.Ptr(uint64(100)),
+        },
+        {
+            Query: qdrant.NewQueryNearest("bm25_vec"),
+            Using: qdrant.Ptr("bm25_vec"),
+            Filter: &qdrant.Filter{
+                Must: []*qdrant.Condition{
+                    qdrant.NewMatch("status", "active"),
+                },
+            },
+            Limit: qdrant.Ptr(uint64(100)),
+        },
+    },
+    Query: qdrant.NewQueryFusion(qdrant.Fusion_RRF),
+    Limit: qdrant.Ptr(uint64(10)),
+})`;
+
+// ── Scenario 2: Tenant Shard + Filter ──────────────────────────────────────
+
 const restTenant = `{
-  "query": "<dense vector>",
+  "shard_key": "tenant-corp-99",
+  "query": { "nearest": "dense_vec" },
   "filter": {
     "must": [
-      { "key": "department", "match": { "value": "finance" } }
+      {
+        "key": "department",
+        "match": { "value": "finance" }
+      }
     ]
   },
   "limit": 5,
   "with_payload": true
-}
+}`;
 
-POST .../points/query?shard_key=tenant-corp-99`;
-
-const pythonTenant = `client.query_points(
+const pythonTenant = `results = client.query_points(
     collection_name="filings",
     shard_key_selector="tenant-corp-99",
-    query=dense_embedding_vector,
+    query=dense_vector,
     query_filter=models.Filter(
         must=[
             models.FieldCondition(
@@ -96,8 +191,50 @@ const pythonTenant = `client.query_points(
     with_payload=True,
 )`;
 
+const tsTenant = `const results = await client.query("filings", {
+  shardKey: "tenant-corp-99",
+  query: denseVector,
+  filter: {
+    must: [
+      { key: "department", match: { value: "finance" } },
+    ],
+  },
+  limit: 5,
+  withPayload: true,
+});`;
+
+const rustTenant = `let response = client.query(
+    QueryPointsBuilder::new("filings")
+        .shard_key_selector("tenant-corp-99")
+        .query(Query::new_nearest(dense_vector))
+        .filter(Filter::must([
+            Condition::matches("department", "finance"),
+        ]))
+        .limit(5u64)
+        .with_payload(true),
+).await?;`;
+
+const goTenant = `res, err := client.Query(ctx, &qdrant.QueryPoints{
+    CollectionName: "filings",
+    ShardKeySelector: &qdrant.ShardKeySelector{
+        ShardKeys: []*qdrant.ShardKey{
+            qdrant.NewShardKey("tenant-corp-99"),
+        },
+    },
+    Query: qdrant.NewQueryNearest(denseVector),
+    Filter: &qdrant.Filter{
+        Must: []*qdrant.Condition{
+            qdrant.NewMatch("department", "finance"),
+        },
+    },
+    Limit:       qdrant.Ptr(uint64(5)),
+    WithPayload: qdrant.NewWithPayload(true),
+})`;
+
+// ── Scenario 3: Boolean Filters ────────────────────────────────────────────
+
 const restFilters = `{
-  "query": "<dense vector>",
+  "query": { "nearest": "dense_vec" },
   "filter": {
     "must": [
       {
@@ -113,21 +250,23 @@ const restFilters = `{
   "limit": 20
 }`;
 
-const pythonFilters = `client.query_points(
+const pythonFilters = `results = client.query_points(
     collection_name="products",
-    query=product_query_vector,
+    query=product_vector,
     query_filter=models.Filter(
         must=[
-            models.Filter(should=[
-                models.FieldCondition(
-                    key="category",
-                    match=models.MatchValue(value="hardware"),
-                ),
-                models.FieldCondition(
-                    key="category",
-                    match=models.MatchValue(value="tools"),
-                ),
-            ]),
+            models.Filter(
+                should=[
+                    models.FieldCondition(
+                        key="category",
+                        match=models.MatchValue(value="hardware"),
+                    ),
+                    models.FieldCondition(
+                        key="category",
+                        match=models.MatchValue(value="tools"),
+                    ),
+                ]
+            ),
             models.FieldCondition(
                 key="price",
                 range=models.Range(lte=1200.0),
@@ -141,30 +280,135 @@ const pythonFilters = `client.query_points(
     limit=20,
 )`;
 
+const tsFilters = `const results = await client.query("products", {
+  query: productVector,
+  filter: {
+    must: [
+      {
+        should: [
+          { key: "category", match: { value: "hardware" } },
+          { key: "category", match: { value: "tools" } },
+        ],
+      },
+      { key: "price", range: { lte: 1200.0 } },
+      { key: "in_stock", match: { value: true } },
+    ],
+  },
+  limit: 20,
+});`;
+
+const rustFilters = `let filter = Filter::must([
+    Condition::should([
+        Condition::matches("category", "hardware"),
+        Condition::matches("category", "tools"),
+    ]),
+    Condition::range("price", Range {
+        lte: Some(1200.0),
+        ..Default::default()
+    }),
+    Condition::matches("in_stock", true),
+]);
+
+let response = client.query(
+    QueryPointsBuilder::new("products")
+        .query(Query::new_nearest(product_vector))
+        .filter(filter)
+        .limit(20u64),
+).await?;`;
+
+const goFilters = `res, err := client.Query(ctx, &qdrant.QueryPoints{
+    CollectionName: "products",
+    Query: qdrant.NewQueryNearest(productVector),
+    Filter: &qdrant.Filter{
+        Must: []*qdrant.Condition{
+            qdrant.NewFilterCondition(&qdrant.Filter{
+                Should: []*qdrant.Condition{
+                    qdrant.NewMatch("category", "hardware"),
+                    qdrant.NewMatch("category", "tools"),
+                },
+            }),
+            qdrant.NewRange("price", &qdrant.Range{
+                Lte: qdrant.Ptr(1200.0),
+            }),
+            qdrant.NewMatch("in_stock", true),
+        },
+    },
+    Limit: qdrant.Ptr(uint64(20)),
+})`;
+
+const FORMATS = [
+  { id: "rest", label: "REST JSON", lang: "json", badge: "HTTP REST API" },
+  { id: "python", label: "Python", lang: "python", badge: "qdrant-client" },
+  { id: "typescript", label: "TypeScript", lang: "typescript", badge: "@qdrant/js-client-rest" },
+  { id: "rust", label: "Rust", lang: "rust", badge: "qdrant-client crate" },
+  { id: "go", label: "Go", lang: "go", badge: "go-client/qdrant" },
+] as const;
+
+type FormatId = (typeof FORMATS)[number]["id"];
+
 const presets = [
   {
     id: "hybrid",
     title: "Hybrid RRF",
+    badge: "Dense + Sparse",
     qql: hybridQql,
     playgroundHref: `/playground/?q=${encodeURIComponent(hybridQql)}`,
-    rest: restHybrid,
-    python: pythonHybrid,
+    planTime: "0.8ms compile",
+    planSteps: [
+      { glyph: "↳", text: "Prefetch 1: dense_vec nearest (limit: 100)" },
+      { glyph: "↳", text: "Prefetch 2: bm25_vec sparse (limit: 100)" },
+      { glyph: "⚡", text: "Fusion: Reciprocal Rank Fusion (RRF)" },
+      { glyph: "✓", text: "Filter pushed down (status = 'active')" },
+    ],
+    codes: {
+      rest: restHybrid,
+      python: pythonHybrid,
+      typescript: tsHybrid,
+      rust: rustHybrid,
+      go: goHybrid,
+    },
   },
   {
     id: "tenant",
     title: "Shard + filter",
+    badge: "Multi-tenancy",
     qql: tenantQql,
     playgroundHref: `/playground/?q=${encodeURIComponent(tenantQql)}`,
-    rest: restTenant,
-    python: pythonTenant,
+    planTime: "0.6ms compile",
+    planSteps: [
+      { glyph: "↳", text: "Shard routing: 'tenant-corp-99' (direct partition)" },
+      { glyph: "↳", text: "Dense retrieval: nearest vector (limit: 5)" },
+      { glyph: "✓", text: "Tenant isolation: department = 'finance'" },
+      { glyph: "⚡", text: "Zero cross-shard network broadcast" },
+    ],
+    codes: {
+      rest: restTenant,
+      python: pythonTenant,
+      typescript: tsTenant,
+      rust: rustTenant,
+      go: goTenant,
+    },
   },
   {
     id: "filters",
     title: "Boolean filters",
+    badge: "Compound logic",
     qql: filtersQql,
     playgroundHref: `/playground/?q=${encodeURIComponent(filtersQql)}`,
-    rest: restFilters,
-    python: pythonFilters,
+    planTime: "0.7ms compile",
+    planSteps: [
+      { glyph: "↳", text: "Query vector: nearest candidates (limit: 20)" },
+      { glyph: "↳", text: "Should filter: category IN ('hardware', 'tools')" },
+      { glyph: "↳", text: "Range & match: price <= 1200.0 AND in_stock = true" },
+      { glyph: "⚡", text: "Optimized boolean filter tree lowered to Qdrant REST" },
+    ],
+    codes: {
+      rest: restFilters,
+      python: pythonFilters,
+      typescript: tsFilters,
+      rust: rustFilters,
+      go: goFilters,
+    },
   },
 ] as const;
 
@@ -179,7 +423,8 @@ const lines = (source: string) => source.trim().split("\n").length;
     </header>
 
     <div class="landing-compare" data-compare>
-      <div class="landing-compare__tabs" role="tablist" aria-label="Query examples">
+      {/* ── Scenario Tabs Header ── */}
+      <div class="landing-compare__tabs" role="tablist" aria-label="Query scenarios">
         {
           presets.map((preset, idx) => (
             <button
@@ -191,29 +436,45 @@ const lines = (source: string) => source.trim().split("\n").length;
               aria-controls={`compare-panel-${preset.id}`}
               data-preset={preset.id}
             >
-              {preset.title}
+              <span class="landing-compare__tab-title">{preset.title}</span>
+              <span class="landing-compare__tab-badge">{preset.badge}</span>
             </button>
           ))
         }
       </div>
 
+      {/* ── Format Switcher Toolbar ── */}
       <div class="landing-compare__toolbar">
-        <div class="landing-compare__modes" role="radiogroup" aria-label="Compare against">
-          <button type="button" class="is-active" data-format="rest" aria-pressed="true">
-            JSON
-          </button>
-          <button type="button" data-format="python" aria-pressed="false">
-            Python
-          </button>
+        <div class="landing-compare__modes" role="radiogroup" aria-label="Target language comparison">
+          {
+            FORMATS.map((f, idx) => (
+              <button
+                type="button"
+                class:list={[{ "is-active": idx === 0 }]}
+                data-format={f.id}
+                aria-pressed={idx === 0 ? "true" : "false"}
+              >
+                {f.label}
+              </button>
+            ))
+          }
         </div>
-        <p class="landing-compare__stat" data-stat>
-          {lines(presets[0].qql)} lines vs {lines(presets[0].rest)}
-        </p>
+
+        <div class="landing-compare__stats-badge" data-stat-container>
+          <span class="landing-compare__stat" data-stat>
+            {lines(presets[0].qql)} lines QQL vs {lines(presets[0].codes.rest)} lines REST JSON
+          </span>
+          <span class="landing-compare__reduction" data-reduction>
+            -{Math.round((1 - lines(presets[0].qql) / lines(presets[0].codes.rest)) * 100)}% lines
+          </span>
+        </div>
+
         <a class="landing-compare__try" data-play href={presets[0].playgroundHref}>
-          Open in playground
+          Open in playground →
         </a>
       </div>
 
+      {/* ── Scenario Panels ── */}
       {
         presets.map((preset, idx) => (
           <div
@@ -224,41 +485,106 @@ const lines = (source: string) => source.trim().split("\n").length;
             data-panel={preset.id}
             data-play={preset.playgroundHref}
             data-qql-lines={lines(preset.qql)}
-            data-rest-lines={lines(preset.rest)}
-            data-python-lines={lines(preset.python)}
+            data-rest-lines={lines(preset.codes.rest)}
+            data-python-lines={lines(preset.codes.python)}
+            data-typescript-lines={lines(preset.codes.typescript)}
+            data-rust-lines={lines(preset.codes.rust)}
+            data-go-lines={lines(preset.codes.go)}
             hidden={idx !== 0}
           >
-            <div class="landing-compare__split" data-split>
-              <div class="landing-compare__pane">
-                <header>
-                  <span>QQL</span>
-                  <span>{lines(preset.qql)} lines</span>
+            <div class="landing-compare__split">
+              {/* Left Pane: Declarative QQL + Compiled Plan */}
+              <div class="landing-compare__pane landing-compare__pane--qql">
+                <header class="landing-compare__pane-head">
+                  <div class="landing-compare__pane-title-group">
+                    <span class="landing-compare__tag-qql">QQL</span>
+                    <span class="landing-compare__pane-label">Universal SQL</span>
+                  </div>
+                  <div class="landing-compare__pane-meta">
+                    <span class="landing-compare__line-pill">{lines(preset.qql)} lines</span>
+                    <button
+                      type="button"
+                      class="landing-compare__copy-btn"
+                      data-copy-target={`qql-${preset.id}`}
+                      title="Copy QQL"
+                      aria-label="Copy QQL code"
+                    >
+                      <svg class="landing-copy-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                      <span class="landing-copy-feedback">Copied</span>
+                    </button>
+                  </div>
                 </header>
-                <Code code={preset.qql} lang="qql" frame="none" />
+
+                <div class="landing-compare__code-wrapper" id={`qql-${preset.id}`}>
+                  <Code code={preset.qql} lang="qql" frame="none" />
+                </div>
+
+                {/* ── Engine Plan Breakdown balancing the height ── */}
+                <div class="landing-compare__plan-box">
+                  <div class="landing-compare__plan-header">
+                    <span class="landing-compare__plan-title">Engine Plan Breakdown</span>
+                    <span class="landing-compare__plan-time">{preset.planTime}</span>
+                  </div>
+                  <ul class="landing-compare__plan-items">
+                    {
+                      preset.planSteps.map((step) => (
+                        <li class="landing-compare__plan-item">
+                          <span class="landing-compare__plan-glyph">{step.glyph}</span>
+                          <span class="landing-compare__plan-text">{step.text}</span>
+                        </li>
+                      ))
+                    }
+                  </ul>
+                </div>
+
+                <footer class="landing-compare__pane-foot landing-compare__pane-foot--success">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                  <span>1 declarative statement · Server-side fusion & planning</span>
+                </footer>
               </div>
 
-              <button
-                type="button"
-                class="landing-compare__handle"
-                data-split-handle
-                aria-label="Resize comparison"
-              ></button>
-
+              {/* Right Pane: Verbose Native Qdrant in Selected Language */}
               <div class="landing-compare__stack">
-                <div class="landing-compare__pane" data-raw="rest">
-                  <header>
-                    <span>REST JSON</span>
-                    <span>{lines(preset.rest)} lines</span>
-                  </header>
-                  <Code code={preset.rest} lang="json" frame="none" />
-                </div>
-                <div class="landing-compare__pane" data-raw="python" hidden>
-                  <header>
-                    <span>Python SDK</span>
-                    <span>{lines(preset.python)} lines</span>
-                  </header>
-                  <Code code={preset.python} lang="python" frame="none" />
-                </div>
+                {
+                  FORMATS.map((f, fIdx) => (
+                    <div
+                      class="landing-compare__pane landing-compare__pane--target"
+                      data-raw={f.id}
+                      hidden={fIdx !== 0}
+                    >
+                      <header class="landing-compare__pane-head">
+                        <div class="landing-compare__pane-title-group">
+                          <span class="landing-compare__tag-target">{f.label}</span>
+                          <span class="landing-compare__pane-badge">{f.badge}</span>
+                        </div>
+                        <div class="landing-compare__pane-meta">
+                          <span class="landing-compare__line-pill">
+                            {lines(preset.codes[f.id])} lines
+                          </span>
+                          <button
+                            type="button"
+                            class="landing-compare__copy-btn"
+                            data-copy-target={`raw-${preset.id}-${f.id}`}
+                            title={`Copy ${f.label} code`}
+                            aria-label={`Copy ${f.label} code`}
+                          >
+                            <svg class="landing-copy-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                            <span class="landing-copy-feedback">Copied</span>
+                          </button>
+                        </div>
+                      </header>
+
+                      <div class="landing-compare__code-wrapper landing-compare__code-wrapper--target" id={`raw-${preset.id}-${f.id}`}>
+                        <Code code={preset.codes[f.id]} lang={f.lang} frame="none" />
+                      </div>
+
+                      <footer class="landing-compare__pane-foot landing-compare__pane-foot--warn">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                        <span>Deeply nested model structures · Manual parameter binding</span>
+                      </footer>
+                    </div>
+                  ))
+                }
               </div>
             </div>
           </div>
@@ -279,22 +605,47 @@ const lines = (source: string) => source.trim().split("\n").length;
     const panels = [...root.querySelectorAll<HTMLElement>("[data-panel]")];
     const formatBtns = [...root.querySelectorAll<HTMLButtonElement>("[data-format]")];
     const stat = root.querySelector("[data-stat]");
+    const reduction = root.querySelector("[data-reduction]");
     const play = root.querySelector<HTMLAnchorElement>("[data-play]");
-    let format: "rest" | "python" = "rest";
+    const copyBtns = [...root.querySelectorAll<HTMLButtonElement>("[data-copy-target]")];
+
+    const formatLabels: Record<string, string> = {
+      rest: "REST JSON",
+      python: "Python SDK",
+      typescript: "TypeScript SDK",
+      rust: "Rust SDK",
+      go: "Go SDK",
+    };
+
+    let format = "rest";
 
     const activePanel = () => panels.find((panel) => !panel.hidden) ?? panels[0];
 
     const sync = () => {
       const panel = activePanel();
-      const qql = panel.dataset.qqlLines ?? "0";
-      const other = format === "rest" ? panel.dataset.restLines : panel.dataset.pythonLines;
-      if (stat) stat.textContent = `${qql} lines vs ${other}`;
-      if (play && panel.dataset.play) play.href = panel.dataset.play;
+      const qqlLines = Number(panel.dataset.qqlLines ?? "5");
+      const targetLinesAttr = `${format}Lines`;
+      const targetLines = Number(panel.dataset[targetLinesAttr] ?? "20");
+
+      if (stat) {
+        stat.textContent = `${qqlLines} lines QQL vs ${targetLines} lines ${formatLabels[format] ?? format.toUpperCase()}`;
+      }
+
+      if (reduction && targetLines > qqlLines) {
+        const pct = Math.round((1 - qqlLines / targetLines) * 100);
+        reduction.textContent = `-${pct}% lines`;
+      }
+
+      if (play && panel.dataset.play) {
+        play.href = panel.dataset.play;
+      }
+
       root.querySelectorAll<HTMLElement>("[data-raw]").forEach((pane) => {
         pane.hidden = pane.dataset.raw !== format;
       });
     };
 
+    // Preset / Scenario Tab Click
     tabs.forEach((tab) => {
       tab.addEventListener("click", () => {
         const id = tab.dataset.preset;
@@ -310,10 +661,11 @@ const lines = (source: string) => source.trim().split("\n").length;
       });
     });
 
+    // Language Format Button Click
     formatBtns.forEach((btn) => {
       btn.addEventListener("click", () => {
         const next = btn.dataset.format;
-        if (next !== "rest" && next !== "python") return;
+        if (!next) return;
         format = next;
         formatBtns.forEach((item) => {
           const on = item === btn;
@@ -324,25 +676,18 @@ const lines = (source: string) => source.trim().split("\n").length;
       });
     });
 
-    root.querySelectorAll<HTMLElement>("[data-split-handle]").forEach((handle) => {
-      handle.addEventListener("pointerdown", (event) => {
-        const split = handle.closest<HTMLElement>("[data-split]");
-        if (!split || window.matchMedia("(max-width: 51.99rem)").matches) return;
-        event.preventDefault();
-        handle.setPointerCapture(event.pointerId);
-        const rect = split.getBoundingClientRect();
-        const move = (ev: PointerEvent) => {
-          const ratio = (ev.clientX - rect.left) / rect.width;
-          const clamped = Math.min(0.68, Math.max(0.28, ratio));
-          split.style.setProperty("--split", `${(clamped * 100).toFixed(1)}%`);
-        };
-        const up = () => {
-          handle.releasePointerCapture(event.pointerId);
-          handle.removeEventListener("pointermove", move);
-          handle.removeEventListener("pointerup", up);
-        };
-        handle.addEventListener("pointermove", move);
-        handle.addEventListener("pointerup", up);
+    // Copy to clipboard
+    copyBtns.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const targetId = btn.dataset.copyTarget;
+        if (!targetId) return;
+        const targetEl = document.getElementById(targetId);
+        if (!targetEl) return;
+        const text = targetEl.innerText.trim();
+        navigator.clipboard.writeText(text).then(() => {
+          btn.classList.add("is-copied");
+          setTimeout(() => btn.classList.remove("is-copied"), 2000);
+        });
       });
     });
   }
