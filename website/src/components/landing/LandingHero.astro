@@ -2,24 +2,42 @@
 interface Props {
   headline: string;
   lede: string;
+  eyebrow: string;
   primaryCta: { label: string; href: string };
   secondaryCta: { label: string; href: string };
   specimenTitle: string;
+  specimenMeta: string;
+  specimenNote: string;
   specimenQql: string;
 }
 
-const { headline, lede, primaryCta, secondaryCta, specimenTitle, specimenQql } =
-  Astro.props;
+const {
+  headline,
+  lede,
+  eyebrow,
+  primaryCta,
+  secondaryCta,
+  specimenTitle,
+  specimenMeta,
+  specimenNote,
+  specimenQql,
+} = Astro.props;
 ---
 
 <section class="landing-hero" aria-labelledby="hero-headline">
+  <div class="landing-hero__backdrop" aria-hidden="true"></div>
   <div class="landing-shell landing-hero__grid">
     <div class="landing-hero__copy">
+      <p class="landing-hero__eyebrow">
+        <span class="landing-hero__eyebrow-dot" aria-hidden="true"></span>
+        {eyebrow}
+      </p>
       <h1 id="hero-headline">{headline}</h1>
       <p class="landing-hero__lede">{lede}</p>
       <div class="landing-hero__actions">
         <a class="landing-btn landing-btn--primary" href={primaryCta.href}>
           {primaryCta.label}
+          <span class="landing-btn__arrow" aria-hidden="true">→</span>
         </a>
         <a class="landing-btn landing-btn--ghost" href={secondaryCta.href}>
           {secondaryCta.label}
@@ -28,11 +46,85 @@ const { headline, lede, primaryCta, secondaryCta, specimenTitle, specimenQql } =
     </div>
 
     <figure class="landing-code-card" aria-label={specimenQql}>
-      <figcaption class="landing-code-card__bar">
-        <span></span><span></span><span></span>
-        <span class="landing-code-card__label">{specimenTitle}</span>
+      <figcaption class="landing-code-card__head">
+        <div class="landing-code-card__window-controls" aria-hidden="true">
+          <span class="landing-window-dot landing-window-dot--red"></span>
+          <span class="landing-window-dot landing-window-dot--amber"></span>
+          <span class="landing-window-dot landing-window-dot--green"></span>
+        </div>
+        <div class="landing-code-card__tab-active">
+          <svg class="landing-code-card__tab-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+          <span class="landing-code-card__file">{specimenTitle}</span>
+        </div>
+        <span class="landing-code-card__meta">{specimenMeta}</span>
       </figcaption>
-      <pre class="landing-code-card__pre"><code><slot /></code></pre>
+
+      {/* ── Command Strip with Copy ── */}
+      <div class="landing-code-card__cmd-bar">
+        <div class="landing-code-card__cmd-text">
+          <span class="landing-code-card__prompt">$</span>
+          <span class="landing-code-card__cmd" id="hero-install-cmd">curl -fsSL https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.sh | sh</span>
+        </div>
+        <button
+          type="button"
+          class="landing-code-card__copy-btn"
+          id="hero-copy-btn"
+          title="Copy install command"
+          aria-label="Copy install command"
+        >
+          <svg class="landing-copy-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+          <span class="landing-copy-label">Copy</span>
+        </button>
+      </div>
+
+      {/* ── Code Area with Line Numbers Gutter ── */}
+      <div class="landing-code-card__body">
+        <div class="landing-code-card__gutter" aria-hidden="true">
+          <div>01</div>
+          <div>02</div>
+          <div>03</div>
+          <div>04</div>
+          <div>05</div>
+          <div>06</div>
+        </div>
+        <pre class="landing-code-card__pre"><code><slot /></code></pre>
+      </div>
+
+      {/* ── Telemetry Footer ── */}
+      <div class="landing-code-card__telemetry">
+        <div class="landing-code-card__status">
+          <span class="landing-telemetry-badge">200 OK</span>
+          <span class="landing-telemetry-latency">1.2ms</span>
+        </div>
+        <div class="landing-code-card__metrics">
+          <span class="landing-metric-item">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            AST verified by qql-core
+          </span>
+          <span class="landing-metric-item">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            Shard-routed
+          </span>
+        </div>
+      </div>
     </figure>
   </div>
 </section>
+
+<script>
+  const copyBtn = document.getElementById("hero-copy-btn");
+  const cmdEl = document.getElementById("hero-install-cmd");
+  if (copyBtn && cmdEl) {
+    copyBtn.addEventListener("click", () => {
+      navigator.clipboard.writeText(cmdEl.innerText.trim()).then(() => {
+        copyBtn.classList.add("is-copied");
+        const label = copyBtn.querySelector(".landing-copy-label");
+        if (label) label.textContent = "Copied";
+        setTimeout(() => {
+          copyBtn.classList.remove("is-copied");
+          if (label) label.textContent = "Copy";
+        }, 2000);
+      });
+    });
+  }
+</script>

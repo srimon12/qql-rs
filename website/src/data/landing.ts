@@ -3,9 +3,20 @@
 export const hero = {
   headline: "SQL for Qdrant.",
   lede: "QQL is to Qdrant what SQL is to Postgres. One query for hybrid search, filters, and schema.",
+  eyebrow: "Open source · MIT · v0.3.1",
+  specimenTitle: "search.qql",
+  specimenMeta: "QQL · MIT",
+  specimenNote: "parse + plan verified with qql-wasm at build time",
   primaryCta: { label: "Try the playground", href: "/playground/" },
   secondaryCta: { label: "Quickstart", href: "/docs/getting-started/quickstart/" },
 } as const;
+
+export const stats = [
+  { value: "12", label: "Query forms" },
+  { value: "276", label: "Conformance statements" },
+  { value: "6", label: "Runtimes & tools" },
+  { value: "1.4 MB", label: "WASM parser, in-browser" },
+] as const;
 
 export const problem = {
   heading: "Same query. Less JSON.",
@@ -18,8 +29,16 @@ export const why = {
   heading: "What you stop writing.",
   rows: [
     {
+      label: "Per-SDK test matrices",
+      body: "One conformance corpus gates every runtime — crates, SDKs, CLI, VS Code, and this site.",
+    },
+    {
       label: "Filter trees",
       body: "A WHERE clause instead of nested must/should JSON in every call.",
+    },
+    {
+      label: "Silent defaults",
+      body: "Stable error codes and byte spans fail closed at the parse boundary — before anything touches a network.",
     },
     {
       label: "Tenant copies",
@@ -27,16 +46,61 @@ export const why = {
     },
     {
       label: "Three clients",
-      body: "Plan once. REST, gRPC, and in-process edge share the same operation.",
+      body: "Plan once. REST, gRPC, and in-process edge are projections of one operation, not three codepaths.",
+    },
+    {
+      label: "Payload defaults",
+      body: "Every QUERY returns payloads by default — say WITH PAYLOAD false only when you mean it.",
     },
   ],
+} as const;
+
+export const pipeline = {
+  heading: "How a statement runs.",
+  sub: "One pass from source to dispatch. The plan is the contract between every runtime.",
+  steps: [
+    {
+      step: "01",
+      title: "Parse",
+      detail:
+        "qql-core lexes and parses into a typed AST. Malformed clauses fail with a span, never a silent default.",
+    },
+    {
+      step: "02",
+      title: "Validate",
+      detail:
+        "Named vectors resolve against the collection schema. Unknown USING kinds fail closed.",
+    },
+    {
+      step: "03",
+      title: "Plan",
+      detail: "plan() lowers the AST to one transport-neutral PlannedOperation.",
+    },
+    {
+      step: "04",
+      title: "Dispatch",
+      detail:
+        "The same plan projects to REST JSON, gRPC protobuf, or the in-process edge backend.",
+    },
+  ],
+} as const;
+
+export const language = {
+  heading: "One grammar. The whole surface.",
+  sub: "Hybrid retrieval, faceting, formula scoring, recommendations — twelve query forms over one typed grammar.",
+  footHref: "/docs/language/",
+  footLabel: "Language reference",
 } as const;
 
 export const getStarted = {
   heading: "Install",
   sub: "CLI, Python, Node, Rust, WASM, and VS Code.",
   installs: [
-    { name: "CLI", cmd: "curl -fsSL …/install.sh | sh", href: "/docs/getting-started/installation/" },
+    {
+      name: "CLI",
+      cmd: "curl -fsSL https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.sh | sh",
+      href: "/docs/getting-started/installation/",
+    },
     { name: "Python", cmd: "pip install pyqql", href: "/docs/sdks/python/" },
     { name: "Node.js", cmd: "npm i @veristamp/nqql", href: "/docs/sdks/node/" },
     { name: "Rust", cmd: "cargo add qql qql-core", href: "/docs/sdks/rust/" },
@@ -45,6 +109,13 @@ export const getStarted = {
   ],
   footHref: "/docs/getting-started/quickstart/",
   footLabel: "Quickstart",
+} as const;
+
+export const cta = {
+  heading: "One query. Every runtime.",
+  body: "The playground runs the real WASM parser in your browser — no cluster, no signup.",
+  primaryCta: { label: "Try the playground", href: "/playground/" },
+  secondaryCta: { label: "Read the docs", href: "/docs/" },
 } as const;
 
 export const faq = {
@@ -58,7 +129,7 @@ export const faq = {
     {
       question: "Which runtimes ship today?",
       answer:
-        "Rust crates, native Python and Node.js bindings, a ~1.3 MB WASM package, the qql CLI, and a VS Code extension with live diagnostics.",
+        "Rust crates, native Python and Node.js bindings, a ~1.4 MB WASM package, the qql CLI, and a VS Code extension with live diagnostics.",
     },
     {
       question: "How does multitenancy work?",
@@ -73,7 +144,7 @@ export const faq = {
     {
       question: "Is it production-ready?",
       answer:
-        "It is young: v0.3.0. Fail-closed defaults, OpenAPI contract tests, a conformance corpus, and a public gaps document. The API surface is stabilizing, not frozen.",
+        "It is young: v0.3.1. Fail-closed defaults, OpenAPI contract tests, a conformance corpus, and a public gaps document. The API surface is stabilizing, not frozen.",
     },
     {
       question: "Can I try it without a cluster?",
