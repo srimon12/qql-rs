@@ -66,7 +66,7 @@ def strategy_hybrid(tenant, query, year=None, limit=5):
         FROM {C}
         USING HYBRID DENSE dense SPARSE sparse FUSION RRF
         PARAMS (hnsw_ef = 128, quantization = {{ignore: false, rescore: true, oversampling: 2.0}})
-        WITH PAYLOAD true LIMIT {limit}
+        LIMIT {limit}
     """
     return format_hits(run_qql(qql, tenant, year))
 
@@ -80,7 +80,7 @@ def strategy_multistage(tenant, query, year=None, limit=5):
         )
         QUERY FUSION RRF FROM {C}
         PREFETCH (dense_candidates)
-        WITH PAYLOAD true LIMIT {limit}
+        LIMIT {limit}
     """
     return format_hits(run_qql(qql, tenant, year))
 
@@ -95,7 +95,7 @@ def strategy_formula(tenant, query, year=None, limit=5):
         QUERY FORMULA score * 2.0 DEFAULTS (score = 0.0)
         FROM {C}
         PREFETCH (candidates)
-        WITH PAYLOAD true LIMIT {limit}
+        LIMIT {limit}
     """
     return format_hits(run_qql(qql, tenant, year))
 

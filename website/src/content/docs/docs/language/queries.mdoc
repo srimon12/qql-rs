@@ -24,7 +24,14 @@ FROM docs
 USING dense
 LIMIT 10;
 
+-- Explicit vector input
 QUERY VECTOR [0.1, 0.2, 0.3]
+FROM docs
+USING dense
+LIMIT 10;
+
+-- Implicit vector input (VECTOR keyword is optional for array literals)
+QUERY [0.1, 0.2, 0.3]
 FROM docs
 USING dense
 LIMIT 10;
@@ -35,10 +42,13 @@ USING dense
 LIMIT 10;
 
 QUERY POINTS (1, 2, 'point-a')
-FROM docs
-WITH PAYLOAD true;
+FROM docs;
 ```
 {% /qqlExample %}
+
+{% aside type="tip" title="Payloads included by default" %}
+In QQL, `QUERY` includes point payloads by default (`WITH PAYLOAD true`). You only need `WITH PAYLOAD false` when you explicitly want to strip payload data to minimize network transfer bandwidth.
+{% /aside %}
 
 ## Choose a retrieval strategy
 

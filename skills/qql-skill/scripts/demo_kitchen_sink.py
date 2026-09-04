@@ -86,7 +86,7 @@ USING HYBRID"""))
     stmts.append(("search-dense-exact",
         f"QUERY 'acute stroke weakness slurred speech' FROM {COLLECTION} USING dense PARAMS (exact = true) LIMIT 3"))
     stmts.append(("search-dense-by-id",
-        f"QUERY POINTS ('{IDS['stroke']}') FROM {COLLECTION} WITH PAYLOAD true"))
+        f"QUERY POINTS ('{IDS['stroke']}') FROM {COLLECTION}"))
 
     # --- Hybrid search ---
     stmts.append(("search-hybrid",
@@ -206,6 +206,10 @@ QUERY FUSION RRF FROM {COLLECTION} PREFETCH (a, b) PARAMS (rrf_k = 10, rrf_weigh
     # --- SAMPLE — random point sampling ---
     stmts.append(("sample-random",
         f"QUERY SAMPLE RANDOM FROM {COLLECTION} LIMIT 5"))
+
+    # --- FACET — in-database categorical aggregation ---
+    stmts.append(("facet-specialty",
+        f"FACET specialty FROM {COLLECTION} LIMIT 5"))
 
     # --- Delete ---
     stmts.append(("delete-by-filter",

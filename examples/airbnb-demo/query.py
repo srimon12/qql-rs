@@ -51,7 +51,6 @@ QUERIES: list[tuple[str, str]] = [
           }}
           AND price <= 100.0
         {QPARAMS}
-        WITH PAYLOAD true
         LIMIT 5
         """,
     ),
@@ -67,7 +66,6 @@ QUERIES: list[tuple[str, str]] = [
           }}
           AND room_type = 'Entire home apt'
         {QPARAMS}
-        WITH PAYLOAD true
         LIMIT 5
         """,
     ),
@@ -80,7 +78,6 @@ QUERIES: list[tuple[str, str]] = [
         WHERE location GEO_POLYGON {{ exterior: {poly_literal()} }}
           AND rating >= 4.5
         {QPARAMS}
-        WITH PAYLOAD true
         LIMIT 5
         """,
     ),
@@ -92,7 +89,6 @@ QUERIES: list[tuple[str, str]] = [
         USING dense
         WHERE district = 'Mitte' AND rating >= 4.5
         {QPARAMS}
-        WITH PAYLOAD true
         LIMIT 5
         """,
     ),
@@ -104,7 +100,6 @@ QUERIES: list[tuple[str, str]] = [
         USING HYBRID DENSE dense SPARSE sparse FUSION RRF
         WHERE superhost = true AND price <= 150.0
         {QPARAMS}
-        WITH PAYLOAD true
         LIMIT 5
         """,
     ),
@@ -126,7 +121,6 @@ QUERIES: list[tuple[str, str]] = [
         ) DEFAULTS (location = {{lat: {BG['lat']}, lon: {BG['lon']}}})
         FROM {C}
         PREFETCH (candidates)
-        WITH PAYLOAD true
         LIMIT 5
         """,
     ),
@@ -135,7 +129,6 @@ QUERIES: list[tuple[str, str]] = [
         f"""
         QUERY ORDER BY price ASC FROM {C}
         WHERE rating >= 4.8 AND accommodates >= 2
-        WITH PAYLOAD true
         LIMIT 5
         """,
     ),
@@ -169,7 +162,6 @@ QUERIES: list[tuple[str, str]] = [
           hnsw_ef = 128,
           quantization = {{ignore: false, rescore: true, oversampling: 2.0}}
         )
-        WITH PAYLOAD true
         LIMIT 5
         """,
     ),
@@ -181,7 +173,6 @@ QUERIES: list[tuple[str, str]] = [
         USING dense
         WHERE price <= 200.0
         PARAMS (hnsw_ef = 256, quantization = {{ignore: false, rescore: true, oversampling: 3.0}})
-        WITH PAYLOAD true
         LIMIT 8
         """,
     ),
@@ -193,7 +184,14 @@ QUERIES: list[tuple[str, str]] = [
         FROM {C}
         WHERE rating >= 4.6
         {QPARAMS}
-        WITH PAYLOAD true
+        LIMIT 5
+        """,
+    ),
+    (
+        "13. FACET — room type breakdown",
+        f"""
+        FACET room_type FROM {C}
+        WHERE price <= 150.0
         LIMIT 5
         """,
     ),
