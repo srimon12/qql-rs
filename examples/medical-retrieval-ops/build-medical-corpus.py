@@ -44,6 +44,9 @@ SPECIALTY_TENANTS = {
 
 def write_restricted(path: Path, text: str) -> None:
     """Write demo output with owner-only permissions (no PHI in git)."""
+    # codeql[py/clear-text-storage-sensitive-data] False positive: the content
+    # is public benchmark text (RAGCare-QA). Files are local-only, git-ignored,
+    # and written owner-only (0600); clear-text output is the tool's purpose.
     path.write_text(text, encoding="utf-8")
     try:
         os.chmod(path, 0o600)
