@@ -377,6 +377,9 @@ impl<'a> AstLowerer<'a> {
             self.advance()?;
             return self.parse_vector_value().map(QueryInput::Vector);
         }
+        if self.peek()?.kind == TokenKind::Lbracket {
+            return self.parse_vector_value().map(QueryInput::Vector);
+        }
         if self.peek_word("POINT")? {
             self.advance()?;
             return self.parse_point_id("POINT").map(QueryInput::Point);
@@ -786,7 +789,7 @@ impl<'a> AstLowerer<'a> {
         Ok(prefetch)
     }
 
-    fn peek_word(&mut self, word: &str) -> Result<bool, QqlError> {
+    pub(crate) fn peek_word(&mut self, word: &str) -> Result<bool, QqlError> {
         let token = self.peek()?;
         Ok(token.kind.is_keyword_or_identifier() && ascii_equal(token.text, word))
     }

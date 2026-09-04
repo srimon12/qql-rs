@@ -54,6 +54,7 @@ pub static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {
     "EXP" => TokenKind::Exp,
     "EXP_DECAY" => TokenKind::ExpDecay,
     "EXTERIOR" => TokenKind::Exterior,
+    "FACET" => TokenKind::Facet,
     "FALSE" => TokenKind::False,
     "FEEDBACK" => TokenKind::Feedback,
     "FIELD" => TokenKind::Field,

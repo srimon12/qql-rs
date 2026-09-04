@@ -120,5 +120,11 @@ pub async fn execute_planned_grpc(
                 None,
             ))
         }
+        PlannedOperation::Facet { .. } => Err(QqlError::execution(
+            "QQL-GRPC-FACET",
+            "faceting is only exposed through Qdrant's REST API (/collections/{name}/facet); \
+             the public gRPC surface has no facet service. Use the REST backend",
+            None,
+        )),
     }
 }

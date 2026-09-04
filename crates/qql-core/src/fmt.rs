@@ -290,6 +290,31 @@ pub fn format_stmt(statement: &Stmt) -> String {
             }
             out
         }
+        Stmt::Facet(statement) => {
+            let mut out = match &statement.collection {
+                QueryCollection::Explicit(collection) => {
+                    format!(
+                        "FACET {} FROM {}",
+                        render_name(&statement.key),
+                        render_name(collection)
+                    )
+                }
+                QueryCollection::Inherited => format!("FACET {}", render_name(&statement.key)),
+            };
+            if let Some(filter) = &statement.filter {
+                let _ = write!(out, " WHERE {}", render_filter(filter));
+            }
+            if let Some(limit) = statement.limit {
+                let _ = write!(out, " LIMIT {}", limit);
+            }
+            if let Some(exact) = statement.exact {
+                let _ = write!(out, " EXACT {}", exact);
+            }
+            if let Some(key) = &statement.shard_key {
+                let _ = write!(out, " SHARD '{}'", escape_string(key));
+            }
+            out
+        }
     }
 }
 

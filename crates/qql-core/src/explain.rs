@@ -245,6 +245,22 @@ pub fn explain_node(statement: &Stmt) -> String {
             }
             let _ = writeln!(output, "└── Exact: {}", statement.exact.unwrap_or(false));
         }
+        Stmt::Facet(statement) => {
+            output.push_str("Statement: FACET\n");
+            let col = match &statement.collection {
+                QueryCollection::Explicit(c) => c.as_str(),
+                QueryCollection::Inherited => "inherited",
+            };
+            let _ = writeln!(output, "├── Key: {}", statement.key);
+            let _ = writeln!(output, "├── Collection: {}", col);
+            if let Some(f) = &statement.filter {
+                let _ = writeln!(output, "├── Filter: {}", render_filter(f));
+            }
+            if let Some(l) = statement.limit {
+                let _ = writeln!(output, "├── Limit: {}", l);
+            }
+            let _ = writeln!(output, "└── Exact: {}", statement.exact.unwrap_or(false));
+        }
         Stmt::AlterCollection(statement) => {
             let _ = writeln!(
                 output,

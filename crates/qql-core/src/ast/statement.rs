@@ -755,6 +755,33 @@ pub struct CountStmt {
     pub exact: Option<bool>,
 }
 
+/// In-database categorical facet aggregation statement (`FACET <key> FROM <collection>`).
+///
+/// Compiles to Qdrant's `/collections/{collection}/facet` endpoint, returning hit counts
+/// per unique value for a payload field without retrieving full point records.
+///
+/// # Supported clauses
+/// - `WHERE`: Optional filter restricting candidate points.
+/// - `LIMIT`: Maximum number of distinct facet values to return.
+/// - `EXACT`: Whether to compute exact distributed counts across shards.
+/// - `SHARD`: Target shard key for tenant-partitioned collections.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct FacetStmt {
+    /// Payload field name to aggregate values for.
+    pub key: String,
+    /// Target collection.
+    pub collection: QueryCollection,
+    /// Optional point filter scoping the aggregation.
+    pub filter: Option<Box<FilterExpr>>,
+    /// Maximum number of unique facet hits to return.
+    pub limit: Option<u64>,
+    /// Whether to compute exact distributed counts across shards.
+    pub exact: Option<bool>,
+    /// Optional shard key partition routing.
+    pub shard_key: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CreateShardKeyStmt {
@@ -849,6 +876,7 @@ pub enum Stmt {
     UpdateVector(Box<UpdateVectorStmt>),
     UpdatePayload(Box<UpdatePayloadStmt>),
     Count(Box<CountStmt>),
+    Facet(Box<FacetStmt>),
     ShowQuotas,
     SetQuota(Box<SetQuotaStmt>),
 }
@@ -917,13 +945,14 @@ impl serde::Serialize for Stmt {
                 serializer.serialize_newtype_variant("Stmt", 18, "UpdatePayload", s)
             }
             Stmt::Count(s) => serializer.serialize_newtype_variant("Stmt", 19, "Count", s),
+            Stmt::Facet(s) => serializer.serialize_newtype_variant("Stmt", 20, "Facet", s),
             Stmt::ShowQuotas => {
                 let mut map = serializer.serialize_map(Some(1))?;
                 let empty = std::collections::BTreeMap::<String, String>::new();
                 map.serialize_entry("ShowQuotas", &empty)?;
                 map.end()
             }
-            Stmt::SetQuota(s) => serializer.serialize_newtype_variant("Stmt", 21, "SetQuota", s),
+            Stmt::SetQuota(s) => serializer.serialize_newtype_variant("Stmt", 22, "SetQuota", s),
         }
     }
 }
@@ -996,6 +1025,7 @@ impl<'de> serde::Deserialize<'de> for Stmt {
                     "UpdateVector" => Stmt::UpdateVector(map.next_value()?),
                     "UpdatePayload" => Stmt::UpdatePayload(map.next_value()?),
                     "Count" => Stmt::Count(map.next_value()?),
+                    "Facet" => Stmt::Facet(map.next_value()?),
                     "SetQuota" => Stmt::SetQuota(map.next_value()?),
                     _ => {
                         return Err(A::Error::unknown_variant(
@@ -1021,6 +1051,7 @@ impl<'de> serde::Deserialize<'de> for Stmt {
                                 "UpdateVector",
                                 "UpdatePayload",
                                 "Count",
+                                "Facet",
                                 "ShowQuotas",
                                 "SetQuota",
                             ],

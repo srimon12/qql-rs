@@ -707,6 +707,25 @@ pub struct CountRequest {
     pub exact: Option<bool>,
 }
 
+/// Request payload for Qdrant's `/collections/{collection}/facet` endpoint.
+#[derive(Debug, Clone, Serialize)]
+pub struct FacetRequest {
+    /// Payload key to facet on.
+    pub key: String,
+    /// Maximum number of facet hits to return.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<usize>,
+    /// Filter expression narrowing points considered for faceting.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter: Option<FilterExpression>,
+    /// Whether to return exact counts across shards.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exact: Option<bool>,
+    /// Shard key for custom tenant routing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shard_key: Option<String>,
+}
+
 /// HNSW index configuration for collection creation/update.
 #[derive(Debug, Clone, Serialize)]
 pub struct HnswConfig {
