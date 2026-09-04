@@ -23,6 +23,15 @@
 //! - With both disabled, custom [`client::QdrantOps`] implementations still
 //!   compile against the executor with no transport dependency.
 //!
+//! # Public API re-exports
+//!
+//! Types named in this crate's signatures — [`QqlError`], [`Stmt`],
+//! [`PlannedOperation`], the batch and DDL request types — plus the policy
+//! flow ([`Parser`], [`inject_filter`], [`ComparisonOp`], [`Value`]) are
+//! re-exported here, so `QdrantOps` implementors and policy authors depend on
+//! `qql` alone. Deeper IR introspection is advanced territory; add
+//! `qql-plan` / `qql-core` directly when you need it.
+//!
 //! # Errors
 //!
 //! Execution failures are structured `QqlError` values from `qql-core` with
@@ -58,6 +67,18 @@ pub mod qdrant_grpc;
 pub mod rest;
 /// Sparse vector helpers re-exported from `qql-embed` (wire-compatible BM25).
 pub mod sparse;
+
+// Public-API re-exports (Rust API guidelines C-REEXPORT): every type named in
+// this crate's public signatures, plus the parse → inject policy flow, is
+// reachable through `qql` alone — backend and policy authors need no direct
+// `qql-core` / `qql-plan` dependency.
+pub use qql_core::ast::{inject_filter, ComparisonOp, Stmt, Value};
+pub use qql_core::error::{ErrorKind, QqlError, Span};
+pub use qql_core::parser::Parser;
+pub use qql_plan::{
+    CreateCollectionRequest, CreateIndexRequest, PlannedOperation, QueryBatchRequest,
+    UpdateBatchRequest, UpdateCollectionRequest,
+};
 
 // Sparse unit tests live in `qql-embed` (shared implementation).
 
