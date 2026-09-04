@@ -20,3 +20,4 @@ UPDATE docs SET VECTOR sparse = {indices: [0, 3], values: [0.5, 0.8]} WHERE id =
 
 -- Update with string UUID
 UPDATE docs SET PAYLOAD = {status: 'updated'} WHERE id = 'a1b2c3d4';
+

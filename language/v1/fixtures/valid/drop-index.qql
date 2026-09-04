@@ -2,3 +2,4 @@
 
 DROP INDEX ON COLLECTION docs FOR status;
 DROP INDEX ON COLLECTION docs FOR year;
+

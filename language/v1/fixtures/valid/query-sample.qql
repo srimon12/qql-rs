@@ -8,3 +8,4 @@ QUERY SAMPLE RANDOM FROM docs WHERE status = 'active' LIMIT 10;
 
 -- With vector selector
 QUERY SAMPLE RANDOM FROM docs WITH VECTOR false LIMIT 10;
+

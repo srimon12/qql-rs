@@ -2,26 +2,26 @@
 -- Tests: MATCH PREFIX, SLICE condition, per-query IDF as a QQL WHERE filter
 
 -- MATCH PREFIX filter (keyword prefix matching)
-QUERY TEXT 'search' MODEL 'e5' FROM docs
+QUERY TEXT 'search' MODEL 'e5'
+FROM docs
 WHERE title MATCH PREFIX 'Comp'
 LIMIT 10;
 
 -- SLICE deterministic sampling filter
-QUERY TEXT 'search' MODEL 'e5' FROM docs
-WHERE SLICE (4, 1)
-LIMIT 10;
+QUERY TEXT 'search' MODEL 'e5' FROM docs WHERE SLICE (4, 1) LIMIT 10;
 
 -- SLICE combined with an equality predicate
-QUERY TEXT 'search' MODEL 'e5' FROM docs
+QUERY TEXT 'search' MODEL 'e5'
+FROM docs
 WHERE SLICE (4, 1) AND status = 'active'
 LIMIT 10;
 
 -- Per-query IDF corpus: collection-wide statistics
-QUERY TEXT 'search' MODEL 'e5' FROM docs
-PARAMS (idf = 'global')
-LIMIT 10;
+QUERY TEXT 'search' MODEL 'e5' FROM docs PARAMS (idf = 'global') LIMIT 10;
 
 -- Per-query IDF corpus: QQL filter, not a JSON object
-QUERY TEXT 'search' MODEL 'e5' FROM docs
+QUERY TEXT 'search' MODEL 'e5'
+FROM docs
 PARAMS (idf = WHERE status = 'active')
 LIMIT 10;
+

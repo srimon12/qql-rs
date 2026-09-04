@@ -12,7 +12,7 @@ pub(crate) mod upsert;
 pub(crate) mod with_clause;
 
 use crate::ast::Stmt;
-use crate::error::QqlError;
+use crate::error::{QqlError, Span};
 use crate::lexer::Lexer;
 use crate::token::{Token, TokenKind};
 use alloc::string::String;
@@ -63,6 +63,10 @@ impl Parser {
         AstLowerer::lower_script(input)
     }
 
+    pub fn parse_all_with_spans(input: &str) -> Result<Vec<(Stmt, Span)>, QqlError> {
+        AstLowerer::lower_script_with_spans(input)
+    }
+
     /// Parse a standalone literal value (string, number, boolean, null, list, or dict).
     ///
     /// Errors if parsing fails or if unexpected trailing tokens exist after the value.
@@ -96,6 +100,11 @@ impl<'a> AstLowerer<'a> {
     }
 
     fn lower_script(input: &'a str) -> Result<Vec<Stmt>, QqlError> {
+        let with_spans = Self::lower_script_with_spans(input)?;
+        Ok(with_spans.into_iter().map(|(s, _)| s).collect())
+    }
+
+    pub(crate) fn lower_script_with_spans(input: &'a str) -> Result<Vec<(Stmt, Span)>, QqlError> {
         let tokens = Self::lex(input)?;
         let mut parser = AstLowerer::new(input, tokens);
         let mut statements = Vec::new();
@@ -115,9 +124,12 @@ impl<'a> AstLowerer<'a> {
                     parser.peek()?.span,
                 ));
             }
-            statements.push(parser.parse_stmt()?);
-            match parser.peek()?.kind {
+            let start_tok = parser.peek()?;
+            let start_pos = start_tok.span.start;
+            let stmt = parser.parse_stmt()?;
+            let end_pos = match parser.peek()?.kind {
                 TokenKind::Semicolon => {
+                    let semi_span = parser.peek()?.span;
                     parser.advance()?;
                     if parser.peek()?.kind == TokenKind::Semicolon {
                         return Err(QqlError::parse(
@@ -126,8 +138,16 @@ impl<'a> AstLowerer<'a> {
                             parser.peek()?.span,
                         ));
                     }
+                    semi_span.end
                 }
-                TokenKind::Eof => break,
+                TokenKind::Eof => {
+                    let prev_idx = parser.index.saturating_sub(1);
+                    parser
+                        .tokens
+                        .get(prev_idx)
+                        .map(|t| t.span.end)
+                        .unwrap_or(start_tok.span.end)
+                }
                 _ => {
                     return Err(QqlError::parse(
                         "QQL-PARSE-SEPARATOR",
@@ -135,7 +155,8 @@ impl<'a> AstLowerer<'a> {
                         parser.peek()?.span,
                     ));
                 }
-            }
+            };
+            statements.push((stmt, Span::new(start_pos, end_pos)));
         }
         Ok(statements)
     }

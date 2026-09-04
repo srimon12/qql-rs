@@ -11,3 +11,4 @@ DROP SHARD KEY 'acme' ON COLLECTION docs;
 
 -- Show shard keys
 SHOW SHARD KEYS ON COLLECTION docs;
+
