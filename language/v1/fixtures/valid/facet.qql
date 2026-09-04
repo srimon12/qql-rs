@@ -1,0 +1,24 @@
+-- @case minimal facet
+FACET category FROM documents;
+
+-- @case facet with where and limit
+FACET room_type
+FROM stays
+WHERE price < 150
+LIMIT 5;
+
+-- @case facet with exact flag
+FACET author
+FROM articles
+WHERE published = true
+LIMIT 10
+EXACT true;
+
+-- @case facet with shard key
+FACET tag
+FROM catalog
+SHARD 'tenant_1'
+LIMIT 20;
+
+-- @case facet key front syntax
+FACET FROM products KEY category LIMIT 5;

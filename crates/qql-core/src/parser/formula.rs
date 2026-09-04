@@ -39,6 +39,7 @@ fn formula_prefix_parse_fn(tok: &crate::token::Token<'_>) -> Option<PrefixParseF
     } else {
         match tok.kind {
             TokenKind::Integer | TokenKind::Float => Some(parse_formula_constant),
+            TokenKind::String => Some(parse_formula_string),
             TokenKind::Minus => Some(parse_formula_prefix_expression),
             TokenKind::Lparen => Some(parse_formula_grouped_expression),
             _ => None,
@@ -111,6 +112,29 @@ fn parse_formula_constant(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, QqlErro
         ));
     }
     Ok(FormulaExpr::Constant { value: v })
+}
+
+fn looks_like_iso_datetime(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    if bytes.len() >= 10
+        && bytes[0..4].iter().all(|b| b.is_ascii_digit())
+        && bytes[4] == b'-'
+        && bytes[5..7].iter().all(|b| b.is_ascii_digit())
+        && bytes[7] == b'-'
+        && bytes[8..10].iter().all(|b| b.is_ascii_digit())
+    {
+        return true;
+    }
+    false
+}
+
+fn parse_formula_string(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, QqlError> {
+    let s = p.parse_string()?;
+    if looks_like_iso_datetime(&s) {
+        Ok(FormulaExpr::Datetime { value: s })
+    } else {
+        Ok(FormulaExpr::Variable { name: s })
+    }
 }
 
 fn parse_formula_prefix_expression(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, QqlError> {
@@ -231,7 +255,11 @@ fn parse_formula_function_call(
             if p.peek()?.kind == TokenKind::Comma {
                 p.advance()?;
             }
-            let field = p.parse_identifier()?;
+            let field = if p.peek()?.kind == TokenKind::String {
+                p.parse_string()?
+            } else {
+                p.parse_identifier()?
+            };
             p.expect(TokenKind::Rparen)?;
 
             let mut lat = None;

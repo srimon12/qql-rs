@@ -41,6 +41,11 @@ pub enum PlannedOperation {
         collection: String,
         request: CountRequest,
     },
+    /// In-database facet aggregation (`POST /collections/{collection}/facet`).
+    Facet {
+        collection: String,
+        request: FacetRequest,
+    },
     Upsert {
         collection: String,
         request: UpsertRequest,
@@ -133,6 +138,7 @@ impl PlannedOperation {
             PlannedOperation::GetPoints { .. } => "GET_POINTS",
             PlannedOperation::Scroll { .. } => "SCROLL",
             PlannedOperation::Count { .. } => "COUNT",
+            PlannedOperation::Facet { .. } => "FACET",
             PlannedOperation::Upsert { .. } => "UPSERT",
             PlannedOperation::Delete { .. } => "DELETE",
             PlannedOperation::UpdatePayload { .. } => "UPDATE_PAYLOAD",
@@ -167,6 +173,7 @@ impl PlannedOperation {
             PlannedOperation::GetPoints { .. } => "points",
             PlannedOperation::Scroll { .. } => "scroll",
             PlannedOperation::Count { .. } => "count",
+            PlannedOperation::Facet { .. } => "facet",
             PlannedOperation::Upsert { .. } => "upsert",
             PlannedOperation::Delete { .. } => "delete",
             PlannedOperation::UpdatePayload { .. } => "update_payload",
@@ -198,6 +205,7 @@ impl PlannedOperation {
             | PlannedOperation::GetPoints { collection, .. }
             | PlannedOperation::Scroll { collection, .. }
             | PlannedOperation::Count { collection, .. }
+            | PlannedOperation::Facet { collection, .. }
             | PlannedOperation::Upsert { collection, .. }
             | PlannedOperation::Delete { collection, .. }
             | PlannedOperation::UpdatePayload { collection, .. }
@@ -264,6 +272,7 @@ impl PlannedOperation {
             PlannedOperation::GetPoints { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::Scroll { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::Count { request, .. } => request.shard_key.as_deref(),
+            PlannedOperation::Facet { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::Upsert { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::Delete { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::UpdatePayload { request, .. } => request.shard_key.as_deref(),
@@ -474,6 +483,50 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
                     filter,
                     shard_key: count.shard_key.clone(),
                     exact: count.exact,
+                },
+            })
+        }
+        Stmt::Facet(facet) => {
+            let collection = match &facet.collection {
+                qql_core::ast::QueryCollection::Explicit(name) if !name.is_empty() => name.clone(),
+                qql_core::ast::QueryCollection::Explicit(_) => {
+                    return Err(QqlError::validation(
+                        "QQL-PLAN-COLLECTION",
+                        "facet collection name must not be empty",
+                        None,
+                    ));
+                }
+                qql_core::ast::QueryCollection::Inherited => {
+                    return Err(QqlError::validation(
+                        "QQL-PLAN-COLLECTION",
+                        "facet requires an explicit collection (FROM ...)",
+                        None,
+                    ));
+                }
+            };
+            let filter = facet
+                .filter
+                .as_ref()
+                .map(|f| crate::filter::top_level_filter(f));
+            let limit = match facet.limit {
+                Some(n) if n > usize::MAX as u64 => {
+                    return Err(QqlError::validation(
+                        "QQL-VALIDATION-LIMIT-OVERFLOW",
+                        alloc::format!("facet limit {n} exceeds platform usize::MAX"),
+                        None,
+                    ));
+                }
+                Some(n) => Some(n as usize),
+                None => None,
+            };
+            Ok(PlannedOperation::Facet {
+                collection,
+                request: FacetRequest {
+                    key: facet.key.clone(),
+                    limit,
+                    filter,
+                    exact: facet.exact,
+                    shard_key: facet.shard_key.clone(),
                 },
             })
         }
@@ -986,6 +1039,15 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             query: Vec::new(),
             body: body(request),
         },
+        PlannedOperation::Facet {
+            collection,
+            request,
+        } => Route {
+            method: Method::Post,
+            path: format!("/collections/{collection}/facet"),
+            query: Vec::new(),
+            body: body(request),
+        },
         PlannedOperation::Upsert {
             collection,
             request,
@@ -1366,6 +1428,35 @@ mod tests {
         } else {
             panic!("expected Count operation");
         }
+    }
+
+    #[test]
+    fn facet_planning_and_routing() {
+        let stmt = qql_core::parser::Parser::parse(
+            "FACET room_type FROM stays WHERE price < 100 LIMIT 10 EXACT true;",
+        )
+        .unwrap();
+        let op = plan(&stmt).unwrap();
+
+        assert_eq!(op.operation_label(), "FACET");
+        assert_eq!(op.collection(), Some("stays"));
+
+        if let PlannedOperation::Facet { request, .. } = &op {
+            assert_eq!(request.key, "room_type");
+            assert_eq!(request.limit, Some(10));
+            assert_eq!(request.exact, Some(true));
+            assert!(request.filter.is_some());
+        } else {
+            panic!("expected Facet operation");
+        }
+
+        let route = to_rest_route(&op).unwrap();
+        assert_eq!(route.path, "/collections/stays/facet");
+        assert_eq!(route.method, Method::Post);
+        let body = route.body.unwrap();
+        assert_eq!(body["key"], "room_type");
+        assert_eq!(body["limit"], 10);
+        assert_eq!(body["exact"], true);
     }
 
     #[test]

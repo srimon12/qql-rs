@@ -923,6 +923,11 @@ impl QdrantOps for EdgeQdrant {
                 collection,
                 request,
             } => self.execute_edge_count(collection, request).await,
+            Facet { .. } => Err(QqlError::execution(
+                "QQL-EDGE-FACET",
+                "FACET is currently only supported via REST",
+                None,
+            )),
             Upsert {
                 collection,
                 request,

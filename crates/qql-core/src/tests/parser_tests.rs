@@ -864,3 +864,14 @@ fn stmt_serde_round_trips_through_json() {
         Stmt::ShowCollections
     );
 }
+
+#[test]
+fn implicit_array_vector_literal_parses() {
+    let stmt1 = Parser::parse("QUERY [0.1, 0.2, 0.3] FROM docs;").unwrap();
+    let stmt2 = Parser::parse("QUERY VECTOR [0.1, 0.2, 0.3] FROM docs;").unwrap();
+    assert_eq!(stmt1, stmt2);
+
+    let stmt3 = Parser::parse("QUERY [[0.1, 0.2], [0.3, 0.4]] FROM docs;").unwrap();
+    let stmt4 = Parser::parse("QUERY VECTOR [[0.1, 0.2], [0.3, 0.4]] FROM docs;").unwrap();
+    assert_eq!(stmt3, stmt4);
+}

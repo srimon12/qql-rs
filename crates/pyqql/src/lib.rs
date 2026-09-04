@@ -248,8 +248,12 @@ impl PyClient {
     }
 
     /// Execute a QQL query string, a pre-parsed Stmt, or a list of either.
-    /// Lists of same-collection QUERY statements are automatically batched
-    /// into a single network call.
+    ///
+    /// Supports all QQL retrieval, mutation, DDL, and aggregation operations
+    /// (`QUERY`, `SCROLL`, `COUNT`, `FACET`, `UPSERT`, `UPDATE`, `DELETE`, etc.).
+    /// Queries include point payloads by default (`WITH PAYLOAD true`).
+    /// Lists of same-collection QUERY statements are automatically batched into
+    /// a single network call.
     #[pyo3(signature = (query, *, params=None, on_error="stop"))]
     fn execute<'py>(
         &self,
@@ -277,6 +281,8 @@ impl PyClient {
     }
 
     /// Async variant — accepts the same input types as `execute`.
+    ///
+    /// Executes the QQL pipeline asynchronously on the Tokio background runtime.
     #[pyo3(signature = (query, *, params=None, on_error="stop"))]
     fn execute_async<'py>(
         &self,
