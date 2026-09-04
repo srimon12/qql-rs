@@ -8,3 +8,4 @@ DELETE VECTOR dense, sparse FROM docs WHERE status = 'deprecated';
 
 -- Delete vector by filter (not just id)
 DELETE VECTOR colbert FROM docs WHERE status = 'archived';
+

@@ -1,14 +1,12 @@
 -- Fixture: Valid embedding specs for MULTI, MULTIVECTOR, and IMAGE
 CREATE COLLECTION products (dense VECTOR(512, COSINE));
 
-UPSERT INTO products VALUES {id: 1, text: 'red shoe'}
-  USING MULTI MODEL 'bge-m3';
+UPSERT INTO products VALUES {id: 1, text: 'red shoe'} USING MULTIVECTOR MODEL 'bge-m3';
 
-UPSERT INTO products VALUES {id: 2, image: '/path/to/img.png'}
-  USING IMAGE MODEL 'clip-vit';
+UPSERT INTO products VALUES {id: 2, image: '/path/to/img.png'} USING IMAGE MODEL 'clip-vit';
 
-UPSERT INTO products VALUES {id: 3, text: 'colbert document'}
-  USING MULTIVECTOR MODEL 'colbert-v2';
+UPSERT INTO products VALUES {id: 3, text: 'colbert document'} USING MULTIVECTOR MODEL 'colbert-v2';
 
 QUERY IMAGE '/path/to/img.png' FROM products USING 'clip-v2' LIMIT 5;
-QUERY TEXT 'colbert query' FROM products USING colbert AS MULTI LIMIT 5;
+QUERY 'colbert query' FROM products USING colbert AS MULTI LIMIT 5;
+

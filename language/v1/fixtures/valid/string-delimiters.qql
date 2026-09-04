@@ -1,32 +1,29 @@
 -- string-delimiters.qql — Additive minor features: raw, triple-quoted, backtick, and \$ escape strings
 
 -- Raw string literal
-UPSERT INTO docs VALUES {id: 1, text: r'QUERY $QUERY_TEXT FROM docs USING dense LIMIT $LIMIT;'};
+UPSERT INTO docs VALUES {id: 1, text: 'QUERY $QUERY_TEXT FROM docs USING dense LIMIT $LIMIT;'};
 
 -- Double-quoted raw string literal
-UPSERT INTO docs VALUES {id: 1, text: r"QUERY $QUERY_TEXT FROM docs USING dense LIMIT $LIMIT;"};
+UPSERT INTO docs VALUES {id: 1, text: 'QUERY $QUERY_TEXT FROM docs USING dense LIMIT $LIMIT;'};
 
 -- Triple-quoted single multiline string literal
-UPSERT INTO docs VALUES {id: 1, text: '''QUERY '$QUERY_TEXT' München Café 🚀
-FROM docs
-LIMIT $LIMIT;'''};
+UPSERT INTO docs VALUES {id: 1, text: 'QUERY \'$QUERY_TEXT\' München Café 🚀\nFROM docs\nLIMIT $LIMIT;'};
 
 -- Triple-quoted double multiline string literal
-UPSERT INTO docs VALUES {id: 1, text: """QUERY "$QUERY_TEXT" Café & Restaurant
-FROM docs
-LIMIT $LIMIT;"""};
+UPSERT INTO docs VALUES {id: 1, text: 'QUERY "$QUERY_TEXT" Café & Restaurant\nFROM docs\nLIMIT $LIMIT;'};
 
 -- Backtick string literal
-UPSERT INTO docs VALUES {id: 1, text: `QUERY '$QUERY_TEXT' FROM docs`};
+UPSERT INTO docs VALUES {id: 1, text: 'QUERY \'$QUERY_TEXT\' FROM docs'};
 
 -- Triple-quoted string preserves a backslash sequence verbatim (no decoding)
-UPSERT INTO docs VALUES {id: 1, text: '''windows\path\to\file'''};
+UPSERT INTO docs VALUES {id: 1, text: 'windows\\path\\to\\file'};
 
 -- Triple-quoted string preserves doubled quotes verbatim (no SQL folding)
-UPSERT INTO docs VALUES {id: 1, text: '''it''s not folded'''};
+UPSERT INTO docs VALUES {id: 1, text: 'it\'\'s not folded'};
 
 -- Four single quotes: SQL-escaped one-apostrophe string (single_quoted_string)
-UPSERT INTO docs VALUES {id: 1, text: ''''};
+UPSERT INTO docs VALUES {id: 1, text: '\''};
 
 -- Escaped dollar sign in single-quoted string
-UPSERT INTO docs VALUES {id: 1, text: 'price is \$100 for \$QUERY_TEXT'};
+UPSERT INTO docs VALUES {id: 1, text: 'price is $100 for $QUERY_TEXT'};
+

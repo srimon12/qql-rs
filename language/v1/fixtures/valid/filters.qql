@@ -2,7 +2,7 @@
 
 -- Comparison operators
 QUERY 'test' FROM docs WHERE field = 'value' LIMIT 10;
-QUERY 'test' FROM docs WHERE field != 'value' LIMIT 10;
+QUERY 'test' FROM docs WHERE NOT field = 'value' LIMIT 10;
 QUERY 'test' FROM docs WHERE count > 10 LIMIT 10;
 QUERY 'test' FROM docs WHERE count >= 10 LIMIT 10;
 QUERY 'test' FROM docs WHERE count < 100 LIMIT 10;
@@ -17,15 +17,15 @@ QUERY 'test' FROM docs WHERE score BETWEEN 0.5 AND 1.0 LIMIT 10;
 -- IN / NOT IN
 QUERY 'test' FROM docs WHERE status IN ('active', 'pending') LIMIT 10;
 QUERY 'test' FROM docs WHERE year IN (2024, 2025) LIMIT 10;
-QUERY 'test' FROM docs WHERE status NOT IN ('deleted', 'archived') LIMIT 10;
+QUERY 'test' FROM docs WHERE NOT status IN ('deleted', 'archived') LIMIT 10;
 
 -- IS NULL / IS NOT NULL
 QUERY 'test' FROM docs WHERE description IS NULL LIMIT 10;
-QUERY 'test' FROM docs WHERE description IS NOT NULL LIMIT 10;
+QUERY 'test' FROM docs WHERE NOT description IS NULL LIMIT 10;
 
 -- IS EMPTY / IS NOT EMPTY
 QUERY 'test' FROM docs WHERE tags IS EMPTY LIMIT 10;
-QUERY 'test' FROM docs WHERE tags IS NOT EMPTY LIMIT 10;
+QUERY 'test' FROM docs WHERE NOT tags IS EMPTY LIMIT 10;
 
 -- MATCH
 QUERY 'test' FROM docs WHERE content MATCH 'hello world' LIMIT 10;
@@ -37,12 +37,21 @@ QUERY 'test' FROM docs WHERE a = 1 AND b = 2 LIMIT 10;
 QUERY 'test' FROM docs WHERE a = 1 OR b = 2 LIMIT 10;
 QUERY 'test' FROM docs WHERE NOT a = 1 LIMIT 10;
 QUERY 'test' FROM docs WHERE (a = 1 OR b = 2) AND c = 3 LIMIT 10;
-QUERY 'test' FROM docs WHERE status = 'published' AND (score > 0.5 OR tags IS NOT EMPTY) LIMIT 10;
+QUERY 'test'
+FROM docs
+WHERE status = 'published' AND (score > 0.5 OR NOT tags IS EMPTY)
+LIMIT 10;
 
 -- NESTED
 QUERY 'test' FROM docs WHERE NESTED('reviews', rating > 4) LIMIT 10;
-QUERY 'test' FROM docs WHERE NESTED('overwritten_in', by = 'root' AND seq <= 2) LIMIT 10;
-QUERY 'test' FROM docs WHERE branch = 'root' AND NOT NESTED('overwritten_in', by = 'root') LIMIT 10;
+QUERY 'test'
+FROM docs
+WHERE NESTED('overwritten_in', by = 'root' AND seq <= 2)
+LIMIT 10;
+QUERY 'test'
+FROM docs
+WHERE branch = 'root' AND NOT NESTED('overwritten_in', by = 'root')
+LIMIT 10;
 
 -- Point ID filter
 QUERY 'test' FROM docs WHERE id = 42 LIMIT 10;
@@ -50,48 +59,33 @@ QUERY 'test' FROM docs WHERE id = 'uuid-here' LIMIT 10;
 QUERY 'test' FROM docs WHERE id IN (1, 2, 3) LIMIT 10;
 
 -- HAS_VECTOR
-QUERY 'test' FROM docs WHERE HAS_VECTOR 'dense' LIMIT 10;
+QUERY 'test' FROM docs WHERE HAS_VECTOR dense LIMIT 10;
 
 -- VALUES_COUNT
 QUERY 'test' FROM docs WHERE tags VALUES_COUNT >= 2 LIMIT 10;
 QUERY 'test' FROM docs WHERE categories VALUES_COUNT = 0 LIMIT 10;
 
 -- GEO_BBOX
-QUERY 'test' FROM docs WHERE location GEO_BBOX {
-  top_left: {lat: 52.52, lon: 13.405},
-  bottom_right: {lat: 52.51, lon: 13.415}
-} LIMIT 10;
+QUERY 'test'
+FROM docs
+WHERE location GEO_BBOX {top_left: {lat: 52.52, lon: 13.405}, bottom_right: {lat: 52.51, lon: 13.415}}
+LIMIT 10;
 
 -- GEO_RADIUS
-QUERY 'test' FROM docs WHERE location GEO_RADIUS {
-  center: {lat: 52.52, lon: 13.405},
-  radius: 1000.0
-} LIMIT 10;
+QUERY 'test'
+FROM docs
+WHERE location GEO_RADIUS {center: {lat: 52.52, lon: 13.405}, radius: 1000.0}
+LIMIT 10;
 
 -- GEO_POLYGON
-QUERY 'test' FROM docs WHERE location GEO_POLYGON {
-  exterior: [
-    {lat: -70.0, lon: -70.0},
-    {lat: 60.0, lon: -70.0},
-    {lat: 60.0, lon: 60.0},
-    {lat: -70.0, lon: 60.0}
-  ]
-} LIMIT 10;
+QUERY 'test'
+FROM docs
+WHERE location GEO_POLYGON {exterior: [{lat: -70.0, lon: -70.0}, {lat: 60.0, lon: -70.0}, {lat: 60.0, lon: 60.0}, {lat: -70.0, lon: 60.0}]}
+LIMIT 10;
 
 -- GEO_POLYGON with interior holes
-QUERY 'test' FROM docs WHERE location GEO_POLYGON {
-  exterior: [
-    {lat: -70.0, lon: -70.0},
-    {lat: 60.0, lon: -70.0},
-    {lat: 60.0, lon: 60.0},
-    {lat: -70.0, lon: 60.0}
-  ],
-  interiors: [
-    [
-      {lat: -50.0, lon: -50.0},
-      {lat: 50.0, lon: -50.0},
-      {lat: 50.0, lon: 50.0},
-      {lat: -50.0, lon: 50.0}
-    ]
-  ]
-} LIMIT 10;
+QUERY 'test'
+FROM docs
+WHERE location GEO_POLYGON {exterior: [{lat: -70.0, lon: -70.0}, {lat: 60.0, lon: -70.0}, {lat: 60.0, lon: 60.0}, {lat: -70.0, lon: 60.0}], interiors: [[{lat: -50.0, lon: -50.0}, {lat: 50.0, lon: -50.0}, {lat: 50.0, lon: 50.0}, {lat: -50.0, lon: 50.0}]]}
+LIMIT 10;
+

@@ -1,7 +1,7 @@
 -- create-collection.qql — CREATE COLLECTION statements
 
 -- Simple dense collection with MODEL
-CREATE COLLECTION docs USING MODEL 'all-MiniLM-L6-v2';
+CREATE COLLECTION docs USING DENSE MODEL 'all-MiniLM-L6-v2';
 
 -- Explicit DENSE MODEL
 CREATE COLLECTION docs USING DENSE MODEL 'nomic-embed-text';
@@ -13,9 +13,7 @@ CREATE COLLECTION docs HYBRID;
 CREATE COLLECTION docs HYBRID RERANK;
 
 -- Hybrid with named dense and sparse vectors
-CREATE COLLECTION docs HYBRID
-  DENSE VECTOR semantic_v2
-  SPARSE VECTOR lexical_v2;
+CREATE COLLECTION docs HYBRID DENSE VECTOR semantic_v2 SPARSE VECTOR lexical_v2;
 
 -- Explicit vector definitions
 CREATE COLLECTION docs (
@@ -26,22 +24,31 @@ CREATE COLLECTION docs (
 -- With HNSW config
 CREATE COLLECTION docs (
   dense VECTOR(768, COSINE)
-) WITH HNSW (m = 16, ef_construct = 100);
+)
+WITH HNSW (m = 16, ef_construct = 100);
 
 -- With QUANTIZATION
-CREATE COLLECTION docs (dense VECTOR(384, COSINE))
+CREATE COLLECTION docs (
+  dense VECTOR(384, COSINE)
+)
 WITH QUANTIZATION (type = 'scalar', quantile = 0.95);
 
 -- Turbo quantization
-CREATE COLLECTION docs (dense VECTOR(384, COSINE))
-WITH QUANTIZATION (type = 'turbo', bits = 2, always_ram = true);
+CREATE COLLECTION docs (
+  dense VECTOR(384, COSINE)
+)
+WITH QUANTIZATION (type = 'turbo', always_ram = true, bits = 2.0);
 
 -- Binary quantization
-CREATE COLLECTION docs (dense VECTOR(384, COSINE))
+CREATE COLLECTION docs (
+  dense VECTOR(384, COSINE)
+)
 WITH QUANTIZATION (type = 'binary', always_ram = true);
 
 -- Product quantization
-CREATE COLLECTION docs (dense VECTOR(384, COSINE))
+CREATE COLLECTION docs (
+  dense VECTOR(384, COSINE)
+)
 WITH QUANTIZATION (type = 'product');
 
 -- Per-vector quantization
@@ -53,21 +60,20 @@ CREATE COLLECTION docs (
 -- Multivector (ColBERT) with HNSW disabled
 CREATE COLLECTION docs (
   dense VECTOR(384, COSINE),
-  colbert VECTOR(128, COSINE) WITH MULTIVECTOR (comparator = 'max_sim') WITH HNSW (m = 0)
+  colbert VECTOR(128, COSINE) WITH HNSW (m = 0) WITH MULTIVECTOR (comparator = 'max_sim')
 );
 
 -- Multi-tenant collection with custom sharding
 CREATE COLLECTION sec10k (
   dense VECTOR(768, COSINE),
   sparse SPARSE
-) WITH HNSW (m = 16, ef_construct = 100)
-WITH PARAMS (
-  replication_factor = 2,
-  shard_number = 8,
-  sharding_method = 'custom',
-  shard_keys = ['honeywell', 'ge', '3m', 'rtx']
-);
+)
+WITH HNSW (m = 16, ef_construct = 100)
+WITH PARAMS (replication_factor = 2, shard_number = 8, sharding_method = 'custom', shard_keys = ['honeywell', 'ge', '3m', 'rtx']);
 
 -- With OPTIMIZERS
-CREATE COLLECTION docs (dense VECTOR(384, COSINE))
+CREATE COLLECTION docs (
+  dense VECTOR(384, COSINE)
+)
 WITH OPTIMIZERS (max_segment_size = 500000);
+

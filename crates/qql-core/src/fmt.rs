@@ -22,10 +22,196 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::fmt::Write;
 
-/// Parse `source` and render it in canonical QQL form.
+/// Parse `source` and render it in canonical QQL form, preserving comments and blank lines.
 pub fn format(source: &str) -> Result<String, QqlError> {
-    let statements = Parser::parse_all(source)?;
-    Ok(format_script(&statements))
+    let statements_with_spans = Parser::parse_all_with_spans(source)?;
+    if statements_with_spans.is_empty() {
+        let (comments, _) = parse_trivia_lines_with_trailing_blank(source);
+        if comments.is_empty() {
+            return Ok(String::new());
+        }
+        let mut out = String::new();
+        for line in comments {
+            out.push_str(&line);
+            out.push('\n');
+        }
+        return Ok(out);
+    }
+
+    let mut out = String::new();
+    let n = statements_with_spans.len();
+
+    // 1. File header before the first statement
+    let first_stmt_start = statements_with_spans[0].1.start;
+    let header_slice = &source[..first_stmt_start];
+    let (header_comments, had_blank_after_header) =
+        parse_trivia_lines_with_trailing_blank(header_slice);
+    if !header_comments.is_empty() {
+        for line in &header_comments {
+            out.push_str(line);
+            out.push('\n');
+        }
+        if had_blank_after_header {
+            out.push('\n');
+        }
+    }
+
+    // 2. Format each statement and following trivia
+    for i in 0..n {
+        let (stmt, stmt_span) = &statements_with_spans[i];
+
+        // Check if there are any inline comments inside the statement body
+        let inner_slice = &source[stmt_span.start..stmt_span.end];
+        let inline_comments = find_comments_in_slice(inner_slice);
+        for comment in inline_comments {
+            out.push_str(comment);
+            out.push('\n');
+        }
+
+        // Render the statement
+        out.push_str(&format_stmt(stmt));
+        out.push(';');
+
+        // Check gap following statement
+        let gap_start = stmt_span.end;
+        let gap_end = if i + 1 < n {
+            statements_with_spans[i + 1].1.start
+        } else {
+            source.len()
+        };
+        let gap_slice = &source[gap_start..gap_end];
+
+        let (same_line, rest) = match gap_slice.find('\n') {
+            Some(idx) => (&gap_slice[..idx], &gap_slice[idx + 1..]),
+            None => (gap_slice, ""),
+        };
+
+        // Trailing comment on the same line after semicolon
+        if let Some(pos) = same_line.find("--") {
+            out.push(' ');
+            out.push_str(same_line[pos..].trim_end());
+        }
+        out.push('\n');
+
+        if i + 1 < n {
+            // Inter-statement gap
+            let (gap_comments, had_blank_after_gap) = parse_trivia_lines_with_trailing_blank(rest);
+            if gap_comments.is_empty() {
+                // No comments: check if there was a blank line between statements
+                if gap_slice.matches('\n').count() >= 2 {
+                    out.push('\n');
+                }
+            } else {
+                // Comments between statements: precede with a blank line for readability
+                out.push('\n');
+                for line in &gap_comments {
+                    out.push_str(line);
+                    out.push('\n');
+                }
+                if had_blank_after_gap {
+                    out.push('\n');
+                }
+            }
+        } else {
+            // Trailing trivia after last statement
+            let (trailer_comments, _) = parse_trivia_lines_with_trailing_blank(rest);
+            if !trailer_comments.is_empty() {
+                out.push('\n');
+                for line in &trailer_comments {
+                    out.push_str(line);
+                    out.push('\n');
+                }
+            }
+        }
+    }
+
+    Ok(out)
+}
+
+fn parse_trivia_lines_with_trailing_blank(slice: &str) -> (Vec<String>, bool) {
+    let mut comments = Vec::new();
+    let mut pending_blank = false;
+
+    let had_blank_after = if let Some(last_comment_idx) = slice.rfind("--") {
+        let after_comment = &slice[last_comment_idx..];
+        if let Some(nl_idx) = after_comment.find('\n') {
+            after_comment[nl_idx + 1..].contains('\n')
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    for line in slice.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            if !comments.is_empty() {
+                pending_blank = true;
+            }
+        } else if trimmed.starts_with("--") {
+            if pending_blank {
+                comments.push(String::new());
+                pending_blank = false;
+            }
+            comments.push(trimmed.into());
+        }
+    }
+
+    (comments, had_blank_after)
+}
+
+fn find_comments_in_slice(slice: &str) -> Vec<&str> {
+    let mut comments = Vec::new();
+    let bytes = slice.as_bytes();
+    let mut pos = 0;
+    while pos < bytes.len() {
+        match bytes[pos] {
+            b'\'' | b'"' | b'`' => {
+                let quote = bytes[pos];
+                pos += 1;
+                let is_triple =
+                    pos + 1 < bytes.len() && bytes[pos] == quote && bytes[pos + 1] == quote;
+                if is_triple {
+                    pos += 2;
+                    let delim = if quote == b'\'' { "'''" } else { "\"\"\"" };
+                    if let Some(idx) = slice[pos..].find(delim) {
+                        pos += idx + 3;
+                    } else {
+                        break;
+                    }
+                } else {
+                    while pos < bytes.len() {
+                        if bytes[pos] == b'\\' {
+                            pos += 2;
+                            continue;
+                        }
+                        if bytes[pos] == quote {
+                            if quote == b'\'' && pos + 1 < bytes.len() && bytes[pos + 1] == b'\'' {
+                                pos += 2;
+                                continue;
+                            }
+                            pos += 1;
+                            break;
+                        }
+                        pos += 1;
+                    }
+                }
+            }
+            b'-' if pos + 1 < bytes.len() && bytes[pos + 1] == b'-' => {
+                let start = pos;
+                pos += 2;
+                while pos < bytes.len() && bytes[pos] != b'\n' {
+                    pos += 1;
+                }
+                comments.push(slice[start..pos].trim_end());
+            }
+            _ => {
+                pos += 1;
+            }
+        }
+    }
+    comments
 }
 
 /// Render a list of statements as a canonical script (each terminated by `;`,
@@ -65,8 +251,15 @@ pub fn format_stmt(statement: &Stmt) -> String {
         }
         Stmt::Upsert(statement) => {
             let mut out = format!("UPSERT INTO {} VALUES", render_name(&statement.collection));
+            let multiline_points = statement.points.len() > 1;
             for (i, point) in statement.points.iter().enumerate() {
-                if i > 0 {
+                if multiline_points {
+                    if i == 0 {
+                        out.push_str("\n  ");
+                    } else {
+                        out.push_str(",\n  ");
+                    }
+                } else if i > 0 {
                     out.push_str(", ");
                 } else {
                     out.push(' ');
@@ -77,12 +270,17 @@ pub fn format_stmt(statement: &Stmt) -> String {
                 let _ = write!(out, " USING {}", render_embedding_spec(embedding));
             }
             if !statement.embed.is_empty() {
-                out.push_str(" EMBED ");
-                for (i, directive) in statement.embed.iter().enumerate() {
-                    if i > 0 {
-                        out.push_str(", ");
+                if statement.embed.len() > 1 {
+                    out.push_str("\nEMBED ");
+                    for (i, directive) in statement.embed.iter().enumerate() {
+                        if i > 0 {
+                            out.push_str(",\n  ");
+                        }
+                        out.push_str(&render_embed_directive(directive));
                     }
-                    out.push_str(&render_embed_directive(directive));
+                } else {
+                    out.push_str(" EMBED ");
+                    out.push_str(&render_embed_directive(&statement.embed[0]));
                 }
             }
             if let Some(key) = &statement.shard_key {
@@ -97,20 +295,53 @@ pub fn format_stmt(statement: &Stmt) -> String {
             if !mode.is_empty() && (!has_vectors || statement.vectors.is_empty()) {
                 let _ = write!(out, " {}", mode);
             }
-            if has_vectors {
-                out.push_str(" (");
-                let mut defs = Vec::new();
-                for vector in &statement.vectors {
-                    defs.push(render_vector_def(vector));
-                }
-                for sparse in &statement.sparse_vectors {
-                    defs.push(render_sparse_vector_def(sparse));
-                }
-                out.push_str(&defs.join(", "));
-                out.push(')');
+            let mut defs = Vec::new();
+            for vector in &statement.vectors {
+                defs.push(render_vector_def(vector));
             }
-            if let Some(config) = &statement.config {
-                out.push_str(&render_collection_config(config));
+            for sparse in &statement.sparse_vectors {
+                defs.push(render_sparse_vector_def(sparse));
+            }
+
+            let configs = if let Some(config) = &statement.config {
+                render_collection_config_clauses(config)
+            } else {
+                Vec::new()
+            };
+
+            let single_line_len = out.len()
+                + if has_vectors {
+                    defs.iter().map(|d| d.len() + 2).sum::<usize>() + 3
+                } else {
+                    0
+                }
+                + configs.iter().map(|c| c.len() + 1).sum::<usize>();
+
+            let is_complex = defs.len() >= 2
+                || (has_vectors && !configs.is_empty())
+                || configs.len() >= 2
+                || single_line_len > 80;
+
+            if is_complex {
+                if has_vectors {
+                    out.push_str(" (\n  ");
+                    out.push_str(&defs.join(",\n  "));
+                    out.push_str("\n)");
+                }
+                for config_clause in configs {
+                    out.push('\n');
+                    out.push_str(&config_clause);
+                }
+            } else {
+                if has_vectors {
+                    out.push_str(" (");
+                    out.push_str(&defs.join(", "));
+                    out.push(')');
+                }
+                for config_clause in configs {
+                    out.push(' ');
+                    out.push_str(&config_clause);
+                }
             }
             out
         }
@@ -162,7 +393,18 @@ pub fn format_stmt(statement: &Stmt) -> String {
         Stmt::AlterCollection(statement) => {
             let mut out = format!("ALTER COLLECTION {}", render_name(&statement.collection));
             if let Some(config) = &statement.config {
-                out.push_str(&render_collection_config(config));
+                let clauses = render_collection_config_clauses(config);
+                if clauses.len() >= 2 {
+                    for clause in clauses {
+                        out.push('\n');
+                        out.push_str(&clause);
+                    }
+                } else {
+                    for clause in clauses {
+                        out.push(' ');
+                        out.push_str(&clause);
+                    }
+                }
             }
             out
         }
@@ -322,41 +564,24 @@ pub fn format_stmt(statement: &Stmt) -> String {
 
 fn render_query_body(query: &QueryStmt) -> String {
     let mut out = String::new();
-    if !query.ctes.is_empty() {
-        out.push_str("WITH ");
+    let has_ctes = !query.ctes.is_empty();
+    if has_ctes {
+        out.push_str("WITH\n");
         for (i, cte) in query.ctes.iter().enumerate() {
             if i > 0 {
-                out.push_str(", ");
+                out.push_str(",\n");
             }
-            let _ = write!(out, "{} AS (", render_name(&cte.name));
-            // CTE bodies inherit the enclosing `ctes` list in the AST; a CTE
-            // cannot declare its own WITH clause, so render it without one.
+            let _ = write!(out, "  {} AS (", render_name(&cte.name));
             out.push_str(&render_query_body_inner(&cte.query));
             out.push(')');
         }
-        out.push(' ');
+        out.push('\n');
     }
-    out.push_str(&render_query_body_inner(query));
+    out.push_str(&render_query_body_formatted(query, has_ctes));
     out
 }
 
-/// Render `QUERY <expr> [FROM c] <tail>` without any WITH prefix. Used for
-/// CTE bodies and inline prefetch queries, which cannot declare their own CTEs.
-fn render_query_body_inner(query: &QueryStmt) -> String {
-    let mut out = String::from("QUERY ");
-    out.push_str(&render_query_expr(&query.expression));
-    if let QueryCollection::Explicit(collection) = &query.collection {
-        let _ = write!(out, " FROM {}", render_name(collection));
-    }
-    let tail = render_query_tail(query);
-    if !tail.is_empty() {
-        out.push(' ');
-        out.push_str(&tail);
-    }
-    out
-}
-
-fn render_query_tail(query: &QueryStmt) -> String {
+fn query_tail_clauses(query: &QueryStmt) -> Vec<String> {
     let mut parts: Vec<String> = Vec::new();
     if let Some(using) = query_expr_using(&query.expression) {
         parts.push(format!("USING {}", render_vector_target(using)));
@@ -409,7 +634,66 @@ fn render_query_tail(query: &QueryStmt) -> String {
     if let Some(offset) = query.page.offset {
         parts.push(format!("OFFSET {}", offset));
     }
-    parts.join(" ")
+    parts
+}
+
+/// Render `QUERY <expr> [FROM c] <tail>` formatted with standard single-line/multiline layout.
+fn render_query_body_formatted(query: &QueryStmt, has_ctes: bool) -> String {
+    let expr_str = format!("QUERY {}", render_query_expr(&query.expression));
+    let coll_str = match &query.collection {
+        QueryCollection::Explicit(collection) => Some(format!("FROM {}", render_name(collection))),
+        QueryCollection::Inherited => None,
+    };
+    let tail_clauses = query_tail_clauses(query);
+
+    let single_line_len = expr_str.len()
+        + coll_str.as_ref().map(|s| s.len() + 1).unwrap_or(0)
+        + tail_clauses.iter().map(|s| s.len() + 1).sum::<usize>();
+
+    let is_multiline = has_ctes
+        || tail_clauses.len() >= 3
+        || single_line_len > 80
+        || tail_clauses
+            .iter()
+            .any(|c| c.starts_with("PREFETCH") && c.contains(','));
+
+    if is_multiline {
+        let mut lines = Vec::new();
+        lines.push(expr_str);
+        if let Some(coll) = coll_str {
+            lines.push(coll);
+        }
+        for clause in tail_clauses {
+            lines.push(clause);
+        }
+        lines.join("\n")
+    } else {
+        let mut parts = Vec::new();
+        parts.push(expr_str);
+        if let Some(coll) = coll_str {
+            parts.push(coll);
+        }
+        for clause in tail_clauses {
+            parts.push(clause);
+        }
+        parts.join(" ")
+    }
+}
+
+/// Render `QUERY <expr> [FROM c] <tail>` on a single line. Used for
+/// CTE bodies and inline prefetch queries, which cannot declare their own CTEs.
+fn render_query_body_inner(query: &QueryStmt) -> String {
+    let mut out = String::from("QUERY ");
+    out.push_str(&render_query_expr(&query.expression));
+    if let QueryCollection::Explicit(collection) = &query.collection {
+        let _ = write!(out, " FROM {}", render_name(collection));
+    }
+    let tail_clauses = query_tail_clauses(query);
+    if !tail_clauses.is_empty() {
+        out.push(' ');
+        out.push_str(&tail_clauses.join(" "));
+    }
+    out
 }
 
 fn render_query_expr(expression: &QueryExpr) -> String {
@@ -1111,49 +1395,45 @@ fn render_formula_min(formula: &FormulaExpr, min_precedence: u8) -> String {
 
 // ── DDL config blocks ────────────────────────────────────────────
 
-fn render_collection_config(config: &CollectionConfig) -> String {
-    let mut out = String::new();
+fn render_collection_config_clauses(config: &CollectionConfig) -> Vec<String> {
+    let mut clauses = Vec::new();
     if let Some(hnsw) = &config.hnsw {
         if let Some(body) = render_hnsw_block(hnsw) {
-            let _ = write!(out, " WITH HNSW ({})", body);
+            clauses.push(format!("WITH HNSW ({})", body));
         }
     }
     if let Some(vectors) = &config.vectors {
         if let Some(body) = render_vectors_options(vectors) {
-            let _ = write!(out, " WITH VECTOR ({})", body);
+            clauses.push(format!("WITH VECTOR ({})", body));
         }
     }
     if let Some(optimizers) = &config.optimizers {
         if let Some(body) = render_optimizers_block(optimizers) {
-            let _ = write!(out, " WITH OPTIMIZERS ({})", body);
+            clauses.push(format!("WITH OPTIMIZERS ({})", body));
         }
     }
     if let Some(params) = &config.params {
         if let Some(body) = render_params_block(params) {
-            let _ = write!(out, " WITH PARAMS ({})", body);
+            clauses.push(format!("WITH PARAMS ({})", body));
         }
     }
     if let Some(quantization) = &config.quantization {
         if let Some(body) = render_quantization_block(quantization) {
-            let _ = write!(out, " WITH QUANTIZATION ({})", body);
+            clauses.push(format!("WITH QUANTIZATION ({})", body));
         }
     }
     if let Some(update) = &config.quantization_update {
-        // The parser stores a disable-update in `quantization_update` and the
-        // typed config in both `quantization` and `quantization_update.config`.
-        // Emit the disable form directly; fall back to the update's config only
-        // when `quantization` is absent.
         if update.disabled {
-            out.push_str(" WITH QUANTIZATION (disabled = true)");
+            clauses.push("WITH QUANTIZATION (disabled = true)".into());
         } else if config.quantization.is_none() {
             if let Some(config) = &update.config {
                 if let Some(body) = render_quantization_block(config) {
-                    let _ = write!(out, " WITH QUANTIZATION ({})", body);
+                    clauses.push(format!("WITH QUANTIZATION ({})", body));
                 }
             }
         }
     }
-    out
+    clauses
 }
 
 fn render_collection_mode(mode: &CollectionMode) -> String {
@@ -1482,7 +1762,7 @@ fn render_vector_value(value: &VectorValue) -> String {
             "[{}]",
             values
                 .iter()
-                .map(|v| render_f64(*v as f64))
+                .map(|v| render_f32(*v))
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
@@ -1495,7 +1775,7 @@ fn render_vector_value(value: &VectorValue) -> String {
                 .join(", "),
             values
                 .iter()
-                .map(|v| render_f64(*v as f64))
+                .map(|v| render_f32(*v))
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
@@ -1505,7 +1785,7 @@ fn render_vector_value(value: &VectorValue) -> String {
                 .map(|row| format!(
                     "[{}]",
                     row.iter()
-                        .map(|v| render_f64(*v as f64))
+                        .map(|v| render_f32(*v))
                         .collect::<Vec<_>>()
                         .join(", ")
                 ))
@@ -1532,6 +1812,19 @@ fn render_value(value: &Value) -> String {
         Value::List(items) => {
             let values: Vec<String> = items.iter().map(render_value).collect();
             format!("[{}]", values.join(", "))
+        }
+    }
+}
+
+fn render_f32(value: f32) -> String {
+    if value.fract() == 0.0 && value.abs() < 1e7 {
+        format!("{:.1}", value)
+    } else {
+        let rendered = value.to_string();
+        if rendered.contains('.') || rendered.contains('e') || rendered.contains('E') {
+            rendered
+        } else {
+            format!("{}.0", rendered)
         }
     }
 }
@@ -1711,4 +2004,76 @@ fn escape_string(value: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_render_f32_precision() {
+        assert_eq!(render_f32(0.1), "0.1");
+        assert_eq!(render_f32(0.2), "0.2");
+        assert_eq!(render_f32(0.3), "0.3");
+        assert_eq!(render_f32(1.0), "1.0");
+        assert_eq!(render_f32(0.0), "0.0");
+        assert_eq!(render_f32(-0.5), "-0.5");
+    }
+
+    #[test]
+    fn test_vector_formatting_precision() {
+        let input = "QUERY VECTOR [0.1, 0.2, 0.3] FROM docs LIMIT 10;";
+        let formatted = format(input).unwrap();
+        assert_eq!(
+            formatted,
+            "QUERY VECTOR [0.1, 0.2, 0.3] FROM docs LIMIT 10;\n"
+        );
+        let twice = format(&formatted).unwrap();
+        assert_eq!(formatted, twice);
+    }
+
+    #[test]
+    fn test_format_preserves_comments_and_blank_lines() {
+        let input = r#"-- Header comment line 1
+-- Header comment line 2
+
+-- Section 1
+COUNT FROM docs;
+
+-- Section 2
+COUNT FROM docs WHERE status = 'active'; -- trailing comment
+"#;
+        let formatted = format(input).unwrap();
+        assert_eq!(formatted, input);
+        let twice = format(&formatted).unwrap();
+        assert_eq!(formatted, twice);
+    }
+
+    #[test]
+    fn test_format_collapses_multiple_blank_lines() {
+        let input = r#"COUNT FROM docs;
+
+
+
+
+COUNT FROM other;
+"#;
+        let formatted = format(input).unwrap();
+        let expected = "COUNT FROM docs;\n\nCOUNT FROM other;\n";
+        assert_eq!(formatted, expected);
+        let twice = format(&formatted).unwrap();
+        assert_eq!(formatted, twice);
+    }
+
+    #[test]
+    fn test_format_inline_comment_inside_statement() {
+        let input =
+            "QUERY 'search' FROM docs\n-- filter status\nWHERE status = 'published' LIMIT 10;\n";
+        let formatted = format(input).unwrap();
+        let expected =
+            "-- filter status\nQUERY 'search' FROM docs WHERE status = 'published' LIMIT 10;\n";
+        assert_eq!(formatted, expected);
+        let twice = format(&formatted).unwrap();
+        assert_eq!(formatted, twice);
+    }
 }

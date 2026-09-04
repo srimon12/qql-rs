@@ -13,6 +13,8 @@ QUERY POINTS ('a1b2c3', 'd4e5f6') FROM docs;
 QUERY POINTS (1, 'uuid-here', 100) FROM docs;
 
 -- With payload and vector selectors
-QUERY POINTS (1, 2) FROM docs
+QUERY POINTS (1, 2)
+FROM docs
 WITH PAYLOAD INCLUDE (title, url)
 WITH VECTOR false;
+

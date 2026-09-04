@@ -5,3 +5,4 @@ CLEAR PAYLOAD FROM docs WHERE status = 'archived';
 
 -- Clear payload with complex filter
 CLEAR PAYLOAD FROM docs WHERE status = 'deleted' AND created_year < 2020;
+

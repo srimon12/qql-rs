@@ -1,7 +1,8 @@
 -- query-rerank.qql — Reranking query
 
 -- Basic rerank
-WITH candidates AS (QUERY TEXT 'vector database' USING dense LIMIT 100)
+WITH
+  candidates AS (QUERY 'vector database' USING dense LIMIT 100)
 QUERY RERANK TEXT 'vector database' MODEL 'reranker-v1'
 FROM docs
 USING colbert AS DENSE
@@ -9,7 +10,8 @@ PREFETCH (candidates)
 LIMIT 10;
 
 -- Rerank with vector input
-WITH candidates AS (QUERY VECTOR [0.1, 0.2] USING dense LIMIT 100)
+WITH
+  candidates AS (QUERY VECTOR [0.1, 0.2] USING dense LIMIT 100)
 QUERY RERANK VECTOR [0.1, 0.2] MODEL 'reranker-v1'
 FROM docs
 USING colbert AS DENSE
@@ -17,9 +19,11 @@ PREFETCH (candidates)
 LIMIT 10;
 
 -- Rerank with point input
-WITH candidates AS (QUERY POINT 42 USING dense LIMIT 100)
+WITH
+  candidates AS (QUERY POINT 42 USING dense LIMIT 100)
 QUERY RERANK POINT 42 MODEL 'reranker-v1'
 FROM docs
 USING colbert AS DENSE
 PREFETCH (candidates)
 LIMIT 10;
+

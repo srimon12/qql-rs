@@ -11,3 +11,4 @@ QUERY ORDER BY price ASC FROM products WHERE category = 'electronics' LIMIT 10;
 
 -- With OFFSET
 QUERY ORDER BY rating DESC FROM products LIMIT 10 OFFSET 20;
+

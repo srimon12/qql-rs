@@ -15,7 +15,8 @@ COUNT FROM docs WHERE status = 'active';
 -- DDL mixed with DML
 CREATE COLLECTION test (
   dense VECTOR(384, COSINE)
-) WITH HNSW (m = 16);
+)
+WITH HNSW (m = 16);
 
 UPSERT INTO test VALUES {id: 1, text: 'first'};
 
@@ -24,3 +25,4 @@ CREATE INDEX ON COLLECTION test FOR text TYPE keyword;
 QUERY 'search' FROM test LIMIT 5;
 
 DROP COLLECTION test;
+
