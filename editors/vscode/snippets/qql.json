@@ -68,6 +68,17 @@
     ],
     "description": "Exact point count"
   },
+  "Facet count": {
+    "prefix": ["qfacet"],
+    "body": [
+      "FACET ${1:field}",
+      "  FROM ${2:collection}",
+      "  WHERE ${3:filter}",
+      "  LIMIT ${4:10}",
+      "  EXACT ${5:true};"
+    ],
+    "description": "In-database categorical facet count"
+  },
   "Recommend": {
     "prefix": ["qrecommend"],
     "body": [

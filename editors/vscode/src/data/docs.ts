@@ -175,6 +175,13 @@ export const KEYWORD_DOCS: Record<string, KeywordDoc> = {
     summary: "Count matching points. Use `WITH (exact = true)` for exact counts.",
     example: "COUNT FROM docs WHERE active = true WITH (exact = true);",
   },
+  FACET: {
+    title: "FACET",
+    category: "Statement",
+    summary:
+      "Compute value counts for a payload field via Qdrant's `/collections/{collection}/facet` endpoint. Supports `WHERE`, `LIMIT`, `EXACT`, and `SHARD`.",
+    example: "FACET room_type FROM stays WHERE price < 150 LIMIT 5 EXACT true;",
+  },
   UPSERT: {
     title: "UPSERT INTO",
     category: "Statement",

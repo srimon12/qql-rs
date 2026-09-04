@@ -20,6 +20,9 @@ Highlights and completions cover the full QQL 1.5 surface, including:
 
 | Feature | Example |
 |---------|---------|
+| In-database faceting | `FACET room_type FROM stays WHERE price < 150 LIMIT 5 EXACT true;` |
+| Implicit vector search | `QUERY [0.1, 0.2, ...] FROM docs LIMIT 10;` |
+| Default payload | Point payloads returned by default (`WITH PAYLOAD true`) |
 | Quotas | `SHOW QUOTAS;` / `SET QUOTA (enabled = true, max_resident_memory_percent = 80) WAIT true;` |
 | Memory placement | `WITH VECTOR (memory = 'cached')`, `WITH HNSW (memory = 'cold')`, `payload_memory = 'cold'` |
 | MATCH PREFIX | `WHERE title MATCH PREFIX 'Comp'` |
