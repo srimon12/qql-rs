@@ -185,7 +185,7 @@ QUERY FUSION RRF FROM {COLLECTION} PREFETCH (a, b) PARAMS (rrf_k = 10, rrf_weigh
 
     # --- Select / Scroll ---
     stmts.append(("select-by-id",
-        f"QUERY POINTS ('{IDS['stemi']}') FROM {COLLECTION} WITH PAYLOAD true"))
+        f"QUERY POINTS ('{IDS['stemi']}') FROM {COLLECTION}"))
     stmts.append(("scroll-all",
         f"SCROLL FROM {COLLECTION} LIMIT 3"))
     stmts.append(("scroll-filtered",

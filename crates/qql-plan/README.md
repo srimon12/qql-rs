@@ -85,7 +85,7 @@ let route = to_rest_route(&op)?; // PUT /quotas?wait=true
 
 ## Docs
 
-- [AGENT.md](../../AGENT.md) pipeline · [Syntax](../../docs/syntax.md) · [Multitenancy](../../skills/qql-skill/references/qql-multitenancy.md)
+- [AGENTS.md](../../AGENTS.md) pipeline · [Syntax](../../docs/syntax.md) · [Multitenancy](../../skills/qql-skill/references/qql-multitenancy.md)
 
 ## Test
 

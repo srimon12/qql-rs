@@ -149,7 +149,7 @@ export const KEYWORD_DOCS: Record<string, KeywordDoc> = {
     title: "QUERY POINTS",
     category: "Query mode",
     summary: "Retrieve points by ID (no vector search). No `LIMIT` required.",
-    example: "QUERY POINTS (1, 2) FROM docs WITH PAYLOAD true;",
+    example: "QUERY POINTS (1, 2) FROM docs;",
   },
   ORDER: {
     title: "ORDER BY",
