@@ -17,24 +17,13 @@ are rejected.
 
 {% qqlExample title="Provision a catalog and query it" %}
 ```sql
-CREATE COLLECTION catalog (
-  dense VECTOR(384, COSINE)
-);
+CREATE COLLECTION catalog (dense VECTOR(384, COSINE));
 
-CREATE INDEX ON COLLECTION catalog
-FOR category
-TYPE keyword;
+CREATE INDEX ON COLLECTION catalog FOR category TYPE keyword;
 
-UPSERT INTO catalog VALUES {
-  id: 1,
-  text: 'red chair',
-  category: 'furniture'
-};
+UPSERT INTO catalog VALUES {id: 1, text: 'red chair', category: 'furniture'};
 
-QUERY TEXT 'chair'
-FROM catalog
-USING dense
-LIMIT 5;
+QUERY 'chair' FROM catalog USING dense LIMIT 5;
 ```
 {% /qqlExample %}
 

@@ -25,15 +25,7 @@ one unnamed vector or as an object of arbitrary named vectors.
 
 {% qqlExample title="Payload with a named dense vector" %}
 ```sql
-UPSERT INTO docs VALUES {
-  id: 1,
-  title: 'QQL',
-  text: 'Declarative vector retrieval',
-  vector: {
-    dense: [0.1, 0.2, 0.3],
-    sparse: {indices: [1, 9], values: [0.4, 0.7]}
-  }
-};
+UPSERT INTO docs VALUES {id: 1, vector: {dense: [0.1, 0.2, 0.3], sparse: {indices: [1, 9], values: [0.4, 0.7]}}, title: 'QQL', text: 'Declarative vector retrieval'};
 ```
 {% /qqlExample %}
 
@@ -44,21 +36,11 @@ and a `VECTOR`/`INTO` destination.
 
 {% qqlExample title="Embed multiple payload fields into named vectors" %}
 ```sql
-UPSERT INTO articles VALUES {
-  id: 'article-1',
-  title: 'Planning hybrid retrieval',
-  body: 'Dense and sparse candidate generation'
-}
+UPSERT INTO articles VALUES {id: 'article-1', title: 'Planning hybrid retrieval', body: 'Dense and sparse candidate generation'}
 EMBED body INTO dense_body USING DENSE,
-      title INTO sparse_title USING SPARSE;
+  title INTO sparse_title USING SPARSE;
 
-UPSERT INTO articles VALUES {
-  id: 'article-2',
-  title: 'Vector search',
-  body: 'Semantic ranking'
-}
-USING DENSE MODEL 'all-MiniLM-L6-v2' ON FIELD body INTO dense_body,
-      SPARSE MODEL 'qdrant/bm25' ON FIELD title INTO sparse_title;
+UPSERT INTO articles VALUES {id: 'article-2', title: 'Vector search', body: 'Semantic ranking'} USING DENSE MODEL 'all-MiniLM-L6-v2' ON FIELD body INTO dense_body, SPARSE MODEL 'qdrant/bm25' ON FIELD title INTO sparse_title;
 ```
 {% /qqlExample %}
 
@@ -88,24 +70,15 @@ accident.
 
 {% qqlExample title="Targeted point mutations" %}
 ```sql
-UPDATE docs
-SET PAYLOAD = {status: 'reviewed'}
-WHERE id = 42;
+UPDATE docs SET PAYLOAD = {status: 'reviewed'} WHERE id = 42;
 
-UPDATE docs
-SET VECTOR dense = [0.2, 0.3, 0.4]
-WHERE id = 42;
+UPDATE docs SET VECTOR dense = [0.2, 0.3, 0.4] WHERE id = 42;
 
-DELETE PAYLOAD draft_notes
-FROM docs
-WHERE status = 'published';
+DELETE PAYLOAD draft_notes FROM docs WHERE status = 'published';
 
-DELETE VECTOR dense
-FROM docs
-WHERE id = 42;
+DELETE VECTOR dense FROM docs WHERE id = 42;
 
-DELETE FROM docs
-WHERE status = 'expired';
+DELETE FROM docs WHERE status = 'expired';
 ```
 {% /qqlExample %}
 
@@ -122,14 +95,9 @@ cardinality and accepts the same filter vocabulary.
 
 {% qqlExample title="Browse published documents and count them" %}
 ```sql
-SCROLL FROM docs
-WHERE status = 'published'
-WITH VECTOR false
-LIMIT 100;
+SCROLL FROM docs WHERE status = 'published' WITH VECTOR false LIMIT 100;
 
-COUNT FROM docs
-WHERE status = 'published'
-WITH (exact = true);
+COUNT FROM docs WHERE status = 'published' WITH (exact = true);
 ```
 {% /qqlExample %}
 
@@ -145,16 +113,10 @@ per unique value without fetching full point records.
 {% qqlExample title="Facet counts with filtering and exact accuracy" %}
 ```sql
 -- Compute top 5 room types in a hospitality collection under €150/night
-FACET room_type
-FROM stays
-WHERE price < 150
-LIMIT 5
-EXACT true;
+FACET room_type FROM stays WHERE price < 150 LIMIT 5 EXACT true;
 
 -- Shard-routed facet using key front syntax
-FACET FROM catalog KEY category
-SHARD 'tenant_1'
-LIMIT 10;
+FACET category FROM catalog LIMIT 10 SHARD 'tenant_1';
 ```
 {% /qqlExample %}
 

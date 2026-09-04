@@ -37,7 +37,7 @@ await client.execute("CREATE COLLECTION docs HYBRID");
 await client.execute('UPSERT INTO docs VALUES {id: 1, text: "hello from edge"}');
 
 const report = await client.execute(
-  "QUERY TEXT 'hello' FROM docs USING dense LIMIT 5"
+  "QUERY 'hello' FROM docs USING dense LIMIT 5"
 );
 console.log(report.results[0].data);
 

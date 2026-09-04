@@ -17,12 +17,9 @@ reader.
 
 {% qqlExample title="Comparisons, membership, and boolean logic" %}
 ```sql
-QUERY TEXT 'search'
+QUERY 'search'
 FROM docs
-WHERE status = 'published'
-  AND year BETWEEN 2024 AND 2026
-  AND tags NOT IN ('archived', 'private')
-  AND (score >= 0.7 OR featured = true)
+WHERE status = 'published' AND year BETWEEN 2024 AND 2026 AND NOT tags IN ('archived', 'private') AND (score >= 0.7 OR featured = true)
 LIMIT 10;
 ```
 {% /qqlExample %}
@@ -55,15 +52,9 @@ text-index compatibility is enforced by the backend at execution time —
 
 {% qqlExample title="Text matching, cardinality, and presence" %}
 ```sql
-QUERY TEXT 'search'
+QUERY 'search'
 FROM docs
-WHERE content MATCH 'hello world'
-  AND tags MATCH ANY ('hello', 'world')
-  AND description MATCH PHRASE 'vector database'
-  AND title MATCH PREFIX 'Comp'
-  AND reviews VALUES_COUNT >= 2
-  AND HAS_VECTOR 'dense'
-  AND notes IS NOT NULL
+WHERE content MATCH 'hello world' AND tags MATCH ANY ('hello', 'world') AND description MATCH PHRASE 'vector database' AND title MATCH PREFIX 'Comp' AND reviews VALUES_COUNT >= 2 AND HAS_VECTOR dense AND NOT notes IS NULL
 LIMIT 10;
 ```
 {% /qqlExample %}
@@ -77,17 +68,12 @@ return `QQL-VALIDATION-SLICE`.
 
 {% qqlExample title="Prefix match and deterministic slice" %}
 ```sql
-QUERY TEXT 'search'
+QUERY 'search'
 FROM docs
-WHERE title MATCH PREFIX 'Comp'
-  AND SLICE (4, 1)
+WHERE title MATCH PREFIX 'Comp' AND SLICE (4, 1)
 LIMIT 10;
 
-QUERY TEXT 'search'
-FROM docs
-WHERE SLICE (4, 1)
-  AND status = 'active'
-LIMIT 10;
+QUERY 'search' FROM docs WHERE SLICE (4, 1) AND status = 'active' LIMIT 10;
 ```
 {% /qqlExample %}
 
@@ -99,10 +85,9 @@ payload array. This avoids accidentally matching `rating` from one review and
 
 {% qqlExample title="Phrase and nested-payload matching" %}
 ```sql
-QUERY TEXT 'quality'
+QUERY 'quality'
 FROM products
-WHERE description MATCH PHRASE 'machine washable'
-  AND NESTED('reviews', rating >= 4 AND verified = true)
+WHERE description MATCH PHRASE 'machine washable' AND NESTED('reviews', rating >= 4 AND verified = true)
 LIMIT 20;
 ```
 {% /qqlExample %}
@@ -114,24 +99,18 @@ radius, and polygon structure are validated before planning.
 
 {% qqlExample title="Points within a radius" %}
 ```sql
-QUERY TEXT 'coffee'
+QUERY 'coffee'
 FROM places
-WHERE location GEO_RADIUS {
-  center: {lat: 52.52, lon: 13.405},
-  radius: 1500.0
-}
+WHERE location GEO_RADIUS {center: {lat: 52.52, lon: 13.405}, radius: 1500.0}
 LIMIT 10;
 ```
 {% /qqlExample %}
 
 {% qqlExample title="A geographic bounding box" %}
 ```sql
-QUERY TEXT 'museum'
+QUERY 'museum'
 FROM places
-WHERE location GEO_BBOX {
-  top_left: {lat: 52.54, lon: 13.36},
-  bottom_right: {lat: 52.49, lon: 13.45}
-}
+WHERE location GEO_BBOX {top_left: {lat: 52.54, lon: 13.36}, bottom_right: {lat: 52.49, lon: 13.45}}
 LIMIT 10;
 ```
 {% /qqlExample %}
@@ -143,24 +122,9 @@ positive — all before planning.
 
 {% qqlExample title="A polygon with an interior hole" %}
 ```sql
-QUERY TEXT 'territory'
+QUERY 'territory'
 FROM places
-WHERE location GEO_POLYGON {
-  exterior: [
-    {lat: -70.0, lon: -70.0},
-    {lat: 60.0, lon: -70.0},
-    {lat: 60.0, lon: 60.0},
-    {lat: -70.0, lon: 60.0}
-  ],
-  interiors: [
-    [
-      {lat: -50.0, lon: -50.0},
-      {lat: 50.0, lon: -50.0},
-      {lat: 50.0, lon: 50.0},
-      {lat: -50.0, lon: 50.0}
-    ]
-  ]
-}
+WHERE location GEO_POLYGON {exterior: [{lat: -70.0, lon: -70.0}, {lat: 60.0, lon: -70.0}, {lat: 60.0, lon: 60.0}, {lat: -70.0, lon: 60.0}], interiors: [[{lat: -50.0, lon: -50.0}, {lat: 50.0, lon: -50.0}, {lat: 50.0, lon: 50.0}, {lat: -50.0, lon: 50.0}]]}
 LIMIT 10;
 ```
 {% /qqlExample %}

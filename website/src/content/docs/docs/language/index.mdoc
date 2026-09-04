@@ -23,19 +23,11 @@ accepts at most 256 statements in one script.
 
 {% qqlExample title="Provision, write, and retrieve" %}
 ```sql
-CREATE COLLECTION notes (
-  dense VECTOR(384, COSINE)
-);
+CREATE COLLECTION notes (dense VECTOR(384, COSINE));
 
-UPSERT INTO notes VALUES {
-  id: 1,
-  text: 'first note'
-};
+UPSERT INTO notes VALUES {id: 1, text: 'first note'};
 
-QUERY TEXT 'note'
-FROM notes
-USING dense
-LIMIT 5;
+QUERY 'note' FROM notes USING dense LIMIT 5;
 ```
 {% /qqlExample %}
 
@@ -110,7 +102,7 @@ Each clause appears at most once. The parser does not silently reorder a query:
 
 {% qqlExample title="A complete nearest-neighbor query" %}
 ```sql
-QUERY TEXT 'search'
+QUERY 'search'
 FROM docs
 USING semantic_v2 AS DENSE
 WHERE status = 'published'

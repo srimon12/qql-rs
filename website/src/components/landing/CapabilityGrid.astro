@@ -11,7 +11,7 @@ const featured = capabilities.slice(0, 2);
 const rest = capabilities.slice(2);
 
 const featuredCode = [
-  `QUERY TEXT 'vector database'`,
+  `QUERY 'vector database'`,
   `FROM docs USING HYBRID`,
   `DENSE dense SPARSE bm25 FUSION RRF`,
   `WHERE category = 'tech' LIMIT 10;`,

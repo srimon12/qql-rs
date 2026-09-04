@@ -14,10 +14,7 @@ pip install pyqql
 
 {% qqlExample title="Scoped medical-record search" %}
 ```sql
-QUERY TEXT 'cardiology'
-FROM medical_records
-USING dense
-LIMIT 5;
+QUERY 'cardiology' FROM medical_records USING dense LIMIT 5;
 ```
 {% /qqlExample %}
 

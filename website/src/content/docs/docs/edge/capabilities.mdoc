@@ -77,8 +77,7 @@ DROP COLLECTION docs;
 ```sql
 UPSERT INTO docs VALUES
   {id: 1, text: 'runs locally', category: 'edge'},
-  {id: 2, text: 'shipped to production', category: 'qql'}
-USING HYBRID;
+  {id: 2, text: 'shipped to production', category: 'qql'} USING HYBRID;
 ```
 {% /qqlExample %}
 
@@ -87,7 +86,7 @@ schema's dense and sparse vectors. Explicit vectors work too:
 
 {% qqlExample title="Explicit dense vector" %}
 ```sql
-UPSERT INTO docs VALUES {id: 1, text: 'precomputed', vector: {dense: [0.1, 0.2, 0.3]}};
+UPSERT INTO docs VALUES {id: 1, vector: {dense: [0.1, 0.2, 0.3]}, text: 'precomputed'};
 ```
 {% /qqlExample %}
 
@@ -113,24 +112,33 @@ DELETE VECTOR colbert FROM docs WHERE id = 42;
 
 {% qqlExample title="Dense, sparse, and hybrid search" %}
 ```sql
-QUERY TEXT 'edge vector search' FROM docs USING dense LIMIT 10;
+QUERY 'edge vector search' FROM docs USING dense LIMIT 10;
 
-QUERY TEXT 'keyword style' FROM docs USING sparse LIMIT 10;
+QUERY 'keyword style' FROM docs USING sparse LIMIT 10;
 
-QUERY 'hybrid' FROM docs USING HYBRID LIMIT 10;
+QUERY HYBRID TEXT 'hybrid' FUSION RRF FROM docs LIMIT 10;
 
-QUERY HYBRID TEXT 'hybrid' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10;
+QUERY HYBRID TEXT 'hybrid' DENSE dense SPARSE sparse FUSION RRF
+FROM docs
+LIMIT 10;
 ```
 {% /qqlExample %}
 
 {% qqlExample title="Fusion, MMR, and recommendation" %}
 ```sql
-WITH candidates AS (QUERY TEXT 'x' USING dense LIMIT 100)
-QUERY FUSION RRF FROM docs PREFETCH (candidates) LIMIT 10;
+WITH
+  candidates AS (QUERY 'x' USING dense LIMIT 100)
+QUERY FUSION RRF
+FROM docs
+PREFETCH (candidates)
+LIMIT 10;
 
 QUERY MMR TEXT 'x' DIVERSITY 0.7 CANDIDATES 100 FROM docs USING dense LIMIT 10;
 
-QUERY RECOMMEND POSITIVE (1, 2) NEGATIVE (3) STRATEGY best_score FROM docs USING dense LIMIT 10;
+QUERY RECOMMEND POSITIVE (1, 2) NEGATIVE (3) STRATEGY best_score
+FROM docs
+USING dense
+LIMIT 10;
 ```
 {% /qqlExample %}
 
@@ -138,7 +146,7 @@ QUERY RECOMMEND POSITIVE (1, 2) NEGATIVE (3) STRATEGY best_score FROM docs USING
 ```sql
 QUERY FORMULA $score * 0.8 DEFAULTS (score = 0.0) FROM docs LIMIT 10;
 
-QUERY CONTEXT (POSITIVE TEXT 'good' NEGATIVE TEXT 'bad') FROM docs LIMIT 10;
+QUERY CONTEXT (POSITIVE 'good' NEGATIVE 'bad') FROM docs LIMIT 10;
 
 QUERY SAMPLE RANDOM FROM docs LIMIT 10;
 
@@ -153,10 +161,13 @@ local storage and the host cross-encoder model scores the pairs.
 
 {% qqlExample title="Search params, threshold, and offset" %}
 ```sql
-QUERY TEXT 'x' FROM docs USING dense
+QUERY 'x'
+FROM docs
+USING dense
 PARAMS (hnsw_ef = 64, exact = true)
 SCORE THRESHOLD 0.5
-LIMIT 10 OFFSET 20;
+LIMIT 10
+OFFSET 20;
 ```
 {% /qqlExample %}
 

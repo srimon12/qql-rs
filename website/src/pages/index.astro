@@ -24,23 +24,23 @@ const pageDescription =
   "QQL is to Qdrant what SQL is to Postgres. One declarative language for hybrid search, filtering, mutations, and DDL across Rust, Python, Node.js, WASM, REST, gRPC, and edge.";
 
 // The documentation verifier parses every `verifiedQql` String.raw template.
-const verifiedQqlHero = String.raw`QUERY TEXT 'chest pain' FROM medical
+const verifiedQqlHero = String.raw`QUERY 'chest pain' FROM medical
 USING dense
 WHERE department = 'cardio'
 SHARD 'hospital-east'
 LIMIT 5;`;
 
-const verifiedQqlCompareHybrid = String.raw`QUERY TEXT 'distributed consensus' FROM docs
+const verifiedQqlCompareHybrid = String.raw`QUERY 'distributed consensus' FROM docs
 USING HYBRID DENSE dense_vec SPARSE bm25_vec FUSION RRF
 WHERE status = 'active'
 LIMIT 10;`;
 
-const verifiedQqlCompareTenant = String.raw`QUERY TEXT 'annual financial risks' FROM filings
+const verifiedQqlCompareTenant = String.raw`QUERY 'annual financial risks' FROM filings
 WHERE department = 'finance'
 SHARD 'tenant-corp-99'
 LIMIT 5;`;
 
-const verifiedQqlCompareFilters = String.raw`QUERY TEXT 'industrial robotics' FROM products
+const verifiedQqlCompareFilters = String.raw`QUERY 'industrial robotics' FROM products
 WHERE (category = 'hardware' OR category = 'tools')
   AND price <= 1200.0 AND in_stock = true
 LIMIT 20;`;
@@ -161,7 +161,7 @@ LIMIT 20;`;
         specimenTitle="search.qql"
         specimenQql={verifiedQqlHero}
       >
-        <span class="kw">QUERY TEXT</span> <span class="str">'chest pain'</span><br />
+        <span class="kw">QUERY</span> <span class="str">'chest pain'</span><br />
         <span class="kw">FROM</span> <span class="id">medical</span><br />
         <span class="kw">USING</span> <span class="id">dense</span><br />
         <span class="kw">WHERE</span> <span class="id">department</span>{" "}

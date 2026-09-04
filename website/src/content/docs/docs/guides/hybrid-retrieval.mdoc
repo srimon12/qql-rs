@@ -12,8 +12,8 @@ matching. QQL exposes a shorthand and an explicit multi-stage form.
 
 {% qqlExample title="Schema-resolved hybrid search" %}
 ```sql
-QUERY TEXT 'zero downtime deployment' FROM runbooks
-USING HYBRID DENSE dense SPARSE sparse FUSION RRF
+QUERY HYBRID TEXT 'zero downtime deployment' DENSE dense SPARSE sparse FUSION RRF
+FROM runbooks
 WHERE service = 'gateway'
 LIMIT 10;
 ```
@@ -23,9 +23,7 @@ If the collection has exactly one dense and one sparse vector, omit the names:
 
 {% qqlExample title="Hybrid defaults" %}
 ```sql
-QUERY 'zero downtime deployment' FROM runbooks
-USING HYBRID
-LIMIT 10;
+QUERY HYBRID TEXT 'zero downtime deployment' FUSION RRF FROM runbooks LIMIT 10;
 ```
 {% /qqlExample %}
 
@@ -34,18 +32,8 @@ LIMIT 10;
 {% qqlExample title="Weighted RRF pipeline" %}
 ```sql
 WITH
-  semantic AS (
-    QUERY TEXT 'zero downtime deployment'
-    USING dense
-    WHERE service = 'gateway'
-    LIMIT 120
-  ),
-  lexical AS (
-    QUERY TEXT 'zero downtime deployment'
-    USING sparse
-    WHERE service = 'gateway'
-    LIMIT 180
-  )
+  semantic AS (QUERY 'zero downtime deployment' USING dense WHERE service = 'gateway' LIMIT 120),
+  lexical AS (QUERY 'zero downtime deployment' USING sparse WHERE service = 'gateway' LIMIT 180)
 QUERY FUSION RRF
 FROM runbooks
 PREFETCH (semantic, lexical)
