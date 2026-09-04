@@ -17,7 +17,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 rust-version = "1.98"
 authors = ["Srimon Danguria <srimon12mckv@gmail.com>"]
@@ -32,11 +32,11 @@ homepage = "https://github.com/srimon12/qql-rs"
 missing_docs = "warn"
 
 [workspace.dependencies]
-qql-core = { version = "0.3.0", path = "crates/qql-core" }
-qql-plan = { version = "0.3.0", path = "crates/qql-plan" }
-qql-embed = { version = "0.3.0", path = "crates/qql-embed" }
-qql = { version = "0.3.0", path = "crates/qql-runtime", default-features = false }
-qql-edge = { version = "0.3.0", path = "crates/qql-edge", default-features = false }
+qql-core = { version = "0.3.1", path = "crates/qql-core" }
+qql-plan = { version = "0.3.1", path = "crates/qql-plan" }
+qql-embed = { version = "0.3.1", path = "crates/qql-embed" }
+qql = { version = "0.3.1", path = "crates/qql-runtime", default-features = false }
+qql-edge = { version = "0.3.1", path = "crates/qql-edge", default-features = false }
 
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
