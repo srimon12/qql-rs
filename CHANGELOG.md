@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### 🚀 Added
+- **Native `FACET` statement** — first-class grammar, AST (`Stmt::Facet(Box<FacetStmt>)`), and planning (`PlannedOperation::Facet`) mapping to Qdrant's `POST /collections/{collection}/facet` aggregation endpoint. Supports `WHERE` filtering, `LIMIT`, `EXACT true` distributed counting, and `SHARD` partition routing. Validated across `qql-runtime`, `qql-edge`, `qql-wasm`, and `language/v1` conformance fixtures.
+- **Implicit vector array literals** — queries accept float array literals directly as `QUERY [0.1, 0.2, ...] FROM ...` without requiring the explicit `VECTOR` keyword prefix.
+- **Formula decay ISO datetime string parsing & variable auto-inference** — decay functions (`EXP_DECAY`, `GAUSS_DECAY`, `LIN_DECAY`) now accept standard ISO 8601 string literals `TARGET = "2024-01-01T00:00:00Z"` lowering to `FormulaExpr::Datetime`, and bare payload field names automatically infer `{"datetime_key": name}`.
+- **VS Code extension `FACET` support** — added `qfacet` snippet, hover card documentation in `KEYWORD_DOCS`, and autocompletions in `qql-lang`.
 - **SDK parity: `Stmt::new()` constructor in `nqql-edge`** — Node edge binding now exports a constructible `Stmt(query)` handle mirroring `nqql` and `qql-wasm`.
 - **SDK parity: `Stmt.compile_route()`** — exposed AST route compilation (`compile_route` / `compileRoute`) directly on `Stmt` across `pyqql`, `pyqql-edge`, `nqql`, and `nqql-edge` to avoid re-parsing queries.
 - **SDK parity: `Client.close()`** — added explicit connection release `close()` on remote clients in `pyqql` (with `__enter__`/`__exit__` context manager support) and `nqql`.
@@ -18,9 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CLI gRPC scheme detection** — `qql-cli` recognizes `grpc://` protocol URIs in addition to `:6334` port matching.
 
 ### 🔄 Changed
+- **Default `WITH PAYLOAD true`** — `lower_output_selector` now defaults to returning all payload attributes (`Some(PayloadSelectorReq::All(true))`) when `WITH PAYLOAD` is omitted, matching intuitive SQL retrieval semantics. Explicit `WITH PAYLOAD false` continues to omit payload fields.
 - **Decomposed runtime gRPC monoliths** — split `crates/qql-runtime/src/grpc.rs` (1,000 lines) and `crates/qql-runtime/src/grpc_route.rs` (4,000 lines) into focused domain submodules (`query`, `execute_write`, `execute_read`, `execute_ddl`, `ddl`, `filter`, `formula`, `responses`, `schema`, `points`, `ops`).
 - **Centralized workspace dependencies** — configured `[workspace.dependencies]` in root `Cargo.toml` (`serde`, `serde_json`, `tokio`, `phf`, `uuid`, `async-trait`, and internal crates) and converted member manifests to `.workspace = true`.
 - **Standard error trait** — implemented `core::error::Error` unconditionally on `QqlError` in `qql-core`, enabling standard error interoperability in `#![no_std]` contexts.
+- **Documentation & Skills modernization** — updated all website docs, agent skills, and specification documents to showcase modern QQL idioms (simplified queries without boilerplate `WITH PAYLOAD true`, implicit vectors, and `FACET`).
 
 ### ⚡ Performance
 - **Zero-allocation query and plan explain formatting** — converted 110+ `output.push_str(&format!(...))` heap allocations across `qql-core::fmt` and `qql-core::explain` to in-place `write!` and `writeln!` via `core::fmt::Write`.
@@ -28,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SIMD string case matching** — replaced manual byte-by-byte iterator loops in `qql-core` parser with standard `eq_ignore_ascii_case`.
 
 ### 🐛 Fixed
+- **Formula boolean `MatchCondition` lowering** — single-value match conditions (e.g. `MATCH(is_superhost, true)`) now lower to `{"match": {"value": val}}` instead of `{"match": {"any": [...]}}`, avoiding HTTP 400 schema validation rejection from Qdrant.
 - **REST error UTF-8 boundary panic** — protected 4096-byte response truncation in `qql-runtime` using `floor_char_boundary(4096)`.
 - **Range filter bound inversion in CLI converter** — `convert_condition` in `qql-cli` now only emits `BETWEEN` for `(gte, lte)` pairs; strict inequalities emit explicit `> <` comparisons.
 - **Incomplete string escaping in CLI converter** — replaced naive quote replacement with `escape_qql_string`.
