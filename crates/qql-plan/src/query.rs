@@ -84,7 +84,16 @@ pub fn lower_formula_expr(expr: &qql_core::ast::FormulaExpr) -> serde_json::Valu
             midpoint,
         } => {
             let mut params = serde_json::Map::new();
-            params.insert("x".into(), lower_formula_expr(x));
+            let is_target_datetime = target
+                .as_ref()
+                .is_some_and(|t| matches!(&**t, qql_core::ast::FormulaExpr::Datetime { .. }));
+            let x_val = match (&**x, is_target_datetime) {
+                (qql_core::ast::FormulaExpr::Variable { name }, true) => {
+                    serde_json::json!({ "datetime_key": name })
+                }
+                _ => lower_formula_expr(x),
+            };
+            params.insert("x".into(), x_val);
             if let Some(t) = target {
                 params.insert("target".into(), lower_formula_expr(t));
             }
@@ -132,11 +141,19 @@ pub fn lower_formula_expr(expr: &qql_core::ast::FormulaExpr) -> serde_json::Valu
         qql_core::ast::FormulaExpr::MatchCondition { field, values } => {
             // Condition expressions evaluate to 1.0 / 0.0 on the formula wire format.
             use crate::filter::value_to_json;
-            let any: Vec<_> = values.iter().map(value_to_json).collect();
-            serde_json::json!({
-                "key": field,
-                "match": { "any": any }
-            })
+            if values.len() == 1 {
+                let val = value_to_json(&values[0]);
+                serde_json::json!({
+                    "key": field,
+                    "match": { "value": val }
+                })
+            } else {
+                let any: Vec<_> = values.iter().map(value_to_json).collect();
+                serde_json::json!({
+                    "key": field,
+                    "match": { "any": any }
+                })
+            }
         }
         qql_core::ast::FormulaExpr::Datetime { value } => serde_json::json!({
             "datetime": value
@@ -377,16 +394,21 @@ pub fn lower_output_selector_public(
 fn lower_output_selector(
     output: &qql_core::ast::QueryOutput,
 ) -> (Option<PayloadSelectorReq>, Option<VectorSelectorReq>) {
-    let with_payload = output.payload.as_ref().map(|p| match p {
-        qql_core::ast::PayloadSelector::All => PayloadSelectorReq::All(true),
-        qql_core::ast::PayloadSelector::None => PayloadSelectorReq::All(false),
-        qql_core::ast::PayloadSelector::Include(fields) => PayloadSelectorReq::Include {
-            include: fields.clone(),
-        },
-        qql_core::ast::PayloadSelector::Exclude(fields) => PayloadSelectorReq::Exclude {
-            exclude: fields.clone(),
-        },
-    });
+    let with_payload = match &output.payload {
+        Some(qql_core::ast::PayloadSelector::All) => Some(PayloadSelectorReq::All(true)),
+        Some(qql_core::ast::PayloadSelector::None) => Some(PayloadSelectorReq::All(false)),
+        Some(qql_core::ast::PayloadSelector::Include(fields)) => {
+            Some(PayloadSelectorReq::Include {
+                include: fields.clone(),
+            })
+        }
+        Some(qql_core::ast::PayloadSelector::Exclude(fields)) => {
+            Some(PayloadSelectorReq::Exclude {
+                exclude: fields.clone(),
+            })
+        }
+        None => Some(PayloadSelectorReq::All(true)),
+    };
     let with_vector = output.vectors.as_ref().map(|v| match v {
         qql_core::ast::VectorSelector::All => VectorSelectorReq::All(true),
         qql_core::ast::VectorSelector::None => VectorSelectorReq::All(false),
@@ -965,6 +987,14 @@ mod tests {
     }
 
     #[test]
+    fn formula_match_condition_lowers_to_value_when_single() {
+        let json = parse_route("QUERY FORMULA MATCH(is_superhost, true) FROM docs LIMIT 5;");
+        let formula = &json["query"]["formula"];
+        assert_eq!(formula["key"], "is_superhost");
+        assert_eq!(formula["match"]["value"], true);
+    }
+
+    #[test]
     fn hybrid_expands_to_prefetches() {
         let json = parse_route(
             "QUERY HYBRID TEXT 'ai search' MODEL 'bge' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10;",
@@ -1380,5 +1410,29 @@ mod tests {
         let err = result.unwrap_err();
         assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
         assert_eq!(err.code, "QQL-VALIDATION-LIMIT-OVERFLOW");
+    }
+
+    #[test]
+    fn query_defaults_with_payload_to_true_when_omitted() {
+        let json = parse_route("QUERY TEXT 'q' FROM docs;");
+        assert_eq!(json["with_payload"], true);
+    }
+
+    #[test]
+    fn query_respects_explicit_with_payload_false() {
+        let json = parse_route("QUERY TEXT 'q' FROM docs WITH PAYLOAD false;");
+        assert_eq!(json["with_payload"], false);
+    }
+
+    #[test]
+    fn decay_datetime_target_and_variable_auto_inferred() {
+        let json = parse_route(
+            "QUERY FORMULA EXP_DECAY(judgment_date, TARGET = '2026-09-04T00:00:00Z', SCALE = 630720000, MIDPOINT = 0.5) FROM docs;"
+        );
+        let decay = &json["query"]["formula"]["exp_decay"];
+        assert_eq!(decay["x"]["datetime_key"], "judgment_date");
+        assert_eq!(decay["target"]["datetime"], "2026-09-04T00:00:00Z");
+        assert_eq!(decay["scale"], 630720000.0);
+        assert_eq!(decay["midpoint"], 0.5);
     }
 }

@@ -1,0 +1,81 @@
+{
+  "schema": "qql.ast/v1",
+  "statements": [
+    {
+      "Facet": {
+        "collection": {
+          "Explicit": "documents"
+        },
+        "exact": null,
+        "filter": null,
+        "key": "category",
+        "limit": null,
+        "shard_key": null
+      }
+    },
+    {
+      "Facet": {
+        "collection": {
+          "Explicit": "stays"
+        },
+        "exact": null,
+        "filter": {
+          "Compare": {
+            "field": "price",
+            "op": "Lt",
+            "value": {
+              "Int": 150
+            }
+          }
+        },
+        "key": "room_type",
+        "limit": 5,
+        "shard_key": null
+      }
+    },
+    {
+      "Facet": {
+        "collection": {
+          "Explicit": "articles"
+        },
+        "exact": true,
+        "filter": {
+          "Compare": {
+            "field": "published",
+            "op": "Eq",
+            "value": {
+              "Bool": true
+            }
+          }
+        },
+        "key": "author",
+        "limit": 10,
+        "shard_key": null
+      }
+    },
+    {
+      "Facet": {
+        "collection": {
+          "Explicit": "catalog"
+        },
+        "exact": null,
+        "filter": null,
+        "key": "tag",
+        "limit": 20,
+        "shard_key": "tenant_1"
+      }
+    },
+    {
+      "Facet": {
+        "collection": {
+          "Explicit": "products"
+        },
+        "exact": null,
+        "filter": null,
+        "key": "category",
+        "limit": 5,
+        "shard_key": null
+      }
+    }
+  ]
+}

@@ -950,6 +950,15 @@ impl Executor {
                     .unwrap_or(0);
                 (format!("Count: {count}"), Some(result))
             }
+            PlannedOperation::Facet { .. } => {
+                let hits = result
+                    .get("result")
+                    .and_then(|r| r.get("hits"))
+                    .and_then(|h| h.as_array())
+                    .map(|a| a.len())
+                    .unwrap_or(0);
+                (format!("Found {hits} facet hit(s)"), Some(result))
+            }
             PlannedOperation::ListCollections => {
                 let count = result
                     .get("result")

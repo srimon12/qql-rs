@@ -54,6 +54,7 @@ export const QQL_KEYWORDS = [
   "EXP",
   "EXP_DECAY",
   "EXTERIOR",
+  "FACET",
   "FEEDBACK",
   "FIELD",
   "FLOAT",
