@@ -54,13 +54,29 @@ candidate score when no `DEFAULTS` entry overrides it.
 
 | Function | Signature |
 |---|---|
-| `ABS`, `SQRT`, `LOG`, `LN`, `EXP` | `NAME(expr)` |
+| `ABS`, `SQRT`, `LOG`, `LN`, `EXP`, `ACOSH` | `NAME(expr)` |
 | `POW` | `POW(base, exponent)` |
+| `MAX` / `MIN` | `MAX(expr, expr, …)` — largest/smallest of n ≥ 1 operands |
 | `GEO_DISTANCE` | `GEO_DISTANCE(lat, lon, field)` or `GEO_DISTANCE({lat: ..., lon: ...}, field)` |
 | `MATCH` / `MATCH_ANY` | `MATCH(field, value)` or `MATCH_ANY(field, list)` |
 | `EXP_DECAY`, `GAUSS_DECAY`, `LIN_DECAY` | `NAME(field, TARGET = n, SCALE = n, ...)` or positional |
 | `datetime` | `datetime('2026-01-01')` — literal timestamp |
 | `datetime_key` | `datetime_key('published_at')` — payload timestamp field |
+
+## Clamp and shape scores
+
+`MAX` / `MIN` fold any number of operands (at least one), and `ACOSH` maps
+scores into a strictly positive range — together they give formula ranking
+hard bounds without `CASE` boilerplate:
+
+{% qqlExample title="Clamp a boosted score and shape with ACOSH" %}
+```sql
+QUERY FORMULA MAX(MIN($score * 2.0, 10.0), 0.0) + ACOSH(popularity + 1.0)
+  DEFAULTS (score = 0.0, popularity = 0)
+FROM papers
+LIMIT 10;
+```
+{% /qqlExample %}
 
 ## Precedence and division defaults
 
