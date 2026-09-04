@@ -51,12 +51,10 @@ python3 scripts/check_release.py
 cargo run --locked -p qql-grammar-gen -- check
 cargo run --locked -p qql-conformance -- check language/v1
 cargo fmt --all -- --check
-PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 \
-  cargo clippy --locked --all-features \
+cargo clippy --locked --all-features \
   -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli \
   --all-targets -- -D warnings
-PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 \
-  cargo test --locked --all-features \
+cargo test --locked --all-features \
   -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli
 ```
 

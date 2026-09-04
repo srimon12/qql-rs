@@ -35,6 +35,12 @@ QUERY TEXT 'risks' FROM docs USING sparse
   PARAMS (idf = WHERE tenant_id = 'acme')
   LIMIT 10;
 
+-- In-database faceting / categorical value aggregation
+FACET category FROM docs WHERE rating >= 4.0 LIMIT 10;
+
+-- Compact vector literal & default payload inclusion (WITH PAYLOAD true is default)
+QUERY [0.1, 0.2, 0.3] FROM docs LIMIT 5;
+
 -- Cluster resource quotas (REST only; not edge/gRPC)
 SHOW QUOTAS;
 SET QUOTA (enabled = true, max_resident_memory_percent = 80) WAIT true;
@@ -159,6 +165,10 @@ Examples across this folder exercise:
 - `WHERE SLICE (total, index)` deterministic sampling (Qdrant 1.19+)
 - Memory placement (`memory` / `payload_memory`) + dense `datatype = 'turbo4'`
 - `SHOW QUOTAS` / `SET QUOTA (…)` (REST only)
+- `FACET <field> FROM …` in-database categorical aggregation
+- `QUERY […]` compact vector array literals (optional `VECTOR` keyword)
+- Automatic point payload inclusion (`WITH PAYLOAD true` is default)
+- Formula ISO 8601 decay targets (`TARGET = "2024-01-01T00:00:00Z"` with inferred `datetime_key`)
 - `COUNT … WITH (exact = true)`
 - `SCROLL … WITH VECTOR false`
 - `DELETE PAYLOAD key FROM …`
