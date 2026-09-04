@@ -885,7 +885,12 @@ function setupShare(): void {
 
 function setupDocsBacklink(ref: string | null): void {
   if (!ref || !isSafeDocsRef(ref)) return;
-  docsBacklink.setAttribute("href", ref);
+  // Rebuild the link from the parsed, same-origin URL instead of the raw
+  // parameter; encodeURI is the final barrier so no scheme, authority, or
+  // markup can reach the DOM. For same-origin /docs paths this is
+  // byte-identical to `ref` (encodeURI preserves / ? & = : #).
+  const target = new URL(ref, window.location.origin);
+  docsBacklink.setAttribute("href", encodeURI(target.pathname + target.search));
   docsBacklink.hidden = false;
 }
 
