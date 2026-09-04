@@ -18,3 +18,4 @@ DELETE FROM sec10k WHERE tenant_id = '3m' SHARD '3m';
 
 -- Shard-routed upsert
 UPSERT INTO sec10k VALUES {id: 1, text: 'test'} SHARD 'acme';
+

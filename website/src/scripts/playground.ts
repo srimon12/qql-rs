@@ -265,6 +265,31 @@ function setEditorLoading(message: string | null): void {
   editorHost.setAttribute("aria-busy", String(message != null));
 }
 
+function isSafeDocsRef(ref: string): boolean {
+  // Allow only same-origin /docs/* paths. Reject backslashes, control
+  // chars, and HTML-significant chars so the value cannot break out of
+  // the href context, and re-parse to block encoded // or scheme tricks.
+  if (!/^\/docs(?:\/|$)/.test(ref)) return false;
+  if (/[\\<>"'`\s]/.test(ref)) return false;
+  try {
+    const parsed = new URL(ref, window.location.origin);
+    if (parsed.origin !== window.location.origin) return false;
+    if (!(parsed.pathname === "/docs" || parsed.pathname.startsWith("/docs/"))) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setValidationBadge(text: string): void {
+  validationBadge.replaceChildren();
+  const dot = document.createElement("span");
+  dot.className = "status-dot";
+  validationBadge.append(dot, document.createTextNode(text));
+}
+
 function connectionHost(url: string): string {
   try {
     const parsed = new URL(url);
@@ -551,15 +576,15 @@ function renderValidation(): void {
     validationBadge.textContent = "WASM unavailable";
     analysisSummary.textContent = "The current qql-wasm package could not load.";
   } else if (analysis.policyError) {
-    validationBadge.innerHTML = '<span class="status-dot"></span>Policy blocked';
+    setValidationBadge("Policy blocked");
     analysisSummary.textContent = analysis.policyError;
   } else if (analysis.result.valid) {
-    validationBadge.innerHTML = '<span class="status-dot"></span>Valid QQL';
+    setValidationBadge("Valid QQL");
     analysisSummary.textContent = `${analysis.result.statements_count} ${
       analysis.result.statements_count === 1 ? "statement" : "statements"
     }, ${analysis.result.tokens.length} tokens, ${state.metrics?.parseMs.toFixed(2)} ms`;
   } else {
-    validationBadge.innerHTML = '<span class="status-dot"></span>Invalid QQL';
+    setValidationBadge("Invalid QQL");
     analysisSummary.textContent =
       analysis.result.error?.message ?? "The parser rejected this input.";
   }
@@ -749,7 +774,7 @@ function currentShareUrl(): URL {
   url.hash = "";
   url.searchParams.set("q", editor.state.doc.toString());
   const ref = docsBacklink.hidden ? null : docsBacklink.getAttribute("href");
-  if (ref?.startsWith("/docs/")) url.searchParams.set("ref", ref);
+  if (ref && isSafeDocsRef(ref)) url.searchParams.set("ref", ref);
   return url;
 }
 
@@ -859,8 +884,13 @@ function setupShare(): void {
 }
 
 function setupDocsBacklink(ref: string | null): void {
-  if (!ref || !/^\/docs(?:\/|$)/.test(ref)) return;
-  docsBacklink.href = ref;
+  if (!ref || !isSafeDocsRef(ref)) return;
+  // Rebuild the link from the parsed, same-origin URL instead of the raw
+  // parameter; encodeURI is the final barrier so no scheme, authority, or
+  // markup can reach the DOM. For same-origin /docs paths this is
+  // byte-identical to `ref` (encodeURI preserves / ? & = : #).
+  const target = new URL(ref, window.location.origin);
+  docsBacklink.setAttribute("href", encodeURI(target.pathname + target.search));
   docsBacklink.hidden = false;
 }
 

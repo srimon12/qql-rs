@@ -17,3 +17,4 @@ ALTER COLLECTION docs WITH QUANTIZATION (type = 'scalar');
 
 -- Disable quantization
 ALTER COLLECTION docs WITH QUANTIZATION (disabled = true);
+

@@ -217,6 +217,37 @@ class TestPyQql(unittest.TestCase):
         with self.assertRaises(ValueError):
             pyqql.bind("WHERE x = :name", [1])
 
+    def test_version_exported(self):
+        self.assertTrue(hasattr(pyqql, "__version__"))
+        self.assertIsInstance(pyqql.__version__, str)
+
+    def test_tokenize_spans(self):
+        tokens = pyqql.tokenize("QUERY 'test' FROM docs")
+        self.assertGreater(len(tokens), 0)
+        t0 = tokens[0]
+        self.assertIn("kind", t0)
+        self.assertIn("text", t0)
+        self.assertIn("pos", t0)
+        self.assertIn("end", t0)
+        self.assertIn("len", t0)
+        self.assertEqual(t0["pos"], 0)
+        self.assertEqual(t0["end"], 5)
+        self.assertEqual(t0["len"], 5)
+
+    def test_stmt_compile_route(self):
+        stmts = pyqql.parse("QUERY 'hello' FROM docs LIMIT 10")
+        self.assertEqual(len(stmts), 1)
+        route = stmts[0].compile_route()
+        self.assertEqual(route["method"], "POST")
+        self.assertEqual(route["path"], "/collections/docs/points/query")
+        self.assertIn("payload", route)
+
+    def test_client_close_and_context_manager(self):
+        client = pyqql.Client("http://localhost:6333", use_grpc=False)
+        client.close()
+        with pyqql.Client("http://localhost:6333", use_grpc=False) as c:
+            self.assertIsNotNone(c)
+
 
 if __name__ == "__main__":
     unittest.main()

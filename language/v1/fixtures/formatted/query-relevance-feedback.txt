@@ -1,0 +1,16 @@
+-- query-relevance-feedback.qql — Relevance Feedback
+
+-- Basic relevance feedback
+QUERY RELEVANCE FEEDBACK TARGET 'search' FEEDBACK ((VECTOR [0.1, 0.2], 1.0), (VECTOR [0.3, 0.4], -1.0)) STRATEGY NAIVE (a = 1.0, b = 0.5, c = 0.2)
+FROM docs
+LIMIT 10;
+
+-- With point IDs
+QUERY RELEVANCE FEEDBACK TARGET POINT 42 FEEDBACK ((POINT 1, 2.0), (POINT 2, -0.5)) STRATEGY NAIVE (a = 1.0, b = 0.5, c = 0.2)
+FROM docs
+LIMIT 10;
+
+-- Single feedback item
+QUERY RELEVANCE FEEDBACK TARGET 'query' FEEDBACK (('relevant', 1.5)) STRATEGY NAIVE (a = 1.0, b = 0.5, c = 0.2)
+FROM docs
+LIMIT 10;

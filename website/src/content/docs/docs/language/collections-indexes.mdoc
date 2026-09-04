@@ -23,15 +23,10 @@ storage `datatype` (`float32`, `float16`, `uint8`, or `turbo4` for TurboQuant
 ```sql
 CREATE COLLECTION research (
   dense VECTOR(384, COSINE),
-  sparse SPARSE,
-  colbert VECTOR(128, COSINE)
-    WITH MULTIVECTOR (comparator = 'max_sim')
-    WITH HNSW (m = 0)
+  colbert VECTOR(128, COSINE) WITH HNSW (m = 0) WITH MULTIVECTOR (comparator = 'max_sim'),
+  sparse SPARSE
 )
-WITH HNSW (
-  m = 16,
-  ef_construct = 100
-);
+WITH HNSW (m = 16, ef_construct = 100);
 ```
 {% /qqlExample %}
 
@@ -91,9 +86,9 @@ blocks to an existing collection.
 {% qqlExample title="Memory placement and turbo4 datatype" %}
 ```sql
 CREATE COLLECTION docs (
-  dense VECTOR(384, COSINE)
-    WITH VECTOR (memory = 'cached', datatype = 'turbo4')
-) WITH HNSW (memory = 'cold')
+  dense VECTOR(384, COSINE) WITH VECTOR (memory = 'cached', datatype = 'turbo4')
+)
+WITH HNSW (memory = 'cold')
 WITH PARAMS (payload_memory = 'cold');
 
 CREATE COLLECTION docs2 (
@@ -101,8 +96,7 @@ CREATE COLLECTION docs2 (
 );
 
 CREATE COLLECTION docs3 (
-  dense VECTOR(128, DOT)
-    WITH QUANTIZATION (type = 'scalar', memory = 'pinned')
+  dense VECTOR(128, DOT) WITH QUANTIZATION (type = 'scalar', memory = 'pinned')
 );
 ```
 {% /qqlExample %}
@@ -112,13 +106,9 @@ CREATE COLLECTION docs3 (
 CREATE COLLECTION sec10k (
   dense VECTOR(768, COSINE),
   sparse SPARSE
-) WITH HNSW (m = 16, ef_construct = 100)
-WITH PARAMS (
-  replication_factor = 2,
-  shard_number = 8,
-  sharding_method = 'custom',
-  shard_keys = ['honeywell', 'ge']
-);
+)
+WITH HNSW (m = 16, ef_construct = 100)
+WITH PARAMS (replication_factor = 2, shard_number = 8, sharding_method = 'custom', shard_keys = ['honeywell', 'ge']);
 
 ALTER COLLECTION sec10k WITH QUANTIZATION (type = 'scalar');
 ```
@@ -133,30 +123,11 @@ for every payload field. The index `TYPE` is `keyword`, `integer`, `float`,
 
 {% qqlExample title="Tenant, prefix, and text payload indexes" %}
 ```sql
-CREATE INDEX ON COLLECTION research
-FOR tenant_id
-TYPE keyword
-WITH (
-  is_tenant = true,
-  on_disk = true
-);
+CREATE INDEX ON COLLECTION research FOR tenant_id TYPE keyword WITH (is_tenant = true, on_disk = true);
 
-CREATE INDEX ON COLLECTION research
-FOR title
-TYPE keyword
-WITH (
-  prefix = true,
-  memory = 'cached'
-);
+CREATE INDEX ON COLLECTION research FOR title TYPE keyword WITH (prefix = true, memory = 'cached');
 
-CREATE INDEX ON COLLECTION research
-FOR content
-TYPE text
-WITH (
-  tokenizer = 'multilingual',
-  lowercase = true,
-  phrase_matching = true
-);
+CREATE INDEX ON COLLECTION research FOR content TYPE text WITH (tokenizer = 'multilingual', lowercase = true, phrase_matching = true);
 ```
 {% /qqlExample %}
 
@@ -201,12 +172,7 @@ the replacement body — they do not merge with previous limits. Optional
 ```sql
 SHOW QUOTAS;
 
-SET QUOTA (
-  enabled = true,
-  max_resident_memory_percent = 80,
-  max_disk_usage_percent = 90,
-  release_margin_percent = 5
-) WAIT true;
+SET QUOTA (enabled = true, max_resident_memory_percent = 80, max_disk_usage_percent = 90, release_margin_percent = 5) WAIT true;
 
 SET QUOTA (enabled = false);
 
@@ -224,15 +190,11 @@ tenant predicate your service must enforce.
 
 {% qqlExample title="Manage a custom shard key" %}
 ```sql
-CREATE SHARD KEY 'acme'
-ON COLLECTION research
-WITH (shards_number = 2);
+CREATE SHARD KEY 'acme' ON COLLECTION research WITH (shards_number = 2);
 
-SHOW SHARD KEYS
-ON COLLECTION research;
+SHOW SHARD KEYS ON COLLECTION research;
 
-DROP SHARD KEY 'acme'
-ON COLLECTION research;
+DROP SHARD KEY 'acme' ON COLLECTION research;
 ```
 {% /qqlExample %}
 

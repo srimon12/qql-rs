@@ -362,6 +362,31 @@ class TestEdgeExecutor(unittest.TestCase):
         with self.assertRaises(ValueError):
             pyqql_edge.bind("WHERE x = :name", [1])
 
+    def test_tokenize_spans(self):
+        tokens = pyqql_edge.tokenize("QUERY 'test' FROM docs")
+        self.assertGreater(len(tokens), 0)
+        t0 = tokens[0]
+        self.assertIn("kind", t0)
+        self.assertIn("text", t0)
+        self.assertIn("pos", t0)
+        self.assertIn("end", t0)
+        self.assertIn("len", t0)
+        self.assertEqual(t0["pos"], 0)
+        self.assertEqual(t0["end"], 5)
+        self.assertEqual(t0["len"], 5)
+
+    def test_stmt_compile_route(self):
+        stmts = pyqql_edge.parse("QUERY 'hello' FROM docs LIMIT 10")
+        self.assertEqual(len(stmts), 1)
+        route = stmts[0].compile_route()
+        self.assertEqual(route["method"], "POST")
+        self.assertEqual(route["path"], "/collections/docs/points/query")
+        self.assertIn("payload", route)
+
+    def test_parse_json_syntax_error(self):
+        with self.assertRaises(SyntaxError):
+            pyqql_edge.parse_json("INVALID QUERY SYNTAX !!!")
+
 
 if __name__ == "__main__":
     unittest.main()

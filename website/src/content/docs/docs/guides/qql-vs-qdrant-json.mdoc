@@ -19,8 +19,8 @@ Hybrid search requires querying both a dense semantic index and a sparse lexical
 
 {% qqlExample title="Declarative hybrid search with RRF" %}
 ```sql
-QUERY TEXT 'distributed consensus raft' FROM docs
-USING HYBRID DENSE dense_vec SPARSE bm25_vec FUSION RRF
+QUERY HYBRID TEXT 'distributed consensus raft' DENSE dense_vec SPARSE bm25_vec FUSION RRF
+FROM docs
 WHERE status = 'active'
 LIMIT 10;
 ```
@@ -68,7 +68,8 @@ In production multitenancy, queries require both **logical tenant isolation** (`
 
 {% qqlExample title="Multitenant search with shard key" %}
 ```sql
-QUERY TEXT 'supply chain risk analysis' FROM filings
+QUERY 'supply chain risk analysis'
+FROM filings
 WHERE department = 'finance'
 SHARD 'tenant-corp-99'
 LIMIT 5;
@@ -102,9 +103,9 @@ Filter clauses in vector applications frequently combine equality, range constra
 
 {% qqlExample title="Complex nested predicate filter" %}
 ```sql
-QUERY TEXT 'industrial robotics' FROM products
-WHERE (category = 'hardware' OR category = 'tools')
-  AND price <= 1200.0 AND in_stock = true AND rating >= 4.5
+QUERY 'industrial robotics'
+FROM products
+WHERE (category = 'hardware' OR category = 'tools') AND price <= 1200.0 AND in_stock = true AND rating >= 4.5
 LIMIT 20;
 ```
 {% /qqlExample %}
@@ -171,6 +172,39 @@ PUT /collections/articles/index
 {
   "field_name": "tenant_id",
   "field_schema": "keyword"
+}
+```
+
+---
+
+## 4. In-Database Categorical Aggregations (Faceting)
+
+Aggregating counts of unique payload values filtered by predicates without retrieving individual point records.
+
+### In QQL (4 lines)
+
+{% qqlExample title="Facet aggregation with filtering and exact accuracy" %}
+```sql
+FACET room_type FROM stays WHERE price < 150 LIMIT 5 EXACT true;
+```
+{% /qqlExample %}
+
+### In Raw Qdrant REST JSON (18 lines)
+
+```json
+POST /collections/stays/facet
+{
+  "key": "room_type",
+  "limit": 5,
+  "exact": true,
+  "filter": {
+    "must": [
+      {
+        "key": "price",
+        "range": { "lt": 150.0 }
+      }
+    ]
+  }
 }
 ```
 

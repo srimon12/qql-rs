@@ -16,7 +16,7 @@ EXAMPLES = [
     {
         "mode": "dense-by-id",
         "when": "Use when you want to find results similar to a specific point by its ID.",
-        "query": "QUERY POINTS ('123e4567-e89b-12d3-a456-426614174001') FROM articles WITH PAYLOAD true",
+        "query": "QUERY POINTS ('123e4567-e89b-12d3-a456-426614174001') FROM articles",
         "setup": [],
         "requires_index": [],
     },
@@ -311,7 +311,7 @@ EXAMPLES = [
     {
         "mode": "select-by-id",
         "when": "Use when you already know the exact point ID and want the stored payload.",
-        "query": "QUERY POINTS ('pt-42') FROM articles WITH PAYLOAD true",
+        "query": "QUERY POINTS ('pt-42') FROM articles",
         "setup": [],
         "requires_index": [],
     },

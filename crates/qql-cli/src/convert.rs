@@ -46,7 +46,7 @@ fn extract_collection(path: &str) -> String {
 
 fn format_id(id: &Value) -> String {
     match id {
-        Value::String(s) => format!("'{}'", s.replace('\'', "\\'")),
+        Value::String(s) => format!("'{}'", escape_qql_string(s)),
         Value::Number(n) => {
             if let Some(i) = n.as_i64() {
                 i.to_string()
@@ -85,7 +85,7 @@ fn format_value(v: &Value) -> String {
                 format!("{}", n)
             }
         }
-        Value::String(s) => format!("'{}'", s.replace('\'', "\\'")),
+        Value::String(s) => format!("'{}'", escape_qql_string(s)),
         Value::Array(arr) => {
             let items: Vec<String> = arr.iter().map(format_value).collect();
             format!("[{}]", items.join(", "))
@@ -260,13 +260,24 @@ fn convert_condition(cond: &Value) -> Result<String, String> {
         let lte = range.get("lte");
         let lt = range.get("lt");
 
-        if (gte.is_some() || gt.is_some()) && (lte.is_some() || lt.is_some()) {
-            let low = gte.or(gt).unwrap();
-            let high = lte.or(lt).unwrap();
+        if let (Some(low), Some(high)) = (gte, lte) {
             return Ok(format!(
                 "{} BETWEEN {} AND {}",
                 key,
                 format_value(low),
+                format_value(high)
+            ));
+        }
+        if let (Some(low), Some(high)) = (gte.or(gt), lte.or(lt)) {
+            let op_low = if gte.is_some() { ">=" } else { ">" };
+            let op_high = if lte.is_some() { "<=" } else { "<" };
+            return Ok(format!(
+                "{} {} {} AND {} {} {}",
+                key,
+                op_low,
+                format_value(low),
+                key,
+                op_high,
                 format_value(high)
             ));
         }
@@ -1333,5 +1344,39 @@ mod tests {
         for statement in statements {
             Parser::parse(&format!("{statement};")).expect("generated QUERY POINTS should parse");
         }
+    }
+
+    #[test]
+    fn range_conversion_handles_inclusive_and_strict_inequalities() {
+        use super::convert_condition;
+
+        let between_res = convert_condition(&json!({
+            "key": "age",
+            "range": { "gte": 18, "lte": 65 }
+        }))
+        .expect("between condition");
+        assert_eq!(between_res, "age BETWEEN 18 AND 65");
+
+        let strict_res = convert_condition(&json!({
+            "key": "age",
+            "range": { "gt": 18, "lt": 65 }
+        }))
+        .expect("strict condition");
+        assert_eq!(strict_res, "age > 18 AND age < 65");
+
+        let mixed_res = convert_condition(&json!({
+            "key": "age",
+            "range": { "gte": 18, "lt": 65 }
+        }))
+        .expect("mixed condition");
+        assert_eq!(mixed_res, "age >= 18 AND age < 65");
+    }
+
+    #[test]
+    fn escaping_handles_special_characters() {
+        use super::{format_id, format_value};
+
+        assert_eq!(format_id(&json!("hello\\world\n")), "'hello\\\\world\\n'");
+        assert_eq!(format_value(&json!("a'b\tc")), "'a\\'b\\tc'");
     }
 }

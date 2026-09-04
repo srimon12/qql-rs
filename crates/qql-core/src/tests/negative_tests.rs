@@ -60,6 +60,24 @@ fn bare_using_rejected() {
 }
 
 #[test]
+fn formula_max_min_require_at_least_one_operand() {
+    // Qdrant MaxExpression / MinExpression require ≥ 1 operand.
+    for source in [
+        "QUERY FORMULA MAX() DEFAULTS (score = 0.0) FROM docs;",
+        "QUERY FORMULA MIN() DEFAULTS (score = 0.0) FROM docs;",
+    ] {
+        let err = Parser::parse(source).expect_err("expected empty-operand error");
+        assert_eq!(
+            err.kind,
+            ErrorKind::Parse,
+            "wrong error kind for: {}",
+            source
+        );
+        assert_eq!(err.code, "QQL-PARSE-SYNTAX", "wrong code for: {}", source);
+    }
+}
+
+#[test]
 fn bare_score_threshold_rejected() {
     assert_parse_err!("QUERY TEXT 'x' FROM docs SCORE THRESHOLD;", Parse);
 }

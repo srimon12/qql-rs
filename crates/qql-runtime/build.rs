@@ -1,3 +1,7 @@
+//! Build script for the `qql` runtime crate.
+//!
+//! Generates the Typify REST wire types from the vendored `openapi.json`
+//! (written to `OUT_DIR/qdrant_types.rs`) at compile time.
 use std::env;
 use std::fs;
 use std::path::Path;

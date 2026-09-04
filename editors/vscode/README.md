@@ -20,6 +20,9 @@ Highlights and completions cover the full QQL 1.5 surface, including:
 
 | Feature | Example |
 |---------|---------|
+| In-database faceting | `FACET room_type FROM stays WHERE price < 150 LIMIT 5 EXACT true;` |
+| Implicit vector search | `QUERY [0.1, 0.2, ...] FROM docs LIMIT 10;` |
+| Default payload | Point payloads returned by default (`WITH PAYLOAD true`) |
 | Quotas | `SHOW QUOTAS;` / `SET QUOTA (enabled = true, max_resident_memory_percent = 80) WAIT true;` |
 | Memory placement | `WITH VECTOR (memory = 'cached')`, `WITH HNSW (memory = 'cold')`, `payload_memory = 'cold'` |
 | MATCH PREFIX | `WHERE title MATCH PREFIX 'Comp'` |
@@ -174,7 +177,7 @@ VSIX binaries are **not** committed to the repo. Build one locally or download f
 code --install-extension qql-lang-*.vsix --force
 ```
 
-Extension packaging version is in `package.json` (**0.2.4**). It ships the QQL **0.2.1** WASM parser from this monorepo (crate version need not match the VSIX version). Note: the checked-in WASM binary may still reflect a pre-1.4 parse surface until rebuilt with `wasm-pack`; TextMate / keyword artifacts stay in sync with QQL **1.4** via `qql-grammar-gen generate` without a WASM rebuild.
+Extension packaging version is in `package.json` (**0.3.0**). It ships the QQL **0.3.0** WASM parser from this monorepo (crate version need not match the VSIX version). Note: the checked-in WASM binary may still reflect an older parse surface until rebuilt with `wasm-pack`; TextMate / keyword artifacts stay in sync with the grammar via `qql-grammar-gen generate` without a WASM rebuild, and `npm test` holds the bundle against the full language corpus (canonical formats + invalid-case codes from `language/v1/fixtures`), so staleness fails CI instead of shipping.
 
 ### Build from source
 

@@ -87,6 +87,33 @@ impl Stmt {
         }
         Ok(())
     }
+
+    /// Compile this Stmt AST directly into its transport route without re-parsing.
+    #[napi(catch_unwind)]
+    pub fn compile_route(&self) -> napi::Result<serde_json::Value> {
+        let compiled = routing::compile_statement(&self.inner).map_err(to_napi_err)?;
+        let (method, path, payload) = match compiled.route {
+            Some(route) => {
+                let payload = route.body_json().unwrap_or(serde_json::Value::Null);
+                (
+                    serde_json::Value::String(route.method.as_str().into()),
+                    serde_json::Value::String(route.path),
+                    payload,
+                )
+            }
+            None => (
+                serde_json::Value::Null,
+                serde_json::Value::Null,
+                serde_json::Value::Null,
+            ),
+        };
+        Ok(serde_json::json!({
+            "stmt_type": compiled.stmt_type,
+            "method": method,
+            "path": path,
+            "payload": payload,
+        }))
+    }
 }
 
 #[napi(catch_unwind)]
@@ -106,7 +133,9 @@ pub fn parse_all_json(input: String) -> napi::Result<String> {
 
 #[napi(catch_unwind)]
 pub fn is_valid(input: String) -> bool {
-    Parser::parse_all(&input).is_ok()
+    // Full frontend gate: parse + plan — same contract as execution and the
+    // language conformance suite.
+    qql_plan::parse_and_plan(&input).is_ok()
 }
 
 #[napi(catch_unwind)]
@@ -146,6 +175,8 @@ pub fn tokenize(input: String) -> napi::Result<serde_json::Value> {
         kind: &'a str,
         text: &'a str,
         pos: usize,
+        end: usize,
+        len: usize,
     }
 
     let lexer = Lexer::new(&input);
@@ -157,6 +188,8 @@ pub fn tokenize(input: String) -> napi::Result<serde_json::Value> {
             kind: token.kind.as_str(),
             text: token.text,
             pos: token.span.start,
+            end: token.span.end,
+            len: token.span.end.saturating_sub(token.span.start),
         });
     }
     serde_json::to_value(&tokens).map_err(|e| {
@@ -493,6 +526,12 @@ impl JsClient {
     #[napi(catch_unwind)]
     pub fn compile(&self, query: String) -> napi::Result<serde_json::Value> {
         crate::compile_query(query)
+    }
+
+    /// Close the client and release underlying connections.
+    #[napi(catch_unwind)]
+    pub async fn close(&self) -> napi::Result<()> {
+        self.inner.close().await.map_err(to_napi_err)
     }
 }
 

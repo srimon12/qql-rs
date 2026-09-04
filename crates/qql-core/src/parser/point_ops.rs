@@ -1,5 +1,5 @@
 use super::AstLowerer;
-use crate::ast::{CountStmt, ScrollStmt, Stmt};
+use crate::ast::{CountStmt, FacetStmt, ScrollStmt, Stmt};
 use crate::error::QqlError;
 use crate::token::TokenKind;
 use alloc::boxed::Box;
@@ -108,6 +108,101 @@ impl<'a> AstLowerer<'a> {
             filter,
             shard_key,
             exact,
+        })))
+    }
+
+    pub fn parse_facet(&mut self) -> Result<Stmt, QqlError> {
+        self.expect(TokenKind::Facet)?;
+        let (key, collection) = if self.peek()?.kind == TokenKind::From {
+            self.advance()?;
+            let coll = crate::ast::QueryCollection::Explicit(self.parse_identifier()?);
+            if self.peek()?.kind == TokenKind::Key || self.peek_word("KEY")? {
+                self.advance()?;
+            }
+            let k = self.parse_identifier()?;
+            (k, coll)
+        } else {
+            let k = self.parse_identifier()?;
+            self.expect(TokenKind::From)?;
+            let coll = crate::ast::QueryCollection::Explicit(self.parse_identifier()?);
+            (k, coll)
+        };
+
+        let mut filter = None;
+        let mut limit = None;
+        let mut exact = None;
+        let mut shard_key = None;
+
+        while self.peek()?.kind != TokenKind::Eof && self.peek()?.kind != TokenKind::Semicolon {
+            match self.peek()?.kind {
+                TokenKind::Where if filter.is_none() => {
+                    self.advance()?;
+                    filter = Some(Box::new(self.parse_filter_expr()?));
+                }
+                TokenKind::Limit if limit.is_none() => {
+                    self.advance()?;
+                    limit = Some(self.parse_positive_u64("FACET LIMIT")?);
+                }
+                TokenKind::Exact if exact.is_none() => {
+                    self.advance()?;
+                    match self.peek()?.kind {
+                        TokenKind::True => {
+                            self.advance()?;
+                            exact = Some(true);
+                        }
+                        TokenKind::False => {
+                            self.advance()?;
+                            exact = Some(false);
+                        }
+                        _ => exact = Some(true),
+                    }
+                }
+                TokenKind::Shard if shard_key.is_none() => {
+                    self.advance()?;
+                    shard_key = Some(self.parse_string()?);
+                }
+                TokenKind::With => {
+                    self.advance()?;
+                    let opts = self.parse_config_block()?;
+                    for (k, v) in &opts {
+                        if k.eq_ignore_ascii_case("exact") {
+                            if let crate::ast::Value::Bool(b) = v {
+                                exact = Some(*b);
+                            }
+                        } else if k.eq_ignore_ascii_case("limit") {
+                            if let crate::ast::Value::Int(i) = v {
+                                if *i > 0 {
+                                    limit = Some(*i as u64);
+                                }
+                            }
+                        }
+                    }
+                }
+                _ if (self.peek_word("EXACT")? && exact.is_none()) => {
+                    self.advance()?;
+                    match self.peek()?.kind {
+                        TokenKind::True => {
+                            self.advance()?;
+                            exact = Some(true);
+                        }
+                        TokenKind::False => {
+                            self.advance()?;
+                            exact = Some(false);
+                        }
+                        _ => exact = Some(true),
+                    }
+                }
+                _ => break,
+            }
+        }
+
+        Ok(Stmt::Facet(Box::new(FacetStmt {
+            key,
+            collection,
+            filter,
+            limit,
+            exact,
+            shard_key,
         })))
     }
 }

@@ -3,20 +3,32 @@ use core::iter::Peekable;
 use crate::error::{QqlError, Span};
 use crate::token::{lookup_keyword, Token, TokenKind};
 
+/// Peekable iterator over the token stream produced by a `Lexer`.
 pub type TokenIter<'a> = Peekable<Lexer<'a>>;
 
+/// QQL lexer yielding tokens with byte spans; halts after the first lexical error.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct Lexer<'a> {
     input: &'a str,
     pos: usize,
+    /// Set after a lex error has been yielded. `next_token` may fail without
+    /// advancing `pos`, so the iterator must terminate instead of re-yielding
+    /// the same error forever.
+    halted: bool,
 }
 
 impl<'a> Lexer<'a> {
+    /// Creates a lexer over the given source input.
     pub fn new(input: &'a str) -> Self {
-        Lexer { input, pos: 0 }
+        Lexer {
+            input,
+            pos: 0,
+            halted: false,
+        }
     }
 
+    /// Lexes and returns the next token, `Eof` at end of input, or a lexical error.
     pub fn next_token(&mut self) -> Result<Token<'a>, QqlError> {
         self.skip_whitespace();
 
@@ -469,12 +481,19 @@ impl<'a> Iterator for Lexer<'a> {
     type Item = Result<Token<'a>, QqlError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.pos >= self.input.len() {
+        if self.halted || self.pos >= self.input.len() {
             return None;
         }
         let result = self.next_token();
         match &result {
             Ok(t) if t.kind == TokenKind::Eof => None,
+            // Surface the first lex error exactly once, then terminate: the
+            // failing production may not advance `pos`, so re-polling would
+            // loop forever (and `flatten()`-style consumers would hang).
+            Err(_) => {
+                self.halted = true;
+                Some(result)
+            }
             _ => Some(result),
         }
     }

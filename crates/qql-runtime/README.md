@@ -118,7 +118,7 @@ Hosts should still `inject_filter` untrusted QQL. Routing is request-level
 
 ## Docs
 
-- [AGENT.md](../../AGENT.md) · [qql-plan](../qql-plan/README.md) · [qql-embed](../qql-embed/README.md) · [Syntax](../../docs/syntax.md)
+- [AGENTS.md](../../AGENTS.md) · [qql-plan](../qql-plan/README.md) · [qql-embed](../qql-embed/README.md) · [Syntax](../../docs/syntax.md)
 
 ## Test
 

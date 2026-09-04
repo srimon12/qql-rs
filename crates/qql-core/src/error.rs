@@ -3,18 +3,23 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::fmt;
 
+/// Source-code span as UTF-8 byte offsets into the query text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct Span {
+    /// Inclusive start byte offset.
     pub start: usize,
+    /// Exclusive end byte offset.
     pub end: usize,
 }
 
 impl Span {
+    /// Create a span from explicit byte offsets.
     pub const fn new(start: usize, end: usize) -> Self {
         Self { start, end }
     }
 
+    /// Zero-length span at a single byte position.
     pub const fn point(position: usize) -> Self {
         Self::new(position, position)
     }
@@ -47,11 +52,14 @@ pub enum ErrorKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct ErrorField {
+    /// Field name, e.g. `collection` or `status_code`.
     pub key: Cow<'static, str>,
+    /// Field value as a string.
     pub value: Cow<'static, str>,
 }
 
 impl ErrorField {
+    /// Build an `ErrorField` from anything convertible into `Cow<'static, str>`.
     pub fn new(key: impl Into<Cow<'static, str>>, value: impl Into<Cow<'static, str>>) -> Self {
         Self {
             key: key.into(),
@@ -72,9 +80,13 @@ impl ErrorField {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct QqlError {
+    /// Broad origin category within the pipeline.
     pub kind: ErrorKind,
+    /// Machine-readable error code, e.g. `QQL-PARSE-SYNTAX`.
     pub code: Cow<'static, str>,
+    /// Human-readable description of the failure.
     pub message: Cow<'static, str>,
+    /// Optional source span in the original query text.
     pub span: Option<Span>,
     /// Structured key-value metadata providing machine-readable context
     /// (e.g. `collection`, `status_code`, `field_name`, `url`).
@@ -85,6 +97,7 @@ pub struct QqlError {
 }
 
 impl QqlError {
+    /// Build an error with an explicit kind, code, message, and optional span.
     pub fn new(
         kind: ErrorKind,
         code: impl Into<Cow<'static, str>>,
@@ -103,6 +116,7 @@ impl QqlError {
 
     // ── Named constructors (keep existing API) ──────────────────────
 
+    /// Create an error with `ErrorKind::Lex` and the given source span.
     pub fn lex(
         code: impl Into<Cow<'static, str>>,
         message: impl Into<Cow<'static, str>>,
@@ -111,6 +125,7 @@ impl QqlError {
         Self::new(ErrorKind::Lex, code, message, Some(span))
     }
 
+    /// Create an error with `ErrorKind::Parse` and the given source span.
     pub fn parse(
         code: impl Into<Cow<'static, str>>,
         message: impl Into<Cow<'static, str>>,
@@ -119,6 +134,7 @@ impl QqlError {
         Self::new(ErrorKind::Parse, code, message, Some(span))
     }
 
+    /// Create an error with `ErrorKind::Validation` and an optional span.
     pub fn validation(
         code: impl Into<Cow<'static, str>>,
         message: impl Into<Cow<'static, str>>,
@@ -127,6 +143,7 @@ impl QqlError {
         Self::new(ErrorKind::Validation, code, message, span)
     }
 
+    /// Create an error with `ErrorKind::Execution` and an optional span.
     pub fn execution(
         code: impl Into<Cow<'static, str>>,
         message: impl Into<Cow<'static, str>>,
@@ -135,6 +152,7 @@ impl QqlError {
         Self::new(ErrorKind::Execution, code, message, span)
     }
 
+    /// Create an error with `ErrorKind::Transport` and an optional span.
     pub fn transport(
         code: impl Into<Cow<'static, str>>,
         message: impl Into<Cow<'static, str>>,
@@ -143,6 +161,7 @@ impl QqlError {
         Self::new(ErrorKind::Transport, code, message, span)
     }
 
+    /// Create an error with `ErrorKind::Backend` and an optional span.
     pub fn backend(
         code: impl Into<Cow<'static, str>>,
         message: impl Into<Cow<'static, str>>,
@@ -260,11 +279,23 @@ impl fmt::Display for QqlError {
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for QqlError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl core::error::Error for QqlError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         self.source
             .as_ref()
-            .map(|s| s.as_ref() as &(dyn std::error::Error + 'static))
+            .map(|s| s.as_ref() as &(dyn core::error::Error + 'static))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_core_error_impl() {
+        let err = QqlError::syntax("unexpected token", 0);
+        let dyn_err: &dyn core::error::Error = &err;
+        assert!(dyn_err.source().is_none());
+        assert!(!dyn_err.to_string().is_empty());
     }
 }

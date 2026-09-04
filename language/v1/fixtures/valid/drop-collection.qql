@@ -2,3 +2,4 @@
 
 DROP COLLECTION docs;
 DROP COLLECTION old_data;
+

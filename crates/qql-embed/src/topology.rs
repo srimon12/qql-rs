@@ -25,7 +25,9 @@ pub fn query_needs_kind_resolution(query: &QueryStmt) -> bool {
 /// Dense / sparse / multivector name lists for a collection.
 #[derive(Debug, Clone, Default)]
 pub struct TopologyNames {
+    /// Named dense vectors; empty for a single unnamed default vector.
     pub dense: Vec<String>,
+    /// Named sparse vectors.
     pub sparse: Vec<String>,
     /// Subset of dense names that have multivector config (ColBERT-style).
     pub multivector: Vec<String>,

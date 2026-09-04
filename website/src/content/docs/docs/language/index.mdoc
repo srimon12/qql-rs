@@ -23,19 +23,11 @@ accepts at most 256 statements in one script.
 
 {% qqlExample title="Provision, write, and retrieve" %}
 ```sql
-CREATE COLLECTION notes (
-  dense VECTOR(384, COSINE)
-);
+CREATE COLLECTION notes (dense VECTOR(384, COSINE));
 
-UPSERT INTO notes VALUES {
-  id: 1,
-  text: 'first note'
-};
+UPSERT INTO notes VALUES {id: 1, text: 'first note'};
 
-QUERY TEXT 'note'
-FROM notes
-USING dense
-LIMIT 5;
+QUERY 'note' FROM notes USING dense LIMIT 5;
 ```
 {% /qqlExample %}
 
@@ -49,6 +41,9 @@ Notable QQL 1.5 / Qdrant 1.19 additions: `MATCH PREFIX` and `SLICE` filters,
 `PARAMS (idf = 'global' | WHERE <filter>)`, dense `datatype` / `memory`
 placement, keyword `prefix = true` indexes, and REST-only `SHOW QUOTAS` /
 `SET QUOTA`.
+
+Notable QQL 1.6 / Qdrant upstream sync additions: `MAX` / `MIN` / `ACOSH`
+formula functions and a 65536 vector-dimension cap in `CREATE COLLECTION`.
 
 ## Lexical rules
 
@@ -110,7 +105,7 @@ Each clause appears at most once. The parser does not silently reorder a query:
 
 {% qqlExample title="A complete nearest-neighbor query" %}
 ```sql
-QUERY TEXT 'search'
+QUERY 'search'
 FROM docs
 USING semantic_v2 AS DENSE
 WHERE status = 'published'

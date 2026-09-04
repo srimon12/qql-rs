@@ -132,11 +132,11 @@ full matrix.
 
    UPSERT INTO docs VALUES {id: 1, text: 'hello from edge'};
 
-   QUERY TEXT 'hello' FROM docs USING dense LIMIT 5;
+   QUERY 'hello' FROM docs USING dense LIMIT 5;
    ```
    {% /qqlExample %}
 
-   Execute it with `qql --edge exec "QUERY TEXT 'hello' FROM docs USING dense LIMIT 5"`.
+   Execute it with `qql --edge exec "QUERY 'hello' FROM docs USING dense LIMIT 5"`.
 
 {% /steps %}
 

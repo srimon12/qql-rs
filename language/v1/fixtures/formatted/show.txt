@@ -1,0 +1,10 @@
+-- show.qql — SHOW statements
+
+-- Show all collections
+SHOW COLLECTIONS;
+
+-- Show specific collection
+SHOW COLLECTION docs;
+
+-- Show specific collection details
+SHOW COLLECTION sec10k;

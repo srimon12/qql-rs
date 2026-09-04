@@ -247,6 +247,12 @@ class Client {
   compile(query) {
     return callNative(() => this._inner.compile(query));
   }
+
+  async close() {
+    if (typeof this._inner.close === "function") {
+      await this._inner.close();
+    }
+  }
 }
 
 function bind(query, params) {

@@ -24,9 +24,9 @@ const keywords = fs.readFileSync(
   "utf8",
 );
 
-test("snippet count matches the documented claim (README: 29)", () => {
+test("snippet count matches the documented claim (README: 30)", () => {
   const labels = [...completions.matchAll(/^\s*label: "([^"]+)",$/gm)].map((m) => m[1]);
-  assert.strictEqual(labels.length, 29, "expected exactly 29 snippets");
+  assert.strictEqual(labels.length, 30, "expected exactly 30 snippets");
   assert.strictEqual(new Set(labels).size, labels.length, "snippet labels must be unique");
 });
 
@@ -53,8 +53,8 @@ test("snippet insertText values are well-formed", () => {
   const detailCount = (snippetBlock.match(/\bdetail:/g) || []).length;
   // One declaration belongs to the QqlSnippet interface; every concrete
   // snippet contributes exactly one additional property.
-  assert.strictEqual(insertTextCount, 30, "every snippet must have insertText");
-  assert.strictEqual(detailCount, 30, "every snippet must have a detail");
+  assert.strictEqual(insertTextCount, 31, "every snippet must have insertText");
+  assert.strictEqual(detailCount, 31, "every snippet must have a detail");
 });
 
 test("keyword count supports the '130+' claim", () => {

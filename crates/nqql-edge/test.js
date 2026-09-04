@@ -78,7 +78,19 @@ console.log("  ✓ isValid");
 const tokens = nqql.tokenize("QUERY 'test' FROM docs");
 assert(Array.isArray(tokens) && tokens.length > 0);
 assert.strictEqual(tokens[0].text, "QUERY");
+assert.strictEqual(tokens[0].pos, 0);
+assert.strictEqual(tokens[0].end, 5);
+assert.strictEqual(tokens[0].len, 5);
 console.log("  ✓ tokenize");
+
+// Test Stmt constructor and compileRoute
+const constructedStmt = new nqql.Stmt(query);
+assert(constructedStmt instanceof nqql.Stmt);
+const stmtRoute = constructedStmt.compileRoute();
+assert.strictEqual(stmtRoute.stmt_type, "query");
+assert.strictEqual(stmtRoute.method, "POST");
+assert.strictEqual(stmtRoute.path, "/collections/docs/points/query");
+console.log("  ✓ Stmt constructor & compileRoute");
 
 const route = nqql.compileQuery(query);
 assert.strictEqual(route.method, "POST");

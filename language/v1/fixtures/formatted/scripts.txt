@@ -1,0 +1,27 @@
+-- scripts.qql — Multi-statement script with semicolons
+
+-- Single statement
+QUERY 'hello' FROM docs LIMIT 10;
+
+-- Two statements
+QUERY 'hello' FROM docs LIMIT 10;
+COUNT FROM docs WHERE status = 'active';
+
+-- Multiple statements with trailing semicolon
+QUERY 'test' FROM docs LIMIT 10;
+UPSERT INTO docs VALUES {id: 1, text: 'sample'};
+COUNT FROM docs WHERE status = 'active';
+
+-- DDL mixed with DML
+CREATE COLLECTION test (
+  dense VECTOR(384, COSINE)
+)
+WITH HNSW (m = 16);
+
+UPSERT INTO test VALUES {id: 1, text: 'first'};
+
+CREATE INDEX ON COLLECTION test FOR text TYPE keyword;
+
+QUERY 'search' FROM test LIMIT 5;
+
+DROP COLLECTION test;

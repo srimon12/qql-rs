@@ -31,7 +31,8 @@ endpoint. If you already store vectors, omit the embedder and use vector input.
    ```sql
    CREATE COLLECTION docs (
      dense VECTOR(384, COSINE)
-   ) WITH HNSW (m = 16, ef_construct = 100);
+   )
+   WITH HNSW (m = 16, ef_construct = 100);
 
    CREATE INDEX ON COLLECTION docs FOR category TYPE keyword;
    ```
@@ -43,8 +44,7 @@ endpoint. If you already store vectors, omit the embedder and use vector input.
    ```sql
    UPSERT INTO docs VALUES
      {id: 1, text: 'QQL provides typed vector retrieval', category: 'qql'},
-     {id: 2, text: 'Qdrant stores dense and sparse vectors', category: 'qdrant'}
-    USING DENSE MODEL 'all-minilm:l6-v2';
+     {id: 2, text: 'Qdrant stores dense and sparse vectors', category: 'qdrant'} USING DENSE MODEL 'all-minilm:l6-v2';
    ```
    {% /qqlExample %}
 
@@ -52,10 +52,11 @@ endpoint. If you already store vectors, omit the embedder and use vector input.
 
    {% qqlExample title="Filtered search" %}
    ```sql
-   QUERY TEXT 'typed query language' FROM docs
+   QUERY 'typed query language'
+   FROM docs
    USING dense
-    WHERE category = 'qql'
-    LIMIT 5;
+   WHERE category = 'qql'
+   LIMIT 5;
    ```
    {% /qqlExample %}
 

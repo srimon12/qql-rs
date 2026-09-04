@@ -73,27 +73,24 @@ capability error as authoritative.
 
 {% qqlExample title="Remote search controls" %}
 ```sql
-QUERY TEXT 'search' FROM docs
+QUERY 'search'
+FROM docs
 USING dense
-PARAMS (
-  timeout = 30,
-  consistency = majority,
-  hnsw_ef = 64,
-  acorn = true,
-  max_selectivity = 0.4
-)
+PARAMS (hnsw_ef = 64, acorn = true, max_selectivity = 0.4, timeout = 30, consistency = majority)
 LIMIT 10;
 ```
 {% /qqlExample %}
 
 {% qqlExample title="Sparse IDF corpus (search-body param)" %}
 ```sql
-QUERY TEXT 'search' FROM docs
+QUERY 'search'
+FROM docs
 USING sparse
 PARAMS (idf = 'global')
 LIMIT 10;
 
-QUERY TEXT 'search' FROM docs
+QUERY 'search'
+FROM docs
 USING sparse
 WHERE tenant_id = 'acme'
 PARAMS (idf = WHERE tenant_id = 'acme')

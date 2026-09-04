@@ -73,10 +73,9 @@ CREATE COLLECTION docs HYBRID;
 
 UPSERT INTO docs VALUES
   {id: 1, text: 'QQL runs vector search locally'},
-  {id: 2, text: 'qdrant-edge keeps the HNSW index in-process'}
-USING HYBRID;
+  {id: 2, text: 'qdrant-edge keeps the HNSW index in-process'} USING HYBRID;
 
-QUERY TEXT 'local vector search' FROM docs USING dense LIMIT 5;
+QUERY 'local vector search' FROM docs USING dense LIMIT 5;
 ```
 {% /qqlExample %}
 

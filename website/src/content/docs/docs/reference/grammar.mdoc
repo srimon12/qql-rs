@@ -28,7 +28,7 @@ change, regenerate it with `qql-grammar-gen` and review the complete diff.
 script = [ statement, { ";", statement }, [ ";" ] ] ;
 statement = query | scroll | count | upsert | update | delete
           | clear-payload | delete-payload | delete-vector
-          | create | alter | drop | show ;
+          | create | alter | drop | show | facet ;
 ```
 
 ## Statement surface
@@ -40,6 +40,7 @@ Every statement family, including the three `SHOW` forms:
 | `QUERY ...` | `query` |
 | `SCROLL FROM ... LIMIT n` | `scroll` |
 | `COUNT FROM ...` | `count` |
+| `FACET field FROM ...` | `facet` |
 | `UPSERT INTO ... VALUES {...}` | `upsert` |
 | `UPDATE ... SET PAYLOAD` / `SET VECTOR` | `update` |
 | `DELETE FROM ... WHERE ...` | `delete` |
@@ -90,7 +91,7 @@ cargo run -p qql-grammar-gen -- check
 
 ## Versioning contract
 
-QQL follows `MAJOR.MINOR`; the current language version is `1.5` while the
+QQL follows `MAJOR.MINOR`; the current language version is `1.6` while the
 canonical AST schema is independently fixed as `qql.ast/v1`.
 
 - Within one major version, every program valid in an earlier minor release

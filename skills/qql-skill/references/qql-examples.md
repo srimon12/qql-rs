@@ -382,6 +382,15 @@ QUERY FORMULA (SQRT(score) * LOG(citation_count + 1)) DEFAULTS (citation_count =
   LIMIT 20;
 ```
 
+**N-ary clamping and inverse hyperbolic cosine** -- `MAX(...)` / `MIN(...)` fold two or more operands into the largest/smallest term; `ACOSH(x)` maps scores into a strictly positive range.
+
+```sql
+QUERY FORMULA MAX(MIN($score * 2.0, 10.0), 0.0) + ACOSH(popularity + 1.0)
+  DEFAULTS (score = 0.0)
+  FROM papers
+  LIMIT 20;
+```
+
 ---
 
 ## 15. Hybrid Search with Formula Boosting
@@ -727,3 +736,54 @@ QUERY TEXT 'hello' FROM docs USING sparse
 - Write `idf = WHERE <filter>` — not a Qdrant JSON `{must: […]}` object.
 - Pair with `WHERE tenant_id = 'acme'` (and `SHARD 'acme'` when custom-sharded) so
   both **retrieval isolation** and **IDF stats** stay tenant-local.
+
+---
+
+## 31. In-Database Categorical Aggregations (FACET)
+
+**Problem:** You need value counts for categorical payload fields (e.g. room types, legal precedent jurisdictions, tags) filtered by metadata or tenant partitions, without pulling thousands of records into your application layer.
+
+**Why this works:** QQL's native `FACET` statement compiles to Qdrant's `/collections/{collection}/facet` API, performing aggregation directly in-engine.
+
+```sql
+-- Count distinct room types in a hospitality collection
+FACET room_type FROM stays
+WHERE price < 150
+LIMIT 5
+EXACT true;
+
+-- Shard-routed facet for a multi-tenant catalog
+FACET tag FROM products
+WHERE in_stock = true
+SHARD 'tenant_1'
+LIMIT 10;
+```
+
+**Key decisions:**
+- `FACET <field> FROM <collection>`: Aggregates unique counts in the collection.
+- `WHERE`: Scopes aggregation to matching points.
+- `EXACT true`: Computes exact counts across shards rather than approximate counts.
+- `SHARD`: Directs aggregation to a specific tenant shard key.
+
+---
+
+## 32. Compact Vector Array Literals & Payload Defaults
+
+**Problem:** Embedding vectors are already computed by an external model service or local embedder. You want concise queries without boilerplate `VECTOR` keywords or manual `WITH PAYLOAD true` clauses.
+
+**Why this works:** `QUERY [0.1, 0.2, ...]` auto-recognizes array literals as vector queries, and queries automatically include payloads (`WITH PAYLOAD true` is the default).
+
+```sql
+-- Concise vector search with implicit array literal and default payload inclusion
+QUERY [0.0125, -0.0452, 0.8912]
+FROM documents
+USING dense
+LIMIT 10;
+
+-- Minimal bandwidth mode: explicitly strip payloads
+QUERY [0.0125, -0.0452, 0.8912]
+FROM documents
+USING dense
+WITH PAYLOAD false
+LIMIT 10;
+```

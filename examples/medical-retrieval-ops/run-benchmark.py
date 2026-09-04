@@ -2,6 +2,13 @@
 # requires-python = ">=3.11"
 # ///
 
+"""Score retrieval modes on the local medical demo benchmark.
+
+Input questions come from the public RAGCare-QA benchmark. stdout carries
+only aggregate hit rates plus opaque point IDs (no question/answer text),
+so benchmark logs never contain medical narrative in clear text.
+"""
+
 from __future__ import annotations
 
 import json
@@ -43,6 +50,8 @@ def score_mode(items: list[dict[str, object]], mode_name: str) -> dict[str, obje
     results = []
 
     for idx, item in enumerate(items, start=1):
+        # Question text is used only to build the QQL statement; it is never
+        # echoed into logs or stdout. Results keep opaque IDs + hit flags.
         question = escape_qql(str(item["question"]))
         limit = int(item.get("limit", 5))
         statement = MODES[mode_name](question, limit)
@@ -57,7 +66,6 @@ def score_mode(items: list[dict[str, object]], mode_name: str) -> dict[str, obje
             {
                 "index": idx,
                 "id": expected_id,
-                "specialty": item.get("specialty"),
                 "top1_hit": top1,
                 "top5_hit": top5,
                 "result_ids": result_ids,

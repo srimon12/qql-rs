@@ -2,15 +2,18 @@
 
 -- Basic hybrid
 QUERY HYBRID TEXT 'vector database' DENSE dense SPARSE bm25 FUSION RRF
-FROM docs LIMIT 10;
+FROM docs
+LIMIT 10;
 
 -- Hybrid with bare string (no TEXT keyword)
-QUERY HYBRID 'search query' DENSE dense SPARSE bm25 FUSION DBSF
-FROM docs LIMIT 10;
+QUERY HYBRID TEXT 'search query' DENSE dense SPARSE bm25 FUSION DBSF
+FROM docs
+LIMIT 10;
 
 -- Hybrid with MODEL
 QUERY HYBRID TEXT 'machine learning' MODEL 'nomic-embed-text' DENSE dense SPARSE bm25 FUSION RRF
-FROM docs LIMIT 10;
+FROM docs
+LIMIT 10;
 
 -- Hybrid with filter
 QUERY HYBRID TEXT 'vector database' DENSE dense SPARSE bm25 FUSION RRF
@@ -25,14 +28,15 @@ SCORE THRESHOLD 0.5
 LIMIT 10;
 
 -- Tail-form USING HYBRID (same AST expand as front-form QUERY HYBRID)
-QUERY TEXT 'vector database' FROM docs
-USING HYBRID DENSE dense SPARSE bm25 FUSION RRF
+QUERY HYBRID TEXT 'vector database' DENSE dense SPARSE bm25 FUSION RRF
+FROM docs
 LIMIT 10;
 
 -- Tail-form with bare string + defaults (omit names → schema resolve; FUSION defaults RRF)
-QUERY 'search query' FROM docs USING HYBRID LIMIT 10;
+QUERY HYBRID TEXT 'search query' FUSION RRF FROM docs LIMIT 10;
 
 -- Tail-form with MODEL + DBSF
-QUERY TEXT 'machine learning' MODEL 'nomic-embed-text' FROM docs
-USING HYBRID DENSE dense SPARSE bm25 FUSION DBSF
+QUERY HYBRID TEXT 'machine learning' MODEL 'nomic-embed-text' DENSE dense SPARSE bm25 FUSION DBSF
+FROM docs
 LIMIT 10;
+

@@ -1,8 +1,10 @@
 export class Stmt {
+  constructor(input: string);
   injectFilter(field: string, op: string, value: unknown): void;
   toObject(): unknown;
   toJson(): string;
   toJSON(): string;
+  compileRoute(): CompiledRoute;
   /** QQL `SHARD '…'` routing key (request-level). Prefer the clause in QQL. */
   shardKey?: string | null;
 }
@@ -147,7 +149,7 @@ export function injectFilter(
 
 export function tokenize(
   query: string,
-): Array<{ kind: string; text: string; pos: number }>;
+): Array<{ kind: string; text: string; pos: number; end: number; len: number }>;
 
 export function compileQuery(query: string): CompiledRoute;
 

@@ -39,6 +39,8 @@ use qql_plan::{
     UpdateCollectionRequest,
 };
 
+/// In-process backend: one `qdrant_edge` shard per collection under `base_path`,
+/// zero network. Batch methods fan out to individual routes (no native batch RPC).
 pub struct EdgeQdrant {
     base_path: PathBuf,
     on_disk_payload: bool,
@@ -70,6 +72,8 @@ impl std::fmt::Debug for EdgeQdrant {
 }
 
 impl EdgeQdrant {
+    /// Create an edge backend rooted at `base_path`; payloads persist on disk
+    /// unless `on_disk_payload` is false.
     pub fn new(base_path: impl Into<PathBuf>, on_disk_payload: bool) -> Self {
         Self {
             base_path: base_path.into(),
@@ -188,6 +192,10 @@ impl EdgeQdrant {
             .write()
             .await
             .insert(name.to_string(), Arc::clone(&shard));
+        {
+            let mut opening = self.opening.lock().await;
+            opening.remove(name);
+        }
         Ok(shard)
     }
 
@@ -785,6 +793,10 @@ impl QdrantOps for EdgeQdrant {
             let mut shards = self.shards.write().await;
             shards.remove(name)
         };
+        {
+            let mut opening = self.opening.lock().await;
+            opening.remove(name);
+        }
         if let Some(shard) = shard {
             tokio::task::spawn_blocking(move || drop(shard))
                 .await
@@ -915,6 +927,11 @@ impl QdrantOps for EdgeQdrant {
                 collection,
                 request,
             } => self.execute_edge_count(collection, request).await,
+            Facet { .. } => Err(QqlError::execution(
+                "QQL-EDGE-FACET",
+                "FACET is currently only supported via REST",
+                None,
+            )),
             Upsert {
                 collection,
                 request,

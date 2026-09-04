@@ -1,0 +1,11 @@
+-- query-formula-div-default.qql — Formula division with DEFAULT fallback
+
+-- Formula division with DEFAULT fallback
+QUERY FORMULA $score / views [DEFAULT = 1.0] * 10.0 DEFAULTS (score = 0.0)
+FROM docs
+LIMIT 10;
+
+-- Complex formula division with DEFAULT fallback
+QUERY FORMULA score_a / score_b [DEFAULT = 0.0] + 1.0 DEFAULTS (score = 0.0)
+FROM docs
+LIMIT 10;

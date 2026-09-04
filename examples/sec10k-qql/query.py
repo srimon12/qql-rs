@@ -121,7 +121,7 @@ queries = [
         QUERY HYBRID TEXT 'cybersecurity risk factors' DENSE dense SPARSE sparse FUSION RRF
         FROM {C}
         {QRESCORE}
-        WITH PAYLOAD true LIMIT 5
+        LIMIT 5
         """,
         "honeywell",
     ),
@@ -132,7 +132,7 @@ queries = [
         FROM {C}
         USING HYBRID DENSE dense SPARSE sparse FUSION RRF
         {QRESCORE}
-        WITH PAYLOAD true LIMIT 5
+        LIMIT 5
         """,
         "honeywell",
     ),
@@ -142,7 +142,7 @@ queries = [
         QUERY HYBRID TEXT 'supply chain disruption' DENSE dense SPARSE sparse FUSION DBSF
         FROM {C}
         {QRESCORE}
-        WITH PAYLOAD true LIMIT 5
+        LIMIT 5
         """,
         "honeywell",
     ),
@@ -154,7 +154,7 @@ queries = [
         QUERY FUSION RRF FROM {C}
         PREFETCH (a, b)
         {QRESCORE}
-        WITH PAYLOAD true LIMIT 5
+        LIMIT 5
         """,
         "honeywell",
     ),
@@ -165,7 +165,7 @@ queries = [
         PREFETCH (QUERY TEXT 'missile defense' FROM {C} USING sparse LIMIT 50)
         SCORE THRESHOLD 0.3
         {QRESCORE}
-        WITH PAYLOAD true LIMIT 5
+        LIMIT 5
         """,
         "rtx",
     ),
@@ -175,7 +175,7 @@ queries = [
         QUERY MMR TEXT 'manufacturing operations' DIVERSITY 0.5 CANDIDATES 100
         FROM {C} USING dense
         PARAMS (hnsw_ef = 256, quantization = {{ignore: false, rescore: true, oversampling: 2.0}})
-        WITH PAYLOAD true LIMIT 5
+        LIMIT 5
         """,
         "3m",
     ),
@@ -186,7 +186,7 @@ queries = [
         QUERY FORMULA score * 2.0 DEFAULTS (score = 0.0)
         FROM {C}
         PREFETCH (candidates)
-        WITH PAYLOAD true LIMIT 5
+        LIMIT 5
         """,
         "rtx",
     ),
@@ -199,7 +199,7 @@ queries = [
         WHERE fiscal_year >= 2024
         PARAMS (acorn = true, max_selectivity = 0.5, hnsw_ef = 128,
                 quantization = {{ignore: false, rescore: true, oversampling: 2.0}})
-        WITH PAYLOAD true LIMIT 5
+        LIMIT 5
         """,
         "ge",
     ),
@@ -211,7 +211,7 @@ queries = [
         USING dense
         PARAMS (timeout = 30, consistency = majority,
                 quantization = {{rescore: true, oversampling: 2.0}})
-        WITH PAYLOAD true LIMIT 5
+        LIMIT 5
         """,
         "rtx",
     ),
@@ -227,9 +227,17 @@ queries = [
         f"""
         QUERY ORDER BY fiscal_year DESC FROM {C}
         WHERE fiscal_year >= 2023
-        WITH PAYLOAD true LIMIT 5
+        LIMIT 5
         """,
         "ge",
+    ),
+    (
+        "12. FACET fiscal_year distribution",
+        f"""
+        FACET fiscal_year FROM {C}
+        LIMIT 5
+        """,
+        "honeywell",
     ),
 ]
 
@@ -283,7 +291,7 @@ for tenant in ["honeywell", "rtx"]:
             QUERY TEXT 'Patriot missile defense'
             FROM {C}
             USING HYBRID DENSE dense SPARSE sparse FUSION RRF
-            WITH PAYLOAD true LIMIT 3
+            LIMIT 3
             """,
             tenant=tenant,
         )
@@ -304,7 +312,7 @@ try:
         QUERY TEXT 'Raytheon contract awards programs'
         FROM {C}
         USING HYBRID DENSE dense SPARSE sparse FUSION RRF
-        WITH PAYLOAD true LIMIT 3
+        LIMIT 3
         """,
         tenant="rtx",
     )

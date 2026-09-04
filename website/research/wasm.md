@@ -33,7 +33,7 @@ qql-wasm-demo/
 ├── components.json                     # shadcn config (style: base-maia, baseColor: mist)
 ├── pnpm-workspace.yaml                 # allowBuilds for esbuild/onnx (blocked)
 ├── wrangler.toml                       # CF Pages config
-├── AGENT.md                            # Internal contributor guide (245 lines)
+├── AGENTS.md                           # Internal contributor guide (245 lines)
 ├── README.md                           # User-facing docs (220 lines)
 ├── scripts/
 │   └── validate-presets.mjs            # CI gate: analyze() every preset with qql-wasm

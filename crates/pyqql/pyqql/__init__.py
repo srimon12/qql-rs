@@ -1,9 +1,8 @@
-__version__ = "0.2.1"
-
 from .pyqql import (
     Client,
     HttpEmbedder,
     Stmt,
+    __version__,
     bind,
     compile_query,
     execute,

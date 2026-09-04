@@ -127,6 +127,12 @@ const SNIPPETS: QqlSnippet[] = [
     detail: "Count points with filter",
   },
   {
+    label: "FACET",
+    insertText:
+      "FACET ${1:field}\n  FROM ${2:collection}\n  WHERE ${3:filter}\n  LIMIT ${4:10}\n  EXACT ${5:true};",
+    detail: "Compute value distribution for payload field",
+  },
+  {
     label: "DELETE",
     insertText: "DELETE FROM ${1:collection} WHERE ${2:status} = '${3:archived}';",
     detail: "Delete points by filter",

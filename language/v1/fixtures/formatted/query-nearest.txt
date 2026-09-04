@@ -1,0 +1,52 @@
+-- query-nearest.qql — Nearest-neighbor (default) search
+-- Tests: bare string input, TEXT with MODEL, VECTOR input, POINT input, all clauses
+
+-- Basic: bare string = TEXT with no model
+QUERY 'vector database' FROM docs LIMIT 10;
+
+-- SQL-style doubled quote decodes to one quote
+QUERY 'St. Peter\'s Church' FROM docs LIMIT 5;
+
+-- Explicit NEAREST with MODEL
+QUERY TEXT 'machine learning' MODEL 'nomic-embed-text'
+FROM docs
+USING semantic_v2 AS DENSE
+LIMIT 10;
+
+-- Arbitrary sparse named vector
+QUERY 'keyword search' FROM docs USING lexical_v2 AS SPARSE LIMIT 10;
+
+-- Vector input (pre-computed)
+QUERY VECTOR [0.1, 0.2, 0.3] FROM docs LIMIT 10;
+
+-- Point ID as similarity input
+QUERY POINT 42 FROM docs LIMIT 10;
+
+-- Full clauses: WHERE, SCORE THRESHOLD, group by, payload selector, OFFSET
+QUERY 'search'
+FROM docs
+USING semantic_v2 AS DENSE
+WHERE status = 'published'
+SCORE THRESHOLD 0.5
+WITH PAYLOAD INCLUDE (title, url)
+WITH VECTOR false
+LIMIT 20
+OFFSET 10;
+
+-- With PARAMS
+QUERY 'search'
+FROM docs
+PARAMS (hnsw_ef = 128, exact = false, acorn = true)
+LIMIT 10;
+
+-- With GROUP BY
+QUERY 'search' FROM docs GROUP BY category SIZE 5 LIMIT 20;
+
+-- With GROUP BY + LOOKUP
+QUERY 'search'
+FROM docs
+GROUP BY category SIZE 5 LOOKUP FROM categories
+LIMIT 20;
+
+-- Dense multivector (ColBERT-style)
+QUERY 'search' FROM docs USING colbert AS MULTI LIMIT 10;

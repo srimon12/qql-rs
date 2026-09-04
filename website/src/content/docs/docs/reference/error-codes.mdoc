@@ -53,6 +53,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PARSE-QUERY-INPUT` | Invalid query input form (a bare number is not a query input) |
 | `QQL-PARSE-CLAUSE-ORDER` | Duplicate or out-of-order query clause |
 | `QQL-PARSE-VECTOR-KIND` | `AS` is not `DENSE`, `SPARSE`, `MULTI`, or `MULTIVECTOR` |
+| `QQL-PARSE-VECTOR-SIZE` | Vector dimension exceeds the 65536 maximum |
 | `QQL-PARSE-DUPLICATE-CTE` | Duplicate CTE name in one script |
 | `QQL-PARSE-DUPLICATE-KEY` | Duplicate object or config key (ASCII case-insensitive) |
 | `QQL-PARSE-POSITIVE-INTEGER` | Value must be a positive integer (for example `LIMIT`, `CANDIDATES`, vector size) |
@@ -144,6 +145,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PLAN-PREFETCH-CTE` | `PREFETCH` references an unknown CTE |
 | `QQL-PLAN-PREFETCH-GROUP` | `GROUP BY` is not supported inside a `PREFETCH` source |
 | `QQL-PLAN-QUOTA` | Invalid `SET QUOTA` key or out-of-range percent |
+| `QQL-PLAN-RECOMMEND-AVERAGE` | `average_vector` examples must share one vector shape |
 | `QQL-PLAN-RERANK-PREFETCH` | `RERANK` requires at least one `PREFETCH` |
 | `QQL-PLAN-RERANK-USING` | `RERANK` requires a non-empty `USING` vector name |
 | `QQL-PLAN-RRF-PARAMS` | `rrf_k` and `rrf_weights` are valid only with `RRF` fusion |
@@ -187,6 +189,7 @@ usually carry a remediation hint pointing at remote Qdrant.
 | `QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY` | `RECOMMEND STRATEGY average_vector`; offline supports `best_score` and `sum_scores` only |
 | `QQL-EDGE-UNSUPPORTED-POINT-REF` | Point-ID query inputs need materialized vectors offline |
 | `QQL-EDGE-UNSUPPORTED-FIELD-TYPE` | The index field type is not available offline |
+| `QQL-EDGE-UNSUPPORTED-FORMULA-FUNCTION` | `MAX` / `MIN` / `ACOSH` formula functions; the pinned qdrant-edge predates those `Expression` variants |
 | `QQL-EDGE-UNSUPPORTED-ROUTE` | The planned operation has no edge route implementation (defensive fallback) |
 | `QQL-EDGE-INVALID-POINT-ID` | Offline point IDs accept unsigned integers or UUIDs only |
 
@@ -251,6 +254,7 @@ QQL-EDGE-UNSUPPORTED-ALTER
 QQL-EDGE-UNSUPPORTED-COLLECTION-PARAMS
 QQL-EDGE-UNSUPPORTED-CONSISTENCY
 QQL-EDGE-UNSUPPORTED-FIELD-TYPE
+QQL-EDGE-UNSUPPORTED-FORMULA-FUNCTION
 QQL-EDGE-UNSUPPORTED-GROUP-BY
 QQL-EDGE-UNSUPPORTED-POINT-REF
 QQL-EDGE-UNSUPPORTED-QUOTA
@@ -331,6 +335,7 @@ QQL-PARSE-TRAILING
 QQL-PARSE-UPDATE
 QQL-PARSE-VALUE
 QQL-PARSE-VECTOR-KIND
+QQL-PARSE-VECTOR-SIZE
 QQL-PLAN-COLLECTION
 QQL-PLAN-CROSS-RERANK-CANDIDATE
 QQL-PLAN-CROSS-RERANK-CTE
@@ -342,6 +347,7 @@ QQL-PLAN-IDF
 QQL-PLAN-PREFETCH-CTE
 QQL-PLAN-PREFETCH-GROUP
 QQL-PLAN-QUOTA
+QQL-PLAN-RECOMMEND-AVERAGE
 QQL-PLAN-RERANK-PREFETCH
 QQL-PLAN-RERANK-USING
 QQL-PLAN-RRF-PARAMS

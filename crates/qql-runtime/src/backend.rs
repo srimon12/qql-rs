@@ -11,7 +11,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// A Qdrant point identifier.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PointId {
+    /// Numeric point ID, serialized as Qdrant's `num` field.
     Num(u64),
+    /// UUID point ID, serialized as Qdrant's `uuid` field.
     Uuid(String),
 }
 
@@ -70,14 +72,17 @@ impl<'de> Deserialize<'de> for PointId {
 pub struct Filter(pub serde_json::Value);
 
 impl Filter {
+    /// Wrap an already-shaped Qdrant filter JSON value.
     pub fn from_json(value: serde_json::Value) -> Self {
         Self(value)
     }
 
+    /// Borrow the underlying filter JSON value.
     pub fn as_json(&self) -> &serde_json::Value {
         &self.0
     }
 
+    /// Consume the filter and return its JSON value.
     pub fn into_json(self) -> serde_json::Value {
         self.0
     }
@@ -86,18 +91,25 @@ impl Filter {
 /// A transport-neutral point accepted by an upsert operation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Point {
+    /// Point identifier (`num` integer or `uuid` string).
     pub id: PointId,
+    /// Vector value in Qdrant wire shape (array, named map, or sparse object).
     pub vector: serde_json::Value,
+    /// Payload key/value map stored with the point.
     pub payload: HashMap<String, serde_json::Value>,
 }
 
 /// A point returned from a similarity query.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScoredPoint {
+    /// Matched point identifier.
     pub id: PointId,
+    /// Similarity score assigned by the backend.
     pub score: f32,
+    /// Payload when requested via `WITH PAYLOAD`; absent when stripped.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payload: Option<HashMap<String, serde_json::Value>>,
+    /// Vector when requested via `WITH VECTOR`; absent by default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vector: Option<serde_json::Value>,
 }
@@ -105,9 +117,12 @@ pub struct ScoredPoint {
 /// A point returned by retrieve or scroll operations.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RetrievedPoint {
+    /// Retrieved point identifier.
     pub id: PointId,
+    /// Payload when requested via `WITH PAYLOAD`; absent when stripped.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payload: Option<HashMap<String, serde_json::Value>>,
+    /// Vector when requested via `WITH VECTOR`; absent by default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vector: Option<serde_json::Value>,
 }
@@ -115,7 +130,9 @@ pub struct RetrievedPoint {
 /// A grouped query result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PointGroup {
+    /// Group key value as returned by Qdrant (JSON-typed).
     pub id: serde_json::Value,
+    /// Scored points in this group, in backend order.
     #[serde(default)]
     pub hits: Vec<ScoredPoint>,
 }
@@ -125,19 +142,28 @@ pub struct PointGroup {
 /// `name == None` means Qdrant's default unnamed vector.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VectorSpec {
+    /// Vector name; `None` for the unnamed default vector.
     pub name: Option<String>,
+    /// Vector dimension.
     pub size: u64,
+    /// Distance metric as reported by Qdrant (e.g. `Cosine`, `Dot`).
     pub distance: String,
+    /// Per-vector HNSW overrides (`hnsw_config`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hnsw: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Per-vector quantization config (`quantization_config`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quantization: Option<serde_json::Value>,
+    /// Multivector (ColBERT) config (`multivector_config`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub multivector: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Whether vector storage stays on disk (`on_disk`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_disk: Option<bool>,
+    /// Storage element type (`datatype`, e.g. `float32`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub datatype: Option<String>,
+    /// Memory placement hint for vector storage (`memory`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory: Option<String>,
 }
@@ -145,10 +171,14 @@ pub struct VectorSpec {
 /// A payload field index declared on the collection.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PayloadIndexSpec {
+    /// Payload field path the index is built on.
     pub field: String,
+    /// Indexed data type (e.g. `keyword`, `integer`, `datetime`).
     pub data_type: String,
+    /// Extra index parameters (e.g. full-text analyzer settings).
     #[serde(default)]
     pub params: serde_json::Map<String, serde_json::Value>,
+    /// Whether this is a tenant index (`is_tenant`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_tenant: Option<bool>,
 }
@@ -156,23 +186,32 @@ pub struct PayloadIndexSpec {
 /// Collection-level params relevant to dump / DDL reconstruction.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CollectionParamsSpec {
+    /// Number of shards (`shard_number`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shard_number: Option<u64>,
+    /// Sharding method name (`sharding_method`, e.g. `auto`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sharding_method: Option<String>,
+    /// Whether payloads are stored on disk (`on_disk_payload`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_disk_payload: Option<bool>,
+    /// Payload memory placement (`params.payload.memory`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payload_memory: Option<String>,
+    /// Shard replication factor (`replication_factor`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replication_factor: Option<u64>,
 }
 
+/// A named sparse vector definition from collection config.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SparseVectorSpec {
+    /// Sparse vector name as declared on the collection.
     pub name: String,
+    /// Sparse index settings (`index`), e.g. on-disk placement.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub index: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Optional modifier (`modifier`, e.g. `idf` for server-side BM25 IDF).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub modifier: Option<String>,
 }
@@ -183,19 +222,25 @@ pub struct CollectionSchema {
     /// Named dense vector names. Empty for a single unnamed default vector.
     #[serde(default)]
     pub dense_vectors: Vec<String>,
+    /// Named sparse vector definitions.
     #[serde(default)]
     pub sparse_vectors: Vec<SparseVectorSpec>,
     /// Full dense vector definitions (size + distance) when the backend provides them.
     #[serde(default)]
     pub vectors: Vec<VectorSpec>,
+    /// Payload field indexes declared on the collection.
     #[serde(default)]
     pub payload_indexes: Vec<PayloadIndexSpec>,
+    /// Collection-level parameters relevant to dump / DDL reconstruction.
     #[serde(default)]
     pub params: CollectionParamsSpec,
+    /// Collection-level HNSW config (`hnsw_config`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hnsw: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Collection-level optimizer config (`optimizer_config`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub optimizers: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Collection-level quantization config (`quantization_config`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quantization: Option<serde_json::Value>,
 }
@@ -203,12 +248,16 @@ pub struct CollectionSchema {
 /// Transport-neutral collection metadata consumed by the executor.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CollectionInfo {
+    /// Collection health status reported by the backend (e.g. `green`).
     #[serde(default)]
     pub status: String,
+    /// Number of points currently stored in the collection.
     #[serde(default)]
     pub points_count: u64,
+    /// Number of storage segments backing the collection.
     #[serde(default)]
     pub segments_count: u64,
+    /// Vector and index schema used for `USING` resolution and dumps.
     #[serde(default)]
     pub schema: CollectionSchema,
 }

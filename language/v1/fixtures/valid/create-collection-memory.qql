@@ -4,7 +4,9 @@
 -- Dense vector with turbo4 datatype and cached memory placement
 CREATE COLLECTION docs (
   dense VECTOR(384, COSINE) WITH VECTOR (memory = 'cached', datatype = 'turbo4')
-) WITH HNSW (memory = 'cold') WITH PARAMS (payload_memory = 'cold');
+)
+WITH HNSW (memory = 'cold')
+WITH PARAMS (payload_memory = 'cold');
 
 -- Sparse index with memory placement
 CREATE COLLECTION docs2 (
@@ -15,3 +17,4 @@ CREATE COLLECTION docs2 (
 CREATE COLLECTION docs3 (
   dense VECTOR(128, DOT) WITH QUANTIZATION (type = 'scalar', memory = 'pinned')
 );
+

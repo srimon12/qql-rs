@@ -14,10 +14,7 @@ npm install @veristamp/nqql
 
 {% qqlExample title="Scoped runbook search" %}
 ```sql
-QUERY TEXT 'incident response'
-FROM runbooks
-USING dense
-LIMIT 5;
+QUERY 'incident response' FROM runbooks USING dense LIMIT 5;
 ```
 {% /qqlExample %}
 

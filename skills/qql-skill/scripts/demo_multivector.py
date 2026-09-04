@@ -75,18 +75,18 @@ def build_statements():
 
     # ── 4. Two-stage retrieval: prefetch + rerank ───────────────
     stmts.append(("pdf-retrieval-prefetch", f"""WITH
-    _pf0 AS (QUERY VECTOR [0.1, 0.2, 0.3] FROM {COLLECTION} USING mean_pooling_columns LIMIT 100),
-    _pf1 AS (QUERY VECTOR [0.1, 0.2, 0.3] FROM {COLLECTION} USING mean_pooling_rows LIMIT 100)
-QUERY VECTOR [0.1, 0.2, 0.3] FROM {COLLECTION} USING original PREFETCH (_pf0, _pf1) LIMIT 5"""))
+    _pf0 AS (QUERY [0.1, 0.2, 0.3] FROM {COLLECTION} USING mean_pooling_columns LIMIT 100),
+    _pf1 AS (QUERY [0.1, 0.2, 0.3] FROM {COLLECTION} USING mean_pooling_rows LIMIT 100)
+QUERY [0.1, 0.2, 0.3] FROM {COLLECTION} USING original PREFETCH (_pf0, _pf1) LIMIT 5"""))
 
     # ── 5. Single prefetch with filter ──────────────────────────
     stmts.append(("pdf-retrieval-filtered", f"""WITH
-    _pf0 AS (QUERY VECTOR [0.1, 0.2, 0.3] FROM {COLLECTION} USING mean_pooling_columns WHERE page_number >= 2 LIMIT 50)
-QUERY VECTOR [0.1, 0.2, 0.3] FROM {COLLECTION} USING original PREFETCH (_pf0) LIMIT 3"""))
+    _pf0 AS (QUERY [0.1, 0.2, 0.3] FROM {COLLECTION} USING mean_pooling_columns WHERE page_number >= 2 LIMIT 50)
+QUERY [0.1, 0.2, 0.3] FROM {COLLECTION} USING original PREFETCH (_pf0) LIMIT 3"""))
 
     # ── 6. Dense search on named vector ─────────────────────────
     stmts.append(("search-columns-only",
-        f"QUERY VECTOR [0.1, 0.2, 0.3] FROM {COLLECTION} USING mean_pooling_columns LIMIT 3"))
+        f"QUERY [0.1, 0.2, 0.3] FROM {COLLECTION} USING mean_pooling_columns LIMIT 3"))
 
     # ── 7. Show collection ──────────────────────────────────────
     stmts.append(("show-collection", f"SHOW COLLECTION {COLLECTION}"))

@@ -17,101 +17,190 @@ use qql_core::ast::{
 };
 use qql_core::error::QqlError;
 
+/// Full frontend validity gate: parse a script and plan-validate every
+/// statement.
+///
+/// This is the exact contract the language conformance suite enforces
+/// (`parse_all` + `plan`) and the runtime applies before executing, so
+/// `is_ok()` here means the script would be accepted for execution. Bindings
+/// (`pyqql` / `nqql` / `qql-wasm`) expose this as their `is_valid`.
+pub fn parse_and_plan(source: &str) -> Result<Vec<Stmt>, QqlError> {
+    let statements = qql_core::parser::Parser::parse_all(source)?;
+    for statement in &statements {
+        plan(statement)?;
+    }
+    Ok(statements)
+}
+
 /// Canonical planned operation. Batch compatibility is determined from this
 /// type, not from raw AST.
 #[derive(Debug, Clone)]
 pub enum PlannedOperation {
+    /// Vector or text search: `POST /collections/{c}/points/query`.
     Query {
+        /// Target collection name.
         collection: String,
+        /// Lowered `/points/query` request body.
         request: QueryRequest,
     },
+    /// Grouped search: `POST /collections/{c}/points/query/groups`.
     QueryGroups {
+        /// Target collection name.
         collection: String,
+        /// Lowered `/points/query/groups` request body.
         request: QueryGroupsRequest,
     },
+    /// Point-ID retrieval: `POST /collections/{c}/points`.
     GetPoints {
+        /// Target collection name.
         collection: String,
+        /// Lowered `/points` request body.
         request: PointsRequest,
     },
+    /// Keyset pagination: `POST /collections/{c}/points/scroll`.
     Scroll {
+        /// Target collection name.
         collection: String,
+        /// Lowered `/points/scroll` request body.
         request: ScrollRequest,
     },
+    /// Count matching points: `POST /collections/{c}/points/count`.
     Count {
+        /// Target collection name.
         collection: String,
+        /// Lowered `/points/count` request body.
         request: CountRequest,
     },
-    Upsert {
+    /// In-database facet aggregation (`POST /collections/{collection}/facet`).
+    Facet {
+        /// Target collection name.
         collection: String,
+        /// Lowered `/points/facet` request body.
+        request: FacetRequest,
+    },
+    /// Point upsert: `PUT /collections/{c}/points`.
+    Upsert {
+        /// Target collection name.
+        collection: String,
+        /// Lowered `/points` upsert request body.
         request: UpsertRequest,
+        /// Force `wait=true` on the route when embedding resolution runs.
         wait: bool,
     },
+    /// Point deletion by ID or filter: `POST /collections/{c}/points/delete`.
     Delete {
+        /// Target collection name.
         collection: String,
+        /// Lowered `/points/delete` request body.
         request: DeleteRequest,
     },
+    /// Merge payload keys: `POST /collections/{c}/points/payload`.
     UpdatePayload {
+        /// Target collection name.
         collection: String,
+        /// Lowered `/points/payload` request body.
         request: UpdatePayloadRequest,
     },
+    /// Drop all payload: `POST /collections/{c}/points/payload/clear`.
     ClearPayload {
+        /// Target collection name.
         collection: String,
+        /// Lowered `/points/payload/clear` request body.
         request: ClearPayloadRequest,
     },
+    /// Remove payload keys: `POST /collections/{c}/points/payload/delete`.
     DeletePayload {
+        /// Target collection name.
         collection: String,
+        /// Lowered `/points/payload/delete` request body.
         request: DeletePayloadRequest,
     },
+    /// Replace point vectors: `PUT /collections/{c}/points/vectors`.
     UpdateVectors {
+        /// Target collection name.
         collection: String,
+        /// Lowered `/points/vectors` request body.
         request: UpdateVectorRequest,
     },
+    /// Remove named vectors: `POST /collections/{c}/points/vectors/delete`.
     DeleteVectors {
+        /// Target collection name.
         collection: String,
+        /// Lowered `/points/vectors/delete` request body.
         request: DeleteVectorRequest,
     },
+    /// Create a collection: `PUT /collections/{c}`.
     CreateCollection {
+        /// Target collection name.
         collection: String,
+        /// Lowered create-collection request body.
         request: CreateCollectionRequest,
     },
+    /// Alter a collection: `PATCH /collections/{c}`.
     UpdateCollection {
+        /// Target collection name.
         collection: String,
+        /// Lowered alter-collection request body.
         request: UpdateCollectionRequest,
     },
+    /// Drop a collection: `DELETE /collections/{c}`.
     DropCollection {
+        /// Target collection name.
         collection: String,
     },
+    /// Create a payload index: `PUT /collections/{c}/index`.
     CreateIndex {
+        /// Target collection name.
         collection: String,
+        /// Lowered create-index request body.
         request: CreateIndexRequest,
     },
+    /// Drop a payload index: `DELETE /collections/{c}/index/{field}`.
     DropIndex {
+        /// Target collection name.
         collection: String,
+        /// Payload field whose index is dropped.
         field: String,
     },
+    /// Create a custom shard key: `PUT /collections/{c}/shards`.
     CreateShardKey {
+        /// Target collection name.
         collection: String,
+        /// Lowered create-shard-key request body.
         request: CreateShardKeyRequest,
     },
+    /// Drop a custom shard key: `POST /collections/{c}/shards/delete`.
     DropShardKey {
+        /// Target collection name.
         collection: String,
+        /// Lowered drop-shard-key request body.
         request: DropShardKeyRequest,
     },
+    /// List custom shard keys: `GET /collections/{c}/shards`.
     ListShardKeys {
+        /// Target collection name.
         collection: String,
     },
+    /// List collections: `GET /collections`.
     ListCollections,
+    /// Inspect a collection: `GET /collections/{c}`.
     GetCollection {
+        /// Target collection name.
         collection: String,
     },
     /// Client-side cross-encoder: run candidate queries, score pairs, reorder.
     CrossRerank {
+        /// Target collection name.
         collection: String,
+        /// Natural-language query text for the cross-encoder.
         query: String,
+        /// Cross-encoder model identifier.
         model: String,
         /// Payload field holding document text for pair scoring.
         field: String,
+        /// Final result limit after reranking.
         limit: u64,
+        /// Result offset after reranking.
         offset: u64,
         /// Candidate ANN stages already planned as normal queries.
         candidates: Vec<(String, QueryRequest)>,
@@ -120,6 +209,7 @@ pub enum PlannedOperation {
     GetQuotas,
     /// Replace the cluster-wide resource quota configuration.
     SetQuotas {
+        /// Replacement quota config; omitted keys become uncapped defaults.
         request: SetQuotaRequest,
     },
 }
@@ -133,6 +223,7 @@ impl PlannedOperation {
             PlannedOperation::GetPoints { .. } => "GET_POINTS",
             PlannedOperation::Scroll { .. } => "SCROLL",
             PlannedOperation::Count { .. } => "COUNT",
+            PlannedOperation::Facet { .. } => "FACET",
             PlannedOperation::Upsert { .. } => "UPSERT",
             PlannedOperation::Delete { .. } => "DELETE",
             PlannedOperation::UpdatePayload { .. } => "UPDATE_PAYLOAD",
@@ -167,6 +258,7 @@ impl PlannedOperation {
             PlannedOperation::GetPoints { .. } => "points",
             PlannedOperation::Scroll { .. } => "scroll",
             PlannedOperation::Count { .. } => "count",
+            PlannedOperation::Facet { .. } => "facet",
             PlannedOperation::Upsert { .. } => "upsert",
             PlannedOperation::Delete { .. } => "delete",
             PlannedOperation::UpdatePayload { .. } => "update_payload",
@@ -198,6 +290,7 @@ impl PlannedOperation {
             | PlannedOperation::GetPoints { collection, .. }
             | PlannedOperation::Scroll { collection, .. }
             | PlannedOperation::Count { collection, .. }
+            | PlannedOperation::Facet { collection, .. }
             | PlannedOperation::Upsert { collection, .. }
             | PlannedOperation::Delete { collection, .. }
             | PlannedOperation::UpdatePayload { collection, .. }
@@ -264,6 +357,7 @@ impl PlannedOperation {
             PlannedOperation::GetPoints { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::Scroll { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::Count { request, .. } => request.shard_key.as_deref(),
+            PlannedOperation::Facet { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::Upsert { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::Delete { request, .. } => request.shard_key.as_deref(),
             PlannedOperation::UpdatePayload { request, .. } => request.shard_key.as_deref(),
@@ -279,9 +373,14 @@ impl PlannedOperation {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Classification family for executor batch sharing: which statements may run
+/// together as one contiguous same-collection batch.
 pub enum BatchFamily {
+    /// Joins a query batch (`/points/query/batch`).
     Query,
+    /// Joins a mutation batch (`UpdateOperations` / `UpdateBatchPoints`).
     Mutation,
+    /// Always executed alone.
     Single,
 }
 
@@ -291,7 +390,9 @@ pub enum BatchFamily {
 /// batches before flushing to the backend.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BatchKey {
+    /// Query batch for the named collection.
     Query(String),
+    /// Mutation batch for the named collection.
     Mutation(String),
 }
 
@@ -477,6 +578,50 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
                 },
             })
         }
+        Stmt::Facet(facet) => {
+            let collection = match &facet.collection {
+                qql_core::ast::QueryCollection::Explicit(name) if !name.is_empty() => name.clone(),
+                qql_core::ast::QueryCollection::Explicit(_) => {
+                    return Err(QqlError::validation(
+                        "QQL-PLAN-COLLECTION",
+                        "facet collection name must not be empty",
+                        None,
+                    ));
+                }
+                qql_core::ast::QueryCollection::Inherited => {
+                    return Err(QqlError::validation(
+                        "QQL-PLAN-COLLECTION",
+                        "facet requires an explicit collection (FROM ...)",
+                        None,
+                    ));
+                }
+            };
+            let filter = facet
+                .filter
+                .as_ref()
+                .map(|f| crate::filter::top_level_filter(f));
+            let limit = match facet.limit {
+                Some(n) if n > usize::MAX as u64 => {
+                    return Err(QqlError::validation(
+                        "QQL-VALIDATION-LIMIT-OVERFLOW",
+                        alloc::format!("facet limit {n} exceeds platform usize::MAX"),
+                        None,
+                    ));
+                }
+                Some(n) => Some(n as usize),
+                None => None,
+            };
+            Ok(PlannedOperation::Facet {
+                collection,
+                request: FacetRequest {
+                    key: facet.key.clone(),
+                    limit,
+                    filter,
+                    exact: facet.exact,
+                    shard_key: facet.shard_key.clone(),
+                },
+            })
+        }
         Stmt::CreateShardKey(sk) => Ok(PlannedOperation::CreateShardKey {
             collection: sk.collection.clone(),
             request: CreateShardKeyRequest {
@@ -640,6 +785,7 @@ fn validate_query_stmt(query: &qql_core::ast::QueryStmt) -> Result<(), QqlError>
 
 fn validate_query_expr(expression: &QueryExpr) -> Result<(), QqlError> {
     validate_query_target_kinds(expression)?;
+    validate_recommend_average_dims(expression)?;
     let prefetch = match expression {
         QueryExpr::Nearest { prefetch, .. }
         | QueryExpr::Recommend { prefetch, .. }
@@ -760,6 +906,74 @@ fn validate_query_target_kinds(expression: &QueryExpr) -> Result<(), QqlError> {
             return Err(query_kind_error(
                 "query input vector type does not match the USING vector kind",
             ));
+        }
+    }
+    Ok(())
+}
+
+/// The recommend `average_vector` strategy (also the server default) folds all
+/// positive/negative examples into a single query vector, so every inline
+/// example vector must share the same shape. Upstream Qdrant rejects
+/// mismatched dimensions (#10374); we fail fast at plan time. Point-ID / TEXT
+/// examples have no known shape here and are skipped (resolved later).
+fn validate_recommend_average_dims(expression: &QueryExpr) -> Result<(), QqlError> {
+    let QueryExpr::Recommend {
+        positive,
+        negative,
+        strategy,
+        ..
+    } = expression
+    else {
+        return Ok(());
+    };
+    // Only average_vector requires a shared shape; best_score / sum_scores
+    // score each example independently.
+    if matches!(
+        strategy,
+        Some(qql_core::ast::RecommendStrategy::BestScore)
+            | Some(qql_core::ast::RecommendStrategy::SumScores)
+    ) {
+        return Ok(());
+    }
+
+    // Dense → (1, dim); MultiDense → (rows, row dim). Ragged rows have no
+    // single dimension, so their shape is unknown here — skip them and let the
+    // backend validate. Sparse examples have no average semantics and are
+    // skipped as well.
+    let shape_of = |value: &VectorValue| -> Option<(usize, usize)> {
+        match value {
+            VectorValue::Dense(dims) => Some((1, dims.len())),
+            VectorValue::MultiDense(rows) => {
+                let dim = rows.first().map_or(0, Vec::len);
+                rows.iter()
+                    .all(|row| row.len() == dim)
+                    .then_some((rows.len(), dim))
+            }
+            VectorValue::Sparse { .. } => None,
+        }
+    };
+
+    let mut expected: Option<(usize, usize)> = None;
+    for input in positive.iter().chain(negative.iter()) {
+        let QueryInput::Vector(value) = input else {
+            continue;
+        };
+        let Some(shape) = shape_of(value) else {
+            continue;
+        };
+        match expected {
+            None => expected = Some(shape),
+            Some(prev) if prev == shape => {}
+            Some(prev) => {
+                return Err(QqlError::validation(
+                    "QQL-PLAN-RECOMMEND-AVERAGE",
+                    alloc::format!(
+                        "average_vector examples must share one dimension: found ({}, {}) and ({}, {}) rows x dims",
+                        prev.0, prev.1, shape.0, shape.1
+                    ),
+                    None,
+                ));
+            }
         }
     }
     Ok(())
@@ -891,7 +1105,10 @@ fn ensure_payload_field(query: &mut qql_core::ast::QueryStmt, field: &str) {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RestProjectionError {
     /// Client-side only (e.g. CROSS RERANK). Compile still exposes `stmt_type`.
-    ClientSideOnly { stmt_type: &'static str },
+    ClientSideOnly {
+        /// Statement type name used in error messages.
+        stmt_type: &'static str,
+    },
 }
 
 /// Serialize a plan struct to JSON for the REST body.
@@ -983,6 +1200,15 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
         } => Route {
             method: Method::Post,
             path: format!("/collections/{collection}/points/count"),
+            query: Vec::new(),
+            body: body(request),
+        },
+        PlannedOperation::Facet {
+            collection,
+            request,
+        } => Route {
+            method: Method::Post,
+            path: format!("/collections/{collection}/facet"),
             query: Vec::new(),
             body: body(request),
         },
@@ -1161,6 +1387,10 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
         }
     })
 }
+/// Plan a statement and project it to a REST route in one call.
+///
+/// Returns `QQL-REST-CLIENT-SIDE` for client-side operations (e.g. CROSS
+/// RERANK) that have no single Qdrant REST endpoint.
 pub fn try_route(statement: &Stmt) -> Result<Route, QqlError> {
     let op = plan(statement)?;
     to_rest_route(&op).map_err(|err| match err {
@@ -1178,7 +1408,110 @@ pub fn try_route(statement: &Stmt) -> Result<Route, QqlError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use qql_core::ast::{PageSpec, QueryInput, QueryOutput, QueryStmt};
     use qql_core::parser::Parser;
+
+    /// Build a minimal recommend statement with inline example vectors.
+    fn recommend_stmt(
+        strategy: Option<qql_core::ast::RecommendStrategy>,
+        positive: Vec<QueryInput>,
+        negative: Vec<QueryInput>,
+    ) -> Stmt {
+        use qql_core::ast::QueryCollection;
+        Stmt::Query(Box::new(QueryStmt {
+            ctes: Vec::new(),
+            collection: QueryCollection::Explicit("docs".into()),
+            expression: QueryExpr::Recommend {
+                positive,
+                negative,
+                strategy,
+                using: None,
+                prefetch: Vec::new(),
+            },
+            filter: None,
+            params: None,
+            score_threshold: None,
+            group: None,
+            output: QueryOutput::default(),
+            page: PageSpec {
+                limit: Some(5),
+                offset: None,
+            },
+            shard_key: None,
+        }))
+    }
+
+    #[test]
+    fn recommend_average_rejects_mismatched_example_dims() {
+        // Qdrant #10374: the average API folds examples into one vector, so
+        // mismatched dimensions are rejected (client-side at plan time here).
+        let stmt = recommend_stmt(
+            None,
+            vec![QueryInput::Vector(VectorValue::Dense(vec![0.1, 0.2]))],
+            vec![QueryInput::Vector(VectorValue::Dense(vec![0.3, 0.4, 0.5]))],
+        );
+        let err = plan(&stmt).unwrap_err();
+        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+        assert_eq!(err.code, "QQL-PLAN-RECOMMEND-AVERAGE");
+    }
+
+    #[test]
+    fn recommend_average_accepts_matching_example_dims() {
+        let stmt = recommend_stmt(
+            Some(qql_core::ast::RecommendStrategy::AverageVector),
+            vec![
+                QueryInput::Vector(VectorValue::Dense(vec![0.1, 0.2])),
+                QueryInput::Vector(VectorValue::Dense(vec![0.3, 0.4])),
+            ],
+            vec![QueryInput::Vector(VectorValue::Dense(vec![0.5, 0.6]))],
+        );
+        assert!(plan(&stmt).is_ok());
+    }
+
+    #[test]
+    fn recommend_best_score_allows_mismatched_example_dims() {
+        // best_score scores each example independently — no shared shape needed.
+        let stmt = recommend_stmt(
+            Some(qql_core::ast::RecommendStrategy::BestScore),
+            vec![QueryInput::Vector(VectorValue::Dense(vec![0.1, 0.2]))],
+            vec![QueryInput::Vector(VectorValue::Dense(vec![0.3, 0.4, 0.5]))],
+        );
+        assert!(plan(&stmt).is_ok());
+    }
+
+    #[test]
+    fn recommend_average_rejects_mismatched_multidense_row_counts() {
+        let stmt = recommend_stmt(
+            None,
+            vec![QueryInput::Vector(VectorValue::MultiDense(vec![
+                vec![0.1, 0.2],
+                vec![0.3, 0.4],
+            ]))],
+            vec![QueryInput::Vector(VectorValue::MultiDense(vec![vec![
+                0.5, 0.6,
+            ]]))],
+        );
+        let err = plan(&stmt).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-RECOMMEND-AVERAGE");
+    }
+
+    #[test]
+    fn recommend_average_defers_ragged_multidense_to_the_backend() {
+        // Ragged rows have no single dimension — the plan cannot judge shape,
+        // so it must defer instead of comparing first-row lengths.
+        let stmt = recommend_stmt(
+            None,
+            vec![QueryInput::Vector(VectorValue::MultiDense(vec![
+                vec![0.1, 0.2, 0.3],
+                vec![0.4, 0.5],
+            ]))],
+            vec![QueryInput::Vector(VectorValue::MultiDense(vec![
+                vec![0.6, 0.7],
+                vec![0.8, 0.9, 1.0],
+            ]))],
+        );
+        assert!(plan(&stmt).is_ok());
+    }
 
     #[test]
     fn plan_rejects_inherited_top_level() {
@@ -1366,6 +1699,35 @@ mod tests {
         } else {
             panic!("expected Count operation");
         }
+    }
+
+    #[test]
+    fn facet_planning_and_routing() {
+        let stmt = qql_core::parser::Parser::parse(
+            "FACET room_type FROM stays WHERE price < 100 LIMIT 10 EXACT true;",
+        )
+        .unwrap();
+        let op = plan(&stmt).unwrap();
+
+        assert_eq!(op.operation_label(), "FACET");
+        assert_eq!(op.collection(), Some("stays"));
+
+        if let PlannedOperation::Facet { request, .. } = &op {
+            assert_eq!(request.key, "room_type");
+            assert_eq!(request.limit, Some(10));
+            assert_eq!(request.exact, Some(true));
+            assert!(request.filter.is_some());
+        } else {
+            panic!("expected Facet operation");
+        }
+
+        let route = to_rest_route(&op).unwrap();
+        assert_eq!(route.path, "/collections/stays/facet");
+        assert_eq!(route.method, Method::Post);
+        let body = route.body.unwrap();
+        assert_eq!(body["key"], "room_type");
+        assert_eq!(body["limit"], 10);
+        assert_eq!(body["exact"], true);
     }
 
     #[test]
