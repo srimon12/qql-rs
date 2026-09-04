@@ -180,6 +180,13 @@ class TestParseAPI(unittest.TestCase):
 
     def test_b11_is_valid_false(self):
         self.assertFalse(pyqql.is_valid("SELECT * FROM docs"))
+        # Plan-level invalidity counts as invalid too — is_valid applies the
+        # same gate as execution and the language conformance suite.
+        self.assertFalse(
+            pyqql.is_valid(
+                "QUERY VECTOR [0.1, 0.2] FROM docs USING lexical_v2 AS SPARSE LIMIT 10;"
+            )
+        )
 
     def test_b12_tokenize_returns_list_of_dicts(self):
         tokens = pyqql.tokenize('QUERY "hello" FROM docs LIMIT 5')

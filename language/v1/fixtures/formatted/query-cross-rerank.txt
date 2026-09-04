@@ -1,0 +1,17 @@
+-- query-cross-rerank.qql — Cross-encoder reranking
+
+-- Basic CROSS RERANK with prefetch
+WITH
+  candidates AS (QUERY 'rust vector database' USING dense LIMIT 100)
+QUERY CROSS RERANK TEXT 'rust vector database' MODEL 'bge-reranker-large'
+FROM docs
+PREFETCH (candidates)
+LIMIT 10;
+
+-- CROSS RERANK with explicit ON FIELD
+WITH
+  candidates AS (QUERY 'search query' USING dense LIMIT 100)
+QUERY CROSS RERANK TEXT 'search query' MODEL 'cross-encoder-v1' ON FIELD content
+FROM docs
+PREFETCH (candidates)
+LIMIT 10;

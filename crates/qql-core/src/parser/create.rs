@@ -99,6 +99,15 @@ impl<'a> AstLowerer<'a> {
                             size_tok.pos,
                         ));
                     }
+                    // Qdrant rejects dimensions above 65536 (VectorParams.size
+                    // maximum in the OpenAPI schema).
+                    if size > 65536.0 {
+                        return Err(QqlError::parse(
+                            "QQL-PARSE-VECTOR-SIZE",
+                            "vector size must not exceed 65536",
+                            size_tok.span,
+                        ));
+                    }
                     self.expect(TokenKind::Comma)?;
                     let dist_tok = self.peek()?;
                     let distance = match dist_tok.kind {

@@ -1,0 +1,13 @@
+-- query-order-by.qql — Order-by query
+
+-- ASC
+QUERY ORDER BY price ASC FROM products LIMIT 10;
+
+-- DESC
+QUERY ORDER BY created_at DESC FROM posts LIMIT 10;
+
+-- With filter
+QUERY ORDER BY price ASC FROM products WHERE category = 'electronics' LIMIT 10;
+
+-- With OFFSET
+QUERY ORDER BY rating DESC FROM products LIMIT 10 OFFSET 20;

@@ -207,6 +207,7 @@ formula_primary = _{
       number
     | "(" ~ formula_expr ~ ")"
     | unary_function
+    | nary_function
     | ^"POW" ~ "(" ~ formula_expr ~ "," ~ formula_expr ~ ")"
     | geo_distance
     | match_function
@@ -218,8 +219,16 @@ formula_primary = _{
 
 formula_variable = { identifier }
 unary_function = {
-    (^"ABS" | ^"SQRT" | ^"LOG" | ^"LN" | ^"EXP")
+    (^"ABS" | ^"SQRT" | ^"LOG" | ^"LN" | ^"EXP" | ^"ACOSH")
     ~ "(" ~ formula_expr ~ ")"
+}
+// MAX / MIN fold n ≥ 1 operands; at least one operand is required by the
+// Qdrant Expression wire format (MaxExpression / MinExpression). The empty
+// operand list is rejected by the reference parser (QQL-PARSE-SYNTAX), which
+// the grammar cannot express numerically.
+nary_function = {
+    (^"MAX" | ^"MIN")
+    ~ "(" ~ formula_expr ~ ("," ~ formula_expr)* ~ ")"
 }
 geo_distance = {
     ^"GEO_DISTANCE" ~ "("

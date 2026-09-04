@@ -250,12 +250,14 @@ formula-expr = constant
              | "LOG", "(", formula-expr, ")"
              | "LN", "(", formula-expr, ")"
              | "EXP", "(", formula-expr, ")"
+             | "ACOSH", "(", formula-expr, ")"
+             | ("MAX" | "MIN"), "(", formula-expr, { ",", formula-expr }, ")"
              | "POW", "(", formula-expr, ",", formula-expr, ")"
              | "GEO_DISTANCE", "(", lat, ",", lon, ",", field, ")"
              | decay-function ;
 ```
 
-The formula parser supports standard arithmetic operators with precedence and parentheses. The `$score` variable represents the query score. Decay functions:
+The formula parser supports standard arithmetic operators with precedence and parentheses. The `$score` variable represents the query score. `MAX` and `MIN` fold n ≥ 1 operands; the empty operand list is a parse error. Decay functions:
 
 ```ebnf
 decay-function = ("EXP_DECAY" | "GAUSS_DECAY" | "LIN_DECAY"),

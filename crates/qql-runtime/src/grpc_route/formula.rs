@@ -92,6 +92,30 @@ pub(crate) fn ast_formula_to_grpc(expr: &qql_core::ast::FormulaExpr) -> Option<q
                 variant: Some(Variant::Exp(Box::new(inner))),
             })
         }
+        qql_core::ast::FormulaExpr::Acosh { x } => {
+            let inner = ast_formula_to_grpc(x)?;
+            Some(qdrant::Expression {
+                variant: Some(Variant::Acosh(Box::new(inner))),
+            })
+        }
+        qql_core::ast::FormulaExpr::Max { args } => {
+            let terms = args
+                .iter()
+                .map(ast_formula_to_grpc)
+                .collect::<Option<Vec<_>>>()?;
+            Some(qdrant::Expression {
+                variant: Some(Variant::Max(qdrant::MaxExpression { max: terms })),
+            })
+        }
+        qql_core::ast::FormulaExpr::Min { args } => {
+            let terms = args
+                .iter()
+                .map(ast_formula_to_grpc)
+                .collect::<Option<Vec<_>>>()?;
+            Some(qdrant::Expression {
+                variant: Some(Variant::Min(qdrant::MinExpression { min: terms })),
+            })
+        }
         qql_core::ast::FormulaExpr::Pow { base, exponent } => {
             let b = ast_formula_to_grpc(base)?;
             let e = ast_formula_to_grpc(exponent)?;
@@ -232,6 +256,32 @@ pub(crate) fn to_formula_expression(val: &serde_json::Value) -> Option<qdrant::E
                     let inner = to_formula_expression(val)?;
                     Some(qdrant::Expression {
                         variant: Some(Variant::Exp(Box::new(inner))),
+                    })
+                }
+                "acosh" | "Acosh" => {
+                    let inner = to_formula_expression(val)?;
+                    Some(qdrant::Expression {
+                        variant: Some(Variant::Acosh(Box::new(inner))),
+                    })
+                }
+                "max" | "Max" => {
+                    let terms = val
+                        .as_array()?
+                        .iter()
+                        .map(to_formula_expression)
+                        .collect::<Option<Vec<_>>>()?;
+                    Some(qdrant::Expression {
+                        variant: Some(Variant::Max(qdrant::MaxExpression { max: terms })),
+                    })
+                }
+                "min" | "Min" => {
+                    let terms = val
+                        .as_array()?
+                        .iter()
+                        .map(to_formula_expression)
+                        .collect::<Option<Vec<_>>>()?;
+                    Some(qdrant::Expression {
+                        variant: Some(Variant::Min(qdrant::MinExpression { min: terms })),
                     })
                 }
                 "pow" | "Pow" => {

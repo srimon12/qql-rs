@@ -45,8 +45,8 @@ fn run() -> Result<(), Box<dyn Error>> {
 fn usage() -> &'static str {
     "Usage: qql-conformance <check|generate> [LANGUAGE_DIR]\n\
      \n\
-     check     Parse every valid case, reject every invalid case, and compare AST snapshots.\n\
-     generate  Validate all cases, then regenerate fixtures/expected/*.json."
+     check     Parse every valid case, reject every invalid case, and compare AST + canonical-format snapshots.\n\
+     generate  Validate all cases, then regenerate fixtures/expected/*.json and fixtures/formatted/*.txt."
 }
 
 fn check(spec_dir: &Path, require_expected: bool) -> Result<(), Box<dyn Error>> {
@@ -57,9 +57,16 @@ fn check(spec_dir: &Path, require_expected: bool) -> Result<(), Box<dyn Error>> 
         // until the stale file is removed (or regenerated).
         let valid_dir = spec_dir.join("fixtures/valid");
         let expected_dir = spec_dir.join("fixtures/expected");
+        let formatted_dir = spec_dir.join("fixtures/formatted");
         for stale in stale_snapshots(&valid_dir, &expected_dir)? {
             report.failures.push(format!(
                 "{}: stale AST snapshot (no matching fixture); remove it or run `cargo run -p qql-conformance -- generate`",
+                stale.display()
+            ));
+        }
+        for stale in stale_formatted(&valid_dir, &formatted_dir)? {
+            report.failures.push(format!(
+                "{}: stale canonical-format snapshot (no matching fixture); remove it or run `cargo run -p qql-conformance -- generate`",
                 stale.display()
             ));
         }
@@ -70,11 +77,12 @@ fn check(spec_dir: &Path, require_expected: bool) -> Result<(), Box<dyn Error>> 
 fn finish_check(report: &Report) -> Result<(), Box<dyn Error>> {
     if report.failures.is_empty() {
         println!(
-            "conformant: {} valid files ({} statements), {} invalid cases, {} AST snapshots",
+            "conformant: {} valid files ({} statements), {} invalid cases, {} AST snapshots, {} canonical formats",
             report.valid_files,
             report.valid_statements,
             report.invalid_cases,
-            report.expected_files
+            report.expected_files,
+            report.formatted_files
         );
         return Ok(());
     }
@@ -100,7 +108,9 @@ fn generate(spec_dir: &Path) -> Result<(), Box<dyn Error>> {
 
     let valid_dir = spec_dir.join("fixtures/valid");
     let expected_dir = spec_dir.join("fixtures/expected");
+    let formatted_dir = spec_dir.join("fixtures/formatted");
     fs::create_dir_all(&expected_dir)?;
+    fs::create_dir_all(&formatted_dir)?;
 
     let mut written = 0;
     for fixture in qql_files(&valid_dir)? {
@@ -110,19 +120,34 @@ fn generate(spec_dir: &Path) -> Result<(), Box<dyn Error>> {
         let json = serde_json::to_string_pretty(&canonical_ast(&statements)?)?;
         let output = expected_path(&fixture, &valid_dir, &expected_dir);
         write_atomic(&output, &(json + "\n"))?;
+        // Canonical-format golden: exactly what `fmt::format` produces for the
+        // fixture. Shared contract for every formatter implementation (native
+        // and WASM) — a stale bundle diverges from this text.
+        let formatted = qql_core::fmt::format(&source)
+            .map_err(|error| format_parse_failure(&fixture, &error))?;
+        let formatted_output = formatted_path(&fixture, &valid_dir, &formatted_dir);
+        write_atomic(&formatted_output, &formatted)?;
         written += 1;
     }
 
-    // Stale-snapshot safety: remove expected snapshots whose fixture has been
-    // deleted or renamed, so a dead snapshot cannot keep passing `check`.
+    // Stale-snapshot safety: remove snapshots whose fixture has been deleted
+    // or renamed, so a dead snapshot cannot keep passing `check`.
     for stale in stale_snapshots(&valid_dir, &expected_dir)? {
         fs::remove_file(&stale)?;
         println!("removed stale snapshot {}", stale.display());
     }
+    for stale in stale_formatted(&valid_dir, &formatted_dir)? {
+        fs::remove_file(&stale)?;
+        println!(
+            "removed stale canonical-format snapshot {}",
+            stale.display()
+        );
+    }
 
     println!(
-        "generated {written} AST snapshot(s) in {}",
-        expected_dir.display()
+        "generated {written} AST snapshot(s) in {} and {written} canonical format(s) in {}",
+        expected_dir.display(),
+        formatted_dir.display()
     );
     Ok(())
 }
@@ -133,6 +158,7 @@ struct Report {
     valid_statements: usize,
     invalid_cases: usize,
     expected_files: usize,
+    formatted_files: usize,
     failures: Vec<String>,
 }
 
@@ -140,6 +166,7 @@ fn inspect(spec_dir: &Path, require_expected: bool) -> Result<Report, Box<dyn Er
     let valid_dir = spec_dir.join("fixtures/valid");
     let invalid_dir = spec_dir.join("fixtures/invalid");
     let expected_dir = spec_dir.join("fixtures/expected");
+    let formatted_dir = spec_dir.join("fixtures/formatted");
     ensure_directory(&valid_dir)?;
     ensure_directory(&invalid_dir)?;
 
@@ -159,6 +186,7 @@ fn inspect(spec_dir: &Path, require_expected: bool) -> Result<Report, Box<dyn Er
                         &statements,
                         &mut report,
                     )?;
+                    compare_formatted(&fixture, &valid_dir, &formatted_dir, &source, &mut report)?;
                 }
             }
             Err(error) => report.failures.push(format_parse_failure(&fixture, &error)),
@@ -256,6 +284,70 @@ fn canonical_ast(statements: &[qql_core::ast::Stmt]) -> Result<serde_json::Value
         "schema": AST_SCHEMA,
         "statements": statements,
     }))
+}
+
+/// Canonical-format golden path for a fixture, mirroring its relative
+/// location under `fixtures/valid`.
+fn formatted_path(fixture: &Path, valid_dir: &Path, formatted_dir: &Path) -> PathBuf {
+    let relative = fixture.strip_prefix(valid_dir).unwrap_or(fixture);
+    formatted_dir.join(relative).with_extension("txt")
+}
+
+/// Verify a fixture's canonical-format golden against `fmt::format`.
+fn compare_formatted(
+    fixture: &Path,
+    valid_dir: &Path,
+    formatted_dir: &Path,
+    source: &str,
+    report: &mut Report,
+) -> Result<(), Box<dyn Error>> {
+    let golden = formatted_path(fixture, valid_dir, formatted_dir);
+    if !golden.is_file() {
+        report.failures.push(format!(
+            "{}: missing canonical-format snapshot",
+            golden.display()
+        ));
+        return Ok(());
+    }
+    report.formatted_files += 1;
+
+    let expected = fs::read_to_string(&golden)?;
+    let actual =
+        qql_core::fmt::format(source).map_err(|error| format_parse_failure(fixture, &error))?;
+    if actual != expected {
+        report.failures.push(format!(
+            "{}: canonical format differs from {}; run `cargo run -p qql-conformance -- generate`",
+            fixture.display(),
+            golden.display()
+        ));
+    }
+    Ok(())
+}
+
+/// Canonical-format goldens whose `*.qql` fixture no longer exists.
+fn stale_formatted(valid_dir: &Path, formatted_dir: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+    let mut stale = Vec::new();
+    if !formatted_dir.is_dir() {
+        return Ok(stale);
+    }
+    for entry in text_files(formatted_dir)? {
+        let relative = entry
+            .strip_prefix(formatted_dir)
+            .unwrap_or(&entry)
+            .with_extension("qql");
+        let fixture = valid_dir.join(relative);
+        if !fixture.is_file() {
+            stale.push(entry);
+        }
+    }
+    Ok(stale)
+}
+
+fn text_files(directory: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+    let mut files = Vec::new();
+    collect_files_with_extension(directory, "txt", &mut files)?;
+    files.sort();
+    Ok(files)
 }
 
 fn normalize_numbers(value: &mut serde_json::Value) {
@@ -393,18 +485,22 @@ fn stale_snapshots(valid_dir: &Path, expected_dir: &Path) -> Result<Vec<PathBuf>
 
 fn qql_json_files(directory: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>> {
     let mut files = Vec::new();
-    collect_qql_json_files(directory, &mut files)?;
+    collect_files_with_extension(directory, "json", &mut files)?;
     files.sort();
     Ok(files)
 }
 
-fn collect_qql_json_files(directory: &Path, out: &mut Vec<PathBuf>) -> Result<(), Box<dyn Error>> {
+fn collect_files_with_extension(
+    directory: &Path,
+    extension: &str,
+    out: &mut Vec<PathBuf>,
+) -> Result<(), Box<dyn Error>> {
     for entry in fs::read_dir(directory)? {
         let entry = entry?;
         let path = entry.path();
         if path.is_dir() {
-            collect_qql_json_files(&path, out)?;
-        } else if path.extension() == Some(OsStr::new("json")) {
+            collect_files_with_extension(&path, extension, out)?;
+        } else if path.extension() == Some(OsStr::new(extension)) {
             out.push(path);
         }
     }
@@ -434,7 +530,7 @@ fn format_parse_failure(path: &Path, error: &QqlError) -> String {
 }
 
 fn write_atomic(path: &Path, contents: &str) -> Result<(), Box<dyn Error>> {
-    let temporary = path.with_extension("json.tmp");
+    let temporary = path.with_extension("tmp");
     fs::write(&temporary, contents)?;
     fs::rename(temporary, path)?;
     Ok(())
@@ -580,6 +676,11 @@ mod grammar_gate {
             "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (replication_factor = 3);",
             "CREATE SHARD KEY 'a' ON COLLECTION docs WITH (SHARDS_NUMBER = 4, REPLICATION_FACTOR = 2);",
             "CREATE SHARD KEY 'a' ON COLLECTION docs WITH ('shards_number' = 2);",
+            // MAX / MIN fold n ≥ 1 operands: a single operand is valid in both
+            // the grammar and the runtime; the empty list is rejected by both.
+            "QUERY FORMULA MAX($score) DEFAULTS (score = 0.0) FROM docs LIMIT 5;",
+            "QUERY FORMULA MIN($score) DEFAULTS (score = 0.0) FROM docs LIMIT 5;",
+            "QUERY FORMULA MAX($score, 1.0, 2.0) DEFAULTS (score = 0.0) FROM docs LIMIT 5;",
         ];
 
         for source in both_reject {

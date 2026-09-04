@@ -6,6 +6,7 @@
 export const QQL_KEYWORDS = [
   "ABS",
   "ACORN",
+  "ACOSH",
   "AFTER",
   "ALL",
   "ALTER",
@@ -101,8 +102,10 @@ export const QQL_KEYWORDS = [
   "MANHATTAN",
   "MATCH",
   "MATCH_ANY",
+  "MAX",
   "MAX_SELECTIVITY",
   "MIDPOINT",
+  "MIN",
   "MMR",
   "MODEL",
   "MULTI",

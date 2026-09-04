@@ -17,6 +17,21 @@ use qql_core::ast::{
 };
 use qql_core::error::QqlError;
 
+/// Full frontend validity gate: parse a script and plan-validate every
+/// statement.
+///
+/// This is the exact contract the language conformance suite enforces
+/// (`parse_all` + `plan`) and the runtime applies before executing, so
+/// `is_ok()` here means the script would be accepted for execution. Bindings
+/// (`pyqql` / `nqql` / `qql-wasm`) expose this as their `is_valid`.
+pub fn parse_and_plan(source: &str) -> Result<Vec<Stmt>, QqlError> {
+    let statements = qql_core::parser::Parser::parse_all(source)?;
+    for statement in &statements {
+        plan(statement)?;
+    }
+    Ok(statements)
+}
+
 /// Canonical planned operation. Batch compatibility is determined from this
 /// type, not from raw AST.
 #[derive(Debug, Clone)]
@@ -693,6 +708,7 @@ fn validate_query_stmt(query: &qql_core::ast::QueryStmt) -> Result<(), QqlError>
 
 fn validate_query_expr(expression: &QueryExpr) -> Result<(), QqlError> {
     validate_query_target_kinds(expression)?;
+    validate_recommend_average_dims(expression)?;
     let prefetch = match expression {
         QueryExpr::Nearest { prefetch, .. }
         | QueryExpr::Recommend { prefetch, .. }
@@ -813,6 +829,74 @@ fn validate_query_target_kinds(expression: &QueryExpr) -> Result<(), QqlError> {
             return Err(query_kind_error(
                 "query input vector type does not match the USING vector kind",
             ));
+        }
+    }
+    Ok(())
+}
+
+/// The recommend `average_vector` strategy (also the server default) folds all
+/// positive/negative examples into a single query vector, so every inline
+/// example vector must share the same shape. Upstream Qdrant rejects
+/// mismatched dimensions (#10374); we fail fast at plan time. Point-ID / TEXT
+/// examples have no known shape here and are skipped (resolved later).
+fn validate_recommend_average_dims(expression: &QueryExpr) -> Result<(), QqlError> {
+    let QueryExpr::Recommend {
+        positive,
+        negative,
+        strategy,
+        ..
+    } = expression
+    else {
+        return Ok(());
+    };
+    // Only average_vector requires a shared shape; best_score / sum_scores
+    // score each example independently.
+    if matches!(
+        strategy,
+        Some(qql_core::ast::RecommendStrategy::BestScore)
+            | Some(qql_core::ast::RecommendStrategy::SumScores)
+    ) {
+        return Ok(());
+    }
+
+    // Dense → (1, dim); MultiDense → (rows, row dim). Ragged rows have no
+    // single dimension, so their shape is unknown here — skip them and let the
+    // backend validate. Sparse examples have no average semantics and are
+    // skipped as well.
+    let shape_of = |value: &VectorValue| -> Option<(usize, usize)> {
+        match value {
+            VectorValue::Dense(dims) => Some((1, dims.len())),
+            VectorValue::MultiDense(rows) => {
+                let dim = rows.first().map_or(0, Vec::len);
+                rows.iter()
+                    .all(|row| row.len() == dim)
+                    .then_some((rows.len(), dim))
+            }
+            VectorValue::Sparse { .. } => None,
+        }
+    };
+
+    let mut expected: Option<(usize, usize)> = None;
+    for input in positive.iter().chain(negative.iter()) {
+        let QueryInput::Vector(value) = input else {
+            continue;
+        };
+        let Some(shape) = shape_of(value) else {
+            continue;
+        };
+        match expected {
+            None => expected = Some(shape),
+            Some(prev) if prev == shape => {}
+            Some(prev) => {
+                return Err(QqlError::validation(
+                    "QQL-PLAN-RECOMMEND-AVERAGE",
+                    alloc::format!(
+                        "average_vector examples must share one dimension: found ({}, {}) and ({}, {}) rows x dims",
+                        prev.0, prev.1, shape.0, shape.1
+                    ),
+                    None,
+                ));
+            }
         }
     }
     Ok(())
@@ -1240,7 +1324,110 @@ pub fn try_route(statement: &Stmt) -> Result<Route, QqlError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use qql_core::ast::{PageSpec, QueryInput, QueryOutput, QueryStmt};
     use qql_core::parser::Parser;
+
+    /// Build a minimal recommend statement with inline example vectors.
+    fn recommend_stmt(
+        strategy: Option<qql_core::ast::RecommendStrategy>,
+        positive: Vec<QueryInput>,
+        negative: Vec<QueryInput>,
+    ) -> Stmt {
+        use qql_core::ast::QueryCollection;
+        Stmt::Query(Box::new(QueryStmt {
+            ctes: Vec::new(),
+            collection: QueryCollection::Explicit("docs".into()),
+            expression: QueryExpr::Recommend {
+                positive,
+                negative,
+                strategy,
+                using: None,
+                prefetch: Vec::new(),
+            },
+            filter: None,
+            params: None,
+            score_threshold: None,
+            group: None,
+            output: QueryOutput::default(),
+            page: PageSpec {
+                limit: Some(5),
+                offset: None,
+            },
+            shard_key: None,
+        }))
+    }
+
+    #[test]
+    fn recommend_average_rejects_mismatched_example_dims() {
+        // Qdrant #10374: the average API folds examples into one vector, so
+        // mismatched dimensions are rejected (client-side at plan time here).
+        let stmt = recommend_stmt(
+            None,
+            vec![QueryInput::Vector(VectorValue::Dense(vec![0.1, 0.2]))],
+            vec![QueryInput::Vector(VectorValue::Dense(vec![0.3, 0.4, 0.5]))],
+        );
+        let err = plan(&stmt).unwrap_err();
+        assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
+        assert_eq!(err.code, "QQL-PLAN-RECOMMEND-AVERAGE");
+    }
+
+    #[test]
+    fn recommend_average_accepts_matching_example_dims() {
+        let stmt = recommend_stmt(
+            Some(qql_core::ast::RecommendStrategy::AverageVector),
+            vec![
+                QueryInput::Vector(VectorValue::Dense(vec![0.1, 0.2])),
+                QueryInput::Vector(VectorValue::Dense(vec![0.3, 0.4])),
+            ],
+            vec![QueryInput::Vector(VectorValue::Dense(vec![0.5, 0.6]))],
+        );
+        assert!(plan(&stmt).is_ok());
+    }
+
+    #[test]
+    fn recommend_best_score_allows_mismatched_example_dims() {
+        // best_score scores each example independently — no shared shape needed.
+        let stmt = recommend_stmt(
+            Some(qql_core::ast::RecommendStrategy::BestScore),
+            vec![QueryInput::Vector(VectorValue::Dense(vec![0.1, 0.2]))],
+            vec![QueryInput::Vector(VectorValue::Dense(vec![0.3, 0.4, 0.5]))],
+        );
+        assert!(plan(&stmt).is_ok());
+    }
+
+    #[test]
+    fn recommend_average_rejects_mismatched_multidense_row_counts() {
+        let stmt = recommend_stmt(
+            None,
+            vec![QueryInput::Vector(VectorValue::MultiDense(vec![
+                vec![0.1, 0.2],
+                vec![0.3, 0.4],
+            ]))],
+            vec![QueryInput::Vector(VectorValue::MultiDense(vec![vec![
+                0.5, 0.6,
+            ]]))],
+        );
+        let err = plan(&stmt).unwrap_err();
+        assert_eq!(err.code, "QQL-PLAN-RECOMMEND-AVERAGE");
+    }
+
+    #[test]
+    fn recommend_average_defers_ragged_multidense_to_the_backend() {
+        // Ragged rows have no single dimension — the plan cannot judge shape,
+        // so it must defer instead of comparing first-row lengths.
+        let stmt = recommend_stmt(
+            None,
+            vec![QueryInput::Vector(VectorValue::MultiDense(vec![
+                vec![0.1, 0.2, 0.3],
+                vec![0.4, 0.5],
+            ]))],
+            vec![QueryInput::Vector(VectorValue::MultiDense(vec![
+                vec![0.6, 0.7],
+                vec![0.8, 0.9, 1.0],
+            ]))],
+        );
+        assert!(plan(&stmt).is_ok());
+    }
 
     #[test]
     fn plan_rejects_inherited_top_level() {

@@ -1,0 +1,62 @@
+-- upsert.qql — UPSERT statements
+
+-- Basic upsert
+UPSERT INTO docs VALUES {id: 1, title: 'Hello', body: 'World'};
+
+-- Multiple points
+UPSERT INTO docs VALUES
+  {id: 1, text: 'hello'},
+  {id: 2, text: 'world'};
+
+-- With hybrid embedding
+UPSERT INTO docs VALUES {id: 1, text: 'hello'} USING HYBRID;
+
+-- With dense model embedding
+UPSERT INTO docs VALUES {id: 1, text: 'hello'} USING DENSE MODEL 'all-MiniLM-L6-v2';
+
+-- With sparse model embedding
+UPSERT INTO docs VALUES {id: 1, text: 'hello'} USING SPARSE MODEL 'qdrant/bm25';
+
+-- With hybrid and explicit dense/sparse models
+UPSERT INTO docs VALUES {id: 1, text: 'hello'} USING HYBRID DENSE MODEL 'all-MiniLM-L6-v2' SPARSE MODEL 'qdrant/bm25';
+
+-- Infer both targets from an existing hybrid schema
+UPSERT INTO docs VALUES {id: 2, text: 'inferred targets'} USING HYBRID;
+
+-- Arbitrary vector names with explicit dense/sparse roles
+UPSERT INTO docs VALUES {id: 3, text: 'named targets'} USING HYBRID DENSE VECTOR semantic_v2 SPARSE VECTOR lexical_v2;
+
+-- With pre-computed named vectors
+UPSERT INTO docs VALUES {id: 1, vector: {dense: [0.1, 0.2, 0.3]}, text: 'hello'};
+
+-- With pre-computed multivector (ColBERT)
+UPSERT INTO docs VALUES {id: 1, vector: {colbert: [[0.1, 0.2], [0.3, 0.4]]}, text: 'hello'};
+
+-- With EMBED directive: route specific fields to specific named vectors
+UPSERT INTO arxiv VALUES {id: '2104.01234', text: 'chunk text', title: 'Paper Title', abstract: 'Full abstract'}
+EMBED text INTO dense_chunk USING DENSE,
+  title INTO dense_title USING DENSE,
+  abstract INTO dense_abstract USING DENSE,
+  title INTO sparse_title USING SPARSE;
+
+-- EMBED with model overrides
+UPSERT INTO docs VALUES {id: 1, text: 'hello', title: 'World'}
+EMBED text INTO dense_chunk USING DENSE MODEL 'all-MiniLM-L6-v2',
+  title INTO sparse_title USING SPARSE MODEL 'qdrant/bm25';
+
+-- EMBED with multivector and image kinds (mirror single_embedding_spec)
+UPSERT INTO docs VALUES {id: 1, text: 'colbert doc'} EMBED text INTO colbert_vec USING MULTI MODEL 'colbert-v2';
+UPSERT INTO docs VALUES {id: 1, image: '/path/to/img.png'} EMBED image INTO clip_vec USING IMAGE MODEL 'clip-vit';
+UPSERT INTO docs VALUES {id: 1, text: 'colbert doc'} EMBED text INTO colbert_vec USING MULTI MODEL 'colbert-v2';
+
+-- With shard routing
+UPSERT INTO sec10k VALUES {id: 1, text: 'test'} SHARD 'tenant-a';
+
+-- String UUID as id
+UPSERT INTO docs VALUES {id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890', text: 'document'};
+
+-- With vector value
+UPSERT INTO docs VALUES {id: 1, vector: [0.1, 0.2, 0.3], text: 'with vector'};
+
+-- Sparse vector value
+UPSERT INTO docs VALUES {id: 1, vector: {indices: [0, 3, 5], values: [0.5, 0.8, 0.2]}};

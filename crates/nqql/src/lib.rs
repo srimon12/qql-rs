@@ -133,7 +133,9 @@ pub fn parse_all_json(input: String) -> napi::Result<String> {
 
 #[napi(catch_unwind)]
 pub fn is_valid(input: String) -> bool {
-    Parser::parse_all(&input).is_ok()
+    // Full frontend gate: parse + plan — same contract as execution and the
+    // language conformance suite.
+    qql_plan::parse_and_plan(&input).is_ok()
 }
 
 #[napi(catch_unwind)]

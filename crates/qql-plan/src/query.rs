@@ -64,6 +64,17 @@ pub fn lower_formula_expr(expr: &qql_core::ast::FormulaExpr) -> serde_json::Valu
         qql_core::ast::FormulaExpr::Exp { x } => serde_json::json!({
             "exp": lower_formula_expr(x)
         }),
+        qql_core::ast::FormulaExpr::Acosh { x } => serde_json::json!({
+            "acosh": lower_formula_expr(x)
+        }),
+        qql_core::ast::FormulaExpr::Max { args } => {
+            let terms: Vec<_> = args.iter().map(lower_formula_expr).collect();
+            serde_json::json!({ "max": terms })
+        }
+        qql_core::ast::FormulaExpr::Min { args } => {
+            let terms: Vec<_> = args.iter().map(lower_formula_expr).collect();
+            serde_json::json!({ "min": terms })
+        }
         qql_core::ast::FormulaExpr::Pow { base, exponent } => serde_json::json!({
             "pow": {
                 "base": lower_formula_expr(base),

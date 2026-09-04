@@ -1326,6 +1326,9 @@ fn render_formula_min(formula: &FormulaExpr, min_precedence: u8) -> String {
         FormulaExpr::Log { x } => format!("LOG({})", render_formula_min(x, 0)),
         FormulaExpr::Ln { x } => format!("LN({})", render_formula_min(x, 0)),
         FormulaExpr::Exp { x } => format!("EXP({})", render_formula_min(x, 0)),
+        FormulaExpr::Acosh { x } => format!("ACOSH({})", render_formula_min(x, 0)),
+        FormulaExpr::Max { args } => render_formula_call("MAX", args),
+        FormulaExpr::Min { args } => render_formula_call("MIN", args),
         FormulaExpr::Pow { base, exponent } => format!(
             "POW({}, {})",
             render_formula_min(base, 0),
@@ -1391,6 +1394,12 @@ fn render_formula_min(formula: &FormulaExpr, min_precedence: u8) -> String {
     } else {
         rendered
     }
+}
+
+/// Render an n-ary formula call (`MAX(a, b)`, `MIN(a, b, c)`).
+fn render_formula_call(name: &str, args: &[FormulaExpr]) -> String {
+    let rendered: Vec<String> = args.iter().map(|a| render_formula_min(a, 0)).collect();
+    format!("{}({})", name, rendered.join(", "))
 }
 
 // ── DDL config blocks ────────────────────────────────────────────

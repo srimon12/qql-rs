@@ -1,0 +1,24 @@
+-- scroll.qql — SCROLL statements
+
+-- Basic scroll
+SCROLL FROM docs LIMIT 50;
+
+-- Scroll with filter
+SCROLL FROM docs WHERE status = 'active' LIMIT 50;
+
+-- Scroll with AFTER (cursor-based pagination)
+SCROLL FROM docs AFTER 42 LIMIT 50;
+
+-- Scroll with filter and AFTER
+SCROLL FROM docs WHERE status = 'archived' AFTER 'page-2' LIMIT 50;
+
+-- Scroll with vector selector
+SCROLL FROM docs WITH VECTOR false LIMIT 50;
+SCROLL FROM docs WITH VECTOR true LIMIT 50;
+SCROLL FROM docs WITH VECTOR (dense, sparse) LIMIT 50;
+
+-- Scroll with filter and vector selector
+SCROLL FROM docs WHERE category = 'tech' WITH VECTOR (dense) LIMIT 50;
+
+-- Scroll with shard routing
+SCROLL FROM sec10k WHERE tenant_id = 'honeywell' SHARD 'honeywell' LIMIT 50;

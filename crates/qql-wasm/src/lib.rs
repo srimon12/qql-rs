@@ -242,7 +242,9 @@ pub fn parse(input: &str) -> Result<JsValue, JsValue> {
 
 #[wasm_bindgen(js_name = isValid)]
 pub fn is_valid(input: &str) -> bool {
-    Parser::parse_all(input).is_ok()
+    // Full frontend gate: parse + plan — same contract as execution and the
+    // language conformance suite.
+    qql_plan::parse_and_plan(input).is_ok()
 }
 
 #[wasm_bindgen]
@@ -408,7 +410,11 @@ pub fn tokenize(input: &str) -> Result<Vec<JsValue>, JsValue> {
 fn build_analyze_value(input: &str) -> serde_json::Value {
     let mut tokens = Vec::new();
     let lexer = Lexer::new(input);
-    for t in lexer.flatten() {
+    for token in lexer {
+        // The first lex error ends the token stream; `parse_all` below
+        // reports it (never iterate with `flatten()` — it would silently
+        // drop the error instead of stopping).
+        let Ok(t) = token else { break };
         tokens.push(serde_json::json!({
             "kind": t.kind.as_str(),
             "text": t.text,
@@ -418,7 +424,7 @@ fn build_analyze_value(input: &str) -> serde_json::Value {
         }));
     }
 
-    let stmts_res = Parser::parse_all(input);
+    let stmts_res = qql_plan::parse_and_plan(input);
     match stmts_res {
         Ok(stmts) => {
             let ast_val = serde_json::to_value(&stmts).unwrap_or(serde_json::Value::Null);

@@ -446,6 +446,13 @@ fn json_to_expression(value: &serde_json::Value) -> Result<qdrant_edge::Expressi
                 return Ok(qdrant_edge::Expression::Condition(Box::new(condition)));
             }
 
+            // MAX / MIN / ACOSH are parseable QQL but the pinned qdrant-edge
+            // has no matching Expression variants — fail with the catalog
+            // error instead of a generic "unsupported expression".
+            if obj.contains_key("max") || obj.contains_key("min") || obj.contains_key("acosh") {
+                return Err(crate::backend::unsupported::EdgeUnsupported::FormulaNary.error());
+            }
+
             if let Some(dt) = obj.get("datetime").and_then(|v| v.as_str()) {
                 return Ok(qdrant_edge::Expression::Datetime(dt.to_string()));
             }
@@ -829,6 +836,37 @@ mod tests {
         });
         let result = convert_query(&query, None);
         assert!(result.is_ok(), "formula with defaults: {:?}", result.err());
+    }
+
+    /// MAX / MIN / ACOSH parse in QQL but the pinned qdrant-edge has no
+    /// matching Expression variants — must fail closed with the catalog code.
+    #[test]
+    fn test_formula_nary_acosh_fail_closed() {
+        for expr in [
+            qql_core::ast::FormulaExpr::Max {
+                args: vec![
+                    qql_core::ast::FormulaExpr::Constant { value: 1.0 },
+                    qql_core::ast::FormulaExpr::Constant { value: 2.0 },
+                ],
+            },
+            qql_core::ast::FormulaExpr::Min {
+                args: vec![qql_core::ast::FormulaExpr::Constant { value: 1.0 }],
+            },
+            qql_core::ast::FormulaExpr::Acosh {
+                x: Box::new(qql_core::ast::FormulaExpr::Constant { value: 1.0 }),
+            },
+        ] {
+            let query = QueryVariant::Formula(FormulaQuery {
+                formula: PlanFormula(expr),
+                defaults: None,
+            });
+            let result = convert_query(&query, None);
+            let err = result.expect_err("n-ary/acosh formula must fail closed offline");
+            assert_eq!(
+                err.code, "QQL-EDGE-UNSUPPORTED-FORMULA-FUNCTION",
+                "wrong code for {err}"
+            );
+        }
     }
 
     #[test]

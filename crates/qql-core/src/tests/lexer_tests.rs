@@ -10,6 +10,30 @@ fn tokens(source: &str) -> Vec<(TokenKind, &str, Span)> {
 }
 
 #[test]
+fn iterator_terminates_after_a_lex_error() {
+    // `read_number` returns Err without advancing `pos` (e.g. a trailing '.'
+    // after `1.`). The iterator must surface that error exactly once and
+    // then stop — an iterator that re-yields the same item forever hangs
+    // any `flatten()`-style consumer.
+    for source in [
+        "COUNT FROM docs WHERE score >= 1.;",
+        "COUNT FROM docs WHERE score >= 1e+;",
+        "QUERY 'unterminated",
+    ] {
+        let mut results = Vec::new();
+        for token in Lexer::new(source) {
+            results.push(token);
+            assert!(
+                results.len() <= 4096,
+                "lexer iterator did not terminate for: {source}"
+            );
+        }
+        let errors = results.iter().filter(|r| r.is_err()).count();
+        assert_eq!(errors, 1, "expected exactly one lex error for: {source}");
+    }
+}
+
+#[test]
 fn basic_keywords() {
     let t = tokens("QUERY UPSERT DELETE SCROLL");
     assert_eq!(t[0].0, TokenKind::Query);

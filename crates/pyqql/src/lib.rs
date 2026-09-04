@@ -104,7 +104,9 @@ fn parse_json(input: &str) -> PyResult<String> {
 
 #[pyfunction]
 fn is_valid(input: &str) -> bool {
-    Parser::parse_all(input).is_ok()
+    // Full frontend gate: parse + plan — same contract as execution and the
+    // language conformance suite.
+    qql_plan::parse_and_plan(input).is_ok()
 }
 
 #[pyfunction]

@@ -280,7 +280,9 @@ the backend at execution time.
 
 Formula precedence is unary `-`, multiplication/division, then addition/
 subtraction. Operators are left-associative. Division may carry
-`[DEFAULT = number]`. Function names are case-insensitive. Decay `scale` and
+`[DEFAULT = number]`. Function names are case-insensitive. `MAX` and `MIN`
+fold n ≥ 1 operands — an empty operand list is a parse error
+(`QQL-PARSE-SYNTAX`); `ACOSH` is unary. Decay `scale` and
 `midpoint`/`decay` are numeric constants. `CASE WHEN` uses a QQL filter as its
 condition.
 
