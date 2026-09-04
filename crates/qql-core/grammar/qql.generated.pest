@@ -324,11 +324,14 @@ count_config_key = { ^"exact" | string }
 
 facet = {
     ^"FACET" ~ (facet_key ~ ^"FROM" ~ collection | ^"FROM" ~ collection ~ (^"KEY")? ~ facet_key)
-    ~ (^"WHERE" ~ filter)?
-    ~ (^"LIMIT" ~ integer)?
-    ~ (^"EXACT" ~ boolean?)?
-    ~ (^"SHARD" ~ string)?
-    ~ (^"WITH" ~ facet_config)?
+    ~ facet_clause*
+}
+facet_clause = _{
+      ^"WHERE" ~ filter
+    | ^"LIMIT" ~ integer
+    | ^"EXACT" ~ boolean?
+    | ^"SHARD" ~ string
+    | ^"WITH" ~ facet_config
 }
 facet_key = { name }
 facet_config = { "(" ~ facet_config_entry ~ ("," ~ facet_config_entry)* ~ ")" }
