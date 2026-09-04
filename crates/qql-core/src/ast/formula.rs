@@ -47,9 +47,20 @@ pub enum FormulaExpr {
     Exp {
         x: Box<FormulaExpr>,
     },
+    Acosh {
+        x: Box<FormulaExpr>,
+    },
     Pow {
         base: Box<FormulaExpr>,
         exponent: Box<FormulaExpr>,
+    },
+    /// N-ary `MAX(...)`. At least one operand (parser-enforced).
+    Max {
+        args: Vec<FormulaExpr>,
+    },
+    /// N-ary `MIN(...)`. At least one operand (parser-enforced).
+    Min {
+        args: Vec<FormulaExpr>,
     },
     GeoDistance {
         lat: f64,

@@ -317,6 +317,27 @@ fn parse_formula_function_call(
                 .map_err(|_| QqlError::syntax("EXP() expects 1 argument", pos))?;
             Ok(FormulaExpr::Exp { x: Box::new(x) })
         }
+        "acosh" => {
+            let [x] = <[FormulaExpr; 1]>::try_from(args)
+                .map_err(|_| QqlError::syntax("ACOSH() expects 1 argument", pos))?;
+            Ok(FormulaExpr::Acosh { x: Box::new(x) })
+        }
+        "max" | "min" => {
+            if args.is_empty() {
+                return Err(QqlError::syntax(
+                    alloc::format!(
+                        "{}() requires at least one argument",
+                        func_name.to_uppercase()
+                    ),
+                    pos,
+                ));
+            }
+            if func_name == "max" {
+                Ok(FormulaExpr::Max { args })
+            } else {
+                Ok(FormulaExpr::Min { args })
+            }
+        }
         "pow" => {
             let [base, exponent] = <[FormulaExpr; 2]>::try_from(args)
                 .map_err(|_| QqlError::syntax("POW() expects 2 arguments", pos))?;

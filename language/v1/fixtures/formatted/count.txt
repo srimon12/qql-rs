@@ -1,0 +1,16 @@
+-- count.qql — COUNT statements
+
+-- Count all
+COUNT FROM docs;
+
+-- Count with filter
+COUNT FROM docs WHERE status = 'active';
+
+-- Count with shard routing
+COUNT FROM sec10k WHERE tenant_id = 'honeywell' SHARD 'honeywell';
+
+-- Count with complex filter
+COUNT FROM docs WHERE status = 'published' AND year >= 2024;
+
+-- Count with exact flag
+COUNT FROM docs WHERE active = true WITH (exact = true);

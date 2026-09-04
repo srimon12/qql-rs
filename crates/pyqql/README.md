@@ -50,7 +50,7 @@ client.execute(stmt)
 |--------|------|
 | `Client(url, api_key=None, use_grpc=False, embedder=None, route_affinity=None)` | Execute against Qdrant |
 | `HttpEmbedder(endpoint, model, dimension, api_key="")` | OpenAI-compatible embeddings |
-| `parse` / `parse_json` / `is_valid` / `tokenize` | Frontend |
+| `parse` / `parse_json` / `is_valid` / `tokenize` | Frontend — `is_valid` is the full gate (parse **+ plan**), matching execution and the language conformance suite |
 | `inject_filter(query\|Stmt, field, op, value)` | Host isolation (AST) |
 | `Stmt.shard_key` | Same field as QQL `SHARD '…'` (get/set; no `inject_shard_key`) |
 | `compile_query` / `explain` | Offline plan / REST projection |

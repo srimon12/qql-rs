@@ -20,6 +20,16 @@ LIMIT 10;
 QUERY FORMULA SQRT($score) * 10.0 DEFAULTS (score = 0.0) FROM docs LIMIT 10;
 QUERY FORMULA LOG($score + 1.0) DEFAULTS (score = 0.0) FROM docs LIMIT 10;
 QUERY FORMULA POW(ABS($score), 2.0) DEFAULTS (score = 0.0) FROM docs LIMIT 10;
+QUERY FORMULA ACOSH($score + 1.0) DEFAULTS (score = 0.0) FROM docs LIMIT 10;
+
+-- N-ary fold functions (MAX / MIN require at least one operand)
+QUERY FORMULA MAX($score * 2.0, 1.0) DEFAULTS (score = 0.0) FROM docs LIMIT 10;
+QUERY FORMULA MIN($score, bonus, popularity) DEFAULTS (score = 0.0) FROM docs LIMIT 10;
+QUERY FORMULA MAX(MIN($score, 5.0), MIN(0.0, $score)) DEFAULTS (score = 0.0) FROM docs LIMIT 10;
+
+-- A single operand is valid (n ≥ 1)
+QUERY FORMULA MAX($score) DEFAULTS (score = 0.0) FROM docs LIMIT 10;
+QUERY FORMULA MIN($score) DEFAULTS (score = 0.0) FROM docs LIMIT 10;
 
 -- Geo distance in formula
 QUERY FORMULA $score * (1.0 / (1.0 + GEO_DISTANCE(52.52, 13.405, location))) DEFAULTS (score = 0.0)

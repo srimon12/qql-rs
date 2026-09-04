@@ -60,7 +60,7 @@ client.free();
 
 | Export | Role |
 |--------|------|
-| `parse` / `isValid` / `tokenize` | Frontend |
+| `parse` / `isValid` / `tokenize` | Frontend — `isValid` is the full gate (parse **+ plan**), matching execution and the language conformance suite |
 | `inject_filter` | Isolation |
 | `analyze` | tokens + AST + route(s) + explain |
 | `compile` / `explain` | Offline REST projection / plan text |

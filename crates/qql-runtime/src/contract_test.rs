@@ -114,6 +114,20 @@ mod tests {
                 "formula",
                 "QUERY FORMULA score * 2.0 DEFAULTS (score = 0.0) FROM docs LIMIT 10;",
             ),
+            (
+                "formula max/min",
+                "QUERY FORMULA MAX(score * 2.0, MIN(score, bonus)) DEFAULTS (score = 0.0) FROM docs LIMIT 10;",
+            ),
+            (
+                "formula max/min single operand",
+                // n ≥ 1: a one-term fold is valid QQL and must satisfy the
+                // OpenAPI MaxExpression / MinExpression oneOf members.
+                "QUERY FORMULA MAX(score) + MIN(1.0) DEFAULTS (score = 0.0) FROM docs LIMIT 10;",
+            ),
+            (
+                "formula acosh",
+                "QUERY FORMULA ACOSH(1.0 + score) DEFAULTS (score = 0.0) FROM docs LIMIT 10;",
+            ),
         ];
 
         for (name, qql) in query_cases {
@@ -484,6 +498,70 @@ mod tests {
             }
             other => panic!("expected Formula, got {other:?}"),
         }
+    }
+
+    /// MAX / MIN / ACOSH — new Qdrant Expression variants (proto fields 20-22).
+    #[test]
+    fn rest_grpc_formula_nary_acosh_parity() {
+        let stmt = Parser::parse(
+            "QUERY FORMULA MAX(score * 2.0, MIN(score, bonus)) + ACOSH(rank) \
+             DEFAULTS (score = 0.0, bonus = 0.0) FROM docs LIMIT 5;",
+        )
+        .unwrap();
+        let op = plan(&stmt).unwrap();
+        let PlannedOperation::Query {
+            collection,
+            request,
+        } = &op
+        else {
+            panic!("expected Query");
+        };
+
+        // REST: sum → [max: [mult, min: [...] ], acosh]
+        let body = to_rest_route(&op).expect("rest route").body_json().unwrap();
+        let expr = &body["query"]["formula"];
+        let sum = expr["sum"].as_array().expect("sum terms");
+        let max = &sum[0]["max"];
+        assert!(
+            max.is_array() && max.as_array().unwrap().len() == 2,
+            "{max}"
+        );
+        assert!(
+            max[1]["min"].as_array().is_some_and(|m| m.len() == 2),
+            "nested MIN must lower to a 2-term array: {max}"
+        );
+        assert_eq!(
+            sum[1]["acosh"],
+            serde_json::json!("rank"),
+            "ACOSH over a bare variable lowers to a string expression: {sum:?}"
+        );
+
+        // gRPC: same shape via typed proto variants.
+        let grpc = test_api::to_query_points(request, collection).unwrap();
+        use qdrant::expression::Variant as Ev;
+        use qdrant::query::Variant as Qv;
+        let Some(Qv::Formula(formula)) = grpc.query.as_ref().and_then(|q| q.variant.as_ref())
+        else {
+            panic!("expected Formula query");
+        };
+        let Some(expression) = formula.expression.as_ref() else {
+            panic!("formula missing expression");
+        };
+        let Some(Ev::Sum(sum)) = expression.variant.as_ref() else {
+            panic!("expected Sum expression, got {:?}", expression.variant);
+        };
+        let Some(Ev::Max(max)) = sum.sum[0].variant.as_ref() else {
+            panic!("expected Max expression, got {:?}", sum.sum[0].variant);
+        };
+        assert_eq!(max.max.len(), 2, "MAX must carry both operands");
+        assert!(
+            matches!(max.max[1].variant.as_ref(), Some(Ev::Min(_))),
+            "nested MIN must map to MinExpression, got {:?}",
+            max.max[1].variant
+        );
+        let Some(Ev::Acosh(_)) = sum.sum[1].variant.as_ref() else {
+            panic!("expected Acosh expression, got {:?}", sum.sum[1].variant);
+        };
     }
 
     #[test]

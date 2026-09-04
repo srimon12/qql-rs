@@ -331,6 +331,65 @@ export const KEYWORD_DOCS: Record<string, KeywordDoc> = {
     category: "Formula",
     summary: "Distance in meters between two geo points — used in formula scoring/decay.",
   },
+  ABS: {
+    title: "ABS(x)",
+    category: "Formula",
+    summary: "Absolute value of a formula expression.",
+    example: "QUERY FORMULA ABS($score) DEFAULTS (score = 0.0) FROM docs LIMIT 10;",
+  },
+  SQRT: {
+    title: "SQRT(x)",
+    category: "Formula",
+    summary: "Square root — common non-linear score dampening.",
+    example: "QUERY FORMULA SQRT($score) * 10.0 DEFAULTS (score = 0.0) FROM docs LIMIT 10;",
+  },
+  LOG: {
+    title: "LOG(x)",
+    category: "Formula",
+    summary: "Base-10 logarithm (wire key `log10`) — logarithmic dampening of heavy-tailed fields.",
+    example:
+      "QUERY FORMULA LOG(citation_count + 1) DEFAULTS (citation_count = 0) FROM docs LIMIT 10;",
+  },
+  LN: {
+    title: "LN(x)",
+    category: "Formula",
+    summary: "Natural logarithm.",
+    example: "QUERY FORMULA LN($score + 1) DEFAULTS (score = 0.0) FROM docs LIMIT 10;",
+  },
+  EXP: {
+    title: "EXP(x)",
+    category: "Formula",
+    summary: "Natural exponential `e^x`.",
+    example: "QUERY FORMULA EXP($score) DEFAULTS (score = 0.0) FROM docs LIMIT 10;",
+  },
+  ACOSH: {
+    title: "ACOSH(x)",
+    category: "Formula",
+    summary:
+      "Inverse hyperbolic cosine — smooth strictly-positive score shaping. New Qdrant `Expression` variant.",
+    example: "QUERY FORMULA ACOSH($score + 1.0) DEFAULTS (score = 0.0) FROM docs LIMIT 10;",
+  },
+  POW: {
+    title: "POW(base, exponent)",
+    category: "Formula",
+    summary: "Raise a formula expression to a power.",
+    example: "QUERY FORMULA POW(ABS($score), 2.0) DEFAULTS (score = 0.0) FROM docs LIMIT 10;",
+  },
+  MAX: {
+    title: "MAX(a, b, …)",
+    category: "Formula",
+    summary:
+      "Largest of n ≥ 1 formula expressions — clamp scores upward. New Qdrant `Expression` variant.",
+    example: "QUERY FORMULA MAX($score * 2.0, 1.0) DEFAULTS (score = 0.0) FROM docs LIMIT 10;",
+  },
+  MIN: {
+    title: "MIN(a, b, …)",
+    category: "Formula",
+    summary:
+      "Smallest of n ≥ 1 formula expressions — cap scores / normalize. New Qdrant `Expression` variant.",
+    example:
+      "QUERY FORMULA MIN($score, bonus, popularity) DEFAULTS (score = 0.0) FROM docs LIMIT 10;",
+  },
   EXP_DECAY: {
     title: "EXP_DECAY",
     category: "Formula",

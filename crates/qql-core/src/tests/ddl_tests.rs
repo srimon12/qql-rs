@@ -8,6 +8,16 @@ fn create_collection_dense() {
 }
 
 #[test]
+fn create_collection_vector_size_cap() {
+    // VectorParams.size maximum in the Qdrant OpenAPI schema (qdrant#10324).
+    assert!(Parser::parse("CREATE COLLECTION docs (d VECTOR(65536, COSINE));").is_ok());
+    let err = Parser::parse("CREATE COLLECTION docs (d VECTOR(65537, COSINE));")
+        .expect_err("size above the 65536 maximum must be rejected");
+    assert_eq!(err.kind, crate::error::ErrorKind::Parse);
+    assert_eq!(err.code, "QQL-PARSE-VECTOR-SIZE");
+}
+
+#[test]
 fn create_collection_with_sparse() {
     let s =
         Parser::parse("CREATE COLLECTION docs (dense VECTOR(768, DOT), sparse SPARSE);").unwrap();

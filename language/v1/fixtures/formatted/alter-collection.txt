@@ -1,0 +1,19 @@
+-- alter-collection.qql — ALTER COLLECTION statements
+
+-- Alter vector config
+ALTER COLLECTION docs WITH VECTOR (on_disk = true);
+
+-- Alter HNSW
+ALTER COLLECTION docs WITH HNSW (m = 32);
+
+-- Alter with OPTIMIZERS
+ALTER COLLECTION docs WITH OPTIMIZERS (max_segment_size = 500000);
+
+-- Alter with PARAMS
+ALTER COLLECTION docs WITH PARAMS (replication_factor = 3);
+
+-- Alter with QUANTIZATION
+ALTER COLLECTION docs WITH QUANTIZATION (type = 'scalar');
+
+-- Disable quantization
+ALTER COLLECTION docs WITH QUANTIZATION (disabled = true);

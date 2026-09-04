@@ -1,0 +1,14 @@
+-- set-quota.qql — global resource quota API (v1.19)
+-- Tests: SHOW QUOTAS, SET QUOTA with config + WAIT
+
+-- Show the cluster-wide quota config and current utilization
+SHOW QUOTAS;
+
+-- Replace the quota configuration, waiting for consensus
+SET QUOTA (enabled = true, max_resident_memory_percent = 80, max_disk_usage_percent = 90, release_margin_percent = 5) WAIT true;
+
+-- A partial config (PUT replaces the whole config)
+SET QUOTA (enabled = false);
+
+-- Clearing a limit with null
+SET QUOTA (max_disk_usage_percent = null);

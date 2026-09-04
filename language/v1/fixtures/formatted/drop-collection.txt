@@ -1,0 +1,4 @@
+-- drop-collection.qql — DROP COLLECTION
+
+DROP COLLECTION docs;
+DROP COLLECTION old_data;

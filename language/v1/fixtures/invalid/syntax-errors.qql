@@ -114,3 +114,15 @@ FROM docs
 USING colbert AS DENSE
 PREFETCH (candidates)
 LIMIT 10;
+
+-- @case formula-max-without-operands
+-- @error QQL-PARSE-SYNTAX
+QUERY FORMULA MAX() DEFAULTS (score = 0.0) FROM docs LIMIT 10;
+
+-- @case formula-min-without-operands
+-- @error QQL-PARSE-SYNTAX
+QUERY FORMULA MIN() DEFAULTS (score = 0.0) FROM docs LIMIT 10;
+
+-- @case create-collection-vector-size-above-maximum
+-- @error QQL-PARSE-VECTOR-SIZE
+CREATE COLLECTION docs (oversized VECTOR(65537, COSINE));

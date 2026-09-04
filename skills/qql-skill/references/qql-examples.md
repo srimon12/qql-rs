@@ -382,6 +382,15 @@ QUERY FORMULA (SQRT(score) * LOG(citation_count + 1)) DEFAULTS (citation_count =
   LIMIT 20;
 ```
 
+**N-ary clamping and inverse hyperbolic cosine** -- `MAX(...)` / `MIN(...)` fold two or more operands into the largest/smallest term; `ACOSH(x)` maps scores into a strictly positive range.
+
+```sql
+QUERY FORMULA MAX(MIN($score * 2.0, 10.0), 0.0) + ACOSH(popularity + 1.0)
+  DEFAULTS (score = 0.0)
+  FROM papers
+  LIMIT 20;
+```
+
 ---
 
 ## 15. Hybrid Search with Formula Boosting
