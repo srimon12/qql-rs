@@ -19,30 +19,17 @@ and does not accept search clauses such as `WHERE` or `LIMIT`.
 
 {% qqlExample title="Text, vector, and stored-point input" %}
 ```sql
-QUERY TEXT 'vector database'
-FROM docs
-USING dense
-LIMIT 10;
+QUERY 'vector database' FROM docs USING dense LIMIT 10;
 
 -- Explicit vector input
-QUERY VECTOR [0.1, 0.2, 0.3]
-FROM docs
-USING dense
-LIMIT 10;
+QUERY VECTOR [0.1, 0.2, 0.3] FROM docs USING dense LIMIT 10;
 
 -- Implicit vector input (VECTOR keyword is optional for array literals)
-QUERY [0.1, 0.2, 0.3]
-FROM docs
-USING dense
-LIMIT 10;
+QUERY VECTOR [0.1, 0.2, 0.3] FROM docs USING dense LIMIT 10;
 
-QUERY POINT 42
-FROM docs
-USING dense
-LIMIT 10;
+QUERY POINT 42 FROM docs USING dense LIMIT 10;
 
-QUERY POINTS (1, 2, 'point-a')
-FROM docs;
+QUERY POINTS (1, 2, 'point-a') FROM docs;
 ```
 {% /qqlExample %}
 
@@ -69,17 +56,11 @@ the v1 conformance corpus.
 
 {% qqlExample title="Hybrid dense and sparse fusion" %}
 ```sql
-QUERY HYBRID TEXT 'vector database'
-DENSE dense
-SPARSE sparse
-FUSION RRF
+QUERY HYBRID TEXT 'vector database' DENSE dense SPARSE sparse FUSION RRF
 FROM docs
 LIMIT 10;
 
-QUERY TEXT 'search query'
-FROM docs
-USING HYBRID
-LIMIT 10;
+QUERY HYBRID TEXT 'search query' FUSION RRF FROM docs LIMIT 10;
 ```
 {% /qqlExample %}
 
@@ -113,16 +94,8 @@ outer collection. `PREFETCH` names must resolve to CTEs.
 {% qqlExample title="Dense and sparse candidates fused with RRF" %}
 ```sql
 WITH
-  dense_candidates AS (
-    QUERY TEXT 'database internals'
-    USING dense
-    LIMIT 100
-  ),
-  sparse_candidates AS (
-    QUERY TEXT 'database internals'
-    USING sparse
-    LIMIT 100
-  )
+  dense_candidates AS (QUERY 'database internals' USING dense LIMIT 100),
+  sparse_candidates AS (QUERY 'database internals' USING sparse LIMIT 100)
 QUERY FUSION RRF
 FROM docs
 PREFETCH (dense_candidates, sparse_candidates)
@@ -139,17 +112,12 @@ candidate-generating stage explicit so the planner can validate the pipeline.
 
 {% qqlExample title="Recommendation and diversified search" %}
 ```sql
-QUERY RECOMMEND
-POSITIVE (1, 2)
-NEGATIVE (3)
-STRATEGY best_score
+QUERY RECOMMEND POSITIVE (1, 2) NEGATIVE (3) STRATEGY best_score
 FROM products
 USING dense
 LIMIT 10;
 
-QUERY MMR TEXT 'vector database'
-DIVERSITY 0.7
-CANDIDATES 100
+QUERY MMR TEXT 'vector database' DIVERSITY 0.7 CANDIDATES 100
 FROM docs
 USING dense
 LIMIT 10;
@@ -161,12 +129,10 @@ grouping when the UI needs several results per payload category.
 
 {% qqlExample title="Grouped results with lookup" %}
 ```sql
-QUERY TEXT 'incident'
+QUERY 'incident'
 FROM runbooks
 USING dense
-GROUP BY service
-SIZE 3
-LOOKUP FROM services
+GROUP BY service SIZE 3 LOOKUP FROM services
 WITH PAYLOAD INCLUDE (title, service)
 LIMIT 10;
 ```
@@ -181,16 +147,11 @@ ID, `TEXT` or `VECTOR` otherwise.
 
 {% qqlExample title="Context pairs and a discover target" %}
 ```sql
-QUERY CONTEXT (
-  POSITIVE POINT 1 NEGATIVE POINT 2,
-  POSITIVE POINT 3 NEGATIVE POINT 4
-)
+QUERY CONTEXT (POSITIVE POINT 1 NEGATIVE POINT 2, POSITIVE POINT 3 NEGATIVE POINT 4)
 FROM docs
 LIMIT 10;
 
-QUERY DISCOVER
-TARGET TEXT 'search'
-CONTEXT (POSITIVE POINT 1 NEGATIVE POINT 2)
+QUERY DISCOVER TARGET 'search' CONTEXT (POSITIVE POINT 1 NEGATIVE POINT 2)
 FROM docs
 LIMIT 10;
 ```
@@ -202,13 +163,7 @@ query vector. Feedback items pair a query input with a relevance weight.
 
 {% qqlExample title="Naive relevance feedback" %}
 ```sql
-QUERY RELEVANCE FEEDBACK
-TARGET TEXT 'search'
-FEEDBACK (
-  (VECTOR [0.1, 0.2], 1.0),
-  (VECTOR [0.3, 0.4], -1.0)
-)
-STRATEGY NAIVE (a = 1.0, b = 0.5, c = 0.2)
+QUERY RELEVANCE FEEDBACK TARGET 'search' FEEDBACK ((VECTOR [0.1, 0.2], 1.0), (VECTOR [0.3, 0.4], -1.0)) STRATEGY NAIVE (a = 1.0, b = 0.5, c = 0.2)
 FROM docs
 LIMIT 10;
 ```
@@ -222,15 +177,9 @@ or `PREFETCH` — there is no similarity input to resolve.
 
 {% qqlExample title="Ordered and random access" %}
 ```sql
-QUERY ORDER BY price ASC
-FROM products
-WHERE category = 'electronics'
-LIMIT 10;
+QUERY ORDER BY price ASC FROM products WHERE category = 'electronics' LIMIT 10;
 
-QUERY SAMPLE RANDOM
-FROM docs
-WITH VECTOR false
-LIMIT 10;
+QUERY SAMPLE RANDOM FROM docs WITH VECTOR false LIMIT 10;
 ```
 {% /qqlExample %}
 
@@ -247,13 +196,9 @@ instead when you need a filtered search.
 
 {% qqlExample title="Late-interaction rerank of dense candidates" %}
 ```sql
-WITH candidates AS (
-  QUERY TEXT 'vector database'
-  USING dense
-  LIMIT 100
-)
-QUERY RERANK TEXT 'vector database'
-MODEL 'reranker-v1'
+WITH
+  candidates AS (QUERY 'vector database' USING dense LIMIT 100)
+QUERY RERANK TEXT 'vector database' MODEL 'reranker-v1'
 FROM docs
 USING colbert AS DENSE
 PREFETCH (candidates)
@@ -269,14 +214,9 @@ candidates.
 
 {% qqlExample title="Cross-encoder reranking on a payload field" %}
 ```sql
-WITH candidates AS (
-  QUERY TEXT 'vector database'
-  USING dense
-  LIMIT 100
-)
-QUERY CROSS RERANK TEXT 'vector database'
-MODEL 'bge-reranker-base'
-ON FIELD abstract
+WITH
+  candidates AS (QUERY 'vector database' USING dense LIMIT 100)
+QUERY CROSS RERANK TEXT 'vector database' MODEL 'bge-reranker-base' ON FIELD abstract
 FROM docs
 PREFETCH (candidates)
 LIMIT 10;
@@ -299,19 +239,19 @@ stays on statement `WHERE` / host `inject_filter`. IDF only scopes BM25 rarity.
 
 {% qqlExample title="Per-query sparse IDF corpus" %}
 ```sql
-QUERY TEXT 'search'
+QUERY 'search'
 FROM docs
 USING sparse
 PARAMS (idf = 'global')
 LIMIT 10;
 
-QUERY TEXT 'search'
+QUERY 'search'
 FROM docs
 USING sparse
 PARAMS (idf = WHERE status = 'active')
 LIMIT 10;
 
-QUERY TEXT 'search'
+QUERY 'search'
 FROM docs
 USING sparse
 WHERE tenant_id = 'acme'
@@ -335,7 +275,7 @@ When parameters are bound at runtime via the SDKs (`bind` or `Client.execute(...
 
 {% qqlExample title="Bound query execution" %}
 ```sql
-QUERY TEXT 'chest pain'
+QUERY 'chest pain'
 FROM docs
 WHERE category = 'cardiology' AND rating >= 4.5
 LIMIT 10;

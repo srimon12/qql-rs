@@ -30,7 +30,7 @@ computation, so no point outside the caller's scope can influence a result.
 
 {% qqlExample title="Tenant-scoped query" %}
 ```sql
-QUERY TEXT 'compliance review'
+QUERY 'compliance review'
 FROM docs
 USING dense
 WHERE tenant_id = 'acme'
@@ -133,9 +133,8 @@ For queries, the recursion matters. A rewritten statement is only safe if
 
 {% qqlExample title="Injection covers CTEs and prefetches" %}
 ```sql
-WITH candidates AS (
-  QUERY TEXT 'candidate' USING dense LIMIT 100
-)
+WITH
+  candidates AS (QUERY 'candidate' USING dense LIMIT 100)
 QUERY FUSION RRF
 FROM docs
 PREFETCH (candidates)

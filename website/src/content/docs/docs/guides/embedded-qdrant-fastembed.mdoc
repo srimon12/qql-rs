@@ -50,7 +50,7 @@ client.execute("""
 
 # 3. Query with declarative QQL
 results = client.execute("""
-    QUERY TEXT 'edge vector database'
+    QUERY 'edge vector database'
     FROM knowledge_base
     USING HYBRID
     WHERE topic = 'architecture'
@@ -96,7 +96,7 @@ await client.execute(`
 `);
 
 const response = await client.execute(`
-  QUERY TEXT 'machine learning on device'
+  QUERY 'machine learning on device'
   FROM articles
   USING dense
   LIMIT 5;

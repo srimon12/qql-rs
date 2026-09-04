@@ -17,7 +17,8 @@ QQL deliberately separates language correctness from backend execution.
 
 {% qqlExample title="A schema-resolved text query" %}
 ```sql
-QUERY TEXT 'release safety' FROM engineering_docs
+QUERY 'release safety'
+FROM engineering_docs
 USING semantic_v2
 PARAMS (hnsw_ef = 96, exact = false)
 LIMIT 12;
