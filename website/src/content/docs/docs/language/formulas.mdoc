@@ -37,7 +37,9 @@ LIMIT 10;
 
 Decay functions take a payload field followed by named (`TARGET =`, `SCALE =`,
 `MIDPOINT =`, `DECAY =`) or positional arguments. `scale` and
-`midpoint`/`decay` are numeric constants.
+`midpoint`/`decay` are numeric constants. `TARGET` can be a numeric constant
+or an ISO 8601 datetime string (e.g. `TARGET = "2026-01-01T00:00:00Z"`). When `TARGET`
+is a datetime string, the payload field automatically infers `datetime_key`.
 
 | Function | Choose it when |
 |---|---|

@@ -57,9 +57,12 @@ Translate user intent directly into QQL syntax:
 - CLIP image query -> `QUERY IMAGE '/path.jpg' MODEL 'Qdrant/clip-ViT-B-32-vision' FROM <coll> USING image LIMIT <n>`
 - CLIP image upsert -> `UPSERT … USING IMAGE MODEL 'clip-vision' ON FIELD image INTO image`
 - MMR diversification -> `QUERY MMR 'query_text' DIVERSITY 0.5 CANDIDATES 100 FROM <collection> USING dense LIMIT <n>`
-- Formula / Score shaping -> `QUERY FORMULA score + 0.3 * popularity DEFAULTS (popularity = 1.0) FROM <collection> USING dense LIMIT <n>`
+- Vector array literal search -> `QUERY [0.1, 0.2, ...] FROM <collection> USING dense LIMIT <n>` (implicit vector literal, `VECTOR` keyword optional)
+- Formula / Score shaping -> `QUERY FORMULA score + 0.3 * EXP_DECAY(published_at, TARGET = "2024-01-01T00:00:00Z", SCALE = 630720000) FROM <collection> USING dense LIMIT <n>`
+- In-database faceting (aggregations) -> `FACET <field> FROM <collection> [WHERE <filter>] [LIMIT <n>] [EXACT true]`
 - Grouped results -> add `GROUP BY <field> SIZE <m> LOOKUP FROM <collection>`
 - Browse points -> `SCROLL FROM <collection> [AFTER <id>] LIMIT <n>`
+- Point payload default -> `QUERY` includes point payloads by default (`WITH PAYLOAD true`). Use `WITH PAYLOAD false` to explicitly omit payloads.
 - Batch ingest -> `UPSERT INTO <collection> VALUES {id: 1, text: '...'}, {id: 2, text: '...'}`
 - Delete points -> `DELETE FROM <collection> WHERE <filter>`
 - Clear payload -> `CLEAR PAYLOAD FROM <collection> WHERE <filter>`

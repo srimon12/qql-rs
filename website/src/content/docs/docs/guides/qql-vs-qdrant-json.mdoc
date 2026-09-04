@@ -176,6 +176,43 @@ PUT /collections/articles/index
 
 ---
 
+## 4. In-Database Categorical Aggregations (Faceting)
+
+Aggregating counts of unique payload values filtered by predicates without retrieving individual point records.
+
+### In QQL (4 lines)
+
+{% qqlExample title="Facet aggregation with filtering and exact accuracy" %}
+```sql
+FACET room_type
+FROM stays
+WHERE price < 150
+LIMIT 5
+EXACT true;
+```
+{% /qqlExample %}
+
+### In Raw Qdrant REST JSON (18 lines)
+
+```json
+POST /collections/stays/facet
+{
+  "key": "room_type",
+  "limit": 5,
+  "exact": true,
+  "filter": {
+    "must": [
+      {
+        "key": "price",
+        "range": { "lt": 150.0 }
+      }
+    ]
+  }
+}
+```
+
+---
+
 ## Comparison Matrix
 
 | Dimension | Raw Qdrant JSON API | QQL Dialect |

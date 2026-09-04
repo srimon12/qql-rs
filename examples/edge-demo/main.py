@@ -158,12 +158,13 @@ def main():
 
     # ── 7. Point Access ──
     section("7. Point Access")
-    step("QUERY POINTS by id",  f"QUERY POINTS (1, 3) FROM {COL} WITH PAYLOAD true")
+    step("QUERY POINTS by id",  f"QUERY POINTS (1, 3) FROM {COL}")
     step("SCROLL all",          f"SCROLL FROM {COL} LIMIT 5")
     step("SCROLL no vectors",   f"SCROLL FROM {COL} WITH VECTOR false LIMIT 5")
     step("SCROLL filtered",     f"SCROLL FROM {COL} WHERE tag = 'database' LIMIT 5")
     step("ORDER BY year DESC",  f"QUERY ORDER BY year DESC FROM {COL} LIMIT 5", allow_fail=True)
     step("COUNT exact",         f"COUNT FROM {COL} WHERE year = 2024 WITH (exact = true)", allow_fail=True)
+    step("FACET tag distribution", f"FACET tag FROM {COL} LIMIT 5", allow_fail=True)
 
     # ── 8. Mutations ──
     section("8. Mutations")

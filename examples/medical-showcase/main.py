@@ -269,7 +269,7 @@ def main():
     # -- Point Access --
     print("\n[12] Point Access")
     run("Point lookup by ID",
-        f"QUERY POINTS (2) FROM {COL} WITH PAYLOAD true",
+        f"QUERY POINTS (2) FROM {COL}",
         execute=args.execute)
     run("Scroll all",
         f"SCROLL FROM {COL} LIMIT 3",
@@ -282,6 +282,9 @@ def main():
         execute=args.execute)
     run("COUNT exact",
         f"COUNT FROM {COL} WHERE priority = 'high' WITH (exact = true)",
+        execute=args.execute)
+    run("FACET breakdown",
+        f"FACET specialty FROM {COL} LIMIT 5",
         execute=args.execute)
     run("DELETE PAYLOAD keys",
         f"DELETE PAYLOAD care_path FROM {COL} WHERE id = 1",

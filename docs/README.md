@@ -18,6 +18,9 @@
 | Feature | Notes |
 |---------|--------|
 | `SHOW QUOTAS` / `SET QUOTA (…)` | Cluster REST `GET|PUT /quotas` only; gRPC → `QQL-GRPC-QUOTA`; edge → `QQL-EDGE-UNSUPPORTED-QUOTA` |
+| `FACET field FROM col` | In-database categorical value counts via REST `/collections/{col}/facet` |
+| `QUERY [...] FROM col` | Implicit vector array literals without requiring `VECTOR` keyword |
+| `WITH PAYLOAD` default | Queries default to returning all payload fields (`true`) when omitted |
 | `memory = 'cold'\|'cached'\|'pinned'` | HNSW / VECTOR / SPARSE / QUANTIZATION / indexes; `payload_memory` is cold\|cached only |
 | `WHERE field MATCH PREFIX '…'` | Keyword prefix match (`prefix=true` index) |
 | `WHERE SLICE (total, index)` | Deterministic id-space slice (`total ≥ 1`, `index < total`) |
