@@ -11,9 +11,12 @@ use serde::{Serialize, Serializer};
 
 // ── Point ID ────────────────────────────────────────────────────
 
+/// Transport-neutral point ID: unsigned integer or string (typically UUID).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlanPointId {
+    /// Unsigned 64-bit point ID.
     Number(u64),
+    /// String point ID, typically a UUID.
     String(String),
 }
 
@@ -55,10 +58,19 @@ impl<'de> serde::Deserialize<'de> for PlanPointId {
 
 // ── Vector value ────────────────────────────────────────────────
 
+/// Transport-neutral vector value: dense, sparse, or multi-dense rows.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlanVectorValue {
+    /// Single dense `f32` vector.
     Dense(Vec<f32>),
-    Sparse { indices: Vec<u32>, values: Vec<f32> },
+    /// Sparse vector with paired `indices` and `values` arrays.
+    Sparse {
+        /// Row indices of the non-zero entries.
+        indices: Vec<u32>,
+        /// Values at the indexed rows.
+        values: Vec<f32>,
+    },
+    /// Multi-dense vector: one row per input token or patch.
     MultiDense(Vec<Vec<f32>>),
 }
 
@@ -117,19 +129,25 @@ impl Serialize for PlanVectorValue {
 /// image distinctions that JSON shape inference cannot recover.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlanQueryInput {
+    /// Point-ID input resolved by the backend.
     Point(PlanPointId),
+    /// Inline dense/sparse/multi-dense vector input.
     Vector(PlanVectorValue),
     /// Server-side or client-pre-embed document. `model: None` serializes as a
     /// bare string for REST compatibility with historical QQL output.
     Document {
+        /// Document text to embed.
         text: String,
+        /// Embedding model; empty when the executor fills it in.
         model: Option<String>,
     },
     /// OpenAPI `Image` inference input (image URL or base64 + model).
     /// Prefer resolving to a dense [`PlanQueryInput::Vector`] client-side when
     /// the host has an image embedder; otherwise the wire form is preserved.
     Image {
+        /// Image URL or base64 payload.
         image: String,
+        /// Image embedding model; empty when the executor fills it in.
         model: Option<String>,
     },
 }
@@ -185,9 +203,12 @@ impl Serialize for PlanQueryInput {
 
 // ── Point vectors (upsert body) ─────────────────────────────────
 
+/// Vectors carried by one point: single unnamed vector or named set.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlanPointVectors {
+    /// Single unnamed vector (single-vector collection).
     Unnamed(PlanVectorValue),
+    /// Named vectors as `(name, value)` pairs.
     Named(Vec<(String, PlanVectorValue)>),
 }
 

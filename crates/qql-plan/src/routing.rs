@@ -2,11 +2,16 @@ use crate::plan::{plan, to_rest_route};
 use crate::types::*;
 use qql_core::ast::Stmt;
 
+/// Optional REST projection of a plan: HTTP method, path, query, and body.
 #[derive(Debug)]
 pub struct Route {
+    /// HTTP verb of the projected route.
     pub method: Method,
+    /// Absolute Qdrant path with the collection interpolated.
     pub path: String,
+    /// Ordered query-string parameters as `(name, value)` pairs.
     pub query: Vec<(String, String)>,
+    /// Serialized JSON body; `None` for bodyless routes.
     pub body: Option<serde_json::Value>,
 }
 
@@ -31,7 +36,9 @@ pub fn try_route(statement: &Stmt) -> Result<Route, qql_core::error::QqlError> {
 /// a stable `stmt_type` but no single Qdrant HTTP endpoint.
 #[derive(Debug)]
 pub struct CompiledStatement {
+    /// Stable snake_case type id from `compile_stmt_type`.
     pub stmt_type: &'static str,
+    /// Projected REST route; `None` for client-side-only operations.
     pub route: Option<Route>,
 }
 

@@ -4,11 +4,13 @@ use qql_core::error::QqlError;
 use crate::sparse::{self, SparseVector};
 
 #[cfg(not(target_arch = "wasm32"))]
+/// Send/Sync bound helper for `Embedder` implementations on native targets.
 pub trait EmbedderBound: Send + Sync {}
 #[cfg(not(target_arch = "wasm32"))]
 impl<T: Send + Sync> EmbedderBound for T {}
 
 #[cfg(target_arch = "wasm32")]
+/// Single-threaded bound helper for `Embedder` implementations on wasm32.
 pub trait EmbedderBound {}
 #[cfg(target_arch = "wasm32")]
 impl<T> EmbedderBound for T {}
@@ -24,6 +26,7 @@ impl<T> EmbedderBound for T {}
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait Embedder: EmbedderBound {
+    /// Embed one text into a dense vector; `model` may be empty or `"default"`.
     async fn embed_dense(&self, text: &str, model: &str) -> Result<Vec<f32>, QqlError>;
 
     /// Sparse embedding for **query** text: unique terms with unit weights,
@@ -264,8 +267,11 @@ pub fn sparse_model_unsupported_error(model: &str) -> QqlError {
 /// Output container for single-pass joint multi-modal / BGE-M3 embedding.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct JointEmbeddingOutput {
+    /// Dense vector, when the model provides one.
     pub dense: Option<Vec<f32>>,
+    /// Sparse (BM25 / SPLADE) vector, when the model provides one.
     pub sparse: Option<SparseVector>,
+    /// Multivector token vectors (ColBERT), when the model provides them.
     pub multi: Option<Vec<Vec<f32>>>,
 }
 

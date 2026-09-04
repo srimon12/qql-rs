@@ -9,6 +9,8 @@ use crate::qdrant_grpc::qdrant;
 /// gRPC metadata key for Qdrant 1.19 read affinity (same string as the HTTP header).
 pub const ROUTE_AFFINITY_METADATA: &str = "x-qdrant-route-affinity";
 
+/// Qdrant gRPC backend handle: `tonic` channel plus API-key and route-affinity
+/// metadata, with typed points/collections client factories.
 pub struct GrpcQdrant {
     channel: Channel,
     api_key: Option<String>,
@@ -47,6 +49,7 @@ impl tonic::service::Interceptor for MetadataInterceptor {
 }
 
 impl GrpcQdrant {
+    /// Wrap an existing `tonic` channel without credentials.
     pub fn from_channel(channel: Channel) -> Self {
         Self {
             channel,
@@ -55,10 +58,13 @@ impl GrpcQdrant {
         }
     }
 
+    /// Connect lazily to a `grpc://` / `http(s)://` Qdrant endpoint with an
+    /// optional API key.
     pub fn from_url(url: &str, api_key: Option<String>) -> Result<Self, QqlError> {
         Self::from_url_with_timeout(url, api_key, None)
     }
 
+    /// Like `from_url`, with an explicit overall request timeout on the endpoint.
     pub fn from_url_with_timeout(
         url: &str,
         api_key: Option<String>,
@@ -98,10 +104,12 @@ impl GrpcQdrant {
         self
     }
 
+    /// Current route-affinity value, if set.
     pub fn route_affinity(&self) -> Option<&str> {
         self.route_affinity.as_deref()
     }
 
+    /// Clone the underlying `tonic` channel for custom clients.
     pub fn channel(&self) -> Channel {
         self.channel.clone()
     }

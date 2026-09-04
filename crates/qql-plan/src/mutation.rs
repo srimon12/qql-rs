@@ -6,6 +6,7 @@ use qql_core::ast::{
     UpdatePayloadStmt, UpdateVectorStmt, UpsertPoint, UpsertStmt,
 };
 
+/// Lower `UPSERT INTO` to the `PUT /collections/{c}/points` request body.
 pub fn lower_upsert_request(stmt: &UpsertStmt) -> UpsertRequest {
     UpsertRequest {
         points: stmt.points.iter().map(lower_upsert_point).collect(),
@@ -32,6 +33,7 @@ fn lower_upsert_point(point: &UpsertPoint) -> UpsertPointRequest {
     req
 }
 
+/// Lower `DELETE` to the `POST /points/delete` body, by IDs or filter.
 pub fn lower_delete_request(stmt: &DeleteStmt) -> DeleteRequest {
     match &stmt.selector {
         PointSelector::Id(id) => DeleteRequest {
@@ -52,6 +54,7 @@ pub fn lower_delete_request(stmt: &DeleteStmt) -> DeleteRequest {
     }
 }
 
+/// Lower `UPDATE … SET VECTOR` to the `PUT /points/vectors` request body.
 pub fn lower_update_vector_request(stmt: &UpdateVectorStmt) -> UpdateVectorRequest {
     let vector = if let Some(ref name) = stmt.vector_name {
         PlanPointVectors::Named(vec![(name.clone(), lower_vector_value(&stmt.vector))])
@@ -67,6 +70,7 @@ pub fn lower_update_vector_request(stmt: &UpdateVectorStmt) -> UpdateVectorReque
     }
 }
 
+/// Lower `UPDATE … SET PAYLOAD` to the `POST /points/payload` request body.
 pub fn lower_update_payload_request(stmt: &UpdatePayloadStmt) -> UpdatePayloadRequest {
     let mut payload = serde_json::Map::with_capacity(stmt.payload.len());
     for (key, value) in &stmt.payload {
@@ -94,6 +98,7 @@ pub fn lower_update_payload_request(stmt: &UpdatePayloadStmt) -> UpdatePayloadRe
     }
 }
 
+/// Lower `CLEAR PAYLOAD` to the `POST /points/payload/clear` request body.
 pub fn lower_clear_payload_request(stmt: &ClearPayloadStmt) -> ClearPayloadRequest {
     match &stmt.selector {
         PointSelector::Id(id) => ClearPayloadRequest {
@@ -114,6 +119,7 @@ pub fn lower_clear_payload_request(stmt: &ClearPayloadStmt) -> ClearPayloadReque
     }
 }
 
+/// Lower `DELETE PAYLOAD <keys>` to the `POST /points/payload/delete` body.
 pub fn lower_delete_payload_request(stmt: &DeletePayloadStmt) -> DeletePayloadRequest {
     match &stmt.selector {
         PointSelector::Id(id) => DeletePayloadRequest {
@@ -137,6 +143,7 @@ pub fn lower_delete_payload_request(stmt: &DeletePayloadStmt) -> DeletePayloadRe
     }
 }
 
+/// Lower `DELETE VECTOR <names>` to the `POST /points/vectors/delete` body.
 pub fn lower_delete_vector_request(stmt: &DeleteVectorStmt) -> DeleteVectorRequest {
     match &stmt.selector {
         PointSelector::Id(id) => DeleteVectorRequest {
@@ -160,6 +167,7 @@ pub fn lower_delete_vector_request(stmt: &DeleteVectorStmt) -> DeleteVectorReque
     }
 }
 
+/// Lower `SCROLL` to the `/points/scroll` body: payload on, vectors off.
 pub fn lower_scroll_request(
     limit: u64,
     filter: Option<&qql_core::ast::FilterExpr>,

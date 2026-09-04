@@ -42,27 +42,33 @@ pub(crate) struct AstLowerer<'a> {
 /// should split them into bounded batches before parsing.
 pub const MAX_STATEMENTS: usize = 256;
 
+/// Returns true when `s` equals `upper`, ignoring ASCII case.
 pub fn ascii_equal(s: &str, upper: &str) -> bool {
     s.eq_ignore_ascii_case(upper)
 }
 
+/// Returns true when `s` equals `lower`, ignoring ASCII case.
 pub fn ascii_equal_lower(s: &str, lower: &str) -> bool {
     s.eq_ignore_ascii_case(lower)
 }
 
+/// Returns true when a token kind can serve as a contextual field name.
 pub fn is_contextual_field_name(kind: TokenKind) -> bool {
     kind.is_keyword_or_identifier()
 }
 
 impl Parser {
+    /// Parses a single QQL statement from the input string.
     pub fn parse(input: &str) -> Result<Stmt, QqlError> {
         AstLowerer::lower_statement(input)
     }
 
+    /// Parses a `;`-separated script into a list of statements.
     pub fn parse_all(input: &str) -> Result<Vec<Stmt>, QqlError> {
         AstLowerer::lower_script(input)
     }
 
+    /// Parses a script, returning each statement paired with its source span.
     pub fn parse_all_with_spans(input: &str) -> Result<Vec<(Stmt, Span)>, QqlError> {
         AstLowerer::lower_script_with_spans(input)
     }

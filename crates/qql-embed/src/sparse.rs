@@ -21,7 +21,9 @@ use rust_stemmers::{Algorithm, Stemmer};
 /// Sparse embedding (indices + values). Transport-neutral — not a protobuf type.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SparseVector {
+    /// Sorted token IDs (murmur3-32, wire-compatible with Qdrant `qdrant/bm25`).
     pub indices: Vec<u32>,
+    /// Per-token weights aligned with `indices` (unit for queries, tf for docs).
     pub values: Vec<f32>,
 }
 

@@ -3,8 +3,10 @@ use core::iter::Peekable;
 use crate::error::{QqlError, Span};
 use crate::token::{lookup_keyword, Token, TokenKind};
 
+/// Peekable iterator over the token stream produced by a `Lexer`.
 pub type TokenIter<'a> = Peekable<Lexer<'a>>;
 
+/// QQL lexer yielding tokens with byte spans; halts after the first lexical error.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct Lexer<'a> {
@@ -17,6 +19,7 @@ pub struct Lexer<'a> {
 }
 
 impl<'a> Lexer<'a> {
+    /// Creates a lexer over the given source input.
     pub fn new(input: &'a str) -> Self {
         Lexer {
             input,
@@ -25,6 +28,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Lexes and returns the next token, `Eof` at end of input, or a lexical error.
     pub fn next_token(&mut self) -> Result<Token<'a>, QqlError> {
         self.skip_whitespace();
 

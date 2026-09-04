@@ -11,6 +11,7 @@ use crate::error::Span;
 macro_rules! gen_as_str {
     ($($var:ident => $str:expr),* $(,)?) => {
         impl TokenKind {
+            /// Returns the canonical display string for this token kind.
             pub fn as_str(&self) -> &'static str {
                 match self {
                     $( Self::$var => $str, )*
@@ -20,204 +21,401 @@ macro_rules! gen_as_str {
     };
 }
 
+/// The lexical token kinds produced by the QQL lexer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum TokenKind {
+    /// The `ABS` keyword.
     Abs,
+    /// The `ACORN` keyword.
     Acorn,
+    /// The `ACOSH` keyword.
     Acosh,
+    /// The `AFTER` keyword.
     After,
+    /// The `ALL` keyword.
     All,
+    /// The `ALTER` keyword.
     Alter,
+    /// The `AND` keyword.
     And,
+    /// The `ANY` keyword.
     Any,
+    /// The `AS` keyword.
     As,
+    /// The `ASC` keyword.
     Asc,
+    /// The `AVERAGE_VECTOR` keyword.
     AverageVector,
+    /// The `BEST_SCORE` keyword.
     BestScore,
+    /// The `BETWEEN` keyword.
     Between,
+    /// The `BOOL` keyword.
     Bool,
+    /// The `BOTTOM_RIGHT` keyword.
     BottomRight,
+    /// The `BY` keyword.
     By,
+    /// The `CANDIDATES` keyword.
     Candidates,
+    /// The `CASE` keyword.
     Case,
+    /// The `CENTER` keyword.
     Center,
+    /// The `CLEAR` keyword.
     Clear,
+    /// The `COLLECTION` keyword.
     Collection,
+    /// The `COLLECTIONS` keyword.
     Collections,
+    /// The `CONSISTENCY` keyword.
     Consistency,
+    /// The `CONTEXT` keyword.
     Context,
+    /// The `COSINE` keyword.
     Cosine,
+    /// The `COUNT` keyword.
     Count,
+    /// The `CREATE` keyword.
     Create,
+    /// The `CROSS` keyword.
     Cross,
+    /// The `DATETIME` keyword.
     Datetime,
+    /// The `DATETIME_KEY` keyword.
     DatetimeKey,
+    /// The `DBSF` keyword.
     Dbsf,
+    /// The `DECAY` keyword.
     Decay,
+    /// The `DEFAULT` keyword.
     Default,
+    /// The `DEFAULTS` keyword.
     Defaults,
+    /// The `DELETE` keyword.
     Delete,
+    /// The `DENSE` keyword.
     Dense,
+    /// The `DESC` keyword.
     Desc,
+    /// The `DISCOVER` keyword.
     Discover,
+    /// The `DIVERSITY` keyword.
     Diversity,
+    /// The `DOT` keyword.
     Dot,
+    /// The `DROP` keyword.
     Drop,
+    /// The `ELSE` keyword.
     Else,
+    /// The `EMBED` keyword.
     Embed,
+    /// The `EMPTY` keyword.
     Empty,
+    /// The `END` keyword.
     End,
+    /// The `EUCLID` keyword.
     Euclid,
+    /// The `EXACT` keyword.
     Exact,
+    /// The `FACET` keyword.
     Facet,
+    /// The `EXCLUDE` keyword.
     Exclude,
+    /// The `EXP` keyword.
     Exp,
+    /// The `EXP_DECAY` keyword.
     ExpDecay,
+    /// The `EXTERIOR` keyword.
     Exterior,
+    /// The `FALSE` keyword.
     False,
+    /// The `FEEDBACK` keyword.
     Feedback,
+    /// The `FIELD` keyword.
     Field,
+    /// A float literal token; also the `FLOAT` field-type keyword.
     Float,
+    /// The `FOR` keyword.
     For,
+    /// The `FORMULA` keyword.
     Formula,
+    /// The `FROM` keyword.
     From,
+    /// The `FUSION` keyword.
     Fusion,
+    /// The `GAUSS_DECAY` keyword.
     GaussDecay,
+    /// The `GEO` keyword.
     Geo,
+    /// The `GEO_BBOX` keyword.
     GeoBbox,
+    /// The `GEO_DISTANCE` keyword.
     GeoDistance,
+    /// The `GEO_POLYGON` keyword.
     GeoPolygon,
+    /// The `GEO_RADIUS` keyword.
     GeoRadius,
+    /// The `GLOBAL` keyword.
     Global,
+    /// The `GROUP` keyword.
     Group,
+    /// The `HAS_VECTOR` keyword.
     HasVector,
+    /// The `HNSW` keyword.
     Hnsw,
+    /// The `HNSW_EF` keyword.
     HnswEf,
+    /// The `HYBRID` keyword.
     Hybrid,
+    /// The `ID` keyword.
     Id,
+    /// The `IDF` keyword.
     Idf,
+    /// The `IGNORE` keyword.
     Ignore,
+    /// The `IMAGE` keyword.
     Image,
+    /// The `IN` keyword.
     In,
+    /// The `INCLUDE` keyword.
     Include,
+    /// The `INDEX` keyword.
     Index,
+    /// The `INDEXED_ONLY` keyword.
     IndexedOnly,
+    /// The `INDICES` keyword.
     Indices,
+    /// An integer literal token; also the `INTEGER` field-type keyword.
     Integer,
+    /// The `INTERIORS` keyword.
     Interiors,
+    /// The `INTO` keyword.
     Into,
+    /// The `IS` keyword.
     Is,
+    /// The `KEY` keyword.
     Key,
+    /// The `KEYS` keyword.
     Keys,
+    /// The `KEYWORD` keyword.
     Keyword,
+    /// The `LAT` keyword.
     Lat,
+    /// The `LIMIT` keyword.
     Limit,
+    /// The `LIN_DECAY` keyword.
     LinDecay,
+    /// The `LN` keyword.
     Ln,
+    /// The `LOG` keyword.
     Log,
+    /// The `LON` keyword.
     Lon,
+    /// The `LOOKUP` keyword.
     Lookup,
+    /// The `MAJORITY` keyword.
     Majority,
+    /// The `MANHATTAN` keyword.
     Manhattan,
+    /// The `MATCH` keyword.
     Match,
+    /// The `MATCH_ANY` keyword.
     MatchAny,
+    /// The `MAX` keyword.
     Max,
+    /// The `MAX_SELECTIVITY` keyword.
     MaxSelectivity,
+    /// The `MIDPOINT` keyword.
     Midpoint,
+    /// The `MIN` keyword.
     Min,
+    /// The `MMR` keyword.
     Mmr,
+    /// The `MODEL` keyword.
     Model,
+    /// The `MULTI` keyword.
     Multi,
+    /// The `MULTIVECTOR` keyword.
     Multivector,
+    /// The `NAIVE` keyword.
     Naive,
+    /// The `NEAREST` keyword.
     Nearest,
+    /// The `NEGATIVE` keyword.
     Negative,
+    /// The `NESTED` keyword.
     Nested,
+    /// The `NOT` keyword.
     Not,
+    /// The `NULL` keyword.
     Null,
+    /// The `OFFSET` keyword.
     Offset,
+    /// The `ON` keyword.
     On,
+    /// The `OPTIMIZERS` keyword.
     Optimizers,
+    /// The `OR` keyword.
     Or,
+    /// The `ORDER` keyword.
     Order,
+    /// The `OVERSAMPLING` keyword.
     Oversampling,
+    /// The `PARAMS` keyword.
     Params,
+    /// The `PAYLOAD` keyword.
     Payload,
+    /// The `PHRASE` keyword.
     Phrase,
+    /// The `POINT` keyword.
     Point,
+    /// The `POINTS` keyword.
     Points,
+    /// The `POSITIVE` keyword.
     Positive,
+    /// The `POW` keyword.
     Pow,
+    /// The `PREFETCH` keyword.
     Prefetch,
+    /// The `PREFIX` keyword.
     Prefix,
+    /// The `QUANTIZATION` keyword.
     Quantization,
+    /// The `QUERY` keyword.
     Query,
+    /// The `QUOTA` keyword.
     Quota,
+    /// The `QUOTAS` keyword.
     Quotas,
+    /// The `QUORUM` keyword.
     Quorum,
+    /// The `RADIUS` keyword.
     Radius,
+    /// The `RANDOM` keyword.
     Random,
+    /// The `RECOMMEND` keyword.
     Recommend,
+    /// The `RELEVANCE` keyword.
     Relevance,
+    /// The `RERANK` keyword.
     Rerank,
+    /// The `RESCORE` keyword.
     Rescore,
+    /// The `RRF` keyword.
     Rrf,
+    /// The `RRF_K` keyword.
     RrfK,
+    /// The `RRF_WEIGHTS` keyword.
     RrfWeights,
+    /// The `SAMPLE` keyword.
     Sample,
+    /// The `SCALE` keyword.
     Scale,
+    /// The `SCORE` keyword.
     Score,
+    /// The `SCROLL` keyword.
     Scroll,
+    /// The `SET` keyword.
     Set,
+    /// The `SHARD` keyword.
     Shard,
+    /// The `SHOW` keyword.
     Show,
+    /// The `SIZE` keyword.
     Size,
+    /// The `SLICE` keyword.
     Slice,
+    /// The `SPARSE` keyword.
     Sparse,
+    /// The `SQRT` keyword.
     Sqrt,
+    /// The `STRATEGY` keyword.
     Strategy,
+    /// The `SUM_SCORES` keyword.
     SumScores,
+    /// The `TARGET` keyword.
     Target,
+    /// The `TEXT` keyword.
     Text,
+    /// The `THEN` keyword.
     Then,
+    /// The `THRESHOLD` keyword.
     Threshold,
+    /// The `TIMEOUT` keyword.
     Timeout,
+    /// The `TOP_LEFT` keyword.
     TopLeft,
+    /// The `TRUE` keyword.
     True,
+    /// The `TYPE` keyword.
     Type,
+    /// The `UPDATE` keyword.
     Update,
+    /// The `UPSERT` keyword.
     Upsert,
+    /// The `USING` keyword.
     Using,
+    /// The `UUID` keyword.
     Uuid,
+    /// The `VALUES` keyword.
     Values,
+    /// The `VALUES_COUNT` keyword.
     ValuesCount,
+    /// The `VECTOR` keyword.
     Vector,
+    /// The `WAIT` keyword.
     Wait,
+    /// The `WHEN` keyword.
     When,
+    /// The `WHERE` keyword.
     Where,
+    /// The `WITH` keyword.
     With,
+    /// A `*` token (wildcard or multiplication).
     Star,
+    /// An identifier token (field, collection, or parameter name).
     Identifier,
+    /// A string literal token (quoted, raw, backtick, or triple-quoted).
     String,
+    /// A `{` token.
     Lbrace,
+    /// A `}` token.
     Rbrace,
+    /// A `[` token.
     Lbracket,
+    /// A `]` token.
     Rbracket,
+    /// A `(` token.
     Lparen,
+    /// A `)` token.
     Rparen,
+    /// A `:` token.
     Colon,
+    /// A `,` token.
     Comma,
+    /// An `=` token.
     Equals,
+    /// A `!=` token.
     NotEquals,
+    /// A `>` token.
     Gt,
+    /// A `>=` token.
     Gte,
+    /// A `<` token.
     Lt,
+    /// A `<=` token.
     Lte,
+    /// A `+` token.
     Plus,
+    /// A `-` token.
     Minus,
+    /// A `/` token.
     Slash,
+    /// A `;` token.
     Semicolon,
+    /// The end-of-input token.
     Eof,
 }
 
@@ -423,6 +621,7 @@ gen_as_str! {
 include!("keywords.generated.rs");
 
 impl TokenKind {
+    /// Returns true for every kind except string, punctuation, and end-of-input tokens.
     pub fn is_keyword_or_identifier(&self) -> bool {
         !matches!(
             self,
@@ -456,17 +655,22 @@ impl fmt::Display for TokenKind {
     }
 }
 
+/// A lexed token: its kind, source text, and byte-offset span.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct Token<'a> {
+    /// The token kind.
     pub kind: TokenKind,
+    /// The raw source text of the token.
     pub text: &'a str,
+    /// The byte-offset span of the token in the source input.
     pub span: Span,
     #[cfg_attr(feature = "serde", serde(skip))]
     pub(crate) pos: usize,
 }
 
 impl<'a> Token<'a> {
+    /// Creates a token from a kind, source text, and span.
     pub fn new(kind: TokenKind, text: &'a str, span: Span) -> Self {
         Token {
             kind,
@@ -476,6 +680,7 @@ impl<'a> Token<'a> {
         }
     }
 
+    /// Creates the end-of-input token at the given byte offset.
     pub fn eof(position: usize) -> Self {
         Token {
             kind: TokenKind::Eof,
@@ -485,6 +690,7 @@ impl<'a> Token<'a> {
         }
     }
 
+    /// Returns true when this token can stand in for a keyword or identifier.
     pub fn is_keyword_or_identifier(&self) -> bool {
         match self.kind {
             TokenKind::String
@@ -523,6 +729,7 @@ impl<'a> fmt::Display for Token<'a> {
     }
 }
 
+/// Resolves a word to its keyword token kind, matching ASCII case-insensitively.
 pub fn lookup_keyword(s: &str) -> Option<TokenKind> {
     let bytes = s.as_bytes();
     let len = bytes.len();
