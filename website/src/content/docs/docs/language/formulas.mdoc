@@ -16,17 +16,9 @@ predictable instead of leaving their behavior implicit.
 
 {% qqlExample title="Blend relevance and citation count" %}
 ```sql
-WITH candidates AS (
-  QUERY TEXT 'distributed systems'
-  USING dense
-  LIMIT 100
-)
-QUERY FORMULA
-  $score * 0.8 + LOG(citation_count + 1) * 0.2
-DEFAULTS (
-  score = 0.0,
-  citation_count = 0
-)
+WITH
+  candidates AS (QUERY 'distributed systems' USING dense LIMIT 100)
+QUERY FORMULA $score * 0.8 + LOG(citation_count + 1.0) * 0.2 DEFAULTS (score = 0.0, citation_count = 0)
 FROM papers
 PREFETCH (candidates)
 LIMIT 10;
@@ -37,7 +29,9 @@ LIMIT 10;
 
 Decay functions take a payload field followed by named (`TARGET =`, `SCALE =`,
 `MIDPOINT =`, `DECAY =`) or positional arguments. `scale` and
-`midpoint`/`decay` are numeric constants.
+`midpoint`/`decay` are numeric constants. `TARGET` can be a numeric constant
+or an ISO 8601 datetime string (e.g. `TARGET = "2026-01-01T00:00:00Z"`). When `TARGET`
+is a datetime string, the payload field automatically infers `datetime_key`.
 
 | Function | Choose it when |
 |---|---|
@@ -47,15 +41,7 @@ Decay functions take a payload field followed by named (`TARGET =`, `SCALE =`,
 
 {% qqlExample title="Freshness and popularity signals" %}
 ```sql
-QUERY FORMULA
-  $score
-  + EXP_DECAY(age_days, TARGET = 0, SCALE = 30, MIDPOINT = 0.5)
-  + GAUSS_DECAY(popularity, TARGET = 100, SCALE = 25)
-DEFAULTS (
-  score = 0.0,
-  age_days = 365,
-  popularity = 0
-)
+QUERY FORMULA $score + EXP_DECAY(age_days, TARGET = 0.0, SCALE = 30.0, MIDPOINT = 0.5) + GAUSS_DECAY(popularity, TARGET = 100.0, SCALE = 25.0) DEFAULTS (score = 0.0, age_days = 365, popularity = 0)
 FROM articles
 LIMIT 10;
 ```
@@ -68,13 +54,29 @@ candidate score when no `DEFAULTS` entry overrides it.
 
 | Function | Signature |
 |---|---|
-| `ABS`, `SQRT`, `LOG`, `LN`, `EXP` | `NAME(expr)` |
+| `ABS`, `SQRT`, `LOG`, `LN`, `EXP`, `ACOSH` | `NAME(expr)` |
 | `POW` | `POW(base, exponent)` |
+| `MAX` / `MIN` | `MAX(expr, expr, …)` — largest/smallest of n ≥ 1 operands |
 | `GEO_DISTANCE` | `GEO_DISTANCE(lat, lon, field)` or `GEO_DISTANCE({lat: ..., lon: ...}, field)` |
 | `MATCH` / `MATCH_ANY` | `MATCH(field, value)` or `MATCH_ANY(field, list)` |
 | `EXP_DECAY`, `GAUSS_DECAY`, `LIN_DECAY` | `NAME(field, TARGET = n, SCALE = n, ...)` or positional |
 | `datetime` | `datetime('2026-01-01')` — literal timestamp |
 | `datetime_key` | `datetime_key('published_at')` — payload timestamp field |
+
+## Clamp and shape scores
+
+`MAX` / `MIN` fold any number of operands (at least one), and `ACOSH` maps
+scores into a strictly positive range — together they give formula ranking
+hard bounds without `CASE` boilerplate:
+
+{% qqlExample title="Clamp a boosted score and shape with ACOSH" %}
+```sql
+QUERY FORMULA MAX(MIN($score * 2.0, 10.0), 0.0) + ACOSH(popularity + 1.0)
+  DEFAULTS (score = 0.0, popularity = 0)
+FROM papers
+LIMIT 10;
+```
+{% /qqlExample %}
 
 ## Precedence and division defaults
 
@@ -84,11 +86,9 @@ an explicit by-zero default with `[DEFAULT = number]`:
 
 {% qqlExample title="Division with a by-zero default" %}
 ```sql
-WITH candidates AS (
-  QUERY TEXT 'distributed systems' USING dense LIMIT 10
-)
-QUERY FORMULA $score / (views + 1) [DEFAULT = 0]
-DEFAULTS (score = 0.0, views = 0)
+WITH
+  candidates AS (QUERY 'distributed systems' USING dense LIMIT 10)
+QUERY FORMULA $score / (views + 1.0) [DEFAULT = 0.0] DEFAULTS (score = 0.0, views = 0)
 FROM docs
 PREFETCH (candidates)
 LIMIT 10;
@@ -102,12 +102,7 @@ missing or non-matching value remains easy to audit.
 
 {% qqlExample title="Boost a premium tier" %}
 ```sql
-QUERY FORMULA
-  CASE WHEN tier MATCH ANY ('premium')
-    THEN $score * 1.5
-    ELSE $score
-  END
-DEFAULTS (score = 0.0)
+QUERY FORMULA CASE WHEN tier MATCH ANY ('premium') THEN $score * 1.5 ELSE $score END DEFAULTS (score = 0.0)
 FROM docs
 LIMIT 10;
 ```

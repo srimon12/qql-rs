@@ -19,7 +19,7 @@ To store token-level multi-vectors in Qdrant, specify `MULTIVECTOR` with dimensi
 ```sql
 CREATE COLLECTION kb_articles (
   dense VECTOR(384, COSINE),
-  colbert VECTOR(128, COSINE) WITH MULTIVECTOR (comparator = 'max_sim') WITH HNSW (m = 0)
+  colbert VECTOR(128, COSINE) WITH HNSW (m = 0) WITH MULTIVECTOR (comparator = 'max_sim')
 );
 ```
 {% /qqlExample %}
@@ -32,11 +32,7 @@ When inserting documents, pass token matrices directly or invoke a supported mul
 
 {% qqlExample title="Upserting with multi-vector model" %}
 ```sql
-UPSERT INTO kb_articles VALUES {
-  id: 101,
-  text: 'QQL supports native multi-vector late interaction ranking',
-  category: 'search'
-} USING MULTIVECTOR MODEL 'colbert-v2';
+UPSERT INTO kb_articles VALUES {id: 101, text: 'QQL supports native multi-vector late interaction ranking', category: 'search'} USING MULTIVECTOR MODEL 'colbert-v2';
 ```
 {% /qqlExample %}
 
@@ -48,7 +44,7 @@ You can search multi-vector spaces directly using `USING ... AS MULTI`:
 
 {% qqlExample title="Direct ColBERT token-level search" %}
 ```sql
-QUERY TEXT 'late interaction vector retrieval'
+QUERY 'late interaction vector retrieval'
 FROM kb_articles
 USING colbert AS MULTI
 WHERE category = 'search'
@@ -66,11 +62,8 @@ In high-scale retrieval systems, running late-interaction over millions of point
 
 {% qqlExample title="Two-stage prefetch and ColBERT re-ranking" %}
 ```sql
-WITH candidates AS (
-  QUERY TEXT 'late interaction vector retrieval'
-  USING dense
-  LIMIT 100
-)
+WITH
+  candidates AS (QUERY 'late interaction vector retrieval' USING dense LIMIT 100)
 QUERY RERANK TEXT 'late interaction vector retrieval' MODEL 'colbert-v2'
 FROM kb_articles
 USING colbert AS DENSE

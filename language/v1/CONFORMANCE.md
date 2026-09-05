@@ -64,6 +64,15 @@ JSON object key order is ignored, array order is preserved, and floating
 values are rounded to six decimal places. Snapshots are generated artifacts;
 do not edit them manually.
 
+### Canonical format
+
+Alongside each AST snapshot, `generate` writes
+`fixtures/formatted/<name>.txt`: the exact output of `fmt::format` for the
+fixture. This is the canonical-text contract for every formatter
+implementation. The native `check` verifies it, and the bundled editor WASM
+must reproduce it byte-for-byte (`editors/vscode/test/format.test.js`), so a
+stale WASM build fails on the first fixture that exercises a changed surface.
+
 ```bash
 cargo run -p qql-conformance -- generate language/v1
 ```

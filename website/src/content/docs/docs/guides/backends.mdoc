@@ -44,7 +44,8 @@ lists exactly which statements and features the edge backend supports.
 
 {% qqlExample title="Transport-neutral query" %}
 ```sql
-QUERY TEXT 'local first retrieval' FROM notes
+QUERY 'local first retrieval'
+FROM notes
 USING dense
 WHERE workspace = 'personal'
 LIMIT 10;

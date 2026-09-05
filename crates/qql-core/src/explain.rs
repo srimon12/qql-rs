@@ -11,6 +11,7 @@ use crate::parser::Parser;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::fmt::Write;
 
 /// Parse `source` and return a structured execution plan.
 pub fn explain(source: &str) -> Result<String, QqlError> {
@@ -35,7 +36,7 @@ pub fn explain_nodes(statements: &[Stmt]) -> String {
         if i > 0 {
             output.push('\n');
         }
-        output.push_str(&format!("── Statement {} ──\n", i + 1));
+        let _ = writeln!(output, "── Statement {} ──", i + 1);
         output.push_str(&explain_node(stmt));
     }
     output
@@ -47,24 +48,24 @@ pub fn explain_node(statement: &Stmt) -> String {
     match statement {
         Stmt::Query(query) => {
             let intent = query_intent(&query.expression);
-            output.push_str(&format!("Statement: QUERY [{}]\n", intent));
+            let _ = writeln!(output, "Statement: QUERY [{}]", intent);
 
             let col = match &query.collection {
                 QueryCollection::Explicit(collection) => collection.as_str(),
                 QueryCollection::Inherited => "inherited",
             };
-            output.push_str(&format!("├── Collection: {}\n", col));
+            let _ = writeln!(output, "├── Collection: {}", col);
 
             if let Some(target) = query_target_vector(&query.expression) {
-                output.push_str(&format!("├── Target Vector: {}\n", target));
+                let _ = writeln!(output, "├── Target Vector: {}", target);
             }
 
             if let Some(shard) = &query.shard_key {
-                output.push_str(&format!("├── Shard Key: '{}'\n", shard));
+                let _ = writeln!(output, "├── Shard Key: '{}'", shard);
             }
 
             if !query.ctes.is_empty() {
-                output.push_str(&format!("├── CTEs ({}):\n", query.ctes.len()));
+                let _ = writeln!(output, "├── CTEs ({}):", query.ctes.len());
                 for (i, cte) in query.ctes.iter().enumerate() {
                     let is_last = i + 1 == query.ctes.len();
                     let prefix = if is_last {
@@ -72,18 +73,19 @@ pub fn explain_node(statement: &Stmt) -> String {
                     } else {
                         "│   ├──"
                     };
-                    output.push_str(&format!(
-                        "{} '{}': {}\n",
+                    let _ = writeln!(
+                        output,
+                        "{} '{}': {}",
                         prefix,
                         cte.name,
                         query_intent(&cte.query.expression)
-                    ));
+                    );
                 }
             }
 
             if let Some(prefetches) = query_prefetches(&query.expression) {
                 if !prefetches.is_empty() {
-                    output.push_str(&format!("├── Prefetches ({}):\n", prefetches.len()));
+                    let _ = writeln!(output, "├── Prefetches ({}):", prefetches.len());
                     for (i, pf) in prefetches.iter().enumerate() {
                         let is_last = i + 1 == prefetches.len();
                         let prefix = if is_last {
@@ -91,24 +93,25 @@ pub fn explain_node(statement: &Stmt) -> String {
                         } else {
                             "│   ├──"
                         };
-                        output.push_str(&format!("{} [{}] {}\n", prefix, i + 1, pf));
+                        let _ = writeln!(output, "{} [{}] {}", prefix, i + 1, pf);
                     }
                 }
             }
 
             if let Some(filter) = &query.filter {
-                output.push_str(&format!("├── Filter: {}\n", render_filter(filter)));
+                let _ = writeln!(output, "├── Filter: {}", render_filter(filter));
             }
 
             if let Some(params) = &query.params {
-                output.push_str(&format!(
-                    "├── Search Params: {}\n",
+                let _ = writeln!(
+                    output,
+                    "├── Search Params: {}",
                     render_search_params(params)
-                ));
+                );
             }
 
             if let Some(score) = query.score_threshold {
-                output.push_str(&format!("├── Score Threshold: {}\n", score));
+                let _ = writeln!(output, "├── Score Threshold: {}", score);
             }
 
             if let Some(group) = &query.group {
@@ -116,16 +119,16 @@ pub fn explain_node(statement: &Stmt) -> String {
                     .size
                     .map(|s| format!(" (size: {})", s))
                     .unwrap_or_default();
-                output.push_str(&format!("├── Group By: {}{}\n", group.field, size_str));
+                let _ = writeln!(output, "├── Group By: {}{}", group.field, size_str);
             }
 
             if let Some(payload) = &query.output.payload {
                 match payload {
                     PayloadSelector::Include(keys) => {
-                        output.push_str(&format!("├── Payload: INCLUDE ({})\n", keys.join(", ")));
+                        let _ = writeln!(output, "├── Payload: INCLUDE ({})", keys.join(", "));
                     }
                     PayloadSelector::Exclude(keys) => {
-                        output.push_str(&format!("├── Payload: EXCLUDE ({})\n", keys.join(", ")));
+                        let _ = writeln!(output, "├── Payload: EXCLUDE ({})", keys.join(", "));
                     }
                     PayloadSelector::All => {
                         output.push_str("├── Payload: ALL\n");
@@ -139,7 +142,7 @@ pub fn explain_node(statement: &Stmt) -> String {
             if let Some(vectors) = &query.output.vectors {
                 match vectors {
                     VectorSelector::Names(names) => {
-                        output.push_str(&format!("├── Vectors: ({})\n", names.join(", ")));
+                        let _ = writeln!(output, "├── Vectors: ({})", names.join(", "));
                     }
                     VectorSelector::All => {
                         output.push_str("├── Vectors: ALL\n");
@@ -156,34 +159,28 @@ pub fn explain_node(statement: &Stmt) -> String {
                 .map(|l| l.to_string())
                 .unwrap_or_else(|| "default".into());
             let offset = query.page.offset.unwrap_or(0);
-            output.push_str(&format!(
-                "└── Pagination: limit={}, offset={}\n",
-                limit, offset
-            ));
+            let _ = writeln!(output, "└── Pagination: limit={}, offset={}", limit, offset);
         }
         Stmt::Scroll(statement) => {
             output.push_str("Statement: SCROLL\n");
-            output.push_str(&format!("├── Collection: {}\n", statement.collection));
+            let _ = writeln!(output, "├── Collection: {}", statement.collection);
             if let Some(f) = &statement.filter {
-                output.push_str(&format!("├── Filter: {}\n", render_filter(f)));
+                let _ = writeln!(output, "├── Filter: {}", render_filter(f));
             }
             if let Some(shard) = &statement.shard_key {
-                output.push_str(&format!("├── Shard Key: '{}'\n", shard));
+                let _ = writeln!(output, "├── Shard Key: '{}'", shard);
             }
-            output.push_str(&format!("└── Limit: {}\n", statement.limit));
+            let _ = writeln!(output, "└── Limit: {}", statement.limit);
         }
         Stmt::Upsert(statement) => {
             output.push_str("Statement: UPSERT\n");
-            output.push_str(&format!("├── Collection: {}\n", statement.collection));
-            output.push_str(&format!("├── Points: {}\n", statement.points.len()));
+            let _ = writeln!(output, "├── Collection: {}", statement.collection);
+            let _ = writeln!(output, "├── Points: {}", statement.points.len());
             if let Some(shard) = &statement.shard_key {
-                output.push_str(&format!("├── Shard Key: '{}'\n", shard));
+                let _ = writeln!(output, "├── Shard Key: '{}'", shard);
             }
             if !statement.embed.is_empty() {
-                output.push_str(&format!(
-                    "└── Embed Directives: {}\n",
-                    statement.embed.len()
-                ));
+                let _ = writeln!(output, "└── Embed Directives: {}", statement.embed.len());
             } else {
                 output.push_str("└── Status: direct payload\n");
             }
@@ -195,31 +192,32 @@ pub fn explain_node(statement: &Stmt) -> String {
                 CollectionMode::Rerank => "rerank-oriented",
             };
             output.push_str("Statement: CREATE COLLECTION\n");
-            output.push_str(&format!("├── Collection: {}\n", statement.collection));
-            output.push_str(&format!("├── Mode: {}\n", mode));
-            output.push_str(&format!(
-                "└── Vectors: {} dense, {} sparse\n",
+            let _ = writeln!(output, "├── Collection: {}", statement.collection);
+            let _ = writeln!(output, "├── Mode: {}", mode);
+            let _ = writeln!(
+                output,
+                "└── Vectors: {} dense, {} sparse",
                 statement.vectors.len(),
                 statement.sparse_vectors.len()
-            ));
+            );
         }
         Stmt::CreateIndex(statement) => {
             output.push_str("Statement: CREATE INDEX\n");
-            output.push_str(&format!("├── Collection: {}\n", statement.collection));
-            output.push_str(&format!("└── Field: {}\n", statement.field));
+            let _ = writeln!(output, "├── Collection: {}", statement.collection);
+            let _ = writeln!(output, "└── Field: {}", statement.field);
         }
         Stmt::CreateShardKey(statement) => {
             output.push_str("Statement: CREATE SHARD KEY\n");
-            output.push_str(&format!("├── Collection: {}\n", statement.collection));
-            output.push_str(&format!("└── Shard: {}\n", statement.shard_key));
+            let _ = writeln!(output, "├── Collection: {}", statement.collection);
+            let _ = writeln!(output, "└── Shard: {}", statement.shard_key);
         }
         Stmt::DropShardKey(statement) => {
             output.push_str("Statement: DROP SHARD KEY\n");
-            output.push_str(&format!("├── Collection: {}\n", statement.collection));
-            output.push_str(&format!("└── Shard: {}\n", statement.shard_key));
+            let _ = writeln!(output, "├── Collection: {}", statement.collection);
+            let _ = writeln!(output, "└── Shard: {}", statement.shard_key);
         }
         Stmt::ShowShardKeys(collection) => {
-            output.push_str(&format!("Statement: SHOW SHARD KEYS [{}]\n", collection));
+            let _ = writeln!(output, "Statement: SHOW SHARD KEYS [{}]", collection);
         }
         Stmt::ShowQuotas => {
             output.push_str("Statement: SHOW QUOTAS\n");
@@ -227,13 +225,13 @@ pub fn explain_node(statement: &Stmt) -> String {
         Stmt::SetQuota(statement) => {
             output.push_str("Statement: SET QUOTA\n");
             for (key, value) in &statement.config {
-                output.push_str(&format!("  {} = {}\n", key, render_quota_value(value)));
+                let _ = writeln!(output, "  {} = {}", key, render_quota_value(value));
             }
         }
         Stmt::DropIndex(statement) => {
             output.push_str("Statement: DROP INDEX\n");
-            output.push_str(&format!("├── Collection: {}\n", statement.collection));
-            output.push_str(&format!("└── Field: {}\n", statement.field));
+            let _ = writeln!(output, "├── Collection: {}", statement.collection);
+            let _ = writeln!(output, "└── Field: {}", statement.field);
         }
         Stmt::Count(statement) => {
             output.push_str("Statement: COUNT\n");
@@ -241,68 +239,85 @@ pub fn explain_node(statement: &Stmt) -> String {
                 QueryCollection::Explicit(c) => c.as_str(),
                 QueryCollection::Inherited => "inherited",
             };
-            output.push_str(&format!("├── Collection: {}\n", col));
+            let _ = writeln!(output, "├── Collection: {}", col);
             if let Some(f) = &statement.filter {
-                output.push_str(&format!("├── Filter: {}\n", render_filter(f)));
+                let _ = writeln!(output, "├── Filter: {}", render_filter(f));
             }
-            output.push_str(&format!(
-                "└── Exact: {}\n",
-                statement.exact.unwrap_or(false)
-            ));
+            let _ = writeln!(output, "└── Exact: {}", statement.exact.unwrap_or(false));
+        }
+        Stmt::Facet(statement) => {
+            output.push_str("Statement: FACET\n");
+            let col = match &statement.collection {
+                QueryCollection::Explicit(c) => c.as_str(),
+                QueryCollection::Inherited => "inherited",
+            };
+            let _ = writeln!(output, "├── Key: {}", statement.key);
+            let _ = writeln!(output, "├── Collection: {}", col);
+            if let Some(f) = &statement.filter {
+                let _ = writeln!(output, "├── Filter: {}", render_filter(f));
+            }
+            if let Some(l) = statement.limit {
+                let _ = writeln!(output, "├── Limit: {}", l);
+            }
+            let _ = writeln!(output, "└── Exact: {}", statement.exact.unwrap_or(false));
         }
         Stmt::AlterCollection(statement) => {
-            output.push_str(&format!(
-                "Statement: ALTER COLLECTION [{}]\n",
+            let _ = writeln!(
+                output,
+                "Statement: ALTER COLLECTION [{}]",
                 statement.collection
-            ));
+            );
         }
         Stmt::DropCollection(statement) => {
-            output.push_str(&format!(
-                "Statement: DROP COLLECTION [{}]\n",
+            let _ = writeln!(
+                output,
+                "Statement: DROP COLLECTION [{}]",
                 statement.collection
-            ));
+            );
         }
         Stmt::ShowCollections => {
             output.push_str("Statement: SHOW COLLECTIONS\n");
         }
         Stmt::ShowCollection(collection) => {
-            output.push_str(&format!("Statement: SHOW COLLECTION [{}]\n", collection));
+            let _ = writeln!(output, "Statement: SHOW COLLECTION [{}]", collection);
         }
         Stmt::Delete(statement) => {
-            output.push_str(&format!(
-                "Statement: DELETE FROM {}\n",
-                statement.collection
-            ));
+            let _ = writeln!(output, "Statement: DELETE FROM {}", statement.collection);
         }
         Stmt::ClearPayload(statement) => {
-            output.push_str(&format!(
-                "Statement: CLEAR PAYLOAD ON {}\n",
+            let _ = writeln!(
+                output,
+                "Statement: CLEAR PAYLOAD ON {}",
                 statement.collection
-            ));
+            );
         }
         Stmt::DeletePayload(statement) => {
-            output.push_str(&format!(
-                "Statement: DELETE PAYLOAD ({:?}) ON {}\n",
+            let _ = writeln!(
+                output,
+                "Statement: DELETE PAYLOAD ({:?}) ON {}",
                 statement.keys, statement.collection
-            ));
+            );
         }
         Stmt::DeleteVector(statement) => {
-            output.push_str(&format!(
-                "Statement: DELETE VECTOR ({:?}) ON {}\n",
+            let _ = writeln!(
+                output,
+                "Statement: DELETE VECTOR ({:?}) ON {}",
                 statement.vector_names, statement.collection
-            ));
+            );
         }
         Stmt::UpdateVector(statement) => {
-            output.push_str(&format!(
-                "Statement: UPDATE VECTOR ON {}\n",
+            let _ = writeln!(
+                output,
+                "Statement: UPDATE VECTOR ON {}",
                 statement.collection
-            ));
+            );
         }
         Stmt::UpdatePayload(statement) => {
-            output.push_str(&format!(
-                "Statement: UPDATE PAYLOAD ON {}\n",
+            let _ = writeln!(
+                output,
+                "Statement: UPDATE PAYLOAD ON {}",
                 statement.collection
-            ));
+            );
         }
     }
     output

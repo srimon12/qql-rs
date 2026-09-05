@@ -1,10 +1,10 @@
 ---
 interface Props {
-  heading: string;
-  sub: string;
-  installs: readonly { name: string; cmd: string; href: string }[];
-  footHref?: string;
-  footLabel?: string;
+	heading: string;
+	sub: string;
+	installs: readonly { name: string; cmd: string; href: string }[];
+	footHref?: string;
+	footLabel?: string;
 }
 
 const { heading, sub, installs, footHref, footLabel } = Astro.props;

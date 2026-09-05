@@ -3,6 +3,7 @@ use crate::ast::{CollectionConfig, OptimizationThreads, Value};
 use crate::error::QqlError;
 use alloc::string::String;
 
+/// Looks up a config entry by key, comparing ASCII case-insensitively.
 pub fn config_value<'a>(config: &'a [(String, Value)], key: &str) -> Option<&'a Value> {
     for (k, v) in config {
         if ascii_equal_lower(k, key) {
@@ -12,10 +13,12 @@ pub fn config_value<'a>(config: &'a [(String, Value)], key: &str) -> Option<&'a 
     None
 }
 
+/// Returns true when the config contains the given key (case-insensitive).
 pub fn config_has_key(config: &[(String, Value)], key: &str) -> bool {
     config_value(config, key).is_some()
 }
 
+/// Reads a boolean config value, returning `None` when absent or not a bool.
 pub fn config_bool(config: &[(String, Value)], key: &str) -> Option<bool> {
     match config_value(config, key)? {
         Value::Bool(b) => Some(*b),
@@ -36,6 +39,7 @@ fn validation_err(
     )
 }
 
+/// Reads a positive integer config value; `None` when absent, error when invalid.
 pub fn config_positive_u64(
     config: &[(String, Value)],
     key: &str,
@@ -52,6 +56,7 @@ pub fn config_positive_u64(
     }
 }
 
+/// Reads a non-negative integer config value; `None` when absent, error when invalid.
 pub fn config_non_negative_u64(
     config: &[(String, Value)],
     key: &str,
@@ -68,6 +73,7 @@ pub fn config_non_negative_u64(
     }
 }
 
+/// Reads a numeric config value, or `None` when absent or outside `[min, max]`.
 pub fn config_float_range(
     config: &[(String, Value)],
     key: &str,
@@ -94,6 +100,7 @@ pub fn config_float_range(
     }
 }
 
+/// Reads a thread count as a positive integer or the string `auto`.
 pub fn config_max_optimization_threads(
     config: &[(String, Value)],
     key: &str,
@@ -119,6 +126,7 @@ pub fn is_integer_val(value: &Value) -> bool {
     }
 }
 
+/// Type-checks one HNSW config option (`m`, `ef_construct`, `on_disk`, `memory`, …).
 pub fn validate_hnsw_value(key: &str, value: &Value, pos: usize) -> Result<(), QqlError> {
     let lower = key.to_ascii_lowercase();
     match lower.as_str() {
@@ -142,6 +150,7 @@ pub fn validate_hnsw_value(key: &str, value: &Value, pos: usize) -> Result<(), Q
     Ok(())
 }
 
+/// Type-checks one vectors config option (`on_disk`, `memory`, `datatype`).
 pub fn validate_vectors_value(key: &str, value: &Value, pos: usize) -> Result<(), QqlError> {
     let lower = key.to_ascii_lowercase();
     match lower.as_str() {
@@ -197,6 +206,7 @@ fn validate_memory_value(
     }
 }
 
+/// Type-checks one optimizers config option (`deleted_threshold`, `memmap_threshold`, …).
 pub fn validate_optimizers_value(key: &str, value: &Value, pos: usize) -> Result<(), QqlError> {
     let lower = key.to_ascii_lowercase();
     match lower.as_str() {
@@ -240,6 +250,7 @@ pub fn validate_optimizers_value(key: &str, value: &Value, pos: usize) -> Result
     Ok(())
 }
 
+/// Type-checks one collection `PARAMS` option (replication, sharding, memory, …).
 pub fn validate_params_value(key: &str, value: &Value, pos: usize) -> Result<(), QqlError> {
     let lower = key.to_ascii_lowercase();
     match lower.as_str() {
@@ -304,6 +315,7 @@ pub fn validate_params_value(key: &str, value: &Value, pos: usize) -> Result<(),
     Ok(())
 }
 
+/// Merges new collection config clauses into `current`, erroring on duplicates.
 pub fn merge_collection_config(
     current: &mut CollectionConfig,
     new: CollectionConfig,
@@ -357,6 +369,7 @@ pub fn merge_collection_config(
     Ok(())
 }
 
+/// Checks that `deleted_threshold` is a number between 0.0 and 1.0.
 pub fn check_deleted_threshold(value: &Value, pos: usize) -> Result<(), QqlError> {
     match value {
         Value::Int(n) => {
@@ -379,6 +392,7 @@ pub fn check_deleted_threshold(value: &Value, pos: usize) -> Result<(), QqlError
     Ok(())
 }
 
+/// Type-checks CREATE INDEX options, erroring on unknown keys or bad value types.
 pub fn validate_index_options(options: &[(String, Value)], pos: usize) -> Result<(), QqlError> {
     for (k, v) in options {
         let lower = k.to_ascii_lowercase();

@@ -94,8 +94,9 @@ def main():
     main = eval_data["main"]
     related = eval_data["related"]
     print(f"  Rows: {json.loads((GENERATED / 'eval.json').read_text())['row_count']}")
-    print(f"  Main Q: {main['question'][:80]}...")
-    print(f"  Related Q: {related['question'][:80]}...")
+    # Log opaque IDs + routing labels only; question text stays out of logs.
+    print(f"  Main id: {main['id']} specialty={main['specialty']}")
+    print(f"  Related id: {related['id']} specialty={related['specialty']}")
 
     # ── schema ──
     step("Schema")
@@ -187,17 +188,18 @@ def main():
     step("Mutations")
     MID = main["id"]
     run("Update payload by ID", f"UPDATE {COLLECTION} SET PAYLOAD = {{'case_status': 'reviewed', 'note': 'demo-update'}} WHERE id = {MID}")
-    run("Verify update",        f"QUERY POINTS ({MID}) FROM {COLLECTION} WITH PAYLOAD true")
+    run("Verify update",        f"QUERY POINTS ({MID}) FROM {COLLECTION}")
     run("Revert update",        f"UPDATE {COLLECTION} SET PAYLOAD = {{'case_status': '{STATUS}'}} WHERE id = {MID}")
 
     # ═══════════════════════════════════════════════════════════════
     #  POINT ACCESS
     # ═══════════════════════════════════════════════════════════════
     step("Point Access")
-    run("Point lookup",         f"QUERY POINTS ({MID}, {RID}) FROM {COLLECTION} WITH PAYLOAD true")
+    run("Point lookup",         f"QUERY POINTS ({MID}, {RID}) FROM {COLLECTION}")
     run("Scroll all",           f"SCROLL FROM {COLLECTION} LIMIT 5")
     run("Scroll filtered",      f"SCROLL FROM {COLLECTION} WHERE case_priority = '{PRI}' LIMIT 5")
     run("ORDER BY",             f"QUERY ORDER BY id DESC FROM {COLLECTION} LIMIT 5")
+    run("FACET breakdown",      f"FACET case_status FROM {COLLECTION} LIMIT 5")
 
     # ═══════════════════════════════════════════════════════════════
     #  OPERATIONS

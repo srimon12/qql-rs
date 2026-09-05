@@ -1,0 +1,28 @@
+-- query-idf-tenant.qql — Per-tenant sparse IDF
+-- Tests: global IDF vs tenant-scoped IDF; isolation, routing, and scoring stay separate
+
+-- Collection-wide BM25 rarity (no tenant corpus)
+QUERY 'supply chain'
+FROM sec10k
+USING lexical_v2 AS SPARSE
+PARAMS (idf = 'global')
+LIMIT 10;
+
+-- Isolation is WHERE. Routing is SHARD. Scoring corpus is PARAMS idf.
+-- All three use QQL; none of them is a host inject.
+QUERY 'supply chain'
+FROM sec10k
+USING lexical_v2 AS SPARSE
+WHERE tenant_id = 'acme'
+SHARD 'acme'
+PARAMS (idf = WHERE tenant_id = 'acme')
+LIMIT 10;
+
+-- IDF corpus can be a compound filter
+QUERY 'supply chain'
+FROM sec10k
+USING lexical_v2 AS SPARSE
+WHERE tenant_id = 'acme' AND status = 'active'
+SHARD 'acme'
+PARAMS (idf = WHERE tenant_id = 'acme' AND status = 'active')
+LIMIT 10;

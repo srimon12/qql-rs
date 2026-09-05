@@ -56,7 +56,7 @@ console.log(version, isValid("SHOW COLLECTIONS"), compileQuery("SHOW COLLECTIONS
 |--------|------|
 | `Client({ url, apiKey?, useGrpc?, routeAffinity?, embedder? })` | Live execute |
 | `HttpEmbedder({ endpoint, model, dimension, apiKey?, multi*?, image*?, rerank*? })` | Embeddings (dense, multi/ColBERT, image/CLIP, rerank) |
-| `parse` / `parseJson` / `isValid` / `tokenize` | Frontend |
+| `parse` / `parseJson` / `isValid` / `tokenize` | Frontend — `isValid` is the full gate (parse **+ plan**), matching execution and the language conformance suite |
 | `injectFilter` / `stmt.injectFilter` | Isolation |
 | `stmt.shardKey` | Same as QQL `SHARD '…'` (no `injectShardKey`) |
 | `compileQuery` / `explain` / `explainStmt` | Offline |

@@ -1,0 +1,7 @@
+-- delete-payload.qql — DELETE PAYLOAD statements
+
+-- Delete single payload key by filter
+DELETE PAYLOAD draft FROM docs WHERE status = 'archived';
+
+-- Delete multiple payload keys with complex filter and shard key
+DELETE PAYLOAD draft, temp_token FROM docs WHERE status = 'deleted' AND created_year < 2020 SHARD 'acme';

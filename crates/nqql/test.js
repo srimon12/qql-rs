@@ -27,6 +27,16 @@ const tokens = nqql.tokenize("QUERY 'test' FROM docs");
 assert(Array.isArray(tokens));
 assert(tokens.length > 0);
 assert.strictEqual(tokens[0].text, "QUERY");
+assert.strictEqual(tokens[0].pos, 0);
+assert.strictEqual(tokens[0].end, 5);
+assert.strictEqual(tokens[0].len, 5);
+
+// Test Stmt compileRoute
+const stmtRoute = r0.compileRoute();
+assert.strictEqual(stmtRoute.stmt_type, "query");
+assert.strictEqual(stmtRoute.method, "POST");
+assert.strictEqual(stmtRoute.path, "/collections/docs/points/query");
+assert(stmtRoute.payload && typeof stmtRoute.payload === "object");
 
 // Test route compilation contract
 const route = nqql.compileQuery(query);
@@ -279,6 +289,7 @@ async function testAsyncErrors() {
   assert.strictEqual(report.succeeded, 0);
   assert.strictEqual(report.failed, 1);
   assert.strictEqual(report.results[0].operation, "PARSE");
+  await client.close();
 }
 
 testAsyncErrors()

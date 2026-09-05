@@ -19,8 +19,8 @@ Hybrid search requires querying both a dense semantic index and a sparse lexical
 
 {% qqlExample title="Declarative hybrid search with RRF" %}
 ```sql
-QUERY TEXT 'distributed consensus raft' FROM docs
-USING HYBRID DENSE dense_vec SPARSE bm25_vec FUSION RRF
+QUERY HYBRID TEXT 'distributed consensus raft' DENSE dense_vec SPARSE bm25_vec FUSION RRF
+FROM docs
 WHERE status = 'active'
 LIMIT 10;
 ```
@@ -33,7 +33,7 @@ POST /collections/docs/points/query
 {
   "prefetch": [
     {
-      "query": { "nearest": "dense_vec" },
+      "query": { "nearest": [[-0.8341, 0.3246, 0.8082, 0.5827, -0.1808, 0.4981, 0.5986, 0.2889, -0.6872, -0.0107, -0.4604, -0.8198, -0.0454, -0.6500, 0.8162, 0.0493, -0.5883, -0.4003, -0.4453, -0.5332, -0.4828, -0.2249, 0.2747, -0.6625, 0.4591, 0.4512, 0.7914, -0.0895, -0.1859, 0.8409, -0.6285, -0.3860, 0.3781, 0.8227, 0.3000, -0.4750, -0.2491, -0.7190, -0.1459, 0.1496, -0.2711, -0.5102, -0.1721, 0.1021, 0.2094, -0.1980, -0.4571, 0.4044, 0.3838, -0.2662, -0.2421, -0.1941, -0.6848, 0.3947, 0.4648, -0.7211, -0.0207, 0.7768, -0.2160, -0.2854, -0.5785, -0.2012, -0.5811, -0.0887, 0.8375, -0.1985, 0.4698, -0.8024, -0.6266, -0.4051, -0.7371, 0.7423, 0.4752, 0.4108, 0.8600, 0.8091, 0.0810, 0.1070, -0.8834, 0.8925, -0.3868, 0.4119, -0.6004, -0.2988, -0.5928, 0.0096, -0.4165, -0.5491, 0.1028, 0.3863, 0.7679, -0.1669, 0.1026, -0.1855, 0.3284, 0.3623, 0.8886, 0.4558, -0.4087, 0.2459, 0.5371, -0.7318, 0.5787, 0.8731, -0.3596, 0.0157, -0.8949, 0.7609, -0.0526, -0.4481, -0.5893, 0.8038, 0.0857, -0.1079, 0.2876, -0.6757, -0.3795, -0.3590, -0.3351, -0.8739, 0.6963, -0.5127, 0.5271, -0.7124, 0.4026, -0.1012, 0.8255, 0.1209, -0.6608, 0.1335, 0.6894, -0.7431, 0.1662, 0.3492, 0.0026, 0.6724, -0.5163, 0.1192, -0.6100, 0.3680, -0.6964, 0.0909, 0.0911, -0.7368, 0.3913, 0.2379, 0.1775, 0.1234, -0.4802, -0.6878, -0.7407, -0.1625, -0.2609, -0.4566, -0.3065, 0.6959, 0.1161, 0.5673, 0.6054, 0.2438, 0.3655, -0.3528, -0.0855, 0.1712, 0.4866, 0.7373, 0.6785, -0.5811, 0.6893, -0.0188, 0.0782, 0.7779, 0.7505, -0.3548, -0.0727, 0.8252, 0.6773, -0.3570, -0.2251, -0.8019, -0.0521, 0.6419, 0.7384, -0.1708, 0.8343, 0.1367, -0.2210, 0.0294, -0.8128, 0.8492, 0.3767, -0.5884, -0.4776, -0.3096, 0.1900, -0.7208, 0.6574, 0.7838, 0.5785, -0.5399, 0.7687, 0.0258, -0.4163, -0.6368, -0.3419, -0.0798, 0.8841, -0.1439, -0.7492, 0.1326, 0.2094, -0.4157, 0.6982, -0.2057, -0.8270, 0.6790, -0.6730, 0.2420, -0.1563, 0.7184, 0.0630, -0.6098, 0.5560, -0.5983, -0.6118, 0.6540, 0.0345, -0.2249, 0.8647, 0.2693, 0.0244, -0.2381, 0.8427, 0.3350, 0.4102, -0.0237, 0.4774, -0.2903, -0.2092, -0.1882, -0.6338, 0.4168, -0.2032, -0.8167, -0.0136, 0.6793, 0.6732, -0.3174, -0.3135, -0.3831, 0.6144, -0.6832, -0.2752, -0.4907, -0.7504, 0.0081, -0.4762, -0.3763, -0.3290, -0.5452, -0.4550, -0.4135, 0.7944, -0.3652, -0.0298, 0.6177, 0.8923, 0.6495, -0.6935, -0.3569, 0.4642, 0.8011, -0.8194, 0.6292, -0.2940, -0.6487, -0.7162, 0.6119, -0.8726, -0.7868, 0.7347, 0.4605, -0.6201, -0.7322, -0.7746, -0.0443, -0.5352, -0.7299, 0.2014, -0.0395, -0.3664, 0.7825, 0.8095, -0.3525, 0.7014, 0.5005, 0.6860, -0.7118, -0.2468, -0.2400, 0.8205, 0.8799, -0.3923, -0.0674, -0.6379, -0.1494, 0.3477, -0.6358, -0.5239, 0.2454, -0.2236, 0.3264, 0.8809, -0.2056, -0.1808, -0.1165, 0.2244, -0.0888, -0.0678, 0.8932, 0.0652, 0.3398, -0.5071, 0.3285, -0.3375, 0.8246, -0.5066, -0.5879, -0.1779, -0.7927, -0.8859, 0.2667, -0.8810, -0.7357, -0.4215, -0.3594, 0.7692, 0.7786, 0.8194, 0.8126, -0.1926, 0.5191, -0.5197, -0.7328, -0.8382, 0.1507, -0.7349, 0.6664, 0.6189, 0.5664, 0.5433, 0.0061, -0.1789, -0.4579, 0.3197, 0.7012, 0.5952, 0.4326, 0.6730, -0.7355, 0.0795, 0.7076, 0.6974, -0.4046, -0.3944, 0.6549, 0.3090, -0.2132, 0.1870, -0.3696, 0.7735, 0.7250, 0.1846, 0.4912, 0.7893, -0.4209, -0.7256, 0.7370, -0.1497, 0.5222, -0.7619, -0.0348, 0.2766, -0.0836]] },
       "using": "dense_vec",
       "filter": {
         "must": [
@@ -43,7 +43,7 @@ POST /collections/docs/points/query
       "limit": 100
     },
     {
-      "query": { "nearest": "bm25_vec" },
+      "query": { "nearest": { "indices": [3719, 12808, 41172], "values": [0.72, 1.34, 0.41] } },
       "using": "bm25_vec",
       "filter": {
         "must": [
@@ -68,7 +68,8 @@ In production multitenancy, queries require both **logical tenant isolation** (`
 
 {% qqlExample title="Multitenant search with shard key" %}
 ```sql
-QUERY TEXT 'supply chain risk analysis' FROM filings
+QUERY 'supply chain risk analysis'
+FROM filings
 WHERE department = 'finance'
 SHARD 'tenant-corp-99'
 LIMIT 5;
@@ -102,9 +103,9 @@ Filter clauses in vector applications frequently combine equality, range constra
 
 {% qqlExample title="Complex nested predicate filter" %}
 ```sql
-QUERY TEXT 'industrial robotics' FROM products
-WHERE (category = 'hardware' OR category = 'tools')
-  AND price <= 1200.0 AND in_stock = true AND rating >= 4.5
+QUERY 'industrial robotics'
+FROM products
+WHERE (category = 'hardware' OR category = 'tools') AND price <= 1200.0 AND in_stock = true AND rating >= 4.5
 LIMIT 20;
 ```
 {% /qqlExample %}
@@ -171,6 +172,39 @@ PUT /collections/articles/index
 {
   "field_name": "tenant_id",
   "field_schema": "keyword"
+}
+```
+
+---
+
+## 4. In-Database Categorical Aggregations (Faceting)
+
+Aggregating counts of unique payload values filtered by predicates without retrieving individual point records.
+
+### In QQL (4 lines)
+
+{% qqlExample title="Facet aggregation with filtering and exact accuracy" %}
+```sql
+FACET room_type FROM stays WHERE price < 150 LIMIT 5 EXACT true;
+```
+{% /qqlExample %}
+
+### In Raw Qdrant REST JSON (18 lines)
+
+```json
+POST /collections/stays/facet
+{
+  "key": "room_type",
+  "limit": 5,
+  "exact": true,
+  "filter": {
+    "must": [
+      {
+        "key": "price",
+        "range": { "lt": 150.0 }
+      }
+    ]
+  }
 }
 ```
 

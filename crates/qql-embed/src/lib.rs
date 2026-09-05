@@ -7,7 +7,9 @@
 //! Used by `qql` (runtime HttpEmbedder), `qql-edge` (FastEmbedder), and `qql-wasm`
 //! (fetch / JS adapters). No Qdrant I/O and no HTTP client live here.
 
+/// Host-agnostic `Embedder` trait, joint embedding output, and error helpers.
 pub mod embedder;
+/// AST rewriting: resolve `TEXT` inputs to vectors via the configured embedder.
 pub mod resolve;
 pub mod sparse;
 pub mod topology;

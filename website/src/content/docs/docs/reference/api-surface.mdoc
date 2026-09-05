@@ -52,14 +52,12 @@ affinity (single node).
 
 Python, Node.js, and WASM expose statement handles so a host can parse once,
 inject policy, set optional shard routing, inspect the AST, and execute the
-same object. WASM owners must call `free()` explicitly when they are finished.
-In addition to `toObject`/`toJSON`, the WASM `Stmt` exposes `compileRoute` and
-`compileRouteBytes` to inspect the compiled REST route of a single owned
-statement.
+In addition to `toObject`/`toJSON`, `Stmt` across Python, Node, and WASM
+exposes `compile_route` / `compileRoute` to inspect the compiled REST route of a single
+statement. WASM owners must call `free()` explicitly when they are finished.
 
-Token objects are nearly identical across hosts but differ slightly in shape:
-the Rust lexer emits `{ kind, text, span }`, the Python and Node bindings emit
-`{ kind, text, pos }`, and WASM additionally includes `end` and `len`.
+Token objects are consistent across hosts: Python, Node, and WASM bindings emit
+`{ kind, text, pos, end, len }`, matching the underlying `Span { start, end }` model.
 
 ## Execution reports
 

@@ -229,6 +229,12 @@ test('isValid() with valid input', () => {
 test('isValid() with invalid input', () => {
   assert.strictEqual(nqql.isValid('SELECT * FROM docs'), false);
   assert.strictEqual(nqql.isValid('GARBAGE'), false);
+  // Plan-level invalidity counts as invalid too — isValid applies the same
+  // gate as execution and the language conformance suite.
+  assert.strictEqual(
+    nqql.isValid('QUERY VECTOR [0.1, 0.2] FROM docs USING lexical_v2 AS SPARSE LIMIT 10;'),
+    false,
+  );
 });
 
 test('isValid() with empty string', () => {

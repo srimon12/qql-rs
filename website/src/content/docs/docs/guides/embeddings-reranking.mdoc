@@ -17,9 +17,7 @@ embedding path?” QQL keeps those decisions separate.
 
 {% qqlExample title="Offline-explicit vector role" %}
 ```sql
-QUERY TEXT 'late interaction' FROM papers
-USING colbert AS MULTI
-LIMIT 10;
+QUERY 'late interaction' FROM papers USING colbert AS MULTI LIMIT 10;
 ```
 {% /qqlExample %}
 
@@ -27,9 +25,8 @@ LIMIT 10;
 
 {% qqlExample title="ColBERT-style rerank" %}
 ```sql
-WITH candidates AS (
-  QUERY TEXT 'vector compression' USING dense LIMIT 100
-)
+WITH
+  candidates AS (QUERY 'vector compression' USING dense LIMIT 100)
 QUERY RERANK TEXT 'vector compression' MODEL 'colbert-v2'
 FROM papers
 USING colbert AS MULTI
@@ -45,12 +42,9 @@ stored multivector target.
 
 {% qqlExample title="Host pair scoring" %}
 ```sql
-WITH candidates AS (
-  QUERY TEXT 'vector compression' USING dense LIMIT 50
-)
-QUERY CROSS RERANK TEXT 'vector compression'
-MODEL 'bge-reranker-base'
-ON FIELD abstract
+WITH
+  candidates AS (QUERY 'vector compression' USING dense LIMIT 50)
+QUERY CROSS RERANK TEXT 'vector compression' MODEL 'bge-reranker-base' ON FIELD abstract
 FROM papers
 PREFETCH (candidates)
 LIMIT 10;

@@ -19,20 +19,17 @@ concerns.
 ```sql
 CREATE COLLECTION documents (
   dense VECTOR(384, COSINE)
-) WITH PARAMS (
-  shard_number = 8,
-  sharding_method = 'custom',
-  shard_keys = ['acme', 'globex']
-);
+)
+WITH PARAMS (shard_number = 8, sharding_method = 'custom', shard_keys = ['acme', 'globex']);
 
-CREATE INDEX ON COLLECTION documents FOR tenant_id
-TYPE keyword WITH (is_tenant = true);
+CREATE INDEX ON COLLECTION documents FOR tenant_id TYPE keyword WITH (is_tenant = true);
 ```
 {% /qqlExample %}
 
 {% qqlExample title="Isolation and routing together" %}
 ```sql
-QUERY TEXT 'risk factors' FROM documents
+QUERY 'risk factors'
+FROM documents
 USING dense
 WHERE tenant_id = 'acme'
 SHARD 'acme'

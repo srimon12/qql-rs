@@ -8,3 +8,4 @@ SHOW COLLECTION docs;
 
 -- Show specific collection details
 SHOW COLLECTION sec10k;
+

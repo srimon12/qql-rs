@@ -1,7 +1,7 @@
 //! Embedding adapters for the runtime.
 //!
-//! The shared [`Embedder`] trait and AST resolve live in `qql-embed`.
-//! This module re-exports them and provides [`HttpEmbedder`] (reqwest).
+//! The shared `Embedder` trait and AST resolve live in `qql-embed`.
+//! This module re-exports them and provides `HttpEmbedder` (reqwest).
 
 #[cfg(feature = "rest")]
 use async_trait::async_trait;
@@ -50,25 +50,35 @@ struct EmbedData {
 #[cfg(feature = "rest")]
 #[derive(Debug, Clone, Default)]
 pub struct HttpEmbedderOptions {
+    /// OpenAI-compatible embedding endpoint URL (e.g. `https://host/v1/embeddings`).
     pub endpoint: String,
+    /// Bearer token sent as `Authorization` when non-empty.
     pub api_key: String,
+    /// Default dense model name.
     pub model: String,
+    /// Expected dense dimension; must be positive.
     pub dimension: usize,
     /// Optional multi/ColBERT endpoint. Falls back to `endpoint` when empty.
     pub multi_endpoint: Option<String>,
+    /// Bearer token for `multi_endpoint`; falls back to `api_key`.
     pub multi_api_key: Option<String>,
+    /// Multi/ColBERT model name; falls back to `model` when unset.
     pub multi_model: Option<String>,
     /// Expected per-token dim for multi responses. `0` skips dim checks.
     pub multi_dimension: usize,
     /// Optional image/CLIP vision endpoint. Falls back to `endpoint` when empty.
     pub image_endpoint: Option<String>,
+    /// Bearer token for `image_endpoint`; falls back to `api_key`.
     pub image_api_key: Option<String>,
+    /// Image/CLIP vision model name; falls back to `model` when unset.
     pub image_model: Option<String>,
     /// Expected dense dim for image responses (CLIP = 512). `0` uses dense dim.
     pub image_dimension: usize,
     /// Cross-encoder pair-rerank endpoint (Cohere-compatible).
     pub rerank_endpoint: Option<String>,
+    /// Bearer token for the rerank endpoint; falls back to `api_key`.
     pub rerank_api_key: Option<String>,
+    /// Cross-encoder model name (Cohere-style `rerank` API).
     pub rerank_model: Option<String>,
 }
 
@@ -102,6 +112,8 @@ pub struct HttpEmbedder {
 
 #[cfg(feature = "rest")]
 impl HttpEmbedder {
+    /// Build an embedder with only dense settings; see `try_with_options` for
+    /// multi, image, and rerank configuration.
     pub fn new(
         endpoint: String,
         api_key: String,
@@ -117,6 +129,8 @@ impl HttpEmbedder {
         })
     }
 
+    /// Validate options and build the embedder; endpoint, model, and positive
+    /// dimension are required.
     pub fn try_with_options(opts: HttpEmbedderOptions) -> Result<Self, QqlError> {
         if opts.endpoint.trim().is_empty() {
             return Err(QqlError::execution(
@@ -198,18 +212,22 @@ impl HttpEmbedder {
         self
     }
 
+    /// Whether multi/ColBERT embedding is configured on this embedder.
     pub fn multi_enabled(&self) -> bool {
         self.multi_model.is_some() || self.multi_endpoint.is_some() || self.multi_dimension > 0
     }
 
+    /// Whether image/CLIP vision embedding is configured on this embedder.
     pub fn image_enabled(&self) -> bool {
         self.image_model.is_some() || self.image_endpoint.is_some() || self.image_dimension > 0
     }
 
+    /// Whether cross-encoder pair rerank is configured on this embedder.
     pub fn rerank_enabled(&self) -> bool {
         self.rerank_endpoint.is_some() || self.rerank_model.is_some()
     }
 
+    /// Embed one sample input and return the observed vector dimension.
     pub async fn probe_dimension(&self, input: &str) -> Result<usize, QqlError> {
         let input = [input.to_string()];
         let body = EmbedRequest {
@@ -310,6 +328,8 @@ impl HttpEmbedder {
             .unwrap_or(self.api_key.as_str())
     }
 
+    /// Embed a dense batch in one request, validating count, index coverage,
+    /// and per-vector dimension against the configured `dimension`.
     pub async fn embed_batch_with_model(
         &self,
         inputs: &[String],
@@ -402,6 +422,7 @@ impl HttpEmbedder {
         Ok(result)
     }
 
+    /// Embed a dense batch with the configured default model.
     pub async fn embed_batch(&self, inputs: &[String]) -> Result<Vec<Vec<f32>>, QqlError> {
         self.embed_batch_with_model(inputs, &self.model).await
     }

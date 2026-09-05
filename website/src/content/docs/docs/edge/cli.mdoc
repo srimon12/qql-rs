@@ -24,7 +24,7 @@ command to route it to the in-process backend instead of `QDRANT_URL`:
 
 {% terminal title="Edge examples" %}
 qql --edge exec "SHOW COLLECTIONS"
-qql --edge exec "QUERY TEXT 'hello' FROM docs USING dense LIMIT 5"
+qql --edge exec "QUERY 'hello' FROM docs USING dense LIMIT 5"
 qql --edge execute first-local.qql
 qql --edge dump docs backup.qql
 qql --edge connect
@@ -106,7 +106,7 @@ embedder reuses the same variables as remote execution.
 
 {% terminal title="One-shot edge override" %}
 QQL_EDGE_DATA_DIR=/tmp/ephemeral QQL_EDGE_MODEL=all-minilm-l6-v2 \
-  qql --edge exec "QUERY TEXT 'hi' FROM docs USING dense LIMIT 3"
+  qql --edge exec "QUERY 'hi' FROM docs USING dense LIMIT 3"
 {% /terminal %}
 
 ## Edge doctor output

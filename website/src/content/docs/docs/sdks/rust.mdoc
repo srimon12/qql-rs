@@ -14,10 +14,7 @@ cargo add qql-core qql
 
 {% qqlExample title="Tenant-scoped product search" %}
 ```sql
-QUERY TEXT 'laptops'
-FROM products
-USING dense
-LIMIT 10;
+QUERY 'laptops' FROM products USING dense LIMIT 10;
 ```
 {% /qqlExample %}
 
@@ -77,7 +74,7 @@ let mut params = HashMap::new();
 params.insert("cat".into(), Value::Str("laptops".into()));
 params.insert("lim".into(), Value::Int(10));
 let report = executor.execute_with_params(
-    "QUERY TEXT 'ultrabook' FROM products WHERE category = :cat LIMIT :lim",
+    "QUERY 'ultrabook' FROM products WHERE category = :cat LIMIT :lim",
     &params,
     OnError::Stop,
 ).await?;
@@ -85,13 +82,13 @@ let report = executor.execute_with_params(
 // Positional parameters (?)
 let pos_params = vec![Value::Str("laptops".into()), Value::Int(10)];
 let report2 = executor.execute_with_positional_params(
-    "QUERY TEXT 'ultrabook' FROM products WHERE category = ? LIMIT ?",
+    "QUERY 'ultrabook' FROM products WHERE category = ? LIMIT ?",
     &pos_params,
     OnError::Stop,
 ).await?;
 
 // Standalone binding (qql_core::params)
-let bound = bind_named("QUERY TEXT :q FROM products LIMIT :lim", |k| match k {
+let bound = bind_named("QUERY :q FROM products LIMIT :lim", |k| match k {
     "q" => Some(Value::Str("thinkpad".into())),
     "lim" => Some(Value::Int(5)),
     _ => None,

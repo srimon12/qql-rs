@@ -13,7 +13,7 @@ script       = [ statement, { ";", statement }, [ ";" ] ] ;
 statement    = query | scroll | upsert | update | delete | ddl | count
              | clear-payload | delete-payload | delete-vectors
              | create-shard-key | drop-shard-key | show-shard-keys
-             | drop-index | show | show-quotas | set-quota ;
+             | drop-index | show | show-quotas | set-quota | facet ;
 ```
 
 Multiple statements require `;`. Leading semicolons, repeated semicolons, and adjacent unseparated statements are invalid.
@@ -51,7 +51,17 @@ vector-kind  = "DENSE" | "SPARSE" | "MULTI" | "MULTIVECTOR" ;
 
 Top-level queries require `FROM`. A CTE may omit it and inherit the outer collection. Clauses occur at most once and only in the order above.
 
-### `SHARD KEY` (DDL) vs `SHARD` (routing)
+### Vector Input Forms
+QQL supports three vector input forms for semantic search:
+- **Explicit vector**: `QUERY VECTOR [0.1, 0.2, 0.3] FROM docs ...`
+- **Implicit vector array**: `QUERY [0.1, 0.2, 0.3] FROM docs ...` (the `VECTOR` keyword can be omitted for compact array literals)
+- **Point reference**: `QUERY POINT 42 FROM docs ...`
+
+### Payload Selection Defaults
+By default, queries return all point payloads (`WITH PAYLOAD true`). To minimize network payload bandwidth when payload attributes are not needed, pass explicit `WITH PAYLOAD false`:
+```sql
+QUERY 'search' FROM docs WITH PAYLOAD false LIMIT 10;
+```
 
 These are **two different features**. Confusing them is the most common multi-tenant mistake.
 
@@ -240,12 +250,14 @@ formula-expr = constant
              | "LOG", "(", formula-expr, ")"
              | "LN", "(", formula-expr, ")"
              | "EXP", "(", formula-expr, ")"
+             | "ACOSH", "(", formula-expr, ")"
+             | ("MAX" | "MIN"), "(", formula-expr, { ",", formula-expr }, ")"
              | "POW", "(", formula-expr, ",", formula-expr, ")"
              | "GEO_DISTANCE", "(", lat, ",", lon, ",", field, ")"
              | decay-function ;
 ```
 
-The formula parser supports standard arithmetic operators with precedence and parentheses. The `$score` variable represents the query score. Decay functions:
+The formula parser supports standard arithmetic operators with precedence and parentheses. The `$score` variable represents the query score. `MAX` and `MIN` fold n ≥ 1 operands; the empty operand list is a parse error. Decay functions:
 
 ```ebnf
 decay-function = ("EXP_DECAY" | "GAUSS_DECAY" | "LIN_DECAY"),
@@ -439,6 +451,12 @@ scroll       = "SCROLL", "FROM", collection,
 count        = "COUNT", "FROM", collection,
                [ "WHERE", filter ],
                [ "SHARD", string ] ;
+facet        = "FACET", ( field, "FROM", collection | "FROM", collection, [ "KEY" ], field ),
+                [ "WHERE", filter ],
+                [ "LIMIT", positive-integer ],
+                [ "EXACT", boolean ],
+                [ "SHARD", string ],
+                [ "WITH", "(", facet-config, ")" ] ;
 delete       = "DELETE", "FROM", collection, "WHERE", filter,
                [ "SHARD", string ] ;
 clear-payload = "CLEAR", "PAYLOAD", "FROM", collection,
@@ -691,6 +709,26 @@ COUNT FROM docs WHERE status = 'active' WITH (exact = true);
 
 -- Count with shard routing
 COUNT FROM sec10k WHERE tenant_id = 'honeywell' SHARD 'honeywell';
+```
+
+### Facet Aggregations
+
+Computes value counts for payload fields via Qdrant's `/collections/{collection}/facet` endpoint:
+
+```sql
+-- Basic facet counting unique categories
+FACET category FROM docs;
+
+-- Filtered facet with limit and exact counting
+FACET room_type FROM stays
+WHERE price < 150
+LIMIT 5
+EXACT true;
+
+-- Shard-routed facet with key front syntax
+FACET FROM catalog KEY tags
+SHARD 'tenant_1'
+LIMIT 10;
 ```
 
 ### Point Mutations

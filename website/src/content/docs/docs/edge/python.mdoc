@@ -34,7 +34,7 @@ client = pyqql_edge.local_executor(
 client.execute("CREATE COLLECTION docs HYBRID")
 client.execute('UPSERT INTO docs VALUES {id: 1, text: "hello from edge"}')
 
-report = client.execute("QUERY TEXT 'hello' FROM docs USING dense LIMIT 10")
+report = client.execute("QUERY 'hello' FROM docs USING dense LIMIT 10")
 print(report["results"][0]["data"])
 
 client.close()  # flush before deleting ./qdrant_data
@@ -153,7 +153,7 @@ and `execute_async` build a temporary client, run, and close:
 
 ```python
 report = pyqql_edge.execute(
-    "QUERY TEXT 'hello' FROM docs USING dense LIMIT 5",
+    "QUERY 'hello' FROM docs USING dense LIMIT 5",
     data_dir="./qdrant_data",
     model="bge-small-en-v1.5",
 )

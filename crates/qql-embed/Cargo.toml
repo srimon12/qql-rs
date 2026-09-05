@@ -14,12 +14,15 @@ keywords = ["qql", "qdrant", "embeddings", "vector-search", "bm25"]
 categories = ["database", "algorithms"]
 
 [dependencies]
-qql-core = { version = "0.3.0", path = "../qql-core", features = ["std"] }
-async-trait = "0.1"
-phf = { version = "0.14", features = ["macros"] }
+qql-core = { workspace = true, features = ["std"] }
+async-trait = { workspace = true }
+phf = { workspace = true }
 # Wire-compatible BM25: same murmur3 + snowball crates the Qdrant server uses.
 murmur3_32 = "0.1"
 rust-stemmers = { package = "qdrant-rust-stemmers", version = "1.2" }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true

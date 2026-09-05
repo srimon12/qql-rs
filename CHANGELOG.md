@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+## [0.3.1] - 2026-09-04
+
+### 📦 Packaging
+- **Workspace 0.3.1** — synchronized across all crates, PyPI (`pyqql` / `pyqql-edge`), npm (`@veristamp/nqql` / `@veristamp/nqql-edge` + platform packages), and the bundled editor WASM; `Cargo.lock` refreshed. `scripts/check_release.py` now drives this: `set <version>` / `bump major|minor|patch` rewrite every version site in one step, refresh the lockfile, and re-validate; check mode additionally validates root `[workspace.dependencies]` pins and `VERSION` ↔ workspace consistency.
+
+### 🚀 Added
+- **Formula functions `MAX` / `MIN` / `ACOSH`** (QQL 1.6, Qdrant upstream API sync) — `MAX`/`MIN` fold n ≥ 1 operands and `ACOSH(x)` is unary; wired grammar → parser → typed AST → canonical formatter → plan lowering → gRPC protobuf. The edge backend fails closed (`QQL-EDGE-UNSUPPORTED-FORMULA-FUNCTION`).
+- **Vector-dimension cap** — `CREATE COLLECTION` rejects dimensions above 65536 at parse time with `QQL-PARSE-VECTOR-SIZE` (mirrors the Qdrant `VectorParams.size` maximum).
+- **Canonical-format conformance goldens** — `language/v1/fixtures/formatted/*.txt` join the conformance contract (40 files), verified natively and against the bundled editor WASM via corpus-driven extension tests.
+- **`qql` single-dependency re-exports** — `QqlError` / `ErrorKind` / `Span`, `Stmt` / `Parser` / `inject_filter` / `ComparisonOp` / `Value`, and the plan contract types (`PlannedOperation`, batch + DDL request types) are re-exported from `qql` (Rust API guidelines C-REEXPORT), with a compile-time test enforcing that a full `QdrantOps` impl and the parse → inject policy flow build from `qql::` paths alone.
+- **Native `FACET` statement** — first-class grammar, AST (`Stmt::Facet(Box<FacetStmt>)`), and planning (`PlannedOperation::Facet`) mapping to Qdrant's `POST /collections/{collection}/facet` aggregation endpoint. Supports `WHERE` filtering, `LIMIT`, `EXACT true` distributed counting, and `SHARD` partition routing. Validated across `qql-runtime`, `qql-edge`, `qql-wasm`, and `language/v1` conformance fixtures.
+- **Implicit vector array literals** — queries accept float array literals directly as `QUERY [0.1, 0.2, ...] FROM ...` without requiring the explicit `VECTOR` keyword prefix.
+- **Formula decay ISO datetime string parsing & variable auto-inference** — decay functions (`EXP_DECAY`, `GAUSS_DECAY`, `LIN_DECAY`) now accept standard ISO 8601 string literals `TARGET = "2024-01-01T00:00:00Z"` lowering to `FormulaExpr::Datetime`, and bare payload field names automatically infer `{"datetime_key": name}`.
+- **VS Code extension `FACET` support** — added `qfacet` snippet, hover card documentation in `KEYWORD_DOCS`, and autocompletions in `qql-lang`.
+- **SDK parity: `Stmt::new()` constructor in `nqql-edge`** — Node edge binding now exports a constructible `Stmt(query)` handle mirroring `nqql` and `qql-wasm`.
+- **SDK parity: `Stmt.compile_route()`** — exposed AST route compilation (`compile_route` / `compileRoute`) directly on `Stmt` across `pyqql`, `pyqql-edge`, `nqql`, and `nqql-edge` to avoid re-parsing queries.
+- **SDK parity: `Client.close()`** — added explicit connection release `close()` on remote clients in `pyqql` (with `__enter__`/`__exit__` context manager support) and `nqql`.
+- **SDK parity: full token spans** — `tokenize()` outputs across `pyqql`, `pyqql-edge`, `nqql`, and `nqql-edge` now provide `{ kind, text, pos, end, len }` matching `qql-wasm` and the lexer `Span` contract.
+- **SDK parity: version export** — `pyqql` exports `__version__` matching the cargo package version.
+- **CLI gRPC scheme detection** — `qql-cli` recognizes `grpc://` protocol URIs in addition to `:6334` port matching.
+
+### 🔄 Changed
+- **QQL language version 1.6** — additive minor per `language/v1/spec/versioning.md`; the conformance corpus grows to 40 valid files (276 statements), 59 invalid cases, 40 AST snapshots, and 40 canonical formats.
+- **`is_valid` is a full parse + plan gate** — `is_valid` / `analyze` in `pyqql`, `nqql`, and `qql-wasm` validate plan-level semantics through the shared `qql_plan::parse_and_plan` instead of syntax alone; binding READMEs document the tightened contract.
+- **Default `WITH PAYLOAD true`** — `lower_output_selector` now defaults to returning all payload attributes (`Some(PayloadSelectorReq::All(true))`) when `WITH PAYLOAD` is omitted, matching intuitive SQL retrieval semantics. Explicit `WITH PAYLOAD false` continues to omit payload fields.
+- **Decomposed runtime gRPC monoliths** — split `crates/qql-runtime/src/grpc.rs` (1,000 lines) and `crates/qql-runtime/src/grpc_route.rs` (4,000 lines) into focused domain submodules (`query`, `execute_write`, `execute_read`, `execute_ddl`, `ddl`, `filter`, `formula`, `responses`, `schema`, `points`, `ops`).
+- **Centralized workspace dependencies** — configured `[workspace.dependencies]` in root `Cargo.toml` (`serde`, `serde_json`, `tokio`, `phf`, `uuid`, `async-trait`, and internal crates) and converted member manifests to `.workspace = true`.
+- **Standard error trait** — implemented `core::error::Error` unconditionally on `QqlError` in `qql-core`, enabling standard error interoperability in `#![no_std]` contexts.
+- **Documentation & Skills modernization** — updated all website docs, agent skills, and specification documents to showcase modern QQL idioms (simplified queries without boilerplate `WITH PAYLOAD true`, implicit vectors, and `FACET`).
+
+### ⚡ Performance
+- **Zero-allocation query and plan explain formatting** — converted 110+ `output.push_str(&format!(...))` heap allocations across `qql-core::fmt` and `qql-core::explain` to in-place `write!` and `writeln!` via `core::fmt::Write`.
+- **Single-pass table alignment** — rewrote `qql-cli::table` column alignment to a single short-circuiting pass over rows.
+- **SIMD string case matching** — replaced manual byte-by-byte iterator loops in `qql-core` parser with standard `eq_ignore_ascii_case`.
+
+### 🐛 Fixed
+- **Lexer error-stream termination** — the `Lexer` iterator re-yielded non-advancing lex errors forever (inputs like `1.` or `1e+` hung `flatten()` consumers); the token stream now halts after the first error, and `qql-wasm` `analyze` handles errors explicitly instead of flattening.
+- **Formula boolean `MatchCondition` lowering** — single-value match conditions (e.g. `MATCH(is_superhost, true)`) now lower to `{"match": {"value": val}}` instead of `{"match": {"any": [...]}}`, avoiding HTTP 400 schema validation rejection from Qdrant.
+- **REST error UTF-8 boundary panic** — protected 4096-byte response truncation in `qql-runtime` using `floor_char_boundary(4096)`.
+- **Range filter bound inversion in CLI converter** — `convert_condition` in `qql-cli` now only emits `BETWEEN` for `(gte, lte)` pairs; strict inequalities emit explicit `> <` comparisons.
+- **Incomplete string escaping in CLI converter** — replaced naive quote replacement with `escape_qql_string`.
+- **Monotonic mutex growth in edge backend** — evicted collection keys from `self.opening` once cached or upon collection deletion in `qql-edge`.
+- **Python error type consistency** — aligned `pyqql-edge` `parse_json` to raise `SyntaxError` on malformed queries.
+
+### 🔒 Security
+- **Website transitive deps (pnpm)** — `nanoid 3.3.16 → 3.3.18` (GHSA-2v37-7h3g-55p8, custom-generator infinite loop on size 0), `adm-zip 0.5.18 → 0.6.0` (GHSA-xcpc-8h2w-3j85, crafted-ZIP 4GB `Buffer.alloc`), `js-yaml 4.3.0 → 4.3.1` (GHSA-5p4m-2wfm-xmqj, quadratic `!!omap` CPU), `sharp 0.35.3/0.34.5 → 0.35.4` (libvips ≥8.18.6 for CVE-2026-33327/33328/35590/35591). Enforced via `website/pnpm-workspace.yaml` `overrides`; `pnpm audit` is clean.
+- **VS Code extension transitive deps (npm)** — `js-yaml 4.3.0 → 4.3.1`, `brace-expansion 5.0.8 → 5.0.9` (GHSA-rgw5-rvv9-x895), `qs 6.15.3 → 6.16.0` (GHSA-x5fp-wj9c-mxmx / GHSA-4mjr-xmp4-gh2g) via `package.json` `overrides`; `npm audit` is clean.
+- **Rust `rand` (RUSTSEC-2026-0097, Low/INFO)** — `rand 0.9.5` / `0.10.2` already at latest compatible; `0.7.3` / `0.8.8` remain via `qdrant-edge 0.8.0` (latest upstream, no patched `0.7`/`0.8` line). Not exploitable here: no `rand::rng()`/`thread_rng()` use in our code and no `log` feature enabled on the old lines.
+- **Invalid-pointer CodeQL (Rust)** — removed the repo's only two `unsafe` blocks: `qql-wasm` no longer uses `Uint8Array::view` (uses `Uint8Array::from` copy), `qql-embed` BM25 lowercasing uses checked `from_utf8().expect()` instead of `from_utf8_unchecked`.
+- **Playground XSS + open-redirect (CodeQL)** — `website/src/scripts/playground.ts` now validates `?ref=` with strict same-origin `isSafeDocsRef()` (`/docs` + reject `[\\<>"'`\s]` + `URL` origin/pathname check), sets the backlink via `setAttribute("href")`, and builds share URLs only from validated refs. Replaced `innerHTML` badge updates with `createElement`/`createTextNode`.
+- **Medical demo clear-text logging/storage (CodeQL)** — `build-medical-corpus.py` / `run-benchmark.py` / `run_demo.py` log only file names, counts, opaque IDs and hit flags (no question/answer/context text); all generated/cache writes go through owner-only `0600` helper; eval manifest drops unused `answer` fields. `generated/` is now git-ignored and untracked (`git rm --cached`); files stay local only.
+
+### 📚 Documentation
+- **Full public-API Rust docs** — ~1,500 doc comments across the six published crates (`qql`, `qql-core`, `qql-plan`, `qql-embed`, `qql-edge`, `qql-cli`): AST variants, plan IR, the `QdrantOps` extension contract, executor/config/transports, tokens, and errors; docs.rs landing pages for `qql` and `qql-core`. A `missing_docs` workspace lint scoped to exactly CI's `cargo doc -D warnings` gate makes the standard self-enforcing. Generated code (`qdrant.rs`, `qdrant_grpc.rs`, `keywords.generated.rs`) keeps its local allowances.
+- **Website and reference alignment to QQL 1.6** — formula reference (`MAX` / `MIN` / `ACOSH` + a clamping example validated by the docs pipeline), error-code tables (`QQL-PARSE-VECTOR-SIZE`, `QQL-PLAN-RECOMMEND-AVERAGE`, `QQL-EDGE-UNSUPPORTED-FORMULA-FUNCTION`), grammar/editors/language pages bumped to QQL 1.6.
+
 ## [0.3.0] - 2026-08-30
 
 ### 📦 Packaging

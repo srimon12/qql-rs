@@ -16,6 +16,7 @@ impl Stmt {
             Self::Query(query) => query.shard_key.as_deref(),
             Self::Scroll(scroll) => scroll.shard_key.as_deref(),
             Self::Count(count) => count.shard_key.as_deref(),
+            Self::Facet(facet) => facet.shard_key.as_deref(),
             Self::Upsert(upsert) => upsert.shard_key.as_deref(),
             Self::Delete(delete) => delete.shard_key.as_deref(),
             Self::ClearPayload(clear) => clear.shard_key.as_deref(),
@@ -49,6 +50,10 @@ impl Stmt {
             }
             Self::Count(count) => {
                 count.shard_key = key;
+                true
+            }
+            Self::Facet(facet) => {
+                facet.shard_key = key;
                 true
             }
             Self::Upsert(upsert) => {
@@ -99,6 +104,7 @@ fn apply_query_shard(query: &mut QueryStmt, key: Option<&str>) {
     }
 }
 
+/// Injects a typed field comparison into a statement (CTEs and prefetches included), fail-closed.
 pub fn inject_filter(
     statement: &mut Stmt,
     field: &str,
@@ -111,6 +117,7 @@ pub fn inject_filter(
         Stmt::Scroll(scroll) => merge_filter(&mut scroll.filter, filter),
         Stmt::Delete(delete) => merge_selector(&mut delete.selector, filter),
         Stmt::Count(count) => merge_filter(&mut count.filter, filter),
+        Stmt::Facet(facet) => merge_filter(&mut facet.filter, filter),
         Stmt::ClearPayload(clear) => merge_selector(&mut clear.selector, filter),
         Stmt::DeletePayload(del) => merge_selector(&mut del.selector, filter),
         Stmt::DeleteVector(del_vec) => merge_selector(&mut del_vec.selector, filter),
@@ -149,6 +156,7 @@ fn stmt_kind(statement: &Stmt) -> &'static str {
         Stmt::Query(_) => "QUERY",
         Stmt::Scroll(_) => "SCROLL",
         Stmt::Count(_) => "COUNT",
+        Stmt::Facet(_) => "FACET",
         Stmt::Upsert(_) => "UPSERT",
         Stmt::Delete(_) => "DELETE",
         Stmt::ClearPayload(_) => "CLEAR PAYLOAD",

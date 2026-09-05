@@ -51,6 +51,10 @@ Edge unsupported codes are stable (see `crates/qql-edge/README.md`).
 
 | Area | Use this |
 |---|---|
+| In-database faceting | `FACET <field> FROM <col> [WHERE ...] [LIMIT ...] [EXACT true]` → REST `/collections/{col}/facet` |
+| Implicit vector literals | `QUERY [0.1, 0.2, ...] FROM <col>` (array literal without `VECTOR` keyword) |
+| Payload inclusion default | `WITH PAYLOAD` defaults to `true` when omitted; use `WITH PAYLOAD false` to explicitly omit |
+| Formula decay ISO strings | `EXP_DECAY(field, TARGET = "2024-01-01T00:00:00Z", ...)` — auto-infers `datetime_key` and parses ISO string |
 | Hybrid shorthand | `USING HYBRID` or `QUERY HYBRID TEXT …` (same expand) |
 | Request timeout | `PARAMS (timeout = 30)` → REST `?timeout=30` / gRPC `timeout` (seconds) |
 | Read consistency | `PARAMS (consistency = majority\|quorum\|all\|N)` → OpenAPI `ReadConsistency` |

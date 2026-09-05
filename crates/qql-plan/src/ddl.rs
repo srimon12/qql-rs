@@ -2,6 +2,7 @@ use crate::filter::value_to_json;
 use crate::types::*;
 use qql_core::ast::{AlterCollectionStmt, CreateCollectionStmt, CreateIndexStmt, VectorDistance};
 
+/// Lower `CREATE COLLECTION` to the transport-neutral create request.
 pub fn lower_create_collection(stmt: &CreateCollectionStmt) -> CreateCollectionRequest {
     let mut req = CreateCollectionRequest {
         vectors: None,
@@ -128,6 +129,7 @@ pub fn lower_create_collection(stmt: &CreateCollectionStmt) -> CreateCollectionR
     req
 }
 
+/// Lower `ALTER COLLECTION` to the transport-neutral update request.
 pub fn lower_alter_collection(stmt: &AlterCollectionStmt) -> UpdateCollectionRequest {
     let mut req = UpdateCollectionRequest {
         hnsw_config: None,
@@ -141,6 +143,7 @@ pub fn lower_alter_collection(stmt: &AlterCollectionStmt) -> UpdateCollectionReq
     req
 }
 
+/// Lower `CREATE INDEX` to the transport-neutral index request (options flat).
 pub fn lower_create_index(stmt: &CreateIndexStmt) -> CreateIndexRequest {
     let mut extra = serde_json::Map::new();
     for (key, value) in &stmt.options {
@@ -285,6 +288,7 @@ fn fill_update_collection_config(
     }
 }
 
+/// Lower an AST HNSW config into the typed plan `HnswConfig` IR.
 pub fn lower_hnsw_config(config: &qql_core::ast::HnswRuntimeConfig) -> HnswConfig {
     HnswConfig {
         m: config.m,
@@ -298,6 +302,7 @@ pub fn lower_hnsw_config(config: &qql_core::ast::HnswRuntimeConfig) -> HnswConfi
     }
 }
 
+/// Lower an AST HNSW config to a flat JSON object (internal IR / gRPC shape).
 pub fn lower_hnsw_config_val(config: &qql_core::ast::HnswRuntimeConfig) -> serde_json::Value {
     let mut obj = serde_json::Map::new();
     if let Some(m) = config.m {
@@ -330,6 +335,7 @@ pub fn lower_hnsw_config_val(config: &qql_core::ast::HnswRuntimeConfig) -> serde
     serde_json::Value::Object(obj)
 }
 
+/// Lower an AST optimizer config into the typed plan `OptimizersConfig` IR.
 pub fn lower_optimizers_config(
     config: &qql_core::ast::OptimizersRuntimeConfig,
 ) -> OptimizersConfig {
@@ -353,6 +359,7 @@ pub fn lower_optimizers_config(
     }
 }
 
+/// Lower an AST optimizer config to a flat JSON object (internal IR / gRPC shape).
 pub fn lower_optimizers_config_val(
     config: &qql_core::ast::OptimizersRuntimeConfig,
 ) -> serde_json::Value {
@@ -421,6 +428,7 @@ fn turbo_bits_label(bits: Option<f64>) -> Option<String> {
     Some(label.into())
 }
 
+/// Lower an AST quantization config into the typed plan `QuantizationConfig`.
 pub fn lower_quantization_config(config: &qql_core::ast::QuantizationConfig) -> QuantizationConfig {
     match config.qtype {
         qql_core::ast::QuantizationType::Scalar => QuantizationConfig::Scalar {
@@ -456,6 +464,7 @@ pub fn lower_quantization_config(config: &qql_core::ast::QuantizationConfig) -> 
     }
 }
 
+/// Lower an AST quantization config to a flat JSON object (internal IR / gRPC shape).
 pub fn lower_quantization_config_val(
     config: &qql_core::ast::QuantizationConfig,
 ) -> serde_json::Value {

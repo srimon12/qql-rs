@@ -19,21 +19,21 @@ grpc = ["dep:tonic", "dep:tonic-prost", "dep:prost", "dep:prost-types", "tokio/r
 rest = ["dep:reqwest", "tokio/rt"]
 
 [dependencies]
-qql-core = { version = "0.3.0", path = "../qql-core", features = ["serde", "std"] }
-qql-plan = { version = "0.3.0", path = "../qql-plan" }
-qql-embed = { version = "0.3.0", path = "../qql-embed" }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+qql-core = { workspace = true, features = ["serde", "std"] }
+qql-plan = { workspace = true }
+qql-embed = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
-async-trait = "0.1"
+async-trait = { workspace = true }
 # Required by typify-generated OpenAPI types (`qdrant_types.rs` in OUT_DIR).
 chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1", features = ["serde"] }
+uuid = { workspace = true }
 tonic = { version = "0.14", default-features = false, features = ["channel", "codegen", "tls-ring", "tls-webpki-roots"], optional = true }
 tonic-prost = { version = "0.14", optional = true }
 prost = { version = "0.14", optional = true }
 prost-types = { version = "0.14", optional = true }
-tokio = { version = "1", features = ["macros", "time"] }
+tokio = { workspace = true, features = ["macros", "time"] }
 
 [build-dependencies]
 typify = "0.7"
@@ -46,3 +46,6 @@ protoc-bin-vendored = "3"
 
 [dev-dependencies]
 jsonschema = "0.26"
+
+[lints]
+workspace = true

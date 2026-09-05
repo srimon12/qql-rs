@@ -160,6 +160,8 @@ struct SparseSlot {
     model_code: String,
 }
 
+/// Local fastembed embedder: dense ONNX model plus optional sparse, multi
+/// (ColBERT), image, and cross-encoder slots, with wire-compatible BM25 fallback.
 pub struct FastEmbedder {
     dense: DenseSlot,
     sparse: Option<SparseSlot>,
@@ -207,6 +209,8 @@ fn rerank_cache() -> &'static ModelCache<TextRerank> {
 }
 
 impl FastEmbedder {
+    /// Compatibility constructor from a fastembed `InitOptionsWithLength`
+    /// (dense model only; no sparse/multi/image/rerank slots).
     pub fn try_new(options: InitOptionsWithLength<EmbeddingModel>) -> Result<Self, QqlError> {
         let cache_dir = if options.cache_dir != std::path::PathBuf::new() {
             Some(options.cache_dir.clone())
@@ -461,6 +465,7 @@ impl FastEmbedder {
         })
     }
 
+    /// Construct with default options (dense `BGESmallENV15`, no sparse/multi/image/rerank).
     pub fn try_default() -> Result<Self, QqlError> {
         Self::try_with_options(FastEmbedderOptions::default())
     }
@@ -473,66 +478,83 @@ impl FastEmbedder {
         })
     }
 
+    /// Dense model enum-style name (e.g. `BGESmallENV15`).
     pub fn model_name(&self) -> &str {
         &self.dense.model_name
     }
 
+    /// Dense HuggingFace model code (e.g. `Xenova/bge-small-en-v1.5`).
     pub fn model_code(&self) -> &str {
         &self.dense.model_code
     }
 
+    /// Dense embedding dimension.
     pub fn dimension(&self) -> usize {
         self.dense.dim
     }
 
+    /// Multivector model enum-style name, when configured.
     pub fn multi_model_name(&self) -> Option<&str> {
         self.multi.as_ref().map(|m| m.model_name.as_str())
     }
 
+    /// Multivector model code, when configured.
     pub fn multi_model_code(&self) -> Option<&str> {
         self.multi.as_ref().map(|m| m.model_code.as_str())
     }
 
+    /// Per-token multivector (ColBERT) dimension, when configured.
     pub fn multi_dimension(&self) -> Option<usize> {
         self.multi.as_ref().map(|m| m.dim)
     }
 
+    /// Whether an offline multivector (BGE-M3 ColBERT) model is configured.
     pub fn has_multi(&self) -> bool {
         self.multi.is_some()
     }
 
+    /// Image/CLIP vision model enum-style name, when configured.
     pub fn image_model_name(&self) -> Option<&str> {
         self.image.as_ref().map(|m| m.model_name.as_str())
     }
 
+    /// Image/CLIP vision model code, when configured.
     pub fn image_model_code(&self) -> Option<&str> {
         self.image.as_ref().map(|m| m.model_code.as_str())
     }
 
+    /// Image embedding dimension, when configured.
     pub fn image_dimension(&self) -> Option<usize> {
         self.image.as_ref().map(|m| m.dim)
     }
 
+    /// Whether an offline image (CLIP vision) model is configured.
     pub fn has_image(&self) -> bool {
         self.image.is_some()
     }
 
+    /// Whether an offline cross-encoder reranker is configured.
     pub fn has_reranker(&self) -> bool {
         self.reranker.is_some()
     }
 
+    /// Offline sparse model enum-style name, when configured.
     pub fn sparse_model_name(&self) -> Option<&str> {
         self.sparse.as_ref().map(|s| s.model_name.as_str())
     }
 
+    /// Offline sparse model code, when configured.
     pub fn sparse_model_code(&self) -> Option<&str> {
         self.sparse.as_ref().map(|s| s.model_code.as_str())
     }
 
+    /// Whether an offline sparse (SPLADE / BGE-M3) model is configured;
+    /// otherwise sparse requests use wire-compatible BM25.
     pub fn has_sparse(&self) -> bool {
         self.sparse.is_some()
     }
 
+    /// Cross-encoder reranker model code, when configured.
     pub fn reranker_model_code(&self) -> Option<&str> {
         self.reranker.as_ref().map(|m| m.model_code.as_str())
     }

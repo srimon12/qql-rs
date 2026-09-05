@@ -41,7 +41,7 @@ data in one session finds them intact in the next:
 {% terminal title="Two sessions, same data" %}
 qql --edge exec "CREATE COLLECTION docs HYBRID"
 qql --edge exec "UPSERT INTO docs VALUES {id: 1, text: 'hello'}"
-qql --edge exec "QUERY TEXT 'hello' FROM docs USING dense LIMIT 5"   # still there
+qql --edge exec "QUERY 'hello' FROM docs USING dense LIMIT 5"   # still there
 {% /terminal %}
 
 The vector schema is fixed at creation (`edge_config.json`); edge has no

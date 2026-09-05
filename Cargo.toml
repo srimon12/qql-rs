@@ -17,13 +17,33 @@ members = [
 ]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 rust-version = "1.98"
 authors = ["Srimon Danguria <srimon12mckv@gmail.com>"]
 license = "MIT"
 repository = "https://github.com/srimon12/qql-rs"
 homepage = "https://github.com/srimon12/qql-rs"
+
+[workspace.lints.rust]
+# Public API is the product for the six published crates; undocumented public
+# items surface as rustdoc warnings (see docs/rust API pass). Generated files
+# opt out locally via `#![allow(missing_docs)]`.
+missing_docs = "warn"
+
+[workspace.dependencies]
+qql-core = { version = "0.3.1", path = "crates/qql-core" }
+qql-plan = { version = "0.3.1", path = "crates/qql-plan" }
+qql-embed = { version = "0.3.1", path = "crates/qql-embed" }
+qql = { version = "0.3.1", path = "crates/qql-runtime", default-features = false }
+qql-edge = { version = "0.3.1", path = "crates/qql-edge", default-features = false }
+
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = "1.43"
+async-trait = "0.1"
+phf = { version = "0.14", features = ["macros"] }
+uuid = { version = "1.13", features = ["serde"] }
 
 [profile.release]
 lto = "thin"

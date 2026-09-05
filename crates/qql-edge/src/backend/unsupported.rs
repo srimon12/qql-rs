@@ -35,6 +35,8 @@ pub enum EdgeUnsupported {
     Quota,
     /// `RECOMMEND … STRATEGY average_vector`.
     RecommendAverageVector,
+    /// `MAX` / `MIN` / `ACOSH` formula functions (new Qdrant Expression variants).
+    FormulaNary,
     /// Nearest/recommend inputs that are only point IDs (need materialised vectors offline).
     PointReferenceQuery,
     /// Catch-all unknown REST route projection.
@@ -55,6 +57,7 @@ impl EdgeUnsupported {
             Self::Quota => "QQL-EDGE-UNSUPPORTED-QUOTA",
             Self::RecommendAverageVector => "QQL-EDGE-UNSUPPORTED-RECOMMEND-STRATEGY",
             Self::PointReferenceQuery => "QQL-EDGE-UNSUPPORTED-POINT-REF",
+            Self::FormulaNary => "QQL-EDGE-UNSUPPORTED-FORMULA-FUNCTION",
             Self::Route { .. } => "QQL-EDGE-UNSUPPORTED-ROUTE",
         }
     }
@@ -75,6 +78,7 @@ impl EdgeUnsupported {
             Self::Quota => "SHOW QUOTAS / SET QUOTA",
             Self::RecommendAverageVector => "RECOMMEND STRATEGY average_vector",
             Self::PointReferenceQuery => "point-id query inputs without embedded vectors",
+            Self::FormulaNary => "MAX / MIN / ACOSH formula functions",
             Self::Route { path_hint } => path_hint,
         }
     }
@@ -102,6 +106,9 @@ impl EdgeUnsupported {
             }
             Self::PointReferenceQuery => {
                 "offline path must materialize vectors (TEXT/VECTOR) before search"
+            }
+            Self::FormulaNary => {
+                "the pinned qdrant-edge predates the acosh / max / min Expression variants"
             }
             Self::Route { .. } => "this route is not implemented by the edge backend",
         }

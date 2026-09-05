@@ -1,6 +1,6 @@
 use crate::ast::{
-    ComparisonOp, EmbeddingSpec, FilterExpr, FusionMethod, QueryCollection, QueryExpr, QueryInput,
-    Stmt, Value,
+    ComparisonOp, EmbeddingSpec, FilterExpr, FormulaExpr, FusionMethod, QueryCollection, QueryExpr,
+    QueryInput, Stmt, Value,
 };
 use crate::parser::Parser;
 
@@ -169,6 +169,47 @@ fn formula_query() {
 fn formula_query_div_default() {
     let res = Parser::parse("QUERY FORMULA ($score / views [DEFAULT = 1.0]) * 10 DEFAULTS (score = 0.0) FROM docs LIMIT 10;");
     assert!(res.is_ok(), "failed: {:?}", res.err());
+}
+
+#[test]
+fn formula_max_min_acosh_functions() {
+    let s = Parser::parse(
+        "QUERY FORMULA MAX($score * 2.0, MIN($score, bonus)) + ACOSH(rank) DEFAULTS (score = 0.0) FROM docs LIMIT 10;",
+    )
+    .unwrap();
+    let Stmt::Query(q) = s else { panic!() };
+    let QueryExpr::Formula { expression, .. } = &q.expression else {
+        panic!()
+    };
+    // Outer sum: MAX(...) + ACOSH(...)
+    let FormulaExpr::Sum { left, right } = expression.as_ref() else {
+        panic!()
+    };
+    let FormulaExpr::Max { args } = left.as_ref() else {
+        panic!("expected MAX, got {left:?}")
+    };
+    assert_eq!(args.len(), 2, "MAX folds both operands");
+    assert!(matches!(args[0], FormulaExpr::Mul { .. }));
+    let FormulaExpr::Min { args } = &args[1] else {
+        panic!("expected nested MIN, got {:?}", args[1])
+    };
+    assert_eq!(args.len(), 2);
+    let FormulaExpr::Acosh { x } = right.as_ref() else {
+        panic!("expected ACOSH, got {right:?}")
+    };
+    assert!(matches!(x.as_ref(), FormulaExpr::Variable { name } if name == "rank"));
+}
+
+#[test]
+fn formula_functions_are_case_insensitive() {
+    let s =
+        Parser::parse("QUERY FORMULA max(1.0, min(2.0, 3.0)) DEFAULTS (score = 0.0) FROM docs;")
+            .unwrap();
+    let Stmt::Query(q) = s else { panic!() };
+    let QueryExpr::Formula { expression, .. } = &q.expression else {
+        panic!()
+    };
+    assert!(matches!(expression.as_ref(), FormulaExpr::Max { args } if args.len() == 2));
 }
 
 #[test]
@@ -863,4 +904,15 @@ fn stmt_serde_round_trips_through_json() {
         serde_json::from_str::<Stmt>("\"ShowCollections\"").unwrap(),
         Stmt::ShowCollections
     );
+}
+
+#[test]
+fn implicit_array_vector_literal_parses() {
+    let stmt1 = Parser::parse("QUERY [0.1, 0.2, 0.3] FROM docs;").unwrap();
+    let stmt2 = Parser::parse("QUERY VECTOR [0.1, 0.2, 0.3] FROM docs;").unwrap();
+    assert_eq!(stmt1, stmt2);
+
+    let stmt3 = Parser::parse("QUERY [[0.1, 0.2], [0.3, 0.4]] FROM docs;").unwrap();
+    let stmt4 = Parser::parse("QUERY VECTOR [[0.1, 0.2], [0.3, 0.4]] FROM docs;").unwrap();
+    assert_eq!(stmt3, stmt4);
 }

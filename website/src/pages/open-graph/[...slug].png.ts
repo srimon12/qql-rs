@@ -1,91 +1,96 @@
-import type { APIRoute, GetStaticPaths } from "astro";
 import { getCollection } from "astro:content";
+import type { APIRoute, GetStaticPaths } from "astro";
 import sharp from "sharp";
 import { SITE } from "../../config/site";
 
 function escapeXml(unsafe: string): string {
-  return unsafe
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
+	return unsafe
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&apos;");
 }
 
-function wrapText(text: string, maxCharsPerLine: number, maxLines: number): string[] {
-  const words = text.trim().split(/\s+/);
-  const lines: string[] = [];
-  let currentLine = "";
+function wrapText(
+	text: string,
+	maxCharsPerLine: number,
+	maxLines: number,
+): string[] {
+	const words = text.trim().split(/\s+/);
+	const lines: string[] = [];
+	let currentLine = "";
 
-  for (const word of words) {
-    if ((currentLine + " " + word).trim().length <= maxCharsPerLine) {
-      currentLine = (currentLine + " " + word).trim();
-    } else {
-      if (currentLine) {
-        lines.push(currentLine);
-      }
-      currentLine = word;
-      if (lines.length >= maxLines - 1) {
-        break;
-      }
-    }
-  }
-  if (currentLine && lines.length < maxLines) {
-    lines.push(currentLine);
-  }
+	for (const word of words) {
+		if (`${currentLine} ${word}`.trim().length <= maxCharsPerLine) {
+			currentLine = `${currentLine} ${word}`.trim();
+		} else {
+			if (currentLine) {
+				lines.push(currentLine);
+			}
+			currentLine = word;
+			if (lines.length >= maxLines - 1) {
+				break;
+			}
+		}
+	}
+	if (currentLine && lines.length < maxLines) {
+		lines.push(currentLine);
+	}
 
-  if (lines.length === maxLines && words.length > 0) {
-    const lastLine = lines[maxLines - 1];
-    if (text.length > lines.join(" ").length) {
-      lines[maxLines - 1] = lastLine.replace(/[.,;:]?$/, "") + "…";
-    }
-  }
+	if (lines.length === maxLines && words.length > 0) {
+		const lastLine = lines[maxLines - 1];
+		if (text.length > lines.join(" ").length) {
+			lines[maxLines - 1] = `${lastLine.replace(/[.,;:]?$/, "")}…`;
+		}
+	}
 
-  return lines;
+	return lines;
 }
 
 function getCategoryFromSlug(slug: string): string {
-  if (slug === "home" || slug === "og-image") return "DECLARATIVE VECTOR SEARCH";
-  if (slug === "playground") return "INTERACTIVE PLAYGROUND";
-  if (slug.includes("getting-started")) return "GETTING STARTED";
-  if (slug.includes("guides")) return "PRODUCTION GUIDE";
-  if (slug.includes("language")) return "LANGUAGE REFERENCE";
-  if (slug.includes("edge")) return "IN-PROCESS EDGE RUNTIME";
-  if (slug.includes("sdks")) return "NATIVE SDKs";
-  if (slug.includes("tools")) return "DEVELOPER TOOLING";
-  if (slug.includes("reference")) return "API & ERROR SPECIFICATION";
-  if (slug.includes("contributing")) return "CONTRIBUTING";
-  return "DOCUMENTATION";
+	if (slug === "home" || slug === "og-image")
+		return "DECLARATIVE VECTOR SEARCH";
+	if (slug === "playground") return "INTERACTIVE PLAYGROUND";
+	if (slug.includes("getting-started")) return "GETTING STARTED";
+	if (slug.includes("guides")) return "PRODUCTION GUIDE";
+	if (slug.includes("language")) return "LANGUAGE REFERENCE";
+	if (slug.includes("edge")) return "IN-PROCESS EDGE RUNTIME";
+	if (slug.includes("sdks")) return "NATIVE SDKs";
+	if (slug.includes("tools")) return "DEVELOPER TOOLING";
+	if (slug.includes("reference")) return "API & ERROR SPECIFICATION";
+	if (slug.includes("contributing")) return "CONTRIBUTING";
+	return "DOCUMENTATION";
 }
 
 function generateSvg({
-  title,
-  description,
-  category,
+	title,
+	description,
+	category,
 }: {
-  title: string;
-  description: string;
-  category: string;
+	title: string;
+	description: string;
+	category: string;
 }): string {
-  const titleLines = wrapText(title, 34, 2);
-  const descLines = wrapText(description, 58, 3);
+	const titleLines = wrapText(title, 34, 2);
+	const descLines = wrapText(description, 58, 3);
 
-  const titleTspans = titleLines
-    .map(
-      (line, i) =>
-        `<tspan x="80" y="${250 + i * 56}" font-weight="700">${escapeXml(line)}</tspan>`,
-    )
-    .join("\n");
+	const titleTspans = titleLines
+		.map(
+			(line, i) =>
+				`<tspan x="80" y="${250 + i * 56}" font-weight="700">${escapeXml(line)}</tspan>`,
+		)
+		.join("\n");
 
-  const descStartY = 250 + titleLines.length * 56 + 18;
-  const descTspans = descLines
-    .map(
-      (line, i) =>
-        `<tspan x="80" y="${descStartY + i * 32}">${escapeXml(line)}</tspan>`,
-    )
-    .join("\n");
+	const descStartY = 250 + titleLines.length * 56 + 18;
+	const descTspans = descLines
+		.map(
+			(line, i) =>
+				`<tspan x="80" y="${descStartY + i * 32}">${escapeXml(line)}</tspan>`,
+		)
+		.join("\n");
 
-  return `
+	return `
 <svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
@@ -154,67 +159,70 @@ function generateSvg({
 }
 
 export const getStaticPaths: GetStaticPaths = async () => {
-  const docs = await getCollection("docs");
+	const docs = await getCollection("docs");
 
-  const docPaths = docs.map((entry) => {
-    const rawSlug = entry.id.replace(/\.(mdoc|md)$/, "").replace(/^\//, "");
-    return {
-      params: { slug: rawSlug },
-      props: {
-        title: entry.data.title,
-        description: entry.data.description || "Declarative vector search for Qdrant.",
-        category: getCategoryFromSlug(rawSlug),
-      },
-    };
-  });
+	const docPaths = docs.map((entry) => {
+		const rawSlug = entry.id.replace(/\.(mdoc|md)$/, "").replace(/^\//, "");
+		return {
+			params: { slug: rawSlug },
+			props: {
+				title: entry.data.title,
+				description:
+					entry.data.description || "Declarative vector search for Qdrant.",
+				category: getCategoryFromSlug(rawSlug),
+			},
+		};
+	});
 
-  const specialPaths = [
-    {
-      params: { slug: "home" },
-      props: {
-        title: "QQL: SQL for Qdrant Vector Search",
-        description:
-          "One typed declarative query language for hybrid search, filtering, mutations, multitenancy, and schema across Rust, Python, Node.js, WASM, REST, gRPC, and edge.",
-        category: "DECLARATIVE VECTOR SEARCH",
-      },
-    },
-    {
-      params: { slug: "og-image" },
-      props: {
-        title: "QQL: SQL for Qdrant Vector Search",
-        description:
-          "One typed declarative query language for hybrid search, filtering, mutations, multitenancy, and schema across Rust, Python, Node.js, WASM, REST, gRPC, and edge.",
-        category: "DECLARATIVE VECTOR SEARCH",
-      },
-    },
-    {
-      params: { slug: "playground" },
-      props: {
-        title: "QQL Playground: in-browser WASM parser and planner",
-        description:
-          "Interactive browser playground for QQL. Parse queries, inspect ASTs, verify planned execution routes, and test AST filter injection in real time.",
-        category: "INTERACTIVE PLAYGROUND",
-      },
-    },
-  ];
+	const specialPaths = [
+		{
+			params: { slug: "home" },
+			props: {
+				title: "QQL: SQL for Qdrant Vector Search",
+				description:
+					"One typed declarative query language for hybrid search, filtering, mutations, multitenancy, and schema across Rust, Python, Node.js, WASM, REST, gRPC, and edge.",
+				category: "DECLARATIVE VECTOR SEARCH",
+			},
+		},
+		{
+			params: { slug: "og-image" },
+			props: {
+				title: "QQL: SQL for Qdrant Vector Search",
+				description:
+					"One typed declarative query language for hybrid search, filtering, mutations, multitenancy, and schema across Rust, Python, Node.js, WASM, REST, gRPC, and edge.",
+				category: "DECLARATIVE VECTOR SEARCH",
+			},
+		},
+		{
+			params: { slug: "playground" },
+			props: {
+				title: "QQL Playground: in-browser WASM parser and planner",
+				description:
+					"Interactive browser playground for QQL. Parse queries, inspect ASTs, verify planned execution routes, and test AST filter injection in real time.",
+				category: "INTERACTIVE PLAYGROUND",
+			},
+		},
+	];
 
-  return [...specialPaths, ...docPaths];
+	return [...specialPaths, ...docPaths];
 };
 
 export const GET: APIRoute = async ({ props }) => {
-  const { title, description, category } = props as {
-    title: string;
-    description: string;
-    category: string;
-  };
+	const { title, description, category } = props as {
+		title: string;
+		description: string;
+		category: string;
+	};
 
-  const svg = generateSvg({ title, description, category });
-  const pngBuffer = await sharp(Buffer.from(svg)).png({ quality: 90 }).toBuffer();
+	const svg = generateSvg({ title, description, category });
+	const pngBuffer = await sharp(Buffer.from(svg))
+		.png({ quality: 90 })
+		.toBuffer();
 
-  return new Response(pngBuffer, {
-    headers: {
-      "Content-Type": "image/png",
-      "Cache-Control": "public, max-age=31536000, immutable",
-    },
-  });
+	return new Response(pngBuffer, {
+		headers: {
+			"Content-Type": "image/png",
+			"Cache-Control": "public, max-age=31536000, immutable",
+		},
+	});
 };

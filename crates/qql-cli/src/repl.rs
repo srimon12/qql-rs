@@ -293,9 +293,10 @@ fn print_repl_help() {
 \n  \x1b[33mCREATE COLLECTION\x1b[0m <name> [\x1b[33mHYBRID\x1b[0m [\x1b[33mRERANK\x1b[0m]]\n\
 \n  \x1b[33mDROP COLLECTION\x1b[0m <name>\n\
 \n  \x1b[33mSHOW COLLECTIONS\x1b[0m\n\
-\n  \x1b[33mQUERY\x1b[0m ['<text>' | NEAREST POINT <id> | ...]\n\
+\n  \x1b[33mQUERY\x1b[0m ['<text>' | [<vector>] | NEAREST POINT <id> | ...]\n\
       \x1b[33mFROM\x1b[0m <collection> [\x1b[33mUSING\x1b[0m <vector> [\x1b[33mAS DENSE|SPARSE\x1b[0m]] \x1b[33mLIMIT\x1b[0m <n>\n\
-\n  \x1b[33mQUERY POINTS\x1b[0m (<id>, ...) \x1b[33mFROM\x1b[0m <name> [\x1b[33mWITH PAYLOAD true\x1b[0m]\n\
+\n  \x1b[33mQUERY POINTS\x1b[0m (<id>, ...) \x1b[33mFROM\x1b[0m <name> [\x1b[33mWITH PAYLOAD false\x1b[0m]\n\
+\n  \x1b[33mFACET\x1b[0m <field> \x1b[33mFROM\x1b[0m <name> [\x1b[33mWHERE\x1b[0m <filter>] [\x1b[33mLIMIT\x1b[0m <n>] [\x1b[33mEXACT true\x1b[0m]\n\
 \n  \x1b[33mSCROLL FROM\x1b[0m <name> [\x1b[33mWHERE\x1b[0m <filter>] [\x1b[33mAFTER\x1b[0m '<id>'] [\x1b[33mWITH VECTOR\x1b[0m] \x1b[33mLIMIT\x1b[0m <n>\n\
 \n  \x1b[33mDELETE FROM\x1b[0m <name> \x1b[33mWHERE\x1b[0m id = '<id>' | <field> = '<value>'\n\
 \n\x1b[1mBuilt-in Commands:\x1b[0m\n\

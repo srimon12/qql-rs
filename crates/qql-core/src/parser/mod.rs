@@ -12,7 +12,7 @@ pub(crate) mod upsert;
 pub(crate) mod with_clause;
 
 use crate::ast::Stmt;
-use crate::error::QqlError;
+use crate::error::{QqlError, Span};
 use crate::lexer::Lexer;
 use crate::token::{Token, TokenKind};
 use alloc::string::String;
@@ -42,37 +42,35 @@ pub(crate) struct AstLowerer<'a> {
 /// should split them into bounded batches before parsing.
 pub const MAX_STATEMENTS: usize = 256;
 
+/// Returns true when `s` equals `upper`, ignoring ASCII case.
 pub fn ascii_equal(s: &str, upper: &str) -> bool {
-    if s.len() != upper.len() {
-        return false;
-    }
-    s.as_bytes()
-        .iter()
-        .zip(upper.as_bytes().iter())
-        .all(|(a, b)| a.to_ascii_uppercase() == *b)
+    s.eq_ignore_ascii_case(upper)
 }
 
+/// Returns true when `s` equals `lower`, ignoring ASCII case.
 pub fn ascii_equal_lower(s: &str, lower: &str) -> bool {
-    if s.len() != lower.len() {
-        return false;
-    }
-    s.as_bytes()
-        .iter()
-        .zip(lower.as_bytes().iter())
-        .all(|(a, b)| a.to_ascii_lowercase() == *b)
+    s.eq_ignore_ascii_case(lower)
 }
 
+/// Returns true when a token kind can serve as a contextual field name.
 pub fn is_contextual_field_name(kind: TokenKind) -> bool {
     kind.is_keyword_or_identifier()
 }
 
 impl Parser {
+    /// Parses a single QQL statement from the input string.
     pub fn parse(input: &str) -> Result<Stmt, QqlError> {
         AstLowerer::lower_statement(input)
     }
 
+    /// Parses a `;`-separated script into a list of statements.
     pub fn parse_all(input: &str) -> Result<Vec<Stmt>, QqlError> {
         AstLowerer::lower_script(input)
+    }
+
+    /// Parses a script, returning each statement paired with its source span.
+    pub fn parse_all_with_spans(input: &str) -> Result<Vec<(Stmt, Span)>, QqlError> {
+        AstLowerer::lower_script_with_spans(input)
     }
 
     /// Parse a standalone literal value (string, number, boolean, null, list, or dict).
@@ -108,6 +106,11 @@ impl<'a> AstLowerer<'a> {
     }
 
     fn lower_script(input: &'a str) -> Result<Vec<Stmt>, QqlError> {
+        let with_spans = Self::lower_script_with_spans(input)?;
+        Ok(with_spans.into_iter().map(|(s, _)| s).collect())
+    }
+
+    pub(crate) fn lower_script_with_spans(input: &'a str) -> Result<Vec<(Stmt, Span)>, QqlError> {
         let tokens = Self::lex(input)?;
         let mut parser = AstLowerer::new(input, tokens);
         let mut statements = Vec::new();
@@ -127,9 +130,12 @@ impl<'a> AstLowerer<'a> {
                     parser.peek()?.span,
                 ));
             }
-            statements.push(parser.parse_stmt()?);
-            match parser.peek()?.kind {
+            let start_tok = parser.peek()?;
+            let start_pos = start_tok.span.start;
+            let stmt = parser.parse_stmt()?;
+            let end_pos = match parser.peek()?.kind {
                 TokenKind::Semicolon => {
+                    let semi_span = parser.peek()?.span;
                     parser.advance()?;
                     if parser.peek()?.kind == TokenKind::Semicolon {
                         return Err(QqlError::parse(
@@ -138,8 +144,16 @@ impl<'a> AstLowerer<'a> {
                             parser.peek()?.span,
                         ));
                     }
+                    semi_span.end
                 }
-                TokenKind::Eof => break,
+                TokenKind::Eof => {
+                    let prev_idx = parser.index.saturating_sub(1);
+                    parser
+                        .tokens
+                        .get(prev_idx)
+                        .map(|t| t.span.end)
+                        .unwrap_or(start_tok.span.end)
+                }
                 _ => {
                     return Err(QqlError::parse(
                         "QQL-PARSE-SEPARATOR",
@@ -147,7 +161,8 @@ impl<'a> AstLowerer<'a> {
                         parser.peek()?.span,
                     ));
                 }
-            }
+            };
+            statements.push((stmt, Span::new(start_pos, end_pos)));
         }
         Ok(statements)
     }
@@ -189,6 +204,7 @@ impl<'a> AstLowerer<'a> {
             TokenKind::Clear => self.parse_clear(),
             TokenKind::Update => self.parse_update(),
             TokenKind::Count => self.parse_count(),
+            TokenKind::Facet => self.parse_facet(),
             TokenKind::Set => self.parse_set_quota(),
             _ => Err(QqlError::parse(
                 "QQL-PARSE-STATEMENT",

@@ -72,6 +72,9 @@ const q19 = [
   "QUERY TEXT 'risks' FROM docs USING sparse WHERE tenant_id = 'acme' SHARD 'acme' PARAMS (idf = WHERE tenant_id = 'acme') LIMIT 10",
   'SHOW QUOTAS',
   'SET QUOTA (enabled = true, max_resident_memory_percent = 80) WAIT true',
+  'FACET title FROM docs LIMIT 10',
+  'QUERY [0.1, 0.2, 0.3] FROM docs LIMIT 5',
+  'QUERY POINTS (1, 2) FROM docs',
 ];
 console.log('\n── Qdrant 1.19 surface (offline) ──');
 for (const s of q19) {

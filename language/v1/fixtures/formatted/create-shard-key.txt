@@ -1,0 +1,13 @@
+-- create-shard-key.qql — SHARD KEY management
+
+-- Create shard key
+CREATE SHARD KEY 'acme' ON COLLECTION docs WITH (shards_number = 2);
+
+-- Create shard key without config
+CREATE SHARD KEY 'default' ON COLLECTION docs;
+
+-- Drop shard key
+DROP SHARD KEY 'acme' ON COLLECTION docs;
+
+-- Show shard keys
+SHOW SHARD KEYS ON COLLECTION docs;

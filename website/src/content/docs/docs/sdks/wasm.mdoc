@@ -15,10 +15,7 @@ npm install qql-wasm
 
 {% qqlExample title="A browser-safe query source" %}
 ```sql
-QUERY TEXT 'browser retrieval'
-FROM docs
-USING dense
-LIMIT 5;
+QUERY 'browser retrieval' FROM docs USING dense LIMIT 5;
 ```
 {% /qqlExample %}
 

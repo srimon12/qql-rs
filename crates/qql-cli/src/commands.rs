@@ -329,7 +329,7 @@ fn executor(
     let config = qql::config::QqlConfig::load()?.unwrap_or_default();
 
     #[cfg(feature = "grpc")]
-    let use_grpc = url.contains(":6334");
+    let use_grpc = url.starts_with("grpc://") || url.contains(":6334");
     #[cfg(not(feature = "grpc"))]
     let use_grpc = false;
 

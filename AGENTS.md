@@ -1,6 +1,33 @@
-# QQL Agent & Developer Reference Guide
+# Workspace Rust Guidelines & Agent Reference (qql-rs)
 
-Welcome to the QQL Rust codebase. This guide details the architecture, design philosophy, contract testing standards, and key implementation guidelines for developers and AI coding agents.
+This workspace is a high-performance, modular Rust engine containing multiple crates: core execution, parsing, query planning, embeddings, CLI, WASM, Python FFI (`pyqql`), and Node.js FFI (`nqql`).
+
+This guide details the core rules, architecture, design philosophy, contract testing standards, and developer workflows for contributors and AI coding agents.
+
+---
+
+## Core Rules for Agents Operating Here
+
+1. **Verify Before Declaring Done**:
+   - `cargo check --workspace --all-targets`
+   - `cargo clippy --workspace --all-targets -- -D warnings`
+   - `cargo test -p qql-core -p qql-plan -p qql-embed`
+   - `cargo fmt --check`
+
+2. **Memory Safety & Unsafe Code**:
+   - Every `unsafe` block must include a descriptive `// SAFETY:` invariant check.
+   - For FFI boundaries (`pyqql` using PyO3, `nqql` using NAPI-RS, `qql-wasm`), consult `unsafe-checker`, `rust-pyo3`, and `rust-napi`.
+
+3. **Simplicity & Surgical Edits**:
+   - No speculative abstractions. Touch only files directly related to the user's task.
+   - Preserve existing architecture and naming conventions.
+
+4. **QQL Language Idioms**:
+   - **Payloads included by default**: `QUERY` returns point payloads by default (`WITH PAYLOAD true`). Do not add redundant `WITH PAYLOAD true` clauses. Use `WITH PAYLOAD false` only when stripping payloads for minimal bandwidth.
+   - **Compact vector literals**: Use `QUERY [0.1, 0.2, ...] FROM ...` directly. The `VECTOR` keyword prefix is optional for array literals.
+   - **Formula decay datetime targets**: Write `TARGET = "2024-01-01T00:00:00Z"` with standard ISO 8601 strings; bare field identifiers automatically infer `datetime_key`.
+   - **In-database faceting**: Use `FACET <field> FROM <collection> [WHERE ...] [LIMIT ...] [EXACT true]` for categorical value aggregation instead of pulling points into memory.
+   - **Zero SDK dependency**: `pyqql` and `nqql` are standalone runtimes. Never import `qdrant_client` or third-party wrappers inside QQL query code.
 
 ---
 
@@ -130,13 +157,14 @@ pub trait QdrantOps: Send + Sync {
 
 Three implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant`. The gRPC adapter bypasses `execute_route` for DML — it uses `execute_grpc_route()` which converts typed `RequestBody` variants directly to protobuf. For REST, `execute_route` serializes `RequestBody` as JSON.
 
-### Statement → Endpoint Matrix (20 routes)
+### Statement → Endpoint Matrix (21 routes)
 
 | QQL Statement | Endpoint | Method |
 |---|---|---|
 | `QUERY ...` (search) | `/points/query` | POST |
 | `QUERY ... GROUP BY` | `/points/query/groups` | POST |
 | `QUERY POINTS (ids)` | `/points` | POST |
+| `FACET ...` | `/points/facet` | POST |
 | `SCROLL ...` | `/points/scroll` | POST |
 | `COUNT ...` | `/points/count` | POST |
 | `UPSERT ...` | `/points` | PUT |
@@ -160,8 +188,8 @@ Three implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant`. The gRPC adapte
 - `qdrant-client` dropped entirely — replaced with `tonic` 0.14 + `tonic-prost` + `tonic-prost-build`
 - Proto files in `proto/`, compiled at build time via `tonic-prost-build`
 - `GrpcQdrant` wraps `tonic::Channel` with `connect_lazy`
-- `grpc_route.rs` (~2,637 lines) converts typed qql-plan structs → generated protobuf types directly for query vectors, point IDs, and vector values. DDL sub-configs still read from `serde_json::Value` fields (hnsw_config, optimizers_config, quantization_config). Formula expressions still round-trip through JSON via `lower_formula_expr` → `to_formula_expression`.
-- `grpc.rs` (~513 lines) is the thin Tonic client wrapper; heavy conversion lives in `grpc_route.rs`
+- `grpc_route.rs` converts typed qql-plan structs → generated protobuf types directly for query vectors, point IDs, and vector values. DDL sub-configs still read from `serde_json::Value` fields (hnsw_config, optimizers_config, quantization_config). Formula expressions still round-trip through JSON via `lower_formula_expr` → `to_formula_expression`.
+- `grpc.rs` is the thin Tonic client wrapper; heavy conversion lives in `grpc_route.rs`
 - Tonic features: `channel`, `codegen`, `tls-ring`, `tls-webpki-roots` (no server, no axum, no router)
 - API key support via `ApiKeyInterceptor` (RUN-009 fixed)
 - DDL routes (CreateCollection, UpdateCollection, CreateIndex, DropIndex, DeleteCollection, shard operations) all handled in `execute_grpc_route`
@@ -184,8 +212,6 @@ All generated route payloads are validated directly against Qdrant's official
 1. **`Query` Schema Validation**: All 12 query expression variants are validated against `# /components/schemas/Query`.
 2. **`Filter` Schema Validation**: All 17 filter expression variants are validated against `# /components/schemas/Filter`.
 3. **`PointRequest` & `ScrollRequest` Validation**: Validated against `# /components/schemas/PointRequest` and `# /components/schemas/ScrollRequest`.
-
-REST/gRPC operation-matrix coverage is not yet complete — gRPC tests validate dispatch does not error but do not assert field-level parity for formulas, shard keys, search params, or DDL options (QUALITY-003).
 
 ---
 
@@ -251,19 +277,18 @@ Dedicated reference guides for each host SDK live under `skills/qql-skill/refere
 
 ### Testing
 ```bash
-PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 cargo test --workspace --all-targets
+cargo test --workspace --all-targets
 ```
 
 ### Formatting & Clippy
 ```bash
 cargo fmt --check
-PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 cargo check --workspace --all-targets
-PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 cargo clippy --workspace --all-targets -- -D warnings
+cargo check --workspace --all-targets
+cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 ### Known Workspace Blockers
 - `qql-wasm`: `async_trait(?Send)` on WASM Embedder impl conflicts with host `+ Send` trait bound — only builds for `wasm32-unknown-unknown` target.
-- `pyqql`: PyO3 0.23.5 maximum Python version is 3.13; host has Python 3.14. Set `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1` to bypass.
 - `qql-edge`: Requires fastembed-rs with specific native dependencies.
 
 ### Token Definition Hygiene

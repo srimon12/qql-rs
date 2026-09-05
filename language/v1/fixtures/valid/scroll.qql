@@ -22,3 +22,4 @@ SCROLL FROM docs WHERE category = 'tech' WITH VECTOR (dense) LIMIT 50;
 
 -- Scroll with shard routing
 SCROLL FROM sec10k WHERE tenant_id = 'honeywell' SHARD 'honeywell' LIMIT 50;
+

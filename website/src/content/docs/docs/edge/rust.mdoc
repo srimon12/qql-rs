@@ -54,7 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     let report = executor
-        .execute("QUERY TEXT 'hello' FROM docs USING dense LIMIT 5", OnError::Stop)
+        .execute("QUERY 'hello' FROM docs USING dense LIMIT 5", OnError::Stop)
         .await?;
     println!("found {} hits", report.results[0].data.map(|d| d.to_string()).unwrap_or_default());
 

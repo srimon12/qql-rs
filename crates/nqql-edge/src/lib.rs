@@ -45,6 +45,13 @@ pub struct Stmt {
 
 #[napi]
 impl Stmt {
+    /// Parse a QQL string into a Stmt handle.
+    #[napi(constructor, catch_unwind)]
+    pub fn new(input: String) -> napi::Result<Self> {
+        let inner = Parser::parse(&input).map_err(to_napi_err)?;
+        Ok(Stmt { inner })
+    }
+
     #[napi(catch_unwind)]
     pub fn inject_filter(
         &mut self,
@@ -98,6 +105,33 @@ impl Stmt {
             ));
         }
         Ok(())
+    }
+
+    /// Compile this Stmt AST directly into its transport route without re-parsing.
+    #[napi(catch_unwind)]
+    pub fn compile_route(&self) -> napi::Result<serde_json::Value> {
+        let compiled = routing::compile_statement(&self.inner).map_err(to_napi_err)?;
+        let (method, path, payload) = match compiled.route {
+            Some(route) => {
+                let payload = route.body_json().unwrap_or(serde_json::Value::Null);
+                (
+                    serde_json::Value::String(route.method.as_str().into()),
+                    serde_json::Value::String(route.path),
+                    payload,
+                )
+            }
+            None => (
+                serde_json::Value::Null,
+                serde_json::Value::Null,
+                serde_json::Value::Null,
+            ),
+        };
+        Ok(serde_json::json!({
+            "stmt_type": compiled.stmt_type,
+            "method": method,
+            "path": path,
+            "payload": payload,
+        }))
     }
 }
 
@@ -162,6 +196,8 @@ pub fn tokenize(input: String) -> napi::Result<serde_json::Value> {
         kind: &'a str,
         text: &'a str,
         pos: usize,
+        end: usize,
+        len: usize,
     }
 
     let lexer = Lexer::new(&input);
@@ -173,6 +209,8 @@ pub fn tokenize(input: String) -> napi::Result<serde_json::Value> {
             kind: token.kind.as_str(),
             text: token.text,
             pos: token.span.start,
+            end: token.span.end,
+            len: token.span.end.saturating_sub(token.span.start),
         });
     }
     serde_json::to_value(&tokens).map_err(|e| {

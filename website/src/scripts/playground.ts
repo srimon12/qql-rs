@@ -1,36 +1,35 @@
-import { basicSetup } from "codemirror";
-import { EditorState } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
 import { indentWithTab } from "@codemirror/commands";
 import {
-  forceLinting,
-  linter,
-  lintGutter,
-  type Diagnostic,
+	type Diagnostic,
+	forceLinting,
+	linter,
+	lintGutter,
 } from "@codemirror/lint";
+import { EditorState } from "@codemirror/state";
+import { EditorView, keymap } from "@codemirror/view";
+import { basicSetup } from "codemirror";
 import initQql, {
-  analyze,
-  Client,
-  Stmt,
-  type AnalysisResult,
-  type CompiledRoute,
+	analyze,
+	Client,
+	type CompiledRoute,
+	Stmt,
 } from "qql-wasm-current";
 import { createBrowserEmbedder } from "./browser-embedder";
 import {
-  qqlCompletion,
-  qqlHighlighting,
-  qqlLanguage,
+	qqlCompletion,
+	qqlHighlighting,
+	qqlLanguage,
 } from "./playground-language";
 import {
-  DEFAULT_POLICY,
-  DEFAULT_SETTINGS,
-  type ExportLanguage,
-  type InspectorTab,
-  type PlaygroundAnalysis,
-  type PlaygroundSettings,
-  type PlaygroundState,
-  type PolicyValueType,
-  type RuntimePolicy,
+	DEFAULT_POLICY,
+	DEFAULT_SETTINGS,
+	type ExportLanguage,
+	type InspectorTab,
+	type PlaygroundAnalysis,
+	type PlaygroundSettings,
+	type PlaygroundState,
+	type PolicyValueType,
+	type RuntimePolicy,
 } from "./playground-types";
 
 const SETTINGS_KEY = "qql-playground.settings.v1";
@@ -40,102 +39,105 @@ const INSPECTOR_TAB_KEY = "qql-playground.inspector-tab.v1";
 const ANALYSIS_DELAY_MS = 90;
 
 function required<T extends Element>(selector: string): T {
-  const element = document.querySelector<T>(selector);
-  if (!element) throw new Error(`Playground element is missing: ${selector}`);
-  return element;
+	const element = document.querySelector<T>(selector);
+	if (!element) throw new Error(`Playground element is missing: ${selector}`);
+	return element;
 }
 
 function all<T extends Element>(selector: string): T[] {
-  return [...document.querySelectorAll<T>(selector)];
+	return [...document.querySelectorAll<T>(selector)];
 }
 
 function formatError(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (typeof error === "string") return error;
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
+	if (error instanceof Error) return error.message;
+	if (typeof error === "string") return error;
+	try {
+		return JSON.stringify(error);
+	} catch {
+		return String(error);
+	}
 }
 
 function pretty(value: unknown): string {
-  return JSON.stringify(value, null, 2);
+	return JSON.stringify(value, null, 2);
 }
 
 function loadStored<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return { ...fallback };
-    return { ...fallback, ...(JSON.parse(raw) as Partial<T>) };
-  } catch {
-    return { ...fallback };
-  }
+	try {
+		const raw = localStorage.getItem(key);
+		if (!raw) return { ...fallback };
+		return { ...fallback, ...(JSON.parse(raw) as Partial<T>) };
+	} catch {
+		return { ...fallback };
+	}
 }
 
 function loadSession(key: string): string | null {
-  try {
-    return sessionStorage.getItem(key);
-  } catch {
-    return null;
-  }
+	try {
+		return sessionStorage.getItem(key);
+	} catch {
+		return null;
+	}
 }
 
 function saveSession(key: string, value: string): void {
-  try {
-    sessionStorage.setItem(key, value);
-  } catch {
-    // Private browsing may deny storage; the playground remains usable.
-  }
+	try {
+		sessionStorage.setItem(key, value);
+	} catch {
+		// Private browsing may deny storage; the playground remains usable.
+	}
 }
 
 function applyRuntimePolicy(statement: Stmt): void {
-  statement.injectFilter(policy.field, policy.op, policyValue(policy));
-  if (policy.shardKey.trim()) statement.shardKey = policy.shardKey.trim();
+	statement.injectFilter(policy.field, policy.op, policyValue(policy));
+	if (policy.shardKey.trim()) statement.shardKey = policy.shardKey.trim();
 }
 
 function policyValue(policy: RuntimePolicy): string | number | boolean {
-  if (policy.valueType === "number") {
-    const number = Number(policy.value);
-    if (!Number.isFinite(number)) throw new Error("Policy value must be a number.");
-    return number;
-  }
-  if (policy.valueType === "boolean") {
-    if (policy.value !== "true" && policy.value !== "false") {
-      throw new Error("Boolean policy values must be true or false.");
-    }
-    return policy.value === "true";
-  }
-  return policy.value;
+	if (policy.valueType === "number") {
+		const number = Number(policy.value);
+		if (!Number.isFinite(number))
+			throw new Error("Policy value must be a number.");
+		return number;
+	}
+	if (policy.valueType === "boolean") {
+		if (policy.value !== "true" && policy.value !== "false") {
+			throw new Error("Boolean policy values must be true or false.");
+		}
+		return policy.value === "true";
+	}
+	return policy.value;
 }
 
 function byteOffsetToPosition(source: string, offset: number): number {
-  const bytes = new TextEncoder().encode(source);
-  const safeOffset = Math.max(0, Math.min(offset, bytes.length));
-  return new TextDecoder().decode(bytes.slice(0, safeOffset)).length;
+	const bytes = new TextEncoder().encode(source);
+	const safeOffset = Math.max(0, Math.min(offset, bytes.length));
+	return new TextDecoder().decode(bytes.slice(0, safeOffset)).length;
 }
 
 function quotePython(source: string): string {
-  return `qql = """${source.replace(/"""/g, '\\\"\\\"\\\"')}"""`;
+	return `qql = """${source.replace(/"""/g, '\\"\\"\\"')}"""`;
 }
 
 function quoteRust(source: string): string {
-  const hashes = source.includes('"#') ? "##" : "#";
-  return `r${hashes}"${source}"${hashes}`;
+	const hashes = source.includes('"#') ? "##" : "#";
+	return `r${hashes}"${source}"${hashes}`;
 }
 
 function exportCode(
-  language: ExportLanguage,
-  source: string,
-  settings: PlaygroundSettings,
-  route: CompiledRoute | null,
-  statementCount: number,
+	language: ExportLanguage,
+	source: string,
+	settings: PlaygroundSettings,
+	route: CompiledRoute | null,
+	statementCount: number,
 ): string {
-  const url = JSON.stringify(settings.qdrantUrl);
-  const pythonKey = settings.qdrantKey ? JSON.stringify(settings.qdrantKey) : "None";
+	const url = JSON.stringify(settings.qdrantUrl);
+	const pythonKey = settings.qdrantKey
+		? JSON.stringify(settings.qdrantKey)
+		: "None";
 
-  if (language === "python") {
-    return `# pip install pyqql
+	if (language === "python") {
+		return `# pip install pyqql
 from pyqql import Client
 
 ${quotePython(source)}
@@ -143,13 +145,13 @@ ${quotePython(source)}
 client = Client(url=${url}, api_key=${pythonKey})
 report = client.execute(qql)
 print(report)`;
-  }
+	}
 
-  if (language === "node") {
-    const apiKey = settings.qdrantKey
-      ? `,\n  apiKey: ${JSON.stringify(settings.qdrantKey)}`
-      : "";
-    return `// npm install @veristamp/nqql
+	if (language === "node") {
+		const apiKey = settings.qdrantKey
+			? `,\n  apiKey: ${JSON.stringify(settings.qdrantKey)}`
+			: "";
+		return `// npm install @veristamp/nqql
 import { Client } from "@veristamp/nqql";
 
 const qql = ${JSON.stringify(source)};
@@ -158,13 +160,13 @@ const client = new Client({
 });
 const report = await client.execute(qql);
 console.log(report);`;
-  }
+	}
 
-  if (language === "rust") {
-    const rustKey = settings.qdrantKey
-      ? `Some(${JSON.stringify(settings.qdrantKey)}.to_owned())`
-      : "None";
-    return `// Cargo.toml: qql = "0.1", tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+	if (language === "rust") {
+		const rustKey = settings.qdrantKey
+			? `Some(${JSON.stringify(settings.qdrantKey)}.to_owned())`
+			: "None";
+		return `// Cargo.toml: qql = "0.1", tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 use qql::executor::{Executor, OnError};
 
 #[tokio::main]
@@ -176,14 +178,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("{report:#?}");
     Ok(())
 }`;
-  }
+	}
 
-  if (!route) return "A compiled route is required before exporting cURL.";
-  const payload = pretty(route.payload).replace(/'/g, "'\\''");
-  const header = settings.qdrantKey
-    ? ` \\\n  -H ${JSON.stringify(`api-key: ${settings.qdrantKey}`)}`
-    : "";
-  return `# Statement ${state.selectedStatement + 1} of ${statementCount} · compiled from the editor
+	if (!route) return "A compiled route is required before exporting cURL.";
+	const payload = pretty(route.payload).replace(/'/g, "'\\''");
+	const header = settings.qdrantKey
+		? ` \\\n  -H ${JSON.stringify(`api-key: ${settings.qdrantKey}`)}`
+		: "";
+	return `# Statement ${state.selectedStatement + 1} of ${statementCount} · compiled from the editor
 curl -X ${route.method} ${JSON.stringify(`${settings.qdrantUrl}${route.path}`)} \\
   -H "content-type: application/json"${header} \\
   --data '${payload}'`;
@@ -219,13 +221,13 @@ const shareButton = required<HTMLButtonElement>("[data-share]");
 const docsBacklink = required<HTMLAnchorElement>("[data-docs-backlink]");
 
 const state: PlaygroundState = {
-  analysis: null,
-  response: null,
-  executionError: null,
-  selectedStatement: 0,
-  inspectorTab: "plan",
-  exportLanguage: "python",
-  metrics: null,
+	analysis: null,
+	response: null,
+	executionError: null,
+	selectedStatement: 0,
+	inspectorTab: "plan",
+	exportLanguage: "python",
+	metrics: null,
 };
 
 let settings = loadStored(SETTINGS_KEY, DEFAULT_SETTINGS);
@@ -236,1041 +238,1114 @@ const retiredClients = new Set<Client>();
 let analysisTimer: number | null = null;
 
 function toast(message: string, tone: "success" | "error" = "success"): void {
-  const item = document.createElement("div");
-  item.className = `toast toast--${tone}`;
-  item.textContent = message;
-  toastRegion.append(item);
-  window.setTimeout(() => item.remove(), 3600);
+	const item = document.createElement("div");
+	item.className = `toast toast--${tone}`;
+	item.textContent = message;
+	toastRegion.append(item);
+	window.setTimeout(() => item.remove(), 3600);
 }
 
-function setRuntime(message: string, tone: "idle" | "ready" | "failed" = "idle"): void {
-  runtimeStatus.textContent = message;
-  runtimeDot.classList.remove("is-ready", "is-failed");
-  if (tone === "ready") runtimeDot.classList.add("is-ready");
-  if (tone === "failed") runtimeDot.classList.add("is-failed");
+function setRuntime(
+	message: string,
+	tone: "idle" | "ready" | "failed" = "idle",
+): void {
+	runtimeStatus.textContent = message;
+	runtimeDot.classList.remove("is-ready", "is-failed");
+	if (tone === "ready") runtimeDot.classList.add("is-ready");
+	if (tone === "failed") runtimeDot.classList.add("is-failed");
 }
 
 /** Show "Ctrl" instead of "⌘" in kbd hints when the host is not Apple hardware. */
 function applyPlatformKeyHints(): void {
-  const isApple = /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent);
-  if (isApple) return;
-  for (const kbd of all<HTMLElement>("[data-kbd]")) {
-    kbd.textContent = (kbd.textContent ?? "").replace("⌘", "Ctrl ");
-  }
+	const isApple = /Mac|iPhone|iPad|iPod/i.test(
+		navigator.platform || navigator.userAgent,
+	);
+	if (isApple) return;
+	for (const kbd of all<HTMLElement>("[data-kbd]")) {
+		kbd.textContent = (kbd.textContent ?? "").replace("⌘", "Ctrl ");
+	}
 }
 
 function setEditorLoading(message: string | null): void {
-  editorLoading.hidden = message == null;
-  if (message != null) editorLoading.textContent = message;
-  editorHost.setAttribute("aria-busy", String(message != null));
+	editorLoading.hidden = message == null;
+	if (message != null) editorLoading.textContent = message;
+	editorHost.setAttribute("aria-busy", String(message != null));
+}
+
+function isSafeDocsRef(ref: string): boolean {
+	// Allow only same-origin /docs/* paths. Reject backslashes, control
+	// chars, and HTML-significant chars so the value cannot break out of
+	// the href context, and re-parse to block encoded // or scheme tricks.
+	if (!/^\/docs(?:\/|$)/.test(ref)) return false;
+	if (/[\\<>"'`\s]/.test(ref)) return false;
+	try {
+		const parsed = new URL(ref, window.location.origin);
+		if (parsed.origin !== window.location.origin) return false;
+		if (
+			!(parsed.pathname === "/docs" || parsed.pathname.startsWith("/docs/"))
+		) {
+			return false;
+		}
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+function setValidationBadge(text: string): void {
+	validationBadge.replaceChildren();
+	const dot = document.createElement("span");
+	dot.className = "status-dot";
+	validationBadge.append(dot, document.createTextNode(text));
 }
 
 function connectionHost(url: string): string {
-  try {
-    const parsed = new URL(url);
-    return parsed.host || url;
-  } catch {
-    return url.replace(/^https?:\/\//, "");
-  }
+	try {
+		const parsed = new URL(url);
+		return parsed.host || url;
+	} catch {
+		return url.replace(/^https?:\/\//, "");
+	}
 }
 
 function updateConnectionSummary(): void {
-  const embedding =
-    settings.embedProvider === "browser"
-      ? "MiniLM"
-      : settings.embedProvider === "http"
-        ? settings.embedModel || "HTTP embeddings"
-        : "no embedder";
-  const summary = `${connectionHost(settings.qdrantUrl)} · ${embedding}`;
-  connectionValue.textContent = summary;
-  connectionValue.parentElement?.setAttribute(
-    "title",
-    `Edit connection (${settings.qdrantUrl}, ${embedding})`,
-  );
+	const embedding =
+		settings.embedProvider === "browser"
+			? "MiniLM"
+			: settings.embedProvider === "http"
+				? settings.embedModel || "HTTP embeddings"
+				: "no embedder";
+	const summary = `${connectionHost(settings.qdrantUrl)} · ${embedding}`;
+	connectionValue.textContent = summary;
+	connectionValue.parentElement?.setAttribute(
+		"title",
+		`Edit connection (${settings.qdrantUrl}, ${embedding})`,
+	);
 }
 
 function syncPolicyChip(): void {
-  policyDot.classList.toggle("is-active", policy.enabled);
-  policyChip.hidden = !policy.enabled;
-  const value = required<HTMLElement>("[data-policy-chip-value]");
-  value.textContent = policy.enabled
-    ? `${policy.field} ${policy.op} ${policy.value}`
-    : "";
+	policyDot.classList.toggle("is-active", policy.enabled);
+	policyChip.hidden = !policy.enabled;
+	const value = required<HTMLElement>("[data-policy-chip-value]");
+	value.textContent = policy.enabled
+		? `${policy.field} ${policy.op} ${policy.value}`
+		: "";
 }
 
 function releaseRetiredClients(): void {
-  if (activeExecutions !== 0) return;
-  for (const retired of retiredClients) retired.free();
-  retiredClients.clear();
+	if (activeExecutions !== 0) return;
+	for (const retired of retiredClients) retired.free();
+	retiredClients.clear();
 }
 
 function configureClient(): void {
-  const previous = client;
-  const next = new Client(settings.qdrantUrl, settings.qdrantKey || null);
+	const previous = client;
+	const next = new Client(settings.qdrantUrl, settings.qdrantKey || null);
 
-  if (settings.embedProvider === "browser") {
-    next.setEmbedder(
-      createBrowserEmbedder((message) => {
-        embedStatus.textContent = message;
-        setRuntime(message);
-      }),
-    );
-    embedStatus.textContent =
-      "Browser model loads only when execution needs text embeddings.";
-  } else if (settings.embedProvider === "http") {
-    if (!settings.embedUrl || !settings.embedModel || settings.embedDim < 1) {
-      next.free();
-      throw new Error("HTTP embeddings need an endpoint, model, and dimension.");
-    }
-    next.setHttpEmbedder(
-      settings.embedUrl,
-      settings.embedModel,
-      settings.embedDim,
-      settings.embedKey || null,
-    );
-    embedStatus.textContent = `Using ${settings.embedModel} through ${settings.embedUrl}.`;
-  } else {
-    embedStatus.textContent = "Text embedding is disabled; use explicit vectors.";
-  }
+	if (settings.embedProvider === "browser") {
+		next.setEmbedder(
+			createBrowserEmbedder((message) => {
+				embedStatus.textContent = message;
+				setRuntime(message);
+			}),
+		);
+		embedStatus.textContent =
+			"Browser model loads only when execution needs text embeddings.";
+	} else if (settings.embedProvider === "http") {
+		if (!settings.embedUrl || !settings.embedModel || settings.embedDim < 1) {
+			next.free();
+			throw new Error(
+				"HTTP embeddings need an endpoint, model, and dimension.",
+			);
+		}
+		next.setHttpEmbedder(
+			settings.embedUrl,
+			settings.embedModel,
+			settings.embedDim,
+			settings.embedKey || null,
+		);
+		embedStatus.textContent = `Using ${settings.embedModel} through ${settings.embedUrl}.`;
+	} else {
+		embedStatus.textContent =
+			"Text embedding is disabled; use explicit vectors.";
+	}
 
-  client = next;
-  if (previous) {
-    if (activeExecutions === 0) previous.free();
-    else retiredClients.add(previous);
-  }
-  updateConnectionSummary();
+	client = next;
+	if (previous) {
+		if (activeExecutions === 0) previous.free();
+		else retiredClients.add(previous);
+	}
+	updateConnectionSummary();
 }
 
 function analyzeWithPolicy(source: string): PlaygroundAnalysis {
-  const started = performance.now();
-  const result = analyze(source);
-  let effectiveAst = result.ast;
-  let effectiveRoutes = result.routes;
-  let policyError: string | null = null;
+	const started = performance.now();
+	const result = analyze(source);
+	let effectiveAst = result.ast;
+	let effectiveRoutes = result.routes;
+	let policyError: string | null = null;
 
-  if (result.valid && policy.enabled) {
-    if (result.statements_count !== 1) {
-      policyError =
-        "Runtime policy injection accepts exactly one statement. Multi-statement scripts fail closed.";
-    } else {
-      let statement: Stmt | null = null;
-      try {
-        statement = new Stmt(source);
-        applyRuntimePolicy(statement);
-        effectiveAst = [statement.toObject()];
-        effectiveRoutes = [statement.compileRoute()];
-      } catch (error) {
-        policyError = formatError(error);
-      } finally {
-        statement?.free();
-      }
-    }
-  }
+	if (result.valid && policy.enabled) {
+		if (result.statements_count !== 1) {
+			policyError =
+				"Runtime policy injection accepts exactly one statement. Multi-statement scripts fail closed.";
+		} else {
+			let statement: Stmt | null = null;
+			try {
+				statement = new Stmt(source);
+				applyRuntimePolicy(statement);
+				effectiveAst = [statement.toObject()];
+				effectiveRoutes = [statement.compileRoute()];
+			} catch (error) {
+				policyError = formatError(error);
+			} finally {
+				statement?.free();
+			}
+		}
+	}
 
-  state.metrics = {
-    analyzedAt: new Date().toISOString(),
-    parseMs: performance.now() - started,
-    executeMs: state.metrics?.executeMs ?? null,
-    statements: result.statements_count,
-    policyApplied: policy.enabled && !policyError && result.valid,
-    embedProvider: settings.embedProvider,
-  };
+	state.metrics = {
+		analyzedAt: new Date().toISOString(),
+		parseMs: performance.now() - started,
+		executeMs: state.metrics?.executeMs ?? null,
+		statements: result.statements_count,
+		policyApplied: policy.enabled && !policyError && result.valid,
+		embedProvider: settings.embedProvider,
+	};
 
-  return { source, result, effectiveAst, effectiveRoutes, policyError };
+	return { source, result, effectiveAst, effectiveRoutes, policyError };
 }
 
 function currentDiagnostic(): Diagnostic[] {
-  const analysis = state.analysis;
-  if (!analysis) return [];
-  const { source, result, policyError } = analysis;
-  if (policyError) {
-    const firstLine = source.indexOf("\n");
-    return [
-      {
-        from: 0,
-        to: Math.max(1, firstLine === -1 ? Math.min(source.length, 1) : firstLine),
-        severity: "error",
-        message: policyError,
-      },
-    ];
-  }
-  if (result.valid || !result.error) return [];
-  const from =
-    result.error.start == null
-      ? 0
-      : byteOffsetToPosition(source, result.error.start);
-  const rawTo =
-    result.error.end == null
-      ? from + 1
-      : byteOffsetToPosition(source, result.error.end);
-  return [
-    {
-      from: Math.min(from, source.length),
-      to: Math.min(Math.max(from + 1, rawTo), source.length),
-      severity: "error",
-      message: `${result.error.code}: ${result.error.message}`,
-    },
-  ];
+	const analysis = state.analysis;
+	if (!analysis) return [];
+	const { source, result, policyError } = analysis;
+	if (policyError) {
+		const firstLine = source.indexOf("\n");
+		return [
+			{
+				from: 0,
+				to: Math.max(
+					1,
+					firstLine === -1 ? Math.min(source.length, 1) : firstLine,
+				),
+				severity: "error",
+				message: policyError,
+			},
+		];
+	}
+	if (result.valid || !result.error) return [];
+	const from =
+		result.error.start == null
+			? 0
+			: byteOffsetToPosition(source, result.error.start);
+	const rawTo =
+		result.error.end == null
+			? from + 1
+			: byteOffsetToPosition(source, result.error.end);
+	return [
+		{
+			from: Math.min(from, source.length),
+			to: Math.min(Math.max(from + 1, rawTo), source.length),
+			severity: "error",
+			message: `${result.error.code}: ${result.error.message}`,
+		},
+	];
 }
 
 function selectedRoute(): CompiledRoute | null {
-  return (
-    state.analysis?.effectiveRoutes[state.selectedStatement] ??
-    state.analysis?.result.route ??
-    null
-  );
+	return (
+		state.analysis?.effectiveRoutes[state.selectedStatement] ??
+		state.analysis?.result.route ??
+		null
+	);
 }
 
 function renderStatementSelect(): void {
-  const analysis = state.analysis;
-  const count = Math.max(
-    analysis?.result.statements_count ?? 0,
-    analysis?.effectiveRoutes.length ?? 0,
-  );
-  statementSelect.replaceChildren();
-  for (let index = 0; index < count; index += 1) {
-    const option = document.createElement("option");
-    option.value = String(index);
-    option.textContent = `Statement ${index + 1}`;
-    statementSelect.append(option);
-  }
-  state.selectedStatement = Math.min(
-    state.selectedStatement,
-    Math.max(0, count - 1),
-  );
-  statementSelect.value = String(state.selectedStatement);
-  statementSelect.disabled = count <= 1;
+	const analysis = state.analysis;
+	const count = Math.max(
+		analysis?.result.statements_count ?? 0,
+		analysis?.effectiveRoutes.length ?? 0,
+	);
+	statementSelect.replaceChildren();
+	for (let index = 0; index < count; index += 1) {
+		const option = document.createElement("option");
+		option.value = String(index);
+		option.textContent = `Statement ${index + 1}`;
+		statementSelect.append(option);
+	}
+	state.selectedStatement = Math.min(
+		state.selectedStatement,
+		Math.max(0, count - 1),
+	);
+	statementSelect.value = String(state.selectedStatement);
+	statementSelect.disabled = count <= 1;
 }
 
 function renderPlan(): void {
-  const route = selectedRoute();
-  planEmpty.hidden = Boolean(route);
-  planCard.hidden = !route;
-  if (!route) return;
-  routeMethod.textContent = route.method;
-  routePath.textContent = route.path;
-  routeType.textContent = route.stmt_type;
-  routePolicy.textContent = policy.enabled
-    ? "Trusted predicate injected"
-    : "Source only";
+	const route = selectedRoute();
+	planEmpty.hidden = Boolean(route);
+	planCard.hidden = !route;
+	if (!route) return;
+	routeMethod.textContent = route.method;
+	routePath.textContent = route.path;
+	routeType.textContent = route.stmt_type;
+	routePolicy.textContent = policy.enabled
+		? "Trusted predicate injected"
+		: "Source only";
 }
 
 function selectStatement(index: number): void {
-  state.selectedStatement = index;
-  statementSelect.value = String(index);
-  renderPlan();
-  renderOutputs();
-  renderRoutes();
+	state.selectedStatement = index;
+	statementSelect.value = String(index);
+	renderPlan();
+	renderOutputs();
+	renderRoutes();
 }
 
 function renderRoutes(): void {
-  const routes = state.analysis?.effectiveRoutes ?? [];
-  routesSection.hidden = routes.length === 0;
-  routesCount.textContent = `${routes.length} ${routes.length === 1 ? "statement" : "statements"}`;
-  routesList.replaceChildren();
+	const routes = state.analysis?.effectiveRoutes ?? [];
+	routesSection.hidden = routes.length === 0;
+	routesCount.textContent = `${routes.length} ${routes.length === 1 ? "statement" : "statements"}`;
+	routesList.replaceChildren();
 
-  routes.forEach((route, index) => {
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = "route-row";
-    item.setAttribute("role", "option");
-    item.setAttribute(
-      "aria-selected",
-      String(index === state.selectedStatement),
-    );
-    item.setAttribute("aria-current", String(index === state.selectedStatement));
-    item.dataset.routeIndex = String(index);
+	routes.forEach((route, index) => {
+		const item = document.createElement("button");
+		item.type = "button";
+		item.className = "route-row";
+		item.setAttribute("role", "option");
+		item.setAttribute(
+			"aria-selected",
+			String(index === state.selectedStatement),
+		);
+		item.setAttribute(
+			"aria-current",
+			String(index === state.selectedStatement),
+		);
+		item.dataset.routeIndex = String(index);
 
-    const indexLabel = document.createElement("span");
-    indexLabel.className = "route-row__index";
-    indexLabel.textContent = String(index + 1);
-    const typeLabel = document.createElement("span");
-    typeLabel.className = "route-row__type";
-    typeLabel.textContent = route.stmt_type;
-    const methodLabel = document.createElement("span");
-    methodLabel.className = "route-row__method";
-    methodLabel.textContent = route.method;
-    const pathLabel = document.createElement("span");
-    pathLabel.className = "route-row__path";
-    pathLabel.textContent = route.path;
+		const indexLabel = document.createElement("span");
+		indexLabel.className = "route-row__index";
+		indexLabel.textContent = String(index + 1);
+		const typeLabel = document.createElement("span");
+		typeLabel.className = "route-row__type";
+		typeLabel.textContent = route.stmt_type;
+		const methodLabel = document.createElement("span");
+		methodLabel.className = "route-row__method";
+		methodLabel.textContent = route.method;
+		const pathLabel = document.createElement("span");
+		pathLabel.className = "route-row__path";
+		pathLabel.textContent = route.path;
 
-    item.append(indexLabel, typeLabel, methodLabel, pathLabel);
-    item.addEventListener("click", () => selectStatement(index));
-    routesList.append(item);
-  });
+		item.append(indexLabel, typeLabel, methodLabel, pathLabel);
+		item.addEventListener("click", () => selectStatement(index));
+		routesList.append(item);
+	});
 }
 
 function renderOutputs(): void {
-  const analysis = state.analysis;
-  const route = selectedRoute();
-  const ast = analysis?.effectiveAst?.[state.selectedStatement] ?? null;
-  const responseOutput =
-    state.executionError != null
-      ? { ok: false, error: state.executionError }
-      : state.response;
+	const analysis = state.analysis;
+	const route = selectedRoute();
+	const ast = analysis?.effectiveAst?.[state.selectedStatement] ?? null;
+	const responseOutput =
+		state.executionError != null
+			? { ok: false, error: state.executionError }
+			: state.response;
 
-  const values: Record<Exclude<InspectorTab, "plan">, unknown> = {
-    wire: route
-      ? {
-          method: route.method,
-          path: route.path,
-          payload: route.payload,
-        }
-      : "No compiled route.",
-    ast: ast ?? "No AST output.",
-    tokens:
-      analysis?.result.tokens.map((token) => ({
-        kind: token.kind,
-        text: token.text,
-        span: [token.pos, token.end],
-      })) ?? "No tokens.",
-    explain:
-      analysis?.result.explain ??
-      (analysis?.policyError
-        ? analysis.policyError
-        : "No explanation is available."),
-    response: responseOutput ?? "Run a valid query to see the Qdrant response.",
-    metrics:
-      state.metrics ?? "Analysis metrics are not available.",
-  };
+	const values: Record<Exclude<InspectorTab, "plan">, unknown> = {
+		wire: route
+			? {
+					method: route.method,
+					path: route.path,
+					payload: route.payload,
+				}
+			: "No compiled route.",
+		ast: ast ?? "No AST output.",
+		tokens:
+			analysis?.result.tokens.map((token) => ({
+				kind: token.kind,
+				text: token.text,
+				span: [token.pos, token.end],
+			})) ?? "No tokens.",
+		explain:
+			analysis?.result.explain ??
+			(analysis?.policyError
+				? analysis.policyError
+				: "No explanation is available."),
+		response: responseOutput ?? "Run a valid query to see the Qdrant response.",
+		metrics: state.metrics ?? "Analysis metrics are not available.",
+	};
 
-  for (const [name, value] of Object.entries(values)) {
-    required<HTMLElement>(`[data-output="${name}"]`).textContent =
-      typeof value === "string" ? value : pretty(value);
-  }
+	for (const [name, value] of Object.entries(values)) {
+		required<HTMLElement>(`[data-output="${name}"]`).textContent =
+			typeof value === "string" ? value : pretty(value);
+	}
 }
 
 function renderValidation(): void {
-  const analysis = state.analysis;
-  const valid =
-    analysis?.result.valid === true && analysis.policyError == null;
-  validationBadge.classList.remove("is-loading", "is-valid", "is-invalid");
-  validationBadge.classList.add(valid ? "is-valid" : "is-invalid");
+	const analysis = state.analysis;
+	const valid = analysis?.result.valid === true && analysis.policyError == null;
+	validationBadge.classList.remove("is-loading", "is-valid", "is-invalid");
+	validationBadge.classList.add(valid ? "is-valid" : "is-invalid");
 
-  if (!analysis) {
-    validationBadge.textContent = "WASM unavailable";
-    analysisSummary.textContent = "The current qql-wasm package could not load.";
-  } else if (analysis.policyError) {
-    validationBadge.innerHTML = '<span class="status-dot"></span>Policy blocked';
-    analysisSummary.textContent = analysis.policyError;
-  } else if (analysis.result.valid) {
-    validationBadge.innerHTML = '<span class="status-dot"></span>Valid QQL';
-    analysisSummary.textContent = `${analysis.result.statements_count} ${
-      analysis.result.statements_count === 1 ? "statement" : "statements"
-    }, ${analysis.result.tokens.length} tokens, ${state.metrics?.parseMs.toFixed(2)} ms`;
-  } else {
-    validationBadge.innerHTML = '<span class="status-dot"></span>Invalid QQL';
-    analysisSummary.textContent =
-      analysis.result.error?.message ?? "The parser rejected this input.";
-  }
+	if (!analysis) {
+		validationBadge.textContent = "WASM unavailable";
+		analysisSummary.textContent =
+			"The current qql-wasm package could not load.";
+	} else if (analysis.policyError) {
+		setValidationBadge("Policy blocked");
+		analysisSummary.textContent = analysis.policyError;
+	} else if (analysis.result.valid) {
+		setValidationBadge("Valid QQL");
+		analysisSummary.textContent = `${analysis.result.statements_count} ${
+			analysis.result.statements_count === 1 ? "statement" : "statements"
+		}, ${analysis.result.tokens.length} tokens, ${state.metrics?.parseMs.toFixed(2)} ms`;
+	} else {
+		setValidationBadge("Invalid QQL");
+		analysisSummary.textContent =
+			analysis.result.error?.message ?? "The parser rejected this input.";
+	}
 
-  runButton.disabled = !valid;
-  exportButton.disabled = !valid;
+	runButton.disabled = !valid;
+	exportButton.disabled = !valid;
 }
 
 function renderInspector(): void {
-  renderStatementSelect();
-  renderPlan();
-  renderOutputs();
-  renderRoutes();
-  renderValidation();
+	renderStatementSelect();
+	renderPlan();
+	renderOutputs();
+	renderRoutes();
+	renderValidation();
 }
 
 function runAnalysis(source: string): void {
-  try {
-    state.analysis = analyzeWithPolicy(source);
-  } catch (error) {
-    const message = formatError(error);
-    state.analysis = {
-      source,
-      result: {
-        valid: false,
-        statements_count: 0,
-        tokens: [],
-        ast: null,
-        route: null,
-        routes: [],
-        explain: null,
-        error: {
-          code: "QQL-WASM",
-          message,
-          start: null,
-          end: null,
-        },
-      },
-      effectiveAst: null,
-      effectiveRoutes: [],
-      policyError: null,
-    };
-  }
-  state.selectedStatement = 0;
-  renderInspector();
-  forceLinting(editor);
+	try {
+		state.analysis = analyzeWithPolicy(source);
+	} catch (error) {
+		const message = formatError(error);
+		state.analysis = {
+			source,
+			result: {
+				valid: false,
+				statements_count: 0,
+				tokens: [],
+				ast: null,
+				route: null,
+				routes: [],
+				explain: null,
+				error: {
+					code: "QQL-WASM",
+					message,
+					start: null,
+					end: null,
+				},
+			},
+			effectiveAst: null,
+			effectiveRoutes: [],
+			policyError: null,
+		};
+	}
+	state.selectedStatement = 0;
+	renderInspector();
+	forceLinting(editor);
 }
 
 function queueAnalysis(source: string): void {
-  if (analysisTimer != null) window.clearTimeout(analysisTimer);
-  analysisTimer = window.setTimeout(() => {
-    analysisTimer = null;
-    runAnalysis(source);
-  }, ANALYSIS_DELAY_MS);
+	if (analysisTimer != null) window.clearTimeout(analysisTimer);
+	analysisTimer = window.setTimeout(() => {
+		analysisTimer = null;
+		runAnalysis(source);
+	}, ANALYSIS_DELAY_MS);
 }
 
 function switchInspectorTab(tab: InspectorTab, focus = false): void {
-  state.inspectorTab = tab;
-  saveSession(INSPECTOR_TAB_KEY, tab);
-  for (const button of all<HTMLButtonElement>("[data-inspector-tab]")) {
-    const active = button.dataset.inspectorTab === tab;
-    button.setAttribute("aria-selected", String(active));
-    button.tabIndex = active ? 0 : -1;
-    if (active && focus) button.focus();
-  }
-  for (const panel of all<HTMLElement>("[data-inspector-panel]")) {
-    panel.hidden = panel.dataset.inspectorPanel !== tab;
-  }
+	state.inspectorTab = tab;
+	saveSession(INSPECTOR_TAB_KEY, tab);
+	for (const button of all<HTMLButtonElement>("[data-inspector-tab]")) {
+		const active = button.dataset.inspectorTab === tab;
+		button.setAttribute("aria-selected", String(active));
+		button.tabIndex = active ? 0 : -1;
+		if (active && focus) button.focus();
+	}
+	for (const panel of all<HTMLElement>("[data-inspector-panel]")) {
+		panel.hidden = panel.dataset.inspectorPanel !== tab;
+	}
 }
 
 function setupTabs(): void {
-  const tabs = all<HTMLButtonElement>("[data-inspector-tab]");
-  tabs.forEach((button, index) => {
-    button.addEventListener("click", () => {
-      switchInspectorTab(button.dataset.inspectorTab as InspectorTab);
-    });
-    button.addEventListener("keydown", (event) => {
-      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-      event.preventDefault();
-      const direction = event.key === "ArrowRight" ? 1 : -1;
-      const next = (index + direction + tabs.length) % tabs.length;
-      switchInspectorTab(
-        tabs[next].dataset.inspectorTab as InspectorTab,
-        true,
-      );
-    });
-  });
+	const tabs = all<HTMLButtonElement>("[data-inspector-tab]");
+	tabs.forEach((button, index) => {
+		button.addEventListener("click", () => {
+			switchInspectorTab(button.dataset.inspectorTab as InspectorTab);
+		});
+		button.addEventListener("keydown", (event) => {
+			if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+			event.preventDefault();
+			const direction = event.key === "ArrowRight" ? 1 : -1;
+			const next = (index + direction + tabs.length) % tabs.length;
+			switchInspectorTab(tabs[next].dataset.inspectorTab as InspectorTab, true);
+		});
+	});
 }
 
 function openDialog(id: string): void {
-  const dialog = required<HTMLDialogElement>(id);
-  dialog.showModal();
-  if (id === "#preset-dialog") {
-    window.setTimeout(() => required<HTMLInputElement>("[data-preset-search]").focus(), 0);
-  }
+	const dialog = required<HTMLDialogElement>(id);
+	dialog.showModal();
+	if (id === "#preset-dialog") {
+		window.setTimeout(
+			() => required<HTMLInputElement>("[data-preset-search]").focus(),
+			0,
+		);
+	}
 }
 
 function setupDialogs(): void {
-  for (const dialog of all<HTMLDialogElement>("dialog[data-app-dialog]")) {
-    dialog.addEventListener("click", (event) => {
-      if (event.target === dialog) dialog.close();
-    });
-    for (const close of all<HTMLButtonElement>(
-      `#${dialog.id} [data-close-dialog]`,
-    )) {
-      close.addEventListener("click", () => dialog.close());
-    }
-  }
-  for (const button of all<HTMLElement>("[data-open-presets]")) {
-    button.addEventListener("click", () => openDialog("#preset-dialog"));
-  }
-  for (const button of all<HTMLElement>("[data-open-settings]")) {
-    button.addEventListener("click", () => openDialog("#settings-dialog"));
-  }
-  required("[data-open-policy]").addEventListener("click", () =>
-    openDialog("#policy-dialog"),
-  );
-  policyChip.addEventListener("click", () => openDialog("#policy-dialog"));
-  exportButton.addEventListener("click", () => {
-    renderExport();
-    openDialog("#export-dialog");
-  });
+	for (const dialog of all<HTMLDialogElement>("dialog[data-app-dialog]")) {
+		dialog.addEventListener("click", (event) => {
+			if (event.target === dialog) dialog.close();
+		});
+		for (const close of all<HTMLButtonElement>(
+			`#${dialog.id} [data-close-dialog]`,
+		)) {
+			close.addEventListener("click", () => dialog.close());
+		}
+	}
+	for (const button of all<HTMLElement>("[data-open-presets]")) {
+		button.addEventListener("click", () => openDialog("#preset-dialog"));
+	}
+	for (const button of all<HTMLElement>("[data-open-settings]")) {
+		button.addEventListener("click", () => openDialog("#settings-dialog"));
+	}
+	required("[data-open-policy]").addEventListener("click", () =>
+		openDialog("#policy-dialog"),
+	);
+	policyChip.addEventListener("click", () => openDialog("#policy-dialog"));
+	exportButton.addEventListener("click", () => {
+		renderExport();
+		openDialog("#export-dialog");
+	});
 }
 
 function setupPresets(): void {
-  const search = required<HTMLInputElement>("[data-preset-search]");
-  const results = required<HTMLElement>("[data-preset-results]");
-  const cards = all<HTMLButtonElement>("[data-preset]");
-  const categories = all<HTMLButtonElement>("[data-preset-category]");
-  let category = "all";
+	const search = required<HTMLInputElement>("[data-preset-search]");
+	const results = required<HTMLElement>("[data-preset-results]");
+	const cards = all<HTMLButtonElement>("[data-preset]");
+	const categories = all<HTMLButtonElement>("[data-preset-category]");
+	let category = "all";
 
-  const filter = () => {
-    const query = search.value.trim().toLowerCase();
-    for (const card of cards) {
-      const categoryMatches =
-        category === "all" || card.dataset.presetCategoryValue === category;
-      const text = [
-        card.dataset.presetLabel,
-        card.dataset.presetDescription,
-        card.dataset.presetId,
-      ]
-        .join(" ")
-        .toLowerCase();
-      card.hidden = !categoryMatches || !text.includes(query);
-    }
-    const shown = cards.filter((card) => !card.hidden).length;
-    results.textContent = `${shown} of ${cards.length} fixture examples shown`;
-  };
+	const filter = () => {
+		const query = search.value.trim().toLowerCase();
+		for (const card of cards) {
+			const categoryMatches =
+				category === "all" || card.dataset.presetCategoryValue === category;
+			const text = [
+				card.dataset.presetLabel,
+				card.dataset.presetDescription,
+				card.dataset.presetId,
+			]
+				.join(" ")
+				.toLowerCase();
+			card.hidden = !categoryMatches || !text.includes(query);
+		}
+		const shown = cards.filter((card) => !card.hidden).length;
+		results.textContent = `${shown} of ${cards.length} fixture examples shown`;
+	};
 
-  search.addEventListener("input", filter);
-  for (const button of categories) {
-    button.addEventListener("click", () => {
-      category = button.dataset.presetCategory ?? "all";
-      categories.forEach((item) => item.setAttribute("aria-pressed", String(item === button)));
-      filter();
-    });
-  }
-  for (const card of cards) {
-    card.addEventListener("click", () => {
-      const query = card.dataset.presetQuery ?? "";
-      editor.dispatch({
-        changes: { from: 0, to: editor.state.doc.length, insert: query },
-      });
-      activeFixture.textContent = card.dataset.presetLabel ?? "Custom query";
-      required<HTMLDialogElement>("#preset-dialog").close();
-      editor.focus();
-    });
-    card.addEventListener("keydown", (event) => {
-      const visible = cards.filter((item) => !item.hidden);
-      const index = visible.indexOf(card);
-      if (index === -1) return;
-      let next: number | null = null;
-      if (event.key === "Home") next = 0;
-      if (event.key === "End") next = visible.length - 1;
-      if (event.key === "ArrowRight" || event.key === "ArrowDown") next = index + 1;
-      if (event.key === "ArrowLeft" || event.key === "ArrowUp") next = index - 1;
-      if (next == null) return;
-      event.preventDefault();
-      visible[(next + visible.length) % visible.length]?.focus();
-    });
-  }
+	search.addEventListener("input", filter);
+	for (const button of categories) {
+		button.addEventListener("click", () => {
+			category = button.dataset.presetCategory ?? "all";
+			categories.forEach((item) => {
+				item.setAttribute("aria-pressed", String(item === button));
+			});
+			filter();
+		});
+	}
+	for (const card of cards) {
+		card.addEventListener("click", () => {
+			const query = card.dataset.presetQuery ?? "";
+			editor.dispatch({
+				changes: { from: 0, to: editor.state.doc.length, insert: query },
+			});
+			activeFixture.textContent = card.dataset.presetLabel ?? "Custom query";
+			required<HTMLDialogElement>("#preset-dialog").close();
+			editor.focus();
+		});
+		card.addEventListener("keydown", (event) => {
+			const visible = cards.filter((item) => !item.hidden);
+			const index = visible.indexOf(card);
+			if (index === -1) return;
+			let next: number | null = null;
+			if (event.key === "Home") next = 0;
+			if (event.key === "End") next = visible.length - 1;
+			if (event.key === "ArrowRight" || event.key === "ArrowDown")
+				next = index + 1;
+			if (event.key === "ArrowLeft" || event.key === "ArrowUp")
+				next = index - 1;
+			if (next == null) return;
+			event.preventDefault();
+			visible[(next + visible.length) % visible.length]?.focus();
+		});
+	}
 }
 
 function currentShareUrl(): URL {
-  const url = new URL(window.location.href);
-  url.search = "";
-  url.hash = "";
-  url.searchParams.set("q", editor.state.doc.toString());
-  const ref = docsBacklink.hidden ? null : docsBacklink.getAttribute("href");
-  if (ref?.startsWith("/docs/")) url.searchParams.set("ref", ref);
-  return url;
+	const url = new URL(window.location.href);
+	url.search = "";
+	url.hash = "";
+	url.searchParams.set("q", editor.state.doc.toString());
+	const ref = docsBacklink.hidden ? null : docsBacklink.getAttribute("href");
+	if (ref && isSafeDocsRef(ref)) url.searchParams.set("ref", ref);
+	return url;
 }
 
 function shareHeadline(source: string): string {
-  const line =
-    source
-      .split("\n")
-      .map((row) => row.trim())
-      .find((row) => row && !row.startsWith("--")) ?? "a QQL query";
-  const clipped = line.length > 72 ? `${line.slice(0, 69)}…` : line;
-  return `Try this in the QQL playground:\n${clipped}`;
+	const line =
+		source
+			.split("\n")
+			.map((row) => row.trim())
+			.find((row) => row && !row.startsWith("--")) ?? "a QQL query";
+	const clipped = line.length > 72 ? `${line.slice(0, 69)}…` : line;
+	return `Try this in the QQL playground:\n${clipped}`;
 }
 
 function positionShareMenu(menu: HTMLElement): void {
-  const rect = shareButton.getBoundingClientRect();
-  const width = menu.offsetWidth;
-  const left = Math.min(
-    Math.max(8, rect.right - width),
-    window.innerWidth - width - 8,
-  );
-  menu.style.top = `${rect.bottom + 8}px`;
-  menu.style.left = `${left}px`;
+	const rect = shareButton.getBoundingClientRect();
+	const width = menu.offsetWidth;
+	const left = Math.min(
+		Math.max(8, rect.right - width),
+		window.innerWidth - width - 8,
+	);
+	menu.style.top = `${rect.bottom + 8}px`;
+	menu.style.left = `${left}px`;
 }
 
 function setupShare(): void {
-  const menu = required<HTMLElement>("[data-share-menu]");
-  const urlInput = required<HTMLInputElement>("[data-share-url]");
-  const copyButton = required<HTMLButtonElement>("[data-share-copy]");
-  const copyLabel = required<HTMLElement>("[data-share-copy-label]");
-  const xLink = required<HTMLAnchorElement>("[data-share-x]");
-  const linkedinLink = required<HTMLAnchorElement>("[data-share-linkedin]");
-  const nativeButton = document.querySelector<HTMLButtonElement>("[data-share-native]");
-  const canPopover = "showPopover" in HTMLElement.prototype;
-  let copiedTimer = 0;
+	const menu = required<HTMLElement>("[data-share-menu]");
+	const urlInput = required<HTMLInputElement>("[data-share-url]");
+	const copyButton = required<HTMLButtonElement>("[data-share-copy]");
+	const copyLabel = required<HTMLElement>("[data-share-copy-label]");
+	const xLink = required<HTMLAnchorElement>("[data-share-x]");
+	const linkedinLink = required<HTMLAnchorElement>("[data-share-linkedin]");
+	const nativeButton = document.querySelector<HTMLButtonElement>(
+		"[data-share-native]",
+	);
+	const canPopover = "showPopover" in HTMLElement.prototype;
+	let copiedTimer = 0;
 
-  const fill = (): string => {
-    const url = currentShareUrl().toString();
-    const text = shareHeadline(editor.state.doc.toString());
-    urlInput.value = url;
-    xLink.href = `https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`;
-    linkedinLink.href = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(url)}`;
-    return url;
-  };
+	const fill = (): string => {
+		const url = currentShareUrl().toString();
+		const text = shareHeadline(editor.state.doc.toString());
+		urlInput.value = url;
+		xLink.href = `https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`;
+		linkedinLink.href = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(url)}`;
+		return url;
+	};
 
-  const markCopied = (copied: boolean): void => {
-    if (copied) copyButton.dataset.copied = "true";
-    else delete copyButton.dataset.copied;
-    copyLabel.textContent = copied ? "Copied" : "Copy";
-    copyButton.setAttribute("aria-label", copied ? "Link copied" : "Copy link");
-  };
+	const markCopied = (copied: boolean): void => {
+		if (copied) copyButton.dataset.copied = "true";
+		else delete copyButton.dataset.copied;
+		copyLabel.textContent = copied ? "Copied" : "Copy";
+		copyButton.setAttribute("aria-label", copied ? "Link copied" : "Copy link");
+	};
 
-  const copyShareUrl = async (): Promise<void> => {
-    const url = fill();
-    try {
-      await navigator.clipboard.writeText(url);
-      markCopied(true);
-      toast("Share link copied.");
-      window.clearTimeout(copiedTimer);
-      copiedTimer = window.setTimeout(() => markCopied(false), 2000);
-    } catch {
-      urlInput.select();
-      toast("Clipboard access was denied. Copy the URL from the field.", "error");
-    }
-  };
+	const copyShareUrl = async (): Promise<void> => {
+		const url = fill();
+		try {
+			await navigator.clipboard.writeText(url);
+			markCopied(true);
+			toast("Share link copied.");
+			window.clearTimeout(copiedTimer);
+			copiedTimer = window.setTimeout(() => markCopied(false), 2000);
+		} catch {
+			urlInput.select();
+			toast(
+				"Clipboard access was denied. Copy the URL from the field.",
+				"error",
+			);
+		}
+	};
 
-  if (nativeButton && "share" in navigator) {
-    nativeButton.hidden = false;
-    nativeButton.addEventListener("click", async () => {
-      const url = fill();
-      try {
-        await navigator.share({
-          title: "QQL Playground",
-          text: shareHeadline(editor.state.doc.toString()),
-          url,
-        });
-      } catch (error) {
-        if (error instanceof Error && error.name === "AbortError") return;
-        toast("Share failed.", "error");
-      }
-    });
-  }
+	if (nativeButton && "share" in navigator) {
+		nativeButton.hidden = false;
+		nativeButton.addEventListener("click", async () => {
+			const url = fill();
+			try {
+				await navigator.share({
+					title: "QQL Playground",
+					text: shareHeadline(editor.state.doc.toString()),
+					url,
+				});
+			} catch (error) {
+				if (error instanceof Error && error.name === "AbortError") return;
+				toast("Share failed.", "error");
+			}
+		});
+	}
 
-  if (!canPopover) {
-    shareButton.addEventListener("click", () => void copyShareUrl());
-    return;
-  }
+	if (!canPopover) {
+		shareButton.addEventListener("click", () => void copyShareUrl());
+		return;
+	}
 
-  menu.addEventListener("toggle", () => {
-    const open = menu.matches(":popover-open");
-    shareButton.setAttribute("aria-expanded", String(open));
-    if (!open) {
-      markCopied(false);
-      return;
-    }
-    fill();
-    positionShareMenu(menu);
-    urlInput.focus();
-    urlInput.select();
-  });
+	menu.addEventListener("toggle", () => {
+		const open = menu.matches(":popover-open");
+		shareButton.setAttribute("aria-expanded", String(open));
+		if (!open) {
+			markCopied(false);
+			return;
+		}
+		fill();
+		positionShareMenu(menu);
+		urlInput.focus();
+		urlInput.select();
+	});
 
-  window.addEventListener("resize", () => {
-    if (menu.matches(":popover-open")) positionShareMenu(menu);
-  });
+	window.addEventListener("resize", () => {
+		if (menu.matches(":popover-open")) positionShareMenu(menu);
+	});
 
-  copyButton.addEventListener("click", () => void copyShareUrl());
-  urlInput.addEventListener("focus", () => urlInput.select());
+	copyButton.addEventListener("click", () => void copyShareUrl());
+	urlInput.addEventListener("focus", () => urlInput.select());
 }
 
 function setupDocsBacklink(ref: string | null): void {
-  if (!ref || !/^\/docs(?:\/|$)/.test(ref)) return;
-  docsBacklink.href = ref;
-  docsBacklink.hidden = false;
+	if (!ref || !isSafeDocsRef(ref)) return;
+	// Rebuild the link from the parsed, same-origin URL instead of the raw
+	// parameter; encodeURI is the final barrier so no scheme, authority, or
+	// markup can reach the DOM. For same-origin /docs paths this is
+	// byte-identical to `ref` (encodeURI preserves / ? & = : #).
+	const target = new URL(ref, window.location.origin);
+	docsBacklink.setAttribute("href", encodeURI(target.pathname + target.search));
+	docsBacklink.hidden = false;
 }
 
 function writeSettingsForm(): void {
-  const form = required<HTMLFormElement>("[data-settings-form]");
-  const field = <T extends HTMLInputElement | HTMLSelectElement>(name: string) =>
-    required<T>(`[data-settings-form] [name="${name}"]`);
-  field<HTMLInputElement>("qdrantUrl").value = settings.qdrantUrl;
-  field<HTMLInputElement>("qdrantKey").value = settings.qdrantKey;
-  field<HTMLSelectElement>("embedProvider").value = settings.embedProvider;
-  field<HTMLInputElement>("embedUrl").value = settings.embedUrl;
-  field<HTMLInputElement>("embedModel").value = settings.embedModel;
-  field<HTMLInputElement>("embedDim").value = String(settings.embedDim);
-  field<HTMLInputElement>("embedKey").value = settings.embedKey;
+	const form = required<HTMLFormElement>("[data-settings-form]");
+	const field = <T extends HTMLInputElement | HTMLSelectElement>(
+		name: string,
+	) => required<T>(`[data-settings-form] [name="${name}"]`);
+	field<HTMLInputElement>("qdrantUrl").value = settings.qdrantUrl;
+	field<HTMLInputElement>("qdrantKey").value = settings.qdrantKey;
+	field<HTMLSelectElement>("embedProvider").value = settings.embedProvider;
+	field<HTMLInputElement>("embedUrl").value = settings.embedUrl;
+	field<HTMLInputElement>("embedModel").value = settings.embedModel;
+	field<HTMLInputElement>("embedDim").value = String(settings.embedDim);
+	field<HTMLInputElement>("embedKey").value = settings.embedKey;
 
-  const toggleHttpFields = () => {
-    required<HTMLFieldSetElement>("[data-http-embed-fields]").hidden =
-      field<HTMLSelectElement>("embedProvider").value !== "http";
-  };
-  field<HTMLSelectElement>("embedProvider").addEventListener(
-    "change",
-    toggleHttpFields,
-  );
-  toggleHttpFields();
+	const toggleHttpFields = () => {
+		required<HTMLFieldSetElement>("[data-http-embed-fields]").hidden =
+			field<HTMLSelectElement>("embedProvider").value !== "http";
+	};
+	field<HTMLSelectElement>("embedProvider").addEventListener(
+		"change",
+		toggleHttpFields,
+	);
+	toggleHttpFields();
 
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    settings = {
-      qdrantUrl: field<HTMLInputElement>("qdrantUrl").value.replace(/\/+$/, ""),
-      qdrantKey: field<HTMLInputElement>("qdrantKey").value,
-      embedProvider: field<HTMLSelectElement>("embedProvider")
-        .value as PlaygroundSettings["embedProvider"],
-      embedUrl: field<HTMLInputElement>("embedUrl").value,
-      embedModel: field<HTMLInputElement>("embedModel").value,
-      embedDim: Number(field<HTMLInputElement>("embedDim").value),
-      embedKey: field<HTMLInputElement>("embedKey").value,
-    };
-    try {
-      configureClient();
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-      required<HTMLDialogElement>("#settings-dialog").close();
-      runAnalysis(editor.state.doc.toString());
-      toast("Connection settings saved.");
-    } catch (error) {
-      toast(formatError(error), "error");
-    }
-  });
+	form.addEventListener("submit", (event) => {
+		event.preventDefault();
+		settings = {
+			qdrantUrl: field<HTMLInputElement>("qdrantUrl").value.replace(/\/+$/, ""),
+			qdrantKey: field<HTMLInputElement>("qdrantKey").value,
+			embedProvider: field<HTMLSelectElement>("embedProvider")
+				.value as PlaygroundSettings["embedProvider"],
+			embedUrl: field<HTMLInputElement>("embedUrl").value,
+			embedModel: field<HTMLInputElement>("embedModel").value,
+			embedDim: Number(field<HTMLInputElement>("embedDim").value),
+			embedKey: field<HTMLInputElement>("embedKey").value,
+		};
+		try {
+			configureClient();
+			localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+			required<HTMLDialogElement>("#settings-dialog").close();
+			runAnalysis(editor.state.doc.toString());
+			toast("Connection settings saved.");
+		} catch (error) {
+			toast(formatError(error), "error");
+		}
+	});
 }
 
 function writePolicyForm(): void {
-  const form = required<HTMLFormElement>("[data-policy-form]");
-  const field = <T extends HTMLInputElement | HTMLSelectElement>(name: string) =>
-    required<T>(`[data-policy-form] [name="${name}"]`);
-  const recipes = all<HTMLButtonElement>("[data-policy-recipe]");
-  field<HTMLInputElement>("enabled").checked = policy.enabled;
-  field<HTMLInputElement>("field").value = policy.field;
-  field<HTMLSelectElement>("op").value = policy.op;
-  field<HTMLInputElement>("value").value = policy.value;
-  field<HTMLSelectElement>("valueType").value = policy.valueType;
-  field<HTMLInputElement>("shardKey").value = policy.shardKey;
-  syncPolicyChip();
+	const form = required<HTMLFormElement>("[data-policy-form]");
+	const field = <T extends HTMLInputElement | HTMLSelectElement>(
+		name: string,
+	) => required<T>(`[data-policy-form] [name="${name}"]`);
+	const recipes = all<HTMLButtonElement>("[data-policy-recipe]");
+	field<HTMLInputElement>("enabled").checked = policy.enabled;
+	field<HTMLInputElement>("field").value = policy.field;
+	field<HTMLSelectElement>("op").value = policy.op;
+	field<HTMLInputElement>("value").value = policy.value;
+	field<HTMLSelectElement>("valueType").value = policy.valueType;
+	field<HTMLInputElement>("shardKey").value = policy.shardKey;
+	syncPolicyChip();
 
-  const preview = required<HTMLOutputElement>("[data-policy-preview]");
-  const quotePreviewValue = (raw: string, valueType: string) => {
-    if (valueType === "string") return `'${raw || "value"}'`;
-    return raw || "value";
-  };
-  const syncRecipeSelection = () => {
-    const current = {
-      field: field<HTMLInputElement>("field").value.trim(),
-      op: field<HTMLSelectElement>("op").value,
-      value: field<HTMLInputElement>("value").value,
-      valueType: field<HTMLSelectElement>("valueType").value,
-      shard: field<HTMLInputElement>("shardKey").value.trim(),
-    };
-    for (const recipe of recipes) {
-      const matches =
-        recipe.dataset.field === current.field &&
-        (recipe.dataset.op ?? "=") === current.op &&
-        recipe.dataset.value === current.value &&
-        (recipe.dataset.valueType ?? "string") === current.valueType &&
-        (recipe.dataset.shard ?? "") === current.shard;
-      recipe.setAttribute("aria-pressed", String(matches));
-    }
-  };
-  const updatePreview = () => {
-    const enabled = field<HTMLInputElement>("enabled").checked;
-    const fieldName = field<HTMLInputElement>("field").value.trim() || "field";
-    const operator = field<HTMLSelectElement>("op").value;
-    const valueType = field<HTMLSelectElement>("valueType").value;
-    const value = quotePreviewValue(
-      field<HTMLInputElement>("value").value,
-      valueType,
-    );
-    const shard = field<HTMLInputElement>("shardKey").value.trim();
-    if (!enabled) {
-      preview.textContent =
-        "The source stays unchanged. Enable injection to rewrite the AST after parse.";
-      syncRecipeSelection();
-      return;
-    }
-    const parts = [`WHERE ${fieldName} ${operator} ${value}`];
-    if (shard) parts.push(`SHARD '${shard}'`);
-    preview.textContent = parts.join("\n");
-    syncRecipeSelection();
-  };
-  updatePreview();
+	const preview = required<HTMLOutputElement>("[data-policy-preview]");
+	const quotePreviewValue = (raw: string, valueType: string) => {
+		if (valueType === "string") return `'${raw || "value"}'`;
+		return raw || "value";
+	};
+	const syncRecipeSelection = () => {
+		const current = {
+			field: field<HTMLInputElement>("field").value.trim(),
+			op: field<HTMLSelectElement>("op").value,
+			value: field<HTMLInputElement>("value").value,
+			valueType: field<HTMLSelectElement>("valueType").value,
+			shard: field<HTMLInputElement>("shardKey").value.trim(),
+		};
+		for (const recipe of recipes) {
+			const matches =
+				recipe.dataset.field === current.field &&
+				(recipe.dataset.op ?? "=") === current.op &&
+				recipe.dataset.value === current.value &&
+				(recipe.dataset.valueType ?? "string") === current.valueType &&
+				(recipe.dataset.shard ?? "") === current.shard;
+			recipe.setAttribute("aria-pressed", String(matches));
+		}
+	};
+	const updatePreview = () => {
+		const enabled = field<HTMLInputElement>("enabled").checked;
+		const fieldName = field<HTMLInputElement>("field").value.trim() || "field";
+		const operator = field<HTMLSelectElement>("op").value;
+		const valueType = field<HTMLSelectElement>("valueType").value;
+		const value = quotePreviewValue(
+			field<HTMLInputElement>("value").value,
+			valueType,
+		);
+		const shard = field<HTMLInputElement>("shardKey").value.trim();
+		if (!enabled) {
+			preview.textContent =
+				"The source stays unchanged. Enable injection to rewrite the AST after parse.";
+			syncRecipeSelection();
+			return;
+		}
+		const parts = [`WHERE ${fieldName} ${operator} ${value}`];
+		if (shard) parts.push(`SHARD '${shard}'`);
+		preview.textContent = parts.join("\n");
+		syncRecipeSelection();
+	};
+	updatePreview();
 
-  for (const name of [
-    "enabled",
-    "field",
-    "op",
-    "value",
-    "valueType",
-    "shardKey",
-  ] as const) {
-    field<HTMLInputElement | HTMLSelectElement>(name).addEventListener(
-      "input",
-      updatePreview,
-    );
-    field<HTMLInputElement | HTMLSelectElement>(name).addEventListener(
-      "change",
-      updatePreview,
-    );
-  }
+	for (const name of [
+		"enabled",
+		"field",
+		"op",
+		"value",
+		"valueType",
+		"shardKey",
+	] as const) {
+		field<HTMLInputElement | HTMLSelectElement>(name).addEventListener(
+			"input",
+			updatePreview,
+		);
+		field<HTMLInputElement | HTMLSelectElement>(name).addEventListener(
+			"change",
+			updatePreview,
+		);
+	}
 
-  for (const recipe of recipes) {
-    recipe.addEventListener("click", () => {
-      field<HTMLInputElement>("enabled").checked = true;
-      field<HTMLInputElement>("field").value = recipe.dataset.field ?? "";
-      field<HTMLSelectElement>("op").value = recipe.dataset.op ?? "=";
-      field<HTMLInputElement>("value").value = recipe.dataset.value ?? "";
-      field<HTMLSelectElement>("valueType").value =
-        recipe.dataset.valueType ?? "string";
-      field<HTMLInputElement>("shardKey").value = recipe.dataset.shard ?? "";
-      updatePreview();
-    });
-  }
+	for (const recipe of recipes) {
+		recipe.addEventListener("click", () => {
+			field<HTMLInputElement>("enabled").checked = true;
+			field<HTMLInputElement>("field").value = recipe.dataset.field ?? "";
+			field<HTMLSelectElement>("op").value = recipe.dataset.op ?? "=";
+			field<HTMLInputElement>("value").value = recipe.dataset.value ?? "";
+			field<HTMLSelectElement>("valueType").value =
+				recipe.dataset.valueType ?? "string";
+			field<HTMLInputElement>("shardKey").value = recipe.dataset.shard ?? "";
+			updatePreview();
+		});
+	}
 
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    policy = {
-      enabled: field<HTMLInputElement>("enabled").checked,
-      field: field<HTMLInputElement>("field").value.trim(),
-      op: field<HTMLSelectElement>("op").value,
-      value: field<HTMLInputElement>("value").value,
-      valueType: field<HTMLSelectElement>("valueType")
-        .value as PolicyValueType,
-      shardKey: field<HTMLInputElement>("shardKey").value,
-    };
-    localStorage.setItem(POLICY_KEY, JSON.stringify(policy));
-    syncPolicyChip();
-    required<HTMLDialogElement>("#policy-dialog").close();
-    runAnalysis(editor.state.doc.toString());
-    toast(policy.enabled ? "Runtime policy applied." : "Runtime policy disabled.");
-  });
+	form.addEventListener("submit", (event) => {
+		event.preventDefault();
+		policy = {
+			enabled: field<HTMLInputElement>("enabled").checked,
+			field: field<HTMLInputElement>("field").value.trim(),
+			op: field<HTMLSelectElement>("op").value,
+			value: field<HTMLInputElement>("value").value,
+			valueType: field<HTMLSelectElement>("valueType").value as PolicyValueType,
+			shardKey: field<HTMLInputElement>("shardKey").value,
+		};
+		localStorage.setItem(POLICY_KEY, JSON.stringify(policy));
+		syncPolicyChip();
+		required<HTMLDialogElement>("#policy-dialog").close();
+		runAnalysis(editor.state.doc.toString());
+		toast(
+			policy.enabled ? "Runtime policy applied." : "Runtime policy disabled.",
+		);
+	});
 }
 
 function renderExport(): void {
-  const source = editor.state.doc.toString();
-  required<HTMLElement>("[data-export-output]").textContent = exportCode(
-    state.exportLanguage,
-    source,
-    settings,
-    selectedRoute(),
-    state.analysis?.result.statements_count ?? 1,
-  );
+	const source = editor.state.doc.toString();
+	required<HTMLElement>("[data-export-output]").textContent = exportCode(
+		state.exportLanguage,
+		source,
+		settings,
+		selectedRoute(),
+		state.analysis?.result.statements_count ?? 1,
+	);
 }
 
 function setupExporter(): void {
-  const tabs = all<HTMLButtonElement>("[data-export-tab]");
-  for (const tab of tabs) {
-    tab.addEventListener("click", () => {
-      state.exportLanguage = tab.dataset.exportTab as ExportLanguage;
-      tabs.forEach((item) =>
-        item.setAttribute("aria-pressed", String(item === tab)),
-      );
-      renderExport();
-    });
-  }
-  required("[data-copy-export]").addEventListener("click", async () => {
-    const code = required<HTMLElement>("[data-export-output]").textContent ?? "";
-    try {
-      await navigator.clipboard.writeText(code);
-      toast("SDK code copied.");
-    } catch {
-      toast("Clipboard access was denied.", "error");
-    }
-  });
+	const tabs = all<HTMLButtonElement>("[data-export-tab]");
+	for (const tab of tabs) {
+		tab.addEventListener("click", () => {
+			state.exportLanguage = tab.dataset.exportTab as ExportLanguage;
+			tabs.forEach((item) => {
+				item.setAttribute("aria-pressed", String(item === tab));
+			});
+			renderExport();
+		});
+	}
+	required("[data-copy-export]").addEventListener("click", async () => {
+		const code =
+			required<HTMLElement>("[data-export-output]").textContent ?? "";
+		try {
+			await navigator.clipboard.writeText(code);
+			toast("SDK code copied.");
+		} catch {
+			toast("Clipboard access was denied.", "error");
+		}
+	});
 }
 
 async function executeQuery(): Promise<void> {
-  if (!client || !state.analysis?.result.valid || state.analysis.policyError) {
-    return;
-  }
-  runButton.disabled = true;
-  runButton.classList.add("is-running");
-  runLabel.textContent = "Running…";
-  state.executionError = null;
-  state.response = null;
-  renderOutputs();
-  setRuntime("Executing against Qdrant…");
+	if (!client || !state.analysis?.result.valid || state.analysis.policyError) {
+		return;
+	}
+	runButton.disabled = true;
+	runButton.classList.add("is-running");
+	runLabel.textContent = "Running…";
+	state.executionError = null;
+	state.response = null;
+	renderOutputs();
+	setRuntime("Executing against Qdrant…");
 
-  const executionClient = client;
-  const source = editor.state.doc.toString();
-  const started = performance.now();
-  let statement: Stmt | null = null;
-  activeExecutions += 1;
+	const executionClient = client;
+	const source = editor.state.doc.toString();
+	const started = performance.now();
+	let statement: Stmt | null = null;
+	activeExecutions += 1;
 
-  try {
-    if (policy.enabled) {
-      statement = new Stmt(source);
-      applyRuntimePolicy(statement);
-      state.response = await executionClient.executeStmt(statement);
-    } else {
-      state.response = await executionClient.execute(source);
-    }
-    if (state.metrics) state.metrics.executeMs = performance.now() - started;
-    setRuntime(
-      state.response.ok
-        ? `Execution complete, ${state.response.succeeded} succeeded`
-        : `Execution complete, ${state.response.failed} failed`,
-      state.response.ok ? "ready" : "failed",
-    );
-    switchInspectorTab("response");
-    toast(
-      state.response.ok ? "Query executed." : "Qdrant returned a failure.",
-      state.response.ok ? "success" : "error",
-    );
-  } catch (error) {
-    state.executionError = formatError(error);
-    if (state.metrics) state.metrics.executeMs = performance.now() - started;
-    setRuntime("Execution failed.", "failed");
-    switchInspectorTab("response");
-    toast(state.executionError, "error");
-  } finally {
-    statement?.free();
-    activeExecutions -= 1;
-    releaseRetiredClients();
-    runButton.classList.remove("is-running");
-    runLabel.textContent = "Run";
-    renderValidation();
-    renderOutputs();
-  }
+	try {
+		if (policy.enabled) {
+			statement = new Stmt(source);
+			applyRuntimePolicy(statement);
+			state.response = await executionClient.executeStmt(statement);
+		} else {
+			state.response = await executionClient.execute(source);
+		}
+		if (state.metrics) state.metrics.executeMs = performance.now() - started;
+		setRuntime(
+			state.response.ok
+				? `Execution complete, ${state.response.succeeded} succeeded`
+				: `Execution complete, ${state.response.failed} failed`,
+			state.response.ok ? "ready" : "failed",
+		);
+		switchInspectorTab("response");
+		toast(
+			state.response.ok ? "Query executed." : "Qdrant returned a failure.",
+			state.response.ok ? "success" : "error",
+		);
+	} catch (error) {
+		state.executionError = formatError(error);
+		if (state.metrics) state.metrics.executeMs = performance.now() - started;
+		setRuntime("Execution failed.", "failed");
+		switchInspectorTab("response");
+		toast(state.executionError, "error");
+	} finally {
+		statement?.free();
+		activeExecutions -= 1;
+		releaseRetiredClients();
+		runButton.classList.remove("is-running");
+		runLabel.textContent = "Run";
+		renderValidation();
+		renderOutputs();
+	}
 }
 
 const pageParams = new URLSearchParams(window.location.search);
 const urlQuery = pageParams.get("q");
 const initialQuery =
-  urlQuery || loadSession(WORKSPACE_KEY) || workspace.dataset.defaultQuery || "";
+	urlQuery ||
+	loadSession(WORKSPACE_KEY) ||
+	workspace.dataset.defaultQuery ||
+	"";
 
 const editor = new EditorView({
-  parent: editorHost,
-  state: EditorState.create({
-    doc: initialQuery,
-    extensions: [
-      basicSetup,
-      qqlLanguage,
-      qqlHighlighting,
-      qqlCompletion,
-      lintGutter(),
-      linter(currentDiagnostic),
-      EditorView.contentAttributes.of({
-        spellcheck: "false",
-        autocorrect: "off",
-        autocapitalize: "off",
-        translate: "no",
-      }),
-      keymap.of([
-        indentWithTab,
-        {
-          key: "Mod-Enter",
-          run: () => {
-            void executeQuery();
-            return true;
-          },
-        },
-        {
-          key: "Mod-k",
-          run: () => {
-            openDialog("#preset-dialog");
-            return true;
-          },
-        },
-      ]),
-      EditorView.lineWrapping,
-      EditorView.updateListener.of((update) => {
-        if (!update.docChanged) return;
-        activeFixture.textContent = "Custom query";
-        saveSession(WORKSPACE_KEY, update.state.doc.toString());
-        queueAnalysis(update.state.doc.toString());
-      }),
-    ],
-  }),
+	parent: editorHost,
+	state: EditorState.create({
+		doc: initialQuery,
+		extensions: [
+			basicSetup,
+			qqlLanguage,
+			qqlHighlighting,
+			qqlCompletion,
+			lintGutter(),
+			linter(currentDiagnostic),
+			EditorView.contentAttributes.of({
+				spellcheck: "false",
+				autocorrect: "off",
+				autocapitalize: "off",
+				translate: "no",
+			}),
+			keymap.of([
+				indentWithTab,
+				{
+					key: "Mod-Enter",
+					run: () => {
+						void executeQuery();
+						return true;
+					},
+				},
+				{
+					key: "Mod-k",
+					run: () => {
+						openDialog("#preset-dialog");
+						return true;
+					},
+				},
+			]),
+			EditorView.lineWrapping,
+			EditorView.updateListener.of((update) => {
+				if (!update.docChanged) return;
+				activeFixture.textContent = "Custom query";
+				saveSession(WORKSPACE_KEY, update.state.doc.toString());
+				queueAnalysis(update.state.doc.toString());
+			}),
+		],
+	}),
 });
 
 /** Draggable divider between the editor and inspector panels (lg and up). */
 function setupSplit(): void {
-  const handle = document.querySelector<HTMLElement>("[data-split-handle]");
-  if (!handle) return;
-  const SPLIT_KEY = "qql-playground.split.v1";
-  const MIN = 0.6;
-  const MAX = 1.4;
-  const DEFAULT_A = 1.08;
+	const handle = document.querySelector<HTMLElement>("[data-split-handle]");
+	if (!handle) return;
+	const SPLIT_KEY = "qql-playground.split.v1";
+	const MIN = 0.6;
+	const MAX = 1.4;
+	const DEFAULT_A = 1.08;
 
-  const apply = (a: number): number => {
-    const clamped = Math.min(MAX, Math.max(MIN, a));
-    workspace.style.setProperty("--split-a", `${clamped.toFixed(3)}fr`);
-    workspace.style.setProperty("--split-b", `${(2 - clamped).toFixed(3)}fr`);
-    return clamped;
-  };
+	const apply = (a: number): number => {
+		const clamped = Math.min(MAX, Math.max(MIN, a));
+		workspace.style.setProperty("--split-a", `${clamped.toFixed(3)}fr`);
+		workspace.style.setProperty("--split-b", `${(2 - clamped).toFixed(3)}fr`);
+		return clamped;
+	};
 
-  const saved = Number(localStorage.getItem(SPLIT_KEY));
-  if (Number.isFinite(saved) && saved >= MIN && saved <= MAX) apply(saved);
+	const saved = Number(localStorage.getItem(SPLIT_KEY));
+	if (Number.isFinite(saved) && saved >= MIN && saved <= MAX) apply(saved);
 
-  const fractionFromEvent = (clientX: number): number => {
-    const bounds = workspace.getBoundingClientRect();
-    const handleWidth = handle.offsetWidth || 8;
-    const usable = bounds.width - handleWidth;
-    if (usable <= 0) return DEFAULT_A;
-    // Columns are [a, handle, b] with a + b = 2, so solve for a in fr units.
-    return ((clientX - bounds.left - handleWidth / 2) / usable) * 2;
-  };
+	const fractionFromEvent = (clientX: number): number => {
+		const bounds = workspace.getBoundingClientRect();
+		const handleWidth = handle.offsetWidth || 8;
+		const usable = bounds.width - handleWidth;
+		if (usable <= 0) return DEFAULT_A;
+		// Columns are [a, handle, b] with a + b = 2, so solve for a in fr units.
+		return ((clientX - bounds.left - handleWidth / 2) / usable) * 2;
+	};
 
-  handle.addEventListener("pointerdown", (event) => {
-    if (!window.matchMedia("(min-width: 64rem)").matches) return;
-    event.preventDefault();
-    handle.setPointerCapture(event.pointerId);
-    handle.dataset.dragging = "true";
-    const move = (moveEvent: PointerEvent) => {
-      apply(fractionFromEvent(moveEvent.clientX));
-    };
-    const up = (upEvent: PointerEvent) => {
-      const finalSplit = apply(fractionFromEvent(upEvent.clientX));
-      handle.dataset.dragging = "false";
-      delete handle.dataset.dragging;
-      localStorage.setItem(SPLIT_KEY, String(finalSplit));
-      editor.requestMeasure();
-      handle.removeEventListener("pointermove", move);
-      handle.removeEventListener("pointerup", up);
-      handle.removeEventListener("pointercancel", up);
-    };
-    handle.addEventListener("pointermove", move);
-    handle.addEventListener("pointerup", up);
-    handle.addEventListener("pointercancel", up);
-  });
+	handle.addEventListener("pointerdown", (event) => {
+		if (!window.matchMedia("(min-width: 64rem)").matches) return;
+		event.preventDefault();
+		handle.setPointerCapture(event.pointerId);
+		handle.dataset.dragging = "true";
+		const move = (moveEvent: PointerEvent) => {
+			apply(fractionFromEvent(moveEvent.clientX));
+		};
+		const up = (upEvent: PointerEvent) => {
+			const finalSplit = apply(fractionFromEvent(upEvent.clientX));
+			handle.dataset.dragging = "false";
+			delete handle.dataset.dragging;
+			localStorage.setItem(SPLIT_KEY, String(finalSplit));
+			editor.requestMeasure();
+			handle.removeEventListener("pointermove", move);
+			handle.removeEventListener("pointerup", up);
+			handle.removeEventListener("pointercancel", up);
+		};
+		handle.addEventListener("pointermove", move);
+		handle.addEventListener("pointerup", up);
+		handle.addEventListener("pointercancel", up);
+	});
 
-  handle.addEventListener("dblclick", () => {
-    apply(DEFAULT_A);
-    localStorage.setItem(SPLIT_KEY, String(DEFAULT_A));
-    editor.requestMeasure();
-  });
+	handle.addEventListener("dblclick", () => {
+		apply(DEFAULT_A);
+		localStorage.setItem(SPLIT_KEY, String(DEFAULT_A));
+		editor.requestMeasure();
+	});
 
-  handle.addEventListener("keydown", (event) => {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-    event.preventDefault();
-    const current = Number.parseFloat(
-      workspace.style.getPropertyValue("--split-a") || String(DEFAULT_A),
-    );
-    const next = apply(current + (event.key === "ArrowRight" ? 0.08 : -0.08));
-    localStorage.setItem(SPLIT_KEY, String(next));
-    editor.requestMeasure();
-  });
+	handle.addEventListener("keydown", (event) => {
+		if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+		event.preventDefault();
+		const current = Number.parseFloat(
+			workspace.style.getPropertyValue("--split-a") || String(DEFAULT_A),
+		);
+		const next = apply(current + (event.key === "ArrowRight" ? 0.08 : -0.08));
+		localStorage.setItem(SPLIT_KEY, String(next));
+		editor.requestMeasure();
+	});
 }
 
 async function start(): Promise<void> {
-  applyPlatformKeyHints();
-  setupSplit();
-  setupTabs();
-  setupDialogs();
-  setupPresets();
-  setupShare();
-  setupDocsBacklink(pageParams.get("ref"));
-  writeSettingsForm();
-  writePolicyForm();
-  setupExporter();
-  const savedTab = loadSession(INSPECTOR_TAB_KEY);
-  if (["plan", "wire", "ast", "tokens", "explain", "response", "metrics"].includes(savedTab ?? "")) {
-    switchInspectorTab(savedTab as InspectorTab);
-  }
-  statementSelect.addEventListener("change", () => {
-    state.selectedStatement = Number(statementSelect.value);
-    renderPlan();
-    renderOutputs();
-    renderRoutes();
-  });
-  runButton.addEventListener("click", () => void executeQuery());
+	applyPlatformKeyHints();
+	setupSplit();
+	setupTabs();
+	setupDialogs();
+	setupPresets();
+	setupShare();
+	setupDocsBacklink(pageParams.get("ref"));
+	writeSettingsForm();
+	writePolicyForm();
+	setupExporter();
+	const savedTab = loadSession(INSPECTOR_TAB_KEY);
+	if (
+		[
+			"plan",
+			"wire",
+			"ast",
+			"tokens",
+			"explain",
+			"response",
+			"metrics",
+		].includes(savedTab ?? "")
+	) {
+		switchInspectorTab(savedTab as InspectorTab);
+	}
+	statementSelect.addEventListener("change", () => {
+		state.selectedStatement = Number(statementSelect.value);
+		renderPlan();
+		renderOutputs();
+		renderRoutes();
+	});
+	runButton.addEventListener("click", () => void executeQuery());
 
-  try {
-    await initQql();
-    configureClient();
-    setRuntime("Current qql-rs WASM ready", "ready");
-    runAnalysis(editor.state.doc.toString());
-    setEditorLoading(null);
-  } catch (error) {
-    const message = formatError(error);
-    setRuntime(`WASM failed: ${message}`, "failed");
-    validationBadge.classList.remove("is-loading");
-    validationBadge.classList.add("is-invalid");
-    validationBadge.textContent = "WASM unavailable";
-    analysisSummary.textContent = message;
-    setEditorLoading("QQL WebAssembly could not load. Reload the page to try again.");
-    toast(message, "error");
-  }
+	try {
+		await initQql();
+		configureClient();
+		setRuntime("Current qql-rs WASM ready", "ready");
+		runAnalysis(editor.state.doc.toString());
+		setEditorLoading(null);
+	} catch (error) {
+		const message = formatError(error);
+		setRuntime(`WASM failed: ${message}`, "failed");
+		validationBadge.classList.remove("is-loading");
+		validationBadge.classList.add("is-invalid");
+		validationBadge.textContent = "WASM unavailable";
+		analysisSummary.textContent = message;
+		setEditorLoading(
+			"QQL WebAssembly could not load. Reload the page to try again.",
+		);
+		toast(message, "error");
+	}
 }
 
 window.addEventListener("beforeunload", () => {
-  client?.free();
-  for (const retired of retiredClients) retired.free();
-  retiredClients.clear();
+	client?.free();
+	for (const retired of retiredClients) retired.free();
+	retiredClients.clear();
 });
 
 void start();

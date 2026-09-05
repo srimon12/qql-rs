@@ -360,8 +360,9 @@ jobs:
   # ── VS Code extension ────────────────────────────────────────
   # The extension ships a committed qql-wasm bundle under editors/vscode/wasm/.
   # A stale bundle silently rejects syntax that the grammar, snippets, and
-  # completions advertise, so compare its export surface against a fresh
-  # wasm-pack build and run the extension's own gates.
+  # completions advertise, so (1) compare its export surface against a fresh
+  # wasm-pack build, and (2) run the extension's corpus-driven behavior tests
+  # (canonical formats + invalid-case codes from language/v1/fixtures).
 
   editor-check:
     name: VS Code extension
@@ -455,7 +456,7 @@ jobs:
       - uses: pnpm/action-setup@v4
         if: steps.relevant.outputs.relevant == 'true'
         with:
-          version: 9
+          version: 11
 
       - uses: actions/setup-node@v7
         if: steps.relevant.outputs.relevant == 'true'

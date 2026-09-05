@@ -16,6 +16,7 @@ statement = _{
       query
     | scroll
     | count
+    | facet
     | upsert
     | update
     | delete_payload
@@ -201,6 +202,7 @@ formula_primary = _{
       number
     | "(" ~ formula_expr ~ ")"
     | unary_function
+    | nary_function
     | ^"POW" ~ "(" ~ formula_expr ~ "," ~ formula_expr ~ ")"
     | geo_distance
     | match_function
@@ -212,8 +214,16 @@ formula_primary = _{
 
 formula_variable = { identifier }
 unary_function = {
-    (^"ABS" | ^"SQRT" | ^"LOG" | ^"LN" | ^"EXP")
+    (^"ABS" | ^"SQRT" | ^"LOG" | ^"LN" | ^"EXP" | ^"ACOSH")
     ~ "(" ~ formula_expr ~ ")"
+}
+// MAX / MIN fold n ≥ 1 operands; at least one operand is required by the
+// Qdrant Expression wire format (MaxExpression / MinExpression). The empty
+// operand list is rejected by the reference parser (QQL-PARSE-SYNTAX), which
+// the grammar cannot express numerically.
+nary_function = {
+    (^"MAX" | ^"MIN")
+    ~ "(" ~ formula_expr ~ ("," ~ formula_expr)* ~ ")"
 }
 geo_distance = {
     ^"GEO_DISTANCE" ~ "("
@@ -315,6 +325,22 @@ count = {
 count_config = { "(" ~ count_config_entry ~ ("," ~ count_config_entry)* ~ ")" }
 count_config_entry = { count_config_key ~ "=" ~ boolean }
 count_config_key = { ^"exact" | string }
+
+facet = {
+    ^"FACET" ~ (facet_key ~ ^"FROM" ~ collection | ^"FROM" ~ collection ~ (^"KEY")? ~ facet_key)
+    ~ facet_clause*
+}
+facet_clause = _{
+      ^"WHERE" ~ filter
+    | ^"LIMIT" ~ integer
+    | ^"EXACT" ~ boolean?
+    | ^"SHARD" ~ string
+    | ^"WITH" ~ facet_config
+}
+facet_key = { name }
+facet_config = { "(" ~ facet_config_entry ~ ("," ~ facet_config_entry)* ~ ")" }
+facet_config_entry = { facet_config_key ~ "=" ~ (boolean | integer) }
+facet_config_key = { ^"exact" | ^"limit" | string }
 
 upsert = {
     ^"UPSERT" ~ ^"INTO" ~ collection ~ ^"VALUES"

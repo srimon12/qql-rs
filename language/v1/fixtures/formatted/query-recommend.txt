@@ -1,0 +1,30 @@
+-- query-recommend.qql — Recommendation query
+
+-- Basic recommend (positive only)
+QUERY RECOMMEND POSITIVE (1, 2, 3) FROM products LIMIT 10;
+
+-- Recommend with positive and negative
+QUERY RECOMMEND POSITIVE (1, 2) NEGATIVE (3) FROM products LIMIT 10;
+
+-- Recommend with strategy
+QUERY RECOMMEND POSITIVE (1) STRATEGY best_score FROM products LIMIT 10;
+
+-- All strategies
+QUERY RECOMMEND POSITIVE (1) NEGATIVE (2) STRATEGY average_vector
+FROM products
+LIMIT 10;
+QUERY RECOMMEND POSITIVE (1) NEGATIVE (2) STRATEGY best_score
+FROM products
+LIMIT 10;
+QUERY RECOMMEND POSITIVE (1) NEGATIVE (2) STRATEGY sum_scores
+FROM products
+LIMIT 10;
+
+-- With filter
+QUERY RECOMMEND POSITIVE (1, 2) NEGATIVE (3)
+FROM products
+WHERE category = 'electronics'
+LIMIT 10;
+
+-- With score threshold
+QUERY RECOMMEND POSITIVE (1) FROM products SCORE THRESHOLD 0.8 LIMIT 10;

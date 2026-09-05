@@ -20,9 +20,6 @@ RUSTC_WRAPPER= cargo test --workspace --all-targets
 RUSTC_WRAPPER= cargo clippy --workspace --all-targets -- -D warnings
 {% /terminal %}
 
-For native Python checks in environments using a newer unsupported CPython,
-the workspace may require `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1`.
-
 ## Pull request expectations
 
 - Add valid and invalid fixtures for language changes.

@@ -3,9 +3,11 @@
 //
 // Run `cargo run -p qql-grammar-gen -- generate` after changing the source.
 
+/// Keyword lookup table: uppercase keyword text to token kind.
 pub static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {
     "ABS" => TokenKind::Abs,
     "ACORN" => TokenKind::Acorn,
+    "ACOSH" => TokenKind::Acosh,
     "AFTER" => TokenKind::After,
     "ALL" => TokenKind::All,
     "ALTER" => TokenKind::Alter,
@@ -54,6 +56,7 @@ pub static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {
     "EXP" => TokenKind::Exp,
     "EXP_DECAY" => TokenKind::ExpDecay,
     "EXTERIOR" => TokenKind::Exterior,
+    "FACET" => TokenKind::Facet,
     "FALSE" => TokenKind::False,
     "FEEDBACK" => TokenKind::Feedback,
     "FIELD" => TokenKind::Field,
@@ -101,8 +104,10 @@ pub static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {
     "MANHATTAN" => TokenKind::Manhattan,
     "MATCH" => TokenKind::Match,
     "MATCH_ANY" => TokenKind::MatchAny,
+    "MAX" => TokenKind::Max,
     "MAX_SELECTIVITY" => TokenKind::MaxSelectivity,
     "MIDPOINT" => TokenKind::Midpoint,
+    "MIN" => TokenKind::Min,
     "MMR" => TokenKind::Mmr,
     "MODEL" => TokenKind::Model,
     "MULTI" => TokenKind::Multi,
