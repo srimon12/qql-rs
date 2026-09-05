@@ -1,29 +1,40 @@
 ---
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
 import "@fontsource/newsreader/latin-300.css";
 import "@fontsource/newsreader/latin-400.css";
-import "@fontsource/ibm-plex-sans/400.css";
-import "@fontsource/ibm-plex-sans/500.css";
-import "@fontsource/ibm-plex-sans/600.css";
-import "@fontsource/jetbrains-mono/400.css";
-import "@fontsource/jetbrains-mono/500.css";
 import "../styles/global.css";
 import "@qql/ui-docs/chrome.css";
 import "@qql/ui-docs/landing.css";
+import CtaBand from "../components/landing/CtaBand.astro";
 import FaqList from "../components/landing/FaqList.astro";
 import InstallGrid from "../components/landing/InstallGrid.astro";
 import LandingHero from "../components/landing/LandingHero.astro";
+import LanguageSamples from "../components/landing/LanguageSamples.astro";
+import PipelineSteps from "../components/landing/PipelineSteps.astro";
 import ProblemCompare from "../components/landing/ProblemCompare.astro";
-import WhyList from "../components/landing/WhyList.astro";
+import StatsStrip from "../components/landing/StatsStrip.astro";
 import SiteFooter from "../components/SiteFooter.astro";
 import SiteHeader from "../components/SiteHeader.astro";
 import { ANALYTICS, APPS, SITE } from "../config/site";
-import { faq, getStarted, hero, problem, why } from "../data/landing";
+import {
+	cta,
+	faq,
+	getStarted,
+	hero,
+	language,
+	pipeline,
+	problem,
+	stats,
+} from "../data/landing";
 
 const pageTitle = "QQL: SQL for Qdrant vector search";
 const pageDescription =
-  "QQL is to Qdrant what SQL is to Postgres. One declarative language for hybrid search, filtering, mutations, and DDL across Rust, Python, Node.js, WASM, REST, gRPC, and edge.";
+	"QQL is to Qdrant what SQL is to Postgres. One declarative language for hybrid search, filtering, mutations, and DDL across Rust, Python, Node.js, WASM, REST, gRPC, and edge.";
 
-// The documentation verifier parses every `verifiedQql` String.raw template.
+// The documentation verifier parses every `verifiedQql` String.raw template
+// (see scripts/verify-qql-docs.mjs), so the marker must stay despite none of
+// the templates containing backslashes.
 const verifiedQqlHero = String.raw`QUERY 'chest pain' FROM medical
 USING dense
 WHERE department = 'cardio'
@@ -31,7 +42,10 @@ SHARD 'hospital-east'
 LIMIT 5;`;
 
 const verifiedQqlCompareHybrid = String.raw`QUERY 'distributed consensus' FROM docs
-USING HYBRID DENSE dense_vec SPARSE bm25_vec FUSION RRF
+USING HYBRID
+  DENSE dense_vec
+  SPARSE bm25_vec
+  FUSION RRF
 WHERE status = 'active'
 LIMIT 10;`;
 
@@ -44,6 +58,28 @@ const verifiedQqlCompareFilters = String.raw`QUERY 'industrial robotics' FROM pr
 WHERE (category = 'hardware' OR category = 'tools')
   AND price <= 1200.0 AND in_stock = true
 LIMIT 20;`;
+
+const verifiedQqlHybrid = String.raw`QUERY TEXT 'vector database' FROM docs
+  USING HYBRID DENSE dense SPARSE bm25 FUSION RRF
+  LIMIT 10;`;
+
+const verifiedQqlFacet = String.raw`FACET room_type FROM stays WHERE price < 150 LIMIT 5 EXACT true;`;
+
+const verifiedQqlFormula = String.raw`QUERY FORMULA MAX(MIN($score * 2.0, 10.0), 0.0) + ACOSH(popularity + 1.0)
+  DEFAULTS (score = 0.0, popularity = 0)
+FROM papers LIMIT 10;`;
+
+const verifiedQqlGrouped = String.raw`QUERY 'incident'
+FROM runbooks
+USING dense
+GROUP BY service SIZE 3 LOOKUP FROM services
+WITH PAYLOAD INCLUDE (title, service)
+LIMIT 10;`;
+
+const verifiedQqlRecommend = String.raw`QUERY RECOMMEND POSITIVE (1, 2) NEGATIVE (3) STRATEGY best_score
+FROM products
+USING dense
+LIMIT 10;`;
 ---
 
 <!doctype html>
@@ -150,15 +186,18 @@ LIMIT 20;`;
   </head>
 
   <body class="landing-body">
+    <div class="landing-noise" aria-hidden="true"></div>
     <SiteHeader active="home" />
 
     <main id="main-content">
       <LandingHero
         headline={hero.headline}
         lede={hero.lede}
+        eyebrow={hero.eyebrow}
         primaryCta={hero.primaryCta}
         secondaryCta={hero.secondaryCta}
-        specimenTitle="search.qql"
+        specimenTitle={hero.specimenTitle}
+        specimenMeta={hero.specimenMeta}
         specimenQql={verifiedQqlHero}
       >
         <span class="kw">QUERY</span> <span class="str">'chest pain'</span><br />
@@ -170,6 +209,8 @@ LIMIT 20;`;
         <span class="kw">LIMIT</span> <span class="num">5</span><span class="op">;</span>
       </LandingHero>
 
+      <StatsStrip stats={stats} />
+
       <ProblemCompare
         heading={problem.heading}
         sub={problem.sub}
@@ -180,7 +221,23 @@ LIMIT 20;`;
         filtersQql={verifiedQqlCompareFilters}
       />
 
-      <WhyList heading={why.heading} rows={why.rows} />
+      <PipelineSteps
+        heading={pipeline.heading}
+        sub={pipeline.sub}
+        steps={pipeline.steps}
+      />
+
+      <LanguageSamples
+        heading={language.heading}
+        sub={language.sub}
+        footHref={language.footHref}
+        footLabel={language.footLabel}
+        hybridQql={verifiedQqlHybrid}
+        facetQql={verifiedQqlFacet}
+        formulaQql={verifiedQqlFormula}
+        groupedQql={verifiedQqlGrouped}
+        recommendQql={verifiedQqlRecommend}
+      />
 
       <InstallGrid
         heading={getStarted.heading}
@@ -191,6 +248,13 @@ LIMIT 20;`;
       />
 
       <FaqList heading={faq.heading} items={faq.items} />
+
+      <CtaBand
+        heading={cta.heading}
+        body={cta.body}
+        primaryCta={cta.primaryCta}
+        secondaryCta={cta.secondaryCta}
+      />
     </main>
 
     <SiteFooter />

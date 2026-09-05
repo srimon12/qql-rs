@@ -1,16 +1,16 @@
 ---
 interface Preset {
-  id: string;
-  label: string;
-  description: string;
-  category: string;
-  query: string;
-  statements: number;
+	id: string;
+	label: string;
+	description: string;
+	category: string;
+	query: string;
+	statements: number;
 }
 
 interface Props {
-  presets: Preset[];
-  categories: string[];
+	presets: Preset[];
+	categories: string[];
 }
 
 const { presets, categories } = Astro.props;

@@ -67,6 +67,7 @@ body:has(.site-header) {
   overflow: hidden;
   border-radius: 0.44rem;
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+  color: var(--sl-color-white);
 }
 
 .brand__mark img,
@@ -86,6 +87,9 @@ body:has(.site-header) {
 }
 
 .brand__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
   padding: 0.22rem 0.6rem;
   border: 1px solid var(--sl-color-gray-5);
   border-radius: 999px;
@@ -97,6 +101,14 @@ body:has(.site-header) {
   text-transform: uppercase;
   color: var(--sl-color-gray-3);
   white-space: nowrap;
+}
+
+.brand__badge::before {
+  content: "";
+  width: 0.25rem;
+  height: 0.25rem;
+  border-radius: 999px;
+  background: var(--sl-color-accent);
 }
 
 @media (max-width: 44rem) {
@@ -340,7 +352,7 @@ body:has(.site-header) {
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--sl-color-accent);
+  color: var(--sl-color-accent-text);
 }
 
 .site-footer__pill-dot {

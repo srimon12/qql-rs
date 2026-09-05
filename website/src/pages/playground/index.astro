@@ -1,9 +1,9 @@
 ---
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import ExportDialog from "../../components/playground/ExportDialog.astro";
 import EditorPanel from "../../components/playground/EditorPanel.astro";
+import ExportDialog from "../../components/playground/ExportDialog.astro";
 import InspectorPanel from "../../components/playground/InspectorPanel.astro";
 import PolicyDialog from "../../components/playground/PolicyDialog.astro";
 import PresetDialog from "../../components/playground/PresetDialog.astro";
@@ -11,74 +11,76 @@ import SettingsDialog from "../../components/playground/SettingsDialog.astro";
 import SiteFooter from "../../components/SiteFooter.astro";
 import SiteHeader from "../../components/SiteHeader.astro";
 import { ANALYTICS, APPS } from "../../config/site";
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
 import "@fontsource/newsreader/latin-400.css";
-import "@fontsource/ibm-plex-sans/400.css";
-import "@fontsource/ibm-plex-sans/500.css";
-import "@fontsource/ibm-plex-sans/600.css";
-import "@fontsource/jetbrains-mono/400.css";
-import "@fontsource/jetbrains-mono/500.css";
 import "../../styles/global.css";
 import "@qql/ui-docs/chrome.css";
 
-const workspaceRoot = fileURLToPath(
-  new URL("../../../../", import.meta.url),
-);
+const workspaceRoot = fileURLToPath(new URL("../../../../", import.meta.url));
 const fixtureRoot = join(workspaceRoot, "language", "v1", "fixtures");
 const validRoot = join(fixtureRoot, "valid");
 const expectedRoot = join(fixtureRoot, "expected");
 
 const categoryFor = (id: string) => {
-  if (id.startsWith("query-")) return "Query";
-  if (id.includes("collection") || id.includes("index") || id.includes("shard")) return "Schema";
-  if (
-    id.startsWith("upsert") ||
-    id.startsWith("update") ||
-    id.startsWith("delete") ||
-    id.startsWith("clear")
-  ) return "Data";
-  if (id === "filters") return "Filters";
-  if (id === "scripts" || id === "string-delimiters") return "Language";
-  return "Operations";
+	if (id.startsWith("query-")) return "Query";
+	if (id.includes("collection") || id.includes("index") || id.includes("shard"))
+		return "Schema";
+	if (
+		id.startsWith("upsert") ||
+		id.startsWith("update") ||
+		id.startsWith("delete") ||
+		id.startsWith("clear")
+	)
+		return "Data";
+	if (id === "filters") return "Filters";
+	if (id === "scripts" || id === "string-delimiters") return "Language";
+	return "Operations";
 };
 
 const presets = readdirSync(validRoot)
-  .filter((name) => name.endsWith(".qql"))
-  .sort()
-  .map((name) => {
-    const id = basename(name, ".qql");
-    const query = readFileSync(join(validRoot, name), "utf8").trim();
-    const comments = query
-      .split("\n")
-      .filter((line) => line.startsWith("--"))
-      .map((line) => line.replace(/^--\s*/, "").trim())
-      .filter(Boolean);
-    const expected = JSON.parse(
-      readFileSync(join(expectedRoot, `${id}.json`), "utf8"),
-    ) as { statements?: unknown[] };
-    const label = (comments[0]?.split("—")[1] ?? id)
-      .trim()
-      .replace(/\bqql$/i, "");
-    const description =
-      comments.find((line) => line.startsWith("Tests:"))?.replace("Tests:", "").trim() ??
-      comments[1] ??
-      "Valid QQL v1 conformance fixture.";
+	.filter((name) => name.endsWith(".qql"))
+	.sort()
+	.map((name) => {
+		const id = basename(name, ".qql");
+		const query = readFileSync(join(validRoot, name), "utf8").trim();
+		const comments = query
+			.split("\n")
+			.filter((line) => line.startsWith("--"))
+			.map((line) => line.replace(/^--\s*/, "").trim())
+			.filter(Boolean);
+		const expected = JSON.parse(
+			readFileSync(join(expectedRoot, `${id}.json`), "utf8"),
+		) as { statements?: unknown[] };
+		const label = (comments[0]?.split("—")[1] ?? id)
+			.trim()
+			.replace(/\bqql$/i, "");
+		const description =
+			comments
+				.find((line) => line.startsWith("Tests:"))
+				?.replace("Tests:", "")
+				.trim() ??
+			comments[1] ??
+			"Valid QQL v1 conformance fixture.";
 
-    return {
-      id,
-      label,
-      description,
-      category: categoryFor(id),
-      query,
-      statements: expected.statements?.length ?? 1,
-    };
-  });
+		return {
+			id,
+			label,
+			description,
+			category: categoryFor(id),
+			query,
+			statements: expected.statements?.length ?? 1,
+		};
+	});
 
-const categories = [...new Set(presets.map((preset) => preset.category))].sort();
+const categories = [
+	...new Set(presets.map((preset) => preset.category)),
+].sort();
 const defaultPreset =
-  presets.find((preset) => preset.id === "query-hybrid") ?? presets[0];
+	presets.find((preset) => preset.id === "query-hybrid") ?? presets[0];
 const pageTitle = "QQL Playground: parse, plan, and run Qdrant queries";
 const pageDescription =
-  "Explore the current qql-rs parser and planner in your browser using the complete QQL v1 valid fixture corpus.";
+	"Explore the current qql-rs parser and planner in your browser using the complete QQL v1 valid fixture corpus.";
 ---
 
 <!doctype html>

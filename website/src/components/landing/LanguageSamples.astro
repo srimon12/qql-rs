@@ -1,24 +1,74 @@
 ---
 import { Code } from "@astrojs/starlight/components";
 
-interface Sample {
-  kind: string;
-  code: string;
-  href: string;
-}
-
 interface Props {
-  heading: string;
-  sub: string;
-  footHref: string;
-  footLabel: string;
-  samples: readonly Sample[];
+	heading: string;
+	sub: string;
+	footHref: string;
+	footLabel: string;
+	hybridQql: string;
+	facetQql: string;
+	formulaQql: string;
+	groupedQql: string;
+	recommendQql: string;
 }
 
-const { heading, sub, footHref, footLabel, samples } = Astro.props;
+const {
+	heading,
+	sub,
+	footHref,
+	footLabel,
+	hybridQql,
+	facetQql,
+	formulaQql,
+	groupedQql,
+	recommendQql,
+} = Astro.props;
+
+const featured = {
+	kind: "Hybrid",
+	ver: "",
+	code: hybridQql,
+	caption:
+		"Dense and sparse in one statement — the engine fuses, not your client.",
+};
+
+const samples = [
+	{
+		kind: "Facet",
+		ver: "",
+		code: facetQql,
+		caption:
+			"Category counts stay in the database — no points pulled into memory.",
+	},
+	{
+		kind: "Formula",
+		ver: "QQL 1.6",
+		code: formulaQql,
+		caption: "Clamps and curves in one expression — no CASE boilerplate.",
+	},
+	{
+		kind: "Group + lookup",
+		ver: "",
+		code: groupedQql,
+		caption:
+			"Several results per category, joined to a lookup collection — one statement.",
+	},
+	{
+		kind: "Recommend",
+		ver: "",
+		code: recommendQql,
+		caption: "Positive and negative points — no external service.",
+	},
+].map((sample) => ({
+	...sample,
+	href: `/playground/?q=${encodeURIComponent(sample.code)}`,
+}));
+
+const featuredHref = `/playground/?q=${encodeURIComponent(featured.code)}`;
 ---
 
-<section class="landing-section landing-section--muted" aria-labelledby="language-heading">
+<section class="landing-section" aria-labelledby="language-heading">
   <div class="landing-shell landing-fade-up">
     <header class="landing-section__head">
       <h2 id="language-heading">{heading}</h2>
@@ -26,25 +76,44 @@ const { heading, sub, footHref, footLabel, samples } = Astro.props;
     </header>
 
     <div class="landing-samples">
+      <article class="landing-sample landing-sample--featured">
+        <header class="landing-sample__head">
+          <span class="landing-sample__kind">{featured.kind}</span>
+          <a class="landing-sample__try" href={featuredHref}>
+            Try the playground →
+          </a>
+        </header>
+        <div class="landing-sample__body">
+          <div class="landing-sample__code">
+            <Code code={featured.code} lang="qql" frame="none" />
+          </div>
+          <p class="landing-sample__cap">{featured.caption}</p>
+        </div>
+      </article>
+
       {
         samples.map((sample) => (
           <article class="landing-sample">
             <header class="landing-sample__head">
-              <span class="landing-sample__kind">{sample.kind}</span>
+              <span class="landing-sample__kind">
+                {sample.kind}
+                {sample.ver && <span class="landing-sample__ver">{sample.ver}</span>}
+              </span>
               <a class="landing-sample__try" href={sample.href}>
-                Try in playground
+                Try the playground →
               </a>
             </header>
             <div class="landing-sample__code">
               <Code code={sample.code} lang="qql" frame="none" />
             </div>
+            <p class="landing-sample__cap">{sample.caption}</p>
           </article>
         ))
       }
     </div>
 
     <p class="landing-section__foot">
-      <a href={footHref}>{footLabel}</a>
+      <a href={footHref}>{footLabel} →</a>
     </p>
   </div>
 </section>

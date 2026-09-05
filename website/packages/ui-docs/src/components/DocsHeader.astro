@@ -4,6 +4,7 @@ import Search from "virtual:starlight/components/Search";
 import SocialIcons from "virtual:starlight/components/SocialIcons";
 import config from "virtual:starlight/user-config";
 import type { DocsHeaderConfig } from "../types";
+import BrandMark from "./BrandMark.astro";
 import ThemeToggle from "./ThemeToggle.astro";
 
 interface Props {
@@ -17,14 +18,13 @@ const shouldRenderSearch =
 	config.components.Search !== "@astrojs/starlight/components/Search.astro";
 
 const currentPath = Astro.url.pathname;
-const markSrc = `${import.meta.env.BASE_URL}logo.svg`.replace(/([^:]\/)\/+/g, "$1");
 ---
 
 <div class="header">
   <div class="title-wrapper sl-flex">
-    <a class="docs-brand" href="/" aria-label="QQL home">
+    <a class="docs-brand" href="/">
       <span class="docs-brand__mark" aria-hidden="true">
-        <img src={markSrc} alt="" width="32" height="32" />
+        <BrandMark />
       </span>
       <span class="docs-brand__name">QQL</span>
       <span class="docs-brand__chip">Docs</span>
@@ -124,6 +124,7 @@ const markSrc = `${import.meta.env.BASE_URL}logo.svg`.replace(/([^:]\/)\/+/g, "$
     overflow: hidden;
     border-radius: 0.44rem;
     box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+    color: var(--sl-color-white);
   }
 
   .docs-brand__mark img,

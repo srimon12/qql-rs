@@ -3,11 +3,25 @@ import StarlightHead from "@astrojs/starlight/components/Head.astro";
 import type { StarlightRouteData } from "@astrojs/starlight/route-data";
 import { APPS, SITE } from "../config/site";
 
-const starlightRoute = (Astro.locals as any)?.starlightRoute as StarlightRouteData | undefined;
-const entry = starlightRoute?.entry ?? (Astro.props as any)?.entry;
+/** Structural view of what this component actually reads off an entry. */
+interface EntryLike {
+	id?: string;
+	data?: { title?: string; description?: string };
+}
+
+const starlightRoute = (Astro.locals as { starlightRoute?: StarlightRouteData })
+	.starlightRoute;
+const entry: EntryLike | undefined =
+	starlightRoute?.entry ?? (Astro.props as { entry?: EntryLike }).entry;
 const title = entry?.data?.title ?? "Documentation";
-const description = entry?.data?.description || "Declarative vector search for Qdrant: QQL language, SDKs, CLI, and security patterns.";
-const rawId = entry?.id ? String(entry.id).replace(/\.(mdoc|md)$/, "").replace(/^\//, "") : "docs";
+const description =
+	entry?.data?.description ||
+	"Declarative vector search for Qdrant: QQL language, SDKs, CLI, and security patterns.";
+const rawId = entry?.id
+	? String(entry.id)
+			.replace(/\.(mdoc|md)$/, "")
+			.replace(/^\//, "")
+	: "docs";
 const canonicalUrl = new URL(Astro.url.pathname, APPS.home.url).href;
 const ogImageUrl = `${APPS.home.url}/open-graph/${rawId}.png`;
 
@@ -15,23 +29,23 @@ const ogImageUrl = `${APPS.home.url}/open-graph/${rawId}.png`;
 const cleanDocPath = rawId.replace(/^docs\/?/, "");
 const pathSegments = cleanDocPath.split("/").filter(Boolean);
 const breadcrumbs = [
-  { name: "Home", url: `${APPS.home.url}/` },
-  { name: "Docs", url: `${APPS.docs.url}/` },
+	{ name: "Home", url: `${APPS.home.url}/` },
+	{ name: "Docs", url: `${APPS.docs.url}/` },
 ];
 
 let currentPath = `${APPS.docs.url}`;
 for (let i = 0; i < pathSegments.length; i++) {
-  const seg = pathSegments[i];
-  if (seg === "index") continue;
-  currentPath += `/${seg}`;
-  const label = seg
-    .split("-")
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
-  breadcrumbs.push({
-    name: i === pathSegments.length - 1 ? title : label,
-    url: `${currentPath}/`,
-  });
+	const seg = pathSegments[i];
+	if (seg === "index") continue;
+	currentPath += `/${seg}`;
+	const label = seg
+		.split("-")
+		.map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+		.join(" ");
+	breadcrumbs.push({
+		name: i === pathSegments.length - 1 ? title : label,
+		url: `${currentPath}/`,
+	});
 }
 ---
 
