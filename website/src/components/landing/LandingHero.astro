@@ -112,17 +112,27 @@ const {
 <script>
   const copyBtn = document.getElementById("hero-copy-btn");
   const cmdEl = document.getElementById("hero-install-cmd");
+  const heroCopyLabel = "Copy install command";
   if (copyBtn && cmdEl) {
+    const label = copyBtn.querySelector(".landing-copy-label");
+    const flash = (text: string, ok: boolean) => {
+      copyBtn.classList.toggle("is-copied", ok);
+      if (label) label.textContent = text;
+      copyBtn.setAttribute(
+        "aria-label",
+        ok ? `Copied. ${heroCopyLabel}` : `Copy failed. ${heroCopyLabel}`,
+      );
+      setTimeout(() => {
+        copyBtn.classList.remove("is-copied");
+        if (label) label.textContent = "Copy";
+        copyBtn.setAttribute("aria-label", heroCopyLabel);
+      }, 2000);
+    };
     copyBtn.addEventListener("click", () => {
-      navigator.clipboard.writeText(cmdEl.innerText.trim()).then(() => {
-        copyBtn.classList.add("is-copied");
-        const label = copyBtn.querySelector(".landing-copy-label");
-        if (label) label.textContent = "Copied";
-        setTimeout(() => {
-          copyBtn.classList.remove("is-copied");
-          if (label) label.textContent = "Copy";
-        }, 2000);
-      });
+      navigator.clipboard.writeText(cmdEl.innerText.trim()).then(
+        () => flash("Copied", true),
+        () => flash("Copy failed", false),
+      );
     });
   }
 </script>

@@ -799,9 +799,11 @@ html.js .landing-fade-up.landing-visible {
   box-shadow: none !important;
   margin: 0 !important;
   padding: 0 !important;
+  /* Scroll instead of clipping long lines; the scrollbar stays visually
+     suppressed, and the script focuses panes that actually overflow. */
   scrollbar-width: none !important;
   -ms-overflow-style: none !important;
-  overflow-x: hidden !important;
+  overflow-x: auto !important;
 }
 
 .landing-compare__code-wrapper .expressive-code pre > code {
@@ -1342,6 +1344,7 @@ html.js .landing-fade-up.landing-visible {
   .landing-sample { transition: none; }
   .landing-install:hover,
   .landing-sample:hover { transform: none; }
+  .landing-hero__eyebrow-dot::before { animation: none; }
 }
 
 /* ── Scrollbar Utilities ─────────────────────────────────────────────────── */
