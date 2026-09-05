@@ -3,9 +3,9 @@
 /* ---Aesthetic Theming --- */
 
 :root {
-	--sl-font: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+	--sl-font: "Geist Variable", "Geist Sans", Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
 	--sl-font-serif: "Newsreader", Georgia, "Times New Roman", serif;
-	--sl-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+	--sl-font-mono: "Geist Mono Variable", "Geist Mono", "Space Mono", ui-monospace, "SF Mono", monospace;
 	--sl-content-width: 52rem;
 	--qql-radius: 0.75rem;
 	--syntax-keyword: #9f3f2d;
@@ -19,6 +19,8 @@
 	--sl-color-accent-low: #f0eee6;
 	--sl-color-accent: #b34c35;
 	--sl-color-accent-high: #5c1906;
+	/* Accent tuned for small text on light backgrounds (WCAG AA >= 4.5:1) */
+	--sl-color-accent-text: #7d3525;
 }
 
 /* --- Dark Mode ( Main Vibe) --- */
@@ -30,6 +32,8 @@
 	--sl-color-accent-low: #2e130a;
 	--sl-color-accent: #ba5442;
 	--sl-color-accent-high: #ffcfbf;
+	/* Accent tuned for small text on dark backgrounds (WCAG AA >= 4.5:1) */
+	--sl-color-accent-text: #d29084;
 
 	--sl-color-gray-1: #e6e4e0;
 	--sl-color-gray-2: #b8b6b0;

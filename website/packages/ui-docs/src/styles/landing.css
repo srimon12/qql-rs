@@ -480,23 +480,21 @@ html.js .landing-fade-up.landing-visible {
 
 .landing-section__foot a:hover { color: var(--sl-color-white); }
 
-/* ── Problem Compare Component ──────────────────────────────────────────── */
+/* ── Problem Compare Component ────────────────────────────────────────────
+   Two self-contained cards (QQL vs the selected SDK) that each take their
+   natural height. No shared stretched container, so no dead vertical gaps. */
 
 .landing-compare {
-  overflow: hidden;
-  border: 1px solid var(--sl-color-gray-5);
-  border-radius: 1rem;
-  background: var(--sl-color-bg);
-  box-shadow: 0 20px 40px -15px color-mix(in srgb, var(--sl-color-text) 6%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.25rem;
 }
 
 .landing-compare__tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem;
-  padding: 0.55rem 0.65rem;
-  background: color-mix(in srgb, var(--sl-color-gray-6) 60%, transparent);
-  border-bottom: 1px solid var(--sl-color-gray-5);
+  gap: 0.4rem;
 }
 
 .landing-compare__tab {
@@ -507,7 +505,7 @@ html.js .landing-fade-up.landing-visible {
   border: 1px solid transparent;
   border-radius: 0.5rem;
   background: transparent;
-  color: var(--sl-color-gray-3);
+  color: var(--sl-color-gray-2);
   font-family: var(--sl-font);
   font-size: 0.82rem;
   font-weight: 500;
@@ -537,7 +535,7 @@ html.js .landing-fade-up.landing-visible {
   font-family: var(--sl-font-mono);
   font-size: 0.62rem;
   background: var(--sl-color-gray-5);
-  color: var(--sl-color-gray-3);
+  color: var(--sl-color-gray-2);
 }
 
 .landing-compare__tab.is-active .landing-compare__tab-badge {
@@ -555,10 +553,15 @@ html.js .landing-fade-up.landing-visible {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem 1rem;
-  padding: 0.65rem 1rem;
-  border-bottom: 1px solid var(--sl-color-gray-5);
-  background: color-mix(in srgb, var(--sl-color-gray-6) 30%, transparent);
+  gap: 0.6rem 1rem;
+}
+
+.landing-compare__toolbar-right {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.75rem;
+  margin-left: auto;
 }
 
 .landing-compare__modes {
@@ -608,13 +611,13 @@ html.js .landing-fade-up.landing-visible {
 }
 
 .landing-compare__reduction {
-  padding: 0.12rem 0.5rem;
+  padding: 0.14rem 0.5rem;
   border-radius: 999px;
   font-size: 0.68rem;
   font-weight: 600;
-  background: rgba(16, 185, 129, 0.12);
-  color: #34d399;
-  border: 1px solid rgba(16, 185, 129, 0.3);
+  background: color-mix(in srgb, var(--sl-color-accent) 14%, transparent);
+  color: var(--sl-color-accent-high);
+  border: 1px solid color-mix(in srgb, var(--sl-color-accent) 32%, transparent);
 }
 
 .landing-compare__try {
@@ -632,16 +635,14 @@ html.js .landing-fade-up.landing-visible {
 
 .landing-compare__split {
   display: grid;
-  grid-template-columns: 1fr;
-  min-height: 18rem;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.9rem;
+  align-items: start;
 }
 
 @media (min-width: 54rem) {
   .landing-compare__split {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
-  }
-  .landing-compare__pane--qql {
-    border-right: 1px solid var(--sl-color-gray-5);
+    grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.2fr);
   }
 }
 
@@ -653,14 +654,19 @@ html.js .landing-fade-up.landing-visible {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 0.85rem;
+  background: color-mix(in srgb, var(--sl-color-gray-6) 32%, var(--sl-color-bg));
+  overflow: hidden;
+}
+
+.landing-compare__pane[hidden] {
+  display: none;
 }
 
 .landing-compare__pane--qql {
-  background: color-mix(in srgb, var(--sl-color-accent) 3%, var(--sl-color-bg));
-}
-
-.landing-compare__pane--target {
-  background: var(--sl-color-bg);
+  background: color-mix(in srgb, var(--sl-color-accent) 4%, var(--sl-color-bg));
+  border-color: color-mix(in srgb, var(--sl-color-accent) 26%, var(--sl-color-gray-5));
 }
 
 .landing-compare__pane-head {
@@ -683,7 +689,7 @@ html.js .landing-fade-up.landing-visible {
 .landing-compare__tag-qql {
   font-size: 0.72rem;
   font-weight: 700;
-  color: var(--sl-color-accent);
+  color: var(--sl-color-accent-text);
   letter-spacing: 0.06em;
 }
 
@@ -744,8 +750,8 @@ html.js .landing-fade-up.landing-visible {
 }
 
 .landing-compare__copy-btn.is-copied {
-  color: #10b981;
-  border-color: rgba(16, 185, 129, 0.4);
+  color: var(--sl-color-accent-high);
+  border-color: color-mix(in srgb, var(--sl-color-accent) 40%, transparent);
 }
 
 .landing-copy-feedback {
@@ -760,7 +766,7 @@ html.js .landing-fade-up.landing-visible {
   border: 1px solid var(--sl-color-gray-5);
   font-family: var(--sl-font-mono);
   font-size: 0.62rem;
-  color: #10b981;
+  color: var(--sl-color-accent-high);
   white-space: nowrap;
 }
 
@@ -771,39 +777,43 @@ html.js .landing-fade-up.landing-visible {
 .landing-compare__code-wrapper {
   flex: 1;
   min-width: 0;
-  padding: 0.5rem 0;
   scrollbar-width: none !important;
   -ms-overflow-style: none !important;
 }
 
-.landing-compare__code-wrapper::-webkit-scrollbar {
-  display: none !important;
-  width: 0 !important;
-  height: 0 !important;
+/* One padding source only. Expressive-code's own per-line inset
+   (--ec-codePadInl, 1rem) aligns the code with the pane header and footer;
+   stacking figure/frame/pre paddings tripled it and broke the left edge. */
+.landing-compare__code-wrapper .expressive-code,
+.landing-compare__code-wrapper .expressive-code .frame {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
 }
 
-.landing-compare__code-wrapper .expressive-code,
-.landing-compare__code-wrapper .expressive-code .frame,
 .landing-compare__code-wrapper .expressive-code pre {
   background: transparent !important;
   border: 0 !important;
   box-shadow: none !important;
   margin: 0 !important;
-  padding: 0.5rem 1rem !important;
+  padding: 0 !important;
   scrollbar-width: none !important;
   -ms-overflow-style: none !important;
   overflow-x: hidden !important;
 }
 
-.landing-compare__code-wrapper .expressive-code pre::-webkit-scrollbar {
-  display: none !important;
-  width: 0 !important;
-  height: 0 !important;
-}
-
 .landing-compare__code-wrapper .expressive-code pre > code {
+  padding-block: 0.7rem 0.55rem !important;
   font-size: 0.77rem !important;
   line-height: 1.6 !important;
+}
+
+/* The pane header already carries a copy button; the ec-injected one
+   duplicates it as a floating square over the code. */
+.landing-compare__code-wrapper .expressive-code .copy {
+  display: none !important;
 }
 
 /* ── Left Pane: Engine Plan Breakdown ── */
@@ -835,11 +845,11 @@ html.js .landing-fade-up.landing-visible {
 
 .landing-compare__plan-time {
   font-size: 0.6rem;
-  color: #34d399;
-  background: rgba(16, 185, 129, 0.1);
-  padding: 0.1rem 0.35rem;
+  color: var(--sl-color-accent-high);
+  background: color-mix(in srgb, var(--sl-color-accent) 12%, transparent);
+  padding: 0.1rem 0.4rem;
   border-radius: 999px;
-  border: 1px solid rgba(16, 185, 129, 0.25);
+  border: 1px solid color-mix(in srgb, var(--sl-color-accent) 30%, transparent);
 }
 
 .landing-compare__plan-items {
@@ -879,26 +889,23 @@ html.js .landing-fade-up.landing-visible {
   font-family: var(--sl-font-mono);
   font-size: 0.68rem;
   letter-spacing: 0.02em;
-  margin-top: auto;
 }
 
 .landing-compare__pane-foot--success {
-  background: rgba(16, 185, 129, 0.04);
   color: var(--sl-color-gray-2);
 }
 
 .landing-compare__pane-foot--success svg {
-  color: #34d399;
+  color: var(--sl-color-accent);
   flex-shrink: 0;
 }
 
 .landing-compare__pane-foot--warn {
-  background: color-mix(in srgb, var(--sl-color-gray-6) 45%, transparent);
   color: var(--sl-color-gray-3);
 }
 
 .landing-compare__pane-foot--warn svg {
-  color: #f59e0b;
+  color: var(--sl-color-gray-4);
   flex-shrink: 0;
 }
 
@@ -916,53 +923,6 @@ html.js .landing-fade-up.landing-visible {
   display: none !important;
   width: 0 !important;
   height: 0 !important;
-}
-
-.landing-why {
-  list-style: none;
-  margin: 1.25rem 0 0;
-  padding: 0;
-  border-top: 1px solid var(--sl-color-gray-5);
-}
-
-.landing-why__row {
-  display: grid;
-  gap: 0.45rem 2rem;
-  padding: 1.2rem 0;
-  border-bottom: 1px solid var(--sl-color-gray-5);
-}
-
-@media (min-width: 48rem) {
-  .landing-why__row {
-    grid-template-columns: 2.4rem 10.5rem minmax(0, 1fr);
-    align-items: baseline;
-  }
-}
-
-.landing-why__num {
-  font-family: var(--sl-font-mono);
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  color: var(--sl-color-accent);
-}
-
-.landing-why__label {
-  margin: 0;
-  font-family: var(--sl-font-mono);
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--sl-color-white);
-}
-
-.landing-why__body {
-  margin: 0;
-  max-width: 42rem;
-  font-size: 1rem;
-  line-height: 1.55;
-  color: var(--sl-color-gray-2);
 }
 
 .landing-installs {

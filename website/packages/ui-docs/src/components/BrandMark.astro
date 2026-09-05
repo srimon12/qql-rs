@@ -1,0 +1,31 @@
+---
+/**
+ * Inline brand mark: ring + slit "V", the shared Veristamp/QQL glyph.
+ *
+ * Inlined (instead of <img src="logo.svg">) so the V can use `currentColor`:
+ * the standalone SVG pins its fill to `prefers-color-scheme`, which goes
+ * near-invisible whenever the site theme disagrees with the OS preference
+ * (e.g. light OS + dark site).
+ */
+interface Props {
+	class?: string;
+}
+
+const { class: className } = Astro.props;
+const uid = `vslit-${Math.random().toString(36).slice(2, 8)}`;
+---
+
+<svg viewBox="0 0 32 32" fill="none" aria-hidden="true" class={className}>
+	<defs>
+		<mask id={uid}>
+			<rect width="32" height="32" fill="#fff"></rect>
+			<line x1="23.54" y1="9.02" x2="16" y2="22.59" stroke="#000" stroke-width="1.6"></line>
+		</mask>
+	</defs>
+	<circle cx="16" cy="16" r="12.64" stroke="#B04930" stroke-width="2.56"></circle>
+	<path
+		fill="currentColor"
+		mask={`url(#${uid})`}
+		d="M6.698 9.998 L16 26.741 L25.302 9.998 L21.777 8.04 L16 18.439 L10.223 8.04 Z"
+	></path>
+</svg>

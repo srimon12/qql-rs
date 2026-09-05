@@ -2,17 +2,24 @@
 import { Code } from "@astrojs/starlight/components";
 
 interface Props {
-  heading: string;
-  sub: string;
-  guideHref: string;
-  guideLabel: string;
-  hybridQql: string;
-  tenantQql: string;
-  filtersQql: string;
+	heading: string;
+	sub: string;
+	guideHref: string;
+	guideLabel: string;
+	hybridQql: string;
+	tenantQql: string;
+	filtersQql: string;
 }
 
-const { heading, sub, guideHref, guideLabel, hybridQql, tenantQql, filtersQql } =
-  Astro.props;
+const {
+	heading,
+	sub,
+	guideHref,
+	guideLabel,
+	hybridQql,
+	tenantQql,
+	filtersQql,
+} = Astro.props;
 
 // ── Scenario 1: Hybrid Search (Dense + Sparse RRF) ─────────────────────────
 
@@ -337,79 +344,91 @@ const goFilters = `res, err := client.Query(ctx, &qdrant.QueryPoints{
 })`;
 
 const FORMATS = [
-  { id: "rest", label: "REST JSON", lang: "json", badge: "HTTP REST API" },
-  { id: "python", label: "Python", lang: "python", badge: "qdrant-client" },
-  { id: "typescript", label: "TypeScript", lang: "typescript", badge: "@qdrant/js-client-rest" },
-  { id: "rust", label: "Rust", lang: "rust", badge: "qdrant-client crate" },
-  { id: "go", label: "Go", lang: "go", badge: "go-client/qdrant" },
+	{ id: "python", label: "Python", lang: "python", badge: "qdrant-client" },
+	{
+		id: "typescript",
+		label: "TypeScript",
+		lang: "typescript",
+		badge: "@qdrant/js-client-rest",
+	},
+	{ id: "rust", label: "Rust", lang: "rust", badge: "qdrant-client crate" },
+	{ id: "go", label: "Go", lang: "go", badge: "go-client/qdrant" },
+	{ id: "rest", label: "REST JSON", lang: "json", badge: "HTTP REST API" },
 ] as const;
 
-type FormatId = (typeof FORMATS)[number]["id"];
-
 const presets = [
-  {
-    id: "hybrid",
-    title: "Hybrid RRF",
-    badge: "Dense + Sparse",
-    qql: hybridQql,
-    playgroundHref: `/playground/?q=${encodeURIComponent(hybridQql)}`,
-    planTime: "0.8ms compile",
-    planSteps: [
-      { glyph: "↳", text: "Prefetch 1: dense_vec nearest (limit: 100)" },
-      { glyph: "↳", text: "Prefetch 2: bm25_vec sparse (limit: 100)" },
-      { glyph: "⚡", text: "Fusion: Reciprocal Rank Fusion (RRF)" },
-      { glyph: "✓", text: "Filter pushed down (status = 'active')" },
-    ],
-    codes: {
-      rest: restHybrid,
-      python: pythonHybrid,
-      typescript: tsHybrid,
-      rust: rustHybrid,
-      go: goHybrid,
-    },
-  },
-  {
-    id: "tenant",
-    title: "Shard + filter",
-    badge: "Multi-tenancy",
-    qql: tenantQql,
-    playgroundHref: `/playground/?q=${encodeURIComponent(tenantQql)}`,
-    planTime: "0.6ms compile",
-    planSteps: [
-      { glyph: "↳", text: "Shard routing: 'tenant-corp-99' (direct partition)" },
-      { glyph: "↳", text: "Dense retrieval: nearest vector (limit: 5)" },
-      { glyph: "✓", text: "Tenant isolation: department = 'finance'" },
-      { glyph: "⚡", text: "Zero cross-shard network broadcast" },
-    ],
-    codes: {
-      rest: restTenant,
-      python: pythonTenant,
-      typescript: tsTenant,
-      rust: rustTenant,
-      go: goTenant,
-    },
-  },
-  {
-    id: "filters",
-    title: "Boolean filters",
-    badge: "Compound logic",
-    qql: filtersQql,
-    playgroundHref: `/playground/?q=${encodeURIComponent(filtersQql)}`,
-    planTime: "0.7ms compile",
-    planSteps: [
-      { glyph: "↳", text: "Query vector: nearest candidates (limit: 20)" },
-      { glyph: "↳", text: "Should filter: category IN ('hardware', 'tools')" },
-      { glyph: "↳", text: "Range & match: price <= 1200.0 AND in_stock = true" },
-      { glyph: "⚡", text: "Optimized boolean filter tree lowered to Qdrant REST" },
-    ],
-    codes: {
-      rest: restFilters,
-      python: pythonFilters,
-      typescript: tsFilters,
-      rust: rustFilters,
-      go: goFilters,
-    },
-  },
+	{
+		id: "hybrid",
+		title: "Hybrid RRF",
+		badge: "Dense + Sparse",
+		qql: hybridQql,
+		playgroundHref: `/playground/?q=${encodeURIComponent(hybridQql)}`,
+		planTime: "0.8ms compile",
+		planSteps: [
+			{ glyph: "↳", text: "Prefetch 1: dense_vec nearest (limit: 100)" },
+			{ glyph: "↳", text: "Prefetch 2: bm25_vec sparse (limit: 100)" },
+			{ glyph: "⚡", text: "Fusion: Reciprocal Rank Fusion (RRF)" },
+			{ glyph: "✓", text: "Filter pushed down (status = 'active')" },
+		],
+		codes: {
+			rest: restHybrid,
+			python: pythonHybrid,
+			typescript: tsHybrid,
+			rust: rustHybrid,
+			go: goHybrid,
+		},
+	},
+	{
+		id: "tenant",
+		title: "Shard + filter",
+		badge: "Multi-tenancy",
+		qql: tenantQql,
+		playgroundHref: `/playground/?q=${encodeURIComponent(tenantQql)}`,
+		planTime: "0.6ms compile",
+		planSteps: [
+			{
+				glyph: "↳",
+				text: "Shard routing: 'tenant-corp-99' (direct partition)",
+			},
+			{ glyph: "↳", text: "Dense retrieval: nearest vector (limit: 5)" },
+			{ glyph: "✓", text: "Tenant isolation: department = 'finance'" },
+			{ glyph: "⚡", text: "Zero cross-shard network broadcast" },
+		],
+		codes: {
+			rest: restTenant,
+			python: pythonTenant,
+			typescript: tsTenant,
+			rust: rustTenant,
+			go: goTenant,
+		},
+	},
+	{
+		id: "filters",
+		title: "Boolean filters",
+		badge: "Compound logic",
+		qql: filtersQql,
+		playgroundHref: `/playground/?q=${encodeURIComponent(filtersQql)}`,
+		planTime: "0.7ms compile",
+		planSteps: [
+			{ glyph: "↳", text: "Query vector: nearest candidates (limit: 20)" },
+			{ glyph: "↳", text: "Should filter: category IN ('hardware', 'tools')" },
+			{
+				glyph: "↳",
+				text: "Range & match: price <= 1200.0 AND in_stock = true",
+			},
+			{
+				glyph: "⚡",
+				text: "Optimized boolean filter tree lowered to Qdrant REST",
+			},
+		],
+		codes: {
+			rest: restFilters,
+			python: pythonFilters,
+			typescript: tsFilters,
+			rust: rustFilters,
+			go: goFilters,
+		},
+	},
 ] as const;
 
 const lines = (source: string) => source.trim().split("\n").length;
@@ -460,18 +479,20 @@ const lines = (source: string) => source.trim().split("\n").length;
           }
         </div>
 
-        <div class="landing-compare__stats-badge" data-stat-container>
-          <span class="landing-compare__stat" data-stat>
-            {lines(presets[0].qql)} lines QQL vs {lines(presets[0].codes.rest)} lines REST JSON
-          </span>
-          <span class="landing-compare__reduction" data-reduction>
-            -{Math.round((1 - lines(presets[0].qql) / lines(presets[0].codes.rest)) * 100)}% lines
-          </span>
-        </div>
+        <div class="landing-compare__toolbar-right">
+          <div class="landing-compare__stats-badge" data-stat-container>
+            <span class="landing-compare__stat" data-stat>
+              {lines(presets[0].qql)} lines vs {lines(presets[0].codes.python)} in Python
+            </span>
+            <span class="landing-compare__reduction" data-reduction>
+              −{Math.round((1 - lines(presets[0].qql) / lines(presets[0].codes.python)) * 100)}%
+            </span>
+          </div>
 
-        <a class="landing-compare__try" data-play href={presets[0].playgroundHref}>
-          Open in playground →
-        </a>
+          <a class="landing-compare__try" data-play href={presets[0].playgroundHref}>
+            Open in playground →
+          </a>
+        </div>
       </div>
 
       {/* ── Scenario Panels ── */}
@@ -617,7 +638,7 @@ const lines = (source: string) => source.trim().split("\n").length;
       go: "Go SDK",
     };
 
-    let format = "rest";
+    let format = "python";
 
     const activePanel = () => panels.find((panel) => !panel.hidden) ?? panels[0];
 
@@ -628,12 +649,12 @@ const lines = (source: string) => source.trim().split("\n").length;
       const targetLines = Number(panel.dataset[targetLinesAttr] ?? "20");
 
       if (stat) {
-        stat.textContent = `${qqlLines} lines QQL vs ${targetLines} lines ${formatLabels[format] ?? format.toUpperCase()}`;
+        stat.textContent = `${qqlLines} lines vs ${targetLines} in ${formatLabels[format] ?? format.toUpperCase()}`;
       }
 
       if (reduction && targetLines > qqlLines) {
         const pct = Math.round((1 - qqlLines / targetLines) * 100);
-        reduction.textContent = `-${pct}% lines`;
+        reduction.textContent = `−${pct}%`;
       }
 
       if (play && panel.dataset.play) {

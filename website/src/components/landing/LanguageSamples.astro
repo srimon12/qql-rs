@@ -2,64 +2,67 @@
 import { Code } from "@astrojs/starlight/components";
 
 interface Props {
-  heading: string;
-  sub: string;
-  footHref: string;
-  footLabel: string;
-  hybridQql: string;
-  facetQql: string;
-  formulaQql: string;
-  groupedQql: string;
-  recommendQql: string;
+	heading: string;
+	sub: string;
+	footHref: string;
+	footLabel: string;
+	hybridQql: string;
+	facetQql: string;
+	formulaQql: string;
+	groupedQql: string;
+	recommendQql: string;
 }
 
 const {
-  heading,
-  sub,
-  footHref,
-  footLabel,
-  hybridQql,
-  facetQql,
-  formulaQql,
-  groupedQql,
-  recommendQql,
+	heading,
+	sub,
+	footHref,
+	footLabel,
+	hybridQql,
+	facetQql,
+	formulaQql,
+	groupedQql,
+	recommendQql,
 } = Astro.props;
 
 const featured = {
-  kind: "Hybrid",
-  ver: "",
-  code: hybridQql,
-  caption: "Dense and sparse in one statement — the engine fuses, not your client.",
+	kind: "Hybrid",
+	ver: "",
+	code: hybridQql,
+	caption:
+		"Dense and sparse in one statement — the engine fuses, not your client.",
 };
 
 const samples = [
-  {
-    kind: "Facet",
-    ver: "",
-    code: facetQql,
-    caption: "Category counts stay in the database — no points pulled into memory.",
-  },
-  {
-    kind: "Formula",
-    ver: "QQL 1.6",
-    code: formulaQql,
-    caption: "Clamps and curves in one expression — no CASE boilerplate.",
-  },
-  {
-    kind: "Group + lookup",
-    ver: "",
-    code: groupedQql,
-    caption: "Several results per category, joined to a lookup collection — one statement.",
-  },
-  {
-    kind: "Recommend",
-    ver: "",
-    code: recommendQql,
-    caption: "Positive and negative points — no external service.",
-  },
+	{
+		kind: "Facet",
+		ver: "",
+		code: facetQql,
+		caption:
+			"Category counts stay in the database — no points pulled into memory.",
+	},
+	{
+		kind: "Formula",
+		ver: "QQL 1.6",
+		code: formulaQql,
+		caption: "Clamps and curves in one expression — no CASE boilerplate.",
+	},
+	{
+		kind: "Group + lookup",
+		ver: "",
+		code: groupedQql,
+		caption:
+			"Several results per category, joined to a lookup collection — one statement.",
+	},
+	{
+		kind: "Recommend",
+		ver: "",
+		code: recommendQql,
+		caption: "Positive and negative points — no external service.",
+	},
 ].map((sample) => ({
-  ...sample,
-  href: `/playground/?q=${encodeURIComponent(sample.code)}`,
+	...sample,
+	href: `/playground/?q=${encodeURIComponent(sample.code)}`,
 }));
 
 const featuredHref = `/playground/?q=${encodeURIComponent(featured.code)}`;

@@ -1,24 +1,32 @@
 ---
+import BrandMark from "@qql/ui-docs/BrandMark.astro";
 import { APPS } from "../config/site";
 
 interface Props {
-  active?: "home" | "docs" | "playground";
+	active?: "home" | "docs" | "playground";
+}
+
+interface NavItem {
+	key: string;
+	label: string;
+	href: string;
+	external?: boolean;
 }
 
 const { active } = Astro.props;
-const nav = [
-  { key: "docs", label: "Docs", href: "/docs/" },
-  { key: "playground", label: "Playground", href: "/playground/" },
-  { key: "blog", label: "Blog", href: APPS.blog.url, external: true },
-] as const;
+const nav: NavItem[] = [
+	{ key: "docs", label: "Docs", href: "/docs/" },
+	{ key: "playground", label: "Playground", href: "/playground/" },
+	{ key: "blog", label: "Blog", href: APPS.blog.url, external: true },
+];
 ---
 
 <header class="site-header" data-site-header>
   <a class="skip-link" href="#main-content">Skip to content</a>
   <div class="site-header__inner">
-    <a class="brand" href="/" aria-label="QQL home">
+    <a class="brand" href="/">
       <span class="brand__mark" aria-hidden="true">
-        <img src={`${import.meta.env.BASE_URL}logo.svg`.replace(/([^:]\/)\/+/g, "$1")} alt="" width="32" height="32" />
+        <BrandMark />
       </span>
       <span class="brand__name">QQL</span>
       <span class="brand__badge">Query language</span>

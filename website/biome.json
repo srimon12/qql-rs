@@ -1,0 +1,58 @@
+{
+	"$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+	"assist": { "actions": { "source": { "organizeImports": "on" } } },
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"recommended": true
+		}
+	},
+	"formatter": {
+		"enabled": true,
+		"indentStyle": "tab"
+	},
+	"css": {
+		"parser": {
+			"tailwindDirectives": true
+		}
+	},
+	"files": {
+		"includes": [
+			"**",
+			"!**/node_modules",
+			"!**/dist",
+			"!**/.astro",
+			"!**/.wasm",
+			"!**/public",
+			"!**/src/scripts/qql-keywords.generated.ts",
+			"!**/src/styles/ec-theme.css",
+			"!**/packages/ui-docs/src/styles/*.css"
+		]
+	},
+	"javascript": {
+		"globals": ["React", "JSX"]
+	},
+	"overrides": [
+		{
+			"includes": ["src/pages/index.astro"],
+			"linter": {
+				"rules": {
+					"complexity": {
+						"noUselessStringRaw": "off"
+					}
+				}
+			}
+		},
+		{
+			"includes": ["**/*.astro"],
+			"linter": {
+				"rules": {
+					"correctness": {
+						"noUnusedImports": "off",
+						"noUnusedVariables": "off"
+					}
+				}
+			}
+		}
+	]
+}

@@ -1,33 +1,40 @@
 ---
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
 import "@fontsource/newsreader/latin-300.css";
 import "@fontsource/newsreader/latin-400.css";
-import "@fontsource/ibm-plex-sans/400.css";
-import "@fontsource/ibm-plex-sans/500.css";
-import "@fontsource/ibm-plex-sans/600.css";
-import "@fontsource/jetbrains-mono/400.css";
-import "@fontsource/jetbrains-mono/500.css";
 import "../styles/global.css";
 import "@qql/ui-docs/chrome.css";
 import "@qql/ui-docs/landing.css";
+import CtaBand from "../components/landing/CtaBand.astro";
 import FaqList from "../components/landing/FaqList.astro";
 import InstallGrid from "../components/landing/InstallGrid.astro";
-import CtaBand from "../components/landing/CtaBand.astro";
 import LandingHero from "../components/landing/LandingHero.astro";
 import LanguageSamples from "../components/landing/LanguageSamples.astro";
 import PipelineSteps from "../components/landing/PipelineSteps.astro";
 import ProblemCompare from "../components/landing/ProblemCompare.astro";
 import StatsStrip from "../components/landing/StatsStrip.astro";
-import WhyList from "../components/landing/WhyList.astro";
 import SiteFooter from "../components/SiteFooter.astro";
 import SiteHeader from "../components/SiteHeader.astro";
 import { ANALYTICS, APPS, SITE } from "../config/site";
-import { cta, faq, getStarted, hero, language, pipeline, problem, stats, why } from "../data/landing";
+import {
+	cta,
+	faq,
+	getStarted,
+	hero,
+	language,
+	pipeline,
+	problem,
+	stats,
+} from "../data/landing";
 
 const pageTitle = "QQL: SQL for Qdrant vector search";
 const pageDescription =
-  "QQL is to Qdrant what SQL is to Postgres. One declarative language for hybrid search, filtering, mutations, and DDL across Rust, Python, Node.js, WASM, REST, gRPC, and edge.";
+	"QQL is to Qdrant what SQL is to Postgres. One declarative language for hybrid search, filtering, mutations, and DDL across Rust, Python, Node.js, WASM, REST, gRPC, and edge.";
 
-// The documentation verifier parses every `verifiedQql` String.raw template.
+// The documentation verifier parses every `verifiedQql` String.raw template
+// (see scripts/verify-qql-docs.mjs), so the marker must stay despite none of
+// the templates containing backslashes.
 const verifiedQqlHero = String.raw`QUERY 'chest pain' FROM medical
 USING dense
 WHERE department = 'cardio'
@@ -191,7 +198,6 @@ LIMIT 10;`;
         secondaryCta={hero.secondaryCta}
         specimenTitle={hero.specimenTitle}
         specimenMeta={hero.specimenMeta}
-        specimenNote={hero.specimenNote}
         specimenQql={verifiedQqlHero}
       >
         <span class="kw">QUERY</span> <span class="str">'chest pain'</span><br />
@@ -214,8 +220,6 @@ LIMIT 10;`;
         tenantQql={verifiedQqlCompareTenant}
         filtersQql={verifiedQqlCompareFilters}
       />
-
-      <WhyList heading={why.heading} rows={why.rows} />
 
       <PipelineSteps
         heading={pipeline.heading}
