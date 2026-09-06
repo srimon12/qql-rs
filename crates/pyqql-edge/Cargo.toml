@@ -22,7 +22,7 @@ http-embedding = ["qql-edge/http-embedding"]
 
 [dependencies]
 qql-core = { workspace = true, features = ["serde", "json"] }
-pyqql-common = { path = "../pyqql-common" }
+pyqql-common = { workspace = true }
 qql-plan = { workspace = true }
 qql = { workspace = true }
 qql-edge = { workspace = true }

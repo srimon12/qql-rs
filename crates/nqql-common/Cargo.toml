@@ -5,6 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Shared NAPI-RS binding logic for the nqql and nqql-edge SDKs"
 publish = false
 
 [lib]
