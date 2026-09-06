@@ -48,61 +48,17 @@ try {
   }
 }
 
-if (nativeBinding.Stmt && !nativeBinding.Stmt.prototype.toJSON) {
-  nativeBinding.Stmt.prototype.toJSON = function () {
-    return this.toJson();
-  };
-}
+// Shared DX layer (error mapping, typed result classes, Stmt-aware bind) —
+// byte-identical with nqql-edge; a CI check diffs the two copies.
+const dx = require('./dx-common.js');
+dx.installStmtToJSON(nativeBinding.Stmt);
 
-function buildError(raw) {
-  const message = raw instanceof Error ? raw.message : String(raw);
-  try {
-    const parsed = JSON.parse(message);
-    if (parsed && parsed.code) {
-      const error = new Error(parsed.message || message);
-      error.code = parsed.code;
-      error.kind = parsed.kind;
-      error.span = parsed.span ?? null;
-      return error;
-    }
-  } catch (_) {
-    // Non-QQL errors retain their original JS error and stack.
-  }
-  return raw instanceof Error ? raw : new Error(message);
-}
+const { buildError, callNative, validateOptions, ScoredPoint, ExecutionReport } = dx;
 
-function callNative(call) {
-  try {
-    return call();
-  } catch (error) {
-    throw buildError(error);
-  }
-}
+const normalizeQuery = (query) => dx.normalizeQuery(nativeBinding.Stmt, query);
 
-function normalizeQuery(query) {
-  if (query instanceof nativeBinding.Stmt) {
-    return query.toObject();
-  }
-  if (Array.isArray(query)) {
-    return query.map(normalizeQuery);
-  }
-  return query;
-}
 
-function validateOptions(options) {
-  if (
-    options !== undefined &&
-    options !== null &&
-    (typeof options !== 'object' || Array.isArray(options))
-  ) {
-    throw new TypeError('options must be an object');
-  }
-  const value = options?.onError;
-  if (value !== undefined && value !== 'stop' && value !== 'continue') {
-    throw new TypeError("options.onError must be 'stop' or 'continue'");
-  }
-  return options;
-}
+
 
 /**
  * Parse one statement or a semicolon-delimited script.
@@ -227,84 +183,6 @@ function httpExecutor(dataDir, url, embedKey, embedModel, embedDim, onDiskPayloa
   return new Client(inner);
 }
 
-class ScoredPoint {
-  constructor(data) {
-    if (!data || typeof data !== 'object') {
-      throw new TypeError('ScoredPoint requires a hit object');
-    }
-    // Field defaults mirror pyqql's ScoredPoint dataclass; Object.assign
-    // below overlays the hit's own values.
-    this.id = data.id;
-    this.score = data.score ?? 0;
-    this.payload = data.payload ?? null;
-    this.text = data.text ?? null;
-    this.collection = data.collection ?? null;
-    Object.assign(this, data);
-  }
-
-  get(key, defaultValue = null) {
-    if (this.payload && typeof this.payload === 'object' && key in this.payload) {
-      return this.payload[key];
-    }
-    return defaultValue;
-  }
-}
-
-class ExecutionReport {
-  constructor(data) {
-    // Defaults mirror pyqql's ExecutionReport dict subclass.
-    this.ok = false;
-    this.results = [];
-    this.succeeded = 0;
-    this.failed = 0;
-    Object.assign(this, data);
-  }
-
-  #resultAt(stmt) {
-    const res = this.results;
-    if (!Array.isArray(res) || res.length === 0) return undefined;
-    const idx = stmt < 0 ? res.length + stmt : stmt;
-    return res[idx];
-  }
-
-  hits(stmt = 0) {
-    const res = this.#resultAt(stmt);
-    if (!res || !Array.isArray(res.data)) return [];
-    return res.data
-      .filter((d) => d && typeof d === 'object')
-      .map((d) => new ScoredPoint(d));
-  }
-
-  points(stmt = 0) {
-    return this.hits(stmt);
-  }
-
-  facet(stmt = 0) {
-    const res = this.#resultAt(stmt);
-    if (!res) return [];
-    if (Array.isArray(res.data)) return res.data;
-    if (typeof res.data === 'object' && res.data !== null) {
-      return res.data.result?.hits || res.data.hits || [];
-    }
-    return [];
-  }
-
-  count(stmt = 0) {
-    const res = this.#resultAt(stmt);
-    if (!res) return 0;
-    if (typeof res.data === 'number') return res.data;
-    if (typeof res.data === 'object' && res.data !== null) {
-      const c = res.data.result?.count ?? res.data.count;
-      if (typeof c === 'number') return c;
-    }
-    if (typeof res.message === 'string' && res.message.startsWith('Count: ')) {
-      const parsed = parseInt(res.message.slice(7), 10);
-      if (!Number.isNaN(parsed)) return parsed;
-    }
-    return 0;
-  }
-}
-
 async function execute(query, options) {
   try {
     const raw = await nativeBinding.execute(
@@ -389,17 +267,10 @@ class Client {
 
 /**
  * Substitute `:name` (object) or `?` (array) placeholders into a query string
- * or Stmt. Mirrors pyqql's `bind`: Stmt inputs return a bound Stmt (or, with
- * `truncateVectors`, the truncated readable string); string inputs return the
- * bound query string. Without `params`, the input is returned unchanged.
+ * or Stmt (shared implementation in dx-common.js, pyqql `bind` parity).
  */
 function bind(query, params, options) {
-  if (query instanceof nativeBinding.Stmt) {
-    const bound = query.bind(params ?? undefined);
-    const truncate = options?.truncateVectors ?? false;
-    return truncate ? bound.toReadableString() : bound;
-  }
-  return callNative(() => nativeBinding.bind(query, params ?? undefined, options));
+  return dx.bind(nativeBinding, query, params, options);
 }
 
 module.exports = {

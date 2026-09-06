@@ -174,11 +174,13 @@ binding](/docs/language/queries/#parameter-binding--prepared-queries).
 | `QQL-BIND-MIXED-STYLE` | The template mixes `:name` and `?`, or the binder received the other style |
 | `QQL-BIND-MISSING-PARAM` | A named placeholder has no bound value, or a positional index is out of range |
 | `QQL-BIND-UNUSED-PARAMS` | More positional values were supplied than `?` placeholders |
+| `QQL-BIND-BATCH-LENGTH` | A statement-scoped params list length does not match the statement count |
 | `QQL-BIND-INVALID-FLOAT` | A non-finite float (`NaN`, infinity) cannot be rendered as a literal |
 | `QQL-BIND-INVALID-POINT-ID` | A bound point ID is neither an unsigned integer nor a string |
 | `QQL-BIND-TYPE-MISMATCH` | A bound value has the wrong type for its position (for example a non-string bound to `TEXT`) |
 | `QQL-BIND-INVALID-INTEGER` | A `LIMIT` / `OFFSET` parameter is not a non-negative integer |
 | `QQL-BIND-FORMULA-TYPE` | A formula parameter cannot be bound to a numeric, datetime, or variable constant |
+| `QQL-BIND-BATCH-LENGTH` | A statement-scoped params list length does not match the statement count |
 | `QQL-BIND-INVALID-PARAMS` | The `params` argument is neither an object (named) nor an array (positional) |
 
 ## Embedding
@@ -241,6 +243,7 @@ QQL-BACKEND-HTTP
 QQL-BACKEND-JSON
 QQL-BATCH-CARDINALITY
 QQL-BATCH-INVARIANT
+QQL-BIND-BATCH-LENGTH
 QQL-BIND-FORMULA-TYPE
 QQL-BIND-INVALID-FLOAT
 QQL-BIND-INVALID-INTEGER

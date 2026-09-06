@@ -1,0 +1,22 @@
+[package]
+name = "nqql-common"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+napi = { version = "3", features = ["napi8", "serde-json", "async"] }
+qql-core = { workspace = true, features = ["serde", "json"] }
+qql-plan = { workspace = true }
+qql = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

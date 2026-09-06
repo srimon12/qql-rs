@@ -1,0 +1,24 @@
+[package]
+name = "pyqql-common"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+pyo3 = { version = "0.29", features = ["extension-module", "abi3-py310", "parking_lot"] }
+pythonize = "0.29"
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+qql-core = { workspace = true, features = ["serde", "json"] }
+qql-plan = { workspace = true }
+qql = { workspace = true }
+
+[lints]
+workspace = true

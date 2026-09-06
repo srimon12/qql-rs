@@ -130,11 +130,14 @@ Additional shapes:
 
 - **Nested expansion**: `{"loc": {"lat": 1.0, "lon": 2.0}}` binds `:loc.lat`
   and `:loc.lon`; flat dotted keys (`{"loc.lat": 1.0}`) are equivalent.
-- **Statement-scoped batch params**: pass `params` as a list/array with one
-  entry per statement (dict/object → named, list of scalars → positional).
-  The length must match the statement count exactly; otherwise the list is
-  reinterpreted as positional parameters for the whole input, which fails for
-  named-placeholder templates.
+- **Statement-scoped batch params**: pass `params` as a list/array whose
+  entries are all dicts/objects or arrays — one container per statement
+  (object → named, array → positional for that statement). The length must
+  match the statement count exactly (`QQL-BIND-BATCH-LENGTH` otherwise);
+  partial binding is rejected rather than silently dropping placeholders.
+  Any other params shape (object, scalar list, scalar) applies identically to
+  every statement: a scalar list is a *shared* positional list, never
+  per-statement.
 - **`is_valid`** runs the full parse + plan gate (`qql_plan::parse_and_plan`),
   not just lexing, on `pyqql`, `pyqql-edge`, `nqql`, and `nqql-edge`.
 
@@ -165,7 +168,9 @@ All binding failures are validation errors with a stable `QQL-BIND-*` code:
 | `QQL-BIND-TYPE-MISMATCH` | A bound value has the wrong type for its position (e.g. a non-string bound to `TEXT`) |
 | `QQL-BIND-INVALID-INTEGER` | A `LIMIT` / `OFFSET` parameter is not a non-negative integer |
 | `QQL-BIND-FORMULA-TYPE` | A formula parameter cannot be bound to a numeric, datetime, or variable constant |
-| `QQL-BIND-INVALID-PARAMS` | The `params` argument is neither an object (named) nor an array (positional) — raised by the Node SDKs |
+| `QQL-BIND-BATCH-LENGTH` | A statement-scoped params list length does not match the statement count |
+| `QQL-BIND-INVALID-PARAMS` | The `params` argument is neither an object (named) nor an array (positional) |
 
 Codes 1–8 live in `crates/qql-core/src/params.rs`; `QQL-BIND-INVALID-PARAMS`
-is the Node bindings' guard for malformed `params` shapes.
+and `QQL-BIND-BATCH-LENGTH` are enforced by the shared JSON binding layer in
+`crates/qql-core/src/params_json.rs`, which every SDK binding routes through.

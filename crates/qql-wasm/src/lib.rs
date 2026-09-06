@@ -200,87 +200,20 @@ fn extract_ast_stmt(val: &JsValue) -> Option<ast::Stmt> {
     serde_wasm_bindgen::from_value::<ast::Stmt>(val.clone()).ok()
 }
 
-fn flatten_json_object(
-    obj: &serde_json::Map<String, serde_json::Value>,
-    prefix: &str,
-    out: &mut std::collections::HashMap<String, ast::Value>,
-) -> Result<(), JsValue> {
-    for (k, v) in obj {
-        let full_key = if prefix.is_empty() {
-            k.clone()
-        } else {
-            format!("{prefix}.{k}")
-        };
-        if let serde_json::Value::Object(nested) = v {
-            flatten_json_object(nested, &full_key, out)?;
-        }
-        let val =
-            ast::Value::from_json(v.clone()).map_err(|e| JsValue::from_str(&e.to_string()))?;
-        out.insert(full_key, val);
-    }
-    Ok(())
-}
-
+/// Map a params binding to a query string via the shared JSON contract.
 fn bind_json_params(
     query: &str,
     params: &serde_json::Value,
     truncate_vectors: bool,
 ) -> Result<String, JsValue> {
-    match params {
-        serde_json::Value::Object(obj) => {
-            let mut map = std::collections::HashMap::new();
-            flatten_json_object(obj, "", &mut map)?;
-            if truncate_vectors {
-                qql_core::params::bind_named_readable(query, |k| map.get(k).cloned(), 2)
-                    .map_err(|e| JsValue::from_str(&e.to_string()))
-            } else {
-                qql_core::params::bind_named(query, |k| map.get(k).cloned())
-                    .map_err(|e| JsValue::from_str(&e.to_string()))
-            }
-        }
-        serde_json::Value::Array(arr) => {
-            let items: Vec<ast::Value> = arr
-                .iter()
-                .cloned()
-                .map(ast::Value::from_json)
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| JsValue::from_str(&e.to_string()))?;
-            if truncate_vectors {
-                qql_core::params::bind_positional_readable(query, &items, 2)
-                    .map_err(|e| JsValue::from_str(&e.to_string()))
-            } else {
-                qql_core::params::bind_positional(query, &items)
-                    .map_err(|e| JsValue::from_str(&e.to_string()))
-            }
-        }
-        _ => Err(JsValue::from_str(
-            "params must be an object for :name or an array for ?",
-        )),
-    }
+    qql_core::params_json::bind_str_with_params(query, params, truncate_vectors)
+        .map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
+/// Map a params binding into a statement AST via the shared JSON contract.
 fn bind_stmt_json(stmt: &mut ast::Stmt, params: &serde_json::Value) -> Result<(), JsValue> {
-    match params {
-        serde_json::Value::Object(obj) => {
-            let mut map = std::collections::HashMap::new();
-            flatten_json_object(obj, "", &mut map)?;
-            qql_core::params::bind_stmt(stmt, |k| map.get(k).cloned(), &[])
-                .map_err(|e| JsValue::from_str(&e.to_string()))
-        }
-        serde_json::Value::Array(arr) => {
-            let items: Vec<ast::Value> = arr
-                .iter()
-                .cloned()
-                .map(ast::Value::from_json)
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| JsValue::from_str(&e.to_string()))?;
-            qql_core::params::bind_stmt(stmt, |_| None, &items)
-                .map_err(|e| JsValue::from_str(&e.to_string()))
-        }
-        _ => Err(JsValue::from_str(
-            "params must be an object for named parameters (:name) or an array for positional parameters (?)",
-        )),
-    }
+    qql_core::params_json::bind_stmt_with_params(stmt, params)
+        .map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
@@ -334,19 +267,9 @@ pub fn inject_filter(
 }
 
 fn parse_comparison_op(op: &str) -> Result<ComparisonOp, JsValue> {
-    match op {
-        "=" | "==" | "eq" => Ok(ComparisonOp::Eq),
-        ">" | "gt" => Ok(ComparisonOp::Gt),
-        ">=" | "gte" => Ok(ComparisonOp::Gte),
-        "<" | "lt" => Ok(ComparisonOp::Lt),
-        "<=" | "lte" => Ok(ComparisonOp::Lte),
-        "!=" | "neq" | "<>" => Err(JsValue::from_str(
-            "inject_filter does not support '!='; inject equality and wrap with NOT, or rewrite the query",
-        )),
-        other => Err(JsValue::from_str(&format!(
-            "unsupported comparison operator '{other}' (use =, >, >=, <, <=)"
-        ))),
-    }
+    // Single source in qql-core: supported operators and rejection messages
+    // stay identical across every SDK binding.
+    qql_core::ast::ComparisonOp::parse_inject_op(op).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 // ── Stmt class ─────────────────────────────────────────────────────
@@ -1018,22 +941,19 @@ impl Client {
             let mut succeeded = 0usize;
             let mut failed = 0usize;
 
-            let scoped_params = if let Some(serde_json::Value::Array(ref p_arr)) = params {
-                if p_arr.len() == len {
-                    Some(p_arr)
-                } else {
-                    None
-                }
-            } else {
-                None
+            let plan = match params.as_ref() {
+                Some(p) => Some(
+                    qql_core::params_json::plan_statement_params(p, len)
+                        .map_err(|e| JsValue::from_str(&e.to_string()))?,
+                ),
+                None => None,
             };
 
             for i in 0..len {
                 let item = arr.get(i as u32);
-                let item_params = match scoped_params {
-                    Some(scoped) => Some(&scoped[i]),
-                    None => params.as_ref(),
-                };
+                let item_params = plan
+                    .as_ref()
+                    .map(|plan| qql_core::params_json::param_for(plan, i));
 
                 if let Some(s) = item.as_string() {
                     let s = maybe_bind(&s, item_params)?;
@@ -1097,7 +1017,9 @@ impl Client {
 
         if let Some(mut stmt) = extract_ast_stmt(&query) {
             if let Some(ref p) = params {
-                bind_stmt_json(&mut stmt, p)?;
+                let plan = qql_core::params_json::plan_statement_params(p, 1)
+                    .map_err(|e| JsValue::from_str(&e.to_string()))?;
+                bind_stmt_json(&mut stmt, qql_core::params_json::param_for(&plan, 0))?;
             }
             let val = self.execute_stmt_inner(&stmt).await?;
             let report = WasmReport::single(val);
@@ -1105,49 +1027,64 @@ impl Client {
         }
 
         if let Some(s) = query.as_string() {
-            if let Some(serde_json::Value::Array(ref p_arr)) = params {
-                if let Ok(parsed_stmts) = Parser::parse_all(&s) {
-                    if parsed_stmts.len() > 1 && p_arr.len() == parsed_stmts.len() {
-                        let mut bound_stmts = Vec::with_capacity(parsed_stmts.len());
-                        for (i, mut stmt) in parsed_stmts.into_iter().enumerate() {
-                            bind_stmt_json(&mut stmt, &p_arr[i])?;
-                            bound_stmts.push(stmt);
-                        }
-                        let mut all_results: Vec<serde_json::Value> = Vec::new();
-                        let mut succeeded = 0usize;
-                        let mut failed = 0usize;
-                        for stmt in bound_stmts {
-                            match self.execute_stmt_inner(&stmt).await {
-                                Ok(val) => {
-                                    succeeded += 1;
-                                    all_results.push(val);
+            // A params array of containers (objects/arrays) is a scoped
+            // candidate for scripts: parse once to count statements, then let
+            // the shared planner enforce the exact length contract.
+            if let Some(p) = params.as_ref()
+                && matches!(p, serde_json::Value::Array(arr)
+                    if !arr.is_empty() && arr.iter().all(|e| e.is_object() || e.is_array()))
+            {
+                let parsed_stmts =
+                    Parser::parse_all(&s).map_err(|e| JsValue::from_str(&e.to_string()))?;
+                let plan = qql_core::params_json::plan_statement_params(p, parsed_stmts.len())
+                    .map_err(|e| JsValue::from_str(&e.to_string()))?;
+                if let qql_core::params_json::ParamPlan::Scoped(list) = &plan {
+                    let mut bound_stmts = Vec::with_capacity(parsed_stmts.len());
+                    for (i, mut stmt) in parsed_stmts.into_iter().enumerate() {
+                        bind_stmt_json(&mut stmt, &list[i])?;
+                        bound_stmts.push(stmt);
+                    }
+                    let mut all_results: Vec<serde_json::Value> = Vec::new();
+                    let mut succeeded = 0usize;
+                    let mut failed = 0usize;
+                    for stmt in bound_stmts {
+                        match self.execute_stmt_inner(&stmt).await {
+                            Ok(val) => {
+                                succeeded += 1;
+                                all_results.push(val);
+                            }
+                            Err(e) => {
+                                if on_error == WasmOnError::Stop {
+                                    return Err(e);
                                 }
-                                Err(e) => {
-                                    if on_error == WasmOnError::Stop {
-                                        return Err(e);
-                                    }
-                                    failed += 1;
-                                    all_results.push(exec_response(
-                                        false,
-                                        "ERROR",
-                                        &e.as_string().unwrap_or_default(),
-                                        None,
-                                    ));
-                                }
+                                failed += 1;
+                                all_results.push(exec_response(
+                                    false,
+                                    "ERROR",
+                                    &e.as_string().unwrap_or_default(),
+                                    None,
+                                ));
                             }
                         }
-                        let report = WasmReport {
-                            ok: failed == 0,
-                            results: all_results,
-                            succeeded,
-                            failed,
-                        };
-                        return to_js_value(&report);
                     }
+                    let report = WasmReport {
+                        ok: failed == 0,
+                        results: all_results,
+                        succeeded,
+                        failed,
+                    };
+                    return to_js_value(&report);
                 }
             }
-            let s = maybe_bind(&s, params.as_ref())?;
-            let report = self.execute_script(&s, on_error).await?;
+            let bound = match params.as_ref() {
+                Some(p) => {
+                    let plan = qql_core::params_json::plan_statement_params(p, 1)
+                        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+                    bind_json_params(&s, qql_core::params_json::param_for(&plan, 0), false)?
+                }
+                None => s.clone(),
+            };
+            let report = self.execute_script(&bound, on_error).await?;
             return to_js_value(&report);
         }
 
@@ -1165,7 +1102,9 @@ impl Client {
         let params = options_params(options.as_ref())?;
         let mut inner = stmt.inner.clone();
         if let Some(ref p) = params {
-            bind_stmt_json(&mut inner, p)?;
+            let plan = qql_core::params_json::plan_statement_params(p, 1)
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            bind_stmt_json(&mut inner, qql_core::params_json::param_for(&plan, 0))?;
         }
         let val = self.execute_stmt_inner(&inner).await?;
         let report = WasmReport::single(val);

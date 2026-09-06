@@ -45,7 +45,9 @@ qql/ (workspace root)
 │   ├── qql-edge/         # Local in-process executor: fastembed-rs + qdrant-edge
 │   ├── qql-cli/          # CLI binary and interactive REPL
 │   ├── pyqql/            # Python bindings (PyO3)
+│   ├── pyqql-common/     # Shared PyO3 surface for pyqql + pyqql-edge (Stmt, parser fns, dispatch)
 │   ├── nqql/             # Node.js bindings (N-API)
+│   ├── nqql-common/      # Shared NAPI logic for nqql + nqql-edge (Stmt ops, parser fns, execute dispatch)
 │   └── qql-wasm/         # WebAssembly bindings (wasm-bindgen)
 ```
 
@@ -93,6 +95,7 @@ Canonical plan is `PlannedOperation` (transport-neutral). `Route { method, path,
 * **`qql-cli`**: CLI binary. Uses the executor via REST/adapter construction.
 
 * **Foreign Bindings**: PyO3 (`pyqql`), N-API (`nqql`), Wasm-bindgen (`qql-wasm`). Expose parser, tokenization, filter injection, explain, `compile_query` (via `qql_plan::routing::compile_statement`), and `Client` classes. Keep public class names (`Client`, `HttpEmbedder`, `Stmt`), return shapes, and error mappings aligned.
+* **Binding dedup (anti-drift)**: server/edge pairs share a common crate — `pyqql-common` (PyO3: `Stmt`, parser functions, error mapping, `prepare_input`/`run_input`/`run_async` dispatch) and `nqql-common` (NAPI logic without `#[napi]` macros; the SDK crates keep thin `#[napi]` wrappers). All SDKs route parameter binding through `qql_core::params_json` (the single batch contract: `plan_statement_params` + `bind_stmt_with_params` / `bind_str_with_params`) and operator parsing through `ComparisonOp::parse_inject_op`. The JS wrapper layer (`dx-common.js`), Python report classes (`_dx_report.py`), and `test_dx.js` are byte-identical copies across the two SDKs of each language, enforced by a CI diff check — edit both copies or neither.
 
 ### Permanently Removed Abstractions
 

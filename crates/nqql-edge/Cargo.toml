@@ -29,6 +29,7 @@ qql-core = { workspace = true, features = ["serde", "json"] }
 qql-plan = { workspace = true }
 qql = { workspace = true }
 qql-edge = { workspace = true }
+nqql-common = { path = "../nqql-common" }
 napi = { version = "3", features = ["napi8", "serde-json", "async"] }
 napi-derive = "3"
 serde_json = { workspace = true }

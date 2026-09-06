@@ -19,6 +19,33 @@ pub enum ComparisonOp {
     Lte,
 }
 
+impl ComparisonOp {
+    /// Parse a host-language comparison operator string for
+    /// [`inject_filter`](crate::ast::inject_filter) (`=`, `==`, `eq`, `>`,
+    /// `gt`, …). `!=` / `neq` / `<>` are rejected with guidance to inject
+    /// equality and wrap with `NOT`; the single source of this contract lives
+    /// here so every binding surfaces the same message and code.
+    pub fn parse_inject_op(op: &str) -> Result<Self, crate::error::QqlError> {
+        match op {
+            "=" | "==" | "eq" => Ok(Self::Eq),
+            ">" | "gt" => Ok(Self::Gt),
+            ">=" | "gte" => Ok(Self::Gte),
+            "<" | "lt" => Ok(Self::Lt),
+            "<=" | "lte" => Ok(Self::Lte),
+            "!=" | "neq" | "<>" => Err(crate::error::QqlError::validation(
+                "QQL-VALIDATION-FILTER-INJECT",
+                "inject_filter does not support '!='; inject equality and wrap with NOT, or rewrite the query",
+                None,
+            )),
+            other => Err(crate::error::QqlError::validation(
+                "QQL-VALIDATION-FILTER-INJECT",
+                alloc::format!("unsupported comparison operator '{other}' (use =, >, >=, <, <=)"),
+                None,
+            )),
+        }
+    }
+}
+
 /// Point-ID predicate of a `PointId` filter clause.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

@@ -14,24 +14,14 @@
 //! const exec = nqql.localExecutor("./qdrant_data");
 //! const result = await exec.execute("QUERY 'hello' FROM docs LIMIT 10");
 //! ```
+//!
+//! The parser/parameter/execution logic lives in `nqql-common`, shared with
+//! `nqql` so the two SDKs cannot drift; this crate keeps only the `#[napi]`
+//! wrappers plus the edge client construction and one-shot helpers.
 
 use napi_derive::napi;
-use qql_core::ast::{self, ComparisonOp, Value};
-use qql_core::error::QqlError;
-use qql_core::lexer::Lexer;
-use qql_core::parser::Parser;
-use qql_plan::routing;
 
-/// Serialize a QqlError to JSON so the JS wrapper can extract structured fields.
-fn to_napi_err(e: QqlError) -> napi::Error {
-    let json = serde_json::to_string(&e).unwrap_or_else(|_| e.to_string());
-    napi::Error::from_reason(json)
-}
-
-/// Convert a serde_json error to a napi error.
-fn serde_napi_err(e: serde_json::Error) -> napi::Error {
-    napi::Error::from_reason(e.to_string())
-}
+use nqql_common as common;
 
 // ═══════════════════════════════════════════════════════════════════
 //  Stmt class — mirrors nqql.Stmt
@@ -48,8 +38,9 @@ impl Stmt {
     /// Parse a QQL string into a Stmt handle.
     #[napi(constructor, catch_unwind)]
     pub fn new(input: String) -> napi::Result<Self> {
-        let inner = Parser::parse(&input).map_err(to_napi_err)?;
-        Ok(Stmt { inner })
+        Ok(Stmt {
+            inner: common::stmt_parse(&input).map_err(common::to_napi_err)?,
+        })
     }
 
     #[napi(catch_unwind)]
@@ -59,36 +50,17 @@ impl Stmt {
         op: String,
         value: serde_json::Value,
     ) -> napi::Result<()> {
-        if op == "!=" || op == "neq" || op == "<>" {
-            return Err(napi::Error::from_reason(
-                "inject_filter does not support '!='; inject equality and wrap with NOT, or rewrite the query",
-            ));
-        }
-        let cmp = match op.as_str() {
-            "=" | "==" | "eq" => ComparisonOp::Eq,
-            ">" | "gt" => ComparisonOp::Gt,
-            ">=" | "gte" => ComparisonOp::Gte,
-            "<" | "lt" => ComparisonOp::Lt,
-            "<=" | "lte" => ComparisonOp::Lte,
-            _ => {
-                return Err(napi::Error::from_reason(format!(
-                    "unsupported comparison operator '{op}' (use =, >, >=, <, <=)"
-                )));
-            }
-        };
-        let val = Value::from_json(value).map_err(to_napi_err)?;
-        ast::inject_filter(&mut self.inner, &field, cmp, val).map_err(to_napi_err)?;
-        Ok(())
+        common::stmt_inject_filter(&mut self.inner, &field, &op, value).map_err(common::to_napi_err)
     }
 
     #[napi(catch_unwind)]
     pub fn to_object(&self) -> napi::Result<serde_json::Value> {
-        serde_json::to_value(&self.inner).map_err(serde_napi_err)
+        serde_json::to_value(&self.inner).map_err(common::serde_napi_err)
     }
 
     #[napi(catch_unwind)]
     pub fn to_json(&self) -> napi::Result<String> {
-        serde_json::to_string(&self.inner).map_err(serde_napi_err)
+        serde_json::to_string(&self.inner).map_err(common::serde_napi_err)
     }
 
     /// QQL `SHARD '…'` routing key (request-level). Prefer the clause in QQL.
@@ -110,25 +82,23 @@ impl Stmt {
     /// Bind parameters into this statement and return a new bound Stmt.
     #[napi(catch_unwind)]
     pub fn bind(&self, params: Option<serde_json::Value>) -> napi::Result<Self> {
-        let mut stmt = self.inner.clone();
-        if let Some(ref p) = params {
-            bind_stmt_json(&mut stmt, p).map_err(to_napi_err)?;
-        }
-        Ok(Stmt { inner: stmt })
+        Ok(Stmt {
+            inner: common::stmt_bind(&self.inner, params.as_ref()).map_err(common::to_napi_err)?,
+        })
     }
 
     /// Format statement as canonical, re-parseable QQL (mirrors Python `str(stmt)`).
     #[allow(clippy::inherent_to_string)]
     #[napi(catch_unwind, js_name = "toString")]
     pub fn to_string(&self) -> String {
-        qql_core::fmt::format_stmt(&self.inner)
+        common::stmt_full(&self.inner)
     }
 
     /// Format statement as a human-readable preview (mirrors Python `repr(stmt)`):
     /// long vector literals are truncated, so the output may not re-parse.
     #[napi(catch_unwind, js_name = "toReadableString")]
     pub fn to_readable_string(&self) -> String {
-        qql_core::fmt::format_stmt_readable(&self.inner)
+        common::stmt_readable(&self.inner)
     }
 
     /// Compile this Stmt AST directly into its transport route without re-parsing.
@@ -138,43 +108,21 @@ impl Stmt {
         &self,
         params: Option<serde_json::Value>,
     ) -> napi::Result<serde_json::Value> {
-        let mut stmt = self.inner.clone();
-        if let Some(ref p) = params {
-            bind_stmt_json(&mut stmt, p).map_err(to_napi_err)?;
-        }
-        let compiled = routing::compile_statement(&stmt).map_err(to_napi_err)?;
-        let (method, path, payload) = match compiled.route {
-            Some(route) => {
-                let payload = route.body_json().unwrap_or(serde_json::Value::Null);
-                (
-                    serde_json::Value::String(route.method.as_str().into()),
-                    serde_json::Value::String(route.path),
-                    payload,
-                )
-            }
-            None => (
-                serde_json::Value::Null,
-                serde_json::Value::Null,
-                serde_json::Value::Null,
-            ),
-        };
-        Ok(serde_json::json!({
-            "stmt_type": compiled.stmt_type,
-            "method": method,
-            "path": path,
-            "payload": payload,
-        }))
+        common::stmt_compile_route(&self.inner, params.as_ref()).map_err(common::to_napi_err)
     }
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  Parser functions (identical to nqql)
+//  Parser functions (identical to nqql — shared via nqql-common)
 // ═══════════════════════════════════════════════════════════════════
 
 #[napi(catch_unwind)]
 pub fn parse_all(input: String) -> napi::Result<Vec<Stmt>> {
-    let stmts = Parser::parse_all(&input).map_err(to_napi_err)?;
-    Ok(stmts.into_iter().map(|s| Stmt { inner: s }).collect())
+    Ok(common::parse_all(&input)
+        .map_err(common::to_napi_err)?
+        .into_iter()
+        .map(|inner| Stmt { inner })
+        .collect())
 }
 
 /// Fast JSON-only parse — returns a JSON string of the AST array.
@@ -182,15 +130,12 @@ pub fn parse_all(input: String) -> napi::Result<Vec<Stmt>> {
 /// Ideal for HTTP/IPC forwarding.
 #[napi(js_name = parseAllJson, catch_unwind)]
 pub fn parse_all_json(input: String) -> napi::Result<String> {
-    let stmts = Parser::parse_all(&input).map_err(to_napi_err)?;
-    serde_json::to_string(&stmts).map_err(serde_napi_err)
+    common::parse_all_json(&input).map_err(common::to_napi_err)
 }
 
 #[napi(catch_unwind)]
 pub fn is_valid(input: String) -> bool {
-    // Full frontend gate: parse + plan — same contract as execution and the
-    // server SDKs (nqql, pyqql).
-    qql_plan::parse_and_plan(&input).is_ok()
+    common::is_valid(&input)
 }
 
 #[napi(catch_unwind)]
@@ -200,59 +145,12 @@ pub fn inject_filter(
     op: String,
     value: serde_json::Value,
 ) -> napi::Result<serde_json::Value> {
-    if op == "!=" || op == "neq" || op == "<>" {
-        return Err(napi::Error::from_reason(
-            "inject_filter does not support '!='; inject equality and wrap with NOT, or rewrite the query",
-        ));
-    }
-    let cmp = match op.as_str() {
-        "=" | "==" | "eq" => ComparisonOp::Eq,
-        ">" | "gt" => ComparisonOp::Gt,
-        ">=" | "gte" => ComparisonOp::Gte,
-        "<" | "lt" => ComparisonOp::Lt,
-        "<=" | "lte" => ComparisonOp::Lte,
-        _ => {
-            return Err(napi::Error::from_reason(format!(
-                "unsupported comparison operator '{op}' (use =, >, >=, <, <=)"
-            )));
-        }
-    };
-    let val = Value::from_json(value).map_err(to_napi_err)?;
-    let mut stmt = Parser::parse(&query).map_err(to_napi_err)?;
-    ast::inject_filter(&mut stmt, &field, cmp, val).map_err(to_napi_err)?;
-    serde_json::to_value(&stmt).map_err(serde_napi_err)
+    common::inject_filter(&query, &field, &op, value).map_err(common::to_napi_err)
 }
 
 #[napi(catch_unwind)]
 pub fn tokenize(input: String) -> napi::Result<serde_json::Value> {
-    #[derive(serde::Serialize)]
-    struct TokenView<'a> {
-        kind: &'a str,
-        text: &'a str,
-        pos: usize,
-        end: usize,
-        len: usize,
-    }
-
-    let lexer = Lexer::new(&input);
-    let mut tokens = Vec::with_capacity(input.len() / 4 + 1);
-    for token_result in lexer {
-        let token =
-            token_result.map_err(|e| napi::Error::new(napi::Status::InvalidArg, e.to_string()))?;
-        tokens.push(TokenView {
-            kind: token.kind.as_str(),
-            text: token.text,
-            pos: token.span.start,
-            end: token.span.end,
-            len: token.span.end.saturating_sub(token.span.start),
-        });
-    }
-    serde_json::to_value(&tokens).map_err(|e| {
-        napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("failed to serialize tokens: {}", e),
-        )
-    })
+    common::tokenize(&input).map_err(common::to_napi_err)
 }
 
 #[napi(catch_unwind)]
@@ -260,32 +158,7 @@ pub fn compile_query(
     input: String,
     params: Option<serde_json::Value>,
 ) -> napi::Result<serde_json::Value> {
-    let mut stmt = Parser::parse(&input).map_err(to_napi_err)?;
-    if let Some(ref p) = params {
-        bind_stmt_json(&mut stmt, p).map_err(to_napi_err)?;
-    }
-    let compiled = routing::compile_statement(&stmt).map_err(to_napi_err)?;
-    let (method, path, payload) = match compiled.route {
-        Some(route) => {
-            let payload = route.body_json().unwrap_or(serde_json::Value::Null);
-            (
-                serde_json::Value::String(route.method.as_str().into()),
-                serde_json::Value::String(route.path),
-                payload,
-            )
-        }
-        None => (
-            serde_json::Value::Null,
-            serde_json::Value::Null,
-            serde_json::Value::Null,
-        ),
-    };
-    Ok(serde_json::json!({
-        "stmt_type": compiled.stmt_type,
-        "method": method,
-        "path": path,
-        "payload": payload,
-    }))
+    common::compile_query(&input, params.as_ref()).map_err(common::to_napi_err)
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -294,12 +167,12 @@ pub fn compile_query(
 
 #[napi(catch_unwind)]
 pub fn explain(query: String) -> napi::Result<String> {
-    qql_core::explain::explain(&query).map_err(to_napi_err)
+    common::explain(&query).map_err(common::to_napi_err)
 }
 
 #[napi(catch_unwind)]
 pub fn explain_stmt(stmt: &Stmt) -> napi::Result<String> {
-    Ok(qql_core::explain::explain_node(&stmt.inner))
+    Ok(common::explain_stmt(&stmt.inner))
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -339,139 +212,20 @@ impl JsClient {
         if self.closed.load(std::sync::atomic::Ordering::Acquire) {
             return Err(napi::Error::from_reason("client is closed"));
         }
-        let on_error = options
-            .as_ref()
-            .and_then(|o| o.get("onError"))
-            .and_then(|v| v.as_str())
-            .map(|s| match s {
-                "continue" => qql::executor::OnError::Continue,
-                _ => qql::executor::OnError::Stop,
-            })
-            .unwrap_or(qql::executor::OnError::Stop);
-        let params = options.as_ref().and_then(|o| o.get("params"));
-
-        let report = match &query {
-            serde_json::Value::String(s) => {
-                if let Some(serde_json::Value::Array(p_arr)) = params
-                    && let Ok(parsed_stmts) = Parser::parse_all(s)
-                    && parsed_stmts.len() > 1
-                    && p_arr.len() == parsed_stmts.len()
-                {
-                    let mut bound_stmts = Vec::with_capacity(parsed_stmts.len());
-                    for (i, mut stmt) in parsed_stmts.into_iter().enumerate() {
-                        bind_stmt_json(&mut stmt, &p_arr[i]).map_err(to_napi_err)?;
-                        bound_stmts.push(stmt);
-                    }
-                    let results = self
-                        .inner
-                        .execute_batch_nodes(
-                            bound_stmts,
-                            matches!(on_error, qql::executor::OnError::Stop),
-                        )
-                        .await
-                        .map_err(to_napi_err)?;
-                    let report = qql::executor::ExecutionReport::from_results(results);
-                    return serde_json::to_string(&report).map_err(serde_napi_err);
-                }
-                let bound_query = if let Some(p) = params {
-                    bind_json_params(s, p, false)?
-                } else {
-                    s.clone()
-                };
-                self.inner
-                    .execute(&bound_query, on_error)
-                    .await
-                    .map_err(to_napi_err)?
-            }
-            serde_json::Value::Array(arr) => {
-                if arr.is_empty() {
-                    qql::executor::ExecutionReport::empty()
-                } else {
-                    let scoped_params = if let Some(serde_json::Value::Array(p_arr)) = params {
-                        if p_arr.len() == arr.len() {
-                            Some(p_arr)
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
-
-                    if arr[0].is_string() {
-                        let mut bound_strs = Vec::with_capacity(arr.len());
-                        for (i, v) in arr.iter().enumerate() {
-                            let s = v.as_str().ok_or_else(|| {
-                                napi::Error::from_reason("batch items must be strings")
-                            })?;
-                            let item_params = match scoped_params {
-                                Some(scoped) => Some(&scoped[i]),
-                                None => params,
-                            };
-                            let bound = if let Some(p) = item_params {
-                                bind_json_params(s, p, false)?
-                            } else {
-                                s.to_string()
-                            };
-                            bound_strs.push(bound);
-                        }
-                        let refs: Vec<&str> = bound_strs.iter().map(|s| s.as_str()).collect();
-                        self.inner
-                            .execute_batch(&refs, on_error)
-                            .await
-                            .map_err(to_napi_err)?
-                    } else {
-                        let mut stmts = Vec::with_capacity(arr.len());
-                        for (i, v) in arr.iter().enumerate() {
-                            let mut s: ast::Stmt =
-                                serde_json::from_value(v.clone()).map_err(|e| {
-                                    napi::Error::from_reason(format!("invalid Stmt: {e}"))
-                                })?;
-                            let item_params = match scoped_params {
-                                Some(scoped) => Some(&scoped[i]),
-                                None => params,
-                            };
-                            if let Some(p) = item_params {
-                                bind_stmt_json(&mut s, p).map_err(to_napi_err)?;
-                            }
-                            stmts.push(s);
-                        }
-                        let results = self
-                            .inner
-                            .execute_batch_nodes(
-                                stmts,
-                                matches!(on_error, qql::executor::OnError::Stop),
-                            )
-                            .await
-                            .map_err(to_napi_err)?;
-                        qql::executor::ExecutionReport::from_results(results)
-                    }
-                }
-            }
-            _ => {
-                let mut s: ast::Stmt = serde_json::from_value(query)
-                    .map_err(|e| napi::Error::from_reason(format!("invalid Stmt: {e}")))?;
-                if let Some(p) = params {
-                    bind_stmt_json(&mut s, p).map_err(to_napi_err)?;
-                }
-                let results = self
-                    .inner
-                    .execute_batch_nodes(vec![s], matches!(on_error, qql::executor::OnError::Stop))
-                    .await
-                    .map_err(to_napi_err)?;
-                qql::executor::ExecutionReport::from_results(results)
-            }
-        };
-        serde_json::to_string(&report).map_err(serde_napi_err)
+        let report = common::execute::execute_dispatch(&self.inner, query, options.as_ref())
+            .await
+            .map_err(common::to_napi_err)?;
+        serde_json::to_string(&report).map_err(common::serde_napi_err)
     }
 
     #[napi(catch_unwind)]
     pub fn explain(&self, query: String) -> napi::Result<String> {
-        qql::executor::Executor::explain(&query).map_err(to_napi_err)
+        qql::executor::Executor::explain(&query).map_err(common::to_napi_err)
     }
 
     #[napi(catch_unwind)]
     pub fn explain_stmt(&self, stmt: &Stmt) -> napi::Result<String> {
-        qql::executor::Executor::explain_node(&stmt.inner).map_err(to_napi_err)
+        qql::executor::Executor::explain_node(&stmt.inner).map_err(common::to_napi_err)
     }
 
     /// Compile a QQL query to its transport route (non-executing).
@@ -481,7 +235,7 @@ impl JsClient {
         query: String,
         params: Option<serde_json::Value>,
     ) -> napi::Result<serde_json::Value> {
-        crate::compile_query(query, params)
+        common::compile_query(&query, params.as_ref()).map_err(common::to_napi_err)
     }
 
     /// Flush and release edge storage. Idempotent; execution after close is
@@ -491,7 +245,7 @@ impl JsClient {
         if self.closed.swap(true, std::sync::atomic::Ordering::AcqRel) {
             return Ok(());
         }
-        self.inner.close().await.map_err(to_napi_err)
+        self.inner.close().await.map_err(common::to_napi_err)
     }
 }
 
@@ -575,7 +329,7 @@ pub fn local_executor(
             show_download_progress: opts.show_download_progress.unwrap_or(false),
         },
     )
-    .map_err(to_napi_err)?;
+    .map_err(common::to_napi_err)?;
     Ok(JsClient::from_executor(exec))
 }
 
@@ -640,7 +394,7 @@ pub fn http_executor(
         embed_model,
         embed_dim as usize,
     )
-    .map_err(to_napi_err)?;
+    .map_err(common::to_napi_err)?;
     Ok(JsClient::from_executor(exec))
 }
 
@@ -775,16 +529,22 @@ pub async fn execute_stmt(stmt: &Stmt, options: Option<serde_json::Value>) -> na
     let client = standalone_client(options.as_ref())?;
     let mut inner = stmt.inner.clone();
     if let Some(p) = options.as_ref().and_then(|o| o.get("params")) {
-        bind_stmt_json(&mut inner, p).map_err(to_napi_err)?;
+        let plan =
+            qql_core::params_json::plan_statement_params(p, 1).map_err(common::to_napi_err)?;
+        qql_core::params_json::bind_stmt_with_params(
+            &mut inner,
+            qql_core::params_json::param_for(&plan, 0),
+        )
+        .map_err(common::to_napi_err)?;
     }
     let resp = client
         .inner
         .execute_node(inner)
         .await
-        .map_err(to_napi_err)?;
+        .map_err(common::to_napi_err)?;
     let report = qql::executor::ExecutionReport::single(resp);
-    client.inner.close().await.map_err(to_napi_err)?;
-    serde_json::to_string(&report).map_err(serde_napi_err)
+    client.inner.close().await.map_err(common::to_napi_err)?;
+    serde_json::to_string(&report).map_err(common::serde_napi_err)
 }
 
 #[cfg(all(feature = "fastembed-local", not(feature = "http-embedding")))]
@@ -797,9 +557,11 @@ pub async fn execute(
     options: Option<serde_json::Value>,
 ) -> napi::Result<String> {
     let client = standalone_client(options.as_ref())?;
-    let report = client.execute(query, options).await?;
-    client.inner.close().await.map_err(to_napi_err)?;
-    Ok(report)
+    let report = common::execute::execute_dispatch(&client.inner, query, options.as_ref())
+        .await
+        .map_err(common::to_napi_err)?;
+    client.inner.close().await.map_err(common::to_napi_err)?;
+    serde_json::to_string(&report).map_err(common::serde_napi_err)
 }
 
 #[cfg(feature = "http-embedding")]
@@ -812,85 +574,11 @@ pub async fn execute(
     options: Option<serde_json::Value>,
 ) -> napi::Result<String> {
     let client = standalone_client(options.as_ref())?;
-    let report = client.execute(query, options).await?;
-    client.inner.close().await.map_err(to_napi_err)?;
-    Ok(report)
-}
-
-fn flatten_json_object(
-    obj: &serde_json::Map<String, serde_json::Value>,
-    prefix: &str,
-    out: &mut std::collections::HashMap<String, ast::Value>,
-) -> Result<(), QqlError> {
-    for (k, v) in obj {
-        let full_key = if prefix.is_empty() {
-            k.clone()
-        } else {
-            format!("{prefix}.{k}")
-        };
-        if let serde_json::Value::Object(nested) = v {
-            flatten_json_object(nested, &full_key, out)?;
-        }
-        let val = ast::Value::from_json(v.clone())?;
-        out.insert(full_key, val);
-    }
-    Ok(())
-}
-
-fn bind_json_params(
-    query: &str,
-    params: &serde_json::Value,
-    truncate_vectors: bool,
-) -> napi::Result<String> {
-    match params {
-        serde_json::Value::Object(obj) => {
-            let mut map = std::collections::HashMap::new();
-            flatten_json_object(obj, "", &mut map).map_err(to_napi_err)?;
-            if truncate_vectors {
-                qql_core::params::bind_named_readable(query, |k| map.get(k).cloned(), 2)
-                    .map_err(to_napi_err)
-            } else {
-                qql_core::params::bind_named(query, |k| map.get(k).cloned()).map_err(to_napi_err)
-            }
-        }
-        serde_json::Value::Array(arr) => {
-            let items: Vec<ast::Value> = arr
-                .iter()
-                .map(|v| ast::Value::from_json(v.clone()))
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(to_napi_err)?;
-            if truncate_vectors {
-                qql_core::params::bind_positional_readable(query, &items, 2).map_err(to_napi_err)
-            } else {
-                qql_core::params::bind_positional(query, &items).map_err(to_napi_err)
-            }
-        }
-        _ => Err(napi::Error::from_reason(
-            "params must be an object for named parameters (:name) or an array for positional parameters (?)",
-        )),
-    }
-}
-
-fn bind_stmt_json(stmt: &mut ast::Stmt, params: &serde_json::Value) -> Result<(), QqlError> {
-    match params {
-        serde_json::Value::Object(obj) => {
-            let mut map = std::collections::HashMap::new();
-            flatten_json_object(obj, "", &mut map)?;
-            qql_core::params::bind_stmt(stmt, |k| map.get(k).cloned(), &[])
-        }
-        serde_json::Value::Array(arr) => {
-            let items: Vec<ast::Value> = arr
-                .iter()
-                .map(|v| ast::Value::from_json(v.clone()))
-                .collect::<Result<Vec<_>, _>>()?;
-            qql_core::params::bind_stmt(stmt, |_| None, &items)
-        }
-        _ => Err(QqlError::validation(
-            "QQL-BIND-INVALID-PARAMS",
-            "params must be an object for named parameters (:name) or an array for positional parameters (?)",
-            None,
-        )),
-    }
+    let report = common::execute::execute_dispatch(&client.inner, query, options.as_ref())
+        .await
+        .map_err(common::to_napi_err)?;
+    client.inner.close().await.map_err(common::to_napi_err)?;
+    serde_json::to_string(&report).map_err(common::serde_napi_err)
 }
 
 /// Substitute `:name` (object) or `?` (array) placeholders into a query string.
@@ -912,7 +600,16 @@ pub fn bind(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
     match params {
-        Some(p) => bind_json_params(&query, &p, truncate),
+        Some(p) => {
+            let plan =
+                qql_core::params_json::plan_statement_params(&p, 1).map_err(common::to_napi_err)?;
+            qql_core::params_json::bind_str_with_params(
+                &query,
+                qql_core::params_json::param_for(&plan, 0),
+                truncate,
+            )
+            .map_err(common::to_napi_err)
+        }
         None => Ok(query),
     }
 }

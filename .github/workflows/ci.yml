@@ -314,6 +314,21 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "22.13.1"
+      - name: Shared DX helper files must stay byte-identical across SDKs
+        run: |
+          set -euo pipefail
+          fail=0
+          for pair in \
+            "crates/nqql/dx-common.js crates/nqql-edge/dx-common.js" \
+            "crates/nqql/test_dx.js crates/nqql-edge/test_dx.js" \
+            "crates/pyqql/pyqql/_dx_report.py crates/pyqql-edge/pyqql_edge/_dx_report.py"; do
+            set -- $pair
+            if ! diff -q "$1" "$2" >/dev/null; then
+              echo "::error::shared DX helper drifted: $1 != $2 — edit both copies or neither"
+              fail=1
+            fi
+          done
+          exit "$fail"
       - name: Install JS dependencies
         working-directory: crates/${{ matrix.package }}
         run: npm install --no-package-lock --omit=optional --no-audit --no-fund
@@ -329,12 +344,14 @@ jobs:
           HF_HOME: ${{ runner.temp }}/hf-home
         run: |
           set -euo pipefail
-          npm run build:debug
+          # The build itself downloads ort-sys's onnxruntime static lib on a
+          # cold cache — retry it alongside the model download so a transient
+          # network failure cannot kill the whole warm step.
           for attempt in 1 2 3 4 5; do
-            if node warm-cache.js; then
+            if npm run build:debug && node warm-cache.js; then
               exit 0
             fi
-            echo "::warning::fastembed model download failed (attempt $attempt/5), retrying in 30s"
+            echo "::warning::fastembed warm-up failed (attempt $attempt/5), retrying in 30s"
             sleep 30
           done
           exit 1

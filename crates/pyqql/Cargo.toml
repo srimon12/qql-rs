@@ -20,8 +20,9 @@ grpc = ["qql/grpc"]
 
 [dependencies]
 serde = { workspace = true }
-qql-core = { workspace = true, features = ["serde"] }
+qql-core = { workspace = true, features = ["serde", "json"] }
 qql-plan = { workspace = true }
+pyqql-common = { path = "../pyqql-common" }
 qql = { workspace = true }
 pyo3 = { version = "0.29", features = ["extension-module", "abi3-py310", "parking_lot"] }
 pyo3-async-runtimes = { version = "0.29", features = ["tokio-runtime"] }

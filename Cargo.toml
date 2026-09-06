@@ -11,8 +11,10 @@ members = [
     "crates/qql-edge",
     "crates/qql-wasm",
     "crates/pyqql",
+    "crates/pyqql-common",
     "crates/pyqql-edge",
     "crates/nqql",
+    "crates/nqql-common",
     "crates/nqql-edge",
 ]
 
