@@ -424,10 +424,10 @@ fn filter_known_keys(
 ) -> serde_json::Map<String, serde_json::Value> {
     let mut out = serde_json::Map::new();
     for key in keys {
-        if let Some(val) = map.get(*key) {
-            if !val.is_null() {
-                out.insert((*key).to_string(), val.clone());
-            }
+        if let Some(val) = map.get(*key)
+            && !val.is_null()
+        {
+            out.insert((*key).to_string(), val.clone());
         }
     }
     out

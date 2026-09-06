@@ -1,7 +1,7 @@
 use core::iter::Peekable;
 
 use crate::error::{QqlError, Span};
-use crate::token::{lookup_keyword, Token, TokenKind};
+use crate::token::{Token, TokenKind, lookup_keyword};
 
 /// Peekable iterator over the token stream produced by a `Lexer`.
 pub type TokenIter<'a> = Peekable<Lexer<'a>>;
@@ -443,10 +443,10 @@ impl<'a> Lexer<'a> {
 
         let word = &self.input[start..self.pos];
 
-        if !word.contains('.') {
-            if let Some(kind) = lookup_keyword(word) {
-                return Ok(Token::new(kind, word, Span::new(start, self.pos)));
-            }
+        if !word.contains('.')
+            && let Some(kind) = lookup_keyword(word)
+        {
+            return Ok(Token::new(kind, word, Span::new(start, self.pos)));
         }
 
         Ok(Token::new(

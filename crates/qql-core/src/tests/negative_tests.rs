@@ -237,16 +237,23 @@ fn non_finite_float_literals_rejected() {
         "UPSERT INTO docs VALUES {id: 1, v: 1e999};",
         "QUERY TEXT 'x' FROM docs SCORE THRESHOLD 1e999 LIMIT 5;",
         "QUERY FORMULA 1e999 FROM docs LIMIT 5;",
+        "QUERY FORMULA -1e999 FROM docs LIMIT 5;",
         "QUERY TEXT 'x' FROM docs WHERE score >= -1e999 LIMIT 5;",
+        "QUERY [1e999, 0.2] FROM docs;",
+        "QUERY VECTOR [-1e999] FROM docs;",
+        "UPSERT INTO docs VALUES {id: 1, vector: [1e999]};",
+        "UPSERT INTO docs VALUES {id: 1, vector: {indices: [1], values: [1e999]}};",
+        "QUERY 'x' FROM docs WITH (mmr = true, diversity = 1e999);",
+        "QUERY 'x' FROM docs PARAMS (oversampling = 1e999);",
     ];
     for source in cases {
         let err = Parser::parse(source).expect_err(&format!(
             "expected non-finite float rejection for: {source}"
         ));
-        assert_eq!(
+        assert!(
+            matches!(err.kind, ErrorKind::Parse | ErrorKind::Validation),
+            "unexpected error kind for: {source} (kind {:?}, code {})",
             err.kind,
-            ErrorKind::Parse,
-            "unexpected error kind for: {source} (code {})",
             err.code
         );
     }

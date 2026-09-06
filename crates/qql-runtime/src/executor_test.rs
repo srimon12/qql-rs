@@ -143,10 +143,9 @@ impl QdrantOps for MockQdrantClient {
         if let qql_plan::PlannedOperation::Query { collection, .. }
         | qql_plan::PlannedOperation::QueryGroups { collection, .. }
         | qql_plan::PlannedOperation::Facet { collection, .. } = op
+            && let Some(points) = self.point_map.lock().unwrap().get(collection)
         {
-            if let Some(points) = self.point_map.lock().unwrap().get(collection) {
-                return Ok(points.clone());
-            }
+            return Ok(points.clone());
         }
         Ok(serde_json::json!({"result": {"points": []}}))
     }
@@ -893,8 +892,8 @@ async fn test_do_scroll_returns_upstream_style_payload() {
 #[tokio::test]
 async fn test_query_missing_collection_errors() {
     let mut client = MockQdrantClient::default(); // exists = false
-                                                  // Provide an empty schema so the vector-name check passes; the actual
-                                                  // "not found" error comes from execute_route which checks the path.
+    // Provide an empty schema so the vector-name check passes; the actual
+    // "not found" error comes from execute_route which checks the path.
     client.info = Some(CollectionInfo::default());
     let mock_embedder = Arc::new(MockEmbedder {
         dense: vec![0.1, 0.2],

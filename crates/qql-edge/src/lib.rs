@@ -36,8 +36,8 @@ mod embedder;
 pub use backend::EdgeQdrant;
 #[cfg(feature = "fastembed-local")]
 pub use embedder::{
-    list_embedding_models, resolve_embedding_model, resolve_image_model, resolve_multi_model,
-    EmbeddingModelInfo, FastEmbedder, FastEmbedderOptions,
+    EmbeddingModelInfo, FastEmbedder, FastEmbedderOptions, list_embedding_models,
+    resolve_embedding_model, resolve_image_model, resolve_multi_model,
 };
 
 use qql::config::QqlConfig;

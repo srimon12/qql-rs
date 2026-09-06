@@ -39,10 +39,10 @@ fn sanitize_schema(value: &mut serde_json::Value) {
             let is_integer = map.get("type").and_then(|t| t.as_str()) == Some("integer");
             if is_integer {
                 for key in &["minimum", "maximum", "multipleOf"] {
-                    if let Some(val) = map.get_mut(*key) {
-                        if let Some(f) = val.as_f64() {
-                            *val = serde_json::Value::Number(serde_json::Number::from(f as i64));
-                        }
+                    if let Some(val) = map.get_mut(*key)
+                        && let Some(f) = val.as_f64()
+                    {
+                        *val = serde_json::Value::Number(serde_json::Number::from(f as i64));
                     }
                 }
             }
@@ -98,37 +98,34 @@ fn main() {
         }),
     );
 
-    if let Some(filter_schema) = schemas.get_mut("Filter") {
-        if let Some(props) = filter_schema.pointer_mut("/properties") {
-            if let Some(obj) = props.as_object_mut() {
-                let array_schema = serde_json::json!({
-                    "type": "array",
-                    "items": { "$ref": "#/components/schemas/Condition" }
-                });
-                if obj.contains_key("must") {
-                    obj.insert("must".to_string(), array_schema.clone());
-                }
-                if obj.contains_key("must_not") {
-                    obj.insert("must_not".to_string(), array_schema.clone());
-                }
-                if obj.contains_key("should") {
-                    obj.insert("should".to_string(), array_schema.clone());
-                }
-            }
+    if let Some(filter_schema) = schemas.get_mut("Filter")
+        && let Some(props) = filter_schema.pointer_mut("/properties")
+        && let Some(obj) = props.as_object_mut()
+    {
+        let array_schema = serde_json::json!({
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Condition" }
+        });
+        if obj.contains_key("must") {
+            obj.insert("must".to_string(), array_schema.clone());
+        }
+        if obj.contains_key("must_not") {
+            obj.insert("must_not".to_string(), array_schema.clone());
+        }
+        if obj.contains_key("should") {
+            obj.insert("should".to_string(), array_schema.clone());
         }
     }
 
     if let Some(doc_options_schema) = schemas.remove("DocumentOptions") {
         schemas.insert("TextDocumentOptions".to_string(), doc_options_schema);
     }
-    if let Some(document_schema) = schemas.get_mut("Document") {
-        if let Some(options_schema) = document_schema.pointer_mut("/properties/options/anyOf/0") {
-            if let Some(ref_val) = options_schema.get_mut("$ref") {
-                if ref_val == "#/components/schemas/DocumentOptions" {
-                    *ref_val = serde_json::json!("#/components/schemas/TextDocumentOptions");
-                }
-            }
-        }
+    if let Some(document_schema) = schemas.get_mut("Document")
+        && let Some(options_schema) = document_schema.pointer_mut("/properties/options/anyOf/0")
+        && let Some(ref_val) = options_schema.get_mut("$ref")
+        && ref_val == "#/components/schemas/DocumentOptions"
+    {
+        *ref_val = serde_json::json!("#/components/schemas/TextDocumentOptions");
     }
 
     let type_defs: Vec<(String, schemars::schema::Schema)> = schemas
@@ -165,7 +162,10 @@ fn main() {
 
         let protoc = protoc_bin_vendored::protoc_bin_path()
             .expect("failed to locate the vendored protoc binary");
-        env::set_var("PROTOC", protoc);
+        // SAFETY: build.rs is single-threaded at compile time; no concurrent threads access the environment.
+        unsafe {
+            env::set_var("PROTOC", protoc);
+        }
 
         tonic_prost_build::configure()
             .build_server(false)

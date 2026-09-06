@@ -137,7 +137,7 @@ mod report {
 }
 
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
-use report::{exec_response, WasmReport};
+use report::{WasmReport, exec_response};
 
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -408,12 +408,13 @@ impl Stmt {
     #[wasm_bindgen(js_name = bind)]
     pub fn bind(&self, params: Option<JsValue>) -> Result<Stmt, JsValue> {
         let mut stmt = self.inner.clone();
-        if let Some(p) = params {
-            if !p.is_undefined() && !p.is_null() {
-                let parsed: serde_json::Value = serde_wasm_bindgen::from_value(p)
-                    .map_err(|e| JsValue::from_str(&format!("invalid params: {e}")))?;
-                bind_stmt_json(&mut stmt, &parsed)?;
-            }
+        if let Some(p) = params
+            && !p.is_undefined()
+            && !p.is_null()
+        {
+            let parsed: serde_json::Value = serde_wasm_bindgen::from_value(p)
+                .map_err(|e| JsValue::from_str(&format!("invalid params: {e}")))?;
+            bind_stmt_json(&mut stmt, &parsed)?;
         }
         Ok(Stmt { inner: stmt })
     }
@@ -430,12 +431,13 @@ impl Stmt {
     #[wasm_bindgen(js_name = compileRoute, unchecked_return_type = "CompiledRoute")]
     pub fn compile_route(&self, params: Option<JsValue>) -> Result<JsValue, JsValue> {
         let mut stmt = self.inner.clone();
-        if let Some(p) = params {
-            if !p.is_undefined() && !p.is_null() {
-                let parsed: serde_json::Value = serde_wasm_bindgen::from_value(p)
-                    .map_err(|e| JsValue::from_str(&format!("invalid params: {e}")))?;
-                bind_stmt_json(&mut stmt, &parsed)?;
-            }
+        if let Some(p) = params
+            && !p.is_undefined()
+            && !p.is_null()
+        {
+            let parsed: serde_json::Value = serde_wasm_bindgen::from_value(p)
+                .map_err(|e| JsValue::from_str(&format!("invalid params: {e}")))?;
+            bind_stmt_json(&mut stmt, &parsed)?;
         }
         let compiled =
             routing::compile_statement(&stmt).map_err(|e| JsValue::from_str(&e.to_string()))?;
@@ -1156,7 +1158,7 @@ impl Client {
         query: &str,
         on_error: WasmOnError,
     ) -> Result<WasmReport, JsValue> {
-        use qql_plan::{statement_batch_key, BatchKey};
+        use qql_plan::{BatchKey, statement_batch_key};
 
         let stmts = match Parser::parse_all(query) {
             Ok(stmts) => stmts,

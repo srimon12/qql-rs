@@ -207,16 +207,16 @@ fn convert_condition(cond: &Value) -> Result<String, String> {
         return Ok(format!("id IN ({})", ids.join(", ")));
     }
 
-    if let Some(is_empty) = obj.get("is_empty").and_then(|v| v.as_object()) {
-        if let Some(key) = is_empty.get("key").and_then(|v| v.as_str()) {
-            return Ok(format!("{} IS EMPTY", key));
-        }
+    if let Some(is_empty) = obj.get("is_empty").and_then(|v| v.as_object())
+        && let Some(key) = is_empty.get("key").and_then(|v| v.as_str())
+    {
+        return Ok(format!("{} IS EMPTY", key));
     }
 
-    if let Some(is_null) = obj.get("is_null").and_then(|v| v.as_object()) {
-        if let Some(key) = is_null.get("key").and_then(|v| v.as_str()) {
-            return Ok(format!("{} IS NULL", key));
-        }
+    if let Some(is_null) = obj.get("is_null").and_then(|v| v.as_object())
+        && let Some(key) = is_null.get("key").and_then(|v| v.as_str())
+    {
+        return Ok(format!("{} IS NULL", key));
     }
 
     let key = obj.get("key").and_then(|v| v.as_str()).unwrap_or("");
@@ -570,10 +570,10 @@ fn convert_search(input: &Value, collection: &str) -> Result<Vec<String>, String
     }
 
     // Lookup from
-    if let Some(lookup) = obj.get("lookup_from").and_then(|v| v.as_object()) {
-        if let Some(s) = lookup_from_str(lookup) {
-            qql_args.push(s);
-        }
+    if let Some(lookup) = obj.get("lookup_from").and_then(|v| v.as_object())
+        && let Some(s) = lookup_from_str(lookup)
+    {
+        qql_args.push(s);
     }
 
     parts.push(qql_args.join(" "));
@@ -613,10 +613,10 @@ fn convert_recommend(input: &Value, collection: &str) -> Result<Vec<String>, Str
         parts.push(using_str(using));
     }
 
-    if let Some(lookup) = obj.get("lookup_from").and_then(|v| v.as_object()) {
-        if let Some(s) = lookup_from_str(lookup) {
-            parts.push(s);
-        }
+    if let Some(lookup) = obj.get("lookup_from").and_then(|v| v.as_object())
+        && let Some(s) = lookup_from_str(lookup)
+    {
+        parts.push(s);
     }
 
     if let Some(filter) = obj.get("filter") {
@@ -649,28 +649,28 @@ fn extract_recommend_params(
         .map(|s| s.to_string());
 
     // Check nested query.recommend
-    if let Some(query) = obj.get("query").and_then(|v| v.as_object()) {
-        if let Some(recommend) = query.get("recommend").and_then(|v| v.as_object()) {
-            if positive.is_empty() {
-                positive = recommend
-                    .get("positive")
-                    .and_then(|v| v.as_array())
-                    .cloned()
-                    .unwrap_or_default();
-            }
-            if negative.is_empty() {
-                negative = recommend
-                    .get("negative")
-                    .and_then(|v| v.as_array())
-                    .cloned()
-                    .unwrap_or_default();
-            }
-            if strategy.is_none() {
-                strategy = recommend
-                    .get("strategy")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-            }
+    if let Some(query) = obj.get("query").and_then(|v| v.as_object())
+        && let Some(recommend) = query.get("recommend").and_then(|v| v.as_object())
+    {
+        if positive.is_empty() {
+            positive = recommend
+                .get("positive")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+        }
+        if negative.is_empty() {
+            negative = recommend
+                .get("negative")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+        }
+        if strategy.is_none() {
+            strategy = recommend
+                .get("strategy")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
         }
     }
 
@@ -954,16 +954,16 @@ fn build_vector_def(name: &str, v: &serde_json::Map<String, Value>) -> String {
         .unwrap_or_else(|| "Cosine".to_string());
     let mut def = format!("'{}' VECTOR({}, {})", name, size, distance);
 
-    if let Some(mvc) = v.get("multivector_config").and_then(|v| v.as_object()) {
-        if let Some(comp) = mvc.get("comparator") {
-            def.push_str(&format!(" WITH MULTIVECTOR (comparator = '{}')", comp));
-        }
+    if let Some(mvc) = v.get("multivector_config").and_then(|v| v.as_object())
+        && let Some(comp) = mvc.get("comparator")
+    {
+        def.push_str(&format!(" WITH MULTIVECTOR (comparator = '{}')", comp));
     }
 
-    if let Some(hnsw) = v.get("hnsw_config").and_then(|v| v.as_object()) {
-        if let Some(m) = hnsw.get("m") {
-            def.push_str(&format!(" WITH HNSW (m = {})", m));
-        }
+    if let Some(hnsw) = v.get("hnsw_config").and_then(|v| v.as_object())
+        && let Some(m) = hnsw.get("m")
+    {
+        def.push_str(&format!(" WITH HNSW (m = {})", m));
     }
 
     def
@@ -1111,11 +1111,11 @@ fn stmts_with_prefetch(
                 if let Some(text) = document.get("text").and_then(|v| v.as_str()) {
                     pf_parts.push(format!("QUERY '{}'", escape_qql_string(text)));
                 }
-            } else if let Some(vector) = pf_obj.get("vector").and_then(|v| v.as_array()) {
-                if !vector.is_empty() {
-                    let vs: Vec<String> = vector.iter().map(|v| v.to_string()).collect();
-                    pf_parts.push(format!("QUERY [{}]", vs.join(", ")));
-                }
+            } else if let Some(vector) = pf_obj.get("vector").and_then(|v| v.as_array())
+                && !vector.is_empty()
+            {
+                let vs: Vec<String> = vector.iter().map(|v| v.to_string()).collect();
+                pf_parts.push(format!("QUERY [{}]", vs.join(", ")));
             }
 
             if let Some(limit) = pf_obj.get("limit").and_then(|v| v.as_i64()) {
@@ -1206,18 +1206,18 @@ fn has_points_field(
     obj: &serde_json::Map<String, Value>,
     collection: &str,
 ) -> Option<Result<Vec<String>, String>> {
-    if let Some(points) = obj.get("points").and_then(|v| v.as_array()) {
-        if !points.is_empty() {
-            if let Some(first) = points.first().and_then(|v| v.as_object()) {
-                if first.contains_key("vector") || first.contains_key("payload") {
-                    return Some(convert_upsert(&Value::Object(obj.clone()), collection));
-                }
-            }
-            return Some(convert_delete_points(
-                &Value::Object(obj.clone()),
-                collection,
-            ));
+    if let Some(points) = obj.get("points").and_then(|v| v.as_array())
+        && !points.is_empty()
+    {
+        if let Some(first) = points.first().and_then(|v| v.as_object())
+            && (first.contains_key("vector") || first.contains_key("payload"))
+        {
+            return Some(convert_upsert(&Value::Object(obj.clone()), collection));
         }
+        return Some(convert_delete_points(
+            &Value::Object(obj.clone()),
+            collection,
+        ));
     }
     None
 }

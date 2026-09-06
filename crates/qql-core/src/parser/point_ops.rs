@@ -169,12 +169,11 @@ impl<'a> AstLowerer<'a> {
                             if let crate::ast::Value::Bool(b) = v {
                                 exact = Some(*b);
                             }
-                        } else if k.eq_ignore_ascii_case("limit") {
-                            if let crate::ast::Value::Int(i) = v {
-                                if *i > 0 {
-                                    limit = Some(*i as u64);
-                                }
-                            }
+                        } else if k.eq_ignore_ascii_case("limit")
+                            && let crate::ast::Value::Int(i) = v
+                            && *i > 0
+                        {
+                            limit = Some(*i as u64);
                         }
                     }
                 }

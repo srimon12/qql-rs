@@ -8,10 +8,10 @@ mod tests {
     use std::fs;
 
     use qql_core::parser::Parser;
+    use qql_plan::PlannedOperation;
     use qql_plan::plan::{plan, to_rest_route};
     use qql_plan::routing::try_route;
     use qql_plan::types::{PlanQueryInput, PlanVectorValue};
-    use qql_plan::PlannedOperation;
 
     use crate::grpc_route::test_api;
     use crate::qdrant_grpc::qdrant;
@@ -198,10 +198,11 @@ mod tests {
             let op = plan(&stmt).unwrap();
             let r = to_rest_route(&op).expect("rest route");
             assert!(r.query.iter().any(|(k, v)| k == "timeout" && v == "30"));
-            assert!(r
-                .query
-                .iter()
-                .any(|(k, v)| k == "consistency" && v == "majority"));
+            assert!(
+                r.query
+                    .iter()
+                    .any(|(k, v)| k == "consistency" && v == "majority")
+            );
             let body = r.body_json().unwrap();
             assert!(body.get("timeout").is_none());
             assert!(body.get("consistency").is_none());
@@ -384,10 +385,12 @@ mod tests {
         let route = to_rest_route(&op).expect("rest route");
         assert_eq!(route.path, "/collections/docs/points/query");
         assert!(route.query.iter().any(|(k, v)| k == "timeout" && v == "15"));
-        assert!(route
-            .query
-            .iter()
-            .any(|(k, v)| k == "consistency" && v == "quorum"));
+        assert!(
+            route
+                .query
+                .iter()
+                .any(|(k, v)| k == "consistency" && v == "quorum")
+        );
         let body = route.body_json().unwrap();
         assert_eq!(body["limit"], 7);
         assert_eq!(body["using"], "colbert");

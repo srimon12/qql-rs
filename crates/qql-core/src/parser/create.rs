@@ -8,7 +8,7 @@ use crate::ast::{
 use crate::error::QqlError;
 use crate::token::TokenKind;
 
-use super::{ascii_equal, AstLowerer};
+use super::{AstLowerer, ascii_equal};
 
 impl<'a> AstLowerer<'a> {
     pub fn parse_create(&mut self) -> Result<Stmt, QqlError> {

@@ -586,32 +586,29 @@ impl FastEmbedder {
         {
             return true;
         }
-        if let Some(ref sparse) = self.sparse {
-            if r.eq_ignore_ascii_case(&sparse.model_name)
+        if let Some(ref sparse) = self.sparse
+            && (r.eq_ignore_ascii_case(&sparse.model_name)
                 || r.eq_ignore_ascii_case(&sparse.model_code)
                 || short_alias_matches(r, &sparse.model_code)
-                || is_sparse_alias(r)
-            {
-                return true;
-            }
+                || is_sparse_alias(r))
+        {
+            return true;
         }
-        if let Some(ref multi) = self.multi {
-            if r.eq_ignore_ascii_case(&multi.model_name)
+        if let Some(ref multi) = self.multi
+            && (r.eq_ignore_ascii_case(&multi.model_name)
                 || r.eq_ignore_ascii_case(&multi.model_code)
                 || short_alias_matches(r, &multi.model_code)
-                || is_multi_alias(r)
-            {
-                return true;
-            }
+                || is_multi_alias(r))
+        {
+            return true;
         }
-        if let Some(ref image) = self.image {
-            if r.eq_ignore_ascii_case(&image.model_name)
+        if let Some(ref image) = self.image
+            && (r.eq_ignore_ascii_case(&image.model_name)
                 || r.eq_ignore_ascii_case(&image.model_code)
                 || short_alias_matches(r, &image.model_code)
-                || is_image_alias(r)
-            {
-                return true;
-            }
+                || is_image_alias(r))
+        {
+            return true;
         }
         false
     }
@@ -766,10 +763,10 @@ pub fn resolve_embedding_model(name: &str) -> Result<EmbeddingModel, QqlError> {
         if short_alias_matches(name, &info.model_code) {
             return Ok(info.model);
         }
-        if let Some(slug) = info.model_code.rsplit('/').next() {
-            if slug.eq_ignore_ascii_case(name) {
-                return Ok(info.model);
-            }
+        if let Some(slug) = info.model_code.rsplit('/').next()
+            && slug.eq_ignore_ascii_case(name)
+        {
+            return Ok(info.model);
         }
     }
 
@@ -932,10 +929,10 @@ fn short_alias_matches(requested: &str, model_code: &str) -> bool {
         return true;
     }
     // strip org prefix: "Xenova/bge-small-en-v1.5" ↔ "bge-small-en-v1.5"
-    if let Some(slug) = code.rsplit('/').next() {
-        if req.eq_ignore_ascii_case(slug) {
-            return true;
-        }
+    if let Some(slug) = code.rsplit('/').next()
+        && req.eq_ignore_ascii_case(slug)
+    {
+        return true;
     }
     // Strip common suffixes people omit when referring to a converted model.
     [

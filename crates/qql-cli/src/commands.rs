@@ -474,7 +474,9 @@ fn edge_executor() -> Result<qql::executor::Executor, Box<dyn std::error::Error>
             let show_progress = config.show_download_progress || is_tty;
             let model_name = config.model.as_deref().unwrap_or("BGESmallENV15");
             if show_progress {
-                eprintln!("ℹ Initializing local edge embedder (model: '{model_name}'). Model weights are downloaded on first run if not cached.");
+                eprintln!(
+                    "ℹ Initializing local edge embedder (model: '{model_name}'). Model weights are downloaded on first run if not cached."
+                );
             }
             let options = qql_edge::LocalExecutorOptions {
                 on_disk_payload: config.on_disk_payload,
@@ -577,12 +579,10 @@ pub fn handle_fmt(
         return Ok(());
     }
 
-    if write {
-        if let Some(p) = path {
-            std::fs::write(p, format!("{}\n", formatted))
-                .map_err(|e| format!("cannot write '{}': {}", p, e))?;
-            return Ok(());
-        }
+    if write && let Some(p) = path {
+        std::fs::write(p, format!("{}\n", formatted))
+            .map_err(|e| format!("cannot write '{}': {}", p, e))?;
+        return Ok(());
     }
 
     println!("{}", formatted);

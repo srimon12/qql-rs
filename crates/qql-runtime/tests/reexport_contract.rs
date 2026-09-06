@@ -5,9 +5,8 @@
 use qql::client::{CollectionInfo, QdrantOps};
 use qql::executor::Executor;
 use qql::{
-    inject_filter, ComparisonOp, CreateCollectionRequest, CreateIndexRequest, Parser,
-    PlannedOperation, QqlError, QueryBatchRequest, UpdateBatchRequest, UpdateCollectionRequest,
-    Value,
+    ComparisonOp, CreateCollectionRequest, CreateIndexRequest, Parser, PlannedOperation, QqlError,
+    QueryBatchRequest, UpdateBatchRequest, UpdateCollectionRequest, Value, inject_filter,
 };
 
 /// Minimal backend used purely to prove the contract compiles from `qql` paths.

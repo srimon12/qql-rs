@@ -56,7 +56,7 @@ pub fn compile_statement(statement: &Stmt) -> Result<CompiledStatement, qql_core
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{plan, PlannedOperation};
+    use crate::{PlannedOperation, plan};
     use qql_core::parser::Parser;
 
     #[test]
@@ -103,12 +103,14 @@ mod tests {
             panic!("expected point lookup");
         };
         assert_eq!(request.shard_key.as_deref(), Some("tenant-a"));
-        assert!(try_route(&statement)
-            .unwrap()
-            .body_json()
-            .unwrap()
-            .to_string()
-            .contains("tenant-a"));
+        assert!(
+            try_route(&statement)
+                .unwrap()
+                .body_json()
+                .unwrap()
+                .to_string()
+                .contains("tenant-a")
+        );
     }
 
     #[test]
@@ -135,7 +137,7 @@ mod tests {
 
     #[test]
     fn quota_plan_validates_config() {
-        use crate::plan::{plan, PlannedOperation};
+        use crate::plan::{PlannedOperation, plan};
         let bad = Parser::parse("SET QUOTA (bogus = 1);").unwrap();
         let err = plan(&bad).unwrap_err();
         assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);

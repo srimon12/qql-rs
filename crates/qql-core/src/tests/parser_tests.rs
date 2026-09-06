@@ -167,7 +167,9 @@ fn formula_query() {
 
 #[test]
 fn formula_query_div_default() {
-    let res = Parser::parse("QUERY FORMULA ($score / views [DEFAULT = 1.0]) * 10 DEFAULTS (score = 0.0) FROM docs LIMIT 10;");
+    let res = Parser::parse(
+        "QUERY FORMULA ($score / views [DEFAULT = 1.0]) * 10 DEFAULTS (score = 0.0) FROM docs LIMIT 10;",
+    );
     assert!(res.is_ok(), "failed: {:?}", res.err());
 }
 
@@ -311,10 +313,12 @@ fn using_hybrid_preserves_model_and_dbsf() {
 fn using_hybrid_rejects_non_text_nearest() {
     assert!(Parser::parse("QUERY VECTOR [0.1, 0.2] FROM docs USING HYBRID LIMIT 10;").is_err());
     assert!(Parser::parse("QUERY IMAGE '/tmp/a.png' FROM docs USING HYBRID LIMIT 10;").is_err());
-    assert!(Parser::parse(
-        "QUERY MMR TEXT 'x' DIVERSITY 0.5 CANDIDATES 20 FROM docs USING HYBRID LIMIT 10;"
-    )
-    .is_err());
+    assert!(
+        Parser::parse(
+            "QUERY MMR TEXT 'x' DIVERSITY 0.5 CANDIDATES 20 FROM docs USING HYBRID LIMIT 10;"
+        )
+        .is_err()
+    );
     // Front-form already Hybrid — USING HYBRID is redundant/invalid.
     assert!(Parser::parse("QUERY HYBRID TEXT 'x' FROM docs USING HYBRID LIMIT 10;").is_err());
 }
@@ -420,15 +424,16 @@ fn params_idf_global_and_corpus() {
     // Bare keyword global, and formatter round-trip of WHERE corpora.
     let s = Parser::parse("QUERY 'x' FROM docs PARAMS (idf = global) LIMIT 5;").unwrap();
     let Stmt::Query(q) = s else { panic!() };
-    assert!(q
-        .params
-        .as_ref()
-        .unwrap()
-        .idf
-        .as_ref()
-        .unwrap()
-        .corpus
-        .is_none());
+    assert!(
+        q.params
+            .as_ref()
+            .unwrap()
+            .idf
+            .as_ref()
+            .unwrap()
+            .corpus
+            .is_none()
+    );
 
     let formatted = crate::fmt::format_stmt(
         &Parser::parse("QUERY 'x' FROM docs PARAMS (idf = 'global') LIMIT 5;").unwrap(),
@@ -477,9 +482,11 @@ fn shard_clause_parses_on_query_and_ctes_via_set_shard_key() {
     assert_eq!(q.ctes[0].query.shard_key.as_deref(), Some("acme"));
     assert!(stmt.set_shard_key(Some(String::new()))); // empty clears
     assert_eq!(stmt.shard_key(), None);
-    assert!(!Parser::parse("SHOW COLLECTIONS")
-        .unwrap()
-        .set_shard_key(Some("x".into())));
+    assert!(
+        !Parser::parse("SHOW COLLECTIONS")
+            .unwrap()
+            .set_shard_key(Some("x".into()))
+    );
 }
 
 #[test]

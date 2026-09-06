@@ -7,7 +7,7 @@ use crate::ast::{FormulaExpr, Value};
 use crate::error::QqlError;
 use crate::token::TokenKind;
 
-use super::{ascii_equal, AstLowerer};
+use super::{AstLowerer, ascii_equal};
 
 // ── Precedence constants ────────────────────────────────────────
 
@@ -502,7 +502,7 @@ fn parse_formula_function_call(
                     return Err(QqlError::syntax(
                         alloc::format!("unknown decay function: {}", func_name),
                         pos,
-                    ))
+                    ));
                 }
             };
             Ok(FormulaExpr::Decay {

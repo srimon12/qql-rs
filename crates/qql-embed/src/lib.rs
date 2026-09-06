@@ -20,12 +20,12 @@ mod resolve_test;
 mod sparse_test;
 
 pub use embedder::{
-    cross_rerank_unsupported_error, image_unsupported_error, multi_unsupported_error,
-    sparse_model_unsupported_error, Embedder, EmbedderBound, JointEmbeddingOutput, SparseEmbedder,
+    Embedder, EmbedderBound, JointEmbeddingOutput, SparseEmbedder, cross_rerank_unsupported_error,
+    image_unsupported_error, multi_unsupported_error, sparse_model_unsupported_error,
 };
-pub use resolve::{resolve_embeddings, DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME};
+pub use resolve::{DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME, resolve_embeddings};
 pub use sparse::SparseVector;
 pub use topology::{
-    query_needs_kind_resolution, resolve_query_vector_kinds, resolve_query_vector_kinds_simple,
-    TopologyNames,
+    TopologyNames, query_needs_kind_resolution, resolve_query_vector_kinds,
+    resolve_query_vector_kinds_simple,
 };

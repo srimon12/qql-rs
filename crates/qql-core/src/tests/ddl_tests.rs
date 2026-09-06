@@ -106,18 +106,24 @@ fn create_collection_rejects_bad_memory_and_datatype() {
         "CREATE COLLECTION docs (d VECTOR(4, COSINE)) WITH VECTOR (memory = 'hot');",
     )
     .is_err());
-    assert!(Parser::parse(
-        "CREATE COLLECTION docs (d VECTOR(4, COSINE)) WITH VECTOR (datatype = 'float64');",
-    )
-    .is_err());
-    assert!(Parser::parse(
-        "CREATE COLLECTION docs (d VECTOR(4, COSINE)) WITH HNSW (memory = 'pinned');",
-    )
-    .is_ok());
-    assert!(Parser::parse(
-        "CREATE COLLECTION docs (d VECTOR(4, COSINE)) WITH PARAMS (payload_memory = 'pinned');",
-    )
-    .is_err());
+    assert!(
+        Parser::parse(
+            "CREATE COLLECTION docs (d VECTOR(4, COSINE)) WITH VECTOR (datatype = 'float64');",
+        )
+        .is_err()
+    );
+    assert!(
+        Parser::parse(
+            "CREATE COLLECTION docs (d VECTOR(4, COSINE)) WITH HNSW (memory = 'pinned');",
+        )
+        .is_ok()
+    );
+    assert!(
+        Parser::parse(
+            "CREATE COLLECTION docs (d VECTOR(4, COSINE)) WITH PARAMS (payload_memory = 'pinned');",
+        )
+        .is_err()
+    );
 }
 
 #[test]

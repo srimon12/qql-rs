@@ -57,21 +57,18 @@ pub(crate) fn schema_from_grpc_collection(info: &qdrant::CollectionInfo) -> Coll
                         if let Some(v) = i.on_disk {
                             map.insert("on_disk".into(), serde_json::Value::Bool(v));
                         }
-                        if let Some(v) = i.datatype {
-                            if let Ok(dt) = qdrant::Datatype::try_from(v) {
-                                // Normalize protobuf enum names to QQL/OpenAPI forms.
-                                let name = match dt {
-                                    qdrant::Datatype::Float32 => "float32",
-                                    qdrant::Datatype::Uint8 => "uint8",
-                                    qdrant::Datatype::Float16 => "float16",
-                                    qdrant::Datatype::Turbo4 => "turbo4",
-                                    qdrant::Datatype::Default => "default",
-                                };
-                                map.insert(
-                                    "datatype".into(),
-                                    serde_json::Value::String(name.into()),
-                                );
-                            }
+                        if let Some(v) = i.datatype
+                            && let Ok(dt) = qdrant::Datatype::try_from(v)
+                        {
+                            // Normalize protobuf enum names to QQL/OpenAPI forms.
+                            let name = match dt {
+                                qdrant::Datatype::Float32 => "float32",
+                                qdrant::Datatype::Uint8 => "uint8",
+                                qdrant::Datatype::Float16 => "float16",
+                                qdrant::Datatype::Turbo4 => "turbo4",
+                                qdrant::Datatype::Default => "default",
+                            };
+                            map.insert("datatype".into(), serde_json::Value::String(name.into()));
                         }
                         if let Some(name) = i.memory.and_then(memory_to_str) {
                             map.insert("memory".into(), serde_json::Value::String(name.into()));
@@ -235,15 +232,15 @@ fn optimizer_config_diff_to_map(
     if let Some(v) = diff.flush_interval_sec {
         map.insert("flush_interval_sec".into(), serde_json::json!(v));
     }
-    if let Some(ref mot) = diff.max_optimization_threads {
-        if let Some(ref variant) = mot.variant {
-            match variant {
-                qdrant::max_optimization_threads::Variant::Value(val) => {
-                    map.insert("max_optimization_threads".into(), serde_json::json!(val));
-                }
-                qdrant::max_optimization_threads::Variant::Setting(_) => {
-                    map.insert("max_optimization_threads".into(), serde_json::json!("auto"));
-                }
+    if let Some(ref mot) = diff.max_optimization_threads
+        && let Some(ref variant) = mot.variant
+    {
+        match variant {
+            qdrant::max_optimization_threads::Variant::Value(val) => {
+                map.insert("max_optimization_threads".into(), serde_json::json!(val));
+            }
+            qdrant::max_optimization_threads::Variant::Setting(_) => {
+                map.insert("max_optimization_threads".into(), serde_json::json!("auto"));
             }
         }
     }
@@ -286,42 +283,37 @@ fn quantization_config_to_json(q: &qdrant::QuantizationConfig) -> Option<serde_j
             if let Some(v) = bq.always_ram {
                 map.insert("always_ram".into(), serde_json::Value::Bool(v));
             }
-            if let Some(enc) = bq.encoding {
-                if let Ok(e) = qdrant::BinaryQuantizationEncoding::try_from(enc) {
-                    // QQL CREATE accepts snake_case aliases, not protobuf enum names.
-                    let qql_enc = match e {
-                        qdrant::BinaryQuantizationEncoding::OneBit => "one_bit",
-                        qdrant::BinaryQuantizationEncoding::TwoBits => "two_bits",
-                        qdrant::BinaryQuantizationEncoding::OneAndHalfBits => "one_and_half_bits",
-                    };
-                    map.insert("encoding".into(), serde_json::Value::String(qql_enc.into()));
-                }
+            if let Some(enc) = bq.encoding
+                && let Ok(e) = qdrant::BinaryQuantizationEncoding::try_from(enc)
+            {
+                // QQL CREATE accepts snake_case aliases, not protobuf enum names.
+                let qql_enc = match e {
+                    qdrant::BinaryQuantizationEncoding::OneBit => "one_bit",
+                    qdrant::BinaryQuantizationEncoding::TwoBits => "two_bits",
+                    qdrant::BinaryQuantizationEncoding::OneAndHalfBits => "one_and_half_bits",
+                };
+                map.insert("encoding".into(), serde_json::Value::String(qql_enc.into()));
             }
-            if let Some(ref qe) = bq.query_encoding {
-                if let Some(qdrant::binary_quantization_query_encoding::Variant::Setting(s)) =
+            if let Some(ref qe) = bq.query_encoding
+                && let Some(qdrant::binary_quantization_query_encoding::Variant::Setting(s)) =
                     qe.variant
-                {
-                    if let Ok(setting) =
-                        qdrant::binary_quantization_query_encoding::Setting::try_from(s)
-                    {
-                        let name = match setting {
-                            qdrant::binary_quantization_query_encoding::Setting::Binary => "binary",
-                            qdrant::binary_quantization_query_encoding::Setting::Scalar4Bits => {
-                                "scalar4bits"
-                            }
-                            qdrant::binary_quantization_query_encoding::Setting::Scalar8Bits => {
-                                "scalar8bits"
-                            }
-                            qdrant::binary_quantization_query_encoding::Setting::Default => {
-                                "default"
-                            }
-                        };
-                        map.insert(
-                            "query_encoding".into(),
-                            serde_json::Value::String(name.into()),
-                        );
+                && let Ok(setting) =
+                    qdrant::binary_quantization_query_encoding::Setting::try_from(s)
+            {
+                let name = match setting {
+                    qdrant::binary_quantization_query_encoding::Setting::Binary => "binary",
+                    qdrant::binary_quantization_query_encoding::Setting::Scalar4Bits => {
+                        "scalar4bits"
                     }
-                }
+                    qdrant::binary_quantization_query_encoding::Setting::Scalar8Bits => {
+                        "scalar8bits"
+                    }
+                    qdrant::binary_quantization_query_encoding::Setting::Default => "default",
+                };
+                map.insert(
+                    "query_encoding".into(),
+                    serde_json::Value::String(name.into()),
+                );
             }
             Some(serde_json::json!({ "binary": map }))
         }
@@ -331,17 +323,17 @@ fn quantization_config_to_json(q: &qdrant::QuantizationConfig) -> Option<serde_j
             if let Some(v) = tq.always_ram {
                 map.insert("always_ram".into(), serde_json::Value::Bool(v));
             }
-            if let Some(bits) = tq.bits {
-                if let Ok(b) = qdrant::TurboQuantBitSize::try_from(bits) {
-                    // Numeric form matches QQL CREATE: bits = 1 | 1.5 | 2 | 4
-                    let n = match b {
-                        qdrant::TurboQuantBitSize::Bits1 => 1.0,
-                        qdrant::TurboQuantBitSize::Bits15 => 1.5,
-                        qdrant::TurboQuantBitSize::Bits2 => 2.0,
-                        qdrant::TurboQuantBitSize::Bits4 => 4.0,
-                    };
-                    map.insert("bits".into(), serde_json::json!(n));
-                }
+            if let Some(bits) = tq.bits
+                && let Ok(b) = qdrant::TurboQuantBitSize::try_from(bits)
+            {
+                // Numeric form matches QQL CREATE: bits = 1 | 1.5 | 2 | 4
+                let n = match b {
+                    qdrant::TurboQuantBitSize::Bits1 => 1.0,
+                    qdrant::TurboQuantBitSize::Bits15 => 1.5,
+                    qdrant::TurboQuantBitSize::Bits2 => 2.0,
+                    qdrant::TurboQuantBitSize::Bits4 => 4.0,
+                };
+                map.insert("bits".into(), serde_json::json!(n));
             }
             Some(serde_json::json!({ "turbo": map }))
         }

@@ -23,13 +23,13 @@
 //! and `` `...` ``) and comments (`-- ...`) in the source query are preserved
 //! verbatim and never substituted.
 
+use crate::ast::Value;
 use crate::ast::filter::{FilterExpr, PointIdPredicate};
 use crate::ast::formula::FormulaExpr;
 use crate::ast::statement::{
     PageSpec, PointId, PointSelector, Prefetch, PrefetchSource, QueryExpr, QueryInput, QueryStmt,
     Stmt, VectorValue,
 };
-use crate::ast::Value;
 use crate::error::QqlError;
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -656,21 +656,21 @@ where
                         None,
                     ));
                 }
-            } else if let Some(idx_str) = text.strip_prefix('?') {
-                if let Ok(idx) = idx_str.parse::<usize>() {
-                    let val = resolve_positional(idx, positional)?;
-                    if let Value::Str(s) = val {
-                        *text = s;
-                    } else {
-                        return Err(QqlError::validation(
-                            "QQL-BIND-TYPE-MISMATCH",
-                            alloc::format!(
-                                "positional parameter ?{} for TEXT query must be a string",
-                                idx
-                            ),
-                            None,
-                        ));
-                    }
+            } else if let Some(idx_str) = text.strip_prefix('?')
+                && let Ok(idx) = idx_str.parse::<usize>()
+            {
+                let val = resolve_positional(idx, positional)?;
+                if let Value::Str(s) = val {
+                    *text = s;
+                } else {
+                    return Err(QqlError::validation(
+                        "QQL-BIND-TYPE-MISMATCH",
+                        alloc::format!(
+                            "positional parameter ?{} for TEXT query must be a string",
+                            idx
+                        ),
+                        None,
+                    ));
                 }
             }
         }
@@ -771,11 +771,11 @@ where
             if let Some(param_name) = name.strip_prefix(':') {
                 let val = resolve_param(param_name, lookup)?;
                 *formula = value_to_formula_constant(val)?;
-            } else if let Some(idx_str) = name.strip_prefix('?') {
-                if let Ok(idx) = idx_str.parse::<usize>() {
-                    let val = resolve_positional(idx, positional)?;
-                    *formula = value_to_formula_constant(val)?;
-                }
+            } else if let Some(idx_str) = name.strip_prefix('?')
+                && let Ok(idx) = idx_str.parse::<usize>()
+            {
+                let val = resolve_positional(idx, positional)?;
+                *formula = value_to_formula_constant(val)?;
             }
         }
         FormulaExpr::Sum { left, right }
@@ -1059,21 +1059,21 @@ where
                         None,
                     ));
                 }
-            } else if let Some(idx_str) = text.strip_prefix('?') {
-                if let Ok(idx) = idx_str.parse::<usize>() {
-                    let val = resolve_positional(idx, positional)?;
-                    if let Value::Str(s) = val {
-                        *text = s;
-                    } else {
-                        return Err(QqlError::validation(
-                            "QQL-BIND-TYPE-MISMATCH",
-                            alloc::format!(
-                                "positional parameter ?{} for HYBRID query must be a string",
-                                idx
-                            ),
-                            None,
-                        ));
-                    }
+            } else if let Some(idx_str) = text.strip_prefix('?')
+                && let Ok(idx) = idx_str.parse::<usize>()
+            {
+                let val = resolve_positional(idx, positional)?;
+                if let Value::Str(s) = val {
+                    *text = s;
+                } else {
+                    return Err(QqlError::validation(
+                        "QQL-BIND-TYPE-MISMATCH",
+                        alloc::format!(
+                            "positional parameter ?{} for HYBRID query must be a string",
+                            idx
+                        ),
+                        None,
+                    ));
                 }
             }
         }
@@ -1102,21 +1102,21 @@ where
                         None,
                     ));
                 }
-            } else if let Some(idx_str) = query.strip_prefix('?') {
-                if let Ok(idx) = idx_str.parse::<usize>() {
-                    let val = resolve_positional(idx, positional)?;
-                    if let Value::Str(s) = val {
-                        *query = s;
-                    } else {
-                        return Err(QqlError::validation(
-                            "QQL-BIND-TYPE-MISMATCH",
-                            alloc::format!(
-                                "positional parameter ?{} for CROSS RERANK query must be a string",
-                                idx
-                            ),
-                            None,
-                        ));
-                    }
+            } else if let Some(idx_str) = query.strip_prefix('?')
+                && let Ok(idx) = idx_str.parse::<usize>()
+            {
+                let val = resolve_positional(idx, positional)?;
+                if let Value::Str(s) = val {
+                    *query = s;
+                } else {
+                    return Err(QqlError::validation(
+                        "QQL-BIND-TYPE-MISMATCH",
+                        alloc::format!(
+                            "positional parameter ?{} for CROSS RERANK query must be a string",
+                            idx
+                        ),
+                        None,
+                    ));
                 }
             }
             for p in prefetch {
@@ -1382,9 +1382,10 @@ mod tests {
 
         let query_no_placeholders = "QUERY TEXT 'test' FROM docs LIMIT 5;";
         let err = bind_positional(query_no_placeholders, &[Value::Int(1)]).unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("no '?' placeholders found in query"));
+        assert!(
+            err.to_string()
+                .contains("no '?' placeholders found in query")
+        );
     }
 
     #[test]

@@ -204,12 +204,12 @@ fn first_unquoted(text: &str, needle: char) -> Option<usize> {
             c if c == needle && !in_string => return Some(idx),
             '^' => {
                 // `^"..."` — skip the whole literal.
-                if let Some((_, next)) = iter.next() {
-                    if next == '"' {
-                        for (_, c) in iter.by_ref() {
-                            if c == '"' {
-                                break;
-                            }
+                if let Some((_, next)) = iter.next()
+                    && next == '"'
+                {
+                    for (_, c) in iter.by_ref() {
+                        if c == '"' {
+                            break;
                         }
                     }
                 }

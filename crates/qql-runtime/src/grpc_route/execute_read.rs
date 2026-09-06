@@ -7,7 +7,9 @@ use crate::qdrant_grpc::qdrant;
 
 use super::common::{shard_key_selector, to_point_id};
 use super::filter::to_filter_opt;
-use super::query::{to_payload_selector, to_query_groups, to_query_points, to_vectors_selector};
+use super::query::{
+    to_payload_selector, to_query_groups, to_query_points, to_scroll_points, to_vectors_selector,
+};
 use super::responses::{
     batch_result_to_json, get_points_envelope, groups_result_to_json, point_id_to_json,
     retrieved_point_to_json, scored_point_to_json,
@@ -86,16 +88,7 @@ pub(crate) async fn execute_scroll(
     collection: &str,
     request: &qql_plan::types::ScrollRequest,
 ) -> Result<serde_json::Value, QqlError> {
-    let grpc_req = qdrant::ScrollPoints {
-        collection_name: collection.to_owned(),
-        filter: to_filter_opt(request.filter.as_ref())?,
-        offset: request.offset.as_ref().map(to_point_id),
-        limit: request.limit.map(|l| l as u32),
-        with_payload: request.with_payload.as_ref().map(to_payload_selector),
-        with_vectors: request.with_vector.as_ref().map(to_vectors_selector),
-        shard_key_selector: shard_key_selector(&request.shard_key),
-        ..Default::default()
-    };
+    let grpc_req = to_scroll_points(request, collection)?;
     let resp = client
         .scroll(grpc_req)
         .await

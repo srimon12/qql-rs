@@ -15,9 +15,9 @@ use std::path::Path;
 
 use qql::backend::{CollectionInfo, PayloadIndexSpec, VectorSpec};
 use qql::executor::Executor;
+use qql_plan::PlannedOperation;
 use qql_plan::semantic::PlanPointId;
 use qql_plan::types::{PayloadSelectorReq, ScrollRequest, VectorSelectorReq};
-use qql_plan::PlannedOperation;
 use serde_json::Value;
 
 // ── Public API ──────────────────────────────────────────────────
@@ -98,10 +98,10 @@ async fn dump_collection_inner(
 
     let info = ops.get_collection_info(collection).await?;
 
-    if let Some(parent) = Path::new(output_path).parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent)?;
-        }
+    if let Some(parent) = Path::new(output_path).parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent)?;
     }
 
     let file = File::create(output_path)?;
@@ -245,22 +245,22 @@ pub fn generate_create_statement(collection: &str, info: &CollectionInfo) -> Str
         stmt.push_str(&format!(" WITH PARAMS ({})", with_parts.join(", ")));
     }
 
-    if let Some(ref hnsw) = info.schema.hnsw {
-        if let Some(block) = format_config_block("HNSW", hnsw, HNSW_KEYS) {
-            stmt.push_str(&block);
-        }
+    if let Some(ref hnsw) = info.schema.hnsw
+        && let Some(block) = format_config_block("HNSW", hnsw, HNSW_KEYS)
+    {
+        stmt.push_str(&block);
     }
 
-    if let Some(ref opts_map) = info.schema.optimizers {
-        if let Some(block) = format_config_block("OPTIMIZERS", opts_map, OPTIMIZER_KEYS) {
-            stmt.push_str(&block);
-        }
+    if let Some(ref opts_map) = info.schema.optimizers
+        && let Some(block) = format_config_block("OPTIMIZERS", opts_map, OPTIMIZER_KEYS)
+    {
+        stmt.push_str(&block);
     }
 
-    if let Some(ref quant) = info.schema.quantization {
-        if let Some(quant_str) = format_quantization_spec(quant) {
-            stmt.push_str(&format!(" WITH QUANTIZATION ({})", quant_str));
-        }
+    if let Some(ref quant) = info.schema.quantization
+        && let Some(quant_str) = format_quantization_spec(quant)
+    {
+        stmt.push_str(&format!(" WITH QUANTIZATION ({})", quant_str));
     }
 
     stmt
@@ -296,10 +296,10 @@ fn format_config_block(
 ) -> Option<String> {
     let mut opts = Vec::new();
     for key in allowed {
-        if let Some(val) = map.get(*key) {
-            if let Some(opt) = format_index_option(key, val) {
-                opts.push(opt);
-            }
+        if let Some(val) = map.get(*key)
+            && let Some(opt) = format_index_option(key, val)
+        {
+            opts.push(opt);
         }
     }
     if opts.is_empty() {
@@ -365,16 +365,16 @@ fn format_vector_part(v: &VectorSpec) -> String {
         ),
     };
 
-    if let Some(ref hnsw) = v.hnsw {
-        if let Some(block) = format_config_block("HNSW", hnsw, HNSW_KEYS) {
-            part.push_str(&block);
-        }
+    if let Some(ref hnsw) = v.hnsw
+        && let Some(block) = format_config_block("HNSW", hnsw, HNSW_KEYS)
+    {
+        part.push_str(&block);
     }
 
-    if let Some(ref quant) = v.quantization {
-        if let Some(quant_str) = format_quantization_spec(quant) {
-            part.push_str(&format!(" WITH QUANTIZATION ({})", quant_str));
-        }
+    if let Some(ref quant) = v.quantization
+        && let Some(quant_str) = format_quantization_spec(quant)
+    {
+        part.push_str(&format!(" WITH QUANTIZATION ({})", quant_str));
     }
 
     if let Some(ref mv) = v.multivector {
@@ -548,10 +548,10 @@ pub fn generate_index_statements(collection: &str, indexes: &[PayloadIndexSpec])
                 opts.push(opt);
             }
         }
-        if let Some(tenant) = idx.is_tenant {
-            if !opts.iter().any(|o| o.starts_with("is_tenant")) {
-                opts.push(format!("is_tenant = {}", tenant));
-            }
+        if let Some(tenant) = idx.is_tenant
+            && !opts.iter().any(|o| o.starts_with("is_tenant"))
+        {
+            opts.push(format!("is_tenant = {}", tenant));
         }
         if !opts.is_empty() {
             opts.sort();
@@ -604,10 +604,10 @@ pub fn point_to_upsert_object(point: &Value) -> Option<Value> {
         }
     }
 
-    if let Some(vector) = point.get("vector") {
-        if !vector.is_null() {
-            map.insert("vector".into(), vector.clone());
-        }
+    if let Some(vector) = point.get("vector")
+        && !vector.is_null()
+    {
+        map.insert("vector".into(), vector.clone());
     }
 
     Some(Value::Object(map))

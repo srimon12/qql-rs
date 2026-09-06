@@ -27,7 +27,7 @@ use query_converter::{
     convert_order_by_interface, convert_query_request, convert_with_payload, convert_with_vector,
     parse_json_path,
 };
-use unsupported::{reject_collection_sharding, reject_shard_key, EdgeUnsupported};
+use unsupported::{EdgeUnsupported, reject_collection_sharding, reject_shard_key};
 use vector_parser::ToEdgeVector;
 
 use qql::backend::{CollectionInfo, CollectionSchema};
@@ -664,12 +664,10 @@ impl QdrantOps for EdgeQdrant {
             })? {
                 if entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
                     && entry.path().join("segments").is_dir()
+                    && let Some(name) = entry.file_name().to_str()
+                    && !name.starts_with('.')
                 {
-                    if let Some(name) = entry.file_name().to_str() {
-                        if !name.starts_with('.') {
-                            cols.push(name.to_string());
-                        }
-                    }
+                    cols.push(name.to_string());
                 }
             }
             cols.sort();
@@ -849,7 +847,7 @@ impl QdrantOps for EdgeQdrant {
                     None,
                 )
                 .with_collection(collection_name.to_string())
-                .with_field_name(req.field_name.clone()))
+                .with_field_name(req.field_name.clone()));
             }
         };
 
@@ -1092,13 +1090,13 @@ impl QdrantOps for EdgeQdrant {
 }
 
 fn edge_vectors_json(vectors: &[qql::backend::VectorSpec]) -> Result<Value, QqlError> {
-    if let [vector] = vectors {
-        if vector.name.is_none() {
-            return Ok(serde_json::json!({
-                "size": vector.size,
-                "distance": vector.distance,
-            }));
-        }
+    if let [vector] = vectors
+        && vector.name.is_none()
+    {
+        return Ok(serde_json::json!({
+            "size": vector.size,
+            "distance": vector.distance,
+        }));
     }
     if vectors.iter().any(|vector| vector.name.is_none()) {
         return Err(QqlError::execution(

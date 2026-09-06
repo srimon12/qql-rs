@@ -206,17 +206,17 @@ fn inspect(spec_dir: &Path, require_expected: bool) -> Result<Report, Box<dyn Er
                             case.name
                         )),
                         Err(error) => {
-                            if let Some(expected) = case.expected_error.as_deref() {
-                                if error.code != expected {
-                                    report.failures.push(format!(
-                                        "{} [{}]: expected error {}, got {} ({})",
-                                        fixture.display(),
-                                        case.name,
-                                        expected,
-                                        error.code,
-                                        error.message
-                                    ));
-                                }
+                            if let Some(expected) = case.expected_error.as_deref()
+                                && error.code != expected
+                            {
+                                report.failures.push(format!(
+                                    "{} [{}]: expected error {}, got {} ({})",
+                                    fixture.display(),
+                                    case.name,
+                                    expected,
+                                    error.code,
+                                    error.message
+                                ));
                             }
                         }
                     }

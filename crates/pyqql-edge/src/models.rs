@@ -3,7 +3,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList};
 use std::sync::atomic::AtomicBool;
 
-use crate::{parse_on_error, qql_py_error, run_async, wrap_execution_report, PyClient};
+use crate::{PyClient, parse_on_error, qql_py_error, run_async, wrap_execution_report};
 
 /// List dense ONNX models available for ``local_executor(model=...)``.
 ///

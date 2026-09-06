@@ -459,3 +459,35 @@ pub(crate) fn points_and_filter_selector(
         Ok(None)
     }
 }
+
+pub(crate) fn to_scroll_points(
+    request: &qql_plan::types::ScrollRequest,
+    collection: &str,
+) -> Result<qdrant::ScrollPoints, QqlError> {
+    let limit = request
+        .limit
+        .map(|l| {
+            u32::try_from(l).map_err(|_| {
+                QqlError::validation(
+                    "QQL-GRPC-SCROLL-LIMIT",
+                    format!(
+                        "scroll limit {l} cannot be represented on the gRPC path: the bundled Qdrant proto stores scroll limit as uint32 (max {})",
+                        u32::MAX
+                    ),
+                    None,
+                )
+            })
+        })
+        .transpose()?;
+
+    Ok(qdrant::ScrollPoints {
+        collection_name: collection.to_owned(),
+        filter: to_filter_opt(request.filter.as_ref())?,
+        offset: request.offset.as_ref().map(to_point_id),
+        limit,
+        with_payload: request.with_payload.as_ref().map(to_payload_selector),
+        with_vectors: request.with_vector.as_ref().map(to_vectors_selector),
+        shard_key_selector: shard_key_selector(&request.shard_key),
+        ..Default::default()
+    })
+}

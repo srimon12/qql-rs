@@ -37,20 +37,19 @@ impl Executor {
                     .collection_exists(&upsert.collection)
                     .await
                     .unwrap_or(false)
+                && let Ok(info) = self.client.get_collection_info(&upsert.collection).await
             {
-                if let Ok(info) = self.client.get_collection_info(&upsert.collection).await {
-                    let dense = dense_targets(&info);
-                    if dense.len() == 1 && !dense[0].is_empty() {
-                        let dense_name = &dense[0];
-                        for point in &mut upsert.points {
-                            if let Some(PointVectors::Unnamed(vv)) = point.vectors.take() {
-                                point.vectors =
-                                    Some(PointVectors::Named(vec![(dense_name.clone(), vv)]));
-                            }
+                let dense = dense_targets(&info);
+                if dense.len() == 1 && !dense[0].is_empty() {
+                    let dense_name = &dense[0];
+                    for point in &mut upsert.points {
+                        if let Some(PointVectors::Unnamed(vv)) = point.vectors.take() {
+                            point.vectors =
+                                Some(PointVectors::Named(vec![(dense_name.clone(), vv)]));
                         }
                     }
-                    return Ok(Some(info));
                 }
+                return Ok(Some(info));
             }
             return Ok(None);
         }
@@ -112,13 +111,12 @@ impl Executor {
                 }
                 PointVectors::Named(values) => {
                     for (name, value) in values {
-                        if let VectorValue::Dense(_) | VectorValue::MultiDense(_) = value {
-                            if let Some(spec) = dense_specs
+                        if let VectorValue::Dense(_) | VectorValue::MultiDense(_) = value
+                            && let Some(spec) = dense_specs
                                 .iter()
                                 .find(|spec| spec.name.as_deref().unwrap_or("") == name)
-                            {
-                                validate_vector_value(&upsert.collection, name, value, spec)?;
-                            }
+                        {
+                            validate_vector_value(&upsert.collection, name, value, spec)?;
                         }
                     }
                 }
@@ -141,7 +139,7 @@ impl Executor {
             return Ok(false);
         }
 
-        use qql_plan::{types::CreateCollectionRequest, PlannedOperation};
+        use qql_plan::{PlannedOperation, types::CreateCollectionRequest};
         let mut req = CreateCollectionRequest {
             vectors: None,
             sparse_vectors: None,
@@ -201,10 +199,10 @@ impl Executor {
         }
 
         if self.uses_local_embeddings() {
-            if let Some(ref cfg) = self.config {
-                if cfg.embedding_dimension > 0 {
-                    return Ok(cfg.embedding_dimension);
-                }
+            if let Some(ref cfg) = self.config
+                && cfg.embedding_dimension > 0
+            {
+                return Ok(cfg.embedding_dimension);
             }
             return match self.config.as_ref() {
                 #[cfg(feature = "rest")]
@@ -230,10 +228,10 @@ impl Executor {
             };
         }
 
-        if let Some(ref cfg) = self.config {
-            if cfg.embedding_dimension > 0 {
-                return Ok(cfg.embedding_dimension);
-            }
+        if let Some(ref cfg) = self.config
+            && cfg.embedding_dimension > 0
+        {
+            return Ok(cfg.embedding_dimension);
         }
 
         if model.is_some()
@@ -504,17 +502,17 @@ fn validate_vector_value(
         VectorValue::MultiDense(rows) => rows.first().map(Vec::len),
         VectorValue::Sparse { .. } => None,
     };
-    if let Some(got) = dimensions {
-        if got != spec.size as usize {
-            return Err(QqlError::execution(
-                "QQL-EMBEDDING-DIM",
-                format!(
-                    "embedding dimension mismatch for collection '{collection}' vector '{name}': model produced {got}, collection expects {}",
-                    spec.size
-                ),
-                None,
-            ));
-        }
+    if let Some(got) = dimensions
+        && got != spec.size as usize
+    {
+        return Err(QqlError::execution(
+            "QQL-EMBEDDING-DIM",
+            format!(
+                "embedding dimension mismatch for collection '{collection}' vector '{name}': model produced {got}, collection expects {}",
+                spec.size
+            ),
+            None,
+        ));
     }
     Ok(())
 }

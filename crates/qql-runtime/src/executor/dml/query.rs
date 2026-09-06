@@ -2,7 +2,7 @@ use crate::client::CollectionInfo;
 use crate::executor::{Executor, SearchHit};
 use qql_core::ast::QueryStmt;
 use qql_core::error::QqlError;
-use qql_embed::{query_needs_kind_resolution, resolve_query_vector_kinds, TopologyNames};
+use qql_embed::{TopologyNames, query_needs_kind_resolution, resolve_query_vector_kinds};
 
 impl Executor {
     /// Resolve omitted vector names from the collection schema and validate

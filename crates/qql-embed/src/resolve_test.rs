@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use crate::embedder::Embedder;
 use crate::resolve::resolve_embeddings;
 use crate::sparse::SparseVector;
-use crate::topology::{resolve_query_vector_kinds, TopologyNames};
+use crate::topology::{TopologyNames, resolve_query_vector_kinds};
 
 struct MockEmbedder {
     dense_calls: Arc<Mutex<Vec<(String, String)>>>, // (model, text)
