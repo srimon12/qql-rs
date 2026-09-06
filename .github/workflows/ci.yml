@@ -243,6 +243,12 @@ jobs:
   pyqql-check:
     name: Python bindings
     runs-on: ubuntu-latest
+    env:
+      # pyqql-edge is PyO3 over qql-edge → same Rust fastembed path →
+      # HF_HOME resolves as the cache ROOT (no /hub suffix) and overrides
+      # explicit cacheDir opts. Pin it so warm step, workflow cache, and
+      # tests share one deterministic directory.
+      HF_HOME: ${{ runner.temp }}/hf-home
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -250,6 +256,15 @@ jobs:
         with:
           shared-key: pyqql-stable
           cache-on-failure: true
+      # fastembed downloads Xenova/bge-small-en-v1.5 from HuggingFace on
+      # first use; anonymous HF downloads from Actions runners are
+      # rate-limited intermittently (PR #73). Cached per-job (separate key:
+      # same-key saves race when both jobs miss), warm step retries cold path.
+      - name: Cache fastembed model
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/hf-home
+          key: fastembed-bge-small-en-v1.5-python
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -258,6 +273,16 @@ jobs:
           set -euo pipefail
           python -m pip install --upgrade pip
           python -m pip install ./crates/pyqql ./crates/pyqql-edge
+          warm_ok=false
+          for attempt in 1 2 3 4 5; do
+            if python -c "import tempfile, pyqql_edge; pyqql_edge.local_executor(tempfile.mkdtemp())"; then
+              warm_ok=true
+              break
+            fi
+            echo "::warning::fastembed model download failed (attempt $attempt/5), retrying in 30s"
+            sleep 30
+          done
+          [ "$warm_ok" = true ]
           python -m unittest discover -s crates/pyqql/tests -v
           python -m unittest discover -s crates/pyqql-edge/tests -v
 
@@ -268,6 +293,12 @@ jobs:
       fail-fast: false
       matrix:
         package: [nqql, nqql-edge]
+    env:
+      # fastembed-rs resolves HF_HOME as its cache ROOT (no /hub suffix) and
+      # it overrides even explicit cacheDir opts — pinning it gives the warm
+      # step, the workflow cache, and all tests one deterministic directory.
+      # (fastembed-6.0.2/src/common.rs: HF_HOME > FASTEMBED_CACHE_DIR > ./.fastembed_cache)
+      HF_HOME: ${{ runner.temp }}/hf-home
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -275,14 +306,40 @@ jobs:
         with:
           shared-key: nqql-${{ matrix.package }}-stable
           cache-on-failure: true
+      # fastembed downloads Xenova/bge-small-en-v1.5 from HuggingFace on first
+      # use; anonymous HF downloads from Actions runners are rate-limited
+      # intermittently (PR #73). Cache the pinned cache root so the download
+      # happens at most once; the warm step retries the cold path.
+      - name: Cache fastembed model
+        if: matrix.package == 'nqql-edge'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/hf-home
+          key: fastembed-bge-small-en-v1.5-node
       - uses: actions/setup-node@v7
         with:
           node-version: "22.13.1"
+      - name: Install JS dependencies
+        working-directory: crates/${{ matrix.package }}
+        run: npm install --no-package-lock --omit=optional --no-audit --no-fund
+      - name: Warm embedding model cache (guarded download)
+        if: matrix.package == 'nqql-edge'
+        working-directory: crates/nqql-edge
+        run: |
+          set -euo pipefail
+          npm run build:debug
+          for attempt in 1 2 3 4 5; do
+            if node warm-cache.js; then
+              exit 0
+            fi
+            echo "::warning::fastembed model download failed (attempt $attempt/5), retrying in 30s"
+            sleep 30
+          done
+          exit 1
       - name: Build and test ${{ matrix.package }}
         working-directory: crates/${{ matrix.package }}
         run: |
           set -euo pipefail
-          npm install --no-package-lock --omit=optional --no-audit --no-fund
           npm test
           npm pack --dry-run --ignore-scripts
 
@@ -398,6 +455,20 @@ jobs:
               missing=1
             fi
           done < <(grep -oE '^export function [a-zA-Z0-9_]+' "$fresh" | awk '{print $3}' | sort -u)
+          # Class surfaces (Stmt / Client members) drift too — e.g. Stmt.bind,
+          # toReadableString, compileRouteBytes. Compare every declared class
+          # member name between the fresh and bundled declarations.
+          members() {
+            sed -n 's/^[[:space:]]\+\([a-zA-Z_][a-zA-Z0-9_]*\)[?(]\?.*(.*/\1/p' "$1" \
+              | grep -vE '^(get|set|readonly|if|for|while|switch|catch|function|return|export)$' \
+              | sort -u
+          }
+          while read -r name; do
+            if ! grep -qE "^[[:space:]]+${name}[?(]\?\(" "$bundled"; then
+              echo "::error::bundled editor WASM class API is missing member '${name}'; rebuild editors/vscode/wasm from crates/qql-wasm"
+              missing=1
+            fi
+          done < <(members "$fresh")
           exit "$missing"
       - name: Typecheck, lint, and test the extension
         working-directory: editors/vscode
