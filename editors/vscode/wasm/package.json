@@ -4,7 +4,7 @@
     "Srimon Danguria <srimon12mckv@gmail.com>"
   ],
   "description": "WebAssembly bindings for QQL parsing, planning, and Qdrant execution",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "license": "MIT",
   "repository": {
     "type": "git",
