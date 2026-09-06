@@ -3,7 +3,7 @@
 export const hero = {
 	headline: "SQL for Qdrant.",
 	lede: "QQL is to Qdrant what SQL is to Postgres. One query for hybrid search, filters, and schema.",
-	eyebrow: "Open source · MIT · v0.3.1",
+	eyebrow: "Open source · MIT · v0.3.2",
 	specimenTitle: "search.qql",
 	specimenMeta: "QQL · MIT",
 	primaryCta: { label: "Try the playground", href: "/playground/" },
@@ -117,7 +117,7 @@ export const faq = {
 		{
 			question: "Is it production-ready?",
 			answer:
-				"It is young: v0.3.1. Fail-closed defaults, OpenAPI contract tests, a conformance corpus, and a public gaps document. The API surface is stabilizing, not frozen.",
+				"It is young: v0.3.2. Fail-closed defaults, OpenAPI contract tests, a conformance corpus, and a public gaps document. The API surface is stabilizing, not frozen.",
 		},
 		{
 			question: "Can I try it without a cluster?",

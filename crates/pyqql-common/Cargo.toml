@@ -5,6 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Shared PyO3 binding logic for the pyqql and pyqql-edge SDKs"
 publish = false
 
 [lib]

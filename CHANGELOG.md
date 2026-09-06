@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [0.3.2] - 2026-09-06
 
 ### 🚀 Added
 - **Prepared statements** — bind parameters against a pre-parsed `Stmt` (`stmt.bind(...)`, `client.execute(stmt, params=...)`) without string re-parsing; statement-scoped parameter lists (`params=[dict0, dict1]`) batch-execute one bind per statement (length must match the statement count); nested dictionary parameter expansion (`:loc.lat`).
@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Regenerated stale `native.d.ts`** — the committed NAPI-RS declaration files for `nqql` / `nqql-edge` predated the prepared-statement surface; regenerated via `napi build`.
 - **VS Code rebuild docs used a relative `--out-dir`** — `wasm-pack` resolves `--out-dir` against the crate directory, so the documented command wrote to `crates/qql-wasm/wasm` instead of the editor bundle; the correct absolute-relative path is documented and the orphaned build output removed.
 - **CI editor check compares class member surface** — the bundled editor WASM gate now diffs `Stmt` / `Client` members (not just free functions) against a fresh wasm-pack build, catching drift like a missing `Stmt.bind`.
+- **Release gate covers the shared binding crates** — `scripts/check_release.py` validates the `pyqql-common` / `nqql-common` manifests (metadata, `publish = false`) and their root pins, fails closed on unknown workspace crate directories, and the shared crates are declared once in root `[workspace.dependencies]` (inherited via `workspace = true`), so a version bump rewrites one manifest instead of four.
 
 ### 🧪 Tests
 - Pinned `u64::MAX` LIMIT/OFFSET passthrough (plain / grouped / hybrid `LIMIT*10` boundary) and beyond-u64 rejection for `QUERY` and `SCROLL`.

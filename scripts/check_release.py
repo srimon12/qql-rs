@@ -15,8 +15,9 @@ manifest is rewritten from it, then the result is re-validated):
 Version sites owned by this script:
 
 - ``VERSION`` (root source of truth)
-- root ``Cargo.toml``: ``[workspace.package].version`` and the five internal
-  ``[workspace.dependencies]`` path entries
+- root ``Cargo.toml``: ``[workspace.package].version`` and the internal
+  ``[workspace.dependencies]`` path entries (``qql-core``, ``qql-plan``,
+  ``qql-embed``, ``qql``, ``qql-edge``, ``pyqql-common``, ``nqql-common``)
 - crate manifests: internal path dependencies that pin a literal version
   (``qql-conformance``, ``qql-wasm``, …)
 - ``crates/{pyqql,pyqql-edge}/pyproject.toml`` ``[project].version``
@@ -57,13 +58,25 @@ PRIVATE_CRATES = (
     "qql-grammar-gen",
     "qql-wasm",
     "pyqql",
+    "pyqql-common",
     "pyqql-edge",
     "nqql",
+    "nqql-common",
     "nqql-edge",
 )
 ALL_CRATES = PUBLIC_CRATES + PRIVATE_CRATES
 # Internal crates that appear as versioned path dependencies in manifests.
-INTERNAL_DEP_KEYS = ("qql-core", "qql-plan", "qql-embed", "qql", "qql-edge")
+# The shared binding crates are declared once here (root
+# [workspace.dependencies]) and inherited everywhere via `workspace = true`.
+INTERNAL_DEP_KEYS = (
+    "qql-core",
+    "qql-plan",
+    "qql-embed",
+    "qql",
+    "qql-edge",
+    "pyqql-common",
+    "nqql-common",
+)
 PYTHON_PACKAGES = ("pyqql", "pyqql-edge")
 NODE_PACKAGES = ("nqql", "nqql-edge")
 
@@ -114,6 +127,16 @@ def workspace_version() -> str:
     return root["workspace"]["package"]["version"]
 
 
+def workspace_package_names() -> frozenset[str]:
+    """Package names of every workspace crate. An internal path dependency
+    must either pin the release version or use `workspace = true` — a bare
+    path dep would escape both validation and update rewriting."""
+    return frozenset(
+        load_toml(ROOT / "crates" / crate / "Cargo.toml")["package"]["name"]
+        for crate in ALL_CRATES
+    )
+
+
 # --------------------------------------------------------------------------
 # Check mode
 # --------------------------------------------------------------------------
@@ -136,6 +159,8 @@ def validate_cargo(expected: str) -> None:
             fail(f"workspace.dependencies.{key} must declare version {expected}")
         if not isinstance(spec.get("path"), str):
             fail(f"workspace.dependencies.{key} must be a path dependency")
+
+    internal_names = workspace_package_names()
 
     for crate in ALL_CRATES:
         manifest = ROOT / "crates" / crate / "Cargo.toml"
@@ -170,9 +195,10 @@ def validate_cargo(expected: str) -> None:
             for dependency, spec in data.get(section, {}).items():
                 if not isinstance(spec, dict) or "path" not in spec:
                     continue
-                if dependency.startswith("qql") and spec.get("version") != expected:
+                if dependency in internal_names and spec.get("version") != expected:
                     fail(
-                        f"{crate} {section}.{dependency} must declare version {expected}"
+                        f"{crate} {section}.{dependency} must declare version "
+                        f"{expected} (or declare it with `workspace = true`)"
                     )
 
 
@@ -251,7 +277,24 @@ def validate_editor(expected: str) -> None:
             )
 
 
+def validate_crate_discovery() -> None:
+    """Every crates/* directory must be known to this script: an unknown crate
+    would silently escape version validation, and a stale ALL_CRATES entry
+    must fail loudly instead of crashing mid-scan."""
+    for manifest in sorted((ROOT / "crates").glob("*/Cargo.toml")):
+        crate = manifest.parent.name
+        if crate not in ALL_CRATES:
+            fail(
+                f"unknown workspace crate {crate!r}; add it to PUBLIC_CRATES or "
+                "PRIVATE_CRATES in scripts/check_release.py"
+            )
+    for crate in ALL_CRATES:
+        if not (ROOT / "crates" / crate / "Cargo.toml").is_file():
+            fail(f"crates/{crate} is listed in check_release.py but has no manifest")
+
+
 def run_checks(expected: str) -> None:
+    validate_crate_discovery()
     if not (ROOT / "LICENSE").is_file():
         fail("root MIT LICENSE is missing")
     if not (ROOT / "crates" / "qql-runtime" / "openapi.json").is_file():
@@ -359,7 +402,13 @@ def collect_update_plan(old: str, new: str) -> list[tuple[Path, str, str]]:
             f"root Cargo.toml [workspace.dependencies] declares {dep_hits} of "
             f"{len(INTERNAL_DEP_KEYS)} internal path deps at {old}"
         )
-    plan.append((root_manifest, "workspace.package version + 5 workspace.dependencies", text))
+    plan.append(
+        (
+            root_manifest,
+            f"workspace.package version + {len(INTERNAL_DEP_KEYS)} workspace.dependencies",
+            text,
+        )
+    )
 
     for crate in ALL_CRATES:
         manifest = ROOT / "crates" / crate / "Cargo.toml"
