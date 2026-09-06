@@ -186,7 +186,10 @@ git clone https://github.com/srimon12/qql-rs
 cd qql-rs/editors/vscode
 
 # Build the WASM parser (Node target)
-wasm-pack build ../../crates/qql-wasm --release --target nodejs --out-dir wasm
+# NOTE: --out-dir resolves relative to the crate directory, so this writes
+# into editors/vscode/wasm — do NOT use a bare `--out-dir wasm` from here
+# (that would land in crates/qql-wasm/wasm instead).
+wasm-pack build ../../crates/qql-wasm --release --target nodejs --out-dir ../../editors/vscode/wasm
 
 npm install
 npm run check

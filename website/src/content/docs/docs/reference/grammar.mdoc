@@ -91,8 +91,14 @@ cargo run -p qql-grammar-gen -- check
 
 ## Versioning contract
 
-QQL follows `MAJOR.MINOR`; the current language version is `1.6` while the
+QQL follows `MAJOR.MINOR`; the current language version is `1.7` while the
 canonical AST schema is independently fixed as `qql.ast/v1`.
+
+QQL 1.7 adds parameter placeholder productions (`param = ":" identifier | "?"`)
+across query inputs, point IDs, scalars, and clauses (`SHARD`, `LIMIT`,
+`OFFSET`, `SCORE THRESHOLD`). Placeholders are substituted client-side by the
+SDK binders before planning — see [Parameter
+binding](/docs/language/queries/#parameter-binding--prepared-queries).
 
 - Within one major version, every program valid in an earlier minor release
   must stay valid with the same meaning and canonical AST. A minor release may

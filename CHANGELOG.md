@@ -10,21 +10,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### 🚀 Added
-- **Prepared statements** — bind parameters against a pre-parsed `Stmt` (`stmt.bind(...)`, `client.execute(stmt, params=...)`) without string re-parsing; statement-scoped parameter lists (`params=[dict0, dict1]`) batch-execute one bind per statement; nested dictionary parameter expansion (`:loc.lat`).
+- **Prepared statements** — bind parameters against a pre-parsed `Stmt` (`stmt.bind(...)`, `client.execute(stmt, params=...)`) without string re-parsing; statement-scoped parameter lists (`params=[dict0, dict1]`) batch-execute one bind per statement (length must match the statement count); nested dictionary parameter expansion (`:loc.lat`).
 - **Typed execution results** — `ScoredPoint` dataclass and typed `ExecutionReport` accessors (`.hits()`, `.points()`, `.facet()`, `.count()`); `client.execute_hits()`; FACET results normalize to the hits array directly; numeric point IDs preserved as integers instead of string round-trips.
 - **Default `USING bm25` model resolution** — an unspecified `USING bm25` model resolves to the server-side `Qdrant/bm25` model.
-- **Vector truncation on bind** — `bind(..., truncate_vectors=True)` clamps overspecified vector literals to the declared dimension; `Stmt` gained string/repr rendering.
-- **Cross-SDK DX parity (QQL 1.7)** — `Stmt.bind()` / `Stmt.compileRoute()` / `Stmt.toString()` and the `ExecutionReport` / `ScoredPoint` surface land in `pyqql`, `pyqql-edge`, `nqql`, `nqql-edge`, and `qql-wasm` (`.pyi` stubs and TS `.d.ts` updated); grammar formally declares parameter placeholders (query inputs, point IDs, scalars, clauses) with `qql.generated.pest` and conformance snapshots regenerated.
+- **Vector truncation on bind** — `bind(..., truncate_vectors=True)` renders compact `[0.1, 0.2, ... (N dims)]` previews of long vector literals; `Stmt` gained string/repr rendering.
+- **Cross-SDK DX parity (QQL 1.7)** — `Stmt.bind()` / `Stmt.compileRoute()` / `Stmt.toString()` / `Stmt.toReadableString()` and the typed `ExecutionReport` / `ScoredPoint` surface land in `pyqql`, `pyqql-edge`, `nqql`, and `nqql-edge` (`.pyi` stubs and TS `.d.ts` updated); `qql-wasm` gains `Stmt.bind` / `compileRoute` / `toString` / `toReadableString` / `explain` and the optional-params module `bind` (reports remain plain objects there); grammar formally declares parameter placeholders (query inputs, point IDs, scalars, clauses) with `qql.generated.pest` and conformance snapshots regenerated.
+- **Compile-time parameter binding everywhere** — `compile_query(query, params=...)` and `Client.compile(query, params=...)` accept parameter bindings on all four SDKs (`pyqql`, `pyqql-edge`, `nqql`, `nqql-edge`); `bind(query, params?)` accepts `Stmt` inputs on the Node SDKs (returns a bound `Stmt`, or the readable string with `truncateVectors`); `bind(params)` is optional everywhere (omitting it is a no-op, mirroring `pyqql`).
 - **Audit-gap conformance fixtures** — exponent-overflow literals (`1e999`) rejected on the value path (`QQL-PARSE-FLOAT`) and the formula path (`QQL-PARSE-NUMBER`); `LIMIT` beyond `u64::MAX` rejected at parse time (`QQL-PARSE-POSITIVE-INTEGER`).
 
 ### 🔧 Changed
 - **Non-finite formula constants report `QQL-PARSE-NUMBER`** (previously the generic `QQL-PARSE-SYNTAX`), matching `parse_numeric_literal`'s stable code for score thresholds and decay targets.
 - **Workspace on Rust Edition 2024** — all crates and examples; edition-2024 idioms eligible (let-chains, resolver 3 / MSRV-aware resolution).
+- **`Stmt.toString()` is the canonical, re-parseable form** on `nqql`, `nqql-edge`, and `qql-wasm` (mirrors Python `str(stmt)`); the truncated preview moves to `Stmt.toReadableString()` (mirrors Python `repr(stmt)`).
+- **Statement-scoped batch params require an exact length match** — `params=[dict0, dict1]` binds only when the list length equals the statement count on every SDK; `nqql` now enforces the same contract as `pyqql` / `nqql-edge` instead of partially binding.
+- **`is_valid` is a full parse + plan gate on the edge SDKs** — `pyqql-edge` and `nqql-edge` join `pyqql`, `nqql`, and `qql-wasm` in validating plan-level semantics via `qql_plan::parse_and_plan`.
+- **`qql-wasm` `ExecuteOptions` drops `truncateVectors`** — the option was never read on `execute` / `executeStmt`; truncation stays on the module-level `bind()` where it applies.
+
+### 🐛 Fixed
+- **`nqql-edge` one-shot `execute()` / `executeStmt()` silently dropped `options.params`** — the standalone options normalizer stripped the field, so `:name` / `?` placeholders flowed to the server unbound; params now pass through with type validation.
+- **Invalid parameter types fail closed on `Stmt` paths** — `stmt.bind(42)` and scalar entries in scoped batch params raise `QQL-BIND-INVALID-PARAMS` (`nqql`, `nqql-edge`, `qql-wasm`) instead of silently returning an unbound statement; matches the `pyqql` contract.
+- **One-shot Node clients leaked connections** — module-level `execute()` / `executeStmt()` in `nqql` now close their temporary client (and honor `options.params`), matching `nqql-edge` and the Python SDKs.
+- **Node `ScoredPoint` / `ExecutionReport` parity with `pyqql`** — `payload` defaults to `null`, `text` comes from the top-level hit key only, non-dict hit entries are filtered, negative statement indices use Python list semantics, and absent report keys default to `false` / `[]` / `0`.
+- **Regenerated stale `native.d.ts`** — the committed NAPI-RS declaration files for `nqql` / `nqql-edge` predated the prepared-statement surface; regenerated via `napi build`.
+- **VS Code rebuild docs used a relative `--out-dir`** — `wasm-pack` resolves `--out-dir` against the crate directory, so the documented command wrote to `crates/qql-wasm/wasm` instead of the editor bundle; the correct absolute-relative path is documented and the orphaned build output removed.
+- **CI editor check compares class member surface** — the bundled editor WASM gate now diffs `Stmt` / `Client` members (not just free functions) against a fresh wasm-pack build, catching drift like a missing `Stmt.bind`.
 
 ### 🧪 Tests
 - Pinned `u64::MAX` LIMIT/OFFSET passthrough (plain / grouped / hybrid `LIMIT*10` boundary) and beyond-u64 rejection for `QUERY` and `SCROLL`.
 - Pinned bare `NaN` as a string filter value (QQL has no NaN literal; numeric non-finite forms are rejected) and `1 - -2` formula lowering (lexer folds the sign into the literal — no double negation; `--` after whitespace is a line comment).
 - `--` lexer suite (CRLF, 3-dash, in-string safety), non-finite float contexts (vector / sparse / mmr / oversampling), RERANK + CTE prefetch (plan + gRPC), and the gRPC scroll-limit guard (`QQL-GRPC-SCROLL-LIMIT`).
+- Cross-SDK DX suites extended: `test_dx.js` (network-free bind/compileRoute/toString/error-code/report coverage) is wired into the `npm test` script of `nqql` and `nqql-edge`; params passthrough for one-shot edge execution is pinned in `test_options.js`; `compile_query(params=...)` coverage in the `pyqql` / `pyqql-edge` suites.
 
 ## [0.3.1] - 2026-09-04
 

@@ -33,16 +33,16 @@ cte-query    = "QUERY", query-expr, [ "FROM", collection ], query-tail ;
 query-tail   = [ "USING", hybrid-using | vector-target ],
                [ "PREFETCH", "(", prefetch, { ",", prefetch }, ")" ],
                [ "WHERE", filter ],
-               [ "SHARD", string ],
+               [ "SHARD", param | string ],
                [ "PARAMS", search-params ],
-               [ "SCORE", "THRESHOLD", number ],
+               [ "SCORE", "THRESHOLD", param | number ],
                [ "GROUP", "BY", field,
                    [ "SIZE", positive-integer ],
                    [ "LOOKUP", "FROM", collection, [ "VECTOR", vector-name ] ] ],
                [ "WITH", "PAYLOAD", payload-selector ],
                [ "WITH", "VECTOR", vector-selector ],
-               [ "LIMIT", positive-integer ],
-               [ "OFFSET", non-negative-integer ] ;
+               [ "LIMIT", param | positive-integer ],
+               [ "OFFSET", param | non-negative-integer ] ;
 vector-target = vector-name, [ "AS", vector-kind ] ;
 hybrid-using  = "HYBRID", [ "DENSE", vector-name ], [ "SPARSE", vector-name ],
                 [ "FUSION", ( "RRF" | "DBSF" ) ] ;
@@ -50,6 +50,17 @@ vector-kind  = "DENSE" | "SPARSE" | "MULTI" | "MULTIVECTOR" ;
 ```
 
 Top-level queries require `FROM`. A CTE may omit it and inherit the outer collection. Clauses occur at most once and only in the order above.
+
+### Parameter placeholders (QQL 1.7)
+
+`param = ":", identifier | "?"` — a named `:name` or positional `?`
+placeholder — may appear wherever the productions above show it: query inputs
+(`QUERY TEXT :q`, `VECTOR :vec`), point IDs (`QUERY POINTS (:id)`,
+`POINT ?`), and scalars/clauses (`SHARD :tenant`, `SCORE THRESHOLD :min`,
+`LIMIT :lim`, `OFFSET :off`). Placeholders parse into the AST but stay inert
+until a host binder substitutes escaped literals (see
+[`docs/parameters.md`](parameters.md)); the binder rejects mixed styles
+(`QQL-BIND-MIXED-STYLE`) and unresolved values (`QQL-BIND-MISSING-PARAM`).
 
 ### Vector Input Forms
 QQL supports three vector input forms for semantic search:
@@ -150,10 +161,13 @@ query-expr   = points
 
 points       = "POINTS", "(", point-id, { ",", point-id }, ")" ;
 nearest      = [ "NEAREST" ], query-input ;
-query-input  = "TEXT", string, [ "MODEL", string ]
-             | "IMAGE", string, [ "MODEL", string ]
-             | "VECTOR", vector-value
+point-id     = unsigned-integer | string | param ;
+param        = ":", identifier | "?" ;
+query-input  = "TEXT", ( param | string ), [ "MODEL", string ]
+             | "IMAGE", ( param | string ), [ "MODEL", string ]
+             | "VECTOR", ( param | vector-value )
              | "POINT", point-id
+             | param
              | string ;
 
 recommend    = "RECOMMEND", "POSITIVE", point-id-list,

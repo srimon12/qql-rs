@@ -276,6 +276,13 @@ Rust keeps typed twins (`bind_named` / `bind_positional`, `execute_with_params` 
 `execute_with_positional_params`). Python, Node, and WASM collapse those into
 one `bind(query, params)` plus `execute(..., params=...)`.
 
+Readable/preview variants truncate long vector literals in the bound output:
+`bind_named_readable(source, lookup, max_dims)` and
+`bind_positional_readable(source, params, max_dims)` (QQL 1.7,
+`qql_core::params`). To bind into a parsed AST instead of source text, use
+`bind_stmt(&mut Stmt, lookup, &positional)` — the same entry point the host
+SDKs call before planning.
+
 ```rust
 use std::collections::HashMap;
 use qql::executor::{Executor, OnError};
@@ -317,6 +324,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     )?;
     println!("{bound}");
+
+    // 3b. Readable binding with vector truncation (QQL 1.7, qql_core::params)
+    let readable = qql_core::params::bind_named_readable(
+        "QUERY :vec FROM docs LIMIT :lim",
+        |k| match k {
+            "vec" => Some(Value::List(vec![Value::Float(0.1); 384])),
+            "lim" => Some(Value::Int(5)),
+            _ => None,
+        },
+        2, // max dims shown before "... (N dims)"
+    )?;
+    println!("{readable}");
+
+    // 3c. Bind into a parsed AST (same entry point the host SDKs call)
+    let mut stmt = qql_core::parser::Parser::parse(
+        "QUERY TEXT :q FROM docs LIMIT :lim;",
+    )?;
+    qql_core::params::bind_stmt(
+        &mut stmt,
+        |k| match k {
+            "q" => Some(Value::Str("cardiology".into())),
+            "lim" => Some(Value::Int(5)),
+            _ => None,
+        },
+        &[],
+    )?;
 
     // 4. Hierarchical ASCII Tree Explain (qql_core::explain)
     let plan = qql_core::explain::explain(&bound)?;

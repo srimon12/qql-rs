@@ -21,6 +21,7 @@ emits. Codes are grouped by the failure family:
 | `QQL-VALIDATION-*` | Semantic validation of a parsed program |
 | `QQL-PLAN-*`, `QQL-MISSING-*`, `QQL-UNKNOWN-*`, `QQL-VECTOR-KIND` | Planning and schema resolution |
 | `QQL-JSON-*` | Value conversion to JSON |
+| `QQL-BIND-*` | Prepared-statement parameter binding |
 | `QQL-EMBEDDING-*` | UPSERT embedding inference |
 | `QQL-EDGE-*` | In-process edge backend capability and runtime failures |
 
@@ -162,6 +163,24 @@ The same structured fields are projected differently by each host binding.
 | `QQL-JSON-NONFINITE` | A non-finite float cannot be serialized to JSON |
 | `QQL-JSON-NUMBER` | A value cannot be represented as a JSON number |
 
+## Binding
+
+Raised when client-side parameter substitution fails (QQL 1.7 placeholders
+`:name` and `?`). See [Parameter
+binding](/docs/language/queries/#parameter-binding--prepared-queries).
+
+| Code | Meaning |
+|---|---|
+| `QQL-BIND-MIXED-STYLE` | The template mixes `:name` and `?`, or the binder received the other style |
+| `QQL-BIND-MISSING-PARAM` | A named placeholder has no bound value, or a positional index is out of range |
+| `QQL-BIND-UNUSED-PARAMS` | More positional values were supplied than `?` placeholders |
+| `QQL-BIND-INVALID-FLOAT` | A non-finite float (`NaN`, infinity) cannot be rendered as a literal |
+| `QQL-BIND-INVALID-POINT-ID` | A bound point ID is neither an unsigned integer nor a string |
+| `QQL-BIND-TYPE-MISMATCH` | A bound value has the wrong type for its position (for example a non-string bound to `TEXT`) |
+| `QQL-BIND-INVALID-INTEGER` | A `LIMIT` / `OFFSET` parameter is not a non-negative integer |
+| `QQL-BIND-FORMULA-TYPE` | A formula parameter cannot be bound to a numeric, datetime, or variable constant |
+| `QQL-BIND-INVALID-PARAMS` | The `params` argument is neither an object (named) nor an array (positional) |
+
 ## Embedding
 
 | Code | Meaning |
@@ -222,6 +241,15 @@ QQL-BACKEND-HTTP
 QQL-BACKEND-JSON
 QQL-BATCH-CARDINALITY
 QQL-BATCH-INVARIANT
+QQL-BIND-FORMULA-TYPE
+QQL-BIND-INVALID-FLOAT
+QQL-BIND-INVALID-INTEGER
+QQL-BIND-INVALID-PARAMS
+QQL-BIND-INVALID-POINT-ID
+QQL-BIND-MISSING-PARAM
+QQL-BIND-MIXED-STYLE
+QQL-BIND-TYPE-MISMATCH
+QQL-BIND-UNUSED-PARAMS
 QQL-CONFIG
 QQL-CROSS-RERANK
 QQL-EDGE-CLEAR-PAYLOAD-REQUIRES-TARGET

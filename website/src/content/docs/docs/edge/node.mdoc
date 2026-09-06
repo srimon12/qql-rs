@@ -96,10 +96,11 @@ const client = httpExecutor(
 
 | Method | Purpose |
 |---|---|
-| `client.execute(query, options?)` | Execute a query string, `Stmt`, or array of either; `options.onError` is `"stop"` or `"continue"` |
+| `client.execute(query, options?)` | Execute a query string, `Stmt`, or array of either; `options.onError` is `"stop"` or `"continue"`, `options.params` binds `:name` / `?` placeholders |
+| `client.executeHits(query, options?)` | Typed `ScoredPoint[]` hits without the report |
 | `client.explain(query)` | Human-readable plan for a string |
 | `client.explainStmt(stmt)` | Human-readable plan for a pre-parsed `Stmt` |
-| `client.compile(query)` | Non-executing `{stmt_type, method, path, payload}` route |
+| `client.compile(query, params?)` | Non-executing `{stmt_type, method, path, payload}` route (optionally binding params) |
 | `client.close()` | Flush and release edge storage. Idempotent |
 
 `execute` returns an `ExecutionReport`:
@@ -120,11 +121,19 @@ const client = httpExecutor(
 }
 ```
 
-`Stmt` objects come from `parse()` and support `stmt.injectFilter(field, op, value)` and
-`stmt.toJson()`. `injectFilter` is the supported tenant-scoping mechanism.
-Edge has no custom `SHARD` routing, so a `SHARD '…'` clause fails at
-execution with `QQL-EDGE-UNSUPPORTED-SHARD` — see
+`Stmt` objects come from `parse()` and support `stmt.injectFilter(field, op,
+value)`, `stmt.bind(params?)` (returns a new bound `Stmt`),
+`stmt.compileRoute(params?)`, `stmt.toJson()`, canonical `stmt.toString()`, and
+the truncated `stmt.toReadableString()` preview. `injectFilter` is the
+supported tenant-scoping mechanism. Edge has no custom `SHARD` routing, so a
+`SHARD '…'` clause fails at execution with `QQL-EDGE-UNSUPPORTED-SHARD` — see
 [capabilities](/docs/edge/capabilities/).
+
+The edge `ExecutionReport` also exposes typed accessors: `report.hits(stmt)` /
+`report.points(stmt)` return `ScoredPoint` objects (`id`, `score`, `payload`,
+`text`, `collection`), `report.facet(stmt)` returns normalized
+`[{ value, count }]`, and `report.count(stmt)` returns an integer. A negative
+statement index counts from the end, matching Python list semantics.
 
 ## Module-level helpers
 
@@ -132,15 +141,17 @@ execution with `QQL-EDGE-UNSUPPORTED-SHARD` — see
 |---|---|
 | `parse(query)` | Parse one statement or a script into `Stmt[]` |
 | `parseJson(query)` | Raw AST JSON string (avoids V8 object allocation) |
-| `isValid(query)` | Boolean parse check |
+| `isValid(query)` | Boolean parse + plan check |
 | `injectFilter(query, field, op, value)` | Return a filtered statement |
 | `tokenize(query)` | Token list `{kind, text, pos, end, len}` |
-| `compileQuery(query)` | Non-executing route |
+| `compileQuery(query, params?)` | Non-executing route (optionally binding params) |
+| `bind(query, params?, { truncateVectors? })` | Substitute `:name` (object) or `?` (array) placeholders into a string or `Stmt` |
 | `explain(query)` / `explainStmt(stmt)` | Plan rendering |
 | `listEmbeddingModels()` | Catalog of loadable ONNX models |
 | `version` | Package version string |
-| `execute(query, options?)` | One-shot execution with a temporary client (loads the model every call — prefer a long-lived `Client`) |
-| `executeStmt(stmt, options?)` | One-shot execution of a pre-parsed `Stmt` |
+| `execute(query, options?)` | One-shot execution with a temporary client (loads the model every call — prefer a long-lived `Client`); forwards `options.params` |
+| `executeStmt(stmt, options?)` | One-shot execution of a pre-parsed `Stmt`; forwards `options.params` |
+| `executeHits(query, options?)` | One-shot execution returning `ScoredPoint[]` |
 
 Supported injected operators: `=`, `>`, `>=`, `<`, `<=` (`!=` is rejected by
 design; wrap equality and negate instead).

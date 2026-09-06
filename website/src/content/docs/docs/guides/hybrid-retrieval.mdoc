@@ -45,6 +45,16 @@ LIMIT 10;
 Use the explicit form when candidate limits, filters, or weights differ by
 stage. `rrf_weights` length must equal the prefetch count.
 
+`USING bm25` without an explicit model resolves to the server-side
+`Qdrant/bm25` model — queries embed with unit weights and documents with tf
+saturation, staying wire-compatible with Qdrant's `qdrant/bm25`:
+
+{% qqlExample title="bm25 defaults" %}
+```sql
+QUERY 'zero downtime deployment' FROM runbooks USING bm25 LIMIT 10;
+```
+{% /qqlExample %}
+
 ## RRF or DBSF?
 
 | Fusion | Prefer when |

@@ -41,7 +41,7 @@ print(report["succeeded"], report["failed"])
 Pass `params` as a dictionary for named placeholders (`:name`) or a list for positional placeholders (`?`):
 
 ```python
-from pyqql import Client, bind
+from pyqql import Client, bind, parse
 
 client = Client("http://localhost:6333")
 
@@ -57,8 +57,85 @@ report = client.execute(
     params=["cardiology", "medical", 10],
 )
 
-# Standalone query string binding
+# Standalone query string binding (accepts str or Stmt)
 bound_qql = bind("QUERY TEXT :q FROM docs LIMIT :lim", {"q": "search", "lim": 5})
+```
+
+Parse once, then reuse the statement. `stmt.bind(params)` returns a new bound
+`Stmt`, and `stmt.compile_route(params=...)` lowers the bound statement to its
+Qdrant route without re-parsing:
+
+```python
+stmt = parse("QUERY TEXT :q FROM docs WHERE category = :cat LIMIT :lim")[0]
+
+bound = stmt.bind({"q": "cardiology", "cat": "medical", "lim": 10})
+route = stmt.compile_route(params={"q": "cardiology", "cat": "medical", "lim": 10})
+print(route["method"], route["path"])
+
+# str(stmt) renders canonical QQL; repr(stmt) truncates long vectors for logging
+print(str(bound))
+```
+
+Nested dictionaries expand to dotted keys (`{"loc": {"lat": 1.0, "lon": 2.0}}`
+binds `:loc.lat` / `:loc.lon`), and flat dotted keys work the same way. For a
+multi-statement batch, pass `params` as a list with one entry per statement —
+the length must match the statement count, and each entry is a dict (named) or
+a list of scalars (positional):
+
+```python
+report = client.execute(
+    [
+        "QUERY TEXT :q FROM docs LIMIT 5",
+        "QUERY TEXT :q FROM articles LIMIT 10",
+    ],
+    params=[{"q": "quantum"}, {"q": "relativity"}],
+)
+```
+
+Use `truncate_vectors=True` for readable logs: `bind(query, params,
+truncate_vectors=True)` renders long vector literals compactly, and binding a
+`Stmt` with truncation returns the readable string:
+
+```python
+print(bind("QUERY :vec FROM docs LIMIT 5", {"vec": [0.1] * 384}, truncate_vectors=True))
+# QUERY [0.10, 0.10, ... (384 dims)] FROM docs LIMIT 5
+```
+
+Binding failures raise errors with stable `QQL-BIND-*` codes — mixed
+placeholder styles, missing parameters, extra positional values, or wrong
+types (see the [error code reference](/docs/reference/error-codes/)).
+
+`compile_query(query, params=...)` and `Client.compile(query, params=...)`
+compile a template to its route in one step, and `is_valid` runs the full
+parse + plan gate:
+
+```python
+route = compile_query("QUERY TEXT :q FROM docs LIMIT :lim", {"q": "search", "lim": 5})
+print(client.compile("QUERY TEXT :q FROM docs LIMIT :lim", {"q": "search", "lim": 5}))
+```
+
+## Typed results
+
+`Client.execute_hits` and `execute_async_hits` return `ScoredPoint` objects
+directly, and `ExecutionReport` adds typed accessors to the report
+dictionary:
+
+```python
+from pyqql import Client
+
+client = Client("http://localhost:6333")
+
+# 1. Hits as typed ScoredPoint objects (id, score, payload, text, collection)
+for hit in client.execute_hits("QUERY TEXT 'neural search' FROM docs LIMIT 5"):
+    print(hit.id, hit.score, hit["title"])  # payload access via hit["key"]
+
+# 2. Facet / count / point accessors per statement index
+report = client.execute("FACET category FROM docs LIMIT 10")
+print(report.facet())        # [{value: ..., count: ...}, ...]
+report = client.execute("COUNT FROM docs WHERE category = 'tech'")
+print(report.count())
+report = client.execute("QUERY POINTS (1, 2, 3) FROM docs")
+print(report.points())
 ```
 
 ## Parse, isolate, and route
@@ -97,13 +174,19 @@ print(tokenize(query))
 |---|---|---|
 | `Client(url, api_key, use_grpc, embedder, route_affinity)` | client | Configure remote execution once |
 | `Client.execute` / `execute_async` | report dictionary | Execute source, statements, or an array; choose sync or async host flow |
-| `Client.explain` / `Client.compile` | plan or route dictionary | Inspect work before executing it |
+| `Client.execute_hits` / `execute_async_hits` | `list[ScoredPoint]` | Skip the report when you only need typed hits |
+| `report.hits(stmt)` / `points` / `facet` / `count` | typed accessors | Read results per statement index without digging into `results` |
+| `ScoredPoint` | typed hit | `id`, `score`, `payload`, `text`, `collection`, and `hit["key"]` payload access |
+| `Client.explain` / `Client.compile` | plan or route dictionary | Inspect work before executing it (`Client.compile` accepts `params`) |
 | `parse(source)` | `list[Stmt]` | You need to inspect or mutate a statement |
 | `parse_json(source)` | JSON string of the AST array | Forward a parse over HTTP/IPC without Python object overhead |
+| `Stmt.bind(params)` | bound `Stmt` | Substitute `:name` / `?` parameters into a prepared statement |
+| `Stmt.compile_route(params=...)` | route dictionary | Compile a prepared statement to its Qdrant route without re-parsing |
 | `Stmt.inject_filter`, `Stmt.shard_key` | mutated statement | Enforce a predicate and optionally choose routing |
 | `Stmt.to_dict` / `Stmt.to_json` | AST representation | Log or inspect the rewritten statement |
-| `is_valid`, `tokenize`, `explain` | boolean, tokens, plan | Lightweight strict parser tools |
-| `compile_query` | route dictionary | Obtain the Qdrant method, path, and payload |
+| `is_valid`, `tokenize`, `explain` | boolean, tokens, plan | Lightweight strict parser tools (`is_valid` runs parse + plan) |
+| `compile_query(source, params=...)` | route dictionary | Obtain the Qdrant method, path, and payload (optionally binding params) |
+| `bind(query, params, *, truncate_vectors=False)` | bound string or `Stmt` | Substitute `:name` / `?` parameters; `Stmt` + `truncate_vectors=True` returns a readable string |
 | `inject_filter` / `execute` | host-friendly convenience result | One-shot transform or execution |
 | `HttpEmbedder` | embedder object | Supply a remote embedding model |
 
