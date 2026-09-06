@@ -16,8 +16,8 @@ QUERY MMR TEXT 'test' DIVERSITY 0.5 CANDIDATES 0
 FROM docs USING semantic_v2 AS DENSE LIMIT 10;
 
 -- @case limit-zero
--- @error QQL-PARSE-NONNEGATIVE-INTEGER
-QUERY 'test' FROM docs LIMIT -1;
+-- @error QQL-PARSE-POSITIVE-INTEGER
+QUERY 'test' FROM docs LIMIT 0;
 
 -- @case offset-negative
 -- @error QQL-PARSE-NONNEGATIVE-INTEGER

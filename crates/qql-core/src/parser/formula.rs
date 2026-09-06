@@ -146,7 +146,14 @@ fn parse_formula_string(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, QqlError>
 fn parse_formula_param(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, QqlError> {
     p.advance()?; // consume ':'
     let name = p.parse_param_name()?;
-    Ok(FormulaExpr::Variable { name })
+    // Keep the ':' prefix: bare identifiers are DEFAULTS-bound keys, so the
+    // prefix is what distinguishes a parameter placeholder on the AST path.
+    // bind_formula strips it, and `?idx` placeholders already store their
+    // prefix the same way. Without it `TARGET = :now` bound a bare variable
+    // and shipped an unresolved reference to the server.
+    Ok(FormulaExpr::Variable {
+        name: alloc::format!(":{name}"),
+    })
 }
 
 fn parse_formula_positional_param(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, QqlError> {

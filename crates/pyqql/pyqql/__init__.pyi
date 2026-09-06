@@ -7,12 +7,15 @@ class QqlError(Exception):
     code: Optional[str]
     kind: Optional[str]
     span: Optional[Tuple[int, int]]
+    fields: Dict[str, str]
+    request_id: Optional[str]
     def __init__(
         self,
         message: str,
         code: Optional[str] = None,
         kind: Optional[str] = None,
         span: Optional[Tuple[int, int]] = None,
+        fields: Optional[Dict[str, str]] = None,
     ) -> None: ...
 
 class QqlSyntaxError(QqlError, SyntaxError): ...

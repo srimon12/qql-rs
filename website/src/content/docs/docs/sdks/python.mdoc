@@ -126,9 +126,13 @@ The subclasses also inherit the builtin category each one used to raise
 (`QqlSyntaxError` extends `SyntaxError`, `QqlValidationError` extends
 `ValueError`, `QqlExecutionError` / `QqlTransportError` /
 `QqlBackendError` extend `RuntimeError`), so existing `except` clauses
-keep working. Re-binding an already-bound `Stmt` with new params raises
-`QQL-BIND-ALREADY-BOUND` instead of silently ignoring them, and executing
-an empty script raises `QQL-VALIDATION-EMPTY-SCRIPT` (parity with `";;"`).
+keep working. Transport and backend errors additionally carry structured
+`.fields` (url, status, …) and a `.request_id` attribute matching the
+`x-request-id` header QQL sends on every request — correlate a failing
+response directly in Qdrant's logs. Re-binding an already-bound `Stmt`
+with new params raises `QQL-BIND-ALREADY-BOUND` instead of silently
+ignoring them, and executing an empty script raises
+`QQL-VALIDATION-EMPTY-SCRIPT` (parity with `";;"`).
 
 Prefer the **implicit** parameter spelling `QUERY :vec USING <model> FROM …`
 over the explicit `QUERY VECTOR :vec` form: both parse to the same

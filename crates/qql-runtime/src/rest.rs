@@ -148,6 +148,7 @@ impl RestQdrant {
                 None,
             )
             .with_url(url_buf.clone())
+            .with_field("request_id", request_id.clone())
         })?;
         let status = resp.status();
         let server_request_id = resp
@@ -173,7 +174,8 @@ impl RestQdrant {
                 None,
             )
             .with_status(status.as_u16())
-            .with_url(url_buf.clone()));
+            .with_url(url_buf.clone())
+            .with_field("request_id", server_request_id.clone()));
         }
         let value: Value = serde_json::from_str(&text).map_err(|error| {
             QqlError::backend(
@@ -440,6 +442,7 @@ impl RestQdrant {
                 None,
             )
             .with_url(url.clone())
+            .with_field("request_id", request_id.clone())
         })?;
         let status = resp.status();
         let server_request_id = resp
@@ -462,7 +465,8 @@ impl RestQdrant {
                 None,
             )
             .with_status(status.as_u16())
-            .with_url(url));
+            .with_url(url)
+            .with_field("request_id", server_request_id));
         }
         let value: Value = serde_json::from_str(&text).map_err(|e| {
             QqlError::backend(
@@ -472,6 +476,7 @@ impl RestQdrant {
                 ),
                 None,
             )
+            .with_field("request_id", server_request_id)
         })?;
         validate_success_envelope(&value, &route.path)?;
         Ok(value)

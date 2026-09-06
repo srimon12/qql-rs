@@ -35,6 +35,18 @@ function buildError(raw) {
       error.code = parsed.code;
       error.kind = parsed.kind;
       error.span = parsed.span ?? null;
+      // Structured fields (url, status, request_id, …) arrive as a
+      // Vec<{key, value}> from serde; normalize to a map + a `request_id`
+      // convenience attribute, mirroring the Python SDK's error surface.
+      error.fields = {};
+      if (Array.isArray(parsed.fields)) {
+        for (const f of parsed.fields) {
+          if (f && f.key !== undefined) error.fields[f.key] = f.value;
+        }
+      }
+      if (error.fields.request_id !== undefined) {
+        error.request_id = error.fields.request_id;
+      }
       return error;
     }
   } catch (_) {

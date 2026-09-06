@@ -461,6 +461,9 @@ impl Executor {
         let mut pending_key: Option<BatchKey> = None;
 
         for stmt in stmts {
+            // Fail closed before any network I/O: an unbound placeholder
+            // cannot produce a valid request (see `plan::ensure_no_unbound_params`).
+            qql_plan::ensure_no_unbound_params(&stmt)?;
             let statement_key = statement_batch_key(&stmt);
 
             // A statement outside the current batch family is an execution

@@ -65,6 +65,11 @@ fn raise_qql_error(error: QqlError, class_name: &str) -> PyErr {
     let kind_str = format!("{:?}", error.kind);
     let span = error.span.map(|s| (s.start as i64, s.end as i64));
     Python::attach(|py| {
+        let fields = PyDict::new(py);
+        for field in &error.fields {
+            let _ = fields.set_item(field.key.as_ref(), field.value.as_ref());
+        }
+        let fields_py = fields.unbind();
         let cls = ERROR_MODULE
             .get()
             .and_then(|module| py.import(module.as_str()).ok())
@@ -72,7 +77,7 @@ fn raise_qql_error(error: QqlError, class_name: &str) -> PyErr {
         if let Some(cls) = cls
             && let Ok(ty) = cls.cast_into::<pyo3::types::PyType>()
         {
-            return PyErr::from_type(ty, (message, code, kind_str, span));
+            return PyErr::from_type(ty, (message, code, kind_str, span, fields_py));
         }
         let base: PyErr = match class_name {
             "QqlSyntaxError" => PySyntaxError::new_err(message),
@@ -101,6 +106,16 @@ pub fn qql_py_value_error(error: QqlError) -> PyErr {
     raise_qql_error(error, "QqlValidationError")
 }
 
+/// The typed `QQL-CLIENT-CLOSED` error shared by both Python SDKs' client
+/// guards (message parity with the executor's own `ensure_open` gate).
+pub fn client_closed_error() -> PyErr {
+    qql_py_error(QqlError::execution(
+        "QQL-CLIENT-CLOSED",
+        "client is closed; create a new Client to run more statements",
+        None,
+    ))
+}
+
 fn attach_qql_error(py_error: PyErr, error: QqlError) -> PyErr {
     Python::attach(|py| {
         let value = py_error.value(py);
@@ -115,6 +130,17 @@ fn attach_qql_error(py_error: PyErr, error: QqlError) -> PyErr {
             py.None().into_bound(py)
         };
         let _ = value.setattr("span", span);
+        // Structured fields (url, status, collection, request_id, …) as a
+        // dict, with a `request_id` convenience attribute so programmatic
+        // correlation never requires message parsing.
+        let fields = PyDict::new(py);
+        for field in &error.fields {
+            let _ = fields.set_item(field.key.as_ref(), field.value.as_ref());
+        }
+        let _ = value.setattr("fields", fields);
+        if let Some(field) = error.fields.iter().find(|f| f.key == "request_id") {
+            let _ = value.setattr("request_id", field.value.as_ref());
+        }
     });
     py_error
 }

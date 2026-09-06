@@ -116,9 +116,12 @@ class TestEmptyScriptParity(unittest.TestCase):
 
 
 class TestLimitZero(unittest.TestCase):
-    def test_limit_zero_is_valid(self):
-        self.assertTrue(pyqql.is_valid("QUERY 'x' FROM docs LIMIT 0;"))
-        self.assertTrue(pyqql.is_valid("SCROLL FROM docs LIMIT 0;"))
+    def test_limit_zero_rejected_at_parse_time(self):
+        # Live-verified against Qdrant 1.19.1: /points/query answers 422
+        # "internal.limit: value 0 invalid, must be 1 or larger" — so QQL
+        # rejects LIMIT 0 at parse time instead of shipping a 422.
+        self.assertFalse(pyqql.is_valid("QUERY 'x' FROM docs LIMIT 0;"))
+        self.assertFalse(pyqql.is_valid("SCROLL FROM docs LIMIT 0;"))
 
     def test_limit_negative_rejected(self):
         self.assertFalse(pyqql.is_valid("QUERY 'x' FROM docs LIMIT -1;"))
@@ -139,3 +142,50 @@ class TestClosedClient(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestVerdictRoundTwo(unittest.TestCase):
+    """N1-N5 from the 1.19.1 verification report."""
+
+    def test_unbound_string_path_fails_closed(self):
+        # N2: execute(str) with no params used to ship the raw placeholder and
+        # get a 422 from the server; the plan gate now raises the binder's own
+        # missing-param error before any request leaves.
+        client = pyqql.Client("http://localhost:1")
+        with self.assertRaises(ValueError) as ctx:
+            client.execute("QUERY VECTOR :qvec FROM docs LIMIT 1")
+        self.assertIn("QQL-BIND-MISSING-PARAM", str(ctx.exception))
+
+    def test_formula_datetime_binds_on_the_prepared_path(self):
+        # N3: TARGET = :now with an ISO string used to lose the type through
+        # the AST (bare identifier == DEFAULTS key) and the server answered
+        # "Expected number value ..."; the prepared path now produces the
+        # inline datetime form.
+        stmt = pyqql.parse(
+            "QUERY FORMULA GAUSS_DECAY(DATETIME_KEY('judgment_date'), TARGET = :now) FROM docs"
+        )[0]
+        bound = stmt.bind({"now": "2024-01-01T00:00:00Z"})
+        self.assertIn("TARGET = datetime('2024-01-01T00:00:00Z')", str(bound))
+        route = bound.compile_route()
+        self.assertIn("2024-01-01T00:00:00Z", str(route["payload"]))
+
+    def test_transport_error_carries_request_id(self):
+        # N4: the request id is a structured attribute, not message-only.
+        client = pyqql.Client("http://localhost:1")
+        try:
+            client.execute("QUERY 'x' FROM docs LIMIT 1")
+        except pyqql.QqlTransportError as e:
+            self.assertIsInstance(e.request_id, str)
+            self.assertTrue(e.request_id.startswith("qql-"), e.request_id)
+            self.assertIn("request_id", e.fields)
+            self.assertIn("url", e.fields)
+        else:
+            self.fail("expected QqlTransportError")
+
+    def test_default_keys_stay_variables_when_binding(self):
+        # N3 sibling: bare identifiers are DEFAULTS keys, never params.
+        stmt = pyqql.parse(
+            "QUERY FORMULA GAUSS_DECAY(rank, TARGET = 100.0, SCALE = 10.0) DEFAULTS (rank = 0.0) FROM docs"
+        )[0]
+        bound = stmt.bind({"rank": 5})
+        self.assertIn("GAUSS_DECAY(rank", str(bound))

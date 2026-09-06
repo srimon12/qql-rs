@@ -267,18 +267,23 @@ QQL queries support parameterized templates with type-safe client-side binding:
 - **Named Placeholders**: `:name` (e.g. `:category`, `:lim`)
 - **Positional Placeholders**: `?` (mapped sequentially to argument lists)
 
-{% qqlExample title="A parameterized template" %}
+A template like `QUERY TEXT :q FROM docs WHERE category = :cat LIMIT :lim`
+is inert until values are bound — unbound placeholders fail at the plan
+gate (`QQL-BIND-MISSING-PARAM`) before any request leaves the client, on
+every binding path. Here is the same statement with values bound:
+
+{% qqlExample title="A bound parameterized query" %}
 ```sql
-QUERY TEXT :q
+QUERY TEXT 'cardiology'
 FROM docs
-WHERE category = :cat
-LIMIT :lim;
+WHERE category = 'medical'
+LIMIT 10;
 ```
 {% /qqlExample %}
 
-The template is inert until values are bound. Bind it client-side with the
-Python `bind` / `Stmt.bind`, Node `bind` / `Stmt.bind`, or WASM `bind`
-helpers, or pass `params` straight to `Client.execute` — see the
+Bind client-side with the Python `bind` / `Stmt.bind`, Node `bind` /
+`Stmt.bind`, or WASM `bind` helpers, or pass `params` straight to
+`Client.execute` — see the
 [Python](/docs/sdks/python/#parameter-binding--prepared-queries),
 [Node.js](/docs/sdks/node/#parameter-binding--prepared-queries), and
 [WebAssembly](/docs/sdks/wasm/) SDK pages. Rust uses the typed

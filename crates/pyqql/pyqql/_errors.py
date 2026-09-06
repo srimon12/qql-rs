@@ -14,7 +14,7 @@ A CI check diffs the two copies of this file, so edit both or neither
 (they must stay in lockstep with ``_dx_report.py``'s sharing model).
 """
 
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 
 class QqlError(Exception):
@@ -34,12 +34,17 @@ class QqlError(Exception):
         code: Optional[str] = None,
         kind: Optional[str] = None,
         span: Optional[Tuple[int, int]] = None,
+        fields: Optional[Dict[str, str]] = None,
     ) -> None:
         super().__init__(message)
         self.message = message
         self.code = code
         self.kind = kind
         self.span = span
+        self.fields: Dict[str, str] = dict(fields) if fields else {}
+        # Convenience attribute: programmatic request correlation never
+        # requires message parsing.
+        self.request_id = self.fields.get("request_id")
 
 
 class QqlSyntaxError(QqlError, SyntaxError):

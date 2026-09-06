@@ -133,7 +133,7 @@ impl<'a> AstLowerer<'a> {
             let field = self.parse_field_path()?;
             let size = if self.peek_word("SIZE")? {
                 self.advance()?;
-                Some(self.parse_non_negative_u64("group size")?)
+                Some(self.parse_positive_u64("group size")?)
             } else {
                 None
             };
@@ -183,7 +183,7 @@ impl<'a> AstLowerer<'a> {
                 let idx = self.next_positional_param();
                 (None, Some(alloc::format!("?{}", idx)))
             } else {
-                (Some(self.parse_non_negative_u64("LIMIT")?), None)
+                (Some(self.parse_positive_u64("LIMIT")?), None)
             }
         } else {
             (None, None)

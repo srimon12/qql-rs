@@ -61,7 +61,7 @@ query_tail = {
     ~ group_clause?
     ~ (^"WITH" ~ ^"PAYLOAD" ~ payload_selector)?
     ~ (^"WITH" ~ ^"VECTOR" ~ vector_selector?)?
-    ~ (^"LIMIT" ~ (param | non_negative_integer))?
+    ~ (^"LIMIT" ~ (param | positive_integer))?
     ~ (^"OFFSET" ~ (param | non_negative_integer))?
 }
 
@@ -81,7 +81,7 @@ vector_kind = { ^"DENSE" | ^"SPARSE" | ^"MULTIVECTOR" | ^"MULTI" }
 
 group_clause = {
     ^"GROUP" ~ ^"BY" ~ field
-    ~ (^"SIZE" ~ non_negative_integer)?
+    ~ (^"SIZE" ~ positive_integer)?
     ~ (^"LOOKUP" ~ ^"FROM" ~ collection)?
 }
 
@@ -308,7 +308,7 @@ scroll = {
     ~ (^"AFTER" ~ point_id)?
     ~ (^"SHARD" ~ (param | string))?
     ~ (^"WITH" ~ ^"VECTOR" ~ vector_selector?)?
-    ~ ^"LIMIT" ~ (param | non_negative_integer)
+    ~ ^"LIMIT" ~ (param | positive_integer)
 }
 
 count = {
@@ -334,7 +334,7 @@ facet = {
 }
 facet_clause = _{
       ^"WHERE" ~ filter
-    | ^"LIMIT" ~ (param | non_negative_integer)
+    | ^"LIMIT" ~ (param | positive_integer)
     | ^"EXACT" ~ boolean?
     | ^"SHARD" ~ (param | string)
     | ^"WITH" ~ facet_config

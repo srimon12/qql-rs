@@ -421,8 +421,23 @@ pub fn statement_batch_key(stmt: &Stmt) -> Option<BatchKey> {
     }
 }
 
+/// An unbound parameter placeholder (`:name` / `?idx`) that reaches planning
+/// would ship a broken request — the string path with no `params` used to
+/// send the raw placeholder to Qdrant and get a 422 back. Probe with the
+/// binder's own traversal (no-op lookup): any surviving placeholder raises
+/// `QQL-BIND-MISSING-PARAM`, the same error `Stmt.bind` raises earlier on
+/// the prepared path.
+///
+/// Public so the executor can probe *before* schema resolution (network);
+/// [`plan`] probes again as the compile-path gate.
+pub fn ensure_no_unbound_params(statement: &Stmt) -> Result<(), QqlError> {
+    let mut probe = statement.clone();
+    qql_core::params::bind_stmt(&mut probe, |_| None, &[])
+}
+
 /// Fallible planner — the single source of truth for statement → operation.
 pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
+    ensure_no_unbound_params(statement)?;
     match statement {
         Stmt::Query(query) => {
             validate_query_stmt(query)?;
@@ -1417,6 +1432,23 @@ mod tests {
     use super::*;
     use qql_core::ast::{PageSpec, QueryInput, QueryOutput, QueryStmt};
     use qql_core::parser::Parser;
+
+    #[test]
+    fn unbound_params_fail_at_plan_time_with_the_binder_code() {
+        // N2: the string path with no params used to ship the raw placeholder
+        // to Qdrant and get a 422 back. Planning is the execution gate, so an
+        // unbound template must raise the binder's own missing-param error.
+        for source in [
+            "QUERY VECTOR :qvec FROM docs USING dense LIMIT 1;",
+            "QUERY :v FROM docs USING dense LIMIT :lim;",
+            "QUERY TEXT :q FROM docs LIMIT 5;",
+        ] {
+            let stmt = Parser::parse(source).expect("template must parse");
+            let err = plan(&stmt).expect_err("unbound template must not plan");
+            assert_eq!(err.code, "QQL-BIND-MISSING-PARAM", "{err:?}");
+            assert!(err.message.contains("missing value"), "{err:?}");
+        }
+    }
 
     /// Build a minimal recommend statement with inline example vectors.
     fn recommend_stmt(

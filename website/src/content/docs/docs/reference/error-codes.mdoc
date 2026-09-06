@@ -57,8 +57,8 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PARSE-VECTOR-SIZE` | Vector dimension exceeds the 65536 maximum |
 | `QQL-PARSE-DUPLICATE-CTE` | Duplicate CTE name in one script |
 | `QQL-PARSE-DUPLICATE-KEY` | Duplicate object or config key (ASCII case-insensitive) |
-| `QQL-PARSE-POSITIVE-INTEGER` | Value must be a positive integer (for example MMR `CANDIDATES`, `hnsw_ef`, vector size) |
-| `QQL-PARSE-NONNEGATIVE-INTEGER` | Value must be non-negative (for example `LIMIT`, `OFFSET`, `SIZE`, `VALUES_COUNT`) — `LIMIT 0` is valid (Qdrant accepts it) |
+| `QQL-PARSE-POSITIVE-INTEGER` | Value must be a positive integer (for example `LIMIT`, `SIZE`, MMR `CANDIDATES`, `hnsw_ef`) — Qdrant's query API requires `limit >= 1`, so `LIMIT 0` rejects at parse time |
+| `QQL-PARSE-NONNEGATIVE-INTEGER` | Value must be non-negative (for example `OFFSET`, `VALUES_COUNT`) |
 | `QQL-PARSE-SYNTAX` | Production-specific syntax or range failure |
 | `QQL-PARSE-COMPARISON` | Expected a comparison operator |
 | `QQL-PARSE-COUNT-CONFIG` | Unknown `COUNT WITH (…)` parameter, or `exact` is not true/false |

@@ -163,3 +163,22 @@ class TestDxImprovements(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCloseContract(unittest.TestCase):
+    """N5: the edge client's close gate is typed, not a bare RuntimeError."""
+
+    def test_close_raises_typed_client_closed(self):
+        import shutil
+        import tempfile
+
+        tmpdir = tempfile.mkdtemp(prefix="pyqql_edge_close_")
+        try:
+            client = pyqql_edge.local_executor(tmpdir, on_disk_payload=False)
+            client.close()
+            self.assertTrue(client.is_closed)
+            with self.assertRaises(pyqql_edge.QqlExecutionError) as ctx:
+                client.execute("QUERY 'x' FROM docs")
+            self.assertEqual(ctx.exception.code, "QQL-CLIENT-CLOSED")
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)

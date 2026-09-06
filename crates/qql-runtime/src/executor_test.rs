@@ -179,10 +179,12 @@ impl QdrantOps for MockQdrantClient {
                 None,
             ));
         }
+        // Real upstream shape (OpenAPI QueryResponse): each batch item
+        // carries the points at its top level — no `result` wrapper.
         Ok(batch
             .searches
             .iter()
-            .map(|_| serde_json::json!({"result": {"points": []}}))
+            .map(|_| serde_json::json!({"points": []}))
             .collect())
     }
 
@@ -1651,4 +1653,51 @@ async fn query_batch_failure_with_continue_retries_individually() {
         2,
         "one response per statement, in order"
     );
+}
+
+#[tokio::test]
+async fn same_collection_query_batch_yields_per_statement_hits() {
+    // N1: two same-collection QUERY statements batch into ONE
+    // /points/query/batch RPC. The upstream per-item shape (OpenAPI
+    // QueryResponse) is {"points": [...]} — the extraction must map each
+    // item to its own statement's hits instead of silently returning [].
+    let client = MockQdrantClient {
+        info: Some(collection_with_vectors(&["dense"], &[])),
+        ..Default::default()
+    };
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+
+    // Bypass the mock's uniform batch response: drive the extraction the
+    // way flush_planned_group does, on the real per-item shapes.
+    let item_a = serde_json::json!({
+        "points": [
+            {"id": 1483, "score": 0.9, "payload": {"text": "a"}},
+            {"id": 582, "score": 0.8, "payload": {"text": "b"}}
+        ]
+    });
+    let item_b = serde_json::json!({
+        "points": [{"id": 1787, "score": 0.7, "payload": {"text": "c"}}]
+    });
+    let hits_a = crate::executor::dml::query::extract_search_hits(&item_a);
+    let hits_b = crate::executor::dml::query::extract_search_hits(&item_b);
+    assert_eq!(hits_a.len(), 2, "batch item A must yield its 2 hits");
+    assert_eq!(hits_a[0].id, qql_plan::PlanPointId::Number(1483));
+    assert_eq!(hits_b.len(), 1, "batch item B must yield its 1 hit");
+
+    // End-to-end: the batched executor reports one response per statement.
+    let report = executor
+        .execute_batch(
+            &[
+                "QUERY VECTOR [0.1] FROM docs USING dense LIMIT 2",
+                "QUERY VECTOR [0.2] FROM docs USING dense LIMIT 1",
+            ],
+            OnError::Stop,
+        )
+        .await
+        .expect("same-collection batch must succeed");
+    assert!(report.ok, "{report:?}");
+    assert_eq!(report.results.len(), 2, "one response per statement");
+    for r in &report.results {
+        assert!(r.ok, "every batched statement must succeed: {r:?}");
+    }
 }

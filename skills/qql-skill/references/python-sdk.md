@@ -186,7 +186,11 @@ spelling. `QUERY VECTOR :vec` now parses to the same statement (since
 0.3.2), but implicit+USING is the canonical documented form. Matrix params
 (list of number lists) bind as ColBERT multi-vectors on the `Stmt` path,
 and array-likes with `tolist()` (numpy arrays) bind directly.
-`LIMIT 0` is valid (Qdrant accepts it).
+`LIMIT 0` is rejected at parse time: Qdrant's query API requires
+`limit >= 1` (verified live — the server answers 422), so the failure
+surfaces at the parse gate instead of as a runtime 422. Unbound
+placeholders fail the same way on every path — `execute(str)` without
+params raises `QQL-BIND-MISSING-PARAM` before any request leaves.
 
 ```python
 from pyqql import parse, Client

@@ -286,6 +286,45 @@ mod tests {
     }
 
     #[test]
+    fn formula_param_binds_datetime_on_the_ast_path() {
+        // N3: `TARGET = :now` used to store the bare identifier (indistinguishable
+        // from a DEFAULTS key), so the prepared path shipped an unresolved
+        // variable and the server answered "Expected number value for
+        // judgment_date". The parser now preserves the ':' prefix, so binding
+        // an ISO string produces the same Datetime node the inline form has.
+        let mut stmt = Parser::parse(
+            "QUERY FORMULA GAUSS_DECAY(DATETIME_KEY('judgment_date'), TARGET = :now) FROM docs",
+        )
+        .unwrap();
+        bind_stmt_with_params(&mut stmt, &json!({"now": "2024-01-01T00:00:00Z"})).unwrap();
+        let rendered = crate::fmt::format_stmt(&stmt);
+        assert!(
+            rendered.contains("TARGET = datetime('2024-01-01T00:00:00Z')"),
+            "bound target must render as an inline datetime, got: {rendered}"
+        );
+        assert!(
+            !rendered.contains(":now"),
+            "no unresolved variable may remain: {rendered}"
+        );
+    }
+
+    #[test]
+    fn formula_defaults_keys_stay_variables() {
+        // Bare identifiers (no colon) are DEFAULTS-bound keys, not params —
+        // they must survive binding untouched.
+        let mut stmt = Parser::parse(
+            "QUERY FORMULA GAUSS_DECAY(rank, TARGET = 100.0, SCALE = 10.0) DEFAULTS (rank = 0.0) FROM docs",
+        )
+        .unwrap();
+        bind_stmt_with_params(&mut stmt, &json!({"rank": 5})).unwrap();
+        let rendered = crate::fmt::format_stmt(&stmt);
+        assert!(
+            rendered.contains("GAUSS_DECAY(rank"),
+            "DEFAULTS key must stay: {rendered}"
+        );
+    }
+
+    #[test]
     fn bind_batch_end_to_end() {
         let mut stmts = Parser::parse_all(
             "QUERY [0.1] FROM docs WHERE x = :x LIMIT :lim; QUERY [0.2] FROM docs WHERE y = :y;",
