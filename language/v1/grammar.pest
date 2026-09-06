@@ -55,14 +55,14 @@ query_tail = {
     (^"USING" ~ (hybrid_using | vector_target))?
     ~ (^"PREFETCH" ~ "(" ~ prefetch ~ ("," ~ prefetch)* ~ ")")?
     ~ (^"WHERE" ~ filter)?
-    ~ (^"SHARD" ~ string)?
+    ~ (^"SHARD" ~ (param | string))?
     ~ (^"PARAMS" ~ search_params)?
-    ~ (^"SCORE" ~ ^"THRESHOLD" ~ number)?
+    ~ (^"SCORE" ~ ^"THRESHOLD" ~ (param | number))?
     ~ group_clause?
     ~ (^"WITH" ~ ^"PAYLOAD" ~ payload_selector)?
     ~ (^"WITH" ~ ^"VECTOR" ~ vector_selector?)?
-    ~ (^"LIMIT" ~ positive_integer)?
-    ~ (^"OFFSET" ~ non_negative_integer)?
+    ~ (^"LIMIT" ~ (param | positive_integer))?
+    ~ (^"OFFSET" ~ (param | non_negative_integer))?
 }
 
 // Tail-form hybrid: QUERY TEXT '…' FROM c USING HYBRID [DENSE n] [SPARSE n] [FUSION …]
@@ -107,12 +107,13 @@ points = { ^"POINTS" ~ point_id_list }
 nearest = { ^"NEAREST"? ~ query_input }
 
 query_input = _{
-      ^"TEXT" ~ string ~ (^"MODEL" ~ string)?
+      ^"TEXT" ~ (param | string) ~ (^"MODEL" ~ string)?
     // IMAGE: local path or URL → dense embed via host image/CLIP vision model.
     // Same dense role as TEXT; modality is image, not multivector.
-    | ^"IMAGE" ~ string ~ (^"MODEL" ~ string)?
-    | ^"VECTOR" ~ vector_value
+    | ^"IMAGE" ~ (param | string) ~ (^"MODEL" ~ string)?
+    | ^"VECTOR" ~ (param | vector_value)
     | ^"POINT" ~ point_id
+    | param
     | string
 }
 
@@ -182,7 +183,7 @@ rerank_input = _{
 prefetch = {
     (cte_query | cte_name)
     ~ (^"WHERE" ~ filter)?
-    ~ (^"SCORE" ~ ^"THRESHOLD" ~ number)?
+    ~ (^"SCORE" ~ ^"THRESHOLD" ~ (param | number))?
     ~ (^"LOOKUP" ~ ^"FROM" ~ collection ~ (^"VECTOR" ~ vector_name)?)?
 }
 
@@ -199,7 +200,8 @@ formula_product = {
 }
 formula_prefix = { "-"? ~ formula_primary }
 formula_primary = _{
-      number
+      param
+    | number
     | "(" ~ formula_expr ~ ")"
     | unary_function
     | nary_function
@@ -304,15 +306,15 @@ scroll = {
     ^"SCROLL" ~ ^"FROM" ~ collection
     ~ (^"WHERE" ~ filter)?
     ~ (^"AFTER" ~ point_id)?
-    ~ (^"SHARD" ~ string)?
+    ~ (^"SHARD" ~ (param | string))?
     ~ (^"WITH" ~ ^"VECTOR" ~ vector_selector?)?
-    ~ ^"LIMIT" ~ positive_integer
+    ~ ^"LIMIT" ~ (param | positive_integer)
 }
 
 count = {
     ^"COUNT" ~ ^"FROM" ~ collection
     ~ (^"WHERE" ~ filter)?
-    ~ (^"SHARD" ~ string)?
+    ~ (^"SHARD" ~ (param | string))?
     ~ (^"WITH" ~ count_config)?
 }
 
@@ -332,9 +334,9 @@ facet = {
 }
 facet_clause = _{
       ^"WHERE" ~ filter
-    | ^"LIMIT" ~ integer
+    | ^"LIMIT" ~ (param | integer)
     | ^"EXACT" ~ boolean?
-    | ^"SHARD" ~ string
+    | ^"SHARD" ~ (param | string)
     | ^"WITH" ~ facet_config
 }
 facet_key = { name }
@@ -347,7 +349,7 @@ upsert = {
     ~ point_object ~ ("," ~ point_object)*
     ~ embedding_options?
     ~ embed_clause?
-    ~ (^"SHARD" ~ string)?
+    ~ (^"SHARD" ~ (param | string))?
 }
 
 embedding_options = {
@@ -392,35 +394,35 @@ delete_vectors = {
     ~ vector_name ~ ("," ~ vector_name)*
     ~ ^"FROM" ~ collection
     ~ ^"WHERE" ~ filter
-    ~ (^"SHARD" ~ string)?
+    ~ (^"SHARD" ~ (param | string))?
 }
 delete = {
     ^"DELETE" ~ ^"FROM" ~ collection
     ~ ^"WHERE" ~ filter
-    ~ (^"SHARD" ~ string)?
+    ~ (^"SHARD" ~ (param | string))?
 }
 clear_payload = {
     ^"CLEAR" ~ ^"PAYLOAD" ~ ^"FROM" ~ collection
     ~ ^"WHERE" ~ filter
-    ~ (^"SHARD" ~ string)?
+    ~ (^"SHARD" ~ (param | string))?
 }
 delete_payload = {
     ^"DELETE" ~ ^"PAYLOAD"
     ~ field ~ ("," ~ field)*
     ~ ^"FROM" ~ collection
     ~ ^"WHERE" ~ filter
-    ~ (^"SHARD" ~ string)?
+    ~ (^"SHARD" ~ (param | string))?
 }
 
 update = {
     ^"UPDATE" ~ collection ~ ^"SET"
     ~ (
-        ^"VECTOR" ~ vector_name? ~ "=" ~ vector_value
+        ^"VECTOR" ~ vector_name? ~ "=" ~ (param | vector_value)
         ~ ^"WHERE" ~ ^"id" ~ "=" ~ point_id
-        ~ (^"SHARD" ~ string)?
-        | ^"PAYLOAD" ~ "=" ~ object
+        ~ (^"SHARD" ~ (param | string))?
+        | ^"PAYLOAD" ~ "=" ~ (param | object)
         ~ ^"WHERE" ~ filter
-        ~ (^"SHARD" ~ string)?
+        ~ (^"SHARD" ~ (param | string))?
     )
 }
 
@@ -599,8 +601,10 @@ sparse_vector = {
     ~ "}"
 }
 
+param = { ":" ~ identifier | "?" }
+
 value = _{ scalar | object | list }
-scalar = _{ string | float | integer | boolean | null | identifier }
+scalar = _{ param | string | float | integer | boolean | null | identifier }
 object = { "{" ~ (object_entry ~ ("," ~ object_entry)*)? ~ "}" }
 object_entry = { object_key ~ ":" ~ value }
 object_key = { name }
@@ -641,7 +645,7 @@ collection = { name }
 vector_name = { name }
 cte_name = { name }
 field = { identifier | string }
-point_id = _{ unsigned_integer | string }
+point_id = _{ param | unsigned_integer | string }
 point_id_list = { "(" ~ point_id ~ ("," ~ point_id)* ~ ")" }
 
 identifier = @{

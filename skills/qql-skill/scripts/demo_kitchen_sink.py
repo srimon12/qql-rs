@@ -96,7 +96,7 @@ USING HYBRID"""))
 
     # --- Parameterized RRF ---
     stmts.append(("search-hybrid-rrf-params",
-        f"QUERY HYBRID TEXT 'emergency critical care' DENSE dense SPARSE sparse FUSION RRF FROM {COLLECTION} WITH (rrf_k = 30, rrf_weights = [0.7, 0.3]) LIMIT 3"))
+        f"QUERY HYBRID TEXT 'emergency critical care' DENSE dense SPARSE sparse FUSION RRF FROM {COLLECTION} PARAMS (rrf_k = 30, rrf_weights = [0.7, 0.3]) LIMIT 3"))
 
     # --- Sparse search ---
     stmts.append(("search-sparse",

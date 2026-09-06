@@ -191,6 +191,16 @@ impl<'a> AstLowerer<'a> {
                     )
                 })
             }
+            TokenKind::Colon => {
+                self.advance()?;
+                let name = self.parse_param_name()?;
+                Ok(PointId::Param(name))
+            }
+            TokenKind::Question => {
+                self.advance()?;
+                let idx = self.next_positional_param();
+                Ok(PointId::PositionalParam(idx))
+            }
             _ => Err(QqlError::parse(
                 "QQL-PARSE-POINT-ID",
                 alloc::format!(
@@ -458,6 +468,8 @@ pub fn point_id_from_value(value: Value, span: Span) -> Result<PointId, QqlError
     match value {
         Value::Int(value) if value >= 0 => Ok(PointId::Number(value as u64)),
         Value::Str(value) => Ok(PointId::String(value)),
+        Value::Param(name) => Ok(PointId::Param(name)),
+        Value::PositionalParam(idx) => Ok(PointId::PositionalParam(idx)),
         _ => Err(QqlError::validation(
             "QQL-VALIDATION-POINT-ID",
             "point IDs must be unsigned integers or strings",

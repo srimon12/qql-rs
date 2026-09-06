@@ -141,7 +141,8 @@ impl QdrantOps for MockQdrantClient {
         }
         // Return per-collection mock points when configured.
         if let qql_plan::PlannedOperation::Query { collection, .. }
-        | qql_plan::PlannedOperation::QueryGroups { collection, .. } = op
+        | qql_plan::PlannedOperation::QueryGroups { collection, .. }
+        | qql_plan::PlannedOperation::Facet { collection, .. } = op
         {
             if let Some(points) = self.point_map.lock().unwrap().get(collection) {
                 return Ok(points.clone());
@@ -1440,4 +1441,70 @@ async fn cross_rerank_preserves_same_id_different_collections() {
             .expect("hit should have a numeric score");
         assert!(score > 0.0, "score should be positive, got {score}");
     }
+}
+
+#[tokio::test]
+async fn numeric_and_string_ids_preserve_json_types() {
+    let mut client = MockQdrantClient::default();
+    client.exists = true;
+    client.info = Some(collection_with_vectors(&["dense"], &[]));
+    client.point_map.lock().unwrap().insert(
+        "test_coll".to_string(),
+        serde_json::json!({"result": {"points": [
+            {"id": 42, "score": 0.9, "payload": {"title": "numeric id"}},
+            {"id": "b3e0c0ea-52aa-4ebc-bd89-e137b0196ce2", "score": 0.8, "payload": {"title": "uuid id"}}
+        ]}}),
+    );
+
+    let executor = Executor::new(Box::new(client), Some(test_local_config()));
+    let report = executor
+        .execute("QUERY [0.1, 0.2] FROM test_coll LIMIT 2", OnError::Stop)
+        .await
+        .expect("query should succeed");
+
+    assert!(report.ok);
+    let hits = report.results[0].data.as_ref().unwrap().as_array().unwrap();
+    assert_eq!(hits[0]["id"].as_u64(), Some(42));
+    assert_eq!(
+        hits[1]["id"].as_str(),
+        Some("b3e0c0ea-52aa-4ebc-bd89-e137b0196ce2")
+    );
+}
+
+#[tokio::test]
+async fn facet_response_normalizes_hits_in_data() {
+    let mut client = MockQdrantClient::default();
+    client.exists = true;
+    client.info = Some(collection_with_vectors(&["dense"], &[]));
+    client.point_map.lock().unwrap().insert(
+        "test_coll".to_string(),
+        serde_json::json!({
+            "result": {
+                "hits": [
+                    {"value": "electronics", "count": 12},
+                    {"value": "clothing", "count": 5}
+                ]
+            },
+            "status": "ok",
+            "time": 0.002
+        }),
+    );
+
+    let executor = Executor::new(Box::new(client), Some(test_local_config()));
+    let report = executor
+        .execute("FACET category FROM test_coll LIMIT 10", OnError::Stop)
+        .await
+        .expect("facet should succeed");
+
+    assert!(report.ok);
+    let data = report.results[0]
+        .data
+        .as_ref()
+        .expect("data should be present");
+    let hits = data
+        .as_array()
+        .expect("facet data must be a normalized array of hits");
+    assert_eq!(hits.len(), 2);
+    assert_eq!(hits[0]["value"], "electronics");
+    assert_eq!(hits[0]["count"], 12);
 }

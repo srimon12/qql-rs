@@ -61,7 +61,7 @@ test('exports: executeStmt', () => assert.strictEqual(typeof nqql.executeStmt, '
 test('exports: bind', () => assert.strictEqual(typeof nqql.bind, 'function'));
 test('exports: version', () => assert.strictEqual(typeof nqql.version, 'string'));
 
-const knownKeys = ['Client','Stmt','bind','compileQuery','execute','executeStmt',
+const knownKeys = ['Client','ExecutionReport','ScoredPoint','Stmt','bind','compileQuery','execute','executeHits','executeStmt',
   'explain','explainStmt','httpExecutor','injectFilter','isValid','listEmbeddingModels',
   'localExecutor','parse','parseJson','tokenize', 'version', '__version__'];
 const actualKeys = Object.keys(nqql).sort();

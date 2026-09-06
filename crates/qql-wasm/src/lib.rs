@@ -19,6 +19,7 @@ const EXECUTION_TYPES: &str = r#"
 export interface ExecuteOptions {
   onError?: "stop" | "continue";
   params?: Record<string, unknown> | unknown[];
+  truncateVectors?: boolean;
 }
 
 export interface ExecResponse {
@@ -186,16 +187,85 @@ fn options_params(options: Option<&JsValue>) -> Result<Option<serde_json::Value>
     Ok(Some(parsed))
 }
 
-fn bind_json_params(query: &str, params: &serde_json::Value) -> Result<String, JsValue> {
+#[cfg(all(feature = "client", target_arch = "wasm32"))]
+fn extract_ast_stmt(val: &JsValue) -> Option<ast::Stmt> {
+    if let Ok(to_obj_val) = js_sys::Reflect::get(val, &JsValue::from_str("toObject")) {
+        if let Ok(to_obj_fn) = to_obj_val.dyn_into::<js_sys::Function>() {
+            if let Ok(obj) = to_obj_fn.call0(val) {
+                if let Ok(s) = serde_wasm_bindgen::from_value::<ast::Stmt>(obj) {
+                    return Some(s);
+                }
+            }
+        }
+    }
+    serde_wasm_bindgen::from_value::<ast::Stmt>(val.clone()).ok()
+}
+
+fn flatten_json_object(
+    obj: &serde_json::Map<String, serde_json::Value>,
+    prefix: &str,
+    out: &mut std::collections::HashMap<String, ast::Value>,
+) -> Result<(), JsValue> {
+    for (k, v) in obj {
+        let full_key = if prefix.is_empty() {
+            k.clone()
+        } else {
+            format!("{prefix}.{k}")
+        };
+        if let serde_json::Value::Object(nested) = v {
+            flatten_json_object(nested, &full_key, out)?;
+        }
+        let val =
+            ast::Value::from_json(v.clone()).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        out.insert(full_key, val);
+    }
+    Ok(())
+}
+
+fn bind_json_params(
+    query: &str,
+    params: &serde_json::Value,
+    truncate_vectors: bool,
+) -> Result<String, JsValue> {
     match params {
         serde_json::Value::Object(obj) => {
             let mut map = std::collections::HashMap::new();
-            for (k, v) in obj {
-                let val = ast::Value::from_json(v.clone())
-                    .map_err(|e| JsValue::from_str(&e.to_string()))?;
-                map.insert(k.clone(), val);
+            flatten_json_object(obj, "", &mut map)?;
+            if truncate_vectors {
+                qql_core::params::bind_named_readable(query, |k| map.get(k).cloned(), 2)
+                    .map_err(|e| JsValue::from_str(&e.to_string()))
+            } else {
+                qql_core::params::bind_named(query, |k| map.get(k).cloned())
+                    .map_err(|e| JsValue::from_str(&e.to_string()))
             }
-            qql_core::params::bind_named(query, |k| map.get(k).cloned())
+        }
+        serde_json::Value::Array(arr) => {
+            let items: Vec<ast::Value> = arr
+                .iter()
+                .cloned()
+                .map(ast::Value::from_json)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            if truncate_vectors {
+                qql_core::params::bind_positional_readable(query, &items, 2)
+                    .map_err(|e| JsValue::from_str(&e.to_string()))
+            } else {
+                qql_core::params::bind_positional(query, &items)
+                    .map_err(|e| JsValue::from_str(&e.to_string()))
+            }
+        }
+        _ => Err(JsValue::from_str(
+            "params must be an object for :name or an array for ?",
+        )),
+    }
+}
+
+fn bind_stmt_json(stmt: &mut ast::Stmt, params: &serde_json::Value) -> Result<(), JsValue> {
+    match params {
+        serde_json::Value::Object(obj) => {
+            let mut map = std::collections::HashMap::new();
+            flatten_json_object(obj, "", &mut map)?;
+            qql_core::params::bind_stmt(stmt, |k| map.get(k).cloned(), &[])
                 .map_err(|e| JsValue::from_str(&e.to_string()))
         }
         serde_json::Value::Array(arr) => {
@@ -205,19 +275,17 @@ fn bind_json_params(query: &str, params: &serde_json::Value) -> Result<String, J
                 .map(ast::Value::from_json)
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| JsValue::from_str(&e.to_string()))?;
-            qql_core::params::bind_positional(query, &items)
+            qql_core::params::bind_stmt(stmt, |_| None, &items)
                 .map_err(|e| JsValue::from_str(&e.to_string()))
         }
-        _ => Err(JsValue::from_str(
-            "params must be an object for :name or an array for ?",
-        )),
+        _ => Ok(()),
     }
 }
 
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
 fn maybe_bind(query: &str, params: Option<&serde_json::Value>) -> Result<String, JsValue> {
     match params {
-        Some(params) => bind_json_params(query, params),
+        Some(params) => bind_json_params(query, params, false),
         None => Ok(query.to_string()),
     }
 }
@@ -336,11 +404,41 @@ impl Stmt {
         to_js_value(&self.inner)
     }
 
+    /// Bind parameters into this statement and return a new bound Stmt.
+    #[wasm_bindgen(js_name = bind)]
+    pub fn bind(&self, params: Option<JsValue>) -> Result<Stmt, JsValue> {
+        let mut stmt = self.inner.clone();
+        if let Some(p) = params {
+            if !p.is_undefined() && !p.is_null() {
+                let parsed: serde_json::Value = serde_wasm_bindgen::from_value(p)
+                    .map_err(|e| JsValue::from_str(&format!("invalid params: {e}")))?;
+                bind_stmt_json(&mut stmt, &parsed)?;
+            }
+        }
+        Ok(Stmt { inner: stmt })
+    }
+
+    /// Format statement as readable QQL string.
+    #[allow(clippy::inherent_to_string)]
+    #[wasm_bindgen(js_name = toString)]
+    pub fn to_string(&self) -> String {
+        qql_core::fmt::format_stmt_readable(&self.inner)
+    }
+
     /// Compile this Stmt AST directly into a Qdrant REST route object.
+    /// Optionally accepts `params` to bind before compiling.
     #[wasm_bindgen(js_name = compileRoute, unchecked_return_type = "CompiledRoute")]
-    pub fn compile_route(&self) -> Result<JsValue, JsValue> {
-        let compiled = routing::compile_statement(&self.inner)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    pub fn compile_route(&self, params: Option<JsValue>) -> Result<JsValue, JsValue> {
+        let mut stmt = self.inner.clone();
+        if let Some(p) = params {
+            if !p.is_undefined() && !p.is_null() {
+                let parsed: serde_json::Value = serde_wasm_bindgen::from_value(p)
+                    .map_err(|e| JsValue::from_str(&format!("invalid params: {e}")))?;
+                bind_stmt_json(&mut stmt, &parsed)?;
+            }
+        }
+        let compiled =
+            routing::compile_statement(&stmt).map_err(|e| JsValue::from_str(&e.to_string()))?;
         let output = compiled_route_json(&compiled);
         to_js_value(&output)
     }
@@ -558,10 +656,17 @@ pub fn format_query(input: &str) -> Result<String, JsValue> {
 pub fn bind(
     query: &str,
     #[wasm_bindgen(unchecked_param_type = "Record<string, unknown> | unknown[]")] params: JsValue,
+    #[wasm_bindgen(unchecked_optional_param_type = "{ truncateVectors?: boolean }")]
+    options: Option<JsValue>,
 ) -> Result<String, JsValue> {
     let parsed: serde_json::Value = serde_wasm_bindgen::from_value(params)
         .map_err(|e| JsValue::from_str(&format!("invalid bind params: {e}")))?;
-    bind_json_params(query, &parsed)
+    let truncate = options
+        .as_ref()
+        .and_then(|o| js_sys::Reflect::get(o, &JsValue::from_str("truncateVectors")).ok())
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    bind_json_params(query, &parsed, truncate)
 }
 
 // ── Client: browser fetch-based execute with embedding ────────────
@@ -872,13 +977,13 @@ impl Client {
 
     /// Parse, compile, embed if needed, and POST to Qdrant's REST API.
     ///
-    /// Accepts a string (single statement or semicolon-delimited script) or
-    /// a `string[]`. Always returns a stable `ExecutionReport` object:
+    /// Accepts a string, a Stmt, or an array of either. Always returns a stable
+    /// `ExecutionReport` object:
     /// `{ "ok": bool, "results": [...], "succeeded": N, "failed": M }`.
     #[wasm_bindgen(unchecked_return_type = "ExecutionReport")]
     pub async fn execute(
         &self,
-        #[wasm_bindgen(unchecked_param_type = "string | string[]")] query: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "string | Stmt | (string | Stmt)[]")] query: JsValue,
         #[wasm_bindgen(unchecked_optional_param_type = "ExecuteOptions")] options: Option<JsValue>,
     ) -> Result<JsValue, JsValue> {
         let on_error = parse_on_error(options.as_ref())?;
@@ -889,34 +994,73 @@ impl Client {
             let mut all_results: Vec<serde_json::Value> = Vec::new();
             let mut succeeded = 0usize;
             let mut failed = 0usize;
+
+            let scoped_params = if let Some(serde_json::Value::Array(ref p_arr)) = params {
+                if p_arr.len() == len {
+                    Some(p_arr)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
             for i in 0..len {
                 let item = arr.get(i as u32);
-                let s = item.as_string().ok_or_else(|| {
-                    JsValue::from_str(&format!(
-                        "array item at index {} must be a string, got {:?}",
+                let item_params = match scoped_params {
+                    Some(scoped) => Some(&scoped[i]),
+                    None => params.as_ref(),
+                };
+
+                if let Some(s) = item.as_string() {
+                    let s = maybe_bind(&s, item_params)?;
+                    match self.execute_script(&s, on_error).await {
+                        Ok(report) => {
+                            succeeded += report.succeeded;
+                            failed += report.failed;
+                            all_results.extend(report.results);
+                        }
+                        Err(e) => {
+                            if on_error == WasmOnError::Stop {
+                                return Err(e);
+                            }
+                            failed += 1;
+                            all_results.push(exec_response(
+                                false,
+                                "ERROR",
+                                &e.as_string().unwrap_or_default(),
+                                None,
+                            ));
+                        }
+                    }
+                } else if let Some(mut stmt) = extract_ast_stmt(&item) {
+                    if let Some(p) = item_params {
+                        bind_stmt_json(&mut stmt, p)?;
+                    }
+                    match self.execute_stmt_inner(&stmt).await {
+                        Ok(val) => {
+                            succeeded += 1;
+                            all_results.push(val);
+                        }
+                        Err(e) => {
+                            if on_error == WasmOnError::Stop {
+                                return Err(e);
+                            }
+                            failed += 1;
+                            all_results.push(exec_response(
+                                false,
+                                "ERROR",
+                                &e.as_string().unwrap_or_default(),
+                                None,
+                            ));
+                        }
+                    }
+                } else {
+                    return Err(JsValue::from_str(&format!(
+                        "array item at index {} must be a string or Stmt, got {:?}",
                         i,
                         item.js_typeof()
-                    ))
-                })?;
-                let s = maybe_bind(&s, params.as_ref())?;
-                match self.execute_script(&s, on_error).await {
-                    Ok(report) => {
-                        succeeded += report.succeeded;
-                        failed += report.failed;
-                        all_results.extend(report.results);
-                    }
-                    Err(e) => {
-                        if on_error == WasmOnError::Stop {
-                            return Err(e);
-                        }
-                        failed += 1;
-                        all_results.push(exec_response(
-                            false,
-                            "ERROR",
-                            &e.as_string().unwrap_or_default(),
-                            None,
-                        ));
-                    }
+                    )));
                 }
             }
             let report = WasmReport {
@@ -928,20 +1072,79 @@ impl Client {
             return to_js_value(&report);
         }
 
+        if let Some(mut stmt) = extract_ast_stmt(&query) {
+            if let Some(ref p) = params {
+                bind_stmt_json(&mut stmt, p)?;
+            }
+            let val = self.execute_stmt_inner(&stmt).await?;
+            let report = WasmReport::single(val);
+            return to_js_value(&report);
+        }
+
         if let Some(s) = query.as_string() {
+            if let Some(serde_json::Value::Array(ref p_arr)) = params {
+                if let Ok(parsed_stmts) = Parser::parse_all(&s) {
+                    if parsed_stmts.len() > 1 && p_arr.len() == parsed_stmts.len() {
+                        let mut bound_stmts = Vec::with_capacity(parsed_stmts.len());
+                        for (i, mut stmt) in parsed_stmts.into_iter().enumerate() {
+                            bind_stmt_json(&mut stmt, &p_arr[i])?;
+                            bound_stmts.push(stmt);
+                        }
+                        let mut all_results: Vec<serde_json::Value> = Vec::new();
+                        let mut succeeded = 0usize;
+                        let mut failed = 0usize;
+                        for stmt in bound_stmts {
+                            match self.execute_stmt_inner(&stmt).await {
+                                Ok(val) => {
+                                    succeeded += 1;
+                                    all_results.push(val);
+                                }
+                                Err(e) => {
+                                    if on_error == WasmOnError::Stop {
+                                        return Err(e);
+                                    }
+                                    failed += 1;
+                                    all_results.push(exec_response(
+                                        false,
+                                        "ERROR",
+                                        &e.as_string().unwrap_or_default(),
+                                        None,
+                                    ));
+                                }
+                            }
+                        }
+                        let report = WasmReport {
+                            ok: failed == 0,
+                            results: all_results,
+                            succeeded,
+                            failed,
+                        };
+                        return to_js_value(&report);
+                    }
+                }
+            }
             let s = maybe_bind(&s, params.as_ref())?;
             let report = self.execute_script(&s, on_error).await?;
             return to_js_value(&report);
         }
 
-        Err(JsValue::from_str("query must be a string or string[]"))
+        Err(JsValue::from_str("query must be a string, Stmt, or array"))
     }
 
-    /// Execute a pre-parsed Stmt object.  Injects embeddings for UPSERT
-    /// if an embedder is configured.
+    /// Execute a pre-parsed Stmt object. Injects embeddings for UPSERT
+    /// if an embedder is configured. Optionally binds parameters.
     #[wasm_bindgen(js_name = executeStmt, unchecked_return_type = "ExecutionReport")]
-    pub async fn execute_stmt(&self, stmt: &Stmt) -> Result<JsValue, JsValue> {
-        let val = self.execute_stmt_inner(&stmt.inner).await?;
+    pub async fn execute_stmt(
+        &self,
+        stmt: &Stmt,
+        #[wasm_bindgen(unchecked_optional_param_type = "ExecuteOptions")] options: Option<JsValue>,
+    ) -> Result<JsValue, JsValue> {
+        let params = options_params(options.as_ref())?;
+        let mut inner = stmt.inner.clone();
+        if let Some(ref p) = params {
+            bind_stmt_json(&mut inner, p)?;
+        }
+        let val = self.execute_stmt_inner(&inner).await?;
         let report = WasmReport::single(val);
         to_js_value(&report)
     }
@@ -1461,13 +1664,14 @@ fn wasm_success_response(
             (format!("Count: {count}"), Some(result))
         }
         PlannedOperation::Facet { .. } => {
-            let hits = result
+            let facet_hits = result
                 .get("result")
                 .and_then(|value| value.get("hits"))
-                .or_else(|| result.get("hits"))
-                .and_then(serde_json::Value::as_array)
-                .map_or(0, Vec::len);
-            (format!("Found {hits} facet hit(s)"), Some(result))
+                .cloned()
+                .or_else(|| result.get("hits").cloned())
+                .unwrap_or_else(|| serde_json::json!([]));
+            let hits = facet_hits.as_array().map_or(0, Vec::len);
+            (format!("Found {hits} facet hit(s)"), Some(facet_hits))
         }
         PlannedOperation::Upsert { request, .. } => (
             format!("Upserted {} point(s)", request.points.len()),

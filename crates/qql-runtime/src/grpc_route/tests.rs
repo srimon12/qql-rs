@@ -592,8 +592,8 @@ fn grpc_get_points_envelope_keeps_hits_extractable() {
     assert_eq!(envelope["result"]["points"].as_array().unwrap().len(), 2);
     let hits = extract_search_hits(&envelope);
     assert_eq!(hits.len(), 2, "GetPoints hits must survive hit extraction");
-    assert_eq!(hits[0].id, "1");
-    assert_eq!(hits[1].id, "2");
+    assert_eq!(hits[0].id, qql_plan::PlanPointId::Number(1));
+    assert_eq!(hits[1].id, qql_plan::PlanPointId::Number(2));
 
     // The empty case still yields zero hits, not an error.
     let envelope = get_points_envelope(Vec::new(), 0.0);

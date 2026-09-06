@@ -4,6 +4,7 @@
 export interface ExecuteOptions {
     onError?: "stop" | "continue";
     params?: Record<string, unknown> | unknown[];
+    truncateVectors?: boolean;
 }
 
 export interface ExecResponse {
@@ -65,16 +66,16 @@ export class Client {
     /**
      * Parse, compile, embed if needed, and POST to Qdrant's REST API.
      *
-     * Accepts a string (single statement or semicolon-delimited script) or
-     * a `string[]`. Always returns a stable `ExecutionReport` object:
+     * Accepts a string, a Stmt, or an array of either. Always returns a stable
+     * `ExecutionReport` object:
      * `{ "ok": bool, "results": [...], "succeeded": N, "failed": M }`.
      */
-    execute(query: string | string[], options?: ExecuteOptions): Promise<ExecutionReport>;
+    execute(query: string | Stmt | (string | Stmt)[], options?: ExecuteOptions): Promise<ExecutionReport>;
     /**
-     * Execute a pre-parsed Stmt object.  Injects embeddings for UPSERT
-     * if an embedder is configured.
+     * Execute a pre-parsed Stmt object. Injects embeddings for UPSERT
+     * if an embedder is configured. Optionally binds parameters.
      */
-    executeStmt(stmt: Stmt): Promise<ExecutionReport>;
+    executeStmt(stmt: Stmt, options?: ExecuteOptions): Promise<ExecutionReport>;
     /**
      * Parse and explain the query — no server needed.
      */
@@ -120,9 +121,14 @@ export class Stmt {
     free(): void;
     [Symbol.dispose](): void;
     /**
-     * Compile this Stmt AST directly into a Qdrant REST route object.
+     * Bind parameters into this statement and return a new bound Stmt.
      */
-    compileRoute(): CompiledRoute;
+    bind(params?: any | null): Stmt;
+    /**
+     * Compile this Stmt AST directly into a Qdrant REST route object.
+     * Optionally accepts `params` to bind before compiling.
+     */
+    compileRoute(params?: any | null): CompiledRoute;
     /**
      * Compile this Stmt AST into a JS-owned Uint8Array byte buffer.
      */
@@ -144,6 +150,10 @@ export class Stmt {
      */
     toObject(): any;
     /**
+     * Format statement as readable QQL string.
+     */
+    toString(): string;
+    /**
      * QQL `SHARD '…'` routing key (request-level). Prefer the clause in QQL.
      */
     get shardKey(): string | undefined;
@@ -155,7 +165,7 @@ export function analyze(input: string): AnalysisResult;
 /**
  * Substitute `:name` (object) or `?` (array) placeholders into a query string.
  */
-export function bind(query: string, params: Record<string, unknown> | unknown[]): string;
+export function bind(query: string, params: Record<string, unknown> | unknown[], options?: { truncateVectors?: boolean }): string;
 
 /**
  * Compile one QQL statement into a JavaScript route object.

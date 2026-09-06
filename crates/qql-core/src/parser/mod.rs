@@ -36,6 +36,7 @@ pub(crate) struct AstLowerer<'a> {
     pub input: &'a str,
     tokens: Vec<Token<'a>>,
     index: usize,
+    positional_param_count: usize,
 }
 
 /// Hard upper bound for one parsed script. Callers that need larger imports
@@ -91,6 +92,7 @@ impl<'a> AstLowerer<'a> {
             input,
             tokens,
             index: 0,
+            positional_param_count: 0,
         }
     }
 
@@ -337,6 +339,16 @@ impl<'a> AstLowerer<'a> {
                     Ok(crate::ast::Value::Str(tok.text.to_string()))
                 }
             }
+            TokenKind::Colon => {
+                self.advance()?;
+                let name = self.parse_param_name()?;
+                Ok(crate::ast::Value::Param(name))
+            }
+            TokenKind::Question => {
+                self.advance()?;
+                let idx = self.next_positional_param();
+                Ok(crate::ast::Value::PositionalParam(idx))
+            }
             TokenKind::Lbrace => self.parse_payload_dict().map(crate::ast::Value::Dict),
             TokenKind::Lbracket => self.parse_list().map(crate::ast::Value::List),
             _ => Err(QqlError::parse(
@@ -344,6 +356,29 @@ impl<'a> AstLowerer<'a> {
                 alloc::format!("unexpected value token '{}'", tok.text),
                 tok.span,
             )),
+        }
+    }
+
+    pub(crate) fn next_positional_param(&mut self) -> usize {
+        let idx = self.positional_param_count;
+        self.positional_param_count += 1;
+        idx
+    }
+
+    pub(crate) fn parse_param_name(&mut self) -> Result<String, QqlError> {
+        let tok = self.peek()?;
+        if tok.is_keyword_or_identifier() {
+            self.advance()?;
+            Ok(tok.text.to_string())
+        } else {
+            Err(QqlError::parse(
+                "QQL-PARSE-PARAM",
+                alloc::format!(
+                    "expected parameter identifier after ':', found '{}'",
+                    tok.text
+                ),
+                tok.span,
+            ))
         }
     }
 

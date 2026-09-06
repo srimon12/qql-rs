@@ -285,30 +285,93 @@ result = client.execute(query)
 Substitute named (`:name`) or positional (`?`) parameters safely into queries:
 
 ```python
-from pyqql import Client, bind
+from pyqql import Client, bind, parse
 
 client = Client("http://localhost:6333")
 
 # Direct execution with named parameters
-result = client.execute(
+report = client.execute(
     "QUERY TEXT :query FROM docs WHERE category = :cat AND rating >= :min_rating LIMIT :limit",
     params={"query": "machine learning", "cat": "tech", "min_rating": 4.5, "limit": 10},
 )
 
 # Direct execution with positional parameters
-result = client.execute(
+report = client.execute(
     "QUERY TEXT ? FROM docs WHERE category = ? LIMIT ?",
     params=["machine learning", "tech", 10],
 )
 
-# Standalone string binding
-bound = bind("QUERY TEXT :q FROM docs LIMIT :lim", {"q": "search term", "lim": 5})
-print(bound)  # QUERY TEXT 'search term' FROM docs LIMIT 5
+# Prepared statements: parse once, execute repeatedly with different parameters
+stmt = parse("QUERY TEXT :query FROM docs WHERE category = :cat LIMIT :limit")[0]
+report = client.execute(stmt, params={"query": "neural nets", "cat": "ai", "limit": 5})
+
+# Direct compile route from prepared statement (no re-parsing required)
+route = stmt.compile_route(params={"query": "neural nets", "cat": "ai", "limit": 5})
+print(route["path"], route["payload"])
+
+# Standalone AST statement binding
+bound_stmt = stmt.bind({"query": "search term", "cat": "tech", "limit": 5})
+print(bound_stmt)  # Formatted QQL string
+
+# Nested dictionary parameters (automatically flattened to dotted keys like :loc.lat)
+geo_query = "QUERY 'coffee' FROM venues WHERE location GEO_RADIUS { center: {lat: :loc.lat, lon: :loc.lon}, radius: :rad } LIMIT 5"
+report = client.execute(geo_query, params={"loc": {"lat": 52.52, "lon": 13.40}, "rad": 1000})
+
+# Statement-scoped parameters for multi-statement batches
+batch_stmts = [
+    "QUERY TEXT :q FROM docs LIMIT 5",
+    "QUERY TEXT :q FROM articles LIMIT 10",
+]
+report = client.execute(batch_stmts, params=[{"q": "quantum"}, {"q": "relativity"}])
+
+# Vector truncation for readable logging (avoids dumping hundreds of float literals)
+vec_query = "QUERY :vec FROM docs LIMIT 5"
+print(bind(vec_query, {"vec": [0.1] * 384}, truncate_vectors=True))
+# -> QUERY [0.10, 0.10, ... (384 dims)] FROM docs LIMIT 5
 ```
 
 ---
 
-## 8. Async Execution
+## 8. Typed Result Accessors & `ExecutionReport`
+
+`client.execute()` returns an `ExecutionReport` (subclass of `dict` that retains full backward compatibility with `report["results"]` and `report["ok"]`).
+
+```python
+from pyqql import Client, ScoredPoint
+
+client = Client("http://localhost:6333")
+
+# 1. Accessing hits with .hits() -> List[ScoredPoint]
+report = client.execute("QUERY TEXT 'neural search' FROM docs LIMIT 5")
+for hit in report.hits():
+    # hit is a ScoredPoint dataclass:
+    print(hit.id)         # int (e.g. 42) or str (UUID) -- numeric IDs are preserved as ints!
+    print(hit.score)      # float, e.g. 0.892
+    print(hit.payload)    # dict with document payload
+    print(hit.text)       # shortcut for hit.payload.get("text")
+    print(hit["title"])   # dict-like subscript access to hit.payload
+    print(hit.get("url")) # dict-like get() with optional default
+
+# 2. Shortcut: execute_hits() returns List[ScoredPoint] directly
+hits = client.execute_hits("QUERY TEXT 'neural search' FROM docs LIMIT 5")
+
+# 3. Facet queries -> .facet() returns normalized [{value: ..., count: ...}]
+report = client.execute("FACET category FROM docs LIMIT 10")
+for item in report.facet():
+    print(item["value"], item["count"])
+
+# 4. Count queries -> .count() returns integer count
+report = client.execute("COUNT FROM docs WHERE category = 'tech'")
+print("Total matches:", report.count())
+
+# 5. Point retrieval -> .points() returns retrieved points
+report = client.execute("QUERY POINTS (1, 2, 3) FROM docs")
+points = report.points()
+```
+
+---
+
+## 9. Async Execution
 
 ```python
 import asyncio
@@ -326,7 +389,7 @@ asyncio.run(main())
 
 ---
 
-## 9. Free Functions & Explain
+## 10. Free Functions & Explain
 
 ```python
 import pyqql

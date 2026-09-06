@@ -5,9 +5,24 @@ export class Stmt {
   toObject(): unknown;
   toJson(): string;
   toJSON(): string;
-  compileRoute(): CompiledRoute;
+  toString(): string;
+  bind(
+    params: Record<string, unknown> | unknown[],
+    options?: { truncateVectors?: boolean },
+  ): Stmt;
+  compileRoute(params?: Record<string, unknown> | unknown[]): CompiledRoute;
   /** QQL `SHARD '…'` routing key (request-level). Prefer the clause in QQL. */
   shardKey?: string | null;
+}
+
+export class ScoredPoint {
+  id: string | number;
+  score: number;
+  payload: Record<string, unknown>;
+  text: string | null;
+  collection: string | null;
+  get(key: string, defaultValue?: unknown): unknown;
+  [key: string]: unknown;
 }
 
 export interface ExecResponse {
@@ -17,11 +32,15 @@ export interface ExecResponse {
   data: unknown | null;
 }
 
-export interface ExecutionReport {
+export class ExecutionReport {
   ok: boolean;
   results: ExecResponse[];
   succeeded: number;
   failed: number;
+  hits(stmt?: number): ScoredPoint[];
+  points(stmt?: number): unknown[];
+  facet(stmt?: number): Array<{ value: unknown; count: number }>;
+  count(stmt?: number): number;
 }
 
 export interface ExecuteOptions {
@@ -94,9 +113,13 @@ export class Client {
     query: string | Stmt | string[] | Stmt[],
     options?: ExecuteOptions,
   ): Promise<ExecutionReport>;
+  executeHits(
+    query: string | Stmt | string[] | Stmt[],
+    options?: ExecuteOptions,
+  ): Promise<ScoredPoint[]>;
   explain(query: string): string;
   explainStmt(stmt: Stmt): string;
-  compile(query: string): CompiledRoute;
+  compile(query: string, params?: Record<string, unknown> | unknown[]): CompiledRoute;
   /** Qdrant 1.19+ read affinity key set at construction; `null` when unset. */
   readonly routeAffinity: string | null;
   close(): Promise<void>;
@@ -116,18 +139,26 @@ export function injectFilter(
 export function tokenize(
   query: string,
 ): Array<{ kind: string; text: string; pos: number; end: number; len: number }>;
-export function compileQuery(query: string): CompiledRoute;
+export function compileQuery(
+  query: string,
+  params?: Record<string, unknown> | unknown[],
+): CompiledRoute;
 export function explain(query: string): string;
 export function explainStmt(stmt: Stmt): string;
 /** Substitute `:name` (object) or `?` (array) placeholders into a query string. */
 export function bind(
   query: string,
   params: Record<string, unknown> | unknown[],
+  options?: { truncateVectors?: boolean },
 ): string;
 export function execute(
   query: string | Stmt | string[] | Stmt[],
   options?: ExecuteOptions & ClientOptions,
 ): Promise<ExecutionReport>;
+export function executeHits(
+  query: string | Stmt | string[] | Stmt[],
+  options?: ExecuteOptions & ClientOptions,
+): Promise<ScoredPoint[]>;
 export function executeStmt(
   stmt: Stmt,
   options?: ClientOptions,

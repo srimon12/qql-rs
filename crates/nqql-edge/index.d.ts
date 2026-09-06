@@ -4,9 +4,21 @@ export class Stmt {
   toObject(): unknown;
   toJson(): string;
   toJSON(): string;
-  compileRoute(): CompiledRoute;
+  bind(params?: Record<string, unknown> | unknown[]): Stmt;
+  toString(): string;
+  compileRoute(params?: Record<string, unknown> | unknown[]): CompiledRoute;
   /** QQL `SHARD '…'` routing key (request-level). Prefer the clause in QQL. */
   shardKey?: string | null;
+}
+
+export class ScoredPoint {
+  id: number | string;
+  score: number;
+  payload: Record<string, unknown>;
+  text: string | null;
+  collection: string | null;
+  [key: string]: unknown;
+  get(key: string, defaultValue?: unknown): unknown;
 }
 
 export interface ExecResponse {
@@ -16,11 +28,16 @@ export interface ExecResponse {
   data: unknown | null;
 }
 
-export interface ExecutionReport {
+export class ExecutionReport {
   ok: boolean;
   results: ExecResponse[];
   succeeded: number;
   failed: number;
+  [key: string]: unknown;
+  hits(stmt?: number): ScoredPoint[];
+  points(stmt?: number): ScoredPoint[];
+  facet(stmt?: number): Array<Record<string, unknown>>;
+  count(stmt?: number): number;
 }
 
 export interface ExecuteOptions {
@@ -119,6 +136,12 @@ export class Client {
     options?: ExecuteOptions,
   ): Promise<ExecutionReport>;
 
+  /** Execute a query and return typed ScoredPoint hits directly. */
+  executeHits(
+    query: string | Stmt | string[] | Stmt[],
+    options?: ExecuteOptions,
+  ): Promise<ScoredPoint[]>;
+
   /** Explain a QQL query string — returns a human-readable plan. */
   explain(query: string): string;
 
@@ -161,7 +184,14 @@ export function explainStmt(stmt: Stmt): string;
 export function bind(
   query: string,
   params: Record<string, unknown> | unknown[],
+  options?: { truncateVectors?: boolean },
 ): string;
+
+/** One-shot execute returning typed ScoredPoint hits directly. */
+export function executeHits(
+  query: string | Stmt | string[] | Stmt[],
+  options?: ExecuteOptions & StandaloneOptions,
+): Promise<ScoredPoint[]>;
 
 /**
  * Create a fully-local edge executor backed by fastembed-rs.

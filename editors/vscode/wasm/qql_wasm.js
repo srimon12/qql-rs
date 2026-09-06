@@ -36,10 +36,10 @@ class Client {
     /**
      * Parse, compile, embed if needed, and POST to Qdrant's REST API.
      *
-     * Accepts a string (single statement or semicolon-delimited script) or
-     * a `string[]`. Always returns a stable `ExecutionReport` object:
+     * Accepts a string, a Stmt, or an array of either. Always returns a stable
+     * `ExecutionReport` object:
      * `{ "ok": bool, "results": [...], "succeeded": N, "failed": M }`.
-     * @param {string | string[]} query
+     * @param {string | Stmt | (string | Stmt)[]} query
      * @param {ExecuteOptions} [options]
      * @returns {ExecutionReport}
      */
@@ -48,14 +48,15 @@ class Client {
         return takeObject(ret);
     }
     /**
-     * Execute a pre-parsed Stmt object.  Injects embeddings for UPSERT
-     * if an embedder is configured.
+     * Execute a pre-parsed Stmt object. Injects embeddings for UPSERT
+     * if an embedder is configured. Optionally binds parameters.
      * @param {Stmt} stmt
+     * @param {ExecuteOptions} [options]
      * @returns {ExecutionReport}
      */
-    executeStmt(stmt) {
+    executeStmt(stmt, options) {
         _assertClass(stmt, Stmt);
-        const ret = wasm.client_executeStmt(this.__wbg_ptr, stmt.__wbg_ptr);
+        const ret = wasm.client_executeStmt(this.__wbg_ptr, stmt.__wbg_ptr, isLikeNone(options) ? 0 : addHeapObject(options));
         return takeObject(ret);
     }
     /**
@@ -214,6 +215,12 @@ if (Symbol.dispose) Client.prototype[Symbol.dispose] = Client.prototype.free;
 exports.Client = Client;
 
 class Stmt {
+    static __wrap(ptr) {
+        const obj = Object.create(Stmt.prototype);
+        obj.__wbg_ptr = ptr;
+        StmtFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
     __destroy_into_raw() {
         const ptr = this.__wbg_ptr;
         this.__wbg_ptr = 0;
@@ -225,13 +232,35 @@ class Stmt {
         wasm.__wbg_stmt_free(ptr, 0);
     }
     /**
-     * Compile this Stmt AST directly into a Qdrant REST route object.
-     * @returns {CompiledRoute}
+     * Bind parameters into this statement and return a new bound Stmt.
+     * @param {any | null} [params]
+     * @returns {Stmt}
      */
-    compileRoute() {
+    bind(params) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.stmt_compileRoute(retptr, this.__wbg_ptr);
+            wasm.stmt_bind(retptr, this.__wbg_ptr, isLikeNone(params) ? 0 : addHeapObject(params));
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            if (r2) {
+                throw takeObject(r1);
+            }
+            return Stmt.__wrap(r0);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * Compile this Stmt AST directly into a Qdrant REST route object.
+     * Optionally accepts `params` to bind before compiling.
+     * @param {any | null} [params]
+     * @returns {CompiledRoute}
+     */
+    compileRoute(params) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.stmt_compileRoute(retptr, this.__wbg_ptr, isLikeNone(params) ? 0 : addHeapObject(params));
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
@@ -393,6 +422,26 @@ class Stmt {
             wasm.__wbindgen_add_to_stack_pointer(16);
         }
     }
+    /**
+     * Format statement as readable QQL string.
+     * @returns {string}
+     */
+    toString() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.stmt_toString(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            deferred1_0 = r0;
+            deferred1_1 = r1;
+            return getStringFromWasm0(r0, r1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export5(deferred1_0, deferred1_1, 1);
+        }
+    }
 }
 if (Symbol.dispose) Stmt.prototype[Symbol.dispose] = Stmt.prototype.free;
 exports.Stmt = Stmt;
@@ -424,16 +473,17 @@ exports.analyze = analyze;
  * Substitute `:name` (object) or `?` (array) placeholders into a query string.
  * @param {string} query
  * @param {Record<string, unknown> | unknown[]} params
+ * @param {{ truncateVectors?: boolean }} [options]
  * @returns {string}
  */
-function bind(query, params) {
+function bind(query, params, options) {
     let deferred3_0;
     let deferred3_1;
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
         const ptr0 = passStringToWasm0(query, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        wasm.bind(retptr, ptr0, len0, addHeapObject(params));
+        wasm.bind(retptr, ptr0, len0, addHeapObject(params), isLikeNone(options) ? 0 : addHeapObject(options));
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
@@ -687,6 +737,10 @@ function __wbg_get_imports() {
             const ret = Error(getStringFromWasm0(arg0, arg1));
             return addHeapObject(ret);
         },
+        __wbg_Number_3890faa6d3ff057d: function(arg0) {
+            const ret = Number(getObject(arg0));
+            return ret;
+        },
         __wbg_String_8564e559799eccda: function(arg0, arg1) {
             const ret = String(getObject(arg1));
             const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_export, wasm.__wbindgen_export2);
@@ -811,6 +865,10 @@ function __wbg_get_imports() {
         }, arguments); },
         __wbg_get_unchecked_e20b893aeafc3fca: function(arg0, arg1) {
             const ret = getObject(arg0)[arg1 >>> 0];
+            return addHeapObject(ret);
+        },
+        __wbg_get_with_ref_key_6412cf3094599694: function(arg0, arg1) {
+            const ret = getObject(arg0)[getObject(arg1)];
             return addHeapObject(ret);
         },
         __wbg_instanceof_ArrayBuffer_993d02d2d254cad1: function(arg0) {
@@ -940,7 +998,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_239(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_243(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -1074,7 +1132,7 @@ function __wbg_get_imports() {
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 37, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_235);
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_239);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000002: function(arg0) {
@@ -1111,10 +1169,10 @@ function __wbg_get_imports() {
     };
 }
 
-function __wasm_bindgen_func_elem_235(arg0, arg1, arg2) {
+function __wasm_bindgen_func_elem_239(arg0, arg1, arg2) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        wasm.__wasm_bindgen_func_elem_235(retptr, arg0, arg1, addHeapObject(arg2));
+        wasm.__wasm_bindgen_func_elem_239(retptr, arg0, arg1, addHeapObject(arg2));
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         if (r1) {
@@ -1125,8 +1183,8 @@ function __wasm_bindgen_func_elem_235(arg0, arg1, arg2) {
     }
 }
 
-function __wasm_bindgen_func_elem_239(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_239(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_243(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_243(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
 const ClientFinalization = (typeof FinalizationRegistry === 'undefined')

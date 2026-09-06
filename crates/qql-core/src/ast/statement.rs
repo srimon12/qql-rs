@@ -110,6 +110,10 @@ pub enum PointId {
     Number(u64),
     /// Arbitrary unique string ID.
     String(String),
+    /// Parameter placeholder (`:name`).
+    Param(String),
+    /// Positional parameter placeholder (`?`).
+    PositionalParam(usize),
 }
 
 /// A vector value: dense, sparse, or multivector.
@@ -162,6 +166,10 @@ pub enum QueryInput {
     Vector(VectorValue),
     /// Reference point — use an existing point's vector as the input.
     Point(PointId),
+    /// Parameter placeholder (`:name`) for target query input.
+    Param(String),
+    /// Positional parameter placeholder (`?`) for target query input.
+    PositionalParam(usize),
 }
 
 /// Explicit `AS` role for a `USING` vector target.
@@ -564,6 +572,18 @@ pub struct PageSpec {
     pub limit: Option<u64>,
     /// Number of results (or groups) to skip.
     pub offset: Option<u64>,
+    /// Parameter name for limit (e.g. `:lim`), if unbound.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub limit_param: Option<String>,
+    /// Parameter name for offset (e.g. `:off`), if unbound.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub offset_param: Option<String>,
 }
 
 /// One named common table expression: `name AS (QUERY …)`.
@@ -1464,5 +1484,11 @@ impl<'de> serde::Deserialize<'de> for Stmt {
         }
 
         deserializer.deserialize_any(StmtVisitor)
+    }
+}
+
+impl core::fmt::Display for Stmt {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", crate::fmt::format_stmt(self))
     }
 }

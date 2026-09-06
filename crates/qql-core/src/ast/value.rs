@@ -21,6 +21,10 @@ pub enum Value {
     Dict(Vec<(String, Value)>),
     /// `[v1, v2, …]` list literal (also dense vector input).
     List(Vec<Value>),
+    /// Named parameter placeholder (`:name`).
+    Param(String),
+    /// Positional parameter placeholder (`?`).
+    PositionalParam(usize),
 }
 
 impl core::fmt::Debug for Value {
@@ -33,6 +37,8 @@ impl core::fmt::Debug for Value {
             Self::Null => f.write_str("Null"),
             Self::Dict(value) => f.debug_tuple("Dict").field(value).finish(),
             Self::List(value) => f.debug_tuple("List").field(value).finish(),
+            Self::Param(value) => f.debug_tuple("Param").field(value).finish(),
+            Self::PositionalParam(idx) => f.debug_tuple("PositionalParam").field(idx).finish(),
         }
     }
 }
@@ -97,11 +103,21 @@ impl Value {
                 .map(Self::from_json)
                 .collect::<Result<Vec<_>, _>>()
                 .map(Self::List),
-            serde_json::Value::Object(items) => items
-                .into_iter()
-                .map(|(key, value)| Self::from_json(value).map(|value| (key, value)))
-                .collect::<Result<Vec<_>, _>>()
-                .map(Self::Dict),
+            serde_json::Value::Object(items) => {
+                if items.len() == 1 {
+                    if let Some(p) = items.get("$param").and_then(|v| v.as_str()) {
+                        return Ok(Self::Param(p.to_string()));
+                    }
+                    if let Some(i) = items.get("$param_idx").and_then(|v| v.as_u64()) {
+                        return Ok(Self::PositionalParam(i as usize));
+                    }
+                }
+                items
+                    .into_iter()
+                    .map(|(key, value)| Self::from_json(value).map(|value| (key, value)))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map(Self::Dict)
+            }
         }
     }
 
@@ -134,6 +150,8 @@ impl Value {
                 .map(Self::to_json)
                 .collect::<Result<Vec<_>, _>>()
                 .map(serde_json::Value::Array),
+            Self::Param(name) => Ok(serde_json::json!({ "$param": name })),
+            Self::PositionalParam(idx) => Ok(serde_json::json!({ "$param_idx": idx })),
         }
     }
 }

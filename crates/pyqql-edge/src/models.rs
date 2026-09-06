@@ -3,7 +3,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList};
 use std::sync::atomic::AtomicBool;
 
-use crate::{bind_py_params, classify, parse_on_error, qql_py_error, run_async, Input, PyClient};
+use crate::{parse_on_error, qql_py_error, run_async, wrap_execution_report, PyClient};
 
 /// List dense ONNX models available for ``local_executor(model=...)``.
 ///
@@ -127,19 +127,6 @@ pub fn execute_async<'py>(
     show_download_progress: bool,
     on_error: &str,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let input = if let Some(p) = params {
-        if let Ok(q_str) = query.extract::<String>() {
-            let bound = bind_py_params(&q_str, p)?;
-            Input::String(bound)
-        } else {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "parameter binding requires a query string",
-            ));
-        }
-    } else {
-        classify(&query)?
-    };
-    let on_error = parse_on_error(on_error)?;
     let client = local_executor(
         data_dir,
         on_disk_payload,
@@ -151,6 +138,8 @@ pub fn execute_async<'py>(
         cache_dir,
         show_download_progress,
     )?;
+    let input = client.prepare_input(&query, params)?;
+    let on_error = parse_on_error(on_error)?;
     let inner = client.inner.clone();
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
         let result = run_async(&inner, input, on_error).await;
@@ -158,9 +147,10 @@ pub fn execute_async<'py>(
         let value = result.map_err(qql_py_error)?;
         close_result.map_err(qql_py_error)?;
         Python::attach(|py| {
-            pythonize::pythonize(py, &value)
-                .map(|bound| bound.unbind())
-                .map_err(|error| PyRuntimeError::new_err(error.to_string()))
+            let dict = pythonize::pythonize(py, &value)
+                .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
+            let report = wrap_execution_report(py, dict)?;
+            Ok(report.unbind())
         })
     })
 }

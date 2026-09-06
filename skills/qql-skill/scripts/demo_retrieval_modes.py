@@ -45,7 +45,7 @@ EXAMPLES = [
         "when": "Use when you want to tune RRF parameters — K controls rank smoothing, weights control source influence.",
         "query": (
             "QUERY HYBRID TEXT 'vector search performance' DENSE dense SPARSE sparse FUSION RRF FROM articles "
-            "WITH (rrf_k = 30, rrf_weights = [0.7, 0.3]) LIMIT 10"
+            "PARAMS (rrf_k = 30, rrf_weights = [0.7, 0.3]) LIMIT 10"
         ),
         "setup": [],
         "requires_index": [],
@@ -233,7 +233,7 @@ EXAMPLES = [
             "WITH a AS (QUERY 'search query' FROM docs USING dense WHERE category = 'tech' LIMIT 200),\n"
             "     b AS (QUERY 'search query' FROM docs USING sparse LIMIT 300)\n"
             "QUERY FUSION RRF FROM docs PREFETCH (a SCORE THRESHOLD 0.6, b SCORE THRESHOLD 0.3)\n"
-            "  WITH (rrf_k = 20, rrf_weights = [0.6, 0.4]) LIMIT 10"
+            "  PARAMS (rrf_k = 20, rrf_weights = [0.6, 0.4]) LIMIT 10"
         ),
         "setup": [],
         "requires_index": [],

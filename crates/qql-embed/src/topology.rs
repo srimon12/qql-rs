@@ -303,7 +303,11 @@ fn configure_prefetches(
 fn input_kind(input: &QueryInput) -> Option<VectorKind> {
     match input {
         // Text/image/point kinds are filled from USING / schema before embed.
-        QueryInput::Text { .. } | QueryInput::Image { .. } | QueryInput::Point(_) => None,
+        QueryInput::Text { .. }
+        | QueryInput::Image { .. }
+        | QueryInput::Point(_)
+        | QueryInput::Param(_)
+        | QueryInput::PositionalParam(_) => None,
         QueryInput::Vector(VectorValue::Dense(_) | VectorValue::MultiDense(_)) => {
             Some(VectorKind::Dense)
         }
