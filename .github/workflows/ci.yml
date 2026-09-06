@@ -344,12 +344,14 @@ jobs:
           HF_HOME: ${{ runner.temp }}/hf-home
         run: |
           set -euo pipefail
-          npm run build:debug
+          # The build itself downloads ort-sys's onnxruntime static lib on a
+          # cold cache — retry it alongside the model download so a transient
+          # network failure cannot kill the whole warm step.
           for attempt in 1 2 3 4 5; do
-            if node warm-cache.js; then
+            if npm run build:debug && node warm-cache.js; then
               exit 0
             fi
-            echo "::warning::fastembed model download failed (attempt $attempt/5), retrying in 30s"
+            echo "::warning::fastembed warm-up failed (attempt $attempt/5), retrying in 30s"
             sleep 30
           done
           exit 1
