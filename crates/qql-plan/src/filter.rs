@@ -287,6 +287,8 @@ pub fn value_to_json(value: &Value) -> serde_json::Value {
             }
             serde_json::Value::Object(map)
         }
+        Value::Param(name) => serde_json::Value::String(format!(":{}", name)),
+        Value::PositionalParam(idx) => serde_json::Value::String(format!("?{}", idx)),
     }
 }
 

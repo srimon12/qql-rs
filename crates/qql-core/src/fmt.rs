@@ -630,9 +630,21 @@ fn query_tail_clauses(query: &QueryStmt) -> Vec<String> {
     }
     if let Some(limit) = query.page.limit {
         parts.push(format!("LIMIT {}", limit));
+    } else if let Some(param) = &query.page.limit_param {
+        if param.starts_with('?') {
+            parts.push(format!("LIMIT {}", param));
+        } else {
+            parts.push(format!("LIMIT :{}", param));
+        }
     }
     if let Some(offset) = query.page.offset {
         parts.push(format!("OFFSET {}", offset));
+    } else if let Some(param) = &query.page.offset_param {
+        if param.starts_with('?') {
+            parts.push(format!("OFFSET {}", param));
+        } else {
+            parts.push(format!("OFFSET :{}", param));
+        }
     }
     parts
 }
@@ -909,10 +921,19 @@ fn render_prefetch(prefetch: &Prefetch) -> String {
 fn render_query_input(input: &QueryInput, allow_bare: bool) -> String {
     match input {
         QueryInput::Text { text, model: None } if allow_bare => {
-            format!("'{}'", escape_string(text))
+            if text.starts_with(':') || text.starts_with('?') {
+                text.clone()
+            } else {
+                format!("'{}'", escape_string(text))
+            }
         }
         QueryInput::Text { text, model } => {
-            let mut out = format!("TEXT '{}'", escape_string(text));
+            let rendered_text = if text.starts_with(':') || text.starts_with('?') {
+                text.clone()
+            } else {
+                format!("'{}'", escape_string(text))
+            };
+            let mut out = format!("TEXT {}", rendered_text);
             if let Some(model) = model {
                 let _ = write!(out, " MODEL '{}'", escape_string(model));
             }
@@ -927,6 +948,8 @@ fn render_query_input(input: &QueryInput, allow_bare: bool) -> String {
         }
         QueryInput::Vector(value) => format!("VECTOR {}", render_vector_value(value)),
         QueryInput::Point(point) => format!("POINT {}", render_point_id(point)),
+        QueryInput::Param(name) => format!(":{}", name),
+        QueryInput::PositionalParam(_) => "?".to_string(),
     }
 }
 
@@ -1762,6 +1785,8 @@ fn render_point_id(point: &PointId) -> String {
     match point {
         PointId::Number(value) => value.to_string(),
         PointId::String(value) => format!("'{}'", escape_string(value)),
+        PointId::Param(name) => format!(":{}", name),
+        PointId::PositionalParam(_) => "?".to_string(),
     }
 }
 
@@ -1822,7 +1847,14 @@ fn render_value(value: &Value) -> String {
             let values: Vec<String> = items.iter().map(render_value).collect();
             format!("[{}]", values.join(", "))
         }
+        Value::Param(name) => format!(":{}", name),
+        Value::PositionalParam(_) => "?".to_string(),
     }
+}
+
+/// Render a single statement in human-readable QQL form with compact vector literals.
+pub fn format_stmt_readable(statement: &Stmt) -> String {
+    crate::params::truncate_vector_literals(&format_stmt(statement), 5)
 }
 
 fn render_f32(value: f32) -> String {

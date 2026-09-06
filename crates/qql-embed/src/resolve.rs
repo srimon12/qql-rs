@@ -679,7 +679,10 @@ async fn apply_input(
             *input = QueryInput::Vector(VectorValue::Dense(vec));
             Ok(())
         }
-        QueryInput::Vector(_) | QueryInput::Point(_) => Ok(()),
+        QueryInput::Vector(_)
+        | QueryInput::Point(_)
+        | QueryInput::Param(_)
+        | QueryInput::PositionalParam(_) => Ok(()),
     }
 }
 

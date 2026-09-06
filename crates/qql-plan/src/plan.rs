@@ -900,7 +900,11 @@ fn validate_query_target_kinds(expression: &QueryExpr) -> Result<(), QqlError> {
                 Some(VectorKind::Dense)
             }
             QueryInput::Vector(VectorValue::Sparse { .. }) => Some(VectorKind::Sparse),
-            QueryInput::Text { .. } | QueryInput::Image { .. } | QueryInput::Point(_) => None,
+            QueryInput::Text { .. }
+            | QueryInput::Image { .. }
+            | QueryInput::Point(_)
+            | QueryInput::Param(_)
+            | QueryInput::PositionalParam(_) => None,
         };
         if input_kind.is_some_and(|kind| kind != target_kind) {
             return Err(query_kind_error(
@@ -1436,6 +1440,7 @@ mod tests {
             page: PageSpec {
                 limit: Some(5),
                 offset: None,
+                ..Default::default()
             },
             shard_key: None,
         }))
@@ -1529,6 +1534,7 @@ mod tests {
             page: PageSpec {
                 limit: Some(5),
                 offset: None,
+                ..Default::default()
             },
             shard_key: None,
         }));
@@ -1591,6 +1597,7 @@ mod tests {
                         page: PageSpec {
                             limit: Some(10),
                             offset: None,
+                            ..Default::default()
                         },
                         shard_key: None,
                     })),
@@ -1607,6 +1614,7 @@ mod tests {
             page: PageSpec {
                 limit: Some(5),
                 offset: None,
+                ..Default::default()
             },
             shard_key: None,
         }));
@@ -1639,6 +1647,7 @@ mod tests {
             page: PageSpec {
                 limit: Some(5),
                 offset: None,
+                ..Default::default()
             },
             shard_key: None,
         }));

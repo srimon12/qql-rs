@@ -415,6 +415,8 @@ pub enum TokenKind {
     Slash,
     /// A `;` token.
     Semicolon,
+    /// A `?` token.
+    Question,
     /// The end-of-input token.
     Eof,
 }
@@ -615,6 +617,7 @@ gen_as_str! {
     Minus => "MINUS",
     Slash => "SLASH",
     Semicolon => "SEMICOLON",
+    Question => "QUESTION",
     Eof => "EOF",
 }
 
@@ -644,6 +647,7 @@ impl TokenKind {
                 | Self::Minus
                 | Self::Slash
                 | Self::Semicolon
+                | Self::Question
                 | Self::Eof
         )
     }
@@ -712,6 +716,7 @@ impl<'a> Token<'a> {
             | TokenKind::Minus
             | TokenKind::Slash
             | TokenKind::Semicolon
+            | TokenKind::Question
             | TokenKind::Eof => false,
             TokenKind::Integer | TokenKind::Float => self
                 .text

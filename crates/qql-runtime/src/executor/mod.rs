@@ -108,8 +108,8 @@ use qql_plan::{statement_batch_key, BatchKey};
 /// Normalized search hit returned inside `ExecResponse` data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchHit {
-    /// Point ID rendered as a string (`num` or `uuid`).
-    pub id: String,
+    /// Point ID (integer or string/UUID).
+    pub id: qql_plan::PlanPointId,
     /// Similarity or rerank score.
     pub score: f32,
     /// Payload text extracted for text-centric results, when present.
@@ -992,13 +992,14 @@ impl Executor {
                 (format!("Count: {count}"), Some(result))
             }
             PlannedOperation::Facet { .. } => {
-                let hits = result
+                let facet_hits = result
                     .get("result")
                     .and_then(|r| r.get("hits"))
-                    .and_then(|h| h.as_array())
-                    .map(|a| a.len())
-                    .unwrap_or(0);
-                (format!("Found {hits} facet hit(s)"), Some(result))
+                    .cloned()
+                    .or_else(|| result.get("hits").cloned())
+                    .unwrap_or_else(|| serde_json::json!([]));
+                let count = facet_hits.as_array().map(|a| a.len()).unwrap_or(0);
+                (format!("Found {count} facet hit(s)"), Some(facet_hits))
             }
             PlannedOperation::ListCollections => {
                 let count = result
@@ -1061,7 +1062,7 @@ impl Executor {
             )
         })?;
 
-        let mut by_key: HashMap<(String, String), SearchHit> = HashMap::new();
+        let mut by_key: HashMap<(String, qql_plan::PlanPointId), SearchHit> = HashMap::new();
         for (collection, request) in candidates {
             let op = qql_plan::PlannedOperation::Query {
                 collection: collection.clone(),

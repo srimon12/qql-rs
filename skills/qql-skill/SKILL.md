@@ -297,11 +297,18 @@ routing inside the filter object.
 ## Parameter Binding & Prepared Queries
 
 QQL provides type-safe parameter binding across all SDKs:
-- **Named Placeholders**: `:name` (e.g. `:category`, `:lim`)
+- **Named Placeholders**: `:name` (e.g. `:category`, `:lim`, `:loc.lat`)
 - **Positional Placeholders**: `?` (sequential 1-to-1 mapping)
+- **Prepared Statements (Parse Once, Execute Many)**: Pre-parsed `Stmt` objects can be bound directly via `stmt.bind(params)`, compiled with `stmt.compile_route(params=...)`, or executed via `client.execute(stmt, params=...)` without re-lexing or re-parsing the query string.
+- **Nested & Scoped Parameters**:
+  - Dotted dictionary paths automatically bind nested keys (e.g. `{"loc": {"lat": 1.0, "lon": 2.0}}` binds `:loc.lat` and `:loc.lon`).
+  - Batch queries support statement-scoped parameter lists: `params=[dict0, dict1]` binds `dict0` to the first statement and `dict1` to the second.
+- **Vector Truncation for Logging**: `bind(query, params, truncate_vectors=True)` or `print(stmt)` renders compact vector previews (e.g. `[0.12, 0.34, ... (384 dims)]`) to keep logs and debug output clean.
 - **Host DX**: one `bind(query, params)` plus `Client.execute(..., params=...)`. Dict/object → named; list/array → positional. WASM takes a JS object/array, not a JSON string. Rust keeps typed `bind_named` / `bind_positional`.
 - **Grammar Rule**: `$` is an identifier character in QQL (`$category`, `$score`). **Never** use `$name` or `$1` as placeholders — only `:name` and `?`.
 - **Token Boundaries**: Colons in compact dicts (`{a:b}`, `{'a':b}`) are preserved as key-value separators. Write `{key: :val}` to bind dict values.
+- **RRF Parameters**: RRF hyper-parameters (`rrf_k`, `rrf_weights`) are configured via the query `PARAMS (...)` clause (e.g. `PARAMS (rrf_k = 60, rrf_weights = [0.8, 0.2])`), **never** `WITH (...)`.
+- **BM25 Default Model**: `USING bm25` automatically defaults `model` to `Qdrant/bm25` when unspecified.
 
 ## CLI Reference
 
@@ -331,13 +338,16 @@ embedder = pyqql.HttpEmbedder("http://localhost:11434/v1/embeddings", "all-minil
 client = pyqql.Client("http://localhost:6333", embedder=embedder)
 
 # Standard execution
-result = client.execute("QUERY 'semantic search' FROM docs USING dense LIMIT 5")
+report = client.execute("QUERY 'semantic search' FROM docs USING dense LIMIT 5")
+for hit in report.hits():  # Typed ScoredPoint objects with .id, .score, .payload, .text
+    print(hit.id, hit.score, hit.text)
 
-# Parameterized execution (named or positional)
-result = client.execute(
-    "QUERY TEXT :q FROM docs WHERE category = :cat LIMIT :lim",
-    params={"q": "chest pain", "cat": "medical", "lim": 10},
-)
+# Direct hits shortcut
+hits = client.execute_hits("QUERY 'semantic search' FROM docs USING dense LIMIT 5")
+
+# Prepared statement execution (parse once, bind + execute repeatedly)
+stmt = pyqql.parse("QUERY TEXT :q FROM docs WHERE category = :cat LIMIT :lim")[0]
+report = client.execute(stmt, params={"q": "chest pain", "cat": "medical", "lim": 10})
 ```
 
 ### Rust (`qql`)

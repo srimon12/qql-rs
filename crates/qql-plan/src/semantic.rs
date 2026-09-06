@@ -12,7 +12,7 @@ use serde::{Serialize, Serializer};
 // ── Point ID ────────────────────────────────────────────────────
 
 /// Transport-neutral point ID: unsigned integer or string (typically UUID).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PlanPointId {
     /// Unsigned 64-bit point ID.
     Number(u64),
@@ -20,11 +20,24 @@ pub enum PlanPointId {
     String(String),
 }
 
+impl core::fmt::Display for PlanPointId {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            PlanPointId::Number(n) => write!(f, "{n}"),
+            PlanPointId::String(s) => write!(f, "{s}"),
+        }
+    }
+}
+
 impl From<&qql_core::ast::PointId> for PlanPointId {
     fn from(id: &qql_core::ast::PointId) -> Self {
         match id {
             qql_core::ast::PointId::Number(n) => PlanPointId::Number(*n),
             qql_core::ast::PointId::String(s) => PlanPointId::String(s.clone()),
+            qql_core::ast::PointId::Param(name) => PlanPointId::String(format!(":{}", name)),
+            qql_core::ast::PointId::PositionalParam(idx) => {
+                PlanPointId::String(format!("?{}", idx))
+            }
         }
     }
 }
@@ -166,6 +179,14 @@ impl From<&qql_core::ast::QueryInput> for PlanQueryInput {
             qql_core::ast::QueryInput::Image { source, model } => PlanQueryInput::Image {
                 image: source.clone(),
                 model: model.clone(),
+            },
+            qql_core::ast::QueryInput::Param(name) => PlanQueryInput::Document {
+                text: format!(":{}", name),
+                model: None,
+            },
+            qql_core::ast::QueryInput::PositionalParam(idx) => PlanQueryInput::Document {
+                text: format!("?{}", idx),
+                model: None,
             },
         }
     }

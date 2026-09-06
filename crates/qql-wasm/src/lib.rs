@@ -1461,13 +1461,14 @@ fn wasm_success_response(
             (format!("Count: {count}"), Some(result))
         }
         PlannedOperation::Facet { .. } => {
-            let hits = result
+            let facet_hits = result
                 .get("result")
                 .and_then(|value| value.get("hits"))
-                .or_else(|| result.get("hits"))
-                .and_then(serde_json::Value::as_array)
-                .map_or(0, Vec::len);
-            (format!("Found {hits} facet hit(s)"), Some(result))
+                .cloned()
+                .or_else(|| result.get("hits").cloned())
+                .unwrap_or_else(|| serde_json::json!([]));
+            let hits = facet_hits.as_array().map_or(0, Vec::len);
+            (format!("Found {hits} facet hit(s)"), Some(facet_hits))
         }
         PlannedOperation::Upsert { request, .. } => (
             format!("Upserted {} point(s)", request.points.len()),

@@ -56,6 +56,7 @@ impl<'a> Lexer<'a> {
             b'+' => self.single_char(TokenKind::Plus),
             b'/' => self.single_char(TokenKind::Slash),
             b';' => self.single_char(TokenKind::Semicolon),
+            b'?' => self.single_char(TokenKind::Question),
             b'-' => self.read_minus_or_number(),
             b'`' => self.read_backtick_string(),
             b'"' | b'\'' => self.read_string(ch),

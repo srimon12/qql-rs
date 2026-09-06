@@ -181,13 +181,27 @@ pub fn lower_formula_expr(expr: &qql_core::ast::FormulaExpr) -> serde_json::Valu
 /// Lower a `QueryExpr` to its wire `QueryVariant` representation.
 pub fn lower_query_expr(expr: &QueryExpr) -> Result<QueryVariant, QqlError> {
     Ok(match expr {
-        QueryExpr::Nearest { input, mmr, .. } => QueryVariant::Nearest(NearestQuery {
-            nearest: lower_query_input(input),
-            mmr: mmr.as_ref().map(|m| MmrQueryParams {
-                diversity: m.diversity,
-                candidates_limit: m.candidates,
-            }),
-        }),
+        QueryExpr::Nearest {
+            input, using, mmr, ..
+        } => {
+            let mut nearest = lower_query_input(input);
+            if let PlanQueryInput::Document { model, .. } = &mut nearest {
+                if model.as_deref().unwrap_or("").is_empty()
+                    && using
+                        .as_ref()
+                        .is_some_and(|target| target.name.eq_ignore_ascii_case("bm25"))
+                {
+                    *model = Some("Qdrant/bm25".to_string());
+                }
+            }
+            QueryVariant::Nearest(NearestQuery {
+                nearest,
+                mmr: mmr.as_ref().map(|m| MmrQueryParams {
+                    diversity: m.diversity,
+                    candidates_limit: m.candidates,
+                }),
+            })
+        }
         QueryExpr::Recommend {
             positive,
             negative,
@@ -551,7 +565,7 @@ fn build_query_with_prefetch(
             };
             let dense_prefetch = PrefetchRequest {
                 query: Some(QueryVariant::Nearest(NearestQuery {
-                    nearest: build_text_input(text, model),
+                    nearest: build_text_input(text, model, dense_vector.as_deref()),
                     mmr: None,
                 })),
                 using: dense_vector.clone(),
@@ -564,7 +578,7 @@ fn build_query_with_prefetch(
             };
             let sparse_prefetch = PrefetchRequest {
                 query: Some(QueryVariant::Nearest(NearestQuery {
-                    nearest: build_text_input(text, model),
+                    nearest: build_text_input(text, model, sparse_vector.as_deref()),
                     mmr: None,
                 })),
                 using: sparse_vector.clone(),
@@ -659,6 +673,17 @@ fn build_query_with_prefetch(
                 }
             }
             let using = expression_using(&query.expression).map(str::to_owned);
+            if let QueryVariant::Nearest(nearest) = &mut variant {
+                if let PlanQueryInput::Document { model, .. } = &mut nearest.nearest {
+                    if model.as_deref().unwrap_or("").is_empty()
+                        && using
+                            .as_deref()
+                            .is_some_and(|u| u.eq_ignore_ascii_case("bm25"))
+                    {
+                        *model = Some("Qdrant/bm25".to_string());
+                    }
+                }
+            }
             let prefetches = expression_prefetch(&query.expression);
             let pf_requests: Vec<PrefetchRequest> = prefetches
                 .iter()
@@ -669,10 +694,20 @@ fn build_query_with_prefetch(
     }
 }
 
-fn build_text_input(text: &str, model: &Option<String>) -> PlanQueryInput {
+fn build_text_input(text: &str, model: &Option<String>, using: Option<&str>) -> PlanQueryInput {
+    let resolved_model = match model {
+        Some(m) if !m.is_empty() => Some(m.clone()),
+        _ => {
+            if using.is_some_and(|u| u.eq_ignore_ascii_case("bm25")) {
+                Some("Qdrant/bm25".to_string())
+            } else {
+                model.clone()
+            }
+        }
+    };
     PlanQueryInput::Document {
         text: text.to_string(),
-        model: model.clone(),
+        model: resolved_model,
     }
 }
 
@@ -1398,6 +1433,7 @@ mod tests {
             page: PageSpec {
                 limit: Some(10),
                 offset: None,
+                ..Default::default()
             },
             shard_key: None,
         }));

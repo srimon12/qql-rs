@@ -23,10 +23,17 @@
 //! and `` `...` ``) and comments (`-- ...`) in the source query are preserved
 //! verbatim and never substituted.
 
+use crate::ast::filter::{FilterExpr, PointIdPredicate};
+use crate::ast::formula::FormulaExpr;
+use crate::ast::statement::{
+    PageSpec, PointId, PointSelector, Prefetch, PrefetchSource, QueryExpr, QueryInput, QueryStmt,
+    Stmt, VectorValue,
+};
 use crate::ast::Value;
 use crate::error::QqlError;
 use alloc::format;
 use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 
 /// Check if a string is a simple identifier (starts with ascii alphabetic or `_`,
 /// followed by ascii alphanumeric or `_`).
@@ -70,7 +77,7 @@ fn is_ident_start(b: u8) -> bool {
 
 #[inline]
 fn is_ident_continue(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
+    b.is_ascii_alphanumeric() || b == b'_' || b == b'.'
 }
 
 /// Advance past a `--` line comment. `i` is the first `-`. Stops before `\n`.
@@ -221,7 +228,153 @@ pub fn value_to_literal(value: &Value) -> Result<String, QqlError> {
             out.push('}');
             Ok(out)
         }
+        Value::Param(p) => Ok(alloc::format!(":{}", p)),
+        Value::PositionalParam(_) => Ok("?".to_string()),
     }
+}
+
+/// Convert an AST `Value` into a human-readable literal string, truncating vectors larger than `max_vec_len`.
+pub fn value_to_readable_literal(value: &Value, max_vec_len: usize) -> Result<String, QqlError> {
+    match value {
+        Value::List(items)
+            if items.len() > max_vec_len
+                && items
+                    .iter()
+                    .all(|v| matches!(v, Value::Float(_) | Value::Int(_))) =>
+        {
+            let mut out = String::from("[");
+            let preview_count = max_vec_len.min(items.len());
+            for (i, item) in items.iter().take(preview_count).enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                match item {
+                    Value::Float(f) => {
+                        let s = alloc::format!("{:.4}", f);
+                        let trimmed = s.trim_end_matches('0');
+                        let trimmed = if trimmed.ends_with('.') {
+                            alloc::format!("{}0", trimmed)
+                        } else {
+                            trimmed.to_string()
+                        };
+                        out.push_str(&trimmed);
+                    }
+                    Value::Int(n) => out.push_str(&n.to_string()),
+                    _ => {}
+                }
+            }
+            out.push_str(&alloc::format!(", ... ({} dims)]", items.len()));
+            Ok(out)
+        }
+        Value::List(items) => {
+            let mut out = String::from("[");
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                out.push_str(&value_to_readable_literal(item, max_vec_len)?);
+            }
+            out.push(']');
+            Ok(out)
+        }
+        Value::Dict(entries) => {
+            let mut out = String::from("{");
+            for (i, (k, v)) in entries.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                if is_simple_ident(k) {
+                    out.push_str(k);
+                } else {
+                    out.push_str(&escape_str_literal(k));
+                }
+                out.push_str(": ");
+                out.push_str(&value_to_readable_literal(v, max_vec_len)?);
+            }
+            out.push('}');
+            Ok(out)
+        }
+        other => value_to_literal(other),
+    }
+}
+
+/// Truncate long numeric vector literals inside a QQL query string for compact preview.
+pub fn truncate_vector_literals(source: &str, max_dims: usize) -> String {
+    let bytes = source.as_bytes();
+    let len = bytes.len();
+    let mut out = String::with_capacity(source.len());
+    let mut i = 0;
+    let mut run = 0;
+
+    while i < len {
+        if let Some(next) = skip_protected(bytes, i) {
+            i = next;
+            continue;
+        }
+
+        if bytes[i] == b'[' {
+            let bracket_start = i;
+            let mut j = i + 1;
+            let mut is_numeric_list = true;
+            let mut depth = 1;
+            while j < len {
+                if let Some(next) = skip_protected(bytes, j) {
+                    is_numeric_list = false;
+                    j = next;
+                    continue;
+                }
+                let b = bytes[j];
+                if b == b'[' {
+                    depth += 1;
+                    is_numeric_list = false;
+                } else if b == b']' {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                } else if !(b.is_ascii_whitespace()
+                    || b.is_ascii_digit()
+                    || b == b'.'
+                    || b == b'-'
+                    || b == b'+'
+                    || b == b'e'
+                    || b == b'E'
+                    || b == b',')
+                {
+                    is_numeric_list = false;
+                }
+                j += 1;
+            }
+
+            if depth == 0 && is_numeric_list {
+                let inner = &source[bracket_start + 1..j];
+                let elements: Vec<&str> = inner
+                    .split(',')
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                if elements.len() > max_dims && elements.iter().all(|s| s.parse::<f64>().is_ok()) {
+                    out.push_str(&source[run..bracket_start]);
+                    out.push('[');
+                    for (idx, elem) in elements[..max_dims].iter().enumerate() {
+                        if idx > 0 {
+                            out.push_str(", ");
+                        }
+                        out.push_str(elem);
+                    }
+                    out.push_str(&alloc::format!(", ... ({} dims)]", elements.len()));
+                    i = j + 1;
+                    run = i;
+                    continue;
+                }
+            }
+        }
+
+        i += 1;
+    }
+
+    out.push_str(&source[run..len]);
+    out
 }
 
 /// Substitute named parameters (`:name`) into `source`.
@@ -260,6 +413,9 @@ where
                 let name_start = i;
                 while i < len && is_ident_continue(bytes[i]) {
                     i += 1;
+                }
+                while i > name_start && bytes[i - 1] == b'.' {
+                    i -= 1;
                 }
                 let name = ident_at(source, name_start, i);
                 if let Some(val) = lookup(name) {
@@ -352,6 +508,693 @@ pub fn bind_positional(source: &str, params: &[Value]) -> Result<String, QqlErro
     }
 
     Ok(out)
+}
+
+/// Substitute named parameters (`:name`) into `source`, truncating long vector literals for readable preview.
+pub fn bind_named_readable<F>(source: &str, lookup: F, max_dims: usize) -> Result<String, QqlError>
+where
+    F: Fn(&str) -> Option<Value>,
+{
+    let bound = bind_named(source, lookup)?;
+    Ok(truncate_vector_literals(&bound, max_dims))
+}
+
+/// Substitute positional parameters (`?`) sequentially into `source`, truncating long vector literals for readable preview.
+pub fn bind_positional_readable(
+    source: &str,
+    params: &[Value],
+    max_dims: usize,
+) -> Result<String, QqlError> {
+    let bound = bind_positional(source, params)?;
+    Ok(truncate_vector_literals(&bound, max_dims))
+}
+
+fn resolve_param<F>(name: &str, lookup: &F) -> Result<Value, QqlError>
+where
+    F: Fn(&str) -> Option<Value>,
+{
+    if let Some(val) = lookup(name) {
+        Ok(val)
+    } else {
+        Err(QqlError::validation(
+            "QQL-BIND-MISSING-PARAM",
+            alloc::format!("missing value for named parameter ':{}'", name),
+            None,
+        ))
+    }
+}
+
+fn resolve_positional(idx: usize, positional: &[Value]) -> Result<Value, QqlError> {
+    if idx < positional.len() {
+        Ok(positional[idx].clone())
+    } else {
+        Err(QqlError::validation(
+            "QQL-BIND-MISSING-PARAM",
+            alloc::format!(
+                "positional parameter ? index {} out of range (total provided: {})",
+                idx + 1,
+                positional.len()
+            ),
+            None,
+        ))
+    }
+}
+
+/// Recursively bind parameters into an AST `Value` in-place.
+pub fn bind_value<F>(value: &mut Value, lookup: &F, positional: &[Value]) -> Result<(), QqlError>
+where
+    F: Fn(&str) -> Option<Value>,
+{
+    match value {
+        Value::Param(name) => {
+            let resolved = resolve_param(name, lookup)?;
+            *value = resolved;
+        }
+        Value::PositionalParam(idx) => {
+            let resolved = resolve_positional(*idx, positional)?;
+            *value = resolved;
+        }
+        Value::List(items) => {
+            for item in items {
+                bind_value(item, lookup, positional)?;
+            }
+        }
+        Value::Dict(entries) => {
+            for (_k, v) in entries {
+                bind_value(v, lookup, positional)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Bind parameters into a `PointId` in-place.
+pub fn bind_point_id<F>(id: &mut PointId, lookup: &F, positional: &[Value]) -> Result<(), QqlError>
+where
+    F: Fn(&str) -> Option<Value>,
+{
+    match id {
+        PointId::Param(name) => {
+            let val = resolve_param(name, lookup)?;
+            *id = value_to_point_id(&val)?;
+        }
+        PointId::PositionalParam(idx) => {
+            let val = resolve_positional(*idx, positional)?;
+            *id = value_to_point_id(&val)?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn value_to_point_id(val: &Value) -> Result<PointId, QqlError> {
+    match val {
+        Value::Int(n) if *n >= 0 => Ok(PointId::Number(*n as u64)),
+        Value::Str(s) => Ok(PointId::String(s.clone())),
+        _ => Err(QqlError::validation(
+            "QQL-BIND-INVALID-POINT-ID",
+            alloc::format!("cannot convert parameter value '{:?}' to point id", val),
+            None,
+        )),
+    }
+}
+
+/// Bind parameters into a `QueryInput` in-place.
+pub fn bind_query_input<F>(
+    input: &mut QueryInput,
+    lookup: &F,
+    positional: &[Value],
+) -> Result<(), QqlError>
+where
+    F: Fn(&str) -> Option<Value>,
+{
+    match input {
+        QueryInput::Param(name) => {
+            let val = resolve_param(name, lookup)?;
+            *input = value_to_query_input(val)?;
+        }
+        QueryInput::PositionalParam(idx) => {
+            let val = resolve_positional(*idx, positional)?;
+            *input = value_to_query_input(val)?;
+        }
+        QueryInput::Point(point) => {
+            bind_point_id(point, lookup, positional)?;
+        }
+        QueryInput::Text { text, .. } => {
+            if let Some(param_name) = text.strip_prefix(':') {
+                let val = resolve_param(param_name, lookup)?;
+                if let Value::Str(s) = val {
+                    *text = s;
+                } else {
+                    return Err(QqlError::validation(
+                        "QQL-BIND-TYPE-MISMATCH",
+                        alloc::format!(
+                            "parameter ':{}' for TEXT query must be a string",
+                            param_name
+                        ),
+                        None,
+                    ));
+                }
+            } else if let Some(idx_str) = text.strip_prefix('?') {
+                if let Ok(idx) = idx_str.parse::<usize>() {
+                    let val = resolve_positional(idx, positional)?;
+                    if let Value::Str(s) = val {
+                        *text = s;
+                    } else {
+                        return Err(QqlError::validation(
+                            "QQL-BIND-TYPE-MISMATCH",
+                            alloc::format!(
+                                "positional parameter ?{} for TEXT query must be a string",
+                                idx
+                            ),
+                            None,
+                        ));
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn value_to_query_input(val: Value) -> Result<QueryInput, QqlError> {
+    match val {
+        Value::Str(s) => Ok(QueryInput::Text {
+            text: s,
+            model: None,
+        }),
+        Value::List(items) => {
+            let mut floats = Vec::with_capacity(items.len());
+            for item in items {
+                match item {
+                    Value::Float(f) => floats.push(f as f32),
+                    Value::Int(i) => floats.push(i as f32),
+                    _ => {
+                        return Err(QqlError::validation(
+                            "QQL-BIND-TYPE-MISMATCH",
+                            "list parameter bound to query input must contain only numbers",
+                            None,
+                        ));
+                    }
+                }
+            }
+            Ok(QueryInput::Vector(VectorValue::Dense(floats)))
+        }
+        Value::Int(n) if n >= 0 => Ok(QueryInput::Point(PointId::Number(n as u64))),
+        _ => Err(QqlError::validation(
+            "QQL-BIND-TYPE-MISMATCH",
+            alloc::format!("unsupported value type for query input: {:?}", val),
+            None,
+        )),
+    }
+}
+
+/// Recursively bind parameters into a `FilterExpr` in-place.
+pub fn bind_filter<F>(
+    filter: &mut FilterExpr,
+    lookup: &F,
+    positional: &[Value],
+) -> Result<(), QqlError>
+where
+    F: Fn(&str) -> Option<Value>,
+{
+    match filter {
+        FilterExpr::PointId(pred) => match pred {
+            PointIdPredicate::Eq(id) => bind_point_id(id, lookup, positional)?,
+            PointIdPredicate::In(ids) => {
+                for id in ids {
+                    bind_point_id(id, lookup, positional)?;
+                }
+            }
+        },
+        FilterExpr::Compare { value, .. } => {
+            bind_value(value, lookup, positional)?;
+        }
+        FilterExpr::Between { low, high, .. } => {
+            bind_value(low, lookup, positional)?;
+            bind_value(high, lookup, positional)?;
+        }
+        FilterExpr::In { values, .. } | FilterExpr::MatchAny { values, .. } => {
+            for v in values {
+                bind_value(v, lookup, positional)?;
+            }
+        }
+        FilterExpr::And { operands } | FilterExpr::Or { operands } => {
+            for op in operands {
+                bind_filter(op, lookup, positional)?;
+            }
+        }
+        FilterExpr::Not { operand } => {
+            bind_filter(operand, lookup, positional)?;
+        }
+        FilterExpr::Nested { filter, .. } => {
+            bind_filter(filter, lookup, positional)?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Recursively bind parameters into a `FormulaExpr` in-place.
+pub fn bind_formula<F>(
+    formula: &mut FormulaExpr,
+    lookup: &F,
+    positional: &[Value],
+) -> Result<(), QqlError>
+where
+    F: Fn(&str) -> Option<Value>,
+{
+    match formula {
+        FormulaExpr::Variable { name } => {
+            if let Some(param_name) = name.strip_prefix(':') {
+                let val = resolve_param(param_name, lookup)?;
+                *formula = value_to_formula_constant(val)?;
+            } else if let Some(idx_str) = name.strip_prefix('?') {
+                if let Ok(idx) = idx_str.parse::<usize>() {
+                    let val = resolve_positional(idx, positional)?;
+                    *formula = value_to_formula_constant(val)?;
+                }
+            }
+        }
+        FormulaExpr::Sum { left, right }
+        | FormulaExpr::Sub { left, right }
+        | FormulaExpr::Mul { left, right }
+        | FormulaExpr::Div { left, right, .. }
+        | FormulaExpr::Pow {
+            base: left,
+            exponent: right,
+        } => {
+            bind_formula(left, lookup, positional)?;
+            bind_formula(right, lookup, positional)?;
+        }
+        FormulaExpr::Neg { operand }
+        | FormulaExpr::Abs { x: operand }
+        | FormulaExpr::Sqrt { x: operand }
+        | FormulaExpr::Log { x: operand }
+        | FormulaExpr::Ln { x: operand }
+        | FormulaExpr::Exp { x: operand }
+        | FormulaExpr::Acosh { x: operand } => {
+            bind_formula(operand, lookup, positional)?;
+        }
+        FormulaExpr::Max { args } | FormulaExpr::Min { args } => {
+            for arg in args {
+                bind_formula(arg, lookup, positional)?;
+            }
+        }
+        FormulaExpr::Decay { x, target, .. } => {
+            bind_formula(x, lookup, positional)?;
+            if let Some(t) = target {
+                bind_formula(t, lookup, positional)?;
+            }
+        }
+        FormulaExpr::Case { cond, then_, else_ } => {
+            bind_filter(cond, lookup, positional)?;
+            bind_formula(then_, lookup, positional)?;
+            bind_formula(else_, lookup, positional)?;
+        }
+        FormulaExpr::MatchCondition { values, .. } => {
+            for v in values {
+                bind_value(v, lookup, positional)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn looks_like_iso_datetime(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    bytes.len() >= 10
+        && bytes[0..4].iter().all(|b| b.is_ascii_digit())
+        && bytes[4] == b'-'
+        && bytes[5..7].iter().all(|b| b.is_ascii_digit())
+        && bytes[7] == b'-'
+        && bytes[8..10].iter().all(|b| b.is_ascii_digit())
+}
+
+fn value_to_u64(val: &Value, clause: &str) -> Result<u64, QqlError> {
+    match val {
+        Value::Int(n) if *n >= 0 => Ok(*n as u64),
+        _ => Err(QqlError::validation(
+            "QQL-BIND-INVALID-INTEGER",
+            alloc::format!("{} parameter must be a non-negative integer", clause),
+            None,
+        )),
+    }
+}
+
+fn value_to_formula_constant(val: Value) -> Result<FormulaExpr, QqlError> {
+    match val {
+        Value::Float(f) => Ok(FormulaExpr::Constant { value: f }),
+        Value::Int(i) => Ok(FormulaExpr::Constant { value: i as f64 }),
+        Value::Str(s) => {
+            if looks_like_iso_datetime(&s) {
+                Ok(FormulaExpr::Datetime { value: s })
+            } else if let Ok(f) = s.parse::<f64>() {
+                Ok(FormulaExpr::Constant { value: f })
+            } else {
+                Ok(FormulaExpr::Variable { name: s })
+            }
+        }
+        _ => Err(QqlError::validation(
+            "QQL-BIND-FORMULA-TYPE",
+            alloc::format!("formula parameter cannot be bound to value: {:?}", val),
+            None,
+        )),
+    }
+}
+
+/// Bind parameters into a `PageSpec` in-place.
+pub fn bind_page_spec<F>(
+    page: &mut PageSpec,
+    lookup: &F,
+    positional: &[Value],
+) -> Result<(), QqlError>
+where
+    F: Fn(&str) -> Option<Value>,
+{
+    if let Some(param) = &page.limit_param {
+        if let Some(name) = param.strip_prefix(':') {
+            let val = resolve_param(name, lookup)?;
+            page.limit = Some(value_to_u64(&val, "LIMIT")?);
+        } else if let Some(idx_str) = param.strip_prefix('?') {
+            if let Ok(idx) = idx_str.parse::<usize>() {
+                let val = resolve_positional(idx, positional)?;
+                page.limit = Some(value_to_u64(&val, "LIMIT")?);
+            }
+        } else {
+            let val = resolve_param(param, lookup)?;
+            page.limit = Some(value_to_u64(&val, "LIMIT")?);
+        }
+        page.limit_param = None;
+    }
+    if let Some(param) = &page.offset_param {
+        if let Some(name) = param.strip_prefix(':') {
+            let val = resolve_param(name, lookup)?;
+            page.offset = Some(value_to_u64(&val, "OFFSET")?);
+        } else if let Some(idx_str) = param.strip_prefix('?') {
+            if let Ok(idx) = idx_str.parse::<usize>() {
+                let val = resolve_positional(idx, positional)?;
+                page.offset = Some(value_to_u64(&val, "OFFSET")?);
+            }
+        } else {
+            let val = resolve_param(param, lookup)?;
+            page.offset = Some(value_to_u64(&val, "OFFSET")?);
+        }
+        page.offset_param = None;
+    }
+    Ok(())
+}
+
+fn bind_point_selector<F>(
+    sel: &mut PointSelector,
+    lookup: &F,
+    positional: &[Value],
+) -> Result<(), QqlError>
+where
+    F: Fn(&str) -> Option<Value>,
+{
+    match sel {
+        PointSelector::Id(id) => bind_point_id(id, lookup, positional),
+        PointSelector::Ids(ids) => {
+            for id in ids {
+                bind_point_id(id, lookup, positional)?;
+            }
+            Ok(())
+        }
+        PointSelector::Filter(filter) => bind_filter(filter, lookup, positional),
+    }
+}
+
+fn bind_prefetch<F>(
+    prefetch: &mut Prefetch,
+    lookup: &F,
+    positional: &[Value],
+) -> Result<(), QqlError>
+where
+    F: Fn(&str) -> Option<Value>,
+{
+    match &mut prefetch.source {
+        PrefetchSource::Query(sub) => bind_query_stmt(sub, lookup, positional)?,
+        PrefetchSource::Cte(_) => {}
+    }
+    if let Some(f) = &mut prefetch.filter {
+        bind_filter(f, lookup, positional)?;
+    }
+    Ok(())
+}
+
+/// Recursively bind parameters into a `QueryExpr` in-place.
+pub fn bind_query_expr<F>(
+    expr: &mut QueryExpr,
+    lookup: &F,
+    positional: &[Value],
+) -> Result<(), QqlError>
+where
+    F: Fn(&str) -> Option<Value>,
+{
+    match expr {
+        QueryExpr::Points { ids } => {
+            for id in ids {
+                bind_point_id(id, lookup, positional)?;
+            }
+        }
+        QueryExpr::Nearest {
+            input, prefetch, ..
+        } => {
+            bind_query_input(input, lookup, positional)?;
+            for p in prefetch {
+                bind_prefetch(p, lookup, positional)?;
+            }
+        }
+        QueryExpr::Recommend {
+            positive,
+            negative,
+            prefetch,
+            ..
+        } => {
+            for pos in positive {
+                bind_query_input(pos, lookup, positional)?;
+            }
+            for neg in negative {
+                bind_query_input(neg, lookup, positional)?;
+            }
+            for p in prefetch {
+                bind_prefetch(p, lookup, positional)?;
+            }
+        }
+        QueryExpr::Context {
+            pairs, prefetch, ..
+        } => {
+            for pair in pairs {
+                bind_query_input(&mut pair.positive, lookup, positional)?;
+                bind_query_input(&mut pair.negative, lookup, positional)?;
+            }
+            for p in prefetch {
+                bind_prefetch(p, lookup, positional)?;
+            }
+        }
+        QueryExpr::Discover {
+            target,
+            context,
+            prefetch,
+            ..
+        } => {
+            bind_query_input(target, lookup, positional)?;
+            for pair in context {
+                bind_query_input(&mut pair.positive, lookup, positional)?;
+                bind_query_input(&mut pair.negative, lookup, positional)?;
+            }
+            for p in prefetch {
+                bind_prefetch(p, lookup, positional)?;
+            }
+        }
+        QueryExpr::OrderBy { .. } | QueryExpr::SampleRandom => {}
+        QueryExpr::Fusion { prefetch, .. } => {
+            for p in prefetch {
+                bind_prefetch(p, lookup, positional)?;
+            }
+        }
+        QueryExpr::Formula {
+            expression,
+            defaults,
+            prefetch,
+        } => {
+            bind_formula(expression, lookup, positional)?;
+            for (_k, v) in defaults {
+                bind_value(v, lookup, positional)?;
+            }
+            for p in prefetch {
+                bind_prefetch(p, lookup, positional)?;
+            }
+        }
+        QueryExpr::RelevanceFeedback {
+            target,
+            feedback,
+            prefetch,
+            ..
+        } => {
+            bind_query_input(target, lookup, positional)?;
+            for item in feedback {
+                bind_query_input(&mut item.example, lookup, positional)?;
+            }
+            for p in prefetch {
+                bind_prefetch(p, lookup, positional)?;
+            }
+        }
+        QueryExpr::Hybrid { text, .. } => {
+            if let Some(param_name) = text.strip_prefix(':') {
+                let val = resolve_param(param_name, lookup)?;
+                if let Value::Str(s) = val {
+                    *text = s;
+                } else {
+                    return Err(QqlError::validation(
+                        "QQL-BIND-TYPE-MISMATCH",
+                        alloc::format!(
+                            "parameter ':{}' for HYBRID query must be a string",
+                            param_name
+                        ),
+                        None,
+                    ));
+                }
+            } else if let Some(idx_str) = text.strip_prefix('?') {
+                if let Ok(idx) = idx_str.parse::<usize>() {
+                    let val = resolve_positional(idx, positional)?;
+                    if let Value::Str(s) = val {
+                        *text = s;
+                    } else {
+                        return Err(QqlError::validation(
+                            "QQL-BIND-TYPE-MISMATCH",
+                            alloc::format!(
+                                "positional parameter ?{} for HYBRID query must be a string",
+                                idx
+                            ),
+                            None,
+                        ));
+                    }
+                }
+            }
+        }
+        QueryExpr::Rerank {
+            input, prefetch, ..
+        } => {
+            bind_query_input(input, lookup, positional)?;
+            for p in prefetch {
+                bind_prefetch(p, lookup, positional)?;
+            }
+        }
+        QueryExpr::CrossRerank {
+            query, prefetch, ..
+        } => {
+            if let Some(param_name) = query.strip_prefix(':') {
+                let val = resolve_param(param_name, lookup)?;
+                if let Value::Str(s) = val {
+                    *query = s;
+                } else {
+                    return Err(QqlError::validation(
+                        "QQL-BIND-TYPE-MISMATCH",
+                        alloc::format!(
+                            "parameter ':{}' for CROSS RERANK query must be a string",
+                            param_name
+                        ),
+                        None,
+                    ));
+                }
+            } else if let Some(idx_str) = query.strip_prefix('?') {
+                if let Ok(idx) = idx_str.parse::<usize>() {
+                    let val = resolve_positional(idx, positional)?;
+                    if let Value::Str(s) = val {
+                        *query = s;
+                    } else {
+                        return Err(QqlError::validation(
+                            "QQL-BIND-TYPE-MISMATCH",
+                            alloc::format!(
+                                "positional parameter ?{} for CROSS RERANK query must be a string",
+                                idx
+                            ),
+                            None,
+                        ));
+                    }
+                }
+            }
+            for p in prefetch {
+                bind_prefetch(p, lookup, positional)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Recursively bind parameters into a `QueryStmt` in-place.
+pub fn bind_query_stmt<F>(
+    query: &mut QueryStmt,
+    lookup: &F,
+    positional: &[Value],
+) -> Result<(), QqlError>
+where
+    F: Fn(&str) -> Option<Value>,
+{
+    for cte in &mut query.ctes {
+        bind_query_stmt(&mut cte.query, lookup, positional)?;
+    }
+    bind_query_expr(&mut query.expression, lookup, positional)?;
+    if let Some(filter) = &mut query.filter {
+        bind_filter(filter, lookup, positional)?;
+    }
+    bind_page_spec(&mut query.page, lookup, positional)?;
+    Ok(())
+}
+
+/// Bind parameters into a parsed AST `Stmt` in-place.
+pub fn bind_stmt<F>(stmt: &mut Stmt, lookup: F, positional: &[Value]) -> Result<(), QqlError>
+where
+    F: Fn(&str) -> Option<Value>,
+{
+    match stmt {
+        Stmt::Query(query) => bind_query_stmt(query, &lookup, positional),
+        Stmt::Scroll(scroll) => {
+            if let Some(filter) = &mut scroll.filter {
+                bind_filter(filter, &lookup, positional)?;
+            }
+            Ok(())
+        }
+        Stmt::Upsert(upsert) => {
+            for point in &mut upsert.points {
+                bind_point_id(&mut point.id, &lookup, positional)?;
+                for (_k, v) in &mut point.payload {
+                    bind_value(v, &lookup, positional)?;
+                }
+            }
+            Ok(())
+        }
+        Stmt::Delete(del) => bind_point_selector(&mut del.selector, &lookup, positional),
+        Stmt::ClearPayload(cp) => bind_point_selector(&mut cp.selector, &lookup, positional),
+        Stmt::DeletePayload(dp) => bind_point_selector(&mut dp.selector, &lookup, positional),
+        Stmt::DeleteVector(dv) => bind_point_selector(&mut dv.selector, &lookup, positional),
+        Stmt::UpdateVector(uv) => bind_point_id(&mut uv.point_id, &lookup, positional),
+        Stmt::UpdatePayload(up) => {
+            bind_point_selector(&mut up.selector, &lookup, positional)?;
+            for (_k, v) in &mut up.payload {
+                bind_value(v, &lookup, positional)?;
+            }
+            Ok(())
+        }
+        Stmt::Count(count) => {
+            if let Some(filter) = &mut count.filter {
+                bind_filter(filter, &lookup, positional)?;
+            }
+            Ok(())
+        }
+        Stmt::Facet(facet) => {
+            if let Some(filter) = &mut facet.filter {
+                bind_filter(filter, &lookup, positional)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
 }
 
 #[cfg(test)]
@@ -542,5 +1385,63 @@ mod tests {
         assert!(err
             .to_string()
             .contains("no '?' placeholders found in query"));
+    }
+
+    #[test]
+    fn test_dotted_parameter_names() {
+        let query = "QUERY TEXT :center.query FROM docs WHERE lat = :center.lat AND lon = :center.lon LIMIT 5;";
+        let result = bind_named(query, |name| match name {
+            "center.query" => Some(Value::Str("coffee".into())),
+            "center.lat" => Some(Value::Float(37.7749)),
+            "center.lon" => Some(Value::Float(-122.4194)),
+            _ => None,
+        })
+        .unwrap();
+
+        assert_eq!(
+            result,
+            "QUERY TEXT 'coffee' FROM docs WHERE lat = 37.7749 AND lon = -122.4194 LIMIT 5;"
+        );
+    }
+
+    #[test]
+    fn test_bind_stmt_ast() {
+        let query =
+            "QUERY TEXT :q FROM docs WHERE category = :cat AND score > :min_score LIMIT :lim;";
+        let mut stmt = Parser::parse(query).expect("query with parameters should parse into AST");
+
+        bind_stmt(
+            &mut stmt,
+            |name| match name {
+                "q" => Some(Value::Str("headache".into())),
+                "cat" => Some(Value::Str("medical".into())),
+                "min_score" => Some(Value::Float(0.75)),
+                "lim" => Some(Value::Int(10)),
+                _ => None,
+            },
+            &[],
+        )
+        .expect("bind_stmt should succeed");
+
+        let formatted = crate::fmt::format_stmt(&stmt);
+        assert_eq!(
+            formatted,
+            "QUERY 'headache' FROM docs WHERE category = 'medical' AND score > 0.75 LIMIT 10"
+        );
+    }
+
+    #[test]
+    fn test_truncate_vector_literals() {
+        let qql = "QUERY VECTOR [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8] FROM docs LIMIT 5;";
+        let truncated = truncate_vector_literals(qql, 3);
+        assert_eq!(
+            truncated,
+            "QUERY VECTOR [0.1, 0.2, 0.3, ... (8 dims)] FROM docs LIMIT 5;"
+        );
+
+        // String literals inside queries are preserved
+        let with_str = "QUERY TEXT '[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]' FROM docs LIMIT 5;";
+        let not_truncated = truncate_vector_literals(with_str, 3);
+        assert_eq!(not_truncated, with_str);
     }
 }

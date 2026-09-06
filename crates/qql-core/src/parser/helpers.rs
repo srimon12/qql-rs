@@ -191,6 +191,16 @@ impl<'a> AstLowerer<'a> {
                     )
                 })
             }
+            TokenKind::Colon => {
+                self.advance()?;
+                let name = self.parse_param_name()?;
+                Ok(PointId::Param(name))
+            }
+            TokenKind::Question => {
+                self.advance()?;
+                let idx = self.next_positional_param();
+                Ok(PointId::PositionalParam(idx))
+            }
             _ => Err(QqlError::parse(
                 "QQL-PARSE-POINT-ID",
                 alloc::format!(

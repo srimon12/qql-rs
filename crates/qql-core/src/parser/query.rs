@@ -172,18 +172,38 @@ impl<'a> AstLowerer<'a> {
                 None
             };
 
-        let limit = if self.peek()?.kind == TokenKind::Limit {
+        let (limit, limit_param) = if self.peek()?.kind == TokenKind::Limit {
             self.advance()?;
-            Some(self.parse_positive_u64("LIMIT")?)
+            if self.peek()?.kind == TokenKind::Colon {
+                self.advance()?;
+                let name = self.parse_param_name()?;
+                (None, Some(name))
+            } else if self.peek()?.kind == TokenKind::Question {
+                self.advance()?;
+                let idx = self.next_positional_param();
+                (None, Some(alloc::format!("?{}", idx)))
+            } else {
+                (Some(self.parse_positive_u64("LIMIT")?), None)
+            }
         } else {
-            None
+            (None, None)
         };
 
-        let offset = if self.peek()?.kind == TokenKind::Offset {
+        let (offset, offset_param) = if self.peek()?.kind == TokenKind::Offset {
             self.advance()?;
-            Some(self.parse_non_negative_u64("OFFSET")?)
+            if self.peek()?.kind == TokenKind::Colon {
+                self.advance()?;
+                let name = self.parse_param_name()?;
+                (None, Some(name))
+            } else if self.peek()?.kind == TokenKind::Question {
+                self.advance()?;
+                let idx = self.next_positional_param();
+                (None, Some(alloc::format!("?{}", idx)))
+            } else {
+                (Some(self.parse_non_negative_u64("OFFSET")?), None)
+            }
         } else {
-            None
+            (None, None)
         };
 
         if self.is_query_clause_start()? {
@@ -216,7 +236,12 @@ impl<'a> AstLowerer<'a> {
             score_threshold,
             group,
             output: QueryOutput { payload, vectors },
-            page: PageSpec { limit, offset },
+            page: PageSpec {
+                limit,
+                offset,
+                limit_param,
+                offset_param,
+            },
             shard_key,
         })
     }
@@ -362,7 +387,17 @@ impl<'a> AstLowerer<'a> {
     fn parse_query_input(&mut self) -> Result<QueryInput, QqlError> {
         if self.peek_word("TEXT")? {
             self.advance()?;
-            let text = self.parse_string()?;
+            let text = if self.peek()?.kind == TokenKind::Colon {
+                self.advance()?;
+                let name = self.parse_param_name()?;
+                alloc::format!(":{}", name)
+            } else if self.peek()?.kind == TokenKind::Question {
+                self.advance()?;
+                let idx = self.next_positional_param();
+                alloc::format!("?{}", idx)
+            } else {
+                self.parse_string()?
+            };
             let model = self.parse_optional_model_string()?;
             return Ok(QueryInput::Text { text, model });
         }
@@ -384,6 +419,16 @@ impl<'a> AstLowerer<'a> {
             self.advance()?;
             return self.parse_point_id("POINT").map(QueryInput::Point);
         }
+        if self.peek()?.kind == TokenKind::Colon {
+            self.advance()?;
+            let name = self.parse_param_name()?;
+            return Ok(QueryInput::Param(name));
+        }
+        if self.peek()?.kind == TokenKind::Question {
+            self.advance()?;
+            let idx = self.next_positional_param();
+            return Ok(QueryInput::PositionalParam(idx));
+        }
         if self.peek()?.kind == TokenKind::String {
             return self
                 .parse_string()
@@ -391,7 +436,7 @@ impl<'a> AstLowerer<'a> {
         }
         Err(QqlError::parse(
             "QQL-PARSE-QUERY-INPUT",
-            "query input requires TEXT, IMAGE, VECTOR, or POINT",
+            "query input requires TEXT, IMAGE, VECTOR, POINT, or parameter",
             self.peek()?.span,
         ))
     }

@@ -95,8 +95,16 @@ QUERY FUSION RRF FROM incidents
     general SCORE THRESHOLD 0.4,
     keyword SCORE THRESHOLD 0.3
   )
+  PARAMS (rrf_k = 60, rrf_weights = [0.5, 0.3, 0.2])
   LIMIT 10;
 ```
+
+**Key decisions:**
+- `high_priority`: High-precision leg retrieving 50 critical open incidents with threshold 0.7.
+- `general`: Dense semantic retrieval for 200 candidates.
+- `keyword`: BM25 sparse keyword retrieval for 200 candidates.
+- `QUERY FUSION RRF`: Merges rankings seamlessly using reciprocal rank fusion.
+- `PARAMS (rrf_k = 60, rrf_weights = [...])`: Configure the RRF smoothing constant `k` and per-prefetch weights directly in `PARAMS (...)` (never in `WITH (...)`).
 
 ---
 

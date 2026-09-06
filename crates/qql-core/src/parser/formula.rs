@@ -42,6 +42,8 @@ fn formula_prefix_parse_fn(tok: &crate::token::Token<'_>) -> Option<PrefixParseF
             TokenKind::String => Some(parse_formula_string),
             TokenKind::Minus => Some(parse_formula_prefix_expression),
             TokenKind::Lparen => Some(parse_formula_grouped_expression),
+            TokenKind::Colon => Some(parse_formula_param),
+            TokenKind::Question => Some(parse_formula_positional_param),
             _ => None,
         }
     }
@@ -135,6 +137,20 @@ fn parse_formula_string(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, QqlError>
     } else {
         Ok(FormulaExpr::Variable { name: s })
     }
+}
+
+fn parse_formula_param(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, QqlError> {
+    p.advance()?; // consume ':'
+    let name = p.parse_param_name()?;
+    Ok(FormulaExpr::Variable { name })
+}
+
+fn parse_formula_positional_param(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, QqlError> {
+    p.advance()?; // consume '?'
+    let idx = p.next_positional_param();
+    Ok(FormulaExpr::Variable {
+        name: alloc::format!("?{}", idx),
+    })
 }
 
 fn parse_formula_prefix_expression(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, QqlError> {
