@@ -141,9 +141,16 @@ stmt.injectFilter("tenant_id", "=", "acme");
 stmt.shardKey = "acme";
 console.log(stmt.shardKey);
 
-const route = stmt.compileRoute();          // { stmt_type, method, path, payload }
+// Bind :name (object) or ? (array) parameters; returns a new bound Stmt.
+const bound = stmt.bind({ q: "search", lim: 5 });
+
+const route = stmt.compileRoute({ q: "search", lim: 5 }); // { stmt_type, method, path, payload }
 const astJson = stmt.toJSON();              // string
 const astObject = stmt.toObject();          // plain JS object
+
+console.log(stmt.toString());          // canonical, re-parseable QQL
+console.log(stmt.toReadableString());  // readable preview; long vectors truncated
+console.log(stmt.explain());           // execution plan for this statement
 
 // Transferable byte compile.
 const routeBytes = stmt.compileRouteBytes();
@@ -158,9 +165,13 @@ Methods:
 | `new Stmt(source)` | owned handle | Parse exactly one statement |
 | `injectFilter(field, op, value)` | void | Inject a trusted predicate (mutates in place) |
 | `shardKey` getter / setter | string or null | Assign or read QQL `SHARD` routing |
+| `bind(params?)` | bound `Stmt` | Substitute `:name` / `?` parameters; params optional |
 | `toJSON()` | string | Serialize the AST to JSON |
 | `toObject()` | object | Serialize the AST to a JS object |
-| `compileRoute()` | `{stmt_type, method, path, payload}` | Compile this statement to a Qdrant REST route |
+| `toString()` | string | Canonical, re-parseable QQL |
+| `toReadableString()` | string | Readable preview (truncated vectors, may not re-parse) |
+| `explain()` | string | Execution plan for this statement |
+| `compileRoute(params?)` | `{stmt_type, method, path, payload}` | Compile this statement to a Qdrant REST route (optionally binding params) |
 | `compileRouteBytes()` | `Uint8Array` | Transferable route compile |
 | `free()` / `[Symbol.dispose]()` | — | Release WASM memory (`using` works in TypeScript) |
 
@@ -184,11 +195,17 @@ try {
 ```
 
 `execute(query | string[], options)` accepts a single statement, a
-semicolon-delimited script, or an array of independent sources. `options.onError`
-is `"stop"` (default) or `"continue"`. `options.params` is an object for `:name`
-or an array for `?` — the same shape as `bind(query, params)`. `executeStmt(stmt)`
-runs a pre-parsed `Stmt` handle. `compile(query)` and `explain(query)` inspect a
-route or plan without touching the network.
+semicolon-delimited script, or an array of independent sources. `ExecuteOptions`
+is `{ onError?, params? }` — `onError` is `"stop"` (default) or `"continue"`,
+and `params` is an object for `:name` or an array for `?` — the same shape as
+`bind(query, params)`. For a batch or script, `params` may be an array with one
+entry per statement; the length must match the statement count exactly.
+`executeStmt(stmt, options)` runs a pre-parsed `Stmt` handle. `compile(query)`
+and `explain(query)` inspect a route or plan without touching the network.
+
+The report is a plain `{ ok, results, succeeded, failed }` object — WASM has no
+typed `ExecutionReport` accessors or `executeHits`; read `results[i].data`
+directly or use the Python/Node SDKs for `hits()` / `ScoredPoint`.
 
 ```javascript
 await client.execute("QUERY TEXT :q FROM docs LIMIT :lim", {
@@ -266,10 +283,12 @@ releases it automatically.
 | `analyze(source)` | validity, tokens, AST, routes, explain, error | Editors and offline diagnostics |
 | `compile`, `explain`, `inject_filter` | route, text, rewritten AST | One-shot offline planning helpers |
 | `compileBytes`, `explainBytes` | `Uint8Array` | Transferable worker or IPC payloads |
-| `bind(query, params)` | bound source string | Substitute `:name` (object) or `?` (array) placeholders offline |
+| `bind(query, params?, { truncateVectors })` | bound source string | Substitute `:name` (object) or `?` (array) placeholders offline; `params` optional — omitted returns the query unchanged |
 | `formatQuery` | canonical source string | Normalize clause order, casing, and whitespace |
-| `new Stmt(source)` | owned statement handle | `injectFilter`, route compile, and shard assignment |
+| `new Stmt(source)` | owned statement handle | `injectFilter`, bind, route compile, and shard assignment |
 | `Stmt.injectFilter`, `Stmt.shardKey` | mutated statement handle | Trusted filtering and optional routing |
+| `Stmt.bind`, `Stmt.compileRoute` | bound handle, route | Prepared-statement binding and offline route compile |
+| `Stmt.toString`, `Stmt.toReadableString`, `Stmt.explain` | text | Canonical form, readable preview, and per-statement plan |
 | `Stmt.toObject`, `toJSON`, `compileRoute` | AST or route | Inspect a single owned statement |
 | `Stmt.compileRouteBytes` | `Uint8Array` | Transferable single-statement route |
 | `new Client`, `execute`, `executeStmt` | execution report promise | Direct browser-to-Qdrant REST calls |

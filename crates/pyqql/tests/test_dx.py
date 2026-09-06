@@ -20,6 +20,15 @@ class TestDxImprovements(unittest.TestCase):
         self.assertEqual(route["payload"]["limit"], 5)
         self.assertEqual(len(route["payload"]["query"]["nearest"]), 3)
 
+        # Module compile_query and Client.compile accept params too
+        # (parity with nqql compileQuery / Client.compile).
+        route2 = pyqql.compile_query(
+            "QUERY :v FROM test_coll LIMIT :lim",
+            params={"v": [0.1, 0.2, 0.3], "lim": 5},
+        )
+        self.assertEqual(route2["payload"]["limit"], 5)
+        self.assertEqual(len(route2["payload"]["query"]["nearest"]), 3)
+
     def test_vector_truncation_for_readable_eyeball(self):
         # 7. bind() vector truncation for human readability
         vec = [0.1 * i for i in range(128)]

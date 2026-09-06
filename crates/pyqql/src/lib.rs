@@ -198,8 +198,14 @@ fn tokenize<'py>(input: &str, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict
 }
 
 #[pyfunction]
-fn compile_query<'py>(py: Python<'py>, input: &str) -> PyResult<Bound<'py, PyAny>> {
-    let stmt = Parser::parse(input).map_err(qql_py_syntax_error)?;
+#[pyo3(signature = (input, params=None))]
+fn compile_query<'py>(
+    py: Python<'py>,
+    input: &str,
+    params: Option<&Bound<'py, PyAny>>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let mut stmt = Parser::parse(input).map_err(qql_py_syntax_error)?;
+    bind_py_stmt(&mut stmt, params)?;
     let compiled = qql_plan::routing::compile_statement(&stmt).map_err(qql_py_syntax_error)?;
     let (method, path, payload) = match compiled.route {
         Some(route) => {
@@ -338,8 +344,15 @@ impl PyClient {
     }
 
     /// Compile a QQL query to its transport route without executing (parity with nqql).
-    fn compile<'py>(&self, py: Python<'py>, query: &str) -> PyResult<Bound<'py, PyAny>> {
-        compile_query(py, query)
+    /// Optionally accepts `params` to bind before compiling.
+    #[pyo3(signature = (query, params=None))]
+    fn compile<'py>(
+        &self,
+        py: Python<'py>,
+        query: &str,
+        params: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        compile_query(py, query, params)
     }
 }
 // ── internal dispatch (plain impl) ────────────────────────────────

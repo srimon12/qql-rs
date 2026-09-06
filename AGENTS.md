@@ -288,7 +288,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 ### Known Workspace Blockers
-- `qql-wasm`: `async_trait(?Send)` on WASM Embedder impl conflicts with host `+ Send` trait bound — only builds for `wasm32-unknown-unknown` target.
+- `qql-wasm` builds only for the `wasm32-unknown-unknown` target (wasm-bindgen); CI builds it with wasm-pack on every run (`editor-check` job), including the `#[async_trait(?Send)]` WASM Embedder impl, which is cfg-gated against the host `+ Send` bound in `qql-embed`.
 - `qql-edge`: Requires fastembed-rs with specific native dependencies.
 
 ### Token Definition Hygiene

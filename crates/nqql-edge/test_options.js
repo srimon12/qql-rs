@@ -86,6 +86,22 @@ test("standalone options apply defaults", () => {
   assert.strictEqual(opts.embedUrl, undefined);
 });
 
+test("standalone options forward params for prepared statements", () => {
+  // Regression: normalizeStandaloneOptions used to strip `params`, so one-shot
+  // execute()/executeStmt() silently ignored :name / ? bindings.
+  const named = normalizeStandaloneOptions({ params: { status: "active" } });
+  assert.deepStrictEqual(named.params, { status: "active" });
+  const positional = normalizeStandaloneOptions({ params: [1, 2] });
+  assert.deepStrictEqual(positional.params, [1, 2]);
+  const scoped = normalizeStandaloneOptions({ params: [{ a: 1 }, { b: 2 }] });
+  assert.deepStrictEqual(scoped.params, [{ a: 1 }, { b: 2 }]);
+  assert.strictEqual(normalizeStandaloneOptions({}).params, undefined);
+  assert.throws(
+    () => normalizeStandaloneOptions({ params: "nope" }),
+    /params must be an object/,
+  );
+});
+
 test("standalone options undefined returns undefined", () => {
   assert.strictEqual(normalizeStandaloneOptions(undefined), undefined);
   assert.strictEqual(normalizeStandaloneOptions(null), undefined);

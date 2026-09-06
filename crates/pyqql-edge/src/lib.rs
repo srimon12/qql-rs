@@ -153,7 +153,9 @@ fn parse_json(input: &str) -> PyResult<String> {
 
 #[pyfunction]
 fn is_valid(input: &str) -> bool {
-    Parser::parse_all(input).is_ok()
+    // Full frontend gate: parse + plan — same contract as execution and the
+    // server SDKs (pyqql, nqql).
+    qql_plan::parse_and_plan(input).is_ok()
 }
 
 #[pyfunction]
@@ -210,8 +212,14 @@ fn tokenize<'py>(input: &str, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict
 }
 
 #[pyfunction]
-fn compile_query<'py>(py: Python<'py>, input: &str) -> PyResult<Bound<'py, PyAny>> {
-    let stmt = Parser::parse(input).map_err(qql_py_syntax_error)?;
+#[pyo3(signature = (input, params=None))]
+fn compile_query<'py>(
+    py: Python<'py>,
+    input: &str,
+    params: Option<&Bound<'py, PyAny>>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let mut stmt = Parser::parse(input).map_err(qql_py_syntax_error)?;
+    bind_py_stmt(&mut stmt, params)?;
     let compiled = qql_plan::routing::compile_statement(&stmt)
         .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
     let (method, path, payload) = match compiled.route {
@@ -377,8 +385,15 @@ impl PyClient {
 
     /// Compile a QQL query to its transport route without executing (parity
     /// with `pyqql.Client.compile` / `nqql-edge` `Client.compile`).
-    fn compile<'py>(&self, py: Python<'py>, query: &str) -> PyResult<Bound<'py, PyAny>> {
-        compile_query(py, query)
+    /// Optionally accepts `params` to bind before compiling.
+    #[pyo3(signature = (query, params=None))]
+    fn compile<'py>(
+        &self,
+        py: Python<'py>,
+        query: &str,
+        params: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        compile_query(py, query, params)
     }
 
     /// Flush and release edge storage. Idempotent.

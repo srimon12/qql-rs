@@ -292,6 +292,26 @@ class Stmt {
         }
     }
     /**
+     * Explain this statement's execution plan (mirrors the free `explain`).
+     * @returns {string}
+     */
+    explain() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.stmt_explain(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            deferred1_0 = r0;
+            deferred1_1 = r1;
+            return getStringFromWasm0(r0, r1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export5(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
      * Inject a WHERE filter into this statement's AST (mutates in place).
      * @param {string} field
      * @param {string} op
@@ -423,7 +443,28 @@ class Stmt {
         }
     }
     /**
-     * Format statement as readable QQL string.
+     * Format statement as a human-readable preview (mirrors Python `repr(stmt)`):
+     * long vector literals are truncated, so the output may not re-parse.
+     * @returns {string}
+     */
+    toReadableString() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.stmt_toReadableString(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            deferred1_0 = r0;
+            deferred1_1 = r1;
+            return getStringFromWasm0(r0, r1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export5(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Format statement as canonical, re-parseable QQL (mirrors Python `str(stmt)`).
      * @returns {string}
      */
     toString() {
@@ -471,8 +512,9 @@ exports.analyze = analyze;
 
 /**
  * Substitute `:name` (object) or `?` (array) placeholders into a query string.
+ * Without `params`, the query is returned unchanged (mirrors pyqql `bind`).
  * @param {string} query
- * @param {Record<string, unknown> | unknown[]} params
+ * @param {Record<string, unknown> | unknown[]} [params]
  * @param {{ truncateVectors?: boolean }} [options]
  * @returns {string}
  */
@@ -483,7 +525,7 @@ function bind(query, params, options) {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
         const ptr0 = passStringToWasm0(query, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        wasm.bind(retptr, ptr0, len0, addHeapObject(params), isLikeNone(options) ? 0 : addHeapObject(options));
+        wasm.bind(retptr, ptr0, len0, isLikeNone(params) ? 0 : addHeapObject(params), isLikeNone(options) ? 0 : addHeapObject(options));
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);

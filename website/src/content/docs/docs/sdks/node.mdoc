@@ -38,7 +38,7 @@ console.log(report.ok, report.succeeded, report.results);
 Pass `params` in the execution options as an object for named placeholders (`:name`) or an array for positional placeholders (`?`):
 
 ```javascript
-const { Client, bind } = require("@veristamp/nqql");
+const { Client, bind, parse } = require("@veristamp/nqql");
 
 const client = new Client({ url: "http://localhost:6333" });
 
@@ -54,8 +54,71 @@ const reportPos = await client.execute(
   { params: ["incident response", "ops", 5] }
 );
 
-// Standalone query string binding
+// Standalone binding (accepts a string or a Stmt; Stmt + truncateVectors returns a string)
 const boundQql = bind("QUERY TEXT :q FROM docs LIMIT :lim", { q: "search", lim: 10 });
+```
+
+Parse once, then reuse the statement. `stmt.bind(params)` returns a new bound
+`Stmt`, `stmt.compileRoute(params?)` lowers the bound statement to its route,
+and `stmt.toString()` renders canonical QQL while `stmt.toReadableString()`
+truncates long vectors for logs:
+
+```javascript
+const [stmt] = parse("QUERY TEXT :q FROM runbooks WHERE category = :cat LIMIT :lim");
+
+const bound = stmt.bind({ q: "incident response", cat: "ops", lim: 5 });
+const route = stmt.compileRoute({ q: "incident response", cat: "ops", lim: 5 });
+console.log(route.method, route.path);
+console.log(stmt.toString());         // canonical, re-parseable QQL
+console.log(stmt.toReadableString()); // readable preview
+```
+
+Nested objects expand to dotted keys (`{ loc: { lat: 1.0, lon: 2.0 } }` binds
+`:loc.lat` / `:loc.lon`), and flat dotted keys work the same way. For a
+multi-statement batch, pass `params` as an array with one entry per statement —
+the length must match the statement count exactly, and each entry is an object
+(named) or an array of scalars (positional):
+
+```javascript
+const batch = await client.execute(
+  [
+    "QUERY TEXT :q FROM runbooks LIMIT 5",
+    "QUERY TEXT :q FROM incidents LIMIT 10",
+  ],
+  { params: [{ q: "database" }, { q: "network" }] }
+);
+```
+
+Binding failures throw errors with stable `QQL-BIND-*` codes — mixed
+placeholder styles, missing parameters, extra positional values, or wrong
+types (see the [error code reference](/docs/reference/error-codes/)).
+
+`compileQuery(query, params?)` and `client.compile(query, params?)` compile a
+template to its route in one step, and `isValid` runs the full parse + plan
+gate.
+
+## Typed results
+
+`client.executeHits` and the module-level `executeHits` return `ScoredPoint`
+objects directly, and `ExecutionReport` adds typed accessors to the report:
+
+```javascript
+const { Client, executeHits } = require("@veristamp/nqql");
+
+const client = new Client({ url: "http://localhost:6333" });
+
+// 1. Hits as typed ScoredPoint objects (id, score, payload, text, collection)
+for (const hit of await client.executeHits("QUERY TEXT 'incident' FROM runbooks LIMIT 5")) {
+  console.log(hit.id, hit.score, hit.get("severity")); // payload access via hit.get(key)
+}
+
+// 2. Facet / count / point accessors per statement index (negative index counts from the end)
+const report = await client.execute("FACET severity FROM runbooks LIMIT 10");
+console.log(report.facet()); // [{ value: ..., count: ... }, ...]
+const countReport = await client.execute("COUNT FROM runbooks WHERE status = 'open'");
+console.log(countReport.count());
+const pointReport = await client.execute("QUERY POINTS (1, 2, 3) FROM runbooks");
+console.log(pointReport.points());
 ```
 
 ## Retain the parsed statement for policy
@@ -105,12 +168,19 @@ const report = await client.execute([
 |---|---|---|
 | `new Client({ url, apiKey, useGrpc, routeAffinity, embedder })` | Configure a reusable native client |
 | `Client.execute`, `executeStmt` | Source, statement, script, or array execution |
-| `Client.explain`, `explainStmt`, `compile` | Plan and route inspection |
+| `Client.executeHits`, module `executeHits` | Typed `ScoredPoint[]` hits without the report |
+| `report.hits(stmt)` / `points` / `facet` / `count` | Typed accessors per statement index (negative index counts from the end) |
+| `ScoredPoint` | Typed hit with `id`, `score`, `payload`, `text`, `collection` |
+| `Client.explain`, `explainStmt`, `compile` | Plan and route inspection (`compile` accepts `params`) |
 | `parse(source)` | Native `Stmt` handles for AST mutation |
+| `Stmt.bind(params?)` | Bound `Stmt` from `:name` / `?` placeholders |
+| `Stmt.compileRoute(params?)` | Compile a prepared statement to its route without re-parsing |
+| `Stmt.toString` / `Stmt.toReadableString` | Canonical QQL vs truncated preview |
 | `Stmt.injectFilter`, `Stmt.shardKey` | Trusted filtering and optional routing |
 | `Stmt.toObject`, `toJson`, `toJSON` | AST inspection and serialization |
-| `isValid`, `tokenize`, `explain` | Lightweight parser and diagnostic tools |
-| `compileQuery` | Qdrant route inspection without network I/O |
+| `isValid`, `tokenize`, `explain` | Lightweight parser and diagnostic tools (`isValid` runs parse + plan) |
+| `compileQuery(query, params?)` | Qdrant route inspection without network I/O (optionally binding params) |
+| `bind(query, params?, { truncateVectors })` | Substitute `:name` / `?` placeholders into a string or `Stmt` |
 | `parseJson` | High-throughput JSON forwarding |
 | `injectFilter`, `execute` | One-shot host convenience functions |
 | `HttpEmbedder` | A reusable HTTP embedder configuration |

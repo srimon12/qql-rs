@@ -105,4 +105,67 @@ await client.execute("QUERY TEXT :q FROM docs LIMIT :lim", {
 bind("QUERY TEXT :q FROM docs LIMIT :lim", { q: "chest pain", lim: 5 });
 ```
 
-WASM `bind` takes a JS object or array (not a JSON string). The same object/array goes on `client.execute(query, { params })`.
+WASM `bind` takes a JS object or array (not a JSON string). The same object/array goes on `client.execute(query, { params })`; `params` is optional — without it the query is returned unchanged.
+
+---
+
+## 5. Prepared Statement Surface (QQL 1.7)
+
+Pre-parsed `Stmt` handles can carry parameters without re-lexing the source:
+
+| Host | Bind | Compile route | Direct hits |
+|---|---|---|---|
+| Python (`pyqql`, `pyqql-edge`) | `stmt.bind(params)` → new `Stmt` | `stmt.compile_route(params=None)` | `client.execute_hits(...)` / `execute_async_hits` |
+| Node (`nqql`, `nqql-edge`) | `stmt.bind(params?)` → new `Stmt` | `stmt.compileRoute(params?)` | `client.executeHits(...)` / module `executeHits` |
+| WASM (`qql-wasm`) | `stmt.bind(params?)` → new `Stmt` | `stmt.compileRoute(params?)` | — (no `executeHits`) |
+| Rust | `qql_core::params::bind_stmt(&mut Stmt, lookup, &positional)` | `compile_statement(&stmt)` after binding | — |
+
+`str(stmt)` (Python) / `stmt.toString()` (Node, WASM) render canonical
+re-parseable QQL; `repr(stmt)` / `stmt.toReadableString()` render a readable
+preview with long vectors truncated. The module-level `bind` accepts a string
+or a `Stmt`: a `Stmt` returns a bound `Stmt`, or the readable string when
+`truncate_vectors` / `truncateVectors` is set.
+
+Additional shapes:
+
+- **Nested expansion**: `{"loc": {"lat": 1.0, "lon": 2.0}}` binds `:loc.lat`
+  and `:loc.lon`; flat dotted keys (`{"loc.lat": 1.0}`) are equivalent.
+- **Statement-scoped batch params**: pass `params` as a list/array with one
+  entry per statement (dict/object → named, list of scalars → positional).
+  The length must match the statement count exactly; otherwise the list is
+  reinterpreted as positional parameters for the whole input, which fails for
+  named-placeholder templates.
+- **`is_valid`** runs the full parse + plan gate (`qql_plan::parse_and_plan`),
+  not just lexing, on `pyqql`, `pyqql-edge`, `nqql`, and `nqql-edge`.
+
+```python
+from pyqql import Client, parse
+
+client = Client("http://localhost:6333")
+stmt = parse("QUERY TEXT :q FROM docs WHERE category = :cat LIMIT :lim")[0]
+
+bound = stmt.bind({"q": "cardiology", "cat": "medical", "lim": 10})
+route = stmt.compile_route(params={"q": "cardiology", "cat": "medical", "lim": 10})
+hits = client.execute_hits(stmt, params={"q": "cardiology", "cat": "medical", "lim": 10})
+```
+
+---
+
+## 6. Error Codes
+
+All binding failures are validation errors with a stable `QQL-BIND-*` code:
+
+| Code | Meaning |
+|---|---|
+| `QQL-BIND-MIXED-STYLE` | The template mixes `:name` and `?`, or the binder received the other style |
+| `QQL-BIND-MISSING-PARAM` | A named placeholder has no bound value, or a positional index is out of range |
+| `QQL-BIND-UNUSED-PARAMS` | More positional values were supplied than `?` placeholders |
+| `QQL-BIND-INVALID-FLOAT` | A non-finite float (`NaN`, infinity) cannot be rendered as a literal |
+| `QQL-BIND-INVALID-POINT-ID` | A bound point ID is neither an unsigned integer nor a string |
+| `QQL-BIND-TYPE-MISMATCH` | A bound value has the wrong type for its position (e.g. a non-string bound to `TEXT`) |
+| `QQL-BIND-INVALID-INTEGER` | A `LIMIT` / `OFFSET` parameter is not a non-negative integer |
+| `QQL-BIND-FORMULA-TYPE` | A formula parameter cannot be bound to a numeric, datetime, or variable constant |
+| `QQL-BIND-INVALID-PARAMS` | The `params` argument is neither an object (named) nor an array (positional) — raised by the Node SDKs |
+
+Codes 1–8 live in `crates/qql-core/src/params.rs`; `QQL-BIND-INVALID-PARAMS`
+is the Node bindings' guard for malformed `params` shapes.

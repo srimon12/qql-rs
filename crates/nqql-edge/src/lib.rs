@@ -117,10 +117,17 @@ impl Stmt {
         Ok(Stmt { inner: stmt })
     }
 
-    /// Format statement as readable QQL string.
+    /// Format statement as canonical, re-parseable QQL (mirrors Python `str(stmt)`).
     #[allow(clippy::inherent_to_string)]
     #[napi(catch_unwind, js_name = "toString")]
     pub fn to_string(&self) -> String {
+        qql_core::fmt::format_stmt(&self.inner)
+    }
+
+    /// Format statement as a human-readable preview (mirrors Python `repr(stmt)`):
+    /// long vector literals are truncated, so the output may not re-parse.
+    #[napi(catch_unwind, js_name = "toReadableString")]
+    pub fn to_readable_string(&self) -> String {
         qql_core::fmt::format_stmt_readable(&self.inner)
     }
 
@@ -181,7 +188,9 @@ pub fn parse_all_json(input: String) -> napi::Result<String> {
 
 #[napi(catch_unwind)]
 pub fn is_valid(input: String) -> bool {
-    Parser::parse_all(&input).is_ok()
+    // Full frontend gate: parse + plan — same contract as execution and the
+    // server SDKs (nqql, pyqql).
+    qql_plan::parse_and_plan(&input).is_ok()
 }
 
 #[napi(catch_unwind)]
@@ -247,8 +256,14 @@ pub fn tokenize(input: String) -> napi::Result<serde_json::Value> {
 }
 
 #[napi(catch_unwind)]
-pub fn compile_query(input: String) -> napi::Result<serde_json::Value> {
-    let stmt = Parser::parse(&input).map_err(to_napi_err)?;
+pub fn compile_query(
+    input: String,
+    params: Option<serde_json::Value>,
+) -> napi::Result<serde_json::Value> {
+    let mut stmt = Parser::parse(&input).map_err(to_napi_err)?;
+    if let Some(ref p) = params {
+        bind_stmt_json(&mut stmt, p).map_err(to_napi_err)?;
+    }
     let compiled = routing::compile_statement(&stmt).map_err(to_napi_err)?;
     let (method, path, payload) = match compiled.route {
         Some(route) => {
@@ -461,8 +476,12 @@ impl JsClient {
 
     /// Compile a QQL query to its transport route (non-executing).
     #[napi(catch_unwind)]
-    pub fn compile(&self, query: String) -> napi::Result<serde_json::Value> {
-        crate::compile_query(query)
+    pub fn compile(
+        &self,
+        query: String,
+        params: Option<serde_json::Value>,
+    ) -> napi::Result<serde_json::Value> {
+        crate::compile_query(query, params)
     }
 
     /// Flush and release edge storage. Idempotent; execution after close is
@@ -866,18 +885,25 @@ fn bind_stmt_json(stmt: &mut ast::Stmt, params: &serde_json::Value) -> Result<()
                 .collect::<Result<Vec<_>, _>>()?;
             qql_core::params::bind_stmt(stmt, |_| None, &items)
         }
-        _ => Ok(()),
+        _ => Err(QqlError::validation(
+            "QQL-BIND-INVALID-PARAMS",
+            "params must be an object for named parameters (:name) or an array for positional parameters (?)",
+            None,
+        )),
     }
 }
 
 /// Substitute `:name` (object) or `?` (array) placeholders into a query string.
+/// Without `params`, the query is returned unchanged. With `truncateVectors`,
+/// long vector literals render as `[0.1, 0.2, ... (N dims)]` for previews.
+/// (Stmt inputs are handled by the JS wrapper, which routes to `Stmt.bind`.)
 #[napi(
     catch_unwind,
-    ts_args_type = "query: string, params: Record<string, any> | any[], options?: { truncateVectors?: boolean }"
+    ts_args_type = "query: string, params?: Record<string, any> | any[], options?: { truncateVectors?: boolean }"
 )]
 pub fn bind(
     query: String,
-    params: serde_json::Value,
+    params: Option<serde_json::Value>,
     options: Option<serde_json::Value>,
 ) -> napi::Result<String> {
     let truncate = options
@@ -885,7 +911,10 @@ pub fn bind(
         .and_then(|o| o.get("truncateVectors"))
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    bind_json_params(&query, &params, truncate)
+    match params {
+        Some(p) => bind_json_params(&query, &p, truncate),
+        None => Ok(query),
+    }
 }
 
 #[cfg(test)]

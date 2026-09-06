@@ -98,10 +98,17 @@ impl Stmt {
         Ok(Stmt { inner: stmt })
     }
 
-    /// Format statement as readable QQL string.
+    /// Format statement as canonical, re-parseable QQL (mirrors Python `str(stmt)`).
     #[allow(clippy::inherent_to_string)]
     #[napi(catch_unwind, js_name = "toString")]
     pub fn to_string(&self) -> String {
+        qql_core::fmt::format_stmt(&self.inner)
+    }
+
+    /// Format statement as a human-readable preview (mirrors Python `repr(stmt)`):
+    /// long vector literals are truncated, so the output may not re-parse.
+    #[napi(catch_unwind, js_name = "toReadableString")]
+    pub fn to_readable_string(&self) -> String {
         qql_core::fmt::format_stmt_readable(&self.inner)
     }
 
@@ -476,32 +483,34 @@ impl JsClient {
 
         let params = options.as_ref().and_then(|o| o.get("params"));
 
-        let get_batch_param = |idx: usize| -> Option<&serde_json::Value> {
-            if let Some(serde_json::Value::Array(param_list)) = params
-                && !param_list.is_empty()
-                && (param_list[0].is_object() || param_list[0].is_array())
-            {
-                return param_list.get(idx);
-            }
-            params
+        // Statement-scoped params: only when `params` is an array with exactly
+        // one entry per statement (pyqql contract). Elements may be objects
+        // (named) or arrays/scalars (positional).
+        let scoped_list = match params {
+            Some(serde_json::Value::Array(arr)) if !arr.is_empty() => Some(arr),
+            _ => None,
         };
 
         let report = match &query {
             serde_json::Value::String(s) => {
-                let has_semicolon = s.contains(';');
-                let is_batch_params = match params {
-                    Some(serde_json::Value::Array(arr)) => {
-                        !arr.is_empty() && (arr[0].is_object() || arr[0].is_array())
-                    }
-                    _ => false,
+                // Statement-scoped binding for scripts requires >1 parsed
+                // statements and an exact params-list length match
+                // (single-statement strings bind the whole params value,
+                // matching pyqql).
+                let scoped_script = match scoped_list {
+                    Some(arr) => match Parser::parse_all(s) {
+                        Ok(stmts) if stmts.len() > 1 && arr.len() == stmts.len() => {
+                            Some((arr, stmts))
+                        }
+                        Ok(_) => None,
+                        Err(e) => return Err(to_napi_err(e)),
+                    },
+                    None => None,
                 };
 
-                if has_semicolon && is_batch_params {
-                    let mut stmts = Parser::parse_all(s).map_err(to_napi_err)?;
+                if let Some((arr, mut stmts)) = scoped_script {
                     for (i, stmt) in stmts.iter_mut().enumerate() {
-                        if let Some(p) = get_batch_param(i) {
-                            bind_stmt_json(stmt, p).map_err(to_napi_err)?;
-                        }
+                        bind_stmt_json(stmt, &arr[i]).map_err(to_napi_err)?;
                     }
                     let results = self
                         .inner
@@ -528,6 +537,7 @@ impl JsClient {
                 if arr.is_empty() {
                     qql::executor::ExecutionReport::empty()
                 } else if arr[0].is_string() {
+                    let scoped = scoped_list.filter(|p| p.len() == arr.len());
                     let strs: Vec<String> = arr
                         .iter()
                         .enumerate()
@@ -535,10 +545,12 @@ impl JsClient {
                             let s = v.as_str().ok_or_else(|| {
                                 napi::Error::from_reason("batch items must be strings")
                             })?;
-                            if let Some(p) = get_batch_param(i) {
-                                bind_json_params(s, p, false)
-                            } else {
-                                Ok(s.to_string())
+                            match scoped {
+                                Some(p) => bind_json_params(s, &p[i], false),
+                                None => match params {
+                                    Some(p) => bind_json_params(s, p, false),
+                                    None => Ok(s.to_string()),
+                                },
                             }
                         })
                         .collect::<napi::Result<_>>()?;
@@ -548,6 +560,7 @@ impl JsClient {
                         .await
                         .map_err(to_napi_err)?
                 } else {
+                    let scoped = scoped_list.filter(|p| p.len() == arr.len());
                     let mut stmts: Vec<ast::Stmt> = arr
                         .iter()
                         .map(|v| {
@@ -556,7 +569,11 @@ impl JsClient {
                         })
                         .collect::<napi::Result<_>>()?;
                     for (i, stmt) in stmts.iter_mut().enumerate() {
-                        if let Some(p) = get_batch_param(i) {
+                        let stmt_params = match scoped {
+                            Some(p) => Some(&p[i]),
+                            None => params,
+                        };
+                        if let Some(p) = stmt_params {
                             bind_stmt_json(stmt, p).map_err(to_napi_err)?;
                         }
                     }
@@ -683,18 +700,25 @@ fn bind_stmt_json(stmt: &mut ast::Stmt, params: &serde_json::Value) -> Result<()
                 .collect::<Result<Vec<_>, _>>()?;
             qql_core::params::bind_stmt(stmt, |_| None, &items)
         }
-        _ => Ok(()),
+        _ => Err(QqlError::validation(
+            "QQL-BIND-INVALID-PARAMS",
+            "params must be an object for named parameters (:name) or an array for positional parameters (?)",
+            None,
+        )),
     }
 }
 
 /// Substitute `:name` (object) or `?` (array) placeholders into a query string.
+/// Without `params`, the query is returned unchanged. With `truncateVectors`,
+/// long vector literals render as `[0.1, 0.2, ... (N dims)]` for previews.
+/// (Stmt inputs are handled by the JS wrapper, which routes to `Stmt.bind`.)
 #[napi(
     catch_unwind,
-    ts_args_type = "query: string, params: Record<string, any> | any[], options?: { truncateVectors?: boolean }"
+    ts_args_type = "query: string, params?: Record<string, any> | any[], options?: { truncateVectors?: boolean }"
 )]
 pub fn bind(
     query: String,
-    params: serde_json::Value,
+    params: Option<serde_json::Value>,
     options: Option<serde_json::Value>,
 ) -> napi::Result<String> {
     let truncate = options
@@ -705,7 +729,10 @@ pub fn bind(
         })
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    bind_json_params(&query, &params, truncate)
+    match params {
+        Some(p) => bind_json_params(&query, &p, truncate),
+        None => Ok(query),
+    }
 }
 
 #[napi(catch_unwind)]
@@ -721,13 +748,18 @@ pub fn explain_stmt(stmt: &Stmt) -> napi::Result<String> {
 /// Execute a pre-parsed Stmt directly via a new temporary client.
 #[napi(catch_unwind, ts_args_type = "stmt: Stmt, options?: object")]
 pub async fn execute_stmt(stmt: &Stmt, options: Option<serde_json::Value>) -> napi::Result<String> {
-    let client = JsClient::new(options)?;
+    let client = JsClient::new(options.clone())?;
+    let mut inner = stmt.inner.clone();
+    if let Some(p) = options.as_ref().and_then(|o| o.get("params")) {
+        bind_stmt_json(&mut inner, p).map_err(to_napi_err)?;
+    }
     let resp = client
         .inner
-        .execute_node(stmt.inner.clone())
+        .execute_node(inner)
         .await
         .map_err(to_napi_err)?;
     let report = qql::executor::ExecutionReport::single(resp);
+    client.inner.close().await.map_err(to_napi_err)?;
     serde_json::to_string(&report).map_err(serde_napi_err)
 }
 
@@ -740,5 +772,7 @@ pub async fn execute(
     options: Option<serde_json::Value>,
 ) -> napi::Result<String> {
     let client = JsClient::new(options.clone())?;
-    client.execute(query, options).await
+    let report = client.execute(query, options).await?;
+    client.inner.close().await.map_err(to_napi_err)?;
+    Ok(report)
 }

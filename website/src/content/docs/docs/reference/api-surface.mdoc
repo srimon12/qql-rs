@@ -11,11 +11,12 @@ naming and object ownership.
 | Capability | Rust | Python | Node.js | WASM |
 |---|---|---|---|---|
 | Parse script | `Parser::parse_all` | `parse` | `parse` | `parse` |
-| Validate | `Parser::parse(_).is_ok()` | `is_valid` | `isValid` | `isValid` |
+| Validate | `Parser::parse(_).is_ok()` | `is_valid` (parse + plan) | `isValid` (parse + plan) | `isValid` |
 | Tokenize | lexer API | `tokenize` | `tokenize` | `tokenize` |
 | Inject policy | `inject_filter` | `inject_filter` | `injectFilter` | `inject_filter` / `Stmt.injectFilter` |
 | Explain | planner/runtime | `explain` | `explain` | `explain` / `analyze` |
 | Compile | planner/runtime | `compile_query` | `compileQuery` | `compile` |
+| Bind parameters | `bind_named` / `bind_positional` (+ `*_readable`) | `bind`, `Stmt.bind`, `execute(…, params=)` | `bind`, `Stmt.bind`, `execute(…, { params })` | `bind` (string only), `Stmt.bind` |
 | Execute | `Executor::execute` | `Client.execute` | `Client.execute` | `Client.execute` |
 
 ## Three input axes
@@ -52,9 +53,11 @@ affinity (single node).
 
 Python, Node.js, and WASM expose statement handles so a host can parse once,
 inject policy, set optional shard routing, inspect the AST, and execute the
-In addition to `toObject`/`toJSON`, `Stmt` across Python, Node, and WASM
-exposes `compile_route` / `compileRoute` to inspect the compiled REST route of a single
-statement. WASM owners must call `free()` explicitly when they are finished.
+statement. In addition to `toObject`/`toJSON`, `Stmt` across Python, Node, and
+WASM exposes `bind(params)` to substitute `:name` / `?` placeholders into the
+statement AST and `compile_route` / `compileRoute` (optionally accepting
+`params`) to inspect the compiled REST route of a single statement. WASM owners
+must call `free()` explicitly when they are finished.
 
 Token objects are consistent across hosts: Python, Node, and WASM bindings emit
 `{ kind, text, pos, end, len }`, matching the underlying `Span { start, end }` model.
@@ -63,6 +66,15 @@ Token objects are consistent across hosts: Python, Node, and WASM bindings emit
 
 Execution returns a stable report with aggregate `ok`, ordered per-operation
 results, and succeeded/failed counts. `on_error` / `onError` selects stop or
-continue behavior for multi-operation inputs. The WASM `Client` is REST-only:
-it compiles to and executes Qdrant REST routes and does not open gRPC
-connections.
+continue behavior for multi-operation inputs. Python and Node reports add
+typed accessors: `hits(stmt)` / `points(stmt)` return `ScoredPoint` objects
+(`id`, `score`, `payload`, `text`, `collection`), `facet(stmt)` returns
+normalized `[{ value, count }]` hits, and `count(stmt)` returns an integer;
+Node accepts a negative statement index (Python list semantics). Python
+`execute_hits` / `execute_async_hits` and Node `executeHits` skip the report
+entirely. Passing `params` as a list/array with one entry per statement binds
+parameters statement-scoped — the length must match the statement count
+exactly, and each entry is a dict/object (named) or a list/array of scalars
+(positional). The WASM `Client` is REST-only: it compiles to and executes
+Qdrant REST routes and does not open gRPC connections; its report stays a
+plain `{ ok, results, succeeded, failed }` object with no typed accessors.

@@ -795,3 +795,37 @@ USING dense
 WITH PAYLOAD false
 LIMIT 10;
 ```
+
+---
+
+## 33. Parameterized Templates (QQL 1.7)
+
+**Problem:** A service keeps re-issuing the same search shape with different user-supplied text, categories, and limits. Concatenating strings risks injection and defeats prepared-statement reuse.
+
+**Why this works:** Placeholders (`:name` named, `?` positional) are inert until the host binder substitutes safely escaped literals (`bind`, `Stmt.bind`, `Client.execute(..., params=...)`). Comments and string literals in the template are never substituted; mixed styles fail with `QQL-BIND-MIXED-STYLE`.
+
+```sql
+-- Named placeholders (bind with an object/dict: {"q": "...", "cat": "...", "lim": 10})
+QUERY TEXT :q
+FROM docs
+WHERE category = :cat
+LIMIT :lim;
+
+-- Positional placeholders (bind with a list: ["chest pain", "cardiology", 10])
+QUERY TEXT ?
+FROM medical_records
+WHERE department = ?
+LIMIT ?;
+
+-- Placeholders in clauses and point IDs (SHARD, LIMIT, OFFSET, POINT)
+QUERY POINT :point_id
+FROM events
+SHARD :tenant
+LIMIT :lim
+OFFSET :offset;
+```
+
+**Key decisions:**
+- `:name` is matched by identifier name; `?` maps 1-to-1 sequentially with the positional list.
+- Nested dict params expand to dotted keys (`{"loc": {"lat": 1.0}}` binds `:loc.lat`); flat dotted keys work identically.
+- Colons in compact dicts (`{a:b}`) are separators, not placeholders — write `{key: :val}` to bind a dict value.

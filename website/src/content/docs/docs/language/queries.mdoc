@@ -267,6 +267,23 @@ QQL queries support parameterized templates with type-safe client-side binding:
 - **Named Placeholders**: `:name` (e.g. `:category`, `:lim`)
 - **Positional Placeholders**: `?` (mapped sequentially to argument lists)
 
+{% qqlExample title="A parameterized template" %}
+```sql
+QUERY TEXT :q
+FROM docs
+WHERE category = :cat
+LIMIT :lim;
+```
+{% /qqlExample %}
+
+The template is inert until values are bound. Bind it client-side with the
+Python `bind` / `Stmt.bind`, Node `bind` / `Stmt.bind`, or WASM `bind`
+helpers, or pass `params` straight to `Client.execute` — see the
+[Python](/docs/sdks/python/#parameter-binding--prepared-queries),
+[Node.js](/docs/sdks/node/#parameter-binding--prepared-queries), and
+[WebAssembly](/docs/sdks/wasm/) SDK pages. Rust uses the typed
+`bind_named` / `bind_positional` twins in `qql_core::params`.
+
 {% aside type="note" title="Why :name and ? (not $name)?" %}
 In QQL, `$` is a first-class identifier character (e.g. `$score`, `$category`, `$1`). To guarantee that `$`-prefixed identifiers and formula variables are never accidentally overwritten, parameter placeholders exclusively use `:name` and `?`.
 {% /aside %}
@@ -281,6 +298,16 @@ WHERE category = 'cardiology' AND rating >= 4.5
 LIMIT 10;
 ```
 {% /qqlExample %}
+
+Nested dictionaries expand to dotted keys: `{"loc": {"lat": 1.0, "lon": 2.0}}`
+binds `:loc.lat` and `:loc.lon`, and flat dotted keys work identically. For
+multi-statement batches, pass `params` as a list with one entry per statement
+(the length must match the statement count). Substitution failures carry
+stable `QQL-BIND-*` codes — mixed placeholder styles
+(`QQL-BIND-MIXED-STYLE`), missing values (`QQL-BIND-MISSING-PARAM`), extra
+positional values (`QQL-BIND-UNUSED-PARAMS`), and type mismatches
+(`QQL-BIND-TYPE-MISMATCH`) — see the
+[error code reference](/docs/reference/error-codes/).
 
 Colons in compact dictionary syntax (e.g. `{a:b}`, `{'a':b}`) are preserved as key-value separators and not treated as placeholders.
 

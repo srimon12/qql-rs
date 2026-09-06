@@ -118,8 +118,6 @@ strings. Pass `{ onError: "continue" }` to collect per-statement failures; the
 default is `"stop"`. Pass `{ params }` as an object for `:name` or an array for
 `?` — same shape as `bind(query, params)`, no `JSON.stringify`. Adjacent
 compatible operations use Qdrant batch endpoints.
-Every execution path returns an `ExecutionReport` object with `ok`, `results`,
-`succeeded`, and `failed` fields.
 
 ```js
 // Single query
@@ -131,6 +129,16 @@ const result = await client.execute(
 await client.execute("QUERY TEXT :q FROM docs LIMIT :lim", {
     params: { q: "vector databases", lim: 10 },
 });
+
+// Statement-scoped params: array with one entry per statement —
+// the length must match the statement count exactly
+await client.execute(
+    [
+        "QUERY TEXT :q FROM docs LIMIT 5",
+        "QUERY TEXT :q FROM articles LIMIT 10",
+    ],
+    { params: [{ q: "quantum" }, { q: "relativity" }] }
+);
 
 // Multi-statement (semicolons auto-detected)
 const schemaResult = await client.execute(`
@@ -151,6 +159,11 @@ const stmt = new Stmt("QUERY 'search' FROM docs USING dense LIMIT 10");
 stmt.shardKey = "acme";
 const stmtResult = await client.executeStmt(stmt);
 ```
+
+Every execution path returns a plain `ExecutionReport` object with `ok`,
+`results`, `succeeded`, and `failed` fields. WASM has **no** typed accessors
+(`hits()` / `facet()` / `count()`) and no `executeHits` / `ScoredPoint` — read
+`results[i].data` directly, or use the Python / Node SDKs for typed hits.
 
 ---
 
@@ -175,6 +188,26 @@ console.log(stmt.shardKey);  // -> "acme"
 // Serialise to JSON
 const json = stmt.toJSON();
 const obj = stmt.toObject();
+```
+
+Prepared-statement helpers (QQL 1.7):
+
+```js
+// Bind :name (object) or ? (array) params; params is optional.
+// Returns a NEW bound Stmt (the original is not mutated).
+const bound = stmt.bind({ q: "search", lim: 10 });
+
+// Compile to a route object; params binds first when provided.
+const route = stmt.compileRoute({ q: "search", lim: 10 });
+
+// Canonical, re-parseable QQL (mirrors Python str(stmt))
+console.log(stmt.toString());
+
+// Readable preview (mirrors Python repr(stmt); long vectors truncated)
+console.log(stmt.toReadableString());
+
+// Execution plan for this statement (mirrors the free explain)
+console.log(stmt.explain());
 ```
 
 Sparse IDF is QQL (`PARAMS (idf = 'global' | WHERE <filter>)`). There is no
@@ -262,7 +295,8 @@ const result = analyze("QUERY 'search' FROM docs USING dense LIMIT 10");
 import init, { bind, formatQuery, explain } from 'qql-wasm';
 await init();
 
-// Substitute named parameters (:name)
+// Substitute named parameters (:name) — params is OPTIONAL; without it the
+// query is returned unchanged (mirrors pyqql bind)
 const boundNamed = bind(
     "QUERY TEXT :q FROM docs WHERE category = :cat LIMIT :lim",
     { q: "chest pain", cat: "medical", lim: 10 }
@@ -275,6 +309,10 @@ const boundPos = bind(
     ["chest pain", "medical", 10]
 );
 console.log(boundPos);
+
+// truncateVectors renders long vector literals as readable previews
+const preview = bind("QUERY :vec FROM docs LIMIT 5", { vec: Array(384).fill(0.1) }, { truncateVectors: true });
+console.log(preview); // QUERY [0.10, 0.10, ... (384 dims)] FROM docs LIMIT 5
 
 // Canonical query formatting
 const formatted = formatQuery("query text 'hello' from docs limit 5");

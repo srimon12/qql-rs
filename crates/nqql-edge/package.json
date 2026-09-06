@@ -14,7 +14,7 @@
   "scripts": {
     "build": "napi build --platform --no-js --release --dts native.d.ts",
     "build:debug": "napi build --platform --no-js --dts native.d.ts",
-    "test": "node --test test_options.js && npm run build:debug && node test.js && node test_comprehensive.js",
+    "test": "node --test test_options.js && npm run build:debug && node test_dx.js nqql-edge && node test.js && node test_comprehensive.js",
     "test:options": "node --test test_options.js",
     "prepublishOnly": "napi prepublish -t npm"
   },

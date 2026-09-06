@@ -19,7 +19,6 @@ const EXECUTION_TYPES: &str = r#"
 export interface ExecuteOptions {
   onError?: "stop" | "continue";
   params?: Record<string, unknown> | unknown[];
-  truncateVectors?: boolean;
 }
 
 export interface ExecResponse {
@@ -278,7 +277,9 @@ fn bind_stmt_json(stmt: &mut ast::Stmt, params: &serde_json::Value) -> Result<()
             qql_core::params::bind_stmt(stmt, |_| None, &items)
                 .map_err(|e| JsValue::from_str(&e.to_string()))
         }
-        _ => Ok(()),
+        _ => Err(JsValue::from_str(
+            "params must be an object for named parameters (:name) or an array for positional parameters (?)",
+        )),
     }
 }
 
@@ -419,10 +420,17 @@ impl Stmt {
         Ok(Stmt { inner: stmt })
     }
 
-    /// Format statement as readable QQL string.
+    /// Format statement as canonical, re-parseable QQL (mirrors Python `str(stmt)`).
     #[allow(clippy::inherent_to_string)]
     #[wasm_bindgen(js_name = toString)]
     pub fn to_string(&self) -> String {
+        qql_core::fmt::format_stmt(&self.inner)
+    }
+
+    /// Format statement as a human-readable preview (mirrors Python `repr(stmt)`):
+    /// long vector literals are truncated, so the output may not re-parse.
+    #[wasm_bindgen(js_name = toReadableString)]
+    pub fn to_readable_string(&self) -> String {
         qql_core::fmt::format_stmt_readable(&self.inner)
     }
 
@@ -458,6 +466,12 @@ impl Stmt {
                 .map_err(|e| JsValue::from_str(&e.to_string()))?;
             Ok(safe_owned_uint8_array(&buf))
         })
+    }
+
+    /// Explain this statement's execution plan (mirrors the free `explain`).
+    #[wasm_bindgen(js_name = explain)]
+    pub fn explain(&self) -> String {
+        qql_core::explain::explain_node(&self.inner)
     }
 }
 
@@ -654,21 +668,28 @@ pub fn format_query(input: &str) -> Result<String, JsValue> {
 }
 
 /// Substitute `:name` (object) or `?` (array) placeholders into a query string.
+/// Without `params`, the query is returned unchanged (mirrors pyqql `bind`).
 #[wasm_bindgen]
 pub fn bind(
     query: &str,
-    #[wasm_bindgen(unchecked_param_type = "Record<string, unknown> | unknown[]")] params: JsValue,
+    #[wasm_bindgen(unchecked_optional_param_type = "Record<string, unknown> | unknown[]")]
+    params: Option<JsValue>,
     #[wasm_bindgen(unchecked_optional_param_type = "{ truncateVectors?: boolean }")]
     options: Option<JsValue>,
 ) -> Result<String, JsValue> {
-    let parsed: serde_json::Value = serde_wasm_bindgen::from_value(params)
-        .map_err(|e| JsValue::from_str(&format!("invalid bind params: {e}")))?;
     let truncate = options
         .as_ref()
         .and_then(|o| js_sys::Reflect::get(o, &JsValue::from_str("truncateVectors")).ok())
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    bind_json_params(query, &parsed, truncate)
+    match params {
+        Some(p) if !p.is_null() && !p.is_undefined() => {
+            let parsed: serde_json::Value = serde_wasm_bindgen::from_value(p)
+                .map_err(|e| JsValue::from_str(&format!("invalid bind params: {e}")))?;
+            bind_json_params(query, &parsed, truncate)
+        }
+        _ => Ok(query.to_string()),
+    }
 }
 
 // ── Client: browser fetch-based execute with embedding ────────────

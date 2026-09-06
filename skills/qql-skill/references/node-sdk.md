@@ -5,7 +5,8 @@ Native Node.js bindings via N-API (napi-rs).
 Language surface includes **Qdrant 1.19 / QQL 1.5** features expressible in QQL
 (`SHOW QUOTAS`, memory/`turbo4`, `MATCH PREFIX`, `SLICE`, `PARAMS (idf = …)`).
 Pass those strings to `client.execute` when the backend supports them (quotas:
-**REST only**).
+**REST only**). Parameter placeholders (`:name` / `?`) and prepared-statement
+binding arrive with **QQL 1.7**.
 
 **Route affinity** (`X-Qdrant-Route-Affinity`) is exposed on `Client` via the
 `routeAffinity` constructor option (readable with `client.routeAffinity`). See
@@ -192,6 +193,25 @@ console.log(stmt.toJSON());
 console.log(stmt.toObject());
 ```
 
+Prepared-statement helpers (QQL 1.7): `stmt.bind(params?)` returns a **new**
+bound `Stmt` (named object or positional array), `stmt.compileRoute(params?)`
+lowers the statement — optionally binding first — to its
+`{ stmt_type, method, path, payload }` route, `stmt.toString()` renders
+canonical re-parseable QQL (Python `str(stmt)` parity), and
+`stmt.toReadableString()` renders the truncated preview (Python `repr(stmt)`
+parity — long vectors collapse to `[0.1, 0.2, ... (384 dims)]`).
+
+```js
+const [stmt] = parse("QUERY TEXT :q FROM docs WHERE category = :cat LIMIT :lim");
+
+const bound = stmt.bind({ q: "vector databases", cat: "tech", lim: 10 });
+console.log(bound.toString());        // QUERY TEXT 'vector databases' FROM docs ...
+console.log(stmt.toReadableString()); // placeholder preview (readable)
+
+const route = stmt.compileRoute({ q: "vector databases", cat: "tech", lim: 10 });
+console.log(route.method, route.path);
+```
+
 ---
 
 ## 6. Parameter Binding & Prepared Queries
@@ -212,9 +232,81 @@ const res2 = await client.execute(
   { params: ["machine learning", "tech", 10] }
 );
 
-// Standalone string binding
+// Prepared statement: parse once, execute repeatedly with different params
+const [stmt] = parse("QUERY TEXT :query FROM docs WHERE category = :cat LIMIT :limit");
+const res3 = await client.execute(stmt, { params: { query: "neural nets", cat: "ai", limit: 5 } });
+
+// Standalone binding — `bind` accepts a string or a Stmt.
+// Stmt + { truncateVectors: true } returns the readable string instead of a Stmt.
 const bound = bind("QUERY TEXT :q FROM docs LIMIT :lim", { q: "test", lim: 10 });
 console.log(bound); // QUERY TEXT 'test' FROM docs LIMIT 10
+
+const readable = bind(stmt, { query: "test", cat: "tech", limit: 5 }, { truncateVectors: true });
+
+// Nested dictionary parameters expand to dotted keys ({"loc": {"lat": 1.0}} binds :loc.lat)
+const geo = await client.execute(
+  "QUERY 'coffee' FROM venues WHERE location GEO_RADIUS { center: {lat: :loc.lat, lon: :loc.lon}, radius: :rad } LIMIT 5",
+  { params: { loc: { lat: 52.52, lon: 13.40 }, rad: 1000 } }
+);
+
+// Statement-scoped batch parameters: array length must EXACTLY match the
+// statement count; each entry is an object (named) or an array (positional)
+const batch = await client.execute(
+  [
+    "QUERY TEXT :q FROM docs LIMIT 5",
+    "QUERY TEXT :q FROM articles LIMIT 10",
+  ],
+  { params: [{ q: "quantum" }, { q: "relativity" }] }
+);
+```
+
+Mixed styles fail closed with `QQL-BIND-MIXED-STYLE`; missing values raise
+`QQL-BIND-MISSING-PARAM`, extra positional values `QQL-BIND-UNUSED-PARAMS`,
+and wrong types `QQL-BIND-TYPE-MISMATCH` (see the
+[error codes](/docs/reference/error-codes/)).
+
+---
+
+## 6b. Typed Result Accessors & `executeHits`
+
+`execute()` returns an `ExecutionReport` object with `ok`, `results`,
+`succeeded`, and `failed`, plus typed accessors.
+
+```js
+const { Client, executeHits } = require('@veristamp/nqql');
+
+const client = new Client({ url: "http://localhost:6333" });
+
+// 1. Typed hits: report.hits(stmt) / report.points(stmt) -> ScoredPoint[]
+const report = await client.execute("QUERY TEXT 'neural search' FROM docs LIMIT 5");
+for (const hit of report.hits()) {
+  console.log(hit.id);        // number (e.g. 42) or UUID string
+  console.log(hit.score);     // number
+  console.log(hit.payload);   // object (null when absent)
+  console.log(hit.text);      // top-level text shortcut (null when absent)
+  console.log(hit.get("title", "n/a")); // payload access with optional default
+}
+
+// Negative statement index counts from the end (Python list semantics)
+const batch = await client.execute("COUNT FROM docs; QUERY TEXT 'q' FROM docs LIMIT 5");
+console.log(batch.hits(-1)); // last statement's hits
+
+// 2. Shortcut: executeHits() (module or Client) -> ScoredPoint[] directly
+const hits = await client.executeHits("QUERY TEXT 'neural search' FROM docs LIMIT 5");
+
+// 3. Facet -> normalized [{ value, count }]
+const facetReport = await client.execute("FACET category FROM docs LIMIT 10");
+for (const item of facetReport.facet()) {
+  console.log(item.value, item.count);
+}
+
+// 4. Count -> integer
+const countReport = await client.execute("COUNT FROM docs WHERE category = 'tech'");
+console.log(countReport.count());
+
+// 5. Point retrieval -> points()
+const pointReport = await client.execute("QUERY POINTS (1, 2, 3) FROM docs");
+console.log(pointReport.points());
 ```
 
 ---
@@ -227,10 +319,11 @@ const { parse, parseJson, isValid, injectFilter, tokenize, compileQuery, explain
 parse("QUERY 'x' FROM docs LIMIT 5");                    // Always Stmt[]
 parse("QUERY 'x' FROM docs LIMIT 5; COUNT FROM docs");   // Script -> Stmt[]
 parseJson("QUERY 'x' FROM docs LIMIT 5");                // Raw JSON string (2× faster, no V8 objects)
-isValid("QUERY 'x' FROM docs LIMIT 5");                  // Validate
+isValid("QUERY 'x' FROM docs LIMIT 5");                  // Parse + plan gate
 injectFilter("QUERY 'x' FROM docs", "tenant_id", "=", "acme");
 tokenize("QUERY 'x'");
-compileQuery("QUERY 'x' FROM docs LIMIT 5");
+compileQuery("QUERY 'x' FROM docs LIMIT 5");                   // Route object
+compileQuery("QUERY TEXT :q FROM docs LIMIT :lim", { q: "x", lim: 5 }); // With parameter binding
 
 // Hierarchical ASCII tree plan
 const planTree = explain("QUERY TEXT 'hello' FROM docs USING dense LIMIT 10");
