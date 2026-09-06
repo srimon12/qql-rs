@@ -103,7 +103,7 @@ pub enum OnError {
     Continue,
 }
 
-use qql_plan::{statement_batch_key, BatchKey};
+use qql_plan::{BatchKey, statement_batch_key};
 
 /// Normalized search hit returned inside `ExecResponse` data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -629,8 +629,8 @@ impl Executor {
         stop_on_error: bool,
         results: &mut Vec<ExecResponse>,
     ) -> Result<(), QqlError> {
-        use qql_plan::mutation::planned_to_update_operation;
         use qql_plan::UpdateBatchRequest;
+        use qql_plan::mutation::planned_to_update_operation;
 
         if operations.is_empty() {
             return Ok(());
@@ -825,16 +825,15 @@ impl Executor {
         &self,
         create: &mut ast::CreateCollectionStmt,
     ) -> Result<(), QqlError> {
-        if let ast::CollectionMode::Dense { model: Some(model) } = &create.mode {
-            if let Some(embedder) = self.embedder.as_deref() {
-                if !embedder.accepts_model(model) {
-                    return Err(QqlError::execution(
-                        "QQL-EMBEDDING-MODEL",
-                        format!("embedding model '{model}' is not available from the configured embedder"),
-                        None,
-                    ));
-                }
-            }
+        if let ast::CollectionMode::Dense { model: Some(model) } = &create.mode
+            && let Some(embedder) = self.embedder.as_deref()
+            && !embedder.accepts_model(model)
+        {
+            return Err(QqlError::execution(
+                "QQL-EMBEDDING-MODEL",
+                format!("embedding model '{model}' is not available from the configured embedder"),
+                None,
+            ));
         }
         if !create.vectors.is_empty() {
             if let ast::CollectionMode::Dense { model: Some(model) } = &create.mode {

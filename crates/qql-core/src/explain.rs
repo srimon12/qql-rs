@@ -83,18 +83,18 @@ pub fn explain_node(statement: &Stmt) -> String {
                 }
             }
 
-            if let Some(prefetches) = query_prefetches(&query.expression) {
-                if !prefetches.is_empty() {
-                    let _ = writeln!(output, "├── Prefetches ({}):", prefetches.len());
-                    for (i, pf) in prefetches.iter().enumerate() {
-                        let is_last = i + 1 == prefetches.len();
-                        let prefix = if is_last {
-                            "│   └──"
-                        } else {
-                            "│   ├──"
-                        };
-                        let _ = writeln!(output, "{} [{}] {}", prefix, i + 1, pf);
-                    }
+            if let Some(prefetches) = query_prefetches(&query.expression)
+                && !prefetches.is_empty()
+            {
+                let _ = writeln!(output, "├── Prefetches ({}):", prefetches.len());
+                for (i, pf) in prefetches.iter().enumerate() {
+                    let is_last = i + 1 == prefetches.len();
+                    let prefix = if is_last {
+                        "│   └──"
+                    } else {
+                        "│   ├──"
+                    };
+                    let _ = writeln!(output, "{} [{}] {}", prefix, i + 1, pf);
                 }
             }
 

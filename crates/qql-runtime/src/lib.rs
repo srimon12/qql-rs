@@ -72,7 +72,7 @@ pub mod sparse;
 // this crate's public signatures, plus the parse → inject policy flow, is
 // reachable through `qql` alone — backend and policy authors need no direct
 // `qql-core` / `qql-plan` dependency.
-pub use qql_core::ast::{inject_filter, ComparisonOp, Stmt, Value};
+pub use qql_core::ast::{ComparisonOp, Stmt, Value, inject_filter};
 pub use qql_core::error::{ErrorKind, QqlError, Span};
 pub use qql_core::parser::Parser;
 pub use qql_plan::{

@@ -1,4 +1,4 @@
-use super::{ascii_equal, AstLowerer};
+use super::{AstLowerer, ascii_equal};
 use crate::ast::{
     IdfParams, PayloadSelector, QuantizationSearchParams, ReadConsistency, SearchParams, Value,
     VectorSelector,

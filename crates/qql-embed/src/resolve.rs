@@ -69,18 +69,16 @@ async fn resolve_upsert_embeddings(
     if upsert.embedding.is_none() && upsert.embed.is_empty() {
         let mut targets = Vec::new();
         for (idx, point) in upsert.points.iter().enumerate() {
-            if point.vectors.is_none() {
-                if let Some((_, qql_core::ast::Value::Str(text))) =
+            if point.vectors.is_none()
+                && let Some((_, qql_core::ast::Value::Str(text))) =
                     point.payload.iter().find(|(k, _)| {
                         k.eq_ignore_ascii_case("text")
                             || k.eq_ignore_ascii_case("body")
                             || k.eq_ignore_ascii_case("content")
                     })
-                {
-                    if !text.is_empty() {
-                        targets.push((idx, text.clone()));
-                    }
-                }
+                && !text.is_empty()
+            {
+                targets.push((idx, text.clone()));
             }
         }
         if !targets.is_empty() {
@@ -112,10 +110,9 @@ async fn resolve_upsert_embeddings(
                 .payload
                 .iter()
                 .find(|(k, _)| k.eq_ignore_ascii_case(field_name))
+                && !text.is_empty()
             {
-                if !text.is_empty() {
-                    targets.push((idx, text.clone()));
-                }
+                targets.push((idx, text.clone()));
             }
         }
 
@@ -340,11 +337,12 @@ fn collect_input_dense_job(
     default_model: &str,
     jobs: &mut Vec<(String, String)>,
 ) {
-    if let QueryInput::Text { text, model } = input {
-        if target.kind == VectorKind::Dense && !target.multi {
-            let m = model.as_deref().unwrap_or(default_model).to_string();
-            jobs.push((m, text.clone()));
-        }
+    if let QueryInput::Text { text, model } = input
+        && target.kind == VectorKind::Dense
+        && !target.multi
+    {
+        let m = model.as_deref().unwrap_or(default_model).to_string();
+        jobs.push((m, text.clone()));
     }
 }
 
@@ -999,12 +997,11 @@ fn collect_image_targets(
             .enumerate()
             .filter_map(|(idx, point)| {
                 point.payload.iter().find_map(|(key, value)| {
-                    if key.eq_ignore_ascii_case(target_field) {
-                        if let qql_core::ast::Value::Str(source) = value {
-                            if !source.is_empty() {
-                                return Some((idx, source.clone()));
-                            }
-                        }
+                    if key.eq_ignore_ascii_case(target_field)
+                        && let qql_core::ast::Value::Str(source) = value
+                        && !source.is_empty()
+                    {
+                        return Some((idx, source.clone()));
                     }
                     None
                 })
@@ -1020,10 +1017,9 @@ fn collect_image_targets(
                         .payload
                         .iter()
                         .find(|(key, _)| key.eq_ignore_ascii_case(candidate))
+                        && !source.is_empty()
                     {
-                        if !source.is_empty() {
-                            return Some((idx, source.clone()));
-                        }
+                        return Some((idx, source.clone()));
                     }
                 }
                 None
@@ -1042,12 +1038,11 @@ fn collect_text_targets(
             .enumerate()
             .filter_map(|(idx, point)| {
                 point.payload.iter().find_map(|(key, value)| {
-                    if key.eq_ignore_ascii_case(target_field) {
-                        if let qql_core::ast::Value::Str(text) = value {
-                            if !text.is_empty() {
-                                return Some((idx, text.clone()));
-                            }
-                        }
+                    if key.eq_ignore_ascii_case(target_field)
+                        && let qql_core::ast::Value::Str(text) = value
+                        && !text.is_empty()
+                    {
+                        return Some((idx, text.clone()));
                     }
                     None
                 })
@@ -1068,10 +1063,9 @@ fn collect_default_text_targets(points: &[UpsertPoint]) -> Vec<(usize, String)> 
                     .payload
                     .iter()
                     .find(|(key, _)| key.eq_ignore_ascii_case(candidate))
+                    && !text.is_empty()
                 {
-                    if !text.is_empty() {
-                        return Some((idx, text.clone()));
-                    }
+                    return Some((idx, text.clone()));
                 }
             }
             None

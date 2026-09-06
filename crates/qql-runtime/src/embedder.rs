@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 use qql_core::error::QqlError;
 
 // Re-export shared API so existing `qql::embedder::Embedder` paths keep working.
-pub use qql_embed::embedder::{Embedder, EmbedderBound, SparseEmbedder};
 pub use qql_embed::SparseVector;
+pub use qql_embed::embedder::{Embedder, EmbedderBound, SparseEmbedder};
 
 #[cfg(feature = "rest")]
 #[derive(Debug, Clone, Serialize)]

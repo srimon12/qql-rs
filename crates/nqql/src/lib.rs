@@ -289,73 +289,73 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
         ..Default::default()
     };
 
-    if let Some(emb) = opts.get("embedder") {
-        if let Some(ep) = emb.get("endpoint").and_then(|v| v.as_str()) {
-            config.embedding_endpoint = Some(ep.to_string());
-            config.embedding_api_key = emb
-                .get("apiKey")
-                .or_else(|| emb.get("api_key"))
-                .and_then(|v| v.as_str())
-                .map(String::from);
-            config.embedding_model = emb.get("model").and_then(|v| v.as_str()).map(String::from);
-            config.embedding_dimension =
-                emb.get("dimension").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            config.multi_embedding_endpoint = emb
-                .get("multiEndpoint")
-                .or_else(|| emb.get("multi_endpoint"))
-                .and_then(|v| v.as_str())
-                .map(String::from);
-            config.multi_embedding_api_key = emb
-                .get("multiApiKey")
-                .or_else(|| emb.get("multi_api_key"))
-                .and_then(|v| v.as_str())
-                .map(String::from);
-            config.multi_embedding_model = emb
-                .get("multiModel")
-                .or_else(|| emb.get("multi_model"))
-                .and_then(|v| v.as_str())
-                .map(String::from);
-            config.multi_embedding_dimension = emb
-                .get("multiDimension")
-                .or_else(|| emb.get("multi_dimension"))
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as usize;
-            config.image_embedding_endpoint = emb
-                .get("imageEndpoint")
-                .or_else(|| emb.get("image_endpoint"))
-                .and_then(|v| v.as_str())
-                .map(String::from);
-            config.image_embedding_api_key = emb
-                .get("imageApiKey")
-                .or_else(|| emb.get("image_api_key"))
-                .and_then(|v| v.as_str())
-                .map(String::from);
-            config.image_embedding_model = emb
-                .get("imageModel")
-                .or_else(|| emb.get("image_model"))
-                .and_then(|v| v.as_str())
-                .map(String::from);
-            config.image_embedding_dimension = emb
-                .get("imageDimension")
-                .or_else(|| emb.get("image_dimension"))
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as usize;
-            config.rerank_endpoint = emb
-                .get("rerankEndpoint")
-                .or_else(|| emb.get("rerank_endpoint"))
-                .and_then(|v| v.as_str())
-                .map(String::from);
-            config.rerank_api_key = emb
-                .get("rerankApiKey")
-                .or_else(|| emb.get("rerank_api_key"))
-                .and_then(|v| v.as_str())
-                .map(String::from);
-            config.rerank_model = emb
-                .get("rerankModel")
-                .or_else(|| emb.get("rerank_model"))
-                .and_then(|v| v.as_str())
-                .map(String::from);
-        }
+    if let Some(emb) = opts.get("embedder")
+        && let Some(ep) = emb.get("endpoint").and_then(|v| v.as_str())
+    {
+        config.embedding_endpoint = Some(ep.to_string());
+        config.embedding_api_key = emb
+            .get("apiKey")
+            .or_else(|| emb.get("api_key"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        config.embedding_model = emb.get("model").and_then(|v| v.as_str()).map(String::from);
+        config.embedding_dimension =
+            emb.get("dimension").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        config.multi_embedding_endpoint = emb
+            .get("multiEndpoint")
+            .or_else(|| emb.get("multi_endpoint"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        config.multi_embedding_api_key = emb
+            .get("multiApiKey")
+            .or_else(|| emb.get("multi_api_key"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        config.multi_embedding_model = emb
+            .get("multiModel")
+            .or_else(|| emb.get("multi_model"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        config.multi_embedding_dimension = emb
+            .get("multiDimension")
+            .or_else(|| emb.get("multi_dimension"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+        config.image_embedding_endpoint = emb
+            .get("imageEndpoint")
+            .or_else(|| emb.get("image_endpoint"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        config.image_embedding_api_key = emb
+            .get("imageApiKey")
+            .or_else(|| emb.get("image_api_key"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        config.image_embedding_model = emb
+            .get("imageModel")
+            .or_else(|| emb.get("image_model"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        config.image_embedding_dimension = emb
+            .get("imageDimension")
+            .or_else(|| emb.get("image_dimension"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+        config.rerank_endpoint = emb
+            .get("rerankEndpoint")
+            .or_else(|| emb.get("rerank_endpoint"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        config.rerank_api_key = emb
+            .get("rerankApiKey")
+            .or_else(|| emb.get("rerank_api_key"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        config.rerank_model = emb
+            .get("rerankModel")
+            .or_else(|| emb.get("rerank_model"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
     }
 
     let client: Box<dyn qql::client::QdrantOps> = if grpc {
@@ -477,11 +477,11 @@ impl JsClient {
         let params = options.as_ref().and_then(|o| o.get("params"));
 
         let get_batch_param = |idx: usize| -> Option<&serde_json::Value> {
-            if let Some(serde_json::Value::Array(param_list)) = params {
-                if !param_list.is_empty() && (param_list[0].is_object() || param_list[0].is_array())
-                {
-                    return param_list.get(idx);
-                }
+            if let Some(serde_json::Value::Array(param_list)) = params
+                && !param_list.is_empty()
+                && (param_list[0].is_object() || param_list[0].is_array())
+            {
+                return param_list.get(idx);
             }
             params
         };

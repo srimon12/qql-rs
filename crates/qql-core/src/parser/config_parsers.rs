@@ -9,10 +9,10 @@ use crate::error::{QqlError, Span};
 use crate::token::TokenKind;
 
 use super::{
-    ascii_equal, ascii_equal_lower, config_bool, config_float_range, config_has_key,
+    AstLowerer, ascii_equal, ascii_equal_lower, config_bool, config_float_range, config_has_key,
     config_max_optimization_threads, config_non_negative_u64, config_positive_u64, config_value,
     merge_collection_config, validate_hnsw_value, validate_optimizers_value, validate_params_value,
-    validate_vectors_value, AstLowerer,
+    validate_vectors_value,
 };
 
 fn validation_err(
@@ -91,7 +91,7 @@ impl<'a> AstLowerer<'a> {
             let block = self.parse_collection_config_clause(for_alter)?;
             match &mut config {
                 None => config = Some(block),
-                Some(ref mut c) => merge_collection_config(c, block, self.peek()?.pos)?,
+                Some(c) => merge_collection_config(c, block, self.peek()?.pos)?,
             }
         }
         Ok(config.map(Box::new))
@@ -163,10 +163,11 @@ impl<'a> AstLowerer<'a> {
             validate_hnsw_value(key, value, self.peek()?.pos)?;
         }
 
-        if let Some(Value::Int(n)) = config_value(&config, "m") {
-            if *n != 0 && *n < 4 {
-                return Err(validation_err("m must be 0 or >= 4", self.peek()?.pos));
-            }
+        if let Some(Value::Int(n)) = config_value(&config, "m")
+            && *n != 0
+            && *n < 4
+        {
+            return Err(validation_err("m must be 0 or >= 4", self.peek()?.pos));
         }
 
         let m_val = config_non_negative_u64(&config, "m", self.peek()?.pos)?;
@@ -357,9 +358,9 @@ impl<'a> AstLowerer<'a> {
                 || config_has_key(&config, "read_fan_out_delay_ms"))
         {
             return Err(validation_err(
-                    "WITH PARAMS (read_fan_out_factor, read_fan_out_delay_ms) is supported only for ALTER COLLECTION",
-                    self.peek()?.pos,
-                ));
+                "WITH PARAMS (read_fan_out_factor, read_fan_out_delay_ms) is supported only for ALTER COLLECTION",
+                self.peek()?.pos,
+            ));
         }
 
         Ok(CollectionConfig {
@@ -439,20 +440,20 @@ impl<'a> AstLowerer<'a> {
     pub fn parse_quantization_config_block(&mut self) -> Result<CollectionConfig, QqlError> {
         let config = self.parse_config_block()?;
 
-        if let Some(disabled_val) = config_bool(&config, "disabled") {
-            if disabled_val {
-                return Ok(CollectionConfig {
-                    vectors: None,
-                    hnsw: None,
-                    optimizers: None,
-                    params: None,
-                    quantization: None,
-                    quantization_update: Some(Box::new(QuantizationUpdate {
-                        disabled: true,
-                        config: None,
-                    })),
-                });
-            }
+        if let Some(disabled_val) = config_bool(&config, "disabled")
+            && disabled_val
+        {
+            return Ok(CollectionConfig {
+                vectors: None,
+                hnsw: None,
+                optimizers: None,
+                params: None,
+                quantization: None,
+                quantization_update: Some(Box::new(QuantizationUpdate {
+                    disabled: true,
+                    config: None,
+                })),
+            });
         }
 
         let err_pos = self.peek()?.pos;
@@ -503,37 +504,37 @@ impl<'a> AstLowerer<'a> {
         }
 
         let mut bits: Option<f64> = None;
-        if qtype == QuantizationType::Turbo {
-            if let Some(v) = config_value(&config, "bits") {
-                let bits_val = match v {
-                    Value::Int(n) => Some(*n as f64),
-                    Value::Float(f) => Some(*f),
-                    _ => None,
-                };
-                if let Some(b) = bits_val {
-                    if b != 1.0 && b != 1.5 && b != 2.0 && b != 4.0 {
-                        return Err(QqlError::syntax(
-                            "bits must be one of 1, 1.5, 2, or 4 for TURBO quantization",
-                            self.peek()?.pos,
-                        ));
-                    }
-                    bits = Some(b);
+        if qtype == QuantizationType::Turbo
+            && let Some(v) = config_value(&config, "bits")
+        {
+            let bits_val = match v {
+                Value::Int(n) => Some(*n as f64),
+                Value::Float(f) => Some(*f),
+                _ => None,
+            };
+            if let Some(b) = bits_val {
+                if b != 1.0 && b != 1.5 && b != 2.0 && b != 4.0 {
+                    return Err(QqlError::syntax(
+                        "bits must be one of 1, 1.5, 2, or 4 for TURBO quantization",
+                        self.peek()?.pos,
+                    ));
                 }
+                bits = Some(b);
             }
         }
 
         let mut compression: Option<String> = None;
-        if qtype == QuantizationType::Product {
-            if let Some(Value::Str(c)) = config_value(&config, "compression") {
-                let c_lower = c.to_ascii_lowercase();
-                if matches!(c_lower.as_str(), "x4" | "x8" | "x16" | "x32" | "x64") {
-                    compression = Some(c_lower);
-                } else {
-                    return Err(QqlError::syntax(
-                        "compression must be x4, x8, x16, x32, or x64 for PRODUCT quantization",
-                        self.peek()?.pos,
-                    ));
-                }
+        if qtype == QuantizationType::Product
+            && let Some(Value::Str(c)) = config_value(&config, "compression")
+        {
+            let c_lower = c.to_ascii_lowercase();
+            if matches!(c_lower.as_str(), "x4" | "x8" | "x16" | "x32" | "x64") {
+                compression = Some(c_lower);
+            } else {
+                return Err(QqlError::syntax(
+                    "compression must be x4, x8, x16, x32, or x64 for PRODUCT quantization",
+                    self.peek()?.pos,
+                ));
             }
         }
 

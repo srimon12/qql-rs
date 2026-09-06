@@ -13,7 +13,9 @@ pub async fn run_repl(
     crate::output::print_banner();
     let target = if use_edge { "local edge" } else { url };
     crate::output::print_success(&format!("Connected to \x1b[36m{}\x1b[0m", target));
-    println!("Type \x1b[1mhelp\x1b[0m for available commands, \x1b[1m\\f\x1b[0m to format, or \x1b[1mexit\x1b[0m to quit.\n");
+    println!(
+        "Type \x1b[1mhelp\x1b[0m for available commands, \x1b[1m\\f\x1b[0m to format, or \x1b[1mexit\x1b[0m to quit.\n"
+    );
 
     let mut rl = rustyline::DefaultEditor::new()?;
     let mut buffer = String::new();

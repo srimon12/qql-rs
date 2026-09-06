@@ -286,9 +286,10 @@ fn four_double_quotes_lex_as_two_empty_strings() {
     // `""""` is `""` + `""` (two empty double-quoted strings).
     let t = tokens("\"\"\"\"");
     assert_eq!(t.len(), 2);
-    assert!(t
-        .iter()
-        .all(|(kind, text, _)| { *kind == TokenKind::String && text.is_empty() }));
+    assert!(
+        t.iter()
+            .all(|(kind, text, _)| { *kind == TokenKind::String && text.is_empty() })
+    );
 }
 
 #[test]
@@ -412,6 +413,81 @@ fn comment_edge_cases_are_skipped() {
     let t = tokens("SHOW -- inline comment\nCOLLECTIONS");
     assert_eq!(t[0].0, TokenKind::Show);
     assert_eq!(t[1].0, TokenKind::Collections);
+}
+
+#[test]
+fn lexer_double_minus_hazard_suite() {
+    // 1. Binary minus followed by negative number vs comment
+    let t = tokens("1 - -2");
+    assert_eq!(t.len(), 3);
+    assert_eq!(t[0].0, TokenKind::Integer);
+    assert_eq!(t[0].1, "1");
+    assert_eq!(t[1].0, TokenKind::Minus);
+    assert_eq!(t[1].1, "-");
+    assert_eq!(t[2].0, TokenKind::Integer);
+    assert_eq!(t[2].1, "-2");
+
+    // 2. Binary minus followed by unary minus and positive number
+    let t = tokens("1 - - 2");
+    assert_eq!(t.len(), 4);
+    assert_eq!(t[0].0, TokenKind::Integer);
+    assert_eq!(t[1].0, TokenKind::Minus);
+    assert_eq!(t[2].0, TokenKind::Minus);
+    assert_eq!(t[3].0, TokenKind::Integer);
+    assert_eq!(t[3].1, "2");
+
+    // 3. Three dashes: `--` starts comment, remaining dash is in comment body
+    let t = tokens("1 --- line comment\n2");
+    assert_eq!(t.len(), 2);
+    assert_eq!(t[0].0, TokenKind::Integer);
+    assert_eq!(t[0].1, "1");
+    assert_eq!(t[1].0, TokenKind::Integer);
+    assert_eq!(t[1].1, "2");
+
+    // 4. Comment directly attached to punctuation without preceding whitespace
+    let t = tokens("SHOW COLLECTIONS;--trailing comment\n");
+    assert_eq!(t.len(), 3);
+    assert_eq!(t[0].0, TokenKind::Show);
+    assert_eq!(t[1].0, TokenKind::Collections);
+    assert_eq!(t[2].0, TokenKind::Semicolon);
+
+    // 5. Windows CRLF (\r\n) line endings
+    let t = tokens("-- comment with crlf\r\nSHOW COLLECTIONS;");
+    assert_eq!(t.len(), 3);
+    assert_eq!(t[0].0, TokenKind::Show);
+    assert_eq!(t[1].0, TokenKind::Collections);
+    assert_eq!(t[2].0, TokenKind::Semicolon);
+
+    // 6. Double minus inside string literals must remain verbatim string content
+    let t = tokens("'hello -- world' \"foo -- bar\" '''-- verbatim --'''");
+    assert_eq!(t.len(), 3);
+    assert_eq!(t[0].0, TokenKind::String);
+    assert_eq!(t[0].1, "hello -- world");
+    assert_eq!(t[1].0, TokenKind::String);
+    assert_eq!(t[1].1, "foo -- bar");
+    assert_eq!(t[2].0, TokenKind::String);
+    assert_eq!(t[2].1, "-- verbatim --");
+
+    // 7. Formula expression parsing distinguishes subtraction and negation
+    let stmt = crate::parser::Parser::parse("QUERY FORMULA a - -b FROM docs;").unwrap();
+    if let crate::ast::Stmt::Query(q) = stmt {
+        match q.expression {
+            crate::ast::QueryExpr::Formula { expression, .. } => match *expression {
+                crate::ast::FormulaExpr::Sub { left, right } => {
+                    assert!(
+                        matches!(*left, crate::ast::FormulaExpr::Variable { ref name } if name == "a")
+                    );
+                    assert!(
+                        matches!(*right, crate::ast::FormulaExpr::Neg { ref operand } if matches!(**operand, crate::ast::FormulaExpr::Variable { ref name } if name == "b"))
+                    );
+                }
+                other => panic!("expected FormulaExpr::Sub, got {other:?}"),
+            },
+            other => panic!("expected QueryExpr::Formula, got {other:?}"),
+        }
+    } else {
+        panic!("expected Stmt::Query");
+    }
 }
 
 #[test]

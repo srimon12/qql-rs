@@ -116,12 +116,11 @@ pub fn lower_create_collection(stmt: &CreateCollectionStmt) -> CreateCollectionR
         .vectors_config
         .take()
         .and_then(|config| config.get("on_disk").and_then(serde_json::Value::as_bool))
+        && let Some(vectors) = &mut req.vectors
     {
-        if let Some(vectors) = &mut req.vectors {
-            for vector in vectors.values_mut() {
-                if let Some(vector) = vector.as_object_mut() {
-                    vector.insert("on_disk".into(), serde_json::Value::Bool(on_disk));
-                }
+        for vector in vectors.values_mut() {
+            if let Some(vector) = vector.as_object_mut() {
+                vector.insert("on_disk".into(), serde_json::Value::Bool(on_disk));
             }
         }
     }

@@ -1,5 +1,5 @@
 use super::helpers::point_id_from_value;
-use super::{ascii_equal, AstLowerer};
+use super::{AstLowerer, ascii_equal};
 use crate::ast::{ComparisonOp, FilterExpr, GeoPoint, PointIdPredicate, Value};
 use crate::error::{QqlError, Span};
 use crate::token::TokenKind;

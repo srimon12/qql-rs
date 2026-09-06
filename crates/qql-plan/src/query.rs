@@ -185,14 +185,13 @@ pub fn lower_query_expr(expr: &QueryExpr) -> Result<QueryVariant, QqlError> {
             input, using, mmr, ..
         } => {
             let mut nearest = lower_query_input(input);
-            if let PlanQueryInput::Document { model, .. } = &mut nearest {
-                if model.as_deref().unwrap_or("").is_empty()
-                    && using
-                        .as_ref()
-                        .is_some_and(|target| target.name.eq_ignore_ascii_case("bm25"))
-                {
-                    *model = Some("Qdrant/bm25".to_string());
-                }
+            if let PlanQueryInput::Document { model, .. } = &mut nearest
+                && model.as_deref().unwrap_or("").is_empty()
+                && using
+                    .as_ref()
+                    .is_some_and(|target| target.name.eq_ignore_ascii_case("bm25"))
+            {
+                *model = Some("Qdrant/bm25".to_string());
             }
             QueryVariant::Nearest(NearestQuery {
                 nearest,
@@ -658,31 +657,27 @@ fn build_query_with_prefetch(
         }
         _ => {
             let mut variant = lower_query_expr(&query.expression)?;
-            if let Some(params) = &query.params {
-                if params.rrf_k.is_some() || params.rrf_weights.is_some() {
-                    if let QueryVariant::Fusion { fusion } = &variant {
-                        if fusion == "rrf" {
-                            variant = QueryVariant::Rrf(RrfQuery {
-                                rrf: RrfParams {
-                                    k: params.rrf_k,
-                                    weights: params.rrf_weights.clone(),
-                                },
-                            });
-                        }
-                    }
-                }
+            if let Some(params) = &query.params
+                && (params.rrf_k.is_some() || params.rrf_weights.is_some())
+                && let QueryVariant::Fusion { fusion } = &variant
+                && fusion == "rrf"
+            {
+                variant = QueryVariant::Rrf(RrfQuery {
+                    rrf: RrfParams {
+                        k: params.rrf_k,
+                        weights: params.rrf_weights.clone(),
+                    },
+                });
             }
             let using = expression_using(&query.expression).map(str::to_owned);
-            if let QueryVariant::Nearest(nearest) = &mut variant {
-                if let PlanQueryInput::Document { model, .. } = &mut nearest.nearest {
-                    if model.as_deref().unwrap_or("").is_empty()
-                        && using
-                            .as_deref()
-                            .is_some_and(|u| u.eq_ignore_ascii_case("bm25"))
-                    {
-                        *model = Some("Qdrant/bm25".to_string());
-                    }
-                }
+            if let QueryVariant::Nearest(nearest) = &mut variant
+                && let PlanQueryInput::Document { model, .. } = &mut nearest.nearest
+                && model.as_deref().unwrap_or("").is_empty()
+                && using
+                    .as_deref()
+                    .is_some_and(|u| u.eq_ignore_ascii_case("bm25"))
+            {
+                *model = Some("Qdrant/bm25".to_string());
             }
             let prefetches = expression_prefetch(&query.expression);
             let pf_requests: Vec<PrefetchRequest> = prefetches
@@ -965,10 +960,12 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
-        assert!(route
-            .query
-            .iter()
-            .any(|(k, v)| k == "consistency" && v == "2"));
+        assert!(
+            route
+                .query
+                .iter()
+                .any(|(k, v)| k == "consistency" && v == "2")
+        );
     }
 
     #[test]
@@ -1471,6 +1468,59 @@ mod tests {
     }
 
     #[test]
+    fn plain_limit_and_offset_u64_max_plan_through() {
+        // REST bodies and the gRPC QueryPoints proto both carry u64, so the
+        // u64::MAX ceiling passes through unchanged; only LIMIT+OFFSET
+        // arithmetic and candidate scaling overflow (error tests above).
+        let op = crate::plan::plan(
+            &Parser::parse(
+                "QUERY VECTOR [0.1] FROM docs USING dense \
+                 LIMIT 18446744073709551615 OFFSET 18446744073709551615;",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let crate::plan::PlannedOperation::Query { request, .. } = &op else {
+            panic!("expected Query, got {op:?}");
+        };
+        assert_eq!(request.limit, Some(u64::MAX));
+        assert_eq!(request.offset, Some(u64::MAX));
+    }
+
+    #[test]
+    fn grouped_limit_u64_max_without_offset_plans_through() {
+        // LIMIT alone (OFFSET defaults to 0) must not trip the overflow guard.
+        let op = crate::plan::plan(
+            &Parser::parse("QUERY TEXT 'x' FROM docs GROUP BY topic LIMIT 18446744073709551615;")
+                .unwrap(),
+        )
+        .unwrap();
+        let crate::plan::PlannedOperation::QueryGroups { request, .. } = &op else {
+            panic!("expected QueryGroups, got {op:?}");
+        };
+        assert_eq!(request.limit, u64::MAX);
+    }
+
+    #[test]
+    fn hybrid_limit_times_ten_boundary_plans_through() {
+        // u64::MAX / 10 scaled by 10 still fits u64 exactly; only LIMIT above
+        // that overflows the candidate limit (error test above).
+        let op = crate::plan::plan(
+            &Parser::parse(
+                "QUERY HYBRID TEXT 'q' DENSE d SPARSE s FROM docs \
+                 LIMIT 1844674407370955161;",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let crate::plan::PlannedOperation::Query { request, .. } = &op else {
+            panic!("expected Query, got {op:?}");
+        };
+        let candidates = request.prefetch.first().and_then(|p| p.limit).unwrap();
+        assert_eq!(candidates, 1844674407370955161 * 10);
+    }
+
+    #[test]
     fn query_defaults_with_payload_to_true_when_omitted() {
         let json = parse_route("QUERY TEXT 'q' FROM docs;");
         assert_eq!(json["with_payload"], true);
@@ -1485,7 +1535,7 @@ mod tests {
     #[test]
     fn decay_datetime_target_and_variable_auto_inferred() {
         let json = parse_route(
-            "QUERY FORMULA EXP_DECAY(judgment_date, TARGET = '2026-09-04T00:00:00Z', SCALE = 630720000, MIDPOINT = 0.5) FROM docs;"
+            "QUERY FORMULA EXP_DECAY(judgment_date, TARGET = '2026-09-04T00:00:00Z', SCALE = 630720000, MIDPOINT = 0.5) FROM docs;",
         );
         let decay = &json["query"]["formula"]["exp_decay"];
         assert_eq!(decay["x"]["datetime_key"], "judgment_date");

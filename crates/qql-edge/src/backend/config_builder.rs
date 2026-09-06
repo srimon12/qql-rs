@@ -37,12 +37,12 @@ pub(crate) fn build_edge_config(
                 Some(other) => {
                     return Err(edge_config_error(format!(
                         "vector '{name}' has unsupported distance '{other}'"
-                    )))
+                    )));
                 }
                 None => {
                     return Err(edge_config_error(format!(
                         "vector '{name}' requires a distance"
-                    )))
+                    )));
                 }
             };
             let multivector_config = params.get("multivector_config").and_then(|mv| {

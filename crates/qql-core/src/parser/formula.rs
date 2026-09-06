@@ -7,7 +7,7 @@ use crate::ast::{FormulaExpr, Value};
 use crate::error::QqlError;
 use crate::token::TokenKind;
 
-use super::{ascii_equal, AstLowerer};
+use super::{AstLowerer, ascii_equal};
 
 // ── Precedence constants ────────────────────────────────────────
 
@@ -108,9 +108,13 @@ fn parse_formula_constant(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, QqlErro
         .parse()
         .map_err(|_| QqlError::syntax("invalid number format in formula", tok.pos))?;
     if !v.is_finite() {
-        return Err(QqlError::syntax(
-            alloc::format!("formula number '{}' is not finite", tok.text),
-            tok.pos,
+        // Same failure class as `parse_numeric_literal` (score thresholds,
+        // decay targets): a non-finite numeric literal, so it carries the
+        // same stable code instead of the generic syntax code.
+        return Err(QqlError::parse(
+            "QQL-PARSE-NUMBER",
+            alloc::format!("number '{}' is not finite", tok.text),
+            tok.span,
         ));
     }
     Ok(FormulaExpr::Constant { value: v })
@@ -502,7 +506,7 @@ fn parse_formula_function_call(
                     return Err(QqlError::syntax(
                         alloc::format!("unknown decay function: {}", func_name),
                         pos,
-                    ))
+                    ));
                 }
             };
             Ok(FormulaExpr::Decay {

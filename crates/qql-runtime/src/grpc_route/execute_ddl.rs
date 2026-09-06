@@ -2,8 +2,8 @@
 
 use qql_core::error::QqlError;
 
-use crate::grpc::memory::memory_from_str;
 use crate::grpc::GrpcQdrant;
+use crate::grpc::memory::memory_from_str;
 use crate::qdrant_grpc::qdrant;
 
 use super::ddl::{

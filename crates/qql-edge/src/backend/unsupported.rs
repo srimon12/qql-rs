@@ -117,9 +117,9 @@ impl EdgeUnsupported {
     pub fn remote_hint(self) -> Option<&'static str> {
         match self {
             Self::CollectionParams | Self::PointReferenceQuery => None,
-            Self::RecommendAverageVector => {
-                Some("Use STRATEGY best_score or sum_scores offline, or remote Qdrant for average_vector")
-            }
+            Self::RecommendAverageVector => Some(
+                "Use STRATEGY best_score or sum_scores offline, or remote Qdrant for average_vector",
+            ),
             _ => Some("Use remote Qdrant (REST or gRPC) for this feature"),
         }
     }

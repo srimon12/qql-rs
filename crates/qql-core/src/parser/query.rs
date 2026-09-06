@@ -1,4 +1,4 @@
-use super::{ascii_equal, AstLowerer};
+use super::{AstLowerer, ascii_equal};
 use crate::ast::{
     ContextPair, Cte, FeedbackItem, FeedbackStrategy, FilterExpr, FusionMethod, GroupSpec,
     LookupSpec, MmrConfig, OrderDirection, PageSpec, Prefetch, PrefetchSource, QueryCollection,
@@ -1057,14 +1057,14 @@ fn validate_prefetch_references(
         | QueryExpr::Hybrid { .. } => return Ok(()),
     };
     for item in prefetch {
-        if let PrefetchSource::Cte(name) = &item.source {
-            if !ctes.iter().any(|cte| cte.name.eq_ignore_ascii_case(name)) {
-                return Err(QqlError::validation(
-                    "QQL-VALIDATION-PREFETCH-CTE",
-                    alloc::format!("PREFETCH references unknown CTE '{}'", name),
-                    Some(span),
-                ));
-            }
+        if let PrefetchSource::Cte(name) = &item.source
+            && !ctes.iter().any(|cte| cte.name.eq_ignore_ascii_case(name))
+        {
+            return Err(QqlError::validation(
+                "QQL-VALIDATION-PREFETCH-CTE",
+                alloc::format!("PREFETCH references unknown CTE '{}'", name),
+                Some(span),
+            ));
         }
     }
     Ok(())
@@ -1081,14 +1081,14 @@ fn validate_common_clauses(
     offset: Option<u64>,
     span: Span,
 ) -> Result<(), QqlError> {
-    if let Some(score) = score_threshold {
-        if !score.is_finite() {
-            return Err(QqlError::validation(
-                "QQL-VALIDATION-SCORE",
-                "score threshold must be finite",
-                Some(span),
-            ));
-        }
+    if let Some(score) = score_threshold
+        && !score.is_finite()
+    {
+        return Err(QqlError::validation(
+            "QQL-VALIDATION-SCORE",
+            "score threshold must be finite",
+            Some(span),
+        ));
     }
     if matches!(expression, QueryExpr::Points { .. })
         && (filter.is_some()

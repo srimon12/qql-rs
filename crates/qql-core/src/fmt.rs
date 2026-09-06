@@ -1,17 +1,14 @@
 //! Canonical QQL formatter.
 //!
 //! Parses source text into the typed AST and re-emits it in canonical form.
-//! The output is normalized (single-line per statement, canonical clause
-//! order, canonical keyword casing, escaped string literals) and always
-//! re-parses to an identical AST:
+//! The output is normalized (canonical clause order, canonical keyword casing,
+//! escaped string literals) while preserving comments, file headers, and
+//! blank-line trivia, and always re-parses to an identical AST:
 //!
 //! ```text
 //! parse(format(parse(input))) == parse(input)
 //! format(format(input))        == format(input)
 //! ```
-//!
-//! Comments are not preserved: formatting is AST-based, so any source
-//! comments are dropped in favor of the canonical rendering.
 
 use crate::ast::*;
 use crate::error::QqlError;
@@ -1429,40 +1426,39 @@ fn render_formula_call(name: &str, args: &[FormulaExpr]) -> String {
 
 fn render_collection_config_clauses(config: &CollectionConfig) -> Vec<String> {
     let mut clauses = Vec::new();
-    if let Some(hnsw) = &config.hnsw {
-        if let Some(body) = render_hnsw_block(hnsw) {
-            clauses.push(format!("WITH HNSW ({})", body));
-        }
+    if let Some(hnsw) = &config.hnsw
+        && let Some(body) = render_hnsw_block(hnsw)
+    {
+        clauses.push(format!("WITH HNSW ({})", body));
     }
-    if let Some(vectors) = &config.vectors {
-        if let Some(body) = render_vectors_options(vectors) {
-            clauses.push(format!("WITH VECTOR ({})", body));
-        }
+    if let Some(vectors) = &config.vectors
+        && let Some(body) = render_vectors_options(vectors)
+    {
+        clauses.push(format!("WITH VECTOR ({})", body));
     }
-    if let Some(optimizers) = &config.optimizers {
-        if let Some(body) = render_optimizers_block(optimizers) {
-            clauses.push(format!("WITH OPTIMIZERS ({})", body));
-        }
+    if let Some(optimizers) = &config.optimizers
+        && let Some(body) = render_optimizers_block(optimizers)
+    {
+        clauses.push(format!("WITH OPTIMIZERS ({})", body));
     }
-    if let Some(params) = &config.params {
-        if let Some(body) = render_params_block(params) {
-            clauses.push(format!("WITH PARAMS ({})", body));
-        }
+    if let Some(params) = &config.params
+        && let Some(body) = render_params_block(params)
+    {
+        clauses.push(format!("WITH PARAMS ({})", body));
     }
-    if let Some(quantization) = &config.quantization {
-        if let Some(body) = render_quantization_block(quantization) {
-            clauses.push(format!("WITH QUANTIZATION ({})", body));
-        }
+    if let Some(quantization) = &config.quantization
+        && let Some(body) = render_quantization_block(quantization)
+    {
+        clauses.push(format!("WITH QUANTIZATION ({})", body));
     }
     if let Some(update) = &config.quantization_update {
         if update.disabled {
             clauses.push("WITH QUANTIZATION (disabled = true)".into());
-        } else if config.quantization.is_none() {
-            if let Some(config) = &update.config {
-                if let Some(body) = render_quantization_block(config) {
-                    clauses.push(format!("WITH QUANTIZATION ({})", body));
-                }
-            }
+        } else if config.quantization.is_none()
+            && let Some(config) = &update.config
+            && let Some(body) = render_quantization_block(config)
+        {
+            clauses.push(format!("WITH QUANTIZATION ({})", body));
         }
     }
     clauses
@@ -1498,15 +1494,15 @@ fn render_vector_def(vector: &VectorDef) -> String {
         vector.size,
         render_distance(vector.distance)
     );
-    if let Some(hnsw) = &vector.hnsw {
-        if let Some(body) = render_hnsw_block(hnsw) {
-            let _ = write!(out, " WITH HNSW ({})", body);
-        }
+    if let Some(hnsw) = &vector.hnsw
+        && let Some(body) = render_hnsw_block(hnsw)
+    {
+        let _ = write!(out, " WITH HNSW ({})", body);
     }
-    if let Some(quantization) = &vector.quantization {
-        if let Some(body) = render_quantization_block(quantization) {
-            let _ = write!(out, " WITH QUANTIZATION ({})", body);
-        }
+    if let Some(quantization) = &vector.quantization
+        && let Some(body) = render_quantization_block(quantization)
+    {
+        let _ = write!(out, " WITH QUANTIZATION ({})", body);
     }
     if let Some(multivector) = &vector.multivector {
         let _ = write!(
@@ -1517,10 +1513,10 @@ fn render_vector_def(vector: &VectorDef) -> String {
             }
         );
     }
-    if let Some(vectors) = &vector.vectors {
-        if let Some(body) = render_vectors_options(vectors) {
-            let _ = write!(out, " WITH VECTOR ({})", body);
-        }
+    if let Some(vectors) = &vector.vectors
+        && let Some(body) = render_vectors_options(vectors)
+    {
+        let _ = write!(out, " WITH VECTOR ({})", body);
     }
     out
 }

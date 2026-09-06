@@ -337,26 +337,26 @@ impl JsClient {
 
         let report = match &query {
             serde_json::Value::String(s) => {
-                if let Some(serde_json::Value::Array(ref p_arr)) = params {
-                    if let Ok(parsed_stmts) = Parser::parse_all(s) {
-                        if parsed_stmts.len() > 1 && p_arr.len() == parsed_stmts.len() {
-                            let mut bound_stmts = Vec::with_capacity(parsed_stmts.len());
-                            for (i, mut stmt) in parsed_stmts.into_iter().enumerate() {
-                                bind_stmt_json(&mut stmt, &p_arr[i]).map_err(to_napi_err)?;
-                                bound_stmts.push(stmt);
-                            }
-                            let results = self
-                                .inner
-                                .execute_batch_nodes(
-                                    bound_stmts,
-                                    matches!(on_error, qql::executor::OnError::Stop),
-                                )
-                                .await
-                                .map_err(to_napi_err)?;
-                            let report = qql::executor::ExecutionReport::from_results(results);
-                            return serde_json::to_string(&report).map_err(serde_napi_err);
-                        }
+                if let Some(serde_json::Value::Array(p_arr)) = params
+                    && let Ok(parsed_stmts) = Parser::parse_all(s)
+                    && parsed_stmts.len() > 1
+                    && p_arr.len() == parsed_stmts.len()
+                {
+                    let mut bound_stmts = Vec::with_capacity(parsed_stmts.len());
+                    for (i, mut stmt) in parsed_stmts.into_iter().enumerate() {
+                        bind_stmt_json(&mut stmt, &p_arr[i]).map_err(to_napi_err)?;
+                        bound_stmts.push(stmt);
                     }
+                    let results = self
+                        .inner
+                        .execute_batch_nodes(
+                            bound_stmts,
+                            matches!(on_error, qql::executor::OnError::Stop),
+                        )
+                        .await
+                        .map_err(to_napi_err)?;
+                    let report = qql::executor::ExecutionReport::from_results(results);
+                    return serde_json::to_string(&report).map_err(serde_napi_err);
                 }
                 let bound_query = if let Some(p) = params {
                     bind_json_params(s, p, false)?
@@ -372,7 +372,7 @@ impl JsClient {
                 if arr.is_empty() {
                     qql::executor::ExecutionReport::empty()
                 } else {
-                    let scoped_params = if let Some(serde_json::Value::Array(ref p_arr)) = params {
+                    let scoped_params = if let Some(serde_json::Value::Array(p_arr)) = params {
                         if p_arr.len() == arr.len() {
                             Some(p_arr)
                         } else {

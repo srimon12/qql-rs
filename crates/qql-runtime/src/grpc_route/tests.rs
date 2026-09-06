@@ -2,7 +2,7 @@
 
 use super::ddl::{hnsw_config_from_plan, quantization_config_from_plan, vector_params};
 use super::filter::to_match;
-use super::query::{to_query_groups, to_query_points};
+use super::query::{to_query_groups, to_query_points, to_scroll_points};
 use super::responses::get_points_envelope;
 use crate::qdrant_grpc::qdrant;
 use qql_core::parser::Parser;
@@ -851,5 +851,126 @@ fn grpc_in_list_homogeneous_lists_survive_full_path() {
             assert_eq!(k.strings, vec!["deleted", "archived"]);
         }
         other => panic!("expected Keywords, got {other:?}"),
+    }
+}
+
+#[test]
+fn scroll_limit_overflow_is_rejected_in_grpc() {
+    let stmt = Parser::parse("SCROLL FROM docs LIMIT 18446744073709551615;").unwrap();
+    let op = qql_plan::plan(&stmt).unwrap();
+    let (collection, req) = match &op {
+        qql_plan::PlannedOperation::Scroll {
+            collection,
+            request,
+        } => (collection, request),
+        other => panic!("expected Scroll, got {other:?}"),
+    };
+    let err = to_scroll_points(req, collection).unwrap_err();
+    assert_eq!(err.code, "QQL-GRPC-SCROLL-LIMIT");
+    assert!(err.message.contains("scroll limit"));
+}
+
+#[test]
+fn grpc_rerank_with_cte_prefetch_preserves_structure() {
+    use qdrant::query::Variant as Qv;
+    use qdrant::vector_input::Variant as Vi;
+
+    let stmt = Parser::parse(
+        "WITH a AS (QUERY TEXT 'candidate text' MODEL 'e5' FROM docs USING dense LIMIT 20) \
+         QUERY RERANK TEXT 'query text' MODEL 'colbert' FROM docs USING colbert PREFETCH (a) LIMIT 10;",
+    )
+    .unwrap();
+    let op = qql_plan::plan(&stmt).unwrap();
+    let (collection, req) = match &op {
+        qql_plan::PlannedOperation::Query {
+            collection,
+            request,
+        } => (collection, request),
+        other => panic!("expected Query, got {other:?}"),
+    };
+    let qp = to_query_points(req, collection).unwrap();
+
+    // Verify top-level query is Nearest with colbert model and document input
+    assert_eq!(qp.collection_name, "docs");
+    assert_eq!(qp.using, Some("colbert".to_string()));
+    assert_eq!(qp.limit, Some(10));
+    match qp.query.and_then(|q| q.variant) {
+        Some(Qv::Nearest(near)) => match near.variant {
+            Some(Vi::Document(doc)) => {
+                assert_eq!(doc.text, "query text");
+                assert_eq!(doc.model, "colbert");
+            }
+            other => panic!("expected Document variant, got {other:?}"),
+        },
+        other => panic!("expected Nearest query, got {other:?}"),
+    }
+
+    // Verify prefetch preserved CTE candidate query structure
+    assert_eq!(qp.prefetch.len(), 1);
+    let pf = &qp.prefetch[0];
+    assert_eq!(pf.limit, Some(20));
+    assert_eq!(pf.using, Some("dense".to_string()));
+    match pf.query.as_ref().and_then(|q| q.variant.as_ref()) {
+        Some(Qv::Nearest(near)) => match near.variant.as_ref() {
+            Some(Vi::Document(doc)) => {
+                assert_eq!(doc.text, "candidate text");
+                assert_eq!(doc.model, "e5");
+            }
+            other => panic!("expected Document variant in prefetch, got {other:?}"),
+        },
+        other => panic!("expected Nearest query in prefetch, got {other:?}"),
+    }
+}
+
+#[test]
+fn grpc_fusion_rrf_standalone_with_params() {
+    use qdrant::query::Variant as Qv;
+
+    // Direct fusion with rrf_k and rrf_weights
+    let stmt = Parser::parse(
+        "QUERY FUSION RRF FROM docs \
+         PREFETCH (QUERY TEXT 'a' MODEL 'm' FROM docs USING dense LIMIT 10, \
+                   QUERY TEXT 'b' MODEL 'm' FROM docs USING dense LIMIT 10) \
+         PARAMS (rrf_k = 10, rrf_weights = [0.75, 0.25]) LIMIT 5;",
+    )
+    .unwrap();
+    let op = qql_plan::plan(&stmt).unwrap();
+    let (collection, req) = match &op {
+        qql_plan::PlannedOperation::Query {
+            collection,
+            request,
+        } => (collection, request),
+        other => panic!("expected Query, got {other:?}"),
+    };
+    let qp = to_query_points(req, collection).unwrap();
+    match qp.query.and_then(|q| q.variant) {
+        Some(Qv::Rrf(rrf)) => {
+            assert_eq!(rrf.k, Some(10));
+            assert_eq!(rrf.weights, vec![0.75, 0.25]);
+        }
+        other => panic!("expected Rrf variant, got {other:?}"),
+    }
+
+    // Direct fusion with default params maps to Fusion::Rrf enum
+    let stmt_default = Parser::parse(
+        "QUERY FUSION RRF FROM docs \
+         PREFETCH (QUERY TEXT 'a' MODEL 'm' FROM docs USING dense LIMIT 10, \
+                   QUERY TEXT 'b' MODEL 'm' FROM docs USING dense LIMIT 10) LIMIT 5;",
+    )
+    .unwrap();
+    let op_default = qql_plan::plan(&stmt_default).unwrap();
+    let (collection, req_default) = match &op_default {
+        qql_plan::PlannedOperation::Query {
+            collection,
+            request,
+        } => (collection, request),
+        other => panic!("expected Query, got {other:?}"),
+    };
+    let qp_default = to_query_points(req_default, collection).unwrap();
+    match qp_default.query.and_then(|q| q.variant) {
+        Some(Qv::Fusion(f)) => {
+            assert_eq!(f, qdrant::Fusion::Rrf as i32);
+        }
+        other => panic!("expected Fusion(Rrf), got {other:?}"),
     }
 }

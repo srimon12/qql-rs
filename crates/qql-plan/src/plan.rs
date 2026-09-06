@@ -973,7 +973,10 @@ fn validate_recommend_average_dims(expression: &QueryExpr) -> Result<(), QqlErro
                     "QQL-PLAN-RECOMMEND-AVERAGE",
                     alloc::format!(
                         "average_vector examples must share one dimension: found ({}, {}) and ({}, {}) rows x dims",
-                        prev.0, prev.1, shape.0, shape.1
+                        prev.0,
+                        prev.1,
+                        shape.0,
+                        shape.1
                     ),
                     None,
                 ));
@@ -1772,5 +1775,38 @@ mod tests {
         let route = to_rest_route(&op).expect("rest route");
         assert!(route.body.is_some());
         assert_ne!(route.body, Some(serde_json::Value::Null));
+    }
+
+    #[test]
+    fn cross_rerank_with_cte_prefetch_plans_candidates() {
+        let stmt = Parser::parse(
+            "WITH candidates AS (QUERY TEXT 'rust query' MODEL 'bge' FROM docs USING dense LIMIT 50) \
+             QUERY CROSS RERANK TEXT 'rust query' MODEL 'bge-reranker-large' ON FIELD body \
+             FROM docs PREFETCH (candidates) LIMIT 10;",
+        )
+        .unwrap();
+        let op = plan(&stmt).unwrap();
+        match op {
+            PlannedOperation::CrossRerank {
+                collection,
+                query,
+                model,
+                field,
+                limit,
+                offset,
+                candidates,
+            } => {
+                assert_eq!(collection, "docs");
+                assert_eq!(query, "rust query");
+                assert_eq!(model, "bge-reranker-large");
+                assert_eq!(field, "body");
+                assert_eq!(limit, 10);
+                assert_eq!(offset, 0);
+                assert_eq!(candidates.len(), 1);
+                assert_eq!(candidates[0].0, "docs");
+                assert_eq!(candidates[0].1.limit, Some(50));
+            }
+            other => panic!("expected CrossRerank, got {other:?}"),
+        }
     }
 }

@@ -721,12 +721,11 @@ pub(crate) fn wrap_execution_report<'py>(
     py: Python<'py>,
     dict: Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    if let Ok(pyqql_edge) = py.import("pyqql_edge") {
-        if let Ok(report_cls) = pyqql_edge.getattr("ExecutionReport") {
-            if let Ok(report) = report_cls.call1((&dict,)) {
-                return Ok(report);
-            }
-        }
+    if let Ok(pyqql_edge) = py.import("pyqql_edge")
+        && let Ok(report_cls) = pyqql_edge.getattr("ExecutionReport")
+        && let Ok(report) = report_cls.call1((&dict,))
+    {
+        return Ok(report);
     }
     Ok(dict)
 }
