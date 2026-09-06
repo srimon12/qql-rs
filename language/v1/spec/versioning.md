@@ -1,6 +1,6 @@
 # QQL versioning policy
 
-QQL uses `MAJOR.MINOR`. The current language version is `1.6`; the canonical AST
+QQL uses `MAJOR.MINOR`. The current language version is `1.7`; the canonical AST
 schema identifier is independently fixed as `qql.ast/v1`.
 
 ## Compatibility rule
@@ -101,6 +101,7 @@ executable verifier, not a second private specification.
 | 1.4 | 2026-08-05 | Additive minor features aligned with Qdrant 1.19: `SHOW QUOTAS` / `SET QUOTA (…) [WAIT bool]`; `memory` placement (`cold`/`cached`/`pinned`) on HNSW, VECTOR, SPARSE, QUANTIZATION, and indexes plus `payload_memory` in collection `PARAMS`; `WHERE field MATCH PREFIX '…'` and `WHERE SLICE (total, index)`; `PARAMS (idf = 'global' \| {corpus: …})` for per-query sparse IDF corpora; keyword index `prefix = true`; dense `datatype = 'turbo4'` (aliases `t4`, plus `f32`/`f16`/`u8`); conformance corpus 38 valid files (261 statements), 53 invalid cases, 38 AST snapshots. |
 | 1.5 | 2026-08-24 | `PARAMS (idf = …)` corpus is a QQL `WHERE` filter (`idf = WHERE tenant_id = 'acme'`), stored as `FilterExpr`. The Qdrant JSON `{corpus: {must: […]}}` form is removed. Isolation remains `WHERE` / `inject_filter`; routing remains `SHARD`; IDF is scoring only. Conformance corpus 39 valid files (265 statements), 56 invalid cases, 39 AST snapshots. |
 | 1.6 | 2026-09-04 | Additive minor features aligned with the Qdrant upstream API sync: formula functions `MAX(...)` / `MIN(...)` (n ≥ 1 operands) and `ACOSH(x)`; `CREATE COLLECTION` rejects vector dimensions above 65536 (`QQL-PARSE-VECTOR-SIZE`, new code for a previously unspecified case). Conformance corpus 40 valid files (276 statements), 59 invalid cases, 40 AST snapshots, 40 canonical formats. |
+| 1.7 | 2026-09-06 | Additive minor syntax: formal parameter placeholders in grammar (`param = { ":" ~ identifier | "?" }`) across scalars, point IDs, query inputs, and clauses; prepared statement AST binding (`bind_stmt`), scoped batch parameter maps, and nested property parameter expansion. Conformance corpus 40 valid files (278 statements), 59 invalid cases, 40 AST snapshots, 40 canonical formats. |
 
 `qql-rs` is the supported reference implementation. An implementation version
 number does not imply QQL conformance; conformance is claimed only against a

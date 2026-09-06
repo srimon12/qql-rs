@@ -77,10 +77,36 @@ impl PyStmt {
         pythonize::pythonize(py, &val).map_err(|e| PySyntaxError::new_err(e.to_string()))
     }
 
+    fn __str__(&self) -> String {
+        format!("{}", self.inner)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "<Stmt: {}>",
+            qql_core::fmt::format_stmt_readable(&self.inner)
+        )
+    }
+
+    /// Bind parameters into this statement and return a new bound Stmt.
+    #[pyo3(signature = (params=None))]
+    fn bind(&self, params: Option<&Bound<'_, PyAny>>) -> PyResult<PyStmt> {
+        let mut inner = self.inner.clone();
+        bind_py_stmt(&mut inner, params)?;
+        Ok(PyStmt { inner })
+    }
+
     /// Compile this Stmt directly to its transport route without re-parsing.
-    fn compile_route<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let compiled = qql_plan::routing::compile_statement(&self.inner)
-            .map_err(|e| PySyntaxError::new_err(e.to_string()))?;
+    /// Optionally accepts `params` to bind before compiling.
+    #[pyo3(signature = (params=None))]
+    fn compile_route<'py>(
+        &self,
+        py: Python<'py>,
+        params: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let mut stmt = self.inner.clone();
+        bind_py_stmt(&mut stmt, params)?;
+        let compiled = qql_plan::routing::compile_statement(&stmt).map_err(qql_py_syntax_error)?;
         let (method, path, payload) = match compiled.route {
             Some(route) => {
                 let payload = route.body_json().unwrap_or(serde_json::Value::Null);
@@ -252,7 +278,7 @@ fn explain(query: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
 //  Edge Client — wraps qql-edge Executor
 // ═══════════════════════════════════════════════════════════════════
 
-#[pyclass(name = "Client", frozen)]
+#[pyclass(name = "Client", subclass)]
 pub struct PyClient {
     pub(crate) inner: std::sync::Arc<qql::executor::Executor>,
     pub(crate) runtime: tokio::runtime::Runtime,
@@ -273,21 +299,11 @@ impl PyClient {
             return Err(PyRuntimeError::new_err("client is closed"));
         }
         let oe = parse_on_error(on_error)?;
-        let input = if let Some(p) = params {
-            if let Ok(q_str) = query.extract::<String>() {
-                let bound = bind_py_params(&q_str, p)?;
-                Input::String(bound)
-            } else {
-                return Err(PyValueError::new_err(
-                    "parameter binding requires a query string",
-                ));
-            }
-        } else {
-            classify(query)?
-        };
+        let input = self.prepare_input(query, params)?;
         let out = py.detach(|| self.run_input(input, oe))?;
-        pythonize::pythonize(py, &out)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+        let dict = pythonize::pythonize(py, &out)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        wrap_execution_report(py, dict)
     }
 
     #[pyo3(signature = (query, *, params=None, on_error="stop"))]
@@ -302,27 +318,54 @@ impl PyClient {
             return Err(PyRuntimeError::new_err("client is closed"));
         }
         let inner = self.inner.clone();
-        let input = if let Some(p) = params {
-            if let Ok(q_str) = query.extract::<String>() {
-                let bound = bind_py_params(&q_str, p)?;
-                Input::String(bound)
-            } else {
-                return Err(PyValueError::new_err(
-                    "parameter binding requires a query string",
-                ));
-            }
-        } else {
-            classify(&query)?
-        };
-        let on_error = parse_on_error(on_error)?;
+        let oe = parse_on_error(on_error)?;
+        let input = self.prepare_input(&query, params)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let val = run_async(&inner, input, on_error)
+            let val = run_async(&inner, input, oe)
                 .await
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
             Python::attach(|py| {
-                pythonize::pythonize(py, &val)
-                    .map(|b| b.unbind())
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+                let dict = pythonize::pythonize(py, &val)
+                    .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+                let report = wrap_execution_report(py, dict)?;
+                Ok(report.unbind())
+            })
+        })
+    }
+
+    #[pyo3(signature = (query, *, params=None, on_error="stop"))]
+    fn execute_hits<'py>(
+        &self,
+        py: Python<'py>,
+        query: &Bound<'_, PyAny>,
+        params: Option<&Bound<'_, PyAny>>,
+        on_error: &str,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let rep = self.execute(py, query, params, on_error)?;
+        rep.call_method1("hits", (0,))
+    }
+
+    #[pyo3(signature = (query, *, params=None, on_error="stop"))]
+    fn execute_async_hits<'py>(
+        &self,
+        py: Python<'py>,
+        query: Bound<'py, PyAny>,
+        params: Option<&Bound<'_, PyAny>>,
+        on_error: &str,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        let oe = parse_on_error(on_error)?;
+        let input = self.prepare_input(&query, params)?;
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let val = run_async(&inner, input, oe)
+                .await
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            Python::attach(|py| {
+                let dict = pythonize::pythonize(py, &val)
+                    .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+                let report = wrap_execution_report(py, dict)?;
+                let hits = report.call_method1("hits", (0,))?;
+                Ok(hits.unbind())
             })
         })
     }
@@ -369,37 +412,110 @@ pub(crate) enum Input {
     StmtList(Vec<ast::Stmt>),
 }
 
-pub(crate) fn classify(query: &Bound<'_, PyAny>) -> PyResult<Input> {
-    if let Ok(list) = query.cast::<pyo3::types::PyList>() {
-        if list.is_empty() {
-            return Ok(Input::StrList(Vec::new()));
+impl PyClient {
+    pub(crate) fn prepare_input(
+        &self,
+        query: &Bound<'_, PyAny>,
+        params: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Input> {
+        let params_opt = params.filter(|p| !p.is_none());
+
+        // Check if query is a Python list
+        if let Ok(list) = query.cast::<pyo3::types::PyList>() {
+            if list.is_empty() {
+                return Ok(Input::StrList(Vec::new()));
+            }
+
+            // Check if params is a list of statement-scoped parameters
+            let scoped_params = if let Some(p) = params_opt {
+                if let Ok(param_list) = p.cast::<pyo3::types::PyList>() {
+                    if param_list.len() == list.len() {
+                        let mut v = Vec::with_capacity(param_list.len());
+                        for item in param_list.iter() {
+                            v.push(item);
+                        }
+                        Some(v)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            let first = list.get_item(0)?;
+            if first.extract::<PyRef<'_, PyStmt>>().is_ok() {
+                let mut stmts = Vec::with_capacity(list.len());
+                for (i, item) in list.iter().enumerate() {
+                    let stmt_params = match &scoped_params {
+                        Some(scoped) => Some(&scoped[i]),
+                        None => params_opt,
+                    };
+                    let py_stmt = item.extract::<PyRef<'_, PyStmt>>()?;
+                    let mut s = py_stmt.inner.clone();
+                    bind_py_stmt(&mut s, stmt_params)?;
+                    stmts.push(s);
+                }
+                return Ok(Input::StmtList(stmts));
+            }
+
+            // List of strings
+            let mut strs = Vec::with_capacity(list.len());
+            for (i, item) in list.iter().enumerate() {
+                let s_str = item.extract::<String>().map_err(|_| {
+                    pyo3::exceptions::PyTypeError::new_err(
+                        "list items must be strings or Stmt objects",
+                    )
+                })?;
+                let stmt_params = match &scoped_params {
+                    Some(scoped) => Some(&scoped[i]),
+                    None => params_opt,
+                };
+                let bound = match stmt_params {
+                    Some(p) => bind_py_params(&s_str, p, false)?,
+                    None => s_str,
+                };
+                strs.push(bound);
+            }
+            return Ok(Input::StrList(strs));
         }
-        let first = list.get_item(0)?;
-        if first.extract::<PyRef<'_, PyStmt>>().is_ok() {
-            let stmts: Vec<ast::Stmt> = list
-                .iter()
-                .map(|i| Ok(i.extract::<PyRef<'_, PyStmt>>()?.inner.clone()))
-                .collect::<PyResult<_>>()?;
-            return Ok(Input::StmtList(stmts));
+
+        // Single Stmt
+        if let Ok(py_stmt) = query.extract::<PyRef<'_, PyStmt>>() {
+            let mut stmt = py_stmt.inner.clone();
+            bind_py_stmt(&mut stmt, params_opt)?;
+            return Ok(Input::Stmt(stmt));
         }
-        let strs: Vec<String> = list
-            .iter()
-            .map(|i| i.extract::<String>())
-            .collect::<PyResult<_>>()
-            .map_err(|_| {
-                pyo3::exceptions::PyTypeError::new_err("list items must be strings or Stmt objects")
-            })?;
-        return Ok(Input::StrList(strs));
-    }
-    if let Ok(stmt) = query.extract::<PyRef<'_, PyStmt>>() {
-        return Ok(Input::Stmt(stmt.inner.clone()));
-    }
-    let s = query.extract::<String>().map_err(|_| {
-        pyo3::exceptions::PyTypeError::new_err(
+
+        // Single String (could be a script)
+        if let Ok(s) = query.extract::<String>() {
+            if let Some(p) = params_opt {
+                // If params is a list of statement-scoped dicts, check if it matches the number of statements in the script
+                if let Ok(param_list) = p.cast::<pyo3::types::PyList>() {
+                    let parsed_stmts = Parser::parse_all(&s).map_err(qql_py_syntax_error)?;
+                    if parsed_stmts.len() > 1 && param_list.len() == parsed_stmts.len() {
+                        let mut bound_stmts = Vec::with_capacity(parsed_stmts.len());
+                        for (i, mut stmt) in parsed_stmts.into_iter().enumerate() {
+                            let param_item = param_list.get_item(i)?;
+                            bind_py_stmt(&mut stmt, Some(&param_item))?;
+                            bound_stmts.push(stmt);
+                        }
+                        return Ok(Input::StmtList(bound_stmts));
+                    }
+                }
+                let bound = bind_py_params(&s, p, false)?;
+                return Ok(Input::String(bound));
+            } else {
+                return Ok(Input::String(s));
+            }
+        }
+
+        Err(pyo3::exceptions::PyTypeError::new_err(
             "query must be a str, Stmt, list[str], or list[Stmt]",
-        )
-    })?;
-    Ok(Input::String(s))
+        ))
+    }
 }
 
 impl PyClient {
@@ -474,43 +590,145 @@ pub(crate) async fn run_async(
     }
 }
 
-/// Substitute named (:name) or positional (?) parameters into a query string.
+/// Substitute named (:name) or positional (?) parameters into a query string or Stmt.
+///
+/// When `truncate_vectors=True`, long vector literals (e.g. 384 dims) are rendered
+/// in a compact human-readable format `[0.12, 0.34, ... (384 dims)]` suitable for logging.
 #[pyfunction]
-#[pyo3(signature = (query, params=None))]
-fn bind(query: &str, params: Option<&Bound<'_, PyAny>>) -> PyResult<String> {
-    match params {
-        Some(p) => bind_py_params(query, p),
-        None => Ok(query.to_string()),
+#[pyo3(signature = (query, params=None, *, truncate_vectors=false))]
+fn bind<'py>(
+    py: Python<'py>,
+    query: &Bound<'py, PyAny>,
+    params: Option<&Bound<'py, PyAny>>,
+    truncate_vectors: bool,
+) -> PyResult<Bound<'py, PyAny>> {
+    if let Ok(stmt) = query.extract::<PyRef<'_, PyStmt>>() {
+        let mut inner = stmt.inner.clone();
+        bind_py_stmt(&mut inner, params)?;
+        let py_stmt = PyStmt { inner };
+        if truncate_vectors {
+            let readable = qql_core::fmt::format_stmt_readable(&py_stmt.inner);
+            Ok(readable.into_pyobject(py)?.into_any())
+        } else {
+            Ok(Bound::new(py, py_stmt)?.into_any())
+        }
+    } else if let Ok(q_str) = query.extract::<String>() {
+        let bound = match params {
+            Some(p) => bind_py_params(&q_str, p, truncate_vectors)?,
+            None => q_str,
+        };
+        Ok(bound.into_pyobject(py)?.into_any())
+    } else {
+        Err(pyo3::exceptions::PyTypeError::new_err(
+            "query must be a str or Stmt",
+        ))
     }
 }
 
-pub(crate) fn bind_py_params(query: &str, params: &Bound<'_, PyAny>) -> PyResult<String> {
+pub(crate) fn extract_param_map(
+    params: &Bound<'_, PyAny>,
+) -> PyResult<(std::collections::HashMap<String, Value>, Vec<Value>)> {
+    let mut named = std::collections::HashMap::new();
+    let mut positional = Vec::new();
+
+    if params.is_none() {
+        return Ok((named, positional));
+    }
+
+    if let Ok(dict) = params.cast::<PyDict>() {
+        flatten_dict_params(dict, "", &mut named)?;
+    } else if let Ok(list) = params.cast::<PyList>() {
+        for item in list.iter() {
+            positional.push(py_to_value(&item)?);
+        }
+    } else {
+        return Err(PyValueError::new_err(
+            "params must be a dict for named parameters (:name) or a list for positional parameters (?)",
+        ));
+    }
+
+    Ok((named, positional))
+}
+
+pub(crate) fn flatten_dict_params(
+    dict: &Bound<'_, PyDict>,
+    prefix: &str,
+    out: &mut std::collections::HashMap<String, Value>,
+) -> PyResult<()> {
+    for (k, v) in dict.iter() {
+        let key = k
+            .extract::<String>()
+            .map_err(|_| PySyntaxError::new_err("parameter dict keys must be strings"))?;
+        let full_key = if prefix.is_empty() {
+            key.clone()
+        } else {
+            format!("{prefix}.{key}")
+        };
+
+        let val = py_to_value(&v)?;
+        if let Ok(nested_dict) = v.cast::<PyDict>() {
+            flatten_dict_params(nested_dict, &full_key, out)?;
+        }
+        out.insert(full_key, val);
+    }
+    Ok(())
+}
+
+pub(crate) fn bind_py_stmt(
+    stmt: &mut ast::Stmt,
+    params: Option<&Bound<'_, PyAny>>,
+) -> PyResult<()> {
+    let Some(p) = params else {
+        return Ok(());
+    };
+    if p.is_none() {
+        return Ok(());
+    }
+    let (named, positional) = extract_param_map(p)?;
+    qql_core::params::bind_stmt(stmt, |name| named.get(name).cloned(), &positional)
+        .map_err(qql_py_value_error)?;
+    Ok(())
+}
+
+pub(crate) fn bind_py_params(
+    query: &str,
+    params: &Bound<'_, PyAny>,
+    truncate_vectors: bool,
+) -> PyResult<String> {
     if params.is_none() {
         return Ok(query.to_string());
     }
-    if let Ok(dict) = params.cast::<PyDict>() {
-        let mut map = std::collections::HashMap::new();
-        for (k, v) in dict.iter() {
-            let key = k
-                .extract::<String>()
-                .map_err(|_| PySyntaxError::new_err("parameter dict keys must be strings"))?;
-            let val = py_to_value(&v)?;
-            map.insert(key, val);
+    let (named, positional) = extract_param_map(params)?;
+    if !positional.is_empty() {
+        if truncate_vectors {
+            qql_core::params::bind_positional_readable(query, &positional, 2)
+                .map_err(qql_py_value_error)
+        } else {
+            qql_core::params::bind_positional(query, &positional).map_err(qql_py_value_error)
         }
-        qql_core::params::bind_named(query, |k| map.get(k).cloned())
-            .map_err(|e| PyValueError::new_err(e.to_string()))
-    } else if let Ok(list) = params.cast::<PyList>() {
-        let mut items = Vec::with_capacity(list.len());
-        for item in list.iter() {
-            items.push(py_to_value(&item)?);
-        }
-        qql_core::params::bind_positional(query, &items)
-            .map_err(|e| PyValueError::new_err(e.to_string()))
     } else {
-        Err(PyValueError::new_err(
-            "params must be a dict for named parameters (:name) or a list for positional parameters (?)",
-        ))
+        if truncate_vectors {
+            qql_core::params::bind_named_readable(query, |k| named.get(k).cloned(), 2)
+                .map_err(qql_py_value_error)
+        } else {
+            qql_core::params::bind_named(query, |k| named.get(k).cloned())
+                .map_err(qql_py_value_error)
+        }
     }
+}
+
+pub(crate) fn wrap_execution_report<'py>(
+    py: Python<'py>,
+    dict: Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    if let Ok(pyqql_edge) = py.import("pyqql_edge") {
+        if let Ok(report_cls) = pyqql_edge.getattr("ExecutionReport") {
+            if let Ok(report) = report_cls.call1((&dict,)) {
+                return Ok(report);
+            }
+        }
+    }
+    Ok(dict)
 }
 
 mod models;
@@ -552,6 +770,13 @@ fn qql_py_error(error: qql_core::error::QqlError) -> pyo3::PyErr {
 
 fn qql_py_syntax_error(error: qql_core::error::QqlError) -> pyo3::PyErr {
     attach_qql_error(PySyntaxError::new_err(error.to_string()), error)
+}
+
+fn qql_py_value_error(error: qql_core::error::QqlError) -> pyo3::PyErr {
+    attach_qql_error(
+        pyo3::exceptions::PyValueError::new_err(error.to_string()),
+        error,
+    )
 }
 
 fn attach_qql_error(py_error: pyo3::PyErr, error: qql_core::error::QqlError) -> pyo3::PyErr {

@@ -179,12 +179,71 @@ function explain(query) {
   return callNative(() => nativeBinding.explain(query));
 }
 
+class ScoredPoint {
+  constructor(data) {
+    this.id = data?.id;
+    this.score = data?.score ?? 0;
+    this.payload = data?.payload ?? {};
+    this.text = this.payload?.text ?? null;
+    this.collection = data?.collection ?? null;
+    Object.assign(this, data);
+  }
+
+  get(key, defaultValue = null) {
+    if (this.payload && typeof this.payload === 'object' && key in this.payload) {
+      return this.payload[key];
+    }
+    return defaultValue;
+  }
+}
+
+class ExecutionReport {
+  constructor(data) {
+    Object.assign(this, data);
+  }
+
+  hits(stmt = 0) {
+    const res = this.results?.[stmt];
+    if (!res || !Array.isArray(res.data)) return [];
+    return res.data.map(d => new ScoredPoint(d));
+  }
+
+  points(stmt = 0) {
+    return this.hits(stmt);
+  }
+
+  facet(stmt = 0) {
+    const res = this.results?.[stmt];
+    if (!res) return [];
+    if (Array.isArray(res.data)) return res.data;
+    if (typeof res.data === 'object' && res.data !== null) {
+      return res.data.result?.hits || res.data.hits || [];
+    }
+    return [];
+  }
+
+  count(stmt = 0) {
+    const res = this.results?.[stmt];
+    if (!res) return 0;
+    if (typeof res.data === 'number') return res.data;
+    if (typeof res.data === 'object' && res.data !== null) {
+      const c = res.data.result?.count ?? res.data.count;
+      if (typeof c === 'number') return c;
+    }
+    if (typeof res.message === 'string' && res.message.startsWith('Count: ')) {
+      const parsed = parseInt(res.message.slice(7), 10);
+      if (!Number.isNaN(parsed)) return parsed;
+    }
+    return 0;
+  }
+}
+
 function explainStmt(stmt) {
   return callNative(() => nativeBinding.explainStmt(stmt));
 }
 
-function compileQuery(query) {
-  return callNative(() => nativeBinding.compileQuery(query));
+function compileQuery(query, params) {
+  return callNative(() => nativeBinding.compileQuery(query, params));
 }
 
 async function execute(query, options) {
@@ -193,18 +252,25 @@ async function execute(query, options) {
       normalizeQuery(query),
       normalizeClientOptions(validateOptions(options)),
     );
-    return JSON.parse(raw);
+    return new ExecutionReport(JSON.parse(raw));
   } catch (error) {
     throw buildError(error);
   }
 }
 
+async function executeHits(query, options) {
+  const report = await execute(query, options);
+  return report.hits(0);
+}
+
 async function executeStmt(stmt, options) {
   try {
-    return JSON.parse(
-      await nativeBinding.executeStmt(
-        stmt,
-        normalizeClientOptions(validateOptions(options)),
+    return new ExecutionReport(
+      JSON.parse(
+        await nativeBinding.executeStmt(
+          stmt,
+          normalizeClientOptions(validateOptions(options)),
+        ),
       ),
     );
   } catch (error) {
@@ -230,10 +296,15 @@ class Client {
         normalizeQuery(query),
         validateOptions(options) || undefined,
       );
-      return JSON.parse(raw);
+      return new ExecutionReport(JSON.parse(raw));
     } catch (error) {
       throw buildError(error);
     }
+  }
+
+  async executeHits(query, options) {
+    const report = await this.execute(query, options);
+    return report.hits(0);
   }
 
   explain(query) {
@@ -244,8 +315,8 @@ class Client {
     return callNative(() => this._inner.explainStmt(stmt));
   }
 
-  compile(query) {
-    return callNative(() => this._inner.compile(query));
+  compile(query, params) {
+    return callNative(() => this._inner.compile(query, params));
   }
 
   async close() {
@@ -255,8 +326,8 @@ class Client {
   }
 }
 
-function bind(query, params) {
-  return callNative(() => nativeBinding.bind(query, params));
+function bind(query, params, options) {
+  return callNative(() => nativeBinding.bind(query, params, options));
 }
 
 module.exports = {
@@ -270,9 +341,12 @@ module.exports = {
   explainStmt,
   bind,
   execute,
+  executeHits,
   executeStmt,
   Client,
   Stmt: nativeBinding.Stmt,
+  ScoredPoint,
+  ExecutionReport,
   HttpEmbedder,
   version: pkg.version,
   __version__: pkg.version,

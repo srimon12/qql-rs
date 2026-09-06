@@ -102,7 +102,7 @@ test('exports: executeStmt', () => assert.strictEqual(typeof nqql.executeStmt, '
 test('exports: bind', () => assert.strictEqual(typeof nqql.bind, 'function'));
 
 // Unknown exports check
-const knownKeys = ['Client','HttpEmbedder','Stmt','bind','compileQuery','execute','executeStmt',
+const knownKeys = ['Client','ExecutionReport','HttpEmbedder','ScoredPoint','Stmt','bind','compileQuery','execute','executeHits','executeStmt',
   'explain','explainStmt','injectFilter','isValid','parse','parseJson','tokenize', 'version', '__version__'];
 const actualKeys = Object.keys(nqql).sort();
 test('no extra exports', () => {

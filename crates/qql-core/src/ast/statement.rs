@@ -573,8 +573,16 @@ pub struct PageSpec {
     /// Number of results (or groups) to skip.
     pub offset: Option<u64>,
     /// Parameter name for limit (e.g. `:lim`), if unbound.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub limit_param: Option<String>,
     /// Parameter name for offset (e.g. `:off`), if unbound.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub offset_param: Option<String>,
 }
 

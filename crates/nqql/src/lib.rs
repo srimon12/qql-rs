@@ -88,10 +88,35 @@ impl Stmt {
         Ok(())
     }
 
-    /// Compile this Stmt AST directly into its transport route without re-parsing.
+    /// Bind parameters into this statement and return a new bound Stmt.
     #[napi(catch_unwind)]
-    pub fn compile_route(&self) -> napi::Result<serde_json::Value> {
-        let compiled = routing::compile_statement(&self.inner).map_err(to_napi_err)?;
+    pub fn bind(&self, params: Option<serde_json::Value>) -> napi::Result<Self> {
+        let mut stmt = self.inner.clone();
+        if let Some(ref p) = params {
+            bind_stmt_json(&mut stmt, p).map_err(to_napi_err)?;
+        }
+        Ok(Stmt { inner: stmt })
+    }
+
+    /// Format statement as readable QQL string.
+    #[allow(clippy::inherent_to_string)]
+    #[napi(catch_unwind, js_name = "toString")]
+    pub fn to_string(&self) -> String {
+        qql_core::fmt::format_stmt_readable(&self.inner)
+    }
+
+    /// Compile this Stmt AST directly into its transport route without re-parsing.
+    /// Optionally accepts `params` to bind before compiling.
+    #[napi(catch_unwind)]
+    pub fn compile_route(
+        &self,
+        params: Option<serde_json::Value>,
+    ) -> napi::Result<serde_json::Value> {
+        let mut stmt = self.inner.clone();
+        if let Some(ref p) = params {
+            bind_stmt_json(&mut stmt, p).map_err(to_napi_err)?;
+        }
+        let compiled = routing::compile_statement(&stmt).map_err(to_napi_err)?;
         let (method, path, payload) = match compiled.route {
             Some(route) => {
                 let payload = route.body_json().unwrap_or(serde_json::Value::Null);
@@ -201,8 +226,14 @@ pub fn tokenize(input: String) -> napi::Result<serde_json::Value> {
 }
 
 #[napi(catch_unwind)]
-pub fn compile_query(input: String) -> napi::Result<serde_json::Value> {
-    let stmt = Parser::parse(&input).map_err(to_napi_err)?;
+pub fn compile_query(
+    input: String,
+    params: Option<serde_json::Value>,
+) -> napi::Result<serde_json::Value> {
+    let mut stmt = Parser::parse(&input).map_err(to_napi_err)?;
+    if let Some(ref p) = params {
+        bind_stmt_json(&mut stmt, p).map_err(to_napi_err)?;
+    }
     let compiled = routing::compile_statement(&stmt).map_err(to_napi_err)?;
     let (method, path, payload) = match compiled.route {
         Some(route) => {
@@ -445,17 +476,53 @@ impl JsClient {
 
         let params = options.as_ref().and_then(|o| o.get("params"));
 
+        let get_batch_param = |idx: usize| -> Option<&serde_json::Value> {
+            if let Some(serde_json::Value::Array(param_list)) = params {
+                if !param_list.is_empty() && (param_list[0].is_object() || param_list[0].is_array())
+                {
+                    return param_list.get(idx);
+                }
+            }
+            params
+        };
+
         let report = match &query {
             serde_json::Value::String(s) => {
-                let effective_query = if let Some(p) = params {
-                    bind_json_params(s, p)?
-                } else {
-                    s.clone()
+                let has_semicolon = s.contains(';');
+                let is_batch_params = match params {
+                    Some(serde_json::Value::Array(arr)) => {
+                        !arr.is_empty() && (arr[0].is_object() || arr[0].is_array())
+                    }
+                    _ => false,
                 };
-                self.inner
-                    .execute(&effective_query, on_error)
-                    .await
-                    .map_err(to_napi_err)?
+
+                if has_semicolon && is_batch_params {
+                    let mut stmts = Parser::parse_all(s).map_err(to_napi_err)?;
+                    for (i, stmt) in stmts.iter_mut().enumerate() {
+                        if let Some(p) = get_batch_param(i) {
+                            bind_stmt_json(stmt, p).map_err(to_napi_err)?;
+                        }
+                    }
+                    let results = self
+                        .inner
+                        .execute_batch_nodes(
+                            stmts,
+                            matches!(on_error, qql::executor::OnError::Stop),
+                        )
+                        .await
+                        .map_err(to_napi_err)?;
+                    qql::executor::ExecutionReport::from_results(results)
+                } else {
+                    let effective_query = if let Some(p) = params {
+                        bind_json_params(s, p, false)?
+                    } else {
+                        s.clone()
+                    };
+                    self.inner
+                        .execute(&effective_query, on_error)
+                        .await
+                        .map_err(to_napi_err)?
+                }
             }
             serde_json::Value::Array(arr) => {
                 if arr.is_empty() {
@@ -463,12 +530,13 @@ impl JsClient {
                 } else if arr[0].is_string() {
                     let strs: Vec<String> = arr
                         .iter()
-                        .map(|v| {
+                        .enumerate()
+                        .map(|(i, v)| {
                             let s = v.as_str().ok_or_else(|| {
                                 napi::Error::from_reason("batch items must be strings")
                             })?;
-                            if let Some(p) = params {
-                                bind_json_params(s, p)
+                            if let Some(p) = get_batch_param(i) {
+                                bind_json_params(s, p, false)
                             } else {
                                 Ok(s.to_string())
                             }
@@ -480,13 +548,18 @@ impl JsClient {
                         .await
                         .map_err(to_napi_err)?
                 } else {
-                    let stmts: Vec<ast::Stmt> = arr
+                    let mut stmts: Vec<ast::Stmt> = arr
                         .iter()
                         .map(|v| {
                             serde_json::from_value(v.clone())
                                 .map_err(|e| napi::Error::from_reason(format!("invalid Stmt: {e}")))
                         })
                         .collect::<napi::Result<_>>()?;
+                    for (i, stmt) in stmts.iter_mut().enumerate() {
+                        if let Some(p) = get_batch_param(i) {
+                            bind_stmt_json(stmt, p).map_err(to_napi_err)?;
+                        }
+                    }
                     let results = self
                         .inner
                         .execute_batch_nodes(
@@ -499,8 +572,11 @@ impl JsClient {
                 }
             }
             _ => {
-                let s: ast::Stmt = serde_json::from_value(query)
+                let mut s: ast::Stmt = serde_json::from_value(query)
                     .map_err(|e| napi::Error::from_reason(format!("invalid Stmt: {e}")))?;
+                if let Some(p) = params {
+                    bind_stmt_json(&mut s, p).map_err(to_napi_err)?;
+                }
                 let results = self
                     .inner
                     .execute_batch_nodes(vec![s], matches!(on_error, qql::executor::OnError::Stop))
@@ -524,8 +600,12 @@ impl JsClient {
 
     /// Compile a QQL query to its transport route (non-executing).
     #[napi(catch_unwind)]
-    pub fn compile(&self, query: String) -> napi::Result<serde_json::Value> {
-        crate::compile_query(query)
+    pub fn compile(
+        &self,
+        query: String,
+        params: Option<serde_json::Value>,
+    ) -> napi::Result<serde_json::Value> {
+        crate::compile_query(query, params)
     }
 
     /// Close the client and release underlying connections.
@@ -535,15 +615,41 @@ impl JsClient {
     }
 }
 
-fn bind_json_params(query: &str, params: &serde_json::Value) -> napi::Result<String> {
+fn flatten_json_object(
+    obj: &serde_json::Map<String, serde_json::Value>,
+    prefix: &str,
+    out: &mut std::collections::HashMap<String, ast::Value>,
+) -> Result<(), QqlError> {
+    for (k, v) in obj {
+        let full_key = if prefix.is_empty() {
+            k.clone()
+        } else {
+            format!("{prefix}.{k}")
+        };
+        if let serde_json::Value::Object(nested) = v {
+            flatten_json_object(nested, &full_key, out)?;
+        }
+        let val = ast::Value::from_json(v.clone())?;
+        out.insert(full_key, val);
+    }
+    Ok(())
+}
+
+fn bind_json_params(
+    query: &str,
+    params: &serde_json::Value,
+    truncate_vectors: bool,
+) -> napi::Result<String> {
     match params {
         serde_json::Value::Object(obj) => {
             let mut map = std::collections::HashMap::new();
-            for (k, v) in obj {
-                let val = ast::Value::from_json(v.clone()).map_err(to_napi_err)?;
-                map.insert(k.clone(), val);
+            flatten_json_object(obj, "", &mut map).map_err(to_napi_err)?;
+            if truncate_vectors {
+                qql_core::params::bind_named_readable(query, |k| map.get(k).cloned(), 2)
+                    .map_err(to_napi_err)
+            } else {
+                qql_core::params::bind_named(query, |k| map.get(k).cloned()).map_err(to_napi_err)
             }
-            qql_core::params::bind_named(query, |k| map.get(k).cloned()).map_err(to_napi_err)
         }
         serde_json::Value::Array(arr) => {
             let items: Vec<ast::Value> = arr
@@ -551,7 +657,11 @@ fn bind_json_params(query: &str, params: &serde_json::Value) -> napi::Result<Str
                 .map(|v| ast::Value::from_json(v.clone()))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(to_napi_err)?;
-            qql_core::params::bind_positional(query, &items).map_err(to_napi_err)
+            if truncate_vectors {
+                qql_core::params::bind_positional_readable(query, &items, 2).map_err(to_napi_err)
+            } else {
+                qql_core::params::bind_positional(query, &items).map_err(to_napi_err)
+            }
         }
         _ => Err(napi::Error::from_reason(
             "params must be an object for named parameters (:name) or an array for positional parameters (?)",
@@ -559,13 +669,43 @@ fn bind_json_params(query: &str, params: &serde_json::Value) -> napi::Result<Str
     }
 }
 
+fn bind_stmt_json(stmt: &mut ast::Stmt, params: &serde_json::Value) -> Result<(), QqlError> {
+    match params {
+        serde_json::Value::Object(obj) => {
+            let mut map = std::collections::HashMap::new();
+            flatten_json_object(obj, "", &mut map)?;
+            qql_core::params::bind_stmt(stmt, |k| map.get(k).cloned(), &[])
+        }
+        serde_json::Value::Array(arr) => {
+            let items: Vec<ast::Value> = arr
+                .iter()
+                .map(|v| ast::Value::from_json(v.clone()))
+                .collect::<Result<Vec<_>, _>>()?;
+            qql_core::params::bind_stmt(stmt, |_| None, &items)
+        }
+        _ => Ok(()),
+    }
+}
+
 /// Substitute `:name` (object) or `?` (array) placeholders into a query string.
 #[napi(
     catch_unwind,
-    ts_args_type = "query: string, params: Record<string, any> | any[]"
+    ts_args_type = "query: string, params: Record<string, any> | any[], options?: { truncateVectors?: boolean }"
 )]
-pub fn bind(query: String, params: serde_json::Value) -> napi::Result<String> {
-    bind_json_params(&query, &params)
+pub fn bind(
+    query: String,
+    params: serde_json::Value,
+    options: Option<serde_json::Value>,
+) -> napi::Result<String> {
+    let truncate = options
+        .as_ref()
+        .and_then(|o| {
+            o.get("truncateVectors")
+                .or_else(|| o.get("truncate_vectors"))
+        })
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    bind_json_params(&query, &params, truncate)
 }
 
 #[napi(catch_unwind)]
