@@ -106,3 +106,23 @@ class ExecutionReport(dict):
             except (IndexError, ValueError):
                 pass
         return 0
+
+    def groups(self, stmt: int = 0) -> List[Dict[str, Any]]:
+        """Return ``GROUP BY`` groups for statement `stmt` (default first).
+
+        Each group is the raw backend group object (``{"id": <group key>,
+        "hits": [<point records>]}``) — the same shape the server returns,
+        normalized across the ``{"result": {"groups": [...]}}`` and bare
+        ``{"groups": [...]}`` envelopes.
+        """
+        res = self.results
+        if not res or stmt >= len(res):
+            return []
+        data = res[stmt].get("data")
+        if isinstance(data, dict):
+            result = data.get("result")
+            nested = result.get("groups") if isinstance(result, dict) else None
+            groups = nested if nested is not None else data.get("groups")
+            if isinstance(groups, list):
+                return groups
+        return []

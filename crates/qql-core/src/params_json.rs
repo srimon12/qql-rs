@@ -238,6 +238,54 @@ mod tests {
     }
 
     #[test]
+    fn matrix_param_binds_as_multidense_and_matches_implicit_spelling() {
+        // The explicit `QUERY VECTOR :x` spelling must parse to the same
+        // parameter node as the implicit `QUERY :x USING` form, and a matrix
+        // param must bind as a multi-vector on both (ColBERT prepared
+        // statements).
+        let mut explicit = Parser::parse("QUERY VECTOR :q FROM docs USING dense").unwrap();
+        let mut implicit = Parser::parse("QUERY :q FROM docs USING dense").unwrap();
+        let params = json!({"q": [[0.1, 0.2], [0.3, 0.4]]});
+        bind_stmt_with_params(&mut explicit, &params).unwrap();
+        bind_stmt_with_params(&mut implicit, &params).unwrap();
+        let rendered = crate::fmt::format_stmt(&explicit);
+        assert_eq!(rendered, crate::fmt::format_stmt(&implicit));
+        assert!(
+            rendered.contains("[[0.1, 0.2], [0.3, 0.4]]"),
+            "matrix must render as a nested vector literal, got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn matrix_param_rejects_non_numeric_rows() {
+        let mut stmt = Parser::parse("QUERY VECTOR :q FROM docs USING dense").unwrap();
+        let err = bind_stmt_with_params(&mut stmt, &json!({"q": [[0.1], ["x"]]})).unwrap_err();
+        assert_eq!(err.code, "QQL-BIND-TYPE-MISMATCH");
+    }
+
+    #[test]
+    fn null_param_fails_closed_with_a_clear_code() {
+        // A literal None/null parameter used to render as `null` text and
+        // fail downstream with a misleading "query input requires …" error.
+        let mut stmt = Parser::parse("QUERY :q FROM docs USING dense").unwrap();
+        let err = bind_stmt_with_params(&mut stmt, &json!({"q": null})).unwrap_err();
+        assert_eq!(err.code, "QQL-BIND-NULL-PARAM");
+
+        let mut stmt = Parser::parse("QUERY ? FROM docs USING dense").unwrap();
+        let err = bind_stmt_with_params(&mut stmt, &json!([null])).unwrap_err();
+        assert_eq!(err.code, "QQL-BIND-NULL-PARAM");
+
+        let err =
+            bind_str_with_params("QUERY :q FROM docs USING dense", &json!({"q": null}), false)
+                .unwrap_err();
+        assert_eq!(err.code, "QQL-BIND-NULL-PARAM");
+
+        // Nulls *inside* containers stay legal (payload fields are JSON).
+        let mut stmt = Parser::parse("QUERY VECTOR :v FROM docs USING dense").unwrap();
+        bind_stmt_with_params(&mut stmt, &json!({"v": [0.1]})).unwrap();
+    }
+
+    #[test]
     fn bind_batch_end_to_end() {
         let mut stmts = Parser::parse_all(
             "QUERY [0.1] FROM docs WHERE x = :x LIMIT :lim; QUERY [0.2] FROM docs WHERE y = :y;",

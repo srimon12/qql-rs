@@ -260,20 +260,37 @@ fn non_finite_float_literals_rejected() {
 }
 
 #[test]
-fn limit_beyond_u64_rejected_with_positive_integer_code() {
+fn limit_beyond_u64_rejected_with_non_negative_integer_code() {
     // Integer literals larger than u64::MAX must be rejected at parse time,
-    // not silently clamped or wrapped; LIMIT/OFFSET are `positive_integer`
-    // productions carried as u64.
+    // not silently clamped or wrapped; LIMIT/OFFSET are `non_negative_integer`
+    // productions carried as u64 (Qdrant accepts `limit: 0`, so limits share
+    // OFFSET's non-negative contract).
     let cases = [
         "QUERY VECTOR [0.1] FROM docs USING dense LIMIT 18446744073709551616;",
         "SCROLL FROM docs LIMIT 18446744073709551616;",
+        "QUERY VECTOR [0.1] FROM docs USING dense LIMIT -1;",
     ];
     for source in cases {
         let err = Parser::parse(source)
             .expect_err(&format!("expected beyond-u64 rejection for: {source}"));
         assert_eq!(
-            err.code, "QQL-PARSE-POSITIVE-INTEGER",
+            err.code, "QQL-PARSE-NONNEGATIVE-INTEGER",
             "unexpected code for: {source}"
+        );
+    }
+}
+
+#[test]
+fn limit_zero_is_valid() {
+    // Qdrant itself accepts `limit: 0` (returns zero points) — QQL must not
+    // reject what the backend allows.
+    for source in [
+        "QUERY VECTOR [0.1] FROM docs USING dense LIMIT 0;",
+        "SCROLL FROM docs LIMIT 0;",
+    ] {
+        assert!(
+            Parser::parse(source).is_ok(),
+            "LIMIT 0 must parse: {source}"
         );
     }
 }

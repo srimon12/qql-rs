@@ -37,7 +37,7 @@ impl<'a> AstLowerer<'a> {
                 None
             };
         self.expect(TokenKind::Limit)?;
-        let limit = self.parse_positive_u64("SCROLL LIMIT")?;
+        let limit = self.parse_non_negative_u64("SCROLL LIMIT")?;
         Ok(Stmt::Scroll(Box::new(ScrollStmt {
             collection,
             limit,
@@ -141,7 +141,7 @@ impl<'a> AstLowerer<'a> {
                 }
                 TokenKind::Limit if limit.is_none() => {
                     self.advance()?;
-                    limit = Some(self.parse_positive_u64("FACET LIMIT")?);
+                    limit = Some(self.parse_non_negative_u64("FACET LIMIT")?);
                 }
                 TokenKind::Exact if exact.is_none() => {
                     self.advance()?;

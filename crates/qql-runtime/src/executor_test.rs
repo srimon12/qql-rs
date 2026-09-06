@@ -29,6 +29,10 @@ struct MockQdrantClient {
     /// Per-collection mock points returned by `execute_planned` when non-empty.
     /// Key: collection name, Value: JSON object with a "points" array.
     pub point_map: Arc<Mutex<HashMap<String, serde_json::Value>>>,
+    /// When true, `execute_query_batch` fails (simulating a batch RPC error).
+    pub fail_query_batch: Arc<Mutex<bool>>,
+    /// When non-zero, `execute_planned` fails on that call number (1-based).
+    pub fail_execute_planned_call: Arc<Mutex<usize>>,
 }
 
 impl Default for MockQdrantClient {
@@ -46,6 +50,8 @@ impl Default for MockQdrantClient {
             create_collection_call_count: Arc::new(Mutex::new(0)),
             created_collections: Arc::new(Mutex::new(HashSet::new())),
             point_map: Arc::new(Mutex::new(HashMap::new())),
+            fail_query_batch: Arc::new(Mutex::new(false)),
+            fail_execute_planned_call: Arc::new(Mutex::new(0)),
         }
     }
 }
@@ -113,6 +119,14 @@ impl QdrantOps for MockQdrantClient {
     ) -> Result<serde_json::Value, QqlError> {
         *self.execute_planned_call_count.lock().unwrap() += 1;
         *self.last_planned.lock().unwrap() = Some(op.clone());
+        let call = *self.execute_planned_call_count.lock().unwrap();
+        if *self.fail_execute_planned_call.lock().unwrap() == call {
+            return Err(QqlError::execution(
+                "QQL-EXECUTION",
+                "mock failure for this call",
+                None,
+            ));
+        }
         if let qql_plan::PlannedOperation::CreateCollection { collection, .. } = op {
             self.created_collections
                 .lock()
@@ -142,7 +156,8 @@ impl QdrantOps for MockQdrantClient {
         // Return per-collection mock points when configured.
         if let qql_plan::PlannedOperation::Query { collection, .. }
         | qql_plan::PlannedOperation::QueryGroups { collection, .. }
-        | qql_plan::PlannedOperation::Facet { collection, .. } = op
+        | qql_plan::PlannedOperation::Facet { collection, .. }
+        | qql_plan::PlannedOperation::GetPoints { collection, .. } = op
             && let Some(points) = self.point_map.lock().unwrap().get(collection)
         {
             return Ok(points.clone());
@@ -157,6 +172,13 @@ impl QdrantOps for MockQdrantClient {
     ) -> Result<Vec<serde_json::Value>, QqlError> {
         *self.batch_call_count.lock().unwrap() += 1;
         *self.last_batch_searches_count.lock().unwrap() = batch.searches.len();
+        if *self.fail_query_batch.lock().unwrap() {
+            return Err(QqlError::transport(
+                "QQL-BACKEND-HTTP",
+                "REST 400: batch rejected",
+                None,
+            ));
+        }
         Ok(batch
             .searches
             .iter()
@@ -1506,4 +1528,127 @@ async fn facet_response_normalizes_hits_in_data() {
     assert_eq!(hits.len(), 2);
     assert_eq!(hits[0]["value"], "electronics");
     assert_eq!(hits[0]["count"], 12);
+}
+
+#[tokio::test]
+async fn get_points_bare_array_result_yields_hits() {
+    // `POST /collections/{c}/points` answers with `result` as a bare array of
+    // point records (unlike the query API's `{points: [...]}` envelope). The
+    // lookup must surface those points instead of silently reporting 0 hits.
+    let client = MockQdrantClient {
+        info: Some(collection_with_vectors(&["dense"], &[])),
+        ..Default::default()
+    };
+    *client
+        .point_map
+        .lock()
+        .unwrap()
+        .entry("docs".to_string())
+        .or_default() = serde_json::json!({
+        // REST get-points shape: `result` IS the point array.
+        "result": [
+            {"id": 1483, "payload": {"text": "first"}},
+            {"id": 1787, "payload": {"text": "second"}},
+        ]
+    });
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+    let report = executor
+        .execute("QUERY POINTS (1483, 1787) FROM docs", OnError::Stop)
+        .await
+        .expect("point lookup should succeed");
+    assert!(report.ok, "{report:?}");
+    let hits = report.results[0].data.as_ref().expect("data present");
+    assert_eq!(hits.as_array().unwrap().len(), 2);
+    assert_eq!(hits[0]["id"], 1483);
+    assert_eq!(hits[1]["id"], 1787);
+}
+
+#[tokio::test]
+async fn empty_script_fails_closed_like_double_semicolon() {
+    let executor = Executor::new(Box::new(MockQdrantClient::default()), Some(test_config()));
+    let err = executor
+        .execute("   ", OnError::Stop)
+        .await
+        .expect_err("empty script must fail");
+    assert_eq!(err.code, "QQL-VALIDATION-EMPTY-SCRIPT");
+
+    let err = executor
+        .execute_batch(&[], OnError::Stop)
+        .await
+        .expect_err("empty batch must fail");
+    assert_eq!(err.code, "QQL-VALIDATION-EMPTY-SCRIPT");
+
+    // Parity: `";;"` was already a parse error.
+    let err = executor.execute(";;", OnError::Stop).await.unwrap_err();
+    assert!(err.code.starts_with("QQL-PARSE"), "{err:?}");
+}
+
+#[tokio::test]
+async fn closed_client_fails_every_execution_entry_point() {
+    let executor = Executor::new(Box::new(MockQdrantClient::default()), Some(test_config()));
+    executor.close().await.expect("close is idempotent");
+    assert!(executor.is_closed());
+    executor.close().await.expect("close twice is fine");
+
+    let err = executor
+        .execute("QUERY VECTOR [0.1] FROM docs", OnError::Stop)
+        .await
+        .expect_err("execute must fail after close");
+    assert_eq!(err.code, "QQL-CLIENT-CLOSED");
+
+    let err = executor
+        .execute_batch(&["QUERY VECTOR [0.1] FROM docs"], OnError::Stop)
+        .await
+        .expect_err("execute_batch must fail after close");
+    assert_eq!(err.code, "QQL-CLIENT-CLOSED");
+
+    let stmt = qql_core::parser::Parser::parse("QUERY VECTOR [0.1] FROM docs").unwrap();
+    let err = executor
+        .execute_node(stmt)
+        .await
+        .expect_err("execute_node must fail after close");
+    assert_eq!(err.code, "QQL-CLIENT-CLOSED");
+}
+
+#[tokio::test]
+async fn query_batch_failure_with_continue_retries_individually() {
+    // Two same-collection QUERY statements batch into one RPC. When the batch
+    // RPC fails and on_error = continue, the group is retried one-by-one so
+    // the first statement's success is preserved and the failed one is
+    // reported at its own index.
+    let client = MockQdrantClient {
+        info: Some(collection_with_vectors(&["dense"], &[])),
+        ..Default::default()
+    };
+    *client.fail_query_batch.lock().unwrap() = true;
+    // On the per-op retry, statement 1 (the second execute_planned call) fails.
+    *client.fail_execute_planned_call.lock().unwrap() = 2;
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+
+    let report = executor
+        .execute_batch(
+            &[
+                "QUERY VECTOR [0.1] FROM docs USING dense",
+                "QUERY VECTOR [0.2] FROM docs USING dense",
+            ],
+            OnError::Continue,
+        )
+        .await
+        .expect("continue mode must return a report");
+    assert!(!report.ok);
+    assert_eq!(report.succeeded, 1);
+    assert_eq!(report.failed, 1);
+    assert!(
+        report.results[0].ok,
+        "first statement must keep its success"
+    );
+    assert!(
+        !report.results[1].ok,
+        "second statement must be the failure"
+    );
+    assert_eq!(
+        report.results.len(),
+        2,
+        "one response per statement, in order"
+    );
 }

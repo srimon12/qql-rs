@@ -182,8 +182,17 @@ pub fn create_executor(
     let client: Box<dyn qql::client::QdrantOps> = if use_grpc {
         #[cfg(feature = "grpc")]
         {
-            let mut grpc = qql::grpc::GrpcQdrant::from_url(url, api_key)
-                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            // tonic's `connect_lazy` captures the tokio reactor eagerly
+            // (hyper-util timer handle, captured at Channel construction), so
+            // the channel must be built with the client's runtime entered —
+            // otherwise construction panics with "there is no reactor
+            // running" on the Python thread.
+            let grpc = {
+                let _enter = rt.enter();
+                qql::grpc::GrpcQdrant::from_url(url, api_key)
+                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
+            };
+            let mut grpc = grpc;
             if let Some(affinity) = route_affinity.as_deref() {
                 grpc = grpc.with_route_affinity(affinity);
             }

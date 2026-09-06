@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### 🐛 Fixed
+- **gRPC clients no longer panic on construction** — `Client(..., use_grpc=True)` panicked with `there is no reactor running` because tonic's lazy channel captures the tokio reactor at construction while the binding hosts built it on their foreign (Python / JS) thread; pyqql and nqql now construct the channel inside their driving runtime. Pinned by a contract test.
+- **`QUERY POINTS (id, …)` silently returned empty** — the REST get-points response carries `result` as a bare point array, but hit extraction only understood the query API's `{points: [...]}` envelope; the points now surface with correct ids (gRPC was unaffected).
+- **`on_error="continue"` no longer loses successful statements** — when a batched RPC fails (or returns the wrong cardinality), the group is retried statement-by-statement so per-statement success/failure stays accurate and aligned; per-item `status: "error"` entries inside a 200 batch response are also reported as failures instead of successes.
+- **`close()` is a real gate** — a closed executor fails every execution entry point with `QQL-CLIENT-CLOSED` (previously a no-op; `Client.is_closed` getter added on both Python SDKs).
+- **Re-binding an already-bound `Stmt` raises** — `bound.bind(params)` and `execute(bound_stmt, params=…)` used to silently ignore the new params; both raise `QQL-BIND-ALREADY-BOUND`.
+- **`compile_query` accepts `QUERY VECTOR :x` params** — the explicit spelling failed to parse while `bind()` / `execute` accepted it; `VECTOR :name` / `VECTOR ?` now parse to the same parameter node as the implicit `QUERY :x USING` form, so all three paths behave identically.
+- **Matrix params bind on the `Stmt` path** — a list of number lists binds as a ColBERT multi-vector (`MultiDense`), matching the string path, so multi-vector queries can be prepared statements.
+- **`None` parameters fail closed with a clear code** — binding `None` used to render the text `null` and die downstream with a misleading "query input requires …" parse error; both textual and AST binding now raise `QQL-BIND-NULL-PARAM`.
+- **numpy arrays (and any `tolist()` array-like) bind directly** — query inputs accept them like qdrant-client does; unsupported values now report an accurate bind error (was the generic "unsupported filter value type" `SyntaxError`).
+- **Empty scripts fail closed** — `execute("")` / `execute([])` used to return a silently-empty `ok: true` report while `";;"` errored; both now raise `QQL-VALIDATION-EMPTY-SCRIPT`.
+- **`LIMIT 0` is valid** — Qdrant accepts `limit: 0`; QQL's LIMIT / `SIZE` / SCROLL / FACET LIMIT now share OFFSET's non-negative contract (`QQL-PARSE-NONNEGATIVE-INTEGER`), with grammar, fixtures, and conformance snapshots regenerated.
+
+### 🚀 Added
+- **Typed Python exception hierarchy** — every pyqql / pyqql-edge error is a `QqlError` subclass carrying `.code` / `.kind` / `.span`: `QqlSyntaxError`, `QqlValidationError`, `QqlExecutionError`, `QqlTransportError`, `QqlBackendError` (each also subclasses the builtin category it used to raise, so existing `except` clauses keep working). Classes live in a byte-identical `_errors.py` shared by both packages, enforced by CI.
+- **`ExecutionReport.groups()`** — grouped-query accessor on the Python and Node report classes (previously only the raw dict), with both response envelopes normalized.
+- **Request correlation ids** — every REST request sends `x-request-id` (and gRPC metadata); transport/backend errors echo the id (preferring the server-returned value) so server-side anomalies like intermittent empty BM25 windows can be traced in Qdrant's logs.
+
+### 📚 Docs
+- Python SDK guide and skill reference document the typed exception hierarchy, the `close()` / re-binding contracts, the implicit `QUERY :x USING` preference, and the new error codes (`QQL-BIND-NULL-PARAM`, `QQL-BIND-ALREADY-BOUND`, `QQL-CLIENT-CLOSED`, `QQL-VALIDATION-EMPTY-SCRIPT`); the error-code reference gains a request-correlation section.
+
 ## [0.3.2] - 2026-09-06
 
 ### 🚀 Added

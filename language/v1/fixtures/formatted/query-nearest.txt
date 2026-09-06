@@ -54,3 +54,6 @@ QUERY 'search' FROM docs USING colbert AS MULTI LIMIT 10;
 -- Parameterized queries (named and positional)
 QUERY :q FROM docs WHERE category = :cat LIMIT :lim;
 QUERY ? FROM docs LIMIT 5;
+
+-- LIMIT 0 is valid (Qdrant accepts limit: 0 — returns zero points)
+QUERY 'test' FROM docs USING dense LIMIT 0;

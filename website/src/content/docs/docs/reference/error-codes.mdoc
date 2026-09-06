@@ -57,8 +57,8 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PARSE-VECTOR-SIZE` | Vector dimension exceeds the 65536 maximum |
 | `QQL-PARSE-DUPLICATE-CTE` | Duplicate CTE name in one script |
 | `QQL-PARSE-DUPLICATE-KEY` | Duplicate object or config key (ASCII case-insensitive) |
-| `QQL-PARSE-POSITIVE-INTEGER` | Value must be a positive integer (for example `LIMIT`, `CANDIDATES`, vector size) |
-| `QQL-PARSE-NONNEGATIVE-INTEGER` | Value must be non-negative (for example `OFFSET`, `VALUES_COUNT`) |
+| `QQL-PARSE-POSITIVE-INTEGER` | Value must be a positive integer (for example MMR `CANDIDATES`, `hnsw_ef`, vector size) |
+| `QQL-PARSE-NONNEGATIVE-INTEGER` | Value must be non-negative (for example `LIMIT`, `OFFSET`, `SIZE`, `VALUES_COUNT`) — `LIMIT 0` is valid (Qdrant accepts it) |
 | `QQL-PARSE-SYNTAX` | Production-specific syntax or range failure |
 | `QQL-PARSE-COMPARISON` | Expected a comparison operator |
 | `QQL-PARSE-COUNT-CONFIG` | Unknown `COUNT WITH (…)` parameter, or `exact` is not true/false |
@@ -108,6 +108,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-VALIDATION-HYBRID` | Invalid `USING HYBRID` / `QUERY HYBRID` combination |
 | `QQL-VALIDATION-FILTER-INJECT` | `inject_filter` does not apply to this statement type |
 | `QQL-VALIDATION-ID-PREDICATE` | A point ID predicate uses an operator other than `=`, `!=`, `IN`, or `NOT IN` |
+| `QQL-VALIDATION-EMPTY-SCRIPT` | Nothing to execute — the query is empty, whitespace-only, or the statement list is empty |
 | `QQL-VALIDATION-POINT-ID` | A value used as a point ID is neither an unsigned integer nor a string |
 | `QQL-VALIDATION-ACORN-SELECTIVITY` | `max_selectivity` requires `PARAMS (acorn = true, …)` |
 | `QQL-VALIDATION-CONFIG` | Invalid collection configuration block |
@@ -182,6 +183,14 @@ binding](/docs/language/queries/#parameter-binding--prepared-queries).
 | `QQL-BIND-FORMULA-TYPE` | A formula parameter cannot be bound to a numeric, datetime, or variable constant |
 | `QQL-BIND-BATCH-LENGTH` | A statement-scoped params list length does not match the statement count |
 | `QQL-BIND-INVALID-PARAMS` | The `params` argument is neither an object (named) nor an array (positional) |
+| `QQL-BIND-NULL-PARAM` | A parameter resolved to `null` / `None` — QQL cannot bind null; pass a concrete value |
+| `QQL-BIND-ALREADY-BOUND` | New params were passed to an already-bound `Stmt` — they would be silently ignored |
+
+## Execution
+
+| Code | Meaning |
+|---|---|
+| `QQL-CLIENT-CLOSED` | The client was closed (`close()`); create a new `Client` to run more statements |
 
 ## Embedding
 
@@ -189,6 +198,22 @@ binding](/docs/language/queries/#parameter-binding--prepared-queries).
 |---|---|
 | `QQL-EMBEDDING-TOPOLOGY` | UPSERT embedding inference is ambiguous across the collection topology |
 | `QQL-EMBEDDING-TARGET` | The UPSERT embedding target is absent or has the wrong role |
+
+## Request correlation
+
+Every request the Rust runtime sends carries a generated `x-request-id`
+header (`qql-<nanos><seq>`, REST) or `x-request-id` gRPC metadata. Qdrant
+echoes the id into its own log lines, so a misbehaving response can be
+traced in the server log:
+
+- Transport and backend errors include the id in their message —
+  `… (request id: qql-1a2b3c4d0001)` — preferring the server-returned
+  value when Qdrant echoes one back.
+- For a **silent** wrong answer (HTTP 200, empty results — e.g. the
+  intermittent empty BM25 windows seen against inference-backed sparse
+  queries), enable Qdrant request logging (`LOG_LEVEL=DEBUG` on the
+  server) and correlate by endpoint + timestamp with the ids your client
+  sent.
 
 ## Edge backend
 
@@ -243,6 +268,7 @@ QQL-BACKEND-HTTP
 QQL-BACKEND-JSON
 QQL-BATCH-CARDINALITY
 QQL-BATCH-INVARIANT
+QQL-BIND-ALREADY-BOUND
 QQL-BIND-BATCH-LENGTH
 QQL-BIND-FORMULA-TYPE
 QQL-BIND-INVALID-FLOAT
@@ -251,8 +277,10 @@ QQL-BIND-INVALID-PARAMS
 QQL-BIND-INVALID-POINT-ID
 QQL-BIND-MISSING-PARAM
 QQL-BIND-MIXED-STYLE
+QQL-BIND-NULL-PARAM
 QQL-BIND-TYPE-MISMATCH
 QQL-BIND-UNUSED-PARAMS
+QQL-CLIENT-CLOSED
 QQL-CONFIG
 QQL-CROSS-RERANK
 QQL-EDGE-CLEAR-PAYLOAD-REQUIRES-TARGET
@@ -398,6 +426,7 @@ QQL-VALIDATION-CONSISTENCY
 QQL-VALIDATION-CREATE-MODEL
 QQL-VALIDATION-CROSS-RERANK-PREFETCH
 QQL-VALIDATION-FILTER-INJECT
+QQL-VALIDATION-EMPTY-SCRIPT
 QQL-VALIDATION-FROM
 QQL-VALIDATION-FUSION
 QQL-VALIDATION-FUSION-PREFETCH

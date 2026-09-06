@@ -155,6 +155,15 @@ class ExecutionReport {
     }
     return 0;
   }
+
+  groups(stmt = 0) {
+    const res = this.#resultAt(stmt);
+    if (!res || typeof res.data !== 'object' || res.data === null) return [];
+    const raw = res.data.result;
+    const nested = raw && typeof raw === 'object' ? raw.groups : undefined;
+    const groups = nested !== undefined && nested !== null ? nested : res.data.groups;
+    return Array.isArray(groups) ? groups : [];
+  }
 }
 
 /**

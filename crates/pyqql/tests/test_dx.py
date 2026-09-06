@@ -134,3 +134,51 @@ class TestDxImprovements(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_execution_report_groups_accessor(self):
+        # GROUP BY results normalize through report.groups() (pyqql parity
+        # with nqql's ExecutionReport.groups()).
+        from pyqql import ExecutionReport
+
+        nested = ExecutionReport(
+            {
+                "ok": True,
+                "succeeded": 1,
+                "failed": 0,
+                "results": [
+                    {
+                        "ok": True,
+                        "operation": "QUERY_GROUPS",
+                        "message": "Found 2 group(s)",
+                        "data": {
+                            "result": {
+                                "groups": [
+                                    {"id": "a", "hits": [{"id": 1, "score": 0.9}]},
+                                    {"id": "b", "hits": [{"id": 2, "score": 0.8}]},
+                                ]
+                            },
+                            "status": "ok",
+                        },
+                    }
+                ],
+            }
+        )
+        self.assertEqual(len(nested.groups()), 2)
+        self.assertEqual(nested.groups()[0]["id"], "a")
+        bare = ExecutionReport(
+            {
+                "ok": True,
+                "succeeded": 1,
+                "failed": 0,
+                "results": [
+                    {
+                        "ok": True,
+                        "operation": "QUERY_GROUPS",
+                        "message": "Found 1 group(s)",
+                        "data": {"groups": [{"id": "x", "hits": []}]},
+                    }
+                ],
+            }
+        )
+        self.assertEqual(bare.groups()[0]["id"], "x")
+        self.assertEqual(ExecutionReport({}).groups(), [])

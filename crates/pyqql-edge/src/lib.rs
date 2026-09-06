@@ -151,6 +151,12 @@ impl PyClient {
             .map_err(common::qql_py_error)
     }
 
+    /// Whether `close()` has been called on this client.
+    #[getter]
+    fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::Acquire)
+    }
+
     fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
         slf
     }
@@ -175,6 +181,7 @@ pub use models::*;
 
 #[pymodule]
 fn pyqql_edge(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    common::register_error_module("pyqql_edge");
     m.add_class::<common::PyStmt>()?;
     m.add_class::<PyClient>()?;
     #[cfg(feature = "fastembed-local")]

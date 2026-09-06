@@ -30,20 +30,75 @@ pub use dispatch::{
 //  Error mapping
 // ═══════════════════════════════════════════════════════════════════
 
-/// Map a [`QqlError`] to a Python `RuntimeError` carrying `.code` / `.kind` /
-/// `.span`.
+/// The host module that owns the shared exception classes (`pyqql` /
+/// `pyqql_edge`). Registered by each SDK's `#[pymodule]` init; the classes
+/// themselves live in the byte-identical `_errors.py` shared file and
+/// subclass both `QqlError` and the builtin category each mapper used to
+/// raise, so existing `except` clauses keep working.
+static ERROR_MODULE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Point pyqql-common at the host module exporting the shared exception
+/// classes. Call once from `#[pymodule]` init.
+pub fn register_error_module(module_name: &'static str) {
+    let _ = ERROR_MODULE.set(module_name.to_string());
+}
+
+/// Python class for a QQL error kind, per the shared `_errors.py`.
+fn exception_class_name(kind: qql_core::error::ErrorKind) -> &'static str {
+    use qql_core::error::ErrorKind;
+    match kind {
+        ErrorKind::Lex | ErrorKind::Parse => "QqlSyntaxError",
+        ErrorKind::Validation => "QqlValidationError",
+        ErrorKind::Execution => "QqlExecutionError",
+        ErrorKind::Transport => "QqlTransportError",
+        ErrorKind::Backend => "QqlBackendError",
+    }
+}
+
+/// Raise `error` as the shared typed exception `class_name`, carrying
+/// `.code` / `.kind` / `.span`. Falls back to the builtin category with
+/// attached attributes when the shared classes are unavailable (before
+/// module registration, or during interpreter teardown).
+fn raise_qql_error(error: QqlError, class_name: &str) -> PyErr {
+    let message = error.to_string();
+    let code = error.code.as_ref().to_string();
+    let kind_str = format!("{:?}", error.kind);
+    let span = error.span.map(|s| (s.start as i64, s.end as i64));
+    Python::attach(|py| {
+        let cls = ERROR_MODULE
+            .get()
+            .and_then(|module| py.import(module.as_str()).ok())
+            .and_then(|module| module.getattr(class_name).ok());
+        if let Some(cls) = cls
+            && let Ok(ty) = cls.cast_into::<pyo3::types::PyType>()
+        {
+            return PyErr::from_type(ty, (message, code, kind_str, span));
+        }
+        let base: PyErr = match class_name {
+            "QqlSyntaxError" => PySyntaxError::new_err(message),
+            "QqlValidationError" => PyValueError::new_err(message),
+            _ => PyRuntimeError::new_err(message),
+        };
+        attach_qql_error(base, error)
+    })
+}
+
+/// Map a [`QqlError`] to the typed shared exception for its
+/// [`ErrorKind`](qql_core::error::ErrorKind) (subclass of `QqlError` and of
+/// the builtin category this kind used to raise).
 pub fn qql_py_error(error: QqlError) -> PyErr {
-    attach_qql_error(PyRuntimeError::new_err(error.to_string()), error)
+    let class_name = exception_class_name(error.kind);
+    raise_qql_error(error, class_name)
 }
 
-/// Map a [`QqlError`] to a Python `SyntaxError` (parse / validation surface).
+/// Map a [`QqlError`] to `QqlSyntaxError` (parse / validation surface).
 pub fn qql_py_syntax_error(error: QqlError) -> PyErr {
-    attach_qql_error(PySyntaxError::new_err(error.to_string()), error)
+    raise_qql_error(error, "QqlSyntaxError")
 }
 
-/// Map a [`QqlError`] to a Python `ValueError` (binding / value surface).
+/// Map a [`QqlError`] to `QqlValidationError` (binding / value surface).
 pub fn qql_py_value_error(error: QqlError) -> PyErr {
-    attach_qql_error(PyValueError::new_err(error.to_string()), error)
+    raise_qql_error(error, "QqlValidationError")
 }
 
 fn attach_qql_error(py_error: PyErr, error: QqlError) -> PyErr {
@@ -62,6 +117,17 @@ fn attach_qql_error(py_error: PyErr, error: QqlError) -> PyErr {
         let _ = value.setattr("span", span);
     });
     py_error
+}
+
+/// A statement that has already been bound rejects new params — silently
+/// ignoring them would look like success while the placeholders stay as
+/// they were.
+fn already_bound_error() -> PyErr {
+    qql_py_value_error(QqlError::validation(
+        "QQL-BIND-ALREADY-BOUND",
+        "statement is already bound; passing params again would be silently ignored — parse a fresh Stmt or bind a copy",
+        None,
+    ))
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -107,12 +173,20 @@ pub fn py_to_json(value: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
         for (key, item) in dict.iter() {
             let key = key
                 .extract::<String>()
-                .map_err(|_| PySyntaxError::new_err("dict keys must be strings"))?;
+                .map_err(|_| PyValueError::new_err("dict keys must be strings"))?;
             map.insert(key, py_to_json(&item)?);
         }
         return Ok(serde_json::Value::Object(map));
     }
-    Err(PySyntaxError::new_err("unsupported filter value type"))
+    // Array-likes (numpy arrays, pandas Series) expose `tolist()` — accept
+    // them so query vectors can bind directly, matching qdrant-client's
+    // numpy support.
+    if let Ok(list) = value.call_method0("tolist") {
+        return py_to_json(&list);
+    }
+    Err(PyValueError::new_err(
+        "unsupported value type for parameter binding or filter values (expected bool, int, float, str, list, dict, or an array-like like a numpy array)",
+    ))
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -169,6 +243,10 @@ pub fn bind_py_params(
 pub struct PyStmt {
     /// The typed AST backing this handle.
     pub inner: qql_core::ast::Stmt,
+    /// Whether parameters have already been bound into this statement.
+    /// Binding again — or passing params to `execute` / `compile_route` —
+    /// would be silently ignored, so both raise `QQL-BIND-ALREADY-BOUND`.
+    pub bound: bool,
 }
 
 #[pymethods]
@@ -187,9 +265,19 @@ impl PyStmt {
     /// Bind parameters into this statement and return a new bound Stmt.
     #[pyo3(signature = (params=None))]
     fn bind(&self, params: Option<&Bound<'_, PyAny>>) -> PyResult<PyStmt> {
+        if let Some(p) = params
+            && !p.is_none()
+            && self.bound
+        {
+            return Err(already_bound_error());
+        }
         let mut inner = self.inner.clone();
+        let binds_now = params.map(|p| !p.is_none()).unwrap_or(false);
         bind_py_stmt(&mut inner, params)?;
-        Ok(PyStmt { inner })
+        Ok(PyStmt {
+            inner,
+            bound: self.bound || binds_now,
+        })
     }
 
     fn inject_filter(&mut self, field: &str, op: &str, value: &Bound<'_, PyAny>) -> PyResult<()> {
@@ -239,6 +327,12 @@ impl PyStmt {
         py: Python<'py>,
         params: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
+        if let Some(p) = params
+            && !p.is_none()
+            && self.bound
+        {
+            return Err(already_bound_error());
+        }
         let mut stmt = self.inner.clone();
         bind_py_stmt(&mut stmt, params)?;
         let compiled = qql_plan::routing::compile_statement(&stmt).map_err(qql_py_syntax_error)?;
@@ -290,7 +384,13 @@ pub fn compiled_route_json(compiled: &qql_plan::routing::CompiledStatement) -> s
 #[pyfunction]
 pub fn parse(input: &str) -> PyResult<Vec<PyStmt>> {
     let stmts = Parser::parse_all(input).map_err(qql_py_syntax_error)?;
-    Ok(stmts.into_iter().map(|s| PyStmt { inner: s }).collect())
+    Ok(stmts
+        .into_iter()
+        .map(|s| PyStmt {
+            inner: s,
+            bound: false,
+        })
+        .collect())
 }
 
 /// Parse a QQL source and return the canonical AST as a JSON string without
@@ -326,7 +426,10 @@ pub fn inject_filter(
     } else if let Ok(query_str) = query.extract::<String>() {
         let mut stmt = Parser::parse(&query_str).map_err(qql_py_syntax_error)?;
         ast::inject_filter(&mut stmt, field, cmp, val).map_err(qql_py_syntax_error)?;
-        Ok(PyStmt { inner: stmt })
+        Ok(PyStmt {
+            inner: stmt,
+            bound: false,
+        })
     } else {
         Err(pyo3::exceptions::PyTypeError::new_err(
             "query must be a string or a Stmt object",
@@ -427,9 +530,19 @@ pub fn bind<'py>(
     truncate_vectors: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
     if let Ok(stmt) = query.extract::<PyRef<'_, PyStmt>>() {
+        if let Some(p) = params
+            && !p.is_none()
+            && stmt.bound
+        {
+            return Err(already_bound_error());
+        }
         let mut inner = stmt.inner.clone();
+        let binds_now = params.map(|p| !p.is_none()).unwrap_or(false);
         bind_py_stmt(&mut inner, params)?;
-        let py_stmt = PyStmt { inner };
+        let py_stmt = PyStmt {
+            inner,
+            bound: stmt.bound || binds_now,
+        };
         if truncate_vectors {
             let readable = qql_core::fmt::format_stmt_readable(&py_stmt.inner);
             Ok(readable.into_pyobject(py)?.into_any())

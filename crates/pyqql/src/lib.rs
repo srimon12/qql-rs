@@ -56,6 +56,12 @@ impl PyClient {
             .map_err(common::qql_py_error)
     }
 
+    /// Whether `close()` has been called on this client.
+    #[getter]
+    fn is_closed(&self) -> bool {
+        self.inner.is_closed()
+    }
+
     fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
         slf
     }
@@ -175,6 +181,7 @@ fn execute_async<'py>(
 
 #[pymodule]
 fn pyqql(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    common::register_error_module("pyqql");
     m.add_class::<common::PyStmt>()?;
     m.add_class::<PyHttpEmbedder>()?;
     m.add_class::<PyClient>()?;

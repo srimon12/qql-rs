@@ -171,6 +171,23 @@ failures; the default is `"stop"`.
 Every input form returns an `ExecutionReport` dict with `ok`, ordered
 `results`, `succeeded`, and `failed` fields.
 
+Typed exceptions: every error is a `pyqql.QqlError` subclass carrying
+`.code` / `.kind` / `.span` — catch `QqlSyntaxError`, `QqlValidationError`,
+`QqlExecutionError`, `QqlTransportError`, or `QqlBackendError` by code
+instead of string-matching (each also subclasses the builtin category it
+used to raise, so `except SyntaxError` / `ValueError` / `RuntimeError`
+keep working). Re-binding an already-bound `Stmt` with new params raises
+`QQL-BIND-ALREADY-BOUND`; an empty script raises
+`QQL-VALIDATION-EMPTY-SCRIPT`; a `close()`d client raises
+`QQL-CLIENT-CLOSED` on the next execute.
+
+Vector parameters: prefer the implicit `QUERY :vec USING <model> FROM …`
+spelling. `QUERY VECTOR :vec` now parses to the same statement (since
+0.3.2), but implicit+USING is the canonical documented form. Matrix params
+(list of number lists) bind as ColBERT multi-vectors on the `Stmt` path,
+and array-likes with `tolist()` (numpy arrays) bind directly.
+`LIMIT 0` is valid (Qdrant accepts it).
+
 ```python
 from pyqql import parse, Client
 

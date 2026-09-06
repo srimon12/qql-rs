@@ -496,6 +496,44 @@
         "score_threshold": null,
         "shard_key": null
       }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "docs"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "test"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": {
+              "kind": null,
+              "multi": false,
+              "name": "dense"
+            }
+          }
+        },
+        "filter": null,
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 0,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": null
+      }
     }
   ]
 }

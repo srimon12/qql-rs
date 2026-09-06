@@ -1,7 +1,7 @@
 //! Shared client dispatch: input normalization, parameter planning, and the
 //! blocking/async run loops used by `pyqql` and `pyqql-edge` clients.
 
-use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyList};
 use qql_core::ast;
@@ -11,7 +11,7 @@ use qql_core::params_json::{
 };
 use qql_core::parser::Parser;
 
-use crate::{PyStmt, py_to_json, qql_py_syntax_error, qql_py_value_error};
+use crate::{PyStmt, already_bound_error, py_to_json, qql_py_syntax_error, qql_py_value_error};
 
 /// Executor error mode: stop the batch on the first failure, or continue.
 pub type OnError = qql::executor::OnError;
@@ -67,6 +67,11 @@ pub fn prepare_input(
             let mut stmts = Vec::with_capacity(list.len());
             for (i, item) in list.iter().enumerate() {
                 let py_stmt = item.extract::<PyRef<'_, PyStmt>>()?;
+                if plan.is_some() && py_stmt.bound {
+                    // The scoped/shared params would be silently ignored for
+                    // an already-bound statement.
+                    return Err(already_bound_error());
+                }
                 let mut s = py_stmt.inner.clone();
                 if let Some(plan) = &plan {
                     bind_stmt_with_params(&mut s, param_for(plan, i))
@@ -93,6 +98,9 @@ pub fn prepare_input(
     }
 
     if let Ok(py_stmt) = query.extract::<PyRef<'_, PyStmt>>() {
+        if py_stmt.bound && params_opt.is_some() {
+            return Err(already_bound_error());
+        }
         let mut stmt = py_stmt.inner.clone();
         if let Some(p) = params_opt {
             let json_params = py_to_json(p)?;
@@ -144,7 +152,7 @@ pub fn run_input(
     on_error: OnError,
 ) -> PyResult<serde_json::Value> {
     let stop = matches!(on_error, OnError::Stop);
-    let map_err = |e: QqlError| PyRuntimeError::new_err(e.to_string());
+    let map_err = crate::qql_py_error;
     match input {
         Input::String(s) => {
             let report = runtime

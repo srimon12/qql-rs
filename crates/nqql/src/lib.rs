@@ -289,8 +289,17 @@ fn create_js_executor(options: Option<serde_json::Value>) -> napi::Result<qql::e
     let client: Box<dyn qql::client::QdrantOps> = if grpc {
         #[cfg(feature = "grpc")]
         {
-            let mut grpc =
-                qql::grpc::GrpcQdrant::from_url(url_str, api_key).map_err(common::to_napi_err)?;
+            // tonic's `connect_lazy` captures the tokio reactor at
+            // construction — build the channel inside napi's global tokio
+            // runtime (which drives every async #[napi] call), otherwise
+            // construction panics on the JS thread with "there is no reactor
+            // running".
+            let handle =
+                napi::bindgen_prelude::block_on(async { tokio::runtime::Handle::current() });
+            let mut grpc = {
+                let _enter = handle.enter();
+                qql::grpc::GrpcQdrant::from_url(url_str, api_key).map_err(common::to_napi_err)?
+            };
             if let Some(affinity) = route_affinity.as_deref() {
                 grpc = grpc.with_route_affinity(affinity);
             }

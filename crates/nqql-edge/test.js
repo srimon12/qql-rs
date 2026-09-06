@@ -433,10 +433,20 @@ console.log("  ✓ Client.compile");
   assert.strictEqual(r.ok, false, "wrong MODEL must fail");
   console.log("  ✓ USING MODEL mismatch rejected (embedder is locked at construction)");
 
-  // 5i. Empty / garbage scripts
-  r = await exec.execute("", { onError: "continue" });
-  // empty may parse to 0 stmts
-  console.log(`  ✓ empty script → ok=${r.ok} succeeded=${r.succeeded}`);
+  // 5i. Empty / garbage scripts — both fail closed (parity since the
+  // empty-script contract landed; "" raises QQL-VALIDATION-EMPTY-SCRIPT
+  // instead of returning a silently-empty ok report).
+  try {
+    await exec.execute("", { onError: "continue" });
+    assert.fail("empty script must raise");
+  } catch (e) {
+    assert.strictEqual(
+      e.code,
+      "QQL-VALIDATION-EMPTY-SCRIPT",
+      `expected EMPTY-SCRIPT code, got code=${e.code} msg=${e.message}`,
+    );
+  }
+  console.log("  ✓ empty script raises QQL-VALIDATION-EMPTY-SCRIPT (parity with ';;')");
 
   // 5j. CREATE COLLECTION with explicit wrong dimension vs model
   {
