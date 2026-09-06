@@ -4,7 +4,6 @@
 export interface ExecuteOptions {
     onError?: "stop" | "continue";
     params?: Record<string, unknown> | unknown[];
-    truncateVectors?: boolean;
 }
 
 export interface ExecResponse {
@@ -134,6 +133,10 @@ export class Stmt {
      */
     compileRouteBytes(): Uint8Array;
     /**
+     * Explain this statement's execution plan (mirrors the free `explain`).
+     */
+    explain(): string;
+    /**
      * Inject a WHERE filter into this statement's AST (mutates in place).
      */
     injectFilter(field: string, op: string, value: any): void;
@@ -150,7 +153,12 @@ export class Stmt {
      */
     toObject(): any;
     /**
-     * Format statement as readable QQL string.
+     * Format statement as a human-readable preview (mirrors Python `repr(stmt)`):
+     * long vector literals are truncated, so the output may not re-parse.
+     */
+    toReadableString(): string;
+    /**
+     * Format statement as canonical, re-parseable QQL (mirrors Python `str(stmt)`).
      */
     toString(): string;
     /**
@@ -164,8 +172,9 @@ export function analyze(input: string): AnalysisResult;
 
 /**
  * Substitute `:name` (object) or `?` (array) placeholders into a query string.
+ * Without `params`, the query is returned unchanged (mirrors pyqql `bind`).
  */
-export function bind(query: string, params: Record<string, unknown> | unknown[], options?: { truncateVectors?: boolean }): string;
+export function bind(query: string, params?: Record<string, unknown> | unknown[], options?: { truncateVectors?: boolean }): string;
 
 /**
  * Compile one QQL statement into a JavaScript route object.

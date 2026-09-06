@@ -55,6 +55,16 @@ function normalizeStandaloneOptions(options) {
   ) {
     throw new TypeError("options.onError must be 'stop' or 'continue'");
   }
+  if (
+    options.params !== undefined &&
+    options.params !== null &&
+    !Array.isArray(options.params) &&
+    typeof options.params !== "object"
+  ) {
+    throw new TypeError(
+      "options.params must be an object for named parameters (:name) or an array for positional parameters (?)",
+    );
+  }
   return {
     dataDir: typeof options.dataDir === "string" ? options.dataDir : "./qdrant_data",
     onDiskPayload: options.onDiskPayload ?? true,
@@ -73,6 +83,10 @@ function normalizeStandaloneOptions(options) {
     embedKey: typeof options.embedKey === "string" ? options.embedKey : undefined,
     embedModel: typeof options.embedModel === "string" ? options.embedModel : undefined,
     embedDim: Number.isSafeInteger(options.embedDim) ? options.embedDim : undefined,
+    // Query parameters for prepared statements: object (:name) or array (?).
+    // Must survive normalization or one-shot execute()/executeStmt() silently
+    // drop bindings. Type validity is asserted above.
+    params: options.params ?? undefined,
     onError: options.onError,
   };
 }

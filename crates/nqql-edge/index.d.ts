@@ -4,8 +4,12 @@ export class Stmt {
   toObject(): unknown;
   toJson(): string;
   toJSON(): string;
+  /** Bind `:name` (object) / `?` (array) params into this statement; returns a new bound Stmt. */
   bind(params?: Record<string, unknown> | unknown[]): Stmt;
+  /** Canonical, re-parseable QQL (mirrors Python `str(stmt)`). */
   toString(): string;
+  /** Human-readable preview; long vectors are truncated (mirrors Python `repr(stmt)`). */
+  toReadableString(): string;
   compileRoute(params?: Record<string, unknown> | unknown[]): CompiledRoute;
   /** QQL `SHARD '…'` routing key (request-level). Prefer the clause in QQL. */
   shardKey?: string | null;
@@ -14,7 +18,7 @@ export class Stmt {
 export class ScoredPoint {
   id: number | string;
   score: number;
-  payload: Record<string, unknown>;
+  payload: Record<string, unknown> | null;
   text: string | null;
   collection: string | null;
   [key: string]: unknown;
@@ -36,7 +40,7 @@ export class ExecutionReport {
   [key: string]: unknown;
   hits(stmt?: number): ScoredPoint[];
   points(stmt?: number): ScoredPoint[];
-  facet(stmt?: number): Array<Record<string, unknown>>;
+  facet(stmt?: number): Array<{ value: unknown; count: number }>;
   count(stmt?: number): number;
 }
 
@@ -149,7 +153,7 @@ export class Client {
   explainStmt(stmt: Stmt): string;
 
   /** Compile a QQL query to its transport route (non-executing). */
-  compile(query: string): CompiledRoute;
+  compile(query: string, params?: Record<string, unknown> | unknown[]): CompiledRoute;
 
   /** Flush and release local edge storage. Idempotent. */
   close(): Promise<void>;
@@ -174,18 +178,19 @@ export function tokenize(
   query: string,
 ): Array<{ kind: string; text: string; pos: number; end: number; len: number }>;
 
-export function compileQuery(query: string): CompiledRoute;
+export function compileQuery(query: string, params?: Record<string, unknown> | unknown[]): CompiledRoute;
 
 export function explain(query: string): string;
 
 export function explainStmt(stmt: Stmt): string;
 
-/** Substitute `:name` (object) or `?` (array) placeholders into a query string. */
+/** Substitute `:name` (object) or `?` (array) placeholders into a query string
+ * or Stmt. Stmt inputs return a bound Stmt (a string when `truncateVectors`). */
 export function bind(
-  query: string,
-  params: Record<string, unknown> | unknown[],
+  query: string | Stmt,
+  params?: Record<string, unknown> | unknown[],
   options?: { truncateVectors?: boolean },
-): string;
+): string | Stmt;
 
 /** One-shot execute returning typed ScoredPoint hits directly. */
 export function executeHits(

@@ -5,11 +5,12 @@ export class Stmt {
   toObject(): unknown;
   toJson(): string;
   toJSON(): string;
+  /** Canonical, re-parseable QQL (mirrors Python `str(stmt)`). */
   toString(): string;
-  bind(
-    params: Record<string, unknown> | unknown[],
-    options?: { truncateVectors?: boolean },
-  ): Stmt;
+  /** Human-readable preview; long vectors are truncated (mirrors Python `repr(stmt)`). */
+  toReadableString(): string;
+  /** Bind `:name` (object) / `?` (array) params into this statement; returns a new bound Stmt. */
+  bind(params?: Record<string, unknown> | unknown[]): Stmt;
   compileRoute(params?: Record<string, unknown> | unknown[]): CompiledRoute;
   /** QQL `SHARD '…'` routing key (request-level). Prefer the clause in QQL. */
   shardKey?: string | null;
@@ -18,7 +19,7 @@ export class Stmt {
 export class ScoredPoint {
   id: string | number;
   score: number;
-  payload: Record<string, unknown>;
+  payload: Record<string, unknown> | null;
   text: string | null;
   collection: string | null;
   get(key: string, defaultValue?: unknown): unknown;
@@ -38,7 +39,7 @@ export class ExecutionReport {
   succeeded: number;
   failed: number;
   hits(stmt?: number): ScoredPoint[];
-  points(stmt?: number): unknown[];
+  points(stmt?: number): ScoredPoint[];
   facet(stmt?: number): Array<{ value: unknown; count: number }>;
   count(stmt?: number): number;
 }
@@ -145,12 +146,13 @@ export function compileQuery(
 ): CompiledRoute;
 export function explain(query: string): string;
 export function explainStmt(stmt: Stmt): string;
-/** Substitute `:name` (object) or `?` (array) placeholders into a query string. */
+/** Substitute `:name` (object) or `?` (array) placeholders into a query string
+ * or Stmt. Stmt inputs return a bound Stmt (a string when `truncateVectors`). */
 export function bind(
-  query: string,
-  params: Record<string, unknown> | unknown[],
+  query: string | Stmt,
+  params?: Record<string, unknown> | unknown[],
   options?: { truncateVectors?: boolean },
-): string;
+): string | Stmt;
 export function execute(
   query: string | Stmt | string[] | Stmt[],
   options?: ExecuteOptions & ClientOptions,
@@ -161,7 +163,7 @@ export function executeHits(
 ): Promise<ScoredPoint[]>;
 export function executeStmt(
   stmt: Stmt,
-  options?: ClientOptions,
+  options?: ClientOptions & ExecuteOptions,
 ): Promise<ExecutionReport>;
 export const version: string;
 export const __version__: string;

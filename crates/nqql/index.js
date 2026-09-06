@@ -181,11 +181,16 @@ function explain(query) {
 
 class ScoredPoint {
   constructor(data) {
-    this.id = data?.id;
-    this.score = data?.score ?? 0;
-    this.payload = data?.payload ?? {};
-    this.text = this.payload?.text ?? null;
-    this.collection = data?.collection ?? null;
+    if (!data || typeof data !== 'object') {
+      throw new TypeError('ScoredPoint requires a hit object');
+    }
+    // Field defaults mirror pyqql's ScoredPoint dataclass; Object.assign
+    // below overlays the hit's own values.
+    this.id = data.id;
+    this.score = data.score ?? 0;
+    this.payload = data.payload ?? null;
+    this.text = data.text ?? null;
+    this.collection = data.collection ?? null;
     Object.assign(this, data);
   }
 
@@ -199,13 +204,27 @@ class ScoredPoint {
 
 class ExecutionReport {
   constructor(data) {
+    // Defaults mirror pyqql's ExecutionReport dict subclass.
+    this.ok = false;
+    this.results = [];
+    this.succeeded = 0;
+    this.failed = 0;
     Object.assign(this, data);
   }
 
+  #resultAt(stmt) {
+    const res = this.results;
+    if (!Array.isArray(res) || res.length === 0) return undefined;
+    const idx = stmt < 0 ? res.length + stmt : stmt;
+    return res[idx];
+  }
+
   hits(stmt = 0) {
-    const res = this.results?.[stmt];
+    const res = this.#resultAt(stmt);
     if (!res || !Array.isArray(res.data)) return [];
-    return res.data.map(d => new ScoredPoint(d));
+    return res.data
+      .filter((d) => d && typeof d === 'object')
+      .map((d) => new ScoredPoint(d));
   }
 
   points(stmt = 0) {
@@ -213,7 +232,7 @@ class ExecutionReport {
   }
 
   facet(stmt = 0) {
-    const res = this.results?.[stmt];
+    const res = this.#resultAt(stmt);
     if (!res) return [];
     if (Array.isArray(res.data)) return res.data;
     if (typeof res.data === 'object' && res.data !== null) {
@@ -223,7 +242,7 @@ class ExecutionReport {
   }
 
   count(stmt = 0) {
-    const res = this.results?.[stmt];
+    const res = this.#resultAt(stmt);
     if (!res) return 0;
     if (typeof res.data === 'number') return res.data;
     if (typeof res.data === 'object' && res.data !== null) {
@@ -326,8 +345,19 @@ class Client {
   }
 }
 
+/**
+ * Substitute `:name` (object) or `?` (array) placeholders into a query string
+ * or Stmt. Mirrors pyqql's `bind`: Stmt inputs return a bound Stmt (or, with
+ * `truncateVectors`, the truncated readable string); string inputs return the
+ * bound query string. Without `params`, the input is returned unchanged.
+ */
 function bind(query, params, options) {
-  return callNative(() => nativeBinding.bind(query, params, options));
+  if (query instanceof nativeBinding.Stmt) {
+    const bound = query.bind(params ?? undefined);
+    const truncate = options?.truncateVectors ?? options?.truncate_vectors ?? false;
+    return truncate ? bound.toReadableString() : bound;
+  }
+  return callNative(() => nativeBinding.bind(query, params ?? undefined, options));
 }
 
 module.exports = {
