@@ -166,6 +166,43 @@ fn formula_query() {
 }
 
 #[test]
+fn formula_subtract_negative_literal() {
+    // The lexer folds a leading `-` into numeric literals, so `1 - -2` lowers
+    // to Sub(Constant(1), Constant(-2)) with no double negation: `-2` is one
+    // signed token, and the binary minus is the single explicit operator.
+    // (`--` after whitespace is always a line comment — see lexer_tests — so
+    // the spaced form is the only way to write this.)
+    let s = Parser::parse("QUERY FORMULA 1 - -2 FROM docs LIMIT 5;").unwrap();
+    let Stmt::Query(q) = s else {
+        panic!("expected query")
+    };
+    let QueryExpr::Formula { expression, .. } = &q.expression else {
+        panic!("expected formula, got {:?}", q.expression);
+    };
+    let FormulaExpr::Sub { left, right } = expression.as_ref() else {
+        panic!("expected Sub, got {expression:?}");
+    };
+    assert_eq!(**left, FormulaExpr::Constant { value: 1.0 });
+    assert_eq!(**right, FormulaExpr::Constant { value: -2.0 });
+}
+
+#[test]
+fn bare_nan_is_a_string_value_not_a_float() {
+    // QQL has no NaN literal: a bare `NaN` is an identifier and falls back to
+    // a string value like any bare identifier in filter position. Only
+    // *numeric* non-finite forms exist, and those are rejected (see
+    // `non_finite_float_literals_rejected`).
+    let s = Parser::parse("QUERY TEXT 'x' FROM docs WHERE score >= NaN LIMIT 5;").unwrap();
+    let Stmt::Query(q) = s else {
+        panic!("expected query")
+    };
+    let Some(FilterExpr::Compare { value, .. }) = q.filter.as_deref() else {
+        panic!("expected compare filter, got {:?}", q.filter);
+    };
+    assert!(matches!(value, Value::Str(v) if v == "NaN"));
+}
+
+#[test]
 fn formula_query_div_default() {
     let res = Parser::parse(
         "QUERY FORMULA ($score / views [DEFAULT = 1.0]) * 10 DEFAULTS (score = 0.0) FROM docs LIMIT 10;",

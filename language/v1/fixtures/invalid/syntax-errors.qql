@@ -126,3 +126,15 @@ QUERY FORMULA MIN() DEFAULTS (score = 0.0) FROM docs LIMIT 10;
 -- @case create-collection-vector-size-above-maximum
 -- @error QQL-PARSE-VECTOR-SIZE
 CREATE COLLECTION docs (oversized VECTOR(65537, COSINE));
+
+-- @case number-exponent-overflow-value
+-- @error QQL-PARSE-FLOAT
+UPSERT INTO docs VALUES {id: 1, v: 1e999};
+
+-- @case number-exponent-overflow-formula
+-- @error QQL-PARSE-NUMBER
+QUERY FORMULA 1e999 FROM docs LIMIT 5;
+
+-- @case limit-beyond-u64-range
+-- @error QQL-PARSE-POSITIVE-INTEGER
+QUERY VECTOR [0.1] FROM docs USING dense LIMIT 18446744073709551616;
