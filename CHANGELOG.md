@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 🚀 Added
+- **Prepared statements** — bind parameters against a pre-parsed `Stmt` (`stmt.bind(...)`, `client.execute(stmt, params=...)`) without string re-parsing; statement-scoped parameter lists (`params=[dict0, dict1]`) batch-execute one bind per statement; nested dictionary parameter expansion (`:loc.lat`).
+- **Typed execution results** — `ScoredPoint` dataclass and typed `ExecutionReport` accessors (`.hits()`, `.points()`, `.facet()`, `.count()`); `client.execute_hits()`; FACET results normalize to the hits array directly; numeric point IDs preserved as integers instead of string round-trips.
+- **Default `USING bm25` model resolution** — an unspecified `USING bm25` model resolves to the server-side `Qdrant/bm25` model.
+- **Vector truncation on bind** — `bind(..., truncate_vectors=True)` clamps overspecified vector literals to the declared dimension; `Stmt` gained string/repr rendering.
+- **Cross-SDK DX parity (QQL 1.7)** — `Stmt.bind()` / `Stmt.compileRoute()` / `Stmt.toString()` and the `ExecutionReport` / `ScoredPoint` surface land in `pyqql`, `pyqql-edge`, `nqql`, `nqql-edge`, and `qql-wasm` (`.pyi` stubs and TS `.d.ts` updated); grammar formally declares parameter placeholders (query inputs, point IDs, scalars, clauses) with `qql.generated.pest` and conformance snapshots regenerated.
+- **Audit-gap conformance fixtures** — exponent-overflow literals (`1e999`) rejected on the value path (`QQL-PARSE-FLOAT`) and the formula path (`QQL-PARSE-NUMBER`); `LIMIT` beyond `u64::MAX` rejected at parse time (`QQL-PARSE-POSITIVE-INTEGER`).
+
+### 🔧 Changed
+- **Non-finite formula constants report `QQL-PARSE-NUMBER`** (previously the generic `QQL-PARSE-SYNTAX`), matching `parse_numeric_literal`'s stable code for score thresholds and decay targets.
+- **Workspace on Rust Edition 2024** — all crates and examples; edition-2024 idioms eligible (let-chains, resolver 3 / MSRV-aware resolution).
+
+### 🧪 Tests
+- Pinned `u64::MAX` LIMIT/OFFSET passthrough (plain / grouped / hybrid `LIMIT*10` boundary) and beyond-u64 rejection for `QUERY` and `SCROLL`.
+- Pinned bare `NaN` as a string filter value (QQL has no NaN literal; numeric non-finite forms are rejected) and `1 - -2` formula lowering (lexer folds the sign into the literal — no double negation; `--` after whitespace is a line comment).
+- `--` lexer suite (CRLF, 3-dash, in-string safety), non-finite float contexts (vector / sparse / mmr / oversampling), RERANK + CTE prefetch (plan + gRPC), and the gRPC scroll-limit guard (`QQL-GRPC-SCROLL-LIMIT`).
+
 ## [0.3.1] - 2026-09-04
 
 ### 📦 Packaging
