@@ -469,7 +469,7 @@ jobs:
               | sort -u
           }
           while read -r name; do
-            if ! grep -qE "^[[:space:]]+${name}[?(]\?\(" "$bundled"; then
+            if ! grep -qE "^[[:space:]]+${name}\(" "$bundled"; then
               echo "::error::bundled editor WASM class API is missing member '${name}'; rebuild editors/vscode/wasm from crates/qql-wasm"
               missing=1
             fi
