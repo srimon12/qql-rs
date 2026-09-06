@@ -3,7 +3,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList};
 use std::sync::atomic::AtomicBool;
 
-use crate::{PyClient, parse_on_error, qql_py_error, run_async, wrap_execution_report};
+use crate::PyClient;
 
 /// List dense ONNX models available for ``local_executor(model=...)``.
 ///
@@ -138,18 +138,18 @@ pub fn execute_async<'py>(
         cache_dir,
         show_download_progress,
     )?;
-    let input = client.prepare_input(&query, params)?;
-    let on_error = parse_on_error(on_error)?;
+    let input = pyqql_common::prepare_input(&query, params)?;
+    let on_error = pyqql_common::parse_on_error(on_error)?;
     let inner = client.inner.clone();
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
-        let result = run_async(&inner, input, on_error).await;
+        let result = pyqql_common::run_async(&inner, input, on_error).await;
         let close_result = inner.close().await;
-        let value = result.map_err(qql_py_error)?;
-        close_result.map_err(qql_py_error)?;
+        let value = result.map_err(pyqql_common::qql_py_error)?;
+        close_result.map_err(pyqql_common::qql_py_error)?;
         Python::attach(|py| {
             let dict = pythonize::pythonize(py, &value)
                 .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
-            let report = wrap_execution_report(py, dict)?;
+            let report = pyqql_common::wrap_execution_report(py, dict, "pyqql_edge")?;
             Ok(report.unbind())
         })
     })

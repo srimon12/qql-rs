@@ -21,7 +21,8 @@ fastembed-local = ["qql-edge/fastembed-local"]
 http-embedding = ["qql-edge/http-embedding"]
 
 [dependencies]
-qql-core = { workspace = true, features = ["serde"] }
+qql-core = { workspace = true, features = ["serde", "json"] }
+pyqql-common = { path = "../pyqql-common" }
 qql-plan = { workspace = true }
 qql = { workspace = true }
 qql-edge = { workspace = true }

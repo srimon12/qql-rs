@@ -318,6 +318,9 @@ geo_query = "QUERY 'coffee' FROM venues WHERE location GEO_RADIUS { center: {lat
 report = client.execute(geo_query, params={"loc": {"lat": 52.52, "lon": 13.40}, "rad": 1000})
 
 # Statement-scoped parameters for multi-statement batches
+# (length must match the statement count exactly — QQL-BIND-BATCH-LENGTH
+# otherwise; a scalar list like [1, 2] is a shared positional list, never
+# per-statement)
 batch_stmts = [
     "QUERY TEXT :q FROM docs LIMIT 5",
     "QUERY TEXT :q FROM articles LIMIT 10",

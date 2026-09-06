@@ -314,6 +314,21 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "22.13.1"
+      - name: Shared DX helper files must stay byte-identical across SDKs
+        run: |
+          set -euo pipefail
+          fail=0
+          for pair in \
+            "crates/nqql/dx-common.js crates/nqql-edge/dx-common.js" \
+            "crates/nqql/test_dx.js crates/nqql-edge/test_dx.js" \
+            "crates/pyqql/pyqql/_dx_report.py crates/pyqql-edge/pyqql_edge/_dx_report.py"; do
+            set -- $pair
+            if ! diff -q "$1" "$2" >/dev/null; then
+              echo "::error::shared DX helper drifted: $1 != $2 — edit both copies or neither"
+              fail=1
+            fi
+          done
+          exit "$fail"
       - name: Install JS dependencies
         working-directory: crates/${{ matrix.package }}
         run: npm install --no-package-lock --omit=optional --no-audit --no-fund

@@ -3175,6 +3175,7 @@ version = "0.3.1"
 dependencies = [
  "napi",
  "napi-derive",
+ "nqql-common",
  "qql",
  "qql-core",
  "qql-plan",
@@ -3184,11 +3185,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "nqql-common"
+version = "0.3.1"
+dependencies = [
+ "napi",
+ "qql",
+ "qql-core",
+ "qql-plan",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "nqql-edge"
 version = "0.3.1"
 dependencies = [
  "napi",
  "napi-derive",
+ "nqql-common",
  "qql",
  "qql-core",
  "qql-edge",
@@ -4124,6 +4138,21 @@ version = "0.3.1"
 dependencies = [
  "pyo3",
  "pyo3-async-runtimes",
+ "pyqql-common",
+ "pythonize",
+ "qql",
+ "qql-core",
+ "qql-plan",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "pyqql-common"
+version = "0.3.1"
+dependencies = [
+ "pyo3",
  "pythonize",
  "qql",
  "qql-core",
@@ -4139,6 +4168,7 @@ version = "0.3.1"
 dependencies = [
  "pyo3",
  "pyo3-async-runtimes",
+ "pyqql-common",
  "pythonize",
  "qql",
  "qql-core",
