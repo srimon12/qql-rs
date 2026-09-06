@@ -41,8 +41,8 @@ pub fn stmt_parse(input: &str) -> Result<ast::Stmt, QqlError> {
 }
 
 /// Inject a WHERE filter into `stmt` in place. `op` is parsed by
-/// [`ComparisonOp::parse_inject_op`] — the single source for supported
-/// operators and rejection messages.
+/// [`qql_core::ast::ComparisonOp::parse_inject_op`] — the single source for
+/// supported operators and rejection messages.
 pub fn stmt_inject_filter(
     stmt: &mut ast::Stmt,
     field: &str,

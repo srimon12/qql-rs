@@ -10,7 +10,7 @@
 //! - an **array** binds positional `?` parameters;
 //! - anything else is rejected (`QQL-BIND-INVALID-PARAMS`).
 //!
-//! Batch dispatch is centralized in [`plan_statement_params`]: a params array
+//! Batch dispatch is centralized in `plan_statement_params`: a params array
 //! whose entries are all objects or arrays is a *statement-scoped* list (one
 //! params container per statement, length must match — `QQL-BIND-BATCH-LENGTH`
 //! otherwise); every other shape applies to every statement identically.

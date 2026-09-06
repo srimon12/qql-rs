@@ -35,8 +35,8 @@ fn scoped_candidate(params: Option<&serde_json::Value>) -> bool {
 /// `executor`, binding `options.params` per the shared batch contract.
 ///
 /// Multi-statement strings (semicolons) and arrays are auto-batched. Returns
-/// the transport-neutral [`ExecutionReport`]; the SDK crates serialize it for
-/// their JS wrapper.
+/// the transport-neutral `qql::executor::ExecutionReport`; the SDK crates
+/// serialize it for their JS wrapper.
 pub async fn execute_dispatch(
     executor: &qql::executor::Executor,
     query: serde_json::Value,
