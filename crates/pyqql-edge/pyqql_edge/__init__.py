@@ -3,6 +3,14 @@
 from typing import Any, Dict, List, Optional, Union
 
 from ._dx_report import ExecutionReport, ScoredPoint
+from ._errors import (
+    QqlError,
+    QqlSyntaxError,
+    QqlValidationError,
+    QqlExecutionError,
+    QqlTransportError,
+    QqlBackendError,
+)
 from .pyqql_edge import (  # type: ignore[attr-defined]
     Client,
     Stmt,
@@ -57,6 +65,12 @@ __all__ = [
     "Stmt",
     "ScoredPoint",
     "ExecutionReport",
+    "QqlError",
+    "QqlSyntaxError",
+    "QqlValidationError",
+    "QqlExecutionError",
+    "QqlTransportError",
+    "QqlBackendError",
     "bind",
     "compile_query",
     "execute",

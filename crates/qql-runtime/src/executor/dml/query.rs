@@ -55,7 +55,16 @@ pub(crate) fn extract_search_hits(result: &serde_json::Value) -> Vec<SearchHit> 
     let points = result
         .get("result")
         .and_then(|r| r.get("points"))
-        .and_then(serde_json::Value::as_array);
+        .and_then(serde_json::Value::as_array)
+        // `/points/query/batch` answers one QueryResponse per search, and per
+        // the OpenAPI `QueryResponse` schema each item carries the points at
+        // its TOP LEVEL: `{"points": [...]}` — no `result` wrapper. Without
+        // this branch every same-collection QUERY batch silently reports
+        // 0 hits.
+        .or_else(|| result.get("points").and_then(serde_json::Value::as_array))
+        // `POST /collections/{c}/points` (get points by ID) returns `result`
+        // as a bare array of point records.
+        .or_else(|| result.get("result").and_then(serde_json::Value::as_array));
 
     match points {
         Some(pts) => pts

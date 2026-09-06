@@ -50,7 +50,7 @@ impl PyClient {
         on_error: &str,
     ) -> PyResult<Bound<'py, PyAny>> {
         if self.closed.load(Ordering::Acquire) {
-            return Err(PyRuntimeError::new_err("client is closed"));
+            return Err(common::client_closed_error());
         }
         let oe = common::parse_on_error(on_error)?;
         let input = common::prepare_input(query, params)?;
@@ -69,7 +69,7 @@ impl PyClient {
         on_error: &str,
     ) -> PyResult<Bound<'py, PyAny>> {
         if self.closed.load(Ordering::Acquire) {
-            return Err(PyRuntimeError::new_err("client is closed"));
+            return Err(common::client_closed_error());
         }
         let inner = self.inner.clone();
         let oe = common::parse_on_error(on_error)?;
@@ -77,7 +77,7 @@ impl PyClient {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let val = common::run_async(&inner, input, oe)
                 .await
-                .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+                .map_err(common::qql_py_error)?;
             Python::attach(|py| {
                 let dict = pythonize::pythonize(py, &val)
                     .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
@@ -151,6 +151,12 @@ impl PyClient {
             .map_err(common::qql_py_error)
     }
 
+    /// Whether `close()` has been called on this client.
+    #[getter]
+    fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::Acquire)
+    }
+
     fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
         slf
     }
@@ -175,6 +181,7 @@ pub use models::*;
 
 #[pymodule]
 fn pyqql_edge(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    common::register_error_module("pyqql_edge");
     m.add_class::<common::PyStmt>()?;
     m.add_class::<PyClient>()?;
     #[cfg(feature = "fastembed-local")]

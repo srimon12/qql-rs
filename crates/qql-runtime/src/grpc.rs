@@ -20,4 +20,4 @@ mod ops;
 mod points;
 mod schema;
 
-pub use client::{GrpcQdrant, ROUTE_AFFINITY_METADATA};
+pub use client::{GrpcQdrant, REQUEST_ID_METADATA, ROUTE_AFFINITY_METADATA};

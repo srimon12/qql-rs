@@ -105,6 +105,41 @@ Binding failures raise errors with stable `QQL-BIND-*` codes — mixed
 placeholder styles, missing parameters, extra positional values, or wrong
 types (see the [error code reference](/docs/reference/error-codes/)).
 
+Every error pyqql raises is a typed `QqlError` subclass carrying `.code`,
+`.kind`, and `.span`, so programs handle failures by code instead of
+string-matching messages:
+
+```python
+from pyqql import QqlSyntaxError, QqlValidationError, QqlTransportError
+
+try:
+    client.execute("QUERY :vec FROM docs USING dense", params={"vec": None})
+except QqlValidationError as e:
+    print(e.code)   # QQL-BIND-NULL-PARAM — a None parameter cannot bind
+except QqlSyntaxError as e:
+    print(e.code, e.span)  # parse errors carry the source span
+except QqlTransportError:
+    ...  # network / timeout failures
+```
+
+The subclasses also inherit the builtin category each one used to raise
+(`QqlSyntaxError` extends `SyntaxError`, `QqlValidationError` extends
+`ValueError`, `QqlExecutionError` / `QqlTransportError` /
+`QqlBackendError` extend `RuntimeError`), so existing `except` clauses
+keep working. Transport and backend errors additionally carry structured
+`.fields` (url, status, …) and a `.request_id` attribute matching the
+`x-request-id` header QQL sends on every request — correlate a failing
+response directly in Qdrant's logs. Re-binding an already-bound `Stmt`
+with new params raises `QQL-BIND-ALREADY-BOUND` instead of silently
+ignoring them, and executing an empty script raises
+`QQL-VALIDATION-EMPTY-SCRIPT` (parity with `";;"`).
+
+Prefer the **implicit** parameter spelling `QUERY :vec USING <model> FROM …`
+over the explicit `QUERY VECTOR :vec` form: both parse to the same
+statement and both accept matrix params (ColBERT multi-vectors) since 0.3.2,
+but the implicit form is the canonical, documented shape and reads the same
+across `QUERY`, `HYBRID`, and `RERANK` inputs.
+
 `compile_query(query, params=...)` and `Client.compile(query, params=...)`
 compile a template to its route in one step, and `is_valid` runs the full
 parse + plan gate:

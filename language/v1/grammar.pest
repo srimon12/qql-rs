@@ -334,7 +334,7 @@ facet = {
 }
 facet_clause = _{
       ^"WHERE" ~ filter
-    | ^"LIMIT" ~ (param | integer)
+    | ^"LIMIT" ~ (param | positive_integer)
     | ^"EXACT" ~ boolean?
     | ^"SHARD" ~ (param | string)
     | ^"WITH" ~ facet_config

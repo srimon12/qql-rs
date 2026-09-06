@@ -260,17 +260,25 @@ fn non_finite_float_literals_rejected() {
 }
 
 #[test]
-fn limit_beyond_u64_rejected_with_positive_integer_code() {
+fn limit_beyond_u64_and_zero_rejected_with_positive_integer_code() {
     // Integer literals larger than u64::MAX must be rejected at parse time,
     // not silently clamped or wrapped; LIMIT/OFFSET are `positive_integer`
     // productions carried as u64.
+    //
+    // LIMIT 0 is rejected too — live-verified against Qdrant 1.19.1: its
+    // /points/query API answers 422 "internal.limit: value 0 invalid, must
+    // be 1 or larger", so a parse-time rejection beats a runtime 422. (The
+    // one-shot acceptance in 0.3.2 was reverted on that evidence.)
     let cases = [
         "QUERY VECTOR [0.1] FROM docs USING dense LIMIT 18446744073709551616;",
         "SCROLL FROM docs LIMIT 18446744073709551616;",
+        "QUERY VECTOR [0.1] FROM docs USING dense LIMIT -1;",
+        "QUERY VECTOR [0.1] FROM docs USING dense LIMIT 0;",
+        "SCROLL FROM docs LIMIT 0;",
     ];
     for source in cases {
-        let err = Parser::parse(source)
-            .expect_err(&format!("expected beyond-u64 rejection for: {source}"));
+        let err =
+            Parser::parse(source).expect_err(&format!("expected limit rejection for: {source}"));
         assert_eq!(
             err.code, "QQL-PARSE-POSITIVE-INTEGER",
             "unexpected code for: {source}"

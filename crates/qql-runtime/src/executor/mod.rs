@@ -155,6 +155,8 @@ pub struct Executor {
     pub(crate) client: Box<dyn QdrantOps>,
     pub(crate) config: Option<QqlConfig>,
     pub(crate) embedder: Option<Arc<dyn Embedder>>,
+    /// Set by [`Executor::close`]; every execution entry point fails after it.
+    closed: std::sync::atomic::AtomicBool,
 }
 
 impl Executor {
@@ -186,6 +188,7 @@ impl Executor {
             client,
             config,
             embedder: None,
+            closed: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -199,6 +202,7 @@ impl Executor {
             client,
             config,
             embedder,
+            closed: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -231,8 +235,30 @@ impl Executor {
 
     /// Flush and release backend-owned resources. This is especially important
     /// for embedded backends before deleting their data directory.
+    ///
+    /// After `close`, every execution entry point fails with
+    /// `QQL-CLIENT-CLOSED` — a closed client cannot run more statements.
+    /// Calling `close` again is a no-op.
     pub async fn close(&self) -> Result<(), QqlError> {
+        self.closed
+            .store(true, std::sync::atomic::Ordering::Release);
         self.client.close().await
+    }
+
+    /// Whether [`Executor::close`] has been called.
+    pub fn is_closed(&self) -> bool {
+        self.closed.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    fn ensure_open(&self) -> Result<(), QqlError> {
+        if self.is_closed() {
+            return Err(QqlError::execution(
+                "QQL-CLIENT-CLOSED",
+                "client is closed; create a new Client to run more statements",
+                None,
+            ));
+        }
+        Ok(())
     }
 
     /// Borrow the configured embedder, if any.
@@ -268,6 +294,7 @@ impl Executor {
         query: &str,
         on_error: OnError,
     ) -> Result<ExecutionReport, QqlError> {
+        self.ensure_open()?;
         let stop_on_error = matches!(on_error, OnError::Stop);
         let statements = match parser::Parser::parse_all(query) {
             Ok(statements) => statements,
@@ -282,7 +309,14 @@ impl Executor {
             }
         };
         if statements.is_empty() {
-            return Ok(ExecutionReport::empty());
+            // An empty script is a caller bug, not a statement failure — fail
+            // closed instead of returning a silently-empty `ok: true` report
+            // (parity with `";;"`, which is a parse error).
+            return Err(QqlError::validation(
+                "QQL-VALIDATION-EMPTY-SCRIPT",
+                "no statements to execute; the query is empty or contains only whitespace",
+                None,
+            ));
         }
         let results = self.execute_batch_nodes(statements, stop_on_error).await?;
         Ok(ExecutionReport::from_results(results))
@@ -295,6 +329,7 @@ impl Executor {
         params: &HashMap<String, qql_core::ast::Value>,
         on_error: OnError,
     ) -> Result<ExecutionReport, QqlError> {
+        self.ensure_open()?;
         let bound = qql_core::params::bind_named(query, |k| params.get(k).cloned())?;
         self.execute(&bound, on_error).await
     }
@@ -306,6 +341,7 @@ impl Executor {
         params: &[qql_core::ast::Value],
         on_error: OnError,
     ) -> Result<ExecutionReport, QqlError> {
+        self.ensure_open()?;
         let bound = qql_core::params::bind_positional(query, params)?;
         self.execute(&bound, on_error).await
     }
@@ -313,6 +349,7 @@ impl Executor {
     /// Execute one parsed statement under the configured timeout, returning a
     /// single response.
     pub async fn execute_node(&self, stmt: Stmt) -> Result<ExecResponse, QqlError> {
+        self.ensure_open()?;
         if let Some(secs) = self.request_timeout() {
             match tokio::time::timeout(
                 std::time::Duration::from_secs(secs),
@@ -346,6 +383,7 @@ impl Executor {
         queries: &[&str],
         on_error: OnError,
     ) -> Result<ExecutionReport, QqlError> {
+        self.ensure_open()?;
         let stop_on_error = matches!(on_error, OnError::Stop);
         let mut pending = Vec::with_capacity(queries.len());
         let mut results = Vec::with_capacity(queries.len());
@@ -374,6 +412,15 @@ impl Executor {
         if !pending.is_empty() {
             results.extend(self.execute_batch_nodes(pending, stop_on_error).await?);
         }
+        if results.is_empty() {
+            // Every input parsed to zero statements (e.g. `["", "  "]`) — same
+            // empty-script contract as `execute`.
+            return Err(QqlError::validation(
+                "QQL-VALIDATION-EMPTY-SCRIPT",
+                "no statements to execute; the query list is empty or every entry is empty",
+                None,
+            ));
+        }
         Ok(ExecutionReport::from_results(results))
     }
 
@@ -384,6 +431,7 @@ impl Executor {
         stmts: Vec<Stmt>,
         stop_on_error: bool,
     ) -> Result<Vec<ExecResponse>, QqlError> {
+        self.ensure_open()?;
         if let Some(secs) = self.request_timeout() {
             match tokio::time::timeout(
                 std::time::Duration::from_secs(secs),
@@ -413,6 +461,9 @@ impl Executor {
         let mut pending_key: Option<BatchKey> = None;
 
         for stmt in stmts {
+            // Fail closed before any network I/O: an unbound placeholder
+            // cannot produce a valid request (see `plan::ensure_no_unbound_params`).
+            qql_plan::ensure_no_unbound_params(&stmt)?;
             let statement_key = statement_batch_key(&stmt);
 
             // A statement outside the current batch family is an execution
@@ -523,99 +574,107 @@ impl Executor {
         }
 
         let operations = core::mem::take(pending);
-        match &operations[0] {
-            PlannedOperation::Query { collection, .. } => {
-                let collection = collection.clone();
-                let searches = operations
-                    .iter()
-                    .map(|operation| match operation {
-                        PlannedOperation::Query { request, .. } => Ok(request.clone()),
-                        _ => Err(QqlError::execution(
-                            "QQL-BATCH-INVARIANT",
-                            "query batch contained a non-query operation",
-                            None,
-                        )),
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                let expected = searches.len();
-                let batch = QueryBatchRequest { searches };
-                match self.client.execute_query_batch(&collection, &batch).await {
-                    Ok(responses) if responses.len() == expected => {
-                        for value in responses {
-                            let hits = extract_search_hits(&value);
+        let is_query = matches!(&operations[0], PlannedOperation::Query { .. });
+        if is_query {
+            let collection = operations[0].collection().unwrap_or_default().to_string();
+            let searches = operations
+                .iter()
+                .map(|operation| match operation {
+                    PlannedOperation::Query { request, .. } => Ok(request.clone()),
+                    _ => Err(QqlError::execution(
+                        "QQL-BATCH-INVARIANT",
+                        "query batch contained a non-query operation",
+                        None,
+                    )),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let expected = searches.len();
+            let batch = QueryBatchRequest { searches };
+            match self.client.execute_query_batch(&collection, &batch).await {
+                Ok(responses) if responses.len() == expected => {
+                    for value in responses {
+                        if let Some(message) = Self::batch_item_error(&value) {
+                            // A 200 batch response can carry per-item
+                            // failures; keep them aligned with the request
+                            // order instead of reporting everything as ok.
                             results.push(ExecResponse {
-                                ok: true,
+                                ok: false,
                                 operation: "QUERY".to_string(),
-                                message: format!("Found {} hits", hits.len()),
-                                data: Some(serialize_hits(&hits)?),
+                                message,
+                                data: None,
                             });
+                            continue;
                         }
-                    }
-                    Ok(responses) => {
-                        let error = QqlError::transport(
-                            "QQL-BATCH-CARDINALITY",
-                            format!(
-                                "query batch returned {} results for {expected} operations",
-                                responses.len()
-                            ),
-                            None,
-                        );
-                        self.collect_batch_error(
-                            error,
-                            &vec!["QUERY"; expected],
-                            stop_on_error,
-                            results,
-                        )?;
-                    }
-                    Err(error) => self.collect_batch_error(
-                        error,
-                        &vec!["QUERY"; expected],
-                        stop_on_error,
-                        results,
-                    )?,
-                }
-            }
-            _ => {
-                // Mutations batch. Most mutations lower to an
-                // `UpdateOperation` and batch through `execute_update_batch`.
-                // `DELETE PAYLOAD` has no wire batch form
-                // (`planned_to_update_operation` returns `None`), so it is
-                // deliberately isolated: consecutive batchable mutations still
-                // run as one batch, and each non-batchable statement is
-                // dispatched through the working single-op path in statement
-                // order. Every operation in the group succeeds instead of the
-                // whole group aborting with `QQL-BATCH-INVARIANT`.
-                let mut collection: Option<String> = None;
-                let mut run: Vec<qql_plan::PlannedOperation> = Vec::new();
-                for operation in operations {
-                    let op_collection = operation.collection().map(str::to_owned);
-                    if collection
-                        .as_ref()
-                        .is_some_and(|c| Some(c.as_str()) != op_collection.as_deref())
-                    {
-                        return Err(QqlError::execution(
-                            "QQL-BATCH-INVARIANT",
-                            "mutation batch contained multiple collections",
-                            None,
-                        ));
-                    }
-                    if collection.is_none() {
-                        collection = op_collection;
-                    }
-                    if qql_plan::mutation::planned_to_update_operation(&operation).is_some() {
-                        run.push(operation);
-                    } else {
-                        // Non-batchable mutation (DELETE PAYLOAD): flush the
-                        // batchable run first, then dispatch this statement
-                        // singly so statement order is preserved.
-                        self.flush_update_run(core::mem::take(&mut run), stop_on_error, results)
-                            .await?;
-                        self.dispatch_or_collect(operation, stop_on_error, results)
-                            .await?;
+                        let hits = extract_search_hits(&value);
+                        results.push(ExecResponse {
+                            ok: true,
+                            operation: "QUERY".to_string(),
+                            message: format!("Found {} hits", hits.len()),
+                            data: Some(serialize_hits(&hits)?),
+                        });
                     }
                 }
-                self.flush_update_run(run, stop_on_error, results).await?;
+                Ok(responses) => {
+                    let error = QqlError::transport(
+                        "QQL-BATCH-CARDINALITY",
+                        format!(
+                            "query batch returned {} results for {expected} operations",
+                            responses.len()
+                        ),
+                        None,
+                    );
+                    if stop_on_error {
+                        return Err(error);
+                    }
+                    self.retry_batch_individually(operations, results).await?;
+                }
+                Err(error) => {
+                    if stop_on_error {
+                        return Err(error);
+                    }
+                    self.retry_batch_individually(operations, results).await?;
+                }
             }
+        } else {
+            // Mutations batch. Most mutations lower to an
+            // `UpdateOperation` and batch through `execute_update_batch`.
+            // `DELETE PAYLOAD` has no wire batch form
+            // (`planned_to_update_operation` returns `None`), so it is
+            // deliberately isolated: consecutive batchable mutations still
+            // run as one batch, and each non-batchable statement is
+            // dispatched through the working single-op path in statement
+            // order. Every operation in the group succeeds instead of the
+            // whole group aborting with `QQL-BATCH-INVARIANT`.
+            let mut collection: Option<String> = None;
+            let mut run: Vec<qql_plan::PlannedOperation> = Vec::new();
+            for operation in operations {
+                let op_collection = operation.collection().map(str::to_owned);
+                if collection
+                    .as_ref()
+                    .is_some_and(|c| Some(c.as_str()) != op_collection.as_deref())
+                {
+                    return Err(QqlError::execution(
+                        "QQL-BATCH-INVARIANT",
+                        "mutation batch contained multiple collections",
+                        None,
+                    ));
+                }
+                if collection.is_none() {
+                    collection = op_collection;
+                }
+                if qql_plan::mutation::planned_to_update_operation(&operation).is_some() {
+                    run.push(operation);
+                } else {
+                    // Non-batchable mutation (DELETE PAYLOAD): flush the
+                    // batchable run first, then dispatch this statement
+                    // singly so statement order is preserved.
+                    self.flush_update_run(core::mem::take(&mut run), stop_on_error, results)
+                        .await?;
+                    self.dispatch_or_collect(operation, stop_on_error, results)
+                        .await?;
+                }
+            }
+            self.flush_update_run(run, stop_on_error, results).await?;
         }
         Ok(())
     }
@@ -666,6 +725,15 @@ impl Executor {
         match self.client.execute_update_batch(&collection, &batch).await {
             Ok(responses) if responses.len() == expected => {
                 for (value, label) in responses.into_iter().zip(labels.iter()) {
+                    if let Some(message) = Self::batch_item_error(&value) {
+                        results.push(ExecResponse {
+                            ok: false,
+                            operation: (*label).to_string(),
+                            message,
+                            data: None,
+                        });
+                        continue;
+                    }
                     results.push(ExecResponse {
                         ok: true,
                         operation: (*label).to_string(),
@@ -683,33 +751,54 @@ impl Executor {
                     ),
                     None,
                 );
-                self.collect_batch_error(error, &labels, stop_on_error, results)?;
+                if stop_on_error {
+                    return Err(error);
+                }
+                self.retry_batch_individually(operations, results).await?;
             }
             Err(error) => {
-                self.collect_batch_error(error, &labels, stop_on_error, results)?;
+                if stop_on_error {
+                    return Err(error);
+                }
+                self.retry_batch_individually(operations, results).await?;
             }
         }
         Ok(())
     }
 
-    fn collect_batch_error(
+    /// A batched RPC failed (or returned the wrong cardinality). With
+    /// `on_error = "continue"`, fall back to dispatching each operation
+    /// individually so per-statement success/failure stays accurate —
+    /// reporting the whole group as failed would lose statements that
+    /// succeed on their own.
+    async fn retry_batch_individually(
         &self,
-        error: QqlError,
-        labels: &[&str],
-        stop_on_error: bool,
+        operations: Vec<qql_plan::PlannedOperation>,
         results: &mut Vec<ExecResponse>,
     ) -> Result<(), QqlError> {
-        if stop_on_error {
-            return Err(error);
+        for operation in operations {
+            self.dispatch_or_collect(operation, false, results).await?;
         }
-        let message = error.to_string();
-        results.extend(labels.iter().map(|label| ExecResponse {
-            ok: false,
-            operation: (*label).to_string(),
-            message: message.clone(),
-            data: None,
-        }));
         Ok(())
+    }
+
+    /// Qdrant batch endpoints answer per item; a 200 response can still carry
+    /// per-item failures (`status: "error"`). Detect them so successes and
+    /// failures stay aligned with the request order.
+    fn batch_item_error(item: &serde_json::Value) -> Option<String> {
+        if item.get("status").and_then(serde_json::Value::as_str) == Some("error") {
+            return Some(
+                item.get("error")
+                    .and_then(serde_json::Value::as_str)
+                    .or_else(|| {
+                        item.pointer("/status/error")
+                            .and_then(serde_json::Value::as_str)
+                    })
+                    .unwrap_or("batch item failed")
+                    .to_string(),
+            );
+        }
+        None
     }
 
     /// Shared preparation: embeddings, named-vector validation, and UPSERT

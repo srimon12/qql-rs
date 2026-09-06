@@ -35,6 +35,18 @@ function buildError(raw) {
       error.code = parsed.code;
       error.kind = parsed.kind;
       error.span = parsed.span ?? null;
+      // Structured fields (url, status, request_id, …) arrive as a
+      // Vec<{key, value}> from serde; normalize to a map + a `request_id`
+      // convenience attribute, mirroring the Python SDK's error surface.
+      error.fields = {};
+      if (Array.isArray(parsed.fields)) {
+        for (const f of parsed.fields) {
+          if (f && f.key !== undefined) error.fields[f.key] = f.value;
+        }
+      }
+      if (error.fields.request_id !== undefined) {
+        error.request_id = error.fields.request_id;
+      }
       return error;
     }
   } catch (_) {
@@ -154,6 +166,15 @@ class ExecutionReport {
       if (!Number.isNaN(parsed)) return parsed;
     }
     return 0;
+  }
+
+  groups(stmt = 0) {
+    const res = this.#resultAt(stmt);
+    if (!res || typeof res.data !== 'object' || res.data === null) return [];
+    const raw = res.data.result;
+    const nested = raw && typeof raw === 'object' ? raw.groups : undefined;
+    const groups = nested !== undefined && nested !== null ? nested : res.data.groups;
+    return Array.isArray(groups) ? groups : [];
   }
 }
 

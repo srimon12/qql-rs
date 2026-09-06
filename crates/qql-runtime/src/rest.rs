@@ -9,6 +9,8 @@ use qql_core::error::QqlError;
 use qql_plan::types::Method as PlanMethod;
 use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 
+pub use crate::client::REQUEST_ID_HEADER;
+pub(crate) use crate::client::next_request_id;
 use crate::client::{CollectionInfo, QdrantOps};
 
 /// HTTP header for Qdrant 1.19 read affinity (`X-Qdrant-Route-Affinity`).
@@ -92,14 +94,18 @@ impl RestQdrant {
         self.route_affinity.as_deref()
     }
 
-    fn apply_headers(&self, mut req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    fn apply_headers(
+        &self,
+        mut req: reqwest::RequestBuilder,
+        request_id: &str,
+    ) -> reqwest::RequestBuilder {
         if let Some(ref key) = self.api_key {
             req = req.header("api-key", key);
         }
         if let Some(ref affinity) = self.route_affinity {
             req = req.header(ROUTE_AFFINITY_HEADER, affinity);
         }
-        req
+        req.header(REQUEST_ID_HEADER, request_id)
     }
 
     async fn call_body<B: serde::Serialize + ?Sized, T: DeserializeOwned>(
@@ -111,20 +117,28 @@ impl RestQdrant {
         let mut url_buf = String::with_capacity(self.base_url.len() + path.len());
         url_buf.push_str(&self.base_url);
         url_buf.push_str(path);
+        let request_id = next_request_id();
         let mut req = self.client.request(method, &url_buf);
-        req = self.apply_headers(req);
+        req = self.apply_headers(req, &request_id);
         if let Some(b) = body {
             req = req.json(b);
         }
         let resp = req.send().await.map_err(|error| {
             QqlError::transport(
                 "QQL-TRANSPORT",
-                format!("HTTP request failed: {error}"),
+                format!("HTTP request failed: {error} (request id: {request_id})"),
                 None,
             )
             .with_url(url_buf.clone())
+            .with_field("request_id", request_id.clone())
         })?;
         let status = resp.status();
+        let server_request_id = resp
+            .headers()
+            .get(REQUEST_ID_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned)
+            .unwrap_or_else(|| request_id.clone());
         let text = resp.text().await.map_err(|error| {
             QqlError::backend(
                 "QQL-BACKEND",
@@ -138,16 +152,19 @@ impl RestQdrant {
             let detail = &text[..limit];
             return Err(QqlError::backend(
                 "QQL-BACKEND-HTTP",
-                format!("Qdrant returned {status}: {detail}"),
+                format!("Qdrant returned {status}: {detail} (request id: {server_request_id})"),
                 None,
             )
             .with_status(status.as_u16())
-            .with_url(url_buf.clone()));
+            .with_url(url_buf.clone())
+            .with_field("request_id", server_request_id.clone()));
         }
         let value: Value = serde_json::from_str(&text).map_err(|error| {
             QqlError::backend(
                 "QQL-BACKEND-JSON",
-                format!("failed to parse Qdrant response: {error}"),
+                format!(
+                    "failed to parse Qdrant response: {error} (request id: {server_request_id})"
+                ),
                 None,
             )
             .with_url(url_buf.clone())
@@ -156,7 +173,9 @@ impl RestQdrant {
         serde_json::from_value(value).map_err(|error| {
             QqlError::backend(
                 "QQL-BACKEND-JSON",
-                format!("failed to decode Qdrant response: {error}"),
+                format!(
+                    "failed to decode Qdrant response: {error} (request id: {server_request_id})"
+                ),
                 None,
             )
             .with_url(url_buf.clone())
@@ -382,6 +401,7 @@ impl RestQdrant {
         };
 
         let url = format!("{}{}", self.base_url, route.path);
+        let request_id = next_request_id();
         let mut builder = match method {
             Method::GET => self.client.get(&url),
             Method::POST => self.client.post(&url),
@@ -393,33 +413,52 @@ impl RestQdrant {
         if !route.query.is_empty() {
             builder = builder.query(&route.query);
         }
-        builder = self.apply_headers(builder);
+        builder = self.apply_headers(builder, &request_id);
         if let Some(ref body) = route.body {
             builder = builder.json(body);
         }
         let resp = builder.send().await.map_err(|e| {
-            QqlError::transport("QQL-TRANSPORT", format!("REST request failed: {e}"), None)
-                .with_url(url.clone())
+            QqlError::transport(
+                "QQL-TRANSPORT",
+                format!("REST request failed: {e} (request id: {request_id})"),
+                None,
+            )
+            .with_url(url.clone())
+            .with_field("request_id", request_id.clone())
         })?;
         let status = resp.status();
+        let server_request_id = resp
+            .headers()
+            .get(REQUEST_ID_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned)
+            .unwrap_or_else(|| request_id.clone());
         let text = resp.text().await.map_err(|e| {
-            QqlError::transport("QQL-TRANSPORT", format!("REST body read failed: {e}"), None)
+            QqlError::transport(
+                "QQL-TRANSPORT",
+                format!("REST body read failed: {e} (request id: {request_id})"),
+                None,
+            )
         })?;
         if !status.is_success() {
             return Err(QqlError::backend(
                 "QQL-BACKEND-HTTP",
-                format!("REST {status}: {text}"),
+                format!("REST {status}: {text} (request id: {server_request_id})"),
                 None,
             )
             .with_status(status.as_u16())
-            .with_url(url));
+            .with_url(url)
+            .with_field("request_id", server_request_id));
         }
         let value: Value = serde_json::from_str(&text).map_err(|e| {
             QqlError::backend(
                 "QQL-BACKEND-JSON",
-                format!("invalid JSON response: {e}; body={text}"),
+                format!(
+                    "invalid JSON response: {e}; body={text} (request id: {server_request_id})"
+                ),
                 None,
             )
+            .with_field("request_id", server_request_id)
         })?;
         validate_success_envelope(&value, &route.path)?;
         Ok(value)

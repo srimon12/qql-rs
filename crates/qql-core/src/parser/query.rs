@@ -410,6 +410,14 @@ impl<'a> AstLowerer<'a> {
         }
         if self.peek()?.kind == TokenKind::Vector {
             self.advance()?;
+            // `VECTOR :name` / `VECTOR ?` — the explicit spelling of a
+            // parameter bound to the vector slot. Lower to the same
+            // `Param` / `PositionalParam` node as the implicit
+            // `QUERY :x USING …` form so AST binding and textual binding
+            // behave identically.
+            if matches!(self.peek()?.kind, TokenKind::Colon | TokenKind::Question) {
+                return self.parse_query_input();
+            }
             return self.parse_vector_value().map(QueryInput::Vector);
         }
         if self.peek()?.kind == TokenKind::Lbracket {

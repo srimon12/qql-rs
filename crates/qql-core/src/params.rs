@@ -419,6 +419,17 @@ where
                 }
                 let name = ident_at(source, name_start, i);
                 if let Some(val) = lookup(name) {
+                    if matches!(val, Value::Null) {
+                        // Rendering `null` would only fail downstream with a
+                        // misleading parse error — fail closed here.
+                        return Err(QqlError::validation(
+                            "QQL-BIND-NULL-PARAM",
+                            alloc::format!(
+                                "parameter ':{name}' is null; QQL cannot bind null — pass a concrete value or remove the placeholder"
+                            ),
+                            None,
+                        ));
+                    }
                     out.push_str(&value_to_literal(&val)?);
                 } else {
                     return Err(QqlError::validation(
@@ -468,6 +479,16 @@ pub fn bind_positional(source: &str, params: &[Value]) -> Result<String, QqlErro
 
         if ch == b'?' {
             if param_index < params.len() {
+                if matches!(params[param_index], Value::Null) {
+                    return Err(QqlError::validation(
+                        "QQL-BIND-NULL-PARAM",
+                        alloc::format!(
+                            "positional parameter ?{} is null; QQL cannot bind null — pass a concrete value or remove the placeholder",
+                            param_index + 1
+                        ),
+                        None,
+                    ));
+                }
                 out.push_str(&source[run..i]);
                 out.push_str(&value_to_literal(&params[param_index])?);
                 param_index += 1;
@@ -533,22 +554,31 @@ fn resolve_param<F>(name: &str, lookup: &F) -> Result<Value, QqlError>
 where
     F: Fn(&str) -> Option<Value>,
 {
-    if let Some(val) = lookup(name) {
-        Ok(val)
-    } else {
-        Err(QqlError::validation(
+    let val = lookup(name).ok_or_else(|| {
+        QqlError::validation(
             "QQL-BIND-MISSING-PARAM",
             alloc::format!("missing value for named parameter ':{}'", name),
             None,
-        ))
+        )
+    })?;
+    if matches!(val, Value::Null) {
+        // A literal `None`/`null` parameter used to render as the text
+        // `null`, which then failed downstream with a misleading
+        // "query input requires …" parse error. Fail closed here instead.
+        return Err(QqlError::validation(
+            "QQL-BIND-NULL-PARAM",
+            alloc::format!(
+                "parameter ':{name}' is null; QQL cannot bind null — pass a concrete value or remove the placeholder"
+            ),
+            None,
+        ));
     }
+    Ok(val)
 }
 
 fn resolve_positional(idx: usize, positional: &[Value]) -> Result<Value, QqlError> {
-    if idx < positional.len() {
-        Ok(positional[idx].clone())
-    } else {
-        Err(QqlError::validation(
+    let val = positional.get(idx).cloned().ok_or_else(|| {
+        QqlError::validation(
             "QQL-BIND-MISSING-PARAM",
             alloc::format!(
                 "positional parameter ? index {} out of range (total provided: {})",
@@ -556,8 +586,19 @@ fn resolve_positional(idx: usize, positional: &[Value]) -> Result<Value, QqlErro
                 positional.len()
             ),
             None,
-        ))
+        )
+    })?;
+    if matches!(val, Value::Null) {
+        return Err(QqlError::validation(
+            "QQL-BIND-NULL-PARAM",
+            alloc::format!(
+                "positional parameter ?{} is null; QQL cannot bind null — pass a concrete value or remove the placeholder",
+                idx + 1
+            ),
+            None,
+        ));
     }
+    Ok(val)
 }
 
 /// Recursively bind parameters into an AST `Value` in-place.
@@ -686,6 +727,49 @@ fn value_to_query_input(val: Value) -> Result<QueryInput, QqlError> {
             model: None,
         }),
         Value::List(items) => {
+            if items.is_empty() {
+                return Ok(QueryInput::Vector(VectorValue::Dense(Vec::new())));
+            }
+            // A matrix (list of lists) is a multi-vector bag (ColBERT-style).
+            // The textual path already accepts `[[0.1, ...], [0.2, ...]]`
+            // literals — the AST path must too, so ColBERT queries can be
+            // prepared statements.
+            let all_rows = items.iter().all(|i| matches!(i, Value::List(_)));
+            if all_rows {
+                let mut rows = Vec::with_capacity(items.len());
+                for row in items {
+                    let Value::List(cells) = row else {
+                        return Err(QqlError::validation(
+                            "QQL-BIND-TYPE-MISMATCH",
+                            "matrix parameter bound to query input must contain only lists of numbers",
+                            None,
+                        ));
+                    };
+                    let mut floats = Vec::with_capacity(cells.len());
+                    for cell in cells {
+                        match cell {
+                            Value::Float(f) => floats.push(f as f32),
+                            Value::Int(i) => floats.push(i as f32),
+                            _ => {
+                                return Err(QqlError::validation(
+                                    "QQL-BIND-TYPE-MISMATCH",
+                                    "matrix parameter bound to query input must contain only numbers",
+                                    None,
+                                ));
+                            }
+                        }
+                    }
+                    if floats.is_empty() {
+                        return Err(QqlError::validation(
+                            "QQL-BIND-TYPE-MISMATCH",
+                            "matrix parameter bound to query input must not contain empty rows",
+                            None,
+                        ));
+                    }
+                    rows.push(floats);
+                }
+                return Ok(QueryInput::Vector(VectorValue::MultiDense(rows)));
+            }
             let mut floats = Vec::with_capacity(items.len());
             for item in items {
                 match item {
@@ -694,7 +778,7 @@ fn value_to_query_input(val: Value) -> Result<QueryInput, QqlError> {
                     _ => {
                         return Err(QqlError::validation(
                             "QQL-BIND-TYPE-MISMATCH",
-                            "list parameter bound to query input must contain only numbers",
+                            "list parameter bound to query input must contain only numbers (a matrix of number lists binds as a multi-vector)",
                             None,
                         ));
                     }

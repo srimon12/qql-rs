@@ -195,6 +195,53 @@ console.log(`Testing Node.js DX enhancements (${LABEL})...`);
   assert.strictEqual(empty.failed, 0);
   assert.deepStrictEqual(empty.hits(), []);
   assert.strictEqual(empty.count(), 0);
+  assert.deepStrictEqual(empty.groups(), []);
+
+  // Grouped query (GROUP BY): groups() normalizes the envelopes.
+  assert.deepStrictEqual(
+    report.groups(9),
+    [],
+    'out-of-range stmt yields empty groups'
+  );
+  const grouped = new sdk.ExecutionReport({
+    ok: true,
+    succeeded: 1,
+    failed: 0,
+    results: [
+      {
+        ok: true,
+        operation: 'QUERY_GROUPS',
+        message: 'Found 2 group(s)',
+        data: {
+          result: {
+            groups: [
+              { id: 'a', hits: [{ id: 1, score: 0.9 }] },
+              { id: 'b', hits: [{ id: 2, score: 0.8 }] },
+            ],
+          },
+          status: 'ok',
+        },
+      },
+    ],
+  });
+  assert.strictEqual(grouped.groups().length, 2);
+  assert.strictEqual(grouped.groups()[0].id, 'a');
+  assert.strictEqual(grouped.groups()[1].hits.length, 1);
+  // Bare envelope (no result wrapper) normalizes too.
+  const bare = new sdk.ExecutionReport({
+    ok: true,
+    succeeded: 1,
+    failed: 0,
+    results: [
+      {
+        ok: true,
+        operation: 'QUERY_GROUPS',
+        message: 'Found 1 group(s)',
+        data: { groups: [{ id: 'x', hits: [] }] },
+      },
+    ],
+  });
+  assert.strictEqual(bare.groups()[0].id, 'x');
 
   // Facet report
   assert.strictEqual(report.facet(1).length, 2);
