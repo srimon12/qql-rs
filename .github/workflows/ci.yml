@@ -243,12 +243,6 @@ jobs:
   pyqql-check:
     name: Python bindings
     runs-on: ubuntu-latest
-    env:
-      # pyqql-edge is PyO3 over qql-edge → same Rust fastembed path →
-      # HF_HOME resolves as the cache ROOT (no /hub suffix) and overrides
-      # explicit cacheDir opts. Pin it so warm step, workflow cache, and
-      # tests share one deterministic directory.
-      HF_HOME: ${{ runner.temp }}/hf-home
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -269,6 +263,13 @@ jobs:
         with:
           python-version: "3.12"
       - name: Build and test Python SDKs
+        # pyqql-edge is PyO3 over qql-edge → same Rust fastembed path →
+        # HF_HOME resolves as the cache ROOT (no /hub suffix) and overrides
+        # explicit cacheDir opts. Pin it so the workflow cache and tests share
+        # one deterministic directory. (Step-level env: the `runner` context
+        # is not available in job-level env.)
+        env:
+          HF_HOME: ${{ runner.temp }}/hf-home
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
@@ -293,12 +294,6 @@ jobs:
       fail-fast: false
       matrix:
         package: [nqql, nqql-edge]
-    env:
-      # fastembed-rs resolves HF_HOME as its cache ROOT (no /hub suffix) and
-      # it overrides even explicit cacheDir opts — pinning it gives the warm
-      # step, the workflow cache, and all tests one deterministic directory.
-      # (fastembed-6.0.2/src/common.rs: HF_HOME > FASTEMBED_CACHE_DIR > ./.fastembed_cache)
-      HF_HOME: ${{ runner.temp }}/hf-home
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -325,6 +320,13 @@ jobs:
       - name: Warm embedding model cache (guarded download)
         if: matrix.package == 'nqql-edge'
         working-directory: crates/nqql-edge
+        # fastembed-rs resolves HF_HOME as its cache ROOT (no /hub suffix) and
+        # it overrides even explicit cacheDir opts — pinning it gives the
+        # workflow cache and all tests one deterministic directory.
+        # (fastembed-6.0.2/src/common.rs: HF_HOME > FASTEMBED_CACHE_DIR > ./.fastembed_cache)
+        # Step-level env: the `runner` context is unavailable in job-level env.
+        env:
+          HF_HOME: ${{ runner.temp }}/hf-home
         run: |
           set -euo pipefail
           npm run build:debug
@@ -338,6 +340,9 @@ jobs:
           exit 1
       - name: Build and test ${{ matrix.package }}
         working-directory: crates/${{ matrix.package }}
+        env:
+          # Same pinned cache root as the warm step — see the comment there.
+          HF_HOME: ${{ runner.temp }}/hf-home
         run: |
           set -euo pipefail
           npm test
