@@ -1,8 +1,33 @@
+#[cfg(any(feature = "rest", feature = "grpc"))]
+use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(any(feature = "rest", feature = "grpc"))]
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use async_trait::async_trait;
 use qql_core::error::QqlError;
 use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 
 pub use crate::backend::{CollectionInfo, Filter as QdrantFilter, PointId, ScoredPoint};
+
+/// HTTP header / gRPC metadata key Qdrant echoes into its logs for request
+/// correlation (`x-request-id`). QQL generates one per request so a
+/// misbehaving server response can be traced in Qdrant's own log lines.
+pub const REQUEST_ID_HEADER: &str = "x-request-id";
+
+#[cfg(any(feature = "rest", feature = "grpc"))]
+static REQUEST_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Generate a process-unique request id: `qql-<nanos><seq>` — no external
+/// uuid dependency, unique enough for log correlation within a boot.
+#[cfg(any(feature = "rest", feature = "grpc"))]
+pub(crate) fn next_request_id() -> String {
+    let seq = REQUEST_SEQ.fetch_add(1, Ordering::Relaxed);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    format!("qql-{nanos:08x}{seq:04x}")
+}
 
 /// Named vectors a collection exposes for dense, sparse, and rerank usage.
 #[derive(Debug, Clone)]

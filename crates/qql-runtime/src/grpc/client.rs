@@ -9,6 +9,9 @@ use crate::qdrant_grpc::qdrant;
 /// gRPC metadata key for Qdrant 1.19 read affinity (same string as the HTTP header).
 pub const ROUTE_AFFINITY_METADATA: &str = "x-qdrant-route-affinity";
 
+/// gRPC metadata key for request correlation (`x-request-id`).
+pub const REQUEST_ID_METADATA: &str = crate::client::REQUEST_ID_HEADER;
+
 /// Qdrant gRPC backend handle: `tonic` channel plus API-key and route-affinity
 /// metadata, with typed points/collections client factories.
 pub struct GrpcQdrant {
@@ -46,9 +49,9 @@ impl tonic::service::Interceptor for MetadataInterceptor {
         }
         // Per-request correlation id — Qdrant echoes it into its log lines,
         // matching the REST adapter's `x-request-id` header.
-        let request_id = crate::rest::next_request_id();
+        let request_id = crate::client::next_request_id();
         if let Ok(value) = tonic::metadata::MetadataValue::try_from(request_id.as_str()) {
-            request.metadata_mut().insert("x-request-id", value);
+            request.metadata_mut().insert(REQUEST_ID_METADATA, value);
         }
         Ok(request)
     }

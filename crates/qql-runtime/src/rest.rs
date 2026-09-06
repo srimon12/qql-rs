@@ -1,6 +1,4 @@
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use reqwest::{Client, Method};
@@ -11,28 +9,12 @@ use qql_core::error::QqlError;
 use qql_plan::types::Method as PlanMethod;
 use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
 
+pub use crate::client::REQUEST_ID_HEADER;
+pub(crate) use crate::client::next_request_id;
 use crate::client::{CollectionInfo, QdrantOps};
 
 /// HTTP header for Qdrant 1.19 read affinity (`X-Qdrant-Route-Affinity`).
 pub const ROUTE_AFFINITY_HEADER: &str = "X-Qdrant-Route-Affinity";
-
-/// HTTP header / gRPC metadata Qdrant echoes into its logs for request
-/// correlation (`x-request-id`). QQL generates one per request so a
-/// misbehaving server response can be traced in Qdrant's own log lines.
-pub const REQUEST_ID_HEADER: &str = "x-request-id";
-
-static REQUEST_SEQ: AtomicU64 = AtomicU64::new(0);
-
-/// Generate a process-unique request id: `qql-<nanos><seq>` — no external
-/// uuid dependency, unique enough for log correlation within a boot.
-pub(crate) fn next_request_id() -> String {
-    let seq = REQUEST_SEQ.fetch_add(1, Ordering::Relaxed);
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.subsec_nanos())
-        .unwrap_or(0);
-    format!("qql-{nanos:08x}{seq:04x}")
-}
 
 /// REST transport adapter implementing the `QdrantOps` backend contract over
 /// the Qdrant HTTP API.
