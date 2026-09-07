@@ -1,12 +1,28 @@
+//! Mock-executor E2E: parse → prepare → plan → mock dispatch.
+//!
+//! Uses the same `bench/queries.json` corpus as `parse`/`explain` so the three
+//! suites stay comparable. Two corpus entries carry an `e2e` counterpart (the
+//! TEXT+MODEL+USING form): bare `QUERY '…'` has no vector target and cannot
+//! resolve against the mock dense+sparse topology (`QQL-MISSING-USING`).
+//! Queries carrying `params` (the `Bound` query) are bound once up front —
+//! bind cost itself is measured in `bench_bind` — so this suite measures the
+//! execute path only. No network, no model inference.
+//!
+//! usage: `e2e [--iterations N] [--reps N] [--filter SUBSTR] [--json]`
+
+#[path = "../common.rs"]
+mod common;
+
 use async_trait::async_trait;
+use common::{
+    Row, apply_filter, load_queries, median, parse_args, print_header, print_json, print_row,
+};
 use qql::client::*;
 use qql::executor::{Executor, OnError};
 use qql_core::error::QqlError;
 use qql_plan::{QueryBatchRequest, UpdateBatchRequest};
-use std::{
-    hint::black_box,
-    time::{Duration, Instant},
-};
+use std::hint::black_box;
+use std::time::Instant;
 
 struct MockQdrant;
 
@@ -85,52 +101,74 @@ impl QdrantOps for MockQdrant {
     }
 }
 
-const QUERIES: &[(&str, &str)] = &[
-    ("Simple", "QUERY TEXT 'search' MODEL 'bench' FROM docs USING dense LIMIT 10"),
-    ("Hybrid", "QUERY HYBRID TEXT 'search' MODEL 'bench' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10"),
-    ("Full", "QUERY TEXT 'x' MODEL 'bench' FROM docs USING dense WHERE active = true PARAMS (hnsw_ef = 64, exact = false) SCORE THRESHOLD 0.2 GROUP BY category SIZE 3 LOOKUP FROM categories WITH PAYLOAD INCLUDE (title, url) WITH VECTOR (dense) LIMIT 10 OFFSET 2"),
-    ("CTE_Prefetch", "WITH d AS (QUERY TEXT 'x' MODEL 'bench' USING dense LIMIT 100), s AS (QUERY TEXT 'x' MODEL 'bench' USING sparse LIMIT 100) QUERY FUSION RRF FROM docs PREFETCH (d, s) LIMIT 10"),
-    ("CreateCollection", "CREATE COLLECTION docs HYBRID WITH HNSW (m = 32, ef_construct = 100) WITH QUANTIZATION (type = 'scalar', quantile = 0.95)"),
-    ("Upsert", "UPSERT INTO docs VALUES {id: 1, text: 'hello world', category: 'tech'}, {id: 2, text: 'second document', category: 'science'}"),
-    ("DeleteWhere", "DELETE FROM docs WHERE category = 'archived'"),
-    ("OrderBy", "QUERY ORDER BY created_at DESC FROM docs WHERE status = 'active' LIMIT 20"),
-    ("WithPayload", "QUERY TEXT 'search' MODEL 'bench' FROM docs USING dense WITH PAYLOAD INCLUDE (title, body) WITH VECTOR (dense) LIMIT 10"),
-];
+/// Bind `params` once so the timed loop measures execute only. Prefers the
+/// query's `e2e` counterpart when the corpus provides one (see queries.json).
+fn bound_query(query: &common::BenchQuery) -> String {
+    let qql = query.e2e.as_deref().unwrap_or(&query.qql);
+    match &query.params {
+        Some(p) => qql_core::params_json::bind_str_with_params(qql, p, false)
+            .expect("benchmark params must bind"),
+        None => qql.to_string(),
+    }
+}
 
-async fn bench(executor: &Executor, _name: &str, q: &str, iterations: usize) -> Duration {
-    for _ in 0..100 {
+async fn bench_query(executor: &Executor, qql: &str, warmup: usize, iterations: usize) -> f64 {
+    for _ in 0..warmup {
         black_box(
             executor
-                .execute(q, OnError::Stop)
+                .execute(qql, OnError::Stop)
                 .await
                 .expect("benchmark query must execute"),
         );
     }
-
     let start = Instant::now();
     for _ in 0..iterations {
         black_box(
             executor
-                .execute(q, OnError::Stop)
+                .execute(qql, OnError::Stop)
                 .await
                 .expect("benchmark query must execute"),
         );
     }
-    start.elapsed()
+    start.elapsed().as_nanos() as f64 / iterations as f64
 }
 
 #[tokio::main]
 async fn main() {
+    let args = parse_args("e2e", 50_000, 3);
+    let queries = apply_filter(load_queries(), args.filter.as_deref());
+    // Bind up front (see module docs); fail fast on a bad corpus entry.
+    let bound: Vec<(String, String)> = queries
+        .iter()
+        .map(|q| (q.name.clone(), bound_query(q)))
+        .collect();
+    // Smoke the bound queries once so a corpus regression fails before timing.
     let executor = Executor::new(Box::new(MockQdrant), None);
-    let iterations = 100_000;
-    println!("Rust qql-runtime E2E  |  {} iterations each\n", iterations);
-    println!("{:<20} {:>12} {:>12}", "Query", "ns/op", "ops/s");
-    println!("{}", "-".repeat(46));
+    for (name, qql) in &bound {
+        executor
+            .execute(qql, OnError::Stop)
+            .await
+            .unwrap_or_else(|e| panic!("e2e corpus query '{name}' must execute: {e}"));
+    }
 
-    for (name, q) in QUERIES {
-        let dur = bench(&executor, name, q, iterations).await;
-        let ns = dur.as_nanos() as f64 / iterations as f64;
-        let ops = 1_000_000_000.0 / ns;
-        println!("{:<20} {:>10.0} {:>12.0}", name, ns, ops);
+    if !args.json {
+        print_header("Rust qql-runtime E2E (mock dispatch)", &args);
+    }
+    let mut rows = Vec::with_capacity(bound.len());
+    for (name, qql) in &bound {
+        let mut samples = Vec::with_capacity(args.reps);
+        for _ in 0..args.reps {
+            samples.push(bench_query(&executor, qql, 100, args.iterations).await);
+        }
+        rows.push(Row {
+            name: name.clone(),
+            ns_per_op: median(samples),
+        });
+        if !args.json {
+            print_row(rows.last().expect("row just pushed"));
+        }
+    }
+    if args.json {
+        print_json("e2e", &args, &rows);
     }
 }
