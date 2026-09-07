@@ -72,18 +72,16 @@ pub(crate) fn extract_search_hits(result: &serde_json::Value) -> Vec<SearchHit> 
             .map(|hit| SearchHit {
                 id: hit
                     .get("id")
-                    .and_then(|id| match id {
+                    .map(|id| match id {
                         serde_json::Value::Number(n) => {
                             if let Some(u) = n.as_u64() {
-                                Some(qql_plan::PlanPointId::Number(u))
+                                qql_plan::PlanPointId::Number(u)
                             } else {
-                                Some(qql_plan::PlanPointId::String(n.to_string()))
+                                qql_plan::PlanPointId::String(n.to_string())
                             }
                         }
-                        serde_json::Value::String(s) => {
-                            Some(qql_plan::PlanPointId::String(s.clone()))
-                        }
-                        _ => None,
+                        serde_json::Value::String(s) => qql_plan::PlanPointId::String(s.clone()),
+                        other => qql_plan::PlanPointId::String(other.to_string()),
                     })
                     .unwrap_or_else(|| qql_plan::PlanPointId::String(String::new())),
                 score: hit

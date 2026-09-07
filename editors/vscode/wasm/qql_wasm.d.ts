@@ -64,6 +64,10 @@ export class Client {
      */
     compile(query: string, params?: any | null): CompiledRoute;
     /**
+     * Parse and compile one statement without executing it. Alias for `compile`.
+     */
+    compileQuery(query: string, params?: any | null): CompiledRoute;
+    /**
      * Parse, compile, embed if needed, and POST to Qdrant's REST API.
      *
      * Accepts a string, a Stmt, or an array of either. Always returns a stable
@@ -192,6 +196,11 @@ export function compile(query: string, params?: any | null): CompiledRoute;
  * Compiles QQL query into a safe, JS-owned Uint8Array byte buffer.
  */
 export function compileBytes(query: string): Uint8Array;
+
+/**
+ * Compile one QQL statement into a JavaScript route object. Alias for `compile`.
+ */
+export function compileQuery(query: string, params?: any | null): CompiledRoute;
 
 export function explain(query: string): string;
 

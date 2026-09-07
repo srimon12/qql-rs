@@ -33,7 +33,7 @@ tonic = { version = "0.14", default-features = false, features = ["channel", "co
 tonic-prost = { version = "0.14", optional = true }
 prost = { version = "0.14", optional = true }
 prost-types = { version = "0.14", optional = true }
-tokio = { workspace = true, features = ["macros", "time"] }
+tokio = { workspace = true, features = ["macros", "time", "sync"] }
 
 [build-dependencies]
 typify = "0.7"

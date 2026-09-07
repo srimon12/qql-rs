@@ -13,7 +13,7 @@ class ScoredPoint:
     """A scored hit returned from a search or retrieval query."""
 
     id: Union[int, str]
-    score: float
+    score: float = 0.0
     payload: Optional[Dict[str, Any]] = None
     text: Optional[str] = None
     collection: Optional[str] = None
@@ -68,21 +68,25 @@ class ExecutionReport(dict):
         data = r.get("data")
         if not isinstance(data, list):
             return []
-        return [
-            ScoredPoint(
-                id=h.get("id"),
-                score=float(h.get("score", 0.0)),
-                payload=h.get("payload"),
-                text=h.get("text"),
-                collection=h.get("collection"),
-                vector=h.get("vector"),
-                shard_key=h.get("shard_key"),
-            )
-            for h in data
+        out = []
+        for h in data:
             # Only map entries shaped like scored points; facet entries
             # ({value, count}) are not ScoredPoints.
-            if isinstance(h, dict) and "id" in h and "score" in h
-        ]
+            if isinstance(h, dict) and "id" in h and "score" in h:
+                score_val = h.get("score")
+                score = float(score_val) if score_val is not None else 0.0
+                out.append(
+                    ScoredPoint(
+                        id=h.get("id"),
+                        score=score,
+                        payload=h.get("payload"),
+                        text=h.get("text"),
+                        collection=h.get("collection"),
+                        vector=h.get("vector"),
+                        shard_key=h.get("shard_key"),
+                    )
+                )
+        return out
 
     def points(self, stmt: int = 0) -> List[ScoredPoint]:
         """Alias for hits(stmt)."""

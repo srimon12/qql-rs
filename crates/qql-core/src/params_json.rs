@@ -50,7 +50,17 @@ fn flatten_into(
         if let serde_json::Value::Object(nested) = v {
             flatten_into(nested, &full_key, out)?;
         }
-        out.insert(full_key, Value::from_json(v.clone())?);
+        let parsed_val = Value::from_json(v.clone())?;
+        if out.contains_key(&full_key) {
+            return Err(QqlError::validation(
+                "QQL-BIND-DUPLICATE-PARAM",
+                alloc::format!(
+                    "duplicate parameter key '{full_key}' from flat and nested parameter sources"
+                ),
+                None,
+            ));
+        }
+        out.insert(full_key, parsed_val);
     }
     Ok(())
 }
@@ -183,6 +193,17 @@ mod tests {
         assert_eq!(map["top"], Value::Int(2));
         assert_eq!(map["loc.lat"], Value::Int(1));
         assert!(map.contains_key("loc"));
+    }
+
+    #[test]
+    fn flatten_rejects_duplicate_colliding_keys() {
+        let err = flatten_object(
+            json!({"loc.lat": 1, "loc": {"lat": 2}})
+                .as_object()
+                .unwrap(),
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "QQL-BIND-DUPLICATE-PARAM");
     }
 
     #[test]

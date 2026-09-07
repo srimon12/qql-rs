@@ -130,6 +130,8 @@ Additional shapes:
 
 - **Nested expansion**: `{"loc": {"lat": 1.0, "lon": 2.0}}` binds `:loc.lat`
   and `:loc.lon`; flat dotted keys (`{"loc.lat": 1.0}`) are equivalent.
+  Colliding flat and nested definitions (e.g. `{"loc.lat": 1.0, "loc": {"lat": 2.0}}`)
+  fail closed with `QQL-BIND-DUPLICATE-PARAM`.
 - **Statement-scoped batch params**: pass `params` as a list/array whose
   entries are all dicts/objects or arrays — one container per statement
   (object → named, array → positional for that statement). The length must
@@ -169,6 +171,7 @@ All binding failures are validation errors with a stable `QQL-BIND-*` code:
 | `QQL-BIND-INVALID-INTEGER` | A `LIMIT` / `OFFSET` parameter is not a non-negative integer |
 | `QQL-BIND-FORMULA-TYPE` | A formula parameter cannot be bound to a numeric, datetime, or variable constant |
 | `QQL-BIND-BATCH-LENGTH` | A statement-scoped params list length does not match the statement count |
+| `QQL-BIND-DUPLICATE-PARAM` | A key collision occurred when flattening nested dictionary parameters |
 | `QQL-BIND-INVALID-PARAMS` | The `params` argument is neither an object (named) nor an array (positional) |
 
 Codes 1–8 live in `crates/qql-core/src/params.rs`; `QQL-BIND-INVALID-PARAMS`

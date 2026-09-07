@@ -342,3 +342,27 @@ explain("QUERY 'x' FROM docs LIMIT 5");                  // Hierarchical ASCII p
 bind("QUERY :q FROM docs", { q: "test" }); // Parameter substitution
 formatQuery("query 'x' from docs");                      // Canonical formatter
 ```
+
+---
+
+## 10. Typed DX Layer (`dx.js`)
+
+For rich client responses and error handling matching `nqql` / `pyqql`, import from `qql-wasm/dx`:
+
+```js
+import init, { Client } from 'qql-wasm';
+import { ExecutionReport, ScoredPoint, buildError } from 'qql-wasm/dx';
+await init();
+
+const client = new Client('http://localhost:6333');
+const raw = await client.execute("QUERY 'health' FROM docs LIMIT 5");
+const report = new ExecutionReport(raw);
+
+if (report.ok) {
+    const hits = report.hits(0); // ScoredPoint[]
+    for (const hit of hits) {
+        console.log(hit.id, hit.score, hit.payload);
+    }
+}
+```
+

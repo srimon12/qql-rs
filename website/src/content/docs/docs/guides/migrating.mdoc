@@ -1,0 +1,115 @@
+---
+title: "Migrating to QQL 0.4.0"
+description: "Breaking changes, behavioral updates, and migration guidance for upgrading from QQL 0.3.x to 0.4.0."
+sidebar:
+  order: 9
+---
+
+QQL 0.4.0 hardens the compiler, query planner, and host SDKs for production stability,
+unifies batch parameter semantics across all language bindings, and introduces typed
+result objects.
+
+Review the breaking changes and behavioral updates below when upgrading from 0.3.x.
+
+---
+
+## 1. Statement-Scoped Batch Parameters (`QQL-BIND-BATCH-LENGTH`)
+
+In 0.3.x, passing lists of parameters to multi-statement batches had ambiguous broadcasting
+rules. In 0.4.0, batch parameter binding follows a single strict contract across Python,
+Node.js, and WebAssembly:
+
+- **Statement-scoped**: A list whose items are all parameter containers (all dicts/objects or all lists/arrays) binds 1:1 to statements by index. The parameter list length **must exactly match** the statement count, or the runtime raises `QQL-BIND-BATCH-LENGTH`.
+- **Broadcast**: A single dictionary/object or single primitive list binds to all statements in the batch identically.
+
+```python
+# Statement-scoped: 2 statements, exactly 2 parameter dictionaries
+client.execute(
+    ["QUERY :v FROM coll_a", "QUERY :v FROM coll_b"],
+    params=[{"v": [0.1, 0.2]}, {"v": [0.3, 0.4]}],
+)
+
+# Broadcast: 2 statements, 1 shared dictionary applied to both
+client.execute(
+    ["QUERY :v FROM coll_a", "QUERY :v FROM coll_b"],
+    params={"v": [0.1, 0.2]},
+)
+```
+
+---
+
+## 2. Duplicate Parameter Collisions (`QQL-BIND-DUPLICATE-PARAM`)
+
+When flattening nested dictionaries into dotted parameter keys (such as `loc.lat`), QQL
+now rejects conflicting definitions instead of silently overwriting earlier values.
+
+```python
+# FAILS with QQL-BIND-DUPLICATE-PARAM:
+client.execute(
+    "QUERY [0.1, 0.2] FROM docs WHERE lat = :loc.lat",
+    params={"loc": {"lat": 1.0}, "loc.lat": 2.0},
+)
+```
+
+---
+
+## 3. String Representation: Canonical vs Preview
+
+`Stmt` string serialization is now strictly separated into canonical and preview forms:
+
+- **Canonical QQL (`Stmt.toString()` / `str(stmt)`)**: Returns full, valid QQL that can be re-parsed without data loss. Vector literals are never truncated.
+- **Preview (`Stmt.toReadableString()` / `repr(stmt)`)**: Produces a compact summary with vector dimensions truncated (e.g., `[0.1, 0.2, ... (128 dims)]`) intended for logging and debug output.
+
+```javascript
+// Canonical: re-parseable
+const qql = stmt.toString();
+
+// Preview: safe for logs
+console.log(stmt.toReadableString());
+```
+
+---
+
+## 4. Removal of `truncateVectors` from Execution Options
+
+The `truncateVectors` flag has been removed from client `execute()` and `executeAsync()`
+options. Vector truncation is strictly a display/inspection concern:
+
+- Use `bind(query, params, truncate_vectors=True)` or `stmt.toReadableString()` for debugging.
+- Query execution always transmits full vector payloads.
+
+---
+
+## 5. Strict Zero-Limit Rejection
+
+Queries and paginated statements now strictly reject `LIMIT 0` at validation time across
+`QUERY`, `SCROLL`, and `FACET` statements. If pagination yields zero items, omit the request
+or set `LIMIT` to at least `1`.
+
+```text
+-- REJECTED at parse/validation:
+QUERY [0.1, 0.2] FROM docs LIMIT 0;
+FACET category FROM docs WITH (limit = 0);
+```
+
+---
+
+## 6. Point ID Type Preservation
+
+`QUERY` and retrieval responses now preserve non-standard point IDs as strings rather than
+silently dropping them or coercing them to empty strings. Scored hits accurately reflect
+either integer or string identifiers:
+
+```python
+hits = report.hits(0)
+# hits[0].id is typed as Union[int, str]
+print(hits[0].id, type(hits[0].id))
+```
+
+---
+
+## 7. WebAssembly DX Layer (`dx.js`)
+
+`@veristamp/qql-wasm` now includes the typed `dx.js` wrapper module matching `@veristamp/nqql`:
+`ExecutionReport`, `ScoredPoint`, and `buildError` are available for browser and Edge
+runtimes with full TypeScript typings.
