@@ -183,7 +183,7 @@ keep working). Re-binding an already-bound `Stmt` with new params raises
 
 Vector parameters: prefer the implicit `QUERY :vec USING <model> FROM …`
 spelling. `QUERY VECTOR :vec` now parses to the same statement (since
-0.3.2), but implicit+USING is the canonical documented form. Matrix params
+0.4.0), but implicit+USING is the canonical documented form. Matrix params
 (list of number lists) bind as ColBERT multi-vectors on the `Stmt` path,
 and array-likes with `tolist()` (numpy arrays) bind directly.
 `LIMIT 0` is rejected at parse time: Qdrant's query API requires

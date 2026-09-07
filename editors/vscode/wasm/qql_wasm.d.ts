@@ -59,9 +59,10 @@ export class Client {
     free(): void;
     [Symbol.dispose](): void;
     /**
-     * Parse and compile one statement without executing it.
+     * Parse and compile one statement without executing it. Optional
+     * `params` bind before parsing (same shape as the module-level `bind`).
      */
-    compile(query: string): CompiledRoute;
+    compile(query: string, params?: any | null): CompiledRoute;
     /**
      * Parse, compile, embed if needed, and POST to Qdrant's REST API.
      *
@@ -162,6 +163,10 @@ export class Stmt {
      */
     toString(): string;
     /**
+     * Whether parameters have already been bound into this statement.
+     */
+    readonly bound: boolean;
+    /**
      * QQL `SHARD '…'` routing key (request-level). Prefer the clause in QQL.
      */
     get shardKey(): string | undefined;
@@ -177,9 +182,11 @@ export function analyze(input: string): AnalysisResult;
 export function bind(query: string, params?: Record<string, unknown> | unknown[], options?: { truncateVectors?: boolean }): string;
 
 /**
- * Compile one QQL statement into a JavaScript route object.
+ * Compile one QQL statement into a JavaScript route object. Optional
+ * `params` (object for `:name`, array for `?`) bind before parsing —
+ * parity with `Client.compile(query, params)` on the Python and Node SDKs.
  */
-export function compile(query: string): CompiledRoute;
+export function compile(query: string, params?: any | null): CompiledRoute;
 
 /**
  * Compiles QQL query into a safe, JS-owned Uint8Array byte buffer.

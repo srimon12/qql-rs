@@ -136,7 +136,7 @@ ignoring them, and executing an empty script raises
 
 Prefer the **implicit** parameter spelling `QUERY :vec USING <model> FROM …`
 over the explicit `QUERY VECTOR :vec` form: both parse to the same
-statement and both accept matrix params (ColBERT multi-vectors) since 0.3.2,
+statement and both accept matrix params (ColBERT multi-vectors) since 0.4.0,
 but the implicit form is the canonical, documented shape and reads the same
 across `QUERY`, `HYBRID`, and `RERANK` inputs.
 

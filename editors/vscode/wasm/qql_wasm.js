@@ -12,16 +12,18 @@ class Client {
         wasm.__wbg_client_free(ptr, 0);
     }
     /**
-     * Parse and compile one statement without executing it.
+     * Parse and compile one statement without executing it. Optional
+     * `params` bind before parsing (same shape as the module-level `bind`).
      * @param {string} query
+     * @param {any | null} [params]
      * @returns {CompiledRoute}
      */
-    compile(query) {
+    compile(query, params) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
             const ptr0 = passStringToWasm0(query, wasm.__wbindgen_export, wasm.__wbindgen_export2);
             const len0 = WASM_VECTOR_LEN;
-            wasm.client_compile(retptr, this.__wbg_ptr, ptr0, len0);
+            wasm.client_compile(retptr, this.__wbg_ptr, ptr0, len0, isLikeNone(params) ? 0 : addHeapObject(params));
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
@@ -250,6 +252,14 @@ class Stmt {
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
         }
+    }
+    /**
+     * Whether parameters have already been bound into this statement.
+     * @returns {boolean}
+     */
+    get bound() {
+        const ret = wasm.stmt_bound(this.__wbg_ptr);
+        return ret !== 0;
     }
     /**
      * Compile this Stmt AST directly into a Qdrant REST route object.
@@ -547,16 +557,19 @@ function bind(query, params, options) {
 exports.bind = bind;
 
 /**
- * Compile one QQL statement into a JavaScript route object.
+ * Compile one QQL statement into a JavaScript route object. Optional
+ * `params` (object for `:name`, array for `?`) bind before parsing —
+ * parity with `Client.compile(query, params)` on the Python and Node SDKs.
  * @param {string} query
+ * @param {any | null} [params]
  * @returns {CompiledRoute}
  */
-function compile(query) {
+function compile(query, params) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
         const ptr0 = passStringToWasm0(query, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        wasm.compile(retptr, ptr0, len0);
+        wasm.compile(retptr, ptr0, len0, isLikeNone(params) ? 0 : addHeapObject(params));
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
