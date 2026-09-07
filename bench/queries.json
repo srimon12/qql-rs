@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "note": "Single source of truth for bench QUERIES. Read by bench_rust (include_str), bench_python.py and bench_node.js. Keep the original 9 entries byte-identical for continuity; append new ones only. The optional e2e field is the executable counterpart for the mock-executor suite: bare QUERY '...' has no vector target and cannot resolve against the mock dense+sparse topology (QQL-MISSING-USING), so e2e runs the TEXT+MODEL+USING form of the same statement. All other suites use qql.",
+  "queries": [    {
+      "name": "Simple",
+      "qql": "QUERY 'search' FROM docs LIMIT 10",
+      "e2e": "QUERY TEXT 'search' MODEL 'bench' FROM docs USING dense LIMIT 10"
+    },
+    {
+      "name": "Hybrid",
+      "qql": "QUERY HYBRID TEXT 'search' DENSE dense SPARSE sparse FUSION RRF FROM docs LIMIT 10"
+    },
+    {
+      "name": "Full",
+      "qql": "QUERY TEXT 'x' FROM docs USING dense WHERE active = true PARAMS (hnsw_ef = 64, exact = false) SCORE THRESHOLD 0.2 GROUP BY category SIZE 3 LOOKUP FROM categories WITH PAYLOAD INCLUDE (title, url) WITH VECTOR (dense) LIMIT 10 OFFSET 2"
+    },
+    {
+      "name": "CTE_Prefetch",
+      "qql": "WITH d AS (QUERY TEXT 'x' USING dense LIMIT 100), s AS (QUERY TEXT 'x' USING sparse LIMIT 100) QUERY FUSION RRF FROM docs PREFETCH (d, s) LIMIT 10"
+    },
+    {
+      "name": "CreateCollection",
+      "qql": "CREATE COLLECTION docs HYBRID WITH HNSW (m = 32, ef_construct = 100) WITH QUANTIZATION (type = 'scalar', quantile = 0.95)"
+    },
+    {
+      "name": "Upsert",
+      "qql": "UPSERT INTO docs VALUES {id: 1, text: 'hello world', category: 'tech'}, {id: 2, text: 'second document', category: 'science'}"
+    },
+    {
+      "name": "DeleteWhere",
+      "qql": "DELETE FROM docs WHERE category = 'archived'"
+    },
+    {
+      "name": "OrderBy",
+      "qql": "QUERY ORDER BY created_at DESC FROM docs WHERE status = 'active' LIMIT 20"
+    },
+    {
+      "name": "WithPayload",
+      "qql": "QUERY 'search' FROM docs WITH PAYLOAD INCLUDE (title, body) WITH VECTOR (dense) LIMIT 10",
+      "e2e": "QUERY TEXT 'search' MODEL 'bench' FROM docs USING dense WITH PAYLOAD INCLUDE (title, body) WITH VECTOR (dense) LIMIT 10"
+    },
+    {
+      "name": "Facet",
+      "qql": "FACET category FROM docs WHERE active = true LIMIT 10"
+    },
+    {
+      "name": "Scroll",
+      "qql": "SCROLL FROM docs WHERE status = 'active' LIMIT 50"
+    },
+    {
+      "name": "Count",
+      "qql": "COUNT FROM docs WHERE status = 'active'"
+    },
+    {
+      "name": "Bound",
+      "qql": "QUERY TEXT :q FROM docs USING dense WHERE active = :active LIMIT 10",
+      "params": {
+        "q": "search",
+        "active": true
+      }
+    }
+  ]
+}
