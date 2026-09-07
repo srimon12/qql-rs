@@ -268,7 +268,7 @@ fn limit_beyond_u64_and_zero_rejected_with_positive_integer_code() {
     // LIMIT 0 is rejected too — live-verified against Qdrant 1.19.1: its
     // /points/query API answers 422 "internal.limit: value 0 invalid, must
     // be 1 or larger", so a parse-time rejection beats a runtime 422. (The
-    // one-shot acceptance in 0.3.2 was reverted on that evidence.)
+    // one-shot acceptance was reverted on that evidence.)
     let cases = [
         "QUERY VECTOR [0.1] FROM docs USING dense LIMIT 18446744073709551616;",
         "SCROLL FROM docs LIMIT 18446744073709551616;",

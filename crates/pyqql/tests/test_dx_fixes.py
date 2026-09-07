@@ -1,4 +1,4 @@
-"""Regression tests for the 0.3.2 live-verdict fixes (P0/P1/P2).
+"""Regression tests for the 0.4.0 live-verdict fixes (P0/P1/P2).
 
 Network-free: everything here either never touches the transport or fails
 before the first request (client pointed at an unreachable port).

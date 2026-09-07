@@ -9,90 +9,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.2] - 2026-09-06
+## [0.4.0] - 2026-09-07
 
-### 🚀 Added
-- **Prepared statements** — bind parameters against a pre-parsed `Stmt` (`stmt.bind(...)`, `client.execute(stmt, params=...)`) without string re-parsing; statement-scoped parameter lists (`params=[dict0, dict1]`) batch-execute one bind per statement (length must match the statement count); nested dictionary parameter expansion (`:loc.lat`).
-- **Typed execution results** — `ScoredPoint` dataclass and typed `ExecutionReport` accessors (`.hits()`, `.points()`, `.facet()`, `.count()`); `client.execute_hits()`; FACET results normalize to the hits array directly; numeric point IDs preserved as integers instead of string round-trips.
-- **Typed Python exception hierarchy** — every pyqql / pyqql-edge error is a `QqlError` subclass carrying `.code` / `.kind` / `.span`: `QqlSyntaxError`, `QqlValidationError`, `QqlExecutionError`, `QqlTransportError`, `QqlBackendError` (each also subclasses the builtin category it used to raise, so existing `except` clauses keep working). Classes live in a byte-identical `_errors.py` shared by both packages, enforced by CI.
-- **`ExecutionReport.groups()`** — grouped-query accessor on the Python and Node report classes (previously only the raw dict), with both response envelopes normalized.
-- **Request correlation ids** — every REST request sends `x-request-id` (and gRPC metadata); transport/backend errors echo the id in the message AND expose it as a structured `.fields` map with a `.request_id` attribute (Python and Node), so server-side anomalies like intermittent empty BM25 windows can be traced in Qdrant's logs without message parsing.
-- **Default `USING bm25` model resolution** — an unspecified `USING bm25` model resolves to the server-side `Qdrant/bm25` model.
-- **Vector truncation on bind** — `bind(..., truncate_vectors=True)` renders compact `[0.1, 0.2, ... (N dims)]` previews of long vector literals; `Stmt` gained string/repr rendering.
-- **Cross-SDK DX parity (QQL 1.7)** — `Stmt.bind()` / `Stmt.compileRoute()` / `Stmt.toString()` / `Stmt.toReadableString()` and the typed `ExecutionReport` / `ScoredPoint` surface land in `pyqql`, `pyqql-edge`, `nqql`, and `nqql-edge` (`.pyi` stubs and TS `.d.ts` updated); `qql-wasm` gains `Stmt.bind` / `compileRoute` / `toString` / `toReadableString` / `explain` and the optional-params module `bind` (reports remain plain objects there); grammar formally declares parameter placeholders (query inputs, point IDs, scalars, clauses) with `qql.generated.pest` and conformance snapshots regenerated.
-- **Compile-time parameter binding everywhere** — `compile_query(query, params=...)` and `Client.compile(query, params=...)` accept parameter bindings on all four SDKs (`pyqql`, `pyqql-edge`, `nqql`, `nqql-edge`); `bind(query, params?)` accepts `Stmt` inputs on the Node SDKs (returns a bound `Stmt`, or the readable string with `truncateVectors`); `bind(params)` is optional everywhere (omitting it is a no-op, mirroring `pyqql`).
-- **Audit-gap conformance fixtures** — exponent-overflow literals (`1e999`) rejected on the value path (`QQL-PARSE-FLOAT`) and the formula path (`QQL-PARSE-NUMBER`); `LIMIT` beyond `u64::MAX` rejected at parse time (`QQL-PARSE-POSITIVE-INTEGER`).
+### 🚀 Prepared Statements & Parameter Binding
+- **AST Parameter Binding** — Bind parameters directly against pre-parsed statement trees (`stmt.bind(...)`, `client.execute(stmt, params=...)`) without textual re-parsing; support for nested dictionary expansions (`:loc.lat`) and optional vector preview truncation (`truncate_vectors=True`).
+- **Statement-Scoped Batch Execution** — Pass `params=[dict0, dict1]` to bind and execute multiple statements in a single call, matching parameters 1:1 with statement count (`QQL-BIND-BATCH-LENGTH` on length mismatch).
+- **Expanded Placeholder Positions** — Full placeholder support across `LIMIT`, `OFFSET`, `SCROLL AFTER :cursor`, `FACET LIMIT`, `QueryInput::Text`, `HYBRID TEXT`, `CROSS RERANK`, and formula `TARGET = :datetime`.
+- **Type-Safe Binding Invariants**:
+  - Bound `LIMIT` parameters enforce `> 0` across `QUERY`, `SCROLL`, and `FACET` (`QQL-BIND-INVALID-INTEGER`).
+  - Vector element bindings enforce finite float ranges, rejecting values beyond `f32::MAX` (`QQL-VALIDATION-VECTOR`).
+  - Literal colons inside query strings (e.g. `QUERY TEXT ':heart:'`) are cleanly preserved and never misclassified as unbound placeholders.
+  - Re-binding an already bound `Stmt` fails closed with `QQL-BIND-ALREADY-BOUND`.
+  - Triple-quoted (`"""`) and raw (`r'...'`) string literals are protected from placeholder replacement.
 
-### 🔧 Changed
-- **Single-source `USING bm25` model default** — the `Qdrant/bm25` defaulting for an unspecified `USING bm25` target lives in one `default_model_for_using` helper in `qql-plan` instead of three hard-coded literals across the lowering paths, so the next default (or alias rename) cannot drift.
-- **Zero-allocation unbound-parameter gate** — `qql_plan::ensure_no_unbound_params` uses a read-only visitor (`validate_no_unbound_params`) instead of cloning the entire statement per planned statement.
-- **Prepared `SCROLL` / `FACET` LIMIT and `SCROLL AFTER` parameters** — `ScrollStmt` / `FacetStmt` gained `limit_param` and the binder binds `AFTER :cursor`; the plan-time gate (`validate_no_unbound_params`) covers the new positions, so no placeholder can ship to the backend.
-- **Literal colons in query text are unambiguous** — `QueryInput::Text` / `Hybrid` / `CrossRerank` carry an explicit `text_param` / `query_param` slot, so a literal query string containing `:` (e.g. `QUERY TEXT ':heart:' FROM docs`) is never mistaken for an unbound placeholder on the AST path.
-- **Unbound-parameter probe under `on_error = "continue"` is a per-statement row** — a statement with an unbound placeholder collects a `BIND` failure row like PREPARE/PLAN defects instead of aborting the script and discarding every already-collected result.
-- **`QQL-BIND-ALREADY-BOUND` on every SDK** — re-binding an already-bound `Stmt` (or passing params to one) raises on Python, Node (`nqql` / `nqql-edge` via the shared `nqql-common` bound flag), and WASM; previously the second binding was silently ignored outside Python.
-- **Prepared-statement DX hardening** — triple-quoted (`"""…"""` / `'''…'''`) and raw (`r'…'`) string literals are never rewritten during textual binding; positional-index parse errors report `QQL-BIND-INVALID-PARAMS` instead of silently dropping the limit/offset.
-- **Typed `ScoredPoint` gains `vector` / `shard_key`** — populated from hits on Python and Node (`.pyi` / `.d.ts` updated); `pyqql-edge`'s `.pyi` regenerated against the real 0.3.2 surface (bind / compile_route / explain / execute_hits / params); `groups()` declared in both Node `index.d.ts` and documented in the SDK guides and README export tables.
-- **Scheduled security CI** — a weekly `security` workflow runs `cargo audit`, CodeQL (Rust), `npm audit` (both Node SDKs), and `pnpm audit` (website).
-- **Non-finite formula constants report `QQL-PARSE-NUMBER`** (previously the generic `QQL-PARSE-SYNTAX`), matching `parse_numeric_literal`'s stable code for score thresholds and decay targets.
-- **Workspace on Rust Edition 2024** — all crates and examples; edition-2024 idioms eligible (let-chains, resolver 3 / MSRV-aware resolution).
-- **Centralized SDK shared core** — `pyqql` / `pyqql-edge` share `pyqql-common` (Stmt, parser surface, error mapping, input dispatch) and `nqql` / `nqql-edge` share `nqql-common` (Stmt ops, parser surface, execution dispatch); `qql-wasm` routes through the same `qql-core::params_json` batch contract, so the helper layer that drifted three times in the DX audit can no longer diverge. The JS wrapper layer and Python report classes live in byte-identical `dx-common.js` / `_dx_report.py` copies enforced by a CI diff check.
-- **Statement-scoped batch params are strictly validated everywhere** — a params list whose entries are all objects/arrays must match the statement count exactly (`QQL-BIND-BATCH-LENGTH`); length mismatches no longer silently fall back to whole-list positional binding. Scalar lists are shared positional values on every SDK (previously `pyqql` scoped scalar lists per statement when the length matched).
-- **`Stmt.toString()` is the canonical, re-parseable form** on `nqql`, `nqql-edge`, and `qql-wasm` (mirrors Python `str(stmt)`); the truncated preview moves to `Stmt.toReadableString()` (mirrors Python `repr(stmt)`).
-- **`is_valid` is a full parse + plan gate on the edge SDKs** — `pyqql-edge` and `nqql-edge` join `pyqql`, `nqql`, and `qql-wasm` in validating plan-level semantics via `qql_plan::parse_and_plan`.
-- **`qql-wasm` `ExecuteOptions` drops `truncateVectors`** — the option was never read on `execute` / `executeStmt`; truncation stays on the module-level `bind()` where it applies.
+### 🎯 Typed Results & Execution Reports
+- **Typed `ScoredPoint`** — Dataclass / interface exposing `id`, `score`, `version`, `payload`, `vector`, and `shard_key`. Numeric point IDs preserve integer types instead of converting through string round-trips.
+- **Typed Report Accessors** — `ExecutionReport` provides typed methods: `.hits()`, `.points()`, `.facet()`, `.count()`, and `.groups()`.
+- **FACET Result Isolation** — Facet aggregation buckets (`{ value, count }`) no longer instantiate pseudo-`ScoredPoint`s; `.hits()` and `.points()` cleanly return empty arrays for facet operations.
+- **Python Typed Exception Hierarchy** — Every error in `pyqql` and `pyqql-edge` raises a typed `QqlError` subclass with structured `.code`, `.kind`, `.span`, and `.fields`: `QqlSyntaxError`, `QqlValidationError`, `QqlExecutionError`, `QqlTransportError`, and `QqlBackendError`.
 
-### 🐛 Fixed
-- **Canonical placeholder formatting** — `format_stmt` / `Stmt.toString()` render positional parameters as a bare `?` everywhere (page `LIMIT ?` / `OFFSET ?`, formula `TARGET = ?`, `TEXT ?`, `HYBRID TEXT ?`, `CROSS RERANK TEXT ?`); the stored `?N` index used to leak into the output, which did not re-parse (`QQL-PARSE-TRAILING`).
-- **`SCROLL` / `FACET` LIMIT parameter formatting** — a statement with `LIMIT :lim` used to format as `SCROLL ... LIMIT None` (Scroll) or silently drop the clause (Facet); both now render the placeholder and re-parse.
-- **Bound `LIMIT 0` fails like the literal form** — literal `LIMIT 0` is a parse error, but a bound `LIMIT :lim` with `0` passed silently; `QUERY` / `SCROLL` / `FACET` LIMIT parameters now reject `0` (`QQL-BIND-INVALID-INTEGER`). Bound `OFFSET 0` remains valid.
-- **Bound vector elements reject non-finite values** — the AST bind path skipped the finiteness check the textual parse path enforces, so an f64 source beyond `f32::MAX` (e.g. JSON `1e39`) bound a silent `inf` vector; it now raises `QQL-VALIDATION-VECTOR` with the same message as the parser.
-- **Empty arrays fail closed on Node/WASM** — `execute([])` used to return a silently-empty `ok: true` report on `nqql`, `nqql-edge`, and `qql-wasm` while Python raised; all SDKs now raise `QQL-VALIDATION-EMPTY-SCRIPT` (parity with the empty-string path).
-- **`params: null` means "no params" on Node** — `execute(q, { params: null })` raised `QQL-BIND-INVALID-PARAMS` on `nqql` while Python and nqql-edge treated it as absent; explicit `null` now means no params everywhere (scalar params still fail closed).
-- **One-shot Node clients close on the error path** — `execute()` / `executeStmt()` returned before `close()` on any dispatch error, leaking the temporary executor (for nqql-edge: on-disk shards and the loaded model); a shared `run_then_close` guard now closes unconditionally, and a close failure after a successful dispatch is surfaced instead of masking the report.
-- **`pyqql-edge.execute_async_hits` raises typed errors** — it mapped failures to a plain `RuntimeError`, losing `.code` / `.kind` / `.span` / `.fields`; `except QqlTransportError` etc. now work on the async hits path.
-- **gRPC errors carry the correlation id** — the interceptor records each outgoing RPC's `x-request-id` and `grpc_error` attaches it to the message and `.fields["request_id"]` (mirrors the REST echo; best-effort under concurrent RPCs on one client).
-- **`report.hits()` / `points()` return `[]` for FACET results** — facet entries (`{value, count}`) used to surface as pseudo-`ScoredPoint`s (`id=undefined, score=0`) on Python and Node; the accessors now gate on point-shaped entries.
-- **`nqql-edge` free `bind` accepts `truncate_vectors`** — only `truncateVectors` was read (the byte-adjacent `nqql` reads both spellings), so snake_case silently no-truncated.
-- **`qql-wasm` `compile(query, params?)`** — the free `compile` and `Client.compile` now accept parameter bindings, matching `Client.compile(query, params)` on the Python and Node SDKs (`compileBytes` keeps its signature).
-- **Language spec conformance counts** — `language/v1/spec/versioning.md` 1.7 row claimed 278 statements / 59 invalid cases; the actual corpus (and conformance run) is 276 statements / 62 invalid cases.
-- **VS Code extension manifest 0.3.2** — the extension shipped a 1.7 parser under a `0.3.0` manifest (the release gate warned); `editors.mdoc` "1.6 parser" reference corrected. `scripts/check_release.py check` is now warning-free.
-- **README install snippets are copy-paste runnable** — `pip install pyqql OR pyqql-edge` pasted literally; each SDK now has separate commands, and the "Edge verions" typo is fixed.
+### ⚡ Cross-SDK Parity (`pyqql`, `nqql`, `qql-wasm`)
+- **Shared Runtime Core** — Centralized SDK binding logic into `pyqql-common` and `nqql-common` with byte-identical report adapters (`dx-common.js`, `_dx_report.py`) to prevent cross-language drift.
+- **Canonical `toString()`** — `Stmt.toString()` outputs canonical, re-parseable QQL with positional markers normalized to bare `?`. Truncated debug previews move to `Stmt.toReadableString()`.
+- **Unified Compilation** — Free and client `compile(query, params?)` accept parameter bindings consistently across Python, Node, and WASM.
+- **Edge Validation Gate** — `pyqql-edge` and `nqql-edge` now perform full parse and plan semantic validation on `is_valid` queries via `qql_plan::parse_and_plan`.
 
-- **Same-collection QUERY batches return real hits** — the `/points/query/batch` per-item response carries the points at its top level (`QueryResponse { points }`, OpenAPI), but hit extraction only understood the single-query envelope, so every statement in a same-collection batch silently reported 0 hits.
-- **Unbound placeholders fail closed on every path** — `execute(str)` with no params used to ship the raw `:placeholder` and get a 422 back; the executor probes before any network I/O and `plan()` probes again at the compile gate, both raising `QQL-BIND-MISSING-PARAM`.
-- **Formula parameters bind on the prepared path** — `TARGET = :now` stored the bare identifier (indistinguishable from a DEFAULTS key), so prepared formulas shipped unresolved variables ("Expected number value for judgment_date"); the parser now preserves the `:` prefix (matching the `?idx` form), so binding an ISO string produces the same inline `datetime(...)` the string path has, and DEFAULTS keys stay untouched.
-- **gRPC clients no longer panic on construction** — `Client(..., use_grpc=True)` panicked with `there is no reactor running` because tonic's lazy channel captures the tokio reactor at construction while the binding hosts built it on their foreign (Python / JS) thread; pyqql and nqql now construct the channel inside their driving runtime. Pinned by a contract test.
-- **`QUERY POINTS (id, …)` silently returned empty** — the REST get-points response carries `result` as a bare point array, but hit extraction only understood the query API's `{points: [...]}` envelope; the points now surface with correct ids (gRPC was unaffected).
-- **`on_error="continue"` no longer loses successful statements** — when a batched RPC fails (or returns the wrong cardinality), the group is retried statement-by-statement so per-statement success/failure stays accurate and aligned; per-item `status: "error"` entries inside a 200 batch response are also reported as failures instead of successes.
-- **`close()` is a real gate** — a closed executor fails every execution entry point with `QQL-CLIENT-CLOSED` (previously a no-op; `Client.is_closed` getter added on both Python SDKs).
-- **Re-binding an already-bound `Stmt` raises** — `bound.bind(params)` and `execute(bound_stmt, params=…)` used to silently ignore the new params; both raise `QQL-BIND-ALREADY-BOUND`.
-- **`compile_query` accepts `QUERY VECTOR :x` params** — the explicit spelling failed to parse while `bind()` / `execute` accepted it; `VECTOR :name` / `VECTOR ?` now parse to the same parameter node as the implicit `QUERY :x USING` form, so all three paths behave identically.
-- **Matrix params bind on the `Stmt` path** — a list of number lists binds as a ColBERT multi-vector (`MultiDense`), matching the string path, so multi-vector queries can be prepared statements.
-- **`None` parameters fail closed with a clear code** — binding `None` used to render the text `null` and die downstream with a misleading "query input requires …" parse error; both textual and AST binding now raise `QQL-BIND-NULL-PARAM`.
-- **numpy arrays (and any `tolist()` array-like) bind directly** — query inputs accept them like qdrant-client does; unsupported values now report an accurate bind error (was the generic "unsupported filter value type" `SyntaxError`).
-- **Empty scripts fail closed** — `execute("")` / `execute([])` used to return a silently-empty `ok: true` report while `";;"` errored; both now raise `QQL-VALIDATION-EMPTY-SCRIPT`.
-- **`LIMIT 0` rejects at parse time with the honest reason** — live verification against Qdrant 1.19.1 showed the query API answers 422 "internal.limit: value 0 invalid, must be 1 or larger", so the one-shot acceptance was reverted: `LIMIT 0` fails at the parse gate (`QQL-PARSE-POSITIVE-INTEGER`) instead of shipping a runtime 422.
-- **gRPC request ID correlation compilation** — request ID correlation generation and header constants centralized in `crate::client` so `qql` compiles with `--no-default-features --features grpc` without depending on the gated `rest` module.
-- **`nqql-edge` one-shot `execute()` / `executeStmt()` silently dropped `options.params`** — the standalone options normalizer stripped the field, so `:name` / `?` placeholders flowed to the server unbound; params now pass through with type validation.
-- **Invalid parameter types fail closed on `Stmt` paths** — `stmt.bind(42)` and scalar entries in scoped batch params raise `QQL-BIND-INVALID-PARAMS` (`nqql`, `nqql-edge`, `qql-wasm`) instead of silently returning an unbound statement; matches the `pyqql` contract.
-- **One-shot Node clients leaked connections** — module-level `execute()` / `executeStmt()` in `nqql` now close their temporary client (and honor `options.params`), matching `nqql-edge` and the Python SDKs.
-- **Node `ScoredPoint` / `ExecutionReport` parity with `pyqql`** — `payload` defaults to `null`, `text` comes from the top-level hit key only, non-dict hit entries are filtered, negative statement indices use Python list semantics, and absent report keys default to `false` / `[]` / `0`.
-- **Regenerated stale `native.d.ts`** — the committed NAPI-RS declaration files for `nqql` / `nqql-edge` predated the prepared-statement surface; regenerated via `napi build`.
-- **VS Code rebuild docs used a relative `--out-dir`** — `wasm-pack` resolves `--out-dir` against the crate directory, so the documented command wrote to `crates/qql-wasm/wasm` instead of the editor bundle; the correct absolute-relative path is documented and the orphaned build output removed.
-- **CI editor check compares class member surface** — the bundled editor WASM gate now diffs `Stmt` / `Client` members (not just free functions) against a fresh wasm-pack build, catching drift like a missing `Stmt.bind`.
-- **Release gate covers the shared binding crates** — `scripts/check_release.py` validates the `pyqql-common` / `nqql-common` manifests (metadata, `publish = false`) and their root pins, fails closed on unknown workspace crate directories, and the shared crates are declared once in root `[workspace.dependencies]` (inherited via `workspace = true`), so a version bump rewrites one manifest instead of four.
+### ⚠️ Breaking & Behavioral Changes
+- **Empty Script Validation** — `execute("")` and `execute([])` now fail closed with `QQL-VALIDATION-EMPTY-SCRIPT` across all SDKs instead of returning an empty `{ ok: true }` report.
+- **`Stmt.toString()` Output Format** — Node and WASM `Stmt.toString()` now returns canonical, re-parseable SQL syntax rather than a truncated debug preview. Use `Stmt.toReadableString()` for truncated representations.
+- **Rust Edition 2024** — Entire workspace upgraded to Rust Edition 2024 with modern MSRV and let-chain resolution.
+- **Strict Limit Constraints** — Literal `LIMIT 0` and bound `LIMIT 0` are rejected across `QUERY`, `SCROLL`, and `FACET` (`QQL-PARSE-POSITIVE-INTEGER` / `QQL-BIND-INVALID-INTEGER`). `OFFSET 0` remains valid.
 
-### 📚 Documentation
-- Python SDK guide and skill reference document the typed exception hierarchy, the `close()` / re-binding contracts, the implicit `QUERY :x USING` preference, and the new error codes (`QQL-BIND-NULL-PARAM`, `QQL-BIND-ALREADY-BOUND`, `QQL-CLIENT-CLOSED`, `QQL-VALIDATION-EMPTY-SCRIPT`); the error-code reference gains a request-correlation section.
+### 🐛 Bug Fixes & Engine Reliability
+- **Canonical Placeholder Formatting** — `format_stmt` normalizes positional parameter markers to bare `?` (fixing `QQL-PARSE-TRAILING` errors when re-parsing queries with `LIMIT ?`, `OFFSET ?`, or formula targets).
+- **SCROLL & FACET Formatter Invariants** — Fixed parameter formatting in `ScrollStmt` and `FacetStmt` where `limit_param` previously rendered as `None` or was silently dropped.
+- **gRPC Request Correlation** — Outgoing gRPC requests inject `x-request-id` into metadata; errors append `(request id: ...)` and populate `.fields["request_id"]`.
+- **One-Shot Client Lifecycle** — Node one-shot `execute()` / `executeStmt()` guarantees executor cleanup on both error and success paths via `run_then_close`.
+- **Batch Query Result Preservation** — Fixed hit extraction for `/points/query/batch` same-collection batches where points were silently dropped from the response envelope.
+- **`on_error = "continue"` Script Resilience** — Unbound parameter failures are recorded as discrete step failures (`operation: "BIND"`) rather than aborting batch execution and discarding prior results.
+- **gRPC Lazy Channel Initialization** — Resolved `there is no reactor running` panics on foreign threads by initializing the Tonic channel inside the driving runtime.
+- **BM25 Default Model Resolution** — Consolidated unspecified `USING bm25` targets to resolve canonically to `Qdrant/bm25` in `qql-plan`.
 
-### 🧪 Tests
-- Pinned `u64::MAX` LIMIT/OFFSET passthrough (plain / grouped / hybrid `LIMIT*10` boundary) and beyond-u64 rejection for `QUERY` and `SCROLL`.
-- Pinned bare `NaN` as a string filter value (QQL has no NaN literal; numeric non-finite forms are rejected) and `1 - -2` formula lowering (lexer folds the sign into the literal — no double negation; `--` after whitespace is a line comment).
-- `--` lexer suite (CRLF, 3-dash, in-string safety), non-finite float contexts (vector / sparse / mmr / oversampling), RERANK + CTE prefetch (plan + gRPC), and the gRPC scroll-limit guard (`QQL-GRPC-SCROLL-LIMIT`).
-- Format round-trip pins for every parameter-placeholder position (`LIMIT ?`, `OFFSET ?`, `TARGET = ?`, `TEXT ?`, `HYBRID`/`CROSS RERANK`/`SCROLL AFTER ?`, named SCROLL/FACET LIMIT) — every formatted statement must re-parse.
-- Pinned bound `LIMIT 0` rejection across QUERY/SCROLL/FACET (with valid `OFFSET 0`) and non-finite vector-element rejection on the AST bind path.
-- `QQL-BIND-ALREADY-BOUND` parity pins for Node (`test_dx.js`) and WASM; typed-error and empty-array probes in the Node suites.
-- Cross-SDK DX suites extended: `test_dx.js` (network-free bind/compileRoute/toString/error-code/report coverage) is wired into the `npm test` script of `nqql` and `nqql-edge`; params passthrough for one-shot edge execution is pinned in `test_options.js`; `compile_query(params=...)` coverage in the `pyqql` / `pyqql-edge` suites.
+### 🛠️ Workspace, Security & Conformance
+- **Security Audit CI** — Added scheduled workflow for `cargo audit`, CodeQL, and npm/pnpm dependency vulnerability scanning.
+- **Release Automation** — `scripts/check_release.py` supports atomic version synchronization across Cargo, PyPI, npm, and editor WASM.
+- **Language Conformance** — Synchronized language v1.7 specification with 40 conformance suites (276 valid statements, 62 invalid cases).
+- **Editor Integration** — Bundled VS Code extension updated to 0.4.0 with the latest QQL 1.7 WASM engine.
+
+
 
 ## [0.3.1] - 2026-09-04
 

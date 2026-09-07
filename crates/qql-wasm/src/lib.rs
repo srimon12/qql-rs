@@ -108,6 +108,7 @@ mod report {
             }
         }
 
+        #[allow(dead_code)]
         pub fn empty() -> Self {
             Self {
                 ok: true,
