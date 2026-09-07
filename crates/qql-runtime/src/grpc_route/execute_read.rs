@@ -8,11 +8,12 @@ use crate::qdrant_grpc::qdrant;
 use super::common::{shard_key_selector, to_point_id};
 use super::filter::to_filter_opt;
 use super::query::{
-    to_payload_selector, to_query_groups, to_query_points, to_scroll_points, to_vectors_selector,
+    to_facet_counts, to_payload_selector, to_query_groups, to_query_points, to_scroll_points,
+    to_vectors_selector,
 };
 use super::responses::{
-    batch_result_to_json, get_points_envelope, groups_result_to_json, point_id_to_json,
-    retrieved_point_to_json, scored_point_to_json,
+    batch_result_to_json, facet_hit_to_json, get_points_envelope, groups_result_to_json,
+    point_id_to_json, retrieved_point_to_json, scored_point_to_json,
 };
 
 /// Run a single query request via `Points.Query`.
@@ -127,6 +128,27 @@ pub(crate) async fn execute_count(
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("count: {e}"), None))?;
     Ok(serde_json::json!({
         "result": { "count": resp.result.unwrap_or_default().count },
+        "status": "ok",
+        "time": resp.time,
+    }))
+}
+
+/// Compute facet counts via `Points.Facet`.
+pub(crate) async fn execute_facet(
+    client: &GrpcQdrant,
+    collection: &str,
+    request: &qql_plan::types::FacetRequest,
+) -> Result<serde_json::Value, QqlError> {
+    let grpc_req = to_facet_counts(request, collection)?;
+    let resp = client
+        .facet(grpc_req)
+        .await
+        .map_err(|e| QqlError::backend("QQL-GRPC", format!("facet: {e}"), None))?;
+    let hits: Vec<serde_json::Value> = resp.hits.into_iter().map(facet_hit_to_json).collect();
+    Ok(serde_json::json!({
+        "result": {
+            "hits": hits,
+        },
         "status": "ok",
         "time": resp.time,
     }))

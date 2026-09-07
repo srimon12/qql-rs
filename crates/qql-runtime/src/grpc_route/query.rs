@@ -491,3 +491,18 @@ pub(crate) fn to_scroll_points(
         ..Default::default()
     })
 }
+
+pub(crate) fn to_facet_counts(
+    request: &qql_plan::types::FacetRequest,
+    collection: &str,
+) -> Result<qdrant::FacetCounts, QqlError> {
+    Ok(qdrant::FacetCounts {
+        collection_name: collection.to_owned(),
+        key: request.key.clone(),
+        filter: to_filter_opt(request.filter.as_ref())?,
+        limit: request.limit.map(|l| l as u64),
+        exact: request.exact,
+        shard_key_selector: shard_key_selector(&request.shard_key),
+        ..Default::default()
+    })
+}

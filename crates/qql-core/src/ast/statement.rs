@@ -1117,7 +1117,7 @@ pub struct CountStmt {
 
 /// In-database categorical facet aggregation statement (`FACET <key> FROM <collection>`).
 ///
-/// Compiles to Qdrant's `/collections/{collection}/facet` endpoint, returning hit counts
+/// Compiles to Qdrant's `/collections/{collection}/facet` endpoint (REST) or `Points.Facet` (gRPC), returning hit counts
 /// per unique value for a payload field without retrieving full point records.
 ///
 /// # Supported clauses

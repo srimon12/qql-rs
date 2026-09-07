@@ -44,6 +44,9 @@ PROTO_UPSTREAM_DIR = "lib/api/src/grpc/proto"
 OPENAPI_UPSTREAM_PATH = "docs/redoc/master/openapi.json"
 
 # Vendored verbatim from the public gRPC surface.
+# Note: Facet definitions (FacetCounts, FacetHit, FacetValue, FacetResponse) and
+# the Points.Facet RPC are defined inside points.proto and points_service.proto
+# (there is no standalone facet.proto upstream).
 VERBATIM_PROTOS = (
     "collections.proto",
     "collections_service.proto",
