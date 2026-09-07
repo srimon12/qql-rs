@@ -385,155 +385,10 @@ pub enum BatchFamily {
 }
 
 /// Grouping key for statement/operation batching (same collection + family).
-///
-/// Used by executors to collect adjacent operations into query/mutation
-/// batches before flushing to the backend.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BatchKey {
-    /// Query batch for the named collection.
-    Query(String),
-    /// Mutation batch for the named collection.
-    Mutation(String),
-}
-
-/// Batch grouping key for a raw AST statement (before preparation/planning).
-///
-/// Returns `None` for statements that are never batchable (DDL, SHOW, group
-/// queries, point-ID lookups, etc.).
-pub fn statement_batch_key(stmt: &Stmt) -> Option<BatchKey> {
-    match stmt {
-        Stmt::Query(query)
-            if query.group.is_none() && !matches!(query.expression, QueryExpr::Points { .. }) =>
-        {
-            match &query.collection {
-                QueryCollection::Explicit(collection) => Some(BatchKey::Query(collection.clone())),
-                QueryCollection::Inherited => None,
-            }
-        }
-        Stmt::Upsert(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
-        Stmt::Delete(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
-        Stmt::UpdatePayload(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
-        Stmt::ClearPayload(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
-        Stmt::DeletePayload(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
-        Stmt::UpdateVector(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
-        Stmt::DeleteVector(stmt) => Some(BatchKey::Mutation(stmt.collection.clone())),
-        _ => None,
-    }
-}
-
-/// Detect per-item errors in Qdrant batch endpoint responses.
-///
-/// Qdrant batch endpoints answer per item; a 200 response can still carry
-/// per-item failures (`status: "error"`).
-pub fn batch_item_error(item: &serde_json::Value) -> Option<String> {
-    if item.get("status").and_then(serde_json::Value::as_str) == Some("error") {
-        return Some(
-            item.get("error")
-                .and_then(serde_json::Value::as_str)
-                .or_else(|| {
-                    item.pointer("/status/error")
-                        .and_then(serde_json::Value::as_str)
-                })
-                .unwrap_or("batch item failed")
-                .to_string(),
-        );
-    }
-    None
-}
-
-/// Verify that a batch response has the expected cardinality.
-///
-/// Returns `Ok(())` if `received == expected`, or a `QQL-BATCH-CARDINALITY` error otherwise.
-pub fn verify_batch_cardinality(
-    kind: &str,
-    expected: usize,
-    received: usize,
-) -> Result<(), QqlError> {
-    if expected == received {
-        Ok(())
-    } else {
-        Err(QqlError::transport(
-            "QQL-BATCH-CARDINALITY",
-            alloc::format!("{kind} batch returned {received} results for {expected} operations"),
-            None,
-        ))
-    }
-}
-
-/// Build a `QueryBatchRequest` from a slice of `PlannedOperation` IRs.
-pub fn build_query_batch(
-    operations: &[PlannedOperation],
-) -> Result<(String, crate::types::QueryBatchRequest), QqlError> {
-    if operations.is_empty() {
-        return Err(QqlError::execution(
-            "QQL-BATCH-INVARIANT",
-            "cannot build query batch from empty operations",
-            None,
-        ));
-    }
-    let collection = operations[0].collection().unwrap_or_default().to_string();
-    let searches = operations
-        .iter()
-        .map(|operation| match operation {
-            PlannedOperation::Query { request, .. } => Ok(request.clone()),
-            _ => Err(QqlError::execution(
-                "QQL-BATCH-INVARIANT",
-                "query batch contained a non-query operation",
-                None,
-            )),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok((collection, crate::types::QueryBatchRequest { searches }))
-}
-
-/// Build an `UpdateBatchRequest` from a slice of `PlannedOperation` IRs.
-pub fn build_update_batch(
-    operations: &[PlannedOperation],
-) -> Result<(String, Vec<&'static str>, crate::types::UpdateBatchRequest), QqlError> {
-    if operations.is_empty() {
-        return Err(QqlError::execution(
-            "QQL-BATCH-INVARIANT",
-            "cannot build update batch from empty operations",
-            None,
-        ));
-    }
-    let mut updates = Vec::with_capacity(operations.len());
-    let mut labels = Vec::with_capacity(operations.len());
-    let mut collection = None;
-
-    for operation in operations {
-        let Some((current_collection, update)) =
-            crate::mutation::planned_to_update_operation(operation)
-        else {
-            return Err(QqlError::execution(
-                "QQL-BATCH-INVARIANT",
-                "mutation batch contained a non-mutation operation",
-                None,
-            ));
-        };
-        if collection
-            .as_ref()
-            .is_some_and(|col| col != &current_collection)
-        {
-            return Err(QqlError::execution(
-                "QQL-BATCH-INVARIANT",
-                "mutation batch contained multiple collections",
-                None,
-            ));
-        }
-        collection.get_or_insert(current_collection);
-        labels.push(update.operation_name());
-        updates.push(update);
-    }
-    let collection = collection.unwrap_or_default();
-    Ok((
-        collection,
-        labels,
-        crate::types::UpdateBatchRequest {
-            operations: updates,
-        },
-    ))
-}
+pub use crate::batch::{
+    BatchKey, batch_item_error, build_query_batch, build_update_batch, statement_batch_key,
+    verify_batch_cardinality,
+};
 
 /// An unbound parameter placeholder (`:name` / `?idx`) that reaches planning
 /// would ship a broken request — the string path with no `params` used to
@@ -1032,8 +887,8 @@ fn validate_query_target_kinds(expression: &QueryExpr) -> Result<(), QqlError> {
             QueryInput::Text { .. }
             | QueryInput::Image { .. }
             | QueryInput::Point(_)
-            | QueryInput::Param(_)
-            | QueryInput::PositionalParam(_) => None,
+            | QueryInput::Param(..)
+            | QueryInput::PositionalParam(..) => None,
         };
         if input_kind.is_some_and(|kind| kind != target_kind) {
             return Err(query_kind_error(

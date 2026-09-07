@@ -412,7 +412,8 @@ fn test_bound_zero_limit_rejected_like_literal() {
             &[],
         )
         .expect_err("bound LIMIT 0 must fail like the literal form");
-        assert_eq!(err.code, "QQL-BIND-INVALID-INTEGER", "{query}");
+        assert_eq!(err.code, "QQL-BIND-TYPE-MISMATCH", "{query}");
+        assert!(err.span.is_some(), "bound LIMIT 0 must carry source span");
         // OFFSET 0 stays valid.
         let mut stmt =
             Parser::parse("QUERY [0.1] FROM docs LIMIT 5 OFFSET :off;").expect("should parse");

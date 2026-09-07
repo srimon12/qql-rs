@@ -341,7 +341,9 @@ report = client.execute(geo_query, params={"loc": {"lat": 52.52, "lon": 13.40}, 
 # Statement-scoped parameters for multi-statement batches
 # (length must match the statement count exactly — QQL-BIND-BATCH-LENGTH
 # otherwise; a scalar list like [1, 2] is a shared positional list, never
-# per-statement)
+# per-statement. Single-container rule: with 1 statement, params=[[1, 2]] unrolls
+# as a 1-element container list binding [1, 2] to statement 0 positionally,
+# never as a positional matrix)
 batch_stmts = [
     "QUERY TEXT :q FROM docs LIMIT 5",
     "QUERY TEXT :q FROM articles LIMIT 10",

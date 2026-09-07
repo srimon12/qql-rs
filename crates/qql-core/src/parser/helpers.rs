@@ -192,14 +192,15 @@ impl<'a> AstLowerer<'a> {
                 })
             }
             TokenKind::Colon => {
-                self.advance()?;
+                let colon_tok = self.advance()?;
                 let name = self.parse_param_name()?;
-                Ok(PointId::Param(name))
+                let span = Span::new(colon_tok.span.start, self.prev_span().end);
+                Ok(PointId::Param(name, Some(span)))
             }
             TokenKind::Question => {
-                self.advance()?;
+                let q_tok = self.advance()?;
                 let idx = self.next_positional_param();
-                Ok(PointId::PositionalParam(idx))
+                Ok(PointId::PositionalParam(idx, Some(q_tok.span)))
             }
             _ => Err(QqlError::parse(
                 "QQL-PARSE-POINT-ID",
@@ -468,8 +469,10 @@ pub fn point_id_from_value(value: Value, span: Span) -> Result<PointId, QqlError
     match value {
         Value::Int(value) if value >= 0 => Ok(PointId::Number(value as u64)),
         Value::Str(value) => Ok(PointId::String(value)),
-        Value::Param(name) => Ok(PointId::Param(name)),
-        Value::PositionalParam(idx) => Ok(PointId::PositionalParam(idx)),
+        Value::Param(name, param_span) => Ok(PointId::Param(name, param_span.or(Some(span)))),
+        Value::PositionalParam(idx, param_span) => {
+            Ok(PointId::PositionalParam(idx, param_span.or(Some(span))))
+        }
         _ => Err(QqlError::validation(
             "QQL-VALIDATION-POINT-ID",
             "point IDs must be unsigned integers or strings",
@@ -561,13 +564,8 @@ fn numeric_vector(values: Vec<Value>, span: Option<Span>) -> Result<Vec<f32>, Qq
                 Value::Int(value) => value as f64,
                 Value::Float(value) => value,
                 _ => {
-                    let code = if span.is_none() {
-                        "QQL-BIND-TYPE-MISMATCH"
-                    } else {
-                        "QQL-VALIDATION-VECTOR"
-                    };
                     return Err(QqlError::validation(
-                        code,
+                        "QQL-BIND-TYPE-MISMATCH",
                         "vector elements must be numeric",
                         span,
                     ));
@@ -587,10 +585,5 @@ fn numeric_vector(values: Vec<Value>, span: Option<Span>) -> Result<Vec<f32>, Qq
 }
 
 fn vector_error(message: &'static str, span: Option<Span>) -> QqlError {
-    let code = if span.is_none() {
-        "QQL-BIND-TYPE-MISMATCH"
-    } else {
-        "QQL-VALIDATION-VECTOR"
-    };
-    QqlError::validation(code, message, span)
+    QqlError::validation("QQL-VALIDATION-VECTOR", message, span)
 }

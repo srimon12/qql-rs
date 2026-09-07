@@ -679,8 +679,8 @@ async fn apply_input(
         }
         QueryInput::Vector(_)
         | QueryInput::Point(_)
-        | QueryInput::Param(_)
-        | QueryInput::PositionalParam(_) => Ok(()),
+        | QueryInput::Param(..)
+        | QueryInput::PositionalParam(..) => Ok(()),
     }
 }
 

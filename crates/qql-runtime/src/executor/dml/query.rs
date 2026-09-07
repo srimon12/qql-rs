@@ -83,7 +83,7 @@ pub(crate) fn extract_search_hits(result: &serde_json::Value) -> Vec<SearchHit> 
                         serde_json::Value::String(s) => qql_plan::PlanPointId::String(s.clone()),
                         other => qql_plan::PlanPointId::String(other.to_string()),
                     })
-                    .unwrap_or_else(|| qql_plan::PlanPointId::String(String::new())),
+                    .unwrap_or_else(|| qql_plan::PlanPointId::String("<missing-id>".to_string())),
                 score: hit
                     .get("score")
                     .and_then(serde_json::Value::as_f64)

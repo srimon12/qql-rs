@@ -250,7 +250,10 @@ const geo = await client.execute(
 );
 
 // Statement-scoped batch parameters: array length must EXACTLY match the
-// statement count; each entry is an object (named) or an array (positional)
+// statement count; each entry is an object (named) or an array (positional).
+// Single-container rule: for 1 statement, params: [[1, 2]] unrolls as a
+// 1-element container list binding [1, 2] to statement 0 positionally, never
+// as a positional matrix.
 const batch = await client.execute(
   [
     "QUERY TEXT :q FROM docs LIMIT 5",

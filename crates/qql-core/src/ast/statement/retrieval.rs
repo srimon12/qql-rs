@@ -27,6 +27,12 @@ pub struct ScrollStmt {
         serde(default, skip_serializing_if = "Option::is_none")
     )]
     pub limit_param: Option<String>,
+    /// Source span of the limit parameter placeholder, if unbound.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub limit_span: Option<crate::error::Span>,
 }
 
 /// `COUNT FROM <collection> [WHERE …]` statement.
@@ -74,4 +80,10 @@ pub struct FacetStmt {
         serde(default, skip_serializing_if = "Option::is_none")
     )]
     pub limit_param: Option<String>,
+    /// Source span of the limit parameter placeholder, if unbound.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub limit_span: Option<crate::error::Span>,
 }

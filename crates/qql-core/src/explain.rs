@@ -374,7 +374,7 @@ fn query_intent(expression: &QueryExpr) -> &'static str {
             QueryInput::Image { .. } => "nearest neighbors from an image",
             QueryInput::Vector(_) => "nearest neighbors from a vector",
             QueryInput::Point(_) => "nearest neighbors from a point",
-            QueryInput::Param(_) | QueryInput::PositionalParam(_) => {
+            QueryInput::Param(..) | QueryInput::PositionalParam(..) => {
                 "nearest neighbors from query parameter"
             }
         },
@@ -426,8 +426,8 @@ fn render_quota_value(value: &Value) -> String {
         Value::Null => "null".into(),
         Value::Dict(_) => "<object>".into(),
         Value::List(_) => "<list>".into(),
-        Value::Param(name) => format!(":{}", name),
-        Value::PositionalParam(_) => "?".into(),
+        Value::Param(name, _) => format!(":{}", name),
+        Value::PositionalParam(..) => "?".into(),
     }
 }
 

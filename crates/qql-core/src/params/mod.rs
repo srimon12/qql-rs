@@ -24,18 +24,24 @@
 //! verbatim and never substituted.
 
 pub(crate) mod ast;
+pub(crate) mod filter;
+pub(crate) mod formula;
+pub(crate) mod input;
+pub(crate) mod render;
+pub(crate) mod scan;
 pub(crate) mod text;
 pub(crate) mod validate;
+pub(crate) mod value;
 
 #[cfg(test)]
 mod tests;
 
-pub use ast::{
-    bind_filter, bind_formula, bind_page_spec, bind_point_id, bind_query_expr, bind_query_input,
-    bind_query_stmt, bind_stmt, bind_value,
-};
-pub use text::{
-    bind_named, bind_named_readable, bind_positional, bind_positional_readable,
-    truncate_vector_literals, value_to_literal,
-};
+pub use ast::{bind_page_spec, bind_query_expr, bind_query_stmt, bind_stmt};
+pub use filter::{bind_filter, bind_point_selector};
+pub use formula::bind_formula;
+pub use input::bind_query_input;
+pub use render::{escape_str_literal, truncate_vector_literals, value_to_literal};
+pub use scan::{ident_at, is_ident_continue, is_ident_start, is_placeholder_start, skip_protected};
+pub use text::{bind_named, bind_named_readable, bind_positional, bind_positional_readable};
 pub use validate::validate_no_unbound_params;
+pub use value::{bind_point_id, bind_value, resolve_param_u64};

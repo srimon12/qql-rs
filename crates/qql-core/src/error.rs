@@ -5,7 +5,7 @@ use core::fmt;
 
 /// Source-code span as UTF-8 byte offsets into the query text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Span {
     /// Inclusive start byte offset.
     pub start: usize,

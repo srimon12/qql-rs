@@ -250,6 +250,14 @@ impl<'a> AstLowerer<'a> {
         Ok(tok)
     }
 
+    pub(crate) fn prev_span(&self) -> Span {
+        let prev_idx = self.index.saturating_sub(1);
+        self.tokens
+            .get(prev_idx)
+            .map(|t| t.span)
+            .unwrap_or(Span::new(0, 0))
+    }
+
     pub fn expect(&mut self, kind: TokenKind) -> Result<Token<'a>, QqlError> {
         let tok = self.peek()?;
         if tok.kind != kind {
@@ -347,14 +355,15 @@ impl<'a> AstLowerer<'a> {
                 }
             }
             TokenKind::Colon => {
-                self.advance()?;
+                let colon_tok = self.advance()?;
                 let name = self.parse_param_name()?;
-                Ok(crate::ast::Value::Param(name))
+                let span = Span::new(colon_tok.span.start, self.prev_span().end);
+                Ok(crate::ast::Value::Param(name, Some(span)))
             }
             TokenKind::Question => {
-                self.advance()?;
+                let q_tok = self.advance()?;
                 let idx = self.next_positional_param();
-                Ok(crate::ast::Value::PositionalParam(idx))
+                Ok(crate::ast::Value::PositionalParam(idx, Some(q_tok.span)))
             }
             TokenKind::Lbrace => self.parse_payload_dict().map(crate::ast::Value::Dict),
             TokenKind::Lbracket => self.parse_list().map(crate::ast::Value::List),

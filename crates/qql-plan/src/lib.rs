@@ -7,6 +7,8 @@
 
 extern crate alloc;
 
+/// Batch grouping, extraction, and validation for multi-statement execution.
+pub mod batch;
 /// DDL lowering: collection, index, and shard-key statements into plan requests.
 pub mod ddl;
 /// Filter lowering into OpenAPI-shaped `Filter` condition structures.
@@ -22,6 +24,7 @@ pub mod semantic;
 /// Wire and plan-IR request types shared by the REST projection and gRPC conversion.
 pub mod types;
 
+pub use batch::BatchGrouper;
 pub use plan::{
     BatchFamily, BatchKey, PlannedOperation, RestProjectionError, batch_item_error,
     build_query_batch, build_update_batch, ensure_no_unbound_params, parse_and_plan, plan,
