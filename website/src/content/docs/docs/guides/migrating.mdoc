@@ -86,7 +86,7 @@ Queries and paginated statements now strictly reject `LIMIT 0` at validation tim
 `QUERY`, `SCROLL`, and `FACET` statements. If pagination yields zero items, omit the request
 or set `LIMIT` to at least `1`.
 
-```sql
+```text
 -- REJECTED at parse/validation:
 QUERY [0.1, 0.2] FROM docs LIMIT 0;
 FACET category FROM docs WITH (limit = 0);
