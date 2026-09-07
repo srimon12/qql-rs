@@ -269,6 +269,31 @@ OpenAI-compatible `{"model", "input": [...]}` endpoint and sends the whole batch
 in one request. `setRemoteEmbedder` is an alias with the same signature.
 `hasEmbedder()` reports whether either is configured.
 
+## Typed DX layer (`dx.js`)
+
+For structured, typed result handling matching `@veristamp/nqql` and `pyqql`, `@veristamp/qql-wasm` includes the `dx.js` helper module:
+
+```javascript
+import init, { Client } from "qql-wasm";
+import { ExecutionReport, ScoredPoint, buildError } from "qql-wasm/dx";
+
+await init();
+
+const client = new Client("http://localhost:6333");
+const raw = await client.execute("QUERY 'search text' FROM docs LIMIT 5;");
+const report = new ExecutionReport(raw);
+
+console.log(`Success: ${report.ok}, hits: ${report.succeeded}`);
+for (const hit of report.hits(0)) {
+  console.log(hit.id, hit.score, hit.payload);
+}
+```
+
+The module exports:
+- **`ExecutionReport`**: Accessors for statement hits (`.hits(stmt)` / `.points(stmt)`), facets (`.facet(stmt)`), counts (`.count(stmt)`), and groups (`.groups(stmt)`).
+- **`ScoredPoint`**: Typed hit objects with `.id`, `.score`, `.payload`, `.vector`, and `.shard_key`, plus `.get(key, default)`.
+- **`buildError`**: Unpacks JSON error strings returned across the WASM boundary into standard `Error` objects carrying `.code`, `.kind`, and `.span`.
+
 ## Memory
 
 Every `Client` and `Stmt` owns WASM allocations. Call `free()` when a handle is

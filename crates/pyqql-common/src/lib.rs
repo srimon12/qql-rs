@@ -121,14 +121,7 @@ fn attach_qql_error(py_error: PyErr, error: QqlError) -> PyErr {
         let value = py_error.value(py);
         let _ = value.setattr("code", error.code.as_ref());
         let _ = value.setattr("kind", format!("{:?}", error.kind));
-        let span = if let Some(span) = error.span {
-            let span_dict = PyDict::new(py);
-            let _ = span_dict.set_item("start", span.start);
-            let _ = span_dict.set_item("end", span.end);
-            span_dict.into_any()
-        } else {
-            py.None().into_bound(py)
-        };
+        let span = error.span.map(|s| (s.start as i64, s.end as i64));
         let _ = value.setattr("span", span);
         // Structured fields (url, status, collection, request_id, …) as a
         // dict, with a `request_id` convenience attribute so programmatic

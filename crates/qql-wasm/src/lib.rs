@@ -107,16 +107,6 @@ mod report {
                 failed: if ok { 0 } else { 1 },
             }
         }
-
-        #[allow(dead_code)]
-        pub fn empty() -> Self {
-            Self {
-                ok: true,
-                results: Vec::new(),
-                succeeded: 0,
-                failed: 0,
-            }
-        }
     }
 
     /// Build an ExecResponse-compatible JSON value.
@@ -608,6 +598,12 @@ fn build_compile_output(
 pub fn compile(query: &str, params: Option<JsValue>) -> Result<JsValue, JsValue> {
     let output = build_compile_output(query, params)?;
     to_js_value(&output)
+}
+
+/// Compile one QQL statement into a JavaScript route object. Alias for `compile`.
+#[wasm_bindgen(js_name = compileQuery, unchecked_return_type = "CompiledRoute")]
+pub fn compile_query(query: &str, params: Option<JsValue>) -> Result<JsValue, JsValue> {
+    compile(query, params)
 }
 
 /// Compiles QQL query into a safe, JS-owned Uint8Array byte buffer.
@@ -1356,8 +1352,10 @@ impl Client {
         on_error: WasmOnError,
         results: &mut Vec<serde_json::Value>,
     ) -> Result<(), JsValue> {
-        use qql_plan::mutation::planned_to_update_operation;
-        use qql_plan::{PlannedOperation, QueryBatchRequest, UpdateBatchRequest, batch_item_error};
+        use qql_plan::{
+            PlannedOperation, batch_item_error, build_query_batch, build_update_batch,
+            verify_batch_cardinality,
+        };
 
         if pending.is_empty() {
             return Ok(());
@@ -1369,19 +1367,10 @@ impl Client {
 
         let operations = core::mem::take(pending);
         match &operations[0] {
-            PlannedOperation::Query { collection, .. } => {
-                let collection = collection.clone();
-                let searches = operations
-                    .iter()
-                    .map(|operation| match operation {
-                        PlannedOperation::Query { request, .. } => Ok(request.clone()),
-                        _ => Err(JsValue::from_str(
-                            "QQL-BATCH-INVARIANT: query batch contained a non-query operation",
-                        )),
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                let expected = searches.len();
-                let batch = QueryBatchRequest { searches };
+            PlannedOperation::Query { .. } => {
+                let (collection, batch) = build_query_batch(&operations)
+                    .map_err(|e| JsValue::from_str(&e.to_string()))?;
+                let expected = batch.searches.len();
                 let path = format!("/collections/{collection}/points/query/batch");
                 let body = serde_json::to_value(&batch)
                     .map_err(|error| JsValue::from_str(&error.to_string()))?;
@@ -1392,11 +1381,9 @@ impl Client {
                             .and_then(serde_json::Value::as_array)
                             .cloned()
                             .unwrap_or_default();
-                        if values.len() != expected {
-                            let error = JsValue::from_str(&format!(
-                                "QQL-BATCH-CARDINALITY: query batch returned {} results for {expected} operations",
-                                values.len()
-                            ));
+                        if let Err(err) = verify_batch_cardinality("query", expected, values.len())
+                        {
+                            let error = JsValue::from_str(&err.to_string());
                             if on_error == WasmOnError::Stop {
                                 return Err(error);
                             }
@@ -1433,33 +1420,9 @@ impl Client {
                 }
             }
             _ => {
-                let mut updates = Vec::with_capacity(operations.len());
-                let mut labels = Vec::with_capacity(operations.len());
-                let mut collection = None;
-                for operation in &operations {
-                    let Some((current_collection, update)) = planned_to_update_operation(operation)
-                    else {
-                        return Err(JsValue::from_str(
-                            "QQL-BATCH-INVARIANT: mutation batch contained a non-mutation operation",
-                        ));
-                    };
-                    if collection
-                        .as_ref()
-                        .is_some_and(|collection| collection != &current_collection)
-                    {
-                        return Err(JsValue::from_str(
-                            "QQL-BATCH-INVARIANT: mutation batch contained multiple collections",
-                        ));
-                    }
-                    collection.get_or_insert(current_collection);
-                    labels.push(update.operation_name());
-                    updates.push(update);
-                }
-                let collection = collection.unwrap_or_default();
-                let expected = updates.len();
-                let batch = UpdateBatchRequest {
-                    operations: updates,
-                };
+                let (collection, labels, batch) = build_update_batch(&operations)
+                    .map_err(|e| JsValue::from_str(&e.to_string()))?;
+                let expected = batch.operations.len();
                 let path = format!("/collections/{collection}/points/batch?wait=true");
                 let body = serde_json::to_value(&batch)
                     .map_err(|error| JsValue::from_str(&error.to_string()))?;
@@ -1470,11 +1433,9 @@ impl Client {
                             .and_then(serde_json::Value::as_array)
                             .cloned()
                             .unwrap_or_default();
-                        if values.len() != expected {
-                            let error = JsValue::from_str(&format!(
-                                "QQL-BATCH-CARDINALITY: update batch returned {} results for {expected} operations",
-                                values.len()
-                            ));
+                        if let Err(err) = verify_batch_cardinality("update", expected, values.len())
+                        {
+                            let error = JsValue::from_str(&err.to_string());
                             if on_error == WasmOnError::Stop {
                                 return Err(error);
                             }
@@ -1564,6 +1525,12 @@ impl Client {
     /// `params` bind before parsing (same shape as the module-level `bind`).
     #[wasm_bindgen(unchecked_return_type = "CompiledRoute")]
     pub fn compile(&self, query: &str, params: Option<JsValue>) -> Result<JsValue, JsValue> {
+        compile(query, params)
+    }
+
+    /// Parse and compile one statement without executing it. Alias for `compile`.
+    #[wasm_bindgen(js_name = compileQuery, unchecked_return_type = "CompiledRoute")]
+    pub fn compile_query(&self, query: &str, params: Option<JsValue>) -> Result<JsValue, JsValue> {
         compile(query, params)
     }
 

@@ -7,35 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
-
-### 🚀 CLI & Developer Experience
-- **CLI Parameter Binding** — Added `--param key=value` (`-p`) and `--params-file <path>` support to `qql exec` and `qql explain` for executing and explaining parameterized queries directly from the command line.
-- **Interactive REPL Parameters** — Added `\param [key=value | clear]` (`\p`) command in the interactive REPL for inspecting, setting, and clearing session-scoped parameter bindings.
-- **WASM DX Wrapper** — Added `dx.js` helper providing typed `ExecutionReport` and `ScoredPoint` accessors (`.hits()`, `.points()`, `.facet()`, `.count()`, `.groups()`) for WebAssembly consumers.
-
-### ⚡ Engine Reliability & Parity
-- **WASM Batch Orchestration Parity** — `qql-wasm` now detects per-item `status: "error"` in 200 batch responses via shared `qql_plan::batch_item_error`, and retries batch operations individually when `on_error = "continue"` on batch RPC failure or cardinality mismatch.
-- **Executor Latch Safety** — `Executor::close()` only latches the closed state atomically after backend cleanup succeeds; subsequent close calls are immediate no-ops.
-- **Monotonic Correlation IDs** — Switched `next_request_id` to monotonic 64-bit nanosecond timestamps, eliminating 1-second counter wrapping.
-- **Strict Facet Validation** — `FACET ... WITH (limit = 0)` is strictly rejected with `QQL-PARSE-POSITIVE-INTEGER`, matching explicit `LIMIT 0` behavior.
-
-### 🧹 Structural Deduplication & Core Hygiene
-- **Unified Vector Conversions** — Replaced duplicate vector extraction loops in `params.rs` with canonical `vector_from_value`, unifying dense, sparse dictionary, and multi-dense vector validation across parsing and binding.
-- **Strict ISO-8601 Datetime Parsing** — Centralized `looks_like_iso_datetime` in `formula.rs`, strictly rejecting trailing non-datetime characters across all parsing and binding paths.
-- **String & Identifier Helpers** — Single-sourced `is_simple_ident` and `escape_string` in `ast/mod.rs`, eliminating duplicated format and escape logic between `fmt.rs` and `params.rs`.
-- **Canonical Statement Kinds** — Added `Stmt::stmt_kind` to `ast/statement.rs` and eliminated duplicate classifications in `transform.rs`.
-- **Eliminated `QqlError::syntax`** — Replaced all legacy syntax constructors across parser modules with explicit `QqlError::parse("QQL-PARSE-SYNTAX", ...)` or `syntax_err`.
-- **Parameter Binding Fail-Closed** — Binding against DDL or unsupported statement types now fails closed with `QQL-BIND-UNSUPPORTED-STATEMENT`.
-- **Conformance Suite Error Pinning** — All 9 unpinned legacy syntax error fixtures in `syntax-errors.qql` now assert exact error codes.
-- **CI Private Crates Verification** — Added automated clippy and test steps covering private binding crates (`pyqql-common`, `nqql-common`).
-
 ## [0.4.0] - 2026-09-07
 
 ### 🚀 Prepared Statements & Parameter Binding
 - **AST Parameter Binding** — Bind parameters directly against pre-parsed statement trees (`stmt.bind(...)`, `client.execute(stmt, params=...)`) without textual re-parsing; support for nested dictionary expansions (`:loc.lat`) and optional vector preview truncation (`truncate_vectors=True`).
 - **Statement-Scoped Batch Execution** — Pass `params=[dict0, dict1]` to bind and execute multiple statements in a single call, matching parameters 1:1 with statement count (`QQL-BIND-BATCH-LENGTH` on length mismatch).
+- **Duplicate Parameter Collision Detection** — Flattened parameter namespaces reject colliding keys fail-closed with `QQL-BIND-DUPLICATE-PARAM` (e.g. `{"loc.lat": 1, "loc": {"lat": 2}}`).
 - **Expanded Placeholder Positions** — Full placeholder support across `LIMIT`, `OFFSET`, `SCROLL AFTER :cursor`, `FACET LIMIT`, `QueryInput::Text`, `HYBRID TEXT`, `CROSS RERANK`, and formula `TARGET = :datetime`.
+- **Parameter Binding Fail-Closed** — Binding against DDL or unsupported statement types fails closed with `QQL-BIND-UNSUPPORTED-STATEMENT`.
 - **Type-Safe Binding Invariants**:
   - Bound `LIMIT` parameters enforce `> 0` across `QUERY`, `SCROLL`, and `FACET` (`QQL-BIND-INVALID-INTEGER`).
   - Vector element bindings enforce finite float ranges, rejecting values beyond `f32::MAX` (`QQL-VALIDATION-VECTOR`).
@@ -43,23 +22,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Re-binding an already bound `Stmt` fails closed with `QQL-BIND-ALREADY-BOUND`.
   - Triple-quoted (`"""`) and raw (`r'...'`) string literals are protected from placeholder replacement.
 
+### 💻 CLI & Interactive REPL
+- **CLI Parameter Binding** — Added `--param key=value` (`-p`) and `--params-file <path>` support to `qql exec` and `qql explain` for executing and explaining parameterized queries directly from the command line.
+- **Interactive REPL Parameters** — Added `\param [key=value | clear]` (`\p`) command in the interactive REPL for inspecting, setting, and clearing session-scoped parameter bindings.
+
 ### 🎯 Typed Results & Execution Reports
-- **Typed `ScoredPoint`** — Dataclass / interface exposing `id`, `score`, `version`, `payload`, `vector`, and `shard_key`. Numeric point IDs preserve integer types instead of converting through string round-trips.
+- **Typed `ScoredPoint`** — Dataclass / interface exposing `id`, `score`, `version`, `payload`, `vector`, and `shard_key`. Numeric point IDs preserve integer types instead of converting through string round-trips; non-standard string IDs are preserved without loss. `score` defaults defensively to `0.0`.
 - **Typed Report Accessors** — `ExecutionReport` provides typed methods: `.hits()`, `.points()`, `.facet()`, `.count()`, and `.groups()`.
+- **WASM DX Wrapper** — Added `dx.js` helper providing typed `ExecutionReport`, `ScoredPoint`, and `buildError` accessors for WebAssembly consumers.
 - **FACET Result Isolation** — Facet aggregation buckets (`{ value, count }`) no longer instantiate pseudo-`ScoredPoint`s; `.hits()` and `.points()` cleanly return empty arrays for facet operations.
 - **Python Typed Exception Hierarchy** — Every error in `pyqql` and `pyqql-edge` raises a typed `QqlError` subclass with structured `.code`, `.kind`, `.span`, and `.fields`: `QqlSyntaxError`, `QqlValidationError`, `QqlExecutionError`, `QqlTransportError`, and `QqlBackendError`.
 
-### ⚡ Cross-SDK Parity (`pyqql`, `nqql`, `qql-wasm`)
-- **Shared Runtime Core** — Centralized SDK binding logic into `pyqql-common` and `nqql-common` with byte-identical report adapters (`dx-common.js`, `_dx_report.py`) to prevent cross-language drift.
+### ⚡ Cross-SDK Parity & Engine Reliability
+- **WASM Batch Orchestration Parity** — `qql-wasm` shares `qql_plan::build_query_batch`, `build_update_batch`, and `verify_batch_cardinality`; detects per-item `status: "error"` in 200 batch responses via shared `qql_plan::batch_item_error`; and retries batch operations individually when `on_error = "continue"` on batch RPC failure or cardinality mismatch.
+- **Executor Concurrency & Latch Safety** — `Executor::close()` uses a double-checked lock and atomically latches the closed state only after backend cleanup succeeds; subsequent close calls are immediate no-ops.
+- **Monotonic Correlation IDs** — Switched `next_request_id` to monotonic 64-bit nanosecond timestamps, eliminating 1-second counter wrapping.
+- **Shared Runtime Core** — Centralized SDK binding logic into `pyqql-common` and `nqql-common` with byte-identical report adapters (`dx-common.js`, `_dx_report.py`, `test_dx.py`, `_errors.py`) to prevent cross-language drift.
 - **Canonical `toString()`** — `Stmt.toString()` outputs canonical, re-parseable QQL with positional markers normalized to bare `?`. Truncated debug previews move to `Stmt.toReadableString()`.
-- **Unified Compilation** — Free and client `compile(query, params?)` accept parameter bindings consistently across Python, Node, and WASM.
+- **Unified Compilation** — Free and client `compile(query, params?)` and `compileQuery` alias accept parameter bindings consistently across Python, Node, and WASM.
 - **Edge Validation Gate** — `pyqql-edge` and `nqql-edge` now perform full parse and plan semantic validation on `is_valid` queries via `qql_plan::parse_and_plan`.
+
+### 🧹 Architecture, Deduplication & Code Hygiene
+- **Decomposed Core Modules (<400 Lines)** — Decomposed large monolithic files into focused, cohesive submodules under `crates/qql-core`:
+  - `fmt/` (`mod.rs`, `expr.rs`, `query.rs`, `mutation.rs`, `ddl.rs`, `tests.rs`)
+  - `params/` (`mod.rs`, `text.rs`, `ast.rs`, `validate.rs`, `tests.rs`)
+  - `ast/statement/` (`mod.rs`, `types.rs`, `query.rs`, `mutation.rs`, `retrieval.rs`, `ddl.rs`)
+  - `parser/query/` (`mod.rs`, `expr.rs`, `pipeline.rs`)
+- **Unified Vector Conversions** — Replaced duplicate vector extraction loops in `params.rs` with canonical `vector_from_value`, unifying dense, sparse dictionary, and multi-dense vector validation across parsing and binding.
+- **Strict ISO-8601 Datetime Parsing** — Centralized `looks_like_iso_datetime` in `formula.rs`, strictly rejecting trailing non-datetime characters across all parsing and binding paths.
+- **String & Identifier Helpers** — Single-sourced `is_simple_ident` and `escape_string` in `ast/mod.rs`, eliminating duplicated format and escape logic between `fmt.rs` and `params.rs`.
+- **Canonical Statement Kinds** — Added `Stmt::stmt_kind` to `ast/statement.rs` and eliminated duplicate classifications in `transform.rs`.
+- **Eliminated `QqlError::syntax`** — Replaced all legacy syntax constructors across parser modules with explicit `QqlError::parse("QQL-PARSE-SYNTAX", ...)` or `syntax_err`.
 
 ### ⚠️ Breaking & Behavioral Changes
 - **Empty Script Validation** — `execute("")` and `execute([])` now fail closed with `QQL-VALIDATION-EMPTY-SCRIPT` across all SDKs instead of returning an empty `{ ok: true }` report.
 - **`Stmt.toString()` Output Format** — Node and WASM `Stmt.toString()` now returns canonical, re-parseable SQL syntax rather than a truncated debug preview. Use `Stmt.toReadableString()` for truncated representations.
 - **Rust Edition 2024** — Entire workspace upgraded to Rust Edition 2024 with modern MSRV and let-chain resolution.
-- **Strict Limit Constraints** — Literal `LIMIT 0` and bound `LIMIT 0` are rejected across `QUERY`, `SCROLL`, and `FACET` (`QQL-PARSE-POSITIVE-INTEGER` / `QQL-BIND-INVALID-INTEGER`). `OFFSET 0` remains valid.
+- **Strict Limit Constraints** — Literal `LIMIT 0` and bound `LIMIT 0` are rejected across `QUERY`, `SCROLL`, and `FACET` (`QQL-PARSE-POSITIVE-INTEGER` / `QQL-BIND-INVALID-INTEGER`). `FACET ... WITH (limit = 0)` is strictly rejected with `QQL-PARSE-POSITIVE-INTEGER`. `OFFSET 0` remains valid.
+- **Point ID Preservation** — Non-standard string IDs are preserved as strings rather than coerced to empty strings.
 
 ### 🐛 Bug Fixes & Engine Reliability
 - **Canonical Placeholder Formatting** — `format_stmt` normalizes positional parameter markers to bare `?` (fixing `QQL-PARSE-TRAILING` errors when re-parsing queries with `LIMIT ?`, `OFFSET ?`, or formula targets).
@@ -73,8 +73,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🛠️ Workspace, Security & Conformance
 - **Security Audit CI** — Added scheduled workflow for `cargo audit`, CodeQL, and npm/pnpm dependency vulnerability scanning.
+- **CI Verification for Private & Shared Crates** — Automated clippy, tests, and anti-drift checks covering `pyqql-common`, `nqql-common`, and cross-SDK shared test suites.
 - **Release Automation** — `scripts/check_release.py` supports atomic version synchronization across Cargo, PyPI, npm, and editor WASM.
-- **Language Conformance** — Synchronized language v1.7 specification with 40 conformance suites (276 valid statements, 62 invalid cases).
+- **Language Conformance** — Synchronized language v1.7 specification with 40 conformance suites (276 valid statements, 62 invalid cases pinned).
 - **Editor Integration** — Bundled VS Code extension updated to 0.4.0 with the latest QQL 1.7 WASM engine.
 
 

@@ -1,11 +1,18 @@
+import importlib
+import os
 import unittest
-import pyqql
+
+SDK_NAME = os.environ.get(
+    "PYQQL_MODULE",
+    "pyqql_edge" if "pyqql-edge" in os.path.abspath(__file__) else "pyqql",
+)
+sdk = importlib.import_module(SDK_NAME)
 
 
 class TestDxImprovements(unittest.TestCase):
     def test_prepared_statement_binding_and_compile_route(self):
         # 1. execute(Stmt, params=...) / Stmt.bind prepared statements
-        stmt = pyqql.parse("QUERY :v FROM test_coll LIMIT :lim")[0]
+        stmt = sdk.parse("QUERY :v FROM test_coll LIMIT :lim")[0]
         self.assertIn(":v", repr(stmt))
         self.assertEqual(str(stmt), "QUERY :v FROM test_coll LIMIT :lim")
 
@@ -22,7 +29,7 @@ class TestDxImprovements(unittest.TestCase):
 
         # Module compile_query and Client.compile accept params too
         # (parity with nqql compileQuery / Client.compile).
-        route2 = pyqql.compile_query(
+        route2 = sdk.compile_query(
             "QUERY :v FROM test_coll LIMIT :lim",
             params={"v": [0.1, 0.2, 0.3], "lim": 5},
         )
@@ -32,14 +39,14 @@ class TestDxImprovements(unittest.TestCase):
     def test_vector_truncation_for_readable_eyeball(self):
         # 7. bind() vector truncation for human readability
         vec = [0.1 * i for i in range(128)]
-        s = pyqql.bind("QUERY :v FROM test_coll", {"v": vec}, truncate_vectors=True)
+        s = sdk.bind("QUERY :v FROM test_coll", {"v": vec}, truncate_vectors=True)
         self.assertIn("... (128 dims)", s)
         self.assertNotIn(str(vec[-1]), s)
 
     def test_dotted_and_nested_parameters(self):
         # 3. Dotted and nested parameter names
         nested_params = {"loc": {"lat": 12.34, "lon": 56.78}}
-        s = pyqql.bind(
+        s = sdk.bind(
             "QUERY [0.1, 0.2] FROM test_coll WHERE lat = :loc.lat AND lon = :loc.lon",
             nested_params,
         )
@@ -49,7 +56,7 @@ class TestDxImprovements(unittest.TestCase):
         )
 
         flat_params = {"loc.lat": 12.34, "loc.lon": 56.78}
-        s2 = pyqql.bind(
+        s2 = sdk.bind(
             "QUERY [0.1, 0.2] FROM test_coll WHERE lat = :loc.lat AND lon = :loc.lon",
             flat_params,
         )
@@ -104,7 +111,7 @@ class TestDxImprovements(unittest.TestCase):
             "failed": 0,
         }
 
-        rep = pyqql.ExecutionReport(rep_dict)
+        rep = sdk.ExecutionReport(rep_dict)
         # Backward compatibility
         self.assertTrue(rep.ok)
         self.assertTrue(rep["ok"])
@@ -143,7 +150,7 @@ class TestDxImprovements(unittest.TestCase):
     def test_execution_report_groups_accessor(self):
         # GROUP BY results normalize through report.groups() (pyqql parity
         # with nqql's ExecutionReport.groups()).
-        from pyqql import ExecutionReport
+        ExecutionReport = sdk.ExecutionReport
 
         nested = ExecutionReport(
             {
@@ -191,4 +198,3 @@ class TestDxImprovements(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

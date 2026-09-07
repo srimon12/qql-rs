@@ -36,6 +36,29 @@ class Client {
         }
     }
     /**
+     * Parse and compile one statement without executing it. Alias for `compile`.
+     * @param {string} query
+     * @param {any | null} [params]
+     * @returns {CompiledRoute}
+     */
+    compileQuery(query, params) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            const ptr0 = passStringToWasm0(query, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len0 = WASM_VECTOR_LEN;
+            wasm.client_compileQuery(retptr, this.__wbg_ptr, ptr0, len0, isLikeNone(params) ? 0 : addHeapObject(params));
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            if (r2) {
+                throw takeObject(r1);
+            }
+            return takeObject(r0);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
      * Parse, compile, embed if needed, and POST to Qdrant's REST API.
      *
      * Accepts a string, a Stmt, or an array of either. Always returns a stable
@@ -608,6 +631,31 @@ function compileBytes(query) {
 exports.compileBytes = compileBytes;
 
 /**
+ * Compile one QQL statement into a JavaScript route object. Alias for `compile`.
+ * @param {string} query
+ * @param {any | null} [params]
+ * @returns {CompiledRoute}
+ */
+function compileQuery(query, params) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passStringToWasm0(query, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.compileQuery(retptr, ptr0, len0, isLikeNone(params) ? 0 : addHeapObject(params));
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        if (r2) {
+            throw takeObject(r1);
+        }
+        return takeObject(r0);
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+exports.compileQuery = compileQuery;
+
+/**
  * @param {string} query
  * @returns {string}
  */
@@ -1053,7 +1101,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_243(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_244(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -1187,7 +1235,7 @@ function __wbg_get_imports() {
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 37, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_239);
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_240);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000002: function(arg0) {
@@ -1224,10 +1272,10 @@ function __wbg_get_imports() {
     };
 }
 
-function __wasm_bindgen_func_elem_239(arg0, arg1, arg2) {
+function __wasm_bindgen_func_elem_240(arg0, arg1, arg2) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        wasm.__wasm_bindgen_func_elem_239(retptr, arg0, arg1, addHeapObject(arg2));
+        wasm.__wasm_bindgen_func_elem_240(retptr, arg0, arg1, addHeapObject(arg2));
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         if (r1) {
@@ -1238,8 +1286,8 @@ function __wasm_bindgen_func_elem_239(arg0, arg1, arg2) {
     }
 }
 
-function __wasm_bindgen_func_elem_243(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_243(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_244(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_244(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
 const ClientFinalization = (typeof FinalizationRegistry === 'undefined')

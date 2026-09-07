@@ -900,4 +900,48 @@ mod tests {
         assert_eq!(normalized["value"], "entire_home");
         assert_eq!(normalized["count"], 42);
     }
+
+    #[test]
+    fn test_batch_item_error_shape() {
+        use qql_plan::batch_item_error;
+        use serde_json::json;
+
+        // 1. Root error property with status "error"
+        let err_item = json!({
+            "status": "error",
+            "error": "point 42 not found"
+        });
+        assert_eq!(
+            batch_item_error(&err_item),
+            Some("point 42 not found".to_string())
+        );
+
+        // 2. Fallback when error field is missing but status is "error"
+        let fallback_err = json!({
+            "status": "error"
+        });
+        assert_eq!(
+            batch_item_error(&fallback_err),
+            Some("batch item failed".to_string())
+        );
+
+        // 3. Successful or completed items return None
+        let completed = json!({
+            "status": "completed",
+            "result": { "operation_id": 1 }
+        });
+        assert_eq!(batch_item_error(&completed), None);
+
+        let acknowledged = json!({
+            "status": "acknowledged",
+            "operation_id": 10
+        });
+        assert_eq!(batch_item_error(&acknowledged), None);
+
+        let normal_hit = json!({
+            "id": 1,
+            "score": 0.95
+        });
+        assert_eq!(batch_item_error(&normal_hit), None);
+    }
 }

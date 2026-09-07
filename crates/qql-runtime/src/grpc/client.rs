@@ -87,9 +87,11 @@ impl GrpcQdrant {
     /// # Errors
     /// Returns `QqlError::transport` if the provided endpoint URL cannot be parsed.
     ///
-    /// # Runtime Requirements
-    /// The returned `GrpcQdrant` uses lazy connection establishment via `tonic`.
-    /// Connecting and executing RPCs require an active Tokio runtime reactor.
+    /// # Panics
+    /// Panics if called when no Tokio runtime reactor is running or entered (due to
+    /// `tonic::transport::Endpoint::connect_lazy` requiring a Tokio timer handle).
+    /// Foreign thread callers (e.g. PyO3 / N-API constructors) must enter their
+    /// driving Tokio runtime before constructing a `GrpcQdrant` instance.
     pub fn from_url(url: &str, api_key: Option<String>) -> Result<Self, QqlError> {
         Self::from_url_with_timeout(url, api_key, None)
     }
@@ -99,9 +101,11 @@ impl GrpcQdrant {
     /// # Errors
     /// Returns `QqlError::transport` if the provided endpoint URL cannot be parsed.
     ///
-    /// # Runtime Requirements
-    /// The returned `GrpcQdrant` uses lazy connection establishment via `tonic`.
-    /// Connecting and executing RPCs require an active Tokio runtime reactor.
+    /// # Panics
+    /// Panics if called when no Tokio runtime reactor is running or entered (due to
+    /// `tonic::transport::Endpoint::connect_lazy` requiring a Tokio timer handle).
+    /// Foreign thread callers (e.g. PyO3 / N-API constructors) must enter their
+    /// driving Tokio runtime before constructing a `GrpcQdrant` instance.
     pub fn from_url_with_timeout(
         url: &str,
         api_key: Option<String>,

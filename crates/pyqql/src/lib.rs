@@ -141,52 +141,12 @@ impl PyClient {
     }
 }
 
-// ── module-level one-shots ────────────────────────────────────────
-
-#[pyfunction]
-#[pyo3(signature = (query, *, params=None, url="http://localhost:6333", api_key=None, use_grpc=false, embedder=None, on_error="stop", route_affinity=None))]
-#[allow(clippy::too_many_arguments)]
-fn execute<'py>(
-    py: Python<'py>,
-    query: &Bound<'_, PyAny>,
-    params: Option<&Bound<'_, PyAny>>,
-    url: &str,
-    api_key: Option<String>,
-    use_grpc: bool,
-    embedder: Option<&Bound<'_, PyAny>>,
-    on_error: &str,
-    route_affinity: Option<String>,
-) -> PyResult<Bound<'py, PyAny>> {
-    let client = PyClient::new(url, api_key, use_grpc, embedder, route_affinity)?;
-    client.execute(py, query, params, on_error)
-}
-
-#[pyfunction]
-#[pyo3(signature = (query, *, params=None, url="http://localhost:6333", api_key=None, use_grpc=false, embedder=None, on_error="stop", route_affinity=None))]
-#[allow(clippy::too_many_arguments)]
-fn execute_async<'py>(
-    py: Python<'py>,
-    query: Bound<'py, PyAny>,
-    params: Option<&Bound<'_, PyAny>>,
-    url: &str,
-    api_key: Option<String>,
-    use_grpc: bool,
-    embedder: Option<&Bound<'_, PyAny>>,
-    on_error: &str,
-    route_affinity: Option<String>,
-) -> PyResult<Bound<'py, PyAny>> {
-    let client = PyClient::new(url, api_key, use_grpc, embedder, route_affinity)?;
-    client.execute_async(py, query, params, on_error)
-}
-
 #[pymodule]
 fn pyqql(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     common::register_error_module("pyqql");
     m.add_class::<common::PyStmt>()?;
     m.add_class::<PyHttpEmbedder>()?;
     m.add_class::<PyClient>()?;
-    m.add_function(wrap_pyfunction!(execute, m)?)?;
-    m.add_function(wrap_pyfunction!(execute_async, m)?)?;
     m.add_function(wrap_pyfunction!(common::bind, m)?)?;
     m.add_function(wrap_pyfunction!(common::explain, m)?)?;
     m.add_function(wrap_pyfunction!(common::parse, m)?)?;

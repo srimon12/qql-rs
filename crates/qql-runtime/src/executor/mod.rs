@@ -79,16 +79,6 @@ impl ExecutionReport {
             failed: if ok { 0 } else { 1 },
         }
     }
-
-    /// A successful report with no results (empty script).
-    pub fn empty() -> Self {
-        Self {
-            ok: true,
-            results: Vec::new(),
-            succeeded: 0,
-            failed: 0,
-        }
-    }
 }
 
 /// Controls batch-execution behaviour when a statement fails.
@@ -157,6 +147,7 @@ pub struct Executor {
     pub(crate) embedder: Option<Arc<dyn Embedder>>,
     /// Set by [`Executor::close`]; every execution entry point fails after it.
     closed: std::sync::atomic::AtomicBool,
+    close_lock: tokio::sync::Mutex<()>,
 }
 
 impl Executor {
@@ -189,6 +180,7 @@ impl Executor {
             config,
             embedder: None,
             closed: std::sync::atomic::AtomicBool::new(false),
+            close_lock: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -203,10 +195,15 @@ impl Executor {
             config,
             embedder,
             closed: std::sync::atomic::AtomicBool::new(false),
+            close_lock: tokio::sync::Mutex::new(()),
         }
     }
 
     /// Borrow the underlying backend ops (alias of `client`).
+    ///
+    /// # Note
+    /// Direct calls on the returned `&dyn QdrantOps` bypass the executor's
+    /// `QQL-CLIENT-CLOSED` guard.
     pub fn ops(&self) -> &dyn QdrantOps {
         self.client.as_ref()
     }
@@ -229,6 +226,10 @@ impl Executor {
     // --- explain_stmt removed --- moved to qql_core::explain
 
     /// Borrow the underlying backend `QdrantOps` implementation.
+    ///
+    /// # Note
+    /// Direct calls on the returned `&dyn QdrantOps` bypass the executor's
+    /// `QQL-CLIENT-CLOSED` guard.
     pub fn client(&self) -> &dyn QdrantOps {
         self.client.as_ref()
     }
@@ -240,6 +241,10 @@ impl Executor {
     /// `QQL-CLIENT-CLOSED` — a closed client cannot run more statements.
     /// Calling `close` again is a no-op.
     pub async fn close(&self) -> Result<(), QqlError> {
+        if self.is_closed() {
+            return Ok(());
+        }
+        let _guard = self.close_lock.lock().await;
         if self.is_closed() {
             return Ok(());
         }
@@ -582,7 +587,7 @@ impl Executor {
         stop_on_error: bool,
         results: &mut Vec<ExecResponse>,
     ) -> Result<(), QqlError> {
-        use qql_plan::{PlannedOperation, QueryBatchRequest};
+        use qql_plan::PlannedOperation;
 
         if pending.is_empty() {
             return Ok(());
@@ -597,20 +602,8 @@ impl Executor {
         let operations = core::mem::take(pending);
         let is_query = matches!(&operations[0], PlannedOperation::Query { .. });
         if is_query {
-            let collection = operations[0].collection().unwrap_or_default().to_string();
-            let searches = operations
-                .iter()
-                .map(|operation| match operation {
-                    PlannedOperation::Query { request, .. } => Ok(request.clone()),
-                    _ => Err(QqlError::execution(
-                        "QQL-BATCH-INVARIANT",
-                        "query batch contained a non-query operation",
-                        None,
-                    )),
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            let expected = searches.len();
-            let batch = QueryBatchRequest { searches };
+            let (collection, batch) = qql_plan::build_query_batch(&operations)?;
+            let expected = batch.searches.len();
             match self.client.execute_query_batch(&collection, &batch).await {
                 Ok(responses) if responses.len() == expected => {
                     for value in responses {
@@ -704,9 +697,6 @@ impl Executor {
         stop_on_error: bool,
         results: &mut Vec<ExecResponse>,
     ) -> Result<(), QqlError> {
-        use qql_plan::UpdateBatchRequest;
-        use qql_plan::mutation::planned_to_update_operation;
-
         if operations.is_empty() {
             return Ok(());
         }
@@ -720,24 +710,8 @@ impl Executor {
                 .await;
         }
 
-        let mut update_operations = Vec::with_capacity(operations.len());
-        let mut labels = Vec::with_capacity(operations.len());
-        for operation in &operations {
-            let (_, update) = planned_to_update_operation(operation).ok_or_else(|| {
-                QqlError::execution(
-                    "QQL-BATCH-INVARIANT",
-                    "mutation batch contained a non-mutation operation",
-                    None,
-                )
-            })?;
-            labels.push(update.operation_name());
-            update_operations.push(update);
-        }
-        let collection = operations[0].collection().unwrap_or_default().to_string();
-        let expected = update_operations.len();
-        let batch = UpdateBatchRequest {
-            operations: update_operations,
-        };
+        let (collection, labels, batch) = qql_plan::build_update_batch(&operations)?;
+        let expected = batch.operations.len();
         match self.client.execute_update_batch(&collection, &batch).await {
             Ok(responses) if responses.len() == expected => {
                 for (value, label) in responses.into_iter().zip(labels.iter()) {
@@ -781,6 +755,12 @@ impl Executor {
     /// individually so per-statement success/failure stays accurate —
     /// reporting the whole group as failed would lose statements that
     /// succeed on their own.
+    ///
+    /// # Semantics
+    /// Note that retrying individual operations in a partially failed batch
+    /// provides **at-least-once** execution semantics for mutations. If earlier
+    /// operations in the batch were already partially applied on the backend
+    /// before the batch failed, retrying them individually will re-apply them.
     async fn retry_batch_individually(
         &self,
         operations: Vec<qql_plan::PlannedOperation>,

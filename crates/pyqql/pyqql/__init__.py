@@ -16,8 +16,6 @@ from .pyqql import (
     __version__,
     bind,
     compile_query,
-    execute as _raw_execute,
-    execute_async as _raw_execute_async,
     explain,
     inject_filter,
     is_valid,

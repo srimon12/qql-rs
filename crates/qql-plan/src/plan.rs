@@ -460,6 +460,81 @@ pub fn verify_batch_cardinality(
     }
 }
 
+/// Build a `QueryBatchRequest` from a slice of `PlannedOperation` IRs.
+pub fn build_query_batch(
+    operations: &[PlannedOperation],
+) -> Result<(String, crate::types::QueryBatchRequest), QqlError> {
+    if operations.is_empty() {
+        return Err(QqlError::execution(
+            "QQL-BATCH-INVARIANT",
+            "cannot build query batch from empty operations",
+            None,
+        ));
+    }
+    let collection = operations[0].collection().unwrap_or_default().to_string();
+    let searches = operations
+        .iter()
+        .map(|operation| match operation {
+            PlannedOperation::Query { request, .. } => Ok(request.clone()),
+            _ => Err(QqlError::execution(
+                "QQL-BATCH-INVARIANT",
+                "query batch contained a non-query operation",
+                None,
+            )),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((collection, crate::types::QueryBatchRequest { searches }))
+}
+
+/// Build an `UpdateBatchRequest` from a slice of `PlannedOperation` IRs.
+pub fn build_update_batch(
+    operations: &[PlannedOperation],
+) -> Result<(String, Vec<&'static str>, crate::types::UpdateBatchRequest), QqlError> {
+    if operations.is_empty() {
+        return Err(QqlError::execution(
+            "QQL-BATCH-INVARIANT",
+            "cannot build update batch from empty operations",
+            None,
+        ));
+    }
+    let mut updates = Vec::with_capacity(operations.len());
+    let mut labels = Vec::with_capacity(operations.len());
+    let mut collection = None;
+
+    for operation in operations {
+        let Some((current_collection, update)) =
+            crate::mutation::planned_to_update_operation(operation)
+        else {
+            return Err(QqlError::execution(
+                "QQL-BATCH-INVARIANT",
+                "mutation batch contained a non-mutation operation",
+                None,
+            ));
+        };
+        if collection
+            .as_ref()
+            .is_some_and(|col| col != &current_collection)
+        {
+            return Err(QqlError::execution(
+                "QQL-BATCH-INVARIANT",
+                "mutation batch contained multiple collections",
+                None,
+            ));
+        }
+        collection.get_or_insert(current_collection);
+        labels.push(update.operation_name());
+        updates.push(update);
+    }
+    let collection = collection.unwrap_or_default();
+    Ok((
+        collection,
+        labels,
+        crate::types::UpdateBatchRequest {
+            operations: updates,
+        },
+    ))
+}
+
 /// An unbound parameter placeholder (`:name` / `?idx`) that reaches planning
 /// would ship a broken request — the string path with no `params` used to
 /// send the raw placeholder to Qdrant and get a 422 back. Probe with the

@@ -333,7 +333,8 @@ jobs:
             "crates/nqql/dx-common.js crates/nqql-edge/dx-common.js" \
             "crates/nqql/test_dx.js crates/nqql-edge/test_dx.js" \
             "crates/pyqql/pyqql/_dx_report.py crates/pyqql-edge/pyqql_edge/_dx_report.py" \
-            "crates/pyqql/pyqql/_errors.py crates/pyqql-edge/pyqql_edge/_errors.py"; do
+            "crates/pyqql/pyqql/_errors.py crates/pyqql-edge/pyqql_edge/_errors.py" \
+            "crates/pyqql/tests/test_dx.py crates/pyqql-edge/tests/test_dx.py"; do
             set -- $pair
             if ! diff -q "$1" "$2" >/dev/null; then
               echo "::error::shared DX helper drifted: $1 != $2 — edit both copies or neither"
@@ -481,28 +482,48 @@ jobs:
           fresh=/tmp/qql-wasm-editor-fresh/qql_wasm.d.ts
           bundled=editors/vscode/wasm/qql_wasm.d.ts
           # Every exported free function of the fresh build must exist in the
-          # committed bundle (byte-identical rebuilds are not required).
+          # committed bundle and vice-versa (bidirectional parity check).
           missing=0
+          exports() {
+            grep -oE '^export function [a-zA-Z0-9_]+' "$1" | awk '{print $3}' | sort -u
+          }
           while read -r name; do
             if ! grep -qE "^export function ${name}\b" "$bundled"; then
               echo "::error::bundled editor WASM is missing export '${name}'; rebuild editors/vscode/wasm from crates/qql-wasm"
               missing=1
             fi
-          done < <(grep -oE '^export function [a-zA-Z0-9_]+' "$fresh" | awk '{print $3}' | sort -u)
-          # Class surfaces (Stmt / Client members) drift too — e.g. Stmt.bind,
-          # toReadableString, compileRouteBytes. Compare every declared class
-          # member name between the fresh and bundled declarations.
+          done < <(exports "$fresh")
+          while read -r name; do
+            if ! grep -qE "^export function ${name}\b" "$fresh"; then
+              echo "::error::bundled editor WASM has unexpected export '${name}' not in crates/qql-wasm; rebuild editors/vscode/wasm"
+              missing=1
+            fi
+          done < <(exports "$bundled")
+
+          # Class surfaces (Stmt / Client members, getters, properties) must match
+          # bidirectionally between fresh and bundled declarations.
           members() {
-            sed -n 's/^[[:space:]]\+\([a-zA-Z_][a-zA-Z0-9_]*\)[?(]\?.*(.*/\1/p' "$1" \
-              | grep -vE '^(get|set|readonly|if|for|while|switch|catch|function|return|export)$' \
+            sed -n \
+              -e 's/^[[:space:]]\+get[[:space:]]\+\([a-zA-Z_][a-zA-Z0-9_]*\).*/\1/p' \
+              -e 's/^[[:space:]]\+set[[:space:]]\+\([a-zA-Z_][a-zA-Z0-9_]*\).*/\1/p' \
+              -e 's/^[[:space:]]\+readonly[[:space:]]\+\([a-zA-Z_][a-zA-Z0-9_]*\).*/\1/p' \
+              -e 's/^[[:space:]]\+\([a-zA-Z_][a-zA-Z0-9_]*\)[?(]\?.*(.*/\1/p' \
+              "$1" \
+              | grep -vE '^(get|set|readonly|if|for|while|switch|catch|function|return|export|constructor)$' \
               | sort -u
           }
           while read -r name; do
-            if ! grep -qE "^[[:space:]]+${name}\(" "$bundled"; then
+            if ! grep -qE "^[[:space:]]+(get[[:space:]]+|set[[:space:]]+|readonly[[:space:]]+)?${name}\b" "$bundled"; then
               echo "::error::bundled editor WASM class API is missing member '${name}'; rebuild editors/vscode/wasm from crates/qql-wasm"
               missing=1
             fi
           done < <(members "$fresh")
+          while read -r name; do
+            if ! grep -qE "^[[:space:]]+(get[[:space:]]+|set[[:space:]]+|readonly[[:space:]]+)?${name}\b" "$fresh"; then
+              echo "::error::bundled editor WASM class API has unexpected member '${name}' not in crates/qql-wasm; rebuild editors/vscode/wasm"
+              missing=1
+            fi
+          done < <(members "$bundled")
           exit "$missing"
       - name: Typecheck, lint, and test the extension
         working-directory: editors/vscode

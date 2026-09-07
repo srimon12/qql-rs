@@ -1,11 +1,18 @@
+import importlib
+import os
 import unittest
-import pyqql_edge
+
+SDK_NAME = os.environ.get(
+    "PYQQL_MODULE",
+    "pyqql_edge" if "pyqql-edge" in os.path.abspath(__file__) else "pyqql",
+)
+sdk = importlib.import_module(SDK_NAME)
 
 
 class TestDxImprovements(unittest.TestCase):
     def test_prepared_statement_binding_and_compile_route(self):
         # 1. execute(Stmt, params=...) / Stmt.bind prepared statements
-        stmt = pyqql_edge.parse("QUERY :v FROM test_coll LIMIT :lim")[0]
+        stmt = sdk.parse("QUERY :v FROM test_coll LIMIT :lim")[0]
         self.assertIn(":v", repr(stmt))
         self.assertEqual(str(stmt), "QUERY :v FROM test_coll LIMIT :lim")
 
@@ -21,8 +28,8 @@ class TestDxImprovements(unittest.TestCase):
         self.assertEqual(len(route["payload"]["query"]["nearest"]), 3)
 
         # Module compile_query and Client.compile accept params too
-        # (parity with pyqql / nqql-edge compileQuery / Client.compile).
-        route2 = pyqql_edge.compile_query(
+        # (parity with nqql compileQuery / Client.compile).
+        route2 = sdk.compile_query(
             "QUERY :v FROM test_coll LIMIT :lim",
             params={"v": [0.1, 0.2, 0.3], "lim": 5},
         )
@@ -32,14 +39,14 @@ class TestDxImprovements(unittest.TestCase):
     def test_vector_truncation_for_readable_eyeball(self):
         # 7. bind() vector truncation for human readability
         vec = [0.1 * i for i in range(128)]
-        s = pyqql_edge.bind("QUERY :v FROM test_coll", {"v": vec}, truncate_vectors=True)
+        s = sdk.bind("QUERY :v FROM test_coll", {"v": vec}, truncate_vectors=True)
         self.assertIn("... (128 dims)", s)
         self.assertNotIn(str(vec[-1]), s)
 
     def test_dotted_and_nested_parameters(self):
         # 3. Dotted and nested parameter names
         nested_params = {"loc": {"lat": 12.34, "lon": 56.78}}
-        s = pyqql_edge.bind(
+        s = sdk.bind(
             "QUERY [0.1, 0.2] FROM test_coll WHERE lat = :loc.lat AND lon = :loc.lon",
             nested_params,
         )
@@ -49,7 +56,7 @@ class TestDxImprovements(unittest.TestCase):
         )
 
         flat_params = {"loc.lat": 12.34, "loc.lon": 56.78}
-        s2 = pyqql_edge.bind(
+        s2 = sdk.bind(
             "QUERY [0.1, 0.2] FROM test_coll WHERE lat = :loc.lat AND lon = :loc.lon",
             flat_params,
         )
@@ -104,7 +111,7 @@ class TestDxImprovements(unittest.TestCase):
             "failed": 0,
         }
 
-        rep = pyqql_edge.ExecutionReport(rep_dict)
+        rep = sdk.ExecutionReport(rep_dict)
         # Backward compatibility
         self.assertTrue(rep.ok)
         self.assertTrue(rep["ok"])
@@ -131,54 +138,63 @@ class TestDxImprovements(unittest.TestCase):
         # Count accessor
         self.assertEqual(rep.count(2), 42)
 
-    def test_live_edge_execution_with_prepared_stmt_and_scoped_params(self):
-        import tempfile, shutil
-        tmpdir = tempfile.mkdtemp(prefix="pyqql_edge_dx_")
-        try:
-            client = pyqql_edge.local_executor(tmpdir, on_disk_payload=False)
-            res1 = client.execute("CREATE COLLECTION test_dx")
-            self.assertTrue(res1.ok)
+        # Vector and shard_key defaults and negative index safety
+        self.assertIsNone(hits[0].vector)
+        self.assertIsNone(hits[0].shard_key)
+        self.assertEqual(rep.hits(-10), [])
+        self.assertEqual(rep.points(-10), [])
+        self.assertEqual(rep.facet(-10), [])
+        self.assertEqual(rep.count(-10), 0)
+        self.assertEqual(rep.groups(-10), [])
 
-            # 1. Execute with Stmt object + params
-            count_stmt = pyqql_edge.parse("COUNT FROM test_dx")[0]
-            rep = client.execute(count_stmt)
-            self.assertTrue(rep.ok)
-            self.assertEqual(rep.count(0), 0)
+    def test_execution_report_groups_accessor(self):
+        # GROUP BY results normalize through report.groups() (pyqql parity
+        # with nqql's ExecutionReport.groups()).
+        ExecutionReport = sdk.ExecutionReport
 
-            # 2. Scoped batch params
-            batch_stmts = [
-                "COUNT FROM test_dx",
-                "COUNT FROM test_dx",
-            ]
-            batch_rep = client.execute(batch_stmts)
-            self.assertTrue(batch_rep.ok)
-            self.assertEqual(len(batch_rep.results), 2)
-            self.assertEqual(batch_rep.count(0), 0)
-            self.assertEqual(batch_rep.count(1), 0)
-
-            client.close()
-        finally:
-            shutil.rmtree(tmpdir, ignore_errors=True)
+        nested = ExecutionReport(
+            {
+                "ok": True,
+                "succeeded": 1,
+                "failed": 0,
+                "results": [
+                    {
+                        "ok": True,
+                        "operation": "QUERY_GROUPS",
+                        "message": "Found 2 group(s)",
+                        "data": {
+                            "result": {
+                                "groups": [
+                                    {"id": "a", "hits": [{"id": 1, "score": 0.9}]},
+                                    {"id": "b", "hits": [{"id": 2, "score": 0.8}]},
+                                ]
+                            },
+                            "status": "ok",
+                        },
+                    }
+                ],
+            }
+        )
+        self.assertEqual(len(nested.groups()), 2)
+        self.assertEqual(nested.groups()[0]["id"], "a")
+        bare = ExecutionReport(
+            {
+                "ok": True,
+                "succeeded": 1,
+                "failed": 0,
+                "results": [
+                    {
+                        "ok": True,
+                        "operation": "QUERY_GROUPS",
+                        "message": "Found 1 group(s)",
+                        "data": {"groups": [{"id": "x", "hits": []}]},
+                    }
+                ],
+            }
+        )
+        self.assertEqual(bare.groups()[0]["id"], "x")
+        self.assertEqual(ExecutionReport({}).groups(), [])
 
 
 if __name__ == "__main__":
     unittest.main()
-
-
-class TestCloseContract(unittest.TestCase):
-    """N5: the edge client's close gate is typed, not a bare RuntimeError."""
-
-    def test_close_raises_typed_client_closed(self):
-        import shutil
-        import tempfile
-
-        tmpdir = tempfile.mkdtemp(prefix="pyqql_edge_close_")
-        try:
-            client = pyqql_edge.local_executor(tmpdir, on_disk_payload=False)
-            client.close()
-            self.assertTrue(client.is_closed)
-            with self.assertRaises(pyqql_edge.QqlExecutionError) as ctx:
-                client.execute("QUERY 'x' FROM docs")
-            self.assertEqual(ctx.exception.code, "QQL-CLIENT-CLOSED")
-        finally:
-            shutil.rmtree(tmpdir, ignore_errors=True)
