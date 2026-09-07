@@ -1,4 +1,4 @@
-use super::ascii_equal_lower;
+use super::{ascii_equal_lower, syntax_err};
 use crate::ast::{CollectionConfig, OptimizationThreads, Value};
 use crate::error::QqlError;
 use alloc::string::String;
@@ -323,46 +323,37 @@ pub fn merge_collection_config(
 ) -> Result<(), QqlError> {
     if new.vectors.is_some() {
         if current.vectors.is_some() {
-            return Err(QqlError::syntax("VECTOR clause may only appear once", pos));
+            return Err(syntax_err("VECTOR clause may only appear once", pos));
         }
         current.vectors = new.vectors;
     }
     if new.hnsw.is_some() {
         if current.hnsw.is_some() {
-            return Err(QqlError::syntax("HNSW clause may only appear once", pos));
+            return Err(syntax_err("HNSW clause may only appear once", pos));
         }
         current.hnsw = new.hnsw;
     }
     if new.optimizers.is_some() {
         if current.optimizers.is_some() {
-            return Err(QqlError::syntax(
-                "OPTIMIZERS clause may only appear once",
-                pos,
-            ));
+            return Err(syntax_err("OPTIMIZERS clause may only appear once", pos));
         }
         current.optimizers = new.optimizers;
     }
     if new.params.is_some() {
         if current.params.is_some() {
-            return Err(QqlError::syntax("PARAMS clause may only appear once", pos));
+            return Err(syntax_err("PARAMS clause may only appear once", pos));
         }
         current.params = new.params;
     }
     if new.quantization.is_some() {
         if current.quantization.is_some() {
-            return Err(QqlError::syntax(
-                "QUANTIZATION clause may only appear once",
-                pos,
-            ));
+            return Err(syntax_err("QUANTIZATION clause may only appear once", pos));
         }
         current.quantization = new.quantization;
     }
     if new.quantization_update.is_some() {
         if current.quantization_update.is_some() {
-            return Err(QqlError::syntax(
-                "QUANTIZATION clause may only appear once",
-                pos,
-            ));
+            return Err(syntax_err("QUANTIZATION clause may only appear once", pos));
         }
         current.quantization_update = new.quantization_update;
     }
@@ -375,14 +366,14 @@ pub fn check_deleted_threshold(value: &Value, pos: usize) -> Result<(), QqlError
         Value::Int(n) => {
             let f = *n as f64;
             if !(0.0..=1.0).contains(&f) {
-                return Err(QqlError::syntax(
+                return Err(syntax_err(
                     "deleted_threshold must be between 0.0 and 1.0",
                     pos,
                 ));
             }
         }
         Value::Float(f) if !(0.0..=1.0).contains(f) => {
-            return Err(QqlError::syntax(
+            return Err(syntax_err(
                 "deleted_threshold must be between 0.0 and 1.0",
                 pos,
             ));
@@ -400,7 +391,7 @@ pub fn validate_index_options(options: &[(String, Value)], pos: usize) -> Result
             "is_tenant" | "on_disk" | "enable_hnsw" | "lowercase" | "ascii_folding"
             | "phrase_matching" | "lookup" | "range" | "is_principal" | "prefix" => {
                 if !matches!(v, Value::Bool(_)) {
-                    return Err(QqlError::syntax(
+                    return Err(syntax_err(
                         alloc::format!("{} must be true or false", k),
                         pos,
                     ));
@@ -408,7 +399,7 @@ pub fn validate_index_options(options: &[(String, Value)], pos: usize) -> Result
             }
             "min_token_len" | "max_token_len" => {
                 if !matches!(v, Value::Int(n) if *n >= 0) {
-                    return Err(QqlError::syntax(
+                    return Err(syntax_err(
                         alloc::format!("{} must be a non-negative integer", k),
                         pos,
                     ));
@@ -416,10 +407,7 @@ pub fn validate_index_options(options: &[(String, Value)], pos: usize) -> Result
             }
             "tokenizer" | "stemmer" => {
                 if !matches!(v, Value::Str(_)) {
-                    return Err(QqlError::syntax(
-                        alloc::format!("{} must be a string", k),
-                        pos,
-                    ));
+                    return Err(syntax_err(alloc::format!("{} must be a string", k), pos));
                 }
             }
             "memory" => validate_memory_value(k, v, pos, true)?,
@@ -427,7 +415,7 @@ pub fn validate_index_options(options: &[(String, Value)], pos: usize) -> Result
                 Value::List(items) => {
                     for item in items {
                         if !matches!(item, Value::Str(_)) {
-                            return Err(QqlError::syntax(
+                            return Err(syntax_err(
                                 alloc::format!("{} must be a list of strings", k),
                                 pos,
                             ));
@@ -435,14 +423,14 @@ pub fn validate_index_options(options: &[(String, Value)], pos: usize) -> Result
                     }
                 }
                 _ => {
-                    return Err(QqlError::syntax(
+                    return Err(syntax_err(
                         alloc::format!("{} must be a list of strings", k),
                         pos,
                     ));
                 }
             },
             _ => {
-                return Err(QqlError::syntax(
+                return Err(syntax_err(
                     alloc::format!("unknown index option: {}", k),
                     pos,
                 ));

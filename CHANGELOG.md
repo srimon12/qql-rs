@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 🚀 CLI & Developer Experience
+- **CLI Parameter Binding** — Added `--param key=value` (`-p`) and `--params-file <path>` support to `qql exec` and `qql explain` for executing and explaining parameterized queries directly from the command line.
+- **Interactive REPL Parameters** — Added `\param [key=value | clear]` (`\p`) command in the interactive REPL for inspecting, setting, and clearing session-scoped parameter bindings.
+- **WASM DX Wrapper** — Added `dx.js` helper providing typed `ExecutionReport` and `ScoredPoint` accessors (`.hits()`, `.points()`, `.facet()`, `.count()`, `.groups()`) for WebAssembly consumers.
+
+### ⚡ Engine Reliability & Parity
+- **WASM Batch Orchestration Parity** — `qql-wasm` now detects per-item `status: "error"` in 200 batch responses via shared `qql_plan::batch_item_error`, and retries batch operations individually when `on_error = "continue"` on batch RPC failure or cardinality mismatch.
+- **Executor Latch Safety** — `Executor::close()` only latches the closed state atomically after backend cleanup succeeds; subsequent close calls are immediate no-ops.
+- **Monotonic Correlation IDs** — Switched `next_request_id` to monotonic 64-bit nanosecond timestamps, eliminating 1-second counter wrapping.
+- **Strict Facet Validation** — `FACET ... WITH (limit = 0)` is strictly rejected with `QQL-PARSE-POSITIVE-INTEGER`, matching explicit `LIMIT 0` behavior.
+
+### 🧹 Structural Deduplication & Core Hygiene
+- **Unified Vector Conversions** — Replaced duplicate vector extraction loops in `params.rs` with canonical `vector_from_value`, unifying dense, sparse dictionary, and multi-dense vector validation across parsing and binding.
+- **Strict ISO-8601 Datetime Parsing** — Centralized `looks_like_iso_datetime` in `formula.rs`, strictly rejecting trailing non-datetime characters across all parsing and binding paths.
+- **String & Identifier Helpers** — Single-sourced `is_simple_ident` and `escape_string` in `ast/mod.rs`, eliminating duplicated format and escape logic between `fmt.rs` and `params.rs`.
+- **Canonical Statement Kinds** — Added `Stmt::stmt_kind` to `ast/statement.rs` and eliminated duplicate classifications in `transform.rs`.
+- **Eliminated `QqlError::syntax`** — Replaced all legacy syntax constructors across parser modules with explicit `QqlError::parse("QQL-PARSE-SYNTAX", ...)` or `syntax_err`.
+- **Parameter Binding Fail-Closed** — Binding against DDL or unsupported statement types now fails closed with `QQL-BIND-UNSUPPORTED-STATEMENT`.
+- **Conformance Suite Error Pinning** — All 9 unpinned legacy syntax error fixtures in `syntax-errors.qql` now assert exact error codes.
+- **CI Private Crates Verification** — Added automated clippy and test steps covering private binding crates (`pyqql-common`, `nqql-common`).
+
 ## [0.4.0] - 2026-09-07
 
 ### 🚀 Prepared Statements & Parameter Binding

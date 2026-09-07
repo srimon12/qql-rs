@@ -11,8 +11,8 @@ use crate::token::TokenKind;
 use super::{
     AstLowerer, ascii_equal, ascii_equal_lower, config_bool, config_float_range, config_has_key,
     config_max_optimization_threads, config_non_negative_u64, config_positive_u64, config_value,
-    merge_collection_config, validate_hnsw_value, validate_optimizers_value, validate_params_value,
-    validate_vectors_value,
+    merge_collection_config, syntax_err, validate_hnsw_value, validate_optimizers_value,
+    validate_params_value, validate_vectors_value,
 };
 
 fn validation_err(
@@ -66,15 +66,12 @@ fn config_dense_datatype(
         None => Ok(None),
         Some(Value::Str(s)) => match VectorDatatype::parse(s) {
             Some(dt) => Ok(Some(dt)),
-            None => Err(QqlError::syntax(
+            None => Err(syntax_err(
                 "datatype must be float32, float16, uint8, or turbo4 for VECTOR",
                 pos,
             )),
         },
-        Some(_) => Err(QqlError::syntax(
-            "datatype must be a string for VECTOR",
-            pos,
-        )),
+        Some(_) => Err(syntax_err("datatype must be a string for VECTOR", pos)),
     }
 }
 
@@ -204,7 +201,7 @@ impl<'a> AstLowerer<'a> {
                 key.to_ascii_lowercase().as_str(),
                 "on_disk" | "memory" | "datatype"
             ) {
-                return Err(QqlError::syntax(
+                return Err(syntax_err(
                     alloc::format!(
                         "unknown VECTOR parameter '{}'. Expected: on_disk, memory, datatype",
                         key
@@ -243,7 +240,7 @@ impl<'a> AstLowerer<'a> {
                 | "max_optimization_threads"
                 | "prevent_unoptimized" => {}
                 _ => {
-                    return Err(QqlError::syntax(
+                    return Err(syntax_err(
                         alloc::format!(
                             "unknown OPTIMIZERS parameter '{}'. Expected: deleted_threshold, vacuum_min_vector_number, default_segment_number, max_segment_size, memmap_threshold, indexing_threshold, flush_interval_sec, max_optimization_threads, prevent_unoptimized",
                             key
@@ -260,13 +257,13 @@ impl<'a> AstLowerer<'a> {
             if lower.as_str() == "max_optimization_threads" {
                 match value {
                     Value::Int(n) if *n <= 0 => {
-                        return Err(QqlError::syntax(
+                        return Err(syntax_err(
                             "max_optimization_threads must be a positive integer or 'auto'",
                             self.peek()?.pos,
                         ));
                     }
                     Value::Str(s) if !ascii_equal_lower(s, "auto") => {
-                        return Err(QqlError::syntax(
+                        return Err(syntax_err(
                             "max_optimization_threads must be a positive integer or 'auto'",
                             self.peek()?.pos,
                         ));
@@ -458,7 +455,7 @@ impl<'a> AstLowerer<'a> {
 
         let err_pos = self.peek()?.pos;
         let type_raw = config_value(&config, "type").ok_or_else(|| {
-            QqlError::syntax(
+            syntax_err(
                 "QUANTIZATION config requires a 'type' (scalar, binary, product, turbo)",
                 err_pos,
             )
@@ -467,7 +464,7 @@ impl<'a> AstLowerer<'a> {
         let type_str = match type_raw {
             Value::Str(s) => s,
             _ => {
-                return Err(QqlError::syntax(
+                return Err(syntax_err(
                     "QUANTIZATION 'type' must be a string",
                     self.peek()?.pos,
                 ));
@@ -480,7 +477,7 @@ impl<'a> AstLowerer<'a> {
             "product" => QuantizationType::Product,
             "turbo" => QuantizationType::Turbo,
             _ => {
-                return Err(QqlError::syntax(
+                return Err(syntax_err(
                     alloc::format!(
                         "unknown QUANTIZATION type '{}'. Expected scalar, binary, product, turbo",
                         type_str
@@ -496,7 +493,7 @@ impl<'a> AstLowerer<'a> {
         if qtype == QuantizationType::Scalar && config_has_key(&config, "quantile") {
             quantile = config_float_range(&config, "quantile", 0.0, 1.0);
             if quantile.is_none() {
-                return Err(QqlError::syntax(
+                return Err(syntax_err(
                     "quantile must be between 0.0 and 1.0",
                     self.peek()?.pos,
                 ));
@@ -514,7 +511,7 @@ impl<'a> AstLowerer<'a> {
             };
             if let Some(b) = bits_val {
                 if b != 1.0 && b != 1.5 && b != 2.0 && b != 4.0 {
-                    return Err(QqlError::syntax(
+                    return Err(syntax_err(
                         "bits must be one of 1, 1.5, 2, or 4 for TURBO quantization",
                         self.peek()?.pos,
                     ));
@@ -531,7 +528,7 @@ impl<'a> AstLowerer<'a> {
             if matches!(c_lower.as_str(), "x4" | "x8" | "x16" | "x32" | "x64") {
                 compression = Some(c_lower);
             } else {
-                return Err(QqlError::syntax(
+                return Err(syntax_err(
                     "compression must be x4, x8, x16, x32, or x64 for PRODUCT quantization",
                     self.peek()?.pos,
                 ));
@@ -555,7 +552,7 @@ impl<'a> AstLowerer<'a> {
                         }
                     }
                     _ => {
-                        return Err(QqlError::syntax(
+                        return Err(syntax_err(
                             "encoding must be a string or number for BINARY quantization",
                             self.peek()?.pos,
                         ));
@@ -567,7 +564,7 @@ impl<'a> AstLowerer<'a> {
                     "two_bits" | "twobits" | "2" => "two_bits".into(),
                     "one_and_half_bits" | "oneandhalfbits" | "1.5" => "one_and_half_bits".into(),
                     _ => {
-                        return Err(QqlError::syntax(
+                        return Err(syntax_err(
                             "encoding must be one_bit (1), two_bits (2), or one_and_half_bits (1.5) for BINARY quantization",
                             self.peek()?.pos,
                         ));
@@ -583,7 +580,7 @@ impl<'a> AstLowerer<'a> {
                 ) {
                     query_encoding = Some(qe_lower);
                 } else {
-                    return Err(QqlError::syntax(
+                    return Err(syntax_err(
                         "query_encoding must be default, binary, scalar4bits, or scalar8bits for BINARY quantization",
                         self.peek()?.pos,
                     ));
@@ -619,18 +616,18 @@ impl<'a> AstLowerer<'a> {
         let config = self.parse_config_block()?;
         let err_pos = self.peek()?.pos;
         let comp = config_value(&config, "comparator")
-            .ok_or_else(|| QqlError::syntax("MULTIVECTOR config requires 'comparator'", err_pos))?;
+            .ok_or_else(|| syntax_err("MULTIVECTOR config requires 'comparator'", err_pos))?;
         let comparator = match comp {
             Value::Str(s) => s.to_ascii_lowercase(),
             _ => {
-                return Err(QqlError::syntax(
+                return Err(syntax_err(
                     "MULTIVECTOR comparator must be a string",
                     self.peek()?.pos,
                 ));
             }
         };
         if comparator != "max_sim" {
-            return Err(QqlError::syntax(
+            return Err(syntax_err(
                 alloc::format!(
                     "MULTIVECTOR comparator must be 'max_sim', got '{}'",
                     comparator
@@ -653,7 +650,7 @@ impl<'a> AstLowerer<'a> {
                 lower.as_str(),
                 "modifier" | "full_scan_threshold" | "on_disk" | "datatype" | "memory"
             ) {
-                return Err(QqlError::syntax(
+                return Err(syntax_err(
                     alloc::format!(
                         "unknown SPARSE/INDEX parameter '{}'. Expected: modifier, full_scan_threshold, on_disk, datatype, memory",
                         key
@@ -669,7 +666,7 @@ impl<'a> AstLowerer<'a> {
             if matches!(m_lower.as_str(), "none" | "idf") {
                 modifier = Some(m_lower);
             } else {
-                return Err(QqlError::syntax(
+                return Err(syntax_err(
                     "modifier must be none or idf for SPARSE vector",
                     self.peek()?.pos,
                 ));
@@ -684,14 +681,14 @@ impl<'a> AstLowerer<'a> {
             Some(Value::Str(s)) => match VectorDatatype::parse_sparse(s) {
                 Some(dt) => Some(dt),
                 None => {
-                    return Err(QqlError::syntax(
+                    return Err(syntax_err(
                         "datatype must be float32, uint8, float16, or default for SPARSE index",
                         self.peek()?.pos,
                     ));
                 }
             },
             Some(_) => {
-                return Err(QqlError::syntax(
+                return Err(syntax_err(
                     "datatype must be a string for SPARSE index",
                     self.peek()?.pos,
                 ));

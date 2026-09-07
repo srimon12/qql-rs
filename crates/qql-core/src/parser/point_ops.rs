@@ -191,11 +191,19 @@ impl<'a> AstLowerer<'a> {
                             if let crate::ast::Value::Bool(b) = v {
                                 exact = Some(*b);
                             }
-                        } else if k.eq_ignore_ascii_case("limit")
-                            && let crate::ast::Value::Int(i) = v
-                            && *i > 0
-                        {
-                            limit = Some(*i as u64);
+                        } else if k.eq_ignore_ascii_case("limit") {
+                            match v {
+                                crate::ast::Value::Int(i) if *i > 0 => {
+                                    limit = Some(*i as u64);
+                                }
+                                _ => {
+                                    return Err(QqlError::parse(
+                                        "QQL-PARSE-POSITIVE-INTEGER",
+                                        "FACET limit must be a positive integer",
+                                        self.peek()?.span,
+                                    ));
+                                }
+                            }
                         }
                     }
                 }

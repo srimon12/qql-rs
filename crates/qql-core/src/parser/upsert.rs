@@ -145,10 +145,10 @@ fn point_vectors_from_value(
         {
             let mut vectors = Vec::new();
             for (name, value) in items {
-                vectors.push((name, super::helpers::vector_from_value(value, span)?));
+                vectors.push((name, super::helpers::vector_from_value(value, Some(span))?));
             }
             Ok(PointVectors::Named(vectors))
         }
-        value => super::helpers::vector_from_value(value, span).map(PointVectors::Unnamed),
+        value => super::helpers::vector_from_value(value, Some(span)).map(PointVectors::Unnamed),
     }
 }

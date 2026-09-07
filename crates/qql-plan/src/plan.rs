@@ -421,6 +421,45 @@ pub fn statement_batch_key(stmt: &Stmt) -> Option<BatchKey> {
     }
 }
 
+/// Detect per-item errors in Qdrant batch endpoint responses.
+///
+/// Qdrant batch endpoints answer per item; a 200 response can still carry
+/// per-item failures (`status: "error"`).
+pub fn batch_item_error(item: &serde_json::Value) -> Option<String> {
+    if item.get("status").and_then(serde_json::Value::as_str) == Some("error") {
+        return Some(
+            item.get("error")
+                .and_then(serde_json::Value::as_str)
+                .or_else(|| {
+                    item.pointer("/status/error")
+                        .and_then(serde_json::Value::as_str)
+                })
+                .unwrap_or("batch item failed")
+                .to_string(),
+        );
+    }
+    None
+}
+
+/// Verify that a batch response has the expected cardinality.
+///
+/// Returns `Ok(())` if `received == expected`, or a `QQL-BATCH-CARDINALITY` error otherwise.
+pub fn verify_batch_cardinality(
+    kind: &str,
+    expected: usize,
+    received: usize,
+) -> Result<(), QqlError> {
+    if expected == received {
+        Ok(())
+    } else {
+        Err(QqlError::transport(
+            "QQL-BATCH-CARDINALITY",
+            alloc::format!("{kind} batch returned {received} results for {expected} operations"),
+            None,
+        ))
+    }
+}
+
 /// An unbound parameter placeholder (`:name` / `?idx`) that reaches planning
 /// would ship a broken request — the string path with no `params` used to
 /// send the raw placeholder to Qdrant and get a 422 back. Probe with the

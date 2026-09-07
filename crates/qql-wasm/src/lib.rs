@@ -1357,7 +1357,7 @@ impl Client {
         results: &mut Vec<serde_json::Value>,
     ) -> Result<(), JsValue> {
         use qql_plan::mutation::planned_to_update_operation;
-        use qql_plan::{PlannedOperation, QueryBatchRequest, UpdateBatchRequest};
+        use qql_plan::{PlannedOperation, QueryBatchRequest, UpdateBatchRequest, batch_item_error};
 
         if pending.is_empty() {
             return Ok(());
@@ -1397,14 +1397,19 @@ impl Client {
                                 "QQL-BATCH-CARDINALITY: query batch returned {} results for {expected} operations",
                                 values.len()
                             ));
-                            self.collect_batch_error(
-                                error,
-                                &vec!["QUERY"; expected],
-                                on_error,
-                                results,
-                            )?;
+                            if on_error == WasmOnError::Stop {
+                                return Err(error);
+                            }
+                            for operation in operations {
+                                self.dispatch_or_collect(operation, on_error, results)
+                                    .await?;
+                            }
                         } else {
                             for value in values {
+                                if let Some(msg) = batch_item_error(&value) {
+                                    results.push(exec_response(false, "QUERY", &msg, None));
+                                    continue;
+                                }
                                 let hits = wasm_search_hits(&value);
                                 let count = hits.as_array().map_or(0, Vec::len);
                                 results.push(exec_response(
@@ -1416,12 +1421,15 @@ impl Client {
                             }
                         }
                     }
-                    Err(error) => self.collect_batch_error(
-                        error,
-                        &vec!["QUERY"; expected],
-                        on_error,
-                        results,
-                    )?,
+                    Err(error) => {
+                        if on_error == WasmOnError::Stop {
+                            return Err(error);
+                        }
+                        for operation in operations {
+                            self.dispatch_or_collect(operation, on_error, results)
+                                .await?;
+                        }
+                    }
                 }
             }
             _ => {
@@ -1467,9 +1475,19 @@ impl Client {
                                 "QQL-BATCH-CARDINALITY: update batch returned {} results for {expected} operations",
                                 values.len()
                             ));
-                            self.collect_batch_error(error, &labels, on_error, results)?;
+                            if on_error == WasmOnError::Stop {
+                                return Err(error);
+                            }
+                            for operation in operations {
+                                self.dispatch_or_collect(operation, on_error, results)
+                                    .await?;
+                            }
                         } else {
                             for (value, label) in values.into_iter().zip(labels.iter()) {
+                                if let Some(msg) = batch_item_error(&value) {
+                                    results.push(exec_response(false, label, &msg, None));
+                                    continue;
+                                }
                                 results.push(exec_response(
                                     true,
                                     label,
@@ -1480,30 +1498,17 @@ impl Client {
                         }
                     }
                     Err(error) => {
-                        self.collect_batch_error(error, &labels, on_error, results)?;
+                        if on_error == WasmOnError::Stop {
+                            return Err(error);
+                        }
+                        for operation in operations {
+                            self.dispatch_or_collect(operation, on_error, results)
+                                .await?;
+                        }
                     }
                 }
             }
         }
-        Ok(())
-    }
-
-    fn collect_batch_error(
-        &self,
-        error: JsValue,
-        labels: &[&str],
-        on_error: WasmOnError,
-        results: &mut Vec<serde_json::Value>,
-    ) -> Result<(), JsValue> {
-        if on_error == WasmOnError::Stop {
-            return Err(error);
-        }
-        let message = error.as_string().unwrap_or_default();
-        results.extend(
-            labels
-                .iter()
-                .map(|label| exec_response(false, label, &message, None)),
-        );
         Ok(())
     }
 

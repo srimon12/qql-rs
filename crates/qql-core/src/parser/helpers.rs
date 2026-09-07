@@ -460,7 +460,7 @@ impl<'a> AstLowerer<'a> {
     pub fn parse_vector_value(&mut self) -> Result<VectorValue, QqlError> {
         let span = self.peek()?.span;
         let value = self.parse_value()?;
-        vector_from_value(value, span)
+        vector_from_value(value, Some(span))
     }
 }
 
@@ -478,22 +478,30 @@ pub fn point_id_from_value(value: Value, span: Span) -> Result<PointId, QqlError
     }
 }
 
-pub(super) fn vector_from_value(value: Value, span: Span) -> Result<VectorValue, QqlError> {
+pub(crate) fn vector_from_value(value: Value, span: Option<Span>) -> Result<VectorValue, QqlError> {
     match value {
-        Value::List(values) if values.iter().all(|value| matches!(value, Value::List(_))) => values
-            .into_iter()
-            .map(|value| match value {
-                Value::List(row) => numeric_vector(row, span),
-                _ => unreachable!(),
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .and_then(|rows| {
-                if rows.is_empty() {
-                    Err(vector_error("multidense vector cannot be empty", span))
-                } else {
-                    Ok(VectorValue::MultiDense(rows))
+        Value::List(values) if values.iter().all(|value| matches!(value, Value::List(_))) => {
+            if values.is_empty() {
+                return Err(vector_error("multidense vector cannot be empty", span));
+            }
+            let mut rows = Vec::with_capacity(values.len());
+            for value in values {
+                match value {
+                    Value::List(row) => {
+                        let row_vec = numeric_vector(row, span)?;
+                        if row_vec.is_empty() {
+                            return Err(vector_error(
+                                "multidense vector rows cannot be empty",
+                                span,
+                            ));
+                        }
+                        rows.push(row_vec);
+                    }
+                    _ => unreachable!(),
                 }
-            }),
+            }
+            Ok(VectorValue::MultiDense(rows))
+        }
         Value::List(values) => numeric_vector(values, span).and_then(|values| {
             if values.is_empty() {
                 Err(vector_error("dense vector cannot be empty", span))
@@ -545,18 +553,30 @@ pub(super) fn vector_from_value(value: Value, span: Span) -> Result<VectorValue,
     }
 }
 
-fn numeric_vector(values: Vec<Value>, span: Span) -> Result<Vec<f32>, QqlError> {
+fn numeric_vector(values: Vec<Value>, span: Option<Span>) -> Result<Vec<f32>, QqlError> {
     values
         .into_iter()
         .map(|value| {
             let value = match value {
                 Value::Int(value) => value as f64,
                 Value::Float(value) => value,
-                _ => return Err(vector_error("vector elements must be numeric", span)),
+                _ => {
+                    let code = if span.is_none() {
+                        "QQL-BIND-TYPE-MISMATCH"
+                    } else {
+                        "QQL-VALIDATION-VECTOR"
+                    };
+                    return Err(QqlError::validation(
+                        code,
+                        "vector elements must be numeric",
+                        span,
+                    ));
+                }
             };
             let converted = value as f32;
             if !value.is_finite() || !converted.is_finite() {
-                return Err(vector_error(
+                return Err(QqlError::validation(
+                    "QQL-VALIDATION-VECTOR",
                     "vector elements must be finite f32 values",
                     span,
                 ));
@@ -566,6 +586,11 @@ fn numeric_vector(values: Vec<Value>, span: Span) -> Result<Vec<f32>, QqlError> 
         .collect()
 }
 
-fn vector_error(message: &'static str, span: Span) -> QqlError {
-    QqlError::validation("QQL-VALIDATION-VECTOR", message, Some(span))
+fn vector_error(message: &'static str, span: Option<Span>) -> QqlError {
+    let code = if span.is_none() {
+        "QQL-BIND-TYPE-MISMATCH"
+    } else {
+        "QQL-VALIDATION-VECTOR"
+    };
+    QqlError::validation(code, message, span)
 }

@@ -2055,36 +2055,6 @@ fn render_name(name: &str) -> String {
     }
 }
 
-fn is_simple_ident(name: &str) -> bool {
-    let mut chars = name.chars();
-    match chars.next() {
-        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
-        _ => return false,
-    }
-    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
-}
-
-/// Escape a string for a QQL single-quoted literal.
-///
-/// Only escape sequences the parser decodes are emitted (`\\`, `\'`, `\n`,
-/// `\r`, `\t`), so the rendered literal always re-parses to the same content.
-/// Null bytes are dropped (the parser has no escape for them).
-fn escape_string(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for ch in value.chars() {
-        match ch {
-            '\\' => out.push_str("\\\\"),
-            '\'' => out.push_str("\\'"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\0' => {}
-            c => out.push(c),
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

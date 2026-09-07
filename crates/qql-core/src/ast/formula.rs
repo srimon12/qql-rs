@@ -148,3 +148,74 @@ pub enum FormulaExpr {
         key: String,
     },
 }
+
+/// Returns `true` if `s` is a valid ISO 8601 date or datetime string (`YYYY-MM-DD` or `YYYY-MM-DD[T| ]hh:mm:ss[.s][Z|±hh[:mm]]`).
+/// Strictly rejects trailing non-datetime characters (e.g. "2024-01-01XYZ").
+pub fn looks_like_iso_datetime(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    if bytes.len() < 10 {
+        return false;
+    }
+    // Check YYYY-MM-DD
+    if !bytes[0..4].iter().all(u8::is_ascii_digit)
+        || bytes[4] != b'-'
+        || !bytes[5..7].iter().all(u8::is_ascii_digit)
+        || bytes[7] != b'-'
+        || !bytes[8..10].iter().all(u8::is_ascii_digit)
+    {
+        return false;
+    }
+    if bytes.len() == 10 {
+        return true;
+    }
+    // If longer, must be separated by 'T', 't', or ' '
+    let sep = bytes[10];
+    if sep != b'T' && sep != b't' && sep != b' ' {
+        return false;
+    }
+    // Must have at least hh:mm:ss (8 chars) -> 10 + 1 + 8 = 19
+    if bytes.len() < 19 {
+        return false;
+    }
+    if !bytes[11..13].iter().all(u8::is_ascii_digit)
+        || bytes[13] != b':'
+        || !bytes[14..16].iter().all(u8::is_ascii_digit)
+        || bytes[16] != b':'
+        || !bytes[17..19].iter().all(u8::is_ascii_digit)
+    {
+        return false;
+    }
+    let mut i = 19;
+    // Optional fractional seconds: .123...
+    if i < bytes.len() && bytes[i] == b'.' {
+        i += 1;
+        let frac_start = i;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        if i == frac_start {
+            return false; // '.' with no digits following
+        }
+    }
+    if i == bytes.len() {
+        return true;
+    }
+    // Optional timezone: 'Z', 'z', or '+hh[:mm]' / '-hh[:mm]'
+    if bytes[i] == b'Z' || bytes[i] == b'z' {
+        return i + 1 == bytes.len();
+    }
+    if bytes[i] == b'+' || bytes[i] == b'-' {
+        i += 1;
+        let tz_start = i;
+        while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b':') {
+            i += 1;
+        }
+        let tz_len = i - tz_start;
+        // Valid timezone specs: hh (2), hhmm (4), hh:mm (5)
+        if (tz_len == 2 || tz_len == 4 || tz_len == 5) && i == bytes.len() {
+            return true;
+        }
+        return false;
+    }
+    false
+}

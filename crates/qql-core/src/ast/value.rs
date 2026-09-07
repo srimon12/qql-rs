@@ -103,21 +103,11 @@ impl Value {
                 .map(Self::from_json)
                 .collect::<Result<Vec<_>, _>>()
                 .map(Self::List),
-            serde_json::Value::Object(items) => {
-                if items.len() == 1 {
-                    if let Some(p) = items.get("$param").and_then(|v| v.as_str()) {
-                        return Ok(Self::Param(p.to_string()));
-                    }
-                    if let Some(i) = items.get("$param_idx").and_then(|v| v.as_u64()) {
-                        return Ok(Self::PositionalParam(i as usize));
-                    }
-                }
-                items
-                    .into_iter()
-                    .map(|(key, value)| Self::from_json(value).map(|value| (key, value)))
-                    .collect::<Result<Vec<_>, _>>()
-                    .map(Self::Dict)
-            }
+            serde_json::Value::Object(items) => items
+                .into_iter()
+                .map(|(key, value)| Self::from_json(value).map(|value| (key, value)))
+                .collect::<Result<Vec<_>, _>>()
+                .map(Self::Dict),
         }
     }
 

@@ -240,9 +240,13 @@ impl Executor {
     /// `QQL-CLIENT-CLOSED` — a closed client cannot run more statements.
     /// Calling `close` again is a no-op.
     pub async fn close(&self) -> Result<(), QqlError> {
+        if self.is_closed() {
+            return Ok(());
+        }
+        self.client.close().await?;
         self.closed
             .store(true, std::sync::atomic::Ordering::Release);
-        self.client.close().await
+        Ok(())
     }
 
     /// Whether [`Executor::close`] has been called.
@@ -632,14 +636,9 @@ impl Executor {
                     }
                 }
                 Ok(responses) => {
-                    let error = QqlError::transport(
-                        "QQL-BATCH-CARDINALITY",
-                        format!(
-                            "query batch returned {} results for {expected} operations",
-                            responses.len()
-                        ),
-                        None,
-                    );
+                    let error =
+                        qql_plan::verify_batch_cardinality("query", expected, responses.len())
+                            .unwrap_err();
                     if stop_on_error {
                         return Err(error);
                     }
@@ -760,14 +759,8 @@ impl Executor {
                 }
             }
             Ok(responses) => {
-                let error = QqlError::transport(
-                    "QQL-BATCH-CARDINALITY",
-                    format!(
-                        "update batch returned {} results for {expected} operations",
-                        responses.len()
-                    ),
-                    None,
-                );
+                let error = qql_plan::verify_batch_cardinality("update", expected, responses.len())
+                    .unwrap_err();
                 if stop_on_error {
                     return Err(error);
                 }
@@ -803,19 +796,7 @@ impl Executor {
     /// per-item failures (`status: "error"`). Detect them so successes and
     /// failures stay aligned with the request order.
     fn batch_item_error(item: &serde_json::Value) -> Option<String> {
-        if item.get("status").and_then(serde_json::Value::as_str) == Some("error") {
-            return Some(
-                item.get("error")
-                    .and_then(serde_json::Value::as_str)
-                    .or_else(|| {
-                        item.pointer("/status/error")
-                            .and_then(serde_json::Value::as_str)
-                    })
-                    .unwrap_or("batch item failed")
-                    .to_string(),
-            );
-        }
-        None
+        qql_plan::batch_item_error(item)
     }
 
     /// Shared preparation: embeddings, named-vector validation, and UPSERT

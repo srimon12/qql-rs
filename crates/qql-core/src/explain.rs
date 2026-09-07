@@ -153,12 +153,18 @@ pub fn explain_node(statement: &Stmt) -> String {
                 }
             }
 
-            let limit = query
-                .page
-                .limit
-                .map(|l| l.to_string())
-                .unwrap_or_else(|| "default".into());
-            let offset = query.page.offset.unwrap_or(0);
+            let limit = if let Some(param) = &query.page.limit_param {
+                param.clone()
+            } else if let Some(l) = query.page.limit {
+                l.to_string()
+            } else {
+                "default".into()
+            };
+            let offset = if let Some(param) = &query.page.offset_param {
+                param.clone()
+            } else {
+                query.page.offset.unwrap_or(0).to_string()
+            };
             let _ = writeln!(output, "└── Pagination: limit={}, offset={}", limit, offset);
         }
         Stmt::Scroll(statement) => {
@@ -170,7 +176,11 @@ pub fn explain_node(statement: &Stmt) -> String {
             if let Some(shard) = &statement.shard_key {
                 let _ = writeln!(output, "├── Shard Key: '{}'", shard);
             }
-            let _ = writeln!(output, "└── Limit: {}", statement.limit);
+            if let Some(param) = &statement.limit_param {
+                let _ = writeln!(output, "└── Limit: {}", param);
+            } else {
+                let _ = writeln!(output, "└── Limit: {}", statement.limit);
+            }
         }
         Stmt::Upsert(statement) => {
             output.push_str("Statement: UPSERT\n");
@@ -256,7 +266,12 @@ pub fn explain_node(statement: &Stmt) -> String {
             if let Some(f) = &statement.filter {
                 let _ = writeln!(output, "├── Filter: {}", render_filter(f));
             }
-            if let Some(l) = statement.limit {
+            if let Some(shard) = &statement.shard_key {
+                let _ = writeln!(output, "├── Shard Key: '{}'", shard);
+            }
+            if let Some(param) = &statement.limit_param {
+                let _ = writeln!(output, "├── Limit: {}", param);
+            } else if let Some(l) = statement.limit {
                 let _ = writeln!(output, "├── Limit: {}", l);
             }
             let _ = writeln!(output, "└── Exact: {}", statement.exact.unwrap_or(false));

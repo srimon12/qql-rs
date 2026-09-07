@@ -55,9 +55,10 @@ impl<'a> AstLowerer<'a> {
                             sparse_vector = Some(v);
                         }
                     } else {
-                        return Err(QqlError::syntax(
+                        return Err(QqlError::parse(
+                            "QQL-PARSE-SYNTAX",
                             "expected VECTOR after DENSE/SPARSE",
-                            self.peek()?.pos,
+                            self.peek()?.span,
                         ));
                     }
                 }
@@ -94,9 +95,10 @@ impl<'a> AstLowerer<'a> {
                     let size_tok = self.peek()?;
                     let size = self.parse_numeric_literal()?;
                     if size <= 0.0 || size != (size as u64) as f64 {
-                        return Err(QqlError::syntax(
+                        return Err(QqlError::parse(
+                            "QQL-PARSE-SYNTAX",
                             "vector size must be a positive integer",
-                            size_tok.pos,
+                            size_tok.span,
                         ));
                     }
                     // Qdrant rejects dimensions above 65536 (VectorParams.size
@@ -116,9 +118,10 @@ impl<'a> AstLowerer<'a> {
                         TokenKind::Euclid => VectorDistance::Euclid,
                         TokenKind::Manhattan => VectorDistance::Manhattan,
                         _ => {
-                            return Err(QqlError::syntax(
+                            return Err(QqlError::parse(
+                                "QQL-PARSE-SYNTAX",
                                 "expected distance metric (COSINE, DOT, EUCLID, MANHATTAN)",
-                                dist_tok.pos,
+                                dist_tok.span,
                             ));
                         }
                     };
@@ -151,9 +154,10 @@ impl<'a> AstLowerer<'a> {
                             self.advance()?;
                             vec_cfg = self.parse_vectors_config_block()?.vectors;
                         } else {
-                            return Err(QqlError::syntax(
+                            return Err(QqlError::parse(
+                                "QQL-PARSE-SYNTAX",
                                 "expected HNSW, QUANTIZATION, MULTIVECTOR, or VECTOR after WITH for vector configuration",
-                                self.peek()?.pos,
+                                self.peek()?.span,
                             ));
                         }
                     }
@@ -201,9 +205,10 @@ impl<'a> AstLowerer<'a> {
                                 modifier = mod_val;
                             }
                         } else {
-                            return Err(QqlError::syntax(
+                            return Err(QqlError::parse(
+                                "QQL-PARSE-SYNTAX",
                                 "expected SPARSE or INDEX after WITH for sparse vector configuration",
-                                self.peek()?.pos,
+                                self.peek()?.span,
                             ));
                         }
                     }
@@ -213,16 +218,21 @@ impl<'a> AstLowerer<'a> {
                         modifier,
                     });
                 } else {
-                    return Err(QqlError::syntax(
+                    return Err(QqlError::parse(
+                        "QQL-PARSE-SYNTAX",
                         "expected VECTOR or SPARSE after vector name",
-                        self.peek()?.pos,
+                        self.peek()?.span,
                     ));
                 }
 
                 if self.peek()?.kind == TokenKind::Comma {
                     self.advance()?;
                 } else if self.peek()?.kind != TokenKind::Rparen {
-                    return Err(QqlError::syntax("expected comma or )", self.peek()?.pos));
+                    return Err(QqlError::parse(
+                        "QQL-PARSE-SYNTAX",
+                        "expected comma or )",
+                        self.peek()?.span,
+                    ));
                 }
             }
             self.expect(TokenKind::Rparen)?;

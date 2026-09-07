@@ -1517,6 +1517,37 @@ impl<'de> serde::Deserialize<'de> for Stmt {
     }
 }
 
+impl Stmt {
+    /// Return the canonical keyword name for this statement variant (e.g. "QUERY", "CREATE COLLECTION").
+    pub fn stmt_kind(&self) -> &'static str {
+        match self {
+            Self::Query(_) => "QUERY",
+            Self::Scroll(_) => "SCROLL",
+            Self::Count(_) => "COUNT",
+            Self::Facet(_) => "FACET",
+            Self::Upsert(_) => "UPSERT",
+            Self::Delete(_) => "DELETE",
+            Self::ClearPayload(_) => "CLEAR PAYLOAD",
+            Self::DeletePayload(_) => "DELETE PAYLOAD",
+            Self::DeleteVector(_) => "DELETE VECTOR",
+            Self::UpdateVector(_) => "UPDATE VECTOR",
+            Self::UpdatePayload(_) => "UPDATE PAYLOAD",
+            Self::CreateCollection(_) => "CREATE COLLECTION",
+            Self::AlterCollection(_) => "ALTER COLLECTION",
+            Self::DropCollection(_) => "DROP COLLECTION",
+            Self::CreateIndex(_) => "CREATE INDEX",
+            Self::DropIndex(_) => "DROP INDEX",
+            Self::CreateShardKey(_) => "CREATE SHARD KEY",
+            Self::DropShardKey(_) => "DROP SHARD KEY",
+            Self::ShowCollections => "SHOW COLLECTIONS",
+            Self::ShowCollection(_) => "SHOW COLLECTION",
+            Self::ShowShardKeys(_) => "SHOW SHARD KEYS",
+            Self::ShowQuotas => "SHOW QUOTAS",
+            Self::SetQuota(_) => "SET QUOTA",
+        }
+    }
+}
+
 impl core::fmt::Display for Stmt {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}", crate::fmt::format_stmt(self))

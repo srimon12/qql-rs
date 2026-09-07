@@ -34,6 +34,12 @@ enum Command {
     Exec {
         /// QQL query string (e.g., "QUERY 'hello' FROM docs LIMIT 5")
         query: String,
+        /// Parameter in key=value format (can be specified multiple times)
+        #[arg(long = "param", short = 'p')]
+        params: Vec<String>,
+        /// Path to JSON file containing parameter map or positional array
+        #[arg(long = "params-file")]
+        params_file: Option<PathBuf>,
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -52,6 +58,12 @@ enum Command {
     /// Explain a QQL query (show execution plan)
     Explain {
         query: String,
+        /// Parameter in key=value format (can be specified multiple times)
+        #[arg(long = "param", short = 'p')]
+        params: Vec<String>,
+        /// Path to JSON file containing parameter map or positional array
+        #[arg(long = "params-file")]
+        params_file: Option<PathBuf>,
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -182,6 +194,57 @@ enum ConfigCommand {
     },
 }
 
+fn resolve_query_params(
+    query: &str,
+    params: &[String],
+    params_file: Option<&PathBuf>,
+) -> Result<String, Box<dyn std::error::Error>> {
+    if params.is_empty() && params_file.is_none() {
+        return Ok(query.to_string());
+    }
+
+    let mut map = serde_json::Map::new();
+
+    if let Some(file_path) = params_file {
+        let content = std::fs::read_to_string(file_path)?;
+        let parsed: serde_json::Value = serde_json::from_str(&content)?;
+        match parsed {
+            serde_json::Value::Object(obj) => {
+                for (k, v) in obj {
+                    let key = k.strip_prefix(':').unwrap_or(&k).to_string();
+                    map.insert(key, v);
+                }
+            }
+            serde_json::Value::Array(_) => {
+                let bound = qql_core::params_json::bind_str_with_params(query, &parsed, false)?;
+                return Ok(bound);
+            }
+            _ => {
+                return Err("--params-file must contain a JSON object or array".into());
+            }
+        }
+    }
+
+    for p in params {
+        let (key_raw, val_raw) = p
+            .split_once('=')
+            .ok_or_else(|| format!("parameter must be in key=value format, got '{p}'"))?;
+        let key = key_raw
+            .trim()
+            .strip_prefix(':')
+            .unwrap_or(key_raw.trim())
+            .to_string();
+        let val_trimmed = val_raw.trim();
+        let parsed_val: serde_json::Value = serde_json::from_str(val_trimmed)
+            .unwrap_or_else(|_| serde_json::Value::String(val_trimmed.to_string()));
+        map.insert(key, parsed_val);
+    }
+
+    let bound =
+        qql_core::params_json::bind_str_with_params(query, &serde_json::Value::Object(map), false)?;
+    Ok(bound)
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
@@ -192,14 +255,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|| "http://localhost:6333".to_string());
 
     match cli.command.unwrap_or(Command::Connect) {
-        Command::Exec { query, json, quiet } => {
-            commands::handle_exec(&url, use_edge, &query, json, quiet).await
+        Command::Exec {
+            query,
+            params,
+            params_file,
+            json,
+            quiet,
+        } => {
+            let bound = resolve_query_params(&query, &params, params_file.as_ref())?;
+            commands::handle_exec(&url, use_edge, &bound, json, quiet).await
         }
         Command::Execute {
             file,
             stop_on_error,
         } => commands::handle_execute_file(&url, use_edge, &file, stop_on_error).await,
-        Command::Explain { query, json, quiet } => commands::handle_explain(&query, json, quiet),
+        Command::Explain {
+            query,
+            params,
+            params_file,
+            json,
+            quiet,
+        } => {
+            let bound = resolve_query_params(&query, &params, params_file.as_ref())?;
+            commands::handle_explain(&bound, json, quiet)
+        }
         Command::Connect => commands::handle_connect(&url, use_edge).await,
         Command::Convert { file } => commands::handle_convert(file.as_deref()),
         Command::Fmt { file, check, write } => commands::handle_fmt(file.as_deref(), check, write),
@@ -308,5 +387,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }),
         },
         Command::Version => commands::handle_version(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolve_query_params_named() {
+        let query = "QUERY TEXT :q FROM docs WHERE price < :p LIMIT :l;";
+        let params = vec![
+            "q=laptop".to_string(),
+            ":p=999.50".to_string(),
+            "l=5".to_string(),
+        ];
+        let bound = resolve_query_params(query, &params, None).unwrap();
+        assert!(bound.contains("QUERY TEXT 'laptop' FROM docs WHERE price < 999.5"));
+        assert!(bound.contains("LIMIT 5"));
+    }
+
+    #[test]
+    fn test_resolve_query_params_empty() {
+        let query = "QUERY TEXT 'test' FROM docs LIMIT 10;";
+        let bound = resolve_query_params(query, &[], None).unwrap();
+        assert_eq!(bound, query);
     }
 }

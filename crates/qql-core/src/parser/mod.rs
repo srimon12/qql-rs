@@ -43,6 +43,13 @@ pub(crate) struct AstLowerer<'a> {
 /// should split them into bounded batches before parsing.
 pub const MAX_STATEMENTS: usize = 256;
 
+pub(crate) fn syntax_err(
+    message: impl Into<alloc::borrow::Cow<'static, str>>,
+    pos: usize,
+) -> QqlError {
+    QqlError::parse("QQL-PARSE-SYNTAX", message, Span::point(pos))
+}
+
 /// Returns true when `s` equals `upper`, ignoring ASCII case.
 pub fn ascii_equal(s: &str, upper: &str) -> bool {
     s.eq_ignore_ascii_case(upper)

@@ -18,15 +18,15 @@ pub const REQUEST_ID_HEADER: &str = "x-request-id";
 static REQUEST_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// Generate a process-unique request id: `qql-<nanos><seq>` — no external
-/// uuid dependency, unique enough for log correlation within a boot.
+/// uuid dependency, globally unique and monotonic for log correlation.
 #[cfg(any(feature = "rest", feature = "grpc"))]
 pub(crate) fn next_request_id() -> String {
     let seq = REQUEST_SEQ.fetch_add(1, Ordering::Relaxed);
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.subsec_nanos())
+        .map(|d| d.as_nanos() as u64)
         .unwrap_or(0);
-    format!("qql-{nanos:08x}{seq:04x}")
+    format!("qql-{nanos:016x}{seq:04x}")
 }
 
 /// Named vectors a collection exposes for dense, sparse, and rerank usage.
