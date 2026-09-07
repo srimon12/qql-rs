@@ -1174,7 +1174,7 @@ impl Client {
         query: &str,
         on_error: WasmOnError,
     ) -> Result<WasmReport, JsValue> {
-        use qql_plan::{BatchKey, statement_batch_key};
+        use qql_plan::BatchGrouper;
 
         let stmts = match Parser::parse_all(query) {
             Ok(stmts) => stmts,
@@ -1204,23 +1204,21 @@ impl Client {
         }
 
         let mut results: Vec<serde_json::Value> = Vec::with_capacity(stmts.len());
-        let mut pending = Vec::new();
-        let mut pending_key: Option<BatchKey> = None;
+        let mut grouper = BatchGrouper::new();
 
         for stmt in stmts {
-            let statement_key = statement_batch_key(&stmt);
-            if !pending.is_empty() && statement_key != pending_key {
-                self.flush_planned_group(&mut pending, on_error, &mut results)
+            if let Some(ops) = grouper.check_statement_barrier(&stmt) {
+                self.flush_planned_group(ops, on_error, &mut results)
                     .await?;
-                pending_key = None;
             }
 
             let planned = match self.prepare_operation(&stmt).await {
                 Ok(planned) => planned,
                 Err(error) => {
-                    self.flush_planned_group(&mut pending, on_error, &mut results)
-                        .await?;
-                    pending_key = None;
+                    if let Some(ops) = grouper.flush_on_error() {
+                        self.flush_planned_group(ops, on_error, &mut results)
+                            .await?;
+                    }
                     if on_error == WasmOnError::Stop {
                         return Err(error);
                     }
@@ -1234,26 +1232,21 @@ impl Client {
                 }
             };
 
-            let key = planned.batch_key();
-            if key.is_none() {
-                self.flush_planned_group(&mut pending, on_error, &mut results)
-                    .await?;
-                pending_key = None;
-                self.dispatch_or_collect(planned, on_error, &mut results)
-                    .await?;
-                continue;
-            }
-
-            if !pending.is_empty() && key != pending_key {
-                self.flush_planned_group(&mut pending, on_error, &mut results)
+            let (flush_ops, dispatch_single) = grouper.push_planned(planned);
+            if let Some(ops) = flush_ops {
+                self.flush_planned_group(ops, on_error, &mut results)
                     .await?;
             }
-            pending_key = key;
-            pending.push(planned);
+            if let Some(single) = dispatch_single {
+                self.dispatch_or_collect(single, on_error, &mut results)
+                    .await?;
+            }
         }
 
-        self.flush_planned_group(&mut pending, on_error, &mut results)
-            .await?;
+        if let Some(ops) = grouper.finish() {
+            self.flush_planned_group(ops, on_error, &mut results)
+                .await?;
+        }
         Ok(WasmReport::from_results(results))
     }
 
@@ -1348,7 +1341,7 @@ impl Client {
 
     async fn flush_planned_group(
         &self,
-        pending: &mut Vec<qql_plan::PlannedOperation>,
+        mut operations: Vec<qql_plan::PlannedOperation>,
         on_error: WasmOnError,
         results: &mut Vec<serde_json::Value>,
     ) -> Result<(), JsValue> {
@@ -1357,15 +1350,13 @@ impl Client {
             verify_batch_cardinality,
         };
 
-        if pending.is_empty() {
+        if operations.is_empty() {
             return Ok(());
         }
-        if pending.len() == 1 {
-            let operation = pending.pop().expect("pending contains one operation");
+        if operations.len() == 1 {
+            let operation = operations.pop().expect("pending contains one operation");
             return self.dispatch_or_collect(operation, on_error, results).await;
         }
-
-        let operations = core::mem::take(pending);
         match &operations[0] {
             PlannedOperation::Query { .. } => {
                 let (collection, batch) = build_query_batch(&operations)

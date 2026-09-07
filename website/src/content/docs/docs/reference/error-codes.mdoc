@@ -177,13 +177,10 @@ binding](/docs/language/queries/#parameter-binding--prepared-queries).
 | `QQL-BIND-UNUSED-PARAMS` | More positional values were supplied than `?` placeholders |
 | `QQL-BIND-BATCH-LENGTH` | A statement-scoped params list length does not match the statement count |
 | `QQL-BIND-DUPLICATE-PARAM` | A key collision occurred when flattening nested dictionary parameters |
-| `QQL-BIND-INVALID-FLOAT` | A non-finite float (`NaN`, infinity) cannot be rendered as a literal |
-| `QQL-BIND-INVALID-POINT-ID` | A bound point ID is neither an unsigned integer nor a string |
-| `QQL-BIND-TYPE-MISMATCH` | A bound value has the wrong type for its position (for example a non-string bound to `TEXT`) |
-| `QQL-BIND-INVALID-INTEGER` | A `LIMIT` / `OFFSET` parameter is not a non-negative integer |
-| `QQL-BIND-FORMULA-TYPE` | A formula parameter cannot be bound to a numeric, datetime, or variable constant |
+| `QQL-BIND-TYPE-MISMATCH` | A bound value has the wrong type for its position (e.g. a non-string bound to `TEXT`, non-integer to `LIMIT`/`OFFSET`, invalid point ID, non-finite float, or invalid formula parameter) |
 | `QQL-BIND-INVALID-PARAMS` | The `params` argument is neither an object (named) nor an array (positional) |
 | `QQL-BIND-NULL-PARAM` | A parameter resolved to `null` / `None` — QQL cannot bind null; pass a concrete value |
+| `QQL-BIND-UNSUPPORTED-STATEMENT` | Parameter binding attempted on an unsupported statement type (e.g. DDL) |
 | `QQL-BIND-ALREADY-BOUND` | New params were passed to an already-bound `Stmt` — they would be silently ignored |
 
 ## Execution
@@ -271,15 +268,12 @@ QQL-BATCH-INVARIANT
 QQL-BIND-ALREADY-BOUND
 QQL-BIND-BATCH-LENGTH
 QQL-BIND-DUPLICATE-PARAM
-QQL-BIND-FORMULA-TYPE
-QQL-BIND-INVALID-FLOAT
-QQL-BIND-INVALID-INTEGER
 QQL-BIND-INVALID-PARAMS
-QQL-BIND-INVALID-POINT-ID
 QQL-BIND-MISSING-PARAM
 QQL-BIND-MIXED-STYLE
 QQL-BIND-NULL-PARAM
 QQL-BIND-TYPE-MISMATCH
+QQL-BIND-UNSUPPORTED-STATEMENT
 QQL-BIND-UNUSED-PARAMS
 QQL-CLIENT-CLOSED
 QQL-CONFIG

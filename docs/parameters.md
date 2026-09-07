@@ -39,7 +39,7 @@ If a colon immediately follows an identifier character (`a:b`) or closing quote 
 When substituting parameters into templates, the binder applies strict literal formatting:
 
 1. **Strings**: Escaped with QQL single-quote rules (`'` $\to$ `''`, `\` $\to$ `\\`, `\n`, `\t`).
-2. **Numbers & Floats**: Rendered canonically. Non-finite floats (`NaN`, `+Infinity`, `-Infinity`) are rejected with `QQL-BIND-INVALID-FLOAT`.
+2. **Numbers & Floats**: Rendered canonically. Non-finite floats (`NaN`, `+Infinity`, `-Infinity`) are rejected with `QQL-BIND-TYPE-MISMATCH`.
 3. **Dictionaries**: Keys with colons, quotes, spaces, or dots are escaped and quoted (`{'a: 1, b': 5}`).
 4. **Preserved Literals**: Source comments (`-- ...`), string literals (`'hello :name'`), and backtick strings (`` `C:\path\:dir` ``) in the template are preserved verbatim and never altered.
 5. **Mixed-Style Detection**: Passing `?` to a named binder or `:name` to a positional binder returns `QQL-BIND-MIXED-STYLE` with clear guidance.
@@ -140,6 +140,11 @@ Additional shapes:
   Any other params shape (object, scalar list, scalar) applies identically to
   every statement: a scalar list is a *shared* positional list, never
   per-statement.
+  *Single-container disambiguation rule*: When executing a single statement with
+  a single array container like `params=[[1, 2]]`, the outer array is detected as
+  a 1-element container list whose only item is the array `[1, 2]`. This binds
+  the single statement positionally with parameters `[1, 2]`; it is never treated
+  as a positional matrix binding a nested array value into the statement.
 - **`is_valid`** runs the full parse + plan gate (`qql_plan::parse_and_plan`),
   not just lexing, on `pyqql`, `pyqql-edge`, `nqql`, and `nqql-edge`.
 
@@ -165,15 +170,13 @@ All binding failures are validation errors with a stable `QQL-BIND-*` code:
 | `QQL-BIND-MIXED-STYLE` | The template mixes `:name` and `?`, or the binder received the other style |
 | `QQL-BIND-MISSING-PARAM` | A named placeholder has no bound value, or a positional index is out of range |
 | `QQL-BIND-UNUSED-PARAMS` | More positional values were supplied than `?` placeholders |
-| `QQL-BIND-INVALID-FLOAT` | A non-finite float (`NaN`, infinity) cannot be rendered as a literal |
-| `QQL-BIND-INVALID-POINT-ID` | A bound point ID is neither an unsigned integer nor a string |
-| `QQL-BIND-TYPE-MISMATCH` | A bound value has the wrong type for its position (e.g. a non-string bound to `TEXT`) |
-| `QQL-BIND-INVALID-INTEGER` | A `LIMIT` / `OFFSET` parameter is not a non-negative integer |
-| `QQL-BIND-FORMULA-TYPE` | A formula parameter cannot be bound to a numeric, datetime, or variable constant |
+| `QQL-BIND-TYPE-MISMATCH` | A bound value has the wrong type for its position (e.g. non-string bound to `TEXT`, non-integer to `LIMIT`/`OFFSET`, invalid point ID, non-finite float, or invalid formula parameter) |
+| `QQL-BIND-NULL-PARAM` | A parameter resolved to `null` / `None` — QQL cannot bind null; pass a concrete value |
 | `QQL-BIND-BATCH-LENGTH` | A statement-scoped params list length does not match the statement count |
 | `QQL-BIND-DUPLICATE-PARAM` | A key collision occurred when flattening nested dictionary parameters |
 | `QQL-BIND-INVALID-PARAMS` | The `params` argument is neither an object (named) nor an array (positional) |
+| `QQL-BIND-UNSUPPORTED-STATEMENT` | Parameter binding attempted on an unsupported statement type (e.g. DDL) |
+| `QQL-BIND-ALREADY-BOUND` | New params were passed to an already-bound `Stmt` |
 
-Codes 1–8 live in `crates/qql-core/src/params.rs`; `QQL-BIND-INVALID-PARAMS`
-and `QQL-BIND-BATCH-LENGTH` are enforced by the shared JSON binding layer in
+`QQL-BIND-INVALID-PARAMS` and `QQL-BIND-BATCH-LENGTH` are enforced by the shared JSON binding layer in
 `crates/qql-core/src/params_json.rs`, which every SDK binding routes through.

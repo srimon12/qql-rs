@@ -34,10 +34,10 @@ impl From<&qql_core::ast::PointId> for PlanPointId {
         match id {
             qql_core::ast::PointId::Number(n) => PlanPointId::Number(*n),
             qql_core::ast::PointId::String(s) => PlanPointId::String(s.clone()),
-            qql_core::ast::PointId::Param(name) => {
+            qql_core::ast::PointId::Param(name, _) => {
                 panic!("invariant violation: unbound parameter :{name} reached PlanPointId");
             }
-            qql_core::ast::PointId::PositionalParam(idx) => {
+            qql_core::ast::PointId::PositionalParam(idx, _) => {
                 panic!(
                     "invariant violation: unbound positional parameter ?{idx} reached PlanPointId"
                 );
@@ -184,10 +184,10 @@ impl From<&qql_core::ast::QueryInput> for PlanQueryInput {
                 image: source.clone(),
                 model: model.clone(),
             },
-            qql_core::ast::QueryInput::Param(name) => {
+            qql_core::ast::QueryInput::Param(name, _) => {
                 panic!("invariant violation: unbound parameter :{name} reached PlanQueryInput");
             }
-            qql_core::ast::QueryInput::PositionalParam(idx) => {
+            qql_core::ast::QueryInput::PositionalParam(idx, _) => {
                 panic!(
                     "invariant violation: unbound positional parameter ?{idx} reached PlanQueryInput"
                 );

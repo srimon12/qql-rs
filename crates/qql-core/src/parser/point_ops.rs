@@ -1,6 +1,6 @@
 use super::AstLowerer;
 use crate::ast::{CountStmt, FacetStmt, ScrollStmt, Stmt};
-use crate::error::QqlError;
+use crate::error::{QqlError, Span};
 use crate::token::TokenKind;
 use alloc::boxed::Box;
 
@@ -37,16 +37,20 @@ impl<'a> AstLowerer<'a> {
                 None
             };
         self.expect(TokenKind::Limit)?;
-        let (limit, limit_param) = if self.peek()?.kind == TokenKind::Colon {
-            self.advance()?;
+        let (limit, limit_param, limit_span) = if self.peek()?.kind == TokenKind::Colon {
+            let colon_tok = self.advance()?;
             let name = self.parse_param_name()?;
-            (10, Some(alloc::format!(":{}", name)))
+            (
+                10,
+                Some(alloc::format!(":{}", name)),
+                Some(Span::new(colon_tok.span.start, self.prev_span().end)),
+            )
         } else if self.peek()?.kind == TokenKind::Question {
-            self.advance()?;
+            let q_tok = self.advance()?;
             let idx = self.next_positional_param();
-            (10, Some(alloc::format!("?{}", idx)))
+            (10, Some(alloc::format!("?{}", idx)), Some(q_tok.span))
         } else {
-            (self.parse_positive_u64("SCROLL LIMIT")?, None)
+            (self.parse_positive_u64("SCROLL LIMIT")?, None, None)
         };
         Ok(Stmt::Scroll(Box::new(ScrollStmt {
             collection,
@@ -56,6 +60,7 @@ impl<'a> AstLowerer<'a> {
             shard_key,
             with_vector,
             limit_param,
+            limit_span,
         })))
     }
 
@@ -142,6 +147,7 @@ impl<'a> AstLowerer<'a> {
         let mut filter = None;
         let mut limit = None;
         let mut limit_param = None;
+        let mut limit_span = None;
         let mut exact = None;
         let mut shard_key = None;
 
@@ -154,13 +160,15 @@ impl<'a> AstLowerer<'a> {
                 TokenKind::Limit if limit.is_none() && limit_param.is_none() => {
                     self.advance()?;
                     if self.peek()?.kind == TokenKind::Colon {
-                        self.advance()?;
+                        let colon_tok = self.advance()?;
                         let name = self.parse_param_name()?;
                         limit_param = Some(alloc::format!(":{}", name));
+                        limit_span = Some(Span::new(colon_tok.span.start, self.prev_span().end));
                     } else if self.peek()?.kind == TokenKind::Question {
-                        self.advance()?;
+                        let q_tok = self.advance()?;
                         let idx = self.next_positional_param();
                         limit_param = Some(alloc::format!("?{}", idx));
+                        limit_span = Some(q_tok.span);
                     } else {
                         limit = Some(self.parse_positive_u64("FACET LIMIT")?);
                     }
@@ -233,6 +241,7 @@ impl<'a> AstLowerer<'a> {
             exact,
             shard_key,
             limit_param,
+            limit_span,
         })))
     }
 }

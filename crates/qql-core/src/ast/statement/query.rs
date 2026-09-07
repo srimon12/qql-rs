@@ -36,9 +36,53 @@ pub enum QueryInput {
     /// Reference point — use an existing point's vector as the input.
     Point(PointId),
     /// Parameter placeholder (`:name`) for target query input.
-    Param(String),
+    Param(
+        String,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        Option<crate::error::Span>,
+    ),
     /// Positional parameter placeholder (`?`) for target query input.
-    PositionalParam(usize),
+    PositionalParam(
+        usize,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        Option<crate::error::Span>,
+    ),
+}
+
+impl QueryInput {
+    /// Construct an unlocated named parameter placeholder.
+    pub fn param(name: impl Into<String>) -> Self {
+        Self::Param(name.into(), None)
+    }
+
+    /// Construct a located named parameter placeholder.
+    pub fn param_with_span(name: impl Into<String>, span: crate::error::Span) -> Self {
+        Self::Param(name.into(), Some(span))
+    }
+
+    /// Construct an unlocated positional parameter placeholder.
+    pub fn positional_param(idx: usize) -> Self {
+        Self::PositionalParam(idx, None)
+    }
+
+    /// Construct a located positional parameter placeholder.
+    pub fn positional_param_with_span(idx: usize, span: crate::error::Span) -> Self {
+        Self::PositionalParam(idx, Some(span))
+    }
+
+    /// Extract the parameter source span if present.
+    pub fn param_span(&self) -> Option<crate::error::Span> {
+        match self {
+            Self::Param(_, span) | Self::PositionalParam(_, span) => *span,
+            _ => None,
+        }
+    }
 }
 
 /// Maximal marginal relevance settings (`MMR … DIVERSITY … CANDIDATES …`).
@@ -386,6 +430,18 @@ pub struct PageSpec {
         serde(default, skip_serializing_if = "Option::is_none")
     )]
     pub offset_param: Option<String>,
+    /// Source span of the limit parameter placeholder, if unbound.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub limit_span: Option<crate::error::Span>,
+    /// Source span of the offset parameter placeholder, if unbound.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub offset_span: Option<crate::error::Span>,
 }
 
 /// One named common table expression: `name AS (QUERY …)`.

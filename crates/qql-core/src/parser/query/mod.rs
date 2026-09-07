@@ -1,4 +1,6 @@
 pub(crate) mod expr;
+pub(crate) mod expr_advanced;
+pub(crate) mod expr_input;
 pub(crate) mod pipeline;
 
 use super::{AstLowerer, ascii_equal};
@@ -6,7 +8,7 @@ use crate::ast::{
     Cte, GroupSpec, PageSpec, QueryCollection, QueryOutput, QueryStmt, Stmt, VectorKind,
     VectorTarget,
 };
-use crate::error::QqlError;
+use crate::error::{QqlError, Span};
 use crate::token::TokenKind;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -175,38 +177,46 @@ impl<'a> AstLowerer<'a> {
                 None
             };
 
-        let (limit, limit_param) = if self.peek()?.kind == TokenKind::Limit {
+        let (limit, limit_param, limit_span) = if self.peek()?.kind == TokenKind::Limit {
             self.advance()?;
             if self.peek()?.kind == TokenKind::Colon {
-                self.advance()?;
+                let colon_tok = self.advance()?;
                 let name = self.parse_param_name()?;
-                (None, Some(name))
+                (
+                    None,
+                    Some(name),
+                    Some(Span::new(colon_tok.span.start, self.prev_span().end)),
+                )
             } else if self.peek()?.kind == TokenKind::Question {
-                self.advance()?;
+                let q_tok = self.advance()?;
                 let idx = self.next_positional_param();
-                (None, Some(alloc::format!("?{}", idx)))
+                (None, Some(alloc::format!("?{}", idx)), Some(q_tok.span))
             } else {
-                (Some(self.parse_positive_u64("LIMIT")?), None)
+                (Some(self.parse_positive_u64("LIMIT")?), None, None)
             }
         } else {
-            (None, None)
+            (None, None, None)
         };
 
-        let (offset, offset_param) = if self.peek()?.kind == TokenKind::Offset {
+        let (offset, offset_param, offset_span) = if self.peek()?.kind == TokenKind::Offset {
             self.advance()?;
             if self.peek()?.kind == TokenKind::Colon {
-                self.advance()?;
+                let colon_tok = self.advance()?;
                 let name = self.parse_param_name()?;
-                (None, Some(name))
+                (
+                    None,
+                    Some(name),
+                    Some(Span::new(colon_tok.span.start, self.prev_span().end)),
+                )
             } else if self.peek()?.kind == TokenKind::Question {
-                self.advance()?;
+                let q_tok = self.advance()?;
                 let idx = self.next_positional_param();
-                (None, Some(alloc::format!("?{}", idx)))
+                (None, Some(alloc::format!("?{}", idx)), Some(q_tok.span))
             } else {
-                (Some(self.parse_non_negative_u64("OFFSET")?), None)
+                (Some(self.parse_non_negative_u64("OFFSET")?), None, None)
             }
         } else {
-            (None, None)
+            (None, None, None)
         };
 
         if self.is_query_clause_start()? {
@@ -244,6 +254,8 @@ impl<'a> AstLowerer<'a> {
                 offset,
                 limit_param,
                 offset_param,
+                limit_span,
+                offset_span,
             },
             shard_key,
         })

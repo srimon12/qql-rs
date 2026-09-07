@@ -21,6 +21,7 @@ Node.js, and WebAssembly:
 
 - **Statement-scoped**: A list whose items are all parameter containers (all dicts/objects or all lists/arrays) binds 1:1 to statements by index. The parameter list length **must exactly match** the statement count, or the runtime raises `QQL-BIND-BATCH-LENGTH`.
 - **Broadcast**: A single dictionary/object or single primitive list binds to all statements in the batch identically.
+- **Single-container rule**: Passing `params=[[1, 2]]` to a single statement binds `[1, 2]` positionally to statement 0 (unrolled as a 1-element container list), never as a positional matrix.
 
 ```python
 # Statement-scoped: 2 statements, exactly 2 parameter dictionaries
@@ -113,3 +114,12 @@ print(hits[0].id, type(hits[0].id))
 `@veristamp/qql-wasm` now includes the typed `dx.js` wrapper module matching `@veristamp/nqql`:
 `ExecutionReport`, `ScoredPoint`, and `buildError` are available for browser and Edge
 runtimes with full TypeScript typings.
+
+---
+
+## 8. Parameter Error Code Consolidation & Exact Spans
+
+Parameter type failures (`QQL-BIND-INVALID-INTEGER`, `QQL-BIND-INVALID-POINT-ID`,
+`QQL-BIND-INVALID-FLOAT`, `QQL-BIND-FORMULA-TYPE`) are consolidated into the single
+semantic code `QQL-BIND-TYPE-MISMATCH`. In addition, parameter binding errors now carry
+exact `Span` byte ranges pinpointing the offending placeholder in the template.

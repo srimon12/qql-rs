@@ -111,9 +111,53 @@ pub enum PointId {
     /// Arbitrary unique string ID.
     String(String),
     /// Parameter placeholder (`:name`).
-    Param(String),
+    Param(
+        String,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        Option<crate::error::Span>,
+    ),
     /// Positional parameter placeholder (`?`).
-    PositionalParam(usize),
+    PositionalParam(
+        usize,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        Option<crate::error::Span>,
+    ),
+}
+
+impl PointId {
+    /// Construct an unlocated named parameter placeholder.
+    pub fn param(name: impl Into<String>) -> Self {
+        Self::Param(name.into(), None)
+    }
+
+    /// Construct a located named parameter placeholder.
+    pub fn param_with_span(name: impl Into<String>, span: crate::error::Span) -> Self {
+        Self::Param(name.into(), Some(span))
+    }
+
+    /// Construct an unlocated positional parameter placeholder.
+    pub fn positional_param(idx: usize) -> Self {
+        Self::PositionalParam(idx, None)
+    }
+
+    /// Construct a located positional parameter placeholder.
+    pub fn positional_param_with_span(idx: usize, span: crate::error::Span) -> Self {
+        Self::PositionalParam(idx, Some(span))
+    }
+
+    /// Extract the parameter source span if present.
+    pub fn param_span(&self) -> Option<crate::error::Span> {
+        match self {
+            Self::Param(_, span) | Self::PositionalParam(_, span) => *span,
+            _ => None,
+        }
+    }
 }
 
 /// A vector value: dense, sparse, or multivector.

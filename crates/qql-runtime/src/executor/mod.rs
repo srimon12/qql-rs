@@ -93,7 +93,7 @@ pub enum OnError {
     Continue,
 }
 
-use qql_plan::{BatchKey, statement_batch_key};
+use qql_plan::BatchGrouper;
 
 /// Normalized search hit returned inside `ExecResponse` data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -466,8 +466,7 @@ impl Executor {
         stop_on_error: bool,
     ) -> Result<Vec<ExecResponse>, QqlError> {
         let mut results = Vec::with_capacity(stmts.len());
-        let mut pending = Vec::new();
-        let mut pending_key: Option<BatchKey> = None;
+        let mut grouper = BatchGrouper::new();
 
         for stmt in stmts {
             // Fail closed before any network I/O: an unbound placeholder
@@ -476,9 +475,10 @@ impl Executor {
             // PREPARE/PLAN — collect it instead of aborting the whole script
             // (which would discard every already-collected result).
             if let Err(e) = qql_plan::ensure_no_unbound_params(&stmt) {
-                self.flush_planned_group(&mut pending, stop_on_error, &mut results)
-                    .await?;
-                pending_key = None;
+                if let Some(ops) = grouper.flush_on_error() {
+                    self.flush_planned_group(ops, stop_on_error, &mut results)
+                        .await?;
+                }
                 if stop_on_error {
                     return Err(e);
                 }
@@ -490,23 +490,22 @@ impl Executor {
                 });
                 continue;
             }
-            let statement_key = statement_batch_key(&stmt);
 
             // A statement outside the current batch family is an execution
             // barrier. Flush before preparing it because preparation may read
             // or mutate backend state (for example UPSERT auto-creation).
-            if !pending.is_empty() && statement_key != pending_key {
-                self.flush_planned_group(&mut pending, stop_on_error, &mut results)
+            if let Some(ops) = grouper.check_statement_barrier(&stmt) {
+                self.flush_planned_group(ops, stop_on_error, &mut results)
                     .await?;
-                pending_key = None;
             }
 
             let prepared = match self.prepare_statement(stmt).await {
                 Ok(p) => p,
                 Err(e) => {
-                    self.flush_planned_group(&mut pending, stop_on_error, &mut results)
-                        .await?;
-                    pending_key = None;
+                    if let Some(ops) = grouper.flush_on_error() {
+                        self.flush_planned_group(ops, stop_on_error, &mut results)
+                            .await?;
+                    }
                     if stop_on_error {
                         return Err(e);
                     }
@@ -523,9 +522,10 @@ impl Executor {
             let planned = match plan(&prepared) {
                 Ok(planned) => planned,
                 Err(e) => {
-                    self.flush_planned_group(&mut pending, stop_on_error, &mut results)
-                        .await?;
-                    pending_key = None;
+                    if let Some(ops) = grouper.flush_on_error() {
+                        self.flush_planned_group(ops, stop_on_error, &mut results)
+                            .await?;
+                    }
                     if stop_on_error {
                         return Err(e);
                     }
@@ -539,26 +539,21 @@ impl Executor {
                 }
             };
 
-            let key = planned.batch_key();
-            if key.is_none() {
-                self.flush_planned_group(&mut pending, stop_on_error, &mut results)
-                    .await?;
-                pending_key = None;
-                self.dispatch_or_collect(planned, stop_on_error, &mut results)
-                    .await?;
-                continue;
-            }
-
-            if !pending.is_empty() && key != pending_key {
-                self.flush_planned_group(&mut pending, stop_on_error, &mut results)
+            let (flush_ops, dispatch_single) = grouper.push_planned(planned);
+            if let Some(ops) = flush_ops {
+                self.flush_planned_group(ops, stop_on_error, &mut results)
                     .await?;
             }
-            pending_key = key;
-            pending.push(planned);
+            if let Some(single) = dispatch_single {
+                self.dispatch_or_collect(single, stop_on_error, &mut results)
+                    .await?;
+            }
         }
 
-        self.flush_planned_group(&mut pending, stop_on_error, &mut results)
-            .await?;
+        if let Some(ops) = grouper.finish() {
+            self.flush_planned_group(ops, stop_on_error, &mut results)
+                .await?;
+        }
         Ok(results)
     }
 
@@ -583,23 +578,21 @@ impl Executor {
 
     async fn flush_planned_group(
         &self,
-        pending: &mut Vec<qql_plan::PlannedOperation>,
+        mut operations: Vec<qql_plan::PlannedOperation>,
         stop_on_error: bool,
         results: &mut Vec<ExecResponse>,
     ) -> Result<(), QqlError> {
         use qql_plan::PlannedOperation;
 
-        if pending.is_empty() {
+        if operations.is_empty() {
             return Ok(());
         }
-        if pending.len() == 1 {
-            let planned = pending.pop().expect("pending contains one operation");
+        if operations.len() == 1 {
+            let planned = operations.pop().expect("pending contains one operation");
             return self
                 .dispatch_or_collect(planned, stop_on_error, results)
                 .await;
         }
-
-        let operations = core::mem::take(pending);
         let is_query = matches!(&operations[0], PlannedOperation::Query { .. });
         if is_query {
             let (collection, batch) = qql_plan::build_query_batch(&operations)?;

@@ -287,10 +287,10 @@ pub fn value_to_json(value: &Value) -> serde_json::Value {
             }
             serde_json::Value::Object(map)
         }
-        Value::Param(name) => {
+        Value::Param(name, _) => {
             panic!("invariant violation: unbound parameter :{name} reached filter lowering");
         }
-        Value::PositionalParam(idx) => {
+        Value::PositionalParam(idx, _) => {
             panic!(
                 "invariant violation: unbound positional parameter ?{idx} reached filter lowering"
             );

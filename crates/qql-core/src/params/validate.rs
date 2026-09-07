@@ -8,44 +8,44 @@ use crate::ast::statement::{
 };
 use crate::error::QqlError;
 
-fn unbound_named_err(name: &str) -> QqlError {
+fn unbound_named_err(name: &str, span: Option<crate::error::Span>) -> QqlError {
     QqlError::validation(
         "QQL-BIND-MISSING-PARAM",
         alloc::format!("missing value for named parameter ':{}'", name),
-        None,
+        span,
     )
 }
 
-fn unbound_positional_err(idx: usize) -> QqlError {
+fn unbound_positional_err(idx: usize, span: Option<crate::error::Span>) -> QqlError {
     QqlError::validation(
         "QQL-BIND-MISSING-PARAM",
         alloc::format!("missing value for positional parameter '?{}'", idx),
-        None,
+        span,
     )
 }
 
-fn unbound_param_str_err(param: &str) -> QqlError {
+fn unbound_param_str_err(param: &str, span: Option<crate::error::Span>) -> QqlError {
     if let Some(name) = param.strip_prefix(':') {
-        unbound_named_err(name)
+        unbound_named_err(name, span)
     } else if let Some(idx_str) = param.strip_prefix('?') {
         if let Ok(idx) = idx_str.parse::<usize>() {
-            unbound_positional_err(idx)
+            unbound_positional_err(idx, span)
         } else {
             QqlError::validation(
                 "QQL-BIND-INVALID-PARAMS",
                 alloc::format!("invalid positional parameter index '?{}'", idx_str),
-                None,
+                span,
             )
         }
     } else {
-        unbound_named_err(param)
+        unbound_named_err(param, span)
     }
 }
 
 fn validate_no_unbound_value(val: &Value) -> Result<(), QqlError> {
     match val {
-        Value::Param(name) => Err(unbound_named_err(name)),
-        Value::PositionalParam(idx) => Err(unbound_positional_err(*idx)),
+        Value::Param(name, span) => Err(unbound_named_err(name, *span)),
+        Value::PositionalParam(idx, span) => Err(unbound_positional_err(*idx, *span)),
         Value::List(items) => {
             for item in items {
                 validate_no_unbound_value(item)?;
@@ -64,20 +64,20 @@ fn validate_no_unbound_value(val: &Value) -> Result<(), QqlError> {
 
 fn validate_no_unbound_point_id(id: &PointId) -> Result<(), QqlError> {
     match id {
-        PointId::Param(name) => Err(unbound_named_err(name)),
-        PointId::PositionalParam(idx) => Err(unbound_positional_err(*idx)),
+        PointId::Param(name, span) => Err(unbound_named_err(name, *span)),
+        PointId::PositionalParam(idx, span) => Err(unbound_positional_err(*idx, *span)),
         _ => Ok(()),
     }
 }
 
 fn validate_no_unbound_query_input(input: &QueryInput) -> Result<(), QqlError> {
     match input {
-        QueryInput::Param(name) => Err(unbound_named_err(name)),
-        QueryInput::PositionalParam(idx) => Err(unbound_positional_err(*idx)),
+        QueryInput::Param(name, span) => Err(unbound_named_err(name, *span)),
+        QueryInput::PositionalParam(idx, span) => Err(unbound_positional_err(*idx, *span)),
         QueryInput::Point(point) => validate_no_unbound_point_id(point),
         QueryInput::Text { text_param, .. } => {
             if let Some(param) = text_param {
-                Err(unbound_param_str_err(param))
+                Err(unbound_param_str_err(param, None))
             } else {
                 Ok(())
             }
@@ -121,67 +121,11 @@ fn validate_no_unbound_filter(filter: &FilterExpr) -> Result<(), QqlError> {
 }
 
 fn validate_no_unbound_formula(expr: &FormulaExpr) -> Result<(), QqlError> {
-    match expr {
-        FormulaExpr::Variable { name } => {
-            if let Some(param_name) = name.strip_prefix(':') {
-                return Err(unbound_named_err(param_name));
-            } else if let Some(idx_str) = name.strip_prefix('?') {
-                if let Ok(idx) = idx_str.parse::<usize>() {
-                    return Err(unbound_positional_err(idx));
-                } else {
-                    return Err(QqlError::validation(
-                        "QQL-BIND-INVALID-PARAMS",
-                        alloc::format!("invalid positional parameter index '?{}'", idx_str),
-                        None,
-                    ));
-                }
-            }
-            Ok(())
-        }
-        FormulaExpr::Sum { left, right }
-        | FormulaExpr::Sub { left, right }
-        | FormulaExpr::Mul { left, right }
-        | FormulaExpr::Div { left, right, .. }
-        | FormulaExpr::Pow {
-            base: left,
-            exponent: right,
-        } => {
-            validate_no_unbound_formula(left)?;
-            validate_no_unbound_formula(right)
-        }
-        FormulaExpr::Neg { operand }
-        | FormulaExpr::Abs { x: operand }
-        | FormulaExpr::Sqrt { x: operand }
-        | FormulaExpr::Log { x: operand }
-        | FormulaExpr::Ln { x: operand }
-        | FormulaExpr::Exp { x: operand }
-        | FormulaExpr::Acosh { x: operand } => validate_no_unbound_formula(operand),
-        FormulaExpr::Max { args } | FormulaExpr::Min { args } => {
-            for arg in args {
-                validate_no_unbound_formula(arg)?;
-            }
-            Ok(())
-        }
-        FormulaExpr::Decay { x, target, .. } => {
-            validate_no_unbound_formula(x)?;
-            if let Some(t) = target {
-                validate_no_unbound_formula(t)?;
-            }
-            Ok(())
-        }
-        FormulaExpr::Case { cond, then_, else_ } => {
-            validate_no_unbound_filter(cond)?;
-            validate_no_unbound_formula(then_)?;
-            validate_no_unbound_formula(else_)
-        }
-        FormulaExpr::MatchCondition { values, .. } => {
-            for v in values {
-                validate_no_unbound_value(v)?;
-            }
-            Ok(())
-        }
-        _ => Ok(()),
-    }
+    super::formula::validate_no_unbound_formula(
+        expr,
+        &validate_no_unbound_filter,
+        &validate_no_unbound_value,
+    )
 }
 
 fn validate_no_unbound_prefetch(prefetch: &Prefetch) -> Result<(), QqlError> {
@@ -295,7 +239,7 @@ fn validate_no_unbound_query_expr(expr: &QueryExpr) -> Result<(), QqlError> {
         }
         QueryExpr::Hybrid { text_param, .. } => {
             if let Some(param) = text_param {
-                Err(unbound_param_str_err(param))
+                Err(unbound_param_str_err(param, None))
             } else {
                 Ok(())
             }
@@ -315,7 +259,7 @@ fn validate_no_unbound_query_expr(expr: &QueryExpr) -> Result<(), QqlError> {
             ..
         } => {
             if let Some(param) = query_param {
-                Err(unbound_param_str_err(param))
+                Err(unbound_param_str_err(param, None))
             } else {
                 for p in prefetch {
                     validate_no_unbound_prefetch(p)?;
@@ -335,10 +279,10 @@ fn validate_no_unbound_query_stmt(query: &QueryStmt) -> Result<(), QqlError> {
         validate_no_unbound_filter(filter)?;
     }
     if let Some(param) = &query.page.limit_param {
-        return Err(unbound_param_str_err(param));
+        return Err(unbound_param_str_err(param, query.page.limit_span));
     }
     if let Some(param) = &query.page.offset_param {
-        return Err(unbound_param_str_err(param));
+        return Err(unbound_param_str_err(param, query.page.offset_span));
     }
     Ok(())
 }
@@ -368,7 +312,7 @@ pub fn validate_no_unbound_params(stmt: &Stmt) -> Result<(), QqlError> {
                 validate_no_unbound_point_id(after)?;
             }
             if let Some(param) = &scroll.limit_param {
-                return Err(unbound_param_str_err(param));
+                return Err(unbound_param_str_err(param, scroll.limit_span));
             }
             Ok(())
         }
@@ -404,7 +348,7 @@ pub fn validate_no_unbound_params(stmt: &Stmt) -> Result<(), QqlError> {
                 validate_no_unbound_filter(filter)?;
             }
             if let Some(param) = &facet.limit_param {
-                return Err(unbound_param_str_err(param));
+                return Err(unbound_param_str_err(param, facet.limit_span));
             }
             Ok(())
         }

@@ -22,9 +22,23 @@ pub enum Value {
     /// `[v1, v2, …]` list literal (also dense vector input).
     List(Vec<Value>),
     /// Named parameter placeholder (`:name`).
-    Param(String),
+    Param(
+        String,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        Option<crate::error::Span>,
+    ),
     /// Positional parameter placeholder (`?`).
-    PositionalParam(usize),
+    PositionalParam(
+        usize,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        Option<crate::error::Span>,
+    ),
 }
 
 impl core::fmt::Debug for Value {
@@ -37,8 +51,12 @@ impl core::fmt::Debug for Value {
             Self::Null => f.write_str("Null"),
             Self::Dict(value) => f.debug_tuple("Dict").field(value).finish(),
             Self::List(value) => f.debug_tuple("List").field(value).finish(),
-            Self::Param(value) => f.debug_tuple("Param").field(value).finish(),
-            Self::PositionalParam(idx) => f.debug_tuple("PositionalParam").field(idx).finish(),
+            Self::Param(value, span) => f.debug_tuple("Param").field(value).field(span).finish(),
+            Self::PositionalParam(idx, span) => f
+                .debug_tuple("PositionalParam")
+                .field(idx)
+                .field(span)
+                .finish(),
         }
     }
 }
@@ -112,6 +130,12 @@ impl Value {
     }
 
     /// Convert the value into JSON, failing on non-finite floats.
+    ///
+    /// Note: Parameter placeholders (`Value::Param` and `Value::PositionalParam`)
+    /// emit diagnostic sentinel objects (`{"$param": ...}`) with optional `$span`.
+    /// This manual JSON representation is emit-only; `Value::from_json` decodes
+    /// all JSON objects as standard `Value::Dict` to prevent payload sentinel
+    /// hijacking. For full two-way AST serialization, use serde.
     #[cfg(feature = "json")]
     pub fn to_json(&self) -> Result<serde_json::Value, QqlError> {
         match self {
@@ -140,8 +164,56 @@ impl Value {
                 .map(Self::to_json)
                 .collect::<Result<Vec<_>, _>>()
                 .map(serde_json::Value::Array),
-            Self::Param(name) => Ok(serde_json::json!({ "$param": name })),
-            Self::PositionalParam(idx) => Ok(serde_json::json!({ "$param_idx": idx })),
+            Self::Param(name, span) => {
+                if let Some(sp) = span {
+                    Ok(serde_json::json!({ "$param": name, "$span": [sp.start, sp.end] }))
+                } else {
+                    Ok(serde_json::json!({ "$param": name }))
+                }
+            }
+            Self::PositionalParam(idx, span) => {
+                if let Some(sp) = span {
+                    Ok(serde_json::json!({ "$param_idx": idx, "$span": [sp.start, sp.end] }))
+                } else {
+                    Ok(serde_json::json!({ "$param_idx": idx }))
+                }
+            }
+        }
+    }
+
+    /// Construct an unlocated named parameter placeholder.
+    pub fn param(name: impl Into<String>) -> Self {
+        Self::Param(name.into(), None)
+    }
+
+    /// Construct a located named parameter placeholder.
+    pub fn param_with_span(name: impl Into<String>, span: crate::error::Span) -> Self {
+        Self::Param(name.into(), Some(span))
+    }
+
+    /// Construct an unlocated positional parameter placeholder.
+    pub fn positional_param(idx: usize) -> Self {
+        Self::PositionalParam(idx, None)
+    }
+
+    /// Construct a located positional parameter placeholder.
+    pub fn positional_param_with_span(idx: usize, span: crate::error::Span) -> Self {
+        Self::PositionalParam(idx, Some(span))
+    }
+
+    /// Extract the parameter name if this is a named parameter.
+    pub fn param_name(&self) -> Option<&str> {
+        match self {
+            Self::Param(name, _) => Some(name.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Extract the parameter source span if present.
+    pub fn param_span(&self) -> Option<crate::error::Span> {
+        match self {
+            Self::Param(_, span) | Self::PositionalParam(_, span) => *span,
+            _ => None,
         }
     }
 }

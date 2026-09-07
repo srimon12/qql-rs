@@ -12,8 +12,12 @@
 
 pub(crate) mod ddl;
 pub(crate) mod expr;
+pub(crate) mod filter;
+pub(crate) mod formula;
+pub(crate) mod index_quota;
 pub(crate) mod mutation;
 pub(crate) mod query;
+pub(crate) mod query_expr;
 
 #[cfg(test)]
 mod tests;
