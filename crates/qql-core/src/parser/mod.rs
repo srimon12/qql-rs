@@ -358,12 +358,18 @@ impl<'a> AstLowerer<'a> {
                 let colon_tok = self.advance()?;
                 let name = self.parse_param_name()?;
                 let span = Span::new(colon_tok.span.start, self.prev_span().end);
-                Ok(crate::ast::Value::Param(name, Some(span)))
+                Ok(crate::ast::Value::Param(
+                    name,
+                    Some(alloc::boxed::Box::new(span)),
+                ))
             }
             TokenKind::Question => {
                 let q_tok = self.advance()?;
                 let idx = self.next_positional_param();
-                Ok(crate::ast::Value::PositionalParam(idx, Some(q_tok.span)))
+                Ok(crate::ast::Value::PositionalParam(
+                    idx,
+                    Some(alloc::boxed::Box::new(q_tok.span)),
+                ))
             }
             TokenKind::Lbrace => self.parse_payload_dict().map(crate::ast::Value::Dict),
             TokenKind::Lbracket => self.parse_list().map(crate::ast::Value::List),

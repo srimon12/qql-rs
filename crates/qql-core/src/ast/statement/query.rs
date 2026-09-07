@@ -42,7 +42,7 @@ pub enum QueryInput {
             feature = "serde",
             serde(default, skip_serializing_if = "Option::is_none")
         )]
-        Option<crate::error::Span>,
+        Option<alloc::boxed::Box<crate::error::Span>>,
     ),
     /// Positional parameter placeholder (`?`) for target query input.
     PositionalParam(
@@ -51,7 +51,7 @@ pub enum QueryInput {
             feature = "serde",
             serde(default, skip_serializing_if = "Option::is_none")
         )]
-        Option<crate::error::Span>,
+        Option<alloc::boxed::Box<crate::error::Span>>,
     ),
 }
 
@@ -63,7 +63,7 @@ impl QueryInput {
 
     /// Construct a located named parameter placeholder.
     pub fn param_with_span(name: impl Into<String>, span: crate::error::Span) -> Self {
-        Self::Param(name.into(), Some(span))
+        Self::Param(name.into(), Some(alloc::boxed::Box::new(span)))
     }
 
     /// Construct an unlocated positional parameter placeholder.
@@ -73,13 +73,13 @@ impl QueryInput {
 
     /// Construct a located positional parameter placeholder.
     pub fn positional_param_with_span(idx: usize, span: crate::error::Span) -> Self {
-        Self::PositionalParam(idx, Some(span))
+        Self::PositionalParam(idx, Some(alloc::boxed::Box::new(span)))
     }
 
     /// Extract the parameter source span if present.
     pub fn param_span(&self) -> Option<crate::error::Span> {
         match self {
-            Self::Param(_, span) | Self::PositionalParam(_, span) => *span,
+            Self::Param(_, span) | Self::PositionalParam(_, span) => span.as_deref().copied(),
             _ => None,
         }
     }

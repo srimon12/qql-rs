@@ -195,12 +195,15 @@ impl<'a> AstLowerer<'a> {
                 let colon_tok = self.advance()?;
                 let name = self.parse_param_name()?;
                 let span = Span::new(colon_tok.span.start, self.prev_span().end);
-                Ok(PointId::Param(name, Some(span)))
+                Ok(PointId::Param(name, Some(alloc::boxed::Box::new(span))))
             }
             TokenKind::Question => {
                 let q_tok = self.advance()?;
                 let idx = self.next_positional_param();
-                Ok(PointId::PositionalParam(idx, Some(q_tok.span)))
+                Ok(PointId::PositionalParam(
+                    idx,
+                    Some(alloc::boxed::Box::new(q_tok.span)),
+                ))
             }
             _ => Err(QqlError::parse(
                 "QQL-PARSE-POINT-ID",
@@ -469,10 +472,14 @@ pub fn point_id_from_value(value: Value, span: Span) -> Result<PointId, QqlError
     match value {
         Value::Int(value) if value >= 0 => Ok(PointId::Number(value as u64)),
         Value::Str(value) => Ok(PointId::String(value)),
-        Value::Param(name, param_span) => Ok(PointId::Param(name, param_span.or(Some(span)))),
-        Value::PositionalParam(idx, param_span) => {
-            Ok(PointId::PositionalParam(idx, param_span.or(Some(span))))
-        }
+        Value::Param(name, param_span) => Ok(PointId::Param(
+            name,
+            param_span.or_else(|| Some(alloc::boxed::Box::new(span))),
+        )),
+        Value::PositionalParam(idx, param_span) => Ok(PointId::PositionalParam(
+            idx,
+            param_span.or_else(|| Some(alloc::boxed::Box::new(span))),
+        )),
         _ => Err(QqlError::validation(
             "QQL-VALIDATION-POINT-ID",
             "point IDs must be unsigned integers or strings",

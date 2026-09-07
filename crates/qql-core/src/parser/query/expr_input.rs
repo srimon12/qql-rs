@@ -56,12 +56,15 @@ impl<'a> AstLowerer<'a> {
             let colon_tok = self.advance()?;
             let name = self.parse_param_name()?;
             let span = Span::new(colon_tok.span.start, self.prev_span().end);
-            return Ok(QueryInput::Param(name, Some(span)));
+            return Ok(QueryInput::Param(name, Some(alloc::boxed::Box::new(span))));
         }
         if self.peek()?.kind == TokenKind::Question {
             let q_tok = self.advance()?;
             let idx = self.next_positional_param();
-            return Ok(QueryInput::PositionalParam(idx, Some(q_tok.span)));
+            return Ok(QueryInput::PositionalParam(
+                idx,
+                Some(alloc::boxed::Box::new(q_tok.span)),
+            ));
         }
         if self.peek()?.kind == TokenKind::String {
             return self.parse_string().map(|text| QueryInput::Text {
