@@ -11,6 +11,7 @@ use qql_core::params_json::{
     bind_stmt_with_params, bind_str_with_params, param_for, plan_statement_params,
 };
 use qql_core::parser::Parser;
+use std::future::Future;
 
 /// Parse the `onError` option (`"stop"` default, `"continue"`).
 fn on_error_from(options: Option<&serde_json::Value>) -> qql::executor::OnError {
@@ -31,6 +32,28 @@ fn scoped_candidate(params: Option<&serde_json::Value>) -> bool {
         if !arr.is_empty() && arr.iter().all(|p| p.is_object() || p.is_array()))
 }
 
+/// Close a one-shot executor after `run` completes, so a failed dispatch
+/// cannot leak the underlying connection (for edge: on-disk shards and the
+/// loaded model). Mirrors the Python wrapper's `try/finally: close()`
+/// contract: on the error path the dispatch error wins and the close is
+/// best-effort; after a *successful* dispatch a close failure is surfaced
+/// (an unflushed edge write must not be silently swallowed).
+pub async fn run_then_close<T, E>(executor: &qql::executor::Executor, run: E) -> Result<T, QqlError>
+where
+    E: Future<Output = Result<T, QqlError>>,
+{
+    match run.await {
+        Ok(value) => {
+            executor.close().await?;
+            Ok(value)
+        }
+        Err(e) => {
+            let _ = executor.close().await;
+            Err(e)
+        }
+    }
+}
+
 /// Execute a QQL query string, a Stmt, or an array of either against
 /// `executor`, binding `options.params` per the shared batch contract.
 ///
@@ -44,7 +67,10 @@ pub async fn execute_dispatch(
 ) -> Result<qql::executor::ExecutionReport, QqlError> {
     let on_error = on_error_from(options);
     let stop = matches!(on_error, qql::executor::OnError::Stop);
-    let params = options.and_then(|o| o.get("params"));
+    // JS `null` means "no params" (mirrors Python `params=None`).
+    let params = options
+        .and_then(|o| o.get("params"))
+        .filter(|p| !p.is_null());
 
     match &query {
         serde_json::Value::String(s) => {
@@ -74,7 +100,13 @@ pub async fn execute_dispatch(
         }
         serde_json::Value::Array(arr) => {
             if arr.is_empty() {
-                return Ok(qql::executor::ExecutionReport::empty());
+                // Fail closed like the executor does for an empty string —
+                // an empty array must not return a silently-empty ok report.
+                return Err(QqlError::validation(
+                    "QQL-VALIDATION-EMPTY-SCRIPT",
+                    "no statements to execute; the query is empty or contains only whitespace",
+                    None,
+                ));
             }
             let plan = match params {
                 Some(p) => Some(plan_statement_params(p, arr.len())?),

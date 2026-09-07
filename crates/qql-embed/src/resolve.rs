@@ -337,7 +337,7 @@ fn collect_input_dense_job(
     default_model: &str,
     jobs: &mut Vec<(String, String)>,
 ) {
-    if let QueryInput::Text { text, model } = input
+    if let QueryInput::Text { text, model, .. } = input
         && target.kind == VectorKind::Dense
         && !target.multi
     {
@@ -645,7 +645,7 @@ async fn apply_input(
             *input = QueryInput::Vector(VectorValue::Dense(vec));
             Ok(())
         }
-        QueryInput::Text { text, model } => {
+        QueryInput::Text { text, model, .. } => {
             let model_name = model.as_deref().unwrap_or(default_model);
             if target.kind == VectorKind::Sparse {
                 let s_vec = embedder.embed_sparse_query(text, model_name).await?;

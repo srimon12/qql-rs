@@ -172,7 +172,7 @@ impl From<&qql_core::ast::QueryInput> for PlanQueryInput {
             qql_core::ast::QueryInput::Vector(v) => {
                 PlanQueryInput::Vector(PlanVectorValue::from(v))
             }
-            qql_core::ast::QueryInput::Text { text, model } => PlanQueryInput::Document {
+            qql_core::ast::QueryInput::Text { text, model, .. } => PlanQueryInput::Document {
                 text: text.clone(),
                 model: model.clone(),
             },

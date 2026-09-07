@@ -16,7 +16,7 @@ impl GrpcQdrant {
         cl.query(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| grpc_error("query", e))
+            .map_err(|e| grpc_error("query", e, &self.current_request_id()))
     }
 
     /// gRPC `QueryGroups`: run a grouped query request.
@@ -28,7 +28,7 @@ impl GrpcQdrant {
         cl.query_groups(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| grpc_error("query_groups", e))
+            .map_err(|e| grpc_error("query_groups", e, &self.current_request_id()))
     }
 
     /// gRPC `QueryBatch`: run multiple queries in one round trip.
@@ -40,7 +40,7 @@ impl GrpcQdrant {
         cl.query_batch(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| grpc_error("query_batch", e))
+            .map_err(|e| grpc_error("query_batch", e, &self.current_request_id()))
     }
 
     /// gRPC `UpdateBatch`: apply multiple mutations in one round trip.
@@ -52,7 +52,7 @@ impl GrpcQdrant {
         cl.update_batch(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| grpc_error("update_batch", e))
+            .map_err(|e| grpc_error("update_batch", e, &self.current_request_id()))
     }
 
     /// gRPC `Get`: retrieve points by ID.
@@ -64,7 +64,7 @@ impl GrpcQdrant {
         cl.get(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| grpc_error("get_points", e))
+            .map_err(|e| grpc_error("get_points", e, &self.current_request_id()))
     }
 
     /// gRPC `Scroll`: page through points with an optional filter.
@@ -76,7 +76,7 @@ impl GrpcQdrant {
         cl.scroll(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| grpc_error("scroll", e))
+            .map_err(|e| grpc_error("scroll", e, &self.current_request_id()))
     }
 
     /// gRPC `Upsert`: write or replace points.
@@ -88,7 +88,7 @@ impl GrpcQdrant {
         cl.upsert(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| grpc_error("upsert", e))
+            .map_err(|e| grpc_error("upsert", e, &self.current_request_id()))
     }
 
     /// gRPC `Delete`: remove points by ID or filter.
@@ -100,7 +100,7 @@ impl GrpcQdrant {
         cl.delete(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| grpc_error("delete", e))
+            .map_err(|e| grpc_error("delete", e, &self.current_request_id()))
     }
 
     /// gRPC `UpdateVectors`: replace vectors on existing points.
@@ -112,7 +112,7 @@ impl GrpcQdrant {
         cl.update_vectors(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| grpc_error("update_vectors", e))
+            .map_err(|e| grpc_error("update_vectors", e, &self.current_request_id()))
     }
 
     /// gRPC `SetPayload`: merge payload values onto points.
@@ -124,7 +124,7 @@ impl GrpcQdrant {
         cl.set_payload(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| grpc_error("set_payload", e))
+            .map_err(|e| grpc_error("set_payload", e, &self.current_request_id()))
     }
 
     /// gRPC `Collections/Create`: create a collection from a raw request.
@@ -136,7 +136,7 @@ impl GrpcQdrant {
         cl.create(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| grpc_error("create_collection", e))
+            .map_err(|e| grpc_error("create_collection", e, &self.current_request_id()))
     }
 
     /// gRPC `Collections/Update`: update collection parameters.
@@ -148,7 +148,7 @@ impl GrpcQdrant {
         cl.update(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| grpc_error("update_collection", e))
+            .map_err(|e| grpc_error("update_collection", e, &self.current_request_id()))
     }
 
     /// gRPC `Collections/Delete`: drop a collection.
@@ -160,7 +160,7 @@ impl GrpcQdrant {
         cl.delete(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| grpc_error("delete_collection", e))
+            .map_err(|e| grpc_error("delete_collection", e, &self.current_request_id()))
     }
 
     /// gRPC `CreateFieldIndex`: index a payload field.
@@ -172,7 +172,7 @@ impl GrpcQdrant {
         cl.create_field_index(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| grpc_error("create_field_index", e))
+            .map_err(|e| grpc_error("create_field_index", e, &self.current_request_id()))
     }
 
     /// gRPC `DeleteFieldIndex`: drop a payload field index.
@@ -184,7 +184,7 @@ impl GrpcQdrant {
         cl.delete_field_index(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| grpc_error("delete_field_index", e))
+            .map_err(|e| grpc_error("delete_field_index", e, &self.current_request_id()))
     }
 
     /// gRPC `Count`: count points matching an optional filter.
@@ -196,7 +196,7 @@ impl GrpcQdrant {
         cl.count(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| grpc_error("count", e))
+            .map_err(|e| grpc_error("count", e, &self.current_request_id()))
     }
 
     /// gRPC `ClearPayload`: remove all payload from points.
@@ -208,7 +208,7 @@ impl GrpcQdrant {
         cl.clear_payload(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| grpc_error("clear_payload", e))
+            .map_err(|e| grpc_error("clear_payload", e, &self.current_request_id()))
     }
 
     /// gRPC `DeletePayload`: remove specific payload keys from points.
@@ -220,7 +220,7 @@ impl GrpcQdrant {
         cl.delete_payload(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| grpc_error("delete_payload", e))
+            .map_err(|e| grpc_error("delete_payload", e, &self.current_request_id()))
     }
 
     /// gRPC `DeleteVectors`: remove vectors from points.
@@ -232,7 +232,7 @@ impl GrpcQdrant {
         cl.delete_vectors(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| grpc_error("delete_vectors", e))
+            .map_err(|e| grpc_error("delete_vectors", e, &self.current_request_id()))
     }
 
     /// gRPC `Facet`: calculate categorical value distributions.
@@ -241,6 +241,6 @@ impl GrpcQdrant {
         cl.facet(tonic::Request::new(req))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| grpc_error("facet", e))
+            .map_err(|e| grpc_error("facet", e, &self.current_request_id()))
     }
 }

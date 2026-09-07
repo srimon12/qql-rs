@@ -431,8 +431,7 @@ pub fn statement_batch_key(stmt: &Stmt) -> Option<BatchKey> {
 /// Public so the executor can probe *before* schema resolution (network);
 /// [`plan`] probes again as the compile-path gate.
 pub fn ensure_no_unbound_params(statement: &Stmt) -> Result<(), QqlError> {
-    let mut probe = statement.clone();
-    qql_core::params::bind_stmt(&mut probe, |_| None, &[])
+    qql_core::params::validate_no_unbound_params(statement)
 }
 
 /// Fallible planner — the single source of truth for statement → operation.
@@ -484,6 +483,7 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
                 model,
                 field,
                 prefetch,
+                ..
             } = &query.expression
             {
                 return plan_cross_rerank(query, &collection, qtext, model, field, prefetch);
@@ -1616,6 +1616,7 @@ mod tests {
                 input: QueryInput::Text {
                     text: "rerank text".into(),
                     model: None,
+                    text_param: None,
                 },
                 model: "colbert-v2".into(),
                 using: None,
@@ -1665,6 +1666,7 @@ mod tests {
                 input: QueryInput::Text {
                     text: "rerank text".into(),
                     model: None,
+                    text_param: None,
                 },
                 model: "colbert-v2".into(),
                 using: Some(VectorTarget {

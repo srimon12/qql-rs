@@ -37,7 +37,17 @@ impl<'a> AstLowerer<'a> {
                 None
             };
         self.expect(TokenKind::Limit)?;
-        let limit = self.parse_positive_u64("SCROLL LIMIT")?;
+        let (limit, limit_param) = if self.peek()?.kind == TokenKind::Colon {
+            self.advance()?;
+            let name = self.parse_param_name()?;
+            (10, Some(alloc::format!(":{}", name)))
+        } else if self.peek()?.kind == TokenKind::Question {
+            self.advance()?;
+            let idx = self.next_positional_param();
+            (10, Some(alloc::format!("?{}", idx)))
+        } else {
+            (self.parse_positive_u64("SCROLL LIMIT")?, None)
+        };
         Ok(Stmt::Scroll(Box::new(ScrollStmt {
             collection,
             limit,
@@ -45,6 +55,7 @@ impl<'a> AstLowerer<'a> {
             after,
             shard_key,
             with_vector,
+            limit_param,
         })))
     }
 
@@ -130,6 +141,7 @@ impl<'a> AstLowerer<'a> {
 
         let mut filter = None;
         let mut limit = None;
+        let mut limit_param = None;
         let mut exact = None;
         let mut shard_key = None;
 
@@ -139,9 +151,19 @@ impl<'a> AstLowerer<'a> {
                     self.advance()?;
                     filter = Some(Box::new(self.parse_filter_expr()?));
                 }
-                TokenKind::Limit if limit.is_none() => {
+                TokenKind::Limit if limit.is_none() && limit_param.is_none() => {
                     self.advance()?;
-                    limit = Some(self.parse_positive_u64("FACET LIMIT")?);
+                    if self.peek()?.kind == TokenKind::Colon {
+                        self.advance()?;
+                        let name = self.parse_param_name()?;
+                        limit_param = Some(alloc::format!(":{}", name));
+                    } else if self.peek()?.kind == TokenKind::Question {
+                        self.advance()?;
+                        let idx = self.next_positional_param();
+                        limit_param = Some(alloc::format!("?{}", idx));
+                    } else {
+                        limit = Some(self.parse_positive_u64("FACET LIMIT")?);
+                    }
                 }
                 TokenKind::Exact if exact.is_none() => {
                     self.advance()?;
@@ -202,6 +224,7 @@ impl<'a> AstLowerer<'a> {
             limit,
             exact,
             shard_key,
+            limit_param,
         })))
     }
 }

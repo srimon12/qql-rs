@@ -113,7 +113,7 @@ impl PyClient {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let val = common::run_async(&inner, input, oe)
                 .await
-                .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+                .map_err(common::qql_py_error)?;
             Python::attach(|py| {
                 let dict = pythonize::pythonize(py, &val)
                     .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;

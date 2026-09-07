@@ -9,7 +9,7 @@ fn nearest_text_is_default_shorthand() {
     let s = Parser::parse("QUERY 'hello' FROM docs;").unwrap();
     let Stmt::Query(q) = s else { panic!() };
     assert!(matches!(q.expression, QueryExpr::Nearest {
-        input: QueryInput::Text { ref text, model: None }, ..
+        input: QueryInput::Text { ref text, model: None, .. }, ..
     } if text == "hello"));
     assert_eq!(q.collection, QueryCollection::Explicit("docs".into()));
 }
@@ -49,7 +49,7 @@ fn nearest_explicit_text_with_model() {
     let s = Parser::parse("QUERY TEXT 'search' MODEL 'all-minilm' FROM docs;").unwrap();
     let Stmt::Query(q) = s else { panic!() };
     assert!(matches!(q.expression, QueryExpr::Nearest {
-        input: QueryInput::Text { ref text, model: Some(ref m) }, ..
+        input: QueryInput::Text { ref text, model: Some(ref m), .. }, ..
     } if text == "search" && m == "all-minilm"));
 }
 
@@ -307,6 +307,7 @@ fn using_hybrid_shorthand_expands_to_hybrid() {
             sparse_vector: Some(ref sp),
             fusion: FusionMethod::Rrf,
             model: None,
+            ..
         } if text == "search" && d == "dense" && sp == "sparse"
     ));
 }
@@ -323,6 +324,7 @@ fn using_hybrid_defaults_fusion_rrf_and_omitted_names() {
             sparse_vector: None,
             fusion: FusionMethod::Rrf,
             model: None,
+            ..
         } if text == "search"
     ));
 }
@@ -342,6 +344,7 @@ fn using_hybrid_preserves_model_and_dbsf() {
             dense_vector: Some(ref d),
             sparse_vector: Some(ref sp),
             fusion: FusionMethod::Dbsf,
+            ..
         } if text == "q" && m == "nomic" && d == "d" && sp == "s"
     ));
 }
@@ -577,6 +580,7 @@ fn cross_rerank_parses() {
                 model,
                 field,
                 prefetch,
+                ..
             } => {
                 assert_eq!(query, "q");
                 assert_eq!(model, "bge-reranker-base");

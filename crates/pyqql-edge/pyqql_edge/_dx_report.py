@@ -17,6 +17,8 @@ class ScoredPoint:
     payload: Optional[Dict[str, Any]] = None
     text: Optional[str] = None
     collection: Optional[str] = None
+    vector: Optional[Any] = None
+    shard_key: Optional[Union[str, int]] = None
 
     def __getitem__(self, key: str) -> Any:
         if self.payload and key in self.payload:
@@ -52,12 +54,18 @@ class ExecutionReport(dict):
     def failed(self) -> int:
         return self.get("failed", 0)
 
+    def _result_at(self, stmt: int) -> Optional[Dict[str, Any]]:
+        res = self.results
+        if not res or stmt >= len(res) or stmt < -len(res):
+            return None
+        return res[stmt]
+
     def hits(self, stmt: int = 0) -> List[ScoredPoint]:
         """Return typed ScoredPoint objects for statement `stmt` (default first statement)."""
-        res = self.results
-        if not res or stmt >= len(res):
+        r = self._result_at(stmt)
+        if not r:
             return []
-        data = res[stmt].get("data")
+        data = r.get("data")
         if not isinstance(data, list):
             return []
         return [
@@ -67,9 +75,13 @@ class ExecutionReport(dict):
                 payload=h.get("payload"),
                 text=h.get("text"),
                 collection=h.get("collection"),
+                vector=h.get("vector"),
+                shard_key=h.get("shard_key"),
             )
             for h in data
-            if isinstance(h, dict)
+            # Only map entries shaped like scored points; facet entries
+            # ({value, count}) are not ScoredPoints.
+            if isinstance(h, dict) and "id" in h and "score" in h
         ]
 
     def points(self, stmt: int = 0) -> List[ScoredPoint]:
@@ -78,10 +90,10 @@ class ExecutionReport(dict):
 
     def facet(self, stmt: int = 0) -> List[Dict[str, Any]]:
         """Return facet hits list for statement `stmt`."""
-        res = self.results
-        if not res or stmt >= len(res):
+        r = self._result_at(stmt)
+        if not r:
             return []
-        data = res[stmt].get("data")
+        data = r.get("data")
         if isinstance(data, list):
             return data
         if isinstance(data, dict):
@@ -90,10 +102,9 @@ class ExecutionReport(dict):
 
     def count(self, stmt: int = 0) -> int:
         """Return count integer for statement `stmt`."""
-        res = self.results
-        if not res or stmt >= len(res):
+        r = self._result_at(stmt)
+        if not r:
             return 0
-        r = res[stmt]
         data = r.get("data")
         if isinstance(data, dict):
             c = data.get("result", {}).get("count", data.get("count"))
@@ -115,10 +126,10 @@ class ExecutionReport(dict):
         normalized across the ``{"result": {"groups": [...]}}`` and bare
         ``{"groups": [...]}`` envelopes.
         """
-        res = self.results
-        if not res or stmt >= len(res):
+        r = self._result_at(stmt)
+        if not r:
             return []
-        data = res[stmt].get("data")
+        data = r.get("data")
         if isinstance(data, dict):
             result = data.get("result")
             nested = result.get("groups") if isinstance(result, dict) else None
@@ -126,3 +137,4 @@ class ExecutionReport(dict):
             if isinstance(groups, list):
                 return groups
         return []
+

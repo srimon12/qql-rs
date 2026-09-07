@@ -153,6 +153,12 @@ pub enum QueryInput {
         text: String,
         /// Optional embedding model override.
         model: Option<String>,
+        /// Parameter placeholder (`:name` or `?idx`) when the text was not provided as a literal string.
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        text_param: Option<String>,
     },
     /// Image path or URL for dense embedding (CLIP vision, etc.).
     /// Resolved to [`VectorValue::Dense`] before plan/dispatch.
@@ -418,6 +424,12 @@ pub enum QueryExpr {
         sparse_vector: Option<String>,
         /// Fusion method for the two stages.
         fusion: FusionMethod,
+        /// Parameter placeholder (`:name` or `?idx`) when the text was not provided as a literal string.
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        text_param: Option<String>,
     },
     /// `QUERY RERANK <input> MODEL '…'` — late-interaction rerank over prefetch.
     Rerank {
@@ -441,6 +453,12 @@ pub enum QueryExpr {
         field: Option<String>,
         /// Candidate stages whose documents are reranked.
         prefetch: Vec<Prefetch>,
+        /// Parameter placeholder (`:name` or `?idx`) when the query was not provided as a literal string.
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        query_param: Option<String>,
     },
 }
 
@@ -638,6 +656,12 @@ pub struct ScrollStmt {
     pub shard_key: Option<String>,
     /// Optional `WITH VECTOR` selector. Defaults to no vectors when `None`.
     pub with_vector: Option<VectorSelector>,
+    /// Optional limit parameter placeholder (`:limit` or `?`).
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub limit_param: Option<String>,
 }
 
 /// Role of an `EMBED` directive.
@@ -1140,6 +1164,12 @@ pub struct FacetStmt {
     pub exact: Option<bool>,
     /// Optional shard key partition routing.
     pub shard_key: Option<String>,
+    /// Optional limit parameter placeholder (`:limit` or `?`).
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub limit_param: Option<String>,
 }
 
 /// `CREATE SHARD KEY '<key>' ON COLLECTION <c> [WITH (…)]`.

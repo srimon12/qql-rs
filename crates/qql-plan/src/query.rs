@@ -187,11 +187,9 @@ pub fn lower_query_expr(expr: &QueryExpr) -> Result<QueryVariant, QqlError> {
             let mut nearest = lower_query_input(input);
             if let PlanQueryInput::Document { model, .. } = &mut nearest
                 && model.as_deref().unwrap_or("").is_empty()
-                && using
-                    .as_ref()
-                    .is_some_and(|target| target.name.eq_ignore_ascii_case("bm25"))
             {
-                *model = Some("Qdrant/bm25".to_string());
+                *model = default_model_for_using(using.as_ref().map(|t| t.name.as_str()))
+                    .or_else(|| model.clone());
             }
             QueryVariant::Nearest(NearestQuery {
                 nearest,
@@ -539,6 +537,7 @@ fn build_query_with_prefetch(
             dense_vector,
             sparse_vector,
             fusion,
+            ..
         } => {
             let fusion_name = match fusion {
                 FusionMethod::Rrf => "rrf",
@@ -673,11 +672,8 @@ fn build_query_with_prefetch(
             if let QueryVariant::Nearest(nearest) = &mut variant
                 && let PlanQueryInput::Document { model, .. } = &mut nearest.nearest
                 && model.as_deref().unwrap_or("").is_empty()
-                && using
-                    .as_deref()
-                    .is_some_and(|u| u.eq_ignore_ascii_case("bm25"))
             {
-                *model = Some("Qdrant/bm25".to_string());
+                *model = default_model_for_using(using.as_deref()).or_else(|| model.clone());
             }
             let prefetches = expression_prefetch(&query.expression);
             let pf_requests: Vec<PrefetchRequest> = prefetches
@@ -689,16 +685,20 @@ fn build_query_with_prefetch(
     }
 }
 
+/// Single definition of the `USING bm25` model default: an unspecified
+/// `USING bm25` target resolves to Qdrant's server-side BM25 model — the same
+/// model `qql-embed`'s sparse pipeline is wire-compatible with. All lowering
+/// sites must go through this helper so the default cannot drift.
+fn default_model_for_using(using: Option<&str>) -> Option<String> {
+    using
+        .is_some_and(|u| u.eq_ignore_ascii_case("bm25"))
+        .then(|| "Qdrant/bm25".to_string())
+}
+
 fn build_text_input(text: &str, model: &Option<String>, using: Option<&str>) -> PlanQueryInput {
     let resolved_model = match model {
         Some(m) if !m.is_empty() => Some(m.clone()),
-        _ => {
-            if using.is_some_and(|u| u.eq_ignore_ascii_case("bm25")) {
-                Some("Qdrant/bm25".to_string())
-            } else {
-                model.clone()
-            }
-        }
+        _ => default_model_for_using(using).or_else(|| model.clone()),
     };
     PlanQueryInput::Document {
         text: text.to_string(),

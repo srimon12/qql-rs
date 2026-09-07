@@ -42,6 +42,7 @@ export class ExecutionReport {
   points(stmt?: number): ScoredPoint[];
   facet(stmt?: number): Array<{ value: unknown; count: number }>;
   count(stmt?: number): number;
+  groups(stmt?: number): Array<{ group_id: unknown; hits: Array<Record<string, unknown>> }>;
 }
 
 export interface ExecuteOptions {

@@ -131,9 +131,14 @@ class TestDxImprovements(unittest.TestCase):
         # Count accessor
         self.assertEqual(rep.count(2), 42)
 
-
-if __name__ == "__main__":
-    unittest.main()
+        # Vector and shard_key defaults and negative index safety
+        self.assertIsNone(hits[0].vector)
+        self.assertIsNone(hits[0].shard_key)
+        self.assertEqual(rep.hits(-10), [])
+        self.assertEqual(rep.points(-10), [])
+        self.assertEqual(rep.facet(-10), [])
+        self.assertEqual(rep.count(-10), 0)
+        self.assertEqual(rep.groups(-10), [])
 
     def test_execution_report_groups_accessor(self):
         # GROUP BY results normalize through report.groups() (pyqql parity
@@ -182,3 +187,8 @@ if __name__ == "__main__":
         )
         self.assertEqual(bare.groups()[0]["id"], "x")
         self.assertEqual(ExecutionReport({}).groups(), [])
+
+
+if __name__ == "__main__":
+    unittest.main()
+
