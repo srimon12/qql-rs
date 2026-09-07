@@ -130,6 +130,12 @@ impl Value {
     }
 
     /// Convert the value into JSON, failing on non-finite floats.
+    ///
+    /// Note: Parameter placeholders (`Value::Param` and `Value::PositionalParam`)
+    /// emit diagnostic sentinel objects (`{"$param": ...}`) with optional `$span`.
+    /// This manual JSON representation is emit-only; `Value::from_json` decodes
+    /// all JSON objects as standard `Value::Dict` to prevent payload sentinel
+    /// hijacking. For full two-way AST serialization, use serde.
     #[cfg(feature = "json")]
     pub fn to_json(&self) -> Result<serde_json::Value, QqlError> {
         match self {

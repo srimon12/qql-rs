@@ -170,7 +170,7 @@ pub fn py_to_json(value: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
     if let Ok(v) = value.extract::<f64>() {
         if !v.is_finite() {
             // serde_json would silently serialize NaN/infinity as `null`;
-            // reject instead so the QQL-BIND-INVALID-FLOAT contract holds.
+            // reject instead so non-finite floats fail with QQL-BIND-TYPE-MISMATCH.
             return Err(PyValueError::new_err(format!(
                 "cannot bind non-finite float value '{v}'"
             )));
