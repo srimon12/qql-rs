@@ -59,96 +59,126 @@ core and its host SDKs (Python `pyqql`, Node `nqql`, WASM `qql-wasm`).
 | 12 | Count *(new)* | `COUNT FROM docs WHERE status = 'active'` |
 | 13 | Bound *(new)* | `QUERY TEXT :q FROM docs USING dense WHERE active = :active LIMIT 10` with `{"q": "search", "active": true}` |
 
-## Results — 2026-09-07 (v0.3.2)
+## Results — 2026-09-07 (v0.4.0)
 
-CPU i5-10400F @ 2.90 GHz · Rust 1.98.0 · CPython 3.14.4 (`pyqql` 0.3.2) ·
-Node 24.18.0 (`nqql` 0.3.2) · release builds · `taskset` pinned · median of reps.
-Prior single-shot reports: `BENCHMARK_REPORT_2026-07-29.md`,
-`BENCHMARK_REPORT_2026-08-28.md` (means, not medians — compare trends, not digits).
+CPU i5-10400F @ 2.90 GHz · Rust 1.98.0 · CPython 3.14.4 (`pyqql` 0.4.0, abi3) ·
+Node 24.18.0 (`nqql` 0.4.0, NAPI-RS 3) · `wasm32-unknown-unknown` release ·
+release builds · `taskset` pinned · median of reps.
+
+Scope of this run vs the prior (v0.3.2) run: prepared statements, typed
+execution results, batch orchestration via `qql_plan::BatchGrouper`, and
+located parameter-error spans (`Option<Box<Span>>` on parameter AST variants —
+boxed so the AST enums keep their 32-byte layout; unboxed, the FFI serialization
+walk cost Python 3–11%).
 
 ### Rust parser (`parse`, ops/s)
 
 | Simple | Hybrid | Full | CTE | CreateColl | Upsert | DeleteWhere | OrderBy | WithPayload | Facet | Scroll | Count | Bound |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 2,022,383 | 941,182 | 318,046 | 386,075 | 590,976 | 626,684 | 1,853,692 | 1,049,437 | 748,910 | 1,243,873 | 1,598,249 | 1,939,976 | 895,270 |
+| 1,998,717 | 955,567 | 320,815 | 392,144 | 608,958 | 631,862 | 1,858,858 | 1,066,386 | 749,676 | 1,263,238 | 1,620,974 | 1,979,281 | 916,001 |
 
-### Rust explain (`explain`, ops/s)
+Parse is flat vs v0.3.2 (±3%) — span capture on parameter placeholders is
+absorbed.
+
+### Rust explanation rendering (`explain`, ops/s)
 
 | Simple | Hybrid | Full | CTE | CreateColl | Upsert | DeleteWhere | OrderBy | WithPayload | Facet | Scroll | Count | Bound |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1,263,906 | 683,473 | 239,854 | 307,397 | 530,429 | 561,321 | 1,550,958 | 646,228 | 569,779 | 812,499 | 884,177 | 969,502 | 608,529 |
+| 1,246,788 | 679,466 | 234,680 | 294,784 | 514,207 | 546,183 | 1,501,884 | 642,033 | 537,599 | 792,713 | 840,432 | 953,325 | 554,186 |
+
+`explain` now renders parameterized pagination (`LIMIT :name` / `?`) and
+located spans, which costs 1–5% on most queries (−9% on `Bound`, the
+parameter-heavy case) in exchange for plans that show their placeholders.
 
 ### Rust mock E2E (`e2e`, ops/s)
 
 | Simple | Hybrid | Full | CTE | CreateColl | Upsert | DeleteWhere | OrderBy | WithPayload | Facet | Scroll | Count | Bound |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 384,677 | 416,591 | 166,649 | 152,311 | 282,809 | 240,739 | 444,382 | 420,200 | 260,672 | 572,018 | 612,025 | 713,553 | 319,803 |
+| 402,572 | 417,208 | 172,613 | 175,751 | 293,901 | 253,904 | 747,367 | 449,738 | 287,478 | 636,230 | 657,252 | 808,635 | 360,469 |
+
+The execute path is the big winner of 0.4.0: **+0.1% to +68%** vs v0.3.2
+(DeleteWhere +68%, Count +13%, Facet +11%, CTE +15%) — typed result
+normalization, the `BatchGrouper` orchestration, and the zero-allocation
+unbound-parameter gate.
 
 ### Rust bind/compile (`bench_bind`, ops/s)
 
 | `bind_str` | `parse+bind_stmt` | `parse+bind+plan` | `parse_and_plan` | `compile_statement` | `format` |
 |---:|---:|---:|---:|---:|---:|
-| 2,143,065 | 720,751 | 506,951 | 241,075 | 151,110 | 201,697 |
+| 1,763,051 | 708,964 | 582,235 | 273,029 | 157,323 | 194,532 |
 
-String binding is ~3× cheaper than parse+AST-bind; full plan+route
-(`compile_statement`, 151k ops/s) dominates the prepared-statement path.
+AST binding + planning is **+15%** faster than v0.3.2 (the zero-alloc
+`validate_no_unbound_params` visitor). Textual binding (`bind_str`) is
+−18% (466 → 567 ns/op) — the price of the triple-quoted/raw-string literal
+scanner and located spans in bind errors; still ~1.8M queries/s.
 
 ### Rust microbenchmarks
 
 | Operation | Throughput |
 |---|---:|
-| BM25 build document | 260,987 ops/s |
-| BM25 build query | 831,213 ops/s |
-| UPSERT parse only | 597,776 ops/s |
-| UPSERT parse + route | 301,179 ops/s |
-| UPSERT parse + route + JSON body | 246,867 ops/s |
+| BM25 build document | 266,339 ops/s |
+| BM25 build query | 868,270 ops/s |
+| UPSERT parse only | 611,078 ops/s |
+| UPSERT parse + route | 330,160 ops/s |
+| UPSERT parse + route + JSON body | 267,334 ops/s |
 
-Route projection ≈ 1,647 ns/op; JSON body extraction ≈ 730 ns/op.
+Route projection ≈ 1,445 ns/op; JSON body extraction ≈ 726 ns/op.
 
 ### Python `pyqql` (ops/s)
 
 | Query | Parse | ParseJson | Explain |
 |---|---:|---:|---:|
-| Simple | 1,398,693 | 881,742 | 850,654 |
-| Hybrid | 821,783 | 609,219 | 558,136 |
-| Full | 311,931 | 235,158 | 213,813 |
-| CTE Prefetch | 378,834 | 209,157 | 264,566 |
-| CreateCollection | 529,929 | 363,164 | 432,633 |
-| Upsert | 544,788 | 437,174 | 438,678 |
-| DeleteWhere | 1,395,251 | 1,090,558 | 1,110,749 |
-| OrderBy | 870,263 | 609,557 | 523,838 |
-| WithPayload | 661,632 | 496,739 | 468,947 |
-| Facet | 985,833 | 841,645 | 575,683 |
-| Scroll | 1,264,848 | 977,305 | 659,365 |
-| Count | 1,401,399 | 1,116,090 | 696,971 |
-| Bound | 741,791 | 514,485 | 455,722 |
+| Simple | 1,504,704 | 895,148 | 901,060 |
+| Hybrid | 870,761 | 587,167 | 577,000 |
+| Full | 322,158 | 225,268 | 212,911 |
+| CTE Prefetch | 379,597 | 211,207 | 266,782 |
+| CreateCollection | 530,663 | 365,405 | 453,382 |
+| Upsert | 532,043 | 439,029 | 468,508 |
+| DeleteWhere | 1,405,406 | 1,027,514 | 1,179,828 |
+| OrderBy | 938,627 | 624,069 | 533,269 |
+| WithPayload | 694,188 | 497,809 | 474,524 |
+| Facet | 1,057,363 | 816,514 | 611,463 |
+| Scroll | 1,317,173 | 998,317 | 691,525 |
+| Count | 1,481,977 | 1,100,107 | 699,691 |
+| Bound | 740,602 | 493,446 | 446,315 |
 
-Bound prepared path: `bind` 588,302 · `compile_query` 120,254 · `is_valid` 682,019 ops/s.
+Bound prepared path: `bind` 572,497 · `compile_query` 121,664 · `is_valid`
+752,111 ops/s (`is_valid` +11% vs v0.3.2). Net vs v0.3.2: parse +0.1–7.9%,
+parseJson −4.2–+2.2%, explain −2.1–+6.8% — the `Box<Span>` layout keeps the
+FFI walk flat while bind errors stay located.
 
 ### Node `nqql` + WASM (ops/s)
 
 | Query | NAPI `parse()` | NAPI `parseJson()` | WASM `parse()` |
 |---|---:|---:|---:|
-| Simple | 383,121 | 789,735 | 319,859 |
-| Hybrid | 287,740 | 544,237 | 235,996 |
-| Full | 159,482 | 216,128 | 98,580 |
-| CTE Prefetch | 146,375 | 197,557 | 76,363 |
-| CreateCollection | 231,243 | 318,237 | 178,505 |
-| Upsert | 219,086 | 403,673 | 159,464 |
-| DeleteWhere | 400,938 | 956,949 | 395,172 |
-| OrderBy | 298,473 | 554,842 | 237,931 |
-| WithPayload | 256,150 | 458,900 | 199,273 |
-| Facet | 332,049 | 712,178 | 346,590 |
-| Scroll | 373,731 | 885,086 | 362,182 |
-| Count | 384,159 | 992,377 | 406,943 |
-| Bound | 269,037 | 463,758 | 191,773 |
+| Simple | 390,300 | 787,613 | 323,018 |
+| Hybrid | 301,038 | 509,764 | 243,140 |
+| Full | 152,335 | 209,934 | 95,643 |
+| CTE Prefetch | 143,002 | 191,437 | 73,033 |
+| CreateCollection | 229,624 | 321,933 | 173,044 |
+| Upsert | 209,953 | 400,549 | 151,888 |
+| DeleteWhere | 388,899 | 891,829 | 378,145 |
+| OrderBy | 298,686 | 559,663 | 227,310 |
+| WithPayload | 247,678 | 438,328 | 188,107 |
+| Facet | 310,676 | 704,061 | 332,495 |
+| Scroll | 367,814 | 834,874 | 357,987 |
+| Count | 377,842 | 978,304 | 408,613 |
+| Bound | 255,283 | 431,893 | 171,175 |
 
-Bound prepared path: `bind` 542,553 · `compileQuery` 70,399 · `isValid` 598,390 · WASM `bind` 391,663 ops/s.
+Bound prepared path: `bind` 477,124 · `compileQuery` 67,973 · `isValid`
+691,180 (NAPI) · WASM `bind` 377,763 ops/s.
 
-`parseJson()` stays 1.4–2.6× faster than `parse()` — V8 object allocation, not
-Rust parsing, is the Node bottleneck. The WASM `Simple` dip seen in the
-2026-09-06 single-shot run (185,964) is gone under median-of-3 (319,859):
-single-shot WASM numbers carry JIT/GC noise; prefer the median.
+Node/WASM parse is flat vs v0.3.2 (−7% worst case on parameter-heavy
+queries, several positive) — same 32-byte AST layout behind NAPI and the
+wasm-bindgen JSON serializer.
+
+`parseJson()` stays 1.4–2.6× faster than `parse()` — V8 object allocation,
+not Rust parsing, is the Node bottleneck. Prefer medians over single-shot
+WASM numbers: JIT/GC noise dominates a single pass (see the legacy reports).
+
+Prior single-shot reports: `legacy/BENCHMARK_REPORT_2026-07-29.md`,
+`legacy/BENCHMARK_REPORT_2026-08-28.md` (means, not medians — compare
+trends, not digits).
 
 ## Running the Benchmarks
 

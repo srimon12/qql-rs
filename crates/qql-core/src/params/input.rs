@@ -17,12 +17,12 @@ where
 {
     match input {
         QueryInput::Param(name, span) => {
-            let sp = *span;
+            let sp = span.as_deref().copied();
             let val = resolve_param(name, sp, lookup)?;
             *input = value_to_query_input(val, sp)?;
         }
         QueryInput::PositionalParam(idx, span) => {
-            let sp = *span;
+            let sp = span.as_deref().copied();
             let val = resolve_positional(*idx, sp, positional)?;
             *input = value_to_query_input(val, sp)?;
         }

@@ -66,11 +66,11 @@ where
 {
     match value {
         Value::Param(name, span) => {
-            let resolved = resolve_param(name, *span, lookup)?;
+            let resolved = resolve_param(name, span.as_deref().copied(), lookup)?;
             *value = resolved;
         }
         Value::PositionalParam(idx, span) => {
-            let resolved = resolve_positional(*idx, *span, positional)?;
+            let resolved = resolve_positional(*idx, span.as_deref().copied(), positional)?;
             *value = resolved;
         }
         Value::List(items) => {
@@ -95,12 +95,12 @@ where
 {
     match id {
         PointId::Param(name, span) => {
-            let val = resolve_param(name, *span, lookup)?;
-            *id = value_to_point_id(&val, *span)?;
+            let val = resolve_param(name, span.as_deref().copied(), lookup)?;
+            *id = value_to_point_id(&val, span.as_deref().copied())?;
         }
         PointId::PositionalParam(idx, span) => {
-            let val = resolve_positional(*idx, *span, positional)?;
-            *id = value_to_point_id(&val, *span)?;
+            let val = resolve_positional(*idx, span.as_deref().copied(), positional)?;
+            *id = value_to_point_id(&val, span.as_deref().copied())?;
         }
         _ => {}
     }

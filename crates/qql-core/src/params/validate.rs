@@ -44,8 +44,10 @@ fn unbound_param_str_err(param: &str, span: Option<crate::error::Span>) -> QqlEr
 
 fn validate_no_unbound_value(val: &Value) -> Result<(), QqlError> {
     match val {
-        Value::Param(name, span) => Err(unbound_named_err(name, *span)),
-        Value::PositionalParam(idx, span) => Err(unbound_positional_err(*idx, *span)),
+        Value::Param(name, span) => Err(unbound_named_err(name, span.as_deref().copied())),
+        Value::PositionalParam(idx, span) => {
+            Err(unbound_positional_err(*idx, span.as_deref().copied()))
+        }
         Value::List(items) => {
             for item in items {
                 validate_no_unbound_value(item)?;
@@ -64,16 +66,20 @@ fn validate_no_unbound_value(val: &Value) -> Result<(), QqlError> {
 
 fn validate_no_unbound_point_id(id: &PointId) -> Result<(), QqlError> {
     match id {
-        PointId::Param(name, span) => Err(unbound_named_err(name, *span)),
-        PointId::PositionalParam(idx, span) => Err(unbound_positional_err(*idx, *span)),
+        PointId::Param(name, span) => Err(unbound_named_err(name, span.as_deref().copied())),
+        PointId::PositionalParam(idx, span) => {
+            Err(unbound_positional_err(*idx, span.as_deref().copied()))
+        }
         _ => Ok(()),
     }
 }
 
 fn validate_no_unbound_query_input(input: &QueryInput) -> Result<(), QqlError> {
     match input {
-        QueryInput::Param(name, span) => Err(unbound_named_err(name, *span)),
-        QueryInput::PositionalParam(idx, span) => Err(unbound_positional_err(*idx, *span)),
+        QueryInput::Param(name, span) => Err(unbound_named_err(name, span.as_deref().copied())),
+        QueryInput::PositionalParam(idx, span) => {
+            Err(unbound_positional_err(*idx, span.as_deref().copied()))
+        }
         QueryInput::Point(point) => validate_no_unbound_point_id(point),
         QueryInput::Text { text_param, .. } => {
             if let Some(param) = text_param {
