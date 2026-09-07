@@ -1,0 +1,83 @@
+name: Security
+
+# Scheduled dependency audits (npm / pnpm / pip) and CodeQL static analysis
+# for the Rust workspace. Scheduled + dispatch only — dependency-audit jobs
+# would otherwise block every PR on advisory mirror flakiness.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly, Monday 03:20 UTC.
+    - cron: "20 3 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  cargo-audit:
+    name: cargo audit (crates.io advisories)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked || cargo install cargo-audit --locked
+      - name: Run cargo audit
+        run: cargo audit --file Cargo.lock
+
+  codeql-rust:
+    name: CodeQL (Rust)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: rust
+          build-mode: manual
+      # qql-edge requires fastembed native deps; the security scan targets the
+      # published core/plan/runtime/cli surface plus the FFI bindings.
+      - name: Build workspace (edge excluded)
+        run: cargo check --workspace --all-targets --exclude qql-edge --exclude pyqql-edge --exclude nqql-edge
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:rust"
+
+  npm-audit:
+    name: npm audit (nqql, nqql-edge)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The packages are lockfile-less in CI (see ci.yml); build the lock
+      # in-memory first — `npm audit` requires one.
+      - name: nqql audit
+        working-directory: crates/nqql
+        run: |
+          npm install --package-lock-only --omit=optional --no-audit --no-fund
+          npm audit --omit=dev
+      - name: nqql-edge audit
+        working-directory: crates/nqql-edge
+        run: |
+          npm install --package-lock-only --omit=optional --no-audit --no-fund
+          npm audit --omit=dev
+
+  pnpm-audit:
+    name: pnpm audit (website)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - name: pnpm audit
+        working-directory: website
+        run: pnpm audit --prod

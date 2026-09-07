@@ -11,14 +11,36 @@
  */
 
 /**
- * Install the `toJSON` alias on the native Stmt prototype (JSON.stringify
- * support) exactly once.
+ * Install the `toJSON` alias and error-mapping wrappers on the native Stmt
+ * prototype so method errors surface with `.code` / `.kind` / `.span`.
  */
 function installStmtToJSON(Stmt) {
-  if (Stmt && !Stmt.prototype.toJSON) {
+  if (!Stmt || !Stmt.prototype) return;
+  if (!Stmt.prototype.toJSON) {
     Stmt.prototype.toJSON = function () {
       return this.toJson();
     };
+  }
+  const origBind = Stmt.prototype.bind;
+  if (origBind && !origBind._wrapped) {
+    Stmt.prototype.bind = function (params) {
+      return callNative(() => origBind.call(this, params));
+    };
+    Stmt.prototype.bind._wrapped = true;
+  }
+  const origCompileRoute = Stmt.prototype.compileRoute;
+  if (origCompileRoute && !origCompileRoute._wrapped) {
+    Stmt.prototype.compileRoute = function (params) {
+      return callNative(() => origCompileRoute.call(this, params));
+    };
+    Stmt.prototype.compileRoute._wrapped = true;
+  }
+  const origInjectFilter = Stmt.prototype.injectFilter;
+  if (origInjectFilter && !origInjectFilter._wrapped) {
+    Stmt.prototype.injectFilter = function (field, op, value) {
+      return callNative(() => origInjectFilter.call(this, field, op, value));
+    };
+    Stmt.prototype.injectFilter._wrapped = true;
   }
 }
 
@@ -103,6 +125,8 @@ class ScoredPoint {
     this.payload = data.payload ?? null;
     this.text = data.text ?? null;
     this.collection = data.collection ?? null;
+    this.vector = data.vector ?? null;
+    this.shard_key = data.shard_key ?? null;
     Object.assign(this, data);
   }
 
@@ -135,7 +159,9 @@ class ExecutionReport {
     const res = this.#resultAt(stmt);
     if (!res || !Array.isArray(res.data)) return [];
     return res.data
-      .filter((d) => d && typeof d === 'object')
+      // Only map entries shaped like scored points; facet entries
+      // ({ value, count }) are not ScoredPoints.
+      .filter((d) => d && typeof d === 'object' && 'id' in d && 'score' in d)
       .map((d) => new ScoredPoint(d));
   }
 

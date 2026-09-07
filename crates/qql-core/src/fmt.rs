@@ -243,7 +243,13 @@ pub fn format_stmt(statement: &Stmt) -> String {
             if let Some(selector) = &statement.with_vector {
                 let _ = write!(out, " WITH VECTOR {}", render_vector_selector(selector));
             }
-            let _ = write!(out, " LIMIT {}", statement.limit);
+            if statement.limit_param.is_some() {
+                if let Some(param) = &statement.limit_param {
+                    let _ = write!(out, " LIMIT {}", render_placeholder(param));
+                }
+            } else {
+                let _ = write!(out, " LIMIT {}", statement.limit);
+            }
             out
         }
         Stmt::Upsert(statement) => {
@@ -545,6 +551,8 @@ pub fn format_stmt(statement: &Stmt) -> String {
             }
             if let Some(limit) = statement.limit {
                 let _ = write!(out, " LIMIT {}", limit);
+            } else if let Some(param) = &statement.limit_param {
+                let _ = write!(out, " LIMIT {}", render_placeholder(param));
             }
             if let Some(exact) = statement.exact {
                 let _ = write!(out, " EXACT {}", exact);
@@ -629,7 +637,7 @@ fn query_tail_clauses(query: &QueryStmt) -> Vec<String> {
         parts.push(format!("LIMIT {}", limit));
     } else if let Some(param) = &query.page.limit_param {
         if param.starts_with('?') {
-            parts.push(format!("LIMIT {}", param));
+            parts.push("LIMIT ?".to_string());
         } else {
             parts.push(format!("LIMIT :{}", param));
         }
@@ -638,7 +646,7 @@ fn query_tail_clauses(query: &QueryStmt) -> Vec<String> {
         parts.push(format!("OFFSET {}", offset));
     } else if let Some(param) = &query.page.offset_param {
         if param.starts_with('?') {
-            parts.push(format!("OFFSET {}", param));
+            parts.push("OFFSET ?".to_string());
         } else {
             parts.push(format!("OFFSET :{}", param));
         }
@@ -830,8 +838,14 @@ fn render_query_expr(expression: &QueryExpr) -> String {
             dense_vector,
             sparse_vector,
             fusion,
+            text_param,
         } => {
-            let mut out = format!("HYBRID TEXT '{}'", escape_string(text));
+            let rendered_text = if let Some(param) = text_param {
+                render_placeholder(param).to_string()
+            } else {
+                format!("'{}'", escape_string(text))
+            };
+            let mut out = format!("HYBRID TEXT {}", rendered_text);
             if let Some(model) = model {
                 let _ = write!(out, " MODEL '{}'", escape_string(model));
             }
@@ -853,11 +867,17 @@ fn render_query_expr(expression: &QueryExpr) -> String {
             query,
             model,
             field,
+            query_param,
             ..
         } => {
+            let rendered_query = if let Some(param) = query_param {
+                render_placeholder(param).to_string()
+            } else {
+                format!("'{}'", escape_string(query))
+            };
             let mut out = format!(
-                "CROSS RERANK TEXT '{}' MODEL '{}'",
-                escape_string(query),
+                "CROSS RERANK TEXT {} MODEL '{}'",
+                rendered_query,
                 escape_string(model)
             );
             if let Some(field) = field {
@@ -915,18 +935,34 @@ fn render_prefetch(prefetch: &Prefetch) -> String {
     out
 }
 
+/// Render a stored parameter marker canonically. Positional markers
+/// (`?0`, `?1`, …) always render as a bare `?` — the parser re-assigns
+/// positional indices in encounter order, so the stored index is not
+/// part of the canonical form (rendering `?1` would not re-parse).
+fn render_placeholder(param: &str) -> &str {
+    if param.starts_with('?') { "?" } else { param }
+}
+
 fn render_query_input(input: &QueryInput, allow_bare: bool) -> String {
     match input {
-        QueryInput::Text { text, model: None } if allow_bare => {
-            if text.starts_with(':') || text.starts_with('?') {
-                text.clone()
+        QueryInput::Text {
+            text,
+            model: None,
+            text_param,
+        } if allow_bare => {
+            if let Some(param) = text_param {
+                render_placeholder(param).to_string()
             } else {
                 format!("'{}'", escape_string(text))
             }
         }
-        QueryInput::Text { text, model } => {
-            let rendered_text = if text.starts_with(':') || text.starts_with('?') {
-                text.clone()
+        QueryInput::Text {
+            text,
+            model,
+            text_param,
+        } => {
+            let rendered_text = if let Some(param) = text_param {
+                render_placeholder(param).to_string()
             } else {
                 format!("'{}'", escape_string(text))
             };
@@ -1309,7 +1345,13 @@ fn render_formula_min(formula: &FormulaExpr, min_precedence: u8) -> String {
     let precedence = formula_precedence(formula);
     let rendered = match formula {
         FormulaExpr::Constant { value } => render_f64(*value),
-        FormulaExpr::Variable { name } => name.clone(),
+        FormulaExpr::Variable { name } => {
+            if name.starts_with('?') {
+                "?".to_string()
+            } else {
+                name.clone()
+            }
+        }
         FormulaExpr::Sum { left, right } => format!(
             "{} + {}",
             render_formula_min(left, 1),

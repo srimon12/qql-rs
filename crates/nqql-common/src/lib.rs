@@ -31,6 +31,15 @@ pub fn serde_napi_err(e: serde_json::Error) -> napi::Error {
     napi::Error::from_reason(e.to_string())
 }
 
+/// Error returned when attempting to re-bind a Stmt that is already bound.
+pub fn already_bound_error() -> QqlError {
+    QqlError::validation(
+        "QQL-BIND-ALREADY-BOUND",
+        "cannot bind parameters into a Stmt that has already been bound (params would be silently ignored)",
+        None,
+    )
+}
+
 // ═══════════════════════════════════════════════════════════════════
 //  Stmt operations
 // ═══════════════════════════════════════════════════════════════════
@@ -60,7 +69,9 @@ pub fn stmt_bind(
     params: Option<&serde_json::Value>,
 ) -> Result<ast::Stmt, QqlError> {
     let mut inner = stmt.clone();
-    if let Some(p) = params {
+    // JS `null` means "no params" (mirrors Python `params=None`), not a
+    // failed binding — only non-null scalars fail closed downstream.
+    if let Some(p) = params.filter(|p| !p.is_null()) {
         qql_core::params_json::bind_stmt_with_params(&mut inner, p)?;
     }
     Ok(inner)

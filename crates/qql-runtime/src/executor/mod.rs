@@ -463,7 +463,24 @@ impl Executor {
         for stmt in stmts {
             // Fail closed before any network I/O: an unbound placeholder
             // cannot produce a valid request (see `plan::ensure_no_unbound_params`).
-            qql_plan::ensure_no_unbound_params(&stmt)?;
+            // Under `on_error = "continue"` this is a per-statement defect like
+            // PREPARE/PLAN — collect it instead of aborting the whole script
+            // (which would discard every already-collected result).
+            if let Err(e) = qql_plan::ensure_no_unbound_params(&stmt) {
+                self.flush_planned_group(&mut pending, stop_on_error, &mut results)
+                    .await?;
+                pending_key = None;
+                if stop_on_error {
+                    return Err(e);
+                }
+                results.push(ExecResponse {
+                    ok: false,
+                    operation: "BIND".to_string(),
+                    message: e.to_string(),
+                    data: None,
+                });
+                continue;
+            }
             let statement_key = statement_batch_key(&stmt);
 
             // A statement outside the current batch family is an execution

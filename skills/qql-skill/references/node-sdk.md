@@ -307,6 +307,14 @@ console.log(countReport.count());
 // 5. Point retrieval -> points()
 const pointReport = await client.execute("QUERY POINTS (1, 2, 3) FROM docs");
 console.log(pointReport.points());
+
+// 6. Grouped queries -> groups() returns [{ group_id, hits }]
+const grouped = await client.execute(
+  "QUERY TEXT 'neural search' FROM docs GROUP BY category LIMIT 5"
+);
+for (const group of grouped.groups()) {
+  console.log(group.group_id, group.hits.map((h) => h.id));
+}
 ```
 
 ---

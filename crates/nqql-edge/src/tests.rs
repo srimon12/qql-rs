@@ -212,6 +212,7 @@ fn execute_stmt_prefers_http_embedding_when_embed_url_supplied() {
     let stmt = Stmt {
         inner: Parser::parse("UPSERT INTO http_docs VALUES {id: 1, text: 'hello'}")
             .expect("parse upsert"),
+        bound: false,
     };
     let options = serde_json::json!({
         "dataDir": data_dir,

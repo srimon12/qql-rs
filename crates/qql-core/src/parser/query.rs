@@ -387,19 +387,23 @@ impl<'a> AstLowerer<'a> {
     fn parse_query_input(&mut self) -> Result<QueryInput, QqlError> {
         if self.peek_word("TEXT")? {
             self.advance()?;
-            let text = if self.peek()?.kind == TokenKind::Colon {
+            let (text, text_param) = if self.peek()?.kind == TokenKind::Colon {
                 self.advance()?;
                 let name = self.parse_param_name()?;
-                alloc::format!(":{}", name)
+                (String::new(), Some(alloc::format!(":{}", name)))
             } else if self.peek()?.kind == TokenKind::Question {
                 self.advance()?;
                 let idx = self.next_positional_param();
-                alloc::format!("?{}", idx)
+                (String::new(), Some(alloc::format!("?{}", idx)))
             } else {
-                self.parse_string()?
+                (self.parse_string()?, None)
             };
             let model = self.parse_optional_model_string()?;
-            return Ok(QueryInput::Text { text, model });
+            return Ok(QueryInput::Text {
+                text,
+                model,
+                text_param,
+            });
         }
         // IMAGE is a bare word (not reserved) — local path or URL for CLIP vision.
         if self.peek_word("IMAGE")? {
@@ -438,9 +442,11 @@ impl<'a> AstLowerer<'a> {
             return Ok(QueryInput::PositionalParam(idx));
         }
         if self.peek()?.kind == TokenKind::String {
-            return self
-                .parse_string()
-                .map(|text| QueryInput::Text { text, model: None });
+            return self.parse_string().map(|text| QueryInput::Text {
+                text,
+                model: None,
+                text_param: None,
+            });
         }
         Err(QqlError::parse(
             "QQL-PARSE-QUERY-INPUT",
@@ -650,7 +656,12 @@ impl<'a> AstLowerer<'a> {
         self.expect(TokenKind::Hybrid)?;
         let input_tok = self.peek()?;
         let input = self.parse_query_input()?;
-        let QueryInput::Text { text, model } = input else {
+        let QueryInput::Text {
+            text,
+            model,
+            text_param,
+        } = input
+        else {
             return Err(QqlError::validation(
                 "QQL-VALIDATION-HYBRID",
                 "HYBRID shorthand requires a text input",
@@ -668,6 +679,7 @@ impl<'a> AstLowerer<'a> {
             dense_vector,
             sparse_vector,
             fusion,
+            text_param,
         })
     }
 
@@ -708,11 +720,29 @@ impl<'a> AstLowerer<'a> {
         // CROSS is a bare word (not reserved).
         self.advance()?;
         self.expect(TokenKind::Rerank)?;
-        let query = if self.peek_word("TEXT")? {
+        let (query, query_param) = if self.peek_word("TEXT")? {
             self.advance()?;
-            self.parse_string()?
+            if self.peek()?.kind == TokenKind::Colon {
+                self.advance()?;
+                let name = self.parse_param_name()?;
+                (String::new(), Some(alloc::format!(":{}", name)))
+            } else if self.peek()?.kind == TokenKind::Question {
+                self.advance()?;
+                let idx = self.next_positional_param();
+                (String::new(), Some(alloc::format!("?{}", idx)))
+            } else {
+                (self.parse_string()?, None)
+            }
+        } else if self.peek()?.kind == TokenKind::Colon {
+            self.advance()?;
+            let name = self.parse_param_name()?;
+            (String::new(), Some(alloc::format!(":{}", name)))
+        } else if self.peek()?.kind == TokenKind::Question {
+            self.advance()?;
+            let idx = self.next_positional_param();
+            (String::new(), Some(alloc::format!("?{}", idx)))
         } else if self.peek()?.kind == TokenKind::String {
-            self.parse_string()?
+            (self.parse_string()?, None)
         } else {
             return Err(QqlError::parse(
                 "QQL-PARSE-CROSS-RERANK",
@@ -733,6 +763,7 @@ impl<'a> AstLowerer<'a> {
             model,
             field,
             prefetch: Vec::new(),
+            query_param,
         })
     }
 
@@ -745,6 +776,7 @@ impl<'a> AstLowerer<'a> {
             QueryInput::Text {
                 text: self.parse_string()?,
                 model: None,
+                text_param: None,
             }
         } else if self.peek()?.kind == TokenKind::Vector {
             self.advance()?;
@@ -893,7 +925,12 @@ fn expand_using_hybrid(
 ) -> Result<(), QqlError> {
     match expression {
         QueryExpr::Nearest {
-            input: QueryInput::Text { text, model },
+            input:
+                QueryInput::Text {
+                    text,
+                    model,
+                    text_param,
+                },
             using: None,
             prefetch,
             mmr: None,
@@ -904,6 +941,7 @@ fn expand_using_hybrid(
                 dense_vector: hybrid.dense_vector,
                 sparse_vector: hybrid.sparse_vector,
                 fusion: hybrid.fusion,
+                text_param: text_param.take(),
             };
             Ok(())
         }

@@ -3,7 +3,6 @@ use async_trait::async_trait;
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
 use gloo_net::http::Request;
 use qql_core::ast::{self, ComparisonOp, Value};
-#[cfg(all(feature = "client", target_arch = "wasm32"))]
 use qql_core::error::QqlError;
 use qql_core::lexer::Lexer;
 use qql_core::parser::Parser;
@@ -277,6 +276,7 @@ fn parse_comparison_op(op: &str) -> Result<ComparisonOp, JsValue> {
 #[wasm_bindgen]
 pub struct Stmt {
     inner: qql_core::ast::Stmt,
+    bound: bool,
 }
 
 #[wasm_bindgen]
@@ -285,7 +285,10 @@ impl Stmt {
     #[wasm_bindgen(constructor)]
     pub fn new(input: &str) -> Result<Stmt, JsValue> {
         let inner = Parser::parse(input).map_err(|e| JsValue::from_str(&e.to_string()))?;
-        Ok(Stmt { inner })
+        Ok(Stmt {
+            inner,
+            bound: false,
+        })
     }
 
     /// Inject a WHERE filter into this statement's AST (mutates in place).
@@ -316,6 +319,12 @@ impl Stmt {
         Ok(())
     }
 
+    /// Whether parameters have already been bound into this statement.
+    #[wasm_bindgen(getter, js_name = bound)]
+    pub fn bound(&self) -> bool {
+        self.bound
+    }
+
     /// Serialise the AST to a JSON string.
     #[wasm_bindgen(js_name = toJSON)]
     pub fn to_json(&self) -> Result<String, JsValue> {
@@ -331,16 +340,31 @@ impl Stmt {
     /// Bind parameters into this statement and return a new bound Stmt.
     #[wasm_bindgen(js_name = bind)]
     pub fn bind(&self, params: Option<JsValue>) -> Result<Stmt, JsValue> {
+        let binds_now = params
+            .as_ref()
+            .map(|p| !p.is_undefined() && !p.is_null())
+            .unwrap_or(false);
+        if binds_now && self.bound {
+            return Err(JsValue::from_str(
+                &serde_json::to_string(&QqlError::validation(
+                    "QQL-BIND-ALREADY-BOUND",
+                    "cannot bind parameters into a Stmt that has already been bound (params would be silently ignored)",
+                    None,
+                ))
+                .unwrap_or_else(|_| "cannot bind parameters into an already bound Stmt".into()),
+            ));
+        }
         let mut stmt = self.inner.clone();
-        if let Some(p) = params
-            && !p.is_undefined()
-            && !p.is_null()
-        {
+        if binds_now {
+            let p = params.unwrap();
             let parsed: serde_json::Value = serde_wasm_bindgen::from_value(p)
                 .map_err(|e| JsValue::from_str(&format!("invalid params: {e}")))?;
             bind_stmt_json(&mut stmt, &parsed)?;
         }
-        Ok(Stmt { inner: stmt })
+        Ok(Stmt {
+            inner: stmt,
+            bound: self.bound || binds_now,
+        })
     }
 
     /// Format statement as canonical, re-parseable QQL (mirrors Python `str(stmt)`).
@@ -361,11 +385,23 @@ impl Stmt {
     /// Optionally accepts `params` to bind before compiling.
     #[wasm_bindgen(js_name = compileRoute, unchecked_return_type = "CompiledRoute")]
     pub fn compile_route(&self, params: Option<JsValue>) -> Result<JsValue, JsValue> {
+        let binds_now = params
+            .as_ref()
+            .map(|p| !p.is_undefined() && !p.is_null())
+            .unwrap_or(false);
+        if binds_now && self.bound {
+            return Err(JsValue::from_str(
+                &serde_json::to_string(&QqlError::validation(
+                    "QQL-BIND-ALREADY-BOUND",
+                    "cannot bind parameters into a Stmt that has already been bound (params would be silently ignored)",
+                    None,
+                ))
+                .unwrap_or_else(|_| "cannot bind parameters into an already bound Stmt".into()),
+            ));
+        }
         let mut stmt = self.inner.clone();
-        if let Some(p) = params
-            && !p.is_undefined()
-            && !p.is_null()
-        {
+        if binds_now {
+            let p = params.unwrap();
             let parsed: serde_json::Value = serde_wasm_bindgen::from_value(p)
                 .map_err(|e| JsValue::from_str(&format!("invalid params: {e}")))?;
             bind_stmt_json(&mut stmt, &parsed)?;
@@ -546,24 +582,37 @@ fn compiled_route_json(compiled: &qql_plan::CompiledStatement) -> serde_json::Va
     }
 }
 
-fn build_compile_output(query: &str) -> Result<serde_json::Value, JsValue> {
-    let stmt = Parser::parse(query).map_err(|e| JsValue::from_str(&e.to_string()))?;
+fn build_compile_output(
+    query: &str,
+    params: Option<JsValue>,
+) -> Result<serde_json::Value, JsValue> {
+    let bound = match params {
+        Some(p) if !p.is_undefined() && !p.is_null() => {
+            let json: serde_json::Value = serde_wasm_bindgen::from_value(p)
+                .map_err(|e| JsValue::from_str(&format!("invalid params: {e}")))?;
+            bind_json_params(query, &json, false)?
+        }
+        _ => query.to_string(),
+    };
+    let stmt = Parser::parse(&bound).map_err(|e| JsValue::from_str(&e.to_string()))?;
     let compiled =
         routing::compile_statement(&stmt).map_err(|e| JsValue::from_str(&e.to_string()))?;
     Ok(compiled_route_json(&compiled))
 }
 
-/// Compile one QQL statement into a JavaScript route object.
+/// Compile one QQL statement into a JavaScript route object. Optional
+/// `params` (object for `:name`, array for `?`) bind before parsing —
+/// parity with `Client.compile(query, params)` on the Python and Node SDKs.
 #[wasm_bindgen(unchecked_return_type = "CompiledRoute")]
-pub fn compile(query: &str) -> Result<JsValue, JsValue> {
-    let output = build_compile_output(query)?;
+pub fn compile(query: &str, params: Option<JsValue>) -> Result<JsValue, JsValue> {
+    let output = build_compile_output(query, params)?;
     to_js_value(&output)
 }
 
 /// Compiles QQL query into a safe, JS-owned Uint8Array byte buffer.
 #[wasm_bindgen(js_name = compileBytes)]
 pub fn compile_bytes(query: &str) -> Result<js_sys::Uint8Array, JsValue> {
-    let output = build_compile_output(query)?;
+    let output = build_compile_output(query, None)?;
     SCRATCH_BUF.with(|cell| {
         let mut buf = cell.borrow_mut();
         buf.clear();
@@ -1100,6 +1149,16 @@ impl Client {
         #[wasm_bindgen(unchecked_optional_param_type = "ExecuteOptions")] options: Option<JsValue>,
     ) -> Result<JsValue, JsValue> {
         let params = options_params(options.as_ref())?;
+        if params.is_some() && stmt.bound {
+            return Err(JsValue::from_str(
+                &serde_json::to_string(&QqlError::validation(
+                    "QQL-BIND-ALREADY-BOUND",
+                    "cannot bind parameters into a Stmt that has already been bound (params would be silently ignored)",
+                    None,
+                ))
+                .unwrap_or_else(|_| "cannot bind parameters into an already bound Stmt".into()),
+            ));
+        }
         let mut inner = stmt.inner.clone();
         if let Some(ref p) = params {
             let plan = qql_core::params_json::plan_statement_params(p, 1)
@@ -1135,7 +1194,16 @@ impl Client {
             }
         };
         if stmts.is_empty() {
-            return Ok(WasmReport::empty());
+            // Fail closed like the executor does for an empty string —
+            // an empty array must not return a silently-empty ok report.
+            return Err(JsValue::from_str(
+                &serde_json::to_string(&QqlError::validation(
+                    "QQL-VALIDATION-EMPTY-SCRIPT",
+                    "no statements to execute; the query is empty or contains only whitespace",
+                    None,
+                ))
+                .unwrap_or_else(|_| "no statements to execute".into()),
+            ));
         }
 
         let mut results: Vec<serde_json::Value> = Vec::with_capacity(stmts.len());
@@ -1486,10 +1554,11 @@ impl Client {
         serde_json::from_str(&text).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
-    /// Parse and compile one statement without executing it.
+    /// Parse and compile one statement without executing it. Optional
+    /// `params` bind before parsing (same shape as the module-level `bind`).
     #[wasm_bindgen(unchecked_return_type = "CompiledRoute")]
-    pub fn compile(&self, query: &str) -> Result<JsValue, JsValue> {
-        compile(query)
+    pub fn compile(&self, query: &str, params: Option<JsValue>) -> Result<JsValue, JsValue> {
+        compile(query, params)
     }
 
     /// Parse and explain the query — no server needed.

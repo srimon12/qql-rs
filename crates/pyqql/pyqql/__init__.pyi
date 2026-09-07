@@ -30,6 +30,8 @@ class ScoredPoint:
     payload: Optional[Dict[str, Any]]
     text: Optional[str]
     collection: Optional[str]
+    vector: Optional[Any]
+    shard_key: Optional[Union[str, int]]
     def __getitem__(self, key: str) -> Any: ...
     def get(self, key: str, default: Any = None) -> Any: ...
 

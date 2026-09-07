@@ -29,7 +29,11 @@ impl QdrantOps for GrpcQdrant {
         {
             Ok(resp) => Ok(resp.into_inner().result.map(|r| r.exists).unwrap_or(false)),
             Err(status) if status.code() == tonic::Code::NotFound => Ok(false),
-            Err(e) => Err(grpc_error("collection_exists", e)),
+            Err(e) => Err(grpc_error(
+                "collection_exists",
+                e,
+                &self.current_request_id(),
+            )),
         }
     }
 

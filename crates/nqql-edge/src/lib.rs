@@ -30,7 +30,8 @@ use nqql_common as common;
 #[napi]
 #[derive(Clone)]
 pub struct Stmt {
-    inner: qql_core::ast::Stmt,
+    pub(crate) inner: qql_core::ast::Stmt,
+    pub(crate) bound: bool,
 }
 
 #[napi]
@@ -40,6 +41,7 @@ impl Stmt {
     pub fn new(input: String) -> napi::Result<Self> {
         Ok(Stmt {
             inner: common::stmt_parse(&input).map_err(common::to_napi_err)?,
+            bound: false,
         })
     }
 
@@ -79,11 +81,23 @@ impl Stmt {
         Ok(())
     }
 
+    /// Whether parameters have already been bound into this statement.
+    #[napi(getter, catch_unwind)]
+    pub fn bound(&self) -> bool {
+        self.bound
+    }
+
     /// Bind parameters into this statement and return a new bound Stmt.
     #[napi(catch_unwind)]
     pub fn bind(&self, params: Option<serde_json::Value>) -> napi::Result<Self> {
+        let binds_now = params.as_ref().map(|p| !p.is_null()).unwrap_or(false);
+        if binds_now && self.bound {
+            return Err(common::to_napi_err(common::already_bound_error()));
+        }
+        let inner = common::stmt_bind(&self.inner, params.as_ref()).map_err(common::to_napi_err)?;
         Ok(Stmt {
-            inner: common::stmt_bind(&self.inner, params.as_ref()).map_err(common::to_napi_err)?,
+            inner,
+            bound: self.bound || binds_now,
         })
     }
 
@@ -108,6 +122,10 @@ impl Stmt {
         &self,
         params: Option<serde_json::Value>,
     ) -> napi::Result<serde_json::Value> {
+        let binds_now = params.as_ref().map(|p| !p.is_null()).unwrap_or(false);
+        if binds_now && self.bound {
+            return Err(common::to_napi_err(common::already_bound_error()));
+        }
         common::stmt_compile_route(&self.inner, params.as_ref()).map_err(common::to_napi_err)
     }
 }
@@ -121,7 +139,10 @@ pub fn parse_all(input: String) -> napi::Result<Vec<Stmt>> {
     Ok(common::parse_all(&input)
         .map_err(common::to_napi_err)?
         .into_iter()
-        .map(|inner| Stmt { inner })
+        .map(|inner| Stmt {
+            inner,
+            bound: false,
+        })
         .collect())
 }
 
@@ -527,23 +548,24 @@ fn standalone_client(options: Option<&serde_json::Value>) -> napi::Result<JsClie
 )]
 pub async fn execute_stmt(stmt: &Stmt, options: Option<serde_json::Value>) -> napi::Result<String> {
     let client = standalone_client(options.as_ref())?;
-    let mut inner = stmt.inner.clone();
-    if let Some(p) = options.as_ref().and_then(|o| o.get("params")) {
-        let plan =
-            qql_core::params_json::plan_statement_params(p, 1).map_err(common::to_napi_err)?;
-        qql_core::params_json::bind_stmt_with_params(
-            &mut inner,
-            qql_core::params_json::param_for(&plan, 0),
-        )
-        .map_err(common::to_napi_err)?;
-    }
-    let resp = client
-        .inner
-        .execute_node(inner)
-        .await
-        .map_err(common::to_napi_err)?;
+    let resp = common::execute::run_then_close(&client.inner, async {
+        let mut inner = stmt.inner.clone();
+        if let Some(p) = options
+            .as_ref()
+            .and_then(|o| o.get("params"))
+            .filter(|p| !p.is_null())
+        {
+            let plan = qql_core::params_json::plan_statement_params(p, 1)?;
+            qql_core::params_json::bind_stmt_with_params(
+                &mut inner,
+                qql_core::params_json::param_for(&plan, 0),
+            )?;
+        }
+        client.inner.execute_node(inner).await
+    })
+    .await
+    .map_err(common::to_napi_err)?;
     let report = qql::executor::ExecutionReport::single(resp);
-    client.inner.close().await.map_err(common::to_napi_err)?;
     serde_json::to_string(&report).map_err(common::serde_napi_err)
 }
 
@@ -557,10 +579,12 @@ pub async fn execute(
     options: Option<serde_json::Value>,
 ) -> napi::Result<String> {
     let client = standalone_client(options.as_ref())?;
-    let report = common::execute::execute_dispatch(&client.inner, query, options.as_ref())
-        .await
-        .map_err(common::to_napi_err)?;
-    client.inner.close().await.map_err(common::to_napi_err)?;
+    let report = common::execute::run_then_close(
+        &client.inner,
+        common::execute::execute_dispatch(&client.inner, query, options.as_ref()),
+    )
+    .await
+    .map_err(common::to_napi_err)?;
     serde_json::to_string(&report).map_err(common::serde_napi_err)
 }
 
@@ -574,10 +598,12 @@ pub async fn execute(
     options: Option<serde_json::Value>,
 ) -> napi::Result<String> {
     let client = standalone_client(options.as_ref())?;
-    let report = common::execute::execute_dispatch(&client.inner, query, options.as_ref())
-        .await
-        .map_err(common::to_napi_err)?;
-    client.inner.close().await.map_err(common::to_napi_err)?;
+    let report = common::execute::run_then_close(
+        &client.inner,
+        common::execute::execute_dispatch(&client.inner, query, options.as_ref()),
+    )
+    .await
+    .map_err(common::to_napi_err)?;
     serde_json::to_string(&report).map_err(common::serde_napi_err)
 }
 
@@ -596,7 +622,10 @@ pub fn bind(
 ) -> napi::Result<String> {
     let truncate = options
         .as_ref()
-        .and_then(|o| o.get("truncateVectors"))
+        .and_then(|o| {
+            o.get("truncateVectors")
+                .or_else(|| o.get("truncate_vectors"))
+        })
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
     match params {

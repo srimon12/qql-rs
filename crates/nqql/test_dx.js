@@ -40,6 +40,13 @@ console.log(`Testing Node.js DX enhancements (${LABEL})...`);
   const untouched = stmt.bind();
   assert.strictEqual(untouched.toString(), before);
 
+  // Re-binding an already-bound Stmt raises QQL-BIND-ALREADY-BOUND
+  assert.throws(() => bound.bind({ status: 'inactive' }), (err) => {
+    return err.code === 'QQL-BIND-ALREADY-BOUND';
+  });
+  // Calling bind() without params on an already-bound Stmt is a no-op
+  assert.strictEqual(bound.bind().toString(), after);
+
   // Invalid params types fail closed (mirrors pyqql ValueError)
   assert.throws(() => stmt.bind(42), /params must be an object/);
 }
@@ -66,6 +73,12 @@ console.log(`Testing Node.js DX enhancements (${LABEL})...`);
   assert.strictEqual(typeof route.payload, 'object');
   assert.strictEqual(route.payload.limit, 5);
   assert.ok(JSON.stringify(route.payload).includes('books'));
+
+  // compileRoute with new params on an already-bound Stmt raises QQL-BIND-ALREADY-BOUND
+  const boundCat = stmt.bind({ cat: 'music' });
+  assert.throws(() => boundCat.compileRoute({ cat: 'art' }), (err) => {
+    return err.code === 'QQL-BIND-ALREADY-BOUND';
+  });
 }
 
 // 4. Nested dictionary parameter expansion (:loc.lat, :loc.lon)
@@ -178,6 +191,8 @@ console.log(`Testing Node.js DX enhancements (${LABEL})...`);
   assert.deepStrictEqual(hits[0].vector, [0.1, 0.2]);
   assert.strictEqual(hits[1].id, 'uuid-2');
   assert.strictEqual(hits[1].score, 0.82);
+  assert.strictEqual(hits[1].vector, null);
+  assert.strictEqual(hits[1].shard_key, null);
   assert.strictEqual(hits[0].payload, mockPayload.results[0].data[0].payload);
 
   // points() alias + negative index (Python list semantics: -1 = last stmt)
@@ -186,6 +201,8 @@ console.log(`Testing Node.js DX enhancements (${LABEL})...`);
   assert.strictEqual(report.points(-1).length, 0); // last stmt is the count result
   // Out-of-range → empty
   assert.deepStrictEqual(report.hits(9), []);
+  assert.deepStrictEqual(report.hits(-10), []);
+  assert.deepStrictEqual(report.points(-10), []);
 
   // Defaults mirror pyqql when keys are absent
   const empty = new sdk.ExecutionReport({});

@@ -391,6 +391,11 @@ print("Total matches:", report.count())
 # 5. Point retrieval -> .points() returns retrieved points
 report = client.execute("QUERY POINTS (1, 2, 3) FROM docs")
 points = report.points()
+
+# 6. Grouped queries -> .groups() returns [{group_id, hits}]
+report = client.execute("QUERY TEXT 'neural search' FROM docs GROUP BY category LIMIT 5")
+for group in report.groups():
+    print(group["group_id"], [h.id for h in group["hits"]])
 ```
 
 ---

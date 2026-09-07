@@ -19,6 +19,13 @@ pub struct GrpcQdrant {
     api_key: Option<String>,
     /// Stable value hashed by Qdrant to pin reads to one replica.
     route_affinity: Option<String>,
+    /// Most recently generated correlation id. Written by the interceptor on
+    /// every outgoing RPC; read by the error path so gRPC failures can be
+    /// matched against Qdrant's log lines (mirrors the REST `x-request-id`
+    /// echo). Best-effort under concurrent RPCs on one client (last write
+    /// wins); exact for sequential awaits, which is how the executor drives
+    /// this backend.
+    last_request_id: std::sync::Arc<std::sync::Mutex<String>>,
 }
 
 /// Interceptor that attaches API-key and optional route-affinity metadata.
@@ -26,6 +33,8 @@ pub struct GrpcQdrant {
 pub(crate) struct MetadataInterceptor {
     api_key: Option<String>,
     route_affinity: Option<String>,
+    /// Shared slot recording the id generated for each outgoing RPC.
+    last_request_id: std::sync::Arc<std::sync::Mutex<String>>,
 }
 
 impl tonic::service::Interceptor for MetadataInterceptor {
@@ -48,10 +57,14 @@ impl tonic::service::Interceptor for MetadataInterceptor {
                 .insert(ROUTE_AFFINITY_METADATA, value);
         }
         // Per-request correlation id — Qdrant echoes it into its log lines,
-        // matching the REST adapter's `x-request-id` header.
+        // matching the REST adapter's `x-request-id` header. The generated id
+        // is recorded on the shared slot so a failing RPC can report it.
         let request_id = crate::client::next_request_id();
         if let Ok(value) = tonic::metadata::MetadataValue::try_from(request_id.as_str()) {
             request.metadata_mut().insert(REQUEST_ID_METADATA, value);
+        }
+        if let Ok(mut slot) = self.last_request_id.lock() {
+            *slot = request_id;
         }
         Ok(request)
     }
@@ -64,6 +77,7 @@ impl GrpcQdrant {
             channel,
             api_key: None,
             route_affinity: None,
+            last_request_id: std::sync::Arc::new(std::sync::Mutex::new(String::new())),
         }
     }
 
@@ -102,6 +116,7 @@ impl GrpcQdrant {
             channel,
             api_key,
             route_affinity: None,
+            last_request_id: std::sync::Arc::new(std::sync::Mutex::new(String::new())),
         })
     }
 
@@ -118,6 +133,16 @@ impl GrpcQdrant {
         self.route_affinity.as_deref()
     }
 
+    /// Most recently generated correlation id (best-effort under concurrent
+    /// RPCs — last write wins). Used by the error path so gRPC failures can
+    /// be matched to Qdrant's log lines.
+    pub(crate) fn current_request_id(&self) -> String {
+        self.last_request_id
+            .lock()
+            .map(|id| id.clone())
+            .unwrap_or_default()
+    }
+
     /// Clone the underlying `tonic` channel for custom clients.
     pub fn channel(&self) -> Channel {
         self.channel.clone()
@@ -127,6 +152,7 @@ impl GrpcQdrant {
         MetadataInterceptor {
             api_key: self.api_key.clone(),
             route_affinity: self.route_affinity.clone(),
+            last_request_id: self.last_request_id.clone(),
         }
     }
 

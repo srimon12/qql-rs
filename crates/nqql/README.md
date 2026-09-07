@@ -62,6 +62,8 @@ console.log(version, isValid("SHOW COLLECTIONS"), compileQuery("SHOW COLLECTIONS
 | `compileQuery` / `explain` / `explainStmt` | Offline |
 | `bind(query, params)` | Substitute `:name` (object) or `?` (array) |
 | `execute` / `executeStmt` | Free-function execute (`options.params` same as `bind`) |
+| `executeHits` | Free-function execute returning `ScoredPoint[]` |
+| `ExecutionReport.hits/points/facet/count/groups` | Typed result accessors on every report |
 
 ### Isolation vs routing
 

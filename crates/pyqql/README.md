@@ -56,6 +56,8 @@ client.execute(stmt)
 | `compile_query` / `explain` | Offline plan / REST projection |
 | `bind(query, params)` | Substitute `:name` (dict) or `?` (list) |
 | `execute` / `execute_async` | One-shot free functions (`params=` same as `bind`) |
+| `execute_hits` / `execute_async_hits` | One-shot free functions returning `List[ScoredPoint]` |
+| `ExecutionReport.hits/points/facet/count/groups` | Typed result accessors on every report |
 
 ### `inject_filter` operators
 

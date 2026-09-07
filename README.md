@@ -35,14 +35,18 @@ irm https://raw.githubusercontent.com/srimon12/qql-rs/main/scripts/install.ps1 |
 #### 📦 Language SDKs
 
 ```bash
-# Edge verions are heavier but comes with qdrant_edge and fastembed-rs in a single package
-# for minimal footprint prefer vanilla sdk without the -edge.
+# Edge SDKs are heavier but bundle qdrant_edge and fastembed-rs in a single
+# package; for minimal footprint prefer the vanilla SDK without the -edge.
 
 # Python
-pip install pyqql OR pyqql-edge
+pip install pyqql
+# or, for the in-process edge runtime:
+pip install pyqql-edge
 
 # Node.js
-npm install @veristamp/nqql OR @veristamp/nqql-edge  
+npm install @veristamp/nqql
+# or, for the in-process edge runtime:
+npm install @veristamp/nqql-edge
 
 # WebAssembly
 npm install qql-wasm
