@@ -1036,7 +1036,7 @@ pub struct CountRequest {
     pub exact: Option<bool>,
 }
 
-/// Request payload for Qdrant's `/collections/{collection}/facet` endpoint.
+/// Request payload for Qdrant's `/collections/{collection}/facet` endpoint or gRPC `Points.Facet`.
 #[derive(Debug, Clone, Serialize)]
 pub struct FacetRequest {
     /// Payload key to facet on.

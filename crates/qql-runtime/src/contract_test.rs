@@ -841,4 +841,63 @@ mod tests {
         }
         validate_ref(&openapi, "QueryRequest", &json);
     }
+
+    /// FACET statement lowers to a REST body that satisfies the OpenAPI
+    /// `#/components/schemas/FacetRequest` schema, and lowers to a gRPC
+    /// `FacetCounts` message with identical semantics.
+    #[test]
+    fn facet_contract_matches_openapi_and_grpc() {
+        let Some(openapi) = openapi_or_skip() else {
+            return;
+        };
+
+        let stmt = Parser::parse(
+            "FACET room_type FROM stays WHERE price < 150 LIMIT 5 EXACT true SHARD 'tenant_1';",
+        )
+        .unwrap();
+
+        // 1. REST route body matches OpenAPI FacetRequest schema
+        let route = try_route(&stmt).unwrap();
+        assert_eq!(route.path, "/collections/stays/facet");
+        let body = route.body_json().unwrap();
+        validate_ref(&openapi, "FacetRequest", &body);
+
+        assert_eq!(body["key"], "room_type");
+        assert_eq!(body["limit"], 5);
+        assert_eq!(body["exact"], true);
+        assert_eq!(body["shard_key"], "tenant_1");
+        assert!(body["filter"].is_object());
+
+        // 2. gRPC conversion matches the planned operation
+        let op = plan(&stmt).unwrap();
+        let (collection, req) = match &op {
+            PlannedOperation::Facet {
+                collection,
+                request,
+            } => (collection, request),
+            other => panic!("expected Facet operation, got {other:?}"),
+        };
+
+        let fc = test_api::to_facet_counts(req, collection).unwrap();
+        assert_eq!(fc.collection_name, "stays");
+        assert_eq!(fc.key, "room_type");
+        assert_eq!(fc.limit, Some(5));
+        assert_eq!(fc.exact, Some(true));
+        assert!(fc.filter.is_some());
+        assert!(fc.shard_key_selector.is_some());
+
+        // 3. Response conversion parity: gRPC FacetHit normalizes to REST shape
+        let hit_str = qdrant::FacetHit {
+            value: Some(qdrant::FacetValue {
+                variant: Some(qdrant::facet_value::Variant::StringValue(
+                    "entire_home".into(),
+                )),
+            }),
+            count: 42,
+        };
+        let normalized = test_api::facet_hit_to_json(hit_str);
+        validate_ref(&openapi, "FacetValueHit", &normalized);
+        assert_eq!(normalized["value"], "entire_home");
+        assert_eq!(normalized["count"], 42);
+    }
 }

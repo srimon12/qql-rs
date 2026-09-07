@@ -167,7 +167,7 @@ Three implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant`. The gRPC adapte
 | `QUERY ...` (search) | `/points/query` | POST |
 | `QUERY ... GROUP BY` | `/points/query/groups` | POST |
 | `QUERY POINTS (ids)` | `/points` | POST |
-| `FACET ...` | `/points/facet` | POST |
+| `FACET ...` | `/collections/{c}/facet` (REST) / `Points.Facet` (gRPC) | POST |
 | `SCROLL ...` | `/points/scroll` | POST |
 | `COUNT ...` | `/points/count` | POST |
 | `UPSERT ...` | `/points` | PUT |

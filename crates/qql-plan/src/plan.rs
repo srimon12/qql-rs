@@ -71,11 +71,11 @@ pub enum PlannedOperation {
         /// Lowered `/points/count` request body.
         request: CountRequest,
     },
-    /// In-database facet aggregation (`POST /collections/{collection}/facet`).
+    /// In-database facet aggregation (REST `POST /collections/{collection}/facet` or gRPC `Points.Facet`).
     Facet {
         /// Target collection name.
         collection: String,
-        /// Lowered `/points/facet` request body.
+        /// Lowered facet request body.
         request: FacetRequest,
     },
     /// Point upsert: `PUT /collections/{c}/points`.

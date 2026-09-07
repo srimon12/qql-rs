@@ -107,7 +107,7 @@ Use `SCROLL ... AFTER point_id` to continue from a cursor. Use `COUNT` without
 ## In-database faceting (FACET)
 
 `FACET` calculates categorical value distributions for any indexed payload key
-using Qdrant's `/collections/{collection}/facet` endpoint, returning hit counts
+using Qdrant's `/collections/{collection}/facet` endpoint (or `Points.Facet` over gRPC), returning hit counts
 per unique value without fetching full point records.
 
 {% qqlExample title="Facet counts with filtering and exact accuracy" %}

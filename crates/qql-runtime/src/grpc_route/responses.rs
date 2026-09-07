@@ -493,3 +493,17 @@ pub(crate) fn quantization_response_to_json(qc: &qdrant::QuantizationConfig) -> 
     }
     serde_json::Value::Object(obj)
 }
+
+pub(crate) fn facet_hit_to_json(hit: qdrant::FacetHit) -> serde_json::Value {
+    use qdrant::facet_value::Variant;
+    let val = match hit.value.and_then(|v| v.variant) {
+        Some(Variant::StringValue(s)) => serde_json::Value::String(s),
+        Some(Variant::IntegerValue(i)) => serde_json::json!(i),
+        Some(Variant::BoolValue(b)) => serde_json::Value::Bool(b),
+        None => serde_json::Value::Null,
+    };
+    serde_json::json!({
+        "value": val,
+        "count": hit.count,
+    })
+}

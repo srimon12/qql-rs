@@ -179,7 +179,7 @@ export const KEYWORD_DOCS: Record<string, KeywordDoc> = {
     title: "FACET",
     category: "Statement",
     summary:
-      "Compute value counts for a payload field via Qdrant's `/collections/{collection}/facet` endpoint. Supports `WHERE`, `LIMIT`, `EXACT`, and `SHARD`.",
+      "Compute value counts for a payload field via Qdrant's `/collections/{collection}/facet` endpoint (REST) or `Points.Facet` (gRPC). Supports `WHERE`, `LIMIT`, `EXACT`, and `SHARD`.",
     example: "FACET room_type FROM stays WHERE price < 150 LIMIT 5 EXACT true;",
   },
   UPSERT: {

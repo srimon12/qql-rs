@@ -2,8 +2,8 @@
 
 use super::ddl::{hnsw_config_from_plan, quantization_config_from_plan, vector_params};
 use super::filter::to_match;
-use super::query::{to_query_groups, to_query_points, to_scroll_points};
-use super::responses::get_points_envelope;
+use super::query::{to_facet_counts, to_query_groups, to_query_points, to_scroll_points};
+use super::responses::{facet_hit_to_json, get_points_envelope};
 use crate::qdrant_grpc::qdrant;
 use qql_core::parser::Parser;
 use qql_plan::types::{FilterExpression, MatchValue};
@@ -47,6 +47,7 @@ fn test_grpc_route_conversion_all_statements() {
         "CREATE INDEX ON COLLECTION docs FOR title TYPE text;",
         "SHOW COLLECTIONS;",
         "SHOW COLLECTION docs;",
+        "FACET category FROM docs WHERE status = 'active' LIMIT 10 EXACT true SHARD 'tenant_1';",
     ];
 
     for stmt_str in statements {
@@ -102,6 +103,17 @@ fn test_grpc_route_conversion_all_statements() {
             qql_plan::PlannedOperation::Count { .. } => {}
             qql_plan::PlannedOperation::CreateShardKey { .. } => {}
             qql_plan::PlannedOperation::DropShardKey { .. } => {}
+            qql_plan::PlannedOperation::Facet {
+                collection,
+                request,
+            } => {
+                let grpc_req = to_facet_counts(request, collection);
+                assert!(
+                    grpc_req.is_ok(),
+                    "to_facet_counts failed for {stmt_str}: {:?}",
+                    grpc_req.err()
+                );
+            }
             _ => {}
         }
     }
@@ -973,4 +985,85 @@ fn grpc_fusion_rrf_standalone_with_params() {
         }
         other => panic!("expected Fusion(Rrf), got {other:?}"),
     }
+}
+
+#[test]
+fn facet_counts_conversion_matches_plan() {
+    let stmt = Parser::parse(
+        "FACET room_type FROM stays WHERE price < 150 LIMIT 5 EXACT true SHARD 'tenant_1';",
+    )
+    .unwrap();
+    let op = qql_plan::plan(&stmt).unwrap();
+    let (collection, req) = match &op {
+        qql_plan::PlannedOperation::Facet {
+            collection,
+            request,
+        } => (collection, request),
+        other => panic!("expected Facet, got {other:?}"),
+    };
+
+    let fc = to_facet_counts(req, collection).unwrap();
+    assert_eq!(fc.collection_name, "stays");
+    assert_eq!(fc.key, "room_type");
+    assert_eq!(fc.limit, Some(5));
+    assert_eq!(fc.exact, Some(true));
+    assert!(fc.filter.is_some());
+    match &fc.shard_key_selector {
+        Some(sks) => {
+            assert_eq!(sks.shard_keys.len(), 1);
+            assert_eq!(
+                sks.shard_keys[0].key.as_ref(),
+                Some(&qdrant::shard_key::Key::Keyword("tenant_1".to_string()))
+            );
+        }
+        None => panic!("expected shard_key_selector to be set"),
+    }
+}
+
+#[test]
+fn facet_hit_to_json_handles_all_variants() {
+    use qdrant::facet_value::Variant;
+    use qdrant::{FacetHit, FacetValue};
+
+    let hit_str = FacetHit {
+        value: Some(FacetValue {
+            variant: Some(Variant::StringValue("hotel".to_string())),
+        }),
+        count: 42,
+    };
+    assert_eq!(
+        facet_hit_to_json(hit_str),
+        serde_json::json!({ "value": "hotel", "count": 42 })
+    );
+
+    let hit_int = FacetHit {
+        value: Some(FacetValue {
+            variant: Some(Variant::IntegerValue(101)),
+        }),
+        count: 7,
+    };
+    assert_eq!(
+        facet_hit_to_json(hit_int),
+        serde_json::json!({ "value": 101, "count": 7 })
+    );
+
+    let hit_bool = FacetHit {
+        value: Some(FacetValue {
+            variant: Some(Variant::BoolValue(true)),
+        }),
+        count: 99,
+    };
+    assert_eq!(
+        facet_hit_to_json(hit_bool),
+        serde_json::json!({ "value": true, "count": 99 })
+    );
+
+    let hit_none = FacetHit {
+        value: None,
+        count: 0,
+    };
+    assert_eq!(
+        facet_hit_to_json(hit_none),
+        serde_json::json!({ "value": null, "count": 0 })
+    );
 }

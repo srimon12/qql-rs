@@ -234,4 +234,13 @@ impl GrpcQdrant {
             .map(|r| r.into_inner())
             .map_err(|e| grpc_error("delete_vectors", e))
     }
+
+    /// gRPC `Facet`: calculate categorical value distributions.
+    pub async fn facet(&self, req: qdrant::FacetCounts) -> Result<qdrant::FacetResponse, QqlError> {
+        let mut cl = self.points_client();
+        cl.facet(tonic::Request::new(req))
+            .await
+            .map(|r| r.into_inner())
+            .map_err(|e| grpc_error("facet", e))
+    }
 }

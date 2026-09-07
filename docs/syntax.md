@@ -727,7 +727,7 @@ COUNT FROM sec10k WHERE tenant_id = 'honeywell' SHARD 'honeywell';
 
 ### Facet Aggregations
 
-Computes value counts for payload fields via Qdrant's `/collections/{collection}/facet` endpoint:
+Computes value counts for payload fields via Qdrant's REST `/collections/{collection}/facet` endpoint or gRPC `Points.Facet` RPC:
 
 ```sql
 -- Basic facet counting unique categories
