@@ -19,6 +19,7 @@ pub async fn run_repl(
 
     let mut rl = rustyline::DefaultEditor::new()?;
     let mut buffer = String::new();
+    let mut session_params = serde_json::Map::new();
 
     loop {
         let prompt = if buffer.is_empty() {
@@ -62,6 +63,41 @@ pub async fn run_repl(
             if lower == "doctor" || lower == "\\d" {
                 let _ = rl.add_history_entry(trimmed);
                 let _ = crate::commands::handle_doctor(url, use_edge, false, false).await;
+                continue;
+            }
+
+            if let Some(args) = cut_command_prefix(trimmed, "param")
+                .or_else(|| cut_command_prefix(trimmed, "\\param"))
+                .or_else(|| cut_command_prefix(trimmed, "\\p"))
+            {
+                let _ = rl.add_history_entry(trimmed);
+                let trimmed_args = args.trim();
+                if trimmed_args.is_empty() {
+                    if session_params.is_empty() {
+                        println!("\x1b[2m(no session parameters set)\x1b[0m");
+                    } else {
+                        println!("\x1b[1mCurrent Session Parameters:\x1b[0m");
+                        for (k, v) in &session_params {
+                            println!("  \x1b[36m:{}\x1b[0m = {}", k, v);
+                        }
+                    }
+                } else if trimmed_args.eq_ignore_ascii_case("clear") {
+                    session_params.clear();
+                    crate::output::print_success("Parameters cleared.");
+                } else if let Some((key_raw, val_raw)) = trimmed_args.split_once('=') {
+                    let key = key_raw
+                        .trim()
+                        .strip_prefix(':')
+                        .unwrap_or(key_raw.trim())
+                        .to_string();
+                    let val_trimmed = val_raw.trim();
+                    let val: serde_json::Value = serde_json::from_str(val_trimmed)
+                        .unwrap_or_else(|_| serde_json::Value::String(val_trimmed.to_string()));
+                    println!("Set parameter \x1b[36m:{key}\x1b[0m = {val}");
+                    session_params.insert(key, val);
+                } else {
+                    crate::output::print_error("param usage: \\p [key=value | clear]");
+                }
                 continue;
             }
 
@@ -186,9 +222,25 @@ pub async fn run_repl(
         let full_query = core::mem::take(&mut buffer);
         let _ = rl.add_history_entry(&full_query);
 
+        let effective_query = if !session_params.is_empty() {
+            match qql_core::params_json::bind_str_with_params(
+                &full_query,
+                &serde_json::Value::Object(session_params.clone()),
+                false,
+            ) {
+                Ok(bound) => bound,
+                Err(e) => {
+                    crate::output::print_error(&format!("bind error: {}", e));
+                    continue;
+                }
+            }
+        } else {
+            full_query
+        };
+
         let start = Instant::now();
         match executor
-            .execute(&full_query, qql::executor::OnError::Stop)
+            .execute(&effective_query, qql::executor::OnError::Stop)
             .await
         {
             Ok(report) => {
@@ -304,6 +356,7 @@ fn print_repl_help() {
 \n\x1b[1mBuilt-in Commands:\x1b[0m\n\
 \n  \x1b[36mhelp\x1b[0m, \x1b[36m\\h\x1b[0m, \x1b[36m?\x1b[0m       Show this help card (note: bare ? triggers help)\n\
   \x1b[36mdoctor\x1b[0m, \x1b[36m\\d\x1b[0m         Check connection health and loaded model hosts\n\
+  \x1b[36mparam [k=v]\x1b[0m, \x1b[36m\\p\x1b[0m    Set, inspect, or clear session query parameters\n\
   \x1b[36mfmt <qql>\x1b[0m, \x1b[36m\\f\x1b[0m      Format QQL into canonical syntax\n\
   \x1b[36mexplain <qql>\x1b[0m     Show hierarchical tree query execution plan\n\
   \x1b[36mexecute <file>\x1b[0m, \x1b[36m\\e\x1b[0m Execute a .qql script file against Qdrant\n\

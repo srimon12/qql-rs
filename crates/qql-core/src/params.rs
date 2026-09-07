@@ -23,28 +23,17 @@
 //! and `` `...` ``) and comments (`-- ...`) in the source query are preserved
 //! verbatim and never substituted.
 
-use crate::ast::Value;
 use crate::ast::filter::{FilterExpr, PointIdPredicate};
 use crate::ast::formula::FormulaExpr;
 use crate::ast::statement::{
     PageSpec, PointId, PointSelector, Prefetch, PrefetchSource, QueryExpr, QueryInput, QueryStmt,
-    Stmt, VectorValue,
+    Stmt,
 };
+use crate::ast::{Value, escape_string, is_simple_ident, looks_like_iso_datetime};
 use crate::error::QqlError;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-
-/// Check if a string is a simple identifier (starts with ascii alphabetic or `_`,
-/// followed by ascii alphanumeric or `_`).
-fn is_simple_ident(name: &str) -> bool {
-    let mut chars = name.chars();
-    match chars.next() {
-        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
-        _ => return false,
-    }
-    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
-}
 
 /// Returns true if the `:` at byte offset `i` is at a valid token boundary to begin a parameter placeholder.
 ///
@@ -202,20 +191,7 @@ fn ident_at(source: &str, start: usize, end: usize) -> &str {
 
 /// Escape a string literal for QQL single-quoted representation.
 fn escape_str_literal(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('\'');
-    for c in s.chars() {
-        match c {
-            '\'' => out.push_str("''"),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            other => out.push(other),
-        }
-    }
-    out.push('\'');
-    out
+    format!("'{}'", escape_string(s))
 }
 
 /// Convert an AST `Value` into its canonical, safely escaped QQL literal string.
@@ -278,71 +254,6 @@ pub fn value_to_literal(value: &Value) -> Result<String, QqlError> {
         }
         Value::Param(p) => Ok(alloc::format!(":{}", p)),
         Value::PositionalParam(_) => Ok("?".to_string()),
-    }
-}
-
-/// Convert an AST `Value` into a human-readable literal string, truncating vectors larger than `max_vec_len`.
-pub fn value_to_readable_literal(value: &Value, max_vec_len: usize) -> Result<String, QqlError> {
-    match value {
-        Value::List(items)
-            if items.len() > max_vec_len
-                && items
-                    .iter()
-                    .all(|v| matches!(v, Value::Float(_) | Value::Int(_))) =>
-        {
-            let mut out = String::from("[");
-            let preview_count = max_vec_len.min(items.len());
-            for (i, item) in items.iter().take(preview_count).enumerate() {
-                if i > 0 {
-                    out.push_str(", ");
-                }
-                match item {
-                    Value::Float(f) => {
-                        let s = alloc::format!("{:.4}", f);
-                        let trimmed = s.trim_end_matches('0');
-                        let trimmed = if trimmed.ends_with('.') {
-                            alloc::format!("{}0", trimmed)
-                        } else {
-                            trimmed.to_string()
-                        };
-                        out.push_str(&trimmed);
-                    }
-                    Value::Int(n) => out.push_str(&n.to_string()),
-                    _ => {}
-                }
-            }
-            out.push_str(&alloc::format!(", ... ({} dims)]", items.len()));
-            Ok(out)
-        }
-        Value::List(items) => {
-            let mut out = String::from("[");
-            for (i, item) in items.iter().enumerate() {
-                if i > 0 {
-                    out.push_str(", ");
-                }
-                out.push_str(&value_to_readable_literal(item, max_vec_len)?);
-            }
-            out.push(']');
-            Ok(out)
-        }
-        Value::Dict(entries) => {
-            let mut out = String::from("{");
-            for (i, (k, v)) in entries.iter().enumerate() {
-                if i > 0 {
-                    out.push_str(", ");
-                }
-                if is_simple_ident(k) {
-                    out.push_str(k);
-                } else {
-                    out.push_str(&escape_str_literal(k));
-                }
-                out.push_str(": ");
-                out.push_str(&value_to_readable_literal(v, max_vec_len)?);
-            }
-            out.push('}');
-            Ok(out)
-        }
-        other => value_to_literal(other),
     }
 }
 
@@ -798,81 +709,17 @@ fn value_to_query_input(val: Value) -> Result<QueryInput, QqlError> {
             model: None,
             text_param: None,
         }),
-        Value::List(items) => {
-            if items.is_empty() {
-                return Ok(QueryInput::Vector(VectorValue::Dense(Vec::new())));
-            }
-            // A matrix (list of lists) is a multi-vector bag (ColBERT-style).
-            // The textual path already accepts `[[0.1, ...], [0.2, ...]]`
-            // literals — the AST path must too, so ColBERT queries can be
-            // prepared statements.
-            let all_rows = items.iter().all(|i| matches!(i, Value::List(_)));
-            if all_rows {
-                let mut rows = Vec::with_capacity(items.len());
-                for row in items {
-                    let Value::List(cells) = row else {
-                        return Err(QqlError::validation(
-                            "QQL-BIND-TYPE-MISMATCH",
-                            "matrix parameter bound to query input must contain only lists of numbers",
-                            None,
-                        ));
-                    };
-                    let mut floats = Vec::with_capacity(cells.len());
-                    for cell in cells {
-                        push_bound_vector_f32(&mut floats, &cell)?;
-                    }
-                    if floats.is_empty() {
-                        return Err(QqlError::validation(
-                            "QQL-BIND-TYPE-MISMATCH",
-                            "matrix parameter bound to query input must not contain empty rows",
-                            None,
-                        ));
-                    }
-                    rows.push(floats);
-                }
-                return Ok(QueryInput::Vector(VectorValue::MultiDense(rows)));
-            }
-            let mut floats = Vec::with_capacity(items.len());
-            for item in items {
-                push_bound_vector_f32(&mut floats, &item)?;
-            }
-            Ok(QueryInput::Vector(VectorValue::Dense(floats)))
-        }
         Value::Int(n) if n >= 0 => Ok(QueryInput::Point(PointId::Number(n as u64))),
+        Value::List(_) | Value::Dict(_) => {
+            let vec = crate::parser::helpers::vector_from_value(val, None)?;
+            Ok(QueryInput::Vector(vec))
+        }
         _ => Err(QqlError::validation(
             "QQL-BIND-TYPE-MISMATCH",
             alloc::format!("unsupported value type for query input: {:?}", val),
             None,
         )),
     }
-}
-
-/// Convert one bound JSON number into a vector element with the same
-/// finiteness rules as the textual parse path (`parser::helpers::numeric_vector`):
-/// non-finite sources and f32 overflow both reject, so a bound `inf` vector
-/// can never reach the wire.
-fn push_bound_vector_f32(floats: &mut Vec<f32>, value: &Value) -> Result<(), QqlError> {
-    let source = match value {
-        Value::Int(i) => *i as f64,
-        Value::Float(f) => *f,
-        _ => {
-            return Err(QqlError::validation(
-                "QQL-BIND-TYPE-MISMATCH",
-                "list parameter bound to query input must contain only numbers (a matrix of number lists binds as a multi-vector)",
-                None,
-            ));
-        }
-    };
-    let converted = source as f32;
-    if !source.is_finite() || !converted.is_finite() {
-        return Err(QqlError::validation(
-            "QQL-VALIDATION-VECTOR",
-            "vector elements must be finite f32 values",
-            None,
-        ));
-    }
-    floats.push(converted);
-    Ok(())
 }
 
 /// Recursively bind parameters into a `FilterExpr` in-place.
@@ -988,16 +835,6 @@ where
     Ok(())
 }
 
-fn looks_like_iso_datetime(s: &str) -> bool {
-    let bytes = s.as_bytes();
-    bytes.len() >= 10
-        && bytes[0..4].iter().all(|b| b.is_ascii_digit())
-        && bytes[4] == b'-'
-        && bytes[5..7].iter().all(|b| b.is_ascii_digit())
-        && bytes[7] == b'-'
-        && bytes[8..10].iter().all(|b| b.is_ascii_digit())
-}
-
 fn value_to_u64(val: &Value, clause: &str) -> Result<u64, QqlError> {
     match val {
         Value::Int(n) if *n >= 0 => Ok(*n as u64),
@@ -1045,6 +882,44 @@ fn value_to_formula_constant(val: Value) -> Result<FormulaExpr, QqlError> {
     }
 }
 
+fn resolve_param_spec<F>(param: &str, lookup: &F, positional: &[Value]) -> Result<Value, QqlError>
+where
+    F: Fn(&str) -> Option<Value>,
+{
+    if let Some(name) = param.strip_prefix(':') {
+        resolve_param(name, lookup)
+    } else if let Some(idx_str) = param.strip_prefix('?') {
+        let idx = idx_str.parse::<usize>().map_err(|_| {
+            QqlError::validation(
+                "QQL-BIND-INVALID-PARAMS",
+                alloc::format!("invalid positional parameter index '?{}'", idx_str),
+                None,
+            )
+        })?;
+        resolve_positional(idx, positional)
+    } else {
+        resolve_param(param, lookup)
+    }
+}
+
+fn resolve_param_u64<F>(
+    param: &str,
+    lookup: &F,
+    positional: &[Value],
+    clause: &str,
+    positive: bool,
+) -> Result<u64, QqlError>
+where
+    F: Fn(&str) -> Option<Value>,
+{
+    let val = resolve_param_spec(param, lookup, positional)?;
+    if positive {
+        value_to_positive_u64(&val, clause)
+    } else {
+        value_to_u64(&val, clause)
+    }
+}
+
 /// Bind parameters into a `PageSpec` in-place.
 pub fn bind_page_spec<F>(
     page: &mut PageSpec,
@@ -1055,43 +930,13 @@ where
     F: Fn(&str) -> Option<Value>,
 {
     if let Some(param) = &page.limit_param {
-        if let Some(name) = param.strip_prefix(':') {
-            let val = resolve_param(name, lookup)?;
-            page.limit = Some(value_to_positive_u64(&val, "LIMIT")?);
-        } else if let Some(idx_str) = param.strip_prefix('?') {
-            let idx = idx_str.parse::<usize>().map_err(|_| {
-                QqlError::validation(
-                    "QQL-BIND-INVALID-PARAMS",
-                    alloc::format!("invalid positional parameter index '?{}'", idx_str),
-                    None,
-                )
-            })?;
-            let val = resolve_positional(idx, positional)?;
-            page.limit = Some(value_to_positive_u64(&val, "LIMIT")?);
-        } else {
-            let val = resolve_param(param, lookup)?;
-            page.limit = Some(value_to_positive_u64(&val, "LIMIT")?);
-        }
+        page.limit = Some(resolve_param_u64(param, lookup, positional, "LIMIT", true)?);
         page.limit_param = None;
     }
     if let Some(param) = &page.offset_param {
-        if let Some(name) = param.strip_prefix(':') {
-            let val = resolve_param(name, lookup)?;
-            page.offset = Some(value_to_u64(&val, "OFFSET")?);
-        } else if let Some(idx_str) = param.strip_prefix('?') {
-            let idx = idx_str.parse::<usize>().map_err(|_| {
-                QqlError::validation(
-                    "QQL-BIND-INVALID-PARAMS",
-                    alloc::format!("invalid positional parameter index '?{}'", idx_str),
-                    None,
-                )
-            })?;
-            let val = resolve_positional(idx, positional)?;
-            page.offset = Some(value_to_u64(&val, "OFFSET")?);
-        } else {
-            let val = resolve_param(param, lookup)?;
-            page.offset = Some(value_to_u64(&val, "OFFSET")?);
-        }
+        page.offset = Some(resolve_param_u64(
+            param, lookup, positional, "OFFSET", false,
+        )?);
         page.offset_param = None;
     }
     Ok(())
@@ -1398,23 +1243,8 @@ where
                 bind_point_id(after, &lookup, positional)?;
             }
             if let Some(param) = scroll.limit_param.take() {
-                if let Some(name) = param.strip_prefix(':') {
-                    let val = resolve_param(name, &lookup)?;
-                    scroll.limit = value_to_positive_u64(&val, "SCROLL LIMIT")?;
-                } else if let Some(idx_str) = param.strip_prefix('?') {
-                    let idx = idx_str.parse::<usize>().map_err(|_| {
-                        QqlError::validation(
-                            "QQL-BIND-INVALID-PARAMS",
-                            alloc::format!("invalid positional parameter index '?{}'", idx_str),
-                            None,
-                        )
-                    })?;
-                    let val = resolve_positional(idx, positional)?;
-                    scroll.limit = value_to_positive_u64(&val, "SCROLL LIMIT")?;
-                } else {
-                    let val = resolve_param(&param, &lookup)?;
-                    scroll.limit = value_to_positive_u64(&val, "SCROLL LIMIT")?;
-                }
+                scroll.limit =
+                    resolve_param_u64(&param, &lookup, positional, "SCROLL LIMIT", true)?;
             }
             Ok(())
         }
@@ -1450,27 +1280,24 @@ where
                 bind_filter(filter, &lookup, positional)?;
             }
             if let Some(param) = facet.limit_param.take() {
-                if let Some(name) = param.strip_prefix(':') {
-                    let val = resolve_param(name, &lookup)?;
-                    facet.limit = Some(value_to_positive_u64(&val, "FACET LIMIT")?);
-                } else if let Some(idx_str) = param.strip_prefix('?') {
-                    let idx = idx_str.parse::<usize>().map_err(|_| {
-                        QqlError::validation(
-                            "QQL-BIND-INVALID-PARAMS",
-                            alloc::format!("invalid positional parameter index '?{}'", idx_str),
-                            None,
-                        )
-                    })?;
-                    let val = resolve_positional(idx, positional)?;
-                    facet.limit = Some(value_to_positive_u64(&val, "FACET LIMIT")?);
-                } else {
-                    let val = resolve_param(&param, &lookup)?;
-                    facet.limit = Some(value_to_positive_u64(&val, "FACET LIMIT")?);
-                }
+                facet.limit = Some(resolve_param_u64(
+                    &param,
+                    &lookup,
+                    positional,
+                    "FACET LIMIT",
+                    true,
+                )?);
             }
             Ok(())
         }
-        _ => Ok(()),
+        other => Err(QqlError::validation(
+            "QQL-BIND-UNSUPPORTED-STATEMENT",
+            alloc::format!(
+                "cannot bind parameters into statement type: {}",
+                other.stmt_kind()
+            ),
+            None,
+        )),
     }
 }
 
@@ -1897,7 +1724,7 @@ mod tests {
     fn test_value_to_literal_escaping() {
         assert_eq!(
             value_to_literal(&Value::Str("O'Connor and \\path".into())).unwrap(),
-            "'O''Connor and \\\\path'"
+            "'O\\'Connor and \\\\path'"
         );
         assert_eq!(value_to_literal(&Value::Int(42)).unwrap(), "42");
         assert_eq!(value_to_literal(&Value::Float(3.75)).unwrap(), "3.75");
@@ -1948,7 +1775,10 @@ mod tests {
             ("weird 'quote".into(), Value::Str("val".into())),
         ]);
         let lit = value_to_literal(&dict).unwrap();
-        assert_eq!(lit, "{simple_key: 1, 'a: 1, b': 5, 'weird ''quote': 'val'}");
+        assert_eq!(
+            lit,
+            "{simple_key: 1, 'a: 1, b': 5, 'weird \\'quote': 'val'}"
+        );
 
         let query = format!("UPSERT INTO test VALUES {{id: 1, payload: {}}};", lit);
         let parsed = Parser::parse(&query);

@@ -49,32 +49,41 @@ SELECT * FROM docs WHERE id = 42;
 INSERT INTO docs VALUES {id: 1};
 
 -- @case legacy-boost
+-- @error QQL-PARSE-STATEMENT
 BOOST ($score * 2);
 
 -- @case legacy-collection-vectors-prefix
+-- @error QQL-PARSE-SEPARATOR
 CREATE COLLECTION docs VECTORS (dense VECTOR (4, COSINE));
 
 -- @case legacy-implicit-vector-name
+-- @error QQL-PARSE-SYNTAX
 CREATE COLLECTION docs (VECTOR (4, COSINE));
 
 -- @case legacy-omitted-vector-keyword
+-- @error QQL-PARSE-SYNTAX
 CREATE COLLECTION docs (dense (4, COSINE));
 
 -- @case legacy-vector-config-plural
+-- @error QQL-PARSE-SYNTAX
 CREATE COLLECTION docs (
   dense VECTOR (4, COSINE) WITH VECTORS (on_disk = true)
 );
 
 -- @case legacy-quantize
+-- @error QQL-VALIDATION-CONFIG
 ALTER COLLECTION docs WITH QUANTIZE (type = 'scalar');
 
 -- @case legacy-shard-without-key
+-- @error QQL-PARSE-EXPECTED
 CREATE SHARD 'tenant' ON COLLECTION docs;
 
 -- @case legacy-short-rrf-k
+-- @error QQL-VALIDATION-SEARCH-PARAM
 QUERY TEXT 'x' FROM docs PARAMS (k = 30);
 
 -- @case legacy-short-rrf-weights
+-- @error QQL-VALIDATION-SEARCH-PARAM
 QUERY TEXT 'x' FROM docs PARAMS (weights = [1.0]);
 
 -- @case legacy-quoted-index-type

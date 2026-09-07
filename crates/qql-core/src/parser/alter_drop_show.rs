@@ -90,12 +90,14 @@ impl<'a> AstLowerer<'a> {
             let collection = self.parse_identifier()?;
             return Ok(Stmt::ShowShardKeys(collection));
         }
-        Err(QqlError::syntax(
+        let peek = self.peek()?;
+        Err(QqlError::parse(
+            "QQL-PARSE-SYNTAX",
             alloc::format!(
                 "expected COLLECTION, COLLECTIONS, QUOTAS, or SHARD KEYS after SHOW, got '{}'",
-                self.peek()?.text
+                peek.text
             ),
-            self.peek()?.pos,
+            peek.span,
         ))
     }
 

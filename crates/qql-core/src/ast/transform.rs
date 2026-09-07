@@ -142,41 +142,13 @@ pub fn inject_filter(
                 "QQL-VALIDATION-FILTER-INJECT",
                 format!(
                     "inject_filter does not apply to this statement type ({})",
-                    stmt_kind(other)
+                    other.stmt_kind()
                 ),
                 None,
             ));
         }
     }
     Ok(())
-}
-
-fn stmt_kind(statement: &Stmt) -> &'static str {
-    match statement {
-        Stmt::Query(_) => "QUERY",
-        Stmt::Scroll(_) => "SCROLL",
-        Stmt::Count(_) => "COUNT",
-        Stmt::Facet(_) => "FACET",
-        Stmt::Upsert(_) => "UPSERT",
-        Stmt::Delete(_) => "DELETE",
-        Stmt::ClearPayload(_) => "CLEAR PAYLOAD",
-        Stmt::DeletePayload(_) => "DELETE PAYLOAD",
-        Stmt::DeleteVector(_) => "DELETE VECTOR",
-        Stmt::UpdateVector(_) => "UPDATE VECTOR",
-        Stmt::UpdatePayload(_) => "UPDATE PAYLOAD",
-        Stmt::CreateCollection(_) => "CREATE COLLECTION",
-        Stmt::AlterCollection(_) => "ALTER COLLECTION",
-        Stmt::DropCollection(_) => "DROP COLLECTION",
-        Stmt::CreateIndex(_) => "CREATE INDEX",
-        Stmt::DropIndex(_) => "DROP INDEX",
-        Stmt::CreateShardKey(_) => "CREATE SHARD KEY",
-        Stmt::DropShardKey(_) => "DROP SHARD KEY",
-        Stmt::ShowCollections => "SHOW COLLECTIONS",
-        Stmt::ShowCollection(_) => "SHOW COLLECTION",
-        Stmt::ShowShardKeys(_) => "SHOW SHARD KEYS",
-        Stmt::ShowQuotas => "SHOW QUOTAS",
-        Stmt::SetQuota(_) => "SET QUOTA",
-    }
 }
 
 fn build_filter(field: &str, operator: ComparisonOp, value: Value) -> Result<FilterExpr, QqlError> {

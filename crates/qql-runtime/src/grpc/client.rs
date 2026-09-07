@@ -83,11 +83,25 @@ impl GrpcQdrant {
 
     /// Connect lazily to a `grpc://` / `http(s)://` Qdrant endpoint with an
     /// optional API key.
+    ///
+    /// # Errors
+    /// Returns `QqlError::transport` if the provided endpoint URL cannot be parsed.
+    ///
+    /// # Runtime Requirements
+    /// The returned `GrpcQdrant` uses lazy connection establishment via `tonic`.
+    /// Connecting and executing RPCs require an active Tokio runtime reactor.
     pub fn from_url(url: &str, api_key: Option<String>) -> Result<Self, QqlError> {
         Self::from_url_with_timeout(url, api_key, None)
     }
 
     /// Like `from_url`, with an explicit overall request timeout on the endpoint.
+    ///
+    /// # Errors
+    /// Returns `QqlError::transport` if the provided endpoint URL cannot be parsed.
+    ///
+    /// # Runtime Requirements
+    /// The returned `GrpcQdrant` uses lazy connection establishment via `tonic`.
+    /// Connecting and executing RPCs require an active Tokio runtime reactor.
     pub fn from_url_with_timeout(
         url: &str,
         api_key: Option<String>,

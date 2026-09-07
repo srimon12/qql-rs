@@ -27,7 +27,7 @@ rest = ["qql/rest"]
 edge = ["qql-edge", "qql-edge/http-embedding"]
 
 [dependencies]
-qql-core = { workspace = true }
+qql-core = { workspace = true, features = ["serde", "json", "std"] }
 qql-plan = { workspace = true }
 qql = { workspace = true }
 qql-edge = { workspace = true, optional = true }

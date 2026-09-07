@@ -170,10 +170,6 @@ impl QqlError {
         Self::new(ErrorKind::Backend, code, message, span)
     }
 
-    pub(crate) fn syntax(message: impl Into<Cow<'static, str>>, position: usize) -> Self {
-        Self::parse("QQL-PARSE-SYNTAX", message, Span::point(position))
-    }
-
     // ── Builder API ─────────────────────────────────────────────────
 
     /// Attach a structured key-value metadata field.
@@ -293,7 +289,7 @@ mod tests {
 
     #[test]
     fn test_core_error_impl() {
-        let err = QqlError::syntax("unexpected token", 0);
+        let err = QqlError::parse("QQL-PARSE-SYNTAX", "unexpected token", Span::point(0));
         let dyn_err: &dyn core::error::Error = &err;
         assert!(dyn_err.source().is_none());
         assert!(!dyn_err.to_string().is_empty());

@@ -94,10 +94,21 @@ jobs:
           -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli
           --all-targets -- -D warnings
 
+      - name: Clippy (private binding helper crates)
+        run: >
+          cargo clippy --locked
+          -p pyqql-common -p nqql-common
+          --all-targets -- -D warnings
+
       - name: Test (published Rust crates)
         run: >
           cargo test --locked --all-features
           -p qql-core -p qql-plan -p qql-embed -p qql -p qql-edge -p qql-cli
+
+      - name: Test (private binding helper crates)
+        run: >
+          cargo test --locked
+          -p pyqql-common -p nqql-common
 
   features:
     name: Feature matrix
