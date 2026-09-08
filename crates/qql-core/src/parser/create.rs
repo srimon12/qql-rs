@@ -264,7 +264,7 @@ impl<'a> AstLowerer<'a> {
         // Consume the SHARD token (parse_create() only peeked at it)
         self.expect(TokenKind::Shard)?;
         self.expect(TokenKind::Key)?;
-        let shard_name = self.parse_string()?;
+        let shard_name = self.parse_shard_key_atom()?;
         self.expect(TokenKind::On)?;
         self.expect(TokenKind::Collection)?;
         let collection = self.parse_identifier()?;

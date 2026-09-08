@@ -3,6 +3,38 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
+/// Custom shard routing key: Qdrant keyword (string) or numeric key.
+///
+/// These hash differently on the wire (`ShardKey::Keyword` vs `ShardKey::Number`),
+/// so a payload integer `101` must not be coerced to the keyword `"101"`.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum ShardKey {
+    /// String / UUID shard key (`SHARD 'acme'`).
+    Keyword(String),
+    /// Numeric shard key (`SHARD 101`).
+    Number(u64),
+}
+
+impl ShardKey {
+    /// Keyword text when this is a string key.
+    pub fn as_keyword(&self) -> Option<&str> {
+        match self {
+            Self::Keyword(s) => Some(s.as_str()),
+            Self::Number(_) => None,
+        }
+    }
+}
+
+impl core::fmt::Display for ShardKey {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Keyword(s) => write!(f, "'{}'", super::super::escape_string(s)),
+            Self::Number(n) => write!(f, "{n}"),
+        }
+    }
+}
+
 /// Memory placement of a storage component (`cold` / `cached` / `pinned`).
 ///
 /// Mirrors Qdrant 1.19 `Memory`. Data is always persisted on disk; this only

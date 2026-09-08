@@ -1,5 +1,6 @@
 use crate::filter::{point_id_req_typed, top_level_filter, value_to_json};
 use crate::query::lower_vector_value;
+use crate::semantic::PlanShardKey;
 use crate::types::*;
 use qql_core::ast::{
     ClearPayloadStmt, DeletePayloadStmt, DeleteStmt, DeleteVectorStmt, PointEntry, PointSelector,
@@ -22,7 +23,7 @@ pub fn lower_upsert_request(stmt: &UpsertStmt) -> UpsertRequest {
                 PointEntry::Param(..) | PointEntry::PositionalParam(..) => None,
             })
             .collect(),
-        shard_key: stmt.shard_key.clone(),
+        shard_key: stmt.shard_key.as_ref().map(PlanShardKey::from),
     }
 }
 

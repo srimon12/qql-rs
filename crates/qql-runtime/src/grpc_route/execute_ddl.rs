@@ -246,9 +246,7 @@ pub(crate) async fn execute_create_shard_key(
     let grpc_req = qdrant::CreateShardKeyRequest {
         collection_name: collection.to_owned(),
         request: Some(qdrant::CreateShardKey {
-            shard_key: Some(qdrant::ShardKey {
-                key: Some(qdrant::shard_key::Key::Keyword(request.shard_key.clone())),
-            }),
+            shard_key: Some(super::common::shard_key_proto(&request.shard_key)),
             shards_number: request.shards_number.map(|n| n as u32),
             replication_factor: request.replication_factor.map(|n| n as u32),
             ..Default::default()

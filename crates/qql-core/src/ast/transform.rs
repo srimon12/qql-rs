@@ -17,7 +17,7 @@ impl Stmt {
             Self::Scroll(scroll) => scroll.shard_key.as_deref(),
             Self::Count(count) => count.shard_key.as_deref(),
             Self::Facet(facet) => facet.shard_key.as_deref(),
-            Self::Upsert(upsert) => upsert.shard_key.as_deref(),
+            Self::Upsert(upsert) => upsert.shard_key.as_ref().and_then(|k| k.as_keyword()),
             Self::Delete(delete) => delete.shard_key.as_deref(),
             Self::ClearPayload(clear) => clear.shard_key.as_deref(),
             Self::DeletePayload(delete) => delete.shard_key.as_deref(),
@@ -57,7 +57,7 @@ impl Stmt {
                 true
             }
             Self::Upsert(upsert) => {
-                upsert.shard_key = key;
+                upsert.shard_key = key.map(super::ShardKey::Keyword);
                 true
             }
             Self::Delete(delete) => {

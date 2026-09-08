@@ -77,6 +77,73 @@ impl<'de> serde::Deserialize<'de> for PlanPointId {
     }
 }
 
+// ── Shard key ───────────────────────────────────────────────────
+
+/// Transport-neutral custom shard key. Serializes as a JSON string or number
+/// so REST matches OpenAPI `ExtendedPointId`-style shard keys.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum PlanShardKey {
+    /// Keyword / UUID shard key.
+    Keyword(String),
+    /// Numeric shard key.
+    Number(u64),
+}
+
+impl PlanShardKey {
+    /// Keyword text, when this key is a string.
+    pub fn as_keyword(&self) -> Option<&str> {
+        match self {
+            Self::Keyword(s) => Some(s.as_str()),
+            Self::Number(_) => None,
+        }
+    }
+}
+
+impl core::fmt::Display for PlanShardKey {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Keyword(s) => write!(f, "{s}"),
+            Self::Number(n) => write!(f, "{n}"),
+        }
+    }
+}
+
+impl From<&qql_core::ast::ShardKey> for PlanShardKey {
+    fn from(key: &qql_core::ast::ShardKey) -> Self {
+        match key {
+            qql_core::ast::ShardKey::Keyword(s) => Self::Keyword(s.clone()),
+            qql_core::ast::ShardKey::Number(n) => Self::Number(*n),
+        }
+    }
+}
+
+impl Serialize for PlanShardKey {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Number(n) => serializer.serialize_u64(*n),
+            Self::Keyword(s) => serializer.serialize_str(s),
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for PlanShardKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(untagged)]
+        enum Wire {
+            Number(u64),
+            String(String),
+        }
+        Ok(match Wire::deserialize(deserializer)? {
+            Wire::Number(n) => Self::Number(n),
+            Wire::String(s) => Self::Keyword(s),
+        })
+    }
+}
+
 // ── Vector value ────────────────────────────────────────────────
 
 /// Transport-neutral vector value: dense, sparse, or multi-dense rows.

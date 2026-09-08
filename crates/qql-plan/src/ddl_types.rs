@@ -223,8 +223,8 @@ pub struct CreateIndexRequest {
 /// Plan IR for creating a custom shard key on a collection.
 #[derive(Debug, Clone, Serialize)]
 pub struct CreateShardKeyRequest {
-    /// Custom shard key to create.
-    pub shard_key: String,
+    /// Custom shard key to create (keyword or numeric).
+    pub shard_key: crate::semantic::PlanShardKey,
     /// Number of shards backing the key.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shards_number: Option<u64>,

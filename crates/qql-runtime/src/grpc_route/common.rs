@@ -1,14 +1,30 @@
 //! Small JSON / shard-key helpers shared by the plan-to-gRPC converters.
 
-use qql_plan::PlanPointId;
+use qql_plan::{PlanPointId, PlanShardKey};
 
 use crate::qdrant_grpc::qdrant;
 
+pub(crate) fn shard_key_proto(key: &PlanShardKey) -> qdrant::ShardKey {
+    qdrant::ShardKey {
+        key: Some(match key {
+            PlanShardKey::Keyword(s) => qdrant::shard_key::Key::Keyword(s.clone()),
+            PlanShardKey::Number(n) => qdrant::shard_key::Key::Number(*n),
+        }),
+    }
+}
+
 pub(crate) fn shard_key_selector(key: &Option<String>) -> Option<qdrant::ShardKeySelector> {
     key.as_ref().map(|k| qdrant::ShardKeySelector {
-        shard_keys: vec![qdrant::ShardKey {
-            key: Some(qdrant::shard_key::Key::Keyword(k.clone())),
-        }],
+        shard_keys: vec![shard_key_proto(&PlanShardKey::Keyword(k.clone()))],
+        ..Default::default()
+    })
+}
+
+pub(crate) fn shard_key_selector_plan(
+    key: &Option<PlanShardKey>,
+) -> Option<qdrant::ShardKeySelector> {
+    key.as_ref().map(|k| qdrant::ShardKeySelector {
+        shard_keys: vec![shard_key_proto(k)],
         ..Default::default()
     })
 }

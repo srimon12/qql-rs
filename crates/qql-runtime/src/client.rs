@@ -130,4 +130,32 @@ pub trait QdrantOps: QdrantOpsBound {
         collection: &str,
         batch: &UpdateBatchRequest,
     ) -> Result<Vec<serde_json::Value>, QqlError>;
+
+    /// Atomically update collection aliases (`POST /collections/aliases`).
+    ///
+    /// Default rejects: edge and custom backends have no alias table.
+    async fn change_aliases(&self, _actions: &[AliasAction]) -> Result<(), QqlError> {
+        Err(QqlError::validation(
+            "QQL-VALIDATION-ALIASES",
+            "collection aliases are not supported on this backend",
+            None,
+        ))
+    }
+}
+
+/// One action in a Qdrant alias batch (`ChangeAliasesOperation`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AliasAction {
+    /// Remove an alias name.
+    Delete {
+        /// Alias to delete.
+        alias: String,
+    },
+    /// Point an alias at a collection.
+    Create {
+        /// Collection the alias should resolve to.
+        collection: String,
+        /// Alias name.
+        alias: String,
+    },
 }

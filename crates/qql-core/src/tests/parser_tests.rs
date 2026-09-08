@@ -566,6 +566,21 @@ fn mutation_shard_key_parses_from_qql() {
 }
 
 #[test]
+fn upsert_and_create_accept_numeric_shard_keys() {
+    let upsert = Parser::parse("UPSERT INTO docs VALUES :rows SHARD 101 WAIT true;").unwrap();
+    let Stmt::Upsert(u) = upsert else {
+        panic!("expected Upsert");
+    };
+    assert_eq!(u.shard_key, Some(crate::ast::ShardKey::Number(101)));
+
+    let create = Parser::parse("CREATE SHARD KEY 101 ON COLLECTION docs;").unwrap();
+    let Stmt::CreateShardKey(c) = create else {
+        panic!("expected CreateShardKey");
+    };
+    assert_eq!(c.shard_key, crate::ast::ShardKey::Number(101));
+}
+
+#[test]
 fn cross_rerank_parses() {
     let stmt = Parser::parse(
         "WITH c AS (QUERY TEXT 'q' FROM docs USING dense LIMIT 50) \

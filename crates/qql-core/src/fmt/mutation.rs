@@ -75,7 +75,7 @@ pub(crate) fn render_upsert(statement: &UpsertStmt) -> String {
         }
     }
     if let Some(key) = &statement.shard_key {
-        let _ = write!(out, " SHARD '{}'", escape_string(key));
+        let _ = write!(out, " SHARD {key}");
     }
     if let Some(wait) = statement.wait {
         let _ = write!(out, " WAIT {}", wait);

@@ -182,6 +182,7 @@ fn print_doctor_hosts(hosts: &serde_json::Value) {
 }
 use crate::convert;
 use crate::dump;
+use crate::migrate;
 use crate::output;
 use crate::script;
 
@@ -313,6 +314,14 @@ fn executor(
     url: &str,
     use_edge: bool,
 ) -> Result<qql::executor::Executor, Box<dyn std::error::Error>> {
+    executor_for(url, use_edge, None)
+}
+
+pub(crate) fn executor_for(
+    url: &str,
+    use_edge: bool,
+    api_key: Option<String>,
+) -> Result<qql::executor::Executor, Box<dyn std::error::Error>> {
     if use_edge {
         #[cfg(feature = "edge")]
         {
@@ -338,8 +347,9 @@ fn executor(
         {
             Box::new(qql::grpc::GrpcQdrant::from_url(
                 url,
-                std::env::var("QDRANT_API_KEY")
-                    .ok()
+                api_key
+                    .clone()
+                    .or_else(|| std::env::var("QDRANT_API_KEY").ok())
                     .or_else(|| config.secret.clone()),
             )?)
         }
@@ -352,8 +362,8 @@ fn executor(
         {
             Box::new(qql::rest::RestQdrant::new(
                 url.to_owned(),
-                std::env::var("QDRANT_API_KEY")
-                    .ok()
+                api_key
+                    .or_else(|| std::env::var("QDRANT_API_KEY").ok())
                     .or_else(|| config.secret.clone()),
             ))
         }
@@ -601,6 +611,31 @@ pub async fn handle_dump(
     let result = dump::dump_collection(&executor, collection, output, batch_size, progress).await;
     executor.close().await?;
     result
+}
+
+pub async fn handle_migrate(
+    source_url: &str,
+    source_edge: bool,
+    target_url: &str,
+    target_edge: bool,
+    target_api_key: Option<String>,
+    opts: migrate::MigrateOptions,
+    progress: Option<&(dyn Fn(migrate::MigrateProgress) + Sync)>,
+) -> Result<migrate::MigrateStats, Box<dyn std::error::Error>> {
+    let source = executor_for(source_url, source_edge, None)?;
+    if source_edge && target_edge {
+        let result = migrate::migrate_collection(&source, &source, opts, progress).await;
+        source.close().await?;
+        return result;
+    }
+    let target = executor_for(target_url, target_edge, target_api_key)?;
+    let result = migrate::migrate_collection(&source, &target, opts, progress).await;
+    let close_source = source.close().await;
+    let close_target = target.close().await;
+    let stats = result?;
+    close_source?;
+    close_target?;
+    Ok(stats)
 }
 
 pub fn handle_configure_edge(

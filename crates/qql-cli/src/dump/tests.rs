@@ -7,7 +7,7 @@ use serde_json::json;
 use super::escape::*;
 use super::point::*;
 use super::quant::*;
-use super::*;
+use super::{next_scroll_cursor, scroll_page_complete, *};
 
 fn info_with_vectors(vectors: Vec<VectorSpec>, sparse: Vec<String>) -> CollectionInfo {
     CollectionInfo {
@@ -278,6 +278,43 @@ fn extract_empty_page() {
     let (points, next) = extract_scroll_page(&response);
     assert!(points.is_empty());
     assert!(next.is_none());
+}
+
+#[test]
+fn next_scroll_cursor_falls_back_to_last_id() {
+    let points = vec![json!({"id": 7}), json!({"id": 8})];
+    assert_eq!(
+        next_scroll_cursor(None, &points),
+        Some(PlanPointId::Number(8))
+    );
+    assert_eq!(
+        next_scroll_cursor(Some(PlanPointId::Number(9)), &points),
+        Some(PlanPointId::Number(9))
+    );
+}
+
+#[test]
+fn scroll_page_complete_detects_short_and_stuck() {
+    let points = vec![json!({"id": 1})];
+    assert!(scroll_page_complete(
+        &points,
+        Some(&PlanPointId::Number(1)),
+        None,
+        10
+    ));
+    let full = vec![json!({"id": 1}), json!({"id": 2})];
+    assert!(scroll_page_complete(
+        &full,
+        Some(&PlanPointId::Number(1)),
+        Some(&PlanPointId::Number(1)),
+        2
+    ));
+    assert!(!scroll_page_complete(
+        &full,
+        Some(&PlanPointId::Number(2)),
+        Some(&PlanPointId::Number(1)),
+        2
+    ));
 }
 
 #[test]

@@ -169,8 +169,8 @@ pub struct UpsertStmt {
     pub embedding: Option<EmbeddingSpec>,
     /// `EMBED <field> INTO <vector>` directives.
     pub embed: Vec<EmbedDirective>,
-    /// `SHARD '<key>'` routing key.
-    pub shard_key: Option<String>,
+    /// `SHARD '<key>'` or `SHARD <n>` routing key.
+    pub shard_key: Option<super::ShardKey>,
     /// Optional write durability confirmation (`WAIT true` / `WAIT false`).
     pub wait: Option<bool>,
 }

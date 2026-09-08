@@ -287,8 +287,8 @@ pub struct DropIndexStmt {
 pub struct CreateShardKeyStmt {
     /// Collection to partition.
     pub collection: String,
-    /// Shard key value to register.
-    pub shard_key: String,
+    /// Shard key value to register (`'acme'` or `101`).
+    pub shard_key: super::ShardKey,
     /// Number of shards behind this key.
     pub shards_number: Option<u64>,
     /// Replication factor for these shards.

@@ -390,6 +390,27 @@ impl QdrantOps for RestQdrant {
         let value: Value = self.call_body(Method::POST, &path, Some(batch)).await?;
         result_array(&value, &path)
     }
+
+    async fn change_aliases(&self, actions: &[crate::client::AliasAction]) -> Result<(), QqlError> {
+        let body = serde_json::json!({
+            "actions": actions.iter().map(|a| match a {
+                crate::client::AliasAction::Delete { alias } => {
+                    serde_json::json!({ "delete_alias": { "alias_name": alias } })
+                }
+                crate::client::AliasAction::Create { collection, alias } => {
+                    serde_json::json!({
+                        "create_alias": {
+                            "collection_name": collection,
+                            "alias_name": alias,
+                        }
+                    })
+                }
+            }).collect::<Vec<_>>(),
+        });
+        self.call::<Value>(Method::POST, "/collections/aliases", Some(body))
+            .await?;
+        Ok(())
+    }
 }
 
 impl RestQdrant {

@@ -20,15 +20,19 @@ use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
+use qql::client::QdrantOps;
 use qql::executor::Executor;
 use qql_plan::PlannedOperation;
 use qql_plan::semantic::PlanPointId;
-use qql_plan::types::{PayloadSelectorReq, ScrollRequest, VectorSelectorReq};
+use qql_plan::types::{FilterExpression, PayloadSelectorReq, ScrollRequest, VectorSelectorReq};
 
-use cursor::{extract_scroll_page, json_to_plan_point_id};
-use indexes::generate_index_statements;
-use point::{point_to_upsert_object, write_upsert_batch};
-use schema::generate_create_statement;
+use point::write_upsert_batch;
+
+pub(crate) use cursor::{extract_scroll_page, json_to_plan_point_id};
+pub(crate) use escape::format_ident;
+pub(crate) use indexes::generate_index_statements;
+pub(crate) use point::point_to_upsert_object;
+pub(crate) use schema::generate_create_statement;
 
 // ── Public API ──────────────────────────────────────────────────
 
@@ -139,22 +143,7 @@ async fn dump_collection_inner(
     let mut after: Option<PlanPointId> = None;
 
     loop {
-        let op = PlannedOperation::Scroll {
-            collection: collection.to_string(),
-            request: ScrollRequest {
-                filter: None,
-                offset: after.clone(),
-                limit: Some(batch_size as u64),
-                with_payload: Some(PayloadSelectorReq::All(true)),
-                with_vector: Some(VectorSelectorReq::All(true)),
-                order_by: None,
-                shard_key: None,
-            },
-        };
-
-        let response = ops.execute_planned(&op).await?;
-        let (points, next) = extract_scroll_page(&response);
-
+        let (points, next) = scroll_page(ops, collection, after.clone(), batch_size, None).await?;
         if points.is_empty() {
             break;
         }
@@ -182,20 +171,9 @@ async fn dump_collection_inner(
             }
         }
 
-        // Prefer Qdrant's next_page_offset; fall back to last point id.
         let prev_after = after;
-        after = next.or_else(|| {
-            points
-                .last()
-                .and_then(|p| p.get("id"))
-                .and_then(json_to_plan_point_id)
-        });
-
-        // Guard against a stuck cursor (same offset on a full page → infinite loop).
-        if after.is_none()
-            || points.len() < batch_size as usize
-            || after.as_ref() == prev_after.as_ref()
-        {
+        after = next_scroll_cursor(next, &points);
+        if scroll_page_complete(&points, after.as_ref(), prev_after.as_ref(), batch_size) {
             break;
         }
     }
@@ -211,6 +189,53 @@ async fn dump_collection_inner(
         skipped,
         batches,
     })
+}
+
+/// Scroll one page of points, including stored vectors and payloads.
+pub async fn scroll_page(
+    ops: &dyn QdrantOps,
+    collection: &str,
+    after: Option<PlanPointId>,
+    batch_size: u32,
+    filter: Option<FilterExpression>,
+) -> Result<(Vec<serde_json::Value>, Option<PlanPointId>), Box<dyn Error>> {
+    let op = PlannedOperation::Scroll {
+        collection: collection.to_string(),
+        request: ScrollRequest {
+            filter,
+            offset: after,
+            limit: Some(batch_size as u64),
+            with_payload: Some(PayloadSelectorReq::All(true)),
+            with_vector: Some(VectorSelectorReq::All(true)),
+            order_by: None,
+            shard_key: None,
+        },
+    };
+    let response = ops.execute_planned(&op).await?;
+    Ok(extract_scroll_page(&response))
+}
+
+/// Prefer Qdrant's `next_page_offset`; fall back to the last point id on the page.
+pub(crate) fn next_scroll_cursor(
+    next: Option<PlanPointId>,
+    points: &[serde_json::Value],
+) -> Option<PlanPointId> {
+    next.or_else(|| {
+        points
+            .last()
+            .and_then(|p| p.get("id"))
+            .and_then(json_to_plan_point_id)
+    })
+}
+
+/// True when the page is the last one (short page, missing cursor, or stuck offset).
+pub(crate) fn scroll_page_complete(
+    points: &[serde_json::Value],
+    after: Option<&PlanPointId>,
+    prev_after: Option<&PlanPointId>,
+    batch_size: u32,
+) -> bool {
+    after.is_none() || points.len() < batch_size as usize || after == prev_after
 }
 
 #[cfg(test)]
