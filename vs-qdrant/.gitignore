@@ -1,0 +1,9 @@
+.venv/
+node/node_modules/
+rust/target/
+data/*.f32
+data/*.jsonl
+data/berlin_bm25.json
+data/legal_bm25.json
+data/queries.json
+__pycache__/
