@@ -97,6 +97,29 @@ types (see the [error code reference](/docs/reference/error-codes/)).
 template to its route in one step, and `isValid` runs the full parse + plan
 gate.
 
+## Bulk ingest
+
+Pass point objects — payload as data, never SQL text. One `:rows` template
+is prepared once, then each `batchSize` chunk splices through the
+point-splice path with no re-parse and no per-batch schema fetch.
+Prefer this over hand-rolled batch loops:
+
+```javascript
+const rows = [
+  { id: 1, vector: { dense: [0.1, 0.2, 0.3] }, tag: "a" },
+  { id: 2, vector: { dense: [0.4, 0.5, 0.6] }, tag: "b" },
+];
+const report = await client.upsertMany("docs", rows, { batchSize: 100 });
+console.log(report.succeeded, report.failed);
+```
+
+Row vectors accept plain arrays and the flat `{ data: [...], dim: N }`
+multivector form. (`Float32Array`/`Float64Array` only convert on the sync
+`Stmt.bind` surface — bind there, then `execute` the bound statement.)
+Each object has the same shape as an inline `VALUES {…}` row, so a
+misshapen row fails closed with `QQL-BIND-TYPE-MISMATCH` (missing `id` →
+`QQL-VALIDATION-UPSERT-ID`) instead of landing partial data.
+
 ## Typed results
 
 `client.executeHits` and the module-level `executeHits` return `ScoredPoint`

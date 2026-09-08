@@ -7,11 +7,11 @@ use pyo3::types::{PyAny, PyList};
 use qql_core::ast;
 use qql_core::error::QqlError;
 use qql_core::params_json::{
-    ParamPlan, bind_stmt_with_params, bind_str_with_params, param_for, plan_statement_params,
+    ValueParamPlan, bind_stmt_with_values, bind_str_with_values, param_value_for, plan_value_params,
 };
 use qql_core::parser::Parser;
 
-use crate::{PyStmt, already_bound_error, py_to_json, qql_py_syntax_error, qql_py_value_error};
+use crate::{PyStmt, already_bound_error, py_to_value, qql_py_syntax_error, qql_py_value_error};
 
 /// Executor error mode: stop the batch on the first failure, or continue.
 pub type OnError = qql::executor::OnError;
@@ -53,12 +53,12 @@ pub fn prepare_input(
         }
         // Convert params once; the shared planner enforces the scoped
         // length contract (QQL-BIND-BATCH-LENGTH on mismatch).
-        let json_params = match params_opt {
-            Some(p) => Some(py_to_json(p)?),
+        let value_params = match params_opt {
+            Some(p) => Some(py_to_value(p)?),
             None => None,
         };
-        let plan = match &json_params {
-            Some(p) => Some(plan_statement_params(p, list.len()).map_err(qql_py_value_error)?),
+        let plan = match &value_params {
+            Some(p) => Some(plan_value_params(p, list.len()).map_err(qql_py_value_error)?),
             None => None,
         };
 
@@ -74,7 +74,7 @@ pub fn prepare_input(
                 }
                 let mut s = py_stmt.inner.clone();
                 if let Some(plan) = &plan {
-                    bind_stmt_with_params(&mut s, param_for(plan, i))
+                    bind_stmt_with_values(&mut s, param_value_for(plan, i))
                         .map_err(qql_py_value_error)?;
                 }
                 stmts.push(s);
@@ -88,7 +88,7 @@ pub fn prepare_input(
                 .extract::<String>()
                 .map_err(|_| PyTypeError::new_err("list items must be strings or Stmt objects"))?;
             let bound = match &plan {
-                Some(plan) => bind_str_with_params(&s_str, param_for(plan, i), false)
+                Some(plan) => bind_str_with_values(&s_str, param_value_for(plan, i), false)
                     .map_err(qql_py_value_error)?,
                 None => s_str,
             };
@@ -103,28 +103,32 @@ pub fn prepare_input(
         }
         let mut stmt = py_stmt.inner.clone();
         if let Some(p) = params_opt {
-            let json_params = py_to_json(p)?;
-            let plan = plan_statement_params(&json_params, 1).map_err(qql_py_value_error)?;
-            bind_stmt_with_params(&mut stmt, param_for(&plan, 0)).map_err(qql_py_value_error)?;
+            let value_params = py_to_value(p)?;
+            let plan = plan_value_params(&value_params, 1).map_err(qql_py_value_error)?;
+            bind_stmt_with_values(&mut stmt, param_value_for(&plan, 0))
+                .map_err(qql_py_value_error)?;
         }
         return Ok(Input::Stmt(stmt));
     }
 
     if let Ok(s) = query.extract::<String>() {
         if let Some(p) = params_opt {
-            let json_params = py_to_json(p)?;
+            let value_params = py_to_value(p)?;
             // A params list of containers is a scoped candidate for scripts:
             // parse once to count statements, then plan.
-            let scoped_candidate = matches!(&json_params, serde_json::Value::Array(arr)
-                if !arr.is_empty() && arr.iter().all(|e| e.is_object() || e.is_array()));
+            let scoped_candidate = matches!(&value_params, qql_core::ast::Value::List(arr)
+                if !arr.is_empty()
+                    && arr
+                        .iter()
+                        .all(|e| matches!(e, qql_core::ast::Value::Dict(_) | qql_core::ast::Value::List(_))));
             if scoped_candidate {
                 let parsed = Parser::parse_all(&s).map_err(qql_py_syntax_error)?;
-                let plan = plan_statement_params(&json_params, parsed.len())
-                    .map_err(qql_py_value_error)?;
-                if let ParamPlan::Scoped(list) = &plan {
+                let plan =
+                    plan_value_params(&value_params, parsed.len()).map_err(qql_py_value_error)?;
+                if let ValueParamPlan::Scoped(list) = &plan {
                     let mut bound_stmts = Vec::with_capacity(parsed.len());
                     for (i, mut stmt) in parsed.into_iter().enumerate() {
-                        bind_stmt_with_params(&mut stmt, &list[i]).map_err(qql_py_value_error)?;
+                        bind_stmt_with_values(&mut stmt, &list[i]).map_err(qql_py_value_error)?;
                         bound_stmts.push(stmt);
                     }
                     return Ok(Input::StmtList(bound_stmts));
@@ -133,7 +137,7 @@ pub fn prepare_input(
                 // through to whole-string binding defensively.
             }
             let bound =
-                bind_str_with_params(&s, &json_params, false).map_err(qql_py_value_error)?;
+                bind_str_with_values(&s, &value_params, false).map_err(qql_py_value_error)?;
             return Ok(Input::String(bound));
         }
         return Ok(Input::String(s));

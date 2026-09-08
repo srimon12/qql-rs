@@ -18,6 +18,7 @@ use qql_core::parser::Parser;
 use qql_plan::routing;
 
 pub mod execute;
+pub mod jsparams;
 
 /// Serialize a [`QqlError`] to JSON so the JS wrapper can extract structured
 /// fields (`code`, `kind`, `span`).
@@ -49,6 +50,14 @@ pub fn stmt_parse(input: &str) -> Result<ast::Stmt, QqlError> {
     Parser::parse(input)
 }
 
+/// Convert a serde-boundary JSON value (async entry points) into a typed
+/// [`Value`]. Typed arrays do not survive serde — callers needing
+/// `Float32Array`/`Float64Array` must use the sync `Unknown` surface
+/// ([`jsparams::unknown_to_value`]) instead.
+pub fn value_from_json(value: serde_json::Value) -> Result<Value, QqlError> {
+    Value::from_json(value)
+}
+
 /// Inject a WHERE filter into `stmt` in place. `op` is parsed by
 /// [`qql_core::ast::ComparisonOp::parse_inject_op`] — the single source for
 /// supported operators and rejection messages.
@@ -77,6 +86,19 @@ pub fn stmt_bind(
     Ok(inner)
 }
 
+/// Bind already-typed [`Value`] parameters into `stmt`.
+///
+/// Same contract as [`stmt_bind`]; the `Value` tree comes from
+/// [`jsparams::unknown_to_value`], which binds typed arrays without a JSON
+/// round-trip. `None` binds nothing.
+pub fn stmt_bind_value(stmt: &ast::Stmt, params: Option<&Value>) -> Result<ast::Stmt, QqlError> {
+    let mut inner = stmt.clone();
+    if let Some(p) = params {
+        qql_core::params_json::bind_stmt_with_values(&mut inner, p)?;
+    }
+    Ok(inner)
+}
+
 /// Canonical, re-parseable QQL (mirrors Python `str(stmt)`).
 pub fn stmt_full(stmt: &ast::Stmt) -> String {
     qql_core::fmt::format_stmt(stmt)
@@ -95,7 +117,22 @@ pub fn stmt_compile_route(
     params: Option<&serde_json::Value>,
 ) -> Result<serde_json::Value, QqlError> {
     let bound = stmt_bind(stmt, params)?;
-    let compiled = routing::compile_statement(&bound)?;
+    compile_bound_route(&bound)
+}
+
+/// Compile a statement AST with already-typed [`Value`] parameters.
+///
+/// Same contract as [`stmt_compile_route`]; see [`stmt_bind_value`].
+pub fn stmt_compile_route_value(
+    stmt: &ast::Stmt,
+    params: Option<&Value>,
+) -> Result<serde_json::Value, QqlError> {
+    let bound = stmt_bind_value(stmt, params)?;
+    compile_bound_route(&bound)
+}
+
+fn compile_bound_route(bound: &ast::Stmt) -> Result<serde_json::Value, QqlError> {
+    let compiled = routing::compile_statement(bound)?;
     let (method, path, payload) = match compiled.route {
         Some(route) => {
             let payload = route.body_json().unwrap_or(serde_json::Value::Null);
@@ -190,6 +227,20 @@ pub fn compile_query(
     let mut stmt = Parser::parse(input)?;
     if let Some(p) = params {
         qql_core::params_json::bind_stmt_with_params(&mut stmt, p)?;
+    }
+    stmt_compile_route(&stmt, None)
+}
+
+/// Compile a QQL query with already-typed [`Value`] parameters.
+///
+/// Same contract as [`compile_query`]; see [`stmt_bind_value`].
+pub fn compile_query_value(
+    input: &str,
+    params: Option<&Value>,
+) -> Result<serde_json::Value, QqlError> {
+    let mut stmt = Parser::parse(input)?;
+    if let Some(p) = params {
+        qql_core::params_json::bind_stmt_with_values(&mut stmt, p)?;
     }
     stmt_compile_route(&stmt, None)
 }

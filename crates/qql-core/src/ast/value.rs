@@ -21,6 +21,8 @@ pub enum Value {
     Dict(Vec<(String, Value)>),
     /// `[v1, v2, …]` list literal (also dense vector input).
     List(Vec<Value>),
+    /// Flat array of `f32` (dense vector). Bypasses per-element float boxing.
+    F32Array(Vec<f32>),
     /// Named parameter placeholder (`:name`).
     Param(
         String,
@@ -51,6 +53,7 @@ impl core::fmt::Debug for Value {
             Self::Null => f.write_str("Null"),
             Self::Dict(value) => f.debug_tuple("Dict").field(value).finish(),
             Self::List(value) => f.debug_tuple("List").field(value).finish(),
+            Self::F32Array(value) => f.debug_tuple("F32Array").field(value).finish(),
             Self::Param(value, span) => f.debug_tuple("Param").field(value).field(span).finish(),
             Self::PositionalParam(idx, span) => f
                 .debug_tuple("PositionalParam")
@@ -164,6 +167,23 @@ impl Value {
                 .map(Self::to_json)
                 .collect::<Result<Vec<_>, _>>()
                 .map(serde_json::Value::Array),
+            Self::F32Array(values) => {
+                let items = values
+                    .iter()
+                    .map(|&f| {
+                        serde_json::Number::from_f64(f as f64)
+                            .map(serde_json::Value::Number)
+                            .ok_or_else(|| {
+                                QqlError::validation(
+                                    "QQL-JSON-NONFINITE",
+                                    "non-finite floats cannot be converted to JSON",
+                                    None,
+                                )
+                            })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(serde_json::Value::Array(items))
+            }
             Self::Param(name, span) => {
                 if let Some(sp) = span {
                     Ok(serde_json::json!({ "$param": name, "$span": [sp.start, sp.end] }))
@@ -215,5 +235,11 @@ impl Value {
             Self::Param(_, span) | Self::PositionalParam(_, span) => span.as_deref().copied(),
             _ => None,
         }
+    }
+}
+
+impl From<Vec<f32>> for Value {
+    fn from(values: Vec<f32>) -> Self {
+        Self::F32Array(values)
     }
 }

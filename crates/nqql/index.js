@@ -204,6 +204,32 @@ class Client {
     return report.hits(0);
   }
 
+  /**
+   * Bulk ingest point objects (`{id, vector, …payload}`) in `batchSize`
+   * chunks (default 100). One `:rows` template is prepared once — no
+   * re-parse, no per-batch schema fetch. Vectors take plain arrays or the
+   * flat `{data, dim}` multivector form; `Float32Array`/`Float64Array`
+   * need the sync `Stmt.bind` surface instead, then `execute`.
+   */
+  async upsertMany(collection, rows, options) {
+    try {
+      if (
+        options?.batchSize !== undefined &&
+        (!Number.isInteger(options.batchSize) || options.batchSize < 1)
+      ) {
+        throw new TypeError("options.batchSize must be an integer >= 1");
+      }
+      const raw = await this._inner.upsertMany(
+        collection,
+        rows,
+        validateOptions(options) || undefined,
+      );
+      return new ExecutionReport(JSON.parse(raw));
+    } catch (error) {
+      throw buildError(error);
+    }
+  }
+
   explain(query) {
     return callNative(() => this._inner.explain(query));
   }

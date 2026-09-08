@@ -2,7 +2,8 @@
 
 use async_trait::async_trait;
 use qql_core::ast::{
-    PointId, PointVectors, QueryExpr, QueryInput, Stmt, UpsertPoint, UpsertStmt, VectorValue,
+    PointEntry, PointId, PointVectors, QueryExpr, QueryInput, Stmt, UpsertPoint, UpsertStmt,
+    VectorValue,
 };
 use qql_core::error::QqlError;
 use qql_core::parser::Parser;
@@ -129,16 +130,16 @@ async fn upsert_batch_cardinality_mismatch_errors() {
     let mut stmt = Stmt::Upsert(Box::new(UpsertStmt {
         collection: "docs".into(),
         points: vec![
-            UpsertPoint {
+            PointEntry::Inline(UpsertPoint {
                 id: PointId::Number(1),
                 vectors: None,
                 payload: vec![("text".into(), qql_core::ast::Value::Str("a".into()))],
-            },
-            UpsertPoint {
+            }),
+            PointEntry::Inline(UpsertPoint {
                 id: PointId::Number(2),
                 vectors: None,
                 payload: vec![("text".into(), qql_core::ast::Value::Str("b".into()))],
-            },
+            }),
         ],
         embedding: Some(qql_core::ast::EmbeddingSpec::Dense {
             model: Some("m".into()),
@@ -147,6 +148,7 @@ async fn upsert_batch_cardinality_mismatch_errors() {
         }),
         embed: vec![],
         shard_key: None,
+        wait: None,
     }));
     let mock = MockEmbedder {
         dense_batch_override: Some(vec![vec![1.0]]), // only 1 vector for 2 texts
@@ -164,11 +166,11 @@ async fn upsert_batch_cardinality_mismatch_errors() {
 async fn unnamed_vector_topology_conflict_rejected() {
     let mut stmt = Stmt::Upsert(Box::new(UpsertStmt {
         collection: "docs".into(),
-        points: vec![UpsertPoint {
+        points: vec![PointEntry::Inline(UpsertPoint {
             id: PointId::Number(1),
             vectors: Some(PointVectors::Unnamed(VectorValue::Dense(vec![0.1, 0.2]))),
             payload: vec![("text".into(), qql_core::ast::Value::Str("hello".into()))],
-        }],
+        })],
         embedding: Some(qql_core::ast::EmbeddingSpec::Dense {
             model: Some("m".into()),
             vector: Some("dense".into()),
@@ -176,6 +178,7 @@ async fn unnamed_vector_topology_conflict_rejected() {
         }),
         embed: vec![],
         shard_key: None,
+        wait: None,
     }));
     let mock = MockEmbedder::default();
     let err = resolve_embeddings(&mut stmt, &mock).await.unwrap_err();
@@ -202,7 +205,10 @@ async fn upsert_multi_vector_spec_calls_embed_multi() {
     let Stmt::Upsert(u) = &stmt else {
         panic!("expected upsert");
     };
-    match &u.points[0].vectors {
+    let PointEntry::Inline(point) = &u.points[0] else {
+        panic!("expected inline point");
+    };
+    match &point.vectors {
         Some(PointVectors::Named(list)) => {
             let (_, v) = list
                 .iter()
@@ -253,7 +259,10 @@ async fn upsert_image_spec_calls_embed_image() {
     let Stmt::Upsert(u) = &stmt else {
         panic!("expected upsert");
     };
-    match &u.points[0].vectors {
+    let PointEntry::Inline(point) = &u.points[0] else {
+        panic!("expected inline point");
+    };
+    match &point.vectors {
         Some(PointVectors::Named(list)) => {
             let (_, v) = list.iter().find(|(n, _)| n == "image").expect("image vec");
             assert!(matches!(v, VectorValue::Dense(_)));
@@ -340,6 +349,9 @@ async fn b_upsert_text_resolved_to_dense_only_without_topology() {
         panic!("expected Upsert");
     };
     for (i, point) in upsert.points.iter().enumerate() {
+        let PointEntry::Inline(point) = point else {
+            panic!("point {i} expected inline point");
+        };
         let Some(PointVectors::Named(list)) = &point.vectors else {
             panic!("point {i} expected named vectors");
         };
@@ -367,7 +379,9 @@ async fn c_upsert_with_using_dense_model() {
     let Stmt::Upsert(upsert) = &stmt else {
         panic!("expected Upsert");
     };
-    let Some(PointVectors::Named(list)) = &upsert.points[0].vectors else {
+    let Some(PointVectors::Named(list)) =
+        &upsert.points[0].as_inline().expect("inline point").vectors
+    else {
         panic!("expected named vectors");
     };
     assert!(
@@ -389,7 +403,9 @@ async fn d_upsert_with_embed_sparse_directive() {
     let Stmt::Upsert(upsert) = &stmt else {
         panic!("expected Upsert");
     };
-    let Some(PointVectors::Named(list)) = &upsert.points[0].vectors else {
+    let Some(PointVectors::Named(list)) =
+        &upsert.points[0].as_inline().expect("inline point").vectors
+    else {
         panic!("expected named vectors");
     };
     assert!(
@@ -413,7 +429,9 @@ async fn e_upsert_with_using_hybrid_dense_and_sparse() {
     let Stmt::Upsert(upsert) = &stmt else {
         panic!("expected Upsert");
     };
-    let Some(PointVectors::Named(list)) = &upsert.points[0].vectors else {
+    let Some(PointVectors::Named(list)) =
+        &upsert.points[0].as_inline().expect("inline point").vectors
+    else {
         panic!("expected named vectors");
     };
     assert!(
@@ -441,7 +459,9 @@ async fn f1_upsert_with_embed_directive_dense() {
     let Stmt::Upsert(upsert) = &stmt else {
         panic!("expected Upsert");
     };
-    let Some(PointVectors::Named(list)) = &upsert.points[0].vectors else {
+    let Some(PointVectors::Named(list)) =
+        &upsert.points[0].as_inline().expect("inline point").vectors
+    else {
         panic!("expected named vectors");
     };
     assert!(
@@ -464,7 +484,9 @@ async fn f2_upsert_with_embed_directive_sparse() {
     let Stmt::Upsert(upsert) = &stmt else {
         panic!("expected Upsert");
     };
-    let Some(PointVectors::Named(list)) = &upsert.points[0].vectors else {
+    let Some(PointVectors::Named(list)) =
+        &upsert.points[0].as_inline().expect("inline point").vectors
+    else {
         panic!("expected named vectors");
     };
     assert!(
@@ -487,7 +509,9 @@ async fn g_preexisting_vector_preserved_without_spec() {
     let Stmt::Upsert(upsert) = &stmt else {
         panic!("expected Upsert");
     };
-    let Some(PointVectors::Named(list)) = &upsert.points[0].vectors else {
+    let Some(PointVectors::Named(list)) =
+        &upsert.points[0].as_inline().expect("inline point").vectors
+    else {
         panic!("expected named vectors");
     };
     assert!(
@@ -722,7 +746,9 @@ async fn test_on_field_explicit_resolution() {
     let Stmt::Upsert(upsert) = &stmt else {
         panic!("expected Upsert");
     };
-    let Some(PointVectors::Named(list)) = &upsert.points[0].vectors else {
+    let Some(PointVectors::Named(list)) =
+        &upsert.points[0].as_inline().expect("inline point").vectors
+    else {
         panic!("expected named vectors");
     };
     assert!(list.iter().any(|(k, _)| k == "title_vec"));

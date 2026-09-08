@@ -46,32 +46,39 @@ pub async fn execute_planned_grpc(
         PlannedOperation::Upsert {
             collection,
             request,
+            wait,
             ..
-        } => super::execute_write::execute_upsert(client, collection, request).await,
+        } => super::execute_write::execute_upsert(client, collection, request, *wait).await,
         PlannedOperation::Delete {
             collection,
             request,
-        } => super::execute_write::execute_delete(client, collection, request).await,
+            wait,
+        } => super::execute_write::execute_delete(client, collection, request, *wait).await,
         PlannedOperation::ClearPayload {
             collection,
             request,
-        } => super::execute_write::execute_clear_payload(client, collection, request).await,
+            wait,
+        } => super::execute_write::execute_clear_payload(client, collection, request, *wait).await,
         PlannedOperation::DeletePayload {
             collection,
             request,
-        } => super::execute_write::execute_delete_payload(client, collection, request).await,
+            wait,
+        } => super::execute_write::execute_delete_payload(client, collection, request, *wait).await,
         PlannedOperation::DeleteVectors {
             collection,
             request,
-        } => super::execute_write::execute_delete_vectors(client, collection, request).await,
+            wait,
+        } => super::execute_write::execute_delete_vectors(client, collection, request, *wait).await,
         PlannedOperation::UpdateVectors {
             collection,
             request,
-        } => super::execute_write::execute_update_vectors(client, collection, request).await,
+            wait,
+        } => super::execute_write::execute_update_vectors(client, collection, request, *wait).await,
         PlannedOperation::UpdatePayload {
             collection,
             request,
-        } => super::execute_write::execute_update_payload(client, collection, request).await,
+            wait,
+        } => super::execute_write::execute_update_payload(client, collection, request, *wait).await,
         PlannedOperation::CreateCollection {
             collection,
             request,
@@ -86,7 +93,8 @@ pub async fn execute_planned_grpc(
         PlannedOperation::CreateIndex {
             collection,
             request,
-        } => super::execute_ddl::execute_create_index(client, collection, request).await,
+            wait,
+        } => super::execute_ddl::execute_create_index(client, collection, request, *wait).await,
         PlannedOperation::DropIndex { collection, field } => {
             super::execute_ddl::execute_drop_index(client, collection, field).await
         }

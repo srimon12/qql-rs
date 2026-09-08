@@ -170,7 +170,7 @@ pub fn py_to_json(value: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
     if let Ok(v) = value.extract::<f64>() {
         if !v.is_finite() {
             // serde_json would silently serialize NaN/infinity as `null`;
-            // reject instead so non-finite floats fail with QQL-BIND-TYPE-MISMATCH.
+            // reject eagerly with ValueError to prevent silent corruption downstream.
             return Err(PyValueError::new_err(format!(
                 "cannot bind non-finite float value '{v}'"
             )));
@@ -208,6 +208,123 @@ pub fn py_to_json(value: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
     ))
 }
 
+/// Read a 1-D float buffer (numpy `float32`/`float64` arrays,
+/// `array.array('f'/'d')`, memoryviews) straight into an [`Value::F32Array`]
+/// without materializing a Python list first.
+///
+/// Implemented on top of the `memoryview` protocol (all safe, stable API —
+/// no version-gated `pyo3::buffer`, no `unsafe`): any object exporting a
+/// 1-D native-endian float buffer qualifies, regardless of where it comes
+/// from. Multi-dimensional, strided (copied in C order by `tobytes`), and
+/// non-float buffers fall through to the regular arms.
+///
+/// Returns `Ok(None)` for anything that is not such a buffer so the caller
+/// falls through (scalars, lists, dicts, `tolist()`-only array-likes).
+fn try_buffer_value(value: &Bound<'_, PyAny>) -> PyResult<Option<Value>> {
+    use pyo3::types::PyMemoryView;
+    let Ok(view) = PyMemoryView::from(value) else {
+        return Ok(None);
+    };
+    let Ok(format) = view.getattr("format")?.extract::<String>() else {
+        return Ok(None);
+    };
+    if format != "d" && format != "f" {
+        return Ok(None);
+    }
+    let Ok(shape) = view.getattr("shape")?.extract::<Vec<usize>>() else {
+        return Ok(None);
+    };
+    if shape.len() != 1 {
+        return Ok(None);
+    }
+    let n = shape[0];
+    let bytes: Vec<u8> = view.call_method0("tobytes")?.extract()?;
+    let itemsize = if format == "d" { 8 } else { 4 };
+    if bytes.len() != n * itemsize {
+        return Ok(None);
+    }
+    // `format` is native-endian by PEP 3118, so `from_ne_bytes` is correct
+    // on every platform.
+    if format == "d" {
+        let (chunks, rest) = bytes.as_chunks::<8>();
+        debug_assert!(rest.is_empty(), "tobytes length pre-validated");
+        let mut out = Vec::with_capacity(n);
+        for chunk in chunks {
+            let x = f64::from_ne_bytes(*chunk);
+            if !x.is_finite() {
+                return Err(PyValueError::new_err(format!(
+                    "cannot bind non-finite float value '{x}'"
+                )));
+            }
+            out.push(x as f32);
+        }
+        return Ok(Some(Value::F32Array(out)));
+    }
+    let (chunks, rest) = bytes.as_chunks::<4>();
+    debug_assert!(rest.is_empty(), "tobytes length pre-validated");
+    let mut out = Vec::with_capacity(n);
+    for chunk in chunks {
+        out.push(f32::from_ne_bytes(*chunk));
+    }
+    Ok(Some(Value::F32Array(out)))
+}
+
+/// Convert a Python value straight to a typed [`Value`].
+///
+/// Same contract as [`py_to_json`], minus the JSON layer: plain values map to
+/// the same variants [`Value::from_json`] would produce from their JSON form,
+/// while 1-D C-contiguous float buffers bind as [`Value::F32Array`] with a
+/// single copy. Error behavior (non-finite floats, `tolist()` fallback,
+/// unsupported types) matches [`py_to_json`] arm-for-arm.
+pub fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
+    if value.is_none() {
+        return Ok(Value::Null);
+    }
+    if let Ok(v) = value.extract::<bool>() {
+        return Ok(Value::Bool(v));
+    }
+    if let Ok(v) = value.extract::<i64>() {
+        return Ok(Value::Int(v));
+    }
+    if let Ok(v) = value.extract::<f64>() {
+        if !v.is_finite() {
+            return Err(PyValueError::new_err(format!(
+                "cannot bind non-finite float value '{v}'"
+            )));
+        }
+        return Ok(Value::Float(v));
+    }
+    if let Ok(s) = value.extract::<String>() {
+        return Ok(Value::Str(s));
+    }
+    if let Ok(list) = value.cast::<PyList>() {
+        let mut items = Vec::with_capacity(list.len());
+        for item in list.iter() {
+            items.push(py_to_value(&item)?);
+        }
+        return Ok(Value::List(items));
+    }
+    if let Ok(dict) = value.cast::<PyDict>() {
+        let mut entries = Vec::with_capacity(dict.len());
+        for (key, item) in dict.iter() {
+            let key = key
+                .extract::<String>()
+                .map_err(|_| PyValueError::new_err("dict keys must be strings"))?;
+            entries.push((key, py_to_value(&item)?));
+        }
+        return Ok(Value::Dict(entries));
+    }
+    if let Some(fast) = try_buffer_value(value)? {
+        return Ok(fast);
+    }
+    if let Ok(list) = value.call_method0("tolist") {
+        return py_to_value(&list);
+    }
+    Err(PyValueError::new_err(
+        "unsupported value type for parameter binding or filter values (expected bool, int, float, str, list, dict, or an array-like like a numpy array)",
+    ))
+}
+
 // ═══════════════════════════════════════════════════════════════════
 //  Parameter binding over Python objects
 // ═══════════════════════════════════════════════════════════════════
@@ -224,8 +341,8 @@ pub fn bind_py_stmt(stmt: &mut ast::Stmt, params: Option<&Bound<'_, PyAny>>) -> 
     if p.is_none() {
         return Ok(());
     }
-    let json_params = py_to_json(p)?;
-    qql_core::params_json::bind_stmt_with_params(stmt, &json_params).map_err(qql_py_value_error)
+    let value_params = py_to_value(p)?;
+    qql_core::params_json::bind_stmt_with_values(stmt, &value_params).map_err(qql_py_value_error)
 }
 
 /// Bind parameters into a query string; `truncate_vectors` renders compact
@@ -241,12 +358,12 @@ pub fn bind_py_params(
     if p.is_none() {
         return Ok(query.to_string());
     }
-    let json_params = py_to_json(p)?;
-    let plan = qql_core::params_json::plan_statement_params(&json_params, 1)
-        .map_err(qql_py_value_error)?;
-    qql_core::params_json::bind_str_with_params(
+    let value_params = py_to_value(p)?;
+    let plan =
+        qql_core::params_json::plan_value_params(&value_params, 1).map_err(qql_py_value_error)?;
+    qql_core::params_json::bind_str_with_values(
         query,
-        qql_core::params_json::param_for(&plan, 0),
+        qql_core::params_json::param_value_for(&plan, 0),
         truncate_vectors,
     )
     .map_err(qql_py_value_error)

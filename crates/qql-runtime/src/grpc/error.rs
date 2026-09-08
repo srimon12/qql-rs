@@ -17,7 +17,33 @@ pub(crate) fn grpc_error(operation: &str, status: tonic::Status, request_id: &st
     } else {
         format!("{operation}: {status} (request id: {request_id})")
     };
-    let error = QqlError::backend("QQL-GRPC", message, None)
+    let code = match status.code() {
+        tonic::Code::Unauthenticated | tonic::Code::PermissionDenied => "QQL-BACKEND-AUTH",
+        tonic::Code::NotFound => "QQL-BACKEND-COLLECTION-NOT-FOUND",
+        _ => {
+            let msg = status.message().to_ascii_lowercase();
+            if msg.contains("no appropriate index")
+                || msg.contains("index not found")
+                || msg.contains("index is not ready")
+                || msg.contains("indexing")
+            {
+                "QQL-BACKEND-INDEX-NOT-READY"
+            } else if msg.contains("dimension")
+                || msg.contains("vector size")
+                || msg.contains("dimensions")
+            {
+                "QQL-BACKEND-DIMENSION-MISMATCH"
+            } else if msg.contains("strict-mode")
+                || msg.contains("strict mode")
+                || msg.contains("quota exceeded")
+            {
+                "QQL-BACKEND-STRICT-MODE"
+            } else {
+                "QQL-GRPC"
+            }
+        }
+    };
+    let error = QqlError::backend(code, message, None)
         .with_field("grpc_code", format!("{}", status.code() as i32))
         .with_field("operation", operation.to_string());
     if request_id.is_empty() {

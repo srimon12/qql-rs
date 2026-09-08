@@ -43,5 +43,8 @@ pub use input::bind_query_input;
 pub use render::{escape_str_literal, truncate_vector_literals, value_to_literal};
 pub use scan::{ident_at, is_ident_continue, is_ident_start, is_placeholder_start, skip_protected};
 pub use text::{bind_named, bind_named_readable, bind_positional, bind_positional_readable};
-pub use validate::validate_no_unbound_params;
+pub use validate::{
+    collect_statement_params, stmt_has_point_params, validate_no_unbound_params,
+    validate_no_unbound_scalar_params,
+};
 pub use value::{bind_point_id, bind_value, resolve_param_u64};

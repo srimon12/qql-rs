@@ -195,6 +195,91 @@ class TestDxImprovements(unittest.TestCase):
         self.assertEqual(bare.groups()[0]["id"], "x")
         self.assertEqual(ExecutionReport({}).groups(), [])
 
+    def test_typed_buffer_vector_params(self):
+        # Buffer-protocol vectors bind identically to plain lists (no server).
+        import array
+
+        vec = [0.1, 0.2, 0.3, 0.4]
+        q = "QUERY :v FROM test_coll USING dense LIMIT 2"
+        expected = str(sdk.parse(q)[0].bind({"v": vec}))
+        self.assertIn("[0.1, 0.2, 0.3, 0.4]", expected)
+
+        for buf in (
+            array.array("d", vec),
+            array.array("f", vec),
+            memoryview(array.array("d", vec)),
+        ):
+            with self.subTest(buf=type(buf).__name__):
+                self.assertEqual(str(sdk.parse(q)[0].bind({"v": buf})), expected)
+
+        np = None
+        try:
+            import numpy
+
+            np = numpy
+        except ImportError:
+            pass
+        if np is not None:
+            for arr in (
+                np.array(vec, dtype=np.float64),
+                np.array(vec, dtype=np.float32),
+            ):
+                with self.subTest(buf=f"numpy-{arr.dtype}"):
+                    self.assertEqual(str(sdk.parse(q)[0].bind({"v": arr})), expected)
+            # Non-contiguous views keep the tolist() path (same values).
+            strided = np.array(vec * 2, dtype=np.float64)[::2]
+            strided_expected = str(sdk.parse(q)[0].bind({"v": list(strided)}))
+            self.assertEqual(
+                str(sdk.parse(q)[0].bind({"v": strided})), strided_expected
+            )
+            # 2-D arrays keep prior behavior: tolist() path, binds exactly
+            # like the equivalent nested lists.
+            two_d = np.array([[0.1, 0.2], [0.3, 0.4]])
+            self.assertEqual(
+                str(sdk.parse(q)[0].bind({"v": two_d})),
+                str(sdk.parse(q)[0].bind({"v": [[0.1, 0.2], [0.3, 0.4]]})),
+            )
+
+        # Module bind + compile_query equivalence, incl. flat {data, dim}.
+        self.assertEqual(
+            sdk.bind(q, {"v": array.array("d", vec)}), sdk.bind(q, {"v": vec})
+        )
+        self.assertEqual(
+            sdk.compile_query(q, {"v": array.array("d", vec)}),
+            sdk.compile_query(q, {"v": vec}),
+        )
+        flat = sdk.bind(
+            "QUERY VECTOR :m FROM test_coll USING dense",
+            {"m": {"data": vec, "dim": 2}},
+        )
+        nested = sdk.bind(
+            "QUERY VECTOR :m FROM test_coll USING dense",
+            {"m": [[0.1, 0.2], [0.3, 0.4]]},
+        )
+        # String bind renders the dict literally; both re-parse to the same
+        # chunked MultiDense statement.
+        self.assertEqual(
+            str(sdk.parse(flat)[0]), str(sdk.parse(nested)[0])
+        )
+
+        # Positional ? with buffers.
+        qp = "QUERY ? FROM test_coll USING dense LIMIT 1"
+        self.assertEqual(
+            str(sdk.parse(qp)[0].bind([array.array("d", vec)])),
+            str(sdk.parse(qp)[0].bind([vec])),
+        )
+
+        # Bytes are not float buffers — same unsupported-value error as before.
+        with self.assertRaises(ValueError):
+            sdk.parse(q)[0].bind({"v": b"\x00\x01"})
+
+    def test_upsert_many_surface(self):
+        # Bulk ingest lives on the client next to execute — one `:rows`
+        # template prepared once, no hand-rolled batch loops. Offline:
+        # surface parity only (live chunking is covered by Rust mock
+        # tests + the vs-qdrant harness, no Qdrant server in CI).
+        self.assertTrue(callable(sdk.Client.upsert_many))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.4.0] - 2026-09-07
+## [0.4.0] - 2026-09-08
 
 ### 🚀 Prepared Statements & Parameter Binding
 - **AST Parameter Binding** — Bind parameters directly against pre-parsed statement trees (`stmt.bind(...)`, `client.execute(stmt, params=...)`) without textual re-parsing; support for nested dictionary expansions (`:loc.lat`) and optional vector preview truncation (`truncate_vectors=True`).
@@ -15,12 +15,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Duplicate Parameter Collision Detection** — Flattened parameter namespaces reject colliding keys fail-closed with `QQL-BIND-DUPLICATE-PARAM` (e.g. `{"loc.lat": 1, "loc": {"lat": 2}}`).
 - **Expanded Placeholder Positions** — Full placeholder support across `LIMIT`, `OFFSET`, `SCROLL AFTER :cursor`, `FACET LIMIT`, `QueryInput::Text`, `HYBRID TEXT`, `CROSS RERANK`, and formula `TARGET = :datetime`.
 - **Parameter Binding Fail-Closed** — Binding against DDL or unsupported statement types fails closed with `QQL-BIND-UNSUPPORTED-STATEMENT`.
+- **Vector & Point Placeholders in the Plan Layer** — `PlanVectorValue::from_value` accepts packed `F32Array`, dense/sparse/flat-multivector shapes; unbound `:name` / `?` vector and query placeholders survive template planning (`plan_template`) and bind at the IR layer instead of failing the plan gate.
 - **Type-Safe Binding Invariants**:
   - Bound `LIMIT` parameters enforce `> 0` across `QUERY`, `SCROLL`, and `FACET` (`QQL-BIND-INVALID-INTEGER`).
   - Vector element bindings enforce finite float ranges, rejecting values beyond `f32::MAX` (`QQL-VALIDATION-VECTOR`).
   - Literal colons inside query strings (e.g. `QUERY TEXT ':heart:'`) are cleanly preserved and never misclassified as unbound placeholders.
   - Re-binding an already bound `Stmt` fails closed with `QQL-BIND-ALREADY-BOUND`.
   - Triple-quoted (`"""`) and raw (`r'...'`) string literals are protected from placeholder replacement.
+
+### ⚡ Typed-Array Parameter Binding
+- **Zero-walk vector params** — `Float32Array` / `Float64Array` (Node) and 1-D float buffers (numpy, `array.array`, memoryviews on Python) bind as packed `f32` vectors with a single copy instead of a per-element walk. Plain lists behave exactly as before.
+- **Flat multivector params** — `{data: [...], dim: N}` binds as a ColBERT multi-vector, equivalent to nested row lists.
+- **Fail-closed binary inputs** — raw `Buffer`/`ArrayBuffer` without a float view is rejected with guidance instead of binding as index-keyed garbage.
+
+### 📦 Whole-Point Upsert Parameters
+- **Point-row params** — `UPSERT INTO c VALUES :p0, :p1` / `VALUES :rows` / `VALUES ?, ?` bind whole points from dicts (or lists of dicts, splicing N points). Same `{id, vector, …}` shape as inline rows; nested placeholders compose; misshapen values fail closed (`QQL-BIND-TYPE-MISMATCH`, missing `id` → `QQL-VALIDATION-UPSERT-ID`).
+- **Prepared upsert fast path** — point-param templates pre-fetch the collection schema once at `prepare()` and skip re-parse + re-fetch per execution (falls back to the checking slow path for embedders, embedding specs, vectorless points, or missing collections). A 100-dict `:rows` value on a one-statement script splices 100 points — never statement-scoped batching.
+- **Fix (found by the vs-qdrant harness)** — the unnamed→named vector mapping used a blind `vectors.take()`: when a point carried *named* vectors, `take()` removed them and the replacement never ran, silently sending vector-less points (backend: "Expected some vectors"). The slow path was guarded by `has_unnamed_vectors`, so only the new fast path fired it. Now clone-on-match; regression-tested with named dense+sparse points.
+
+### 🚀 Bulk ingest helpers (`upsert_many`)
+- **One call, no batch loop** — `client.upsert_many("docs", rows, batch_size=100)` (Python) / `client.upsertMany("docs", rows, { batchSize: 100 })` (Node) / `exec.upsert_many("docs", rows, 100, OnError::Stop).await` (Rust). Prepares the `:rows` template once (schema fetched once), moves (never clones) each chunk through the point-splice path. `batch_size < 1` fails closed (`QQL-VALIDATION-UPSERT-BATCH`); empty rows return an empty `ok` report; `OnError::Continue` collects per-chunk failures.
+- **Node serde rule** — `upsertMany` is an async serde boundary like `execute`: plain arrays and flat `{data, dim}` ride it; `Float32Array`/`Float64Array` convert on the sync `Stmt.bind` surface instead, then `execute` the bound statement. Python keeps full buffer support (same converter as `bind`).
+- **Offline happy paths** — `examples/quickstart.py`, `examples/quickstart.mjs`, `examples/rust/quickstart` run the same narrative in CI with no server: hybrid CTE as text → `inject_filter` + `SHARD` → bind → `compile*` route → `:rows` splice.
 
 ### 💻 CLI & Interactive REPL
 - **CLI Parameter Binding** — Added `--param key=value` (`-p`) and `--params-file <path>` support to `qql exec` and `qql explain` for executing and explaining parameterized queries directly from the command line.
@@ -62,6 +78,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Point ID Preservation** — Non-standard string IDs are preserved as strings rather than coerced to empty strings.
 
 ### 🐛 Bug Fixes & Engine Reliability
+- **Named backend error codes** — REST and gRPC failures now map to stable codes instead of generic `QQL-BACKEND` / `QQL-GRPC`: auth (`QQL-BACKEND-AUTH`), missing collection (`QQL-BACKEND-COLLECTION-NOT-FOUND`), dimension mismatch (`QQL-BACKEND-DIMENSION-MISMATCH`), index-not-ready (`QQL-BACKEND-INDEX-NOT-READY`), strict-mode/quota (`QQL-BACKEND-STRICT-MODE`).
+- **gRPC `WAIT` propagation** — UPSERT/DELETE/UPDATE/CLEAR-PAYLOAD/CREATE-INDEX honor `WAIT true` / `WAIT false` on the gRPC path instead of always waiting.
+- **Edge fail-closed on unbound placeholders** — vector/query `Param` / `PositionalParam` placeholders reaching edge execution fail with a named-parameter error instead of executing unbound.
 - **Canonical Placeholder Formatting** — `format_stmt` normalizes positional parameter markers to bare `?` (fixing `QQL-PARSE-TRAILING` errors when re-parsing queries with `LIMIT ?`, `OFFSET ?`, or formula targets).
 - **SCROLL & FACET Formatter Invariants** — Fixed parameter formatting in `ScrollStmt` and `FacetStmt` where `limit_param` previously rendered as `None` or was silently dropped.
 - **gRPC Request Correlation** — Outgoing gRPC requests inject `x-request-id` into metadata; errors append `(request id: ...)` and populate `.fields["request_id"]`.

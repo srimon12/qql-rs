@@ -110,6 +110,9 @@ jobs:
           cargo test --locked
           -p pyqql-common -p nqql-common
 
+      - name: Offline happy path (no Qdrant server)
+        run: cargo run --manifest-path examples/rust/quickstart/Cargo.toml
+
   features:
     name: Feature matrix
     runs-on: ubuntu-latest
@@ -297,6 +300,9 @@ jobs:
           [ "$warm_ok" = true ]
           python -m unittest discover -s crates/pyqql/tests -v
           python -m unittest discover -s crates/pyqql-edge/tests -v
+          # Offline happy path (no Qdrant server): hybrid CTE → isolation →
+          # bind → compile route → `:rows` splice.
+          python examples/quickstart.py
 
   nqql-check:
     name: Node binding (${{ matrix.package }})
@@ -377,6 +383,9 @@ jobs:
           set -euo pipefail
           npm test
           npm pack --dry-run --ignore-scripts
+          # Offline happy path (no Qdrant server): hybrid CTE → isolation →
+          # bind → compile route → `:rows` splice.
+          node ../../examples/quickstart.mjs crates/${{ matrix.package }}
 
   wasm-check:
     name: WASM bindings

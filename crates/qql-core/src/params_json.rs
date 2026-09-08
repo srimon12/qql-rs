@@ -180,6 +180,149 @@ pub fn param_for<'a>(plan: &'a ParamPlan<'a>, index: usize) -> &'a serde_json::V
     }
 }
 
+/// Flatten a [`Value`] object into dotted parameter keys.
+///
+/// Same contract as [`flatten_object`], but over an already-typed [`Value`]
+/// tree — the entry point for host bindings (NAPI typed arrays, Python
+/// buffer-protocol objects) that convert FFI values straight to [`Value`],
+/// bypassing the JSON round-trip. `F32Array` values flow through untouched so
+/// dense vectors bind without per-element boxing.
+pub fn flatten_value_object(obj: &[(String, Value)]) -> Result<BTreeMap<String, Value>, QqlError> {
+    let mut out = BTreeMap::new();
+    flatten_value_into(obj, "", &mut out)?;
+    Ok(out)
+}
+
+fn flatten_value_into(
+    obj: &[(String, Value)],
+    prefix: &str,
+    out: &mut BTreeMap<String, Value>,
+) -> Result<(), QqlError> {
+    for (k, v) in obj {
+        let full_key = if prefix.is_empty() {
+            k.clone()
+        } else {
+            alloc::format!("{prefix}.{k}")
+        };
+        if let Value::Dict(nested) = v {
+            flatten_value_into(nested, &full_key, out)?;
+        }
+        if out.contains_key(&full_key) {
+            return Err(QqlError::validation(
+                "QQL-BIND-DUPLICATE-PARAM",
+                alloc::format!(
+                    "duplicate parameter key '{full_key}' from flat and nested parameter sources"
+                ),
+                None,
+            ));
+        }
+        out.insert(full_key, v.clone());
+    }
+    Ok(())
+}
+
+/// Bind a typed [`Value`] `params` into a single statement AST in-place.
+///
+/// Same contract as [`bind_stmt_with_params`], minus the JSON layer.
+pub fn bind_stmt_with_values(stmt: &mut Stmt, params: &Value) -> Result<(), QqlError> {
+    match params {
+        Value::Dict(obj) => {
+            let map = flatten_value_object(obj)?;
+            crate::params::bind_stmt(stmt, |k| map.get(k).cloned(), &[])
+        }
+        Value::List(arr) => crate::params::bind_stmt(stmt, |_| None, arr),
+        _ => Err(QqlError::validation(
+            "QQL-BIND-INVALID-PARAMS",
+            "params must be an object for named parameters (:name) or an array for positional parameters (?)",
+            None,
+        )),
+    }
+}
+
+/// Bind a typed [`Value`] `params` into a query string.
+///
+/// Same contract as [`bind_str_with_params`], minus the JSON layer.
+pub fn bind_str_with_values(
+    query: &str,
+    params: &Value,
+    truncate_vectors: bool,
+) -> Result<String, QqlError> {
+    match params {
+        Value::Dict(obj) => {
+            let map = flatten_value_object(obj)?;
+            if truncate_vectors {
+                bind_named_readable(query, |k| map.get(k).cloned(), 2)
+            } else {
+                bind_named(query, |k| map.get(k).cloned())
+            }
+        }
+        Value::List(arr) => {
+            if truncate_vectors {
+                bind_positional_readable(query, arr, 2)
+            } else {
+                bind_positional(query, arr)
+            }
+        }
+        _ => Err(QqlError::validation(
+            "QQL-BIND-INVALID-PARAMS",
+            "params must be an object for named parameters (:name) or an array for positional parameters (?)",
+            None,
+        )),
+    }
+}
+
+/// How a typed [`Value`] `params` argument applies to a batch of statements.
+///
+/// Same contract as [`plan_statement_params`]: a non-empty list whose entries
+/// are **all** dicts or lists is statement-scoped (entry *i* binds statement
+/// *i*, length must match — `QQL-BIND-BATCH-LENGTH` otherwise); every other
+/// shape applies identically to every statement. `F32Array` counts as a
+/// scalar here (a vector value, never a per-statement container).
+#[derive(Debug)]
+pub enum ValueParamPlan<'a> {
+    /// The same params value binds every statement.
+    Shared(&'a Value),
+    /// One params container per statement; length matches the statement count.
+    Scoped(&'a [Value]),
+}
+
+/// Decide how typed `params` applies to `stmt_count` statements.
+pub fn plan_value_params(
+    params: &Value,
+    stmt_count: usize,
+) -> Result<ValueParamPlan<'_>, QqlError> {
+    if let Value::List(arr) = params
+        && !arr.is_empty()
+        && arr
+            .iter()
+            .all(|p| matches!(p, Value::Dict(_) | Value::List(_)))
+    {
+        if arr.len() == stmt_count {
+            return Ok(ValueParamPlan::Scoped(arr));
+        }
+        return Err(QqlError::validation(
+            "QQL-BIND-BATCH-LENGTH",
+            format!(
+                "statement-scoped params list has {} entr{} but {} statement{} given; provide one params container (object or array) per statement",
+                arr.len(),
+                if arr.len() == 1 { "y" } else { "ies" },
+                stmt_count,
+                if stmt_count == 1 { " was" } else { "s were" }
+            ),
+            None,
+        ));
+    }
+    Ok(ValueParamPlan::Shared(params))
+}
+
+/// Resolve the params container for statement `index` under `plan`.
+pub fn param_value_for<'a>(plan: &'a ValueParamPlan<'a>, index: usize) -> &'a Value {
+    match plan {
+        ValueParamPlan::Shared(params) => params,
+        ValueParamPlan::Scoped(list) => &list[index],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -364,5 +507,163 @@ mod tests {
             crate::fmt::format_stmt(&stmts[1]),
             "QUERY VECTOR [0.2] FROM docs WHERE y = 'k'"
         );
+    }
+
+    #[test]
+    fn bind_stmt_with_values_named_and_dotted() {
+        use crate::ast::Value;
+        let mut stmt =
+            Parser::parse("QUERY [0.1] FROM docs WHERE x = :x AND y = :loc.lat").unwrap();
+        let params = Value::Dict(alloc::vec![
+            ("x".into(), Value::Int(1)),
+            (
+                "loc".into(),
+                Value::Dict(alloc::vec![("lat".into(), Value::Int(2))])
+            ),
+        ]);
+        bind_stmt_with_values(&mut stmt, &params).unwrap();
+        assert_eq!(
+            crate::fmt::format_stmt(&stmt),
+            "QUERY VECTOR [0.1] FROM docs WHERE x = 1 AND y = 2"
+        );
+    }
+
+    #[test]
+    fn bind_stmt_with_values_positional_and_invalid_shape() {
+        use crate::ast::Value;
+        let mut stmt = Parser::parse("QUERY ? FROM docs USING dense LIMIT ?").unwrap();
+        let params = Value::List(alloc::vec![
+            Value::List(alloc::vec![Value::Float(0.5)]),
+            Value::Int(7),
+        ]);
+        bind_stmt_with_values(&mut stmt, &params).unwrap();
+        assert_eq!(
+            crate::fmt::format_stmt(&stmt),
+            "QUERY VECTOR [0.5] FROM docs USING dense LIMIT 7"
+        );
+
+        let mut stmt = Parser::parse("QUERY [0.1] FROM docs").unwrap();
+        let err = bind_stmt_with_values(&mut stmt, &Value::Int(1)).unwrap_err();
+        assert_eq!(err.code, "QQL-BIND-INVALID-PARAMS");
+    }
+
+    #[test]
+    fn bind_stmt_with_values_scoped_batch() {
+        use crate::ast::Value;
+        let mut stmts = Parser::parse_all(
+            "QUERY [0.1] FROM docs WHERE x = :x; QUERY [0.2] FROM docs WHERE y = :y;",
+        )
+        .unwrap();
+        let params = Value::List(alloc::vec![
+            Value::Dict(alloc::vec![("x".into(), Value::Int(1))]),
+            Value::Dict(alloc::vec![("y".into(), Value::Int(2))]),
+        ]);
+        let plan = plan_value_params(&params, stmts.len()).unwrap();
+        for (i, stmt) in stmts.iter_mut().enumerate() {
+            bind_stmt_with_values(stmt, param_value_for(&plan, i)).unwrap();
+        }
+        assert_eq!(
+            crate::fmt::format_stmt(&stmts[1]),
+            "QUERY VECTOR [0.2] FROM docs WHERE y = 2"
+        );
+        let err = plan_value_params(&params, 3).unwrap_err();
+        assert_eq!(err.code, "QQL-BIND-BATCH-LENGTH");
+    }
+
+    #[test]
+    fn bind_stmt_with_values_matches_json_path() {
+        // Same logical params through both contracts must bind identically.
+        use crate::ast::Value;
+        let params_json = serde_json::json!({"x": 1, "v": [0.1, 0.2]});
+        let params_value = Value::Dict(alloc::vec![
+            ("x".into(), Value::Int(1)),
+            (
+                "v".into(),
+                Value::List(alloc::vec![Value::Float(0.1), Value::Float(0.2)]),
+            ),
+        ]);
+        let mut a = Parser::parse("QUERY :v FROM docs USING dense WHERE x = :x").unwrap();
+        let mut b = a.clone();
+        bind_stmt_with_params(&mut a, &params_json).unwrap();
+        bind_stmt_with_values(&mut b, &params_value).unwrap();
+        assert_eq!(crate::fmt::format_stmt(&a), crate::fmt::format_stmt(&b));
+    }
+
+    #[test]
+    fn bind_stmt_with_values_f32array_vector() {
+        // Typed-array fast path: F32Array binds without per-element boxing.
+        use crate::ast::Value;
+        let mut stmt = Parser::parse("QUERY :v FROM docs USING dense").unwrap();
+        let params = Value::Dict(alloc::vec![(
+            "v".into(),
+            Value::F32Array(alloc::vec![0.1, 0.2])
+        )]);
+        bind_stmt_with_values(&mut stmt, &params).unwrap();
+        assert_eq!(
+            crate::fmt::format_stmt(&stmt),
+            "QUERY VECTOR [0.1, 0.2] FROM docs USING dense"
+        );
+    }
+
+    #[test]
+    fn bind_str_with_values_renders_vectors() {
+        use crate::ast::Value;
+        let params = Value::Dict(alloc::vec![("v".into(), Value::F32Array(alloc::vec![0.5]))]);
+        let bound = bind_str_with_values("QUERY :v FROM docs USING dense", &params, false).unwrap();
+        assert_eq!(bound, "QUERY [0.5] FROM docs USING dense");
+    }
+
+    #[test]
+    fn flat_multivector_dict_binds_like_nested() {
+        // {"data": [...], "dim": N} spells the same MultiDense as nested lists.
+        let mut flat = Parser::parse("QUERY VECTOR :q FROM docs USING dense").unwrap();
+        bind_stmt_with_params(
+            &mut flat,
+            &serde_json::json!({"q": {"data": [0.1, 0.2, 0.3, 0.4], "dim": 2}}),
+        )
+        .unwrap();
+        let mut nested = Parser::parse("QUERY VECTOR :q FROM docs USING dense").unwrap();
+        bind_stmt_with_params(
+            &mut nested,
+            &serde_json::json!({"q": [[0.1, 0.2], [0.3, 0.4]]}),
+        )
+        .unwrap();
+        assert_eq!(
+            crate::fmt::format_stmt(&flat),
+            crate::fmt::format_stmt(&nested)
+        );
+    }
+
+    #[test]
+    fn flat_multivector_dict_rejects_bad_shapes() {
+        for params in [
+            serde_json::json!({"q": {"data": [0.1, 0.2]}}),
+            serde_json::json!({"q": {"data": [0.1, 0.2, 0.3], "dim": 2}}),
+            serde_json::json!({"q": {"data": [0.1], "dim": 0}}),
+            serde_json::json!({"q": {"data": [0.1], "dim": 2, "indices": [0]}}),
+        ] {
+            let mut stmt = Parser::parse("QUERY VECTOR :q FROM docs USING dense").unwrap();
+            let err = bind_stmt_with_params(&mut stmt, &params).unwrap_err();
+            assert_eq!(err.code, "QQL-VALIDATION-VECTOR", "params: {params}");
+        }
+    }
+
+    #[test]
+    fn sparse_values_accept_f32array() {
+        use crate::ast::Value;
+        let mut stmt = Parser::parse("QUERY VECTOR :q FROM docs USING sparse").unwrap();
+        let params = Value::Dict(alloc::vec![(
+            "q".into(),
+            Value::Dict(alloc::vec![
+                (
+                    "indices".into(),
+                    Value::List(alloc::vec![Value::Int(1), Value::Int(5)])
+                ),
+                ("values".into(), Value::F32Array(alloc::vec![0.5, 0.8])),
+            ]),
+        )]);
+        bind_stmt_with_values(&mut stmt, &params).unwrap();
+        let rendered = crate::fmt::format_stmt(&stmt);
+        assert!(rendered.contains("indices"), "got: {rendered}");
     }
 }

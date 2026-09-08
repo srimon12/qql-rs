@@ -431,3 +431,235 @@ fn test_bound_zero_limit_rejected_like_literal() {
         .expect("bound OFFSET 0 is valid");
     }
 }
+
+#[test]
+fn test_upsert_vector_param_binding() {
+    let qql = "UPSERT INTO items VALUES {id: 1, vector: :v} WAIT true;";
+    let mut stmt = Parser::parse(qql).expect("upsert with vector param should parse");
+
+    bind_stmt(
+        &mut stmt,
+        |name| {
+            if name == "v" {
+                Some(Value::F32Array(vec![0.1, 0.2, 0.3]))
+            } else {
+                None
+            }
+        },
+        &[],
+    )
+    .expect("binding Value::F32Array into upsert vector should succeed");
+
+    let formatted = crate::fmt::format_stmt(&stmt);
+    assert!(formatted.contains("0.1"));
+    assert!(formatted.contains("WAIT true"));
+}
+
+#[test]
+fn test_f32array_literal_renders_shortest_f32() {
+    // F32Array literals must render with shortest-f32 precision, matching
+    // AST vector formatting: widening through f64 would print 0.1f32 as
+    // 0.10000000149011612 and break typed/plain equivalence.
+    let lit = value_to_literal(&Value::F32Array(vec![0.1, 0.2, 0.3])).unwrap();
+    assert_eq!(lit, "[0.1, 0.2, 0.3]");
+    let err = value_to_literal(&Value::F32Array(vec![f32::NAN])).unwrap_err();
+    assert_eq!(err.code, "QQL-BIND-TYPE-MISMATCH");
+}
+
+#[test]
+fn test_sparse_query_input_object_literal() {
+    let qql = "QUERY {indices: [1, 2], values: [0.5, 0.8]} FROM docs LIMIT 5;";
+    let stmt = Parser::parse(qql).expect("sparse query input object literal should parse");
+    let formatted = crate::fmt::format_stmt(&stmt);
+    assert!(formatted.contains("indices: [1, 2]"));
+}
+
+#[test]
+fn test_upsert_point_param_parse_and_format() {
+    use crate::ast::PointEntry;
+
+    let stmt = Parser::parse("UPSERT INTO t VALUES :p0, :p1;").expect("point params should parse");
+    let crate::ast::Stmt::Upsert(upsert) = &stmt else {
+        panic!("expected upsert");
+    };
+    assert!(matches!(upsert.points[0], PointEntry::Param(..)));
+    assert!(matches!(upsert.points[1], PointEntry::Param(..)));
+    let formatted = crate::fmt::format_stmt(&stmt);
+    assert!(formatted.contains(":p0"), "got: {formatted}");
+    assert!(formatted.contains(":p1"), "got: {formatted}");
+
+    let stmt = Parser::parse("UPSERT INTO t VALUES ?, ?;").expect("positional points parse");
+    let formatted = crate::fmt::format_stmt(&stmt);
+    // Round-trips through parse again (bare `?` re-numbers deterministically).
+    Parser::parse(&formatted).expect("formatted positional points must re-parse");
+}
+
+#[test]
+fn test_upsert_point_param_dict_splice() {
+    use crate::ast::PointEntry;
+
+    let mut stmt = Parser::parse("UPSERT INTO t VALUES :p;").expect("point param should parse");
+    let point = Value::Dict(vec![
+        ("id".into(), Value::Int(7)),
+        (
+            "vector".into(),
+            Value::Dict(vec![(
+                "dense".into(),
+                Value::List(vec![Value::Float(0.1), Value::Float(0.2)]),
+            )]),
+        ),
+        ("tag".into(), Value::Str("x".into())),
+    ]);
+    bind_stmt(&mut stmt, |name| (name == "p").then(|| point.clone()), &[])
+        .expect("dict should splice one point");
+    let crate::ast::Stmt::Upsert(upsert) = &stmt else {
+        panic!("expected upsert");
+    };
+    assert_eq!(upsert.points.len(), 1);
+    let crate::ast::PointEntry::Inline(inline) = &upsert.points[0] else {
+        panic!("expected inline point after bind");
+    };
+    assert!(matches!(inline.id, crate::ast::PointId::Number(7)));
+    assert_eq!(inline.payload, vec![("tag".into(), Value::Str("x".into()))]);
+    // Equivalence with the inline literal form.
+    let literal =
+        Parser::parse("UPSERT INTO t VALUES {id: 7, vector: {dense: [0.1, 0.2]}, tag: 'x'};")
+            .unwrap();
+    assert_eq!(
+        crate::fmt::format_stmt(&stmt),
+        crate::fmt::format_stmt(&literal)
+    );
+    let _ = PointEntry::Inline(inline.clone());
+}
+
+#[test]
+fn test_upsert_point_rows_splice_avoids_scoping() {
+    // A 100-dict `:rows` value on a ONE-statement script must splice 100
+    // points — never trip statement-scoped batching (QQL-BIND-BATCH-LENGTH).
+    use crate::ast::PointEntry;
+
+    let mut stmt = Parser::parse("UPSERT INTO t VALUES :rows;").expect("rows param should parse");
+    let rows = Value::List(
+        (0..100)
+            .map(|i| {
+                Value::Dict(vec![
+                    ("id".into(), Value::Int(i)),
+                    ("v".into(), Value::Int(i)),
+                ])
+            })
+            .collect(),
+    );
+    // Through the shared Value batch contract, exactly as SDKs call it.
+    crate::params_json::bind_stmt_with_values(&mut stmt, &Value::Dict(vec![("rows".into(), rows)]))
+        .expect("100-dict rows must splice without batch-length error");
+    let crate::ast::Stmt::Upsert(upsert) = &stmt else {
+        panic!("expected upsert");
+    };
+    assert_eq!(upsert.points.len(), 100);
+    assert!(
+        upsert
+            .points
+            .iter()
+            .all(|p| matches!(p, PointEntry::Inline(_))),
+        "all placeholders must be spliced"
+    );
+}
+
+#[test]
+fn test_upsert_point_param_errors() {
+    // Missing id.
+    let mut stmt = Parser::parse("UPSERT INTO t VALUES :p;").unwrap();
+    let err = bind_stmt(
+        &mut stmt,
+        |_| Some(Value::Dict(vec![("tag".into(), Value::Str("x".into()))])),
+        &[],
+    )
+    .unwrap_err();
+    assert_eq!(err.code, "QQL-VALIDATION-UPSERT-ID");
+
+    // Scalar is not a point.
+    let mut stmt = Parser::parse("UPSERT INTO t VALUES :p;").unwrap();
+    let err = bind_stmt(&mut stmt, |_| Some(Value::Int(1)), &[]).unwrap_err();
+    assert_eq!(err.code, "QQL-BIND-TYPE-MISMATCH");
+
+    // List with a non-dict member.
+    let mut stmt = Parser::parse("UPSERT INTO t VALUES :p;").unwrap();
+    let err = bind_stmt(
+        &mut stmt,
+        |_| {
+            Some(Value::List(vec![
+                Value::Dict(vec![("id".into(), Value::Int(1))]),
+                Value::Int(2),
+            ]))
+        },
+        &[],
+    )
+    .unwrap_err();
+    assert_eq!(err.code, "QQL-BIND-TYPE-MISMATCH");
+
+    // Missing named parameter.
+    let mut stmt = Parser::parse("UPSERT INTO t VALUES :p;").unwrap();
+    let err = bind_stmt(&mut stmt, |_| None, &[]).unwrap_err();
+    assert_eq!(err.code, "QQL-BIND-UNBOUND-PARAM");
+
+    // Missing positional parameter.
+    let mut stmt = Parser::parse("UPSERT INTO t VALUES ?;").unwrap();
+    let err = bind_stmt(&mut stmt, |_| None, &[]).unwrap_err();
+    assert_eq!(err.code, "QQL-BIND-MISSING-POSITIONAL");
+
+    // Nested placeholders inside the dict compose.
+    let mut stmt = Parser::parse("UPSERT INTO t VALUES :p;").unwrap();
+    bind_stmt(
+        &mut stmt,
+        |name| match name {
+            "p" => Some(Value::Dict(vec![
+                ("id".into(), Value::Int(3)),
+                ("vector".into(), Value::Param("v".into(), None)),
+            ])),
+            "v" => Some(Value::List(vec![Value::Float(0.5)])),
+            _ => None,
+        },
+        &[],
+    )
+    .expect("nested vector param should compose");
+    let formatted = crate::fmt::format_stmt(&stmt);
+    assert!(formatted.contains("0.5"), "got: {formatted}");
+}
+
+#[test]
+fn test_inject_filter_rejects_unbound_point_param() {
+    use crate::ast::{ComparisonOp, inject_filter};
+
+    let mut stmt = Parser::parse("UPSERT INTO t VALUES :p;").unwrap();
+    let err = inject_filter(
+        &mut stmt,
+        "tenant",
+        ComparisonOp::Eq,
+        Value::Str("acme".into()),
+    )
+    .unwrap_err();
+    assert_eq!(err.code, "QQL-VALIDATION-FILTER-INJECT");
+
+    // After binding, injection applies to the spliced points normally.
+    let mut stmt = Parser::parse("UPSERT INTO t VALUES :p;").unwrap();
+    bind_stmt(
+        &mut stmt,
+        |_| {
+            Some(Value::Dict(vec![
+                ("id".into(), Value::Int(1)),
+                ("vector".into(), Value::List(vec![Value::Float(0.1)])),
+            ]))
+        },
+        &[],
+    )
+    .unwrap();
+    inject_filter(
+        &mut stmt,
+        "tenant",
+        ComparisonOp::Eq,
+        Value::Str("acme".into()),
+    )
+    .expect("inject after bind should succeed");
+    let formatted = crate::fmt::format_stmt(&stmt);
+    assert!(formatted.contains("acme"), "got: {formatted}");
+}

@@ -142,6 +142,46 @@ impl PyClient {
         common::compile_query(py, query, params)
     }
 
+    /// Bulk ingest: `rows` is a list of point dicts
+    /// (`{id, vector, …payload}`) spliced through the `:rows` point-splice
+    /// path in `batch_size` chunks (default 100). Row values convert exactly
+    /// like `bind` params — nested dicts, lists, and 1-D float buffers
+    /// (numpy, `array.array`, memoryviews) all compose.
+    #[pyo3(signature = (collection, rows, *, batch_size=100, on_error="stop"))]
+    fn upsert_many<'py>(
+        &self,
+        py: Python<'py>,
+        collection: &str,
+        rows: &Bound<'_, PyAny>,
+        batch_size: usize,
+        on_error: &str,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        if self.closed.load(Ordering::Acquire) {
+            return Err(common::client_closed_error());
+        }
+        let oe = common::parse_on_error(on_error)?;
+        let items: Vec<Bound<'_, PyAny>> = rows.extract().map_err(|_| {
+            common::qql_py_value_error(qql_core::error::QqlError::validation(
+                "QQL-BIND-TYPE-MISMATCH",
+                "upsert_many rows must be a list of point objects ({id, vector, …payload})",
+                None,
+            ))
+        })?;
+        let values: Vec<qql_core::ast::Value> = items
+            .iter()
+            .map(common::py_to_value)
+            .collect::<PyResult<_>>()?;
+        let report = py
+            .detach(|| {
+                self.runtime
+                    .block_on(self.inner.upsert_many(collection, values, batch_size, oe))
+            })
+            .map_err(common::qql_py_error)?;
+        let dict = pythonize::pythonize(py, &report)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+        common::wrap_execution_report(py, dict, "pyqql_edge")
+    }
+
     /// Flush and release edge storage. Idempotent.
     fn close(&self) -> PyResult<()> {
         if self.closed.swap(true, Ordering::AcqRel) {

@@ -161,6 +161,36 @@ hits = client.execute_hits(stmt, params={"q": "cardiology", "cat": "medical", "l
 
 ---
 
+## 5b. Bulk ingest (`VALUES :rows` + `upsert_many`)
+
+Whole-point placeholders turn ingest into data: `UPSERT INTO c VALUES :rows`
+binds one point dict (`{id, vector, …payload}`) or a list of them, splicing
+N points with the same shape as inline `VALUES {…}` rows. Nested
+placeholders compose; misshapen rows fail closed (`QQL-BIND-TYPE-MISMATCH`,
+missing `id` → `QQL-VALIDATION-UPSERT-ID`).
+
+For application ingest, skip the hand-rolled batch loop. Every SDK prepares
+the `:rows` template once (schema fetched once) and chunks for you:
+
+| Host | Helper |
+|---|---|
+| Python | `client.upsert_many("docs", rows, batch_size=100)` |
+| Node | `await client.upsertMany("docs", rows, { batchSize: 100 })` |
+| Rust | `exec.upsert_many("docs", rows, 100, OnError::Stop).await` |
+
+```python
+rows = [{"id": 1, "vector": {"dense": [0.1, 0.2, 0.3]}, "tag": "a"}]
+report = client.upsert_many("docs", rows, batch_size=100)
+```
+
+Row vectors accept the same inputs as `bind` params (plain lists, 1-D float
+buffers, flat `{data, dim}` multivectors). On Node's async boundary the
+serde rule applies: plain arrays and `{data, dim}` ride `upsertMany`;
+`Float32Array`/`Float64Array` convert on the sync `Stmt.bind` surface —
+bind there, then `execute` the bound statement.
+
+---
+
 ## 6. Error Codes
 
 All binding failures are validation errors with a stable `QQL-BIND-*` code:

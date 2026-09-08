@@ -201,6 +201,25 @@ canonical re-parseable QQL (Python `str(stmt)` parity), and
 `stmt.toReadableString()` renders the truncated preview (Python `repr(stmt)`
 parity — long vectors collapse to `[0.1, 0.2, ... (384 dims)]`).
 
+Vector params accept plain arrays **or** `Float32Array` / `Float64Array`
+(one memcpy, no per-element walk — prefer typed arrays for bulk ingest);
+integer typed arrays bind as integer lists (sparse `indices`). Raw
+`Buffer`/`ArrayBuffer` without a float view fail closed — wrap them first
+(`new Float64Array(buf)`). Multivectors accept nested lists or the flat
+`{data: [...], dim: N}` form. Whole-point upsert params work the same way:
+`UPSERT INTO c VALUES :rows` binds `{id, vector, …}` dicts (or lists of
+them) — bulk ingest as data, and prepared statements skip re-parsing
+every batch. Better: skip the loop entirely with the helper, which
+prepares once and chunks for you:
+
+```js
+const rows = [
+  { id: 1, vector: { dense: [0.1, 0.2, 0.3] }, tag: "a" },
+  { id: 2, vector: { dense: [0.4, 0.5, 0.6] }, tag: "b" },
+];
+const report = await client.upsertMany("docs", rows, { batchSize: 100 });
+```
+
 ```js
 const [stmt] = parse("QUERY TEXT :q FROM docs WHERE category = :cat LIMIT :lim");
 

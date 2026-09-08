@@ -1,6 +1,6 @@
-use super::helpers::point_id_from_value;
+use super::helpers::{point_id_from_value, point_vectors_from_value};
 use super::{AstLowerer, ascii_equal};
-use crate::ast::{EmbedDirective, EmbedKind, PointVectors, Stmt, UpsertPoint, UpsertStmt, Value};
+use crate::ast::{EmbedDirective, EmbedKind, PointEntry, Stmt, UpsertPoint, UpsertStmt};
 use crate::error::QqlError;
 use crate::token::TokenKind;
 use alloc::boxed::Box;
@@ -15,34 +15,47 @@ impl<'a> AstLowerer<'a> {
 
         let mut points = Vec::new();
         loop {
-            let mut row = self.parse_payload_dict()?;
-            let id_index = row
-                .iter()
-                .position(|(key, _)| key.eq_ignore_ascii_case("id"))
-                .ok_or_else(|| {
-                    QqlError::validation(
-                        "QQL-VALIDATION-UPSERT-ID",
-                        "each UPSERT row requires an id",
-                        Some(span),
-                    )
-                })?;
-            let (_, id) = row.remove(id_index);
-            let id = point_id_from_value(id, span)?;
-
-            let vectors = if let Some(index) = row
-                .iter()
-                .position(|(key, _)| key.eq_ignore_ascii_case("vector"))
-            {
-                let (_, value) = row.remove(index);
-                Some(point_vectors_from_value(value, span)?)
+            // Whole-point placeholders (`VALUES :p0, :p1` / `VALUES ?, ?`)
+            // bind later to point dicts (or lists of point dicts).
+            if self.peek()?.kind == TokenKind::Colon {
+                let colon_tok = self.advance()?;
+                let name = self.parse_param_name()?;
+                let span = crate::error::Span::new(colon_tok.span.start, self.prev_span().end);
+                points.push(PointEntry::Param(name, Some(Box::new(span))));
+            } else if self.peek()?.kind == TokenKind::Question {
+                let q_tok = self.advance()?;
+                let idx = self.next_positional_param();
+                points.push(PointEntry::PositionalParam(idx, Some(Box::new(q_tok.span))));
             } else {
-                None
-            };
-            points.push(UpsertPoint {
-                id,
-                vectors,
-                payload: row,
-            });
+                let mut row = self.parse_payload_dict()?;
+                let id_index = row
+                    .iter()
+                    .position(|(key, _)| key.eq_ignore_ascii_case("id"))
+                    .ok_or_else(|| {
+                        QqlError::validation(
+                            "QQL-VALIDATION-UPSERT-ID",
+                            "each UPSERT row requires an id",
+                            Some(span),
+                        )
+                    })?;
+                let (_, id) = row.remove(id_index);
+                let id = point_id_from_value(id, span)?;
+
+                let vectors = if let Some(index) = row
+                    .iter()
+                    .position(|(key, _)| key.eq_ignore_ascii_case("vector"))
+                {
+                    let (_, value) = row.remove(index);
+                    Some(point_vectors_from_value(value, Some(span))?)
+                } else {
+                    None
+                };
+                points.push(PointEntry::Inline(UpsertPoint {
+                    id,
+                    vectors,
+                    payload: row,
+                }));
+            }
             if self.peek()?.kind != TokenKind::Comma {
                 break;
             }
@@ -57,13 +70,7 @@ impl<'a> AstLowerer<'a> {
         } else {
             Vec::new()
         };
-
-        let shard_key = if self.peek()?.kind == TokenKind::Shard {
-            self.advance()?;
-            Some(self.parse_string()?)
-        } else {
-            None
-        };
+        let (shard_key, wait) = self.parse_optional_shard_and_wait()?;
 
         Ok(Stmt::Upsert(Box::new(UpsertStmt {
             collection,
@@ -71,6 +78,7 @@ impl<'a> AstLowerer<'a> {
             embedding,
             embed,
             shard_key,
+            wait,
         })))
     }
 
@@ -130,25 +138,5 @@ impl<'a> AstLowerer<'a> {
             self.advance()?;
         }
         Ok(directives)
-    }
-}
-
-fn point_vectors_from_value(
-    value: Value,
-    span: crate::error::Span,
-) -> Result<PointVectors, QqlError> {
-    match value {
-        Value::Dict(items)
-            if !items.iter().any(|(key, _)| {
-                key.eq_ignore_ascii_case("indices") || key.eq_ignore_ascii_case("values")
-            }) =>
-        {
-            let mut vectors = Vec::new();
-            for (name, value) in items {
-                vectors.push((name, super::helpers::vector_from_value(value, Some(span))?));
-            }
-            Ok(PointVectors::Named(vectors))
-        }
-        value => super::helpers::vector_from_value(value, Some(span)).map(PointVectors::Unnamed),
     }
 }

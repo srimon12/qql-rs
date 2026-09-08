@@ -267,6 +267,8 @@ pub struct CreateIndexStmt {
     pub field_type: String,
     /// `WITH (…)` index options (e.g. `is_tenant`, `prefix`).
     pub options: Vec<(String, Value)>,
+    /// Optional index creation durability confirmation (`WAIT true` / `WAIT false`).
+    pub wait: Option<bool>,
 }
 
 /// `DROP INDEX ON COLLECTION <c> FOR <field>` statement.

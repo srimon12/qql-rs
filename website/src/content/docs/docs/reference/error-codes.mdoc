@@ -93,6 +93,9 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PARSE-TRAILING` | Unexpected trailing token |
 | `QQL-PARSE-UPDATE` | Expected `VECTOR` or `PAYLOAD` after `SET` |
 | `QQL-PARSE-VALUE` | Unexpected value token |
+| `QQL-PARSE-BOOL` | Expected `true` or `false` |
+| `QQL-PARSE-DUPLICATE-CLAUSE` | Duplicate clause (for example a repeated `WAIT`) |
+| `QQL-PARSE-PARAM` | Expected a parameter identifier after `:` |
 
 ## Validation
 
@@ -127,6 +130,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-VALIDATION-IDF` | `PARAMS (idf = …)` is not `'global'` or `WHERE <filter>` |
 | `QQL-VALIDATION-USING` | This query expression does not accept `USING` |
 | `QQL-VALIDATION-VECTOR` | Invalid vector value |
+| `QQL-VALIDATION-UPSERT-BATCH` | `upsert_many` / `upsertMany` called with `batch_size` / `batchSize` below 1 |
 
 ## Planning
 
@@ -155,7 +159,13 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PLAN-UNSUPPORTED-PREFETCH` | `POINTS` / `CROSS RERANK` are not supported inside `PREFETCH` |
 | `QQL-REST-CLIENT-SIDE` | The operation is executed client-side and has no single Qdrant REST route |
 | `QQL-GRPC-QUOTA` | Quotas have no public gRPC service (upstream serves quota usage on the internal cluster port only, with no setter RPC); use REST (`SHOW QUOTAS` / `SET QUOTA`) |
+| `QQL-GRPC-SCROLL-LIMIT` | Scroll `LIMIT` exceeds `u32::MAX` — the bundled Qdrant proto stores scroll limit as `uint32` |
 | `QQL-BACKEND` | Generic backend or transport failure |
+| `QQL-BACKEND-AUTH` | Rejected credentials (HTTP 401/403, gRPC `Unauthenticated` / `PermissionDenied`) |
+| `QQL-BACKEND-COLLECTION-NOT-FOUND` | The backend reports a missing collection (HTTP 404, gRPC `NotFound`) |
+| `QQL-BACKEND-DIMENSION-MISMATCH` | Vector size disagrees with the collection schema |
+| `QQL-BACKEND-INDEX-NOT-READY` | The server index is still building — retry the query |
+| `QQL-BACKEND-STRICT-MODE` | The request violates the collection's strict-mode / quota limits |
 
 ## Value conversion
 
@@ -174,6 +184,8 @@ binding](/docs/language/queries/#parameter-binding--prepared-queries).
 |---|---|
 | `QQL-BIND-MIXED-STYLE` | The template mixes `:name` and `?`, or the binder received the other style |
 | `QQL-BIND-MISSING-PARAM` | A named placeholder has no bound value, or a positional index is out of range |
+| `QQL-BIND-UNBOUND-PARAM` | AST-level bind found a named placeholder (`:p`, `VECTOR :v`, `VALUES :p`) with no bound value |
+| `QQL-BIND-MISSING-POSITIONAL` | AST-level bind found a positional placeholder (`?`) with no bound value |
 | `QQL-BIND-UNUSED-PARAMS` | More positional values were supplied than `?` placeholders |
 | `QQL-BIND-BATCH-LENGTH` | A statement-scoped params list length does not match the statement count |
 | `QQL-BIND-DUPLICATE-PARAM` | A key collision occurred when flattening nested dictionary parameters |
@@ -250,6 +262,9 @@ target (`QQL-EDGE-DELETE-REQUIRES-TARGET`, `QQL-EDGE-CLEAR-PAYLOAD-REQUIRES-TARG
 `QQL-EDGE-DELETE-PAYLOAD-REQUIRES-TARGET`, `QQL-EDGE-DELETE-VECTORS-REQUIRES-TARGET`,
 `QQL-EDGE-SET-PAYLOAD-REQUIRES-TARGET`).
 
+`FACET` has no offline route: the edge backend fails closed with
+`QQL-EDGE-FACET` (run it against remote Qdrant over REST instead).
+
 The [Backend compatibility](/docs/reference/backend-compatibility/) matrix
 covers which features are available on each backend.
 
@@ -260,9 +275,14 @@ The full set of codes emitted by the reference implementation, generated from
 
 ```text
 QQL-BACKEND
+QQL-BACKEND-AUTH
+QQL-BACKEND-COLLECTION-NOT-FOUND
+QQL-BACKEND-DIMENSION-MISMATCH
 QQL-BACKEND-ENVELOPE
 QQL-BACKEND-HTTP
+QQL-BACKEND-INDEX-NOT-READY
 QQL-BACKEND-JSON
+QQL-BACKEND-STRICT-MODE
 QQL-BATCH-CARDINALITY
 QQL-BATCH-INVARIANT
 QQL-BIND-ALREADY-BOUND
@@ -270,9 +290,11 @@ QQL-BIND-BATCH-LENGTH
 QQL-BIND-DUPLICATE-PARAM
 QQL-BIND-INVALID-PARAMS
 QQL-BIND-MISSING-PARAM
+QQL-BIND-MISSING-POSITIONAL
 QQL-BIND-MIXED-STYLE
 QQL-BIND-NULL-PARAM
 QQL-BIND-TYPE-MISMATCH
+QQL-BIND-UNBOUND-PARAM
 QQL-BIND-UNSUPPORTED-STATEMENT
 QQL-BIND-UNUSED-PARAMS
 QQL-CLIENT-CLOSED
@@ -291,6 +313,7 @@ QQL-EDGE-DELETE-REQUIRES-TARGET
 QQL-EDGE-DELETE-VECTORS-REQUIRES-TARGET
 QQL-EDGE-DIR-ENTRY
 QQL-EDGE-EMBED
+QQL-EDGE-FACET
 QQL-EDGE-FIELD-NAME
 QQL-EDGE-FILTER-CONVERT
 QQL-EDGE-FILTER-DESERIALIZE
@@ -337,6 +360,7 @@ QQL-GRPC-LIST-TYPE
 QQL-GRPC-MATCH-VALUE
 QQL-GRPC-NO-RESULT
 QQL-GRPC-QUOTA
+QQL-GRPC-SCROLL-LIMIT
 QQL-GRPC-RRF-K
 QQL-GRPC-RRF-WEIGHT
 QQL-JSON-NONFINITE
@@ -345,11 +369,13 @@ QQL-LEX-CHAR
 QQL-LEX-NUMBER
 QQL-LEX-STRING
 QQL-MISSING-USING
+QQL-PARSE-BOOL
 QQL-PARSE-CLAUSE-ORDER
 QQL-PARSE-COMPARISON
 QQL-PARSE-CONTEXT
 QQL-PARSE-COUNT-CONFIG
 QQL-PARSE-CROSS-RERANK
+QQL-PARSE-DUPLICATE-CLAUSE
 QQL-PARSE-DUPLICATE-CTE
 QQL-PARSE-DUPLICATE-KEY
 QQL-PARSE-EMBED
@@ -373,6 +399,7 @@ QQL-PARSE-OBJECT-KEY
 QQL-PARSE-PAYLOAD-SELECTOR
 QQL-PARSE-POINT-ID
 QQL-PARSE-POINT-IDS
+QQL-PARSE-PARAM
 QQL-PARSE-POSITIVE-INTEGER
 QQL-PARSE-PREFETCH
 QQL-PARSE-QUERY-INPUT
@@ -441,6 +468,7 @@ QQL-VALIDATION-RERANK-USING
 QQL-VALIDATION-SCORE
 QQL-VALIDATION-SEARCH-PARAM
 QQL-VALIDATION-SLICE
+QQL-VALIDATION-UPSERT-BATCH
 QQL-VALIDATION-UPSERT-ID
 QQL-VALIDATION-USING
 QQL-VALIDATION-VECTOR

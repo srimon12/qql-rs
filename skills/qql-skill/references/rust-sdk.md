@@ -351,7 +351,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &[],
     )?;
 
-    // 4. Hierarchical ASCII Tree Explain (qql_core::explain)
+    // 4. Bulk ingest: point values in `batch_size` chunks. One `:rows`
+    // template is prepared once (schema fetched once) — prefer this over
+    // hand-rolled batch loops.
+    let rows: Vec<Value> = vec![
+        // {id, vector: {dense: [...]}, …payload} per entry
+    ];
+    let report = exec.upsert_many("docs", rows, 100, OnError::Stop).await?;
+
+    // 5. Hierarchical ASCII Tree Explain (qql_core::explain)
     let plan = qql_core::explain::explain(&bound)?;
     println!("{plan}");
 

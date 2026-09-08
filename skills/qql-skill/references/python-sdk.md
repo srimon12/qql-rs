@@ -186,6 +186,22 @@ spelling. `QUERY VECTOR :vec` now parses to the same statement (since
 0.4.0), but implicit+USING is the canonical documented form. Matrix params
 (list of number lists) bind as ColBERT multi-vectors on the `Stmt` path,
 and array-likes with `tolist()` (numpy arrays) bind directly.
+1-D C-contiguous float buffers (numpy `float32`/`float64`, `array.array`,
+memoryviews) bind as packed `f32` vectors with a single copy — prefer them
+over lists for bulk ingest; anything else keeps the `tolist()` path.
+Whole-point upsert params: `UPSERT INTO c VALUES :rows` binds a point dict
+(`{id, vector, …payload}`) or a list of them (splicing N points) — the same
+shape as inline rows, so bulk ingest is data, not text. Pair with a prepared
+statement to skip re-parsing every batch. Better: skip the loop entirely
+with the helper, which prepares once and chunks for you:
+
+```python
+rows = [
+    {"id": 1, "vector": {"dense": [0.1, 0.2, 0.3]}, "tag": "a"},
+    {"id": 2, "vector": {"dense": [0.4, 0.5, 0.6]}, "tag": "b"},
+]
+report = client.upsert_many("docs", rows, batch_size=100)
+```
 `LIMIT 0` is rejected at parse time: Qdrant's query API requires
 `limit >= 1` (verified live — the server answers 422), so the failure
 surfaces at the parse gate instead of as a runtime 422. Unbound

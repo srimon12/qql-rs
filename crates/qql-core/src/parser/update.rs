@@ -8,16 +8,6 @@ use crate::token::TokenKind;
 use alloc::boxed::Box;
 
 impl<'a> AstLowerer<'a> {
-    /// Optional trailing `SHARD '<key>'` on mutations that support custom sharding.
-    fn parse_optional_shard_key(&mut self) -> Result<Option<String>, QqlError> {
-        if self.peek()?.kind == TokenKind::Shard {
-            self.advance()?;
-            Ok(Some(self.parse_string()?))
-        } else {
-            Ok(None)
-        }
-    }
-
     pub fn parse_update(&mut self) -> Result<Stmt, QqlError> {
         self.expect(TokenKind::Update)?;
         let collection = self.parse_identifier()?;
@@ -36,13 +26,14 @@ impl<'a> AstLowerer<'a> {
                 self.expect(TokenKind::Id)?;
                 self.expect(TokenKind::Equals)?;
                 let point_id = self.parse_point_id("UPDATE VECTOR")?;
-                let shard_key = self.parse_optional_shard_key()?;
+                let (shard_key, wait) = self.parse_optional_shard_and_wait()?;
                 Ok(Stmt::UpdateVector(Box::new(UpdateVectorStmt {
                     collection,
                     point_id,
                     vector,
                     vector_name,
                     shard_key,
+                    wait,
                 })))
             }
             TokenKind::Payload => {
@@ -51,12 +42,13 @@ impl<'a> AstLowerer<'a> {
                 let payload = self.parse_payload_dict()?;
                 self.expect(TokenKind::Where)?;
                 let selector = selector_from_filter(self.parse_filter_expr()?);
-                let shard_key = self.parse_optional_shard_key()?;
+                let (shard_key, wait) = self.parse_optional_shard_and_wait()?;
                 Ok(Stmt::UpdatePayload(Box::new(UpdatePayloadStmt {
                     collection,
                     selector,
                     payload,
                     shard_key,
+                    wait,
                 })))
             }
             _ => Err(QqlError::parse(
@@ -81,12 +73,13 @@ impl<'a> AstLowerer<'a> {
             let collection = self.parse_identifier()?;
             self.expect(TokenKind::Where)?;
             let selector = selector_from_filter(self.parse_filter_expr()?);
-            let shard_key = self.parse_optional_shard_key()?;
+            let (shard_key, wait) = self.parse_optional_shard_and_wait()?;
             return Ok(Stmt::DeletePayload(Box::new(DeletePayloadStmt {
                 collection,
                 keys,
                 selector,
                 shard_key,
+                wait,
             })));
         }
         // Check if this is DELETE VECTOR or DELETE FROM
@@ -102,12 +95,13 @@ impl<'a> AstLowerer<'a> {
             let collection = self.parse_identifier()?;
             self.expect(TokenKind::Where)?;
             let selector = selector_from_filter(self.parse_filter_expr()?);
-            let shard_key = self.parse_optional_shard_key()?;
+            let (shard_key, wait) = self.parse_optional_shard_and_wait()?;
             return Ok(Stmt::DeleteVector(Box::new(DeleteVectorStmt {
                 collection,
                 selector,
                 vector_names,
                 shard_key,
+                wait,
             })));
         }
         // DELETE FROM
@@ -115,11 +109,12 @@ impl<'a> AstLowerer<'a> {
         let collection = self.parse_identifier()?;
         self.expect(TokenKind::Where)?;
         let selector = selector_from_filter(self.parse_filter_expr()?);
-        let shard_key = self.parse_optional_shard_key()?;
+        let (shard_key, wait) = self.parse_optional_shard_and_wait()?;
         Ok(Stmt::Delete(Box::new(DeleteStmt {
             collection,
             selector,
             shard_key,
+            wait,
         })))
     }
 
@@ -130,11 +125,12 @@ impl<'a> AstLowerer<'a> {
         let collection = self.parse_identifier()?;
         self.expect(TokenKind::Where)?;
         let selector = selector_from_filter(self.parse_filter_expr()?);
-        let shard_key = self.parse_optional_shard_key()?;
+        let (shard_key, wait) = self.parse_optional_shard_and_wait()?;
         Ok(Stmt::ClearPayload(Box::new(ClearPayloadStmt {
             collection,
             selector,
             shard_key,
+            wait,
         })))
     }
 }

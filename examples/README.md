@@ -56,6 +56,7 @@ examples below construct their client with it.
 
 | Directory | Stack | What it teaches |
 |-----------|-------|-----------------|
+| [`quickstart.py`](quickstart.py) / [`quickstart.mjs`](quickstart.mjs) / [`rust/quickstart/`](rust/quickstart/) | pyqql / nqql / qql-core | **Start here — offline, CI-run:** hybrid CTE as text → `inject_filter` + `SHARD` → bind → `compile*` route → `:rows` splice (`upsert_many` needs a server) |
 | [`python/`](python/) | pyqql | Offline parse → explain → compile → inject filter/shard; multi-tenant gateway |
 | [`nodejs/`](nodejs/) | nqql | Same gateway pattern in Node (N-API) |
 | [`rust/`](rust/) | qql-core | `ComparisonOp` inject API + fail-closed shard inject |

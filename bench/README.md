@@ -195,9 +195,8 @@ bench/bench_rust/target/release/bench_upsert [--iterations N] [--reps N] [--filt
 # 2. Python binding benchmark (requires installed pyqql)
 python3 bench/bench_python.py [--iterations N] [--reps N] [--filter SUBSTR] [--json]
 
-# 3. Node N-API + WASM benchmark (requires built nqql; WASM optional)
 #    (cd crates/nqql && npm run build)
-#    wasm-pack build crates/qql-wasm --release --target nodejs --out-dir pkg-node
+#    (cd crates/qql-wasm && wasm-pack build --release --target nodejs --out-dir pkg-node)
 node bench/bench_node.js [--iterations N] [--reps N] [--filter SUBSTR] [--json]
 ```
 

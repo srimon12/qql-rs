@@ -14,7 +14,7 @@ use qql_core::parser::Parser;
 use std::future::Future;
 
 /// Parse the `onError` option (`"stop"` default, `"continue"`).
-fn on_error_from(options: Option<&serde_json::Value>) -> qql::executor::OnError {
+pub fn on_error_from(options: Option<&serde_json::Value>) -> qql::executor::OnError {
     options
         .and_then(|o| o.get("onError"))
         .and_then(|v| v.as_str())
@@ -23,6 +23,50 @@ fn on_error_from(options: Option<&serde_json::Value>) -> qql::executor::OnError 
             _ => qql::executor::OnError::Stop,
         })
         .unwrap_or(qql::executor::OnError::Stop)
+}
+
+/// Parse the `batchSize` option (default 100). Values `< 1` fail closed with
+/// the same code as the Rust `Executor::upsert_many` core, so JS callers get
+/// the identical error without any I/O.
+pub fn batch_size_from(options: Option<&serde_json::Value>) -> Result<usize, QqlError> {
+    match options.and_then(|o| o.get("batchSize")) {
+        None => Ok(100),
+        Some(v) => match v.as_u64() {
+            Some(n) if n >= 1 => Ok(n as usize),
+            _ => Err(QqlError::validation(
+                "QQL-VALIDATION-UPSERT-BATCH",
+                "upsertMany batchSize must be >= 1",
+                None,
+            )),
+        },
+    }
+}
+
+/// Bulk ingest dispatch shared by both Node SDKs: `rows` must be the
+/// `Value::List` of point dicts produced by [`jsparams::unknown_to_value`]
+/// (typed arrays preserved — never the serde layer, which would mangle
+/// `Float32Array` into index-keyed objects). Non-list input fails closed
+/// with the same code as whole-point `Stmt.bind`.
+pub async fn upsert_many_dispatch(
+    executor: &qql::executor::Executor,
+    collection: String,
+    rows: ast::Value,
+    batch_size: usize,
+    on_error: qql::executor::OnError,
+) -> Result<qql::executor::ExecutionReport, QqlError> {
+    let rows = match rows {
+        ast::Value::List(rows) => rows,
+        _ => {
+            return Err(QqlError::validation(
+                "QQL-BIND-TYPE-MISMATCH",
+                "upsertMany rows must be an array of point objects ({id, vector, …payload})",
+                None,
+            ));
+        }
+    };
+    executor
+        .upsert_many(&collection, rows, batch_size, on_error)
+        .await
 }
 
 /// True when `params` is a non-empty array whose entries are all objects or

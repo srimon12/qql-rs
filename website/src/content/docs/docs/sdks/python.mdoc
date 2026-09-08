@@ -149,6 +149,29 @@ route = compile_query("QUERY TEXT :q FROM docs LIMIT :lim", {"q": "search", "lim
 print(client.compile("QUERY TEXT :q FROM docs LIMIT :lim", {"q": "search", "lim": 5}))
 ```
 
+## Bulk ingest
+
+Pass point dicts — payload as data, never SQL text. One `:rows` template
+is prepared once, then each `batch_size` chunk splices through the
+point-splice path with no re-parse and no per-batch schema fetch.
+Prefer this over hand-rolled batch loops:
+
+```python
+rows = [
+    {"id": 1, "vector": {"dense": [0.1, 0.2, 0.3]}, "tag": "a"},
+    {"id": 2, "vector": {"dense": [0.4, 0.5, 0.6]}, "tag": "b"},
+]
+report = client.upsert_many("docs", rows, batch_size=100)
+print(report["succeeded"], report["failed"])
+```
+
+Row vectors accept plain lists, 1-D float buffers (numpy, `array.array`,
+memoryviews — one copy, no per-element walk), and the flat
+`{"data": [...], "dim": N}` multivector form. Each dict has the same shape
+as an inline `VALUES {…}` row, so a misshapen row fails closed with
+`QQL-BIND-TYPE-MISMATCH` (missing `id` → `QQL-VALIDATION-UPSERT-ID`)
+instead of landing partial data.
+
 ## Typed results
 
 `Client.execute_hits` and `execute_async_hits` return `ScoredPoint` objects

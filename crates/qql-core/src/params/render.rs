@@ -53,6 +53,27 @@ pub fn value_to_literal(value: &Value) -> Result<String, QqlError> {
             out.push(']');
             Ok(out)
         }
+        Value::F32Array(values) => {
+            let mut out = String::from("[");
+            for (i, &f) in values.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                if !f.is_finite() {
+                    return Err(QqlError::validation(
+                        "QQL-BIND-TYPE-MISMATCH",
+                        format!("cannot bind non-finite float value '{f}'"),
+                        None,
+                    ));
+                }
+                // Shortest-f32 rendering (shared with AST vector formatting):
+                // widening to f64 first would print 0.1f32 as
+                // 0.10000000149011612.
+                out.push_str(&crate::fmt::expr::render_f32(f));
+            }
+            out.push(']');
+            Ok(out)
+        }
         Value::Dict(entries) => {
             let mut out = String::from("{");
             for (i, (k, v)) in entries.iter().enumerate() {

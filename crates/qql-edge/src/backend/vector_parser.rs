@@ -27,6 +27,12 @@ impl ToEdgeVector for PlanPointVectors {
                 }
                 Ok(VectorStructInternal::Named(map))
             }
+            PlanPointVectors::Param(name) => Err(err(format!(
+                "unbound parameter ':{name}' reached edge vector parsing"
+            ))),
+            PlanPointVectors::PositionalParam(idx) => Err(err(format!(
+                "unbound positional parameter ?{idx} reached edge vector parsing"
+            ))),
         }
     }
 }
@@ -48,6 +54,12 @@ fn plan_vector_value_internal(v: PlanVectorValue) -> Result<VectorInternal, QqlE
                 .map_err(|e| err(format!("invalid multivector: {e}")))?;
             Ok(vec.0)
         }
+        PlanVectorValue::Param(name) => Err(err(format!(
+            "unbound parameter ':{name}' reached edge vector execution"
+        ))),
+        PlanVectorValue::PositionalParam(idx) => Err(err(format!(
+            "unbound positional parameter ?{idx} reached edge vector execution"
+        ))),
     }
 }
 
