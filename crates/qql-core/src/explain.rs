@@ -190,9 +190,12 @@ pub fn explain_node(statement: &Stmt) -> String {
                 let _ = writeln!(output, "├── Shard Key: {}", shard);
             }
             if !statement.embed.is_empty() {
-                let _ = writeln!(output, "└── Embed Directives: {}", statement.embed.len());
+                let _ = writeln!(output, "├── Embed Directives: {}", statement.embed.len());
             } else {
-                output.push_str("└── Status: direct payload\n");
+                output.push_str("├── Status: direct payload\n");
+            }
+            if let Some(wait) = statement.wait {
+                let _ = writeln!(output, "└── Wait: {wait}");
             }
         }
         Stmt::CreateCollection(statement) => {
@@ -511,5 +514,16 @@ mod tests {
         assert!(plan.contains("status = 'archived'"));
         assert!(plan.contains("Shard Key: 'east'"));
         assert!(plan.contains("Wait: true"));
+    }
+
+    #[test]
+    fn explain_upsert_includes_shard_and_wait() {
+        let plan =
+            explain("UPSERT INTO docs VALUES {id: 1, text: 'a'} SHARD 101 WAIT true;").unwrap();
+        assert!(plan.contains("Statement: UPSERT"));
+        assert!(plan.contains("Shard Key: 101"));
+        assert!(plan.contains("Wait: true"));
+        let plain = explain("UPSERT INTO docs VALUES {id: 1, text: 'a'};").unwrap();
+        assert!(!plain.contains("Wait:"));
     }
 }
