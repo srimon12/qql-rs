@@ -44,7 +44,9 @@
             }
           }
         },
-        "shard_key": "honeywell"
+        "shard_key": {
+          "Keyword": "honeywell"
+        }
       }
     },
     {

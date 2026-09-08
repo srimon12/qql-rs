@@ -61,7 +61,7 @@ pub fn explain_node(statement: &Stmt) -> String {
             }
 
             if let Some(shard) = &query.shard_key {
-                let _ = writeln!(output, "├── Shard Key: '{}'", shard);
+                let _ = writeln!(output, "├── Shard Key: {shard}");
             }
 
             if !query.ctes.is_empty() {
@@ -174,7 +174,7 @@ pub fn explain_node(statement: &Stmt) -> String {
                 let _ = writeln!(output, "├── Filter: {}", render_filter(f));
             }
             if let Some(shard) = &statement.shard_key {
-                let _ = writeln!(output, "├── Shard Key: '{}'", shard);
+                let _ = writeln!(output, "├── Shard Key: {shard}");
             }
             if let Some(param) = &statement.limit_param {
                 let _ = writeln!(output, "└── Limit: {}", param);
@@ -267,7 +267,7 @@ pub fn explain_node(statement: &Stmt) -> String {
                 let _ = writeln!(output, "├── Filter: {}", render_filter(f));
             }
             if let Some(shard) = &statement.shard_key {
-                let _ = writeln!(output, "├── Shard Key: '{}'", shard);
+                let _ = writeln!(output, "├── Shard Key: {shard}");
             }
             if let Some(param) = &statement.limit_param {
                 let _ = writeln!(output, "├── Limit: {}", param);
@@ -301,7 +301,7 @@ pub fn explain_node(statement: &Stmt) -> String {
             explain_mutation_tail(
                 &mut output,
                 &statement.selector,
-                statement.shard_key.as_deref(),
+                statement.shard_key.as_ref(),
                 statement.wait,
             );
         }
@@ -314,7 +314,7 @@ pub fn explain_node(statement: &Stmt) -> String {
             explain_mutation_tail(
                 &mut output,
                 &statement.selector,
-                statement.shard_key.as_deref(),
+                statement.shard_key.as_ref(),
                 statement.wait,
             );
         }
@@ -327,7 +327,7 @@ pub fn explain_node(statement: &Stmt) -> String {
             explain_mutation_tail(
                 &mut output,
                 &statement.selector,
-                statement.shard_key.as_deref(),
+                statement.shard_key.as_ref(),
                 statement.wait,
             );
         }
@@ -340,7 +340,7 @@ pub fn explain_node(statement: &Stmt) -> String {
             explain_mutation_tail(
                 &mut output,
                 &statement.selector,
-                statement.shard_key.as_deref(),
+                statement.shard_key.as_ref(),
                 statement.wait,
             );
         }
@@ -355,7 +355,7 @@ pub fn explain_node(statement: &Stmt) -> String {
                 let _ = writeln!(output, "├── Vector: {name}");
             }
             if let Some(shard) = &statement.shard_key {
-                let _ = writeln!(output, "├── Shard Key: '{shard}'");
+                let _ = writeln!(output, "├── Shard Key: {shard}");
             }
             if let Some(wait) = statement.wait {
                 let _ = writeln!(output, "└── Wait: {wait}");
@@ -370,7 +370,7 @@ pub fn explain_node(statement: &Stmt) -> String {
             explain_mutation_tail(
                 &mut output,
                 &statement.selector,
-                statement.shard_key.as_deref(),
+                statement.shard_key.as_ref(),
                 statement.wait,
             );
         }
@@ -460,12 +460,12 @@ fn query_prefetches(expression: &QueryExpr) -> Option<Vec<String>> {
 fn explain_mutation_tail(
     output: &mut String,
     selector: &PointSelector,
-    shard_key: Option<&str>,
+    shard_key: Option<&ShardKey>,
     wait: Option<bool>,
 ) {
     let _ = writeln!(output, "├── Selector: {}", render_point_selector(selector));
     if let Some(shard) = shard_key {
-        let _ = writeln!(output, "├── Shard Key: '{shard}'");
+        let _ = writeln!(output, "├── Shard Key: {shard}");
     }
     if let Some(wait) = wait {
         let _ = writeln!(output, "└── Wait: {wait}");

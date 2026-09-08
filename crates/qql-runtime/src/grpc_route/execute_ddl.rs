@@ -123,9 +123,7 @@ pub(crate) async fn execute_create_collection(
                 .create_shard_key(qdrant::CreateShardKeyRequest {
                     collection_name: collection.to_owned(),
                     request: Some(qdrant::CreateShardKey {
-                        shard_key: Some(qdrant::ShardKey {
-                            key: Some(qdrant::shard_key::Key::Keyword(shard_key.clone())),
-                        }),
+                        shard_key: Some(super::common::shard_key_proto(shard_key)),
                         ..Default::default()
                     }),
                     ..Default::default()
@@ -269,9 +267,7 @@ pub(crate) async fn execute_drop_shard_key(
     let grpc_req = qdrant::DeleteShardKeyRequest {
         collection_name: collection.to_owned(),
         request: Some(qdrant::DeleteShardKey {
-            shard_key: Some(qdrant::ShardKey {
-                key: Some(qdrant::shard_key::Key::Keyword(request.shard_key.clone())),
-            }),
+            shard_key: Some(super::common::shard_key_proto(&request.shard_key)),
         }),
         ..Default::default()
     };

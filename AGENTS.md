@@ -271,7 +271,7 @@ policy bypass.
 * `SELECT` is rejected as an unrecognized statement. Use `QUERY POINTS` for point retrieval.
 * Duplicate object keys, config keys, CTE names, and query clauses are rejected.
 * `QqlError` always carries an explicit `ErrorKind` and `Span`.
-* `SHARD '<key>'` routing is supported on all DML plus Facet (QUERY, SCROLL, COUNT, FACET, UPSERT, DELETE, CLEAR PAYLOAD, DELETE PAYLOAD, DELETE VECTOR, UPDATE VECTOR, UPDATE PAYLOAD). DDL and SHOW cannot carry a shard key. Numeric keys (`SHARD 101`) stay typed end-to-end only on UPSERT and `CREATE SHARD KEY` (`ShardKey`/`PlanShardKey` Keyword vs Number, which hash differently on the wire); every other statement stores the key as a string, so a numeric `SHARD` there routes as the keyword `"101"` — use quoted keys unless the statement is UPSERT. `DROP SHARD KEY` accepts quoted keys only.
+* `SHARD '<key>'` routing is supported on all DML plus Facet (QUERY, SCROLL, COUNT, FACET, UPSERT, DELETE, CLEAR PAYLOAD, DELETE PAYLOAD, DELETE VECTOR, UPDATE VECTOR, UPDATE PAYLOAD). DDL and SHOW cannot carry a shard key. Shard keys are typed end-to-end: `SHARD 'acme'` routes to the keyword partition, `SHARD 101` to the numeric partition (`ShardKey`/`PlanShardKey` Keyword vs Number, which hash differently on the wire) — the parsed form survives parse → plan → REST/gRPC on every statement. `SHARD :tenant` binds like any placeholder (strings become keywords, non-negative integers numbers). `DROP SHARD KEY` accepts quoted or numeric keys.
 * Collection creation supports `shard_number`, `sharding_method`, and `shard_keys` via `WITH PARAMS`.
 * Payload indexes support `is_tenant = true` for Qdrant-native tenant optimization.
 

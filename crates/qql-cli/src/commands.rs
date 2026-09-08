@@ -194,11 +194,36 @@ pub async fn handle_exec(
     url: &str,
     use_edge: bool,
     query: &str,
+    params: Option<&serde_json::Value>,
     json: bool,
     quiet: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let executor = executor(url, use_edge)?;
-    let result = executor.execute(query, qql::executor::OnError::Stop).await;
+    let result = match params {
+        None => executor.execute(query, qql::executor::OnError::Stop).await,
+        Some(serde_json::Value::Object(obj)) => {
+            let mut map = std::collections::HashMap::new();
+            for (k, v) in obj {
+                map.insert(k.clone(), qql_core::ast::Value::from_json(v.clone())?);
+            }
+            executor
+                .execute_with_params(query, &map, qql::executor::OnError::Stop)
+                .await
+        }
+        Some(serde_json::Value::Array(arr)) => {
+            let items: Vec<qql_core::ast::Value> = arr
+                .iter()
+                .cloned()
+                .map(qql_core::ast::Value::from_json)
+                .collect::<Result<_, _>>()?;
+            executor
+                .execute_with_positional_params(query, &items, qql::executor::OnError::Stop)
+                .await
+        }
+        Some(_) => {
+            return Err("--params-file must contain a JSON object or array".into());
+        }
+    };
     executor.close().await?;
     let report = result?;
     if !quiet {

@@ -52,4 +52,4 @@ pub use validate::{
     collect_statement_params, stmt_has_point_params, validate_no_unbound_params,
     validate_no_unbound_scalar_params,
 };
-pub use value::{bind_point_id, bind_value, resolve_param_u64};
+pub use value::{bind_point_id, bind_shard_key, bind_value, resolve_param_u64};

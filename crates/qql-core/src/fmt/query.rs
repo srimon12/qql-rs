@@ -5,7 +5,7 @@ pub(crate) use super::query_expr::{
     render_search_params, render_vector_target,
 };
 
-use crate::ast::{QueryCollection, QueryStmt, escape_string};
+use crate::ast::{QueryCollection, QueryStmt};
 use crate::fmt::expr::{
     render_f64, render_name, render_payload_selector, render_placeholder, render_vector_selector,
 };
@@ -54,7 +54,7 @@ pub(crate) fn query_tail_clauses(query: &QueryStmt) -> Vec<String> {
         parts.push(format!("WHERE {}", render_filter(filter)));
     }
     if let Some(key) = &query.shard_key {
-        parts.push(format!("SHARD '{}'", escape_string(key)));
+        parts.push(format!("SHARD {key}"));
     }
     if let Some(params) = &query.params {
         parts.push(format!("PARAMS ({})", render_search_params(params)));

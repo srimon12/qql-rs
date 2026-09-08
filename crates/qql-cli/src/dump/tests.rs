@@ -7,7 +7,7 @@ use serde_json::json;
 use super::escape::*;
 use super::point::*;
 use super::quant::*;
-use super::{next_scroll_cursor, scroll_page_complete, *};
+use super::*;
 
 fn info_with_vectors(vectors: Vec<VectorSpec>, sparse: Vec<String>) -> CollectionInfo {
     CollectionInfo {
@@ -238,10 +238,46 @@ fn format_upsert_batch_statement() {
         json!({"id": 1, "vector": [0.1], "t": "a"}),
         json!({"id": 2, "vector": [0.2], "t": "b"}),
     ];
-    let stmt = format_upsert_statement("docs", &records);
+    let stmt = format_upsert_statement("docs", &records, None);
     assert!(stmt.starts_with("UPSERT INTO docs VALUES\n"));
+    assert!(!stmt.contains("SHARD"));
     let full = format!("{};", stmt.trim_end());
     qql_core::parser::Parser::parse(&full).expect("batch upsert should parse");
+}
+
+#[test]
+fn format_upsert_batch_with_shard_key_parses() {
+    use qql_core::ast::ShardKey;
+    let records = vec![json!({"id": 1, "vector": [0.1], "district": "Mitte"})];
+    let keyword =
+        format_upsert_statement("docs", &records, Some(&ShardKey::Keyword("Mitte".into())));
+    assert!(keyword.contains("SHARD 'Mitte'"));
+    qql_core::parser::Parser::parse(&format!("{};", keyword.trim_end()))
+        .expect("keyword SHARD upsert should parse");
+    let number = format_upsert_statement("docs", &records, Some(&ShardKey::Number(101)));
+    assert!(number.contains("SHARD 101"));
+    qql_core::parser::Parser::parse(&format!("{};", number.trim_end()))
+        .expect("numeric SHARD upsert should parse");
+}
+
+#[test]
+fn parse_shard_key_list_accepts_rest_and_grpc_shapes() {
+    use qql_core::ast::ShardKey;
+    // REST wraps each key: {"key": …}.
+    let rest = json!({ "result": { "shard_keys": [{"key": "Mitte"}, {"key": 101}] } });
+    assert_eq!(
+        parse_shard_key_list(&rest),
+        vec![ShardKey::Keyword("Mitte".into()), ShardKey::Number(101),]
+    );
+    // gRPC returns bare values.
+    let grpc = json!({ "result": { "shard_keys": ["Mitte", 101] } });
+    assert_eq!(
+        parse_shard_key_list(&grpc),
+        vec![ShardKey::Keyword("Mitte".into()), ShardKey::Number(101),]
+    );
+    // Empty / missing means an auto-sharded collection (single stream).
+    assert!(parse_shard_key_list(&json!({ "result": { "shard_keys": [] } })).is_empty());
+    assert!(parse_shard_key_list(&json!({ "result": {} })).is_empty());
 }
 
 #[test]
@@ -294,27 +330,20 @@ fn next_scroll_cursor_falls_back_to_last_id() {
 }
 
 #[test]
-fn scroll_page_complete_detects_short_and_stuck() {
-    let points = vec![json!({"id": 1})];
-    assert!(scroll_page_complete(
-        &points,
-        Some(&PlanPointId::Number(1)),
-        None,
-        10
-    ));
-    let full = vec![json!({"id": 1}), json!({"id": 2})];
-    assert!(scroll_page_complete(
-        &full,
-        Some(&PlanPointId::Number(1)),
-        Some(&PlanPointId::Number(1)),
-        2
-    ));
-    assert!(!scroll_page_complete(
-        &full,
-        Some(&PlanPointId::Number(2)),
-        Some(&PlanPointId::Number(1)),
-        2
-    ));
+fn drop_resumed_point_drops_only_the_cursor() {
+    let points = vec![json!({"id": 7}), json!({"id": 8})];
+    // Inclusive-offset backends repeat the resume cursor first.
+    assert_eq!(
+        drop_resumed_point(points.clone(), Some(&PlanPointId::Number(7))),
+        vec![json!({"id": 8})]
+    );
+    // Exclusive-offset pages never start at the cursor: untouched.
+    assert_eq!(
+        drop_resumed_point(points.clone(), Some(&PlanPointId::Number(6))),
+        points
+    );
+    assert_eq!(drop_resumed_point(points.clone(), None), points);
+    assert!(drop_resumed_point(Vec::new(), Some(&PlanPointId::Number(7))).is_empty());
 }
 
 #[test]
@@ -377,7 +406,12 @@ fn create_omits_zero_positive_only_hnsw_and_optimizer_keys() {
         }],
         vec![],
     );
-    info.schema.hnsw = None;
+    info.schema.hnsw = Some({
+        let mut collection_hnsw = serde_json::Map::new();
+        collection_hnsw.insert("m".into(), json!(16));
+        collection_hnsw.insert("max_indexing_threads".into(), json!(0i64));
+        collection_hnsw
+    });
     info.schema.optimizers = Some(opts);
     let stmt = generate_create_statement("docs", &info);
     assert!(

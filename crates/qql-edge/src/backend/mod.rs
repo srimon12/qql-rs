@@ -229,7 +229,7 @@ impl EdgeQdrant {
         collection: &str,
         req: &qql_plan::types::PointsRequest,
     ) -> Result<Value, QqlError> {
-        reject_shard_key(req.shard_key.as_deref())?;
+        reject_shard_key(req.shard_key.as_ref())?;
         let shard = self.open_shard(collection).await?;
         let ids = to_edge_ids(req.ids.iter())?;
         let with_payload = req
@@ -270,7 +270,7 @@ impl EdgeQdrant {
         collection: &str,
         req: &qql_plan::types::ScrollRequest,
     ) -> Result<Value, QqlError> {
-        reject_shard_key(req.shard_key.as_deref())?;
+        reject_shard_key(req.shard_key.as_ref())?;
         let shard = self.open_shard(collection).await?;
 
         let offset = match req.offset.as_ref() {
@@ -370,7 +370,7 @@ impl EdgeQdrant {
         collection: &str,
         req: &qql_plan::types::DeleteRequest,
     ) -> Result<Value, QqlError> {
-        reject_shard_key(req.shard_key.as_deref())?;
+        reject_shard_key(req.shard_key.as_ref())?;
         let shard = self.open_shard(collection).await?;
 
         let operation = if let Some(points) = &req.points {
@@ -407,7 +407,7 @@ impl EdgeQdrant {
         collection: &str,
         req: &qql_plan::types::ClearPayloadRequest,
     ) -> Result<Value, QqlError> {
-        reject_shard_key(req.shard_key.as_deref())?;
+        reject_shard_key(req.shard_key.as_ref())?;
         let shard = self.open_shard(collection).await?;
 
         let operation = if let Some(points) = &req.points {
@@ -445,7 +445,7 @@ impl EdgeQdrant {
         collection: &str,
         req: &qql_plan::types::DeletePayloadRequest,
     ) -> Result<Value, QqlError> {
-        reject_shard_key(req.shard_key.as_deref())?;
+        reject_shard_key(req.shard_key.as_ref())?;
         let shard = self.open_shard(collection).await?;
 
         let points = req
@@ -489,7 +489,7 @@ impl EdgeQdrant {
         collection: &str,
         req: &qql_plan::types::DeleteVectorRequest,
     ) -> Result<Value, QqlError> {
-        reject_shard_key(req.shard_key.as_deref())?;
+        reject_shard_key(req.shard_key.as_ref())?;
         let shard = self.open_shard(collection).await?;
         let vector_names: Vec<String> = req.vector.clone();
 
@@ -532,7 +532,7 @@ impl EdgeQdrant {
         collection: &str,
         req: &qql_plan::types::UpdateVectorRequest,
     ) -> Result<Value, QqlError> {
-        reject_shard_key(req.shard_key.as_deref())?;
+        reject_shard_key(req.shard_key.as_ref())?;
         let shard = self.open_shard(collection).await?;
 
         let mut pvps = Vec::with_capacity(req.points.len());
@@ -564,7 +564,7 @@ impl EdgeQdrant {
         collection: &str,
         req: &qql_plan::types::UpdatePayloadRequest,
     ) -> Result<Value, QqlError> {
-        reject_shard_key(req.shard_key.as_deref())?;
+        reject_shard_key(req.shard_key.as_ref())?;
         let shard = self.open_shard(collection).await?;
         let payload = qdrant_edge::Payload(req.payload.clone().into_iter().collect());
 
@@ -615,7 +615,7 @@ impl EdgeQdrant {
         collection: &str,
         req: &qql_plan::types::CountRequest,
     ) -> Result<Value, QqlError> {
-        reject_shard_key(req.shard_key.as_deref())?;
+        reject_shard_key(req.shard_key.as_ref())?;
         let shard = self.open_shard(collection).await?;
         let filter = convert_edge_filter(req.filter.as_ref())?;
         let count_req = qdrant_edge::CountRequest {
@@ -1043,7 +1043,7 @@ impl QdrantOps for EdgeQdrant {
         batch: &QueryBatchRequest,
     ) -> Result<Vec<serde_json::Value>, QqlError> {
         for request in &batch.searches {
-            reject_shard_key(request.shard_key.as_deref())?;
+            reject_shard_key(request.shard_key.as_ref())?;
         }
         let mut results = Vec::with_capacity(batch.searches.len());
         for req in &batch.searches {

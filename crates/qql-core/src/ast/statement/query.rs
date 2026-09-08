@@ -477,5 +477,5 @@ pub struct QueryStmt {
     /// `LIMIT` / `OFFSET` paging.
     pub page: PageSpec,
     /// `SHARD '<key>'` routing for tenant-partitioned collections.
-    pub shard_key: Option<String>,
+    pub shard_key: Option<super::ShardKey>,
 }

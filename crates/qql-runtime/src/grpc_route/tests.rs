@@ -542,53 +542,44 @@ fn grpc_fusion_method_maps_to_correct_enum() {
     }
 }
 
-/// Float equality filters must not silently lower to an empty `Match`:
-/// integral floats map to an integer match, non-integral floats produce a
-/// structured error (the pinned proto's Match has no double field).
+/// Float equality filters lower to `range` (gte == lte) in the plan, so the
+/// gRPC path converts them exactly like REST: no `QQL-GRPC-FLOAT-MATCH`, no
+/// integer coercion (`2.0` stays a float bound).
 #[test]
-fn grpc_float_equality_filter_is_explicit() {
-    // Non-integral float → structured error.
-    let stmt =
-        Parser::parse("QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE rating = 1.5 LIMIT 5;")
-            .unwrap();
-    let op = qql_plan::plan(&stmt).unwrap();
-    let (collection, req) = match &op {
-        qql_plan::PlannedOperation::Query {
-            collection,
-            request,
-        } => (collection, request),
-        other => panic!("expected Query, got {:?}", other),
-    };
-    let err = to_query_points(req, collection).unwrap_err();
-    assert_eq!(err.kind, qql_core::error::ErrorKind::Validation);
-    assert_eq!(err.code, "QQL-GRPC-FLOAT-MATCH");
-    assert!(err.message.contains("1.5"));
-
-    // Integral float → integer match (numerically equivalent in Qdrant).
-    let stmt =
-        Parser::parse("QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE rating = 2.0 LIMIT 5;")
-            .unwrap();
-    let op = qql_plan::plan(&stmt).unwrap();
-    let (collection, req) = match &op {
-        qql_plan::PlannedOperation::Query {
-            collection,
-            request,
-        } => (collection, request),
-        other => panic!("expected Query, got {:?}", other),
-    };
-    let qp = to_query_points(req, collection).unwrap();
-    let filter = qp.filter.expect("filter should be set");
-    let mv = filter.must[0]
-        .condition_one_of
-        .as_ref()
-        .and_then(|c| match c {
-            qdrant::condition::ConditionOneOf::Field(f) => f.r#match.as_ref(),
-            _ => None,
-        })
-        .expect("field match");
-    match mv.match_value.as_ref().unwrap() {
-        qdrant::r#match::MatchValue::Integer(n) => assert_eq!(*n, 2),
-        other => panic!("expected Integer(2), got {other:?}"),
+fn grpc_float_equality_filter_is_range() {
+    for (sql, expected) in [
+        (
+            "QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE rating = 1.5 LIMIT 5;",
+            1.5,
+        ),
+        (
+            "QUERY TEXT 'x' MODEL 'test-model' FROM docs WHERE rating = 2.0 LIMIT 5;",
+            2.0,
+        ),
+    ] {
+        let stmt = Parser::parse(sql).unwrap();
+        let op = qql_plan::plan(&stmt).unwrap();
+        let (collection, req) = match &op {
+            qql_plan::PlannedOperation::Query {
+                collection,
+                request,
+            } => (collection, request),
+            other => panic!("expected Query, got {:?}", other),
+        };
+        let qp = to_query_points(req, collection).unwrap();
+        let filter = qp.filter.expect("filter should be set");
+        let range = filter.must[0]
+            .condition_one_of
+            .as_ref()
+            .and_then(|c| match c {
+                qdrant::condition::ConditionOneOf::Field(f) => f.range.as_ref(),
+                _ => None,
+            })
+            .expect("field range");
+        assert_eq!(range.gte, Some(expected));
+        assert_eq!(range.lte, Some(expected));
+        assert_eq!(range.gt, None);
+        assert_eq!(range.lt, None);
     }
 }
 

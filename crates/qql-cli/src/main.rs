@@ -319,6 +319,50 @@ enum ConfigCommand {
     },
 }
 
+/// Named/positional params for `qql exec`. Bound on the AST (not string-spliced)
+/// so `UPSERT … VALUES :rows` can take a JSON array of point objects.
+fn collect_exec_params(
+    params: &[String],
+    params_file: Option<&PathBuf>,
+) -> Result<Option<serde_json::Value>, Box<dyn std::error::Error>> {
+    if params.is_empty() && params_file.is_none() {
+        return Ok(None);
+    }
+    let mut map = serde_json::Map::new();
+    if let Some(file_path) = params_file {
+        let content = std::fs::read_to_string(file_path)?;
+        let parsed: serde_json::Value = serde_json::from_str(&content)?;
+        match parsed {
+            serde_json::Value::Object(obj) => {
+                for (k, v) in obj {
+                    let key = k.strip_prefix(':').unwrap_or(&k).to_string();
+                    map.insert(key, v);
+                }
+            }
+            serde_json::Value::Array(_) if params.is_empty() => return Ok(Some(parsed)),
+            serde_json::Value::Array(_) => {
+                return Err("--params-file array cannot be combined with --param key=value".into());
+            }
+            _ => return Err("--params-file must contain a JSON object or array".into()),
+        }
+    }
+    for p in params {
+        let (key_raw, val_raw) = p
+            .split_once('=')
+            .ok_or_else(|| format!("parameter must be in key=value format, got '{p}'"))?;
+        let key = key_raw
+            .trim()
+            .strip_prefix(':')
+            .unwrap_or(key_raw.trim())
+            .to_string();
+        let val_trimmed = val_raw.trim();
+        let parsed_val: serde_json::Value = serde_json::from_str(val_trimmed)
+            .unwrap_or_else(|_| serde_json::Value::String(val_trimmed.to_string()));
+        map.insert(key, parsed_val);
+    }
+    Ok(Some(serde_json::Value::Object(map)))
+}
+
 fn resolve_query_params(
     query: &str,
     params: &[String],
@@ -450,8 +494,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             json,
             quiet,
         } => {
-            let bound = resolve_query_params(&query, &params, params_file.as_ref())?;
-            commands::handle_exec(&url, use_edge, &bound, json, quiet).await
+            let exec_params = collect_exec_params(&params, params_file.as_ref())?;
+            commands::handle_exec(&url, use_edge, &query, exec_params.as_ref(), json, quiet).await
         }
         Command::Execute {
             file,

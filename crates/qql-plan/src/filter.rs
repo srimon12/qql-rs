@@ -179,6 +179,19 @@ fn lower_point_id(predicate: &PointIdPredicate) -> FilterClause {
 
 fn lower_compare(field: &str, op: ComparisonOp, value: &Value) -> FilterClause {
     if op == ComparisonOp::Eq {
+        // Qdrant `match` rejects floats at runtime (MatchInterface has no
+        // float variant); exact float equality is `range` with gte == lte.
+        if let Value::Float(_) = value {
+            let v = value_to_json(value);
+            return field_condition(field, |fc| {
+                fc.range = Some(RangeParams {
+                    gt: None,
+                    gte: Some(v.clone()),
+                    lt: None,
+                    lte: Some(v),
+                })
+            });
+        }
         return field_condition(field, |fc| {
             fc.r#match = Some(MatchValue::Value {
                 value: value_to_json(value),
@@ -363,6 +376,21 @@ mod tests {
         assert_json(
             &lower_filter(&f),
             json!({"key": "status", "match": {"value": "active"}}),
+        );
+    }
+
+    #[test]
+    fn eq_float_lowers_to_range() {
+        // Qdrant `match` has no float variant; exact float equality must be
+        // `range` with gte == lte or the backend 400s (MatchInterface).
+        let f = FilterExpr::Compare {
+            field: "rating".into(),
+            op: ComparisonOp::Eq,
+            value: Value::Float(4.5),
+        };
+        assert_json(
+            &lower_filter(&f),
+            json!({"key": "rating", "range": {"gte": 4.5, "lte": 4.5}}),
         );
     }
 

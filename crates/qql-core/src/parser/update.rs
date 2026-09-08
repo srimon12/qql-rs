@@ -26,7 +26,7 @@ impl<'a> AstLowerer<'a> {
                 self.expect(TokenKind::Id)?;
                 self.expect(TokenKind::Equals)?;
                 let point_id = self.parse_point_id("UPDATE VECTOR")?;
-                let (shard_key, wait) = self.parse_optional_shard_and_wait()?;
+                let (shard_key, wait) = self.parse_optional_typed_shard_and_wait()?;
                 Ok(Stmt::UpdateVector(Box::new(UpdateVectorStmt {
                     collection,
                     point_id,
@@ -42,7 +42,7 @@ impl<'a> AstLowerer<'a> {
                 let payload = self.parse_payload_dict()?;
                 self.expect(TokenKind::Where)?;
                 let selector = selector_from_filter(self.parse_filter_expr()?);
-                let (shard_key, wait) = self.parse_optional_shard_and_wait()?;
+                let (shard_key, wait) = self.parse_optional_typed_shard_and_wait()?;
                 Ok(Stmt::UpdatePayload(Box::new(UpdatePayloadStmt {
                     collection,
                     selector,
@@ -73,7 +73,7 @@ impl<'a> AstLowerer<'a> {
             let collection = self.parse_identifier()?;
             self.expect(TokenKind::Where)?;
             let selector = selector_from_filter(self.parse_filter_expr()?);
-            let (shard_key, wait) = self.parse_optional_shard_and_wait()?;
+            let (shard_key, wait) = self.parse_optional_typed_shard_and_wait()?;
             return Ok(Stmt::DeletePayload(Box::new(DeletePayloadStmt {
                 collection,
                 keys,
@@ -95,7 +95,7 @@ impl<'a> AstLowerer<'a> {
             let collection = self.parse_identifier()?;
             self.expect(TokenKind::Where)?;
             let selector = selector_from_filter(self.parse_filter_expr()?);
-            let (shard_key, wait) = self.parse_optional_shard_and_wait()?;
+            let (shard_key, wait) = self.parse_optional_typed_shard_and_wait()?;
             return Ok(Stmt::DeleteVector(Box::new(DeleteVectorStmt {
                 collection,
                 selector,
@@ -109,7 +109,7 @@ impl<'a> AstLowerer<'a> {
         let collection = self.parse_identifier()?;
         self.expect(TokenKind::Where)?;
         let selector = selector_from_filter(self.parse_filter_expr()?);
-        let (shard_key, wait) = self.parse_optional_shard_and_wait()?;
+        let (shard_key, wait) = self.parse_optional_typed_shard_and_wait()?;
         Ok(Stmt::Delete(Box::new(DeleteStmt {
             collection,
             selector,
@@ -125,7 +125,7 @@ impl<'a> AstLowerer<'a> {
         let collection = self.parse_identifier()?;
         self.expect(TokenKind::Where)?;
         let selector = selector_from_filter(self.parse_filter_expr()?);
-        let (shard_key, wait) = self.parse_optional_shard_and_wait()?;
+        let (shard_key, wait) = self.parse_optional_typed_shard_and_wait()?;
         Ok(Stmt::ClearPayload(Box::new(ClearPayloadStmt {
             collection,
             selector,

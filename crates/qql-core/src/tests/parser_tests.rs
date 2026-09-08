@@ -508,7 +508,10 @@ fn shard_clause_parses_on_query_and_ctes_via_set_shard_key() {
     let Stmt::Query(q) = &with_clause else {
         panic!()
     };
-    assert_eq!(q.shard_key.as_deref(), Some("acme"));
+    assert_eq!(
+        q.shard_key.clone(),
+        Some(crate::ast::ShardKey::Keyword("acme".into()))
+    );
 
     // Host path after parse: property setter (recurses into CTEs)
     let mut stmt = Parser::parse(
@@ -518,9 +521,15 @@ fn shard_clause_parses_on_query_and_ctes_via_set_shard_key() {
     .unwrap();
     assert!(stmt.set_shard_key(Some("acme".into())));
     let Stmt::Query(q) = &stmt else { panic!() };
-    assert_eq!(q.shard_key.as_deref(), Some("acme"));
-    assert_eq!(q.ctes[0].query.shard_key.as_deref(), Some("acme"));
-    assert!(stmt.set_shard_key(Some(String::new()))); // empty clears
+    assert_eq!(
+        q.shard_key.clone(),
+        Some(crate::ast::ShardKey::Keyword("acme".into()))
+    );
+    assert_eq!(
+        q.ctes[0].query.shard_key.clone(),
+        Some(crate::ast::ShardKey::Keyword("acme".into()))
+    );
+    assert!(stmt.set_shard_key(Some(crate::ast::ShardKey::Keyword(String::new())))); // empty clears
     assert_eq!(stmt.shard_key(), None);
     assert!(
         !Parser::parse("SHOW COLLECTIONS")
@@ -535,14 +544,20 @@ fn mutation_shard_key_parses_from_qql() {
     let Stmt::ClearPayload(c) = clear else {
         panic!("expected ClearPayload");
     };
-    assert_eq!(c.shard_key.as_deref(), Some("tenant-a"));
+    assert_eq!(
+        c.shard_key.clone(),
+        Some(crate::ast::ShardKey::Keyword("tenant-a".into()))
+    );
 
     let del_vec =
         Parser::parse("DELETE VECTOR dense FROM docs WHERE id = 1 SHARD 'tenant-b';").unwrap();
     let Stmt::DeleteVector(d) = del_vec else {
         panic!("expected DeleteVector");
     };
-    assert_eq!(d.shard_key.as_deref(), Some("tenant-b"));
+    assert_eq!(
+        d.shard_key.clone(),
+        Some(crate::ast::ShardKey::Keyword("tenant-b".into()))
+    );
 
     let upd_vec =
         Parser::parse("UPDATE docs SET VECTOR dense = [0.1, 0.2] WHERE id = 1 SHARD 'tenant-c';")
@@ -550,7 +565,10 @@ fn mutation_shard_key_parses_from_qql() {
     let Stmt::UpdateVector(u) = upd_vec else {
         panic!("expected UpdateVector");
     };
-    assert_eq!(u.shard_key.as_deref(), Some("tenant-c"));
+    assert_eq!(
+        u.shard_key.clone(),
+        Some(crate::ast::ShardKey::Keyword("tenant-c".into()))
+    );
 
     let upd_pay =
         Parser::parse("UPDATE docs SET PAYLOAD = {\"a\": 1} WHERE id = 1 SHARD 'tenant-d';")
@@ -558,11 +576,17 @@ fn mutation_shard_key_parses_from_qql() {
     let Stmt::UpdatePayload(p) = upd_pay else {
         panic!("expected UpdatePayload");
     };
-    assert_eq!(p.shard_key.as_deref(), Some("tenant-d"));
+    assert_eq!(
+        p.shard_key.clone(),
+        Some(crate::ast::ShardKey::Keyword("tenant-d".into()))
+    );
 
     let mut host = Parser::parse("CLEAR PAYLOAD FROM docs WHERE id = 2;").unwrap();
     assert!(host.set_shard_key(Some("injected".into())));
-    assert_eq!(host.shard_key(), Some("injected"));
+    assert_eq!(
+        host.shard_key(),
+        Some(&crate::ast::ShardKey::Keyword("injected".into()))
+    );
 }
 
 #[test]
@@ -578,6 +602,107 @@ fn upsert_and_create_accept_numeric_shard_keys() {
         panic!("expected CreateShardKey");
     };
     assert_eq!(c.shard_key, crate::ast::ShardKey::Number(101));
+}
+
+#[test]
+fn repro_numeric_shard_key_stays_typed_on_drop() {
+    // DROP SHARD KEY must address numeric partitions: currently a parse error.
+    let stmt = Parser::parse("DROP SHARD KEY 101 ON COLLECTION docs;");
+    let Ok(Stmt::DropShardKey(d)) = stmt else {
+        panic!("expected DROP SHARD KEY 101 to parse, got {stmt:?}");
+    };
+    assert_eq!(d.shard_key, crate::ast::ShardKey::Number(101));
+}
+
+#[test]
+fn repro_shard_key_accepts_placeholders() {
+    // Grammar 1.7 promises params in clauses; SDK examples bind SHARD :tenant.
+    // Currently a parse error on every statement.
+    let stmt = Parser::parse("QUERY TEXT 'x' FROM docs SHARD :tenant LIMIT 1;");
+    let Ok(Stmt::Query(_)) = stmt else {
+        panic!("expected SHARD :tenant to parse, got {stmt:?}");
+    };
+}
+
+#[test]
+fn shard_keys_list_accepts_mixed_string_and_integer_keys() {
+    use crate::ast::ShardKey;
+    let stmt = Parser::parse(
+        "CREATE COLLECTION docs (dense VECTOR (4, Cosine)) WITH PARAMS (shard_keys = ['a', 5]);",
+    )
+    .unwrap();
+    let Stmt::CreateCollection(cc) = &stmt else {
+        panic!("expected CreateCollection");
+    };
+    let keys = cc
+        .config
+        .as_ref()
+        .and_then(|c| c.params.as_ref())
+        .and_then(|p| p.shard_keys.clone())
+        .expect("shard_keys");
+    assert_eq!(
+        keys,
+        vec![ShardKey::Keyword("a".into()), ShardKey::Number(5)]
+    );
+}
+
+#[test]
+fn numeric_shard_key_stays_typed_on_mutations() {
+    // The 1.7 silent-mistargeting fix: SHARD 101 must not become "101".
+    for (qql, expect) in [
+        (
+            "DELETE FROM docs WHERE id = 1 SHARD 101;",
+            crate::ast::ShardKey::Number(101),
+        ),
+        (
+            "UPDATE docs SET PAYLOAD = {\"a\": 1} WHERE id = 1 SHARD 7;",
+            crate::ast::ShardKey::Number(7),
+        ),
+        (
+            "CLEAR PAYLOAD FROM docs WHERE id = 1 SHARD 't';",
+            crate::ast::ShardKey::Keyword("t".into()),
+        ),
+    ] {
+        let stmt = Parser::parse(qql).unwrap();
+        assert_eq!(stmt.shard_key().cloned(), Some(expect), "{qql}");
+    }
+}
+
+#[test]
+fn shard_key_placeholder_binds_and_validates() {
+    use crate::ast::Value;
+    use crate::params::{bind_stmt, collect_statement_params, validate_no_unbound_params};
+    use alloc::collections::BTreeMap;
+
+    let mut stmt = Parser::parse("QUERY TEXT 'x' FROM docs SHARD :tenant LIMIT 1;").unwrap();
+    // Collected like any other placeholder so prepared statements require it.
+    let (named, _) = collect_statement_params(&stmt);
+    assert!(named.contains("tenant"));
+    // Unbound fails closed with the binder's own code.
+    let err = validate_no_unbound_params(&stmt).unwrap_err();
+    assert_eq!(err.code, "QQL-BIND-MISSING-PARAM");
+    // Bound values keep their form: strings route as keywords, ints numeric.
+    let mut map = BTreeMap::new();
+    map.insert("tenant".to_string(), Value::Str("acme".into()));
+    bind_stmt(&mut stmt, |k| map.get(k).cloned(), &[]).unwrap();
+    assert_eq!(
+        stmt.shard_key().cloned(),
+        Some(crate::ast::ShardKey::Keyword("acme".into()))
+    );
+    let mut stmt = Parser::parse("DELETE FROM docs WHERE id = 1 SHARD :n;").unwrap();
+    let mut map = BTreeMap::new();
+    map.insert("n".to_string(), Value::Int(101));
+    bind_stmt(&mut stmt, |k| map.get(k).cloned(), &[]).unwrap();
+    assert_eq!(
+        stmt.shard_key().cloned(),
+        Some(crate::ast::ShardKey::Number(101))
+    );
+    // Wrong-typed values fail with the bind type code, not a panic.
+    let mut stmt = Parser::parse("DELETE FROM docs WHERE id = 1 SHARD :n;").unwrap();
+    let mut map = BTreeMap::new();
+    map.insert("n".to_string(), Value::Bool(true));
+    let err = bind_stmt(&mut stmt, |k| map.get(k).cloned(), &[]).unwrap_err();
+    assert_eq!(err.code, "QQL-BIND-TYPE-MISMATCH");
 }
 
 #[test]
@@ -1032,4 +1157,26 @@ fn quoted_identifier_decodes_escapes() {
     let stmt = Parser::parse("QUERY TEXT 'x' FROM \"docs\\nset\";").unwrap();
     let Stmt::Query(q) = stmt else { panic!() };
     assert_eq!(q.collection, QueryCollection::Explicit("docs\nset".into()));
+}
+
+#[test]
+fn payload_mutation_filter_params_are_collected_for_prepared() {
+    // Clear/DeletePayload/DeleteVector selectors never fed collection, so
+    // prepared execution rejected their filter params as unused. Shard keys
+    // ride the same arms.
+    use crate::params::collect_statement_params;
+    for (qql, expect) in [
+        (
+            "CLEAR PAYLOAD FROM docs WHERE x = :v SHARD :t;",
+            vec!["t", "v"],
+        ),
+        ("DELETE PAYLOAD k FROM docs WHERE x = :v;", vec!["v"]),
+        ("DELETE VECTOR d FROM docs WHERE id = :i;", vec!["i"]),
+    ] {
+        let stmt = Parser::parse(qql).unwrap();
+        let (named, _) = collect_statement_params(&stmt);
+        for key in expect {
+            assert!(named.contains(key), "{qql} missing :{key}");
+        }
+    }
 }

@@ -538,3 +538,28 @@ async fn test_execute_with_named_params() {
         .unwrap();
     assert!(rep_param.ok);
 }
+
+#[tokio::test]
+async fn test_prepared_clear_payload_with_filter_and_shard_params() {
+    // Regression: Clear/DeletePayload/DeleteVector selector params were never
+    // collected, so prepared execution rejected them as unused. Shard params
+    // ride the same arms.
+    let client = MockQdrantClient::default();
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+
+    let prepared = executor
+        .prepare("CLEAR PAYLOAD FROM docs WHERE x = :v SHARD :t")
+        .await
+        .expect("prepare should succeed");
+    assert!(prepared.named_params().contains("v"));
+    assert!(prepared.named_params().contains("t"));
+
+    let mut params = HashMap::new();
+    params.insert("v".to_string(), qql_core::ast::Value::Str("a".into()));
+    params.insert("t".to_string(), qql_core::ast::Value::Str("acme".into()));
+    let report = executor
+        .execute_prepared(&prepared, &params)
+        .await
+        .expect("execute_prepared should succeed");
+    assert!(report.ok, "prepared clear payload must succeed: {report:?}");
+}

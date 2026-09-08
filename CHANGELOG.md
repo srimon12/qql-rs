@@ -39,8 +39,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Offline happy paths** — `examples/quickstart.py`, `examples/quickstart.mjs`, `examples/rust/quickstart` run the same narrative in CI with no server: hybrid CTE as text → `inject_filter` + `SHARD` → bind → `compile*` route → `:rows` splice.
 
 ### 💻 CLI & Interactive REPL
-- **CLI Parameter Binding** — Added `--param key=value` (`-p`) and `--params-file <path>` support to `qql exec` and `qql explain` for executing and explaining parameterized queries directly from the command line.
+- **CLI Parameter Binding** — Added `--param key=value` (`-p`) and `--params-file <path>` support to `qql exec` and `qql explain` for executing and explaining parameterized queries directly from the command line. Parameters bind on the AST (`execute_with_params`), so `UPSERT INTO c VALUES :rows WAIT true` ingests a JSON batch file per invocation.
 - **Interactive REPL Parameters** — Added `\param [key=value | clear]` (`\p`) command in the interactive REPL for inspecting, setting, and clearing session-scoped parameter bindings.
+- **CLI Table Coverage** — Dedicated tables for `QUERY POINTS` hits, `FACET` value/count, `SHOW SHARD KEYS`, and `SHOW QUOTAS`; wide text/vector cells truncate at `QQL_MAX_COL_WIDTH` (80) to protect terminal layout; zero-allocation padding.
+
+### 🔀 Collection Migration & Sharded Dump (`qql migrate` / `qql dump`)
+- **Collection mover** — `qql migrate` copies schema + points between clusters (not snapshots): `CREATE COLLECTION` with reshard/quantize overrides → `CREATE INDEX` before points → suppressed `indexing_threshold` during bulk load → checkpointed scroll → `:rows` upsert → optimizer restore (also on error / Ctrl+C) → exact `COUNT` verify → optional `--cutover` alias swap. Flags: `--to`, `--target-url` / `--target-api-key`, `--workers`, `--batch-size`, `--shard-number` / `--replication-factor` / `--sharding-method`, `--quantize scalar|binary|product|turbo`, `--where`, `--checkpoint` / `--resume` / `--restart`, `--dry-run`, `--recreate`, `--no-fast-bulk`, `--no-verify`, `--no-wait`, `--json`.
+- **Shard-key discovery** — `--shard-key-field <field>` discovers custom shard keys via `FACET <field> … LIMIT 10000 EXACT true` (payload-only scroll fallback past truncation or without an index), creates them in the schema phase with an `is_tenant = true` index, and routes each point with `SHARD '<key>'` (numbers stay numeric). `--shard-key` pins one literal; `--on-missing-shard-key error|skip|default=<key>` polices gaps. Standalone Qdrant fails in the schema phase instead of hanging ingest.
+- **Sharded dump round-trip** — `qql dump` on a `custom` collection emits `CREATE SHARD KEY` plus per-shard `SHARD`-routed `UPSERT` batches (auto-sharded output unchanged), so `qql execute` replays it onto a fresh collection with exact counts. Key listing accepts both REST (`{"key": …}`) and gRPC (bare value) shapes.
+- **E2E demo** — `crates/qql-cli/src/migrate/berlin_shard_migration.py` (stdlib-only) drives the CLI through create → ingest → verify → dry-run → migrate → verify → dump round-trip against a 3-node cluster.
 
 ### 🎯 Typed Results & Execution Reports
 - **Typed `ScoredPoint`** — Dataclass / interface exposing `id`, `score`, `version`, `payload`, `vector`, and `shard_key`. Numeric point IDs preserve integer types instead of converting through string round-trips; non-standard string IDs are preserved without loss. `score` defaults defensively to `0.0`.
@@ -58,6 +65,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Unified Compilation** — Free and client `compile(query, params?)` and `compileQuery` alias accept parameter bindings consistently across Python, Node, and WASM.
 - **WASM SDK parity** — `parseJson` (raw AST JSON, no object allocation), `Client.upsertMany` (prepare-once bulk ingest with move-not-clone chunking), typed-array params (`Float32Array`/`Float64Array` packed, integer arrays as int lists) across *every* binding entry point via one shared converter, and an `executeHits` one-shot in `dx.js`. The 1,733-line single-file binding is split into nine focused modules (params, statement, functions, report, response, client, execution pipeline, embed adapter).
 - **Edge Validation Gate** — `pyqql-edge` and `nqql-edge` now perform full parse and plan semantic validation on `is_valid` queries via `qql_plan::parse_and_plan`.
+- **Native FACET on gRPC** — `FACET` executes through Qdrant's `Points.Facet` RPC (`GrpcQdrant::facet`) instead of the `QQL-GRPC-FACET` rejection, with contract parity tests against the OpenAPI schema.
+- **Collection Schema Caching** — The executor caches collection schema and vector topology (`RwLock`, DDL-invalidated), eliminating a `GET /collections/{name}` roundtrip per query-kind resolution and upsert routing.
+- **32-Byte AST Layout** — Parameter span fields are `Option<Box<Span>>`, restoring `size_of::<Value>()` to 32 bytes (the inline `Option<Span>` had grown every `Value` to 48 bytes and taxed full-AST traversals ~3–11%).
 
 ### 🧹 Architecture, Deduplication & Code Hygiene
 - **Decomposed Core Modules (<400 Lines)** — Decomposed large monolithic files into focused, cohesive submodules under `crates/qql-core`:
@@ -65,6 +75,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `params/` (`mod.rs`, `text.rs`, `ast.rs`, `validate.rs`, `tests.rs`)
   - `ast/statement/` (`mod.rs`, `types.rs`, `query.rs`, `mutation.rs`, `retrieval.rs`, `ddl.rs`)
   - `parser/query/` (`mod.rs`, `expr.rs`, `pipeline.rs`)
+- **Executor, Plan & CLI Splits (<400 Lines)** — Same treatment, no behavior change (public paths re-exported): `qql-runtime` executor → `ddl/` + `batch` + `dispatch` + `prepared` + `response` with a decomposed test suite; `qql-plan` → `routing` / `bind` / `validate` / `rerank` / `query_types` / `mutation_types` / `ddl_types` / `quantization` / `ddl_rest`; CLI `table.rs` → `table/` package and `dump.rs` → `dump/` modules.
 - **Unified Vector Conversions** — Replaced duplicate vector extraction loops in `params.rs` with canonical `vector_from_value`, unifying dense, sparse dictionary, and multi-dense vector validation across parsing and binding.
 - **Strict ISO-8601 Datetime Parsing** — Centralized `looks_like_iso_datetime` in `formula.rs`, strictly rejecting trailing non-datetime characters across all parsing and binding paths.
 - **String & Identifier Helpers** — Single-sourced `is_simple_ident` and `escape_string` in `ast/mod.rs`, eliminating duplicated format and escape logic between `fmt.rs` and `params.rs`.
@@ -72,10 +83,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Eliminated `QqlError::syntax`** — Replaced all legacy syntax constructors across parser modules with explicit `QqlError::parse("QQL-PARSE-SYNTAX", ...)` or `syntax_err`.
 
 ### ⚠️ Breaking & Behavioral Changes
+- **Typed shard keys end-to-end** — `SHARD` routing keys are `ShardKey`/`PlanShardKey` (`Keyword` vs `Number`) from parse through REST/gRPC instead of strings. `SHARD 101`, `CREATE`/`DROP SHARD KEY 101`, and integer `shard_keys` entries keep numeric form to the wire (keyword and number keys hash differently); previously only `UPSERT` preserved numbers while other statements silently coerced them to keywords. `SHARD :tenant` binds like any placeholder. Host `Stmt.shard_key` getters/setters now take and return `str | int` (Python), `string | number | bigint` (Node), and string/`BigInt` (WASM); Rust `Stmt::shard_key` / `PlannedOperation::shard_key` return the typed key. AST JSON renders keys as `{"Keyword": …}` / `{"Number": …}`. The non-contract `?shard_key=` REST query parameter is no longer emitted (routing rides the body field).
 - **Empty Script Validation** — `execute("")` and `execute([])` now fail closed with `QQL-VALIDATION-EMPTY-SCRIPT` across all SDKs instead of returning an empty `{ ok: true }` report.
 - **`Stmt.toString()` Output Format** — Node and WASM `Stmt.toString()` now returns canonical, re-parseable SQL syntax rather than a truncated debug preview. Use `Stmt.toReadableString()` for truncated representations.
 - **Rust Edition 2024** — Entire workspace upgraded to Rust Edition 2024 with modern MSRV and let-chain resolution.
 - **Strict Limit Constraints** — Literal `LIMIT 0` and bound `LIMIT 0` are rejected across `QUERY`, `SCROLL`, and `FACET` (`QQL-PARSE-POSITIVE-INTEGER` / `QQL-BIND-INVALID-INTEGER`). `FACET ... WITH (limit = 0)` is strictly rejected with `QQL-PARSE-POSITIVE-INTEGER`. `OFFSET 0` remains valid.
+- **Strict Grammar Surface** — Trailing commas, empty `PARAMS ()`, `ALTER COLLECTION` without `WITH`, numeric field names, non-scalar `BETWEEN`/`IN` bounds, float HNSW integers (`m = 2.0`), operator object keys, and duplicate/unknown `FACET WITH` keys are rejected at parse time; unknown `VECTOR`/`OPTIMIZERS`/`QUANTIZATION`/index options are `Validation`, and `PARAMS`/config errors carry token spans.
+- **Fail-Closed Filter Injection** — `inject_filter` on `UPSERT` with a non-`Eq` operator or the `id` field reports the combination instead of silently no-oping; `ComparisonOp::parse_inject_op` is ASCII-case-insensitive.
+- **Imperative Executor Helpers Removed** — `Executor::scroll_ids` / `upsert_records` / `upsert_columns` are gone from the Rust executor and SDK clients; use declarative QQL (`SCROLL FROM … AFTER :offset LIMIT …`) and `upsert_many` / `upsertMany`.
 - **Point ID Preservation** — Non-standard string IDs are preserved as strings rather than coerced to empty strings.
 
 ### 🐛 Bug Fixes & Engine Reliability
@@ -90,11 +105,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`on_error = "continue"` Script Resilience** — Unbound parameter failures are recorded as discrete step failures (`operation: "BIND"`) rather than aborting batch execution and discarding prior results.
 - **gRPC Lazy Channel Initialization** — Resolved `there is no reactor running` panics on foreign threads by initializing the Tonic channel inside the driving runtime.
 - **BM25 Default Model Resolution** — Consolidated unspecified `USING bm25` targets to resolve canonically to `Qdrant/bm25` in `qql-plan`.
+- **Float Equality Filters** — `WHERE rating = 4.5` lowers to `range(gte, lte)` instead of `match`, which Qdrant rejects at runtime (`MatchInterface` 400). Integer/string equality still uses `match`.
+- **Unscored Retrieval Accessors** — `.hits()` / `.points()` no longer drop points without a `score`, so `SCROLL` and `QUERY POINTS` return rows instead of `[]` across Python, Node, and WASM.
+- **Batched `DELETE PAYLOAD`** — Same-collection `DELETE PAYLOAD` batches on REST / gRPC / edge like the other update ops, closing the native-isolates / WASM divergence; REST projection failures surface as `QQL-PLAN-SERIALIZE` instead of panicking.
+- **Hybrid Sparse Model Leg** — Hybrid queries embed the sparse leg with the request's `MODEL` instead of silently falling back to `"default"`; the WASM client rejects non-default dense `MODEL` clauses and empty dense responses, and empty embedding vectors are rejected on the query path.
+- **gRPC Converter Validation** — Unbound-parameter panics in the gRPC query converters return `QQL-BIND-*` errors like every other layer; no non-test `panic!` remains in the runtime crate.
 
 ### 🛠️ Workspace, Security & Conformance
 - **Security Audit CI** — Added scheduled workflow for `cargo audit`, CodeQL, and npm/pnpm dependency vulnerability scanning.
 - **CI Verification for Private & Shared Crates** — Automated clippy, tests, and anti-drift checks covering `pyqql-common`, `nqql-common`, and cross-SDK shared test suites.
 - **Release Automation** — `scripts/check_release.py` supports atomic version synchronization across Cargo, PyPI, npm, and editor WASM.
+- **Error-Code Sync Gate** — `scripts/check-error-codes.sh` verifies emitted-vs-documented codes in both directions (plus per-section coverage and sort order) as the CI `error-codes` job; the website error-code, multitenancy, and embed-trait references were re-synced with it.
+- **Head-to-Head Benchmark Harness** — `vs-qdrant/` pits `pyqql` / `nqql` / `qql` against the official Qdrant SDKs on a seeded, checksummed corpus (8,000 Berlin + 2,000 legal points) with parity-gated timings rendered from raw JSON.
 - **Language Conformance** — Synchronized language v1.7 specification with 40 conformance suites (276 valid statements, 62 invalid cases pinned).
 - **Editor Integration** — Bundled VS Code extension updated to 0.4.0 with the latest QQL 1.7 WASM engine.
 

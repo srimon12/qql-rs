@@ -255,6 +255,10 @@ stmt = parse("QUERY 'search' FROM docs USING dense LIMIT 10")[0]
 stmt.shard_key = "acme"
 print(stmt.shard_key)  # -> "acme"
 
+# Numeric partitions: ints stay numeric end-to-end (never coerced to keywords)
+stmt.shard_key = 101
+print(stmt.shard_key)  # -> 101
+
 # Inject a tenant filter
 stmt.inject_filter("tenant_id", "=", "acme")
 

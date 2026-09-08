@@ -3,6 +3,7 @@
 use std::error::Error;
 use std::io::Write;
 
+use qql_core::ast::ShardKey;
 use serde_json::Value;
 
 use super::escape::{escape_string, format_ident, is_simple_ident};
@@ -30,7 +31,14 @@ pub fn point_to_upsert_object(point: &Value) -> Option<Value> {
 }
 
 /// Format a batch of upsert records as a QQL `UPSERT INTO … VALUES …` statement.
-pub fn format_upsert_statement(collection: &str, records: &[Value]) -> String {
+///
+/// `shard_key` routes the batch on custom-sharded collections
+/// (`… SHARD 'tenant'`); `None` keeps the unrouted form.
+pub fn format_upsert_statement(
+    collection: &str,
+    records: &[Value],
+    shard_key: Option<&ShardKey>,
+) -> String {
     let mut body = format!("UPSERT INTO {} VALUES\n", format_ident(collection));
     for (idx, rec) in records.iter().enumerate() {
         body.push_str("  ");
@@ -40,6 +48,9 @@ pub fn format_upsert_statement(collection: &str, records: &[Value]) -> String {
         }
         body.push('\n');
     }
+    if let Some(key) = shard_key {
+        body.push_str(&format!(" SHARD {key}"));
+    }
     body
 }
 
@@ -47,8 +58,13 @@ pub fn write_upsert_batch(
     out: &mut impl Write,
     collection: &str,
     records: &[Value],
+    shard_key: Option<&ShardKey>,
 ) -> Result<(), Box<dyn Error>> {
-    write!(out, "{}", format_upsert_statement(collection, records))?;
+    write!(
+        out,
+        "{}",
+        format_upsert_statement(collection, records, shard_key)
+    )?;
     writeln!(out, ";")?;
     writeln!(out)?;
     Ok(())

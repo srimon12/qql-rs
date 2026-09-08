@@ -325,7 +325,7 @@ Collection config keys are case-insensitive and unique:
 `read_fan_out_factor` and `read_fan_out_delay_ms` are ALTER-only. Quantization
 type is `scalar`, `binary`, `product`, or `turbo`; `disabled = true` is an
 ALTER form. `sharding_method` accepts the string `'auto'` or `'custom'`;
-`shard_keys` is a list of strings.
+`shard_keys` is a list of string or non-negative integer keys (integers route to numeric partitions, never coerced to keywords).
 
 ### 6.1 Memory placement
 
@@ -471,7 +471,6 @@ invalid fixtures are normative for those cases.
 | `QQL-PARSE-NONNEGATIVE-INTEGER` | Value must be non-negative (for example `OFFSET`, `VALUES_COUNT`) |
 | `QQL-PARSE-SYNTAX` | Production-specific syntax or range failure |
 | `QQL-PARSE-COMPARISON` | Expected a comparison operator |
-| `QQL-PARSE-CONTEXT` | `CONTEXT` requires at least one positive/negative pair |
 | `QQL-PARSE-COUNT-CONFIG` | `COUNT … WITH (…)` accepts only `exact = true` / `exact = false` |
 | `QQL-PARSE-CROSS-RERANK` | `CROSS RERANK` requires `TEXT '…'` or a string query input |
 | `QQL-PARSE-EMBED` | `EMBED USING` requires `DENSE`, `SPARSE`, `MULTI`, `IMAGE`, or `MODEL` |
@@ -484,7 +483,6 @@ invalid fixtures are normative for those cases.
 | `QQL-PARSE-IDENTIFIER` | Expected an identifier or quoted name |
 | `QQL-PARSE-IN` | `IN` / `NOT IN` requires a non-empty value list |
 | `QQL-PARSE-INDEX-TYPE` | Unsupported `CREATE INDEX` field type |
-| `QQL-PARSE-INTEGER` | Invalid integer literal |
 | `QQL-PARSE-LITERAL` | Expected a scalar literal |
 | `QQL-PARSE-MATCH-ANY` | `MATCH ANY` requires a non-empty exact-value list |
 | `QQL-PARSE-NUMBER` | Expected a number |

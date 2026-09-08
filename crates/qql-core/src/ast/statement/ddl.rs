@@ -180,7 +180,7 @@ pub struct CollectionParamsConfig {
     /// Shard placement method: `auto` or `custom`.
     pub sharding_method: Option<String>,
     /// Tenant keys enabled for custom sharding.
-    pub shard_keys: Option<Vec<String>>,
+    pub shard_keys: Option<Vec<super::ShardKey>>,
 }
 
 /// Full `WITH`-clause configuration of a collection.
@@ -302,7 +302,7 @@ pub struct DropShardKeyStmt {
     /// Collection to update.
     pub collection: String,
     /// Shard key value to remove.
-    pub shard_key: String,
+    pub shard_key: super::ShardKey,
 }
 
 /// Global quota configuration statement (`SET QUOTA (…) [WAIT bool]`).

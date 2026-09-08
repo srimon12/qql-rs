@@ -238,7 +238,7 @@ pub struct MigratePlan {
     pub create: String,
     /// `CREATE INDEX` statements, payload indexes first.
     pub indexes: Vec<String>,
-    /// `CREATE SHARD KEY` statements known up front (fixed `--shard-key`).
+    /// `CREATE SHARD KEY` statements (fixed `--shard-key` or FACET-discovered).
     pub shard_keys: Vec<String>,
     /// `ALTER COLLECTION` restoring optimizer indexing after bulk load.
     pub restore_optimizers: Option<String>,

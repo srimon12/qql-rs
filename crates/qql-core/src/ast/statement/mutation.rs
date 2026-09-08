@@ -184,7 +184,7 @@ pub struct ClearPayloadStmt {
     /// Points whose payload is cleared.
     pub selector: PointSelector,
     /// `SHARD '<key>'` routing key.
-    pub shard_key: Option<String>,
+    pub shard_key: Option<super::ShardKey>,
     /// Optional write durability confirmation (`WAIT true` / `WAIT false`).
     pub wait: Option<bool>,
 }
@@ -200,7 +200,7 @@ pub struct DeleteVectorStmt {
     /// Named vectors to remove.
     pub vector_names: Vec<String>,
     /// `SHARD '<key>'` routing key.
-    pub shard_key: Option<String>,
+    pub shard_key: Option<super::ShardKey>,
     /// Optional write durability confirmation (`WAIT true` / `WAIT false`).
     pub wait: Option<bool>,
 }
@@ -226,7 +226,7 @@ pub struct DeleteStmt {
     /// Points to delete.
     pub selector: PointSelector,
     /// `SHARD '<key>'` routing key.
-    pub shard_key: Option<String>,
+    pub shard_key: Option<super::ShardKey>,
     /// Optional write durability confirmation (`WAIT true` / `WAIT false`).
     pub wait: Option<bool>,
 }
@@ -244,7 +244,7 @@ pub struct UpdateVectorStmt {
     /// Named vector to update; `None` targets the unnamed vector.
     pub vector_name: Option<String>,
     /// `SHARD '<key>'` routing key.
-    pub shard_key: Option<String>,
+    pub shard_key: Option<super::ShardKey>,
     /// Optional write durability confirmation (`WAIT true` / `WAIT false`).
     pub wait: Option<bool>,
 }
@@ -260,7 +260,7 @@ pub struct DeletePayloadStmt {
     /// Points whose payload keys are removed.
     pub selector: PointSelector,
     /// `SHARD '<key>'` routing key.
-    pub shard_key: Option<String>,
+    pub shard_key: Option<super::ShardKey>,
     /// Optional write durability confirmation (`WAIT true` / `WAIT false`).
     pub wait: Option<bool>,
 }
@@ -276,7 +276,7 @@ pub struct UpdatePayloadStmt {
     /// Payload keys to merge into the points.
     pub payload: Vec<(String, Value)>,
     /// `SHARD '<key>'` routing key.
-    pub shard_key: Option<String>,
+    pub shard_key: Option<super::ShardKey>,
     /// Optional write durability confirmation (`WAIT true` / `WAIT false`).
     pub wait: Option<bool>,
 }

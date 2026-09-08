@@ -83,7 +83,10 @@ test('Stmt.shardKey setter supports DELETE PAYLOAD', () => {
   const [stmt] = nqql.parse("DELETE PAYLOAD draft FROM docs WHERE status = 'archived'");
   stmt.shardKey = 'tenant-a';
   assert.strictEqual(stmt.shardKey, 'tenant-a');
-  assert.strictEqual(stmt.toObject().DeletePayload.shard_key, 'tenant-a');
+  assert.deepStrictEqual(stmt.toObject().DeletePayload.shard_key, { Keyword: 'tenant-a' });
+  stmt.shardKey = 101;
+  assert.strictEqual(stmt.shardKey, 101n);
+  assert.deepStrictEqual(stmt.toObject().DeletePayload.shard_key, { Number: 101 });
 });
 test('Stmt.shardKey from SHARD clause and property', () => {
   const [s] = nqql.parse("DELETE PAYLOAD draft FROM docs WHERE status = 'x' SHARD 'tenant'");

@@ -76,6 +76,8 @@ const result = await client.execute(stmt);
 
 // Host-resolved after parse:
 // stmt.shardKey = "honeywell";
+// Numeric partitions stay numeric (BigInt on read):
+// stmt.shardKey = 101;
 ```
 
 `injectFilter` does not support `!=` — use equality or rewrite the query.

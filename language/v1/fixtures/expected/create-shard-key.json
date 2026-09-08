@@ -24,11 +24,31 @@
     {
       "DropShardKey": {
         "collection": "docs",
-        "shard_key": "acme"
+        "shard_key": {
+          "Keyword": "acme"
+        }
       }
     },
     {
       "ShowShardKeys": "docs"
+    },
+    {
+      "CreateShardKey": {
+        "collection": "docs",
+        "replication_factor": null,
+        "shard_key": {
+          "Number": 101
+        },
+        "shards_number": 2
+      }
+    },
+    {
+      "DropShardKey": {
+        "collection": "docs",
+        "shard_key": {
+          "Number": 101
+        }
+      }
     }
   ]
 }

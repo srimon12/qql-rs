@@ -93,6 +93,15 @@ pub fn generate_create_statement(collection: &str, info: &CollectionInfo) -> Str
     stmt
 }
 
+fn is_auto_zero(val: &Value) -> bool {
+    match val {
+        Value::Number(n) => {
+            n.as_u64() == Some(0) || n.as_i64() == Some(0) || n.as_f64() == Some(0.0)
+        }
+        _ => false,
+    }
+}
+
 /// QQL `config_positive_u64` keys. Qdrant reports `0` for "auto"/unset; emitting
 /// `key = 0` fails parse, so dump/migrate omit those zeros.
 const POSITIVE_ONLY_KEYS: &[&str] = &[
@@ -113,7 +122,7 @@ pub fn format_config_block(
     let mut opts = Vec::new();
     for key in allowed {
         if let Some(val) = map.get(*key) {
-            if POSITIVE_ONLY_KEYS.contains(key) && val.as_u64() == Some(0) {
+            if POSITIVE_ONLY_KEYS.contains(key) && is_auto_zero(val) {
                 continue;
             }
             if let Some(opt) = format_index_option(key, val) {

@@ -249,7 +249,7 @@ fn split_by_payload_field() {
     ];
     let (mut groups, skipped) = split_by_shard(records, &opts).unwrap();
     assert_eq!(skipped, 0);
-    groups.sort_by(|a, b| a.shard_key.cmp(&b.shard_key));
+    groups.sort_by_key(|g| g.shard_key.as_ref().map(|k| k.to_string()));
     assert_eq!(groups.len(), 2);
     assert_eq!(
         groups[0].shard_key.as_ref().and_then(|k| k.as_keyword()),
@@ -370,4 +370,59 @@ fn custom_sharding_probe_sql_parses() {
         .expect("probe CREATE SHARD KEY");
     qql_core::parser::Parser::parse("DROP SHARD KEY '__qql_migrate_probe__' ON COLLECTION docs;")
         .expect("probe DROP SHARD KEY");
+}
+
+#[test]
+fn json_to_shard_key_keyword_and_number() {
+    use super::discover::json_to_shard_key;
+    assert_eq!(
+        json_to_shard_key(&json!("acme")),
+        Some(qql_core::ast::ShardKey::Keyword("acme".into()))
+    );
+    assert_eq!(
+        json_to_shard_key(&json!(101)),
+        Some(qql_core::ast::ShardKey::Number(101))
+    );
+    assert_eq!(json_to_shard_key(&json!("")), None);
+    assert_eq!(json_to_shard_key(&json!(-1)), None);
+}
+
+#[test]
+fn facet_hits_read_wrapped_and_flat() {
+    use super::discover::facet_hits;
+    let wrapped = json!({
+        "result": {
+            "hits": [
+                {"value": "Mitte", "count": 3},
+                {"value": 101, "count": 1}
+            ]
+        }
+    });
+    let hits = facet_hits(Some(&wrapped));
+    assert_eq!(hits.len(), 2);
+    assert_eq!(hits[0].0, json!("Mitte"));
+    assert_eq!(hits[1].0, json!(101));
+    let flat = json!([{"value": "acme", "count": 9}]);
+    assert_eq!(facet_hits(Some(&flat)).len(), 1);
+}
+
+#[test]
+fn create_shard_key_sql_parses_keyword_and_number() {
+    let k = super::discover::create_shard_key_sql(
+        "docs",
+        &qql_core::ast::ShardKey::Keyword("acme".into()),
+    );
+    qql_core::parser::Parser::parse(&format!("{k};")).expect("keyword CREATE SHARD KEY");
+    let n = super::discover::create_shard_key_sql("docs", &qql_core::ast::ShardKey::Number(101));
+    qql_core::parser::Parser::parse(&format!("{n};")).expect("numeric CREATE SHARD KEY");
+}
+
+#[test]
+fn facet_discovery_sql_parses() {
+    qql_core::parser::Parser::parse("FACET tenant FROM docs LIMIT 10000 EXACT true;")
+        .expect("FACET discovery");
+    qql_core::parser::Parser::parse(
+        "FACET tenant FROM docs WHERE city = 'berlin' LIMIT 10000 EXACT true;",
+    )
+    .expect("FACET discovery with WHERE");
 }

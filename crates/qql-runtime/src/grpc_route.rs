@@ -39,6 +39,7 @@ pub use execute_write::execute_update_batch_grpc;
 /// Test-only re-exports for REST/gRPC parity contract tests.
 #[cfg(test)]
 pub(crate) mod test_api {
+    pub(crate) use super::common::shard_key_selector;
     pub(crate) use super::query::{to_facet_counts, to_query_points, to_vector_input};
     pub(crate) use super::responses::facet_hit_to_json;
 }

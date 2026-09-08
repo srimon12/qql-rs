@@ -14,7 +14,7 @@
 
 use pyo3::exceptions::{PyRuntimeError, PySyntaxError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyList};
+use pyo3::types::{PyAny, PyBool, PyDict, PyInt, PyList, PyString};
 use qql_core::ast::{self, Value};
 use qql_core::error::QqlError;
 use qql_core::lexer::Lexer;
@@ -373,6 +373,38 @@ pub fn bind_py_params(
 //  Stmt class — identical surface in pyqql and pyqql-edge
 // ═══════════════════════════════════════════════════════════════════
 
+/// Convert a Python `shard_key` value to its typed form.
+///
+/// `str` (non-empty) becomes a keyword key, integers become numeric keys, and
+/// `None`/empty clears. `bool` is rejected explicitly — it subclasses `int`
+/// but `True` as shard `1` would be silent mistargeting, the exact failure
+/// this typing exists to prevent.
+fn py_shard_key_from_value(value: &Bound<'_, PyAny>) -> PyResult<Option<qql_core::ast::ShardKey>> {
+    use qql_core::ast::ShardKey;
+    if value.is_instance_of::<PyString>() {
+        let s: String = value
+            .extract()
+            .map_err(|_| PyValueError::new_err("shard_key string is not valid Unicode"))?;
+        return Ok(if s.is_empty() {
+            None
+        } else {
+            Some(ShardKey::Keyword(s))
+        });
+    }
+    if value.is_instance_of::<PyBool>() {
+        return Err(PyValueError::new_err(
+            "shard_key must be str, int, or None (bool is not a shard key)",
+        ));
+    }
+    if value.is_instance_of::<PyInt>() {
+        let n: u64 = value
+            .extract()
+            .map_err(|_| PyValueError::new_err("shard_key integer must fit in u64"))?;
+        return Ok(Some(ShardKey::Number(n)));
+    }
+    Err(PyValueError::new_err("shard_key must be str, int, or None"))
+}
+
 /// A parsed QQL statement handle (mirrors `nqql`'s `Stmt` and `qql-wasm`'s).
 #[pyclass(name = "Stmt", from_py_object)]
 #[derive(Clone)]
@@ -427,13 +459,27 @@ impl PyStmt {
     /// QQL `SHARD '…'` routing key on this statement (request-level; not a filter).
     /// Prefer writing `SHARD 'tenant'` in QQL; use the setter only when the host
     /// resolves the key after parse. Empty / None clears. Recurses into CTEs.
+    ///
+    /// Reads back `str` for keyword keys, `int` for numeric keys, `None` when
+    /// unset (placeholders also read as `None` — bind first).
     #[getter]
-    fn shard_key(&self) -> Option<String> {
-        self.inner.shard_key().map(str::to_owned)
+    fn shard_key<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
+        match self.inner.shard_key() {
+            None => Ok(None),
+            Some(qql_core::ast::ShardKey::Keyword(s)) => Ok(Some(PyString::new(py, s).into_any())),
+            Some(qql_core::ast::ShardKey::Number(n)) => Ok(Some(PyInt::new(py, *n).into_any())),
+            // Unbound placeholders have no host value yet; bind first.
+            Some(_) => Ok(None),
+        }
     }
 
     #[setter]
-    fn set_shard_key(&mut self, key: Option<String>) -> PyResult<()> {
+    fn set_shard_key(&mut self, key: Option<Bound<'_, PyAny>>) -> PyResult<()> {
+        let key = match key {
+            None => None,
+            // Empty strings clear, matching the pre-typed core setter contract.
+            Some(value) => py_shard_key_from_value(&value)?,
+        };
         if !self.inner.set_shard_key(key) {
             return Err(PyValueError::new_err(
                 "cannot set shard_key on statement type that does not support sharding (e.g. DDL statements)",

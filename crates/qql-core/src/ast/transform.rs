@@ -1,87 +1,90 @@
 use super::{
     ComparisonOp, FilterExpr, PointId, PointIdPredicate, PointSelector, Prefetch, PrefetchSource,
-    QueryExpr, QueryStmt, Stmt, Value,
+    QueryExpr, QueryStmt, ShardKey, Stmt, Value,
 };
 use crate::error::QqlError;
 use alloc::boxed::Box;
-use alloc::string::{String, ToString};
+use alloc::string::ToString;
 
 impl Stmt {
     /// Custom shard routing key for this statement, if any.
     ///
-    /// Corresponds to QQL `SHARD '…'` on DML, lowered to request-level
+    /// Corresponds to QQL `SHARD` on DML, lowered to request-level
     /// `shard_key` (REST) / `ShardKeySelector` (gRPC) — never inside `Filter`.
-    pub fn shard_key(&self) -> Option<&str> {
+    /// Keyword and numeric forms are preserved (`ShardKey::Number(101)` reads
+    /// back as a number, never coerced to `"101"`).
+    pub fn shard_key(&self) -> Option<&ShardKey> {
         match self {
-            Self::Query(query) => query.shard_key.as_deref(),
-            Self::Scroll(scroll) => scroll.shard_key.as_deref(),
-            Self::Count(count) => count.shard_key.as_deref(),
-            Self::Facet(facet) => facet.shard_key.as_deref(),
-            Self::Upsert(upsert) => upsert.shard_key.as_ref().and_then(|k| k.as_keyword()),
-            Self::Delete(delete) => delete.shard_key.as_deref(),
-            Self::ClearPayload(clear) => clear.shard_key.as_deref(),
-            Self::DeletePayload(delete) => delete.shard_key.as_deref(),
-            Self::DeleteVector(delete) => delete.shard_key.as_deref(),
-            Self::UpdateVector(update) => update.shard_key.as_deref(),
-            Self::UpdatePayload(update) => update.shard_key.as_deref(),
+            Self::Query(query) => query.shard_key.as_ref(),
+            Self::Scroll(scroll) => scroll.shard_key.as_ref(),
+            Self::Count(count) => count.shard_key.as_ref(),
+            Self::Facet(facet) => facet.shard_key.as_ref(),
+            Self::Upsert(upsert) => upsert.shard_key.as_ref(),
+            Self::Delete(delete) => delete.shard_key.as_ref(),
+            Self::ClearPayload(clear) => clear.shard_key.as_ref(),
+            Self::DeletePayload(delete) => delete.shard_key.as_ref(),
+            Self::DeleteVector(delete) => delete.shard_key.as_ref(),
+            Self::UpdateVector(update) => update.shard_key.as_ref(),
+            Self::UpdatePayload(update) => update.shard_key.as_ref(),
             _ => None,
         }
     }
 
-    /// Set custom shard routing (same field as QQL `SHARD '…'`).
+    /// Set custom shard routing (same field as QQL `SHARD`).
     ///
-    /// Prefer writing `SHARD 'tenant'` in the query when the tenant is known at
-    /// authoring time. Use this setter only when the host resolves the key after
-    /// parse (e.g. from auth context) without re-stringifying QQL.
+    /// Prefer writing the `SHARD` clause in the query when the tenant is known
+    /// at authoring time. Use this setter only when the host resolves the key
+    /// after parse (e.g. from auth context) without re-stringifying QQL.
     ///
     /// On `QUERY`, recurses into CTEs and nested prefetch queries so routing
-    /// matches a top-level `SHARD` clause. Empty / `None` clears the key.
+    /// matches a top-level `SHARD` clause. `None` (or an empty keyword) clears
+    /// the key.
     /// Returns `false` for statement types that cannot carry routing (DDL, SHOW).
-    pub fn set_shard_key(&mut self, shard_key: Option<String>) -> bool {
-        let key = shard_key.filter(|k| !k.is_empty());
+    pub fn set_shard_key(&mut self, shard_key: Option<ShardKey>) -> bool {
+        let shard_key = shard_key.filter(|k| !matches!(k, ShardKey::Keyword(s) if s.is_empty()));
         match self {
             Self::Query(query) => {
-                apply_query_shard(query, key.as_deref());
+                apply_query_shard(query, shard_key.as_ref());
                 true
             }
             Self::Scroll(scroll) => {
-                scroll.shard_key = key;
+                scroll.shard_key = shard_key;
                 true
             }
             Self::Count(count) => {
-                count.shard_key = key;
+                count.shard_key = shard_key;
                 true
             }
             Self::Facet(facet) => {
-                facet.shard_key = key;
+                facet.shard_key = shard_key;
                 true
             }
             Self::Upsert(upsert) => {
-                upsert.shard_key = key.map(super::ShardKey::Keyword);
+                upsert.shard_key = shard_key;
                 true
             }
             Self::Delete(delete) => {
-                delete.shard_key = key;
+                delete.shard_key = shard_key;
                 true
             }
             Self::ClearPayload(clear) => {
-                clear.shard_key = key;
+                clear.shard_key = shard_key;
                 true
             }
             Self::DeletePayload(delete) => {
-                delete.shard_key = key;
+                delete.shard_key = shard_key;
                 true
             }
             Self::DeleteVector(delete) => {
-                delete.shard_key = key;
+                delete.shard_key = shard_key;
                 true
             }
             Self::UpdateVector(update) => {
-                update.shard_key = key;
+                update.shard_key = shard_key;
                 true
             }
             Self::UpdatePayload(update) => {
-                update.shard_key = key;
+                update.shard_key = shard_key;
                 true
             }
             _ => false,
@@ -90,8 +93,8 @@ impl Stmt {
 }
 
 /// Apply shard routing to a query and nested CTE / prefetch queries.
-fn apply_query_shard(query: &mut QueryStmt, key: Option<&str>) {
-    query.shard_key = key.map(str::to_string);
+fn apply_query_shard(query: &mut QueryStmt, key: Option<&ShardKey>) {
+    query.shard_key = key.cloned();
     for cte in &mut query.ctes {
         apply_query_shard(&mut cte.query, key);
     }

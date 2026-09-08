@@ -13,16 +13,7 @@ pub(crate) fn shard_key_proto(key: &PlanShardKey) -> qdrant::ShardKey {
     }
 }
 
-pub(crate) fn shard_key_selector(key: &Option<String>) -> Option<qdrant::ShardKeySelector> {
-    key.as_ref().map(|k| qdrant::ShardKeySelector {
-        shard_keys: vec![shard_key_proto(&PlanShardKey::Keyword(k.clone()))],
-        ..Default::default()
-    })
-}
-
-pub(crate) fn shard_key_selector_plan(
-    key: &Option<PlanShardKey>,
-) -> Option<qdrant::ShardKeySelector> {
+pub(crate) fn shard_key_selector(key: &Option<PlanShardKey>) -> Option<qdrant::ShardKeySelector> {
     key.as_ref().map(|k| qdrant::ShardKeySelector {
         shard_keys: vec![shard_key_proto(k)],
         ..Default::default()
