@@ -89,6 +89,14 @@ const [stmt] = parse(query);
 stmt.injectFilter("tenant_id", "=", "acme");
 ```
 
+```javascript
+import init, { Stmt } from "qql-wasm";
+await init();
+
+const stmt = new Stmt(query);
+stmt.injectFilter("tenant_id", "=", "acme");
+```
+
 ## Supported operators
 
 Only comparison operators that keep the predicate deniable are supported:

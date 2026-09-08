@@ -13,7 +13,7 @@ inside the documentation site.
 | `examples/python` | Python (`pyqql`) | Python basics through advanced retrieval: `basic_to_medium.py` (parse → `is_valid` → `explain` → `compile_query` → `inject_filter` → shard key) and `medium_to_expert.py`. Offline — no Qdrant needed. |
 | `examples/nodejs` | Node.js (`@veristamp/nqql`) | Node.js parser and runtime APIs: `basic_to_medium.mjs` and `medium_to_expert.mjs`. |
 | `examples/rust` | Rust (`qql-core`) | `basic_to_medium` (`Parser::parse` + `inject_filter` + `set_shard_key`) and `medium_to_expert` (fail-closed multi-tenant gateway with a per-user `tenant_id` plus a `status` predicate). |
-| `examples/wasm` | WebAssembly (`qql-wasm`) | WASM `parse` / `analyze` / `compile` / `explain` and `Stmt.injectFilter`. |
+| `examples/wasm` | WebAssembly (`qql-wasm`) | WASM `parse` / `isValid` / `analyze` / `compile` / `explain`, `Stmt.injectFilter` + `shardKey`, hybrid analysis, `Client` execute (multi-tenant gateway). |
 | `examples/edge-demo` | qql CLI `--edge` | In-process edge execution with the qql CLI. Requires an edge-enabled build (`--features edge`). |
 | `examples/airbnb-demo` | Python (`pyqql`) + Qdrant + Ollama | Berlin geo search: `GEO_RADIUS` / `GEO_BBOX` / `GEO_POLYGON`, hybrid search, turbo binary quantization with rescore. |
 | `examples/medical-retrieval-ops` | qql CLI + Qdrant | Provisions the ChatMED RAGCare-QA benchmark and runs retrieval checks. |

@@ -166,6 +166,7 @@ Methods:
 | `injectFilter(field, op, value)` | void | Inject a trusted predicate (mutates in place) |
 | `shardKey` getter / setter | string or null | Assign or read QQL `SHARD` routing |
 | `bind(params?)` | bound `Stmt` | Substitute `:name` / `?` parameters; params optional |
+| `bound` | boolean | Whether params were already bound; passing new params to a bound `Stmt` throws `QQL-BIND-ALREADY-BOUND` |
 | `toJSON()` | string | Serialize the AST to JSON |
 | `toObject()` | object | Serialize the AST to a JS object |
 | `toString()` | string | Canonical, re-parseable QQL |
@@ -194,8 +195,8 @@ try {
 }
 ```
 
-`execute(query | string[], options)` accepts a single statement, a
-semicolon-delimited script, or an array of independent sources. `ExecuteOptions`
+`execute(query | Stmt | (query | Stmt)[], options)` accepts a single statement or
+script string, a pre-parsed `Stmt`, or an array of independent strings/`Stmt`s. `ExecuteOptions`
 is `{ onError?, params? }` — `onError` is `"stop"` (default) or `"continue"`,
 and `params` is an object for `:name` or an array for `?` — the same shape as
 `bind(query, params)`. For a batch or script, `params` may be an array with one
@@ -292,7 +293,7 @@ For structured, typed result handling matching `@veristamp/nqql` and `pyqql`, `@
 
 ```javascript
 import init, { Client } from "qql-wasm";
-import { ExecutionReport, ScoredPoint, buildError } from "qql-wasm/dx";
+import { ExecutionReport, ScoredPoint, buildError, executeHits } from "qql-wasm/dx";
 
 await init();
 
@@ -308,8 +309,9 @@ for (const hit of report.hits(0)) {
 
 The module exports:
 - **`ExecutionReport`**: Accessors for statement hits (`.hits(stmt)` / `.points(stmt)`), facets (`.facet(stmt)`), counts (`.count(stmt)`), and groups (`.groups(stmt)`).
-- **`ScoredPoint`**: Typed hit objects with `.id`, `.score`, `.payload`, `.vector`, and `.shard_key`, plus `.get(key, default)`.
-- **`buildError`**: Unpacks JSON error strings returned across the WASM boundary into standard `Error` objects carrying `.code`, `.kind`, and `.span`.
+- **`ScoredPoint`**: Typed hits with `.id`, `.score`, `.payload`, `.text`, `.collection`, `.vector`, `.shard_key`, plus `.get(key, default)`.
+- **`buildError`**: Unpacks JSON error strings into `Error` objects carrying `.code`, `.kind`, `.span`, plus `.fields` and `.request_id` when present.
+- **`wrapReport`**: Returns the input if already an `ExecutionReport`, else wraps the plain object.
 - **`executeHits(client, query, options)`**: One-shot reads returning `ScoredPoint[]` directly.
 
 ## Memory
@@ -324,7 +326,7 @@ releases it automatically.
 | `init` / `initSync` | initialized WASM module | One-time module initialization |
 | `parse`, `isValid`, `tokenize` | AST values, boolean, token list | Strict local parser primitives |
 | `analyze(source)` | validity, tokens, AST, routes, explain, error | Editors and offline diagnostics |
-| `compile`, `explain`, `inject_filter` | route, text, rewritten AST | One-shot offline planning helpers |
+| `compile` / `compileQuery`, `explain`, `inject_filter` | route, text, rewritten AST | One-shot offline planning helpers (`compileQuery` is an alias of `compile`) |
 | `compileBytes`, `explainBytes` | `Uint8Array` | Transferable worker or IPC payloads |
 | `bind(query, params?, { truncateVectors })` | bound source string | Substitute `:name` (object) or `?` (array) placeholders offline; `params` optional — omitted returns the query unchanged |
 | `formatQuery` | canonical source string | Normalize clause order, casing, and whitespace |
@@ -346,3 +348,13 @@ WASM has no gRPC or edge backend. `setHttpEmbedder` configures one HTTP text
 embedder; multi-vector, image, and reranker endpoint configuration belongs in
 the Rust, Python, or Node SDKs.
 {% /aside %}
+
+## Parameter binding
+
+`bind(query, params?)`, `Stmt.bind(params?)`, and `execute(…, { params })`
+take an object for `:name` or an array for `?` — the same contract as every
+other SDK. Vector params accept plain arrays, `Float32Array` /
+`Float64Array` (packed, one copy), integer typed arrays (sparse `indices`),
+and the flat `{ data, dim }` multivector form; raw `ArrayBuffer` without a
+float view fails closed. `parseJson` returns the AST as a raw JSON string
+with no object allocation.
