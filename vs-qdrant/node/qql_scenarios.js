@@ -53,16 +53,15 @@ class QqlScenarios {
   }
 
   // ----------------------------------------------------------- ingest ----
-  // Typed arrays only convert on the sync Stmt.bind surface (the async
-  // upsertMany boundary is serde: Float32Array would arrive index-keyed).
-  // So ingest stays a bind loop — but a thin one: constant template,
-  // one dict-splice per batch, no text rows, no helpers.
   async ingestBerlin(name, docs, dense, sparse) {
     const t0 = process.hrtime.bigint();
-    const rows = docs.map((doc, k) => ({ ...doc, vector: {
-      dense: Array.from(dense.subarray(k * 384, (k + 1) * 384)),
-      bm25: { indices: Array.from(sparse[k].indices), values: Array.from(sparse[k].values) },
-    }}));
+    const rows = docs.map((doc, k) => ({
+      ...doc,
+      vector: {
+        dense: Array.from(dense.subarray(k * 384, (k + 1) * 384)),
+        bm25: { indices: Array.from(sparse[k].indices), values: Array.from(sparse[k].values) },
+      },
+    }));
     await this.client.upsertMany(name, rows, { batchSize: BATCH_BERLIN });
     return Number(process.hrtime.bigint() - t0) / 1e9;
   }
@@ -71,61 +70,57 @@ class QqlScenarios {
     const offsets = [0];
     for (const n of colbertLens) offsets.push(offsets[offsets.length - 1] + n * 128);
     const t0 = process.hrtime.bigint();
-    const rows = docs.map((doc, k) => ({ ...doc, vector: {
-      dense: Array.from(dense.subarray(k * 384, (k + 1) * 384)),
-      bm25: { indices: Array.from(sparse[k].indices), values: Array.from(sparse[k].values) },
-      colbert: { data: Array.from(colbertFlat.subarray(offsets[k], offsets[k + 1])), dim: 128 },
-    }}));
+    const rows = docs.map((doc, k) => ({
+      ...doc,
+      vector: {
+        dense: Array.from(dense.subarray(k * 384, (k + 1) * 384)),
+        bm25: { indices: Array.from(sparse[k].indices), values: Array.from(sparse[k].values) },
+        colbert: { data: Array.from(colbertFlat.subarray(offsets[k], offsets[k + 1])), dim: 128 },
+      },
+    }));
     await this.client.upsertMany(name, rows, { batchSize: BATCH_LEGAL });
     return Number(process.hrtime.bigint() - t0) / 1e9;
   }
 
   // ------------------------------------------------------------- reads ----
-  _hits(report) {
-    return report.results[0].data;
-  }
-
   async queryDense(name, qvec) {
-    const stmt = nqql.parse(`QUERY :dv FROM ${name} USING dense LIMIT 10`)[0];
-    return this._hits(await this.client.execute(stmt, { params: { dv: qvec } }));
+    return (await this.client.execute(`QUERY :dv FROM ${name} USING dense LIMIT 10`, { params: { dv: qvec } })).hits();
   }
 
   async queryDenseFiltered(name, qvec) {
-    const stmt = nqql.parse(
-      `QUERY :dv FROM ${name} USING dense WHERE price < 150.0 AND guests >= 2 LIMIT 10`)[0];
-    return this._hits(await this.client.execute(stmt, { params: { dv: qvec } }));
+    return (await this.client.execute(
+      `QUERY :dv FROM ${name} USING dense WHERE price < 150.0 AND guests >= 2 LIMIT 10`,
+      { params: { dv: qvec } },
+    )).hits();
   }
 
   async querySparse(name, svec) {
-    const stmt = nqql.parse(`QUERY :sv FROM ${name} USING bm25 LIMIT 10`)[0];
-    return this._hits(await this.client.execute(stmt, { params: { sv: svec } }));
+    return (await this.client.execute(`QUERY :sv FROM ${name} USING bm25 LIMIT 10`, { params: { sv: svec } })).hits();
   }
 
   async queryHybrid(name, qvec, svec) {
-    // hnsw_ef=128 on the dense CTE: fused rankings must be deterministic
-    // across the two independently built collections.
-    const stmt = nqql.parse(`
+    return (await this.client.execute(`
       WITH d AS (QUERY :dv FROM ${name} USING dense PARAMS (hnsw_ef = 128) LIMIT 50),
            s AS (QUERY :sv FROM ${name} USING bm25 LIMIT 50)
-      QUERY FUSION RRF FROM ${name} PREFETCH (d, s) LIMIT 10`)[0];
-    return this._hits(await this.client.execute(stmt, { params: { dv: qvec, sv: svec } }));
+      QUERY FUSION RRF FROM ${name} PREFETCH (d, s) LIMIT 10`,
+      { params: { dv: qvec, sv: svec } },
+    )).hits();
   }
 
   async queryColbert(name, mvec) {
-    const stmt = nqql.parse(`QUERY :mv FROM ${name} USING colbert LIMIT 10`)[0];
-    return this._hits(await this.client.execute(stmt, { params: { mv: mvec } }));
+    return (await this.client.execute(`QUERY :mv FROM ${name} USING colbert LIMIT 10`, { params: { mv: mvec } })).hits();
   }
 
   async scrollPages(name, pages, batch) {
-    const stmt = nqql.parse(`SCROLL FROM ${name} AFTER :off LIMIT ${batch}`)[0];
     const ids = [];
-    let off = 0;
+    let offset = null;
     for (let p = 0; p < pages; p++) {
-      const hits = this._hits(await this.client.execute(stmt, { params: { off } }));
-      if (!hits.length) break;
-      for (const h of hits) ids.push(h.id);
-      // QQL `AFTER` is exclusive — resume at the boundary point.
-      off = Number(ids[ids.length - 1]);
+      const sql = offset !== null ? `SCROLL FROM ${name} AFTER ${offset} LIMIT ${batch}` : `SCROLL FROM ${name} LIMIT ${batch}`;
+      const rep = await this.client.execute(sql);
+      const pageIds = rep.ids();
+      if (!pageIds || pageIds.length === 0) break;
+      ids.push(...pageIds);
+      offset = ids[ids.length - 1];
     }
     return ids;
   }
@@ -162,7 +157,7 @@ class QqlScenarios {
     const stmt = nqql.parse(`QUERY :dv FROM ${name} USING dense LIMIT 10`)[0];
     let hits;
     for (const v of qvecs) {
-      hits = this._hits(await this.client.execute(stmt, { params: { dv: v } }));
+      hits = (await this.client.execute(stmt, { params: { dv: v } })).hits();
     }
     return hits;
   }

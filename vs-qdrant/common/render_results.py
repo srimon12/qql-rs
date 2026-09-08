@@ -16,7 +16,7 @@ def fmt_ratio(s: dict) -> str:
 
 def ingest_ratio(lang: str) -> str:
     i = R[lang]["ingest"]
-    return f"{i['qql_sec'] / i['official_sec']:.2f}x"
+    return f"{i['official_sec'] / i['qql_sec']:.2f}x"
 
 lines = []
 
@@ -37,7 +37,12 @@ for lang, title in (("python", "Python — `qdrant-client 1.19.0` vs `pyqql 0.4.
             parity = "exact" if p["match"] else f"FAIL: {p['detail'][:40]}"
         elif "qql_vs_official" in p:
             qvo = p["qql_vs_official"]
-            parity = f"overlap {qvo['jaccard_overlap']}, top1 {'ok' if qvo['top1_match'] else 'differs'}"
+            ovo = p.get("official_vs_official", {})
+            if not ovo.get("top1_match", True) and not qvo.get("top1_match", True):
+                top1_str = "tie-break ok"
+            else:
+                top1_str = "top1 ok" if qvo.get("top1_match", True) else "top1 differs"
+            parity = f"overlap {qvo['jaccard_overlap']}, {top1_str}"
         else:
             parity = f"overlap {p['jaccard_overlap']}, top1 {'ok' if p['top1_match'] else 'differs'}"
         lines.append(f"| {name} | {s['official']['ops_per_sec']:,} | {s['qql']['ops_per_sec']:,} "

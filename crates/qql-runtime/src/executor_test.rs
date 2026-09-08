@@ -2344,3 +2344,122 @@ async fn test_upsert_many_continue_collects_chunk_errors() {
     assert_eq!(report.succeeded, 2);
     assert_eq!(report.failed, 1);
 }
+
+#[test]
+fn test_exec_response_and_report_helpers() {
+    use crate::executor::{ExecResponse, ExecutionReport, SearchHit};
+
+    let hit = SearchHit {
+        id: qql_plan::PlanPointId::Number(42),
+        score: 0.95,
+        text: Some("hello".into()),
+        payload: None,
+        collection: None,
+        vector: None,
+    };
+    let hits_json = serde_json::to_value(vec![hit]).unwrap();
+    let query_resp = ExecResponse {
+        ok: true,
+        operation: "QUERY".into(),
+        message: "Found 1 hits".into(),
+        data: Some(hits_json),
+    };
+
+    assert_eq!(query_resp.ids(), vec![42]);
+    let typed_hits = query_resp.hits().expect("should deserialize hits");
+    assert_eq!(typed_hits.len(), 1);
+    assert_eq!(typed_hits[0].score, 0.95);
+    assert_eq!(query_resp.hits_json().unwrap().len(), 1);
+
+    let count_resp = ExecResponse {
+        ok: true,
+        operation: "COUNT".into(),
+        message: "Count: 15".into(),
+        data: Some(serde_json::json!({
+            "result": { "count": 15 }
+        })),
+    };
+    assert_eq!(count_resp.count(), Some(15));
+
+    let facet_resp = ExecResponse {
+        ok: true,
+        operation: "FACET".into(),
+        message: "Facet hits: 2".into(),
+        data: Some(serde_json::json!([
+            { "value": "Mitte", "count": 10 },
+            { "value": "Pankow", "count": 5 }
+        ])),
+    };
+    let facet_pairs = facet_resp.facet().expect("should parse facet pairs");
+    assert_eq!(facet_pairs.len(), 2);
+    assert_eq!(facet_pairs[0].0, serde_json::json!("Mitte"));
+    assert_eq!(facet_pairs[0].1, 10);
+
+    let report = ExecutionReport::from_results(vec![query_resp, count_resp, facet_resp]);
+    assert_eq!(report.hits(0).unwrap().len(), 1);
+    assert_eq!(report.ids(0), vec![42]);
+    assert_eq!(report.first_ids(), vec![42]);
+    assert_eq!(report.first_hits_raw().len(), 1);
+    assert_eq!(report.first_hits_json().unwrap().len(), 1);
+    assert_eq!(report.count(1), Some(15));
+    assert_eq!(report.first_count(), None); // stmt 0 is QUERY, not COUNT
+    assert_eq!(report.facet(2).unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn test_execute_with_named_params() {
+    let mut client = MockQdrantClient::default();
+    client.info = Some(collection_with_vectors(&["dense"], &["bm25"]));
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+
+    let param_sql = "QUERY :v FROM docs USING dense LIMIT 5";
+    let rep_param = executor
+        .execute_with_named_params(
+            param_sql,
+            &[("v", qql_core::ast::Value::F32Array(vec![0.1, 0.2, 0.3]))],
+            OnError::Stop,
+        )
+        .await
+        .unwrap();
+    assert!(rep_param.ok);
+}
+
+#[tokio::test]
+async fn test_schema_cache_reuses_and_invalidates_on_ddl() {
+    let client = MockQdrantClient {
+        exists: true,
+        collections: vec!["docs".to_string()],
+        info: Some(collection_with_vectors(&["dense"], &["bm25"])),
+        ..Default::default()
+    };
+    let info_count = client.info_call_count.clone();
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+
+    let sql = "QUERY [0.1, 0.2, 0.3] FROM docs USING dense LIMIT 5";
+    assert!(executor.execute(sql, OnError::Stop).await.unwrap().ok);
+    assert_eq!(*info_count.lock().unwrap(), 1);
+
+    assert!(executor.execute(sql, OnError::Stop).await.unwrap().ok);
+    assert_eq!(
+        *info_count.lock().unwrap(),
+        1,
+        "schema cache must skip the second GET /collections"
+    );
+
+    assert!(
+        executor
+            .execute(
+                "CREATE INDEX ON COLLECTION docs FOR district TYPE keyword",
+                OnError::Stop,
+            )
+            .await
+            .unwrap()
+            .ok
+    );
+    assert!(executor.execute(sql, OnError::Stop).await.unwrap().ok);
+    assert_eq!(
+        *info_count.lock().unwrap(),
+        2,
+        "DDL must invalidate the schema cache"
+    );
+}

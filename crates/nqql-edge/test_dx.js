@@ -195,6 +195,9 @@ console.log(`Testing Node.js DX enhancements (${LABEL})...`);
   assert.strictEqual(hits[1].shard_key, null);
   assert.strictEqual(hits[0].payload, mockPayload.results[0].data[0].payload);
 
+  // ids() accessor
+  assert.deepStrictEqual(report.ids(0), [1, 'uuid-2']);
+
   // points() alias + negative index (Python list semantics: -1 = last stmt)
   assert.strictEqual(report.points(0).length, 2);
   assert.strictEqual(report.points(-3).length, 2);

@@ -21,11 +21,16 @@ class ScoredPoint:
     shard_key: Optional[Union[str, int]] = None
 
     def __getitem__(self, key: str) -> Any:
+        if hasattr(self, key):
+            return getattr(self, key)
         if self.payload and key in self.payload:
             return self.payload[key]
         raise KeyError(key)
 
     def get(self, key: str, default: Any = None) -> Any:
+        if hasattr(self, key):
+            val = getattr(self, key)
+            return val if val is not None else default
         if self.payload and key in self.payload:
             return self.payload[key]
         return default
@@ -70,9 +75,9 @@ class ExecutionReport(dict):
             return []
         out = []
         for h in data:
-            # Only map entries shaped like scored points; facet entries
-            # ({value, count}) are not ScoredPoints.
-            if isinstance(h, dict) and "id" in h and "score" in h:
+            # Only map entries shaped like points; facet entries
+            # ({value, count}) are not points.
+            if isinstance(h, dict) and "id" in h:
                 score_val = h.get("score")
                 score = float(score_val) if score_val is not None else 0.0
                 out.append(
@@ -91,6 +96,29 @@ class ExecutionReport(dict):
     def points(self, stmt: int = 0) -> List[ScoredPoint]:
         """Alias for hits(stmt)."""
         return self.hits(stmt)
+
+    def ids(self, stmt: int = 0) -> List[Any]:
+        """Return point IDs for statement `stmt`."""
+        r = self._result_at(stmt)
+        if not r:
+            return []
+        data = r.get("data")
+        items = []
+        if isinstance(data, list):
+            items = data
+        elif isinstance(data, dict):
+            res = data.get("result")
+            if isinstance(res, dict):
+                items = res.get("points", res.get("hits", []))
+            elif isinstance(res, list):
+                items = res
+            else:
+                items = data.get("points", data.get("hits", []))
+        out = []
+        for item in items:
+            if isinstance(item, dict) and "id" in item:
+                out.append(item["id"])
+        return out
 
     def facet(self, stmt: int = 0) -> List[Dict[str, Any]]:
         """Return facet hits list for statement `stmt`."""

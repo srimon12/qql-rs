@@ -19,7 +19,7 @@ grpc = ["dep:tonic", "dep:tonic-prost", "dep:prost", "dep:prost-types", "tokio/r
 rest = ["dep:reqwest", "tokio/rt"]
 
 [dependencies]
-qql-core = { workspace = true, features = ["serde", "std"] }
+qql-core = { workspace = true, features = ["serde", "std", "json"] }
 qql-plan = { workspace = true }
 qql-embed = { workspace = true }
 serde = { workspace = true }

@@ -1,6 +1,6 @@
 {
   "meta": {
-    "timestamp": "2026-09-08T00:30:36.208Z",
+    "timestamp": "2026-09-08T09:01:09.995Z",
     "node": "v24.18.0",
     "nqql": "0.4.0",
     "js_client_rest": "1.19.0",
@@ -10,16 +10,16 @@
   "scenarios": {
     "query_dense": {
       "official": {
-        "ops_per_sec": 304,
-        "p50_ms": 3.29,
-        "p95_ms": 3.443,
+        "ops_per_sec": 293,
+        "p50_ms": 3.417,
+        "p95_ms": 3.533,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 653,
-        "p50_ms": 1.532,
-        "p95_ms": 1.609,
+        "ops_per_sec": 850,
+        "p50_ms": 1.176,
+        "p95_ms": 1.241,
         "reps": 5,
         "iters": 25
       },
@@ -31,16 +31,16 @@
     },
     "query_dense_filtered": {
       "official": {
-        "ops_per_sec": 186,
-        "p50_ms": 5.378,
-        "p95_ms": 5.535,
+        "ops_per_sec": 203,
+        "p50_ms": 4.919,
+        "p95_ms": 5.22,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 275,
-        "p50_ms": 3.643,
-        "p95_ms": 3.773,
+        "ops_per_sec": 309,
+        "p50_ms": 3.238,
+        "p95_ms": 3.261,
         "reps": 5,
         "iters": 25
       },
@@ -52,49 +52,49 @@
     },
     "query_sparse": {
       "official": {
-        "ops_per_sec": 434,
-        "p50_ms": 2.303,
-        "p95_ms": 2.385,
+        "ops_per_sec": 450,
+        "p50_ms": 2.222,
+        "p95_ms": 2.422,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 1344,
-        "p50_ms": 0.744,
-        "p95_ms": 0.788,
+        "ops_per_sec": 2339,
+        "p50_ms": 0.427,
+        "p95_ms": 0.446,
         "reps": 5,
         "iters": 25
       },
       "parity": {
         "top1_match": true,
         "jaccard_overlap": 1,
-        "max_score_diff": 0.000006
+        "max_score_diff": 0.000005
       }
     },
     "query_hybrid": {
       "official": {
-        "ops_per_sec": 259,
-        "p50_ms": 3.861,
-        "p95_ms": 3.966,
+        "ops_per_sec": 247,
+        "p50_ms": 4.045,
+        "p95_ms": 4.21,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 426,
-        "p50_ms": 2.347,
-        "p95_ms": 2.38,
+        "ops_per_sec": 556,
+        "p50_ms": 1.798,
+        "p95_ms": 1.863,
         "reps": 5,
         "iters": 25
       },
       "parity": {
         "qql_vs_official": {
-          "top1_match": true,
-          "jaccard_overlap": 0.818,
-          "max_score_diff": 0.08333
+          "top1_match": false,
+          "jaccard_overlap": 1,
+          "max_score_diff": 0.05
         },
         "official_vs_official": {
-          "top1_match": false,
-          "jaccard_overlap": 0.818,
+          "top1_match": true,
+          "jaccard_overlap": 1,
           "max_score_diff": 0.000005
         }
       }
@@ -102,15 +102,15 @@
     "scroll_pages": {
       "official": {
         "ops_per_sec": 59,
-        "p50_ms": 16.974,
-        "p95_ms": 17.342,
+        "p50_ms": 16.863,
+        "p95_ms": 17.851,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 97,
-        "p50_ms": 10.32,
-        "p95_ms": 10.435,
+        "ops_per_sec": 140,
+        "p50_ms": 7.16,
+        "p95_ms": 7.189,
         "reps": 5,
         "iters": 25
       },
@@ -122,16 +122,16 @@
     },
     "count_berlin": {
       "official": {
-        "ops_per_sec": 406,
-        "p50_ms": 2.461,
-        "p95_ms": 2.496,
+        "ops_per_sec": 410,
+        "p50_ms": 2.436,
+        "p95_ms": 2.612,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 1492,
-        "p50_ms": 0.67,
-        "p95_ms": 0.715,
+        "ops_per_sec": 1497,
+        "p50_ms": 0.668,
+        "p95_ms": 0.707,
         "reps": 5,
         "iters": 25
       },
@@ -142,16 +142,16 @@
     },
     "facet_district": {
       "official": {
-        "ops_per_sec": 473,
-        "p50_ms": 2.112,
-        "p95_ms": 2.164,
+        "ops_per_sec": 484,
+        "p50_ms": 2.068,
+        "p95_ms": 2.292,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 2025,
-        "p50_ms": 0.494,
-        "p95_ms": 0.523,
+        "ops_per_sec": 2144,
+        "p50_ms": 0.466,
+        "p95_ms": 0.514,
         "reps": 5,
         "iters": 25
       },
@@ -162,16 +162,16 @@
     },
     "query_colbert": {
       "official": {
-        "ops_per_sec": 120,
-        "p50_ms": 8.34,
-        "p95_ms": 8.952,
+        "ops_per_sec": 118,
+        "p50_ms": 8.49,
+        "p95_ms": 8.941,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 138,
-        "p50_ms": 7.224,
-        "p95_ms": 7.356,
+        "ops_per_sec": 145,
+        "p50_ms": 6.916,
+        "p95_ms": 7.027,
         "reps": 5,
         "iters": 25
       },
@@ -183,16 +183,16 @@
     },
     "count_legal": {
       "official": {
-        "ops_per_sec": 513,
-        "p50_ms": 1.947,
-        "p95_ms": 2.036,
+        "ops_per_sec": 505,
+        "p50_ms": 1.98,
+        "p95_ms": 2.323,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 3015,
-        "p50_ms": 0.332,
-        "p95_ms": 0.352,
+        "ops_per_sec": 3077,
+        "p50_ms": 0.325,
+        "p95_ms": 0.371,
         "reps": 5,
         "iters": 25
       },
@@ -203,16 +203,16 @@
     },
     "prepared_rerun": {
       "official": {
-        "ops_per_sec": 83,
-        "p50_ms": 12.049,
-        "p95_ms": 12.377,
+        "ops_per_sec": 82,
+        "p50_ms": 12.254,
+        "p95_ms": 12.586,
         "reps": 5,
         "iters": 25
       },
       "qql": {
-        "ops_per_sec": 167,
-        "p50_ms": 5.975,
-        "p95_ms": 6.07,
+        "ops_per_sec": 206,
+        "p50_ms": 4.856,
+        "p95_ms": 5.25,
         "reps": 5,
         "iters": 25
       },
@@ -224,8 +224,8 @@
     }
   },
   "ingest": {
-    "official_sec": 8.764,
-    "qql_sec": 7.109,
+    "official_sec": 8.803,
+    "qql_sec": 7.223,
     "points": {
       "berlin": 8000,
       "legal": 2000,
@@ -246,7 +246,7 @@
     "delete_by_filter": true
   },
   "cold_import": {
-    "qdrant/js-client-rest": 103.2,
-    "nqql": 37.7
+    "qdrant/js-client-rest": 107.3,
+    "nqql": 38.3
   }
 }

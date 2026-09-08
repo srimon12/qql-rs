@@ -123,12 +123,20 @@ class TestDxImprovements(unittest.TestCase):
         self.assertEqual(len(hits), 2)
         # 5. ID integer vs string
         self.assertEqual(hits[0].id, 936746218411023069)
+        self.assertEqual(hits[0]["id"], 936746218411023069)
         self.assertIsInstance(hits[0].id, int)
         self.assertIsInstance(hits[1].id, str)
         self.assertEqual(hits[0].score, 0.95)
+        self.assertEqual(hits[0]["score"], 0.95)
         self.assertEqual(hits[0]["title"], "Doc 1")
         self.assertEqual(hits[0].get("title"), "Doc 1")
         self.assertEqual(hits[0].collection, "coll_a")
+
+        # Point IDs accessor
+        self.assertEqual(
+            rep.ids(0),
+            [936746218411023069, "c87bb3c1-a201-447a-8f5f-1555df27d14d"],
+        )
 
         # 4. Facet normalized hits
         facet = rep.facet(1)

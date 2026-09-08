@@ -18,6 +18,12 @@ export interface ExecutionReport {
     results: ExecResponse[];
     succeeded: number;
     failed: number;
+    hits(stmt?: number): Array<Record<string, unknown>>;
+    points(stmt?: number): Array<Record<string, unknown>>;
+    ids(stmt?: number): Array<string | number>;
+    facet(stmt?: number): Array<{ value: unknown; count: number }>;
+    count(stmt?: number): number;
+    groups(stmt?: number): Array<{ group_id: unknown; hits: Array<Record<string, unknown>> }>;
 }
 
 export interface Token {

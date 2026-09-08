@@ -68,12 +68,16 @@ pub(crate) fn scored_point_to_json(p: qdrant::ScoredPoint) -> serde_json::Value 
     let id =
         p.id.as_ref()
             .map_or(serde_json::Value::Null, point_id_to_json);
-    let payload = serde_json::Value::Object(
-        p.payload
-            .into_iter()
-            .map(|(k, v)| (k, qdrant_value_to_json(&v)))
-            .collect(),
-    );
+    let payload = if p.payload.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::Value::Object(
+            p.payload
+                .into_iter()
+                .map(|(k, v)| (k, qdrant_value_to_json(&v)))
+                .collect(),
+        )
+    };
     let mut obj = serde_json::Map::new();
     obj.insert("id".into(), id);
     obj.insert("score".into(), serde_json::json!(p.score));
@@ -91,12 +95,16 @@ pub(crate) fn retrieved_point_to_json(p: qdrant::RetrievedPoint) -> serde_json::
     let id =
         p.id.as_ref()
             .map_or(serde_json::Value::Null, point_id_to_json);
-    let payload = serde_json::Value::Object(
-        p.payload
-            .into_iter()
-            .map(|(k, v)| (k, qdrant_value_to_json(&v)))
-            .collect(),
-    );
+    let payload = if p.payload.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::Value::Object(
+            p.payload
+                .into_iter()
+                .map(|(k, v)| (k, qdrant_value_to_json(&v)))
+                .collect(),
+        )
+    };
     let mut obj = serde_json::Map::new();
     obj.insert("id".into(), id);
     obj.insert("payload".into(), payload);
@@ -106,133 +114,6 @@ pub(crate) fn retrieved_point_to_json(p: qdrant::RetrievedPoint) -> serde_json::
     serde_json::Value::Object(obj)
 }
 
-pub(crate) fn retrieved_point_to_hit_and_json(
-    p: qdrant::RetrievedPoint,
-) -> (crate::executor::SearchHit, serde_json::Value) {
-    let plan_id =
-        p.id.as_ref()
-            .map(point_id_to_plan_point_id)
-            .unwrap_or_else(|| qql_plan::PlanPointId::String("<missing-id>".to_string()));
-    let json_id =
-        p.id.as_ref()
-            .map_or(serde_json::Value::Null, point_id_to_json);
-
-    let mut payload_map: std::collections::HashMap<String, serde_json::Value> =
-        std::collections::HashMap::with_capacity(p.payload.len());
-    for (k, v) in p.payload {
-        payload_map.insert(k, qdrant_value_to_json(&v));
-    }
-
-    let text = payload_map
-        .get("text")
-        .and_then(|v| v.as_str().map(ToString::to_string));
-    let vector = p.vectors.as_ref().map(vectors_output_to_json);
-
-    let pt_payload: serde_json::Map<String, serde_json::Value> = payload_map
-        .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
-
-    let hit = crate::executor::SearchHit {
-        id: plan_id,
-        score: 0.0,
-        text,
-        payload: if payload_map.is_empty() {
-            None
-        } else {
-            Some(payload_map)
-        },
-        collection: None,
-        vector: vector.clone(),
-    };
-
-    let mut pt_obj = serde_json::Map::new();
-    pt_obj.insert("id".into(), json_id);
-    pt_obj.insert("payload".into(), serde_json::Value::Object(pt_payload));
-    if let Some(v) = vector {
-        pt_obj.insert("vector".into(), v);
-    }
-
-    (hit, serde_json::Value::Object(pt_obj))
-}
-
-pub(crate) fn point_id_to_plan_point_id(id: &qdrant::PointId) -> qql_plan::PlanPointId {
-    match &id.point_id_options {
-        Some(qdrant::point_id::PointIdOptions::Num(n)) => qql_plan::PlanPointId::Number(*n),
-        Some(qdrant::point_id::PointIdOptions::Uuid(s)) => qql_plan::PlanPointId::String(s.clone()),
-        None => qql_plan::PlanPointId::String("<missing-id>".to_string()),
-    }
-}
-
-pub(crate) fn scored_point_to_search_hit(p: qdrant::ScoredPoint) -> crate::executor::SearchHit {
-    let id =
-        p.id.as_ref()
-            .map(point_id_to_plan_point_id)
-            .unwrap_or_else(|| qql_plan::PlanPointId::String("<missing-id>".to_string()));
-    let score = p.score;
-    let text = p.payload.get("text").and_then(|v| {
-        use qdrant::value::Kind;
-        match &v.kind {
-            Some(Kind::StringValue(s)) => Some(s.clone()),
-            _ => None,
-        }
-    });
-    let payload = if p.payload.is_empty() {
-        None
-    } else {
-        Some(
-            p.payload
-                .into_iter()
-                .map(|(k, v)| (k, qdrant_value_to_json(&v)))
-                .collect(),
-        )
-    };
-    let vector = p.vectors.as_ref().map(vectors_output_to_json);
-    crate::executor::SearchHit {
-        id,
-        score,
-        text,
-        payload,
-        collection: None,
-        vector,
-    }
-}
-
-pub(crate) fn retrieved_point_to_search_hit(
-    p: qdrant::RetrievedPoint,
-) -> crate::executor::SearchHit {
-    let id =
-        p.id.as_ref()
-            .map(point_id_to_plan_point_id)
-            .unwrap_or_else(|| qql_plan::PlanPointId::String("<missing-id>".to_string()));
-    let text = p.payload.get("text").and_then(|v| {
-        use qdrant::value::Kind;
-        match &v.kind {
-            Some(Kind::StringValue(s)) => Some(s.clone()),
-            _ => None,
-        }
-    });
-    let payload = if p.payload.is_empty() {
-        None
-    } else {
-        Some(
-            p.payload
-                .into_iter()
-                .map(|(k, v)| (k, qdrant_value_to_json(&v)))
-                .collect(),
-        )
-    };
-    let vector = p.vectors.as_ref().map(vectors_output_to_json);
-    crate::executor::SearchHit {
-        id,
-        score: 0.0,
-        text,
-        payload,
-        collection: None,
-        vector,
-    }
-}
-
 pub(crate) fn groups_result_to_json(r: qdrant::GroupsResult) -> serde_json::Value {
     serde_json::json!({
         "groups": r.groups.into_iter().map(point_group_to_json).collect::<Vec<_>>(),
@@ -240,16 +121,9 @@ pub(crate) fn groups_result_to_json(r: qdrant::GroupsResult) -> serde_json::Valu
 }
 
 pub(crate) fn batch_result_to_json(r: qdrant::BatchResult) -> serde_json::Value {
-    let hits: Vec<_> = r
-        .result
-        .into_iter()
-        .map(scored_point_to_search_hit)
-        .collect();
-    let hits_len = hits.len();
-    let serialized = serde_json::to_value(&hits).unwrap_or_default();
+    let points = serde_json::Value::Array(r.result.into_iter().map(scored_point_to_json).collect());
     serde_json::json!({
-        "__pre_serialized_hits": serialized,
-        "hits_len": hits_len,
+        "points": points,
     })
 }
 

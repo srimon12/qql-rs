@@ -71,33 +71,53 @@ class OfficialScenarios:
         self.client.create_payload_index(name, "year", M.PayloadSchemaType.INTEGER)
 
     # ----------------------------------------------------------- ingest ----
-    def _points(self, docs, dense, sparse, colbert=None):
-        points = []
-        for i, doc in enumerate(docs):
-            vector = {
-                "dense": dense[i].tolist(),
-                "bm25": M.SparseVector(indices=sparse[i]["indices"], values=sparse[i]["values"]),
-            }
-            if colbert is not None:
-                vector["colbert"] = colbert[i]
-            # `id` addresses the point; QQL (and Qdrant convention) keeps it
-            # out of the payload.
-            payload = {k: v for k, v in doc.items() if k != "id"}
-            points.append(M.PointStruct(id=doc["id"], vector=vector, payload=payload))
-        return points
-
     def ingest_berlin(self, name: str, docs, dense, sparse) -> float:
-        points = self._points(docs, dense, sparse)
+        dense_list = dense.tolist() if hasattr(dense, "tolist") else dense
+        sparse_vecs = [
+            M.SparseVector(indices=s["indices"], values=s["values"])
+            for s in sparse
+        ]
+        payloads = [{k: v for k, v in d.items() if k != "id"} for d in docs]
+        ids = [d["id"] for d in docs]
         t0 = time.perf_counter()
-        for i in range(0, len(points), BATCH_BERLIN):
-            self.client.upsert(name, points[i:i + BATCH_BERLIN], wait=False)
+        for i in range(0, len(docs), BATCH_BERLIN):
+            self.client.upsert(
+                name,
+                points=M.Batch(
+                    ids=ids[i : i + BATCH_BERLIN],
+                    vectors={
+                        "dense": dense_list[i : i + BATCH_BERLIN],
+                        "bm25": sparse_vecs[i : i + BATCH_BERLIN],
+                    },
+                    payloads=payloads[i : i + BATCH_BERLIN],
+                ),
+                wait=False,
+            )
         return time.perf_counter() - t0
 
     def ingest_legal(self, name: str, docs, dense, sparse, colbert) -> float:
-        points = self._points(docs, dense, sparse, colbert)
+        dense_list = dense.tolist() if hasattr(dense, "tolist") else dense
+        sparse_vecs = [
+            M.SparseVector(indices=s["indices"], values=s["values"])
+            for s in sparse
+        ]
+        payloads = [{k: v for k, v in d.items() if k != "id"} for d in docs]
+        ids = [d["id"] for d in docs]
         t0 = time.perf_counter()
-        for i in range(0, len(points), BATCH_LEGAL):
-            self.client.upsert(name, points[i:i + BATCH_LEGAL], wait=False)
+        for i in range(0, len(docs), BATCH_LEGAL):
+            self.client.upsert(
+                name,
+                points=M.Batch(
+                    ids=ids[i : i + BATCH_LEGAL],
+                    vectors={
+                        "dense": dense_list[i : i + BATCH_LEGAL],
+                        "bm25": sparse_vecs[i : i + BATCH_LEGAL],
+                        "colbert": colbert[i : i + BATCH_LEGAL],
+                    },
+                    payloads=payloads[i : i + BATCH_LEGAL],
+                ),
+                wait=False,
+            )
         return time.perf_counter() - t0
 
     # ------------------------------------------------------------- reads ----

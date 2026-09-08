@@ -57,7 +57,6 @@ vs-qdrant/node/**/index.*.node
 vs-qdrant/node/**/index.node
 vs-qdrant/node/**/package-lock.json
 vs-qdrant/node/**/node_modules/
-vs-qdrant/results/
 vs-qdrant/rust/target/
 vs-qdrant/data/legal_colbert_lens.json
 vs-qdrant/data/manifest.json
