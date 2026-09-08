@@ -15,8 +15,9 @@ policy here, then hand `Stmt` to `qql-plan` / runtime.
 
 | Kind | Examples |
 |------|----------|
-| Query | `QUERY`, CTEs, hybrid, formula, rerank, recommend, … |
-| DML | `UPSERT`, `DELETE`, `SCROLL`, `COUNT`, payload/vector updates |
+| Query | `QUERY` (nearest, hybrid, formula, recommend, `RERANK`, **`CROSS RERANK`**, …), CTEs |
+| Retrieval | `SCROLL`, `COUNT`, **`FACET`** |
+| DML | `UPSERT`, `DELETE`, payload/vector updates (`DELETE PAYLOAD`, …) |
 | DDL | `CREATE/ALTER/DROP COLLECTION`, indexes, **`CREATE/DROP/SHOW SHARD KEY`** |
 | Meta | `SHOW COLLECTIONS` / `SHOW COLLECTION` |
 | Quotas | **`SHOW QUOTAS`** / **`SET QUOTA (…)`** (Qdrant ≥ 1.19; REST at execute time) |
@@ -85,7 +86,9 @@ let mut stmt = Parser::parse(
     "QUERY TEXT 'hello' FROM docs USING dense LIMIT 5"
 )?;
 
-// Isolation (recurses CTEs / prefetches)
+// Isolation (recurses CTEs / prefetches). Fail-closed on DDL / SHOW /
+// UPDATE VECTOR, and on UPSERT unless Eq on a non-id payload field.
+// ComparisonOp::parse_inject_op is ASCII-case-insensitive (`EQ`, ` Gt `).
 inject_filter(
     &mut stmt,
     "tenant_id",
