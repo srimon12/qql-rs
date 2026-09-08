@@ -2407,24 +2407,11 @@ fn test_exec_response_and_report_helpers() {
 }
 
 #[tokio::test]
-async fn test_ast_cache_and_named_params() {
+async fn test_execute_with_named_params() {
     let mut client = MockQdrantClient::default();
     client.info = Some(collection_with_vectors(&["dense"], &["bm25"]));
     let executor = Executor::new(Box::new(client), Some(test_config()));
 
-    // 1. AST caching
-    let sql = "QUERY [0.1, 0.2, 0.3] FROM docs LIMIT 5";
-    let rep1 = executor.execute(sql, OnError::Stop).await.unwrap();
-    assert!(rep1.ok);
-    {
-        let cache = executor.ast_cache.read().unwrap();
-        assert!(cache.contains_key(sql));
-    }
-    // Repeated execution hits cache without re-parsing
-    let rep2 = executor.execute(sql, OnError::Stop).await.unwrap();
-    assert!(rep2.ok);
-
-    // 2. Named params execution
     let param_sql = "QUERY :v FROM docs USING dense LIMIT 5";
     let rep_param = executor
         .execute_with_named_params(
@@ -2435,4 +2422,44 @@ async fn test_ast_cache_and_named_params() {
         .await
         .unwrap();
     assert!(rep_param.ok);
+}
+
+#[tokio::test]
+async fn test_schema_cache_reuses_and_invalidates_on_ddl() {
+    let client = MockQdrantClient {
+        exists: true,
+        collections: vec!["docs".to_string()],
+        info: Some(collection_with_vectors(&["dense"], &["bm25"])),
+        ..Default::default()
+    };
+    let info_count = client.info_call_count.clone();
+    let executor = Executor::new(Box::new(client), Some(test_config()));
+
+    let sql = "QUERY [0.1, 0.2, 0.3] FROM docs USING dense LIMIT 5";
+    assert!(executor.execute(sql, OnError::Stop).await.unwrap().ok);
+    assert_eq!(*info_count.lock().unwrap(), 1);
+
+    assert!(executor.execute(sql, OnError::Stop).await.unwrap().ok);
+    assert_eq!(
+        *info_count.lock().unwrap(),
+        1,
+        "schema cache must skip the second GET /collections"
+    );
+
+    assert!(
+        executor
+            .execute(
+                "CREATE INDEX ON COLLECTION docs FOR district TYPE keyword",
+                OnError::Stop,
+            )
+            .await
+            .unwrap()
+            .ok
+    );
+    assert!(executor.execute(sql, OnError::Stop).await.unwrap().ok);
+    assert_eq!(
+        *info_count.lock().unwrap(),
+        2,
+        "DDL must invalidate the schema cache"
+    );
 }

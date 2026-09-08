@@ -312,10 +312,12 @@ pub struct Executor {
     pub(crate) client: Box<dyn QdrantOps>,
     pub(crate) config: Option<QqlConfig>,
     pub(crate) embedder: Option<Arc<dyn Embedder>>,
+    /// Collection topology (dense / sparse / multivector names). Invalidated
+    /// after DDL so `USING` routing does not `GET /collections/{name}` per query.
+    /// Repeated SQL templates belong on [`Executor::prepare`], not here.
     pub(crate) schema_cache: std::sync::RwLock<
         HashMap<String, (CollectionInfo, std::sync::Arc<qql_embed::TopologyNames>)>,
     >,
-    pub(crate) ast_cache: std::sync::RwLock<HashMap<String, Vec<Stmt>>>,
     /// Set by [`Executor::close`]; every execution entry point fails after it.
     closed: std::sync::atomic::AtomicBool,
     close_lock: tokio::sync::Mutex<()>,
@@ -351,7 +353,6 @@ impl Executor {
             config,
             embedder: None,
             schema_cache: std::sync::RwLock::new(HashMap::new()),
-            ast_cache: std::sync::RwLock::new(HashMap::new()),
             closed: std::sync::atomic::AtomicBool::new(false),
             close_lock: tokio::sync::Mutex::new(()),
         }
@@ -368,7 +369,6 @@ impl Executor {
             config,
             embedder,
             schema_cache: std::sync::RwLock::new(HashMap::new()),
-            ast_cache: std::sync::RwLock::new(HashMap::new()),
             closed: std::sync::atomic::AtomicBool::new(false),
             close_lock: tokio::sync::Mutex::new(()),
         }
@@ -415,22 +415,6 @@ impl Executor {
         if let Ok(mut guard) = self.schema_cache.write() {
             guard.remove(collection);
         }
-    }
-
-    /// Parse or retrieve cached AST statements for a query string.
-    pub(crate) fn parse_cached(&self, query: &str) -> Result<Vec<Stmt>, QqlError> {
-        if let Ok(guard) = self.ast_cache.read()
-            && let Some(stmts) = guard.get(query)
-        {
-            return Ok(stmts.clone());
-        }
-        let statements = parser::Parser::parse_all(query)?;
-        if let Ok(mut guard) = self.ast_cache.write()
-            && guard.len() < 512
-        {
-            guard.insert(query.to_string(), statements.clone());
-        }
-        Ok(statements)
     }
 
     /// Borrow the underlying backend ops (alias of `client`).
@@ -539,7 +523,7 @@ impl Executor {
     ) -> Result<ExecutionReport, QqlError> {
         self.ensure_open()?;
         let stop_on_error = matches!(on_error, OnError::Stop);
-        let statements = match self.parse_cached(query) {
+        let statements = match parser::Parser::parse_all(query) {
             Ok(statements) => statements,
             Err(error) if stop_on_error => return Err(error),
             Err(error) => {
@@ -573,7 +557,7 @@ impl Executor {
         on_error: OnError,
     ) -> Result<ExecutionReport, QqlError> {
         self.ensure_open()?;
-        let mut statements = self.parse_cached(query)?;
+        let mut statements = parser::Parser::parse_all(query)?;
         for stmt in &mut statements {
             qql_core::params::bind_stmt(stmt, |k| params.get(k).cloned(), &[])?;
         }
@@ -590,7 +574,7 @@ impl Executor {
         on_error: OnError,
     ) -> Result<ExecutionReport, QqlError> {
         self.ensure_open()?;
-        let mut statements = self.parse_cached(query)?;
+        let mut statements = parser::Parser::parse_all(query)?;
         for stmt in &mut statements {
             qql_core::params::bind_stmt(
                 stmt,
@@ -616,7 +600,7 @@ impl Executor {
         on_error: OnError,
     ) -> Result<ExecutionReport, QqlError> {
         self.ensure_open()?;
-        let mut statements = self.parse_cached(query)?;
+        let mut statements = parser::Parser::parse_all(query)?;
         for stmt in &mut statements {
             qql_core::params::bind_stmt(stmt, |_| None, params)?;
         }
@@ -628,7 +612,7 @@ impl Executor {
     /// Prepare a query template for repeated execution with different parameters.
     pub async fn prepare(&self, sql: &str) -> Result<PreparedStatement, QqlError> {
         self.ensure_open()?;
-        let mut stmts = self.parse_cached(sql)?;
+        let mut stmts = parser::Parser::parse_all(sql)?;
         let stmt = if stmts.len() == 1 {
             stmts.pop().unwrap()
         } else if stmts.is_empty() {
