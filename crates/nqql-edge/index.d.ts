@@ -4,7 +4,8 @@ export class Stmt {
   toObject(): unknown;
   toJson(): string;
   toJSON(): string;
-  /** Bind `:name` (object) / `?` (array) params into this statement; returns a new bound Stmt. */
+  /** Bind `:name` (object) / `?` (array) params into this statement; returns a new bound Stmt.
+   * Vector params accept plain arrays or Float32Array / Float64Array (one memcpy). */
   bind(params?: Record<string, unknown> | unknown[]): Stmt;
   /** Canonical, re-parseable QQL (mirrors Python `str(stmt)`). */
   toString(): string;
@@ -146,6 +147,18 @@ export class Client {
     query: string | Stmt | string[] | Stmt[],
     options?: ExecuteOptions,
   ): Promise<ScoredPoint[]>;
+  /**
+   * Bulk ingest point objects (`{id, vector, …payload}`) in `batchSize`
+   * chunks (default 100). One `:rows` template is prepared once — no
+   * re-parse, no per-batch schema fetch. Vectors take plain arrays or the
+   * flat `{data, dim}` multivector form; `Float32Array`/`Float64Array`
+   * need the sync `Stmt.bind` surface instead, then `execute`.
+   */
+  upsertMany(
+    collection: string,
+    rows: Record<string, unknown>[],
+    options?: ExecuteOptions & { batchSize?: number },
+  ): Promise<ExecutionReport>;
 
   /** Explain a QQL query string — returns a human-readable plan. */
   explain(query: string): string;

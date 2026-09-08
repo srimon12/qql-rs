@@ -26,6 +26,9 @@ pub(crate) fn render_create_index(statement: &CreateIndexStmt) -> String {
             .collect();
         let _ = write!(out, " WITH ({})", options.join(", "));
     }
+    if let Some(wait) = statement.wait {
+        let _ = write!(out, " WAIT {}", wait);
+    }
     out
 }
 

@@ -114,6 +114,49 @@ pub struct UpsertPoint {
     pub payload: Vec<(String, Value)>,
 }
 
+/// One entry of an `UPSERT INTO … VALUES` list: either an inline point
+/// object or a whole-point placeholder (`:name` / `?`) bound later to a
+/// point dict (or a list of point dicts, splicing several points).
+///
+/// `untagged` keeps the JSON shape of inline points identical to before,
+/// so existing AST snapshots are unaffected.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(untagged))]
+pub enum PointEntry {
+    /// Inline `{id: …, …}` point object.
+    Inline(UpsertPoint),
+    /// Named whole-point placeholder (`:name`).
+    Param(
+        String,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        Option<alloc::boxed::Box<crate::error::Span>>,
+    ),
+    /// Positional whole-point placeholder (`?`).
+    PositionalParam(
+        usize,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        Option<alloc::boxed::Box<crate::error::Span>>,
+    ),
+}
+
+impl PointEntry {
+    /// Borrow the inline point, if this entry is one (`VALUES {…}` rows
+    /// always are; placeholders become inline once bound).
+    pub fn as_inline(&self) -> Option<&UpsertPoint> {
+        match self {
+            PointEntry::Inline(point) => Some(point),
+            PointEntry::Param(..) | PointEntry::PositionalParam(..) => None,
+        }
+    }
+}
+
 /// `UPSERT INTO <collection> VALUES …` statement.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -121,13 +164,15 @@ pub struct UpsertStmt {
     /// Target collection.
     pub collection: String,
     /// Points to upsert.
-    pub points: Vec<UpsertPoint>,
+    pub points: Vec<PointEntry>,
     /// Optional `USING` embedding clause.
     pub embedding: Option<EmbeddingSpec>,
     /// `EMBED <field> INTO <vector>` directives.
     pub embed: Vec<EmbedDirective>,
     /// `SHARD '<key>'` routing key.
     pub shard_key: Option<String>,
+    /// Optional write durability confirmation (`WAIT true` / `WAIT false`).
+    pub wait: Option<bool>,
 }
 
 /// `CLEAR PAYLOAD FROM <collection> WHERE …` statement.
@@ -140,6 +185,8 @@ pub struct ClearPayloadStmt {
     pub selector: PointSelector,
     /// `SHARD '<key>'` routing key.
     pub shard_key: Option<String>,
+    /// Optional write durability confirmation (`WAIT true` / `WAIT false`).
+    pub wait: Option<bool>,
 }
 
 /// `DELETE VECTOR <names> FROM <collection> WHERE …` statement.
@@ -154,6 +201,8 @@ pub struct DeleteVectorStmt {
     pub vector_names: Vec<String>,
     /// `SHARD '<key>'` routing key.
     pub shard_key: Option<String>,
+    /// Optional write durability confirmation (`WAIT true` / `WAIT false`).
+    pub wait: Option<bool>,
 }
 
 /// Point selection used by mutation statements.
@@ -178,6 +227,8 @@ pub struct DeleteStmt {
     pub selector: PointSelector,
     /// `SHARD '<key>'` routing key.
     pub shard_key: Option<String>,
+    /// Optional write durability confirmation (`WAIT true` / `WAIT false`).
+    pub wait: Option<bool>,
 }
 
 /// `UPDATE <collection> SET VECTOR … WHERE id = …` statement.
@@ -194,6 +245,8 @@ pub struct UpdateVectorStmt {
     pub vector_name: Option<String>,
     /// `SHARD '<key>'` routing key.
     pub shard_key: Option<String>,
+    /// Optional write durability confirmation (`WAIT true` / `WAIT false`).
+    pub wait: Option<bool>,
 }
 
 /// `DELETE PAYLOAD <keys> FROM <collection> WHERE …` statement.
@@ -208,6 +261,8 @@ pub struct DeletePayloadStmt {
     pub selector: PointSelector,
     /// `SHARD '<key>'` routing key.
     pub shard_key: Option<String>,
+    /// Optional write durability confirmation (`WAIT true` / `WAIT false`).
+    pub wait: Option<bool>,
 }
 
 /// `UPDATE <collection> SET PAYLOAD = {…} WHERE …` statement.
@@ -222,4 +277,6 @@ pub struct UpdatePayloadStmt {
     pub payload: Vec<(String, Value)>,
     /// `SHARD '<key>'` routing key.
     pub shard_key: Option<String>,
+    /// Optional write durability confirmation (`WAIT true` / `WAIT false`).
+    pub wait: Option<bool>,
 }

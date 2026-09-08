@@ -64,6 +64,8 @@ fn inject_into_upsert() {
     let Stmt::Upsert(u) = s else { panic!() };
     assert_eq!(
         u.points[0]
+            .as_inline()
+            .expect("inline point")
             .payload
             .iter()
             .find(|(k, _)| k == "tenant")

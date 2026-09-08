@@ -279,6 +279,15 @@ pub fn value_to_json(value: &Value) -> serde_json::Value {
             .map_or(serde_json::Value::Null, serde_json::Value::Number),
         Value::Bool(b) => serde_json::Value::Bool(*b),
         Value::Null => serde_json::Value::Null,
+        Value::F32Array(values) => serde_json::Value::Array(
+            values
+                .iter()
+                .map(|f| {
+                    serde_json::Number::from_f64(*f as f64)
+                        .map_or(serde_json::Value::Null, serde_json::Value::Number)
+                })
+                .collect(),
+        ),
         Value::List(items) => serde_json::Value::Array(items.iter().map(value_to_json).collect()),
         Value::Dict(entries) => {
             let mut map = serde_json::Map::with_capacity(entries.len());

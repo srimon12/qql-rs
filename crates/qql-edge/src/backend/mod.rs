@@ -938,26 +938,32 @@ impl QdrantOps for EdgeQdrant {
             Delete {
                 collection,
                 request,
+                ..
             } => self.execute_edge_delete(collection, request).await,
             UpdatePayload {
                 collection,
                 request,
+                ..
             } => self.execute_edge_update_payload(collection, request).await,
             ClearPayload {
                 collection,
                 request,
+                ..
             } => self.execute_edge_clear_payload(collection, request).await,
             DeletePayload {
                 collection,
                 request,
+                ..
             } => self.execute_edge_delete_payload(collection, request).await,
             UpdateVectors {
                 collection,
                 request,
+                ..
             } => self.execute_edge_update_vectors(collection, request).await,
             DeleteVectors {
                 collection,
                 request,
+                ..
             } => self.execute_edge_delete_vectors(collection, request).await,
             CreateCollection {
                 collection,
@@ -982,6 +988,7 @@ impl QdrantOps for EdgeQdrant {
             CreateIndex {
                 collection,
                 request,
+                ..
             } => {
                 self.create_field_index(collection, request).await?;
                 Ok(mutation_response())

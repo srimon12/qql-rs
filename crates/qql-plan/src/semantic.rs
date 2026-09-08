@@ -89,6 +89,10 @@ pub enum PlanVectorValue {
     },
     /// Multi-dense vector: one row per input token or patch.
     MultiDense(Vec<Vec<f32>>),
+    /// Parameter placeholder for vector (`:name`).
+    Param(String),
+    /// Positional parameter placeholder (`?N` or `?`).
+    PositionalParam(usize),
 }
 
 impl From<&qql_core::ast::VectorValue> for PlanVectorValue {
@@ -102,6 +106,156 @@ impl From<&qql_core::ast::VectorValue> for PlanVectorValue {
             qql_core::ast::VectorValue::MultiDense(rows) => {
                 PlanVectorValue::MultiDense(rows.clone())
             }
+            qql_core::ast::VectorValue::Param(name, _) => PlanVectorValue::Param(name.clone()),
+            qql_core::ast::VectorValue::PositionalParam(idx, _) => {
+                PlanVectorValue::PositionalParam(*idx)
+            }
+        }
+    }
+}
+
+impl PlanVectorValue {
+    /// Convert a `qql_core::ast::Value` to `PlanVectorValue` if possible.
+    pub fn from_value(val: &qql_core::ast::Value) -> Option<Self> {
+        match val {
+            qql_core::ast::Value::F32Array(v) => Some(PlanVectorValue::Dense(v.clone())),
+            qql_core::ast::Value::List(items) => {
+                if items.is_empty() {
+                    return Some(PlanVectorValue::Dense(Vec::new()));
+                }
+                if let qql_core::ast::Value::List(_) = &items[0] {
+                    let mut rows = Vec::with_capacity(items.len());
+                    for item in items {
+                        if let qql_core::ast::Value::List(sub) = item {
+                            let mut row = Vec::with_capacity(sub.len());
+                            for f in sub {
+                                match f {
+                                    qql_core::ast::Value::Float(x) => row.push(*x as f32),
+                                    qql_core::ast::Value::Int(i) => row.push(*i as f32),
+                                    _ => return None,
+                                }
+                            }
+                            rows.push(row);
+                        } else {
+                            return None;
+                        }
+                    }
+                    Some(PlanVectorValue::MultiDense(rows))
+                } else {
+                    let mut dense = Vec::with_capacity(items.len());
+                    for item in items {
+                        match item {
+                            qql_core::ast::Value::Float(x) => dense.push(*x as f32),
+                            qql_core::ast::Value::Int(i) => dense.push(*i as f32),
+                            _ => return None,
+                        }
+                    }
+                    Some(PlanVectorValue::Dense(dense))
+                }
+            }
+            qql_core::ast::Value::Dict(entries) => {
+                let mut has_data = false;
+                let mut has_dim = false;
+                let mut has_indices = false;
+                let mut has_values = false;
+                for (k, _) in entries {
+                    if k.eq_ignore_ascii_case("data") {
+                        has_data = true;
+                    } else if k.eq_ignore_ascii_case("dim") {
+                        has_dim = true;
+                    } else if k.eq_ignore_ascii_case("indices") {
+                        has_indices = true;
+                    } else if k.eq_ignore_ascii_case("values") {
+                        has_values = true;
+                    }
+                }
+                if has_data || has_dim {
+                    if has_indices || has_values {
+                        return None;
+                    }
+                    let mut flat: Option<Vec<f32>> = None;
+                    let mut dim: Option<usize> = None;
+                    for (k, v) in entries {
+                        if k.eq_ignore_ascii_case("data") {
+                            flat = match v {
+                                qql_core::ast::Value::F32Array(items) => Some(items.clone()),
+                                qql_core::ast::Value::List(items) => {
+                                    let mut out = Vec::with_capacity(items.len());
+                                    for item in items {
+                                        match item {
+                                            qql_core::ast::Value::Float(x) => out.push(*x as f32),
+                                            qql_core::ast::Value::Int(i) => out.push(*i as f32),
+                                            _ => return None,
+                                        }
+                                    }
+                                    Some(out)
+                                }
+                                _ => return None,
+                            };
+                        } else if k.eq_ignore_ascii_case("dim") {
+                            match v {
+                                qql_core::ast::Value::Int(n) if *n > 0 => {
+                                    dim = usize::try_from(*n).ok();
+                                }
+                                _ => return None,
+                            }
+                        } else {
+                            return None;
+                        }
+                    }
+                    let (flat, dim) = match (flat, dim) {
+                        (Some(flat), Some(dim)) => (flat, dim),
+                        _ => return None,
+                    };
+                    if flat.is_empty() || dim == 0 || flat.len() % dim != 0 {
+                        return None;
+                    }
+                    return Some(PlanVectorValue::MultiDense(
+                        flat.chunks_exact(dim).map(<[f32]>::to_vec).collect(),
+                    ));
+                }
+                let mut indices = None;
+                let mut values = None;
+                for (k, v) in entries {
+                    if k == "indices"
+                        && let qql_core::ast::Value::List(idx_list) = v
+                    {
+                        let mut idxs = Vec::with_capacity(idx_list.len());
+                        for idx in idx_list {
+                            if let qql_core::ast::Value::Int(i) = idx {
+                                idxs.push(*i as u32);
+                            } else {
+                                return None;
+                            }
+                        }
+                        indices = Some(idxs);
+                    } else if k == "values" {
+                        match v {
+                            qql_core::ast::Value::F32Array(items) => {
+                                values = Some(items.clone());
+                            }
+                            qql_core::ast::Value::List(val_list) => {
+                                let mut vals = Vec::with_capacity(val_list.len());
+                                for val in val_list {
+                                    match val {
+                                        qql_core::ast::Value::Float(x) => vals.push(*x as f32),
+                                        qql_core::ast::Value::Int(i) => vals.push(*i as f32),
+                                        _ => return None,
+                                    }
+                                }
+                                values = Some(vals);
+                            }
+                            _ => return None,
+                        }
+                    }
+                }
+                if let (Some(indices), Some(values)) = (indices, values) {
+                    Some(PlanVectorValue::Sparse { indices, values })
+                } else {
+                    None
+                }
+            }
+            _ => None,
         }
     }
 }
@@ -136,6 +290,8 @@ impl Serialize for PlanVectorValue {
                 }
                 seq.end()
             }
+            PlanVectorValue::Param(name) => serializer.serialize_str(&format!(":{name}")),
+            PlanVectorValue::PositionalParam(idx) => serializer.serialize_str(&format!("?{idx}")),
         }
     }
 }
@@ -185,12 +341,10 @@ impl From<&qql_core::ast::QueryInput> for PlanQueryInput {
                 model: model.clone(),
             },
             qql_core::ast::QueryInput::Param(name, _) => {
-                panic!("invariant violation: unbound parameter :{name} reached PlanQueryInput");
+                PlanQueryInput::Vector(PlanVectorValue::Param(name.clone()))
             }
             qql_core::ast::QueryInput::PositionalParam(idx, _) => {
-                panic!(
-                    "invariant violation: unbound positional parameter ?{idx} reached PlanQueryInput"
-                );
+                PlanQueryInput::Vector(PlanVectorValue::PositionalParam(*idx))
             }
         }
     }
@@ -235,6 +389,10 @@ pub enum PlanPointVectors {
     Unnamed(PlanVectorValue),
     /// Named vectors as `(name, value)` pairs.
     Named(Vec<(String, PlanVectorValue)>),
+    /// Parameter placeholder for unnamed or named vector (`:name`).
+    Param(String),
+    /// Positional parameter placeholder (`?N` or `?`).
+    PositionalParam(usize),
 }
 
 impl From<&qql_core::ast::PointVectors> for PlanPointVectors {
@@ -249,6 +407,10 @@ impl From<&qql_core::ast::PointVectors> for PlanPointVectors {
                     .map(|(n, vv)| (n.clone(), PlanVectorValue::from(vv)))
                     .collect(),
             ),
+            qql_core::ast::PointVectors::Param(name, _) => PlanPointVectors::Param(name.clone()),
+            qql_core::ast::PointVectors::PositionalParam(idx, _) => {
+                PlanPointVectors::PositionalParam(*idx)
+            }
         }
     }
 }
@@ -264,6 +426,8 @@ impl Serialize for PlanPointVectors {
                 }
                 map.end()
             }
+            PlanPointVectors::Param(name) => serializer.serialize_str(&format!(":{name}")),
+            PlanPointVectors::PositionalParam(idx) => serializer.serialize_str(&format!("?{idx}")),
         }
     }
 }
@@ -280,5 +444,117 @@ impl Serialize for PlanFormula {
         // Delegate to JSON intermediate that already matches OpenAPI Expression.
         let value = crate::query::lower_formula_expr(&self.0);
         value.serialize(serializer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use qql_core::ast::Value;
+
+    fn dict(pairs: Vec<(&str, Value)>) -> Value {
+        Value::Dict(pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
+    }
+
+    #[test]
+    fn from_value_flat_multivector_chunks() {
+        let v = dict(vec![
+            (
+                "data",
+                Value::List(vec![
+                    Value::Float(0.1),
+                    Value::Float(0.2),
+                    Value::Float(0.3),
+                    Value::Float(0.4),
+                ]),
+            ),
+            ("dim", Value::Int(2)),
+        ]);
+        assert_eq!(
+            PlanVectorValue::from_value(&v),
+            Some(PlanVectorValue::MultiDense(vec![
+                vec![0.1, 0.2],
+                vec![0.3, 0.4]
+            ]))
+        );
+        // F32Array data takes the same path without per-element boxing.
+        let v = dict(vec![
+            ("data", Value::F32Array(vec![0.1, 0.2])),
+            ("dim", Value::Int(2)),
+        ]);
+        assert_eq!(
+            PlanVectorValue::from_value(&v),
+            Some(PlanVectorValue::MultiDense(vec![vec![0.1, 0.2]]))
+        );
+        // Nested lists stay equivalent to the flat spelling.
+        let nested = Value::List(vec![
+            Value::List(vec![Value::Float(0.1), Value::Float(0.2)]),
+            Value::List(vec![Value::Float(0.3), Value::Float(0.4)]),
+        ]);
+        let flat2 = dict(vec![
+            (
+                "data",
+                Value::List(vec![
+                    Value::Float(0.1),
+                    Value::Float(0.2),
+                    Value::Float(0.3),
+                    Value::Float(0.4),
+                ]),
+            ),
+            ("dim", Value::Int(2)),
+        ]);
+        assert_eq!(
+            PlanVectorValue::from_value(&nested),
+            PlanVectorValue::from_value(&flat2)
+        );
+    }
+
+    #[test]
+    fn from_value_flat_multivector_rejects_bad_shapes() {
+        // Missing dim.
+        assert_eq!(
+            PlanVectorValue::from_value(&dict(vec![("data", Value::List(vec![]))])),
+            None
+        );
+        // Length not a multiple of dim.
+        assert_eq!(
+            PlanVectorValue::from_value(&dict(vec![
+                ("data", Value::List(vec![Value::Float(0.1)])),
+                ("dim", Value::Int(2)),
+            ])),
+            None
+        );
+        // Non-positive dim.
+        assert_eq!(
+            PlanVectorValue::from_value(&dict(vec![
+                ("data", Value::List(vec![Value::Float(0.1)])),
+                ("dim", Value::Int(0)),
+            ])),
+            None
+        );
+        // Mixed flat + sparse keys fail closed.
+        assert_eq!(
+            PlanVectorValue::from_value(&dict(vec![
+                ("data", Value::List(vec![Value::Float(0.1)])),
+                ("dim", Value::Int(1)),
+                ("indices", Value::List(vec![Value::Int(0)])),
+            ])),
+            None
+        );
+    }
+
+    #[test]
+    fn from_value_sparse_accepts_f32array_values() {
+        let v = dict(vec![
+            ("indices", Value::List(vec![Value::Int(1), Value::Int(5)])),
+            ("values", Value::F32Array(vec![0.5, 0.8])),
+        ]);
+        assert_eq!(
+            PlanVectorValue::from_value(&v),
+            Some(PlanVectorValue::Sparse {
+                indices: vec![1, 5],
+                values: vec![0.5, 0.8]
+            })
+        );
     }
 }

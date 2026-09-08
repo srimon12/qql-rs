@@ -15,6 +15,7 @@ pub(crate) async fn execute_upsert(
     client: &GrpcQdrant,
     collection: &str,
     request: &qql_plan::types::UpsertRequest,
+    wait: bool,
 ) -> Result<serde_json::Value, QqlError> {
     let points: Vec<qdrant::PointStruct> = request
         .points
@@ -40,7 +41,7 @@ pub(crate) async fn execute_upsert(
         .collect();
     let grpc_req = qdrant::UpsertPoints {
         collection_name: collection.to_owned(),
-        wait: Some(true),
+        wait: Some(wait),
         points,
         shard_key_selector: shard_key_selector(&request.shard_key),
         ..Default::default()
@@ -57,11 +58,12 @@ pub(crate) async fn execute_delete(
     client: &GrpcQdrant,
     collection: &str,
     request: &qql_plan::types::DeleteRequest,
+    wait: bool,
 ) -> Result<serde_json::Value, QqlError> {
     let selector = points_and_filter_selector(request.points.as_ref(), request.filter.as_ref())?;
     let grpc_req = qdrant::DeletePoints {
         collection_name: collection.to_owned(),
-        wait: Some(true),
+        wait: Some(wait),
         points: selector,
         shard_key_selector: shard_key_selector(&request.shard_key),
         ..Default::default()
@@ -78,11 +80,12 @@ pub(crate) async fn execute_clear_payload(
     client: &GrpcQdrant,
     collection: &str,
     request: &qql_plan::types::ClearPayloadRequest,
+    wait: bool,
 ) -> Result<serde_json::Value, QqlError> {
     let selector = points_and_filter_selector(request.points.as_ref(), request.filter.as_ref())?;
     let grpc_req = qdrant::ClearPayloadPoints {
         collection_name: collection.to_owned(),
-        wait: Some(true),
+        wait: Some(wait),
         points: selector,
         shard_key_selector: shard_key_selector(&request.shard_key),
         ..Default::default()
@@ -99,11 +102,12 @@ pub(crate) async fn execute_delete_payload(
     client: &GrpcQdrant,
     collection: &str,
     request: &qql_plan::types::DeletePayloadRequest,
+    wait: bool,
 ) -> Result<serde_json::Value, QqlError> {
     let selector = points_and_filter_selector(request.points.as_ref(), request.filter.as_ref())?;
     let grpc_req = qdrant::DeletePayloadPoints {
         collection_name: collection.to_owned(),
-        wait: Some(true),
+        wait: Some(wait),
         keys: request.keys.clone(),
         points_selector: selector,
         shard_key_selector: shard_key_selector(&request.shard_key),
@@ -121,11 +125,12 @@ pub(crate) async fn execute_delete_vectors(
     client: &GrpcQdrant,
     collection: &str,
     request: &qql_plan::types::DeleteVectorRequest,
+    wait: bool,
 ) -> Result<serde_json::Value, QqlError> {
     let selector = points_and_filter_selector(request.points.as_ref(), request.filter.as_ref())?;
     let grpc_req = qdrant::DeletePointVectors {
         collection_name: collection.to_owned(),
-        wait: Some(true),
+        wait: Some(wait),
         points_selector: selector,
         vectors: Some(qdrant::VectorsSelector {
             names: request.vector.clone(),
@@ -145,6 +150,7 @@ pub(crate) async fn execute_update_vectors(
     client: &GrpcQdrant,
     collection: &str,
     request: &qql_plan::types::UpdateVectorRequest,
+    wait: bool,
 ) -> Result<serde_json::Value, QqlError> {
     let points: Vec<qdrant::PointVectors> = request
         .points
@@ -156,7 +162,7 @@ pub(crate) async fn execute_update_vectors(
         .collect();
     let grpc_req = qdrant::UpdatePointVectors {
         collection_name: collection.to_owned(),
-        wait: Some(true),
+        wait: Some(wait),
         points,
         shard_key_selector: shard_key_selector(&request.shard_key),
         ..Default::default()
@@ -173,6 +179,7 @@ pub(crate) async fn execute_update_payload(
     client: &GrpcQdrant,
     collection: &str,
     request: &qql_plan::types::UpdatePayloadRequest,
+    wait: bool,
 ) -> Result<serde_json::Value, QqlError> {
     let selector = points_and_filter_selector(request.points.as_ref(), request.filter.as_ref())?;
     let payload_map: std::collections::HashMap<String, qdrant::Value> = request
@@ -182,7 +189,7 @@ pub(crate) async fn execute_update_payload(
         .collect();
     let grpc_req = qdrant::SetPayloadPoints {
         collection_name: collection.to_owned(),
-        wait: Some(true),
+        wait: Some(wait),
         payload: payload_map,
         points_selector: selector,
         shard_key_selector: shard_key_selector(&request.shard_key),

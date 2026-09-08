@@ -108,6 +108,8 @@ pub(crate) fn render_vector_value(value: &VectorValue) -> String {
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
+        VectorValue::Param(name, _) => format!(":{}", name),
+        VectorValue::PositionalParam(idx, _) => format!("?{}", idx + 1),
     }
 }
 
@@ -118,6 +120,14 @@ pub(crate) fn render_value(value: &Value) -> String {
         Value::Float(value) => render_f64(*value),
         Value::Bool(value) => value.to_string(),
         Value::Null => "null".into(),
+        Value::F32Array(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(|v| render_f32(*v))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
         Value::Dict(entries) => {
             let items: Vec<String> = entries
                 .iter()

@@ -126,14 +126,38 @@ pub fn inject_filter(
             if operator == ComparisonOp::Eq && !field.eq_ignore_ascii_case("id") =>
         {
             for point in &mut upsert.points {
-                if let Some((_, current)) = point
+                // A whole-point placeholder has no payload yet — silently
+                // skipping it would drop a security filter. Bind first.
+                let inline = match point {
+                    crate::ast::PointEntry::Inline(inline) => inline,
+                    crate::ast::PointEntry::Param(name, _) => {
+                        return Err(QqlError::validation(
+                            "QQL-VALIDATION-FILTER-INJECT",
+                            alloc::format!(
+                                "cannot inject filter into unbound point parameter ':{name}'; bind point parameters before filter injection"
+                            ),
+                            None,
+                        ));
+                    }
+                    crate::ast::PointEntry::PositionalParam(idx, _) => {
+                        return Err(QqlError::validation(
+                            "QQL-VALIDATION-FILTER-INJECT",
+                            alloc::format!(
+                                "cannot inject filter into unbound point parameter '?{}'; bind point parameters before filter injection",
+                                *idx + 1
+                            ),
+                            None,
+                        ));
+                    }
+                };
+                if let Some((_, current)) = inline
                     .payload
                     .iter_mut()
                     .find(|(key, _)| key.eq_ignore_ascii_case(field))
                 {
                     *current = value.clone();
                 } else {
-                    point.payload.push((field.to_string(), value.clone()));
+                    inline.payload.push((field.to_string(), value.clone()));
                 }
             }
         }

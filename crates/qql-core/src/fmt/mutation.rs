@@ -2,8 +2,8 @@
 
 use crate::ast::{
     ClearPayloadStmt, CountStmt, DeletePayloadStmt, DeleteStmt, DeleteVectorStmt, EmbedDirective,
-    EmbedKind, EmbeddingSpec, FacetStmt, PointSelector, PointVectors, QueryCollection, ScrollStmt,
-    UpdatePayloadStmt, UpdateVectorStmt, UpsertPoint, UpsertStmt, escape_string,
+    EmbedKind, EmbeddingSpec, FacetStmt, PointEntry, PointSelector, PointVectors, QueryCollection,
+    ScrollStmt, UpdatePayloadStmt, UpdateVectorStmt, UpsertPoint, UpsertStmt, escape_string,
 };
 use crate::fmt::expr::{
     render_filter, render_name, render_placeholder, render_point_id, render_value,
@@ -54,7 +54,7 @@ pub(crate) fn render_upsert(statement: &UpsertStmt) -> String {
         } else {
             out.push(' ');
         }
-        out.push_str(&render_point(point));
+        out.push_str(&render_point_entry(point));
     }
     if let Some(embedding) = &statement.embedding {
         let _ = write!(out, " USING {}", render_embedding_spec(embedding));
@@ -76,6 +76,9 @@ pub(crate) fn render_upsert(statement: &UpsertStmt) -> String {
     if let Some(key) = &statement.shard_key {
         let _ = write!(out, " SHARD '{}'", escape_string(key));
     }
+    if let Some(wait) = statement.wait {
+        let _ = write!(out, " WAIT {}", wait);
+    }
     out
 }
 
@@ -88,6 +91,9 @@ pub(crate) fn render_delete(statement: &DeleteStmt) -> String {
     if let Some(key) = &statement.shard_key {
         let _ = write!(out, " SHARD '{}'", escape_string(key));
     }
+    if let Some(wait) = statement.wait {
+        let _ = write!(out, " WAIT {}", wait);
+    }
     out
 }
 
@@ -99,6 +105,9 @@ pub(crate) fn render_clear_payload(statement: &ClearPayloadStmt) -> String {
     );
     if let Some(key) = &statement.shard_key {
         let _ = write!(out, " SHARD '{}'", escape_string(key));
+    }
+    if let Some(wait) = statement.wait {
+        let _ = write!(out, " WAIT {}", wait);
     }
     out
 }
@@ -113,6 +122,9 @@ pub(crate) fn render_delete_payload(statement: &DeletePayloadStmt) -> String {
     );
     if let Some(key) = &statement.shard_key {
         let _ = write!(out, " SHARD '{}'", escape_string(key));
+    }
+    if let Some(wait) = statement.wait {
+        let _ = write!(out, " WAIT {}", wait);
     }
     out
 }
@@ -132,6 +144,9 @@ pub(crate) fn render_delete_vector(statement: &DeleteVectorStmt) -> String {
     if let Some(key) = &statement.shard_key {
         let _ = write!(out, " SHARD '{}'", escape_string(key));
     }
+    if let Some(wait) = statement.wait {
+        let _ = write!(out, " WAIT {}", wait);
+    }
     out
 }
 
@@ -148,6 +163,9 @@ pub(crate) fn render_update_vector(statement: &UpdateVectorStmt) -> String {
     );
     if let Some(key) = &statement.shard_key {
         let _ = write!(out, " SHARD '{}'", escape_string(key));
+    }
+    if let Some(wait) = statement.wait {
+        let _ = write!(out, " WAIT {}", wait);
     }
     out
 }
@@ -166,6 +184,9 @@ pub(crate) fn render_update_payload(statement: &UpdatePayloadStmt) -> String {
     );
     if let Some(key) = &statement.shard_key {
         let _ = write!(out, " SHARD '{}'", escape_string(key));
+    }
+    if let Some(wait) = statement.wait {
+        let _ = write!(out, " WAIT {}", wait);
     }
     out
 }
@@ -232,6 +253,14 @@ pub(crate) fn render_point_selector(selector: &PointSelector) -> String {
     }
 }
 
+pub(crate) fn render_point_entry(entry: &PointEntry) -> String {
+    match entry {
+        PointEntry::Inline(point) => render_point(point),
+        PointEntry::Param(name, _) => format!(":{name}"),
+        PointEntry::PositionalParam(..) => "?".to_string(),
+    }
+}
+
 pub(crate) fn render_point(point: &UpsertPoint) -> String {
     let mut parts = vec![format!("id: {}", render_point_id(&point.id))];
     if let Some(vectors) = &point.vectors {
@@ -255,6 +284,8 @@ pub(crate) fn render_point_vectors(vectors: &PointVectors) -> String {
                 .collect();
             format!("{{{}}}", entries.join(", "))
         }
+        PointVectors::Param(name, _) => format!(":{}", name),
+        PointVectors::PositionalParam(idx, _) => format!("?{}", idx + 1),
     }
 }
 

@@ -17,7 +17,8 @@
             "Number": 42
           }
         },
-        "shard_key": null
+        "shard_key": null,
+        "wait": null
       }
     },
     {
@@ -42,7 +43,8 @@
             }
           }
         },
-        "shard_key": null
+        "shard_key": null,
+        "wait": null
       }
     },
     {
@@ -67,7 +69,8 @@
             "Number": 42
           }
         },
-        "shard_key": null
+        "shard_key": null,
+        "wait": null
       }
     },
     {
@@ -84,7 +87,8 @@
             0.3
           ]
         },
-        "vector_name": null
+        "vector_name": null,
+        "wait": null
       }
     },
     {
@@ -101,7 +105,8 @@
             0.3
           ]
         },
-        "vector_name": "dense"
+        "vector_name": "dense",
+        "wait": null
       }
     },
     {
@@ -123,7 +128,8 @@
             ]
           }
         },
-        "vector_name": "sparse"
+        "vector_name": "sparse",
+        "wait": null
       }
     },
     {
@@ -142,7 +148,46 @@
             "String": "a1b2c3d4"
           }
         },
-        "shard_key": null
+        "shard_key": null,
+        "wait": null
+      }
+    },
+    {
+      "UpdatePayload": {
+        "collection": "docs",
+        "payload": [
+          [
+            "status",
+            {
+              "Str": "archived"
+            }
+          ]
+        ],
+        "selector": {
+          "Id": {
+            "Number": 7
+          }
+        },
+        "shard_key": null,
+        "wait": true
+      }
+    },
+    {
+      "UpdateVector": {
+        "collection": "docs",
+        "point_id": {
+          "Number": 7
+        },
+        "shard_key": null,
+        "vector": {
+          "Dense": [
+            0.4,
+            0.5,
+            0.6
+          ]
+        },
+        "vector_name": null,
+        "wait": false
       }
     }
   ]

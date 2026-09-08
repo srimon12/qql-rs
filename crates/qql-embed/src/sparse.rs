@@ -11,6 +11,12 @@
 //!
 //! Because token IDs and formulas match the server, vectors produced here can
 //! be mixed with server-side `qdrant/bm25` inference on the same collection.
+//!
+//! ### FastEmbed Query Weighting Parity Note
+//! FastEmbed's Python `Qdrant/bm25` emits a uniform scaling factor (~1.665) on query
+//! term weights, whereas Qdrant's server-side inference and QQL use unit weights (1.0).
+//! Because this factor is uniform across all terms in a query, ranking order is
+//! mathematically identical, but raw score magnitudes will scale by ~1.665x.
 
 use std::sync::LazyLock;
 

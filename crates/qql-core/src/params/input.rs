@@ -90,7 +90,7 @@ pub fn value_to_query_input(val: Value, span: Option<Span>) -> Result<QueryInput
             text_param: None,
         }),
         Value::Int(n) if n >= 0 => Ok(QueryInput::Point(PointId::Number(n as u64))),
-        Value::List(_) | Value::Dict(_) => {
+        Value::List(_) | Value::Dict(_) | Value::F32Array(_) => {
             let vec = crate::parser::helpers::vector_from_value(val, span)?;
             Ok(QueryInput::Vector(vec))
         }

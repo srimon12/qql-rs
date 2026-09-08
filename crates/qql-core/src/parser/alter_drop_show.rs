@@ -170,11 +170,13 @@ impl<'a> AstLowerer<'a> {
             options = self.parse_config_block()?;
             super::validate_index_options(&options, pos)?;
         }
+        let wait = self.parse_optional_wait()?;
         Ok(Stmt::CreateIndex(Box::new(CreateIndexStmt {
             collection,
             field,
             field_type,
             options,
+            wait,
         })))
     }
 }

@@ -1,5 +1,5 @@
 use super::AstLowerer;
-use crate::ast::{EmbeddingSpec, PointId, Value, VectorValue};
+use crate::ast::{EmbeddingSpec, PointId, PointVectors, Value, VectorValue};
 use crate::error::{QqlError, Span};
 use crate::token::{Token, TokenKind};
 use alloc::string::{String, ToString};
@@ -466,6 +466,58 @@ impl<'a> AstLowerer<'a> {
         let value = self.parse_value()?;
         vector_from_value(value, Some(span))
     }
+
+    pub fn parse_bool(&mut self) -> Result<bool, QqlError> {
+        match self.peek()?.kind {
+            TokenKind::True => {
+                self.advance()?;
+                Ok(true)
+            }
+            TokenKind::False => {
+                self.advance()?;
+                Ok(false)
+            }
+            _ => Err(QqlError::parse(
+                "QQL-PARSE-BOOL",
+                "expected true or false",
+                self.peek()?.span,
+            )),
+        }
+    }
+
+    pub fn parse_optional_wait(&mut self) -> Result<Option<bool>, QqlError> {
+        if self.peek()?.kind == TokenKind::Wait {
+            self.advance()?;
+            Ok(Some(self.parse_bool()?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn parse_optional_shard_and_wait(
+        &mut self,
+    ) -> Result<(Option<String>, Option<bool>), QqlError> {
+        let mut shard_key = None;
+        let mut wait = None;
+        loop {
+            if self.peek()?.kind == TokenKind::Shard && shard_key.is_none() {
+                self.advance()?;
+                shard_key = Some(self.parse_string()?);
+            } else if let Some(w) = self.parse_optional_wait()? {
+                if wait.is_some() {
+                    return Err(QqlError::parse(
+                        "QQL-PARSE-DUPLICATE-CLAUSE",
+                        "duplicate WAIT clause",
+                        self.peek()?.span,
+                    ));
+                }
+                wait = Some(w);
+            } else {
+                break;
+            }
+        }
+        Ok((shard_key, wait))
+    }
 }
 
 pub fn point_id_from_value(value: Value, span: Span) -> Result<PointId, QqlError> {
@@ -490,13 +542,41 @@ pub fn point_id_from_value(value: Value, span: Span) -> Result<PointId, QqlError
 
 pub(crate) fn vector_from_value(value: Value, span: Option<Span>) -> Result<VectorValue, QqlError> {
     match value {
-        Value::List(values) if values.iter().all(|value| matches!(value, Value::List(_))) => {
+        Value::F32Array(values) => {
+            if values.is_empty() {
+                Err(vector_error("dense vector cannot be empty", span))
+            } else {
+                Ok(VectorValue::Dense(values))
+            }
+        }
+        Value::Param(name, param_span) => Ok(VectorValue::Param(
+            name,
+            param_span.or_else(|| span.map(alloc::boxed::Box::new)),
+        )),
+        Value::PositionalParam(idx, param_span) => Ok(VectorValue::PositionalParam(
+            idx,
+            param_span.or_else(|| span.map(alloc::boxed::Box::new)),
+        )),
+        Value::List(values)
+            if values
+                .iter()
+                .all(|value| matches!(value, Value::List(_) | Value::F32Array(_))) =>
+        {
             if values.is_empty() {
                 return Err(vector_error("multidense vector cannot be empty", span));
             }
             let mut rows = Vec::with_capacity(values.len());
             for value in values {
                 match value {
+                    Value::F32Array(row) => {
+                        if row.is_empty() {
+                            return Err(vector_error(
+                                "multidense vector rows cannot be empty",
+                                span,
+                            ));
+                        }
+                        rows.push(row);
+                    }
                     Value::List(row) => {
                         let row_vec = numeric_vector(row, span)?;
                         if row_vec.is_empty() {
@@ -520,19 +600,73 @@ pub(crate) fn vector_from_value(value: Value, span: Option<Span>) -> Result<Vect
             }
         }),
         Value::Dict(items) => {
+            let mut data_v = None;
+            let mut dim_v = None;
             let mut indices_v = None;
             let mut values_v = None;
             for (key, value) in items {
-                if key.eq_ignore_ascii_case("indices") {
+                if key.eq_ignore_ascii_case("data") {
+                    data_v = Some(value);
+                } else if key.eq_ignore_ascii_case("dim") {
+                    dim_v = Some(value);
+                } else if key.eq_ignore_ascii_case("indices") {
                     indices_v = Some(value);
                 } else if key.eq_ignore_ascii_case("values") {
                     values_v = Some(value);
                 }
             }
-            let (Some(Value::List(indices)), Some(Value::List(values))) = (indices_v, values_v)
-            else {
+            if data_v.is_some() || dim_v.is_some() {
+                if indices_v.is_some() || values_v.is_some() {
+                    return Err(vector_error(
+                        "vector object must be either flat multivector {data, dim} or sparse {indices, values}, not both",
+                        span,
+                    ));
+                }
+                let (Some(data), Some(dim)) = (data_v, dim_v) else {
+                    return Err(vector_error(
+                        "flat multivector requires data and dim (e.g. {data: [...], dim: 128})",
+                        span,
+                    ));
+                };
+                let dim = match dim {
+                    Value::Int(n) if n > 0 => usize::try_from(n)
+                        .map_err(|_| vector_error("multivector dim is out of range", span))?,
+                    _ => {
+                        return Err(vector_error(
+                            "multivector dim must be a positive integer",
+                            span,
+                        ));
+                    }
+                };
+                let flat = match data {
+                    Value::F32Array(flat) => flat,
+                    Value::List(items) => numeric_vector(items, span)?,
+                    _ => {
+                        return Err(vector_error(
+                            "multivector data must be a flat list of numbers",
+                            span,
+                        ));
+                    }
+                };
+                if flat.is_empty() || flat.len() % dim != 0 {
+                    return Err(vector_error(
+                        "multivector data length must be a non-empty multiple of dim",
+                        span,
+                    ));
+                }
+                return Ok(VectorValue::MultiDense(
+                    flat.chunks_exact(dim).map(<[f32]>::to_vec).collect(),
+                ));
+            }
+            let (Some(indices), Some(values)) = (indices_v, values_v) else {
                 return Err(vector_error(
                     "sparse vectors require indices and values lists",
+                    span,
+                ));
+            };
+            let Value::List(indices) = indices else {
+                return Err(vector_error(
+                    "sparse vector indices must be non-negative integers",
                     span,
                 ));
             };
@@ -547,7 +681,16 @@ pub(crate) fn vector_from_value(value: Value, span: Option<Span>) -> Result<Vect
                     )),
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            let values = numeric_vector(values, span)?;
+            let values = match values {
+                Value::F32Array(flat) => flat,
+                Value::List(items) => numeric_vector(items, span)?,
+                _ => {
+                    return Err(vector_error(
+                        "sparse vector values must be a list of numbers",
+                        span,
+                    ));
+                }
+            };
             if indices.is_empty() || indices.len() != values.len() {
                 return Err(vector_error(
                     "sparse vector indices and values must be non-empty and have equal length",
@@ -593,4 +736,32 @@ fn numeric_vector(values: Vec<Value>, span: Option<Span>) -> Result<Vec<f32>, Qq
 
 fn vector_error(message: &'static str, span: Option<Span>) -> QqlError {
     QqlError::validation("QQL-VALIDATION-VECTOR", message, span)
+}
+
+pub fn point_vectors_from_value(
+    value: Value,
+    span: Option<Span>,
+) -> Result<PointVectors, QqlError> {
+    match value {
+        Value::Param(name, param_span) => Ok(PointVectors::Param(
+            name,
+            param_span.or_else(|| span.map(alloc::boxed::Box::new)),
+        )),
+        Value::PositionalParam(idx, param_span) => Ok(PointVectors::PositionalParam(
+            idx,
+            param_span.or_else(|| span.map(alloc::boxed::Box::new)),
+        )),
+        Value::Dict(items)
+            if !items.iter().any(|(key, _)| {
+                key.eq_ignore_ascii_case("indices") || key.eq_ignore_ascii_case("values")
+            }) =>
+        {
+            let mut vectors = Vec::new();
+            for (name, value) in items {
+                vectors.push((name, vector_from_value(value, span)?));
+            }
+            Ok(PointVectors::Named(vectors))
+        }
+        value => vector_from_value(value, span).map(PointVectors::Unnamed),
+    }
 }

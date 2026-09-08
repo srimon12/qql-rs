@@ -318,6 +318,12 @@ pub(crate) fn to_vector_input(input: &PlanQueryInput) -> qdrant::VectorInput {
                 ..Default::default()
             })),
         },
+        PlanQueryInput::Vector(PlanVectorValue::Param(name)) => {
+            panic!("invariant violation: unbound parameter :{name} reached gRPC to_vector_input")
+        }
+        PlanQueryInput::Vector(PlanVectorValue::PositionalParam(idx)) => panic!(
+            "invariant violation: unbound positional parameter ?{idx} reached gRPC to_vector_input"
+        ),
     }
 }
 
@@ -413,6 +419,12 @@ pub(crate) fn plan_vector_to_proto(v: &PlanVectorValue) -> qdrant::Vector {
             )),
             ..Default::default()
         },
+        PlanVectorValue::Param(name) => {
+            panic!("invariant violation: unbound parameter :{name} reached plan_vector_to_proto")
+        }
+        PlanVectorValue::PositionalParam(idx) => panic!(
+            "invariant violation: unbound positional parameter ?{idx} reached plan_vector_to_proto"
+        ),
     }
 }
 
@@ -433,6 +445,12 @@ pub(crate) fn to_vectors(vectors: &PlanPointVectors) -> Option<qdrant::Vectors> 
                     qdrant::NamedVectors { vectors: map },
                 )),
             })
+        }
+        PlanPointVectors::Param(name) => {
+            panic!("invariant violation: unbound parameter :{name} reached to_vectors")
+        }
+        PlanPointVectors::PositionalParam(idx) => {
+            panic!("invariant violation: unbound positional parameter ?{idx} reached to_vectors")
         }
     }
 }

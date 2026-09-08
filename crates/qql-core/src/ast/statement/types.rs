@@ -175,6 +175,57 @@ pub enum VectorValue {
     },
     /// Multivector bag of dense vectors (ColBERT-style MaxSim).
     MultiDense(Vec<Vec<f32>>),
+    /// Parameter placeholder (`:name`).
+    Param(
+        String,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        Option<alloc::boxed::Box<crate::error::Span>>,
+    ),
+    /// Positional parameter placeholder (`?`).
+    PositionalParam(
+        usize,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        Option<alloc::boxed::Box<crate::error::Span>>,
+    ),
+}
+
+impl VectorValue {
+    /// Construct a [`VectorValue::MultiDense`] from a flat slice of floats and a per-vector dimension.
+    pub fn multidense_from_flat(flat: &[f32], dim: usize) -> Result<Self, crate::error::QqlError> {
+        if dim == 0 {
+            return Err(crate::error::QqlError::validation(
+                "QQL-VALIDATION-VECTOR",
+                "multivector dimension cannot be zero",
+                None,
+            ));
+        }
+        if flat.is_empty() {
+            return Err(crate::error::QqlError::validation(
+                "QQL-VALIDATION-VECTOR",
+                "multivector cannot be empty",
+                None,
+            ));
+        }
+        if !flat.len().is_multiple_of(dim) {
+            return Err(crate::error::QqlError::validation(
+                "QQL-VALIDATION-VECTOR",
+                alloc::format!(
+                    "flat slice length ({}) is not a multiple of dimension ({})",
+                    flat.len(),
+                    dim
+                ),
+                None,
+            ));
+        }
+        let rows = flat.chunks_exact(dim).map(|c| c.to_vec()).collect();
+        Ok(Self::MultiDense(rows))
+    }
 }
 
 /// Vector payload attached to an upsert point.
@@ -185,6 +236,24 @@ pub enum PointVectors {
     Unnamed(VectorValue),
     /// Vector values keyed by vector name.
     Named(Vec<(String, VectorValue)>),
+    /// Parameter placeholder (`:name`) for entire vector payload or single vector.
+    Param(
+        String,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        Option<alloc::boxed::Box<crate::error::Span>>,
+    ),
+    /// Positional parameter placeholder (`?`) for entire vector payload or single vector.
+    PositionalParam(
+        usize,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        Option<alloc::boxed::Box<crate::error::Span>>,
+    ),
 }
 
 /// Explicit `AS` role for a `USING` vector target.

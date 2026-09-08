@@ -2,14 +2,26 @@ use crate::filter::{point_id_req_typed, top_level_filter, value_to_json};
 use crate::query::lower_vector_value;
 use crate::types::*;
 use qql_core::ast::{
-    ClearPayloadStmt, DeletePayloadStmt, DeleteStmt, DeleteVectorStmt, PointSelector, Stmt,
-    UpdatePayloadStmt, UpdateVectorStmt, UpsertPoint, UpsertStmt,
+    ClearPayloadStmt, DeletePayloadStmt, DeleteStmt, DeleteVectorStmt, PointEntry, PointSelector,
+    Stmt, UpdatePayloadStmt, UpdateVectorStmt, UpsertPoint, UpsertStmt,
 };
 
 /// Lower `UPSERT INTO` to the `PUT /collections/{c}/points` request body.
+///
+/// Whole-point placeholders (`VALUES :p` / `VALUES ?`) are skipped: they
+/// splice in at execution time. Template planning therefore yields the inline
+/// points only; executors must route point-param templates through the
+/// point-splice path, never dispatch a template plan directly.
 pub fn lower_upsert_request(stmt: &UpsertStmt) -> UpsertRequest {
     UpsertRequest {
-        points: stmt.points.iter().map(lower_upsert_point).collect(),
+        points: stmt
+            .points
+            .iter()
+            .filter_map(|point| match point {
+                PointEntry::Inline(inline) => Some(lower_upsert_point(inline)),
+                PointEntry::Param(..) | PointEntry::PositionalParam(..) => None,
+            })
+            .collect(),
         shard_key: stmt.shard_key.clone(),
     }
 }
@@ -167,6 +179,26 @@ pub fn lower_delete_vector_request(stmt: &DeleteVectorStmt) -> DeleteVectorReque
     }
 }
 
+/// Increment a 128-bit UUID point ID string by 1 to implement exclusive
+/// cursor pagination (`id > after`), matching integer `AFTER n -> offset n+1`.
+fn increment_uuid_point_id(s: &str) -> Option<String> {
+    let clean: String = s.chars().filter(|c| *c != '-').collect();
+    if clean.len() == 32 {
+        let val = u128::from_str_radix(&clean, 16).ok()?;
+        let next = val.saturating_add(1);
+        Some(format!(
+            "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
+            (next >> 96) as u32,
+            ((next >> 80) & 0xffff) as u16,
+            ((next >> 64) & 0xffff) as u16,
+            ((next >> 48) & 0xffff) as u16,
+            (next & 0xffff_ffff_ffff) as u64
+        ))
+    } else {
+        None
+    }
+}
+
 /// Lower `SCROLL` to the `/points/scroll` body: payload on, vectors off.
 pub fn lower_scroll_request(
     limit: u64,
@@ -185,7 +217,17 @@ pub fn lower_scroll_request(
     };
     ScrollRequest {
         filter: filter.map(top_level_filter),
-        offset: after.map(point_id_req_typed),
+        offset: after.map(|id| match id {
+            qql_core::ast::PointId::Number(n) => PlanPointId::Number(n.saturating_add(1)),
+            qql_core::ast::PointId::String(s) => {
+                if let Some(next) = increment_uuid_point_id(s) {
+                    PlanPointId::String(next)
+                } else {
+                    PlanPointId::String(s.clone())
+                }
+            }
+            other => point_id_req_typed(other),
+        }),
         limit: Some(limit),
         with_payload: Some(PayloadSelectorReq::All(true)),
         with_vector,
@@ -257,6 +299,7 @@ pub fn planned_to_update_operation(
         PlannedOperation::Delete {
             collection,
             request,
+            ..
         } => Some((
             collection.clone(),
             UpdateOperation::Delete {
@@ -266,6 +309,7 @@ pub fn planned_to_update_operation(
         PlannedOperation::UpdatePayload {
             collection,
             request,
+            ..
         } => Some((
             collection.clone(),
             UpdateOperation::SetPayload {
@@ -275,6 +319,7 @@ pub fn planned_to_update_operation(
         PlannedOperation::ClearPayload {
             collection,
             request,
+            ..
         } => Some((
             collection.clone(),
             UpdateOperation::ClearPayload {
@@ -284,6 +329,7 @@ pub fn planned_to_update_operation(
         PlannedOperation::UpdateVectors {
             collection,
             request,
+            ..
         } => Some((
             collection.clone(),
             UpdateOperation::UpdateVectors {
@@ -293,6 +339,7 @@ pub fn planned_to_update_operation(
         PlannedOperation::DeleteVectors {
             collection,
             request,
+            ..
         } => Some((
             collection.clone(),
             UpdateOperation::DeleteVectors {

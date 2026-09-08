@@ -307,7 +307,8 @@ fn input_kind(input: &QueryInput) -> Option<VectorKind> {
         | QueryInput::Image { .. }
         | QueryInput::Point(_)
         | QueryInput::Param(..)
-        | QueryInput::PositionalParam(..) => None,
+        | QueryInput::PositionalParam(..)
+        | QueryInput::Vector(VectorValue::Param(..) | VectorValue::PositionalParam(..)) => None,
         QueryInput::Vector(VectorValue::Dense(_) | VectorValue::MultiDense(_)) => {
             Some(VectorKind::Dense)
         }

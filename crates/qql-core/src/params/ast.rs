@@ -6,9 +6,13 @@ use super::input::{bind_context_pair, bind_feedback_item, bind_query_input};
 pub use super::value::{bind_point_id, bind_value, resolve_param_u64};
 
 use crate::ast::Value;
-use crate::ast::statement::{PageSpec, Prefetch, PrefetchSource, QueryExpr, QueryStmt, Stmt};
-use crate::error::QqlError;
+use crate::ast::statement::{
+    PageSpec, PointEntry, PointVectors, Prefetch, PrefetchSource, QueryExpr, QueryStmt, Stmt,
+    UpsertPoint, VectorValue,
+};
+use crate::error::{QqlError, Span};
 use alloc::format;
+use alloc::vec::Vec;
 
 /// Bind parameters into a `PageSpec` in-place.
 pub fn bind_page_spec<F>(
@@ -266,19 +270,68 @@ where
             Ok(())
         }
         Stmt::Upsert(upsert) => {
-            for point in &mut upsert.points {
-                bind_point_id(&mut point.id, &lookup, positional)?;
-                for (_k, v) in &mut point.payload {
-                    bind_value(v, &lookup, positional)?;
+            // Whole-point placeholders splice in place: one entry may become
+            // several points (`:rows` bound to a list of point dicts), so the
+            // vec is rebuilt rather than updated in place.
+            let mut bound = Vec::with_capacity(upsert.points.len());
+            for entry in core::mem::take(&mut upsert.points) {
+                match entry {
+                    PointEntry::Inline(mut point) => {
+                        bind_point_id(&mut point.id, &lookup, positional)?;
+                        if let Some(vectors) = &mut point.vectors {
+                            bind_point_vectors(vectors, &lookup, positional)?;
+                        }
+                        for (_k, v) in &mut point.payload {
+                            bind_value(v, &lookup, positional)?;
+                        }
+                        bound.push(PointEntry::Inline(point));
+                    }
+                    PointEntry::Param(name, span) => {
+                        let val = lookup(&name).ok_or_else(|| {
+                            QqlError::validation(
+                                "QQL-BIND-UNBOUND-PARAM",
+                                format!("unbound named parameter ':{name}'"),
+                                span.as_deref().copied(),
+                            )
+                        })?;
+                        bind_point_entry_value(
+                            &mut bound,
+                            val,
+                            span.as_deref().copied(),
+                            &lookup,
+                            positional,
+                        )?;
+                    }
+                    PointEntry::PositionalParam(idx, span) => {
+                        let val = positional.get(idx).cloned().ok_or_else(|| {
+                            QqlError::validation(
+                                "QQL-BIND-MISSING-POSITIONAL",
+                                format!("missing positional parameter ?{}", idx + 1),
+                                span.as_deref().copied(),
+                            )
+                        })?;
+                        bind_point_entry_value(
+                            &mut bound,
+                            val,
+                            span.as_deref().copied(),
+                            &lookup,
+                            positional,
+                        )?;
+                    }
                 }
             }
+            upsert.points = bound;
             Ok(())
         }
         Stmt::Delete(del) => bind_point_selector(&mut del.selector, &lookup, positional),
         Stmt::ClearPayload(cp) => bind_point_selector(&mut cp.selector, &lookup, positional),
         Stmt::DeletePayload(dp) => bind_point_selector(&mut dp.selector, &lookup, positional),
         Stmt::DeleteVector(dv) => bind_point_selector(&mut dv.selector, &lookup, positional),
-        Stmt::UpdateVector(uv) => bind_point_id(&mut uv.point_id, &lookup, positional),
+        Stmt::UpdateVector(uv) => {
+            bind_point_id(&mut uv.point_id, &lookup, positional)?;
+            bind_vector_value(&mut uv.vector, &lookup, positional)?;
+            Ok(())
+        }
         Stmt::UpdatePayload(up) => {
             bind_point_selector(&mut up.selector, &lookup, positional)?;
             for (_k, v) in &mut up.payload {
@@ -318,4 +371,175 @@ where
             None,
         )),
     }
+}
+
+/// Bind parameters into a `VectorValue` in-place.
+pub fn bind_vector_value<F>(
+    vec: &mut VectorValue,
+    lookup: &F,
+    positional: &[Value],
+) -> Result<(), QqlError>
+where
+    F: Fn(&str) -> Option<Value>,
+{
+    match vec {
+        VectorValue::Param(name, span) => {
+            let val = lookup(name).ok_or_else(|| {
+                QqlError::validation(
+                    "QQL-BIND-UNBOUND-PARAM",
+                    format!("unbound named parameter ':{name}'"),
+                    span.as_deref().copied(),
+                )
+            })?;
+            *vec = crate::parser::helpers::vector_from_value(val, span.as_deref().copied())?;
+        }
+        VectorValue::PositionalParam(idx, span) => {
+            let val = positional.get(*idx).cloned().ok_or_else(|| {
+                QqlError::validation(
+                    "QQL-BIND-MISSING-POSITIONAL",
+                    format!("missing positional parameter ?{}", *idx + 1),
+                    span.as_deref().copied(),
+                )
+            })?;
+            *vec = crate::parser::helpers::vector_from_value(val, span.as_deref().copied())?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn point_param_shape_error(span: Option<Span>) -> QqlError {
+    QqlError::validation(
+        "QQL-BIND-TYPE-MISMATCH",
+        "point parameter must be an object ({id: …, …}) or a list of point objects",
+        span,
+    )
+}
+
+/// Build one concrete point from a bound point-dict value, mirroring
+/// `VALUES {…}` row parsing: `id` is required (case-insensitive), `vector`
+/// routes through vector lowering, every other key becomes payload.
+fn upsert_point_from_items<F>(
+    mut row: Vec<(String, Value)>,
+    span: Option<Span>,
+    lookup: &F,
+    positional: &[Value],
+) -> Result<UpsertPoint, QqlError>
+where
+    F: Fn(&str) -> Option<Value>,
+{
+    let id_index = row
+        .iter()
+        .position(|(key, _)| key.eq_ignore_ascii_case("id"))
+        .ok_or_else(|| {
+            QqlError::validation(
+                "QQL-VALIDATION-UPSERT-ID",
+                "each UPSERT row requires an id",
+                span,
+            )
+        })?;
+    let (_, id) = row.remove(id_index);
+    let mut id = crate::parser::helpers::point_id_from_value(id, span.unwrap_or(Span::new(0, 0)))?;
+    let mut vectors = if let Some(index) = row
+        .iter()
+        .position(|(key, _)| key.eq_ignore_ascii_case("vector"))
+    {
+        let (_, value) = row.remove(index);
+        Some(crate::parser::helpers::point_vectors_from_value(
+            value, span,
+        )?)
+    } else {
+        None
+    };
+    let mut payload = row;
+    // Nested placeholders inside the dict compose like inline rows.
+    bind_point_id(&mut id, lookup, positional)?;
+    if let Some(vectors) = &mut vectors {
+        bind_point_vectors(vectors, lookup, positional)?;
+    }
+    for (_k, v) in &mut payload {
+        bind_value(v, lookup, positional)?;
+    }
+    Ok(UpsertPoint {
+        id,
+        vectors,
+        payload,
+    })
+}
+
+/// Splice one bound whole-point value into the output vec: a dict becomes a
+/// single point, a list of dicts becomes several points.
+fn bind_point_entry_value<F>(
+    bound: &mut Vec<PointEntry>,
+    value: Value,
+    span: Option<Span>,
+    lookup: &F,
+    positional: &[Value],
+) -> Result<(), QqlError>
+where
+    F: Fn(&str) -> Option<Value>,
+{
+    match value {
+        Value::Dict(row) => {
+            bound.push(PointEntry::Inline(upsert_point_from_items(
+                row, span, lookup, positional,
+            )?));
+        }
+        Value::List(items) => {
+            for item in items {
+                match item {
+                    Value::Dict(row) => {
+                        bound.push(PointEntry::Inline(upsert_point_from_items(
+                            row, span, lookup, positional,
+                        )?));
+                    }
+                    _ => return Err(point_param_shape_error(span)),
+                }
+            }
+        }
+        _ => return Err(point_param_shape_error(span)),
+    }
+    Ok(())
+}
+
+/// Bind parameters into `PointVectors` in-place.
+pub fn bind_point_vectors<F>(
+    pv: &mut PointVectors,
+    lookup: &F,
+    positional: &[Value],
+) -> Result<(), QqlError>
+where
+    F: Fn(&str) -> Option<Value>,
+{
+    match pv {
+        PointVectors::Param(name, span) => {
+            let val = lookup(name).ok_or_else(|| {
+                QqlError::validation(
+                    "QQL-BIND-UNBOUND-PARAM",
+                    format!("unbound named parameter ':{name}'"),
+                    span.as_deref().copied(),
+                )
+            })?;
+            *pv = crate::parser::helpers::point_vectors_from_value(val, span.as_deref().copied())?;
+        }
+        PointVectors::PositionalParam(idx, span) => {
+            let val = positional.get(*idx).cloned().ok_or_else(|| {
+                QqlError::validation(
+                    "QQL-BIND-MISSING-POSITIONAL",
+                    format!("missing positional parameter ?{}", *idx + 1),
+                    span.as_deref().copied(),
+                )
+            })?;
+            *pv = crate::parser::helpers::point_vectors_from_value(val, span.as_deref().copied())?;
+        }
+        PointVectors::Unnamed(v) => {
+            bind_vector_value(v, lookup, positional)?;
+        }
+        PointVectors::Named(list) => {
+            for (_, v) in list {
+                bind_vector_value(v, lookup, positional)?;
+            }
+        }
+    }
+    Ok(())
 }

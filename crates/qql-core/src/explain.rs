@@ -425,7 +425,7 @@ fn render_quota_value(value: &Value) -> String {
         Value::Bool(b) => b.to_string(),
         Value::Null => "null".into(),
         Value::Dict(_) => "<object>".into(),
-        Value::List(_) => "<list>".into(),
+        Value::List(_) | Value::F32Array(_) => "<list>".into(),
         Value::Param(name, _) => format!(":{}", name),
         Value::PositionalParam(..) => "?".into(),
     }

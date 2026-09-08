@@ -13,7 +13,8 @@ use super::query::{
 };
 use super::responses::{
     batch_result_to_json, facet_hit_to_json, get_points_envelope, groups_result_to_json,
-    point_id_to_json, retrieved_point_to_json, scored_point_to_json,
+    point_id_to_json, retrieved_point_to_hit_and_json, retrieved_point_to_search_hit,
+    scored_point_to_search_hit,
 };
 
 /// Run a single query request via `Points.Query`.
@@ -27,10 +28,16 @@ pub(crate) async fn execute_query(
         .query(grpc_req)
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("query: {e}"), None))?;
+    let hits: Vec<_> = resp
+        .result
+        .into_iter()
+        .map(scored_point_to_search_hit)
+        .collect();
+    let hits_len = hits.len();
+    let hits_val = serde_json::to_value(&hits).unwrap_or_default();
     Ok(serde_json::json!({
-        "result": {
-            "points": resp.result.into_iter().map(scored_point_to_json).collect::<Vec<_>>()
-        },
+        "__pre_serialized_hits": hits_val,
+        "hits_len": hits_len,
         "status": "ok",
         "time": resp.time,
     }))
@@ -74,13 +81,19 @@ pub(crate) async fn execute_get_points(
         .get_points(grpc_req)
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("get_points: {e}"), None))?;
-    Ok(get_points_envelope(
-        resp.result
-            .into_iter()
-            .map(retrieved_point_to_json)
-            .collect(),
-        resp.time,
-    ))
+    let (hits, points): (Vec<_>, Vec<_>) = resp
+        .result
+        .into_iter()
+        .map(retrieved_point_to_hit_and_json)
+        .unzip();
+    let hits_len = hits.len();
+    let hits_val = serde_json::to_value(&hits).unwrap_or_default();
+    let mut obj = get_points_envelope(points, resp.time);
+    if let serde_json::Value::Object(ref mut map) = obj {
+        map.insert("__pre_serialized_hits".into(), hits_val);
+        map.insert("hits_len".into(), serde_json::json!(hits_len));
+    }
+    Ok(obj)
 }
 
 /// Paginate points via `Points.Scroll`.
@@ -94,15 +107,18 @@ pub(crate) async fn execute_scroll(
         .scroll(grpc_req)
         .await
         .map_err(|e| QqlError::backend("QQL-GRPC", format!("scroll: {e}"), None))?;
+    let hits: Vec<_> = resp
+        .result
+        .into_iter()
+        .map(retrieved_point_to_search_hit)
+        .collect();
+    let hits_len = hits.len();
+    let hits_val = serde_json::to_value(&hits).unwrap_or_default();
     let mut obj = serde_json::Map::new();
     obj.insert("status".into(), serde_json::json!("ok"));
     obj.insert("time".into(), serde_json::json!(resp.time));
-    obj.insert(
-        "result".into(),
-        serde_json::json!({
-            "points": resp.result.into_iter().map(retrieved_point_to_json).collect::<Vec<_>>()
-        }),
-    );
+    obj.insert("__pre_serialized_hits".into(), hits_val);
+    obj.insert("hits_len".into(), serde_json::json!(hits_len));
     if let Some(offset) = resp.next_page_offset {
         obj.insert("next_page_offset".into(), point_id_to_json(&offset));
     }

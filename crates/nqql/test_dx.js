@@ -274,4 +274,61 @@ console.log(`Testing Node.js DX enhancements (${LABEL})...`);
   assert.strictEqual(typeof sdk.Client.prototype.executeHits, 'function');
 }
 
+// 10. Typed-array vector params bind identically to plain arrays.
+{
+  const vec = [0.1, 0.2, 0.3, 0.4];
+  const f64 = new Float64Array(vec);
+  const f32 = new Float32Array(vec);
+  const q = 'QUERY :v FROM docs USING dense LIMIT 2';
+
+  // Stmt.bind equivalence (typed === plain, exact same canonical string).
+  const fromPlain = sdk.parse(q)[0].bind({ v: vec }).toString();
+  assert.ok(fromPlain.includes('[0.1, 0.2, 0.3, 0.4]'));
+  assert.strictEqual(sdk.parse(q)[0].bind({ v: f64 }).toString(), fromPlain);
+  assert.strictEqual(sdk.parse(q)[0].bind({ v: f32 }).toString(), fromPlain);
+
+  // Module bind + compileQuery equivalence.
+  assert.strictEqual(sdk.bind(q, { v: f64 }), sdk.bind(q, { v: vec }));
+  assert.deepStrictEqual(sdk.compileQuery(q, { v: f64 }), sdk.compileQuery(q, { v: vec }));
+
+  // Positional ? with typed arrays.
+  const qp = 'QUERY ? FROM docs USING dense LIMIT 1';
+  assert.strictEqual(
+    sdk.parse(qp)[0].bind([f64]).toString(),
+    sdk.parse(qp)[0].bind([vec]).toString()
+  );
+
+  // Flat {data, dim} multivector re-parses to the same statement as nested
+  // lists (string bind renders the dict literally; the parser chunks it).
+  const flat = sdk.bind('QUERY VECTOR :m FROM docs USING dense', {
+    m: { data: [0.1, 0.2, 0.3, 0.4], dim: 2 },
+  });
+  const nested = sdk.bind('QUERY VECTOR :m FROM docs USING dense', {
+    m: [[0.1, 0.2], [0.3, 0.4]],
+  });
+  assert.strictEqual(sdk.parse(flat)[0].toString(), sdk.parse(nested)[0].toString());
+
+  // Sparse indices as Uint32Array, values as Float64Array.
+  const sp1 = sdk.bind('QUERY VECTOR :s FROM docs USING sparse', {
+    s: { indices: [1, 5], values: [0.5, 0.8] },
+  });
+  const sp2 = sdk.bind('QUERY VECTOR :s FROM docs USING sparse', {
+    s: { indices: new Uint32Array([1, 5]), values: new Float64Array([0.5, 0.8]) },
+  });
+  assert.strictEqual(sp2, sp1);
+
+  // Raw binary without a float dtype fails closed with guidance.
+  assert.throws(
+    () => sdk.parse(q)[0].bind({ v: Buffer.from([1, 2, 3, 4]) }),
+    /Float32Array or Float64Array/
+  );
+}
+
+
+// upsertMany surface (offline): bulk ingest lives on the client next to
+// execute — one `:rows` template prepared once, no hand-rolled batch loops.
+{
+  assert.strictEqual(typeof sdk.Client.prototype.upsertMany, 'function');
+}
+
 console.log(`All ${LABEL} DX unit tests passed successfully!`);

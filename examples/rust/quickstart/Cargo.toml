@@ -1,0 +1,9 @@
+[workspace]
+
+[package]
+name = "quickstart"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+qql-core = { path = "../../../crates/qql-core", features = ["json"] }

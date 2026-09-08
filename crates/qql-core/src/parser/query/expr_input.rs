@@ -45,7 +45,7 @@ impl<'a> AstLowerer<'a> {
             }
             return self.parse_vector_value().map(QueryInput::Vector);
         }
-        if self.peek()?.kind == TokenKind::Lbracket {
+        if self.peek()?.kind == TokenKind::Lbracket || self.peek()?.kind == TokenKind::Lbrace {
             return self.parse_vector_value().map(QueryInput::Vector);
         }
         if self.peek_word("POINT")? {

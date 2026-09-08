@@ -95,6 +95,7 @@ impl QdrantOps for GrpcQdrant {
         let op = qql_plan::PlannedOperation::CreateIndex {
             collection: collection_name.to_string(),
             request: req.clone(),
+            wait: true,
         };
         self.execute_planned(&op).await.map(|_| ())
     }

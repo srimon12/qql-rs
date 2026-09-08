@@ -93,6 +93,8 @@ pub enum PlannedOperation {
         collection: String,
         /// Lowered `/points/delete` request body.
         request: DeleteRequest,
+        /// Wait for deletion.
+        wait: bool,
     },
     /// Merge payload keys: `POST /collections/{c}/points/payload`.
     UpdatePayload {
@@ -100,6 +102,8 @@ pub enum PlannedOperation {
         collection: String,
         /// Lowered `/points/payload` request body.
         request: UpdatePayloadRequest,
+        /// Wait for update.
+        wait: bool,
     },
     /// Drop all payload: `POST /collections/{c}/points/payload/clear`.
     ClearPayload {
@@ -107,6 +111,8 @@ pub enum PlannedOperation {
         collection: String,
         /// Lowered `/points/payload/clear` request body.
         request: ClearPayloadRequest,
+        /// Wait for clear.
+        wait: bool,
     },
     /// Remove payload keys: `POST /collections/{c}/points/payload/delete`.
     DeletePayload {
@@ -114,6 +120,8 @@ pub enum PlannedOperation {
         collection: String,
         /// Lowered `/points/payload/delete` request body.
         request: DeletePayloadRequest,
+        /// Wait for delete.
+        wait: bool,
     },
     /// Replace point vectors: `PUT /collections/{c}/points/vectors`.
     UpdateVectors {
@@ -121,6 +129,8 @@ pub enum PlannedOperation {
         collection: String,
         /// Lowered `/points/vectors` request body.
         request: UpdateVectorRequest,
+        /// Wait for update.
+        wait: bool,
     },
     /// Remove named vectors: `POST /collections/{c}/points/vectors/delete`.
     DeleteVectors {
@@ -128,6 +138,8 @@ pub enum PlannedOperation {
         collection: String,
         /// Lowered `/points/vectors/delete` request body.
         request: DeleteVectorRequest,
+        /// Wait for delete.
+        wait: bool,
     },
     /// Create a collection: `PUT /collections/{c}`.
     CreateCollection {
@@ -154,6 +166,8 @@ pub enum PlannedOperation {
         collection: String,
         /// Lowered create-index request body.
         request: CreateIndexRequest,
+        /// Wait for index creation.
+        wait: bool,
     },
     /// Drop a payload index: `DELETE /collections/{c}/index/{field}`.
     DropIndex {
@@ -370,6 +384,161 @@ impl PlannedOperation {
             _ => None,
         }
     }
+
+    /// Bind vector parameters directly into this planned operation without re-planning.
+    pub fn bind_vector_params<F, P>(&mut self, named: &F, positional: &P)
+    where
+        F: Fn(&str) -> Option<PlanVectorValue>,
+        P: Fn(usize) -> Option<PlanVectorValue>,
+    {
+        match self {
+            PlannedOperation::Query { request, .. } => {
+                Self::bind_query_request_vectors(request, named, positional);
+            }
+            PlannedOperation::Upsert { request, .. } => {
+                for p in &mut request.points {
+                    if let Some(ref mut pvs) = p.vector {
+                        match pvs {
+                            PlanPointVectors::Param(name) => {
+                                if let Some(new_v) = named(name) {
+                                    *pvs = PlanPointVectors::Unnamed(new_v);
+                                }
+                            }
+                            PlanPointVectors::PositionalParam(idx) => {
+                                if let Some(new_v) = positional(*idx) {
+                                    *pvs = PlanPointVectors::Unnamed(new_v);
+                                }
+                            }
+                            PlanPointVectors::Unnamed(v) => {
+                                Self::bind_vector_val(v, named, positional);
+                            }
+                            PlanPointVectors::Named(entries) => {
+                                for (_, v) in entries {
+                                    Self::bind_vector_val(v, named, positional);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            PlannedOperation::UpdateVectors { request, .. } => {
+                for p in &mut request.points {
+                    Self::bind_point_vectors_val(&mut p.vector, named, positional);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn bind_point_vectors_val<F, P>(pvs: &mut PlanPointVectors, named: &F, positional: &P)
+    where
+        F: Fn(&str) -> Option<PlanVectorValue>,
+        P: Fn(usize) -> Option<PlanVectorValue>,
+    {
+        match pvs {
+            PlanPointVectors::Param(name) => {
+                if let Some(new_v) = named(name) {
+                    *pvs = PlanPointVectors::Unnamed(new_v);
+                }
+            }
+            PlanPointVectors::PositionalParam(idx) => {
+                if let Some(new_v) = positional(*idx) {
+                    *pvs = PlanPointVectors::Unnamed(new_v);
+                }
+            }
+            PlanPointVectors::Unnamed(v) => {
+                Self::bind_vector_val(v, named, positional);
+            }
+            PlanPointVectors::Named(entries) => {
+                for (_, v) in entries {
+                    Self::bind_vector_val(v, named, positional);
+                }
+            }
+        }
+    }
+
+    fn bind_query_request_vectors<F, P>(req: &mut QueryRequest, named: &F, positional: &P)
+    where
+        F: Fn(&str) -> Option<PlanVectorValue>,
+        P: Fn(usize) -> Option<PlanVectorValue>,
+    {
+        Self::bind_query_variant_vectors(&mut req.query, named, positional);
+        for prefetch in &mut req.prefetch {
+            if let Some(ref mut qv) = prefetch.query {
+                Self::bind_query_variant_vectors(qv, named, positional);
+            }
+        }
+    }
+
+    fn bind_plan_query_input<F, P>(input: &mut PlanQueryInput, named: &F, positional: &P)
+    where
+        F: Fn(&str) -> Option<PlanVectorValue>,
+        P: Fn(usize) -> Option<PlanVectorValue>,
+    {
+        if let PlanQueryInput::Vector(v) = input {
+            Self::bind_vector_val(v, named, positional);
+        }
+    }
+
+    fn bind_query_variant_vectors<F, P>(qv: &mut QueryVariant, named: &F, positional: &P)
+    where
+        F: Fn(&str) -> Option<PlanVectorValue>,
+        P: Fn(usize) -> Option<PlanVectorValue>,
+    {
+        match qv {
+            QueryVariant::Nearest(nearest) => {
+                Self::bind_plan_query_input(&mut nearest.nearest, named, positional);
+            }
+            QueryVariant::Recommend { recommend } => {
+                for pos in &mut recommend.positive {
+                    Self::bind_plan_query_input(pos, named, positional);
+                }
+                for neg in &mut recommend.negative {
+                    Self::bind_plan_query_input(neg, named, positional);
+                }
+            }
+            QueryVariant::Context { context } => {
+                for pair in context {
+                    Self::bind_plan_query_input(&mut pair.positive, named, positional);
+                    Self::bind_plan_query_input(&mut pair.negative, named, positional);
+                }
+            }
+            QueryVariant::Discover { discover } => {
+                Self::bind_plan_query_input(&mut discover.target, named, positional);
+                for pair in &mut discover.context {
+                    Self::bind_plan_query_input(&mut pair.positive, named, positional);
+                    Self::bind_plan_query_input(&mut pair.negative, named, positional);
+                }
+            }
+            QueryVariant::RelevanceFeedback { relevance_feedback } => {
+                Self::bind_plan_query_input(&mut relevance_feedback.target, named, positional);
+                for fb in &mut relevance_feedback.feedback {
+                    Self::bind_plan_query_input(&mut fb.example, named, positional);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn bind_vector_val<F, P>(v: &mut PlanVectorValue, named: &F, positional: &P)
+    where
+        F: Fn(&str) -> Option<PlanVectorValue>,
+        P: Fn(usize) -> Option<PlanVectorValue>,
+    {
+        match v {
+            PlanVectorValue::Param(name) => {
+                if let Some(new_v) = named(name) {
+                    *v = new_v;
+                }
+            }
+            PlanVectorValue::PositionalParam(idx) => {
+                if let Some(new_v) = positional(*idx) {
+                    *v = new_v;
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -406,6 +575,20 @@ pub fn ensure_no_unbound_params(statement: &Stmt) -> Result<(), QqlError> {
 /// Fallible planner — the single source of truth for statement → operation.
 pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
     ensure_no_unbound_params(statement)?;
+    lower_statement_to_planned(statement)
+}
+
+/// Fallible template planner for prepared statements.
+///
+/// Permits unbound vector parameters (`:name` or `?N`) so statements can be
+/// pre-planned into a [`PlannedOperation`], while rejecting unbound scalar parameters
+/// (e.g. filters, pagination, point IDs) which cannot be bound at the IR layer.
+pub fn plan_template(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
+    qql_core::params::validate_no_unbound_scalar_params(statement)?;
+    lower_statement_to_planned(statement)
+}
+
+pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
     match statement {
         Stmt::Query(query) => {
             validate_query_stmt(query)?;
@@ -484,31 +667,39 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
         Stmt::Upsert(upsert) => Ok(PlannedOperation::Upsert {
             collection: upsert.collection.clone(),
             request: lower_upsert_request(upsert),
-            wait: upsert.embedding.is_some() || !upsert.embed.is_empty(),
+            wait: upsert
+                .wait
+                .unwrap_or(upsert.embedding.is_some() || !upsert.embed.is_empty()),
         }),
         Stmt::Delete(delete) => Ok(PlannedOperation::Delete {
             collection: delete.collection.clone(),
             request: lower_delete_request(delete),
+            wait: delete.wait.unwrap_or(true),
         }),
         Stmt::ClearPayload(clear) => Ok(PlannedOperation::ClearPayload {
             collection: clear.collection.clone(),
             request: lower_clear_payload_request(clear),
+            wait: clear.wait.unwrap_or(true),
         }),
         Stmt::DeletePayload(del) => Ok(PlannedOperation::DeletePayload {
             collection: del.collection.clone(),
             request: lower_delete_payload_request(del),
+            wait: del.wait.unwrap_or(true),
         }),
         Stmt::DeleteVector(del_vec) => Ok(PlannedOperation::DeleteVectors {
             collection: del_vec.collection.clone(),
             request: lower_delete_vector_request(del_vec),
+            wait: del_vec.wait.unwrap_or(true),
         }),
         Stmt::UpdateVector(update) => Ok(PlannedOperation::UpdateVectors {
             collection: update.collection.clone(),
             request: lower_update_vector_request(update),
+            wait: update.wait.unwrap_or(true),
         }),
         Stmt::UpdatePayload(update) => Ok(PlannedOperation::UpdatePayload {
             collection: update.collection.clone(),
             request: lower_update_payload_request(update),
+            wait: update.wait.unwrap_or(true),
         }),
         Stmt::CreateCollection(create) => Ok(PlannedOperation::CreateCollection {
             collection: create.collection.clone(),
@@ -524,6 +715,7 @@ pub fn plan(statement: &Stmt) -> Result<PlannedOperation, QqlError> {
         Stmt::CreateIndex(index) => Ok(PlannedOperation::CreateIndex {
             collection: index.collection.clone(),
             request: lower_create_index(index),
+            wait: index.wait.unwrap_or(true),
         }),
         Stmt::DropIndex(index) => Ok(PlannedOperation::DropIndex {
             collection: index.collection.clone(),
@@ -884,7 +1076,8 @@ fn validate_query_target_kinds(expression: &QueryExpr) -> Result<(), QqlError> {
                 Some(VectorKind::Dense)
             }
             QueryInput::Vector(VectorValue::Sparse { .. }) => Some(VectorKind::Sparse),
-            QueryInput::Text { .. }
+            QueryInput::Vector(VectorValue::Param(..) | VectorValue::PositionalParam(..))
+            | QueryInput::Text { .. }
             | QueryInput::Image { .. }
             | QueryInput::Point(_)
             | QueryInput::Param(..)
@@ -937,7 +1130,9 @@ fn validate_recommend_average_dims(expression: &QueryExpr) -> Result<(), QqlErro
                     .all(|row| row.len() == dim)
                     .then_some((rows.len(), dim))
             }
-            VectorValue::Sparse { .. } => None,
+            VectorValue::Sparse { .. }
+            | VectorValue::Param(..)
+            | VectorValue::PositionalParam(..) => None,
         }
     };
 
@@ -1140,8 +1335,11 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
     }
 
     /// Mutation query params: wait + optional shard_key.
-    fn mut_query(shard_key: Option<&str>) -> Vec<(String, String)> {
-        let mut q = vec![("wait".into(), "true".into())];
+    fn mut_query(wait: bool, shard_key: Option<&str>) -> Vec<(String, String)> {
+        let mut q = Vec::new();
+        if wait {
+            q.push(("wait".into(), "true".into()));
+        }
         if let Some(sk) = shard_key {
             q.push(("shard_key".into(), sk.to_owned()));
         }
@@ -1225,55 +1423,61 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
         PlannedOperation::Delete {
             collection,
             request,
+            wait,
         } => Route {
             method: Method::Post,
             path: format!("/collections/{collection}/points/delete"),
-            query: mut_query(request.shard_key.as_deref()),
+            query: mut_query(*wait, request.shard_key.as_deref()),
             body: body(request),
         },
         PlannedOperation::ClearPayload {
             collection,
             request,
+            wait,
         } => Route {
             method: Method::Post,
             path: format!("/collections/{collection}/points/payload/clear"),
-            query: mut_query(request.shard_key.as_deref()),
+            query: mut_query(*wait, request.shard_key.as_deref()),
             body: body(request),
         },
         PlannedOperation::DeletePayload {
             collection,
             request,
+            wait,
         } => Route {
             method: Method::Post,
             path: format!("/collections/{collection}/points/payload/delete"),
-            query: mut_query(request.shard_key.as_deref()),
+            query: mut_query(*wait, request.shard_key.as_deref()),
             body: body(request),
         },
         PlannedOperation::DeleteVectors {
             collection,
             request,
+            wait,
         } => Route {
             method: Method::Post,
             path: format!("/collections/{collection}/points/vectors/delete"),
-            query: mut_query(request.shard_key.as_deref()),
+            query: mut_query(*wait, request.shard_key.as_deref()),
             body: body(request),
         },
         PlannedOperation::UpdateVectors {
             collection,
             request,
+            wait,
         } => Route {
             method: Method::Put,
             path: format!("/collections/{collection}/points/vectors"),
-            query: mut_query(request.shard_key.as_deref()),
+            query: mut_query(*wait, request.shard_key.as_deref()),
             body: body(request),
         },
         PlannedOperation::UpdatePayload {
             collection,
             request,
+            wait,
         } => Route {
             method: Method::Post,
             path: format!("/collections/{collection}/points/payload"),
-            query: mut_query(request.shard_key.as_deref()),
+            query: mut_query(*wait, request.shard_key.as_deref()),
             body: body(request),
         },
         // DDL: REST shapes differ from plan IR — use OpenAPI projection fns
@@ -1298,10 +1502,15 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
         PlannedOperation::CreateIndex {
             collection,
             request,
+            wait,
         } => Route {
             method: Method::Put,
             path: format!("/collections/{collection}/index"),
-            query: Vec::new(),
+            query: if *wait {
+                vec![("wait".into(), "true".into())]
+            } else {
+                Vec::new()
+            },
             body: Some(crate::ddl::create_index_rest_body(request)),
         },
         PlannedOperation::CreateShardKey {
@@ -1679,6 +1888,7 @@ mod tests {
         if let PlannedOperation::DeletePayload {
             collection,
             request,
+            ..
         } = &op
         {
             assert_eq!(collection, "docs");

@@ -191,6 +191,7 @@ pub(crate) async fn execute_create_index(
     client: &GrpcQdrant,
     collection: &str,
     request: &qql_plan::types::CreateIndexRequest,
+    wait: bool,
 ) -> Result<serde_json::Value, QqlError> {
     let field_type = match request.field_schema.as_str() {
         "keyword" => qdrant::FieldType::Keyword as i32,
@@ -205,7 +206,7 @@ pub(crate) async fn execute_create_index(
     };
     let grpc_req = qdrant::CreateFieldIndexCollection {
         collection_name: collection.to_owned(),
-        wait: Some(true),
+        wait: Some(wait),
         field_name: request.field_name.clone(),
         field_type: Some(field_type),
         field_index_params: Some(payload_index_params(&request.field_schema, &request.extra)?),

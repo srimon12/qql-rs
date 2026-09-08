@@ -142,7 +142,8 @@
             "vectors": null
           }
         ],
-        "shard_key": null
+        "shard_key": null,
+        "wait": null
       }
     },
     {
@@ -223,7 +224,8 @@
             "vectors": null
           }
         ],
-        "shard_key": null
+        "shard_key": null,
+        "wait": null
       }
     },
     {
@@ -231,7 +233,8 @@
         "collection": "test",
         "field": "text",
         "field_type": "keyword",
-        "options": []
+        "options": [],
+        "wait": null
       }
     },
     {

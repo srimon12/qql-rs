@@ -28,6 +28,42 @@ pub struct RestQdrant {
     client: Client,
 }
 
+pub(crate) fn classify_backend_error_code(status: u16, body: &str) -> &'static str {
+    let lower = body.to_ascii_lowercase();
+    if lower.contains("strict-mode")
+        || lower.contains("strict mode")
+        || lower.contains("quota exceeded")
+    {
+        "QQL-BACKEND-STRICT-MODE"
+    } else if status == 401
+        || (status == 403 && !lower.contains("strict"))
+        || lower.contains("forbidden")
+        || lower.contains("unauthorized")
+        || lower.contains("api-key")
+    {
+        "QQL-BACKEND-AUTH"
+    } else if status == 404 || lower.contains("not found") {
+        "QQL-BACKEND-COLLECTION-NOT-FOUND"
+    } else if (lower.contains("index")
+        && (lower.contains("not exist")
+            || lower.contains("appropriate")
+            || lower.contains("not ready")
+            || lower.contains("missing")
+            || lower.contains("indexing")
+            || lower.contains("failed")))
+        || lower.contains("no appropriate index")
+    {
+        "QQL-BACKEND-INDEX-NOT-READY"
+    } else if lower.contains("dimension")
+        || lower.contains("vector size")
+        || lower.contains("dimensions")
+    {
+        "QQL-BACKEND-DIMENSION-MISMATCH"
+    } else {
+        "QQL-BACKEND-HTTP"
+    }
+}
+
 impl RestQdrant {
     /// Construct with a 30s request timeout.
     ///
@@ -150,8 +186,9 @@ impl RestQdrant {
         if !status.is_success() {
             let limit = text.floor_char_boundary(4096);
             let detail = &text[..limit];
+            let code = classify_backend_error_code(status.as_u16(), detail);
             return Err(QqlError::backend(
-                "QQL-BACKEND-HTTP",
+                code,
                 format!("Qdrant returned {status}: {detail} (request id: {server_request_id})"),
                 None,
             )
@@ -289,6 +326,7 @@ impl QdrantOps for RestQdrant {
         let op = qql_plan::PlannedOperation::CreateIndex {
             collection: collection_name.to_string(),
             request: req.clone(),
+            wait: true,
         };
         self.execute_planned(&op).await.map(|_| ())
     }
@@ -441,8 +479,9 @@ impl RestQdrant {
             )
         })?;
         if !status.is_success() {
+            let code = classify_backend_error_code(status.as_u16(), &text);
             return Err(QqlError::backend(
-                "QQL-BACKEND-HTTP",
+                code,
                 format!("REST {status}: {text} (request id: {server_request_id})"),
                 None,
             )

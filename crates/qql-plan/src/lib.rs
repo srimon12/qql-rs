@@ -28,7 +28,7 @@ pub use batch::BatchGrouper;
 pub use plan::{
     BatchFamily, BatchKey, PlannedOperation, RestProjectionError, batch_item_error,
     build_query_batch, build_update_batch, ensure_no_unbound_params, parse_and_plan, plan,
-    statement_batch_key, to_rest_route, try_route, verify_batch_cardinality,
+    plan_template, statement_batch_key, to_rest_route, try_route, verify_batch_cardinality,
 };
 pub use routing::{CompiledStatement, compile_statement};
 pub use semantic::{PlanFormula, PlanPointId, PlanPointVectors, PlanQueryInput, PlanVectorValue};

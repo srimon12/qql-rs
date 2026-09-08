@@ -65,6 +65,25 @@ class Client(_Client):
         rep = await self.execute_async(query, params=params, on_error=on_error)
         return rep.hits(0)
 
+    def upsert_many(
+        self,
+        collection: str,
+        rows: List[Dict[str, Any]],
+        *,
+        batch_size: int = 100,
+        on_error: str = "stop",
+    ) -> ExecutionReport:
+        """Bulk ingest `rows` (point dicts) in `batch_size` chunks.
+
+        One `:rows` template is prepared once; each chunk splices through
+        the point-splice path with no re-parse and no per-batch schema
+        fetch. Prefer this over hand-rolled batch loops.
+        """
+        raw = super().upsert_many(
+            collection, rows, batch_size=batch_size, on_error=on_error
+        )
+        return ExecutionReport(raw)
+
 
 def execute(
     query: Union[str, Stmt, List[Union[str, Stmt]]],

@@ -12,7 +12,8 @@
         "shard_key": null,
         "vector_names": [
           "colbert"
-        ]
+        ],
+        "wait": null
       }
     },
     {
@@ -33,7 +34,8 @@
         "vector_names": [
           "dense",
           "sparse"
-        ]
+        ],
+        "wait": null
       }
     },
     {
@@ -53,7 +55,23 @@
         "shard_key": null,
         "vector_names": [
           "colbert"
-        ]
+        ],
+        "wait": null
+      }
+    },
+    {
+      "DeleteVector": {
+        "collection": "docs",
+        "selector": {
+          "Id": {
+            "Number": 42
+          }
+        },
+        "shard_key": null,
+        "vector_names": [
+          "colbert"
+        ],
+        "wait": true
       }
     }
   ]

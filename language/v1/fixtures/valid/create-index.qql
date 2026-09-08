@@ -36,3 +36,7 @@ CREATE INDEX ON COLLECTION docs FOR created_at TYPE datetime WITH (on_disk = tru
 -- UUID index
 CREATE INDEX ON COLLECTION docs FOR user_id TYPE uuid WITH (is_tenant = true, on_disk = true);
 
+
+
+-- Keyword index with durability confirmation
+CREATE INDEX ON COLLECTION docs FOR status TYPE keyword WAIT true;

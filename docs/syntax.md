@@ -446,7 +446,8 @@ Keys in payload objects, configuration blocks, formula defaults, and search para
 upsert       = "UPSERT", "INTO", collection, "VALUES",
                point-object, { ",", point-object },
                [ embedding-options ],
-               [ "SHARD", string ] ;
+               [ "SHARD", string ],
+               [ "WAIT", boolean ] ;
 embedding-options = ( dense-embed | sparse-embed | hybrid-embed ) ;
 dense-embed  = "USING",
                ( "DENSE", [ "MODEL", string ], [ "VECTOR", vector-name ]
@@ -472,18 +473,22 @@ facet        = "FACET", ( field, "FROM", collection | "FROM", collection, [ "KEY
                 [ "SHARD", string ],
                 [ "WITH", "(", facet-config, ")" ] ;
 delete       = "DELETE", "FROM", collection, "WHERE", filter,
-               [ "SHARD", string ] ;
+               [ "SHARD", string ],
+               [ "WAIT", boolean ] ;
 clear-payload = "CLEAR", "PAYLOAD", "FROM", collection,
                 "WHERE", filter,
-                [ "SHARD", string ] ;
+                [ "SHARD", string ],
+                [ "WAIT", boolean ] ;
 delete-vectors = "DELETE", "VECTOR", name, { ",", name },
                  "FROM", collection, "WHERE", filter,
-                 [ "SHARD", string ] ;
+                 [ "SHARD", string ],
+                 [ "WAIT", boolean ] ;
 update       = "UPDATE", collection, "SET",
                ( "VECTOR", [ vector-name ], "=", vector-value,
                  "WHERE", "id", "=", point-id, [ "SHARD", string ]
                | "PAYLOAD", "=", object, "WHERE", filter,
-                 [ "SHARD", string ] ) ;
+                 [ "SHARD", string ] ),
+               [ "WAIT", boolean ] ;
 
 vector-value = dense-vector | sparse-vector | multidense-vector ;
 dense-vector = "[", number, { ",", number }, "]" ;
@@ -496,6 +501,8 @@ Every upsert point requires an unsigned integer or string `id`. Its optional `ve
 
 `SHARD '<key>'` on QUERY, SCROLL, COUNT, UPSERT, DELETE, CLEAR PAYLOAD, DELETE VECTOR, UPDATE … VECTOR, or UPDATE … PAYLOAD routes the operation to a specific shard group. It is a clustered-Qdrant feature; `qql-edge` rejects it explicitly because edge storage is single-node.
 
+Appending `WAIT true` (or `WAIT false`) to UPSERT, DELETE, CLEAR PAYLOAD, DELETE VECTOR, DELETE PAYLOAD, UPDATE … VECTOR, UPDATE … PAYLOAD, or CREATE INDEX asks the server to wait for write durability (REST `?wait=`, gRPC `wait` field).
+
 ### Embed directive (fine-grained embedding control)
 
 ```ebnf
@@ -503,7 +510,8 @@ upsert       = "UPSERT", "INTO", collection, "VALUES",
                point-object, { ",", point-object },
                [ embedding-options ],
                [ embed-directive, { ",", embed-directive } ],
-               [ "SHARD", string ] ;
+               [ "SHARD", string ],
+               [ "WAIT", boolean ] ;
 embed-directive = "EMBED", field, "INTO", vector-name,
                   [ "USING",
                     ( ( "DENSE" | "SPARSE" ), [ "MODEL", string ]
@@ -540,7 +548,8 @@ alter-collection = "ALTER", "COLLECTION", name, config-blocks ;
 
 create-index    = "CREATE", "INDEX", "ON", "COLLECTION", name,
                   "FOR", field, [ "TYPE", field-type ],
-                  [ "WITH", config-block ] ;
+                  [ "WITH", config-block ],
+                  [ "WAIT", boolean ] ;
 
 drop-index      = "DROP", "INDEX", "ON", "COLLECTION", name,
                   "FOR", field ;

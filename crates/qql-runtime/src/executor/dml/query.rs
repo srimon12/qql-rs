@@ -86,7 +86,11 @@ pub(crate) fn extract_search_hits(result: &serde_json::Value) -> Vec<SearchHit> 
                     .unwrap_or_else(|| qql_plan::PlanPointId::String("<missing-id>".to_string())),
                 score: hit
                     .get("score")
-                    .and_then(serde_json::Value::as_f64)
+                    .and_then(|v| match v {
+                        serde_json::Value::Number(n) => n.as_f64(),
+                        serde_json::Value::String(s) => s.parse::<f64>().ok(),
+                        _ => None,
+                    })
                     .unwrap_or(0.0) as f32,
                 text: hit
                     .get("payload")
@@ -98,6 +102,10 @@ pub(crate) fn extract_search_hits(result: &serde_json::Value) -> Vec<SearchHit> 
                         .map(|o| o.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
                 }),
                 collection: None,
+                vector: hit
+                    .get("vector")
+                    .cloned()
+                    .or_else(|| hit.get("vectors").cloned()),
             })
             .collect(),
         None => Vec::new(),

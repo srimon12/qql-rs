@@ -3,8 +3,8 @@ use std::future::Future;
 use std::pin::Pin;
 
 use qql_core::ast::{
-    EmbedKind, EmbeddingSpec, PointVectors, Prefetch, PrefetchSource, QueryExpr, QueryInput,
-    QueryStmt, Stmt, UpsertPoint, UpsertStmt, VectorKind, VectorTarget, VectorValue,
+    EmbedKind, EmbeddingSpec, PointEntry, PointVectors, Prefetch, PrefetchSource, QueryExpr,
+    QueryInput, QueryStmt, Stmt, UpsertStmt, VectorKind, VectorTarget, VectorValue,
 };
 use qql_core::error::QqlError;
 
@@ -69,9 +69,12 @@ async fn resolve_upsert_embeddings(
     if upsert.embedding.is_none() && upsert.embed.is_empty() {
         let mut targets = Vec::new();
         for (idx, point) in upsert.points.iter().enumerate() {
-            if point.vectors.is_none()
+            let PointEntry::Inline(inline) = point else {
+                continue;
+            };
+            if inline.vectors.is_none()
                 && let Some((_, qql_core::ast::Value::Str(text))) =
-                    point.payload.iter().find(|(k, _)| {
+                    inline.payload.iter().find(|(k, _)| {
                         k.eq_ignore_ascii_case("text")
                             || k.eq_ignore_ascii_case("body")
                             || k.eq_ignore_ascii_case("content")
@@ -106,7 +109,10 @@ async fn resolve_upsert_embeddings(
         let target_vec_name = &directive.target_vector;
         let mut targets = Vec::new();
         for (idx, point) in upsert.points.iter().enumerate() {
-            if let Some((_, qql_core::ast::Value::Str(text))) = point
+            let PointEntry::Inline(inline) = point else {
+                continue;
+            };
+            if let Some((_, qql_core::ast::Value::Str(text))) = inline
                 .payload
                 .iter()
                 .find(|(k, _)| k.eq_ignore_ascii_case(field_name))
@@ -925,6 +931,10 @@ fn validate_non_empty_targets(
         let actual_fields = upsert
             .points
             .first()
+            .and_then(|p| match p {
+                PointEntry::Inline(inline) => Some(inline),
+                PointEntry::Param(..) | PointEntry::PositionalParam(..) => None,
+            })
             .map(|p| {
                 p.payload
                     .iter()
@@ -988,7 +998,7 @@ const DEFAULT_IMAGE_FIELDS_ORDERED: &[&str] = &[
 
 /// Collect image path/URL payload fields for IMAGE embedding specs.
 fn collect_image_targets(
-    points: &[UpsertPoint],
+    points: &[PointEntry],
     field_override: Option<&str>,
 ) -> Vec<(usize, String)> {
     if let Some(target_field) = field_override {
@@ -996,7 +1006,10 @@ fn collect_image_targets(
             .iter()
             .enumerate()
             .filter_map(|(idx, point)| {
-                point.payload.iter().find_map(|(key, value)| {
+                let PointEntry::Inline(inline) = point else {
+                    return None;
+                };
+                inline.payload.iter().find_map(|(key, value)| {
                     if key.eq_ignore_ascii_case(target_field)
                         && let qql_core::ast::Value::Str(source) = value
                         && !source.is_empty()
@@ -1012,8 +1025,11 @@ fn collect_image_targets(
             .iter()
             .enumerate()
             .filter_map(|(idx, point)| {
+                let PointEntry::Inline(inline) = point else {
+                    return None;
+                };
                 for &candidate in DEFAULT_IMAGE_FIELDS_ORDERED {
-                    if let Some((_, qql_core::ast::Value::Str(source))) = point
+                    if let Some((_, qql_core::ast::Value::Str(source))) = inline
                         .payload
                         .iter()
                         .find(|(key, _)| key.eq_ignore_ascii_case(candidate))
@@ -1029,7 +1045,7 @@ fn collect_image_targets(
 }
 
 fn collect_text_targets(
-    points: &[UpsertPoint],
+    points: &[PointEntry],
     field_override: Option<&str>,
 ) -> Vec<(usize, String)> {
     if let Some(target_field) = field_override {
@@ -1037,7 +1053,10 @@ fn collect_text_targets(
             .iter()
             .enumerate()
             .filter_map(|(idx, point)| {
-                point.payload.iter().find_map(|(key, value)| {
+                let PointEntry::Inline(inline) = point else {
+                    return None;
+                };
+                inline.payload.iter().find_map(|(key, value)| {
                     if key.eq_ignore_ascii_case(target_field)
                         && let qql_core::ast::Value::Str(text) = value
                         && !text.is_empty()
@@ -1053,13 +1072,16 @@ fn collect_text_targets(
     }
 }
 
-fn collect_default_text_targets(points: &[UpsertPoint]) -> Vec<(usize, String)> {
+fn collect_default_text_targets(points: &[PointEntry]) -> Vec<(usize, String)> {
     points
         .iter()
         .enumerate()
         .filter_map(|(idx, point)| {
+            let PointEntry::Inline(inline) = point else {
+                return None;
+            };
             for &candidate in DEFAULT_TEXT_FIELDS_ORDERED {
-                if let Some((_, qql_core::ast::Value::Str(text))) = point
+                if let Some((_, qql_core::ast::Value::Str(text))) = inline
                     .payload
                     .iter()
                     .find(|(key, _)| key.eq_ignore_ascii_case(candidate))
@@ -1074,10 +1096,29 @@ fn collect_default_text_targets(points: &[UpsertPoint]) -> Vec<(usize, String)> 
 }
 
 fn add_point_vector(
-    point: &mut UpsertPoint,
+    point: &mut PointEntry,
     name: &str,
     vector: VectorValue,
 ) -> Result<(), QqlError> {
+    let point = match point {
+        PointEntry::Inline(inline) => inline,
+        // Unreachable via collect_*_targets (they skip placeholders), but
+        // embedding into unknown payload must never silently drop vectors.
+        PointEntry::Param(name, span) => {
+            return Err(QqlError::execution(
+                "QQL-EMBEDDING",
+                format!("cannot embed into unbound point parameter ':{name}'"),
+                span.as_deref().copied(),
+            ));
+        }
+        PointEntry::PositionalParam(idx, span) => {
+            return Err(QqlError::execution(
+                "QQL-EMBEDDING",
+                format!("cannot embed into unbound point parameter '?{}'", *idx + 1),
+                span.as_deref().copied(),
+            ));
+        }
+    };
     if name.is_empty() {
         return match &mut point.vectors {
             Some(PointVectors::Unnamed(existing)) => {
@@ -1090,6 +1131,10 @@ fn add_point_vector(
                 } else {
                     list.push((String::new(), vector));
                 }
+                Ok(())
+            }
+            Some(PointVectors::Param(..)) | Some(PointVectors::PositionalParam(..)) => {
+                point.vectors = Some(PointVectors::Unnamed(vector));
                 Ok(())
             }
             None => {
@@ -1107,7 +1152,9 @@ fn add_point_vector(
             }
             Ok(())
         }
-        Some(PointVectors::Unnamed(_)) => Err(QqlError::execution(
+        Some(PointVectors::Unnamed(_))
+        | Some(PointVectors::Param(..))
+        | Some(PointVectors::PositionalParam(..)) => Err(QqlError::execution(
             "QQL-EMBEDDING",
             format!(
                 "cannot add named vector '{name}' to a point that already has an unnamed vector; \

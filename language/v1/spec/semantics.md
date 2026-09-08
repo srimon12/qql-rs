@@ -292,6 +292,12 @@ condition.
 `DELETE VECTOR` require `WHERE`. `UPDATE ... SET VECTOR` targets exactly one
 point ID; payload updates accept any filter.
 
+`UPSERT`, `DELETE`, `CLEAR PAYLOAD`, `DELETE PAYLOAD`, `DELETE VECTOR`,
+`UPDATE … VECTOR`, `UPDATE … PAYLOAD`, and `CREATE INDEX` accept an optional
+trailing durability clause `WAIT true` / `WAIT false` after `SHARD`, lowering
+to REST `?wait=` / the gRPC `wait` field. A repeated `WAIT` is rejected with
+`QQL-PARSE-DUPLICATE-CLAUSE`.
+
 Collection modes:
 
 - no mode: dense topology without a model hint;
@@ -459,6 +465,7 @@ invalid fixtures are normative for those cases.
 | `QQL-PARSE-CLAUSE-ORDER` | Duplicate or out-of-order query clause |
 | `QQL-PARSE-VECTOR-KIND` | `AS` is not `DENSE`, `SPARSE`, `MULTI`, or `MULTIVECTOR` |
 | `QQL-PARSE-DUPLICATE-CTE` | Duplicate CTE name in one script |
+| `QQL-PARSE-DUPLICATE-CLAUSE` | Duplicate `WAIT` clause |
 | `QQL-PARSE-DUPLICATE-KEY` | Duplicate object or config key (ASCII case-insensitive) |
 | `QQL-PARSE-POSITIVE-INTEGER` | Value must be a positive integer (for example `LIMIT`, `CANDIDATES`, vector size) |
 | `QQL-PARSE-NONNEGATIVE-INTEGER` | Value must be non-negative (for example `OFFSET`, `VALUES_COUNT`) |
@@ -482,6 +489,8 @@ invalid fixtures are normative for those cases.
 | `QQL-PARSE-MATCH-ANY` | `MATCH ANY` requires a non-empty exact-value list |
 | `QQL-PARSE-NUMBER` | Expected a number |
 | `QQL-PARSE-OBJECT-KEY` | Expected an object key |
+| `QQL-PARSE-BOOL` | Expected `true` or `false` |
+| `QQL-PARSE-PARAM` | Expected a parameter identifier after `:` |
 | `QQL-PARSE-PAYLOAD-SELECTOR` | `WITH PAYLOAD` requires `true`, `false`, `INCLUDE (...)`, or `EXCLUDE (...)` |
 | `QQL-PARSE-POINT-ID` | A point ID must be an unsigned integer or a string |
 | `QQL-PARSE-POINT-IDS` | A point ID list cannot be empty |
@@ -501,6 +510,7 @@ invalid fixtures are normative for those cases.
 | `QQL-VALIDATION-RERANK-PREFETCH` | `QUERY RERANK` has no `PREFETCH` |
 | `QQL-VALIDATION-POINTS-CLAUSE` | `QUERY POINTS` uses a clause it cannot accept |
 | `QQL-VALIDATION-UPSERT-ID` | An UPSERT point lacks a valid `id` key |
+| `QQL-VALIDATION-UPSERT-BATCH` | `upsert_many` / `upsertMany` called with `batch_size` / `batchSize` below 1 |
 | `QQL-VALIDATION-MMR` | MMR `DIVERSITY` is outside `[0, 1]` or not finite |
 | `QQL-VALIDATION-HYBRID` | Invalid `USING HYBRID` / `QUERY HYBRID` combination |
 | `QQL-VALIDATION-FILTER-INJECT` | `inject_filter` does not apply to this statement type |
@@ -541,6 +551,11 @@ invalid fixtures are normative for those cases.
 | `QQL-PLAN-UNSUPPORTED-PREFETCH` | `POINTS` / `CROSS RERANK` are not supported inside `PREFETCH` |
 | `QQL-REST-CLIENT-SIDE` | The operation is executed client-side and has no single Qdrant REST route |
 | `QQL-BACKEND` | Generic backend or transport failure |
+| `QQL-BACKEND-AUTH` | Rejected credentials |
+| `QQL-BACKEND-COLLECTION-NOT-FOUND` | The backend reports a missing collection |
+| `QQL-BACKEND-DIMENSION-MISMATCH` | Vector size disagrees with the collection schema |
+| `QQL-BACKEND-INDEX-NOT-READY` | The server index is still building — retry the query |
+| `QQL-BACKEND-STRICT-MODE` | The request violates strict-mode / quota limits |
 | `QQL-JSON-NONFINITE` | A non-finite float cannot be serialized to JSON |
 | `QQL-JSON-NUMBER` | A value cannot be represented as a JSON number |
 | `QQL-EMBEDDING-TOPOLOGY` | UPSERT embedding inference is ambiguous across the collection topology |
@@ -563,9 +578,11 @@ invalid fixtures are normative for those cases.
 | `QQL-PLAN-QUOTA` | Invalid `SET QUOTA` key or out-of-range percent |
 | `QQL-PLAN-IDF` | `PARAMS (idf = WHERE …)` lowered to an empty Qdrant filter |
 | `QQL-GRPC-QUOTA` | Quotas have no public gRPC service; use REST |
+| `QQL-GRPC-SCROLL-LIMIT` | Scroll `LIMIT` exceeds `u32::MAX` — the bundled Qdrant proto stores scroll limit as `uint32` |
 | `QQL-VALIDATION-SLICE` | `SLICE (total, index)` with `total < 1` or `index >= total` |
 | `QQL-VALIDATION-IDF` | Malformed `idf` search param at parse time |
 | `QQL-EDGE-INVALID-POINT-ID` | Offline point IDs accept unsigned integers or UUIDs only |
+| `QQL-EDGE-FACET` | `FACET` has no offline route — run it against remote Qdrant |
 
 New error codes may refine cases in a v1 minor release. A code already asserted
 by a v1 fixture cannot change before v2.

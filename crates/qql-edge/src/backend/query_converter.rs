@@ -281,6 +281,12 @@ fn plan_input_to_vector_internal(input: &PlanQueryInput) -> Result<VectorInterna
         PlanQueryInput::Vector(PlanVectorValue::Dense(_)) => {
             Err(edge_error("dense query vector cannot be empty"))
         }
+        PlanQueryInput::Vector(PlanVectorValue::Param(name)) => Err(edge_error(format!(
+            "unbound parameter ':{name}' reached edge query execution"
+        ))),
+        PlanQueryInput::Vector(PlanVectorValue::PositionalParam(idx)) => Err(edge_error(format!(
+            "unbound positional parameter ?{idx} reached edge query execution"
+        ))),
         PlanQueryInput::Point(_) => {
             Err(crate::backend::unsupported::EdgeUnsupported::PointReferenceQuery.error())
         }

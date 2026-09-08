@@ -775,7 +775,7 @@ fn parse_upsert_with_dollar_and_pattern_strings() {
         r"UPSERT INTO qql_memory VALUES { id: 'abc', pattern_text: 'QUERY \$QUERY_TEXT FROM docs USING dense LIMIT \$LIMIT' };"
     ).unwrap();
     let Stmt::Upsert(u) = stmt else { panic!() };
-    let (_, val) = &u.points[0].payload[0];
+    let (_, val) = &(u.points[0].as_inline().expect("inline point")).payload[0];
     match val {
         crate::ast::Value::Str(s) => {
             assert_eq!(s, "QUERY $QUERY_TEXT FROM docs USING dense LIMIT $LIMIT")
@@ -789,7 +789,7 @@ fn parse_upsert_with_dollar_and_pattern_strings() {
     let Stmt::Upsert(u_raw) = raw_stmt else {
         panic!()
     };
-    let (_, val_raw) = &u_raw.points[0].payload[0];
+    let (_, val_raw) = &(u_raw.points[0].as_inline().expect("inline point")).payload[0];
     match val_raw {
         crate::ast::Value::Str(s) => {
             assert_eq!(s, "QUERY $QUERY_TEXT FROM docs USING dense LIMIT $LIMIT")
@@ -804,7 +804,7 @@ fn parse_upsert_with_dollar_and_pattern_strings() {
     let Stmt::Upsert(u_raw_bs) = raw_backslash_stmt else {
         panic!()
     };
-    let (_, val_raw_bs) = &u_raw_bs.points[0].payload[0];
+    let (_, val_raw_bs) = &(u_raw_bs.points[0].as_inline().expect("inline point")).payload[0];
     match val_raw_bs {
         crate::ast::Value::Str(s) => {
             assert_eq!(s, r"path\to\$file");
@@ -818,7 +818,7 @@ fn parse_upsert_with_dollar_and_pattern_strings() {
     let Stmt::Upsert(u_triple) = triple_stmt else {
         panic!()
     };
-    let (_, val_triple) = &u_triple.points[0].payload[0];
+    let (_, val_triple) = &(u_triple.points[0].as_inline().expect("inline point")).payload[0];
     match val_triple {
         crate::ast::Value::Str(s) => {
             assert_eq!(s, "QUERY '$QUERY_TEXT'\nFROM berlin_airbnb\nLIMIT $LIMIT;")
@@ -833,7 +833,7 @@ fn triple_quoted_strings_preserve_backslash_verbatim() {
     let Stmt::Upsert(upsert) = stmt else {
         panic!("expected upsert")
     };
-    let (_, value) = &upsert.points[0].payload[0];
+    let (_, value) = &(upsert.points[0].as_inline().expect("inline point")).payload[0];
     match value {
         crate::ast::Value::Str(s) => {
             // Backslash is content, not an escape: the value is `a\nb`
@@ -850,7 +850,7 @@ fn triple_quoted_strings_preserve_doubled_quotes_verbatim() {
     let Stmt::Upsert(upsert) = stmt else {
         panic!("expected upsert")
     };
-    let (_, value) = &upsert.points[0].payload[0];
+    let (_, value) = &(upsert.points[0].as_inline().expect("inline point")).payload[0];
     match value {
         crate::ast::Value::Str(s) => assert_eq!(s, "it''s"),
         _ => panic!("expected string payload"),
@@ -863,7 +863,7 @@ fn triple_quoted_double_delimited_strings_are_verbatim() {
     let Stmt::Upsert(upsert) = stmt else {
         panic!("expected upsert")
     };
-    let (_, value) = &upsert.points[0].payload[0];
+    let (_, value) = &(upsert.points[0].as_inline().expect("inline point")).payload[0];
     match value {
         crate::ast::Value::Str(s) => assert_eq!(s, r"a\nb"),
         _ => panic!("expected string payload"),
@@ -876,7 +876,7 @@ fn four_quotes_decode_to_single_apostrophe() {
     let Stmt::Upsert(upsert) = stmt else {
         panic!("expected upsert")
     };
-    let (_, value) = &upsert.points[0].payload[0];
+    let (_, value) = &(upsert.points[0].as_inline().expect("inline point")).payload[0];
     match value {
         crate::ast::Value::Str(s) => assert_eq!(s, "'"),
         _ => panic!("expected string payload"),
@@ -889,7 +889,7 @@ fn empty_triple_quoted_string_decodes_to_empty() {
     let Stmt::Upsert(upsert) = stmt else {
         panic!("expected upsert")
     };
-    let (_, value) = &upsert.points[0].payload[0];
+    let (_, value) = &(upsert.points[0].as_inline().expect("inline point")).payload[0];
     match value {
         crate::ast::Value::Str(s) => assert_eq!(s, ""),
         _ => panic!("expected string payload"),

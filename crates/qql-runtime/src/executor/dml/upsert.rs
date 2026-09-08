@@ -2,7 +2,7 @@ use crate::backend::{CollectionInfo, VectorSpec};
 #[cfg(feature = "rest")]
 use crate::embedder::HttpEmbedder;
 use crate::executor::Executor;
-use qql_core::ast::{EmbeddingSpec, PointVectors, UpsertStmt, Value, VectorValue};
+use qql_core::ast::{EmbeddingSpec, PointEntry, PointVectors, UpsertStmt, Value, VectorValue};
 use qql_core::error::QqlError;
 
 impl Executor {
@@ -16,8 +16,11 @@ impl Executor {
         let needs_implicit = upsert.embedding.is_none()
             && upsert.embed.is_empty()
             && upsert.points.iter().any(|point| {
-                point.vectors.is_none()
-                    && point.payload.iter().any(|(key, value)| {
+                let PointEntry::Inline(inline) = point else {
+                    return false;
+                };
+                inline.vectors.is_none()
+                    && inline.payload.iter().any(|(key, value)| {
                         matches!(value, Value::Str(text) if !text.is_empty())
                             && (key.eq_ignore_ascii_case("text")
                                 || key.eq_ignore_ascii_case("body")
@@ -25,10 +28,13 @@ impl Executor {
                     })
             });
 
-        let has_unnamed_vectors = upsert
-            .points
-            .iter()
-            .any(|p| matches!(p.vectors, Some(PointVectors::Unnamed(_))));
+        let has_unnamed_vectors = upsert.points.iter().any(|p| {
+            matches!(
+                p,
+                PointEntry::Inline(inline)
+                    if matches!(inline.vectors, Some(PointVectors::Unnamed(_)))
+            )
+        });
         let has_embedding = upsert.embedding.is_some() || !upsert.embed.is_empty();
         if !needs_implicit && !has_embedding {
             if has_unnamed_vectors
@@ -39,16 +45,7 @@ impl Executor {
                     .unwrap_or(false)
                 && let Ok(info) = self.client.get_collection_info(&upsert.collection).await
             {
-                let dense = dense_targets(&info);
-                if dense.len() == 1 && !dense[0].is_empty() {
-                    let dense_name = &dense[0];
-                    for point in &mut upsert.points {
-                        if let Some(PointVectors::Unnamed(vv)) = point.vectors.take() {
-                            point.vectors =
-                                Some(PointVectors::Named(vec![(dense_name.clone(), vv)]));
-                        }
-                    }
-                }
+                map_unnamed_to_single_dense(upsert, &info);
                 return Ok(Some(info));
             }
             return Ok(None);
@@ -100,6 +97,9 @@ impl Executor {
     ) -> Result<(), QqlError> {
         let dense_specs = &info.schema.vectors;
         for point in &upsert.points {
+            let PointEntry::Inline(point) = point else {
+                continue;
+            };
             let Some(vectors) = &point.vectors else {
                 continue;
             };
@@ -120,6 +120,7 @@ impl Executor {
                         }
                     }
                 }
+                PointVectors::Param(..) | PointVectors::PositionalParam(..) => {}
             }
         }
         Ok(())
@@ -250,6 +251,29 @@ impl Executor {
         }
 
         Ok(crate::executor::DENSE_VECTOR_SIZE as usize)
+    }
+}
+
+/// Map unnamed point vectors onto the single dense target, if the collection
+/// has exactly one (`dense_targets`).
+///
+/// Pure: no I/O. Shared by [`configure_upsert_embeddings`](Executor::configure_upsert_embeddings)
+/// and the prepared point-splice fast path, so both resolve identically.
+pub(crate) fn map_unnamed_to_single_dense(upsert: &mut UpsertStmt, info: &CollectionInfo) {
+    let dense = dense_targets(info);
+    if dense.len() == 1 && !dense[0].is_empty() {
+        let dense_name = &dense[0];
+        for point in &mut upsert.points {
+            if let PointEntry::Inline(inline) = point
+                && let Some(PointVectors::Unnamed(vv)) = &inline.vectors
+            {
+                // Only replace named-target vectors; cloning here because a
+                // blind `take()` would drop Named vectors when the pattern
+                // fails to match after removal.
+                let vv = vv.clone();
+                inline.vectors = Some(PointVectors::Named(vec![(dense_name.clone(), vv)]));
+            }
+        }
     }
 }
 
@@ -500,7 +524,9 @@ fn validate_vector_value(
     let dimensions = match value {
         VectorValue::Dense(vector) => Some(vector.len()),
         VectorValue::MultiDense(rows) => rows.first().map(Vec::len),
-        VectorValue::Sparse { .. } => None,
+        VectorValue::Sparse { .. } | VectorValue::Param(..) | VectorValue::PositionalParam(..) => {
+            None
+        }
     };
     if let Some(got) = dimensions
         && got != spec.size as usize
@@ -515,4 +541,90 @@ fn validate_vector_value(
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::{CollectionInfo, CollectionSchema, VectorSpec};
+    use qql_core::ast::{PointEntry, PointVectors};
+
+    fn info_with_dense(names: &[&str]) -> CollectionInfo {
+        CollectionInfo {
+            schema: CollectionSchema {
+                vectors: names
+                    .iter()
+                    .map(|n| VectorSpec {
+                        name: (!n.is_empty()).then(|| n.to_string()),
+                        size: 3,
+                        distance: "Cosine".into(),
+                        hnsw: None,
+                        quantization: None,
+                        multivector: None,
+                        on_disk: None,
+                        datatype: None,
+                        memory: None,
+                    })
+                    .collect(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    fn parse_upsert(sql: &str) -> qql_core::ast::UpsertStmt {
+        match qql_core::parser::Parser::parse(sql).unwrap() {
+            qql_core::ast::Stmt::Upsert(u) => *u,
+            other => panic!("expected upsert, got {other:?}"),
+        }
+    }
+
+    /// Regression: the unnamed→named mapping must not strip named-vector
+    /// points. A blind `vectors.take()` dropped them (the point-splice fast
+    /// path then sent points with no vectors and the backend rejected with
+    /// "Expected some vectors").
+    #[test]
+    fn map_unnamed_preserves_named_vectors() {
+        let mut upsert = parse_upsert(
+            "UPSERT INTO c VALUES {id: 1, vector: [0.1, 0.2, 0.3]}, \
+             {id: 2, vector: {dense: [0.1, 0.2, 0.3], bm25: {indices: [1], values: [0.5]}}}",
+        );
+        let info = info_with_dense(&["dense"]);
+        map_unnamed_to_single_dense(&mut upsert, &info);
+
+        let [PointEntry::Inline(first), PointEntry::Inline(second)] = &upsert.points[..] else {
+            panic!("expected two inline points");
+        };
+        let Some(PointVectors::Named(first)) = &first.vectors else {
+            panic!("unnamed point must map to the dense target");
+        };
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].0, "dense");
+
+        let Some(PointVectors::Named(second)) = &second.vectors else {
+            panic!("named-vector point must keep its vectors (take() regression)");
+        };
+        assert_eq!(
+            second.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
+            vec!["dense", "bm25"]
+        );
+    }
+
+    /// Single unnamed-dense topology: named sparse entries survive alongside
+    /// the mapped dense target.
+    #[test]
+    fn map_unnamed_keeps_named_dense_with_sparse() {
+        let mut upsert = parse_upsert(
+            "UPSERT INTO c VALUES {id: 1, vector: {dense: [0.1, 0.2, 0.3], bm25: {indices: [1], values: [0.5]}}}",
+        );
+        let info = info_with_dense(&["dense"]);
+        map_unnamed_to_single_dense(&mut upsert, &info);
+        let Some(PointEntry::Inline(point)) = upsert.points.first() else {
+            panic!("expected one inline point");
+        };
+        let Some(PointVectors::Named(entries)) = &point.vectors else {
+            panic!("named vectors must survive the mapping");
+        };
+        assert_eq!(entries.len(), 2);
+    }
 }

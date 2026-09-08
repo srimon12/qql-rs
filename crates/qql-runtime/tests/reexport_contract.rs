@@ -5,8 +5,9 @@
 use qql::client::{CollectionInfo, QdrantOps};
 use qql::executor::Executor;
 use qql::{
-    ComparisonOp, CreateCollectionRequest, CreateIndexRequest, Parser, PlannedOperation, QqlError,
-    QueryBatchRequest, UpdateBatchRequest, UpdateCollectionRequest, Value, inject_filter,
+    ComparisonOp, CreateCollectionRequest, CreateIndexRequest, Parser, PlannedOperation,
+    PreparedStatement, QqlError, QueryBatchRequest, UpdateBatchRequest, UpdateCollectionRequest,
+    Value, VectorValue, inject_filter,
 };
 
 /// Minimal backend used purely to prove the contract compiles from `qql` paths.
@@ -91,6 +92,7 @@ impl QdrantOps for StubBackend {
 #[test]
 fn executor_accepts_qql_only_backend() {
     let _executor = Executor::new(Box::new(StubBackend), None);
+    let _ = std::mem::size_of::<PreparedStatement>();
 }
 
 /// The parse → inject policy flow compiles and runs from `qql` paths alone.
@@ -104,4 +106,11 @@ fn policy_flow_from_qql_paths_only() {
         Value::Str("acme".to_string()),
     )
     .expect("inject tenant filter");
+
+    let flat = vec![1.0, 2.0, 3.0, 4.0];
+    let mv = VectorValue::multidense_from_flat(&flat, 2).expect("multidense from flat");
+    assert_eq!(
+        mv,
+        VectorValue::MultiDense(vec![vec![1.0, 2.0], vec![3.0, 4.0]])
+    );
 }

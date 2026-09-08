@@ -229,6 +229,50 @@ mod tests {
     }
 
     #[test]
+    fn upsert_explicit_wait() {
+        let s = Parser::parse("UPSERT INTO docs VALUES {id: 1, vector: [0.1]} WAIT true;").unwrap();
+        let r = try_route(&s).unwrap();
+        assert!(r.query.iter().any(|(k, v)| k == "wait" && v == "true"));
+
+        let s_false =
+            Parser::parse("UPSERT INTO docs VALUES {id: 1, vector: [0.1]} WAIT false;").unwrap();
+        let r_false = try_route(&s_false).unwrap();
+        assert!(!r_false.query.iter().any(|(k, _)| k == "wait"));
+    }
+
+    #[test]
+    fn create_index_default_wait() {
+        let s = Parser::parse("CREATE INDEX ON COLLECTION docs FOR tag TYPE keyword;").unwrap();
+        let r = try_route(&s).unwrap();
+        assert!(r.query.iter().any(|(k, v)| k == "wait" && v == "true"));
+
+        let s_nowait =
+            Parser::parse("CREATE INDEX ON COLLECTION docs FOR tag TYPE keyword WAIT false;")
+                .unwrap();
+        let r_nowait = try_route(&s_nowait).unwrap();
+        assert!(!r_nowait.query.iter().any(|(k, _)| k == "wait"));
+    }
+
+    #[test]
+    fn scroll_after_exclusive_offset() {
+        let s = Parser::parse("SCROLL FROM docs AFTER 42 LIMIT 10;").unwrap();
+        let r = try_route(&s).unwrap();
+        let body = r.body.unwrap();
+        assert_eq!(body["offset"], 43);
+    }
+
+    #[test]
+    fn scroll_after_exclusive_uuid_offset() {
+        let s = Parser::parse(
+            "SCROLL FROM docs AFTER '00000000-0000-0000-0000-00000000002a' LIMIT 10;",
+        )
+        .unwrap();
+        let r = try_route(&s).unwrap();
+        let body = r.body.unwrap();
+        assert_eq!(body["offset"], "00000000-0000-0000-0000-00000000002b");
+    }
+
+    #[test]
     fn show_collections_no_body() {
         let s = Parser::parse("SHOW COLLECTIONS;").unwrap();
         let r = try_route(&s).unwrap();

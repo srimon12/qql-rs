@@ -4,6 +4,7 @@
 //! `nqql-edge` so the two SDKs cannot drift; this crate keeps only the
 //! `#[napi]` wrappers and the REST/gRPC client construction.
 
+use napi::Unknown;
 use napi_derive::napi;
 
 use nqql_common as common;
@@ -71,13 +72,17 @@ impl Stmt {
     }
 
     /// Bind parameters into this statement and return a new bound Stmt.
+    /// Vector params accept plain arrays as well as `Float32Array` /
+    /// `Float64Array` (one memcpy, no per-element walk).
     #[napi(catch_unwind)]
-    pub fn bind(&self, params: Option<serde_json::Value>) -> napi::Result<Self> {
-        let binds_now = params.as_ref().map(|p| !p.is_null()).unwrap_or(false);
+    pub fn bind(&self, params: Unknown<'_>) -> napi::Result<Self> {
+        let params = common::jsparams::unknown_opt_to_value(params).map_err(common::to_napi_err)?;
+        let binds_now = params.is_some();
         if binds_now && self.bound {
             return Err(common::to_napi_err(common::already_bound_error()));
         }
-        let inner = common::stmt_bind(&self.inner, params.as_ref()).map_err(common::to_napi_err)?;
+        let inner =
+            common::stmt_bind_value(&self.inner, params.as_ref()).map_err(common::to_napi_err)?;
         Ok(Stmt {
             inner,
             bound: self.bound || binds_now,
@@ -101,15 +106,13 @@ impl Stmt {
     /// Compile this Stmt AST directly into its transport route without re-parsing.
     /// Optionally accepts `params` to bind before compiling.
     #[napi(catch_unwind)]
-    pub fn compile_route(
-        &self,
-        params: Option<serde_json::Value>,
-    ) -> napi::Result<serde_json::Value> {
-        let binds_now = params.as_ref().map(|p| !p.is_null()).unwrap_or(false);
+    pub fn compile_route(&self, params: Unknown<'_>) -> napi::Result<serde_json::Value> {
+        let params = common::jsparams::unknown_opt_to_value(params).map_err(common::to_napi_err)?;
+        let binds_now = params.is_some();
         if binds_now && self.bound {
             return Err(common::to_napi_err(common::already_bound_error()));
         }
-        common::stmt_compile_route(&self.inner, params.as_ref()).map_err(common::to_napi_err)
+        common::stmt_compile_route_value(&self.inner, params.as_ref()).map_err(common::to_napi_err)
     }
 }
 
@@ -154,11 +157,9 @@ pub fn tokenize(input: String) -> napi::Result<serde_json::Value> {
 }
 
 #[napi(catch_unwind)]
-pub fn compile_query(
-    input: String,
-    params: Option<serde_json::Value>,
-) -> napi::Result<serde_json::Value> {
-    common::compile_query(&input, params.as_ref()).map_err(common::to_napi_err)
+pub fn compile_query(input: String, params: Unknown<'_>) -> napi::Result<serde_json::Value> {
+    let params = common::jsparams::unknown_opt_to_value(params).map_err(common::to_napi_err)?;
+    common::compile_query_value(&input, params.as_ref()).map_err(common::to_napi_err)
 }
 
 #[napi(catch_unwind)]
@@ -181,7 +182,7 @@ pub fn explain_stmt(stmt: &Stmt) -> napi::Result<String> {
 )]
 pub fn bind(
     query: String,
-    params: Option<serde_json::Value>,
+    params: Unknown<'_>,
     options: Option<serde_json::Value>,
 ) -> napi::Result<String> {
     let truncate = options
@@ -192,13 +193,14 @@ pub fn bind(
         })
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    let params = common::jsparams::unknown_opt_to_value(params).map_err(common::to_napi_err)?;
     match params {
         Some(p) => {
             let plan =
-                qql_core::params_json::plan_statement_params(&p, 1).map_err(common::to_napi_err)?;
-            qql_core::params_json::bind_str_with_params(
+                qql_core::params_json::plan_value_params(&p, 1).map_err(common::to_napi_err)?;
+            qql_core::params_json::bind_str_with_values(
                 &query,
-                qql_core::params_json::param_for(&plan, 0),
+                qql_core::params_json::param_value_for(&plan, 0),
                 truncate,
             )
             .map_err(common::to_napi_err)
@@ -440,12 +442,42 @@ impl JsClient {
 
     /// Compile a QQL query to its transport route (non-executing).
     #[napi(catch_unwind)]
-    pub fn compile(
+    pub fn compile(&self, query: String, params: Unknown<'_>) -> napi::Result<serde_json::Value> {
+        let params = common::jsparams::unknown_opt_to_value(params).map_err(common::to_napi_err)?;
+        common::compile_query_value(&query, params.as_ref()).map_err(common::to_napi_err)
+    }
+
+    /// Bulk ingest: `rows` is an array of point objects
+    /// (`{id, vector, …payload}`) spliced through the `:rows` point-splice
+    /// path in `batchSize` chunks (default 100). Vectors accept plain arrays
+    /// and the flat `{data, dim}` multivector form. Like [`JsClient::execute`]
+    /// this is a serde boundary: `Float32Array`/`Float64Array` do not survive
+    /// it — bind those on the sync `Stmt.bind` surface instead, then execute
+    /// the bound statement. Returns a stable ExecutionReport JSON string.
+    #[napi(
+        catch_unwind,
+        ts_args_type = "collection: string, rows: Record<string, any>[], options?: { onError?: 'stop' | 'continue', batchSize?: number }"
+    )]
+    pub async fn upsert_many(
         &self,
-        query: String,
-        params: Option<serde_json::Value>,
-    ) -> napi::Result<serde_json::Value> {
-        common::compile_query(&query, params.as_ref()).map_err(common::to_napi_err)
+        collection: String,
+        rows: serde_json::Value,
+        options: Option<serde_json::Value>,
+    ) -> napi::Result<String> {
+        let rows = common::value_from_json(rows).map_err(common::to_napi_err)?;
+        let batch_size =
+            common::execute::batch_size_from(options.as_ref()).map_err(common::to_napi_err)?;
+        let on_error = common::execute::on_error_from(options.as_ref());
+        let report = common::execute::upsert_many_dispatch(
+            &self.inner,
+            collection,
+            rows,
+            batch_size,
+            on_error,
+        )
+        .await
+        .map_err(common::to_napi_err)?;
+        serde_json::to_string(&report).map_err(common::serde_napi_err)
     }
 
     /// Close the client and release underlying connections.
