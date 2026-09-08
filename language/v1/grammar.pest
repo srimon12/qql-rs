@@ -350,6 +350,7 @@ upsert = {
     ~ embedding_options?
     ~ embed_clause?
     ~ (^"SHARD" ~ (param | string))?
+    ~ (^"WAIT" ~ boolean)?
 }
 
 embedding_options = {
@@ -395,16 +396,19 @@ delete_vectors = {
     ~ ^"FROM" ~ collection
     ~ ^"WHERE" ~ filter
     ~ (^"SHARD" ~ (param | string))?
+    ~ (^"WAIT" ~ boolean)?
 }
 delete = {
     ^"DELETE" ~ ^"FROM" ~ collection
     ~ ^"WHERE" ~ filter
     ~ (^"SHARD" ~ (param | string))?
+    ~ (^"WAIT" ~ boolean)?
 }
 clear_payload = {
     ^"CLEAR" ~ ^"PAYLOAD" ~ ^"FROM" ~ collection
     ~ ^"WHERE" ~ filter
     ~ (^"SHARD" ~ (param | string))?
+    ~ (^"WAIT" ~ boolean)?
 }
 delete_payload = {
     ^"DELETE" ~ ^"PAYLOAD"
@@ -412,6 +416,7 @@ delete_payload = {
     ~ ^"FROM" ~ collection
     ~ ^"WHERE" ~ filter
     ~ (^"SHARD" ~ (param | string))?
+    ~ (^"WAIT" ~ boolean)?
 }
 
 update = {
@@ -424,6 +429,7 @@ update = {
         ~ ^"WHERE" ~ filter
         ~ (^"SHARD" ~ (param | string))?
     )
+    ~ (^"WAIT" ~ boolean)?
 }
 
 // DDL
@@ -487,6 +493,7 @@ create_index = {
     ~ ^"FOR" ~ field
     ~ (^"TYPE" ~ field_type)?
     ~ (^"WITH" ~ config_block)?
+    ~ (^"WAIT" ~ boolean)?
 }
 drop_index = {
     ^"DROP" ~ ^"INDEX" ~ ^"ON" ~ ^"COLLECTION" ~ collection
