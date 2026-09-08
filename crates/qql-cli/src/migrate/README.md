@@ -1,6 +1,6 @@
 # Collection Migration & Snapshot Strategy Guide
 
-Operator docs: [QUICKSTART.md](QUICKSTART.md) · [EXAMPLES.md](EXAMPLES.md) · [HANDOVER.md](HANDOVER.md).
+Operator docs: [QUICKSTART.md](QUICKSTART.md) · [EXAMPLES.md](EXAMPLES.md).
 
 Comprehensive architectural guide comparing **Qdrant Native Snapshots** and **QQL Logical Streaming Migration (`qql migrate`)**, informed by modern Qdrant capabilities (`v1.15` through `v1.19.1`).
 
