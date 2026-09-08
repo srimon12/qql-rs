@@ -3,7 +3,9 @@
 //! Emits:
 //! 1. `CREATE COLLECTION` from typed vector schema (sizes, distances, sparse)
 //! 2. `CREATE INDEX` from typed payload index specs
-//! 3. Batched `UPSERT` with real `vector:` values (not re-embed stubs)
+//! 3. `CREATE SHARD KEY` for every custom shard key (sharded collections only)
+//! 4. Batched `UPSERT` with real `vector:` values (not re-embed stubs),
+//!    each batch carrying its `SHARD` key on custom-sharded collections
 //!
 //! Scroll uses cursor pagination and `with_vector: true` so every page
 //! includes stored vectors. Output is streamed to disk to bound memory.
@@ -22,8 +24,9 @@ use std::path::Path;
 
 use qql::client::QdrantOps;
 use qql::executor::Executor;
+use qql_core::ast::ShardKey;
 use qql_plan::PlannedOperation;
-use qql_plan::semantic::PlanPointId;
+use qql_plan::semantic::{PlanPointId, PlanShardKey};
 use qql_plan::types::{FilterExpression, PayloadSelectorReq, ScrollRequest, VectorSelectorReq};
 
 use point::write_upsert_batch;
@@ -33,7 +36,6 @@ pub(crate) use escape::format_ident;
 pub(crate) use indexes::generate_index_statements;
 pub(crate) use point::point_to_upsert_object;
 pub(crate) use schema::generate_create_statement;
-
 // ── Public API ──────────────────────────────────────────────────
 
 /// Result summary of a dump run.
@@ -137,44 +139,58 @@ async fn dump_collection_inner(
         writeln!(out)?;
     }
 
+    // Every batch on a custom-sharded collection carries its `SHARD` key:
+    // an unrouted replay against a `custom` collection fails with
+    // "Shard key not specified". Auto-sharded collections dump as one stream.
+    let shard_keys = list_shard_keys(ops, collection).await?;
+    for key in &shard_keys {
+        writeln!(
+            out,
+            "CREATE SHARD KEY {} ON COLLECTION {};",
+            key,
+            format_ident(collection)
+        )?;
+    }
+    if !shard_keys.is_empty() {
+        writeln!(out)?;
+    }
+
+    let shards: Vec<Option<&ShardKey>> = if shard_keys.is_empty() {
+        vec![None]
+    } else {
+        shard_keys.iter().map(Some).collect()
+    };
+
     let mut written = 0usize;
     let mut skipped = 0usize;
     let mut batches = 0usize;
-    let mut after: Option<PlanPointId> = None;
 
-    loop {
-        let (points, next) = scroll_page(ops, collection, after.clone(), batch_size, None).await?;
-        if points.is_empty() {
-            break;
-        }
-
-        let mut records = Vec::with_capacity(points.len());
-        for point in &points {
-            match point_to_upsert_object(point) {
-                Some(rec) => records.push(rec),
-                None => skipped += 1,
+    for shard in shards {
+        let mut pages =
+            ScrollPages::new(ops, collection, batch_size).shard(shard.map(PlanShardKey::from));
+        while let Some(points) = pages.next().await? {
+            let mut records = Vec::with_capacity(points.len());
+            for point in &points {
+                match point_to_upsert_object(point) {
+                    Some(rec) => records.push(rec),
+                    None => skipped += 1,
+                }
             }
-        }
 
-        if !records.is_empty() {
-            write_upsert_batch(&mut out, collection, &records)?;
-            written += records.len();
-            batches += 1;
+            if !records.is_empty() {
+                write_upsert_batch(&mut out, collection, &records, shard)?;
+                written += records.len();
+                batches += 1;
 
-            if let Some(cb) = progress {
-                cb(DumpProgress {
-                    collection: collection.to_string(),
-                    written,
-                    skipped,
-                    batches,
-                });
+                if let Some(cb) = progress {
+                    cb(DumpProgress {
+                        collection: collection.to_string(),
+                        written,
+                        skipped,
+                        batches,
+                    });
+                }
             }
-        }
-
-        let prev_after = after;
-        after = next_scroll_cursor(next, &points);
-        if scroll_page_complete(&points, after.as_ref(), prev_after.as_ref(), batch_size) {
-            break;
         }
     }
 
@@ -191,31 +207,169 @@ async fn dump_collection_inner(
     })
 }
 
-/// Scroll one page of points, including stored vectors and payloads.
-pub async fn scroll_page(
+/// Custom shard keys on the collection, sorted and deduplicated.
+///
+/// Empty for auto-sharded collections. Accepts both wire shapes: REST wraps
+/// each key as `{"key": …}` while gRPC returns bare values.
+pub(crate) async fn list_shard_keys(
     ops: &dyn QdrantOps,
     collection: &str,
-    after: Option<PlanPointId>,
-    batch_size: u32,
-    filter: Option<FilterExpression>,
-) -> Result<(Vec<serde_json::Value>, Option<PlanPointId>), Box<dyn Error>> {
-    let op = PlannedOperation::Scroll {
+) -> Result<Vec<ShardKey>, Box<dyn Error>> {
+    let op = PlannedOperation::ListShardKeys {
         collection: collection.to_string(),
-        request: ScrollRequest {
-            filter,
-            offset: after,
-            limit: Some(batch_size as u64),
-            with_payload: Some(PayloadSelectorReq::All(true)),
-            with_vector: Some(VectorSelectorReq::All(true)),
-            order_by: None,
-            shard_key: None,
-        },
     };
     let response = ops.execute_planned(&op).await?;
-    Ok(extract_scroll_page(&response))
+    Ok(parse_shard_key_list(&response))
+}
+
+/// Sorted, deduplicated shard keys from a `ListShardKeys` response body.
+pub(crate) fn parse_shard_key_list(response: &serde_json::Value) -> Vec<ShardKey> {
+    let result = response.get("result").unwrap_or(response);
+    let entries = result
+        .get("shard_keys")
+        .and_then(|k| k.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let mut keys: std::collections::HashMap<String, ShardKey> = std::collections::HashMap::new();
+    for entry in &entries {
+        let value = entry.get("key").unwrap_or(entry);
+        if let Some(key) = crate::migrate::discover::json_to_shard_key(value) {
+            keys.insert(key.to_string(), key);
+        }
+    }
+    let mut out: Vec<(String, ShardKey)> = keys.into_iter().collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out.into_iter().map(|(_, k)| k).collect()
+}
+
+/// Sequential scroll stream shared by dump and migrate.
+///
+/// Qdrant scroll `offset` is inclusive while the server `next_page_offset`
+/// already points past the page: resuming from a server cursor never repeats,
+/// but resuming from the last-id fallback (used when the server omits the
+/// cursor) repeats that point first, so it is dropped. Point ids are unique
+/// per page, making the drop a no-op for exclusive-offset backends.
+pub(crate) struct ScrollPages<'a> {
+    ops: &'a dyn QdrantOps,
+    collection: String,
+    batch_size: u32,
+    filter: Option<FilterExpression>,
+    shard_key: Option<PlanShardKey>,
+    with_payload: PayloadSelectorReq,
+    with_vector: VectorSelectorReq,
+    after: Option<PlanPointId>,
+    fell_back: bool,
+    done: bool,
+}
+
+impl<'a> ScrollPages<'a> {
+    pub(crate) fn new(ops: &'a dyn QdrantOps, collection: &str, batch_size: u32) -> Self {
+        Self {
+            ops,
+            collection: collection.to_string(),
+            batch_size,
+            filter: None,
+            shard_key: None,
+            with_payload: PayloadSelectorReq::All(true),
+            with_vector: VectorSelectorReq::All(true),
+            after: None,
+            fell_back: false,
+            done: false,
+        }
+    }
+
+    pub(crate) fn filter(mut self, filter: Option<FilterExpression>) -> Self {
+        self.filter = filter;
+        self
+    }
+
+    pub(crate) fn shard(mut self, shard_key: Option<PlanShardKey>) -> Self {
+        self.shard_key = shard_key;
+        self
+    }
+
+    /// Start from a stored checkpoint cursor. Checkpoint cursors resume
+    /// exactly like the fetch that stored them, so they are never treated as
+    /// a last-id fallback.
+    pub(crate) fn resume(mut self, after: Option<PlanPointId>) -> Self {
+        self.after = after;
+        self
+    }
+
+    pub(crate) fn select(
+        mut self,
+        with_payload: PayloadSelectorReq,
+        with_vector: VectorSelectorReq,
+    ) -> Self {
+        self.with_payload = with_payload;
+        self.with_vector = with_vector;
+        self
+    }
+
+    /// Cursor the next page resumes from.
+    pub(crate) fn cursor(&self) -> Option<&PlanPointId> {
+        self.after.as_ref()
+    }
+
+    /// Next page, or `None` when the stream is exhausted.
+    pub(crate) async fn next(&mut self) -> Result<Option<Vec<serde_json::Value>>, Box<dyn Error>> {
+        if self.done {
+            return Ok(None);
+        }
+        let op = PlannedOperation::Scroll {
+            collection: self.collection.clone(),
+            request: ScrollRequest {
+                filter: self.filter.clone(),
+                offset: self.after.clone(),
+                limit: Some(self.batch_size as u64),
+                with_payload: Some(self.with_payload.clone()),
+                with_vector: Some(self.with_vector.clone()),
+                order_by: None,
+                shard_key: self.shard_key.clone(),
+            },
+        };
+        let response = self.ops.execute_planned(&op).await?;
+        let (points, next) = extract_scroll_page(&response);
+        let mut points = points;
+        if self.fell_back {
+            points = drop_resumed_point(points, self.after.as_ref());
+        }
+        if points.is_empty() {
+            self.done = true;
+            return Ok(None);
+        }
+        self.fell_back = next.is_none();
+        self.after = next_scroll_cursor(next, &points);
+        Ok(Some(points))
+    }
+}
+
+/// Drop the resume-cursor point Qdrant repeats at page boundaries.
+///
+/// Scroll `offset` is inclusive, so resuming from the previous page's last id
+/// re-emits that point first. The server `next_page_offset` already points
+/// past it — this only triggers on the last-id fallback — and point ids are
+/// unique per page, so the drop is a no-op for exclusive-offset backends.
+pub(crate) fn drop_resumed_point(
+    mut points: Vec<serde_json::Value>,
+    after: Option<&PlanPointId>,
+) -> Vec<serde_json::Value> {
+    let duplicate = match (after, points.first()) {
+        (Some(cursor), Some(first)) => {
+            first.get("id").and_then(json_to_plan_point_id).as_ref() == Some(cursor)
+        }
+        _ => false,
+    };
+    if duplicate {
+        points.remove(0);
+    }
+    points
 }
 
 /// Prefer Qdrant's `next_page_offset`; fall back to the last point id on the page.
+///
+/// [`ScrollPages`] uses the fallback to keep cursor-less backends streaming;
+/// the inclusive-offset repeat it causes is removed by [`drop_resumed_point`].
 pub(crate) fn next_scroll_cursor(
     next: Option<PlanPointId>,
     points: &[serde_json::Value],
@@ -226,16 +380,6 @@ pub(crate) fn next_scroll_cursor(
             .and_then(|p| p.get("id"))
             .and_then(json_to_plan_point_id)
     })
-}
-
-/// True when the page is the last one (short page, missing cursor, or stuck offset).
-pub(crate) fn scroll_page_complete(
-    points: &[serde_json::Value],
-    after: Option<&PlanPointId>,
-    prev_after: Option<&PlanPointId>,
-    batch_size: u32,
-) -> bool {
-    after.is_none() || points.len() < batch_size as usize || after == prev_after
 }
 
 #[cfg(test)]

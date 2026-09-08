@@ -6,13 +6,14 @@ use std::time::Duration;
 
 use qql::backend::CollectionInfo;
 use qql::executor::{Executor, OnError};
-use qql_core::ast::Stmt;
+use qql_core::ast::{ShardKey, Stmt};
 use qql_core::parser::Parser;
 use qql_plan::filter::top_level_filter;
 use qql_plan::types::FilterExpression;
 use serde_json::{Value, json};
 
 use super::checkpoint::Checkpoint;
+use super::discover::create_shard_key_sql;
 use super::options::{
     DEFAULT_INDEXING_THRESHOLD, MigrateOptions, MigratePlan, QuantizeKind, QuantizeSpec,
 };
@@ -179,6 +180,7 @@ pub async fn prepare_target(
     target: &Executor,
     source_info: &CollectionInfo,
     opts: &MigrateOptions,
+    discovered_keys: &[ShardKey],
     checkpoint: &mut Checkpoint,
 ) -> Result<MigratePlan, Box<dyn Error>> {
     let mut info = source_info.clone();
@@ -224,10 +226,8 @@ pub async fn prepare_target(
             )
             .into());
         }
-        // `--shard-key-field` creates keys during ingest. Probe now so a
-        // standalone target fails in the schema phase instead of hanging
-        // the scroll/upsert pipeline.
-        if opts.shard_key.is_none() {
+        // Empty discovery still probes so standalone fails in schema, not ingest.
+        if discovered_keys.is_empty() {
             probe_custom_sharding(target, &opts.target_collection).await?;
         }
     }
@@ -259,6 +259,13 @@ pub async fn prepare_target(
         run_sql(target, &format!("{};", stmt)).await?;
     }
 
+    let mut plan = plan;
+    if !discovered_keys.is_empty() {
+        plan.shard_keys = discovered_keys
+            .iter()
+            .map(|k| create_shard_key_sql(&opts.target_collection, k))
+            .collect();
+    }
     for stmt in &plan.shard_keys {
         ensure_shard_key(target, stmt).await?;
     }

@@ -3,15 +3,21 @@
 //! Copies **schema + points** (not RocksDB snapshots), so the target can be
 //! any Qdrant minor version, any shard count, and any quantization config.
 //!
+//! End-to-end demo (berlin, sharded): [`berlin_shard_migration.py`], run from
+//! the workspace root. It drives the `qql` CLI through create, ingest,
+//! migrate, verify, and a sharded dump round-trip.
+//!
 //! Protocol (Qdrant bulk-load guidance):
 //! 1. `CREATE COLLECTION` with optional in-flight overrides
 //! 2. `CREATE INDEX` before points (filterable HNSW links)
-//! 3. Suppress `indexing_threshold` during ingest
-//! 4. Stream scroll → `:rows` upsert with an atomic checkpoint
-//! 5. Restore optimizer threshold and verify exact counts
+//! 3. `CREATE SHARD KEY` for every discovered key (FACET, then payload scroll)
+//! 4. Suppress `indexing_threshold` during ingest
+//! 5. Stream scroll → `:rows` upsert with an atomic checkpoint
+//! 6. Restore optimizer threshold and verify exact counts
 
 mod checkpoint;
 mod cutover;
+pub(crate) mod discover;
 mod options;
 mod pipeline;
 mod schema;
@@ -57,7 +63,18 @@ pub async fn migrate_collection(
     let source_info = source_ops
         .get_collection_info(&opts.source_collection)
         .await?;
-    let plan = build_plan(&source_info, &opts);
+    let mut plan = build_plan(&source_info, &opts);
+    let filter = match opts.where_clause.as_deref() {
+        Some(clause) => Some(schema::parse_where_filter(&opts.source_collection, clause)?),
+        None => None,
+    };
+    let discovered = discover::discover_shard_keys(source, &opts, filter.clone()).await?;
+    if !discovered.is_empty() {
+        plan.shard_keys = discovered
+            .iter()
+            .map(|k| discover::create_shard_key_sql(&opts.target_collection, k))
+            .collect();
+    }
     let source_count = verify::exact_count(
         source,
         &opts.source_collection,
@@ -84,11 +101,6 @@ pub async fn migrate_collection(
     let (mut checkpoint, resumed) = load_or_init(&opts, source_count)?;
     checkpoint.source_count = source_count;
 
-    let filter = match opts.where_clause.as_deref() {
-        Some(clause) => Some(schema::parse_where_filter(&opts.source_collection, clause)?),
-        None => None,
-    };
-
     if checkpoint.phase == Phase::Schema {
         emit(
             progress,
@@ -96,7 +108,7 @@ pub async fn migrate_collection(
             &opts.target_collection,
             &checkpoint,
         );
-        schema::prepare_target(target, &source_info, &opts, &mut checkpoint).await?;
+        schema::prepare_target(target, &source_info, &opts, &discovered, &mut checkpoint).await?;
         checkpoint.phase = Phase::Ingest;
         checkpoint::save(&opts.checkpoint_path, &checkpoint)?;
     }
@@ -110,6 +122,7 @@ pub async fn migrate_collection(
                     target,
                     &opts,
                     filter,
+                    &discovered,
                     &mut checkpoint,
                     progress,
                 ) => result,

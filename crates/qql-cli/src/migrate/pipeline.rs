@@ -15,9 +15,7 @@ use qql_plan::types::FilterExpression;
 use super::checkpoint::{self, Checkpoint, Phase};
 use super::options::{MigrateOptions, MigrateProgress, MissingShardKey};
 use super::schema::ensure_shard_key;
-use crate::dump::{
-    format_ident, next_scroll_cursor, point_to_upsert_object, scroll_page, scroll_page_complete,
-};
+use crate::dump::{ScrollPages, format_ident, point_to_upsert_object};
 
 #[derive(Debug)]
 pub(crate) struct IngestBatch {
@@ -30,7 +28,6 @@ struct WindowPage {
     written: usize,
     skipped: usize,
     points: Vec<serde_json::Value>,
-    prev: Option<PlanPointId>,
 }
 
 /// Scroll the source and upsert into the target, checkpointing after each window.
@@ -42,34 +39,32 @@ pub async fn stream_points(
     target: &Executor,
     opts: &MigrateOptions,
     filter: Option<FilterExpression>,
+    precreated: &[ShardKey],
     checkpoint: &mut Checkpoint,
     progress: Option<&(dyn Fn(MigrateProgress) + Sync)>,
 ) -> Result<(), Box<dyn Error>> {
-    let mut after = checkpoint.cursor.clone();
+    let after = checkpoint.cursor.clone();
     let mut prepared: HashMap<String, qql::executor::PreparedStatement> = HashMap::new();
     let mut created_keys: HashSet<String> = HashSet::new();
-    if let Some(ref key) = opts.shard_key {
-        created_keys.insert(key.clone());
+    for key in precreated {
+        created_keys.insert(shard_cache_key(Some(key), opts.wait));
     }
 
     let cap = opts.workers.max(1).saturating_mul(2);
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<WindowPage>>(cap);
 
-    let produce = async {
+    let produce = async move {
+        let mut pages = ScrollPages::new(source.ops(), &opts.source_collection, opts.batch_size)
+            .filter(filter)
+            .resume(after);
         loop {
-            let window = fill_window(source, opts, filter.clone(), after.clone()).await?;
+            let window = fill_window(&mut pages, opts).await?;
             if window.is_empty() {
                 break;
             }
-            let terminal = window_is_terminal(&window, opts.batch_size);
-            let next = window.last().and_then(|p| p.next_after.clone());
             if tx.send(window).await.is_err() {
                 break;
             }
-            if terminal {
-                break;
-            }
-            after = next;
         }
         Ok::<(), Box<dyn Error>>(())
     };
@@ -78,8 +73,7 @@ pub async fn stream_points(
         while let Some(window) = rx.recv().await {
             let missing =
                 upsert_window(target, opts, &window, &mut prepared, &mut created_keys).await?;
-            let (next_after, written, skipped, batches, terminal) =
-                window_totals(&window, opts.batch_size);
+            let (next_after, written, skipped, batches) = window_totals(&window);
             checkpoint.written += written.saturating_sub(missing);
             checkpoint.skipped += skipped + missing;
             checkpoint.batches += batches;
@@ -95,9 +89,6 @@ pub async fn stream_points(
                     batches: checkpoint.batches,
                     source_count: checkpoint.source_count,
                 });
-            }
-            if terminal {
-                break;
             }
         }
         Ok::<(), Box<dyn Error>>(())
@@ -116,68 +107,31 @@ pub async fn stream_points(
     }
 }
 
-fn window_totals(
-    window: &[WindowPage],
-    batch_size: u32,
-) -> (Option<PlanPointId>, usize, usize, usize, bool) {
+fn window_totals(window: &[WindowPage]) -> (Option<PlanPointId>, usize, usize, usize) {
     let written = window.iter().map(|p| p.written).sum();
     let skipped = window.iter().map(|p| p.skipped).sum();
     let batches = window.len();
-    let last = window.last();
-    let next_after = last.and_then(|p| p.next_after.clone());
-    let terminal = last.is_none_or(|p| {
-        p.next_after.is_none()
-            || scroll_page_complete(
-                &p.points,
-                p.next_after.as_ref(),
-                p.prev.as_ref(),
-                batch_size,
-            )
-    });
-    (next_after, written, skipped, batches, terminal)
-}
-
-fn window_is_terminal(window: &[WindowPage], batch_size: u32) -> bool {
-    window_totals(window, batch_size).4
+    let next_after = window.last().and_then(|p| p.next_after.clone());
+    (next_after, written, skipped, batches)
 }
 
 async fn fill_window(
-    source: &Executor,
+    pages: &mut ScrollPages<'_>,
     opts: &MigrateOptions,
-    filter: Option<FilterExpression>,
-    mut after: Option<PlanPointId>,
 ) -> Result<Vec<WindowPage>, Box<dyn Error>> {
     let mut window = Vec::with_capacity(opts.workers.max(1));
-    let ops = source.ops();
     for _ in 0..opts.workers.max(1) {
-        let prev = after.clone();
-        let (points, next) = scroll_page(
-            ops,
-            &opts.source_collection,
-            after.clone(),
-            opts.batch_size,
-            filter.clone(),
-        )
-        .await?;
-        if points.is_empty() {
+        let Some(points) = pages.next().await? else {
             break;
-        }
-        let next_after = next_scroll_cursor(next, &points);
+        };
         let written = points.iter().filter(|p| p.get("id").is_some()).count();
         let skipped = points.len() - written;
-        let complete =
-            scroll_page_complete(&points, next_after.as_ref(), prev.as_ref(), opts.batch_size);
         window.push(WindowPage {
-            next_after: next_after.clone(),
+            next_after: pages.cursor().cloned(),
             written,
             skipped,
             points,
-            prev,
         });
-        if complete {
-            break;
-        }
-        after = next_after;
     }
     Ok(window)
 }
@@ -403,9 +357,8 @@ pub(crate) fn window_totals_for_test(
             written: *w,
             skipped: *s,
             points: Vec::new(),
-            prev: None,
         })
         .collect();
-    let (_, w, s, b, _) = window_totals(&pages, 128);
+    let (_, w, s, b) = window_totals(&pages);
     (w, s, b)
 }
