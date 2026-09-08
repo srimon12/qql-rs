@@ -144,7 +144,7 @@ impl EdgeUnsupported {
 }
 
 /// Convenience: reject optional shard key on DML.
-pub fn reject_shard_key(shard_key: Option<&str>) -> Result<(), QqlError> {
+pub fn reject_shard_key<T>(shard_key: Option<T>) -> Result<(), QqlError> {
     if shard_key.is_some() {
         Err(EdgeUnsupported::ShardRouting.error())
     } else {

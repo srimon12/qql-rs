@@ -356,6 +356,44 @@ fn schema_from_rest_result_feeds_create() {
 }
 
 #[test]
+fn create_omits_zero_positive_only_hnsw_and_optimizer_keys() {
+    let mut hnsw = serde_json::Map::new();
+    hnsw.insert("m".into(), json!(16));
+    hnsw.insert("max_indexing_threads".into(), json!(0));
+    let mut opts = serde_json::Map::new();
+    opts.insert("default_segment_number".into(), json!(0));
+    opts.insert("indexing_threshold".into(), json!(20000));
+    let mut info = info_with_vectors(
+        vec![VectorSpec {
+            name: Some("dense".into()),
+            size: 4,
+            distance: "Cosine".into(),
+            hnsw: Some(hnsw),
+            quantization: None,
+            multivector: None,
+            on_disk: None,
+            datatype: None,
+            memory: None,
+        }],
+        vec![],
+    );
+    info.schema.hnsw = None;
+    info.schema.optimizers = Some(opts);
+    let stmt = generate_create_statement("docs", &info);
+    assert!(
+        !stmt.contains("max_indexing_threads"),
+        "zero max_indexing_threads should be omitted: {stmt}"
+    );
+    assert!(
+        !stmt.contains("default_segment_number"),
+        "zero default_segment_number should be omitted: {stmt}"
+    );
+    assert!(stmt.contains("indexing_threshold = 20000"));
+    qql_core::parser::Parser::parse(&format!("{};", stmt))
+        .expect("CREATE with omitted auto-zeros should parse");
+}
+
+#[test]
 fn create_vector_with_hnsw_and_quantization() {
     let mut hnsw = serde_json::Map::new();
     hnsw.insert("m".into(), json!(16));

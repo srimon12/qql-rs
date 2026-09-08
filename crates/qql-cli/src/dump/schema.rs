@@ -93,6 +93,18 @@ pub fn generate_create_statement(collection: &str, info: &CollectionInfo) -> Str
     stmt
 }
 
+/// QQL `config_positive_u64` keys. Qdrant reports `0` for "auto"/unset; emitting
+/// `key = 0` fails parse, so dump/migrate omit those zeros.
+const POSITIVE_ONLY_KEYS: &[&str] = &[
+    "ef_construct",
+    "max_indexing_threads",
+    "payload_m",
+    "vacuum_min_vector_number",
+    "default_segment_number",
+    "max_segment_size",
+    "flush_interval_sec",
+];
+
 pub fn format_config_block(
     keyword: &str,
     map: &serde_json::Map<String, Value>,
@@ -100,10 +112,13 @@ pub fn format_config_block(
 ) -> Option<String> {
     let mut opts = Vec::new();
     for key in allowed {
-        if let Some(val) = map.get(*key)
-            && let Some(opt) = format_index_option(key, val)
-        {
-            opts.push(opt);
+        if let Some(val) = map.get(*key) {
+            if POSITIVE_ONLY_KEYS.contains(key) && val.as_u64() == Some(0) {
+                continue;
+            }
+            if let Some(opt) = format_index_option(key, val) {
+                opts.push(opt);
+            }
         }
     }
     if opts.is_empty() {
