@@ -46,10 +46,13 @@ cd "$ROOT"
 extract() {
   # Test doubles are excluded: they re-emit codes (or invented ones like the
   # mock's bare `QQL-EXECUTION`) that are not part of the shipped contract.
+  # File selection uses find (not tool globs) so rg and grep behave identically.
   if command -v rg >/dev/null 2>&1; then
-    rg -o --no-filename -g '!*test*' 'QQL-[A-Z0-9-]+' "${SCAN_ROOTS[@]}"
+    find "${SCAN_ROOTS[@]}" -type f -name '*.rs' -not -path '*test*' \
+      -exec rg -o --no-filename 'QQL-[A-Z0-9-]+' {} +
   else
-    grep -rhoE --exclude='*test*' 'QQL-[A-Z0-9-]+' "${SCAN_ROOTS[@]}"
+    find "${SCAN_ROOTS[@]}" -type f -name '*.rs' -not -path '*test*' \
+      -exec grep -hoE 'QQL-[A-Z0-9-]+' {} +
   fi
 }
 
