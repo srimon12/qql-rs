@@ -56,6 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Shared Runtime Core** — Centralized SDK binding logic into `pyqql-common` and `nqql-common` with byte-identical report adapters (`dx-common.js`, `_dx_report.py`, `test_dx.py`, `_errors.py`) to prevent cross-language drift.
 - **Canonical `toString()`** — `Stmt.toString()` outputs canonical, re-parseable QQL with positional markers normalized to bare `?`. Truncated debug previews move to `Stmt.toReadableString()`.
 - **Unified Compilation** — Free and client `compile(query, params?)` and `compileQuery` alias accept parameter bindings consistently across Python, Node, and WASM.
+- **WASM SDK parity** — `parseJson` (raw AST JSON, no object allocation), `Client.upsertMany` (prepare-once bulk ingest with move-not-clone chunking), typed-array params (`Float32Array`/`Float64Array` packed, integer arrays as int lists) across *every* binding entry point via one shared converter, and an `executeHits` one-shot in `dx.js`. The 1,733-line single-file binding is split into nine focused modules (params, statement, functions, report, response, client, execution pipeline, embed adapter).
 - **Edge Validation Gate** — `pyqql-edge` and `nqql-edge` now perform full parse and plan semantic validation on `is_valid` queries via `qql_plan::parse_and_plan`.
 
 ### 🧹 Architecture, Deduplication & Code Hygiene

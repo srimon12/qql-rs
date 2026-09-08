@@ -203,9 +203,26 @@ entry per statement; the length must match the statement count exactly.
 `executeStmt(stmt, options)` runs a pre-parsed `Stmt` handle. `compile(query)`
 and `explain(query)` inspect a route or plan without touching the network.
 
-The report is a plain `{ ok, results, succeeded, failed }` object — WASM has no
-typed `ExecutionReport` accessors or `executeHits`; read `results[i].data`
-directly or use the Python/Node SDKs for `hits()` / `ScoredPoint`.
+The report is a plain `{ ok, results, succeeded, failed }` object — wrap it
+with the [`dx.js` helpers](#typed-dx-layer-dxjs) for typed `hits()` /
+`facet()` / `count()` accessors and the `executeHits(client, query, options)`
+one-shot. Row vectors accept plain arrays, `Float32Array` / `Float64Array`
+(packed, one copy), integer typed arrays, and the flat `{ data, dim }`
+multivector form everywhere params enter.
+
+## Bulk ingest
+
+```javascript
+const rows = [
+  { id: 1, vector: { dense: new Float32Array([0.1, 0.2, 0.3]) }, tag: "a" },
+  { id: 2, vector: { dense: [0.4, 0.5, 0.6] }, tag: "b" },
+];
+const report = await client.upsertMany("docs", rows, { batchSize: 100 });
+```
+
+One `:rows` template is prepared once, then each chunk splices through the
+point-splice path with no re-parse — the same helper contract as
+`upsert_many` / `upsertMany` on the Python and Node SDKs.
 
 ```javascript
 await client.execute("QUERY TEXT :q FROM docs LIMIT :lim", {
@@ -293,6 +310,7 @@ The module exports:
 - **`ExecutionReport`**: Accessors for statement hits (`.hits(stmt)` / `.points(stmt)`), facets (`.facet(stmt)`), counts (`.count(stmt)`), and groups (`.groups(stmt)`).
 - **`ScoredPoint`**: Typed hit objects with `.id`, `.score`, `.payload`, `.vector`, and `.shard_key`, plus `.get(key, default)`.
 - **`buildError`**: Unpacks JSON error strings returned across the WASM boundary into standard `Error` objects carrying `.code`, `.kind`, and `.span`.
+- **`executeHits(client, query, options)`**: One-shot reads returning `ScoredPoint[]` directly.
 
 ## Memory
 

@@ -161,9 +161,32 @@ const stmtResult = await client.executeStmt(stmt);
 ```
 
 Every execution path returns a plain `ExecutionReport` object with `ok`,
-`results`, `succeeded`, and `failed` fields. WASM has **no** typed accessors
-(`hits()` / `facet()` / `count()`) and no `executeHits` / `ScoredPoint` — read
-`results[i].data` directly, or use the Python / Node SDKs for typed hits.
+`results`, `succeeded`, and `failed` fields. For typed accessors, wrap it
+with the [`dx.js` helpers](#10-typed-dx-layer-dxjs) (`hits()` / `facet()` /
+`count()` / `ScoredPoint`, plus the `executeHits(client, query, options)`
+one-shot).
+
+---
+
+## 3b. Bulk ingest
+
+Pass point objects — payload as data, never SQL text. One `:rows` template
+is prepared once, then each `batchSize` chunk splices through the
+point-splice path with no re-parse. Prefer this over hand-rolled batch loops:
+
+```js
+const rows = [
+  { id: 1, vector: { dense: new Float32Array([0.1, 0.2, 0.3]) }, tag: "a" },
+  { id: 2, vector: { dense: [0.4, 0.5, 0.6] }, tag: "b" },
+];
+const report = await client.upsertMany("docs", rows, { batchSize: 100 });
+```
+
+Row vectors accept plain arrays, `Float32Array` / `Float64Array` (packed,
+one copy — unlike the Node async boundary, WASM converts `JsValue`
+directly), integer typed arrays (sparse `indices`), and the flat
+`{ data: [...], dim: N }` multivector form. Raw `ArrayBuffer` without a
+float view fails closed — wrap it first (`new Float64Array(buffer)`).
 
 ---
 
@@ -314,6 +337,10 @@ console.log(boundPos);
 const preview = bind("QUERY :vec FROM docs LIMIT 5", { vec: Array(384).fill(0.1) }, { truncateVectors: true });
 console.log(preview); // QUERY [0.10, 0.10, ... (384 dims)] FROM docs LIMIT 5
 
+// Typed arrays bind as packed f32 (one copy); integer arrays as int lists
+bind("QUERY VECTOR :v FROM docs USING dense", { v: new Float32Array([0.1, 0.2]) });
+bind("QUERY VECTOR :s FROM docs USING sparse", { s: { indices: new Uint32Array([1, 5]), values: [0.5, 0.8] } });
+
 // Canonical query formatting
 const formatted = formatQuery("query text 'hello' from docs limit 5");
 console.log(formatted); // "QUERY TEXT 'hello' FROM docs LIMIT 5;"
@@ -328,11 +355,12 @@ console.log(planTree);
 ## 9. Free Functions
 
 ```js
-import init, { parse, isValid, inject_filter,
+import init, { parse, parseJson, isValid, inject_filter,
               tokenize, compile, explain, bind, formatQuery } from 'qql-wasm';
 await init();
 
 parse("QUERY 'x' FROM docs LIMIT 5");                  // Always returns an array
+parseJson("QUERY 'x' FROM docs LIMIT 5");              // Raw JSON string, no object allocation
 parse("QUERY 'x' FROM docs; COUNT FROM docs");           // Parse multi-statement
 isValid("QUERY 'x' FROM docs LIMIT 5");                  // Validate
 inject_filter("QUERY 'x'", "tenant_id", "=", "acme");   // Inject filter (string -> object)
@@ -351,7 +379,7 @@ For rich client responses and error handling matching `nqql` / `pyqql`, import f
 
 ```js
 import init, { Client } from 'qql-wasm';
-import { ExecutionReport, ScoredPoint, buildError } from 'qql-wasm/dx';
+import { ExecutionReport, ScoredPoint, buildError, executeHits } from 'qql-wasm/dx';
 await init();
 
 const client = new Client('http://localhost:6333');
@@ -364,5 +392,8 @@ if (report.ok) {
         console.log(hit.id, hit.score, hit.payload);
     }
 }
+
+// One-shot reads without manual wrapping:
+const hits = await executeHits(client, "QUERY 'health' FROM docs LIMIT 5");
 ```
 
