@@ -529,7 +529,7 @@ fn shard_clause_parses_on_query_and_ctes_via_set_shard_key() {
         q.ctes[0].query.shard_key.clone(),
         Some(crate::ast::ShardKey::Keyword("acme".into()))
     );
-    assert!(stmt.set_shard_key(Some(String::new()))); // empty clears
+    assert!(stmt.set_shard_key(Some(crate::ast::ShardKey::Keyword(String::new())))); // empty clears
     assert_eq!(stmt.shard_key(), None);
     assert!(
         !Parser::parse("SHOW COLLECTIONS")
@@ -583,7 +583,10 @@ fn mutation_shard_key_parses_from_qql() {
 
     let mut host = Parser::parse("CLEAR PAYLOAD FROM docs WHERE id = 2;").unwrap();
     assert!(host.set_shard_key(Some("injected".into())));
-    assert_eq!(host.shard_key(), Some("injected"));
+    assert_eq!(
+        host.shard_key(),
+        Some(&crate::ast::ShardKey::Keyword("injected".into()))
+    );
 }
 
 #[test]
@@ -661,7 +664,7 @@ fn numeric_shard_key_stays_typed_on_mutations() {
         ),
     ] {
         let stmt = Parser::parse(qql).unwrap();
-        assert_eq!(stmt.shard_key_typed().cloned(), Some(expect), "{qql}");
+        assert_eq!(stmt.shard_key().cloned(), Some(expect), "{qql}");
     }
 }
 
@@ -683,7 +686,7 @@ fn shard_key_placeholder_binds_and_validates() {
     map.insert("tenant".to_string(), Value::Str("acme".into()));
     bind_stmt(&mut stmt, |k| map.get(k).cloned(), &[]).unwrap();
     assert_eq!(
-        stmt.shard_key_typed().cloned(),
+        stmt.shard_key().cloned(),
         Some(crate::ast::ShardKey::Keyword("acme".into()))
     );
     let mut stmt = Parser::parse("DELETE FROM docs WHERE id = 1 SHARD :n;").unwrap();
@@ -691,7 +694,7 @@ fn shard_key_placeholder_binds_and_validates() {
     map.insert("n".to_string(), Value::Int(101));
     bind_stmt(&mut stmt, |k| map.get(k).cloned(), &[]).unwrap();
     assert_eq!(
-        stmt.shard_key_typed().cloned(),
+        stmt.shard_key().cloned(),
         Some(crate::ast::ShardKey::Number(101))
     );
     // Wrong-typed values fail with the bind type code, not a panic.

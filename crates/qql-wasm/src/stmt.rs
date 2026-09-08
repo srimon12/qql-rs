@@ -49,7 +49,7 @@ impl Stmt {
     /// exact non-negative integers (larger keys need `BigInt`).
     #[wasm_bindgen(getter, js_name = shardKey)]
     pub fn shard_key(&self) -> JsValue {
-        match self.inner.shard_key_typed() {
+        match self.inner.shard_key() {
             None => JsValue::NULL,
             Some(ast::ShardKey::Keyword(s)) => JsValue::from_str(s),
             Some(ast::ShardKey::Number(n)) => js_sys::BigInt::from(*n).into(),
@@ -62,7 +62,7 @@ impl Stmt {
     pub fn set_shard_key(&mut self, key: JsValue) -> Result<(), JsValue> {
         let key = super::params::jsvalue_to_shard_key(&key)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        if !self.inner.set_shard_key_typed(key) {
+        if !self.inner.set_shard_key(key) {
             return Err(JsValue::from_str(
                 "cannot set shardKey on statement type that does not support sharding (e.g. DDL statements)",
             ));

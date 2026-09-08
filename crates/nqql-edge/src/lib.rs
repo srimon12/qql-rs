@@ -77,7 +77,7 @@ impl Stmt {
         &self,
     ) -> Option<napi::bindgen_prelude::Either<String, napi::bindgen_prelude::BigInt>> {
         use napi::bindgen_prelude::{BigInt, Either};
-        match self.inner.shard_key_typed() {
+        match self.inner.shard_key() {
             None => None,
             Some(qql_core::ast::ShardKey::Keyword(s)) => Some(Either::A(s.clone())),
             Some(qql_core::ast::ShardKey::Number(n)) => Some(Either::B(BigInt {
@@ -101,7 +101,7 @@ impl Stmt {
                 common::jsparams::unknown_opt_to_shard_key(value).map_err(common::to_napi_err)?
             }
         };
-        if !self.inner.set_shard_key_typed(key) {
+        if !self.inner.set_shard_key(key) {
             return Err(napi::Error::from_reason(
                 "cannot set shardKey on statement type that does not support sharding (e.g. DDL statements)",
             ));

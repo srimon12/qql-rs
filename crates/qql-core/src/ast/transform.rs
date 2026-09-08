@@ -4,25 +4,16 @@ use super::{
 };
 use crate::error::QqlError;
 use alloc::boxed::Box;
-use alloc::string::{String, ToString};
+use alloc::string::ToString;
 
 impl Stmt {
     /// Custom shard routing key for this statement, if any.
     ///
-    /// Corresponds to QQL `SHARD '…'` on DML, lowered to request-level
+    /// Corresponds to QQL `SHARD` on DML, lowered to request-level
     /// `shard_key` (REST) / `ShardKeySelector` (gRPC) — never inside `Filter`.
-    ///
-    /// Keyword-only view: numeric keys (and placeholders) read as `None`.
-    /// Use [`Stmt::shard_key_typed`] when the key form matters.
-    pub fn shard_key(&self) -> Option<&str> {
-        self.shard_key_typed().and_then(|k| k.as_keyword())
-    }
-
-    /// Custom shard routing key with its keyword / numeric form preserved.
-    ///
-    /// Unlike [`Stmt::shard_key`], a numeric `SHARD 101` is visible here as
-    /// `ShardKey::Number(101)` instead of vanishing.
-    pub fn shard_key_typed(&self) -> Option<&ShardKey> {
+    /// Keyword and numeric forms are preserved (`ShardKey::Number(101)` reads
+    /// back as a number, never coerced to `"101"`).
+    pub fn shard_key(&self) -> Option<&ShardKey> {
         match self {
             Self::Query(query) => query.shard_key.as_ref(),
             Self::Scroll(scroll) => scroll.shard_key.as_ref(),
@@ -39,29 +30,18 @@ impl Stmt {
         }
     }
 
-    /// Set custom shard routing (same field as QQL `SHARD '…'`).
+    /// Set custom shard routing (same field as QQL `SHARD`).
     ///
-    /// Prefer writing `SHARD 'tenant'` in the query when the tenant is known at
-    /// authoring time. Use this setter only when the host resolves the key after
-    /// parse (e.g. from auth context) without re-stringifying QQL.
-    ///
-    /// String-only: the key is stored as a keyword. For numeric keys use
-    /// [`Stmt::set_shard_key_typed`] (or write `SHARD 101` in QQL).
+    /// Prefer writing the `SHARD` clause in the query when the tenant is known
+    /// at authoring time. Use this setter only when the host resolves the key
+    /// after parse (e.g. from auth context) without re-stringifying QQL.
     ///
     /// On `QUERY`, recurses into CTEs and nested prefetch queries so routing
-    /// matches a top-level `SHARD` clause. Empty / `None` clears the key.
+    /// matches a top-level `SHARD` clause. `None` (or an empty keyword) clears
+    /// the key.
     /// Returns `false` for statement types that cannot carry routing (DDL, SHOW).
-    pub fn set_shard_key(&mut self, shard_key: Option<String>) -> bool {
-        let key = shard_key.filter(|k| !k.is_empty()).map(ShardKey::Keyword);
-        self.set_shard_key_typed(key)
-    }
-
-    /// Set custom shard routing with the keyword / numeric form preserved.
-    ///
-    /// Same recursion and clearing rules as [`Stmt::set_shard_key`], but a
-    /// `ShardKey::Number` stays numeric to the wire instead of being coerced
-    /// to a keyword string.
-    pub fn set_shard_key_typed(&mut self, shard_key: Option<ShardKey>) -> bool {
+    pub fn set_shard_key(&mut self, shard_key: Option<ShardKey>) -> bool {
+        let shard_key = shard_key.filter(|k| !matches!(k, ShardKey::Keyword(s) if s.is_empty()));
         match self {
             Self::Query(query) => {
                 apply_query_shard(query, shard_key.as_ref());

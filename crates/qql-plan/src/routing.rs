@@ -540,7 +540,7 @@ mod tests {
             let operation = plan::plan(&statement).unwrap();
             assert_eq!(
                 operation.shard_key(),
-                Some(expected),
+                Some(&crate::semantic::PlanShardKey::Keyword(expected.into())),
                 "plan.shard_key for {qql}"
             );
             let r = to_rest_route(&operation).expect("rest route");

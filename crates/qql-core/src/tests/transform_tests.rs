@@ -105,8 +105,11 @@ fn shard_key_access_supports_delete_payload() {
         Parser::parse("DELETE PAYLOAD draft FROM docs WHERE status = 'archived';").unwrap();
 
     assert_eq!(statement.shard_key(), None);
-    assert!(statement.set_shard_key(Some("tenant-a".into())));
-    assert_eq!(statement.shard_key(), Some("tenant-a"));
+    assert!(statement.set_shard_key(Some(crate::ast::ShardKey::Keyword("tenant-a".into()))));
+    assert_eq!(
+        statement.shard_key(),
+        Some(&crate::ast::ShardKey::Keyword("tenant-a".into()))
+    );
 
     assert!(statement.set_shard_key(None));
     assert_eq!(statement.shard_key(), None);

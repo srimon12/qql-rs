@@ -409,14 +409,12 @@ class Stmt {
         }
     }
     /**
-     * @param {string | null} [key]
+     * @param {any} key
      */
     set shardKey(key) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            var ptr0 = isLikeNone(key) ? 0 : passStringToWasm0(key, wasm.__wbindgen_export, wasm.__wbindgen_export2);
-            var len0 = WASM_VECTOR_LEN;
-            wasm.stmt_set_shardKey(retptr, this.__wbg_ptr, ptr0, len0);
+            wasm.stmt_set_shardKey(retptr, this.__wbg_ptr, addHeapObject(key));
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             if (r1) {
@@ -427,24 +425,17 @@ class Stmt {
         }
     }
     /**
-     * QQL `SHARD '…'` routing key (request-level). Prefer the clause in QQL.
-     * @returns {string | undefined}
+     * QQL `SHARD` routing key (request-level). Prefer the clause in QQL.
+     *
+     * Reads back a string for keyword keys, a `BigInt` for numeric keys, and
+     * `null` when unset (placeholders also read as `null` — bind first).
+     * The setter accepts string, number, `BigInt`, or null: numbers must be
+     * exact non-negative integers (larger keys need `BigInt`).
+     * @returns {any}
      */
     get shardKey() {
-        try {
-            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.stmt_shardKey(retptr, this.__wbg_ptr);
-            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
-            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
-            let v1;
-            if (r0 !== 0) {
-                v1 = getStringFromWasm0(r0, r1);
-                wasm.__wbindgen_export5(r0, r1 * 1, 1);
-            }
-            return v1;
-        } finally {
-            wasm.__wbindgen_add_to_stack_pointer(16);
-        }
+        const ret = wasm.stmt_shardKey(this.__wbg_ptr);
+        return takeObject(ret);
     }
     /**
      * Serialise the AST to a JSON string.
@@ -1221,7 +1212,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_265(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_266(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -1367,7 +1358,7 @@ function __wbg_get_imports() {
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 37, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_261);
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_262);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000002: function(arg0) {
@@ -1404,10 +1395,10 @@ function __wbg_get_imports() {
     };
 }
 
-function __wasm_bindgen_func_elem_261(arg0, arg1, arg2) {
+function __wasm_bindgen_func_elem_262(arg0, arg1, arg2) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        wasm.__wasm_bindgen_func_elem_261(retptr, arg0, arg1, addHeapObject(arg2));
+        wasm.__wasm_bindgen_func_elem_262(retptr, arg0, arg1, addHeapObject(arg2));
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         if (r1) {
@@ -1418,8 +1409,8 @@ function __wasm_bindgen_func_elem_261(arg0, arg1, arg2) {
     }
 }
 
-function __wasm_bindgen_func_elem_265(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_265(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_266(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_266(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
 const ClientFinalization = (typeof FinalizationRegistry === 'undefined')

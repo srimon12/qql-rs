@@ -366,16 +366,9 @@ impl PlannedOperation {
         }
     }
 
-    /// Shard key carried on the plan, when present.
-    ///
-    /// Keyword-only view: numeric keys read as `None`. Use
-    /// [`PlannedOperation::shard_key_typed`] when the key form matters.
-    pub fn shard_key(&self) -> Option<&str> {
-        self.shard_key_typed().and_then(|k| k.as_keyword())
-    }
-
-    /// Shard key with its keyword / numeric form preserved.
-    pub fn shard_key_typed(&self) -> Option<&crate::semantic::PlanShardKey> {
+    /// Shard key carried on the plan, when present, with its keyword /
+    /// numeric form preserved.
+    pub fn shard_key(&self) -> Option<&crate::semantic::PlanShardKey> {
         match self {
             PlannedOperation::Query { request, .. } => request.shard_key.as_ref(),
             PlannedOperation::QueryGroups { request, .. } => request.shard_key.as_ref(),
@@ -986,7 +979,10 @@ mod tests {
         assert_eq!(op.operation_label(), "DELETE_PAYLOAD");
         assert_eq!(op.compile_stmt_type(), "delete_payload");
         assert_eq!(op.collection(), Some("docs"));
-        assert_eq!(op.shard_key(), Some("tenant_1"));
+        assert_eq!(
+            op.shard_key(),
+            Some(&crate::semantic::PlanShardKey::Keyword("tenant_1".into()))
+        );
 
         if let PlannedOperation::DeletePayload {
             collection,
@@ -1091,7 +1087,10 @@ mod tests {
 
         assert_eq!(op.operation_label(), "COUNT");
         assert_eq!(op.collection(), Some("docs"));
-        assert_eq!(op.shard_key(), Some("tenant_2"));
+        assert_eq!(
+            op.shard_key(),
+            Some(&crate::semantic::PlanShardKey::Keyword("tenant_2".into()))
+        );
 
         if let PlannedOperation::Count { request, .. } = op {
             assert_eq!(request.exact, Some(true));

@@ -464,7 +464,7 @@ impl PyStmt {
     /// unset (placeholders also read as `None` — bind first).
     #[getter]
     fn shard_key<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
-        match self.inner.shard_key_typed() {
+        match self.inner.shard_key() {
             None => Ok(None),
             Some(qql_core::ast::ShardKey::Keyword(s)) => Ok(Some(PyString::new(py, s).into_any())),
             Some(qql_core::ast::ShardKey::Number(n)) => Ok(Some(PyInt::new(py, *n).into_any())),
@@ -480,7 +480,7 @@ impl PyStmt {
             // Empty strings clear, matching the pre-typed core setter contract.
             Some(value) => py_shard_key_from_value(&value)?,
         };
-        if !self.inner.set_shard_key_typed(key) {
+        if !self.inner.set_shard_key(key) {
             return Err(PyValueError::new_err(
                 "cannot set shard_key on statement type that does not support sharding (e.g. DDL statements)",
             ));

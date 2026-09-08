@@ -186,10 +186,14 @@ export class Stmt {
      */
     readonly bound: boolean;
     /**
-     * QQL `SHARD '…'` routing key (request-level). Prefer the clause in QQL.
+     * QQL `SHARD` routing key (request-level). Prefer the clause in QQL.
+     *
+     * Reads back a string for keyword keys, a `BigInt` for numeric keys, and
+     * `null` when unset (placeholders also read as `null` — bind first).
+     * The setter accepts string, number, `BigInt`, or null: numbers must be
+     * exact non-negative integers (larger keys need `BigInt`).
      */
-    get shardKey(): string | undefined;
-    set shardKey(value: string | null | undefined);
+    shardKey: any;
 }
 
 export function analyze(input: string): AnalysisResult;
