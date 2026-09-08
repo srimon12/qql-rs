@@ -41,6 +41,7 @@ export class ExecutionReport {
   [key: string]: unknown;
   hits(stmt?: number): ScoredPoint[];
   points(stmt?: number): ScoredPoint[];
+  ids(stmt?: number): Array<string | number>;
   facet(stmt?: number): Array<{ value: unknown; count: number }>;
   count(stmt?: number): number;
   groups(stmt?: number): Array<{ group_id: unknown; hits: Array<Record<string, unknown>> }>;

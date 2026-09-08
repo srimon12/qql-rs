@@ -60,12 +60,11 @@ class QqlScenarios:
         self.client.execute(f"CREATE INDEX ON COLLECTION {name} FOR year TYPE integer")
 
     # ----------------------------------------------------------- ingest ----
-    # Bulk ingest is one call: point dicts in, no batch loop — upsert_many
-    # prepares one `:rows` template and chunks internally.
     def ingest_berlin(self, name: str, docs, dense, sparse) -> float:
+        dense_list = dense.tolist() if hasattr(dense, "tolist") else dense
         t0 = time.perf_counter()
         rows = [
-            {**doc, "vector": {"dense": dense[k], "bm25": sparse[k]}}
+            {**doc, "vector": {"dense": dense_list[k], "bm25": sparse[k]}}
             for k, doc in enumerate(docs)
         ]
         self.client.upsert_many(name, rows, batch_size=BATCH_BERLIN)
@@ -75,15 +74,18 @@ class QqlScenarios:
         offsets = [0]
         for n in colbert_lens:
             offsets.append(offsets[-1] + n * 128)
+        dense_list = dense.tolist() if hasattr(dense, "tolist") else dense
         t0 = time.perf_counter()
         rows = [
             {
                 **doc,
                 "vector": {
-                    "dense": dense[k],
+                    "dense": dense_list[k],
                     "bm25": sparse[k],
                     "colbert": {
-                        "data": colbert_flat[offsets[k] : offsets[k + 1]],
+                        "data": colbert_flat[offsets[k] : offsets[k + 1]].tolist()
+                        if hasattr(colbert_flat, "tolist")
+                        else colbert_flat[offsets[k] : offsets[k + 1]],
                         "dim": 128,
                     },
                 },
@@ -94,72 +96,76 @@ class QqlScenarios:
         return time.perf_counter() - t0
 
     # ------------------------------------------------------------- reads ----
-    def _hits(self, result) -> list:
-        return result["results"][0]["data"]
-
     def query_dense(self, name: str, qvec: list[float]) -> list:
-        stmt = self.parse(f"QUERY :dv FROM {name} USING dense LIMIT {LIMIT}")[0]
-        return self._hits(self.client.execute(stmt, params={"dv": qvec}))
+        return self.client.execute(
+            f"QUERY :dv FROM {name} USING dense LIMIT {LIMIT}",
+            params={"dv": qvec},
+        ).hits()
 
     def query_dense_filtered(self, name: str, qvec: list[float]) -> list:
-        stmt = self.parse(
+        return self.client.execute(
             f"QUERY :dv FROM {name} USING dense "
-            f"WHERE price < 150.0 AND guests >= 2 LIMIT {LIMIT}")[0]
-        return self._hits(self.client.execute(stmt, params={"dv": qvec}))
+            f"WHERE price < 150.0 AND guests >= 2 LIMIT {LIMIT}",
+            params={"dv": qvec},
+        ).hits()
 
     def query_sparse(self, name: str, svec: dict) -> list:
-        stmt = self.parse(f"QUERY :sv FROM {name} USING bm25 LIMIT {LIMIT}")[0]
-        return self._hits(self.client.execute(stmt, params={"sv": svec}))
+        return self.client.execute(
+            f"QUERY :sv FROM {name} USING bm25 LIMIT {LIMIT}",
+            params={"sv": svec},
+        ).hits()
 
     def query_hybrid(self, name: str, qvec: list[float], svec: dict) -> list:
         # hnsw_ef=128 on the dense CTE: fused rankings must be deterministic
         # across the two independently built collections.
-        stmt = self.parse(f"""
+        return self.client.execute(f"""
             WITH d AS (QUERY :dv FROM {name} USING dense PARAMS (hnsw_ef = 128) LIMIT 50),
                  s AS (QUERY :sv FROM {name} USING bm25 LIMIT 50)
-            QUERY FUSION RRF FROM {name} PREFETCH (d, s) LIMIT {LIMIT}""")[0]
-        return self._hits(self.client.execute(stmt, params={"dv": qvec, "sv": svec}))
+            QUERY FUSION RRF FROM {name} PREFETCH (d, s) LIMIT {LIMIT}""",
+            params={"dv": qvec, "sv": svec},
+        ).hits()
 
     def query_colbert(self, name: str, mvec: list) -> list:
-        stmt = self.parse(f"QUERY :mv FROM {name} USING colbert LIMIT {LIMIT}")[0]
-        return self._hits(self.client.execute(stmt, params={"mv": mvec}))
+        return self.client.execute(
+            f"QUERY :mv FROM {name} USING colbert LIMIT {LIMIT}",
+            params={"mv": mvec},
+        ).hits()
 
     def scroll_pages(self, name: str, pages: int, batch: int) -> list[int]:
-        stmt = self.parse(f"SCROLL FROM {name} AFTER :off LIMIT {batch}")[0]
-        ids, off = [], 0
+        ids, offset = [], None
         for _ in range(pages):
-            hits = self._hits(self.client.execute(stmt, params={"off": off}))
-            if not hits:
+            sql = f"SCROLL FROM {name} AFTER {offset} LIMIT {batch}" if offset else f"SCROLL FROM {name} LIMIT {batch}"
+            rep = self.client.execute(sql)
+            page_ids = rep.ids()
+            if not page_ids:
                 break
-            ids.extend(h["id"] for h in hits)
-            off = int(ids[-1])  # AFTER is exclusive — resume at the boundary
+            ids.extend(page_ids)
+            offset = ids[-1]
         return ids
 
     def count_berlin(self, name: str) -> int:
-        raw = self.client.execute(f"COUNT FROM {name} WHERE price < 150.0")["results"][0]["data"]
-        return raw["result"]["count"]
+        return self.client.execute(f"COUNT FROM {name} WHERE price < 150.0").count()
 
     def count_legal(self, name: str) -> int:
-        raw = self.client.execute(f"COUNT FROM {name} WHERE year >= 2010")["results"][0]["data"]
-        return raw["result"]["count"]
+        return self.client.execute(f"COUNT FROM {name} WHERE year >= 2010").count()
 
     def facet_district(self, name: str) -> dict:
-        hits = self.client.execute(
-            f"FACET district FROM {name} LIMIT 20 EXACT true")["results"][0]["data"]
+        hits = self.client.execute(f"FACET district FROM {name} LIMIT 20 EXACT true").facet()
         return {h["value"]: h["count"] for h in hits}
 
     # ----------------------------------------------------------- writes ----
     def update_payload(self, name: str) -> None:
         self.client.execute(
-            f"UPDATE {name} SET PAYLOAD = {{rating: 4.5}} WHERE district = 'Mitte' WAIT true")
+            f"UPDATE {name} SET PAYLOAD = {{'rating': 4.5}} "
+            f"WHERE district = 'Mitte' WAIT true")
 
     def delete_by_filter(self, name: str) -> None:
         self.client.execute(f"DELETE FROM {name} WHERE price > 250.0 WAIT true")
 
     def prepared_rerun(self, name: str, qvecs: list[list[float]]) -> list:
-        """Parse once, rerun with different vectors — the prepared path."""
+        # Parse once, rerun with different vectors — the prepared path.
         stmt = self.parse(f"QUERY :dv FROM {name} USING dense LIMIT {LIMIT}")[0]
         hits = []
         for v in qvecs:
-            hits = self._hits(self.client.execute(stmt, params={"dv": v}))
+            hits = self.client.execute(stmt, params={"dv": v}).hits()
         return hits

@@ -46,12 +46,35 @@ export class ExecutionReport {
     const res = this.#resultAt(stmt);
     if (!res || !Array.isArray(res.data)) return [];
     return res.data
-      .filter((d) => d && typeof d === 'object' && 'id' in d && 'score' in d)
+      .filter((d) => d && typeof d === 'object' && 'id' in d)
       .map((d) => new ScoredPoint(d));
   }
 
   points(stmt = 0) {
     return this.hits(stmt);
+  }
+
+  ids(stmt = 0) {
+    const res = this.#resultAt(stmt);
+    if (!res) return [];
+    let items = [];
+    if (Array.isArray(res.data)) {
+      items = res.data;
+    } else if (typeof res.data === 'object' && res.data !== null) {
+      const raw = res.data.result;
+      if (raw && typeof raw === 'object') {
+        items = Array.isArray(raw) ? raw : (raw.points || raw.hits || []);
+      } else {
+        items = res.data.points || res.data.hits || [];
+      }
+    }
+    const out = [];
+    for (const item of items) {
+      if (item && typeof item === 'object' && 'id' in item) {
+        out.push(item.id);
+      }
+    }
+    return out;
   }
 
   facet(stmt = 0) {

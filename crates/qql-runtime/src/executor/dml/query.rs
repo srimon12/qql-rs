@@ -15,8 +15,7 @@ impl Executor {
         if !query_needs_kind_resolution(query) {
             return Ok(());
         }
-        let info = self.client.get_collection_info(collection).await?;
-        let topology = topology_names_from_info(&info);
+        let topology = self.get_cached_topology(collection).await?;
         resolve_query_vector_kinds(collection, query, &topology)
     }
 }

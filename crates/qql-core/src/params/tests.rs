@@ -532,6 +532,7 @@ fn test_upsert_point_param_dict_splice() {
     let _ = PointEntry::Inline(inline.clone());
 }
 
+#[cfg(feature = "json")]
 #[test]
 fn test_upsert_point_rows_splice_avoids_scoping() {
     // A 100-dict `:rows` value on a ONE-statement script must splice 100

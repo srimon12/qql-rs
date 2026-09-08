@@ -79,6 +79,68 @@ impl ExecutionReport {
             failed: if ok { 0 } else { 1 },
         }
     }
+
+    /// Return the first statement response, if present.
+    pub fn first(&self) -> Option<&ExecResponse> {
+        self.results.first()
+    }
+
+    /// Return search hits of statement `stmt` as a JSON slice.
+    pub fn hits_json(&self, stmt: usize) -> Option<&[serde_json::Value]> {
+        self.results.get(stmt).and_then(|r| r.hits_json())
+    }
+
+    /// Return typed search hits of statement `stmt`.
+    pub fn hits(&self, stmt: usize) -> Option<Vec<SearchHit>> {
+        self.results.get(stmt).and_then(|r| r.hits())
+    }
+
+    /// Return point IDs from statement `stmt`.
+    pub fn ids(&self, stmt: usize) -> Vec<u64> {
+        self.results.get(stmt).map(|r| r.ids()).unwrap_or_default()
+    }
+
+    /// Return the count integer from statement `stmt`.
+    pub fn count(&self, stmt: usize) -> Option<u64> {
+        self.results.get(stmt).and_then(|r| r.count())
+    }
+
+    /// Return facet entries as `(value, count)` pairs from statement `stmt`.
+    pub fn facet(&self, stmt: usize) -> Option<Vec<(serde_json::Value, u64)>> {
+        self.results.get(stmt).and_then(|r| r.facet())
+    }
+
+    /// Return the count integer from the first statement.
+    pub fn first_count(&self) -> Option<u64> {
+        self.count(0)
+    }
+
+    /// Return the search hits from the first statement.
+    pub fn first_hits(&self) -> Option<Vec<SearchHit>> {
+        self.hits(0)
+    }
+
+    /// Return the search hits from the first statement as a JSON slice.
+    pub fn first_hits_json(&self) -> Option<&[serde_json::Value]> {
+        self.hits_json(0)
+    }
+
+    /// Return the search hits from the first statement as a raw vector of JSON objects.
+    pub fn first_hits_raw(&self) -> Vec<serde_json::Value> {
+        self.first_hits_json()
+            .map(|s| s.to_vec())
+            .unwrap_or_default()
+    }
+
+    /// Return the point IDs from the first statement.
+    pub fn first_ids(&self) -> Vec<u64> {
+        self.ids(0)
+    }
+
+    /// Return the facet pairs from the first statement.
+    pub fn first_facet(&self) -> Option<Vec<(serde_json::Value, u64)>> {
+        self.facet(0)
+    }
 }
 
 /// Controls batch-execution behaviour when a statement fails.
@@ -100,7 +162,8 @@ use qql_plan::BatchGrouper;
 pub struct SearchHit {
     /// Point ID (integer or string/UUID).
     pub id: qql_plan::PlanPointId,
-    /// Similarity or rerank score.
+    /// Similarity or rerank score (defaults to 0.0 for unscored retrieved points).
+    #[serde(default)]
     pub score: f32,
     /// Payload text extracted for text-centric results, when present.
     pub text: Option<String>,
@@ -123,6 +186,59 @@ pub struct GroupedSearchResult {
     pub group_id: serde_json::Value,
     /// Search hits in this group, in backend order.
     pub hits: Vec<SearchHit>,
+}
+
+impl ExecResponse {
+    /// Return search hits as a slice of JSON values if this response contains hits data.
+    pub fn hits_json(&self) -> Option<&[serde_json::Value]> {
+        self.data
+            .as_ref()
+            .and_then(|d| d.as_array().map(|v| v.as_slice()))
+    }
+
+    /// Deserialize hits into typed `Vec<SearchHit>` if present.
+    pub fn hits(&self) -> Option<Vec<SearchHit>> {
+        self.data
+            .as_ref()
+            .and_then(|d| serde_json::from_value(d.clone()).ok())
+    }
+
+    /// Return point IDs as u64 from hits or scroll results.
+    pub fn ids(&self) -> Vec<u64> {
+        let Some(arr) = self.hits_json() else {
+            return Vec::new();
+        };
+        arr.iter()
+            .filter_map(|h| {
+                h.get("id").and_then(|id| {
+                    id.as_u64()
+                        .or_else(|| id.as_str().and_then(|s| s.parse().ok()))
+                })
+            })
+            .collect()
+    }
+
+    /// Return the count from a COUNT response, if present.
+    pub fn count(&self) -> Option<u64> {
+        self.data.as_ref().and_then(|d| {
+            d.get("result")
+                .and_then(|r| r.get("count"))
+                .or_else(|| d.get("count"))
+                .and_then(|c| c.as_u64())
+        })
+    }
+
+    /// Return facet entries as `(value, count)` pairs, if present.
+    pub fn facet(&self) -> Option<Vec<(serde_json::Value, u64)>> {
+        let arr = self.data.as_ref()?.as_array()?;
+        let mut out = Vec::with_capacity(arr.len());
+        for item in arr {
+            let val = item.get("value")?.clone();
+            let count = item.get("count")?.as_u64()?;
+            out.push((val, count));
+        }
+        Some(out)
+    }
 }
 
 /// A parsed and pre-compiled query template for repeated execution with different parameters.
@@ -196,6 +312,10 @@ pub struct Executor {
     pub(crate) client: Box<dyn QdrantOps>,
     pub(crate) config: Option<QqlConfig>,
     pub(crate) embedder: Option<Arc<dyn Embedder>>,
+    pub(crate) schema_cache: std::sync::RwLock<
+        HashMap<String, (CollectionInfo, std::sync::Arc<qql_embed::TopologyNames>)>,
+    >,
+    pub(crate) ast_cache: std::sync::RwLock<HashMap<String, Vec<Stmt>>>,
     /// Set by [`Executor::close`]; every execution entry point fails after it.
     closed: std::sync::atomic::AtomicBool,
     close_lock: tokio::sync::Mutex<()>,
@@ -230,6 +350,8 @@ impl Executor {
             client,
             config,
             embedder: None,
+            schema_cache: std::sync::RwLock::new(HashMap::new()),
+            ast_cache: std::sync::RwLock::new(HashMap::new()),
             closed: std::sync::atomic::AtomicBool::new(false),
             close_lock: tokio::sync::Mutex::new(()),
         }
@@ -245,9 +367,70 @@ impl Executor {
             client,
             config,
             embedder,
+            schema_cache: std::sync::RwLock::new(HashMap::new()),
+            ast_cache: std::sync::RwLock::new(HashMap::new()),
             closed: std::sync::atomic::AtomicBool::new(false),
             close_lock: tokio::sync::Mutex::new(()),
         }
+    }
+
+    /// Return cached collection info or fetch from backend and cache it.
+    pub(crate) async fn get_cached_collection_info(
+        &self,
+        collection: &str,
+    ) -> Result<CollectionInfo, QqlError> {
+        if let Ok(guard) = self.schema_cache.read()
+            && let Some((info, _)) = guard.get(collection)
+        {
+            return Ok(info.clone());
+        }
+        let info = self.client.get_collection_info(collection).await?;
+        let topo = std::sync::Arc::new(dml::query::topology_names_from_info(&info));
+        if let Ok(mut guard) = self.schema_cache.write() {
+            guard.insert(collection.to_string(), (info.clone(), topo));
+        }
+        Ok(info)
+    }
+
+    /// Return cached collection topology or fetch from backend and cache it.
+    pub(crate) async fn get_cached_topology(
+        &self,
+        collection: &str,
+    ) -> Result<std::sync::Arc<qql_embed::TopologyNames>, QqlError> {
+        if let Ok(guard) = self.schema_cache.read()
+            && let Some((_, topo)) = guard.get(collection)
+        {
+            return Ok(topo.clone());
+        }
+        let info = self.client.get_collection_info(collection).await?;
+        let topo = std::sync::Arc::new(dml::query::topology_names_from_info(&info));
+        if let Ok(mut guard) = self.schema_cache.write() {
+            guard.insert(collection.to_string(), (info, topo.clone()));
+        }
+        Ok(topo)
+    }
+
+    /// Invalidate any cached schema for a collection.
+    pub(crate) fn invalidate_collection_schema(&self, collection: &str) {
+        if let Ok(mut guard) = self.schema_cache.write() {
+            guard.remove(collection);
+        }
+    }
+
+    /// Parse or retrieve cached AST statements for a query string.
+    pub(crate) fn parse_cached(&self, query: &str) -> Result<Vec<Stmt>, QqlError> {
+        if let Ok(guard) = self.ast_cache.read()
+            && let Some(stmts) = guard.get(query)
+        {
+            return Ok(stmts.clone());
+        }
+        let statements = parser::Parser::parse_all(query)?;
+        if let Ok(mut guard) = self.ast_cache.write()
+            && guard.len() < 512
+        {
+            guard.insert(query.to_string(), statements.clone());
+        }
+        Ok(statements)
     }
 
     /// Borrow the underlying backend ops (alias of `client`).
@@ -356,7 +539,7 @@ impl Executor {
     ) -> Result<ExecutionReport, QqlError> {
         self.ensure_open()?;
         let stop_on_error = matches!(on_error, OnError::Stop);
-        let statements = match parser::Parser::parse_all(query) {
+        let statements = match self.parse_cached(query) {
             Ok(statements) => statements,
             Err(error) if stop_on_error => return Err(error),
             Err(error) => {
@@ -390,9 +573,35 @@ impl Executor {
         on_error: OnError,
     ) -> Result<ExecutionReport, QqlError> {
         self.ensure_open()?;
-        let mut statements = parser::Parser::parse_all(query)?;
+        let mut statements = self.parse_cached(query)?;
         for stmt in &mut statements {
             qql_core::params::bind_stmt(stmt, |k| params.get(k).cloned(), &[])?;
+        }
+        let stop_on_error = matches!(on_error, OnError::Stop);
+        let results = self.execute_batch_nodes(statements, stop_on_error).await?;
+        Ok(ExecutionReport::from_results(results))
+    }
+
+    /// Execute a parameterized query with named parameters given as a slice of `(name, value)` pairs.
+    pub async fn execute_with_named_params<K: AsRef<str>>(
+        &self,
+        query: &str,
+        params: &[(K, qql_core::ast::Value)],
+        on_error: OnError,
+    ) -> Result<ExecutionReport, QqlError> {
+        self.ensure_open()?;
+        let mut statements = self.parse_cached(query)?;
+        for stmt in &mut statements {
+            qql_core::params::bind_stmt(
+                stmt,
+                |k| {
+                    params
+                        .iter()
+                        .find(|(name, _)| name.as_ref() == k)
+                        .map(|(_, v)| v.clone())
+                },
+                &[],
+            )?;
         }
         let stop_on_error = matches!(on_error, OnError::Stop);
         let results = self.execute_batch_nodes(statements, stop_on_error).await?;
@@ -407,7 +616,7 @@ impl Executor {
         on_error: OnError,
     ) -> Result<ExecutionReport, QqlError> {
         self.ensure_open()?;
-        let mut statements = parser::Parser::parse_all(query)?;
+        let mut statements = self.parse_cached(query)?;
         for stmt in &mut statements {
             qql_core::params::bind_stmt(stmt, |_| None, params)?;
         }
@@ -419,7 +628,22 @@ impl Executor {
     /// Prepare a query template for repeated execution with different parameters.
     pub async fn prepare(&self, sql: &str) -> Result<PreparedStatement, QqlError> {
         self.ensure_open()?;
-        let stmt = parser::Parser::parse(sql)?;
+        let mut stmts = self.parse_cached(sql)?;
+        let stmt = if stmts.len() == 1 {
+            stmts.pop().unwrap()
+        } else if stmts.is_empty() {
+            return Err(QqlError::validation(
+                "QQL-VALIDATION-EMPTY-SCRIPT",
+                "cannot prepare an empty query template",
+                None,
+            ));
+        } else {
+            return Err(QqlError::validation(
+                "QQL-VALIDATION-MULTI-STMT",
+                "cannot prepare a multi-statement script; prepare one statement at a time",
+                None,
+            ));
+        };
         self.prepare_from_stmt(sql.to_string(), stmt).await
     }
 
@@ -518,8 +742,7 @@ impl Executor {
                     .await
                     .unwrap_or(false)
             {
-                self.client
-                    .get_collection_info(&upsert.collection)
+                self.get_cached_collection_info(&upsert.collection)
                     .await
                     .ok()
             } else {
@@ -995,7 +1218,7 @@ impl Executor {
             let expected = batch.searches.len();
             match self.client.execute_query_batch(&collection, &batch).await {
                 Ok(responses) if responses.len() == expected => {
-                    for value in responses {
+                    for mut value in responses {
                         if let Some(message) = Self::batch_item_error(&value) {
                             // A 200 batch response can carry per-item
                             // failures; keep them aligned with the request
@@ -1008,16 +1231,26 @@ impl Executor {
                             });
                             continue;
                         }
-                        let (hits_val, count) = if let Some(hits_val) =
-                            value.get("__pre_serialized_hits").cloned()
-                        {
-                            let count = value.get("hits_len").and_then(|v| v.as_u64()).unwrap_or(0)
-                                as usize;
-                            (hits_val, count)
-                        } else {
-                            let hits = extract_search_hits(&value);
-                            let count = hits.len();
-                            (serialize_hits(&hits)?, count)
+                        let (hits_val, count) = {
+                            let pts_opt = if let Some(serde_json::Value::Object(obj)) =
+                                value.get_mut("result")
+                            {
+                                obj.remove("points")
+                            } else if let Some(serde_json::Value::Array(_)) = value.get("result") {
+                                value.as_object_mut().and_then(|o| o.remove("result"))
+                            } else if let Some(obj) = value.as_object_mut() {
+                                obj.remove("points")
+                            } else {
+                                None
+                            };
+                            if let Some(pts) = pts_opt {
+                                let c = pts.as_array().map(|a| a.len()).unwrap_or(0);
+                                (pts, c)
+                            } else {
+                                let hits = extract_search_hits(&value);
+                                let c = hits.len();
+                                (serialize_hits(&hits)?, c)
+                            }
                         };
                         results.push(ExecResponse {
                             ok: true,
@@ -1412,16 +1645,33 @@ impl Executor {
 
         let label = op.operation_label();
         let mut result = self.client.execute_planned(op).await?;
+        match op {
+            qql_plan::PlannedOperation::CreateCollection { collection, .. }
+            | qql_plan::PlannedOperation::UpdateCollection { collection, .. }
+            | qql_plan::PlannedOperation::DropCollection { collection }
+            | qql_plan::PlannedOperation::CreateIndex { collection, .. }
+            | qql_plan::PlannedOperation::DropIndex { collection, .. } => {
+                self.invalidate_collection_schema(collection);
+            }
+            _ => {}
+        }
         let (message, data) = match op {
             PlannedOperation::Query { .. }
             | PlannedOperation::Scroll { .. }
             | PlannedOperation::GetPoints { .. } => {
-                if let Some(hits_val) = result
-                    .get_mut("__pre_serialized_hits")
-                    .map(serde_json::Value::take)
+                let pts_opt = if let Some(serde_json::Value::Object(obj)) = result.get_mut("result")
                 {
-                    let count = result.get("hits_len").and_then(|v| v.as_u64()).unwrap_or(0);
-                    (format!("Found {count} hits"), Some(hits_val))
+                    obj.remove("points")
+                } else if let Some(serde_json::Value::Array(_)) = result.get("result") {
+                    result.as_object_mut().and_then(|o| o.remove("result"))
+                } else if let Some(obj) = result.as_object_mut() {
+                    obj.remove("points")
+                } else {
+                    None
+                };
+                if let Some(pts) = pts_opt {
+                    let count = pts.as_array().map(|a| a.len()).unwrap_or(0);
+                    (format!("Found {count} hits"), Some(pts))
                 } else {
                     let hits = extract_search_hits(&result);
                     (

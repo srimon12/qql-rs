@@ -43,7 +43,7 @@ impl Executor {
                     .collection_exists(&upsert.collection)
                     .await
                     .unwrap_or(false)
-                && let Ok(info) = self.client.get_collection_info(&upsert.collection).await
+                && let Ok(info) = self.get_cached_collection_info(&upsert.collection).await
             {
                 map_unnamed_to_single_dense(upsert, &info);
                 return Ok(Some(info));
@@ -64,7 +64,7 @@ impl Executor {
             return Ok(None);
         }
 
-        let info = self.client.get_collection_info(&upsert.collection).await?;
+        let info = self.get_cached_collection_info(&upsert.collection).await?;
         if needs_implicit {
             let multi_names = multivector_targets(&info);
             let dense_all = dense_targets(&info);

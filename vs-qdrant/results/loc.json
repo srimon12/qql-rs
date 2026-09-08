@@ -1,14 +1,14 @@
 {
   "python": {
     "official": {
-      "code_lines": 147,
-      "total_lines": 187
+      "code_lines": 170,
+      "total_lines": 207
     },
     "qql": {
-      "code_lines": 126,
-      "total_lines": 166
+      "code_lines": 134,
+      "total_lines": 172
     },
-    "ratio": 0.86
+    "ratio": 0.79
   },
   "node": {
     "official": {
@@ -16,10 +16,10 @@
       "total_lines": 189
     },
     "qql": {
-      "code_lines": 123,
-      "total_lines": 172
+      "code_lines": 126,
+      "total_lines": 167
     },
-    "ratio": 0.81
+    "ratio": 0.83
   },
   "rust": {
     "official": {
@@ -27,9 +27,9 @@
       "total_lines": 464
     },
     "qql": {
-      "code_lines": 293,
-      "total_lines": 352
+      "code_lines": 253,
+      "total_lines": 303
     },
-    "ratio": 0.7
+    "ratio": 0.6
   }
 }
