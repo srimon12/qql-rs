@@ -1,6 +1,6 @@
 use super::AstLowerer;
 use crate::ast::{CountStmt, FacetStmt, ScrollStmt, Stmt};
-use crate::error::{QqlError, Span};
+use crate::error::QqlError;
 use crate::token::TokenKind;
 use alloc::boxed::Box;
 
@@ -37,21 +37,12 @@ impl<'a> AstLowerer<'a> {
                 None
             };
         self.expect(TokenKind::Limit)?;
-        let (limit, limit_param, limit_span) = if self.peek()?.kind == TokenKind::Colon {
-            let colon_tok = self.advance()?;
-            let name = self.parse_param_name()?;
-            (
-                10,
-                Some(alloc::format!(":{}", name)),
-                Some(Span::new(colon_tok.span.start, self.prev_span().end)),
-            )
-        } else if self.peek()?.kind == TokenKind::Question {
-            let q_tok = self.advance()?;
-            let idx = self.next_positional_param();
-            (10, Some(alloc::format!("?{}", idx)), Some(q_tok.span))
-        } else {
-            (self.parse_positive_u64("SCROLL LIMIT")?, None, None)
-        };
+        let (limit, limit_param, limit_span) =
+            if let Some((param, span)) = self.parse_placeholder_param()? {
+                (10, Some(param), Some(span))
+            } else {
+                (self.parse_positive_u64("SCROLL LIMIT")?, None, None)
+            };
         Ok(Stmt::Scroll(Box::new(ScrollStmt {
             collection,
             limit,
@@ -83,6 +74,7 @@ impl<'a> AstLowerer<'a> {
             None
         };
         let exact = if self.peek()?.kind == TokenKind::With {
+            let with_span = self.peek()?.span;
             self.advance()?;
             let opts = self.parse_config_block()?;
             let mut exact = None;
@@ -90,8 +82,8 @@ impl<'a> AstLowerer<'a> {
                 if !key.eq_ignore_ascii_case("exact") {
                     return Err(QqlError::parse(
                         "QQL-PARSE-COUNT-CONFIG",
-                        alloc::format!("unknown COUNT parameter '{}'. Expected: exact", key),
-                        self.peek()?.span,
+                        alloc::format!("unknown COUNT parameter '{key}'. Expected: exact"),
+                        with_span,
                     ));
                 }
                 match value {
@@ -100,7 +92,7 @@ impl<'a> AstLowerer<'a> {
                         return Err(QqlError::parse(
                             "QQL-PARSE-COUNT-CONFIG",
                             "COUNT 'exact' must be true or false",
-                            self.peek()?.span,
+                            with_span,
                         ));
                     }
                 }
@@ -159,19 +151,19 @@ impl<'a> AstLowerer<'a> {
                 }
                 TokenKind::Limit if limit.is_none() && limit_param.is_none() => {
                     self.advance()?;
-                    if self.peek()?.kind == TokenKind::Colon {
-                        let colon_tok = self.advance()?;
-                        let name = self.parse_param_name()?;
-                        limit_param = Some(alloc::format!(":{}", name));
-                        limit_span = Some(Span::new(colon_tok.span.start, self.prev_span().end));
-                    } else if self.peek()?.kind == TokenKind::Question {
-                        let q_tok = self.advance()?;
-                        let idx = self.next_positional_param();
-                        limit_param = Some(alloc::format!("?{}", idx));
-                        limit_span = Some(q_tok.span);
+                    if let Some((param, span)) = self.parse_placeholder_param()? {
+                        limit_param = Some(param);
+                        limit_span = Some(span);
                     } else {
                         limit = Some(self.parse_positive_u64("FACET LIMIT")?);
                     }
+                }
+                TokenKind::Limit => {
+                    return Err(QqlError::parse(
+                        "QQL-PARSE-DUPLICATE-CLAUSE",
+                        "duplicate FACET LIMIT clause",
+                        self.peek()?.span,
+                    ));
                 }
                 TokenKind::Exact if exact.is_none() => {
                     self.advance()?;
@@ -187,46 +179,69 @@ impl<'a> AstLowerer<'a> {
                         _ => exact = Some(true),
                     }
                 }
+                TokenKind::Exact => {
+                    return Err(QqlError::parse(
+                        "QQL-PARSE-DUPLICATE-CLAUSE",
+                        "duplicate FACET EXACT clause",
+                        self.peek()?.span,
+                    ));
+                }
                 TokenKind::Shard if shard_key.is_none() => {
                     self.advance()?;
                     shard_key = Some(self.parse_string()?);
                 }
                 TokenKind::With => {
+                    let with_span = self.peek()?.span;
                     self.advance()?;
                     let opts = self.parse_config_block()?;
                     for (k, v) in &opts {
                         if k.eq_ignore_ascii_case("exact") {
-                            if let crate::ast::Value::Bool(b) = v {
-                                exact = Some(*b);
+                            if exact.is_some() {
+                                return Err(QqlError::parse(
+                                    "QQL-PARSE-DUPLICATE-CLAUSE",
+                                    "duplicate FACET EXACT clause",
+                                    with_span,
+                                ));
+                            }
+                            match v {
+                                crate::ast::Value::Bool(b) => exact = Some(*b),
+                                _ => {
+                                    return Err(QqlError::parse(
+                                        "QQL-PARSE-FACET-CONFIG",
+                                        "FACET 'exact' must be true or false",
+                                        with_span,
+                                    ));
+                                }
                             }
                         } else if k.eq_ignore_ascii_case("limit") {
+                            if limit.is_some() || limit_param.is_some() {
+                                return Err(QqlError::parse(
+                                    "QQL-PARSE-DUPLICATE-CLAUSE",
+                                    "duplicate FACET LIMIT clause",
+                                    with_span,
+                                ));
+                            }
                             match v {
                                 crate::ast::Value::Int(i) if *i > 0 => {
                                     limit = Some(*i as u64);
                                 }
                                 _ => {
                                     return Err(QqlError::parse(
-                                        "QQL-PARSE-POSITIVE-INTEGER",
+                                        "QQL-PARSE-FACET-CONFIG",
                                         "FACET limit must be a positive integer",
-                                        self.peek()?.span,
+                                        with_span,
                                     ));
                                 }
                             }
+                        } else {
+                            return Err(QqlError::parse(
+                                "QQL-PARSE-FACET-CONFIG",
+                                alloc::format!(
+                                    "unknown FACET parameter '{k}'. Expected: exact, limit"
+                                ),
+                                with_span,
+                            ));
                         }
-                    }
-                }
-                _ if (self.peek_word("EXACT")? && exact.is_none()) => {
-                    self.advance()?;
-                    match self.peek()?.kind {
-                        TokenKind::True => {
-                            self.advance()?;
-                            exact = Some(true);
-                        }
-                        TokenKind::False => {
-                            self.advance()?;
-                            exact = Some(false);
-                        }
-                        _ => exact = Some(true),
                     }
                 }
                 _ => break,

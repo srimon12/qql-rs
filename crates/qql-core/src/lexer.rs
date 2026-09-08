@@ -1,10 +1,5 @@
-use core::iter::Peekable;
-
 use crate::error::{QqlError, Span};
 use crate::token::{Token, TokenKind, lookup_keyword};
-
-/// Peekable iterator over the token stream produced by a `Lexer`.
-pub type TokenIter<'a> = Peekable<Lexer<'a>>;
 
 /// QQL lexer yielding tokens with byte spans; halts after the first lexical error.
 #[derive(Debug, Clone)]
@@ -29,7 +24,21 @@ impl<'a> Lexer<'a> {
     }
 
     /// Lexes and returns the next token, `Eof` at end of input, or a lexical error.
+    ///
+    /// After a lexical error the lexer stays halted: further calls return `Eof`
+    /// instead of re-yielding the same error.
     pub fn next_token(&mut self) -> Result<Token<'a>, QqlError> {
+        if self.halted {
+            return Ok(Token::eof(self.pos));
+        }
+        let result = self.lex_one();
+        if result.is_err() {
+            self.halted = true;
+        }
+        result
+    }
+
+    fn lex_one(&mut self) -> Result<Token<'a>, QqlError> {
         self.skip_whitespace();
 
         if self.pos >= self.input.len() {
@@ -95,7 +104,7 @@ impl<'a> Lexer<'a> {
                     ))
                 } else if is_digit(ch) {
                     self.read_number()
-                } else if is_alpha(ch) || ch == b'_' || ch == b'$' {
+                } else if is_ident_start(ch) {
                     self.read_identifier()
                 } else {
                     let c = self.input[self.pos..].chars().next().unwrap_or('?');
@@ -397,8 +406,7 @@ impl<'a> Lexer<'a> {
         let start = self.pos;
         let bytes = self.input.as_bytes();
 
-        while self.pos < self.input.len() && (is_alnum(bytes[self.pos]) || bytes[self.pos] == b'_')
-        {
+        while self.pos < self.input.len() && is_ident_continue(bytes[self.pos]) {
             self.pos += 1;
         }
 
@@ -414,8 +422,7 @@ impl<'a> Lexer<'a> {
                 if first_byte.is_ascii_alphabetic() || first_byte == b'_' {
                     self.pos += 1;
                     while self.pos < self.input.len()
-                        && (is_alnum(self.input.as_bytes()[self.pos])
-                            || self.input.as_bytes()[self.pos] == b'_')
+                        && is_ident_continue(self.input.as_bytes()[self.pos])
                     {
                         self.pos += 1;
                     }
@@ -428,8 +435,7 @@ impl<'a> Lexer<'a> {
                 if first_byte.is_ascii_alphabetic() || first_byte == b'_' {
                     self.pos += 3;
                     while self.pos < self.input.len()
-                        && (is_alnum(self.input.as_bytes()[self.pos])
-                            || self.input.as_bytes()[self.pos] == b'_')
+                        && is_ident_continue(self.input.as_bytes()[self.pos])
                     {
                         self.pos += 1;
                     }
@@ -508,10 +514,10 @@ fn is_digit(ch: u8) -> bool {
     ch.is_ascii_digit()
 }
 
-fn is_alpha(ch: u8) -> bool {
-    ch == b'$' || ch.is_ascii_alphabetic()
+fn is_ident_start(ch: u8) -> bool {
+    ch == b'$' || ch == b'_' || ch.is_ascii_alphabetic()
 }
 
-fn is_alnum(ch: u8) -> bool {
-    is_alpha(ch) || is_digit(ch)
+fn is_ident_continue(ch: u8) -> bool {
+    is_ident_start(ch) || is_digit(ch)
 }

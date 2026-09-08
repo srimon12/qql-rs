@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 
 impl<'a> AstLowerer<'a> {
     pub fn parse_upsert(&mut self) -> Result<Stmt, QqlError> {
-        let span = self.expect(TokenKind::Upsert)?.span;
+        self.expect(TokenKind::Upsert)?;
         self.expect(TokenKind::Into)?;
         let collection = self.parse_identifier()?;
         self.expect(TokenKind::Values)?;
@@ -27,7 +27,9 @@ impl<'a> AstLowerer<'a> {
                 let idx = self.next_positional_param();
                 points.push(PointEntry::PositionalParam(idx, Some(Box::new(q_tok.span))));
             } else {
+                let row_start = self.peek()?.span.start;
                 let mut row = self.parse_payload_dict()?;
+                let row_span = crate::error::Span::new(row_start, self.prev_span().end);
                 let id_index = row
                     .iter()
                     .position(|(key, _)| key.eq_ignore_ascii_case("id"))
@@ -35,18 +37,18 @@ impl<'a> AstLowerer<'a> {
                         QqlError::validation(
                             "QQL-VALIDATION-UPSERT-ID",
                             "each UPSERT row requires an id",
-                            Some(span),
+                            Some(row_span),
                         )
                     })?;
                 let (_, id) = row.remove(id_index);
-                let id = point_id_from_value(id, span)?;
+                let id = point_id_from_value(id, row_span)?;
 
                 let vectors = if let Some(index) = row
                     .iter()
                     .position(|(key, _)| key.eq_ignore_ascii_case("vector"))
                 {
                     let (_, value) = row.remove(index);
-                    Some(point_vectors_from_value(value, Some(span))?)
+                    Some(point_vectors_from_value(value, Some(row_span))?)
                 } else {
                     None
                 };

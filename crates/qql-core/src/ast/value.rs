@@ -76,19 +76,23 @@ impl Value {
         }
     }
 
-    /// Set a key in a `Dict` (case-insensitive replace) or append it; no-op on
-    /// other variants.
-    pub fn dict_set(&mut self, key: String, value: Value) {
-        if let Self::Dict(items) = self {
-            if let Some((_, current)) = items
-                .iter_mut()
-                .find(|(candidate, _)| candidate.eq_ignore_ascii_case(&key))
-            {
-                *current = value;
-            } else {
-                items.push((key, value));
-            }
+    /// Set a key in a `Dict` (case-insensitive replace) or append it.
+    ///
+    /// Returns `true` when this value is a dict and the key was written;
+    /// `false` when called on a non-dict (nothing is mutated).
+    pub fn dict_set(&mut self, key: String, value: Value) -> bool {
+        let Self::Dict(items) = self else {
+            return false;
+        };
+        if let Some((_, current)) = items
+            .iter_mut()
+            .find(|(candidate, _)| candidate.eq_ignore_ascii_case(&key))
+        {
+            *current = value;
+        } else {
+            items.push((key, value));
         }
+        true
     }
 
     /// Borrow the string contents, if this value is a `Str`.

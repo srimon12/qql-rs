@@ -178,9 +178,9 @@ impl<'a> AstLowerer<'a> {
                 return Err(id_operator_error(operator.span));
             }
             self.advance()?;
-            let low = self.parse_value()?;
+            let low = self.parse_literal()?;
             self.expect(TokenKind::And)?;
-            let high = self.parse_value()?;
+            let high = self.parse_literal()?;
             return Ok(FilterExpr::Between { field, low, high });
         }
 

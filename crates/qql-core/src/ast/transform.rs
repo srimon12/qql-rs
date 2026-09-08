@@ -122,9 +122,14 @@ pub fn inject_filter(
         Stmt::DeletePayload(del) => merge_selector(&mut del.selector, filter),
         Stmt::DeleteVector(del_vec) => merge_selector(&mut del_vec.selector, filter),
         Stmt::UpdatePayload(update) => merge_selector(&mut update.selector, filter),
-        Stmt::Upsert(upsert)
-            if operator == ComparisonOp::Eq && !field.eq_ignore_ascii_case("id") =>
-        {
+        Stmt::Upsert(_) if operator != ComparisonOp::Eq || field.eq_ignore_ascii_case("id") => {
+            return Err(QqlError::validation(
+                "QQL-VALIDATION-FILTER-INJECT",
+                "inject_filter into UPSERT requires Eq on a non-id payload field",
+                None,
+            ));
+        }
+        Stmt::Upsert(upsert) => {
             for point in &mut upsert.points {
                 // A whole-point placeholder has no payload yet — silently
                 // skipping it would drop a security filter. Bind first.

@@ -1,4 +1,4 @@
-use crate::ast::{ComparisonOp, FilterExpr, Stmt, Value};
+use crate::ast::{ComparisonOp, FilterExpr, QueryExpr, Stmt, Value};
 use crate::parser::Parser;
 
 #[test]
@@ -213,4 +213,120 @@ fn injection_resists_standalone_and_bypass() {
         }
         other => panic!("expected AND wrapper, got {other:?}"),
     }
+}
+
+fn tenant_eq() -> (ComparisonOp, Value) {
+    (ComparisonOp::Eq, Value::Str("acme".into()))
+}
+
+#[test]
+fn inject_into_facet_count_and_payload_mutations() {
+    let (op, value) = tenant_eq();
+    for source in [
+        "FACET category FROM docs;",
+        "COUNT FROM docs;",
+        "CLEAR PAYLOAD FROM docs WHERE id = 1;",
+        "DELETE PAYLOAD draft FROM docs WHERE id = 1;",
+        "DELETE VECTOR dense FROM docs WHERE id = 1;",
+        "UPDATE docs SET PAYLOAD = {flag: true} WHERE id = 1;",
+    ] {
+        let mut s = Parser::parse(source).unwrap();
+        crate::ast::inject_filter(&mut s, "tenant", op, value.clone()).unwrap();
+        match &s {
+            Stmt::Facet(f) => assert!(f.filter.is_some(), "{source}"),
+            Stmt::Count(c) => assert!(c.filter.is_some(), "{source}"),
+            Stmt::ClearPayload(p) => {
+                assert!(matches!(p.selector, crate::ast::PointSelector::Filter(_)))
+            }
+            Stmt::DeletePayload(p) => {
+                assert!(matches!(p.selector, crate::ast::PointSelector::Filter(_)))
+            }
+            Stmt::DeleteVector(p) => {
+                assert!(matches!(p.selector, crate::ast::PointSelector::Filter(_)))
+            }
+            Stmt::UpdatePayload(p) => {
+                assert!(matches!(p.selector, crate::ast::PointSelector::Filter(_)))
+            }
+            other => panic!("unexpected statement for {source}: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn inject_rejects_ddl_show_update_vector_and_upsert_combos() {
+    let (op, value) = tenant_eq();
+    for source in [
+        "CREATE COLLECTION docs (d VECTOR(4, COSINE));",
+        "SHOW COLLECTIONS;",
+        "UPDATE docs SET VECTOR dense = [0.1] WHERE id = 1;",
+    ] {
+        let mut s = Parser::parse(source).unwrap();
+        let err = crate::ast::inject_filter(&mut s, "tenant", op, value.clone()).unwrap_err();
+        assert_eq!(err.code, "QQL-VALIDATION-FILTER-INJECT");
+        assert!(
+            err.message
+                .contains("does not apply to this statement type"),
+            "{}",
+            err.message
+        );
+    }
+
+    let mut upsert = Parser::parse("UPSERT INTO docs VALUES {id: 1, title: 'a'};").unwrap();
+    let err = crate::ast::inject_filter(&mut upsert, "title", ComparisonOp::Gt, Value::Int(1))
+        .unwrap_err();
+    assert_eq!(err.code, "QQL-VALIDATION-FILTER-INJECT");
+    assert!(
+        err.message
+            .contains("inject_filter into UPSERT requires Eq"),
+        "{}",
+        err.message
+    );
+
+    let mut upsert_id = Parser::parse("UPSERT INTO docs VALUES {id: 1, title: 'a'};").unwrap();
+    let err = crate::ast::inject_filter(&mut upsert_id, "id", ComparisonOp::Eq, Value::Int(2))
+        .unwrap_err();
+    assert_eq!(err.code, "QQL-VALIDATION-FILTER-INJECT");
+    assert!(
+        err.message.contains("non-id payload field"),
+        "{}",
+        err.message
+    );
+}
+
+#[test]
+fn inject_recurses_into_inline_prefetch_query() {
+    let mut s = Parser::parse(
+        "QUERY FUSION RRF FROM docs PREFETCH (QUERY TEXT 'x' FROM docs LIMIT 10) LIMIT 5;",
+    )
+    .unwrap();
+    let (op, value) = tenant_eq();
+    crate::ast::inject_filter(&mut s, "tenant", op, value).unwrap();
+    let Stmt::Query(q) = s else { panic!() };
+    assert!(q.filter.is_some());
+    let QueryExpr::Fusion { prefetch, .. } = q.expression else {
+        panic!("expected fusion");
+    };
+    assert!(prefetch[0].filter.is_some());
+}
+
+#[test]
+fn parse_inject_op_is_case_insensitive() {
+    use crate::ast::ComparisonOp;
+    assert_eq!(
+        ComparisonOp::parse_inject_op("EQ").unwrap(),
+        ComparisonOp::Eq
+    );
+    assert_eq!(
+        ComparisonOp::parse_inject_op(" Gt ").unwrap(),
+        ComparisonOp::Gt
+    );
+    assert_eq!(
+        ComparisonOp::parse_inject_op("GTE").unwrap(),
+        ComparisonOp::Gte
+    );
+    let err = ComparisonOp::parse_inject_op("!=").unwrap_err();
+    assert_eq!(err.code, "QQL-VALIDATION-FILTER-INJECT");
+    assert!(err.message.contains("wrap with NOT"));
+    let err = ComparisonOp::parse_inject_op("bogus").unwrap_err();
+    assert_eq!(err.code, "QQL-VALIDATION-FILTER-INJECT");
 }

@@ -45,19 +45,14 @@ pub const MAX_STATEMENTS: usize = 256;
 
 pub(crate) fn syntax_err(
     message: impl Into<alloc::borrow::Cow<'static, str>>,
-    pos: usize,
+    span: Span,
 ) -> QqlError {
-    QqlError::parse("QQL-PARSE-SYNTAX", message, Span::point(pos))
+    QqlError::parse("QQL-PARSE-SYNTAX", message, span)
 }
 
-/// Returns true when `s` equals `upper`, ignoring ASCII case.
-pub fn ascii_equal(s: &str, upper: &str) -> bool {
-    s.eq_ignore_ascii_case(upper)
-}
-
-/// Returns true when `s` equals `lower`, ignoring ASCII case.
-pub fn ascii_equal_lower(s: &str, lower: &str) -> bool {
-    s.eq_ignore_ascii_case(lower)
+/// Returns true when `s` equals `other`, ignoring ASCII case.
+pub fn ascii_equal(s: &str, other: &str) -> bool {
+    s.eq_ignore_ascii_case(other)
 }
 
 /// Returns true when a token kind can serve as a contextual field name.
@@ -272,11 +267,15 @@ impl<'a> AstLowerer<'a> {
 
     // ── Identifier parsing ──────────────────────────────────────
 
-    pub fn parse_identifier_str(&mut self) -> Result<&'a str, QqlError> {
+    pub fn parse_identifier_str(&mut self) -> Result<String, QqlError> {
         let tok = self.peek()?;
-        if tok.is_keyword_or_identifier() || tok.kind == TokenKind::String {
+        if tok.kind == TokenKind::String {
             self.advance()?;
-            Ok(tok.text)
+            return self.decode_string(tok);
+        }
+        if tok.is_keyword_or_identifier() {
+            self.advance()?;
+            Ok(tok.text.to_string())
         } else {
             Err(QqlError::parse(
                 "QQL-PARSE-IDENTIFIER",
@@ -287,7 +286,7 @@ impl<'a> AstLowerer<'a> {
     }
 
     pub fn parse_identifier(&mut self) -> Result<String, QqlError> {
-        self.parse_identifier_str().map(String::from)
+        self.parse_identifier_str()
     }
 
     // ── Value parsing ───────────────────────────────────────────
@@ -301,34 +300,31 @@ impl<'a> AstLowerer<'a> {
             }
             TokenKind::Float => {
                 self.advance()?;
-                let v: f64 = tok.text.parse().map_err(|_| {
-                    QqlError::parse(
-                        "QQL-PARSE-FLOAT",
-                        alloc::format!("invalid float literal '{}'", tok.text),
-                        tok.span,
-                    )
-                })?;
-                // grammar.pest `float` can only denote finite values; an
-                // exponent overflow like `1e999` must not become inf/NaN.
-                if !v.is_finite() {
-                    return Err(QqlError::parse(
-                        "QQL-PARSE-FLOAT",
-                        alloc::format!("float literal '{}' is not finite", tok.text),
-                        tok.span,
-                    ));
+                // `FLOAT` is also a field-type keyword mapped onto this kind.
+                // Numeric text is a float; the keyword spelling is a string.
+                if let Ok(v) = tok.text.parse::<f64>() {
+                    // grammar.pest `float` can only denote finite values; an
+                    // exponent overflow like `1e999` must not become inf/NaN.
+                    if !v.is_finite() {
+                        return Err(QqlError::parse(
+                            "QQL-PARSE-FLOAT",
+                            alloc::format!("float literal '{}' is not finite", tok.text),
+                            tok.span,
+                        ));
+                    }
+                    Ok(crate::ast::Value::Float(v))
+                } else {
+                    Ok(crate::ast::Value::Str(tok.text.to_string()))
                 }
-                Ok(crate::ast::Value::Float(v))
             }
             TokenKind::Integer => {
                 self.advance()?;
-                let v: i64 = tok.text.parse().map_err(|_| {
-                    QqlError::parse(
-                        "QQL-PARSE-INTEGER",
-                        alloc::format!("invalid integer literal '{}'", tok.text),
-                        tok.span,
-                    )
-                })?;
-                Ok(crate::ast::Value::Int(v))
+                // `INTEGER` is also a field-type keyword mapped onto this kind.
+                if let Ok(v) = tok.text.parse::<i64>() {
+                    Ok(crate::ast::Value::Int(v))
+                } else {
+                    Ok(crate::ast::Value::Str(tok.text.to_string()))
+                }
             }
             TokenKind::Null => {
                 self.advance()?;
@@ -343,16 +339,9 @@ impl<'a> AstLowerer<'a> {
                 Ok(crate::ast::Value::Bool(false))
             }
             kind if kind.is_keyword_or_identifier() => {
+                // Bare TRUE/FALSE/NULL always lex to dedicated kinds above.
                 self.advance()?;
-                if ascii_equal(tok.text, "TRUE") {
-                    Ok(crate::ast::Value::Bool(true))
-                } else if ascii_equal(tok.text, "FALSE") {
-                    Ok(crate::ast::Value::Bool(false))
-                } else if ascii_equal(tok.text, "NULL") {
-                    Ok(crate::ast::Value::Null)
-                } else {
-                    Ok(crate::ast::Value::Str(tok.text.to_string()))
-                }
+                Ok(crate::ast::Value::Str(tok.text.to_string()))
             }
             TokenKind::Colon => {
                 let colon_tok = self.advance()?;

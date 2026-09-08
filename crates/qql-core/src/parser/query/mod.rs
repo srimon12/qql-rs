@@ -8,7 +8,7 @@ use crate::ast::{
     Cte, GroupSpec, PageSpec, QueryCollection, QueryOutput, QueryStmt, Stmt, VectorKind,
     VectorTarget,
 };
-use crate::error::{QqlError, Span};
+use crate::error::QqlError;
 use crate::token::TokenKind;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -179,18 +179,8 @@ impl<'a> AstLowerer<'a> {
 
         let (limit, limit_param, limit_span) = if self.peek()?.kind == TokenKind::Limit {
             self.advance()?;
-            if self.peek()?.kind == TokenKind::Colon {
-                let colon_tok = self.advance()?;
-                let name = self.parse_param_name()?;
-                (
-                    None,
-                    Some(name),
-                    Some(Span::new(colon_tok.span.start, self.prev_span().end)),
-                )
-            } else if self.peek()?.kind == TokenKind::Question {
-                let q_tok = self.advance()?;
-                let idx = self.next_positional_param();
-                (None, Some(alloc::format!("?{}", idx)), Some(q_tok.span))
+            if let Some((param, span)) = self.parse_placeholder_param()? {
+                (None, Some(param), Some(span))
             } else {
                 (Some(self.parse_positive_u64("LIMIT")?), None, None)
             }
@@ -200,18 +190,8 @@ impl<'a> AstLowerer<'a> {
 
         let (offset, offset_param, offset_span) = if self.peek()?.kind == TokenKind::Offset {
             self.advance()?;
-            if self.peek()?.kind == TokenKind::Colon {
-                let colon_tok = self.advance()?;
-                let name = self.parse_param_name()?;
-                (
-                    None,
-                    Some(name),
-                    Some(Span::new(colon_tok.span.start, self.prev_span().end)),
-                )
-            } else if self.peek()?.kind == TokenKind::Question {
-                let q_tok = self.advance()?;
-                let idx = self.next_positional_param();
-                (None, Some(alloc::format!("?{}", idx)), Some(q_tok.span))
+            if let Some((param, span)) = self.parse_placeholder_param()? {
+                (None, Some(param), Some(span))
             } else {
                 (Some(self.parse_non_negative_u64("OFFSET")?), None, None)
             }

@@ -22,11 +22,13 @@ pub enum ComparisonOp {
 impl ComparisonOp {
     /// Parse a host-language comparison operator string for
     /// [`inject_filter`](crate::ast::inject_filter) (`=`, `==`, `eq`, `>`,
-    /// `gt`, …). `!=` / `neq` / `<>` are rejected with guidance to inject
-    /// equality and wrap with `NOT`; the single source of this contract lives
-    /// here so every binding surfaces the same message and code.
+    /// `gt`, …). Matching is ASCII-case-insensitive and trims surrounding
+    /// whitespace (`"EQ"`, `" Gt "`). `!=` / `neq` / `<>` are rejected with
+    /// guidance to inject equality and wrap with `NOT`; the single source of
+    /// this contract lives here so every binding surfaces the same message
+    /// and code.
     pub fn parse_inject_op(op: &str) -> Result<Self, crate::error::QqlError> {
-        match op {
+        match op.trim().to_ascii_lowercase().as_str() {
             "=" | "==" | "eq" => Ok(Self::Eq),
             ">" | "gt" => Ok(Self::Gt),
             ">=" | "gte" => Ok(Self::Gte),

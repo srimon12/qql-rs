@@ -24,6 +24,13 @@ impl<'a> AstLowerer<'a> {
         self.expect(TokenKind::Collection)?;
         let collection = self.parse_identifier()?;
         let config = self.parse_collection_config_blocks(true)?;
+        if config.is_none() {
+            return Err(QqlError::parse(
+                "QQL-PARSE-ALTER-CONFIG",
+                "ALTER COLLECTION requires at least one WITH clause",
+                self.peek()?.span,
+            ));
+        }
         Ok(Stmt::AlterCollection(Box::new(AlterCollectionStmt {
             collection,
             config,
@@ -165,10 +172,10 @@ impl<'a> AstLowerer<'a> {
         }
         let mut options = Vec::new();
         if self.peek()?.kind == TokenKind::With {
-            let pos = self.peek()?.pos;
+            let span = self.peek()?.span;
             self.advance()?;
             options = self.parse_config_block()?;
-            super::validate_index_options(&options, pos)?;
+            super::validate_index_options(&options, span)?;
         }
         let wait = self.parse_optional_wait()?;
         Ok(Stmt::CreateIndex(Box::new(CreateIndexStmt {

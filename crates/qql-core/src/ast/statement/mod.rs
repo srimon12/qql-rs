@@ -103,7 +103,7 @@ impl serde::Serialize for Stmt {
             // form `"ShowCollections"`, so serde round-trips.
             Stmt::ShowCollections => {
                 let mut map = serializer.serialize_map(Some(1))?;
-                let empty = std::collections::BTreeMap::<String, String>::new();
+                let empty = alloc::collections::BTreeMap::<String, String>::new();
                 map.serialize_entry("ShowCollections", &empty)?;
                 map.end()
             }
@@ -133,7 +133,7 @@ impl serde::Serialize for Stmt {
             Stmt::Facet(s) => serializer.serialize_newtype_variant("Stmt", 20, "Facet", s),
             Stmt::ShowQuotas => {
                 let mut map = serializer.serialize_map(Some(1))?;
-                let empty = std::collections::BTreeMap::<String, String>::new();
+                let empty = alloc::collections::BTreeMap::<String, String>::new();
                 map.serialize_entry("ShowQuotas", &empty)?;
                 map.end()
             }

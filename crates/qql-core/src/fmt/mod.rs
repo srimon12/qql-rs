@@ -22,7 +22,8 @@ pub(crate) mod query_expr;
 #[cfg(test)]
 mod tests;
 
-pub use expr::render_filter;
+pub use filter::render_filter;
+pub(crate) use mutation::render_point_selector;
 pub(crate) use query::render_search_params;
 
 use crate::ast::Stmt;

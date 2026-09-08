@@ -624,11 +624,17 @@ gen_as_str! {
 include!("keywords.generated.rs");
 
 impl TokenKind {
-    /// Returns true for every kind except string, punctuation, and end-of-input tokens.
+    /// Returns true for keyword and identifier kinds.
+    ///
+    /// Numeric kinds (`Integer` / `Float`) are excluded here: the word
+    /// spellings `FLOAT` / `INTEGER` (field-type keywords mapped onto those
+    /// kinds) are recovered by [`Token::is_keyword_or_identifier`].
     pub fn is_keyword_or_identifier(&self) -> bool {
         !matches!(
             self,
             Self::String
+                | Self::Integer
+                | Self::Float
                 | Self::Lbrace
                 | Self::Rbrace
                 | Self::Lbracket
@@ -645,6 +651,7 @@ impl TokenKind {
                 | Self::Lte
                 | Self::Plus
                 | Self::Minus
+                | Self::Star
                 | Self::Slash
                 | Self::Semicolon
                 | Self::Question
@@ -695,35 +702,18 @@ impl<'a> Token<'a> {
     }
 
     /// Returns true when this token can stand in for a keyword or identifier.
+    ///
+    /// `FLOAT` / `INTEGER` field-type keywords share kinds with numeric
+    /// literals; they count as identifiers only when the source text starts
+    /// with a letter.
     pub fn is_keyword_or_identifier(&self) -> bool {
         match self.kind {
-            TokenKind::String
-            | TokenKind::Lbrace
-            | TokenKind::Rbrace
-            | TokenKind::Lbracket
-            | TokenKind::Rbracket
-            | TokenKind::Lparen
-            | TokenKind::Rparen
-            | TokenKind::Colon
-            | TokenKind::Comma
-            | TokenKind::Equals
-            | TokenKind::NotEquals
-            | TokenKind::Gt
-            | TokenKind::Gte
-            | TokenKind::Lt
-            | TokenKind::Lte
-            | TokenKind::Plus
-            | TokenKind::Minus
-            | TokenKind::Slash
-            | TokenKind::Semicolon
-            | TokenKind::Question
-            | TokenKind::Eof => false,
             TokenKind::Integer | TokenKind::Float => self
                 .text
                 .bytes()
                 .next()
                 .is_some_and(|b| b.is_ascii_alphabetic()),
-            _ => true,
+            other => other.is_keyword_or_identifier(),
         }
     }
 }

@@ -8,22 +8,16 @@ use crate::ast::{
 use crate::error::{QqlError, Span};
 use crate::token::TokenKind;
 
+use super::config_validation::is_integer_val;
 use super::{
-    AstLowerer, ascii_equal, ascii_equal_lower, config_bool, config_float_range, config_has_key,
+    AstLowerer, ascii_equal, config_bool, config_float_range, config_has_key,
     config_max_optimization_threads, config_non_negative_u64, config_positive_u64, config_value,
-    merge_collection_config, syntax_err, validate_hnsw_value, validate_optimizers_value,
-    validate_params_value, validate_vectors_value,
+    merge_collection_config, validate_hnsw_value, validate_optimizers_value, validate_params_value,
+    validate_vectors_value,
 };
 
-fn validation_err(
-    message: impl Into<alloc::borrow::Cow<'static, str>>,
-    position: usize,
-) -> QqlError {
-    QqlError::validation(
-        "QQL-VALIDATION-CONFIG",
-        message,
-        Some(Span::point(position)),
-    )
+fn validation_err(message: impl Into<alloc::borrow::Cow<'static, str>>, span: Span) -> QqlError {
+    QqlError::validation("QQL-VALIDATION-CONFIG", message, Some(span))
 }
 
 /// Parse a `memory = 'cold' | 'cached' | 'pinned'` placement value.
@@ -35,7 +29,7 @@ fn validation_err(
 fn config_memory(
     config: &[(alloc::string::String, Value)],
     key: &str,
-    pos: usize,
+    span: Span,
     allow_pinned: bool,
 ) -> Result<Option<MemoryPlacement>, QqlError> {
     match config_value(config, key) {
@@ -43,35 +37,35 @@ fn config_memory(
         Some(Value::Str(s)) => match MemoryPlacement::parse(s) {
             Some(MemoryPlacement::Pinned) if !allow_pinned => Err(validation_err(
                 alloc::format!("{key} does not support 'pinned'"),
-                pos,
+                span,
             )),
             Some(m) => Ok(Some(m)),
             None => Err(validation_err(
                 alloc::format!("{key} must be 'cold', 'cached', or 'pinned', got '{s}'"),
-                pos,
+                span,
             )),
         },
         Some(_) => Err(validation_err(
             alloc::format!("{key} must be a string ('cold', 'cached', or 'pinned')"),
-            pos,
+            span,
         )),
     }
 }
 
 fn config_dense_datatype(
     config: &[(alloc::string::String, Value)],
-    pos: usize,
+    span: Span,
 ) -> Result<Option<VectorDatatype>, QqlError> {
     match config_value(config, "datatype") {
         None => Ok(None),
         Some(Value::Str(s)) => match VectorDatatype::parse(s) {
             Some(dt) => Ok(Some(dt)),
-            None => Err(syntax_err(
+            None => Err(validation_err(
                 "datatype must be float32, float16, uint8, or turbo4 for VECTOR",
-                pos,
+                span,
             )),
         },
-        Some(_) => Err(syntax_err("datatype must be a string for VECTOR", pos)),
+        Some(_) => Err(validation_err("datatype must be a string for VECTOR", span)),
     }
 }
 
@@ -88,7 +82,7 @@ impl<'a> AstLowerer<'a> {
             let block = self.parse_collection_config_clause(for_alter)?;
             match &mut config {
                 None => config = Some(block),
-                Some(c) => merge_collection_config(c, block, self.peek()?.pos)?,
+                Some(c) => merge_collection_config(c, block, self.peek()?.span)?,
             }
         }
         Ok(config.map(Box::new))
@@ -129,7 +123,7 @@ impl<'a> AstLowerer<'a> {
                     "expected HNSW, VECTOR, OPTIMIZERS, PARAMS, or QUANTIZATION after WITH, got '{}'",
                     tok.text
                 ),
-                tok.pos,
+                tok.span,
             )),
         }
     }
@@ -153,27 +147,34 @@ impl<'a> AstLowerer<'a> {
                             "unknown HNSW parameter '{}'. Expected: m, ef_construct, full_scan_threshold, max_indexing_threads, on_disk, payload_m, inline_storage, memory",
                             key
                         ),
-                        self.peek()?.pos,
+                        self.peek()?.span,
                     ));
                 }
             }
-            validate_hnsw_value(key, value, self.peek()?.pos)?;
+            validate_hnsw_value(key, value, self.peek()?.span)?;
         }
 
-        if let Some(Value::Int(n)) = config_value(&config, "m")
-            && *n != 0
-            && *n < 4
-        {
-            return Err(validation_err("m must be 0 or >= 4", self.peek()?.pos));
+        if let Some(value) = config_value(&config, "m") {
+            let m = match value {
+                Value::Int(n) => Some(*n),
+                Value::Float(f) if is_integer_val(value) => Some(*f as i64),
+                _ => None,
+            };
+            if let Some(n) = m
+                && n != 0
+                && n < 4
+            {
+                return Err(validation_err("m must be 0 or >= 4", self.peek()?.span));
+            }
         }
 
-        let m_val = config_non_negative_u64(&config, "m", self.peek()?.pos)?;
-        let ef_construct = config_positive_u64(&config, "ef_construct", self.peek()?.pos)?;
+        let m_val = config_non_negative_u64(&config, "m", self.peek()?.span)?;
+        let ef_construct = config_positive_u64(&config, "ef_construct", self.peek()?.span)?;
         let full_scan_threshold =
-            config_non_negative_u64(&config, "full_scan_threshold", self.peek()?.pos)?;
+            config_non_negative_u64(&config, "full_scan_threshold", self.peek()?.span)?;
         let max_indexing_threads =
-            config_positive_u64(&config, "max_indexing_threads", self.peek()?.pos)?;
-        let payload_m = config_positive_u64(&config, "payload_m", self.peek()?.pos)?;
+            config_positive_u64(&config, "max_indexing_threads", self.peek()?.span)?;
+        let payload_m = config_positive_u64(&config, "payload_m", self.peek()?.span)?;
 
         Ok(CollectionConfig {
             vectors: None,
@@ -185,7 +186,7 @@ impl<'a> AstLowerer<'a> {
                 on_disk: config_bool(&config, "on_disk"),
                 payload_m,
                 inline_storage: config_bool(&config, "inline_storage"),
-                memory: config_memory(&config, "memory", self.peek()?.pos, true)?,
+                memory: config_memory(&config, "memory", self.peek()?.span, true)?,
             })),
             optimizers: None,
             params: None,
@@ -201,21 +202,21 @@ impl<'a> AstLowerer<'a> {
                 key.to_ascii_lowercase().as_str(),
                 "on_disk" | "memory" | "datatype"
             ) {
-                return Err(syntax_err(
+                return Err(validation_err(
                     alloc::format!(
                         "unknown VECTOR parameter '{}'. Expected: on_disk, memory, datatype",
                         key
                     ),
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 ));
             }
-            validate_vectors_value(key, value, self.peek()?.pos)?;
+            validate_vectors_value(key, value, self.peek()?.span)?;
         }
         Ok(CollectionConfig {
             vectors: Some(Box::new(VectorsConfig {
                 on_disk: config_bool(&config, "on_disk"),
-                memory: config_memory(&config, "memory", self.peek()?.pos, true)?,
-                datatype: config_dense_datatype(&config, self.peek()?.pos)?,
+                memory: config_memory(&config, "memory", self.peek()?.span, true)?,
+                datatype: config_dense_datatype(&config, self.peek()?.span)?,
             })),
             hnsw: None,
             optimizers: None,
@@ -240,32 +241,32 @@ impl<'a> AstLowerer<'a> {
                 | "max_optimization_threads"
                 | "prevent_unoptimized" => {}
                 _ => {
-                    return Err(syntax_err(
+                    return Err(validation_err(
                         alloc::format!(
                             "unknown OPTIMIZERS parameter '{}'. Expected: deleted_threshold, vacuum_min_vector_number, default_segment_number, max_segment_size, memmap_threshold, indexing_threshold, flush_interval_sec, max_optimization_threads, prevent_unoptimized",
                             key
                         ),
-                        self.peek()?.pos,
+                        self.peek()?.span,
                     ));
                 }
             }
-            validate_optimizers_value(key, value, self.peek()?.pos)?;
+            validate_optimizers_value(key, value, self.peek()?.span)?;
 
             if lower.as_str() == "deleted_threshold" {
-                super::check_deleted_threshold(value, self.peek()?.pos)?;
+                super::check_deleted_threshold(value, self.peek()?.span)?;
             }
             if lower.as_str() == "max_optimization_threads" {
                 match value {
                     Value::Int(n) if *n <= 0 => {
-                        return Err(syntax_err(
+                        return Err(validation_err(
                             "max_optimization_threads must be a positive integer or 'auto'",
-                            self.peek()?.pos,
+                            self.peek()?.span,
                         ));
                     }
-                    Value::Str(s) if !ascii_equal_lower(s, "auto") => {
-                        return Err(syntax_err(
+                    Value::Str(s) if !ascii_equal(s, "auto") => {
+                        return Err(validation_err(
                             "max_optimization_threads must be a positive integer or 'auto'",
-                            self.peek()?.pos,
+                            self.peek()?.span,
                         ));
                     }
                     _ => {}
@@ -281,32 +282,32 @@ impl<'a> AstLowerer<'a> {
                 vacuum_min_vector_number: config_positive_u64(
                     &config,
                     "vacuum_min_vector_number",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 )?,
                 default_segment_number: config_positive_u64(
                     &config,
                     "default_segment_number",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 )?,
                 max_segment_size: config_positive_u64(
                     &config,
                     "max_segment_size",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 )?,
                 memmap_threshold: config_non_negative_u64(
                     &config,
                     "memmap_threshold",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 )?,
                 indexing_threshold: config_non_negative_u64(
                     &config,
                     "indexing_threshold",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 )?,
                 flush_interval_sec: config_positive_u64(
                     &config,
                     "flush_interval_sec",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 )?,
                 max_optimization_threads: config_max_optimization_threads(
                     &config,
@@ -343,11 +344,11 @@ impl<'a> AstLowerer<'a> {
                             "unknown PARAMS parameter '{}'. Expected: replication_factor, write_consistency_factor, read_fan_out_factor, read_fan_out_delay_ms, on_disk_payload, payload_memory, shard_number, sharding_method, shard_keys",
                             key
                         ),
-                        self.peek()?.pos,
+                        self.peek()?.span,
                     ));
                 }
             }
-            validate_params_value(key, value, self.peek()?.pos)?;
+            validate_params_value(key, value, self.peek()?.span)?;
         }
 
         if !for_alter
@@ -356,7 +357,7 @@ impl<'a> AstLowerer<'a> {
         {
             return Err(validation_err(
                 "WITH PARAMS (read_fan_out_factor, read_fan_out_delay_ms) is supported only for ALTER COLLECTION",
-                self.peek()?.pos,
+                self.peek()?.span,
             ));
         }
 
@@ -368,32 +369,32 @@ impl<'a> AstLowerer<'a> {
                 replication_factor: config_positive_u64(
                     &config,
                     "replication_factor",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 )?,
                 write_consistency_factor: config_positive_u64(
                     &config,
                     "write_consistency_factor",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 )?,
                 read_fan_out_factor: config_positive_u64(
                     &config,
                     "read_fan_out_factor",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 )?,
                 read_fan_out_delay_ms: config_non_negative_u64(
                     &config,
                     "read_fan_out_delay_ms",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 )?,
                 on_disk_payload: config_bool(&config, "on_disk_payload"),
-                payload_memory: config_memory(&config, "payload_memory", self.peek()?.pos, false)?,
-                shard_number: config_positive_u64(&config, "shard_number", self.peek()?.pos)?,
+                payload_memory: config_memory(&config, "payload_memory", self.peek()?.span, false)?,
+                shard_number: config_positive_u64(&config, "shard_number", self.peek()?.span)?,
                 sharding_method: match config_value(&config, "sharding_method") {
                     Some(Value::Str(s)) => Some(s.clone()),
                     Some(_) => {
                         return Err(validation_err(
                             "sharding_method must be a string ('auto' or 'custom')",
-                            self.peek()?.pos,
+                            self.peek()?.span,
                         ));
                     }
                     None => None,
@@ -407,7 +408,7 @@ impl<'a> AstLowerer<'a> {
                                 _ => {
                                     return Err(validation_err(
                                         "shard_keys entries must all be strings",
-                                        self.peek()?.pos,
+                                        self.peek()?.span,
                                     ));
                                 }
                             }
@@ -415,7 +416,7 @@ impl<'a> AstLowerer<'a> {
                         if keys.is_empty() {
                             return Err(validation_err(
                                 "shard_keys must be a non-empty list of strings",
-                                self.peek()?.pos,
+                                self.peek()?.span,
                             ));
                         }
                         Some(keys)
@@ -423,7 +424,7 @@ impl<'a> AstLowerer<'a> {
                     Some(_) => {
                         return Err(validation_err(
                             "shard_keys must be a list of strings",
-                            self.peek()?.pos,
+                            self.peek()?.span,
                         ));
                     }
                     None => None,
@@ -453,20 +454,20 @@ impl<'a> AstLowerer<'a> {
             });
         }
 
-        let err_pos = self.peek()?.pos;
+        let err_span = self.peek()?.span;
         let type_raw = config_value(&config, "type").ok_or_else(|| {
-            syntax_err(
+            validation_err(
                 "QUANTIZATION config requires a 'type' (scalar, binary, product, turbo)",
-                err_pos,
+                err_span,
             )
         })?;
 
         let type_str = match type_raw {
             Value::Str(s) => s,
             _ => {
-                return Err(syntax_err(
+                return Err(validation_err(
                     "QUANTIZATION 'type' must be a string",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 ));
             }
         };
@@ -477,12 +478,12 @@ impl<'a> AstLowerer<'a> {
             "product" => QuantizationType::Product,
             "turbo" => QuantizationType::Turbo,
             _ => {
-                return Err(syntax_err(
+                return Err(validation_err(
                     alloc::format!(
                         "unknown QUANTIZATION type '{}'. Expected scalar, binary, product, turbo",
                         type_str
                     ),
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 ));
             }
         };
@@ -493,9 +494,9 @@ impl<'a> AstLowerer<'a> {
         if qtype == QuantizationType::Scalar && config_has_key(&config, "quantile") {
             quantile = config_float_range(&config, "quantile", 0.0, 1.0);
             if quantile.is_none() {
-                return Err(syntax_err(
+                return Err(validation_err(
                     "quantile must be between 0.0 and 1.0",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 ));
             }
         }
@@ -511,9 +512,9 @@ impl<'a> AstLowerer<'a> {
             };
             if let Some(b) = bits_val {
                 if b != 1.0 && b != 1.5 && b != 2.0 && b != 4.0 {
-                    return Err(syntax_err(
+                    return Err(validation_err(
                         "bits must be one of 1, 1.5, 2, or 4 for TURBO quantization",
-                        self.peek()?.pos,
+                        self.peek()?.span,
                     ));
                 }
                 bits = Some(b);
@@ -528,9 +529,9 @@ impl<'a> AstLowerer<'a> {
             if matches!(c_lower.as_str(), "x4" | "x8" | "x16" | "x32" | "x64") {
                 compression = Some(c_lower);
             } else {
-                return Err(syntax_err(
+                return Err(validation_err(
                     "compression must be x4, x8, x16, x32, or x64 for PRODUCT quantization",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 ));
             }
         }
@@ -552,9 +553,9 @@ impl<'a> AstLowerer<'a> {
                         }
                     }
                     _ => {
-                        return Err(syntax_err(
+                        return Err(validation_err(
                             "encoding must be a string or number for BINARY quantization",
-                            self.peek()?.pos,
+                            self.peek()?.span,
                         ));
                     }
                 };
@@ -564,9 +565,9 @@ impl<'a> AstLowerer<'a> {
                     "two_bits" | "twobits" | "2" => "two_bits".into(),
                     "one_and_half_bits" | "oneandhalfbits" | "1.5" => "one_and_half_bits".into(),
                     _ => {
-                        return Err(syntax_err(
+                        return Err(validation_err(
                             "encoding must be one_bit (1), two_bits (2), or one_and_half_bits (1.5) for BINARY quantization",
-                            self.peek()?.pos,
+                            self.peek()?.span,
                         ));
                     }
                 });
@@ -580,9 +581,9 @@ impl<'a> AstLowerer<'a> {
                 ) {
                     query_encoding = Some(qe_lower);
                 } else {
-                    return Err(syntax_err(
+                    return Err(validation_err(
                         "query_encoding must be default, binary, scalar4bits, or scalar8bits for BINARY quantization",
-                        self.peek()?.pos,
+                        self.peek()?.span,
                     ));
                 }
             }
@@ -596,7 +597,7 @@ impl<'a> AstLowerer<'a> {
             compression,
             encoding,
             query_encoding,
-            memory: config_memory(&config, "memory", self.peek()?.pos, true)?,
+            memory: config_memory(&config, "memory", self.peek()?.span, true)?,
         };
 
         Ok(CollectionConfig {
@@ -614,25 +615,25 @@ impl<'a> AstLowerer<'a> {
 
     pub fn parse_multivector_config_block(&mut self) -> Result<MultivectorConfig, QqlError> {
         let config = self.parse_config_block()?;
-        let err_pos = self.peek()?.pos;
+        let err_span = self.peek()?.span;
         let comp = config_value(&config, "comparator")
-            .ok_or_else(|| syntax_err("MULTIVECTOR config requires 'comparator'", err_pos))?;
+            .ok_or_else(|| validation_err("MULTIVECTOR config requires 'comparator'", err_span))?;
         let comparator = match comp {
             Value::Str(s) => s.to_ascii_lowercase(),
             _ => {
-                return Err(syntax_err(
+                return Err(validation_err(
                     "MULTIVECTOR comparator must be a string",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 ));
             }
         };
         if comparator != "max_sim" {
-            return Err(syntax_err(
+            return Err(validation_err(
                 alloc::format!(
                     "MULTIVECTOR comparator must be 'max_sim', got '{}'",
                     comparator
                 ),
-                self.peek()?.pos,
+                self.peek()?.span,
             ));
         }
         Ok(MultivectorConfig {
@@ -650,12 +651,12 @@ impl<'a> AstLowerer<'a> {
                 lower.as_str(),
                 "modifier" | "full_scan_threshold" | "on_disk" | "datatype" | "memory"
             ) {
-                return Err(syntax_err(
+                return Err(validation_err(
                     alloc::format!(
                         "unknown SPARSE/INDEX parameter '{}'. Expected: modifier, full_scan_threshold, on_disk, datatype, memory",
                         key
                     ),
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 ));
             }
         }
@@ -666,14 +667,14 @@ impl<'a> AstLowerer<'a> {
             if matches!(m_lower.as_str(), "none" | "idf") {
                 modifier = Some(m_lower);
             } else {
-                return Err(syntax_err(
+                return Err(validation_err(
                     "modifier must be none or idf for SPARSE vector",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 ));
             }
         }
         let full_scan_threshold =
-            config_non_negative_u64(&config, "full_scan_threshold", self.peek()?.pos)?;
+            config_non_negative_u64(&config, "full_scan_threshold", self.peek()?.span)?;
         let on_disk = config_bool(&config, "on_disk");
         // `default` (and omitting the key) both mean "backend default" → None.
         let datatype = match config_value(&config, "datatype") {
@@ -681,16 +682,16 @@ impl<'a> AstLowerer<'a> {
             Some(Value::Str(s)) => match VectorDatatype::parse_sparse(s) {
                 Some(dt) => Some(dt),
                 None => {
-                    return Err(syntax_err(
+                    return Err(validation_err(
                         "datatype must be float32, uint8, float16, or default for SPARSE index",
-                        self.peek()?.pos,
+                        self.peek()?.span,
                     ));
                 }
             },
             Some(_) => {
-                return Err(syntax_err(
+                return Err(validation_err(
                     "datatype must be a string for SPARSE index",
-                    self.peek()?.pos,
+                    self.peek()?.span,
                 ));
             }
             None => None,
@@ -705,7 +706,7 @@ impl<'a> AstLowerer<'a> {
                 full_scan_threshold,
                 on_disk,
                 datatype,
-                memory: config_memory(&config, "memory", self.peek()?.pos, true)?,
+                memory: config_memory(&config, "memory", self.peek()?.span, true)?,
             }))
         } else {
             None

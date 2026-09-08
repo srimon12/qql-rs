@@ -86,9 +86,9 @@ Canonical plan is `PlannedOperation` (transport-neutral). `Route { method, path,
 
 * **`qql-plan`**: Transport-neutral lowering layer. Contains the fallible planner `plan()` returning `PlannedOperation`, typed filter/query/mutation/DDL types (`PlanPointId`, `PlanVectorValue`, `PlanQueryInput`), and `to_rest_route()` for the **optional** REST projection. Also provides `BatchKey` + `statement_batch_key()` + `PlannedOperation::batch_key()` for executor sharing (Rust + WASM). `Route` and `RequestBody` are REST-specific. Depends ONLY on `qql-core`. No networking, no tokio, no reqwest.
 
-* **`qql-embed`**: Shared embedding layer. `Embedder` trait (`embed_dense` / `embed_sparse_query` / `embed_sparse_document` / `embed_multi`), local wire-compatible BM25 (murmur3-32 token IDs, word tokenizer, English stopwords + snowball stemming — byte-identical to Qdrant's `qdrant/bm25`; queries embed unit weights, documents tf saturation), `resolve_query_vector_kinds` (schema topology → dense/sparse/multi flags), and `resolve_embeddings` (TEXT → Dense | Sparse | MultiDense). Unknown `USING` kinds fail closed (`QQL-VECTOR-KIND`). No Qdrant I/O. Used by runtime (`HttpEmbedder`), edge (`FastEmbedder`), and wasm (fetch/JS adapters).
+* **`qql-embed`**: Shared embedding layer. Wide host-agnostic `Embedder` trait (dense/sparse/multi/image/rerank plus batch variants; reject-by-default for opt-in modalities). Local BM25 is wire-compatible with Qdrant's `qdrant/bm25` (murmur3-32 token IDs, word tokenizer, English stopwords + snowball stemming; queries embed unit weights, documents tf saturation) except murmur3-collision counting, which has no cross-impl contract. `resolve_query_vector_kinds` (schema topology → dense/sparse/multi flags) and `resolve_embeddings` (TEXT → Dense | Sparse | MultiDense, batch dense by model). Unknown `USING` kinds fail closed (`QQL-VECTOR-KIND`). Unknown names with an already-declared `AS` kind are kept for offline / empty mock schemas. No Qdrant I/O. Used by runtime (`HttpEmbedder`), edge (`FastEmbedder`), and wasm (fetch/JS adapters).
 
-* **`qql-runtime`**: The executor and transport adapters. Package name is `qql`. The `Executor` holds a `Box<dyn QdrantOps>` (single unified trait with 11 methods) and optional `Embedder`. Calls `prepare_statement` (**schema vector resolution first**, then embeddings, then upsert schema prep) → `plan()` → batch classification / dispatch. DDL flows through `plan()` → REST projection → `execute_route()` or `execute_grpc_route()`. Features: `default = ["grpc", "rest"]`, `grpc`, `rest`. Re-exports embed API via `qql::embedder` / `qql::sparse`.
+* **`qql-runtime`**: The executor and transport adapters. Package name is `qql`. The `Executor` holds a `Box<dyn QdrantOps>` (11 required methods plus a defaulted `close()`) and optional `Embedder`. Calls `prepare_statement` (**schema vector resolution first**, then embeddings, then upsert schema prep) → `plan()` → batch classification / dispatch. DDL flows through `plan()` → REST projection → `execute_route()` or `execute_grpc_route()`. Features: `default = ["grpc", "rest"]`, `grpc`, `rest`. Re-exports embed API via `qql::embedder` / `qql::sparse`.
 
 * **`qql-edge`**: In-process vector search using qdrant-edge + optional fastembed-rs. Zero network. Implements `QdrantOps` with batch methods fanning out to individual routes (no native edge batch RPC). Uses `qdrant-edge` 0.7.x.
 
@@ -105,7 +105,7 @@ The following old abstractions have been permanently removed — do NOT reintrod
 - `filter_conv/` — replaced by `qql_plan::filter::lower_filter()`
 - `pipeline/` module — replaced by `qql_plan::types`
 - `QdrantCoreOps` / `QdrantAdminOps` dual-trait — merged into single `QdrantOps`
-- `QueryMode`, `QueryType`, `SearchWith`, `SelectStmt` — replaced by `QueryExpr` enum (12 variants)
+- `QueryMode`, `QueryType`, `SearchWith`, `SelectStmt` — replaced by `QueryExpr` enum (13 variants)
 - `qdrant-client` crate dependency — replaced by raw `tonic` 0.14
 - `SELECT` / `INSERT INTO` keywords — replaced by `QUERY POINTS` / `UPSERT INTO`
 - String filter operators (`"="`, `">"`, etc.) — replaced by `ComparisonOp` enum
@@ -118,12 +118,15 @@ The following old abstractions have been permanently removed — do NOT reintrod
 - `qql-plan/src/embedding.rs` (embedding job extraction) — removed; embeddings are solely owned by `qql-embed`
 - `CollectionSchema` (client.rs) — removed duplicate; backend schema is the only source
 
-### Current QueryExpr Variants (12 total)
+### Current QueryExpr Variants (13 total)
 
 ```
 Points, Nearest, Recommend, Context, Discover, OrderBy,
-SampleRandom, Fusion, Formula, RelevanceFeedback, Hybrid, Rerank
+SampleRandom, Fusion, Formula, RelevanceFeedback, Hybrid, Rerank,
+CrossRerank
 ```
+
+`CrossRerank` is client-side (the executor scores pairs then reorders). It is not a Qdrant `Query` wire variant.
 
 ### Error Model
 
@@ -135,10 +138,12 @@ pub struct Span { start: usize, end: usize }
 
 Error kind is explicit — never inferred from position. No `runtime` constructor.
 
-### QdrantOps Trait (11 methods)
+### QdrantOps Trait (11 required methods + defaulted `close()`)
 
 ```rust
 pub trait QdrantOps: Send + Sync {
+    async fn close(&self) -> Result<(), QqlError> { Ok(()) }
+
     // DDL / metadata
     async fn list_collections(&self) -> Result<Vec<String>, QqlError>;
     async fn collection_exists(&self, name: &str) -> Result<bool, QqlError>;
@@ -160,7 +165,7 @@ pub trait QdrantOps: Send + Sync {
 
 Three implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant`. The gRPC adapter bypasses `execute_route` for DML — it uses `execute_grpc_route()` which converts typed `RequestBody` variants directly to protobuf. For REST, `execute_route` serializes `RequestBody` as JSON.
 
-### Statement → Endpoint Matrix (21 routes)
+### Statement → Endpoint Matrix (25 REST routes)
 
 | QQL Statement | Endpoint | Method |
 |---|---|---|
@@ -173,6 +178,7 @@ Three implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant`. The gRPC adapte
 | `UPSERT ...` | `/points` | PUT |
 | `DELETE ...` | `/points/delete` | POST |
 | `CLEAR PAYLOAD ...` | `/points/payload/clear` | POST |
+| `DELETE PAYLOAD ...` | `/points/payload/delete` | POST |
 | `DELETE VECTOR ...` | `/points/vectors/delete` | POST |
 | `UPDATE ... VECTOR` | `/points/vectors` | PUT |
 | `UPDATE ... PAYLOAD` | `/points/payload` | POST |
@@ -181,10 +187,15 @@ Three implementations: `RestQdrant`, `GrpcQdrant`, `EdgeQdrant`. The gRPC adapte
 | `DROP COLLECTION` | `/collections/{c}` | DELETE |
 | `CREATE INDEX` | `/collections/{c}/index` | PUT |
 | `DROP INDEX` | `/collections/{c}/index/{field}` | DELETE |
+| `CREATE SHARD KEY` | `/collections/{c}/shards` | PUT |
+| `DROP SHARD KEY` | `/collections/{c}/shards/delete` | POST |
+| `SHOW SHARD KEYS` | `/collections/{c}/shards` | GET |
 | `SHOW COLLECTIONS` | `/collections` | GET |
 | `SHOW COLLECTION` | `/collections/{c}` | GET |
 | `SHOW QUOTAS` | `/quotas` | GET |
 | `SET QUOTA` | `/quotas` | PUT |
+
+`QUERY CROSS RERANK` is client-side (no Qdrant route). Shard-key ops execute via `execute_planned`.
 
 ### gRPC Stack
 
@@ -212,9 +223,9 @@ All generated route payloads are validated directly against Qdrant's official
 `crates/qql-runtime/openapi.json` specification in
 `crates/qql-runtime/src/contract_test.rs`:
 
-1. **`Query` Schema Validation**: All 12 query expression variants are validated against `# /components/schemas/Query`.
-2. **`Filter` Schema Validation**: All 17 filter expression variants are validated against `# /components/schemas/Filter`.
-3. **`PointRequest` & `ScrollRequest` Validation**: Validated against `# /components/schemas/PointRequest` and `# /components/schemas/ScrollRequest`.
+1. **`Query` Schema Validation**: All Qdrant-backed query expression variants (the 12 wire `Query` shapes; `CrossRerank` is client-side and asserted separately) against `# /components/schemas/Query`.
+2. **`Filter` Schema Validation**: All 20 `FilterExpr` variants (including `MatchPrefix`, `Slice`, `HasVector`, and the three geo predicates) against `# /components/schemas/Filter`.
+3. **`PointRequest` & `ScrollRequest` Validation**: Validated against `# /components/schemas/PointRequest` and `# /components/schemas/ScrollRequest`, plus Facet/DDL/parity coverage in the same suite.
 
 ---
 
@@ -239,13 +250,16 @@ pub fn inject_filter(
 ) -> Result<(), QqlError>
 ```
 
-Recursively injects into QueryStmt (including all CTEs and prefetches), Scroll, Count, Delete,
-UpdatePayload, and Upsert (when `operator == Eq` and `field != "id"`, injects into point
-payloads). Callers must convert their string operators before calling.
+Recursively injects into Query (including all CTEs and prefetches), Scroll, Count, Facet,
+Delete, ClearPayload, DeletePayload, DeleteVector, UpdatePayload, and Upsert (when
+`operator == Eq` and `field != "id"`, stamps the payload key on each point). Callers must
+convert their string operators before calling (`ComparisonOp::parse_inject_op` is
+ASCII-case-insensitive).
 
 **Fail-closed**: Returns a validation error (`QQL-VALIDATION-FILTER-INJECT`) for unsupported
-statement types (DDL, SHOW, UpdateVector, non-Eq Upsert). Unlike earlier versions that
-silently no-oped, this prevents accidental policy bypass.
+statement types (DDL, SHOW, UpdateVector) and for Upsert when the operator is not `Eq` or
+the field is `id`. Unlike earlier versions that silently no-oped, this prevents accidental
+policy bypass.
 
 ---
 
@@ -257,7 +271,7 @@ silently no-oped, this prevents accidental policy bypass.
 * `SELECT` is rejected as an unrecognized statement. Use `QUERY POINTS` for point retrieval.
 * Duplicate object keys, config keys, CTE names, and query clauses are rejected.
 * `QqlError` always carries an explicit `ErrorKind` and `Span`.
-* `SHARD '<key>'` routing is supported on QUERY, COUNT, UPSERT, SCROLL, and DELETE for custom-sharded collections.
+* `SHARD '<key>'` routing is supported on all DML plus Facet (QUERY, SCROLL, COUNT, FACET, UPSERT, DELETE, CLEAR PAYLOAD, DELETE PAYLOAD, DELETE VECTOR, UPDATE VECTOR, UPDATE PAYLOAD). DDL and SHOW cannot carry a shard key.
 * Collection creation supports `shard_number`, `sharding_method`, and `shard_keys` via `WITH PARAMS`.
 * Payload indexes support `is_tenant = true` for Qdrant-native tenant optimization.
 
@@ -295,10 +309,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 - `qql-edge`: Requires fastembed-rs with specific native dependencies.
 
 ### Token Definition Hygiene
-When adding a new keyword token to `token.rs`:
-1. Add the variant to `pub enum TokenKind`.
+When adding a new keyword token:
+1. Add the variant (and rustdoc) to `pub enum TokenKind` in `token.rs`.
 2. Add a `Variant => "STRING"` entry to `gen_as_str!`.
-3. Add a `"STRING" => TokenKind::Variant` entry to `gen_keywords!`.
+3. Add the keyword literal to `language/v1/grammar.pest` and run `cargo run -p qql-grammar-gen -- generate`. Never hand-edit `keywords.generated.rs`.
 
 ### Workspace Hygiene
 * Keep workspace version in root `Cargo.toml` as single source of truth.

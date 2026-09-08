@@ -6,10 +6,12 @@ pub(crate) use super::query_expr::{
 };
 
 use crate::ast::{QueryCollection, QueryStmt, escape_string};
-use crate::fmt::expr::{render_f64, render_name, render_payload_selector, render_vector_selector};
+use crate::fmt::expr::{
+    render_f64, render_name, render_payload_selector, render_placeholder, render_vector_selector,
+};
 use crate::fmt::filter::render_filter;
 use alloc::format;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt::Write;
 
@@ -82,20 +84,12 @@ pub(crate) fn query_tail_clauses(query: &QueryStmt) -> Vec<String> {
     if let Some(limit) = query.page.limit {
         parts.push(format!("LIMIT {}", limit));
     } else if let Some(param) = &query.page.limit_param {
-        if param.starts_with('?') {
-            parts.push("LIMIT ?".to_string());
-        } else {
-            parts.push(format!("LIMIT :{}", param));
-        }
+        parts.push(format!("LIMIT {}", render_placeholder(param)));
     }
     if let Some(offset) = query.page.offset {
         parts.push(format!("OFFSET {}", offset));
     } else if let Some(param) = &query.page.offset_param {
-        if param.starts_with('?') {
-            parts.push("OFFSET ?".to_string());
-        } else {
-            parts.push(format!("OFFSET :{}", param));
-        }
+        parts.push(format!("OFFSET {}", render_placeholder(param)));
     }
     parts
 }

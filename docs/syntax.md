@@ -101,7 +101,7 @@ QUERY TEXT 'risks' FROM tenants USING dense
 - Host code may set the same field after parse: `stmt.shard_key = 'acme'` (Python),
   `stmt.shardKey = 'acme'` (Node/WASM), `stmt.set_shard_key(Some(...))` (Rust).
   There is **no** `inject_shard_key` API.
-- Supported on: `QUERY`, `SCROLL`, `COUNT`, `UPSERT`, `DELETE`, `CLEAR PAYLOAD`,
+- Supported on: `QUERY`, `SCROLL`, `COUNT`, `FACET`, `UPSERT`, `DELETE`, `CLEAR PAYLOAD`,
   `DELETE PAYLOAD`, `DELETE VECTOR`, `UPDATE … VECTOR`, `UPDATE … PAYLOAD`.
 
 ### Vector targets and embedding roles
@@ -499,7 +499,7 @@ multidense-vector = "[", dense-vector, { ",", dense-vector }, "]" ;
 
 Every upsert point requires an unsigned integer or string `id`. Its optional `vector` may be one unnamed vector value or an object of named vector values. All other object entries remain arbitrary payload values.
 
-`SHARD '<key>'` on QUERY, SCROLL, COUNT, UPSERT, DELETE, CLEAR PAYLOAD, DELETE VECTOR, UPDATE … VECTOR, or UPDATE … PAYLOAD routes the operation to a specific shard group. It is a clustered-Qdrant feature; `qql-edge` rejects it explicitly because edge storage is single-node.
+`SHARD '<key>'` on QUERY, SCROLL, COUNT, FACET, UPSERT, DELETE, CLEAR PAYLOAD, DELETE PAYLOAD, DELETE VECTOR, UPDATE … VECTOR, or UPDATE … PAYLOAD routes the operation to a specific shard group. It is a clustered-Qdrant feature; `qql-edge` rejects it explicitly because edge storage is single-node. Trailing commas in objects, lists, and `PARAMS` / config blocks are rejected (`QQL-PARSE-TRAILING-COMMA`). Empty `PARAMS ()` and `ALTER COLLECTION` without a `WITH` clause are rejected.
 
 Appending `WAIT true` (or `WAIT false`) to UPSERT, DELETE, CLEAR PAYLOAD, DELETE VECTOR, DELETE PAYLOAD, UPDATE … VECTOR, UPDATE … PAYLOAD, or CREATE INDEX asks the server to wait for write durability (REST `?wait=`, gRPC `wait` field).
 

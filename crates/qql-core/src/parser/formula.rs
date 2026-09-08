@@ -4,7 +4,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::ast::{FormulaExpr, Value, looks_like_iso_datetime};
-use crate::error::QqlError;
+use crate::error::{QqlError, Span};
 use crate::token::TokenKind;
 
 use super::{AstLowerer, ascii_equal, syntax_err};
@@ -64,7 +64,7 @@ impl<'a> AstLowerer<'a> {
         let prefix = formula_prefix_parse_fn(&tok).ok_or_else(|| {
             syntax_err(
                 alloc::format!("unexpected token in formula: {}", tok.text),
-                tok.pos,
+                tok.span,
             )
         })?;
 
@@ -95,7 +95,7 @@ fn parse_formula_identifier_or_func(p: &mut AstLowerer<'_>) -> Result<FormulaExp
 
     if p.peek()?.kind == TokenKind::Lparen {
         p.advance()?;
-        return parse_formula_function_call(p, &lower, tok.pos);
+        return parse_formula_function_call(p, &lower, tok.span);
     }
 
     Ok(FormulaExpr::Variable { name: val })
@@ -106,7 +106,7 @@ fn parse_formula_constant(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, QqlErro
     let v: f64 = tok
         .text
         .parse()
-        .map_err(|_| syntax_err("invalid number format in formula", tok.pos))?;
+        .map_err(|_| syntax_err("invalid number format in formula", tok.span))?;
     if !v.is_finite() {
         // Same failure class as `parse_numeric_literal` (score thresholds,
         // decay targets): a non-finite numeric literal, so it carries the
@@ -205,7 +205,7 @@ fn parse_formula_infix_expression(
         }
         _ => Err(syntax_err(
             alloc::format!("unknown formula operator: {}", tok.text),
-            tok.pos,
+            tok.span,
         )),
     }
 }
@@ -238,7 +238,7 @@ fn parse_formula_case_expression(p: &mut AstLowerer<'_>) -> Result<FormulaExpr, 
 fn parse_formula_function_call(
     p: &mut AstLowerer<'_>,
     func_name: &str,
-    pos: usize,
+    span: Span,
 ) -> Result<FormulaExpr, QqlError> {
     match func_name {
         "match" | "match_any" => {
@@ -294,9 +294,9 @@ fn parse_formula_function_call(
                 }
             }
             let lat =
-                lat.ok_or_else(|| syntax_err("geo_distance dict must have 'lat' key", pos))?;
+                lat.ok_or_else(|| syntax_err("geo_distance dict must have 'lat' key", span))?;
             let lon =
-                lon.ok_or_else(|| syntax_err("geo_distance dict must have 'lon' key", pos))?;
+                lon.ok_or_else(|| syntax_err("geo_distance dict must have 'lon' key", span))?;
             return Ok(FormulaExpr::GeoDistance { lat, lon, field });
         }
         _ => {}
@@ -307,32 +307,32 @@ fn parse_formula_function_call(
     match func_name {
         "abs" => {
             let [x] = <[FormulaExpr; 1]>::try_from(args)
-                .map_err(|_| syntax_err("ABS() expects 1 argument", pos))?;
+                .map_err(|_| syntax_err("ABS() expects 1 argument", span))?;
             Ok(FormulaExpr::Abs { x: Box::new(x) })
         }
         "sqrt" => {
             let [x] = <[FormulaExpr; 1]>::try_from(args)
-                .map_err(|_| syntax_err("SQRT() expects 1 argument", pos))?;
+                .map_err(|_| syntax_err("SQRT() expects 1 argument", span))?;
             Ok(FormulaExpr::Sqrt { x: Box::new(x) })
         }
         "log" => {
             let [x] = <[FormulaExpr; 1]>::try_from(args)
-                .map_err(|_| syntax_err("LOG() expects 1 argument", pos))?;
+                .map_err(|_| syntax_err("LOG() expects 1 argument", span))?;
             Ok(FormulaExpr::Log { x: Box::new(x) })
         }
         "ln" => {
             let [x] = <[FormulaExpr; 1]>::try_from(args)
-                .map_err(|_| syntax_err("LN() expects 1 argument", pos))?;
+                .map_err(|_| syntax_err("LN() expects 1 argument", span))?;
             Ok(FormulaExpr::Ln { x: Box::new(x) })
         }
         "exp" => {
             let [x] = <[FormulaExpr; 1]>::try_from(args)
-                .map_err(|_| syntax_err("EXP() expects 1 argument", pos))?;
+                .map_err(|_| syntax_err("EXP() expects 1 argument", span))?;
             Ok(FormulaExpr::Exp { x: Box::new(x) })
         }
         "acosh" => {
             let [x] = <[FormulaExpr; 1]>::try_from(args)
-                .map_err(|_| syntax_err("ACOSH() expects 1 argument", pos))?;
+                .map_err(|_| syntax_err("ACOSH() expects 1 argument", span))?;
             Ok(FormulaExpr::Acosh { x: Box::new(x) })
         }
         "max" | "min" => {
@@ -342,7 +342,7 @@ fn parse_formula_function_call(
                         "{}() requires at least one argument",
                         func_name.to_uppercase()
                     ),
-                    pos,
+                    span,
                 ));
             }
             if func_name == "max" {
@@ -353,7 +353,7 @@ fn parse_formula_function_call(
         }
         "pow" => {
             let [base, exponent] = <[FormulaExpr; 2]>::try_from(args)
-                .map_err(|_| syntax_err("POW() expects 2 arguments", pos))?;
+                .map_err(|_| syntax_err("POW() expects 2 arguments", span))?;
             Ok(FormulaExpr::Pow {
                 base: Box::new(base),
                 exponent: Box::new(exponent),
@@ -363,7 +363,7 @@ fn parse_formula_function_call(
             let [lat_e, lon_e, field_e] = <[FormulaExpr; 3]>::try_from(args).map_err(|_| {
                 syntax_err(
                     "GEO_DISTANCE() expects 3 arguments (lat, lon, field_name)",
-                    pos,
+                    span,
                 )
             })?;
             let lat = match lat_e {
@@ -371,7 +371,7 @@ fn parse_formula_function_call(
                 _ => {
                     return Err(syntax_err(
                         "GEO_DISTANCE() first argument must be a float constant",
-                        pos,
+                        span,
                     ));
                 }
             };
@@ -380,7 +380,7 @@ fn parse_formula_function_call(
                 _ => {
                     return Err(syntax_err(
                         "GEO_DISTANCE() second argument must be a float constant",
-                        pos,
+                        span,
                     ));
                 }
             };
@@ -389,7 +389,7 @@ fn parse_formula_function_call(
                 _ => {
                     return Err(syntax_err(
                         "GEO_DISTANCE() third argument must be a field name",
-                        pos,
+                        span,
                     ));
                 }
             };
@@ -407,7 +407,7 @@ fn parse_formula_function_call(
             } else {
                 return Err(syntax_err(
                     alloc::format!("{}() requires 'x' argument", func_name.to_uppercase()),
-                    pos,
+                    span,
                 ));
             };
 
@@ -427,7 +427,7 @@ fn parse_formula_function_call(
                     _ => {
                         return Err(syntax_err(
                             "scale argument in decay function must be a constant",
-                            pos,
+                            span,
                         ));
                     }
                 }
@@ -441,7 +441,7 @@ fn parse_formula_function_call(
                     _ => {
                         return Err(syntax_err(
                             "scale argument in decay function must be a constant",
-                            pos,
+                            span,
                         ));
                     }
                 }
@@ -455,7 +455,7 @@ fn parse_formula_function_call(
                     _ => {
                         return Err(syntax_err(
                             "midpoint/decay argument in decay function must be a constant",
-                            pos,
+                            span,
                         ));
                     }
                 }
@@ -469,7 +469,7 @@ fn parse_formula_function_call(
                     _ => {
                         return Err(syntax_err(
                             "midpoint argument in decay function must be a constant",
-                            pos,
+                            span,
                         ));
                     }
                 }
@@ -483,7 +483,7 @@ fn parse_formula_function_call(
                     _ => {
                         return Err(syntax_err(
                             "decay argument in decay function must be a constant",
-                            pos,
+                            span,
                         ));
                     }
                 }
@@ -498,7 +498,7 @@ fn parse_formula_function_call(
                 _ => {
                     return Err(syntax_err(
                         alloc::format!("unknown decay function: {}", func_name),
-                        pos,
+                        span,
                     ));
                 }
             };
@@ -512,7 +512,7 @@ fn parse_formula_function_call(
         }
         _ => Err(syntax_err(
             alloc::format!("unknown formula function: {}", func_name),
-            pos,
+            span,
         )),
     }
 }
@@ -559,7 +559,7 @@ fn parse_formula_call_arguments_and_kwargs(
             if !kwargs.is_empty() {
                 return Err(syntax_err(
                     "positional argument cannot follow keyword argument",
-                    p.peek()?.pos,
+                    p.peek()?.span,
                 ));
             }
             let arg = p.parse_formula_expr(PRECEDENCE_LOWEST)?;
