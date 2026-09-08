@@ -3,7 +3,7 @@
 //! Copies **schema + points** (not RocksDB snapshots), so the target can be
 //! any Qdrant minor version, any shard count, and any quantization config.
 //!
-//! End-to-end demo (berlin, sharded): [`berlin_shard_migration.py`], run from
+//! End-to-end demo (berlin, sharded): `berlin_shard_migration.py`, run from
 //! the workspace root. It drives the `qql` CLI through create, ingest,
 //! migrate, verify, and a sharded dump round-trip.
 //!
