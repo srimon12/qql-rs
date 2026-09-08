@@ -32,7 +32,7 @@ qql-plan = { workspace = true }
 qql = { workspace = true }
 qql-edge = { workspace = true, optional = true }
 clap = { version = "4", features = ["derive", "env"] }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "signal"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "signal", "time"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 rustyline = "14"

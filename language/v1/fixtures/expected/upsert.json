@@ -600,7 +600,9 @@
             "vectors": null
           }
         ],
-        "shard_key": "tenant-a",
+        "shard_key": {
+          "Keyword": "tenant-a"
+        },
         "wait": null
       }
     },

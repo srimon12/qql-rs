@@ -200,27 +200,20 @@ async fn upsert_window(
         groups.extend(part);
     }
     for group in &groups {
-        if let Some(ref key) = group.shard_key {
-            let cache = shard_cache_key(Some(key), opts.wait);
-            if created_keys.insert(cache.clone()) {
-                let stmt = format!(
-                    "CREATE SHARD KEY {key} ON COLLECTION {}",
-                    format_ident(&opts.target_collection)
-                );
-                ensure_shard_key(target, &stmt).await?;
-            }
-            if !prepared.contains_key(&cache) {
-                let sql = upsert_template(&opts.target_collection, Some(key), opts.wait);
-                let stmt = target.prepare(&sql).await?;
-                prepared.insert(cache, stmt);
-            }
-        } else {
-            let cache = shard_cache_key(None, opts.wait);
-            if !prepared.contains_key(&cache) {
-                let sql = upsert_template(&opts.target_collection, None, opts.wait);
-                let stmt = target.prepare(&sql).await?;
-                prepared.insert(cache, stmt);
-            }
+        let cache = shard_cache_key(group.shard_key.as_ref(), opts.wait);
+        if let Some(ref key) = group.shard_key
+            && created_keys.insert(cache.clone())
+        {
+            let stmt = format!(
+                "CREATE SHARD KEY {key} ON COLLECTION {}",
+                format_ident(&opts.target_collection)
+            );
+            ensure_shard_key(target, &stmt).await?;
+        }
+        if !prepared.contains_key(&cache) {
+            let sql = upsert_template(&opts.target_collection, group.shard_key.as_ref(), opts.wait);
+            let stmt = target.prepare(&sql).await?;
+            prepared.insert(cache, stmt);
         }
     }
     upsert_groups(target, prepared, groups, opts.wait, opts.workers).await?;
@@ -248,7 +241,17 @@ pub(crate) fn split_by_shard(
     records: Vec<serde_json::Value>,
     opts: &MigrateOptions,
 ) -> Result<(Vec<IngestBatch>, usize), Box<dyn Error>> {
-    if opts.shard_key.is_none() && opts.shard_key_field.is_none() {
+    if let Some(ref key) = opts.shard_key {
+        let shard_key = Some(super::options::parse_shard_key_literal(key));
+        return Ok((
+            vec![IngestBatch {
+                shard_key,
+                rows: json_rows(records)?,
+            }],
+            0,
+        ));
+    }
+    let Some(ref field) = opts.shard_key_field else {
         return Ok((
             vec![IngestBatch {
                 shard_key: None,
@@ -256,42 +259,26 @@ pub(crate) fn split_by_shard(
             }],
             0,
         ));
-    }
-    if let Some(ref key) = opts.shard_key {
-        return Ok((
-            vec![IngestBatch {
-                shard_key: Some(super::options::parse_shard_key_literal(key)),
-                rows: json_rows(records)?,
-            }],
-            0,
-        ));
-    }
-    let field = opts.shard_key_field.as_deref().unwrap();
+    };
     let mut buckets: HashMap<String, (ShardKey, Vec<serde_json::Value>)> = HashMap::new();
     let mut skipped = 0usize;
     for rec in records {
-        match shard_key_from_payload(&rec, field) {
-            Ok(key) => {
-                let label = key.to_string();
-                buckets
-                    .entry(label)
-                    .or_insert_with(|| (key, Vec::new()))
-                    .1
-                    .push(rec);
-            }
+        let key = match shard_key_from_payload(&rec, field) {
+            Ok(key) => key,
             Err(err) => match &opts.missing_shard_key {
                 MissingShardKey::Error => return Err(err),
-                MissingShardKey::Skip => skipped += 1,
-                MissingShardKey::Default(key) => {
-                    let label = key.to_string();
-                    buckets
-                        .entry(label)
-                        .or_insert_with(|| (key.clone(), Vec::new()))
-                        .1
-                        .push(rec);
+                MissingShardKey::Skip => {
+                    skipped += 1;
+                    continue;
                 }
+                MissingShardKey::Default(key) => key.clone(),
             },
-        }
+        };
+        buckets
+            .entry(key.to_string())
+            .or_insert_with(|| (key, Vec::new()))
+            .1
+            .push(rec);
     }
     let mut out = Vec::with_capacity(buckets.len());
     for (_, (key, recs)) in buckets {
@@ -307,6 +294,8 @@ fn shard_key_from_payload(
     rec: &serde_json::Value,
     field: &str,
 ) -> Result<ShardKey, Box<dyn Error>> {
+    let err_msg =
+        || format!("payload field '{field}' must be a non-empty string or non-negative integer");
     match rec.get(field) {
         Some(serde_json::Value::String(s)) if !s.is_empty() => Ok(ShardKey::Keyword(s.clone())),
         Some(serde_json::Value::Number(n)) => {
@@ -315,16 +304,10 @@ fn shard_key_from_payload(
             } else if let Some(i) = n.as_i64().filter(|i| *i >= 0) {
                 Ok(ShardKey::Number(i as u64))
             } else {
-                Err(format!(
-                    "payload field '{field}' must be a non-empty string or non-negative integer"
-                )
-                .into())
+                Err(err_msg().into())
             }
         }
-        Some(_) => Err(format!(
-            "payload field '{field}' must be a non-empty string or non-negative integer"
-        )
-        .into()),
+        Some(_) => Err(err_msg().into()),
         None => Err(format!("payload field '{field}' is missing on a migrated point").into()),
     }
 }

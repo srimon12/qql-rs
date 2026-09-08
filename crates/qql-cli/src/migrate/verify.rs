@@ -36,15 +36,23 @@ pub async fn verify_counts(
     opts: &MigrateOptions,
     source_count: u64,
 ) -> Result<u64, Box<dyn Error>> {
-    let target_count = exact_count(target, &opts.target_collection, None).await?;
-    if target_count != source_count {
-        return Err(format!(
-            "count mismatch after migrate: source '{}' = {source_count}, target '{}' = {target_count}",
-            opts.source_collection, opts.target_collection
-        )
-        .into());
+    // `--no-wait` returns before WAL apply; poll briefly so verify is not a race.
+    let attempts = if opts.wait { 1 } else { 40 };
+    let mut target_count = 0;
+    for i in 0..attempts {
+        target_count = exact_count(target, &opts.target_collection, None).await?;
+        if target_count == source_count {
+            return Ok(target_count);
+        }
+        if i + 1 < attempts {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
     }
-    Ok(target_count)
+    Err(format!(
+        "count mismatch after migrate: source '{}' = {source_count}, target '{}' = {target_count}",
+        opts.source_collection, opts.target_collection
+    )
+    .into())
 }
 
 fn strip_where(clause: &str) -> &str {
