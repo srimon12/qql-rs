@@ -6,9 +6,10 @@ use crate::ast::{
     ScrollStmt, UpdatePayloadStmt, UpdateVectorStmt, UpsertPoint, UpsertStmt, escape_string,
 };
 use crate::fmt::expr::{
-    render_filter, render_name, render_placeholder, render_point_id, render_value,
-    render_vector_selector, render_vector_value,
+    render_name, render_placeholder, render_point_id, render_value, render_vector_selector,
+    render_vector_value,
 };
+use crate::fmt::filter::render_filter;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec;

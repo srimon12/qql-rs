@@ -1,7 +1,5 @@
 //! Formatting for values, literals, selectors, points, and vectors.
 
-pub use crate::fmt::filter::render_filter;
-
 use crate::ast::{
     PayloadSelector, PointId, ReadConsistency, Value, VectorDistance, VectorSelector, VectorValue,
     escape_string, is_simple_ident,

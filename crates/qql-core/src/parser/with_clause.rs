@@ -3,7 +3,7 @@ use crate::ast::{
     IdfParams, PayloadSelector, QuantizationSearchParams, ReadConsistency, SearchParams, Value,
     VectorSelector,
 };
-use crate::error::QqlError;
+use crate::error::{QqlError, Span};
 use crate::token::TokenKind;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -14,12 +14,17 @@ impl<'a> AstLowerer<'a> {
         let mut params = SearchParams::default();
         let mut keys: Vec<String> = Vec::new();
         if self.peek()?.kind == TokenKind::Rparen {
-            self.advance()?;
-            return Ok(params);
+            return Err(QqlError::parse(
+                "QQL-PARSE-SEARCH-PARAMS",
+                "PARAMS requires at least one search parameter",
+                self.peek()?.span,
+            ));
         }
+        let mut max_selectivity_span = None;
         loop {
             let key_token = self.parse_object_key()?;
             let key = key_token.text.to_string();
+            let key_span = key_token.span;
             if keys
                 .iter()
                 .any(|candidate| candidate.eq_ignore_ascii_case(&key))
@@ -27,7 +32,7 @@ impl<'a> AstLowerer<'a> {
                 return Err(QqlError::parse(
                     "QQL-PARSE-DUPLICATE-KEY",
                     alloc::format!("duplicate configuration key '{}'", key),
-                    key_token.span,
+                    key_span,
                 ));
             }
             self.expect(TokenKind::Equals)?;
@@ -36,27 +41,38 @@ impl<'a> AstLowerer<'a> {
                 other => {
                     let value = self.parse_value()?;
                     match other {
-                        "hnsw_ef" => params.hnsw_ef = Some(positive_integer(value, &key)?),
-                        "exact" => params.exact = Some(boolean(value, &key)?),
-                        "acorn" => params.acorn = Some(boolean(value, &key)?),
-                        "max_selectivity" => {
-                            params.max_selectivity = Some(unit_interval(value, &key)?);
+                        "hnsw_ef" => {
+                            params.hnsw_ef = Some(positive_integer(value, &key, key_span)?)
                         }
-                        "indexed_only" => params.indexed_only = Some(boolean(value, &key)?),
-                        "rrf_k" => params.rrf_k = Some(positive_integer(value, &key)?),
-                        "rrf_weights" => params.rrf_weights = Some(float_list(value, &key)?),
+                        "exact" => params.exact = Some(boolean(value, &key, key_span)?),
+                        "acorn" => params.acorn = Some(boolean(value, &key, key_span)?),
+                        "max_selectivity" => {
+                            params.max_selectivity = Some(unit_interval(value, &key, key_span)?);
+                            max_selectivity_span = Some(key_span);
+                        }
+                        "indexed_only" => {
+                            params.indexed_only = Some(boolean(value, &key, key_span)?)
+                        }
+                        "rrf_k" => params.rrf_k = Some(positive_integer(value, &key, key_span)?),
+                        "rrf_weights" => {
+                            params.rrf_weights = Some(float_list(value, &key, key_span)?)
+                        }
                         "quantization" => {
-                            params.quantization = Some(quantization(value)?);
+                            params.quantization = Some(quantization(value, key_span)?);
                         }
                         // OpenAPI query param / proto field — seconds, minimum 1.
-                        "timeout" => params.timeout = Some(positive_integer(value, &key)?),
+                        "timeout" => {
+                            params.timeout = Some(positive_integer(value, &key, key_span)?)
+                        }
                         // OpenAPI ReadConsistency: factor N or majority|quorum|all.
-                        "consistency" => params.consistency = Some(read_consistency(value, &key)?),
+                        "consistency" => {
+                            params.consistency = Some(read_consistency(value, &key, key_span)?)
+                        }
                         _ => {
                             return Err(QqlError::validation(
                                 "QQL-VALIDATION-SEARCH-PARAM",
                                 alloc::format!("unknown search parameter '{}'", key),
-                                None,
+                                Some(key_span),
                             ));
                         }
                     }
@@ -67,16 +83,14 @@ impl<'a> AstLowerer<'a> {
                 break;
             }
             self.advance()?;
-            if self.peek()?.kind == TokenKind::Rparen {
-                break;
-            }
+            self.reject_trailing_comma(TokenKind::Rparen)?;
         }
         self.expect(TokenKind::Rparen)?;
         if params.max_selectivity.is_some() && params.acorn != Some(true) {
             return Err(QqlError::validation(
                 "QQL-VALIDATION-ACORN-SELECTIVITY",
                 "max_selectivity requires PARAMS (acorn = true, …)",
-                None,
+                max_selectivity_span,
             ));
         }
         Ok(params)
@@ -131,7 +145,7 @@ impl<'a> AstLowerer<'a> {
         } else {
             Err(QqlError::parse(
                 "QQL-PARSE-PAYLOAD-SELECTOR",
-                "WITH PAYLOAD requires true, false, INCLUDE (...), or EXCLUDE (...) ",
+                "WITH PAYLOAD requires true, false, INCLUDE (...), or EXCLUDE (...)",
                 self.peek()?.span,
             ))
         }
@@ -199,41 +213,41 @@ impl<'a> AstLowerer<'a> {
     }
 }
 
-fn positive_integer(value: Value, key: &str) -> Result<u64, QqlError> {
+fn positive_integer(value: Value, key: &str, span: Span) -> Result<u64, QqlError> {
     match value {
         Value::Int(value) if value > 0 => Ok(value as u64),
         _ => Err(QqlError::validation(
             "QQL-VALIDATION-SEARCH-PARAM",
             alloc::format!("{} must be a positive integer", key),
-            None,
+            Some(span),
         )),
     }
 }
 
-fn boolean(value: Value, key: &str) -> Result<bool, QqlError> {
+fn boolean(value: Value, key: &str, span: Span) -> Result<bool, QqlError> {
     match value {
         Value::Bool(value) => Ok(value),
         _ => Err(QqlError::validation(
             "QQL-VALIDATION-SEARCH-PARAM",
             alloc::format!("{} must be true or false", key),
-            None,
+            Some(span),
         )),
     }
 }
 
-fn quantization(value: Value) -> Result<QuantizationSearchParams, QqlError> {
+fn quantization(value: Value, span: Span) -> Result<QuantizationSearchParams, QqlError> {
     let Value::Dict(values) = value else {
         return Err(QqlError::validation(
             "QQL-VALIDATION-SEARCH-PARAM",
             "quantization must be an object",
-            None,
+            Some(span),
         ));
     };
     let mut params = QuantizationSearchParams::default();
     for (key, value) in values {
         match key.to_ascii_lowercase().as_str() {
-            "ignore" => params.ignore = Some(boolean(value, &key)?),
-            "rescore" => params.rescore = Some(boolean(value, &key)?),
+            "ignore" => params.ignore = Some(boolean(value, &key, span)?),
+            "rescore" => params.rescore = Some(boolean(value, &key, span)?),
             "oversampling" => {
                 let value = match value {
                     Value::Int(value) => value as f64,
@@ -242,7 +256,7 @@ fn quantization(value: Value) -> Result<QuantizationSearchParams, QqlError> {
                         return Err(QqlError::validation(
                             "QQL-VALIDATION-SEARCH-PARAM",
                             "oversampling must be numeric",
-                            None,
+                            Some(span),
                         ));
                     }
                 };
@@ -250,7 +264,7 @@ fn quantization(value: Value) -> Result<QuantizationSearchParams, QqlError> {
                     return Err(QqlError::validation(
                         "QQL-VALIDATION-SEARCH-PARAM",
                         "oversampling must be finite and greater than zero",
-                        None,
+                        Some(span),
                     ));
                 }
                 params.oversampling = Some(value);
@@ -259,7 +273,7 @@ fn quantization(value: Value) -> Result<QuantizationSearchParams, QqlError> {
                 return Err(QqlError::validation(
                     "QQL-VALIDATION-SEARCH-PARAM",
                     alloc::format!("unknown quantization search parameter '{}'", key),
-                    None,
+                    Some(span),
                 ));
             }
         }
@@ -267,12 +281,12 @@ fn quantization(value: Value) -> Result<QuantizationSearchParams, QqlError> {
     Ok(params)
 }
 
-fn float_list(value: Value, key: &str) -> Result<Vec<f64>, QqlError> {
+fn float_list(value: Value, key: &str, span: Span) -> Result<Vec<f64>, QqlError> {
     let Value::List(items) = value else {
         return Err(QqlError::validation(
             "QQL-VALIDATION-SEARCH-PARAM",
             alloc::format!("{} must be a list of numbers", key),
-            None,
+            Some(span),
         ));
     };
     let mut res = Vec::new();
@@ -284,7 +298,7 @@ fn float_list(value: Value, key: &str) -> Result<Vec<f64>, QqlError> {
                 return Err(QqlError::validation(
                     "QQL-VALIDATION-SEARCH-PARAM",
                     alloc::format!("{} elements must be numbers", key),
-                    None,
+                    Some(span),
                 ));
             }
         }
@@ -293,7 +307,7 @@ fn float_list(value: Value, key: &str) -> Result<Vec<f64>, QqlError> {
 }
 
 /// Number in (0, 1] for ACORN max_selectivity.
-fn unit_interval(value: Value, key: &str) -> Result<f64, QqlError> {
+fn unit_interval(value: Value, key: &str, span: Span) -> Result<f64, QqlError> {
     let value = match value {
         Value::Int(v) => v as f64,
         Value::Float(v) => v,
@@ -301,7 +315,7 @@ fn unit_interval(value: Value, key: &str) -> Result<f64, QqlError> {
             return Err(QqlError::validation(
                 "QQL-VALIDATION-SEARCH-PARAM",
                 alloc::format!("{key} must be a number"),
-                None,
+                Some(span),
             ));
         }
     };
@@ -309,14 +323,14 @@ fn unit_interval(value: Value, key: &str) -> Result<f64, QqlError> {
         return Err(QqlError::validation(
             "QQL-VALIDATION-SEARCH-PARAM",
             alloc::format!("{key} must be a finite number in (0, 1]"),
-            None,
+            Some(span),
         ));
     }
     Ok(value)
 }
 
 /// OpenAPI `ReadConsistency`: integer factor or majority|quorum|all.
-fn read_consistency(value: Value, key: &str) -> Result<ReadConsistency, QqlError> {
+fn read_consistency(value: Value, key: &str, span: Span) -> Result<ReadConsistency, QqlError> {
     match value {
         Value::Int(v) if v >= 0 => Ok(ReadConsistency::Factor(v as u64)),
         Value::Str(s) => match s.to_ascii_lowercase().as_str() {
@@ -326,13 +340,13 @@ fn read_consistency(value: Value, key: &str) -> Result<ReadConsistency, QqlError
             _ => Err(QqlError::validation(
                 "QQL-VALIDATION-CONSISTENCY",
                 "consistency must be a non-negative integer factor, or majority|quorum|all",
-                None,
+                Some(span),
             )),
         },
         _ => Err(QqlError::validation(
             "QQL-VALIDATION-CONSISTENCY",
             alloc::format!("{key} must be a non-negative integer factor, or majority|quorum|all"),
-            None,
+            Some(span),
         )),
     }
 }

@@ -238,12 +238,13 @@ impl<'a> AstLowerer<'a> {
     }
 
     pub fn parse_literal(&mut self) -> Result<Value, QqlError> {
+        let start = self.peek()?.span;
         let value = self.parse_value()?;
         if matches!(value, Value::Dict(_) | Value::List(_)) {
             return Err(QqlError::parse(
                 "QQL-PARSE-LITERAL",
                 "expected a scalar literal",
-                self.peek()?.span,
+                Span::new(start.start, self.prev_span().end),
             ));
         }
         Ok(value)
@@ -273,7 +274,7 @@ impl<'a> AstLowerer<'a> {
             self.advance()?;
             return self.decode_string(token);
         }
-        if token.kind != TokenKind::Identifier && !super::is_contextual_field_name(token.kind) {
+        if !token.is_keyword_or_identifier() {
             return Err(QqlError::parse(
                 "QQL-PARSE-FIELD",
                 alloc::format!("expected a field name, got '{}'", token.text),
@@ -314,9 +315,7 @@ impl<'a> AstLowerer<'a> {
                 break;
             }
             self.advance()?;
-            if self.peek()?.kind == TokenKind::Rbrace {
-                break;
-            }
+            self.reject_trailing_comma(TokenKind::Rbrace)?;
         }
         self.expect(TokenKind::Rbrace)?;
         Ok(values)
@@ -348,9 +347,7 @@ impl<'a> AstLowerer<'a> {
                 break;
             }
             self.advance()?;
-            if self.peek()?.kind == TokenKind::Rparen {
-                break;
-            }
+            self.reject_trailing_comma(TokenKind::Rparen)?;
         }
         self.expect(TokenKind::Rparen)?;
         Ok(values)
@@ -358,20 +355,12 @@ impl<'a> AstLowerer<'a> {
 
     pub(crate) fn parse_object_key(&mut self) -> Result<Token<'a>, QqlError> {
         let token = self.peek()?;
-        if matches!(
-            token.kind,
-            TokenKind::Lbrace
-                | TokenKind::Rbrace
-                | TokenKind::Lbracket
-                | TokenKind::Rbracket
-                | TokenKind::Lparen
-                | TokenKind::Rparen
-                | TokenKind::Colon
-                | TokenKind::Comma
-                | TokenKind::Equals
-                | TokenKind::Semicolon
-                | TokenKind::Eof
-        ) {
+        let ok = token.is_keyword_or_identifier()
+            || matches!(
+                token.kind,
+                TokenKind::String | TokenKind::Integer | TokenKind::Float
+            );
+        if !ok {
             return Err(QqlError::parse(
                 "QQL-PARSE-OBJECT-KEY",
                 alloc::format!("expected an object key, got '{}'", token.text),
@@ -379,6 +368,37 @@ impl<'a> AstLowerer<'a> {
             ));
         }
         self.advance()
+    }
+
+    /// Parse `:name` or `?` into the stored placeholder form (`":name"` / `"?{idx}"`).
+    pub(crate) fn parse_placeholder_param(&mut self) -> Result<Option<(String, Span)>, QqlError> {
+        match self.peek()?.kind {
+            TokenKind::Colon => {
+                let colon_tok = self.advance()?;
+                let name = self.parse_param_name()?;
+                Ok(Some((
+                    alloc::format!(":{name}"),
+                    Span::new(colon_tok.span.start, self.prev_span().end),
+                )))
+            }
+            TokenKind::Question => {
+                let q_tok = self.advance()?;
+                let idx = self.next_positional_param();
+                Ok(Some((alloc::format!("?{idx}"), q_tok.span)))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    pub(crate) fn reject_trailing_comma(&mut self, closer: TokenKind) -> Result<(), QqlError> {
+        if self.peek()?.kind == closer {
+            return Err(QqlError::parse(
+                "QQL-PARSE-TRAILING-COMMA",
+                "trailing commas are not allowed",
+                self.peek()?.span,
+            ));
+        }
+        Ok(())
     }
 
     pub fn parse_list(&mut self) -> Result<Vec<Value>, QqlError> {
@@ -394,9 +414,7 @@ impl<'a> AstLowerer<'a> {
                 break;
             }
             self.advance()?;
-            if self.peek()?.kind == TokenKind::Rbracket {
-                break;
-            }
+            self.reject_trailing_comma(TokenKind::Rbracket)?;
         }
         self.expect(TokenKind::Rbracket)?;
         Ok(values)
@@ -587,7 +605,8 @@ pub(crate) fn vector_from_value(value: Value, span: Option<Span>) -> Result<Vect
                         }
                         rows.push(row_vec);
                     }
-                    _ => unreachable!(),
+                    // Guarded by the `all(List | F32Array)` match above.
+                    _ => unreachable!("multidense row is List or F32Array"),
                 }
             }
             Ok(VectorValue::MultiDense(rows))

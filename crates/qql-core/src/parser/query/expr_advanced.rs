@@ -61,7 +61,6 @@ impl<'a> AstLowerer<'a> {
     }
 
     pub(crate) fn parse_context_pairs(&mut self) -> Result<Vec<ContextPair>, QqlError> {
-        let paren_tok = self.peek()?;
         self.expect(TokenKind::Lparen)?;
         let mut pairs = Vec::new();
         loop {
@@ -76,13 +75,6 @@ impl<'a> AstLowerer<'a> {
             self.advance()?;
         }
         self.expect(TokenKind::Rparen)?;
-        if pairs.is_empty() {
-            return Err(QqlError::parse(
-                "QQL-PARSE-CONTEXT",
-                "CONTEXT requires at least one positive/negative pair",
-                paren_tok.span,
-            ));
-        }
         Ok(pairs)
     }
 

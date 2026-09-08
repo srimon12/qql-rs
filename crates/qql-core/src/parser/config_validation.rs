@@ -1,4 +1,4 @@
-use super::{ascii_equal_lower, syntax_err};
+use super::ascii_equal;
 use crate::ast::{CollectionConfig, OptimizationThreads, Value};
 use crate::error::QqlError;
 use alloc::string::String;
@@ -6,7 +6,7 @@ use alloc::string::String;
 /// Looks up a config entry by key, comparing ASCII case-insensitively.
 pub fn config_value<'a>(config: &'a [(String, Value)], key: &str) -> Option<&'a Value> {
     for (k, v) in config {
-        if ascii_equal_lower(k, key) {
+        if ascii_equal(k, key) {
             return Some(v);
         }
     }
@@ -28,22 +28,15 @@ pub fn config_bool(config: &[(String, Value)], key: &str) -> Option<bool> {
 
 use crate::error::Span;
 
-fn validation_err(
-    message: impl Into<alloc::borrow::Cow<'static, str>>,
-    position: usize,
-) -> QqlError {
-    QqlError::validation(
-        "QQL-VALIDATION-CONFIG",
-        message,
-        Some(Span::point(position)),
-    )
+fn validation_err(message: impl Into<alloc::borrow::Cow<'static, str>>, span: Span) -> QqlError {
+    QqlError::validation("QQL-VALIDATION-CONFIG", message, Some(span))
 }
 
 /// Reads a positive integer config value; `None` when absent, error when invalid.
 pub fn config_positive_u64(
     config: &[(String, Value)],
     key: &str,
-    pos: usize,
+    span: Span,
 ) -> Result<Option<u64>, QqlError> {
     match config_value(config, key) {
         None => Ok(None),
@@ -51,7 +44,7 @@ pub fn config_positive_u64(
         Some(Value::Float(n)) if *n > 0.0 && *n == (*n as u64) as f64 => Ok(Some(*n as u64)),
         _ => Err(validation_err(
             alloc::format!("{} must be a positive integer", key),
-            pos,
+            span,
         )),
     }
 }
@@ -60,7 +53,7 @@ pub fn config_positive_u64(
 pub fn config_non_negative_u64(
     config: &[(String, Value)],
     key: &str,
-    pos: usize,
+    span: Span,
 ) -> Result<Option<u64>, QqlError> {
     match config_value(config, key) {
         None => Ok(None),
@@ -68,7 +61,7 @@ pub fn config_non_negative_u64(
         Some(Value::Float(n)) if *n >= 0.0 && *n == (*n as u64) as f64 => Ok(Some(*n as u64)),
         _ => Err(validation_err(
             alloc::format!("{} must be a non-negative integer", key),
-            pos,
+            span,
         )),
     }
 }
@@ -110,7 +103,7 @@ pub fn config_max_optimization_threads(
             auto_: false,
             value: *n as u64,
         }),
-        Value::Str(s) if ascii_equal_lower(s, "auto") => Some(OptimizationThreads {
+        Value::Str(s) if ascii_equal(s, "auto") => Some(OptimizationThreads {
             auto_: true,
             value: 0,
         }),
@@ -127,52 +120,52 @@ pub fn is_integer_val(value: &Value) -> bool {
 }
 
 /// Type-checks one HNSW config option (`m`, `ef_construct`, `on_disk`, `memory`, …).
-pub fn validate_hnsw_value(key: &str, value: &Value, pos: usize) -> Result<(), QqlError> {
+pub fn validate_hnsw_value(key: &str, value: &Value, span: Span) -> Result<(), QqlError> {
     let lower = key.to_ascii_lowercase();
     match lower.as_str() {
         "m" | "ef_construct" | "full_scan_threshold" | "max_indexing_threads" | "payload_m" => {
             if !is_integer_val(value) {
                 return Err(validation_err(
                     alloc::format!("{} must be an integer", key),
-                    pos,
+                    span,
                 ));
             }
         }
         "on_disk" | "inline_storage" if !matches!(value, Value::Bool(_)) => {
             return Err(validation_err(
                 alloc::format!("{} must be true or false", key),
-                pos,
+                span,
             ));
         }
-        "memory" => validate_memory_value(key, value, pos, true)?,
+        "memory" => validate_memory_value(key, value, span, true)?,
         _ => {}
     }
     Ok(())
 }
 
 /// Type-checks one vectors config option (`on_disk`, `memory`, `datatype`).
-pub fn validate_vectors_value(key: &str, value: &Value, pos: usize) -> Result<(), QqlError> {
+pub fn validate_vectors_value(key: &str, value: &Value, span: Span) -> Result<(), QqlError> {
     let lower = key.to_ascii_lowercase();
     match lower.as_str() {
         "on_disk" if !matches!(value, Value::Bool(_)) => {
             return Err(validation_err(
                 alloc::format!("{} must be true or false", key),
-                pos,
+                span,
             ));
         }
-        "memory" => validate_memory_value(key, value, pos, true)?,
+        "memory" => validate_memory_value(key, value, span, true)?,
         "datatype" => match value {
             Value::Str(s) if crate::ast::VectorDatatype::parse(s).is_some() => {}
             Value::Str(_) => {
                 return Err(validation_err(
                     alloc::format!("{key} must be float32, float16, uint8, or turbo4"),
-                    pos,
+                    span,
                 ));
             }
             _ => {
                 return Err(validation_err(
                     alloc::format!("{key} must be a string (float32, float16, uint8, or turbo4)"),
-                    pos,
+                    span,
                 ));
             }
         },
@@ -184,37 +177,37 @@ pub fn validate_vectors_value(key: &str, value: &Value, pos: usize) -> Result<()
 fn validate_memory_value(
     key: &str,
     value: &Value,
-    pos: usize,
+    span: Span,
     allow_pinned: bool,
 ) -> Result<(), QqlError> {
     match value {
         Value::Str(s) => match crate::ast::MemoryPlacement::parse(s) {
             Some(crate::ast::MemoryPlacement::Pinned) if !allow_pinned => Err(validation_err(
                 alloc::format!("{key} does not support 'pinned'"),
-                pos,
+                span,
             )),
             Some(_) => Ok(()),
             None => Err(validation_err(
                 alloc::format!("{key} must be 'cold', 'cached', or 'pinned'"),
-                pos,
+                span,
             )),
         },
         _ => Err(validation_err(
             alloc::format!("{key} must be a string ('cold', 'cached', or 'pinned')"),
-            pos,
+            span,
         )),
     }
 }
 
 /// Type-checks one optimizers config option (`deleted_threshold`, `memmap_threshold`, …).
-pub fn validate_optimizers_value(key: &str, value: &Value, pos: usize) -> Result<(), QqlError> {
+pub fn validate_optimizers_value(key: &str, value: &Value, span: Span) -> Result<(), QqlError> {
     let lower = key.to_ascii_lowercase();
     match lower.as_str() {
         "deleted_threshold" => {
             if !matches!(value, Value::Int(_) | Value::Float(_)) {
                 return Err(validation_err(
                     alloc::format!("{} must be a number", key),
-                    pos,
+                    span,
                 ));
             }
         }
@@ -227,7 +220,7 @@ pub fn validate_optimizers_value(key: &str, value: &Value, pos: usize) -> Result
             if !is_integer_val(value) {
                 return Err(validation_err(
                     alloc::format!("{} must be an integer", key),
-                    pos,
+                    span,
                 ));
             }
         }
@@ -235,14 +228,14 @@ pub fn validate_optimizers_value(key: &str, value: &Value, pos: usize) -> Result
             if !is_integer_val(value) && !matches!(value, Value::Str(_)) {
                 return Err(validation_err(
                     alloc::format!("{} must be a positive integer or 'auto'", key),
-                    pos,
+                    span,
                 ));
             }
         }
         "prevent_unoptimized" if !matches!(value, Value::Bool(_)) => {
             return Err(validation_err(
                 alloc::format!("{} must be true or false", key),
-                pos,
+                span,
             ));
         }
         _ => {}
@@ -251,7 +244,7 @@ pub fn validate_optimizers_value(key: &str, value: &Value, pos: usize) -> Result
 }
 
 /// Type-checks one collection `PARAMS` option (replication, sharding, memory, …).
-pub fn validate_params_value(key: &str, value: &Value, pos: usize) -> Result<(), QqlError> {
+pub fn validate_params_value(key: &str, value: &Value, span: Span) -> Result<(), QqlError> {
     let lower = key.to_ascii_lowercase();
     match lower.as_str() {
         "replication_factor"
@@ -262,30 +255,30 @@ pub fn validate_params_value(key: &str, value: &Value, pos: usize) -> Result<(),
             if !matches!(value, Value::Int(_)) {
                 return Err(validation_err(
                     alloc::format!("{} must be an integer", key),
-                    pos,
+                    span,
                 ));
             }
         }
         "on_disk_payload" if !matches!(value, Value::Bool(_)) => {
             return Err(validation_err(
                 alloc::format!("{} must be true or false", key),
-                pos,
+                span,
             ));
         }
-        "payload_memory" => validate_memory_value(key, value, pos, false)?,
+        "payload_memory" => validate_memory_value(key, value, span, false)?,
         "sharding_method" => match value {
             Value::Str(s) if s.eq_ignore_ascii_case("auto") || s.eq_ignore_ascii_case("custom") => {
             }
             Value::Str(_) => {
                 return Err(validation_err(
                     "sharding_method must be 'auto' or 'custom'",
-                    pos,
+                    span,
                 ));
             }
             _ => {
                 return Err(validation_err(
                     "sharding_method must be a string ('auto' or 'custom')",
-                    pos,
+                    span,
                 ));
             }
         },
@@ -293,7 +286,7 @@ pub fn validate_params_value(key: &str, value: &Value, pos: usize) -> Result<(),
             Value::List(items) if items.is_empty() => {
                 return Err(validation_err(
                     "shard_keys must be a non-empty list of strings",
-                    pos,
+                    span,
                 ));
             }
             Value::List(items) => {
@@ -301,13 +294,13 @@ pub fn validate_params_value(key: &str, value: &Value, pos: usize) -> Result<(),
                     if !matches!(item, Value::Str(_)) {
                         return Err(validation_err(
                             "shard_keys entries must all be strings",
-                            pos,
+                            span,
                         ));
                     }
                 }
             }
             _ => {
-                return Err(validation_err("shard_keys must be a list of strings", pos));
+                return Err(validation_err("shard_keys must be a list of strings", span));
             }
         },
         _ => {}
@@ -319,41 +312,50 @@ pub fn validate_params_value(key: &str, value: &Value, pos: usize) -> Result<(),
 pub fn merge_collection_config(
     current: &mut CollectionConfig,
     new: CollectionConfig,
-    pos: usize,
+    span: Span,
 ) -> Result<(), QqlError> {
     if new.vectors.is_some() {
         if current.vectors.is_some() {
-            return Err(syntax_err("VECTOR clause may only appear once", pos));
+            return Err(validation_err("VECTOR clause may only appear once", span));
         }
         current.vectors = new.vectors;
     }
     if new.hnsw.is_some() {
         if current.hnsw.is_some() {
-            return Err(syntax_err("HNSW clause may only appear once", pos));
+            return Err(validation_err("HNSW clause may only appear once", span));
         }
         current.hnsw = new.hnsw;
     }
     if new.optimizers.is_some() {
         if current.optimizers.is_some() {
-            return Err(syntax_err("OPTIMIZERS clause may only appear once", pos));
+            return Err(validation_err(
+                "OPTIMIZERS clause may only appear once",
+                span,
+            ));
         }
         current.optimizers = new.optimizers;
     }
     if new.params.is_some() {
         if current.params.is_some() {
-            return Err(syntax_err("PARAMS clause may only appear once", pos));
+            return Err(validation_err("PARAMS clause may only appear once", span));
         }
         current.params = new.params;
     }
     if new.quantization.is_some() {
         if current.quantization.is_some() {
-            return Err(syntax_err("QUANTIZATION clause may only appear once", pos));
+            return Err(validation_err(
+                "QUANTIZATION clause may only appear once",
+                span,
+            ));
         }
         current.quantization = new.quantization;
     }
     if new.quantization_update.is_some() {
         if current.quantization_update.is_some() {
-            return Err(syntax_err("QUANTIZATION clause may only appear once", pos));
+            return Err(validation_err(
+                "QUANTIZATION clause may only appear once",
+                span,
+            ));
         }
         current.quantization_update = new.quantization_update;
     }
@@ -361,21 +363,21 @@ pub fn merge_collection_config(
 }
 
 /// Checks that `deleted_threshold` is a number between 0.0 and 1.0.
-pub fn check_deleted_threshold(value: &Value, pos: usize) -> Result<(), QqlError> {
+pub fn check_deleted_threshold(value: &Value, span: Span) -> Result<(), QqlError> {
     match value {
         Value::Int(n) => {
             let f = *n as f64;
             if !(0.0..=1.0).contains(&f) {
-                return Err(syntax_err(
+                return Err(validation_err(
                     "deleted_threshold must be between 0.0 and 1.0",
-                    pos,
+                    span,
                 ));
             }
         }
         Value::Float(f) if !(0.0..=1.0).contains(f) => {
-            return Err(syntax_err(
+            return Err(validation_err(
                 "deleted_threshold must be between 0.0 and 1.0",
-                pos,
+                span,
             ));
         }
         _ => {}
@@ -384,55 +386,58 @@ pub fn check_deleted_threshold(value: &Value, pos: usize) -> Result<(), QqlError
 }
 
 /// Type-checks CREATE INDEX options, erroring on unknown keys or bad value types.
-pub fn validate_index_options(options: &[(String, Value)], pos: usize) -> Result<(), QqlError> {
+pub fn validate_index_options(options: &[(String, Value)], span: Span) -> Result<(), QqlError> {
     for (k, v) in options {
         let lower = k.to_ascii_lowercase();
         match lower.as_str() {
             "is_tenant" | "on_disk" | "enable_hnsw" | "lowercase" | "ascii_folding"
             | "phrase_matching" | "lookup" | "range" | "is_principal" | "prefix" => {
                 if !matches!(v, Value::Bool(_)) {
-                    return Err(syntax_err(
+                    return Err(validation_err(
                         alloc::format!("{} must be true or false", k),
-                        pos,
+                        span,
                     ));
                 }
             }
             "min_token_len" | "max_token_len" => {
                 if !matches!(v, Value::Int(n) if *n >= 0) {
-                    return Err(syntax_err(
+                    return Err(validation_err(
                         alloc::format!("{} must be a non-negative integer", k),
-                        pos,
+                        span,
                     ));
                 }
             }
             "tokenizer" | "stemmer" => {
                 if !matches!(v, Value::Str(_)) {
-                    return Err(syntax_err(alloc::format!("{} must be a string", k), pos));
+                    return Err(validation_err(
+                        alloc::format!("{} must be a string", k),
+                        span,
+                    ));
                 }
             }
-            "memory" => validate_memory_value(k, v, pos, true)?,
+            "memory" => validate_memory_value(k, v, span, true)?,
             "stopwords" => match v {
                 Value::List(items) => {
                     for item in items {
                         if !matches!(item, Value::Str(_)) {
-                            return Err(syntax_err(
+                            return Err(validation_err(
                                 alloc::format!("{} must be a list of strings", k),
-                                pos,
+                                span,
                             ));
                         }
                     }
                 }
                 _ => {
-                    return Err(syntax_err(
+                    return Err(validation_err(
                         alloc::format!("{} must be a list of strings", k),
-                        pos,
+                        span,
                     ));
                 }
             },
             _ => {
-                return Err(syntax_err(
+                return Err(validation_err(
                     alloc::format!("unknown index option: {}", k),
-                    pos,
+                    span,
                 ));
             }
         }

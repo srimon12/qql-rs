@@ -964,3 +964,57 @@ fn implicit_array_vector_literal_parses() {
     let stmt4 = Parser::parse("QUERY VECTOR [[0.1, 0.2], [0.3, 0.4]] FROM docs;").unwrap();
     assert_eq!(stmt3, stmt4);
 }
+
+#[test]
+fn named_limit_params_are_colon_prefixed() {
+    let Stmt::Query(q) = Parser::parse("QUERY [0.1] FROM docs LIMIT :lim OFFSET :off;").unwrap()
+    else {
+        panic!("query");
+    };
+    assert_eq!(q.page.limit_param.as_deref(), Some(":lim"));
+    assert_eq!(q.page.offset_param.as_deref(), Some(":off"));
+
+    let Stmt::Scroll(s) = Parser::parse("SCROLL FROM docs LIMIT :lim;").unwrap() else {
+        panic!("scroll");
+    };
+    assert_eq!(s.limit_param.as_deref(), Some(":lim"));
+
+    let Stmt::Facet(f) = Parser::parse("FACET category FROM docs LIMIT :lim;").unwrap() else {
+        panic!("facet");
+    };
+    assert_eq!(f.limit_param.as_deref(), Some(":lim"));
+
+    let Stmt::Query(q) = Parser::parse("QUERY TEXT :q FROM docs;").unwrap() else {
+        panic!("text");
+    };
+    let QueryExpr::Nearest {
+        input: QueryInput::Text { text_param, .. },
+        ..
+    } = q.expression
+    else {
+        panic!("nearest");
+    };
+    assert_eq!(text_param.as_deref(), Some(":q"));
+}
+
+#[test]
+fn float_and_integer_keywords_are_string_values() {
+    let Stmt::Query(q) = Parser::parse("QUERY TEXT 'x' FROM docs WHERE kind = FLOAT;").unwrap()
+    else {
+        panic!("query");
+    };
+    match q.filter.as_deref() {
+        Some(FilterExpr::Compare {
+            value: Value::Str(s),
+            ..
+        }) if s.eq_ignore_ascii_case("float") => {}
+        other => panic!("expected string FLOAT, got {other:?}"),
+    }
+}
+
+#[test]
+fn quoted_identifier_decodes_escapes() {
+    let stmt = Parser::parse("QUERY TEXT 'x' FROM \"docs\\nset\";").unwrap();
+    let Stmt::Query(q) = stmt else { panic!() };
+    assert_eq!(q.collection, QueryCollection::Explicit("docs\nset".into()));
+}

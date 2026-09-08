@@ -524,6 +524,27 @@ fn span_positions_are_bytes() {
 }
 
 #[test]
+fn unicode_spans_use_byte_offsets() {
+    let source = "year ≥ 2024";
+    let t = tokens(source);
+    assert_eq!(t[1].0, TokenKind::Gte);
+    assert_eq!(t[1].2.end - t[1].2.start, '≥'.len_utf8());
+
+    let source = "'café'";
+    let t = tokens(source);
+    assert_eq!(t[0].0, TokenKind::String);
+    assert_eq!(t[0].2, Span::new(0, source.len()));
+}
+
+#[test]
+fn next_token_halts_after_lex_error() {
+    let mut lexer = Lexer::new("@oops");
+    assert!(lexer.next_token().is_err());
+    let again = lexer.next_token().expect("halted lexer yields Eof");
+    assert_eq!(again.kind, TokenKind::Eof);
+}
+
+#[test]
 fn identifier_with_underscore_and_digits() {
     let t = tokens("field_name field2 _private");
     assert!(t.iter().all(|(k, _, _)| matches!(k, TokenKind::Identifier)));

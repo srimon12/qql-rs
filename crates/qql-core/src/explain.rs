@@ -6,7 +6,7 @@
 
 use crate::ast::*;
 use crate::error::QqlError;
-use crate::fmt::{render_filter, render_search_params};
+use crate::fmt::{render_filter, render_point_selector, render_search_params};
 use crate::parser::Parser;
 use alloc::format;
 use alloc::string::String;
@@ -298,12 +298,24 @@ pub fn explain_node(statement: &Stmt) -> String {
         }
         Stmt::Delete(statement) => {
             let _ = writeln!(output, "Statement: DELETE FROM {}", statement.collection);
+            explain_mutation_tail(
+                &mut output,
+                &statement.selector,
+                statement.shard_key.as_deref(),
+                statement.wait,
+            );
         }
         Stmt::ClearPayload(statement) => {
             let _ = writeln!(
                 output,
                 "Statement: CLEAR PAYLOAD ON {}",
                 statement.collection
+            );
+            explain_mutation_tail(
+                &mut output,
+                &statement.selector,
+                statement.shard_key.as_deref(),
+                statement.wait,
             );
         }
         Stmt::DeletePayload(statement) => {
@@ -312,12 +324,24 @@ pub fn explain_node(statement: &Stmt) -> String {
                 "Statement: DELETE PAYLOAD ({:?}) ON {}",
                 statement.keys, statement.collection
             );
+            explain_mutation_tail(
+                &mut output,
+                &statement.selector,
+                statement.shard_key.as_deref(),
+                statement.wait,
+            );
         }
         Stmt::DeleteVector(statement) => {
             let _ = writeln!(
                 output,
                 "Statement: DELETE VECTOR ({:?}) ON {}",
                 statement.vector_names, statement.collection
+            );
+            explain_mutation_tail(
+                &mut output,
+                &statement.selector,
+                statement.shard_key.as_deref(),
+                statement.wait,
             );
         }
         Stmt::UpdateVector(statement) => {
@@ -326,12 +350,28 @@ pub fn explain_node(statement: &Stmt) -> String {
                 "Statement: UPDATE VECTOR ON {}",
                 statement.collection
             );
+            let _ = writeln!(output, "├── Point: {:?}", statement.point_id);
+            if let Some(name) = &statement.vector_name {
+                let _ = writeln!(output, "├── Vector: {name}");
+            }
+            if let Some(shard) = &statement.shard_key {
+                let _ = writeln!(output, "├── Shard Key: '{shard}'");
+            }
+            if let Some(wait) = statement.wait {
+                let _ = writeln!(output, "└── Wait: {wait}");
+            }
         }
         Stmt::UpdatePayload(statement) => {
             let _ = writeln!(
                 output,
                 "Statement: UPDATE PAYLOAD ON {}",
                 statement.collection
+            );
+            explain_mutation_tail(
+                &mut output,
+                &statement.selector,
+                statement.shard_key.as_deref(),
+                statement.wait,
             );
         }
     }
@@ -417,6 +457,21 @@ fn query_prefetches(expression: &QueryExpr) -> Option<Vec<String>> {
     }
 }
 
+fn explain_mutation_tail(
+    output: &mut String,
+    selector: &PointSelector,
+    shard_key: Option<&str>,
+    wait: Option<bool>,
+) {
+    let _ = writeln!(output, "├── Selector: {}", render_point_selector(selector));
+    if let Some(shard) = shard_key {
+        let _ = writeln!(output, "├── Shard Key: '{shard}'");
+    }
+    if let Some(wait) = wait {
+        let _ = writeln!(output, "└── Wait: {wait}");
+    }
+}
+
 fn render_quota_value(value: &Value) -> String {
     match value {
         Value::Str(s) => format!("'{}'", s),
@@ -445,5 +500,16 @@ mod tests {
         assert!(plan.contains("├── Shard Key: 'east'"));
         assert!(plan.contains("├── Filter: department = 'cardio'"));
         assert!(plan.contains("└── Pagination: limit=5, offset=0"));
+    }
+
+    #[test]
+    fn explain_dml_includes_selector_and_shard() {
+        let plan =
+            explain("DELETE FROM docs WHERE status = 'archived' SHARD 'east' WAIT true;").unwrap();
+        assert!(plan.contains("Statement: DELETE FROM docs"));
+        assert!(plan.contains("Selector:"));
+        assert!(plan.contains("status = 'archived'"));
+        assert!(plan.contains("Shard Key: 'east'"));
+        assert!(plan.contains("Wait: true"));
     }
 }

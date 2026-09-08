@@ -1,6 +1,6 @@
 # QQL Filter Reference
 
-Metadata predicates in `WHERE` for `QUERY`, `COUNT`, `SCROLL`, `DELETE`,
+Metadata predicates in `WHERE` for `QUERY`, `COUNT`, `SCROLL`, `FACET`, `DELETE`,
 `CLEAR PAYLOAD`, `DELETE PAYLOAD`, `DELETE VECTOR`, and `UPDATE … SET PAYLOAD`.
 (`UPDATE … SET VECTOR` is point-ID scoped only.)
 

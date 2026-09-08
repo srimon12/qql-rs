@@ -22,6 +22,11 @@
 //! query injection breakouts. String literals (`'...'`, `r'...'`, `"""..."""`,
 //! and `` `...` ``) and comments (`-- ...`) in the source query are preserved
 //! verbatim and never substituted.
+//!
+//! `params` (typed `Value`) and `params_json` (JSON `serde_json::Value`) are
+//! dual contracts that must stay in lockstep: a binding-rule fix in one must
+//! be ported to the other. JSON is the host-SDK round-trip; typed `Value` is
+//! the zero-copy FFI fast path (`F32Array`, packed multivector).
 
 pub(crate) mod ast;
 pub(crate) mod filter;

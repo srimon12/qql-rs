@@ -14,6 +14,11 @@
 //! whose entries are all objects or arrays is a *statement-scoped* list (one
 //! params container per statement, length must match — `QQL-BIND-BATCH-LENGTH`
 //! otherwise); every other shape applies to every statement identically.
+//!
+//! Keep this module in lockstep with [`crate::params`]: named/positional
+//! flattening, duplicate-key rejection, and bind errors must match the typed
+//! `Value` path. The only intended deltas are JSON-specific spellings
+//! (`F32Array` fast path and `{"data","dim"}` multivector).
 
 use crate::ast::Value;
 use crate::ast::statement::Stmt;
