@@ -18,7 +18,7 @@ pub struct ScrollStmt {
     /// `AFTER` cursor — resume scrolling after this point ID.
     pub after: Option<PointId>,
     /// `SHARD '<key>'` routing key.
-    pub shard_key: Option<String>,
+    pub shard_key: Option<super::ShardKey>,
     /// Optional `WITH VECTOR` selector. Defaults to no vectors when `None`.
     pub with_vector: Option<VectorSelector>,
     /// Optional limit parameter placeholder (`:limit` or `?`).
@@ -44,7 +44,7 @@ pub struct CountStmt {
     /// Optional `WHERE` filter.
     pub filter: Option<Box<FilterExpr>>,
     /// `SHARD '<key>'` routing key.
-    pub shard_key: Option<String>,
+    pub shard_key: Option<super::ShardKey>,
     /// `WITH (exact = …)` — require exact counts.
     pub exact: Option<bool>,
 }
@@ -73,7 +73,7 @@ pub struct FacetStmt {
     /// Whether to compute exact distributed counts across shards.
     pub exact: Option<bool>,
     /// Optional shard key partition routing.
-    pub shard_key: Option<String>,
+    pub shard_key: Option<super::ShardKey>,
     /// Optional limit parameter placeholder (`:limit` or `?`).
     #[cfg_attr(
         feature = "serde",

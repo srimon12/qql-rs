@@ -841,7 +841,14 @@ class TestEdgeCases(unittest.TestCase):
         self.assertEqual(stmt.shard_key, "tenant-a")
         self.assertEqual(
             stmt.to_dict()["DeletePayload"]["shard_key"],
-            "tenant-a",
+            {"Keyword": "tenant-a"},
+        )
+        # Numeric keys stay numeric end-to-end (never coerced to keywords).
+        stmt.shard_key = 101
+        self.assertEqual(stmt.shard_key, 101)
+        self.assertEqual(
+            stmt.to_dict()["DeletePayload"]["shard_key"],
+            {"Number": 101},
         )
 
     def test_j11_stmt_shard_key_property(self):

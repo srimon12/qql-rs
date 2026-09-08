@@ -756,7 +756,21 @@ async function runE2E() {
     const [stmt] = nqql.parse("DELETE PAYLOAD draft FROM docs WHERE status = 'archived'");
     stmt.shardKey = 'tenant-a';
     assert.strictEqual(stmt.shardKey, 'tenant-a');
-    assert.strictEqual(stmt.toObject().DeletePayload.shard_key, 'tenant-a');
+    assert.deepStrictEqual(stmt.toObject().DeletePayload.shard_key, { Keyword: 'tenant-a' });
+  });
+
+  test('Stmt.shardKey setter supports numeric keys without coercion', () => {
+    const [stmt] = nqql.parse("DELETE FROM docs WHERE id = 1");
+    stmt.shardKey = 101;
+    assert.strictEqual(stmt.shardKey, 101n);
+    assert.deepStrictEqual(stmt.toObject().Delete.shard_key, { Number: 101 });
+    // Booleans and floats are rejected, never silently coerced.
+    assert.throws(() => { stmt.shardKey = true; }, /shardKey/);
+    assert.throws(() => { stmt.shardKey = 1.5; }, /shardKey/);
+    assert.throws(() => { stmt.shardKey = -3; }, /shardKey/);
+    assert.throws(() => { stmt.shardKey = 2 ** 60; }, /BigInt/);
+    stmt.shardKey = 2n ** 60n;
+    assert.strictEqual(stmt.shardKey, 2n ** 60n);
   });
 
   test('SHARD clause on DELETE PAYLOAD', () => {
@@ -764,7 +778,7 @@ async function runE2E() {
       "DELETE PAYLOAD draft FROM docs WHERE status = 'archived' SHARD 'tenant-b'",
     );
     assert.strictEqual(stmt.shardKey, 'tenant-b');
-    assert.strictEqual(stmt.toObject().DeletePayload.shard_key, 'tenant-b');
+    assert.deepStrictEqual(stmt.toObject().DeletePayload.shard_key, { Keyword: 'tenant-b' });
   });
 
   test('Stmt.shardKey on SHOW COLLECTIONS returns null', () => {

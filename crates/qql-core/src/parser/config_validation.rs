@@ -285,22 +285,31 @@ pub fn validate_params_value(key: &str, value: &Value, span: Span) -> Result<(),
         "shard_keys" => match value {
             Value::List(items) if items.is_empty() => {
                 return Err(validation_err(
-                    "shard_keys must be a non-empty list of strings",
+                    "shard_keys must be a non-empty list of strings or non-negative integers",
                     span,
                 ));
             }
             Value::List(items) => {
                 for item in items {
-                    if !matches!(item, Value::Str(_)) {
+                    let ok = match item {
+                        Value::Str(_) => true,
+                        Value::Int(n) => *n >= 0,
+                        Value::Param(..) | Value::PositionalParam(..) => true,
+                        _ => false,
+                    };
+                    if !ok {
                         return Err(validation_err(
-                            "shard_keys entries must all be strings",
+                            "shard_keys entries must all be strings or non-negative integers",
                             span,
                         ));
                     }
                 }
             }
             _ => {
-                return Err(validation_err("shard_keys must be a list of strings", span));
+                return Err(validation_err(
+                    "shard_keys must be a list of strings or non-negative integers",
+                    span,
+                ));
             }
         },
         _ => {}

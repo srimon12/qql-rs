@@ -48,16 +48,42 @@ impl Stmt {
         serde_json::to_string(&self.inner).map_err(common::serde_napi_err)
     }
 
-    /// QQL `SHARD '…'` routing key (request-level). Prefer `SHARD` in the query;
-    /// set after parse only when the host resolves the key dynamically.
+    /// QQL `SHARD` routing key (request-level). Prefer the clause in QQL.
+    ///
+    /// Reads back `string` for keyword keys, `bigint` for numeric keys, and
+    /// `null` when unset (placeholders also read as `null` — bind first).
+    /// The setter accepts `string | number | bigint | null`: numbers must be
+    /// exact non-negative integers (larger keys need `BigInt`).
     #[napi(getter, catch_unwind)]
-    pub fn shard_key(&self) -> Option<String> {
-        self.inner.shard_key().map(str::to_owned)
+    pub fn shard_key(
+        &self,
+    ) -> Option<napi::bindgen_prelude::Either<String, napi::bindgen_prelude::BigInt>> {
+        use napi::bindgen_prelude::{BigInt, Either};
+        match self.inner.shard_key_typed() {
+            None => None,
+            Some(qql_core::ast::ShardKey::Keyword(s)) => Some(Either::A(s.clone())),
+            Some(qql_core::ast::ShardKey::Number(n)) => Some(Either::B(BigInt {
+                sign_bit: false,
+                words: vec![*n],
+            })),
+            // Unbound placeholders have no host value yet; bind first.
+            Some(_) => None,
+        }
     }
 
-    #[napi(setter, catch_unwind)]
-    pub fn set_shard_key(&mut self, key: Option<String>) -> napi::Result<()> {
-        if !self.inner.set_shard_key(key) {
+    #[napi(
+        setter,
+        catch_unwind,
+        ts_type = "string | number | bigint | null | undefined"
+    )]
+    pub fn set_shard_key(&mut self, key: Option<Unknown<'_>>) -> napi::Result<()> {
+        let key = match key {
+            None => None,
+            Some(value) => {
+                common::jsparams::unknown_opt_to_shard_key(value).map_err(common::to_napi_err)?
+            }
+        };
+        if !self.inner.set_shard_key_typed(key) {
             return Err(napi::Error::from_reason(
                 "cannot set shardKey on statement type that does not support sharding (e.g. DDL statements)",
             ));

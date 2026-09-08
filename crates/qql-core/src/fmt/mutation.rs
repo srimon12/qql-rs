@@ -25,7 +25,7 @@ pub(crate) fn render_scroll(statement: &ScrollStmt) -> String {
         let _ = write!(out, " AFTER {}", render_point_id(after));
     }
     if let Some(key) = &statement.shard_key {
-        let _ = write!(out, " SHARD '{}'", escape_string(key));
+        let _ = write!(out, " SHARD {key}");
     }
     if let Some(selector) = &statement.with_vector {
         let _ = write!(out, " WITH VECTOR {}", render_vector_selector(selector));
@@ -90,7 +90,7 @@ pub(crate) fn render_delete(statement: &DeleteStmt) -> String {
         render_point_selector(&statement.selector)
     );
     if let Some(key) = &statement.shard_key {
-        let _ = write!(out, " SHARD '{}'", escape_string(key));
+        let _ = write!(out, " SHARD {key}");
     }
     if let Some(wait) = statement.wait {
         let _ = write!(out, " WAIT {}", wait);
@@ -105,7 +105,7 @@ pub(crate) fn render_clear_payload(statement: &ClearPayloadStmt) -> String {
         render_point_selector(&statement.selector)
     );
     if let Some(key) = &statement.shard_key {
-        let _ = write!(out, " SHARD '{}'", escape_string(key));
+        let _ = write!(out, " SHARD {key}");
     }
     if let Some(wait) = statement.wait {
         let _ = write!(out, " WAIT {}", wait);
@@ -122,7 +122,7 @@ pub(crate) fn render_delete_payload(statement: &DeletePayloadStmt) -> String {
         render_point_selector(&statement.selector)
     );
     if let Some(key) = &statement.shard_key {
-        let _ = write!(out, " SHARD '{}'", escape_string(key));
+        let _ = write!(out, " SHARD {key}");
     }
     if let Some(wait) = statement.wait {
         let _ = write!(out, " WAIT {}", wait);
@@ -143,7 +143,7 @@ pub(crate) fn render_delete_vector(statement: &DeleteVectorStmt) -> String {
         render_point_selector(&statement.selector)
     );
     if let Some(key) = &statement.shard_key {
-        let _ = write!(out, " SHARD '{}'", escape_string(key));
+        let _ = write!(out, " SHARD {key}");
     }
     if let Some(wait) = statement.wait {
         let _ = write!(out, " WAIT {}", wait);
@@ -163,7 +163,7 @@ pub(crate) fn render_update_vector(statement: &UpdateVectorStmt) -> String {
         render_point_id(&statement.point_id)
     );
     if let Some(key) = &statement.shard_key {
-        let _ = write!(out, " SHARD '{}'", escape_string(key));
+        let _ = write!(out, " SHARD {key}");
     }
     if let Some(wait) = statement.wait {
         let _ = write!(out, " WAIT {}", wait);
@@ -184,7 +184,7 @@ pub(crate) fn render_update_payload(statement: &UpdatePayloadStmt) -> String {
         render_point_selector(&statement.selector)
     );
     if let Some(key) = &statement.shard_key {
-        let _ = write!(out, " SHARD '{}'", escape_string(key));
+        let _ = write!(out, " SHARD {key}");
     }
     if let Some(wait) = statement.wait {
         let _ = write!(out, " WAIT {}", wait);
@@ -203,7 +203,7 @@ pub(crate) fn render_count(statement: &CountStmt) -> String {
         let _ = write!(out, " WHERE {}", render_filter(filter));
     }
     if let Some(key) = &statement.shard_key {
-        let _ = write!(out, " SHARD '{}'", escape_string(key));
+        let _ = write!(out, " SHARD {key}");
     }
     if let Some(exact) = statement.exact {
         let _ = write!(out, " WITH (exact = {})", exact);
@@ -234,7 +234,7 @@ pub(crate) fn render_facet(statement: &FacetStmt) -> String {
         let _ = write!(out, " EXACT {}", exact);
     }
     if let Some(key) = &statement.shard_key {
-        let _ = write!(out, " SHARD '{}'", escape_string(key));
+        let _ = write!(out, " SHARD {key}");
     }
     out
 }

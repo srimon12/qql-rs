@@ -3,7 +3,8 @@ use alloc::boxed::Box;
 use crate::ast::{
     CollectionConfig, CollectionParamsConfig, HnswRuntimeConfig, MemoryPlacement,
     MultivectorComparator, MultivectorConfig, OptimizersRuntimeConfig, QuantizationConfig,
-    QuantizationType, QuantizationUpdate, SparseIndexConfig, Value, VectorDatatype, VectorsConfig,
+    QuantizationType, QuantizationUpdate, ShardKey, SparseIndexConfig, Value, VectorDatatype,
+    VectorsConfig,
 };
 use crate::error::{QqlError, Span};
 use crate::token::TokenKind;
@@ -402,12 +403,28 @@ impl<'a> AstLowerer<'a> {
                 shard_keys: match config_value(&config, "shard_keys") {
                     Some(Value::List(items)) => {
                         let mut keys = Vec::with_capacity(items.len());
+                        let entry_span = self.peek()?.span;
                         for item in items {
                             match item {
-                                Value::Str(s) => keys.push(s.clone()),
+                                Value::Str(s) => keys.push(ShardKey::Keyword(s.clone())),
+                                Value::Int(n) if *n >= 0 => {
+                                    keys.push(ShardKey::Number(*n as u64));
+                                }
+                                Value::Param(name, span) => keys.push(ShardKey::Param(
+                                    name.clone(),
+                                    span.clone()
+                                        .or_else(|| Some(alloc::boxed::Box::new(entry_span))),
+                                )),
+                                Value::PositionalParam(idx, span) => {
+                                    keys.push(ShardKey::PositionalParam(
+                                        *idx,
+                                        span.clone()
+                                            .or_else(|| Some(alloc::boxed::Box::new(entry_span))),
+                                    ));
+                                }
                                 _ => {
                                     return Err(validation_err(
-                                        "shard_keys entries must all be strings",
+                                        "shard_keys entries must all be strings or non-negative integers",
                                         self.peek()?.span,
                                     ));
                                 }
@@ -415,7 +432,7 @@ impl<'a> AstLowerer<'a> {
                         }
                         if keys.is_empty() {
                             return Err(validation_err(
-                                "shard_keys must be a non-empty list of strings",
+                                "shard_keys must be a non-empty list of strings or non-negative integers",
                                 self.peek()?.span,
                             ));
                         }
@@ -423,7 +440,7 @@ impl<'a> AstLowerer<'a> {
                     }
                     Some(_) => {
                         return Err(validation_err(
-                            "shard_keys must be a list of strings",
+                            "shard_keys must be a list of strings or non-negative integers",
                             self.peek()?.span,
                         ));
                     }

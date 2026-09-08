@@ -40,7 +40,9 @@
         },
         "params": null,
         "score_threshold": null,
-        "shard_key": "honeywell"
+        "shard_key": {
+          "Keyword": "honeywell"
+        }
       }
     },
     {
@@ -58,7 +60,9 @@
             }
           }
         },
-        "shard_key": "honeywell"
+        "shard_key": {
+          "Keyword": "honeywell"
+        }
       }
     },
     {
@@ -75,7 +79,9 @@
           }
         },
         "limit": 50,
-        "shard_key": "ge",
+        "shard_key": {
+          "Keyword": "ge"
+        },
         "with_vector": null
       }
     },
@@ -93,7 +99,9 @@
             }
           }
         },
-        "shard_key": "3m",
+        "shard_key": {
+          "Keyword": "3m"
+        },
         "wait": null
       }
     },
@@ -120,6 +128,70 @@
         ],
         "shard_key": {
           "Keyword": "acme"
+        },
+        "wait": null
+      }
+    },
+    {
+      "Query": {
+        "collection": {
+          "Explicit": "sec10k"
+        },
+        "ctes": [],
+        "expression": {
+          "Nearest": {
+            "input": {
+              "Text": {
+                "model": null,
+                "text": "supply chain risks"
+              }
+            },
+            "mmr": null,
+            "prefetch": [],
+            "using": null
+          }
+        },
+        "filter": {
+          "Compare": {
+            "field": "tenant_id",
+            "op": "Eq",
+            "value": {
+              "Str": "honeywell"
+            }
+          }
+        },
+        "group": null,
+        "output": {
+          "payload": null,
+          "vectors": null
+        },
+        "page": {
+          "limit": 10,
+          "offset": null
+        },
+        "params": null,
+        "score_threshold": null,
+        "shard_key": {
+          "Number": 101
+        }
+      }
+    },
+    {
+      "Delete": {
+        "collection": "sec10k",
+        "selector": {
+          "Filter": {
+            "Compare": {
+              "field": "tenant_id",
+              "op": "Eq",
+              "value": {
+                "Str": "3m"
+              }
+            }
+          }
+        },
+        "shard_key": {
+          "Number": 7
         },
         "wait": null
       }

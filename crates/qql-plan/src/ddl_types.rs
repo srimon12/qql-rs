@@ -185,7 +185,7 @@ pub struct CreateCollectionRequest {
     pub sharding_method: Option<String>,
     /// Custom shard keys created via `/shards` after collection create.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub shard_keys: Option<Vec<String>>,
+    pub shard_keys: Option<Vec<crate::semantic::PlanShardKey>>,
     /// OpenAPI `PayloadStorageParams`: `{"memory": "cold"|"cached"}`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payload: Option<serde_json::Value>,
@@ -237,7 +237,7 @@ pub struct CreateShardKeyRequest {
 #[derive(Debug, Clone, Serialize)]
 pub struct DropShardKeyRequest {
     /// Custom shard key to remove.
-    pub shard_key: String,
+    pub shard_key: crate::semantic::PlanShardKey,
 }
 
 /// Cluster-wide resource quota configuration (`PUT /quotas`).

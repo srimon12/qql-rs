@@ -367,25 +367,31 @@ impl PlannedOperation {
     }
 
     /// Shard key carried on the plan, when present.
+    ///
+    /// Keyword-only view: numeric keys read as `None`. Use
+    /// [`PlannedOperation::shard_key_typed`] when the key form matters.
     pub fn shard_key(&self) -> Option<&str> {
+        self.shard_key_typed().and_then(|k| k.as_keyword())
+    }
+
+    /// Shard key with its keyword / numeric form preserved.
+    pub fn shard_key_typed(&self) -> Option<&crate::semantic::PlanShardKey> {
         match self {
-            PlannedOperation::Query { request, .. } => request.shard_key.as_deref(),
-            PlannedOperation::QueryGroups { request, .. } => request.shard_key.as_deref(),
-            PlannedOperation::GetPoints { request, .. } => request.shard_key.as_deref(),
-            PlannedOperation::Scroll { request, .. } => request.shard_key.as_deref(),
-            PlannedOperation::Count { request, .. } => request.shard_key.as_deref(),
-            PlannedOperation::Facet { request, .. } => request.shard_key.as_deref(),
-            PlannedOperation::Upsert { request, .. } => {
-                request.shard_key.as_ref().and_then(|k| k.as_keyword())
-            }
-            PlannedOperation::Delete { request, .. } => request.shard_key.as_deref(),
-            PlannedOperation::UpdatePayload { request, .. } => request.shard_key.as_deref(),
-            PlannedOperation::ClearPayload { request, .. } => request.shard_key.as_deref(),
-            PlannedOperation::DeletePayload { request, .. } => request.shard_key.as_deref(),
-            PlannedOperation::UpdateVectors { request, .. } => request.shard_key.as_deref(),
-            PlannedOperation::DeleteVectors { request, .. } => request.shard_key.as_deref(),
-            PlannedOperation::CreateShardKey { request, .. } => request.shard_key.as_keyword(),
-            PlannedOperation::DropShardKey { request, .. } => Some(request.shard_key.as_str()),
+            PlannedOperation::Query { request, .. } => request.shard_key.as_ref(),
+            PlannedOperation::QueryGroups { request, .. } => request.shard_key.as_ref(),
+            PlannedOperation::GetPoints { request, .. } => request.shard_key.as_ref(),
+            PlannedOperation::Scroll { request, .. } => request.shard_key.as_ref(),
+            PlannedOperation::Count { request, .. } => request.shard_key.as_ref(),
+            PlannedOperation::Facet { request, .. } => request.shard_key.as_ref(),
+            PlannedOperation::Upsert { request, .. } => request.shard_key.as_ref(),
+            PlannedOperation::Delete { request, .. } => request.shard_key.as_ref(),
+            PlannedOperation::UpdatePayload { request, .. } => request.shard_key.as_ref(),
+            PlannedOperation::ClearPayload { request, .. } => request.shard_key.as_ref(),
+            PlannedOperation::DeletePayload { request, .. } => request.shard_key.as_ref(),
+            PlannedOperation::UpdateVectors { request, .. } => request.shard_key.as_ref(),
+            PlannedOperation::DeleteVectors { request, .. } => request.shard_key.as_ref(),
+            PlannedOperation::CreateShardKey { request, .. } => Some(&request.shard_key),
+            PlannedOperation::DropShardKey { request, .. } => Some(&request.shard_key),
             _ => None,
         }
     }
@@ -475,7 +481,10 @@ pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOper
                         ids,
                         with_payload,
                         with_vector,
-                        shard_key: query.shard_key.clone(),
+                        shard_key: query
+                            .shard_key
+                            .as_ref()
+                            .map(crate::semantic::PlanShardKey::from),
                     },
                 });
             }
@@ -599,7 +608,10 @@ pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOper
                 collection,
                 request: CountRequest {
                     filter,
-                    shard_key: count.shard_key.clone(),
+                    shard_key: count
+                        .shard_key
+                        .as_ref()
+                        .map(crate::semantic::PlanShardKey::from),
                     exact: count.exact,
                 },
             })
@@ -633,7 +645,10 @@ pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOper
                     limit: facet.limit,
                     filter,
                     exact: facet.exact,
-                    shard_key: facet.shard_key.clone(),
+                    shard_key: facet
+                        .shard_key
+                        .as_ref()
+                        .map(crate::semantic::PlanShardKey::from),
                 },
             })
         }
@@ -648,7 +663,7 @@ pub(crate) fn lower_statement_to_planned(statement: &Stmt) -> Result<PlannedOper
         Stmt::DropShardKey(sk) => Ok(PlannedOperation::DropShardKey {
             collection: sk.collection.clone(),
             request: DropShardKeyRequest {
-                shard_key: sk.shard_key.clone(),
+                shard_key: crate::semantic::PlanShardKey::from(&sk.shard_key),
             },
         }),
         Stmt::ShowCollections => Ok(PlannedOperation::ListCollections),
@@ -981,7 +996,10 @@ mod tests {
         {
             assert_eq!(collection, "docs");
             assert_eq!(request.keys, vec!["draft", "temp_token"]);
-            assert_eq!(request.shard_key.as_deref(), Some("tenant_1"));
+            assert_eq!(
+                request.shard_key,
+                Some(crate::semantic::PlanShardKey::Keyword("tenant_1".into()))
+            );
             assert!(request.filter.is_some());
         } else {
             panic!("expected DeletePayload operation");
@@ -1077,7 +1095,10 @@ mod tests {
 
         if let PlannedOperation::Count { request, .. } = op {
             assert_eq!(request.exact, Some(true));
-            assert_eq!(request.shard_key.as_deref(), Some("tenant_2"));
+            assert_eq!(
+                request.shard_key,
+                Some(crate::semantic::PlanShardKey::Keyword("tenant_2".into()))
+            );
             assert!(request.filter.is_some());
         } else {
             panic!("expected Count operation");

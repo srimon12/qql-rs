@@ -7,13 +7,33 @@ use alloc::vec::Vec;
 ///
 /// These hash differently on the wire (`ShardKey::Keyword` vs `ShardKey::Number`),
 /// so a payload integer `101` must not be coerced to the keyword `"101"`.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// Every routing statement keeps the parsed form end-to-end (parse → plan →
+/// REST/gRPC) so numeric keys reach the numeric partition.
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ShardKey {
     /// String / UUID shard key (`SHARD 'acme'`).
     Keyword(String),
     /// Numeric shard key (`SHARD 101`).
     Number(u64),
+    /// Parameter placeholder (`SHARD :name`).
+    Param(
+        String,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        Option<alloc::boxed::Box<crate::error::Span>>,
+    ),
+    /// Positional parameter placeholder (`SHARD ?`).
+    PositionalParam(
+        usize,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        Option<alloc::boxed::Box<crate::error::Span>>,
+    ),
 }
 
 impl ShardKey {
@@ -21,8 +41,38 @@ impl ShardKey {
     pub fn as_keyword(&self) -> Option<&str> {
         match self {
             Self::Keyword(s) => Some(s.as_str()),
-            Self::Number(_) => None,
+            Self::Number(_) | Self::Param(..) | Self::PositionalParam(..) => None,
         }
+    }
+
+    /// Construct an unlocated named parameter placeholder.
+    pub fn param(name: impl Into<String>) -> Self {
+        Self::Param(name.into(), None)
+    }
+
+    /// Construct a located named parameter placeholder.
+    pub fn param_with_span(name: impl Into<String>, span: crate::error::Span) -> Self {
+        Self::Param(name.into(), Some(alloc::boxed::Box::new(span)))
+    }
+}
+
+impl From<String> for ShardKey {
+    /// Strings become keyword keys; numbers stay numbers via `From<u64>`.
+    fn from(value: String) -> Self {
+        Self::Keyword(value)
+    }
+}
+
+impl From<&str> for ShardKey {
+    /// Strings become keyword keys; numbers stay numbers via `From<u64>`.
+    fn from(value: &str) -> Self {
+        Self::Keyword(value.into())
+    }
+}
+
+impl From<u64> for ShardKey {
+    fn from(value: u64) -> Self {
+        Self::Number(value)
     }
 }
 
@@ -31,6 +81,8 @@ impl core::fmt::Display for ShardKey {
         match self {
             Self::Keyword(s) => write!(f, "'{}'", super::super::escape_string(s)),
             Self::Number(n) => write!(f, "{n}"),
+            Self::Param(name, _) => write!(f, ":{name}"),
+            Self::PositionalParam(..) => write!(f, "?"),
         }
     }
 }

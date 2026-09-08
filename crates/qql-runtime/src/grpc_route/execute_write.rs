@@ -5,7 +5,7 @@ use qql_core::error::QqlError;
 use crate::grpc::GrpcQdrant;
 use crate::qdrant_grpc::qdrant;
 
-use super::common::{shard_key_selector, shard_key_selector_plan, to_point_id};
+use super::common::{shard_key_selector, to_point_id};
 use super::query::{points_and_filter_selector, to_vectors};
 use super::responses::{mutation_response_from, update_result_to_json};
 use super::values::to_qdrant_value;
@@ -43,7 +43,7 @@ pub(crate) async fn execute_upsert(
         collection_name: collection.to_owned(),
         wait: Some(wait),
         points,
-        shard_key_selector: shard_key_selector_plan(&request.shard_key),
+        shard_key_selector: shard_key_selector(&request.shard_key),
         ..Default::default()
     };
     let resp = client
@@ -259,7 +259,7 @@ pub(crate) fn to_points_update_operation(
                     })
                 })
                 .collect::<Result<Vec<_>, QqlError>>()?;
-            let shard_key_selector = shard_key_selector_plan(&upsert.shard_key);
+            let shard_key_selector = shard_key_selector(&upsert.shard_key);
             Operation::Upsert(points_update_operation::PointStructList {
                 points,
                 shard_key_selector,

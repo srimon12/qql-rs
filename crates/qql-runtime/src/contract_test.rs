@@ -363,6 +363,41 @@ mod tests {
 
     /// REST query params + body vs gRPC conversion field parity for key Query paths.
     #[test]
+    fn numeric_shard_key_stays_numeric_on_both_transports() {
+        // The 1.7 mistargeting fix: SHARD 101 must reach the numeric
+        // partition on REST (body number) and gRPC (Number selector) —
+        // never the "101" keyword.
+        let stmt = Parser::parse("DELETE FROM docs WHERE id = 1 SHARD 101;").unwrap();
+        let op = plan(&stmt).unwrap();
+
+        let route = to_rest_route(&op).expect("rest route");
+        let body = route.body_json().unwrap();
+        assert_eq!(body["shard_key"], serde_json::json!(101));
+        assert!(
+            route.query.iter().all(|(k, _)| k != "shard_key"),
+            "routing rides the body field, not the query string: {:?}",
+            route.query
+        );
+
+        let PlannedOperation::Delete {
+            collection,
+            request,
+            ..
+        } = &op
+        else {
+            panic!("expected Delete plan");
+        };
+        assert_eq!(collection, "docs");
+        let selector = test_api::shard_key_selector(&request.shard_key);
+        let keys = selector.unwrap().shard_keys;
+        assert_eq!(keys.len(), 1);
+        match keys[0].key.as_ref() {
+            Some(qdrant::shard_key::Key::Number(n)) => assert_eq!(*n, 101),
+            other => panic!("expected numeric shard, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn rest_grpc_query_parity_timeout_consistency_shard_multi() {
         // MultiDense + timeout + consistency + shard_key
         let stmt = Parser::parse(

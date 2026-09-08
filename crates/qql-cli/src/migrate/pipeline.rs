@@ -240,6 +240,11 @@ fn shard_cache_key(shard_key: Option<&ShardKey>, wait: bool) -> String {
     match shard_key {
         Some(ShardKey::Keyword(s)) => format!("k:{s}|{wait}"),
         Some(ShardKey::Number(n)) => format!("n:{n}|{wait}"),
+        // Placeholders never occur in migrate-built statements (keys come
+        // from record fields); include them deterministically so the match
+        // stays exhaustive without panicking.
+        Some(ShardKey::Param(name, _)) => format!("p:{name}|{wait}"),
+        Some(ShardKey::PositionalParam(idx, _)) => format!("q:{idx}|{wait}"),
         None => format!("|{wait}"),
     }
 }

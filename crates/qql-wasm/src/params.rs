@@ -98,6 +98,53 @@ fn invalid_params(message: impl Into<String>) -> QqlError {
     QqlError::validation("QQL-BIND-INVALID-PARAMS", message.into(), None)
 }
 
+/// Convert any JS value to a typed shard routing key (`None` clears).
+///
+/// Strings become keywords (empty clears), integers numeric keys — the same
+/// split the reference parser enforces. `BigInt` carries exact integers of
+/// any size; `number`s must be exact non-negative integers within the safe
+/// range (larger keys need `BigInt`, never silent rounding). Booleans and
+/// everything else fail closed.
+pub(crate) fn jsvalue_to_shard_key(v: &JsValue) -> Result<Option<ast::ShardKey>, QqlError> {
+    use qql_core::ast::ShardKey;
+    if v.is_null() || v.is_undefined() {
+        return Ok(None);
+    }
+    if let Some(s) = v.as_string() {
+        return Ok(if s.is_empty() {
+            None
+        } else {
+            Some(ShardKey::Keyword(s))
+        });
+    }
+    if v.as_bool().is_some() {
+        return Err(invalid_params(
+            "shardKey must be a string, an integer, a BigInt, or null",
+        ));
+    }
+    if let Ok(big) = v.clone().dyn_into::<js_sys::BigInt>() {
+        let n = u64::try_from(big)
+            .map_err(|_| invalid_params("shardKey BigInt does not fit in u64"))?;
+        return Ok(Some(ShardKey::Number(n)));
+    }
+    if let Some(n) = v.as_f64() {
+        if !n.is_finite() || n.fract() != 0.0 || n < 0.0 {
+            return Err(invalid_params(
+                "shardKey number must be a non-negative integer",
+            ));
+        }
+        if n > 9007199254740991.0 {
+            return Err(invalid_params(
+                "shardKey number exceeds the exact-integer range; pass a BigInt instead",
+            ));
+        }
+        return Ok(Some(ShardKey::Number(n as u64)));
+    }
+    Err(invalid_params(
+        "shardKey must be a string, an integer, a BigInt, or null",
+    ))
+}
+
 /// Convert any JS value to a typed [`Value`], mirroring `nqql-common`.
 ///
 /// Scalars dispatch on `typeof` first so they never pay for typed-array

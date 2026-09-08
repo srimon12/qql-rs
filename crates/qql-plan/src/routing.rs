@@ -82,14 +82,16 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
         q
     }
 
-    /// Mutation query params: wait + optional shard_key.
-    fn mut_query(wait: bool, shard_key: Option<&str>) -> Vec<(String, String)> {
+    /// Mutation query params: `wait` only.
+    ///
+    /// Shard routing rides the typed body field (`shard_key`, string or
+    /// number per OpenAPI) — never the query string. Qdrant defines no
+    /// `shard_key` query parameter, so emitting one would be dead weight at
+    /// best and a conflicting string form for numeric keys at worst.
+    fn mut_query(wait: bool) -> Vec<(String, String)> {
         let mut q = Vec::new();
         if wait {
             q.push(("wait".into(), "true".into()));
-        }
-        if let Some(sk) = shard_key {
-            q.push(("shard_key".into(), sk.to_owned()));
         }
         q
     }
@@ -158,9 +160,6 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
             if *wait {
                 query.push(("wait".into(), "true".into()));
             }
-            if let Some(ref sk) = request.shard_key {
-                query.push(("shard_key".into(), sk.to_string()));
-            }
             Route {
                 method: Method::Put,
                 path: format!("/collections/{collection}/points"),
@@ -175,7 +174,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
         } => Route {
             method: Method::Post,
             path: format!("/collections/{collection}/points/delete"),
-            query: mut_query(*wait, request.shard_key.as_deref()),
+            query: mut_query(*wait),
             body: body(request)?,
         },
         PlannedOperation::ClearPayload {
@@ -185,7 +184,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
         } => Route {
             method: Method::Post,
             path: format!("/collections/{collection}/points/payload/clear"),
-            query: mut_query(*wait, request.shard_key.as_deref()),
+            query: mut_query(*wait),
             body: body(request)?,
         },
         PlannedOperation::DeletePayload {
@@ -195,7 +194,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
         } => Route {
             method: Method::Post,
             path: format!("/collections/{collection}/points/payload/delete"),
-            query: mut_query(*wait, request.shard_key.as_deref()),
+            query: mut_query(*wait),
             body: body(request)?,
         },
         PlannedOperation::DeleteVectors {
@@ -205,7 +204,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
         } => Route {
             method: Method::Post,
             path: format!("/collections/{collection}/points/vectors/delete"),
-            query: mut_query(*wait, request.shard_key.as_deref()),
+            query: mut_query(*wait),
             body: body(request)?,
         },
         PlannedOperation::UpdateVectors {
@@ -215,7 +214,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
         } => Route {
             method: Method::Put,
             path: format!("/collections/{collection}/points/vectors"),
-            query: mut_query(*wait, request.shard_key.as_deref()),
+            query: mut_query(*wait),
             body: body(request)?,
         },
         PlannedOperation::UpdatePayload {
@@ -225,7 +224,7 @@ pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError
         } => Route {
             method: Method::Post,
             path: format!("/collections/{collection}/points/payload"),
-            query: mut_query(*wait, request.shard_key.as_deref()),
+            query: mut_query(*wait),
             body: body(request)?,
         },
         // DDL: REST shapes differ from plan IR — use OpenAPI projection fns
@@ -431,7 +430,10 @@ mod tests {
         let PlannedOperation::GetPoints { request, .. } = operation else {
             panic!("expected point lookup");
         };
-        assert_eq!(request.shard_key.as_deref(), Some("tenant-a"));
+        assert_eq!(
+            request.shard_key,
+            Some(crate::semantic::PlanShardKey::Keyword("tenant-a".into()))
+        );
         assert!(
             try_route(&statement)
                 .unwrap()
@@ -502,6 +504,21 @@ mod tests {
     }
 
     #[test]
+    fn repro_numeric_shard_key_projects_as_number() {
+        // SHARD 101 on a mutation must stay numeric to the wire (body 101,
+        // not "101"): currently stringified to the keyword partition.
+        let statement = Parser::parse("DELETE FROM docs WHERE id = 1 SHARD 101;").unwrap();
+        let operation = plan::plan(&statement).unwrap();
+        let route = to_rest_route(&operation).expect("rest route");
+        let body = route.body_json().unwrap();
+        assert_eq!(
+            body["shard_key"],
+            serde_json::json!(101),
+            "REST body must carry the numeric key, got {body}"
+        );
+    }
+
+    #[test]
     fn mutation_shard_keys_lower_and_project() {
         let cases = [
             ("CLEAR PAYLOAD FROM docs WHERE id = 1 SHARD 't1';", "t1"),
@@ -527,17 +544,18 @@ mod tests {
                 "plan.shard_key for {qql}"
             );
             let r = to_rest_route(&operation).expect("rest route");
+            // Routing rides the typed body field; Qdrant defines no
+            // `shard_key` query parameter, so none is emitted.
             assert!(
-                r.query
-                    .iter()
-                    .any(|(k, v)| k == "shard_key" && v == expected),
-                "REST query param for {qql}: {:?}",
+                r.query.iter().all(|(k, _)| k != "shard_key"),
+                "no shard_key query param for {qql}: {:?}",
                 r.query
             );
-            let body = r.body_json().unwrap().to_string();
-            assert!(
-                body.contains(expected),
-                "REST body should include shard_key for {qql}: {body}"
+            let body = r.body_json().unwrap();
+            assert_eq!(
+                body["shard_key"],
+                serde_json::json!(expected),
+                "REST body should carry the shard_key for {qql}: {body}"
             );
         }
     }

@@ -249,7 +249,7 @@ fn split_by_payload_field() {
     ];
     let (mut groups, skipped) = split_by_shard(records, &opts).unwrap();
     assert_eq!(skipped, 0);
-    groups.sort_by(|a, b| a.shard_key.cmp(&b.shard_key));
+    groups.sort_by_key(|g| g.shard_key.as_ref().map(|k| k.to_string()));
     assert_eq!(groups.len(), 2);
     assert_eq!(
         groups[0].shard_key.as_ref().and_then(|k| k.as_keyword()),

@@ -55,7 +55,7 @@ query_tail = {
     (^"USING" ~ (hybrid_using | vector_target))?
     ~ (^"PREFETCH" ~ "(" ~ prefetch ~ ("," ~ prefetch)* ~ ")")?
     ~ (^"WHERE" ~ filter)?
-    ~ (^"SHARD" ~ (param | string))?
+    ~ (^"SHARD" ~ (param | string | non_negative_integer))?
     ~ (^"PARAMS" ~ search_params)?
     ~ (^"SCORE" ~ ^"THRESHOLD" ~ (param | number))?
     ~ group_clause?
@@ -306,7 +306,7 @@ scroll = {
     ^"SCROLL" ~ ^"FROM" ~ collection
     ~ (^"WHERE" ~ filter)?
     ~ (^"AFTER" ~ point_id)?
-    ~ (^"SHARD" ~ (param | string))?
+    ~ (^"SHARD" ~ (param | string | non_negative_integer))?
     ~ (^"WITH" ~ ^"VECTOR" ~ vector_selector?)?
     ~ ^"LIMIT" ~ (param | positive_integer)
 }
@@ -314,7 +314,7 @@ scroll = {
 count = {
     ^"COUNT" ~ ^"FROM" ~ collection
     ~ (^"WHERE" ~ filter)?
-    ~ (^"SHARD" ~ (param | string))?
+    ~ (^"SHARD" ~ (param | string | non_negative_integer))?
     ~ (^"WITH" ~ count_config)?
 }
 
@@ -336,7 +336,7 @@ facet_clause = _{
       ^"WHERE" ~ filter
     | ^"LIMIT" ~ (param | positive_integer)
     | ^"EXACT" ~ boolean?
-    | ^"SHARD" ~ (param | string)
+    | ^"SHARD" ~ (param | string | non_negative_integer)
     | ^"WITH" ~ facet_config
 }
 facet_key = { name }
@@ -349,7 +349,7 @@ upsert = {
     ~ point_object ~ ("," ~ point_object)*
     ~ embedding_options?
     ~ embed_clause?
-    ~ (^"SHARD" ~ (param | string))?
+    ~ (^"SHARD" ~ (param | string | non_negative_integer))?
     ~ (^"WAIT" ~ boolean)?
 }
 
@@ -395,19 +395,19 @@ delete_vectors = {
     ~ vector_name ~ ("," ~ vector_name)*
     ~ ^"FROM" ~ collection
     ~ ^"WHERE" ~ filter
-    ~ (^"SHARD" ~ (param | string))?
+    ~ (^"SHARD" ~ (param | string | non_negative_integer))?
     ~ (^"WAIT" ~ boolean)?
 }
 delete = {
     ^"DELETE" ~ ^"FROM" ~ collection
     ~ ^"WHERE" ~ filter
-    ~ (^"SHARD" ~ (param | string))?
+    ~ (^"SHARD" ~ (param | string | non_negative_integer))?
     ~ (^"WAIT" ~ boolean)?
 }
 clear_payload = {
     ^"CLEAR" ~ ^"PAYLOAD" ~ ^"FROM" ~ collection
     ~ ^"WHERE" ~ filter
-    ~ (^"SHARD" ~ (param | string))?
+    ~ (^"SHARD" ~ (param | string | non_negative_integer))?
     ~ (^"WAIT" ~ boolean)?
 }
 delete_payload = {
@@ -415,7 +415,7 @@ delete_payload = {
     ~ field ~ ("," ~ field)*
     ~ ^"FROM" ~ collection
     ~ ^"WHERE" ~ filter
-    ~ (^"SHARD" ~ (param | string))?
+    ~ (^"SHARD" ~ (param | string | non_negative_integer))?
     ~ (^"WAIT" ~ boolean)?
 }
 
@@ -424,10 +424,10 @@ update = {
     ~ (
         ^"VECTOR" ~ vector_name? ~ "=" ~ (param | vector_value)
         ~ ^"WHERE" ~ ^"id" ~ "=" ~ point_id
-        ~ (^"SHARD" ~ (param | string))?
+        ~ (^"SHARD" ~ (param | string | non_negative_integer))?
         | ^"PAYLOAD" ~ "=" ~ (param | object)
         ~ ^"WHERE" ~ filter
-        ~ (^"SHARD" ~ (param | string))?
+        ~ (^"SHARD" ~ (param | string | non_negative_integer))?
     )
     ~ (^"WAIT" ~ boolean)?
 }
@@ -501,7 +501,7 @@ drop_index = {
 }
 
 create_shard_key = {
-    ^"CREATE" ~ ^"SHARD" ~ ^"KEY" ~ string
+    ^"CREATE" ~ ^"SHARD" ~ ^"KEY" ~ (string | non_negative_integer | param)
     ~ ^"ON" ~ ^"COLLECTION" ~ collection
     ~ (^"WITH" ~ shard_key_config)?
 }
@@ -534,7 +534,7 @@ replication_factor_key = {
     ~ "_" ~ ("f" | "F") ~ ("a" | "A") ~ ("c" | "C") ~ ("t" | "T") ~ ("o" | "O") ~ ("r" | "R")
 }
 drop_shard_key = {
-    ^"DROP" ~ ^"SHARD" ~ ^"KEY" ~ string
+    ^"DROP" ~ ^"SHARD" ~ ^"KEY" ~ (string | non_negative_integer | param)
     ~ ^"ON" ~ ^"COLLECTION" ~ collection
 }
 

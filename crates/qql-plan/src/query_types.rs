@@ -53,7 +53,7 @@ pub struct QueryRequest {
     pub lookup_from: Option<LookupRequest>,
     /// Cluster shard routing for custom-sharded collections.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub shard_key: Option<String>,
+    pub shard_key: Option<crate::semantic::PlanShardKey>,
     /// OpenAPI query param / proto field — not body JSON.
     #[serde(skip)]
     pub timeout: Option<u64>,
@@ -102,7 +102,7 @@ pub struct QueryGroupsRequest {
     pub lookup_from: Option<LookupRequest>,
     /// Cluster shard routing for custom-sharded collections.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub shard_key: Option<String>,
+    pub shard_key: Option<crate::semantic::PlanShardKey>,
     /// OpenAPI query param / proto field — not body JSON.
     #[serde(skip)]
     pub timeout: Option<u64>,

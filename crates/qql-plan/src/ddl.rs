@@ -229,7 +229,11 @@ fn fill_collection_config(
             req.shard_number = Some(sn);
         }
         req.sharding_method = p.sharding_method.clone();
-        req.shard_keys = p.shard_keys.clone();
+        req.shard_keys = p.shard_keys.as_ref().map(|keys| {
+            keys.iter()
+                .map(crate::semantic::PlanShardKey::from)
+                .collect()
+        });
     }
     if let Some(ref q) = config.quantization {
         req.quantization_config = Some(lower_quantization_config(q));

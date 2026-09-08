@@ -109,10 +109,24 @@ impl core::fmt::Display for PlanShardKey {
 }
 
 impl From<&qql_core::ast::ShardKey> for PlanShardKey {
+    // INVARIANT: `Param` / `PositionalParam` arms panic. `plan()` gates with
+    // `ensure_no_unbound_params` and `plan_template()` with
+    // `validate_no_unbound_scalar_params` (both cover shard keys, including
+    // DDL key fields and `shard_keys` lists), and `bind_stmt` substitutes
+    // placeholders before re-planning — so direct callers must preserve that
+    // order, exactly like `PlanPointId::from`.
     fn from(key: &qql_core::ast::ShardKey) -> Self {
         match key {
             qql_core::ast::ShardKey::Keyword(s) => Self::Keyword(s.clone()),
             qql_core::ast::ShardKey::Number(n) => Self::Number(*n),
+            qql_core::ast::ShardKey::Param(name, _) => {
+                panic!("invariant violation: unbound parameter :{name} reached PlanShardKey");
+            }
+            qql_core::ast::ShardKey::PositionalParam(idx, _) => {
+                panic!(
+                    "invariant violation: unbound positional parameter ?{idx} reached PlanShardKey"
+                );
+            }
         }
     }
 }

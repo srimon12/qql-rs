@@ -38,6 +38,7 @@ QUERY <expr> FROM <coll>
 |------|------|
 | `CREATE SHARD KEY 'acme' ON COLLECTION c` | DDL — define custom partition |
 | `… SHARD 'acme'` | DML — route this request |
+| `… SHARD 101` | DML — route to a numeric partition (never coerced to `"101"`) |
 
 Routing field after parse: `stmt.set_shard_key(Some("acme".into()))`  
 (same AST field; **no** `inject_shard_key`).

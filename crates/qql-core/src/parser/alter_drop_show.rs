@@ -56,7 +56,7 @@ impl<'a> AstLowerer<'a> {
         if self.peek()?.kind == TokenKind::Shard {
             self.advance()?; // consume SHARD
             self.expect(TokenKind::Key)?;
-            let shard_key = self.parse_string()?;
+            let shard_key = self.parse_shard_key_atom()?;
             self.expect(TokenKind::On)?;
             self.expect(TokenKind::Collection)?;
             let collection = self.parse_identifier()?;

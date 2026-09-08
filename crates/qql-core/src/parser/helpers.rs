@@ -518,19 +518,22 @@ impl<'a> AstLowerer<'a> {
                 let n = self.parse_non_negative_u64("shard key")?;
                 Ok(crate::ast::ShardKey::Number(n))
             }
+            TokenKind::Colon => {
+                let colon_tok = self.advance()?;
+                let name = self.parse_param_name()?;
+                let span = Span::new(colon_tok.span.start, self.prev_span().end);
+                Ok(crate::ast::ShardKey::param_with_span(name, span))
+            }
+            TokenKind::Question => {
+                let q_tok = self.advance()?;
+                let idx = self.next_positional_param();
+                Ok(crate::ast::ShardKey::PositionalParam(
+                    idx,
+                    Some(alloc::boxed::Box::new(q_tok.span)),
+                ))
+            }
             _ => Ok(crate::ast::ShardKey::Keyword(self.parse_string()?)),
         }
-    }
-
-    pub fn parse_optional_shard_and_wait(
-        &mut self,
-    ) -> Result<(Option<String>, Option<bool>), QqlError> {
-        let (typed, wait) = self.parse_optional_typed_shard_and_wait()?;
-        let shard_key = typed.map(|k| match k {
-            crate::ast::ShardKey::Keyword(s) => s,
-            crate::ast::ShardKey::Number(n) => n.to_string(),
-        });
-        Ok((shard_key, wait))
     }
 
     pub fn parse_optional_typed_shard_and_wait(

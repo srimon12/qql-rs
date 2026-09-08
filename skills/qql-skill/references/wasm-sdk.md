@@ -212,6 +212,8 @@ stmt.injectFilter("tenant_id", "=", "acme");
 // Routing: prefer SHARD 'acme' in the QQL string; or set after parse:
 stmt.shardKey = "acme";  // same field as SHARD — no injectShardKey API
 console.log(stmt.shardKey);  // -> "acme"
+// Numeric partitions stay numeric (read back as BigInt):
+// stmt.shardKey = 101;
 
 // Serialise to JSON
 const json = stmt.toJSON();

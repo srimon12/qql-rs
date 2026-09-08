@@ -1,7 +1,7 @@
 //! Core value, point ID, and scalar parameter binding and resolution.
 
 use crate::ast::Value;
-use crate::ast::statement::PointId;
+use crate::ast::statement::{PointId, ShardKey};
 use crate::error::{QqlError, Span};
 use alloc::format;
 
@@ -115,6 +115,46 @@ pub fn value_to_point_id(val: &Value, span: Option<Span>) -> Result<PointId, Qql
         _ => Err(QqlError::validation(
             "QQL-BIND-TYPE-MISMATCH",
             format!("cannot bind {val:?} as point ID: expected non-negative integer or string"),
+            span,
+        )),
+    }
+}
+
+/// Bind parameters into a routing `ShardKey` in-place.
+pub fn bind_shard_key<F>(
+    key: &mut Option<ShardKey>,
+    lookup: &F,
+    positional: &[Value],
+) -> Result<(), QqlError>
+where
+    F: Fn(&str) -> Option<Value>,
+{
+    match key {
+        Some(ShardKey::Param(name, span)) => {
+            let val = resolve_param(name, span.as_deref().copied(), lookup)?;
+            *key = Some(value_to_shard_key(&val, span.as_deref().copied())?);
+        }
+        Some(ShardKey::PositionalParam(idx, span)) => {
+            let val = resolve_positional(*idx, span.as_deref().copied(), positional)?;
+            *key = Some(value_to_shard_key(&val, span.as_deref().copied())?);
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Convert a bound `Value` into a `ShardKey`, failing closed on type mismatch.
+///
+/// Strings become keyword keys, non-negative integers numeric keys — the same
+/// split the parser enforces, so a bound tenant routes exactly like its
+/// literal spelling would.
+pub fn value_to_shard_key(val: &Value, span: Option<Span>) -> Result<ShardKey, QqlError> {
+    match val {
+        Value::Int(n) if *n >= 0 => Ok(ShardKey::Number(*n as u64)),
+        Value::Str(s) => Ok(ShardKey::Keyword(s.clone())),
+        _ => Err(QqlError::validation(
+            "QQL-BIND-TYPE-MISMATCH",
+            format!("cannot bind {val:?} as shard key: expected non-negative integer or string"),
             span,
         )),
     }

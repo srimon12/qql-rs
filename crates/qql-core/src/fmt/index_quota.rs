@@ -61,8 +61,8 @@ pub(crate) fn render_create_shard_key(statement: &CreateShardKeyStmt) -> String 
 
 pub(crate) fn render_drop_shard_key(statement: &DropShardKeyStmt) -> String {
     format!(
-        "DROP SHARD KEY '{}' ON COLLECTION {}",
-        escape_string(&statement.shard_key),
+        "DROP SHARD KEY {} ON COLLECTION {}",
+        statement.shard_key,
         render_name(&statement.collection)
     )
 }

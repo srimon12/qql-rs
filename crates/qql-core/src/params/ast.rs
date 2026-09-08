@@ -3,7 +3,7 @@
 use super::filter::{bind_filter, bind_point_selector};
 use super::formula::bind_formula;
 use super::input::{bind_context_pair, bind_feedback_item, bind_query_input};
-pub use super::value::{bind_point_id, bind_value, resolve_param_u64};
+pub use super::value::{bind_point_id, bind_shard_key, bind_value, resolve_param_u64};
 
 use crate::ast::Value;
 use crate::ast::statement::{
@@ -245,6 +245,7 @@ where
         bind_filter(filter, lookup, positional)?;
     }
     bind_page_spec(&mut query.page, lookup, positional)?;
+    bind_shard_key(&mut query.shard_key, lookup, positional)?;
     Ok(())
 }
 
@@ -267,6 +268,7 @@ where
                 scroll.limit =
                     resolve_param_u64(&param, span, &lookup, positional, "SCROLL LIMIT", true)?;
             }
+            bind_shard_key(&mut scroll.shard_key, &lookup, positional)?;
             Ok(())
         }
         Stmt::Upsert(upsert) => {
@@ -321,15 +323,33 @@ where
                 }
             }
             upsert.points = bound;
+            bind_shard_key(&mut upsert.shard_key, &lookup, positional)?;
             Ok(())
         }
-        Stmt::Delete(del) => bind_point_selector(&mut del.selector, &lookup, positional),
-        Stmt::ClearPayload(cp) => bind_point_selector(&mut cp.selector, &lookup, positional),
-        Stmt::DeletePayload(dp) => bind_point_selector(&mut dp.selector, &lookup, positional),
-        Stmt::DeleteVector(dv) => bind_point_selector(&mut dv.selector, &lookup, positional),
+        Stmt::Delete(del) => {
+            bind_point_selector(&mut del.selector, &lookup, positional)?;
+            bind_shard_key(&mut del.shard_key, &lookup, positional)?;
+            Ok(())
+        }
+        Stmt::ClearPayload(cp) => {
+            bind_point_selector(&mut cp.selector, &lookup, positional)?;
+            bind_shard_key(&mut cp.shard_key, &lookup, positional)?;
+            Ok(())
+        }
+        Stmt::DeletePayload(dp) => {
+            bind_point_selector(&mut dp.selector, &lookup, positional)?;
+            bind_shard_key(&mut dp.shard_key, &lookup, positional)?;
+            Ok(())
+        }
+        Stmt::DeleteVector(dv) => {
+            bind_point_selector(&mut dv.selector, &lookup, positional)?;
+            bind_shard_key(&mut dv.shard_key, &lookup, positional)?;
+            Ok(())
+        }
         Stmt::UpdateVector(uv) => {
             bind_point_id(&mut uv.point_id, &lookup, positional)?;
             bind_vector_value(&mut uv.vector, &lookup, positional)?;
+            bind_shard_key(&mut uv.shard_key, &lookup, positional)?;
             Ok(())
         }
         Stmt::UpdatePayload(up) => {
@@ -337,12 +357,14 @@ where
             for (_k, v) in &mut up.payload {
                 bind_value(v, &lookup, positional)?;
             }
+            bind_shard_key(&mut up.shard_key, &lookup, positional)?;
             Ok(())
         }
         Stmt::Count(count) => {
             if let Some(filter) = &mut count.filter {
                 bind_filter(filter, &lookup, positional)?;
             }
+            bind_shard_key(&mut count.shard_key, &lookup, positional)?;
             Ok(())
         }
         Stmt::Facet(facet) => {
@@ -360,6 +382,7 @@ where
                     true,
                 )?);
             }
+            bind_shard_key(&mut facet.shard_key, &lookup, positional)?;
             Ok(())
         }
         other => Err(QqlError::validation(

@@ -112,7 +112,7 @@ impl<'a> AstLowerer<'a> {
 
         let shard_key = if self.peek()?.kind == TokenKind::Shard {
             self.advance()?;
-            Some(self.parse_string()?)
+            Some(self.parse_shard_key_atom()?)
         } else {
             None
         };

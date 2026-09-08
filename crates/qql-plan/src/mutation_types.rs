@@ -85,7 +85,7 @@ pub struct PointsRequest {
     pub with_vector: Option<VectorSelectorReq>,
     /// Cluster shard routing for custom-sharded collections.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub shard_key: Option<String>,
+    pub shard_key: Option<crate::semantic::PlanShardKey>,
 }
 
 // ── Scroll ─────────────────────────────────────────────────────
@@ -113,7 +113,7 @@ pub struct ScrollRequest {
     pub order_by: Option<OrderByQuery>,
     /// Cluster shard routing for custom-sharded collections.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub shard_key: Option<String>,
+    pub shard_key: Option<crate::semantic::PlanShardKey>,
 }
 
 // ── Mutations ──────────────────────────────────────────────────
@@ -163,7 +163,7 @@ pub struct DeleteRequest {
     pub filter: Option<FilterExpression>,
     /// Cluster shard routing for custom-sharded collections.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub shard_key: Option<String>,
+    pub shard_key: Option<crate::semantic::PlanShardKey>,
 }
 
 /// Body for `PUT /collections/{c}/points/vectors` (replace point vectors).
@@ -173,7 +173,7 @@ pub struct UpdateVectorRequest {
     pub points: Vec<UpdateVectorPoint>,
     /// Cluster shard routing for custom-sharded collections.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub shard_key: Option<String>,
+    pub shard_key: Option<crate::semantic::PlanShardKey>,
 }
 
 /// One point in a vector update.
@@ -198,7 +198,7 @@ pub struct UpdatePayloadRequest {
     pub payload: serde_json::Map<String, serde_json::Value>,
     /// Cluster shard routing for custom-sharded collections.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub shard_key: Option<String>,
+    pub shard_key: Option<crate::semantic::PlanShardKey>,
 }
 
 /// Body for `POST /collections/{c}/points/payload/clear` (drop all payload).
@@ -212,7 +212,7 @@ pub struct ClearPayloadRequest {
     pub filter: Option<FilterExpression>,
     /// Cluster shard routing for custom-sharded collections.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub shard_key: Option<String>,
+    pub shard_key: Option<crate::semantic::PlanShardKey>,
 }
 
 /// Body for `POST /collections/{c}/points/payload/delete` (remove keys).
@@ -228,7 +228,7 @@ pub struct DeletePayloadRequest {
     pub filter: Option<FilterExpression>,
     /// Cluster shard routing for custom-sharded collections.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub shard_key: Option<String>,
+    pub shard_key: Option<crate::semantic::PlanShardKey>,
 }
 
 /// Body for `POST /collections/{c}/points/vectors/delete` (remove vectors).
@@ -244,7 +244,7 @@ pub struct DeleteVectorRequest {
     pub vector: Vec<String>,
     /// Cluster shard routing for custom-sharded collections.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub shard_key: Option<String>,
+    pub shard_key: Option<crate::semantic::PlanShardKey>,
 }
 
 /// Body for `POST /collections/{c}/points/count`.
@@ -255,7 +255,7 @@ pub struct CountRequest {
     pub filter: Option<FilterExpression>,
     /// Cluster shard routing for custom-sharded collections.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub shard_key: Option<String>,
+    pub shard_key: Option<crate::semantic::PlanShardKey>,
     /// Exact count instead of a faster estimate when `true`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exact: Option<bool>,
@@ -277,5 +277,5 @@ pub struct FacetRequest {
     pub exact: Option<bool>,
     /// Shard key for custom tenant routing.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub shard_key: Option<String>,
+    pub shard_key: Option<crate::semantic::PlanShardKey>,
 }

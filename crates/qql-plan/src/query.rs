@@ -231,7 +231,10 @@ pub fn lower_query_request(query: &QueryStmt) -> Result<QueryRequest, QqlError> 
         offset: query.page.offset,
         lookup_from: extract_lookup_from(query),
         // Routing is request-level (REST shard_key / gRPC ShardKeySelector) — not in filter.
-        shard_key: query.shard_key.clone(),
+        shard_key: query
+            .shard_key
+            .as_ref()
+            .map(crate::semantic::PlanShardKey::from),
         timeout,
         consistency,
     })
@@ -286,7 +289,10 @@ pub fn lower_query_groups_request(query: &QueryStmt) -> Result<QueryGroupsReques
             .as_ref()
             .map(|coll| WithLookupValue::Collection(coll.clone())),
         lookup_from: extract_lookup_from(query),
-        shard_key: query.shard_key.clone(),
+        shard_key: query
+            .shard_key
+            .as_ref()
+            .map(crate::semantic::PlanShardKey::from),
         timeout,
         consistency,
         group_offset,

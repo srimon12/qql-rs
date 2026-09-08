@@ -351,7 +351,7 @@ pub(crate) fn render_params_block(params: &CollectionParamsConfig) -> Option<Str
             "shard_keys = [{}]",
             values
                 .iter()
-                .map(|s| format!("'{}'", escape_string(s)))
+                .map(|key| key.to_string())
                 .collect::<Vec<_>>()
                 .join(", ")
         ));

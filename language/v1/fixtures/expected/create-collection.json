@@ -439,10 +439,18 @@
             "read_fan_out_factor": null,
             "replication_factor": 2,
             "shard_keys": [
-              "honeywell",
-              "ge",
-              "3m",
-              "rtx"
+              {
+                "Keyword": "honeywell"
+              },
+              {
+                "Keyword": "ge"
+              },
+              {
+                "Keyword": "3m"
+              },
+              {
+                "Keyword": "rtx"
+              }
             ],
             "shard_number": 8,
             "sharding_method": "custom",

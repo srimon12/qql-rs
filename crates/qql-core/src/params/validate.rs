@@ -5,7 +5,7 @@ use crate::ast::filter::{FilterExpr, PointIdPredicate};
 use crate::ast::formula::FormulaExpr;
 use crate::ast::statement::{
     PointId, PointSelector, PointVectors, Prefetch, PrefetchSource, QueryExpr, QueryInput,
-    QueryStmt, Stmt, VectorValue,
+    QueryStmt, ShardKey, Stmt, VectorValue,
 };
 use crate::error::QqlError;
 
@@ -69,6 +69,21 @@ fn validate_no_unbound_point_id(id: &PointId) -> Result<(), QqlError> {
     match id {
         PointId::Param(name, span) => Err(unbound_named_err(name, span.as_deref().copied())),
         PointId::PositionalParam(idx, span) => {
+            Err(unbound_positional_err(*idx, span.as_deref().copied()))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Reject an unbound routing-shard placeholder before planning.
+///
+/// `SHARD :tenant` must be bound like any other placeholder; an unbound key
+/// reaching lowering would ship a broken request, so this fails closed with
+/// the binder's own missing-param error.
+fn validate_no_unbound_shard_key(key: &Option<ShardKey>) -> Result<(), QqlError> {
+    match key {
+        Some(ShardKey::Param(name, span)) => Err(unbound_named_err(name, span.as_deref().copied())),
+        Some(ShardKey::PositionalParam(idx, span)) => {
             Err(unbound_positional_err(*idx, span.as_deref().copied()))
         }
         _ => Ok(()),
@@ -285,6 +300,7 @@ fn validate_no_unbound_query_stmt(query: &QueryStmt) -> Result<(), QqlError> {
     if let Some(filter) = &query.filter {
         validate_no_unbound_filter(filter)?;
     }
+    validate_no_unbound_shard_key(&query.shard_key)?;
     if let Some(param) = &query.page.limit_param {
         return Err(unbound_param_str_err(param, query.page.limit_span));
     }
@@ -347,6 +363,7 @@ pub fn validate_no_unbound_params(stmt: &Stmt) -> Result<(), QqlError> {
             if let Some(param) = &scroll.limit_param {
                 return Err(unbound_param_str_err(param, scroll.limit_span));
             }
+            validate_no_unbound_shard_key(&scroll.shard_key)?;
             Ok(())
         }
         Stmt::Upsert(upsert) => {
@@ -369,27 +386,48 @@ pub fn validate_no_unbound_params(stmt: &Stmt) -> Result<(), QqlError> {
                     }
                 }
             }
+            validate_no_unbound_shard_key(&upsert.shard_key)?;
             Ok(())
         }
-        Stmt::Delete(del) => validate_no_unbound_point_selector(&del.selector),
-        Stmt::ClearPayload(cp) => validate_no_unbound_point_selector(&cp.selector),
-        Stmt::DeletePayload(dp) => validate_no_unbound_point_selector(&dp.selector),
-        Stmt::DeleteVector(dv) => validate_no_unbound_point_selector(&dv.selector),
+        Stmt::Delete(del) => {
+            validate_no_unbound_point_selector(&del.selector)?;
+            validate_no_unbound_shard_key(&del.shard_key)?;
+            Ok(())
+        }
+        Stmt::ClearPayload(cp) => {
+            validate_no_unbound_point_selector(&cp.selector)?;
+            validate_no_unbound_shard_key(&cp.shard_key)?;
+            Ok(())
+        }
+        Stmt::DeletePayload(dp) => {
+            validate_no_unbound_point_selector(&dp.selector)?;
+            validate_no_unbound_shard_key(&dp.shard_key)?;
+            Ok(())
+        }
+        Stmt::DeleteVector(dv) => {
+            validate_no_unbound_point_selector(&dv.selector)?;
+            validate_no_unbound_shard_key(&dv.shard_key)?;
+            Ok(())
+        }
         Stmt::UpdateVector(uv) => {
             validate_no_unbound_point_id(&uv.point_id)?;
-            validate_no_unbound_vector_value(&uv.vector)
+            validate_no_unbound_vector_value(&uv.vector)?;
+            validate_no_unbound_shard_key(&uv.shard_key)?;
+            Ok(())
         }
         Stmt::UpdatePayload(up) => {
             validate_no_unbound_point_selector(&up.selector)?;
             for (_k, v) in &up.payload {
                 validate_no_unbound_value(v)?;
             }
+            validate_no_unbound_shard_key(&up.shard_key)?;
             Ok(())
         }
         Stmt::Count(count) => {
             if let Some(filter) = &count.filter {
                 validate_no_unbound_filter(filter)?;
             }
+            validate_no_unbound_shard_key(&count.shard_key)?;
             Ok(())
         }
         Stmt::Facet(facet) => {
@@ -399,10 +437,35 @@ pub fn validate_no_unbound_params(stmt: &Stmt) -> Result<(), QqlError> {
             if let Some(param) = &facet.limit_param {
                 return Err(unbound_param_str_err(param, facet.limit_span));
             }
+            validate_no_unbound_shard_key(&facet.shard_key)?;
             Ok(())
         }
+        Stmt::CreateShardKey(sk) => validate_no_unbound_shard_key(&Some(sk.shard_key.clone())),
+        Stmt::DropShardKey(sk) => validate_no_unbound_shard_key(&Some(sk.shard_key.clone())),
+        Stmt::CreateCollection(cc) => validate_collection_shard_keys(
+            cc.config
+                .as_ref()
+                .and_then(|config| config.params.as_ref())
+                .and_then(|params| params.shard_keys.as_ref()),
+        ),
+        Stmt::AlterCollection(ac) => validate_collection_shard_keys(
+            ac.config
+                .as_ref()
+                .and_then(|config| config.params.as_ref())
+                .and_then(|params| params.shard_keys.as_ref()),
+        ),
         _ => Ok(()),
     }
+}
+
+/// Reject unbound placeholders in a `WITH PARAMS (shard_keys = …)` list.
+fn validate_collection_shard_keys(keys: Option<&Vec<ShardKey>>) -> Result<(), QqlError> {
+    if let Some(keys) = keys {
+        for key in keys {
+            validate_no_unbound_shard_key(&Some(key.clone()))?;
+        }
+    }
+    Ok(())
 }
 
 fn check_vector_value_template(vec: &VectorValue, has_vec_params: &mut bool) {
@@ -602,6 +665,60 @@ pub fn validate_no_unbound_scalar_params(stmt: &Stmt) -> Result<bool, QqlError> 
             check_vector_value_template(&uv.vector, &mut has_vec_params);
             Ok(has_vec_params)
         }
+        // Shard placeholders (`SHARD :tenant`) are bound later like vector
+        // parameters, so template planning skips them while still rejecting
+        // unbound scalars. Each arm mirrors its full-validation counterpart
+        // minus the shard check.
+        Stmt::Scroll(scroll) => {
+            if let Some(filter) = &scroll.filter {
+                validate_no_unbound_filter(filter)?;
+            }
+            if let Some(after) = &scroll.after {
+                validate_no_unbound_point_id(after)?;
+            }
+            if let Some(param) = &scroll.limit_param {
+                return Err(unbound_param_str_err(param, scroll.limit_span));
+            }
+            Ok(has_vec_params)
+        }
+        Stmt::Delete(del) => {
+            validate_no_unbound_point_selector(&del.selector)?;
+            Ok(has_vec_params)
+        }
+        Stmt::ClearPayload(cp) => {
+            validate_no_unbound_point_selector(&cp.selector)?;
+            Ok(has_vec_params)
+        }
+        Stmt::DeletePayload(dp) => {
+            validate_no_unbound_point_selector(&dp.selector)?;
+            Ok(has_vec_params)
+        }
+        Stmt::DeleteVector(dv) => {
+            validate_no_unbound_point_selector(&dv.selector)?;
+            Ok(has_vec_params)
+        }
+        Stmt::UpdatePayload(up) => {
+            validate_no_unbound_point_selector(&up.selector)?;
+            for (_k, v) in &up.payload {
+                validate_no_unbound_value(v)?;
+            }
+            Ok(has_vec_params)
+        }
+        Stmt::Count(count) => {
+            if let Some(filter) = &count.filter {
+                validate_no_unbound_filter(filter)?;
+            }
+            Ok(has_vec_params)
+        }
+        Stmt::Facet(facet) => {
+            if let Some(filter) = &facet.filter {
+                validate_no_unbound_filter(filter)?;
+            }
+            if let Some(param) = &facet.limit_param {
+                return Err(unbound_param_str_err(param, facet.limit_span));
+            }
+            Ok(has_vec_params)
+        }
         _ => {
             validate_no_unbound_params(stmt)?;
             Ok(false)
@@ -650,6 +767,22 @@ fn collect_from_param_str(
         }
     } else {
         named.insert(alloc::string::String::from(param));
+    }
+}
+
+fn collect_from_shard_key(
+    key: &Option<ShardKey>,
+    named: &mut alloc::collections::BTreeSet<alloc::string::String>,
+    max_pos: &mut usize,
+) {
+    match key {
+        Some(ShardKey::Param(name, _)) => {
+            named.insert(name.clone());
+        }
+        Some(ShardKey::PositionalParam(idx, _)) => {
+            *max_pos = (*max_pos).max(*idx + 1);
+        }
+        _ => {}
     }
 }
 
@@ -926,6 +1059,7 @@ fn collect_from_query_stmt(
     if let Some(filter) = &query.filter {
         collect_from_filter(filter, named, max_pos);
     }
+    collect_from_shard_key(&query.shard_key, named, max_pos);
     if let Some(param) = &query.page.limit_param {
         collect_from_param_str(param, named, max_pos);
     }
@@ -968,6 +1102,7 @@ pub fn collect_statement_params(
             if let Some(after) = &scroll.after {
                 collect_from_point_id(after, &mut named, &mut max_pos);
             }
+            collect_from_shard_key(&scroll.shard_key, &mut named, &mut max_pos);
             if let Some(param) = &scroll.limit_param {
                 collect_from_param_str(param, &mut named, &mut max_pos);
             }
@@ -992,19 +1127,60 @@ pub fn collect_statement_params(
                     }
                 }
             }
+            collect_from_shard_key(&upsert.shard_key, &mut named, &mut max_pos);
         }
-        Stmt::Delete(del) => match &del.selector {
-            PointSelector::Id(id) => collect_from_point_id(id, &mut named, &mut max_pos),
-            PointSelector::Ids(ids) => {
-                for id in ids {
-                    collect_from_point_id(id, &mut named, &mut max_pos);
+        Stmt::Delete(del) => {
+            match &del.selector {
+                PointSelector::Id(id) => collect_from_point_id(id, &mut named, &mut max_pos),
+                PointSelector::Ids(ids) => {
+                    for id in ids {
+                        collect_from_point_id(id, &mut named, &mut max_pos);
+                    }
                 }
+                PointSelector::Filter(f) => collect_from_filter(f, &mut named, &mut max_pos),
             }
-            PointSelector::Filter(f) => collect_from_filter(f, &mut named, &mut max_pos),
-        },
+            collect_from_shard_key(&del.shard_key, &mut named, &mut max_pos);
+        }
+        Stmt::ClearPayload(cp) => {
+            match &cp.selector {
+                PointSelector::Id(id) => collect_from_point_id(id, &mut named, &mut max_pos),
+                PointSelector::Ids(ids) => {
+                    for id in ids {
+                        collect_from_point_id(id, &mut named, &mut max_pos);
+                    }
+                }
+                PointSelector::Filter(f) => collect_from_filter(f, &mut named, &mut max_pos),
+            }
+            collect_from_shard_key(&cp.shard_key, &mut named, &mut max_pos);
+        }
+        Stmt::DeletePayload(dp) => {
+            match &dp.selector {
+                PointSelector::Id(id) => collect_from_point_id(id, &mut named, &mut max_pos),
+                PointSelector::Ids(ids) => {
+                    for id in ids {
+                        collect_from_point_id(id, &mut named, &mut max_pos);
+                    }
+                }
+                PointSelector::Filter(f) => collect_from_filter(f, &mut named, &mut max_pos),
+            }
+            collect_from_shard_key(&dp.shard_key, &mut named, &mut max_pos);
+        }
+        Stmt::DeleteVector(dv) => {
+            match &dv.selector {
+                PointSelector::Id(id) => collect_from_point_id(id, &mut named, &mut max_pos),
+                PointSelector::Ids(ids) => {
+                    for id in ids {
+                        collect_from_point_id(id, &mut named, &mut max_pos);
+                    }
+                }
+                PointSelector::Filter(f) => collect_from_filter(f, &mut named, &mut max_pos),
+            }
+            collect_from_shard_key(&dv.shard_key, &mut named, &mut max_pos);
+        }
         Stmt::UpdateVector(uv) => {
             collect_from_point_id(&uv.point_id, &mut named, &mut max_pos);
             collect_from_vector_val(&uv.vector, &mut named, &mut max_pos);
+            collect_from_shard_key(&uv.shard_key, &mut named, &mut max_pos);
         }
         Stmt::UpdatePayload(up) => {
             match &up.selector {
@@ -1019,16 +1195,19 @@ pub fn collect_statement_params(
             for (_k, v) in &up.payload {
                 collect_from_val(v, &mut named, &mut max_pos);
             }
+            collect_from_shard_key(&up.shard_key, &mut named, &mut max_pos);
         }
         Stmt::Count(count) => {
             if let Some(filter) = &count.filter {
                 collect_from_filter(filter, &mut named, &mut max_pos);
             }
+            collect_from_shard_key(&count.shard_key, &mut named, &mut max_pos);
         }
         Stmt::Facet(facet) => {
             if let Some(filter) = &facet.filter {
                 collect_from_filter(filter, &mut named, &mut max_pos);
             }
+            collect_from_shard_key(&facet.shard_key, &mut named, &mut max_pos);
             if let Some(param) = &facet.limit_param {
                 collect_from_param_str(param, &mut named, &mut max_pos);
             }

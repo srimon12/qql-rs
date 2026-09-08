@@ -12,8 +12,10 @@ export class Stmt {
   /** Human-readable preview; long vectors are truncated (mirrors Python `repr(stmt)`). */
   toReadableString(): string;
   compileRoute(params?: Record<string, unknown> | unknown[]): CompiledRoute;
-  /** QQL `SHARD '…'` routing key (request-level). Prefer the clause in QQL. */
-  shardKey?: string | null;
+  /** QQL `SHARD` routing key (request-level). Prefer the clause in QQL.
+   * Reads back `string` (keyword) or `bigint` (numeric); set with
+   * `string | number | bigint | null` (numbers must be exact integers). */
+  shardKey?: string | number | bigint | null;
 }
 
 export class ScoredPoint {

@@ -13,8 +13,10 @@ export class Stmt {
    * Vector params accept plain arrays or Float32Array / Float64Array (one memcpy). */
   bind(params?: Record<string, unknown> | unknown[]): Stmt;
   compileRoute(params?: Record<string, unknown> | unknown[]): CompiledRoute;
-  /** QQL `SHARD '…'` routing key (request-level). Prefer the clause in QQL. */
-  shardKey?: string | null;
+  /** QQL `SHARD` routing key (request-level). Prefer the clause in QQL.
+   * Reads back `string` (keyword) or `bigint` (numeric); set with
+   * `string | number | bigint | null` (numbers must be exact integers). */
+  shardKey?: string | number | bigint | null;
 }
 
 export class ScoredPoint {

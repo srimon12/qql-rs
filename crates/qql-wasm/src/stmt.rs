@@ -41,15 +41,28 @@ impl Stmt {
         Ok(())
     }
 
-    /// QQL `SHARD '…'` routing key (request-level). Prefer the clause in QQL.
+    /// QQL `SHARD` routing key (request-level). Prefer the clause in QQL.
+    ///
+    /// Reads back a string for keyword keys, a `BigInt` for numeric keys, and
+    /// `null` when unset (placeholders also read as `null` — bind first).
+    /// The setter accepts string, number, `BigInt`, or null: numbers must be
+    /// exact non-negative integers (larger keys need `BigInt`).
     #[wasm_bindgen(getter, js_name = shardKey)]
-    pub fn shard_key(&self) -> Option<String> {
-        self.inner.shard_key().map(str::to_owned)
+    pub fn shard_key(&self) -> JsValue {
+        match self.inner.shard_key_typed() {
+            None => JsValue::NULL,
+            Some(ast::ShardKey::Keyword(s)) => JsValue::from_str(s),
+            Some(ast::ShardKey::Number(n)) => js_sys::BigInt::from(*n).into(),
+            // Unbound placeholders have no host value yet; bind first.
+            Some(_) => JsValue::NULL,
+        }
     }
 
     #[wasm_bindgen(setter, js_name = shardKey)]
-    pub fn set_shard_key(&mut self, key: Option<String>) -> Result<(), JsValue> {
-        if !self.inner.set_shard_key(key) {
+    pub fn set_shard_key(&mut self, key: JsValue) -> Result<(), JsValue> {
+        let key = super::params::jsvalue_to_shard_key(&key)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        if !self.inner.set_shard_key_typed(key) {
             return Err(JsValue::from_str(
                 "cannot set shardKey on statement type that does not support sharding (e.g. DDL statements)",
             ));

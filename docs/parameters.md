@@ -200,7 +200,7 @@ All binding failures are validation errors with a stable `QQL-BIND-*` code:
 | `QQL-BIND-MIXED-STYLE` | The template mixes `:name` and `?`, or the binder received the other style |
 | `QQL-BIND-MISSING-PARAM` | A named placeholder has no bound value, or a positional index is out of range |
 | `QQL-BIND-UNUSED-PARAMS` | More positional values were supplied than `?` placeholders |
-| `QQL-BIND-TYPE-MISMATCH` | A bound value has the wrong type for its position (e.g. non-string bound to `TEXT`, non-integer to `LIMIT`/`OFFSET`, invalid point ID, non-finite float, or invalid formula parameter) |
+| `QQL-BIND-TYPE-MISMATCH` | A bound value has the wrong type for its position (e.g. non-string bound to `TEXT`, non-integer to `LIMIT`/`OFFSET`, invalid point ID, non-string/non-integer bound to `SHARD`, non-finite float, or invalid formula parameter) |
 | `QQL-BIND-NULL-PARAM` | A parameter resolved to `null` / `None` — QQL cannot bind null; pass a concrete value |
 | `QQL-BIND-BATCH-LENGTH` | A statement-scoped params list length does not match the statement count |
 | `QQL-BIND-DUPLICATE-PARAM` | A key collision occurred when flattening nested dictionary parameters |

@@ -67,3 +67,33 @@ fn test_format_inline_comment_inside_statement() {
     let twice = format(&formatted).unwrap();
     assert_eq!(formatted, twice);
 }
+
+#[test]
+fn test_shard_key_forms_roundtrip() {
+    // Keyword stays quoted, numbers stay bare, placeholders stay placeholders —
+    // the formatter must never coerce a numeric key into a keyword string.
+    for input in [
+        "QUERY TEXT 'x' FROM docs SHARD 'acme' LIMIT 1;",
+        "DELETE FROM docs WHERE id = 1 SHARD 101;",
+        "QUERY TEXT 'x' FROM docs SHARD :tenant LIMIT 1;",
+        "DROP SHARD KEY 101 ON COLLECTION docs;",
+        "CREATE SHARD KEY 101 ON COLLECTION docs;",
+    ] {
+        let formatted = format(input).unwrap();
+        assert!(
+            formatted.contains("SHARD"),
+            "shard clause lost for {input}: {formatted}"
+        );
+        let twice = format(&formatted).unwrap();
+        assert_eq!(formatted, twice, "format not idempotent for {input}");
+    }
+    let numeric = format("DELETE FROM docs WHERE id = 1 SHARD 101;").unwrap();
+    assert!(
+        numeric.contains("SHARD 101;"),
+        "numeric key must render bare, got: {numeric}"
+    );
+    assert!(
+        !numeric.contains("SHARD '101'"),
+        "numeric key must not be quoted, got: {numeric}"
+    );
+}

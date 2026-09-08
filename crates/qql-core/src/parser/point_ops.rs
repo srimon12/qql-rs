@@ -23,7 +23,7 @@ impl<'a> AstLowerer<'a> {
         };
         let shard_key = if self.peek()?.kind == TokenKind::Shard {
             self.advance()?;
-            Some(self.parse_string()?)
+            Some(self.parse_shard_key_atom()?)
         } else {
             None
         };
@@ -69,7 +69,7 @@ impl<'a> AstLowerer<'a> {
         };
         let shard_key = if self.peek()?.kind == TokenKind::Shard {
             self.advance()?;
-            Some(self.parse_string()?)
+            Some(self.parse_shard_key_atom()?)
         } else {
             None
         };
@@ -188,7 +188,7 @@ impl<'a> AstLowerer<'a> {
                 }
                 TokenKind::Shard if shard_key.is_none() => {
                     self.advance()?;
-                    shard_key = Some(self.parse_string()?);
+                    shard_key = Some(self.parse_shard_key_atom()?);
                 }
                 TokenKind::With => {
                     let with_span = self.peek()?.span;

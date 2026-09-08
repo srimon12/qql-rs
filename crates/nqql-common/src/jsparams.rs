@@ -156,3 +156,67 @@ pub fn unknown_opt_to_value(v: Unknown) -> Result<Option<ast::Value>, QqlError> 
         _ => unknown_to_value(v).map(Some),
     }
 }
+
+/// Wrong-typed `shardKey`: mirrors core's `value_to_shard_key` code so hosts
+/// and QQL agree on the failure.
+fn shard_key_type_mismatch(message: impl Into<String>) -> QqlError {
+    QqlError::validation("QQL-BIND-TYPE-MISMATCH", message.into(), None)
+}
+
+/// Largest integer a JS `number` holds exactly. Larger shard keys must arrive
+/// as `BigInt`; silently rounding them would mistarget the request.
+const MAX_SAFE_INTEGER_F64: f64 = 9007199254740991.0;
+
+/// Convert any JS value to a typed shard routing key (`None` clears).
+///
+/// Strings become keywords (empty clears), integers numeric keys — the same
+/// split the reference parser enforces, so host-set tenants route exactly
+/// like their QQL spelling. Anything else fails closed: booleans are rejected
+/// outright (`true` as shard `1` would be silent mistargeting), non-integers
+/// and out-of-range numbers name `BigInt` instead of rounding.
+pub fn unknown_opt_to_shard_key(v: Unknown) -> Result<Option<ast::ShardKey>, QqlError> {
+    use napi::bindgen_prelude::FromNapiValue as _;
+    let bad_type = || {
+        shard_key_type_mismatch(
+            "shardKey must be a string, an integer, a BigInt, null, or undefined",
+        )
+    };
+    match v.get_type().map_err(napi_err)? {
+        ValueType::Undefined | ValueType::Null => Ok(None),
+        ValueType::String => {
+            let s = String::from_unknown(v).map_err(napi_err)?;
+            Ok(if s.is_empty() {
+                None
+            } else {
+                Some(ast::ShardKey::Keyword(s))
+            })
+        }
+        ValueType::Number => {
+            let n = f64::from_unknown(v).map_err(napi_err)?;
+            if !n.is_finite() || n.fract() != 0.0 || n < 0.0 {
+                return Err(shard_key_type_mismatch(
+                    "shardKey number must be a non-negative integer",
+                ));
+            }
+            if n > MAX_SAFE_INTEGER_F64 {
+                return Err(shard_key_type_mismatch(
+                    "shardKey number exceeds the exact-integer range; pass a BigInt instead",
+                ));
+            }
+            Ok(Some(ast::ShardKey::Number(n as u64)))
+        }
+        ValueType::BigInt => {
+            // Exact integers of any size; the words are checked, never assumed.
+            use napi::bindgen_prelude::{BigInt, FromNapiValue as _};
+            let big = BigInt::from_unknown(v).map_err(napi_err)?;
+            match (big.sign_bit, big.words.as_slice()) {
+                (false, [] | [0]) => Ok(Some(ast::ShardKey::Number(0))),
+                (false, [n]) => Ok(Some(ast::ShardKey::Number(*n))),
+                _ => Err(shard_key_type_mismatch(
+                    "shardKey BigInt does not fit in u64",
+                )),
+            }
+        }
+        _ => Err(bad_type()),
+    }
+}
