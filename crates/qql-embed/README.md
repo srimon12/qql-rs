@@ -26,6 +26,18 @@ pub trait Embedder: Send + Sync {
         texts: &[String],
         model: &str,
     ) -> Result<Vec<SparseVector>>;
+    /// Batch query-side sparse embedding. Default loops `embed_sparse_query`.
+    async fn embed_sparse_query_batch(
+        &self,
+        texts: &[String],
+        model: &str,
+    ) -> Result<Vec<SparseVector>>;
+    /// Dense dimension when known (model checking); `None` skips the check.
+    fn dimension(&self) -> Option<usize>;
+    /// Multivector row dimension when known; `None` skips the check.
+    fn multi_dimension(&self) -> Option<usize>;
+    /// Whether a dense `MODEL` name is served; single-model hosts reject the rest.
+    fn accepts_model(&self, model: &str) -> bool;
     /// Dense embedding — batch API, grouped by model.
     async fn embed_dense_batch(&self, texts: &[String], model: &str) -> Result<Vec<Vec<f32>>>;
     /// Multivector (ColBERT-style). Default rejects with QQL-EMBEDDING-MULTI.
@@ -33,6 +45,8 @@ pub trait Embedder: Send + Sync {
     async fn embed_multi_batch(&self, texts: &[String], model: &str) -> Result<Vec<Vec<Vec<f32>>>>;
     /// Image / CLIP vision embedding. Default rejects with QQL-EMBEDDING-IMAGE.
     async fn embed_image(&self, source: &str, model: &str) -> Result<Vec<f32>>;
+    /// Batch image embedding. Default loops `embed_image`.
+    async fn embed_image_batch(&self, sources: &[String], model: &str) -> Result<Vec<Vec<f32>>>;
     /// Cross-encoder pair scoring: (query, documents[i]) → scores. Default rejects with QQL-RERANK-CROSS.
     async fn rerank_pairs(&self, query: &str, documents: &[String], model: &str) -> Result<Vec<f32>>;
     /// Single-pass joint embeddings (dense + sparse + multi in one pass for BGE-M3).

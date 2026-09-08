@@ -74,6 +74,21 @@ pub trait Embedder: EmbedderBound {
         Ok(results)
     }
 
+    /// Batch query-side sparse embedding. Default loops
+    /// [`Self::embed_sparse_query`]; override for real batching
+    /// (model-backed SPLADE / BGE-M3 sparse inference).
+    async fn embed_sparse_query_batch(
+        &self,
+        texts: &[String],
+        model: &str,
+    ) -> Result<Vec<SparseVector>, QqlError> {
+        let mut results = Vec::with_capacity(texts.len());
+        for text in texts {
+            results.push(self.embed_sparse_query(text, model).await?);
+        }
+        Ok(results)
+    }
+
     /// Single-pass joint multi-modal / BGE-M3 embedding (dense + sparse + multi-vectors).
     ///
     /// Default implementation delegates to separate dense, sparse, and multi calls.
@@ -259,6 +274,24 @@ pub fn sparse_model_unsupported_error(model: &str) -> QqlError {
              Omit the MODEL clause (or use MODEL 'default') for local \
              wire-compatible BM25. To use model-aware sparse embedding \
              (SPLADE / BGE-M3), configure a sparse embedding backend."
+        ),
+        None,
+    )
+}
+
+/// Error when a dense model is requested that this embedder cannot satisfy.
+///
+/// Mirrors [`sparse_model_unsupported_error`]: single-model hosts (WASM client
+/// embedder, fixed local models) reject non-default `MODEL` clauses instead
+/// of silently returning vectors from the wrong model.
+pub fn dense_model_unsupported_error(model: &str) -> QqlError {
+    QqlError::execution(
+        "QQL-EMBEDDING",
+        format!(
+            "dense model '{model}' is not available on this embedder. \
+             Omit the MODEL clause (or use MODEL 'default') to use the \
+             configured dense model. To serve multiple dense models, \
+             configure a model-routing dense embedding backend."
         ),
         None,
     )

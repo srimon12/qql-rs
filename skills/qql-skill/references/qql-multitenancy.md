@@ -26,6 +26,12 @@ One collection, many tenants. Isolation is a **filter**. Custom sharding is opti
 | Routing | `SHARD '…'` | `shard_key` | `shard_key_selector` |
 | Define partitions | `CREATE SHARD KEY '…'` | create shard key API | `CreateShardKey` |
 
+Numeric keys (`SHARD 101`, `CREATE SHARD KEY 101 …`) hash differently from
+their quoted spellings on the wire. They stay typed end-to-end only on UPSERT
+and `CREATE SHARD KEY`; every other statement carries the routing key as a
+string, so a numeric `SHARD` there routes as the keyword `"101"` — prefer
+quoted keys except on UPSERT. `DROP SHARD KEY` accepts quoted keys only.
+
 **Never put routing inside `Filter`.** Neither OpenAPI `Filter` nor proto `Filter` accept a shard field.
 
 ---

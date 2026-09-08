@@ -176,10 +176,18 @@ pub(crate) fn to_query_variant(
     use qql_plan::types::QueryVariant;
 
     let variant = match qv {
-        QueryVariant::Nearest(nq) => Variant::Nearest(to_vector_input(&nq.nearest)),
+        QueryVariant::Nearest(nq) => Variant::Nearest(to_vector_input(&nq.nearest)?),
         QueryVariant::Recommend { recommend } => Variant::Recommend(qdrant::RecommendInput {
-            positive: recommend.positive.iter().map(to_vector_input).collect(),
-            negative: recommend.negative.iter().map(to_vector_input).collect(),
+            positive: recommend
+                .positive
+                .iter()
+                .map(to_vector_input)
+                .collect::<Result<Vec<_>, _>>()?,
+            negative: recommend
+                .negative
+                .iter()
+                .map(to_vector_input)
+                .collect::<Result<Vec<_>, _>>()?,
             strategy: recommend.strategy.as_deref().map(|s| match s {
                 "average_vector" => qdrant::RecommendStrategy::AverageVector as i32,
                 "best_score" => qdrant::RecommendStrategy::BestScore as i32,
@@ -190,23 +198,27 @@ pub(crate) fn to_query_variant(
         QueryVariant::Context { context } => Variant::Context(qdrant::ContextInput {
             pairs: context
                 .iter()
-                .map(|p| qdrant::ContextInputPair {
-                    positive: Some(to_vector_input(&p.positive)),
-                    negative: Some(to_vector_input(&p.negative)),
+                .map(|p| {
+                    Ok(qdrant::ContextInputPair {
+                        positive: Some(to_vector_input(&p.positive)?),
+                        negative: Some(to_vector_input(&p.negative)?),
+                    })
                 })
-                .collect(),
+                .collect::<Result<Vec<_>, QqlError>>()?,
         }),
         QueryVariant::Discover { discover } => Variant::Discover(qdrant::DiscoverInput {
-            target: Some(to_vector_input(&discover.target)),
+            target: Some(to_vector_input(&discover.target)?),
             context: Some(qdrant::ContextInput {
                 pairs: discover
                     .context
                     .iter()
-                    .map(|p| qdrant::ContextInputPair {
-                        positive: Some(to_vector_input(&p.positive)),
-                        negative: Some(to_vector_input(&p.negative)),
+                    .map(|p| {
+                        Ok(qdrant::ContextInputPair {
+                            positive: Some(to_vector_input(&p.positive)?),
+                            negative: Some(to_vector_input(&p.negative)?),
+                        })
                     })
-                    .collect(),
+                    .collect::<Result<Vec<_>, QqlError>>()?,
             }),
         }),
         QueryVariant::OrderBy { order_by } => {
@@ -251,11 +263,13 @@ pub(crate) fn to_query_variant(
             let feedback = relevance_feedback
                 .feedback
                 .iter()
-                .map(|item| qdrant::FeedbackItem {
-                    example: Some(to_vector_input(&item.example)),
-                    score: item.score as f32,
+                .map(|item| {
+                    Ok(qdrant::FeedbackItem {
+                        example: Some(to_vector_input(&item.example)?),
+                        score: item.score as f32,
+                    })
                 })
-                .collect();
+                .collect::<Result<Vec<_>, QqlError>>()?;
             let strategy = Some(qdrant::FeedbackStrategy {
                 variant: Some(qdrant::feedback_strategy::Variant::Naive(
                     qdrant::NaiveFeedbackStrategy {
@@ -266,7 +280,7 @@ pub(crate) fn to_query_variant(
                 )),
             });
             Variant::RelevanceFeedback(qdrant::RelevanceFeedbackInput {
-                target: Some(to_vector_input(&relevance_feedback.target)),
+                target: Some(to_vector_input(&relevance_feedback.target)?),
                 feedback,
                 strategy,
             })
@@ -277,54 +291,66 @@ pub(crate) fn to_query_variant(
     })
 }
 
-pub(crate) fn to_vector_input(input: &PlanQueryInput) -> qdrant::VectorInput {
+pub(crate) fn to_vector_input(input: &PlanQueryInput) -> Result<qdrant::VectorInput, QqlError> {
     use qdrant::vector_input::Variant;
-    match input {
-        PlanQueryInput::Point(id) => qdrant::VectorInput {
-            variant: Some(Variant::Id(to_point_id(id))),
-        },
-        PlanQueryInput::Vector(PlanVectorValue::Dense(data)) => qdrant::VectorInput {
-            variant: Some(Variant::Dense(qdrant::DenseVector { data: data.clone() })),
-        },
-        PlanQueryInput::Vector(PlanVectorValue::Sparse { indices, values }) => {
-            qdrant::VectorInput {
-                variant: Some(Variant::Sparse(qdrant::SparseVector {
-                    indices: indices.clone(),
-                    values: values.clone(),
-                })),
-            }
+    let variant = match input {
+        PlanQueryInput::Point(id) => Variant::Id(to_point_id(id)),
+        PlanQueryInput::Vector(PlanVectorValue::Dense(data)) => {
+            Variant::Dense(qdrant::DenseVector { data: data.clone() })
         }
-        PlanQueryInput::Vector(PlanVectorValue::MultiDense(rows)) => qdrant::VectorInput {
-            variant: Some(Variant::MultiDense(qdrant::MultiDenseVector {
+        PlanQueryInput::Vector(PlanVectorValue::Sparse { indices, values }) => {
+            Variant::Sparse(qdrant::SparseVector {
+                indices: indices.clone(),
+                values: values.clone(),
+            })
+        }
+        PlanQueryInput::Vector(PlanVectorValue::MultiDense(rows)) => {
+            Variant::MultiDense(qdrant::MultiDenseVector {
                 vectors: rows
                     .iter()
                     .map(|row| qdrant::DenseVector { data: row.clone() })
                     .collect(),
-            })),
-        },
-        PlanQueryInput::Document { text, model } => qdrant::VectorInput {
-            variant: Some(Variant::Document(qdrant::Document {
-                text: text.clone(),
-                model: model.clone().unwrap_or_default(),
-                ..Default::default()
-            })),
-        },
-        PlanQueryInput::Image { image, model } => qdrant::VectorInput {
-            variant: Some(Variant::Image(qdrant::Image {
-                image: Some(qdrant::Value {
-                    kind: Some(qdrant::value::Kind::StringValue(image.clone())),
-                }),
-                model: model.clone().unwrap_or_default(),
-                ..Default::default()
-            })),
-        },
-        PlanQueryInput::Vector(PlanVectorValue::Param(name)) => {
-            panic!("invariant violation: unbound parameter :{name} reached gRPC to_vector_input")
+            })
         }
-        PlanQueryInput::Vector(PlanVectorValue::PositionalParam(idx)) => panic!(
-            "invariant violation: unbound positional parameter ?{idx} reached gRPC to_vector_input"
-        ),
-    }
+        PlanQueryInput::Document { text, model } => Variant::Document(qdrant::Document {
+            text: text.clone(),
+            model: model.clone().unwrap_or_default(),
+            ..Default::default()
+        }),
+        PlanQueryInput::Image { image, model } => Variant::Image(qdrant::Image {
+            image: Some(qdrant::Value {
+                kind: Some(qdrant::value::Kind::StringValue(image.clone())),
+            }),
+            model: model.clone().unwrap_or_default(),
+            ..Default::default()
+        }),
+        // Fail closed: `ensure_no_unbound_params` (batch) and
+        // `validate_no_unbound_scalar_params` (prepared templates) gate every
+        // normal path, but library callers can hand-build a plan — never panic
+        // in transport code.
+        PlanQueryInput::Vector(PlanVectorValue::Param(name)) => {
+            return Err(QqlError::validation(
+                "QQL-BIND-UNBOUND-PARAM",
+                format!(
+                    "unbound named parameter ':{name}' reached gRPC to_vector_input (bind parameters before dispatch)"
+                ),
+                None,
+            ));
+        }
+        PlanQueryInput::Vector(PlanVectorValue::PositionalParam(idx)) => {
+            return Err(QqlError::validation(
+                "QQL-BIND-MISSING-POSITIONAL",
+                format!(
+                    "missing positional parameter '?{}' reached gRPC to_vector_input (bind parameters before dispatch)",
+                    idx + 1
+                ),
+                None,
+            ));
+        }
+    };
+    Ok(qdrant::VectorInput {
+        variant: Some(variant),
+    })
 }
 
 pub(crate) fn to_payload_selector(ps: &PayloadSelectorReq) -> qdrant::WithPayloadSelector {
@@ -393,65 +419,86 @@ pub(crate) fn to_search_params(
     }
 }
 
-pub(crate) fn plan_vector_to_proto(v: &PlanVectorValue) -> qdrant::Vector {
-    match v {
-        PlanVectorValue::Dense(data) => qdrant::Vector {
-            vector: Some(qdrant::vector::Vector::Dense(qdrant::DenseVector {
-                data: data.clone(),
-            })),
-            ..Default::default()
-        },
-        PlanVectorValue::Sparse { indices, values } => qdrant::Vector {
-            vector: Some(qdrant::vector::Vector::Sparse(qdrant::SparseVector {
-                indices: indices.clone(),
-                values: values.clone(),
-            })),
-            ..Default::default()
-        },
-        PlanVectorValue::MultiDense(rows) => qdrant::Vector {
-            vector: Some(qdrant::vector::Vector::MultiDense(
-                qdrant::MultiDenseVector {
-                    vectors: rows
-                        .iter()
-                        .map(|row| qdrant::DenseVector { data: row.clone() })
-                        .collect(),
-                },
-            )),
-            ..Default::default()
-        },
-        PlanVectorValue::Param(name) => {
-            panic!("invariant violation: unbound parameter :{name} reached plan_vector_to_proto")
+pub(crate) fn plan_vector_to_proto(v: &PlanVectorValue) -> Result<qdrant::Vector, QqlError> {
+    use qdrant::vector::Vector as ProtoVector;
+    let vector = match v {
+        PlanVectorValue::Dense(data) => {
+            ProtoVector::Dense(qdrant::DenseVector { data: data.clone() })
         }
-        PlanVectorValue::PositionalParam(idx) => panic!(
-            "invariant violation: unbound positional parameter ?{idx} reached plan_vector_to_proto"
-        ),
-    }
+        PlanVectorValue::Sparse { indices, values } => ProtoVector::Sparse(qdrant::SparseVector {
+            indices: indices.clone(),
+            values: values.clone(),
+        }),
+        PlanVectorValue::MultiDense(rows) => ProtoVector::MultiDense(qdrant::MultiDenseVector {
+            vectors: rows
+                .iter()
+                .map(|row| qdrant::DenseVector { data: row.clone() })
+                .collect(),
+        }),
+        // Fail closed (see `to_vector_input`): gating lives in
+        // `ensure_no_unbound_params` / `validate_no_unbound_scalar_params`,
+        // but transport code must return, never panic.
+        PlanVectorValue::Param(name) => {
+            return Err(QqlError::validation(
+                "QQL-BIND-UNBOUND-PARAM",
+                format!(
+                    "unbound named parameter ':{name}' reached gRPC plan_vector_to_proto (bind parameters before dispatch)"
+                ),
+                None,
+            ));
+        }
+        PlanVectorValue::PositionalParam(idx) => {
+            return Err(QqlError::validation(
+                "QQL-BIND-MISSING-POSITIONAL",
+                format!(
+                    "missing positional parameter '?{}' reached gRPC plan_vector_to_proto (bind parameters before dispatch)",
+                    idx + 1
+                ),
+                None,
+            ));
+        }
+    };
+    Ok(qdrant::Vector {
+        vector: Some(vector),
+        ..Default::default()
+    })
 }
 
-pub(crate) fn to_vectors(vectors: &PlanPointVectors) -> Option<qdrant::Vectors> {
+pub(crate) fn to_vectors(vectors: &PlanPointVectors) -> Result<Option<qdrant::Vectors>, QqlError> {
     match vectors {
-        PlanPointVectors::Unnamed(v) => Some(qdrant::Vectors {
+        PlanPointVectors::Unnamed(v) => Ok(Some(qdrant::Vectors {
             vectors_options: Some(qdrant::vectors::VectorsOptions::Vector(
-                plan_vector_to_proto(v),
+                plan_vector_to_proto(v)?,
             )),
-        }),
+        })),
         PlanPointVectors::Named(entries) => {
-            let mut map = std::collections::HashMap::new();
+            let mut map = std::collections::HashMap::with_capacity(entries.len());
             for (name, v) in entries {
-                map.insert(name.clone(), plan_vector_to_proto(v));
+                map.insert(name.clone(), plan_vector_to_proto(v)?);
             }
-            Some(qdrant::Vectors {
+            Ok(Some(qdrant::Vectors {
                 vectors_options: Some(qdrant::vectors::VectorsOptions::Vectors(
                     qdrant::NamedVectors { vectors: map },
                 )),
-            })
+            }))
         }
-        PlanPointVectors::Param(name) => {
-            panic!("invariant violation: unbound parameter :{name} reached to_vectors")
-        }
-        PlanPointVectors::PositionalParam(idx) => {
-            panic!("invariant violation: unbound positional parameter ?{idx} reached to_vectors")
-        }
+        // Fail closed (see `to_vector_input`): whole-vector placeholders
+        // splice in at execution time and must never reach the wire.
+        PlanPointVectors::Param(name) => Err(QqlError::validation(
+            "QQL-BIND-UNBOUND-PARAM",
+            format!(
+                "unbound named parameter ':{name}' reached gRPC to_vectors (bind parameters before dispatch)"
+            ),
+            None,
+        )),
+        PlanPointVectors::PositionalParam(idx) => Err(QqlError::validation(
+            "QQL-BIND-MISSING-POSITIONAL",
+            format!(
+                "missing positional parameter '?{}' reached gRPC to_vectors (bind parameters before dispatch)",
+                idx + 1
+            ),
+            None,
+        )),
     }
 }
 

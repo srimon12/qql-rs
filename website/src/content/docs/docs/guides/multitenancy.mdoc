@@ -54,6 +54,14 @@ closed for DDL, `SHOW`, and vector updates. See the
 [Filter injection guide](/docs/guides/filter-injection/) for the full
 behavior.
 
+{% aside type="caution" title="Numeric shard keys" %}
+Keyword and number shard keys hash differently on the wire. Numeric keys
+(`SHARD 101`) stay typed end-to-end only on `UPSERT` and `CREATE SHARD KEY`;
+every other statement carries the key as a string, so a numeric `SHARD` there
+routes as the keyword `"101"`. Prefer quoted keys unless the statement is
+`UPSERT`, and drop keys quoted (`DROP SHARD KEY` accepts quoted keys only).
+{% /aside %}
+
 ```python
 from pyqql import Client, parse
 

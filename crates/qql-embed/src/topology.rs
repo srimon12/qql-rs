@@ -95,9 +95,9 @@ impl QueryTopology {
     }
 
     fn select(&self, kind: Option<VectorKind>) -> Option<(&str, VectorKind)> {
-        let candidates = match kind {
-            Some(VectorKind::Dense) => &self.dense,
-            Some(VectorKind::Sparse) => &self.sparse,
+        let (candidates, kind) = match kind {
+            Some(kind @ VectorKind::Dense) => (&self.dense, kind),
+            Some(kind @ VectorKind::Sparse) => (&self.sparse, kind),
             None => {
                 if self.dense.len() + self.sparse.len() == 1 {
                     return self
@@ -113,12 +113,9 @@ impl QueryTopology {
                 return None;
             }
         };
-        (candidates.len() == 1).then(|| {
-            (
-                candidates[0].as_str(),
-                kind.expect("typed candidate selection has a vector kind"),
-            )
-        })
+        // `kind` is bound by value in the match above, so no `expect` is
+        // needed across the closure boundary.
+        (candidates.len() == 1).then(|| (candidates[0].as_str(), kind))
     }
 
     fn kind_of(&self, name: &str) -> Option<VectorKind> {
@@ -166,15 +163,27 @@ fn expression_needs_kind_resolution(expression: &QueryExpr) -> bool {
 }
 
 fn target_needs_kind(target: &Option<VectorTarget>) -> bool {
-    // Always re-resolve when multi may still need schema (kind set but multi false
-    // and name is multivector). Cheap if already complete.
+    needs_kind_resolution(target) || needs_multi_upgrade(target)
+}
+
+/// Pure check: the target still lacks a schema-resolved kind (`USING` omitted
+/// or `AS` kind not yet filled from topology). No schema access.
+fn needs_kind_resolution(target: &Option<VectorTarget>) -> bool {
     match target {
         None => true,
-        Some(t) if t.kind.is_none() => true,
-        // kind known but multi not set — schema may still mark multivector names.
-        Some(t) if t.kind == Some(VectorKind::Dense) && !t.multi => true,
-        Some(_) => false,
+        Some(t) => t.kind.is_none(),
     }
+}
+
+/// Schema-dependent check: a dense target whose multivector flag is unset may
+/// still need a topology re-walk that upgrades it to multi. This is why
+/// `query_needs_kind_resolution` stays true for fully kind-resolved dense
+/// queries — the re-walk itself is cheap (no embedding I/O).
+fn needs_multi_upgrade(target: &Option<VectorTarget>) -> bool {
+    matches!(
+        target,
+        Some(t) if t.kind == Some(VectorKind::Dense) && !t.multi
+    )
 }
 
 fn prefetch_needs_kind(prefetch: &Prefetch) -> bool {
@@ -336,6 +345,17 @@ fn merge_input_kinds<'a>(
     Ok(resolved)
 }
 
+/// Fill a `USING` target's kind (and omitted targets) from collection topology.
+///
+/// Carve-out (deliberate, offline/mock-friendly): when the target names a
+/// vector that is **not** on the collection topology but already declares an
+/// `AS` kind, resolution keeps the declared kind and returns `Ok` instead of
+/// failing closed. This lets offline-built queries (no collection schema
+/// fetched yet) and hand-built mock topologies embed without a round trip.
+/// A typo'd vector name in this situation embeds against a nonexistent vector
+/// rather than erroring — callers that want fail-closed behavior must resolve
+/// against the real collection schema first. Unknown names *without* a
+/// declared kind still fail with [`QQL-UNKNOWN-VECTOR`](unknown_vector_error).
 fn resolve_using(
     collection: &str,
     using: &mut Option<VectorTarget>,

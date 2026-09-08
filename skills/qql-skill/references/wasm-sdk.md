@@ -86,6 +86,11 @@ client.setHttpEmbedder(
 
 Endpoint is required -- no default URL. Always sends the full text batch in one request.
 
+Single dense model per client: a `MODEL 'name'` clause other than empty or
+`'default'` is rejected with `QQL-EMBEDDING` — the client serves its one
+configured model (same rule on the sparse leg: non-default sparse models are
+rejected with `QQL-EMBEDDING-SPARSE`, otherwise local BM25 runs in-browser).
+
 ### JS Function Embedder
 
 For Transformers.js, custom providers, or in-browser models:

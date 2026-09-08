@@ -2,8 +2,8 @@
 
 use async_trait::async_trait;
 use qql_core::ast::{
-    PointEntry, PointId, PointVectors, QueryExpr, QueryInput, Stmt, UpsertPoint, UpsertStmt,
-    VectorValue,
+    PointEntry, PointId, PointVectors, QueryExpr, QueryInput, QueryStmt, Stmt, UpsertPoint,
+    UpsertStmt, VectorValue,
 };
 use qql_core::error::QqlError;
 use qql_core::parser::Parser;
@@ -16,6 +16,7 @@ use crate::topology::{TopologyNames, resolve_query_vector_kinds};
 
 struct MockEmbedder {
     dense_calls: Arc<Mutex<Vec<(String, String)>>>, // (model, text)
+    sparse_query_calls: Arc<Mutex<Vec<(String, String)>>>, // (model, text)
     multi_calls: Arc<Mutex<Vec<(String, String)>>>,
     image_calls: Arc<Mutex<Vec<(String, String)>>>, // (model, source)
     dense_batch_override: Option<Vec<Vec<f32>>>,
@@ -25,6 +26,7 @@ impl Default for MockEmbedder {
     fn default() -> Self {
         Self {
             dense_calls: Arc::new(Mutex::new(Vec::new())),
+            sparse_query_calls: Arc::new(Mutex::new(Vec::new())),
             multi_calls: Arc::new(Mutex::new(Vec::new())),
             image_calls: Arc::new(Mutex::new(Vec::new())),
             dense_batch_override: None,
@@ -42,11 +44,11 @@ impl Embedder for MockEmbedder {
         Ok(vec![1.0, 2.0, 3.0])
     }
 
-    async fn embed_sparse_query(
-        &self,
-        _text: &str,
-        _model: &str,
-    ) -> Result<SparseVector, QqlError> {
+    async fn embed_sparse_query(&self, text: &str, model: &str) -> Result<SparseVector, QqlError> {
+        self.sparse_query_calls
+            .lock()
+            .unwrap()
+            .push((model.to_string(), text.to_string()));
         Ok(SparseVector {
             indices: vec![1],
             values: vec![1.0],
@@ -285,13 +287,69 @@ async fn as_multi_query_calls_embed_multi() {
 }
 
 #[tokio::test]
-async fn sparse_model_is_accepted() {
+async fn upsert_sparse_spec_delegates_model_to_embedder() {
+    // The permissive mock accepts any sparse model, so this only pins that
+    // the upsert sparse path forwards the MODEL clause to the embedder
+    // (rather than rejecting it in `resolve`). The default reject gate is
+    // pinned on the query path by
+    // `query_sparse_model_rejected_by_default_embedder` below.
     let mut stmt = Parser::parse(
         "UPSERT INTO docs VALUES {id: 1, text: 'hello'} USING SPARSE MODEL 'splade';",
     )
     .unwrap();
     let mock = MockEmbedder::default();
     resolve_embeddings(&mut stmt, &mock).await.unwrap();
+}
+
+#[tokio::test]
+async fn query_sparse_model_rejected_by_default_embedder() {
+    let mut stmt = Parser::parse(
+        "QUERY TEXT 'hello' MODEL 'splade' FROM docs USING sparse AS SPARSE LIMIT 10",
+    )
+    .unwrap();
+    let err = resolve_embeddings(&mut stmt, &DefaultEmbedder)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "QQL-EMBEDDING-SPARSE");
+    assert!(err.message.contains("splade"), "got: {}", err.message);
+}
+
+#[tokio::test]
+async fn hybrid_query_threads_model_into_sparse_leg() {
+    // C2 repro: the dense leg batches with `Hybrid.model`, so the sparse leg
+    // must receive the same model (not a hardcoded "default").
+    let mut stmt = Parser::parse(
+        "QUERY HYBRID TEXT 'q' MODEL 'splade' DENSE d SPARSE s FUSION RRF FROM docs LIMIT 10",
+    )
+    .unwrap();
+    let mock = MockEmbedder::default();
+    resolve_embeddings(&mut stmt, &mock).await.unwrap();
+    let sparse = mock.sparse_query_calls.lock().unwrap();
+    assert_eq!(sparse.len(), 1, "expected one sparse leg call");
+    assert_eq!(sparse[0].0, "splade", "sparse leg must see Hybrid.model");
+    assert_eq!(sparse[0].1, "q");
+    let dense = mock.dense_calls.lock().unwrap();
+    assert!(
+        dense.iter().any(|(m, t)| m == "splade" && t == "q"),
+        "dense leg must see Hybrid.model, got: {dense:?}"
+    );
+}
+
+#[tokio::test]
+async fn empty_dense_vector_rejected_on_query_path() {
+    // C3b repro: multi/image legs reject empty vectors; the dense leg must too.
+    let mut stmt = Parser::parse("QUERY 'hello' FROM docs LIMIT 10").unwrap();
+    let mock = MockEmbedder {
+        dense_batch_override: Some(vec![Vec::new()]),
+        ..Default::default()
+    };
+    let err = resolve_embeddings(&mut stmt, &mock).await.unwrap_err();
+    assert_eq!(err.code, "QQL-EMBEDDING");
+    assert!(
+        err.message.contains("empty"),
+        "expected empty-vector error, got: {}",
+        err.message
+    );
 }
 
 #[tokio::test]
@@ -836,4 +894,154 @@ async fn default_embed_joint_propagates_errors_not_swallowed() {
     let err = e.embed_joint("hello", "default").await.unwrap_err();
     // embed_sparse passes for default model; embed_multi rejects by default.
     assert_eq!(err.code, "QQL-EMBEDDING-MULTI");
+}
+
+/// Embedder echoing the first text byte as the vector, so per-model batch
+/// regrouping can be checked for walk-order restoration.
+struct OrderMockEmbedder;
+
+fn first_byte_vec(text: &str) -> Vec<f32> {
+    vec![text.bytes().next().unwrap_or(0) as f32]
+}
+
+#[async_trait]
+impl Embedder for OrderMockEmbedder {
+    async fn embed_dense(&self, text: &str, _model: &str) -> Result<Vec<f32>, QqlError> {
+        Ok(first_byte_vec(text))
+    }
+
+    async fn embed_dense_batch(
+        &self,
+        texts: &[String],
+        _model: &str,
+    ) -> Result<Vec<Vec<f32>>, QqlError> {
+        Ok(texts.iter().map(|t| first_byte_vec(t)).collect())
+    }
+}
+
+fn dense_input_of(query: &QueryStmt) -> Vec<f32> {
+    let QueryExpr::Nearest { input, .. } = &query.expression else {
+        panic!("expected Nearest");
+    };
+    let QueryInput::Vector(VectorValue::Dense(vec)) = input else {
+        panic!("expected resolved dense vector, got {input:?}");
+    };
+    vec.clone()
+}
+
+#[tokio::test]
+async fn multi_model_batch_restores_walk_order() {
+    // Interleaved models (m1, m2, m1) batch per model but must apply in walk
+    // order: alpha → beta → gamma.
+    let mut stmt = Parser::parse(
+        "WITH a AS (QUERY TEXT 'alpha' MODEL 'm1' USING dense AS DENSE LIMIT 10), \
+         b AS (QUERY TEXT 'beta' MODEL 'm2' USING dense AS DENSE PREFETCH (a) LIMIT 10) \
+         QUERY TEXT 'gamma' MODEL 'm1' FROM docs USING dense AS DENSE PREFETCH (b) LIMIT 10;",
+    )
+    .unwrap();
+    resolve_embeddings(&mut stmt, &OrderMockEmbedder)
+        .await
+        .unwrap();
+    let Stmt::Query(query) = &stmt else {
+        panic!("expected Query");
+    };
+    assert_eq!(query.ctes.len(), 2);
+    let first = dense_input_of(&query.ctes[0].query);
+    let second = dense_input_of(&query.ctes[1].query);
+    assert_eq!(first, vec![b'a' as f32]);
+    assert_eq!(second, vec![b'b' as f32]);
+    assert_eq!(dense_input_of(query), vec![b'g' as f32]);
+}
+
+#[tokio::test]
+async fn default_batch_loops_cover_single_methods() {
+    let e = DefaultEmbedder;
+    // Dense batch loops `embed_dense`.
+    let vecs = e
+        .embed_dense_batch(&["a".to_string(), "b".to_string()], "m")
+        .await
+        .unwrap();
+    assert_eq!(vecs, vec![vec![0.0], vec![0.0]]);
+    // Sparse query batch loops `embed_sparse_query` (default model → BM25).
+    let batch = e
+        .embed_sparse_query_batch(&["hello world".to_string(), "hello".to_string()], "default")
+        .await
+        .unwrap();
+    assert_eq!(batch.len(), 2);
+    assert_eq!(
+        batch[0],
+        e.embed_sparse_query("hello world", "default")
+            .await
+            .unwrap()
+    );
+    // Sparse document batch loops `embed_sparse_document`.
+    let docs = e
+        .embed_sparse_document_batch(&["hello world".to_string()], "")
+        .await
+        .unwrap();
+    assert_eq!(docs.len(), 1);
+    // The non-default reject gate holds through the batch entry too.
+    let err = e
+        .embed_sparse_query_batch(&["x".to_string()], "splade")
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "QQL-EMBEDDING-SPARSE");
+}
+
+#[tokio::test]
+async fn default_opt_in_modalities_reject_with_codes() {
+    let e = DefaultEmbedder;
+    assert_eq!(
+        e.embed_multi("x", "m").await.unwrap_err().code,
+        "QQL-EMBEDDING-MULTI"
+    );
+    assert_eq!(
+        e.embed_image("p", "m").await.unwrap_err().code,
+        "QQL-EMBEDDING-IMAGE"
+    );
+    assert_eq!(
+        e.rerank_pairs("q", &["d".to_string()], "m")
+            .await
+            .unwrap_err()
+            .code,
+        "QQL-RERANK-CROSS"
+    );
+    // Batch variants loop the rejecting singles → same codes.
+    assert_eq!(
+        e.embed_multi_batch(&["x".to_string()], "m")
+            .await
+            .unwrap_err()
+            .code,
+        "QQL-EMBEDDING-MULTI"
+    );
+    assert_eq!(
+        e.embed_image_batch(&["p".to_string()], "m")
+            .await
+            .unwrap_err()
+            .code,
+        "QQL-EMBEDDING-IMAGE"
+    );
+    // Joint fans out to dense + sparse + multi; multi rejects first.
+    assert_eq!(
+        e.embed_joint_batch(&["x".to_string()], "default")
+            .await
+            .unwrap_err()
+            .code,
+        "QQL-EMBEDDING-MULTI"
+    );
+}
+
+#[tokio::test]
+async fn default_dimension_and_model_checks() {
+    let e = DefaultEmbedder;
+    assert_eq!(e.dimension(), None);
+    assert_eq!(e.multi_dimension(), None);
+    assert!(e.accepts_model("anything"));
+}
+
+#[tokio::test]
+async fn dense_model_unsupported_error_shape() {
+    let err = crate::embedder::dense_model_unsupported_error("nomic");
+    assert_eq!(err.code, "QQL-EMBEDDING");
+    assert!(err.message.contains("nomic"), "got: {}", err.message);
 }

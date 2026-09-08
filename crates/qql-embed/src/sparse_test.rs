@@ -1,6 +1,26 @@
 use crate::sparse;
 
 #[test]
+fn test_for_each_token_id_matches_tokenize_then_token_id() {
+    for text in [
+        "Hello, World! 123",
+        "B-cell anti-NMDA CD19-negative",
+        "Привет мир hello-world",
+        "you'll be in town",
+        "",
+        "the and of to in",
+    ] {
+        let mut streamed = Vec::new();
+        sparse::for_each_token_id(text, |id| streamed.push(id));
+        let expected: Vec<u32> = sparse::tokenize(text)
+            .iter()
+            .map(|t| sparse::token_id(t))
+            .collect();
+        assert_eq!(streamed, expected, "parity for {text:?}");
+    }
+}
+
+#[test]
 fn test_tokenize_word_boundaries_lowercases_and_stems() {
     // Word tokenizer splits on every non-alphanumeric char (including `_`),
     // lowercases, then applies English snowball stemming.

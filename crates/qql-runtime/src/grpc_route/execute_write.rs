@@ -22,7 +22,7 @@ pub(crate) async fn execute_upsert(
         .iter()
         .map(|p| {
             let id = to_point_id(&p.id);
-            let vectors = p.vector.as_ref().and_then(to_vectors);
+            let vectors = p.vector.as_ref().map(to_vectors).transpose()?.flatten();
             let payload = p
                 .payload
                 .as_ref()
@@ -32,13 +32,13 @@ pub(crate) async fn execute_upsert(
                         .collect()
                 })
                 .unwrap_or_default();
-            qdrant::PointStruct {
+            Ok(qdrant::PointStruct {
                 id: Some(id),
                 vectors,
                 payload,
-            }
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, QqlError>>()?;
     let grpc_req = qdrant::UpsertPoints {
         collection_name: collection.to_owned(),
         wait: Some(wait),
@@ -155,11 +155,13 @@ pub(crate) async fn execute_update_vectors(
     let points: Vec<qdrant::PointVectors> = request
         .points
         .iter()
-        .map(|p| qdrant::PointVectors {
-            id: Some(to_point_id(&p.id)),
-            vectors: to_vectors(&p.vector),
+        .map(|p| {
+            Ok(qdrant::PointVectors {
+                id: Some(to_point_id(&p.id)),
+                vectors: to_vectors(&p.vector)?,
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, QqlError>>()?;
     let grpc_req = qdrant::UpdatePointVectors {
         collection_name: collection.to_owned(),
         wait: Some(wait),
@@ -250,13 +252,13 @@ pub(crate) fn to_points_update_operation(
                                 .collect()
                         })
                         .unwrap_or_default();
-                    qdrant::PointStruct {
+                    Ok(qdrant::PointStruct {
                         id: Some(to_point_id(&p.id)),
-                        vectors: p.vector.as_ref().and_then(to_vectors),
+                        vectors: p.vector.as_ref().map(to_vectors).transpose()?.flatten(),
                         payload,
-                    }
+                    })
                 })
-                .collect();
+                .collect::<Result<Vec<_>, QqlError>>()?;
             let shard_key_selector = shard_key_selector_plan(&upsert.shard_key);
             Operation::Upsert(points_update_operation::PointStructList {
                 points,
@@ -313,11 +315,13 @@ pub(crate) fn to_points_update_operation(
             let points: Vec<qdrant::PointVectors> = update_vectors
                 .points
                 .iter()
-                .map(|p| qdrant::PointVectors {
-                    id: Some(to_point_id(&p.id)),
-                    vectors: to_vectors(&p.vector),
+                .map(|p| {
+                    Ok(qdrant::PointVectors {
+                        id: Some(to_point_id(&p.id)),
+                        vectors: to_vectors(&p.vector)?,
+                    })
                 })
-                .collect();
+                .collect::<Result<Vec<_>, QqlError>>()?;
             Operation::UpdateVectors(points_update_operation::UpdateVectors {
                 points,
                 shard_key_selector: shard_key_selector(&update_vectors.shard_key),

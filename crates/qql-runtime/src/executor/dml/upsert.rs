@@ -235,8 +235,7 @@ impl Executor {
             return Ok(cfg.embedding_dimension);
         }
 
-        if model.is_some()
-            && model.unwrap() != ""
+        if model.is_some_and(|m| !m.is_empty())
             && self
                 .config
                 .as_ref()

@@ -368,6 +368,139 @@ async fn cross_rerank_preserves_same_id_different_collections() {
 }
 
 #[tokio::test]
+async fn cross_rerank_empty_candidates_returns_zero_hits() {
+    // No `point_map` entries: every candidate stage returns zero points, so
+    // the client-side scorer short-circuits before touching the embedder.
+    let mut client = MockQdrantClient::default();
+    client.exists = true;
+    client.info = Some(collection_with_vectors(&["dense"], &[]));
+    let embedder = Arc::new(MockEmbedder {
+        dense: vec![0.1, 0.2, 0.3],
+        sparse_indices: vec![],
+        sparse_values: vec![],
+        multi: vec![vec![0.1, 0.2], vec![0.3, 0.4]],
+    });
+    let executor =
+        Executor::with_embedder(Box::new(client), Some(test_local_config()), Some(embedder));
+
+    let report = executor
+        .execute(
+            "WITH c1 AS (QUERY TEXT 'hello' MODEL 'test-model' FROM empty_coll USING dense AS DENSE LIMIT 5) \
+             QUERY CROSS RERANK TEXT 'hello' MODEL 'mock' ON FIELD body \
+             FROM empty_coll PREFETCH (c1) LIMIT 10",
+            OnError::Stop,
+        )
+        .await
+        .expect("empty CROSS RERANK should succeed");
+
+    assert!(report.ok, "{report:?}");
+    assert_eq!(report.results.len(), 1);
+    assert_eq!(report.results[0].operation, "CROSS_RERANK");
+    assert_eq!(report.results[0].message, "Found 0 hits");
+    assert_eq!(
+        report.results[0].data.as_ref().expect("data present"),
+        &serde_json::json!([])
+    );
+}
+
+#[tokio::test]
+async fn cross_rerank_missing_payload_field_errors() {
+    // Candidates exist but none carry the rerank field (and it is not the
+    // `text` fallback): fail closed with QQL-RERANK-CROSS-FIELD.
+    let mut client = MockQdrantClient::default();
+    client.exists = true;
+    client.info = Some(collection_with_vectors(&["dense"], &[]));
+    client.point_map.lock().unwrap().insert(
+        "docs".to_string(),
+        serde_json::json!({"result": {"points": [
+            {"id": 1, "score": 0.9, "payload": {"title": "no body here"}}
+        ]}}),
+    );
+    let embedder = Arc::new(MockEmbedder {
+        dense: vec![0.1, 0.2, 0.3],
+        sparse_indices: vec![],
+        sparse_values: vec![],
+        multi: vec![vec![0.1, 0.2], vec![0.3, 0.4]],
+    });
+    let executor =
+        Executor::with_embedder(Box::new(client), Some(test_local_config()), Some(embedder));
+
+    let err = executor
+        .execute(
+            "WITH c1 AS (QUERY TEXT 'hello' MODEL 'test-model' FROM docs USING dense AS DENSE LIMIT 5) \
+             QUERY CROSS RERANK TEXT 'hello' MODEL 'mock' ON FIELD body \
+             FROM docs PREFETCH (c1) LIMIT 10",
+            OnError::Stop,
+        )
+        .await
+        .expect_err("missing rerank field must fail");
+
+    assert_eq!(err.code, "QQL-RERANK-CROSS-FIELD");
+}
+
+/// Test-only embedder returning a fixed (possibly wrong-cardinality) score
+/// list for cross-rerank pair scoring.
+struct FixedScoreEmbedder {
+    scores: Vec<f32>,
+}
+
+#[async_trait::async_trait]
+impl crate::embedder::Embedder for FixedScoreEmbedder {
+    async fn embed_dense(
+        &self,
+        _text: &str,
+        _model: &str,
+    ) -> Result<Vec<f32>, qql_core::error::QqlError> {
+        Ok(vec![0.1, 0.2, 0.3])
+    }
+
+    async fn rerank_pairs(
+        &self,
+        _query: &str,
+        _documents: &[String],
+        _model: &str,
+    ) -> Result<Vec<f32>, qql_core::error::QqlError> {
+        Ok(self.scores.clone())
+    }
+}
+
+#[tokio::test]
+async fn cross_rerank_score_cardinality_mismatch_errors() {
+    // Two scored documents but one returned score: fail closed with
+    // QQL-RERANK-CROSS (the embedder broke the same-order contract).
+    let mut client = MockQdrantClient::default();
+    client.exists = true;
+    client.info = Some(collection_with_vectors(&["dense"], &[]));
+    client.point_map.lock().unwrap().insert(
+        "docs".to_string(),
+        serde_json::json!({"result": {"points": [
+            {"id": 1, "score": 0.9, "payload": {"body": "first document"}},
+            {"id": 2, "score": 0.8, "payload": {"body": "second document"}}
+        ]}}),
+    );
+    let embedder = Arc::new(FixedScoreEmbedder { scores: vec![0.5] });
+    let executor =
+        Executor::with_embedder(Box::new(client), Some(test_local_config()), Some(embedder));
+
+    let err = executor
+        .execute(
+            "WITH c1 AS (QUERY TEXT 'hello' MODEL 'test-model' FROM docs USING dense AS DENSE LIMIT 5) \
+             QUERY CROSS RERANK TEXT 'hello' MODEL 'mock' ON FIELD body \
+             FROM docs PREFETCH (c1) LIMIT 10",
+            OnError::Stop,
+        )
+        .await
+        .expect_err("score cardinality mismatch must fail");
+
+    assert_eq!(err.code, "QQL-RERANK-CROSS");
+    assert!(
+        err.message.contains("1 scores for 2 documents"),
+        "unexpected message: {}",
+        err.message
+    );
+}
+
+#[tokio::test]
 async fn numeric_and_string_ids_preserve_json_types() {
     let mut client = MockQdrantClient::default();
     client.exists = true;
