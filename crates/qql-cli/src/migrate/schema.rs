@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 use std::error::Error;
+use std::time::Duration;
 
 use qql::backend::CollectionInfo;
 use qql::executor::{Executor, OnError};
@@ -16,6 +17,11 @@ use super::options::{
     DEFAULT_INDEXING_THRESHOLD, MigrateOptions, MigratePlan, QuantizeKind, QuantizeSpec,
 };
 use crate::dump::{format_ident, generate_create_statement, generate_index_statements};
+
+/// Standalone Qdrant rejects `CreateShardKey` but the RPC can stall the ingest
+/// pipeline; fail closed well before that.
+const SHARD_KEY_RPC_TIMEOUT: Duration = Duration::from_secs(15);
+const PROBE_SHARD_KEY: &str = "__qql_migrate_probe__";
 
 /// Apply reshard / quantize / custom-sharding overrides onto a cloned schema.
 pub fn apply_overrides(info: &mut CollectionInfo, opts: &MigrateOptions) {
@@ -218,6 +224,12 @@ pub async fn prepare_target(
             )
             .into());
         }
+        // `--shard-key-field` creates keys during ingest. Probe now so a
+        // standalone target fails in the schema phase instead of hanging
+        // the scroll/upsert pipeline.
+        if opts.shard_key.is_none() {
+            probe_custom_sharding(target, &opts.target_collection).await?;
+        }
     }
 
     let existing_indexes: HashSet<String> = target_info
@@ -261,7 +273,23 @@ pub async fn ensure_shard_key(target: &Executor, stmt: &str) -> Result<(), Box<d
     } else {
         format!("{};", stmt)
     };
-    match target.execute(&sql, OnError::Stop).await {
+    let result = match tokio::time::timeout(
+        SHARD_KEY_RPC_TIMEOUT,
+        target.execute(&sql, OnError::Stop),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => {
+            return Err(format!(
+                "CREATE SHARD KEY timed out after {}s; {}",
+                SHARD_KEY_RPC_TIMEOUT.as_secs(),
+                CUSTOM_SHARD_KEY_HINT
+            )
+            .into());
+        }
+    };
+    match result {
         Ok(report) if report.ok => Ok(()),
         Ok(report) => {
             let msg = report
@@ -273,12 +301,42 @@ pub async fn ensure_shard_key(target: &Executor, stmt: &str) -> Result<(), Box<d
             if already_exists(msg) {
                 Ok(())
             } else {
-                Err(msg.into())
+                Err(map_shard_key_error(msg).into())
             }
         }
         Err(err) if already_exists(&err.to_string()) => Ok(()),
-        Err(err) => Err(err.into()),
+        Err(err) => Err(map_shard_key_error(&err.to_string()).into()),
     }
+}
+
+const CUSTOM_SHARD_KEY_HINT: &str = "custom shard keys require Qdrant distributed mode; \
+     this target is standalone. Remove --shard-key / --shard-key-field, \
+     or point --target-url at a clustered Qdrant";
+
+/// True when the backend cannot create custom shard keys (standalone Qdrant).
+pub(crate) fn shard_key_backend_unsupported(msg: &str) -> bool {
+    let lower = msg.to_ascii_lowercase();
+    lower.contains("standalone")
+        || lower.contains("not implemented")
+        || lower.contains("unsupported-shard-key")
+        || lower.contains("unsupported_shard_key")
+}
+
+pub(crate) fn map_shard_key_error(msg: &str) -> String {
+    if shard_key_backend_unsupported(msg) {
+        CUSTOM_SHARD_KEY_HINT.to_string()
+    } else {
+        msg.to_string()
+    }
+}
+
+async fn probe_custom_sharding(target: &Executor, collection: &str) -> Result<(), Box<dyn Error>> {
+    let coll = format_ident(collection);
+    let create = format!("CREATE SHARD KEY '{PROBE_SHARD_KEY}' ON COLLECTION {coll}");
+    ensure_shard_key(target, &create).await?;
+    let drop = format!("DROP SHARD KEY '{PROBE_SHARD_KEY}' ON COLLECTION {coll};");
+    let _ = run_sql(target, &drop).await;
+    Ok(())
 }
 
 /// Restore optimizer indexing after ingest.

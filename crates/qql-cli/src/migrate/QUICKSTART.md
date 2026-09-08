@@ -17,7 +17,7 @@ Use gRPC (`:6334` / `grpc://`) for the ingest path. REST (`:6333`) works too.
 
 ```bash
 ./target/release/qql --url grpc://localhost:6334 \
-  migrate vsq_berlin_qql --to vsq_berlin_copy --dry-run
+  migrate geosmart_berlin_stays --to geosmart_copy --dry-run
 ```
 
 You should see `CREATE COLLECTION`, `CREATE INDEX` (payload indexes first), and
@@ -29,7 +29,7 @@ Same cluster, new collection:
 
 ```bash
 ./target/release/qql --url grpc://localhost:6334 \
-  migrate vsq_berlin_qql --to vsq_berlin_copy --recreate
+  migrate geosmart_berlin_stays --to geosmart_copy --recreate
 ```
 
 Cross cluster:
@@ -58,7 +58,11 @@ URLs). Re-run the same command to resume; `--restart` starts over.
 | `--recreate` | DROP target first |
 | `--workers 4` `--batch-size 128` | Parallel upsert window |
 | `--quantize scalar` | Inject quantization on CREATE |
-| `--where "district = 'Mitte'"` | Filtered copy |
+| `--where "neighbourhood_group = 'Mitte'"` | Filtered copy |
 | `--cutover docs` | Point alias `docs` at the new collection |
 | `--no-wait` | Faster ingest; verify polls until counts match |
 | `--bulk-threshold-kb` | Cap unindexed RAM during bulk load (default 2 000 000) |
+
+`--shard-key` / `--shard-key-field` need **Qdrant distributed mode**. Standalone
+nodes reject `CREATE SHARD KEY`; migrate fails in the schema phase instead of
+hanging.

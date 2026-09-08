@@ -103,10 +103,17 @@ pub async fn stream_points(
         Ok::<(), Box<dyn Error>>(())
     };
 
-    let (produced, consumed) = tokio::join!(produce, consume);
-    produced?;
-    consumed?;
-    Ok(())
+    // Cancel the producer if ingest fails (or finishes); `join!` would keep
+    // scrolling into a full channel while CREATE SHARD KEY/upsert is stuck.
+    tokio::pin!(produce);
+    tokio::pin!(consume);
+    tokio::select! {
+        result = &mut consume => result,
+        result = &mut produce => {
+            result?;
+            consume.await
+        }
+    }
 }
 
 fn window_totals(

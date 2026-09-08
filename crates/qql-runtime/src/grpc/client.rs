@@ -12,6 +12,9 @@ pub const ROUTE_AFFINITY_METADATA: &str = "x-qdrant-route-affinity";
 /// gRPC metadata key for request correlation (`x-request-id`).
 pub const REQUEST_ID_METADATA: &str = crate::client::REQUEST_ID_HEADER;
 
+/// ColBERT / multi-vector scroll pages exceed tonic's 4 MiB default.
+const MAX_MESSAGE_SIZE: usize = 64 * 1024 * 1024;
+
 /// Qdrant gRPC backend handle: `tonic` channel plus API-key and route-affinity
 /// metadata, with typed points/collections client factories.
 pub struct GrpcQdrant {
@@ -183,6 +186,8 @@ impl GrpcQdrant {
             self.channel.clone(),
             self.interceptor(),
         )
+        .max_decoding_message_size(MAX_MESSAGE_SIZE)
+        .max_encoding_message_size(MAX_MESSAGE_SIZE)
     }
 
     pub(crate) fn collections_client(
@@ -194,6 +199,8 @@ impl GrpcQdrant {
             self.channel.clone(),
             self.interceptor(),
         )
+        .max_decoding_message_size(MAX_MESSAGE_SIZE)
+        .max_encoding_message_size(MAX_MESSAGE_SIZE)
     }
 }
 

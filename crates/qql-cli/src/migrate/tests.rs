@@ -346,3 +346,28 @@ fn missing_policy_parse() {
         MissingShardKey::Default(qql_core::ast::ShardKey::Number(101))
     ));
 }
+
+#[test]
+fn standalone_create_shard_key_is_unsupported_not_exists() {
+    assert!(super::schema::shard_key_backend_unsupported(
+        "Operation is not implemented or not supported: Qdrant is running in standalone mode"
+    ));
+    assert!(super::schema::shard_key_backend_unsupported(
+        "Qdrant is running in standalone mode"
+    ));
+    assert!(!super::schema::shard_key_backend_unsupported(
+        "shard key 'acme' already exists"
+    ));
+    let mapped = super::schema::map_shard_key_error(
+        "gRPC create_shard_key: code: 'Operation is not implemented or not supported'",
+    );
+    assert!(mapped.contains("distributed mode"), "{mapped}");
+}
+
+#[test]
+fn custom_sharding_probe_sql_parses() {
+    qql_core::parser::Parser::parse("CREATE SHARD KEY '__qql_migrate_probe__' ON COLLECTION docs;")
+        .expect("probe CREATE SHARD KEY");
+    qql_core::parser::Parser::parse("DROP SHARD KEY '__qql_migrate_probe__' ON COLLECTION docs;")
+        .expect("probe DROP SHARD KEY");
+}
