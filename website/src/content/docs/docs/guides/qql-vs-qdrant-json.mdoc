@@ -79,9 +79,10 @@ LIMIT 5;
 ### In Raw Qdrant REST JSON (24 lines)
 
 ```json
-POST /collections/filings/points/query?shard_key=tenant-corp-99
+POST /collections/filings/points/query
 {
   "query": [0.038, -0.192, 0.441, ...],
+  "shard_key": "tenant-corp-99",
   "filter": {
     "must": [
       { "key": "tenant_id", "match": { "value": "tenant-corp-99" } },
@@ -92,6 +93,12 @@ POST /collections/filings/points/query?shard_key=tenant-corp-99
   "with_payload": true
 }
 ```
+
+`shard_key` rides the request body — the only URL query parameters on
+query endpoints are `consistency` and `timeout`, so `?shard_key=…` is
+silently ignored by Qdrant. A bare `"query"` needs a default (unnamed)
+vector; named-vector collections also need `"using": "<name>"` (what QQL
+sends when the statement has a `USING` clause).
 
 ---
 

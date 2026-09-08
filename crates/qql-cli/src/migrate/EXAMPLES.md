@@ -97,6 +97,10 @@ on CREATE. Other values: `--quantize binary|product|turbo`.
 Creates `sharding_method = 'custom'`, a `is_tenant = true` index on
 `neighbourhood_group`, and routes each point with `SHARD '<group>'`. Integers
 stay numeric shard keys (`SHARD 101`), strings stay keywords (`SHARD 'acme'`).
+Keys are discovered with `FACET <field> … LIMIT 10000 EXACT true`, falling back
+to a payload-only scroll when FACET truncates or the field is unindexed; an
+existing index on the field is promoted with `is_tenant = true`. Use
+`--shard-key <literal>` instead when every point shares one key.
 
 On **standalone** Qdrant this fails in the schema phase (~15 ms) with:
 
@@ -131,3 +135,10 @@ Re-run the **same** command. Checkpoint files live at:
 
 Add `--json` for scripting. Fields: `written`, `source_count`, `target_count`,
 `verified`, `resumed`, `create`, `indexes`, `restore_optimizers`.
+
+## End-to-end sharded demo
+
+`berlin_shard_migration.py` (next to these docs) drives the full loop through
+the CLI — create, ingest via `UPSERT … VALUES :rows --params-file`, migrate
+with `--shard-key-field district`, verify, and a sharded `dump` round-trip.
+Needs multi-node Qdrant; see the script header for prerequisites.

@@ -72,7 +72,7 @@ Edge unsupported codes are stable (see `crates/qql-edge/README.md`).
 | Grouped pagination (OFFSET with GROUP BY) | `GROUP BY … OFFSET N` → maps to `group_offset` |
 | MMR with sparse vectors | `USING … AS SPARSE` with MMR is supported |
 | Filter `min_should` | Conjunction threshold on compound filters |
-| Request-level shard routing | QQL `SHARD '…'` or `stmt.shard_key` → REST `shard_key` / gRPC `ShardKeySelector` (never inside Filter) |
+| Request-level shard routing | QQL `SHARD '…'` / `SHARD 101` or `stmt.shard_key` → REST `shard_key` / gRPC `ShardKeySelector` (never inside Filter) |
 | Schema-first vectors | `USING name` / `AS DENSE\|SPARSE\|MULTI` |
 | Multivector / late interaction | `USING colbert` / `AS MULTI`; `RERANK … PREFETCH` |
 | CLIP | `QUERY IMAGE '…'` / `TEXT` into same dense space |

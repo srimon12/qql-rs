@@ -22,7 +22,7 @@ WHERE field > 10               -- integer greater than
 WHERE field >= 10              -- integer greater than or equal
 WHERE field < 100              -- integer less than
 WHERE field <= 100             -- integer less than or equal
-WHERE field = 3.14             -- float equality
+WHERE field = 3.14             -- float equality (lowers to exact range(gte, lte): Qdrant match has no float variant)
 WHERE field = true             -- boolean equality
 ```
 
