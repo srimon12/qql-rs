@@ -204,6 +204,17 @@ jobs:
           cargo doc --locked --no-deps --all-features -p qql-cli
           --target-dir target/doc-cli
 
+  error-codes:
+    name: Error codes sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # No toolchain needed: the check is rg/grep over sources versus the
+      # website error-code reference (tables + generated set block).
+      - name: Website error codes match emitted codes
+        run: bash scripts/check-error-codes.sh
+
   package:
     name: Package dry-run
     runs-on: ubuntu-latest

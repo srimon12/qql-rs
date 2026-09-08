@@ -9,6 +9,7 @@ use qql_core::ast::{
 use qql_core::error::QqlError;
 
 use crate::embedder::Embedder;
+use crate::sparse::SparseVector;
 
 /// Default named dense vector for auto-embedding.
 pub const DENSE_VECTOR_NAME: &str = "dense";
@@ -317,7 +318,7 @@ fn collect_expr_dense_jobs(
             ..
         } => {
             // RERANK uses the MODEL string for dense/multi, not "default".
-            let mut emb = require_embed_target(using)?;
+            let emb = require_embed_target(using)?;
             // RERANK is always dense-family; multi comes from USING / schema.
             if emb.kind == VectorKind::Sparse {
                 return Err(QqlError::execution(
@@ -326,7 +327,6 @@ fn collect_expr_dense_jobs(
                     None,
                 ));
             }
-            emb.kind = VectorKind::Dense;
             collect_input_dense_job(input, emb, model.as_str(), jobs);
             collect_prefetches_dense_jobs(prefetch, jobs)?;
         }
@@ -514,6 +514,7 @@ fn apply_expr_embeddings<'a>(
             }
             QueryExpr::Hybrid {
                 text,
+                model,
                 dense_vector,
                 sparse_vector,
                 fusion,
@@ -526,7 +527,10 @@ fn apply_expr_embeddings<'a>(
                         None,
                     )
                 })?;
-                let s_vec = embedder.embed_sparse_query(text, "default").await?;
+                // The sparse leg shares `Hybrid.model` with the batched dense
+                // leg above (there is no dedicated sparse-model field).
+                let s_model = model.as_deref().unwrap_or("default");
+                let s_vec = embed_sparse_query_one(embedder, text, s_model).await?;
                 let d_vec_name = dense_vector.as_deref().unwrap_or(DENSE_VECTOR_NAME);
                 let s_vec_name = sparse_vector.as_deref().unwrap_or(SPARSE_VECTOR_NAME);
 
@@ -601,8 +605,7 @@ fn apply_expr_embeddings<'a>(
                 prefetch,
                 ..
             } => {
-                let mut emb = require_embed_target(using)?;
-                emb.kind = VectorKind::Dense;
+                let emb = require_embed_target(using)?;
                 apply_input(input, emb, model.as_str(), embedder, dense).await?;
                 apply_prefetches_embeddings(prefetch, embedder, dense).await?;
             }
@@ -613,6 +616,31 @@ fn apply_expr_embeddings<'a>(
         }
         Ok(())
     })
+}
+
+/// Single query-side sparse embedding via the batch entry point, so backends
+/// that override only [`Embedder::embed_sparse_query_batch`] still serve the
+/// one-text Hybrid and sparse-apply paths.
+async fn embed_sparse_query_one(
+    embedder: &dyn Embedder,
+    text: &str,
+    model: &str,
+) -> Result<SparseVector, QqlError> {
+    let mut vecs = embedder
+        .embed_sparse_query_batch(&[text.to_string()], model)
+        .await?;
+    if vecs.len() != 1 {
+        return Err(QqlError::execution(
+            "QQL-EMBEDDING-SPARSE",
+            format!(
+                "embed_sparse_query_batch returned {} vectors for 1 text (model={model})",
+                vecs.len()
+            ),
+            None,
+        ));
+    }
+    // `len == 1` checked above.
+    Ok(vecs.swap_remove(0))
 }
 
 async fn apply_input(
@@ -654,7 +682,7 @@ async fn apply_input(
         QueryInput::Text { text, model, .. } => {
             let model_name = model.as_deref().unwrap_or(default_model);
             if target.kind == VectorKind::Sparse {
-                let s_vec = embedder.embed_sparse_query(text, model_name).await?;
+                let s_vec = embed_sparse_query_one(embedder, text, model_name).await?;
                 *input = QueryInput::Vector(VectorValue::Sparse {
                     indices: s_vec.indices,
                     values: s_vec.values,
@@ -680,6 +708,13 @@ async fn apply_input(
                     None,
                 )
             })?;
+            if vec.is_empty() {
+                return Err(QqlError::execution(
+                    "QQL-EMBEDDING",
+                    "embed_dense_batch returned an empty vector",
+                    None,
+                ));
+            }
             *input = QueryInput::Vector(VectorValue::Dense(vec));
             Ok(())
         }

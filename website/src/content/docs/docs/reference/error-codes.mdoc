@@ -62,11 +62,11 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PARSE-SYNTAX` | Production-specific syntax or range failure |
 | `QQL-PARSE-COMPARISON` | Expected a comparison operator |
 | `QQL-PARSE-COUNT-CONFIG` | Unknown `COUNT WITH (…)` parameter, or `exact` is not true/false |
+| `QQL-PARSE-FACET-CONFIG` | Unknown `FACET WITH (…)` parameter, non-bool `exact`, or duplicate `LIMIT`/`EXACT` |
 | `QQL-PARSE-FEEDBACK-STRATEGY` | Feedback strategy must be exactly `(a = …, b = …, c = …)` numeric parameters in order |
 | `QQL-PARSE-QUOTA` | `SET QUOTA (…) WAIT` requires true or false |
 | `QQL-PARSE-RERANK` | RERANK input requires `TEXT '…'`, `VECTOR […]`, or `POINT <id>` |
 | `QQL-PARSE-SHARD-KEY-CONFIG` | Unknown `CREATE SHARD KEY (…)` parameter, or a value that must be a positive integer is not one |
-| `QQL-PARSE-CONTEXT` | `CONTEXT` requires at least one positive/negative pair |
 | `QQL-PARSE-CROSS-RERANK` | `CROSS RERANK` requires `TEXT '…'` or a string query input |
 | `QQL-PARSE-EMBED` | `EMBED USING` requires `DENSE`, `SPARSE`, `MULTI`, `IMAGE`, or `MODEL` |
 | `QQL-PARSE-EMBEDDING` | Duplicate clause in a HYBRID embedding spec |
@@ -77,7 +77,6 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PARSE-IDENTIFIER` | Expected an identifier or quoted name |
 | `QQL-PARSE-IN` | `IN` / `NOT IN` requires a non-empty value list |
 | `QQL-PARSE-INDEX-TYPE` | Unsupported `CREATE INDEX` field type |
-| `QQL-PARSE-INTEGER` | Invalid integer literal |
 | `QQL-PARSE-LITERAL` | Expected a scalar literal |
 | `QQL-PARSE-MATCH-ANY` | `MATCH ANY` requires a non-empty exact-value list |
 | `QQL-PARSE-NUMBER` | Expected a number |
@@ -90,7 +89,10 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PARSE-SELECTOR` | A selector list cannot be empty |
 | `QQL-PARSE-SEPARATOR` | Multiple statements must be separated by a semicolon |
 | `QQL-PARSE-STATEMENT-LIMIT` | A script may contain at most 256 statements |
+| `QQL-PARSE-ALTER-CONFIG` | `ALTER COLLECTION` requires at least one `WITH` clause |
+| `QQL-PARSE-SEARCH-PARAMS` | `PARAMS` requires at least one search parameter |
 | `QQL-PARSE-TRAILING` | Unexpected trailing token |
+| `QQL-PARSE-TRAILING-COMMA` | Trailing commas are not allowed (objects, lists, `PARAMS` / config blocks) |
 | `QQL-PARSE-UPDATE` | Expected `VECTOR` or `PAYLOAD` after `SET` |
 | `QQL-PARSE-VALUE` | Unexpected value token |
 | `QQL-PARSE-BOOL` | Expected `true` or `false` |
@@ -114,6 +116,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-VALIDATION-EMPTY-SCRIPT` | Nothing to execute — the query is empty, whitespace-only, or the statement list is empty |
 | `QQL-VALIDATION-POINT-ID` | A value used as a point ID is neither an unsigned integer nor a string |
 | `QQL-VALIDATION-ACORN-SELECTIVITY` | `max_selectivity` requires `PARAMS (acorn = true, …)` |
+| `QQL-VALIDATION-ALIASES` | Collection aliases are not supported on this backend |
 | `QQL-VALIDATION-CONFIG` | Invalid collection configuration block |
 | `QQL-VALIDATION-CONSISTENCY` | `consistency` must be a non-negative integer factor or `majority` / `quorum` / `all` |
 | `QQL-VALIDATION-CREATE-MODEL` | `CREATE COLLECTION … HYBRID` rejects a single dense `MODEL` |
@@ -121,6 +124,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-VALIDATION-FUSION` | The fusion method must be `RRF` or `DBSF` |
 | `QQL-VALIDATION-GEO` | Invalid geo coordinates, radius, or polygon ring |
 | `QQL-VALIDATION-LIMIT-OVERFLOW` | `LIMIT` + `OFFSET` (or hybrid candidate scaling) overflows `u64` |
+| `QQL-VALIDATION-MULTI-STMT` | Cannot prepare a multi-statement script; prepare one statement at a time |
 | `QQL-VALIDATION-PREFETCH` | This query expression does not accept `PREFETCH` |
 | `QQL-VALIDATION-RECOMMEND-STRATEGY` | Unknown `RECOMMEND STRATEGY` |
 | `QQL-VALIDATION-RERANK-USING` | `RERANK` requires `USING <vector>` |
@@ -130,6 +134,7 @@ The same structured fields are projected differently by each host binding.
 | `QQL-VALIDATION-IDF` | `PARAMS (idf = …)` is not `'global'` or `WHERE <filter>` |
 | `QQL-VALIDATION-USING` | This query expression does not accept `USING` |
 | `QQL-VALIDATION-VECTOR` | Invalid vector value |
+| `QQL-VALIDATION-VECTOR-KIND` | Query inputs mix dense and sparse vector values |
 | `QQL-VALIDATION-UPSERT-BATCH` | `upsert_many` / `upsertMany` called with `batch_size` / `batchSize` below 1 |
 
 ## Planning
@@ -141,12 +146,16 @@ The same structured fields are projected differently by each host binding.
 | `QQL-UNKNOWN-VECTOR` | The explicit vector name does not exist in the collection |
 | `QQL-VECTOR-KIND` | The schema role conflicts with the requested role, or the kind is unresolved before embedding |
 | `QQL-PLAN-COLLECTION` | A query collection name must not be empty |
+| `QQL-BATCH-CARDINALITY` | A batch RPC returned a different item count than the operations sent |
+| `QQL-BATCH-INVARIANT` | A mutation batch mixed collections or contained a non-mutation operation |
+| `QQL-CONFIG` | Local client config (`~/.qql/config.json`) is missing, unreadable, or unparsable |
 | `QQL-PLAN-CROSS-RERANK-CANDIDATE` | A `CROSS RERANK` prefetch must plan as a search query |
 | `QQL-PLAN-CROSS-RERANK-CTE` | `PREFETCH` references an unknown CTE |
 | `QQL-PLAN-CROSS-RERANK-MODEL` | `CROSS RERANK MODEL` must not be empty |
 | `QQL-PLAN-CROSS-RERANK-PREFETCH` | `CROSS RERANK` requires at least one `PREFETCH` |
 | `QQL-PLAN-CROSS-RERANK-QUERY` | `CROSS RERANK` query text must not be empty |
 | `QQL-PLAN-FUSION-PREFETCH` | `FUSION` requires at least one prefetch |
+| `QQL-PLAN-GROUP` | A groups query was lowered without a `GROUP BY` (internal misuse) |
 | `QQL-PLAN-IDF` | `PARAMS (idf = WHERE …)` lowered to an empty Qdrant filter |
 | `QQL-PLAN-PREFETCH-CTE` | `PREFETCH` references an unknown CTE |
 | `QQL-PLAN-PREFETCH-GROUP` | `GROUP BY` is not supported inside a `PREFETCH` source |
@@ -156,16 +165,32 @@ The same structured fields are projected differently by each host binding.
 | `QQL-PLAN-RERANK-USING` | `RERANK` requires a non-empty `USING` vector name |
 | `QQL-PLAN-RRF-PARAMS` | `rrf_k` and `rrf_weights` are valid only with `RRF` fusion |
 | `QQL-PLAN-RRF-WEIGHTS` | `rrf_weights` length must equal the prefetch count |
+| `QQL-PLAN-SERIALIZE` | A plan IR request body failed JSON serialization (a `Serialize` regression) |
 | `QQL-PLAN-UNSUPPORTED-PREFETCH` | `POINTS` / `CROSS RERANK` are not supported inside `PREFETCH` |
 | `QQL-REST-CLIENT-SIDE` | The operation is executed client-side and has no single Qdrant REST route |
+| `QQL-GRPC` | Generic gRPC transport failure |
+| `QQL-GRPC-FLOAT-MATCH` | A float equality value has no `double` field in the bundled Qdrant proto `Match`; use a `RANGE` filter or an exact integer value |
+| `QQL-GRPC-FUSION` | Unsupported fusion method on the gRPC path |
+| `QQL-GRPC-INDEX` | Unsupported field index type on the gRPC path |
+| `QQL-GRPC-LIST-INT` | An integer value is out of the gRPC `int64` range |
+| `QQL-GRPC-LIST-TYPE` | A value list mixes strings with other types on the gRPC path |
+| `QQL-GRPC-MATCH-VALUE` | A `match` value cannot be represented on the gRPC path |
 | `QQL-GRPC-QUOTA` | Quotas have no public gRPC service (upstream serves quota usage on the internal cluster port only, with no setter RPC); use REST (`SHOW QUOTAS` / `SET QUOTA`) |
+| `QQL-GRPC-NO-RESULT` | A `collection_info` gRPC response is missing its `result` field |
+| `QQL-GRPC-RRF-K` | An `rrf_k` value exceeds the bundled Qdrant proto `uint32` range |
+| `QQL-GRPC-RRF-WEIGHT` | An `rrf_weights` value is not exactly representable as gRPC `f32` |
 | `QQL-GRPC-SCROLL-LIMIT` | Scroll `LIMIT` exceeds `u32::MAX` — the bundled Qdrant proto stores scroll limit as `uint32` |
 | `QQL-BACKEND` | Generic backend or transport failure |
 | `QQL-BACKEND-AUTH` | Rejected credentials (HTTP 401/403, gRPC `Unauthenticated` / `PermissionDenied`) |
 | `QQL-BACKEND-COLLECTION-NOT-FOUND` | The backend reports a missing collection (HTTP 404, gRPC `NotFound`) |
 | `QQL-BACKEND-DIMENSION-MISMATCH` | Vector size disagrees with the collection schema |
+| `QQL-BACKEND-ENVELOPE` | A Qdrant response envelope missed its expected `result` shape |
+| `QQL-BACKEND-HTTP` | The backend rejected a REST request (for example HTTP 400 on batch) |
 | `QQL-BACKEND-INDEX-NOT-READY` | The server index is still building — retry the query |
+| `QQL-BACKEND-JSON` | A Qdrant response body failed JSON parsing |
 | `QQL-BACKEND-STRICT-MODE` | The request violates the collection's strict-mode / quota limits |
+| `QQL-TIMEOUT` | Batch execution exceeded its deadline |
+| `QQL-TRANSPORT` | HTTP client, request, or body failure (carries the request id) |
 
 ## Value conversion
 
@@ -200,6 +225,10 @@ binding](/docs/language/queries/#parameter-binding--prepared-queries).
 | Code | Meaning |
 |---|---|
 | `QQL-CLIENT-CLOSED` | The client was closed (`close()`); create a new `Client` to run more statements |
+| `QQL-CROSS-RERANK` | `CROSS RERANK` must run client-side, not via a Qdrant route |
+| `QQL-RERANK-CROSS` | `CROSS RERANK` has no pair-scorer configured, or it returned a wrong score count |
+| `QQL-RERANK-CROSS-FIELD` | `CROSS RERANK` candidates lack the scored payload field |
+| `QQL-RESPONSE-SERIALIZE` | Search hits failed JSON serialization while building the response |
 
 ## Embedding
 
@@ -207,6 +236,12 @@ binding](/docs/language/queries/#parameter-binding--prepared-queries).
 |---|---|
 | `QQL-EMBEDDING-TOPOLOGY` | UPSERT embedding inference is ambiguous across the collection topology |
 | `QQL-EMBEDDING-TARGET` | The UPSERT embedding target is absent or has the wrong role |
+| `QQL-EMBEDDING` | The requested dense model is unavailable on this embedder (omit `MODEL` or use `'default'`) |
+| `QQL-EMBEDDING-DIM` | `embedding_dimension` must be configured when creating collections with `USING MODEL` in local inference mode |
+| `QQL-EMBEDDING-IMAGE` | Image embedding is unavailable (no image/CLIP vision path configured) |
+| `QQL-EMBEDDING-MODEL` | The requested embedding model is not available from the configured embedder |
+| `QQL-EMBEDDING-MULTI` | Multivector embedding is unavailable (no multi path configured) |
+| `QQL-EMBEDDING-SPARSE` | Sparse embedding is unavailable on this embedder (non-default `MODEL` with local BM25) |
 
 ## Request correlation
 
@@ -270,8 +305,11 @@ covers which features are available on each backend.
 
 ## Complete code set
 
-The full set of codes emitted by the reference implementation, generated from
-`rg -o 'QQL-[A-Z0-9-]+' crates/qql-core/src crates/qql-plan/src crates/qql-edge/src crates/qql-embed/src crates/qql-runtime/src`:
+The full set of codes emitted by the reference implementation. Do not edit
+by hand — regenerate with `bash scripts/check-error-codes.sh` (same roots as
+below, test doubles excluded, `QQL-BIND-ALREADY-BOUND` allowlisted from the
+bindings) and keep every code's per-section table row alongside it. CI runs
+the script on every PR:
 
 ```text
 QQL-BACKEND
@@ -285,7 +323,6 @@ QQL-BACKEND-JSON
 QQL-BACKEND-STRICT-MODE
 QQL-BATCH-CARDINALITY
 QQL-BATCH-INVARIANT
-QQL-BIND-ALREADY-BOUND
 QQL-BIND-BATCH-LENGTH
 QQL-BIND-DUPLICATE-PARAM
 QQL-BIND-INVALID-PARAMS
@@ -350,7 +387,6 @@ QQL-EMBEDDING-MULTI
 QQL-EMBEDDING-SPARSE
 QQL-EMBEDDING-TARGET
 QQL-EMBEDDING-TOPOLOGY
-QQL-EXECUTION
 QQL-GRPC
 QQL-GRPC-FLOAT-MATCH
 QQL-GRPC-FUSION
@@ -360,19 +396,19 @@ QQL-GRPC-LIST-TYPE
 QQL-GRPC-MATCH-VALUE
 QQL-GRPC-NO-RESULT
 QQL-GRPC-QUOTA
-QQL-GRPC-SCROLL-LIMIT
 QQL-GRPC-RRF-K
 QQL-GRPC-RRF-WEIGHT
+QQL-GRPC-SCROLL-LIMIT
 QQL-JSON-NONFINITE
 QQL-JSON-NUMBER
 QQL-LEX-CHAR
 QQL-LEX-NUMBER
 QQL-LEX-STRING
 QQL-MISSING-USING
+QQL-PARSE-ALTER-CONFIG
 QQL-PARSE-BOOL
 QQL-PARSE-CLAUSE-ORDER
 QQL-PARSE-COMPARISON
-QQL-PARSE-CONTEXT
 QQL-PARSE-COUNT-CONFIG
 QQL-PARSE-CROSS-RERANK
 QQL-PARSE-DUPLICATE-CLAUSE
@@ -383,6 +419,7 @@ QQL-PARSE-EMBEDDING
 QQL-PARSE-EMPTY-STATEMENT
 QQL-PARSE-ESCAPE
 QQL-PARSE-EXPECTED
+QQL-PARSE-FACET-CONFIG
 QQL-PARSE-FEEDBACK-STRATEGY
 QQL-PARSE-FIELD
 QQL-PARSE-FILTER
@@ -390,22 +427,22 @@ QQL-PARSE-FLOAT
 QQL-PARSE-IDENTIFIER
 QQL-PARSE-IN
 QQL-PARSE-INDEX-TYPE
-QQL-PARSE-INTEGER
 QQL-PARSE-LITERAL
 QQL-PARSE-MATCH-ANY
 QQL-PARSE-NONNEGATIVE-INTEGER
 QQL-PARSE-NUMBER
 QQL-PARSE-OBJECT-KEY
+QQL-PARSE-PARAM
 QQL-PARSE-PAYLOAD-SELECTOR
 QQL-PARSE-POINT-ID
 QQL-PARSE-POINT-IDS
-QQL-PARSE-PARAM
 QQL-PARSE-POSITIVE-INTEGER
 QQL-PARSE-PREFETCH
 QQL-PARSE-QUERY-INPUT
 QQL-PARSE-QUOTA
 QQL-PARSE-RERANK
 QQL-PARSE-SAMPLE
+QQL-PARSE-SEARCH-PARAMS
 QQL-PARSE-SELECTOR
 QQL-PARSE-SEPARATOR
 QQL-PARSE-SHARD-KEY-CONFIG
@@ -413,6 +450,7 @@ QQL-PARSE-STATEMENT
 QQL-PARSE-STATEMENT-LIMIT
 QQL-PARSE-SYNTAX
 QQL-PARSE-TRAILING
+QQL-PARSE-TRAILING-COMMA
 QQL-PARSE-UPDATE
 QQL-PARSE-VALUE
 QQL-PARSE-VECTOR-KIND
@@ -424,6 +462,7 @@ QQL-PLAN-CROSS-RERANK-MODEL
 QQL-PLAN-CROSS-RERANK-PREFETCH
 QQL-PLAN-CROSS-RERANK-QUERY
 QQL-PLAN-FUSION-PREFETCH
+QQL-PLAN-GROUP
 QQL-PLAN-IDF
 QQL-PLAN-PREFETCH-CTE
 QQL-PLAN-PREFETCH-GROUP
@@ -433,6 +472,7 @@ QQL-PLAN-RERANK-PREFETCH
 QQL-PLAN-RERANK-USING
 QQL-PLAN-RRF-PARAMS
 QQL-PLAN-RRF-WEIGHTS
+QQL-PLAN-SERIALIZE
 QQL-PLAN-UNSUPPORTED-PREFETCH
 QQL-PLAN-VECTOR-KIND
 QQL-RERANK-CROSS
@@ -443,21 +483,23 @@ QQL-TIMEOUT
 QQL-TRANSPORT
 QQL-UNKNOWN-VECTOR
 QQL-VALIDATION-ACORN-SELECTIVITY
+QQL-VALIDATION-ALIASES
 QQL-VALIDATION-CONFIG
 QQL-VALIDATION-CONSISTENCY
 QQL-VALIDATION-CREATE-MODEL
 QQL-VALIDATION-CROSS-RERANK-PREFETCH
-QQL-VALIDATION-FILTER-INJECT
 QQL-VALIDATION-EMPTY-SCRIPT
+QQL-VALIDATION-FILTER-INJECT
 QQL-VALIDATION-FROM
 QQL-VALIDATION-FUSION
 QQL-VALIDATION-FUSION-PREFETCH
 QQL-VALIDATION-GEO
 QQL-VALIDATION-HYBRID
-QQL-VALIDATION-IDF
 QQL-VALIDATION-ID-PREDICATE
+QQL-VALIDATION-IDF
 QQL-VALIDATION-LIMIT-OVERFLOW
 QQL-VALIDATION-MMR
+QQL-VALIDATION-MULTI-STMT
 QQL-VALIDATION-POINT-ID
 QQL-VALIDATION-POINTS-CLAUSE
 QQL-VALIDATION-PREFETCH

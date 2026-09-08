@@ -62,7 +62,7 @@ impl Executor {
         self.ensure_open()?;
         let mut stmts = parser::Parser::parse_all(sql)?;
         let stmt = if stmts.len() == 1 {
-            stmts.pop().unwrap()
+            stmts.pop().expect("single stmt")
         } else if stmts.is_empty() {
             return Err(QqlError::validation(
                 "QQL-VALIDATION-EMPTY-SCRIPT",

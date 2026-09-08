@@ -43,6 +43,11 @@ pub const DEFAULT_AVGDL: f64 = 256.0;
 
 /// Token → `u32` ID. Wire-compatible with Qdrant's BM25 sparse vectors:
 /// murmur3 32-bit (seed 0), then `|i32|` to make it positive.
+///
+/// Hashes bytes **as given**: the embedding pipeline lowercases (and stems)
+/// before calling, so callers must pass already-normalized text — hashing
+/// `"Hello"` and `"hello"` yields different IDs by design (like the server's
+/// own `token_id` layer).
 pub fn token_id(token: &str) -> u32 {
     (Murmur3::hash(0, token.as_bytes()) as i32).unsigned_abs()
 }

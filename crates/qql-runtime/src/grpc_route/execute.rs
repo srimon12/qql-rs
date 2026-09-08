@@ -1,6 +1,14 @@
 //! Fast-path gRPC dispatch: [`PlannedOperation`] → execution helpers.
 //!
-//! Dispatch a [`PlannedOperation`] directly to gRPC — **no Route, no JSON**.
+//! Dispatch a [`PlannedOperation`] directly to gRPC — **no Route, no JSON**
+//! for query vectors and point IDs, which convert from typed plan structs
+//! straight to protobuf. Two sanctioned exceptions keep JSON on this path by
+//! design: (a) the formula fallback (`formula::ast_formula_to_grpc` falls back
+//! to `lower_formula_expr → to_formula_expression` for future AST variants),
+//! and (b) DDL sub-configs (`hnsw_config`, `optimizers_config`,
+//! `quantization_config`, vector params), whose plan IR fields are
+//! intentionally schemaless `serde_json::Value` maps.
+//!
 //! This is the fast path for gRPC backends: each variant delegates to a
 //! focused helper in [`super::execute_read`], [`super::execute_write`] or
 //! [`super::execute_ddl`] that builds the tonic request from the

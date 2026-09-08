@@ -11,17 +11,22 @@
 pub mod embedder;
 /// AST rewriting: resolve `TEXT` inputs to vectors via the configured embedder.
 pub mod resolve;
+/// Local wire-compatible BM25 sparse vectors (no network).
 pub mod sparse;
+/// `USING` vector-kind resolution from collection topology (dense/sparse/multi).
 pub mod topology;
 
 #[cfg(test)]
 mod resolve_test;
 #[cfg(test)]
 mod sparse_test;
+#[cfg(test)]
+mod topology_test;
 
 pub use embedder::{
     Embedder, EmbedderBound, JointEmbeddingOutput, SparseEmbedder, cross_rerank_unsupported_error,
-    image_unsupported_error, multi_unsupported_error, sparse_model_unsupported_error,
+    dense_model_unsupported_error, image_unsupported_error, multi_unsupported_error,
+    sparse_model_unsupported_error,
 };
 pub use resolve::{DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME, resolve_embeddings};
 pub use sparse::SparseVector;

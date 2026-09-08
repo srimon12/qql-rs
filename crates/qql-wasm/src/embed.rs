@@ -13,7 +13,10 @@ use super::client::Client;
 #[cfg(all(feature = "client", target_arch = "wasm32"))]
 #[async_trait(?Send)]
 impl Embedder for Client {
-    async fn embed_dense(&self, text: &str, _model: &str) -> Result<Vec<f32>, QqlError> {
+    async fn embed_dense(&self, text: &str, model: &str) -> Result<Vec<f32>, QqlError> {
+        if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
+            return Err(qql_embed::dense_model_unsupported_error(model));
+        }
         let batch = self
             .embed_texts(vec![text.to_string()])
             .await
@@ -24,14 +27,19 @@ impl Embedder for Client {
                     None,
                 )
             })?;
-        Ok(batch.into_iter().next().unwrap_or_default())
+        batch.into_iter().next().ok_or_else(|| {
+            QqlError::execution("QQL-EMBEDDING", "dense embedding response was empty", None)
+        })
     }
 
     async fn embed_dense_batch(
         &self,
         texts: &[String],
-        _model: &str,
+        model: &str,
     ) -> Result<Vec<Vec<f32>>, QqlError> {
+        if !model.is_empty() && !model.eq_ignore_ascii_case("default") {
+            return Err(qql_embed::dense_model_unsupported_error(model));
+        }
         self.embed_texts(texts.to_vec()).await.map_err(|e| {
             QqlError::execution(
                 "QQL-EMBEDDING",

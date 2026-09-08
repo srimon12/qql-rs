@@ -2,11 +2,15 @@
 
 use super::ddl::{hnsw_config_from_plan, quantization_config_from_plan, vector_params};
 use super::filter::to_match;
-use super::query::{to_facet_counts, to_query_groups, to_query_points, to_scroll_points};
+use super::query::{
+    plan_vector_to_proto, to_facet_counts, to_query_groups, to_query_points, to_scroll_points,
+    to_vector_input, to_vectors,
+};
 use super::responses::{facet_hit_to_json, get_points_envelope};
 use crate::qdrant_grpc::qdrant;
 use qql_core::parser::Parser;
 use qql_plan::types::{FilterExpression, MatchValue};
+use qql_plan::{PlanPointVectors, PlanQueryInput, PlanVectorValue};
 
 #[test]
 fn dense_vector_params_propagates_datatype() {
@@ -1066,4 +1070,38 @@ fn facet_hit_to_json_handles_all_variants() {
         facet_hit_to_json(hit_none),
         serde_json::json!({ "value": null, "count": 0 })
     );
+}
+
+/// RT-01: unbound vector params fail closed on the gRPC path (an error, never
+/// a panic). `ensure_no_unbound_params` / `validate_no_unbound_scalar_params`
+/// gate the normal paths; these pins cover a hand-built plan bypassing them.
+#[test]
+fn grpc_to_vector_input_rejects_unbound_params() {
+    let named = PlanQueryInput::Vector(PlanVectorValue::Param("q".to_string()));
+    let err = to_vector_input(&named).unwrap_err();
+    assert_eq!(err.code, "QQL-BIND-UNBOUND-PARAM");
+
+    let positional = PlanQueryInput::Vector(PlanVectorValue::PositionalParam(0));
+    let err = to_vector_input(&positional).unwrap_err();
+    assert_eq!(err.code, "QQL-BIND-MISSING-POSITIONAL");
+}
+
+/// RT-01: `plan_vector_to_proto` returns `QQL-BIND-*`, never panics.
+#[test]
+fn grpc_plan_vector_to_proto_rejects_unbound_params() {
+    let err = plan_vector_to_proto(&PlanVectorValue::Param("v".to_string())).unwrap_err();
+    assert_eq!(err.code, "QQL-BIND-UNBOUND-PARAM");
+
+    let err = plan_vector_to_proto(&PlanVectorValue::PositionalParam(2)).unwrap_err();
+    assert_eq!(err.code, "QQL-BIND-MISSING-POSITIONAL");
+}
+
+/// RT-01: `to_vectors` returns `QQL-BIND-*`, never panics.
+#[test]
+fn grpc_to_vectors_rejects_unbound_params() {
+    let err = to_vectors(&PlanPointVectors::Param("vecs".to_string())).unwrap_err();
+    assert_eq!(err.code, "QQL-BIND-UNBOUND-PARAM");
+
+    let err = to_vectors(&PlanPointVectors::PositionalParam(1)).unwrap_err();
+    assert_eq!(err.code, "QQL-BIND-MISSING-POSITIONAL");
 }

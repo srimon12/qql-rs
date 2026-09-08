@@ -52,3 +52,61 @@ pub(crate) fn grpc_error(operation: &str, status: tonic::Status, request_id: &st
         error.with_field("request_id", request_id.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn code_for(code: tonic::Code, message: &str) -> String {
+        grpc_error("op", tonic::Status::new(code, message), "req-1")
+            .code
+            .into_owned()
+    }
+
+    #[test]
+    fn maps_auth_and_not_found_codes() {
+        assert_eq!(
+            code_for(tonic::Code::Unauthenticated, "invalid api key"),
+            "QQL-BACKEND-AUTH"
+        );
+        assert_eq!(
+            code_for(tonic::Code::PermissionDenied, "forbidden"),
+            "QQL-BACKEND-AUTH"
+        );
+        assert_eq!(
+            code_for(tonic::Code::NotFound, "collection not found"),
+            "QQL-BACKEND-COLLECTION-NOT-FOUND"
+        );
+    }
+
+    #[test]
+    fn maps_message_sniffed_backend_failures() {
+        assert_eq!(
+            code_for(
+                tonic::Code::Unknown,
+                "no appropriate index for filtered search"
+            ),
+            "QQL-BACKEND-INDEX-NOT-READY"
+        );
+        assert_eq!(
+            code_for(
+                tonic::Code::Unknown,
+                "vector size 128 does not match dimension 384"
+            ),
+            "QQL-BACKEND-DIMENSION-MISMATCH"
+        );
+        assert_eq!(
+            code_for(tonic::Code::Unknown, "strict-mode quota exceeded"),
+            "QQL-BACKEND-STRICT-MODE"
+        );
+        assert_eq!(code_for(tonic::Code::Unknown, "boom"), "QQL-GRPC");
+    }
+
+    #[test]
+    fn omits_empty_request_id_from_message() {
+        let without = grpc_error("search", tonic::Status::unknown("boom"), "");
+        assert!(!without.message.contains("request id"));
+        let with = grpc_error("search", tonic::Status::unknown("boom"), "req-1");
+        assert!(with.message.contains("req-1"));
+    }
+}

@@ -578,7 +578,7 @@ mod tests {
         );
 
         let input = PlanQueryInput::Vector(multi);
-        let vi = test_api::to_vector_input(&input);
+        let vi = test_api::to_vector_input(&input).expect("dense multi converts");
         use qdrant::vector_input::Variant as Vi;
         match vi.variant {
             Some(Vi::MultiDense(md)) => {

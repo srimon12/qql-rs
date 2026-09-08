@@ -64,6 +64,17 @@ pub(crate) fn classify_backend_error_code(status: u16, body: &str) -> &'static s
     }
 }
 
+/// Whether a `GET /collections/{name}` failure means "collection missing".
+///
+/// This is the predicate behind `collection_exists`'s `Ok(false)` arm: a 404
+/// status echoed in the message, or a "Not found" body. It is deliberately
+/// narrower than [`classify_backend_error_code`]'s lowercase `"not found"`
+/// match (see RT-09): a 200-envelope probe mentioning "index not found" must
+/// not read as collection-missing here.
+pub(crate) fn is_collection_missing_message(message: &str) -> bool {
+    message.contains("404") || message.contains("Not found")
+}
+
 impl RestQdrant {
     /// Construct with a 30s request timeout.
     ///
@@ -266,7 +277,7 @@ impl QdrantOps for RestQdrant {
                     .is_some();
                 Ok(status_ok)
             }
-            Err(e) if e.message.contains("404") || e.message.contains("Not found") => Ok(false),
+            Err(e) if is_collection_missing_message(&e.message) => Ok(false),
             Err(e) => Err(e),
         }
     }
@@ -610,5 +621,22 @@ mod tests {
         let value = serde_json::json!({ "result": [], "status": "error" });
         let error = validate_success_envelope(&value, "test").unwrap_err();
         assert_eq!(error.code, "QQL-BACKEND-ENVELOPE");
+    }
+
+    #[test]
+    fn collection_missing_predicate_matches_404_shapes() {
+        // Synthetic 404-ish failures (status echoed in the message, or a
+        // "Not found" body) map to `Ok(false)` in `collection_exists`.
+        assert!(is_collection_missing_message(
+            "Qdrant returned 404 Not Found: {\"status\":{\"error\":\"Not found: Collection docs not found\"}}"
+        ));
+        assert!(is_collection_missing_message("collection Not found"));
+        // Anything else propagates as an error.
+        assert!(!is_collection_missing_message(
+            "HTTP request failed: connection refused"
+        ));
+        // Lowercase body text (e.g. "index not found" inside a 200 envelope)
+        // must not read as collection-missing (RT-09 asymmetry).
+        assert!(!is_collection_missing_message("index not found"));
     }
 }
