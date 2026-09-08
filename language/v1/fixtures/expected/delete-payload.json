@@ -18,7 +18,8 @@
             }
           }
         },
-        "shard_key": null
+        "shard_key": null,
+        "wait": null
       }
     },
     {
@@ -54,7 +55,29 @@
             }
           }
         },
-        "shard_key": "acme"
+        "shard_key": "acme",
+        "wait": null
+      }
+    },
+    {
+      "DeletePayload": {
+        "collection": "docs",
+        "keys": [
+          "draft"
+        ],
+        "selector": {
+          "Filter": {
+            "Compare": {
+              "field": "status",
+              "op": "Eq",
+              "value": {
+                "Str": "archived"
+              }
+            }
+          }
+        },
+        "shard_key": null,
+        "wait": false
       }
     }
   ]

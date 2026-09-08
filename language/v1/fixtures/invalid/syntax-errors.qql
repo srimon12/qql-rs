@@ -147,3 +147,7 @@ QUERY FORMULA 1e999 FROM docs LIMIT 5;
 -- @case limit-beyond-u64-range
 -- @error QQL-PARSE-POSITIVE-INTEGER
 QUERY VECTOR [0.1] FROM docs USING dense LIMIT 18446744073709551616;
+
+-- @case duplicate-wait-clause
+-- @error QQL-PARSE-DUPLICATE-CLAUSE
+DELETE FROM docs WHERE id = 1 WAIT true WAIT false;

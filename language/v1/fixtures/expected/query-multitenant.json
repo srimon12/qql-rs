@@ -93,7 +93,8 @@
             }
           }
         },
-        "shard_key": "3m"
+        "shard_key": "3m",
+        "wait": null
       }
     },
     {
@@ -117,7 +118,8 @@
             "vectors": null
           }
         ],
-        "shard_key": "acme"
+        "shard_key": "acme",
+        "wait": null
       }
     }
   ]

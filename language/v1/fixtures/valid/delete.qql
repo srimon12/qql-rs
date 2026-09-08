@@ -18,3 +18,7 @@ DELETE FROM sec10k WHERE tenant_id = 'honeywell' SHARD 'honeywell';
 -- Delete by ID IN filter
 DELETE FROM docs WHERE id IN (1, 2, 3);
 
+
+
+-- Delete without waiting for durability
+DELETE FROM docs WHERE id = 7 WAIT false;

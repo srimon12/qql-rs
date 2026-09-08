@@ -28,7 +28,8 @@
             "vectors": null
           }
         ],
-        "shard_key": null
+        "shard_key": null,
+        "wait": null
       }
     },
     {
@@ -66,7 +67,8 @@
             "vectors": null
           }
         ],
-        "shard_key": null
+        "shard_key": null,
+        "wait": null
       }
     },
     {
@@ -99,7 +101,8 @@
             "vectors": null
           }
         ],
-        "shard_key": null
+        "shard_key": null,
+        "wait": null
       }
     },
     {
@@ -129,7 +132,8 @@
             "vectors": null
           }
         ],
-        "shard_key": null
+        "shard_key": null,
+        "wait": null
       }
     },
     {
@@ -159,7 +163,8 @@
             "vectors": null
           }
         ],
-        "shard_key": null
+        "shard_key": null,
+        "wait": null
       }
     },
     {
@@ -192,7 +197,8 @@
             "vectors": null
           }
         ],
-        "shard_key": null
+        "shard_key": null,
+        "wait": null
       }
     },
     {
@@ -225,7 +231,8 @@
             "vectors": null
           }
         ],
-        "shard_key": null
+        "shard_key": null,
+        "wait": null
       }
     },
     {
@@ -258,7 +265,8 @@
             "vectors": null
           }
         ],
-        "shard_key": null
+        "shard_key": null,
+        "wait": null
       }
     },
     {
@@ -295,7 +303,8 @@
             }
           }
         ],
-        "shard_key": null
+        "shard_key": null,
+        "wait": null
       }
     },
     {
@@ -337,7 +346,8 @@
             }
           }
         ],
-        "shard_key": null
+        "shard_key": null,
+        "wait": null
       }
     },
     {
@@ -410,7 +420,8 @@
             "vectors": null
           }
         ],
-        "shard_key": null
+        "shard_key": null,
+        "wait": null
       }
     },
     {
@@ -459,7 +470,8 @@
             "vectors": null
           }
         ],
-        "shard_key": null
+        "shard_key": null,
+        "wait": null
       }
     },
     {
@@ -493,7 +505,8 @@
             "vectors": null
           }
         ],
-        "shard_key": null
+        "shard_key": null,
+        "wait": null
       }
     },
     {
@@ -527,7 +540,8 @@
             "vectors": null
           }
         ],
-        "shard_key": null
+        "shard_key": null,
+        "wait": null
       }
     },
     {
@@ -561,7 +575,8 @@
             "vectors": null
           }
         ],
-        "shard_key": null
+        "shard_key": null,
+        "wait": null
       }
     },
     {
@@ -585,7 +600,8 @@
             "vectors": null
           }
         ],
-        "shard_key": "tenant-a"
+        "shard_key": "tenant-a",
+        "wait": null
       }
     },
     {
@@ -609,7 +625,8 @@
             "vectors": null
           }
         ],
-        "shard_key": null
+        "shard_key": null,
+        "wait": null
       }
     },
     {
@@ -641,7 +658,8 @@
             }
           }
         ],
-        "shard_key": null
+        "shard_key": null,
+        "wait": null
       }
     },
     {
@@ -673,7 +691,58 @@
             }
           }
         ],
-        "shard_key": null
+        "shard_key": null,
+        "wait": null
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "docs",
+        "embed": [],
+        "embedding": null,
+        "points": [
+          {
+            "id": {
+              "Number": 9
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "durable write"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": null,
+        "wait": true
+      }
+    },
+    {
+      "Upsert": {
+        "collection": "docs",
+        "embed": [],
+        "embedding": null,
+        "points": [
+          {
+            "id": {
+              "Number": 10
+            },
+            "payload": [
+              [
+                "text",
+                {
+                  "Str": "fire and forget"
+                }
+              ]
+            ],
+            "vectors": null
+          }
+        ],
+        "shard_key": null,
+        "wait": false
       }
     }
   ]
