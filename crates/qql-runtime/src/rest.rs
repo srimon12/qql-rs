@@ -362,6 +362,11 @@ impl QdrantOps for RestQdrant {
                 format!("{stmt_type} cannot be executed as a single REST route"),
                 None,
             ),
+            qql_plan::RestProjectionError::SerializeFailed { message } => QqlError::execution(
+                "QQL-PLAN-SERIALIZE",
+                format!("plan IR REST request body serialization failed: {message}"),
+                None,
+            ),
         })?;
         self.execute_http(route).await
     }
@@ -395,7 +400,18 @@ impl RestQdrant {
         collection: &str,
         req: &qql_plan::types::CreateCollectionRequest,
     ) -> Result<(), QqlError> {
-        let body = qql_plan::ddl::create_collection_rest_body(req);
+        let body = qql_plan::ddl::create_collection_rest_body(req).map_err(|e| match e {
+            qql_plan::RestProjectionError::ClientSideOnly { stmt_type } => QqlError::execution(
+                "QQL-REST-CLIENT-SIDE",
+                format!("{stmt_type} cannot be executed as a single REST route"),
+                None,
+            ),
+            qql_plan::RestProjectionError::SerializeFailed { message } => QqlError::execution(
+                "QQL-PLAN-SERIALIZE",
+                format!("plan IR REST request body serialization failed: {message}"),
+                None,
+            ),
+        })?;
         self.call::<Value>(
             Method::PUT,
             &format!("/collections/{collection}"),

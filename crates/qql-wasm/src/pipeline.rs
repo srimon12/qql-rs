@@ -112,6 +112,9 @@ impl Client {
             qql_plan::RestProjectionError::ClientSideOnly { stmt_type } => {
                 JsValue::from_str(&format!("{stmt_type} has no single Qdrant REST route"))
             }
+            qql_plan::RestProjectionError::SerializeFailed { message } => {
+                JsValue::from_str(&format!("plan IR serialization failed: {message}"))
+            }
         })?;
         let result = self
             .send_json(route.method.as_str(), &route.path, route.body_json())

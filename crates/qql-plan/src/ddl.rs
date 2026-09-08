@@ -532,7 +532,10 @@ fn distance_str(d: VectorDistance) -> String {
 // Internal plan IR keeps flat `type: "scalar"|…` for gRPC converters.
 
 /// OpenAPI PUT `/collections/{c}` body from plan IR.
-pub fn create_collection_rest_body(req: &CreateCollectionRequest) -> serde_json::Value {
+pub fn create_collection_rest_body(
+    req: &CreateCollectionRequest,
+) -> Result<serde_json::Value, crate::plan::RestProjectionError> {
+    use crate::plan::{RestProjectionError, serialize_body};
     let mut body = serde_json::Map::new();
 
     if let Some(vectors) = &req.vectors {
@@ -549,22 +552,22 @@ pub fn create_collection_rest_body(req: &CreateCollectionRequest) -> serde_json:
         );
     }
     if let Some(hnsw) = &req.hnsw_config {
-        body.insert(
-            "hnsw_config".into(),
-            crate::plan::serialize_body(hnsw).expect("hnsw_config REST serialization failed"),
-        );
+        let v = serialize_body(hnsw).map_err(|e| RestProjectionError::SerializeFailed {
+            message: e.to_string(),
+        })?;
+        body.insert("hnsw_config".into(), v);
     }
     if let Some(opt) = &req.optimizers_config {
-        body.insert(
-            "optimizers_config".into(),
-            crate::plan::serialize_body(opt).expect("optimizers_config REST serialization failed"),
-        );
+        let v = serialize_body(opt).map_err(|e| RestProjectionError::SerializeFailed {
+            message: e.to_string(),
+        })?;
+        body.insert("optimizers_config".into(), v);
     }
     if let Some(q) = &req.quantization_config {
-        body.insert(
-            "quantization_config".into(),
-            crate::plan::serialize_body(q).expect("quantization_config REST serialization failed"),
-        );
+        let v = serialize_body(q).map_err(|e| RestProjectionError::SerializeFailed {
+            message: e.to_string(),
+        })?;
+        body.insert("quantization_config".into(), v);
     }
     if let Some(n) = req.shard_number {
         body.insert("shard_number".into(), serde_json::Value::from(n));
@@ -594,7 +597,7 @@ pub fn create_collection_rest_body(req: &CreateCollectionRequest) -> serde_json:
         body.insert("payload".into(), payload.clone());
     }
     // Do not emit: params, vectors_config, shard_keys
-    serde_json::Value::Object(body)
+    Ok(serde_json::Value::Object(body))
 }
 
 /// OpenAPI PUT `/collections/{c}/index` body.
@@ -641,19 +644,22 @@ pub fn create_index_rest_body(req: &CreateIndexRequest) -> serde_json::Value {
 }
 
 /// OpenAPI PATCH `/collections/{c}` body from plan IR.
-pub fn update_collection_rest_body(req: &UpdateCollectionRequest) -> serde_json::Value {
+pub fn update_collection_rest_body(
+    req: &UpdateCollectionRequest,
+) -> Result<serde_json::Value, crate::plan::RestProjectionError> {
+    use crate::plan::{RestProjectionError, serialize_body};
     let mut body = serde_json::Map::new();
     if let Some(hnsw) = &req.hnsw_config {
-        body.insert(
-            "hnsw_config".into(),
-            crate::plan::serialize_body(hnsw).expect("hnsw_config REST serialization failed"),
-        );
+        let v = serialize_body(hnsw).map_err(|e| RestProjectionError::SerializeFailed {
+            message: e.to_string(),
+        })?;
+        body.insert("hnsw_config".into(), v);
     }
     if let Some(opt) = &req.optimizers_config {
-        body.insert(
-            "optimizers_config".into(),
-            crate::plan::serialize_body(opt).expect("optimizers_config REST serialization failed"),
-        );
+        let v = serialize_body(opt).map_err(|e| RestProjectionError::SerializeFailed {
+            message: e.to_string(),
+        })?;
+        body.insert("optimizers_config".into(), v);
     }
     if let Some(params) = &req.params {
         body.insert("params".into(), params.clone());
@@ -661,7 +667,7 @@ pub fn update_collection_rest_body(req: &UpdateCollectionRequest) -> serde_json:
     if let Some(q) = &req.quantization_config {
         body.insert("quantization_config".into(), nest_quantization_for_rest(q));
     }
-    serde_json::Value::Object(body)
+    Ok(serde_json::Value::Object(body))
 }
 
 /// Follow-up PATCH body for create-time params that only exist on update
@@ -791,17 +797,8 @@ pub fn nest_quantization_for_rest(value: &serde_json::Value) -> serde_json::Valu
                 .get("bits")
                 .or_else(|| obj.get("turbo_bits"))
                 .and_then(|v| v.as_f64());
-            if let Some(bits) = bits {
-                let label = if (bits - 1.5).abs() < f64::EPSILON {
-                    "bits1_5"
-                } else if (bits - 2.0).abs() < f64::EPSILON {
-                    "bits2"
-                } else if (bits - 4.0).abs() < f64::EPSILON {
-                    "bits4"
-                } else {
-                    "bits1"
-                };
-                inner.insert("bits".into(), serde_json::Value::String(label.into()));
+            if let Some(label) = bits.and_then(|b| turbo_bits_label(Some(b))) {
+                inner.insert("bits".into(), serde_json::Value::String(label));
             }
             serde_json::json!({ "turbo": inner })
         }
@@ -934,6 +931,26 @@ mod tests {
     }
 
     #[test]
+    fn turbo_bits_label_and_nesting_agree() {
+        // P15 twin-drift guard: the typed label helper and the REST nester
+        // must map the same numeric bits to the same OpenAPI string.
+        // Unknown values stay backend-rejectable (no silent "bits1").
+        for (bits, expected) in [
+            (1.0, "bits1"),
+            (1.5, "bits1_5"),
+            (2.0, "bits2"),
+            (4.0, "bits4"),
+        ] {
+            assert_eq!(turbo_bits_label(Some(bits)).as_deref(), Some(expected));
+            let flat = serde_json::json!({"type": "turbo", "bits": bits});
+            assert_eq!(nest_quantization_for_rest(&flat)["turbo"]["bits"], expected);
+        }
+        let unknown = serde_json::json!({"type": "turbo", "bits": 3.0});
+        let nested = nest_quantization_for_rest(&unknown);
+        assert_eq!(nested["turbo"]["bits"], "bits3");
+    }
+
+    #[test]
     fn lower_vector_on_disk_and_query_encoding_and_multivector() {
         let stmt = parse_stmt(
             "CREATE COLLECTION docs (v VECTOR(64, COSINE) WITH MULTIVECTOR (comparator = 'max_sim') WITH VECTOR (on_disk = true) WITH QUANTIZATION (type = 'binary', encoding = 'two_bits', query_encoding = 'scalar4bits', always_ram = true));",
@@ -978,7 +995,7 @@ mod tests {
             panic!()
         };
         let req = lower_create_collection(cc);
-        let rest = create_collection_rest_body(&req);
+        let rest = create_collection_rest_body(&req).unwrap();
         // OpenAPI top-level params
         assert_eq!(rest["replication_factor"], 2);
         assert_eq!(rest["write_consistency_factor"], 1);
@@ -1068,7 +1085,7 @@ mod tests {
             panic!()
         };
         let req = lower_create_collection(cc);
-        let rest = create_collection_rest_body(&req);
+        let rest = create_collection_rest_body(&req).unwrap();
         assert_ne!(rest["hnsw_config"], serde_json::Value::Null);
         assert_eq!(rest["hnsw_config"]["m"], 16);
         assert_ne!(rest["optimizers_config"], serde_json::Value::Null);
@@ -1089,7 +1106,7 @@ mod tests {
             panic!()
         };
         let req = lower_alter_collection(ac);
-        let rest = update_collection_rest_body(&req);
+        let rest = update_collection_rest_body(&req).unwrap();
         assert_ne!(rest["hnsw_config"], serde_json::Value::Null);
         assert_eq!(rest["hnsw_config"]["m"], 32);
         assert_ne!(rest["optimizers_config"], serde_json::Value::Null);

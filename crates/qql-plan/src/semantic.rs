@@ -30,6 +30,10 @@ impl core::fmt::Display for PlanPointId {
 }
 
 impl From<&qql_core::ast::PointId> for PlanPointId {
+    // INVARIANT: `Param` / `PositionalParam` arms panic. `plan()` gates with
+    // `ensure_no_unbound_params` and `plan_template()` with
+    // `validate_no_unbound_scalar_params` (which covers point IDs), so direct
+    // callers must preserve that order.
     fn from(id: &qql_core::ast::PointId) -> Self {
         match id {
             qql_core::ast::PointId::Number(n) => PlanPointId::Number(*n),
@@ -306,8 +310,10 @@ pub enum PlanQueryInput {
     Point(PlanPointId),
     /// Inline dense/sparse/multi-dense vector input.
     Vector(PlanVectorValue),
-    /// Server-side or client-pre-embed document. `model: None` serializes as a
-    /// bare string for REST compatibility with historical QQL output.
+    /// Server-side or client-pre-embed document. `model: None` serializes as
+    /// `{"text": …, "model": ""}` — a placeholder the executor's embedding
+    /// resolution must replace before dispatch. Offline `compile_statement`
+    /// output on an un-prepared plan therefore requires preparation.
     Document {
         /// Document text to embed.
         text: String,
@@ -317,6 +323,8 @@ pub enum PlanQueryInput {
     /// OpenAPI `Image` inference input (image URL or base64 + model).
     /// Prefer resolving to a dense [`PlanQueryInput::Vector`] client-side when
     /// the host has an image embedder; otherwise the wire form is preserved.
+    /// Like [`PlanQueryInput::Document`], `model: None` serializes as
+    /// `{"image": …, "model": ""}` pending executor resolution.
     Image {
         /// Image URL or base64 payload.
         image: String,
@@ -357,9 +365,8 @@ impl Serialize for PlanQueryInput {
             PlanQueryInput::Vector(v) => v.serialize(serializer),
             PlanQueryInput::Document { text, model } => {
                 // OpenAPI Document requires both "text" and "model" fields.
-                // Planning validation rejects model-less Documents before we
-                // reach serialization; keep a safe fallback to prevent a bare
-                // string from ever leaking to the REST wire.
+                // Model-less plans serialize "model": "" as a placeholder the
+                // executor's embedding resolution replaces before dispatch.
                 let mut map = serializer.serialize_map(Some(2))?;
                 map.serialize_entry("text", text)?;
                 map.serialize_entry("model", &model.as_deref().unwrap_or(""))?;
@@ -369,8 +376,7 @@ impl Serialize for PlanQueryInput {
                 // OpenAPI Image requires both "image" and "model" fields.
                 // gRPC proto Image uses a Value for the image field; REST
                 // always serializes as an object with two string members.
-                // Planning validation rejects model-less Images before we
-                // reach serialization; keep a safe fallback for the model key.
+                // Model-less plans keep "" as a placeholder for the executor.
                 let mut map = serializer.serialize_map(Some(2))?;
                 map.serialize_entry("image", image)?;
                 map.serialize_entry("model", &model.as_deref().unwrap_or(""))?;
@@ -442,7 +448,7 @@ pub struct PlanFormula(pub qql_core::ast::FormulaExpr);
 impl Serialize for PlanFormula {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         // Delegate to JSON intermediate that already matches OpenAPI Expression.
-        let value = crate::query::lower_formula_expr(&self.0);
+        let value = crate::query::lower_formula_expr(&self.0).map_err(serde::ser::Error::custom)?;
         value.serialize(serializer)
     }
 }
