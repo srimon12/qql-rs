@@ -1,19 +1,27 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
-use serde_json;
-
-use qql_core::ast::{self, Stmt};
+use qql_core::ast::{self, Stmt, Value};
 use qql_core::error::QqlError;
 use qql_core::parser;
-use qql_plan::{plan, plan_template};
 
+use crate::backend::CollectionInfo;
+use crate::client::QdrantOps;
 use crate::config::QqlConfig;
 use crate::embedder::Embedder;
-use crate::executor::dml::query::extract_search_hits;
 
+pub(crate) mod batch;
+/// DDL preparation and collection schema caching.
+pub mod ddl;
+pub(crate) mod dispatch;
+pub(crate) mod dml;
+pub(crate) mod prepared;
+pub(crate) mod response;
+
+pub use prepared::PreparedStatement;
 pub use qql_embed::resolve::{DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME};
+pub use response::{ExecResponse, ExecutionReport, GroupedSearchResult, OnError, SearchHit};
+
 /// Collection vector name reserved for multivector (ColBERT) rerank vectors.
 pub const RERANK_VECTOR_NAME: &str = "colbert";
 /// Dense model used when a default embedder is required and none is configured.
@@ -28,283 +36,6 @@ pub const DENSE_VECTOR_SIZE: u64 = 384;
 pub const RERANK_VECTOR_SIZE: u64 = 96;
 /// Default inference mode (`local` fastembed; `remote` uses HTTP endpoints).
 pub const INFERENCE_MODE_DEFAULT: &str = "local";
-
-/// Single-statement execution outcome: status, operation label, message, and data.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExecResponse {
-    /// Whether the statement succeeded.
-    pub ok: bool,
-    /// Operation label (e.g. `QUERY`, `UPSERT`, `PARSE`) for this result.
-    pub operation: String,
-    /// Human-readable summary or error text.
-    pub message: String,
-    /// JSON payload (search hits, raw result, or counts), when the operation returns data.
-    pub data: Option<serde_json::Value>,
-}
-
-/// Canonical cross-SDK execution result.  Every `client.execute(…)` call
-/// returns this shape regardless of input type (string / Stmt / array).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExecutionReport {
-    /// Whether every statement succeeded (`failed == 0`).
-    pub ok: bool,
-    /// One `ExecResponse` per statement, in execution order.
-    pub results: Vec<ExecResponse>,
-    /// Number of successful statements.
-    pub succeeded: usize,
-    /// Number of failed statements.
-    pub failed: usize,
-}
-
-impl ExecutionReport {
-    /// Create from a collection of `ExecResponse`s.  `ok` is `failed == 0`.
-    pub fn from_results(results: Vec<ExecResponse>) -> Self {
-        let succeeded = results.iter().filter(|r| r.ok).count();
-        let failed = results.len() - succeeded;
-        Self {
-            ok: failed == 0,
-            results,
-            succeeded,
-            failed,
-        }
-    }
-
-    /// Convenience wrapper for a single `ExecResponse`.
-    pub fn single(resp: ExecResponse) -> Self {
-        let ok = resp.ok;
-        Self {
-            ok,
-            results: vec![resp],
-            succeeded: if ok { 1 } else { 0 },
-            failed: if ok { 0 } else { 1 },
-        }
-    }
-
-    /// Return the first statement response, if present.
-    pub fn first(&self) -> Option<&ExecResponse> {
-        self.results.first()
-    }
-
-    /// Return search hits of statement `stmt` as a JSON slice.
-    pub fn hits_json(&self, stmt: usize) -> Option<&[serde_json::Value]> {
-        self.results.get(stmt).and_then(|r| r.hits_json())
-    }
-
-    /// Return typed search hits of statement `stmt`.
-    pub fn hits(&self, stmt: usize) -> Option<Vec<SearchHit>> {
-        self.results.get(stmt).and_then(|r| r.hits())
-    }
-
-    /// Return point IDs from statement `stmt`.
-    pub fn ids(&self, stmt: usize) -> Vec<u64> {
-        self.results.get(stmt).map(|r| r.ids()).unwrap_or_default()
-    }
-
-    /// Return the count integer from statement `stmt`.
-    pub fn count(&self, stmt: usize) -> Option<u64> {
-        self.results.get(stmt).and_then(|r| r.count())
-    }
-
-    /// Return facet entries as `(value, count)` pairs from statement `stmt`.
-    pub fn facet(&self, stmt: usize) -> Option<Vec<(serde_json::Value, u64)>> {
-        self.results.get(stmt).and_then(|r| r.facet())
-    }
-
-    /// Return the count integer from the first statement.
-    pub fn first_count(&self) -> Option<u64> {
-        self.count(0)
-    }
-
-    /// Return the search hits from the first statement.
-    pub fn first_hits(&self) -> Option<Vec<SearchHit>> {
-        self.hits(0)
-    }
-
-    /// Return the search hits from the first statement as a JSON slice.
-    pub fn first_hits_json(&self) -> Option<&[serde_json::Value]> {
-        self.hits_json(0)
-    }
-
-    /// Return the search hits from the first statement as a raw vector of JSON objects.
-    pub fn first_hits_raw(&self) -> Vec<serde_json::Value> {
-        self.first_hits_json()
-            .map(|s| s.to_vec())
-            .unwrap_or_default()
-    }
-
-    /// Return the point IDs from the first statement.
-    pub fn first_ids(&self) -> Vec<u64> {
-        self.ids(0)
-    }
-
-    /// Return the facet pairs from the first statement.
-    pub fn first_facet(&self) -> Option<Vec<(serde_json::Value, u64)>> {
-        self.facet(0)
-    }
-}
-
-/// Controls batch-execution behaviour when a statement fails.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum OnError {
-    /// Halt immediately on the first error (default).
-    #[default]
-    Stop,
-    /// Continue executing remaining statements, collecting error
-    /// responses alongside successes.
-    Continue,
-}
-
-use qql_plan::BatchGrouper;
-
-/// Normalized search hit returned inside `ExecResponse` data.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SearchHit {
-    /// Point ID (integer or string/UUID).
-    pub id: qql_plan::PlanPointId,
-    /// Similarity or rerank score (defaults to 0.0 for unscored retrieved points).
-    #[serde(default)]
-    pub score: f32,
-    /// Payload text extracted for text-centric results, when present.
-    pub text: Option<String>,
-    /// Point payload when requested via `WITH PAYLOAD`.
-    pub payload: Option<HashMap<String, serde_json::Value>>,
-    /// Source collection. Populated by cross-collection operations (e.g.
-    /// CROSS RERANK) so results are unambiguous when multiple collections
-    /// share the same point id.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub collection: Option<String>,
-    /// Vector(s) returned when requested via `WITH VECTOR`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub vector: Option<serde_json::Value>,
-}
-
-/// Grouped query result: one group key with its ordered hits.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GroupedSearchResult {
-    /// Group key value as returned by Qdrant (JSON-typed).
-    pub group_id: serde_json::Value,
-    /// Search hits in this group, in backend order.
-    pub hits: Vec<SearchHit>,
-}
-
-impl ExecResponse {
-    /// Return search hits as a slice of JSON values if this response contains hits data.
-    pub fn hits_json(&self) -> Option<&[serde_json::Value]> {
-        self.data
-            .as_ref()
-            .and_then(|d| d.as_array().map(|v| v.as_slice()))
-    }
-
-    /// Deserialize hits into typed `Vec<SearchHit>` if present.
-    pub fn hits(&self) -> Option<Vec<SearchHit>> {
-        self.data
-            .as_ref()
-            .and_then(|d| serde_json::from_value(d.clone()).ok())
-    }
-
-    /// Return point IDs as u64 from hits or scroll results.
-    pub fn ids(&self) -> Vec<u64> {
-        let Some(arr) = self.hits_json() else {
-            return Vec::new();
-        };
-        arr.iter()
-            .filter_map(|h| {
-                h.get("id").and_then(|id| {
-                    id.as_u64()
-                        .or_else(|| id.as_str().and_then(|s| s.parse().ok()))
-                })
-            })
-            .collect()
-    }
-
-    /// Return the count from a COUNT response, if present.
-    pub fn count(&self) -> Option<u64> {
-        self.data.as_ref().and_then(|d| {
-            d.get("result")
-                .and_then(|r| r.get("count"))
-                .or_else(|| d.get("count"))
-                .and_then(|c| c.as_u64())
-        })
-    }
-
-    /// Return facet entries as `(value, count)` pairs, if present.
-    pub fn facet(&self) -> Option<Vec<(serde_json::Value, u64)>> {
-        let arr = self.data.as_ref()?.as_array()?;
-        let mut out = Vec::with_capacity(arr.len());
-        for item in arr {
-            let val = item.get("value")?.clone();
-            let count = item.get("count")?.as_u64()?;
-            out.push((val, count));
-        }
-        Some(out)
-    }
-}
-
-/// A parsed and pre-compiled query template for repeated execution with different parameters.
-#[derive(Debug, Clone)]
-pub struct PreparedStatement {
-    pub(crate) sql: String,
-    pub(crate) stmt: Stmt,
-    pub(crate) planned: Option<qql_plan::PlannedOperation>,
-    pub(crate) named_params: BTreeSet<String>,
-    pub(crate) positional_count: usize,
-    /// Whether the template carries whole-point placeholders (`VALUES :p`).
-    pub(crate) has_point_params: bool,
-    /// Collection schema fetched once at [`Executor::prepare`] for templates
-    /// with point placeholders, reused by every point-splice execution
-    /// instead of re-fetching per call.
-    pub(crate) upsert_schema: Option<crate::backend::CollectionInfo>,
-}
-
-impl PreparedStatement {
-    /// The original SQL query template string.
-    pub fn sql(&self) -> &str {
-        &self.sql
-    }
-
-    /// The parsed AST statement.
-    pub fn stmt(&self) -> &Stmt {
-        &self.stmt
-    }
-
-    /// Whether this prepared statement has a fast execution path: either a
-    /// pre-compiled planned operation template or whole-point placeholders
-    /// bound via the point-splice path.
-    pub fn is_planned(&self) -> bool {
-        self.planned.is_some() || self.has_point_params
-    }
-
-    /// Parameter names referenced in this statement template.
-    pub fn named_params(&self) -> &BTreeSet<String> {
-        &self.named_params
-    }
-
-    /// Total count of positional parameter placeholders (`?`) referenced in this statement template.
-    ///
-    /// Positional parameters use 0-based indexing: the first `?` corresponds to index 0
-    /// (`params[0]`), the second to index 1 (`params[1]`), etc.
-    pub fn positional_count(&self) -> usize {
-        self.positional_count
-    }
-}
-
-pub use crate::client::*;
-
-/// Serialize search hits into the `data` envelope of an `ExecResponse`.
-///
-/// Serialization cannot currently fail for [`SearchHit`]'s field types, but
-/// failing loudly here beats silently emitting `null` data on a future type
-/// change.
-fn serialize_hits(hits: &[SearchHit]) -> Result<serde_json::Value, QqlError> {
-    serde_json::to_value(hits).map_err(|error| {
-        QqlError::execution(
-            "QQL-RESPONSE-SERIALIZE",
-            format!("failed to serialize search results: {error}"),
-            None,
-        )
-    })
-}
 
 /// The QQL executor: prepare (schema `USING` resolution + embeddings) → `plan()`
 /// → batch classification → dispatch over a `QdrantOps` backend.
@@ -324,11 +55,7 @@ pub struct Executor {
 }
 
 impl Executor {
-    /// Creates an executor backed by Qdrant's REST API.
-    ///
-    /// The backend owns a reusable HTTP client. Applications that need custom
-    /// proxy, TLS, tracing, or pool settings can construct `RestQdrant` with
-    /// their own `reqwest::Client` and pass it to [`Self::new`] instead.
+    /// Create an executor connected to Qdrant over HTTP REST.
     #[cfg(feature = "rest")]
     pub fn rest(url: impl Into<String>, api_key: Option<String>) -> Result<Self, QqlError> {
         Ok(Self::new(
@@ -337,7 +64,7 @@ impl Executor {
         ))
     }
 
-    /// Creates an executor backed by Qdrant's gRPC API.
+    /// Create an executor connected to Qdrant over gRPC.
     #[cfg(feature = "grpc")]
     pub fn grpc(url: &str, api_key: Option<String>) -> Result<Self, QqlError> {
         Ok(Self::new(
@@ -346,9 +73,9 @@ impl Executor {
         ))
     }
 
-    /// Creates an executor around a custom `QdrantOps` backend with optional config.
+    /// Construct an executor with a boxed backend and optional runtime configuration.
     pub fn new(client: Box<dyn QdrantOps>, config: Option<QqlConfig>) -> Self {
-        Executor {
+        Self {
             client,
             config,
             embedder: None,
@@ -358,13 +85,13 @@ impl Executor {
         }
     }
 
-    /// Like `new`, but with a pre-built embedder (e.g. `FastEmbedder` or `HttpEmbedder`).
+    /// Construct an executor with a backend, config, and embedder.
     pub fn with_embedder(
         client: Box<dyn QdrantOps>,
         config: Option<QqlConfig>,
         embedder: Option<Arc<dyn Embedder>>,
     ) -> Self {
-        Executor {
+        Self {
             client,
             config,
             embedder,
@@ -374,131 +101,71 @@ impl Executor {
         }
     }
 
-    /// Return cached collection info or fetch from backend and cache it.
-    pub(crate) async fn get_cached_collection_info(
-        &self,
-        collection: &str,
-    ) -> Result<CollectionInfo, QqlError> {
-        if let Ok(guard) = self.schema_cache.read()
-            && let Some((info, _)) = guard.get(collection)
-        {
-            return Ok(info.clone());
-        }
-        let info = self.client.get_collection_info(collection).await?;
-        let topo = std::sync::Arc::new(dml::query::topology_names_from_info(&info));
-        if let Ok(mut guard) = self.schema_cache.write() {
-            guard.insert(collection.to_string(), (info.clone(), topo));
-        }
-        Ok(info)
-    }
-
-    /// Return cached collection topology or fetch from backend and cache it.
-    pub(crate) async fn get_cached_topology(
-        &self,
-        collection: &str,
-    ) -> Result<std::sync::Arc<qql_embed::TopologyNames>, QqlError> {
-        if let Ok(guard) = self.schema_cache.read()
-            && let Some((_, topo)) = guard.get(collection)
-        {
-            return Ok(topo.clone());
-        }
-        let info = self.client.get_collection_info(collection).await?;
-        let topo = std::sync::Arc::new(dml::query::topology_names_from_info(&info));
-        if let Ok(mut guard) = self.schema_cache.write() {
-            guard.insert(collection.to_string(), (info, topo.clone()));
-        }
-        Ok(topo)
-    }
-
-    /// Invalidate any cached schema for a collection.
-    pub(crate) fn invalidate_collection_schema(&self, collection: &str) {
-        if let Ok(mut guard) = self.schema_cache.write() {
-            guard.remove(collection);
-        }
-    }
-
     /// Borrow the underlying backend ops (alias of `client`).
-    ///
-    /// # Note
-    /// Direct calls on the returned `&dyn QdrantOps` bypass the executor's
-    /// `QQL-CLIENT-CLOSED` guard.
     pub fn ops(&self) -> &dyn QdrantOps {
         self.client.as_ref()
     }
 
-    /// Explain a single QQL query string without executing it.
+    /// Format an ASCII plan tree for the query without executing it.
     pub fn explain(query: &str) -> Result<String, QqlError> {
         qql_core::explain::explain(query)
     }
 
-    /// Explain every statement in a multi-statement script.
+    /// Format plan trees for all statements in a multi-statement script.
     pub fn explain_all(query: &str) -> Result<String, QqlError> {
         qql_core::explain::explain_all(query)
     }
 
-    /// Explain an already-parsed statement.
+    /// Format the plan tree for a pre-parsed statement node.
     pub fn explain_node(stmt: &Stmt) -> Result<String, QqlError> {
         Ok(qql_core::explain::explain_node(stmt))
     }
 
-    // --- explain_stmt removed --- moved to qql_core::explain
-
-    /// Borrow the underlying backend `QdrantOps` implementation.
-    ///
-    /// # Note
-    /// Direct calls on the returned `&dyn QdrantOps` bypass the executor's
-    /// `QQL-CLIENT-CLOSED` guard.
+    /// Reference to the underlying backend ops (`RestQdrant`, `GrpcQdrant`, or test mock).
     pub fn client(&self) -> &dyn QdrantOps {
         self.client.as_ref()
     }
 
-    /// Flush and release backend-owned resources. This is especially important
-    /// for embedded backends before deleting their data directory.
-    ///
-    /// After `close`, every execution entry point fails with
-    /// `QQL-CLIENT-CLOSED` — a closed client cannot run more statements.
-    /// Calling `close` again is a no-op.
+    /// Close the executor, aborting in-flight work and preventing future executions.
     pub async fn close(&self) -> Result<(), QqlError> {
-        if self.is_closed() {
-            return Ok(());
-        }
         let _guard = self.close_lock.lock().await;
-        if self.is_closed() {
+        if self.closed.swap(true, std::sync::atomic::Ordering::SeqCst) {
             return Ok(());
         }
-        self.client.close().await?;
-        self.closed
-            .store(true, std::sync::atomic::Ordering::Release);
-        Ok(())
-    }
-
-    /// Whether [`Executor::close`] has been called.
-    pub fn is_closed(&self) -> bool {
-        self.closed.load(std::sync::atomic::Ordering::Acquire)
-    }
-
-    fn ensure_open(&self) -> Result<(), QqlError> {
-        if self.is_closed() {
-            return Err(QqlError::execution(
-                "QQL-CLIENT-CLOSED",
-                "client is closed; create a new Client to run more statements",
-                None,
-            ));
+        if let Ok(mut cache) = self.schema_cache.write() {
+            cache.clear();
         }
         Ok(())
     }
 
-    /// Borrow the configured embedder, if any.
+    /// Check whether this executor has been closed.
+    pub fn is_closed(&self) -> bool {
+        self.closed.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    pub(crate) fn ensure_open(&self) -> Result<(), QqlError> {
+        if self.is_closed() {
+            Err(QqlError::execution(
+                "QQL-CLIENT-CLOSED",
+                "cannot execute query on a closed executor",
+                None,
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Borrow the embedder reference if configured.
     pub fn embedder(&self) -> Option<&Arc<dyn Embedder>> {
         self.embedder.as_ref()
     }
 
-    /// Borrow the executor config, if any.
+    /// Borrow the runtime configuration if set.
     pub fn config(&self) -> Option<&QqlConfig> {
         self.config.as_ref()
     }
 
-    /// Configured request timeout in seconds, or `None` when disabled (`0`).
+    /// Request timeout in seconds, if configured.
     pub fn request_timeout(&self) -> Option<u64> {
         self.config.as_ref().and_then(|c| {
             if c.request_timeout > 0 {
@@ -509,13 +176,7 @@ impl Executor {
         })
     }
 
-    /// Execute a QQL query string.  Semicolon-delimited multi-statement
-    /// scripts are automatically detected, parsed, and executed in batch —
-    /// contiguous same-collection QUERY statements use `/points/query/batch`,
-    /// and contiguous same-collection mutations use `/points/batch`.
-    ///
-    /// Always returns a stable [`ExecutionReport`] for a single statement or
-    /// semicolon-delimited script.
+    /// Execute a multi-statement QQL script string under the configured timeout.
     pub async fn execute(
         &self,
         query: &str,
@@ -527,21 +188,18 @@ impl Executor {
             Ok(statements) => statements,
             Err(error) if stop_on_error => return Err(error),
             Err(error) => {
-                return Ok(ExecutionReport::single(ExecResponse {
+                return Ok(ExecutionReport::from_results(vec![ExecResponse {
                     ok: false,
                     operation: "PARSE".to_string(),
                     message: error.to_string(),
                     data: None,
-                }));
+                }]));
             }
         };
         if statements.is_empty() {
-            // An empty script is a caller bug, not a statement failure — fail
-            // closed instead of returning a silently-empty `ok: true` report
-            // (parity with `";;"`, which is a parse error).
             return Err(QqlError::validation(
                 "QQL-VALIDATION-EMPTY-SCRIPT",
-                "no statements to execute; the query is empty or contains only whitespace",
+                "no statements to execute; the query string is empty or contains only comments",
                 None,
             ));
         }
@@ -553,7 +211,7 @@ impl Executor {
     pub async fn execute_with_params(
         &self,
         query: &str,
-        params: &HashMap<String, qql_core::ast::Value>,
+        params: &HashMap<String, Value>,
         on_error: OnError,
     ) -> Result<ExecutionReport, QqlError> {
         self.ensure_open()?;
@@ -570,7 +228,7 @@ impl Executor {
     pub async fn execute_with_named_params<K: AsRef<str>>(
         &self,
         query: &str,
-        params: &[(K, qql_core::ast::Value)],
+        params: &[(K, Value)],
         on_error: OnError,
     ) -> Result<ExecutionReport, QqlError> {
         self.ensure_open()?;
@@ -596,7 +254,7 @@ impl Executor {
     pub async fn execute_with_positional_params(
         &self,
         query: &str,
-        params: &[qql_core::ast::Value],
+        params: &[Value],
         on_error: OnError,
     ) -> Result<ExecutionReport, QqlError> {
         self.ensure_open()?;
@@ -609,796 +267,10 @@ impl Executor {
         Ok(ExecutionReport::from_results(results))
     }
 
-    /// Prepare a query template for repeated execution with different parameters.
-    pub async fn prepare(&self, sql: &str) -> Result<PreparedStatement, QqlError> {
-        self.ensure_open()?;
-        let mut stmts = parser::Parser::parse_all(sql)?;
-        let stmt = if stmts.len() == 1 {
-            stmts.pop().unwrap()
-        } else if stmts.is_empty() {
-            return Err(QqlError::validation(
-                "QQL-VALIDATION-EMPTY-SCRIPT",
-                "cannot prepare an empty query template",
-                None,
-            ));
-        } else {
-            return Err(QqlError::validation(
-                "QQL-VALIDATION-MULTI-STMT",
-                "cannot prepare a multi-statement script; prepare one statement at a time",
-                None,
-            ));
-        };
-        self.prepare_from_stmt(sql.to_string(), stmt).await
-    }
-
-    /// Bulk ingest helper: the canonical fast path for application ingest.
-    ///
-    /// Prepares `UPSERT INTO <collection> VALUES :rows` once (schema fetched
-    /// once), then splices each `batch_size` chunk of point dicts through the
-    /// point-splice path. Each `rows` entry is one `{id, vector, …payload}`
-    /// point dict — the same shape as inline `VALUES {…}` rows.
-    ///
-    /// The template is built as AST (never interpolated SQL), so collection
-    /// names are data, not syntax. `batch_size == 0` fails closed;
-    /// empty `rows` returns an empty `ok` report without I/O.
-    pub async fn upsert_many(
-        &self,
-        collection: &str,
-        rows: Vec<qql_core::ast::Value>,
-        batch_size: usize,
-        on_error: OnError,
-    ) -> Result<ExecutionReport, QqlError> {
-        self.ensure_open()?;
-        if batch_size == 0 {
-            return Err(QqlError::validation(
-                "QQL-VALIDATION-UPSERT-BATCH",
-                "upsert_many batch_size must be >= 1",
-                None,
-            ));
-        }
-        if rows.is_empty() {
-            return Ok(ExecutionReport::from_results(Vec::new()));
-        }
-        let stmt = Stmt::Upsert(Box::new(qql_core::ast::UpsertStmt {
-            collection: collection.to_string(),
-            points: vec![ast::PointEntry::Param("rows".to_string(), None)],
-            embedding: None,
-            embed: Vec::new(),
-            shard_key: None,
-            wait: None,
-        }));
-        // `prepare` re-checks openness; the template carries no user SQL.
-        let prepared = self
-            .prepare_from_stmt(format!("UPSERT INTO {collection} VALUES :rows"), stmt)
-            .await?;
-        let stop_on_error = matches!(on_error, OnError::Stop);
-        let mut results = Vec::new();
-        // Move (never clone) each chunk out of `rows`: the point dicts are
-        // already owned, and a deep clone here would duplicate every vector
-        // element once more for no reason.
-        let mut rows = rows.into_iter();
-        loop {
-            let chunk: Vec<qql_core::ast::Value> = rows.by_ref().take(batch_size).collect();
-            if chunk.is_empty() {
-                break;
-            }
-            let mut params = HashMap::with_capacity(1);
-            params.insert("rows".to_string(), qql_core::ast::Value::List(chunk));
-            match self.execute_prepared(&prepared, &params).await {
-                Ok(resp) => results.push(resp),
-                Err(e) if !stop_on_error => results.push(ExecResponse {
-                    ok: false,
-                    operation: "UPSERT".to_string(),
-                    message: e.to_string(),
-                    data: None,
-                }),
-                Err(e) => return Err(e),
-            }
-        }
-        Ok(ExecutionReport::from_results(results))
-    }
-
-    /// Shared preparation body: schema resolution + template planning for an
-    /// already-parsed statement. [`Executor::prepare`] parses first;
-    /// [`Executor::upsert_many`] builds its template as AST (no SQL
-    /// interpolation, so collection names stay data).
-    async fn prepare_from_stmt(
-        &self,
-        sql: String,
-        stmt: Stmt,
-    ) -> Result<PreparedStatement, QqlError> {
-        self.ensure_open()?;
-        let (named_params, positional_count) = qql_core::params::collect_statement_params(&stmt);
-        let has_point_params = qql_core::params::stmt_has_point_params(&stmt);
-        let planned = match self.prepare_statement(stmt.clone()).await {
-            Ok(prep) => plan_template(&prep).ok(),
-            Err(_) => None,
-        };
-        // Point-placeholder templates resolve bound points against this
-        // schema on every execution instead of re-fetching per call. Fetched
-        // once here; `None` (missing collection) disables the fast path and
-        // every execution takes the checking slow path instead.
-        let upsert_schema = if has_point_params {
-            if let Stmt::Upsert(upsert) = &stmt
-                && self
-                    .client
-                    .collection_exists(&upsert.collection)
-                    .await
-                    .unwrap_or(false)
-            {
-                self.get_cached_collection_info(&upsert.collection)
-                    .await
-                    .ok()
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-        Ok(PreparedStatement {
-            sql: sql.to_string(),
-            stmt,
-            planned,
-            named_params,
-            positional_count,
-            has_point_params,
-            upsert_schema,
-        })
-    }
-
-    /// Execute a prepared statement with named parameters.
-    pub async fn execute_prepared(
-        &self,
-        prepared: &PreparedStatement,
-        params: &HashMap<String, qql_core::ast::Value>,
-    ) -> Result<ExecResponse, QqlError> {
-        self.ensure_open()?;
-        if prepared.named_params.is_empty() && prepared.positional_count == 0 && !params.is_empty()
-        {
-            return Err(QqlError::validation(
-                "QQL-BIND-UNUSED-PARAMS",
-                "query has no parameter placeholders, but parameters were provided",
-                None,
-            ));
-        }
-        for k in params.keys() {
-            if !prepared.named_params.contains(k) {
-                return Err(QqlError::validation(
-                    "QQL-BIND-UNUSED-PARAMS",
-                    format!("parameter ':{k}' was provided but is not used in the query template"),
-                    None,
-                ));
-            }
-        }
-        if prepared.has_point_params {
-            for required in &prepared.named_params {
-                if !params.contains_key(required) {
-                    return Err(QqlError::validation(
-                        "QQL-BIND-MISSING-PARAM",
-                        format!("missing value for named parameter ':{required}'"),
-                        None,
-                    ));
-                }
-            }
-            return self
-                .execute_prepared_upsert_points(prepared, &|k| params.get(k).cloned(), &[])
-                .await;
-        }
-        if let Some(ref template_op) = prepared.planned {
-            for required in &prepared.named_params {
-                let Some(val) = params.get(required) else {
-                    return Err(QqlError::validation(
-                        "QQL-BIND-MISSING-PARAM",
-                        format!("missing value for named parameter ':{required}'"),
-                        None,
-                    ));
-                };
-                if qql_plan::PlanVectorValue::from_value(val).is_none() {
-                    return Err(QqlError::validation(
-                        "QQL-BIND-INVALID-PARAMS",
-                        format!("parameter ':{required}' must be a vector (list of floats)"),
-                        None,
-                    ));
-                }
-            }
-            let mut op = template_op.clone();
-            op.bind_vector_params(
-                &|name| {
-                    params
-                        .get(name)
-                        .and_then(qql_plan::PlanVectorValue::from_value)
-                },
-                &|_| None,
-            );
-            return self.dispatch_planned(&op).await;
-        }
-        let mut stmt = prepared.stmt.clone();
-        qql_core::params::bind_stmt(&mut stmt, |k| params.get(k).cloned(), &[])?;
-        self.execute_node(stmt).await
-    }
-
-    /// Execute a prepared statement with positional parameters (`?`).
-    ///
-    /// Positional parameters use 0-based indexing: `params[0]` binds to the first `?`,
-    /// `params[1]` binds to the second `?`, up to `prepared.positional_count() - 1`.
-    ///
-    /// Returns `QQL-BIND-UNUSED-PARAMS` if more parameters are supplied than `?` placeholders,
-    /// or `QQL-BIND-MISSING-PARAM` if fewer parameters are supplied.
-    pub async fn execute_prepared_positional(
-        &self,
-        prepared: &PreparedStatement,
-        params: &[qql_core::ast::Value],
-    ) -> Result<ExecResponse, QqlError> {
-        self.ensure_open()?;
-        if prepared.positional_count == 0 && prepared.named_params.is_empty() && !params.is_empty()
-        {
-            return Err(QqlError::validation(
-                "QQL-BIND-UNUSED-PARAMS",
-                "query has no parameter placeholders, but positional parameters were provided",
-                None,
-            ));
-        }
-        if params.len() > prepared.positional_count {
-            return Err(QqlError::validation(
-                "QQL-BIND-UNUSED-PARAMS",
-                format!(
-                    "too many positional parameters provided: expected {}, but {} were provided",
-                    prepared.positional_count,
-                    params.len()
-                ),
-                None,
-            ));
-        }
-        if prepared.has_point_params {
-            if params.len() < prepared.positional_count {
-                return Err(QqlError::validation(
-                    "QQL-BIND-MISSING-PARAM",
-                    format!(
-                        "missing value for positional parameter '?{}' (only {} parameter(s) provided)",
-                        params.len() + 1,
-                        params.len()
-                    ),
-                    None,
-                ));
-            }
-            return self
-                .execute_prepared_upsert_points(prepared, &|_| None, params)
-                .await;
-        }
-        if let Some(ref template_op) = prepared.planned {
-            if params.len() < prepared.positional_count {
-                return Err(QqlError::validation(
-                    "QQL-BIND-MISSING-PARAM",
-                    format!(
-                        "missing value for positional parameter '?{}' (only {} parameter(s) provided)",
-                        params.len() + 1,
-                        params.len()
-                    ),
-                    None,
-                ));
-            }
-            for (idx, val) in params.iter().take(prepared.positional_count).enumerate() {
-                if qql_plan::PlanVectorValue::from_value(val).is_none() {
-                    return Err(QqlError::validation(
-                        "QQL-BIND-INVALID-PARAMS",
-                        format!(
-                            "positional parameter '?{}' must be a vector (list of floats)",
-                            idx + 1
-                        ),
-                        None,
-                    ));
-                }
-            }
-            let mut op = template_op.clone();
-            op.bind_vector_params(&|_| None, &|idx| {
-                params
-                    .get(idx)
-                    .and_then(qql_plan::PlanVectorValue::from_value)
-            });
-            return self.dispatch_planned(&op).await;
-        }
-        let mut stmt = prepared.stmt.clone();
-        qql_core::params::bind_stmt(&mut stmt, |_| None, params)?;
-        self.execute_node(stmt).await
-    }
-
-    /// Point-splice fast path for upsert templates with whole-point
-    /// placeholders (`VALUES :p` / `VALUES ?`).
-    ///
-    /// Binds point dicts (no re-parse), resolves unnamed vectors against the
-    /// schema cached at [`Executor::prepare`] (no re-fetch), lowers and
-    /// dispatches. Falls back to full [`Executor::execute_node`] whenever
-    /// exact parity with the slow path needs per-call preparation: a
-    /// configured embedder, template-level embedding specs, bound points
-    /// without explicit vectors (implicit-embedding path), or a missing
-    /// cached schema (collection was absent at prepare time).
-    async fn execute_prepared_upsert_points(
-        &self,
-        prepared: &PreparedStatement,
-        lookup: &impl Fn(&str) -> Option<qql_core::ast::Value>,
-        positional: &[qql_core::ast::Value],
-    ) -> Result<ExecResponse, QqlError> {
-        let mut stmt = prepared.stmt.clone();
-        qql_core::params::bind_stmt(&mut stmt, lookup, positional)?;
-        let ast::Stmt::Upsert(mut upsert) = stmt else {
-            return Err(QqlError::validation(
-                "QQL-BIND-INVALID-PARAMS",
-                "point parameters are only supported by UPSERT templates",
-                None,
-            ));
-        };
-        if self.embedder.is_some() || upsert.embedding.is_some() || !upsert.embed.is_empty() {
-            return self.execute_node(ast::Stmt::Upsert(upsert)).await;
-        }
-        let needs_slow_path = upsert.points.iter().any(|point| {
-            !matches!(
-                point,
-                ast::PointEntry::Inline(inline) if inline.vectors.is_some()
-            )
-        });
-        if needs_slow_path || prepared.upsert_schema.is_none() {
-            return self.execute_node(ast::Stmt::Upsert(upsert)).await;
-        }
-        // Post-bind there are no placeholders left (missing ones fail closed
-        // inside `bind_stmt`), so every point is inline with explicit vectors
-        // here: pure map, validate, lower, dispatch.
-        if let Some(info) = prepared.upsert_schema.as_ref() {
-            crate::executor::dml::upsert::map_unnamed_to_single_dense(&mut upsert, info);
-            self.validate_embedded_upsert(&upsert, info)?;
-        }
-        let request = qql_plan::mutation::lower_upsert_request(&upsert);
-        let wait = upsert
-            .wait
-            .unwrap_or(upsert.embedding.is_some() || !upsert.embed.is_empty());
-        let op = qql_plan::PlannedOperation::Upsert {
-            collection: upsert.collection.clone(),
-            request,
-            wait,
-        };
-        self.dispatch_planned(&op).await
-    }
-
-    /// Execute one parsed statement under the configured timeout, returning a
-    /// single response.
-    pub async fn execute_node(&self, stmt: Stmt) -> Result<ExecResponse, QqlError> {
-        self.ensure_open()?;
-        if let Some(secs) = self.request_timeout() {
-            match tokio::time::timeout(
-                std::time::Duration::from_secs(secs),
-                self.execute_node_inner(stmt),
-            )
-            .await
-            {
-                Ok(res) => res,
-                Err(_) => Err(QqlError::transport(
-                    "QQL-TIMEOUT",
-                    format!("operation timed out after {secs}s"),
-                    None,
-                )),
-            }
-        } else {
-            self.execute_node_inner(stmt).await
-        }
-    }
-
-    async fn execute_node_inner(&self, stmt: Stmt) -> Result<ExecResponse, QqlError> {
-        let prepared = self.prepare_statement(stmt).await?;
-        let planned = plan(&prepared)?;
-        self.dispatch_planned(&planned).await
-    }
-
-    /// Parse every list entry to AST and run the unified prepared batch path.
-    /// Contiguous same-collection operations are smart-batched just as for
-    /// multi-statement scripts (RUN-013).
-    pub async fn execute_batch(
-        &self,
-        queries: &[&str],
-        on_error: OnError,
-    ) -> Result<ExecutionReport, QqlError> {
-        self.ensure_open()?;
-        let stop_on_error = matches!(on_error, OnError::Stop);
-        let mut pending = Vec::with_capacity(queries.len());
-        let mut results = Vec::with_capacity(queries.len());
-        for query in queries {
-            match parser::Parser::parse_all(query) {
-                Ok(parsed) => pending.extend(parsed),
-                Err(error) => {
-                    if !pending.is_empty() {
-                        results.extend(
-                            self.execute_batch_nodes(core::mem::take(&mut pending), stop_on_error)
-                                .await?,
-                        );
-                    }
-                    if stop_on_error {
-                        return Err(error);
-                    }
-                    results.push(ExecResponse {
-                        ok: false,
-                        operation: "PARSE".to_string(),
-                        message: error.to_string(),
-                        data: None,
-                    });
-                }
-            }
-        }
-        if !pending.is_empty() {
-            results.extend(self.execute_batch_nodes(pending, stop_on_error).await?);
-        }
-        if results.is_empty() {
-            // Every input parsed to zero statements (e.g. `["", "  "]`) — same
-            // empty-script contract as `execute`.
-            return Err(QqlError::validation(
-                "QQL-VALIDATION-EMPTY-SCRIPT",
-                "no statements to execute; the query list is empty or every entry is empty",
-                None,
-            ));
-        }
-        Ok(ExecutionReport::from_results(results))
-    }
-
-    /// Execute already-parsed statements through the unified batch path,
-    /// honoring the configured request timeout.
-    pub async fn execute_batch_nodes(
-        &self,
-        stmts: Vec<Stmt>,
-        stop_on_error: bool,
-    ) -> Result<Vec<ExecResponse>, QqlError> {
-        self.ensure_open()?;
-        if let Some(secs) = self.request_timeout() {
-            match tokio::time::timeout(
-                std::time::Duration::from_secs(secs),
-                self.execute_batch_nodes_inner(stmts, stop_on_error),
-            )
-            .await
-            {
-                Ok(res) => res,
-                Err(_) => Err(QqlError::transport(
-                    "QQL-TIMEOUT",
-                    format!("batch execution timed out after {secs}s"),
-                    None,
-                )),
-            }
-        } else {
-            self.execute_batch_nodes_inner(stmts, stop_on_error).await
-        }
-    }
-
-    async fn execute_batch_nodes_inner(
-        &self,
-        stmts: Vec<Stmt>,
-        stop_on_error: bool,
-    ) -> Result<Vec<ExecResponse>, QqlError> {
-        let mut results = Vec::with_capacity(stmts.len());
-        let mut grouper = BatchGrouper::new();
-
-        for stmt in stmts {
-            // Fail closed before any network I/O: an unbound placeholder
-            // cannot produce a valid request (see `plan::ensure_no_unbound_params`).
-            // Under `on_error = "continue"` this is a per-statement defect like
-            // PREPARE/PLAN — collect it instead of aborting the whole script
-            // (which would discard every already-collected result).
-            if let Err(e) = qql_plan::ensure_no_unbound_params(&stmt) {
-                if let Some(ops) = grouper.flush_on_error() {
-                    self.flush_planned_group(ops, stop_on_error, &mut results)
-                        .await?;
-                }
-                if stop_on_error {
-                    return Err(e);
-                }
-                results.push(ExecResponse {
-                    ok: false,
-                    operation: "BIND".to_string(),
-                    message: e.to_string(),
-                    data: None,
-                });
-                continue;
-            }
-
-            // A statement outside the current batch family is an execution
-            // barrier. Flush before preparing it because preparation may read
-            // or mutate backend state (for example UPSERT auto-creation).
-            if let Some(ops) = grouper.check_statement_barrier(&stmt) {
-                self.flush_planned_group(ops, stop_on_error, &mut results)
-                    .await?;
-            }
-
-            let prepared = match self.prepare_statement(stmt).await {
-                Ok(p) => p,
-                Err(e) => {
-                    if let Some(ops) = grouper.flush_on_error() {
-                        self.flush_planned_group(ops, stop_on_error, &mut results)
-                            .await?;
-                    }
-                    if stop_on_error {
-                        return Err(e);
-                    }
-                    results.push(ExecResponse {
-                        ok: false,
-                        operation: "PREPARE".to_string(),
-                        message: e.to_string(),
-                        data: None,
-                    });
-                    continue;
-                }
-            };
-
-            let planned = match plan(&prepared) {
-                Ok(planned) => planned,
-                Err(e) => {
-                    if let Some(ops) = grouper.flush_on_error() {
-                        self.flush_planned_group(ops, stop_on_error, &mut results)
-                            .await?;
-                    }
-                    if stop_on_error {
-                        return Err(e);
-                    }
-                    results.push(ExecResponse {
-                        ok: false,
-                        operation: "PLAN".to_string(),
-                        message: e.to_string(),
-                        data: None,
-                    });
-                    continue;
-                }
-            };
-
-            let (flush_ops, dispatch_single) = grouper.push_planned(planned);
-            if let Some(ops) = flush_ops {
-                self.flush_planned_group(ops, stop_on_error, &mut results)
-                    .await?;
-            }
-            if let Some(single) = dispatch_single {
-                self.dispatch_or_collect(single, stop_on_error, &mut results)
-                    .await?;
-            }
-        }
-
-        if let Some(ops) = grouper.finish() {
-            self.flush_planned_group(ops, stop_on_error, &mut results)
-                .await?;
-        }
-        Ok(results)
-    }
-
-    async fn dispatch_or_collect(
-        &self,
-        planned: qql_plan::PlannedOperation,
-        stop_on_error: bool,
-        results: &mut Vec<ExecResponse>,
-    ) -> Result<(), QqlError> {
-        match self.dispatch_planned(&planned).await {
-            Ok(response) => results.push(response),
-            Err(error) if stop_on_error => return Err(error),
-            Err(error) => results.push(ExecResponse {
-                ok: false,
-                operation: planned.operation_label().to_string(),
-                message: error.to_string(),
-                data: None,
-            }),
-        }
-        Ok(())
-    }
-
-    async fn flush_planned_group(
-        &self,
-        mut operations: Vec<qql_plan::PlannedOperation>,
-        stop_on_error: bool,
-        results: &mut Vec<ExecResponse>,
-    ) -> Result<(), QqlError> {
-        use qql_plan::PlannedOperation;
-
-        if operations.is_empty() {
-            return Ok(());
-        }
-        if operations.len() == 1 {
-            let planned = operations.pop().expect("pending contains one operation");
-            return self
-                .dispatch_or_collect(planned, stop_on_error, results)
-                .await;
-        }
-        let is_query = matches!(&operations[0], PlannedOperation::Query { .. });
-        if is_query {
-            let (collection, batch) = qql_plan::build_query_batch(&operations)?;
-            let expected = batch.searches.len();
-            match self.client.execute_query_batch(&collection, &batch).await {
-                Ok(responses) if responses.len() == expected => {
-                    for mut value in responses {
-                        if let Some(message) = Self::batch_item_error(&value) {
-                            // A 200 batch response can carry per-item
-                            // failures; keep them aligned with the request
-                            // order instead of reporting everything as ok.
-                            results.push(ExecResponse {
-                                ok: false,
-                                operation: "QUERY".to_string(),
-                                message,
-                                data: None,
-                            });
-                            continue;
-                        }
-                        let (hits_val, count) = {
-                            let pts_opt = if let Some(serde_json::Value::Object(obj)) =
-                                value.get_mut("result")
-                            {
-                                obj.remove("points")
-                            } else if let Some(serde_json::Value::Array(_)) = value.get("result") {
-                                value.as_object_mut().and_then(|o| o.remove("result"))
-                            } else if let Some(obj) = value.as_object_mut() {
-                                obj.remove("points")
-                            } else {
-                                None
-                            };
-                            if let Some(pts) = pts_opt {
-                                let c = pts.as_array().map(|a| a.len()).unwrap_or(0);
-                                (pts, c)
-                            } else {
-                                let hits = extract_search_hits(&value);
-                                let c = hits.len();
-                                (serialize_hits(&hits)?, c)
-                            }
-                        };
-                        results.push(ExecResponse {
-                            ok: true,
-                            operation: "QUERY".to_string(),
-                            message: format!("Found {} hits", count),
-                            data: Some(hits_val),
-                        });
-                    }
-                }
-                Ok(responses) => {
-                    let error =
-                        qql_plan::verify_batch_cardinality("query", expected, responses.len())
-                            .unwrap_err();
-                    if stop_on_error {
-                        return Err(error);
-                    }
-                    self.retry_batch_individually(operations, results).await?;
-                }
-                Err(error) => {
-                    if stop_on_error {
-                        return Err(error);
-                    }
-                    self.retry_batch_individually(operations, results).await?;
-                }
-            }
-        } else {
-            // Mutations batch. Most mutations lower to an
-            // `UpdateOperation` and batch through `execute_update_batch`.
-            // `DELETE PAYLOAD` has no wire batch form
-            // (`planned_to_update_operation` returns `None`), so it is
-            // deliberately isolated: consecutive batchable mutations still
-            // run as one batch, and each non-batchable statement is
-            // dispatched through the working single-op path in statement
-            // order. Every operation in the group succeeds instead of the
-            // whole group aborting with `QQL-BATCH-INVARIANT`.
-            let mut collection: Option<String> = None;
-            let mut run: Vec<qql_plan::PlannedOperation> = Vec::new();
-            for operation in operations {
-                let op_collection = operation.collection().map(str::to_owned);
-                if collection
-                    .as_ref()
-                    .is_some_and(|c| Some(c.as_str()) != op_collection.as_deref())
-                {
-                    return Err(QqlError::execution(
-                        "QQL-BATCH-INVARIANT",
-                        "mutation batch contained multiple collections",
-                        None,
-                    ));
-                }
-                if collection.is_none() {
-                    collection = op_collection;
-                }
-                if qql_plan::mutation::planned_to_update_operation(&operation).is_some() {
-                    run.push(operation);
-                } else {
-                    // Non-batchable mutation (DELETE PAYLOAD): flush the
-                    // batchable run first, then dispatch this statement
-                    // singly so statement order is preserved.
-                    self.flush_update_run(core::mem::take(&mut run), stop_on_error, results)
-                        .await?;
-                    self.dispatch_or_collect(operation, stop_on_error, results)
-                        .await?;
-                }
-            }
-            self.flush_update_run(run, stop_on_error, results).await?;
-        }
-        Ok(())
-    }
-
-    /// Dispatch a run of consecutive batchable mutations (same collection).
-    /// A single operation goes through the plain dispatch path; multiple
-    /// operations go through `execute_update_batch`.
-    async fn flush_update_run(
-        &self,
-        operations: Vec<qql_plan::PlannedOperation>,
-        stop_on_error: bool,
-        results: &mut Vec<ExecResponse>,
-    ) -> Result<(), QqlError> {
-        if operations.is_empty() {
-            return Ok(());
-        }
-        if operations.len() == 1 {
-            let planned = operations
-                .into_iter()
-                .next()
-                .expect("run contains one operation");
-            return self
-                .dispatch_or_collect(planned, stop_on_error, results)
-                .await;
-        }
-
-        let (collection, labels, batch) = qql_plan::build_update_batch(&operations)?;
-        let expected = batch.operations.len();
-        match self.client.execute_update_batch(&collection, &batch).await {
-            Ok(responses) if responses.len() == expected => {
-                for (value, label) in responses.into_iter().zip(labels.iter()) {
-                    if let Some(message) = Self::batch_item_error(&value) {
-                        results.push(ExecResponse {
-                            ok: false,
-                            operation: (*label).to_string(),
-                            message,
-                            data: None,
-                        });
-                        continue;
-                    }
-                    results.push(ExecResponse {
-                        ok: true,
-                        operation: (*label).to_string(),
-                        message: format!("{label} ok (batched)"),
-                        data: Some(value),
-                    });
-                }
-            }
-            Ok(responses) => {
-                let error = qql_plan::verify_batch_cardinality("update", expected, responses.len())
-                    .unwrap_err();
-                if stop_on_error {
-                    return Err(error);
-                }
-                self.retry_batch_individually(operations, results).await?;
-            }
-            Err(error) => {
-                if stop_on_error {
-                    return Err(error);
-                }
-                self.retry_batch_individually(operations, results).await?;
-            }
-        }
-        Ok(())
-    }
-
-    /// A batched RPC failed (or returned the wrong cardinality). With
-    /// `on_error = "continue"`, fall back to dispatching each operation
-    /// individually so per-statement success/failure stays accurate —
-    /// reporting the whole group as failed would lose statements that
-    /// succeed on their own.
-    ///
-    /// # Semantics
-    /// Note that retrying individual operations in a partially failed batch
-    /// provides **at-least-once** execution semantics for mutations. If earlier
-    /// operations in the batch were already partially applied on the backend
-    /// before the batch failed, retrying them individually will re-apply them.
-    async fn retry_batch_individually(
-        &self,
-        operations: Vec<qql_plan::PlannedOperation>,
-        results: &mut Vec<ExecResponse>,
-    ) -> Result<(), QqlError> {
-        for operation in operations {
-            self.dispatch_or_collect(operation, false, results).await?;
-        }
-        Ok(())
-    }
-
-    /// Qdrant batch endpoints answer per item; a 200 response can still carry
-    /// per-item failures (`status: "error"`). Detect them so successes and
-    /// failures stay aligned with the request order.
-    fn batch_item_error(item: &serde_json::Value) -> Option<String> {
-        qql_plan::batch_item_error(item)
-    }
-
     /// Shared preparation: embeddings, named-vector validation, and UPSERT
     /// collection auto-creation. Callers must preserve statement order because
     /// preparation may read or mutate backend state.
-    async fn prepare_statement(&self, mut stmt: Stmt) -> Result<Stmt, QqlError> {
+    pub(crate) async fn prepare_statement(&self, mut stmt: Stmt) -> Result<Stmt, QqlError> {
         let upsert_schema = match &mut stmt {
             Stmt::Query(query) => {
                 if let ast::QueryCollection::Explicit(collection) = &query.collection {
@@ -1438,7 +310,6 @@ impl Executor {
                         ast::EmbeddingSpec::Sparse { model, vector, .. } => {
                             vec![(model.as_deref(), false, true, None, vector.as_deref())]
                         }
-                        // MultiVector / Image alone do not auto-create a collection here.
                         ast::EmbeddingSpec::MultiVector { .. }
                         | ast::EmbeddingSpec::Image { .. } => Vec::new(),
                         ast::EmbeddingSpec::Hybrid {
@@ -1503,379 +374,4 @@ impl Executor {
 
         Ok(stmt)
     }
-
-    async fn prepare_create_collection(
-        &self,
-        create: &mut ast::CreateCollectionStmt,
-    ) -> Result<(), QqlError> {
-        if let ast::CollectionMode::Dense { model: Some(model) } = &create.mode
-            && let Some(embedder) = self.embedder.as_deref()
-            && !embedder.accepts_model(model)
-        {
-            return Err(QqlError::execution(
-                "QQL-EMBEDDING-MODEL",
-                format!("embedding model '{model}' is not available from the configured embedder"),
-                None,
-            ));
-        }
-        if !create.vectors.is_empty() {
-            if let ast::CollectionMode::Dense { model: Some(model) } = &create.mode {
-                let expected = self.resolve_dense_vector_size(Some(model)).await? as u64;
-                if create.vectors.len() == 1 && create.vectors[0].size != expected {
-                    return Err(QqlError::execution(
-                        "QQL-EMBEDDING-DIM",
-                        format!(
-                            "collection vector dimension {} does not match embedding model '{model}' dimension {expected}",
-                            create.vectors[0].size
-                        ),
-                        None,
-                    ));
-                }
-            }
-            return Ok(());
-        }
-        if !create.sparse_vectors.is_empty()
-            && matches!(create.mode, ast::CollectionMode::Dense { model: None })
-        {
-            // An explicit sparse definition is a valid sparse-only collection;
-            // do not silently add the default dense vector to it.
-            return Ok(());
-        }
-
-        let (model, dense_name, sparse_name, with_colbert) = match &create.mode {
-            ast::CollectionMode::Dense { model } => {
-                (model.as_deref(), DENSE_VECTOR_NAME, None, false)
-            }
-            ast::CollectionMode::Hybrid {
-                dense_vector,
-                sparse_vector,
-            } => (
-                None,
-                dense_vector.as_deref().unwrap_or(DENSE_VECTOR_NAME),
-                Some(sparse_vector.as_deref().unwrap_or(SPARSE_VECTOR_NAME)),
-                false,
-            ),
-            // Conventional dense + sparse + ColBERT multivector topology.
-            ast::CollectionMode::Rerank => {
-                (None, DENSE_VECTOR_NAME, Some(SPARSE_VECTOR_NAME), true)
-            }
-        };
-        let dense_size = self.resolve_dense_vector_size(model).await? as u64;
-        create.vectors.push(ast::VectorDef {
-            name: dense_name.to_string(),
-            size: dense_size,
-            distance: ast::VectorDistance::Cosine,
-            hnsw: None,
-            quantization: None,
-            multivector: None,
-            vectors: None,
-        });
-        if let Some(sparse_name) = sparse_name {
-            create.sparse_vectors.push(ast::SparseVectorDef {
-                name: sparse_name.to_string(),
-                index: None,
-                modifier: None,
-            });
-        }
-        if with_colbert {
-            let multi_size = self
-                .embedder
-                .as_deref()
-                .and_then(crate::embedder::Embedder::multi_dimension)
-                .or_else(|| {
-                    self.config.as_ref().and_then(|c| {
-                        (c.multi_embedding_dimension > 0).then_some(c.multi_embedding_dimension)
-                    })
-                })
-                .unwrap_or(RERANK_VECTOR_SIZE as usize) as u64;
-            create.vectors.push(ast::VectorDef {
-                name: RERANK_VECTOR_NAME.to_string(),
-                size: multi_size,
-                distance: ast::VectorDistance::Cosine,
-                hnsw: None,
-                quantization: None,
-                multivector: Some(ast::MultivectorConfig {
-                    comparator: ast::MultivectorComparator::MaxSim,
-                }),
-                vectors: None,
-            });
-        }
-
-        Ok(())
-    }
-
-    /// Dispatch a planned operation — gRPC goes direct, REST goes through Route.
-    async fn dispatch_planned(
-        &self,
-        op: &qql_plan::PlannedOperation,
-    ) -> Result<ExecResponse, QqlError> {
-        use qql_plan::PlannedOperation;
-
-        // Client-side pair scorer: never a single Qdrant route.
-        if let PlannedOperation::CrossRerank {
-            collection: _,
-            query,
-            model,
-            field,
-            limit,
-            offset,
-            candidates,
-        } = op
-        {
-            return self
-                .execute_cross_rerank(query, model, field, *limit, *offset, candidates)
-                .await;
-        }
-
-        let label = op.operation_label();
-        let mut result = self.client.execute_planned(op).await?;
-        match op {
-            qql_plan::PlannedOperation::CreateCollection { collection, .. }
-            | qql_plan::PlannedOperation::UpdateCollection { collection, .. }
-            | qql_plan::PlannedOperation::DropCollection { collection }
-            | qql_plan::PlannedOperation::CreateIndex { collection, .. }
-            | qql_plan::PlannedOperation::DropIndex { collection, .. } => {
-                self.invalidate_collection_schema(collection);
-            }
-            _ => {}
-        }
-        let (message, data) = match op {
-            PlannedOperation::Query { .. }
-            | PlannedOperation::Scroll { .. }
-            | PlannedOperation::GetPoints { .. } => {
-                let pts_opt = if let Some(serde_json::Value::Object(obj)) = result.get_mut("result")
-                {
-                    obj.remove("points")
-                } else if let Some(serde_json::Value::Array(_)) = result.get("result") {
-                    result.as_object_mut().and_then(|o| o.remove("result"))
-                } else if let Some(obj) = result.as_object_mut() {
-                    obj.remove("points")
-                } else {
-                    None
-                };
-                if let Some(pts) = pts_opt {
-                    let count = pts.as_array().map(|a| a.len()).unwrap_or(0);
-                    (format!("Found {count} hits"), Some(pts))
-                } else {
-                    let hits = extract_search_hits(&result);
-                    (
-                        format!("Found {} hits", hits.len()),
-                        Some(serialize_hits(&hits)?),
-                    )
-                }
-            }
-            PlannedOperation::QueryGroups { request, .. } => {
-                if let Some(offset) = request.group_offset {
-                    let offset = offset as usize;
-                    let groups_opt = if result.get("result").is_some() {
-                        result.get_mut("result").and_then(|r| r.get_mut("groups"))
-                    } else {
-                        result.get_mut("groups")
-                    };
-                    if let Some(groups) = groups_opt.and_then(|g| g.as_array_mut()) {
-                        if offset < groups.len() {
-                            groups.drain(0..offset);
-                        } else {
-                            groups.clear();
-                        }
-                    }
-                }
-                let groups_count = result
-                    .get("result")
-                    .and_then(|r| r.get("groups"))
-                    .or_else(|| result.get("groups"))
-                    .and_then(|g| g.as_array())
-                    .map(|a| a.len())
-                    .unwrap_or(0);
-                (format!("Found {groups_count} group(s)"), Some(result))
-            }
-            PlannedOperation::Count { .. } => {
-                let count = result
-                    .get("result")
-                    .and_then(|r| r.get("count"))
-                    .and_then(|c| c.as_u64())
-                    .or_else(|| result.get("count").and_then(|c| c.as_u64()))
-                    .unwrap_or(0);
-                (format!("Count: {count}"), Some(result))
-            }
-            PlannedOperation::Facet { .. } => {
-                let facet_hits = result
-                    .get("result")
-                    .and_then(|r| r.get("hits"))
-                    .cloned()
-                    .or_else(|| result.get("hits").cloned())
-                    .unwrap_or_else(|| serde_json::json!([]));
-                let count = facet_hits.as_array().map(|a| a.len()).unwrap_or(0);
-                (format!("Found {count} facet hit(s)"), Some(facet_hits))
-            }
-            PlannedOperation::ListCollections => {
-                let count = result
-                    .get("result")
-                    .and_then(|value| value.get("collections"))
-                    .or_else(|| result.get("collections"))
-                    .and_then(serde_json::Value::as_array)
-                    .map_or(0, Vec::len);
-                (format!("Found {count} collection(s)"), Some(result))
-            }
-            PlannedOperation::GetCollection { .. } => (format!("{label} ok"), Some(result)),
-            PlannedOperation::Upsert { request, .. } => {
-                let n = request.points.len();
-                (
-                    format!("Upserted {n} point(s)"),
-                    Some(serde_json::json!({"count": n})),
-                )
-            }
-            PlannedOperation::ListShardKeys { .. } => ("Shard keys listed".into(), Some(result)),
-            PlannedOperation::GetQuotas => ("Quota configuration shown".into(), Some(result)),
-            PlannedOperation::SetQuotas { .. } => {
-                ("Quota configuration updated".into(), Some(result))
-            }
-            PlannedOperation::CrossRerank { .. } => {
-                // Defensive: early return above must handle this variant.
-                return Err(QqlError::execution(
-                    "QQL-CROSS-RERANK",
-                    "CROSS RERANK must be executed client-side, not via a Qdrant route",
-                    None,
-                ));
-            }
-            _ => (format!("{label} ok"), None),
-        };
-        Ok(ExecResponse {
-            ok: true,
-            operation: label.into(),
-            message,
-            data,
-        })
-    }
-
-    /// Run candidate ANN stages, score (query, doc_text) with a cross-encoder, reorder.
-    async fn execute_cross_rerank(
-        &self,
-        query: &str,
-        model: &str,
-        field: &str,
-        limit: u64,
-        offset: u64,
-        candidates: &[(String, qql_plan::QueryRequest)],
-    ) -> Result<ExecResponse, QqlError> {
-        use std::collections::HashMap;
-
-        let embedder = self.embedder.as_ref().ok_or_else(|| {
-            QqlError::execution(
-                "QQL-RERANK-CROSS",
-                "CROSS RERANK requires a configured embedder with pair scoring \
-                 (rerank_endpoint / edge reranker_model)",
-                None,
-            )
-        })?;
-
-        let mut by_key: HashMap<(String, qql_plan::PlanPointId), SearchHit> = HashMap::new();
-        for (collection, request) in candidates {
-            let op = qql_plan::PlannedOperation::Query {
-                collection: collection.clone(),
-                request: request.clone(),
-            };
-            let raw = self.client.execute_planned(&op).await?;
-            for mut hit in extract_search_hits(&raw) {
-                hit.collection = Some(collection.clone());
-                by_key
-                    .entry((collection.clone(), hit.id.clone()))
-                    .or_insert(hit);
-            }
-        }
-
-        if by_key.is_empty() {
-            return Ok(ExecResponse {
-                ok: true,
-                operation: "CROSS_RERANK".into(),
-                message: "Found 0 hits".into(),
-                data: Some(serde_json::json!([])),
-            });
-        }
-
-        // Stable order for scoring (then re-sort by pair score).
-        let mut hits: Vec<SearchHit> = by_key.into_values().collect();
-        hits.sort_by(|a, b| {
-            a.collection
-                .as_deref()
-                .unwrap_or("")
-                .cmp(b.collection.as_deref().unwrap_or(""))
-                .then_with(|| a.id.cmp(&b.id))
-        });
-
-        let mut docs = Vec::with_capacity(hits.len());
-        let mut keep_idx = Vec::with_capacity(hits.len());
-        for (i, hit) in hits.iter().enumerate() {
-            // Only use `hit.text` when the requested field is the conventional
-            // "text" payload key. Falling back for other fields (e.g. `body`)
-            // silently reranks against the wrong content.
-            let from_payload = hit
-                .payload
-                .as_ref()
-                .and_then(|p| p.get(field))
-                .and_then(|v| v.as_str());
-            let text = match from_payload {
-                Some(s) if !s.is_empty() => s,
-                _ if field.eq_ignore_ascii_case("text") => hit.text.as_deref().unwrap_or(""),
-                _ => "",
-            };
-            if text.is_empty() {
-                continue;
-            }
-            docs.push(text.to_string());
-            keep_idx.push(i);
-        }
-        if docs.is_empty() {
-            return Err(QqlError::execution(
-                "QQL-RERANK-CROSS-FIELD",
-                format!(
-                    "CROSS RERANK found candidates but none had non-empty payload field '{field}'. \
-                     Ensure UPSERT stores text on that field and PREFETCH returns WITH PAYLOAD."
-                ),
-                None,
-            ));
-        }
-
-        let scores = embedder.rerank_pairs(query, &docs, model).await?;
-        if scores.len() != docs.len() {
-            return Err(QqlError::execution(
-                "QQL-RERANK-CROSS",
-                format!(
-                    "rerank_pairs returned {} scores for {} documents",
-                    scores.len(),
-                    docs.len()
-                ),
-                None,
-            ));
-        }
-
-        let mut ranked: Vec<(f32, SearchHit)> = keep_idx
-            .into_iter()
-            .zip(scores)
-            .map(|(i, score)| {
-                let mut h = hits[i].clone();
-                h.score = score;
-                (score, h)
-            })
-            .collect();
-        ranked.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-
-        let skip = offset as usize;
-        let take = limit as usize;
-        let out: Vec<SearchHit> = ranked
-            .into_iter()
-            .skip(skip)
-            .take(take)
-            .map(|(_, h)| h)
-            .collect();
-        let n = out.len();
-        Ok(ExecResponse {
-            ok: true,
-            operation: "CROSS_RERANK".into(),
-            message: format!("Found {n} hits (cross-encoder)"),
-            data: Some(serialize_hits(&out)?),
-        })
-    }
 }
-
-pub(crate) mod dml;
