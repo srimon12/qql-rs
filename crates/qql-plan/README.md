@@ -33,24 +33,24 @@ let stmt = Parser::parse(
 )?;
 let op = plan(&stmt)?;
 let route = to_rest_route(&op)?;   // fallible REST projection
-// Prefer try_route(&stmt) for libraries; avoid panic-prone route()
+// Prefer try_route(&stmt) when you want plan + projection in one call.
 ```
 
 ## PlannedOperation (selected)
 
 | Family | Variants |
 |--------|----------|
-| Search | `Query`, `QueryGroups`, `GetPoints`, `Scroll`, `Count` |
-| Mutations | `Upsert`, `Delete`, `ClearPayload`, `UpdateVectors`, `DeleteVectors`, `UpdatePayload`, … |
+| Search | `Query`, `QueryGroups`, `GetPoints`, `Scroll`, `Count`, `Facet` |
+| Mutations | `Upsert`, `Delete`, `ClearPayload`, `DeletePayload`, `UpdateVectors`, `DeleteVectors`, `UpdatePayload` |
 | DDL | `CreateCollection`, `UpdateCollection`, indexes, **`CreateShardKey` / `DropShardKey` / `ListShardKeys`** |
 | Quotas | **`GetQuotas`** / **`SetQuotas`** → REST `GET|PUT /quotas` (Qdrant ≥ 1.19) |
 | Client-side | `CrossRerank` (no single Qdrant route) |
 
 ### Batch families
 
-- **Query** — contiguous same-collection queries → `/points/query/batch`
-- **Mutation** — contiguous mutations → `/points/batch`
-- **Single** — DDL, scroll, count, quotas, …
+- **Query** — contiguous same-collection searches → `/points/query/batch` (`CrossRerank` is Single)
+- **Mutation** — contiguous same-collection mutations, including `DELETE PAYLOAD` → `/points/batch`
+- **Single** — DDL, scroll, count, facet, quotas, `CrossRerank`, …
 
 ### Semantic primitives
 
@@ -76,12 +76,18 @@ let route = to_rest_route(&op)?; // PUT /quotas?wait=true
 
 ## Modules
 
+Public crate surface. REST projection lives in `routing`; `plan` re-exports
+`to_rest_route` / `try_route` so existing `qql_plan::plan::*` paths stay valid.
+
 | Module | Role |
 |--------|------|
-| `plan` | `plan`, `to_rest_route`, `try_route`, `compile_statement` |
+| `plan` | `plan` / `plan_template` → `PlannedOperation`. Re-exports `to_rest_route`, `try_route`. |
+| `routing` | `Route`, `to_rest_route`, `try_route`, `compile_statement` |
 | `query` / `mutation` / `ddl` | Lowering (including quotas / IDF / memory) |
 | `filter` | `FilterExpression` only (no routing fields) |
-| `types` | Request IR (`SetQuotaRequest`, `IdfSearchParams`, …) |
+| `types` | Request IR façade (`SetQuotaRequest`, `IdfSearchParams`, …) |
+| `batch` | `BatchGrouper`, `BatchKey`, query/update batch builders |
+| `semantic` | `PlanPointId`, `PlanVectorValue`, `PlanQueryInput`, `PlanFormula` |
 
 ## Docs
 

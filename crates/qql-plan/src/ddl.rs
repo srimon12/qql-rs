@@ -1,6 +1,14 @@
 use crate::filter::value_to_json;
+pub(crate) use crate::quantization::turbo_bits_label;
 use crate::types::*;
 use qql_core::ast::{AlterCollectionStmt, CreateCollectionStmt, CreateIndexStmt, VectorDistance};
+use qql_core::error::QqlError;
+
+pub use crate::ddl_rest::{
+    create_collection_deferred_params_rest, create_collection_rest_body, create_index_rest_body,
+    update_collection_rest_body,
+};
+pub use crate::quantization::nest_quantization_for_rest;
 
 /// Lower `CREATE COLLECTION` to the transport-neutral create request.
 pub fn lower_create_collection(stmt: &CreateCollectionStmt) -> CreateCollectionRequest {
@@ -409,24 +417,6 @@ pub fn lower_optimizers_config_val(
     serde_json::Value::Object(obj)
 }
 
-/// Map a numeric QQL `bits` value onto the OpenAPI `TurboQuantBitSize` string.
-fn turbo_bits_label(bits: Option<f64>) -> Option<String> {
-    let bits = bits?;
-    let label = if (bits - 1.5).abs() < f64::EPSILON {
-        "bits1_5"
-    } else if (bits - 2.0).abs() < f64::EPSILON {
-        "bits2"
-    } else if (bits - 4.0).abs() < f64::EPSILON {
-        "bits4"
-    } else if (bits - 1.0).abs() < f64::EPSILON {
-        "bits1"
-    } else {
-        // Unknown — still emit a best-effort label so Qdrant can reject clearly.
-        return Some(format!("bits{bits}"));
-    };
-    Some(label.into())
-}
-
 /// Lower an AST quantization config into the typed plan `QuantizationConfig`.
 pub fn lower_quantization_config(config: &qql_core::ast::QuantizationConfig) -> QuantizationConfig {
     match config.qtype {
@@ -523,287 +513,85 @@ fn distance_str(d: VectorDistance) -> String {
     }
 }
 
-// ── REST OpenAPI wire projection (distinct from internal plan IR) ─────────
-//
-// CreateCollection OpenAPI fields are top-level (replication_factor, …), not a
-// nested `params` object. QuantizationConfig is nested (`{ "scalar": {…} }`).
-// Plan IR may carry `shard_keys`; the REST projection creates them via the
-// /shards endpoint after collection create (not as a CreateCollection field).
-// Internal plan IR keeps flat `type: "scalar"|…` for gRPC converters.
-
-/// OpenAPI PUT `/collections/{c}` body from plan IR.
-pub fn create_collection_rest_body(
-    req: &CreateCollectionRequest,
-) -> Result<serde_json::Value, crate::plan::RestProjectionError> {
-    use crate::plan::{RestProjectionError, serialize_body};
-    let mut body = serde_json::Map::new();
-
-    if let Some(vectors) = &req.vectors {
-        let mut out = serde_json::Map::new();
-        for (name, cfg) in vectors {
-            out.insert(name.clone(), nest_vector_params_for_rest(cfg));
-        }
-        body.insert("vectors".into(), serde_json::Value::Object(out));
-    }
-    if let Some(sparse) = &req.sparse_vectors {
-        body.insert(
-            "sparse_vectors".into(),
-            serde_json::Value::Object(sparse.clone()),
-        );
-    }
-    if let Some(hnsw) = &req.hnsw_config {
-        let v = serialize_body(hnsw).map_err(|e| RestProjectionError::SerializeFailed {
-            message: e.to_string(),
-        })?;
-        body.insert("hnsw_config".into(), v);
-    }
-    if let Some(opt) = &req.optimizers_config {
-        let v = serialize_body(opt).map_err(|e| RestProjectionError::SerializeFailed {
-            message: e.to_string(),
-        })?;
-        body.insert("optimizers_config".into(), v);
-    }
-    if let Some(q) = &req.quantization_config {
-        let v = serialize_body(q).map_err(|e| RestProjectionError::SerializeFailed {
-            message: e.to_string(),
-        })?;
-        body.insert("quantization_config".into(), v);
-    }
-    if let Some(n) = req.shard_number {
-        body.insert("shard_number".into(), serde_json::Value::from(n));
-    }
-    if let Some(method) = &req.sharding_method {
-        body.insert(
-            "sharding_method".into(),
-            serde_json::Value::String(method.clone()),
-        );
-    }
-    // OpenAPI CreateCollection: replication_factor / write_consistency_factor /
-    // on_disk_payload are top-level, not nested under `params`.
-    if let Some(params) = &req.params {
-        if let Some(rf) = params.get("replication_factor") {
-            body.insert("replication_factor".into(), rf.clone());
-        }
-        if let Some(wc) = params.get("write_consistency_factor") {
-            body.insert("write_consistency_factor".into(), wc.clone());
-        }
-        if let Some(od) = params.get("on_disk_payload") {
-            body.insert("on_disk_payload".into(), od.clone());
-        }
-        // read_fan_out_* only exist on UpdateCollection params (CollectionParamsDiff);
-        // callers apply them with a follow-up PATCH (REST) or update (gRPC).
-    }
-    if let Some(payload) = &req.payload {
-        body.insert("payload".into(), payload.clone());
-    }
-    // Do not emit: params, vectors_config, shard_keys
-    Ok(serde_json::Value::Object(body))
-}
-
-/// OpenAPI PUT `/collections/{c}/index` body.
+/// Lower a `SET QUOTA (…)` statement to a typed quota request.
 ///
-/// When index options are present, `field_schema` becomes a typed object
-/// (`{ "type": "text", "tokenizer": … }`) per OpenAPI `PayloadSchemaParams`.
-/// Without options it remains a plain type string.
-pub fn create_index_rest_body(req: &CreateIndexRequest) -> serde_json::Value {
-    let mut body = serde_json::Map::new();
-    body.insert(
-        "field_name".into(),
-        serde_json::Value::String(req.field_name.clone()),
-    );
-    if req.extra.is_empty() {
-        body.insert(
-            "field_schema".into(),
-            serde_json::Value::String(req.field_schema.clone()),
-        );
-    } else {
-        let mut schema = serde_json::Map::new();
-        schema.insert(
-            "type".into(),
-            serde_json::Value::String(req.field_schema.clone()),
-        );
-        for (k, v) in &req.extra {
-            // Map QQL aliases to OpenAPI enum strings where needed.
-            if k == "encoding" {
-                continue;
-            }
-            let v = if k == "tokenizer" {
-                if let Some(s) = v.as_str() {
-                    serde_json::Value::String(s.to_ascii_lowercase())
-                } else {
-                    v.clone()
+/// `PUT /quotas` **replaces** the entire cluster-wide config. Omitted keys
+/// (including `key = null`) are not set on the replacement body, so they
+/// become "uncapped / default" in the new config — not a patch of the old
+/// one. Callers that want to keep existing limits must restate them.
+pub(crate) fn lower_set_quota(
+    stmt: &qql_core::ast::SetQuotaStmt,
+) -> Result<SetQuotaRequest, QqlError> {
+    use qql_core::ast::Value;
+
+    let mut request = SetQuotaRequest {
+        enabled: None,
+        max_resident_memory_percent: None,
+        max_disk_usage_percent: None,
+        release_margin_percent: None,
+        wait: stmt.wait,
+    };
+    for (key, value) in &stmt.config {
+        let lower = key.to_ascii_lowercase();
+        match lower.as_str() {
+            "enabled" => match value {
+                Value::Bool(b) => request.enabled = Some(*b),
+                _ => {
+                    return Err(QqlError::validation(
+                        "QQL-PLAN-QUOTA",
+                        "enabled must be true or false",
+                        None,
+                    ));
                 }
-            } else {
-                v.clone()
-            };
-            schema.insert(k.clone(), v);
+            },
+            "max_resident_memory_percent" | "max_disk_usage_percent" => {
+                request = apply_quota_percent(request, &lower, value, 1, 100)?;
+            }
+            "release_margin_percent" => {
+                request = apply_quota_percent(request, &lower, value, 0, 100)?;
+            }
+            _ => {
+                return Err(QqlError::validation(
+                    "QQL-PLAN-QUOTA",
+                    format!(
+                        "unknown quota parameter '{key}'. Expected: enabled, max_resident_memory_percent, max_disk_usage_percent, release_margin_percent"
+                    ),
+                    None,
+                ));
+            }
         }
-        body.insert("field_schema".into(), serde_json::Value::Object(schema));
     }
-    serde_json::Value::Object(body)
+    Ok(request)
 }
 
-/// OpenAPI PATCH `/collections/{c}` body from plan IR.
-pub fn update_collection_rest_body(
-    req: &UpdateCollectionRequest,
-) -> Result<serde_json::Value, crate::plan::RestProjectionError> {
-    use crate::plan::{RestProjectionError, serialize_body};
-    let mut body = serde_json::Map::new();
-    if let Some(hnsw) = &req.hnsw_config {
-        let v = serialize_body(hnsw).map_err(|e| RestProjectionError::SerializeFailed {
-            message: e.to_string(),
-        })?;
-        body.insert("hnsw_config".into(), v);
-    }
-    if let Some(opt) = &req.optimizers_config {
-        let v = serialize_body(opt).map_err(|e| RestProjectionError::SerializeFailed {
-            message: e.to_string(),
-        })?;
-        body.insert("optimizers_config".into(), v);
-    }
-    if let Some(params) = &req.params {
-        body.insert("params".into(), params.clone());
-    }
-    if let Some(q) = &req.quantization_config {
-        body.insert("quantization_config".into(), nest_quantization_for_rest(q));
-    }
-    Ok(serde_json::Value::Object(body))
-}
-
-/// Follow-up PATCH body for create-time params that only exist on update
-/// (`read_fan_out_factor`, `read_fan_out_delay_ms`).
-pub fn create_collection_deferred_params_rest(
-    req: &CreateCollectionRequest,
-) -> Option<serde_json::Value> {
-    let params = req.params.as_ref()?;
-    let mut out = serde_json::Map::new();
-    if let Some(v) = params.get("read_fan_out_factor") {
-        out.insert("read_fan_out_factor".into(), v.clone());
-    }
-    if let Some(v) = params.get("read_fan_out_delay_ms") {
-        out.insert("read_fan_out_delay_ms".into(), v.clone());
-    }
-    if out.is_empty() {
-        None
-    } else {
-        Some(serde_json::json!({ "params": out }))
-    }
-}
-
-fn nest_vector_params_for_rest(cfg: &serde_json::Value) -> serde_json::Value {
-    let Some(obj) = cfg.as_object() else {
-        return cfg.clone();
-    };
-    let mut out = obj.clone();
-    if let Some(q) = obj.get("quantization_config") {
-        out.insert("quantization_config".into(), nest_quantization_for_rest(q));
-    }
-    serde_json::Value::Object(out)
-}
-
-/// Convert internal flat IR `{ "type": "scalar", … }` to OpenAPI
-/// `{ "scalar": { "type": "int8", … } }` (and product/binary/turbo).
-/// Passes through already-nested configs and update `disabled` forms.
-pub fn nest_quantization_for_rest(value: &serde_json::Value) -> serde_json::Value {
-    if value.as_str() == Some("Disabled") {
-        return serde_json::Value::String("Disabled".into());
-    }
-    let Some(obj) = value.as_object() else {
-        return value.clone();
-    };
-    // Already nested OpenAPI shape
-    if obj.contains_key("scalar")
-        || obj.contains_key("product")
-        || obj.contains_key("binary")
-        || obj.contains_key("turbo")
-        || obj.contains_key("turboquant")
-    {
-        return value.clone();
-    }
-    // Update IR: { disabled: true, quantization_config?: … }
-    if obj.get("disabled").and_then(|v| v.as_bool()) == Some(true) {
-        return serde_json::Value::String("Disabled".into());
-    }
-    if let Some(inner) = obj.get("quantization_config") {
-        return nest_quantization_for_rest(inner);
-    }
-
-    let kind = obj
-        .get("type")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    match kind.as_str() {
-        "scalar" => {
-            let mut inner = serde_json::Map::new();
-            // OpenAPI ScalarType is only `int8`.
-            inner.insert("type".into(), serde_json::Value::String("int8".into()));
-            if let Some(q) = obj.get("quantile") {
-                inner.insert("quantile".into(), q.clone());
+fn apply_quota_percent(
+    mut request: SetQuotaRequest,
+    key: &str,
+    value: &qql_core::ast::Value,
+    min: u64,
+    max: u64,
+) -> Result<SetQuotaRequest, QqlError> {
+    match value {
+        // Explicit null → leave field unset so the replacement config has no
+        // cap for this resource (full PUT replace semantics).
+        qql_core::ast::Value::Null => {}
+        qql_core::ast::Value::Int(n) if *n >= min as i64 && (*n as u64) <= max => {
+            let n = *n as u64;
+            match key {
+                "max_resident_memory_percent" => request.max_resident_memory_percent = Some(n),
+                "max_disk_usage_percent" => request.max_disk_usage_percent = Some(n),
+                _ => request.release_margin_percent = Some(n),
             }
-            if let Some(ar) = obj.get("always_ram") {
-                inner.insert("always_ram".into(), ar.clone());
-            }
-            serde_json::json!({ "scalar": inner })
         }
-        "product" => {
-            let mut inner = serde_json::Map::new();
-            let compression = obj
-                .get("compression")
-                .and_then(|v| v.as_str())
-                .unwrap_or("x4");
-            inner.insert(
-                "compression".into(),
-                serde_json::Value::String(compression.into()),
-            );
-            if let Some(ar) = obj.get("always_ram") {
-                inner.insert("always_ram".into(), ar.clone());
-            }
-            serde_json::json!({ "product": inner })
+        _ => {
+            return Err(QqlError::validation(
+                "QQL-PLAN-QUOTA",
+                format!("{key} must be an integer in [{min}, {max}] or null"),
+                None,
+            ));
         }
-        "binary" => {
-            let mut inner = serde_json::Map::new();
-            if let Some(ar) = obj.get("always_ram") {
-                inner.insert("always_ram".into(), ar.clone());
-            }
-            if let Some(enc) = obj.get("encoding").and_then(|v| v.as_str()) {
-                let enc = match enc.to_ascii_lowercase().as_str() {
-                    "twobits" | "two_bits" | "2" => "two_bits",
-                    "oneandhalfbits" | "one_and_half_bits" | "1.5" => "one_and_half_bits",
-                    _ => "one_bit",
-                };
-                inner.insert("encoding".into(), serde_json::Value::String(enc.into()));
-            }
-            if let Some(qe) = obj.get("query_encoding").and_then(|v| v.as_str()) {
-                let qe = match qe.to_ascii_lowercase().as_str() {
-                    "binary" => "binary",
-                    "scalar4bits" | "scalar4" => "scalar4bits",
-                    "scalar8bits" | "scalar8" => "scalar8bits",
-                    _ => "default",
-                };
-                inner.insert(
-                    "query_encoding".into(),
-                    serde_json::Value::String(qe.into()),
-                );
-            }
-            serde_json::json!({ "binary": inner })
-        }
-        "turbo" | "turboquant" => {
-            let mut inner = serde_json::Map::new();
-            if let Some(ar) = obj.get("always_ram") {
-                inner.insert("always_ram".into(), ar.clone());
-            }
-            let bits = obj
-                .get("bits")
-                .or_else(|| obj.get("turbo_bits"))
-                .and_then(|v| v.as_f64());
-            if let Some(label) = bits.and_then(|b| turbo_bits_label(Some(b))) {
-                inner.insert("bits".into(), serde_json::Value::String(label));
-            }
-            serde_json::json!({ "turbo": inner })
-        }
-        _ => value.clone(),
     }
+    Ok(request)
 }
 
 #[cfg(test)]

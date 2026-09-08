@@ -1,6 +1,7 @@
-use crate::plan::{plan, to_rest_route};
+use crate::plan::{PlannedOperation, plan};
 use crate::types::*;
 use qql_core::ast::Stmt;
+use qql_core::error::QqlError;
 
 /// Optional REST projection of a plan: HTTP method, path, query, and body.
 #[derive(Debug)]
@@ -22,12 +23,340 @@ impl Route {
     }
 }
 
-/// Fallible REST projection of a statement. Prefer for new code.
+/// Why a planned operation cannot become a single Qdrant REST route.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RestProjectionError {
+    /// Client-side only (e.g. CROSS RERANK). Compile still exposes `stmt_type`.
+    ClientSideOnly {
+        /// Statement type name used in error messages.
+        stmt_type: &'static str,
+    },
+    /// Plan IR failed to serialize to JSON (a `Serialize` regression).
+    SerializeFailed {
+        /// Underlying serde error message.
+        message: String,
+    },
+}
+
+/// Serialize a plan struct to JSON for the REST body.
 ///
-/// Client-side ops (CROSS RERANK) and plan failures return `Err` — never a
-/// silent empty GET.
-pub fn try_route(statement: &Stmt) -> Result<Route, qql_core::error::QqlError> {
-    crate::plan::try_route(statement)
+/// Every plan IR request type is JSON-serializable by construction, so this is
+/// only reachable if a `Serialize` impl regresses. A failure must surface as a
+/// loud invariant violation — a JSON `null` body would be rejected by the
+/// backend with an opaque error. `pub(crate)` so the plan/query/ddl REST
+/// projections share the same no-swallow invariant; kept fallible so the
+/// property is unit-testable.
+pub(crate) fn serialize_body<T: serde::Serialize>(
+    req: &T,
+) -> Result<serde_json::Value, serde_json::Error> {
+    serde_json::to_value(req)
+}
+
+/// REST projection of a planned operation (HTTP method/path/query/body).
+///
+/// Client-side operations such as [`PlannedOperation::CrossRerank`] return
+/// [`RestProjectionError::ClientSideOnly`] — they must not invent a Qdrant path.
+/// Returns `RestProjectionError::ClientSideOnly` for operations that have no
+/// single Qdrant REST endpoint (e.g. CROSS RERANK).
+pub fn to_rest_route(op: &PlannedOperation) -> Result<Route, RestProjectionError> {
+    /// Serialize a plan struct to JSON for the REST body, mapping the
+    /// (practically unreachable) serialization failure into the error channel
+    /// instead of panicking the host process.
+    fn body<T: serde::Serialize>(
+        req: &T,
+    ) -> Result<Option<serde_json::Value>, RestProjectionError> {
+        serialize_body(req)
+            .map(Some)
+            .map_err(|e| RestProjectionError::SerializeFailed {
+                message: e.to_string(),
+            })
+    }
+
+    /// Read-op query params: timeout, consistency.
+    fn read_query(
+        timeout: Option<u64>,
+        consistency: Option<&crate::types::ReadConsistencyParam>,
+    ) -> Vec<(String, String)> {
+        let mut q = Vec::new();
+        crate::query::push_read_opts(&mut q, timeout, consistency);
+        q
+    }
+
+    /// Mutation query params: wait + optional shard_key.
+    fn mut_query(wait: bool, shard_key: Option<&str>) -> Vec<(String, String)> {
+        let mut q = Vec::new();
+        if wait {
+            q.push(("wait".into(), "true".into()));
+        }
+        if let Some(sk) = shard_key {
+            q.push(("shard_key".into(), sk.to_owned()));
+        }
+        q
+    }
+
+    Ok(match op {
+        PlannedOperation::Query {
+            collection,
+            request,
+        } => Route {
+            method: Method::Post,
+            path: format!("/collections/{collection}/points/query"),
+            query: read_query(request.timeout, request.consistency.as_ref()),
+            body: body(request)?,
+        },
+        PlannedOperation::QueryGroups {
+            collection,
+            request,
+        } => Route {
+            method: Method::Post,
+            path: format!("/collections/{collection}/points/query/groups"),
+            query: read_query(request.timeout, request.consistency.as_ref()),
+            body: body(request)?,
+        },
+        PlannedOperation::GetPoints {
+            collection,
+            request,
+        } => Route {
+            method: Method::Post,
+            path: format!("/collections/{collection}/points"),
+            query: Vec::new(),
+            body: body(request)?,
+        },
+        PlannedOperation::Scroll {
+            collection,
+            request,
+        } => Route {
+            method: Method::Post,
+            path: format!("/collections/{collection}/points/scroll"),
+            query: Vec::new(),
+            body: body(request)?,
+        },
+        PlannedOperation::Count {
+            collection,
+            request,
+        } => Route {
+            method: Method::Post,
+            path: format!("/collections/{collection}/points/count"),
+            query: Vec::new(),
+            body: body(request)?,
+        },
+        PlannedOperation::Facet {
+            collection,
+            request,
+        } => Route {
+            method: Method::Post,
+            path: format!("/collections/{collection}/facet"),
+            query: Vec::new(),
+            body: body(request)?,
+        },
+        PlannedOperation::Upsert {
+            collection,
+            request,
+            wait,
+        } => {
+            let mut query = Vec::new();
+            if *wait {
+                query.push(("wait".into(), "true".into()));
+            }
+            if let Some(ref sk) = request.shard_key {
+                query.push(("shard_key".into(), sk.clone()));
+            }
+            Route {
+                method: Method::Put,
+                path: format!("/collections/{collection}/points"),
+                query,
+                body: body(request)?,
+            }
+        }
+        PlannedOperation::Delete {
+            collection,
+            request,
+            wait,
+        } => Route {
+            method: Method::Post,
+            path: format!("/collections/{collection}/points/delete"),
+            query: mut_query(*wait, request.shard_key.as_deref()),
+            body: body(request)?,
+        },
+        PlannedOperation::ClearPayload {
+            collection,
+            request,
+            wait,
+        } => Route {
+            method: Method::Post,
+            path: format!("/collections/{collection}/points/payload/clear"),
+            query: mut_query(*wait, request.shard_key.as_deref()),
+            body: body(request)?,
+        },
+        PlannedOperation::DeletePayload {
+            collection,
+            request,
+            wait,
+        } => Route {
+            method: Method::Post,
+            path: format!("/collections/{collection}/points/payload/delete"),
+            query: mut_query(*wait, request.shard_key.as_deref()),
+            body: body(request)?,
+        },
+        PlannedOperation::DeleteVectors {
+            collection,
+            request,
+            wait,
+        } => Route {
+            method: Method::Post,
+            path: format!("/collections/{collection}/points/vectors/delete"),
+            query: mut_query(*wait, request.shard_key.as_deref()),
+            body: body(request)?,
+        },
+        PlannedOperation::UpdateVectors {
+            collection,
+            request,
+            wait,
+        } => Route {
+            method: Method::Put,
+            path: format!("/collections/{collection}/points/vectors"),
+            query: mut_query(*wait, request.shard_key.as_deref()),
+            body: body(request)?,
+        },
+        PlannedOperation::UpdatePayload {
+            collection,
+            request,
+            wait,
+        } => Route {
+            method: Method::Post,
+            path: format!("/collections/{collection}/points/payload"),
+            query: mut_query(*wait, request.shard_key.as_deref()),
+            body: body(request)?,
+        },
+        // DDL: REST shapes differ from plan IR — use OpenAPI projection fns
+        PlannedOperation::CreateCollection {
+            collection,
+            request,
+        } => Route {
+            method: Method::Put,
+            path: format!("/collections/{collection}"),
+            query: Vec::new(),
+            body: Some(crate::ddl::create_collection_rest_body(request)?),
+        },
+        PlannedOperation::UpdateCollection {
+            collection,
+            request,
+        } => Route {
+            method: Method::Patch,
+            path: format!("/collections/{collection}"),
+            query: Vec::new(),
+            body: Some(crate::ddl::update_collection_rest_body(request)?),
+        },
+        PlannedOperation::CreateIndex {
+            collection,
+            request,
+            wait,
+        } => Route {
+            method: Method::Put,
+            path: format!("/collections/{collection}/index"),
+            query: if *wait {
+                vec![("wait".into(), "true".into())]
+            } else {
+                Vec::new()
+            },
+            body: Some(crate::ddl::create_index_rest_body(request)),
+        },
+        PlannedOperation::CreateShardKey {
+            collection,
+            request,
+        } => Route {
+            method: Method::Put,
+            path: format!("/collections/{collection}/shards"),
+            query: Vec::new(),
+            body: body(request)?,
+        },
+        PlannedOperation::DropShardKey {
+            collection,
+            request,
+        } => Route {
+            method: Method::Post,
+            path: format!("/collections/{collection}/shards/delete"),
+            query: Vec::new(),
+            body: body(request)?,
+        },
+        // Bodyless
+        PlannedOperation::DropCollection { collection } => Route {
+            method: Method::Delete,
+            path: format!("/collections/{collection}"),
+            query: Vec::new(),
+            body: None,
+        },
+        PlannedOperation::DropIndex { collection, field } => Route {
+            method: Method::Delete,
+            path: format!("/collections/{collection}/index/{field}"),
+            query: Vec::new(),
+            body: None,
+        },
+        PlannedOperation::ListCollections => Route {
+            method: Method::Get,
+            path: "/collections".into(),
+            query: Vec::new(),
+            body: None,
+        },
+        PlannedOperation::GetCollection { collection } => Route {
+            method: Method::Get,
+            path: format!("/collections/{collection}"),
+            query: Vec::new(),
+            body: None,
+        },
+        PlannedOperation::ListShardKeys { collection } => Route {
+            method: Method::Get,
+            path: format!("/collections/{collection}/shards"),
+            query: Vec::new(),
+            body: None,
+        },
+        PlannedOperation::GetQuotas => Route {
+            method: Method::Get,
+            path: "/quotas".into(),
+            query: Vec::new(),
+            body: None,
+        },
+        PlannedOperation::SetQuotas { request } => {
+            let mut query = Vec::new();
+            if let Some(wait) = request.wait {
+                query.push(("wait".into(), wait.to_string()));
+            }
+            Route {
+                method: Method::Put,
+                path: "/quotas".into(),
+                query,
+                body: body(request)?,
+            }
+        }
+        PlannedOperation::CrossRerank { .. } => {
+            return Err(RestProjectionError::ClientSideOnly {
+                stmt_type: "cross_rerank",
+            });
+        }
+    })
+}
+
+/// Plan a statement and project it to a REST route in one call.
+///
+/// Returns `QQL-REST-CLIENT-SIDE` for client-side operations (e.g. CROSS
+/// RERANK) that have no single Qdrant REST endpoint.
+pub fn try_route(statement: &Stmt) -> Result<Route, QqlError> {
+    let op = plan(statement)?;
+    to_rest_route(&op).map_err(|err| match err {
+        RestProjectionError::ClientSideOnly { stmt_type } => QqlError::validation(
+            "QQL-REST-CLIENT-SIDE",
+            format!(
+                "{stmt_type} is client-side and has no single Qdrant REST route; \
+                 execute via the runtime CROSS RERANK path"
+            ),
+            None,
+        ),
+        RestProjectionError::SerializeFailed { message } => QqlError::execution(
+            "QQL-PLAN-SERIALIZE",
+            format!("plan IR REST request body serialization failed: {message}"),
+            None,
+        ),
+    })
 }
 
 /// Offline compile result for host SDKs.

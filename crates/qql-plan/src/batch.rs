@@ -145,7 +145,7 @@ pub fn build_update_batch(
             ));
         }
         collection = Some(current_collection);
-        labels.push(update_operation_label(operation));
+        labels.push(operation.operation_label());
         updates.push(update);
     }
 
@@ -157,10 +157,6 @@ pub fn build_update_batch(
             operations: updates,
         },
     ))
-}
-
-fn update_operation_label(operation: &PlannedOperation) -> &'static str {
-    operation.operation_label()
 }
 
 /// State machine orchestrating contiguous batch grouping across statements.
